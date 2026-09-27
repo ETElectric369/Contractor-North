@@ -149,6 +149,10 @@ describe("every tab count in the app is an open count", () => {
     const costsOpen = page.slice(page.indexOf("const costsOpen ="), page.indexOf(";", page.indexOf("const costsOpen =")));
     expect(costsOpen).toContain("costGroups?.open.ids.length");
     expect(costsOpen).toContain("costGroups && unbilled && unbilled.hours > 0 ? 1 : 0");
+    // The receipts the Receipts & Papers fold calls "Not On A Bill Yet" (and opens for) count too,
+    // from the very list the fold is handed.
+    expect(costsOpen).toContain("viewerIsStaff && paperSort.loose ? paperSort.loose.length : 0");
+    expect(page).toContain("looseIds={paperSort.loose ? paperSort.loose.map(");
     // The tab's own sentence is behind the same costGroups && unbilled guard.
     expect(page).toMatch(/costGroups && unbilled \? \(\s*<div className="space-y-2">/);
   });
