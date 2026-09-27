@@ -89,7 +89,7 @@ function walk(dir: string, out: string[] = []): string[] {
 const OPEN_TAB_COUNTS: Record<string, string> = {
   openTaskCount: "the job's open tasks + the live Buy Materials row while anything is left to buy",
   materialsOpen: "the job's materials lines still to buy",
-  costsOpen: "the job's Not Billed Yet costs + supplier papers naming it that are in nobody's books",
+  costsOpen: "the job's Not Billed Yet costs + supplier papers naming it that are in nobody's books + one for its hours not billed yet",
   panelCount: "suggested circuits waiting on a Keep or a Not This",
   "tray.length": "Organize's Needs Attention tray",
 };
@@ -142,6 +142,15 @@ describe("every tab count in the app is an open count", () => {
     expect(tab("time")).not.toMatch(/\bcount:/);
     expect(tab("materials")).toContain("count: materialsOpen");
     expect(page).not.toContain("count: canonicalItems?.length");
+  });
+
+  it("the job's Costs chip counts its hours not billed yet (as one), where the tab says them", () => {
+    const page = read("app/(app)/jobs/[id]/page.tsx");
+    const costsOpen = page.slice(page.indexOf("const costsOpen ="), page.indexOf(";", page.indexOf("const costsOpen =")));
+    expect(costsOpen).toContain("costGroups?.open.ids.length");
+    expect(costsOpen).toContain("costGroups && unbilled && unbilled.hours > 0 ? 1 : 0");
+    // The tab's own sentence is behind the same costGroups && unbilled guard.
+    expect(page).toMatch(/costGroups && unbilled \? \(\s*<div className="space-y-2">/);
   });
 
   it("the job's Tasks chip draws no number when the tasks couldn't be read (never the Buy Materials row alone)", () => {
