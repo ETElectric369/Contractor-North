@@ -15,12 +15,11 @@ import { formatTime, formatCityStateZip, formatDateShort, formatFullAddress, for
 import { directionsTarget } from "@/lib/maps";
 import { getOrgSettings } from "@/lib/org-settings";
 import { NavLink } from "@/components/nav-link";
-import { toJobOptions, toCustomerOptions, toStaffOptions, listActiveTechs, listCustomerOptions, jobLabel, jobSiteLabel } from "@/lib/schedule-options";
+import { toJobOptions, toCustomerOptions, toStaffOptions, listActiveTechs, listCustomerOptions, jobLabel } from "@/lib/schedule-options";
 import { todayBoundsInTz, prettyDay, tzDayStartUtc, todayStrInTz } from "@/lib/tz";
 import { YourList } from "./your-list";
+// The Now block for a punch on no job: its door opens the clock's own "Which Job Are You On?" sheet.
 import { WhichJob } from "./which-job";
-// The write behind the Now block (and the clock doors' "Which Job Are You On?" sheet): one copy.
-import { putPunchOnJob } from "../timeclock/which-job-actions";
 import { rankSix } from "@/lib/six-rank";
 import { getActionItems } from "@/lib/action-items/query";
 import { ActionList } from "@/components/action-items/action-list";
@@ -161,19 +160,13 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
   // UTC server's day — a Pacific evening debrief must not fall out of the window a
   // day early).
   const reportsSince = todayStrInTz(tz, new Date(Date.now() - 14 * 86_400_000));
-  const [curJobRes, whichJobsR, poolR, elseCountR, officeCountR, doneTodayR, dailyReportsR] = await Promise.all([
+  // (An open punch with NO job reads no job list here: the Now block's Pick The Job opens the
+  // clock's own "Which Job Are You On?" sheet, which loads its list when it opens: the job he
+  // punched last, today's schedule, the jobs in progress. One list at every door.)
+  const [curJobRes, poolR, elseCountR, officeCountR, doneTodayR, dailyReportsR] = await Promise.all([
     openEntry?.job_id
       ? supabase.from("jobs").select("id, job_number, name, status, address, customers(name, address, city, state, zip)").eq("id", openEntry.job_id).maybeSingle()
       : Promise.resolve({ data: null }),
-    // The open punch has NO job: the Now block asks "Which job are you on?" and needs the jobs
-    // it may be put on — the org's jobs in progress, RLS-scoped, in /timeclock's picker
-    // projection and order with NO cap (its .limit(50) once hid the oldest long-running jobs,
-    // the very ones a crew is on). in_progress only here; the clock doors' "Which Job Are You On?"
-    // sheet also offers the job he punched last and today's schedule (putPunchOnJob promotes
-    // a job not started yet, as clock-in does).
-    openEntry && !openEntry.job_id
-      ? supabase.from("jobs").select("id, job_number, name, address, customers(name)").eq("status", "in_progress").order("created_at", { ascending: false })
-      : Promise.resolve({ data: [] as any[] }),
     // TODAY'S 6 pool — my open TOP-LEVEL tasks a rank can claim (subtasks nest
     // under their parent and never count; children fetch below).
     mineCut(
@@ -241,13 +234,6 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
   const reportsOn = featureOn(features, "daily_reports");
   const isOwner = (me as any)?.role === "owner";
   const currentJob = ((curJobRes as any)?.data as any) ?? undefined;
-  // Options for the job-less punch's picker, labelled the way /timeclock's picker labels them
-  // (its optionLabel): codes on → the job name; codes off → customer · street address.
-  const jobCodesOn = getOrgSettings((orgRow as any)?.settings).timeclock_job_codes;
-  const whichJobs = (((whichJobsR as any)?.data ?? []) as any[]).map((j) => ({
-    id: j.id as string,
-    label: jobCodesOn ? jobLabel(j) : jobSiteLabel({ ...j, customer_name: j.customers?.name ?? null }),
-  }));
   // Navigate target for the "Now" hero: structured address → customer address → job
   // name (so the button never vanishes when the address lives in the name). Same rule
   // the job dock uses (directionsTarget).
@@ -968,7 +954,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
           {/* On the clock with NO job on the punch: ask, don't vanish. Keyed on the punch's own
               job_id being empty — a punch that carries a job never lands here. */}
           {openEntry && !openEntry.job_id && (
-            <WhichJob entryId={openEntry.id} jobs={whichJobs} isStaff={isStaff} onPick={putPunchOnJob} />
+            <WhichJob entryId={openEntry.id} />
           )}
 
           {nextAgenda.length === 0 && laterAgenda.length === 0 && earlierAgenda.length === 0 ? (

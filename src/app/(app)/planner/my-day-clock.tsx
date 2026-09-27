@@ -208,15 +208,20 @@ export function MyDayClock({
               ) : (
                 /* A job-less punch is a real outcome (the server resolver found nothing to attach),
                    but a bare "On the clock" with the label silently missing read as a broken app and
-                   took the Now block's four doors with it. Say it, and point at the ONE control that
-                   fixes it: the "Which job are you on?" picker on the Today card (the anchor lives on
-                   the day view, so the link carries the route for a tech paging the week). Wraps
-                   rather than truncates — the sentence is the point. */
+                   took the Now block's four doors with it. Say it, and open the ONE sheet that fixes
+                   it: the same "Which Job Are You On?" the clock just asked, with the same list (the
+                   job he punched last, today's schedule, the jobs in progress), so a Skip is never
+                   answered from a shorter list than the one skipped. Wraps rather than truncates —
+                   the sentence is the point. */
                 <div className="text-xs text-slate-500">
                   On the clock · no job on this punch yet —{" "}
-                  <Link href="/planner#which-job" className="font-medium text-brand hover:underline">
+                  <button
+                    type="button"
+                    onClick={() => setAsk({ entryId: open.id, moment: "in" })}
+                    className="font-medium text-brand hover:underline"
+                  >
                     Put It on the Job
-                  </Link>{" "}
+                  </button>{" "}
                   ·{" "}
                   <Link href="/timeclock" className="font-medium text-brand hover:underline">
                     Timeclock →
