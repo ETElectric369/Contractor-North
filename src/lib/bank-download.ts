@@ -241,6 +241,34 @@ export function readBankMoney(raw: unknown): number | null {
   return /^c/i.test(tail[1]) ? Math.abs(n) : -Math.abs(n);
 }
 
+/**
+ * A BANK'S DAY CELL. Banks print a time after the day ("9/3/2026 12:00:00 AM", "9/3/2026 0:00"),
+ * a year first with slashes ("2026/09/03") or the month as a word ("03-SEP-2026", "3 Sep 2026").
+ * Each is brought to a shape readDate knows; an Excel serial day still reads (a date column).
+ */
+export function readBankDate(raw: unknown): string | null {
+  let s = String(raw ?? "").trim();
+  if (!s) return null;
+  s = s.replace(/(?:T|\s+)\d{1,2}:\d{2}(?::\d{2}(?:\.\d+)?)?\s*(?:[AP]\.?M\.?)?\s*(?:Z|[+-]\d{2}:?\d{2})?$/i, "").trim();
+  let m = /^(\d{4})[/.](\d{1,2})[/.](\d{1,2})$/.exec(s);
+  if (m) return readDate(`${m[1]}-${m[2]}-${m[3]}`);
+  m = /^(\d{1,2})[-\s]([A-Za-z]{3,9})\.?[-\s,]+(\d{2}|\d{4})$/.exec(s);
+  if (m) return readDate(`${m[2]} ${m[1]}, ${m[3].length === 2 ? `20${m[3]}` : m[3]}`);
+  return readDate(s, true);
+}
+
+/** The skip reason for a day that is there but didn't read (never a total's blank). */
+const DAY_DIDNT_READ = "didn't read as a day";
+
+/** Why a download with no lines that read has none, in one sentence for the drop line. */
+export function noLinesSaid(dl: Pick<BankDownload, "skipped">, name: string): string {
+  const days = dl.skipped.filter((x) => x.why.includes(DAY_DIDNT_READ));
+  if (days.length && days.length === dl.skipped.length)
+    return `${name}: none of its dates read (${days[0].why.replace(/\.$/, "")}). Download it again with dates like 09/03/2026, and drop that.`;
+  const why = dl.skipped[0]?.why;
+  return `${name} has no transactions in it that read${why ? ` (${why.replace(/\.$/, "")})` : ""}.`;
+}
+
 const DEBIT_TYPE = /\b(debit|dr|withdrawal|check|payment|fee|sale|purchase|pos)\b/i;
 const CREDIT_TYPE = /\b(credit|cr|deposit|refund|dslip|interest earned)\b/i;
 
@@ -268,7 +296,7 @@ export function readBankTable(table: readonly (readonly string[])[], name: strin
       skipped.push({ line, why: "Pending at the bank, not posted yet. It comes in with the next download." });
       return;
     }
-    const day = readDate(cell(r, c.date), true) ?? readDate(cell(r, c.txDate), true);
+    const day = readBankDate(cell(r, c.date)) ?? readBankDate(cell(r, c.txDate));
     const text = cell(r, c.description);
     let amount: number | null = null;
     if (c.amount !== undefined && cell(r, c.amount) !== "") {
@@ -285,8 +313,13 @@ export function readBankTable(table: readonly (readonly string[])[], name: strin
       else if (debit !== null || credit !== null) amount = 0;
     }
     if (!day) {
-      // A total or a note under the table, most likely: said by line, never read as money.
-      skipped.push({ line, why: "No date on it, so it isn't a transaction (a total or a note)." });
+      // A day printed in a way nothing reads is said as that (the file needs another download);
+      // a blank or a word is a total or a note under the table: said by line, never read as money.
+      const printed = cell(r, c.date) || cell(r, c.txDate);
+      skipped.push({
+        line,
+        why: /\d/.test(printed) && amount !== null ? `Its date "${redactDigits(printed).slice(0, 30)}" ${DAY_DIDNT_READ}.` : "No date on it, so it isn't a transaction (a total or a note).",
+      });
       return;
     }
     if (amount === null) {

@@ -14,6 +14,8 @@ import {
   merchantKeyOf,
   parseChoiceId,
   planBankDownload,
+  noLinesSaid,
+  readBankDate,
   readBankMoney,
   readBankTable,
   redactDigits,
@@ -140,6 +142,22 @@ CHECK,09/05/2026,CHECK 2001,-300.00,CHECK_PAID,1700.00,2001
     const dl = readBankTable(parseCSV(`Date,Description,Amount\n09/01/2026,CUSTOMER DEPOSIT,1500.00 CR\n09/02/2026,SHOP RENT,650.00 DR\n09/03/2026,REFUND,+200.00\n`), "x.csv", hash)!;
     expect(dl.lines.map((l) => l.cents)).toEqual([150000, -65000, 20000]);
     expect(dl.skipped).toEqual([]);
+  });
+
+  it("reads the days banks print: a time after it, the year first with slashes, the month as a word", () => {
+    for (const raw of ["9/3/2026 12:00:00 AM", "9/3/2026 0:00", "2026/09/03", "03-SEP-2026", "3 Sep 2026", "03-Sep-26", "2026-09-03T00:00:00Z", "09/03/2026"]) {
+      expect(readBankDate(raw)).toBe("2026-09-03");
+    }
+    expect(readBankDate("Total")).toBeNull();
+  });
+
+  it("a file whose days don't read says so, not that its lines are totals", () => {
+    const dl = readBankTable(parseCSV(`Date,Description,Amount\n3rd of Sep 2026,SHOP RENT,-650.00\nTotal,,-650.00\n`), "odd.csv", hash)!;
+    expect(dl.lines).toHaveLength(0);
+    expect(dl.skipped[0].why).toBe('Its date "3rd of Sep 2026" didn\'t read as a day.');
+    expect(dl.skipped[1].why).toMatch(/No date on it/);
+    const all = readBankTable(parseCSV(`Date,Description,Amount\n3rd of Sep 2026,SHOP RENT,-650.00\n`), "odd.csv", hash)!;
+    expect(noLinesSaid(all, "odd.csv")).toMatch(/^odd\.csv: none of its dates read/);
   });
 
   it("an unsigned Amount with a Debit/Credit type column reads the type", () => {

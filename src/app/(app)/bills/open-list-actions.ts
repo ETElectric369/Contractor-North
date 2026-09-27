@@ -19,7 +19,7 @@ import {
   type OpenListColumns,
   type StoredOpenList,
 } from "@/lib/supplier-open-list";
-import { looksLikeBankTable } from "@/lib/bank-download";
+import { looksLikeBankTable, noLinesSaid } from "@/lib/bank-download";
 import { bankLine, capBankTable, createBankPaper, readBankDownload } from "./bank-core";
 import { applyOpenListCore, createOpenListPaper, loadAccounts, loadPapers, openListLine, orgToday, resolveAccount } from "./open-list-core";
 import { fingerprintSeen } from "@/app/(app)/organize/paperwork-actions";
@@ -70,10 +70,7 @@ export async function addOpenList(input: {
     if (looksLikeBankTable(bankTable, supplierRef)) {
       const download = readBankDownload(bankTable, name);
       if (!download) return { ok: false, error: `${name} reads like a bank download, but none of its lines did.` };
-      if (!download.lines.length) {
-        const why = download.skipped[0]?.why;
-        return { ok: false, error: `${name} has no transactions in it that read${why ? ` (${why.replace(/\.$/, "")})` : ""}.` };
-      }
+      if (!download.lines.length) return { ok: false, error: noLinesSaid(download, name) };
       if (sha) {
         const seen = await fingerprintSeen(sha);
         if (seen.seen) return { ok: false, already: seen.seen, error: `${name}: ${seen.seen}` };
