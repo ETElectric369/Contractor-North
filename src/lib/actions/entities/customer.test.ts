@@ -109,6 +109,17 @@ describe("customer.create — the yes to adding him is the yes to his booking", 
     expect((r.data as { link_offer: unknown[] }).link_offer).toHaveLength(1);
   });
 
+  it("a first name alone, or a sub/supplier/inspector: nothing is linked for him, the visit is offered", async () => {
+    for (const input of [{ name: "Tom" }, { name: "Tom Goodman", type: "subcontractor" }]) {
+      linkAppointmentTo.mockClear();
+      const r = await create(input);
+      expect(linkAppointmentTo, JSON.stringify(input)).not.toHaveBeenCalled();
+      expect((r.data as { link_offer: unknown[] }).link_offer).toHaveLength(1);
+      expect(String((r.data as Record<string, unknown>).next_step)).toContain("In THIS answer, ask whether to link");
+      expect(r.recorded).not.toContain("Linked");
+    }
+  });
+
   it("nobody booked: no link, no offer, just the saved customer", async () => {
     db.visits = [];
     const r = await create({ name: "Rita Moss" });
@@ -135,6 +146,16 @@ describe("customer.update — an open offer survives an answer that isn't a yes"
     const data = r.data as { link_offer: { appointment_id: string }[]; next_step: string };
     expect(data.link_offer.map((o) => o.appointment_id)).toEqual([TOM_VISIT.id, "second"]);
     expect(data.next_step).toContain("appointment.linkCustomer");
+    // Carried, not new: ask only while nobody answered it.
+    expect(data.next_step).toContain("ONLY if the person hasn't answered it yet");
+  });
+
+  it("after a no (declined_link), the update carries no offer and asks nothing; the flag never reaches the row", async () => {
+    const r = await update({ id: "cust-tom", email: "tom@example.com", declined_link: true });
+    expect(r).toEqual({ ok: true, recorded: 'Saved: "Tom Goodman".' });
+    expect(linkAppointmentTo).not.toHaveBeenCalled();
+    expect(patchCustomer).toHaveBeenCalledWith("cust-tom", { email: "tom@example.com" });
+    expect(db.visitFilters).toEqual([]);
   });
 
   it("an update never links for them (they were editing the person), even when one visit certainly matches", async () => {

@@ -6,6 +6,7 @@ import { orgTimezone, quotedData } from "@/lib/org-local-time";
 import {
   LINK_OFFER_WINDOW_MS,
   autoLinkPick,
+  carriedOfferNextStep,
   linkOfferNextStep,
   linkedNextStep,
   linkedVisit,
@@ -51,7 +52,7 @@ async function recentCustomerlessVisits(supabase: Db, userId: string): Promise<L
 async function linkOrOffer(
   supabase: Db,
   userId: string | null | undefined,
-  customer: { id: string; name: string; address?: string | null },
+  customer: { id: string; name: string; address?: string | null; type?: string | null },
   mayLink: boolean,
 ): Promise<{ data: Record<string, unknown>; said: string | null }> {
   if (!userId) return { data: {}, said: null };
@@ -73,7 +74,12 @@ async function linkOrOffer(
     const offers = matchLinkOffers(rows, customer, tz);
     if (!offers.length) return { data: {}, said: null };
     return {
-      data: { link_offer: offers, next_step: linkOfferNextStep(offers), ...(failed ? { link_failed: failed } : {}) },
+      data: {
+        link_offer: offers,
+        // A create's offer is new: ask. An update's is carried: ask only while it's unanswered.
+        next_step: mayLink ? linkOfferNextStep(offers) : carriedOfferNextStep(offers),
+        ...(failed ? { link_failed: failed } : {}),
+      },
       said: failed ? `Couldn't link the visit ${offers[0].title} yet (${failed}).` : null,
     };
   } catch {
@@ -123,7 +129,7 @@ export const customerActions: Record<string, ActionDef> = {
       const stored = await customerRecorded(supabase, r.id, "Saved");
       // THE LINK: a visit this person just booked for this customer, still customer-less — linked
       // now when it's certainly theirs (the yes to adding him was the yes to his booking), else offered.
-      const link = await linkOrOffer(supabase, ctx.userId, { id: r.id, name: i.name, address: i.address }, true);
+      const link = await linkOrOffer(supabase, ctx.userId, { id: r.id, name: i.name, address: i.address, type: i.type }, true);
       const recorded = [stored?.said, link.said].filter(Boolean).join(" ");
       return { ...r, data: { id: r.id, ...link.data }, ...(recorded ? { recorded } : {}) };
     },
@@ -133,7 +139,7 @@ export const customerActions: Record<string, ActionDef> = {
     group: "customer",
     label: "Edit customer",
     description:
-      "Fix or update a customer you can see — correct a MISSPELLED name, add a phone/email/address, change the type (e.g. to 'subcontractor'), etc. Pass the customer's id (from list_customers) and ONLY the fields to change. Use this when a name came out wrong; never tell the user you can't fix it. Confirm from the result's `recorded` line (what was stored), never from what you sent. If the result carries link_offer (a visit you booked for this person that still has no customer), the link is still open: follow its next_step in the same answer.",
+      "Fix or update a customer you can see — correct a MISSPELLED name, add a phone/email/address, change the type (e.g. to 'subcontractor'), etc. Pass the customer's id (from list_customers) and ONLY the fields to change. Use this when a name came out wrong; never tell the user you can't fix it. Confirm from the result's `recorded` line (what was stored), never from what you sent. If the result carries link_offer (a visit you booked for this person that still has no customer), follow its next_step: ask about it again only if the user never answered it. Once the user said no to linking this person to a visit, pass declined_link: true on every later update to them, and no offer comes back.",
     input: z.object({
       id: z.string(),
       name: z.string().optional(),
@@ -146,18 +152,22 @@ export const customerActions: Record<string, ActionDef> = {
       zip: z.string().nullable().optional(),
       notes: z.string().nullable().optional(),
       type: z.enum(["residential", "commercial", "industrial", "subcontractor"]).optional(),
+      // Not a column: the user already said no to linking this person to a visit, so the update
+      // carries no link offer (a no writes nothing, so only Nort can tell the server).
+      declined_link: z.boolean().optional(),
     }),
     auth: "staff",
     effect: "write",
-    handler: async ({ id, ...patch }, ctx): Promise<ActionResult> => {
+    handler: async ({ id, declined_link, ...patch }, ctx): Promise<ActionResult> => {
       const r = await patchCustomer(id, patch);
       if (!r.ok) return r;
       const supabase = await createClient();
       const stored = await customerRecorded(supabase, id, "Saved");
       // THE PENDING LINK SURVIVES AN ANSWER THAT ISN'T A YES: Nort asked "link him to tomorrow's
       // inspection?", Erik answered with the phone number, and the offer was gone. While the visit
-      // is still customer-less, the update carries the offer again (never links it for them).
-      const link = stored?.row.name
+      // is still customer-less, the update carries the offer again (never links it for them), worded
+      // to ask only while it's unanswered; after a no (declined_link) nothing rides at all.
+      const link = stored?.row.name && !declined_link
         ? await linkOrOffer(supabase, ctx.userId, { id, name: stored.row.name, address: stored.row.address }, false)
         : { data: {}, said: null };
       return {
