@@ -127,6 +127,7 @@ describe("fileSupplierPaper: Put It On J-011, one tap", () => {
           OK({ id: "0110aaaa-0000-4000-8000-000000000011", job_number: "J-011", name: "13897 Herringbone", customer_id: "c0000000-0000-4000-8000-000000000001", billing_type: "tm" }),
         ],
         "payment_milestones.select": [OK([])],
+        "quotes.select": [OK([])],
         "organizations.select": [OK({ settings: { timezone: "America/Los_Angeles", features: { shop_stock: true } } })],
         "invoices.select": [
           OK([

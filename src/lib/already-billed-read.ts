@@ -17,7 +17,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { billableBillCost } from "@/lib/bill-itemisation";
 import { featureOn } from "@/lib/features";
-import { jobBillsItsActuals } from "@/lib/invoice-import-rule";
+import { isLiveQuote, nextInvoiceImportsActuals } from "@/lib/invoice-import-rule";
 import { fetchJobLaborRows, laborPersonKey, withoutClaimedLabor } from "@/lib/labor-billing";
 import { getOrgSettings } from "@/lib/org-settings";
 import { readJobStock, stockCostLabel } from "@/lib/stock-billing";
@@ -132,7 +132,10 @@ type Loaded = { ok: true; data: AlreadyBilledSheetData } | { ok: false; error: s
 
 /**
  * What the Already Billed sheet offers for one cost on one job. Staff only (the caller checks, and
- * RLS reads nothing money-shaped for a tech anyway). Only on a job that bills its actual costs.
+ * RLS reads nothing money-shaped for a tech anyway). Only on a job whose next New Invoice pulls its
+ * actual costs (nextInvoiceImportsActuals, createInvoiceForJob's own rule): every T&M job with no
+ * schedule, and a fixed-price one with no live estimate (J-010 Purple Sage), where a charge made by
+ * hand that can't be recorded is billed again.
  */
 export async function loadAlreadyBilledSheet(supabase: Db, orgId: string, jobId: string, target: AlreadyBilledTarget): Promise<Loaded> {
   const kind = target?.kind;
@@ -140,16 +143,19 @@ export async function loadAlreadyBilledSheet(supabase: Db, orgId: string, jobId:
   if (!["bill", "po", "stock", "time"].includes(String(kind))) return { ok: false, error: "Couldn't tell what you meant to mark. Nothing was changed." };
   if (kind !== "time" && !ids.length) return { ok: false, error: "Couldn't tell what you meant to mark. Nothing was changed." };
 
-  const [jobRead, msRead, orgRead] = await Promise.all([
+  const [jobRead, msRead, orgRead, quoteRead] = await Promise.all([
     supabase.from("jobs").select("id, job_number, name, customer_id, billing_type").eq("id", jobId).eq("org_id", orgId).maybeSingle(),
     supabase.from("payment_milestones").select("id").eq("job_id", jobId).eq("org_id", orgId),
     supabase.from("organizations").select("settings").eq("id", orgId).maybeSingle(),
+    supabase.from("quotes").select("id, status").eq("job_id", jobId).eq("org_id", orgId),
   ]);
-  if (jobRead.error || msRead.error || orgRead.error) return { ok: false, error: "Couldn't read this job just now. Nothing was changed - try again in a moment." };
+  if (jobRead.error || msRead.error || orgRead.error || quoteRead.error)
+    return { ok: false, error: "Couldn't read this job just now. Nothing was changed - try again in a moment." };
   const job = jobRead.data as { id: string; job_number?: string | null; name?: string | null; customer_id?: string | null; billing_type?: string | null } | null;
   if (!job) return { ok: false, error: "That job isn't here anymore. Reload the page." };
   const jobNumber = String(job.job_number ?? "").trim() || "This job";
-  if (!jobBillsItsActuals(job.billing_type, (msRead.data ?? []).length))
+  const hasLiveQuote = ((quoteRead.data ?? []) as { status?: string | null }[]).some((q) => isLiveQuote(q.status));
+  if (!nextInvoiceImportsActuals(job.billing_type, (msRead.data ?? []).length, hasLiveQuote))
     return { ok: false, error: `${jobNumber} is billed by its contract, not by its time and materials, so nothing on it is marked billed line by line.` };
   const settings = getOrgSettings((orgRead.data as { settings?: unknown } | null)?.settings);
 

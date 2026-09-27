@@ -9,7 +9,9 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
  *     comes back empty is "didn't save", never a quiet success;
  *   - the function's own refusal reaches the office in its own words;
  *   - the sheet offers Purple Sage's paid INV-00023 with its typed Materials line picked, says the
- *     draft instead of offering it, leaves the deposit out, and refuses a fixed-price job.
+ *     draft instead of offering it, leaves the deposit out; J-010 is fixed-price with no estimate,
+ *     so New Invoice bills its actuals and the sheet opens there, and it refuses a job whose live
+ *     estimate is the contract (New Invoice's own rule).
  */
 
 const state = vi.hoisted(() => ({ client: null as any }));
@@ -96,10 +98,12 @@ const INVOICES = [
   { id: "inv-dep", invoice_number: "INV-00020", status: "paid", invoice_kind: "deposit", job_id: J010, created_at: "2026-06-01T00:00:00Z", invoice_items: [line("li-dep", "Deposit", 500)] },
 ];
 
-function sheetRoute(o: { billing?: string; invoicesError?: any } = {}) {
+/** J-010 as it stands on production: fixed price, no estimate, no schedule, billed from its actuals. */
+function sheetRoute(o: { billing?: string; invoicesError?: any; quotes?: { id: string; status: string }[]; milestones?: number } = {}) {
   return (table: string, cols: string): Reply => {
-    if (table === "jobs") return { data: { id: J010, job_number: "J-010", name: "11301 Purple Sage", customer_id: "c0000000-0000-4000-8000-000000000001", billing_type: o.billing ?? "tm" } };
-    if (table === "payment_milestones") return { data: [] };
+    if (table === "jobs") return { data: { id: J010, job_number: "J-010", name: "11301 Purple Sage", customer_id: "c0000000-0000-4000-8000-000000000001", billing_type: o.billing ?? "fixed" } };
+    if (table === "payment_milestones") return { data: Array.from({ length: o.milestones ?? 0 }, (_, i) => ({ id: `m${i}` })) };
+    if (table === "quotes") return { data: o.quotes ?? [] };
     if (table === "organizations") return { data: { settings: { timezone: "America/Los_Angeles", features: { shop_stock: true } } } };
     if (table === "invoices") return o.invoicesError ? { error: o.invoicesError } : { data: INVOICES };
     if (table === "bills") return { data: PS_BILL };
@@ -205,10 +209,19 @@ describe("after it", () => {
     expect(res.data.target.words).toBe("Consolidated Electrical Distributors 8802-1101475");
   });
 
-  it("a fixed-price job is refused in words: nothing on it is marked line by line", async () => {
-    state.client = fake(sheetRoute({ billing: "fixed" }), calls);
-    const res = await alreadyBilledSheet("j-003", { kind: "bill", ids: ["bill-ps"] });
+  it("a fixed-price job whose live estimate is the contract, or a job on a schedule, is refused in words", async () => {
+    state.client = fake(sheetRoute({ quotes: [{ id: "q1", status: "accepted" }] }), calls);
+    const res = await alreadyBilledSheet(J010, { kind: "bill", ids: ["bill-ps"] });
     expect(res).toMatchObject({ ok: false });
     expect((res as { error: string }).error).toMatch(/billed by its contract/);
+    state.client = fake(sheetRoute({ billing: "tm", milestones: 2 }), calls);
+    expect(await alreadyBilledSheet(J010, { kind: "bill", ids: ["bill-ps"] })).toMatchObject({ ok: false });
+  });
+
+  it("a declined estimate is no contract, and on T&M an accepted one is a guide: the sheet opens", async () => {
+    state.client = fake(sheetRoute({ quotes: [{ id: "q1", status: "declined" }] }), calls);
+    expect((await alreadyBilledSheet(J010, { kind: "bill", ids: ["bill-ps"] })).ok).toBe(true);
+    state.client = fake(sheetRoute({ billing: "tm", quotes: [{ id: "q1", status: "accepted" }] }), calls);
+    expect((await alreadyBilledSheet(J010, { kind: "bill", ids: ["bill-ps"] })).ok).toBe(true);
   });
 });
