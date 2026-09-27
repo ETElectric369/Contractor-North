@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { Plus, Camera, Briefcase, CalendarPlus, FileText, Receipt, UserSearch, X, type LucideIcon } from "lucide-react";
-import { SnapOrNoteProvider, openSnapOrNote } from "@/components/snap-or-note";
+import { SnapOrNoteProvider, openSnapOrNote, snapStillSending } from "@/components/snap-or-note";
 import { GLASS_MENU_CLASS } from "@/components/ui/glass-menu";
 import { featureOn, type FeatureKey, type FeatureMap } from "@/lib/features";
 
@@ -47,7 +47,7 @@ export function plusOpens(isStaff: boolean): "menu" | "snap-or-note" {
 /** A soft navigation that hasn't landed in this long, tapped again, is stuck: the next tap loads. */
 export const STUCK_MS = 10_000;
 
-export type QuickAddGo = { way: "soft" } | { way: "full" } | { way: "offline"; said: string };
+export type QuickAddGo = { way: "soft" } | { way: "full" } | { way: "offline"; said: string } | { way: "wait"; said: string };
 
 /**
  * THE TAP THAT DID NOTHING, TWICE (bug-report triage 2026-09-27; the 09-23 sweep's "Didn't open new
@@ -56,13 +56,24 @@ export type QuickAddGo = { way: "soft" } | { way: "full" } | { way: "offline"; s
  * waiting on the failed load, and it never retries a load to the same address.
  *
  *   · no signal (navigator.onLine false): say so in words, right where the tap was, and don't try;
- *   · the last navigation failed (the shell's cn:navigation-failed), or the same tap's soft
- *     navigation never landed: a FULL load, which really retries;
+ *   · the last navigation failed (the shell's cn:navigation-failed, cleared as soon as a later
+ *     navigation lands), or the same tap's soft navigation never landed: a FULL load, which really
+ *     retries;
+ *   · but never a full load while Snap Or Note is still sending files: its queue lives in this
+ *     page's memory and a reload would drop them without a word. That tap says so and waits;
  *   · otherwise the ordinary soft navigation.
  */
-export function quickAddGo(o: { online: boolean; lastFailed: boolean; stuck: boolean; label: string }): QuickAddGo {
+export function quickAddGo(o: { online: boolean; lastFailed: boolean; stuck: boolean; label: string; sending?: number }): QuickAddGo {
   if (!o.online) return { way: "offline", said: `No signal right now, so ${o.label} can't open. Tap it again once you have a bar or two.` };
-  if (o.lastFailed || o.stuck) return { way: "full" };
+  if (o.lastFailed || o.stuck) {
+    const n = o.sending ?? 0;
+    if (n > 0)
+      return {
+        way: "wait",
+        said: `Snap Or Note is still sending ${n === 1 ? "1 file" : `${n} files`}, and reloading now would stop ${n === 1 ? "it" : "them"}. Tap ${o.label} again once ${n === 1 ? "it's" : "they're"} in.`,
+      };
+    return { way: "full" };
+  }
   return { way: "soft" };
 }
 
@@ -130,6 +141,16 @@ export function GlobalQuickAdd({
     return () => window.removeEventListener("cn:navigation-failed", onFail);
   }, []);
 
+  // A NAVIGATION LANDED (the dock, a link, anything): the last one no longer failed. Without this,
+  // one offline tap hours ago made every later + tap a full reload.
+  const pathname = usePathname();
+  const landedOn = useRef(pathname);
+  useEffect(() => {
+    if (landedOn.current === pathname) return;
+    landedOn.current = pathname;
+    failed.current = false;
+  }, [pathname]);
+
   function go(a: (typeof ACTIONS)[number]) {
     const here = window.location.href;
     const p = pending.current;
@@ -141,8 +162,9 @@ export function GlobalQuickAdd({
       lastFailed: failed.current,
       stuck,
       label: a.label,
+      sending: snapStillSending(),
     });
-    if (next.way === "offline") {
+    if (next.way === "offline" || next.way === "wait") {
       // Said right where the tap was: the menu stays open with the sentence under the rows.
       setSaid(next.said);
       return;

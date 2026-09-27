@@ -4,8 +4,8 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { renderToStaticMarkup } from "react-dom/server";
 
-vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
-vi.mock("@/components/snap-or-note", () => ({ SnapOrNoteProvider: () => null, openSnapOrNote: vi.fn() }));
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }), usePathname: () => "/planner" }));
+vi.mock("@/components/snap-or-note", () => ({ SnapOrNoteProvider: () => null, openSnapOrNote: vi.fn(), snapStillSending: () => 0 }));
 
 import { GlobalQuickAdd, QuickAddMenu, STUCK_MS, plusOpens, quickAddActions, quickAddGo } from "./global-quick-add";
 import { ALL_ON, type FeatureMap } from "@/lib/features";
@@ -84,6 +84,29 @@ describe("the tap that did nothing, twice (triage 2026-09-27)", () => {
     expect(quickAddGo({ online: true, lastFailed: false, stuck: true, label: "New Job" })).toEqual({ way: "full" });
     expect(quickAddGo({ online: true, lastFailed: false, stuck: false, label: "New Job" })).toEqual({ way: "soft" });
     expect(STUCK_MS).toBeGreaterThanOrEqual(5000);
+  });
+
+  it("never a full reload while Snap Or Note is still sending files: the tap says so and waits", () => {
+    expect(quickAddGo({ online: true, lastFailed: true, stuck: false, label: "New Job", sending: 6 })).toEqual({
+      way: "wait",
+      said: "Snap Or Note is still sending 6 files, and reloading now would stop them. Tap New Job again once they're in.",
+    });
+    expect(quickAddGo({ online: true, lastFailed: false, stuck: true, label: "New Job", sending: 1 })).toEqual({
+      way: "wait",
+      said: "Snap Or Note is still sending 1 file, and reloading now would stop it. Tap New Job again once it's in.",
+    });
+    // Nothing sending: the full load that really retries. An ordinary tap is soft either way.
+    expect(quickAddGo({ online: true, lastFailed: true, stuck: false, label: "New Job", sending: 0 })).toEqual({ way: "full" });
+    expect(quickAddGo({ online: true, lastFailed: false, stuck: false, label: "New Job", sending: 6 })).toEqual({ way: "soft" });
+    const src = readFileSync(join(process.cwd(), "src/components/global-quick-add.tsx"), "utf8");
+    expect(src).toContain("sending: snapStillSending(),");
+    expect(src).toContain('if (next.way === "offline" || next.way === "wait") {');
+  });
+
+  it("a failed navigation is forgotten once a later one lands (one offline tap hours ago never makes every + tap a reload)", () => {
+    const src = readFileSync(join(process.cwd(), "src/components/global-quick-add.tsx"), "utf8");
+    expect(src).toContain("const pathname = usePathname();");
+    expect(src).toMatch(/landedOn\.current = pathname;\s*failed\.current = false;/);
   });
 
   it("the + hears the shell's failed navigation, and a full load is window.location.assign", () => {
