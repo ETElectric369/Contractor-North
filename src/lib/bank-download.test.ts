@@ -268,6 +268,34 @@ DATA:OFXSGML
     expect(dl.lines.every((l) => l.key.startsWith("fitid:"))).toBe(true);
   });
 
+  it("reads a download with no headings, and a credit union's headings under a preamble", () => {
+    const bare = parseCSV(`"09/25/2026","-42.00","*","","ACME UTILITY WEB ONLINE 092426 12345678901234 ACME CO"
+"09/24/2026","500.00","*","","ONLINE TRANSFER FROM ACME SAVINGS 000123456789"
+"09/23/2026","-12.50","*","1044","CHECK 1044"
+`);
+    expect(findBankHeader(bare)).toEqual({ row: -1, columns: { date: 0, amount: 1, description: 4 } });
+    expect(looksLikeBankTable(bare, false)).toBe(true);
+    const dl = readBankTable(bare, "Checking1.csv", hash)!;
+    expect(dl.lines.map((l) => [l.row, l.postedOn, l.cents])).toEqual([
+      [1, "2026-09-25", -4200],
+      [2, "2026-09-24", 50000],
+      [3, "2026-09-23", -1250],
+    ]);
+    for (const l of dl.lines) expect(l.description).not.toMatch(/\d{6,}/);
+    // A supplier's list with no headings has a column of paper numbers: it stays the supplier's.
+    const list = parseCSV(`"INV-100234","09/01/2026","Invoice for materials at the shop","450.00"\n"CM-100240","09/03/2026","Credit memo for a return","-50.00"\n`);
+    expect(findBankHeader(list)).toBeNull();
+    const cu = parseCSV(`Account Number: 000123456789
+Statement Period,09/01/2026 - 09/30/2026
+Trans Date,Transaction,Withdrawal Amt,Deposit Amt,Bal
+09/03/2026,SHELL OIL 57444 ANYTOWN,62.10,,938.00
+09/04/2026,CUSTOMER DEPOSIT,,500.00,1438.00
+`);
+    const at = findHeaderRow(cu);
+    expect(looksLikeBankTable(cu, at >= 0 && readHeaderRow(cu[at]).columns.reference !== undefined)).toBe(true);
+    expect(readBankTable(cu, "cu.csv", hash)!.lines.map((l) => l.cents)).toEqual([-6210, 50000]);
+  });
+
   it("is told apart from a supplier's open list", () => {
     const bank = parseCSV(CHECKING_CSV);
     const at = findHeaderRow(bank);

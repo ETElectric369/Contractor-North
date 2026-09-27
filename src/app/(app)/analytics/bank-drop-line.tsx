@@ -34,7 +34,7 @@ export function BankDropLine() {
       } catch {
         sha = null;
       }
-      const added = await addOpenList({ name: file.name || "Bank download", sha256: sha, table: read.table, listDate: read.listDate, source: "bills_drop" });
+      const added = await addOpenList({ name: file.name || "Bank download", sha256: sha, table: read.table, listDate: read.listDate, source: "bills_drop", expect: "bank" });
       if (!added.ok) return setSaid({ text: added.already ? `${added.already} Nothing was added twice.` : (added.error ?? "Not added."), ok: !!added.already });
       setSaid({ text: (added.line ?? "Waiting in Sort These on Bills.").replace("Waiting below", "Waiting in Sort These on Bills"), ok: true });
       router.refresh();

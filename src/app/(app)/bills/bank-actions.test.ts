@@ -241,6 +241,19 @@ describe("the door", () => {
     expect(db.payments.every((p) => p.bank_line_id === null)).toBe(true);
   });
 
+  it("Money's bank door refuses a file that isn't a bank download; no door keeps a long number from one", async () => {
+    const odd = `Account: 000123456789\nWhen,What,Out,In\n09/01/2026,ONLINE TRANSFER FROM SAVINGS 000123456789,,500.00\n`;
+    const refused = await addOpenList({ name: "odd.csv", sha256: null, table: parseCSV(odd), listDate: "2026-09-26", source: "bills_drop", expect: "bank" });
+    expect(refused).toMatchObject({ ok: false, error: expect.stringMatching(/^odd\.csv doesn't read as a bank download/) });
+    expect(db.organized_items).toHaveLength(0);
+    // The same file through Drop Paperwork waits for its columns, with every long number cut.
+    const kept = await addOpenList({ name: "odd.csv", sha256: null, table: parseCSV(odd), listDate: "2026-09-26", source: "bills_drop" });
+    expect(kept.ok).toBe(true);
+    const stored = JSON.stringify(db.organized_items[0].proposal);
+    expect(stored).not.toContain("123456789");
+    expect(stored).toContain("••6789");
+  });
+
   it("a download longer than 5,000 rows is refused whole, never cut", async () => {
     const rows = [["Date", "Description", "Amount"], ...Array.from({ length: 5001 }, (_, i) => ["09/01/2026", `COFFEE CART ${i}`, "-4.50"])];
     const res = await addOpenList({ name: "Long.csv", sha256: null, table: rows, listDate: "2026-09-26", source: "bills_drop" });

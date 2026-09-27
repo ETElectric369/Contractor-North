@@ -19,7 +19,7 @@ import {
   type OpenListColumns,
   type StoredOpenList,
 } from "@/lib/supplier-open-list";
-import { looksLikeBankTable, noLinesSaid, redactDigits } from "@/lib/bank-download";
+import { looksLikeBankTable, mayBeBankTable, noLinesSaid, redactDigits, redactWordCells } from "@/lib/bank-download";
 import { bankLine, bankTableTooLong, capBankTable, createBankPaper, readBankDownload } from "./bank-core";
 import { applyOpenListCore, createOpenListPaper, loadAccounts, loadPapers, openListLine, orgToday, resolveAccount } from "./open-list-core";
 import { fingerprintSeen } from "@/app/(app)/organize/paperwork-actions";
@@ -48,6 +48,9 @@ export async function addOpenList(input: {
   /** The day the file was saved (the browser's lastModified), or null for today. */
   listDate?: string | null;
   source?: "bills_drop" | "organize";
+  /** "bank": the door is Money's Drop Your Bank Download. A file that isn't one is refused in
+   *  plain words, never turned into a supplier's list. */
+  expect?: "bank" | null;
 }): Promise<Result & { id?: string; already?: string; line?: string }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
@@ -97,13 +100,25 @@ export async function addOpenList(input: {
       revalidatePath("/planner");
       return { ok: true, id: placed.id, line: bankLine(download) };
     }
+    if (input?.expect === "bank")
+      return {
+        ok: false,
+        error: `${name} doesn't read as a bank download: it needs a date, a description and an amount on every line. Download it again as CSV (with column headings, if the bank offers them) and drop that. Nothing was added.`,
+      };
   }
+  if (input?.expect === "bank") return { ok: false, error: `${name} doesn't read as a bank download. Download it as CSV, Excel or OFX/QFX and drop that. Nothing was added.` };
   if (Array.isArray(input?.table)) {
     const table = capTable(input.table);
     const read = readOpenListTable({ table, from: "file", name, listDate, listDateFrom });
     if (read.ok) stored = { list: read.list, needs: null };
-    else if ("needs" in read) stored = { list: null, needs: read.needs };
-    else return { ok: false, error: read.error };
+    else if ("needs" in read) {
+      // A BANK'S FILE THAT DIDN'T READ AS ONE waits for its columns with no long number in it.
+      const needs = read.needs;
+      const hasRef = needs.headerRow >= 0 && readHeaderRow(needs.raw[needs.headerRow] ?? []).columns.reference !== undefined;
+      stored = mayBeBankTable(needs.raw, needs.headerRow, hasRef)
+        ? { list: null, needs: { ...needs, raw: redactWordCells(needs.raw), header: needs.header.map((h) => redactDigits(h)) } }
+        : { list: null, needs };
+    } else return { ok: false, error: read.error };
   } else if (typeof input?.text === "string" && input.text.trim()) {
     const text = input.text.slice(0, 500_000);
     stored = openListFromText(text, { name, from: "paste", listDate, listDateFrom, parseCsv: parseCSV, strict: false });

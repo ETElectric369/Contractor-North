@@ -47,13 +47,13 @@ export const BANK_WORDS: Record<BankField, readonly string[]> = {
   txDate: ["transaction date", "trans date", "tran date", "purchase date"],
   description: [
     "description", "desc", "memo", "payee", "name", "payee name", "merchant", "merchant name", "transaction description",
-    "original description", "narrative", "transaction details",
+    "original description", "narrative", "transaction details", "transaction",
   ],
   amount: ["amount", "transaction amount", "amt", "amount usd", "net amount"],
-  debit: ["debit", "debits", "withdrawal", "withdrawals", "withdrawal amount", "debit amount", "money out", "amount debit", "paid out"],
-  credit: ["credit", "credits", "deposit", "deposits", "deposit amount", "credit amount", "money in", "amount credit", "paid in"],
+  debit: ["debit", "debits", "withdrawal", "withdrawals", "withdrawal amount", "withdrawal amt", "debit amount", "debit amt", "money out", "amount debit", "paid out"],
+  credit: ["credit", "credits", "deposit", "deposits", "deposit amount", "deposit amt", "credit amount", "credit amt", "money in", "amount credit", "paid in"],
   check: ["check", "check number", "chk", "chk number", "check or slip", "cheque", "cheque number", "check num", "checknum"],
-  balance: ["balance", "running balance", "running bal", "ledger balance", "available balance", "account balance"],
+  balance: ["balance", "running balance", "running bal", "ledger balance", "available balance", "account balance", "bal"],
   account: ["account", "account number", "acct", "acct number", "card", "card number", "account id"],
   id: ["id", "fitid", "transaction id", "trans id"],
   type: ["type", "transaction type", "details", "dr cr", "debit credit"],
@@ -63,7 +63,10 @@ export const BANK_WORDS: Record<BankField, readonly string[]> = {
 /** Words only a bank prints over a column, so a table that also has a paper-number column is still
  *  read as a bank download when it carries one of these. Never "balance": a supplier's statement
  *  prints a running balance beside its paper numbers too, and it is the supplier's list. */
-const BANK_ONLY = new Set(["debit", "credit", "withdrawal", "withdrawals", "deposit", "deposits", "check", "posted", "post date", "posting date", "memo", "payee", "fitid"]);
+const BANK_ONLY = new Set([
+  "debit", "credit", "withdrawal", "withdrawals", "withdrawal amt", "withdrawal amount", "deposit", "deposits", "deposit amt",
+  "deposit amount", "debit amt", "credit amt", "check", "posted", "post date", "posting date", "memo", "payee", "fitid",
+]);
 
 /**
  * The header row of a bank download: a day, a description and money (one signed column, or debit
@@ -79,7 +82,59 @@ export function findBankHeader(table: readonly (readonly string[])[]): { row: nu
     const found = Object.keys(columns).length;
     if (!best || found > best.found) best = { row: i, columns, found };
   }
-  return best ? { row: best.row, columns: best.columns } : null;
+  return best ? { row: best.row, columns: best.columns } : headerlessBank(table);
+}
+
+/**
+ * A DOWNLOAD WITH NO HEADINGS AT ALL (a big bank's CSV is just "09/25/2026","-42.00","*","","ACME…").
+ * Read by what its columns hold, on a strong sign only: one column of days, one of money with at
+ * least one line going out, one of words long enough to be a bank's description, and no column of
+ * paper numbers (a supplier's list without headings has one, and stays the supplier's). The header
+ * row is -1: every row is a line.
+ */
+function headerlessBank(table: readonly (readonly string[])[]): { row: number; columns: BankColumns } | null {
+  const rows = table.filter((r) => r.some((c) => String(c ?? "").trim() !== "")).slice(0, 25);
+  if (rows.length < 2) return null;
+  const width = Math.max(...rows.map((r) => r.length));
+  if (width < 3) return null;
+  const at = (r: readonly string[], i: number) => String(r[i] ?? "").trim();
+  const share = (i: number, test: (v: string) => boolean) => rows.filter((r) => test(at(r, i))).length / rows.length;
+  const isDay = (v: string) => /[/-]/.test(v) && readBankDate(v) !== null;
+  const isMoney = (v: string) => /\d\.\d{2}\b|^[-+(]/.test(v) && readBankMoney(v) !== null && !isDay(v);
+  const cols = [...Array(width).keys()];
+  const date = cols.find((i) => share(i, isDay) >= 0.9);
+  const amount = cols.find((i) => i !== date && share(i, isMoney) >= 0.9);
+  if (date === undefined || amount === undefined) return null;
+  let description: number | undefined;
+  let longest = 0;
+  for (const i of cols) {
+    if (i === date || i === amount || share(i, (v) => /[a-z]{3}/i.test(v)) < 0.9) continue;
+    const avg = rows.reduce((n, r) => n + at(r, i).length, 0) / rows.length;
+    if (avg > longest) [description, longest] = [i, avg];
+  }
+  if (description === undefined || longest < 10) return null;
+  if (!table.some((r) => (readBankMoney(String(r[amount] ?? "")) ?? 0) < 0)) return null;
+  const paperNumbers = cols.some((i) => i !== date && i !== amount && i !== description && share(i, (v) => /^[a-z]{0,4}[-#]?\d[\d-]{3,}$/i.test(v) && !isDay(v)) >= 0.8);
+  return paperNumbers ? null : { row: -1, columns: { date, amount, description } };
+}
+
+/**
+ * A TABLE THAT MAY BE A BANK'S, BUT DIDN'T READ AS ONE: no headings, or a heading only a bank
+ * prints (Withdrawal, Deposit) and no paper-number column. Where it waits for a person to point at
+ * its columns, every cell with words in it is kept with its long digit runs cut to their last 4
+ * ("ONLINE TRANSFER FROM SAVINGS 000123456789" keeps ••6789), the same as a bank line. A cell of
+ * only a number (a paper number, an amount, a day) is left alone: a supplier's list needs them.
+ */
+export function mayBeBankTable(table: readonly (readonly string[])[], headerRow: number, supplierHasReference: boolean): boolean {
+  if (findBankHeader(table)) return false;
+  if (headerRow < 0) return true;
+  if (supplierHasReference) return false;
+  const words = new Set([...BANK_WORDS.debit, ...BANK_WORDS.credit]);
+  return (table[headerRow] ?? []).some((c) => words.has(headerKey(c)));
+}
+
+export function redactWordCells(table: readonly (readonly string[])[]): string[][] {
+  return table.map((r) => r.map((c) => (/[a-z]/i.test(String(c ?? "")) ? redactDigits(String(c ?? "")) : String(c ?? ""))));
 }
 
 /**
