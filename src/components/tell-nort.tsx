@@ -33,6 +33,7 @@ export function TellNort({
   label = "Just tell Nort",
   placeholder = "Two new circuits, one for lights one for outlets, finished room they're converting from storage…",
   nortOn = true,
+  defaultOpen = false,
 }: {
   /** The server action for THIS surface. One component, one extraction path, many targets —
    *  a surface contributes a target and a projection, never an assistant of its own. */
@@ -46,8 +47,10 @@ export function TellNort({
   /** The Nort switch (0352). Off, this still fills the boxes (it isn't the assistant) and says so
    *  without the name: "Just Say It", and "it only uses what's written here". */
   nortOn?: boolean;
+  /** Start with the panel open (the tests count its doors; nothing in the app opens it for you). */
+  defaultOpen?: boolean;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(defaultOpen);
   const [text, setText] = useState("");
   const [recording, setRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
@@ -167,7 +170,14 @@ export function TellNort({
         <p className="text-xs text-slate-500">
           {hint ? `Say the whole thing — ${hint.replace(/\?$/, "")}, and anything else you'd tell somebody.` : "Say the whole thing, the way you'd say it to a person."}
         </p>
-        <button type="button" onClick={() => { stopMic(); setOpen(false); }} className="shrink-0 rounded-md p-1 text-slate-400">
+        {/* A thumb-sized close with a name: 44px like every other door on the walk-through, and a
+            screen reader says what the X does. */}
+        <button
+          type="button"
+          aria-label="Close"
+          onClick={() => { stopMic(); setOpen(false); }}
+          className="-mr-2 -mt-2 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-slate-400 active:bg-slate-100"
+        >
           <X className="h-4 w-4" />
         </button>
       </div>
