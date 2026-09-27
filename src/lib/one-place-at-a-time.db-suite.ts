@@ -28,6 +28,8 @@ const iso = (v: unknown) => new Date(v as string).toISOString();
 export function defineOnePlaceAtATimeSuite(connect: () => Promise<SqlClient>) {
   let c: SqlClient;
   let ready = false;
+  /** The database's guard is this checkout's 0360 text, word for word (not an earlier draft). */
+  let current = false;
   let orgId = "";
   let techId = "";
   let techName = "";
@@ -66,6 +68,10 @@ export function defineOnePlaceAtATimeSuite(connect: () => Promise<SqlClient>) {
     }
   };
   const needs = () => ready || notOnThisDatabase("[one-place-at-a-time] migration 0360 is not on this database yet; apply it (or set ONE_PLACE_SUITE_APPLY=1) to exercise this case.");
+  /** For a case about wording 0360 gained after an earlier draft of it was applied here. */
+  const needsCurrent = () =>
+    (needs() && current) ||
+    notOnThisDatabase("[one-place-at-a-time] the 0360 on this database is an earlier text than this checkout's; re-apply 0360 (it is create-or-replace) or set ONE_PLACE_SUITE_APPLY=1 to exercise this case.");
 
   type EntryIn = { profile?: string; job?: string | null; code?: string | null; in: string; out?: string | null; source?: string; reason?: string | null };
   /** A fixture row, written as the server (no claims): the person guards stand aside, this one does not. */
@@ -104,12 +110,19 @@ export function defineOnePlaceAtATimeSuite(connect: () => Promise<SqlClient>) {
             where n.nspname = 'public' and p.proname = 'guard_time_entry_sanity'`,
         )
       )?.ok === true;
+    // THIS CHECKOUT'S TEXT, not just some 0360: the body between the file's $$ quotes is exactly what
+    // pg_proc.prosrc holds once it is applied, so an older 0360 on the database is told apart.
+    const sql = readFileSync(fileURLToPath(new URL("../../supabase/migrations/0360_one_person_one_place_at_a_time.sql", import.meta.url)), "utf8");
+    const fileBody = /create or replace function public\.guard_time_entry_sanity\(\)[\s\S]*?\bas \$\$([\s\S]*?)\$\$;/.exec(sql)?.[1] ?? null;
+    const isCurrent = async () =>
+      fileBody != null && (await one("select prosrc from pg_proc where oid = 'public.guard_time_entry_sanity()'::regprocedure"))?.prosrc === fileBody;
     ready = await has();
-    if (!ready && process.env.ONE_PLACE_SUITE_APPLY === "1") {
-      const sql = readFileSync(fileURLToPath(new URL("../../supabase/migrations/0360_one_person_one_place_at_a_time.sql", import.meta.url)), "utf8");
+    current = ready && (await isCurrent());
+    if (!current && process.env.ONE_PLACE_SUITE_APPLY === "1") {
       await c.query(sql);
       ready = await has();
-      console.warn("[one-place-at-a-time] 0360 is not on this database yet; applied inside the test's own transaction, which is rolled back.");
+      current = await isCurrent();
+      console.warn("[one-place-at-a-time] this checkout's 0360 is not on this database; applied inside the test's own transaction, which is rolled back.");
     }
     if (!ready) return;
 
@@ -168,6 +181,19 @@ export function defineOnePlaceAtATimeSuite(connect: () => Promise<SqlClient>) {
         // time change, so it passes, and the hours land on the job once.
         await c.query("update public.time_entries set job_id = $2 where id = $1", [punch, jobA]);
         expect((await row(punch)).job_id).toBe(jobA);
+      });
+    });
+
+    it("a shift filed under a code with no job (SHOP) is the company's own time: edit it, never 'put it on the job'", async () => {
+      if (!needsCurrent()) return;
+      await step(async () => {
+        // Brian's 7/16 shape: SHOP, no job. The app says "Edit that entry instead" for it; so does this.
+        const shop = await entry({ job: null, code: "SHOP", in: ts("2001-02-08T14:00:00Z"), out: ts("2001-02-08T19:00:00Z") });
+        await as(staffId);
+        const r = await refusal(() => insert({ job: jobA, in: ts("2001-02-08T15:00:00Z"), out: ts("2001-02-08T16:00:00Z") }));
+        expect(r?.message).toMatch(/overlap a shift already recorded for .*: Thu Feb 8, 9:00 AM to 2:00 PM, on SHOP\. Edit that shift instead, or move these times clear of it\./);
+        expect(r?.message).not.toMatch(/Put that shift on the job/);
+        expect(r?.detail).toBe(`time_entry:${shop}`);
       });
     });
 

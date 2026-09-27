@@ -60,8 +60,9 @@
 --      that person's card. Their gate (v_times_changed) already asked for it.
 --   D. THE SENTENCE NAMES THE SHIFT: whose, which day, from and to in THE COMPANY'S timezone
 --      (split_org_tz, 0288: organizations.settings.timezone, the app's own default when unset), and
---      the job it is on or "no job", with the advice that fits: a no-job shift is put on the job; a
---      shift on a job is edited; a running clock is stopped first. The words "overlap a shift
+--      the job it is on or "no job", with the advice that fits: a shift on no job and no code is put
+--      on the job; a shift on a job, or filed under a code with no job (SHOP, PTO: the company's own
+--      time), is edited; a running clock is stopped first. The words "overlap a shift
 --      already recorded" stay in every one of them, because clockOut and stopShift recognise the
 --      refusal by them. DETAIL carries "time_entry:<id>" so a door can link to the shift it names.
 --
@@ -171,7 +172,9 @@ begin
           to_char(v_clash.clock_in at time zone v_tz, 'FMHH12:MI AM'),
           v_where
           using errcode = 'P0001', detail = 'time_entry:' || v_clash.id::text;
-      elsif v_clash.job_id is null then
+      -- On no job AND no code: a punch nobody placed, which goes on the job. A coded one (SHOP, PTO)
+      -- is the company's own time filed on purpose, and is edited like any other shift.
+      elsif v_clash.job_id is null and nullif(btrim(coalesce(v_clash.job_code, '')), '') is null then
         raise exception 'Those hours overlap a shift already recorded for %: % % to %, %. Put that shift on the job instead of adding the hours again, or move these times clear of it.',
           v_who,
           to_char(v_clash.clock_in at time zone v_tz, 'Dy Mon FMDD,'),
