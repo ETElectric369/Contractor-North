@@ -49,6 +49,18 @@ describe("the rows under the box", () => {
   it("nothing matches: the last row makes the customer from what was typed", () => {
     expect(pickRows("  Nora Gove ", JOBS, CUSTOMERS)).toEqual([{ kind: "new-customer", name: "Nora Gove" }]);
   });
+
+  it("the new-customer row opens on the WHOLE typed name, not the letters that first matched nothing", async () => {
+    // Matching is by substring, so once "No" matches nothing, "Nora Gove" can't either: the row
+    // appears partway through the name and stays. NewCustomerInline takes its name when it mounts,
+    // so the row is keyed by the name - each keystroke mounts a fresh one on the full text.
+    expect(pickRows("No", JOBS, CUSTOMERS)).toEqual([{ kind: "new-customer", name: "No" }]);
+    const { readFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const src = readFileSync(join(process.cwd(), "src/app/(app)/billing/new-invoice-button.tsx"), "utf8");
+    expect(src).toMatch(/<li key=\{`new-customer:\$\{r\.name\}`\}[^>]*>[\s\S]{0,700}?<NewCustomerInline initialName=\{r\.name\}/);
+    expect(src).not.toContain('key="new-customer"');
+  });
 });
 
 describe("what a pick runs", () => {

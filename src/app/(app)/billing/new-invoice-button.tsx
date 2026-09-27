@@ -316,9 +316,12 @@ export function NewInvoicePickBody({
             <ul className="mt-2 divide-y divide-slate-100 overflow-hidden rounded-lg border border-slate-200" role="listbox" aria-label="Jobs and customers">
               {rows.map((r) =>
                 r.kind === "new-customer" ? (
-                  <li key="new-customer" className="px-3 py-1">
+                  <li key={`new-customer:${r.name}`} className="px-3 py-1">
                     {/* No match: this makes the customer and picks them (name and phone; the rest
-                        goes on their contact page later). */}
+                        goes on their contact page later). Keyed by the typed name: the row appears
+                        at the first letters that match nothing ("Mi") and stays while the rest is
+                        typed, and NewCustomerInline takes its name once, when it mounts - so each
+                        new name mounts a fresh one and the box opens on the whole of it. */}
                     <NewCustomerInline initialName={r.name} label={`New Customer '${r.name}'`} onCreated={onCustomerCreated} />
                   </li>
                 ) : (
