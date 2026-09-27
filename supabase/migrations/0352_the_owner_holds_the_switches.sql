@@ -44,10 +44,13 @@
 -- it again.
 --
 -- ORDER: after 0246 (the create_organization body), 0158 (the trust-root helpers), 0154
--- (is_privileged_writer) and 0064 (agent_audit_log). SAFE BEFORE OR AFTER THE CODE: before it, the
--- app reads every switch as ON, Settings > Features says the switches need an update from North,
--- and sign-up falls back to the old two-argument create_organization (PGRST202). After it, the old
--- two-argument call still works (the new parameters default to null). Safe to re-run.
+-- (is_privileged_writer) and 0064 (agent_audit_log). APPLY WITH OR AFTER THE DEPLOY, never before
+-- it. Deployed first is safe: the app reads every switch as ON, Settings > Features says the
+-- switches need an update from North (nothing changes), and sign-up falls back to the old
+-- two-argument create_organization (PGRST202). Applied BEFORE the code, the old Settings >
+-- Scheduling page's Job Codes box says Saved and changes nothing (the pin in 3 carries the stored
+-- timeclock_job_codes through the old save). After it, the old two-argument call still works (the
+-- new parameters default to null). Safe to re-run.
 -- ═══════════════════════════════════════════════════════════════════════════
 
 set local lock_timeout = '3s';
