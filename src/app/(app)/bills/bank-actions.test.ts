@@ -514,6 +514,24 @@ describe("the next download", () => {
   });
 });
 
+describe("a fill-up already on the books", () => {
+  it("is tagged Fuel by the company's answer when its line matches it, and Undo takes the tag off", async () => {
+    const first = await drop();
+    const v = await view(first);
+    await applyBankDownload(first, { fingerprint: v.fingerprint, picks: { [rowBy(v, "SHELL").id]: "cost:Gas & Truck:fuel" } });
+    // A pump receipt filed from Organize before the next download: Gas & Truck, no kind.
+    db.bills.push({ id: "b-receipt", org_id: "org-1", job_id: null, supplier: "Shell", amount: 60, bill_date: "2026-09-28", category: "Gas & Truck", cost_kind: null, bank_line_id: null, superseded_by_bill_id: null });
+    const next = await drop(NEXT_CSV, "Next.csv");
+    const nv = await view(next);
+    await applyBankDownload(next, { fingerprint: nv.fingerprint, picks: {} });
+    const receipt = db.bills.find((b) => b.id === "b-receipt")!;
+    expect(receipt.cost_kind).toBe("fuel");
+    expect(db.bank_lines.find((l) => l.id === receipt.bank_line_id)).toMatchObject({ choice: "matched", matched_kind: "fuel" });
+    await undoBankDownload(next);
+    expect(db.bills.find((b) => b.id === "b-receipt")).toMatchObject({ cost_kind: null, bank_line_id: null });
+  });
+});
+
 describe("a merchant with two answers", () => {
   const STORE = (rows: string) => `Account Number,Post Date,Check,Description,Debit,Credit,Status,Balance\n${rows}`;
 

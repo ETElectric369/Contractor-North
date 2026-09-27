@@ -705,7 +705,17 @@ export function choiceLabel(c: BankChoice, names: BankNames): string {
 export type BooksPayment = { id: string; invoiceId: string; invoiceNumber: string; cents: number; day: string; method: string; feeCents: number | null; stripe: boolean };
 export type BooksPay = { id: string; profileId: string; cents: number; day: string; reference: string | null };
 export type BooksSupplierPay = { id: string; accountId: string; cents: number; day: string; reference: string | null };
-export type BooksBill = { id: string; cents: number; day: string | null; supplier: string; jobId: string | null; category: string | null; onAccount: boolean };
+export type BooksBill = {
+  id: string;
+  cents: number;
+  day: string | null;
+  supplier: string;
+  jobId: string | null;
+  category: string | null;
+  onAccount: boolean;
+  /** Fuel or truck inside Gas & Truck (0362), or null: not said. */
+  costKind?: string | null;
+};
 export type BooksPetty = { id: string; cents: number; day: string; kind: string };
 export type BooksAccount = { id: string; name: string; number: string | null; branch: string | null; onAccount: boolean; aliases: string[] };
 export type BooksInvoice = { id: string; number: string; balanceCents: number };
@@ -752,7 +762,7 @@ export type MatchTable = "payments" | "bills" | "supplier_payments" | "pay_payme
 
 export type Disposition =
   | { how: "already" }
-  | { how: "match"; table: MatchTable; ids: string[]; said: string }
+  | { how: "match"; table: MatchTable; ids: string[]; said: string; tag?: CostKind }
   | { how: "rule"; ruleId: string; choice: BankChoice }
   | { how: "need"; group: string };
 
@@ -1093,7 +1103,13 @@ export function planBankDownload(dl: BankDownload, books: BankBooks): BankPlan {
       if (!hits.length) return null;
       hits.sort(byDistance(line.postedOn));
       const b = hits[0];
-      return { how: "match", table: "bills", ids: [b.id], said: `${line.cents > 0 ? "Return from " : ""}${b.supplier} already on the books` };
+      // A FILL-UP ALREADY ON THE BOOKS (a pump receipt snapped before the download) is fuel when the
+      // company's own answer for this merchant, at this amount, says so: the match tags it, and the
+      // line remembers the tag so Undo takes it off again. Never guessed from the words alone.
+      const r = b.category === "Gas & Truck" && !b.jobId && !b.costKind && line.cents < 0 ? ruleFor(line, books.rules) : null;
+      const rc = r ? ruleChoice(r, books) : null;
+      const tag = rc?.choice === "cost" && rc.bucket === "Gas & Truck" && rc.costKind ? rc.costKind : undefined;
+      return { how: "match", table: "bills", ids: [b.id], said: `${line.cents > 0 ? "Return from " : ""}${b.supplier} already on the books${tag ? ` (${tag === "fuel" ? "Fuel" : "Truck"}, by your answer)` : ""}`, ...(tag ? { tag } : {}) };
     };
     if (line.cents > 0) {
       const kind = depositKindOf(line.description);
@@ -1292,7 +1308,7 @@ export function planBankDownload(dl: BankDownload, books: BankBooks): BankPlan {
   const fingerprint = fingerprintOf(
     lines.map((l) => {
       const d = dispositions.get(l.key)!;
-      const tail = d.how === "match" ? `${d.table}:${d.ids.join(",")}` : d.how === "rule" ? `${d.ruleId}:${choiceId(d.choice)}` : d.how === "need" ? d.group : "";
+      const tail = d.how === "match" ? `${d.table}:${d.ids.join(",")}${d.tag ? `:${d.tag}` : ""}` : d.how === "rule" ? `${d.ruleId}:${choiceId(d.choice)}` : d.how === "need" ? d.group : "";
       return `${l.key}:${d.how}:${tail}`;
     }),
   );

@@ -85,6 +85,9 @@ export function FuelTrendCard({ trend }: { trend: FuelTrend }) {
         </div>
       </div>
       <p className="mt-2 text-sm text-slate-600">{facts.join(" · ")}</p>
+      {/* WHAT IT COUNTS, said: a Gas & Truck business cost tagged Fuel, which a bank download does
+          (a tap on Fuel, the company's answer, or a fill-up it matched by that answer). */}
+      <p className="mt-1 text-xs text-slate-500">Counts Gas &amp; Truck costs marked Fuel on a bank download. A receipt not marked Fuel isn&apos;t in it.</p>
     </Card>
   );
 }

@@ -592,6 +592,20 @@ describe("matching what is already on the books (exact cents, each row once)", (
     expect(view.otherIn.map((b) => b.label)).toContain("Refund: Tools & Supplies");
   });
 
+  it("a fill-up already on the books is tagged Fuel by the company's answer for that merchant, never by its words alone", () => {
+    const dl = readBankTable(parseCSV(`Date,Description,Amount\n09/12/2026,1111-CORNER STORE ANYTOWN,-138.62\n09/14/2026,1111-SHELL OIL ANYTOWN,-60.00\n`), "x.csv", hash)!;
+    const bill = (id: string, cents: number, supplier: string) => ({ id, cents, day: "2026-09-12", supplier, jobId: null, category: "Gas & Truck", onAccount: false, costKind: null });
+    const books = ORG_BOOKS({
+      bills: [bill("b-store", 13862, "Corner Store"), { ...bill("b-shell", 6000, "Shell Oil"), day: "2026-09-14" }],
+      rules: [{ id: "r-store", direction: "out", key: "corner", choice: "cost", bucket: "Gas & Truck", costKind: "fuel", supplierAccountId: null, profileId: null, minCents: 12000, maxCents: 14000 }],
+    });
+    const plan = planBankDownload(dl, books);
+    expect(plan.dispositions.get(dl.lines[0].key)).toMatchObject({ how: "match", ids: ["b-store"], tag: "fuel" });
+    // No answer for SHELL yet: matched, untagged (the person's tap on a later SHELL row is what says).
+    expect(plan.dispositions.get(dl.lines[1].key)).toMatchObject({ how: "match", ids: ["b-shell"] });
+    expect((plan.dispositions.get(dl.lines[1].key) as { tag?: string }).tag).toBeUndefined();
+  });
+
   it("one bill is matched once, even when two lines could take it", () => {
     const dl = download();
     const books = ORG_BOOKS({ bills: [{ id: "b-shell", cents: 10000, day: "2026-09-12", supplier: "Shell", jobId: null, category: "Gas & Truck", onAccount: false }] });

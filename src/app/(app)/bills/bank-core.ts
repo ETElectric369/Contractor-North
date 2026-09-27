@@ -164,7 +164,7 @@ export async function loadBankBooks(supabase: Db, orgId: string, dl: BankDownloa
     paged<any>((f, t) =>
       supabase
         .from("bills")
-        .select("id, amount, bill_date, supplier, job_id, category, supplier_account_id")
+        .select("id, amount, bill_date, supplier, job_id, category, supplier_account_id, cost_kind")
         .eq("org_id", orgId)
         .is("superseded_by_bill_id", null)
         .is("bank_line_id", null)
@@ -268,6 +268,7 @@ export async function loadBankBooks(supabase: Db, orgId: string, dl: BankDownloa
       jobId: b.job_id ?? null,
       category: b.category ?? null,
       onAccount: !!b.supplier_account_id && onAccount.has(String(b.supplier_account_id)),
+      costKind: b.cost_kind ?? null,
     })),
     pettyCash: (pettyR.rows as any[]).map((p) => ({ id: String(p.id), cents: centsOf(p.amount), day: String(p.tx_date), kind: String(p.kind ?? "") })),
     accounts,
@@ -380,7 +381,14 @@ export function bankLine(dl: BankDownload): string {
 
 export type BankApplyResult = { ok: boolean; error?: string; message?: string; stale?: boolean };
 
-type Work = { line: BankLine; sortedBy: "match" | "rule" | "person"; choice: BankChoice | null; match?: { table: MatchTable; ids: string[] }; ruleId?: string; group?: string };
+type Work = {
+  line: BankLine;
+  sortedBy: "match" | "rule" | "person";
+  choice: BankChoice | null;
+  match?: { table: MatchTable; ids: string[]; tag?: "fuel" | "truck" };
+  ruleId?: string;
+  group?: string;
+};
 
 const MATCH_TABLES: MatchTable[] = ["payments", "bills", "supplier_payments", "pay_payments", "petty_cash"];
 
@@ -431,7 +439,7 @@ export async function applyBankCore(
   for (const line of dl.lines) {
     const d = plan.dispositions.get(line.key);
     if (!d || d.how === "already") continue;
-    if (d.how === "match") work.push({ line, sortedBy: "match", choice: null, match: { table: d.table, ids: d.ids } });
+    if (d.how === "match") work.push({ line, sortedBy: "match", choice: null, match: { table: d.table, ids: d.ids, ...(d.tag ? { tag: d.tag } : {}) } });
     else if (d.how === "rule") work.push({ line, sortedBy: "rule", choice: d.choice, ruleId: d.ruleId });
     else {
       const c = picks.ok.get(d.group);
@@ -492,6 +500,8 @@ export async function applyBankCore(
       supplier_account_id: c?.choice === "supplier" ? c.supplierAccountId : null,
       profile_id: c?.choice === "crew" ? c.profileId : null,
       invoice_id: c?.choice === "invoice" ? c.invoiceId : null,
+      // The kind a match tagged on the bill it matched (0365), so Undo takes the tag off again.
+      matched_kind: w.match?.tag ?? null,
       sorted_by: w.sortedBy,
       created_by: who.userId,
     };
@@ -523,10 +533,12 @@ export async function applyBankCore(
   for (const table of MATCH_TABLES) {
     for (const w of work.filter((x) => x.match?.table === table && lineId.has(x.line.key))) {
       const id = lineId.get(w.line.key)!;
-      const { data, error } = await supabase.from(table).update({ bank_line_id: id }).eq("org_id", who.orgId).in("id", w.match!.ids).is("bank_line_id", null).select("id");
+      // A fill-up already on the books takes the fuel (or truck) tag the company's answer gave it.
+      const tag = table === "bills" && w.match!.tag ? { cost_kind: w.match!.tag } : {};
+      const { data, error } = await supabase.from(table).update({ bank_line_id: id, ...tag }).eq("org_id", who.orgId).in("id", w.match!.ids).is("bank_line_id", null).select("id");
       const got = ((data ?? []) as { id: string }[]).map((r) => String(r.id));
       if (error || got.length !== w.match!.ids.length) {
-        if (got.length) await supabase.from(table).update({ bank_line_id: null }).eq("org_id", who.orgId).in("id", got).eq("bank_line_id", id).select("id");
+        if (got.length) await supabase.from(table).update({ bank_line_id: null, ...(w.match!.tag ? { cost_kind: null } : {}) }).eq("org_id", who.orgId).in("id", got).eq("bank_line_id", id).select("id");
         await unwrite([w.line.key], `${w.line.description} (${w.line.postedOn}) wasn't matched: what it matched changed a moment ago.${error ? ` ${dbError(error)}` : ""}`);
       }
     }
@@ -804,7 +816,7 @@ export async function applyBankCore(
 
 // ── UNDO ───────────────────────────────────────────────────────────────────────────────────────
 
-type LineRow = { id: string; choice: string; amount: number | string; bucket: string | null; invoice_id: string | null; posted_on: string; description: string };
+type LineRow = { id: string; choice: string; amount: number | string; bucket: string | null; invoice_id: string | null; posted_on: string; description: string; matched_kind: string | null };
 
 /**
  * TAKE A WHOLE DOWNLOAD BACK: only what it wrote, and only what nobody has changed since.
@@ -818,7 +830,8 @@ type LineRow = { id: string; choice: string; amount: number | string; bucket: st
  */
 export async function undoBankCore(supabase: Db, orgId: string, userId: string, importId: string): Promise<{ ok: true; left: string[]; undone: number } | { ok: false; error: string }> {
   const read = await readAllPages<LineRow>(
-    (f, t) => supabase.from("bank_lines").select("id, choice, amount, bucket, invoice_id, posted_on, description").eq("org_id", orgId).eq("import_id", importId).order("id").range(f, t),
+    (f, t) =>
+      supabase.from("bank_lines").select("id, choice, amount, bucket, invoice_id, posted_on, description, matched_kind").eq("org_id", orgId).eq("import_id", importId).order("id").range(f, t),
     20,
   );
   if (read.error) return { ok: false, error: isMissingBank(read.error) ? BANK_NEEDS_UPDATE : `The download's lines couldn't be read, so nothing was undone. ${dbError(read.error as never)}` };
@@ -832,7 +845,7 @@ export async function undoBankCore(supabase: Db, orgId: string, userId: string, 
 
   for (const table of MATCH_TABLES) {
     const cols =
-      table === "bills" ? "id, bank_line_id, amount, job_id, category" : table === "payments" ? "id, bank_line_id, amount, invoice_id" : table === "petty_cash" ? "id, bank_line_id, amount, kind" : "id, bank_line_id, amount, voided_at";
+      table === "bills" ? "id, bank_line_id, amount, job_id, category, cost_kind" : table === "payments" ? "id, bank_line_id, amount, invoice_id" : table === "petty_cash" ? "id, bank_line_id, amount, kind" : "id, bank_line_id, amount, voided_at";
     for (const part of chunks(ids, 150)) {
       const { data, error } = await supabase.from(table).select(cols).eq("org_id", orgId).in("bank_line_id", part);
       if (error) return { ok: false, error: `${table.replace(/_/g, " ")} couldn't be read, so the rest wasn't undone. ${dbError(error)}` };
@@ -841,7 +854,10 @@ export async function undoBankCore(supabase: Db, orgId: string, userId: string, 
         if (!l) continue;
         const cents = Math.abs(centsOf(l.amount));
         if (l.choice === "matched") {
-          const { error: e } = await supabase.from(table).update({ bank_line_id: null }).eq("org_id", orgId).eq("id", row.id).select("id");
+          // The fuel/truck tag the match put on a bill comes off with the mark, unless a person has
+          // said something else since.
+          const untag = table === "bills" && l.matched_kind && row.cost_kind === l.matched_kind ? { cost_kind: null } : {};
+          const { error: e } = await supabase.from(table).update({ bank_line_id: null, ...untag }).eq("org_id", orgId).eq("id", row.id).select("id");
           if (e) {
             keep.add(l.id);
             say(l, `its mark wouldn't come off: ${dbError(e)}`);

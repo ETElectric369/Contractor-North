@@ -24,10 +24,17 @@
 --     UNIQUE (org_id, direction, merchant_key, answer)   one rule per merchant AND answer, in
 --                                        place of one per merchant.
 --
--- LOCKS: bank_rules only (0363's own table, staff-only, a few rows per company at most): one CHECK
--- swapped, two nullable columns, one generated column (a rewrite of a table this small is
--- nothing), one UNIQUE swapped. lock_timeout 3s: a busy table fails fast and changes nothing. Run
--- it again.
+--   A FILL-UP ALREADY ON THE BOOKS IS FUEL BY THE COMPANY'S ANSWER. A pump receipt snapped (and
+--   filed as Gas & Truck) before the download is matched by its bank line, and never reached the
+--   fuel trend, because only the bank door writes cost_kind (0362). When the company's answer for
+--   that merchant at that amount says Fuel (or Truck), the match now tags the bill, and the line
+--   remembers the tag it put there so its Undo takes the tag off again:
+--     bank_lines.matched_kind   'fuel' | 'truck' | NULL: the kind a matched line tagged on its bill.
+--
+-- LOCKS: 0363's own tables only (staff-only, new): bank_rules gets one CHECK swapped, two nullable
+-- columns, one generated column (a rewrite of a table this small is nothing) and one UNIQUE
+-- swapped; bank_lines one nullable column and its CHECK. lock_timeout 3s: a busy table fails fast
+-- and changes nothing. Run it again.
 --
 -- ORDER: after 0363. Safe before or after the code (the code never writes what this refuses).
 -- A company that already holds an Other Income rule (none can yet: 0363 is new) loses it here,
@@ -62,6 +69,12 @@ alter table public.bank_rules add column if not exists answer text generated alw
 alter table public.bank_rules drop constraint if exists bank_rules_one_per_key;
 alter table public.bank_rules drop constraint if exists bank_rules_one_per_answer;
 alter table public.bank_rules add constraint bank_rules_one_per_answer unique (org_id, direction, merchant_key, answer);
+
+-- ── The tag a match put on a bill ───────────────────────────────────────────────────────────────
+alter table public.bank_lines add column if not exists matched_kind text;
+alter table public.bank_lines drop constraint if exists bank_lines_matched_kind_words;
+alter table public.bank_lines add constraint bank_lines_matched_kind_words check (matched_kind is null or (choice = 'matched' and matched_kind in ('fuel', 'truck')));
+comment on column public.bank_lines.matched_kind is 'The fuel/truck kind this MATCHED line tagged on the Gas & Truck bill it matched (0365), by the company''s own answer; Undo takes it off again.';
 
 comment on column public.bank_rules.min_cents is 'The smallest amount (cents, positive) this answer was given for (0365). The app places a line from half of it; NULL = every amount.';
 comment on column public.bank_rules.max_cents is 'The largest amount (cents, positive) this answer was given for (0365). The app places a line up to twice it; NULL = every amount.';

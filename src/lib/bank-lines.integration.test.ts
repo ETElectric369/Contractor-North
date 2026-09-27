@@ -174,6 +174,9 @@ d("0362 + 0363: bank lines and rules are the company's own, and a line counts on
     expect(await refused("insert into bank_lines (org_id, import_id, line_key, posted_on, amount, choice, sorted_by) values ($1, $2, $3, '2001-01-02', -1, 'cost', 'person')", [orgA, importA, KEY(5)])).toBe("23514");
     expect(await refused("insert into bank_lines (org_id, import_id, line_key, posted_on, amount, choice, bucket, cost_kind, sorted_by) values ($1, $2, $3, '2001-01-02', -1, 'cost', 'Fees', 'fuel', 'person')", [orgA, importA, KEY(6)])).toBe("23514");
     expect(await refused("insert into bank_lines (org_id, import_id, line_key, posted_on, amount, choice, sorted_by) values ($1, $2, 'not-a-key', '2001-01-02', -1, 'personal', 'person')", [orgA, importA])).toBe("23514");
+    // A matched line may remember the fuel/truck tag it put on its bill (0365); nothing else may.
+    expect(await refused("insert into bank_lines (org_id, import_id, line_key, posted_on, amount, choice, matched_kind, sorted_by) values ($1, $2, $3, '2001-01-02', -1, 'personal', 'fuel', 'person')", [orgA, importA, KEY(8)])).toBe("23514");
+    expect(await refused("insert into bank_lines (org_id, import_id, line_key, posted_on, amount, choice, matched_kind, sorted_by) values ($1, $2, $3, '2001-01-02', -1, 'matched', 'fuel', 'match')", [orgA, importA, KEY(9)])).toBeNull();
     // A rule: money in may only say Not Income (Other Income is never a rule's); one rule per merchant
     // AND answer (a second answer for the same merchant is its own rule), each with a sane band.
     expect(await refused("insert into bank_rules (org_id, direction, merchant_key, choice) values ($1, 'out', 'venmo', 'other_income')", [orgA])).toBe("23514");
