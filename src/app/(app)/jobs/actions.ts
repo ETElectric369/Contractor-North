@@ -4,6 +4,7 @@ import { importExtras, extrasSentence, type ImportOutcomeLike } from "@/lib/impo
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { adminConfigured, createAdminClient } from "@/lib/supabase/admin";
 import { pushCalendarItem, deleteCalendarItem } from "@/lib/calendar-sync";
 import { JOB_STATUSES } from "@/lib/job-status";
 import { DRAW_KINDS, isDrawKind } from "@/lib/invoice-math";
@@ -1277,9 +1278,9 @@ export async function createBill(input: {
   // may only supersede a PO on its own job, or the supersede silently drops another job's
   // order from the cost rollup. A mismatched/foreign id is ignored (the bill still saves).
   const poId = await visiblePoIdOnJobOrNull(supabase, input.po_id ?? null, jobId);
-  // A COST WITH NO JOB IS A BUSINESS COST, AND IT LANDS IN ONE OF THE SIX BUCKETS whichever door
+  // A COST WITH NO JOB IS A BUSINESS COST, AND IT LANDS IN ONE OF THE BUCKETS whichever door
   // sent it: the Bills page, Add Business Cost, Add Cost, or Nort. bucketOf reads an old word
-  // ("Fuel") as its bucket and anything unknown as Other, so no door can start a seventh list.
+  // ("Vehicle") as its bucket and anything unknown as Other, so no door can start a list of its own.
   // A job bill's category is the kind of paper it is (Receipt, Materials) and passes untouched.
   const category = jobId ? (input.category ?? null) : bucketOf(input.category);
 
@@ -1452,23 +1453,33 @@ export async function updateBill(
   if (patch.status !== undefined) clean.status = patch.status;
   if (patch.bill_date !== undefined) clean.bill_date = patch.bill_date || null;
   if (patch.notes !== undefined) clean.notes = patch.notes?.trim() || null;
-  // The same rule as createBill: an edit that says this bill has no job puts its category in one
-  // of the six buckets. (A patch that leaves job_id out is not told which it is, and passes as sent.)
-  if (patch.category !== undefined)
-    clean.category = patch.job_id !== undefined && !patch.job_id ? bucketOf(patch.category) : (patch.category ?? null);
   if (patch.job_id !== undefined) clean.job_id = patch.job_id || null;
 
-  // One stored-row read of the bill as it stands — feeds THREE things: the old-job revalidation
-  // (a re-pointed bill's cost must leave its old job), the PO same-job check below, and the claim
-  // guard. It asks for `amount` as well as `job_id` because "did the price actually move" cannot
-  // be answered from the patch alone: the bills list sends `amount` on every save whether it
-  // changed or not, so without the stored figure every save would look like a re-price.
+  // One stored-row read of the bill as it stands — feeds FOUR things: the old-job revalidation
+  // (a re-pointed bill's cost must leave its old job), the PO same-job check below, the claim
+  // guard, and the bucket rule for a category sent without a job. It asks for `amount` as well as
+  // `job_id` because "did the price actually move" cannot be answered from the patch alone: the
+  // bills list sends `amount` on every save whether it changed or not, so without the stored figure
+  // every save would look like a re-price.
   let oldJobId: string | null = null;
   let oldAmount = 0;
-  if (patch.job_id !== undefined || patch.amount !== undefined || (patch.po_id !== undefined && !!patch.po_id)) {
+  if (
+    patch.job_id !== undefined ||
+    patch.amount !== undefined ||
+    patch.category !== undefined ||
+    (patch.po_id !== undefined && !!patch.po_id)
+  ) {
     const { data: prev } = await supabase.from("bills").select("job_id, amount").eq("id", id).maybeSingle();
     oldJobId = (prev as { job_id: string | null } | null)?.job_id ?? null;
     oldAmount = Number((prev as { amount?: number | string | null } | null)?.amount ?? 0);
+  }
+  // The same rule as createBill: a bill with no job puts its category in one of the buckets. The job
+  // it will have is the one this patch sends, or the stored one when the patch leaves job_id out (Nort
+  // can send a category alone): without that, a "gas" typed on a no-job bill was stored as typed, the
+  // Owner's Draw card counted it as Fuel through bucketOf, and the Fuel card, which read "Fuel", did not.
+  if (patch.category !== undefined) {
+    const nextJobId = patch.job_id !== undefined ? patch.job_id || null : oldJobId;
+    clean.category = !nextJobId ? bucketOf(patch.category) : (patch.category ?? null);
   }
 
   // A RECEIPT AN INVOICE BILLS MAY NOT CHANGE JOBS, AND MAY NOT CHANGE PRICE IN SILENCE.
@@ -1516,11 +1527,11 @@ export async function updateBill(
     const restamp = await restampLotsForBill(supabase, ctx.orgId, id);
     if (!restamp.ok) {
       reportError("updateBill.restamp", new Error(restamp.error), { billId: id });
-      shelfNote = `The bill saved, but the roll on the shelf from this ticket couldn't be re-costed: ${restamp.error}`;
+      shelfNote = `The bill saved, but the roll in stock from this ticket couldn't be re-costed: ${restamp.error}`;
     } else if (restamp.unshelved > 0) {
-      shelfNote = `${restamp.unshelved === 1 ? "The roll" : `${restamp.unshelved} rolls`} on the shelf from this ticket came off the shelf, because nothing of ${restamp.unshelved === 1 ? "its line" : "their lines"} is left for it.`;
+      shelfNote = `${restamp.unshelved === 1 ? "The roll" : `${restamp.unshelved} rolls`} from this ticket came out of stock, because nothing of ${restamp.unshelved === 1 ? "its line" : "their lines"} is left for it.`;
     } else if (restamp.restamped > 0) {
-      shelfNote = `${restamp.restamped === 1 ? "The roll" : `${restamp.restamped} rolls`} on the shelf from this ticket ${restamp.restamped === 1 ? "was" : "were"} re-costed to match.`;
+      shelfNote = `${restamp.restamped === 1 ? "The roll" : `${restamp.restamped} rolls`} in stock from this ticket ${restamp.restamped === 1 ? "was" : "were"} re-costed to match.`;
     }
   }
   for (const jid of new Set([oldJobId, (data as any)?.job_id].filter(Boolean) as string[])) revalidatePath(`/jobs/${jid}`);
@@ -1708,7 +1719,7 @@ export async function deleteDocument(
   const supabase = await createClient();
   // Read the row FIRST (RLS scopes it to the caller's org) so we delete the file it actually
   // points at, not a client path that could name another org's object; row-check the delete.
-  const { data: row } = await supabase.from("documents").select("id, file_url, uploaded_by").eq("id", id).maybeSingle();
+  const { data: row } = await supabase.from("documents").select("id, org_id, file_url, uploaded_by").eq("id", id).maybeSingle();
   if (!row) return { ok: false, error: "Document not found." };
 
   /**
@@ -1740,12 +1751,92 @@ export async function deleteDocument(
   }
 
   const storedPath = (row as { file_url?: string | null }).file_url ?? null;
+  const orgId = (row as { org_id?: string | null }).org_id ?? null;
+  // Anyone but staff: the links naming the file are read past RLS first (fileHeldByOthers).
+  let keepFile = false;
+  if (!isStaff && storedPath) {
+    const held = await fileHeldByOthers(orgId, storedPath, id, uid);
+    if (held === "money") {
+      return {
+        ok: false,
+        error: "The office recorded this receipt as a cost, so only the office can delete it now. Ask them if it should go.",
+      };
+    }
+    keepFile = held !== "none";
+  }
   const { data: del, error } = await supabase.from("documents").delete().eq("id", id).select("id");
   if (error) return { ok: false, error: dbError(error) };
   if (!del?.length) return { ok: false, error: "Document not found." };
-  if (storedPath) await supabase.storage.from("documents").remove([storedPath]);
+  if (storedPath && !keepFile && (await tiesLetGoOfFile(supabase, orgId, storedPath, id))) {
+    await supabase.storage.from("documents").remove([storedPath]);
+  }
   revalidatePath(`/jobs/${jobId}`);
   return { ok: true };
+}
+
+/**
+ * A BILL'S TIE LETS GO OF A DELETED FILE (2026-09-27: bills and job photos kept separate).
+ *
+ * The link that says which paper made which bill (organized_items: the reader's, Add Cost's, File
+ * It's) names the file itself, and its document_id is only SET NULL when the documents row goes. So
+ * a receipt deleted from Receipts & Papers left its bill's row opening a file that was about to be
+ * removed from storage: "The receipt couldn't load just now. Reload to try again." on every load,
+ * on the job's Costs tab and on /bills. Every link naming the file lets go of it first (the bill
+ * then draws no paper door, which is the truth), and the file is removed only when that write
+ * answered: a failed write keeps the file, so the bill still opens it. No link at all is the usual
+ * case (a photo, a plan), so zero rows is an answer, not a silent write.
+ */
+async function tiesLetGoOfFile(supabase: SupabaseClient, orgId: string | null, path: string, documentId: string): Promise<boolean> {
+  if (!orgId) return false;
+  const { error } = await supabase
+    .from("organized_items")
+    .update({ file_url: null })
+    .eq("org_id", orgId)
+    .eq("file_url", path)
+    .select("id");
+  if (error) {
+    reportError("deleteDocument.tiesLetGo", error, { documentId });
+    return false;
+  }
+  return true;
+}
+
+/**
+ * A TECH'S DELETE NEVER STRANDS THE OFFICE'S LINK (review of release/v1026). tiesLetGoOfFile writes
+ * with the caller's own sign-in, and a tech sees only the links they made (organized_items_write,
+ * 0340): the office's link from a bill to a receipt the tech snapped was invisible, the release
+ * found nothing, and the file was removed under the bill's Receipt door. So for anyone but staff,
+ * every link naming the file (by the file, or by the document) is read past RLS first, a read
+ * only: one that made money (a bill, a supplier invoice, petty cash) refuses the delete in words;
+ * one somebody else made keeps the file; a read that couldn't run keeps the file too (a file left
+ * in storage costs nothing, a dead door on a bill does). "none" is the only answer that removes it.
+ */
+async function fileHeldByOthers(orgId: string | null, path: string, documentId: string, uid: string | null): Promise<"money" | "other" | "none" | "unknown"> {
+  if (!orgId || !uid || !adminConfigured()) return "unknown";
+  try {
+    const admin = createAdminClient();
+    const cols = "id, created_by, bill_id, tied_bill_id, tied_supplier_invoice_id, petty_cash_id";
+    const [byFile, byDoc] = await Promise.all([
+      admin.from("organized_items").select(cols).eq("org_id", orgId).eq("file_url", path).limit(50),
+      admin.from("organized_items").select(cols).eq("org_id", orgId).eq("document_id", documentId).limit(50),
+    ]);
+    if (byFile.error || byDoc.error) {
+      reportError("deleteDocument.fileHeldByOthers", byFile.error ?? byDoc.error, { documentId });
+      return "unknown";
+    }
+    const rows = [...(byFile.data ?? []), ...(byDoc.data ?? [])] as {
+      created_by?: string | null;
+      bill_id?: string | null;
+      tied_bill_id?: string | null;
+      tied_supplier_invoice_id?: string | null;
+      petty_cash_id?: string | null;
+    }[];
+    if (rows.some((r) => r.bill_id || r.tied_bill_id || r.tied_supplier_invoice_id || r.petty_cash_id)) return "money";
+    return rows.some((r) => r.created_by !== uid) ? "other" : "none";
+  } catch (e) {
+    reportError("deleteDocument.fileHeldByOthers", e, { documentId });
+    return "unknown";
+  }
 }
 
 export type JobImportRow = {

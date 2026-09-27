@@ -9,6 +9,7 @@ import {
   getOwnerMoney,
   getOwnerMoneyViews,
   hasUnratedHours,
+  materialsWithStock,
   notCountedLine,
   ownerMoneyChartWindow,
   ownerMoneyReadSpan,
@@ -16,6 +17,7 @@ import {
   supplierDocsNoBillCovers,
   parseOwnerMoneyMonthKey,
   resolveOwnerMoneySelection,
+  stockLine,
   windowInsideSpan,
   windowLabel,
   windowMonths,
@@ -27,6 +29,7 @@ import {
 import { computeRevenueTrend } from "@/lib/analytics/money-metrics";
 import { balanceForPerson } from "@/lib/payroll-math";
 import { BUSINESS_COST_BUCKETS } from "@/lib/business-cost-buckets";
+import { BUCKETS_BESIDE_FUEL } from "@/lib/analytics/owner-money";
 
 const TZ = "America/Los_Angeles";
 const TODAY = "2026-09-24";
@@ -75,14 +78,15 @@ const base = (): OwnerMoneyInputs => ({
 });
 
 const cents = (n: number) => Math.round(n * 100);
-const bizTotal = (f: OwnerMoneyFigures) => BUSINESS_COST_BUCKETS.reduce((s, b) => s + cents(f.businessCosts[b]), 0);
-/** THE INVARIANT, in cents: received = materials + crew pay + mileage + business costs
+const bizTotal = (f: OwnerMoneyFigures) => BUCKETS_BESIDE_FUEL.reduce((s, b) => s + cents(f.businessCosts[b]), 0);
+/** THE INVARIANT, in cents: received = materials + crew pay + mileage + fuel + business costs
  *  + put on the shelf + shop stock lost (0303) + left. */
 const holds = (f: OwnerMoneyFigures) =>
   cents(f.received) ===
   cents(f.materialsAndBills) +
     cents(f.crewPay) +
     cents(f.crewMileagePaid) +
+    cents(f.fuel) +
     cents(f.businessCostsTotal) +
     cents(f.putOnShelf) +
     cents(f.shopStockLost) +
@@ -267,6 +271,79 @@ describe("computeOwnerMoney: the shelf counts in the month it is bought", () => 
     expect(off.totals.shopStockLost).toBe(0);
     expect(off.totals.materialsAndBills).toBe(199.48);
   });
+
+  // Erik, 2026-09-27: "we dont need a put on the shelf on the bar graph". The card and the chart show
+  // stock bought INSIDE Materials & Bills; the engine keeps it apart for the accountant's Stock
+  // Bought list. The card's lines must still add up to the draw, and one line says how much is stock.
+  it("the card folds stock bought into Materials & Bills, still adds up to the cent, and says so in one line", () => {
+    const lots = [{ lot_id: "L1", bill_id: "h1", cost: 180.17, cost_left: 100, live: true }];
+    const moves = [{ id: "w1", lot_id: "L1", kind: "write_off", cost: 36.93, created_at: "2026-09-10T18:00:00Z" }];
+    // A fill-up in the same month: Fuel is its own line on the card (0362), never inside Materials &
+    // Bills, so the card adds up only when it counts once.
+    const fuel = { id: "f9", job_id: null, amount: 42.17, bill_date: "2026-08-12", created_at: "2026-08-12T18:00:00Z", category: "Fuel", status: "paid" };
+    const both = { ...inputs([jobTicket, fuel], lots), shelfMoves: moves };
+    const cardAddsUp = (f: OwnerMoneyFigures) =>
+      cents(f.received) ===
+      cents(materialsWithStock(f)) + cents(f.crewPay) + cents(f.crewMileagePaid) + cents(f.fuel) + cents(f.businessCostsTotal) + cents(f.shopStockLost) + cents(f.left);
+    const aug = computeOwnerMoney(both, AUG, TZ, TODAY);
+    const sep = computeOwnerMoney(both, ownerMoneyWindow("2026-09", TODAY), TZ, TODAY);
+    const year = computeOwnerMoney(both, YEAR, TZ, TODAY);
+    expect(aug.totals.fuel).toBe(42.17);
+    for (const f of [aug.totals, sep.totals, year.totals, ...year.months]) expect(cardAddsUp(f)).toBe(true);
+    // August reads as the ticket did before any of it went into stock: the whole $199.48.
+    expect(materialsWithStock(aug.totals)).toBe(199.48);
+    expect(stockLine(aug)).toBe(
+      "Materials & Bills includes $180.17 of shop stock, counted the month it was bought. In Stock Now: $100.00 at cost. It moves onto a job's profit as pieces are taken, and never counts against the draw twice.",
+    );
+    // September bought nothing and wrote $36.93 off: said as given back, never "-$36.93 of stock".
+    expect(materialsWithStock(sep.totals)).toBe(-36.93);
+    expect(stockLine(sep)).toBe(
+      "Materials & Bills gives back $36.93 of shop stock bought before, now in Shop Stock Lost. In Stock Now: $100.00 at cost. It moves onto a job's profit as pieces are taken, and never counts against the draw twice.",
+    );
+    expect(stockLine(year)).toContain("Materials & Bills includes $143.24 of shop stock, counted the month it was bought, less what moved to Shop Stock Lost.");
+    for (const m of [aug, sep, year]) expect(stockLine(m)).not.toMatch(/shelf/i);
+    // No stock money and nothing in stock: no line at all.
+    expect(stockLine(computeOwnerMoney(inputs([jobTicket]), AUG, TZ, TODAY))).toBeNull();
+  });
+
+  // Review of fix/stock-not-shelf: "less what moved" said Shop Stock Lost held stock money when it
+  // held only a supplier's credit, and said nothing when a move and a credit cancelled to $0.
+  it("'less what moved to Shop Stock Lost' keys on what MOVED, never on a credit sitting in Shop Stock Lost", () => {
+    // August: 50 ft of the August roll went back to CED ($36.03). September: a new $50 roll, and
+    // CED's -$20 credit for the August return, dated in September.
+    const sepTicket = { ...jobTicket, id: "h2", amount: 50, bill_date: "2026-09-02", created_at: "2026-09-02T18:00:00Z" };
+    const credit = { id: "cr1", job_id: null, on_shelf: true, amount: -20, bill_date: "2026-09-03", created_at: "2026-09-03T18:00:00Z", category: "Credit", status: "paid" };
+    const lots = [
+      { lot_id: "L1", bill_id: "h1", cost: 180.17, cost_left: 144.14, live: true },
+      { lot_id: "L2", bill_id: "h2", cost: 50, cost_left: 50, live: true },
+    ];
+    const ret = { id: "r1", lot_id: "L1", kind: "supplier_return", cost: 36.03, created_at: "2026-08-25T19:00:00Z", credit_bill_id: "cr1" };
+    const SEP = ownerMoneyWindow("2026-09", TODAY);
+    const creditOnly = computeOwnerMoney({ ...inputs([jobTicket, sepTicket, credit], lots), shelfMoves: [ret] }, SEP, TZ, TODAY);
+    expect(creditOnly.totals.putOnShelf).toBe(50);
+    expect(creditOnly.totals.shopStockLost).toBe(-20); // only the credit: nothing moved in September
+    expect(creditOnly.totals.stockMovedOut).toBe(0);
+    expect(stockLine(creditOnly)).toBe(
+      "Materials & Bills includes $50.00 of shop stock, counted the month it was bought. In Stock Now: $194.14 at cost. It moves onto a job's profit as pieces are taken, and never counts against the draw twice.",
+    );
+    // The same September with $20 written off the new roll: Shop Stock Lost nets to $0, but the $30
+    // is $50 bought less $20 moved out, and the line says so.
+    const off = { id: "w2", lot_id: "L2", kind: "write_off", cost: 20, created_at: "2026-09-10T18:00:00Z" };
+    const lotsAfter = [lots[0], { ...lots[1], cost_left: 30 }];
+    const cancel = computeOwnerMoney({ ...inputs([jobTicket, sepTicket, credit], lotsAfter), shelfMoves: [ret, off] }, SEP, TZ, TODAY);
+    expect(cancel.totals.putOnShelf).toBe(30);
+    expect(cancel.totals.shopStockLost).toBe(0);
+    expect(cancel.totals.stockMovedOut).toBe(20);
+    expect(stockLine(cancel)).toContain("Materials & Bills includes $30.00 of shop stock, counted the month it was bought, less what moved to Shop Stock Lost.");
+    // A credit for an OPENING roll sent back moves nothing out of any month's stock, whole year included.
+    const opening = [{ lot_id: "L0", bill_id: null, kind: "opening", cost: 40, cost_left: 10, live: true }, lots[1]];
+    const back = { ...ret, lot_id: "L0", cost: 30, created_at: "2026-09-01T19:00:00Z" };
+    const year = computeOwnerMoney({ ...inputs([sepTicket, credit], opening), shelfMoves: [back] }, YEAR, TZ, TODAY);
+    expect(year.totals.shopStockLost).toBe(-20);
+    expect(year.totals.stockMovedOut).toBe(0);
+    expect(stockLine(year)).toContain("Materials & Bills includes $50.00 of shop stock, counted the month it was bought.");
+    for (const m of [creditOnly, cancel, year]) for (const f of [m.totals, ...m.months]) expect(holds(f)).toBe(true);
+  });
 });
 
 describe("computeOwnerMoney: what is left for the owner", () => {
@@ -274,9 +351,9 @@ describe("computeOwnerMoney: what is left for the owner", () => {
 
   it("covers Jan through the current month, and the months sum to the total", () => {
     expect(m.months.map((x) => x.month)).toEqual(["2026-01", "2026-02", "2026-03", "2026-04", "2026-05", "2026-06", "2026-07", "2026-08", "2026-09"]);
-    const fields = ["received", "materialsAndBills", "crewPay", "crewMileagePaid", "businessCostsTotal", "processorFees", "left"] as const;
+    const fields = ["received", "materialsAndBills", "crewPay", "crewMileagePaid", "fuel", "businessCostsTotal", "processorFees", "left"] as const;
     for (const f of fields) expect(m.months.reduce((s, x) => s + cents(x[f]), 0)).toBe(cents(m.totals[f]));
-    for (const b of BUSINESS_COST_BUCKETS) expect(m.months.reduce((s, x) => s + cents(x.businessCosts[b]), 0)).toBe(cents(m.totals.businessCosts[b]));
+    for (const b of BUCKETS_BESIDE_FUEL) expect(m.months.reduce((s, x) => s + cents(x.businessCosts[b]), 0)).toBe(cents(m.totals.businessCosts[b]));
     expect(m.months.reduce((s, x) => s + x.ownerHours * 100, 0)).toBe(Math.round(m.totals.ownerHours * 100));
   });
 
@@ -307,10 +384,43 @@ describe("computeOwnerMoney: what is left for the owner", () => {
   });
 
   it("a no-job bill lands in its bucket; blank is Other; petty cash with no job too; a refill is not a cost", () => {
-    expect(m.totals.businessCosts["Gas & Truck"]).toBe(138.62); // "Fuel" → Gas & Truck
+    expect(m.totals.fuel).toBe(138.62); // the Fuel bucket, its own line
+    expect(m.totals.businessCosts.Auto).toBe(0);
     expect(m.totals.businessCosts.Other).toBe(47.44);
     expect(m.totals.businessCosts["Tools & Supplies"]).toBe(20);
     expect(m.months.find((x) => x.month === "2026-09")!.businessCosts.Other).toBe(47.44); // created_at read in Pacific
+  });
+
+  it("FUEL STANDS OUT: its own line, never inside Business Costs, and every cent still adds up", () => {
+    const withTruck = computeOwnerMoney(
+      {
+        ...yearInputs(),
+        bills: [
+          ...yearInputs().bills,
+          { id: "t1", job_id: null, amount: 480, bill_date: "2026-09-11", created_at: "2026-09-11T18:00:00Z", category: "Auto", status: "paid" },
+          // A row 0362 has not renamed yet: the old Gas & Truck is Auto, never Fuel.
+          { id: "t2", job_id: null, amount: 96.4, bill_date: "2026-09-11", created_at: "2026-09-11T18:00:00Z", category: "Gas & Truck", status: "paid" },
+          { id: "f2", job_id: null, amount: 60, bill_date: "2026-09-12", created_at: "2026-09-12T18:00:00Z", category: "Fuel", status: "paid" },
+        ],
+        pettyCash: [...yearInputs().pettyCash, { job_id: null, amount: 12.5, kind: "expense", category: "gas", tx_date: "2026-09-12", created_at: "2026-09-12T18:00:00Z" }],
+      },
+      YEAR,
+      TZ,
+      TODAY,
+    );
+    const t = withTruck.totals;
+    expect(t.fuel).toBe(211.12); // 138.62 + 60 + 12.50 of petty cash filed as "gas"
+    expect(t.businessCosts.Auto).toBe(576.4);
+    expect("Fuel" in t.businessCosts).toBe(false);
+    expect(cents(t.businessCostsTotal)).toBe(bizTotal(t));
+    // Moving fuel onto its own line moves no money: Left is exactly the old Left less the new costs.
+    expect(cents(t.left)).toBe(cents(m.totals.left) - cents(480 + 96.4 + 60 + 12.5));
+    for (const f of [t, ...withTruck.months]) expect(holds(f)).toBe(true);
+    const sep = withTruck.months.find((x) => x.month === "2026-09")!;
+    expect(sep.fuel).toBe(72.5);
+    expect(sep.businessCosts.Auto).toBe(576.4);
+    // Every bucket is somewhere: Fuel on its own, the rest in Business Costs.
+    expect([...BUCKETS_BESIDE_FUEL, "Fuel"].sort()).toEqual([...BUSINESS_COST_BUCKETS].sort());
   });
 
   it("Stripe's real fee lands in Fees; a NULL fee is UNKNOWN, reported, and never $0", () => {
@@ -831,9 +941,9 @@ describe("the windows agree with each other", () => {
   it("This Year's totals are the field-by-field sum of each month run on its own", () => {
     const year = computeOwnerMoney(yearInputs(), YEAR, TZ, TODAY);
     const monthly = year.months.map((x) => computeOwnerMoney(yearInputs(), ownerMoneyWindow("this_month", `${x.month}-15`), TZ, TODAY));
-    const fields = ["received", "materialsAndBills", "crewPay", "crewMileagePaid", "businessCostsTotal", "processorFees", "left"] as const;
+    const fields = ["received", "materialsAndBills", "crewPay", "crewMileagePaid", "fuel", "businessCostsTotal", "processorFees", "left"] as const;
     for (const f of fields) expect(monthly.reduce((s, m) => s + cents(m.totals[f]), 0)).toBe(cents(year.totals[f]));
-    for (const b of BUSINESS_COST_BUCKETS) {
+    for (const b of BUCKETS_BESIDE_FUEL) {
       expect(monthly.reduce((s, m) => s + cents(m.totals.businessCosts[b]), 0)).toBe(cents(year.totals.businessCosts[b]));
     }
     expect(monthly.reduce((s, m) => s + Math.round(m.totals.ownerHours * 100), 0)).toBe(Math.round(year.totals.ownerHours * 100));
@@ -949,7 +1059,7 @@ describe("getOwnerMoney: the fetch half", () => {
     expect(money!.totals.crewPay).toBe(320);
     expect(money!.totals.ownerHours).toBe(5);
     expect(money!.totals.businessCosts.Fees).toBe(13.35);
-    expect(money!.totals.businessCosts["Gas & Truck"]).toBe(30);
+    expect(money!.totals.fuel).toBe(30);
     expect(money!.owners).toEqual([{ id: ERIK, name: "Erik Taylor" }]);
   });
 

@@ -8,6 +8,7 @@ import {
   officeBellWords,
   parseShelf,
   parseTakes,
+  personNote,
   settleRefusalWords,
   shortOf,
   shortWords,
@@ -68,9 +69,9 @@ describe("the words", () => {
     expect(shortOf(5, 20)).toBe(15);
     expect(shortOf(250, 60)).toBe(0);
     expect(shortOf(-15, 10)).toBe(10); // a shelf already below zero shows none
-    expect(shortWords(20, "ft")).toBe("20 ft more than the shelf shows — the office will settle it");
+    expect(shortWords(20, "ft")).toBe("20 ft more than stock shows — the office will settle it");
     expect(tookWords({ qty: 20, unit: "ft", item: "12/2 NM-B", job: "Herringbone", short: 15 })).toBe(
-      "Took 20 ft of 12/2 NM-B for Herringbone. 15 ft more than the shelf shows — the office will settle it.",
+      "Took 20 ft of 12/2 NM-B for Herringbone. 15 ft more than stock shows — the office will settle it.",
     );
   });
 
@@ -85,20 +86,24 @@ describe("the words", () => {
     );
     const bell = officeBellWords({ who: "Brian", qty: 40, unit: "ft", item: "12/2 NM-B", job: "Herringbone", short: 40, onHandAfter: 60 });
     expect(bell.title).toBe("Brian took 40 ft of 12/2 NM-B; 40 ft of it isn't on a filed roll");
-    expect(bell.title).not.toContain("the shelf said");
+    expect(bell.title).not.toContain("stock showed");
     // Enough on filed rolls: nothing to say.
     expect(takeShortWords({ ...takeShort({ onHand: 100, takeable: 100 }, 40), unit: "ft" })).toBeNull();
     // Past the count as well: the count is what the crew sees, so that is what is said.
-    expect(takeShortWords({ ...takeShort({ onHand: 30, takeable: 10 }, 40), unit: "ft" })).toBe("10 ft more than the shelf shows — the office will settle it");
+    expect(takeShortWords({ ...takeShort({ onHand: 30, takeable: 10 }, 40), unit: "ft" })).toBe("10 ft more than stock shows — the office will settle it");
   });
 
   it("never sends the office to count a short it can't settle by counting", () => {
     const bell = officeBellWords({ who: "Brian", qty: 20, unit: "ft", item: "12/2", job: "Herringbone", short: 15, onHandAfter: -15 });
-    expect(bell.body).toBe("For Herringbone. File the roll on Shop Stock, then Settle From The Shelf — or Undo the take.");
+    expect(bell.body).toBe("For Herringbone. File the roll on Shop Stock, then Settle From Stock — or Undo the take.");
     expect(bell.body).not.toMatch(/count it/i);
+    // A database before 0364 still ends its refusal the old way: it is still turned round.
     expect(settleRefusalWords("Only 0 on the shelf, and 15 were taken past it. File the roll or count the shelf first.")).toBe(
-      "Only 0 on the shelf, and 15 were taken past it. A count can't settle it: file the roll on the shelf first, or Undo the take.",
+      "Only 0 on the shelf, and 15 were taken past it. A count can't settle it: file the roll on Shop Stock first, or Undo the take.",
     );
+    // 0364 says it itself, so the words pass through as they are.
+    const said = "Only 0 in stock, and 15 were taken past it. A count can't settle it: file the roll on Shop Stock first, or Undo the take.";
+    expect(settleRefusalWords(said)).toBe(said);
     expect(settleRefusalWords("Something else.")).toBe("Something else.");
   });
 
@@ -107,8 +112,8 @@ describe("the words", () => {
       "Brian took 60 ft of 12/2 NM-B for Herringbone",
     );
     const short = officeBellWords({ who: "Brian", qty: 20, unit: "ft", item: "12/2", job: "Herringbone", short: 15, onHandAfter: -15 });
-    expect(short.title).toBe("Brian took 20 ft of 12/2, the shelf said 5 ft");
-    expect(short.body).toBe("For Herringbone. File the roll on Shop Stock, then Settle From The Shelf — or Undo the take.");
+    expect(short.title).toBe("Brian took 20 ft of 12/2, stock showed 5 ft");
+    expect(short.body).toBe("For Herringbone. File the roll on Shop Stock, then Settle From Stock — or Undo the take.");
     for (const w of [short.title, short.body]) expect(w).not.toMatch(/\$/);
   });
 
@@ -124,7 +129,7 @@ describe("the words", () => {
     });
     // Brought back in part: says why there is no Undo, and names no door the app doesn't have.
     const back = takeDoor({ canUndo: false, billedOn: null, back: 5 });
-    expect(back).toEqual({ kind: "none", why: "Some of it came back to the shelf, so this take can't be undone." });
+    expect(back).toEqual({ kind: "none", why: "Some of it came back to stock, so this take can't be undone." });
     expect(takeDoor({ canUndo: false, billedOn: null, back: 0 })).toEqual({ kind: "none", why: null });
     // The office settled the short inside a tech's own take: his Undo is gone, and the row says who can (audit v1018).
     expect(takeDoor({ canUndo: false, billedOn: null, back: 0, settledByOffice: true })).toEqual({
@@ -144,11 +149,11 @@ describe("never silent (audit v1018)", () => {
     expect(belowZeroWords(0, "ft")).toBeNull();
     expect(belowZeroWords(undefined, "ft")).toBeNull();
     expect(tookWords({ qty: 90, unit: "ft", item: "12/2 NM-B", job: "Herringbone", short: 0, onHandAfter: -10 })).toBe(
-      "Took 90 ft of 12/2 NM-B for Herringbone. The shelf now reads -10 ft, below zero — the office will settle it.",
+      "Took 90 ft of 12/2 NM-B for Herringbone. Stock now reads -10 ft, below zero — the office will settle it.",
     );
     const bell = officeBellWords({ who: "Brian", qty: 90, unit: "ft", item: "12/2 NM-B", job: "Herringbone", short: 0, onHandAfter: -10 });
-    expect(bell.title).toBe("Brian took 90 ft of 12/2 NM-B; the shelf now reads -10 ft");
-    expect(bell.body).toBe("For Herringbone. An older short on it is still open: File the roll on Shop Stock, then Settle From The Shelf — or Undo the take.");
+    expect(bell.title).toBe("Brian took 90 ft of 12/2 NM-B; stock now reads -10 ft");
+    expect(bell.body).toBe("For Herringbone. An older short on it is still open: File the roll on Shop Stock, then Settle From Stock — or Undo the take.");
     // The bell opens where its words send the office: Shop Stock, whenever there is a short to settle.
     expect(officeBellOpensShelf({ short: 0, onHandAfter: -10 })).toBe(true);
     expect(officeBellOpensShelf({ short: 15, onHandAfter: -15 })).toBe(true);
@@ -188,5 +193,18 @@ describe("which item did they mean (Nort's fill)", () => {
   it("the card's link opens the job's Materials tab with the sheet filled in", () => {
     expect(takeHref("job-1", "i-122", 60)).toBe("/jobs/job-1?tab=materials&take=i-122&qty=60");
     expect(takeHref("job-1", "i-122", null)).toBe("/jobs/job-1?tab=materials&take=i-122");
+  });
+});
+
+describe("personNote: a move's note as a person wrote it", () => {
+  it("drops Count It's own note, in either wording, and keeps a person's", () => {
+    expect(personNote("Counted on the shelf")).toBeNull(); // saved before 0364, kept for good
+    expect(personNote("Counted in stock")).toBeNull();
+    expect(personNote(" Counted in stock ")).toBeNull();
+    expect(personNote("Counted in the truck")).toBe("Counted in the truck");
+    expect(personNote("Counted in stock, two rolls behind the ladder")).toBe("Counted in stock, two rolls behind the ladder");
+    expect(personNote("  ")).toBeNull();
+    expect(personNote(null)).toBeNull();
+    expect(personNote(undefined)).toBeNull();
   });
 });

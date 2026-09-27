@@ -37,6 +37,8 @@ import {
 import { ShelfTicketSheet, type ShelfCountLine } from "@/components/shelf-count";
 import { OpenListCard } from "@/components/open-list-card";
 import type { OpenListView } from "@/lib/supplier-open-list";
+import { BankCard } from "@/components/bank-card";
+import type { BankView } from "@/lib/bank-download";
 import {
   aiReviewItem,
   archiveItem,
@@ -76,6 +78,8 @@ export type PaperRowItem = PaperItem & {
   file_url?: string | null;
   /** A supplier's open list: what it changes, worked out on the server as the page loads. */
   open_list?: OpenListView | null;
+  /** A bank download: how it sorts against the books, worked out on the server as the page loads. */
+  bank?: BankView | null;
 };
 
 /** `status` complete: a finished job, offered under Completed Jobs (PR1), never pre-picked. */
@@ -113,6 +117,8 @@ function badgeFor(item: PaperItem) {
       return <Badge tone="green">Ready To File</Badge>;
     case "open_list":
       return <Badge tone="blue">Supplier&apos;s List</Badge>;
+    case "bank_download":
+      return <Badge tone="blue">Bank Download</Badge>;
     case "needs_total":
       return <Badge tone="amber">Needs A Total</Badge>;
     case "not_read":
@@ -354,7 +360,7 @@ export function PaperworkRow({
     if (!d) return "";
     if (d.type === "job" || d.type === "photo") return `on ${destLabel(value)}`;
     if (d.type === "overhead") return `as a business cost, ${d.category}`;
-    if (d.type === "stock") return "on the shop shelf";
+    if (d.type === "stock") return "in shop stock";
     return "in files";
   }
 
@@ -601,6 +607,33 @@ export function PaperworkRow({
       {guessChip}
     </div>
   );
+
+  // A BANK DOWNLOAD is one card: how it sorted, the rows that need a person, Apply / Not Now.
+  if (r.state === "bank_download") {
+    return (
+      <Card className="border-brand/30">
+        <div className="flex gap-3 p-3 sm:gap-4 sm:p-4">
+          <div className="min-w-0 flex-1">
+            {/* Said once each: what it is here, the account and days in the card's headline (no
+                badge repeating "Bank Download"). */}
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-medium text-slate-900">{describePaper(item)}</span>
+            </div>
+            <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-slate-500">
+              <span>Added {formatDate(item.created_at)}</span>
+              <span className="truncate">{item.title}</span>
+            </div>
+            <BankCard itemId={item.id} view={item.bank} run={run} busy={busy} working={working} />
+            {said && (
+              <p className={`mt-2 rounded-lg px-3 py-2 text-sm ${said.tone === "error" ? "bg-red-50 text-red-700" : "bg-brand/5 text-brand-dark"}`} role={said.tone === "error" ? "alert" : "status"}>
+                {said.text}
+              </p>
+            )}
+          </div>
+        </div>
+      </Card>
+    );
+  }
 
   // A SUPPLIER'S OPEN LIST is one sentence and Apply / Not Now; nothing else on this row applies.
   if (r.state === "open_list") {
@@ -875,7 +908,7 @@ export function PaperworkRow({
       </div>
       {shelfSheet && (
         <ShelfTicketSheet
-          title="File It To The Shelf"
+          title="File It To Stock"
           lines={shelfRowsOf(item).map(
             (l): ShelfCountLine => ({
               key: String(l.index),
@@ -887,13 +920,13 @@ export function PaperworkRow({
             }),
           )}
           total={item.amount == null || item.amount === "" ? null : Number(item.amount)}
-          fileLabel="File It To The Shelf"
+          fileLabel="File It To Stock"
           onClose={() => setShelfSheet(null)}
           onFile={async (choices) => {
             const res = await fileItem(item.id, { type: "stock", lines: choices }, { differentPurchase: shelfSheet.differentPurchase });
             if (!res.ok) return res;
             setShelfSheet(null);
-            const sentence = res.message ?? "Filed on the shop shelf.";
+            const sentence = res.message ?? "Filed in shop stock.";
             onFiled({ id: item.id, sentence: `${describePaper(item)}: ${sentence}` });
             toast(sentence, "success", {
               label: "Undo",

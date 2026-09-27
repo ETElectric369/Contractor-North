@@ -95,10 +95,10 @@ describe("a receipt line and the shelf", () => {
   it("on / not passed: today's line, Put The Rest On The Shelf offered", () => {
     const today = renderToStaticMarkup(createElement(ReceiptLines, { receipt }));
     expect(renderToStaticMarkup(createElement(ReceiptLines, { receipt, shopStock: true }))).toBe(today);
-    expect(today).toContain("Put The Rest On The Shelf");
+    expect(today).toContain("Put The Rest In Stock");
   });
   it("off: not offered", () => {
-    expect(renderToStaticMarkup(createElement(ReceiptLines, { receipt, shopStock: false }))).not.toContain("Put The Rest On The Shelf");
+    expect(renderToStaticMarkup(createElement(ReceiptLines, { receipt, shopStock: false }))).not.toContain("Put The Rest In Stock");
   });
 });
 

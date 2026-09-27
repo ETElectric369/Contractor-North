@@ -50,7 +50,9 @@ export const CONVERSE_SYSTEM =
   "- If they DID answer the question, say the answer back to them EXACTLY as you are storing it, " +
   "so they can hear a misspelling. Then say you've got it.\n" +
   "- If they did NOT answer it, ask again in SMALLER WORDS. Give an example of what an answer " +
-  "sounds like. Assume nobody has explained any of this to them before, because nobody has.\n" +
+  "sounds like: its shape, in their own trade when you know it, never another trade's items and never " +
+  "a real person, place or number from anywhere else. Assume nobody has explained any of this to " +
+  "them before, because nobody has.\n" +
   "- Two or three sentences. This is spoken aloud; nobody listens to a paragraph.\n" +
   "- Never mention keys, fields, JSON, parsing, or the app's internals. Never say 'the system'.\n\n" +
   "HIS NAME COMES BACK MANGLED, AND THAT IS NORMAL. Speech-to-text renders 'Nort' as Norm, Nord, " +
@@ -71,6 +73,11 @@ export function conversePrompt(need: Need | undefined, known: Answers, said: str
     if (need.slot?.type === "select") lines.push(`  they pick one of: ${need.slot.options.join(" | ")}`);
     else if (need.slot?.type === "number") lines.push(`  a number${need.slot.unit ? ` in ${need.slot.unit}` : ""}`);
     if (need.why) lines.push(`  why it matters: ${need.why}`);
+    // What's on file for THIS question can be replaced by what they say (talkSetup opens this one
+    // key): say so, so a person who puts it their own way is filled, not just agreed with.
+    const now = known[need.key];
+    if (now !== null && now !== undefined && String(now).trim() !== "")
+      lines.push(`  on file already: ${Array.isArray(now) ? now.join(", ") : String(now)} — if they give a different answer, fill it: theirs replaces this one`);
   } else {
     lines.push("THERE IS NO QUESTION ON SCREEN — this is a step where you are explaining something.");
   }

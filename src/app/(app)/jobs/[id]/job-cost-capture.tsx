@@ -43,7 +43,7 @@ type Line = { id: number; name: string; text: string; tone: Tone; differentDoc?:
  *
  * Write-then-show, not review-then-save: one result line per bill, in the pipeline's own words
  * when the reader didn't run (over its 8 MB cap, a .heic name, an unreadable total) — and the
- * file is FILED either way, so nothing captured is lost; Receipts & Documents below still has
+ * file is FILED either way, so nothing captured is lost; Receipts & Papers below still has
  * "Record as Cost" for a retry. The Supplier bills list refreshes underneath (router.refresh),
  * and its Edit / Delete are the undo trail (no save game).
  */
@@ -79,7 +79,7 @@ export function JobCostCapture({ orgId, jobId, billsTotal, nortOn = true }: { or
 
   /**
    * DIFFERENT PURCHASE, RIGHT HERE (review of audit v994's fix). The line said to press it, and
-   * this door had no such button: the one under Receipts & Documents only appears after another
+   * this door had no such button: the one under Receipts & Papers only appears after another
    * Record as Cost press, another paid read. A person looked and says it is a different purchase.
    */
   async function recordAnyway(l: Line) {

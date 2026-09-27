@@ -4,8 +4,9 @@ import { useRef, useState, useTransition } from "react";
 import { DropTarget } from "@/components/drop-target";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Upload, Camera, Trash2, Loader2, FileText, DollarSign, Pencil, Globe } from "lucide-react";
+import { Upload, Camera, Trash2, Loader2, FileText, DollarSign, Pencil, Globe, Receipt } from "lucide-react";
 import { categoryIsShowable } from "@/lib/portal/doc-kinds";
+import { Fold } from "@/components/why-fold";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
 import { Modal, ModalActions } from "@/components/ui/modal";
@@ -14,11 +15,17 @@ import { formatDate } from "@/lib/utils";
 import { CameraCapture } from "@/components/camera-capture";
 import { MediaLightbox } from "@/components/media-lightbox";
 import { captureReceipt, prettyBytes, readReceiptDocument, type ReceiptTone } from "@/lib/receipt-capture";
+import { isCostableCategory } from "@/lib/job-photos";
 import { deleteDocument, updateDocument } from "../actions";
 
-const COSTABLE = (c: string | null) => c === "Receipt" || c === "Bill";
+/** A Receipt or a Bill: read into a job cost on upload, and Record As Cost's (lib/job-photos, the
+ *  same rule that decides which papers can be "Not On A Bill Yet"). */
+const COSTABLE = isCostableCategory;
 
 const CATEGORIES = ["Receipt", "Bill", "Invoice", "Photo", "Plan", "Permit", "Other"];
+/** A picture filed as one of these shows on the Photos tab (lib/job-photos), not in this list. */
+const ON_PHOTOS_TAB = ["Photo", "Plan", "Permit", "Other"];
+const IMAGE_NAME = /\.(jpe?g|png|webp|gif|heic)$/i;
 
 interface Doc {
   id: string;
@@ -69,6 +76,13 @@ const NOTE_COLOR: Record<ReceiptTone, string> = {
  * tab's Add Plans Or Drawings (?plans=add), whatever the dropdown says, so a plan never has to be
  * found through the dropdown. Office only: the Customer
  * Page tab is not a tech's, so a tech is never pointed at it.
+ *
+ * RECEIPTS & PAPERS, FOLDED (Erik, 2026-09-27: bills and job photos kept separate). The list leads
+ * with the job's papers; what the Photos tab holds (`photoTabIds`) folds under them, still here for
+ * the pencil (a receipt snapped as a Photo is re-filed from this list) and the trash. A paper that
+ * made a bill on this job says which (`billOf`); a receipt or bill on no bill at all (`looseIds`)
+ * says so beside its Record As Cost, and the fold's line counts those and starts open while there
+ * are any, so an unrecorded receipt is never folded out of sight.
  */
 export function JobDocuments({
   orgId,
@@ -77,6 +91,10 @@ export function JobDocuments({
   portalPapers = null,
   plansDoor = false,
   nortOn = true,
+  photoTabIds = null,
+  billOf = null,
+  looseIds = null,
+  tieNote = null,
 }: {
   orgId: string;
   jobId: string;
@@ -89,8 +107,28 @@ export function JobDocuments({
   plansDoor?: boolean;
   /** The Nort switch (0352): the receipt reader still reads; its tooltip just doesn't name Nort. */
   nortOn?: boolean;
+  /** The documents the Photos tab holds (lib/job-photos sortJobPapers): listed last, folded. */
+  photoTabIds?: readonly string[] | null;
+  /** Document id → the bill on this job it made, in words ("the CED bill #8802-1106969"). */
+  billOf?: Record<string, string> | null;
+  /** Receipts and bills tied to no bill at all (never an Invoice: nothing reads one into a bill, so
+   *  its flag would have no Record As Cost). null = not known (the ties weren't read): nothing is
+   *  claimed, and Record as Cost stays on every receipt, as before. */
+  looseIds?: readonly string[] | null;
+  /** Said when the ties couldn't be read (the bills then draw no Receipt door): the fold starts open
+   *  so it is seen. */
+  tieNote?: string | null;
 }) {
   const router = useRouter();
+  const onPhotoTab = new Set(photoTabIds ?? []);
+  const papers = docs.filter((d) => !onPhotoTab.has(d.id));
+  const tabPictures = docs.filter((d) => onPhotoTab.has(d.id));
+  const loose = looseIds ? new Set(looseIds) : null;
+  const looseCount = loose ? papers.filter((d) => loose.has(d.id)).length : 0;
+  // Open while a paper is on no bill, as the page loaded: a fold that shut itself the moment the last
+  // one was recorded would hide the line saying it was. Open too when the ties couldn't be read: the
+  // bills above draw no Receipt door then, and the sentence saying why is inside this fold.
+  const [openAtStart] = useState(() => looseCount > 0 || !!tieNote);
   const [category, setCategory] = useState("Receipt");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -108,6 +146,8 @@ export function JobDocuments({
   // Per-document "recorded as a job cost" status, keyed by document id.
   const [billing, setBilling] = useState<string | null>(null);
   const [billMsg, setBillMsg] = useState<Record<string, BillNote>>({});
+  // "Filed on the Photos tab": a picture uploaded here as a Photo or a Plan leaves this list.
+  const [filedNote, setFiledNote] = useState<string | null>(null);
 
   const note = (docId: string, n: BillNote | null) =>
     setBillMsg((m) => {
@@ -125,6 +165,8 @@ export function JobDocuments({
     // go through (the old loop threw on the first failure and quietly abandoned the others).
     const lost: string[] = [];
     let touched = false;
+    let toPhotos = 0;
+    setFiledNote(null);
     for (const raw of files) {
       const out = await captureReceipt({ orgId, jobId, file: raw, category, read: COSTABLE(category), nortOn });
       if (out.kind === "lost") {
@@ -133,7 +175,11 @@ export function JobDocuments({
       }
       touched = true;
       // Paper that isn't a cost (a Plan, a Permit) is simply filed — its row is the confirmation.
-      if (out.kind === "filed" && out.why === "not_asked") continue;
+      // A picture filed that way lands on the Photos tab, not in this list, so that is said here.
+      if (out.kind === "filed" && out.why === "not_asked") {
+        if (ON_PHOTOS_TAB.includes(category) && (String(raw.type).startsWith("image/") || IMAGE_NAME.test(raw.name))) toPhotos++;
+        continue;
+      }
       note(out.docId, {
         text: out.sentence,
         done: out.kind !== "filed",
@@ -141,6 +187,7 @@ export function JobDocuments({
         different: out.kind === "already" && out.samePurchase === true,
       });
     }
+    if (toPhotos) setFiledNote(`Filed. ${toPhotos === 1 ? "It shows" : `All ${toPhotos} show`} on the Photos tab.`);
     if (lost.length) setError(lost.join(" "));
     setBusy(false);
     if (touched) router.refresh();
@@ -219,41 +266,199 @@ export function JobDocuments({
     router.refresh();
   }
 
-  return (
-    <div>
-      <div className="mb-3 flex flex-wrap items-center gap-2">
-        <Select value={category} onChange={(e) => setCategory(e.target.value)} className="w-32">
-          {CATEGORIES.map((c) => (
-            <option key={c} value={c}>{c}</option>
-          ))}
-        </Select>
-        <input ref={fileRef} type="file" multiple accept="image/*,application/pdf" className="hidden" onChange={onFiles} />
-        <input ref={captureRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={onFiles} />
-        <DropTarget onFiles={(files) => void uploadFiles(files)} accept="image/*,application/pdf" label="Drop Files">
-          <Button variant="outline" onClick={() => fileRef.current?.click()} disabled={busy}>
-            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-            Upload File
-          </Button>
-        </DropTarget>
-        <Button variant="outline" type="button" onClick={takePhoto} disabled={busy}>
-          <Camera className="h-4 w-4" /> Take Photo
-        </Button>
-      </div>
-      {/* Always there for the office, not only after the dropdown says Plan: the dropdown starts
-          on Receipt, so a plan uploaded here without touching it is read as a cost. */}
-      {plansDoor && (
-        <p className="mb-3 rounded-lg bg-slate-50 px-3 py-1 text-sm text-slate-700">
-          {category === "Plan" || category === "Permit"
-            ? "Plans and drawings live on the Customer Page tab. "
-            : "This is for receipts and bills. "}
-          <Link
-            href={`/jobs/${jobId}?tab=customer&plans=add`}
-            className="inline-flex min-h-11 items-center font-semibold text-brand underline-offset-2 hover:underline"
+  const row = (d: Doc) => {
+    const n = billMsg[d.id];
+    // Record as Cost is for a receipt no bill holds: when the ties were read, one that made a bill
+    // has nothing left to record (the reader would only answer "already recorded").
+    const recordable = COSTABLE(d.category) && !n?.done && (!loose || loose.has(d.id));
+    return (
+      <li key={d.id} className="flex flex-col gap-1.5 px-3 py-2.5">
+        <div className="flex items-center gap-3">
+          <button onClick={() => open(d)} className="shrink-0">
+            {isImage(d) && d.signedUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={d.signedUrl} alt="" className="h-12 w-12 rounded-md object-cover" />
+            ) : (
+              <span className="flex h-12 w-12 items-center justify-center rounded-md bg-slate-100">
+                <FileText className="h-5 w-5 text-slate-400" />
+              </span>
+            )}
+          </button>
+          <button onClick={() => open(d)} className="min-w-0 flex-1 text-left">
+            <div className="truncate text-sm font-medium text-slate-900 hover:text-brand">{d.name}</div>
+            <div className="text-xs text-slate-400">
+              {formatDate(d.created_at)}
+              {d.size_bytes ? ` · ${prettyBytes(d.size_bytes)}` : ""}
+            </div>
+            {billOf?.[d.id] && <div className="text-xs text-slate-500">On {billOf[d.id]}.</div>}
+            {loose?.has(d.id) && !n?.done && <div className="text-xs font-medium text-amber-700">Not on a bill yet.</div>}
+          </button>
+          {recordable && (
+            <button
+              onClick={() => recordCost(d)}
+              disabled={billing === d.id}
+              className="inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-md border border-brand/30 bg-brand/5 px-2 py-1 text-xs font-medium text-brand hover:bg-brand/10 disabled:opacity-50"
+              title={`${nortOn ? "Nort reads" : "Reads"} the receipt and adds it to this job's costs`}
+            >
+              {billing === d.id ? (
+                <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+              ) : (
+                <DollarSign className="h-4 w-4 shrink-0" />
+              )}
+              Record As Cost
+            </button>
+          )}
+          {d.category && <Badge tone="blue">{d.category}</Badge>}
+          <button
+            onClick={() => openEdit(d)}
+            className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+            title="Rename or re-categorize"
           >
-            Plan Or Drawing? Add It On The Customer Page
-          </Link>
-        </p>
-      )}
+            <Pencil className="h-4 w-4" />
+          </button>
+          <button
+            onClick={() => remove(d)}
+            disabled={pending}
+            className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600"
+            title="Delete"
+          >
+            <Trash2 className="h-4 w-4" />
+          </button>
+        </div>
+        {portalPapers && d.file_url && categoryIsShowable(d.category) && (
+          <div className="pl-15">
+            <Link
+              href={`/jobs/${jobId}?tab=customer&paper=${d.id}`}
+              className={`inline-flex min-h-11 items-center gap-1.5 rounded-md px-2 text-xs font-semibold ${
+                portalPapers[d.id] === "shown" ? "bg-emerald-50 text-emerald-800" : "text-brand hover:bg-brand/5"
+              }`}
+            >
+              <Globe className="h-4 w-4" />
+              {portalPapers[d.id] === "shown"
+                ? "On The Portal"
+                : portalPapers[d.id] === "replaced"
+                  ? "Replaced By A Newer One On The Portal"
+                  : "Show On Portal"}
+            </Link>
+          </div>
+        )}
+        {n && (
+          <div className={`pl-15 text-xs ${NOTE_COLOR[n.tone]}`}>
+            {n.text}
+          </div>
+        )}
+        {n?.different && (
+          <div className="pl-15">
+            <button
+              onClick={() => recordCost(d, true)}
+              disabled={billing === d.id}
+              className="inline-flex min-h-11 items-center gap-1.5 rounded-md border border-slate-300 px-3 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            >
+              {billing === d.id ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              Different Purchase: Record It Anyway
+            </button>
+          </div>
+        )}
+      </li>
+    );
+  };
+
+  return (
+    <>
+      <Fold
+        open={openAtStart}
+        summaryClassName="px-5 py-3"
+        summary={
+          <span className="flex flex-wrap items-center gap-x-2 text-sm">
+            <span className="inline-flex items-center gap-2 font-semibold text-slate-900">
+              <Receipt className="h-4 w-4 text-slate-400" /> Receipts &amp; Papers
+            </span>
+            {looseCount > 0 && (
+              <span className="font-medium text-amber-700">
+                · {looseCount} Not On A Bill Yet
+              </span>
+            )}
+          </span>
+        }
+      >
+        <div className="border-t border-slate-100 px-5 py-5">
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            <Select value={category} onChange={(e) => setCategory(e.target.value)} className="w-32">
+              {CATEGORIES.map((c) => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+            </Select>
+            <input ref={fileRef} type="file" multiple accept="image/*,application/pdf" className="hidden" onChange={onFiles} />
+            <input ref={captureRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={onFiles} />
+            <DropTarget onFiles={(files) => void uploadFiles(files)} accept="image/*,application/pdf" label="Drop Files">
+              <Button variant="outline" onClick={() => fileRef.current?.click()} disabled={busy}>
+                {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                Upload File
+              </Button>
+            </DropTarget>
+            <Button variant="outline" type="button" onClick={takePhoto} disabled={busy}>
+              <Camera className="h-4 w-4" /> Take Photo
+            </Button>
+          </div>
+          {/* Always there for the office, not only after the dropdown says Plan: the dropdown starts
+              on Receipt, so a plan uploaded here without touching it is read as a cost. */}
+          {plansDoor && (
+            <p className="mb-3 rounded-lg bg-slate-50 px-3 py-1 text-sm text-slate-700">
+              {category === "Plan" || category === "Permit"
+                ? "Plans and drawings live on the Customer Page tab. "
+                : "This is for receipts and bills. "}
+              <Link
+                href={`/jobs/${jobId}?tab=customer&plans=add`}
+                className="inline-flex min-h-11 items-center font-semibold text-brand underline-offset-2 hover:underline"
+              >
+                Plan Or Drawing? Add It On The Customer Page
+              </Link>
+            </p>
+          )}
+
+          {error && <p className="mb-2 text-sm text-red-600">{error}</p>}
+          {filedNote && (
+            <p className="mb-2 flex flex-wrap items-center gap-x-2 text-sm text-emerald-700">
+              {filedNote}
+              <Link
+                href={`/jobs/${jobId}?tab=photos`}
+                className="inline-flex min-h-11 items-center font-medium text-brand underline-offset-2 hover:underline"
+              >
+                Open Photos
+              </Link>
+            </p>
+          )}
+          {tieNote && <p className="mb-2 text-sm text-slate-500">{tieNote}</p>}
+
+          {papers.length === 0 ? (
+            <p className="text-sm text-slate-400">
+              No receipts or documents yet. Upload a bill, or snap a photo of a receipt.
+            </p>
+          ) : (
+            <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">{papers.map(row)}</ul>
+          )}
+
+          {/* What the Photos tab holds, folded last: still here for the pencil (a receipt snapped as a
+              Photo is re-filed as a Receipt from this list) and the trash. */}
+          {tabPictures.length > 0 && (
+            <Fold
+              className="mt-4"
+              summary={<span className="text-sm font-medium text-slate-700">Photos And Plans On The Photos Tab</span>}
+            >
+              <p className="mb-2 flex flex-wrap items-center gap-x-2 text-xs text-slate-500">
+                They show on the Photos tab. One that is really a receipt: tap its pencil and file it as a Receipt.
+                <Link
+                  href={`/jobs/${jobId}?tab=photos`}
+                  className="inline-flex min-h-11 items-center text-sm font-medium text-brand underline-offset-2 hover:underline"
+                >
+                  Open Photos
+                </Link>
+              </p>
+              <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">{tabPictures.map(row)}</ul>
+            </Fold>
+          )}
+        </div>
+      </Fold>
 
       {showCamera && (
         <CameraCapture
@@ -306,108 +511,6 @@ export function JobDocuments({
           {editErr && <p className="text-sm text-red-600">{editErr}</p>}
         </div>
       </Modal>
-
-      {error && <p className="mb-2 text-sm text-red-600">{error}</p>}
-
-      {docs.length === 0 ? (
-        <p className="text-sm text-slate-400">
-          No receipts or documents yet. Upload a bill, or snap a photo of a receipt.
-        </p>
-      ) : (
-        <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
-          {docs.map((d) => {
-            const n = billMsg[d.id];
-            return (
-            <li key={d.id} className="flex flex-col gap-1.5 px-3 py-2.5">
-              <div className="flex items-center gap-3">
-                <button onClick={() => open(d)} className="shrink-0">
-                  {isImage(d) && d.signedUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={d.signedUrl} alt="" className="h-12 w-12 rounded-md object-cover" />
-                  ) : (
-                    <span className="flex h-12 w-12 items-center justify-center rounded-md bg-slate-100">
-                      <FileText className="h-5 w-5 text-slate-400" />
-                    </span>
-                  )}
-                </button>
-                <button onClick={() => open(d)} className="min-w-0 flex-1 text-left">
-                  <div className="truncate text-sm font-medium text-slate-900 hover:text-brand">{d.name}</div>
-                  <div className="text-xs text-slate-400">
-                    {formatDate(d.created_at)}
-                    {d.size_bytes ? ` · ${prettyBytes(d.size_bytes)}` : ""}
-                  </div>
-                </button>
-                {COSTABLE(d.category) && !n?.done && (
-                  <button
-                    onClick={() => recordCost(d)}
-                    disabled={billing === d.id}
-                    className="inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-md border border-brand/30 bg-brand/5 px-2 py-1 text-xs font-medium text-brand hover:bg-brand/10 disabled:opacity-50"
-                    title={`${nortOn ? "Nort reads" : "Reads"} the receipt and adds it to this job's costs`}
-                  >
-                    {billing === d.id ? (
-                      <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
-                    ) : (
-                      <DollarSign className="h-4 w-4 shrink-0" />
-                    )}
-                    Record As Cost
-                  </button>
-                )}
-                {d.category && <Badge tone="blue">{d.category}</Badge>}
-                <button
-                  onClick={() => openEdit(d)}
-                  className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-                  title="Rename or re-categorize"
-                >
-                  <Pencil className="h-4 w-4" />
-                </button>
-                <button
-                  onClick={() => remove(d)}
-                  disabled={pending}
-                  className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600"
-                  title="Delete"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </button>
-              </div>
-              {portalPapers && d.file_url && categoryIsShowable(d.category) && (
-                <div className="pl-15">
-                  <Link
-                    href={`/jobs/${jobId}?tab=customer&paper=${d.id}`}
-                    className={`inline-flex min-h-11 items-center gap-1.5 rounded-md px-2 text-xs font-semibold ${
-                      portalPapers[d.id] === "shown" ? "bg-emerald-50 text-emerald-800" : "text-brand hover:bg-brand/5"
-                    }`}
-                  >
-                    <Globe className="h-4 w-4" />
-                    {portalPapers[d.id] === "shown"
-                      ? "On The Portal"
-                      : portalPapers[d.id] === "replaced"
-                        ? "Replaced By A Newer One On The Portal"
-                        : "Show On Portal"}
-                  </Link>
-                </div>
-              )}
-              {n && (
-                <div className={`pl-15 text-xs ${NOTE_COLOR[n.tone]}`}>
-                  {n.text}
-                </div>
-              )}
-              {n?.different && (
-                <div className="pl-15">
-                  <button
-                    onClick={() => recordCost(d, true)}
-                    disabled={billing === d.id}
-                    className="inline-flex min-h-11 items-center gap-1.5 rounded-md border border-slate-300 px-3 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-                  >
-                    {billing === d.id ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                    Different Purchase: Record It Anyway
-                  </button>
-                </div>
-              )}
-            </li>
-            );
-          })}
-        </ul>
-      )}
-    </div>
+    </>
   );
 }

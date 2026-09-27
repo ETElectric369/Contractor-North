@@ -68,7 +68,7 @@ const buttons = (html: string) =>
   Array.from(html.matchAll(/<button([^>]*)>([\s\S]*?)<\/button>/g))
     .filter((m) => !/aria-label="Close"/.test(m[1]))
     .map((m) => ({ attrs: m[1], words: m[2].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim() }));
-const text = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/&#x27;/g, "'").replace(/&amp;/g, "&").replace(/\s+/g, " ");
+const text = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/&#x27;/g, "'").replace(/&quot;/g, '"').replace(/&amp;/g, "&").replace(/\s+/g, " ");
 /** Title Case: every word that starts with a letter starts with a capital ("INV-00023", "h" and "$" aside). */
 const titleCase = (s: string) => s.split(/\s+/).filter((w) => /^[a-z]/i.test(w) && w !== "h").every((w) => /^[A-Z]/.test(w));
 
@@ -100,7 +100,7 @@ describe("the sheet, Purple Sage", () => {
     const html = render({ state: "ok", data: data() }, { lineId: "materials", step: "ask" });
     expect(text(html)).toContain("Did J-010 Use All Of It?");
     const b = buttons(html).map((x) => x.words);
-    expect(b).toEqual(expect.arrayContaining(["Yes, All Of It", "No, Some Went On The Shelf", "Back"]));
+    expect(b).toEqual(expect.arrayContaining(["Yes, All Of It", "No, Some Went Into Stock", "Back"]));
     for (const x of buttons(html)) expect(titleCase(x.words), x.words).toBe(true);
   });
 
@@ -156,6 +156,34 @@ describe("the sheet, hours", () => {
 
   it("names whose time it is in the sentence", () => {
     expect(hoursWhat(entries, ["b1", "b2"])).toBe("12.5 h of Brian Taylor's time");
+  });
+
+  it("a line that names one person lists only that person's shifts, says why, and never counts a tick on anyone else's (0361)", () => {
+    const withErik = [...entries, { id: "e1", person: "p-erik", name: "Erik Taylor", clockIn: "2026-06-18T15:00:00Z", hours: 6 }];
+    const judged = { ...INV00023, lines: [{ ...INV00023.lines[1], person: "p-brian", personName: "Brian Taylor" }] };
+    const html = render(
+      { state: "ok", data: { ...hoursData(), entries: withErik, invoices: [{ invoice: judged, preselect: "brian" }] } },
+      { lineId: "brian", checked: ["b1", "e1"] },
+    );
+    const t = text(html);
+    expect(Array.from(html.matchAll(/<input type="checkbox"[^>]*>/g))).toHaveLength(3);
+    expect(t).not.toContain("Erik Taylor");
+    expect(t).toContain(`"Labor - Brian" names Brian Taylor, so only Brian Taylor's hours are listed here.`);
+    // Erik's tick is not on the list, so it is not counted (and never sent).
+    expect(t).toContain("Line: 13 h · Checked: 8 h");
+    // A crew line lists everyone's.
+    const crew = { ...INV00023, lines: [{ ...INV00023.lines[1], description: "Labor - hourly with 2 guys", person: null, personName: null }] };
+    const all = render({ state: "ok", data: { ...hoursData(), entries: withErik, invoices: [{ invoice: crew, preselect: "brian" }] } }, { lineId: "brian" });
+    expect(Array.from(all.matchAll(/<input type="checkbox"[^>]*>/g))).toHaveLength(4);
+    expect(text(all)).not.toContain("are listed here");
+  });
+
+  it("a line whose person has no open shifts says so, instead of listing someone else's", () => {
+    const erikOnly = [{ id: "e1", person: "p-erik", name: "Erik Taylor", clockIn: "2026-06-18T15:00:00Z", hours: 6 }];
+    const judged = { ...INV00023, lines: [{ ...INV00023.lines[1], person: "p-brian", personName: "Brian Taylor" }] };
+    const html = render({ state: "ok", data: { ...hoursData(), entries: erikOnly, invoices: [{ invoice: judged, preselect: "brian" }] } }, { lineId: "brian" });
+    expect(Array.from(html.matchAll(/<input type="checkbox"[^>]*>/g))).toHaveLength(0);
+    expect(text(html)).toContain("None of Brian Taylor's hours on J-010 are open to mark.");
   });
 });
 
@@ -248,6 +276,20 @@ describe("the sheet, hours on no job", () => {
     const t = text(renderNoJob({ state: "ok", data: noJob({ invoices: [] }) }));
     expect(t).toContain("No invoice with no job that went out has a line that could have charged for these hours.");
     expect(t).not.toContain("on No Job");
+  });
+
+  it("a line that names JP lists only JP's hours: Brian's shift, pressed on, is neither listed nor ticked (0361)", () => {
+    const judged = { ...INV055, lines: [{ ...INV055.lines[0], person: "p-jp", personName: "JP Prince" }] };
+    const html = renderNoJob({ state: "ok", data: noJob({ invoices: [{ invoice: judged, preselect: "jp" }], preticked: ["t8"] }) }, { lineId: "jp", checked: ["t8"] });
+    const t = text(html);
+    expect(Array.from(html.matchAll(/<input type="checkbox"[^>]*>/g))).toHaveLength(2);
+    expect(Array.from(html.matchAll(/<input type="checkbox"[^>]*checked=""[^>]*>/g))).toHaveLength(0);
+    expect(t).not.toContain("Brian Taylor");
+    expect(t).toContain("Nothing is ticked to start. Tick the hours this line charged for.");
+    expect(t).toContain("Line: 23 h · Checked: 0 h");
+    // Nothing ticked that is listed: Mark can't be pressed.
+    const mark = buttons(html).find((b) => b.words === "Mark Billed On INV-055");
+    expect(mark?.attrs).toMatch(/disabled/);
   });
 
   it("a shift the door named that isn't open any more is said above the list", () => {

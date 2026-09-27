@@ -22,7 +22,7 @@ import { getOrgSettings } from "@/lib/org-settings";
 import { officeRecipients, ringOffice } from "@/lib/notifications";
 import { startedAtProblem, startedWords, clockWords, jobShort, visitIsOver, type StartedClock } from "@/lib/appointments/visit-start";
 import { loadLinkInstead } from "@/lib/appointments/visit-start-read";
-import { overlapRefusal } from "@/lib/overlap-refusal";
+import { clockInClashWords, findOverlap } from "@/lib/overlap-refusal";
 import type { GeoPoint } from "@/lib/types";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createJobFromAppointment, linkAppointmentTo } from "./actions";
@@ -187,8 +187,18 @@ export async function startJobFromVisit(input: {
      clock-out tonight, as a shift nobody could close. Asked here, before anything is made, with the
      Timecards' own test and words. Only a fresh clock-in has a start to judge: a switch cuts at now. */
   if (input.clock === "in" && startAt && !running) {
-    const clash = await overlapRefusal(supabase, ctx.userId, Date.parse(startAt), Date.now(), { tz });
-    if (clash) return { ok: false, error: `${clash} Nothing was started. Pick a start after that shift, or Now.` };
+    // The clock-in's own words (clockInClashWords, the Timeclock's): start after that shift, or fix
+    // it. The Add Entry sentence ("Put that shift on the job") was for a door this card has not got,
+    // and the job it would go on does not exist yet.
+    const overlap = await findOverlap(supabase, ctx.userId, Date.parse(startAt), Date.now(), { tz });
+    if (overlap) {
+      return {
+        ok: false,
+        error: overlap.clash
+          ? clockInClashWords({ clash: overlap.clash, startIso: startAt, tz, isStaff: true, nothing: "Nothing was started." })
+          : `${overlap.sentence} Nothing was started.`,
+      };
+    }
   }
 
   const made = await createJobFromAppointment(visit.id);

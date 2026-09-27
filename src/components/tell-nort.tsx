@@ -31,7 +31,10 @@ export function TellNort({
   onFilled,
   hint,
   label = "Just tell Nort",
-  placeholder = "Two new circuits, one for lights one for outlets, finished room they're converting from storage…",
+  // THE SHAPE OF A GOOD ANSWER, in no trade's words: every company sees this on every visit, and an
+  // electrician's job meant nothing to a deck builder (Erik: "Nort cant be giving examples that dont
+  // make sense"). A surface with its own words passes `placeholder`.
+  placeholder = "Say the whole job the way you'd tell a person: what they want, where, how much, and anything in the way…",
   nortOn = true,
   defaultOpen = false,
 }: {

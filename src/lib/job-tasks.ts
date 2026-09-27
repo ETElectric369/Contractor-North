@@ -1,4 +1,5 @@
 import { todayStrInTz } from "@/lib/tz";
+import { buyMaterialsCounts, type BuyMaterials } from "@/lib/materials-checklist";
 
 /**
  * A JOB'S TASKS: ONE LIST, THE JOB'S (0358).
@@ -32,8 +33,8 @@ export interface JobTaskRow {
   /** An optional photo of the finished work. */
   done_photo_path: string | null;
   sort_order: number;
-  /** The task's note: a crew materials request keeps who asked and the whole text here, past the
-   *  title's 120 characters (materials/actions requestMaterials). The Task sheet shows it. */
+  /** The task's note (the Task sheet shows it). Crew materials requests made before 2026-09-27 kept
+   *  who asked and the whole text here; a request is a line on the materials list now. */
   notes: string | null;
 }
 
@@ -119,6 +120,18 @@ export function splitJobTasks(rows: JobTaskRow[]): { open: JobTaskRow[]; done: J
 /** "Tasks: 7 of 12 done" — the card's one-line answer. */
 export function tasksHeader(total: number, done: number): string {
   return `Tasks: ${done} of ${total} done`;
+}
+
+/**
+ * THE JOB'S TASK COUNT, WITH THE LIVE BUY MATERIALS ROW IN IT (lib/materials-checklist). One rule
+ * for every reader (the Overview card's "Tasks: X of Y done", the Tasks chip's badge, My Day's
+ * "Tasks: N left"): the row is ONE task, open while anything on the materials list is left to buy
+ * and done once it's all bought; no row, no task. `open` is the Tasks badge (0 = no badge).
+ */
+export function jobTaskTally(rows: readonly { status: string }[], buy: BuyMaterials): { total: number; done: number; open: number } {
+  const m = buyMaterialsCounts(buy);
+  const done = rows.filter((t) => t.status === "done").length;
+  return { total: rows.length + m.total, done: done + m.done, open: rows.length - done + m.open };
 }
 
 const fmt = (tz: string, o: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat("en-US", { timeZone: tz, ...o });

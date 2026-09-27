@@ -239,7 +239,7 @@ describe("pieces taken past the shelf are said, in one sentence", () => {
     expect(stockShortsSentence([])).toBeNull();
     const one = stockShortsSentence([{ id: "s", item: "12/2 NM-B", unit: "ft", qty: 20, takenAt: "x" }]);
     expect(one).toBe(
-      "20 ft of 12/2 NM-B was taken from stock with no roll behind it yet, so it isn't on the bill yet. File the roll on Shop Stock, then Settle From The Shelf — or Undo the take.",
+      "20 ft of 12/2 NM-B was taken from stock with no roll behind it yet, so it isn't on the bill yet. File the roll on Shop Stock, then Settle From Stock — or Undo the take.",
     );
     const two = stockShortsSentence([
       { id: "a", item: "12/2 NM-B", unit: "ft", qty: 15, takenAt: "x" },
@@ -247,7 +247,7 @@ describe("pieces taken past the shelf are said, in one sentence", () => {
       { id: "c", item: "Twister wire nut", unit: "ea", qty: 12, takenAt: "z" },
     ]);
     expect(two).toBe(
-      "20 ft of 12/2 NM-B and 12 ea of Twister wire nut were taken from stock with no roll behind them yet, so they aren't on the bill yet. File the roll on Shop Stock, then Settle From The Shelf — or Undo the take.",
+      "20 ft of 12/2 NM-B and 12 ea of Twister wire nut were taken from stock with no roll behind them yet, so they aren't on the bill yet. File the roll on Shop Stock, then Settle From Stock — or Undo the take.",
     );
   });
 });

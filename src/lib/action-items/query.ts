@@ -1,4 +1,5 @@
 import { cache } from "react";
+import { viewerSortsBank } from "@/lib/bank-viewer";
 import { createClient } from "@/lib/supabase/server";
 import type { ActionItem, ActionKind } from "./types";
 import { AFFORDANCES, KIND_STREAM, appointmentAffordances } from "./types";
@@ -18,6 +19,9 @@ import { supplierDeskFailedItem, supplierPaperActionItem } from "./supplier-pape
 import { supplierPayActionItems } from "./supplier-pay-item";
 import { readNoJobHoursReach } from "@/lib/already-billed-read";
 import { noJobStrayDoors } from "@/lib/already-billed";
+import { noJobHoursActionItem } from "./no-job-hours-item";
+import { readNoJobHours, type NoJobHours } from "@/lib/no-job-hours";
+import { isOpenToBuy, newestListPerJob } from "@/lib/materials-checklist";
 import { feederOn, inquiryActionItem } from "./switches";
 import { featureOn, featuresFromOffKey } from "@/lib/features";
 import {
@@ -163,6 +167,28 @@ async function buildActionItems(ctx: {
     : Promise.resolve(null);
   const supplierPapersP: Promise<SupplierPaperFeed | null> = supplierDeskP.then((d) => d?.papers ?? null);
 
+  // HOURS ON NO JOB (the duplicate punches, 2026-09-26): every past-day shift nobody put on a job,
+  // with no age limit, as ONE rolled-up line. Its own read, beside the fan-out; `failed` when the
+  // read broke, which the line says rather than showing nothing.
+  const noJobP: Promise<{ summary: NoJobHours | null; failed: boolean }> = isStaff && tz
+    ? readNoJobHours(supabase, { tz, todayStr })
+        .then((summary) => ({ summary, failed: summary === null }))
+        .catch(() => ({ summary: null, failed: true }))
+    : Promise.resolve({ summary: null, failed: false });
+  // The rollup's Already Billed door (1b below) asks whether a sent invoice with no job could hold
+  // hours: chained off the rollup's own read, only when it found shifts, so its two reads ride beside
+  // the fan-out instead of adding a serial wave to every staff build. A lost read offers the door.
+  const noJobReachP: Promise<boolean> = noJobP.then(async (n) => {
+    if (!isStaff || !n.summary?.shifts.length) return false;
+    try {
+      const { data: me } = await supabase.from("profiles").select("org_id").eq("id", userId).maybeSingle();
+      const orgId = String((me as { org_id?: string | null } | null)?.org_id ?? "");
+      return orgId ? (await readNoJobHoursReach(supabase, orgId, [])).canHold : true;
+    } catch {
+      return true;
+    }
+  });
+
   const [jobsR, inqR, apptR, orgR, invR, quoteR, acceptedR, draftR, conR, lienR, bugR, openTimeR, recentTimeR, nonBillableR, matJobsR, matSegR, inspR, inspQuoteR, billedJobR, doneWorkR, draftQuoteR] = await Promise.all([
     // Unscheduled jobs — staff only (the "resting place" for things needing a date).
     // EVERY still-in-flight dateless job, not just estimate/scheduled: an in_progress
@@ -222,7 +248,7 @@ async function buildActionItems(ctx: {
     isStaff
       ? supabase
           .from("organized_items")
-          .select("id, kind, status, job_id")
+          .select("id, kind, status, job_id, category")
           .eq("status", "needs_review")
           .order("created_at", { ascending: false })
           .limit(50)
@@ -521,18 +547,26 @@ async function buildActionItems(ctx: {
     });
   }
 
+  // A bank download is the owner's money: only a viewer who sorts them sees one here (bank-viewer).
+  const bankOk = ((orgR.data ?? []) as any[]).some((o) => o.category === "Bank Download") ? await viewerSortsBank(supabase, userId) : false;
   for (const o of (orgR.data ?? []) as any[]) {
+    // A BANK DOWNLOAD waiting in Sort These (2026-09-27) is on My Day while anything on it needs a
+    // person, and opens where its card is.
+    const bank = o.category === "Bank Download";
+    if (bank && !bankOk) continue;
     items.push({
       id: o.id,
       kind: "organize",
-      title: ORGANIZE_LABEL[o.kind] ?? "To file",
+      title: bank ? "Bank Download To Sort" : (ORGANIZE_LABEL[o.kind] ?? "To file"),
       subtitle: null,
       who: null,
       when: null,
       urgency: 0,
       done: false,
-      href: "/organize",
-      affordances: AFFORDANCES.organize,
+      href: bank ? "/bills#sort-these" : "/organize",
+      // A bank download only opens: Dismiss archived it, and Back in Archive is its whole Undo,
+      // so a swipe here could take every line it counted back without a question.
+      affordances: bank ? ["open"] : AFFORDANCES.organize,
     });
   }
 
@@ -806,13 +840,16 @@ async function buildActionItems(ctx: {
   // Detection only, per the hard boundary: each item names the gap and deep-links to
   // the surface that fixes it; nothing infers hours, dollars, or clock-out times.
 
-  // 1) STRAY TIME — an open clock from a past day, or a past-day close with no job.
+  // 1) STRAY TIME — an open clock from a past day, one row per clock. A past-day close with no job
+  // is NOT a row here any more: it rides in the Hours On No Job rollup below, which never drops it
+  // after three days (the window this detector reads is what let Brian's 9/11 punch go quiet).
   const strayFindings = detectStrayTime(
     [...((openTimeR.data ?? []) as any[]), ...((recentTimeR.data ?? []) as any[])],
     todayStr,
     Date.now(),
     new Set(((nonBillableR.data ?? []) as { code?: string | null }[]).map((c) => String(c.code ?? "").trim()).filter(Boolean)),
-  );
+    tz,
+  ).filter((f) => f.openStill || !tz);
   // Whose clock each open finding is, for the words on its door ("Clock Out Brian").
   const openOwner = new Map<string, { profile_id?: string | null; full_name?: string | null }>(
     ((openTimeR.data ?? []) as any[]).map((e) => [String(e.id), { profile_id: e.profile_id, full_name: e.profiles?.full_name }]),
@@ -856,11 +893,25 @@ async function buildActionItems(ctx: {
       when: f.when,
       urgency: f.openStill ? 2 : 1, // a forgotten clock is a wrong week until somebody stops it
       done: false,
-      // The open one lands on its own clock-out sheet (/timecards finds the entry in any week).
-      href: f.openStill ? `/timecards?entry=${f.entryId}` : "/timecards",
+      // The open one lands on its own clock-out sheet (/timecards finds the entry in any week); a
+      // no-job close (only without an org timezone, when the rollup below cannot run) on its editor.
+      href: `/timecards?entry=${f.entryId}`,
       affordances: AFFORDANCES.time_stray,
       ...(!f.openStill && noJob.door.has(f.entryId) ? { noJobHours: { entryIds: [f.entryId] } } : {}),
     });
+  }
+  // 1b) HOURS ON NO JOB — one line for every past-day shift nobody put on a job, however old.
+  {
+    const noJob = await noJobP;
+    const item = noJobHoursActionItem(noJob.summary, { failed: noJob.failed });
+    // THE ROLLUP KEEPS 0357's ALREADY BILLED DOOR (TTUSD on INV-055): a shift on no job may have been
+    // billed by typing a line on an invoice with no job. The line offers the door only when a sent
+    // invoice with no job could hold hours (a door onto a sheet with no line to pick is a dead end),
+    // with nothing ticked to start (the sheet lists every open shift; he ticks what the line charged).
+    // A lost read offers the door, as the per-shift rows did (the sheet says what it finds). The
+    // reach was started with the rollup's read (noJobReachP), never here after the fan-out.
+    if (item && isStaff && noJob.summary?.shifts.length && (await noJobReachP)) item.noJobHours = { entryIds: [] };
+    if (item) items.push(item);
   }
 
   // ── MATERIALS ROUTING (staff only) — the "who's buying?" feeder. Unpurchased
@@ -963,17 +1014,23 @@ async function buildActionItems(ctx: {
   // {job}" + the first few item names, deep-linked to the job's materials tab.
   if (isStaff && matCandidates.size > 0) {
     const matJobIds = [...matCandidates.keys()].slice(0, 30);
+    // Newest first, so the limit keeps each job's own list; newestListPerJob then keeps only THE
+    // job's list (the one its Materials tab shows), never an older one's lines.
     const { data: matLists } = await supabase
       .from("material_lists")
-      .select("job_id, material_list_items(description, quantity, purchased, is_tool)")
+      .select("id, job_id, created_at, material_list_items(description, quantity, purchased, is_tool)")
       .in("job_id", matJobIds)
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: false })
       .limit(100);
     const needByJob = new Map<string, { description: string; quantity: number }[]>();
-    for (const ml of (matLists ?? []) as any[]) {
+    for (const ml of newestListPerJob((matLists ?? []) as any[]).values()) {
       for (const it of (ml.material_list_items ?? []) as any[]) {
         // Tools are brought from the shop, not bought — an owned tool would sit
-        // "unpurchased" forever and nag the shopping run daily.
-        if (it.purchased || it.is_tool) continue;
+        // "unpurchased" forever and nag the shopping run daily. The ONE rule for "still to buy"
+        // (lib/materials-checklist), on the ONE list (the newest): the job's Materials badge and its
+        // Buy Materials row count exactly these lines.
+        if (!isOpenToBuy(it)) continue;
         if (!needByJob.has(ml.job_id)) needByJob.set(ml.job_id, []);
         needByJob.get(ml.job_id)!.push({ description: it.description, quantity: Number(it.quantity ?? 1) });
       }
@@ -1018,14 +1075,17 @@ async function buildActionItems(ctx: {
       // Infer the blocker from the material take-off: a list with unpurchased (non-tool) items = the
       // job is waiting on a materials order. (A task-based reason is a later add — the inbox may not
       // read the tasks table here, by the badge-economy guard.)
+      // The job's own list only (the newest, as above), so the reason matches its Materials tab.
       const { data: heldMat } = await supabase
         .from("material_lists")
-        .select("job_id, material_list_items(purchased, is_tool)")
+        .select("id, job_id, created_at, material_list_items(purchased, is_tool)")
         .in("job_id", heldIds)
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: false })
         .limit(100);
       const unorderedMatJobs = new Set<string>();
-      for (const ml of (heldMat ?? []) as any[]) {
-        if (((ml.material_list_items ?? []) as any[]).some((it) => !it.purchased && !it.is_tool)) unorderedMatJobs.add(ml.job_id);
+      for (const ml of newestListPerJob((heldMat ?? []) as any[]).values()) {
+        if (((ml.material_list_items ?? []) as any[]).some(isOpenToBuy)) unorderedMatJobs.add(ml.job_id);
       }
       for (const j of held) {
         // updated_at is only a PROXY for "held since" (any edit resets it), so we don't quote a
@@ -1072,7 +1132,7 @@ async function buildActionItems(ctx: {
         items.push({
           id: `stockshort-${r.id}`, // synthetic (kind-prefixed): open-only, settled on Shop Stock
           kind: "stock_short",
-          title: `${q} ${it?.unit ?? ""} Of ${it?.name ?? "An Item"} Taken Past The Shelf · Settle It`.replace(/\s+/g, " "),
+          title: `${q} ${it?.unit ?? ""} Of ${it?.name ?? "An Item"} Taken Past Stock · Settle It`.replace(/\s+/g, " "),
           // Counting can't settle a short (a count has no roll; settle_short walks rolls): name the two
           // ways that work (SHORT_FIX, the bell's own words).
           subtitle: `${who} took them for ${jb ? jobLabel(jb) : "a job"} on ${formatDateShort(r.created_at, tz || undefined)}. ${SHORT_FIX}`,

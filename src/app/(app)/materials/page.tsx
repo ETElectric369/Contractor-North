@@ -8,6 +8,7 @@ import { formatDate } from "@/lib/utils";
 import { isStaffRole } from "@/lib/actions/perms";
 import { NewListButton } from "./new-list-button";
 import { jobLabel, jobSiteLabel } from "@/lib/schedule-options";
+import { openToBuyCount, toBuyWords } from "@/lib/materials-checklist";
 
 export const dynamic = "force-dynamic";
 
@@ -29,7 +30,7 @@ export default async function MaterialsPage({
   // disagreeing about which list is the job's is exactly the bug this page is here to surface.
   let listQuery = supabase
     .from("material_lists")
-    .select("*, jobs(job_number, name, address, customers(name)), material_list_items(id)")
+    .select("*, jobs(job_number, name, address, customers(name)), material_list_items(id, purchased, is_tool)")
     .order("created_at", { ascending: false })
     .order("id", { ascending: false });
   if (jobFilter) listQuery = listQuery.eq("job_id", jobFilter);
@@ -72,7 +73,7 @@ export default async function MaterialsPage({
 
   return (
     <div>
-      {/* The cards carry item count + date only — no cost, no total — for either role,
+      {/* The cards carry what's left to buy + date only — no cost, no total — for either role,
           so there's nothing to strip here; the money lives on the list page, gated there. */}
       <PageHeader
         title="Material lists"
@@ -127,8 +128,10 @@ export default async function MaterialsPage({
                       {/* Plain word, not a status code: this list is not the one the job reads. */}
                       {isSuperseded(l) && <Badge tone="amber" className="shrink-0">Replaced</Badge>}
                     </div>
+                    {/* What's still OPEN, never the list's size (Erik, 2026-09-27: every count shows
+                        only what's open). Plain words, not a badge. */}
                     <div className="mt-0.5 text-xs text-slate-400">
-                      {l.material_list_items?.length ?? 0} items ·{" "}
+                      {(l.material_list_items?.length ?? 0) === 0 ? "No items yet" : toBuyWords(openToBuyCount(l.material_list_items))} ·{" "}
                       {formatDate(l.created_at)}
                     </div>
                     {l.jobs?.name && (

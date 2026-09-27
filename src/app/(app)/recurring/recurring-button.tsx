@@ -221,7 +221,7 @@ export function RecurringButton({
                 <Label htmlFor="r-amt">Amount</Label>
                 <Input id="r-amt" name="amount" type="number" step="0.01" min="0" defaultValue={template?.amount ?? ""} />
               </div>
-              {/* THE SAME SIX BUCKETS AS EVERY OTHER BUSINESS COST. This was a free-text box, so
+              {/* THE SAME BUCKETS AS EVERY OTHER BUSINESS COST. This was a free-text box, so
                   a phone bill could be "Phone" one month and "Verizon" the next and never add up
                   with the rest. The bill each run writes carries this bucket. */}
               <div className="col-span-3">

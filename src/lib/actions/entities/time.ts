@@ -113,7 +113,7 @@ export const timeActions: Record<string, ActionDef> = {
     group: "time",
     label: "Add time entry",
     description:
-      "Add a past/manual timecard entry, for any crew member via profile_id. Office correction — staff only; techs clock in/out live. TWO shapes: exact times (clock_in & clock_out as NAIVE local timestamps, YYYY-MM-DDTHH:MM in the company's own timezone — NO Z, NO offset; the app converts) OR a duration ('Brian worked 6 hours Tuesday' → work_date YYYY-MM-DD + hours). hours must be the USER'S stated number — never estimate or infer it (that's payroll); if they didn't say the hours, ASK.",
+      "Add a past/manual timecard entry, for any crew member via profile_id. Office correction — staff only; techs clock in/out live. TWO shapes: exact times (clock_in & clock_out as NAIVE local timestamps, YYYY-MM-DDTHH:MM in the company's own timezone — NO Z, NO offset; the app converts) OR a duration ('<name> worked <hours> hours Tuesday' → work_date YYYY-MM-DD + hours). hours must be the USER'S stated number — never estimate or infer it (that's payroll); if they didn't say the hours, ASK.",
     // Fragment-first with the payroll boundary: either a full span, or an EXPLICIT
     // day + hour count (expanded server-side to a midday-centered span and flagged in
     // notes as duration-entered). The superRefine issues use zod's "Required" message
@@ -193,7 +193,7 @@ export const timeActions: Record<string, ActionDef> = {
     group: "time",
     label: "Fix timecard entry",
     description:
-      "Fix a crew member's EXISTING timecard entry the user described ('Brian left at 4:30', 'close Brian's open entry', 'his lunch was 45 minutes'). Sets the clock-out (closing an open entry; closing an open entry clocks them out: it tells the crew member and writes who clocked them out), corrects the clock-in, the lunch minutes, or the entry's job — anything not passed stays exactly as stored. clock_in/clock_out are NAIVE local timestamps, YYYY-MM-DDTHH:MM in the company's own timezone — NO Z, NO offset; the app converts. Times and lunch must come FROM THE USER, never inferred (this is payroll); if they didn't say the time, ASK. Resolve entry_id via hours_summary / listed-entries context first — if no entry id is in context or more than one entry could match, say so and ask instead of guessing.",
+      "Fix a crew member's EXISTING timecard entry the user described ('<name> left at <time>', 'close <name>'s open entry', 'their lunch was <minutes> minutes'). Sets the clock-out (closing an open entry; closing an open entry clocks them out: it tells the crew member and writes who clocked them out), corrects the clock-in, the lunch minutes, or the entry's job — anything not passed stays exactly as stored. clock_in/clock_out are NAIVE local timestamps, YYYY-MM-DDTHH:MM in the company's own timezone — NO Z, NO offset; the app converts. Times and lunch must come FROM THE USER, never inferred (this is payroll); if they didn't say the time, ASK. Resolve entry_id via hours_summary / listed-entries context first — if no entry id is in context or more than one entry could match, say so and ask instead of guessing.",
     // The other person's-timecard edit (time.addEntry is the CREATE): closing Brian's
     // still-open shift is the headline case. Fragment-first with the payroll boundary —
     // at least one CHANGE must be stated; the "Required" message rides the same
@@ -418,7 +418,7 @@ export const timeActions: Record<string, ActionDef> = {
     group: "time",
     label: "Split a shift",
     description:
-      "Propose ONE cut of a finished timecard entry into two ('the last hour of Brian's Tuesday was Herringbone', 'Erik switched to the Miller job at 2'). This does NOT save anything: it checks the cut and returns an href that opens the Split This Shift sheet filled in, and the person taps Split Shift. Pass entry_id (from time.listEntries), `at` = the split time as a NAIVE local time (YYYY-MM-DDTHH:MM, company timezone, no Z), and the SECOND part's job_id (uuid, resolve names with list_jobs) or job_code (Drive/Shop). If the user gave HOURS instead of a time ('the last hour'), work the clock time out from the entry's clock-in/clock-out yourself and SAY the time back. A three-job day is two cuts: propose one, let them split it, then the next. The sheet's card is put on the screen for you; speak its `speak` line.",
+      "Propose ONE cut of a finished timecard entry into two ('the last hour of <name>'s Tuesday was <job>', '<name> switched to the <job> job at <time>'). This does NOT save anything: it checks the cut and returns an href that opens the Split This Shift sheet filled in, and the person taps Split Shift. Pass entry_id (from time.listEntries), `at` = the split time as a NAIVE local time (YYYY-MM-DDTHH:MM, company timezone, no Z), and the SECOND part's job_id (uuid, resolve names with list_jobs) or job_code (Drive/Shop). If the user gave HOURS instead of a time ('the last hour'), work the clock time out from the entry's clock-in/clock-out yourself and SAY the time back. A three-job day is two cuts: propose one, let them split it, then the next. The sheet's card is put on the screen for you; speak its `speak` line.",
     input: z
       .object({
         entry_id: z.string().uuid(),

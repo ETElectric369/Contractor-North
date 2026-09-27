@@ -53,7 +53,8 @@ export function SetupInterview({
   initial: Answers;
   onSaved?: () => void;
   /** The Nort switch (0352, rule k). Off, Start Here opens these questions instead of the tour, so
-   *  they say nothing as Nort: the say-it box still fills the boxes, under its plain name. */
+   *  they say nothing as Nort, and they are the plain questions: no say-it box and no drafted why
+   *  lines, because both are model calls (setup:talk, setup:draft), which the server refuses too. */
   nortOn?: boolean;
   /** Where to open. The TOUR already asks the company questions out loud and already explains what
    *  a why line is, so it hands off at 2 — straight to the draft it just promised. Opening at 1
@@ -82,7 +83,7 @@ export function SetupInterview({
     if (startAt !== 2 || needs || drafting.current) return;
     // NO TRADE, NO DRAFT — GO ASK. Erik: "the tour shouldn't assume a trade exists." Answering is
     // optional on every tour step, so somebody can land here having skipped the trade — and
-    // draftMyPlaybook needs a walk-through sheet that only exists once a trade was saved. Rather
+    // draftMyPlaybook needs a walk-through sheet, which it seeds only when a trade is on file. Rather
     // than fetch a failure and explain it, drop to the questions step: trade is the second box on
     // it, and the step-1→2 transition saves (which seeds the sheet) and then drafts, in order.
     if (!String(answers.trade ?? "").trim()) {
@@ -178,21 +179,27 @@ export function SetupInterview({
           <p className="mt-0.5 text-sm text-slate-500">
             {answered === total
               ? "Already on file — have a look and change anything that's out of date."
-              : `${answered} of ${total}. Say it in one breath, or fill the boxes.`}
+              : nortOn
+                ? `${answered} of ${total}. Say it in one breath, or fill the boxes.`
+                : `${answered} of ${total}. Fill the boxes.`}
           </p>
 
-          <TellNort
-            hear={hearSetup}
-            answers={answers}
-            hint={open[0]?.ask}
-            nortOn={nortOn}
-            label="Tell Nort about your business"
-            placeholder="I'm Sam Rivera, a general contractor — I sub out electrical and plumbing, I cover the whole county, and I bill 150 an hour."
-            onFilled={(next) => {
-              setAnswers(next);
-              setDirty(true);
-            }}
-          />
+          {/* THE NORT SWITCH (0352): off, setup is the plain questions. The say-it box sends what's
+              said to a model (setup:talk), so it isn't offered; the boxes below are the whole card. */}
+          {nortOn && (
+            <TellNort
+              hear={hearSetup}
+              answers={answers}
+              hint={open[0]?.ask}
+              nortOn={nortOn}
+              label="Tell Nort about your business"
+              placeholder="Your name, your trade, the town you work out of, how far you go, and what you charge an hour."
+              onFilled={(next) => {
+                setAnswers(next);
+                setDirty(true);
+              }}
+            />
+          )}
 
           {/* THE SAME BOXES, ALWAYS EDITABLE. What Nort fills lands here and what they type lands
               here; one place a value lives, so there is nothing to reconcile. */}
@@ -288,7 +295,7 @@ export function SetupInterview({
               </div>
             ) : (
               <p className="mt-3 flex items-center gap-2 text-sm text-slate-500">
-                <Loader2 className="h-4 w-4 animate-spin" /> Writing you a first draft…
+                <Loader2 className="h-4 w-4 animate-spin" /> {nortOn ? "Writing you a first draft…" : "Opening your questions…"}
               </p>
             )
           ) : (
@@ -304,7 +311,7 @@ export function SetupInterview({
                     {needs.length} questions · {i} you&rsquo;ve been through
                   </p>
 
-                  <p className="mt-3 text-sm leading-relaxed text-slate-600">{explainWhy(n, i, needs.length)}</p>
+                  <p className="mt-3 text-sm leading-relaxed text-slate-600">{explainWhy(n, i, needs.length, nortOn)}</p>
 
                   <div className="mt-4 rounded-lg border border-slate-200 p-3">
                     <Label className="mb-1">The question</Label>

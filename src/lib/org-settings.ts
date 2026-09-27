@@ -57,10 +57,12 @@ export interface OrgSettings {
    *  assistant's self-description. Before this existed, every org's estimator was told
    *  it worked for an electrical contractor — so a deck inspection came back priced by
    *  an electrician who'd been instructed to calculate conduit fill per NEC. Empty
-   *  falls back to the neutral "contractor". */
+   *  falls back to the neutral "contractor". READ IT THROUGH lib/org-trade (orgTrade), never
+   *  directly: sign-up writes only `trade`, so this is empty for every company made since 0352. */
   trade_label: string;
   /** The trade picked at sign-up, as a key (lib/trade-codes TRADE_ORDER); "" = blank or not listed.
-   *  trade_label stays the words. Written only at sign-up and by 0355 (the pin trigger, 0352). */
+   *  trade_label stays the words. Written only at sign-up and by 0355 (the pin trigger, 0352).
+   *  Behaviour branches on this KEY, through lib/org-trade (orgTrade). */
   trade: TradeKey | "";
   /** THE SWITCH BOARD (0352, lib/features). Normalized on read: missing = ON. Written only by the
    *  owner's set_org_feature; updateOrgSettings refuses it. */

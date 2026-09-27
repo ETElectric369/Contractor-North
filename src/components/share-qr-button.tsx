@@ -9,6 +9,7 @@ import { Modal } from "@/components/ui/modal";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/toast";
 import { getShareLink } from "@/app/(app)/share-actions";
+import { withArticle } from "@/lib/org-trade";
 
 /**
  * "Forward the QR" — every employee's personal request-an-estimate link, one tap from the topbar.
@@ -45,7 +46,7 @@ export function ShareQrButton() {
         // strangers a card asking about electrical work.
         const who = link.orgName ?? "us";
         const blurb = link.tradeLabel
-          ? `Need a ${link.tradeLabel}? Get a free estimate from ${who}:`
+          ? `Need ${withArticle(link.tradeLabel)}? Get a free estimate from ${who}:`
           : `Get a free estimate from ${who}:`;
         await navigator.share({ title: `Request an estimate — ${who}`, text: blurb, url: link.url });
         return;

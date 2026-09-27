@@ -12,6 +12,7 @@ import { LONG_SHIFT_PHRASE, isLongOpenShift } from "@/lib/long-shift";
 import { getPosition } from "@/lib/geo";
 import { clockIn, switchJob, clockOutCurrent, createManualEntry } from "../../timeclock/actions";
 import { ClockStartPicker } from "../../timeclock/clock-start-picker";
+import { SameDayShifts } from "../../timeclock/same-day-shifts";
 import type { GeoPoint } from "@/lib/types";
 import { useToast } from "@/components/toast";
 
@@ -212,6 +213,22 @@ export function JobTimeButton({
             ))}
           </Select>
         </div>
+      )}
+      {/* A punch already on that day with no job goes on this job with its real clock times,
+          instead of the hours being logged a second time (the duplicate punches, 2026-09-26).
+          Only once hours are being logged: this block rides inside Clock In and Clock Me Out,
+          where the viewer's own running shift on today would otherwise put an amber "already has
+          a shift" warning in front of every punch. */}
+      {(hours > 0 || workDate !== todayStrInTz(tz)) && (
+        <SameDayShifts
+          profileId={profileId}
+          date={workDate}
+          jobId={jobId}
+          onPlaced={() => {
+            setOpen(false);
+            router.refresh();
+          }}
+        />
       )}
       <Button type="button" variant="outline" size="sm" onClick={doLogHours} disabled={pending || hours <= 0}>
         Log {hours > 0 ? `${hours}h` : "hours"} on This Job

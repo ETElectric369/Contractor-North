@@ -110,7 +110,7 @@ export function NewListButton({ jobs }: { jobs: JobOption[] }) {
                 id="ml-name"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="e.g. Panel upgrade materials"
+                placeholder="What this list is for"
               />
             </div>
             <div>
@@ -137,7 +137,7 @@ export function NewListButton({ jobs }: { jobs: JobOption[] }) {
               rows={2}
               value={scope}
               onChange={(e) => setScope(e.target.value)}
-              placeholder="e.g. Rough-in 4 bedrooms: outlets, switches, smoke detectors, 14/2 & 12/2 wire."
+              placeholder="Describe the work: what, where and how much, the way you'd say it on site."
             />
             <Button
               size="sm"
@@ -161,7 +161,7 @@ export function NewListButton({ jobs }: { jobs: JobOption[] }) {
           <div className="rounded-lg border border-slate-200 p-3">
             <div className="mb-2 text-sm font-semibold text-slate-900">Add an item</div>
             <div className="flex flex-wrap items-center gap-2">
-              <Input value={mDesc} onChange={(e) => setMDesc(e.target.value)} onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addManual())} placeholder="e.g. 20A breaker" className="min-w-[160px] flex-1" />
+              <Input value={mDesc} onChange={(e) => setMDesc(e.target.value)} onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addManual())} placeholder="The item, the way you'd ask for it at the counter" className="min-w-[160px] flex-1" />
               <NumberInput value={mQty} onValueChange={setMQty} className="w-16 text-center" placeholder="Qty" />
               <Input value={mUnit} onChange={(e) => setMUnit(e.target.value)} className="w-14" placeholder="ea" />
               <NumberInput value={mCost} onValueChange={setMCost} className="w-24 text-right" placeholder="$ each" />

@@ -48,7 +48,7 @@ export const FEATURES: readonly FeatureDef[] = [
   { key: "kits", parent: "estimates", label: "Kits & Sizing By Sq Ft", line: "Price whole assemblies and size jobs by the square or linear foot." },
   { key: "contracts", label: "Contracts & Lien Rights", line: "E-sign contracts, payment schedules and lien deadlines." },
   { key: "purchase_orders", label: "Purchase Orders", line: "Write POs to suppliers before you buy. Open POs always count in job cost." },
-  { key: "shop_stock", label: "Shop Stock", line: "Keep leftover rolls and boxes on a shelf and bill them to jobs." },
+  { key: "shop_stock", label: "Shop Stock", line: "Keep leftover rolls and boxes in stock and bill them to jobs." },
   { key: "crew_payroll", label: "Crew & Payroll", line: "Payroll, what you owe each person, mileage and the handbook." },
   { key: "daily_reports", parent: "crew_payroll", label: "Daily Reports", line: "Your crew lead sends an end-of-day report." },
   { key: "crew_board", parent: "crew_payroll", label: "Crew Board", line: "Everyone's day on one board." },

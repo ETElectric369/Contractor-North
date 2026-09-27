@@ -1,3 +1,5 @@
+import { WHY_SHAPES } from "@/lib/playbook/why";
+
 /**
  * THE GUIDED TOUR — Nort walks you round the app, out loud, pointing at real buttons.
  *
@@ -137,7 +139,9 @@ export const TOUR: TourStep[] = [
     say: (c) =>
       c.first
         ? `Hey ${c.first} — I'm Nort. That button up there is me, and I'm on every screen in here. ` +
-          `I've already got you as ${c.first}${c.trade ? `, ${c.trade}` : ""}${c.city ? ` out of ${c.city}` : ""}. ` +
+          // "your trade as …", never "as <trade>": the words can be the key's ("painter"), which
+          // needs an article, or a company's own ("Construction"), which can't take one.
+          `I've already got you as ${c.first}${c.city ? ` out of ${c.city}` : ""}${c.trade ? `, and your trade as ${c.trade}` : ""}. ` +
           `Press the Talk button down here and say hello, just so you can hear how this works. ` +
           `Say a different name and I'll take that instead.`
         : "Hi — I'm Nort. That button up there is me, and I'm on every screen in here. " +
@@ -149,13 +153,21 @@ export const TOUR: TourStep[] = [
     key: "trade",
     anchor: "nort",
     title: "What you do",
+    // NEVER ASKED TWICE. Sign-up already asked the trade (0352), and the layout hands it in through
+    // the one trade reader (lib/org-trade), so a company that picked one hears it back instead of
+    // being asked again. WHAT'S TRUE about the starters (lib/inspection/starter-sheets
+    // STARTER_FOR_TRADE): electrical, deck and plumbing each have their own starter questions, and
+    // every other trade starts on a general set. The trade picked at sign-up chooses; words said
+    // here choose only when none was picked.
     say: (c) =>
-      (c.trade ? `Right — I've got you as ${c.trade}. ` : "Good to meet you. ") +
-      "Now the one that matters most — what trade are you in? " +
-      "Say the one word that fits best — there are four starter walk-throughs, electrical, deck, " +
-      "plumbing and a general one, and the first trade word I spot picks it. " +
-      "This builds the questions I'll ask you on site, and tells the estimator what trade it's " +
-      "pricing. Your job codes came from the dropdown at sign-up; change those under Settings.",
+      c.trade
+        ? `Right — I've got your trade down as ${c.trade}. ` +
+          "That's what picks the starter questions I'll ask you on site, and it tells the estimator what " +
+          "trade it's pricing. If that's not how you'd put it, say it your way and I'll use your words."
+        : "Good to meet you. Now the one that matters most — what trade are you in? " +
+          "Say it the way you'd tell a customer. Electrical, deck and plumbing work each have their " +
+          "own starter questions; any other trade starts on a general set you make your own. " +
+          "It also tells the estimator what trade it's pricing.",
     ask: "trade",
   },
   {
@@ -233,7 +245,7 @@ export const TOUR: TourStep[] = [
     say:
       "Last one, and it's per person, so you and whoever's in the office don't have to agree. " +
       "There's a dial in here for how funny I am and a switch for language, so when you're swearing " +
-      "at a seized breaker I'm not answering you like a call centre. I match you and I never go " +
+      "at a job that's fighting you I'm not answering you like a call centre. I match you and I never go " +
       "first — if you don't swear, you'll never hear it out of me. And none of it ever reaches a " +
       "customer: estimates, invoices, anything a homeowner reads stays clean wherever that dial sits.",
   },
@@ -262,11 +274,52 @@ export interface Lesson {
 
 export const lessonBlurb = (l: Lesson, nortOn: boolean): string => (nortOn ? l.blurb : l.plainBlurb ?? l.blurb);
 
+/**
+ * DOES THE ESTIMATE READ WHY LINES? Not today. This lesson used to say "when I write the estimate,
+ * your why line is what tells me where that answer lands in the price", and nothing on the estimate
+ * path reads one: Start The Estimate hands the estimator "label: answer" only
+ * (lib/playbook/answers factsForEstimatorByProvenance), and Generate Line Items reads the separate
+ * "How Nort writes an estimate" text. Where a why line IS read today: the walk-through fill
+ * (lib/playbook/hear, "where the answer lands") and the grey line under each question on the
+ * walk-through.
+ *
+ * ONE SWITCH, so the lesson stays true whichever way the estimate goes (Erik is deciding whether it
+ * should read them). Flip it in the same change that makes the estimator read why lines;
+ * tour.test holds it to the estimator's own output.
+ */
+export const WHY_LINE_FEEDS_ESTIMATE = false;
+
+const WHY_USES = WHY_LINE_FEEDS_ESTIMATE
+  ? {
+      nort:
+        "Two reasons. If you already told me something, I don't ask you twice — that one I really do. " +
+        "And when I write the estimate, your why line is what tells me where that answer lands in the " +
+        "price. It's for reading, mine and yours. I don't run the sum in it, and I never work out a " +
+        "number you didn't give me.",
+      plain:
+        "Two reasons. If something's already been answered, the walk-through doesn't ask it twice. " +
+        "And when an estimate gets written, your why line is what says where that answer lands in the " +
+        "price. It's for reading. Nothing runs the sum in it, and no number you didn't give gets worked out.",
+    }
+  : {
+      nort:
+        "Two reasons. If you already told me something, I don't ask you twice — that one I really do. " +
+        "And when you say a job out loud on the walk-through, your why line helps me put each answer in " +
+        "the right box, and it sits under the question so whoever's asking can see where it lands. " +
+        "It's for reading, mine and yours. I don't run the sum in it, and I never work out a number " +
+        "you didn't give me.",
+      plain:
+        "Two reasons. If something's already been answered, the walk-through doesn't ask it twice. " +
+        "And when a job gets said out loud on the walk-through, your why line helps put each answer in " +
+        "the right box, and it sits under the question so whoever's asking can see where it lands. " +
+        "It's for reading. Nothing runs the sum in it, and no number you didn't give gets worked out.",
+    };
+
 export const LESSONS: Lesson[] = [
   {
     key: "why-lines",
     title: "Why lines",
-    blurb: "What a why line is, two real ones, how to write yours — the part nobody guesses.",
+    blurb: "What a why line is, the three shapes it takes, how to write yours — the part nobody guesses.",
     steps: [
   // ── 2. THE WHY LINE. The part nobody figures out unaided. ──────────────────────────────────
   {
@@ -285,15 +338,20 @@ export const LESSONS: Lesson[] = [
         "Not why it matters. Where it lands.",
     },
   },
+  // THE SHAPES, NOT SOMEBODY ELSE'S TRADE. This step was "two real ones": a deck builder's board
+  // count and an electrician's subpanel fork, shown to a plumber and a painter alike, and neither
+  // line was even live any more (nothing in the app counts boards or joists). Erik: "Nort cant be
+  // giving examples that dont make sense like in the tour." Until a lesson can show the company's
+  // OWN lines (Wave B), it shows the three shapes in words every trade shares (lib/playbook/why).
   {
     key: "why-example",
-    title: "Two real ones",
+    title: "The three shapes",
     say:
-      "A deck builder asks length and width. His why line: 'Length times width is the square " +
-      "footage, and that drives the board count and the joists.' That's it. That's the whole line. " +
-      "You can follow it from the answer to the number.\n\n" +
-      "An electrician asks about the panel. His: 'Decides subpanel or home runs — which sets every " +
-      "run length after it.' Same shape. The answer goes somewhere specific.",
+      "Every why line takes one of three shapes. It goes into a sum: " +
+      `'${WHY_SHAPES[0].example}' It decides which way the job goes: '${WHY_SHAPES[1].example}' ` +
+      `Or it turns something on: '${WHY_SHAPES[2].example}'\n\n` +
+      "That's it. That's the whole line. You can follow it from the answer to the number, and yours " +
+      "say it with your own questions and your own prices.",
   },
   {
     key: "why-how",
@@ -316,17 +374,10 @@ export const LESSONS: Lesson[] = [
   {
     key: "why-uses",
     title: "And why I need them",
-    say:
-      "Two reasons. If you already told me something, I don't ask you twice — that one I really do. " +
-      "And when I write the estimate, your why line is what tells me where that answer lands in the " +
-      "price. It's for reading, mine and yours. I don't run the sum in it, and I never work out a " +
-      "number you didn't give me.",
+    say: WHY_USES.nort,
     plain: {
       title: "And what they're for",
-      say:
-        "Two reasons. If something's already been answered, the walk-through doesn't ask it twice. " +
-        "And when an estimate gets written, your why line is what says where that answer lands in the " +
-        "price. It's for reading. Nothing runs the sum in it, and no number you didn't give gets worked out.",
+      say: WHY_USES.plain,
     },
   },
   {
@@ -471,20 +522,21 @@ export const LESSONS: Lesson[] = [
     },
   },
   // The honest half of that same moment, and it stays welded to it: it carries the only concrete
-  // example in the whole tour ("two outlets on each of three walls").
+  // example in the whole tour ("two on each of three walls"), in no trade's words, since "outlets"
+  // meant nothing to a deck builder.
   {
     key: "trust",
     title: "One thing to know about me",
     say:
       "And a promise, because it's your money. I only fill in what you actually said. " +
-      "I won't work out a measurement you didn't give me — if you say two outlets on each of three " +
+      "I won't work out a measurement you didn't give me — if you say two on each of three " +
       "walls, I won't quietly write down six. I'll ask. " +
       "Anything I can't place goes in your notes word for word, so nothing you said gets lost.",
     plain: {
       title: "One thing to know",
       say:
         "And a promise, because it's your money. Only what you actually said gets filled in. " +
-        "A measurement you didn't give is never worked out — say two outlets on each of three " +
+        "A measurement you didn't give is never worked out — say two on each of three " +
         "walls and six is never quietly written down. It asks. " +
         "Anything it can't place goes in your notes word for word, so nothing you said gets lost.",
     },

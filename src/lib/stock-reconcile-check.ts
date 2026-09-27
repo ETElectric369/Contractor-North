@@ -26,7 +26,7 @@ export async function findShelfProblems(supabase: Client): Promise<{ problems: S
     .select("org_id, problem, lot_id, item_id, move_id, bill_id, detail")
     .limit(500);
   if (error) {
-    if (isMissingShelf(error)) return { problems: [], skipped: "the shelf ledger (0303) is not on this database" };
+    if (isMissingShelf(error)) return { problems: [], skipped: "the stock ledger (0303) is not on this database" };
     throw new Error(`stock_reconcile_problems could not be read: ${String((error as { message?: string }).message ?? error)}`);
   }
   for (const r of (rows ?? []) as any[]) {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { WHY_ASK, WHY_SHAPES, whyHint, whyNudge, whyProblems } from "./why";
+import { WHY_ASK, WHY_MAX_CHARS, WHY_SHAPES, whyHint, whyNudge, whyProblems } from "./why";
 import { ET_ELECTRIC } from "./starters/et-electric";
 import { PLAYBOOK_STARTERS } from "./starters";
 import type { Need } from "./types";
@@ -26,10 +26,23 @@ describe("the question never invites an essay", () => {
     expect(whyHint(need({ key: "gotcha" })).shape.key).toBe("trigger");
   });
 
-  it("every shape carries a REAL example, not a template", () => {
+  it("every shape carries a whole-sentence example, not a template", () => {
     for (const s of WHY_SHAPES) {
       expect(s.example.length).toBeGreaterThan(30);
       expect(s.example).not.toContain("…"); // the hint has ellipses; the example must be a real sentence
+      // The example passes the check it teaches, and fits the one-line law.
+      expect(whyProblems(s.example), s.key).toEqual([]);
+      expect(s.example.length).toBeLessThanOrEqual(WHY_MAX_CHARS);
+    }
+  });
+
+  it("...in NO trade's words: every company sees these, for every question", () => {
+    // A plumber's "Water heater type" was shown "subpanel or home runs"; a painter was shown an
+    // inspection trip. Erik: "Nort cant be giving examples that dont make sense."
+    const TRADE_NOUNS = /board|joist|deck|subpanel|home ?run|panel|breaker|wire|circuit|outlet|permit|inspection|pipe|drain|roof|paint|tile|square footage/i;
+    for (const s of WHY_SHAPES) {
+      expect(s.example, s.key).not.toMatch(TRADE_NOUNS);
+      expect(s.hint, s.key).not.toMatch(TRADE_NOUNS);
     }
   });
 });
@@ -63,6 +76,59 @@ describe("what it actually catches", () => {
   it("a line that names no destination", () => {
     expect(whyProblems("This one is really important on every job.")).toContain("no_destination");
     expect(whyProblems("Because I need to know it.")).toContain("no_destination");
+  });
+
+  it("THE 'x' HOLE: a letter x is not arithmetic", () => {
+    // [×x*+] passed any line with an x in it. These name nothing downstream.
+    expect(whyProblems("Exterior box, we check it.")).toContain("no_destination");
+    expect(whyProblems("Extra fixtures, maybe.")).toContain("no_destination");
+    expect(whyProblems("Next, the box.")).toContain("no_destination");
+  });
+
+  it("...and a spoken operator inside another word isn't either", () => {
+    // Unanchored, `per\s`, `times` and `total` matched inside these, and they passed as arithmetic.
+    expect(whyProblems("Super important to ask.")).toEqual(["no_destination"]);
+    expect(whyProblems("Sometimes it matters.")).toEqual(["no_destination"]);
+    expect(whyProblems("Totally need to know.")).toEqual(["no_destination"]);
+  });
+
+  it("...while the spoken operators as words still are", () => {
+    expect(whyProblems("Length times width.")).toEqual([]);
+    expect(whyProblems("Rate per linear foot.")).toEqual([]);
+    expect(whyProblems("Squared, then totaled.")).toEqual([]);
+    expect(whyProblems("Each one adds up.")).toEqual([]);
+    expect(whyProblems("Area divided by coverage.")).toEqual([]);
+  });
+
+  it("...but x as an operator still is, and so are the real symbols", () => {
+    expect(whyProblems("Length x width is the square footage.")).toEqual([]);
+    expect(whyProblems("20x16 on the tape, then the rate.")).toEqual([]);
+    expect(whyProblems("Count × unit price.")).toEqual([]);
+    expect(whyProblems("Hours * rate.")).toEqual([]);
+    expect(whyProblems("Answer = the line on the estimate.")).toEqual([]);
+  });
+
+  it("...and so is a multiplier written on a number: x2, 3x, LxW", () => {
+    // Closing the x hole had flagged these real shorthand lines as naming nothing.
+    expect(whyProblems("Count x2 for both sides.")).toEqual([]);
+    expect(whyProblems("Steps x2, one rail each side.")).toEqual([]);
+    expect(whyProblems("3x on a finished wall.")).toEqual([]);
+    expect(whyProblems("LxW is the area.")).toEqual([]);
+    expect(whyProblems("Count x 2 for both sides.")).toEqual([]);
+    // ...while the letter x inside a word still names nothing.
+    expect(whyProblems("Exterior box, we check it.")).toEqual(["no_destination"]);
+    expect(whyProblems("Max out the box.")).toEqual(["no_destination"]);
+  });
+
+  it("ONE LINE IS 140 CHARACTERS (the why-line law), not 220", () => {
+    expect(WHY_MAX_CHARS).toBe(140);
+    const at = `Sets the ${"a".repeat(WHY_MAX_CHARS - "Sets the ".length)}`;
+    expect(at).toHaveLength(WHY_MAX_CHARS);
+    expect(whyProblems(at)).toEqual([]);
+    expect(whyProblems(`${at}b`)).toContain("too_long");
+    // A 224-character line (the length of one live line in production) is flagged, not blocked:
+    // the nudge asks for a shorter one, and nothing refuses the save.
+    expect(whyProblems(`Sets the labor. ${"word ".repeat(42)}`.slice(0, 224))).toContain("too_long");
   });
 
   it("the question said back at you — the most common first attempt", () => {
@@ -119,7 +185,7 @@ describe("THE SHIPPED STARTERS PASS THEIR OWN CHECK", () => {
     for (const n of starter.playbook.needs) {
       it(`${starter.key}/${n.key} — one line, and it names where it lands`, () => {
         expect(whyProblems(n.why, n), `${n.key}: "${n.why}"`).toEqual([]);
-        expect(n.why!.length, `${n.key} is still an essay`).toBeLessThanOrEqual(140);
+        expect(n.why!.length, `${n.key} is still an essay`).toBeLessThanOrEqual(WHY_MAX_CHARS);
       });
     }
   }

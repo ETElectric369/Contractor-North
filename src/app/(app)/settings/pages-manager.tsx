@@ -137,7 +137,7 @@ export function PagesManager({ initial, siteUrl, handle, orgId, brand = "#0f172a
             <div className="grid gap-3 sm:grid-cols-2">
               <div>
                 <Label htmlFor="pg-title">Page title</Label>
-                <Input id="pg-title" value={editing.title} onChange={(e) => setEditing({ ...editing, title: e.target.value })} placeholder="e.g. Custom Lighting" />
+                <Input id="pg-title" value={editing.title} onChange={(e) => setEditing({ ...editing, title: e.target.value })} placeholder="e.g. a service you offer" />
               </div>
               <div>
                 <Label htmlFor="pg-slug">Web address (yoursite.com/…)</Label>
@@ -166,7 +166,7 @@ export function PagesManager({ initial, siteUrl, handle, orgId, brand = "#0f172a
             <div className="grid gap-3 border-t border-slate-100 pt-3 sm:grid-cols-2">
               <div>
                 <Label htmlFor="pg-nav">Menu label (blank = not in the menu)</Label>
-                <Input id="pg-nav" value={editing.nav_label} onChange={(e) => setEditing({ ...editing, nav_label: e.target.value })} placeholder="e.g. Lighting" />
+                <Input id="pg-nav" value={editing.nav_label} onChange={(e) => setEditing({ ...editing, nav_label: e.target.value })} placeholder="A short name for the menu" />
               </div>
               <label className="mt-6 flex items-center gap-2 text-sm text-slate-700">
                 <input type="checkbox" checked={editing.published} onChange={(e) => setEditing({ ...editing, published: e.target.checked })} className="h-4 w-4 rounded border-slate-300 text-brand" />

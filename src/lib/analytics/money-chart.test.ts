@@ -18,8 +18,7 @@ import {
   type MoneyChartMonth,
   type MoneySeriesKey,
 } from "@/lib/analytics/money-chart";
-import { computeOwnerMoney, ownerMoneyChartWindow, type OwnerMoney, type OwnerMoneyMonth } from "@/lib/analytics/owner-money";
-import { BUSINESS_COST_BUCKETS } from "@/lib/business-cost-buckets";
+import { BUCKETS_BESIDE_FUEL, computeOwnerMoney, ownerMoneyChartWindow, type OwnerMoney, type OwnerMoneyMonth } from "@/lib/analytics/owner-money";
 import { MoneyChartSvg } from "@/app/(app)/analytics/money-chart-svg";
 
 const TODAY = "2026-09-24";
@@ -30,6 +29,7 @@ const row = (month: string, f: Partial<OwnerMoneyMonth> = {}): OwnerMoneyMonth =
   const materialsAndBills = f.materialsAndBills ?? 0;
   const crewPay = f.crewPay ?? 0;
   const crewMileagePaid = f.crewMileagePaid ?? 0;
+  const fuel = f.fuel ?? 0;
   const businessCostsTotal = f.businessCostsTotal ?? 0;
   const putOnShelf = f.putOnShelf ?? 0;
   const shopStockLost = f.shopStockLost ?? 0;
@@ -39,12 +39,14 @@ const row = (month: string, f: Partial<OwnerMoneyMonth> = {}): OwnerMoneyMonth =
     materialsAndBills,
     crewPay,
     crewMileagePaid,
-    businessCosts: Object.fromEntries(BUSINESS_COST_BUCKETS.map((b) => [b, 0])) as OwnerMoneyMonth["businessCosts"],
+    fuel,
+    businessCosts: Object.fromEntries(BUCKETS_BESIDE_FUEL.map((b) => [b, 0])) as OwnerMoneyMonth["businessCosts"],
     businessCostsTotal,
     processorFees: 0,
     putOnShelf,
     shopStockLost,
-    left: Math.round((received - materialsAndBills - crewPay - crewMileagePaid - businessCostsTotal - putOnShelf - shopStockLost) * 100) / 100,
+    stockMovedOut: f.stockMovedOut ?? 0,
+    left: Math.round((received - materialsAndBills - crewPay - crewMileagePaid - fuel - businessCostsTotal - putOnShelf - shopStockLost) * 100) / 100,
     ownerHours: 0,
     perOwnerHour: null,
   };
@@ -219,6 +221,54 @@ describe("buildMoneyChartData: what this viewer's chart holds", () => {
     expect(d.series.map((s) => s.key)).toEqual(["collected", "left", "materials", "crewPay", "business"]);
     expect(d.series.find((s) => s.key === "left")!.label).toBe("Left For Erik");
     expect(defaultSeriesOn(d.series)).toEqual(["collected", "left"]);
+  });
+
+  it("stock bought has no bar of its own: it is inside Materials & Bills, the same sum the card prints (Erik, 2026-09-27)", () => {
+    // August: $199.48 of receipts, $180.17 of it went into stock. September: a $36.93 write-off.
+    const m = money([
+      row("2026-08", { received: 1000, materialsAndBills: 19.31, putOnShelf: 180.17 }),
+      row("2026-09", { received: 500, putOnShelf: -36.93, shopStockLost: 36.93 }),
+    ]);
+    const d = buildMoneyChartData(m, { ownerFigures: true, leftLabel: "Owner's Draw" });
+    expect(d.series.map((s) => s.key)).toEqual(["collected", "left", "materials", "lost"]);
+    for (const s of d.series) expect(s.label).not.toMatch(/shelf/i);
+    expect(d.months.map((x) => x.values.materials)).toEqual([199.48, -36.93]);
+    expect(d.months.map((x) => x.values.lost)).toEqual([0, 36.93]);
+    // The bars left standing still account for every dollar: collected = costs + the draw.
+    for (const [i, x] of d.months.entries()) {
+      const v = x.values;
+      expect(Math.round(((v.materials ?? 0) + (v.lost ?? 0) + (v.left ?? 0)) * 100)).toBe(Math.round(m.months[i].received * 100));
+    }
+    // A remembered choice from before (the old stock series' key) falls away quietly to what exists.
+    expect(parseStoredSeries('["collected","shelf"]', d.series)).toEqual(["collected"]);
+  });
+
+  it("FUEL STANDS OUT: its own series in its own colour, beside Business Costs and never inside it", () => {
+    const m = money([
+      row("2026-08", { received: 5000, materialsAndBills: 900, fuel: 312.4, businessCostsTotal: 120, putOnShelf: 80 }),
+      row("2026-09", { received: 4000, fuel: 0, businessCostsTotal: 60 }),
+    ]);
+    const d = buildMoneyChartData(m, { ownerFigures: true, leftLabel: "Owner's Draw" });
+    expect(d.series.map((s) => s.key)).toEqual(["collected", "left", "materials", "fuel", "business"]);
+    const fuel = d.series.find((s) => s.key === "fuel")!;
+    const business = d.series.find((s) => s.key === "business")!;
+    expect(fuel.label).toBe("Fuel");
+    expect(fuel.fill).not.toBe(business.fill);
+    expect(fuel.swatch).toBe("bg-pink-800"); // the Fuel card's and the bank card's colour
+    expect(fuel.defaultOn).toBe(false); // Collected and Owner's Draw stay the two default bars
+    expect(d.months[0].values).toMatchObject({ fuel: 312.4, business: 120 });
+    // EVERY CENT ACCOUNTED FOR: Collected = Owner's Draw + every cost series, Fuel counted once and
+    // stock bought inside Materials & Bills (it has no bar of its own).
+    for (const mo of d.months) {
+      const v = mo.values;
+      const costs = (v.materials ?? 0) + (v.crewPay ?? 0) + (v.mileage ?? 0) + (v.fuel ?? 0) + (v.business ?? 0) + (v.lost ?? 0);
+      expect(Math.round(((v.left ?? 0) + costs) * 100)).toBe(Math.round((v.collected ?? 0) * 100));
+    }
+  });
+
+  it("no fuel in any month shown: no Fuel chip", () => {
+    const d = buildMoneyChartData(money([row("2026-08", { received: 4000, businessCostsTotal: 60 })]), { ownerFigures: true, leftLabel: "Owner's Draw" });
+    expect(d.series.map((s) => s.key)).not.toContain("fuel");
   });
 
   it("Crew Mileage is offered only when the months hold some", () => {

@@ -179,11 +179,11 @@ export function ReceiptLines({
       const res = await takeRollOffShelf(line.shelf!.lotId);
       setShelfBusy(null);
       if (!res?.ok) {
-        toast(res?.error ?? "That roll didn't come off the shelf. Try again.", "error");
+        toast(res?.error ?? "That roll didn't come out of stock. Try again.", "error");
         return;
       }
       toast(
-        `${line.shelf!.pieces} ${line.shelf!.unit} is off the shelf, and its ${formatCurrency(line.shelf!.cost)} is back on the job. What the customer is billed didn't change.`,
+        `${line.shelf!.pieces} ${line.shelf!.unit} is taken out of stock, and its ${formatCurrency(line.shelf!.cost)} is back on the job. What the customer is billed didn't change.`,
         "success",
       );
       router.refresh();
@@ -320,7 +320,7 @@ export function ReceiptLines({
                     ) : part == null ? (
                       <span className="text-slate-400">Billed to the customer</span>
                     ) : part === 0 ? (
-                      <span className="font-medium text-sky-700">{l.isStock ? "On the shelf, none billed here" : "None of it billed here"}</span>
+                      <span className="font-medium text-sky-700">{l.isStock ? "In stock, none billed here" : "None of it billed here"}</span>
                     ) : (
                       <span className="font-medium text-sky-700">
                         {formatCurrency(part)} of it billed to this job
@@ -334,7 +334,7 @@ export function ReceiptLines({
                   /* A ROLL IS ON THE SHELF FROM THIS LINE: the switch would re-cost the
                      roll without moving its pieces, so it doesn't render (the server
                      refuses it too). Take It Off The Shelf below is the way back. */
-                  <span className="shrink-0 text-xs text-slate-400">On the shelf</span>
+                  <span className="shrink-0 text-xs text-slate-400">In stock</span>
                 ) : (
                   <button
                     type="button"
@@ -391,7 +391,7 @@ export function ReceiptLines({
                 <div className="mt-0.5 rounded-md bg-sky-50 px-2 py-1.5 text-xs text-sky-900">
                   <p className="font-medium">
                     {r.job_name ? `${formatCurrency(l.billedAmount ?? 0)} billed to ${r.job_name}` : "None billed to a job"} ·{" "}
-                    {l.shelf.pieces} {l.shelf.unit} on the shelf ({formatCurrency(l.shelf.cost)})
+                    {l.shelf.pieces} {l.shelf.unit} in stock ({formatCurrency(l.shelf.cost)})
                   </p>
                   <p className="text-sky-800">
                     {l.shelf.itemName}: {l.shelf.piecesLeft} {l.shelf.unit} left, {formatCurrency(l.shelf.costLeft)}
@@ -404,11 +404,11 @@ export function ReceiptLines({
                       onClick={() => takeOff(l)}
                       className="-ml-1 flex min-h-11 items-center rounded-lg px-1 text-xs font-medium text-brand hover:underline disabled:opacity-50"
                     >
-                      {shelfBusy === l.id ? "Taking It Off…" : "Take It Off The Shelf"}
+                      {shelfBusy === l.id ? "Taking It Out…" : "Take It Out Of Stock"}
                     </button>
                   )}
                   {l.shelf.liveMoves > 0 && (
-                    <p className="text-sky-800">Pieces of it are on jobs, so it stays on the shelf as it is.</p>
+                    <p className="text-sky-800">Pieces of it are on jobs, so it stays in stock as it is.</p>
                   )}
                 </div>
               ) : (
@@ -422,7 +422,7 @@ export function ReceiptLines({
                     onClick={() => setShelving({ receipt: r, line: l })}
                     className="-ml-1 flex min-h-11 items-center rounded-lg px-1 text-xs font-medium text-brand hover:underline"
                   >
-                    Put The Rest On The Shelf
+                    Put The Rest In Stock
                   </button>
                 )
               )}
@@ -515,14 +515,14 @@ function PutTheRestOnTheShelf({
       .then((res) => {
         setSaving(false);
         if (!res?.ok) {
-          setError(res?.error ?? "Nothing went on the shelf. Try again.");
+          setError(res?.error ?? "Nothing went into stock. Try again.");
           return;
         }
-        onDone(res.message ?? "On the shelf.");
+        onDone(res.message ?? "In stock.");
       })
       .catch(() => {
         setSaving(false);
-        setError("Nothing went on the shelf: the connection dropped. Try again.");
+        setError("Nothing went into stock: the connection dropped. Try again.");
       });
   }
 
@@ -530,7 +530,7 @@ function PutTheRestOnTheShelf({
     <Modal
       open
       onClose={onClose}
-      title="Put The Rest On The Shelf"
+      title="Put The Rest In Stock"
       size="md"
       portal={portal}
       dirty={!!value?.confirmed}
@@ -539,14 +539,14 @@ function PutTheRestOnTheShelf({
           onCancel={onClose}
           onSave={save}
           saving={saving}
-          saveLabel="Put It On The Shelf"
+          saveLabel="Put It In Stock"
           disabled={!value || !(pieces > 0) || !(rest > 0) || saving}
         />
       }
     >
       <div className="space-y-3">
         {!value ? (
-          <p className="text-sm text-slate-500">Reading the shelf…</p>
+          <p className="text-sm text-slate-500">Reading stock…</p>
         ) : (
           <>
             <ShelfCountRow line={countLine} value={value} onChange={setValue} items={items} showUsed allowNotStock={false} startOpen />
@@ -556,7 +556,7 @@ function PutTheRestOnTheShelf({
                 {used > 0
                   ? `${jobName ?? "This job"} is billed ${formatCurrency(billed)} for the ${used} ${value.unit} it used. `
                   : `${jobName ?? "This job"} is billed nothing for it${line.billedAmount == null ? " (it was billing the whole line)" : ""}. `}
-                The other {rest} {value.unit} go on the shelf, and their share of this ticket, tax included, comes off the job&apos;s cost.
+                The other {rest} {value.unit} go into stock, and their share of this ticket, tax included, comes off the job&apos;s cost.
               </p>
             )}
             {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
@@ -852,7 +852,7 @@ function UsedOnThisJob({
              split moves what the customer is billed; once pieces of the roll are on a job, the
              database refuses a change here and says which takes to undo first. */
           <p className="text-xs text-slate-500">
-            Part of this line is on the shelf. Changing the split here moves what the customer is billed.
+            Part of this line is in stock. Changing the split here moves what the customer is billed.
           </p>
         )}
       </div>

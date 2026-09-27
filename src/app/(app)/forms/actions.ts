@@ -7,6 +7,7 @@ import { createClient } from "@/lib/supabase/server";
 import { requireStaff } from "@/lib/staff-guard";
 import { slugifyFieldKey } from "@/lib/form-field-key";
 import { getOrgSettings } from "@/lib/org-settings";
+import { orgTrade } from "@/lib/org-trade";
 import { starterSchemaJson, starterSheet, starterTradeFor } from "@/lib/inspection/starter-sheets";
 import { severeSheetProblems } from "@/lib/inspection/lint";
 
@@ -138,7 +139,8 @@ export async function createStarterInspectionSheet(): Promise<Result> {
   if (existing) return { ok: true, id: existing.id };
 
   const { data: org } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
-  const trade = starterTradeFor(getOrgSettings((org as { settings?: unknown } | null)?.settings).trade_label);
+  // THE KEY PICKS IT (lib/org-trade): the trade chosen at sign-up, not only words typed later.
+  const trade = starterTradeFor(orgTrade(getOrgSettings((org as { settings?: unknown } | null)?.settings)).key);
   const { name } = starterSheet(trade);
 
   const { data, error } = await supabase

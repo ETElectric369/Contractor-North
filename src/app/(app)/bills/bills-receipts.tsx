@@ -17,6 +17,8 @@ import { openFoldsTo } from "@/components/fold-opener";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { createBill, deleteDocument } from "../jobs/actions";
 import { BillRowDoors } from "@/components/bill-row-doors";
+import { BillPaperDoors } from "@/components/bill-paper-doors";
+import type { BillPaper } from "@/lib/job-photos";
 import { executeAction } from "@/lib/actions/execute";
 import { NewPoButton } from "../purchasing/new-po-button";
 import { FeatureOffLine } from "@/components/feature-off-line";
@@ -28,6 +30,7 @@ import { splitReceiptBilling } from "./receipt-billing";
 import { ReceiptLines, type ReceiptForBilling } from "./receipt-billing-card";
 import { AlreadyBilledButton, NotBilledAfterAllButton } from "@/components/already-billed-sheet";
 import type { BillAlreadyBilled } from "@/lib/already-billed";
+import { countOpen, isOpenBill, isOpenPurchaseOrder } from "@/lib/open-counts";
 
 interface JobOption {
   id: string;
@@ -77,6 +80,8 @@ export interface BillRow {
    * with lines. They live in the bill's own detail now: one place per bill, no second list.
    */
   receipt?: ReceiptForBilling | null;
+  /** The paper this bill was read from (lib/job-photos billPapers), opened from its row. */
+  papers?: BillPaper[] | null;
 }
 interface DocRow {
   id: string;
@@ -129,6 +134,7 @@ export function BillsReceipts({
   bills,
   docs,
   readFailed = false,
+  papersNote = null,
   switches = { features: ALL_ON, isOwner: false },
   alreadyBilled = {},
 }: {
@@ -140,6 +146,9 @@ export function BillsReceipts({
   docs: DocRow[];
   /** The bills read failed (audit v1018, class 2): said, never "No bills here yet" and $0.00. */
   readFailed?: boolean;
+  /** Said above the bills when the page couldn't read which receipt made which bill: every row then
+   *  draws no Receipt door, and a bill that has one must not look like one that never had any. */
+  papersNote?: string | null;
   /** The switch board (0352). Purchase Orders off: the tab loses its chip (a ?tab=po link still
    *  opens it, under the Off line) and New PO goes. The POs themselves are listed as ever. Shop
    *  Stock off: a receipt line isn't offered to the shelf. Absent = all on, today's ledger. */
@@ -277,9 +286,12 @@ export function BillsReceipts({
           activeId={tab}
           onChange={(id) => setTab(id as LedgerTab)}
           tabs={[
-            { id: "bills", label: "Bills", count: bills.length },
-            { id: "po", label: "Purchase Orders", count: pos.length, offStrip: !poOn },
-            { id: "receipts", label: "Receipts", count: docs.length },
+            // Open only (Erik, 2026-09-27: "all badges only show whats open"): the bills still owed
+            // and the orders not in yet. Receipts are files, never open, so no badge; the ledger's
+            // own size is said in plain words on its summary line above.
+            { id: "bills", label: "Bills", count: countOpen(bills, isOpenBill) },
+            { id: "po", label: "Purchase Orders", count: countOpen(pos, (p) => isOpenPurchaseOrder(p.status)), offStrip: !poOn },
+            { id: "receipts", label: "Receipts" },
           ]}
         />
 
@@ -369,6 +381,7 @@ export function BillsReceipts({
               {formatCurrency(totalBills)}
             </p>
           )}
+          {!readFailed && papersNote && <p className="mb-2 text-sm text-slate-500">{papersNote}</p>}
 
           {readFailed ? (
             <p className="py-4 text-center text-sm text-amber-800" role="alert">
@@ -422,6 +435,8 @@ export function BillsReceipts({
                         <div className="flex flex-wrap items-center gap-2">
                           {/* THIS TICK AND THE SUPPLIER BALANCE ARE THE SAME DOLLAR (review, 2026-09-19): the
                               three doors are BillRowDoors, one copy with the job's Costs tab. */}
+                          {/* The receipt it was read from, with the bill instead of in a job's Photos. */}
+                          <BillPaperDoors papers={b.papers} />
                           <BillRowDoors bill={b} onEdit={() => setEditBill(b)} disabled={pending} />
                           <BillAlreadyBilledDoor bill={b} door={alreadyBilled[b.id]} />
                           {b.job_id && (
@@ -544,7 +559,7 @@ function BillEditModal({
   const [status, setStatus] = useState(bill.status);
   const [billDate, setBillDate] = useState(bill.bill_date ?? "");
   const [billJob, setBillJob] = useState(bill.job_id ?? "__overhead");
-  // A business cost opens on its own bucket (an old word like "Fuel" read as Gas & Truck). A job
+  // A business cost opens on its own bucket (an old word like "Vehicle", or "Gas & Truck", read as Auto). A job
   // bill's category is a paper kind ("Receipt"), not a bucket, so moving one off its job starts
   // with no bucket and asks for one.
   const [billCategory, setBillCategory] = useState<string>(bill.job_id ? "" : bucketOf(bill.category));

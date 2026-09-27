@@ -16,6 +16,9 @@
  *                     a lump line, never $0; a charge goes on a line of work, a return on a line typed
  *                     by hand that takes money off; the matching kind first (materials for a receipt,
  *                     labor for hours)
+ *   entriesForLine    for hours: a line that names one person (its key, or its words: the company-wide
+ *                     rule, lib/labor-claim-owner) is offered only that person's shifts; 0361 refuses
+ *                     anyone else's, and markPersonRefusal says so before it does
  *   precheckHours     for hours: only the line's own person, only up to the day the invoice was
  *                     WRITTEN (created), never the day it was sent: INV-00023 went out 76 days after it
  *                     was written, and the sent date would have ticked 76 days of unbilled work; and
@@ -30,6 +33,7 @@ import { formatCurrency } from "@/lib/utils";
 import { todayStrInTz } from "@/lib/tz";
 import { billableBillCost, type BillLine } from "@/lib/bill-itemisation";
 import { isReturnBill, returnCreditCost } from "@/lib/supplier-returns";
+import { laborLinePerson, type LaborPerson } from "@/lib/labor-claim-owner";
 
 export type AlreadyBilledKind = "bill" | "po" | "stock" | "time";
 
@@ -48,6 +52,12 @@ export type AbLine = {
   /** For hours: the hours of the job's shifts this line already holds (its claim, by import or by
    *  hand). A hand-bumped line is usually most of the way covered: only the rest is ticked. */
   heldHours?: number | null;
+  /** For hours: WHOSE HOURS THE LINE HOLDS, by the one rule (lib/labor-claim-owner laborLinePerson,
+   *  over the company's people; 0361 holds it in the database): the person its key or its words name,
+   *  null for a crew line (nobody, or more than one person). Undefined: not read (every person's
+   *  shifts are offered). `personName` is that person's name, for the sheet's sentence. */
+  person?: string | null;
+  personName?: string | null;
 };
 
 export type AbInvoice = {
@@ -273,8 +283,12 @@ const wordRe = (w: string) => new RegExp(`(^|[^a-z])${w.toLowerCase().replace(/[
  * WHOSE HOURS A LINE CHARGED: the person its key names (labor:<person>), or, for a line typed by
  * hand, the one person whose full name or first name is in its words ("Labor - Brian"). Two people
  * who both fit, or nobody: null, and nothing is ticked for the office.
+ *
+ * A line the sheet's read already judged (`person`, the company-wide rule 0361 enforces) is taken at
+ * its word; otherwise the people are the ones with open shifts here.
  */
-export function personOfLine(line: Pick<AbLine, "import_key" | "description">, entries: readonly AbEntry[]): string | null {
+export function personOfLine(line: Pick<AbLine, "import_key" | "description"> & Partial<Pick<AbLine, "person">>, entries: readonly AbEntry[]): string | null {
+  if (line.person !== undefined) return line.person;
   const people = new Map<string, string>();
   for (const e of entries) people.set(e.person, e.name);
   const key = String(line.import_key ?? "");
@@ -308,7 +322,7 @@ export function personOfLine(line: Pick<AbLine, "import_key" | "description">, e
  */
 export function precheckHours(
   entries: readonly AbEntry[],
-  line: Pick<AbLine, "import_key" | "description"> & Partial<Pick<AbLine, "unit" | "quantity" | "heldHours">>,
+  line: Pick<AbLine, "import_key" | "description"> & Partial<Pick<AbLine, "unit" | "quantity" | "heldHours" | "person">>,
   writtenAt: string,
   tz: string,
 ): { person: string | null; checked: string[]; covered: boolean } {
@@ -335,6 +349,71 @@ export function precheckHours(
     room = cents(room - h);
   }
   return { person, checked, covered: fams.length > 0 && checked.length === 0 && cents(lineH - held) <= 0 };
+}
+
+// ── Whose hours a line holds (0361) ──────────────────────────────────────────────────────────────
+
+/**
+ * EACH LINE'S PERSON, BY THE ONE RULE: lib/labor-claim-owner's laborLinePerson over the company's
+ * people (every profile of the company with a name, as 0361's labor_line_person reads them). The
+ * person a line's key or words name, or null for a crew line ("Labor - ET Electric hourly with 2
+ * guys": nobody, or more than one person). Sets `person` and `personName` on every line, in place.
+ */
+export function setLinePeople(invoices: readonly { lines: AbLine[] }[], people: readonly LaborPerson[]): void {
+  const nameOf = new Map(people.map((p) => [String(p.id), String(p.name ?? "").trim()] as const));
+  for (const inv of invoices)
+    for (const l of inv.lines) {
+      const person = laborLinePerson(l, people);
+      l.person = person;
+      l.personName = person ? nameOf.get(person) || null : null;
+    }
+}
+
+/**
+ * THE SHIFTS OFFERED FOR A LINE: a line that names one person holds only that person's hours
+ * (0361 refuses anyone else's), so only theirs are listed. A crew line, or a line not judged, lists
+ * every one.
+ */
+export function entriesForLine<T extends Pick<AbEntry, "person">>(entries: readonly T[], line: Partial<Pick<AbLine, "person">> | null | undefined): T[] {
+  const p = line?.person;
+  return p ? entries.filter((e) => e.person === p) : [...entries];
+}
+
+/** Said on the sheet under a line that names one person: why only their hours are listed. */
+export function linePersonNote(line: Pick<AbLine, "description"> & Partial<Pick<AbLine, "person" | "personName">>): string | null {
+  if (!line.person) return null;
+  const who = String(line.personName ?? "").trim() || "one person";
+  const words = String(line.description ?? "").trim() || "This line";
+  return `"${words}" names ${who}, so only ${who}'s hours are listed here. Another person's hours go on their own line, or on a crew line that names nobody.`;
+}
+
+/** "9/11": a shift's day in the company's time zone, the way 0361's refusals say it. */
+export function monthDay(iso: string, tz: string): string {
+  const parts = new Intl.DateTimeFormat("en-US", { timeZone: tz, month: "numeric", day: "numeric" }).formatToParts(new Date(iso));
+  return `${parts.find((p) => p.type === "month")?.value ?? ""}/${parts.find((p) => p.type === "day")?.value ?? ""}`;
+}
+
+/**
+ * MARK'S OWN REFUSAL, BEFORE THE DATABASE'S, IN ITS WORDS (for a line typed by hand, 0361's
+ * invoice_items_hand_hours_are_its_persons says this same sentence; a keyed line's is 0361 B's): a
+ * line that names one person holds only that person's shifts. The first shift that is someone
+ * else's, oldest first, refused; null when every shift is the line's person's, or the line is a crew
+ * line. `shifts`: the time entries among the ids being marked.
+ */
+export function markPersonRefusal(
+  line: { description?: string | null; invoiceNumber?: string | null; person: string | null; personName?: string | null },
+  shifts: readonly { id: string; person: string | null; name?: string | null; clockIn: string }[],
+  tz: string,
+): string | null {
+  if (!line.person) return null;
+  const off = shifts
+    .filter((s) => s.person !== line.person)
+    .sort((a, b) => new Date(a.clockIn).getTime() - new Date(b.clockIn).getTime() || a.id.localeCompare(b.id))[0];
+  if (!off) return null;
+  const words = String(line.description ?? "").trim() || "This line";
+  const who = String(line.personName ?? "").trim() || "one person";
+  const whose = String(off.name ?? "").trim() || "another person";
+  return `"${words}" on ${line.invoiceNumber ?? "this invoice"} names ${who}, so it holds only ${who}'s hours, not ${whose}'s ${monthDay(off.clockIn, tz)} shift. Nothing was changed.`;
 }
 
 /** The hours a line bills, when it is billed in hours ("13 h"), else null. */

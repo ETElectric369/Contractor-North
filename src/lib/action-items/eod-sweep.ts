@@ -61,7 +61,8 @@ export async function sendCloseOutNudges(supabase: any): Promise<{ orgs: number;
     ]);
     const nonBillable = new Set<string>(((codesR.data ?? []) as { code?: string | null }[]).map((c) => String(c.code ?? "").trim()).filter(Boolean));
 
-    const found = detectStrayTime([...((openR.data ?? []) as any[]), ...((recentR.data ?? []) as any[])], today, Date.now(), nonBillable);
+    // The org's own calendar decides "a past day" (tz), not the UTC slice of the timestamp.
+    const found = detectStrayTime([...((openR.data ?? []) as any[]), ...((recentR.data ?? []) as any[])], today, Date.now(), nonBillable, tz);
     const worked = rollupWorkedJobs((recentR.data ?? []) as any[], today);
 
     /* A CLOSED SHIFT ON NO JOB THAT A LIVE INVOICE HOLDS IS BILLED (0357: billed by hand on an

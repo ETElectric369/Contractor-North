@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { DOCK } from "@/lib/dock";
-import { LESSONS, TOUR, lessonBlurb, lessonByKey, sayOf, stepWords, tourIndex, type TourCtx } from "./tour";
+import { LESSONS, TOUR, WHY_LINE_FEEDS_ESTIMATE, lessonBlurb, lessonByKey, sayOf, stepWords, tourIndex, type TourCtx } from "./tour";
+import { factsForEstimatorByProvenance } from "@/lib/playbook/answers";
+import { WHY_SHAPES } from "@/lib/playbook/why";
 
 /**
  * THE SPLIT (cn-v726): TOUR is now ONLY the setup — every step asks something saveSetup writes,
@@ -10,6 +12,7 @@ import { LESSONS, TOUR, lessonBlurb, lessonByKey, sayOf, stepWords, tourIndex, t
 const ALL_STEPS = [...TOUR, ...LESSONS.flatMap((l) => l.steps)];
 const findStep = (key: string) => ALL_STEPS.find((s) => s.key === key)!;
 import { SETUP_PLAYBOOK } from "./setup-playbook";
+import { TRADE_WORDS } from "@/lib/org-trade";
 
 /** A sentence that CLAIMS where something came from, as opposed to where it lives. */
 const ORIGIN_VERB = /\b(came|come|comes|built|builds|build|seeded|seeds|created|creates|set up|sets up|made|makes)\b/i;
@@ -55,14 +58,14 @@ describe("the why-line lesson is actually in here", () => {
     expect(said).toContain("why line");
   });
 
-  it("the example is a REAL one, not a description of one", () => {
-    // An abstract "explain your reasoning" teaches nothing. The example carries a concrete cost.
-    const ex = sayOf(findStep("why-example").say, STRANGER).toLowerCase();
-    // Both brothers, both shapes: arithmetic and a fork. Erik on the old permit example: "the
-    // example in #7 makes no sense to me nor do my why lines."
-    expect(ex).toContain("board count");
-    expect(ex).toContain("home runs");
-    expect(ex.toLowerCase()).toContain("square footage");
+  it("the example shows all three shapes as whole lines, in no trade's words", () => {
+    // An abstract "explain your reasoning" teaches nothing, so each shape is a whole line. But it
+    // was a deck builder's board count and an electrician's subpanel, shown to every trade, and
+    // neither was even live. Erik: "Nort cant be giving examples that dont make sense like in the
+    // tour." The shapes come from lib/playbook/why, so the lesson and the why box never drift.
+    const ex = sayOf(findStep("why-example").say, STRANGER);
+    for (const s of WHY_SHAPES) expect(ex).toContain(s.example);
+    expect(ex).not.toMatch(/board count|joist|subpanel|home runs?|panel|breaker|outlet|deck builder|electrician/i);
   });
 
   it("and it promises the draft that comes next, so the hand-off isn't a surprise", () => {
@@ -181,6 +184,40 @@ describe("well-formed", () => {
     expect(hello.toLowerCase()).not.toContain("tell me your name");
     // ...and a stranger still gets asked.
     expect(sayOf(TOUR[0].say, STRANGER).toLowerCase()).toContain("tell me your name");
+  });
+
+  it("A TRADE PICKED AT SIGN-UP IS NEVER ASKED AGAIN, and the starters are described as they are", () => {
+    // Sign-up keeps the trade key (0352); the layout hands its words in through lib/org-trade.
+    const trade = TOUR.find((s) => s.key === "trade")!;
+    const known = sayOf(trade.say, { ...STRANGER, trade: "plumber" });
+    expect(known).toContain("plumber");
+    expect(known.toLowerCase()).not.toContain("what trade are you in");
+    const cold = sayOf(trade.say, STRANGER).toLowerCase();
+    expect(cold).toContain("what trade are you in");
+    // There are three trade starters and a general set (STARTER_FOR_TRADE), not "four", and a
+    // "first trade word" doesn't pick anything when sign-up already did.
+    for (const t of [known.toLowerCase(), cold]) {
+      expect(t).not.toContain("four starter");
+      expect(t).not.toContain("first trade word");
+    }
+    expect(cold).toMatch(/electrical, deck and plumbing/);
+  });
+
+  it("THE TRADE READS AS A SENTENCE whatever words it is: never 'I've got you as painter'", () => {
+    // The key's own words need an article ("painter"), a company's own may not take one
+    // ("Construction"), so the line says "your trade" and the words follow it.
+    const trade = TOUR.find((s) => s.key === "trade")!;
+    for (const words of [...Object.values(TRADE_WORDS), "Construction"]) {
+      const ctx = { ...KNOWN, trade: words };
+      const lines = [sayOf(trade.say, ctx), sayOf(TOUR[0].say, ctx)];
+      for (const t of lines) {
+        expect(t).toContain(`your trade`);
+        expect(t).toContain(words);
+        expect(t).not.toContain(`got you as ${words}`);
+        expect(t).not.toContain(`, ${words} out of`);
+      }
+    }
+    expect(sayOf(TOUR[0].say, { ...KNOWN, trade: "painter" })).toContain("I've already got you as Erik out of Truckee, and your trade as painter.");
   });
 
   it("no line leaves a hole when he knows nothing — no 'out of undefined'", () => {
@@ -356,6 +393,33 @@ describe("no claim in the onboarding promises something the code does not do", (
     // removed the last need that was gated on the promise.
     expect(SPOKEN).not.toMatch(/worked out from something you already said/i);
     expect(SPOKEN).not.toMatch(/I don'?t make you count it/i);
+  });
+
+  it("says the estimate reads why lines ONLY when the estimator really does", () => {
+    // "when I write the estimate, your why line is what tells me where that answer lands" was
+    // false: Start The Estimate hands the estimator "label: answer" and nothing else. The switch is
+    // held to the estimator's own output, so making it read why lines fails here until the lesson
+    // is flipped with it.
+    const why = "Sets the trip count, which is the labor line.";
+    const pb = { needs: [{ key: "trips", label: "Trips", ask: "How many trips?", slot: { type: "number" as const }, why }] };
+    const facts = factsForEstimatorByProvenance(pb, { trips: 2 }, new Set()).hand;
+    expect(facts).toContain("Trips");
+    expect(facts.includes(why)).toBe(WHY_LINE_FEEDS_ESTIMATE);
+
+    const uses = findStep("why-uses");
+    const on = sayOf(stepWords(uses, true).say, STRANGER).toLowerCase();
+    const off = sayOf(stepWords(uses, false).say, STRANGER).toLowerCase();
+    for (const t of [on, off]) {
+      if (!WHY_LINE_FEEDS_ESTIMATE) {
+        expect(t).not.toMatch(/write the estimate, your why line|estimate gets written, your why line/);
+        // What IS true today: the walk-through fill reads it, and it shows under the question.
+        expect(t).toContain("walk-through");
+        expect(t).toContain("under the question");
+      }
+    }
+    // Either way, it still never claims to run the sum.
+    expect(on).toContain("i don't run the sum");
+    expect(off).toContain("nothing runs the sum");
   });
 
   it("does not promise to RUN the arithmetic in a why line", () => {

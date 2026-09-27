@@ -487,7 +487,7 @@ export function PlaybookManager({
                   <div className="space-y-4 border-t border-slate-100 bg-slate-50/60 p-4">
                     <div>
                       <Label className="mb-1.5">The question, the way you&rsquo;d say it out loud</Label>
-                      <Input value={n.ask} placeholder="Where's the power coming from — which panel, how far, what's open in it?"
+                      <Input value={n.ask} placeholder="The question, the way you'd ask it on site"
                              onChange={(e) => edit(i, { ask: e.target.value })} />
                     </div>
 

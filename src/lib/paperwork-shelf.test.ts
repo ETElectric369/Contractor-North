@@ -21,7 +21,7 @@ import { SHELF_NEEDS_LINES, SHELF_NO_RETURNS } from "./shelf-plan";
 
 /**
  * THE TRAY'S SHOP STOCK DESTINATION (Shop Stock, Phase 2). A CED ticket with STOCK written in its
- * PO box shows up pointed at Shop Stock, with the reason: "Shelf picked from the PO on the bill:
+ * PO box shows up pointed at Shop Stock, with the reason: "Shop Stock picked from the PO on the bill:
  * STOCK". It is a suggestion: a person can switch it to a job, and can send any ticket to the
  * shelf. Only the PO box and the job-name box are read, the WHOLE box, so "IN STOCK" and
  * "STOCKTON" never trigger it. A ticket with no lines can't go to the shelf yet, and says why.
@@ -74,7 +74,7 @@ describe("PO STOCK is suggested to the shelf, with the because-line", () => {
     const row = rematchPaper(stockPaper({ po: "STOCK", jobId: null, jobFrom: null }), JOBS, [], SELF);
     expect(suggestedDestination(row, ["j11"])).toBe("stock");
     expect(paperPickOf(row)).toBe("stock");
-    expect(pickedBecause(row)).toBe("Shelf picked from the PO on the bill: STOCK");
+    expect(pickedBecause(row)).toBe("Shop Stock picked from the PO on the bill: STOCK");
   });
 
   it("STOCK plus a job named on the same paper is two answers: nothing is picked, and the row says so", () => {
@@ -100,7 +100,7 @@ describe("PO STOCK is suggested to the shelf, with the because-line", () => {
     expect(pickProvenance(row, "stock").filed.picked).toBe("paper");
     const onJob = pickProvenance(row, "job:j11");
     expect(onJob.filed.picked).toBe("person");
-    expect(onJob.note).toBe("A person picked this over what the paper names (Shelf picked from the PO on the bill: STOCK).");
+    expect(onJob.note).toBe("A person picked this over what the paper names (Shop Stock picked from the PO on the bill: STOCK).");
   });
 });
 

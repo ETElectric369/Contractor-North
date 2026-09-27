@@ -49,7 +49,7 @@ export type ShelfLoad = { ok: true; rows: ShelfRow[] } | { ok: false; error: str
 /** The shelf for the sheet: names, units and counts. The same read for the crew and the office. */
 export async function loadShelf(): Promise<ShelfLoad> {
   const m = await requireMember();
-  if ("error" in m) return { ok: false, error: m.error ?? "Sign in again to take from the shelf." };
+  if ("error" in m) return { ok: false, error: m.error ?? "Sign in again to take from stock." };
   return shelfForCrew(m.supabase);
 }
 
@@ -60,13 +60,13 @@ export async function takeFromStockAction(raw: unknown): Promise<TakeActionResul
     if (parsed.error.issues.some((i) => i.code === "unrecognized_keys")) return { ok: false, error: NO_MONEY };
     const path = parsed.error.issues[0]?.path[0];
     if (path === "qty") return { ok: false, error: "Say how many you took." };
-    if (path === "itemId") return { ok: false, error: "Pick what you took off the shelf." };
+    if (path === "itemId") return { ok: false, error: "Pick what you took out of stock." };
     if (path === "jobId") return { ok: false, error: "Pick the job these pieces went on." };
     return { ok: false, error: "That take didn't read right. Nothing was taken." };
   }
   const input = parsed.data;
   const m = await requireMember();
-  if ("error" in m) return { ok: false, error: m.error ?? "Sign in again to take from the shelf." };
+  if ("error" in m) return { ok: false, error: m.error ?? "Sign in again to take from stock." };
   const { supabase, orgId, staff } = m;
 
   // The job is this company's, said here as well as in stock_draw (0173: a rule at one door is a
@@ -85,7 +85,7 @@ export async function takeFromStockAction(raw: unknown): Promise<TakeActionResul
     source: staff ? (input.via === "nort" ? "nort" : "office") : "crew",
   });
   if (!res.ok) return { ok: false, error: isMissingShelfRpc({ message: res.error }) ? "Took From Stock needs a database update that hasn't been applied yet. Nothing was taken." : res.error };
-  if (!res.drawGroup) return { ok: false, error: "The shelf didn't say what it took. Reload the job to see where it stands." };
+  if (!res.drawGroup) return { ok: false, error: "The stock record didn't say what it took. Reload the job to see where it stands." };
 
   revalidatePath("/materials/[id]", "page");
 
@@ -138,13 +138,13 @@ async function tellOfficeAboutTake(
 export async function undoTakeAction(drawGroup: string, jobId?: string | null): Promise<{ ok: true; message: string } | { ok: false; error: string }> {
   if (!UUID.safeParse(drawGroup).success) return { ok: false, error: "That take isn't one this job knows. Reload to see where it stands." };
   const m = await requireMember();
-  if ("error" in m) return { ok: false, error: m.error ?? "Sign in again to take from the shelf." };
+  if ("error" in m) return { ok: false, error: m.error ?? "Sign in again to take from stock." };
   const res = await undoTake(drawGroup);
   if (!res.ok) return { ok: false, error: res.error };
   if (!res.undone) return { ok: false, error: "That take was already undone. Reload to see where it stands." };
   if (jobId && UUID.safeParse(jobId).success) revalidatePath(`/jobs/${jobId}`);
   revalidatePath("/materials/[id]", "page");
-  return { ok: true, message: "Undone: the pieces are back on the shelf." };
+  return { ok: true, message: "Undone: the pieces are back in stock." };
 }
 
 /**
@@ -153,14 +153,14 @@ export async function undoTakeAction(drawGroup: string, jobId?: string | null): 
  * and bills nothing.
  */
 export async function settleShortAction(shortId: string): Promise<{ ok: true; message: string } | { ok: false; error: string }> {
-  if (!UUID.safeParse(shortId).success) return { ok: false, error: "That take isn't one the shelf knows. Reload to see where it stands." };
+  if (!UUID.safeParse(shortId).success) return { ok: false, error: "That take isn't on the stock record. Reload to see where it stands." };
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error ?? "This is office-only." };
   const { supabase, orgId } = ctx;
   if (!orgId) return { ok: false, error: "Your sign-in isn't attached to a company." };
   const { data, error } = await supabase.rpc("settle_short", { p_short: shortId });
   if (error) return { ok: false, error: settleRefusalWords(dbError(error)) };
-  if (!(data as { draw_group?: unknown } | null)?.draw_group) return { ok: false, error: "The shelf didn't settle it. Reload to see where it stands." };
+  if (!(data as { draw_group?: unknown } | null)?.draw_group) return { ok: false, error: "The stock record didn't settle it. Reload to see where it stands." };
   revalidatePath("/inventory");
   revalidatePath("/jobs/[id]", "page");
   return { ok: true, message: "Settled: those pieces now cost the job what the roll cost." };

@@ -340,7 +340,7 @@ export function BreakersCardView({
       )}
       {c.shelf.length > 0 && (
         <div className="mt-3">
-          <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">On The Shelf</div>
+          <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">In Stock</div>
           <ul className="mt-1 space-y-1">
             {c.shelf.map((g) => (
               <li key={g.key} className="text-sm text-slate-700">

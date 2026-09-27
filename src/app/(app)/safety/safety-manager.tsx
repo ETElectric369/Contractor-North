@@ -60,16 +60,16 @@ export function SafetyManager({
       paramKey="kind"
       tabs={[
         {
+          // No badges: a safety record is a record, not an open item (no record here waits on anyone),
+          // so how many there are is a total (Erik, 2026-09-27: "all badges only show whats open").
           id: "incident",
           label: "Incidents",
-          count: incidents.length,
           icon: <AlertTriangle className="h-4 w-4" />,
           content: <SafetyPanel kind="incident" employees={employees} jobs={jobs} records={incidents} canEdit={canEdit} canAdd={canAdd} />,
         },
         {
           id: "toolbox",
           label: "Toolbox Talks",
-          count: toolbox.length,
           icon: <Users className="h-4 w-4" />,
           content: <SafetyPanel kind="toolbox" employees={employees} jobs={jobs} records={toolbox} canEdit={canEdit} canAdd={canAdd} />,
         },
@@ -136,7 +136,7 @@ function SafetyPanel({
         {error && <p className="text-sm text-red-600">{error}</p>}
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           <div><Label htmlFor="s-date">Date</Label><Input id="s-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} /></div>
-          <div className="col-span-2 sm:col-span-3"><Label htmlFor="s-title">{isIncident ? "What happened *" : "Topic *"}</Label><Input id="s-title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder={isIncident ? "e.g. Cut hand on conduit" : "e.g. Ladder safety"} /></div>
+          <div className="col-span-2 sm:col-span-3"><Label htmlFor="s-title">{isIncident ? "What happened *" : "Topic *"}</Label><Input id="s-title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder={isIncident ? "e.g. Cut hand on a sharp edge" : "e.g. Ladder safety"} /></div>
           {isIncident ? (
             <>
               <div><Label htmlFor="s-emp">Employee</Label><Select id="s-emp" value={profileId} onChange={(e) => setProfileId(e.target.value)}><option value="">—</option>{employees.map((e) => <option key={e.id} value={e.id}>{e.full_name ?? "Unnamed"}</option>)}</Select></div>
@@ -259,7 +259,7 @@ function EditSafetyButton({
           {error && <p className="text-sm text-red-600">{error}</p>}
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <div><Label htmlFor="e-date">Date</Label><Input id="e-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} /></div>
-            <div className="col-span-2 sm:col-span-3"><Label htmlFor="e-title">{isIncident ? "What happened *" : "Topic *"}</Label><Input id="e-title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder={isIncident ? "e.g. Cut hand on conduit" : "e.g. Ladder safety"} /></div>
+            <div className="col-span-2 sm:col-span-3"><Label htmlFor="e-title">{isIncident ? "What happened *" : "Topic *"}</Label><Input id="e-title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder={isIncident ? "e.g. Cut hand on a sharp edge" : "e.g. Ladder safety"} /></div>
             {isIncident ? (
               <>
                 <div><Label htmlFor="e-emp">Employee</Label><Select id="e-emp" value={profileId} onChange={(e) => setProfileId(e.target.value)}><option value="">—</option>{employees.map((e) => <option key={e.id} value={e.id}>{e.full_name ?? "Unnamed"}</option>)}</Select></div>

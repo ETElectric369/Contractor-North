@@ -1401,7 +1401,7 @@ export function Inspector({
             <Textarea
               rows={2}
               value={materials}
-              placeholder="Or just type it — “roughly 200' of 12-2, a couple of 20A breakers”."
+              placeholder="Or just type it, the way you'd read it out: each item, how much, and the size."
               onChange={(e) => {
                 setMaterials(e.target.value);
                 queueCapture({ materials: e.target.value });

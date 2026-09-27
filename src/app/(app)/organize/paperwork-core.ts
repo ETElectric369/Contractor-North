@@ -2,8 +2,9 @@ import "server-only";
 
 import { reportError } from "@/lib/observe";
 import { dbError } from "@/lib/db-error";
-import { AUTO_FILE_BUCKETS, bucketOf, looksLikeSupplierFee } from "@/lib/business-cost-buckets";
+import { AUTO_FILE_BUCKETS, BUSINESS_COST_BUCKETS, LEGACY_GAS_AND_TRUCK, bucketOf, looksLikeSupplierFee } from "@/lib/business-cost-buckets";
 import { getOrgSettings } from "@/lib/org-settings";
+import { tradeWordsOr, withArticle } from "@/lib/org-trade";
 import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 import { indexSupplierAliases, resolveSupplierAccount, type SupplierAliasIndex } from "@/lib/supplier-identity";
 import { openListFromReader } from "@/lib/supplier-open-list";
@@ -19,6 +20,7 @@ import {
   type MarkJob,
   type MarkPo,
   type PaperMarks,
+  sameMoneyFromBank,
   type BookedBill,
   type BookedPaper,
   type BookedSupplierInvoice,
@@ -167,7 +169,7 @@ export async function tradeOf(supabase: any, orgId: string | null | undefined): 
   if (!orgId) return "contractor";
   try {
     const { data } = await supabase.from("organizations").select("settings").eq("id", orgId).maybeSingle();
-    return getOrgSettings((data as { settings?: unknown } | null)?.settings).trade_label?.trim() || "contractor";
+    return tradeWordsOr(getOrgSettings((data as { settings?: unknown } | null)?.settings));
   } catch {
     return "contractor";
   }
@@ -319,7 +321,7 @@ export function rematchTray<T extends PaperItem>(items: readonly T[], ctx: MarkC
  * transcribes can only come from the paper. A guess at the job is AI Suggest's, a separate look.
  */
 export function paperReaderSystem(trade: string): string {
-  return `You read paperwork for a ${trade}. Look at the upload, say what kind of paper it is, and transcribe it.
+  return `You read paperwork for ${withArticle(trade)}. Look at the upload, say what kind of paper it is, and transcribe it.
 
 Respond with ONLY a JSON object (no prose):
 {
@@ -344,7 +346,7 @@ Respond with ONLY a JSON object (no prose):
   "confidence": "low" | "medium" | "high"
 }
 
-Rules: copy job_marks only from what is on the paper; never fill one in from anything else. A gas-station or convenience receipt is overhead (Gas & Truck). Generic supply-house receipts with no job reference are "unsure", not overhead. A supplier's finance charge, service charge, late fee or interest is "unsure", never overhead. In every "description", write inches as the word in (e.g. "6 in EMT", not 6") and never put a raw double-quote character inside a JSON string.
+Rules: copy job_marks only from what is on the paper; never fill one in from anything else. A fuel receipt (a gas station, a pump, a fill-up at a store) is overhead (Fuel); truck parts, repairs, tires, oil changes and registration are overhead (Auto). Generic supply-house receipts with no job reference are "unsure", not overhead. A supplier's finance charge, service charge, late fee or interest is "unsure", never overhead. In every "description", write inches as the word in (e.g. "6 in EMT", not 6") and never put a raw double-quote character inside a JSON string.
 
 ${FOOD_AND_DRINK_PROMPT_RULE}
 
@@ -555,6 +557,9 @@ export type Books = {
   papers: BookedPaper[];
   supplierInvoices: BookedSupplierInvoice[];
   aliases: SupplierAliasIndex;
+  /** Business costs with no number (a bank download's, from_bank, and any other no-job cost in a
+   *  bucket): the same purchase by money and day. */
+  bankBills?: BookedBill[];
 };
 
 /**
@@ -566,16 +571,18 @@ export type Books = {
 export async function loadBooks(supabase: any, orgId: string | null | undefined): Promise<Books> {
   const empty: Books = { bills: [], papers: [], supplierInvoices: [], aliases: new Map() };
   if (!orgId) return empty;
-  const safe = async <T,>(p: PromiseLike<{ data: unknown; error: unknown }>): Promise<T[]> => {
+  // A THUNK, so a query that can't even be built (a client without a filter, a column not on this
+  // database) is an empty list too, never a thrown error in the File It path.
+  const safe = async <T,>(q: () => PromiseLike<{ data: unknown; error: unknown }>): Promise<T[]> => {
     try {
-      const { data, error } = await p;
-      return error ? [] : ((data ?? []) as T[]);
+      const { data, error } = await q();
+      return error || !Array.isArray(data) ? [] : (data as T[]);
     } catch {
       return [];
     }
   };
-  const [bills, papers, supplierInvoices, aliasRows, links] = await Promise.all([
-    safe<BookedBill>(
+  const [bills, papers, supplierInvoices, aliasRows, links, bankBills, plainCosts] = await Promise.all([
+    safe<BookedBill>(() =>
       supabase
         .from("bills")
         // BOTH NUMBER COLUMNS, and whether it was set aside (audit v994, DB1): a bill Record It As
@@ -593,7 +600,7 @@ export async function loadBooks(supabase: any, orgId: string | null | undefined)
         .order("created_at", { ascending: false })
         .limit(5000),
     ),
-    safe<BookedPaper>(
+    safe<BookedPaper>(() =>
       supabase
         .from("organized_items")
         .select("id, vendor, doc_number, status, bill_id, title")
@@ -601,20 +608,52 @@ export async function loadBooks(supabase: any, orgId: string | null | undefined)
         .not("doc_number", "is", null)
         .limit(5000),
     ),
-    safe<BookedSupplierInvoice>(
+    safe<BookedSupplierInvoice>(() =>
       supabase.from("supplier_invoices").select("id, invoice_number, supplier_account_id, total, invoice_date").eq("org_id", orgId).limit(5000),
     ),
-    safe<{ alias: string; supplier_account_id: string }>(
+    safe<{ alias: string; supplier_account_id: string }>(() =>
       supabase.from("supplier_aliases").select("alias, supplier_account_id").eq("org_id", orgId).limit(5000),
     ),
     // WHICH CED DOCUMENTS A BILL ALREADY COVERS (0273/0277). A document with a bill behind it is
     // that bill's purchase; one without is not a cost at all, and File It links the new bill to it.
-    safe<{ supplier_invoice_id: string; bill_id: string; bills?: { id?: string; job_id?: string | null; jobs?: { job_number?: string | null; name?: string | null } | null } | null }>(
+    safe<{ supplier_invoice_id: string; bill_id: string; bills?: { id?: string; job_id?: string | null; jobs?: { job_number?: string | null; name?: string | null } | null } | null }>(() =>
       supabase
         .from("bill_supplier_invoices")
         .select("supplier_invoice_id, bill_id, bills(id, job_id, jobs(job_number, name))")
         .eq("org_id", orgId)
         .limit(5000),
+    ),
+    // THE BUSINESS COSTS A BANK DOWNLOAD WROTE (0363): they carry no number, so a receipt for the
+    // same purchase is found by its money and day (sameMoneyFromBank). Newest first; a database
+    // before 0363 has no bank_line_id and this is simply empty.
+    safe<BookedBill>(() =>
+      supabase
+        .from("bills")
+        .select("id, supplier, bill_number, supplier_invoice_number, supplier_account_id, superseded_by_bill_id, amount, bill_date, job_id")
+        .eq("org_id", orgId)
+        .not("bank_line_id", "is", null)
+        .is("job_id", null)
+        .is("superseded_by_bill_id", null)
+        .order("bill_date", { ascending: false })
+        .limit(2000),
+    ),
+    // EVERY OTHER BUSINESS COST WITH NO NUMBER (review of release/v1026): the same shape written by
+    // Add Business Cost, or a company's fill-ups loaded by hand from a bank export before the bank
+    // door, carry no bank_line_id, so the read above never sees them and a pump receipt of the same
+    // money filed a second cost. No job, live, no number in either column, in a bucket (or the
+    // pre-0362 Gas & Truck). Never names bank_line_id, so it answers before 0363 too.
+    safe<BookedBill>(() =>
+      supabase
+        .from("bills")
+        .select("id, supplier, bill_number, supplier_invoice_number, supplier_account_id, superseded_by_bill_id, amount, bill_date, job_id")
+        .eq("org_id", orgId)
+        .is("job_id", null)
+        .is("superseded_by_bill_id", null)
+        .is("bill_number", null)
+        .is("supplier_invoice_number", null)
+        .in("category", [...BUSINESS_COST_BUCKETS, LEGACY_GAS_AND_TRUCK])
+        .order("bill_date", { ascending: false })
+        .limit(2000),
     ),
   ]);
   const cover = new Map<string, NonNullable<BookedSupplierInvoice["covered_by"]>>();
@@ -627,11 +666,17 @@ export async function loadBooks(supabase: any, orgId: string | null | undefined)
     papers,
     supplierInvoices: supplierInvoices.map((si) => ({ ...si, covered_by: cover.get(String(si.id)) ?? null })),
     aliases: indexSupplierAliases(aliasRows),
+    // One list, each bill once: the bank door's say so.
+    bankBills: [
+      ...bankBills.map((b) => ({ ...b, from_bank: true })),
+      ...plainCosts.filter((b) => !bankBills.some((x) => x.id === b.id)),
+    ],
   };
 }
 
 export function matchesOnBooks(item: PaperItem, books: Books): NumberMatch[] {
-  return findSameNumber(item, books, books.aliases);
+  const byNumber = findSameNumber(item, books, books.aliases);
+  return [...byNumber, ...sameMoneyFromBank(item, books.bankBills ?? [], byNumber)];
 }
 
 /**
@@ -656,6 +701,8 @@ export async function insertPaperRow(
     kind?: string;
     proposal?: PaperProposal | null;
     confidence?: string;
+    /** What the row is, in words My Day can say ("Bank Download"). */
+    category?: string | null;
   },
 ): Promise<{ id: string } | { duplicate: true } | { error: unknown }> {
   const full: Record<string, unknown> = {
@@ -673,6 +720,7 @@ export async function insertPaperRow(
     amount: row.amount ?? null,
     item_date: row.item_date ?? null,
     proposal: row.proposal ?? null,
+    ...(row.category ? { category: row.category } : {}),
   };
   const insert = (r: Record<string, unknown>) => supabase.from("organized_items").insert(r).select("id").single();
   let res = await insert(full);
@@ -771,7 +819,7 @@ export function standingRefusal(st: BillStanding, then: string, nothing: string,
   }
   if (opts.shelf !== false && st.stocked.length) {
     const n = st.stocked.length;
-    return `${n === 1 ? `A line of this receipt (${st.stocked[0]}) is` : `${n} lines of this receipt are`} on the shop shelf, and that can't go back onto the paper. On Bills, press Take It Off The Shelf on ${n === 1 ? "it" : "them"} first, then ${then}. ${nothing}`;
+    return `${n === 1 ? `A line of this receipt (${st.stocked[0]}) is` : `${n} lines of this receipt are`} in shop stock, and that can't go back onto the paper. On Bills, press Take It Out Of Stock on ${n === 1 ? "it" : "them"} first, then ${then}. ${nothing}`;
   }
   return null;
 }

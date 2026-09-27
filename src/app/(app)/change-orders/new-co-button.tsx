@@ -78,7 +78,7 @@ export function NewChangeOrderButton({ jobs }: { jobs: JobOption[] }) {
               name="description"
               rows={3}
               required
-              placeholder="e.g. Add 2 dedicated 20A circuits for new appliances, relocate panel 4 ft."
+              placeholder="What's changing from the original scope, in plain words."
             />
           </div>
           <div>

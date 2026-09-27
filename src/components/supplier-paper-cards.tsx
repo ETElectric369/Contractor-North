@@ -806,10 +806,10 @@ export function SupplierPaperCards({
       )}
       {shelf && (
         <ShelfTicketSheet
-          title={`Record ${shelf.card.invoiceNumber} To The Shelf`}
+          title={`Record ${shelf.card.invoiceNumber} To Stock`}
           lines={shelf.lines}
           total={shelf.total}
-          fileLabel="Record To Shelf"
+          fileLabel="Record To Stock"
           onClose={() => setShelf(null)}
           onFile={async (choices) => {
             const card = shelf.card;
@@ -821,7 +821,7 @@ export function SupplierPaperCards({
             if (!res.ok) return { ok: false, error: res.error };
             setShelf(null);
             // No Undo here: its rolls come off the shelf with Take It Off The Shelf, on /bills.
-            settle(card, res, `${card.invoiceNumber} is on the shop shelf now.`);
+            settle(card, res, `${card.invoiceNumber} is in shop stock now.`);
             return { ok: true };
           }}
         />

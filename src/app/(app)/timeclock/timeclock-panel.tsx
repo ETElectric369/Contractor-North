@@ -30,6 +30,8 @@ import { ClockStartPicker } from "./clock-start-picker";
 import { MAX_SHIFT_HOURS, isLongOpenShift, startedEarlierDay, stopProblem } from "@/lib/long-shift";
 import { NewJobInline, type CreatedJob } from "./new-job-inline";
 import { DailyReportDebrief } from "./daily-report-debrief";
+import { WhichJobSheet } from "../planner/which-job";
+import { askAfterPunch, type WhichJobAsk } from "./which-job-choices";
 
 interface JobOption {
   id: string;
@@ -151,6 +153,11 @@ export function TimeclockPanel({
   // Crew-lead debrief — opens AFTER a successful clock-out (the entry is closed, so this
   // state must live here, above the openEntry branch, to survive the panel's re-render).
   const [debriefOpen, setDebriefOpen] = useState(false);
+  // "Which Job Are You On?" — asked only after a punch the clock couldn't put on a job, once it is
+  // saved (askAfterPunch). Same reason as the debrief for living up here: the panel swaps branches
+  // under it. A crew lead's debrief waits for this sheet to close, so two sheets never stack.
+  const [ask, setAsk] = useState<WhichJobAsk | null>(null);
+  const [debriefAfterAsk, setDebriefAfterAsk] = useState(false);
 
   // clock-in form
   const [jobId, setJobId] = useState("");
@@ -239,6 +246,8 @@ export function TimeclockPanel({
         if (!res.ok) setError(res.error ?? "Could not clock in.");
         else {
           setShowTools(false); // fresh punch → the running view's disclosure starts closed
+          // The clock couldn't tell the job: the punch is saved, and now it asks (Skip is there).
+          setAsk(askAfterPunch(res, "in"));
           // GPS is optional, but don't pretend it was captured — if it's off/denied/slow, say the
           // punch isn't location-stamped (this used to fall through to gps:null silently). The note
           // now renders in the clocked-in view too, so the crew actually sees it post-punch.
@@ -393,8 +402,15 @@ export function TimeclockPanel({
           setShowTools(false);
           setSwitching(false);
           if (res.warning) toast(res.warning, "info", undefined, { sticky: true });
-          // Crew leads owe the office the end-of-day debrief — Nort asks right here.
-          if (crewLead) setDebriefOpen(true);
+          // Still on no job at the end of it: "Which Job Are You On?" once more, first.
+          const again = askAfterPunch(res, "out");
+          setAsk(again);
+          // Crew leads owe the office the end-of-day debrief — Nort asks right here (after the
+          // job question, when there is one).
+          if (crewLead) {
+            if (again) setDebriefAfterAsk(true);
+            else setDebriefOpen(true);
+          }
         }
       } catch {
         // Dead spot — the entry stays open and every field on this form is kept;
@@ -407,9 +423,26 @@ export function TimeclockPanel({
   // The Nort debrief lives OUTSIDE the openEntry branch: a successful clock-out
   // refreshes the page data and re-renders this panel into the not-clocked-in view,
   // and the modal must survive that swap.
-  const debrief = crewLead ? (
-    <DailyReportDebrief open={debriefOpen} onClose={() => setDebriefOpen(false)} />
-  ) : null;
+  // The job question rides the same slot, for the same reason.
+  const debrief = (
+    <>
+      {ask && (
+        <WhichJobSheet
+          key={ask.entryId + ask.moment}
+          entryId={ask.entryId}
+          moment={ask.moment}
+          onClose={() => {
+            setAsk(null);
+            if (debriefAfterAsk) {
+              setDebriefAfterAsk(false);
+              setDebriefOpen(true);
+            }
+          }}
+        />
+      )}
+      {crewLead ? <DailyReportDebrief open={debriefOpen} onClose={() => setDebriefOpen(false)} /> : null}
+    </>
+  );
 
   // WHERE THE LUNCH GOES, SAID. After a Switch Job the day is two entries, and a lunch taken before
   // the switch belongs on the part before it. The box names the part it lands on, with the other
@@ -541,15 +574,20 @@ export function TimeclockPanel({
 
           {/* A job-less punch is a real, intended outcome (the server resolves today's crew
               day-assignment → a job scheduled today → the org's only in-progress job → none),
-              but "No job selected" reads like a mistake with nowhere to go. Say who fixes it.
-              Switch Job is the right door now: on a job-less punch it moves the WHOLE shift onto
-              the job (0288 switch_job re-points rather than cutting), which is what somebody
-              reading this line wants. */}
+              but "No job selected" reads like a mistake with nowhere to go. A skipped "Which Job
+              Are You On?" can still be answered here: the same sheet, one tap away, and the WHOLE
+              punch goes on the job picked (for every role; staff also keep Switch Job under More
+              Options). Not answering is fine too: the office picks. */}
           {!openEntry.job_id && !openEntry.job_code && (
-            <p className="text-center text-xs text-slate-500">
-              {isStaff
-                ? "No job on this punch yet. Switch Job under More Options puts the whole shift on one."
-                : "No job on this punch yet — the office puts it on the right job."}
+            <p className="flex flex-wrap items-center justify-center gap-x-1 text-center text-xs text-slate-500">
+              <span>No job on this punch yet.</span>
+              <button
+                type="button"
+                onClick={() => setAsk({ entryId: openEntry.id, moment: "in" })}
+                className="inline-flex min-h-[44px] items-center px-1 font-medium text-brand hover:underline"
+              >
+                Pick The Job
+              </button>
             </p>
           )}
 
@@ -906,11 +944,12 @@ export function TimeclockPanel({
         {/* NO DEAD END ON A JOB-LESS PUNCH. A tech gets no job picker here and can't be given
             one (createJob is staff-only), so the screen has to SAY where the punch lands instead
             of leaving "which job?" as an unanswerable question: the server resolves today's crew
-            day-assignment → a job scheduled today → the org's only in-progress job → none. */}
+            day-assignment → a job scheduled today → the org's only in-progress job → none, and on
+            none the punch is saved and "Which Job Are You On?" asks, with a Skip. */}
         {!isStaff && (
           <p className="text-center text-xs text-slate-500">
-            Your job comes from today&apos;s crew assignment. Nothing assigned? Clock in anyway — the
-            office puts it on the right job.
+            Your job comes from today&apos;s crew assignment. Nothing assigned? Clock in anyway — you&apos;ll
+            be asked which job, or skip and the office picks it.
           </p>
         )}
         <p className="flex items-center justify-center gap-1.5 text-xs text-slate-400">

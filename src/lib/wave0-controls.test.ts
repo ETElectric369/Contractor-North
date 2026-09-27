@@ -63,7 +63,9 @@ describe("44px targets on the controls Wave 0 re-wrapped", () => {
 
   it("Record As Cost is a 44px target", () => {
     const s = src("src/app/(app)/jobs/[id]/job-documents.tsx");
-    const at = s.indexOf("Record As Cost");
+    // The button's own label (its text right before </button>), never a comment that names it.
+    const at = s.search(/Record As Cost\s*<\/button>/);
+    expect(at).toBeGreaterThan(-1);
     expect(s.slice(s.lastIndexOf("<button", at), at)).toContain("min-h-11");
   });
 });

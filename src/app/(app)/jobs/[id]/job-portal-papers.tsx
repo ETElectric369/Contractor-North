@@ -348,7 +348,7 @@ export function PapersCard({
       <h4 className="mt-4 text-xs font-semibold uppercase tracking-wide text-slate-500">This Job&apos;s Papers</h4>
       {notUpPapers.length === 0 && !showPhotos ? (
         <p className="mt-1 text-sm text-slate-500">
-          Nothing else to show. Add a plan, a circuit map or a drawing with Add Plans Or Drawings above, and it appears here.
+          Nothing else to show. Add a plan, a permit or a drawing with Add Plans Or Drawings above, and it appears here.
         </p>
       ) : null}
       <ul className="mt-1 space-y-2">
@@ -573,7 +573,7 @@ export function PaperSheet({
         </div>
         <div>
           <Label htmlFor="paper-title">Title {who} Reads</Label>
-          <Input id="paper-title" value={title} maxLength={120} onChange={(e) => setTitle(e.target.value)} placeholder="Circuit Map" />
+          <Input id="paper-title" value={title} maxLength={120} onChange={(e) => setTitle(e.target.value)} placeholder="What they'd call it (the plan, the permit)" />
         </div>
         <div>
           <Label htmlFor="paper-kind">What It Is</Label>

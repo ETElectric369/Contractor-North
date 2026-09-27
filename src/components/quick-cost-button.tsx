@@ -20,7 +20,7 @@ import { jobLabel } from "@/lib/schedule-options";
 import { useToast } from "@/components/toast";
 import { BUSINESS_COST_BUCKETS } from "@/lib/business-cost-buckets";
 
-// What a cost ON A JOB is. A cost with no job is a business cost and picks from the six buckets
+// What a cost ON A JOB is. A cost with no job is a business cost and picks from the business-cost buckets
 // instead (lib/business-cost-buckets), the same list every other no-job door uses.
 const CATEGORIES = ["Materials", "Fuel", "Shop supplies", "Tools", "Subcontractor", "Permit", "Equipment rental", "Office", "Other"];
 // A PRE-prep sanity ceiling on the raw pick, not the reader's cap: the reader's 8 MB applies to
@@ -51,7 +51,7 @@ const DEFAULT_TRIGGER =
 /**
  * THE one "add a cost" everywhere — supplier + amount + category + an optional
  * receipt photo (the camera on mobile), scoped to a job or to the business (a business cost,
- * in one of the six buckets). Wraps
+ * in one of the business-cost buckets). Wraps
  * createBill (a cost = a bill) plus THE receipt pipeline (lib/receipt-capture) for the photo, so every surface
  * logs a cost the same way.
  *
@@ -153,7 +153,7 @@ export function QuickCostButton({
   // SAME NUMBER, NOTHING WRITTEN (review of audit v994's fix). The reader found a bill already
   // carrying this paper's printed number and wrote nothing. The paper is filed on the job (this
   // id); the sheet stays open and offers Different Purchase: Record It Anyway right here, since
-  // the button under Receipts & Documents only appears after another paid read.
+  // the button under Receipts & Papers only appears after another paid read.
   const [sameAsDoc, setSameAsDoc] = useState<string | null>(null);
   // Self-loaded context when not passed in (global + menu use).
   const [autoOrg, setAutoOrg] = useState("");
@@ -226,7 +226,7 @@ export function QuickCostButton({
     const input = captureRef.current;
     if (!input) {
       if (fileRef.current) return fileRef.current.click();
-      return setError("Couldn't open the camera or your photos on this device. Add the receipt later from the job's Receipts & Documents.");
+      return setError("Couldn't open the camera or your photos on this device. Add the receipt later from the job's Receipts & Papers.");
     }
     clearSnapWatch();
     try {
@@ -263,7 +263,7 @@ export function QuickCostButton({
   function pickFromLibrary() {
     setCameraHint(null);
     if (fileRef.current) return fileRef.current.click();
-    setError("Couldn't open your photos on this device. Add the receipt later from the job's Receipts & Documents.");
+    setError("Couldn't open your photos on this device. Add the receipt later from the job's Receipts & Papers.");
   }
 
   // THE RELOAD THAT EATS THE SHEET. In the iOS shell the camera can push the web view out of
@@ -339,7 +339,7 @@ export function QuickCostButton({
   const attachFailure = useRef<string | null>(null);
 
   /** Upload the receipt + file it on the job — THE receipt pipeline (lib/receipt-capture: prep,
-   *  path, storage, documents row), the same one the Costs tab and Receipts & Documents run. This
+   *  path, storage, documents row), the same one the Costs tab and Receipts & Papers run. This
    *  door used to upload the raw file, so an iPhone HEIC reached the reader as a name it refuses
    *  and a 12 MB shot tripped its 8 MB cap — two of the reasons the receipt-only save kept
    *  landing on the $0 placeholder. Returns the new document id (what the reader and the bill
@@ -443,7 +443,7 @@ export function QuickCostButton({
       if (!receipt || !targetJob) return finishOk();
       start(async () => {
         const docId = await attachReceipt(targetJob);
-        if (!docId) return setWarn(`Still couldn't attach it — the receipt ${attachClause()}. You can add it later from the job's Receipts & Documents.`);
+        if (!docId) return setWarn(`Still couldn't attach it — the receipt ${attachClause()}. You can add it later from the job's Receipts & Papers.`);
         // Link it to the cost we already saved, so this file can never be read as a NEW cost.
         if (savedBillId) await linkReceiptToBill(savedBillId, docId);
         finishOk();
@@ -506,7 +506,7 @@ export function QuickCostButton({
       setCostSaved(true);
       setSavedBillId(res.id ?? null);
       if (receipt && targetJob && !docId) {
-        setWarn(`Cost saved ✓ — but the receipt ${attachClause()}. Tap Retry Receipt, or close and add it from the job's Receipts & Documents.`);
+        setWarn(`Cost saved ✓ — but the receipt ${attachClause()}. Tap Retry Receipt, or close and add it from the job's Receipts & Papers.`);
         return;
       }
       finishOk();

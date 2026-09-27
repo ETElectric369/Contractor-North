@@ -38,7 +38,11 @@ import { ticketShelfProblem, type ShelfPick, type TicketLineChoice } from "@/lib
 import { shelveLines } from "@/lib/stock-ledger";
 import { formatCurrency } from "@/lib/utils";
 import { jobInOrg } from "@/lib/job-in-org";
+import { withArticle } from "@/lib/org-trade";
 import { undoOpenListCore } from "@/app/(app)/bills/open-list-core";
+import { proposalAfterUndo, undoBankCore } from "@/app/(app)/bills/bank-core";
+import { OWNER_SORTS_BANK, viewerSortsBank } from "@/lib/bank-viewer";
+import { applyingNow } from "@/lib/bank-download";
 // TWO PROMPTS ITEMISE A RECEIPT and they must offer the model the SAME categories: the paper
 // reader (paperwork-core, any upload) and the job-receipt reader (a receipt already filed to a
 // job). One exported string, interpolated into both, is the only version of "identical" that
@@ -492,7 +496,7 @@ export async function billJobReceipt(
     const msg = await client.messages.create({
       model: DEFAULT_MODEL,
       max_tokens: 4096,
-      system: `You read a purchase receipt for a ${trade} and itemize it as a job cost.
+      system: `You read a purchase receipt for ${withArticle(trade)} and itemize it as a job cost.
 
 Respond with ONLY a JSON object (no prose):
 {
@@ -711,7 +715,7 @@ function billClaimRefusal(err: unknown, tail: string): string | null {
 // NO PETTY CASH DESTINATION (2026-09-24). Filing a receipt to petty cash wrote an expense with no
 // job and replaced the receipt's category with "Receipt", so a job purchase quietly became a
 // business cost: that is how CED 8802-1101094, $379.35 of parts for the Rhodesia job, ended up in
-// the cash box. A receipt now goes to a job or to one of the six business-cost buckets. An item
+// the cash box. A receipt now goes to a job or to one of the business-cost buckets. An item
 // filed to petty cash before this still has its petty_cash_id, and re-filing it tears that row
 // down below exactly as before.
 export type FileDestination =
@@ -889,7 +893,7 @@ export async function fileItem(id: string, dest: FileDestination, opts: FileOpti
   const supabase = ctx.supabase;
   // Checked BEFORE anything is torn down, so a bad bucket costs nothing.
   if (dest.type === "overhead" && !isBusinessCostBucket(dest.category))
-    return { ok: false, error: "Pick one of the six business cost buckets. Nothing was moved." };
+    return { ok: false, error: "Pick one of the business cost buckets. Nothing was moved." };
   // THE JOB IS OURS, asked before anything is claimed or torn down (audit v994 TL2). The job id
   // arrives from the browser; a crafted call naming another company's job would write a bill and a
   // document pointing at a job this company can't see (0340 refuses it in the database too).
@@ -937,7 +941,10 @@ export async function fileItem(id: string, dest: FileDestination, opts: FileOpti
   // refusal: the row showed it with Same Purchase: Tie Them, a person pressed File It anyway, and
   // the bill says so, so two bills with one number are known to have been decided, not missed.
   let maybeSaid = "";
-  if (dest.type !== "unfiled" && dest.type !== "photo" && isCost && item.doc_number && !opts.differentPurchase) {
+  // A receipt with no number is still asked the first time it is filed: a bank download may have
+  // written its purchase already (matchesOnBooks finds that bill by money and day). Moving a paper
+  // that already made its own bill never is: a download after it matched that bill instead.
+  if (dest.type !== "unfiled" && dest.type !== "photo" && isCost && (item.doc_number || !item.bill_id) && !opts.differentPurchase) {
     const books = await loadBooks(supabase, ctx.orgId);
     const found = matchesOnBooks(item, books);
     const onBooks = found.filter((m) => m.kind === "bill");
@@ -1163,13 +1170,13 @@ export async function fileItem(id: string, dest: FileDestination, opts: FileOpti
       .eq("bill_id", billId)
       .order("sort_order");
     if (writtenErr || (written ?? []).length !== rows.length)
-      return backToTray("The ticket's lines didn't all save, so nothing went on the shelf and the paper is back in the tray. Try again.");
+      return backToTray("The ticket's lines didn't all save, so nothing went into stock and the paper is back in the tray. Try again.");
     const idAt = new Map(((written ?? []) as { id: string; sort_order: number }[]).map((w) => [Number(w.sort_order), String(w.id)]));
     const picks: ShelfPick[] = [];
     for (const c of dest.lines) {
       if (c.notStock) continue;
       const lineId = idAt.get(Number(c.index));
-      if (!lineId) return backToTray("A line on this ticket didn't save, so nothing went on the shelf. Try again.");
+      if (!lineId) return backToTray("A line on this ticket didn't save, so nothing went into stock. Try again.");
       picks.push({
         lineId,
         pieces: Number(c.pieces),
@@ -1185,8 +1192,8 @@ export async function fileItem(id: string, dest: FileDestination, opts: FileOpti
     if (!shelved.ok) return backToTray(`${shelved.error} Nothing was filed; the paper is back in the tray.`);
     const notStock = dest.lines.filter((c) => c.notStock).length;
     shelfSaid =
-      ` ${shelved.lots.map((l) => `${l.pieces} ${l.unit} (${formatCurrency(l.cost)})`).join(", ")} on the shelf.` +
-      (notStock ? ` ${notStock === 1 ? "1 line" : `${notStock} lines`} marked Not Stock stay on the ticket as Tools & Supplies, never on the shelf.` : "");
+      ` ${shelved.lots.map((l) => `${l.pieces} ${l.unit} (${formatCurrency(l.cost)})`).join(", ")} in stock.` +
+      (notStock ? ` ${notStock === 1 ? "1 line" : `${notStock} lines`} marked Not Stock stay on the ticket as Tools & Supplies, never in stock.` : "");
   }
 
   // THE CED DOCUMENT THIS PAPER IS (see linkTo above). 0277 lets one bill cover an invoice, once:
@@ -1243,7 +1250,7 @@ export async function fileItem(id: string, dest: FileDestination, opts: FileOpti
   if (prevJob) revalidatePath(`/jobs/${prevJob}`);
   revalidatePath("/inventory");
   const linkedSaid = linkTo.length && !linkNote ? ` Linked to supplier document ${linkTo.map((l) => l.number).join(", ")}.` : "";
-  if (shelfSaid) return { ok: true, message: `Filed on the shop shelf.${shelfSaid}${linkedSaid}${linkNote}` };
+  if (shelfSaid) return { ok: true, message: `Filed in shop stock.${shelfSaid}${linkedSaid}${linkNote}` };
   return linkedSaid || linkNote ? { ok: true, message: `Filed.${linkedSaid}${linkNote}` } : { ok: true };
 }
 
@@ -1274,6 +1281,33 @@ export async function undoPaperwork(id: string): Promise<Result & { message?: st
   const { data: item } = await supabase.from("organized_items").select("*").eq("id", id).eq("org_id", ctx.orgId).maybeSingle();
   if (!item) return { ok: false, error: "That paper isn't here any more." };
   const p = proposalOf(item);
+  // A BANK DOWNLOAD (2026-09-27): everything it wrote comes off (only what nobody changed since),
+  // and it waits in the tray again with every line. Applied in passes, it may already be waiting.
+  // One set aside with Not Now just comes back (the ordinary path below): its lines stay counted.
+  if (p.bankImport && (p.filed?.how === "bank_download" || (item.status === "needs_review" && (p.bankImport.applied?.length ?? 0) > 0))) {
+    if (!ctx.orgId) return { ok: false, error: "Your sign-in isn't attached to a company yet." };
+    if (!(await viewerSortsBank(supabase, ctx.userId))) return { ok: false, error: OWNER_SORTS_BANK };
+    if (applyingNow(p.bankImport)) return { ok: false, error: "This download is being applied right now. Wait a moment, then Undo." };
+    const down = await undoBankCore(supabase, ctx.orgId, ctx.userId, id);
+    if (!down.ok) return { ok: false, error: down.error };
+    const { data: back, error: backErr } = await supabase
+      .from("organized_items")
+      .update({ status: "needs_review", proposal: proposalAfterUndo(p) })
+      .eq("id", id)
+      .eq("org_id", ctx.orgId)
+      .select("id");
+    revalidatePath("/organize");
+    revalidatePath("/bills");
+    revalidatePath("/planner");
+    revalidatePath("/analytics");
+    if (backErr || !back?.length) return { ok: true, message: `Undone: ${down.undone} bank lines came off, but the download didn't go back to the tray. Refresh the page.` };
+    return {
+      ok: true,
+      message:
+        `Undone: ${down.undone} bank ${down.undone === 1 ? "line" : "lines"} came off, and the download waits again.` +
+        (down.left.length ? ` Left as they are now: ${down.left.join("; ")}.` : ""),
+    };
+  }
   const tied = !!(item.tied_bill_id || item.tied_supplier_invoice_id);
   if (item.status === "needs_review" && !item.bill_id && !item.document_id && !item.petty_cash_id && !tied)
     return { ok: false, error: "Nothing to undo: this paper is still waiting to be filed." };
@@ -1472,6 +1506,14 @@ export async function deleteOrganizedItem(id: string): Promise<Result & { messag
     if (!down.ok) return { ok: false, error: `${down.error} Nothing was deleted.` };
     listPutBack = down.left;
   }
+  // A BANK DOWNLOAD THAT WAS APPLIED: the same Undo first, because its lines are found by this row.
+  if (p.bankImport && (p.filed?.how === "bank_download" || (p.bankImport.applied?.length ?? 0) > 0) && ctx.orgId) {
+    if (!(await viewerSortsBank(supabase, ctx.userId))) return { ok: false, error: OWNER_SORTS_BANK };
+    if (applyingNow(p.bankImport)) return { ok: false, error: "This download is being applied right now. Wait a moment, then delete it." };
+    const down = await undoBankCore(supabase, ctx.orgId, ctx.userId, id);
+    if (!down.ok) return { ok: false, error: `${down.error} Nothing was deleted.` };
+    listPutBack = down.left;
+  }
 
   // SAME CEILING, SAME ORDER (0278). A receipt a live invoice is already billing cannot be thrown
   // away, so the bill goes first and a refusal costs nothing: the photo, the copy on the job and
@@ -1511,7 +1553,7 @@ export async function deleteOrganizedItem(id: string): Promise<Result & { messag
     papersBackSaid(torn.papersBack) +
     landedKeptSaid(landedLeft) +
     (listPutBack
-      ? ` Every paper the list changed is back as it was.${listPutBack.length ? ` Left as they are now: ${listPutBack.join(", ")}.` : ""}`
+      ? ` ${p.bankImport ? "Everything the download wrote came off." : "Every paper the list changed is back as it was."}${listPutBack.length ? ` Left as they are now: ${listPutBack.join(", ")}.` : ""}`
       : "");
   return said ? { ok: true, message: `Deleted.${said}` } : { ok: true };
 }
@@ -1734,7 +1776,7 @@ export async function aiReviewItem(id: string): Promise<{ ok: boolean; message: 
       // behind it — not the receipt-reading that becomes billable money.
       model: modelFor("routine"),
       max_tokens: 500,
-      system: `You triage one piece of paperwork for a ${trade} and decide the single best action. Output ONLY a JSON object:
+      system: `You triage one piece of paperwork for ${withArticle(trade)} and decide the single best action. Output ONLY a JSON object:
 {
   "action": "file_job" | "overhead" | "task" | "keep_note" | "unsure",
   "job_id": an id from the list below, or null,
@@ -1743,7 +1785,7 @@ export async function aiReviewItem(id: string): Promise<{ ok: boolean; message: 
   "task_category": "office" | "operations" | "sales",
   "reason": one short sentence
 }
-Rules: "file_job" when anything on the paper points to one job in the list: its PO or job box (contractors write the job's name or street there, e.g. "13897 HERRINGBONE" is the job at 13897 Herringbone Way), a job name, a street (a street written without "Way", "Rd" and so on is still that street), a job number, or a customer. "overhead" only for a company-expense receipt with an amount; a supplier's finance charge, service charge, late fee or interest is "unsure", never "overhead". "task" when a note describes something to DO (call, order, schedule, follow up). "keep_note" for reference info. "unsure" if you genuinely can't tell.
+Rules: "file_job" when anything on the paper points to one job in the list: its PO or job box (contractors write the job's name or street there, e.g. "<number> <STREET NAME>" is the job at that street address), a job name, a street (a street written without "Way", "Rd" and so on is still that street), a job number, or a customer. "overhead" only for a company-expense receipt with an amount; a supplier's finance charge, service charge, late fee or interest is "unsure", never "overhead". "task" when a note describes something to DO (call, order, schedule, follow up). "keep_note" for reference info. "unsure" if you genuinely can't tell.
 ${selfNames.length ? `These names are the company itself and its people, printed as who the paper was sold to; they are never the customer or the job: ${selfNames.join(", ")}.\n` : ""}
 Open jobs (id — number name; address; customer):
 ${jobLines.join("\n") || "(none)"}`,
@@ -1800,7 +1842,7 @@ ${jobLines.join("\n") || "(none)"}`,
       return { ok: true, message: `A guess: ${label}. Tap it on the row to pick it, then press File It if that's right. ${reason}`.trim() };
     }
     if (action === "overhead") {
-      // The bucket is one of the six, and Fees is never the AI's suggestion, because a supplier's
+      // The bucket is one of the list, and Fees is never the AI's suggestion, because a supplier's
       // late or service charge is already on that supplier's own paperwork.
       const cat = bucketOf(parsed.overhead_category);
       // Only a bill or a receipt can be a business cost, and only its row has a bucket to tap.

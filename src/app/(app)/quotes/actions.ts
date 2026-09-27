@@ -32,6 +32,7 @@ import { recordAiUsage, aiSpendExceeded, currentOrgId } from "@/lib/ai-cost";
 import { rateLimited } from "@/lib/rate-limit";
 import type Anthropic from "@anthropic-ai/sdk";
 import { getOrgSettings, accentHex, orgDocUrl } from "@/lib/org-settings";
+import { tradeWordsOr, withArticle } from "@/lib/org-trade";
 import { rowPlace } from "@/lib/doc-place";
 import { companyFromOrg } from "@/components/doc-letterhead";
 import { mapEstimatorLine, type DraftLineItem, type BookRow, type LadderPrice } from "@/lib/estimate/line-map";
@@ -1418,14 +1419,14 @@ async function runEstimator(
   // a research shop (web-priced + trade calcs); the chat route has branched on it since
   // cn-v80. runEstimator never did.
   const catalogMode = orgS.estimating_mode === "catalog";
-  const trade = orgS.trade_label?.trim() || "contractor";
+  const trade = tradeWordsOr(orgS);
 
   const client = getAnthropic();
   const system: Anthropic.MessageCreateParams["system"] = [
       {
         type: "text" as const,
         text:
-          `You are an estimator for a ${trade}. Draft quote line items for the scope, pricing materials from the contractor's OWN PRICE BOOK (their real net cost) — never invent market prices. ` +
+          `You are an estimator for ${withArticle(trade)}. Draft quote line items for the scope, pricing materials from the contractor's OWN PRICE BOOK (their real net cost) — never invent market prices. ` +
           `LABOR: ${stated ? `$${stated}/hr — HE STATED THIS RATE IN THE SCOPE, use it` : rate > 0 ? `$${rate}/hr` : "a realistic US rate for this trade"}; estimate crew-hours realistically (one or more labor lines). ` +
           "MATERIALS: pick items from the PRICE BOOK below where they fit — return the EXACT catalog code and the book cost. " +
           // THE WIRE NUTS. Erik: "get rid of the wire nuts, that small stuff gets worked into the

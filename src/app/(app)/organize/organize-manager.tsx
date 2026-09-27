@@ -340,6 +340,10 @@ export function OrganizeManager({
   }
 
   function restore(item: OrganizedItemRow) {
+    // A BANK DOWNLOAD's Back is its whole Undo: everything it wrote comes off. Asked first, as the
+    // card's own Undo This Download is.
+    const filedHow = proposalOf(item).filed?.how;
+    if (filedHow === "bank_download" && !confirm("Undo this whole bank download? Everything it wrote comes off, and every line waits in Sort These again.")) return;
     start(async () => {
       const res = await unarchiveItem(item.id);
       if (!res?.ok) { toast(res?.error ?? "Couldn't restore — try again.", "error"); return; }
@@ -372,7 +376,7 @@ export function OrganizeManager({
   function filedBadge(item: OrganizedItemRow) {
     if (item.status === "archived") return <Badge tone="slate">Archived</Badge>;
     if (item.job_id && item.jobs) return <Badge tone="blue">{jobLabel(item.jobs)}</Badge>;
-    // A bill with no job is a business cost. bucketOf reads an old word ("Fuel") as its bucket, so
+    // A bill with no job is a business cost. bucketOf reads an old word ("Vehicle") as its bucket, so
     // the archive and the Bills page name the same cost the same way.
     // A shelf ticket is never a business cost (Shop Stock, Phase 2): its bucket would read "Other".
     if (item.bill_id && !item.job_id && isShelfTicket({ category: item.category })) return <Badge tone="indigo">Shop Stock</Badge>;
@@ -561,9 +565,11 @@ export function OrganizeManager({
           <button onClick={() => restore(item)} disabled={pending} className="flex h-11 w-11 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-700" title={
               item.source === "job"
                 ? "Undo Record As Cost (The Receipt Stays On The Job)"
-                : item.bill_id || item.job_id || item.tied_bill_id
-                  ? "Undo Filing (Back To Needs Attention)"
-                  : "Back To Needs Attention"
+                : proposalOf(item).filed?.how === "bank_download"
+                  ? "Undo This Download (Everything It Wrote Comes Off)"
+                  : item.bill_id || item.job_id || item.tied_bill_id
+                    ? "Undo Filing (Back To Needs Attention)"
+                    : "Back To Needs Attention"
             } aria-label={item.source === "job" ? "Undo Record As Cost" : "Back To Needs Attention"}>
             <RotateCcw className="h-4 w-4" />
           </button>
@@ -734,7 +740,8 @@ export function OrganizeManager({
           {
             id: "archive",
             label: "Archive",
-            count: archived.length,
+            // No badge: what's been filed is done (Erik, 2026-09-27: "all badges only show whats
+            // open"). Needs Attention's count is the open one.
             icon: <Archive className="h-4 w-4" />,
             content:
               archived.length === 0 ? (

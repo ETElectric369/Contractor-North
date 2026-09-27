@@ -12,8 +12,9 @@
  *
  * The sheet asks "Which line already charged for this?", lists only the lines that can hold it
  * (lib/already-billed: sent bills, lines typed or changed by hand, never a credit or a lump), beside
- * what the cost was, and presses Mark Billed On INV-x. For hours it lists the open shifts and ticks
- * only the line's own person's, up to the day the bill was written. For a receipt that cost more than
+ * what the cost was, and presses Mark Billed On INV-x. For hours it lists the open shifts (for a line
+ * that names one person, only that person's: 0361 holds a line to its person's hours) and ticks only
+ * the line's own person's, up to the day the bill was written. For a receipt that cost more than
  * the line (Purple Sage: $110 against $186.93) with Shop Stock on, it first asks "Did J-010 Use All Of
  * It?": No opens the receipt's own card so the rest goes on the shelf, then comes back to Mark.
  *
@@ -28,10 +29,12 @@ import { useToast } from "@/components/toast";
 import { formatCurrency, formatDateShort } from "@/lib/utils";
 import {
   askUsedAll,
+  entriesForLine,
   hoursCompareWords,
   hoursOf,
   lineHours,
   lineLabel,
+  linePersonNote,
   precheckHours,
   tickTogether,
   type AbEntry,
@@ -68,10 +71,12 @@ export function precheckWhy(
   chosen: { invoice: { invoice_number: string | null; created_at: string }; line: AbLine },
 ): string {
   const held = Math.max(0, Number(chosen.line.heldHours) || 0);
-  // Hours on no job: only what the door was pressed on is ticked; the line names no one to match.
+  // Hours on no job: only what the door was pressed on is ticked, and only when it is listed for this
+  // line (a line that names one person lists only that person's shifts, 0361).
   if (data.noJob) {
     const already = held > 0 ? ` The line already holds ${held} h of shifts.` : "";
-    return (data.preticked ?? []).length
+    const listed = new Set(entriesForLine(data.entries, chosen.line).map((e) => e.id));
+    return (data.preticked ?? []).some((id) => listed.has(id))
       ? `Ticked to start: the shift you pressed Already Billed on. Tick any others this line charged for.${already}`
       : `Nothing is ticked to start. Tick the hours this line charged for.${already}`;
   }
@@ -267,8 +272,11 @@ export function AlreadyBilledSheet({
   const num = chosen?.invoice.invoice_number ?? "The Bill";
   const markLabel = `Mark Billed On ${num}`;
   const isTime = data?.target.kind === "time";
-  const ids = isTime ? [...checked] : (data?.target.ids ?? []);
-  const what = !data ? target.what : isTime ? hoursWhat(data.entries, checked) : data.target.words || target.what;
+  // WHOSE HOURS (0361): a line that names one person is offered only that person's shifts, and only
+  // those that are listed are ever marked (a tick left on another person's shift is not sent).
+  const shown = data && isTime ? entriesForLine(data.entries, chosen?.line) : [];
+  const ids = isTime ? shown.filter((e) => checked.has(e.id)).map((e) => e.id) : (data?.target.ids ?? []);
+  const what = !data ? target.what : isTime ? hoursWhat(shown, ids) : data.target.words || target.what;
 
   function readReceipt(billId: string) {
     setReceipt({ state: "loading" });
@@ -394,10 +402,17 @@ export function AlreadyBilledSheet({
             {isTime && chosen && (
               <div className="space-y-1">
                 <p className="font-medium text-slate-900">Which hours did it charge for?</p>
-                {data.entries.length === 0 ? (
-                  <p className="text-slate-500">{data.noJob ? "No hours on no job are open to mark." : `No hours on ${data.jobNumber} are open to mark.`}</p>
+                {linePersonNote(chosen.line) && <p className="text-xs text-slate-500">{linePersonNote(chosen.line)}</p>}
+                {shown.length === 0 ? (
+                  <p className="text-slate-500">
+                    {data.entries.length > 0 && chosen.line.person
+                      ? `None of ${String(chosen.line.personName ?? "").trim() || "that person"}'s hours ${data.noJob ? "on no job" : `on ${data.jobNumber}`} are open to mark.`
+                      : data.noJob
+                        ? "No hours on no job are open to mark."
+                        : `No hours on ${data.jobNumber} are open to mark.`}
+                  </p>
                 ) : (
-                  data.entries.map((e) => (
+                  shown.map((e) => (
                     <label key={e.id} className="flex min-h-11 cursor-pointer items-center gap-3 rounded-lg border border-slate-200 px-3 py-2">
                       <input
                         type="checkbox"
@@ -406,7 +421,7 @@ export function AlreadyBilledSheet({
                         // A split shift is ticked whole: its other pieces follow this one.
                         onChange={(ev) => {
                           const on = ev.target.checked;
-                          setChecked((s) => tickTogether(data.entries, s, e.id, on));
+                          setChecked((s) => tickTogether(shown, s, e.id, on));
                         }}
                       />
                       <span className="min-w-0 flex-1">
@@ -415,7 +430,7 @@ export function AlreadyBilledSheet({
                     </label>
                   ))
                 )}
-                <p className="text-slate-600">{hoursCompareWords(chosen.line, hoursOf(data.entries, checked))}</p>
+                <p className="text-slate-600">{hoursCompareWords(chosen.line, hoursOf(shown, ids))}</p>
                 <p className="text-xs text-slate-500">{precheckWhy(data, chosen)}</p>
               </div>
             )}
@@ -428,7 +443,7 @@ export function AlreadyBilledSheet({
             <p className="text-base font-semibold text-slate-900">Did {data.jobNumber} Use All Of It?</p>
             <p className="text-slate-600">
               {chosen.line.description.trim() || "The line"} on {num} is {formatCurrency(chosen.line.line_total)}, and this bill cost{" "}
-              {formatCurrency(data.target.cost ?? 0)}. If some of it went on the shop shelf, put it there first: once {num} holds the bill, its
+              {formatCurrency(data.target.cost ?? 0)}. If some of it went into shop stock, put it there first: once {num} holds the bill, its
               lines lock.
             </p>
             <div className="flex flex-wrap gap-2">
@@ -452,7 +467,7 @@ export function AlreadyBilledSheet({
                   if (data.target.billId) readReceipt(data.target.billId);
                 }}
               >
-                No, Some Went On The Shelf
+                No, Some Went Into Stock
               </Button>
               <Button type="button" variant="ghost" onClick={() => setStep("pick")}>
                 Back
@@ -463,7 +478,7 @@ export function AlreadyBilledSheet({
 
         {data && step === "shelf" && (
           <div className="space-y-2">
-            <p className="text-slate-600">Put what {data.jobNumber} didn&apos;t use on the shelf, then press {markLabel}.</p>
+            <p className="text-slate-600">Put what {data.jobNumber} didn&apos;t use in stock, then press {markLabel}.</p>
             {receipt.state === "loading" && <p className="text-slate-500">Opening the receipt…</p>}
             {receipt.state === "error" && (
               <div className="rounded-lg border border-red-200 bg-red-50 p-3" role="alert">

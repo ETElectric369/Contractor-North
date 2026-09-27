@@ -8,6 +8,7 @@ import { CommandBar } from "@/components/command-bar";
 import { billingEnabled } from "@/lib/stripe";
 import { hasActiveAccess, isCompedOrg, graceDaysLeft } from "@/lib/subscription";
 import { getOrgSettings } from "@/lib/org-settings";
+import { orgTrade } from "@/lib/org-trade";
 import { getActionItemsCount } from "@/lib/action-items/query";
 import { reportError } from "@/lib/observe";
 import { todayStrInTz } from "@/lib/tz";
@@ -174,9 +175,11 @@ export default async function AppLayout({
   const branding = { name: org?.name ?? null, logo: org?.logo_url ?? null };
   // WHAT THE COMPANY STILL HASN'T SAID ABOUT ITSELF, in the setup playbook's own keys — read off
   // the settings this layout already loaded, so the always-there interview door costs no query.
+  // The trade comes through the ONE reader (lib/org-trade): the words, else the sign-up key's own
+  // words, so a company that picked its trade at sign-up is never asked it again.
   const setup = {
     full_name: profile.full_name ?? null,
-    trade: settings.trade_label || null,
+    trade: orgTrade(settings).label || null,
     city: settings.public_city || null,
     service_area: settings.service_area || null,
     labor_rate: settings.default_labor_rate > 0 ? settings.default_labor_rate : null,

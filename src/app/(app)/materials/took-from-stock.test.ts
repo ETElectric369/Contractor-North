@@ -54,8 +54,8 @@ describe("the pick step", () => {
   it("lists names and how much is on the shelf, and not one price", () => {
     const t = textOf(html);
     expect(t).toContain("12/2 NM-B");
-    expect(t).toContain("250 ft on the shelf");
-    expect(t).toContain("440 ea on the shelf");
+    expect(t).toContain("250 ft in stock");
+    expect(t).toContain("440 ea in stock");
     expect(t).not.toMatch(/\$|180\.17|136\.93|0\.72|cost|price/i);
   });
   it("every row is a 44px target, and the search box is too", () => {
@@ -63,7 +63,7 @@ describe("the pick step", () => {
     expect(html).toMatch(/<input[^>]*class="[^"]*h-11/);
   });
   it("says an empty shelf in words", () => {
-    expect(textOf(sheet({ rows: [] }))).toContain("Nothing is on the shelf yet");
+    expect(textOf(sheet({ rows: [] }))).toContain("Nothing is in stock yet");
   });
 });
 
@@ -79,7 +79,7 @@ describe("the number pad", () => {
   });
   it("a take bigger than the shelf shows says so, and Take It stays open", () => {
     const html = sheet({ step: { kind: "count", row: { ...row, onHand: 0, takeable: 0 } }, entry: "20" });
-    expect(textOf(html)).toContain("20 ft more than the shelf shows — the office will settle it.");
+    expect(textOf(html)).toContain("20 ft more than stock shows — the office will settle it.");
     const take = buttons(html).find((b) => b.text === "Take It")!;
     expect(take.markup).not.toMatch(/\sdisabled=""/);
     expect(sheet({ step: { kind: "count", row }, entry: "60" })).not.toContain("take-short");
@@ -87,9 +87,9 @@ describe("the number pad", () => {
   it("warns from what a take can reach, not the bare count: a counted 100 ft with no roll behind it", () => {
     const html = sheet({ step: { kind: "count", row: { ...row, onHand: 100, takeable: 0 } }, entry: "40" });
     const t = textOf(html);
-    expect(t).toContain("100 ft on the shelf");
+    expect(t).toContain("100 ft in stock");
     expect(t).toContain("40 ft of that isn't on a filed roll yet — it still saves, and the office settles it.");
-    expect(t).not.toContain("more than the shelf shows");
+    expect(t).not.toContain("more than stock shows");
   });
   it("Take It is shut until there is a count", () => {
     const take = buttons(sheet({ step: { kind: "count", row }, entry: "" })).find((b) => b.text === "Take It")!;
@@ -202,7 +202,7 @@ describe("the job's takes", () => {
 
   it("a take past the shelf says it is waiting on the office, never a price", () => {
     const t = textOf(list([{ ...base, qty: 20, short: 15 }], false));
-    expect(t).toContain("15 ft past the shelf, waiting on the office");
+    expect(t).toContain("15 ft past stock, waiting on the office");
     expect(t).not.toMatch(/\$/);
   });
 

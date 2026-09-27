@@ -11,12 +11,17 @@ import { proposalOf, type PaperProposal } from "@/lib/paperwork";
 import {
   OPEN_LIST_FIELDS,
   capTable,
+  findHeaderRow,
   openListFromText,
+  readHeaderRow,
   readOpenListTable,
   rememberColumns,
   type OpenListColumns,
   type StoredOpenList,
 } from "@/lib/supplier-open-list";
+import { looksLikeBankTable, mayBeBankTable, noLinesSaid, redactDigits, redactWordCells } from "@/lib/bank-download";
+import { OWNER_SORTS_BANK, viewerSortsBank } from "@/lib/bank-viewer";
+import { bankLine, bankTableTooLong, capBankTable, createBankPaper, readBankDownload } from "./bank-core";
 import { applyOpenListCore, createOpenListPaper, loadAccounts, loadPapers, openListLine, orgToday, resolveAccount } from "./open-list-core";
 import { fingerprintSeen } from "@/app/(app)/organize/paperwork-actions";
 import { isMissingColumnError } from "@/app/(app)/organize/paperwork-core";
@@ -44,6 +49,9 @@ export async function addOpenList(input: {
   /** The day the file was saved (the browser's lastModified), or null for today. */
   listDate?: string | null;
   source?: "bills_drop" | "organize";
+  /** "bank": the door is Money's Drop Your Bank Download. A file that isn't one is refused in
+   *  plain words, never turned into a supplier's list. */
+  expect?: "bank" | null;
 }): Promise<Result & { id?: string; already?: string; line?: string }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
@@ -57,12 +65,65 @@ export async function addOpenList(input: {
 
   let stored: StoredOpenList | null = null;
   let sha: string | null = isSha256(input?.sha256) ? String(input.sha256) : null;
+  // A BANK'S DOWNLOAD comes in by the same doors (Erik, 2026-09-27): recognised by its own header
+  // (a day, a description, money in and out), it becomes one bank card instead of a supplier's list.
+  if (Array.isArray(input?.table)) {
+    const bankTable = capBankTable(input.table);
+    const at = findHeaderRow(bankTable);
+    const supplierRef = at >= 0 && readHeaderRow(bankTable[at] ?? []).columns.reference !== undefined;
+    if (looksLikeBankTable(bankTable, supplierRef)) {
+      // THE OWNER'S MONEY (0286, bank-viewer): only whoever sorts the bank may bring a download in.
+      // An office viewer the owner turned off is told so in words; the database holds the same line
+      // (0365: a bank download in the tray is viewer_sorts_bank()'s only).
+      if (!(await viewerSortsBank(ctx.supabase, ctx.userId))) return { ok: false, error: `${name}: ${OWNER_SORTS_BANK}` };
+      const tooLong = bankTableTooLong(input.table, name);
+      if (tooLong) return { ok: false, error: tooLong };
+      // THE FILE'S NAME IS KEPT REDACTED like every line ("Export_000123456789.csv" keeps ••6789):
+      // it is the card's title. The reader sees it whole only to take an account's last 4 from it.
+      const read = readBankDownload(bankTable, name);
+      if (!read) return { ok: false, error: `${name} reads like a bank download, but none of its lines did.` };
+      const download = { ...read, name: redactDigits(name) };
+      if (!download.lines.length) return { ok: false, error: noLinesSaid(download, name) };
+      if (sha) {
+        const seen = await fingerprintSeen(sha);
+        if (seen.seen) return { ok: false, already: seen.seen, error: `${name}: ${seen.seen}` };
+      }
+      const placed = await createBankPaper(ctx.supabase, {
+        userId: ctx.userId,
+        name: download.name,
+        download,
+        sha256: sha,
+        source: input?.source === "organize" ? "organize" : "bills_drop",
+      });
+      if ("duplicate" in placed) {
+        const again = sha ? await fingerprintSeen(sha) : { seen: null };
+        return { ok: false, already: again.seen ?? "Already In.", error: `${name}: ${again.seen ?? "Already In."}` };
+      }
+      if ("error" in placed) return { ok: false, error: `${name} wasn't added. ${placed.error}` };
+      revalidatePath("/bills");
+      revalidatePath("/organize");
+      revalidatePath("/planner");
+      return { ok: true, id: placed.id, line: bankLine(download) };
+    }
+    if (input?.expect === "bank")
+      return {
+        ok: false,
+        error: `${name} doesn't read as a bank download: it needs a date, a description and an amount on every line. Download it again as CSV (with column headings, if the bank offers them) and drop that. Nothing was added.`,
+      };
+  }
+  if (input?.expect === "bank") return { ok: false, error: `${name} doesn't read as a bank download. Download it as CSV, Excel or OFX/QFX and drop that. Nothing was added.` };
   if (Array.isArray(input?.table)) {
     const table = capTable(input.table);
     const read = readOpenListTable({ table, from: "file", name, listDate, listDateFrom });
     if (read.ok) stored = { list: read.list, needs: null };
-    else if ("needs" in read) stored = { list: null, needs: read.needs };
-    else return { ok: false, error: read.error };
+    else if ("needs" in read) {
+      // A BANK'S FILE THAT DIDN'T READ AS ONE waits for its columns with no long number in it.
+      const needs = read.needs;
+      const hasRef = needs.headerRow >= 0 && readHeaderRow(needs.raw[needs.headerRow] ?? []).columns.reference !== undefined;
+      stored = mayBeBankTable(needs.raw, needs.headerRow, hasRef)
+        ? { list: null, needs: { ...needs, raw: redactWordCells(needs.raw), header: needs.header.map((h) => redactDigits(h)) } }
+        : { list: null, needs };
+    } else return { ok: false, error: read.error };
   } else if (typeof input?.text === "string" && input.text.trim()) {
     const text = input.text.slice(0, 500_000);
     stored = openListFromText(text, { name, from: "paste", listDate, listDateFrom, parseCsv: parseCSV, strict: false });

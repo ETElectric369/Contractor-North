@@ -173,6 +173,21 @@ describe("Stock Used: where every piece went, and what the supplier gave back", 
   it("a window before any of it is empty", () => {
     expect(stockUsedList(inputs(), { from: "2026-08-01", to: "2026-08-31" }, TZ).rows).toEqual([]);
   });
+  it("a count saved with no note has no Note: Count It's own words (either wording, saved before or after 0364) are not a person's", () => {
+    const inp = inputs();
+    const count = (id: string, kind: string, note: string | null, at: string) =>
+      ({ id, item_id: "i-122", lot_id: "L1", job_id: null, kind, qty: "2", cost: "1.44", note, created_at: at, undone_at: null, settled_by: null });
+    inp.moves.push(
+      count("c1", "recount_down", "Counted on the shelf", "2026-09-17T18:00:00Z"),
+      count("c2", "recount_up", "Counted in stock", "2026-09-18T18:00:00Z"),
+      count("c3", "recount_down", "Counted in the truck", "2026-09-19T18:00:00Z"),
+      count("c4", "recount_down", "  ", "2026-09-20T18:00:00Z"),
+    );
+    const notes = stockUsedList(inp, SEPT, TZ)
+      .rows.filter((r) => /^Counted short|^Found on a count/.test(String(r[col("stock_used", "Went To")])))
+      .map((r) => r[col("stock_used", "Note")]);
+    expect(notes).toEqual([null, null, "Counted in the truck", null]);
+  });
   it("a download cut at an instant carries only the moves before it, and records that same instant (0350 freezes exactly what went out)", () => {
     const cut = "2026-09-14T00:00:00.000Z"; // after the 9/12 write-off, before the 9/15 return
     const t = stockUsedList(inputs(), SEPT, TZ, cut);
@@ -230,13 +245,37 @@ describe("Tools: Tools & Supplies tickets, and tools the company kept off other 
     );
     inp.lots.push({ lot_id: "L9", item_id: "i-122", kind: "line", bill_id: "sh", bill_line_id: "sh1", pieces: "250", unit: "ft", cost: "180.17", bought_on: "2026-09-20", live: true, note: null });
     const tools = toolsList(inp, SEPT, TZ).rows.filter((r) => r[0] !== "Total");
-    expect(tools).toContainEqual(["2026-09-20", "Consolidated Electrical Dist.", "8802-ST", "KLEIN NCVT-3 TESTER", 44, "Shelf ticket, not rolls", null]);
+    expect(tools).toContainEqual(["2026-09-20", "Consolidated Electrical Dist.", "8802-ST", "KLEIN NCVT-3 TESTER", 44, "Stock ticket, not rolls", null]);
     // The tied credit (cr1, on the shelf) is Stock Used's, never here.
     expect(tools.some((r) => r[2] === "8802-CM1")).toBe(false);
     const bought = stockBoughtList(inp, SEPT, TZ);
     expect(bought.rows[0].slice(0, 5)).toEqual(["2026-09-20", "12/2 NM-B", 250, "ft", 180.17]);
     expect(bought.total).toBe(180.17);
   });
+  it("a tool bought on a Fuel or an Auto ticket says which: Fuel and Auto are two buckets, and a Gas & Truck row not yet renamed reads Auto", () => {
+    const inp = inputs();
+    inp.bills.push(
+      { id: "fu", supplier: "Corner Store", bill_number: null, bill_date: "2026-09-05", created_at: "2026-09-05T20:00:00Z", job_id: null, amount: "80", category: "Fuel", on_shelf: false },
+      { id: "au", supplier: "Auto Parts Co", bill_number: null, bill_date: "2026-09-06", created_at: "2026-09-06T20:00:00Z", job_id: null, amount: "30", category: "Auto", on_shelf: false },
+      { id: "gt", supplier: "Auto Parts Co", bill_number: null, bill_date: "2026-09-07", created_at: "2026-09-07T20:00:00Z", job_id: null, amount: "12", category: "Gas & Truck", on_shelf: false },
+    );
+    inp.lines.push(
+      { id: "fu1", bill_id: "fu", description: "Unleaded", quantity: 1, unit_price: 70, amount: 70, category: "Fuel", billable: true, billed_amount: null },
+      { id: "fu2", bill_id: "fu", description: "Tire gauge", quantity: 1, unit_price: 10, amount: 10, category: "Tools", billable: true, billed_amount: null },
+      { id: "au1", bill_id: "au", description: "Socket set", quantity: 1, unit_price: 30, amount: 30, category: "Tools", billable: true, billed_amount: null },
+      { id: "gt1", bill_id: "gt", description: "Tow strap", quantity: 1, unit_price: 12, amount: 12, category: "Tools", billable: true, billed_amount: null },
+    );
+    const filedAs = Object.fromEntries(
+      toolsList(inp, SEPT, TZ)
+        .rows.filter((r) => r[0] !== "Total")
+        .map((r) => [r[3], r[col("tools", "Filed As")]]),
+    );
+    expect(filedAs["Tire gauge"]).toBe("Fuel");
+    expect(filedAs["Socket set"]).toBe("Auto");
+    expect(filedAs["Tow strap"]).toBe("Auto");
+    expect(Object.values(filedAs)).not.toContain("Gas & Truck");
+  });
+
   it("a tool billed to the customer is not the company's: it is on the report-only list, with its invoice, never changed", () => {
     const b = toolsBilledList(inputs(), TZ);
     expect(b.header).toEqual(["Date", "Supplier", "Job Number", "Job", "What", "Billed To Customer (At Cost)", "Invoice"]);

@@ -275,25 +275,42 @@ export const HEADER_WORDS: Record<OpenListField, string[]> = {
   account: ["account", "account number", "acct", "acct number", "customer number", "customer account", "account id"],
 };
 
-const WORD_TO_FIELD: Map<string, OpenListField> = (() => {
-  const m = new Map<string, OpenListField>();
-  for (const f of OPEN_LIST_FIELDS) for (const w of HEADER_WORDS[f]) if (!m.has(w)) m.set(w, f);
+/** A words table (field → the header words that name it) as one lookup, first field wins. */
+function wordLookup<F extends string>(words: Record<F, readonly string[]>): Map<string, F> {
+  const m = new Map<string, F>();
+  for (const f of Object.keys(words) as F[]) for (const w of words[f]) if (!m.has(w)) m.set(w, f);
   return m;
-})();
+}
 
-export type HeaderRead = { columns: OpenListColumns; unsure: OpenListField[] };
+const LOOKUPS = new WeakMap<object, Map<string, string>>();
 
-/** Map one header row. Two columns claiming one field is unsure, and the picker asks. */
-export function readHeaderRow(cells: readonly string[]): HeaderRead {
-  const columns: OpenListColumns = {};
-  const unsure = new Set<OpenListField>();
+/**
+ * ONE HEADER ROW, BY ANY WORDS TABLE: a supplier's open list (HEADER_WORDS) or a bank's download
+ * (bank-download.ts BANK_WORDS) reads its columns the same way, by exact header words. Two columns
+ * claiming one field is unsure.
+ */
+export function readHeaderWith<F extends string>(cells: readonly string[], words: Record<F, readonly string[]>): { columns: Partial<Record<F, number>>; unsure: F[] } {
+  let lookup = LOOKUPS.get(words) as Map<string, F> | undefined;
+  if (!lookup) {
+    lookup = wordLookup(words);
+    LOOKUPS.set(words, lookup);
+  }
+  const columns: Partial<Record<F, number>> = {};
+  const unsure = new Set<F>();
   cells.forEach((cell, i) => {
-    const field = WORD_TO_FIELD.get(headerKey(cell));
+    const field = lookup!.get(headerKey(cell));
     if (!field) return;
     if (columns[field] !== undefined) unsure.add(field);
     else columns[field] = i;
   });
   return { columns, unsure: [...unsure] };
+}
+
+export type HeaderRead = { columns: OpenListColumns; unsure: OpenListField[] };
+
+/** Map one header row. Two columns claiming one field is unsure, and the picker asks. */
+export function readHeaderRow(cells: readonly string[]): HeaderRead {
+  return readHeaderWith<OpenListField>(cells, HEADER_WORDS);
 }
 
 const hasRequired = (c: OpenListColumns) => c.reference !== undefined && (c.openBalance !== undefined || c.amount !== undefined);

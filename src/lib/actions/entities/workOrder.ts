@@ -12,7 +12,7 @@ export const workOrderActions: Record<string, ActionDef> = {
     group: "workorder",
     label: "Create work order",
     description:
-      "Open a WORK ORDER — the field crew's instruction sheet — e.g. 'create a work order to swap the panel on the Miller job'. Pass a title (required) and optional description, job_id (resolve with list_jobs — the customer is inherited from it), assigned_to (a user id), status (default draft), and scheduled_for (the company's LOCAL wall-clock time, YYYY-MM-DDTHH:MM, no Z, no offset; the app converts). Returns the new work order's id.",
+      "Open a WORK ORDER — the field crew's instruction sheet — e.g. 'create a work order to <do the work> on the <job> job'. Pass a title (required) and optional description, job_id (resolve with list_jobs — the customer is inherited from it), assigned_to (a user id), status (default draft), and scheduled_for (the company's LOCAL wall-clock time, YYYY-MM-DDTHH:MM, no Z, no offset; the app converts). Returns the new work order's id.",
     input: z.object({
       title: z.string().min(1),
       description: z.string().nullable().optional(),

@@ -321,7 +321,7 @@ describe("the reader proposes; it never files (Erik, 2026-09-24)", () => {
   });
 
   it("a receipt the model calls overhead is not a business cost until a person says so", async () => {
-    ai.parsed = { paper_type: "receipt", kind: "receipt", vendor: "Chevron", amount: 61.2, payment: "paid_at_purchase", destination: "overhead", overhead_category: "Gas & Truck", confidence: "high" };
+    ai.parsed = { paper_type: "receipt", kind: "receipt", vendor: "Chevron", amount: 61.2, payment: "paid_at_purchase", destination: "overhead", overhead_category: "Fuel", confidence: "high" };
     state.client = fakeSupabase(
       {
         "organized_items.insert": [{ data: { id: "oi-2" }, error: null }],
@@ -333,7 +333,7 @@ describe("the reader proposes; it never files (Erik, 2026-09-24)", () => {
     );
     const res = await analyzeAndFile({ path: "org-1/organize/2-gas.jpg", name: "gas.jpg", mime: "image/jpeg", size: 1000 });
     expect(res.item?.status).toBe("needs_review");
-    expect(res.item?.suggestion?.bucket).toBe("Gas & Truck");
+    expect(res.item?.suggestion?.bucket).toBe("Fuel");
     expect(did("bills", "insert")).toBeUndefined();
   });
 
@@ -1373,7 +1373,7 @@ describe("Tie and Undo", () => {
     state.client = fakeSupabase(
       {
         "organized_items.select": [
-          { data: { ...PAPER, status: "filed", bill_id: "bill-2", document_id: "doc-1", job_id: "job-046", category: "Gas & Truck" }, error: null },
+          { data: { ...PAPER, status: "filed", bill_id: "bill-2", document_id: "doc-1", job_id: "job-046", category: "Auto" }, error: null },
           { data: [], error: null },
         ],
         "bills.select": [
@@ -1511,8 +1511,8 @@ describe("Undo, Delete and a deleted bill leave nothing wrong behind (audit v994
     );
     const res = await undoPaperwork("oi-9");
     expect(res.ok).toBe(false);
-    expect(res.error).toContain("(12/2 Romex, 250 ft) is on the shop shelf");
-    expect(res.error).toContain("Take It Off The Shelf");
+    expect(res.error).toContain("(12/2 Romex, 250 ft) is in shop stock");
+    expect(res.error).toContain("Take It Out Of Stock");
     expect(did("bills", "delete")).toBeUndefined();
   });
 

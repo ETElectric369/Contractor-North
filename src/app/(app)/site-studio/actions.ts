@@ -6,6 +6,7 @@ import { aiSpendExceeded, recordAiUsage } from "@/lib/ai-cost";
 import { parseAiJson } from "@/lib/ai-json";
 import { dbError } from "@/lib/db-error";
 import { getOrgSettings } from "@/lib/org-settings";
+import { tradeWordsOr, withArticle } from "@/lib/org-trade";
 import { rateLimited } from "@/lib/rate-limit";
 import { coerceSiteDoc, diffSiteDoc, extractSiteDoc, knownImageUrls, type SiteDoc } from "@/lib/site-doc";
 import { SECTION_KEYS, normalizeBlocks } from "@/lib/site-blocks";
@@ -98,7 +99,7 @@ async function runDesignModel(args: {
       model: DEFAULT_MODEL,
       max_tokens: 12288,
       system:
-        `You are the design lead for a ${settings.trade_label?.trim() || "contractor"}'s public website, working INSIDE a fixed design system. You edit a SITE DOCUMENT (JSON) that a trusted renderer draws — you never write HTML pages.\n` +
+        `You are the design lead for ${withArticle(tradeWordsOr(settings))}'s public website, working INSIDE a fixed design system. You edit a SITE DOCUMENT (JSON) that a trusted renderer draws — you never write HTML pages.\n` +
         "THE LAWS:\n" +
         "· Copy serves a local contractor's customers: plain, confident, specific about the work and the towns. No hype, no invented claims, no invented credentials or reviews.\n" +
         "· IMAGES: use ONLY urls from the IMAGE LIBRARY, verbatim. You may reorder, re-caption, choose the hero, build galleries — never invent or modify a url.\n" +
@@ -130,7 +131,7 @@ async function runDesignModel(args: {
             `THE BUSINESS: ${String((org as { name?: string }).name ?? "")}` +
             `${(org as { license?: string | null }).license ? ` · ${(org as { license: string }).license}` : ""}` +
             `${settings.public_city ? ` · ${settings.public_city}, ${settings.public_state ?? ""}` : ""}` +
-            ` · trade: ${settings.trade_label?.trim() || "contractor"}\n\n` +
+            ` · trade: ${tradeWordsOr(settings)}\n\n` +
             `THE CURRENT DOCUMENT:\n${JSON.stringify(base)}\n\n` +
             `IMAGE LIBRARY (the ONLY usable urls):\n${library.map((i, n) => `${n + 1}. ${i.url}${i.caption ? ` — ${i.caption}` : ""}`).join("\n") || "(no photos yet — design without imagery)"}\n\n` +
             `THE OWNER'S INSTRUCTION:\n"""${ask}"""`,

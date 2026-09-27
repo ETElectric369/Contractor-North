@@ -177,7 +177,7 @@ export const materialActions: Record<string, ActionDef> = {
     group: "material",
     label: "Add materials line",
     description:
-      "Add ONE line to a job's materials list (the job's one shopping/take-off list) — 'add a single-gang bell box to the Waldow materials list', 'put two short extension bits on the Miller job, to be purchased'. Pass job_id as the job's id from list_jobs, OR the job's name / number as spoken ('Waldow', 'J-012'); it resolves itself, and if several jobs match you'll be asked which — then look it up with list_jobs (search) and pass the id. One line per call: 'a bell box and two extension bits' is two calls. description is the item as a person would say it; quantity defaults to 1 and unit to 'ea' (also ft, box, roll…). part_number / vendor / est_cost / is_tool (true = a tool from the truck, not something to buy) are optional — pass them only when said. A new line is unpurchased, which means 'to be purchased'; the office is notified when a crew member adds one. Use list_material_items to read the list back.",
+      "Add ONE line to a job's materials list (the job's one shopping/take-off list) — 'add <item> to the <job> materials list', 'put two <item> on the <job> job, to be purchased'. Pass job_id as the job's id from list_jobs, OR the job's name / number as spoken ('<job name>', 'J-012'); it resolves itself, and if several jobs match you'll be asked which — then look it up with list_jobs (search) and pass the id. One line per call: '<an item> and two <another item>' is two calls. description is the item as a person would say it; quantity defaults to 1 and unit to 'ea' (also ft, box, roll…). part_number / vendor / est_cost / is_tool (true = a tool from the truck, not something to buy) are optional — pass them only when said. A new line is unpurchased, which means 'to be purchased'; the office is notified when a crew member adds one. Use list_material_items to read the list back.",
     input: z.object({
       job_id: z.string().min(1),
       description: z.string().trim().min(1),
@@ -269,7 +269,7 @@ export const materialActions: Record<string, ActionDef> = {
     group: "material",
     label: "Mark materials line purchased",
     description:
-      "Tick ONE line on a job's materials list as purchased (bought) — 'mark the bell box purchased on the Waldow job', 'I picked up the extension bits'. Pass purchased=false to un-tick it. job_id is the job's id from list_jobs OR its name / number as spoken. Name the line with description (a few words of it — it must match exactly ONE line on that job's list, or you'll be told the candidates) or with item_id from list_material_items; pass both when you have them. If you're not sure which line, read the list first with list_material_items.",
+      "Tick ONE line on a job's materials list as purchased (bought) — 'mark the <item> purchased on the <job> job', 'I picked up the <item>'. Pass purchased=false to un-tick it. job_id is the job's id from list_jobs OR its name / number as spoken. Name the line with description (a few words of it — it must match exactly ONE line on that job's list, or you'll be told the candidates) or with item_id from list_material_items; pass both when you have them. If you're not sure which line, read the list first with list_material_items.",
     input: LINE_REF.extend({ purchased: z.boolean().optional().default(true) }).superRefine(requireLineRef),
     auth: "any",
     effect: "write",
@@ -304,7 +304,7 @@ export const materialActions: Record<string, ActionDef> = {
     group: "material",
     label: "Remove materials line",
     description:
-      "Delete ONE line from a job's materials list — 'take the bell box off the Waldow list', 'remove the extension bits'. Not for marking something bought (that's material.markPurchased). job_id is the job's id from list_jobs OR its name / number as spoken. Name the line with description (a few words — it must match exactly ONE line on that list, or you'll be told the candidates) or item_id from list_material_items; pass both when you have them. This asks the user to confirm before it deletes.",
+      "Delete ONE line from a job's materials list — 'take the <item> off the <job> list', 'remove the <item>'. Not for marking something bought (that's material.markPurchased). job_id is the job's id from list_jobs OR its name / number as spoken. Name the line with description (a few words — it must match exactly ONE line on that list, or you'll be told the candidates) or item_id from list_material_items; pass both when you have them. This asks the user to confirm before it deletes.",
     input: LINE_REF.superRefine(requireLineRef),
     auth: "any",
     effect: "write",

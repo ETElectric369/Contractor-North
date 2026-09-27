@@ -57,7 +57,7 @@ export const billActions: Record<string, ActionDef> = {
     name: "bill.update",
     group: "bill",
     label: "Edit bill",
-    description: "Edit a supplier bill's supplier, amount, bill number, date, status, category or notes.",
+    description: `Edit a supplier bill's supplier, amount, bill number, date, status, category or notes. A business cost's (a bill with no job) category is one of: ${BUSINESS_COST_BUCKETS.join(", ")}.`,
     input: z.object({
       id: z.string(),
       supplier: z.string().optional(),

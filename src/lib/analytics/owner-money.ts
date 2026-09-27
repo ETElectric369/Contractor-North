@@ -17,7 +17,7 @@ import { billsCarryingNumber, namedNumbersOf, type LedgerBill } from "@/lib/same
  * is a sole proprietorship, so there is no owner salary: money received, minus the real costs, is
  * what is left for him. That one subtraction, done honestly, is this module.
  *
- *   left = received - materials_and_bills - crew_pay - crew_mileage_paid - business_costs
+ *   left = received - materials_and_bills - crew_pay - crew_mileage_paid - fuel - business_costs
  *               - put_on_the_shelf - shop_stock_lost
  *
  * EVERY LINE COMES FROM A RULE THAT ALREADY EXISTS, never a new definition:
@@ -52,7 +52,10 @@ import { billsCarryingNumber, namedNumbersOf, type LedgerBill } from "@/lib/same
  *                         Lost: what the pieces cost minus the credit is what the company lost.
  *                         Only rolls bought on a ticket: an opening count was never a month's Put
  *                         On The Shelf, so its pieces going are never a month's loss.
- *   · business costs    = bills and petty cash with no job, in the six buckets
+ *   · fuel              = bills and petty cash with no job in the Fuel bucket (0362). A business
+ *                         cost like the rest, said on its OWN line and never inside Business Costs
+ *                         (Erik, 2026-09-27: "lets make fuel stand out from business costs").
+ *   · business costs    = bills and petty cash with no job, in every other bucket
  *                         (business-cost-buckets.ts). The Fees bucket also carries Stripe's real
  *                         card fee on each payment (payments.processor_fee, 0284). A NULL fee is
  *                         UNKNOWN, never $0: it is counted as a caveat, not as money.
@@ -64,9 +67,13 @@ import { billsCarryingNumber, namedNumbersOf, type LedgerBill } from "@/lib/same
  * Pure half (computeOwnerMoney) + a fetch half (getOwnerMoney) that reads the SAME row sources the
  * existing readers use, so the chart the next build puts on top of this cannot disagree with the
  * card. Everything is summed in integer CENTS so the invariant holds to the cent, per month and in
- * total: received = materials_and_bills + crew_pay + crew_mileage_paid + business_costs
+ * total: received = materials_and_bills + crew_pay + crew_mileage_paid + fuel + business_costs
  *                   + put_on_the_shelf + shop_stock_lost + left.
  */
+
+/** The buckets Business Costs holds: every one but Fuel, which is its own line (0362). */
+export type BesideFuelBucket = Exclude<BusinessCostBucket, "Fuel">;
+export const BUCKETS_BESIDE_FUEL: readonly BesideFuelBucket[] = BUSINESS_COST_BUCKETS.filter((b): b is BesideFuelBucket => b !== "Fuel");
 
 // ── Windows ──────────────────────────────────────────────────────────────────
 
@@ -205,16 +212,24 @@ export function windowMonths(win: { start: string; end: string }, todayYmd?: str
 
 // ── Shapes ───────────────────────────────────────────────────────────────────
 
-export type BucketAmounts = Record<BusinessCostBucket, number>;
+/** Business Costs by bucket: every bucket but Fuel (its own figure, `fuel`). */
+export type BucketAmounts = Record<BesideFuelBucket, number>;
 
 /** One month (or the window's total). Dollars, rounded to cents; every sum was done in cents. */
 export type OwnerMoneyFigures = {
+  /** Money received: payments (computeCollected) plus Other Income below. */
   received: number;
+  /** Deposits a person said were Other Income on a bank download (0363, choice 'other_income'):
+   *  inside `received`, said as its own chip. Absent when there is none. */
+  otherIncome?: number;
   materialsAndBills: number;
   crewPay: number;
   crewMileagePaid: number;
-  /** The six buckets. Fees INCLUDES processorFees below. */
+  /** The Fuel bucket (0362): a business cost said on its own line, never inside businessCosts. */
+  fuel: number;
+  /** Every other bucket. Fees INCLUDES processorFees below. */
   businessCosts: BucketAmounts;
+  /** The sum of businessCosts: Fuel is NOT in it. */
   businessCostsTotal: number;
   /** Stripe's real card/bank fees on payments received in the period (already inside Fees). */
   processorFees: number;
@@ -223,6 +238,11 @@ export type OwnerMoneyFigures = {
   /** Pieces written off, counted short or returned to the supplier in the period, less the
    *  supplier's credit for returns (0350). In the month it happened, never the roll's month. */
   shopStockLost: number;
+  /** What left stock in the period (write-offs, counts short, returns to the supplier), at cost,
+   *  before any supplier credit. Already inside putOnShelf (taken off it) and shopStockLost (added
+   *  to it); kept apart only so stockLine says "less what moved" when something moved, and never
+   *  when Shop Stock Lost holds only a credit, or a move and a credit cancel to $0. */
+  stockMovedOut: number;
   left: number;
   ownerHours: number;
   /** left / ownerHours, or null when the owner logged no hours. */
@@ -323,6 +343,8 @@ export type OwnerMoneyInputs = {
    *  still open (model B), and which bills cover each (supplierDocCoverage), so only a document a
    *  counted bill carries is ever in the "counted" figure. */
   supplierDocuments?: any[];
+  /** bank_lines a person placed as Other Income (0363): amount, posted_on. Absent = none. */
+  otherIncome?: any[];
 };
 
 // ── Arithmetic helpers (cents) ───────────────────────────────────────────────
@@ -376,6 +398,7 @@ const emptyBuckets = (): Record<BusinessCostBucket, number> =>
 
 type Acc = {
   received: number;
+  other: number;
   materials: number;
   crewPay: number;
   mileage: number;
@@ -383,9 +406,10 @@ type Acc = {
   fees: number;
   shelf: number;
   lost: number;
+  movedOut: number;
   ownerHours: number; // hundredths of an hour, summed from hoursBetween's 2-decimal hours
 };
-const newAcc = (): Acc => ({ received: 0, materials: 0, crewPay: 0, mileage: 0, buckets: emptyBuckets(), fees: 0, shelf: 0, lost: 0, ownerHours: 0 });
+const newAcc = (): Acc => ({ received: 0, other: 0, materials: 0, crewPay: 0, mileage: 0, buckets: emptyBuckets(), fees: 0, shelf: 0, lost: 0, movedOut: 0, ownerHours: 0 });
 
 // ── THE FROZEN-GROSS RULE ────────────────────────────────────────────────────
 /**
@@ -524,6 +548,15 @@ export function computeOwnerMoney(inp: OwnerMoneyInputs, win: OwnerMoneyWindow, 
     refundByMonth.set(k, list);
   }
   for (const m of months) acc.get(m)!.received = toCents(computeCollected(payByMonth.get(m) ?? [], refundByMonth.get(m) ?? []));
+  // OTHER INCOME (0363): a deposit a person said was income that no invoice holds (a bank download's
+  // Other Income). Money received, on the day the bank posted it; said as its own chip.
+  for (const o of inp.otherIncome ?? []) {
+    const a = at(monthOfDay(o?.posted_on ?? null));
+    if (!a) continue;
+    const c = toCents(o.amount);
+    a.other += c;
+    a.received += c;
+  }
 
   // CARD FEES: Stripe's real fee on each payment received in the window, into the Fees bucket. A
   // Stripe payment whose fee is still NULL is UNKNOWN: it is counted as a caveat, never as $0.
@@ -567,6 +600,7 @@ export function computeOwnerMoney(inp: OwnerMoneyInputs, win: OwnerMoneyWindow, 
     const c = toCents(m.cost);
     a.shelf -= c;
     a.lost += c;
+    a.movedOut += c;
   }
 
   // MATERIALS & BILLS: exactly the job-cost inputs job profit uses - less what went on the shelf,
@@ -599,7 +633,8 @@ export function computeOwnerMoney(inp: OwnerMoneyInputs, win: OwnerMoneyWindow, 
     if (pc.job_id) a.materials += toCents(pc.amount);
     else a.buckets[bucketOf(pc.category)] += toCents(pc.amount);
   }
-  // BUSINESS COSTS: bills with no job, in their bucket. A ticket bought for the shelf is its rolls
+  // BUSINESS COSTS: bills with no job, in their bucket (Fuel's is said on its own line, below). A
+  // ticket bought for the shelf is its rolls
   // (Put On The Shelf, above); whatever of it has no roll behind it (Not Stock lines, their tax,
   // freight, a roll taken back off) is supplies the business used, in Tools & Supplies - named,
   // never "Other" (bucketOf would call the category "Shop Stock" that).
@@ -654,19 +689,23 @@ export function computeOwnerMoney(inp: OwnerMoneyInputs, win: OwnerMoneyWindow, 
   const figures = (a: Acc): OwnerMoneyFigures => {
     const buckets = { ...a.buckets };
     buckets.Fees += a.fees;
-    const bizCents = BUSINESS_COST_BUCKETS.reduce((s, b) => s + buckets[b], 0);
-    const leftCents = a.received - a.materials - a.crewPay - a.mileage - bizCents - a.shelf - a.lost;
+    const fuelCents = buckets.Fuel;
+    const bizCents = BUCKETS_BESIDE_FUEL.reduce((s, b) => s + buckets[b], 0);
+    const leftCents = a.received - a.materials - a.crewPay - a.mileage - fuelCents - bizCents - a.shelf - a.lost;
     const hours = a.ownerHours / 100;
     return {
       received: fromCents(a.received),
+      ...(a.other ? { otherIncome: fromCents(a.other) } : {}),
       materialsAndBills: fromCents(a.materials),
       crewPay: fromCents(a.crewPay),
       crewMileagePaid: fromCents(a.mileage),
-      businessCosts: Object.fromEntries(BUSINESS_COST_BUCKETS.map((b) => [b, fromCents(buckets[b])])) as BucketAmounts,
+      fuel: fromCents(fuelCents),
+      businessCosts: Object.fromEntries(BUCKETS_BESIDE_FUEL.map((b) => [b, fromCents(buckets[b])])) as BucketAmounts,
       businessCostsTotal: fromCents(bizCents),
       processorFees: fromCents(a.fees),
       putOnShelf: fromCents(a.shelf),
       shopStockLost: fromCents(a.lost),
+      stockMovedOut: fromCents(a.movedOut),
       left: fromCents(leftCents),
       ownerHours: hours,
       perOwnerHour: hours > 0 ? Math.round((leftCents / 100 / hours) * 100) / 100 : null,
@@ -675,12 +714,14 @@ export function computeOwnerMoney(inp: OwnerMoneyInputs, win: OwnerMoneyWindow, 
   const total = newAcc();
   for (const a of acc.values()) {
     total.received += a.received;
+    total.other += a.other;
     total.materials += a.materials;
     total.crewPay += a.crewPay;
     total.mileage += a.mileage;
     total.fees += a.fees;
     total.shelf += a.shelf;
     total.lost += a.lost;
+    total.movedOut += a.movedOut;
     total.ownerHours += a.ownerHours;
     for (const b of BUSINESS_COST_BUCKETS) total.buckets[b] += a.buckets[b];
   }
@@ -1016,6 +1057,39 @@ export function costFigure(n: number): string {
   return n > 0 ? `\u2212${formatCurrency(n)}` : `+${formatCurrency(Math.abs(n))}`;
 }
 
+/**
+ * MATERIALS & BILLS AS THE CARD AND THE CHART SAY IT (Erik, 2026-09-27: "we dont need a put on the
+ * shelf on the bar graph"). Shop stock bought is money gone on materials, so both readers show it
+ * INSIDE Materials & Bills, still in the month the ticket is dated (decision 1 is unchanged). The
+ * engine keeps it apart (putOnShelf), because the accountant's Stock Bought list checks against it;
+ * this one sum is the only place the two are joined, so the card and the chart never disagree and
+ * the card's lines still add up to the draw to the cent.
+ */
+export function materialsWithStock(f: Pick<OwnerMoneyFigures, "materialsAndBills" | "putOnShelf">): number {
+  return fromCents(toCents(f.materialsAndBills) + toCents(f.putOnShelf));
+}
+
+/**
+ * The one line under the card that says so (nothing silent): how much of Materials & Bills is shop
+ * stock, and what is in stock now. Null when the window has no stock money and nothing is in stock.
+ * A write-off moves a roll's dollars out of Materials & Bills and into Shop Stock Lost in the month
+ * it happens, so a window can hold less than nothing of stock: that is said as given back, never as
+ * "−$36.93 of shop stock". "Less what moved" keys on what MOVED (stockMovedOut), never on Shop Stock
+ * Lost: a supplier's credit lands there with nothing moving that month, and a write-off and a credit
+ * in the same month can net Shop Stock Lost to $0 while the stock figure is still bought less moved.
+ */
+export function stockLine(m: OwnerMoney): string | null {
+  const stock = m.totals.putOnShelf;
+  const moved = m.totals.stockMovedOut >= 0.005;
+  if (Math.abs(stock) < 0.005 && Math.abs(m.onShelfNow) < 0.005) return null;
+  const parts: string[] = [];
+  if (stock >= 0.005)
+    parts.push(`Materials & Bills includes ${formatCurrency(stock)} of shop stock, counted the month it was bought${moved ? ", less what moved to Shop Stock Lost" : ""}.`);
+  else if (stock <= -0.005) parts.push(`Materials & Bills gives back ${formatCurrency(-stock)} of shop stock bought before, now in Shop Stock Lost.`);
+  parts.push(`In Stock Now: ${formatCurrency(m.onShelfNow)} at cost. It moves onto a job's profit as pieces are taken, and never counts against the draw twice.`);
+  return parts.join(" ");
+}
+
 /** "This Year (records start Jun 11)": the window, with the honest start when records begin late. */
 export function windowLabel(m: OwnerMoney): string {
   const start = m.caveats.find((c) => c.kind === "records_start") as { date: string } | undefined;
@@ -1223,7 +1297,7 @@ export async function readOwnerMoneyInputs(
   // A locked period can start up to a month before the window and still spread pay into it.
   const entriesFrom = tzDayStartUtc(balanceStart, tz).toISOString();
 
-  const [payments, refunds, bills, pos, petty, entries, runs, payPayments, memos, ratesRead, names, firsts, shelfLots, supplierAccounts, supplierPayments] = await Promise.all([
+  const [payments, refunds, bills, pos, petty, entries, runs, payPayments, memos, ratesRead, names, firsts, shelfLots, supplierAccounts, supplierPayments, otherIncome] = await Promise.all([
     readEvery<any>("payments", (f, t) =>
       supabase
         .from("payments")
@@ -1312,10 +1386,12 @@ export async function readOwnerMoneyInputs(
     readEvery<any>("supplier payments", (f, t) =>
       supabase.from("supplier_payments").select("id, supplier_account_id, amount, paid_on, method, voided_at").order("id").range(f, t),
     ),
+    // OTHER INCOME from bank downloads (0363). A database before 0363 has none: never a lost read.
+    readOtherIncome(supabase, span),
   ]);
 
   const problem =
-    [payments, refunds, bills, pos, petty, entries, runs, payPayments, memos, shelfLots, supplierAccounts, supplierPayments]
+    [payments, refunds, bills, pos, petty, entries, runs, payPayments, memos, shelfLots, supplierAccounts, supplierPayments, otherIncome]
       .map((r) => r.problem)
       .find(Boolean) ??
     ratesRead.problem ??
@@ -1359,9 +1435,34 @@ export async function readOwnerMoneyInputs(
       supplierAccounts: supplierAccounts.rows,
       supplierPayments: supplierPayments.rows,
       supplierDocuments: memos.rows,
+      otherIncome: otherIncome.rows,
     },
     problem: null,
   };
+}
+
+/** bank_lines placed as Other Income in the span. No table yet (before 0363) = none. */
+async function readOtherIncome(supabase: any, span: { start: string; end: string }): Promise<{ rows: any[]; problem: string | null }> {
+  const out: any[] = [];
+  for (let i = 0, from = 0; i < MAX_PAGES; i++) {
+    const { data, error } = await supabase
+      .from("bank_lines")
+      .select("id, amount, posted_on")
+      .eq("choice", "other_income")
+      .gte("posted_on", span.start)
+      .lt("posted_on", span.end)
+      .order("id")
+      .range(from, from + PAGE_ROWS - 1);
+    if (error) {
+      const code = String(error?.code ?? "");
+      if (code === "42P01" || code === "PGRST205" || /bank_lines/.test(String(error?.message ?? ""))) return { rows: [], problem: null };
+      return { rows: [], problem: "the bank lines could not be read" };
+    }
+    if (!Array.isArray(data) || !data.length) return { rows: out, problem: null };
+    out.push(...data);
+    from += data.length;
+  }
+  return { rows: [], problem: "there are too many bank lines to read at once" };
 }
 
 /**

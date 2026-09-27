@@ -5,6 +5,7 @@ import { Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/input";
 import type { OrgSettings } from "@/lib/org-settings";
+import { orgTrade } from "@/lib/org-trade";
 import { updateOrgSettings } from "./actions";
 
 /** Free-text quoting playbook — injected into AI quote drafts and the assistant. */
@@ -13,6 +14,8 @@ export function QuotePlaybookForm({ settings }: { settings: OrgSettings }) {
   const [pending, start] = useTransition();
   const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const catalog = settings.estimating_mode === "catalog";
+  const electrical = orgTrade(settings).key === "electrical";
 
   function save() {
     setError(null);
@@ -27,10 +30,25 @@ export function QuotePlaybookForm({ settings }: { settings: OrgSettings }) {
 
   return (
     <div className="space-y-3">
+      {/* WHAT THE ESTIMATOR REALLY DOES, for THIS company (the chat route's estimating method): a
+          catalog shop prices from its own list and never goes to the web, and only electrical
+          work is sized by the NEC. This card told a deck builder in catalog mode about
+          web-researched prices and NEC-calculated sizes. */}
       <p className="text-sm text-slate-500">
-        The AI already handles the <strong>numbers</strong> automatically: labor at your rate (Settings →
-        rates), materials at <em>current</em> web-researched prices + your buffer, and exact NEC-calculated
-        sizes/quantities. Use this box ONLY for your company&apos;s habits, inclusions/exclusions, wording,
+        {catalog ? (
+          <>
+            The AI already handles the <strong>numbers</strong>: labor at your rate (Settings → rates),
+            materials and work from <em>your own</em> price list and kits, and quantities from the
+            customer&apos;s measurements.
+          </>
+        ) : (
+          <>
+            The AI already handles the <strong>numbers</strong> automatically: labor at your rate (Settings →
+            rates), materials at <em>current</em> web-researched prices + your buffer, and exact{" "}
+            {electrical ? "NEC-calculated" : "calculated"} sizes/quantities.
+          </>
+        )}{" "}
+        Use this box ONLY for your company&apos;s habits, inclusions/exclusions, wording,
         and special cases it can&apos;t know — <strong>don&apos;t put rates or markup here</strong> (those
         live in Settings and will override anything stale you type below).
       </p>
@@ -38,7 +56,7 @@ export function QuotePlaybookForm({ settings }: { settings: OrgSettings }) {
         rows={12}
         value={text}
         onChange={(e) => setText(e.target.value)}
-        placeholder={"e.g.\n• Always include a 1-year workmanship warranty line\n• Standard exclusions: permits, sales tax, equipment rental, drywall patch\n• Buy full 500 ft wire rolls; leftover is shop stock\n• We don't run aluminum branch circuits\n• Round each estimate up to the nearest $25\n• Note a 10% deposit due to schedule"}
+        placeholder={"e.g.\n• Always include a 1-year workmanship warranty line\n• Standard exclusions: permits, sales tax, equipment rental\n• What you always include, and what you never do\n• Round each estimate up to the nearest $25\n• Note a deposit due to schedule"}
       />
       <div className="flex items-center gap-3">
         <Button onClick={save} disabled={pending}>{pending ? "Saving…" : "Save Playbook"}</Button>

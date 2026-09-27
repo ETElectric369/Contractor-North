@@ -49,8 +49,8 @@ export const panelActions: Record<string, ActionDef> = {
     group: "panel",
     label: "Suggest circuits on a job's panel",
     description:
-      "Put one or more circuits on a job's Panel tab as SUGGESTIONS ('add a 20 amp for the garage freezer on Herringbone', 'the dryer is a 2-pole 30 on space 21'). A suggestion counts for nothing until a person taps Keep on the Panel tab: say exactly that, and NEVER say the circuit is added, kept, placed or counted. " +
-      "job_id is the job's id from list_jobs OR its name / number as spoken ('Herringbone', 'J-011'). One object per circuit: description = what it feeds ('Freezer'), room ('Garage'), amps (15, 20, 30…), poles (1-3, default 1), kind (standard / afci / gfci / dual_function / spd, only when said), panel_label = the door's words only when said, space / half only when said, work = new (default) / existing / reused / removed. " +
+      "Put one or more circuits on a job's Panel tab as SUGGESTIONS ('add a 20 amp for the garage freezer on <job>', 'the dryer is a 2-pole 30 on space 21'). A suggestion counts for nothing until a person taps Keep on the Panel tab: say exactly that, and NEVER say the circuit is added, kept, placed or counted. " +
+      "job_id is the job's id from list_jobs OR its name / number as spoken ('<job name>', '<job number>'). One object per circuit: description = what it feeds ('Freezer'), room ('Garage'), amps (15, 20, 30…), poles (1-3, default 1), kind (standard / afci / gfci / dual_function / spd, only when said), panel_label = the door's words only when said, space / half only when said, work = new (default) / existing / reused / removed. " +
       "Pass only what was said; never invent amps or a space. Read the panel first with get_job_panel when you need to know what is already there: a circuit already on the list is reported back, not added twice.",
     input: z.object({
       job_id: z.string().min(1),

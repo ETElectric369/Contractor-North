@@ -79,7 +79,7 @@ export async function saveRecurring(formData: FormData, id?: string): Promise<Re
     if (!(invoiceAmount > 0)) return { ok: false, error: "Add at least one line item with an amount." };
   }
   // A recurring expense writes a bill with no job, which is a business cost, so its category is
-  // one of the six buckets and nothing else. Refused here as well as on the form, because the
+  // one of the buckets and nothing else. Refused here as well as on the form, because the
   // form is only one caller of this action.
   const expenseBucket = kind === "expense" ? String(formData.get("category") ?? "").trim() : "";
   if (kind === "expense" && !isBusinessCostBucket(expenseBucket))

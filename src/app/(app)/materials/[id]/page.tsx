@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { jobSiteLabel } from "@/lib/schedule-options";
-import { Briefcase, ListChecks } from "lucide-react";
+import { Briefcase, ChevronDown, ListChecks } from "lucide-react";
+import { checklistGroups } from "@/lib/materials-checklist";
 import { BackLink } from "@/components/back-link";
 import { createClient } from "@/lib/supabase/server";
 import { formatCurrency, formatDate } from "@/lib/utils";
@@ -100,6 +101,24 @@ export default async function MaterialListPage({
   const supersededBy = jobId && canonicalId && canonicalId !== l.id ? canonicalId : null;
   const readOnly = techReadOnly || !!supersededBy;
 
+  // The read-only view's two piles: open (tools to grab and lines to buy, in list order) and Bought.
+  const readOnlyItems = (items ?? []) as any[];
+  const { tools: roTools, toBuy: roToBuy, bought: roBought } = checklistGroups(readOnlyItems);
+  const readOnlyGroups = { open: [...roTools, ...roToBuy], bought: roBought };
+  const readOnlyRow = (it: any) => (
+    <li key={it.id} className="flex items-center gap-2 px-4 py-3 text-sm">
+      <span className={it.purchased ? "text-slate-400 line-through" : "text-slate-800"}>{it.description}</span>
+      <span className="ml-auto shrink-0 text-xs text-slate-400">
+        {it.part_number ? `#${it.part_number} · ` : ""}
+        {it.quantity ?? ""} {it.unit ?? ""}
+        {/* The office reads this view too now (a superseded list is read-only for
+            everyone), and it may be reading it to decide what to carry across, so the
+            cost stays visible to staff. A tech's projection never selects the column. */}
+        {viewerIsStaff && it.est_cost != null && ` · ${formatCurrency(Number(it.est_cost))}`}
+      </span>
+    </li>
+  );
+
   return (
     <div className="mx-auto max-w-4xl">
       <BackLink fallback="/materials" fallbackLabel="Back to Material Lists" />
@@ -193,22 +212,23 @@ export default async function MaterialListPage({
               This list belongs to {keeperNoun} &mdash; the office keeps it.
             </p>
           )}
-          <ul className="divide-y divide-slate-100 rounded-xl border border-slate-200 bg-white">
-            {((items ?? []) as any[]).map((it) => (
-              <li key={it.id} className="flex items-center gap-2 px-4 py-3 text-sm">
-                <span className={it.purchased ? "text-slate-400 line-through" : "text-slate-800"}>{it.description}</span>
-                <span className="ml-auto shrink-0 text-xs text-slate-400">
-                  {it.part_number ? `#${it.part_number} · ` : ""}
-                  {it.quantity ?? ""} {it.unit ?? ""}
-                  {/* The office reads this view too now (a superseded list is read-only for
-                      everyone), and it may be reading it to decide what to carry across, so the
-                      cost stays visible to staff. A tech's projection never selects the column. */}
-                  {viewerIsStaff && it.est_cost != null && ` · ${formatCurrency(Number(it.est_cost))}`}
-                </span>
-              </li>
-            ))}
-            {(items ?? []).length === 0 && <li className="px-4 py-6 text-center text-slate-400">No items on this list.</li>}
-          </ul>
+          {/* The same checklist shape as the editor (lib/materials-checklist): what is still open
+              on top, the checked lines folded under Bought (N). Read-only here, so nothing moves. */}
+          <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+            <ul className="divide-y divide-slate-100">
+              {readOnlyGroups.open.map(readOnlyRow)}
+              {(items ?? []).length === 0 && <li className="px-4 py-6 text-center text-slate-400">No items on this list.</li>}
+            </ul>
+            {readOnlyGroups.bought.length > 0 && (
+              <details className="group border-t border-slate-100">
+                <summary className="flex min-h-[44px] cursor-pointer list-none items-center justify-between px-4 text-sm font-medium text-slate-600 hover:bg-slate-50 [&::-webkit-details-marker]:hidden">
+                  Bought ({readOnlyGroups.bought.length})
+                  <ChevronDown className="h-4 w-4 transition-transform group-open:rotate-180" />
+                </summary>
+                <ul className="divide-y divide-slate-100 border-t border-slate-100">{readOnlyGroups.bought.map(readOnlyRow)}</ul>
+              </details>
+            )}
+          </div>
         </div>
       ) : (
         <div className="space-y-3">
