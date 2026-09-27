@@ -262,7 +262,8 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
       .order("priority", { ascending: false })
       .limit(60),
     // MY OPEN REMINDERS, all of them (top-level): what's behind the six feeds the card's Grab One
-    // and All Reminders links (the /tasks Reminders page shows exactly these).
+    // and All Reminders links. The ones FOR ME: /tasks also lists the Reminders I made for someone
+    // else (theirs to do, never in my six), so the link says "More For You", not a /tasks count.
     mineCut(headCount().eq("status", "open").is("parent_id", null)),
     // My Reminders completed today — the durable half of the card's "2/6".
     mineCut(

@@ -64,7 +64,8 @@ describe("Today's 6: the one Add line up top (Erik, 2026-09-26)", () => {
     const html = renderToStaticMarkup(
       createElement(YourList, { six, subtasks: [], todayStr: "2026-09-26", doneToday: 0, restCount: 4, jobs: JOBS }),
     );
-    expect(html).toContain("All Reminders · 4 More");
+    // "For You": the count is the Reminders for this person; /tasks also lists the ones they made for others.
+    expect(html).toContain("All Reminders · 4 More For You");
     expect(html).toContain('href="/tasks"');
   });
 });

@@ -382,7 +382,8 @@ export function YourList({
           href="/tasks"
           className="flex min-h-[44px] items-center justify-center border-t border-slate-100 text-sm font-medium text-brand hover:bg-slate-50"
         >
-          All Reminders · {restCount} More
+          {/* For you: /tasks also lists the ones you made for someone else, which this doesn't count. */}
+          All Reminders · {restCount} More For You
         </Link>
       )}
 
