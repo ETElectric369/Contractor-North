@@ -1,7 +1,19 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+import { createElement, type ReactNode } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { doorAmountStillMatches, holdCardLine } from "./settle-up-button";
+
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn(), push: vi.fn(), replace: vi.fn() }) }));
+vi.mock("@/components/toast", () => ({ useToast: () => vi.fn() }));
+// The sheet drawn open, so what it says can be read (the real Modal renders nothing while closed).
+vi.mock("@/components/ui/modal", () => ({
+  Modal: ({ title, children, footer }: { title: string; children?: ReactNode; footer?: ReactNode }) =>
+    createElement("div", { "data-modal": title }, children, footer),
+  ModalActions: () => null,
+}));
+
+const { doorAmountStillMatches, holdCardLine, GetPaidButton, SettleUpButton } = await import("./settle-up-button");
 
 /**
  * THE FIGURE ON THE CARD IS THE FIGURE ON THE INVOICE, OR NOTHING IS CHARGED.
@@ -141,10 +153,11 @@ describe("every way to the reader goes through doorFor", () => {
 describe("a PaymentIntent nobody can reach is cancelled, not left open on the tenant's Stripe", () => {
   it("every mint in this file self-cancels when the sheet closed under it", () => {
     const mints = [...SRC.matchAll(/createTapPaymentIntent\(/g)].map((m) => m.index ?? 0);
-    // Three: the open-time pre-mint (Apple 5.6), doorFor's (the press, the job/appointment tap and
-    // the post-terms retry all come through it), and the yes to "Send INV-078 as the bill first?"
-    // asked by the open-time mint on a draft (sendAndGo), which sends it and holds the door.
-    expect(mints).toHaveLength(3);
+    // Two: the open-time pre-mint (Apple 5.6), and doorFor's (the press, the job/appointment tap, the
+    // post-terms retry and the yes to "Send INV-078 as the bill first?" all come through it). The
+    // third was the open-time mint's own ask on a draft; in the one Get Paid sheet (W1-26) a card
+    // door asks when it is PRESSED, so the cash half of the sheet is never stopped by a card question.
+    expect(mints).toHaveLength(2);
     for (const at of mints) {
       // Within the handful of lines after the mint resolves, the closed-sheet branch has to let
       // the intent go. Before this wave doorFor's mint just `return`ed and the intent stayed
@@ -163,9 +176,9 @@ describe("a PaymentIntent nobody can reach is cancelled, not left open on the te
  * payment made weeks ago could not be written down without first sending the invoice, and a
  * company with no Venmo handle could not record one at all.
  */
-describe("Record Payment records Venmo like cash, and its QR writes nothing", () => {
-  const start = SRC.indexOf("export function RecordPaymentButton(");
-  const end = SRC.indexOf("export function SettleUpButton(");
+describe("Or They Paid Another Way (Record Payment's machine) records Venmo like cash, and its QR writes nothing", () => {
+  const start = SRC.indexOf("function useOtherWay(");
+  const end = SRC.indexOf("export function GetPaidButton(");
   const BODY = SRC.slice(start, end);
 
   it("finds the component", () => {
@@ -179,8 +192,9 @@ describe("Record Payment records Venmo like cash, and its QR writes nothing", ()
   });
 
   it("always offers Record It, whatever chip is picked", () => {
-    expect(BODY).toMatch(/onSave=\{go\}\s+saving=\{pending\}\s+saveLabel="Record It"/);
+    expect(BODY).toMatch(/onClick=\{go\} disabled=\{pending \|\| qrPending\}>\s*\{pending \? "Saving…" : "Record It"\}/);
     expect(BODY).not.toMatch(/saveLabel=\{key === "venmo"/);
+    expect(BODY).not.toMatch(/key === "venmo" \? [^:]*"Record It"/);
   });
 
   it("stores the picked chip, not a hard-coded venmo", () => {
@@ -243,5 +257,77 @@ describe("venmoQrFor only reads and draws", () => {
     );
     expect(card).toContain("venmoQrData(");
     expect(card).not.toContain("venmo.com/u/");
+  });
+});
+
+/**
+ * ONE GET PAID SHEET (W1-26). Pay Now and Record Payment were two buttons with two sheets; they are
+ * two panels of one sheet, "Get Paid $<balance>": the card first (Tap to Pay first, primary, full
+ * width, never greyed - Apple 5.1/5.2/5.3), then "Or They Paid Another Way". SettleUpButton keeps its
+ * name and props and opens the same sheet on the job hub and the visit.
+ */
+describe("the one Get Paid sheet", () => {
+  const INV_078 = { source: "invoice" as const, invoiceId: "09ff65de-2ec8-4884-a31f-583a8943b09a", balance: 1558.62 };
+  const html = (props: Record<string, unknown>) => renderToStaticMarkup(createElement(GetPaidButton as any, props));
+
+  it("is titled with what is owed, and the card comes before every other way", () => {
+    const out = html({ ...INV_078, cardEnabled: true, methods: ["Cash", "Check", "Credit Card", "Venmo"] });
+    expect(out).toContain('data-modal="Get Paid $1,558.62"');
+    const card = out.indexOf("Show Card QR");
+    const other = out.indexOf("Or They Paid Another Way");
+    expect(card).toBeGreaterThan(-1);
+    expect(other).toBeGreaterThan(card);
+    // Card is the card panel's; the other way's chips drop it by key ("Credit Card" is card).
+    expect(out).not.toContain(">Credit Card<");
+    expect(out).toContain(">Cash<");
+    expect(out).toContain("Record It");
+    expect(out).not.toContain("Card payments go through Pay Now");
+  });
+
+  it("with cards off there is no card panel, and the sheet says where cards get switched on", () => {
+    const out = html({ ...INV_078, cardEnabled: false, methods: ["Cash"] });
+    expect(out).not.toContain("Show Card QR");
+    expect(out).toContain("How They Paid");
+    expect(out).not.toContain("Or They Paid Another Way");
+    expect(out).toContain("Set Up Card Payments");
+  });
+
+  it("a bank transfer on its way is said inside the sheet: don't record it by hand", () => {
+    const out = html({ ...INV_078, cardEnabled: true, transferPending: "A $1,558.62 bank transfer is on its way." });
+    expect(out).toContain("A $1,558.62 bank transfer is on its way. Don&#x27;t record it by hand, or it counts twice.");
+  });
+
+  it("every door into it is 44px: the method chips, the fields and the small Getting Paid Now? link", () => {
+    const out = html({ ...INV_078, cardEnabled: true, methods: ["Cash", "Check"] });
+    expect(out).toMatch(/class="inline-flex min-h-11 items-center rounded-lg border px-3 text-sm font-semibold capitalize/);
+    expect(out).toMatch(/id="rp-date"[^>]*class="h-11/);
+    const link = html({ ...INV_078, trigger: "link" });
+    expect(link).toMatch(/<button type="button" class="inline-flex min-h-11 items-center text-sm font-medium text-brand hover:underline">Getting Paid Now\?<\/button>/);
+  });
+
+  it("the job hub and the visit keep SettleUpButton, and it opens the same sheet", () => {
+    const out = renderToStaticMarkup(createElement(SettleUpButton as any, { source: "job", id: "j-1", compact: true, cardEnabled: true, methods: ["Cash"] }));
+    expect(out).toContain('data-modal="Get Paid"');
+    expect(out).toContain("Send The Bill &amp; Show Card QR");
+    expect(SRC).toMatch(/export function SettleUpButton\(props: Mode & \{/);
+    expect(SRC).toContain('return <GetPaidButton {...(rest as Mode & Omit<typeof rest, "source">)} trigger={compact ? "outline" : "primary"} />;');
+  });
+
+  it("Tap to Pay is FIRST in the card panel, primary, full width, never disabled (Apple 5.1/5.2/5.3)", () => {
+    const panel = SRC.slice(SRC.indexOf("const panel: React.ReactNode = !props.cardEnabled ? null : !art ? ("), SRC.indexOf("return { onOpen, reset, takeover, panel };"));
+    const tap = panel.indexOf("<TapToPayGlyph /> Tap to Pay");
+    const qr = panel.indexOf('"Show Card QR"');
+    expect(tap).toBeGreaterThan(-1);
+    expect(qr).toBeGreaterThan(tap);
+    for (const m of panel.matchAll(/<Button className="w-full" onClick=\{\(\) => void tapToPay\(\)\}>/g)) expect(m[0]).not.toContain("disabled");
+    // The sheet draws the card panel before the other way, every time.
+    expect(SRC).toMatch(/\{card\.panel\}\s*\{other\.panel\(!!card\.panel, transferPending\)\}/);
+  });
+
+  it("opening the sheet on a draft asks nothing yet: the card doors ask when pressed, and the cash half stays in reach", () => {
+    expect(SRC).toContain("if (r.needsSend && gen.current === g) setDraftAtOpen(r.invoiceNumber ?? null);");
+    expect(SRC).not.toMatch(/then: "mint"/);
+    // Not Now on a card's question goes back to the sheet, never closes it.
+    expect(SRC).toContain('<Button variant="outline" onClick={() => setAsk(null)}>Not Now</Button>');
   });
 });

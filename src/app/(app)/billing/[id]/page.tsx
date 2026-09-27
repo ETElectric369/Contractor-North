@@ -1,9 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { User, FileText, Printer } from "lucide-react";
+import { User, FileText, Printer, Briefcase } from "lucide-react";
 import { BackLink } from "@/components/back-link";
 import { canAcceptPayments, connectStateFromOrg } from "@/lib/stripe-connect";
-import { PayNowButton, RecordPaymentButton } from "@/components/settle-up-button";
+import { GetPaidButton } from "@/components/settle-up-button";
 import { qboConnected } from "@/lib/quickbooks";
 import { QboInvoiceButton } from "./qbo-button";
 import { createClient } from "@/lib/supabase/server";
@@ -11,11 +11,11 @@ import { firstThatWorks, kitsSelectRungs } from "@/lib/kit-line";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { clockDoorWords } from "@/lib/long-shift";
-import { InvoiceDetail } from "./invoice-detail";
+import { InvoiceDetail, InvoiceStatusMenuItems, SetAsideButton } from "./invoice-detail";
 import { CreditButton } from "./credit-button";
 import { ShareIconButton } from "@/components/share-icon-button";
-import { EmailButton } from "@/components/email-button";
-import { SectionActionsMenu } from "@/components/section-actions-menu";
+import { SendButton } from "@/components/send-sheet";
+import { ACTIONS_ROW_CLS, SectionActionsMenu } from "@/components/section-actions-menu";
 import { invoiceSectionTree } from "@/lib/nav-tree";
 import { deleteInvoice, invoiceShareText } from "../actions";
 import { getOrgSettings } from "@/lib/org-settings";
@@ -41,9 +41,18 @@ import { AlreadyBilledButton, NotBilledAfterAllButton } from "@/components/alrea
 import { invoiceCanHoldNoJobHours, noJobHandsShown } from "@/lib/already-billed";
 import { markupBoxSeed } from "@/lib/invoice-markup";
 import { pendingTransfers, transferOnItsWaySentence } from "@/lib/bank-transfer";
+import { netTermsDays } from "@/lib/invoice-due";
+import { estimateIsTheContract, isLiveQuote } from "@/lib/invoice-import-rule";
 import type { Invoice, InvoiceItem, Payment } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
+
+/**
+ * ERIK'S OPEN QUESTION, BUILT AS RECOMMENDED AND EASY TO FLIP (Wave 1): a draft's one button is
+ * Send $X, and running drafts like INV-078 take payments before they go out, so a small "Getting
+ * Paid Now?" sits under Send and opens Get Paid (it is in the ⋯ either way). false removes the link.
+ */
+const GETTING_PAID_NOW_LINK = true;
 
 export default async function InvoicePage({
   params,
@@ -147,7 +156,8 @@ export default async function InvoicePage({
      three days. Only while some shift on no job is open to mark (a door onto nothing is a dead end);
      a lost read shows the door, and the sheet says what it finds. */
   const noJobDoorHere = invoiceCanHoldNoJobHours(inv as any, (items ?? []) as unknown[]);
-  const [supplierNames, { data: payRows }, markupRead, qboOn, noJobHands, openNoJob] = await Promise.all([
+  const invJobIdEarly = ((inv as { job_id?: string | null }).job_id ?? null) as string | null;
+  const [supplierNames, { data: payRows }, markupRead, qboOn, noJobHands, openNoJob, jobContract] = await Promise.all([
     fetchSupplierNames(supabase),
     supabase.from("profile_pay").select("id, bill_rate"),
     /* WHAT THIS INVOICE IS PRICED AT (Erik, 2026-09-25: "i changed andrew's invoice to 11% ... but
@@ -181,6 +191,29 @@ export default async function InvoicePage({
           },
         )
       : Promise.resolve(0),
+    /* IS THE JOB'S ESTIMATE ITS CONTRACT? (W1-27, estimateIsTheContract.) Bring In New Work runs the
+       job's hours and receipts only where no estimate is the price; otherwise only its approved
+       change orders. A lost read is null: the button then brings in only what can't bill a contract
+       twice, and says why. No job: nothing to ask. */
+    invJobIdEarly
+      ? Promise.all([
+          supabase.from("jobs").select("billing_type").eq("id", invJobIdEarly).maybeSingle(),
+          supabase.from("quotes").select("status").eq("job_id", invJobIdEarly),
+        ]).then(
+          ([j, q]) => {
+            if (j.error || q.error) {
+              reportError("billing.[id].jobContract", j.error ?? q.error, { invoiceId: inv.id });
+              return null;
+            }
+            const billing = (j.data as { billing_type?: string | null } | null)?.billing_type ?? null;
+            return estimateIsTheContract(billing, ((q.data ?? []) as { status?: string | null }[]).some((x) => isLiveQuote(x.status)));
+          },
+          (e: unknown) => {
+            reportError("billing.[id].jobContract", e, { invoiceId: inv.id });
+            return null;
+          },
+        )
+      : Promise.resolve(undefined),
   ]);
   const noJobHandLines = noJobHands && noJobHands !== "failed" ? noJobHands.lines : [];
   // openNoJob null: the read was lost, so the door shows (the sheet says what it finds). A database
@@ -277,6 +310,33 @@ export default async function InvoicePage({
     return { id: r.id, clockIn: r.clockIn, name: self ? "You" : r.name, self, door: clockDoorWords(r.fullName, { self }).clockOut };
   });
   const inFlight = (await inFlightP)?.byInvoice.get(String(inv.id)) ?? [];
+  const balance = invoiceBalance(inv.total, inv.amount_paid);
+  /* THE ONE DEFINITION OF "THEY'RE HOLDING AN OLDER BILL" (0269), asked once for the notice in the
+     body and the ⋯'s Mark Sent Again. Paid in full after the change = the customer has the current
+     bill (the board's rule). */
+  const holdsOlderCopy = customerHoldsOlderCopy(
+    (inv as { sent_at?: string | null }).sent_at,
+    (inv as { revised_at?: string | null }).revised_at,
+    { total: inv.total, amountPaid: inv.amount_paid, paidAt: ((payments ?? []) as { paid_at?: string | null }[]).map((p) => p.paid_at) },
+  );
+  /** The badge: the status, and on a paid bill how much and when (the newest payment). */
+  const lastPaidAt = ((payments ?? []) as { paid_at?: string | null }[])[0]?.paid_at ?? null;
+  const statusWords =
+    inv.status === "paid"
+      ? `Paid ${formatCurrency(Number(inv.amount_paid ?? 0))}${lastPaidAt ? ` · ${formatDate(lastPaidAt)}` : ""}`
+      : inv.status;
+  /** Every Get Paid door on this page opens the same sheet, with the same facts. */
+  const payDoor = {
+    source: "invoice" as const,
+    invoiceId: inv.id,
+    balance,
+    cardEnabled,
+    textReady,
+    methods: paymentMethods,
+    venmoConfigured: Boolean(orgSettings.venmo_handle?.trim()),
+    // A transfer on its way is said inside the sheet too: recorded by hand as well, it counts twice.
+    transferPending: inFlight.length > 0 ? transferOnItsWaySentence(inFlight, orgSettings.timezone) : null,
+  };
 
   return (
     <div className="mx-auto max-w-4xl">
@@ -288,7 +348,9 @@ export default async function InvoicePage({
           <h1 className="text-2xl font-bold text-slate-900">
             {inv.invoice_number}
           </h1>
-          <Badge tone={statusTone(inv.status)}>{inv.status}</Badge>
+          {/* THE ONE PLACE THE STATUS SHOWS (W1-27): the picker left the body; on a paid bill the
+              badge says how much and when. */}
+          <Badge tone={statusTone(inv.status)}>{statusWords}</Badge>
           {/* Text it, AirDrop it, WhatsApp it — the way a contractor in a driveway actually sends
               things. Sends the customer's own token link on this business's domain; before this
               existed the only path was the OS share sheet on the PDF preview, which shipped the
@@ -320,45 +382,31 @@ export default async function InvoicePage({
           )}
         </div>
         </div>
-        {/* The impulse row holds the frequent verbs (Send / Record payment / Print);
-            the ⋯ Actions menu (last) is the seek door for the rare deliberate ones —
-            Credit/refund, QuickBooks, the Job link, and Delete (danger, last). */}
-        <div className="flex flex-wrap items-center gap-2 self-start">
-          {/* PAY NOW — the card door, up here with the other verbs (Erik 2026-09-10: "the pay now
-              button should have the credit card stuff"). It replaces the old Collect Payment link,
-              which opened the customer's checkout in a new tab of the OFFICE's browser. Shown on a
-              draft too - and there it ASKS first ("Send INV-078 as the bill first?") and sends it
-              only on the yes (Connected North Phase 1: no pay door sends a draft on its own). */}
-          {invoiceBalance(inv.total, inv.amount_paid) > 0.005 && (
-            <PayNowButton source="invoice" invoiceId={inv.id} balance={invoiceBalance(inv.total, inv.amount_paid)} cardEnabled={cardEnabled} textReady={textReady} />
-          )}
-          <EmailButton
-            id={inv.id}
-            kind="invoice"
-            customerName={inv.customers?.name ?? null}
-            amount={Number(inv.total)}
-            textReady={textReady}
-          />
-          {/* RECORD PAYMENT — everything that isn't a card, as a sheet the same size as Pay Now,
-              in the same row. This used to be an anchor that scrolled to a form in the right
-              column, so the page had two Record Payment buttons and Pay Now sat inside the form.
-              Payments record on DRAFTS too (Erik 7/24): deposits and Venmo prepayments arrive
-              before the invoice goes out, and blocking them forced a fake workflow. */}
-          {invoiceBalance(inv.total, inv.amount_paid) > 0.005 && (
-            <RecordPaymentButton
-              source="invoice"
-              invoiceId={inv.id}
-              balance={invoiceBalance(inv.total, inv.amount_paid)}
-              methods={paymentMethods}
-              venmoConfigured={Boolean(orgSettings.venmo_handle?.trim())}
-            />
-          )}
-          <Link
-            href={`/print/pdf-preview?doc=invoice&id=${inv.id}&back=/billing/${inv.id}`}
-            className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white h-11 px-4 text-sm font-medium text-slate-800 hover:bg-slate-50"
-          >
-            <Printer className="h-4 w-4" /> Preview / Print
-          </Link>
+        {/* ONE PRIMARY BUTTON THAT FOLLOWS THE STATUS (W1-26), then ⋯. A draft: Send $<total> (the
+            Send sheet), with a small "Getting Paid Now?" under it - running drafts like INV-078
+            take payments before they go out. Sent, partial or overdue with money owed: Get Paid
+            $<balance> (the one sheet: card first, then every other way). Paid in full or void:
+            nothing to press. Everything rarer is in the ⋯, in this order: Preview / Print, Send
+            Again, Get Paid (a draft), Job, Credit / Refund, QuickBooks, Set Aside Until…, the status
+            deeds, then Delete or the sentence why it can't be. */}
+        <div className="flex flex-wrap items-start gap-2 self-start">
+          {isDraft ? (
+            <div className="flex flex-col items-end">
+              <SendButton
+                kind="invoice"
+                id={inv.id}
+                number={inv.invoice_number}
+                customerName={inv.customers?.name ?? null}
+                amount={Number(inv.total)}
+                lineCount={(items ?? []).length}
+                textReady={textReady}
+                label={`Send ${formatCurrency(Number(inv.total))}`}
+              />
+              {GETTING_PAID_NOW_LINK && balance > 0.005 && <GetPaidButton {...payDoor} trigger="link" />}
+            </div>
+          ) : inv.status !== "void" && inv.status !== "paid" && balance > 0.005 ? (
+            <GetPaidButton {...payDoor} label={`Get Paid ${formatCurrency(balance)}`} />
+          ) : null}
           <SectionActionsMenu
             tree={invoiceSectionTree(
               inv.invoice_number,
@@ -375,8 +423,32 @@ export default async function InvoicePage({
               // Delete Invoice offered on every void, sent and paid bill exactly as before, while
               // the code above it read as though it had been fixed.
               { status: inv.status, hasPayments: Number(inv.amount_paid ?? 0) > 0 || (payments ?? []).length > 0 },
+              // Job is composed below, in its place in the order (the menu draws children first).
+              { jobNode: false },
             )}
           >
+            <Link href={`/print/pdf-preview?doc=invoice&id=${inv.id}&back=/billing/${inv.id}`} className={ACTIONS_ROW_CLS}>
+              <Printer className="h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" /> Preview / Print
+            </Link>
+            {!isDraft && inv.status !== "void" && (
+              <SendButton
+                variant="menuItem"
+                label="Send Again"
+                kind="invoice"
+                id={inv.id}
+                number={inv.invoice_number}
+                customerName={inv.customers?.name ?? null}
+                amount={Number(inv.total)}
+                lineCount={(items ?? []).length}
+                textReady={textReady}
+              />
+            )}
+            {isDraft && balance > 0.005 && <GetPaidButton {...payDoor} trigger="menuItem" />}
+            {(inv as any).job_id && (
+              <Link href={`/jobs/${(inv as any).job_id}`} className={ACTIONS_ROW_CLS}>
+                <Briefcase className="h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" /> Job
+              </Link>
+            )}
             <CreditButton
               menuItem
               invoiceId={inv.id}
@@ -391,6 +463,22 @@ export default async function InvoicePage({
               defaultAmount={invoiceOverpayment(inv.total, inv.amount_paid)}
             />
             {qboOn && <QboInvoiceButton menuItem id={inv.id} />}
+            {isDraft && (
+              <SetAsideButton
+                invoiceId={inv.id}
+                tz={orgSettings.timezone}
+                holdUntil={(inv as { hold_until?: string | null }).hold_until ?? null}
+                holdReason={(inv as { hold_reason?: string | null }).hold_reason ?? null}
+              />
+            )}
+            <InvoiceStatusMenuItems
+              invoiceId={inv.id}
+              invoiceNumber={inv.invoice_number}
+              status={inv.status}
+              sentAt={(inv as { sent_at?: string | null }).sent_at ?? null}
+              amountPaid={Number(inv.amount_paid ?? 0)}
+              customerHoldsOlderCopy={holdsOlderCopy}
+            />
           </SectionActionsMenu>
         </div>
       </div>
@@ -495,12 +583,9 @@ export default async function InvoicePage({
         noBillRateIds={noBillRateIds}
         tz={orgSettings.timezone}
         salesTax={featureOn(orgSettings.features, "sales_tax")}
-        customerHoldsOlderCopy={customerHoldsOlderCopy(
-          (inv as { sent_at?: string | null }).sent_at,
-          (inv as { revised_at?: string | null }).revised_at,
-          // Paid in full after the change = the customer has the current bill (the board's rule).
-          { total: inv.total, amountPaid: inv.amount_paid, paidAt: ((payments ?? []) as { paid_at?: string | null }[]).map((p) => p.paid_at) },
-        )}
+        customerHoldsOlderCopy={holdsOlderCopy}
+        netDays={netTermsDays((org as any)?.settings)}
+        estimateIsContract={jobContract}
       />
     </div>
   );

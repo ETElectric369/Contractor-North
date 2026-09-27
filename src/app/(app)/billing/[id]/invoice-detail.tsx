@@ -1,11 +1,11 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { NewCustomerInline } from "@/components/new-customer-inline";
 import { useRouter } from "next/navigation";
 import { taxFieldShown } from "@/lib/sales-tax-switch";
 import Link from "next/link";
-import { Plus, Trash2, Pencil, Check, X, ChevronUp, ChevronDown, ChevronsUp, ChevronsDown, Layers } from "lucide-react";
+import { Plus, Trash2, Pencil, Check, X, ChevronsUp, ChevronsDown, Layers, PackagePlus, CalendarClock, Ban, Undo2, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
@@ -44,10 +44,14 @@ import {
   type ImportStats,
 } from "../actions";
 import { AddLineItems } from "@/components/add-line-items";
-/* The same Send Invoice the verb row at the top of the page uses — one send door, not a second
-   one written here. It rides inside the "they are holding an older bill" notice so the fix is
+/* The same Send sheet the header's Send and the ⋯ Send Again open (W1-26) — one send door, not a
+   second one written here. It rides inside the "they are holding an older bill" notice so the fix is
    where the problem is said, and nobody has to scroll back up hunting for it. */
-import { EmailButton } from "@/components/email-button";
+import { SendButton } from "@/components/send-sheet";
+import { ACTIONS_NOTE_CLS, ACTIONS_ROW_CLS } from "@/components/section-actions-menu";
+import { bringInNewWorkSteps, bringInSentence, BRING_IN_NEW_WORK, type BringInOutcome, type BringInStep } from "@/lib/actuals-draw";
+import { invoiceStatusItems, statusToSend } from "@/lib/nav-tree";
+import { todayStrInTz } from "@/lib/tz";
 import { MarkupBox } from "./markup-box";
 
 interface PriceItemLite { id: string; code: string | null; description: string; unit: string; buy_price: number; markup_pct: number; }
@@ -156,6 +160,8 @@ export function InvoiceDetail({
   noBillRateIds = [],
   tz = "America/Los_Angeles",
   salesTax = true,
+  netDays = 30,
+  estimateIsContract,
 }: {
   invoice: Invoice;
   items: InvoiceItem[];
@@ -198,6 +204,12 @@ export function InvoiceDetail({
   tz?: string;
   /** The Sales Tax switch (0352). Off: an untaxed invoice draws no tax row. Absent = on. */
   salesTax?: boolean;
+  /** The company's terms in days (lib/invoice-due netTermsDays): "Due Oct 8 · Net 14", and on an
+   *  untouched draft "Due 14 days after you send it" - the date the first send stamps (W1-27). */
+  netDays?: number;
+  /** The invoice's job bills its estimate as the contract (estimateIsTheContract), for what Bring In
+   *  New Work runs. undefined = not asked; null = the job couldn't be read (lib/actuals-draw). */
+  estimateIsContract?: boolean | null;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -210,19 +222,60 @@ export function InvoiceDetail({
 
   const balance = invoiceBalance(invoice.total, invoice.amount_paid);
 
-  // invoice description (scope shown above the line items)
+  /* THE DESCRIPTION SAVES ITSELF (W1-27, the NOT-annoying rule: no save game). 800 ms after the
+     typing stops, and on leaving the box, with "Saving…" then "Saved" beside the label - and a red
+     "Didn't Save · Try Again" that stays until a save lands, never a quiet loss. Only text that
+     really changed is sent: every write to a delivered bill stamps revised_at (0269) and raises the
+     holding-an-older-copy notice, so an unchanged blur must write nothing. One save at a time; the
+     text typed during one goes next. */
   const [descr, setDescr] = useState((invoice as any).description ?? "");
-  const [descrSaved, setDescrSaved] = useState(false);
-  const descrDirty = descr !== ((invoice as any).description ?? "");
-  function saveDescr() {
-    setDescrSaved(false);
-    start(async () => {
-      const res = await setInvoiceDescription(invoice.id, descr);
-      if (!res?.ok) { toast(res?.error ?? "Couldn't save the description — try again.", "error"); return; }
-      setDescrSaved(true);
-      setTimeout(() => setDescrSaved(false), 2000);
-    });
+  const descrSavedText = useRef<string>((invoice as any).description ?? "");
+  const [descrState, setDescrState] = useState<"idle" | "saving" | "saved" | "failed">("idle");
+  const descrTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const descrBusy = useRef(false);
+  const descrLatest = useRef<string>(descr);
+  async function saveDescr(): Promise<void> {
+    if (descrTimer.current) clearTimeout(descrTimer.current);
+    if (descrBusy.current) return; // the save in flight saves the latest text when it lands
+    const text = descrLatest.current;
+    if (text.trim() === descrSavedText.current.trim()) {
+      if (descrState === "failed") setDescrState("idle");
+      return;
+    }
+    descrBusy.current = true;
+    setDescrState("saving");
+    const res = await setInvoiceDescription(invoice.id, text).catch(() => ({ ok: false as const, error: "That didn't reach the server." }));
+    descrBusy.current = false;
+    if (!res?.ok) {
+      setDescrState("failed");
+      return;
+    }
+    descrSavedText.current = text;
+    setDescrState("saved");
+    // A delivered bill just changed: the page reads again, so the older-copy notice says so.
+    refresh();
+    // Typed while that save was out: save that too.
+    if (descrLatest.current.trim() !== text.trim()) void saveDescr();
   }
+  function typeDescr(v: string) {
+    setDescr(v);
+    descrLatest.current = v;
+    if (descrState === "saved") setDescrState("idle");
+    if (descrTimer.current) clearTimeout(descrTimer.current);
+    descrTimer.current = setTimeout(() => void saveDescr(), 800);
+  }
+  // Leaving the page with a save still waiting on its 800 ms: send it now rather than lose it.
+  useEffect(
+    () => () => {
+      if (descrTimer.current) {
+        clearTimeout(descrTimer.current);
+        if (descrLatest.current.trim() !== descrSavedText.current.trim()) void setInvoiceDescription(invoice.id, descrLatest.current);
+      }
+    },
+    // One unmount per page.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
 
   const isDraft = invoice.status === "draft";
   /* ONE NAME FOR THE WHOLE CARD, NOT FOUR MEMORIES (INV-069, 2026-09-18).
@@ -287,35 +340,79 @@ export function InvoiceDetail({
   /** The customer, by name, in the sentences about what they are holding. */
   const who = customerName?.trim() || "The customer";
 
-  // inline-editable title (the short header label)
+  /* THE TITLE: TAP TO EDIT, SAVED ON LEAVING THE BOX OR ENTER, ESCAPE PUTS IT BACK (W1-27). The
+     check button went: leaving the box IS the save, and the toast carries Undo, the way back that
+     works on a phone with no Escape key. Nothing is sent when nothing changed. */
   const [titleEditing, setTitleEditing] = useState(false);
   const [title, setTitle] = useState(invoice.title ?? "");
   const [titleError, setTitleError] = useState<string | null>(null);
-  function saveTitle() {
-    setTitleError(null);
+  const titleSaved = useRef<string>(invoice.title ?? "");
+  const titleCancelled = useRef(false);
+  function writeTitle(next: string, prev: string, undoable: boolean) {
     start(async () => {
-      const res = await setInvoiceTitle(invoice.id, title);
-      if (!res.ok) { setTitleError(res.error ?? "Could not save the title."); return; }
-      setTitleEditing(false);
+      const res = await setInvoiceTitle(invoice.id, next);
+      if (!res.ok) {
+        setTitleError(res.error ?? "The title didn't save.");
+        setTitle(next);
+        setTitleEditing(true);
+        return;
+      }
+      titleSaved.current = next;
+      setTitle(next);
+      setTitleError(null);
+      toast(undoable ? "Title saved" : "Title put back", "success", undoable ? { label: "Undo", onClick: () => writeTitle(prev, next, false) } : undefined);
       refresh();
     });
   }
+  function commitTitle() {
+    if (titleCancelled.current) {
+      titleCancelled.current = false;
+      return;
+    }
+    setTitleEditing(false);
+    const next = title.trim();
+    const prev = titleSaved.current;
+    if (next === prev.trim()) {
+      setTitle(prev);
+      return;
+    }
+    writeTitle(next, prev, true);
+  }
+  function cancelTitle() {
+    titleCancelled.current = true;
+    setTitle(titleSaved.current);
+    setTitleError(null);
+    setTitleEditing(false);
+  }
 
-  // editable due date (the field the Overdue tracker reads)
-  const [dueDate, setDueDate] = useState(toDateInput(invoice.due_date));
-  const [dueSaved, setDueSaved] = useState(false);
-  const [dueError, setDueError] = useState<string | null>(null);
-  const dueDirty = dueDate !== toDateInput(invoice.due_date);
-  function saveDue() {
-    setDueError(null);
-    setDueSaved(false);
+  /* THE DUE DATE COMES FROM THE COMPANY'S TERMS (W1-27). It reads "Due Oct 8 · Net 14"; a draft
+     whose date nobody picked reads "Due 14 days after you send it", because the first send stamps
+     send day + the terms (markInvoiceSent) - unless a person picked a date, which is theirs
+     (invoices.due_date_by_hand, 0366). Change opens the picker, and a picked date saves on the
+     spot with Undo; Save, "Unsaved" and Clear are gone (an invoice always has a due date - the
+     Overdue tracker needs one). */
+  const [dueEditing, setDueEditing] = useState(false);
+  const dueByHand = (invoice as { due_date_by_hand?: boolean | null }).due_date_by_hand;
+  function writeDue(date: string | null, byHand: boolean, undo: { date: string | null; byHand: boolean } | null) {
     start(async () => {
-      const res = await setInvoiceDueDate(invoice.id, dueDate || null);
-      if (!res.ok) { setDueError(res.error ?? "Could not save the due date."); return; }
-      setDueSaved(true);
-      setTimeout(() => setDueSaved(false), 2000);
+      const res = await setInvoiceDueDate(invoice.id, date, { byHand });
+      if (!res.ok) {
+        toast(res.error ?? "The due date didn't save - try again.", "error");
+        return;
+      }
+      toast(
+        undo ? `Due date moved to ${shortDay(date)}` : `Due date put back to ${shortDay(date)}`,
+        "success",
+        undo ? { label: "Undo", onClick: () => writeDue(undo.date, undo.byHand, null) } : undefined,
+      );
       refresh();
     });
+  }
+  function pickDue(v: string) {
+    setDueEditing(false);
+    const prev = toDateInput(invoice.due_date);
+    if (!v || v === prev) return;
+    writeDue(v, true, { date: prev || null, byHand: dueByHand !== false });
   }
 
   // draft-only customer/job correction
@@ -363,11 +460,12 @@ export function InvoiceDetail({
   const [importMsg, setImportMsg] = useState<string | null>(null);
   /** Money the last import left for a person to decide (an edited tax row behind its parts). */
   const [importWarn, setImportWarn] = useState<string | null>(null);
-  /** An import that could not touch ANYTHING — every line edited, or the deleted ones tombstoned.
-   *  Naming the source arms the "start over" button beside the message (0204). */
-  const [stuckSource, setStuckSource] = useState<"labor" | "costs" | "quote" | "change_orders" | null>(null);
-  /** A draft deliberately waiting — leaves Needs action until this date (0206). */
-  const [hold, setHold] = useState<string>((invoice as { hold_until?: string | null }).hold_until ?? "");
+  /** Imports that could not touch ANYTHING — every line edited, or the deleted ones tombstoned.
+   *  Naming each source arms its "Start It Over" beside the message (0204). */
+  const [stuckSources, setStuckSources] = useState<("labor" | "costs" | "quote" | "change_orders")[]>([]);
+  /** A draft deliberately set aside (0206): the one body line says until when, and why. */
+  const holdUntil = (invoice as { hold_until?: string | null }).hold_until ?? null;
+  const holdReason = (invoice as { hold_reason?: string | null }).hold_reason ?? null;
   /* THE % BOX STARTS WHERE THE INVOICE IS (2026-09-25). It used to start at the customer's usual
      markup whatever the lines said, so on INV-078 - moved to 11% - it read 15, and the next touch
      sent that 15 back over every untouched line. The server now reads what the lines are priced at
@@ -426,7 +524,7 @@ export function InvoiceDetail({
     }
     setImportMsg(null);
     setImportWarn(null);
-    setStuckSource(null);
+    setStuckSources([]);
     start(async () => {
       const res = await fn(invoice.id);
       if (!res.ok) {
@@ -462,7 +560,7 @@ export function InvoiceDetail({
       // its summary already says why, and arming Start It Over would only offer to rebuild
       // nothing. Stats from before 0255 carry no pulled_in, so they keep the old rule.
       const stuck = !!st && !st.inserted && !st.updated && !st.removed && (st.pulled_in == null || st.pulled_in > 0);
-      setStuckSource(stuck ? sourceKey : null);
+      setStuckSources(stuck && sourceKey ? [sourceKey] : []);
       setImportMsg(said ? `${label}: ${said}.` : `${label} imported.`);
       // "3 of your edits kept" was the whole story on INV-074 while its edited tax rows sat at the
       // old markup. The warning rides in the toast, and stays under the import row until the next
@@ -473,6 +571,70 @@ export function InvoiceDetail({
       toast(`${said ? `${label}: ${said}` : `${label} imported`}${warn ? `. ${warn}` : ""}`, warn ? "info" : "success");
       setTimeout(() => setImportMsg(null), 5000);
       onOk?.();
+      refresh();
+    });
+  }
+
+  /* BRING IN NEW WORK (W1-27): one button where four were. What it runs is lib/actuals-draw's
+     bringInNewWorkSteps (a Time & Material or actuals invoice: Labor, Materials, Approved Change
+     Orders; an estimate's invoice: its lines while it holds none, then Approved Change Orders -
+     never labor or materials on top of a price). The importers run one after another; ONE confirm
+     when lines already on the invoice would refresh (the same words the single imports used, with
+     the materials' markup sentence), and ONE sentence after, built from what each importer said -
+     a part that failed is named beside the parts that landed, never one "failed" for the lot. */
+  const bringInSteps: BringInStep[] = bringInNewWorkSteps({
+    importMode: importRow,
+    hasJob: !!invoice.job_id,
+    quoteId: (invoice as { quote_id?: string | null }).quote_id ?? null,
+    quoteLinesOnInvoice: items.filter((i) => i.import_source === "quote").length,
+    estimateIsContract,
+  });
+  function bringInNewWork() {
+    const plan = materialsImportPlan(box, markupSeed);
+    const sourceOf: Record<BringInStep, "labor" | "costs" | "quote" | "change_orders"> = { labor: "labor", materials: "costs", quote: "quote", change_orders: "change_orders" };
+    const nounOf: Record<BringInStep, string> = { labor: "labor", materials: "materials", quote: "estimate", change_orders: "change order" };
+    const refreshing = bringInSteps
+      .map((st) => ({ st, n: items.filter((i) => i.import_source === sourceOf[st]).length }))
+      .filter((x) => x.n > 0);
+    if (refreshing.length) {
+      // Truthful since 0175 (imports are additive): hand-edited lines are NEVER overwritten.
+      const lines = refreshing.map((x) => `${x.n} ${nounOf[x.st]} line${x.n === 1 ? "" : "s"}`).join(" and ");
+      const ok = confirm(
+        `Bring in new work?\n\n` +
+          `This refreshes the ${lines} already on ${invoice.invoice_number} from whatever the job holds right now. ` +
+          `Lines you edited by hand are kept exactly as you set them; anything added to the job since is pulled in.\n\n` +
+          (bringInSteps.includes("materials") && plan.confirmNote ? `${plan.confirmNote}\n\n` : "") +
+          `Current total: ${formatCurrency(Number(invoice.total))}`,
+      );
+      if (!ok) return;
+    }
+    setImportMsg(null);
+    setImportWarn(null);
+    setStuckSources([]);
+    start(async () => {
+      const outcomes: BringInOutcome[] = [];
+      const fail = (e: unknown) => ({ ok: false as const, error: String((e as { message?: unknown })?.message ?? e ?? "That didn't reach the server.") });
+      for (const st of bringInSteps) {
+        const res: { ok: boolean; error?: string; empty?: boolean; emptyNote?: string; stats?: Partial<ImportStats> } =
+          st === "labor"
+            ? await importLaborIntoInvoice(invoice.id).catch(fail)
+            : st === "materials"
+              ? await importCostsIntoInvoice(invoice.id, plan.pct, plan.keepInvoiceMarkup ? { keepInvoiceMarkup: true } : undefined).catch(fail)
+              : st === "quote"
+                ? await importQuoteItemsIntoInvoice(invoice.id).catch(fail)
+                : await importChangeOrdersIntoInvoice(invoice.id).catch(fail);
+        outcomes.push({ step: st, ok: res.ok, empty: res.empty, error: res.error, emptyNote: res.emptyNote, stats: res.stats });
+        if (st === "materials" && res.ok) markupLanded(plan.pct);
+      }
+      const said = bringInSentence(outcomes);
+      setStuckSources(said.stuck.map((st) => sourceOf[st]));
+      setImportMsg(said.sentence);
+      // "3 of your edits kept" was the whole story on INV-074 while its edited tax rows sat at the
+      // old markup. The warning rides in the toast, and stays under the button until the next run.
+      const warn = said.warnings.join(". ");
+      setImportWarn(warn || null);
+      toast(`${said.sentence}${warn ? ` ${warn}.` : ""}`, said.partial ? "info" : "success");
+      setTimeout(() => setImportMsg(null), 8000);
       refresh();
     });
   }
@@ -587,19 +749,6 @@ export function InvoiceDetail({
     });
   }
 
-  function moveItem(id: string, dir: -1 | 1) {
-    const ids = items.map((i) => i.id);
-    const at = ids.indexOf(id);
-    const to = at + dir;
-    if (at < 0 || to < 0 || to >= ids.length) return;
-    [ids[at], ids[to]] = [ids[to], ids[at]];
-    start(async () => {
-      const res = await reorderInvoiceItems(invoice.id, ids);
-      if (!res?.ok) { toast(res?.error ?? "Couldn't move that line — try again.", "error"); return; }
-      refresh();
-    });
-  }
-
   /**
    * GROUP THE LABOR TOGETHER (Erik: "itll be showing up at the bottom of the list").
    *
@@ -647,204 +796,130 @@ export function InvoiceDetail({
         {/* Header fields — title (inline), due date (drives the Overdue tracker),
             and on drafts the customer/job link. */}
         <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-3">
-          {/* Title */}
+          {/* Title — tap to edit; leaving the box or Enter saves, Escape puts it back. A void bill
+              shows it as plain text: nothing on it can change. */}
           <div>
-            <Label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-400">Title</Label>
-            {titleEditing ? (
-              <div className="flex items-center gap-2">
-                <Input
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  placeholder="Short label for this invoice"
-                  onKeyDown={(e) => e.key === "Enter" && saveTitle()}
-                  autoFocus
-                />
-                <button
-                  onClick={saveTitle}
-                  disabled={pending}
-                  className="rounded-md bg-brand p-1.5 text-white hover:bg-brand-dark disabled:opacity-50"
-                  aria-label="Save title"
-                >
-                  <Check className="h-4 w-4" />
-                </button>
-                <button
-                  onClick={() => { setTitleEditing(false); setTitle(invoice.title ?? ""); setTitleError(null); }}
-                  className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100"
-                  aria-label="Cancel"
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
+            <Label htmlFor={titleEditing ? "inv-title" : undefined} className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-400">
+              Title
+            </Label>
+            {linesLocked ? (
+              <p className={invoice.title ? "font-medium text-slate-800" : "text-slate-400"}>{invoice.title || "No title"}</p>
+            ) : titleEditing ? (
+              <Input
+                id="inv-title"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="Short label for this invoice"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    e.currentTarget.blur();
+                  } else if (e.key === "Escape") {
+                    e.preventDefault();
+                    cancelTitle();
+                  }
+                }}
+                onBlur={commitTitle}
+                disabled={pending}
+                className="h-11"
+                autoFocus
+              />
             ) : (
               <button
                 type="button"
                 onClick={() => setTitleEditing(true)}
-                className="group flex w-full items-center gap-2 text-left"
+                className="group flex min-h-11 w-full items-center gap-2 text-left"
                 title="Edit title"
               >
-                <span className={invoice.title ? "font-medium text-slate-800" : "text-slate-400"}>
-                  {invoice.title || "Add a title…"}
-                </span>
+                <span className={title ? "font-medium text-slate-800" : "text-slate-400"}>{title || "Add a title…"}</span>
                 <Pencil className="h-3.5 w-3.5 text-slate-400 group-hover:text-brand" />
               </button>
             )}
             {titleError && <p className="mt-1 text-xs text-red-600">{titleError}</p>}
           </div>
 
-          {/* Due date — without this the Overdue tracker can never fire. */}
+          {/* Due date — the terms say it; without one the Overdue tracker can never fire. */}
           <div>
-            <Label htmlFor="inv-due" className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-400">Due date</Label>
-            <div className="flex items-center gap-2">
+            <Label htmlFor={dueEditing ? "inv-due" : undefined} className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-400">
+              Due Date
+            </Label>
+            {dueEditing && !linesLocked ? (
               <Input
                 id="inv-due"
                 type="date"
-                value={dueDate}
-                onChange={(e) => setDueDate(e.target.value)}
-                className="w-44"
+                defaultValue={toDateInput(invoice.due_date)}
+                onChange={(e) => pickDue(e.target.value)}
+                onBlur={() => setDueEditing(false)}
+                disabled={pending}
+                className="h-11 w-48"
+                autoFocus
               />
-              <Button size="sm" onClick={saveDue} disabled={pending || !dueDirty}>
-                {dueSaved ? <Check className="h-3.5 w-3.5" /> : null}
-                {dueSaved ? "Saved" : "Save"}
-              </Button>
-              {dueDate && (
-                <button
-                  type="button"
-                  onClick={() => setDueDate("")}
-                  className="text-xs text-slate-400 hover:text-red-600"
-                >
-                  Clear
-                </button>
-              )}
-              {dueDirty && !pending && <span className="text-xs text-slate-400">Unsaved</span>}
-            </div>
-            {dueError && <p className="mt-1 text-xs text-red-600">{dueError}</p>}
+            ) : (
+              <div className="flex flex-wrap items-center gap-x-2">
+                <span className="text-sm text-slate-700">
+                  {dueWords({ isDraft, dueDate: toDateInput(invoice.due_date), byHand: dueByHand, netDays })}
+                </span>
+                {!linesLocked && (
+                  <button type="button" onClick={() => setDueEditing(true)} className="inline-flex min-h-11 items-center text-sm font-medium text-brand hover:underline">
+                    Change
+                  </button>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Customer / job link — correctable while it's still a draft. */}
           {isDraft && (
             <div>
               <Label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-400">Customer / Job</Label>
-              <Button size="sm" variant="outline" onClick={openLink} disabled={pending}>
+              <Button variant="outline" onClick={openLink} disabled={pending}>
                 <Pencil className="mr-1 h-3.5 w-3.5" /> Edit Customer / Job
               </Button>
             </div>
           )}
         </div>
 
-        {/* Status is mostly system-derived: "Sent" comes from actually sending the
-            invoice, and "Paid"/"Partial" from recorded payments — letting the user
-            pick those by hand fakes money/send state (a "Sent" with no email, a
-            "Paid" with no payment row so Collected never moves). The manual menu is
-            limited to Draft and Void; the live status still shows as a locked option
-            when it's one the system owns. */}
-        <div className="flex flex-wrap items-center gap-3">
-          <span className="text-sm text-slate-500">Status</span>
-          <Select
-            value={invoice.status}
-            className="w-36"
-            disabled={pending}
-            onChange={(e) => {
-              /* "SENT AGAIN" IS A DEED YOU DECLARE, NOT A STATE THE BILL IS IN — AND A <select>
-                 COULD NOT TELL THE TWO APART (INV-071, 2026-09-20).
-                 The declaration below used to carry value="sent", the same value the locked
-                 current-status option carries once the invoice really is sent. A browser resolves
-                 a select's value by the FIRST option in tree order that matches it, and the
-                 declaration sits above the status, so on any bill that went out and was then
-                 revised the CLOSED dropdown read "Sent Again - I re-sent it myself" as though the
-                 corrected copy were already in Karen Wucher's hands. Three inches below, the amber
-                 banner was asking him to go do that exact thing. The picker said done; the banner
-                 said not done; only one of them was right.
-                 Two options sharing a value broke the declaration as well as the label: picking
-                 the one the browser already considers selected fires no change event, so the
-                 re-send was a no-op. The door therefore gets its own value and is translated back
-                 here, one line from the option, because the server accepts only real statuses
-                 (setInvoiceStatus's whitelist) and its cn-v962 `redelivered` branch keys off
-                 "sent". Everything past this line still sees the status, never the door. */
-              const next = e.target.value === "sent-by-hand" ? "sent" : e.target.value;
-              start(async () => {
-                const res = await setInvoiceStatus(invoice.id, next);
-                if (!res?.ok) { toast(res?.error ?? "Couldn't change the status — try again.", "error"); return; }
-                toast(next === "void" ? "Invoice voided" : next === "sent" ? "Marked as sent" : "Status updated", "success");
-                refresh();
-              });
-            }}
-          >
-            {/* BACK TO DRAFT, ONLY WHEN IT IS REALLY ON OFFER (INV-069). This option used to
-                render unconditionally and the server refused it whenever a payment existed, so
-                Erik's own $200 deposit had become the lock on his own half-built invoice: the
-                one control that would have fixed everything was right there, and it could only
-                ever say no. It now matches the server rule exactly — refused only when money is
-                on the invoice AND it actually went to the customer (sent_at). `isDraft ||` keeps
-                the option present when it is the selected value. */}
-            {(isDraft || canReturnToDraft) && <option value="draft">Draft</option>}
-            {/* Escape hatch: you sent the PDF yourself (texted/AirDropped/emailed it OUTSIDE
-                the app), so record that it went out — the invoice leaves Draft and the job
-                reads as invoiced without forcing you back through the Send button.
-
-                IT HAS A SECOND JOB NOW, AND THE SERVER ALREADY DOES IT (cn-v962, caught by two
-                reviewers). setInvoiceStatus computes `redelivered` so that re-declaring Sent on a
-                revised bill moves the delivery stamp forward and clears the "they're holding an
-                older copy" notice. That branch was unreachable: this option only rendered on a
-                draft, and a revised bill is never a draft. So a person who fixed a line and then
-                handed the customer the new copy by hand had no way to tell the app, and the
-                notice would have nagged forever — a banner you cannot clear by doing what it
-                asks. It now appears in exactly the two cases the server accepts, with the words
-                that match what each one does. */}
-            {(invoice.status === "draft" || customerHoldsOlderCopy) && (
-              /* ITS OWN VALUE, NEVER A STATUS'S. Both labels name a deed the person is declaring,
-                 and the option that shows what the invoice IS is the disabled one below. Give this
-                 one the same value and the browser picks whichever comes first in the file, which
-                 is how a sent-and-revised bill ended up describing itself as re-sent. Translated
-                 back to "sent" in the onChange above. */
-              <option value="sent-by-hand">
-                {invoice.status === "draft" ? "Sent - I sent it myself" : "Sent Again - I re-sent it myself"}
-              </option>
-            )}
-            {/* Keep the current status visible even though it isn't a manual choice. */}
-            {!["draft", "void"].includes(invoice.status) && (
-              <option value={invoice.status} disabled>
-                {invoice.status.charAt(0).toUpperCase() + invoice.status.slice(1)}
-              </option>
-            )}
-            <option value="void">Void</option>
-          </Select>
-          {/* Taking the choice away silently is the same dead end wearing a different coat, so
-              when Draft is gone, say why it is gone — and since cn-v962, say the thing that makes
-              it not matter. The old sentence sent him to Credit / Refund as if the missing Draft
-              meant the bill was finished; it never did, and now the lines below are simply open. */}
-          {!isDraft && !canReturnToDraft && (
-            <span className="text-xs text-slate-400">
-              This one is with the customer and has money on it, so it can&rsquo;t go back to Draft. You
-              don&rsquo;t need Draft to fix it: change the lines below, then send it again.
+        {/* SET ASIDE (0206), said on the one line while it is: until when, why, and the two ways
+            out. The ⋯ Set Aside Until… sets it; Change is the same sheet; Put Back ends it now. */}
+        {isDraft && holdUntil && (
+          <div className="flex flex-wrap items-center gap-x-2 rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-600">
+            <CalendarClock className="h-4 w-4 shrink-0 text-slate-400" />
+            <span className="py-2">
+              Set aside until {shortDay(holdUntil)}
+              {holdReason ? ` · ${holdReason}` : ""}
             </span>
-          )}
-          {/* PARK IT (0206) — the ending that destroys nothing. A draft waiting on a change
-              order or an approval had only Void (which unlinks the payment milestones) or
-              Delete (which throws away the line items); both record something false about a
-              bill that is simply not ready. It leaves Needs action and comes back on the date. */}
-          {isDraft && (
-            <div className="flex items-center gap-1.5">
-              <Input
-                type="date"
-                aria-label="Park this draft until"
-                value={hold}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  setHold(v);
-                  start(async () => {
-                    const res = await parkInvoice(invoice.id, v || null);
-                    if (!res?.ok) { toast(res?.error ?? "Couldn't park it — try again.", "error"); return; }
-                    toast(v ? `Parked until ${v} — it'll come back then` : "Back on the list", "success");
-                    refresh();
+            <span aria-hidden>·</span>
+            <SetAsideButton invoiceId={invoice.id} tz={tz} holdUntil={holdUntil} holdReason={holdReason} variant="link" label="Change" />
+            <span aria-hidden>·</span>
+            <button
+              type="button"
+              disabled={pending}
+              onClick={() =>
+                start(async () => {
+                  const res = await parkInvoice(invoice.id, null);
+                  if (!res?.ok) {
+                    toast(res?.error ?? "Couldn't put it back - try again.", "error");
+                    return;
+                  }
+                  toast("Back on your list.", "success", {
+                    label: "Undo",
+                    onClick: () => void parkInvoice(invoice.id, holdUntil, holdReason ?? undefined).then(() => refresh()),
                   });
-                }}
-                className="h-9 w-40 text-sm"
-              />
-              <span className="text-xs text-slate-400">{hold ? "parked until" : "park until…"}</span>
-            </div>
-          )}
-        </div>
+                  refresh();
+                })
+              }
+              className="inline-flex min-h-11 items-center font-medium text-brand hover:underline"
+            >
+              Put Back
+            </button>
+          </div>
+        )}
 
+        {/* THE STATUS LEFT THE BODY (W1-27): the header's Badge is the one place it shows, and the
+            deeds the old picker offered (Mark Sent - I Sent It Myself, Mark Sent Again, Back To Draft,
+            Void Invoice) are ⋯ rows (InvoiceStatusMenuItems below, lib/nav-tree invoiceStatusItems),
+            with the sentence that says why Draft is gone where it is. Parking is the ⋯'s Set Aside
+            Until… and the one line above. */}
         {/* THE SAME PICKER AS THE COMPOSER. This surface had its own thinner copy: it returned
             NOTHING on an empty query (so you had to guess a search term against a catalog you
             couldn't see) and capped at 6 rows where the composer shows 200 — and it never offered
@@ -886,20 +961,30 @@ export function InvoiceDetail({
             delete and recreate it (it re-imports + recomputes the credit). */}
         {/* Description / scope — printed above the line items on the invoice. */}
         <div className="rounded-xl border border-slate-200 bg-white p-3">
-          <Label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-400">Description (above line items)</Label>
-          <Textarea
-            value={descr}
-            onChange={(e) => setDescr(e.target.value)}
-            placeholder="Scope of work — shows above the line items on the invoice."
-            className="min-h-[60px]"
-          />
-          <div className="mt-2 flex items-center gap-2">
-            <Button size="sm" onClick={saveDescr} disabled={pending || !descrDirty}>
-              {descrSaved ? <Check className="h-3.5 w-3.5" /> : null}
-              {descrSaved ? "Saved" : "Save"}
-            </Button>
-            {descrDirty && !pending && <span className="text-xs text-slate-400">Unsaved</span>}
+          <div className="mb-1 flex flex-wrap items-center gap-x-2">
+            <Label htmlFor={linesLocked ? undefined : "inv-descr"} className="mb-0 block text-xs font-semibold uppercase tracking-wide text-slate-400">
+              Description (above line items)
+            </Label>
+            {descrState === "saving" && <span className="text-xs text-slate-400">Saving…</span>}
+            {descrState === "saved" && <span className="text-xs text-emerald-600">Saved</span>}
+            {descrState === "failed" && (
+              <button type="button" onClick={() => void saveDescr()} className="inline-flex min-h-11 items-center text-xs font-semibold text-red-600 hover:underline">
+                Didn&apos;t Save · Try Again
+              </button>
+            )}
           </div>
+          {linesLocked ? (
+            <p className="whitespace-pre-wrap text-sm text-slate-700">{descr || "No description."}</p>
+          ) : (
+            <Textarea
+              id="inv-descr"
+              value={descr}
+              onChange={(e) => typeDescr(e.target.value)}
+              onBlur={() => void saveDescr()}
+              placeholder="Scope of work — shows above the line items on the invoice."
+              className="min-h-[60px]"
+            />
+          )}
         </div>
 
         {/* A CLOCK STILL RUNNING ON THIS JOB (2026-09-24): its hours are not on this invoice, and
@@ -944,59 +1029,30 @@ export function InvoiceDetail({
           (invoice.job_id || (invoice as any).quote_id) &&
           importRow !== "none" && (
           <div className="flex flex-wrap items-center gap-2 rounded-xl border border-dashed border-slate-300 bg-slate-50/60 px-3 py-2.5">
-            <span className="text-xs font-medium text-slate-500">Import:</span>
-            {importRow === "standard" && (
-              <Button size="sm" variant="outline" onClick={() => runImport(importQuoteItemsIntoInvoice, "Estimate items", items.filter((i) => i.import_source === "quote").length, "quote")} disabled={pending}>
-                From Estimate
+            {bringInSteps.length > 0 ? (
+              <Button variant="outline" onClick={bringInNewWork} disabled={pending}>
+                <PackagePlus className="h-4 w-4" /> {BRING_IN_NEW_WORK}
               </Button>
+            ) : (
+              <span className="text-xs text-slate-500">
+                {estimateIsContract === null
+                  ? "Couldn't read this job just now, so nothing new can be brought in here. Reload to try again."
+                  : "Nothing new comes onto this invoice: its estimate's lines are on it, and there are no approved change orders to add."}
+              </span>
             )}
-            {invoice.job_id && (
-              <>
-                <Button size="sm" variant="outline" onClick={() => runImport(importLaborIntoInvoice, "Labor", items.filter((i) => i.import_source === "labor").length, "labor")} disabled={pending}>
-                  Labor from Timecards
-                </Button>
-                <div className="flex flex-wrap items-center gap-1.5">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => {
-                      /* A typed number is sent as the decision; otherwise the import keeps the
-                         markup the lines are at and refuses on a failed read, so a box that is
-                         only showing the usual (lines disagree, or the page couldn't read them)
-                         never reprices the invoice to it unnamed (materialsImportPlan). */
-                      const plan = materialsImportPlan(box, markupSeed);
-                      runImport(
-                        (id) => importCostsIntoInvoice(id, plan.pct, plan.keepInvoiceMarkup ? { keepInvoiceMarkup: true } : undefined),
-                        "Materials",
-                        items.filter((i) => i.import_source === "costs").length,
-                        "costs",
-                        true,
-                        () => markupLanded(plan.pct),
-                        plan.confirmNote,
-                      );
-                    }}
-                    disabled={pending}
-                  >
-                    Materials from Costs
-                  </Button>
-                  <MarkupBox
-                    value={box.value}
-                    applied={box.applied}
-                    canApply={costsImported}
-                    pending={pending}
-                    words={markupBoxWords(markupSeed, levelMarkupPct != null ? customerName : null)}
-                    onChange={(v) => setBox((b) => ({ ...b, value: v }))}
-                    onApply={applyMarkup}
-                  />
-                </div>
-                {/* APPROVED EXTRAS. Until now a change order's amount was read by nothing in the
-                    app — you could raise one, get it signed, mark it approved, and the money
-                    never appeared on any invoice. Same importer contract as the two above:
-                    idempotent, draft-only, and it never overwrites a line the office edited. */}
-                <Button size="sm" variant="outline" onClick={() => runImport(importChangeOrdersIntoInvoice, "Change orders", items.filter((i) => i.import_source === "change_orders").length, "change_orders")} disabled={pending}>
-                  Approved Change Orders
-                </Button>
-              </>
+            {/* THE % BOX BESIDE IT, where materials come in (a Time & Material or actuals invoice). */}
+            {bringInSteps.includes("materials") && (
+              <div className="flex flex-wrap items-center gap-1.5">
+                <MarkupBox
+                  value={box.value}
+                  applied={box.applied}
+                  canApply={costsImported}
+                  pending={pending}
+                  words={markupBoxWords(markupSeed, levelMarkupPct != null ? customerName : null)}
+                  onChange={(v) => setBox((b) => ({ ...b, value: v }))}
+                  onApply={applyMarkup}
+                />
+              </div>
             )}
             {importMsg && <span className="text-xs text-slate-500">{importMsg}</span>}
             {importWarn && <span className="text-xs text-amber-700">{importWarn}.</span>}
@@ -1006,15 +1062,15 @@ export function InvoiceDetail({
                 screen here can soften. Offering the button on a sent bill would be the dead end
                 this wave exists to delete, so on a delivered invoice the sentence says what to do
                 instead - the ordinary controls, which now work. */}
-            {stuckSource && !isDraft && (
+            {stuckSources.length > 0 && !isDraft && (
               <span className="text-xs text-amber-700">
                 Lines you edited or removed are protected, so nothing came in. On a bill that has
                 already gone out, change the lines directly instead.
               </span>
             )}
-            {stuckSource && isDraft && (
-              <span className="flex items-center gap-1.5 text-xs text-amber-700">
-                Lines you edited or removed are protected, so nothing came in.
+            {isDraft && stuckSources.map((stuckSource) => (
+              <span key={stuckSource} className="flex flex-wrap items-center gap-1.5 text-xs text-amber-700">
+                {`${stuckSource === "labor" ? "Labor" : stuckSource === "costs" ? "Materials" : stuckSource === "quote" ? "The estimate's lines" : "Change orders"}: lines you edited or removed are protected, so nothing came in.`}
                 <button
                   type="button"
                   disabled={pending}
@@ -1038,12 +1094,12 @@ export function InvoiceDetail({
                       src === "costs" ? () => markupLanded(pct) : undefined,
                     );
                   }}
-                  className="rounded-md border border-amber-300 bg-white px-2 py-1 font-medium text-amber-800 hover:bg-amber-50 disabled:opacity-50"
+                  className="inline-flex min-h-11 items-center rounded-md border border-amber-300 bg-white px-3 font-medium text-amber-800 hover:bg-amber-50 disabled:opacity-50"
                 >
                   Start It Over
                 </button>
               </span>
-            )}
+            ))}
           </div>
         )}
 
@@ -1066,13 +1122,17 @@ export function InvoiceDetail({
                     Sent {formatDateTime(sentAt)} · changed {formatDateTime(revisedAt)}
                   </p>
                 </div>
-                {/* The fix, in reach of the problem. */}
-                <EmailButton
-                  id={invoice.id}
+                {/* The fix, in reach of the problem: the same Send sheet the header opens. */}
+                <SendButton
                   kind="invoice"
+                  id={invoice.id}
+                  number={invoice.invoice_number}
                   customerName={customerName}
                   amount={Number(invoice.total)}
+                  lineCount={items.length}
                   textReady={textReady}
+                  label="Send Again"
+                  variant="outline"
                 />
               </div>
             ) : (
@@ -1124,17 +1184,17 @@ export function InvoiceDetail({
                         type="button"
                         onClick={() => moveToEdge(it.id, "top")}
                         disabled={pending || items[0]?.id === it.id}
-                        className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40"
+                        className="inline-flex h-11 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40"
                       >
-                        <ChevronsUp className="h-3.5 w-3.5" /> Move to Top
+                        <ChevronsUp className="h-4 w-4" /> Move To Top
                       </button>
                       <button
                         type="button"
                         onClick={() => moveToEdge(it.id, "bottom")}
                         disabled={pending || items[items.length - 1]?.id === it.id}
-                        className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40"
+                        className="inline-flex h-11 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40"
                       >
-                        <ChevronsDown className="h-3.5 w-3.5" /> Move to Bottom
+                        <ChevronsDown className="h-4 w-4" /> Move To Bottom
                       </button>
                     </div>
                   )}
@@ -1171,30 +1231,8 @@ export function InvoiceDetail({
                       instead of four blocks to remember. */}
                   {!linesLocked && (
                     <>
-                      {items.length > 1 && (
-                        <div className="flex shrink-0 flex-col">
-                          <button
-                            type="button"
-                            onClick={() => moveItem(it.id, -1)}
-                            disabled={pending || items[0]?.id === it.id}
-                            className="rounded p-0.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:opacity-25"
-                            aria-label="Move up"
-                            title="Move up"
-                          >
-                            <ChevronUp className="h-3.5 w-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => moveItem(it.id, 1)}
-                            disabled={pending || items[items.length - 1]?.id === it.id}
-                            className="rounded p-0.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:opacity-25"
-                            aria-label="Move down"
-                            title="Move down"
-                          >
-                            <ChevronDown className="h-3.5 w-3.5" />
-                          </button>
-                        </div>
-                      )}
+                      {/* One step up or down went (W1-27): Move To Top / Move To Bottom in the line's
+                          edit form and Group Materials & Labor below do the moving, 44px each. */}
                       <button
                         onClick={() => startEdit(it)}
                         disabled={pending}
@@ -1235,10 +1273,10 @@ export function InvoiceDetail({
                 type="button"
                 onClick={groupByKind}
                 disabled={pending}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                className="inline-flex h-11 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50"
                 title="Labor first, then materials — lines you added by hand stay where you put them"
               >
-                <Layers className="h-3.5 w-3.5" /> Group Materials & Labor
+                <Layers className="h-4 w-4" /> Group Materials & Labor
               </button>
             </div>
           )}
@@ -1261,8 +1299,8 @@ export function InvoiceDetail({
               {/* The same two doors the server's own refusal names (invoiceLineEditRefusal), in the
                   same order, so reading the page and tripping the guard never tell two stories. */}
               <p>
-                This invoice is void, so its lines are set. If you voided it by mistake, set the status back
-                at the top of the page. To bill this work, start a new invoice.
+                This invoice is void, so its lines are set. If you voided it by mistake, use Back To Draft in
+                the ⋯ menu at the top. To bill this work, start a new invoice.
               </p>
             </div>
           ) : (
@@ -1545,5 +1583,196 @@ export function InvoiceDetail({
         />
       </Modal>
     </div>
+  );
+}
+
+/** "Oct 8" - a date-only value read as that calendar day (never shifted by a timezone); the year
+ *  only when it isn't this one. */
+function shortDay(value: string | null | undefined): string {
+  const d = toDateInput(value);
+  if (!d) return "no date";
+  const at = new Date(`${d}T12:00:00Z`);
+  const sameYear = at.getUTCFullYear() === new Date().getUTCFullYear();
+  return at.toLocaleDateString("en-US", { month: "short", day: "numeric", ...(sameYear ? {} : { year: "numeric" }), timeZone: "UTC" });
+}
+
+/**
+ * THE DUE LINE'S WORDS (W1-27). An untouched draft's due date is not its date yet: the first send
+ * stamps send day + the terms (markInvoiceSent), so it says so. Everything else says the date and
+ * the company's terms. `byHand` undefined = the column isn't there yet (before 0366): the date as
+ * stored is the date, so it is said as one.
+ */
+export function dueWords(f: { isDraft: boolean; dueDate: string; byHand: boolean | null | undefined; netDays: number }): string {
+  if (f.isDraft && f.byHand === false) return `Due ${f.netDays} days after you send it`;
+  if (!f.dueDate) return "No due date yet";
+  return `Due ${shortDay(f.dueDate)} · Net ${f.netDays}`;
+}
+
+/** One week from today in the company's timezone: the Set Aside sheet's first date. */
+function weekOutIn(tz: string): string {
+  const today = todayStrInTz(tz);
+  return new Date(Date.parse(`${today}T00:00:00Z`) + 7 * 86_400_000).toISOString().slice(0, 10);
+}
+
+/**
+ * SET ASIDE UNTIL… (W1-27; 0206's park). A draft waiting on a signature or an approval leaves the
+ * list until a day, then comes back on it - "parked forever" is how a real bill gets forgotten, so
+ * there is no "No Date". The day starts one week out in the company's timezone, and "Why?" rides
+ * along (parkInvoice keeps it as hold_reason). The toast says when it comes back, with Undo.
+ */
+function SetAsideSheet({
+  onClose,
+  invoiceId,
+  tz,
+  holdUntil,
+  holdReason,
+}: {
+  onClose: () => void;
+  invoiceId: string;
+  tz: string;
+  holdUntil: string | null;
+  holdReason: string | null;
+}) {
+  const router = useRouter();
+  const toast = useToast();
+  const [pending, start] = useTransition();
+  const [date, setDate] = useState(toDateInput(holdUntil) || weekOutIn(tz));
+  const [why, setWhy] = useState(holdReason ?? "");
+  const [error, setError] = useState<string | null>(null);
+  function save() {
+    setError(null);
+    start(async () => {
+      const res = await parkInvoice(invoiceId, date, why);
+      if (!res?.ok) {
+        setError(res?.error ?? "Couldn't set it aside - try again.");
+        return;
+      }
+      onClose();
+      toast(`Set Aside Until ${shortDay(date)}. It comes back on your list that day.`, "success", {
+        label: "Undo",
+        onClick: () =>
+          void parkInvoice(invoiceId, toDateInput(holdUntil) || null, holdReason ?? undefined).then((r) => {
+            if (!r?.ok) toast(r?.error ?? "Couldn't undo that - try again.", "error");
+            router.refresh();
+          }),
+      });
+      router.refresh();
+    });
+  }
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title="Set Aside Until…"
+      size="sm"
+      portal
+      holdOpen={pending}
+      footer={<ModalActions onCancel={onClose} onSave={save} saving={pending} saveLabel="Set Aside" disabled={!date} />}
+    >
+      <div className="space-y-3">
+        <p className="text-sm text-slate-600">It leaves your list until that day, then comes back on it. Nothing is sent, and nothing on the invoice changes.</p>
+        <div>
+          <Label htmlFor="sa-date">Until</Label>
+          <Input id="sa-date" type="date" value={date} min={todayStrInTz(tz)} onChange={(e) => setDate(e.target.value)} className="h-11 w-48" />
+        </div>
+        <div>
+          <Label htmlFor="sa-why">Why?</Label>
+          <Textarea id="sa-why" value={why} onChange={(e) => setWhy(e.target.value)} placeholder="Waiting on the change order to be signed" />
+        </div>
+        {error && <p className="text-sm text-red-600">{error}</p>}
+      </div>
+    </Modal>
+  );
+}
+
+/** The ⋯ row "Set Aside Until…" (a draft), or the body line's small "Change". */
+export function SetAsideButton({
+  invoiceId,
+  tz,
+  holdUntil = null,
+  holdReason = null,
+  variant = "menuItem",
+  label,
+}: {
+  invoiceId: string;
+  tz: string;
+  holdUntil?: string | null;
+  holdReason?: string | null;
+  variant?: "menuItem" | "link";
+  label?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      {variant === "menuItem" ? (
+        <button type="button" onClick={() => setOpen(true)} className={ACTIONS_ROW_CLS}>
+          <CalendarClock className="h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" /> {label ?? "Set Aside Until…"}
+        </button>
+      ) : (
+        <button type="button" onClick={() => setOpen(true)} className="inline-flex min-h-11 items-center font-medium text-brand hover:underline">
+          {label ?? "Change"}
+        </button>
+      )}
+      {open && <SetAsideSheet onClose={() => setOpen(false)} invoiceId={invoiceId} tz={tz} holdUntil={holdUntil} holdReason={holdReason} />}
+    </>
+  );
+}
+
+const VOID_ROW_CLS = ACTIONS_ROW_CLS.replace("text-slate-700", "text-red-600");
+
+/**
+ * THE STATUS DEEDS, AS ⋯ ROWS (W1-27). lib/nav-tree invoiceStatusItems decides which (no status
+ * offered twice, none offered as what the invoice already is); each row calls setInvoiceStatus
+ * exactly as the old picker did - the send declarations' own value translated back to "sent"
+ * (statusToSend) one line from the call, the same toasts, Void behind its confirm - and where Back
+ * To Draft can't be offered, the sentence that says why stands in its place.
+ */
+export function InvoiceStatusMenuItems({
+  invoiceId,
+  invoiceNumber,
+  status,
+  sentAt,
+  amountPaid,
+  customerHoldsOlderCopy = false,
+}: {
+  invoiceId: string;
+  invoiceNumber?: string | null;
+  status: string;
+  sentAt?: string | null;
+  amountPaid?: number | null;
+  customerHoldsOlderCopy?: boolean;
+}) {
+  const router = useRouter();
+  const toast = useToast();
+  const [pending, start] = useTransition();
+  const items = invoiceStatusItems({ status, invoiceNumber, sentAt, amountPaid, customerHoldsOlderCopy });
+  function run(value: string, confirmText?: string) {
+    if (confirmText && !confirm(confirmText)) return;
+    const next = statusToSend(value);
+    start(async () => {
+      const res = await setInvoiceStatus(invoiceId, next);
+      if (!res?.ok) {
+        toast(res?.error ?? "Couldn't change the status — try again.", "error");
+        return;
+      }
+      toast(next === "void" ? "Invoice voided" : next === "sent" ? "Marked as sent" : "Status updated", "success");
+      router.refresh();
+    });
+  }
+  return (
+    <>
+      {items.map((it) =>
+        "note" in it ? (
+          <p key={it.id} className={ACTIONS_NOTE_CLS}>
+            {it.note}
+          </p>
+        ) : (
+          <button key={it.id} type="button" disabled={pending} onClick={() => run(it.value, it.confirm)} className={it.value === "void" ? VOID_ROW_CLS : ACTIONS_ROW_CLS}>
+            {it.value === "void" ? <Ban className="h-4 w-4 shrink-0" /> : it.value === "draft" ? <Undo2 className="h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" /> : <Send className="h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" />}
+            {it.label}
+          </button>
+        ),
+      )}
+    </>
   );
 }

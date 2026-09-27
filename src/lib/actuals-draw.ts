@@ -309,6 +309,129 @@ export function pulledIntoSentence(
  *  that is gone ("Labor from Timecards" and "Materials from Costs" were folded into it). */
 export const BRING_IN_NEW_WORK = "Bring In New Work";
 
+// ── Bring In New Work (W1-27) ──────────────────────────────────────────────────────────────────
+
+export type BringInStep = "labor" | "materials" | "change_orders" | "quote";
+
+/**
+ * WHAT BRING IN NEW WORK RUNS, DECIDED ONCE. The invoice's Import row had four buttons (From
+ * Estimate, Labor from Timecards, Materials from Costs, Approved Change Orders), and the right ones
+ * to press depended on what kind of bill it was - knowledge the button can hold instead:
+ *
+ *   an actuals draw (INV-078), a Time & Material job,  → Labor, then Materials, then Approved
+ *   or a job with no estimate that is its contract        Change Orders
+ *   an invoice made from an estimate (quote_id)         → the estimate's lines (only while it holds
+ *                                                         none), then Approved Change Orders - never
+ *                                                         T&M labor or materials on top of a price
+ *   a fixed-price job's estimate is its contract, and   → Approved Change Orders only: the contract
+ *   this invoice isn't the estimate's copy                is billed on its own bill
+ *   a draw for set amounts                              → nothing (the row isn't drawn)
+ *
+ * `estimateIsContract`: undefined = the page didn't ask (the rule before this wave - the job's work
+ * comes in); null = the job couldn't be read, so only what can't bill a contract twice comes in and
+ * the page says why.
+ */
+export function bringInNewWorkSteps(f: {
+  importMode: "standard" | "actuals" | "none";
+  hasJob: boolean;
+  quoteId: string | null | undefined;
+  /** Lines already on the invoice that came from the estimate (import_source "quote"). */
+  quoteLinesOnInvoice: number;
+  estimateIsContract?: boolean | null;
+}): BringInStep[] {
+  if (f.importMode === "none") return [];
+  const changeOrders: BringInStep[] = f.hasJob ? ["change_orders"] : [];
+  if (f.importMode === "actuals") return f.hasJob ? ["labor", "materials", ...changeOrders] : [];
+  if (f.quoteId) return [...(f.quoteLinesOnInvoice === 0 ? (["quote"] as BringInStep[]) : []), ...changeOrders];
+  if (!f.hasJob) return [];
+  if (f.estimateIsContract === true || f.estimateIsContract === null) return changeOrders;
+  return ["labor", "materials", ...changeOrders];
+}
+
+/** What one importer answered (billing/actions' ImportResult, as much as the sentence needs). */
+export type BringInOutcome = {
+  step: BringInStep;
+  ok: boolean;
+  empty?: boolean;
+  error?: string;
+  emptyNote?: string;
+  stats?: {
+    inserted?: number;
+    updated?: number;
+    kept_edited?: number;
+    removed?: number;
+    pulled_in?: number;
+    stock_pulled_in?: number;
+    skipped_claimed?: number;
+    claimed_on?: string[];
+    warnings?: string[];
+  };
+};
+
+const STEP_NAME: Record<BringInStep, string> = {
+  labor: "Labor",
+  materials: "Materials",
+  change_orders: "Approved change orders",
+  quote: "The estimate's lines",
+};
+
+const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+
+/**
+ * ONE RESULT SENTENCE FOR THE WHOLE PRESS: "Brought in: 5 time entries · 2 bills · 1 change order ·
+ * 3 of your edits kept". What each importer left on another invoice is said too ("9 time entries
+ * already on INV-061"), and a part that FAILED is named with its own reason beside what did land -
+ * never one "failed" for the lot. `stuck` names the parts that had rows to place and could place
+ * none (every line edited or deleted): Start It Over is offered for those. `warnings` are the money
+ * sentences a person must read before sending (INV-074's edited tax row).
+ */
+export function bringInSentence(outcomes: readonly BringInOutcome[]): { sentence: string; partial: boolean; warnings: string[]; stuck: BringInStep[] } {
+  const parts: string[] = [];
+  const held: string[] = [];
+  const failed: string[] = [];
+  const notes: string[] = [];
+  const warnings: string[] = [];
+  const stuck: BringInStep[] = [];
+  let kept = 0;
+  let removed = 0;
+  for (const o of outcomes) {
+    if (!o.ok) {
+      if (o.empty) {
+        const why = (o.emptyNote ?? "").trim();
+        if (why) notes.push(why.replace(/\.$/, ""));
+      } else {
+        failed.push(`${STEP_NAME[o.step]} didn't come in: ${(o.error ?? "try again").replace(/\.$/, "")}`);
+      }
+      continue;
+    }
+    const st = o.stats ?? {};
+    const n = Number(st.pulled_in ?? 0);
+    if (n > 0) {
+      if (o.step === "labor") parts.push(count(n, "time entry", "time entries"));
+      else if (o.step === "materials") parts.push(count(n, "bill", "bills"));
+      else if (o.step === "change_orders") parts.push(count(n, "change order", "change orders"));
+      else parts.push(count(n, "estimate line", "estimate lines"));
+    }
+    const takes = Number(st.stock_pulled_in ?? 0);
+    if (takes > 0) parts.push(count(takes, "take from stock", "takes from stock"));
+    kept += Number(st.kept_edited ?? 0);
+    removed += Number(st.removed ?? 0);
+    const skipped = Number(st.skipped_claimed ?? 0);
+    if (skipped > 0 && (st.claimed_on ?? []).length) {
+      const noun = o.step === "labor" ? ["time entry", "time entries"] : o.step === "materials" ? ["bill", "bills"] : o.step === "change_orders" ? ["change order", "change orders"] : ["estimate line", "estimate lines"];
+      held.push(`${count(skipped, noun[0], noun[1])} already on ${joinParts(st.claimed_on ?? [])}`);
+    }
+    warnings.push(...(st.warnings ?? []));
+    const didNothing = !Number(st.inserted ?? 0) && !Number(st.updated ?? 0) && !Number(st.removed ?? 0);
+    if (didNothing && (st.pulled_in == null || n > 0)) stuck.push(o.step);
+  }
+  if (kept > 0) parts.push(`${kept} of your ${kept === 1 ? "edit" : "edits"} kept`);
+  if (removed > 0) parts.push(`${removed} taken off`);
+  const head = parts.length ? `Brought in: ${parts.join(" · ")}.` : failed.length ? "" : "Nothing new to bring in.";
+  const tail = [...held, ...notes, ...failed].map((x) => `${x.charAt(0).toUpperCase()}${x.slice(1)}.`);
+  return { sentence: [head, ...tail].filter(Boolean).join(" "), partial: failed.length > 0 || warnings.length > 0, warnings, stuck };
+}
+
 // ── What the job's New Invoice does (W1-24) ────────────────────────────────────────────────────
 
 /**
