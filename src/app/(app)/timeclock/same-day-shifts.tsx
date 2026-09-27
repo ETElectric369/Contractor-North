@@ -116,7 +116,8 @@ export function SameDayShiftsList({
         {anyNoJob && data.forJob
           ? `A shift on no job is usually this same work. Put it on ${data.forJob.label} instead of adding the hours again.`
           : anyNoJob
-            ? "A shift on no job is usually this same work. Pick the job above to put it there instead of adding the hours again."
+            ? // Only Add Entry has no job yet, and its Job field sits below this list.
+              "A shift on no job is usually this same work. Pick the job below to put it there instead of adding the hours again."
             : "Hours that overlap these would be counted twice."}
       </p>
     </div>

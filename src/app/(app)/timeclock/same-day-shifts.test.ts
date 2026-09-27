@@ -60,7 +60,8 @@ describe("the day's shifts, above the form", () => {
   it("with no job picked yet, the punch is shown and the form says to pick the job; there is no blind button", () => {
     const html = render([punch], null);
     expect(html).not.toContain("Put This On");
-    expect(html).toContain("Pick the job above to put it there instead of adding the hours again.");
+    // Add Entry is the one form with no job yet, and its Job field is below the list.
+    expect(html).toContain("Pick the job below to put it there instead of adding the hours again.");
     expect(html).toContain('href="/timecards?entry=punch"');
   });
 
