@@ -219,10 +219,19 @@ export function cleanDescription(raw: string): string {
   return redactDigits(String(raw ?? "").replace(/\s+/g, " ").trim()).slice(0, 200);
 }
 
-/** Words that open a description but name nobody: the merchant is the word after. */
-const STOP_FIRST = new Set([
-  "the", "sq", "tst", "pp", "paypal", "sp", "py", "in", "an", "of", "el", "la", "le", "los", "las", "online", "mobile", "remote",
-  "bill", "external", "electronic", "www", "ext", "int", "intl", "dd", "ppd", "ccd", "web", "tel", "ref",
+/** Words that open a merchant's name but name nobody alone: kept, joined with the word after
+ *  ("the home", "sq coffee", "paypal acme"). */
+const STOP_FIRST = new Set(["the", "sq", "tst", "pp", "paypal", "sp", "py", "in", "an", "of", "el", "la", "le", "los", "las"]);
+/**
+ * Words a bank puts IN FRONT of the payee: how the money went, never who got it ("Online Payment
+ * To Verizon", "BILL PAY PG&E", "Zelle payment to Pat", "VENMO *JOHN", "WIRE TRANSFER TO ACME").
+ * Dropped from the front, as many as there are, so each payee is its own merchant: kept, "zelle"
+ * or "bill pay" would put crew pay, a subcontractor, a loan and a tax payment under one answer.
+ */
+const DROP_LEAD = new Set([
+  "online", "mobile", "remote", "bill", "external", "electronic", "www", "ext", "int", "intl", "dd", "ppd", "ccd", "web", "tel",
+  "ref", "to", "from", "pay", "name", "orig", "zelle", "venmo", "cashapp", "wire", "transfer", "xfer", "trnsfr", "id", "des",
+  "desc", "entry", "ind", "sent", "received", "recd",
 ]);
 /** Words a bank adds around every merchant (the kind of transaction, never who). */
 const NOISE = new Set([
@@ -237,6 +246,7 @@ export function merchantWords(description: string): string[] {
   s = s.replace(/^\s*\d{4}[-\s]+/, " "); // a card's last 4 in front: "1111-SHELL"
   s = s.replace(/\b\d{1,2}\/\d{1,2}(?:\/\d{2,4})?\b/g, " "); // dates
   s = s.replace(/['’`]/g, " ");
+  s = s.replace(/\bcash\s*app\b/g, " cashapp ");
   return s
     .split(/[^a-z0-9&]+/)
     .filter((w) => w && !/\d/.test(w) && !NOISE.has(w));
@@ -253,16 +263,29 @@ const PROCESSOR_RE = /\b(stripe|square|sq|venmo|zelle|paypal|cash ?app|clover|to
  * "transfer" alone would put the owner's draw and a move to savings under one rule.
  */
 export function merchantKeyOf(description: string): string {
-  if (TRANSFER_RE.test(description) && !PROCESSOR_RE.test(description)) {
+  // AN ACH LINE names its payee after "CO NAME:" ("ORIG CO NAME:ACME INSURANCE ORIG ID:…"); every
+  // ACH line starts "ORIG", so the payee is the only part that says who.
+  const co = /\bCO(?:MPANY)?\s*NAME\s*:\s*(.+?)(?=\s+(?:ORIG|ENTRY|DESC|SEC|IND|TRACE|CO\s*ID)\b|$)/i.exec(String(description ?? ""));
+  const text = co ? co[1] : String(description ?? "");
+  if (TRANSFER_RE.test(text) && !PROCESSOR_RE.test(text)) {
     // The other account's number: a masked one first ("XXXXXX9876", "****9876"), else the first run
     // of 4 or more digits (never a date's 09 or 10, and never a reference number printed after it).
-    const d = String(description);
-    const masked = [...d.matchAll(/[x*]{2,}-?(\d{4})\b/gi)].map((m) => m[1] ?? "").filter(Boolean);
-    const runs = d.match(/\d{4,}/g) ?? [];
+    const masked = [...text.matchAll(/[x*]{2,}-?(\d{4})\b/gi)].map((m) => m[1] ?? "").filter(Boolean);
+    const runs = text.match(/\d{4,}/g) ?? [];
     const acct = masked.length ? (masked[masked.length - 1] ?? "") : (runs[0] ?? "").slice(-4);
-    return `transfer${acct ? ` ${acct}` : ""}`;
+    if (acct) return `transfer ${acct}`;
+    // A wire or transfer TO someone with no account on it is keyed by who it went to.
+    const payee = wordsKey(merchantWords(text));
+    return payee && !DROP_LEAD.has(payee) ? payee : "transfer";
   }
-  const words = merchantWords(description);
+  return wordsKey(merchantWords(text));
+}
+
+/** The key from a description's words: the bank's lead words off the front, then the first word,
+ *  or two when the first names nobody alone. */
+function wordsKey(all: readonly string[]): string {
+  const words = [...all];
+  while (words.length > 1 && DROP_LEAD.has(words[0])) words.shift();
   if (!words.length) return "";
   const first = words[0];
   const key = (STOP_FIRST.has(first) || first.length === 1) && words[1] ? `${first} ${words[1]}` : first;

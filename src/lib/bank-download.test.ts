@@ -363,6 +363,23 @@ describe("the merchant key", () => {
     expect(merchantKeyOf("ONLINE TRANSFER TO SAV XXXXXX5555 ON 09/10")).toBe("transfer 5555");
   });
 
+  it("is the payee, never the way the money went: ACH, bill pay, Zelle, Venmo, Cash App, a wire", () => {
+    expect(merchantKeyOf("ORIG CO NAME:ACME INSURANCE ORIG ID:1234 DESC DATE:0901 CO ENTRY DESCR:PREMIUM")).toBe("acme");
+    expect(merchantKeyOf("ORIG CO NAME:STATE TAX BOARD ORIG ID:9876 DESC DATE:0915 CO ENTRY DESCR:TAX PYMT")).toBe("state");
+    expect(merchantKeyOf("Online Payment ••5678 To Verizon Wireless")).toBe("verizon");
+    expect(merchantKeyOf("Online Payment ••5678 To PG&E Web")).toBe("pg&e");
+    expect(merchantKeyOf("BILL PAY ACME WATER CO")).toBe("acme");
+    expect(merchantKeyOf("Zelle payment to Pat Crew")).toBe("pat");
+    expect(merchantKeyOf("ZELLE PAYMENT TO JOE SUB LLC")).toBe("joe");
+    expect(merchantKeyOf("ZELLE FROM JANE CUSTOMER")).toBe("jane");
+    expect(merchantKeyOf("VENMO *JOHN SMITH")).toBe("john");
+    expect(merchantKeyOf("CASH APP*JANE DOE")).toBe("jane");
+    expect(merchantKeyOf("WIRE TRANSFER TO ACME SUPPLY")).toBe("acme");
+    expect(merchantKeyOf("REMOTE ONLINE DEPOSIT # 1")).toBe("deposit");
+    // Nothing but the bank's words is still a key.
+    expect(merchantKeyOf("ONLINE TRANSFER")).toBe("transfer");
+  });
+
   it("a bare check is its own row and never a rule's", () => {
     expect(isBareCheck({ check: "1043", merchantKey: "check" })).toBe(true);
     expect(isBareCheck({ check: null, merchantKey: "shell" })).toBe(false);
