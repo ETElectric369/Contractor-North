@@ -224,6 +224,23 @@ export function lineKeyOf(hash: Hasher, l: { last4: string | null; fitid: string
   return `line:${hash(`${l.last4 ?? ""}|${l.postedOn}|${l.cents}|${desc}|${repeat}`)}`;
 }
 
+/**
+ * A BANK'S AMOUNT CELL. The supplier reader (readMoney) is for a supplier's statement, where "CR" is
+ * a credit memo (money off what is owed). On a bank's own download CR is money IN and DR money OUT,
+ * and a bank (or an OFX TRNAMT) may print a leading "+". Anything else reads as readMoney does.
+ */
+export function readBankMoney(raw: unknown): number | null {
+  let s = String(raw ?? "").trim();
+  if (!s) return null;
+  const tail = /\s*\b(CR|CREDIT|DR|DEBIT)\.?$/i.exec(s);
+  if (tail) s = s.slice(0, tail.index).trim();
+  if (s.startsWith("+")) s = s.slice(1).trim();
+  const n = readMoney(s);
+  if (n === null) return null;
+  if (!tail) return n;
+  return /^c/i.test(tail[1]) ? Math.abs(n) : -Math.abs(n);
+}
+
 const DEBIT_TYPE = /\b(debit|dr|withdrawal|check|payment|fee|sale|purchase|pos)\b/i;
 const CREDIT_TYPE = /\b(credit|cr|deposit|refund|dslip|interest earned)\b/i;
 
@@ -241,7 +258,7 @@ export function readBankTable(table: readonly (readonly string[])[], name: strin
   const fitids: (string | null)[] = [];
   const body = table.slice(header.row + 1);
   // An unsigned Amount column with a type column: the type says which way the money went.
-  const amounts = c.amount !== undefined ? body.map((r) => readMoney(cell(r, c.amount))).filter((n): n is number => n !== null) : [];
+  const amounts = c.amount !== undefined ? body.map((r) => readBankMoney(cell(r, c.amount))).filter((n): n is number => n !== null) : [];
   const unsigned = amounts.length > 0 && amounts.every((n) => n >= 0) && c.type !== undefined;
   body.forEach((r, i) => {
     const line = header.row + 2 + i;
@@ -255,14 +272,14 @@ export function readBankTable(table: readonly (readonly string[])[], name: strin
     const text = cell(r, c.description);
     let amount: number | null = null;
     if (c.amount !== undefined && cell(r, c.amount) !== "") {
-      amount = readMoney(cell(r, c.amount));
+      amount = readBankMoney(cell(r, c.amount));
       if (amount !== null && unsigned) {
         const t = cell(r, c.type);
         if (DEBIT_TYPE.test(t) && !CREDIT_TYPE.test(t)) amount = -Math.abs(amount);
       }
     } else {
-      const debit = readMoney(cell(r, c.debit));
-      const credit = readMoney(cell(r, c.credit));
+      const debit = readBankMoney(cell(r, c.debit));
+      const credit = readBankMoney(cell(r, c.credit));
       if (debit !== null && Math.round(debit * 100) !== 0) amount = -Math.abs(debit);
       else if (credit !== null && Math.round(credit * 100) !== 0) amount = Math.abs(credit);
       else if (debit !== null || credit !== null) amount = 0;

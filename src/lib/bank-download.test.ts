@@ -14,6 +14,7 @@ import {
   merchantKeyOf,
   parseChoiceId,
   planBankDownload,
+  readBankMoney,
   readBankTable,
   redactDigits,
   ruleFor,
@@ -127,6 +128,18 @@ CHECK,09/05/2026,CHECK 2001,-300.00,CHECK_PAID,1700.00,2001
       ["2026-09-02", -4000, "5678"],
       ["2026-09-04", 50000, "5678"],
     ]);
+  });
+
+  it("reads a bank's own money words: CR is money in, DR money out, a leading + is money in", () => {
+    expect(readBankMoney("1500.00 CR")).toBe(1500);
+    expect(readBankMoney("45.00 DR")).toBe(-45);
+    expect(readBankMoney("+45.00")).toBe(45);
+    expect(readBankMoney("+$1,500.00")).toBe(1500);
+    expect(readBankMoney("(82.10)")).toBe(-82.1);
+    expect(readBankMoney("")).toBeNull();
+    const dl = readBankTable(parseCSV(`Date,Description,Amount\n09/01/2026,CUSTOMER DEPOSIT,1500.00 CR\n09/02/2026,SHOP RENT,650.00 DR\n09/03/2026,REFUND,+200.00\n`), "x.csv", hash)!;
+    expect(dl.lines.map((l) => l.cents)).toEqual([150000, -65000, 20000]);
+    expect(dl.skipped).toEqual([]);
   });
 
   it("an unsigned Amount with a Debit/Credit type column reads the type", () => {
