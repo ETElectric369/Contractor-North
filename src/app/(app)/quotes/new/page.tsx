@@ -6,6 +6,7 @@ import { getOrgSettings } from "@/lib/org-settings";
 import { featureOn } from "@/lib/features";
 import { measurementsFromAnswers, tolerateMissingColumns } from "@/lib/inspection/schema";
 import { factsForEstimatorByProvenance } from "@/lib/playbook/answers";
+import { applicableNeeds, clearInapplicable } from "@/lib/playbook/resolve";
 import { briefProvenanceKeys, parsePlanBrief } from "@/lib/plan-brief";
 import { intakeAnswerLines, intakeProvenanceKeys } from "@/lib/inquiries/carry-intake-answers";
 import { extOf, intakePaths, uploadDisplayName } from "@/lib/playbook/uploads";
@@ -194,9 +195,14 @@ export default async function NewQuotePage({
       // A `scopes` answer is already priced line items. Collect the picks here (where the playbook
       // is in scope) and map them to lines below, once the price book has loaded — the descriptions
       // and units come from the book, not from the answer.
-      for (const n of pb.needs) {
+      // ONLY THE QUESTIONS THAT STILL APPLY, cleared to a fixed point first (the same read as the
+      // facts above). A crew lead's save (0356) keeps the office's priced picks under a scopes
+      // question his answers have since turned off; the Inspector hides that question, so its
+      // picks must not become lines on an estimate nobody can see them on the walk-through of.
+      const liveAnswers = clearInapplicable(pb, answers);
+      for (const n of applicableNeeds(pb, liveAnswers)) {
         if (n.slot?.type !== "scopes") continue;
-        const picks = coerceScopes((answers as Record<string, unknown>)[n.key]);
+        const picks = coerceScopes((liveAnswers as Record<string, unknown>)[n.key]);
         if (picks?.length) pickedScopes.push({ label: n.label, picks });
       }
       captureInquiryId = (appt as any).inquiry_id ?? undefined;
