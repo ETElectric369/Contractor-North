@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { WHY_ASK, WHY_SHAPES, whyHint, whyNudge, whyProblems } from "./why";
+import { WHY_ASK, WHY_MAX_CHARS, WHY_SHAPES, whyHint, whyNudge, whyProblems } from "./why";
 import { ET_ELECTRIC } from "./starters/et-electric";
 import { PLAYBOOK_STARTERS } from "./starters";
 import type { Need } from "./types";
@@ -65,6 +65,32 @@ describe("what it actually catches", () => {
     expect(whyProblems("Because I need to know it.")).toContain("no_destination");
   });
 
+  it("THE 'x' HOLE: a letter x is not arithmetic", () => {
+    // [×x*+] passed any line with an x in it. These name nothing downstream.
+    expect(whyProblems("Exterior box, we check it.")).toContain("no_destination");
+    expect(whyProblems("Extra fixtures, maybe.")).toContain("no_destination");
+    expect(whyProblems("Next, the box.")).toContain("no_destination");
+  });
+
+  it("...but x as an operator still is, and so are the real symbols", () => {
+    expect(whyProblems("Length x width is the square footage.")).toEqual([]);
+    expect(whyProblems("20x16 on the tape, then the rate.")).toEqual([]);
+    expect(whyProblems("Count × unit price.")).toEqual([]);
+    expect(whyProblems("Hours * rate.")).toEqual([]);
+    expect(whyProblems("Answer = the line on the estimate.")).toEqual([]);
+  });
+
+  it("ONE LINE IS 140 CHARACTERS (the why-line law), not 220", () => {
+    expect(WHY_MAX_CHARS).toBe(140);
+    const at = `Sets the ${"a".repeat(WHY_MAX_CHARS - "Sets the ".length)}`;
+    expect(at).toHaveLength(WHY_MAX_CHARS);
+    expect(whyProblems(at)).toEqual([]);
+    expect(whyProblems(`${at}b`)).toContain("too_long");
+    // A 224-character line (the length of one live line in production) is flagged, not blocked:
+    // the nudge asks for a shorter one, and nothing refuses the save.
+    expect(whyProblems(`Sets the labor. ${"word ".repeat(42)}`.slice(0, 224))).toContain("too_long");
+  });
+
   it("the question said back at you — the most common first attempt", () => {
     const n = need({ key: "panel", ask: "What's the panel — brand, size, any room in it?" });
     expect(whyProblems("I need to know the panel brand, size and room in it.", n)).toContain("restates_the_question");
@@ -119,7 +145,7 @@ describe("THE SHIPPED STARTERS PASS THEIR OWN CHECK", () => {
     for (const n of starter.playbook.needs) {
       it(`${starter.key}/${n.key} — one line, and it names where it lands`, () => {
         expect(whyProblems(n.why, n), `${n.key}: "${n.why}"`).toEqual([]);
-        expect(n.why!.length, `${n.key} is still an essay`).toBeLessThanOrEqual(140);
+        expect(n.why!.length, `${n.key} is still an essay`).toBeLessThanOrEqual(WHY_MAX_CHARS);
       });
     }
   }

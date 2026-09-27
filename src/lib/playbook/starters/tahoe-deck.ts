@@ -190,7 +190,9 @@ export const TAHOE_DECK: Playbook = {
       slot: { type: "number" },
       measured: true,
       feeds: ["what"],
-      why: "Each one is DS1A — a wider sill and a more expensive detail than a man door.",
+      // Passed the check only on the x in "expensive" until the x hole closed (why.ts); now it
+      // says where it lands.
+      why: "Each one adds a DS1A detail to the price — a wider sill, and a pricier detail than a man door.",
     },
     {
       key: "trpa",

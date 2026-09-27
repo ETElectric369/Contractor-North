@@ -95,6 +95,9 @@ export function whyHint(n: Need): { ask: string; shape: (typeof WHY_SHAPES)[numb
 
 export type WhyProblem = "empty" | "too_long" | "no_destination" | "restates_the_question";
 
+/** THE WHY-LINE LAW: one line, at most 140 characters. Longer reasoning goes in `Need.note`. */
+export const WHY_MAX_CHARS = 140;
+
 /**
  * IS THIS A PATH, OR JUST WORDS? The check that makes "precision for every single person" a thing
  * the app can actually help with rather than hope for.
@@ -109,17 +112,26 @@ export function whyProblems(why: string | undefined, need?: Need): WhyProblem[] 
   const out: WhyProblem[] = [];
 
   // An essay is the failure mode this whole file exists to end. Erik's own drafted lines ran to
-  // five sentences and he could not read fifteen of them.
+  // five sentences and he could not read fifteen of them. ONE LINE IS 140 CHARACTERS (the why-line
+  // law); anything longer belongs in the need's note, where length is fine.
   const sentences = t.split(/[.!?]+\s/).filter((s) => s.trim().length > 1).length;
-  if (t.length > 220 || sentences > 3) out.push("too_long");
+  if (t.length > WHY_MAX_CHARS || sentences > 3) out.push("too_long");
 
   // A PATH NAMES A DESTINATION. Either arithmetic, or a verb that lands somewhere.
-  const arithmetic = /[×x*+]|times|multiplied|divided|per\s|square|sq\.?\s?ft|linear|total|adds? up/i.test(t);
+  //
+  // THE "x" HOLE, CLOSED. The operator class used to be [×x*+], so ANY letter x passed as
+  // arithmetic: "Exterior box, we check it" named nothing and passed. An x counts only as an
+  // operator: between two numbers ("20x16", "20 x 16") or standing alone between two terms
+  // ("length x width"). The real symbols (× * + = ÷) and the spoken forms still count.
+  const arithmetic =
+    /[×*+=÷]|\d\s*x\s*\d|(^|\s)x(\s|$)|times|multiplied|divided|per\s|square|sq\.?\s?ft|linear|total|adds? up/i.test(t);
   // VERB FORMS ONLY. `size` as a bare noun was matching — "I need the panel brand, size and room"
   // is the QUESTION said back, and it was passing as a destination because the ask itself contained
-  // the word. A destination needs something that ACTS.
+  // the word. A destination needs something that ACTS. `picks` and `chooses` are the fork said
+  // another way ("Picks which questions come next"); they were only passing before on the x in
+  // "next", which is how the hole hid them.
   const lands =
-    /\b(decides?|drives?|sets?|feeds?|sizes|tells?|means|gives?|determines?|triggers?|turns?)\b/i.test(t) ||
+    /\b(decides?|drives?|sets?|feeds?|sizes|tells?|means|gives?|determines?|triggers?|turns?|picks|chooses)\b/i.test(t) ||
     /\b(gets? me|comes? out|ends? up|goes into|adds? to)\b/i.test(t) ||
     // The nouns a contractor's price is actually made of. `prices?` not `price` — "prices nothing
     // like an open wall" is a destination and \bprice\b doesn't match inside "prices".
