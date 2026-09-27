@@ -1761,7 +1761,9 @@ export default async function JobDetailPage({
         isDrawBilled={isDrawBilled}
         /* The book feeds the Edit Job modal, a staff door — a tech's dock never carries it. */
         customers={viewerIsStaff ? allCustomers ?? [] : []}
-        templates={(codeTemplates ?? []) as { id: string; name: string }[]}
+        /* Job Codes off: no code picker is left to limit, so Edit Job draws no template select
+           (updateJob only writes code_template_id when the field is sent: the stored one stays). */
+        templates={on("job_codes") ? ((codeTemplates ?? []) as { id: string; name: string }[]) : []}
         workDay={workDay}
       />
 

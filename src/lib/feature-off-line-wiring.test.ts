@@ -74,6 +74,11 @@ describe("the Off line on every record page", () => {
     expect(src).toContain("arrangeJobTabs(tabs, viewerIsStaff, switches)");
   });
 
+  it("Job Codes off: Edit Job draws no job-code template picker (no code picker is left to limit)", () => {
+    const src = readFileSync(join(ROOT, "jobs/[id]/page.tsx"), "utf8");
+    expect(src).toContain('templates={on("job_codes") ? ((codeTemplates ?? []) as { id: string; name: string }[]) : []}');
+  });
+
   it("an appointment: Leads off hides only a blank walk-through; a service visit keeps its notes and photos, with no Off line", () => {
     const src = readFileSync(join(ROOT, "appointments/[id]/page.tsx"), "utf8");
     expect(src).toContain("const walkThrough = isInspectionType(");
