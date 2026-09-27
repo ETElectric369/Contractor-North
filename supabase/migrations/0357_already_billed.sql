@@ -38,8 +38,9 @@
 --        included (0258 allows a repeat on one invoice; this does not).
 --      It changes the claim lists and nothing else, and it checks: if the line's total, the
 --      invoice's total or its status moved, it raises and nothing is kept. Unmark removes only ids
---      a person added (a split shift's pieces go together), with the same checks, and never on a
---      void invoice (what a void invoice held is its record: un-voiding it is judged against it).
+--      a person added (a split shift's pieces, and a take's moves, go together), with the same
+--      checks, and never on a void invoice (what a void invoice held is its record: un-voiding it
+--      is judged against it).
 --   4. A claim that changes is something a draw's Progress Summary prints (work to date = billed
 --      work lines + unbilled work), so source_ids joins the columns that un-stamp the job's stored
 --      draw PDFs (0349's invoice_items_unstamp_draw_pdfs_upd, recreated with one more column).
@@ -453,6 +454,8 @@ begin
     raise exception 'Only what was marked as already billed by hand comes off here; the rest is on % from an import. Nothing was changed.', v_num using errcode = 'P0001';
   end if;
   -- A SPLIT SHIFT COMES OFF WHOLE: every piece of the same shift this line holds by hand goes with it.
+  -- A TAKE FROM STOCK COMES OFF WHOLE too, as it went on (0343 judges only ids that are added, so a
+  -- take left half on would read as billed and its other half would never be).
   select coalesce(array_agg(distinct h), '{}'::uuid[]) into v_remove
     from (
       select unnest(v_ids) as h
@@ -462,6 +465,12 @@ begin
        where t.id = any (v_line.hand_claims)
          and t.org_id = v_org
          and coalesce(t.split_from, t.id) in (select coalesce(t2.split_from, t2.id) from public.time_entries t2 where t2.id = any (v_ids) and t2.org_id = v_org)
+      union
+      select m.id
+        from public.stock_moves m
+       where m.id = any (v_line.hand_claims)
+         and m.org_id = v_org
+         and m.draw_group in (select m2.draw_group from public.stock_moves m2 where m2.id = any (v_ids) and m2.org_id = v_org and m2.draw_group is not null)
     ) s;
 
   update public.invoice_items
@@ -492,7 +501,7 @@ end;
 $$;
 
 comment on function public.unmark_already_billed(uuid, uuid[]) is
-  'Not Billed After All (0357): takes ids a person marked as already billed back off a line (a split shift''s pieces together). Never an importer''s claim; refuses anything that would move a total or status. SECURITY INVOKER.';
+  'Not Billed After All (0357): takes ids a person marked as already billed back off a line (a split shift''s pieces together, a take''s moves together). Never an importer''s claim; refuses anything that would move a total or status. SECURITY INVOKER.';
 
 revoke all on function public.mark_already_billed(uuid, uuid[]) from public;
 revoke all on function public.unmark_already_billed(uuid, uuid[]) from public;

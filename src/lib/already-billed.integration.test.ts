@@ -370,6 +370,11 @@ d("0357: Already Billed", () => {
     expect(after.total).toBe(before.total);
     expect(after.status).toBe("partial");
     expect(after.hand).toEqual(expect.arrayContaining([order, ...moves]));
+    // A take comes off whole, as it went on: Not Billed After All on one of its moves takes both.
+    const off = await unmark(staff, materials, [moves[0]]);
+    expect([...off.removed].sort()).toEqual([...moves].sort());
+    expect((await state(materials)).hand).toEqual([order]);
+    expect((await mark(staff, materials, moves)).added).toEqual(expect.arrayContaining(moves));
     // An undone take can never be marked.
     await as(staff);
     const take2 = (await one("select public.stock_draw($1, $2, 1, 'TEST take 2', null) as r", [item, jobA])).r as { draw_group: string; moves: { move_id: string }[] };
