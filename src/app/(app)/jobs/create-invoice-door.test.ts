@@ -33,12 +33,15 @@ vi.mock("../billing/actions", () => ({
 
 import { createInvoiceForJob } from "./actions";
 import {
+  estimateBilledInFullWords,
   invoicePresetFromParam,
   newInvoiceChoices,
   newInvoicePageFacts,
   newInvoiceRoute,
   newInvoiceSaveLabel,
+  WORK_SO_FAR_UNREAD,
   workSoFarDoor,
+  workSoFarNote,
 } from "@/lib/actuals-draw";
 import { createParamClaim } from "@/lib/param-claim";
 import { formatCurrency } from "@/lib/utils";
@@ -397,6 +400,81 @@ describe("the job's New Invoice routes like the server, case by case (W1-24)", (
     });
     expect(await createInvoiceForJob(JOB)).toMatchObject({ ok: true, id: "inv-est" });
     expect(createInvoiceFromQuote).toHaveBeenCalledWith("q-acc");
+  });
+
+  it("fixed price, the estimate's invoice sent, no draws, a change order approved since: Bill The Change Orders is the door (never a typed-amount draw)", async () => {
+    const quotes = [{ status: "accepted", total: 12400, created_at: "2026-09-01" }];
+    const invoices = [{ status: "sent", invoice_kind: "standard" }];
+    const changeOrders = [
+      { status: "approved", amount: 850 },
+      { status: "pending", amount: 400 }, // not approved: not billed
+      { status: "approved", amount: 0 }, // $0: nothing to bill
+    ];
+    const f = facts({ billingType: "fixed", estimate: 12400, quotes, invoices });
+    const withCOs = newInvoicePageFacts({ billingType: "fixed", estimate: 12400, quotes, invoices, milestoneCount: 0, changeOrders });
+    expect(withCOs).toMatchObject({ hasEstimate: true, drawBilled: false, billsActuals: false, wholeEstimate: null, changeOrdersToBill: 1 });
+    expect(newInvoiceRoute({ ...withCOs, openDraft: null })).toEqual({ kind: "sheet" });
+    expect(newInvoiceChoices({ ...withCOs, billingType: "fixed", estimate: 12400, workDoor: null })).toEqual({ choices: ["deposit", "part", "changes"], initial: "changes" });
+    // No approved change order yet: no such choice, and the words send an extra to one, not to a draw.
+    expect(f.changeOrdersToBill).toBe(0);
+    expect(newInvoiceChoices({ ...f, billingType: "fixed", estimate: 12400, workDoor: null }).choices).toEqual(["deposit", "part"]);
+    expect(estimateBilledInFullWords({ changesOffered: false, drawBilled: false, billingType: "fixed" })).toMatch(/change order/);
+    expect(estimateBilledInFullWords({ changesOffered: false, drawBilled: false, billingType: "fixed" })).not.toMatch(/type an amount/);
+    expect(estimateBilledInFullWords({ changesOffered: true, drawBilled: false, billingType: "fixed" })).toMatch(/Bill The Change Orders/);
+    // A job already billed in draws bills its extra as one more part (the server refuses a standard bill there).
+    expect(estimateBilledInFullWords({ changesOffered: false, drawBilled: true, billingType: "fixed" })).toMatch(/type an amount instead/);
+    // Where the server would never bring change orders in, they aren't counted: a draw on the job, a
+    // schedule, a T&M job, or an estimate not billed yet (The Whole Estimate is the door then).
+    for (const other of [
+      { billingType: "fixed", invoices: [...invoices, { status: "paid", invoice_kind: "deposit" }], milestoneCount: 0 },
+      { billingType: "fixed", invoices, milestoneCount: 2 },
+      { billingType: "tm", invoices, milestoneCount: 0 },
+      { billingType: "fixed", invoices: [], milestoneCount: 0 },
+    ]) {
+      expect(newInvoicePageFacts({ estimate: 12400, quotes, changeOrders, ...other }).changeOrdersToBill).toBe(0);
+    }
+    expect(newInvoiceSaveLabel("changes", false, null, formatCurrency)).toBe("Create Invoice");
+
+    // The server, on the same job: a second invoice, with the approved change orders brought in.
+    const billing = await import("../billing/actions");
+    const createBlankInvoice = billing.createBlankInvoice as unknown as ReturnType<typeof vi.fn>;
+    const importChangeOrdersIntoInvoice = billing.importChangeOrdersIntoInvoice as unknown as ReturnType<typeof vi.fn>;
+    createBlankInvoice.mockClear();
+    createBlankInvoice.mockResolvedValueOnce({ ok: true, id: "inv-co" });
+    importChangeOrdersIntoInvoice.mockClear();
+    importChangeOrdersIntoInvoice.mockResolvedValueOnce({ ok: true, stats: { inserted: 1, updated: 0, removed: 0, kept_edited: 0, pulled_in: 1 } });
+    state.client = fake((table, cols, single) => {
+      if (table === "payment_milestones") return single ? null : [];
+      if (table === "jobs" && cols === "billing_type") return { billing_type: "fixed" };
+      if (table === "jobs") return { customer_id: "c-1", name: "Timbercreek", description: null };
+      if (table === "invoices" && cols.startsWith("id, invoice_number, invoice_kind, dismissed_import_keys")) return [];
+      if (table === "invoices" && cols.startsWith("id, invoice_number, status, quote_id")) return [{ id: "inv-061", invoice_number: "INV-061", status: "sent", quote_id: "q-acc" }];
+      if (table === "invoices" && cols === "id, invoice_number") return []; // no draws
+      if (table === "quotes") return [{ id: "q-acc", status: "accepted" }];
+      if (table === "organizations") return { settings: {} };
+      // The approved change order, on no bill yet (nothing claims it).
+      if (table === "change_orders") return [{ id: "co-1", co_number: "CO-1", description: "Add a 20A circuit", amount: 850 }];
+      // The new invoice, read back: the change order's line landed on it.
+      if (table === "invoices" && cols === "invoice_number, invoice_items(id)") return { invoice_number: "INV-082", invoice_items: [{ id: "ii-co-1" }] };
+      return single ? null : [];
+    });
+    expect(await createInvoiceForJob(JOB)).toMatchObject({ ok: true, id: "inv-co" });
+    expect(createBlankInvoice).toHaveBeenCalledWith(expect.objectContaining({ job_id: JOB }));
+    expect(importChangeOrdersIntoInvoice).toHaveBeenCalledWith("inv-co");
+  });
+
+  it("a job that bills its actuals whose unbilled work couldn't be read: the sheet says so, never a choice that silently isn't there", () => {
+    const f = facts({ billingType: "tm", estimate: 17325, quotes: [{ status: "accepted", total: 17325 }] });
+    expect(f.billsActuals).toBe(true);
+    // The page passes no figure when its read failed: no Bill The Work So Far…
+    expect(newInvoiceChoices({ ...f, billingType: "tm", estimate: 17325, workDoor: workSoFarDoor(null, 0, false, formatCurrency) }).choices).toEqual(["deposit", "part"]);
+    // …and the sheet says why, and how to get it back.
+    expect(workSoFarNote({ billsActuals: true, unbilledRead: false, workDoor: null })).toBe(WORK_SO_FAR_UNREAD);
+    // Read, and nothing new: said as that - a different sentence.
+    expect(workSoFarNote({ billsActuals: true, unbilledRead: true, workDoor: null })).toBe("Every hour and bill so far is on a bill - nothing new to bill.");
+    // The choice is there: nothing to add. A job that doesn't bill its actuals: nothing to say.
+    expect(workSoFarNote({ billsActuals: true, unbilledRead: true, workDoor: workSoFarDoor(TAO_WORK, 0, false, formatCurrency) })).toBeNull();
+    expect(workSoFarNote({ billsActuals: false, unbilledRead: false, workDoor: null })).toBeNull();
   });
 
   it("Save names what it makes, and The Rest is the last part", () => {

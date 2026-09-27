@@ -517,8 +517,14 @@ export function invoicePresetFromParam(value: string | null | undefined): NewInv
  *                           the sheet and the card can never show two numbers. The default there.
  *   The Whole Estimate      on a fixed-price job whose estimate isn't on a bill yet and that has
  *                           no draws (createInvoiceForJob copies the estimate's lines).
+ *   Bill The Change Orders  on a fixed-price job whose estimate already went out on a bill, with
+ *                           no draws, once a change order is approved: createInvoiceForJob makes
+ *                           the second invoice with each approved change order as its own line
+ *                           (one already on a bill is skipped). Without it the sheet had only a
+ *                           typed amount for an extra, a draw that locks the job into draws and
+ *                           never bills the change order as itself. The default there.
  */
-export type NewInvoiceChoice = "deposit" | "part" | "work" | "whole";
+export type NewInvoiceChoice = "deposit" | "part" | "work" | "whole" | "changes";
 
 export type NewInvoiceSheetFacts = {
   billingType: string | null | undefined;
@@ -532,6 +538,9 @@ export type NewInvoiceSheetFacts = {
   /** The estimate a New Invoice would copy, when it is not on a bill yet (fixed price, no draws);
    *  null otherwise. Its total is the figure on The Whole Estimate. */
   wholeEstimate: number | null;
+  /** Approved change orders New Invoice would bring onto a new invoice (newInvoicePageFacts): only
+   *  counted where that is the server's door, 0 anywhere else. */
+  changeOrdersToBill?: number;
 };
 
 export function newInvoiceChoices(
@@ -541,11 +550,44 @@ export function newInvoiceChoices(
   const choices: NewInvoiceChoice[] = ["deposit"];
   if (f.hasEstimate && f.estimate > 0.005) choices.push("part");
   const work = f.billsActuals && !!f.workDoor && (f.workDoor.kind === "create" || f.workDoor.kind === "draw");
+  const changes = !work && f.billingType !== "tm" && f.wholeEstimate == null && (f.changeOrdersToBill ?? 0) > 0;
   if (work) choices.push("work");
   else if (f.billingType !== "tm" && f.wholeEstimate != null && f.wholeEstimate > 0.005) choices.push("whole");
+  else if (changes) choices.push("changes");
   const initial: NewInvoiceChoice =
-    preset && choices.includes(preset) ? preset : work ? "work" : choices.includes("part") ? "part" : choices[0];
+    preset && choices.includes(preset) ? preset : work ? "work" : changes ? "changes" : choices.includes("part") ? "part" : choices[0];
   return { choices, initial };
+}
+
+/**
+ * WHAT THE SHEET SAYS ABOUT THE WORK SO FAR on a job that bills its actuals, when Bill The Work So
+ * Far isn't a choice - never a choice that just isn't there. `unbilledRead` false: the page couldn't
+ * read the hours and bills not on a bill yet (its read failed, so it passed none), which is not the
+ * same as nothing to bill; the sheet says so and how to get the choice back. null: nothing to say
+ * (the choice is there, or the job doesn't bill its actuals).
+ */
+export const WORK_SO_FAR_UNREAD =
+  "The hours and bills not on a bill yet couldn't be read just now, so Bill The Work So Far isn't here. Reload the page to bill the work so far.";
+
+export function workSoFarNote(f: { billsActuals: boolean; unbilledRead: boolean; workDoor: CardDoor }): string | null {
+  if (!f.billsActuals) return null;
+  if (!f.unbilledRead) return WORK_SO_FAR_UNREAD;
+  if (f.workDoor?.kind === "covered") return f.workDoor.note ?? null;
+  if (!f.workDoor) return "Every hour and bill so far is on a bill - nothing new to bill.";
+  return null;
+}
+
+/**
+ * PART OF THE ESTIMATE WITH NOTHING LEFT OF IT. An extra is not a part of the estimate: on a job
+ * with no draws, a typed amount here would make the job's first draw (and from then on it bills only
+ * in draws, so a change order could never be billed as its own lines). So the words point at the
+ * change order's own door; only a job already billed in draws is told to type an amount.
+ */
+export function estimateBilledInFullWords(f: { changesOffered: boolean; drawBilled: boolean; billingType: string | null | undefined }): string {
+  if (f.changesOffered) return "The estimate is billed in full. Approved change orders go on their own bill: Bill The Change Orders.";
+  if (!f.drawBilled && f.billingType !== "tm")
+    return "The estimate is billed in full. Put extra work on a change order: once it's approved, Bill The Change Orders bills it here.";
+  return "The estimate is billed in full. For an extra, type an amount instead.";
 }
 
 /** The Overview card's unbilled work, as much of it as the door needs (lib/unbilled-work). */
@@ -617,6 +659,11 @@ export function estimateANewInvoiceCopies(
  *                  no schedule, no estimate that is the contract)
  *   wholeEstimate  the estimate New Invoice would copy, while nothing bills it yet: a fixed-price
  *                  job with no draw and no bill that went out (a sent bill may already be it)
+ *   changeOrdersToBill  the job's approved change orders with an amount, counted only where New
+ *                  Invoice brings them onto a new invoice (createInvoiceForJob's wantChangeOrders: a
+ *                  fixed-price job whose estimate is the contract, a standard bill already out, no
+ *                  draws); 0 anywhere else. One already on a bill is skipped by the server, which
+ *                  says "nothing new" when that is all of them.
  */
 export function newInvoicePageFacts(input: {
   billingType: string | null | undefined;
@@ -624,7 +671,8 @@ export function newInvoicePageFacts(input: {
   quotes: readonly { total?: number | string | null; status?: string | null; created_at?: string | null }[];
   invoices: readonly { status?: string | null; invoice_kind?: string | null }[];
   milestoneCount: number;
-}): { hasEstimate: boolean; drawBilled: boolean; scheduleActive: boolean; billsActuals: boolean; wholeEstimate: number | null } {
+  changeOrders?: readonly { status?: string | null; amount?: number | string | null }[];
+}): { hasEstimate: boolean; drawBilled: boolean; scheduleActive: boolean; billsActuals: boolean; wholeEstimate: number | null; changeOrdersToBill: number } {
   const live = input.quotes.filter((q) => isLiveQuote(q.status));
   const hasEstimate = Number(input.estimate) > 0.005 && live.some((q) => Number(q.total) > 0.005);
   const drawBilled = input.invoices.some((i) => isDrawKind(i.invoice_kind) && i.status !== "void");
@@ -632,7 +680,13 @@ export function newInvoicePageFacts(input: {
   const billsActuals = nextInvoiceImportsActuals(input.billingType, input.milestoneCount, live.length > 0);
   const wentOut = input.invoices.some((i) => i.status !== "void" && i.status !== "draft");
   const wholeEstimate = input.billingType !== "tm" && !drawBilled && !wentOut ? estimateANewInvoiceCopies(input.quotes) : null;
-  return { hasEstimate, drawBilled, scheduleActive, billsActuals, wholeEstimate };
+  const standardOut = input.invoices.some((i) => i.status !== "void" && i.status !== "draft" && !isDrawKind(i.invoice_kind));
+  const changeOrdersToBill =
+    input.billingType !== "tm" && live.length > 0 && !drawBilled && !scheduleActive && standardOut
+      ? // The server's own rule (change-order-billing billableChangeOrders): approved (or unstated), not $0.
+        (input.changeOrders ?? []).filter((c) => (c.status == null || c.status === "approved") && Math.abs(Number(c.amount ?? 0)) > 0.005).length
+      : 0;
+  return { hasEstimate, drawBilled, scheduleActive, billsActuals, wholeEstimate, changeOrdersToBill };
 }
 
 /** What Save says it makes: "Create Deposit $500.00", "Create Invoice $1,572.27", "Create Final

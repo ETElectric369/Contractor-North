@@ -14,11 +14,13 @@ import { createClient } from "@/lib/supabase/client";
 import { createParamClaim } from "@/lib/param-claim";
 import { drawAmount, subtotalTaxTotal } from "@/lib/invoice-math";
 import {
+  estimateBilledInFullWords,
   invoicePresetFromParam,
   newInvoiceChoices,
   newInvoiceRoute,
   newInvoiceSaveLabel,
   workSoFarDoor,
+  workSoFarNote,
   type NewInvoiceChoice,
   type NewInvoicePreset,
   type OpenDraft,
@@ -58,6 +60,9 @@ export type NewInvoiceButtonProps = {
   hasEstimate?: boolean;
   /** The estimate a New Invoice would copy, while no bill holds it (fixed price, no draws). */
   wholeEstimate?: number | null;
+  /** Approved change orders a new invoice would bring in (fixed price, estimate billed, no draws);
+   *  above 0 offers Bill The Change Orders (newInvoicePageFacts). */
+  changeOrdersToBill?: number;
   /** Time & Material work to date; null = couldn't total (said, never $0). */
   worked?: number | null;
   /** Sent bills (non-void, non-draft) and what's been paid on the job's bills. */
@@ -72,7 +77,8 @@ export type NewInvoiceButtonProps = {
   /** The next New Invoice pulls the job's hours and receipts (nextInvoiceImportsActuals). */
   billsActuals?: boolean;
   /** The Overview card's unbilled work (staff), and the deposit it nets - Bill The Work So Far's
-   *  figure comes from these through the card's own door, so the two never differ. */
+   *  figure comes from these through the card's own door, so the two never differ. On a job that
+   *  bills its actuals, null (or not passed) means it couldn't be read, and the sheet says so. */
   unbilled?: WorkSoFar | null;
   lumpToNet?: number;
   /** Settings › Money deposit %: the Deposit box's first value (× the estimate). */
@@ -266,6 +272,7 @@ const CHOICE_WORDS: Record<NewInvoiceChoice, string> = {
   part: "Part Of The Estimate",
   work: "Bill The Work So Far",
   whole: "The Whole Estimate",
+  changes: "Bill The Change Orders",
 };
 
 /**
@@ -301,9 +308,11 @@ function NewInvoiceSheet(
       billsActuals: !!p.billsActuals,
       workDoor,
       wholeEstimate: p.wholeEstimate ?? null,
+      changeOrdersToBill: p.changeOrdersToBill ?? 0,
     },
     p.preset,
   );
+  const workNote = workSoFarNote({ billsActuals: !!p.billsActuals, unbilledRead: p.unbilled != null, workDoor });
   const [choice, setChoice] = useState<NewInvoiceChoice>(initial);
   const depositSeed = (Number(p.depositPercent) || 0) > 0 && estimate > 0 ? Math.round(estimate * (Number(p.depositPercent) || 0)) / 100 : 0;
   const [depositAmt, setDepositAmt] = useState(depositSeed);
@@ -338,7 +347,9 @@ function NewInvoiceSheet(
   /** Bill The Work So Far makes a standard invoice (the only path a rate reaches) unless it is the
    *  last bill or the job already bills with draws - then it is a progress report, never taxed. */
   const workIsStandard = workDoor?.kind === "create" && !last;
-  const showTax = p.taxOn && choice === "work" && workIsStandard;
+  // Bill The Change Orders makes a new standard invoice too (the job door's blank branch), so it
+  // starts at the rate shown here, exactly like Bill The Work So Far.
+  const showTax = p.taxOn && ((choice === "work" && workIsStandard) || choice === "changes");
   const partAmount = partDollars ? Math.round((partAmt || 0) * 100) / 100 : drawAmount("percent", partPct, left ?? 0);
   const amount =
     choice === "deposit"
@@ -349,10 +360,12 @@ function NewInvoiceSheet(
           ? workAmount != null && showTax
             ? subtotalTaxTotal([workAmount], taxRate).total
             : workAmount
-          : (p.wholeEstimate ?? null);
+          : choice === "whole"
+            ? (p.wholeEstimate ?? null)
+            : null; // Bill The Change Orders: the server decides which are new, so no figure is guessed.
   const canLast = choice === "part" || choice === "work";
   const saveLabel = newInvoiceSaveLabel(choice, canLast && last, amount, money);
-  const canSave = !pending && !opening && amount != null && amount > 0.005;
+  const canSave = !pending && !opening && (choice === "changes" || (amount != null && amount > 0.005));
 
   function pickPart(v: number | "rest") {
     setPartDollars(false);
@@ -380,6 +393,9 @@ function NewInvoiceSheet(
           workDoor?.kind === "draw" || last
             ? await createProgressReportInvoice(p.jobId, last ? "final" : "progress")
             : await createInvoiceForJob(p.jobId, showTax && taxRate > 0 ? { taxRate } : {});
+      } else if (choice === "changes") {
+        // The job's own door: a new invoice with each approved change order as its own line.
+        res = await createInvoiceForJob(p.jobId, showTax && taxRate > 0 ? { taxRate } : {});
       } else {
         // The estimate's lines, at the estimate's own tax (its price as agreed).
         res = await createInvoiceForJob(p.jobId);
@@ -534,7 +550,9 @@ function NewInvoiceSheet(
               {partDollars ? "Use A Percent Instead" : "Type An Amount Instead"}
             </button>
             {!partDollars && left != null && left <= 0.005 && (
-              <p className="text-sm text-amber-700">The estimate is billed in full. For an extra, type an amount instead.</p>
+              <p className="text-sm text-amber-700">
+                {estimateBilledInFullWords({ changesOffered: choices.includes("changes"), drawBilled: !!p.drawBilled, billingType: p.billingType })}
+              </p>
             )}
           </div>
         )}
@@ -548,10 +566,14 @@ function NewInvoiceSheet(
             {workDoor.note && <p className="mt-1 text-xs text-slate-500">{workDoor.note}</p>}
           </div>
         )}
-        {/* Nothing to bill on a job that bills its work: said, never a choice the server refuses. */}
-        {p.billsActuals && workDoor?.kind === "covered" && <p className="text-sm text-slate-500">{workDoor.note}</p>}
-        {p.billsActuals && !workDoor && p.unbilled && (
-          <p className="text-sm text-slate-500">Every hour and bill so far is on a bill - nothing new to bill.</p>
+        {/* Why Bill The Work So Far isn't a choice on a job that bills its work: nothing to bill, or
+            the work couldn't be read (never a choice that silently isn't there). */}
+        {workNote && <p className={`text-sm ${p.unbilled == null ? "text-amber-700" : "text-slate-500"}`}>{workNote}</p>}
+
+        {choice === "changes" && (
+          <p className="text-sm text-slate-600">
+            Makes a new invoice with this job&apos;s approved change orders, each on its own line. Any already on a bill are left off.
+          </p>
         )}
 
         {choice === "whole" && p.wholeEstimate != null && (

@@ -1790,7 +1790,7 @@ export default async function JobDetailPage({
                 jobId={j.id}
                 billingType={(j as any).billing_type ?? "fixed"}
                 estimate={quoted}
-                // hasEstimate, drawBilled, scheduleActive, billsActuals and wholeEstimate, derived
+                // hasEstimate, drawBilled, scheduleActive, billsActuals, wholeEstimate and changeOrdersToBill, derived
                 // once from this page's own reads (lib/actuals-draw newInvoicePageFacts).
                 {...newInvoicePageFacts({
                   billingType: (j as any).billing_type ?? "fixed",
@@ -1798,6 +1798,8 @@ export default async function JobDetailPage({
                   quotes: (quotes ?? []) as any[],
                   invoices: (invoices ?? []) as any[],
                   milestoneCount: ((paymentMilestones as any) ?? []).length,
+                  // Approved change orders: Bill The Change Orders once the estimate's bill is out.
+                  changeOrders: (changeOrders ?? []) as { status?: string | null; amount?: number | null }[],
                 })}
                 worked={workedToDate}
                 billed={billedToDate}
