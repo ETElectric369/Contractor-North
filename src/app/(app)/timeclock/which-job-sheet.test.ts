@@ -1,0 +1,181 @@
+import { describe, it, expect, vi } from "vitest";
+import { createElement, isValidElement, type ReactElement, type ReactNode } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+
+/**
+ * "WHICH JOB ARE YOU ON?" — the sheet the clock doors open (Erik, 2026-09-26: "yes").
+ *
+ *   - it appears only after a punch that is saved and on no job (askAfterPunch, the one rule every
+ *     door uses), so a clock that knew the job stays two buttons;
+ *   - it opens at once on "Finding your jobs…": the clock has already answered, and the list
+ *     arrives after (the clock never waits on it);
+ *   - each job is one 44px row; "Skip, The Office Will Pick" is always there and writes nothing;
+ *   - a tap is the checked write, and anything but a landed write is a plain line;
+ *   - job names only, never a price.
+ */
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }) }));
+vi.mock("./which-job-actions", () => ({
+  whichJobChoices: vi.fn(async () => ({ ok: true, jobs: [], isStaff: false })),
+  putPunchOnJob: vi.fn(async () => ({ ok: true })),
+}));
+
+import { WhichJobSheetView, type SheetPhase } from "../planner/which-job";
+import { askAfterPunch, orderWhichJobChoices, pickOutcome, whichJobLabel, type WhichJobOption } from "./which-job-choices";
+
+const jobs: WhichJobOption[] = [
+  { id: "j28", label: "85 Whitney", why: "Where you worked last" },
+  { id: "j30", label: "13631 Northwoods", why: "On today's schedule" },
+  { id: "j39", label: "Tahoe Park Heights" },
+];
+
+const view = (state: SheetPhase, over: Partial<Parameters<typeof WhichJobSheetView>[0]> = {}) => ({
+  moment: "in" as const,
+  state,
+  onPick: vi.fn(),
+  onSkip: vi.fn(),
+  ...over,
+});
+const render = (props: Parameters<typeof WhichJobSheetView>[0]) => renderToStaticMarkup(createElement(WhichJobSheetView, props));
+
+/** The words inside an element tree (strings only; components are read through their props). */
+function textOf(node: ReactNode): string {
+  if (node == null || typeof node === "boolean") return "";
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(textOf).join("");
+  if (isValidElement(node)) return textOf((node.props as { children?: ReactNode }).children);
+  return "";
+}
+/** The clickable element whose words include `label`, found in the tree the view returns (its
+ *  children and its pinned footer): the tap is its onClick, called the way React would. */
+function clickable(node: ReactNode, label: string): ReactElement<{ onClick: () => void }> | null {
+  if (node == null || typeof node !== "object") return null;
+  if (Array.isArray(node)) {
+    for (const n of node) {
+      const hit = clickable(n, label);
+      if (hit) return hit;
+    }
+    return null;
+  }
+  if (!isValidElement(node)) return null;
+  const props = node.props as { onClick?: unknown; children?: ReactNode; footer?: ReactNode };
+  if (typeof props.onClick === "function" && textOf(props.children).includes(label)) return node as ReactElement<{ onClick: () => void }>;
+  return clickable(props.footer, label) ?? clickable(props.children, label);
+}
+
+describe("when the sheet appears", () => {
+  it("only after a saved punch the clock couldn't put on a job, at clock-in or clock-out", () => {
+    expect(askAfterPunch({ ok: true, id: "p1", noJob: true }, "in")).toEqual({ entryId: "p1", moment: "in" });
+    expect(askAfterPunch({ ok: true, id: "p1", noJob: true }, "out")).toEqual({ entryId: "p1", moment: "out" });
+  });
+
+  it("never when the job was known, the punch was refused, or there is no punch id", () => {
+    expect(askAfterPunch({ ok: true, id: "p1" }, "in")).toBeNull();
+    expect(askAfterPunch({ ok: true }, "in")).toBeNull();
+    expect(askAfterPunch({ ok: true, noJob: true }, "in")).toBeNull();
+    expect(askAfterPunch({ ok: false, noJob: true, id: "p1" }, "in")).toBeNull();
+    expect(askAfterPunch(null, "out")).toBeNull();
+  });
+});
+
+describe("the sheet", () => {
+  it("opens at once, before its list: the clock already answered, and Skip is there from the start", () => {
+    const html = render(view({ phase: "loading" }));
+    expect(html).toContain("Which Job Are You On?");
+    expect(html).toContain("Finding your jobs…");
+    expect(html).toContain("You&#x27;re clocked in.");
+    expect(html).toContain("Skip, The Office Will Pick");
+  });
+
+  it("lists each job as one 44px row, the likely ones with why, and names only (no price)", () => {
+    const html = render(view({ phase: "ready", jobs, isStaff: false }));
+    for (const j of jobs) expect(html).toContain(j.label);
+    expect(html).toContain("Where you worked last");
+    expect(html).toContain("On today&#x27;s schedule");
+    const rows = html.match(/<button type="button"[^>]*class="flex min-h-\[44px\] w-full/g) ?? [];
+    expect(rows).toHaveLength(jobs.length);
+    expect(html).not.toMatch(/\$\d|price|rate|amount/i);
+  });
+
+  it("at clock-out it asks about the shift that just closed", () => {
+    expect(render(view({ phase: "ready", jobs, isStaff: false }, { moment: "out" }))).toContain(
+      "You&#x27;re clocked out, and this punch has no job. Tap the job it was on.",
+    );
+  });
+
+  it("Skip writes nothing and closes; a row tap picks that job", () => {
+    const props = view({ phase: "ready", jobs, isStaff: false });
+    const tree = WhichJobSheetView(props);
+    clickable(tree, "Skip, The Office Will Pick")!.props.onClick();
+    expect(props.onSkip).toHaveBeenCalledTimes(1);
+    expect(props.onPick).not.toHaveBeenCalled();
+    clickable(tree, "13631 Northwoods")!.props.onClick();
+    expect(props.onPick).toHaveBeenCalledWith(jobs[1]);
+  });
+
+  it("an empty list says who picks instead (the office for a tech), and a failed load says so", () => {
+    expect(render(view({ phase: "ready", jobs: [], isStaff: false }))).toContain("The office puts this punch on the right job.");
+    expect(render(view({ phase: "ready", jobs: [], isStaff: true }))).toContain("from Timecards");
+    expect(render(view({ phase: "failed", error: "Couldn't load the jobs just now." }))).toContain("Couldn&#x27;t load the jobs just now.");
+  });
+
+  it("a refused pick is a plain line; a landed one with no toast to say it is said in the sheet, with Done", () => {
+    const refused = render(view({ phase: "ready", jobs, isStaff: false }, { err: "That job is finished." }));
+    expect(refused).toContain('role="alert"');
+    expect(refused).toContain("That job is finished.");
+    const placed = render(view({ phase: "ready", jobs, isStaff: false }, { placed: "Your punch is on 85 Whitney." }));
+    expect(placed).toContain("Your punch is on 85 Whitney.");
+    expect(placed).toContain(">Done</button>");
+    expect(placed).not.toContain("Skip, The Office Will Pick");
+  });
+});
+
+describe("a tap on a row", () => {
+  const job = jobs[0];
+
+  it("saves through the checked write and says where the punch went", async () => {
+    const put = vi.fn(async () => ({ ok: true, label: "85 Whitney" }));
+    expect(await pickOutcome(put, "p1", job)).toEqual({ kind: "placed", sentence: "Your punch is on 85 Whitney." });
+    expect(put).toHaveBeenCalledWith("p1", "j28");
+  });
+
+  it("a refusal, a punch that moved, or no connection is a sentence, and the punch stays saved", async () => {
+    expect(await pickOutcome(async () => ({ ok: false, error: "That job is finished." }), "p1", job)).toEqual({
+      kind: "refused",
+      sentence: "That job is finished.",
+    });
+    expect((await pickOutcome(async () => ({ ok: false, stale: true, error: "Nothing changed." }), "p1", job)).kind).toBe("stale");
+    const offline = await pickOutcome(
+      async () => {
+        throw new Error("fetch failed");
+      },
+      "p1",
+      job,
+    );
+    expect(offline).toEqual({ kind: "refused", sentence: "No connection, so the punch is still on no job. Try again when you have a bar or two, or skip." });
+  });
+});
+
+describe("the order, and the label", () => {
+  it("each job once, in its first group; finished and other-day jobs are left for the office", () => {
+    const out = orderWhichJobChoices({
+      jobs: [
+        { id: "done", name: "Done", status: "complete" },
+        { id: "a", name: "A", status: "in_progress", created_at: "2026-09-01" },
+        { id: "a", name: "A", status: "in_progress", created_at: "2026-09-01" },
+        { id: "later", name: "Later", status: "scheduled", scheduled_start: "2026-10-05T15:00:00Z" },
+      ],
+      lastJobId: "done",
+      segToday: new Set(),
+      todayStr: "2026-09-26",
+      tz: "America/Los_Angeles",
+      codesOn: true,
+    });
+    expect(out).toEqual([{ id: "a", label: "A" }]);
+  });
+
+  it("codes off, a job reads the way the crew knows it: customer · street", () => {
+    const j = { id: "x", name: "Panel swap", address: "85 Whitney", customers: { name: "Nora" } };
+    expect(whichJobLabel(j, false)).toBe("Nora · 85 Whitney");
+    expect(whichJobLabel(j, true)).toBe("Panel swap");
+  });
+});

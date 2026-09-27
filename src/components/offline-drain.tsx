@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { clockIn } from "@/app/(app)/timeclock/actions";
+import { WhichJobSheet } from "@/app/(app)/planner/which-job";
+import { askAfterPunch, type WhichJobAsk } from "@/app/(app)/timeclock/which-job-choices";
 import { listPending, registerReplayer, remove, startAutoDrain, type QueuedOp } from "@/lib/offline/queue";
 
 /**
@@ -22,11 +24,17 @@ import { listPending, registerReplayer, remove, startAutoDrain, type QueuedOp } 
 export function OfflineDrain({ userId }: { userId: string | null }) {
   const [mine, setMine] = useState<QueuedOp[]>([]);
   const [showBlocked, setShowBlocked] = useState(false);
+  // A punch that filed from the queue with no job gets the same "Which Job Are You On?" the live
+  // clock asks, once it is saved. This shell sits outside the toast provider, so the sheet says
+  // where the punch went itself (confirmInline).
+  const [ask, setAsk] = useState<WhichJobAsk | null>(null);
 
   useEffect(() => {
     registerReplayer("time.clockIn", async (args, clientOpId) => {
       const a = args as Parameters<typeof clockIn>[0];
       const res = await clockIn({ ...a, clock_in_at: null, clientOpId });
+      const again = askAfterPunch(res, "in");
+      if (again) setAsk(again);
       // A refusal that TIME fixes (a session that hadn't refreshed after hours offline) must not
       // be quarantined as a permanent rejection — the drain waits and tries again instead.
       const transient = !res.ok && /sign(ed)? in|session|expired|temporar|timeout|network|fetch/i.test(res.error ?? "");
@@ -73,9 +81,15 @@ export function OfflineDrain({ userId }: { userId: string | null }) {
     setMine(ops.filter((o) => !userId || !o.ownerId || o.ownerId === userId));
   };
 
-  if (!pending && !blocked) return null;
+  const sheet = ask ? (
+    <WhichJobSheet key={ask.entryId} entryId={ask.entryId} moment={ask.moment} confirmInline onClose={() => setAsk(null)} />
+  ) : null;
+
+  if (!pending && !blocked) return sheet;
 
   return (
+    <>
+    {sheet}
     <div className="pointer-events-none fixed inset-x-0 bottom-20 z-40 flex flex-col items-center gap-2 px-3 shell:bottom-4">
       {blocked > 0 && showBlocked ? (
         <div className="pointer-events-auto w-full max-w-sm rounded-2xl border border-rose-200 bg-white p-3 text-xs shadow-lg">
@@ -125,5 +139,6 @@ export function OfflineDrain({ userId }: { userId: string | null }) {
         ) : null}
       </div>
     </div>
+    </>
   );
 }

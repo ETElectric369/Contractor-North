@@ -1,20 +1,21 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/input";
+import { Modal } from "@/components/ui/modal";
 import { useToast } from "@/components/toast";
+import { putPunchOnJob, whichJobChoices } from "../timeclock/which-job-actions";
+import {
+  pickOutcome,
+  type WhichJobMoment,
+  type WhichJobOption,
+  type WhichJobResult,
+} from "../timeclock/which-job-choices";
 
-export type WhichJobOption = { id: string; label: string };
-
-/** The answer to a pick: the page's server action reports a sentence, never a code.
- *  `stale` = the refusal is because the PUNCH is no longer what this screen shows (it closed, or
- *  got its job some other way): the block must re-render from the server, not sit on the old
- *  facts. The shell has no pull-to-refresh, so the sentence can't ask for one — the component
- *  does the refresh itself. */
-export type WhichJobResult = { ok: boolean; error?: string; stale?: boolean };
+export type { WhichJobOption, WhichJobResult } from "../timeclock/which-job-choices";
 
 /**
  * "WHICH JOB ARE YOU ON?" — the Now block for a punch that carries no job.
@@ -26,10 +27,10 @@ export type WhichJobResult = { ok: boolean; error?: string; stale?: boolean };
  * no door (Erik, 2026-09-11: "what happened to my materials button on the job im clocked into").
  *
  * This is that sentence and that door. One pick sets the job on the WHOLE open entry — every
- * hour since the punch, not just the minutes after the tap — through the page's own server
- * action (the same whole-entry move switch_job makes on a job-less punch, open to every role
- * here). After the write lands the route is refreshed and the four doors render in this block's
- * place — no reload, nothing to find.
+ * hour since the punch, not just the minutes after the tap — through the shared server action
+ * (timeclock/which-job-actions putPunchOnJob, the same one the clock doors' sheet below uses).
+ * After the write lands the route is refreshed and the four doors render in this block's place —
+ * no reload, nothing to find.
  *
  * Only ever offered when the punch has NO job. Moving a punch that already carries one stays
  * on Timecards (the office's after-the-fact correction path).
@@ -45,7 +46,7 @@ export function WhichJob({
   jobs: WhichJobOption[];
   /** Names the right door in the empty-list sentence: staff have Timecards, a tech has the office. */
   isStaff: boolean;
-  /** The page's server action: sets job_id on the caller's own open, job-less entry. Checked write. */
+  /** The server action: sets job_id on the caller's own, job-less entry. Checked write. */
   onPick: (entryId: string, jobId: string) => Promise<WhichJobResult>;
 }) {
   const router = useRouter();
@@ -78,8 +79,10 @@ export function WhichJob({
           setErr(sentence);
           return;
         }
-        // The write landed: re-render the page from the server so the Now block comes back
-        // with the job's doors — the RSC refresh, not a full reload.
+        // The write landed: say so (the block is about to be replaced) and re-render the page from
+        // the server so the Now block comes back with the job's doors — the RSC refresh, not a
+        // full reload.
+        if (res.label) toast(`Your punch is on ${res.label}.`, "success");
         router.refresh();
       } catch {
         // Network only (a server refusal comes back as ok:false above). The punch is untouched.
@@ -133,5 +136,195 @@ export function WhichJob({
       )}
       {err && <p className="mt-2 text-sm text-red-600">{err}</p>}
     </div>
+  );
+}
+
+// ── THE SHEET: "Which Job Are You On?" at the clock (Erik, 2026-09-26: "yes") ─────────────────
+//
+// The duplicate punches began with a clock that couldn't tell the job (the schedule didn't cover
+// the day), saved the punch on no job and asked nothing; days later the office typed the same
+// hours again on the job. So when a clock-in lands on no job, the door that made it (Timeclock, My
+// Day's clock card, the offline queue once it files) puts ONE question up, and the same one once
+// more when that shift closes still on no job:
+//   · the punch is ALREADY saved before the sheet appears: the clock never waits on it, and the
+//     sheet loads its own list after the clock has answered;
+//   · the likely jobs first (which-job-choices), each one 44px tap;
+//   · "Skip, The Office Will Pick" always there: skipping writes nothing and the office picks, as
+//     before (Hours On No Job, the job's Time tab);
+//   · picking is a checked write, and anything but a landed write comes back as a plain line;
+//   · a job the clock knew never gets here: the clock stays two buttons.
+
+export type SheetPhase =
+  | { phase: "loading" }
+  | { phase: "ready"; jobs: WhichJobOption[]; isStaff: boolean }
+  | { phase: "failed"; error: string };
+
+/**
+ * The sheet as it looks, given its state. No hooks: the doors' wiring is in WhichJobSheet, and the
+ * tests read this one (every row a 44px button, Skip always present, no price anywhere).
+ */
+export function WhichJobSheetView({
+  moment,
+  state,
+  busyId = null,
+  err = null,
+  placed = null,
+  onPick,
+  onSkip,
+}: {
+  moment: WhichJobMoment;
+  state: SheetPhase;
+  busyId?: string | null;
+  err?: string | null;
+  /** The pick landed and there is no toast to say so (the offline queue's sheet): said here. */
+  placed?: string | null;
+  onPick: (job: WhichJobOption) => void;
+  onSkip: () => void;
+}) {
+  const footer = placed ? (
+    <Button type="button" className="min-h-[44px] w-full" onClick={onSkip}>
+      Done
+    </Button>
+  ) : (
+    <Button type="button" variant="outline" className="min-h-[44px] w-full" onClick={onSkip} disabled={!!busyId}>
+      Skip, The Office Will Pick
+    </Button>
+  );
+  return (
+    <Modal open onClose={onSkip} title="Which Job Are You On?" size="sm" portal footer={footer}>
+      {placed ? (
+        <p className="text-sm font-medium text-green-700" role="status">
+          {placed}
+        </p>
+      ) : (
+        <div data-testid="which-job-sheet">
+          <p className="text-sm text-slate-600">
+            {moment === "in"
+              ? "You're clocked in. Tap the job you're on and the whole punch goes on it."
+              : "You're clocked out, and this punch has no job. Tap the job it was on."}
+          </p>
+          {state.phase === "loading" ? (
+            <p className="mt-3 flex min-h-[44px] items-center gap-2 text-sm text-slate-500">
+              <Loader2 className="h-4 w-4 animate-spin" /> Finding your jobs…
+            </p>
+          ) : state.phase === "failed" ? (
+            <p className="mt-3 text-sm text-slate-600">{state.error}</p>
+          ) : state.jobs.length === 0 ? (
+            <p className="mt-3 text-sm text-slate-600">
+              {state.isStaff
+                ? "No job is going right now. Put this punch on its job from Timecards when you know it."
+                : "No job is going right now. The office puts this punch on the right job."}
+            </p>
+          ) : (
+            <ul className="mt-3 divide-y divide-slate-100 overflow-hidden rounded-lg border border-slate-200">
+              {state.jobs.map((j) => (
+                <li key={j.id}>
+                  <button
+                    type="button"
+                    onClick={() => onPick(j)}
+                    disabled={!!busyId}
+                    className="flex min-h-[44px] w-full items-center gap-2 px-3 py-2 text-left hover:bg-slate-50 disabled:opacity-60"
+                  >
+                    <span className="min-w-0 flex-1">
+                      <span className="block font-medium text-slate-900">{j.label}</span>
+                      {j.why && <span className="block text-xs text-slate-500">{j.why}</span>}
+                    </span>
+                    {busyId === j.id && <Loader2 className="h-4 w-4 shrink-0 animate-spin text-slate-400" />}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          {err && (
+            <p className="mt-2 text-sm text-red-600" role="alert">
+              {err}
+            </p>
+          )}
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+/**
+ * The sheet, wired: loads its own list for `entryId` (after the clock has answered), and a tap puts
+ * the punch on that job. `confirmInline`: the door has no toast (the shell's offline queue sits
+ * outside the toast provider), so the sentence is said in the sheet with a Done button instead.
+ */
+export function WhichJobSheet({
+  entryId,
+  moment,
+  onClose,
+  confirmInline = false,
+}: {
+  entryId: string;
+  moment: WhichJobMoment;
+  onClose: () => void;
+  confirmInline?: boolean;
+}) {
+  const router = useRouter();
+  const toast = useToast();
+  const [state, setState] = useState<SheetPhase>({ phase: "loading" });
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [placed, setPlaced] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    setState({ phase: "loading" });
+    whichJobChoices(entryId).then(
+      (r) => {
+        if (!alive) return;
+        setState(r.ok ? { phase: "ready", jobs: r.jobs, isStaff: r.isStaff } : { phase: "failed", error: r.error });
+      },
+      () => {
+        if (alive) setState({ phase: "failed", error: "No connection, so the jobs didn't load. Your punch is saved; skip, and the office will put it on its job." });
+      },
+    );
+    return () => {
+      alive = false;
+    };
+  }, [entryId]);
+
+  async function pick(job: WhichJobOption) {
+    if (busyId) return;
+    setBusyId(job.id);
+    setErr(null);
+    try {
+      const out = await pickOutcome(putPunchOnJob, entryId, job);
+      if (out.kind === "placed") {
+        router.refresh();
+        if (confirmInline) {
+          setPlaced(out.sentence);
+          return;
+        }
+        toast(out.sentence, "success");
+        onClose();
+        return;
+      }
+      if (out.kind === "stale" && !confirmInline) {
+        // The punch moved underneath (closed, or got its job elsewhere): the screen behind catches
+        // up, and the sentence rides a toast because the sheet goes with it.
+        toast(out.sentence, "error");
+        router.refresh();
+        onClose();
+        return;
+      }
+      setErr(out.sentence);
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  return (
+    <WhichJobSheetView
+      moment={moment}
+      state={state}
+      busyId={busyId}
+      err={err}
+      placed={placed}
+      onPick={(j) => void pick(j)}
+      onSkip={onClose}
+    />
   );
 }

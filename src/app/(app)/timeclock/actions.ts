@@ -4,8 +4,9 @@ import { reportError } from "@/lib/observe";
 
 import { revalidatePath } from "next/cache";
 import { isStaffRole } from "@/lib/actions/perms";
-import { createClient, createServiceClient } from "@/lib/supabase/server";
+import { createClient } from "@/lib/supabase/server";
 import { visibleJobIdOrNull } from "@/lib/job-visibility";
+import { promoteJobToInProgress } from "@/lib/job-promote";
 import { requireStaff } from "@/lib/staff-guard";
 import { ACTIVE_JOB_STATUSES, pickJobScheduledToday } from "@/lib/job-status";
 import { hoursBetween } from "@/lib/utils";
@@ -52,6 +53,12 @@ export type ClockResult = {
   /** A refusal because the person already has hours there: the shift in the way, so the form can
    *  offer its door (Put This On <job> for a no-job punch, Open That Shift otherwise). */
   clash?: OverlapClash;
+  /** The time entry the punch wrote or closed (clockIn, clockOut). Also runOnce's result_id. */
+  id?: string;
+  /** THE CLOCK COULDN'T TELL THE JOB (Erik, 2026-09-26: "yes"). The punch landed, or closed, with
+   *  no job and no code, so the door asks "Which Job Are You On?" once, with a Skip. Only ever set
+   *  on a punch that is ALREADY saved: the question never holds the clock up. */
+  noJob?: boolean;
 };
 
 /** The shift 0360's overlap refusal names in its DETAIL ("time_entry:<uuid>"), or null. */
@@ -320,7 +327,8 @@ async function clockInInner(
   }
 
   // The DB has a unique index preventing two open entries; surface a friendly msg.
-  const { error } = await supabase.from("time_entries").insert({
+  // The row comes back so the door knows WHICH punch to ask about when it landed on no job.
+  const { data: made, error } = await supabase.from("time_entries").insert({
     profile_id: user.id,
     job_id: jobId,
     job_code: input.job_code,
@@ -330,7 +338,7 @@ async function clockInInner(
     // 'offline' outranks the others: it says the SERVER CLOCK wasn't the authority for this time,
     // which is the fact the office needs when reading the card.
     source: offlinePunch ? "offline" : backdated ? "manual" : input.gps ? "app" : "manual",
-  });
+  }).select("id").maybeSingle();
 
   // "You're already clocked in" now lives in dbError's constraint map, not in a string test here.
   // cn-v702 wrapped the ARGUMENT of this test: dbError translates the duplicate-key message into a
@@ -360,44 +368,18 @@ async function clockInInner(
 
   revalidatePath("/timeclock");
   revalidatePath("/planner");
-  return { ok: true };
+  // WHEN THE CLOCK CAN'T TELL THE JOB, THE DOOR ASKS (Erik, 2026-09-26). The punch above is saved
+  // whatever happens next; `noJob` only tells the door to put one question on screen ("Which Job
+  // Are You On?", with Skip, The Office Will Pick). A punch the person gave a code (Shop, Drive)
+  // was named on purpose and is not asked about. The door loads its own choices, so nothing here
+  // reads a job list and the clock answers as fast as it always did.
+  const id = (made as { id?: string } | null)?.id;
+  if (!id) return { ok: true };
+  return !jobId && !(input.job_code ?? "").trim() ? { ok: true, id, noJob: true } : { ok: true, id };
 }
 
-/**
- * PROMOTE A JOB TO in_progress WHEN SOMEBODY STARTS WORKING ON IT.
- *
- * ONE COPY, called by clock-in and by switch-job. The drift between those two copies IS the bug
- * this fixes: clockIn was moved onto the service client in cn-v650 because `jobs_write` requires
- * is_org_staff(), so a TECH's promotion was a zero-row UPDATE that PostgREST reports as success —
- * Brian starts at 7am, the job sits in to_be_scheduled all day, and the office's board is wrong
- * about what is actually being worked. switchJob kept the old broken copy, so the same silent
- * no-op survived on the other path.
- *
- * THE AUTHORIZATION IS THE READ, on the caller's OWN RLS client. No visible row means no org id
- * and nothing is promoted — so the service write can only ever touch a job this person could
- * already see, in their own org. It writes ONE column on ONE row, and never un-completes a
- * finished or cancelled job.
- *
- * Never throws: the punch is the thing that must land.
- */
-async function promoteJobToInProgress(
-  supabase: Awaited<ReturnType<typeof createClient>>,
-  jobId: string,
-): Promise<void> {
-  try {
-    const { data: jobRow } = await supabase.from("jobs").select("org_id").eq("id", jobId).maybeSingle();
-    const jobOrg = (jobRow as { org_id?: string } | null)?.org_id;
-    if (!jobOrg) return;
-    await createServiceClient()
-      .from("jobs")
-      .update({ status: "in_progress" })
-      .eq("id", jobId)
-      .eq("org_id", jobOrg)
-      .in("status", ACTIVE_JOB_STATUSES.filter((st) => st !== "in_progress"));
-  } catch {
-    /* the punch already landed — a board that lags is not worth failing it over */
-  }
-}
+// promoteJobToInProgress lives in lib/job-promote (one copy for clock-in, switch-job and
+// "Which Job Are You On?"; a plain module, so the service-client write is never a callable action).
 
 export type SwitchJobResult = ClockResult & {
   /** The entry the clock is running on NOW. After a cut it is a new entry; the panel, the job-page
@@ -855,7 +837,8 @@ export async function clockOut(input: {
     // And a zero-row UPDATE is a 204, not a success (the silent-write law): if the office
     // removed or reassigned the entry while the panel sat open, this matched nothing and
     // clockOut still returned ok — the tech watched a clean clock-out and had no hours.
-    .select("id");
+    // job_id + job_code ride back: a shift that closes still on no job gets asked about once more.
+    .select("id, job_id, job_code");
 
   if (error) {
     // NOBODY GETS LEFT UNABLE TO CLOCK OUT. 0278 put an overlap ceiling under time_entries, and a
@@ -922,7 +905,15 @@ export async function clockOut(input: {
   revalidatePath("/timeclock");
   revalidatePath("/timecards");
   revalidatePath("/planner"); // clock-in/out status shows on My Day
-  return lunchWarning ? { ok: true, warning: lunchWarning } : { ok: true };
+  // STILL ON NO JOB AT THE END OF IT: the door asks "Which Job Are You On?" once more (Skip is
+  // right there). The shift is already closed; the question never holds the clock-out up. Asked
+  // only of a person closing his own clock: the geofence close has nobody standing there, and a
+  // row that came back without the columns is not read as "no job".
+  const closed = (closedRows as { id?: string; job_id?: string | null; job_code?: string | null }[])[0];
+  const askJob =
+    !input.auto && !input.autoClosedReason && !!closed?.id && closed.job_id === null && !(closed.job_code ?? "").trim();
+  const base: ClockResult = askJob ? { ok: true, id: closed.id, noJob: true } : { ok: true };
+  return lunchWarning ? { ...base, warning: lunchWarning } : base;
 }
 
 /** Close the CALLER's currently-open time entry — finds the open entry instead of

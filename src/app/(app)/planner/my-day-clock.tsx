@@ -12,6 +12,8 @@ import { clockIn, clockOut } from "../timeclock/actions";
 import { lunchMinutesFor, LUNCH_LABEL } from "@/lib/lunch-rule";
 import { isLongOpenShift } from "@/lib/long-shift";
 import { useToast } from "@/components/toast";
+import { WhichJobSheet } from "./which-job";
+import { askAfterPunch, type WhichJobAsk } from "../timeclock/which-job-choices";
 
 /** Best-effort on-gesture GPS with a short cap (the timeclock panel's race pattern):
  *  the punch never waits out the full 8s highAccuracy fix — if the fix lands inside
@@ -59,6 +61,10 @@ export function MyDayClock({
   const [tookLunch, setTookLunch] = useState(false);
   const [held, setHeld] = useState(false);
   const [pending, start] = useTransition();
+  // "Which Job Are You On?" — only after a punch the clock couldn't put on a job, and only once it
+  // is saved (askAfterPunch). Lives here, above the open/closed branches, so the card flipping to
+  // "on the clock" (or back) underneath doesn't take the question with it.
+  const [ask, setAsk] = useState<WhichJobAsk | null>(null);
 
   // Tick once a second only while on the clock.
   // Replay a held punch the moment the connection returns (or the app is reopened).
@@ -130,7 +136,10 @@ export function MyDayClock({
         const res = await clockIn({ job_id: null, job_code: null, gps, clock_in_at: null, clientOpId: op.clientOpId });
         if (persisted) await removeQueued(op.clientOpId);
         if (!res.ok) setErr(res.error ?? "Could not clock in.");
-        else setHeld(false);
+        else {
+          setHeld(false);
+          setAsk(askAfterPunch(res, "in"));
+        }
       } catch {
         // Network only. The punch is on the phone with its real time — say that instead of
         // telling someone standing in a dead zone to try again when they have bars. But if the
@@ -154,9 +163,13 @@ export function MyDayClock({
           gps,
         });
         if (!res.ok) setErr(res.error ?? "Could not clock out.");
-        // Where the lunch landed after a Switch Job (the part before it, when it didn't fit this
-        // one) is said here too, and kept until it is read, as the Timeclock panel does.
-        else if (res.warning) toast(res.warning, "info", undefined, { sticky: true });
+        else {
+          // Where the lunch landed after a Switch Job (the part before it, when it didn't fit this
+          // one) is said here too, and kept until it is read, as the Timeclock panel does.
+          if (res.warning) toast(res.warning, "info", undefined, { sticky: true });
+          // Still on no job at the end of it: asked once more (Skip is right there).
+          setAsk(askAfterPunch(res, "out"));
+        }
       } catch {
         setErr(OFFLINE_MSG);
       }
@@ -260,6 +273,7 @@ export function MyDayClock({
           </Button>
         )}
       </div>
+      {ask && <WhichJobSheet key={ask.entryId + ask.moment} entryId={ask.entryId} moment={ask.moment} onClose={() => setAsk(null)} />}
     </Card>
   );
 }
