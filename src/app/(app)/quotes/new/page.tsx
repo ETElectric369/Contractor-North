@@ -5,6 +5,7 @@ import { PageHeader } from "@/components/page-header";
 import { getOrgSettings } from "@/lib/org-settings";
 import { featureOn } from "@/lib/features";
 import { measurementsFromAnswers, tolerateMissingColumns } from "@/lib/inspection/schema";
+import { readViaView } from "@/lib/inspection/walkthrough-access";
 import { factsForEstimatorByProvenance } from "@/lib/playbook/answers";
 import { applicableNeeds, clearInapplicable } from "@/lib/playbook/resolve";
 import { briefProvenanceKeys, parsePlanBrief } from "@/lib/plan-brief";
@@ -114,15 +115,34 @@ export default async function NewQuotePage({
       // THE TYPED ANSWERS GO FIRST, and are labelled as MEASURED (0165). The inspector already
       // stood in front of these numbers; making the estimator re-extract "85 ft" from a sentence
       // is a re-derivation that can silently come back with a different number. Facts above prose.
-      // Read tolerantly — a deploy precedes its migration, and naming an absent column fails the
-      // whole query. Pre-migration this yields no measured block and the prose prefill is unchanged.
-      const insp = await tolerateMissingColumns<{ inspection_answers: unknown; forms: unknown; inquiry: unknown }>(() =>
-        supabase
-          .from("appointments")
-          .select("inspection_answers, forms:inspection_template_id(schema, playbook), inquiry:inquiry_id(intake)")
-          .eq("id", capture)
-          .maybeSingle(),
+      // THROUGH appointment_answers (0366, LEAK-0227): the answers column is revoked from the
+      // signed-in role, and this is the office's page, so the view hands back the answers as stored,
+      // prices included. The view carries the sheet's id and the lead's id; the sheet and the lead's
+      // intake are then two reads of their own (an embed through a view is PostgREST's guess, never
+      // pinned, so it isn't relied on). Before 0366 the table is read the same way (readViaView). A
+      // failed read is an error, exactly as before: an estimate never seeds from a walk-through it
+      // couldn't read. Pre-0165 (no such column on the table) is still no measured block.
+      const ans = await readViaView<{ inspection_answers: unknown; inspection_template_id: string | null; inquiry_id: string | null }>(
+        supabase,
+        "answers",
+        (from) => from.select("inspection_answers, inspection_template_id, inquiry_id").eq("id", capture).maybeSingle(),
       );
+      if (ans.error && !(ans.via === "table" && String((ans.error as { code?: string }).code ?? "") === "42703")) throw ans.error;
+      const [sheetRel, leadRel] = ans.data
+        ? await Promise.all([
+            ans.data.inspection_template_id
+              ? tolerateMissingColumns<{ schema: unknown; playbook: unknown }>(() =>
+                  supabase.from("forms").select("schema, playbook").eq("id", ans.data!.inspection_template_id!).maybeSingle(),
+                )
+              : Promise.resolve(null),
+            ans.data.inquiry_id
+              ? tolerateMissingColumns<{ intake: unknown }>(() =>
+                  supabase.from("inquiries").select("intake").eq("id", ans.data!.inquiry_id!).maybeSingle(),
+                )
+              : Promise.resolve(null),
+          ])
+        : [null, null];
+      const insp = ans.data ? { inspection_answers: ans.data.inspection_answers, forms: sheetRel, inquiry: leadRel } : null;
       const rel = (insp as any)?.forms;
       // Read through the PLAYBOOK, the same resolver the inspector wrote through (cn-v628). Read
       // through the raw sheet instead and a checkbox-turned-select answer of "No" prints as "yes",

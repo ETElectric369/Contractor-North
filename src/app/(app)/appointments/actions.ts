@@ -4,7 +4,7 @@ import { appointmentTypeFor, bookingTitle, daysNeeded, workingDaysFrom, workKind
 
 import { revalidatePath } from "next/cache";
 import { mergeCaptureSections, parseInspectorCapture, type CapturePatch } from "@/lib/inspection/capture";
-import { isMissingRpc, keepStoredPhotos } from "@/lib/inspection/walkthrough-access";
+import { isMissingRpc, keepStoredPhotos, readViaView } from "@/lib/inspection/walkthrough-access";
 import { formatFullAddress, formatPhone } from "@/lib/utils";
 import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 import { emptyToNull } from "@/lib/forms";
@@ -771,12 +771,16 @@ async function cleanInspectionAnswers(
   let clean: Record<string, unknown> = {};
   if (templateId) {
     // RLS confines this read to the caller's org, so a template id from another tenant simply
-    // doesn't resolve — the schema we validate against is always one this org owns.
-    const { data: form } = await supabase
-      .from("forms")
-      .select("schema, is_inspection, playbook")
-      .eq("id", templateId)
-      .maybeSingle();
+    // doesn't resolve — the schema we validate against is always one this org owns. Through
+    // form_playbooks (0366): a crew lead may no longer read a playbook sheet from forms itself, and
+    // the view hands him its questions without the owner's notes or dollar figures, which the
+    // coercion never needed. A failed read is said, never "no sheet".
+    const { data: form, error: formErr } = await readViaView<{ schema?: unknown; is_inspection?: boolean; playbook?: unknown }>(
+      supabase,
+      "sheets",
+      (from) => from.select("schema, is_inspection, playbook").eq("id", templateId).maybeSingle(),
+    );
+    if (formErr) return { ok: false, error: dbError(formErr) };
     if (!form) return { ok: false, error: "That inspection sheet no longer exists." };
     if (!(form as { is_inspection?: boolean }).is_inspection)
       return { ok: false, error: "That form isn't an inspection sheet." };
@@ -797,11 +801,14 @@ async function cleanInspectionAnswers(
     // question the playbook no longer declares is carried forward FROM THE STORED ROW — see
     // retiredAnswers for why reading it from the row rather than the payload keeps the
     // unknown-key defence intact. Merged after `clean` so a live need always wins its own key.
-    const { data: before } = await supabase
-      .from("appointments")
-      .select("inspection_answers")
-      .eq("id", id)
-      .maybeSingle();
+    // Through appointment_answers (0366): the office gets the stored answers as they are (prices
+    // included), a crew lead gets them without prices (the database keeps a priced answer the
+    // office's whatever his save sends, 0356). A FAILED READ IS AN ERROR, never an empty value: an
+    // empty "stored" row here would drop every retired answer on a finished visit.
+    const { data: before, error: beforeErr } = await readViaView<{ inspection_answers?: unknown }>(supabase, "answers", (from) =>
+      from.select("inspection_answers").eq("id", id).maybeSingle(),
+    );
+    if (beforeErr) return { ok: false, error: dbError(beforeErr) };
     const storedAnswers = (before as { inspection_answers?: unknown } | null)?.inspection_answers;
     const kept = retiredAnswers(pb, storedAnswers);
     if (Object.keys(kept).length) clean = { ...kept, ...clean };

@@ -33,6 +33,54 @@ export function walkthroughAccess(v: {
 export const isMissingRpc = (e: { code?: string | null } | null | undefined): boolean =>
   !!e && (e.code === "PGRST202" || e.code === "42883");
 
+/** PostgREST (PGRST205, not in its schema cache) or Postgres (42P01, undefined table) saying the
+ *  view isn't there: 0366 not applied yet. Nothing else: a refusal, a timeout or a broken function
+ *  inside the view is an error, never a reason to read somewhere else. */
+export const isMissingView = (e: unknown): boolean => {
+  const code = String((e as { code?: unknown } | null)?.code ?? "");
+  return code === "PGRST205" || code === "42P01";
+};
+
+/** The two stand-ins 0366 made, each for the table whose priced column it guards. */
+export const WALKTHROUGH_VIEWS = {
+  /** appointments.inspection_answers: revoked from the signed-in role; the view strips prices for anyone but the office. */
+  answers: { view: "appointment_answers", table: "appointments" },
+  /** forms.playbook: a non-office reader reads a playbook form only here, without its money. */
+  sheets: { view: "form_playbooks", table: "forms" },
+} as const;
+
+type Reader = { from: (relation: string) => any };
+
+/**
+ * READ THROUGH THE VIEW, OR, UNTIL THE VIEW EXISTS, THE TABLE (LEAK-0227, 0366).
+ *
+ * A push deploys before its migration, so every walk-through read asks the view first and, ONLY when
+ * the view isn't on this database yet (isMissingView), asks the table exactly as before: the app
+ * works before 0366 runs and reads through it after. Any other error comes back as the error, with
+ * `via` saying which read it was: tolerateMissingColumns alone would have swallowed "the view is
+ * missing" and a real failure alike, and a swallowed answers read renders an EMPTY walk-through whose
+ * first keystroke autosaves the emptiness over the real one.
+ *
+ * `read` gets the relation's query builder and builds the same select on either (the view carries
+ * every column these reads name).
+ */
+export async function readViaView<T>(
+  supabase: Reader,
+  which: keyof typeof WALKTHROUGH_VIEWS,
+  read: (from: any) => PromiseLike<{ data: T | null; error: unknown }>,
+): Promise<{ data: T | null; error: unknown; via: "view" | "table" }> {
+  const { view, table } = WALKTHROUGH_VIEWS[which];
+  const v = await read(supabase.from(view));
+  if (!v.error) return { data: v.data ?? null, error: null, via: "view" };
+  if (!isMissingView(v.error)) return { data: null, error: v.error, via: "view" };
+  const t = await read(supabase.from(table));
+  return { data: t.error ? null : (t.data ?? null), error: t.error ?? null, via: "table" };
+}
+
+/** A walk-through read's failure, in words the page shows in place of the sheet it couldn't read. */
+export const WALKTHROUGH_UNREAD =
+  "Couldn't read this walk-through just now, so it isn't shown (nothing on it changed). Reload the page to try again.";
+
 /**
  * THE ANSWERS, WITH NO PRICE IN THEM, for anyone who isn't the office.
  *
