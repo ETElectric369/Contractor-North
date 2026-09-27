@@ -163,6 +163,22 @@ CHECK,09/05/2026,CHECK 2001,-300.00,CHECK_PAID,1700.00,2001
   it("an unsigned Amount with a Debit/Credit type column reads the type", () => {
     const dl = readBankTable(parseCSV(`Date,Description,Amount,Type\n09/01/2026,SHOP RENT,650.00,Debit\n09/02/2026,CUSTOMER DEPOSIT,900.00,Credit\n`), "x.csv", hash)!;
     expect(dl.lines.map((l) => l.cents)).toEqual([-65000, 90000]);
+    // Underscored and OFX-style type words; money in is asked first; a word nobody knows is skipped.
+    const more = readBankTable(
+      parseCSV(`Date,Description,Amount,Type
+09/01/2026,UTILITY CO,650.00,ACH_DEBIT
+09/02/2026,SHELL OIL,45.00,DEBIT_CARD
+09/03/2026,MAIN ST,100.00,ATM
+09/04/2026,TO SAVINGS,100.00,Transfer
+09/05/2026,FROM SAVINGS,100.00,Transfer In
+09/06/2026,CUSTOMER,250.00,ACH_CREDIT
+09/07/2026,MYSTERY,75.00,Memo
+`),
+      "x.csv",
+      hash,
+    )!;
+    expect(more.lines.map((l) => l.cents)).toEqual([-65000, -4500, -10000, -10000, 10000, 25000]);
+    expect(more.skipped).toEqual([{ line: 8, why: 'Can\'t tell if this is money in or out: its type "Memo" isn\'t one the app knows.' }]);
   });
 
   it("reads an OFX/QFX file through the same reader (its FITID is the line's key)", () => {

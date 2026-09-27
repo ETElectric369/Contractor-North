@@ -269,8 +269,10 @@ export function noLinesSaid(dl: Pick<BankDownload, "skipped">, name: string): st
   return `${name} has no transactions in it that read${why ? ` (${why.replace(/\.$/, "")})` : ""}.`;
 }
 
-const DEBIT_TYPE = /\b(debit|dr|withdrawal|check|payment|fee|sale|purchase|pos)\b/i;
-const CREDIT_TYPE = /\b(credit|cr|deposit|refund|dslip|interest earned)\b/i;
+/** The type words (a bank's Type column, OFX's TRNTYPE) that say which way unsigned money went.
+ *  Money IN is asked first, so "ACH CREDIT" and "Transfer In" are never read as money out. */
+const CREDIT_TYPE = /\b(credit|cr|deposit|dep|directdep|refund|return|dslip|interest|int|div|dividend|incoming|transfer in|xfer in|transfer from)\b/i;
+const DEBIT_TYPE = /\b(debit|dr|withdrawal|check|payment|fee|srvchg|sale|purchase|pos|atm|xfer|transfer|directdebit|ach|cash|repeatpmt)\b/i;
 
 /**
  * A TABLE INTO A DOWNLOAD. Null when it isn't one (no bank header). Every row that doesn't read is
@@ -302,8 +304,15 @@ export function readBankTable(table: readonly (readonly string[])[], name: strin
     if (c.amount !== undefined && cell(r, c.amount) !== "") {
       amount = readBankMoney(cell(r, c.amount));
       if (amount !== null && unsigned) {
-        const t = cell(r, c.type);
-        if (DEBIT_TYPE.test(t) && !CREDIT_TYPE.test(t)) amount = -Math.abs(amount);
+        // "ACH_DEBIT", "DEBIT_CARD": an underscore is a word character, so it is a space here.
+        const t = cell(r, c.type).replace(/_/g, " ");
+        if (CREDIT_TYPE.test(t)) amount = Math.abs(amount);
+        else if (DEBIT_TYPE.test(t)) amount = -Math.abs(amount);
+        else {
+          // Never guessed: a withdrawal read as a deposit is money that never came in.
+          skipped.push({ line, why: `Can't tell if this is money in or out: its type${t.trim() ? ` "${redactDigits(t.trim()).slice(0, 30)}"` : ""} isn't one the app knows.` });
+          return;
+        }
       }
     } else {
       const debit = readBankMoney(cell(r, c.debit));
