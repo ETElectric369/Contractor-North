@@ -7,18 +7,28 @@
  * `filename*` first, then `filename`.
  */
 
+/** Half of a character: a surrogate with no partner. encodeURIComponent throws on one. */
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
+
 /** Content-Disposition: attachment, with both names. Quotes, backslashes and anything outside
- *  printable ASCII never reach the quoted `filename`. */
+ *  printable ASCII never reach the quoted `filename`. Half a character (a name cut through an emoji)
+ *  is dropped, never a throw: a name must never be why a download fails. */
 export function contentDisposition(name: string): string {
+  const whole = String(name ?? "").replace(LONE_SURROGATE, "");
   const ascii =
-    String(name ?? "")
+    whole
       .normalize("NFKD")
       .replace(/[\u0300-\u036f]/g, "")
       .replace(/[^\x20-\x7E]/g, "")
       .replace(/["\\]/g, "")
       .replace(/\s+/g, " ")
       .trim() || "download";
-  const star = encodeURIComponent(String(name ?? "")).replace(/['()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
+  let star: string;
+  try {
+    star = encodeURIComponent(whole).replace(/['()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
+  } catch {
+    return `attachment; filename="${ascii}"`;
+  }
   return `attachment; filename="${ascii}"; filename*=UTF-8''${star}`;
 }
 

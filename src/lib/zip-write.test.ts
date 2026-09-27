@@ -1,6 +1,9 @@
 import { describe, it, expect } from "vitest";
 import * as zlib from "node:zlib";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { buildZip, crc32 } from "./zip-write";
+import { wallClockInTz } from "./tz";
 import { unzip, text } from "@/test/unzip";
 
 const deflate = (b: Uint8Array) => new Uint8Array(zlib.deflateRawSync(b));
@@ -55,6 +58,20 @@ describe("the zip writer", () => {
     const date = v.getUint16(12, true);
     expect([(date >> 9) + 1980, (date >> 5) & 15, date & 31]).toEqual([2026, 9, 27]);
     expect([time >> 11, (time >> 5) & 63, (time & 31) * 2]).toEqual([18, 30, 10]);
+  });
+
+  it("stamped on the company's clock: a 5:30 PM Pacific download on Sep 27 unzips as Sep 27 17:30, not tomorrow", () => {
+    const now = new Date("2026-09-28T00:30:00Z"); // 5:30 PM PDT on Sep 27
+    const z = buildZip(files, { modified: wallClockInTz("America/Los_Angeles", now) });
+    const v = new DataView(z.buffer);
+    const time = v.getUint16(10, true);
+    const date = v.getUint16(12, true);
+    expect([(date >> 9) + 1980, (date >> 5) & 15, date & 31]).toEqual([2026, 9, 27]);
+    expect([time >> 11, (time >> 5) & 63]).toEqual([17, 30]);
+    // The route stamps the company's clock (never a bare new Date(), which would be UTC's).
+    const route = readFileSync(join(__dirname, "../app/(app)/analytics/accountant/export/route.ts"), "utf8");
+    expect(route).toContain("const modified = wallClockInTz(tz);");
+    expect(route).not.toContain("modified: new Date()");
   });
 
   it("refuses a name that would climb out of the folder, a blank one, or two the same", () => {

@@ -155,11 +155,14 @@ describe("GET /analytics/accountant/export", () => {
     state.officeSees = false;
     const res = await GET(req("period=2026-Q3&as=csv"));
     expect(res.status).toBe(200);
-    const all = unzip(new Uint8Array(await res.arrayBuffer()))
-      .map((f) => text(f.data))
-      .join("\n");
+    const files = unzip(new Uint8Array(await res.arrayBuffer()));
+    const all = files.map((f) => text(f.data)).join("\n");
     expect(all).not.toContain("Net Profit");
     expect(all).not.toContain("Robin Test");
+    // No bottom-line figure at all on the Summary: Net is never one subtraction away.
+    const summary = text(files.find((f) => f.name === "Summary.csv")!.data);
+    expect(summary.split("\r\n").filter((l) => /^(Received|Total Costs|Other Income)/.test(l))).toEqual([]);
+    expect(summary).toContain("The totals are the owner's.");
     // The owner may: the same file with the switch off, downloaded by the owner, has it.
     state.role = "owner";
     const own = unzip(new Uint8Array(await (await GET(req("period=2026-Q3&as=csv"))).arrayBuffer()))

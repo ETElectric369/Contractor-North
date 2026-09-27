@@ -6,8 +6,8 @@ import { isNativeShell } from "@/lib/native-shell";
 import { saveRoute } from "@/lib/shell-save";
 import { fileNameFromDisposition } from "@/lib/download-name";
 import { reportClientError } from "@/app/report-client-error";
-
-const XLSX_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+import { XLSX_TYPE, ZIP_TYPE, downloadVerdict } from "./download-response";
+import { useOpeningPeriod } from "./period-picker";
 
 /**
  * DOWNLOAD FOR YOUR ACCOUNTANT, AND THE SAME THING AS CSV FILES.
@@ -21,12 +21,17 @@ const XLSX_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.s
  * AirDrop). The sheet only opens while the tap is still warm, and making the workbook takes a
  * moment: if the sheet says the tap went cold, the file is kept and one more tap, Save The File,
  * opens it with nothing in between. A phone that can't share files is told so, in words.
+ *
+ * SIGNED OUT, OR NOT THE FILE: the fetch never follows a redirect (the middleware's answer to a
+ * lost session is a redirect to the login page), and anything that isn't the file is said in words
+ * and never saved (download-response.ts). While a newly picked period opens, both wait.
  */
 export function AccountantDownload({ xlsxHref, csvHref, xlsxName, csvName }: { xlsxHref: string; csvHref: string; xlsxName: string; csvName: string }) {
   const [busy, setBusy] = useState<"xlsx" | "csv" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [said, setSaid] = useState<string | null>(null);
   const [ready, setReady] = useState<File | null>(null);
+  const opening = useOpeningPeriod();
 
   function share(file: File, secondTap: boolean) {
     return navigator.share({ files: [file] }).then(
@@ -61,15 +66,26 @@ export function AccountantDownload({ xlsxHref, csvHref, xlsxName, csvName }: { x
     setSaid(null);
     setReady(null);
     try {
-      const res = await fetch(which === "xlsx" ? xlsxHref : csvHref, { cache: "no-store" });
-      if (!res.ok) {
-        const words = (await res.text().catch(() => "")).trim();
-        setError(words && words.length < 400 ? words : "The download didn't come through. Nothing was made; try again.");
+      const res = await fetch(which === "xlsx" ? xlsxHref : csvHref, { cache: "no-store", redirect: "manual" });
+      const verdict = downloadVerdict(
+        {
+          ok: res.ok,
+          status: res.status,
+          type: res.type,
+          redirected: res.redirected,
+          contentType: res.headers.get("content-type"),
+          disposition: res.headers.get("content-disposition"),
+          body: res.ok ? undefined : await res.text().catch(() => ""),
+        },
+        which,
+      );
+      if (!verdict.ok) {
+        setError(verdict.words);
         return;
       }
       const blob = await res.blob();
       const name = fileNameFromDisposition(res.headers.get("content-disposition")) || (which === "xlsx" ? xlsxName : csvName);
-      const type = blob.type || (which === "xlsx" ? XLSX_TYPE : "application/zip");
+      const type = which === "xlsx" ? XLSX_TYPE : ZIP_TYPE;
       const inShell = isNativeShell();
       if (inShell) {
         const file = new File([blob], name, { type });
@@ -102,7 +118,7 @@ export function AccountantDownload({ xlsxHref, csvHref, xlsxName, csvName }: { x
       <button
         type="button"
         onClick={() => get("xlsx")}
-        disabled={busy !== null}
+        disabled={busy !== null || opening !== null}
         className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-lg bg-brand px-4 text-sm font-medium text-white disabled:opacity-60"
       >
         <Download className="h-4 w-4" /> {busy === "xlsx" ? "Making It…" : "Download For Your Accountant"}
@@ -110,7 +126,7 @@ export function AccountantDownload({ xlsxHref, csvHref, xlsxName, csvName }: { x
       <button
         type="button"
         onClick={() => get("csv")}
-        disabled={busy !== null}
+        disabled={busy !== null || opening !== null}
         className="inline-flex min-h-[44px] items-center justify-center self-start px-1 text-sm font-medium text-slate-600 underline underline-offset-2 hover:text-slate-900 disabled:opacity-60"
       >
         {busy === "csv" ? "Making It…" : "Same Thing As CSV Files"}
@@ -123,6 +139,13 @@ export function AccountantDownload({ xlsxHref, csvHref, xlsxName, csvName }: { x
         >
           <Download className="h-4 w-4" /> Save The File
         </button>
+      )}
+      {opening ? (
+        <p role="status" className="text-xs text-slate-600">
+          Opening {opening}…
+        </p>
+      ) : (
+        <p className="text-xs text-slate-500">File: {xlsxName}</p>
       )}
       {said && !error && (
         <p role="status" className="text-xs text-slate-600">

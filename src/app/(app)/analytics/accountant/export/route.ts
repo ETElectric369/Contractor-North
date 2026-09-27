@@ -3,18 +3,18 @@ import { NextResponse, type NextRequest } from "next/server";
 import { requireStaff } from "@/lib/staff-guard";
 import { getOrgSettings } from "@/lib/org-settings";
 import { featureOn } from "@/lib/features";
-import { todayStrInTz, tzDayStartUtc } from "@/lib/tz";
+import { todayStrInTz, tzDayStartUtc, wallClockInTz } from "@/lib/tz";
 import { readAllPages } from "@/lib/read-all-pages";
 import { readAccountantInputs } from "@/lib/accountant-lists";
-import { ownerMoneyReadSpan, readOwnerMoneyInputs } from "@/lib/analytics/owner-money";
+import { readOwnerMoneyInputs } from "@/lib/analytics/owner-money";
 import { SALES_TAX_INVOICE_COLS } from "@/lib/sales-tax";
 import { contentDisposition } from "@/lib/download-name";
 import {
   accountantFileName,
+  accountantReadSpan,
   buildAccountantWorkbook,
   parseAccountantPeriod,
   periodWindow,
-  previousPeriod,
   workbookCsvZip,
   workbookXlsx,
 } from "@/lib/accountant-workbook";
@@ -75,7 +75,8 @@ export async function GET(req: NextRequest) {
   const salesTaxOn = featureOn(settings.features, "sales_tax");
 
   const win = periodWindow(period);
-  const span = ownerMoneyReadSpan([win, periodWindow(previousPeriod(period))]);
+  // The page reads this same span, so its figures are the file's to the cent.
+  const span = accountantReadSpan(period);
   const startIso = tzDayStartUtc(win.start, tz).toISOString();
   const endIso = tzDayStartUtc(win.end, tz).toISOString();
 
@@ -119,7 +120,9 @@ export async function GET(req: NextRequest) {
     arInvoices: ar.rows,
     salesTax: salesTaxOn ? { invoices: taxInvoices?.rows ?? [], taxRates: ((taxRates as { data?: any[] } | null)?.data ?? []) as any[] } : null,
   });
-  const bytes = as === "xlsx" ? workbookXlsx(wb, { deflate, modified: new Date() }) : workbookCsvZip(wb, { deflate, modified: new Date() });
+  // Stamped on the company's own clock: an unzipper reads a zip's time as local time.
+  const modified = wallClockInTz(tz);
+  const bytes = as === "xlsx" ? workbookXlsx(wb, { deflate, modified }) : workbookCsvZip(wb, { deflate, modified });
   return new NextResponse(Buffer.from(bytes), {
     status: 200,
     headers: {

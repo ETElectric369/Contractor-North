@@ -346,6 +346,10 @@ export type OwnerMoneyInputs = {
   supplierDocuments?: any[];
   /** bank_lines a person placed as Other Income (0363): amount, posted_on. Absent = none. */
   otherIncome?: any[];
+  /** The Pay board's own first day of hours (today less BALANCE_MONTHS, org-local). What a person is
+   *  still owed is balanceForPerson over the shifts from this day on ONLY, whatever span was read, so
+   *  it is the Pay board's You Owe to the cent (balanceEntries). Absent = every shift read counts. */
+  balanceFrom?: string | null;
 };
 
 // ── Arithmetic helpers (cents) ───────────────────────────────────────────────
@@ -442,6 +446,10 @@ export function crewPayByMonth(
   runs: any[],
   people: Map<string, OwnerMoneyPerson>,
   tz: string,
+  /** Where an org-local day's pay lands: its month (the default). computeOwnerMoney's "through a
+   *  day" read sends every day after that day to one key past every month, so a pay period that
+   *  crosses the day splits across it by its own shifts, as it splits across a month's end. */
+  keyOf: (day: string) => string = (day) => day.slice(0, 7),
 ): Map<string, Map<string, number>> {
   // person -> month -> cents
   const out = new Map<string, Map<string, number>>();
@@ -471,8 +479,9 @@ export function crewPayByMonth(
       if (e.paid_at) continue;
       const g = hoursBetween(e.clock_in, e.clock_out, e.lunch_minutes) * payRateForEntry(e, fallbackOf(pid));
       if (!(g > 0)) continue;
-      const month = recordDay(null, e.clock_in, tz)?.slice(0, 7);
-      if (!month) continue;
+      const day = recordDay(null, e.clock_in, tz);
+      if (!day) continue;
+      const month = keyOf(day);
       raw.set(month, (raw.get(month) ?? 0) + g);
       total += g;
     }
@@ -504,13 +513,13 @@ export function crewPayByMonth(
       const day = recordDay(null, e.clock_in, tz);
       if (!day || day < g.start || day >= g.end) continue;
       const h = hoursBetween(e.clock_in, e.clock_out, e.lunch_minutes);
-      const month = day.slice(0, 7);
+      const month = keyOf(day);
       byHours.set(month, (byHours.get(month) ?? 0) + h);
       byGross.set(month, (byGross.get(month) ?? 0) + h * payRateForEntry(e, fallbackOf(g.pid)));
     }
     let split = allocateCents(g.cents, byGross);
     if (!split.size) split = allocateCents(g.cents, byHours);
-    if (!split.size) split = new Map([[g.start.slice(0, 7), g.cents]]);
+    if (!split.size) split = new Map([[keyOf(g.start), g.cents]]);
     for (const [month, c] of split) add(g.pid, month, c);
   }
   return out;
@@ -703,13 +712,29 @@ export function supplierAccountRowsOf(inp: OwnerMoneyInputs, tz: string, payment
 
 // ── THE PURE HALF ────────────────────────────────────────────────────────────
 
-export function computeOwnerMoney(inp: OwnerMoneyInputs, win: OwnerMoneyWindow, tz: string, todayYmd?: string): OwnerMoney {
+/** A day after which nothing counts ("through Sep 27"). */
+const AFTER_THE_DAY = "~after";
+
+export function computeOwnerMoney(
+  inp: OwnerMoneyInputs,
+  win: OwnerMoneyWindow,
+  tz: string,
+  todayYmd?: string,
+  /** THROUGH A DAY (the accountant's "so far" comparison, 2026-09-27): the window counted only
+   *  through this org-local day, every record after it left out by the SAME day each figure is
+   *  counted on (a payment's day, a cost line's day, a shift's day). A pay period that crosses the
+   *  day splits across it by its own shifts, the way it splits across a month's end. Absent = the
+   *  whole window, exactly as before. */
+  opts: { throughDay?: string } = {},
+): OwnerMoney {
+  const cut = opts.throughDay && DATE_RE.test(opts.throughDay) ? opts.throughDay : null;
+  const kept = (day: string | null | undefined) => !cut || (!!day && day <= cut);
   const months = windowMonths(win, todayYmd);
   const inWindow = new Set(months);
   const acc = new Map<string, Acc>(months.map((m) => [m, newAcc()]));
   const at = (month: string | null | undefined): Acc | null => (month && inWindow.has(month) ? acc.get(month)! : null);
-  const monthOfDay = (day: string | null) => (day ? day.slice(0, 7) : null);
-  const inDays = (day: string | null) => !!day && day >= win.start && day < win.end;
+  const monthOfDay = (day: string | null) => (day && kept(day) ? day.slice(0, 7) : null);
+  const inDays = (day: string | null) => !!day && day >= win.start && day < win.end && kept(day);
   const winStartMonth = win.start.slice(0, 7);
   const winEndMonth = win.end.slice(0, 7);
 
@@ -718,6 +743,7 @@ export function computeOwnerMoney(inp: OwnerMoneyInputs, win: OwnerMoneyWindow, 
   const payByMonth = new Map<string, any[]>();
   for (const p of inp.payments ?? []) {
     if (!p?.paid_at) continue;
+    if (cut && !kept(recordDay(null, p.paid_at, tz))) continue;
     const k = monthKeyInTz(p.paid_at, tz);
     if (!inWindow.has(k)) continue;
     const list = payByMonth.get(k) ?? [];
@@ -727,6 +753,7 @@ export function computeOwnerMoney(inp: OwnerMoneyInputs, win: OwnerMoneyWindow, 
   const refundByMonth = new Map<string, any[]>();
   for (const r of inp.refunds ?? []) {
     if (!r?.created_at) continue;
+    if (cut && !kept(recordDay(null, r.created_at, tz))) continue;
     const k = monthKeyInTz(r.created_at, tz);
     if (!inWindow.has(k)) continue;
     const list = refundByMonth.get(k) ?? [];
@@ -766,7 +793,7 @@ export function computeOwnerMoney(inp: OwnerMoneyInputs, win: OwnerMoneyWindow, 
   // accountant's Costs list and these figures are one computation.
   const liveBills = (inp.bills ?? []).filter((b) => b && !b.superseded_by_bill_id);
   for (const l of ownerMoneyCostLines(inp, tz)) {
-    const a = at(l.month);
+    const a = at(cut ? monthOfDay(l.day) : l.month);
     if (!a) continue;
     if (l.source === "card_fee") a.fees += l.cents;
     else if (l.to === "materials") a.materials += l.cents;
@@ -778,7 +805,7 @@ export function computeOwnerMoney(inp: OwnerMoneyInputs, win: OwnerMoneyWindow, 
   }
 
   // CREW PAY: earned, by the month the hours were worked (the frozen-gross rule above).
-  const crew = crewPayByMonth(inp.entries ?? [], inp.runs ?? [], inp.people, tz);
+  const crew = crewPayByMonth(inp.entries ?? [], inp.runs ?? [], inp.people, tz, cut ? (day) => (day <= cut ? day.slice(0, 7) : AFTER_THE_DAY) : undefined);
   for (const per of crew.values()) for (const [m, c] of per) {
     const a = at(m);
     if (a) a.crewPay += c;
@@ -908,6 +935,8 @@ export function computeOwnerMoney(inp: OwnerMoneyInputs, win: OwnerMoneyWindow, 
   // first (E_after), and what remains, up to what the window earned (E_window), is this window's:
   //   unpaid in window = clamp(B - E_after, 0, E_window)
   // So Last Month never names September's pay, and a This Year read in January names none of 2026's.
+  // B is over the Pay board's own shifts only (balanceEntries): a read reaching further back for an
+  // older window never adds a never-locked shift the board can't see.
   {
     const byPerson = new Map<string, { entries: any[]; runs: any[]; payments: PayPaymentRow[] }>();
     const slot = (pid: string) => {
@@ -915,7 +944,7 @@ export function computeOwnerMoney(inp: OwnerMoneyInputs, win: OwnerMoneyWindow, 
       byPerson.set(pid, s);
       return s;
     };
-    for (const e of inp.entries ?? []) if (e?.profile_id) slot(String(e.profile_id)).entries.push(e);
+    for (const e of balanceEntries(inp.entries ?? [], inp.balanceFrom, tz)) if (e?.profile_id) slot(String(e.profile_id)).entries.push(e);
     for (const r of inp.runs ?? []) {
       if (!r?.profile_id || (r.kind && r.kind !== "base")) continue;
       slot(String(r.profile_id)).runs.push({ period_start: String(r.period_start), period_end: String(r.period_end), gross: Number(r.gross ?? 0) });
@@ -1304,6 +1333,41 @@ export function supplierDocsNoBillCovers(rows: any[], bills?: any[]): { creditMe
  *  crew-owed caveat and crew pay are built from the rows that board reads. */
 const BALANCE_MONTHS = 18;
 
+/** A pay period is a month at the longest, so one that crosses a span's start began at most this
+ *  many days before it. */
+const PAY_PERIOD_DAYS_MAX = 31;
+
+/**
+ * WHERE THE HOURS ARE READ FROM, for a read over `span`:
+ *   · balanceFrom: the Pay board's own first day (today less 18 months, the board's arithmetic).
+ *     What a person is still owed is built from these shifts only (balanceEntries), so it is the
+ *     board's You Owe whatever period was asked for.
+ *   · from: the earlier of that day and a month before the span starts. A LOCKED pay period that
+ *     crosses the span's start is spread over its own shifts (crewPayByMonth); a read starting AT the
+ *     span's start would hide the ones before it and land the whole period inside. So the page, the
+ *     file and the file's period-before column split it the same way whichever span each read.
+ */
+export function ownerMoneyHoursFrom(spanStart: string, todayYmd: string): { from: string; balanceFrom: string } {
+  const b = new Date(`${todayYmd}T00:00:00Z`);
+  b.setUTCMonth(b.getUTCMonth() - BALANCE_MONTHS);
+  const balanceFrom = b.toISOString().slice(0, 10);
+  const m = new Date(`${spanStart}T00:00:00Z`);
+  m.setUTCDate(m.getUTCDate() - PAY_PERIOD_DAYS_MAX);
+  const margin = m.toISOString().slice(0, 10);
+  return { from: margin < balanceFrom ? margin : balanceFrom, balanceFrom };
+}
+
+/** The shifts the Pay board's balance is built from: clock_in's org-local day on or after its first
+ *  day (the board reads clock_in >= that day's local midnight). No first day = every shift given. */
+export function balanceEntries(entries: any[], balanceFrom: string | null | undefined, tz: string): any[] {
+  const list = entries ?? [];
+  if (!balanceFrom) return list;
+  return list.filter((e) => {
+    const day = recordDay(null, e?.clock_in, tz);
+    return !!day && day >= balanceFrom;
+  });
+}
+
 /**
  * Everything computeOwnerMoney needs, fetched through the same row sources the existing readers use
  * (the RLS-scoped caller's own org), then computed. Returns `problem` instead of figures when any
@@ -1353,14 +1417,10 @@ export async function readOwnerMoneyInputs(
 ): Promise<{ inputs: OwnerMoneyInputs | null; problem: string | null }> {
   const startIso = tzDayStartUtc(span.start, tz).toISOString();
   const endIso = tzDayStartUtc(span.end, tz).toISOString();
-  const balanceStart = (() => {
-    const d = new Date(`${todayYmd}T00:00:00Z`);
-    d.setUTCMonth(d.getUTCMonth() - BALANCE_MONTHS);
-    const ymdStr = d.toISOString().slice(0, 10);
-    return (ymdStr < span.start ? ymdStr : span.start);
-  })();
-  // A locked period can start up to a month before the window and still spread pay into it.
-  const entriesFrom = tzDayStartUtc(balanceStart, tz).toISOString();
+  // A locked period can start up to a month before the window and still spread pay into it; what is
+  // still owed is the Pay board's own 18 months (ownerMoneyHoursFrom).
+  const hoursFrom = ownerMoneyHoursFrom(span.start, todayYmd);
+  const entriesFrom = tzDayStartUtc(hoursFrom.from, tz).toISOString();
 
   const [payments, refunds, bills, pos, petty, entries, runs, payPayments, memos, ratesRead, names, firsts, shelfLots, supplierAccounts, supplierPayments, otherIncome] = await Promise.all([
     readEvery<any>("payments", (f, t) =>
@@ -1503,6 +1563,7 @@ export async function readOwnerMoneyInputs(
       supplierPayments: supplierPayments.rows,
       supplierDocuments: memos.rows,
       otherIncome: otherIncome.rows,
+      balanceFrom: hoursFrom.balanceFrom,
     },
     problem: null,
   };

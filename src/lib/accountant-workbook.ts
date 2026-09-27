@@ -4,7 +4,9 @@ import {
   countedNotPaidLine,
   crewPayByMonth,
   notCountedLine,
+  balanceEntries,
   ownerMoneyCostLines,
+  ownerMoneyReadSpan,
   recordDay,
   supplierAccountRowsOf,
   windowMonths,
@@ -50,7 +52,13 @@ import { buildZip, type DeflateRaw } from "@/lib/zip-write";
  *   Stock    what was in stock on the period's last day, roll by roll (onHandList).
  *
  * THE OWNER'S SWITCH: when the owner has not shared Owner's Draw with the office
- * (office_sees_owner_money), an office download has no Net anywhere and no owner rows, and says so.
+ * (office_sees_owner_money), the bottom line is the owner's. An office download then carries NO
+ * bottom-line figure at all: no Received total, no Total Costs, no Net, no change on them, and no
+ * owner rows; the Summary keeps the cost rows one by one and says "The totals are the owner's." The
+ * itemized tabs stay (the office already sees those records in the app).
+ *
+ * A PERIOD NOT OVER YET is compared with the SAME DAYS of the period before ("2025 Through Sep 27"),
+ * never with the whole of it, and its Change column says "So Far".
  *
  * Pure: the route reads, this builds. Every sum is in integer cents.
  */
@@ -151,6 +159,31 @@ export function periodWindow(p: AccountantPeriod): OwnerMoneyWindow {
   return { key: "period", label: p.label, start: p.start, end: p.end };
 }
 
+/** What the page AND the route read for a period: the period and the one before it, in one span.
+ *  The same span on both, so the page's figures are the file's to the cent. */
+export function accountantReadSpan(p: AccountantPeriod): { start: string; end: string } {
+  return ownerMoneyReadSpan([periodWindow(p), periodWindow(previousPeriod(p))]);
+}
+
+/**
+ * THE SAME DAYS OF THE PERIOD BEFORE, for a period not over yet: as many months into it as today is
+ * into this one, on today's day of the month (the last day of a shorter month). 2026 on Sep 27 is
+ * compared with 2025 through Sep 27; September 27 with August 27; Q3 on Sep 27 with Q2 through
+ * Jun 27. Null when the period is over: then the whole period before is the comparison.
+ */
+export function comparisonThrough(p: AccountantPeriod, todayYmd: string): string | null {
+  if (p.end <= todayYmd) return null;
+  const before = previousPeriod(p);
+  const [py, pm] = p.start.split("-").map(Number);
+  const [ty, tm, td] = todayYmd.split("-").map(Number);
+  const into = (ty - py) * 12 + (tm - pm);
+  const [by, bm] = before.start.split("-").map(Number);
+  const lastOfMonth = new Date(Date.UTC(by, bm - 1 + into + 1, 0));
+  const day = new Date(Date.UTC(lastOfMonth.getUTCFullYear(), lastOfMonth.getUTCMonth(), Math.min(td, lastOfMonth.getUTCDate()))).toISOString().slice(0, 10);
+  const lastBefore = new Date(Date.parse(`${before.end}T12:00:00Z`) - 86_400_000).toISOString().slice(0, 10);
+  return day < lastBefore ? day : lastBefore;
+}
+
 /** The period's last day, or today when the period isn't over yet. */
 export function lastDayShown(p: AccountantPeriod, todayYmd: string): string {
   const last = new Date(Date.parse(`${p.end}T12:00:00Z`) - 86_400_000).toISOString().slice(0, 10);
@@ -164,22 +197,31 @@ export const NET_LABEL = "Net Profit (before income tax)";
 export const STOCK_BOUGHT_LABEL = "Stock Bought";
 export const STOCK_LOST_LABEL = "Stock Lost (Written Off, Counted Short, Returned)";
 export const TAB_NAMES = ["Summary", "Income", "Costs", "People", "Open", "Stock"] as const;
-/** What an office download says when the owner hasn't shared Owner's Draw (never the figure). */
-export const OWNER_HIDDEN_NOTE = "The bottom line and the owner's rows are left out: the owner hasn't shared Owner's Draw with the office.";
+/** What an office download's Summary says when the owner hasn't shared Owner's Draw (never a total). */
+export const OWNER_HIDDEN_NOTE = "The totals are the owner's.";
+/** The page's line for that office viewer: why, and what the file leaves out. Never shown to the owner. */
+export const OWNER_HIDDEN_WHY =
+  "The owner hasn't shared Owner's Draw with the office, so the Summary's totals (Received, Total Costs and Net) and the owner's own rows are left out, here and in the file.";
+/** The People tab's line for that office viewer. */
+export const OWNER_ROWS_HIDDEN_NOTE = "The owner's own row is left out: the totals are the owner's.";
+
+/** Half of a character: a surrogate with no partner. Never valid text, and encodeURIComponent throws on it. */
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
 
 /** A company's name as a file name: no path or header characters, no control characters, one space
- *  between words, 80 characters at most. A blank one is "North". */
+ *  between words, 80 characters at most, counted as characters so an emoji is never cut in half.
+ *  A blank one is "North". */
 export function fileSafeName(raw: string | null | undefined): string {
   const s = String(raw ?? "")
     .normalize("NFC")
+    .replace(LONE_SURROGATE, "")
     .replace(/[\u0000-\u001F\u007F]/g, " ")
     .replace(/[\\/:*?"<>|;]/g, " ")
     .replace(/\s+/g, " ")
     .trim()
-    .replace(/^\.+/, "")
-    .slice(0, 80)
-    .trim();
-  return s || "North";
+    .replace(/^\.+/, "");
+  const cut = Array.from(s).slice(0, 80).join("").trim();
+  return cut || "North";
 }
 
 /** "ET Electric 2026 Q3.xlsx", "ET Electric 2026-09 CSV.zip". */
@@ -212,8 +254,8 @@ export type AccountantWorkbookInput = {
 
 export type AccountantWorkbook = {
   tabs: XlsxSheet[];
-  /** The page's two figures. Net is null when the viewer may not see it. */
-  figures: { received: number; net: number | null };
+  /** The page's two figures. Both null when the viewer may not see the totals (the owner's switch). */
+  figures: { received: number | null; net: number | null };
 };
 
 type Row = XlsxRow;
@@ -230,6 +272,8 @@ const cents = (n: unknown): number => {
 const money = (c: number): XlsxValue => ({ money: c / 100 });
 const date = (ymd: string | null | undefined): XlsxValue => (ymd && /^\d{4}-\d{2}-\d{2}$/.test(ymd) ? { date: ymd } : null);
 const shortMonth = (m: string) => `${MONTH_NAMES[Number(m.slice(5, 7)) - 1].slice(0, 3)} ${m.slice(0, 4)}`;
+/** "Sep 27" from "2025-09-27". */
+const shortDay = (ymd: string) => `${MONTH_NAMES[Number(ymd.slice(5, 7)) - 1].slice(0, 3)} ${Number(ymd.slice(8, 10))}`;
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
 /** A CsvTable (the stock and tools lists) as sheet rows: its header bold, its Total rows bold, the
@@ -277,7 +321,9 @@ export function buildAccountantWorkbook(input: AccountantWorkbookInput): Account
   const win = periodWindow(period);
   const prevPeriod = previousPeriod(period);
   const cur = computeOwnerMoney(inp, win, tz, todayYmd);
-  const prev = computeOwnerMoney(inp, periodWindow(prevPeriod), tz, todayYmd);
+  // A period not over yet is compared with the same days of the one before, never all of it.
+  const prevThrough = comparisonThrough(period, todayYmd);
+  const prev = computeOwnerMoney(inp, periodWindow(prevPeriod), tz, todayYmd, prevThrough ? { throughDay: prevThrough } : {});
   const months = new Set(windowMonths(win, todayYmd));
   const through = lastDayShown(period, todayYmd);
   const unfinished = period.end > todayYmd;
@@ -287,14 +333,20 @@ export function buildAccountantWorkbook(input: AccountantWorkbookInput): Account
   const stock = input.shelf ? onHandList(lists, through, tz) : null;
 
   const tabs: XlsxSheet[] = [
-    summaryTab(input, cur, prev, prevPeriod, open, stock, through, unfinished),
+    summaryTab(input, cur, prev, prevPeriod, prevThrough, open, stock, through, unfinished),
     incomeTab(input, cur, months, jobs),
     costsTab(input, cur, months, jobs, through),
     peopleTab(input, cur, months, through),
     openTab(input, open),
     stockTab(input, stock, through),
   ];
-  return { tabs, figures: { received: cur.totals.received, net: showOwner ? cur.totals.left : null } };
+  return { tabs, figures: showOwner ? { received: cur.totals.received, net: cur.totals.left } : { received: null, net: null } };
+}
+
+/** What the page says instead of $0.00 for a period that ends before North's records begin. */
+export function beforeRecordsLine(p: AccountantPeriod, recordsStart: string | null | undefined): string | null {
+  if (!recordsStart || recordsStart < p.end) return null;
+  return `North has no records before ${shortDay(recordsStart)}, ${recordsStart.slice(0, 4)}, so ${p.label} has nothing in it.`;
 }
 
 // ── Summary ──────────────────────────────────────────────────────────────────
@@ -324,6 +376,7 @@ function summaryTab(
   cur: OwnerMoney,
   prev: OwnerMoney,
   prevPeriod: AccountantPeriod,
+  prevThrough: string | null,
   open: OpenFigures,
   stock: CsvTable | null,
   through: string,
@@ -332,25 +385,32 @@ function summaryTab(
   const { period, showOwner } = input;
   const byMonth = period.kind !== "month";
   const hasOther = [cur.totals, prev.totals].some((f) => Math.abs(f.otherIncome ?? 0) >= 0.005);
-  const lines = summaryLines(hasOther);
+  // THE OWNER'S SWITCH: an office viewer the owner hasn't shared Owner's Draw with gets the cost rows
+  // one by one and no total at all (no Received, no Total Costs, no Net): the totals are the owner's.
+  const lines = summaryLines(hasOther).filter((l) => showOwner || l.cost);
   const cols = (f: (x: OwnerMoneyFigures) => number): XlsxValue[] => {
     const now = cents(f(cur.totals));
     const before = cents(f(prev.totals));
     return [...(byMonth ? cur.months.map((m) => money(cents(f(m)))) : []), money(now), money(before), money(now - before)];
   };
   const costCents = (x: OwnerMoneyFigures) => lines.filter((l) => l.cost).reduce((s, l) => s + cents(l.of(x)), 0);
+  // A period not over yet: the period before through the same day, and the change so far.
+  const prevHead = prevThrough ? `${prevPeriod.label} Through ${shortDay(prevThrough)}` : prevPeriod.label;
+  const changeHead = prevThrough ? "Change So Far" : "Change";
   const rows: Row[] = [
     title(`${fileSafeName(input.company)}: For Your Accountant, ${period.label}`),
     note(`Cash basis: money counts on the day it came in or went out.${unfinished ? ` The period isn't over: figures run through ${through}.` : ""} Downloaded ${input.todayYmd}.`),
     blank(),
-    head("", ...(byMonth ? cur.months.map((m) => shortMonth(m.month)) : []), `Total ${period.label}`, prevPeriod.label, "Change"),
+    head("", ...(byMonth ? cur.months.map((m) => shortMonth(m.month)) : []), `Total ${period.label}`, prevHead, changeHead),
   ];
   for (const l of lines) rows.push(line(l.label, ...cols(l.of)));
-  rows.push(total("Total Costs", ...cols((x) => costCents(x) / 100)));
   if (showOwner) {
+    rows.push(total("Total Costs", ...cols((x) => costCents(x) / 100)));
     rows.push(total(NET_LABEL, ...cols((x) => x.left)));
     const hours = (x: OwnerMoneyFigures) => round2(x.ownerHours);
     rows.push(line("Owner Hours (not pay)", ...(byMonth ? cur.months.map(hours) : []), hours(cur.totals), hours(prev.totals), round2(cur.totals.ownerHours - prev.totals.ownerHours)));
+  } else {
+    rows.push(note(OWNER_HIDDEN_NOTE));
   }
 
   rows.push(blank(), head(`Open As Of ${input.todayYmd}`, "Amount"));
@@ -359,17 +419,29 @@ function summaryTab(
   if (stock) rows.push(line(`In Stock At The End Of ${through}`, money(cents(stock.total ?? 0))));
 
   rows.push(blank());
-  if (!showOwner) rows.push(note(OWNER_HIDDEN_NOTE));
+  if (prevThrough) {
+    rows.push(note(`${changeHead} compares ${period.label} through ${input.todayYmd} with the same days of ${prevPeriod.label} (through ${prevThrough}), not the whole of it.`));
+  }
+  if (open.ahead.length) {
+    const aheadCents = open.ahead.reduce((s, a) => s + a.cents, 0);
+    rows.push(note(`Paid ahead with ${open.ahead.length === 1 ? "1 supplier" : `${open.ahead.length} suppliers`} by ${formatCurrency(aheadCents / 100)}: that credit isn't taken off Suppliers Say You Owe (see Open).`));
+  }
   if (cur.totals.processorFees) rows.push(note(`Fees includes ${formatCurrency(cur.totals.processorFees)} of card fees on payments received.`));
+  const records = input.money.recordsStart ?? null;
+  const empty = beforeRecordsLine(period, records);
+  if (empty) rows.push(note(empty));
   const start = cur.caveats.find((c) => c.kind === "records_start") as { date: string } | undefined;
   if (start) rows.push(note(`Records in North start ${start.date}.`));
+  if (!empty && records && records > prevPeriod.start) {
+    rows.push(note(`Records in North start ${records}, so ${prevPeriod.label} isn't a full comparison.`));
+  }
   const notCounted = notCountedLine(cur);
   if (notCounted) rows.push(note(notCounted));
   const notPaid = countedNotPaidLine(cur);
   if (notPaid) rows.push(note(notPaid));
   rows.push(note(`Open is as of the day this was downloaded (${input.todayYmd}), not the end of the period. Stock is at cost.`));
   rows.push(note("Tabs: Income, Costs, People, Open and Stock hold the rows behind these figures."));
-  return { name: "Summary", rows, widths: [46, ...(byMonth ? cur.months.map(() => 13) : []), 16, 16, 14] };
+  return { name: "Summary", rows, widths: [46, ...(byMonth ? cur.months.map(() => 13) : []), 16, 22, 15] };
 }
 
 // ── Income ───────────────────────────────────────────────────────────────────
@@ -623,8 +695,9 @@ function peopleTab(input: AccountantWorkbookInput, cur: OwnerMoney, months: Set<
     const live = s.payments.filter((p) => !p.voided);
     const paidPeriod = cents(sumPayments(live.filter((p) => months.has(p.paidOn.slice(0, 7)))));
     const paidYear = cents(sumPayments(live.filter((p) => p.paidOn >= yearFrom && p.paidOn <= through)));
+    // Still Owed is the Pay board's You Owe: its own 18 months of shifts, whatever span was read.
     const owed = cents(
-      balanceForPerson({ profileId: pid, name, entries: s.entries, lockedRuns: s.runs, payments: s.payments, tz, fallbackRate: Number(person?.hourlyRate ?? 0) || 0 }).owed,
+      balanceForPerson({ profileId: pid, name, entries: balanceEntries(s.entries, inp.balanceFrom, tz), lockedRuns: s.runs, payments: s.payments, tz, fallbackRate: Number(person?.hourlyRate ?? 0) || 0 }).owed,
     );
     const settled = s.mileageRuns.filter((r) => months.has(String(recordDay(null, r.created_at, tz) ?? "").slice(0, 7))).reduce((c, r) => c + cents(r.mileage_amount), 0);
     if (!hours && !earned && !paidPeriod && !paidYear && !owed && !miles.recorded && !settled) continue;
@@ -645,7 +718,7 @@ function peopleTab(input: AccountantWorkbookInput, cur: OwnerMoney, months: Set<
   if (!crewRows.length) rows.push(note("No crew hours, pay or miles in this period."));
   rows.push(total("Crew Total", null, t.hours / 100, money(t.earned), money(t.paid), money(t.owed), money(t.year), t.miles / 10, t.business / 10, money(t.settled)));
   if (ownerRows.length) rows.push(blank(), ...ownerRows.sort(byName));
-  if (!showOwner) rows.push(blank(), note(OWNER_HIDDEN_NOTE));
+  if (!showOwner) rows.push(blank(), note(OWNER_ROWS_HIDDEN_NOTE));
   rows.push(blank(), note(`Paid In ${year} is what was handed over this calendar year, the figure a 1099-NEC is filed from. Who needs one is your accountant's call.`));
   // Never expected (both are the frozen-gross rule over the same rows), and never silent if it happens.
   if (Math.round(cur.totals.crewPay * 100) !== t.earned) rows.push(note("Earned here doesn't add up to the Summary's Crew Pay (1099); the Summary's figure is the one Money by Month shows."));
@@ -659,12 +732,16 @@ type OpenFigures = {
   customersCents: number;
   suppliers: { name: string; cents: number; how: string }[];
   suppliersCents: number;
+  /** Accounts paid ahead of the bills North has (a credit with that supplier): listed on their own,
+   *  never taken off what the others are owed (/bills: "WHAT HE OWES, not a net position"). */
+  ahead: { name: string; cents: number }[];
 };
 
 function openFigures(input: AccountantWorkbookInput): OpenFigures {
   const { money: inp, tz, todayYmd } = input;
   const customers = computeArAging(input.arInvoices ?? [], todayYmd);
   const suppliers: OpenFigures["suppliers"] = [];
+  const ahead: OpenFigures["ahead"] = [];
   const accounts = supplierAccountRowsOf(inp, tz);
   for (const acct of accounts.values()) {
     const bal = supplierBalance(acct, todayYmd);
@@ -673,7 +750,9 @@ function openFigures(input: AccountantWorkbookInput): OpenFigures {
       continue;
     }
     const c = cents(bal.owed);
-    if (!c) continue;
+    // WHAT IS OWED, not a net position (/bills' rule): a credit with one supplier pays no other.
+    if (c < 0) ahead.push({ name: acct.name, cents: -c });
+    if (c <= 0) continue;
     suppliers.push({ name: acct.name, cents: c, how: bal.model === "supplier-invoices" ? "Their own open invoices" : "Bills minus payments" });
   }
   let n = 0;
@@ -689,7 +768,8 @@ function openFigures(input: AccountantWorkbookInput): OpenFigures {
   }
   suppliers.sort((a, b) => b.cents - a.cents || a.name.localeCompare(b.name));
   if (loose) suppliers.push({ name: "Bills On No Supplier Account", cents: loose, how: `${n} ${n === 1 ? "bill" : "bills"} marked unpaid` });
-  return { customers, customersCents: cents(customers.outstanding), suppliers, suppliersCents: suppliers.reduce((s, x) => s + x.cents, 0) };
+  ahead.sort((a, b) => b.cents - a.cents || a.name.localeCompare(b.name));
+  return { customers, customersCents: cents(customers.outstanding), suppliers, suppliersCents: suppliers.reduce((s, x) => s + x.cents, 0), ahead };
 }
 
 function openTab(input: AccountantWorkbookInput, open: OpenFigures): XlsxSheet {
@@ -710,6 +790,11 @@ function openTab(input: AccountantWorkbookInput, open: OpenFigures): XlsxSheet {
   if (!open.suppliers.length) rows.push(note(`No supplier was owed anything on ${day}.`));
   rows.push(total("Total", money(open.suppliersCents)));
   rows.push(note("A supplier that sends its own invoices is owed what those say is still open. Crew still owed is on People."));
+  if (open.ahead.length) {
+    rows.push(blank(), title("Paid Ahead (Credit With The Supplier)"), head("Supplier", "Credit"));
+    for (const a of open.ahead) rows.push(line(a.name, money(a.cents)));
+    rows.push(note("Paid ahead of the bills North has: the extra sits on that supplier's account and isn't taken off what the others are owed."));
+  }
   return { name: "Open", rows, widths: [30, 26, 13, 13, 13, 10] };
 }
 

@@ -9,7 +9,10 @@ import {
   STOCK_LOST_LABEL,
   TAB_NAMES,
   accountantFileName,
+  accountantReadSpan,
+  beforeRecordsLine,
   buildAccountantWorkbook,
+  comparisonThrough,
   defaultAccountantPeriod,
   fileSafeName,
   lastDayShown,
@@ -379,6 +382,7 @@ describe("Income, Costs and People hold the rows behind the Summary", () => {
 
 describe("the owner's switch: an office download without Owner's Draw", () => {
   const wb = buildAccountantWorkbook(input({ showOwner: false }));
+  const cur = computeOwnerMoney(money(), periodWindow(Q2), TZ, TODAY);
 
   it("has no Net anywhere and no owner rows, and says so", () => {
     const texts = everyText(wb);
@@ -386,15 +390,108 @@ describe("the owner's switch: an office download without Owner's Draw", () => {
     expect(texts.some((s) => s.includes("Dana Pinecrest"))).toBe(false);
     expect(texts.some((s) => s.startsWith("Owner Hours"))).toBe(false);
     expect(texts).toContain(OWNER_HIDDEN_NOTE);
-    expect(wb.figures.net).toBeNull();
-    // The rest is all there: the crew and the money are not the owner's.
+    expect(OWNER_HIDDEN_NOTE).toBe("The totals are the owner's.");
+    expect(wb.figures).toEqual({ received: null, net: null });
+    // The itemized tabs stay: the office already sees those records in the app.
     expect(rowOf(tab(wb, "People"), "Sam Rivera")).toBeTruthy();
-    expect(wb.figures.received).toBe(4170);
+    expect(rowOf(tab(wb, "Income"), "Payments")).toBeTruthy();
     // And the files built from it carry no Net either.
     const csv = unzip(workbookCsvZip(wb)).map((e) => text(e.data)).join("\n");
     expect(csv).not.toContain("Net Profit");
     const xml = unzip(workbookXlsx(wb)).map((e) => text(e.data)).join("\n");
     expect(xml).not.toContain("Net Profit");
+  });
+
+  it("the Summary carries no bottom-line figure at all: no Received, no Total Costs, so Net is never one subtraction away", () => {
+    const summary = tab(wb, "Summary");
+    const labels = summary.rows.map((r) => r.cells[0]);
+    for (const gone of ["Received", "Other Income (Inside Received)", "Total Costs", NET_LABEL, "Owner Hours (not pay)"]) expect(labels, gone).not.toContain(gone);
+    // The cost rows stay, one by one, each with its months, the period, the period before and the change.
+    const costRows = summaryLines(true).filter((l) => l.cost);
+    for (const l of costRows) expect(rowOf(summary, l.label)!.cells.slice(1, 5).map(cents), l.label).toEqual([...cur.months.map((m) => toCents(l.of(m))), toCents(l.of(cur.totals))]);
+    // The table is the cost rows and nothing else: no row holds Received, Net or a total of the costs.
+    const header = summary.rows.findIndex((r) => r.bold && r.cells[0] === "");
+    const table = summary.rows.slice(header + 1, header + 1 + costRows.length);
+    expect(table.map((r) => r.cells[0])).toEqual(costRows.map((l) => l.label));
+    expect(summary.rows[header + 1 + costRows.length].cells).toEqual([OWNER_HIDDEN_NOTE]);
+    const moneyInTable = summary.rows.slice(header + 1).flatMap((r) => r.cells.slice(1).map(cents)).filter((c): c is number => c != null);
+    const costTotal = costRows.reduce((s, l) => s + toCents(l.of(cur.totals)), 0);
+    for (const secret of [toCents(cur.totals.left), toCents(cur.totals.received), costTotal]) expect(moneyInTable).not.toContain(secret);
+  });
+});
+
+describe("what suppliers are owed is /bills' rule: an account paid ahead doesn't come off the others", () => {
+  const withAhead = (): OwnerMoneyInputs => {
+    const m = money();
+    m.supplierAccounts = [...(m.supplierAccounts ?? []), { id: "a2", name: "Paid Ahead Co", on_account: true }];
+    m.supplierPayments = [...(m.supplierPayments ?? []), { id: "sp9", supplier_account_id: "a2", amount: 700, paid_on: "2026-06-15", method: "check", voided_at: null }];
+    return m;
+  };
+  const wb = buildAccountantWorkbook(input({ money: withAhead() }));
+
+  it("Suppliers Say You Owe counts only what is owed, as /bills does; the credit is its own labelled row", () => {
+    // Northline: 1,800 of bills less 500 sent = 1,300 owed. Paid Ahead Co: 700 sent, no bills.
+    expect(cents(rowOf(tab(wb, "Summary"), "Suppliers Say You Owe")!.cells[1])).toBe(130000);
+    const open = tab(wb, "Open");
+    const owedAt = open.rows.findIndex((r) => r.cells[0] === "Suppliers Say You Owe");
+    const owedTotal = open.rows.slice(owedAt).find((r) => r.cells[0] === "Total")!;
+    expect(cents(owedTotal.cells[1])).toBe(130000);
+    const owedRows = open.rows.slice(owedAt + 2, open.rows.indexOf(owedTotal));
+    expect(owedRows.map((r) => r.cells[0])).toEqual(["Northline Supply"]);
+    const aheadAt = open.rows.findIndex((r) => r.cells[0] === "Paid Ahead (Credit With The Supplier)");
+    expect(aheadAt).toBeGreaterThan(owedAt);
+    expect(open.rows[aheadAt + 2].cells).toEqual(["Paid Ahead Co", { money: 700 }]);
+    expect(tab(wb, "Summary").rows.some((r) => String(r.cells[0]).startsWith("Paid ahead with 1 supplier by $700.00"))).toBe(true);
+  });
+});
+
+describe("Still Owed is the Pay board's You Owe, whatever span was read", () => {
+  it("a never-locked shift from before the Pay board's 18 months doesn't raise it", () => {
+    const m = money();
+    m.balanceFrom = "2025-03-27";
+    m.entries = [...m.entries, shift("e-old", SAM, "2025-01-15", 4)];
+    const sam = rowOf(tab(buildAccountantWorkbook(input({ money: m })), "People"), "Sam Rivera")!.cells;
+    expect(sam[5]).toEqual({ money: 520 }); // the same as without the old shift
+  });
+});
+
+describe("a period not over yet is compared with the same days of the period before", () => {
+  it("the same days: as far into the period before as today is into this one", () => {
+    expect(comparisonThrough(periodFromKey("2026")!, TODAY)).toBe("2025-09-27");
+    expect(comparisonThrough(periodFromKey("2026-09")!, TODAY)).toBe("2026-08-27");
+    expect(comparisonThrough(periodFromKey("2026-Q3")!, TODAY)).toBe("2026-06-27");
+    expect(comparisonThrough(periodFromKey("2026-03")!, "2026-03-31")).toBe("2026-02-28");
+    expect(comparisonThrough(periodFromKey("2026-Q2")!, TODAY)).toBeNull(); // over: all of Q1
+  });
+
+  it("Q3 on Sep 27: the column is Q2 through Jun 27 (computeOwnerMoney through that day), and the change says So Far", () => {
+    const q3 = periodFromKey("2026-Q3")!;
+    const s = tab(buildAccountantWorkbook(input({ period: q3 })), "Summary");
+    expect(s.rows.find((r) => r.cells[0] === "" && r.bold)!.cells).toEqual(["", "Jul 2026", "Aug 2026", "Sep 2026", "Total 2026 Q3", "2026 Q2 Through Jun 27", "Change So Far"]);
+    const soFar = computeOwnerMoney(money(), periodWindow(Q2), TZ, TODAY, { throughDay: "2026-06-27" });
+    const whole = computeOwnerMoney(money(), periodWindow(Q2), TZ, TODAY);
+    // The Jun 28 refund and the Jun 30 insurance bill are after the day: not in the comparison.
+    expect(soFar.totals.received).toBe(4220);
+    expect(whole.totals.received).toBe(4170);
+    expect(cents(rowOf(s, "Received")!.cells[5])).toBe(422000);
+    expect(cents(rowOf(s, NET_LABEL)!.cells[5])).toBe(toCents(soFar.totals.left));
+    expect(s.rows.some((r) => String(r.cells[0]).startsWith("Change So Far compares 2026 Q3 through 2026-09-27 with the same days of 2026 Q2"))).toBe(true);
+  });
+
+  it("the default, this year: 2025 through Sep 27", () => {
+    const s = tab(buildAccountantWorkbook(input({ period: periodFromKey("2026")! })), "Summary");
+    const head = s.rows.find((r) => r.cells[0] === "" && r.bold)!.cells;
+    expect(head.slice(-3)).toEqual(["Total 2026", "2025 Through Sep 27", "Change So Far"]);
+  });
+});
+
+describe("a period before North's records says so, never a silent $0.00", () => {
+  it("the page's line and the file's note", () => {
+    expect(beforeRecordsLine(periodFromKey("2025")!, "2026-02-03")).toBe("North has no records before Feb 3, 2026, so 2025 has nothing in it.");
+    expect(beforeRecordsLine(Q2, "2026-02-03")).toBeNull();
+    expect(beforeRecordsLine(Q2, null)).toBeNull();
+    const s = tab(buildAccountantWorkbook(input({ period: periodFromKey("2025")! })), "Summary");
+    expect(s.rows.map((r) => r.cells[0])).toContain("North has no records before Feb 3, 2026, so 2025 has nothing in it.");
   });
 });
 
@@ -435,6 +532,20 @@ describe("the files", () => {
     expect(fileNameFromDisposition('attachment; filename="x.xlsx"')).toBe("x.xlsx");
     expect(fileNameFromDisposition(null)).toBeNull();
   });
+
+  it("a long name with an emoji at the 80-character cut: never half a character, never a failed download", () => {
+    const name = `${"A".repeat(79)}\u{1F50C} Electric`;
+    const safe = fileSafeName(name);
+    expect(Array.from(safe)).toHaveLength(80);
+    expect(safe.endsWith("\u{1F50C}")).toBe(true);
+    expect(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/.test(safe)).toBe(false);
+    const file = accountantFileName(name, periodFromKey("2026-Q3")!, "xlsx");
+    expect(() => contentDisposition(file)).not.toThrow();
+    expect(fileNameFromDisposition(contentDisposition(file))).toBe(file);
+    // And the header itself never throws on half a character, whoever cut it.
+    expect(() => contentDisposition(`${"A".repeat(79)}\uD83D 2026.xlsx`)).not.toThrow();
+    expect(contentDisposition(`AB\uD83D.xlsx`)).toBe(`attachment; filename="AB.xlsx"; filename*=UTF-8''AB.xlsx`);
+  });
 });
 
 describe("periods: whole months only", () => {
@@ -453,13 +564,16 @@ describe("periods: whole months only", () => {
     expect(periodChoices("month", TODAY)).toHaveLength(24);
     expect(lastDayShown(periodFromKey("2026-Q3")!, TODAY)).toBe(TODAY);
     expect(lastDayShown(Q2, TODAY)).toBe("2026-06-30");
+    // What the page and the route both read: the period and the one before.
+    expect(accountantReadSpan(periodFromKey("2026")!)).toEqual({ start: "2025-01-01", end: "2027-01-01" });
+    expect(accountantReadSpan(Q2)).toEqual({ start: "2026-01-01", end: "2026-07-01" });
   });
 
   it("a period not over yet says so, and its months stop at this one", () => {
     const wb = buildAccountantWorkbook(input({ period: periodFromKey("2026-Q3")! }));
     const s = tab(wb, "Summary");
     expect(String(s.rows[1].cells[0])).toContain(`The period isn't over: figures run through ${TODAY}.`);
-    expect(s.rows.find((r) => r.cells[0] === "" && r.bold)!.cells).toEqual(["", "Jul 2026", "Aug 2026", "Sep 2026", "Total 2026 Q3", "2026 Q2", "Change"]);
+    expect(s.rows.find((r) => r.cells[0] === "" && r.bold)!.cells).toEqual(["", "Jul 2026", "Aug 2026", "Sep 2026", "Total 2026 Q3", "2026 Q2 Through Jun 27", "Change So Far"]);
   });
 
   it("a month has no month-by-month columns (the total is the month)", () => {

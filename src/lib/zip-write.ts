@@ -35,8 +35,10 @@ export function crc32(bytes: Uint8Array): number {
   return (c ^ 0xffffffff) >>> 0;
 }
 
-/** MS-DOS time and date (2-second steps, 1980 at the earliest), from the date's own UTC fields so
- *  the same download is the same bytes on any server. */
+/** MS-DOS time and date (2-second steps, 1980 at the earliest). The format has no zone and every
+ *  unzipper reads it as LOCAL time, so the date's UTC fields are written as they are: the caller
+ *  passes the org's wall clock in them (wallClockInTz), the same bytes on any server. Passing a plain
+ *  new Date() would stamp an evening download in the Americas with tomorrow's date. */
 function dosDateTime(d: Date): { time: number; date: number } {
   const y = Math.min(Math.max(d.getUTCFullYear(), 1980), 2107);
   const time = (d.getUTCHours() << 11) | (d.getUTCMinutes() << 5) | Math.floor(d.getUTCSeconds() / 2);
