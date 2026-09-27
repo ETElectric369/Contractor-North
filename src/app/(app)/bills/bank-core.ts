@@ -120,7 +120,7 @@ export async function loadBankBooks(supabase: Db, orgId: string, dl: BankDownloa
     chunks(keys, 150).map((ks) => supabase.from("bank_lines").select("line_key, choice, bucket, cost_kind, amount").eq("org_id", orgId).in("line_key", ks)),
   );
   const paged = <T,>(q: (f: number, t: number) => PromiseLike<{ data: T[] | null; error: unknown }>) => readAllPages<T>(q, 20);
-  const [alreadyR, payR, crewR, supR, billR, pettyR, acctR, aliasR, invR, peopleR, ruleR, paidR, docR] = await Promise.all([
+  const [alreadyR, payR, crewR, supR, billR, pettyR, acctR, aliasR, invR, peopleR, ruleR, paidR, docR, storedR] = await Promise.all([
     already,
     paged<any>((f, t) =>
       supabase
@@ -186,11 +186,23 @@ export async function loadBankBooks(supabase: Db, orgId: string, dl: BankDownloa
       .not("supplier_account_id", "is", null)
       .order("invoice_date", { ascending: false })
       .limit(2000),
+    // EVERY LINE ALREADY COUNTED 3 days either side, under any key: the same transaction in a
+    // download of another format carries another key, and must still count once.
+    paged<any>((f, t) =>
+      supabase
+        .from("bank_lines")
+        .select("line_key, posted_on, amount, account_last4, description, check_number")
+        .eq("org_id", orgId)
+        .gte("posted_on", shiftDay(dl.from!, -3))
+        .lte("posted_on", shiftDay(dl.to!, 3))
+        .order("id")
+        .range(f, t),
+    ),
   ]);
 
   const errors = [
     ...(alreadyR as { error: unknown }[]).map((r) => r.error),
-    payR.error, crewR.error, supR.error, billR.error, pettyR.error, acctR.error, aliasR.error, invR.error, peopleR.error, ruleR.error, paidR.error,
+    payR.error, crewR.error, supR.error, billR.error, pettyR.error, acctR.error, aliasR.error, invR.error, peopleR.error, ruleR.error, paidR.error, storedR.error,
   ].filter(Boolean);
   if (errors.length) {
     if (errors.some(isMissingBank)) return { books: null, problem: BANK_NEEDS_UPDATE };
@@ -270,6 +282,14 @@ export async function loadBankBooks(supabase: Db, orgId: string, dl: BankDownloa
       profileId: r.profile_id ?? null,
     })),
     crewPaid: ((paidR.data ?? []) as any[]).map((p) => ({ profileId: String(p.profile_id), cents: centsOf(p.amount) })),
+    stored: (storedR.rows as any[]).map((l) => ({
+      key: String(l.line_key),
+      postedOn: String(l.posted_on),
+      cents: centsOf(l.amount),
+      last4: l.account_last4 ?? null,
+      description: String(l.description ?? ""),
+      check: l.check_number ?? null,
+    })),
   };
   return { books, problem: null };
 }

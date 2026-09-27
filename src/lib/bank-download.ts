@@ -9,7 +9,10 @@ import { findHeaderRow, fingerprintOf, headerKey, readDate, readHeaderRow, readH
  * business costs in their buckets, the transfers to his own account were owner's draw (never a
  * cost), the dentist was personal. This module does exactly that, in plain code, no model:
  *
- *   1. ALREADY DOWNLOADED: a line whose key is already in bank_lines is counted, never shown.
+ *   1. ALREADY DOWNLOADED: a line whose key is already in bank_lines is counted, never shown. So is
+ *      a line another download of the same account counted under another key (a QFX after a CSV
+ *      of the same weeks: the bank's id in one, the line itself in the other): the same money, 2
+ *      days apart at most, the same account, and words that name the same merchant.
  *   2. MATCH, exact cents, each money row once, in two passes over every line (a sure match first,
  *      so a looser one can never take a row a later line was surely for):
  *        · a deposit is one payment paid the way the bank says the money came (a check or cash for
@@ -714,6 +717,8 @@ export type BooksRule = {
   profileId: string | null;
 };
 export type AlreadyLine = { choice: string; bucket: string | null; costKind: string | null; amountCents: number };
+/** A line already in bank_lines around this download's days, whatever download counted it. */
+export type StoredLine = { key: string; postedOn: string; cents: number; last4: string | null; description: string; check: string | null };
 
 export type BankBooks = {
   /** line_key → what it was, for every line of this download already in bank_lines. */
@@ -730,6 +735,8 @@ export type BankBooks = {
   rules: BooksRule[];
   /** Every live crew payment (marked or not), for "a crew member on a check" guesses. */
   crewPaid: { profileId: string; cents: number }[];
+  /** The company's bank lines 3 days either side of this download, under any key (the twin check). */
+  stored?: StoredLine[];
 };
 
 // ── THE PLAN ───────────────────────────────────────────────────────────────────────────────────
@@ -828,6 +835,16 @@ export function branchFromNumbers(numbers: readonly (string | null | undefined)[
   }
   const [best, count] = [...tally.entries()].sort((a, b) => b[1] - a[1])[0] ?? [null, 0];
   return best && count >= 2 && count / n >= 0.6 ? best : null;
+}
+
+/** Do two lines' words name the same merchant (a word of 3+ letters in common, the same check
+ *  number, or one of them naming nobody at all)? */
+function sameLineWords(a: { description: string; check: string | null }, b: { description: string; check: string | null }): boolean {
+  if (a.check && b.check) return a.check === b.check;
+  const wa = merchantWords(a.description).filter((w) => w.length >= 3);
+  const wb = new Set(merchantWords(b.description).filter((w) => w.length >= 3));
+  if (!wa.length || !wb.size) return true;
+  return wa.some((w) => wb.has(w));
 }
 
 /** Does the line name the bill's supplier: a word of 3+ letters they share ("HOME HARDWARE #55" and
@@ -1111,6 +1128,23 @@ export function planBankDownload(dl: BankDownload, books: BankBooks): BankPlan {
   // ALREADY, then MATCHES in two passes over every line, then rules and questions.
   for (const line of lines) {
     if (!books.already.has(line.key)) continue;
+    dispositions.set(line.key, { how: "already" });
+    counts.already++;
+  }
+  // THE SAME LINE UNDER ANOTHER KEY: a line another download (another format) already counted.
+  // Each stored line stands for one line here, and a line this download carries under its own key
+  // is never anyone's twin.
+  const mine = new Set(lines.map((l) => l.key));
+  const twins = new Set<string>();
+  for (const line of lines) {
+    if (dispositions.has(line.key)) continue;
+    const twin = (books.stored ?? [])
+      .filter(
+        (s) => !mine.has(s.key) && !twins.has(s.key) && s.cents === line.cents && Math.abs(dayDiff(line.postedOn, s.postedOn)) <= 2 && sameLineWords(line, s) && (!s.last4 || !line.last4 || s.last4 === line.last4),
+      )
+      .sort((a, b) => Math.abs(dayDiff(line.postedOn, a.postedOn)) - Math.abs(dayDiff(line.postedOn, b.postedOn)) || a.key.localeCompare(b.key))[0];
+    if (!twin) continue;
+    twins.add(twin.key);
     dispositions.set(line.key, { how: "already" });
     counts.already++;
   }

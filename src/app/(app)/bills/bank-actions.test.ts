@@ -479,6 +479,24 @@ describe("the next download", () => {
     expect(db.organized_items.find((i) => i.id === next)!.status).toBe("filed");
   });
 
+  it("the same weeks downloaded again in another format count once: no second fuel bill", async () => {
+    const first = await drop();
+    const v = await view(first);
+    await applyBankDownload(first, { fingerprint: v.fingerprint, picks: { [rowBy(v, "SHELL").id]: "cost:Gas & Truck:fuel" } });
+    expect(db.bills).toHaveLength(3);
+    // The bank's QFX of the same days: its own ids, its own words for the same fill-ups.
+    const qfx = [
+      ["Account", "Date", "Description", "Amount", "Check", "Id"],
+      ["000099991234", "2026-09-16", "SHELL 123 ANYTOWN ST", "-100.00", "", "F-0916"],
+      ["000099991234", "2026-09-28", "SHELL 789 ANYTOWN", "-70.00", "", "F-0928"],
+    ];
+    const res = await addOpenList({ name: "Checking.qfx", sha256: null, table: qfx, listDate: "2026-09-29", source: "bills_drop" });
+    const nv = await view(res.id!);
+    expect(nv.headline).toMatch(/1 sorted · 1 already in North/);
+    await applyBankDownload(res.id!, { fingerprint: nv.fingerprint, picks: {} });
+    expect(db.bills).toHaveLength(4);
+  });
+
   it("the same file dropped twice is Already In", async () => {
     const sha = "a".repeat(64);
     await drop(CHECKING_CSV, "Checking.csv", sha);

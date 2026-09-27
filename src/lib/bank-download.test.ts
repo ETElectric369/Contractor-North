@@ -403,6 +403,25 @@ describe("the same line never twice", () => {
     expect(b.lines.map((l) => l.key).sort()).toEqual(a.lines.map((l) => l.key).sort());
   });
 
+  it("the same line in a download of another format is counted once", () => {
+    // A CSV counted first (keys from the line), then a QFX of overlapping weeks (keys from FITIDs).
+    const csv = readBankTable(parseCSV(`Account,Date,Description,Amount\nXXXX1234,09/16/2026,1111-SHELL OIL 57444 ANYTOWN CA,-100.00\nXXXX1234,09/17/2026,1111-SHELL OIL 57444 ANYTOWN CA,-100.00\n`), "a.csv", hash)!;
+    const qfx = readBankTable(
+      [["Account", "Date", "Description", "Amount", "Check", "Id"], ["000099991234", "2026-09-16", "SHELL OIL 57444 ANYTOWN CA", "-100.00", "", "F1"], ["000099991234", "2026-09-18", "SHELL OIL 57444", "-100.00", "", "F2"], ["000099991234", "2026-09-18", "ACME DINER", "-100.00", "", "F3"], ["000099991234", "2026-09-20", "SHELL OIL 57444", "-100.00", "", "F4"]],
+      "b.qfx",
+      hash,
+    )!;
+    const stored = csv.lines.map((l) => ({ key: l.key, postedOn: l.postedOn, cents: l.cents, last4: l.last4, description: l.description, check: l.check }));
+    const plan = planBankDownload(qfx, ORG_BOOKS({ stored }));
+    // Two of them are the CSV's two fills (each stored line stands for one); a diner of the same
+    // money isn't a SHELL, and a fill 3 days on is a new one.
+    expect(qfx.lines.map((l) => plan.dispositions.get(l.key)!.how)).toEqual(["already", "already", "need", "need"]);
+    expect(plan.counts.already).toBe(2);
+    // Another account's line is never a twin.
+    const other = planBankDownload({ ...qfx, lines: qfx.lines.map((l) => ({ ...l, last4: "5555" })) }, ORG_BOOKS({ stored }));
+    expect(other.counts.already).toBe(0);
+  });
+
   it("a line already in North is counted, never shown", () => {
     const dl = download();
     const fee = lineBy(dl, "SERVICE FEE");
