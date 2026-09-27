@@ -27,6 +27,10 @@ import { keepPaperwork } from "@/app/(app)/organize/paperwork-actions";
  * folded. Undo takes the whole download back.
  */
 
+/** A row's answer button: a name can be long ("Pay Westfield Electrical Supply Company (Anytown Branch)"), so it
+ *  wraps inside the card at 375px instead of running off it, and is never shorter than a thumb. */
+const ANSWER = "h-auto min-h-11 max-w-full whitespace-normal py-2 text-left";
+
 type Run = (key: string, fn: () => Promise<{ ok: boolean; error?: string; message?: string }>, filedSentence?: string) => void;
 
 /** Each segment its own colour. Where Money by Month (money-chart.ts) has the same money, the same
@@ -103,6 +107,7 @@ function Row({
         {row.buttons.map((b) => (
           <Button
             key={b.id}
+            className={ANSWER}
             variant={picked === b.id ? "primary" : "outline"}
             aria-pressed={picked === b.id}
             onClick={() => onPick(picked === b.id ? undefined : b.id)}
@@ -118,7 +123,7 @@ function Row({
           </Button>
         ))}
         {offList && (
-          <Button variant="primary" aria-pressed onClick={() => onPick(undefined)} disabled={working}>
+          <Button className={ANSWER} variant="primary" aria-pressed onClick={() => onPick(undefined)} disabled={working}>
             <Check /> {pickedLabel}
           </Button>
         )}

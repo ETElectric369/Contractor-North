@@ -103,6 +103,15 @@ describe("the bank card", () => {
     }
   });
 
+  it("a long answer wraps inside the card, still a thumb tall", () => {
+    const html = render({ ...VIEW, rows: [{ ...VIEW.rows[2], buttons: [{ id: "supplier:x", label: "Pay Westfield Electrical Supply Company (Anytown Branch)" }] }] });
+    const b = buttons(html).find((x) => x.text.startsWith("Pay Westfield"))!;
+    expect(b.markup).toMatch(/whitespace-normal/);
+    expect(b.markup).toMatch(/min-h-11/);
+    expect(b.markup).toMatch(/max-w-full/);
+    expect(b.markup).not.toMatch(/whitespace-nowrap/);
+  });
+
   it("a row with no guess says so, and none of its buttons is called one", () => {
     const html = render({ ...VIEW, rows: [{ ...VIEW.rows[0], guess: null, buttons: [{ id: "personal", label: "Personal" }, { id: "draw", label: "Owner's Draw" }] }] });
     expect(textOf(html)).toContain("No guess");
