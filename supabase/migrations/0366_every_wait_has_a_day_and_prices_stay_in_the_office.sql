@@ -64,7 +64,8 @@
 --       job off hold (wake, placing it on a day, the status control, Finish, Nort, a clock-in, Which
 --       Job) clears the hold, with no door able to forget.
 --   Cheap: it runs on every jobs write, and reads the company's timezone only when a job enters hold
---   with no day.
+--   with no day. A job IMPORTED already on hold (importJobs) gets its day here too, with no reason
+--   ("No reason saved" on its row until someone gives one): acceptable, and never a job with no day.
 --
 -- ── B. A WALK-THROUGH'S ANSWERS STAY IN THE OFFICE (LEAK-0227) ──────────────────────────────
 --

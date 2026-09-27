@@ -3,6 +3,7 @@ import { dbError } from "@/lib/db-error";
 import { appointmentTypeFor, bookingTitle, daysNeeded, workingDaysFrom, workKind } from "@/lib/schedule/work-shape";
 
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
 import { mergeCaptureSections, parseInspectorCapture, type CapturePatch } from "@/lib/inspection/capture";
 import { isMissingRpc, keepStoredPhotos, readViaView } from "@/lib/inspection/walkthrough-access";
 import { formatFullAddress, formatPhone } from "@/lib/utils";
@@ -130,7 +131,9 @@ export async function createAppointment(formData: FormData): Promise<Result> {
   const assignedTo = emptyToNull(formData.get("assigned_to"));
   if (assignedTo && assignedTo !== ctx.userId) {
     // On the bell too (notifyPeople): the line says what the push says, to the one person it was for.
-    await notifyPeople(ctx.orgId, [assignedTo], "assigned", {
+    // After the response (it was fire-and-forget before), but kept alive until it lands.
+    const orgId = ctx.orgId;
+    after(() => notifyPeople(orgId, [assignedTo], "assigned", {
       title: "New appointment assigned",
       body: title,
       // Deep-link the appointment's DAY so staff land where its edit/quick actions
@@ -138,7 +141,7 @@ export async function createAppointment(formData: FormData): Promise<Result> {
       // user picked; a tech recipient is still bounced to /planner by the office-only
       // gate on /schedule — that's a separate, pre-existing constraint.
       url: apptDate ? `/schedule?view=day&date=${apptDate}` : "/schedule",
-    });
+    }));
   }
 
   revalidatePath("/schedule");
