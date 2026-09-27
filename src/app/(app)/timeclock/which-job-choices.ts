@@ -161,3 +161,44 @@ export async function pickOutcome(
   const sentence = res?.error || "That didn't go through. Your punch is saved, still on no job.";
   return res?.stale ? { kind: "stale", sentence } : { kind: "refused", sentence };
 }
+
+/** Where a pick's answer goes, once the write has come back. */
+export type PickRoute = {
+  /** Re-render the screen behind from the server (the punch changed, or isn't what it showed). */
+  refresh: boolean;
+  /** Said in a toast: the sheet is going (or already gone) and can't hold the sentence. */
+  toast: { sentence: string; kind: "success" | "error" } | null;
+  /** Said on the sheet's own line, under the rows. */
+  inline: string | null;
+  /** Said on the sheet with Done (the door with no toast). */
+  placed: string | null;
+  /** Close the sheet: its onClose is the door's next step, a crew lead's debrief among them. */
+  close: boolean;
+};
+
+/**
+ * THE ANSWER TO A PICK ALWAYS LANDS SOMEWHERE (pure, so each path is pinned).
+ *
+ * `gone`: the sheet was closed (Back, the X, a tap outside, Escape) while the write was out. Its
+ * onClose already ran, so the door has moved on: the sentence rides a toast, whatever it says, and
+ * nothing is closed a second time (a crew lead's debrief would open again after he had shut it).
+ * `confirmInline`: the door has no toast (the offline queue), so the sheet says it itself.
+ */
+export function routePick(out: PickOutcome, door: { confirmInline: boolean; gone: boolean }): PickRoute {
+  const none = { toast: null, inline: null, placed: null };
+  if (door.gone) {
+    const kind = out.kind === "placed" ? "success" : "error";
+    return { ...none, refresh: out.kind !== "refused", toast: { sentence: out.sentence, kind }, close: false };
+  }
+  if (out.kind === "placed") {
+    return door.confirmInline
+      ? { ...none, refresh: true, placed: out.sentence, close: false }
+      : { ...none, refresh: true, toast: { sentence: out.sentence, kind: "success" }, close: true };
+  }
+  if (out.kind === "stale" && !door.confirmInline) {
+    // The punch moved underneath (closed, or got its job elsewhere): the screen behind catches up,
+    // and the sentence rides a toast because the sheet goes with it.
+    return { ...none, refresh: true, toast: { sentence: out.sentence, kind: "error" }, close: true };
+  }
+  return { ...none, refresh: false, inline: out.sentence, close: false };
+}

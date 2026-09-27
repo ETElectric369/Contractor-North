@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -10,6 +10,7 @@ import { useToast } from "@/components/toast";
 import { putPunchOnJob, whichJobChoices } from "../timeclock/which-job-actions";
 import {
   pickOutcome,
+  routePick,
   type WhichJobMoment,
   type WhichJobOption,
   type WhichJobResult,
@@ -169,6 +170,7 @@ export function WhichJobSheetView({
   busyId = null,
   err = null,
   placed = null,
+  holdWhileBusy = false,
   onPick,
   onSkip,
 }: {
@@ -178,6 +180,9 @@ export function WhichJobSheetView({
   err?: string | null;
   /** The pick landed and there is no toast to say so (the offline queue's sheet): said here. */
   placed?: string | null;
+  /** The door has no toast, so the answer can only land on the sheet: while a pick is out, the X,
+   *  a tap outside and Escape leave it open (Back still closes; Modal holdOpen says why). */
+  holdWhileBusy?: boolean;
   onPick: (job: WhichJobOption) => void;
   onSkip: () => void;
 }) {
@@ -191,7 +196,7 @@ export function WhichJobSheetView({
     </Button>
   );
   return (
-    <Modal open onClose={onSkip} title="Which Job Are You On?" size="sm" portal footer={footer}>
+    <Modal open onClose={onSkip} holdOpen={holdWhileBusy && !!busyId} title="Which Job Are You On?" size="sm" portal footer={footer}>
       {placed ? (
         <p className="text-sm font-medium text-green-700" role="status">
           {placed}
@@ -268,6 +273,17 @@ export function WhichJobSheet({
   const [busyId, setBusyId] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [placed, setPlaced] = useState<string | null>(null);
+  // Whether the sheet is still on screen. It can be closed while a pick is out (Back, the X, a tap
+  // outside): the door's onClose has run and the sheet is gone, so the answer must not go to its
+  // line (nobody would see a refusal) and onClose must not run twice (a crew lead's debrief, shut
+  // already, would open again). routePick sends it to a toast instead.
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -292,27 +308,16 @@ export function WhichJobSheet({
     setErr(null);
     try {
       const out = await pickOutcome(putPunchOnJob, entryId, job);
-      if (out.kind === "placed") {
-        router.refresh();
-        if (confirmInline) {
-          setPlaced(out.sentence);
-          return;
-        }
-        toast(out.sentence, "success");
-        onClose();
-        return;
-      }
-      if (out.kind === "stale" && !confirmInline) {
-        // The punch moved underneath (closed, or got its job elsewhere): the screen behind catches
-        // up, and the sentence rides a toast because the sheet goes with it.
-        toast(out.sentence, "error");
-        router.refresh();
-        onClose();
-        return;
-      }
-      setErr(out.sentence);
+      const gone = !mounted.current;
+      const route = routePick(out, { confirmInline, gone });
+      if (route.refresh) router.refresh();
+      if (route.toast) toast(route.toast.sentence, route.toast.kind);
+      if (gone) return;
+      if (route.placed) setPlaced(route.placed);
+      if (route.inline) setErr(route.inline);
+      if (route.close) onClose();
     } finally {
-      setBusyId(null);
+      if (mounted.current) setBusyId(null);
     }
   }
 
@@ -323,6 +328,7 @@ export function WhichJobSheet({
       busyId={busyId}
       err={err}
       placed={placed}
+      holdWhileBusy={confirmInline}
       onPick={(j) => void pick(j)}
       onSkip={onClose}
     />

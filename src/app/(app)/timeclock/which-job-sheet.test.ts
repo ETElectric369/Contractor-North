@@ -20,7 +20,8 @@ vi.mock("./which-job-actions", () => ({
 }));
 
 import { WhichJobSheetView, type SheetPhase } from "../planner/which-job";
-import { askAfterPunch, orderWhichJobChoices, pickOutcome, whichJobLabel, type WhichJobOption } from "./which-job-choices";
+import { Modal } from "@/components/ui/modal";
+import { askAfterPunch, orderWhichJobChoices, pickOutcome, routePick, whichJobLabel, type WhichJobOption } from "./which-job-choices";
 
 const jobs: WhichJobOption[] = [
   { id: "j28", label: "85 Whitney", why: "Where you worked last" },
@@ -152,6 +153,49 @@ describe("a tap on a row", () => {
       job,
     );
     expect(offline).toEqual({ kind: "refused", sentence: "No connection, so the punch is still on no job. Try again when you have a bar or two, or skip." });
+  });
+});
+
+describe("where a pick's answer lands", () => {
+  const placed = { kind: "placed", sentence: "Your punch is on 85 Whitney." } as const;
+  const stale = { kind: "stale", sentence: "That shift closed a while ago, so the office puts it on its job from Timecards." } as const;
+  const refused = { kind: "refused", sentence: "That job is finished." } as const;
+  const open = { confirmInline: false, gone: false };
+
+  it("with the sheet up: a landed pick is a toast and the sheet closes; a punch that moved too; a refusal stays on its line", () => {
+    expect(routePick(placed, open)).toEqual({ refresh: true, toast: { sentence: placed.sentence, kind: "success" }, inline: null, placed: null, close: true });
+    expect(routePick(stale, open)).toEqual({ refresh: true, toast: { sentence: stale.sentence, kind: "error" }, inline: null, placed: null, close: true });
+    expect(routePick(refused, open)).toEqual({ refresh: false, toast: null, inline: refused.sentence, placed: null, close: false });
+  });
+
+  it("the door with no toast says a landed pick on the sheet, with Done", () => {
+    expect(routePick(placed, { confirmInline: true, gone: false })).toMatchObject({ refresh: true, toast: null, placed: placed.sentence, close: false });
+    expect(routePick(refused, { confirmInline: true, gone: false })).toMatchObject({ toast: null, inline: refused.sentence, close: false });
+  });
+
+  it("closed while the write was out (Back, the X, a tap outside): every answer rides a toast, and nothing closes twice", () => {
+    const gone = { confirmInline: false, gone: true };
+    // The refusal is the one that used to vanish: it went to the line of a sheet nobody could see.
+    expect(routePick(refused, gone)).toEqual({ refresh: false, toast: { sentence: refused.sentence, kind: "error" }, inline: null, placed: null, close: false });
+    expect(routePick(stale, gone)).toEqual({ refresh: true, toast: { sentence: stale.sentence, kind: "error" }, inline: null, placed: null, close: false });
+    // A second onClose here reopened a crew lead's debrief he had already shut.
+    expect(routePick(placed, gone)).toEqual({ refresh: true, toast: { sentence: placed.sentence, kind: "success" }, inline: null, placed: null, close: false });
+  });
+
+  it("the door with no toast holds its sheet while a pick is out: the X, a tap outside and Escape wait for the answer", () => {
+    const held = WhichJobSheetView(view({ phase: "ready", jobs, isStaff: false }, { busyId: "j28", holdWhileBusy: true })) as ReactElement<{ holdOpen?: boolean }>;
+    expect(held.props.holdOpen).toBe(true);
+    const idle = WhichJobSheetView(view({ phase: "ready", jobs, isStaff: false }, { holdWhileBusy: true })) as ReactElement<{ holdOpen?: boolean }>;
+    expect(idle.props.holdOpen).toBe(false);
+    // Every other door has a toast for the answer, so its sheet closes whenever it's asked to.
+    const toastDoor = WhichJobSheetView(view({ phase: "ready", jobs, isStaff: false }, { busyId: "j28" })) as ReactElement<{ holdOpen?: boolean }>;
+    expect(toastDoor.props.holdOpen).toBe(false);
+    const x = (holdOpen: boolean) => {
+      const props = { open: true, onClose: () => {}, title: "T", holdOpen, historyClose: false } as Parameters<typeof Modal>[0];
+      return renderToStaticMarkup(createElement(Modal, props, "body")).match(/<button[^>]*aria-label="Close"[^>]*>/)![0];
+    };
+    expect(x(true)).toContain(' disabled=""');
+    expect(x(false)).not.toContain(' disabled=""');
   });
 });
 
