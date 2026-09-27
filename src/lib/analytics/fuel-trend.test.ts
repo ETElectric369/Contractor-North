@@ -114,6 +114,12 @@ describe("getFuelTrend: every page, the window's rows, and the first fuel ever",
           eq: (c: string, v: unknown) => (filters.push((r) => r[c] === v), chain),
           is: (c: string, v: unknown) => (filters.push((r) => (r[c] ?? null) === v), chain),
           not: (c: string, _op: string, v: unknown) => (filters.push((r) => (r[c] ?? null) !== v), chain),
+          // PostgREST's imatch is Postgres ~*: a regular expression, any letter case.
+          filter: (c: string, op: string, v: string) => {
+            if (op !== "imatch") throw new Error(`the fake has no ${op}`);
+            filters.push((r) => new RegExp(v, "i").test(String(r[c] ?? "")));
+            return chain;
+          },
           gte: (c: string, v: string) => (filters.push((r) => String(r[c]) >= v), chain),
           lt: (c: string, v: string) => (filters.push((r) => String(r[c]) < v), chain),
           or: (s: string) => {
@@ -166,6 +172,28 @@ describe("getFuelTrend: every page, the window's rows, and the first fuel ever",
     );
     expect(t!.weeks.reduce((n, w) => n + w.cents, 0)).toBe(14000);
     expect(t!.fills).toBe(2);
+  });
+
+  it("counts a no-job bill whose category nobody bucketed (\"gas\", \" fuel \") as fuel, as the Owner's Draw card does", async () => {
+    const t = await getFuelTrend(
+      fake({
+        bills: [
+          // The earliest fuel ever, before the window, spelled the old way: the books start before it.
+          { id: "o1", ...fuel("2025-03-03", 30, { category: "diesel" }) },
+          { id: "f1", ...fuel("2026-09-08", 100, { category: "gas" }) },
+          { id: "f2", ...fuel("2026-09-09", 40, { category: " fuel " }) },
+          { id: "x1", ...fuel("2026-09-09", 25, { category: "Fuel surcharge" }) }, // Other, by bucketOf
+        ],
+        payments: [],
+        customer_credits: [],
+        bank_lines: [],
+      }),
+      "UTC",
+      TODAY,
+    );
+    expect(t!.weeks.reduce((n, w) => n + w.cents, 0)).toBe(14000);
+    expect(t!.fills).toBe(2);
+    expect(t!.weeksCounted).toBe(12);
   });
 
   it("money in is the Owner's Draw card's Received: payments and a bank download's Other Income", async () => {

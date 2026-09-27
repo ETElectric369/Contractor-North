@@ -1,5 +1,5 @@
 import { computeCollected } from "@/lib/analytics/money-metrics";
-import { bucketOf } from "@/lib/business-cost-buckets";
+import { bucketCategoryPattern, bucketOf } from "@/lib/business-cost-buckets";
 import { readAllPages } from "@/lib/read-all-pages";
 import { todayStrInTz, tzDayStartUtc } from "@/lib/tz";
 
@@ -138,24 +138,30 @@ export function weekLabel(start: string): string {
 }
 
 /**
- * THE READS: the fuel bills inside the 13 weeks (every page of them: PostgREST cuts a select at
+ * THE READS: the business costs inside the 13 weeks (every page of them: PostgREST cuts a select at
  * 1,000 rows without a word, and a busy fleet passes that), the one earliest fuel bill ever (so the
  * average knows the first week the books have fuel), and the money received over the window, every
- * page. RLS holds all of them to the signed-in company's staff. Every door writes the bucket as
- * bucketOf spells it, so the read asks for exactly "Fuel"; a company with none simply gets no card.
+ * page. RLS holds all of them to the signed-in company's staff. A company with no fuel simply gets
+ * no card.
+ *
+ * WHICH BILL IS FUEL IS isFuelBill'S CALL, never the query's. Postgres `=` is exact, and a no-job bill
+ * whose category nobody bucketed ("gas", "fuel") is one bucketOf counts, so the Owner's Draw card has
+ * it on its Fuel line. The window's read takes every business cost and keeps isFuelBill's; the
+ * earliest-ever read, which can only ask for one row, asks with bucketCategoryPattern (bucketOf's
+ * own words, any letter case) and keeps isFuelBill's too.
  */
 export async function getFuelTrend(supabase: any, tz: string, todayYmd: string): Promise<FuelTrend | null> {
   const win = fuelWindow(todayYmd);
-  const fuelBills = () =>
-    supabase.from("bills").select("id, amount, bill_date, created_at, category, job_id").eq("category", "Fuel").is("job_id", null).is("superseded_by_bill_id", null);
+  const businessBills = () =>
+    supabase.from("bills").select("id, amount, bill_date, created_at, category, job_id").is("job_id", null).is("superseded_by_bill_id", null);
   const [inside, first] = await Promise.all([
-    readAllPages<FuelBillRow & { id: string }>((f, t) => fuelBills().or(`bill_date.gte.${win.start},bill_date.is.null`).order("id").range(f, t), 20),
-    fuelBills().not("bill_date", "is", null).order("bill_date", { ascending: true }).limit(1),
+    readAllPages<FuelBillRow & { id: string }>((f, t) => businessBills().or(`bill_date.gte.${win.start},bill_date.is.null`).order("id").range(f, t), 20),
+    businessBills().filter("category", "imatch", bucketCategoryPattern("Fuel")).not("bill_date", "is", null).order("bill_date", { ascending: true }).limit(1),
   ]);
   if (inside.error || first.error || !Array.isArray(first.data)) return null;
   // The earliest fuel ever, when it is before the window: it says when the books start, nothing more.
-  const before = (first.data as FuelBillRow[]).filter((r) => (r.bill_date ?? "") < win.start);
-  const bills = [...before, ...inside.rows];
+  const before = (first.data as FuelBillRow[]).filter((r) => isFuelBill(r) && (r.bill_date ?? "") < win.start);
+  const bills = [...before, ...inside.rows.filter(isFuelBill)];
   if (!bills.length) return computeFuelTrend([], 0, todayYmd, tz);
   // How far the bank downloads reach: most fills are written from them, so a week past the last one
   // isn't in yet. No bank lines (or none readable): today.

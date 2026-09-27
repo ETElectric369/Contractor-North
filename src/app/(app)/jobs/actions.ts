@@ -1452,23 +1452,33 @@ export async function updateBill(
   if (patch.status !== undefined) clean.status = patch.status;
   if (patch.bill_date !== undefined) clean.bill_date = patch.bill_date || null;
   if (patch.notes !== undefined) clean.notes = patch.notes?.trim() || null;
-  // The same rule as createBill: an edit that says this bill has no job puts its category in one
-  // of the buckets. (A patch that leaves job_id out is not told which it is, and passes as sent.)
-  if (patch.category !== undefined)
-    clean.category = patch.job_id !== undefined && !patch.job_id ? bucketOf(patch.category) : (patch.category ?? null);
   if (patch.job_id !== undefined) clean.job_id = patch.job_id || null;
 
-  // One stored-row read of the bill as it stands — feeds THREE things: the old-job revalidation
-  // (a re-pointed bill's cost must leave its old job), the PO same-job check below, and the claim
-  // guard. It asks for `amount` as well as `job_id` because "did the price actually move" cannot
-  // be answered from the patch alone: the bills list sends `amount` on every save whether it
-  // changed or not, so without the stored figure every save would look like a re-price.
+  // One stored-row read of the bill as it stands — feeds FOUR things: the old-job revalidation
+  // (a re-pointed bill's cost must leave its old job), the PO same-job check below, the claim
+  // guard, and the bucket rule for a category sent without a job. It asks for `amount` as well as
+  // `job_id` because "did the price actually move" cannot be answered from the patch alone: the
+  // bills list sends `amount` on every save whether it changed or not, so without the stored figure
+  // every save would look like a re-price.
   let oldJobId: string | null = null;
   let oldAmount = 0;
-  if (patch.job_id !== undefined || patch.amount !== undefined || (patch.po_id !== undefined && !!patch.po_id)) {
+  if (
+    patch.job_id !== undefined ||
+    patch.amount !== undefined ||
+    patch.category !== undefined ||
+    (patch.po_id !== undefined && !!patch.po_id)
+  ) {
     const { data: prev } = await supabase.from("bills").select("job_id, amount").eq("id", id).maybeSingle();
     oldJobId = (prev as { job_id: string | null } | null)?.job_id ?? null;
     oldAmount = Number((prev as { amount?: number | string | null } | null)?.amount ?? 0);
+  }
+  // The same rule as createBill: a bill with no job puts its category in one of the buckets. The job
+  // it will have is the one this patch sends, or the stored one when the patch leaves job_id out (Nort
+  // can send a category alone): without that, a "gas" typed on a no-job bill was stored as typed, the
+  // Owner's Draw card counted it as Fuel through bucketOf, and the Fuel card, which read "Fuel", did not.
+  if (patch.category !== undefined) {
+    const nextJobId = patch.job_id !== undefined ? patch.job_id || null : oldJobId;
+    clean.category = !nextJobId ? bucketOf(patch.category) : (patch.category ?? null);
   }
 
   // A RECEIPT AN INVOICE BILLS MAY NOT CHANGE JOBS, AND MAY NOT CHANGE PRICE IN SILENCE.

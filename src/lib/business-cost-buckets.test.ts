@@ -5,6 +5,7 @@ import {
   AUTO_FILE_BUCKETS,
   BUSINESS_COST_BUCKETS,
   LEGACY_GAS_AND_TRUCK,
+  bucketCategoryPattern,
   bucketOf,
   isBusinessCostBucket,
   looksLikeSupplierFee,
@@ -112,6 +113,19 @@ describe("bucketOf: an old category word to its bucket", () => {
   it("always answers with a member of the list", () => {
     for (const raw of ["Fuel", "Gas & Truck", "x", "", null, "Petty cash", "Fees", "Insurance & Licenses"]) {
       expect(isBusinessCostBucket(bucketOf(raw))).toBe(true);
+    }
+  });
+});
+
+describe("bucketCategoryPattern: bucketOf's rule as a query", () => {
+  // The same words a query asks for with imatch (Postgres ~*: any letter case).
+  const asks = (bucket: Parameters<typeof bucketCategoryPattern>[0], category: string) => new RegExp(bucketCategoryPattern(bucket), "i").test(category);
+  const samples = ["Fuel", "fuel", " FUEL ", "gas", "Gasoline", "diesel", "Auto", "gas & truck", "Vehicle", "truck", "Tools & Supplies", "tools", "Shop Supplies", "Phone", "office", "Insurance", "Licenses", "Fees", "Fuel surcharge", "Gas station", "gas&truck", "Tools  &  Supplies", "Rent", ""];
+
+  it("matches exactly the categories bucketOf puts in that bucket", () => {
+    for (const bucket of BUSINESS_COST_BUCKETS) {
+      if (bucket === "Other") continue;
+      for (const s of samples) expect([bucket, s, asks(bucket, s)]).toEqual([bucket, s, bucketOf(s) === bucket]);
     }
   });
 });

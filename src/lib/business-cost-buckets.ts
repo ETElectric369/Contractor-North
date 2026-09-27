@@ -95,6 +95,19 @@ export function bucketOf(category: string | null | undefined): BusinessCostBucke
 }
 
 /**
+ * THE SAME RULE, AS A QUERY: a regular expression, for PostgREST's `imatch` (Postgres `~*`, which
+ * ignores letter case), that matches every stored category bucketOf puts in this bucket: its own
+ * name and each old word for it, with any spaces around them. A read that asks the database for
+ * one bucket uses this rather than `eq`, because `eq` is exact and a category nobody bucketed
+ * ("gas", "fuel") is one bucketOf counts. Not for Other, which is everything else.
+ */
+export function bucketCategoryPattern(bucket: Exclude<BusinessCostBucket, "Other">): string {
+  const words = [bucket.toLowerCase(), ...Object.keys(LEGACY_TO_BUCKET).filter((w) => LEGACY_TO_BUCKET[w] === bucket)];
+  const escaped = words.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  return `^\\s*(${escaped.join("|")})\\s*$`;
+}
+
+/**
  * DOES THIS PAPER READ LIKE A SUPPLIER'S LATE OR SERVICE CHARGE? The second chance at the rule
  * above, because the first one is a prompt and a prompt is a request, not a mechanism. Only ever
  * used to hold a paper back from auto-filing (it goes to Needs Review), so a false yes costs a
