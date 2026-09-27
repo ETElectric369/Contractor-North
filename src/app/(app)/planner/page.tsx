@@ -1028,6 +1028,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
                     orgId={(org as any)?.id ?? ""}
                     jobId={currentJob.id}
                     snapFirst
+                    nortOn={featureOn(features, "nort")}
                     className="flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
                   />
                 )}

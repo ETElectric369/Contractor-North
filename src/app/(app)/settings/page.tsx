@@ -449,6 +449,7 @@ export default async function SettingsPage({
                     lessonKey="why-lines"
                     seen={Array.isArray((me as { lessons_seen?: unknown } | null)?.lessons_seen) ? ((me as { lessons_seen: unknown[] }).lessons_seen as unknown[]).map(String) : []}
                     initial={{}}
+                    nortOn={on("nort")}
                   />
                   <p className="mb-4 text-sm text-slate-500">
                     {on("leads")

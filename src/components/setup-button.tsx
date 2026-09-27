@@ -6,7 +6,7 @@ import { unlockAudio } from "@/lib/tts";
 import { Modal } from "@/components/ui/modal";
 import { SetupInterview } from "@/components/setup-interview";
 import { TourDriver } from "@/components/tour/tour-driver";
-import { LESSONS, lessonByKey } from "@/lib/onboarding/tour";
+import { LESSONS, lessonBlurb, lessonByKey } from "@/lib/onboarding/tour";
 import { missingNeeds } from "@/lib/playbook/resolve";
 import { SETUP_PLAYBOOK } from "@/lib/onboarding/setup-playbook";
 import type { Answers } from "@/lib/playbook/types";
@@ -44,7 +44,7 @@ export function SetupButton({
   onboarded: boolean;
   /** The Nort switch (0352). Off, the button's words don't promise him ("a quick walk-through"), and
    *  it opens the setup questions instead of the tour, which is Nort talking and pointing at his own
-   *  button (gone from the top bar while he's off). */
+   *  button (gone from the top bar while he's off). The Lessons still run, in their neutral words. */
   nortOn?: boolean;
 }) {
   const [mode, setMode] = useState<null | "tour" | "questions" | "finish">(null);
@@ -142,7 +142,7 @@ export function SetupButton({
               className="block w-full rounded-lg px-2 py-2 text-left hover:bg-slate-50"
             >
               <span className="block text-sm font-medium text-slate-900">{l.title}</span>
-              <span className="block text-xs text-slate-500">{l.blurb}</span>
+              <span className="block text-xs text-slate-500">{lessonBlurb(l, nortOn)}</span>
             </button>
           ))}
           <div className="mt-1 border-t border-slate-100 pt-1">
@@ -170,6 +170,7 @@ export function SetupButton({
           steps={lessonByKey(lessonKey)!.steps}
           storageKey={`cn.lesson.${lessonKey}`}
           onClose={() => setLessonKey(null)}
+          nortOn={nortOn}
         />
       )}
 

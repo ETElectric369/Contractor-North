@@ -102,6 +102,7 @@ export default async function PriceListPage() {
   // KITS OFF (the switch board, 0352): the Kits tab loses its chip; ?tab=kits still opens it, under
   // the Off line. Only the door: every kit is read and priced exactly as before (rule i).
   const kitsOn = featureOn(getOrgSettings((org as { settings?: unknown } | null)?.settings).features, "kits");
+  const nortOn = featureOn(getOrgSettings((org as { settings?: unknown } | null)?.settings).features, "nort");
 
   const allItems = ((itemsRes.data ?? []) as unknown) as PriceItem[];
   const activeItems = allItems.filter((i) => !i.archived);
@@ -241,6 +242,7 @@ export default async function PriceListPage() {
                       cardsAvailable={cardsAvailable}
                       kindsAvailable={cardsAvailable && cardsRes.kindsAvailable}
                       existingVendors={existingVendors}
+                      nortOn={nortOn}
                     />
                   ),
                 },

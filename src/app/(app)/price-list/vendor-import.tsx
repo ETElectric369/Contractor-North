@@ -116,13 +116,15 @@ function newBatchId(): string {
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
 }
 
-export function VendorImport({ existing, disabled }: { existing: ExistingVendor[]; disabled?: boolean }) {
+export function VendorImport({ existing, disabled, nortOn = true }: { existing: ExistingVendor[]; disabled?: boolean; nortOn?: boolean }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [reading, setReading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<{ file: string; rows: PreviewRow[]; headerSkipped: boolean; overCap: number; note?: string } | null>(null);
   /** A photo or a scanned PDF, waiting for a person to say yes to the stated price. */
   const [offer, setOffer] = useState<{ file: File; kind: "photo" | "scan" } | null>(null);
+  // The Nort switch (0352, rule k): the reader works either way; with Nort off it isn't called Nort.
+  const readLabel = nortOn ? "Read With Nort" : "Read The File";
 
   function open(fileName: string, table: string[][], note?: string) {
     const { rows, headerSkipped, overCap } = rowsFromTable(table);
@@ -212,16 +214,16 @@ export function VendorImport({ existing, disabled }: { existing: ExistingVendor[
         Excel, CSV, text, PDF or a photo. Nothing is saved until you press Add.
       </span>
       {offer && (
-        <div role="group" aria-label="Read With Nort" className="space-y-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">
+        <div role="group" aria-label={readLabel} className="space-y-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">
           <p>
             {offer.kind === "photo"
-              ? `${offer.file.name} is a photo. Nort can read the names off it for about $${READ_EACH_USD.toFixed(2)}.`
-              : `${offer.file.name} has no text in it, so it's probably a scan. Nort can read it for about $${READ_EACH_USD.toFixed(2)} a page.`}{" "}
+              ? `${offer.file.name} is a photo. ${nortOn ? "Nort can read the names off it" : "The names can be read off it"} for about $${READ_EACH_USD.toFixed(2)}.`
+              : `${offer.file.name} has no text in it, so it's probably a scan. ${nortOn ? "Nort can read it" : "It can be read"} for about $${READ_EACH_USD.toFixed(2)} a page.`}{" "}
             It counts toward your monthly AI allowance, and nothing is saved until you press Add.
           </p>
           <div className="flex flex-wrap gap-2">
             <Button onClick={() => void readWithNort()} disabled={reading}>
-              {reading ? "Reading…" : "Read With Nort"}
+              {reading ? "Reading…" : readLabel}
             </Button>
             <Button variant="ghost" onClick={() => setOffer(null)} disabled={reading}>
               Cancel
@@ -243,6 +245,7 @@ export function VendorImport({ existing, disabled }: { existing: ExistingVendor[
           note={preview.note}
           existing={existing}
           onClose={() => setPreview(null)}
+          nortOn={nortOn}
         />
       )}
     </div>
@@ -269,6 +272,7 @@ function ImportPreview({
   note,
   existing,
   onClose,
+  nortOn,
 }: {
   fileName: string;
   initial: PreviewRow[];
@@ -277,6 +281,7 @@ function ImportPreview({
   note?: string;
   existing: ExistingVendor[];
   onClose: () => void;
+  nortOn: boolean;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -494,7 +499,7 @@ function ImportPreview({
               </Button>
               <p className="text-xs text-slate-500">
                 {nextBatch > 0
-                  ? `Nort searches the web for each name: ${lookupPrice(nextBatch)}. Counts toward your monthly AI allowance.${waiting.length > LOOKUP_PER_TAP ? ` ${LOOKUP_PER_TAP} at a time; press again for the rest.` : ""} Picking one only fills the row.`
+                  ? `${nortOn ? "Nort searches" : "Searches"} the web for each name: ${lookupPrice(nextBatch)}. Counts toward your monthly AI allowance.${waiting.length > LOOKUP_PER_TAP ? ` ${LOOKUP_PER_TAP} at a time; press again for the rest.` : ""} Picking one only fills the row.`
                   : "Every ticked name has been looked up, or none is ticked."}
               </p>
             </>

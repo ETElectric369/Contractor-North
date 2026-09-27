@@ -47,7 +47,7 @@ type Line = { id: number; name: string; text: string; tone: Tone; differentDoc?:
  * "Record as Cost" for a retry. The Supplier bills list refreshes underneath (router.refresh),
  * and its Edit / Delete are the undo trail (no save game).
  */
-export function JobCostCapture({ orgId, jobId, billsTotal }: { orgId: string; jobId: string; billsTotal: number }) {
+export function JobCostCapture({ orgId, jobId, billsTotal, nortOn = true }: { orgId: string; jobId: string; billsTotal: number; nortOn?: boolean }) {
   const router = useRouter();
   const captureRef = useRef<HTMLInputElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -219,7 +219,7 @@ export function JobCostCapture({ orgId, jobId, billsTotal }: { orgId: string; jo
           >
             <Upload />
           </Button>
-          <QuickCostButton orgId={orgId} jobId={jobId} icon="dollar" label="Add Cost" className={OUTLINE_BTN} />
+          <QuickCostButton orgId={orgId} jobId={jobId} icon="dollar" label="Add Cost" className={OUTLINE_BTN} nortOn={nortOn} />
         </div>
       </div>
 

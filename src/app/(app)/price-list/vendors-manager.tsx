@@ -54,6 +54,7 @@ export function VendorsManager({
   cardsAvailable,
   kindsAvailable = false,
   existingVendors = [],
+  nortOn = true,
 }: {
   vendors: VendorSummary[];
   /** Active items, for "Put It On An Item". */
@@ -67,6 +68,8 @@ export function VendorsManager({
   kindsAvailable?: boolean;
   /** Every card and item vendor name, for an import's Already Have / Same Company? notes. */
   existingVendors?: ExistingVendor[];
+  /** The Nort switch (0352): the import's reader is never called Nort while it is off. */
+  nortOn?: boolean;
 }) {
   const [q, setQ] = useState("");
   const [filter, setFilter] = useState<VendorFilter>("all");
@@ -102,7 +105,7 @@ export function VendorsManager({
             <Plus className="h-4 w-4" /> Add Vendor
           </Button>
         )}
-        {kindsAvailable && <VendorImport existing={existingVendors} />}
+        {kindsAvailable && <VendorImport existing={existingVendors} nortOn={nortOn} />}
         <div className="relative sm:w-80">
           <Search className="absolute left-3 top-3 h-4 w-4 text-slate-400" />
           <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Find a vendor, a contact, a trade or an item…" className="pl-9" aria-label="Find a vendor" />

@@ -96,7 +96,17 @@ export interface TourStep {
    * Nothing waits for a hand.
    */
   opens?: "account";
+  /**
+   * THE WORDS WITH NORT SWITCHED OFF (0352, rule k): neutral, never "I" and never Nort. Only a step
+   * that speaks as Nort carries one; the rest read the same either way. With Nort on, nothing here
+   * is used, so every lesson reads exactly as it did (tour.test pins both halves).
+   */
+  plain?: { title?: string; say?: Line };
 }
+
+/** The title and the line a step shows, for the Nort switch's state. */
+export const stepWords = (s: TourStep, nortOn: boolean): { title: string; say: Line } =>
+  nortOn ? { title: s.title, say: s.say } : { title: s.plain?.title ?? s.title, say: s.plain?.say ?? s.say };
 
 /**
  * ── THE SPLIT (cn-v726). Erik: "the onboarding is one thing but maybe it should just be
@@ -245,8 +255,12 @@ export interface Lesson {
   title: string;
   /** One sentence: what you'll know after. Shown on the cap menu and the offer strip. */
   blurb: string;
+  /** The blurb with Nort switched off, where the blurb names him (see TourStep.plain). */
+  plainBlurb?: string;
   steps: TourStep[];
 }
+
+export const lessonBlurb = (l: Lesson, nortOn: boolean): string => (nortOn ? l.blurb : l.plainBlurb ?? l.blurb);
 
 export const LESSONS: Lesson[] = [
   {
@@ -263,6 +277,13 @@ export const LESSONS: Lesson[] = [
       "When you walk a job, I ask you questions — and every question has a WHY LINE attached. " +
       "One line, in your words, saying WHERE THAT ANSWER ENDS UP IN YOUR PRICE. " +
       "Not why it matters. Where it lands.",
+    plain: {
+      say:
+        "Here's the thing that makes this different from every other app you've tried. " +
+        "When you walk a job, the walk-through asks you questions — and every question has a WHY LINE attached. " +
+        "One line, in your words, saying WHERE THAT ANSWER ENDS UP IN YOUR PRICE. " +
+        "Not why it matters. Where it lands.",
+    },
   },
   {
     key: "why-example",
@@ -283,6 +304,14 @@ export const LESSONS: Lesson[] = [
       "If you can't say where it lands, that's worth knowing too — it might be a question you don't " +
       "actually need. And you're not starting from a blank box: I'll draft every one from what you " +
       "just told me, and you tell me where I've got it wrong. Arguing beats writing.",
+    plain: {
+      say:
+        "So don't explain the question. Finish this sentence: this answer gets... multiplied by " +
+        "something, or it decides something, or it turns something on. One of those three, every time.\n\n" +
+        "If you can't say where it lands, that's worth knowing too — it might be a question you don't " +
+        "actually need. And you're not starting from a blank box: setup drafts every one from your " +
+        "answers, and you fix what's wrong. Arguing beats writing.",
+    },
   },
   {
     key: "why-uses",
@@ -292,6 +321,13 @@ export const LESSONS: Lesson[] = [
       "And when I write the estimate, your why line is what tells me where that answer lands in the " +
       "price. It's for reading, mine and yours. I don't run the sum in it, and I never work out a " +
       "number you didn't give me.",
+    plain: {
+      title: "And what they're for",
+      say:
+        "Two reasons. If something's already been answered, the walk-through doesn't ask it twice. " +
+        "And when an estimate gets written, your why line is what says where that answer lands in the " +
+        "price. It's for reading. Nothing runs the sum in it, and no number you didn't give gets worked out.",
+    },
   },
   {
     key: "playbook-tab",
@@ -302,6 +338,12 @@ export const LESSONS: Lesson[] = [
       "That's the one to remember in here. Every question I'll ask you on a job is in this tab, " +
       "with its why line, and you can rewrite, reorder or delete any of them whenever your mind " +
       "changes. This is yours, not mine — I just do what it says.",
+    plain: {
+      say:
+        "That's the one to remember in here. Every question you'll be asked on a job is in this tab, " +
+        "with its why line, and you can rewrite, reorder or delete any of them whenever your mind " +
+        "changes. It's yours — the app just does what it says.",
+    },
   },
     ],
   },
@@ -351,6 +393,13 @@ export const LESSONS: Lesson[] = [
       "single screen, and I've opened it. Sign out, your language, your estimate QR code for the " +
       "truck — and Settings, right there in the middle. That's the door. " +
       "That's the one thing worth remembering.",
+    plain: {
+      say: (c) =>
+        `Your initials, top right${c.first ? `, ${c.first}` : ""} — that's your corner, on every ` +
+        "single screen, and it's open now. Sign out, your language, your estimate QR code for the " +
+        "truck — and Settings, right there in the middle. That's the door. " +
+        "That's the one thing worth remembering.",
+    },
   },
   {
     key: "settings",
@@ -369,6 +418,7 @@ export const LESSONS: Lesson[] = [
     key: "how-a-job-runs",
     title: "How a job runs",
     blurb: "Phone call to paid — lead, walk-through, estimate, job, money — and what Nort does at each step.",
+    plainBlurb: "Phone call to paid — lead, walk-through, estimate, job, money — and what the app does at each step.",
     steps: [
   // ── 4. THE RUN. One job, phone call to money, pointing at the tile each time. ───────────────
   //
@@ -397,6 +447,14 @@ export const LESSONS: Lesson[] = [
       "to save one. Turn that lead into a site visit and the address and what they told you ride " +
       "over with it. Offer them three times instead of playing phone tag — I write the text, you " +
       "send it, and whichever one they tap books itself onto your schedule.",
+    plain: {
+      say:
+        "Let's walk one job the whole way. Work runs one direction through here — Sales, then Jobs, " +
+        "then Money — and it starts under Sales, on Leads, where a phone number on its own is enough " +
+        "to save one. Turn that lead into a site visit and the address and what they told you ride " +
+        "over with it. Offer them three times instead of playing phone tag — the app writes the text, " +
+        "you send it, and whichever one they tap books itself onto your schedule.",
+    },
   },
   {
     key: "run-walk",
@@ -405,6 +463,12 @@ export const LESSONS: Lesson[] = [
       "Day of, you're on site with your phone. Open the walk-through, press Talk, and say the whole " +
       "job in one breath the way you'd say it to a person. I put what you said into the right boxes " +
       "and only ask about what's left over.",
+    plain: {
+      say:
+        "Day of, you're on site with your phone. Open the walk-through, press Just Say It, and say the " +
+        "whole job in one breath the way you'd say it to a person. What you said goes into the right " +
+        "boxes, and you're only asked about what's left over.",
+    },
   },
   // The honest half of that same moment, and it stays welded to it: it carries the only concrete
   // example in the whole tour ("two outlets on each of three walls").
@@ -416,17 +480,34 @@ export const LESSONS: Lesson[] = [
       "I won't work out a measurement you didn't give me — if you say two outlets on each of three " +
       "walls, I won't quietly write down six. I'll ask. " +
       "Anything I can't place goes in your notes word for word, so nothing you said gets lost.",
+    plain: {
+      title: "One thing to know",
+      say:
+        "And a promise, because it's your money. Only what you actually said gets filled in. " +
+        "A measurement you didn't give is never worked out — say two outlets on each of three " +
+        "walls and six is never quietly written down. It asks. " +
+        "Anything it can't place goes in your notes word for word, so nothing you said gets lost.",
+    },
   },
   {
     key: "run-estimate",
     title: "Writing it up",
     say:
-      "Back in the truck you press Start the estimate, and the answers from that walk-through are " +
+      "Back in the truck you press Start The Estimate, and the answers from that walk-through are " +
       "already in it, in your own words, taken as given rather than read back to you. Anything you " +
       "priced standing on site is already a line. Press Generate Line Items and I don't touch your " +
       "estimate — I hand you a list of PROPOSED lines. Tick the ones you want, fix any number I got " +
       "wrong, and press Add. Nothing of mine lands until you do. I work off your own price list and " +
       "I flag anything that isn't in it yet as my guess and not your price.",
+    plain: {
+      say:
+        "Back in the truck you press Start The Estimate, and the answers from that walk-through are " +
+        "already in it, in your own words, taken as given rather than read back to you. Anything you " +
+        "priced standing on site is already a line. Press Generate Line Items and your estimate isn't " +
+        "touched — you get a list of PROPOSED lines. Tick the ones you want, fix any number that's " +
+        "wrong, and press Add. Nothing lands until you do. The lines come off your own price list, and " +
+        "anything that isn't in it yet is flagged as a guess, not your price.",
+    },
   },
   {
     key: "run-job",
@@ -438,6 +519,14 @@ export const LESSONS: Lesson[] = [
       "starts collecting: clock in on that job and the hours land on it, photograph a supply house " +
       "receipt and I read it and file it on as a cost. The ones I'm not certain about I put in a " +
       "pile for you rather than guess.",
+    plain: {
+      say:
+        "You mark the estimate accepted and the job builds itself — same customer, same site address, " +
+        "the lead it came from, plus a work order and a material list off the estimate. Then it " +
+        "starts collecting: clock in on that job and the hours land on it, photograph a supply house " +
+        "receipt and it's read and filed on as a cost. The ones it isn't certain about go in a " +
+        "pile for you rather than a guess.",
+    },
   },
   {
     key: "run-money",
@@ -449,6 +538,14 @@ export const LESSONS: Lesson[] = [
       "already agreed to. If there isn't one, it's every person's hours at the right rate plus " +
       "every receipt with your markup on. It lands as a draft, and nothing reaches your customer " +
       "unless you tick the box that sends it.",
+    plain: {
+      say:
+        "Job's done. Press Finish Job and the invoice is already written — if there's an accepted " +
+        "estimate, that estimate IS the bill, and the hours are never stacked on top of a price they " +
+        "already agreed to. If there isn't one, it's every person's hours at the right rate plus " +
+        "every receipt with your markup on. It lands as a draft, and nothing reaches your customer " +
+        "unless you tick the box that sends it.",
+    },
   },
   // HIS "everybody wins", stated as something he can CHECK rather than handed back as a slogan.
   // After the run and not before: a promise made ahead of the demonstration is a brochure; the
@@ -464,6 +561,15 @@ export const LESSONS: Lesson[] = [
       "and your customer gets a price off your real numbers instead of a guess made in a truck. " +
       "Which lead, what date, what price, what goes out — that's all still yours. I do the typing " +
       "and the remembering, you do the trade.",
+    plain: {
+      say:
+        "You typed that address once, on the phone call, and it was still with you at the invoice — " +
+        "same with the numbers off the walk-through and the hours off the clock. So you're not typing " +
+        "it four times, you're not carrying the job round in your head between the yard and the desk, " +
+        "and your customer gets a price off your real numbers instead of a guess made in a truck. " +
+        "Which lead, what date, what price, what goes out — that's all still yours. The app does the " +
+        "typing and the remembering, you do the trade.",
+    },
   },
     ],
   },
