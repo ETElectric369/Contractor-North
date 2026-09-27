@@ -327,8 +327,8 @@ export async function createTriagedInquiry(
  * reads "New Request From …", so the bell, the push and the email call it a request and the
  * email's button names My Day instead of a lead list that isn't there.
  */
-export function requestAlertWords(url: "/leads" | "/planner", cameBack = false) {
-  const lead = url === "/leads";
+export function requestAlertWords(lands: "/leads" | "/planner", cameBack = false) {
+  const lead = lands === "/leads";
   const noun = lead ? "lead" : "request";
   const Noun = lead ? "Lead" : "Request";
   const headline = cameBack ? `${Noun} came back` : `New ${noun}`;

@@ -72,7 +72,7 @@ describe("doors outside the job page", () => {
     const src = read("recurring/page.tsx");
     expect(src).toContain("{recurringOn && dueCount > 0 && <GenerateDueButton count={dueCount} />}");
     expect(src).toContain("{recurringOn && <RecurringButton customers={custOpts} salesTax={salesTax} />}");
-    expect(src).toContain('<RecurringRowActions id={t.id} active={t.active} canGenerate={recurringOn || t.kind !== "invoice"} />');
+    expect(src).toContain('<RecurringRowActions id={t.id} active={t.active} kind={t.kind} canGenerate={recurringOn || t.kind !== "invoice"} />');
     expect(src).toContain("<RecurringButton customers={custOpts} template={value} salesTax={salesTax} />");
   });
 });
