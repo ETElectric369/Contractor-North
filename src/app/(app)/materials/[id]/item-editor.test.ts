@@ -160,4 +160,11 @@ describe("quick ticks at the counter", () => {
     const body = src.slice(src.indexOf("function toggleBought("), src.indexOf("function toggleTool("));
     expect(body).not.toContain("start(");
   });
+
+  it("a tick that folds a line away says so with an Undo (it un-ticks that line); a refusal is a toast too", () => {
+    const src = readFileSync(new URL("./item-editor.tsx", import.meta.url), "utf8");
+    const body = src.slice(src.indexOf("function saveTick("), src.indexOf("function toggleTool("));
+    expect(body).toMatch(/if \(next\) \{\s*toast\([^]*?"success",\s*\{\s*label: "Undo",\s*onClick: \(\) => saveTick\(lid, it, true, false\)/);
+    expect(body).toMatch(/toast\(why, "error"\)/);
+  });
 });

@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { formatCurrency } from "@/lib/utils";
+import { useToast } from "@/components/toast";
 import { checklistGroups, openToBuyCount, toBuyWords } from "@/lib/materials-checklist";
 import {
   addMaterialItem,
@@ -84,6 +85,7 @@ export function ItemEditor({
   viewerIsStaff?: boolean;
 }) {
   const router = useRouter();
+  const toast = useToast();
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
   // add
@@ -189,8 +191,12 @@ export function ItemEditor({
   function toggleBought(it: Item) {
     const lid = listId;
     if (!lid || saving.has(it.id)) return;
-    const next = !bought(it);
-    const from = !!it.purchased;
+    saveTick(lid, it, !!it.purchased, !bought(it));
+  }
+
+  // One tick's round trip. Only functional state updates and stable handles (router, toast), so the
+  // toast's Undo can run it seconds later from an older render and still be right.
+  function saveTick(lid: string, it: Item, from: boolean, next: boolean) {
     setFlips((m) => new Map(m).set(it.id, { from, to: next }));
     setSaving((s) => new Set(s).add(it.id));
     setError(null);
@@ -205,13 +211,26 @@ export function ItemEditor({
         return n;
       });
       if (!res.ok) {
-        // Refused: the line goes back where it was, and the sentence says why.
+        // Refused: the line goes back where it was, and the sentence says why: on the card, and as a
+        // toast, because the card's top can be a long scroll above the line on a phone.
         setFlips((m) => {
           const n = new Map(m);
           n.delete(it.id);
           return n;
         });
-        return setError(res.error ?? "Could not update.");
+        const why = res.error ?? "Could not update.";
+        setError(why);
+        toast(why, "error");
+        return;
+      }
+      // A ticked line folds away into the closed Bought fold, so the tick says where it went, with an
+      // Undo: a mis-tap at the counter is one tap to take back, never a fold to open and a line to
+      // find (the job's Tasks card does the same when a checked task leaves it).
+      if (next) {
+        toast(`Bought: ${it.description}`, "success", {
+          label: "Undo",
+          onClick: () => saveTick(lid, it, true, false),
+        });
       }
       router.refresh();
     })();
