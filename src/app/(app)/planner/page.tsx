@@ -237,7 +237,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
   // (Pins beyond six used to badge the door line; the doors are gone — overflow
   // pins still surface at /tasks like everything else past the six.)
 
-  // The current job's materials and its open tasks (need its id), the "Needs action" inbox (needs
+  // The current job's materials and its open tasks (need its id), the Needs You inbox (needs
   // the role), and the six's subtasks (need the chosen six) — one final round.
   const [mlRes, actionItems, kidsRes, nowTasksRes] = await Promise.all([
     // NEWEST by created_at — the same pick the job tab and ensureJobMaterialList make, so the
@@ -368,7 +368,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
   const niceDay = prettyDay(todayStr);
   const empty = (label: string) => <p className="px-5 py-6 text-center text-sm text-slate-400">{label}</p>;
 
-  // Needs-action shows the top 5 (the query already sorts urgent-first);
+  // Needs You shows the top 5 (the query already sorts urgent-first);
   // ?actions=all expands to the full list without a client component.
   const showAllActions = actionsRaw === "all";
   const visibleActions = showAllActions ? actionItems : actionItems.slice(0, 5);
@@ -992,10 +992,10 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
 
       {/* The office/else DOOR LINES that sat here were removed (Erik's declutter):
           office tasks live at /tasks, and flagged items already surface via
-          Needs-attention below. The backlog stays reachable through the Today's-6
+          Needs You below. The backlog stays reachable through the Today's-6
           Grab-One link + the dock. */}
 
-      {/* Needs action — the pure DECISION inbox (money, leads, waiting, leak
+      {/* NEEDS YOU — the pure DECISION inbox (money, leads, waiting, leak
           detectors), right under the day so pull-work follows the plan. Tasks
           live in Today's 6 + the doors above, never here. */}
       {/* A supplier paper filed from the LAST card leaves no "Supplier Bills" line to hold its
@@ -1004,7 +1004,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
       {actionItems.length > 0 && (
         <Card className="mb-4 overflow-hidden">
           <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3">
-            <h2 className="text-sm font-semibold text-slate-900">Needs action</h2>
+            <h2 className="text-sm font-semibold text-slate-900">Needs You</h2>
             <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-bold text-amber-700">
               {actionItems.length}
             </span>
@@ -1015,7 +1015,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
           {!showAllActions && actionItems.length > 5 && (
             <Link
               href={view === "week" ? `/planner?view=week${weekOffset ? `&week=${weekOffset}` : ""}&actions=all` : "/planner?actions=all"}
-              className="block border-t border-slate-100 px-5 py-2.5 text-center text-sm font-medium text-brand hover:bg-slate-50"
+              className="flex min-h-11 items-center justify-center border-t border-slate-100 px-5 text-center text-sm font-medium text-brand hover:bg-slate-50"
             >
               Show All {actionItems.length} →
             </Link>
@@ -1027,7 +1027,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
 
       {/* The MONEY LINE (getMoneyPipeline totals) left this page — the AR page owns
           that view now, and overdue/draft invoices already surface as actionable
-          rows in the Needs-action inbox above. My Day carries no money map. */}
+          rows in the Needs You inbox above. My Day carries no money map. */}
 
       {/* No leads snapshot anywhere on this page (the "Owner snapshot" tile, then the Open Leads
           card beside the clock, are both gone): leads live in Needs You's rows and on the Sales

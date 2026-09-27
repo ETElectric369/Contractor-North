@@ -164,6 +164,17 @@ describe("My Day's cards (structural: the page is a server component over the da
     expect(page).toContain("leadsOn={leadsOn}");
   });
 
+  it("the decision inbox is called Needs You (Nort's words and the morning push say it too, same release)", () => {
+    expect(pageCode).toContain('<h2 className="text-sm font-semibold text-slate-900">Needs You</h2>');
+    expect(pageCode).not.toMatch(/Needs action/i);
+    // Its list is untouched here: ActionList's props and the one getActionItems call stay as they are.
+    expect(pageCode).toContain("<ActionList items={visibleActions} people={people} todayStr={todayStr} tz={tz} leadsOn={leadsOn} />");
+    expect(pageCode).toContain('getActionItems({ todayStr, isStaff, userId: user?.id ?? "", tz, off: offFeatureKey(features) })');
+    expect(pageCode.match(/getActionItems\(/g)).toHaveLength(1);
+    // Show All is a 44px door too.
+    expect(pageCode).toMatch(/className="flex min-h-11 items-center justify-center border-t[^"]*"\s*>\s*Show All/);
+  });
+
   it("the Daily Reports card stays while a report waits for review, with the Off line on top", () => {
     expect(page).toContain("(reportsOn || reportsToReview > 0)");
     expect(page).toContain('<FeatureOffLine feature="daily_reports"');
