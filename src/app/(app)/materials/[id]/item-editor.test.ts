@@ -79,6 +79,14 @@ describe("the checklist", () => {
     expect(html).not.toContain("12-2 Romex");
   });
 
+  it("a tool's tick says Got, never Bought (a tool comes from the shop)", () => {
+    for (const html of [office(), tech()]) {
+      expect(html).toContain('aria-label="Got: Hole saw"');
+      expect(html).toContain('aria-label="Bought: 12-2 Romex"');
+      expect(html).not.toContain('aria-label="Bought: Hole saw"');
+    }
+  });
+
   it("nothing checked: no fold at all", () => {
     const html = office(ITEMS.map((i) => ({ ...i, purchased: false })));
     expect(html).not.toContain("Bought (");

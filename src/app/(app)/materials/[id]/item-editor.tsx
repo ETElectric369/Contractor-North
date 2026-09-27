@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { formatCurrency } from "@/lib/utils";
 import { useToast } from "@/components/toast";
-import { checklistGroups, openToBuyCount, toBuyWords } from "@/lib/materials-checklist";
+import { checklistGroups, openToBuyCount, tickWord, toBuyWords } from "@/lib/materials-checklist";
 import {
   addMaterialItem,
   deleteMaterialItem,
@@ -227,7 +227,7 @@ export function ItemEditor({
       // Undo: a mis-tap at the counter is one tap to take back, never a fold to open and a line to
       // find (the job's Tasks card does the same when a checked task leaves it).
       if (next) {
-        toast(`Bought: ${it.description}`, "success", {
+        toast(`${tickWord(it)}: ${it.description}`, "success", {
           label: "Undo",
           onClick: () => saveTick(lid, it, true, false),
         });
@@ -285,7 +285,7 @@ export function ItemEditor({
             checked={!!it.purchased}
             onChange={() => toggleBought(it)}
             disabled={saving.has(it.id)}
-            aria-label={it.purchased ? `Not Bought Yet: ${it.description}` : `Bought: ${it.description}`}
+            aria-label={it.purchased ? `Not ${tickWord(it)} Yet: ${it.description}` : `${tickWord(it)}: ${it.description}`}
             className="h-5 w-5 rounded border-slate-300 text-brand focus:ring-brand"
           />
         </label>

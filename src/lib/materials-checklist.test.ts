@@ -6,6 +6,7 @@ import {
   checklistGroups,
   isOpenToBuy,
   openToBuyCount,
+  tickWord,
   toBuyWords,
 } from "./materials-checklist";
 import { jobTaskTally } from "./job-tasks";
@@ -112,5 +113,13 @@ describe("the plain words under a list", () => {
   it("says what is left, or that nothing is", () => {
     expect(toBuyWords(3)).toBe("3 to buy");
     expect(toBuyWords(0)).toBe("Nothing left to buy");
+  });
+});
+
+describe("what a tick means, said", () => {
+  it("a tool is got from the shop, never bought; a material is bought", () => {
+    expect(tickWord({ is_tool: true })).toBe("Got");
+    expect(tickWord({ is_tool: false })).toBe("Bought");
+    expect(tickWord({})).toBe("Bought");
   });
 });

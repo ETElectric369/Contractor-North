@@ -74,6 +74,12 @@ export function buyMaterialsCounts(row: BuyMaterials): { total: number; done: nu
   return row.open > 0 ? { total: 1, done: 0, open: 1 } : { total: 1, done: 1, open: 0 };
 }
 
+/** What a tick on this line means, in words: a tool is GOT from the shop, never bought ("Got: Hammer
+ *  drill", "Not Got Yet: Hammer drill"); everything else is bought. The tick is the same column. */
+export function tickWord(line: ChecklistLine): "Got" | "Bought" {
+  return line.is_tool ? "Got" : "Bought";
+}
+
 /** "3 to buy" / "Nothing left to buy": the plain words under a list (the footer, the /materials card). */
 export function toBuyWords(open: number): string {
   return open > 0 ? `${open} to buy` : "Nothing left to buy";
