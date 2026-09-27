@@ -21,7 +21,7 @@ vi.mock("./which-job-actions", () => ({
 
 import { WhichJobSheetView, type SheetPhase } from "../planner/which-job";
 import { Modal } from "@/components/ui/modal";
-import { askAfterPunch, orderWhichJobChoices, pickOutcome, routePick, whichJobLabel, type WhichJobOption } from "./which-job-choices";
+import { askAfterPunch, orderWhichJobChoices, pickOutcome, routePick, sheetAfterLoad, whichJobLabel, type WhichJobOption } from "./which-job-choices";
 
 const jobs: WhichJobOption[] = [
   { id: "j28", label: "85 Whitney", why: "Where you worked last" },
@@ -114,9 +114,33 @@ describe("the sheet", () => {
   });
 
   it("an empty list says who picks instead (the office for a tech), and a failed load says so", () => {
-    expect(render(view({ phase: "ready", jobs: [], isStaff: false }))).toContain("The office puts this punch on the right job.");
+    expect(render(view({ phase: "ready", jobs: [], isStaff: false }))).toContain("The office puts it on the right job.");
     expect(render(view({ phase: "ready", jobs: [], isStaff: true }))).toContain("from Timecards");
     expect(render(view({ phase: "failed", error: "Couldn't load the jobs just now." }))).toContain("Couldn&#x27;t load the jobs just now.");
+  });
+
+  it("nothing to offer, nothing to ask: an empty list closes the sheet with a toast saying where the punch went", () => {
+    // A new or idle company (nothing in progress, nothing on today's schedule, nothing punched
+    // lately) got a Skip-only modal at clock-in and again at clock-out.
+    expect(sheetAfterLoad({ ok: true, jobs: [], isStaff: false }, { confirmInline: false })).toEqual({
+      close: true,
+      sentence: "No job is going right now, so your punch is saved on no job. The office puts it on the right job.",
+    });
+    expect(sheetAfterLoad({ ok: true, jobs: [], isStaff: true }, { confirmInline: false })).toEqual({
+      close: true,
+      sentence: "No job is going right now, so your punch is saved on no job. Put it on its job from Timecards when you know it.",
+    });
+    // The offline queue's door has no toast: its sheet keeps the sentence, with Skip.
+    expect(sheetAfterLoad({ ok: true, jobs: [], isStaff: false }, { confirmInline: true })).toEqual({
+      close: false,
+      state: { phase: "ready", jobs: [], isStaff: false },
+    });
+    // A list, or a failed load, is shown as ever.
+    expect(sheetAfterLoad({ ok: true, jobs, isStaff: false }, { confirmInline: false })).toEqual({ close: false, state: { phase: "ready", jobs, isStaff: false } });
+    expect(sheetAfterLoad({ ok: false, error: "Couldn't load the jobs just now.", isStaff: false }, { confirmInline: false })).toEqual({
+      close: false,
+      state: { phase: "failed", error: "Couldn't load the jobs just now." },
+    });
   });
 
   it("a refused pick is a plain line; a landed one with no toast to say it is said in the sheet, with Done", () => {

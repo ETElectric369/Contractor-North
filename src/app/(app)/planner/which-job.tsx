@@ -9,14 +9,17 @@ import { Modal } from "@/components/ui/modal";
 import { useToast } from "@/components/toast";
 import { putPunchOnJob, whichJobChoices } from "../timeclock/which-job-actions";
 import {
+  noJobsToOffer,
   pickOutcome,
   routePick,
+  sheetAfterLoad,
+  type SheetPhase,
   type WhichJobMoment,
   type WhichJobOption,
   type WhichJobResult,
 } from "../timeclock/which-job-choices";
 
-export type { WhichJobOption, WhichJobResult } from "../timeclock/which-job-choices";
+export type { SheetPhase, WhichJobOption, WhichJobResult } from "../timeclock/which-job-choices";
 
 /**
  * "WHICH JOB ARE YOU ON?" — the Now block for a punch that carries no job.
@@ -153,12 +156,9 @@ export function WhichJob({
 //   · "Skip, The Office Will Pick" always there: skipping writes nothing and the office picks, as
 //     before (Hours On No Job, the job's Time tab);
 //   · picking is a checked write, and anything but a landed write comes back as a plain line;
-//   · a job the clock knew never gets here: the clock stays two buttons.
-
-export type SheetPhase =
-  | { phase: "loading" }
-  | { phase: "ready"; jobs: WhichJobOption[]; isStaff: boolean }
-  | { phase: "failed"; error: string };
+//   · a job the clock knew never gets here: the clock stays two buttons;
+//   · nothing to offer, nothing to ask: an empty list closes the sheet and a toast says where the
+//     punch went (sheetAfterLoad), so an idle company isn't handed a Skip-only modal twice a day.
 
 /**
  * The sheet as it looks, given its state. No hooks: the doors' wiring is in WhichJobSheet, and the
@@ -215,11 +215,7 @@ export function WhichJobSheetView({
           ) : state.phase === "failed" ? (
             <p className="mt-3 text-sm text-slate-600">{state.error}</p>
           ) : state.jobs.length === 0 ? (
-            <p className="mt-3 text-sm text-slate-600">
-              {state.isStaff
-                ? "No job is going right now. Put this punch on its job from Timecards when you know it."
-                : "No job is going right now. The office puts this punch on the right job."}
-            </p>
+            <p className="mt-3 text-sm text-slate-600">{noJobsToOffer(state.isStaff)}</p>
           ) : (
             <ul className="mt-3 divide-y divide-slate-100 overflow-hidden rounded-lg border border-slate-200">
               {state.jobs.map((j) => (
@@ -285,13 +281,26 @@ export function WhichJobSheet({
     };
   }, []);
 
+  // The door's close and the toast, read when the list lands (the load runs once per punch).
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+  const toastRef = useRef(toast);
+  toastRef.current = toast;
+
   useEffect(() => {
     let alive = true;
     setState({ phase: "loading" });
     whichJobChoices(entryId).then(
       (r) => {
         if (!alive) return;
-        setState(r.ok ? { phase: "ready", jobs: r.jobs, isStaff: r.isStaff } : { phase: "failed", error: r.error });
+        const next = sheetAfterLoad(r, { confirmInline });
+        if (next.close) {
+          // No job to offer: close, and say where the punch went instead of a Skip-only sheet.
+          toastRef.current(next.sentence, "info");
+          closeRef.current();
+          return;
+        }
+        setState(next.state);
       },
       () => {
         if (alive) setState({ phase: "failed", error: "No connection, so the jobs didn't load. Your punch is saved; skip, and the office will put it on its job." });
@@ -300,7 +309,7 @@ export function WhichJobSheet({
     return () => {
       alive = false;
     };
-  }, [entryId]);
+  }, [entryId, confirmInline]);
 
   async function pick(job: WhichJobOption) {
     if (busyId) return;

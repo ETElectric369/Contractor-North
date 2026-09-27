@@ -146,6 +146,36 @@ export function askAfterPunch(
   return res?.ok && res.noJob && res.id ? { entryId: res.id, moment } : null;
 }
 
+/** The sheet's state: its list loading, loaded, or failed to load. */
+export type SheetPhase =
+  | { phase: "loading" }
+  | { phase: "ready"; jobs: WhichJobOption[]; isStaff: boolean }
+  | { phase: "failed"; error: string };
+
+/** What the sheet says when it has no job to offer: where the punch is, and who puts it on its job. */
+export function noJobsToOffer(isStaff: boolean): string {
+  return isStaff
+    ? "No job is going right now, so your punch is saved on no job. Put it on its job from Timecards when you know it."
+    : "No job is going right now, so your punch is saved on no job. The office puts it on the right job.";
+}
+
+/**
+ * WHAT THE SHEET DOES WITH ITS LIST ONCE IT LOADS (pure, so it is pinned).
+ *
+ * An empty list (no job in progress, none on today's schedule, none punched lately: a new or idle
+ * company) has no decision in it, and at clock-in and clock-out both it was a modal whose only
+ * control was Skip, twice a day. So at a door with a toast the sheet closes and the toast says where
+ * the punch went. The offline queue's door has no toast: its sheet keeps the sentence, with Skip.
+ */
+export function sheetAfterLoad(
+  r: WhichJobChoices,
+  door: { confirmInline: boolean },
+): { close: true; sentence: string } | { close: false; state: SheetPhase } {
+  if (!r.ok) return { close: false, state: { phase: "failed", error: r.error } };
+  if (!r.jobs.length && !door.confirmInline) return { close: true, sentence: noJobsToOffer(r.isStaff) };
+  return { close: false, state: { phase: "ready", jobs: r.jobs, isStaff: r.isStaff } };
+}
+
 /** What a tap on a job row came to, in words (the sheet shows it; pure so it is pinned). */
 export type PickOutcome =
   | { kind: "placed"; sentence: string }
