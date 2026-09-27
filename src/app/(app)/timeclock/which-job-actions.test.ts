@@ -198,7 +198,7 @@ describe("the jobs the sheet offers", () => {
           job("window", { scheduled_start: "2026-09-25T15:00:00Z", scheduled_end: "2026-09-27T01:00:00Z" }),
         ],
       };
-    if (q.table === "jobs" && q.filters.some((f) => f[0] === "gte" && f[1] === "scheduled_start"))
+    if (q.table === "jobs" && q.filters.some((f) => f[0] === "lt" && f[1] === "scheduled_start"))
       return {
         data: [
           job("window", { scheduled_start: "2026-09-25T15:00:00Z", scheduled_end: "2026-09-27T01:00:00Z" }),
@@ -227,6 +227,21 @@ describe("the jobs the sheet offers", () => {
     const last = calls.find((c) => c.cols === "job_id, clock_in")!;
     expect(has(last, "neq", "id", PUNCH)).toBe(true);
     expect(has(last, "gte", "clock_in", new Date(NOW - 3 * 86_400_000).toISOString())).toBe(true);
+  });
+
+  it("reads every job in progress and every job whose own window covers today, with no cap to drop today's job", async () => {
+    vi.useFakeTimers({ now: NOW, toFake: ["Date"] });
+    state.client = fakeSupabase(route, calls);
+    await whichJobChoices(PUNCH);
+    const going = calls.find((c) => c.table === "jobs" && has(c, "eq", "status", "in_progress"))!;
+    const window = calls.find((c) => c.table === "jobs" && c.filters.some((f) => f[0] === "lt" && f[1] === "scheduled_start"))!;
+    // A cap on either one once let an org with many jobs lose the oldest long-running job, or
+    // today's own job, from the list (My Day's in-progress read carries no cap for the same reason).
+    for (const q of [going, window]) expect(q.filters.some((f) => f[0] === "limit")).toBe(false);
+    // Saturday Sep 26 in Pacific runs 07:00Z to 07:00Z: a job starting before it ends, and
+    // starting that day or ending that day or later (onToday's own rule, so nothing older rides in).
+    expect(has(window, "lt", "scheduled_start", "2026-09-27T07:00:00.000Z")).toBe(true);
+    expect(has(window, "or", "scheduled_start.gte.2026-09-26T07:00:00.000Z,scheduled_end.gte.2026-09-26T07:00:00.000Z")).toBe(true);
   });
 
   it("techs see job names only: every job read selects label and schedule columns, never a price", async () => {

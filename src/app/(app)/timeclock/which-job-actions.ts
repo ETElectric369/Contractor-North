@@ -50,6 +50,14 @@ export async function whichJobChoices(entryId: string): Promise<WhichJobChoices>
 
   // Four reads at once: the job he punched on last (three days back), today's schedule segments,
   // the jobs in progress, and the jobs whose own window reaches today.
+  //
+  // NO CAP ON EITHER JOB LIST (build for millions). My Day learned it first: a .limit on the
+  // in-progress read hid the oldest long-running jobs, the very ones a crew is on. The window read
+  // is the only one that finds a job on today's schedule with no segment rows and not started yet,
+  // so a cap there dropped today's job itself in a company with many recent jobs. It is bounded by
+  // its filter instead: exactly the jobs whose own window covers today (onToday's rule: it starts
+  // before today ends, and it starts today or ends today or later).
+  const dayStartIso = dayStart.toISOString();
   const [lastR, segR, goingR, windowR] = await Promise.all([
     supabase
       .from("time_entries")
@@ -62,16 +70,14 @@ export async function whichJobChoices(entryId: string): Promise<WhichJobChoices>
       .limit(1)
       .maybeSingle(),
     supabase.from("job_schedule_segments").select("job_id").lte("start_date", todayStr).gte("end_date", todayStr),
-    supabase.from("jobs").select(WHICH_JOB_COLUMNS).eq("status", "in_progress").order("created_at", { ascending: false }).limit(100),
-    // A job with no segment rows is on today when its own window covers it. Started within the
-    // last month (a longer-running one is in progress already, and listed above).
+    supabase.from("jobs").select(WHICH_JOB_COLUMNS).eq("status", "in_progress").order("created_at", { ascending: false }),
+    // A job with no segment rows is on today when its own window covers it.
     supabase
       .from("jobs")
       .select(WHICH_JOB_COLUMNS)
       .in("status", ACTIVE_JOB_STATUSES)
-      .gte("scheduled_start", new Date(dayStart.getTime() - 31 * 86_400_000).toISOString())
       .lt("scheduled_start", dayEnd.toISOString())
-      .limit(100),
+      .or(`scheduled_start.gte.${dayStartIso},scheduled_end.gte.${dayStartIso}`),
   ]);
   if (goingR.error) return { ok: false, isStaff, error: "Couldn't load the jobs just now. Skip, and the office will put this punch on its job." };
 
