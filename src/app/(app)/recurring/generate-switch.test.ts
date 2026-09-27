@@ -3,11 +3,13 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 /**
- * RECURRING BILLING OFF (0352, rule h) at the office's own Generate doors: not drawn while off, and
- * refused in plain words if reached anyway, with the engine never asked. On, or no switches stored,
- * they run and render as today. (The engine's own skip is pinned in lib/recurring-switch.test.)
+ * RECURRING BILLING OFF (0352, rule h) at the office's own Generate doors: an invoice's Generate is
+ * not drawn while off, and refused in plain words if reached anyway, with the engine never asked. A
+ * repeat job or expense is not the switch's: it generates as before. On, or no switches stored, they
+ * run and render as today. (The engine's own skip is pinned in lib/recurring-switch.test.)
  */
 let settings: unknown = {};
+let kind = "invoice";
 const client = {
   from: (table: string) => {
     const b: any = {
@@ -15,7 +17,7 @@ const client = {
       eq: () => b,
       maybeSingle: async () =>
         table === "recurring_templates"
-          ? { data: { id: "t1", kind: "invoice", next_date: "2026-09-01", frequency: "monthly" }, error: null }
+          ? { data: { id: "t1", kind, next_date: "2026-09-01", frequency: "monthly" }, error: null }
           : { data: { settings }, error: null },
     };
     return b;
@@ -39,7 +41,9 @@ const { RecurringRowActions } = await import("./recurring-actions-ui");
 
 beforeEach(() => {
   settings = {};
+  kind = "invoice";
   runInvoiceTemplate.mockClear();
+  runTemplate.mockClear();
   generateDueTemplates.mockClear();
 });
 
@@ -62,16 +66,23 @@ describe("Generate while Recurring Billing is off", () => {
     expect(generateDueTemplates).toHaveBeenCalledTimes(1);
   });
 
-  it("off: both refuse in words, and the engine is never asked", async () => {
+  it("off: an invoice's Generate One Now refuses in words, and the engine is never asked for it", async () => {
     settings = { features: { recurring_billing: false } };
     const one = await generateOne("t1");
-    const due = await generateDue();
-    for (const r of [one, due]) {
-      expect(r.ok).toBe(false);
-      expect(r.error).toBe("Recurring Billing is off. The owner can turn it on in Settings, Features.");
-    }
+    expect(one.ok).toBe(false);
+    expect(one.error).toBe("Recurring Billing is off. The owner can turn it on in Settings, Features.");
     expect(runInvoiceTemplate).not.toHaveBeenCalled();
-    expect(generateDueTemplates).not.toHaveBeenCalled();
+  });
+
+  it("off: a repeat job or expense still generates, and Generate Due runs the engine (which skips only invoices)", async () => {
+    settings = { features: { recurring_billing: false } };
+    for (const k of ["job", "expense"]) {
+      kind = k;
+      expect(await generateOne("t1")).toEqual({ ok: true });
+    }
+    expect(runTemplate).toHaveBeenCalledTimes(2);
+    expect(await generateDue()).toEqual({ ok: true, count: 2 });
+    expect(generateDueTemplates).toHaveBeenCalledTimes(1);
   });
 
   it("another switch off changes nothing", async () => {

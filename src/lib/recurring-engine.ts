@@ -213,12 +213,15 @@ export async function runInvoiceTemplate(
 }
 
 /**
- * RECURRING BILLING OFF (the switch board, 0352, rule h): a switched-off company's due template makes
- * nothing, and its run is SKIPPED, not saved up. next_date steps past today under the same lock a
- * claim uses (only while it still holds the value read), and last_generated_at is left alone because
+ * RECURRING BILLING OFF (the switch board, 0352, rule h): a switched-off company's due repeat INVOICE
+ * makes nothing, and its run is SKIPPED, not saved up. next_date steps past today under the same lock
+ * a claim uses (only while it still holds the value read), and last_generated_at is left alone because
  * nothing was generated. So turning the switch back on never back-fills the runs missed while it was
  * off: the next run is the next one due after that day. A failed step is reported and tried again on
  * the next run, still making nothing.
+ *
+ * Only invoices: the switch is "Invoices that repeat on a schedule", and its confirm counts repeat
+ * invoices. A repeat job or expense (rent, a truck payment) keeps running, so no cost goes missing.
  */
 async function skipDueRun(supabase: any, t: any, today: string): Promise<void> {
   let nd = advance(t.next_date, t.frequency);
@@ -246,8 +249,8 @@ export async function generateDueTemplates(supabase: any, userId: string | null)
   const { data: orgs } = await supabase.from("organizations").select("id, settings");
   const todayByOrg: Record<string, string> = {};
   const settingsByOrg: Record<string, unknown> = {};
-  // Companies with Recurring Billing switched off (0352). A company whose row can't be read is not
-  // in here: missing = ON, today's engine.
+  // Companies with Recurring Billing switched off (0352): their repeat invoices are skipped. A company
+  // whose row can't be read is not in here: missing = ON, today's engine.
   const switchedOff = new Set<string>();
   for (const o of orgs ?? []) {
     settingsByOrg[o.id] = o.settings;
@@ -269,7 +272,7 @@ export async function generateDueTemplates(supabase: any, userId: string | null)
     try {
       const today = todayByOrg[t.org_id] ?? fallbackToday;
       if (t.next_date > today) continue; // due in another org's tz, not this org's yet
-      if (switchedOff.has(t.org_id)) {
+      if (switchedOff.has(t.org_id) && t.kind === "invoice") {
         await skipDueRun(supabase, t, today);
         continue;
       }

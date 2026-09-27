@@ -26,10 +26,11 @@ export default async function RecurringPage() {
     supabase.from("organizations").select("settings").maybeSingle(),
   ]);
   const orgS = getOrgSettings((orgRow as { settings?: unknown } | null)?.settings);
-  // RECURRING BILLING OFF (the switch board, 0352): nothing is made, so the doors that make one
-  // (Generate, the per-row Generate One Now, New) go, and generateOne / generateDue refuse as well.
-  // The list stays readable, and Pause/Resume and edit stay: they change what the engine would do
-  // when the switch comes back on. Opened from a link, the page carries the shell's Off line.
+  // RECURRING BILLING OFF (the switch board, 0352): no repeat invoice is made, so the doors that make
+  // one (Generate, an invoice row's Generate One Now, New) go, and generateOne refuses an invoice as
+  // well. Repeat jobs and expenses aren't the switch's: they keep generating, and their rows keep
+  // Generate One Now. The list stays readable, and Pause/Resume and edit stay. Opened from a link,
+  // the page carries the shell's Off line.
   const recurringOn = featureOn(orgS.features, "recurring_billing");
   const salesTax = featureOn(orgS.features, "sales_tax");
   // "Due" is an ORG-LOCAL calendar decision (audit v921). A UTC today rolls over at ~5 PM Pacific,
@@ -84,7 +85,7 @@ export default async function RecurringPage() {
                       {t.kind === "invoice" ? ` · ${t.amount != null ? formatCurrency(t.amount) : "—"}${t.customers?.name ? ` · ${t.customers.name}` : ""}${t.auto_send ? " · auto-sends" : ""}` : ""}
                     </div>
                   </div>
-                  <RecurringRowActions id={t.id} active={t.active} canGenerate={recurringOn} />
+                  <RecurringRowActions id={t.id} active={t.active} canGenerate={recurringOn || t.kind !== "invoice"} />
                   <RecurringButton customers={custOpts} template={value} salesTax={salesTax} />
                 </li>
               );

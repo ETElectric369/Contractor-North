@@ -145,9 +145,11 @@ export async function generateOne(id: string): Promise<Result> {
   // Org-local today + settings (tz / work-day window) for the generated occurrence.
   const { data: orgRow } = await supabase.from("organizations").select("settings").maybeSingle();
   const raw = (orgRow as { settings?: unknown } | null)?.settings;
-  // RECURRING BILLING OFF (0352, rule h): nothing is generated for this company, by hand or by the
-  // engine. Said plainly, never a quiet "Already generated".
-  if (!featureOn(getOrgSettings(raw).features, "recurring_billing")) return { ok: false, error: featureOffSentence("recurring_billing") };
+  // RECURRING BILLING OFF (0352, rule h): no repeat invoice is generated for this company, by hand or
+  // by the engine. Said plainly, never a quiet "Already generated". Jobs and expenses aren't the
+  // switch's: they generate as before.
+  if (t.kind === "invoice" && !featureOn(getOrgSettings(raw).features, "recurring_billing"))
+    return { ok: false, error: featureOffSentence("recurring_billing") };
   const today = todayStrInTz(getOrgSettings(raw).timezone);
   const ok =
     t.kind === "invoice"
@@ -164,11 +166,8 @@ export async function generateDue(): Promise<Result> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
-  // Refused in words while Recurring Billing is off (the engine would skip this company anyway, and
-  // "Generated 0 invoices" would read as nothing being due).
-  const { data: orgRow } = await supabase.from("organizations").select("settings").eq("id", ctx.orgId ?? "").maybeSingle();
-  if (!featureOn(getOrgSettings((orgRow as { settings?: unknown } | null)?.settings).features, "recurring_billing"))
-    return { ok: false, error: featureOffSentence("recurring_billing") };
+  // Recurring Billing off: the engine skips this company's repeat invoices itself and makes its jobs
+  // and expenses as before (0352, rule h).
   const count = await generateDueTemplates(supabase, ctx.userId);
   revalidatePath("/recurring");
   revalidatePath("/jobs");

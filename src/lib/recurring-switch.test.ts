@@ -4,10 +4,12 @@ import { generateDueTemplates } from "@/lib/recurring-engine";
 /**
  * RECURRING BILLING OFF (the switch board, 0352, rule h), on the engine the daily cron runs.
  *
- *  - A switched-off company's due template makes NOTHING (no invoice, no job, no bill), and its run
- *    is skipped, not saved up: next_date steps past today under the claim lock, with no
- *    last_generated_at, because nothing was generated.
+ *  - A switched-off company's due repeat INVOICE makes nothing, and its run is skipped, not saved up:
+ *    next_date steps past today under the claim lock, with no last_generated_at, because nothing
+ *    was generated.
  *  - So turning the switch back on never back-fills: the next run is the next one due.
+ *  - A repeat job or expense is not the switch's ("Invoices that repeat on a schedule"): it runs
+ *    exactly as before, so no rent or truck payment goes missing from the books.
  *  - Every other company, and a company with no switches stored, runs exactly as before.
  */
 type Call = { table: string; op: "select" | "update" | "insert"; payload?: any; filters: [string, unknown][] };
@@ -81,22 +83,38 @@ describe("the recurring engine and the Recurring Billing switch", () => {
     expect(claim.payload.next_date).toBe("2026-10-01");
   });
 
-  it("switched off: nothing is made, and the missed run is skipped (next_date past today, no last_generated_at)", async () => {
+  it("switched off: no invoice is made, and the missed run is skipped (next_date past today, no last_generated_at)", async () => {
     const { client, writes } = fakeDb(
       [{ id: "org-a", settings: { ...LA, features: { recurring_billing: false } } }],
-      // Three months behind: jobs and expenses would catch up 3 periods, an invoice would make one.
-      [invoiceTpl("org-a", "2026-07-01"), { ...invoiceTpl("org-a", "2026-07-01"), id: "tpl-job", kind: "job" }],
+      // Three months behind: an invoice would make one.
+      [invoiceTpl("org-a", "2026-07-01")],
     );
     expect(await generateDueTemplates(client, null)).toBe(0);
     const w = writes();
     expect(w.filter((c) => c.op === "insert")).toEqual([]);
     const skips = w.filter((c) => c.table === "recurring_templates" && c.op === "update");
-    expect(skips).toHaveLength(2);
-    for (const s of skips) {
-      expect(s.payload).toEqual({ next_date: "2026-10-01" });
-      // The same lock a claim uses: only while next_date still holds the value read.
-      expect(s.filters).toContainEqual(["next_date", "2026-07-01"]);
-    }
+    expect(skips).toHaveLength(1);
+    expect(skips[0].payload).toEqual({ next_date: "2026-10-01" });
+    // The same lock a claim uses: only while next_date still holds the value read.
+    expect(skips[0].filters).toContainEqual(["next_date", "2026-07-01"]);
+  });
+
+  it("switched off: a repeat job and a repeat expense still run, catching up as before", async () => {
+    const { client, writes } = fakeDb(
+      [{ id: "org-a", settings: { ...LA, features: { recurring_billing: false } } }],
+      // Three months behind: jobs and expenses catch up 3 periods each.
+      [
+        { ...invoiceTpl("org-a", "2026-07-01"), id: "tpl-job", kind: "job" },
+        { ...invoiceTpl("org-a", "2026-07-01"), id: "tpl-rent", kind: "expense", vendor: "Landlord", category: "rent" },
+      ],
+    );
+    expect(await generateDueTemplates(client, null)).toBe(6);
+    const w = writes();
+    expect(w.filter((c) => c.table === "jobs" && c.op === "insert")).toHaveLength(3);
+    expect(w.filter((c) => c.table === "bills" && c.op === "insert")).toHaveLength(3);
+    // No skip: every step is a claim that generated something.
+    const updates = w.filter((c) => c.table === "recurring_templates" && c.op === "update");
+    for (const u of updates) expect(u.payload).toHaveProperty("last_generated_at");
   });
 
   it("turning it back on never back-fills: the skipped template's next run is simply the next one due", async () => {
