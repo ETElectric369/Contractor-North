@@ -561,6 +561,17 @@ describe("matching what is already on the books (exact cents, each row once)", (
     expect(by("CHECK 1050")).toMatchObject({ how: "match", ids: ["b-check"] });
   });
 
+  it("a refund coming in matches the return already on the books, and may be put back on its bucket", () => {
+    const dl = readBankTable(parseCSV(`Date,Description,Amount\n09/12/2026,HOME HARDWARE REFUND,45.10\n09/13/2026,ACME TOOLS RETURN,30.00\n`), "x.csv", hash)!;
+    const books = ORG_BOOKS({ bills: [{ id: "b-ret", cents: -4510, day: "2026-09-11", supplier: "Home Hardware", jobId: "job-1", category: "Receipt", onAccount: false }] });
+    const plan = planBankDownload(dl, books);
+    expect(plan.dispositions.get(dl.lines[0].key)).toMatchObject({ how: "match", table: "bills", ids: ["b-ret"], said: "Return from Home Hardware already on the books" });
+    const acme = plan.groups.find((g) => g.label.includes("ACME TOOLS"))!;
+    expect(validPicks({ [acme.id]: "cost:Tools & Supplies" }, plan, books).ok.size).toBe(1);
+    const view = bankViewOf(dl, plan, books);
+    expect(view.otherIn.map((b) => b.label)).toContain("Refund: Tools & Supplies");
+  });
+
   it("one bill is matched once, even when two lines could take it", () => {
     const dl = download();
     const books = ORG_BOOKS({ bills: [{ id: "b-shell", cents: 10000, day: "2026-09-12", supplier: "Shell", jobId: null, category: "Gas & Truck", onAccount: false }] });
@@ -744,7 +755,7 @@ describe("the card and the person's answers", () => {
     expect(out.refused).toEqual(["an answer for a row that is no longer on the card"]);
     expect(out.ok.size).toBe(2);
     expect(out.refused).toHaveLength(1);
-    const wrong = validPicks({ [shell.id]: "other_income", [dep.id]: "cost:Fees" }, plan, books);
+    const wrong = validPicks({ [shell.id]: "other_income", [dep.id]: "personal" }, plan, books);
     expect(wrong.ok.size).toBe(0);
     expect(wrong.refused).toHaveLength(2);
     const stranger = validPicks({ [shell.id]: "crew:not-our-person" }, plan, books);

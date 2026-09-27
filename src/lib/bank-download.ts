@@ -653,9 +653,10 @@ export function parseChoiceId(id: unknown): BankChoice | null {
 
 const IN_CHOICES = new Set<ChoiceName>(["invoice", "other_income", "not_income"]);
 
-/** Money in takes the income choices; money out takes the rest. */
+/** Money in takes the income choices, or a business cost's bucket (a refund of that cost: a
+ *  negative bill in the bucket); money out takes the rest. */
 export function choiceFits(c: BankChoice, direction: "in" | "out"): boolean {
-  return direction === "in" ? IN_CHOICES.has(c.choice) : !IN_CHOICES.has(c.choice);
+  return direction === "in" ? IN_CHOICES.has(c.choice) || c.choice === "cost" : !IN_CHOICES.has(c.choice);
 }
 
 export type BankNames = {
@@ -986,6 +987,22 @@ export function planBankDownload(dl: BankDownload, books: BankBooks): BankPlan {
    *  them says nothing (up to 7 days back), only after every line had its sure pass. */
   type Pass = "sure" | "loose";
   const match = (line: BankLine, pass: Pass): Disposition | null => {
+    const amount = -line.cents;
+    // A BILL FOR THE SAME MONEY within 3 days, not one a supplier account pays. Sure: the line names
+    // the bill's supplier. Loose: the line names nobody, so the amount is all there is to go on. A
+    // transfer between the company's own accounts is never a bill. Money IN is a return or a
+    // supplier's credit already on the books as a negative bill of the same money.
+    const billMatch = (): Disposition | null => {
+      if (TRANSFER_RE.test(line.description) && !PROCESSOR_RE.test(line.description)) return null;
+      const namesNobody = isBareCheck(line) || !merchantWords(line.description).some((w) => w.length >= 3);
+      if (pass === "loose" && !namesNobody) return null;
+      const near = books.bills.filter((b) => !used.has(b.id) && !b.onAccount && b.cents === amount && b.day && Math.abs(dayDiff(line.postedOn, b.day)) <= 3);
+      const hits = pass === "sure" ? near.filter((b) => lineNamesSupplier(line.description, b.supplier)) : near;
+      if (!hits.length) return null;
+      hits.sort(byDistance(line.postedOn));
+      const b = hits[0];
+      return { how: "match", table: "bills", ids: [b.id], said: `${line.cents > 0 ? "Return from " : ""}${b.supplier} already on the books` };
+    };
     if (line.cents > 0) {
       const kind = depositKindOf(line.description);
       const fits = (p: BooksPayment) => {
@@ -1018,23 +1035,8 @@ export function planBankDownload(dl: BankDownload, books: BankBooks): BankPlan {
           return { how: "match", table: "payments", ids: sums[0], said: `${picked.length} ${card ? "card" : "Venmo"} payments (${numbers})${card ? ", less the card fees" : ""}` };
         }
       }
-      return null;
+      return billMatch();
     }
-    const amount = -line.cents;
-    // A BILL FOR THE SAME MONEY within 3 days, not one a supplier account pays. Sure: the line names
-    // the bill's supplier. Loose: the line names nobody, so the amount is all there is to go on. A
-    // transfer between the company's own accounts is never a bill.
-    const billMatch = (): Disposition | null => {
-      if (TRANSFER_RE.test(line.description) && !PROCESSOR_RE.test(line.description)) return null;
-      const namesNobody = isBareCheck(line) || !merchantWords(line.description).some((w) => w.length >= 3);
-      if (pass === "loose" && !namesNobody) return null;
-      const near = books.bills.filter((b) => !used.has(b.id) && !b.onAccount && b.cents === amount && b.day && Math.abs(dayDiff(line.postedOn, b.day)) <= 3);
-      const hits = pass === "sure" ? near.filter((b) => lineNamesSupplier(line.description, b.supplier)) : near;
-      if (!hits.length) return null;
-      hits.sort(byDistance(line.postedOn));
-      const b = hits[0];
-      return { how: "match", table: "bills", ids: [b.id], said: `${b.supplier} already on the books` };
-    };
     if (pass === "loose") return billMatch();
     // A CHECK BY ITS NUMBER: a crew payment or a supplier payment that wrote it down.
     if (line.check) {
@@ -1187,6 +1189,9 @@ export function everyChoice(direction: "in" | "out", books: Pick<BankBooks, "acc
     const out: BankChoice[] = [];
     if (single) for (const i of books.invoices) out.push({ choice: "invoice", invoiceId: i.id });
     out.push({ choice: "other_income" }, { choice: "not_income" });
+    // A REFUND OF A COST: money back from a store or a supplier comes off that bucket.
+    out.push(FUEL, TRUCK);
+    for (const b of BUSINESS_COST_BUCKETS) out.push({ choice: "cost", bucket: b, costKind: null });
     return out;
   }
   const out: BankChoice[] = [FUEL, TRUCK];
@@ -1443,6 +1448,8 @@ export function bankViewOf(dl: BankDownload, plan: BankPlan, books: BankBooks, o
     return c ? choiceLabel(c, names) : id;
   };
   const button = (c: BankChoice): BankButton => ({ id: choiceId(c), label: choiceLabel(c, names) });
+  /** On money in, a bucket is a refund of that cost. */
+  const inButton = (c: BankChoice): BankButton => ({ id: choiceId(c), label: c.choice === "cost" ? `Refund: ${choiceLabel(c, names)}` : choiceLabel(c, names) });
   const byKey = new Map(dl.lines.map((l) => [l.key, l]));
   const sorted = new Map<string, { label: string; n: number; cents: number }>();
   for (const [key, d] of plan.dispositions) {
@@ -1480,8 +1487,8 @@ export function bankViewOf(dl: BankDownload, plan: BankPlan, books: BankBooks, o
       };
     }),
     otherOut: everyChoice("out", books, false).map(button),
-    otherIn: everyChoice("in", books, false).map(button),
-    otherInSingle: everyChoice("in", books, true).map(button),
+    otherIn: everyChoice("in", books, false).map(inButton),
+    otherInSingle: everyChoice("in", books, true).map(inButton),
     flow: flow.out,
     inCents: flow.inCents,
     outCents: flow.outCents,

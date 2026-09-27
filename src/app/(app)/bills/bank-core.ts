@@ -495,6 +495,8 @@ export async function applyBankCore(
   // The file's name never rides on a money row: only which account and which days.
   const note = `From the bank download${dl.last4 ? ` (••${dl.last4})` : ""} of ${sayRange(dl.from, dl.to)}.`;
   const written = (w: Work) => lineId.has(w.line.key);
+  // A cost on money OUT is a paid business cost; on money IN it is a refund of one, the same bucket
+  // with a negative amount (a return, a supplier's credit), so the bucket comes down by it.
   const costs = work.filter((w) => written(w) && w.choice?.choice === "cost");
   if (costs.length) {
     const rows = costs.map((w) => {
@@ -617,6 +619,8 @@ export async function applyBankCore(
     // customer's until a person says otherwise, every time).
     if (w.sortedBy !== "person" || !w.group || !written(w) || !w.choice || w.choice.choice === "invoice" || w.choice.choice === "other_income") continue;
     const g = groupsById.get(w.group);
+    // Money in teaches only Not Income (0363); a refund's bucket is answered each time.
+    if (g?.direction === "in" && w.choice.choice !== "not_income") continue;
     if (!g?.learnable || g.merchantKey.length < 2) continue;
     learned.set(`${g.direction}:${g.merchantKey}`, { direction: g.direction, key: g.merchantKey, c: w.choice });
   }
@@ -742,7 +746,8 @@ export async function undoBankCore(supabase: Db, orgId: string, userId: string, 
           continue;
         }
         if (table === "bills") {
-          const untouched = !row.job_id && centsOf(row.amount) === cents && String(row.category ?? "") === String(l.bucket ?? "");
+          // The bill is the line turned round: a cost for money out, a refund (negative) for money in.
+          const untouched = !row.job_id && centsOf(row.amount) === -centsOf(l.amount) && String(row.category ?? "") === String(l.bucket ?? "");
           if (!untouched) {
             keep.add(l.id);
             say(l, "its bill was changed since, so it stays");

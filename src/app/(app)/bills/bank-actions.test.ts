@@ -427,6 +427,16 @@ describe("Apply", () => {
     expect(db.pay_payments[0]).toMatchObject({ bank_line_id: null, voided_at: null });
   });
 
+  it("a refund put back on its bucket is a negative business cost, and Undo takes it off", async () => {
+    const id = await drop(`Date,Description,Amount\n09/13/2026,ACME TOOLS RETURN,30.00\n`, "Refund1234.csv");
+    const v = await view(id);
+    await applyBankDownload(id, { fingerprint: v.fingerprint, picks: { [rowBy(v, "ACME TOOLS").id]: "cost:Tools & Supplies" } });
+    expect(db.bills).toEqual([expect.objectContaining({ job_id: null, amount: -30, category: "Tools & Supplies" })]);
+    expect(db.bank_rules).toHaveLength(0);
+    await undoBankDownload(id);
+    expect(db.bills).toHaveLength(0);
+  });
+
   it("refuses an answer that doesn't fit, and writes nothing", async () => {
     const id = await drop();
     const v = await view(id);
