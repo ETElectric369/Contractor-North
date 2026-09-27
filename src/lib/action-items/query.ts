@@ -222,7 +222,7 @@ async function buildActionItems(ctx: {
     isStaff
       ? supabase
           .from("organized_items")
-          .select("id, kind, status, job_id")
+          .select("id, kind, status, job_id, category")
           .eq("status", "needs_review")
           .order("created_at", { ascending: false })
           .limit(50)
@@ -522,16 +522,19 @@ async function buildActionItems(ctx: {
   }
 
   for (const o of (orgR.data ?? []) as any[]) {
+    // A BANK DOWNLOAD waiting in Sort These (2026-09-27) is on My Day while anything on it needs a
+    // person, and opens where its card is.
+    const bank = o.category === "Bank Download";
     items.push({
       id: o.id,
       kind: "organize",
-      title: ORGANIZE_LABEL[o.kind] ?? "To file",
+      title: bank ? "Bank Download To Sort" : (ORGANIZE_LABEL[o.kind] ?? "To file"),
       subtitle: null,
       who: null,
       when: null,
       urgency: 0,
       done: false,
-      href: "/organize",
+      href: bank ? "/bills#sort-these" : "/organize",
       affordances: AFFORDANCES.organize,
     });
   }

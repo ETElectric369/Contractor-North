@@ -656,6 +656,8 @@ export async function insertPaperRow(
     kind?: string;
     proposal?: PaperProposal | null;
     confidence?: string;
+    /** What the row is, in words My Day can say ("Bank Download"). */
+    category?: string | null;
   },
 ): Promise<{ id: string } | { duplicate: true } | { error: unknown }> {
   const full: Record<string, unknown> = {
@@ -673,6 +675,7 @@ export async function insertPaperRow(
     amount: row.amount ?? null,
     item_date: row.item_date ?? null,
     proposal: row.proposal ?? null,
+    ...(row.category ? { category: row.category } : {}),
   };
   const insert = (r: Record<string, unknown>) => supabase.from("organized_items").insert(r).select("id").single();
   let res = await insert(full);

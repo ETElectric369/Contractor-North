@@ -54,6 +54,8 @@ import { CedPdfPicker } from "./ced-pdf-picker";
 import { BooksBeginLine } from "./books-begin-line";
 import { DropPaperworkButton, PaperworkDropZone, SortThese } from "./bills-drop";
 import { openListViews } from "./open-list-core";
+import { bankViews } from "./bank-core";
+import type { BankView } from "@/lib/bank-download";
 import type { OpenListView } from "@/lib/supplier-open-list";
 import type { PaperRowItem } from "@/components/paperwork-row";
 import type { NumberMatch } from "@/lib/paperwork";
@@ -415,11 +417,18 @@ export default async function BillsPage({
       reportError("bills.alreadyBilledReach", e, { bills: abBills.length });
     }
   };
-  await Promise.all([signPaths(), readClaims(), signPapers(), viewLists(), readAbReach()]);
+  // A BANK DOWNLOAD waiting in Sort These is sorted against the books as the page loads (bank-core),
+  // so its card is never stale. Nothing waiting, nothing read.
+  let bankCards: Record<string, BankView> = {};
+  const viewBanks = async () => {
+    bankCards = await bankViews(supabase, orgId, papers);
+  };
+  await Promise.all([signPaths(), readClaims(), signPapers(), viewLists(), readAbReach(), viewBanks()]);
   const paperItems: PaperRowItem[] = rematchTray(papers, markCtx).map((i) => ({
     ...i,
     signedUrl: (i.file_url && paperUrls.get(i.file_url)) || null,
     open_list: listViews[i.id] ?? null,
+    bank: bankCards[i.id] ?? null,
   }));
   const paperMatches: Record<string, NumberMatch[]> = Object.fromEntries(paperItems.map((i) => [i.id, matchesOnBooks(i, books)]));
   // Open AND finished jobs (audit v994, PR1): a ticket that lands after a job is complete is still

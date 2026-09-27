@@ -4,6 +4,7 @@ import { PageHeader } from "@/components/page-header";
 import { OrganizeManager, type OrganizedItemRow } from "./organize-manager";
 import { loadBooks, loadMarkContext, matchesOnBooks, OPEN_JOBS_FOR_PAPER, PAPER_JOB_STATUSES, rematchTray } from "./paperwork-core";
 import { openListViews } from "@/app/(app)/bills/open-list-core";
+import { bankViews } from "@/app/(app)/bills/bank-core";
 import { getOrgSettings } from "@/lib/org-settings";
 import { featureOn } from "@/lib/features";
 
@@ -46,14 +47,16 @@ export default async function OrganizePage() {
   // connection per row. Voice/typed notes have no file and are skipped, not sent as null.
   // The signing and a waiting supplier list's card ride together (open-list-core: nothing waiting,
   // nothing read).
-  const [urls, listViews] = await Promise.all([
+  const [urls, listViews, bankCards] = await Promise.all([
     signDocumentUrls(supabase, ((items ?? []) as any[]).map((i) => i.file_url)),
     openListViews(supabase, org?.id, (items ?? []) as any[]),
+    bankViews(supabase, org?.id, (items ?? []) as any[]),
   ]);
   const withUrls: OrganizedItemRow[] = rematchTray((items ?? []) as any[], markCtx).map((i) => ({
     ...i,
     signedUrl: (i.file_url && urls.get(i.file_url)) || null,
     open_list: listViews[i.id] ?? null,
+    bank: bankCards[i.id] ?? null,
   }));
 
   return (

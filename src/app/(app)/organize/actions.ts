@@ -39,6 +39,8 @@ import { shelveLines } from "@/lib/stock-ledger";
 import { formatCurrency } from "@/lib/utils";
 import { jobInOrg } from "@/lib/job-in-org";
 import { undoOpenListCore } from "@/app/(app)/bills/open-list-core";
+import { proposalAfterUndo, undoBankCore } from "@/app/(app)/bills/bank-core";
+import { applyingNow } from "@/lib/bank-download";
 // TWO PROMPTS ITEMISE A RECEIPT and they must offer the model the SAME categories: the paper
 // reader (paperwork-core, any upload) and the job-receipt reader (a receipt already filed to a
 // job). One exported string, interpolated into both, is the only version of "identical" that
@@ -1274,6 +1276,32 @@ export async function undoPaperwork(id: string): Promise<Result & { message?: st
   const { data: item } = await supabase.from("organized_items").select("*").eq("id", id).eq("org_id", ctx.orgId).maybeSingle();
   if (!item) return { ok: false, error: "That paper isn't here any more." };
   const p = proposalOf(item);
+  // A BANK DOWNLOAD (2026-09-27): everything it wrote comes off (only what nobody changed since),
+  // and it waits in the tray again with every line. Applied in passes, it may already be waiting.
+  // One set aside with Not Now just comes back (the ordinary path below): its lines stay counted.
+  if (p.bankImport && (p.filed?.how === "bank_download" || (item.status === "needs_review" && (p.bankImport.applied?.length ?? 0) > 0))) {
+    if (!ctx.orgId) return { ok: false, error: "Your sign-in isn't attached to a company yet." };
+    if (applyingNow(p.bankImport)) return { ok: false, error: "This download is being applied right now. Wait a moment, then Undo." };
+    const down = await undoBankCore(supabase, ctx.orgId, ctx.userId, id);
+    if (!down.ok) return { ok: false, error: down.error };
+    const { data: back, error: backErr } = await supabase
+      .from("organized_items")
+      .update({ status: "needs_review", proposal: proposalAfterUndo(p) })
+      .eq("id", id)
+      .eq("org_id", ctx.orgId)
+      .select("id");
+    revalidatePath("/organize");
+    revalidatePath("/bills");
+    revalidatePath("/planner");
+    revalidatePath("/analytics");
+    if (backErr || !back?.length) return { ok: true, message: `Undone: ${down.undone} bank lines came off, but the download didn't go back to the tray. Refresh the page.` };
+    return {
+      ok: true,
+      message:
+        `Undone: ${down.undone} bank ${down.undone === 1 ? "line" : "lines"} came off, and the download waits again.` +
+        (down.left.length ? ` Left as they are now: ${down.left.join("; ")}.` : ""),
+    };
+  }
   const tied = !!(item.tied_bill_id || item.tied_supplier_invoice_id);
   if (item.status === "needs_review" && !item.bill_id && !item.document_id && !item.petty_cash_id && !tied)
     return { ok: false, error: "Nothing to undo: this paper is still waiting to be filed." };
@@ -1472,6 +1500,13 @@ export async function deleteOrganizedItem(id: string): Promise<Result & { messag
     if (!down.ok) return { ok: false, error: `${down.error} Nothing was deleted.` };
     listPutBack = down.left;
   }
+  // A BANK DOWNLOAD THAT WAS APPLIED: the same Undo first, because its lines are found by this row.
+  if (p.bankImport && (p.filed?.how === "bank_download" || (p.bankImport.applied?.length ?? 0) > 0) && ctx.orgId) {
+    if (applyingNow(p.bankImport)) return { ok: false, error: "This download is being applied right now. Wait a moment, then delete it." };
+    const down = await undoBankCore(supabase, ctx.orgId, ctx.userId, id);
+    if (!down.ok) return { ok: false, error: `${down.error} Nothing was deleted.` };
+    listPutBack = down.left;
+  }
 
   // SAME CEILING, SAME ORDER (0278). A receipt a live invoice is already billing cannot be thrown
   // away, so the bill goes first and a refusal costs nothing: the photo, the copy on the job and
@@ -1511,7 +1546,7 @@ export async function deleteOrganizedItem(id: string): Promise<Result & { messag
     papersBackSaid(torn.papersBack) +
     landedKeptSaid(landedLeft) +
     (listPutBack
-      ? ` Every paper the list changed is back as it was.${listPutBack.length ? ` Left as they are now: ${listPutBack.join(", ")}.` : ""}`
+      ? ` ${p.bankImport ? "Everything the download wrote came off." : "Every paper the list changed is back as it was."}${listPutBack.length ? ` Left as they are now: ${listPutBack.join(", ")}.` : ""}`
       : "");
   return said ? { ok: true, message: `Deleted.${said}` } : { ok: true };
 }

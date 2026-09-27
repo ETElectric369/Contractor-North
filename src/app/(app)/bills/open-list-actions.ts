@@ -11,12 +11,16 @@ import { proposalOf, type PaperProposal } from "@/lib/paperwork";
 import {
   OPEN_LIST_FIELDS,
   capTable,
+  findHeaderRow,
   openListFromText,
+  readHeaderRow,
   readOpenListTable,
   rememberColumns,
   type OpenListColumns,
   type StoredOpenList,
 } from "@/lib/supplier-open-list";
+import { looksLikeBankTable } from "@/lib/bank-download";
+import { bankLine, capBankTable, createBankPaper, readBankDownload } from "./bank-core";
 import { applyOpenListCore, createOpenListPaper, loadAccounts, loadPapers, openListLine, orgToday, resolveAccount } from "./open-list-core";
 import { fingerprintSeen } from "@/app/(app)/organize/paperwork-actions";
 import { isMissingColumnError } from "@/app/(app)/organize/paperwork-core";
@@ -57,6 +61,41 @@ export async function addOpenList(input: {
 
   let stored: StoredOpenList | null = null;
   let sha: string | null = isSha256(input?.sha256) ? String(input.sha256) : null;
+  // A BANK'S DOWNLOAD comes in by the same doors (Erik, 2026-09-27): recognised by its own header
+  // (a day, a description, money in and out), it becomes one bank card instead of a supplier's list.
+  if (Array.isArray(input?.table)) {
+    const bankTable = capBankTable(input.table);
+    const at = findHeaderRow(bankTable);
+    const supplierRef = at >= 0 && readHeaderRow(bankTable[at] ?? []).columns.reference !== undefined;
+    if (looksLikeBankTable(bankTable, supplierRef)) {
+      const download = readBankDownload(bankTable, name);
+      if (!download) return { ok: false, error: `${name} reads like a bank download, but none of its lines did.` };
+      if (!download.lines.length) {
+        const why = download.skipped[0]?.why;
+        return { ok: false, error: `${name} has no transactions in it that read${why ? ` (${why.replace(/\.$/, "")})` : ""}.` };
+      }
+      if (sha) {
+        const seen = await fingerprintSeen(sha);
+        if (seen.seen) return { ok: false, already: seen.seen, error: `${name}: ${seen.seen}` };
+      }
+      const placed = await createBankPaper(ctx.supabase, {
+        userId: ctx.userId,
+        name,
+        download,
+        sha256: sha,
+        source: input?.source === "organize" ? "organize" : "bills_drop",
+      });
+      if ("duplicate" in placed) {
+        const again = sha ? await fingerprintSeen(sha) : { seen: null };
+        return { ok: false, already: again.seen ?? "Already In.", error: `${name}: ${again.seen ?? "Already In."}` };
+      }
+      if ("error" in placed) return { ok: false, error: `${name} wasn't added. ${placed.error}` };
+      revalidatePath("/bills");
+      revalidatePath("/organize");
+      revalidatePath("/planner");
+      return { ok: true, id: placed.id, line: bankLine(download) };
+    }
+  }
   if (Array.isArray(input?.table)) {
     const table = capTable(input.table);
     const read = readOpenListTable({ table, from: "file", name, listDate, listDateFrom });
