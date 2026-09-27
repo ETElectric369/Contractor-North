@@ -19,8 +19,12 @@ import {
   SupplierPaperCards,
   SupplierPaperDoneTrail,
   chipNames,
+  closedUnmarked,
+  filedForMark,
+  notMarkedWords,
   setSupplierPaperScopeForTest,
 } from "./supplier-paper-cards";
+import { cardJob, cardsWithAlreadyBilled } from "@/app/(app)/bills/supplier-papers";
 import { paperContents } from "@/lib/supplier-paper-contents";
 import type { SupplierPaperCard } from "@/app/(app)/bills/supplier-reconcile";
 
@@ -308,5 +312,84 @@ describe("the done line's Already Billed question", () => {
     const trail = renderToStaticMarkup(createElement(SupplierPaperDoneTrail, { scope: "t-ab3" }));
     expect(trail).toContain("Nothing on INV-00023 changed.");
     expect(allButtons(trail)).toEqual(["Undo"]);
+  });
+});
+
+/**
+ * ALREADY BILLED ON THE CARD ITSELF (Erik, 2026-09-26: "on supplier bills on my day inside needs
+ * action should also be a button for already charged"). A card whose paper names or guesses one job,
+ * where a bill that went out on it could hold the paper, says Already Billed On J-010 beside the
+ * answers. The tap files the paper there exactly as Put It On does, then opens the sheet on the bill
+ * it wrote; closed unmarked, the paper stays filed and the done line says so.
+ */
+describe("Already Billed On J-010 on the card", () => {
+  const J010 = { id: "j-010", label: "J-010", name: "11301 Purple Sage", status: "complete" };
+  const ps: SupplierPaperCard = { ...base, invoiceNumber: "8802-1101475", said: "11301 PURPLE SAGE", suggestion: J010, alreadyBilledOn: J010 };
+  const undo = { invoiceId: "si-1", billId: "bill-ps", jobSetTo: "j-010", jobBefore: null };
+
+  it("sits right after Put It On J-010, 44px and Title Case, and every other answer stays", () => {
+    const html = render([ps]);
+    expect(buttons(html)).toEqual(["Put It On J-010", "Already Billed On J-010", "Another Job", "Shop Stock", "Business Cost"]);
+    const tag = Array.from(html.matchAll(/<button[^>]*>Already Billed On J-010<\/button>/g))[0][0];
+    expect(tag).toMatch(/\bh-11\b/);
+  });
+
+  it("a paper already on a job: Record It On J-010, then Already Billed On J-010", () => {
+    const html = render([{ ...ps, state: "record", suggestion: null, onJob: J010 }]);
+    expect(buttons(html).slice(0, 2)).toEqual(["Record It On J-010", "Already Billed On J-010"]);
+  });
+
+  it("the feed decides: only the card's ONE job (where it sits, or the clear guess), and only where a sent bill could hold it", () => {
+    const chips: SupplierPaperCard = { ...base, verdict: "ask", suggestion: null, candidates: [J010, J011] };
+    const onJob: SupplierPaperCard = { ...base, invoiceId: "si-2", state: "record", suggestion: null, onJob: J010 };
+    const guess: SupplierPaperCard = { ...base, invoiceId: "si-3" };
+    expect(cardJob(chips)).toBeNull();
+    expect(cardJob(onJob)?.id).toBe("j-010");
+    expect(cardJob(guess)?.id).toBe("j-011");
+    const feed = cardsWithAlreadyBilled(
+      { cards: [chips, onJob, guess], jobs: [] },
+      new Map([
+        ["j-010", { charge: true }],
+        ["j-011", { charge: false }],
+      ]),
+    );
+    expect(feed.cards.map((c) => c.alreadyBilledOn?.label ?? null)).toEqual([null, "J-010", null]);
+  });
+
+  it("filed: the sheet opens on the bill it wrote; refused: nothing opens (the card says why)", () => {
+    const offer = { jobId: "j-010", billId: "bill-ps", invoiceNumber: "INV-00023", what: "8802-1101475" };
+    const ok = filedForMark(ps, J010, { ok: true, message: "8802-1101475 is a bill on J-010 now.", undo, alreadyBilled: offer })!;
+    expect(ok.done).toMatchObject({ message: "8802-1101475 is a bill on J-010 now.", undo, asked: true, sheetJob: "J-010" });
+    expect(ok.marking?.alreadyBilled).toEqual(offer);
+    // No invoice named by the offer (it read nothing): the sheet still opens on the bill, and says what it finds.
+    const bare = filedForMark(ps, J010, { ok: true, message: "Filed.", undo })!;
+    expect(bare.marking?.alreadyBilled).toEqual({ jobId: "j-010", billId: "bill-ps", invoiceNumber: "", what: "8802-1101475" });
+    // The bill it wrote can't be named: no sheet, and the done line says where to mark it.
+    const lost = filedForMark(ps, J010, { ok: true, message: "Filed." })!;
+    expect(lost.marking).toBeNull();
+    expect(lost.done.message).toBe("Filed. Already Billed couldn't open here: mark it from J-010's Costs tab.");
+    expect(filedForMark(ps, J010, { ok: false, error: "maybe already in your books" })).toBeNull();
+  });
+
+  it("closed without a mark: the paper stays filed and says so; a mark that landed, or the done line's own question, changes nothing", () => {
+    const asked = filedForMark(ps, J010, { ok: true, message: "8802-1101475 is a bill on J-010 now.", undo })!.done;
+    const after = closedUnmarked(asked)!;
+    expect(after.message).toBe(`8802-1101475 is a bill on J-010 now. ${notMarkedWords("J-010")}`);
+    expect(notMarkedWords("J-010")).toBe("It is not marked Already Billed, so the next New Invoice on J-010 bills it.");
+    expect(after.undo).toEqual(undo);
+    expect(closedUnmarked(after)).toBe(after);
+    const marked = { ...asked, marked: { jobId: "j-010", lineId: "li", ids: ["bill-ps"], what: "8802-1101475" } };
+    expect(closedUnmarked(marked)).toBe(marked);
+    const fromQuestion = { ...asked, asked: false };
+    expect(closedUnmarked(fromQuestion)).toBe(fromQuestion);
+  });
+
+  it("the done line after closing: its Undo, and the question to try again (Already Billed? when no invoice was named)", () => {
+    const filed = filedForMark(ps, J010, { ok: true, message: "Filed.", undo })!.done;
+    const d = closedUnmarked({ ...filed, alreadyBilled: { jobId: "j-010", billId: "bill-ps", invoiceNumber: "", what: "x" } })!;
+    setSupplierPaperScopeForTest("t-ab4", { done: { "si-1": d as never }, live: 0 });
+    const trail = renderToStaticMarkup(createElement(SupplierPaperDoneTrail, { scope: "t-ab4" }));
+    expect(trail).toContain("It is not marked Already Billed, so the next New Invoice on J-010 bills it.");
+    expect(allButtons(trail)).toEqual(["Undo", "Already Billed?"]);
   });
 });

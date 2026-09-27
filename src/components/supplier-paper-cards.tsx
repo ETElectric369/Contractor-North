@@ -29,6 +29,7 @@ type UndoToken = NonNullable<SupplierActionResult["undo"]>;
 export type PaperContentsState = { state: "loading" } | { state: "error"; error: string } | { state: "ok"; contents: PaperContents };
 /** `undoWait`: the tap was Waiting On A Credit, and Undo puts back the wait it replaced (none, or the
  *  first stamp on a card told "Wait 30 More Days") with stopWaitingOnCredit. */
+export type PaperDone = Done;
 type Done = {
   card: SupplierPaperCard;
   message: string;
@@ -41,7 +42,47 @@ type Done = {
   marked?: NonNullable<AlreadyBilledWrite["undo"]>;
   /** The filing's own sentence, said again once a mark is undone. */
   filedMessage?: string;
+  /** Filed by the card's Already Billed On J-010 door: the sheet opened by itself, so closing it
+   *  unmarked is said ("the paper stays filed"), never a silent half-answer. */
+  asked?: boolean;
+  /** The job it was filed on, for that sentence. */
+  sheetJob?: string;
 };
+
+/**
+ * AFTER THE CARD'S ALREADY BILLED DOOR FILED THE PAPER (0357): the done line, and the sheet to open
+ * on the bill it wrote. Null when the filing refused (settle already said why, and nothing opens).
+ * The bill it wrote can't be named (no answer to point the sheet at): the done line says where to
+ * mark it instead, and no sheet opens.
+ */
+export function filedForMark(card: SupplierPaperCard, job: PaperJob, res: SupplierActionResult): { done: Done; marking: Done | null } | null {
+  if (!res.ok) return null;
+  const message = res.message ?? `${card.invoiceNumber} is in your books now.`;
+  const billId = res.alreadyBilled?.billId ?? res.undo?.billId ?? null;
+  if (!billId)
+    return {
+      done: { card, message: `${message} Already Billed couldn't open here: mark it from ${job.label}'s Costs tab.`, undo: res.undo, filedMessage: message },
+      marking: null,
+    };
+  const done: Done = { card, message, undo: res.undo, alreadyBilled: res.alreadyBilled, filedMessage: message, asked: true, sheetJob: job.label };
+  return { done, marking: { ...done, alreadyBilled: res.alreadyBilled ?? { jobId: job.id, billId, invoiceNumber: "", what: card.invoiceNumber } } };
+}
+
+/**
+ * THE SHEET CLOSED. After the card's own door filed the paper and nothing was marked, the paper stays
+ * filed and the done line says so, with its Undo and the question to try again. A mark that landed
+ * (`marked`, set first) or a sheet the done line's question opened changes nothing.
+ */
+export function closedUnmarked(cur: Done | undefined): Done | undefined {
+  if (!cur || cur.marked || !cur.asked) return cur;
+  return { ...cur, asked: false, message: `${cur.filedMessage ?? cur.message} ${notMarkedWords(cur.sheetJob)}` };
+}
+
+/** Said when the card's Already Billed door filed the paper and the sheet closed with nothing marked. */
+export function notMarkedWords(jobLabel: string | null | undefined): string {
+  const on = String(jobLabel ?? "").trim() || "the job";
+  return `It is not marked Already Billed, so the next New Invoice on ${on} bills it.`;
+}
 
 /** "in progress" reads "In Progress" on a chip: every clickable is Title Case. */
 const titleCase = (s: string | null | undefined) =>
@@ -266,6 +307,8 @@ export function SupplierPaperCards({
   /** What's On It: which cards have it open, and what each read brought back (kept for a re-open). */
   const [reading, setReading] = useState<Record<string, boolean>>({});
   const [contents, setContents] = useState<Record<string, PaperContentsState>>({});
+  /** The Already Billed sheet open over the cards (a card's own door, or a done line's question). */
+  const [marking, setMarking] = useState<Done | null>(null);
 
   function readContents(card: SupplierPaperCard) {
     const id = card.invoiceId;
@@ -337,6 +380,38 @@ export function SupplierPaperCards({
           false,
         );
       }
+    });
+  }
+
+  /**
+   * ALREADY BILLED ON J-010 (0357, Erik: "on supplier bills on my day inside needs action should also
+   * be a button for already charged"). The paper is filed on that job first, exactly as Put It On
+   * does it (fileSupplierPaper: the same guards, the same sentence, the same Undo), and then the
+   * sheet opens by itself to pick the line that already charged for it. If the filing refuses, the
+   * card says why and nothing opens. If he closes the sheet without marking, the paper stays filed
+   * and the done line says so.
+   */
+  function fileThenMark(card: SupplierPaperCard, job: PaperJob) {
+    setBusy(card.invoiceId);
+    setErrors((e) => ({ ...e, [card.invoiceId]: "" }));
+    start(async () => {
+      let res: SupplierActionResult;
+      try {
+        res = await fileSupplierPaper({ invoiceId: card.invoiceId, jobId: job.id, notSameAs: card.samePurchase.map((s) => s.billId) });
+      } catch {
+        settle(
+          card,
+          { ok: false, error: "The connection dropped before the answer came back. Reload the page to see whether it was filed." },
+          "",
+          false,
+        );
+        return;
+      }
+      settle(card, res, `${card.invoiceNumber} is in your books now.`);
+      const next = filedForMark(card, job, res);
+      if (!next) return;
+      setDone((d) => ({ ...d, [card.invoiceId]: next.done }));
+      if (next.marking) setMarking(next.marking);
     });
   }
 
@@ -417,9 +492,6 @@ export function SupplierPaperCards({
     });
   }
 
-  /** The Already Billed sheet this card's done line opened, when one is open. */
-  const [marking, setMarking] = useState<Done | null>(null);
-
   function undo(d: Done) {
     if (d.marked) return undoMark(d);
     if (!d.undo && !d.undoWait) return;
@@ -461,7 +533,7 @@ export function SupplierPaperCards({
             charged for this paper by hand already (Purple Sage on INV-00023). */}
         {d.alreadyBilled && !d.marked && (
           <Button type="button" variant="outline" disabled={busy === d.card.invoiceId} onClick={() => setMarking(d)}>
-            {`Already Billed On ${d.alreadyBilled.invoiceNumber}?`}
+            {d.alreadyBilled.invoiceNumber ? `Already Billed On ${d.alreadyBilled.invoiceNumber}?` : "Already Billed?"}
           </Button>
         )}
       </div>
@@ -616,6 +688,13 @@ export function SupplierPaperCards({
         <div className="mt-2 flex flex-wrap gap-2">
           {c.state === "record" && c.onJob && jobButton(c, c.onJob, `Record It On ${c.onJob.label}`, "primary")}
           {c.state === "needs_job" && c.suggestion && jobButton(c, c.suggestion, `Put It On ${c.suggestion.label}`, "primary")}
+          {/* ALREADY BILLED (0357): the same job, filed first, then the line that already charged
+              for it. Only where a bill that went out on that job could hold it (withAlreadyBilledDoors). */}
+          {c.alreadyBilledOn && (
+            <Button type="button" variant="outline" disabled={busy === c.invoiceId} onClick={() => fileThenMark(c, c.alreadyBilledOn!)} title={c.alreadyBilledOn.name}>
+              {`Already Billed On ${c.alreadyBilledOn.label}`}
+            </Button>
+          )}
           {c.state === "needs_job" &&
             c.candidates.map((j) =>
               jobButton(
@@ -668,7 +747,17 @@ export function SupplierPaperCards({
         <AlreadyBilledSheet
           jobId={marking.alreadyBilled.jobId}
           target={{ kind: "bill", ids: [marking.alreadyBilled.billId], what: marking.alreadyBilled.what }}
-          onClose={() => setMarking(null)}
+          onClose={() => {
+            const id = marking.card.invoiceId;
+            setMarking(null);
+            // CLOSED WITHOUT A MARK, after the card's own door filed it: the paper stays filed, said.
+            // (A mark that landed set `marked` first, and then this changes nothing.)
+            setDone((all) => {
+              const cur = all[id];
+              const after = closedUnmarked(cur);
+              return after === cur || !after ? all : { ...all, [id]: after };
+            });
+          }}
           onMarked={(res) => {
             const d = marking;
             setMarking(null);
