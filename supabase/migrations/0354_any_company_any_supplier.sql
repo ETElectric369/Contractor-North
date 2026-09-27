@@ -46,12 +46,15 @@
 -- lock_timeout 3s: a busy table fails fast and changes nothing; run it again.
 --
 -- ORDER: after 0350 (the guard) and 0273 (supplier_invoices). Independent of 0352/0353.
--- SAFE BEFORE AND AFTER THE CODE: the code reads books_begin with the earliest bill as fallback, the
--- tagline as blank, and Mark Fixed falls back to the old direct write when platform_set_bug_status
--- is missing. Deploy notes: until this runs, ET's line falls back to its first bill (2026-04-20), so
--- its four pre-June-8 CED papers show as cards, and ET's documents print no tagline. The importer's
--- per-account read is NOT the same under both uniquenesses: until this runs, a paper on a matched
--- account whose number is already on file under ANOTHER account is refused whole by the old
+-- APPLY RIGHT AFTER THE DEPLOY (same window). The new code reads books_begin with the earliest bill
+-- as fallback, the tagline as blank, and Mark Fixed falls back to the old direct write when
+-- platform_set_bug_status is missing. Deploy notes: until this runs, ET's line falls back to its
+-- first bill (2026-04-20), so its four pre-June-8 CED papers show as cards, and ET's documents
+-- print no tagline. Applied BEFORE the deploy, any Document Studio save on the old code stores
+-- doc_style without the tagline (the old normalizer drops the key) and nothing says so; if that
+-- happens, re-run this once after the deploy (1b fills the tagline only while it is blank).
+-- The importer's per-account read is NOT the same under both uniquenesses: until this runs, a paper
+-- on a matched account whose number is already on file under ANOTHER account is refused whole by the old
 -- (org_id, invoice_number) constraint, and every retry is refused the same way (nothing is written);
 -- after it runs, that paper goes on file as its own account's.
 -- Idempotent: safe to re-run.
