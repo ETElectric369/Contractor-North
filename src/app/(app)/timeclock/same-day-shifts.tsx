@@ -69,12 +69,24 @@ export function SameDayShiftsList({
                 <span className="tabular-nums">{line.when}</span>
                 <span className={s.noJob ? "text-amber-800" : "text-slate-500"}> · {line.where}</span>
               </span>
+              {/* THE DOOR WRAPS, it never spills: the label carries the job's whole name ("Put This
+                  On Service call — Nora & Fermin Arnoso" is ~300px), and at 375px the box inside
+                  the modal has ~277px. 44px tall, like every door a thumb has to hit. */}
               {door ? (
-                <Button type="button" size="sm" onClick={() => onPut?.(s)} disabled={!!busyId}>
+                <Button
+                  type="button"
+                  size="md"
+                  className="h-auto min-h-11 max-w-full whitespace-normal py-2 text-left"
+                  onClick={() => onPut?.(s)}
+                  disabled={!!busyId}
+                >
                   {busyId === s.id ? "Putting…" : `Put This On ${data.forJob!.label}`}
                 </Button>
               ) : (
-                <Link href={`/timecards?entry=${s.id}`} className="text-xs font-medium text-brand hover:underline">
+                <Link
+                  href={`/timecards?entry=${s.id}`}
+                  className="inline-flex min-h-[44px] items-center px-1 text-sm font-medium text-brand hover:underline"
+                >
                   Open That Shift
                 </Link>
               )}
