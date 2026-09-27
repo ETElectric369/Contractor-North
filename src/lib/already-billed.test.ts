@@ -354,6 +354,26 @@ describe("the bill's own row on /bills (Erik: 'the Already Billed could connect 
     });
     expect(doors).toEqual({});
   });
+  it("only what New Invoice would bill (the Costs tab's own test): never a receipt that is all the company's own, or a return with nothing the customer was billed for", () => {
+    const own = [
+      { id: "chips", description: "Kettle Chips", amount: 4.29, billable: false },
+      { id: "bar", description: "Ice cream bar", amount: 3.5, billable: false },
+    ];
+    const part = [{ id: "gfci", description: "GFCI", amount: 60 }, ...own];
+    const doors = billAlreadyBilledDoors({
+      bills: [
+        { ...b({ id: "snacks", job_id: "j-010", amount: 7.79 }), lines: own },
+        { ...b({ id: "mixed", job_id: "j-010", amount: 67.79 }), lines: part },
+        { ...b({ id: "lump", job_id: "j-010", amount: 186.93 }), lines: [] },
+        { ...b({ id: "ret-own", job_id: "j-039", amount: -7.79 }), lines: own.map((l) => ({ ...l, amount: -l.amount })) },
+        { ...b({ id: "ret-part", job_id: "j-039", amount: -60 }), lines: [{ id: "gfci-back", description: "GFCI", amount: -60 }] },
+      ],
+      reach,
+      hands: new Map(),
+      claimed: new Set(),
+    });
+    expect(Object.keys(doors).sort()).toEqual(["lump", "mixed", "ret-part"]);
+  });
   it("a supplier return gets the door only where a line typed by hand takes money off", () => {
     const doors = billAlreadyBilledDoors({
       bills: [b({ id: "ret-010", job_id: "j-010", amount: -25 }), b({ id: "ret-039", job_id: "j-039", amount: -25 })],

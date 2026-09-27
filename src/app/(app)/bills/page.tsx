@@ -1149,6 +1149,8 @@ export default async function BillsPage({
             amount: b.amount,
             superseded: b.superseded,
             what: [String(b.supplier ?? "").trim() || "The bill", b.shownNumber ?? null].filter(Boolean).join(" "),
+            // Its lines decide whether New Invoice would bill any of it (the Costs tab's own test).
+            lines: b.line_items ?? null,
           })),
           reach: ledgerReach.jobs,
           hands: ledgerReach.hands,

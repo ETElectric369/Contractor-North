@@ -28,6 +28,8 @@ import { lumpLineRule, isHoursUnit } from "@/lib/invoice-math";
 import { countsAsWorkCompleted, lineGroup } from "@/lib/portal/line-kind";
 import { formatCurrency } from "@/lib/utils";
 import { todayStrInTz } from "@/lib/tz";
+import { billableBillCost, type BillLine } from "@/lib/bill-itemisation";
+import { isReturnBill, returnCreditCost } from "@/lib/supplier-returns";
 
 export type AlreadyBilledKind = "bill" | "po" | "stock" | "time";
 
@@ -371,13 +373,27 @@ export const NEEDS_UPDATE = "Already Billed needs an update to the app's databas
  * hold it (a charge, or a supplier return); a bill a person marked says Billed By Hand On INV-x with
  * Not Billed After All. A bill any invoice holds otherwise (an import, or its order billed: the
  * importer skips a receipt whose order is billed) gets nothing, and so does a $0.00 one.
+ *
+ * AND ONLY WHAT NEW INVOICE WOULD BILL (the Costs tab's own test, unbilled-work's "open"): a receipt
+ * whose every line is the company's own bills $0.00 (billableBillCost), and a return with nothing on
+ * it the customer was billed for gives nothing back (returnCreditCost). Neither is in Not Billed Yet,
+ * so neither gets the door here: the two screens never disagree about one bill. `lines`: the bill's
+ * own lines (none: its lump, unchanged).
  */
 export type BillAlreadyBilled =
   | { kind: "open"; jobId: string; what: string }
   | { kind: "hand"; jobId: string; lineId: string; ids: string[]; invoiceNumber: string | null; what: string };
 
 export function billAlreadyBilledDoors(input: {
-  bills: readonly { id: string; job_id?: string | null; po_id?: string | null; amount?: number | string | null; superseded?: boolean; what: string }[];
+  bills: readonly {
+    id: string;
+    job_id?: string | null;
+    po_id?: string | null;
+    amount?: number | string | null;
+    superseded?: boolean;
+    what: string;
+    lines?: BillLine[] | null;
+  }[];
   reach: ReadonlyMap<string, { charge: boolean; ret: boolean }>;
   hands: ReadonlyMap<string, { lineId: string; invoiceNumber: string | null }>;
   /** Every id some live invoice holds, by an import or by hand. */
@@ -396,8 +412,11 @@ export function billAlreadyBilledDoors(input: {
     if (input.claimed.has(id) || (b.po_id && input.claimed.has(String(b.po_id)))) continue;
     const amount = Number(b.amount) || 0;
     if (amount === 0) continue;
+    const isReturn = isReturnBill(b.amount);
+    // What New Invoice would put on the bill, at cost: nothing means it isn't Not Billed Yet.
+    if (!((isReturn ? returnCreditCost(b.amount, b.lines) : billableBillCost(b.amount, b.lines)) > 0)) continue;
     const r = input.reach.get(job);
-    if (r && (amount < 0 ? r.ret : r.charge)) out[id] = { kind: "open", jobId: job, what: b.what };
+    if (r && (isReturn ? r.ret : r.charge)) out[id] = { kind: "open", jobId: job, what: b.what };
   }
   return out;
 }
