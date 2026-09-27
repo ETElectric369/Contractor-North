@@ -19,7 +19,9 @@ export function BankDropLine() {
   const router = useRouter();
   const input = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
-  const [said, setSaid] = useState<{ text: string; ok: boolean } | null>(null);
+  /** `waiting`: the download is in Sort These now, so the link there leads somewhere. An "Already
+   *  In" (applied, or set aside in files) is not in Sort These, and gets no link. */
+  const [said, setSaid] = useState<{ text: string; ok: boolean; waiting?: boolean } | null>(null);
 
   async function take(file: File | undefined) {
     if (!file) return;
@@ -36,7 +38,7 @@ export function BankDropLine() {
       }
       const added = await addOpenList({ name: file.name || "Bank download", sha256: sha, table: read.table, listDate: read.listDate, source: "bills_drop", expect: "bank" });
       if (!added.ok) return setSaid({ text: added.already ? `${added.already} Nothing was added twice.` : (added.error ?? "Not added."), ok: !!added.already });
-      setSaid({ text: (added.line ?? "Waiting in Sort These on Bills.").replace("Waiting below", "Waiting in Sort These on Bills"), ok: true });
+      setSaid({ text: (added.line ?? "Waiting in Sort These on Bills.").replace("Waiting below", "Waiting in Sort These on Bills"), ok: true, waiting: true });
       router.refresh();
     } catch (e) {
       setSaid({ text: `Not added: ${(e as Error)?.message ?? "something went wrong"}.`, ok: false });
@@ -78,8 +80,8 @@ export function BankDropLine() {
           {said.ok ? <Check className="mt-0.5 h-4 w-4 shrink-0 text-green-600" /> : <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />}
           <span>
             {said.text}{" "}
-            {said.ok && (
-              <Link href="/bills#sort-these" className="font-medium text-brand underline">
+            {said.waiting && (
+              <Link href="/bills#sort-these" className="inline-flex min-h-11 items-center font-medium text-brand underline">
                 Open Sort These
               </Link>
             )}
