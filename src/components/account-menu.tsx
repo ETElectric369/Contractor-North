@@ -165,10 +165,10 @@ export function AccountMenu({
           setByTour(false);
           setOpen((v) => !v);
         }}
-        aria-label={setupDot ? "Account, setup is waiting under Help" : "Account"}
+        aria-label="Account"
         aria-haspopup="menu"
         aria-expanded={open}
-        title="Account"
+        title={setupDot ? "Account — setup is waiting under Help" : "Account"}
         className="relative flex h-11 w-11 items-center justify-center rounded-full hover:bg-slate-100"
       >
         {profile?.avatar_url ? (

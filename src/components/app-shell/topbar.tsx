@@ -132,7 +132,7 @@ export function Topbar({
             onClick={() => window.dispatchEvent(new Event("cn:command"))}
             data-tour="ask"
             aria-label={nortOn ? "Search Or Ask" : "Search"}
-            title={nortOn ? `Search or ask Nort (${modKey})` : `Search (${modKey})`}
+            title={`${nortOn ? "Search or ask Nort" : "Search"} (${modKey})${nortOn && waiting ? " — setup is waiting inside" : ""}`}
             className="relative flex h-11 w-11 items-center justify-center gap-2 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 md:w-auto md:px-3"
           >
             <Search className="h-5 w-5 shrink-0" />
