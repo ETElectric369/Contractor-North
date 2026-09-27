@@ -17,6 +17,8 @@ import { openFoldsTo } from "@/components/fold-opener";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { createBill, deleteDocument } from "../jobs/actions";
 import { BillRowDoors } from "@/components/bill-row-doors";
+import { BillPaperDoors } from "@/components/bill-paper-doors";
+import type { BillPaper } from "@/lib/job-photos";
 import { executeAction } from "@/lib/actions/execute";
 import { NewPoButton } from "../purchasing/new-po-button";
 import { FeatureOffLine } from "@/components/feature-off-line";
@@ -77,6 +79,8 @@ export interface BillRow {
    * with lines. They live in the bill's own detail now: one place per bill, no second list.
    */
   receipt?: ReceiptForBilling | null;
+  /** The paper this bill was read from (lib/job-photos billPapers), opened from its row. */
+  papers?: BillPaper[] | null;
 }
 interface DocRow {
   id: string;
@@ -422,6 +426,8 @@ export function BillsReceipts({
                         <div className="flex flex-wrap items-center gap-2">
                           {/* THIS TICK AND THE SUPPLIER BALANCE ARE THE SAME DOLLAR (review, 2026-09-19): the
                               three doors are BillRowDoors, one copy with the job's Costs tab. */}
+                          {/* The receipt it was read from, with the bill instead of in a job's Photos. */}
+                          <BillPaperDoors papers={b.papers} />
                           <BillRowDoors bill={b} onEdit={() => setEditBill(b)} disabled={pending} />
                           <BillAlreadyBilledDoor bill={b} door={alreadyBilled[b.id]} />
                           {b.job_id && (

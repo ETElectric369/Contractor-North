@@ -13,6 +13,8 @@ import { Modal, ModalActions } from "@/components/ui/modal";
 import { formatCurrency, formatDate, formatDuration } from "@/lib/utils";
 import { createBill } from "../actions";
 import { BillRowDoors } from "@/components/bill-row-doors";
+import { BillPaperDoors } from "@/components/bill-paper-doors";
+import type { BillPaper } from "@/lib/job-photos";
 import { AlreadyBilledButton, NotBilledAfterAllButton } from "@/components/already-billed-sheet";
 import { executeAction } from "@/lib/actions/execute";
 
@@ -82,6 +84,7 @@ export function JobBills({
   alreadyBilled,
   billedHours = [],
   handsNote,
+  papers = null,
 }: {
   jobId: string;
   bills: Bill[];
@@ -97,6 +100,9 @@ export function JobBills({
   billedHours?: JobBilledHours;
   /** Said under Billed when the marks couldn't be read: their Undo can't be shown, never silently. */
   handsNote?: string | null;
+  /** Each bill's own paper (lib/job-photos billPapers): the receipt it was read from, opened from
+   *  its row instead of from the Photos grid. A bill with none draws no door. */
+  papers?: Record<string, BillPaper[]> | null;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -179,6 +185,7 @@ export function JobBills({
         <span className="font-medium text-slate-800">{formatCurrency(b.amount)}</span>
       </div>
       <div className="mt-2 flex flex-wrap items-center gap-2">
+        <BillPaperDoors papers={papers?.[b.id]} />
         <BillRowDoors bill={b} jobId={jobId} onEdit={() => setEditBill(b)} />
         {abDoors(b.id, pile)}
       </div>
