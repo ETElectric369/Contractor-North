@@ -9,6 +9,7 @@ import {
   getOwnerMoney,
   getOwnerMoneyViews,
   hasUnratedHours,
+  materialsWithStock,
   notCountedLine,
   ownerMoneyChartWindow,
   ownerMoneyReadSpan,
@@ -16,6 +17,7 @@ import {
   supplierDocsNoBillCovers,
   parseOwnerMoneyMonthKey,
   resolveOwnerMoneySelection,
+  stockLine,
   windowInsideSpan,
   windowLabel,
   windowMonths,
@@ -266,6 +268,36 @@ describe("computeOwnerMoney: the shelf counts in the month it is bought", () => 
     const off = computeOwnerMoney({ ...inputs([jobTicket], gone), shelfMoves: [{ ...moves[0], lot_id: "L1", cost: 10 }] }, YEAR, TZ, TODAY);
     expect(off.totals.shopStockLost).toBe(0);
     expect(off.totals.materialsAndBills).toBe(199.48);
+  });
+
+  // Erik, 2026-09-27: "we dont need a put on the shelf on the bar graph". The card and the chart show
+  // stock bought INSIDE Materials & Bills; the engine keeps it apart for the accountant's Stock
+  // Bought list. The card's lines must still add up to the draw, and one line says how much is stock.
+  it("the card folds stock bought into Materials & Bills, still adds up to the cent, and says so in one line", () => {
+    const lots = [{ lot_id: "L1", bill_id: "h1", cost: 180.17, cost_left: 100, live: true }];
+    const moves = [{ id: "w1", lot_id: "L1", kind: "write_off", cost: 36.93, created_at: "2026-09-10T18:00:00Z" }];
+    const both = { ...inputs([jobTicket], lots), shelfMoves: moves };
+    const cardAddsUp = (f: OwnerMoneyFigures) =>
+      cents(f.received) ===
+      cents(materialsWithStock(f)) + cents(f.crewPay) + cents(f.crewMileagePaid) + cents(f.businessCostsTotal) + cents(f.shopStockLost) + cents(f.left);
+    const aug = computeOwnerMoney(both, AUG, TZ, TODAY);
+    const sep = computeOwnerMoney(both, ownerMoneyWindow("2026-09", TODAY), TZ, TODAY);
+    const year = computeOwnerMoney(both, YEAR, TZ, TODAY);
+    for (const f of [aug.totals, sep.totals, year.totals, ...year.months]) expect(cardAddsUp(f)).toBe(true);
+    // August reads as the ticket did before any of it went into stock: the whole $199.48.
+    expect(materialsWithStock(aug.totals)).toBe(199.48);
+    expect(stockLine(aug)).toBe(
+      "Materials & Bills includes $180.17 of shop stock, counted the month it was bought. In Stock Now: $100.00 at cost. It moves onto a job's profit as pieces are taken, and never counts against the draw twice.",
+    );
+    // September bought nothing and wrote $36.93 off: said as given back, never "-$36.93 of stock".
+    expect(materialsWithStock(sep.totals)).toBe(-36.93);
+    expect(stockLine(sep)).toBe(
+      "Materials & Bills gives back $36.93 of shop stock bought before, now in Shop Stock Lost. In Stock Now: $100.00 at cost. It moves onto a job's profit as pieces are taken, and never counts against the draw twice.",
+    );
+    expect(stockLine(year)).toContain("Materials & Bills includes $143.24 of shop stock, counted the month it was bought, less what moved to Shop Stock Lost.");
+    for (const m of [aug, sep, year]) expect(stockLine(m)).not.toMatch(/shelf/i);
+    // No stock money and nothing in stock: no line at all.
+    expect(stockLine(computeOwnerMoney(inputs([jobTicket]), AUG, TZ, TODAY))).toBeNull();
   });
 });
 

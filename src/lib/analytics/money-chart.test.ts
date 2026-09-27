@@ -221,6 +221,26 @@ describe("buildMoneyChartData: what this viewer's chart holds", () => {
     expect(defaultSeriesOn(d.series)).toEqual(["collected", "left"]);
   });
 
+  it("stock bought has no bar of its own: it is inside Materials & Bills, the same sum the card prints (Erik, 2026-09-27)", () => {
+    // August: $199.48 of receipts, $180.17 of it went into stock. September: a $36.93 write-off.
+    const m = money([
+      row("2026-08", { received: 1000, materialsAndBills: 19.31, putOnShelf: 180.17 }),
+      row("2026-09", { received: 500, putOnShelf: -36.93, shopStockLost: 36.93 }),
+    ]);
+    const d = buildMoneyChartData(m, { ownerFigures: true, leftLabel: "Owner's Draw" });
+    expect(d.series.map((s) => s.key)).toEqual(["collected", "left", "materials", "lost"]);
+    for (const s of d.series) expect(s.label).not.toMatch(/shelf/i);
+    expect(d.months.map((x) => x.values.materials)).toEqual([199.48, -36.93]);
+    expect(d.months.map((x) => x.values.lost)).toEqual([0, 36.93]);
+    // The bars left standing still account for every dollar: collected = costs + the draw.
+    for (const [i, x] of d.months.entries()) {
+      const v = x.values;
+      expect(Math.round(((v.materials ?? 0) + (v.lost ?? 0) + (v.left ?? 0)) * 100)).toBe(Math.round(m.months[i].received * 100));
+    }
+    // A remembered choice from before (the old stock series' key) falls away quietly to what exists.
+    expect(parseStoredSeries('["collected","shelf"]', d.series)).toEqual(["collected"]);
+  });
+
   it("Crew Mileage is offered only when the months hold some", () => {
     const m = etYear();
     m.months[9] = row("2026-07", { received: 20754.81, crewMileagePaid: 62.5 });

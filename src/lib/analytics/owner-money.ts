@@ -1016,6 +1016,37 @@ export function costFigure(n: number): string {
   return n > 0 ? `\u2212${formatCurrency(n)}` : `+${formatCurrency(Math.abs(n))}`;
 }
 
+/**
+ * MATERIALS & BILLS AS THE CARD AND THE CHART SAY IT (Erik, 2026-09-27: "we dont need a put on the
+ * shelf on the bar graph"). Shop stock bought is money gone on materials, so both readers show it
+ * INSIDE Materials & Bills, still in the month the ticket is dated (decision 1 is unchanged). The
+ * engine keeps it apart (putOnShelf), because the accountant's Stock Bought list checks against it;
+ * this one sum is the only place the two are joined, so the card and the chart never disagree and
+ * the card's lines still add up to the draw to the cent.
+ */
+export function materialsWithStock(f: Pick<OwnerMoneyFigures, "materialsAndBills" | "putOnShelf">): number {
+  return fromCents(toCents(f.materialsAndBills) + toCents(f.putOnShelf));
+}
+
+/**
+ * The one line under the card that says so (nothing silent): how much of Materials & Bills is shop
+ * stock, and what is in stock now. Null when the window has no stock money and nothing is in stock.
+ * A write-off moves a roll's dollars out of Materials & Bills and into Shop Stock Lost in the month
+ * it happens, so a window can hold less than nothing of stock: that is said as given back, never as
+ * "−$36.93 of shop stock".
+ */
+export function stockLine(m: OwnerMoney): string | null {
+  const stock = m.totals.putOnShelf;
+  const lost = Math.abs(m.totals.shopStockLost) >= 0.005;
+  if (Math.abs(stock) < 0.005 && Math.abs(m.onShelfNow) < 0.005) return null;
+  const parts: string[] = [];
+  if (stock >= 0.005)
+    parts.push(`Materials & Bills includes ${formatCurrency(stock)} of shop stock, counted the month it was bought${lost ? ", less what moved to Shop Stock Lost" : ""}.`);
+  else if (stock <= -0.005) parts.push(`Materials & Bills gives back ${formatCurrency(-stock)} of shop stock bought before, now in Shop Stock Lost.`);
+  parts.push(`In Stock Now: ${formatCurrency(m.onShelfNow)} at cost. It moves onto a job's profit as pieces are taken, and never counts against the draw twice.`);
+  return parts.join(" ");
+}
+
 /** "This Year (records start Jun 11)": the window, with the honest start when records begin late. */
 export function windowLabel(m: OwnerMoney): string {
   const start = m.caveats.find((c) => c.kind === "records_start") as { date: string } | undefined;
