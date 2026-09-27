@@ -5,8 +5,9 @@ import type { SiteField, SiteFields } from "./extract";
  * browser (which fills) and the server (which decides what is still missing).
  *
  * THE LAW: a suggestion fills an EMPTY box only. Whatever the person typed stays exactly as typed,
- * even if they typed it while the site was being read. Filling is not saving: nothing is written
- * until the person presses Save (the fill-vs-execute doctrine).
+ * even if they typed it while the site was being read. A box an earlier read filled, still marked
+ * and untouched, counts as empty (withoutSiteFill): it was never the person's. Filling is not
+ * saving: nothing is written until the person presses Save (the fill-vs-execute doctrine).
  */
 
 /** The boxes a site can fill. Category is a pick-list with a default, so it counts as "empty" only
@@ -80,6 +81,16 @@ export function applySiteFill<T extends FillValues>(
     }
   }
   return { next, filled };
+}
+
+/** The form with every box the site filled, and the person hasn't touched since, put back to blank
+ *  (`blank` says what blank is: "" for a box, the default for Category). A box still marked "From
+ *  their site" is the last read's, not the person's, so a new read starts from here and replaces it
+ *  whole: after a different address, nothing of the first site stays behind wearing its tag. */
+export function withoutSiteFill<T extends FillValues>(current: T, fromSite: Iterable<FillKey>, blank: FillValues): T {
+  const next = { ...current };
+  for (const k of fromSite) (next as FillValues)[k] = blank[k];
+  return next;
 }
 
 /** The boxes still empty, which is what the server is asked to find. */

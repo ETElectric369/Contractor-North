@@ -10,6 +10,7 @@ import {
   oneLineAddress,
   siteToForm,
   siteUrl,
+  withoutSiteFill,
   type FillValues,
 } from "./form-fill";
 
@@ -65,6 +66,53 @@ describe("applySiteFill: suggestions fill EMPTY boxes only", () => {
   it("asks the server only for the boxes that are empty", () => {
     expect(emptyBoxes({ ...BLANK, name: "Typed" }, { categoryOpen: false })).toEqual(["phone", "email", "address", "notes"]);
     expect(emptyBoxes(BLANK, { categoryOpen: true })).toEqual(["name", "phone", "email", "address", "notes", "category"]);
+  });
+});
+
+describe("reading a second site: the first one's untouched details are replaced whole", () => {
+  const FIRST = siteToForm({
+    name: "Pacific Power Co",
+    phones: ["(530) 555-0101"],
+    email: "help@pacific-power.example",
+    street: "1 Main St",
+    city: "Quincy",
+    state: "CA",
+    zip: "95971",
+    hours: "Mon–Fri 8 AM–5 PM",
+    category: "Utility",
+  });
+  const SECOND = siteToForm({ name: "Liberty Valley Utilities", email: "service@liberty-valley.example", category: "Utility" });
+
+  it("counts a box still marked from the first site as open, so a paste of another address reads it", () => {
+    const { next, filled } = applySiteFill(BLANK, FIRST, { categoryOpen: true });
+    expect(emptyBoxes(next, { categoryOpen: true })).toEqual(["category"]);
+    expect(emptyBoxes(withoutSiteFill(next, filled, BLANK), { categoryOpen: true })).toEqual(["name", "phone", "email", "address", "notes", "category"]);
+  });
+
+  it("fills from the second site, empties what only the first listed, and keeps what the person edited", () => {
+    const first = applySiteFill(BLANK, FIRST, { categoryOpen: true });
+    // The person corrected the phone, so its mark came off: it's theirs now.
+    const form = { ...first.next, phone: "(530) 555-0199" };
+    const marks = first.filled.filter((k) => k !== "phone");
+    const before = withoutSiteFill(form, marks, BLANK);
+    const { next, filled } = applySiteFill(before, SECOND, { categoryOpen: true });
+    expect(next).toEqual({
+      name: "Liberty Valley Utilities",
+      phone: "(530) 555-0199",
+      email: "service@liberty-valley.example",
+      address: "",
+      notes: "",
+      category: "Utility",
+    });
+    expect(filled).toEqual(["name", "email", "category"]);
+    expect(fillSummary(before, SECOND, filled)).toBe(
+      "Filled name, email and category from their site. Check them, then Save. That site didn't list an address.",
+    );
+  });
+
+  it("puts a category the site picked back to the default when the next site picks none", () => {
+    const first = applySiteFill(BLANK, FIRST, { categoryOpen: true });
+    expect(withoutSiteFill(first.next, first.filled, BLANK).category).toBe("Building Department");
   });
 });
 

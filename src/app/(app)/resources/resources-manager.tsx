@@ -10,7 +10,7 @@ import { Badge, toneClasses } from "@/components/ui/badge";
 import { EmptyState } from "@/components/page-header";
 import { useToast } from "@/components/toast";
 import { cn, formatPhone } from "@/lib/utils";
-import { applySiteFill, emptyBoxes, fillSummary, looksLikeWebAddress, siteToForm, type FillKey } from "@/lib/site-read/form-fill";
+import { applySiteFill, emptyBoxes, fillSummary, looksLikeWebAddress, siteToForm, withoutSiteFill, type FillKey } from "@/lib/site-read/form-fill";
 import { createResource, updateResource, deleteResource } from "./actions";
 import { fillFromSite } from "./fill-from-site";
 import { RESOURCE_CATEGORIES } from "./categories";
@@ -62,9 +62,13 @@ export function ResourcesManager({ resources, canEdit }: { resources: Resource[]
   // The form as it is NOW, for a site read that lands after the person kept typing: it fills what
   // is empty then, never what was empty when the read began. `session` changes whenever the form
   // is opened, closed or switched to another contact, so a late answer never fills the wrong one.
-  const live = useRef({ form, categoryOpen, session: 0 });
+  const live = useRef({ form, categoryOpen, fromSite, session: 0 });
   live.current.form = form;
   live.current.categoryOpen = categoryOpen;
+  live.current.fromSite = fromSite;
+  /** The form as a new read sees it: boxes the last read filled (still marked, untouched) are open
+   *  again, so reading another address replaces the first site's details instead of keeping them. */
+  const openForm = () => withoutSiteFill(live.current.form, live.current.fromSite, EMPTY_FORM);
 
   const filtered = useMemo(() => {
     const t = q.trim().toLowerCase();
@@ -139,17 +143,19 @@ export function ResourcesManager({ resources, canEdit }: { resources: Resource[]
     setReading(true);
     setFillNote(null);
     try {
-      const res = await fillFromSite({ url, need: emptyBoxes(live.current.form, { categoryOpen: live.current.categoryOpen }) });
+      const res = await fillFromSite({ url, need: emptyBoxes(openForm(), { categoryOpen: live.current.categoryOpen }) });
       if (session !== live.current.session) return;
       if (!res.ok) {
         setFillNote({ tone: "error", text: res.error });
         return;
       }
       const found = siteToForm(res.fields);
-      const before = live.current.form;
+      // The form as it is NOW, with the last read's untouched boxes open: this read's details
+      // replace them whole, and the marks are this read's alone.
+      const before = openForm();
       const { next, filled } = applySiteFill(before, found, { categoryOpen: live.current.categoryOpen });
       setForm(next);
-      if (filled.length) setFromSite((s) => new Set([...s, ...filled]));
+      setFromSite(new Set(filled));
       setFillNote({ tone: filled.length ? "ok" : "warn", text: [fillSummary(before, found, filled), res.note].filter(Boolean).join(" ") });
     } catch {
       if (session === live.current.session) setFillNote({ tone: "error", text: "Couldn't read that site. Check your connection, or type the details in." });
@@ -170,7 +176,7 @@ export function ResourcesManager({ resources, canEdit }: { resources: Resource[]
       setTimeout(() => setWebHint(true), 0);
       return;
     }
-    if (emptyBoxes(live.current.form, { categoryOpen: live.current.categoryOpen }).length === 0) return;
+    if (emptyBoxes(openForm(), { categoryOpen: live.current.categoryOpen }).length === 0) return;
     setTimeout(() => void fillFromTheirSite(willBe), 0);
   }
 
