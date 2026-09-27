@@ -3786,7 +3786,8 @@ export async function setInvoiceTitle(
  *  date set here is flagged so that restamp leaves it alone. `byHand: false` is the Undo of a pick
  *  on a date nobody had typed, so the untouched date goes back to being the terms'. Before 0366 the
  *  column isn't there: the date still saves (the flag is best effort), and with no column the send
- *  never restamps, so nothing is lost. */
+ *  never restamps. Nor is it lost once 0366 lands: 0366 adds the flag TRUE on every invoice that
+ *  already exists, so a date typed here before it (unflagged) is kept at Send too. */
 export async function setInvoiceDueDate(
   invoiceId: string,
   date: string | null,

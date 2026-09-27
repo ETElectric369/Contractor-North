@@ -17,7 +17,10 @@ import { mintThrowawayOrg } from "@/lib/throwaway-org.db-fixture";
  *   · a server (service client) write names nobody: hold_by stays null when it holds a job, and its
  *     promotion off hold (the clock's shared promote) clears everything;
  *   · leaving hold by ANY door clears the reason, the day and who held it; a job not on hold can't
- *     carry any of them.
+ *     carry any of them;
+ *   · (0366's invoices.due_date_by_hand) every invoice already there when 0366 adds the column reads
+ *     true, so a due date typed before it is never restamped at Send; a draft made after starts
+ *     false, and a second run of the file marks nothing new.
  *
  * Everything happens inside ONE transaction that is always rolled back, on throwaway companies
  * (lib/throwaway-org.db-fixture). 0366 is applied inside that transaction (the file on this branch,
@@ -40,6 +43,11 @@ d("every wait has a day (0366 jobs_hold_day)", () => {
   let ownerA = "";
   let ownerB = "";
   let techA = "";
+  // THE INVOICES THAT WERE THERE BEFORE 0366 (due_date_by_hand): made before the file runs, when the
+  // database doesn't have the column yet (the test database is at 0365); empty when it already has it.
+  let hadByHand = true;
+  let orgL = "";
+  let legacyDraft = "";
 
   const it = (name: string, fn: () => Promise<void>) =>
     vitestIt(name, async (ctx) => {
@@ -79,6 +87,21 @@ d("every wait has a day (0366 jobs_hold_day)", () => {
     await c.query("begin");
     await c.query("set local lock_timeout = '5s'");
     const had = (await one("select to_regprocedure('public.jobs_hold_day()') is not null as ok")).ok;
+    hadByHand = (
+      await one("select exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'invoices' and column_name = 'due_date_by_hand') as yes")
+    ).yes as boolean;
+    if (!hadByHand) {
+      // A draft whose due date someone typed on main (setInvoiceDueDate wrote due_date alone: no flag).
+      const l = await mintThrowawayOrg(c, { label: "0366 invoices before", techs: 0 });
+      orgL = l.orgId;
+      const lj = (await one("insert into public.jobs (org_id, name, status) values ($1, 'TEST 0366 invoice job', 'in_progress') returning id::text as id", [orgL])).id;
+      legacyDraft = (
+        await one(
+          "insert into public.invoices (org_id, job_id, invoice_number, status, invoice_kind, title, due_date) values ($1, $2, 'TEST-0366-L1', 'draft', 'standard', 'TEST typed before 0366', '2026-11-01') returning id::text as id",
+          [orgL, lj],
+        )
+      ).id;
+    }
     await c.query(M0366);
     console.warn(`[hold-day] 0366 ${had ? "was already on this database; ran it again" : "applied"} inside the test's own transaction, which is rolled back.`);
     await c.query("set local statement_timeout = '30s'");
@@ -185,5 +208,35 @@ d("every wait has a day (0366 jobs_hold_day)", () => {
     const r = await asPerson(techA, () => c.query("update public.jobs set status = 'on_hold', hold_reason = 'tech says so' where id = $1 returning id", [j]));
     expect(r.rowCount).toBe(0);
     expect((await hold(j)).status).toBe("in_progress");
+  });
+
+  vitestIt("0366 marks every invoice already there as dated by hand, so Send keeps a date typed before it; a draft made after starts false, and a second run changes neither", async (ctx) => {
+    if (!ready || hadByHand) return ctx.skip(); // the database already had the column: nothing from before to check
+    const byHand = async (id: string) => (await one("select due_date_by_hand as h, due_date::text as d from public.invoices where id = $1", [id])) as { h: boolean; d: string };
+    // markInvoiceSent's restamp, guard and all (restampDueOnFirstSend).
+    const restamp = async (id: string) =>
+      (await c.query("update public.invoices set due_date = '2026-10-11' where id = $1 and org_id = $2 and due_date_by_hand = false returning id", [id, orgL])).rowCount;
+
+    expect(await byHand(legacyDraft)).toEqual({ h: true, d: "2026-11-01" });
+    const lj = (await one("select job_id::text as j from public.invoices where id = $1", [legacyDraft])).j;
+    const fresh = (
+      await one(
+        "insert into public.invoices (org_id, job_id, invoice_number, status, invoice_kind, title, due_date) values ($1, $2, 'TEST-0366-L2', 'draft', 'standard', 'TEST made after 0366', '2026-10-30') returning id::text as id",
+        [orgL, lj],
+      )
+    ).id as string;
+    expect((await byHand(fresh)).h).toBe(false);
+
+    // Safe to run twice: the second run finds the column and marks nothing.
+    await c.query(M0366);
+    await c.query("set local statement_timeout = '30s'");
+    expect((await byHand(fresh)).h).toBe(false);
+    expect((await byHand(legacyDraft)).h).toBe(true);
+
+    // The first send: the date typed before 0366 stays; the untouched draft made after moves.
+    expect(await restamp(legacyDraft)).toBe(0);
+    expect(await restamp(fresh)).toBe(1);
+    expect(await byHand(legacyDraft)).toEqual({ h: true, d: "2026-11-01" });
+    expect((await byHand(fresh)).d).toBe("2026-10-11");
   });
 });

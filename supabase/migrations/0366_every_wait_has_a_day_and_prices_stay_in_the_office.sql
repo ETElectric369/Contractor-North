@@ -28,8 +28,9 @@
 --
 -- SAFE TO RUN TWICE: add column if not exists, create or replace, drop-then-create for the one
 -- policy it replaces and the two views' read-only triggers, revoke/grant (idempotent), a grant
--- list rebuilt from the live columns. It writes NO company data and
--- backfills nothing.
+-- list rebuilt from the live columns. It writes NO company data and backfills nothing, with one
+-- catalog-only exception: invoices.due_date_by_hand reads true on every invoice that exists when it is
+-- added (A, below), so no date typed before 0366 is restamped at Send.
 --
 -- NOTHING IS REPLACED FROM AN OLD BODY except one policy: forms_read, whose live text (read from
 -- pg_policies on the test database 2026-09-27; the test database mirrors production's policies,
@@ -52,7 +53,9 @@
 --                              Never valid_until: that is the customer's offer window, printed on
 --                              the estimate itself.
 --   invoices.due_date_by_hand  true when a person typed the due date, so Send doesn't restamp it
---                              (lane 4 reads it, W1-27).
+--                              (lane 4 reads it, W1-27). TRUE ON EVERY INVOICE THAT EXISTS WHEN THIS
+--                              RUNS (nobody can tell which of their dates were typed, and main never
+--                              restamps), false on every one made after.
 --
 --   jobs_hold_day (BEFORE INSERT OR UPDATE ON jobs), security definer so it may call split_org_tz
 --   (0288, revoked from the signed-in role), the same company-timezone helper 0360 uses:
@@ -157,7 +160,26 @@ alter table public.jobs
 
 alter table public.quotes add column if not exists follow_up_at date;
 
-alter table public.invoices add column if not exists due_date_by_hand boolean not null default false;
+-- due_date_by_hand: EVERY INVOICE THAT EXISTS WHEN THIS RUNS READS TRUE; every one made after it
+-- starts false. Before 0366 nothing recorded whether a person typed a due date (main's due-date Save
+-- and Nort's invoice.setDueDate wrote due_date alone, and so did this release's own code in the
+-- window before this ran), so an existing draft's date may be one somebody picked, and a first send
+-- would otherwise restamp it to send day + terms without a word. True keeps what main does today:
+-- Send never moves their date. Only drafts made after this runs get the first-send restamp.
+-- HOW, WITHOUT TOUCHING A ROW: the column is added with default true (Postgres keeps a constant
+-- default in the catalog, so no row is rewritten, no trigger fires and no updated_at moves), then its
+-- default becomes false for new rows. Only when this run adds the column: a second run finds it and
+-- changes nothing, so a draft made after the first run is never marked.
+do $bf$
+begin
+  if not exists (
+    select 1 from information_schema.columns
+     where table_schema = 'public' and table_name = 'invoices' and column_name = 'due_date_by_hand'
+  ) then
+    alter table public.invoices add column due_date_by_hand boolean not null default true;
+    alter table public.invoices alter column due_date_by_hand set default false;
+  end if;
+end $bf$;
 
 comment on column public.jobs.hold_until is
   'The day a job on hold comes back to Needs You with its reason (0366). Set when the job goes on hold (a week out in the company''s timezone unless someone picks a day), moved by Snooze, cleared when the job comes off hold by any door (jobs_hold_day). Null on a held job only for one held before 0366: that reads as due now.';
@@ -166,7 +188,7 @@ comment on column public.jobs.hold_by is
 comment on column public.quotes.follow_up_at is
   'The day to follow up on an estimate the customer has not answered (0366). Only the follow-up; valid_until is the customer''s offer window and never moves with it.';
 comment on column public.invoices.due_date_by_hand is
-  'True when a person typed this invoice''s due date (0366), so sending it keeps that date instead of restamping one from the payment terms.';
+  'True when a person typed this invoice''s due date (0366), so sending it keeps that date instead of restamping one from the payment terms. True on every invoice that existed when 0366 added it (whether its date was typed was never recorded before), false by default on every one made after.';
 
 -- ── A. jobs_hold_day ────────────────────────────────────────────────────────────────────────
 
@@ -412,6 +434,11 @@ begin
       where c.table_schema = 'public' and c.table_name = w.tbl and c.column_name = w.col);
   if v_names is not null then
     raise exception '0366: these columns are missing: %. Nothing was changed.', v_names;
+  end if;
+  -- due_date_by_hand: a new invoice starts false (its date is the terms' until someone picks one).
+  if (select c.column_default from information_schema.columns c
+       where c.table_schema = 'public' and c.table_name = 'invoices' and c.column_name = 'due_date_by_hand') is distinct from 'false' then
+    raise exception '0366: invoices.due_date_by_hand does not default to false for new invoices. Nothing was changed.';
   end if;
   if not exists (select 1 from pg_constraint where conname = 'jobs_hold_by_fkey' and conrelid = 'public.jobs'::regclass) then
     raise exception '0366: jobs.hold_by has no jobs_hold_by_fkey. Nothing was changed.';

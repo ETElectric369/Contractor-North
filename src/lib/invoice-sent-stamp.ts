@@ -65,9 +65,11 @@ export async function markInvoiceSent(
  * the WHERE (`due_date_by_hand = false`), so a date picked a moment ago is never overwritten, and
  * .select("id") says whether a row moved (a zero-row UPDATE is a 204). Before 0366 the column isn't
  * there: the guard fails as a missing column (42703 / PGRST204) and the date stays exactly as it
- * was, which is today's behaviour. Any other failure is reported and the date stays. Scoped to the
- * invoice's own org (the recurring cron sends on a service client, which has no boundary but the
- * one typed here). The callers recalc (and so drop the stored PDF) after this, so the PDF and the
+ * was, which is today's behaviour. After 0366 an invoice that existed before it reads
+ * due_date_by_hand = true (0366 adds the column true on every existing row: nothing recorded a typed
+ * date before), so its date stays too; only drafts made after 0366 are restamped. Any other
+ * failure is reported and the date stays. Scoped to the invoice's own org (the recurring cron sends
+ * on a service client, which has no boundary but the one typed here). The callers recalc (and so drop the stored PDF) after this, so the PDF and the
  * customer's page read the stamped row.
  *
  * Exported for the one first-send door that doesn't go through markInvoiceSent: setInvoiceStatus's
