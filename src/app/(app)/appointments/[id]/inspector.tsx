@@ -31,7 +31,7 @@ import { AddressAutocomplete } from "@/components/address-autocomplete";
 import { LinkPicker } from "./link-picker";
 import { TellNort } from "@/components/tell-nort";
 import { hearIntoPlaybook } from "../hear-actions";
-import { saveInspectionAnswers, saveInspectionCapture, setAppointmentPlace } from "../actions";
+import { addInspectionPhotos, saveInspectionAnswers, saveInspectionCapture, setAppointmentPlace } from "../actions";
 import type { WalkthroughAccess } from "@/lib/inspection/walkthrough-access";
 
 /** A numeric field that can be EMPTY. Deliberately not NumberInput: its value is a `number` and
@@ -595,8 +595,12 @@ export function Inspector({
       }
       const next = [...photos, ...added];
       setPhotos(next);
-      // Persist immediately — a closed tab must not lose the shots.
-      const r = await saveInspectionCapture(appointmentId, { photos: next.map((p) => p.path) });
+      // Persist immediately — a closed tab must not lose the shots. A crew lead sends only the ones
+      // he just took, appended on the server: his page's list is from when it opened, and sending it
+      // whole would put back a photo the office has taken off since (0356).
+      const r = crew
+        ? await addInspectionPhotos(appointmentId, added.map((p) => p.path))
+        : await saveInspectionCapture(appointmentId, { photos: next.map((p) => p.path) });
       if (!r.ok) setError(r.error ?? "Couldn't save the photos.");
       else setSavedAt(Date.now());
     } catch (e: unknown) {

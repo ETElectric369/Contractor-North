@@ -42,7 +42,7 @@ vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("@/lib/calendar-sync", () => ({ pushCalendarItem: vi.fn(async () => {}), deleteCalendarItem: vi.fn(async () => {}) }));
 vi.mock("@/lib/push", () => ({ sendPushToProfiles: vi.fn(async () => {}) }));
 
-import { saveInspectionAnswers, saveInspectionCapture } from "./actions";
+import { addInspectionPhotos, saveInspectionAnswers, saveInspectionCapture } from "./actions";
 
 function client() {
   return {
@@ -127,6 +127,15 @@ describe("the office: unchanged", () => {
     expect(db.updates[0].capture.quote_id).toBe("q-9");
   });
 
+  it("a photo appended by someone who is office staff by then is the office's UPDATE, appended too", async () => {
+    db.staff = true;
+    const taken = "org-1/appointments/appt-1/5-taken.jpg";
+    expect(await addInspectionPhotos("appt-1", [taken])).toEqual({ ok: true, id: "appt-1" });
+    expect(db.rpcCalls).toEqual([]);
+    expect(db.updates).toHaveLength(1);
+    expect(db.updates[0].capture.photos).toEqual([PHOTO_OFFICE, taken]);
+  });
+
   it("answers are an UPDATE, and the office may change a price", async () => {
     db.staff = true;
     const r = await saveInspectionAnswers("appt-1", "sheet-1", { work: "Remodel", scope: [{ code: "R1", qty: 2, price: 650 }] });
@@ -191,6 +200,26 @@ describe("a crew lead on the visit: through save_walkthrough_capture", () => {
     expect(await saveInspectionCapture("appt-1", { photos: [PHOTO_OFFICE, PHOTO_LEAD] })).toEqual({ ok: true, id: "appt-1" });
     expect(db.rpcCalls).toHaveLength(2);
     expect(db.rpcCalls[1].args.p_capture.photos).toEqual([PHOTO_OFFICE, officeNew, PHOTO_LEAD]);
+  });
+
+  it("a photo he takes is APPENDED to the stored list: one the office took off while his page was open stays off", async () => {
+    // His page opened with [office, removed]; the office has since taken `removed` off (its file is
+    // still in the folder). He takes a new one: only the new one travels, and the stored list gains it.
+    const removed = "org-1/appointments/appt-1/1b-removed.jpg";
+    const taken = "org-1/appointments/appt-1/4-taken.jpg";
+    expect(await addInspectionPhotos("appt-1", [taken])).toEqual({ ok: true, id: "appt-1" });
+    expect(db.updates).toEqual([]);
+    expect(db.rpcCalls).toHaveLength(1);
+    expect(db.rpcCalls[0].fn).toBe("save_walkthrough_capture");
+    expect(db.rpcCalls[0].args.p_capture.photos).toEqual([PHOTO_OFFICE, taken]);
+    expect(db.rpcCalls[0].args.p_capture.photos).not.toContain(removed);
+    expect(db.rpcCalls[0].args.p_capture.notes).toBe("office note"); // nothing else he didn't send moves
+  });
+
+  it("nothing taken is nothing to save", async () => {
+    expect(await addInspectionPhotos("appt-1", [])).toEqual({ ok: true, id: "appt-1" });
+    expect(db.rpcCalls).toEqual([]);
+    expect(db.updates).toEqual([]);
   });
 
   it("before 0356 is applied: a plain sentence, nothing saved, never PGRST202", async () => {

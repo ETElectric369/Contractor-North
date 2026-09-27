@@ -14,7 +14,8 @@ import { mintThrowawayOrg } from "@/lib/throwaway-org.db-fixture";
  *
  *   · a crew lead ON the visit saves the capture (notes, a photo of this visit) and the answers
  *     through save_walkthrough_capture; quote_id stays the office's;
- *   · he cannot take a photo off, add one from another folder, touch a priced answer (add, change or
+ *   · he cannot take a photo off, add one from another folder or one he didn't upload himself (so a
+ *     photo the office took off stays off, though its file is still in the folder), touch a priced answer (add, change or
  *     clear), switch or clear a saved sheet, or name a form that isn't a walk-through sheet;
  *   · a crew lead NOT on the visit, a plain tech (who can READ his visit under 0227), another
  *     company's crew lead and a deactivated crew lead are all refused, and nothing moves;
@@ -99,6 +100,15 @@ d("a crew lead fills in the walk-through (0356)", () => {
       templateId ?? null,
       answers === undefined || answers === null ? null : JSON.stringify(answers),
     ]);
+  /** A file in the documents bucket, uploaded by `owner` (what the storage API records on upload). */
+  const plant = async (name: string, owner: string) => {
+    const r = await c.query(
+      "insert into storage.objects (bucket_id, name, owner, owner_id) values ('documents', $1, $2::uuid, $3) returning name",
+      [name, owner, owner],
+    );
+    expect(r.rowCount).toBe(1);
+    return name;
+  };
   const row = (id: string) =>
     one(
       `select capture, inspection_template_id::text as sheet, inspection_answers as answers, status, title, location, notes,
@@ -203,6 +213,7 @@ d("a crew lead fills in the walk-through (0356)", () => {
   });
 
   it("the crew lead on the visit saves notes and a photo of this visit; quote_id stays the office's", async () => {
+    await plant(`${prefixA}1-lead.jpg`, leadId); // he uploaded it (the Inspector's Take / Add)
     const r = await save(leadId, apptA, { notes: "crew lead notes", photos: [officePhotoA, `${prefixA}1-lead.jpg`], quote_id: "not-his" });
     expect(r.error).toBeNull();
     expect(r.rows[0].id).toBe(apptA);
@@ -219,9 +230,31 @@ d("a crew lead fills in the walk-through (0356)", () => {
     expect(off.error).toBe("Only the office can take a photo off the walk-through.");
     for (const bad of [`${orgId}/employees/pay.pdf`, `${prefixA}../../employees/pay.pdf`, `${orgId}/appointments/${apptB}/x.jpg`]) {
       const r = await save(leadId, apptA, { photos: [...before.capture.photos, bad] });
-      expect(r.error, bad).toBe("A photo on the walk-through has to be one taken for this visit.");
+      expect(r.error, bad).toBe("A photo you put on the walk-through has to be one you took for this visit.");
     }
     expect((await row(apptA)).capture).toEqual(before.capture);
+  });
+
+  it("a photo the office took off stays off: its file is still in the visit's folder, and it isn't his to put back", async () => {
+    // The office uploads a photo and then takes it off the list (the file stays in the folder).
+    const officeTook = await plant(`${prefixA}2-office-removed.jpg`, ownerId);
+    const on = await row(apptA);
+    expect((await save(ownerId, apptA, { photos: [...on.capture.photos, officeTook] })).error).toBeNull();
+    expect((await save(ownerId, apptA, { photos: on.capture.photos })).error).toBeNull();
+    const before = await row(apptA);
+    expect(before.capture.photos).not.toContain(officeTook);
+    // His page still holds the old list; his next save (or a direct call) sends it back with his new one.
+    const his = await plant(`${prefixA}3-lead-new.jpg`, leadId);
+    const stale = await save(leadId, apptA, { photos: [...before.capture.photos, officeTook, his] });
+    expect(stale.code).toBe("42501");
+    expect(stale.error).toBe("A photo you put on the walk-through has to be one you took for this visit.");
+    // A path in the folder that no one uploaded is no better.
+    const ghost = await save(leadId, apptA, { photos: [...before.capture.photos, `${prefixA}9-never-uploaded.jpg`] });
+    expect(ghost.error).toBe("A photo you put on the walk-through has to be one you took for this visit.");
+    expect((await row(apptA)).capture).toEqual(before.capture);
+    // Only what he just took travels (addInspectionPhotos), and that lands.
+    expect((await save(leadId, apptA, { photos: [...before.capture.photos, his] })).error).toBeNull();
+    expect((await row(apptA)).capture.photos).toEqual([...before.capture.photos, his]);
   });
 
   it("his answers land; a priced answer stays exactly as the office left it, whatever he sends", async () => {

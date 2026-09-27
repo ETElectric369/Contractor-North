@@ -44,8 +44,11 @@
 --        stored whatever the payload says: he cannot add one, change one or clear one.
 --      · THE SHEET: he may set it while none is stored; switching a stored sheet is the office's
 --        (a switch clears every answer on the visit).
---      · PHOTOS: he adds them, each under <company>/appointments/<visit>/; every photo already on
---        the list stays on it. Taking one off is the office's.
+--      · PHOTOS: he adds them, each one a file HE uploaded (storage.objects.owner_id) under
+--        <company>/appointments/<visit>/; every photo already on the list stays on it. Taking one
+--        off is the office's, and so it STAYS off: a photo the office took off (its file is still in
+--        the visit's folder) is not his to put back, whether a stale page or a direct call sends it.
+--        The app sends only the photos he just took (addInspectionPhotos), never his page's list.
 --    For everyone: quote_id inside capture (the write-up backlink saveQuote stamps) is never the
 --    caller's to write; it is carried from the stored row. A sheet id must be one of the company's
 --    walk-through sheets.
@@ -101,8 +104,9 @@ begin
      or not exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'appointments' and column_name = 'inspection_template_id')
      or not exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'appointments' and column_name = 'capture')
      or not exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'forms' and column_name = 'playbook')
-     or not exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'profiles' and column_name = 'crew_lead') then
-    raise exception '0356: a column this needs (appointments.capture / inspection_answers / inspection_template_id, forms.playbook, profiles.crew_lead) is missing. Nothing was changed.';
+     or not exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'profiles' and column_name = 'crew_lead')
+     or not exists (select 1 from information_schema.columns where table_schema = 'storage' and table_name = 'objects' and column_name = 'owner_id') then
+    raise exception '0356: a column this needs (appointments.capture / inspection_answers / inspection_template_id, forms.playbook, profiles.crew_lead, storage.objects.owner_id) is missing. Nothing was changed.';
   end if;
 end $$;
 
@@ -223,16 +227,21 @@ begin
       ) then
         raise exception 'Only the office can take a photo off the walk-through.' using errcode = '42501';
       end if;
-      -- And every new one is this visit's own.
+      -- And every new one is this visit's own AND his: a file he uploaded himself. The prefix alone
+      -- isn't enough: a photo the office took off keeps its file in the visit's folder, so a stale
+      -- list (or a direct call) could otherwise put it straight back.
       v_prefix := v_org::text || '/appointments/' || v_appt.id::text || '/';
       if exists (
         select 1 from jsonb_array_elements(coalesce(v_capture -> 'photos', '[]'::jsonb)) n(p)
          where not (v_stored @> jsonb_build_array(n.p))
            and (jsonb_typeof(n.p) <> 'string'
                 or left(n.p #>> '{}', length(v_prefix)) <> v_prefix
-                or position('..' in (n.p #>> '{}')) > 0)
+                or position('..' in (n.p #>> '{}')) > 0
+                or not exists (
+                  select 1 from storage.objects o
+                   where o.bucket_id = 'documents' and o.name = n.p #>> '{}' and o.owner_id = v_uid::text))
       ) then
-        raise exception 'A photo on the walk-through has to be one taken for this visit.' using errcode = '42501';
+        raise exception 'A photo you put on the walk-through has to be one you took for this visit.' using errcode = '42501';
       end if;
     end if;
   end if;

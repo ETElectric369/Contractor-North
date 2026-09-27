@@ -60,9 +60,11 @@ function omitPrice(o: Record<string, unknown>): Record<string, unknown> {
 }
 
 /**
- * A crew lead's photo list: every photo already on the walk-through stays, in its place, and his
- * new ones follow. He adds; the office takes one off. Merged on the server before the save, so a
- * photo the office added while his page was open is kept rather than refused.
+ * A crew lead's photo list: every photo already on the walk-through stays, in its place, and the
+ * ones he adds follow. He adds; the office takes one off. Merged on the server before the save, so a
+ * photo the office added while his page was open is kept rather than refused. `next` is what he
+ * ADDS (the photos just taken), never his page's whole list: a stale list would bring back a photo
+ * the office took off.
  */
 export function keepStoredPhotos(stored: readonly string[], next: readonly string[]): string[] {
   return [...new Set([...stored, ...next])];

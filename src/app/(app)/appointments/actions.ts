@@ -629,6 +629,27 @@ export async function saveInspectionCapture(
 }
 
 /**
+ * THE PHOTOS JUST TAKEN, APPENDED to what is stored: the crew lead's upload (0356).
+ *
+ * His page sends only the paths he just took, never its whole list. A whole list is the page's list
+ * from when it opened, so a photo the office took off in the meantime would ride back in on his next
+ * upload (the stored list merged with a stale one is the stale one). Appended here, the office's
+ * removal stands; and the database refuses any new photo that isn't a file he uploaded himself.
+ * Someone who is office staff by the time this runs gets the same append through the office's save.
+ */
+export async function addInspectionPhotos(id: string, paths: string[]): Promise<Result> {
+  const add = (Array.isArray(paths) ? paths : []).filter((p): p is string => typeof p === "string" && p.trim() !== "");
+  if (!add.length) return { ok: true, id };
+  const ctx = await requireStaff();
+  if ("error" in ctx) {
+    if (ctx.error === STAFF_ONLY) return saveCaptureAsCrewLead(id, { photos: add });
+    return { ok: false, error: ctx.error };
+  }
+  const { data: existing } = await ctx.supabase.from("appointments").select("capture").eq("id", id).maybeSingle();
+  return saveInspectionCapture(id, { photos: keepStoredPhotos(parseInspectorCapture(existing?.capture ?? null).photos, add) });
+}
+
+/**
  * The legacy four-key entry point, kept as a THIN MERGING WRAPPER.
  *
  * A cached bundle keeps calling this for hours after any deploy, and an op queued offline before
@@ -839,8 +860,10 @@ async function saveCaptureAsCrewLead(id: string, patch: CapturePatch): Promise<R
     if (readErr) return { failed: { ok: false, error: dbError(readErr) } as Result };
     if (!existing) return { failed: { ok: false, error: "Appointment not found." } as Result };
     const stored = (existing as { capture?: unknown }).capture ?? null;
-    // He adds photos; every one already on the list stays (the office takes one off). Merged here so
-    // a photo the office added while his page was open is kept, not refused.
+    // He adds photos; every one already on the list stays (the office takes one off). His `photos`
+    // are what he ADDS (addInspectionPhotos sends only the ones just taken), appended to the stored
+    // list here, so a photo the office added while his page was open is kept, not refused, and one
+    // the office took off isn't in what he sends to come back.
     const fixed: CapturePatch =
       patch.photos !== undefined ? { ...patch, photos: keepStoredPhotos(parseInspectorCapture(stored).photos, patch.photos) } : patch;
     return crew.supabase.rpc("save_walkthrough_capture", { p_appointment: id, p_capture: mergeCaptureSections(stored, fixed) });
