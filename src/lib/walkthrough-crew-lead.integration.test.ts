@@ -24,6 +24,8 @@ import { mintThrowawayOrg } from "@/lib/throwaway-org.db-fixture";
  *   · crew_lead itself is the office's: a tech can't hand it to himself (it was self-service before
  *     0356) and a crew lead can't drop it; the owner can; other self-edits still work;
  *   · with nothing to save it writes nothing and only answers may / may not (the page's probe);
+ *   · a visit's FILES: only the office or the file's uploader deletes, overwrites or moves one
+ *     (docs_update / docs_delete); uploading, and every other folder, keep 0213's rule;
  *   · anon can't call it.
  *
  * Everything happens inside ONE transaction that is always rolled back, on throwaway companies
@@ -391,6 +393,33 @@ d("a crew lead fills in the walk-through (0356)", () => {
     expect(a.capture.photos).toEqual([]);
     expect(a.capture.quote_id).toBe("q-0356");
     expect(a.answers).toEqual({ scope: [{ code: "R1", qty: 2, price: 650 }] });
+  });
+
+  it("a visit's files: only the office or the uploader deletes, overwrites or moves one; other folders keep 0213's rule", async () => {
+    // What the Storage API sets before its own DELETE (storage.protect_delete); RLS still decides the rows.
+    await c.query("select set_config('storage.allow_delete_query', 'true', true)");
+    const exists = async (name: string) =>
+      (await one("select count(*)::int as n from storage.objects where bucket_id = 'documents' and name = $1", [name])).n === 1;
+    const office = await plant(`${prefixA}20-office.jpg`, ownerId);
+    const onObj = (uid: string, sql: string, name: string) => tryAs(uid, sql, [name]);
+    const del = "delete from storage.objects where bucket_id = 'documents' and name = $1 returning name";
+    // A plain tech not on the visit, and the crew lead on it: neither removes, overwrites or moves the office's file.
+    for (const who of [techId, leadId]) {
+      expect((await onObj(who, del, office)).rows, who).toEqual([]);
+      expect((await onObj(who, "update storage.objects set metadata = '{\"swapped\":true}'::jsonb where bucket_id = 'documents' and name = $1 returning name", office)).rows).toEqual([]);
+      expect((await onObj(who, `update storage.objects set name = '${orgId}/moved.jpg' where bucket_id = 'documents' and name = $1 returning name`, office)).rows).toEqual([]);
+    }
+    expect(await exists(office)).toBe(true);
+    // Uploading into a visit's folder is unchanged, and his own upload is his to replace or delete.
+    const own = `${orgId}/appointments/${apptC}/1-tech.jpg`;
+    expect((await tryAs(techId, "insert into storage.objects (bucket_id, name, owner, owner_id) values ('documents', $1, $2::uuid, $3) returning name", [own, techId, techId])).error).toBeNull();
+    expect((await onObj(techId, "update storage.objects set metadata = '{\"v\":2}'::jsonb where bucket_id = 'documents' and name = $1 returning name", own)).rows).toHaveLength(1);
+    expect((await onObj(techId, del, own)).rows).toHaveLength(1);
+    // Every other folder keeps 0213's rule: a member still deletes a job's file.
+    const jobFile = await plant(`${orgId}/some-job/0-office.pdf`, ownerId);
+    expect((await onObj(techId, del, jobFile)).rows).toHaveLength(1);
+    // The office removes a visit's file.
+    expect((await onObj(ownerId, del, office)).rows).toHaveLength(1);
   });
 
   it("anon can't call it; a signed-in member can", async () => {

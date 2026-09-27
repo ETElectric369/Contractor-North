@@ -66,10 +66,18 @@
 --
 -- ── STORAGE ────────────────────────────────────────────────────────────────────────────────
 --
--- Nothing changes. documents' docs_insert / docs_read already let any active member of the company
--- write and read <company>/appointments/... (the staff-only folders are employees, organize,
--- bug-screenshots and picks: docs_path_is_staff_only). The photo lands through that, as it always
--- did for a tech; this function is what puts it on the walk-through's list.
+-- C. UPLOADING stays as it is: documents' docs_insert / docs_read let any active member of the
+--    company write and read <company>/appointments/... (the staff-only folders are employees,
+--    organize, bug-screenshots and picks: docs_path_is_staff_only). The photo lands through that,
+--    as it always did for a tech; this function is what puts it on the walk-through's list.
+--
+--    DELETING, OVERWRITING OR MOVING a visit's file did NOT stay put, and "taking a photo off is the
+--    office's" depends on it: docs_delete / docs_update (0213) let ANY active member remove, upsert
+--    over or move any object under <company>/appointments/<any visit>/, so a plain tech not even on
+--    the visit could empty its photos with his own session, and the list would point at dead or
+--    swapped files. Now, under appointments/, only the office or the person who uploaded the file
+--    deletes, overwrites or moves it. Every other folder keeps 0213's rule exactly. (No app path has
+--    a non-office member delete, overwrite or move a visit's file; the storage sweep is the server.)
 --
 -- ── WHAT IT CHANGES TODAY (production, read 2026-09-26) ────────────────────────────────────
 --
@@ -79,13 +87,15 @@
 -- folder, so none of the rules above would have refused anything already written.
 -- Neither function exists on production (checked), so nothing here replaces a live body.
 --
--- LOCKS: CREATE TRIGGER takes SHARE ROW EXCLUSIVE on profiles for an instant (lock_timeout 3s
---        below: it waits at most that long, then fails and changes nothing). Two functions. No DDL
---        on appointments.
+-- LOCKS: CREATE TRIGGER takes SHARE ROW EXCLUSIVE on profiles for an instant, and replacing the two
+--        storage policies takes ACCESS EXCLUSIVE on storage.objects for an instant (lock_timeout 3s
+--        below: each waits at most that long, then fails and changes nothing). Two functions. No
+--        DDL on appointments.
 -- ORDER: after 0227 (appointments_select / appointments_write), 0224 (profile_self_edit_ok), 0154
 --        (is_privileged_writer), 0165 (inspection_template_id / inspection_answers), 0179
---        (forms.playbook). Refuses, having changed nothing, if any is missing.
--- SAFE TO RE-RUN: create or replace; drop trigger if exists; self-checks at the end.
+--        (forms.playbook), 0213 (docs_path_is_staff_only, the documents policies). Refuses, having
+--        changed nothing, if any is missing.
+-- SAFE TO RE-RUN: create or replace; drop trigger / policy if exists; self-checks at the end.
 -- ═══════════════════════════════════════════════════════════════════════════
 
 set local lock_timeout = '3s';
@@ -102,6 +112,11 @@ begin
      or to_regprocedure('public.is_org_staff()') is null
      or to_regprocedure('public.app_user_role()') is null then
     raise exception '0356: a trust-root helper (auth_org_id, is_org_staff, app_user_role, is_privileged_writer) is missing. Nothing was changed.';
+  end if;
+  if to_regprocedure('public.docs_path_is_staff_only(text)') is null
+     or not exists (select 1 from pg_policies where schemaname = 'storage' and tablename = 'objects' and policyname = 'docs_update')
+     or not exists (select 1 from pg_policies where schemaname = 'storage' and tablename = 'objects' and policyname = 'docs_delete') then
+    raise exception '0356: the documents bucket''s staff split (0213: docs_path_is_staff_only, docs_update, docs_delete) is not on this database. Apply 0213 first. Nothing was changed.';
   end if;
   if not exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'appointments' and column_name = 'inspection_answers')
      or not exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'appointments' and column_name = 'inspection_template_id')
@@ -368,6 +383,28 @@ comment on function public.save_walkthrough_capture(uuid, jsonb, uuid, jsonb) is
 revoke execute on function public.save_walkthrough_capture(uuid, jsonb, uuid, jsonb) from public, anon;
 grant execute on function public.save_walkthrough_capture(uuid, jsonb, uuid, jsonb) to authenticated, service_role;
 
+-- ── C. a visit's files: only the office or their uploader deletes, overwrites or moves them ──
+-- 0213's policies word for word, plus one clause: under <company>/appointments/, the office or the
+-- file's own uploader (storage.objects.owner_id). docs_update has no WITH CHECK, so the same rule
+-- holds for where a move lands.
+drop policy if exists docs_update on storage.objects;
+create policy docs_update on storage.objects for update
+  using (
+    bucket_id = 'documents'
+    and (storage.foldername(name))[1] = (public.auth_org_id())::text
+    and (not public.docs_path_is_staff_only(name) or public.is_org_staff())
+    and (coalesce((storage.foldername(name))[2], '') <> 'appointments' or public.is_org_staff() or owner_id = (auth.uid())::text)
+  );
+
+drop policy if exists docs_delete on storage.objects;
+create policy docs_delete on storage.objects for delete
+  using (
+    bucket_id = 'documents'
+    and (storage.foldername(name))[1] = (public.auth_org_id())::text
+    and (not public.docs_path_is_staff_only(name) or public.is_org_staff())
+    and (coalesce((storage.foldername(name))[2], '') <> 'appointments' or public.is_org_staff() or owner_id = (auth.uid())::text)
+  );
+
 -- ── Self-check ──────────────────────────────────────────────────────────────────────────────────
 do $$
 begin
@@ -401,5 +438,12 @@ begin
   ) then
     raise exception '0356: the appointments write policy is not the office-only one 0227 made. Nothing was changed.';
   end if;
-  raise notice '0356: a crew lead on the visit fills in the walk-through through save_walkthrough_capture; only an owner or admin makes a crew lead.';
+  -- A visit's files: delete and update (overwrite, move) are the office's or the uploader's.
+  if (select count(*) from pg_policies
+       where schemaname = 'storage' and tablename = 'objects' and policyname in ('docs_update', 'docs_delete')
+         and qual like '%''appointments''%' and qual like '%owner_id%' and qual like '%is_org_staff()%'
+         and qual like '%docs_path_is_staff_only(name)%' and qual like '%auth_org_id()%') <> 2 then
+    raise exception '0356: docs_update / docs_delete do not hold a visit''s files to the office or their uploader. Nothing was changed.';
+  end if;
+  raise notice '0356: a crew lead on the visit fills in the walk-through through save_walkthrough_capture; only an owner or admin makes a crew lead; only the office or the uploader deletes, overwrites or moves a visit''s file.';
 end $$;
