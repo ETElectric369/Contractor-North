@@ -189,6 +189,30 @@ d("0362 + 0363: bank lines and rules are the company's own, and a line counts on
     expect(await refused("insert into bank_rules (org_id, direction, merchant_key, choice, min_cents) values ($1, 'out', 'dental', 'personal', 500)", [orgA])).toBe("23514");
   });
 
+  it("a bank download or a supplier's list in the tray is staff-only, even on a row a tech made (0365)", async () => {
+    if (!ready()) return;
+    const forged = JSON.stringify({ bankImport: { download: { v: 1, name: "x", last4: null, from: "2001-01-02", to: "2001-01-02", lines: [], skipped: [], header: [] } } });
+    const list = JSON.stringify({ openList: { list: null, needs: null } });
+    await as(techA);
+    // A tech's own snapped receipt is as before.
+    expect(await refused("insert into organized_items (org_id, title, created_by, status, proposal) values ($1, 'TEST 0365 receipt', $2, 'needs_review', '{}'::jsonb)", [orgA, techA])).toBeNull();
+    expect((await c.query("select id from organized_items where title = 'TEST 0365 receipt'")).rowCount).toBe(1);
+    // A row of their own carrying a bank download or a supplier's list is refused.
+    expect(await refused("insert into organized_items (org_id, title, created_by, status, proposal) values ($1, 'TEST 0365 forged', $2, 'needs_review', $3::jsonb)", [orgA, techA, forged])).toBe("42501");
+    expect(await refused("insert into organized_items (org_id, title, created_by, status, proposal) values ($1, 'TEST 0365 forged', $2, 'needs_review', $3::jsonb)", [orgA, techA, list])).toBe("42501");
+    // Nor can they turn their receipt into one.
+    expect(await refused("update organized_items set proposal = $1::jsonb where title = 'TEST 0365 receipt'", [forged])).toBe("42501");
+    await asServer();
+    // One staff made: the tech who made nothing of it never sees it, even as its creator.
+    await c.query("insert into organized_items (org_id, title, created_by, status, proposal) values ($1, 'TEST 0365 bank', $2, 'needs_review', $3::jsonb)", [orgA, techA, forged]);
+    await as(techA);
+    expect((await c.query("select id from organized_items where title = 'TEST 0365 bank'")).rowCount).toBe(0);
+    await asServer();
+    await as(staffA);
+    expect((await c.query("select id from organized_items where title = 'TEST 0365 bank'")).rowCount).toBe(1);
+    await asServer();
+  });
+
   it("deleting a line takes its mark off the money row (Undo)", async () => {
     if (!ready()) return;
     const lid = (await line(orgA, 7, { description: "HOME HARDWARE" })).rows[0].id;
