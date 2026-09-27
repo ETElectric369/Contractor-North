@@ -72,6 +72,8 @@ export function PhotoTaskSheet({
           // eslint-disable-next-line @next/next/no-img-element -- a local object URL, not a remote image
           <img src={previewUrl} alt="The photo you just took" className="max-h-48 w-full rounded-lg object-cover" />
         )}
+        {/* Said, not assumed: Cancel keeps the photo, it just doesn't become a task. */}
+        <p className="text-xs text-slate-500">This photo is on the job&rsquo;s Photos tab either way.</p>
         <div>
           <Label htmlFor="photo-task-title">What needs doing?</Label>
           <Input
