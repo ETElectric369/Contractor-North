@@ -614,9 +614,10 @@ export function PaperworkRow({
       <Card className="border-brand/30">
         <div className="flex gap-3 p-3 sm:gap-4 sm:p-4">
           <div className="min-w-0 flex-1">
+            {/* Said once each: what it is here, the account and days in the card's headline (no
+                badge repeating "Bank Download"). */}
             <div className="flex flex-wrap items-center gap-2">
               <span className="font-medium text-slate-900">{describePaper(item)}</span>
-              {badgeFor(item)}
             </div>
             <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-slate-500">
               <span>Added {formatDate(item.created_at)}</span>

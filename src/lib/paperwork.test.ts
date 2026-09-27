@@ -590,6 +590,13 @@ describe("a plain picture asks what it is first", () => {
   });
 });
 
+describe("a bank download, described", () => {
+  it("says what it is and how many lines, and leaves the account to the card's headline", () => {
+    const item = receipt({ doc_type: "statement", proposal: { bankImport: { download: { v: 1, name: "x", last4: "1234", from: null, to: null, lines: [{}, {}] as never, skipped: [], header: [] } } } });
+    expect(describePaper(item)).toBe("Bank Download, 2 lines");
+  });
+});
+
 describe("sameMoneyFromBank: a purchase a bank download already wrote", () => {
   const bankBill = { id: "bill-bank", supplier: "1111-SHELL OIL 12345 ANYTOWN", bill_number: null, amount: 62.1, bill_date: "2026-09-12", job_id: null, superseded_by_bill_id: null };
   it("a receipt of the same money within 3 days is that bill, whatever its number", () => {

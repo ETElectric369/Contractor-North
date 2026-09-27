@@ -412,9 +412,9 @@ export function describePaper(item: PaperItem): string {
     return title ? `Picture, ${title}` : "Picture";
   }
   if (p.bankImport) {
-    const dl = p.bankImport.download;
-    const n = dl?.lines?.length ?? 0;
-    return ["Bank Download", dl?.last4 ? `••${dl.last4}` : null, `${n} ${n === 1 ? "line" : "lines"}`].filter(Boolean).join(", ");
+    // The account's last 4 is the card's own headline ("Bank ••1234 · Sep 2–Sep 25 · …"): said once.
+    const n = p.bankImport.download?.lines?.length ?? 0;
+    return `Bank Download, ${n} ${n === 1 ? "line" : "lines"}`;
   }
   if (p.openList) {
     const list = p.openList.list;
