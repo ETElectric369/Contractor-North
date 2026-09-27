@@ -68,11 +68,11 @@ describe("doors outside the job page", () => {
     // The web address lives in the Website group (rule e), which carries its own Off line.
     expect(src).toContain('<FeatureOffLine feature="website" features={settings.features} isOwner={isOwner} />');
   });
-  it("the recurring page draws no Generate or New while the switch is off; editing and pausing stay", () => {
+  it("the recurring page draws no Generate or New while the switch is off (a repeat job or expense row keeps Generate One Now); editing and pausing stay", () => {
     const src = read("recurring/page.tsx");
     expect(src).toContain("{recurringOn && dueCount > 0 && <GenerateDueButton count={dueCount} />}");
     expect(src).toContain("{recurringOn && <RecurringButton customers={custOpts} salesTax={salesTax} />}");
-    expect(src).toContain("<RecurringRowActions id={t.id} active={t.active} canGenerate={recurringOn} />");
+    expect(src).toContain('<RecurringRowActions id={t.id} active={t.active} canGenerate={recurringOn || t.kind !== "invoice"} />');
     expect(src).toContain("<RecurringButton customers={custOpts} template={value} salesTax={salesTax} />");
   });
 });
