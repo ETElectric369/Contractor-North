@@ -47,6 +47,9 @@ type Done = {
   asked?: boolean;
   /** The job it was filed on, for that sentence. */
   sheetJob?: string;
+  /** A mark's answer never came back (the connection dropped): it may have landed. Closing the sheet
+   *  then says so, never "it is not marked", and holds the filing's Undo back until a reload. */
+  markUnknown?: boolean;
 };
 
 /**
@@ -75,10 +78,23 @@ export function filedForMark(card: SupplierPaperCard, job: PaperJob, res: Suppli
  * THE SHEET CLOSED. After the card's own door filed the paper and nothing was marked, the paper stays
  * filed and the done line says so, with its Undo and the question to try again. A mark that landed
  * (`marked`, set first) or a sheet the done line's question opened changes nothing.
+ *
+ * A MARK WHOSE ANSWER NEVER CAME BACK (`markUnknown`) is neither: it may have landed. The done line
+ * says it may be marked and to reload, and the filing's Undo is held back (it would refuse a paper a
+ * line holds, contradicting the sentence), whichever door opened the sheet. The question stays: the
+ * sheet it opens reads what is so.
  */
 export function closedUnmarked(cur: Done | undefined): Done | undefined {
-  if (!cur || cur.marked || !cur.asked) return cur;
+  if (!cur || cur.marked) return cur;
+  if (cur.markUnknown)
+    return { ...cur, asked: false, markUnknown: undefined, undo: undefined, message: `${cur.filedMessage ?? cur.message} ${mayBeMarkedWords()}` };
+  if (!cur.asked) return cur;
   return { ...cur, asked: false, message: `${cur.filedMessage ?? cur.message} ${notMarkedWords(cur.sheetJob)}` };
+}
+
+/** Said when the sheet closed after a mark whose answer never came back. */
+export function mayBeMarkedWords(): string {
+  return "It may already be marked Already Billed: the connection dropped before the answer came back. Reload the page to see.";
 }
 
 /** Said when the card's Already Billed door filed the paper and the sheet closed with nothing marked. */
@@ -766,7 +782,12 @@ export function SupplierPaperCards({
             setMarking(null);
             // If marking fails the sheet says so and the paper stays filed; this runs only on a mark
             // that landed: the done line says it, and its Undo takes the mark back off.
-            setDone((all) => ({ ...all, [d.card.invoiceId]: { ...d, message: res.message ?? d.message, marked: res.undo, error: undefined } }));
+            setDone((all) => ({ ...all, [d.card.invoiceId]: { ...d, message: res.message ?? d.message, marked: res.undo, error: undefined, markUnknown: undefined } }));
+          }}
+          onUnknown={() => {
+            // The answer never came back: closing must not say "it is not marked" (closedUnmarked).
+            const id = marking.card.invoiceId;
+            setDone((all) => (all[id] ? { ...all, [id]: { ...all[id], markUnknown: true } } : all));
           }}
         />
       )}

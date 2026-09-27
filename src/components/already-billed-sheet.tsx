@@ -193,6 +193,7 @@ export function AlreadyBilledSheet({
   target,
   onClose,
   onMarked,
+  onUnknown,
   initial,
 }: {
   /** null: hours on no job (target.kind "time"; target.ids are the shifts the door was pressed on). */
@@ -200,6 +201,10 @@ export function AlreadyBilledSheet({
   target: AlreadyBilledDoorTarget;
   onClose: () => void;
   onMarked?: (res: AlreadyBilledWrite) => void;
+  /** The mark's answer never came back (the connection dropped): it may have landed or not. The
+   *  sheet says so itself; a caller that tells the outcome elsewhere (the paper card's done line)
+   *  must stop saying it isn't marked. */
+  onUnknown?: () => void;
   /** The sheet as it stands on its first paint (the render tests; the app always starts loading). */
   initial?: AlreadyBilledSheetInitial;
 }) {
@@ -307,6 +312,7 @@ export function AlreadyBilledSheet({
       () => {
         setSaving(false);
         setError("The connection dropped before the answer came back. Reload the page to see whether it was marked.");
+        onUnknown?.();
       },
     );
   }

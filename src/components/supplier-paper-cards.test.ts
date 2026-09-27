@@ -21,6 +21,7 @@ import {
   chipNames,
   closedUnmarked,
   filedForMark,
+  mayBeMarkedWords,
   notMarkedWords,
   setSupplierPaperScopeForTest,
 } from "./supplier-paper-cards";
@@ -384,6 +385,21 @@ describe("Already Billed On J-010 on the card", () => {
     expect(closedUnmarked(marked)).toBe(marked);
     const fromQuestion = { ...asked, asked: false };
     expect(closedUnmarked(fromQuestion)).toBe(fromQuestion);
+  });
+
+  it("a mark whose answer never came back: closing says it may be marked (never 'not marked'), holds the filing's Undo back, and keeps the question", () => {
+    const offer = { jobId: "j-010", billId: "bill-ps", invoiceNumber: "INV-00023", what: "8802-1101475" };
+    const asked = filedForMark(ps, J010, { ok: true, message: "8802-1101475 is a bill on J-010 now.", undo, alreadyBilled: offer })!.done;
+    const after = closedUnmarked({ ...asked, markUnknown: true })!;
+    expect(after.message).toBe(`8802-1101475 is a bill on J-010 now. ${mayBeMarkedWords()}`);
+    expect(after.message).not.toContain("not marked");
+    expect(after.undo).toBeUndefined();
+    // The same from the done line's own question (asked false).
+    expect(closedUnmarked({ ...asked, asked: false, markUnknown: true })!.message).toContain(mayBeMarkedWords());
+    setSupplierPaperScopeForTest("t-ab5", { done: { "si-1": after as never }, live: 0 });
+    const trail = renderToStaticMarkup(createElement(SupplierPaperDoneTrail, { scope: "t-ab5" }));
+    expect(trail).toContain("Reload the page to see.");
+    expect(allButtons(trail)).toEqual(["Already Billed On INV-00023?"]);
   });
 
   it("the done line after closing: its Undo, and the question to try again (Already Billed? when no invoice was named)", () => {
