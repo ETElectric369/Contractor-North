@@ -160,7 +160,7 @@ export const taskActions: Record<string, ActionDef> = {
       // date put there would be stored and never seen. Left off, and the read-back says so.
       const onJob = !!jobId;
       const leftOff = onJob
-        ? [i.due_date ? "a due date" : null, i.focus_date ? "a day pin" : null, i.priority ? "a priority" : null].filter(Boolean)
+        ? [i.due_date ? "due date" : null, i.focus_date ? "day pin" : null, i.priority ? "priority" : null].filter(Boolean)
         : [];
       const res = await createTask({
         title: i.title,

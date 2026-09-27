@@ -55,6 +55,13 @@ describe("task.create's read-back", () => {
     expect(res.speak).toContain("Added to J-055's Tasks, for whoever is on the job.");
   });
 
+  it("says what a job's task left off in plain words", async () => {
+    const res = await create({ title: "Hang the panel", job_id: "job-55", due_date: "2026-09-30", priority: 1 });
+    expect(res.speak).toBe(
+      "Added to J-055's Tasks, for whoever is on the job. A job's task has no due date or priority, so that part wasn't saved.",
+    );
+  });
+
   it("a step under a Reminder stays a Reminder, with its date", async () => {
     const res = await create({ title: "Wire nuts", parent_id: "task-parent", due_date: "2026-09-30" });
     expect(state.created[0]).toMatchObject({ job_id: null, due_date: "2026-09-30" });
