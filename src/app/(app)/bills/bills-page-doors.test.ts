@@ -466,11 +466,15 @@ describe("every door keeps exactly one home", () => {
     expect(text(section(`supplier-invoices-${CED}`))).toContain("You've sent $2,000.00 since Sep 5, 2026. It's already off their figure.");
     expect(text(html)).not.toContain("Why Don't These Subtract?");
     expect(text(html)).not.toContain("What Does Undo Do?");
-    // Their Papers' number counts Invoices With No Job and Not Recorded Yet, never Where This Comes From.
+    // Their Papers' number counts the open papers in Invoices With No Job and Not Recorded Yet, each
+    // ONCE, never Where This Comes From. The fixture's STOCK paper 8802-1103061 has no job and no bill,
+    // so it sits in both lists (2 + 1) and is still one paper: two papers in all.
     const ced = section(`supplier-their-papers-${CED}`);
     const noJob = Number(/Invoices With No Job \((\d+)\)/.exec(text(ced))![1]);
     const notRec = Number(/Not Recorded Yet \((\d+)\)/.exec(text(ced))![1]);
-    expect(text(ced)).toContain(`Their Papers (${noJob + notRec})`);
+    expect(noJob + notRec).toBe(3);
+    expect(text(ced).match(/8802-1103061/g)?.length).toBe(2);
+    expect(text(ced)).toContain("Their Papers (2)");
     expect(text(ced)).toContain("Where This Comes From");
   });
 

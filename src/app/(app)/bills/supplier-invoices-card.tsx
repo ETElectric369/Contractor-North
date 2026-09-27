@@ -67,6 +67,15 @@ export interface SupplierInvoiceActions {
 const LIST_LIMIT = 6;
 
 /** "$4.10 off"; a credit memo's negative discount comes back off the credit instead. */
+/**
+ * THEIR PAPERS' NUMBER COUNTS EACH OPEN PAPER ONCE. A paper with no job and no bill (the one a
+ * supplier booked to STOCK, or a $0.00 one) sits in both Invoices With No Job and Not Recorded Yet;
+ * it is still one paper, so the fold counts distinct papers, never the two lists added.
+ */
+export function theirPapersCount(needJob: readonly { invoice: { id: string } }[], billRows: readonly { id: string }[]): number {
+  return new Set([...needJob.map((r) => r.invoice.id), ...billRows.map((r) => r.id)]).size;
+}
+
 const offWords = (amount: number) => (amount < 0 ? `${formatCurrency(-amount)} less credit` : `${formatCurrency(amount)} off`);
 
 const KIND_TONE: Record<SupplierInvoiceKind, Tone> = {
@@ -195,8 +204,8 @@ export function SupplierPaperLists({
   );
   const billRows = useMemo(() => needBill.rows.filter((r) => !setAside.has(r.id)), [needBill, setAside]);
   const billRowsTotal = r2(billRows.reduce((s, r) => s + (Number(r.total) || 0), 0));
-  /** Their Papers' number: only open papers (Invoices With No Job, Not Recorded Yet). */
-  const theirPapersOpen = needJob.length + billRows.length;
+  /** Their Papers' number: only open papers (Invoices With No Job, Not Recorded Yet), each once. */
+  const theirPapersOpen = theirPapersCount(needJob, billRows);
   const claimable = useMemo(() => claimableDiscounts(invoices, today), [invoices, today]);
   const missed = useMemo(() => missedDiscounts(invoices, today), [invoices, today]);
   const interest = useMemo(() => lateInterest(invoices), [invoices]);

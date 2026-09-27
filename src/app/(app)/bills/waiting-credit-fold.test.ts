@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: () => {}, push: () => {} }) }));
 
-import { SupplierPaperLists } from "./supplier-invoices-card";
+import { SupplierPaperLists, theirPapersCount } from "./supplier-invoices-card";
 import { supplierDocumentRows, supplierPaperFeed } from "./supplier-papers";
 
 /**
@@ -82,5 +82,36 @@ describe("the Waiting On A Credit fold under CED", () => {
 
   it("without the Stop Waiting action there is no button that can only refuse", () => {
     expect(render()).not.toContain("Stop Waiting");
+  });
+});
+
+describe("Their Papers counts each open paper once (badges count what is open, once each)", () => {
+  it("a STOCK paper with no job and no bill sits in both lists and is counted as one", () => {
+    const stock = { ...hillside, id: "stock-1", invoice_number: "8802-1103061", job_name_raw: "STOCK", waiting_credit_since: null };
+    const { rows } = supplierDocumentRows({ documents: [stock], bills: [], links: [], aliasRows: [] });
+    const jobs = [{ id: "j-045", jobNumber: "J-045", name: "13683 Hillside", status: "complete", address: "13683 Hillside Drive", createdAt: null }];
+    const feed = supplierPaperFeed({ since: "2026-06-08", rows, jobs, accounts: [{ id: CED, name: "Consolidated Electrical Distributors" }], today: "2026-10-01" });
+    // Stock with no job is not a Needs You card: it stays in the supplier's own lists.
+    expect(feed.cards).toEqual([]);
+    const html = renderToStaticMarkup(
+      createElement(SupplierPaperLists, {
+        accountId: CED,
+        accountName: "CED",
+        feed: { invoices: rows, jobs, recordsSince: "2026-06-08" },
+        today: "2026-10-01",
+        onNeedsYou: [],
+        waitingOnCredit: feed.waiting ?? [],
+        actions: { setInvoiceJob: async () => ({ ok: true }) },
+      }),
+    );
+    expect(html).toContain("Invoices With No Job (1)");
+    expect(html).toContain("Not Recorded Yet (1)");
+    expect(html).toContain("Their Papers (1)");
+    expect(html).not.toContain("Their Papers (2)");
+  });
+
+  it("theirPapersCount counts distinct paper ids across the two lists", () => {
+    expect(theirPapersCount([{ invoice: { id: "a" } }, { invoice: { id: "b" } }], [{ id: "a" }, { id: "c" }])).toBe(3);
+    expect(theirPapersCount([], [])).toBe(0);
   });
 });
