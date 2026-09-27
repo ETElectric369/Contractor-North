@@ -19,6 +19,7 @@ import { ShellNavigationWatch } from "@/components/shell-navigation-watch";
 import { PageOpenCounter } from "@/components/page-open-counter";
 import { BugReporter } from "@/components/bug-reporter";
 import { isPlatformAdmin } from "@/lib/platform-admin";
+import { countOpenBugs } from "@/lib/bug-watch-count";
 import { NativePushBridge } from "@/components/native-push-bridge";
 import { TapToPayWarmup } from "@/components/tap-to-pay/warmup";
 import { TapToPayAwareness } from "@/components/tap-to-pay/awareness";
@@ -152,6 +153,12 @@ export default async function AppLayout({
       }
     })(),
   ]);
+
+  // BUG WATCH COUNTS ITS OWN (NY-list part): the open reports, counted the Bugs page's way (a null
+  // status is open), for North's own team only — asked after isPlatformAdmin resolved, so nobody
+  // else pays the round trip. Handed to the avatar menu UNRESOLVED, like the dock's badges: a count
+  // never holds up the shell, and a failed one is no number (lib/bug-watch-count).
+  const bugCount: Promise<number | null> | null = platformAdmin ? countOpenBugs(supabase) : null;
 
   const settings = getOrgSettings((org as any)?.settings);
   // THE SWITCH BOARD, read ONCE here and handed down (0352): `features` is the company's switches
@@ -296,7 +303,7 @@ export default async function AppLayout({
     >
       <Dock branding={branding} role={profile.role} badges={badges} features={doors} />
       <div className="flex flex-1 flex-col overflow-hidden">
-        <Topbar profile={(profile as Profile) ?? null} lang={profile.language} branding={branding} setup={setup} onboarded={onboarded} platformAdmin={platformAdmin} features={doors} />
+        <Topbar profile={(profile as Profile) ?? null} lang={profile.language} branding={branding} setup={setup} onboarded={onboarded} platformAdmin={platformAdmin} features={doors} bugCount={bugCount} />
         {graceLeft > 0 && (
           <div
             className={`no-print px-4 py-2 text-center text-sm font-medium ${
