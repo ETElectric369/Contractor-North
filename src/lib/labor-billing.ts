@@ -257,8 +257,9 @@ export async function fetchJobLaborRows(
     .from("time_entries")
     // job_code on the ENTRY: an un-billable code (SHOP, PTO) is read here and nowhere else.
     // `id` (0255): the row's identity is what a labor line CLAIMS. The projection law: the fix
-    // for "which hours did that invoice cover" was a select list.
-    .select("id, clock_in, clock_out, lunch_minutes, job_code, profiles(id, full_name)")
+    // for "which hours did that invoice cover" was a select list. `profile_id`: whose shift it is,
+    // by the row's own column, which the importer checks every claim against (lib/labor-claim-owner).
+    .select("id, profile_id, clock_in, clock_out, lunch_minutes, job_code, profiles(id, full_name)")
     .eq("job_id", jobId)
     .eq("status", "closed");
   // The org's own answer to "which of these hours does a customer pay for". Fetched HERE so all

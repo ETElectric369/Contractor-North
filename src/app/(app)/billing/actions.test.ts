@@ -952,6 +952,65 @@ describe("J-011 — a draw built from actuals takes new work; a contract draw re
 });
 
 /**
+ * EACH HOUR ON ITS OWN PERSON'S LINE (2026-09-26, labor claims by person). 0256 gave "Labor — Erik
+ * Taylor" Brian's shifts on ten paid invoices. The importer builds its rows per person, so it never
+ * does that; before it writes, it checks every claim it is about to write against the shift's OWN
+ * profile_id, never the person object that came attached to the row.
+ */
+describe("importLaborIntoInvoice — a line keyed to a person claims only that person's shifts", () => {
+  const ERIK = "d358effe-e352-401b-93bb-7dde456e9bc0";
+  const BRIAN = "07b85435-02ff-4382-a4f1-1f932c561d9f";
+  /** INV-078's shape with real keys: Erik's edited line holds his old shift; a new shift joins it. */
+  const route = (newShiftIsWhose: string) => {
+    const base = openDrawRoute({ actuals: true });
+    return (q: Q): Reply => {
+      if (q.table === "time_entries") {
+        return {
+          data: [
+            { id: TE_OLD, profile_id: ERIK, clock_in: "2026-08-01T15:00:00Z", clock_out: "2026-08-01T23:00:00Z", lunch_minutes: 0, job_code: null, profiles: { id: ERIK, full_name: "Erik" } },
+            // The attached person says Erik; the row's own column is what counts.
+            { id: TE_NEW, profile_id: newShiftIsWhose, clock_in: "2026-09-22T15:00:00Z", clock_out: "2026-09-22T21:00:00Z", lunch_minutes: 0, job_code: null, profiles: { id: ERIK, full_name: "Erik" } },
+          ],
+        };
+      }
+      if (q.table === "profile_pay") return { data: [{ id: ERIK, hourly_rate: 0, bill_rate: 115 }] };
+      if (q.table === "invoice_items" && q.verb === "select" && q.cols === "id, source_ids, import_key, edited, quantity, unit_price, unit, description") {
+        return { data: [{ id: "li-1", import_key: `labor:${ERIK}`, edited: true, source_ids: [TE_OLD], quantity: "8.00", unit_price: "100.00", unit: "hr", description: "Labor - Erik" }] };
+      }
+      return base(q);
+    };
+  };
+
+  it("Erik's new shift joins Erik's line", async () => {
+    spies.reportError = () => {};
+    state.client = fakeSupabase(route(ERIK), calls);
+    const res: any = await importLaborIntoInvoice(OPEN_DRAW);
+    expect(res.ok).toBe(true);
+    const join = calls.find((c) => c.table === "invoice_items" && c.verb === "update");
+    expect(join?.payload).toEqual({ quantity: 14, source_ids: [TE_OLD, TE_NEW] });
+  });
+
+  it("a shift that is Brian's never goes on Erik's line: refused, said, nothing written", async () => {
+    const said: any[] = [];
+    spies.reportError = (...a: any[]) => void said.push(a);
+    state.client = fakeSupabase(route(BRIAN), calls);
+    const res: any = await importLaborIntoInvoice(OPEN_DRAW);
+    expect(res).toEqual({
+      ok: false,
+      error: "Labor wasn't imported: some hours would have landed on another person's labor line. Nothing was written - try Labor from Timecards again.",
+    });
+    expect(calls.some((c) => c.table === "rpc:upsert_imported_invoice_items")).toBe(false);
+    expect(calls.some((c) => c.verb === "update" || c.verb === "insert" || c.verb === "delete")).toBe(false);
+    expect(said[0]?.[0]).toBe("importLabor.crossed");
+    // Both halves of the write are judged: the offer under Erik's key, and the join onto his line.
+    expect(said[0]?.[2]?.crossed).toEqual([
+      { lineId: `labor:${ERIK}`, person: ERIK, ids: [TE_NEW] },
+      { lineId: "li-1", person: ERIK, ids: [TE_NEW] },
+    ]);
+  });
+});
+
+/**
  * THE SAME TAP, TWICE, IS ONE PAYMENT (review of Connected North Phase 1).
  *
  * J-052: INV-074 sent weeks ago, open for $624.49. The job header's Record Payment lands the cash on

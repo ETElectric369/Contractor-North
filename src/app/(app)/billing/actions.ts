@@ -33,6 +33,7 @@ import { resolveDrawCredit, shouldBlockStandardImport, invoiceBalance, isDrawKin
 import { readPriceBookUnits } from "@/lib/price-book-kind";
 import { contractDrawRefusal, isActualsDraw, openDraftOnJob, pulledIntoSentence, readDraftShape, type OpenDraft } from "@/lib/actuals-draw";
 import { hoursWords, joinedSentence, leftOffSentence, planLaborOffer, type LaborJoin, type OwnLaborLine } from "@/lib/labor-offer";
+import { claimsOffTheirPerson } from "@/lib/labor-claim-owner";
 import { removedLines, removedSentence, staleTombstones, textArrayLiteral } from "@/lib/import-reconcile";
 import { linesByBillId, readBillLines, readInvoiceMarkup } from "@/lib/invoice-markup-read";
 import { recalcInvoice } from "@/lib/invoice-recalc";
@@ -1734,6 +1735,28 @@ async function importLaborCore(invoiceId: string, trustedActuals: boolean): Prom
     // the claims it holds through the RPC; the ones it takes on are added by the join below.
     source_ids: l.sourceIds,
   }));
+  // EACH HOUR ON ITS OWN PERSON'S LINE (lib/labor-claim-owner). A line keyed labor:<person> may claim
+  // only that person's shifts, judged by each shift's own profile_id: 0256 once gave one person's line
+  // everybody's hours on ten paid invoices. The rows are built per person, so this is the invariant said
+  // before a single write, in words; 0361 holds it underneath for every writer.
+  const ownerOf = new Map<string, string>();
+  for (const e of labor.jobEntries) {
+    const who = e?.profile_id ?? e?.profiles?.id;
+    if (e?.id && who) ownerOf.set(String(e.id), String(who));
+  }
+  const crossed = claimsOffTheirPerson(
+    [
+      ...rows.map((r) => ({ id: r.import_key, import_key: r.import_key, source_ids: r.source_ids })),
+      ...plan.joins.map((j) => ({ id: j.lineId, import_key: j.importKey, source_ids: j.addIds })),
+    ],
+    [],
+    ownerOf,
+  );
+  if (crossed.length) {
+    reportError("importLabor.crossed", "a labor line would claim another person's shifts", { invoiceId, crossed });
+    return { ok: false, error: "Labor wasn't imported: some hours would have landed on another person's labor line. Nothing was written - try Labor from Timecards again." };
+  }
+
   // What the invoice's labor lines claim BEFORE the RPC, so the toast counts only the entries this
   // tap added — a re-import that refreshed Erik's line with the same nine entries pulled in none.
   const before = await landedSourceIds(supabase, invoiceId, "labor", rows);
