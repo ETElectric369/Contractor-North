@@ -18,6 +18,7 @@ import { supplierDeskFailedItem, supplierPaperActionItem } from "./supplier-pape
 import { supplierPayActionItems } from "./supplier-pay-item";
 import { readNoJobHoursReach } from "@/lib/already-billed-read";
 import { noJobStrayDoors } from "@/lib/already-billed";
+import { isOpenToBuy } from "@/lib/materials-checklist";
 import { feederOn, inquiryActionItem } from "./switches";
 import { featureOn, featuresFromOffKey } from "@/lib/features";
 import {
@@ -972,8 +973,10 @@ async function buildActionItems(ctx: {
     for (const ml of (matLists ?? []) as any[]) {
       for (const it of (ml.material_list_items ?? []) as any[]) {
         // Tools are brought from the shop, not bought — an owned tool would sit
-        // "unpurchased" forever and nag the shopping run daily.
-        if (it.purchased || it.is_tool) continue;
+        // "unpurchased" forever and nag the shopping run daily. The ONE rule for "still to buy"
+        // (lib/materials-checklist): the job's Materials badge and its Buy Materials row count
+        // exactly these lines.
+        if (!isOpenToBuy(it)) continue;
         if (!needByJob.has(ml.job_id)) needByJob.set(ml.job_id, []);
         needByJob.get(ml.job_id)!.push({ description: it.description, quantity: Number(it.quantity ?? 1) });
       }
@@ -1025,7 +1028,7 @@ async function buildActionItems(ctx: {
         .limit(100);
       const unorderedMatJobs = new Set<string>();
       for (const ml of (heldMat ?? []) as any[]) {
-        if (((ml.material_list_items ?? []) as any[]).some((it) => !it.purchased && !it.is_tool)) unorderedMatJobs.add(ml.job_id);
+        if (((ml.material_list_items ?? []) as any[]).some(isOpenToBuy)) unorderedMatJobs.add(ml.job_id);
       }
       for (const j of held) {
         // updated_at is only a PROXY for "held since" (any edit resets it), so we don't quote a

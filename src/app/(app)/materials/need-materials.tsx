@@ -19,11 +19,13 @@ import { requestMaterials } from "./actions";
  * He didn't edit the list, he ASKED, and it became the boss's problem on the boss's phone.
  *
  * Then Erik decided (2026-09-11) the tech gets THE SAME list the office has — add, edit,
- * remove, tick — with only the money kept out of his hands. So this panel no longer stands
- * in for the list; it rides UNDER an editable one, for the things a list line can't say: a
- * rush, a substitution, a question about what's specified, "the van has none of this". The
- * plumbing is untouched — still a task with the job attached, still a bell and a push to
- * every active boss (requestMaterials) — only the words changed to fit the new place.
+ * remove, tick — with only the money kept out of his hands. So this panel rides UNDER the
+ * editable list, for the ask that can't wait: a rush, a swap, "the van has none of this".
+ *
+ * Since 2026-09-27 the ask lands ON the list as a line (requestMaterials), so the job's one live
+ * "Buy Materials · N Open" task and the Materials badge count it, and it is never a second task
+ * saying the same thing. The bell and the push to every active boss are unchanged, and now open the
+ * list it is on.
  */
 export function NeedMaterials({ jobId }: { jobId: string }) {
   const router = useRouter();
@@ -37,13 +39,13 @@ export function NeedMaterials({ jobId }: { jobId: string }) {
       <div className="flex items-start gap-2 rounded-lg bg-emerald-50 px-3 py-2.5 text-sm text-emerald-800">
         <Check className="mt-0.5 h-4 w-4 shrink-0" />
         <span>
-          Sent — the office has it, on their phone, with this job attached.{" "}
+          On the list above, and on the office&rsquo;s phone with this job attached.{" "}
           <button
             type="button"
-            className="underline underline-offset-2"
+            className="inline-flex min-h-[44px] items-center underline underline-offset-2"
             onClick={() => { setSent(false); setText(""); }}
           >
-            Something else?
+            Something Else?
           </button>
         </span>
       </div>
@@ -52,11 +54,11 @@ export function NeedMaterials({ jobId }: { jobId: string }) {
   return (
     <div className="rounded-lg border border-slate-200 p-3">
       <div className="mb-1.5 flex items-center gap-1.5 text-sm font-medium text-slate-900">
-        <PackagePlus className="h-4 w-4 text-brand" /> Anything else the office should know about this job&rsquo;s materials?
+        <PackagePlus className="h-4 w-4 text-brand" /> Need it fast? Tell the office.
       </div>
       <p className="mb-2 text-xs text-slate-500">
-        Add what you need to the list above. Use this for the rest &mdash; a rush, a swap, a question
-        &mdash; and it goes straight to the office with this job attached. You don&rsquo;t have to chase anybody.
+        It goes on the list above and straight to the office&rsquo;s phone, with this job attached. You
+        don&rsquo;t have to chase anybody.
       </p>
       <Textarea
         rows={2}

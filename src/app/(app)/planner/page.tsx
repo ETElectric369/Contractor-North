@@ -35,6 +35,7 @@ import { loadShiftChains } from "@/lib/shift-chain";
 import { reportError } from "@/lib/observe";
 import { featureOn, offFeatureKey } from "@/lib/features";
 import { FeatureOffLine } from "@/components/feature-off-line";
+import { buyMaterials } from "@/lib/materials-checklist";
 
 export const dynamic = "force-dynamic";
 
@@ -338,9 +339,16 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
     // NEWEST by created_at — the same pick the job tab and ensureJobMaterialList make, so the
     // Materials button below lands on the ONE list the crew and the office both call "the"
     // list. order("id") sorted UUIDs: arbitrary, and on a two-list job a different list from
-    // the one the job page shows (Erik: "just one, the same one").
+    // the one the job page shows (Erik: "just one, the same one"). Its lines' two checklist columns
+    // ride along (no money: purchased and is_tool) for the Now block's live Buy Materials row.
     currentJob
-      ? supabase.from("material_lists").select("id, name").eq("job_id", currentJob.id).order("created_at", { ascending: false }).limit(1).maybeSingle()
+      ? supabase
+          .from("material_lists")
+          .select("id, name, material_list_items(purchased, is_tool)")
+          .eq("job_id", currentJob.id)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle()
       : Promise.resolve({ data: null }),
     // audit v921: the feeder's day cuts are calendar-day decisions — hand it the ORG tz so
     // "before today" means org midnight, not UTC's (a 5:30 PM visit surfaced a day late).
@@ -366,12 +374,23 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
           .limit(3)
       : Promise.resolve({ data: [] as any[], count: 0, error: null }),
   ]);
-  const currentMaterials: { id: string; name: string } | null = ((mlRes as any)?.data as any) ?? null;
+  const currentMaterials: { id: string; name: string; material_list_items?: { purchased?: boolean; is_tool?: boolean }[] } | null =
+    ((mlRes as any)?.data as any) ?? null;
   const sixKids = ((kidsRes as any)?.data ?? []) as any[];
+  // THE JOB'S MATERIALS, AS ONE TASK (lib/materials-checklist): "Buy Materials · N Open" leads the
+  // Now block while anything on the list is left to buy, and counts as one of the tasks left. It opens
+  // the same list the Materials button does.
+  const nowBuy = buyMaterials(currentMaterials?.material_list_items ?? []);
+  const currentMaterialsHref = currentMaterials
+    ? `/materials/${currentMaterials.id}`
+    : currentJob
+      ? `/jobs/${currentJob.id}?tab=materials`
+      : "/materials";
+  const nowBuyOpen = nowBuy && nowBuy.open > 0 ? nowBuy.open : 0;
   const nowTasks = (nowTasksRes as any)?.error
     ? null
     : {
-        left: (((nowTasksRes as any)?.count as number | null) ?? 0),
+        left: (((nowTasksRes as any)?.count as number | null) ?? 0) + (nowBuyOpen > 0 ? 1 : 0),
         next: (((nowTasksRes as any)?.data ?? []) as { id: string; title: string }[]).map((t) => ({ id: t.id, title: t.title })),
       };
 
@@ -1028,7 +1047,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
                   Open
                 </Link>
                 <Link
-                  href={currentMaterials ? `/materials/${currentMaterials.id}` : `/jobs/${currentJob.id}?tab=materials`}
+                  href={currentMaterialsHref}
                   className="flex min-h-[44px] items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
                 >
                   Materials
@@ -1049,7 +1068,12 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
                   off right here, and All Tasks for the rest. Only on the clock, only this job;
                   nothing when the list is done or empty. */}
               {nowTasks && nowTasks.left > 0 && (
-                <NowTasks jobId={currentJob.id} left={nowTasks.left} next={nowTasks.next} />
+                <NowTasks
+                  jobId={currentJob.id}
+                  left={nowTasks.left}
+                  next={nowTasks.next}
+                  materials={nowBuyOpen > 0 ? { open: nowBuyOpen, href: currentMaterialsHref } : null}
+                />
               )}
             </div>
           )}

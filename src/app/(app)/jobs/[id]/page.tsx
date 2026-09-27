@@ -53,7 +53,8 @@ import { JobPanelLoader } from "./job-panel-loader";
 import { JobNotes } from "./job-notes";
 import { JobBills } from "./job-bills";
 import { JobTaskList, type TaskPhotos } from "./job-task-list";
-import { readJobTasks, taskPhoto } from "@/lib/job-tasks";
+import { jobTaskTally, readJobTasks, taskPhoto } from "@/lib/job-tasks";
+import { buyMaterials, openToBuyCount } from "@/lib/materials-checklist";
 import { JobPermits } from "./job-permits";
 import { permitStatusTone, permitResultTone } from "@/lib/permit-options";
 import { JobAddTimeEntry } from "./job-add-time";
@@ -830,8 +831,15 @@ export default async function JobDetailPage({
       .filter((t) => t.photo_path || t.done_photo_path)
       .map((t) => [t.id, { task: taskPhoto(t.photo_path, docUrls, jobFiles), done: taskPhoto(t.done_photo_path, docUrls, jobFiles) }]),
   );
-  const openTaskCount = jobTasks.rows.filter((t) => t.status !== "done").length;
+  // THE JOB'S MATERIALS LIST AS A CHECKLIST (Erik, 2026-09-27): the Materials chip counts only what's
+  // still to buy, and the same open lines are ONE live task on the job's Tasks ("Buy Materials · N
+  // Open"), read from the list, never copied into the tasks table. Both from lib/materials-checklist,
+  // so the chip, the row and the list can't disagree.
+  const buy = buyMaterials((canonicalItems ?? []) as { purchased?: boolean; is_tool?: boolean }[]);
+  const materialsOpen = openToBuyCount((canonicalItems ?? []) as { purchased?: boolean; is_tool?: boolean }[]);
+  const openTaskCount = jobTaskTally(jobTasks.rows, buy).open;
   const taskListProps = {
+    materials: buy,
     jobId: j.id as string,
     orgId: j.org_id as string,
     tasks: jobTasks.rows,
@@ -1537,13 +1545,15 @@ export default async function JobDetailPage({
     {
       id: "materials",
       label: "Materials",
-      count: canonicalItems?.length ?? 0,
+      // What's still to buy, never the list's size (Erik: "the badge should only show whats open to
+      // be purchased"). 0 = no badge.
+      count: materialsOpen,
       content: (
         <div className="space-y-3">
           {/* Hit Materials and THE list is right there (Erik, 7/14) — no
-              list-of-lists, nothing to create or open. Checked items sink to the
-              bottom inside the editor; the pick-list print and PO seed ride on
-              top of the SAME list. */}
+              list-of-lists, nothing to create or open. It is a checklist: what's
+              left to buy on top, checked lines folded into Bought (N) inside the
+              editor; the pick-list print and PO seed ride on top of the SAME list. */}
           {/* The pick-list print and the PO seed are office doors (a PO is money; the print
               carries est_cost) — staff only. */}
           {viewerIsStaff && canonicalList && (
@@ -1585,9 +1595,10 @@ export default async function JobDetailPage({
             items={(canonicalItems ?? []) as any}
             viewerIsStaff={viewerIsStaff}
           />
-          {/* BELOW the editor, for a tech: the "anything else the office should know" door — a
-              task + bell + push to the boss's phone (requestMaterials), for what a list line
-              can't say ("I'm short for the far wall, can someone run it out?"). */}
+          {/* BELOW the editor, for a tech: the "need it fast" door — a line on this list plus a
+              bell + push to the boss's phone (requestMaterials), for the ask that can't wait
+              ("I'm short for the far wall, can someone run it out?"). Never a second task: the
+              live Buy Materials row on Tasks already counts the line. */}
           {!viewerIsStaff && <NeedMaterials jobId={j.id} />}
           {/* The list-of-lists is an office concern (which take-off is canonical); for the crew
               the tab IS the list, so the door stays staff-only. */}
