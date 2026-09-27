@@ -226,7 +226,6 @@ export function NewInvoiceButton(p: NewInvoiceButtonProps) {
           taxOn={taxOn}
           loadRate={defaultRate}
           onClose={() => setSheet({ open: false, preset: null, refusal: null })}
-          onLanded={() => setSheet({ open: false, preset: null, refusal: null })}
         />
       )}
     </div>
@@ -283,7 +282,6 @@ function NewInvoiceSheet(
     taxOn: boolean;
     loadRate: () => Promise<number>;
     onClose: () => void;
-    onLanded: () => void;
   },
 ) {
   const router = useRouter();
@@ -316,6 +314,8 @@ function NewInvoiceSheet(
   const [taxRate, setTaxRate] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [errorDoor, setErrorDoor] = useState<{ id: string; number: string } | null>(null);
+  /** The bill exists and its page is loading: Save stays shut so it can't make a second one. */
+  const [opening, setOpening] = useState(false);
 
   // The company's rate, seeded once when a new invoice may start with it (the field shows it).
   useEffect(() => {
@@ -352,7 +352,7 @@ function NewInvoiceSheet(
           : (p.wholeEstimate ?? null);
   const canLast = choice === "part" || choice === "work";
   const saveLabel = newInvoiceSaveLabel(choice, canLast && last, amount, money);
-  const canSave = !pending && amount != null && amount > 0.005;
+  const canSave = !pending && !opening && amount != null && amount > 0.005;
 
   function pickPart(v: number | "rest") {
     setPartDollars(false);
@@ -392,8 +392,16 @@ function NewInvoiceSheet(
       const note = res.note ?? res.importWarning;
       if (note) toast(note, res.partial ? "error" : "info");
       else toast(choice === "deposit" ? "Deposit started as a draft" : "Invoice started as a draft", "success");
-      p.onLanded();
-      router.push(`/billing/${res.id}`);
+      /* OPEN THE NEW BILL WITHOUT CLOSING THE SHEET FIRST (the /billing New Invoice's lesson,
+         2026-09-11). Closing a Modal runs history.back() to take its marker off the stack; with the
+         push still waiting on the server, Next treats that back as a navigation of its own and throws
+         the push away - the person is left on the job with a draft they can't see. So the sheet
+         stays up (Save shut) and the new page REPLACES the sheet's history entry when the marker is
+         on top, or is pushed when it isn't; the job page and the sheet leave together. */
+      setOpening(true);
+      const markerOnTop = !!(window.history.state as { cnOverlay?: boolean } | null)?.cnOverlay;
+      if (markerOnTop) router.replace(`/billing/${res.id}`);
+      else router.push(`/billing/${res.id}`);
     });
   }
 
@@ -404,8 +412,8 @@ function NewInvoiceSheet(
       open
       onClose={p.onClose}
       title="New Invoice"
-      holdOpen={pending}
-      footer={<ModalActions onCancel={p.onClose} onSave={save} saving={pending} saveLabel={saveLabel} disabled={!canSave} />}
+      holdOpen={pending || opening}
+      footer={<ModalActions onCancel={p.onClose} onSave={save} saving={pending || opening} saveLabel={saveLabel} disabled={!canSave} />}
     >
       <div className="space-y-4">
         {/* Why the sheet opened on Part Of The Estimate, when a door said so (a job billed in parts). */}

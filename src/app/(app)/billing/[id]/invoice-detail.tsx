@@ -1055,10 +1055,13 @@ export function InvoiceDetail({
                 <PackagePlus className="h-4 w-4" /> {BRING_IN_NEW_WORK}
               </Button>
             ) : (
-              <span className="text-xs text-slate-500">
-                {estimateIsContract === null
-                  ? "Couldn't read this job just now, so nothing new can be brought in here. Reload to try again."
-                  : "Nothing new comes onto this invoice: its estimate's lines are on it, and there are no approved change orders to add."}
+              // The one case with nothing to run: an estimate's invoice with its lines on it and no job
+              // for new work to come from.
+              <span className="text-xs text-slate-500">Its estimate&apos;s lines are already on it, and it has no job for new work to come from.</span>
+            )}
+            {estimateIsContract === null && !(invoice as { quote_id?: string | null }).quote_id && (
+              <span className="text-xs text-amber-700">
+                Couldn&apos;t read this job just now, so only its approved change orders come in. Reload to bring in its hours and bills.
               </span>
             )}
             {/* THE % BOX BESIDE IT, where materials come in (a Time & Material or actuals invoice). */}
@@ -1183,14 +1186,14 @@ export function InvoiceDetail({
                     <button
                       onClick={saveEdit}
                       disabled={pending || !editDesc.trim()}
-                      className="rounded-md bg-brand p-1.5 text-white hover:bg-brand-dark disabled:opacity-50"
+                      className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md bg-brand text-white hover:bg-brand-dark disabled:opacity-50"
                       aria-label="Save"
                     >
                       <Check className="h-4 w-4" />
                     </button>
                     <button
                       onClick={() => setEditId(null)}
-                      className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100"
+                      className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100"
                       aria-label="Cancel"
                     >
                       <X className="h-4 w-4" />
@@ -1257,7 +1260,7 @@ export function InvoiceDetail({
                       <button
                         onClick={() => startEdit(it)}
                         disabled={pending}
-                        className="shrink-0 text-slate-500 hover:text-brand"
+                        className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-brand"
                         aria-label="Edit"
                         title="Edit"
                       >
@@ -1266,7 +1269,7 @@ export function InvoiceDetail({
                       <button
                         onClick={() => start(async () => { const res = await deleteInvoiceItem(it.id, invoice.id); if (!res?.ok) { toast(res?.error ?? "Couldn't remove the line item — try again.", "error"); return; } refresh(); })}
                         disabled={pending}
-                        className="shrink-0 text-slate-500 hover:text-red-600"
+                        className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-slate-500 hover:bg-slate-100 hover:text-red-600"
                         aria-label="Remove"
                         title="Remove"
                       >
@@ -1475,12 +1478,12 @@ export function InvoiceDetail({
                           })
                         }
                         disabled={pending || payEditAmount <= 0}
-                        className="rounded-md bg-brand p-1.5 text-white disabled:opacity-50"
+                        className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md bg-brand text-white disabled:opacity-50"
                         aria-label="Save payment"
                       >
                         <Check className="h-4 w-4" />
                       </button>
-                      <button onClick={() => setPayEditId(null)} className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100" aria-label="Cancel">
+                      <button onClick={() => setPayEditId(null)} className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100" aria-label="Cancel">
                         <X className="h-4 w-4" />
                       </button>
                     </div>
@@ -1514,7 +1517,7 @@ export function InvoiceDetail({
                         setPayEditNote(p.note ?? "");
                         setPayEditDate(toDateInput(p.paid_at));
                       }}
-                      className="shrink-0 text-slate-400 hover:text-slate-700"
+                      className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-700"
                       aria-label="Edit payment"
                     >
                       <Pencil className="h-4 w-4" />
@@ -1530,7 +1533,7 @@ export function InvoiceDetail({
                         });
                       }}
                       disabled={pending}
-                      className="shrink-0 text-slate-400 hover:text-red-600"
+                      className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-red-600"
                       aria-label="Delete payment"
                     >
                       <Trash2 className="h-4 w-4" />
