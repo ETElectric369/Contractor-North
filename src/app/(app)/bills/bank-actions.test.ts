@@ -23,7 +23,7 @@ vi.mock("@/lib/observe", () => ({ reportError: () => {} }));
 vi.mock("@/lib/pdf-cache", () => ({ bustDocPdf: vi.fn(async () => {}), warmDocPdf: vi.fn(async () => {}) }));
 
 import { addOpenList } from "./open-list-actions";
-import { applyBankDownload, swapBankDownload, undoBankDownload } from "./bank-actions";
+import { applyBankDownload, setBankAccount, swapBankDownload, undoBankDownload } from "./bank-actions";
 import { applyBankCore, bankViews, BANK_NEEDS_UPDATE } from "./bank-core";
 import { undoPaperwork } from "@/app/(app)/organize/actions";
 
@@ -271,6 +271,17 @@ describe("Swap Money In And Out", () => {
     await applyBankDownload(id, { fingerprint: v.fingerprint, picks: { [rowBy(v, "SHELL").id]: "cost:Gas & Truck:fuel" } });
     expect(db.bills).toHaveLength(1);
     expect((await swapBankDownload(id)).error).toMatch(/Undo it first/);
+  });
+
+  it("a download with no account is told its last 4, four digits and no more", async () => {
+    const id = await drop(`Date,Description,Amount\n09/30/2026,MONTHLY SERVICE FEE,-15.00\n`, "stmt.csv");
+    expect((await view(id)).askAccount).toBe(true);
+    expect((await setBankAccount(id, "123456")).ok).toBe(false);
+    expect(await setBankAccount(id, "2222")).toMatchObject({ ok: true, message: "Saved: this download is the account ending 2222." });
+    const v = await view(id);
+    expect(v.askAccount).toBe(false);
+    expect(v.headline).toMatch(/^Bank ••2222/);
+    expect(db.organized_items[0].proposal.bankImport.download.lines[0].last4).toBe("2222");
   });
 });
 

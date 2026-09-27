@@ -209,6 +209,18 @@ export function last4Of(raw: unknown): string | null {
   return d ? d.slice(-4) : null;
 }
 
+/**
+ * THE ACCOUNT FROM THE FILE'S NAME, for a download with no account column ("Chase1111_Activity_
+ * 20260930.csv" → 1111). Only one run of exactly 4 digits that isn't a year: a longer run may be a
+ * date or a timestamp that changes every download (which would make the same line two lines), and
+ * two candidates are no answer. Null when the name doesn't say.
+ */
+export function last4FromName(name: string): string | null {
+  const base = String(name ?? "").replace(/\.[a-z0-9]{2,5}$/i, "");
+  const runs = (base.match(/\d+/g) ?? []).filter((r) => r.length === 4 && !/^(19|20)\d{2}$/.test(r));
+  return runs.length === 1 ? runs[0] : null;
+}
+
 /** A check number from its column, or from the description ("CHECK 1043", "CHECK #1043"). */
 export function checkNumberOf(cell: unknown, description: string): string | null {
   const fromCell = digitsOnly(cell).replace(/^0+/, "");
@@ -304,17 +316,31 @@ function chargesPrintedPositive(lines: readonly { cents: number; description: st
  * Only for a download nothing has been applied from: no line is in bank_lines under the old key.
  */
 export function swapDownloadSigns(dl: BankDownload, hash: Hasher): BankDownload {
+  const lines = dl.lines.map((l) => ({
+    ...l,
+    cents: -l.cents,
+    description: l.description === "Deposit" ? "Withdrawal" : l.description === "Withdrawal" ? "Deposit" : l.description,
+  }));
+  return { ...dl, lines: rekeyLines(lines, hash), swapped: !dl.swapped };
+}
+
+/** Each line's key made again from what it now says (a bank's own id stays as it was). */
+function rekeyLines(lines: readonly BankLine[], hash: Hasher): BankLine[] {
   const seen = new Map<string, number>();
-  const lines = dl.lines.map((l) => {
-    const cents = -l.cents;
-    const description = l.description === "Deposit" ? "Withdrawal" : l.description === "Withdrawal" ? "Deposit" : l.description;
-    if (l.key.startsWith("fitid:")) return { ...l, cents, description };
-    const same = `${l.last4 ?? ""}|${l.postedOn}|${cents}|${description.toUpperCase()}`;
+  return lines.map((l) => {
+    if (l.key.startsWith("fitid:")) return l;
+    const same = `${l.last4 ?? ""}|${l.postedOn}|${l.cents}|${l.description.toUpperCase()}`;
     const repeat = seen.get(same) ?? 0;
     seen.set(same, repeat + 1);
-    return { ...l, cents, description, key: lineKeyOf(hash, { last4: l.last4, fitid: null, postedOn: l.postedOn, cents, description }, repeat) };
+    return { ...l, key: lineKeyOf(hash, { last4: l.last4, fitid: null, postedOn: l.postedOn, cents: l.cents, description: l.description }, repeat) };
   });
-  return { ...dl, lines, swapped: !dl.swapped };
+}
+
+/** A person said which account a download with no account on it is for: every line carries its
+ *  last 4, and its key with it. Only before anything is applied (the old keys are nowhere yet). */
+export function withAccountLast4(dl: BankDownload, last4: string, hash: Hasher): BankDownload {
+  const lines = dl.lines.map((l) => ({ ...l, last4: l.last4 ?? last4 }));
+  return { ...dl, last4, lines: rekeyLines(lines, hash) };
 }
 
 /**
@@ -330,6 +356,9 @@ export function readBankTable(table: readonly (readonly string[])[], name: strin
   const raw: Omit<BankLine, "key" | "merchantKey">[] = [];
   const fitids: (string | null)[] = [];
   const body = table.slice(header.row + 1);
+  // No account column: the file's name may say which account it is, so the same fee on two
+  // accounts' downloads stays two lines.
+  const nameLast4 = c.account === undefined ? last4FromName(name) : null;
   // An unsigned Amount column with a type column: the type says which way the money went.
   const amounts = c.amount !== undefined ? body.map((r) => readBankMoney(cell(r, c.amount))).filter((n): n is number => n !== null) : [];
   const unsigned = amounts.length > 0 && amounts.every((n) => n >= 0) && c.type !== undefined;
@@ -392,7 +421,7 @@ export function readBankTable(table: readonly (readonly string[])[], name: strin
       // From the REDACTED words: "transfer to CHK 123456789" is an account number, not a check,
       // and it must never reach a bill number or a crew payment's reference.
       check: checkNumberOf(cell(r, c.check), description),
-      last4: last4Of(cell(r, c.account)),
+      last4: c.account === undefined ? nameLast4 : last4Of(cell(r, c.account)),
     });
     fitids.push(cell(r, c.id) || null);
   });
@@ -1170,6 +1199,8 @@ export type BankView = {
   swapped: boolean;
   /** Nothing applied yet: a person may still swap money in and out. */
   canSwap: boolean;
+  /** No account on the file or its name: a person may say its last 4 (before anything applies). */
+  askAccount: boolean;
   problem: string | null;
 };
 
@@ -1245,6 +1276,7 @@ export function bankViewOf(dl: BankDownload, plan: BankPlan, books: BankBooks, o
     canUndo: passes.length > 0,
     swapped: !!dl.swapped,
     canSwap: passes.length === 0 && dl.lines.length > 0,
+    askAccount: passes.length === 0 && dl.lines.length > 0 && !dl.last4,
     problem: null,
   };
 }

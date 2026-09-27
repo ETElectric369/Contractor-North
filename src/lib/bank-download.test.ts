@@ -21,6 +21,8 @@ import {
   redactDigits,
   ruleFor,
   swapDownloadSigns,
+  last4FromName,
+  withAccountLast4,
   validPicks,
   type BankBooks,
   type BankDownload,
@@ -159,6 +161,24 @@ CHECK,09/05/2026,CHECK 2001,-300.00,CHECK_PAID,1700.00,2001
     expect(dl.skipped[1].why).toMatch(/No date on it/);
     const all = readBankTable(parseCSV(`Date,Description,Amount\n3rd of Sep 2026,SHOP RENT,-650.00\n`), "odd.csv", hash)!;
     expect(noLinesSaid(all, "odd.csv")).toMatch(/^odd\.csv: none of its dates read/);
+  });
+
+  it("with no account column, the file's name may say which account it is; a person may too", () => {
+    const fee = `Posting Date,Description,Amount\n09/30/2026,MONTHLY SERVICE FEE,-15.00\n`;
+    expect(last4FromName("Chase1111_Activity_20260930.csv")).toBe("1111");
+    expect(last4FromName("Checking1.csv")).toBeNull();
+    expect(last4FromName("2026-09-30_transactions.csv")).toBeNull();
+    expect(last4FromName("export_1727654400.csv")).toBeNull();
+    const a = readBankTable(parseCSV(fee), "Chase1111_Activity.csv", hash)!;
+    const b = readBankTable(parseCSV(fee), "Chase2222_Activity.csv", hash)!;
+    expect([a.last4, b.last4]).toEqual(["1111", "2222"]);
+    expect(a.lines[0].key).not.toBe(b.lines[0].key);
+    const bare = readBankTable(parseCSV(fee), "stmt.csv", hash)!;
+    expect(bare.last4).toBeNull();
+    const told = withAccountLast4(bare, "2222", hash);
+    expect(told.last4).toBe("2222");
+    expect(told.lines[0].last4).toBe("2222");
+    expect(told.lines[0].key).toBe(b.lines[0].key);
   });
 
   it("a card's download that prints charges as positive is read the other way round", () => {

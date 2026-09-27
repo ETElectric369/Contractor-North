@@ -4,10 +4,10 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Archive, ArrowLeftRight, Check, Loader2, Undo2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Select } from "@/components/ui/input";
+import { Input, Select } from "@/components/ui/input";
 import { sayDollars } from "@/lib/supplier-open-list";
 import type { BankRowView, BankView, FlowSegment } from "@/lib/bank-download";
-import { applyBankDownload, swapBankDownload, undoBankDownload } from "@/app/(app)/bills/bank-actions";
+import { applyBankDownload, setBankAccount, swapBankDownload, undoBankDownload } from "@/app/(app)/bills/bank-actions";
 import { keepPaperwork } from "@/app/(app)/organize/paperwork-actions";
 
 /**
@@ -143,6 +143,7 @@ function Row({
 export function BankCard({ itemId, view, run, busy, working }: { itemId: string; view: BankView | null | undefined; run: Run; busy: string | null; working: boolean }) {
   const router = useRouter();
   const [picks, setPicks] = useState<Record<string, string>>({});
+  const [four, setFour] = useState("");
 
   const notNow = (
     <Button variant="outline" onClick={() => run("keep", () => keepPaperwork(itemId), "Set aside.")} disabled={working} title="Set it aside in Organize's Archive">
@@ -250,6 +251,26 @@ export function BankCard({ itemId, view, run, busy, working }: { itemId: string;
         {undo}
       </div>
       {view.swapped && <p className="text-xs text-slate-600">Read as a card&apos;s download: its charges are money out, its payments and credits money in.</p>}
+      {view.askAccount && (
+        <div className="space-y-1.5">
+          <p className="text-xs text-slate-600">No account on this file. Which account is it? The last 4 digits keep the same line on two accounts from being counted once.</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <Input
+              className="h-11 w-24"
+              inputMode="numeric"
+              maxLength={4}
+              value={four}
+              onChange={(e) => setFour(e.target.value.replace(/\D/g, "").slice(0, 4))}
+              aria-label="The account's last 4 digits"
+              placeholder="1234"
+              disabled={working}
+            />
+            <Button variant="outline" onClick={() => run("account", () => setBankAccount(itemId, four))} disabled={working || four.length !== 4}>
+              {busy === "account" ? <Loader2 className="animate-spin" /> : <Check />} Save Account
+            </Button>
+          </div>
+        </div>
+      )}
       {(view.sorted.length > 0 || view.skipped.length > 0 || view.canSwap) && (
         <details className="rounded-lg border border-slate-200 px-3 py-2 text-sm">
           <summary className="flex min-h-11 cursor-pointer items-center font-medium text-slate-700">See How It Sorted</summary>

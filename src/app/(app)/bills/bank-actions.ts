@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { dbError } from "@/lib/db-error";
 import { requireStaff } from "@/lib/staff-guard";
 import { proposalOf } from "@/lib/paperwork";
-import { applyingNow, swapDownloadSigns, type StoredBank } from "@/lib/bank-download";
+import { applyingNow, swapDownloadSigns, withAccountLast4, type BankDownload, type StoredBank } from "@/lib/bank-download";
 import { applyBankCore, proposalAfterUndo, sha256Hex, undoBankCore } from "./bank-core";
 
 /**
@@ -46,8 +46,27 @@ export async function applyBankDownload(id: string, opts: { fingerprint: string;
  * its lines are in bank_lines under the sign they were counted with, and Undo comes first.
  */
 export async function swapBankDownload(id: string): Promise<Result> {
+  const res = await reworkDownload(id, "swap money in and out", (dl) => swapDownloadSigns(dl, sha256Hex));
+  if (!res.ok) return res;
+  return { ok: true, message: res.download.swapped ? "Swapped: charges are money out now." : "Swapped back: money in and out read as the file prints them." };
+}
+
+/**
+ * WHICH ACCOUNT IS IT: a download with no account column (and none in its name) is told its last 4,
+ * so the same fee on two accounts' downloads is never taken for one line. Four digits and no more.
+ */
+export async function setBankAccount(id: string, last4: string): Promise<Result> {
+  const four = String(last4 ?? "").trim();
+  if (!/^\d{4}$/.test(four)) return { ok: false, error: "Type the last 4 digits of the account, and only those." };
+  const res = await reworkDownload(id, "say which account it is", (dl) => withAccountLast4(dl, four, sha256Hex));
+  if (!res.ok) return res;
+  return { ok: true, message: `Saved: this download is the account ending ${four}.` };
+}
+
+/** Rework a download's lines before anything is applied from it (their keys are nowhere yet). */
+async function reworkDownload(id: string, what: string, change: (dl: BankDownload) => BankDownload): Promise<{ ok: true; download: BankDownload } | { ok: false; error: string }> {
   const ctx = await requireStaff();
-  if ("error" in ctx) return { ok: false, error: ctx.error };
+  if ("error" in ctx) return { ok: false, error: String(ctx.error) };
   if (!ctx.orgId) return { ok: false, error: "Your sign-in isn't attached to a company yet." };
   const { data: item } = await ctx.supabase.from("organized_items").select("*").eq("id", id).eq("org_id", ctx.orgId).maybeSingle();
   if (!item) return { ok: false, error: "That bank download isn't here any more." };
@@ -55,8 +74,8 @@ export async function swapBankDownload(id: string): Promise<Result> {
   const stored = p.bankImport as StoredBank | undefined;
   if (!stored?.download) return { ok: false, error: "This paper isn't a bank download." };
   if (item.status !== "needs_review" || (stored.applied?.length ?? 0) > 0 || applyingNow(stored))
-    return { ok: false, error: "Some of this download is already counted. Undo it first, then swap money in and out." };
-  const download = swapDownloadSigns(stored.download, sha256Hex);
+    return { ok: false, error: `Some of this download is already counted. Undo it first, then ${what}.` };
+  const download = change(stored.download);
   const { data: back, error } = await ctx.supabase
     .from("organized_items")
     .update({ proposal: { ...p, bankImport: { ...stored, download } } })
@@ -67,7 +86,7 @@ export async function swapBankDownload(id: string): Promise<Result> {
   if (error) return { ok: false, error: `Nothing was changed. ${dbError(error)}` };
   if (!back?.length) return { ok: false, error: "Nothing was changed: the download was applied or removed from another screen." };
   revalidateBank();
-  return { ok: true, message: download.swapped ? "Swapped: charges are money out now." : "Swapped back: money in and out read as the file prints them." };
+  return { ok: true, download };
 }
 
 /**
