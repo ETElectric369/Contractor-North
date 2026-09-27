@@ -214,7 +214,10 @@ export function BankCard({ itemId, view, run, busy, working }: { itemId: string;
         if (res.ok) setPicks({});
         return res;
       },
-      "Applied.",
+      // THE CARD LEAVES only when every row is answered: then (as any paper filed) the list line and
+      // the toast carry Undo. A partial Apply stays on the card, says what it did in the card's own
+      // line, and its one Undo is the card's confirmed Undo This Download.
+      leftRows === 0 ? "Applied." : undefined,
     );
 
   return (
