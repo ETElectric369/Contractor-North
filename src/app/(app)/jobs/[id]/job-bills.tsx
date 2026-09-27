@@ -19,8 +19,9 @@ import { executeAction } from "@/lib/actions/execute";
 /**
  * ALREADY BILLED ON THE COSTS TAB (0357). `open`: the Not Billed Yet rows the door can mark (a row
  * with no entry has no door: no line on a sent bill could hold it). `hands`: the Billed rows
- * a person marked, with the line and ids Not Billed After All takes back off. Staff only, and only
- * on a job that bills its actual costs (the page decides; a fixed-price job passes nothing).
+ * a person marked, with the line and ids Not Billed After All takes back off. Staff only (the page
+ * decides). `open` only where the piles exist (a job that bills its actual costs); `hands` wherever a
+ * mark is, the plain list included (a fixed-price job New Invoice bills from its actuals, J-010).
  */
 export type JobAlreadyBilled = {
   open: Record<string, { kind: "bill" | "po" | "stock"; ids: string[]; what: string }>;
@@ -145,7 +146,7 @@ export function JobBills({
    */
   const abDoors = (id: string, pile: Pile) => {
     const open = pile === "open" ? alreadyBilled?.open[id] : undefined;
-    const hand = pile === "billed" ? alreadyBilled?.hands[id] : undefined;
+    const hand = pile === "billed" || pile === "plain" ? alreadyBilled?.hands[id] : undefined;
     if (open) return <AlreadyBilledButton jobId={jobId} target={open} />;
     if (hand)
       return (
@@ -402,6 +403,8 @@ export function JobBills({
       ) : (
         rowsOf(bills.map((b) => b.id))
       )}
+      {/* The plain list (no piles): hours a person marked still say so, with the way back. */}
+      {!groups && billedHours.length > 0 && <div className="mt-3 space-y-2">{billedHours.map(hoursRow)}</div>}
 
       {editBill && (
         <JobBillEditModal

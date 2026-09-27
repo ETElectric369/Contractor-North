@@ -467,10 +467,12 @@ export default async function JobDetailPage({
         )
       : Promise.resolve(null as Awaited<ReturnType<typeof readJobStock>> | null),
     // ALREADY BILLED (0357): which of the job's rows a person marked as billed, and on which line,
-    // for the Billed fold's "Billed By Hand On INV-x · Not Billed After All". Staff only, on a job
-    // that bills its actuals. A lost read is logged and the fold simply offers no Undo there (the
-    // rows still say which invoice holds them); a database without 0357 reads as not ready.
-    viewerIsStaff && billsActuals
+    // for "Billed By Hand On INV-x · Not Billed After All". Staff only, on EVERY job whatever its
+    // billing type: a mark can sit on a fixed-price job New Invoice bills from its actuals (J-010
+    // Purple Sage), and the way back has to be there wherever a mark is. A lost read is logged and
+    // the fold simply offers no Undo there (the rows still say which invoice holds them); a
+    // database without 0357 reads as not ready.
+    viewerIsStaff
       ? readHandClaimsForJob(supabase, id, (j as any).customer_id ?? null).catch((e: unknown) => {
           reportError("jobs.[id].handClaims", e, { jobId: id });
           return null;
@@ -561,17 +563,20 @@ export default async function JobDetailPage({
       )
     : { charge: alreadyBilledOffer, ret: alreadyBilledOffer };
   const handById = handClaims?.ready ? handClaims.byId : null;
-  const alreadyBilledDoors = costGroups
-    ? jobAlreadyBilledDoors({
-        groups: costGroups,
-        bills: (bills ?? []) as any[],
-        pos: (pos ?? []) as any[],
-        takes: (jobStock?.takes ?? []).map((t) => ({ key: stockKey(t.group), moveIds: t.moveIds, label: stockCostLabel(t) })),
-        hands: handById,
-        offer: alreadyBilledCan,
-      })
-    : null;
-  const hoursMarked = costGroups ? hoursByHand((laborRows?.jobEntries ?? []) as any[], handById) : [];
+  // Without the piles (a fixed-price job, or the claims unreadable) the tab is one plain list, and a
+  // row a person marked still says so there, with Not Billed After All: every row is a candidate.
+  const alreadyBilledDoors =
+    costGroups || (handById && handById.size > 0)
+      ? jobAlreadyBilledDoors({
+          groups: costGroups ?? { open: { ids: [] }, billed: [{ ids: ((bills ?? []) as any[]).map((b) => String(b.id)) }] },
+          bills: (bills ?? []) as any[],
+          pos: (pos ?? []) as any[],
+          takes: (jobStock?.takes ?? []).map((t) => ({ key: stockKey(t.group), moveIds: t.moveIds, label: stockCostLabel(t) })),
+          hands: handById,
+          offer: costGroups ? alreadyBilledCan : { charge: false, ret: false },
+        })
+      : null;
+  const hoursMarked = hoursByHand((laborRows?.jobEntries ?? []) as any[], handById);
   const paperViews: JobPaperView[] | null = papers
     ? papers.map((p) => ({
         id: p.id,

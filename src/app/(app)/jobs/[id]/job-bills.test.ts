@@ -155,6 +155,23 @@ describe("the Costs tab's Already Billed doors", () => {
     expect(only).toContain("Billed By Hand On INV-060: 10h 30m");
   });
 
+  it("J-010, fixed price with no estimate (no piles): the marked receipt and marked hours still say so, with Not Billed After All", () => {
+    const html = renderToStaticMarkup(
+      createElement(JobBills, {
+        jobId: "j-010",
+        bills: PS as any,
+        pos: [],
+        groups: null,
+        alreadyBilled: { open: {}, hands: doors.hands },
+        billedHours: [{ lineId: "li-brian", invoiceId: "inv-23", invoiceNumber: "INV-00023", ids: ["t1"], hours: 6, what: "6 h of Brian Taylor's time" }],
+      }),
+    );
+    expect(html).toContain("Billed By Hand On INV-00023");
+    expect(html).toContain("Billed By Hand On INV-00023: 6h");
+    expect(words(html).filter((x) => x.words === "Not Billed After All")).toHaveLength(2);
+    expect(words(html).filter((x) => x.words === "Already Billed")).toHaveLength(0);
+  });
+
   it("no doors when the page offers none (a tech's view, a fixed-price job's plain list, or no sent bill to hold it)", () => {
     for (const html of [
       renderToStaticMarkup(createElement(JobBills, { jobId: "j-010", bills: PS as any, pos: [], groups: groups as any, alreadyBilled: null })),
