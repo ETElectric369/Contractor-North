@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { createElement } from "react";
+import { createElement, type FunctionComponent, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn(), replace: vi.fn(), refresh: vi.fn() }) }));
@@ -18,10 +18,13 @@ import { createBackStepper, createOverlayStack } from "./ui/overlay-history";
  */
 
 const tagOpen = (html: string, from: number) => html.lastIndexOf("<div", from);
+// Children go in createElement's third argument (react/no-children-prop), the props cast the way which-job-sheet.test.ts does.
+const el = <P extends object>(type: FunctionComponent<P>, props: Omit<P, "children">, children: ReactNode) =>
+  createElement(type, props as P, children);
 
 describe("the ⋯ trigger", () => {
   it("is 44px and says which row it is for", () => {
-    const html = renderToStaticMarkup(createElement(RowMoreSheet, { title: "Smith walk-through", children: "rows" }));
+    const html = renderToStaticMarkup(el(RowMoreSheet, { title: "Smith walk-through" }, "rows"));
     expect(ROW_MORE_TRIGGER).toContain("h-11 w-11");
     expect(html).toMatch(/<button type="button" aria-label="More For Smith walk-through"[^>]*class="[^"]*h-11 w-11[^"]*"/);
     // Closed, the sheet draws nothing.
@@ -32,13 +35,11 @@ describe("the ⋯ trigger", () => {
 describe("the sheet", () => {
   it("is titled with the row, a quiet subline under it, then its rows in the row grammar", () => {
     const html = renderToStaticMarkup(
-      createElement(RowMoreSheetView, {
-        open: true,
-        title: "Smith walk-through",
-        subline: "9:00 AM · 85 Whitney",
-        onClose: () => {},
-        children: createElement("button", { type: "button", className: SHEET_ROW }, "Mark Done"),
-      }),
+      el(
+        RowMoreSheetView,
+        { open: true, title: "Smith walk-through", subline: "9:00 AM · 85 Whitney", onClose: () => {} },
+        createElement("button", { type: "button", className: SHEET_ROW }, "Mark Done"),
+      ),
     );
     expect(html).toContain(">Smith walk-through</h2>");
     expect(html).toContain("9:00 AM · 85 Whitney");
@@ -48,8 +49,8 @@ describe("the sheet", () => {
   });
 
   it("stays mounted while a child sheet is open; the child renders after it, so it stacks above it at the same z-index", () => {
-    const child = createElement(Modal, { open: true, onClose: () => {}, title: "Move To Another Day", children: "day chips" });
-    const html = renderToStaticMarkup(createElement(RowMoreSheetView, { open: true, title: "Smith walk-through", onClose: () => {}, children: child }));
+    const child = el(Modal, { open: true, onClose: () => {}, title: "Move To Another Day" }, "day chips");
+    const html = renderToStaticMarkup(el(RowMoreSheetView, { open: true, title: "Smith walk-through", onClose: () => {} }, child));
     const sheetTitle = html.indexOf(">Smith walk-through</h2>");
     const childTitle = html.indexOf(">Move To Another Day</h2>");
     expect(sheetTitle).toBeGreaterThan(0);
@@ -68,7 +69,7 @@ describe("the sheet", () => {
 
 describe("a row that goes somewhere", () => {
   it("is a 44px link that never closes the sheet first; with the sheet's entry on top, the new page replaces it", () => {
-    const html = renderToStaticMarkup(createElement(SheetLink, { href: "/tasks", children: "Open" }));
+    const html = renderToStaticMarkup(el(SheetLink, { href: "/tasks" }, "Open"));
     expect(html).toMatch(/<a class="[^"]*min-h-\[44px\][^"]*" href="\/tasks">Open<\/a>/);
     expect(replacesSheetEntry({ cnOverlay: true, __NA: true })).toBe(true);
     expect(replacesSheetEntry({ __NA: true })).toBe(false);
