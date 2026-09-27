@@ -16,6 +16,8 @@ import { SHORT_FIX } from "@/lib/stock-take";
 import { loadSupplierDesk, type SupplierDesk, type SupplierPaperFeed } from "@/app/(app)/bills/supplier-papers";
 import { supplierDeskFailedItem, supplierPaperActionItem } from "./supplier-paper-item";
 import { supplierPayActionItems } from "./supplier-pay-item";
+import { noJobHoursActionItem } from "./no-job-hours-item";
+import { readNoJobHours, type NoJobHours } from "@/lib/no-job-hours";
 import { feederOn, inquiryActionItem } from "./switches";
 import { featureOn, featuresFromOffKey } from "@/lib/features";
 import {
@@ -160,6 +162,15 @@ async function buildActionItems(ctx: {
     ? loadSupplierDesk(supabase, userId, todayStr).catch((): SupplierDesk => ({ papers: null, payDue: [], failed: { papers: true, pay: true } }))
     : Promise.resolve(null);
   const supplierPapersP: Promise<SupplierPaperFeed | null> = supplierDeskP.then((d) => d?.papers ?? null);
+
+  // HOURS ON NO JOB (the duplicate punches, 2026-09-26): every past-day shift nobody put on a job,
+  // with no age limit, as ONE rolled-up line. Its own read, beside the fan-out; `failed` when the
+  // read broke, which the line says rather than showing nothing.
+  const noJobP: Promise<{ summary: NoJobHours | null; failed: boolean }> = isStaff && tz
+    ? readNoJobHours(supabase, { tz, todayStr })
+        .then((summary) => ({ summary, failed: summary === null }))
+        .catch(() => ({ summary: null, failed: true }))
+    : Promise.resolve({ summary: null, failed: false });
 
   const [jobsR, inqR, apptR, orgR, invR, quoteR, acceptedR, draftR, conR, lienR, bugR, openTimeR, recentTimeR, nonBillableR, matJobsR, matSegR, inspR, inspQuoteR, billedJobR, doneWorkR, draftQuoteR] = await Promise.all([
     // Unscheduled jobs — staff only (the "resting place" for things needing a date).
@@ -804,13 +815,16 @@ async function buildActionItems(ctx: {
   // Detection only, per the hard boundary: each item names the gap and deep-links to
   // the surface that fixes it; nothing infers hours, dollars, or clock-out times.
 
-  // 1) STRAY TIME — an open clock from a past day, or a past-day close with no job.
+  // 1) STRAY TIME — an open clock from a past day, one row per clock. A past-day close with no job
+  // is NOT a row here any more: it rides in the Hours On No Job rollup below, which never drops it
+  // after three days (the window this detector reads is what let Brian's 9/11 punch go quiet).
   const strayFindings = detectStrayTime(
     [...((openTimeR.data ?? []) as any[]), ...((recentTimeR.data ?? []) as any[])],
     todayStr,
     Date.now(),
     new Set(((nonBillableR.data ?? []) as { code?: string | null }[]).map((c) => String(c.code ?? "").trim()).filter(Boolean)),
-  );
+    tz,
+  ).filter((f) => f.openStill || !tz);
   // Whose clock each open finding is, for the words on its door ("Clock Out Brian").
   const openOwner = new Map<string, { profile_id?: string | null; full_name?: string | null }>(
     ((openTimeR.data ?? []) as any[]).map((e) => [String(e.id), { profile_id: e.profile_id, full_name: e.profiles?.full_name }]),
@@ -837,10 +851,17 @@ async function buildActionItems(ctx: {
       when: f.when,
       urgency: f.openStill ? 2 : 1, // a forgotten clock is a wrong week until somebody stops it
       done: false,
-      // The open one lands on its own clock-out sheet (/timecards finds the entry in any week).
-      href: f.openStill ? `/timecards?entry=${f.entryId}` : "/timecards",
+      // The open one lands on its own clock-out sheet (/timecards finds the entry in any week); a
+      // no-job close (only without an org timezone, when the rollup below cannot run) on its editor.
+      href: `/timecards?entry=${f.entryId}`,
       affordances: AFFORDANCES.time_stray,
     });
+  }
+  // 1b) HOURS ON NO JOB — one line for every past-day shift nobody put on a job, however old.
+  {
+    const noJob = await noJobP;
+    const item = noJobHoursActionItem(noJob.summary, { failed: noJob.failed });
+    if (item) items.push(item);
   }
 
   // ── MATERIALS ROUTING (staff only) — the "who's buying?" feeder. Unpurchased

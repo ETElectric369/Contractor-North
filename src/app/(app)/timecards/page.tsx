@@ -35,6 +35,8 @@ import { jobLabel } from "@/lib/schedule-options";
 import { LONG_SHIFT_HOURS, clockDoorWords, isLongOpenShift } from "@/lib/long-shift";
 import { loadShiftChains } from "@/lib/shift-chain";
 import { reportError } from "@/lib/observe";
+import { companyTimeCode, readNoJobHours } from "@/lib/no-job-hours";
+import { CompanyTimeButton } from "./company-time-button";
 
 export const dynamic = "force-dynamic";
 
@@ -156,6 +158,8 @@ export default async function TimecardsPage({
   const orgSettings = getOrgSettings((org as any)?.settings);
   const payDoors = shellDoors(orgSettings.features, teammates);
   const tz = orgSettings.timezone;
+  // The shifts on no job (Fix These, below): started now so the read rides beside the others.
+  const noJobP = readNoJobHours(supabase, { tz, todayStr: todayStrInTz(tz) }).catch(() => null);
 
   const { start, end, days: weekDayStrs } = weekRange(offset, tz, orgSettings.week_start);
 
@@ -425,6 +429,7 @@ export default async function TimecardsPage({
       // THE NAME, NOT THE NUMBER, and still a way into the job itself (jobLabel is the SSOT).
       job: e.job_id && e.job ? { href: `/jobs/${e.job_id}`, label: jobLabel(e.job) } : null,
       jobCode: e.job_code ?? null,
+      noJob: !open && !e.job_id && !e.job_code,
       source: e.source === "manual" ? "manual" : e.source === "offline" ? "offline" : null,
       lunchMin: Number(e.lunch_minutes ?? 0),
       notes: e.notes ?? null,
@@ -638,7 +643,24 @@ export default async function TimecardsPage({
       href: hrefFor(weekOf(day), `entry=${e.id}`),
     };
   });
-  const fixCount = brokenRows.length;
+  /* ── AND THE SHIFTS ON NO JOB, HOWEVER OLD (the duplicate punches, 2026-09-26) ──────────────
+   *
+   *  Brian's 9/11 clock punch landed on no job. Needs You dropped it after three days, this box never
+   *  listed it, and on 9/19 the office billing 85 Whitney typed the day again: the same hours, paid
+   *  twice. A shift on no job is hours nobody bills, so it stays here, in any week, until a person
+   *  says what it was: Pick A Job (the row opens its editor) or Company Time (the company's own
+   *  non-billable code). Needs You's Hours On No Job line opens this list (#no-job). */
+  const noJob = await noJobP;
+  const companyCode = companyTimeCode((jobCodes ?? []) as { code?: string | null; billable?: boolean | null; active?: boolean | null }[]);
+  const noJobRows = (noJob?.shifts ?? []).map((s) => ({
+    id: s.id,
+    name: s.name,
+    when: `${formatDateShort(s.clockIn, tz)}, ${formatTime(s.clockIn, tz)}–${formatTime(s.clockOut, tz)}`,
+    hours: s.hours,
+    code: s.jobCode,
+    href: hrefFor(weekOf(s.day), `entry=${s.id}`),
+  }));
+  const fixCount = brokenRows.length + noJobRows.length;
 
   // The ?entry= deep link (a grid pill tap) — find the entry and auto-open its editor below.
   // The stack scrolls 26 weeks, but `entries` holds ONE week — so a tap on any pill outside the
@@ -954,8 +976,52 @@ export default async function TimecardsPage({
                 ))}
               </ul>
             )}
+            {noJobRows.length > 0 && (
+              <div id="no-job" className="mt-2 scroll-mt-24">
+                <h4 className="text-xs font-semibold uppercase tracking-wide text-amber-900">
+                  Hours On No Job ({noJobRows.length}
+                  {noJob?.capped ? "+" : ""} · {formatDuration(noJob?.hours ?? 0)})
+                </h4>
+                <p className="text-xs text-amber-800">
+                  On no invoice, and paid like any shift. Put each on its job, or file it as the company&apos;s own time.
+                </p>
+                <ul className="divide-y divide-amber-200/60">
+                  {noJobRows.map((r) => (
+                    <li key={r.id} className="flex min-h-[44px] flex-wrap items-center gap-x-2 py-1 text-sm">
+                      <Link href={r.href} scroll={false} className="min-w-0 flex-1 py-1.5 text-slate-800 active:bg-amber-100/60">
+                        <span className="font-medium">{r.name}</span>
+                        <span className="text-slate-500"> · {r.when}</span>
+                        <span className="font-mono text-xs tabular-nums text-slate-600"> · {r.hours.toFixed(2)} h</span>
+                        <Badge tone="amber" className="ml-2">
+                          {r.code ? `${r.code}, no job` : "No Job"}
+                        </Badge>
+                      </Link>
+                      <span className="flex shrink-0 items-center gap-1">
+                        {companyCode && <CompanyTimeButton entryId={r.id} code={companyCode} />}
+                        <Link
+                          href={r.href}
+                          scroll={false}
+                          className="flex min-h-[44px] items-center gap-0.5 px-1 text-sm font-medium text-amber-800"
+                        >
+                          Pick A Job
+                          <ChevronRight className="h-4 w-4 text-amber-700" aria-hidden />
+                        </Link>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {noJob === null && (
+              <p className="mt-2 text-xs text-amber-800">Couldn&apos;t check for shifts on no job just now. Reload to try again.</p>
+            )}
           </CardContent>
         </Card>
+      ) : noJob === null ? (
+        /* A failed read is not a clean week: say which check could not be made. */
+        <p className="mb-4 flex min-h-[44px] items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 text-sm font-medium text-amber-900">
+          <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden /> Couldn&apos;t check for shifts on no job just now. Reload to try again.
+        </p>
       ) : (
         /* NOTHING SILENT: a missing warning has to be AFFIRMED. Without this line the page looks
            exactly the same when everything is clean and when the check never ran, and "no news"

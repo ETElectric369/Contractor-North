@@ -10,6 +10,7 @@
 // clock-out times. Every finding is a question ("has no job", "no costs yet"),
 // never a filled-in answer.
 import { LONG_SHIFT_HOURS } from "@/lib/long-shift";
+import { todayStrInTz } from "@/lib/tz";
 
 /** An open entry past this many hours is flagged even when the UTC date-cut (below)
  *  misses an evening start. THE SHARED LONG-SHIFT RULE (lib/long-shift, 2026-09-24):
@@ -68,21 +69,27 @@ const firstName = (full: string | null | undefined) => (full ?? "").trim().split
  *
  * `nonBillableCodes` is the same predicate labor billing uses (labor-billing.ts). Empty = every
  * job-less close is stray, the safe default for a caller without the org's codes.
+ *
+ * `tz` is the ORG's timezone, and `todayStr` is the org's day. Given it, "a past day" is judged on
+ * the org's calendar. Without it the old UTC date slice stands, which calls a Pacific 6 PM close
+ * "tomorrow" and so skips the evening before for a day.
  */
 export function detectStrayTime(
   rows: TimeEntryRow[],
   todayStr: string,
   nowMs: number = Date.now(),
   nonBillableCodes: ReadonlySet<string> = new Set(),
+  tz?: string,
 ): StrayTimeFinding[] {
   const out: StrayTimeFinding[] = [];
   const seen = new Set<string>();
+  const dayOf = (iso: string) => (tz ? todayStrInTz(tz, new Date(iso)) : iso.slice(0, 10));
   for (const e of rows ?? []) {
     if (!e?.id || seen.has(e.id)) continue;
     seen.add(e.id);
     if (e.status === "open") {
       if (!e.clock_in) continue;
-      const startedPastDay = e.clock_in.slice(0, 10) < todayStr;
+      const startedPastDay = dayOf(e.clock_in) < todayStr;
       const staleMs = nowMs - Date.parse(e.clock_in);
       if (!startedPastDay && !(Number.isFinite(staleMs) && staleMs >= OPEN_ENTRY_STALE_HOURS * 3_600_000)) continue;
       out.push({ entryId: e.id, name: firstName(e.profiles?.full_name), openStill: true, when: e.clock_in });
@@ -90,7 +97,7 @@ export function detectStrayTime(
       // Non-billable time (Shop, PTO) is job-less on purpose: its code says where the hours went.
       const code = (e.job_code ?? "").trim();
       if (code && nonBillableCodes.has(code)) continue;
-      if (!e.clock_out || e.clock_out.slice(0, 10) >= todayStr) continue;
+      if (!e.clock_out || dayOf(e.clock_out) >= todayStr) continue;
       out.push({ entryId: e.id, name: firstName(e.profiles?.full_name), openStill: false, when: e.clock_in ?? e.clock_out });
     }
   }

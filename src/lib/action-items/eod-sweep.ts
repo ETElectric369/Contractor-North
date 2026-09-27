@@ -60,7 +60,8 @@ export async function sendCloseOutNudges(supabase: any): Promise<{ orgs: number;
     ]);
     const nonBillable = new Set<string>(((codesR.data ?? []) as { code?: string | null }[]).map((c) => String(c.code ?? "").trim()).filter(Boolean));
 
-    const stray = detectStrayTime([...((openR.data ?? []) as any[]), ...((recentR.data ?? []) as any[])], today, Date.now(), nonBillable);
+    // The org's own calendar decides "a past day" (tz), not the UTC slice of the timestamp.
+    const stray = detectStrayTime([...((openR.data ?? []) as any[]), ...((recentR.data ?? []) as any[])], today, Date.now(), nonBillable, tz);
     const worked = rollupWorkedJobs((recentR.data ?? []) as any[], today);
 
     // Detection only — name the gap, never fill in hours/dollars for the user.
