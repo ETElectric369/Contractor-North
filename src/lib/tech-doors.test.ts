@@ -78,6 +78,8 @@ describe("the job's side doors", () => {
     expect(s).toContain("(viewerIsStaff ? (priceBook ?? []) : [])");
     expect(s).toMatch(/viewerIsStaff\s*\?\s*\(inspection\?\.inspection_answers \?\? \{\}\)\s*:\s*answersWithoutPrices\(/);
     expect(s).toContain("answers: answersWithoutPrices(b.answers)");
+    // A why line names a price and a note is the owner's own voice: only the office gets the sheets as written.
+    expect(s).toContain("templates={viewerIsStaff ? (sheets ?? []) : sheetsWithoutMoney(sheets ?? [])}");
     expect(s).toMatch(/estimateHref=\{viewerIsStaff && estimatesOn \?/);
     // The heading names the estimate only for the people who get its door.
     expect(s).toContain('{viewerIsStaff && estimatesOn ? "Walk Through Or Estimate" : "Walk Through"}');
