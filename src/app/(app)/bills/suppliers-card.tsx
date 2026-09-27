@@ -643,12 +643,16 @@ export function SuppliersCard({
               if (balance.oldestUnpaid) facts.push(`oldest ${sayAge(balance.oldestUnpaidDays)}`);
 
               return (
-                <Card key={account.id} className="overflow-hidden">
+                // NO overflow-hidden ON THE CARD: the ⋯'s Edit Account panel is absolutely placed
+                // under it, inside this card, and a clipping card cut it off (a quiet register
+                // supplier's detail is only the ⋯ row, so its one door was hidden). The rounding
+                // lives on the summary instead.
+                <Card key={account.id}>
                   {/* ONE LINE PER SUPPLIER: the whole line is the tap target, and it opens to the
                       detail. A <details>, so a link to this supplier ("#supplier-invoices-<id>",
                       from a job's papers) opens it (FoldOpener). */}
                   <details id={`supplier-invoices-${account.id}`} className="scroll-mt-20">
-                    <summary className="flex min-h-[72px] cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 active:bg-slate-50 [&::-webkit-details-marker]:hidden">
+                    <summary className="flex min-h-[72px] cursor-pointer list-none items-center justify-between gap-3 rounded-xl px-4 py-3 active:bg-slate-50 [&::-webkit-details-marker]:hidden">
                       <span className="min-w-0">
                         <span className="block truncate text-base font-semibold text-slate-900">{account.name}</span>
                         <span className="mt-0.5 block truncate text-xs text-slate-500">{facts.join(" · ") || "Nothing on account."}</span>

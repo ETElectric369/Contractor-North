@@ -266,4 +266,33 @@ describe("the supplier detail: Check These", () => {
     expect(CARD).toContain("Other Spellings");
     expect(CARD).not.toContain("Names It&apos;s Filed Under");
   });
+
+  it("the ⋯'s Edit Account panel is never clipped: no account card cuts off what drops out of it", () => {
+    // A register supplier with nothing on it: its detail is only the ⋯ row, and the panel under it
+    // hangs below the card's edge. A clipping card (overflow-hidden) hid Edit Account entirely.
+    const html = renderToStaticMarkup(
+      createElement(SuppliersCard, {
+        accounts: [
+          {
+            id: "a9",
+            name: "Corner Hardware",
+            accountNumber: null,
+            branchCode: null,
+            onAccount: false,
+            note: null,
+            aliases: [],
+            bills: [],
+            payments: [],
+          },
+        ],
+        today: "2026-09-26",
+        actions: { recordPayment: async () => ({ ok: true }), voidPayment: async () => ({ ok: true }), updateAccount: async () => ({ ok: true }) },
+      }),
+    );
+    expect(html).toMatch(/<button[^>]*aria-label="Actions"/);
+    const card = /<div class="([^"]*)"><details id="supplier-invoices-a9"/.exec(html);
+    expect(card).not.toBeNull();
+    expect(card![1]).not.toContain("overflow-hidden");
+    expect(CARD).not.toContain('<Card key={account.id} className="overflow-hidden">');
+  });
 });
