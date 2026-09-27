@@ -324,6 +324,9 @@ describe("Income, Costs and People hold the rows behind the Summary", () => {
         .filter((l) => l.cost && l.label !== "Crew Pay (1099)" && l.label !== "Crew Mileage Paid")
         .map((l) => [l.label, toCents(l.of(f))]);
     expect(totals.map((r) => [r.cells[0], cents(r.cells[1])])).toEqual(want(cur.totals));
+    // Its Total leaves crew pay out, and says so, so it never reads as the Summary's Total Costs.
+    const totalAt = costs.rows.findIndex((r, i) => i > at && r.cells[0] === "Total");
+    expect(costs.rows[totalAt + 1].cells[0]).toBe("Crew pay and crew mileage are on the People tab, so they are not in this total.");
     // The ticket with a roll in it: its rest is Materials & Bills, its roll is Stock Bought.
     const b1 = costs.rows.filter((r) => r.cells[2] === "NS-100");
     expect(b1.map((r) => [r.cells[5], cents(r.cells[6])])).toEqual([

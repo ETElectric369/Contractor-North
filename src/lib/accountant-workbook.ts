@@ -644,6 +644,9 @@ function costsTab(input: AccountantWorkbookInput, cur: OwnerMoney, months: Set<s
     rows.push(line(l.label, money(c)));
   }
   rows.push(total("Total", money(all)));
+  // No figure here: an office file the owner hasn't shared carries no bottom line, so the note says
+  // where the rest is rather than adding it up.
+  rows.push(note("Crew pay and crew mileage are on the People tab, so they are not in this total."));
   if (cur.totals.processorFees) rows.push(note(`Fees includes ${formatCurrency(cur.totals.processorFees)} of card fees.`));
 
   // WHAT WAS SENT TO EACH SUPPLIER (supplierBalance over the period's payments).
