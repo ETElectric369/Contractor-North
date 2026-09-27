@@ -1,8 +1,13 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { discountDeadlineSentence } from "./suppliers-card";
+
+// The detail's ⋯ runs registry verbs only when tapped; the action registry is not this file's business.
+vi.mock("@/lib/actions/execute", () => ({ executeAction: vi.fn() }));
+
+import { discountDeadlineSentence, paymentLine, supplierChecks } from "./suppliers-card";
 import { claimableDiscounts, type SupplierInvoiceRow } from "./supplier-reconcile";
+import { supplierBalance, type SupplierAccountRow } from "./supplier-balance";
 
 /**
  * HIS CED DOCUMENTS, THE NIGHT THE WAVE RAN (2026-09-19, migration 0273).
@@ -113,15 +118,15 @@ describe("the card says the things a balance cannot say for itself", () => {
   /**
    * MODEL A: ticking a bill settled and recording the cheque that covered it take the same dollar
    * off twice. Neither control can be blocked - the app cannot know which bills a cheque covered -
-   * so the collision has to be speakable instead.
+   * so the collision has to be speakable instead: one check (W1-33), one sentence and one door, and
+   * the payment's own Undo stays on its row.
    */
-  it("warns when bills marked settled sit beside recorded payments on the same account", () => {
+  it("asks him to check bills marked settled beside recorded payments on the same account", () => {
     expect(CARD).toContain('balance.model === "bills-minus-payments" &&');
     expect(CARD).toContain("const settledBesidePayments =");
-    expect(CARD).toContain("balance is that much too low");
-    // It names controls that exist: the bills-list badge now reads On Account, and a payment's
-    // own button says Undo, not Void.
-    expect(CARD).toContain("or undo that payment here");
+    expect(CARD).toContain("if a check covered them, this balance is too low.");
+    // Undo stays on the payment's own row.
+    expect(CARD).toContain("() => actions.voidPayment(p.id),");
   });
 
   /**
@@ -134,11 +139,12 @@ describe("the card says the things a balance cannot say for itself", () => {
     expect(CARD).not.toContain("those receipts paid in the bills list");
     expect(CARD).not.toContain("Mark those receipts paid in the bills list");
     expect(CARD).not.toContain("is still marked unpaid.`");
-    // Wave B: "further down this page" became a door that opens All Bills (FoldOpener).
-    expect(CARD).toContain("mark those receipts Settled in {toAllBills}");
+    // A check's door opens All Bills (FoldOpener), 44px, saying what it opens.
+    expect(CARD).toContain('seeAllInAllBills("Open In All Bills")');
     expect(CARD).toContain('<a href="#all-bills"');
     expect(CARD).not.toContain("further down this page");
     expect(CARD).toContain("still marked On Account.`");
+    expect(CARD).toContain("Still owed; mark {c.bills.length === 1 ? \"it\" : \"them\"} Settled when you pay.");
   });
 
   /** Model B: their figure cannot cover a purchase they never billed him for. */
@@ -146,8 +152,90 @@ describe("the card says the things a balance cannot say for itself", () => {
     expect(CARD).toContain("const modelledExplained =");
     expect(CARD).toContain("${formatCurrency(modelledExplained)} unpaid there, which is your paperwork rather than theirs.");
     expect(CARD).not.toContain("${formatCurrency(modelledBillsUnpaid)} unpaid there");
-    expect(CARD).toContain("they never sent paper for");
+    expect(CARD).toContain("{account.name} never sent");
     // And the list of his own bills stops calling itself the balance under model B.
     expect(CARD).toContain('{fromSupplier ? "Your Bills On This Account" : "What The Balance Is Made Of"}');
+  });
+});
+
+/**
+ * ONE NUMBER, ONE BUTTON, ONE "CHECK THESE" (W1-33). The closed line's amber "+ $N they never sent
+ * paper for" is "N To Check"; the detail opens on Record A Payment and one slate line of the model's
+ * own arithmetic; each live contradiction is one check. A failure is never a check.
+ */
+describe("the supplier detail: Check These", () => {
+  const acct = (over: Partial<SupplierAccountRow> = {}): SupplierAccountRow => ({
+    id: "a1",
+    name: "Valley Supply",
+    accountNumber: null,
+    branchCode: null,
+    onAccount: true,
+    note: null,
+    aliases: [],
+    bills: [],
+    payments: [],
+    ...over,
+  });
+  const bill = (id: string, amount: number, status = "unpaid", billDate = "2026-09-01") => ({
+    id,
+    supplier: "Valley Supply",
+    billDate,
+    amount,
+    status,
+    jobId: null,
+    jobName: null,
+    invoiceNumber: null,
+    isStatement: false,
+  });
+  const pay = (id: string, amount: number, paidOn: string) => ({ id, accountId: "a1", amount, paidOn, method: "check", reference: null, note: null, voided: false });
+  const checksOf = (a: SupplierAccountRow, noDoc: string[] = [], unread = false) =>
+    supplierChecks({ account: a, balance: supplierBalance(a, "2026-09-26"), noDocIds: new Set(noDoc), unread });
+
+  it("a quiet account has no checks: N is 0, and no fold renders", () => {
+    const a = acct({ bills: [bill("b1", 100)], payments: [pay("p1", 40, "2026-09-05")] });
+    expect(checksOf(a)).toEqual([]);
+  });
+
+  it("N counts only live checks: settled beside payments (model A), and the register pair", () => {
+    const modelA = acct({ bills: [bill("b1", 100), bill("b2", 30, "paid")], payments: [pay("p1", 40, "2026-09-05")] });
+    expect(checksOf(modelA).map((c) => c.kind)).toEqual(["settled_beside_payments"]);
+    // A balance that couldn't be totalled asks no arithmetic check (the failure is said instead).
+    expect(checksOf(modelA, [], true)).toEqual([]);
+    const register = acct({ onAccount: false, bills: [bill("b3", 16.28)] });
+    expect(checksOf(register)).toEqual([{ kind: "register_on_account", count: 1, charged: 16.28 }]);
+  });
+
+  it("model B: bills the supplier never sent paper for are one check, with their money; model A never has it", () => {
+    const papers = [
+      { id: "si-1", invoiceNumber: "1", kind: "invoice", invoiceDate: "2026-09-01", dueDate: null, jobNameRaw: null, jobId: null, jobName: null, total: 50, openBalance: 50, closed: false, discountAmount: null, discountBy: null, billCount: 1 },
+    ] as unknown as SupplierAccountRow["supplierInvoices"];
+    const b = acct({ bills: [bill("b1", 467.87), bill("b2", 20)], supplierInvoices: papers });
+    const [c] = checksOf(b, ["b1"]);
+    expect(c).toMatchObject({ kind: "no_paper", total: 467.87 });
+    expect((c as { bills: { id: string }[] }).bills.map((x) => x.id)).toEqual(["b1"]);
+    expect(checksOf(acct({ bills: [bill("b1", 467.87)] }), ["b1"])).toEqual([]);
+  });
+
+  it("the slate line says the arithmetic of the model actually used", () => {
+    const a = acct({ bills: [bill("b1", 100)], payments: [pay("p1", 40, "2026-09-05")] });
+    expect(paymentLine({ account: a, balance: supplierBalance(a, "2026-09-26"), paymentsUnread: false })).toBe("$100.00 charged less $40.00 you've sent.");
+    expect(paymentLine({ account: a, balance: supplierBalance(a, "2026-09-26"), paymentsUnread: true })).toBe("Couldn't read your payments just now.");
+    expect(paymentLine({ account: acct({ onAccount: false }), balance: supplierBalance(acct({ onAccount: false }), "2026-09-26"), paymentsUnread: false })).toBeNull();
+  });
+
+  it("the card: N To Check replaces the '+ $N they never sent paper for' line; the failure line stays; grids and Why Don't These Subtract? are gone", () => {
+    expect(CARD).toContain("{checks.length} To Check");
+    expect(CARD).not.toContain("they never sent paper for\n");
+    expect(CARD).not.toContain("+ {formatCurrency(noDocTotal)} they never sent paper for");
+    expect(CARD).toContain("Couldn&apos;t check your bills against their papers");
+    expect(CARD).not.toContain("Why Don't These Subtract?");
+    expect(CARD).not.toContain("What Does Undo Do?");
+    expect(CARD).not.toContain('className="grid grid-cols-3 gap-2 rounded-lg bg-slate-50');
+    expect(CARD).toContain("id={`supplier-checks-${account.id}`}");
+    expect(CARD).toContain("{checks.length > 0 && (");
+    // Edit Account is on the detail's ⋯; the spellings are read in its sheet.
+    expect(CARD).toContain("<SectionActionsMenu tree={ACCOUNT_MENU}>");
+    expect(CARD).toContain("Other Spellings");
+    expect(CARD).not.toContain("Names It&apos;s Filed Under");
   });
 });

@@ -1334,7 +1334,7 @@ export async function voidSupplierPayment(paymentId: string): Promise<SupplierAc
 /**
  * THE BILLS A SUPPLIER DOCUMENT MAY ALREADY BE, read the way the /bills page reads them.
  *
- * The page lists a document under Purchases Not In Your Books with Same Purchase: Tie Them beside
+ * The page lists a document under Their Papers › Not Recorded Yet with Same Purchase: Tie Them beside
  * each candidate, and these actions refuse or accept on the SAME candidates, recomputed here from
  * the database: a client's say-so never ties anything. `null` is a read that failed, which is
  * never "no bill": the caller refuses instead of writing.
@@ -1553,15 +1553,15 @@ export async function setSupplierInvoiceJob(input: {
     ok: true,
     // A BILL CARRYING THIS NUMBER IS NOT A QUESTION (review of audit v994's fix). /bills counts
     // that bill as covering the invoice (billsCarryingNumber), so the invoice is never listed under
-    // Purchases Not In Your Books and neither Tie nor Different Purchase is on the screen. Say
+    // Their Papers › Not Recorded Yet and neither Tie nor Different Purchase is on the screen. Say
     // what is already true and name no button; the two buttons are only for a near match.
     message: hasLiveBill
       ? `${number} is on ${label} now, and its bill is already in your books.`
       : maybe?.exact
         ? `${number} is on ${label} now, and a bill already carries its number: ${maybe.label}.`
         : maybe
-          ? `${number} is on ${label} now. ${samePurchaseSentence(maybe)} If it is, press Same Purchase: Tie Them on it down in Purchases Not In Your Books; if not, Different Purchase: Record It Anyway puts the cost on the job.`
-          : `${number} is on ${label} now. Record It As A Bill, down in Purchases Not In Your Books, is what puts the cost on the job.`,
+          ? `${number} is on ${label} now. ${samePurchaseSentence(maybe)} If it is, press Same Purchase: Tie Them on it down in Their Papers › Not Recorded Yet; if not, Different Purchase: Record It Anyway puts the cost on the job.`
+          : `${number} is on ${label} now. Record It As A Bill, down in Their Papers › Not Recorded Yet, is what puts the cost on the job.`,
   };
 }
 
@@ -1954,7 +1954,7 @@ export async function recordSupplierInvoiceAsBill(input: {
     // AN UNKNOWN WINNER LEANS TO TAKING IT BACK OUT. If the read fails there is still certainly a
     // claim on this invoice - that is what the unique index just said - and the two wrongs are not
     // the same size: a bill left behind doubles a job's cost silently and forever, while one taken
-    // back out shows up again on Purchases Not In Your Books with a button on it. The sentence
+    // back out shows up again on Their Papers › Not Recorded Yet with a button on it. The sentence
     // below says which of the two happened rather than guessing at a tidy one.
     if (winnerErr || winningBillId !== billId) {
       // A different bill carries it. This one is a cost the job never incurred, so it goes back out.
@@ -1975,7 +1975,7 @@ export async function recordSupplierInvoiceAsBill(input: {
       return {
         ok: false,
         error: winnerErr
-          ? `${number} is already recorded as a bill somewhere, so this second copy was taken back out. Reload the page, and if it still shows under Purchases Not In Your Books, record it again.`
+          ? `${number} is already recorded as a bill somewhere, so this second copy was taken back out. Reload the page, and if it still shows under Their Papers › Not Recorded Yet, record it again.`
           : `${number} is already recorded as a bill. Reload the page and you'll see it.`,
       };
     }

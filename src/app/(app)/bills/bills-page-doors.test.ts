@@ -255,6 +255,9 @@ const fake = {
   },
 };
 vi.mock("@/lib/supabase/server", () => ({ createClient: async () => fake, createServiceClient: () => fake }));
+// The ⋯ menus (a paper card's, a supplier's) run registry verbs only when tapped; the whole action
+// registry is not this render's business.
+vi.mock("@/lib/actions/execute", () => ({ executeAction: vi.fn() }));
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: () => {}, push: () => {}, replace: () => {} }),
   useSearchParams: () => new URLSearchParams(),
@@ -341,15 +344,19 @@ const HOMES: { door: string | RegExp; was: string; home: string; times?: number 
   // 2. What You Owe Your Suppliers -> one line per supplier, its detail
   { door: /^Consolidated Electrical Distributors Account TR-34426/, was: "account row tap", home: "suppliers" },
   { door: "Record A Payment", was: "account row AND the CED discount section", home: "suppliers", times: 1 },
-  { door: "Turn On A Running Balance", was: "account row", home: "suppliers" },
+  { door: "Turn On A Running Balance", was: "account row (now inside Check These)", home: "suppliers" },
   { door: "Undo", was: "account row (per payment)", home: "suppliers" },
-  { door: "Edit Account", was: "account row", home: "suppliers", times: 2 },
-  { door: /^Names It's Filed Under \(\d+\)$/, was: "account row ('Filed under:' text)", home: "suppliers", times: 2 },
+  // W1-33: each account's live contradictions, one fold (CED's never-sent-paper bills; OSH's bills
+  // marked On Account at a register supplier). Edit Account moved to the detail's ⋯ (a closed menu,
+  // pinned below), and Names It's Filed Under to its sheet.
+  { door: "Check These (1)", was: "the amber boxes under each account", home: "suppliers", times: 2 },
+  { door: "Open In All Bills", was: "the never-sent-paper list's All Bills link", home: "suppliers", times: 1 },
   { door: /^\$615\.79 On 2 Bills With No Supplier Account File It$/, was: "amber 'not on a supplier account' line", home: "suppliers" },
   // 3. What CED Says You Owe -> short folded lists inside CED's detail
+  { door: /^Their Papers \(\d+\)$/, was: "(new fold: Where This Comes From, Invoices With No Job, Not In Your Books)", home: "suppliers" },
   { door: /^Invoices With No Job \(\d+\)/, was: "CED 3a", home: "suppliers" },
   { door: "File It On This Job", was: "CED 3a (row picker)", home: "suppliers" },
-  { door: /^Not In Your Books \(\d+\)/, was: "CED 3b", home: "suppliers" },
+  { door: /^Not Recorded Yet \(\d+\)/, was: "CED 3b (Not In Your Books)", home: "suppliers" },
   { door: "Record To Stock", was: "CED 3b", home: "suppliers" },
   { door: /^Discount Still On The Table/, was: "CED 3c", home: "suppliers" },
   { door: /^What Consolidated Electrical Distributors Has Open \(7\)$/, was: "CED 3d", home: "suppliers" },
@@ -439,6 +446,32 @@ describe("every door keeps exactly one home", () => {
     const fold = section(`supplier-not-in-books-${CED}`);
     expect(count(doors(fold), "Record To Stock")).toBeGreaterThanOrEqual(1);
     expect(section(`supplier-invoices-${CED}`)).toContain(`id="supplier-not-in-books-${CED}"`);
+    // Inside Their Papers, a nested <details> (never a menu), so FoldOpener still opens it.
+    expect(section(`supplier-their-papers-${CED}`)).toContain(`id="supplier-not-in-books-${CED}"`);
+  });
+
+  it("the supplier homes (W1-33): Edit Account on each open detail's ⋯, no Names It's Filed Under, Check These, Their Papers counting open papers only", () => {
+    const suppliers = section("suppliers");
+    // The ⋯ is the section menu, labelled Actions, one per account with the Edit Account action.
+    expect((suppliers.match(/<button[^>]*aria-label="Actions"/g) ?? []).length).toBe(2);
+    expect(text(html)).not.toContain("Names It's Filed Under");
+    // N To Check on each closed line, the money in the check's own row.
+    const lines = doors(suppliers).filter((d) => / To Check/.test(d));
+    expect(lines).toHaveLength(2);
+    for (const l of lines) expect(l).toMatch(/\b1 To Check\b/);
+    expect(text(suppliers)).not.toMatch(/\+ \$[\d,.]+ they never sent paper for/);
+    expect(text(section(`supplier-checks-${CED}`))).toMatch(/\$[\d,.]+ on \d+ bills? Consolidated Electrical Distributors never sent paper for\. Still owed; mark (it|them) Settled when you pay\./);
+    expect(text(section(`supplier-checks-${OSH}`))).toContain("1 bill marked On Account, $16.28, but you pay Outdoor Supply Hardware (OSH - Cupertino) at the register.");
+    // The one slate line under Record A Payment, model B's own arithmetic.
+    expect(text(section(`supplier-invoices-${CED}`))).toContain("You've sent $2,000.00 since Sep 5, 2026. It's already off their figure.");
+    expect(text(html)).not.toContain("Why Don't These Subtract?");
+    expect(text(html)).not.toContain("What Does Undo Do?");
+    // Their Papers' number counts Invoices With No Job and Not Recorded Yet, never Where This Comes From.
+    const ced = section(`supplier-their-papers-${CED}`);
+    const noJob = Number(/Invoices With No Job \((\d+)\)/.exec(text(ced))![1]);
+    const notRec = Number(/Not Recorded Yet \((\d+)\)/.exec(text(ced))![1]);
+    expect(text(ced)).toContain(`Their Papers (${noJob + notRec})`);
+    expect(text(ced)).toContain("Where This Comes From");
   });
 
   it("the same ticket on two jobs is pointed at from Needs You and answered under More", () => {
@@ -452,7 +485,7 @@ describe("every door keeps exactly one home", () => {
     const ced = section(`supplier-invoices-${CED}`);
     // 85 WHITNEY is a card; the only no-job rows left in CED's lists are the credit memo and STOCK.
     expect(text(section("needs-you"))).toContain("It Says 85 WHITNEY");
-    const noJob = ced.slice(ced.indexOf("Invoices With No Job"), ced.indexOf("Not In Your Books"));
+    const noJob = ced.slice(ced.indexOf("Invoices With No Job"), ced.indexOf("Not Recorded Yet"));
     expect(noJob).not.toContain("8802-1107820");
     expect(noJob).toContain("8802-1108541");
     expect(noJob).toContain("8802-1103061");

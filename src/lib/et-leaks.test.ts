@@ -113,6 +113,22 @@ describe("a supplier's terms are the supplier's own", () => {
     const s = src("src/app/(app)/bills/supplier-invoices-card.tsx");
     expect(s).not.toMatch(/tenth of the month|takes a cut off every invoice/);
   });
+
+  it("the supplier detail and its papers speak with the account's own name, never CED (W1-33)", () => {
+    // What a person reads (strings and JSX text; comments name who asked for things and that's fine).
+    for (const f of ["src/app/(app)/bills/suppliers-card.tsx", "src/app/(app)/bills/supplier-invoices-card.tsx"]) {
+      expect(src(f), f).not.toMatch(/\bCED\b/);
+    }
+    expect(src("src/app/(app)/bills/suppliers-card.tsx")).toContain("{account.name} never sent");
+    expect(src("src/app/(app)/bills/supplier-invoices-card.tsx")).toContain("{accountName}");
+  });
+
+  it("the paper door names no supplier and no company either", () => {
+    for (const f of ["src/components/snap-or-note.tsx", "src/components/paperwork-row.tsx", "src/components/paper-answers.tsx", "src/app/(app)/snap-or-note-actions.ts"]) {
+      expect(src(f), f).not.toMatch(ET_WORDS);
+      expect(src(f), f).not.toMatch(/\bCED\b/);
+    }
+  });
 });
 
 describe("a deck company's customers are asked about a region only when the company priced one", () => {

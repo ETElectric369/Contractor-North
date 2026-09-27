@@ -88,7 +88,10 @@ const KIND_TONE: Record<SupplierInvoiceKind, Tone> = {
  *    these lists is what the cards never carry - a credit memo with no job, a paper CED booked to
  *    STOCK (Record To Shelf), a $0.00 line - so every door this card had still has one home.
  *  · EACH LIST IS ONE LINE until he opens it: its name, its count, its money.
- *  · THE BALANCE IS SAID ONCE, on the supplier's line above. Its working sits in a Why? fold.
+ *  · TWO LISTS STAY IN VIEW (W1-33): Waiting On A Credit and What <Supplier> Has Open, with
+ *    Discount Still On The Table while a discount is live. Where This Comes From, Invoices With No
+ *    Job and Not Recorded Yet go inside one closed "Their Papers (N)", N counting only open papers.
+ *  · THE BALANCE IS SAID ONCE, on the supplier's line above.
  *  · THE DISCOUNT'S "Record A Payment" IS GONE: the supplier's own Record A Payment sits right
  *    above these lists, and two doors to one payment sheet is one too many.
  *
@@ -103,7 +106,7 @@ export function SupplierPaperLists({
   waitingOnCredit = [],
   actions,
 }: {
-  /** The supplier account: names the Not In Your Books fold, so Shop Stock's Record To Shelf door
+  /** The supplier account: names the Not Recorded Yet fold, so Shop Stock's Record To Shelf door
    *  (shelf-plan waitingForShelf) lands on it. */
   accountId: string;
   /** What he calls them: "CED Truckee". Used in every sentence, so it is never "the supplier". */
@@ -192,6 +195,8 @@ export function SupplierPaperLists({
   );
   const billRows = useMemo(() => needBill.rows.filter((r) => !setAside.has(r.id)), [needBill, setAside]);
   const billRowsTotal = r2(billRows.reduce((s, r) => s + (Number(r.total) || 0), 0));
+  /** Their Papers' number: only open papers (Invoices With No Job, Not Recorded Yet). */
+  const theirPapersOpen = needJob.length + billRows.length;
   const claimable = useMemo(() => claimableDiscounts(invoices, today), [invoices, today]);
   const missed = useMemo(() => missedDiscounts(invoices, today), [invoices, today]);
   const interest = useMemo(() => lateInterest(invoices), [invoices]);
@@ -250,29 +255,6 @@ export function SupplierPaperLists({
           {waitingOnCards} {waitingOnCards === 1 ? "Is" : "Are"} Waiting Under Needs You
         </a>
       )}
-      <WhyFold label="Where This Comes From">
-        <p>
-          Read off {accountName}&apos;s portal. Where they disagree with your bills they are right: only the
-          supplier knows which invoices a payment settled. {says.documents} open{" "}
-          {says.documents === 1 ? "document" : "documents"}
-          {says.asOf ? `, the newest dated ${formatDate(says.asOf)}` : ""}: {formatCurrency(says.charges)} charged
-          {says.credits > 0.005 ? `, less ${formatCurrency(says.credits)} of credit coming back to you` : ""}.
-        </p>
-        {needBill.reversedRows > 0 && (
-          <p>
-            {needBill.reversedRows === 1
-              ? `One purchase, ${formatCurrency(needBill.reversedTotal)}, went straight back on a credit memo`
-              : `${needBill.reversedRows} purchases, ${formatCurrency(needBill.reversedTotal)}, went straight back on credit memos`}
-            . Nothing kept, nothing owed, so nothing to record.
-          </p>
-        )}
-        {needBill.olderRows > 0 && (
-          <p>
-            {needBill.olderRows} more {needBill.olderRows === 1 ? "purchase" : "purchases"} ({formatCurrency(needBill.olderTotal)})
-            {" "}are from before your books here began{needBill.since ? ` on ${formatDate(needBill.since)}` : ""}, so they are not listed.
-          </p>
-        )}
-      </WhyFold>
 
       {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
       {done && <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-700">{done}</div>}
@@ -326,6 +308,151 @@ export function SupplierPaperLists({
         </Fold>
       )}
 
+      {/* ── THE DISCOUNT: a date, a number, what missing it costs. Paying is the account's own
+             Record A Payment, just above: one door to the payment sheet. ── */}
+      {(claimable.total > 0.005 || missed.total > 0.005 || interest.charged > 0.005) && (
+        <Fold
+          summary={
+            // THE FIGURE IS SAID ONCE: the green sentence on the supplier's own line, just above,
+            // already says how much comes off and by when. This line is the list's name and count.
+            claimable.total > 0.005 ? (
+              listLabel("Discount Still On The Table", claimable.rows.length)
+            ) : (
+              <span className="text-sm font-semibold text-slate-900">The Discount You Are Missing</span>
+            )
+          }
+        >
+          {/* The figure and its date are on the supplier's line; the body is the invoices. */}
+          {!(claimable.total > 0.005) && (
+            <p className="text-xs leading-relaxed text-green-900">
+              Nothing is claimable today.
+            </p>
+          )}
+          {claimable.rows.length > 0 && (
+            <ul className="mt-2 divide-y divide-slate-100 rounded-lg border border-slate-200">
+              {(showAll.disc ? claimable.rows : claimable.rows.slice(0, LIST_LIMIT)).map(({ invoice, reading }) => (
+                <li key={invoice.id} className="flex items-start justify-between gap-3 px-3 py-2">
+                  <span className="min-w-0">
+                    <span className="block truncate text-sm text-slate-800">
+                      {invoice.invoiceNumber}
+                      {invoice.jobNameRaw?.trim() ? ` · ${invoice.jobNameRaw.trim()}` : ""}
+                    </span>
+                    <span className="block truncate text-xs text-slate-400">
+                      {formatCurrency(documentOpenAmount(invoice))} open · pay by {formatDate(reading.by)}
+                    </span>
+                  </span>
+                  <span className="shrink-0 text-sm font-semibold tabular-nums text-green-700">{offWords(reading.amount)}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+          {more("disc", claimable.rows.length, r2(claimable.rows.slice(LIST_LIMIT).reduce((s, r) => s + r.reading.amount, 0)), "Worth Another")}
+          {(missed.total > 0.005 || interest.charged > 0.005) && (
+            <p className="mt-2 text-xs leading-relaxed text-amber-900">
+              {missed.total > 0.005 ? `${formatCurrency(missed.total)} of discount already ran out on invoices still open. ` : ""}
+              {interest.charged > 0.005
+                ? `${formatCurrency(interest.charged)} of late interest charged${interest.stillOpen > 0.005 ? `, ${formatCurrency(interest.stillOpen)} still open` : ""}.`
+                : ""}
+            </p>
+          )}
+        </Fold>
+      )}
+
+      {/* ── WHAT THEY HAVE OPEN: their ledger, newest first, the way the portal lists it. ── */}
+      <Fold summary={listLabel(`What ${accountName} Has Open`, documents.length)}>
+        {documents.length === 0 ? (
+          <p className="py-2 text-sm text-slate-400">{accountName} has nothing open on this account.</p>
+        ) : (
+          <>
+            {docsOnCards > 0 && (
+              <a href="#needs-you" className="flex min-h-11 items-center text-sm font-medium text-brand hover:underline">
+                {docsOnCards} Of These {docsOnCards === 1 ? "Is" : "Are"} Waiting Under Needs You
+              </a>
+            )}
+            {docRows.length > 0 && (
+              <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
+                {(showAll.docs ? docRows : docRows.slice(0, LIST_LIMIT)).map((invoice) => {
+                  const disc = discountReading(invoice, today);
+                  const explain = explainKind(invoice.kind);
+                  const amount = documentOpenAmount(invoice);
+                  return (
+                    <li key={invoice.id} className="px-3 py-2.5">
+                      <div className="flex items-start justify-between gap-3">
+                        <span className="min-w-0">
+                          <span className="flex min-w-0 items-center gap-2">
+                            <span className="truncate text-sm font-medium text-slate-900">{invoice.invoiceNumber}</span>
+                            {invoice.kind !== "invoice" && <Badge tone={KIND_TONE[invoice.kind]}>{sayKind(invoice.kind)}</Badge>}
+                          </span>
+                          <span className="block truncate text-xs text-slate-400">
+                            {invoice.invoiceDate ? formatDate(invoice.invoiceDate) : "No date"}
+                            {invoice.jobName
+                              ? ` · ${invoice.jobName}`
+                              : isUsableJobName(invoice.jobNameRaw)
+                                ? ` · “${invoice.jobNameRaw!.trim()}” (no job yet)`
+                                : ""}
+                            {(invoice.billCount ?? 0) > 0 ? " · in your books" : " · not in your books"}
+                          </span>
+                          {explain && <span className="mt-0.5 block text-xs text-slate-500">{explain}</span>}
+                        </span>
+                        <span className="shrink-0 text-right">
+                          <span className={`block text-sm font-semibold tabular-nums ${amount < 0 ? "text-green-700" : "text-slate-900"}`}>
+                            {formatCurrency(amount)}
+                          </span>
+                          {disc.state === "live" && (
+                            <span className="block text-xs text-green-700">
+                              {offWords(disc.amount)} by {formatDate(disc.by)}
+                            </span>
+                          )}
+                          {disc.state === "expired" && (
+                            <span className="block text-xs text-slate-400">
+                              {offWords(disc.amount)} expired {formatDate(disc.by)}
+                            </span>
+                          )}
+                        </span>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+            {more("docs", docRows.length, r2(docRows.slice(LIST_LIMIT).reduce((s, d) => s + documentOpenAmount(d), 0)))}
+          </>
+        )}
+      </Fold>
+
+      {/* ── THEIR PAPERS (W1-33): the reference and the two lists he works through now and then,
+             in one closed fold under the lists that stay in view. A nested <details>, never a menu,
+             so a link into it (#supplier-not-in-books-<id>, Shop Stock's Record To Shelf door) still
+             opens every fold around it (FoldOpener). N counts only open papers: Invoices With No
+             Job and Not Recorded Yet. Where This Comes From is reference, never counted. ── */}
+      <Fold
+        id={`supplier-their-papers-${accountId}`}
+        summary={<span className="text-sm font-semibold text-slate-900">Their Papers{theirPapersOpen > 0 ? ` (${theirPapersOpen})` : ""}</span>}
+      >
+        <div className="space-y-1 pb-1 pl-2">
+      <WhyFold label="Where This Comes From">
+        <p>
+          Read off {accountName}&apos;s portal. Where they disagree with your bills they are right: only the
+          supplier knows which invoices a payment settled. {says.documents} open{" "}
+          {says.documents === 1 ? "document" : "documents"}
+          {says.asOf ? `, the newest dated ${formatDate(says.asOf)}` : ""}: {formatCurrency(says.charges)} charged
+          {says.credits > 0.005 ? `, less ${formatCurrency(says.credits)} of credit coming back to you` : ""}.
+        </p>
+        {needBill.reversedRows > 0 && (
+          <p>
+            {needBill.reversedRows === 1
+              ? `One purchase, ${formatCurrency(needBill.reversedTotal)}, went straight back on a credit memo`
+              : `${needBill.reversedRows} purchases, ${formatCurrency(needBill.reversedTotal)}, went straight back on credit memos`}
+            . Nothing kept, nothing owed, so nothing to record.
+          </p>
+        )}
+        {needBill.olderRows > 0 && (
+          <p>
+            {needBill.olderRows} more {needBill.olderRows === 1 ? "purchase" : "purchases"} ({formatCurrency(needBill.olderTotal)})
+            {" "}are from before your books here began{needBill.since ? ` on ${formatDate(needBill.since)}` : ""}, so they are not listed.
+          </p>
+        )}
+      </WhyFold>
       {/* ── INVOICES WITH NO JOB, not on a card: a credit memo, a STOCK paper, a $0.00 one. ── */}
       {needJob.length > 0 && (
         <Fold summary={listLabel("Invoices With No Job", needJob.length, formatCurrency(needJobTotals.total))}>
@@ -410,11 +537,11 @@ export function SupplierPaperLists({
         </Fold>
       )}
 
-      {/* ── NOT IN YOUR BOOKS, not on a card: mostly what CED booked to STOCK. ── */}
+      {/* ── NOT RECORDED YET (was Not In Your Books), not on a card: mostly what a supplier booked to STOCK. ── */}
       {billRows.length > 0 && (
         <Fold
           id={`supplier-not-in-books-${accountId}`}
-          summary={listLabel("Not In Your Books", billRows.length, formatCurrency(billRowsTotal))}
+          summary={listLabel("Not Recorded Yet", billRows.length, formatCurrency(billRowsTotal))}
         >
           <WhyFold>
             <p>
@@ -541,116 +668,7 @@ export function SupplierPaperLists({
         </Fold>
       )}
 
-      {/* ── THE DISCOUNT: a date, a number, what missing it costs. Paying is the account's own
-             Record A Payment, just above: one door to the payment sheet. ── */}
-      {(claimable.total > 0.005 || missed.total > 0.005 || interest.charged > 0.005) && (
-        <Fold
-          summary={
-            // THE FIGURE IS SAID ONCE: the green sentence on the supplier's own line, just above,
-            // already says how much comes off and by when. This line is the list's name and count.
-            claimable.total > 0.005 ? (
-              listLabel("Discount Still On The Table", claimable.rows.length)
-            ) : (
-              <span className="text-sm font-semibold text-slate-900">The Discount You Are Missing</span>
-            )
-          }
-        >
-          {/* The figure and its date are on the supplier's line; the body is the invoices. */}
-          {!(claimable.total > 0.005) && (
-            <p className="text-xs leading-relaxed text-green-900">
-              Nothing is claimable today.
-            </p>
-          )}
-          {claimable.rows.length > 0 && (
-            <ul className="mt-2 divide-y divide-slate-100 rounded-lg border border-slate-200">
-              {(showAll.disc ? claimable.rows : claimable.rows.slice(0, LIST_LIMIT)).map(({ invoice, reading }) => (
-                <li key={invoice.id} className="flex items-start justify-between gap-3 px-3 py-2">
-                  <span className="min-w-0">
-                    <span className="block truncate text-sm text-slate-800">
-                      {invoice.invoiceNumber}
-                      {invoice.jobNameRaw?.trim() ? ` · ${invoice.jobNameRaw.trim()}` : ""}
-                    </span>
-                    <span className="block truncate text-xs text-slate-400">
-                      {formatCurrency(documentOpenAmount(invoice))} open · pay by {formatDate(reading.by)}
-                    </span>
-                  </span>
-                  <span className="shrink-0 text-sm font-semibold tabular-nums text-green-700">{offWords(reading.amount)}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-          {more("disc", claimable.rows.length, r2(claimable.rows.slice(LIST_LIMIT).reduce((s, r) => s + r.reading.amount, 0)), "Worth Another")}
-          {(missed.total > 0.005 || interest.charged > 0.005) && (
-            <p className="mt-2 text-xs leading-relaxed text-amber-900">
-              {missed.total > 0.005 ? `${formatCurrency(missed.total)} of discount already ran out on invoices still open. ` : ""}
-              {interest.charged > 0.005
-                ? `${formatCurrency(interest.charged)} of late interest charged${interest.stillOpen > 0.005 ? `, ${formatCurrency(interest.stillOpen)} still open` : ""}.`
-                : ""}
-            </p>
-          )}
-        </Fold>
-      )}
-
-      {/* ── WHAT THEY HAVE OPEN: their ledger, newest first, the way the portal lists it. ── */}
-      <Fold summary={listLabel(`What ${accountName} Has Open`, documents.length)}>
-        {documents.length === 0 ? (
-          <p className="py-2 text-sm text-slate-400">{accountName} has nothing open on this account.</p>
-        ) : (
-          <>
-            {docsOnCards > 0 && (
-              <a href="#needs-you" className="flex min-h-11 items-center text-sm font-medium text-brand hover:underline">
-                {docsOnCards} Of These {docsOnCards === 1 ? "Is" : "Are"} Waiting Under Needs You
-              </a>
-            )}
-            {docRows.length > 0 && (
-              <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
-                {(showAll.docs ? docRows : docRows.slice(0, LIST_LIMIT)).map((invoice) => {
-                  const disc = discountReading(invoice, today);
-                  const explain = explainKind(invoice.kind);
-                  const amount = documentOpenAmount(invoice);
-                  return (
-                    <li key={invoice.id} className="px-3 py-2.5">
-                      <div className="flex items-start justify-between gap-3">
-                        <span className="min-w-0">
-                          <span className="flex min-w-0 items-center gap-2">
-                            <span className="truncate text-sm font-medium text-slate-900">{invoice.invoiceNumber}</span>
-                            {invoice.kind !== "invoice" && <Badge tone={KIND_TONE[invoice.kind]}>{sayKind(invoice.kind)}</Badge>}
-                          </span>
-                          <span className="block truncate text-xs text-slate-400">
-                            {invoice.invoiceDate ? formatDate(invoice.invoiceDate) : "No date"}
-                            {invoice.jobName
-                              ? ` · ${invoice.jobName}`
-                              : isUsableJobName(invoice.jobNameRaw)
-                                ? ` · “${invoice.jobNameRaw!.trim()}” (no job yet)`
-                                : ""}
-                            {(invoice.billCount ?? 0) > 0 ? " · in your books" : " · not in your books"}
-                          </span>
-                          {explain && <span className="mt-0.5 block text-xs text-slate-500">{explain}</span>}
-                        </span>
-                        <span className="shrink-0 text-right">
-                          <span className={`block text-sm font-semibold tabular-nums ${amount < 0 ? "text-green-700" : "text-slate-900"}`}>
-                            {formatCurrency(amount)}
-                          </span>
-                          {disc.state === "live" && (
-                            <span className="block text-xs text-green-700">
-                              {offWords(disc.amount)} by {formatDate(disc.by)}
-                            </span>
-                          )}
-                          {disc.state === "expired" && (
-                            <span className="block text-xs text-slate-400">
-                              {offWords(disc.amount)} expired {formatDate(disc.by)}
-                            </span>
-                          )}
-                        </span>
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-            {more("docs", docRows.length, r2(docRows.slice(LIST_LIMIT).reduce((s, d) => s + documentOpenAmount(d), 0)))}
-          </>
-        )}
+        </div>
       </Fold>
 
       {shelfSheet && actions.recordToShelf && (
