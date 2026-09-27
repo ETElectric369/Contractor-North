@@ -70,6 +70,7 @@ import {
   returnTiedPapers,
   standingRefusal,
   takeDownLanded,
+  landedKeptSaid,
   tradeOf,
   updateItemTolerant,
   type BillLine,
@@ -1277,7 +1278,7 @@ export async function undoPaperwork(id: string): Promise<Result & { message?: st
   if (item.status === "needs_review" && !item.bill_id && !item.document_id && !item.petty_cash_id && !tied)
     return { ok: false, error: "Nothing to undo: this paper is still waiting to be filed." };
 
-  let kept: string[] = [];
+  let landedLeft: { kept: string[]; shared: string[] } = { kept: [], shared: [] };
   let torn: Extract<Teardown, { refused: null }> | null = null;
   /** A supplier's open list: what Apply changed is put back, and the list waits again. */
   let listLeft: string[] | null = null;
@@ -1291,9 +1292,9 @@ export async function undoPaperwork(id: string): Promise<Result & { message?: st
       listLeft = [];
     }
   } else if (p.filed?.how === "supplier_documents" && p.filed.landed?.length) {
-    const down = await takeDownLanded(supabase, ctx.orgId, p.filed.landed);
+    const down = await takeDownLanded(supabase, ctx.orgId, p.filed.landed, p.filed.landedIds);
     if (down.error) return { ok: false, error: `${down.error} Nothing was undone.` };
-    kept = down.kept;
+    landedLeft = down;
   } else if (p.filed?.how === "task" && p.filed.taskId) {
     // THE TASK A NOTE BECAME comes off the list first; a task already gone is simply gone.
     let q = supabase.from("tasks").delete().eq("id", p.filed.taskId);
@@ -1379,7 +1380,7 @@ export async function undoPaperwork(id: string): Promise<Result & { message?: st
       `${tied ? "Untied" : "Undone"}. It is back in the tray, waiting for File It.` +
       (keptLines ? keptChoicesSaid(keptLines) : "") +
       papersBackSaid(torn?.papersBack ?? []) +
-      (kept.length ? ` ${kept.join(", ")} stayed on the supplier documents list, because a bill, a job or another paper already points at ${kept.length === 1 ? "it" : "them"}.` : ""),
+      landedKeptSaid(landedLeft),
   };
 }
 
@@ -1446,11 +1447,11 @@ export async function deleteOrganizedItem(id: string): Promise<Result & { messag
 
   // THE CED DOCUMENTS IT ADDED (TD4): the confirm says Delete removes whatever it filed, and a
   // supplier-documents filing records what it added only on its proposal.
-  let kept: string[] = [];
+  let landedLeft: { kept: string[]; shared: string[] } = { kept: [], shared: [] };
   if (p.filed?.how === "supplier_documents" && p.filed.landed?.length) {
-    const down = await takeDownLanded(supabase, ctx.orgId, p.filed.landed);
+    const down = await takeDownLanded(supabase, ctx.orgId, p.filed.landed, p.filed.landedIds);
     if (down.error) return { ok: false, error: `${down.error} Nothing was deleted.` };
-    kept = down.kept;
+    landedLeft = down;
   }
   // AN APPLIED SUPPLIER LIST: Delete puts back what it changed first (the same Undo), because the
   // record of what it changed lives on this row and goes with it.
@@ -1497,7 +1498,7 @@ export async function deleteOrganizedItem(id: string): Promise<Result & { messag
   const said =
     (jobsOwnFile && item.document_id ? " The receipt stays on the job." : "") +
     papersBackSaid(torn.papersBack) +
-    (kept.length ? ` ${kept.join(", ")} stayed on the supplier documents list, because a bill, a job or another paper already points at ${kept.length === 1 ? "it" : "them"}.` : "") +
+    landedKeptSaid(landedLeft) +
     (listPutBack
       ? ` Every paper the list changed is back as it was.${listPutBack.length ? ` Left as they are now: ${listPutBack.join(", ")}.` : ""}`
       : "");

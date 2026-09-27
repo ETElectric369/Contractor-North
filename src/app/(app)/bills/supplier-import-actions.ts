@@ -97,6 +97,9 @@ export interface ImportedDocument {
   jobNameRaw: string | null;
   /** Which file it was read out of, so a figure on screen can be traced to a document. */
   sourceFile: string | null;
+  /** The row this import wrote (landed only), so a paper's Undo takes off exactly that row and never
+   *  another supplier's document with the same number (0354 allows both). */
+  id?: string;
 }
 
 export interface SupplierImportResult {
@@ -510,7 +513,7 @@ export async function importCedInvoices(input: SupplierImportInput): Promise<Sup
         });
         continue;
       }
-      landed.push(said(invoice, sourceFile));
+      landed.push({ ...said(invoice, sourceFile), id });
       if (invoice.lines.length) linesToWrite.push({ invoiceId: id, invoice });
     }
   }

@@ -213,7 +213,11 @@ export function billDeletedSaid(item: PaperItem): string | null {
  */
 export type PaperFiled = {
   how: "bill" | "tie" | "supplier_documents" | "kept" | "photo" | "task" | "note" | "open_list";
+  /** The supplier documents a paper added, by number (what the screen names). */
   landed?: string[];
+  /** The same documents by row id: what Undo and Delete take off. A paper filed before ids were kept
+   *  has only numbers (takeDownLanded). */
+  landedIds?: string[];
   /** A note a person turned into a task (AI Suggest's proposal, PR2): Undo takes the task off. */
   taskId?: string | null;
   /** The category the paper had before a task replaced it with "Task", given back by Undo. */

@@ -1030,23 +1030,34 @@ export async function papersAfterBillDeleted(
 }
 
 /**
- * THE CED DOCUMENTS A PAPER ADDED come off the list (Undo, and Delete: audit v994 TD4), except any
- * something already points at: a bill covering it, a job a person set, or another paper tied to it.
- * Those are kept and named.
+ * THE SUPPLIER DOCUMENTS A PAPER ADDED come off the list (Undo, and Delete: audit v994 TD4), except
+ * any something already points at: a bill covering it, a job a person set, or another paper tied to
+ * it. Those are kept and named.
+ *
+ * BY ROW ID when the paper kept them (landedIds). Since 0354 two suppliers can each hold a document
+ * with the same number, so a number alone could name another supplier's row. A paper filed before
+ * ids were kept has only numbers: a number that matches more than one row is kept and named, never
+ * guessed at.
  */
 export async function takeDownLanded(
   supabase: any,
   orgId: string | null | undefined,
   landed: string[],
-): Promise<{ kept: string[]; error?: string }> {
-  if (!landed.length || !orgId) return { kept: [] };
-  const { data: docs, error: docsErr } = await supabase
+  landedIds?: string[] | null,
+): Promise<{ kept: string[]; shared: string[]; error?: string }> {
+  const byId = !!landedIds?.length;
+  if ((!byId && !landed.length) || !orgId) return { kept: [], shared: [] };
+  const { data: found, error: docsErr } = await supabase
     .from("supplier_invoices")
     .select("id, invoice_number, job_id")
     .eq("org_id", orgId)
-    .in("invoice_number", landed);
-  if (docsErr) return { kept: [], error: dbError(docsErr) };
-  const ids = ((docs ?? []) as any[]).map((d) => String(d.id));
+    .in(byId ? "id" : "invoice_number", byId ? landedIds : landed);
+  if (docsErr) return { kept: [], shared: [], error: dbError(docsErr) };
+  const perNumber = new Map<string, number>();
+  for (const d of (found ?? []) as any[]) perNumber.set(String(d.invoice_number), (perNumber.get(String(d.invoice_number)) ?? 0) + 1);
+  const shared = byId ? [] : ((found ?? []) as any[]).filter((d) => perNumber.get(String(d.invoice_number))! > 1);
+  const docs = ((found ?? []) as any[]).filter((d) => !shared.includes(d));
+  const ids = docs.map((d) => String(d.id));
   const { data: links } = ids.length
     ? await supabase.from("bill_supplier_invoices").select("supplier_invoice_id").in("supplier_invoice_id", ids)
     : { data: [] };
@@ -1058,8 +1069,9 @@ export async function takeDownLanded(
     ? await supabase.from("organized_items").select("tied_supplier_invoice_id").eq("org_id", orgId).in("tied_supplier_invoice_id", ids)
     : { data: [] };
   for (const t of (tiedPapers ?? []) as any[]) if (t?.tied_supplier_invoice_id) linked.add(String(t.tied_supplier_invoice_id));
-  const removable = ((docs ?? []) as any[]).filter((d) => !linked.has(String(d.id)) && !d.job_id);
-  const kept = ((docs ?? []) as any[]).filter((d) => !removable.includes(d)).map((d) => String(d.invoice_number));
+  const removable = docs.filter((d) => !linked.has(String(d.id)) && !d.job_id);
+  const kept = docs.filter((d) => !removable.includes(d)).map((d) => String(d.invoice_number));
+  const sharedNumbers = [...new Set(shared.map((d) => String(d.invoice_number)))];
   if (removable.length) {
     const { error: delErr } = await supabase
       .from("supplier_invoices")
@@ -1067,7 +1079,15 @@ export async function takeDownLanded(
       .eq("org_id", orgId)
       .in("id", removable.map((d) => String(d.id)))
       .select("id");
-    if (delErr) return { kept, error: dbError(delErr) };
+    if (delErr) return { kept, shared: sharedNumbers, error: dbError(delErr) };
   }
-  return { kept };
+  return { kept, shared: sharedNumbers };
+}
+
+/** What takeDownLanded left on the list, and why, in one place for Undo and Delete. "" = nothing. */
+export function landedKeptSaid({ kept, shared }: { kept: string[]; shared: string[] }): string {
+  return (
+    (kept.length ? ` ${kept.join(", ")} stayed on the supplier documents list, because a bill, a job or another paper already points at ${kept.length === 1 ? "it" : "them"}.` : "") +
+    (shared.length ? ` ${shared.join(", ")} stayed on the supplier documents list too, because more than one supplier has a document with that number.` : "")
+  );
 }

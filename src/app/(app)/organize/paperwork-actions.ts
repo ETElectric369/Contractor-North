@@ -366,9 +366,12 @@ export async function addSupplierDocuments(id: string): Promise<PaperResult> {
   // MERGED, never replaced: a second Add lands nothing (the importer only reports fresh inserts),
   // and overwriting the list with [] left Undo unable to remove what this paper first added.
   const landed = [...new Set([...(p.filed?.landed ?? []), ...result.landed.map((d) => d.invoiceNumber)])];
+  // BY ID, TOO: since 0354 two suppliers can each hold a document with the same number, so Undo takes
+  // off the rows THIS paper wrote, never another supplier's.
+  const landedIds = [...new Set([...(p.filed?.landedIds ?? []), ...result.landed.flatMap((d) => (d.id ? [d.id] : []))])];
   const { data: back, error } = await ctx.supabase
     .from("organized_items")
-    .update({ status: "filed", proposal: { ...p, filed: { how: "supplier_documents", landed } } })
+    .update({ status: "filed", proposal: { ...p, filed: { how: "supplier_documents", landed, landedIds } } })
     .eq("id", id)
     .eq("org_id", ctx.orgId)
     .eq("status", "needs_review")

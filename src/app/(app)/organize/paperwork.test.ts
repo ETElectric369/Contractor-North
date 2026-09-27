@@ -49,7 +49,7 @@ import { insertItemizedBill } from "./paperwork-core";
 import { RETURN_ON_JOB_NEEDS_LINES } from "@/lib/paperwork";
 import { importCedInvoices } from "@/app/(app)/bills/supplier-import-actions";
 
-type Call = { table: string; verb: string; payload?: any; selected?: boolean; eqs: [string, unknown][] };
+type Call = { table: string; verb: string; payload?: any; selected?: boolean; eqs: [string, unknown][]; ins?: [string, unknown[]][] };
 
 /** A scriptable PostgREST fake that also records every .eq(), so the org boundary can be seen. */
 function fakeSupabase(script: Record<string, any[]>, calls: Call[]) {
@@ -102,7 +102,7 @@ function fakeSupabase(script: Record<string, any[]>, calls: Call[]) {
         is() { return chain; },
         limit() { return chain; },
         neq() { return chain; },
-        in() { return chain; },
+        in(col: string, vals: unknown[]) { (mine.ins ??= []).push([col, vals]); return chain; },
         single: () => Promise.resolve(next(`${table}.${verb}`)),
         maybeSingle: () => Promise.resolve(next(`${table}.${verb}`)),
         then(resolve: any, reject: any) {
@@ -2040,8 +2040,78 @@ describe("CED documents a paper added: Restore, Undo and a second Add", () => {
     const res = await addSupplierDocuments("oi-5");
     expect(res.ok).toBe(true);
     const u = did("organized_items", "update")!;
-    expect(u.payload.proposal.filed).toEqual({ how: "supplier_documents", landed: ["8802-1101363"] });
+    expect(u.payload.proposal.filed).toEqual({ how: "supplier_documents", landed: ["8802-1101363"], landedIds: [] });
     expect(u.eqs).toContainEqual(["status", "needs_review"]);
+  });
+
+  it("Add keeps the ids of the rows it wrote beside their numbers", async () => {
+    vi.mocked(importCedInvoices).mockResolvedValueOnce({
+      ok: true,
+      message: "Added.",
+      landed: [{ invoiceNumber: "100234", kind: "invoice", total: 10, jobNameRaw: null, sourceFile: null, id: "si-a" }],
+      refused: [],
+    } as never);
+    state.client = fakeSupabase(
+      {
+        "organized_items.select": [{ data: { ...CED_PAPER, status: "needs_review", proposal: { ...CED_PAPER.proposal, filed: null } }, error: null }],
+        "organized_items.update": [{ data: [{ id: "oi-5" }], error: null }],
+      },
+      calls,
+    );
+    await addSupplierDocuments("oi-5");
+    expect(did("organized_items", "update")!.payload.proposal.filed).toEqual({ how: "supplier_documents", landed: ["100234"], landedIds: ["si-a"] });
+  });
+
+  it("Undo takes off exactly the rows this paper wrote, by id: never another supplier's document with the same number (0354)", async () => {
+    const paper = { ...CED_PAPER, proposal: { ...CED_PAPER.proposal, filed: { how: "supplier_documents", landed: ["100234"], landedIds: ["si-a"] } } };
+    state.client = fakeSupabase(
+      {
+        "organized_items.select": [
+          { data: paper, error: null },
+          { data: [], error: null }, // papers tied to them
+        ],
+        "supplier_invoices.select": [{ data: [{ id: "si-a", invoice_number: "100234", job_id: null }], error: null }],
+        "bill_supplier_invoices.select": [{ data: [], error: null }],
+        "supplier_invoices.delete": [{ data: [{ id: "si-a" }], error: null }],
+        "organized_items.update": [{ data: [{ id: "oi-5" }], error: null }],
+      },
+      calls,
+    );
+    const res = await undoPaperwork("oi-5");
+    expect(res.ok).toBe(true);
+    expect(did("supplier_invoices", "select")!.ins).toEqual([["id", ["si-a"]]]);
+    expect(did("supplier_invoices", "delete")!.ins).toEqual([["id", ["si-a"]]]);
+  });
+
+  it("a paper filed before ids were kept: a number two suppliers share is kept and named, never guessed at", async () => {
+    const paper = { ...CED_PAPER, proposal: { ...CED_PAPER.proposal, filed: { how: "supplier_documents", landed: ["100234", "8802-1101363"] } } };
+    state.client = fakeSupabase(
+      {
+        "organized_items.select": [
+          { data: paper, error: null },
+          { data: [], error: null }, // papers tied to them
+        ],
+        "supplier_invoices.select": [
+          {
+            data: [
+              { id: "si-a", invoice_number: "100234", job_id: null },
+              { id: "si-b", invoice_number: "100234", job_id: null },
+              { id: "si-9", invoice_number: "8802-1101363", job_id: null },
+            ],
+            error: null,
+          },
+        ],
+        "bill_supplier_invoices.select": [{ data: [], error: null }],
+        "supplier_invoices.delete": [{ data: [{ id: "si-9" }], error: null }],
+        "organized_items.update": [{ data: [{ id: "oi-5" }], error: null }],
+      },
+      calls,
+    );
+    const res = await undoPaperwork("oi-5");
+    expect(res.ok).toBe(true);
+    expect(did("supplier_invoices", "select")!.ins).toEqual([["invoice_number", ["100234", "8802-1101363"]]]);
+    expect(did("supplier_invoices", "delete")!.ins).toEqual([["id", ["si-9"]]]);
+    expect(res.message).toContain("100234 stayed on the supplier documents list too, because more than one supplier has a document with that number.");
   });
 
   it("Add hands the importer the tray's own PDF bytes, so the PDF is kept where Open Bill reads it", async () => {
