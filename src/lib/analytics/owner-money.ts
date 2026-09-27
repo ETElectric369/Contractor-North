@@ -1126,7 +1126,7 @@ export function costFigure(n: number): string {
  * MATERIALS & BILLS AS THE CARD AND THE CHART SAY IT (Erik, 2026-09-27: "we dont need a put on the
  * shelf on the bar graph"). Shop stock bought is money gone on materials, so both readers show it
  * INSIDE Materials & Bills, still in the month the ticket is dated (decision 1 is unchanged). The
- * engine keeps it apart (putOnShelf), because the accountant's Stock Bought list checks against it;
+ * engine keeps it apart (putOnShelf), because the accountant download's Summary shows it as Stock Bought;
  * this one sum is the only place the two are joined, so the card and the chart never disagree and
  * the card's lines still add up to the draw to the cent.
  */

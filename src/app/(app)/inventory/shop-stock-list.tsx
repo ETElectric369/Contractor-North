@@ -549,7 +549,7 @@ function WriteOff({ item, lot, onClose, onDone }: { item: ShelfItemView; lot: Sh
         {n > 0 && n <= lot.piecesLeft && (
           <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">
             About {formatCurrency(aboutCost(lot, n))}, what they cost off the roll, shows as Shop Stock Lost this month. The company eats it: no
-            customer is charged. Undo stays until it goes to your accountant.
+            customer is charged. You can Undo it from this list.
           </p>
         )}
         {n > lot.piecesLeft && (

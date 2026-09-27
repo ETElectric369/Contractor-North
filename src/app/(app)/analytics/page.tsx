@@ -195,7 +195,7 @@ export default async function AnalyticsPage({
           href="/analytics/accountant"
           className="inline-flex min-h-[44px] items-center rounded-lg border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-50"
         >
-          Export For Accountant
+          For Your Accountant
         </Link>
       </PageHeader>
 

@@ -1,20 +1,5 @@
 import { describe, it, expect } from "vitest";
-import {
-  ACCOUNTANT_LISTS,
-  HEADERS,
-  accountantList,
-  dataRowCount,
-  exportWindow,
-  onHandList,
-  parseWindow,
-  stockBoughtList,
-  stockUsedList,
-  toCsv,
-  toolsBilledList,
-  toolsList,
-  type AccountantInputs,
-} from "@/lib/accountant-lists";
-import { computeOwnerMoney, ownerMoneyWindow, type OwnerMoneyInputs } from "@/lib/analytics/owner-money";
+import { HEADERS, onHandList, toCsv, toolsBilledList, toolsList, type AccountantInputs, type CsvTable } from "@/lib/accountant-lists";
 
 const TZ = "America/Los_Angeles";
 
@@ -65,146 +50,28 @@ const inputs = (): AccountantInputs => ({
 
 const SEPT = { from: "2026-09-01", to: "2026-09-30" };
 const col = (key: keyof typeof HEADERS, name: string) => HEADERS[key].indexOf(name);
+/** Data rows in a list (the Total rows are not). */
+const dataRowCount = (t: CsvTable) => t.rows.length - (t.summaryRows ?? 0);
 
 describe("the CSV: plain column names, and nothing a spreadsheet would run", () => {
   it("every list's header row is exactly its plain column names", () => {
-    expect(HEADERS.stock_bought).toEqual(["Date Bought", "Item", "Quantity", "Unit", "Cost", "Supplier", "Ticket Number", "Bought On Job", "How It Came In", "Note"]);
-    expect(HEADERS.stock_used).toEqual(["Date", "Item", "Quantity", "Unit", "Cost", "Went To", "Job Number", "Job", "Note", "Supplier Credit"]);
     expect(HEADERS.on_hand).toEqual(["Item", "Unit", "On Hand", "Cost On Hand", "Date Bought", "Supplier", "Ticket Number", "Note"]);
     expect(HEADERS.tools).toEqual(["Date", "Supplier", "Ticket Number", "What", "Cost", "Filed As", "Job Number"]);
-    for (const l of ACCOUNTANT_LISTS) {
-      const csv = toCsv(accountantList(l.key, inputs(), SEPT, TZ));
-      expect(csv.split("\r\n")[0]).toBe(HEADERS[l.key].join(","));
-      for (const row of csv.trimEnd().split("\r\n")) expect(row.split(",").length).toBeGreaterThanOrEqual(HEADERS[l.key].length);
+    const lists: [keyof typeof HEADERS, CsvTable][] = [
+      ["on_hand", onHandList(inputs(), SEPT.to, TZ)],
+      ["tools", toolsList(inputs(), SEPT, TZ)],
+      ["tools_billed", toolsBilledList(inputs(), TZ)],
+    ];
+    for (const [key, t] of lists) {
+      const csv = toCsv(t);
+      expect(csv.split("\r\n")[0]).toBe(HEADERS[key].join(","));
+      for (const row of csv.trimEnd().split("\r\n")) expect(row.split(",").length).toBeGreaterThanOrEqual(HEADERS[key].length);
     }
-    expect(ACCOUNTANT_LISTS.map((l) => l.title)).toEqual(["Stock Bought", "Stock Used", "On Hand", "Tools Bought"]);
-    expect(ACCOUNTANT_LISTS.find((l) => l.key === "tools")!.says).toContain("Depreciation is your accountant's call.");
   });
 
   it("quotes commas, quotes and line breaks, and defuses a formula", () => {
     const csv = toCsv({ header: ["A", "B", "C", "D"], rows: [['4" RND, LS', "=HYPERLINK(1)", -12.5, null], ["line\nbreak", "@sum", 0, "-x"]] });
     expect(csv).toBe('A,B,C,D\r\n"4"" RND, LS",\'=HYPERLINK(1),-12.5,\r\n"line\nbreak",\'@sum,0,\'-x\r\n');
-  });
-});
-
-describe("Stock Bought: every roll that went on the shelf, at its ticket's cost", () => {
-  it("August holds the 8/19 coil at $180.17, bought on J-011; a roll taken back off never counts", () => {
-    const t = stockBoughtList(inputs(), { from: "2026-07-01", to: "2026-08-31" }, TZ);
-    expect(dataRowCount(t)).toBe(1);
-    expect(t.rows[0]).toEqual(["2026-08-19", "12/2 NM-B", 250, "ft", 180.17, "Consolidated Electrical Dist.", null, "J-011", "Rest of a job's receipt", null]);
-    expect(t.rows[1][0]).toBe("Total");
-    expect(t.rows[1][col("stock_bought", "Cost")]).toBe(180.17);
-    expect(t.total).toBe(180.17);
-  });
-  it("a box counted in says so, at the cost it was counted at, with its note, OUTSIDE the Total (never a month's cost)", () => {
-    const inp = inputs();
-    inp.lots[1] = { ...inp.lots[1], cost: "12.5" };
-    const t = stockBoughtList(inp, SEPT, TZ);
-    expect(t.rows[0]).toEqual(["2026-09-25", "Twister 341-Tan", 440, "ea", 12.5, null, null, null, "Counted in, no receipt", "The rest of Waldow's box (INV-069 paid)"]);
-    expect(dataRowCount(t)).toBe(1);
-    expect(t.rows[1][0]).toBe("Total");
-    expect(t.rows[1][col("stock_bought", "Cost")]).toBe(0);
-    expect(t.rows[2][0]).toBe("Not In Total");
-    expect(t.rows[2][col("stock_bought", "Cost")]).toBe(12.5);
-    expect(t.total).toBe(0);
-  });
-  it("a roll is dated by its TICKET, the way Owner Money dates it: a ticket re-dated 8/31 -> 9/2 takes the roll to September", () => {
-    const inp = inputs();
-    inp.bills[0] = { ...inp.bills[0], bill_date: "2026-09-02" }; // bought_on stays 2026-08-19, frozen at shelving
-    expect(dataRowCount(stockBoughtList(inp, { from: "2026-08-01", to: "2026-08-31" }, TZ))).toBe(0);
-    const sep = stockBoughtList(inp, SEPT, TZ);
-    expect(sep.rows[0][0]).toBe("2026-09-02");
-    expect(sep.total).toBe(180.17);
-    // A ticket with no date is the org's own day it was entered (6 PM Pacific 8/31 is 9/1 in UTC).
-    inp.bills[0] = { ...inp.bills[0], bill_date: null, created_at: "2026-09-01T01:00:00Z" };
-    expect(stockBoughtList(inp, { from: "2026-08-31", to: "2026-08-31" }, TZ).total).toBe(180.17);
-  });
-  it("its Total is the app's Put On The Shelf for the same days, to the cent (no moves)", () => {
-    const inp = inputs();
-    inp.moves = [];
-    const om: OwnerMoneyInputs = {
-      payments: [],
-      refunds: [],
-      bills: inp.bills.map((b) => ({ ...b, amount: Number(b.amount), status: "unpaid" })),
-      pos: [],
-      pettyCash: [],
-      entries: [],
-      runs: [],
-      payPayments: [],
-      creditMemos: [],
-      people: new Map(),
-      recordsStart: null,
-      shelfLots: inp.lots.map((l) => ({ lot_id: l.lot_id, bill_id: l.bill_id, cost: Number(l.cost), cost_left: Number(l.cost), live: l.live })),
-      shelfMoves: [],
-    };
-    for (const month of ["2026-07", "2026-08", "2026-09"]) {
-      const w = ownerMoneyWindow(month as any, "2026-09-26");
-      const last = new Date(Date.parse(`${w.end}T12:00:00Z`) - 86_400_000).toISOString().slice(0, 10);
-      const listed = stockBoughtList(inp, { from: w.start, to: last }, TZ).total ?? 0;
-      expect(listed).toBe(computeOwnerMoney(om, w, TZ, "2026-09-26").totals.putOnShelf);
-    }
-  });
-});
-
-describe("Stock Used: where every piece went, and what the supplier gave back", () => {
-  const t = stockUsedList(inputs(), SEPT, TZ);
-  const rows = t.rows.filter((r) => r[0] !== "Total");
-  it("a take, a write-off, a return and pieces back from a job, at their stamped cost; an undone write-off never happened", () => {
-    expect(rows.map((r) => [r[col("stock_used", "Went To")], r[2], r[4]])).toEqual([
-      ["Job", 60, 43.24],
-      ["Written off (Shop Stock Lost)", 10, 7.21],
-      ["Returned to supplier", 50, 36.03],
-      ["Supplier credit for returned stock", null, null],
-      ["Back from a job", -10, -7.21],
-    ]);
-    expect(rows[0][col("stock_used", "Job Number")]).toBe("J-013");
-    expect(rows[1][col("stock_used", "Note")]).toBe("Ruined in the rain");
-    expect(rows.some((r) => r[col("stock_used", "Note")] === "oops")).toBe(false);
-  });
-  it("the credit is its own row in its own column, and the totals add up to the cent", () => {
-    const credit = rows.find((r) => r[5] === "Supplier credit for returned stock")!;
-    expect(credit[col("stock_used", "Supplier Credit")]).toBe(30);
-    expect(credit[col("stock_used", "Note")]).toBe("Consolidated Electrical Dist. #8802-CM1");
-    const total = t.rows[t.rows.length - 1];
-    expect(total[0]).toBe("Total");
-    expect(total[col("stock_used", "Cost")]).toBe(79.27); // 43.24 + 7.21 + 36.03 - 7.21
-    expect(total[col("stock_used", "Supplier Credit")]).toBe(30);
-  });
-  it("a window before any of it is empty", () => {
-    expect(stockUsedList(inputs(), { from: "2026-08-01", to: "2026-08-31" }, TZ).rows).toEqual([]);
-  });
-  it("a count saved with no note has no Note: Count It's own words (either wording, saved before or after 0364) are not a person's", () => {
-    const inp = inputs();
-    const count = (id: string, kind: string, note: string | null, at: string) =>
-      ({ id, item_id: "i-122", lot_id: "L1", job_id: null, kind, qty: "2", cost: "1.44", note, created_at: at, undone_at: null, settled_by: null });
-    inp.moves.push(
-      count("c1", "recount_down", "Counted on the shelf", "2026-09-17T18:00:00Z"),
-      count("c2", "recount_up", "Counted in stock", "2026-09-18T18:00:00Z"),
-      count("c3", "recount_down", "Counted in the truck", "2026-09-19T18:00:00Z"),
-      count("c4", "recount_down", "  ", "2026-09-20T18:00:00Z"),
-    );
-    const notes = stockUsedList(inp, SEPT, TZ)
-      .rows.filter((r) => /^Counted short|^Found on a count/.test(String(r[col("stock_used", "Went To")])))
-      .map((r) => r[col("stock_used", "Note")]);
-    expect(notes).toEqual([null, null, "Counted in the truck", null]);
-  });
-  it("a download cut at an instant carries only the moves before it, and records that same instant (0350 freezes exactly what went out)", () => {
-    const cut = "2026-09-14T00:00:00.000Z"; // after the 9/12 write-off, before the 9/15 return
-    const t = stockUsedList(inputs(), SEPT, TZ, cut);
-    expect(t.rows.filter((r) => r[0] !== "Total").map((r) => r[col("stock_used", "Went To")])).toEqual([
-      "Job",
-      "Written off (Shop Stock Lost)",
-      "Supplier credit for returned stock", // a bill, dated by its day: not a move
-    ]);
-    expect(exportWindow("stock_used", SEPT, TZ, cut)).toEqual({ from_at: "2026-09-01T07:00:00.000Z", to_at: cut });
-    expect(exportWindow("on_hand", SEPT, TZ, cut)).toEqual({ from_at: null, to_at: cut });
-    // A cutoff after the window changes nothing; a window wholly after it still makes a valid record.
-    expect(exportWindow("stock_used", SEPT, TZ, "2026-10-05T00:00:00.000Z").to_at).toBe("2026-10-01T07:00:00.000Z");
-    expect(exportWindow("stock_used", { from: "2026-10-01", to: "2026-10-31" }, TZ, cut)).toEqual({
-      from_at: "2026-10-01T07:00:00.000Z",
-      to_at: "2026-10-01T07:00:00.001Z",
-    });
-    expect(onHandList(inputs(), "2026-09-30", TZ, cut).rows.find((r) => r[0] === "12/2 NM-B")![2]).toBe(180); // 250 - 60 - 10
   });
 });
 
@@ -236,7 +103,7 @@ describe("Tools: Tools & Supplies tickets, and tools the company kept off other 
     ]);
     expect(t.rows[t.rows.length - 1][col("tools", "Cost")]).toBe(153.44);
   });
-  it("a SHELF ticket's part that isn't rolls (a tester, its tax share) is here, as Owner Money counts it in Tools & Supplies; the roll is Stock Bought's", () => {
+  it("a stock ticket's part that isn't rolls (a tester, its tax share) is here, as Owner Money counts it in Tools & Supplies; the roll is Stock Bought's", () => {
     const inp = inputs();
     inp.bills.push({ id: "sh", supplier: "Consolidated Electrical Dist.", bill_number: "8802-ST", bill_date: "2026-09-20", created_at: "2026-09-20T20:00:00Z", job_id: null, amount: "224.17", category: "Shop Stock", on_shelf: true });
     inp.lines.push(
@@ -246,11 +113,8 @@ describe("Tools: Tools & Supplies tickets, and tools the company kept off other 
     inp.lots.push({ lot_id: "L9", item_id: "i-122", kind: "line", bill_id: "sh", bill_line_id: "sh1", pieces: "250", unit: "ft", cost: "180.17", bought_on: "2026-09-20", live: true, note: null });
     const tools = toolsList(inp, SEPT, TZ).rows.filter((r) => r[0] !== "Total");
     expect(tools).toContainEqual(["2026-09-20", "Consolidated Electrical Dist.", "8802-ST", "KLEIN NCVT-3 TESTER", 44, "Stock ticket, not rolls", null]);
-    // The tied credit (cr1, on the shelf) is Stock Used's, never here.
+    // The tied credit (cr1, a stock ticket) is Stock Lost's money back, never here.
     expect(tools.some((r) => r[2] === "8802-CM1")).toBe(false);
-    const bought = stockBoughtList(inp, SEPT, TZ);
-    expect(bought.rows[0].slice(0, 5)).toEqual(["2026-09-20", "12/2 NM-B", 250, "ft", 180.17]);
-    expect(bought.total).toBe(180.17);
   });
   it("a tool bought on a Fuel or an Auto ticket says which: Fuel and Auto are two buckets, and a Gas & Truck row not yet renamed reads Auto", () => {
     const inp = inputs();
@@ -282,18 +146,5 @@ describe("Tools: Tools & Supplies tickets, and tools the company kept off other 
     expect(b.rows).toEqual([["2026-06-12", "The Home Depot", "J-002", "The SuperHawg Job", "MKE 18V GEN2 SUPERHAWG", 400, "INV-050"]]);
     const t = toolsList(inputs(), { from: "2026-06-01", to: "2026-06-30" }, TZ);
     expect(t.rows.some((r) => String(r[3]).includes("SUPERHAWG"))).toBe(false);
-  });
-});
-
-describe("the window", () => {
-  it("defaults to this month to today, and refuses a reversed or bad range", () => {
-    expect(parseWindow(undefined, undefined, "2026-09-26")).toEqual({ from: "2026-09-01", to: "2026-09-26" });
-    expect(parseWindow("2026-09-20", "2026-09-01", "2026-09-26")).toEqual({ from: "2026-09-01", to: "2026-09-26" });
-    expect(parseWindow("2026-13-40", "x", "2026-09-26")).toEqual({ from: "2026-09-01", to: "2026-09-26" });
-    expect(parseWindow("2026-08-01", "2026-08-31", "2026-09-26")).toEqual({ from: "2026-08-01", to: "2026-08-31" });
-  });
-  it("a download records the instants it covered in the org's days; On Hand covers everything before its day ends", () => {
-    expect(exportWindow("stock_used", SEPT, TZ)).toEqual({ from_at: "2026-09-01T07:00:00.000Z", to_at: "2026-10-01T07:00:00.000Z" });
-    expect(exportWindow("on_hand", SEPT, TZ)).toEqual({ from_at: null, to_at: "2026-10-01T07:00:00.000Z" });
   });
 });

@@ -332,7 +332,7 @@ export default async function ShopStockPage({
           href="/analytics/accountant"
           className="inline-flex min-h-[44px] items-center rounded-lg border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-50"
         >
-          Export For Accountant
+          For Your Accountant
         </Link>
         {/* Shop Stock off (the switch board, 0352): no New Item; the shelf stays readable below. */}
         {featureOn(getOrgSettings((orgRow.data as { settings?: unknown } | null)?.settings).features, "shop_stock") && <NewItemButton />}
