@@ -5,7 +5,8 @@
  *
  *   alreadyBilledSheet      what the sheet offers for one cost (lib/already-billed-read)
  *   noJobHoursSheet         what it offers for hours on NO job (invoices with no job, 0357)
- *   markAlreadyBilled      a line on a sent bill claims what it already charged for, by hand
+ *   markAlreadyBilled      a line on a sent bill claims what it already charged for, by hand (a line
+ *                           that names one person: only that person's shifts, 0361)
  *   unmarkAlreadyBilled     Not Billed After All: only what a person marked comes back off
  *
  * Staff only here, and the functions run as the person (SECURITY INVOKER) so RLS refuses a tech in
@@ -20,7 +21,14 @@ import { requireStaff } from "@/lib/staff-guard";
 import { dbError } from "@/lib/db-error";
 import { reportError } from "@/lib/observe";
 import { NEEDS_UPDATE, hoursByHand, markedSentence } from "@/lib/already-billed";
-import { isMissingAlreadyBilledRpc, loadAlreadyBilledSheet, loadNoJobHoursSheet, type AlreadyBilledSheetData, type AlreadyBilledTarget } from "@/lib/already-billed-read";
+import {
+  isMissingAlreadyBilledRpc,
+  loadAlreadyBilledSheet,
+  loadNoJobHoursSheet,
+  markPersonCheck,
+  type AlreadyBilledSheetData,
+  type AlreadyBilledTarget,
+} from "@/lib/already-billed-read";
 
 export type AlreadyBilledSheetResult = { ok: true; data: AlreadyBilledSheetData } | { ok: false; error: string; needsUpdate?: boolean };
 
@@ -98,6 +106,11 @@ export async function markAlreadyBilled(input: { jobId?: string | null; lineId: 
   const what = said(input?.what);
   if (!lineId) return { ok: false, error: "Pick the line that already charged for it. Nothing was changed." };
   if (!ids.length) return { ok: false, error: "Pick what that line already charged for. Nothing was changed." };
+  if (!ctx.orgId) return { ok: false, error: "Your sign-in isn't attached to a company yet." };
+  // WHOSE HOURS (0361): a line that names one person holds only that person's shifts. Said here
+  // first, in the database's own words, and held here on a database without 0361.
+  const notTheirs = await markPersonCheck(ctx.supabase, ctx.orgId, lineId, ids);
+  if (notTheirs) return { ok: false, error: notTheirs };
   const { data, error } = await ctx.supabase.rpc("mark_already_billed", { p_line: lineId, p_ids: ids });
   if (error) {
     if (isMissingAlreadyBilledRpc(error)) return { ok: false, error: NEEDS_UPDATE, needsUpdate: true };

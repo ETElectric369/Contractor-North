@@ -61,6 +61,13 @@ function fake(route: (table: string, cols: string, rpcArgs?: any) => Reply, call
   };
 }
 
+/** A client whose one answer that matters is the function's: Mark's own whose-hours check (0361)
+ *  reads the line and finds no shifts among the ids, so it goes ahead. */
+const rpcAnswers =
+  (r: Reply) =>
+  (table: string): Reply =>
+    table.startsWith("rpc:") ? r : table === "time_entries" ? { data: [] } : { data: null };
+
 /** J-010, 11301 Purple Sage (ids are uuids: they go into the invoices filter). */
 const J010 = "0100aaaa-0000-4000-8000-000000000010";
 
@@ -93,6 +100,11 @@ const line = (id: string, description: string, line_total: number, o: Record<str
   hand_claims: [],
   ...o,
 });
+/** The company's people, as the whose-hours rule reads them (profiles, 0361). */
+const TEAM = [
+  { id: "p-erik", full_name: "Erik Taylor" },
+  { id: "p-brian", full_name: "Brian Taylor" },
+];
 const INVOICES = [
   { id: "inv-23", invoice_number: "INV-00023", status: "paid", invoice_kind: "standard", job_id: J010, created_at: "2026-06-22T04:57:19Z", invoice_items: [line("li-mat", "Materials", 110)] },
   { id: "inv-81", invoice_number: "INV-081", status: "draft", invoice_kind: "standard", job_id: J010, created_at: "2026-09-25T00:00:00Z", invoice_items: [line("li-d", "Materials", 50)] },
@@ -128,7 +140,7 @@ beforeEach(() => {
 
 describe("before 0357 is applied", () => {
   it("Mark says it needs an update and writes nothing", async () => {
-    state.client = fake(() => ({ error: { code: "PGRST202", message: "Could not find the function public.mark_already_billed(p_ids, p_line) in the schema cache" } }), calls);
+    state.client = fake(rpcAnswers({ error: { code: "PGRST202", message: "Could not find the function public.mark_already_billed(p_ids, p_line) in the schema cache" } }), calls);
     const res = await markAlreadyBilled({ jobId: J010, lineId: "li-mat", ids: ["bill-ps"], what: "CED 8802-1101475" });
     expect(res).toMatchObject({ ok: false, error: NEEDS_UPDATE, needsUpdate: true });
   });
@@ -147,7 +159,7 @@ describe("before 0357 is applied", () => {
 describe("after it", () => {
   it("a mark that lands is said with what, where, that nothing changed, and its Undo", async () => {
     state.client = fake(
-      () => ({ data: { line_id: "li-mat", invoice_id: "inv-23", invoice_number: "INV-00023", description: "Materials", line_total: "110.00", added: ["bill-ps"] } }),
+      rpcAnswers({ data: { line_id: "li-mat", invoice_id: "inv-23", invoice_number: "INV-00023", description: "Materials", line_total: "110.00", added: ["bill-ps"] } }),
       calls,
     );
     const res = await markAlreadyBilled({ jobId: J010, lineId: "li-mat", ids: ["bill-ps"], what: "Consolidated Electrical Distributors 8802-1101475" });
@@ -159,14 +171,14 @@ describe("after it", () => {
   });
 
   it("an empty answer is 'didn't save', never a quiet success", async () => {
-    state.client = fake(() => ({ data: null }), calls);
+    state.client = fake(rpcAnswers({ data: null }), calls);
     const res = await markAlreadyBilled({ jobId: J010, lineId: "li-mat", ids: ["bill-ps"], what: "x" });
     expect(res.ok).toBe(false);
     expect(res.error).toMatch(/didn't save/);
   });
 
   it("the function's refusal is the office's sentence", async () => {
-    state.client = fake(() => ({ error: { code: "P0001", message: "INV-081 is still a draft: Add To INV-081 puts it there. Nothing was changed." } }), calls);
+    state.client = fake(rpcAnswers({ error: { code: "P0001", message: "INV-081 is still a draft: Add To INV-081 puts it there. Nothing was changed." } }), calls);
     expect((await markAlreadyBilled({ jobId: J010, lineId: "li-d", ids: ["bill-ps"], what: "x" })).error).toBe(
       "INV-081 is still a draft: Add To INV-081 puts it there. Nothing was changed.",
     );
@@ -236,6 +248,7 @@ describe("after it", () => {
     state.client = fake((table, cols) => {
       if (table === "invoices") return { data: withLabor };
       if (table === "time_entries") return { data: [shift("t-held", "2026-06-16T15:00:00Z", "2026-06-16T23:00:00Z"), shift("t-free", "2026-06-17T15:00:00Z", "2026-06-17T19:00:00Z")] };
+      if (table === "profiles") return { data: TEAM };
       if (table === "job_codes" || table === "profile_pay" || table === "invoice_items") return { data: [] };
       return base(table, cols);
     }, calls);
@@ -246,6 +259,39 @@ describe("after it", () => {
     expect(erik?.heldHours).toBe(8);
     expect(res.data.entries.map((e) => e.id)).toEqual(["t-free"]);
     expect(res.data.entries[0].family).toBe("t-free");
+  });
+
+  it("hours: every line says whose hours it holds, by the company-wide rule (0361); a crew line, nobody's", async () => {
+    const lines = [
+      line("li-brian", "Labor - Brian", 1235, { quantity: 13, unit: "hr", unit_price: 95 }),
+      line("li-crew", "Labor - ET Electric hourly with 2 guys", 2185, { quantity: 23, unit: "hr", unit_price: 95 }),
+      line("li-erik", "Labor — Erik", 950, { quantity: 10, unit: "hr", unit_price: 95, import_source: "labor", import_key: "labor:p-erik", edited: true }),
+    ];
+    const base = sheetRoute();
+    state.client = fake((table, cols) => {
+      if (table === "invoices") return { data: [{ ...INVOICES[0], invoice_items: lines }] };
+      if (table === "profiles") return { data: TEAM };
+      if (table === "time_entries" || table === "job_codes" || table === "profile_pay" || table === "invoice_items") return { data: [] };
+      return base(table, cols);
+    }, calls);
+    const res = await alreadyBilledSheet(J010, { kind: "time", ids: [] });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    const got = Object.fromEntries(res.data.invoices.flatMap((i) => i.invoice.lines).map((l) => [l.id, [l.person, l.personName]]));
+    // Brian has no open shift here, and his line is still his: the rule reads the whole company.
+    expect(got).toEqual({ "li-brian": ["p-brian", "Brian Taylor"], "li-crew": [null, null], "li-erik": ["p-erik", "Erik Taylor"] });
+  });
+
+  it("hours: a lost read of the team is said, and nothing is offered", async () => {
+    const base = sheetRoute();
+    state.client = fake((table, cols) => {
+      if (table === "profiles") return { error: { message: "boom" } };
+      if (table === "time_entries" || table === "job_codes" || table === "profile_pay" || table === "invoice_items") return { data: [] };
+      return base(table, cols);
+    }, calls);
+    const res = await alreadyBilledSheet(J010, { kind: "time", ids: [] });
+    expect(res).toMatchObject({ ok: false });
+    expect(!res.ok && res.error).toMatch(/^Couldn't read your team just now/);
   });
 
   it("a draft is said with the door that is there: Add To only where New Invoice lands, never on a deposit", async () => {
@@ -281,6 +327,59 @@ describe("after it", () => {
 });
 
 /**
+ * WHOSE HOURS, BEFORE MARK WRITES (0361): a line that names one person takes only that person's
+ * shifts. Mark says so in the database's own words and never calls the function; a crew line, or the
+ * person's own shift, goes through; a lost read is said, never a mark made unchecked.
+ */
+describe("Mark checks whose hours they are", () => {
+  const BRIAN_LINE = { id: "li-b", description: "Labor - Brian", import_key: null, invoices: { invoice_number: "INV-059" } };
+  const shiftRow = (id: string, who: "p-erik" | "p-brian", clockIn: string) => ({
+    id,
+    profile_id: who,
+    clock_in: clockIn,
+    profiles: { full_name: who === "p-erik" ? "Erik Taylor" : "Brian Taylor" },
+  });
+  const route =
+    (o: { line?: unknown; shifts?: unknown[]; team?: Reply }) =>
+    (table: string): Reply => {
+      if (table.startsWith("rpc:")) return { data: { line_id: "li-b", invoice_id: "inv-59", invoice_number: "INV-059", description: "Labor - Brian", line_total: "1235.00", added: ["x"] } };
+      if (table === "invoice_items") return { data: o.line ?? BRIAN_LINE };
+      if (table === "time_entries") return { data: o.shifts ?? [] };
+      if (table === "profiles") return o.team ?? { data: TEAM };
+      if (table === "organizations") return { data: { settings: { timezone: "America/Los_Angeles" } } };
+      throw new Error(`unrouted ${table}`);
+    };
+
+  it("Erik's shift on Brian's line: refused in the database's words, and the function is never called", async () => {
+    state.client = fake(route({ shifts: [shiftRow("t-b", "p-brian", "2026-09-10T15:00:00Z"), shiftRow("t-e", "p-erik", "2026-09-11T15:00:00Z")] }), calls);
+    const res = await markAlreadyBilled({ jobId: J010, lineId: "li-b", ids: ["t-b", "t-e"], what: "14 h of time" });
+    expect(res).toEqual({
+      ok: false,
+      error: `"Labor - Brian" on INV-059 names Brian Taylor, so it holds only Brian Taylor's hours, not Erik Taylor's 9/11 shift. Nothing was changed.`,
+    });
+    expect(calls.some((c) => c.table === "rpc:mark_already_billed")).toBe(false);
+  });
+
+  it("Brian's own shift goes through; so does anyone's on a crew line, and a receipt on any line", async () => {
+    state.client = fake(route({ shifts: [shiftRow("t-b", "p-brian", "2026-09-10T15:00:00Z")] }), calls);
+    expect((await markAlreadyBilled({ jobId: J010, lineId: "li-b", ids: ["t-b"], what: "7 h of Brian Taylor's time" })).ok).toBe(true);
+    const crew = { ...BRIAN_LINE, description: "Labor - ET Electric hourly with 2 guys" };
+    state.client = fake(route({ line: crew, shifts: [shiftRow("t-e", "p-erik", "2026-09-11T15:00:00Z")] }), calls);
+    expect((await markAlreadyBilled({ jobId: J010, lineId: "li-b", ids: ["t-e"], what: "7 h of Erik Taylor's time" })).ok).toBe(true);
+    state.client = fake(route({ shifts: [] }), calls);
+    expect((await markAlreadyBilled({ jobId: J010, lineId: "li-b", ids: ["bill-ps"], what: "CED" })).ok).toBe(true);
+  });
+
+  it("a lost read is said, and nothing is marked unchecked", async () => {
+    calls.length = 0;
+    state.client = fake(route({ shifts: [shiftRow("t-e", "p-erik", "2026-09-11T15:00:00Z")], team: { error: { message: "boom" } } }), calls);
+    const res = await markAlreadyBilled({ jobId: J010, lineId: "li-b", ids: ["t-e"], what: "x" });
+    expect(res).toEqual({ ok: false, error: "Couldn't check whose hours those are just now. Nothing was changed - try again in a moment." });
+    expect(calls.some((c) => c.table === "rpc:mark_already_billed")).toBe(false);
+  });
+});
+
+/**
  * HOURS ON NO JOB (TTUSD on INV-055): the same two writes with no job behind them. They refresh
  * Timecards (the hours' home) and the invoice, never a job page; the way back says the hours are
  * back with the other hours on no job.
@@ -290,7 +389,7 @@ describe("hours on no job", () => {
     const paths = revalidatePath as unknown as { mock: { calls: unknown[][] }; mockClear: () => void };
     paths.mockClear();
     state.client = fake(
-      () => ({ data: { line_id: "li-jp", invoice_id: "inv-55", invoice_number: "INV-055", description: "Labor - JP Prince", line_total: "2185.00", added: ["t6"] } }),
+      rpcAnswers({ data: { line_id: "li-jp", invoice_id: "inv-55", invoice_number: "INV-055", description: "Labor - JP Prince", line_total: "2185.00", added: ["t6"] } }),
       calls,
     );
     const res = await markAlreadyBilled({ jobId: null, lineId: "li-jp", ids: ["t6"], what: "11.5 h of JP Prince's time" });

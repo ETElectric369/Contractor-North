@@ -39,3 +39,13 @@ export function billedPartMoved(holder: ClaimHolder | undefined, before: number,
 export function claimedMoveRefusal(holder: ClaimHolder): string {
   return `${invoiceLabel(holder)} already bills this shift — void or adjust that invoice before moving its hours to another job. Nothing was changed.`;
 }
+
+/**
+ * The sentence for handing a claimed shift to someone else (0361's time_entries_billed_person_stays
+ * refuses the same thing underneath). The invoice billed these hours as `name`'s, on that person's
+ * labor line; moved, that line would claim another person's hours.
+ */
+export function claimedPersonRefusal(holder: ClaimHolder, name?: string | null): string {
+  const whose = name?.trim() ? ` as ${name.trim()}'s hours` : "";
+  return `${invoiceLabel(holder)} already bills this shift${whose} — void or adjust that invoice before handing the shift to someone else. Nothing was changed.`;
+}

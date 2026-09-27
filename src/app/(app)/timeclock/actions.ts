@@ -40,7 +40,7 @@ import {
 import { loadShiftChains, type ShiftInfo } from "@/lib/shift-chain";
 import { ADOPT_AFTER_CLOCK_IN_MS, ADOPT_AFTER_SWITCH_MS } from "./adopt-window";
 import { closedPickable } from "./which-job-choices";
-import { billedPartMoved, claimedMoveRefusal, type ClaimHolder, type ClaimIndex } from "./claim-words";
+import { billedPartMoved, claimedMoveRefusal, claimedPersonRefusal, type ClaimHolder, type ClaimIndex } from "./claim-words";
 import { LONG_SHIFT_PHRASE, MAX_SHIFT_HOURS, clockDoorWords, clockedOutWords, isLongOpenShift, stopProblem } from "@/lib/long-shift";
 import { clockInClashWords, findOverlap, overlapRefusal, shiftWhen, type OverlapClash } from "@/lib/overlap-refusal";
 
@@ -1879,6 +1879,9 @@ export async function updateTimeEntry(input: {
   // single write:
   //   • a claimed entry may not move to another job (its hours went out on THIS job's invoice);
   //     0288's time_entries_billed_job_stays refuses the same thing under this, for every caller;
+  //   • nor to another person: the line that billed it is that person's labor line, and handed on,
+  //     Erik's line would claim Brian's hours (0361's time_entries_billed_person_stays, underneath).
+  //     An owner's shift is never in a paid period (0286), so the payroll lock above never stops it;
   //   • its hours MAY change (a typo is a typo), and the answer names the invoice and both figures.
   const claims = await claimsOnSources(supabase, [input.id]);
   if ("error" in claims) return { ok: false, error: claims.error };
@@ -1888,6 +1891,10 @@ export async function updateTimeEntry(input: {
   const billedHoursMoved = !!billedBy && hoursBefore != null && Math.abs(hoursBefore - hoursAfter) >= 0.01;
   if (input.job_id !== undefined && (input.job_id ?? null) !== (oldJobId ?? null) && billedBy) {
     return { ok: false, error: claimedMoveRefusal(billedBy) };
+  }
+  if (billedBy && targetProfileId !== stored.profile_id) {
+    const owner = Array.isArray(stored.profiles) ? stored.profiles[0] : stored.profiles;
+    return { ok: false, error: claimedPersonRefusal(billedBy, owner?.full_name) };
   }
 
   const { data: entryUpd, error } = await supabase

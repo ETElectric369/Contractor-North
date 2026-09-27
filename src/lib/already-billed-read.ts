@@ -37,16 +37,19 @@ import {
   eligibleInvoice,
   eligibleLines,
   jobReach,
+  markPersonRefusal,
   noJobCanHoldHours,
   noJobListOrder,
   noJobPreticked,
   preselectLine,
+  setLinePeople,
   sortInvoicesFor,
   type AbEntry,
   type AbInvoice,
   type AbLine,
   type AlreadyBilledKind,
 } from "@/lib/already-billed";
+import { laborLinePerson, type LaborPerson } from "@/lib/labor-claim-owner";
 
 type Db = Pick<SupabaseClient, "from">;
 
@@ -153,6 +156,19 @@ function entryHours(e: { clock_in: string; clock_out: string; lunch_minutes?: nu
 
 const LINE_COLUMNS = "id, description, quantity, unit, unit_price, line_total, import_source, import_key, edited, line_kind, sort_order, hand_claims, source_ids";
 
+/**
+ * THE COMPANY'S PEOPLE, for whose hours a line holds (lib/labor-claim-owner laborLinePerson): every
+ * profile of the company, as 0361's labor_line_person reads them (a name that is blank names nobody).
+ * A lost read throws: a line read as naming nobody would offer every person's shifts.
+ */
+async function readPeople(supabase: Db, orgId: string): Promise<LaborPerson[]> {
+  const { data, error } = await supabase.from("profiles").select("id, full_name").eq("org_id", orgId);
+  if (error) throw error;
+  return ((data ?? []) as { id: string; full_name?: string | null }[]).map((p) => ({ id: String(p.id), name: p.full_name ?? null }));
+}
+
+const TEAM_UNREAD = "Couldn't read your team just now, so whose hours each line holds isn't known. Nothing was changed - try again in a moment.";
+
 type Loaded = { ok: true; data: AlreadyBilledSheetData } | { ok: false; error: string; needsUpdate?: boolean };
 
 /**
@@ -257,6 +273,12 @@ export async function loadAlreadyBilledSheet(supabase: Db, orgId: string, jobId:
     t.ids = [...take.moveIds];
   } else {
     // HOURS: the job's closed shifts nobody has billed, the ones "Also not billed yet: X h" counts.
+    // WHOSE EACH LINE IS (0361): a line that names one person is offered only that person's shifts.
+    try {
+      setLinePeople(all, await readPeople(supabase, orgId));
+    } catch {
+      return { ok: false, error: TEAM_UNREAD };
+    }
     try {
       const labor = await fetchJobLaborRows(supabase, jobId);
       // THE HOURS EACH LINE ALREADY HOLDS: every closed shift on the job, claimed or not, by id. The
@@ -589,10 +611,14 @@ export async function loadNoJobHoursSheet(
   opts: { invoiceId?: string | null } = {},
 ): Promise<Loaded> {
   const want = [...new Set((pressed ?? []).map((x) => String(x ?? "")).filter(Boolean))].slice(0, IN_CHUNK);
-  const [orgRead, invRead, shifts] = await Promise.all([
+  const [orgRead, invRead, shifts, team] = await Promise.all([
     supabase.from("organizations").select("settings").eq("id", orgId).maybeSingle(),
     supabase.from("invoices").select(INVOICE_WITH_LINES).eq("org_id", orgId).neq("status", "void").is("job_id", null).limit(2000),
     readOpenNoJobShifts(supabase, orgId, want),
+    readPeople(supabase, orgId).then(
+      (people) => ({ ok: true as const, people }),
+      () => ({ ok: false as const, people: [] as LaborPerson[] }),
+    ),
   ]);
   if (invRead.error) {
     if (isMissingHandClaims(invRead.error)) return { ok: false, error: NEEDS_UPDATE, needsUpdate: true };
@@ -600,11 +626,14 @@ export async function loadNoJobHoursSheet(
   }
   if (orgRead.error) return { ok: false, error: NO_JOB_UNREAD };
   if (!shifts.ok) return shifts;
+  if (!team.ok) return { ok: false, error: TEAM_UNREAD };
   const settings = getOrgSettings((orgRead.data as { settings?: unknown } | null)?.settings);
   const { listed, capped } = shifts;
 
   const invoiceRows = (invRead.data ?? []) as InvoiceRow[];
   const all: AbInvoice[] = invoiceRows.map(abInvoiceOf);
+  // WHOSE EACH LINE IS (0361): "Labor - JP Prince" is offered only JP's shifts; a crew line, anyone's.
+  setLinePeople(all, team.people);
   // What each line already holds, for the hours it already charges beside these (hours only).
   const claimsOfLine = new Map<string, string[]>();
   for (const r of invoiceRows)
@@ -735,4 +764,54 @@ export async function readNoJobHandHours(
     });
   }
   return { ready: true, lines: out };
+}
+
+// ── Whose hours, before a mark writes (0361) ─────────────────────────────────────────────────────
+
+const MARK_UNCHECKED = "Couldn't check whose hours those are just now. Nothing was changed - try again in a moment.";
+
+/**
+ * WHOSE HOURS, BEFORE MARK WRITES: a line that names one person (its key, or its words by the
+ * company-wide rule, lib/labor-claim-owner) takes only that person's shifts. 0361 refuses the rest in
+ * the database (a line typed by hand in these same words, lib/already-billed markPersonRefusal); this
+ * says it first, and holds the rule on a database without 0361. Null: go ahead (no shifts among the ids, a crew line, or
+ * every shift the line's person's; a line that isn't found is the function's to say). A lost read
+ * refuses: whose the hours are was never checked.
+ */
+export async function markPersonCheck(supabase: Db, orgId: string, lineId: string, ids: readonly string[]): Promise<string | null> {
+  let line: { description?: string | null; import_key?: string | null; invoices?: { invoice_number?: string | null } | null } | null;
+  let shifts: { id: string; profile_id?: string | null; clock_in: string; profiles?: { full_name?: string | null } | null }[];
+  try {
+    const [lineRead, shiftRows] = await Promise.all([
+      supabase.from("invoice_items").select("id, description, import_key, invoices(invoice_number)").eq("id", lineId).eq("org_id", orgId).maybeSingle(),
+      readIn(ids, (part) => supabase.from("time_entries").select("id, profile_id, clock_in, profiles(full_name)").eq("org_id", orgId).in("id", part) as any),
+    ]);
+    if (lineRead.error) throw lineRead.error;
+    line = (lineRead.data ?? null) as typeof line;
+    shifts = shiftRows as typeof shifts;
+  } catch {
+    return MARK_UNCHECKED;
+  }
+  if (!line || !shifts.length) return null;
+  let people: LaborPerson[];
+  let tz: string;
+  try {
+    const [team, orgRead] = await Promise.all([readPeople(supabase, orgId), supabase.from("organizations").select("settings").eq("id", orgId).maybeSingle()]);
+    if (orgRead.error) throw orgRead.error;
+    people = team;
+    tz = getOrgSettings((orgRead.data as { settings?: unknown } | null)?.settings).timezone;
+  } catch {
+    return MARK_UNCHECKED;
+  }
+  const person = laborLinePerson({ import_key: line.import_key ?? null, description: line.description ?? null }, people);
+  return markPersonRefusal(
+    {
+      description: line.description ?? null,
+      invoiceNumber: line.invoices?.invoice_number ?? null,
+      person,
+      personName: person ? (people.find((p) => p.id === person)?.name ?? null) : null,
+    },
+    shifts.map((s) => ({ id: String(s.id), person: s.profile_id ? String(s.profile_id) : null, name: s.profiles?.full_name ?? null, clockIn: String(s.clock_in) })),
+    tz,
+  );
 }
