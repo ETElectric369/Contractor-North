@@ -74,6 +74,13 @@ describe("the Off line on every record page", () => {
     expect(src).toContain("arrangeJobTabs(tabs, viewerIsStaff, switches)");
   });
 
+  it("an appointment: Leads off hides only a blank walk-through; a service visit keeps its notes and photos, with no Off line", () => {
+    const src = readFileSync(join(ROOT, "appointments/[id]/page.tsx"), "utf8");
+    expect(src).toContain("const walkThrough = isInspectionType(");
+    expect(src).toMatch(/const showInspector =\s*featureOn\(orgSettings\.features, "leads"\) \|\|\s*!walkThrough \|\|/);
+    expect(src).toMatch(/\{walkThrough && \(\s*<FeatureOffLine feature="leads"/);
+  });
+
   it("a safety form carries Safety Log's line; a walk-through sheet or the website's form does not", () => {
     const src = readFileSync(join(ROOT, "forms/[id]/page.tsx"), "utf8");
     const at = src.indexOf('<FeatureOffLineFor feature="safety_log"');

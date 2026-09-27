@@ -128,11 +128,14 @@ export default async function AppointmentCapturePage({
 
   const orgSettings = getOrgSettings((org as { settings?: unknown } | null)?.settings);
   const tz = orgSettings.timezone;
-  // THE SWITCH BOARD (0352). The Inspector below is the walk-through (Leads & Walk-Throughs): off, it
-  // shows only on a visit that already captured something, never as a blank sheet to start.
+  // THE SWITCH BOARD (0352). On a walk-through the Inspector below is Leads & Walk-Throughs': off, it
+  // shows only on a visit that already captured something, never as a blank sheet to start. Every
+  // other visit (service, consult) keeps it: it is that page's only notes, photos and sheet surface.
   const estimatesOn = featureOn(orgSettings.features, "estimates");
+  const walkThrough = isInspectionType((appt as { type?: string | null }).type);
   const showInspector =
     featureOn(orgSettings.features, "leads") ||
+    !walkThrough ||
     hasCaptureData((appt as { capture?: unknown }).capture) ||
     Object.keys((inspection?.inspection_answers ?? {}) as Record<string, unknown>).length > 0;
   const a = appt as any;
@@ -441,7 +444,9 @@ export default async function AppointmentCapturePage({
       {showInspector && (
         <>
           <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500">{estimatesOn ? "Walk Through Or Estimate" : "Walk Through"}</h2>
-          <FeatureOffLine feature="leads" features={orgSettings.features} isOwner={(meRow as { role?: string } | null)?.role === "owner"} />
+          {walkThrough && (
+            <FeatureOffLine feature="leads" features={orgSettings.features} isOwner={(meRow as { role?: string } | null)?.role === "owner"} />
+          )}
           <Inspector
             appointmentId={a.id}
             orgId={a.org_id}
