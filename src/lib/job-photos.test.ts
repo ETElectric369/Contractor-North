@@ -99,8 +99,10 @@ describe("each bill's own paper", () => {
     expect(ids(s.byBill["bill-inv"])).toEqual(["inv-ced"]);
   });
 
-  it("a receipt, bill or invoice on the books through nothing is loose; one on a bill anywhere is not", () => {
+  it("a receipt or bill on the books through nothing is loose; one on a bill anywhere is not", () => {
     expect(ids(s.loose)).toEqual(["rcpt-loose"]);
+    const bill = sortJobPapers([doc("bl", "Bill", "org/job/bl.pdf", "bl.pdf")], [], BILLS);
+    expect(ids(bill.loose)).toEqual(["bl"]);
     // Tied to a bill on ANOTHER job (moved there): not on this job's bill list, and not loose either.
     const moved = sortJobPapers([doc("r", "Receipt")], [{ document_id: "r", bill_id: "bill-elsewhere", file_url: "org/job/r.jpg" }], BILLS);
     expect(moved.byBill).toEqual({});
@@ -108,6 +110,14 @@ describe("each bill's own paper", () => {
     // Petty cash or a supplier's document holds it: on the books, not loose.
     const petty = sortJobPapers([doc("r", "Receipt")], [{ document_id: "r", bill_id: null, petty_cash_id: "pc", file_url: null }], BILLS);
     expect(ids(petty.loose)).toEqual([]);
+  });
+
+  it("an Invoice on no bill is never loose: nothing reads one into a bill, so its flag would have no button", () => {
+    const t = sortJobPapers([doc("inv-pdf", "Invoice", "org/job/inv.pdf", "inv.pdf"), doc("inv-pic", "Invoice")], [], BILLS);
+    expect(ids(t.loose)).toEqual([]);
+    // Still money paper: the picture never lands in the Photos grid.
+    expect(ids(t.photos)).toEqual([]);
+    expect(t.moneyPictures).toBe(1);
   });
 
   it("a lost links read claims nothing: no paper is loose, a Receipt is still never a photo", () => {

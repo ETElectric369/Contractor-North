@@ -15,9 +15,12 @@ import { formatDate } from "@/lib/utils";
 import { CameraCapture } from "@/components/camera-capture";
 import { MediaLightbox } from "@/components/media-lightbox";
 import { captureReceipt, prettyBytes, readReceiptDocument, type ReceiptTone } from "@/lib/receipt-capture";
+import { isCostableCategory } from "@/lib/job-photos";
 import { deleteDocument, updateDocument } from "../actions";
 
-const COSTABLE = (c: string | null) => c === "Receipt" || c === "Bill";
+/** A Receipt or a Bill: read into a job cost on upload, and Record As Cost's (lib/job-photos, the
+ *  same rule that decides which papers can be "Not On A Bill Yet"). */
+const COSTABLE = isCostableCategory;
 
 const CATEGORIES = ["Receipt", "Bill", "Invoice", "Photo", "Plan", "Permit", "Other"];
 /** A picture filed as one of these shows on the Photos tab (lib/job-photos), not in this list. */
@@ -77,9 +80,9 @@ const NOTE_COLOR: Record<ReceiptTone, string> = {
  * RECEIPTS & PAPERS, FOLDED (Erik, 2026-09-27: bills and job photos kept separate). The list leads
  * with the job's papers; what the Photos tab holds (`photoTabIds`) folds under them, still here for
  * the pencil (a receipt snapped as a Photo is re-filed from this list) and the trash. A paper that
- * made a bill on this job says which (`billOf`); a receipt, bill or invoice on no bill at all
- * (`looseIds`) says so, and the fold's line counts those and starts open while there are any, so an
- * unrecorded receipt is never folded out of sight. Record as Cost stays on a paper no bill holds.
+ * made a bill on this job says which (`billOf`); a receipt or bill on no bill at all (`looseIds`)
+ * says so beside its Record As Cost, and the fold's line counts those and starts open while there
+ * are any, so an unrecorded receipt is never folded out of sight.
  */
 export function JobDocuments({
   orgId,
@@ -108,8 +111,9 @@ export function JobDocuments({
   photoTabIds?: readonly string[] | null;
   /** Document id → the bill on this job it made, in words ("the CED bill #8802-1106969"). */
   billOf?: Record<string, string> | null;
-  /** Receipts, bills and invoices tied to no bill at all. null = not known (the ties weren't read):
-   *  nothing is claimed, and Record as Cost stays on every receipt, as before. */
+  /** Receipts and bills tied to no bill at all (never an Invoice: nothing reads one into a bill, so
+   *  its flag would have no Record As Cost). null = not known (the ties weren't read): nothing is
+   *  claimed, and Record as Cost stays on every receipt, as before. */
   looseIds?: readonly string[] | null;
   /** Said when the ties couldn't be read. */
   tieNote?: string | null;

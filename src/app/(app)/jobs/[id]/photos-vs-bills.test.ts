@@ -162,6 +162,16 @@ describe("the Costs tab: Receipts & Papers", () => {
     expect(html.slice(0, at)).not.toContain("panel.jpg");
   });
 
+  it("an Invoice on no bill carries no flag it has no button for, and doesn't hold the fold open", () => {
+    const inv = { ...doc("supplier-inv", "Invoice", "pdf") };
+    const s2 = sortJobPapers([inv], [], BILLS.map((b) => b.id));
+    const html2 = r(JobDocuments, { orgId: "org1", jobId: "j1", docs: [inv], photoTabIds: [], billOf: {}, looseIds: (s2.loose ?? []).map((d) => d.id) });
+    expect(html2).not.toMatch(/^<details[^>]*open=""/);
+    expect(text(html2)).not.toContain("Not On A Bill");
+    expect(text(html2)).not.toContain("Not on a bill yet");
+    expect(text(html2)).toContain("supplier-inv.pdf");
+  });
+
   it("nothing on no bill: the fold starts closed and its line counts nothing", () => {
     const closed = r(JobDocuments, { ...props, looseIds: [] });
     expect(closed).not.toMatch(/^<details[^>]*open=""/);

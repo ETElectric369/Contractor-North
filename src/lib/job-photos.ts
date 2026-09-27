@@ -16,8 +16,10 @@
  *   · WITH ITS BILL (the Costs tab, and the bill's row on /bills): a Receipt, a Bill, an Invoice, a
  *     picture tied to a bill, and an unfiled picture a paper reader handled. The tie is the one the
  *     receipt reader, Add Cost and File It already write: organized_items.bill_id (or tied_bill_id,
- *     Same Purchase: Tie Them) beside document_id. A money paper tied to no bill at all is listed in
- *     the Costs tab's Receipts & Papers and says so, so nothing leaves a screen silently.
+ *     Same Purchase: Tie Them) beside document_id. A receipt or bill tied to no bill at all is listed
+ *     in the Costs tab's Receipts & Papers and says so, beside its Record As Cost, so nothing leaves a
+ *     screen silently. An Invoice on no bill is only listed: nothing reads one into a bill, so a flag
+ *     on it would have no button to answer it.
  *
  * A TECH'S VIEW DOES NOT MOVE. The page hands a tech only the allow-listed papers (tech-documents:
  * no Receipt, Bill, Invoice or uncategorized paper is ever signed for him) and no ties, so he sees
@@ -33,6 +35,13 @@ import { COMPANY_PAPER_CATEGORIES, organizeRowIsMoney } from "@/lib/portal/doc-k
  *  bill, never in the Photos grid. */
 export function isMoneyCategory(category: string | null | undefined): boolean {
   return (COMPANY_PAPER_CATEGORIES as readonly string[]).includes(String(category ?? ""));
+}
+
+/** The papers the receipt reader turns into a bill: a Receipt or a Bill. The Costs tab's upload
+ *  reads these and Record As Cost is offered on these, so these alone can be "Not On A Bill Yet"
+ *  (an Invoice is money paper too, but nothing reads it into a bill: the flag would be a dead end). */
+export function isCostableCategory(category: string | null | undefined): boolean {
+  return category === "Receipt" || category === "Bill";
 }
 
 const IMAGE_FILE = /\.(jpe?g|png|webp|gif|heic)($|\?)/i;
@@ -91,8 +100,9 @@ export type SortedJobPapers<D extends JobPaperRow> = {
   moneyPictures: number;
   /** Bill id (a bill on this job) → its papers among this job's documents, picture or PDF. */
   byBill: Record<string, D[]>;
-  /** Money papers on the books through nothing (no bill anywhere, no supplier's document, no petty
-   *  cash): "Not On A Bill Yet". null = the ties couldn't be read, so nothing is claimed. */
+  /** Receipts and bills on the books through nothing (no bill anywhere, no supplier's document, no
+   *  petty cash): "Not On A Bill Yet", beside Record As Cost. Never an Invoice (isCostableCategory).
+   *  null = the ties couldn't be read, so nothing is claimed. */
   loose: D[] | null;
   /** The documents the Photos tab holds (grid and fold), for the Costs tab's own list. */
   photoTabIds: Set<string>;
@@ -132,7 +142,7 @@ export function sortJobPapers<D extends JobPaperRow>(
     if (here) (byBill[here] ??= []).push(d);
 
     const category = d.category || null;
-    if (isMoneyCategory(category) && !mine.some(accountedBy)) loose.push(d);
+    if (isCostableCategory(category) && !mine.some(accountedBy)) loose.push(d);
 
     if (!isImageDoc(d)) continue;
     // A person or a door said Photo: a photo, whatever else it is tied to.
