@@ -99,13 +99,22 @@ const INVOICES = [
 ];
 
 /** J-010 as it stands on production: fixed price, no estimate, no schedule, billed from its actuals. */
-function sheetRoute(o: { billing?: string; invoicesError?: any; quotes?: { id: string; status: string }[]; milestones?: number } = {}) {
+function sheetRoute(
+  o: { billing?: string; invoicesError?: any; quotes?: { id: string; status: string }[]; milestones?: number; invoices?: any[]; drawLines?: { import_source: string | null }[] } = {},
+) {
   return (table: string, cols: string): Reply => {
     if (table === "jobs") return { data: { id: J010, job_number: "J-010", name: "11301 Purple Sage", customer_id: "c0000000-0000-4000-8000-000000000001", billing_type: o.billing ?? "fixed" } };
     if (table === "payment_milestones") return { data: Array.from({ length: o.milestones ?? 0 }, (_, i) => ({ id: `m${i}` })) };
     if (table === "quotes") return { data: o.quotes ?? [] };
     if (table === "organizations") return { data: { settings: { timezone: "America/Los_Angeles", features: { shop_stock: true } } } };
-    if (table === "invoices") return o.invoicesError ? { error: o.invoicesError } : { data: INVOICES };
+    if (table === "invoices") {
+      if (o.invoicesError) return { error: o.invoicesError };
+      // openDraftOnJob: the job's drafts, then (for a standard one) whether a draw is live beside it.
+      if (cols.includes("dismissed_import_keys")) return { data: (o.invoices ?? INVOICES).filter((i) => i.status === "draft") };
+      if (cols === "id") return { data: (o.invoices ?? INVOICES).filter((i) => i.status !== "void" && i.invoice_kind !== "standard") };
+      return { data: o.invoices ?? INVOICES };
+    }
+    if (table === "invoice_items" && cols === "import_source") return { data: o.drawLines ?? [] };
     if (table === "bills") return { data: PS_BILL };
     throw new Error(`unrouted ${table} [${cols}]`);
   };
@@ -201,7 +210,9 @@ describe("after it", () => {
     if (!res.ok) return;
     expect(res.data.invoices.map((i) => i.invoice.invoice_number)).toEqual(["INV-00023"]);
     expect(res.data.invoices[0].preselect).toBe("li-mat");
-    expect(res.data.drafts).toEqual(["INV-081 is still a draft: Add To INV-081 puts it there."]);
+    // A live deposit sits beside the standard draft, so New Invoice would bill a progress report,
+    // not that draft (H4): the sheet names no Add To button there.
+    expect(res.data.drafts).toEqual(["INV-081 is still a draft: open it to add this there."]);
     // $186.93 less the GFCIs the shelf took ($134.64 - $84.15 = $50.49), with its tax share.
     expect(res.data.target.cost).toBeLessThan(186.93);
     expect(res.data.target.billHasLines).toBe(true);
@@ -234,6 +245,21 @@ describe("after it", () => {
     expect(erik?.heldHours).toBe(8);
     expect(res.data.entries.map((e) => e.id)).toEqual(["t-free"]);
     expect(res.data.entries[0].family).toBe("t-free");
+  });
+
+  it("a draft is said with the door that is there: Add To only where New Invoice lands, never on a deposit", async () => {
+    state.client = fake(sheetRoute({ invoices: [INVOICES[0], { ...INVOICES[1], dismissed_import_keys: null, quote_id: null }] }), calls);
+    const plain = await alreadyBilledSheet(J010, { kind: "bill", ids: ["bill-ps"] });
+    expect(plain.ok && plain.data.drafts).toEqual(["INV-081 is still a draft: Add To INV-081 puts it there."]);
+    const deposit = { id: "inv-dep-d", invoice_number: "INV-090", status: "draft", invoice_kind: "deposit", job_id: J010, created_at: "2026-09-25T00:00:00Z", dismissed_import_keys: null, quote_id: null, invoice_items: [line("li-dd", "Deposit", 1000)] };
+    state.client = fake(sheetRoute({ invoices: [INVOICES[0], deposit] }), calls);
+    let res = await alreadyBilledSheet(J010, { kind: "bill", ids: ["bill-ps"] });
+    expect(res.ok && res.data.drafts).toEqual(["INV-090 is a set amount, so this goes on the next bill."]);
+    // A T&M draft with the estimate copied onto it takes no new work: open it, never Add To.
+    const fromQuote = { ...INVOICES[1], quote_id: "q1", dismissed_import_keys: null };
+    state.client = fake((table, cols) => (table === "jobs" && cols === "billing_type" ? { data: { billing_type: "tm" } } : sheetRoute({ billing: "tm", invoices: [INVOICES[0], fromQuote] })(table, cols)), calls);
+    res = await alreadyBilledSheet(J010, { kind: "bill", ids: ["bill-ps"] });
+    expect(res.ok && res.data.drafts).toEqual(["INV-081 is still a draft: open it to add this there."]);
   });
 
   it("a fixed-price job whose live estimate is the contract, or a job on a schedule, is refused in words", async () => {

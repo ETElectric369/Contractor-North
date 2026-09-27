@@ -15,7 +15,9 @@
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { openDraftOnJob, type OpenDraft } from "@/lib/actuals-draw";
 import { billableBillCost } from "@/lib/bill-itemisation";
+import { isDrawKind } from "@/lib/invoice-math";
 import { featureOn } from "@/lib/features";
 import { isLiveQuote, nextInvoiceImportsActuals } from "@/lib/invoice-import-rule";
 import { fetchJobLaborRows, laborPersonKey, withoutClaimedLabor } from "@/lib/labor-billing";
@@ -272,12 +274,26 @@ export async function loadAlreadyBilledSheet(supabase: Db, orgId: string, jobId:
     t.words = "";
   }
 
-  const drafts = all
-    .filter((i) => i.status === "draft" && i.job_id === jobId)
-    .map((i) => {
-      const n = i.invoice_number ?? "A draft";
-      return `${n} is still a draft: Add To ${n} puts it there.`;
-    });
+  // THE DRAFTS, SAID INSTEAD OF OFFERED, naming only a door that is there. "Add To INV-x" is the
+  // Overview card's door, and it lands only on the draft New Invoice would bring up to date
+  // (openDraftOnJob: a standard draft with no estimate copied on and no live draw beside it, or a
+  // draw built from the actuals). A deposit or set-amount draw bills a slice, never this; any other
+  // draft is opened and added to by hand. A lost read names no button.
+  const jobDrafts = all.filter((i) => i.status === "draft" && i.job_id === jobId);
+  let door: OpenDraft | null | undefined;
+  if (jobDrafts.length) {
+    try {
+      door = await openDraftOnJob(supabase as SupabaseClient, jobId);
+    } catch {
+      door = undefined;
+    }
+  }
+  const drafts = jobDrafts.map((i) => {
+    const n = i.invoice_number ?? "A draft";
+    if (door && door.id === i.id && door.refreshable) return `${n} is still a draft: Add To ${n} puts it there.`;
+    if (door && door.id === i.id && isDrawKind(i.invoice_kind)) return `${n} is a set amount, so this goes on the next bill.`;
+    return `${n} is still a draft: open it to add this there.`;
+  });
   const offered = sortInvoicesFor(all.filter(eligibleInvoice), t.date)
     .map((invoice) => {
       const lines = eligibleLines(invoice, { kind, negative: t.negative });
