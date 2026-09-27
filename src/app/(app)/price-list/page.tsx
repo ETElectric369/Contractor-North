@@ -220,6 +220,7 @@ export default async function PriceListPage() {
                 sizingAvailable={itemsRes.sizingAvailable}
                 optionsByItem={optionsAvailable ? optionsByItem : null}
                 knownVendors={knownVendors}
+                kitDoors={kitsOn}
               />
             ),
           },

@@ -68,6 +68,43 @@ describe("doors outside the job page", () => {
     // The web address lives in the Website group (rule e), which carries its own Off line.
     expect(src).toContain('<FeatureOffLine feature="website" features={settings.features} isOwner={isOwner} />');
   });
+  it("the job's Customer Page tab keeps no door out to a switched-off portal: no link card, no Show Customer pointer", () => {
+    expect(read("jobs/[id]/page.tsx")).toContain('portalOn={on("customer_portal")} />');
+    const src = read("jobs/[id]/job-customer-page.tsx");
+    expect(src).toContain("portalOn = true,");
+    expect(src).toContain("{portalOn && <LinkCard link={link} who={who} jobId={jobId} />}");
+    expect(src).toContain('{portalOn ? "Choose them on the Photos tab with Show Customer under each photo. " : null}');
+    expect(src).toMatch(/\{portalOn && \(\s*<Link href=\{`\/jobs\/\$\{jobId\}\?tab=photos`\}/);
+  });
+  it("the invoice page's kit chips follow Kits, except in catalog mode (as on the estimate pages)", () => {
+    const src = read("billing/[id]/page.tsx");
+    expect(src).toContain('const kitDoors = featureOn(orgSettings.features, "kits") || orgSettings.estimating_mode === "catalog";');
+    expect(src).toContain("kits={(kitDoors ? kits ?? [] : []) as any}");
+    // The kits are still read: a switch never gates a read.
+    expect(src).toContain('supabase.from("kits").select(sel)');
+  });
+  it("the price list's Add to Kit and sizing fields follow Kits", () => {
+    expect(read("price-list/page.tsx")).toContain("kitDoors={kitsOn}");
+  });
+  it("Forms: Safety Log takes only the crew checklists (and New Form); the walk-through and intake forms stay", () => {
+    const src = read("forms/page.tsx");
+    expect(src).toContain("!f.is_inspection && !f.is_public_intake");
+    expect(src).toContain("const list = (forms ?? []).filter((f) => safetyOn || !isChecklist(f));");
+    expect(src).toContain("{isStaff && safetyOn && <NewFormButton />}");
+    expect(src).toContain('<FeatureOffLine feature="safety_log" features={sw.features} isOwner={sw.isOwner} />');
+    expect(featureForPath("/forms")).toBeNull();
+  });
+  it("Settings: Playbook with Leads and Estimates both off leaves the side nav and still opens by ?tab=playbook, each card under its Off line", () => {
+    const src = read("settings/page.tsx");
+    // Always declared (never spread away), so ?tab=playbook can't fall back to Company in silence.
+    expect(src).not.toContain('? [{\n          id: "playbook"');
+    expect(src).toContain('const playbookOff = !on("leads") && !on("estimates") && !playbookForms.some((f) => f.isWebsite);');
+    expect(src).toContain('if (id === "playbook") return playbookOff;');
+    expect(src).toContain('{walkThroughOff && <FeatureOffLine feature="leads" features={settings.features} isOwner={isOwner} />}');
+    expect(src).toContain('{playbookOff && <FeatureOffLine feature="estimates" features={settings.features} isOwner={isOwner} />}');
+    // A link that names a walk-through (the form page's banner) still opens it with Leads off.
+    expect(src).toContain("playbookForms.filter((f) => f.isWebsite || f.id === linkedForm)");
+  });
   it("the recurring page draws no Generate or New while the switch is off (a repeat job or expense row keeps Generate One Now); editing and pausing stay", () => {
     const src = read("recurring/page.tsx");
     expect(src).toContain("{recurringOn && dueCount > 0 && <GenerateDueButton count={dueCount} />}");

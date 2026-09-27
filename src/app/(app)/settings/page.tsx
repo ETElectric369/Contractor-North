@@ -116,9 +116,10 @@ export default async function SettingsPage({
     qbo_error?: string;
     gcal?: string;
     tab?: string;
+    form?: string;
   }>;
 }) {
-  const { billing, billing_error, connect, connect_error, qbo, qbo_error, gcal, tab } = await searchParams;
+  const { billing, billing_error, connect, connect_error, qbo, qbo_error, gcal, tab, form: linkedForm } = await searchParams;
   const supabase = await createClient();
   const {
     data: { user },
@@ -325,8 +326,17 @@ export default async function SettingsPage({
   }));
   // THE WALK-THROUGH'S QUESTIONS ARE LEADS'. With Leads off only the website's intake form stays in
   // the editor: that door keeps working (rule d), and this is the one place its questions live.
-  const shownPlaybookForms = on("leads") ? playbookForms : playbookForms.filter((f) => f.isWebsite);
-  const showWalkThrough = on("leads") || shownPlaybookForms.length > 0;
+  // A link that names a walk-through (the form page's "Edit it in Settings → Playbook") still opens
+  // it, under the Leads Off line: a record opened by a link always opens (rule a).
+  const shownPlaybookForms = on("leads") ? playbookForms : playbookForms.filter((f) => f.isWebsite || f.id === linkedForm);
+  // Leads and Estimates both off, with no website form: nothing in the group is on, so it leaves the
+  // side nav. ?tab=playbook (the tour, the setup questions, an old link) still opens it, each card
+  // under its own Off line, never a silent fall back to Company.
+  const playbookOff = !on("leads") && !on("estimates") && !playbookForms.some((f) => f.isWebsite);
+  const walkThroughForms = playbookOff ? playbookForms : shownPlaybookForms;
+  const showWalkThrough = on("leads") || walkThroughForms.length > 0 || playbookOff;
+  // The walk-through (not only the website form) is in the editor while Leads is off.
+  const walkThroughOff = !on("leads") && (playbookOff || walkThroughForms.some((f) => !f.isWebsite));
 
   // ── "You" — everything personal (profile, notifications, language, security). ─────────
   const youTab = {
@@ -428,8 +438,9 @@ export default async function SettingsPage({
         // "Playbook" — the questions this company's own walk-through asks, and WHY each one is
         // worth asking. Second in the list on purpose: it is the one thing here that changes what
         // happens on a job site, and there has never been anywhere in this app to read it.
-        // Leads and Estimates both off with no website form to edit: nothing here to draw.
-        ...(showWalkThrough || on("estimates") ? [{
+        // Leads and Estimates both off with no website form to edit (playbookOff): the group leaves
+        // the side nav (clusterOff) and still opens from ?tab=playbook, each card under its Off line.
+        {
           id: "playbook",
           label: "Playbook",
           icon: ClipboardList,
@@ -440,39 +451,46 @@ export default async function SettingsPage({
             // the panel itself — which is what he's actually looking at there anyway.
             <div data-tour="settings-playbook" className="space-y-6">
               {showWalkThrough && (
-                <Section title={on("leads") ? "What your walk-through asks" : "What your website asks"}>
-                  {/* THE WHY-LINES LESSON, offered where why lines live (cn-v726 split). Erik's
-                      brief for the tour was that nobody works this out unaided; teaching it on day
-                      one, seventeen steps from this screen, is how it drifted. Offered once —
-                      lessons_seen (0197) — and replayable forever from the cap. */}
-                  <LessonOffer
-                    lessonKey="why-lines"
-                    seen={Array.isArray((me as { lessons_seen?: unknown } | null)?.lessons_seen) ? ((me as { lessons_seen: unknown[] }).lessons_seen as unknown[]).map(String) : []}
-                    initial={{}}
-                  />
-                  <p className="mb-4 text-sm text-slate-500">
-                    {on("leads")
-                      ? <>These are the questions your inspector asks on site, in order, and the reason each one exists.
-                        A question only shows when it applies — and one that&rsquo;s already been answered, out loud or
-                        from the lead, never gets asked at all.</>
-                      : <>These are the questions your website asks a customer, in order, and the reason each one exists.</>}
-                  </p>
-                  <PlaybookManager
-                    forms={shownPlaybookForms}
-                    starters={PLAYBOOK_STARTERS.map((s) => ({ key: s.key, label: s.label, blurb: s.blurb }))}
-                  />
-                </Section>
+                <div>
+                  {walkThroughOff && <FeatureOffLine feature="leads" features={settings.features} isOwner={isOwner} />}
+                  <Section title={on("leads") || walkThroughOff ? "What your walk-through asks" : "What your website asks"}>
+                    {/* THE WHY-LINES LESSON, offered where why lines live (cn-v726 split). Erik's
+                        brief for the tour was that nobody works this out unaided; teaching it on day
+                        one, seventeen steps from this screen, is how it drifted. Offered once —
+                        lessons_seen (0197) — and replayable forever from the cap. */}
+                    <LessonOffer
+                      lessonKey="why-lines"
+                      seen={Array.isArray((me as { lessons_seen?: unknown } | null)?.lessons_seen) ? ((me as { lessons_seen: unknown[] }).lessons_seen as unknown[]).map(String) : []}
+                      initial={{}}
+                    />
+                    <p className="mb-4 text-sm text-slate-500">
+                      {on("leads") || walkThroughOff
+                        ? <>These are the questions your inspector asks on site, in order, and the reason each one exists.
+                          A question only shows when it applies — and one that&rsquo;s already been answered, out loud or
+                          from the lead, never gets asked at all.</>
+                        : <>These are the questions your website asks a customer, in order, and the reason each one exists.</>}
+                    </p>
+                    <PlaybookManager
+                      forms={walkThroughForms}
+                      starters={PLAYBOOK_STARTERS.map((s) => ({ key: s.key, label: s.label, blurb: s.blurb }))}
+                    />
+                  </Section>
+                </div>
               )}
-              {/* Estimates off: no card for how one is written. Nort off: same card, plain title
-                  (the estimate draft still uses it). */}
-              {on("estimates") && (
-                <Section title={on("nort") ? "How Nort writes an estimate" : "How an estimate gets written"}>
-                  <QuotePlaybookForm settings={settings} />
-                </Section>
+              {/* Estimates off: no card for how one is written (it opens by link, under the Off
+                  line, only with the whole group off). Nort off: same card, plain title (the
+                  estimate draft still uses it). */}
+              {(on("estimates") || playbookOff) && (
+                <div>
+                  {playbookOff && <FeatureOffLine feature="estimates" features={settings.features} isOwner={isOwner} />}
+                  <Section title={on("nort") ? "How Nort writes an estimate" : "How an estimate gets written"}>
+                    <QuotePlaybookForm settings={settings} />
+                  </Section>
+                </div>
               )}
             </div>
           ),
-        }] : []),
+        },
         // "Features" — THE SWITCH BOARD (0352): one row per feature, the owner's switches. Its
         // counts are read by FeaturesPanel itself, so they run only when this cluster is open.
         {
@@ -982,8 +1000,10 @@ export default async function SettingsPage({
   // off takes only "Photos & Pages": the Website group stays, because the web address in it is what
   // the request link, the estimate page and the customer's links are built on (rule e); it carries
   // its own Off line and draws only that address.
+  // Playbook belongs to two switches, so it draws each card's own Off line (playbookOff, above).
   const CLUSTER_FEATURE: Partial<Record<string, FeatureKey>> = { content: "website" };
   const clusterOff = (id: string) => {
+    if (id === "playbook") return playbookOff;
     const k = CLUSTER_FEATURE[id];
     return !!k && !featureOn(settings.features, k);
   };

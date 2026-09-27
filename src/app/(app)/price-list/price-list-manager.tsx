@@ -86,6 +86,7 @@ export function PriceListManager({
   sizingAvailable = false,
   optionsByItem = null,
   knownVendors = [],
+  kitDoors = true,
 }: {
   items: PriceItem[];
   /** Settings → default_markup_pct: the last rung of THE markup rule. */
@@ -103,6 +104,9 @@ export function PriceListManager({
   optionsByItem?: Record<string, ItemOption[]> | null;
   /** Every vendor name the org already spells one way, for the Add Vendor box. */
   knownVendors?: string[];
+  /** The Kits & Sizing switch (0352). Off: no row checkboxes and no Add to Kit (they exist only to
+   *  build a kit), and no sizing fields on an item; the Kits column still says which kits hold it. */
+  kitDoors?: boolean;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -473,7 +477,7 @@ export function PriceListManager({
         <SortFilterBar sortOptions={SORT_OPTIONS} groupOptions={GROUP_OPTIONS} chips={chipDefs} prefs={prefs} onChange={update} className="lg:flex-1" />
       </div>
 
-      {selected.size > 0 && (
+      {kitDoors && selected.size > 0 && (
         <div className="flex flex-wrap items-center gap-2 rounded-xl border border-brand/30 bg-brand-light px-4 py-2 text-sm">
           <Package className="h-4 w-4 text-brand" />
           <span className="font-medium text-slate-800">{selected.size} selected</span>
@@ -540,9 +544,11 @@ export function PriceListManager({
             <table className="w-full min-w-[1080px] text-sm">
               <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-400">
                 <tr>
-                  <th className="w-8 px-3 py-3">
-                    <input type="checkbox" aria-label="Select all shown" checked={allVisibleSelected} onChange={toggleAllVisible} className="h-4 w-4 accent-[var(--color-brand)]" />
-                  </th>
+                  {kitDoors && (
+                    <th className="w-8 px-3 py-3">
+                      <input type="checkbox" aria-label="Select all shown" checked={allVisibleSelected} onChange={toggleAllVisible} className="h-4 w-4 accent-[var(--color-brand)]" />
+                    </th>
+                  )}
                   <th className={`${th} w-[9%]`}>Code</th>
                   <th className={`${th} w-[24%]`}>Description</th>
                   <th className={`${th} w-[9%]`}>Category</th>
@@ -560,7 +566,7 @@ export function PriceListManager({
                 <tbody key={`${g.label}-${gi}`} className="divide-y divide-slate-100 border-t border-slate-100">
                   {g.label && (
                     <tr className="bg-slate-50/70">
-                      <td colSpan={12} className="px-3 py-1.5 text-xs font-semibold text-slate-600">
+                      <td colSpan={kitDoors ? 12 : 11} className="px-3 py-1.5 text-xs font-semibold text-slate-600">
                         {prefs.group === "kit" && g.label !== "Not in a kit" && <Package className="mr-1 inline h-3.5 w-3.5 text-slate-400" />}
                         {g.label} <span className="font-normal text-slate-400">· {g.rows.length}</span>
                       </td>
@@ -571,9 +577,11 @@ export function PriceListManager({
                     const busy = saving.has(r.id);
                     return (
                       <tr key={prefs.group === "kit" ? `${r.id}:${r.kit}` : r.id} className={`hover:bg-slate-50/60 ${r.archived ? "text-slate-400" : ""} ${selected.has(r.id) ? "bg-brand-light/40" : ""}`}>
-                        <td className="px-3 py-1.5 align-middle">
-                          <input type="checkbox" aria-label={`Select ${r.description}`} checked={selected.has(r.id)} onChange={() => toggleOne(r.id)} disabled={r.archived} className="h-4 w-4 accent-[var(--color-brand)]" />
-                        </td>
+                        {kitDoors && (
+                          <td className="px-3 py-1.5 align-middle">
+                            <input type="checkbox" aria-label={`Select ${r.description}`} checked={selected.has(r.id)} onChange={() => toggleOne(r.id)} disabled={r.archived} className="h-4 w-4 accent-[var(--color-brand)]" />
+                          </td>
+                        )}
                         <td className={`${td} font-mono text-xs text-slate-500`}>{r.code ?? "—"}</td>
                         <td className={`${td} font-medium text-slate-900`}>
                           {optionsByItem && !r.archived ? (
@@ -687,7 +695,7 @@ export function PriceListManager({
                               </button>
                             ) : (
                               <>
-                                <EditPriceItemButton item={r} sizingAvailable={sizingAvailable} measurements={measurements} />
+                                <EditPriceItemButton item={r} sizingAvailable={sizingAvailable && kitDoors} measurements={measurements} />
                                 <button
                                   onClick={() => void setArchived(r, true)}
                                   disabled={busy}

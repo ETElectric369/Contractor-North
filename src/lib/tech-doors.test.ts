@@ -35,7 +35,8 @@ describe("the office pages read the role and pass it down", () => {
 
 describe("forms: a tech fills, the office builds", () => {
   it("New Form, Edit, Delete, Delete Submission and the Playbook link are staff-only", () => {
-    expect(src("forms/page.tsx")).toContain("{isStaff && <NewFormButton />}");
+    // (and a switch's: Safety Log off takes New Form too, since a new form is a crew checklist)
+    expect(src("forms/page.tsx")).toContain("{isStaff && safetyOn && <NewFormButton />}");
     const detail = src("forms/[id]/page.tsx");
     expect(detail).toContain("{isStaff && <div");
     expect(detail).toContain("{isStaff && isPlaybook ? (");

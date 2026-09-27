@@ -57,7 +57,21 @@ type LinkState = {
 const byDates = (a: StretchRow, b: StretchRow) =>
   a.starts_on.localeCompare(b.starts_on) || a.sort - b.sort || a.ends_on.localeCompare(b.ends_on);
 
-export function JobCustomerPage({ jobId, orgId, customerName }: { jobId: string; orgId: string; customerName: string | null }) {
+/** `portalOn` = the Customer Portal switch (0352). Off, the tab opens only from a link, under the Off
+ *  line: what the office set up stays here to read and edit, but the doors OUT to the customer's
+ *  page (See What They See, Copy The Link, Show Customer on the Photos tab) aren't drawn, because
+ *  that page says "Ask your contractor" until the switch is back on. Omitted = on (as before). */
+export function JobCustomerPage({
+  jobId,
+  orgId,
+  customerName,
+  portalOn = true,
+}: {
+  jobId: string;
+  orgId: string;
+  customerName: string | null;
+  portalOn?: boolean;
+}) {
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [stretches, setStretches] = useState<StretchRow[]>([]);
@@ -110,7 +124,7 @@ export function JobCustomerPage({ jobId, orgId, customerName }: { jobId: string;
 
   return (
     <div className="space-y-4">
-      <LinkCard link={link} who={who} jobId={jobId} />
+      {portalOn && <LinkCard link={link} who={who} jobId={jobId} />}
       {loadError ? (
         <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">{loadError}</div>
       ) : (
@@ -130,13 +144,15 @@ export function JobCustomerPage({ jobId, orgId, customerName }: { jobId: string;
               {stalePhotos > 0
                 ? `${stalePhotos} ${stalePhotos === 1 ? "photo was" : "photos were"} changed after being shown, so ${who} doesn't see ${
                     stalePhotos === 1 ? "it" : "them"
-                  } now: Show Again is on the photo. `
+                  } now${portalOn ? ": Show Again is on the photo" : ""}. `
                 : null}
-              Choose them on the Photos tab with Show Customer under each photo. Receipts are never shown.
+              {portalOn ? "Choose them on the Photos tab with Show Customer under each photo. " : null}Receipts are never shown.
             </p>
-            <Link href={`/jobs/${jobId}?tab=photos`} className="mt-2 inline-flex min-h-[44px] items-center gap-1 text-sm font-semibold text-brand">
-              Go To Photos <ChevronRight className="h-4 w-4" />
-            </Link>
+            {portalOn && (
+              <Link href={`/jobs/${jobId}?tab=photos`} className="mt-2 inline-flex min-h-[44px] items-center gap-1 text-sm font-semibold text-brand">
+                Go To Photos <ChevronRight className="h-4 w-4" />
+              </Link>
+            )}
           </div>
         </>
       )}
