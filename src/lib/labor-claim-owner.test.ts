@@ -38,6 +38,24 @@ describe("whose line it is", () => {
     expect(laborLinePerson({ description: "Labor - Taylor crew" }, people)).toBeNull();
   });
 
+  it("two people, one of them in full, is a crew line: a full name found doesn't end the search", () => {
+    expect(laborLinePerson({ description: "Labor - Erik & Brian Taylor" }, people)).toBeNull();
+    expect(laborLinePerson({ description: "Labor - Erik Taylor & Brian" }, people)).toBeNull();
+    expect(laborLinePerson({ description: "Labor - Brian Taylor with Erik" }, people)).toBeNull();
+    // One person, named twice over, is still that one person.
+    expect(laborLinePerson({ description: "Labor - Erik Taylor (Erik's hours)" }, people)).toBe(ERIK);
+  });
+
+  it("a full name's words are taken out before first names are read: a last name that is someone's first name names nobody more", () => {
+    const TAYLOR = "5c1d9a0e-7b2f-4e61-9a3c-2d4e6f8a0b1c";
+    const three = [...people, { id: TAYLOR, name: "Taylor Reyes" }];
+    expect(laborLinePerson({ description: "Labor — Erik Taylor" }, three)).toBe(ERIK);
+    expect(laborLinePerson({ description: "Labor — Erik Taylor & Taylor" }, three)).toBeNull();
+    expect(laborLinePerson({ description: "Labor - Taylor" }, three)).toBe(TAYLOR);
+    // A name in the words twice is taken out both times.
+    expect(laborLinePerson({ description: "Labor - Brian Taylor, Brian Taylor" }, three)).toBe(BRIAN);
+  });
+
   it("the key wins over the words", () => {
     expect(laborLinePerson({ import_key: `labor:${BRIAN}`, description: "Labor - Erik Taylor" }, people)).toBe(BRIAN);
   });

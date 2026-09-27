@@ -19,9 +19,12 @@
  *
  * THE RULE, ONE COPY:
  *   - a line's person is the one its key names (`labor:<uuid>`, or a legacy `labor:<uuid>:<n>`);
- *   - a line typed by hand names its person in words: the one person whose full name is in it, else
- *     the one whose first name is ("Labor - Brian"). Two people, or nobody ("Labor - ET Electric hourly
- *     with 2 guys"), is a crew line: it bills everyone's hours and is never judged;
+ *   - a line typed by hand names people in words: everyone whose full name is in it, and everyone
+ *     whose first name is in what is left once those full names are taken out ("Labor - Brian").
+ *     Exactly one person named is the line's person. Two people ("Labor - Erik & Brian Taylor": Brian
+ *     in full, Erik by his first name), or nobody ("Labor - ET Electric hourly with 2 guys"), is a
+ *     crew line: it bills everyone's hours and is never judged. Open: a first name that is only a
+ *     customer's ("Labor - Erik Nyborg's panel") still reads as the worker Erik;
  *   - a claimed id is judged only when `ownerOf` knows its person (the caller's map: a time entry by
  *     its own profile_id; a retired split id by the shift it became, when the caller can read that).
  */
@@ -43,6 +46,8 @@ export function laborKeyPerson(importKey: unknown): string | null {
 const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 /** `word` stands alone in `text` (letters and digits either side end it): "Erik" is in "Labor - Erik ", not in "Eriksen". */
 const standsIn = (word: string, text: string) => new RegExp(`(^|[^\\p{L}\\p{N}])${escape(word)}($|[^\\p{L}\\p{N}])`, "u").test(text);
+/** `text` with every place `word` stands in it (as standsIn reads it) turned into a space. */
+const takeOut = (word: string, text: string) => text.replace(new RegExp(`(^|[^\\p{L}\\p{N}])${escape(word)}(?=$|[^\\p{L}\\p{N}])`, "gu"), "$1 ");
 
 /** The person a labor line bills, or null for a crew line (nobody, or more than one person, named). */
 export function laborLinePerson(line: Pick<ClaimingLine, "import_key" | "description">, people: readonly LaborPerson[]): string | null {
@@ -54,10 +59,13 @@ export function laborLinePerson(line: Pick<ClaimingLine, "import_key" | "descrip
     const n = String(p.name ?? "").trim().toLowerCase().replace(/\s+/g, " ");
     if (p.id && n) byId.set(p.id, n);
   }
+  // Everyone named: by full name, then by first name in what the full names leave. A full name found
+  // doesn't end the search: "Labor - Erik & Brian Taylor" names Brian in full and Erik by his first
+  // name, two people, a crew line.
   const full = [...byId].filter(([, n]) => standsIn(n, words));
-  if (full.length) return full.length === 1 ? full[0][0] : null;
-  const first = [...byId].filter(([, n]) => standsIn(n.split(" ")[0], words));
-  return first.length === 1 ? first[0][0] : null;
+  const rest = full.reduce((text, [, n]) => takeOut(n, text), words);
+  const named = new Set([...full.map(([id]) => id), ...[...byId].filter(([, n]) => standsIn(n.split(" ")[0], rest)).map(([id]) => id)]);
+  return named.size === 1 ? [...named][0] : null;
 }
 
 export type CrossedClaim = { lineId: string; person: string; ids: string[] };

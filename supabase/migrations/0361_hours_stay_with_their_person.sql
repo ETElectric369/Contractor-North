@@ -70,10 +70,12 @@
 --
 -- THE ONE RULE FOR WHOSE A LINE IS: public.labor_line_person(import_key, description, org), the
 -- app's laborLinePerson (src/lib/labor-claim-owner.ts) word for word: the person a `labor:<uuid>`
--- key names; else the ONE person of the company whose full name stands in the line's words as a
--- whole word (letters and digits end a word, as \p{L}\p{N} do there), else the one whose first name
--- does; two people, or nobody, is a crew line (null). The company's people are every profile of
--- the org with a name, as the app reads them. The Already Billed sheet asks the same rule, so it
+-- key names; else everyone of the company whose full name stands in the line's words as a whole
+-- word (letters and digits end a word, as \p{L}\p{N} do there), and everyone whose first name stands
+-- in what those full names leave (labor_words_without_name); exactly one person is the line's
+-- person, two people ("Labor - Erik & Brian Taylor": Brian in full, Erik by his first name), or
+-- nobody, is a crew line (null). The company's people are every profile of the org with a name, as
+-- the app reads them. The Already Billed sheet asks the same rule, so it
 -- never offers a line another person's shifts (lib/already-billed entriesForLine), and the app's
 -- Mark refuses them before the database does (already-billed-actions).
 --
@@ -146,10 +148,32 @@ revoke execute on function public.labor_words_name(text, text) from public, anon
 comment on function public.labor_words_name(text, text) is
   'Does p_name stand as a whole word in p_words (letters and digits end a word; the name matched literally)? The word test of labor_line_person (0361), the app''s standsIn.';
 
+-- `p_words` with every place `p_name` stands in it (as labor_words_name reads it) turned into a
+-- space: the app's takeOut. The trailing edge is a lookahead, so "erik taylor erik taylor" loses both.
+create or replace function public.labor_words_without_name(p_words text, p_name text)
+returns text
+language sql
+immutable
+set search_path = public
+as $$
+  select case when coalesce(p_name, '') = '' then coalesce(p_words, '')
+              else regexp_replace(coalesce(p_words, ''),
+                                  '(^|[^[:alnum:]])'
+                                  || regexp_replace(p_name, '([.^$*+?(){}|\[\]\\])', '\\\1', 'g')
+                                  || '(?=$|[^[:alnum:]])',
+                                  '\1 ', 'g')
+         end;
+$$;
+
+revoke execute on function public.labor_words_without_name(text, text) from public, anon;
+comment on function public.labor_words_without_name(text, text) is
+  'p_words with every whole-word p_name (as labor_words_name reads it) turned into a space: labor_line_person (0361) looks for first names only in what the full names leave. The app''s takeOut.';
+
 -- The person a labor line bills: the one its key names, else the one person of the company its
--- words name (full name first, then first name), else null (a crew line). SECURITY INVOKER: from a
--- trigger it reads as the trigger's owner; from a person's session, RLS shows that person their own
--- company, which is the only one anyone asks about.
+-- words name (everyone whose full name is in them, and everyone whose first name is in what those
+-- full names leave), else null (a crew line: nobody, or two people, "labor - erik & brian taylor"
+-- among them). SECURITY INVOKER: from a trigger it reads as the trigger's owner; from a person's
+-- session, RLS shows that person their own company, which is the only one anyone asks about.
 create or replace function public.labor_line_person(p_import_key text, p_description text, p_org uuid)
 returns uuid
 language plpgsql
@@ -160,6 +184,10 @@ declare
   v_key   text := substring(coalesce(p_import_key, '')
                             from '^labor:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?::[0-9]+)?$');
   v_words text := lower(coalesce(p_description, ''));
+  v_rest  text;
+  v_full  uuid[];
+  v_names text[];
+  v_n     text;
   v_hits  uuid[];
 begin
   if v_key is not null then
@@ -168,29 +196,35 @@ begin
   if p_org is null or btrim(v_words) = '' then
     return null;
   end if;
-  -- Full names first: one is the line's person; two is a crew line.
-  select coalesce(array_agg(x.id), '{}'::uuid[]) into v_hits
+  -- Everyone named by full name. A full name found doesn't end the search (a first name may name a
+  -- second person), so each is taken out of the words before first names are looked for.
+  select coalesce(array_agg(x.id), '{}'::uuid[]), coalesce(array_agg(x.n), '{}'::text[]) into v_full, v_names
     from (select p.id, lower(regexp_replace(regexp_replace(coalesce(p.full_name, ''), '^\s+|\s+$', '', 'g'), '\s+', ' ', 'g')) as n
             from public.profiles p
            where p.org_id = p_org) x
    where x.n <> ''
      and public.labor_words_name(v_words, x.n);
-  if cardinality(v_hits) >= 1 then
-    return case when cardinality(v_hits) = 1 then v_hits[1] end;
-  end if;
-  -- Then first names ("Labor - Brian"): only one person may fit.
-  select coalesce(array_agg(x.id), '{}'::uuid[]) into v_hits
-    from (select p.id, lower(regexp_replace(regexp_replace(coalesce(p.full_name, ''), '^\s+|\s+$', '', 'g'), '\s+', ' ', 'g')) as n
-            from public.profiles p
-           where p.org_id = p_org) x
-   where x.n <> ''
-     and public.labor_words_name(v_words, split_part(x.n, ' ', 1));
+  v_rest := v_words;
+  foreach v_n in array v_names loop
+    v_rest := public.labor_words_without_name(v_rest, v_n);
+  end loop;
+  -- Then everyone named by first name in what is left ("Labor - Brian"). Exactly one person in all
+  -- is the line's person; two is a crew line.
+  select coalesce(array_agg(distinct y.id), '{}'::uuid[]) into v_hits
+    from (select unnest(v_full) as id
+          union
+          select x.id
+            from (select p.id, lower(regexp_replace(regexp_replace(coalesce(p.full_name, ''), '^\s+|\s+$', '', 'g'), '\s+', ' ', 'g')) as n
+                    from public.profiles p
+                   where p.org_id = p_org) x
+           where x.n <> ''
+             and public.labor_words_name(v_rest, split_part(x.n, ' ', 1))) y;
   return case when cardinality(v_hits) = 1 then v_hits[1] end;
 end $$;
 
 revoke execute on function public.labor_line_person(text, text, uuid) from public, anon;
 comment on function public.labor_line_person(text, text, uuid) is
-  'Whose hours a labor line bills (0361): the person its labor:<uuid> key names, else the ONE person of the org whose full name (then first name) stands in its words as a whole word, else null (a crew line: nobody, or more than one person). The app''s laborLinePerson (lib/labor-claim-owner), word for word.';
+  'Whose hours a labor line bills (0361): the person its labor:<uuid> key names, else the ONE person of the org its words name as a whole word (by full name, or by first name in what the full names leave), else null (a crew line: nobody, or more than one person). The app''s laborLinePerson (lib/labor-claim-owner), word for word.';
 
 -- ── A. A SHIFT AN INVOICE BILLS STAYS WITH ITS PERSON ─────────────────────────────────────────
 create or replace function public.guard_billed_time_entry_person()
@@ -451,7 +485,8 @@ begin
      or to_regprocedure('public.guard_hand_claim_person()') is null
      or to_regprocedure('public.guard_invoice_unvoid_person()') is null
      or to_regprocedure('public.labor_line_person(text, text, uuid)') is null
-     or to_regprocedure('public.labor_words_name(text, text)') is null then
+     or to_regprocedure('public.labor_words_name(text, text)') is null
+     or to_regprocedure('public.labor_words_without_name(text, text)') is null then
     raise exception '0361: a function is missing. Nothing was changed.';
   end if;
   if exists (
@@ -485,6 +520,10 @@ begin
      or public.labor_words_name('labor cxjx', 'c.j.')
      or not public.labor_words_name('crew: o''brien, 6 h', 'o''brien')
      or public.labor_words_name('labor', '')
+     or public.labor_words_without_name('labor - erik & brian taylor', 'brian taylor') is distinct from 'labor - erik &  '
+     or public.labor_words_without_name('erik taylor erik taylor', 'erik taylor') is distinct from '   '
+     or public.labor_words_without_name('labor - eriksen', 'erik') is distinct from 'labor - eriksen'
+     or public.labor_words_without_name('labor (c.j.) extra', 'c.j.') is distinct from 'labor ( ) extra'
      or public.labor_line_person('labor:0b8e3e2a-1f00-4c33-9b1a-6f0e5a1d2c3b:2', 'Labor - Anyone', null) is distinct from '0b8e3e2a-1f00-4c33-9b1a-6f0e5a1d2c3b'::uuid
      or public.labor_line_person('labor:unknown', 'Labor', null) is not null
      or public.labor_line_person(null, '', gen_random_uuid()) is not null then

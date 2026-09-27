@@ -22,8 +22,8 @@ import { laborLinePerson } from "@/lib/labor-claim-owner";
  *     line (keyed, or named by the line's words), in words; handed back, it comes back; a crew line
  *     comes back whatever it holds; a split of a shift only a void invoice holds is never refused;
  *   · ALREADY BILLED onto a line typed by hand: a line whose words name one person takes only that
- *     person's shifts (mark_already_billed, and any other write of a hand claim); a crew line takes
- *     anyone's;
+ *     person's shifts (mark_already_billed, and any other write of a hand claim); a crew line (nobody
+ *     named, or two people, even when one of them is named in full) takes anyone's;
  *   · labor_line_person reads every line exactly as the app's laborLinePerson does.
  *
  * Everything happens inside ONE transaction that is always rolled back, on a throwaway company
@@ -381,6 +381,32 @@ d("hours stay with their person (0361)", () => {
     ).toMatch(new RegExp(`^"Labor ${techFirst}" on ${inv.number} names ${techName}, so`));
   });
 
+  it("a line naming two people, one of them in full, is a crew line: either one's shift is marked, and it comes back from void", async () => {
+    const o1 = await shift(ownerId, 17);
+    const t1 = await shift(techId, 17);
+    const inv = await invoice("sent");
+    const firstAndFull = await handLine(inv.id, `Labor - ${ownerFirst} & ${techName}`);
+    const fullAndFirst = await handLine(inv.id, `Labor - ${ownerName} with ${techFirst}`);
+
+    await as(ownerId);
+    // The owner's shift on a line that names the tech in full and the owner by first name: marked.
+    expect(await mark(firstAndFull, [o1])).toEqual([o1]);
+    // And the tech's shift on the mirror of it.
+    expect(await mark(fullAndFirst, [t1])).toEqual([t1]);
+    await asServer();
+
+    // A void invoice's such line, one shift of each person on it, comes back: nobody's hours to hand back.
+    const o2 = await shift(ownerId, 18);
+    const t2 = await shift(techId, 18);
+    const dead = await invoice("void");
+    const deadLine = await handLine(dead.id, `Labor - ${ownerFirst} & ${techName}`, [o2, t2]);
+    await as(ownerId);
+    const back = await unvoid(dead.id);
+    await asServer();
+    expect(back).toBeNull();
+    expect(await held(deadLine)).toEqual([o2, t2]);
+  });
+
   it("labor_line_person reads every line exactly as the app's laborLinePerson does", async () => {
     const people = (await c.query("select id::text as id, full_name as name from public.profiles where org_id = $1", [orgId])).rows as { id: string; name: string }[];
     const lines: { import_key: string | null; description: string }[] = [
@@ -391,6 +417,9 @@ d("hours stay with their person (0361)", () => {
       { import_key: null, description: `Labor - ${techFirst}_2` },
       { import_key: null, description: `Labor - ${techFirst} and ${ownerFirst}` },
       { import_key: null, description: `Labor - ${ownerName} with ${techFirst}` },
+      { import_key: null, description: `Labor - ${ownerFirst} & ${techName}` },
+      { import_key: null, description: `Labor - ${ownerName} (${ownerFirst}'s hours)` },
+      { import_key: null, description: `Labor - ${techName}, ${techName}` },
       { import_key: null, description: `Labor - ${ownerFirst}  Q${run}` },
       { import_key: null, description: "Labor - ET Electric hourly with 2 guys" },
       { import_key: null, description: "" },
@@ -404,5 +433,14 @@ d("hours stay with their person (0361)", () => {
       const db = (await one("select public.labor_line_person($1, $2, $3)::text as p", [l.import_key, l.description, orgId])).p;
       expect({ line: l, person: db }).toEqual({ line: l, person: laborLinePerson(l, people) });
     }
+    // Not only the same answer, the right one: two people, one of them in full, is a crew line on both
+    // sides; one person named twice over is that person.
+    const person = async (description: string) => {
+      const db = (await one("select public.labor_line_person(null, $1, $2)::text as p", [description, orgId])).p;
+      return { app: laborLinePerson({ import_key: null, description }, people), db };
+    };
+    expect(await person(`Labor - ${ownerFirst} & ${techName}`)).toEqual({ app: null, db: null });
+    expect(await person(`Labor - ${ownerName} with ${techFirst}`)).toEqual({ app: null, db: null });
+    expect(await person(`Labor - ${ownerName} (${ownerFirst}'s hours)`)).toEqual({ app: ownerId, db: ownerId });
   });
 });
