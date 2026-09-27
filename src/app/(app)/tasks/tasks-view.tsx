@@ -32,6 +32,8 @@ export interface ViewTask {
   focus_date?: string | null;
   job_id: string | null;
   assigned_to: string | null;
+  /** Who made it: only they hand a Reminder to someone else (0358's tasks_update). */
+  created_by?: string | null;
   notes?: string | null;
   parent_id?: string | null;
   tags?: string[] | null;
@@ -169,7 +171,7 @@ export function NewReminderBox() {
 
 /** Full edit modal: title, category, due date, priority, who it's for, tags, notes. No job: a
  *  Reminder is not a job's task (0358); a job's list is worked on the job. */
-function TaskEditModal({
+export function TaskEditModal({
   t,
   people,
   category,
@@ -177,6 +179,7 @@ function TaskEditModal({
   open,
   onClose,
   extras = true,
+  viewerId = null,
 }: {
   t: ViewTask;
   people: Person[];
@@ -187,8 +190,11 @@ function TaskEditModal({
   onClose: () => void;
   /** To-Do Extras (0352): off, no Priority or Tags fields; the reminder keeps what it has. */
   extras?: boolean;
+  /** Who is looking. Only the Reminder's maker gets Who It's For: 0358 refuses anyone else's change. */
+  viewerId?: string | null;
 }) {
   const router = useRouter();
+  const canHandOff = !!viewerId && t.created_by === viewerId;
   const [pending, start] = useTransition();
   const [title, setTitle] = useState(t.title);
   const [cat, setCat] = useState(t.category ?? "");
@@ -210,7 +216,8 @@ function TaskEditModal({
           category: cat.trim() || null,
           due_date: dueDate || null,
           priority,
-          assigned_to: assignedTo || null,
+          // Who it's for is the maker's to change; anyone else's save leaves it as it is.
+          ...(canHandOff ? { assigned_to: assignedTo || null } : {}),
           // Tags follow To-Do Extras: off, the field isn't drawn and the reminder keeps its tags.
           ...(extras ? { tags: tags.split(",").map((s) => s.trim()).filter(Boolean) } : {}),
           notes: notes || null,
@@ -270,14 +277,27 @@ function TaskEditModal({
           )}
         </div>
         <div>
-          {/* A Reminder is private to its maker and the person it's for (0358): only they see it. */}
-          <Label htmlFor="te-person">Who It&rsquo;s For</Label>
-          <Select id="te-person" value={assignedTo} onChange={(e) => setAssignedTo(e.target.value)}>
-            <option value="">Whoever Made It</option>
-            {people.map((p) => (
-              <option key={p.id} value={p.id}>{p.full_name ?? "Unnamed"}</option>
-            ))}
-          </Select>
+          {/* A Reminder is private to its maker and the person it's for (0358): only they see it, and
+              only the maker hands it to someone else, so nobody else is offered a door 0358 refuses. */}
+          {canHandOff ? (
+            <>
+              <Label htmlFor="te-person">Who It&rsquo;s For</Label>
+              <Select id="te-person" value={assignedTo} onChange={(e) => setAssignedTo(e.target.value)}>
+                <option value="">Whoever Made It</option>
+                {people.map((p) => (
+                  <option key={p.id} value={p.id}>{p.full_name ?? "Unnamed"}</option>
+                ))}
+              </Select>
+            </>
+          ) : (
+            <>
+              <Label>Who It&rsquo;s For</Label>
+              <p className="text-sm text-slate-700">
+                {t.assigned_to ? (t.assigned_to === viewerId ? "You" : (t.assignee?.full_name ?? "Someone on the team")) : "Whoever Made It"}
+              </p>
+              <p className="mt-1 text-xs text-slate-500">Only the person who made it can hand it to someone else.</p>
+            </>
+          )}
         </div>
         {extras && (
           <div>
@@ -304,6 +324,7 @@ export function TaskRow({
   overdue = false,
   todayStr,
   extras = true,
+  viewerId = null,
 }: {
   t: ViewTask;
   people: Person[];
@@ -317,6 +338,8 @@ export function TaskRow({
   todayStr?: string;
   /** To-Do Extras (0352): off, no Add Subtask; subtasks already there stay listed and tickable. */
   extras?: boolean;
+  /** Who is looking (the edit modal offers Who It's For to the maker only). */
+  viewerId?: string | null;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -476,7 +499,16 @@ export function TaskRow({
       )}
 
       {editing && (
-        <TaskEditModal t={t} people={people} category={category} categories={categories} open={editing} onClose={() => setEditing(false)} extras={extras} />
+        <TaskEditModal
+          t={t}
+          people={people}
+          category={category}
+          categories={categories}
+          open={editing}
+          onClose={() => setEditing(false)}
+          extras={extras}
+          viewerId={viewerId}
+        />
       )}
     </li>
   );
@@ -554,6 +586,7 @@ export function TasksView({
   doneTotal = 0,
   showingAllDone = false,
   extras = true,
+  viewerId = null,
 }: {
   tasks: ViewTask[];
   people?: Person[];
@@ -564,6 +597,8 @@ export function TasksView({
   showingAllDone?: boolean;
   /** The To-Do Extras switch (0352): priority, step and tag doors. Omitted = on (as before). */
   extras?: boolean;
+  /** Who is looking: only a Reminder's maker is offered Who It's For. */
+  viewerId?: string | null;
 }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -613,6 +648,7 @@ export function TasksView({
       overdue={!!t.due_date && t.due_date < todayStr}
       todayStr={todayStr}
       extras={extras}
+      viewerId={viewerId}
     />
   );
 

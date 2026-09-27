@@ -5,7 +5,7 @@ import { todayStrInTz } from "@/lib/tz";
 import { isStaffRole } from "@/lib/actions/perms";
 
 const TASK_SELECT =
-  "id, title, category, status, priority, due_date, focus_date, job_id, assigned_to, parent_id, tags, assignee:assigned_to(full_name)";
+  "id, title, category, status, priority, due_date, focus_date, job_id, assigned_to, created_by, parent_id, tags, assignee:assigned_to(full_name)";
 
 /** Done tasks stay bounded by default — history is a tap away, not a page weight. */
 export const DONE_LIMIT = 30;
@@ -95,6 +95,8 @@ export async function getTasksPageData(showAllDone: boolean) {
 
   return {
     todayStr: todayStrInTz(tz),
+    /** Who is looking: only a Reminder's maker hands it to someone else (0358's tasks_update). */
+    viewerId: uid || null,
     tasks: [...mineRows, ...steps],
     doneTotal: doneR.count ?? doneR.data?.length ?? 0,
     people: people ?? [],
