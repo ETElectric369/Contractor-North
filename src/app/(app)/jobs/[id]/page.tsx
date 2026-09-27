@@ -1719,8 +1719,10 @@ export default async function JobDetailPage({
           )}
           {/* The Inspector — every note, photo and intake answer from any entrance point, one tap
               away. An access point, not a wall. */}
-          {/* Leads & Walk-Throughs off (the switch board): the Inspector is the walk-through's door. */}
-          {viewerIsStaff && on("leads") && <OpenInspectorButton jobId={j.id} />}
+          {/* Leads & Walk-Throughs off (the switch board): no blank walk-through is started from here,
+              but a job that has a visit keeps the door to its notes and photos (openJobInspector
+              opens that visit first and creates nothing). */}
+          {viewerIsStaff && (on("leads") || (jobAppts ?? []).some((a: any) => a.status !== "cancelled")) && <OpenInspectorButton jobId={j.id} />}
           {/* Provenance backlink → THE STORY, not /leads?focus= — that door resurrected the lead
               as a lead, live convert menu and all. Erik: "a lead not being a lead anymore doesnt
               include putting it back." The origin lives on in the first chapter below. */}
