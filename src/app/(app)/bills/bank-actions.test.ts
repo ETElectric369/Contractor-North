@@ -24,7 +24,8 @@ vi.mock("@/lib/pdf-cache", () => ({ bustDocPdf: vi.fn(async () => {}), warmDocPd
 
 import { addOpenList } from "./open-list-actions";
 import { applyBankDownload, forgetBankRule, setBankAccount, swapBankDownload, undoBankDownload } from "./bank-actions";
-import { applyBankCore, bankViews, BANK_NEEDS_UPDATE } from "./bank-core";
+import { applyBankCore, bankLinesStayHere, bankViews, BANK_NEEDS_UPDATE } from "./bank-core";
+import { describePaper, readinessOf } from "@/lib/paperwork";
 import { fileItem, undoPaperwork } from "@/app/(app)/organize/actions";
 
 type Row = Record<string, any>;
@@ -722,6 +723,35 @@ describe("the owner's money", () => {
     // The owner sorts it as always.
     db.profiles.find((p) => p.id === "user-1")!.role = "owner";
     expect((await view(id)).problem).toBeNull();
+  });
+
+  it("no page hands the browser a download's lines: the card is the view, for the owner and the office alike", async () => {
+    const id = await drop();
+    const row = db.organized_items.find((i) => i.id === id)!;
+    const raw = JSON.stringify(row);
+    expect(raw).toMatch(/DENTAL|SHELL/); // the stored row has them; the server sorts from it
+    // The owner: no line leaves, the count does (describePaper's "Bank Download, 9 lines").
+    const owner = bankLinesStayHere(row, await view(id));
+    expect(JSON.stringify(owner)).not.toMatch(/DENTAL|TRANSFER|SHELL/);
+    expect(owner.proposal.bankImport.download.lines).toEqual([]);
+    expect(describePaper(owner as any)).toBe("Bank Download, 9 lines");
+    expect(row.proposal.bankImport.download.lines).toHaveLength(9); // the stored row is untouched
+    // An office viewer the owner keeps it from: no line and no count.
+    db.organizations[0].settings = { timezone: "America/Los_Angeles", office_sees_owner_money: false };
+    db.profiles.find((p) => p.id === "user-1")!.role = "office";
+    const office = bankLinesStayHere(row, await view(id));
+    expect(JSON.stringify(office)).not.toMatch(/DENTAL|TRANSFER|SHELL/);
+    expect(describePaper(office as any)).toBe("Bank Download");
+    expect(readinessOf(office as any).state).toBe("bank_download");
+    // A filed download has no card: still no line, and no count.
+    expect(JSON.stringify(bankLinesStayHere({ ...row, status: "filed" }, undefined))).not.toMatch(/DENTAL|SHELL/);
+    // Any other paper goes as it is.
+    const plain = { id: "p", proposal: { picture: true } };
+    expect(bankLinesStayHere(plain, undefined)).toBe(plain);
+    // Both pages that hand paper rows to the browser run every row through it.
+    const { readFileSync } = await import("node:fs");
+    for (const page of ["src/app/(app)/bills/page.tsx", "src/app/(app)/organize/page.tsx"])
+      expect(readFileSync(page, "utf8")).toContain("...bankLinesStayHere(i, bankCards[i.id]),");
   });
 });
 

@@ -371,6 +371,23 @@ export async function bankViews(
   return out;
 }
 
+/**
+ * A PAPER ROW AS A PAGE HANDS IT TO THE BROWSER (review of release/v1026). A bank download's lines
+ * (every day, description and amount) stay on the server: the card is `bank`, which bankViews worked
+ * out for this viewer (an office viewer the owner keeps owner money from gets a card with none of
+ * it). What rides along says only that it is a bank download, its account and days, what Apply did,
+ * and, for a viewer who sorts it, how many lines. Any other row goes as it is. Filed or not.
+ */
+export function bankLinesStayHere<T extends { proposal?: unknown }>(item: T, view: BankView | null | undefined): T {
+  const p = proposalOf(item);
+  const stored = p.bankImport as StoredBank | null | undefined;
+  if (!stored?.download) return item;
+  const dl = stored.download;
+  const sees = !!view && view.problem !== OWNER_SORTS_BANK;
+  const bare: StoredBank = { ...stored, download: { ...dl, lines: [], skipped: [], header: [] }, lineCount: sees ? (dl.lines?.length ?? 0) : null };
+  return { ...item, proposal: { ...p, bankImport: bare } };
+}
+
 // ── THE ROW A DOWNLOAD BECOMES ─────────────────────────────────────────────────────────────────
 
 export async function createBankPaper(

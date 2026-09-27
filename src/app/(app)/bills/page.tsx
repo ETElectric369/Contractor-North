@@ -54,7 +54,7 @@ import { CedPdfPicker } from "./ced-pdf-picker";
 import { BooksBeginLine } from "./books-begin-line";
 import { DropPaperworkButton, PaperworkDropZone, SortThese } from "./bills-drop";
 import { openListViews } from "./open-list-core";
-import { bankViews } from "./bank-core";
+import { bankLinesStayHere, bankViews } from "./bank-core";
 import type { BankView } from "@/lib/bank-download";
 import type { OpenListView } from "@/lib/supplier-open-list";
 import type { PaperRowItem } from "@/components/paperwork-row";
@@ -445,8 +445,9 @@ export default async function BillsPage({
     bankCards = await bankViews(supabase, orgId, papers);
   };
   await Promise.all([signPaths(), readClaims(), signPapers(), viewLists(), readAbReach(), signBillPapers(), viewBanks()]);
+  // A bank download's own lines never go to the browser: its card is `bank` (bankLinesStayHere).
   const paperItems: PaperRowItem[] = rematchTray(papers, markCtx).map((i) => ({
-    ...i,
+    ...bankLinesStayHere(i, bankCards[i.id]),
     signedUrl: (i.file_url && paperUrls.get(i.file_url)) || null,
     open_list: listViews[i.id] ?? null,
     bank: bankCards[i.id] ?? null,

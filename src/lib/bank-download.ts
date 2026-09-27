@@ -1575,6 +1575,10 @@ export type StoredBank = {
   applied?: BankAppliedPass[] | null;
   /** When Apply claimed the row, until it finished the writes (an ISO time; `true` from before). */
   pending?: string | boolean | null;
+  /** Only on the copy a page hands the browser (bank-core bankLinesStayHere), whose `download` has
+   *  no lines: how many it has, for a viewer who sorts bank downloads; null for one who doesn't.
+   *  Never stored. */
+  lineCount?: number | null;
 };
 
 /** Minutes after which a claim that never finished is taken as dead (a lost request), so Undo can

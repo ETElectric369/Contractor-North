@@ -4,7 +4,7 @@ import { PageHeader } from "@/components/page-header";
 import { OrganizeManager, type OrganizedItemRow } from "./organize-manager";
 import { loadBooks, loadMarkContext, matchesOnBooks, OPEN_JOBS_FOR_PAPER, PAPER_JOB_STATUSES, rematchTray } from "./paperwork-core";
 import { openListViews } from "@/app/(app)/bills/open-list-core";
-import { bankViews } from "@/app/(app)/bills/bank-core";
+import { bankLinesStayHere, bankViews } from "@/app/(app)/bills/bank-core";
 import { getOrgSettings } from "@/lib/org-settings";
 import { featureOn } from "@/lib/features";
 
@@ -52,8 +52,10 @@ export default async function OrganizePage() {
     openListViews(supabase, org?.id, (items ?? []) as any[]),
     bankViews(supabase, org?.id, (items ?? []) as any[]),
   ]);
+  // A bank download's own lines never go to the browser, waiting or filed: its card is `bank`
+  // (bankLinesStayHere).
   const withUrls: OrganizedItemRow[] = rematchTray((items ?? []) as any[], markCtx).map((i) => ({
-    ...i,
+    ...bankLinesStayHere(i, bankCards[i.id]),
     signedUrl: (i.file_url && urls.get(i.file_url)) || null,
     open_list: listViews[i.id] ?? null,
     bank: bankCards[i.id] ?? null,

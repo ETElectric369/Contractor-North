@@ -413,8 +413,10 @@ export function describePaper(item: PaperItem): string {
   }
   if (p.bankImport) {
     // The account's last 4 is the card's own headline ("Bank ••1234 · Sep 2–Sep 25 · …"): said once.
-    const n = p.bankImport.download?.lines?.length ?? 0;
-    return `Bank Download, ${n} ${n === 1 ? "line" : "lines"}`;
+    // In the browser the lines stay on the server (bankLinesStayHere): the count rides beside them,
+    // and a viewer who doesn't sort bank downloads gets none.
+    const n = p.bankImport.lineCount ?? p.bankImport.download?.lines?.length ?? 0;
+    return n ? `Bank Download, ${n} ${n === 1 ? "line" : "lines"}` : "Bank Download";
   }
   if (p.openList) {
     const list = p.openList.list;
