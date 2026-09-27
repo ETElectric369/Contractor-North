@@ -385,6 +385,9 @@ function NewInvoiceSheet(
         res = await createInvoiceForJob(p.jobId);
       }
       if (!res.ok || !res.id) {
+        // THE REFUSAL IS A DOOR: a job billed in parts takes its next bill as Part Of The Estimate,
+        // so the sheet moves there, with the server's sentence saying why.
+        if ((res as { door?: string }).door === "part-of-estimate" && choices.includes("part")) setChoice("part");
         setErrorDoor(res.billedOn ?? res.openDraft ?? (p.openDraft?.number ? { id: p.openDraft.id, number: p.openDraft.number } : null));
         setError(res.error ?? "Could not create the invoice.");
         return;

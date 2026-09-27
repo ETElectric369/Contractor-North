@@ -161,7 +161,7 @@ export default async function InvoicePage({
     fetchSupplierNames(supabase),
     supabase.from("profile_pay").select("id, bill_rate"),
     /* WHAT THIS INVOICE IS PRICED AT (Erik, 2026-09-25: "i changed andrew's invoice to 11% ... but
-       the marker still shows 15"). The % box beside Materials from Costs starts here - the reading
+       the marker still shows 15"). The % box beside Bring In New Work starts here - the reading
        the importer's keepInvoiceMarkup takes, through the same server read - so opening the page
        and touching the box can never send the customer's usual back over an invoice priced at
        something else. No materials lines yet: nothing to read, the box starts at the usual. */
