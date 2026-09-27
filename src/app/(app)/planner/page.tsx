@@ -3,7 +3,7 @@ import { splitAgenda } from "@/lib/agenda-split";
 import { isInspectionType, appointmentTypeLabel } from "@/lib/statuses";
 import { isStaffRole } from "@/lib/actions/perms";
 import { redirect } from "next/navigation";
-import { CalendarCheck, ChevronLeft, ChevronRight, ClipboardList, UserPlus, Navigation, MessageSquare } from "lucide-react";
+import { CalendarCheck, ChevronLeft, ChevronRight, ClipboardList, Navigation, MessageSquare } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { RefreshOnVisible } from "@/components/refresh-on-visible";
 import { WeatherWidget } from "@/components/weather-widget";
@@ -11,7 +11,7 @@ import { MyDayClock } from "./my-day-clock";
 import { Card } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { jobStatusLabel } from "@/lib/job-status";
-import { formatTime, formatCityStateZip, formatDateShort, formatFullAddress, formatDate, formatDuration } from "@/lib/utils";
+import { formatTime, formatCityStateZip, formatFullAddress, formatDate, formatDuration } from "@/lib/utils";
 import { directionsTarget } from "@/lib/maps";
 import { getOrgSettings } from "@/lib/org-settings";
 import { NavLink } from "@/components/nav-link";
@@ -60,9 +60,10 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
     .maybeSingle();
   const tz = getOrgSettings((orgRow as any)?.settings).timezone || "America/Los_Angeles";
   const { dayStart, dayEnd, todayStr } = todayBoundsInTz(tz);
-  // THE SWITCH BOARD (0352): a switched-off feature's cards leave My Day (the Open Leads card,
-  // the Daily Reports card once nothing is left to review, To-Do Extras on the task box).
-  // No stored map = everything on = My Day as it was.
+  // THE SWITCH BOARD (0352): a switched-off feature's cards leave My Day (the Daily Reports card
+  // once nothing is left to review). No stored map = everything on = My Day as it was.
+  // Leads have no card of their own here: a new request is a Needs You row, and the Sales tile's
+  // badge counts the new, uncontacted ones. leadsOn stays because Needs You's rows hear it.
   const features = getOrgSettings((orgRow as any)?.settings).features;
   const leadsOn = featureOn(features, "leads");
 
@@ -71,7 +72,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
   // (The DayClock's today/pay-week hour queries left with it — /timeclock owns those now.)
   const [
     { data: jobs }, { data: segJobs }, { data: appts }, { data: openRows },
-    { data: customers }, { data: staff }, { data: jobOptRows }, { data: me }, leadsRes,
+    { data: customers }, { data: staff }, { data: jobOptRows }, { data: me },
   ] = await Promise.all([
     supabase.from("jobs").select("id, job_number, name, status, address, scheduled_start, customers(name, phone)").gte("scheduled_start", dayStart.toISOString()).lt("scheduled_start", dayEnd.toISOString()).order("scheduled_start"),
     // Multi-range jobs whose segment covers today.
@@ -90,19 +91,8 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
     // full_name rides along for the setup card — it's the first thing it asks and the first thing
     // that would otherwise be asked again after it was already answered at signup.
     supabase.from("profiles").select("role, full_name").eq("id", user?.id ?? "").maybeSingle(),
-    // Open-leads snapshot for the staff top row: the count + the few newest
-    // open inquiries (name + next follow-up). Same open-lead definition as
-    // /leads; RLS keeps inquiries staff-only, so a tech simply gets zero rows.
-    // Leads off: no card, so no read (a new request still reaches Needs You below).
-    leadsOn
-      ? supabase
-          .from("inquiries")
-          .select("id, name, next_follow_up_at", { count: "exact" })
-          .is("converted_at", null)
-          .neq("status", "lost")
-          .order("created_at", { ascending: false })
-          .limit(3)
-      : Promise.resolve({ data: [] as any[], count: 0 }),
+    // (No leads read: the Open Leads card is gone. A new request reaches Needs You below through
+    // its own feeder, and the Sales tile's badge counts the new, uncontacted ones.)
   ]);
 
   const openEntry = (openRows ?? [])[0] as any | undefined;
@@ -376,8 +366,6 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
   const custOpts = toCustomerOptions(customers);
   const staffOpts = toStaffOptions(staff);
   const people = (staff ?? []).map((s: any) => ({ id: s.id, full_name: s.full_name }));
-  const openInquiries = leadsRes.count ?? 0;
-  const recentLeads = ((leadsRes.data ?? []) as { id: string; name: string | null; next_follow_up_at: string | null }[]);
 
   const niceDay = prettyDay(todayStr);
   const empty = (label: string) => <p className="px-5 py-6 text-center text-sm text-slate-400">{label}</p>;
@@ -688,59 +676,14 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
       </div>
       <p className="mb-4 text-sm italic text-slate-400">&ldquo;{dailyQuote}&rdquo;</p>
 
-      {/* TOP ROW (Erik 7/15) — staff get a 2-col split (stacked on the phone):
-          the MINIMAL clock (cn-v502) LEFT, the open-leads snapshot RIGHT — the
-          old bottom-of-page "Owner snapshot" tile MOVED up here (count + the
-          few newest open leads + follow-ups), not duplicated. Techs keep the
-          full-width clock; /leads is staff territory. With Leads switched off (0352) staff
-          get the tech's full-width clock too: the card goes with the switch. */}
-      {isStaff && leadsOn ? (
-        <div className="mb-4 @container">
-          {/* Container query, not a viewport breakpoint: in the fine-pointer shell band
-              (840-1023px) the dock + subnav leave ~500px of content while sm/md still say
-              "tablet" — the two cards would squeeze to ~280px and crush the clock button.
-              Columns split only when THIS row actually has the room. */}
-          <div className="grid gap-3 @[42rem]:grid-cols-2">
-          <MyDayClock
-            userId={user?.id ?? null}
-            className="h-full"
-            open={openEntry ? { id: openEntry.id, clock_in: openEntry.clock_in, notes: openEntry.notes ?? null, shift_start: openShiftStart } : null}
-            jobLabel={currentJob ? jobLabel(currentJob) : null}
-          />
-          <Link
-            href="/leads"
-            className="block h-full rounded-xl border border-slate-200 bg-white px-4 py-3 hover:bg-slate-50"
-          >
-            <div className="flex items-center gap-2.5">
-              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600">
-                <UserPlus className="h-4 w-4" />
-              </span>
-              <span className="text-lg font-bold leading-none text-slate-900">{openInquiries}</span>
-              <span className="text-xs text-slate-500">Open leads</span>
-              <span className="ml-auto text-xs font-medium text-brand">/leads →</span>
-            </div>
-            {recentLeads.length > 0 && (
-              <ul className="mt-2 space-y-1">
-                {recentLeads.map((l) => (
-                  <li key={l.id} className="flex items-center justify-between gap-2 text-xs">
-                    <span className="min-w-0 truncate font-medium text-slate-700">{l.name ?? "—"}</span>
-                    <span className="shrink-0 text-slate-400">
-                      {l.next_follow_up_at ? `follow up ${formatDateShort(l.next_follow_up_at)}` : "no follow-up set"}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Link>
-          </div>
-        </div>
-      ) : (
-        <MyDayClock
-            userId={user?.id ?? null}
-          open={openEntry ? { id: openEntry.id, clock_in: openEntry.clock_in, notes: openEntry.notes ?? null, shift_start: openShiftStart } : null}
-          jobLabel={currentJob ? jobLabel(currentJob) : null}
-        />
-      )}
+      {/* THE CLOCK, full width, for every role. The Open Leads card that sat beside it for staff
+          (Erik 7/15) is gone: a lead is a Needs You row below, and the Sales tile's badge counts
+          the new, uncontacted ones, so My Day no longer keeps a third place for them. */}
+      <MyDayClock
+        userId={user?.id ?? null}
+        open={openEntry ? { id: openEntry.id, clock_in: openEntry.clock_in, notes: openEntry.notes ?? null, shift_start: openShiftStart } : null}
+        jobLabel={currentJob ? jobLabel(currentJob) : null}
+      />
 
 
 
@@ -1080,8 +1023,9 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
           that view now, and overdue/draft invoices already surface as actionable
           rows in the Needs-action inbox above. My Day carries no money map. */}
 
-      {/* The "Owner snapshot" open-leads tile that closed the page MOVED to the
-          top row beside the clock (Erik 7/15) — one leads snapshot, better slot. */}
+      {/* No leads snapshot anywhere on this page (the "Owner snapshot" tile, then the Open Leads
+          card beside the clock, are both gone): leads live in Needs You's rows and on the Sales
+          tile's badge, which counts the new, uncontacted ones. */}
     </div>
   );
 }

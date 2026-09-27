@@ -5,11 +5,12 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 /**
- * MY DAY AND THE SWITCH BOARD (0352), and MY DAY'S ONE ADD LINE (0358). The Open Leads card goes with
- * Leads; the Daily Reports card goes with Daily Reports once nothing is left to review (until then it
- * stays, Off line on top). The 6-field task box is gone: Today's 6 leads with one line ("Add A
- * Reminder Or Task") and an optional job chip, and asks no priority whatever To-Do Extras says (the
- * switch is the Reminders page's now). Everything on = My Day as it was otherwise.
+ * MY DAY AND THE SWITCH BOARD (0352), and MY DAY'S ONE ADD LINE (0358). There is no Open Leads card
+ * for anyone (a lead is a Needs You row, and the Sales tile's badge counts the new ones); the Daily
+ * Reports card goes with Daily Reports once nothing is left to review (until then it stays, Off line
+ * on top). The 6-field task box is gone: Today's 6 leads with one line ("Add A Reminder Or Task") and
+ * an optional job chip, and asks no priority whatever To-Do Extras says (the switch is the Reminders
+ * page's now). Everything on = My Day as it was otherwise.
  */
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), refresh: vi.fn() }),
@@ -81,12 +82,21 @@ describe("the Reminders page's one-line add", () => {
   });
 });
 
+/** A source file with its comments taken out, so a pin reads what renders, not what a comment says. */
+const codeOf = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+
 describe("My Day's cards (structural: the page is a server component over the database)", () => {
   const page = readFileSync(join(process.cwd(), "src/app/(app)/planner/page.tsx"), "utf8");
+  const pageCode = codeOf(page);
 
-  it("the Open Leads card and its read go with Leads", () => {
-    expect(page).toContain("{isStaff && leadsOn ? (");
-    expect(page).toMatch(/leadsOn\s*\?\s*supabase\s*\.from\("inquiries"\)/);
+  it("no Open Leads card and no leads read, for any role or switch: leads are Needs You rows and the Sales badge", () => {
+    expect(page).not.toContain('.from("inquiries")');
+    expect(pageCode).not.toMatch(/Open leads/i);
+    expect(pageCode).not.toContain('href="/leads"');
+    expect(page).not.toContain("{isStaff && leadsOn ? (");
+    // The switch is still read, because Needs You's rows hear it.
+    expect(page).toContain('const leadsOn = featureOn(features, "leads");');
+    expect(page).toContain("leadsOn={leadsOn}");
   });
 
   it("the Daily Reports card stays while a report waits for review, with the Off line on top", () => {
