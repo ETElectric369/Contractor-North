@@ -167,3 +167,28 @@ describe("the answer to a pick that took a job off hold", () => {
     });
   });
 });
+
+describe("every clock-in door says when a hold came off", () => {
+  // clockIn returns the off-hold sentence as res.warning (lib/job-promote). A door that drops it
+  // takes a job off hold, and clears its reason and day, without a word: the Timeclock page's own
+  // Clock In did exactly that. Every .tsx that calls clockIn must read res.warning.
+  it("each .tsx calling clockIn reads res.warning", async () => {
+    const { readdirSync, readFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const walk = (dir: string): string[] =>
+      readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(join(dir, e.name)) : e.name.endsWith(".tsx") ? [join(dir, e.name)] : []));
+    const callers = walk(join(process.cwd(), "src")).filter((f) => /\bclockIn\(/.test(readFileSync(f, "utf8")));
+    expect(callers.map((f) => f.slice(f.indexOf("src/")))).toContain("src/app/(app)/timeclock/timeclock-panel.tsx");
+    const silent = callers.filter((f) => !/res\.warning/.test(readFileSync(f, "utf8"))).map((f) => f.slice(f.indexOf("src/")));
+    expect(silent).toEqual([]);
+  });
+
+  it("the Timeclock page's Clock In toasts it, sticky, like Switch Job and Clock Out", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const src = readFileSync(join(process.cwd(), "src/app/(app)/timeclock/timeclock-panel.tsx"), "utf8");
+    const at = src.indexOf("function doClockIn()");
+    const body = src.slice(at, src.indexOf("\n  function ", at + 20));
+    expect(body).toContain('if (res.warning) toast(res.warning, "info", undefined, { sticky: true });');
+  });
+});
