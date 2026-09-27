@@ -36,7 +36,19 @@ import { billsPaperDoor } from "./paper-door";
 import { BillsSearchBox } from "./bills-search-box";
 import { SupplierPaperCards } from "@/components/supplier-paper-cards";
 import { formatCurrency, formatDateShort } from "@/lib/utils";
-import { booksBeginOn, readSupplierDocuments, reconcileJobsOf, supplierDocumentRows, supplierPaperFeed } from "./supplier-papers";
+import {
+  booksBeginOn,
+  cardJobIds,
+  cardsWithAlreadyBilled,
+  readSupplierDocuments,
+  reconcileJobsOf,
+  supplierDocumentRows,
+  supplierPaperFeed,
+  withAlreadyBilledDoors,
+} from "./supplier-papers";
+import { readAlreadyBilledReach, type AlreadyBilledReach } from "@/lib/already-billed-read";
+import { billAlreadyBilledDoors } from "@/lib/already-billed";
+import { reportError } from "@/lib/observe";
 import { importCedInvoicesFromForm } from "./supplier-import-actions";
 import { CedPdfPicker } from "./ced-pdf-picker";
 import { BooksBeginLine } from "./books-begin-line";
@@ -383,7 +395,27 @@ export default async function BillsPage({
   const viewLists = async () => {
     listViews = await openListViews(supabase, orgId, papers);
   };
-  await Promise.all([signPaths(), readClaims(), signPapers(), viewLists()]);
+  // ALREADY BILLED ON THE BILL'S OWN ROW (0357, Erik: "the Already Billed could connect to the bill on
+  // that screen too"). Where each live bill's job could hold it, what the jobs' invoices hold, and
+  // which bills a person marked: the same reading the Costs tab and the sheet use
+  // (readAlreadyBilledReach). It rides this breath (it needs only the bills). A lost read is logged
+  // and draws no door (the Costs tab still has them); nothing else on the page depends on it.
+  const abBills = liveBills.filter((b: any) => b.job_id);
+  let abReach: AlreadyBilledReach | null = null;
+  const readAbReach = async () => {
+    if (!abBills.length) return;
+    try {
+      abReach = await readAlreadyBilledReach(
+        supabase,
+        orgId,
+        abBills.map((b: any) => String(b.job_id)),
+        abBills.flatMap((b: any) => [b.id, b.po_id].filter(Boolean).map(String)),
+      );
+    } catch (e) {
+      reportError("bills.alreadyBilledReach", e, { bills: abBills.length });
+    }
+  };
+  await Promise.all([signPaths(), readClaims(), signPapers(), viewLists(), readAbReach()]);
   const paperItems: PaperRowItem[] = rematchTray(papers, markCtx).map((i) => ({
     ...i,
     signedUrl: (i.file_url && paperUrls.get(i.file_url)) || null,
@@ -699,7 +731,7 @@ export default async function BillsPage({
   // books already cover look uncovered: false "Needs You" cards on this screen while My Day
   // (loadSupplierDesk, the same gate) shows none. So it says it couldn't check, instead.
   const paperBooksUnread = !!(billsErr || linksErr || aliasErr || jobsErr);
-  const paperFeed =
+  const bareFeed =
     invoicesErr || accountsErr || paperBooksUnread || !supplierDocuments.length
       ? null
       : supplierPaperFeed({
@@ -711,6 +743,15 @@ export default async function BillsPage({
           tz: orgTz,
           shopStock,
         });
+  // Already Billed On J-010 on the cards (0357), from the reading the ledger already made; a card's
+  // job with no bill on the page yet is read on its own (only then: one more breath).
+  const reachRead = abReach as AlreadyBilledReach | null;
+  const cardJobsUnread = cardJobIds(bareFeed).filter((id) => !reachRead?.jobs.has(id));
+  const paperFeed = !bareFeed
+    ? null
+    : reachRead && reachRead.ready && !cardJobsUnread.length
+      ? cardsWithAlreadyBilled(bareFeed, reachRead.jobs)
+      : await withAlreadyBilledDoors(supabase, orgId, bareFeed);
 
   // NOT RENDERED AT ALL when there are no supplier documents, and that is the no-dead-ends rule
   // rather than tidiness: every section of the reconcile card is built around documents CED
@@ -1096,6 +1137,24 @@ export default async function BillsPage({
       receipt: receiptById.get(String(b.id)) ?? null,
     };
   });
+  // Each bill's Already Billed door, or its Billed By Hand · Not Billed After All (0357).
+  const ledgerReach = abReach as AlreadyBilledReach | null;
+  const billDoors =
+    ledgerReach && ledgerReach.ready
+      ? billAlreadyBilledDoors({
+          bills: ledgerBills.map((b: any) => ({
+            id: String(b.id),
+            job_id: b.job_id ?? null,
+            po_id: b.po_id ?? null,
+            amount: b.amount,
+            superseded: b.superseded,
+            what: [String(b.supplier ?? "").trim() || "The bill", b.shownNumber ?? null].filter(Boolean).join(" "),
+          })),
+          reach: ledgerReach.jobs,
+          hands: ledgerReach.hands,
+          claimed: ledgerReach.claimed,
+        })
+      : {};
 
   // What is waiting under More, counted so its one line says so (nothing silent behind a fold).
   const openDuplicates = duplicates.filter((g) => !g.resolution);
@@ -1253,6 +1312,7 @@ export default async function BillsPage({
         docs={docs as any}
         readFailed={!!billsErr}
         switches={switches}
+        alreadyBilled={billDoors}
       />
 
       {/* MORE: the once-a-month import, and supplier-name housekeeping. Folded, and its one line
