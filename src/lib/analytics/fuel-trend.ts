@@ -10,8 +10,8 @@ import { todayStrInTz, tzDayStartUtc } from "@/lib/tz";
  * with no job, tagged when a person tapped Fuel on a bank download (or a rule the company made from
  * such a tap). This reads those bills over the last 13 weeks, Monday to Sunday on the company's own
  * calendar, and says one number: what fuel costs a week. Under the bars, one line: fuel as a share
- * of money in (computeCollected, the /analytics "Collected" rule, over the same weeks), the average
- * fill, and how many fills.
+ * of money in (the Owner's Draw card's Received: computeCollected, the /analytics "Collected" rule,
+ * plus a bank download's Other Income, over the same weeks), the average fill, and how many fills.
  *
  * THE AVERAGE COUNTS ONLY WEEKS THE BOOKS COVER: from the first week any fuel was recorded (or the
  * window's start, when fuel was recorded before it) to the last FINISHED week the bank downloads
@@ -167,6 +167,13 @@ export async function getFuelTrend(supabase: any, tz: string, todayYmd: string):
     ),
   ]);
   if (payErr || refErr) return null;
+  // OTHER INCOME (0363) is money in, the same as the Owner's Draw card's Received counts it. No
+  // bank_lines table yet: none.
+  const other = await readAllPages<{ amount: number | string; posted_on: string }>(
+    (f, t) => supabase.from("bank_lines").select("id, amount, posted_on").eq("choice", "other_income").gte("posted_on", win.start).lt("posted_on", win.end).order("id").range(f, t),
+    20,
+  );
+  const otherRows = other.error ? [] : other.rows;
   const moneyIn = (from: string, to: string) => {
     const f = tzDayStartUtc(from, tz).getTime();
     const t = tzDayStartUtc(to, tz).getTime();
@@ -174,9 +181,13 @@ export async function getFuelTrend(supabase: any, tz: string, todayYmd: string):
       const ms = Date.parse(String(at ?? ""));
       return ms >= f && ms < t;
     };
-    return computeCollected(
-      ((pays ?? []) as any[]).filter((p) => inside(p.paid_at)),
-      ((refunds ?? []) as any[]).filter((r) => inside(r.created_at)),
+    const otherCents = otherRows.filter((o) => String(o.posted_on) >= from && String(o.posted_on) < to).reduce((n, o) => n + cents(o.amount), 0);
+    return (
+      computeCollected(
+        ((pays ?? []) as any[]).filter((p) => inside(p.paid_at)),
+        ((refunds ?? []) as any[]).filter((r) => inside(r.created_at)),
+      ) +
+      otherCents / 100
     );
   };
   return computeFuelTrend(bills as FuelBillRow[], moneyIn, todayYmd, tz, coveredThrough);

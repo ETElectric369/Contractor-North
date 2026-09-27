@@ -145,4 +145,20 @@ describe("getFuelTrend: every page, the window's rows, and the first fuel ever",
     expect(t!.avgWeekCents).toBe(35000);
     expect(t!.fills).toBe(84);
   });
+
+  it("money in is the Owner's Draw card's Received: payments and a bank download's Other Income", async () => {
+    const rows = [{ id: "f1", ...fuel("2026-09-08", 100) }];
+    const t = await getFuelTrend(
+      fake({
+        bills: rows,
+        payments: [{ id: "p1", amount: 600, paid_at: "2026-09-09T18:00:00Z", invoices: { status: "paid" } }],
+        customer_credits: [],
+        bank_lines: [{ id: "b1", choice: "other_income", amount: 400, posted_on: "2026-09-10" }],
+      }),
+      "UTC",
+      TODAY,
+    );
+    expect(t!.moneyInCents).toBe(100000);
+    expect(t!.sharePct).toBe(10);
+  });
 });
