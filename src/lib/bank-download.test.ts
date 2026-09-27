@@ -44,7 +44,7 @@ XXXXX1234,09/20/2026,,VENMO CASHOUT,,300.00,Posted,10207.10
 XXXXX1234,09/18/2026,,STRIPE TRANSFER ST-AB12,,485.40,Posted,9907.10
 XXXXX1234,09/16/2026,,1111-SHELL 123 ANYTOWN ST,100.00,,Posted,9421.70
 XXXXX1234,09/15/2026,,ATM WITHDRAWAL 000123 MAIN ST,200.00,,Posted,9521.70
-XXXXX1234,09/12/2026,,1111-SIMPLY INSURED CO,31.90,,Posted,9721.70
+XXXXX1234,09/12/2026,,1111-ACME INSURANCE CO,31.90,,Posted,9721.70
 XXXXX1234,09/10/2026,,ONLINE TRANSFER TO CHK XXXXXX9876 REF #IB0123456789,2000.00,,Posted,9746.07
 XXXXX1234,09/09/2026,,1111-SHELL 456 OTHERTOWN,100.00,,Posted,11746.07
 XXXXX1234,09/05/2026,1043,CHECK,640.00,,Posted,11846.07
@@ -177,7 +177,7 @@ describe("privacy: what is kept of a line", () => {
     expect(redactDigits("CARD 4111-1111-1111-1234 SHELL")).toBe("CARD ••1234 SHELL");
     expect(redactDigits("CALL 775 555 1234")).toBe("CALL ••1234");
     // Short numbers stay: a store number, a check, a card's last 4.
-    expect(redactDigits("1111-SHELL 10068 ANYTOWN")).toBe("1111-SHELL 10068 ANYTOWN");
+    expect(redactDigits("1111-SHELL 54321 ANYTOWN")).toBe("1111-SHELL 54321 ANYTOWN");
     expect(cleanDescription("ONLINE   TRANSFER TO CHK XXXXXX9876 REF #IB0123456789")).toBe("ONLINE TRANSFER TO CHK XXXXXX9876 REF #IB••6789");
     const dl = download();
     for (const l of dl.lines) expect(l.description).not.toMatch(/\d{6,}/);
@@ -360,7 +360,7 @@ describe("what needs a person: one row per merchant, the guess first and never p
     expect(shell.cents).toBe(-28845);
     expect(shell.guess).toBe("cost:Gas & Truck:fuel");
     expect(shell.buttons).toEqual(["cost:Gas & Truck:fuel", "cost:Gas & Truck:truck", "personal"]);
-    expect(plan.groups.find((g) => g.label.includes("SIMPLY INSURED"))!.guess).toBe("cost:Insurance & Licenses");
+    expect(plan.groups.find((g) => g.label.includes("ACME INSURANCE"))!.guess).toBe("cost:Insurance & Licenses");
     expect(plan.groups.find((g) => g.label.includes("SERVICE FEE"))!.guess).toBe("cost:Fees");
     expect(plan.groups.find((g) => g.label.includes("ATM"))!.guess).toBe("petty_cash");
     expect(plan.groups.find((g) => g.label.includes("ONLINE TRANSFER"))!.guess).toBe("draw");

@@ -143,7 +143,7 @@ const CHECKING_CSV = `Account Number,Post Date,Check,Description,Debit,Credit,St
 XXXXX1234,09/24/2026,,DENTAL CARE LLC,150.00,,Posted,9012.00
 XXXXX1234,09/18/2026,,STRIPE TRANSFER ST-AB12,,485.40,Posted,9907.10
 XXXXX1234,09/16/2026,,1111-SHELL 123 ANYTOWN ST,100.00,,Posted,9421.70
-XXXXX1234,09/12/2026,,1111-SIMPLY INSURED CO,31.90,,Posted,9721.70
+XXXXX1234,09/12/2026,,1111-ACME INSURANCE CO,31.90,,Posted,9721.70
 XXXXX1234,09/10/2026,,ONLINE TRANSFER TO CHK XXXXXX9876 REF #IB0123456789,2000.00,,Posted,9746.07
 XXXXX1234,09/09/2026,,1111-SHELL 456 OTHERTOWN,100.00,,Posted,11746.07
 XXXXX1234,09/05/2026,1043,CHECK,640.00,,Posted,11846.07
@@ -252,7 +252,7 @@ describe("the door", () => {
 });
 
 describe("Apply", () => {
-  async function applyWithAnswers(id: string, leave: string[] = ["SIMPLY"]) {
+  async function applyWithAnswers(id: string, leave: string[] = ["ACME INSURANCE"]) {
     const v = await view(id);
     const answer: Record<string, string> = {
       SHELL: "cost:Gas & Truck:fuel",
@@ -260,7 +260,7 @@ describe("Apply", () => {
       "ONLINE TRANSFER": "draw",
       Deposit: "invoice:inv-1",
       "Check 1043": "crew:pat",
-      SIMPLY: "cost:Insurance & Licenses",
+      "ACME INSURANCE": "cost:Insurance & Licenses",
     };
     const picks: Record<string, string> = {};
     for (const [words, choice] of Object.entries(answer)) if (!leave.includes(words)) picks[rowBy(v, words).id] = choice;
@@ -320,7 +320,7 @@ describe("Apply", () => {
     // The row left for later keeps the card in Sort These, named as not counted.
     expect(db.organized_items[0].status).toBe("needs_review");
     const after = await view(id);
-    expect(after.rows.map((r) => r.title)).toEqual(["SIMPLY INSURED CO"]);
+    expect(after.rows.map((r) => r.title)).toEqual(["ACME INSURANCE CO"]);
     expect(after.headline).toBe("Bank ••1234 · Sep 2–Sep 24 · 8 already in North · 1 need you");
     expect(after.appliedSaid).toMatch(/1 line left for later is not counted yet/);
     expect(after.canUndo).toBe(true);
