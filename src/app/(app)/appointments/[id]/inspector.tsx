@@ -148,6 +148,7 @@ export function Inspector({
   planBrief = null,
   readOnly = false,
   nortOn = true,
+  buildOwn = true,
 }: {
   appointmentId: string;
   templates: InspectionTemplate[];
@@ -175,6 +176,9 @@ export function Inspector({
   readOnly?: boolean;
   /** The Nort switch (0352): the voice fill keeps working, named without Nort. */
   nortOn?: boolean;
+  /** "or build my own" opens /forms, whose New Form is Safety Log's door (0352): with Safety Log
+   *  off the link would land on no way to build one, so it isn't drawn. */
+  buildOwn?: boolean;
 }) {
   const router = useRouter();
   const stored = useMemo(() => parseInspectorCapture(initialCapture), [initialCapture]);
@@ -1099,7 +1103,7 @@ export function Inspector({
               >
                 {seeding ? <><Loader2 className="h-4 w-4 animate-spin" /> Setting up…</> : "Set up my questions"}
               </Button>
-              <Link href="/forms" className="text-sm text-slate-500 underline-offset-2 hover:underline">or build my own</Link>
+              {buildOwn && <Link href="/forms" className="text-sm text-slate-500 underline-offset-2 hover:underline">or build my own</Link>}
             </div>}
           </div>
         ) : open.length === 0 ? (
