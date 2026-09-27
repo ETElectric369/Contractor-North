@@ -96,10 +96,22 @@ const DEFAULTS: Record<PushKind, boolean> = {
   long_shift: true,
 };
 
+/** An OPT-IN kind: off until a person switches it on (day_ahead: the morning digest and the 6 PM
+ *  close-out). The Bell writes such a kind's line only for the people the push went to (notifyPeople):
+ *  a line on the bell is the push, recorded, never a second channel for something they didn't ask for. */
+export function pushKindIsOptIn(kind: PushKind): boolean {
+  return DEFAULTS[kind] === false;
+}
+
 /**
  * Best-effort push to a set of profiles, respecting each user's toggle for this notification
  * kind. Never throws — safe to call (un-awaited) from any server action; a push failure must not
  * break the underlying operation.
+ *
+ * RETURNS THE PEOPLE IT PUSHED TO (0366, the Bell records every push): the ids that were active and
+ * had this kind on, whatever their devices then did. Empty when push isn't set up on this server, or
+ * nobody was left, or the whole send failed. Existing callers ignore it; notifyPeople reads it for an
+ * opt-in kind.
  *
  * TWO TRANSPORTS, ONE DOOR (2026-09-09). A subscription row is either a Web Push endpoint (the
  * browser and the installed PWA) or an APNs device token (the native shell, which cannot do Web
@@ -111,11 +123,11 @@ export async function sendPushToProfiles(
   profileIds: (string | null | undefined)[],
   kind: PushKind,
   payload: { title: string; body: string; url?: string },
-): Promise<void> {
+): Promise<string[]> {
   try {
-    if (!pushConfigured()) return;
+    if (!pushConfigured()) return [];
     const ids = [...new Set(profileIds.filter((x): x is string => !!x))];
-    if (!ids.length) return;
+    if (!ids.length) return [];
 
     const sb = createServiceClient();
     // This path runs on the SERVICE client, which bypasses RLS entirely — so migration
@@ -129,14 +141,14 @@ export async function sendPushToProfiles(
         const pref = (p.push_prefs ?? {})[kind];
         return pref === undefined ? DEFAULTS[kind] : !!pref;
       })
-      .map((p: any) => p.id);
-    if (!allowed.length) return;
+      .map((p: any) => p.id as string);
+    if (!allowed.length) return [];
 
     const { data: subs } = await sb
       .from("push_subscriptions")
       .select("id, platform, endpoint, p256dh, auth, device_token, apns_env")
       .in("profile_id", allowed);
-    if (!subs?.length) return;
+    if (!subs?.length) return allowed;
 
     const body = JSON.stringify({
       title: payload.title,
@@ -178,8 +190,10 @@ export async function sendPushToProfiles(
         }
       }),
     );
+    return allowed;
   } catch (e) {
     // A whole-batch failure (VAPID/config) is systematic, not an expected dead sub.
     reportError("push", e);
+    return [];
   }
 }

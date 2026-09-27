@@ -2,7 +2,8 @@
 
 import { headers } from "next/headers";
 import { createServiceClient } from "@/lib/supabase/server";
-import { sendPushToProfiles, orgStaffIds } from "@/lib/push";
+import { orgStaffIds } from "@/lib/push";
+import { notifyPeople } from "@/lib/notifications";
 import { clientIp, rateLimited } from "@/lib/rate-limit";
 import { getOrgSettings } from "@/lib/org-settings";
 import { requestHref } from "@/lib/feature-doors";
@@ -116,7 +117,8 @@ async function notifyNewInquiry(orgId: string): Promise<void> {
     // LEADS OFF, THE REQUEST STILL LANDS (the switch board, rule d): the push opens My Day, where
     // it waits with Call Back, instead of the switched-off list. Service client: org filtered here.
     const { data: orgRow } = await sb.from("organizations").select("settings").eq("id", orgId).maybeSingle();
-    await sendPushToProfiles(await orgStaffIds(orgId), "inquiry", {
+    // The bell records it too (notifyPeople): a push missed on the lock screen is still on the bell.
+    await notifyPeople(orgId, await orgStaffIds(orgId), "inquiry", {
       title: "New inquiry",
       body: snippet ? `${who}: ${snippet}` : `${who} sent a new request`,
       url: requestHref(getOrgSettings((orgRow as { settings?: unknown } | null)?.settings).features),

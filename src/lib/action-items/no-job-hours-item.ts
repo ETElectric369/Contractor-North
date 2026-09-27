@@ -36,6 +36,7 @@ export function noJobHoursActionItem(summary: NoJobHours | null | undefined, opt
     return {
       id: NO_JOB_HOURS_ITEM_ID,
       kind: "time_stray",
+      chip: "On No Job",
       stream: KIND_STREAM.time_stray,
       title: "Hours On No Job · Couldn't Check",
       subtitle: "Couldn't read the shifts that are on no job just now. Open Timecards to see them.",
@@ -54,6 +55,7 @@ export function noJobHoursActionItem(summary: NoJobHours | null | undefined, opt
     return {
       id: NO_JOB_HOURS_ITEM_ID,
       kind: "time_stray",
+      chip: "On No Job",
       stream: KIND_STREAM.time_stray,
       title: "Hours On No Job · Couldn't List Them All",
       subtitle: `The newest ${NO_JOB_READ_CAP} shifts on no job are all billed, empty or today's, so older ones weren't checked.`,
@@ -75,6 +77,7 @@ export function noJobHoursActionItem(summary: NoJobHours | null | undefined, opt
   return {
     id: NO_JOB_HOURS_ITEM_ID,
     kind: "time_stray",
+    chip: "On No Job",
     stream: KIND_STREAM.time_stray,
     title: `Hours On No Job · ${shifts.length}${summary?.capped ? "+" : ""}`,
     // ONE COMPANY CODE DECIDES THE WORDS, the same one that draws the Company Time door on

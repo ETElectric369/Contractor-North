@@ -68,6 +68,8 @@ describe("inquiryActionItem — a request on Needs You", () => {
     expect(it2.title).toBe("New Request From Dana Reyes");
     expect(it2.subtitle).toBe("Call them back");
     expect(it2.phone).toBe("(530) 555-0142");
+    // Its chip rides on the row (Wave 1, W1-15): the flat list has no Leads header to rename.
+    expect(it2.chip).toBe("Request");
     // Same record, same urgency, same door (the list renders with the Off line on top).
     expect(it2.href).toBe("/leads?focus=i1");
     expect(it2.urgency).toBe(2);

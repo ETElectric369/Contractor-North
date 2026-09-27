@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
+  COSTED_INVOICE_COLUMNS,
   OPEN_ENTRY_STALE_HOURS,
+  costedJobIds,
   daysAgoStr,
   detectNeedsReturn,
   detectStrayTime,
@@ -129,5 +131,44 @@ describe("detectNeedsReturn — the forgotten return visit", () => {
     expect(detectNeedsReturn({ jobs: [base], worked: live, todayStr: TODAY, ...none })).toEqual([]);
     const toSchedule = { ...base, status: "estimate" }; // undated estimate = job_to_schedule item
     expect(detectNeedsReturn({ jobs: [toSchedule], worked, todayStr: TODAY, ...none })).toEqual([]);
+  });
+  it("a job ON HOLD waits on purpose: never 'nothing scheduled next' (NY-hold, 0366)", () => {
+    const held = { ...base, status: "on_hold" };
+    expect(detectNeedsReturn({ jobs: [held], worked, todayStr: TODAY, ...none })).toEqual([]);
+    // Dated or not: a held job's leftover date is not what keeps it quiet.
+    expect(detectNeedsReturn({ jobs: [{ ...held, scheduled_start: "2026-06-29T08:00:00Z" }], worked, todayStr: TODAY, ...none })).toEqual([]);
+  });
+});
+
+describe("costedJobIds — THE one rule for 'costs on the record' (My Day and the 6 PM push)", () => {
+  it("a bill, a PO, or a materials list with a line: costed", () => {
+    const set = costedJobIds({
+      bills: [{ job_id: "A" }, { job_id: null }],
+      purchaseOrders: [{ job_id: "B" }],
+      materialLists: [{ job_id: "C", material_list_items: [{ id: 1 }] }, { job_id: "D", material_list_items: [] }],
+    });
+    expect([...set].sort()).toEqual(["A", "B", "C"]);
+  });
+
+  it("a live invoice carrying a MATERIALS line (0342): costed; labor lines alone, or a void invoice, are not", () => {
+    const set = costedJobIds({
+      invoices: [
+        { job_id: "E", status: "draft", invoice_items: [{ line_kind: "labor" }, { line_kind: "materials" }] },
+        { job_id: "F", status: "sent", invoice_items: [{ line_kind: "labor" }, { line_kind: "other" }] },
+        { job_id: "G", status: "void", invoice_items: [{ line_kind: "materials" }] },
+        { job_id: "H", status: "paid", invoice_items: null },
+        { job_id: "I", status: "partial", invoice_items: [{ line_kind: "materials" }] },
+      ],
+    });
+    expect([...set].sort()).toEqual(["E", "I"]);
+  });
+
+  it("feeds detectUnbilledWork: a job whose invoice bills its materials is not 'no costs recorded'", () => {
+    const worked = new Map([["E", { lastWorked: "2026-07-01T14:00:00Z", hasOpenEntry: false, workedInUnbilledWindow: true }]]);
+    const job = { id: "E", name: "Herringbone", status: "in_progress" };
+    const invoices = [{ job_id: "E", status: "sent", invoice_items: [{ line_kind: "materials" }] }];
+    expect(detectUnbilledWork({ jobs: [job], worked, costedJobIds: costedJobIds({ invoices }), invoicedJobIds: new Set(["E"]) })).toEqual([]);
+    expect(detectUnbilledWork({ jobs: [job], worked, costedJobIds: costedJobIds({}), invoicedJobIds: new Set(["E"]) }).map((f) => f.job.id)).toEqual(["E"]);
+    expect(COSTED_INVOICE_COLUMNS).toBe("job_id, status, invoice_items(line_kind)");
   });
 });

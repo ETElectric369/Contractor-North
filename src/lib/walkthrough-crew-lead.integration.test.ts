@@ -42,6 +42,7 @@ const { TEST_DBPW, TEST_DB_HOST, TEST_DB_USER, CREWLEAD_APPLY_0356 } = process.e
 const d = TEST_DBPW && TEST_DB_HOST && TEST_DB_USER ? describe : describe.skip;
 const migrations = join(process.cwd(), "supabase/migrations");
 const M0356 = readFileSync(join(migrations, readdirSync(migrations).find((n) => n.startsWith("0356_"))!), "utf8");
+const M0366 = readFileSync(join(migrations, readdirSync(migrations).find((n) => n.startsWith("0366_"))!), "utf8");
 const FN = "public.save_walkthrough_capture(uuid, jsonb, uuid, jsonb)";
 
 d("a crew lead fills in the walk-through (0356)", () => {
@@ -136,6 +137,11 @@ d("a crew lead fills in the walk-through (0356)", () => {
       waiting = !notOnThisDatabase("[walkthrough-crew-lead] 0356 is not on this database yet: run node scripts/test-db/rebuild.cjs.");
       if (waiting) return;
     }
+    // AND WITH 0366 (LEAK-0227): the walk-through's answers column is revoked from the signed-in role
+    // and a playbook sheet is the office's to read from forms. Every case below must hold with it, so
+    // it runs inside this transaction too (safe to run twice: a database that has it runs it again).
+    await c.query(M0366);
+    await c.query("set local statement_timeout = '30s'");
 
     // A TEST company: the owner (office), a crew lead, a second crew lead, a plain tech, and a crew
     // lead whose seat is cut. And a stranger company with its own crew lead.

@@ -101,7 +101,7 @@ export async function whichJobChoices(entryId: string): Promise<WhichJobChoices>
 }
 
 /**
- * PUT THE PUNCH ON A JOB — the write behind "Which Job Are You On?" (My Day's Now block, and the
+ * PUT THE PUNCH ON A JOB — the write behind "Which Job Are You On?" (My Day's Now card, and the
  * sheet every clock door opens when the clock couldn't tell the job).
  *
  * Sets job_id on the caller's OWN, still job-less time entry, so every hour of the punch lands on
@@ -122,7 +122,9 @@ export async function whichJobChoices(entryId: string): Promise<WhichJobChoices>
  * on purpose); older ones are the office's, on Timecards.
  *
  * Naming the job is clocking into it, so a job not started yet is promoted to in progress, the
- * same promotion clock-in makes.
+ * same promotion clock-in makes. A job on hold comes off hold the same way, and the answer says so
+ * (`warning`, NY-hold 0366): the sheet lists a held job last, marked On Hold, so it is never a
+ * surprise either.
  *
  * Checked write (the silent-write law): a zero-row UPDATE is a refusal with a sentence.
  */
@@ -180,13 +182,16 @@ export async function putPunchOnJob(entryId: string, jobId: string): Promise<Whi
   if (error) return { ok: false, error: dbError(error) };
   if (!hit) return { ok: false, stale: true, error: "Nothing changed: the punch closed or got a job in the meantime. The screen is catching up." };
 
-  await promoteJobToInProgress(supabase, job.id);
+  // A held job comes off hold with the pick, and the sheet says so in its own words (NY-hold, 0366):
+  // the same sentence the clock's other doors show, riding back as `warning`.
+  const offHold = (await promoteJobToInProgress(supabase, job.id))?.offHold ?? null;
 
-  revalidatePath("/planner"); // the Now block's doors
+  revalidatePath("/planner"); // the Now card's doors
   revalidatePath("/timeclock"); // the running banner's job name
   revalidatePath("/timecards"); // the crew strip + week grid
   revalidatePath(`/jobs/${job.id}`); // the job's Time tab + labor totals
   revalidatePath("/jobs");
+  if (offHold) revalidatePath("/schedule"); // the rail's held card goes
   const codesOn = getOrgSettings((orgRow as { settings?: unknown } | null)?.settings).timeclock_job_codes;
-  return { ok: true, label: whichJobLabel(job, codesOn) };
+  return { ok: true, label: whichJobLabel(job, codesOn), ...(offHold ? { warning: offHold } : {}) };
 }

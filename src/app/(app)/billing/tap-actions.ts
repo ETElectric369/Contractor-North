@@ -8,7 +8,8 @@ import { canAcceptPayments, connectStateFromOrg } from "@/lib/stripe-connect";
 import { invoiceBalance } from "@/lib/invoice-math";
 import { needsSendRefusal, sendDraftForPayment, type NeedsSend } from "@/lib/pay-door-send";
 import { reportError } from "@/lib/observe";
-import { orgStaffIds, pushConfigured, sendPushToProfiles } from "@/lib/push";
+import { orgStaffIds, pushConfigured } from "@/lib/push";
+import { notifyPeople } from "@/lib/notifications";
 import { STAFF_ROLES } from "@/lib/actions/perms";
 
 /**
@@ -356,7 +357,8 @@ export async function announceTapToPay(): Promise<{ ok: true; sent: number } | {
   }
 
   const ids = await orgStaffIds(orgId);
-  await sendPushToProfiles(ids, "tap_to_pay", {
+  // On the bell too (notifyPeople): the announcement stays where everyone can find it again.
+  await notifyPeople(orgId, ids, "tap_to_pay", {
     title: "Accept in-person payments with Tap to Pay on iPhone.",
     body: "You can accept all types of contactless payments right on your iPhone—from physical debit and credit cards to Apple Pay and other digital wallets. Terms apply.",
     url: "/settings?tab=getpaid",

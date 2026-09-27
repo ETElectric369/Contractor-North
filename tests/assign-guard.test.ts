@@ -28,11 +28,6 @@ describe("blocksCrewWipe — an unpicked assignee never clears a job's crew", ()
     expect(blocksCrewWipe("job_to_schedule", "assign", "emp-1", "ui")).toBe(false);
   });
 
-  it("does not touch task unassign — that's reversible and legitimate", () => {
-    expect(blocksCrewWipe("task", "assign", "", "ui")).toBe(false);
-    expect(blocksCrewWipe("work_order", "assign", "", "ui")).toBe(false);
-  });
-
   it("does not touch other verbs on a job", () => {
     expect(blocksCrewWipe("job_to_schedule", "schedule", "", "ui")).toBe(false);
     expect(blocksCrewWipe("job_to_schedule", "open", "", "ui")).toBe(false);

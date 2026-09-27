@@ -50,6 +50,7 @@ vi.mock("next/cache", () => ({ revalidatePath: spies.revalidate }));
 vi.mock("@/lib/notifications", () => ({
   officeRecipients: vi.fn(async () => state.staffIds),
   ringOffice: spies.ring,
+  notifyPeople: vi.fn(async () => ({ bell: true, pushed: [] })),
 }));
 vi.mock("./actions", () => ({ createJobFromAppointment: spies.createJob, linkAppointmentTo: spies.link }));
 vi.mock("../timeclock/actions", () => ({ clockIn: spies.clockIn, switchJob: spies.switchJob }));

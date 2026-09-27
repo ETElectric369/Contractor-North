@@ -2,9 +2,8 @@ import { cache } from "react";
 import { viewerSortsBank } from "@/lib/bank-viewer";
 import { createClient } from "@/lib/supabase/server";
 import type { ActionItem, ActionKind } from "./types";
-import { AFFORDANCES, KIND_STREAM, appointmentAffordances } from "./types";
+import { AFFORDANCES, KIND_STREAM, appointmentAffordances, sortActionItems } from "./types";
 import { bucketInspections } from "@/lib/inspections";
-import { isPlatformAdmin } from "@/lib/platform-admin";
 import { ESTIMATE_VISIT_TYPES } from "@/lib/statuses";
 import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 import { invoiceBalance } from "@/lib/invoice-math";
@@ -25,7 +24,9 @@ import { isOpenToBuy, newestListPerJob } from "@/lib/materials-checklist";
 import { feederOn, inquiryActionItem } from "./switches";
 import { featureOn, featuresFromOffKey } from "@/lib/features";
 import {
+  COSTED_INVOICE_COLUMNS,
   NEEDS_RETURN_DAYS,
+  costedJobIds,
   daysAgoStr,
   detectNeedsReturn,
   detectStrayTime,
@@ -74,7 +75,7 @@ const QUOTE_EXPIRY_SOON_DAYS = 5;
 
 /**
  * THE single union behind the "Needs action" inbox — DECISIONS ONLY: money
- * (overdue/quiet/draft), leads, waiting (contracts/liens/captures/bug rollup),
+ * (overdue/quiet/draft), leads, the rest (contracts/liens/captures),
  * the leak detectors, appointments, and jobs needing a date. Projects rows from
  * the existing tables onto one ActionItem[] — no new tables. RLS already scopes
  * to the org; we additionally scope tech (non-staff) views to their own items.
@@ -189,7 +190,7 @@ async function buildActionItems(ctx: {
     }
   });
 
-  const [jobsR, inqR, apptR, orgR, invR, quoteR, acceptedR, draftR, conR, lienR, bugR, openTimeR, recentTimeR, nonBillableR, matJobsR, matSegR, inspR, inspQuoteR, billedJobR, doneWorkR, draftQuoteR] = await Promise.all([
+  const [jobsR, inqR, apptR, orgR, invR, quoteR, acceptedR, draftR, conR, lienR, openTimeR, recentTimeR, nonBillableR, matJobsR, matSegR, inspR, inspQuoteR, billedJobR, doneWorkR, draftQuoteR] = await Promise.all([
     // Unscheduled jobs — staff only (the "resting place" for things needing a date).
     // EVERY still-in-flight dateless job, not just estimate/scheduled: an in_progress
     // or on_hold job whose date was cleared must not vanish from every scheduling
@@ -317,20 +318,8 @@ async function buildActionItems(ctx: {
           .or("prelim_sent_at.is.null,lien_recorded_at.is.null")
           .limit(100)
       : empty,
-    // Open bug reports — North's own triage, not a company's (Wave 0): only a platform admin
-    // (0176) gets the rollup. Asked only for staff, so a tech's inbox never pays the round trip.
-    isStaff
-      ? isPlatformAdmin(supabase).then(async (admin): Promise<{ data: any[] | null }> =>
-          admin
-            ? await supabase
-                .from("bug_reports")
-                .select("id, note, page, created_at")
-                .eq("status", "open")
-                .order("created_at", { ascending: false })
-                .limit(50)
-            : { data: [] },
-        )
-      : empty,
+    // (North's own bug reports are not read here: they are Bug Watch's, with its own count on the
+    // avatar row. Wave 1, NY-list: a company's Needs You never carries them.)
     // ── The end-of-day money-leak sweep feeders (staff only) ──
     // Every open clock, whatever its age — a handful of rows at most; the stray
     // rule (past-day OR LONG_SHIFT_HOURS+) is applied per-row in detectStrayTime.
@@ -557,6 +546,8 @@ async function buildActionItems(ctx: {
     items.push({
       id: o.id,
       kind: "organize",
+      // A note is read, not filed; a bank download is sorted on its own card.
+      ...(bank ? { chip: "Bank Download" } : o.kind === "note" ? { chip: "Note To Review" } : {}),
       title: bank ? "Bank Download To Sort" : (ORGANIZE_LABEL[o.kind] ?? "To file"),
       subtitle: null,
       who: null,
@@ -698,6 +689,8 @@ async function buildActionItems(ctx: {
       items.push({
         id: `unbilled-${a.id}`,
         kind: "visit_unbilled",
+        // Its chip says the state it is in: billed and waiting on the money, or not billed at all.
+        ...(openInvoice ? { chip: "Billed, Not Paid" } : {}),
         title: `${a.title || "Work done"} — ${openInvoice ? "billed, no money yet" : "no bill yet"}`,
         subtitle: who,
         who: null,
@@ -817,25 +810,6 @@ async function buildActionItems(ctx: {
     });
   }
 
-  // Open bug reports — ONE rollup item (not one per bug) so a backlog of routine field reports
-  // can't flood the dock badge (it stays +1) and the "open" tap lands cleanly on Bug watch.
-  // Low urgency: it sorts below the money/legal items. Triage happens on /bugs.
-  const openBugs = (bugR.data ?? []) as any[];
-  if (openBugs.length) {
-    items.push({
-      id: "bugs-open", // synthetic rollup id — the only affordance is "open" (navigate), no per-row dispatch
-      kind: "bug_report",
-      title: `${openBugs.length} open bug report${openBugs.length > 1 ? "s" : ""}`,
-      subtitle: "Reported from the field",
-      who: null,
-      when: openBugs[0]?.created_at ?? null,
-      urgency: 0,
-      done: false,
-      href: "/bugs",
-      affordances: AFFORDANCES.bug_report,
-    });
-  }
-
   // ── The end-of-day money-leak sweep (staff only) — the "Apache Ct" detectors. ──
   // Detection only, per the hard boundary: each item names the gap and deep-links to
   // the surface that fixes it; nothing infers hours, dollars, or clock-out times.
@@ -877,6 +851,8 @@ async function buildActionItems(ctx: {
     items.push({
       id: `stray-${f.entryId}`, // synthetic (kind-prefixed) — open-only, no per-row dispatch
       kind: "time_stray",
+      // A clock still running says so; a closed shift on no job says where its hours are.
+      chip: f.openStill ? "Clock Left Running" : "On No Job",
       title: f.openStill
         ? `${f.name}'s ${formatDateShort(f.when)} entry is still open`
         : `${f.name}'s ${formatDateShort(f.when)} entry has no job`,
@@ -942,7 +918,9 @@ async function buildActionItems(ctx: {
       supabase.from("bills").select("job_id").in("job_id", jobIds).limit(200),
       supabase.from("purchase_orders").select("job_id").in("job_id", jobIds).limit(200),
       supabase.from("material_lists").select("job_id, material_list_items(id)").in("job_id", jobIds).limit(100),
-      supabase.from("invoices").select("job_id, status").in("job_id", jobIds).limit(200),
+      // Each line's kind rides along: a materials line on a live invoice is costs on the record
+      // (costedJobIds, the one rule the 6 PM push uses too).
+      supabase.from("invoices").select(COSTED_INVOICE_COLUMNS).in("job_id", jobIds).limit(200),
       supabase
         .from("appointments")
         .select("job_id")
@@ -954,13 +932,12 @@ async function buildActionItems(ctx: {
       supabase.from("job_schedule_segments").select("job_id").in("job_id", jobIds).gte("end_date", todayStr).limit(200),
     ]);
 
-    const costedJobIds = new Set<string>([
-      ...((wBillsR.data ?? []) as any[]).map((b) => b.job_id as string),
-      ...((wPosR.data ?? []) as any[]).map((p) => p.job_id as string),
-      ...((wMatR.data ?? []) as any[])
-        .filter((m) => (m.material_list_items?.length ?? 0) > 0)
-        .map((m) => m.job_id as string),
-    ]);
+    const costed = costedJobIds({
+      bills: (wBillsR.data ?? []) as any[],
+      purchaseOrders: (wPosR.data ?? []) as any[],
+      materialLists: (wMatR.data ?? []) as any[],
+      invoices: (wInvR.data ?? []) as any[],
+    });
     const invoicedJobIds = new Set<string>(
       ((wInvR.data ?? []) as any[]).filter((i) => i.status !== "void" && i.job_id).map((i) => i.job_id as string),
     );
@@ -977,7 +954,7 @@ async function buildActionItems(ctx: {
     }
 
     // 2) UNBILLED WORK — time on the job, zero costs/POs/materials. The Romex leak.
-    for (const f of detectUnbilledWork({ jobs: workedJobs, worked, costedJobIds, invoicedJobIds })) {
+    for (const f of detectUnbilledWork({ jobs: workedJobs, worked, costedJobIds: costed, invoicedJobIds })) {
       items.push({
         id: `unbilled-${f.job.id}`,
         kind: "job_unbilled_work",
@@ -1158,5 +1135,11 @@ async function buildActionItems(ctx: {
   const deskUnread = supplierDeskFailedItem(await supplierDeskP);
   if (deskUnread) items.unshift(deskUnread);
 
-  return items.map((it) => ({ ...it, stream: KIND_STREAM[it.kind] }));
+  // SORTED ONCE, HERE (Wave 1, NY-list): money, leads, today, other; then urgency; then oldest first,
+  // an undated row counting as today; ties keep the order built above (types.ts sortActionItems).
+  // Every reader gets it in this order, so My Day's top five are the right five.
+  return sortActionItems(
+    items.map((it) => ({ ...it, stream: KIND_STREAM[it.kind] })),
+    todayStr,
+  );
 }

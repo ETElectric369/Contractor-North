@@ -36,7 +36,10 @@ vi.mock("@/lib/supabase/server", () => ({ createClient: async () => client, crea
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 const createNotifications = vi.fn(async () => undefined);
 const sendPushToProfiles = vi.fn(async () => undefined);
-vi.mock("@/lib/notifications", () => ({ createNotifications: (...a: unknown[]) => (createNotifications as any)(...a) }));
+vi.mock("@/lib/notifications", () => ({
+  createNotifications: (...a: unknown[]) => (createNotifications as any)(...a),
+  notifyPeople: async () => ({ bell: true, pushed: [] }),
+}));
 vi.mock("@/lib/push", () => ({
   sendPushToProfiles: (...a: unknown[]) => (sendPushToProfiles as any)(...a),
   orgStaffIds: async () => ["owner-1"],

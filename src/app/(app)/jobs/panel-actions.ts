@@ -9,6 +9,7 @@ import { isStaffRole } from "@/lib/actions/perms";
 import { dbError } from "@/lib/db-error";
 import { reportError } from "@/lib/observe";
 import { officeRecipients, ringOffice } from "@/lib/notifications";
+import { readViaView } from "@/lib/inspection/walkthrough-access";
 import {
   circuitName,
   countWord,
@@ -342,21 +343,28 @@ async function findPlans(m: Member, job: JobRow): Promise<{ id: string; name: st
 }
 
 /** What the walk-through's inspector said about the panel (panel_brand, panel_amps, the one-box
- *  panel_condition), from this job's visits, newest first. Shown as suggestions; never written. */
+ *  panel_condition), from this job's visits, newest first. Shown as suggestions; never written.
+ *  THROUGH appointment_answers (0366, LEAK-0227): a tech reads the answers without a price (and only
+ *  his own visits, 0227's rule), the office as stored; and only the three answers walkthroughSaid
+ *  reads leave this function's read, whoever asks. */
 async function walkthroughOf(m: Member, job: JobRow): Promise<{ said: HeaderSaid; words: string | null } | null> {
-  const { data, error } = await m.supabase
-    .from("appointments")
-    .select("inspection_answers, starts_at")
-    .eq("org_id", m.orgId)
-    .eq("job_id", job.id)
-    .not("inspection_answers", "is", null)
-    .order("starts_at", { ascending: false })
-    .limit(5);
+  const { data, error } = await readViaView<{ inspection_answers: Record<string, unknown> | null }[]>(m.supabase, "answers", (from) =>
+    from
+      .select("inspection_answers, starts_at")
+      .eq("org_id", m.orgId)
+      .eq("job_id", job.id)
+      .not("inspection_answers", "is", null)
+      .order("starts_at", { ascending: false })
+      .limit(5),
+  );
   if (error) {
     reportError("panel.walkthroughOf", error, { jobId: job.id });
     return null;
   }
-  const answers = ((data ?? []) as { inspection_answers: Record<string, unknown> | null }[]).map((a) => a.inspection_answers ?? {});
+  const answers = (data ?? []).map((a) => {
+    const all = a.inspection_answers ?? {};
+    return { panel_brand: all.panel_brand, panel_amps: all.panel_amps, panel_condition: all.panel_condition };
+  });
   const w = walkthroughSaid(answers);
   return w.words || w.said.brand || w.said.main_amps ? w : null;
 }

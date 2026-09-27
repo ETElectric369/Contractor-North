@@ -12,7 +12,8 @@ describe("the Settle item", () => {
   it("is a money decision with one door", () => {
     expect(KIND_STREAM.stock_short).toBe("money");
     // Named for the fix that works: a count can't settle a short (audit v1018).
-    expect(KIND_META.stock_short.label).toBe("Settle");
+    // Its chip says the state it is in (Wave 1, W1-15): To Settle, never the verb.
+    expect(KIND_META.stock_short.label).toBe("To Settle");
     expect(AFFORDANCES.stock_short).toEqual(["open"]);
   });
 

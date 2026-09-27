@@ -2,7 +2,7 @@
 // Every surface (jobs to schedule, inquiries, appointments, captures to file,
 // money/legal clocks, leak detectors) projects onto ONE shape with ONE set of
 // canonical verbs, so a single list component and a single voice registry can
-// act on all of them.
+// act on all of them. On My Day it is Needs You.
 //
 // ── THE BADGE INVARIANT (the law; enforced by tests/badge-economy.test.ts) ──
 // A NUMBER on chrome = distinct items needing a HUMAN DECISION TODAY that the
@@ -10,20 +10,17 @@
 // No count may be the length of an unbounded or undated set — every counted
 // item carries an expiry: a date, a bounded window, or a rollup.
 //
-// Chores never badge; decisions badge. Overdue tasks scream through Today's 6's
-// red due-chips, not through chrome. Door labels ("Everything else · N",
-// "Office · N") are browse affordances, not badges — grey inventory only.
+// Chores never badge; decisions badge. TASKS AND REMINDERS ARE NEVER HERE: a job's
+// tasks live on the job's Tasks chip and a person's Reminders in Today's 6 (0358).
+// The old task/work_order kinds and their Convert sheet are gone (Wave 1, W1-16);
+// the registry keeps task.* and inquiry.convert for Nort. North's own bug reports
+// are not a company's decision either: they live on Bug Watch with its own count.
+// Door labels ("Everything else · N", "Office · N") are browse affordances, not
+// badges — grey inventory only.
 
 import type { SupplierPaperFeed } from "@/app/(app)/bills/supplier-papers";
 
 export type ActionKind =
-  // task/work_order are BADGE-EXEMPT and NO LONGER FED by getActionItems (the
-  // task feeder was deleted — an undated task counted as "due now" forever,
-  // violating the invariant above). The kinds stay in the union because the
-  // dispatch grammar (dispatch.ts resolve()) and the six-slot card's "…" sheet
-  // reuse the (kind, verb) → registry mapping. Do not re-feed them.
-  | "task" // an open to-do
-  | "work_order" // an open to-do tied to a job
   | "job_to_schedule" // a job with no date yet
   | "inquiry" // a new/uncontacted lead
   | "appointment" // a scheduled appt awaiting completion
@@ -37,7 +34,6 @@ export type ActionKind =
   | "quote_draft" // an estimate started and never sent — the lead it converted is invisible behind it
   | "lien_deadline" // a lien prelim/recording deadline coming due or past
   | "contract_unsigned" // a contract sent but not yet signed
-  | "bug_report" // an open bug reported from the field (owner watch)
   // ── The end-of-day money-leak sweep (the "Apache Ct" detectors) ──
   | "time_stray" // a time entry left running past its day, or closed with no job — hours nobody can bill
   | "job_unbilled_work" // a job worked recently with ZERO costs/materials recorded (the 30'-of-Romex leak)
@@ -54,27 +50,18 @@ export type ActionKind =
   // gone once it passes (supplier-pay-due.ts), so it badges honestly: a decision with an expiry.
   | "supplier_pay";
 
-/** The four urgency streams the inbox renders under. Order is the render order:
- *  money first (chase the dollars), then fresh leads, then today's work, then
- *  the things we're waiting on someone else for. */
-export type Stream = "money" | "leads" | "today" | "waiting";
+/** The four urgency streams, in the order Needs You is sorted: money first (chase the dollars), then
+ *  fresh leads, then today's work, then everything else. No headers are drawn for them any more
+ *  (Wave 1, W1-15: one flat list of plain chips); the rank is the sort's first key after "done".
+ *  The last is `other`, not `waiting`: the Waiting fold (the things waiting on someone else, each
+ *  with the day it comes back) arrives next, and it is a different thing from this rank. */
+export type Stream = "money" | "leads" | "today" | "other";
 
-export const STREAM_ORDER: Stream[] = ["money", "leads", "today", "waiting"];
-
-export const STREAM_LABEL: Record<Stream, string> = {
-  money: "Money",
-  leads: "Leads",
-  today: "Today",
-  waiting: "Waiting",
-};
+export const STREAM_ORDER: Stream[] = ["money", "leads", "today", "other"];
 
 /** Which stream each kind belongs to — assigned per-kind in ONE place so the
- *  grouped inbox and any digest/summary surface can never disagree. */
+ *  inbox and any digest/summary surface can never disagree. */
 export const KIND_STREAM: Record<ActionKind, Stream> = {
-  // task/work_order entries exist for type completeness + the dispatch grammar —
-  // the inbox never emits them (badge-exempt; see the invariant above).
-  task: "today",
-  work_order: "today",
   job_to_schedule: "today",
   inquiry: "leads",
   appointment: "today",
@@ -82,21 +69,20 @@ export const KIND_STREAM: Record<ActionKind, Stream> = {
   // estimates." Same species as invoice_draft — the work is done and nobody has asked for the
   // money yet — so it belongs in the money stream, not on the calendar it already left.
   inspection_writeup: "money",
-  organize: "waiting",
+  organize: "other",
   invoice_overdue: "money",
   quote_awaiting: "money",
   quote_accepted: "money", // a won deal is the freshest money event — renders at the very top
   invoice_draft: "money",
   visit_unbilled: "money",
   quote_draft: "money",
-  lien_deadline: "waiting", // compliance clock — legal, not A/R
-  contract_unsigned: "waiting",
-  bug_report: "waiting",
+  lien_deadline: "other", // compliance clock — legal, not A/R
+  contract_unsigned: "other",
   time_stray: "today", // a running/orphaned clock is today's cleanup, not tomorrow's
   job_unbilled_work: "money", // uncosted work = dollars leaking off the invoice
   job_needs_return: "today", // the return visit gets scheduled today or it gets forgotten
   materials_needed: "today", // the shopping run happens before the truck rolls — today's prep
-  job_on_hold: "waiting", // paused, waiting on something (material/task/customer) — the "did we forget this?" clock
+  job_on_hold: "other", // paused, waiting on something (material/task/customer) — the "did we forget this?" clock
   // A short costs the job $0 and bills nothing until the office files the roll and settles it:
   // dollars leaking off the invoice, the same species as job_unbilled_work.
   stock_short: "money",
@@ -109,7 +95,6 @@ export type Affordance =
   | "do" // mark complete / contacted
   | "schedule" // put on the calendar / pick a date
   | "assign" // give to a person
-  | "convert" // advance the pipeline (inquiry → estimate/job, capture → filed)
   | "snooze" // defer to a later date
   | "dismiss" // remove from my list (delete / cancel / archive)
   | "open"; // drill into the detail page
@@ -117,7 +102,7 @@ export type Affordance =
 export interface ActionItem {
   id: string;
   kind: ActionKind;
-  stream: Stream; // urgency stream (money/leads/today/waiting) — derived from kind via KIND_STREAM
+  stream: Stream; // urgency stream (money/leads/today/other) — derived from kind via KIND_STREAM
   title: string;
   subtitle?: string | null; // customer / job / vendor line
   who?: string | null; // assignee name
@@ -126,6 +111,10 @@ export interface ActionItem {
   done: boolean; // drives the universal "sinks to the bottom" rule
   href: string; // deep link for Open
   affordances: Affordance[]; // canonical verbs valid for THIS item
+  /** THE ROW'S CHIP, when this row's state has its own words (W1-15): "Billed, Not Paid" on a visit
+   *  whose invoice is open, "Clock Left Running", "On No Job", "Note To Review", "Bank Download",
+   *  "Request" with Leads off. Absent: the kind's own chip (KIND_META). */
+  chip?: string;
   /** supplier_paper only: the cards the rollup carries, and the jobs their pickers offer. */
   supplierPapers?: SupplierPaperFeed | null;
   /** inquiry with Leads switched off only (action-items/switches): the number Call Back dials. */
@@ -139,34 +128,45 @@ export interface ActionItem {
   noJobHours?: { entryIds: string[] } | null;
 }
 
+/**
+ * THE CHIP ON EACH ROW (Wave 1, W1-15): plain words, Title Case, saying the STATE the thing is in,
+ * never the verb (the row's own button or the page it opens is the verb). One flat list, no section
+ * headers, so the chip is what tells a lead from a bill at a glance. A row whose state has words of
+ * its own says them instead (ActionItem.chip). The tones are the ones each kind always had.
+ */
 export const KIND_META: Record<ActionKind, { label: string; tone: "slate" | "blue" | "amber" | "green" }> = {
-  task: { label: "Task", tone: "slate" },
-  work_order: { label: "Job task", tone: "blue" },
-  job_to_schedule: { label: "To schedule", tone: "amber" },
+  job_to_schedule: { label: "Needs A Day", tone: "amber" },
   inquiry: { label: "Lead", tone: "green" },
-  appointment: { label: "Appointment", tone: "blue" },
-  inspection_writeup: { label: "Write up the estimate", tone: "green" },
-  visit_unbilled: { label: "Done & paid?", tone: "green" },
-  quote_draft: { label: "Finish or send it", tone: "green" },
-  organize: { label: "To file", tone: "slate" },
-  invoice_overdue: { label: "Overdue invoice", tone: "amber" },
-  quote_awaiting: { label: "Awaiting reply", tone: "green" },
-  quote_accepted: { label: "Accepted — schedule it", tone: "green" },
-  invoice_draft: { label: "Draft invoice", tone: "slate" },
-  lien_deadline: { label: "Lien deadline", tone: "amber" },
-  contract_unsigned: { label: "Unsigned contract", tone: "blue" },
-  bug_report: { label: "Bug report", tone: "amber" },
-  time_stray: { label: "Stray time", tone: "amber" },
-  job_unbilled_work: { label: "No costs recorded", tone: "amber" },
-  job_needs_return: { label: "Nothing scheduled", tone: "blue" },
-  // Deliberately NOT "No costs recorded" (job_unbilled_work = nothing captured yet);
+  appointment: { label: "Not Closed Out", tone: "blue" },
+  inspection_writeup: { label: "Needs An Estimate", tone: "green" },
+  // Row override: "Billed, Not Paid" when an open invoice anchors the visit (query.ts).
+  visit_unbilled: { label: "Done, Not Billed", tone: "green" },
+  quote_draft: { label: "Not Sent", tone: "green" },
+  // Row overrides: "Note To Review" for a note, "Bank Download" for a bank download (query.ts).
+  organize: { label: "Paper To Sort", tone: "slate" },
+  invoice_overdue: { label: "Past Due", tone: "amber" },
+  quote_awaiting: { label: "No Reply Yet", tone: "green" },
+  quote_accepted: { label: "Won", tone: "green" },
+  invoice_draft: { label: "Not Sent", tone: "slate" },
+  lien_deadline: { label: "Lien Deadline", tone: "amber" },
+  contract_unsigned: { label: "Not Signed", tone: "blue" },
+  // Hours On No Job and a closed shift on no job; a clock still running says "Clock Left Running".
+  time_stray: { label: "On No Job", tone: "amber" },
+  job_unbilled_work: { label: "No Costs Yet", tone: "amber" },
+  job_needs_return: { label: "Needs A Day", tone: "blue" },
+  // Deliberately NOT "No Costs Yet" (job_unbilled_work = nothing captured yet);
   // this one means items ARE on the take-off and still need buying.
-  materials_needed: { label: "Materials needed", tone: "blue" },
-  job_on_hold: { label: "On hold", tone: "amber" },
-  stock_short: { label: "Settle", tone: "amber" },
-  supplier_paper: { label: "Supplier Bills", tone: "amber" },
-  supplier_pay: { label: "Discount", tone: "green" },
+  materials_needed: { label: "To Buy", tone: "blue" },
+  job_on_hold: { label: "On Hold", tone: "amber" },
+  stock_short: { label: "To Settle", tone: "amber" },
+  supplier_paper: { label: "To File", tone: "amber" },
+  supplier_pay: { label: "Discount Ends", tone: "green" },
 };
+
+/** The words on a row's chip: its own, else its kind's. */
+export function chipOf(item: Pick<ActionItem, "kind" | "chip">): string {
+  return item.chip ?? KIND_META[item.kind].label;
+}
 
 /** A TECH'S APPOINTMENT ROW OPENS, NOTHING MORE (Wave 0). Done and Delete dispatch to
  *  appointment.setStatus, which is staff-only, so on a tech's row they were doors that only
@@ -176,11 +176,8 @@ export function appointmentAffordances(isStaff: boolean): Affordance[] {
 }
 
 // The affordance matrix — which verbs each kind exposes. THE contract, consumed
-// by both the UI (<ActionList>) and (later) the voice registry. (Assign/Convert
-// land in a follow-up step with inline pickers.)
+// by both the UI (<ActionList>) and (later) the voice registry.
 export const AFFORDANCES: Record<ActionKind, Affordance[]> = {
-  task: ["do", "schedule", "assign", "snooze", "dismiss", "open"],
-  work_order: ["do", "schedule", "assign", "dismiss", "open"],
   job_to_schedule: ["schedule", "assign", "open"],
   // NO convert verb: that sheet was the pre-0230 five-target grammar, and for a JOB-tagged lead
   // it booked a job-TYPED APPOINTMENT (bypassing the designation-does-the-converting law, which
@@ -213,7 +210,6 @@ export const AFFORDANCES: Record<ActionKind, Affordance[]> = {
   quote_draft: ["open"],
   lien_deadline: ["open"],
   contract_unsigned: ["open"],
-  bug_report: ["open"], // triage on the Bug watch page
   // Detector findings are DERIVED rows (a time entry / a job), not their own records —
   // there's no field a snooze could write, and "dismiss" would hide a real money leak.
   // Open-only: the fix happens on the timecard / the job's costs tab / the job page.
@@ -239,20 +235,41 @@ export const AFFORDANCES: Record<ActionKind, Affordance[]> = {
 };
 
 /**
- * THE universal ordering rule, applied in one place so every surface inherits
- * it: not-done before done ("checked boxes go to the bottom"), then by urgency
- * (high first), then soonest scheduled time first (undated last). Stable.
+ * NEEDS YOU'S ONE ORDER (Wave 1, NY-list), applied ONCE, inside the build, before the list leaves the
+ * server: so the planner's top five are the right five, and every surface reading the list reads it
+ * in the same order.
+ *   1. not done before done ("checked boxes go to the bottom");
+ *   2. the stream: money, then leads, then today, then other (a money row with urgency 0 is above a
+ *      today row with urgency 2: the dollars come first);
+ *   3. urgency, high first;
+ *   4. when, oldest first. A row with no date counts as TODAY (not as last): a rollup like Supplier
+ *      Bills or Hours On No Job is today's business, never pushed below a row dated tomorrow.
+ * Ties keep the build's own order (a stable sort), so the rows the build places on purpose (Supplier
+ * Bills, Pay <Supplier>, Hours On No Job) stay where it put them among their equals. `todayStr` is the
+ * company's today (YYYY-MM-DD).
  */
-export function sortActionItems(items: ActionItem[]): ActionItem[] {
+export function sortActionItems<T extends Pick<ActionItem, "done" | "urgency" | "when" | "kind"> & { stream?: Stream }>(
+  items: T[],
+  todayStr: string,
+): T[] {
+  const today = Date.parse(`${todayStr}T00:00:00Z`);
+  const whenMs = (w: string | null | undefined) => {
+    const t = w ? Date.parse(w) : NaN;
+    return Number.isFinite(t) ? t : today;
+  };
+  const rank = (it: T) => STREAM_ORDER.indexOf(it.stream ?? KIND_STREAM[it.kind]);
   return items
     .map((it, i) => ({ it, i }))
     .sort((a, b) => {
       if (a.it.done !== b.it.done) return a.it.done ? 1 : -1;
+      const ra = rank(a.it);
+      const rb = rank(b.it);
+      if (ra !== rb) return ra - rb;
       if (a.it.urgency !== b.it.urgency) return b.it.urgency - a.it.urgency;
-      const aw = a.it.when ? Date.parse(a.it.when) : Infinity;
-      const bw = b.it.when ? Date.parse(b.it.when) : Infinity;
-      if (aw !== bw) return aw - bw;
-      return a.i - b.i; // stable
+      const wa = whenMs(a.it.when);
+      const wb = whenMs(b.it.when);
+      if (wa !== wb) return wa - wb;
+      return a.i - b.i; // stable: the build's own order
     })
     .map(({ it }) => it);
 }

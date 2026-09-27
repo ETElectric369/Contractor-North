@@ -170,8 +170,16 @@ describe("the chrome's other numbers", () => {
     expect(layout).toMatch(/\.eq\("status", "new"\)\s*\.is\("converted_at", null\)/);
   });
 
-  it("the bell counts unread notifications only", () => {
-    expect(read("components/app-shell/notification-bell.tsx")).toContain("const unread = items.filter((n) => !n.read_at).length;");
+  it("the bell counts unread notifications only, as the database counts them (never the 20 lines it shows)", () => {
+    const bell = read("components/app-shell/notification-bell.tsx");
+    expect(bell).toContain("const badge = bellBadge(unread);");
+    expect(bell).toContain("setUnread(r.unread);");
+    expect(bell).not.toContain("items.filter((n) => !n.read_at).length");
+    // The count is an exact head count of the unread lines, the partial index's own predicate.
+    const actions = read("app/(app)/notification-actions.ts");
+    expect(actions).toMatch(/\.select\("id", \{ count: "exact", head: true \}\)\.eq\("user_id", user\.id\)\.is\("read_at", null\)/);
+    // 9+ above nine, and nothing at zero.
+    expect(read("lib/bell-words.ts")).toContain('return n > 9 ? "9+" : String(n);');
   });
 
   it("the section sheet's handle carries no page-count pill", () => {

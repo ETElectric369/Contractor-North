@@ -14,6 +14,8 @@ import { JOB_STATUSES, jobStatusLabel } from "@/lib/job-status";
 import { setJobContact, setJobHold, sizeAppointment, sizeJob } from "./actions";
 import { usePlacement } from "./placement-context";
 import { WorkShapeControls } from "@/components/work-shape-controls";
+import { ComeBackPicker } from "@/components/come-back-picker";
+import { backWords, comeBackDue, type ComeBackWhen } from "@/lib/come-back-days";
 import { armedInstruction } from "@/lib/schedule/placement-plan";
 import {
   groupByTown,
@@ -72,7 +74,14 @@ function prettyTime(hm: string): string {
   return m[2] === "00" ? `${h12}${suffix}` : `${h12}:${m[2]}${suffix}`;
 }
 
-export function PlaceRail({ items }: { items: Placeable[] }) {
+export function PlaceRail({
+  items,
+  todayStr,
+}: {
+  items: Placeable[];
+  /** The company's today (YYYY-MM-DD): a held card's "Back Oct 3", and the day the hold picker works out. */
+  todayStr?: string;
+}) {
   const router = useRouter();
   const toast = useToast();
   const [pending, start] = useTransition();
@@ -98,9 +107,9 @@ export function PlaceRail({ items }: { items: Placeable[] }) {
    *  calendar; only the box picks. Editing and placing are different intents, one card. */
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
-  /** Which job is typing its hold reason. */
+  /** Which job is picking its hold (why, and the day it comes back). */
   const [holdFor, setHoldFor] = useState<string | null>(null);
-  const [holdReason, setHoldReason] = useState("");
+  const [holdErr, setHoldErr] = useState<string | null>(null);
 
   /** The driveway entry — a phone heard out loud goes straight in. Blank never erases. A lead's
    *  contact is its own; a job's rides its customer (setJobContact's fill-only rule). */
@@ -113,13 +122,18 @@ export function PlaceRail({ items }: { items: Placeable[] }) {
     });
   }
 
-  /** Park with a reason, or wake. */
-  function hold(id: string, reason: string | null) {
+  /** Park with a reason and the day it comes back, change a held job's reason (its day stays), or
+   *  wake. A refused park keeps the picker open with the words under it. */
+  function hold(id: string, reason: string | null, when?: ComeBackWhen) {
     start(async () => {
-      const res = await setJobHold(id, reason);
-      if (!res.ok) { toast(res.error ?? "Couldn't change that.", "error"); return; }
+      setHoldErr(null);
+      const res = await setJobHold(id, reason, when);
+      if (!res.ok) {
+        if (holdFor === id) setHoldErr(res.error ?? "Couldn't change that.");
+        else toast(res.error ?? "Couldn't change that.", "error");
+        return;
+      }
       setHoldFor(null);
-      setHoldReason("");
       router.refresh();
     });
   }
@@ -230,6 +244,12 @@ export function PlaceRail({ items }: { items: Placeable[] }) {
                                   waiting on the permit" tells you what wakes it. */}
                               on hold{i.holdReason ? ` — ${i.holdReason}` : ""}
                             </Badge>
+                          )}
+                          {/* THE DAY IT COMES BACK, ON THE CARD (text to visual, 0366): "Back Oct 3",
+                              amber "Back Today" once it has come (or "No Day Set" for a hold from
+                              before the day existed). No chip while the database has no day yet. */}
+                          {i.onHold && todayStr && i.holdUntil !== undefined && (
+                            <Badge tone={comeBackDue(i.holdUntil, todayStr) ? "amber" : "slate"}>{backWords(i.holdUntil, todayStr)}</Badge>
                           )}
                         </span>
                         {i.address && (
@@ -352,8 +372,10 @@ export function PlaceRail({ items }: { items: Placeable[] }) {
                             hold button is weird it should be the same kind picker flow as
                             everything else: continuity is our friend." One more small select —
                             the job-status spine, same as the job page's dropdown. Picking On hold
-                            opens the why-input (a hold has a reason, 0234); any other pick moves
-                            the status and the reason dies with the hold (setJobStatus clears it). */}
+                            opens the come-back picker (a hold has a reason, 0234, and a day it comes
+                            back, 0366: In A Week unless another is picked); any other pick moves the
+                            status and the reason and the day die with the hold (the database clears
+                            them, jobs_hold_day). */}
                         {i.kind === "job" && (
                           <span className="flex flex-wrap items-center gap-1.5">
                             <select
@@ -362,8 +384,8 @@ export function PlaceRail({ items }: { items: Placeable[] }) {
                               onChange={(e) => {
                                 const v = e.target.value;
                                 if (v === "on_hold" && !i.onHold) {
+                                  setHoldErr(null);
                                   setHoldFor(i.id);
-                                  setHoldReason(i.holdReason ?? "");
                                   return;
                                 }
                                 setHoldFor(null);
@@ -373,7 +395,7 @@ export function PlaceRail({ items }: { items: Placeable[] }) {
                                   router.refresh();
                                 });
                               }}
-                              className="h-8 rounded-md border border-slate-200 bg-white px-1.5 text-xs disabled:opacity-50"
+                              className="h-11 rounded-md border border-slate-200 bg-white px-2 text-sm disabled:opacity-50"
                               aria-label="Job status"
                             >
                               {JOB_STATUSES.map((st) => (
@@ -383,29 +405,24 @@ export function PlaceRail({ items }: { items: Placeable[] }) {
                               ))}
                             </select>
                             {holdFor === i.id && (
-                              <>
-                                <input
+                              <span className="block w-full">
+                                <ComeBackPicker
+                                  label="Hold It"
+                                  requireWhy
                                   autoFocus
-                                  value={holdReason}
-                                  onChange={(e) => setHoldReason(e.target.value)}
-                                  onKeyDown={(e) => {
-                                    if (e.key === "Enter") { e.preventDefault(); hold(i.id, holdReason); }
-                                    if (e.key === "Escape") setHoldFor(null);
+                                  initialWhy={i.holdReason ?? ""}
+                                  todayStr={todayStr}
+                                  pending={pending}
+                                  error={holdErr}
+                                  onCancel={() => {
+                                    setHoldFor(null);
+                                    setHoldErr(null);
                                   }}
-                                  placeholder="Why? — waiting on the permit"
-                                  aria-label="Why is this on hold"
-                                  className="h-8 w-56 rounded-md border border-brand/60 px-1.5 text-xs"
+                                  onSubmit={({ why, when }) => hold(i.id, why, when)}
                                 />
-                                <button
-                                  type="button"
-                                  onClick={() => hold(i.id, holdReason)}
-                                  className="h-8 rounded-md bg-brand px-2 text-xs font-semibold text-white"
-                                >
-                                  Hold it
-                                </button>
-                              </>
+                              </span>
                             )}
-                            {/* An already-held job edits its reason right here. */}
+                            {/* An already-held job edits its reason right here; its day stays. */}
                             {i.onHold && holdFor !== i.id && (
                               <input
                                 defaultValue={i.holdReason ?? ""}
@@ -416,7 +433,7 @@ export function PlaceRail({ items }: { items: Placeable[] }) {
                                 }}
                                 placeholder="Why? — waiting on the permit"
                                 aria-label="Why is this on hold"
-                                className="h-8 w-56 rounded-md border border-slate-200 px-1.5 text-xs"
+                                className="h-11 w-56 max-w-full rounded-md border border-slate-200 px-2 text-sm"
                               />
                             )}
                           </span>
