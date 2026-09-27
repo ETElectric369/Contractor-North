@@ -175,6 +175,19 @@ async function buildActionItems(ctx: {
         .then((summary) => ({ summary, failed: summary === null }))
         .catch(() => ({ summary: null, failed: true }))
     : Promise.resolve({ summary: null, failed: false });
+  // The rollup's Already Billed door (1b below) asks whether a sent invoice with no job could hold
+  // hours: chained off the rollup's own read, only when it found shifts, so its two reads ride beside
+  // the fan-out instead of adding a serial wave to every staff build. A lost read offers the door.
+  const noJobReachP: Promise<boolean> = noJobP.then(async (n) => {
+    if (!isStaff || !n.summary?.shifts.length) return false;
+    try {
+      const { data: me } = await supabase.from("profiles").select("org_id").eq("id", userId).maybeSingle();
+      const orgId = String((me as { org_id?: string | null } | null)?.org_id ?? "");
+      return orgId ? (await readNoJobHoursReach(supabase, orgId, [])).canHold : true;
+    } catch {
+      return true;
+    }
+  });
 
   const [jobsR, inqR, apptR, orgR, invR, quoteR, acceptedR, draftR, conR, lienR, bugR, openTimeR, recentTimeR, nonBillableR, matJobsR, matSegR, inspR, inspQuoteR, billedJobR, doneWorkR, draftQuoteR] = await Promise.all([
     // Unscheduled jobs — staff only (the "resting place" for things needing a date).
@@ -895,18 +908,9 @@ async function buildActionItems(ctx: {
     // billed by typing a line on an invoice with no job. The line offers the door only when a sent
     // invoice with no job could hold hours (a door onto a sheet with no line to pick is a dead end),
     // with nothing ticked to start (the sheet lists every open shift; he ticks what the line charged).
-    // A lost read offers the door, as the per-shift rows did (the sheet says what it finds).
-    if (item && isStaff && noJob.summary?.shifts.length) {
-      let canHold = true;
-      try {
-        const { data: me } = await supabase.from("profiles").select("org_id").eq("id", userId).maybeSingle();
-        const orgId = String((me as { org_id?: string | null } | null)?.org_id ?? "");
-        if (orgId) canHold = (await readNoJobHoursReach(supabase, orgId, [])).canHold;
-      } catch {
-        canHold = true;
-      }
-      if (canHold) item.noJobHours = { entryIds: [] };
-    }
+    // A lost read offers the door, as the per-shift rows did (the sheet says what it finds). The
+    // reach was started with the rollup's read (noJobReachP), never here after the fan-out.
+    if (item && isStaff && noJob.summary?.shifts.length && (await noJobReachP)) item.noJobHours = { entryIds: [] };
     if (item) items.push(item);
   }
 

@@ -84,6 +84,11 @@ describe("badge economy: the inbox is decisions-only (the task feeder stays dead
     expect(querySrc).toContain("noJobHoursActionItem(noJob.summary, { failed: noJob.failed })");
     expect(querySrc).toContain(".filter((f) => f.openStill || !tz)");
     expect(querySrc).toContain("readNoJobHours(supabase, { tz, todayStr })");
+    // The rollup's Already Billed door reads its reach beside the fan-out (chained off the rollup's
+    // own read), never as two serial reads after it on every staff build.
+    expect(querySrc).toContain("const noJobReachP: Promise<boolean> = noJobP.then(");
+    expect(querySrc.indexOf("const noJobReachP")).toBeLessThan(querySrc.indexOf("await Promise.all(["));
+    expect(querySrc.match(/readNoJobHoursReach\(supabase, orgId, \[\]\)/g)).toHaveLength(1);
     expect(querySrc).not.toContain('kind: "time_stray",\n      title: `Hours On No Job');
     expect(KIND_STREAM.time_stray).toBe("today");
     expect(AFFORDANCES.time_stray).toEqual(["open"]);
