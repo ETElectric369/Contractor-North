@@ -160,6 +160,46 @@ describe("Nort's tools are described for any trade", () => {
   });
 });
 
+/**
+ * A PLACEHOLDER IS AN EXAMPLE. "Circuit Map" sat in the title box of the Papers card every company
+ * sees. Every placeholder outside the Panel screens (whose subject is circuits) names no
+ * electrician's thing.
+ */
+const PANEL_SCREENS = /(panel|breaker|circuit)[^/]*\.tsx$/i;
+
+function placeholderHits(): string[] {
+  const hits: string[] = [];
+  for (const abs of sourceFiles(join(ROOT, "src"))) {
+    const file = relative(ROOT, abs);
+    if (!file.endsWith(".tsx") || PANEL_SCREENS.test(file) || FIXTURE.some((r) => r.test(file))) continue;
+    const text = readFileSync(abs, "utf8");
+    if (!text.includes("placeholder")) continue;
+    const sf = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+    const walk = (n: ts.Node) => {
+      if (ts.isJsxAttribute(n) && n.name.getText(sf) === "placeholder" && n.initializer) {
+        const said = n.initializer.getText(sf);
+        const m = said.match(ELECTRICIAN_WORDS);
+        if (m) hits.push(`${file}: "${m[0]}" in ${said.slice(0, 100)}`);
+      }
+      ts.forEachChild(n, walk);
+    };
+    walk(sf);
+  }
+  return hits;
+}
+
+describe("no placeholder outside the Panel screens is an electrician's example", () => {
+  it("finds none", () => {
+    expect(placeholderHits()).toEqual([]);
+  }, SCAN_TIMEOUT);
+
+  it("the Panel screens are the ones allowed, and only by name", () => {
+    expect(PANEL_SCREENS.test("src/app/(app)/jobs/[id]/job-panel.tsx")).toBe(true);
+    expect(PANEL_SCREENS.test("src/app/(app)/jobs/[id]/place-breaker-sheet.tsx")).toBe(true);
+    expect(PANEL_SCREENS.test("src/app/(app)/jobs/[id]/job-portal-papers.tsx")).toBe(false);
+  });
+});
+
 describe("Nort is told the same thing the guard enforces", () => {
   it("examples are the company's own, or shapes", () => {
     expect(NORT_EXAMPLES_RULE).toContain("THIS company");
