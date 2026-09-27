@@ -157,6 +157,23 @@ describe("a crew lead on this visit: fills it in, never a price", () => {
     }
   });
 
+  it("a file question: he adds through a 44px door, and never takes the office's file off", () => {
+    const withFile = {
+      ...SHEET,
+      playbook: { needs: [...SHEET.playbook.needs, { key: "plans", label: "Plans", ask: "Upload the plans", slot: { type: "file", multi: true } }] },
+    };
+    const planPath = "org-1/appointments/appt-1/1700000000000-plans.pdf";
+    const over = { templates: [withFile], initialAnswers: { ...ANSWERS, plans: [planPath] } };
+    const crewHtml = render("crewLead", over);
+    expect(textOf(crewHtml)).toContain("plans.pdf");
+    const door = crewHtml.match(/<label[^>]*>(?:(?!<\/label>)[\s\S])*Add Files[\s\S]*?<\/label>/)?.[0] ?? "";
+    expect(door).toMatch(TARGET);
+    expect(door).toContain('type="file"');
+    expect(buttons(crewHtml).map((b) => b.text)).not.toContain("Remove");
+    // The office still takes one off.
+    expect(buttons(render("office", over)).map((b) => b.text)).toContain("Remove");
+  });
+
   it("with no questions set up, he is told it's the office's, and notes and photos still save", () => {
     const none = textOf(render("crewLead", { templates: [], initialTemplateId: null, initialAnswers: {} }));
     expect(none).toContain("The office hasn't set up walk-through questions yet. Notes, measurements and photos below still save.");

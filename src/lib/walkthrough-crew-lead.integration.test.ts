@@ -16,7 +16,8 @@ import { mintThrowawayOrg } from "@/lib/throwaway-org.db-fixture";
  *     through save_walkthrough_capture; quote_id stays the office's;
  *   · he cannot take a photo off, add one from another folder or one he didn't upload himself (so a
  *     photo the office took off stays off, though its file is still in the folder), touch a priced answer (add, change or
- *     clear), switch or clear a saved sheet, or name a form that isn't a walk-through sheet;
+ *     clear), take a file off a file question (he adds only his own uploads), switch or clear a
+ *     saved sheet, or name a form that isn't a walk-through sheet;
  *   · a crew lead NOT on the visit, a plain tech (who can READ his visit under 0227), another
  *     company's crew lead and a deactivated crew lead are all refused, and nothing moves;
  *   · the function writes only the capture columns, and a crew lead has no UPDATE on appointments;
@@ -158,6 +159,7 @@ d("a crew lead fills in the walk-through (0356)", () => {
             needs: [
               { key: "work", label: "Work", ask: "What work?", slot: { type: "select", options: ["Deck", "Remodel"] } },
               { key: "scope", label: "Scope", ask: "Which scopes?", slot: { type: "scopes" } },
+              { key: "plans", label: "Plans", ask: "Upload the plans", slot: { type: "file", multi: true } },
             ],
           }),
         ],
@@ -271,6 +273,27 @@ d("a crew lead fills in the walk-through (0356)", () => {
     expect((await save(leadId, apptA, null, sheetId, { work: "Deck" })).error).toBeNull();
     a = await row(apptA);
     expect(a.answers).toEqual({ work: "Deck", scope: [{ code: "R1", qty: 1, price: 500 }] });
+  });
+
+  it("a file question's files: the office's stay whatever he sends, and he adds only his own uploads", async () => {
+    const plan = await plant(`${prefixA}10-office-plans.pdf`, ownerId);
+    const gone = await plant(`${prefixA}11-office-removed.pdf`, ownerId);
+    expect((await save(ownerId, apptA, null, sheetId, { work: "Deck", plans: [plan, gone] })).error).toBeNull();
+    expect((await save(ownerId, apptA, null, sheetId, { work: "Deck", plans: [plan] })).error).toBeNull();
+    // His Remove (an empty list) or leaving the question out saves the rest, and the office's plan stays.
+    expect((await save(leadId, apptA, null, sheetId, { work: "Remodel", plans: [] })).error).toBeNull();
+    expect((await row(apptA)).answers).toMatchObject({ work: "Remodel", plans: [plan] });
+    expect((await save(leadId, apptA, null, sheetId, { work: "Remodel" })).error).toBeNull();
+    expect((await row(apptA)).answers.plans).toEqual([plan]);
+    // A stale page's list (with the file the office took off), a path nobody uploaded and another
+    // folder's file are left out; his own upload is added after the office's.
+    const his = await plant(`${prefixA}12-lead-plans.pdf`, leadId);
+    const r = await save(leadId, apptA, null, sheetId, {
+      work: "Remodel",
+      plans: [gone, plan, his, `${prefixA}13-never-uploaded.pdf`, `${orgId}/employees/pay.pdf`],
+    });
+    expect(r.error).toBeNull();
+    expect((await row(apptA)).answers.plans).toEqual([plan, his]);
   });
 
   it("the sheet: he sets the first one; switching or clearing a saved one, or naming a non-sheet, is refused", async () => {

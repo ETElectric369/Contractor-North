@@ -49,6 +49,9 @@
 --        off is the office's, and so it STAYS off: a photo the office took off (its file is still in
 --        the visit's folder) is not his to put back, whether a stale page or a direct call sends it.
 --        The app sends only the photos he just took (addInspectionPhotos), never his page's list.
+--      · A FILE QUESTION'S FILES (slot.type = 'file': a list of storage paths) the same way: every
+--        file already on the answer stays whatever his save sends, and he adds only files he
+--        uploaded himself under this visit's folder; anything else he sends for it is left out.
 --    For everyone: quote_id inside capture (the write-up backlink saveQuote stamps) is never the
 --    caller's to write; it is carried from the stored row. A sheet id must be one of the company's
 --    walk-through sheets.
@@ -170,6 +173,11 @@ declare
   v_prefix  text;
   v_scopes  text[];
   v_keep    text[];
+  v_files   text[];                                  -- the sheet's file questions
+  v_k       text;
+  v_had     jsonb;
+  v_sent    jsonb;
+  v_list    jsonb;
   v_id      uuid;
 begin
   if v_uid is null or v_org is null then
@@ -298,6 +306,45 @@ begin
              end;
       v_answers := (p_answers - v_keep)
         || coalesce((select jsonb_object_agg(k, v_old -> k) from unnest(v_keep) k where v_old ? k), '{}'::jsonb);
+
+      -- A FILE QUESTION'S FILES are held like the photos: every file already on the answer stays
+      -- (whatever his payload says: a stale page, a Remove, a branch his answer turned off), and he
+      -- adds only files he uploaded himself under this visit's folder. Anything else he sends for
+      -- that question (a file the office took off, someone else's upload) is left out, the office's
+      -- answer standing, the same way a priced answer keeps what is stored.
+      v_prefix := v_org::text || '/appointments/' || v_appt.id::text || '/';
+      select coalesce(array_agg(distinct btrim(left(btrim(n ->> 'key'), 80))), '{}'::text[]) into v_files
+        from public.forms f
+        cross join lateral jsonb_array_elements(
+          case
+            when jsonb_typeof(f.playbook) = 'array' then f.playbook
+            when jsonb_typeof(f.playbook -> 'needs') = 'array' then f.playbook -> 'needs'
+            else '[]'::jsonb
+          end) n
+       where f.org_id = v_org
+         and f.id in (p_template_id, v_appt.inspection_template_id)
+         and jsonb_typeof(n) = 'object'
+         and n -> 'slot' ->> 'type' = 'file';
+      foreach v_k in array v_files loop
+        continue when v_k = any (v_keep);
+        v_had := case jsonb_typeof(v_old -> v_k) when 'array' then v_old -> v_k when 'string' then jsonb_build_array(v_old -> v_k) else '[]'::jsonb end;
+        v_sent := case jsonb_typeof(v_answers -> v_k) when 'array' then v_answers -> v_k when 'string' then jsonb_build_array(v_answers -> v_k) else '[]'::jsonb end;
+        select v_had || coalesce(jsonb_agg(x.p order by x.i), '[]'::jsonb) into v_list
+          from (
+            select distinct on (e.p) e.p, e.i
+              from jsonb_array_elements(v_sent) with ordinality e(p, i)
+             where jsonb_typeof(e.p) = 'string'
+               and not (v_had @> jsonb_build_array(e.p))
+               and left(e.p #>> '{}', length(v_prefix)) = v_prefix
+               and position('..' in (e.p #>> '{}')) = 0
+               and exists (
+                 select 1 from storage.objects o
+                  where o.bucket_id = 'documents' and o.name = e.p #>> '{}' and o.owner_id = v_uid::text)
+             order by e.p, e.i
+          ) x;
+        v_answers := case when jsonb_array_length(v_list) = 0 then v_answers - v_k
+                          else v_answers || jsonb_build_object(v_k, v_list) end;
+      end loop;
     end if;
   end if;
 
@@ -316,7 +363,7 @@ begin
 end $$;
 
 comment on function public.save_walkthrough_capture(uuid, jsonb, uuid, jsonb) is
-  'The walk-through''s capture columns (capture, inspection_template_id, inspection_answers) for the office or the crew lead ON the visit (0356). A crew lead cannot touch a priced answer, switch a stored sheet, or take a photo off. quote_id is never the caller''s. With nothing to save it only answers whether the caller may.';
+  'The walk-through''s capture columns (capture, inspection_template_id, inspection_answers) for the office or the crew lead ON the visit (0356). A crew lead cannot touch a priced answer, switch a stored sheet, or take a photo or a file-question file off (he adds only his own uploads). quote_id is never the caller''s. With nothing to save it only answers whether the caller may.';
 
 revoke execute on function public.save_walkthrough_capture(uuid, jsonb, uuid, jsonb) from public, anon;
 grant execute on function public.save_walkthrough_capture(uuid, jsonb, uuid, jsonb) to authenticated, service_role;

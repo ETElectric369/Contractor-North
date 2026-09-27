@@ -896,30 +896,39 @@ export function Inspector({
       };
       return (
         <DropTarget onFiles={(files) => void uploadSlotFiles(files)} accept={ACCEPT_ATTR} multiple={n.slot.multi !== false} label="Drop the Plans" className="rounded-lg border border-dashed border-slate-300 p-2">
-          <input
-            type="file"
-            multiple={n.slot.multi !== false}
-            accept={ACCEPT_ATTR}
-            disabled={uploading}
-            onChange={(e) => {
-              const files = Array.from(e.target.files ?? []);
-              e.target.value = "";
-              void uploadSlotFiles(files);
-            }}
-            className="block w-full text-sm text-slate-600 file:mr-3 file:rounded-full file:border-0 file:bg-slate-900 file:px-3 file:py-1.5 file:text-xs file:text-white"
-          />
+          {/* A 44px door, not the browser's own file button (a thumb-sized target on the truck). The
+              input rides inside its label, so tapping anywhere on it opens the picker. */}
+          <label className="inline-flex min-h-[44px] cursor-pointer items-center gap-2 rounded-full bg-slate-900 px-4 text-sm font-medium text-white has-[:disabled]:cursor-default has-[:disabled]:opacity-50">
+            {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />} Add Files
+            <input
+              type="file"
+              multiple={n.slot.multi !== false}
+              accept={ACCEPT_ATTR}
+              disabled={uploading}
+              onChange={(e) => {
+                const files = Array.from(e.target.files ?? []);
+                e.target.value = "";
+                void uploadSlotFiles(files);
+              }}
+              className="sr-only"
+            />
+          </label>
           {have.length > 0 && (
             <ul className="mt-1.5 space-y-0.5">
               {have.map((path) => (
-                <li key={path} className="flex items-center justify-between gap-2 text-xs text-slate-600">
+                <li key={path} className="flex min-h-[44px] items-center justify-between gap-2 text-xs text-slate-600">
                   <span className="truncate">{uploadDisplayName(path)}</span>
-                  <button
-                    type="button"
-                    onClick={() => setAnswer(n.key, have.filter((x) => x !== path))}
-                    className="min-h-[44px] shrink-0 px-2 text-slate-400 underline-offset-2 hover:underline"
-                  >
-                    Remove
-                  </button>
+                  {/* Taking a file off is the office's, like a photo: a crew lead adds, and 0356 keeps
+                      every file already on the answer whatever his save sends. */}
+                  {office && (
+                    <button
+                      type="button"
+                      onClick={() => setAnswer(n.key, have.filter((x) => x !== path))}
+                      className="min-h-[44px] shrink-0 px-2 text-slate-400 underline-offset-2 hover:underline"
+                    >
+                      Remove
+                    </button>
+                  )}
                 </li>
               ))}
             </ul>
