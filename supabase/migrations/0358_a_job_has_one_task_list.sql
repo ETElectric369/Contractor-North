@@ -49,8 +49,10 @@
 -- THE TRIGGER ALSO SAYS NO IN WORDS. The policies are the boundary; the trigger runs first and
 -- refuses the same cross-company job, a teammate who isn't on the team, and a photo from another
 -- company's folder with a sentence a person can read instead of "violates row-level security". It
--- also holds the delete rule's side door: only the office or whoever added a task may take it OFF
--- its job (a tech turning an office task into his own Reminder would clear it off the crew's list).
+-- also holds the delete rule's side doors: only the office or whoever added a task may MOVE it —
+-- off its job (a tech turning an office task into his own Reminder would clear it off the crew's
+-- list), onto another job, or under another task (a step goes when its task is deleted, so an
+-- office task put under a tech's own one would go with his Delete).
 --
 -- PRIVILEGED WRITERS (a migration, the service role, an ops repair — is_privileged_writer, 0154)
 -- keep what they write for the stamps, the way 0254 treats them. The company checks (job, person,
@@ -147,11 +149,13 @@ begin
         new.done_photo_path := null;
       end if;
     else
-      -- Taking a task off its job is the delete rule's business: the office, or whoever added it.
-      -- (Otherwise a tech could clear an office task off the crew's list by making it a Reminder.)
-      if old.job_id is not null and new.job_id is null
+      -- Moving a task is the delete rule's business: the office, or whoever added it. Off its job
+      -- (a tech would clear an office task off the crew's list by making it a Reminder), onto
+      -- another job, or under another task (parent_id cascades on delete, so an office task put
+      -- under a tech's own task would go when he deletes his).
+      if (new.job_id is distinct from old.job_id or new.parent_id is distinct from old.parent_id)
          and not public.is_org_staff() and old.created_by is distinct from auth.uid() then
-        raise exception 'Only the office or whoever added this task can take it off the job. You can still check it off.'
+        raise exception 'Only the office or whoever added this task can move it. You can still check it off.'
           using errcode = '42501';
       end if;
       -- Who added it and when never change.

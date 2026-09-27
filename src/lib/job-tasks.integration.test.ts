@@ -1,9 +1,16 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import pg from "pg";
 import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { mintThrowawayOrg } from "@/lib/throwaway-org.db-fixture";
 import { assertTestDatabase } from "@/lib/db-guard";
+
+const MIGRATION_0358 = "0358_a_job_has_one_task_list.sql";
+// The test database's steps and their md5s, as rebuild.cjs records them (one list, steps.cjs).
+const { stepsOnDisk } = createRequire(import.meta.url)("../../scripts/test-db/steps.cjs") as {
+  stepsOnDisk: () => { name: string; md5: string }[];
+};
 
 /**
  * Migration 0358 — a job has one task list, exercised where the boundary lives.
@@ -20,8 +27,9 @@ import { assertTestDatabase } from "@/lib/db-guard";
  * transaction it can `set local role authenticated` and plant request.jwt.claims (what auth.uid()
  * reads). Everything is minted inside the one transaction — a TEST company (owner + two techs) and a
  * TEST stranger company — and rolled back (throwaway-org.db-fixture). If 0358 is not on this database
- * yet it is applied inside that same transaction, rolled back with it (the materials-crew-boundary
- * suite's pattern); applying 0358 to the test database turns that into a no-op.
+ * yet, or the database's is older than the file (its recorded md5 differs), the file is applied inside
+ * that same transaction, rolled back with it (the materials-crew-boundary suite's pattern); applying
+ * this 0358 to the test database turns that into a no-op.
  *
  * Same creds gate as rls.integration.test.ts; skips cleanly without them:
  *   TEST_DB_HOST=… TEST_DB_USER=… TEST_DBPW=… npm test
@@ -89,14 +97,23 @@ d("tasks: a job has one task list, and a Reminder is private (0358)", () => {
     await assertTestDatabase(client);
     await client.query("begin");
 
+    // THIS FILE's 0358, not just any: the ledger's md5 (rebuild.cjs, steps.cjs) says whether the
+    // database carries the migration as it is on disk. Missing, or applied before an edit: the file is
+    // applied inside this transaction (it is safe to re-run) and rolled back with it.
     const { rows: [has] } = await client.query(
-      "select exists (select 1 from pg_trigger where tgname = 'tasks_stamp_who' and tgrelid = 'public.tasks'::regclass) as yes",
+      "select exists (select 1 from pg_trigger where tgname = 'tasks_stamp_who' and tgrelid = 'public.tasks'::regclass) as yes, to_regclass('public.cn_test_migrations') is not null as ledger",
     );
-    if (!has.yes) {
-      await client.query(
-        readFileSync(fileURLToPath(new URL("../../supabase/migrations/0358_a_job_has_one_task_list.sql", import.meta.url)), "utf8"),
+    const step = stepsOnDisk().find((s) => s.name === MIGRATION_0358);
+    const recorded = has.ledger
+      ? (((await client.query("select md5 from public.cn_test_migrations where name = $1", [MIGRATION_0358])).rows[0]?.md5 ?? null) as string | null)
+      : null;
+    if (!has.yes || !step || recorded !== step.md5) {
+      await client.query(readFileSync(fileURLToPath(new URL(`../../supabase/migrations/${MIGRATION_0358}`, import.meta.url)), "utf8"));
+      console.warn(
+        has.yes
+          ? "[job-tasks] this database's 0358 isn't the file on disk (edited since it was applied); the file was applied inside the test's own transaction, which is rolled back."
+          : "[job-tasks] 0358 is not on this database yet; applied inside the test's own transaction, which is rolled back.",
       );
-      console.warn("[job-tasks] 0358 is not on this database yet; applied inside the test's own transaction, which is rolled back.");
     }
 
     const org = await mintThrowawayOrg(client, { label: "0358", techs: 2 });
@@ -277,7 +294,37 @@ d("tasks: a job has one task list, and a Reminder is private (0358)", () => {
     await as(techId);
     const r = await refused("update tasks set job_id = null, assigned_to = $2 where id = $1", [officeTaskId, techId]);
     expect(r?.code).toBe("42501");
-    expect(r?.message).toMatch(/Only the office or whoever added this task can take it off the job/);
+    expect(r?.message).toMatch(/Only the office or whoever added this task can move it/);
+    expect((await landed(officeTaskId)).job_id).toBe(jobId);
+  });
+
+  it("nor by putting it under his own task and deleting that (a step goes with its task)", async () => {
+    await as(techId);
+    const { rows: [mine] } = await client.query("insert into tasks (job_id, title) values ($1, 'TEST 0358 his decoy') returning id", [jobId]);
+    const r = await refused("update tasks set parent_id = $2 where id = $1", [officeTaskId, mine.id]);
+    expect(r?.code).toBe("42501");
+    expect(r?.message).toMatch(/Only the office or whoever added this task can move it/);
+    await as(techId);
+    expect((await client.query("delete from tasks where id = $1", [mine.id])).rowCount).toBe(1);
+    const still = await landed(officeTaskId);
+    expect(still).not.toBeNull();
+    expect(still.job_id).toBe(jobId);
+  });
+
+  it("nor by moving it to another of the company's jobs; the office and whoever added a task can move it", async () => {
+    await as(techId);
+    const r = await refused("update tasks set job_id = $2 where id = $1", [officeTaskId, job2Id]);
+    expect(r?.code).toBe("42501");
+    expect((await landed(officeTaskId)).job_id).toBe(jobId);
+    // His own task moves.
+    await as(techId);
+    const { rows: [mine] } = await client.query("insert into tasks (job_id, title) values ($1, 'TEST 0358 his to move') returning id", [jobId]);
+    expect((await client.query("update tasks set job_id = $2 where id = $1", [mine.id, job2Id])).rowCount).toBe(1);
+    expect((await landed(mine.id)).job_id).toBe(job2Id);
+    // The office moves anyone's, and back.
+    await as(officeId);
+    expect((await client.query("update tasks set job_id = $2 where id = $1", [officeTaskId, job2Id])).rowCount).toBe(1);
+    expect((await client.query("update tasks set job_id = $2 where id = $1", [officeTaskId, jobId])).rowCount).toBe(1);
     expect((await landed(officeTaskId)).job_id).toBe(jobId);
   });
 
