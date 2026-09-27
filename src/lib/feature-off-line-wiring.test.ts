@@ -40,6 +40,7 @@ const PAGES: [string, FeatureKey][] = [
   ["site-studio/page.tsx", "website"],
   ["settings/page.tsx", "website"],
   ["tools/page.tsx", "calculators"],
+  ["schedule/page.tsx", "crew_board"],
 ];
 
 /** "quotes/[id]/page.tsx" → "/quotes/x"; a file that isn't a page has no route of its own. */

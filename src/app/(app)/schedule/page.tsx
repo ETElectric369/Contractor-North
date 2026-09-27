@@ -13,6 +13,7 @@ import { PlacementProvider } from "./placement-context";
 import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 import type { Placeable } from "@/lib/schedule/place-by-town";
 import { KIND_FROM_APPT_TYPE } from "@/lib/schedule/work-shape";
+import { FeatureOffLineFor } from "@/components/feature-off-line-for";
 
 export const dynamic = "force-dynamic";
 
@@ -89,9 +90,17 @@ export default async function SchedulePage({
     );
   }
 
-  // "Everyone's Day" — the all-crew swimlane board (one lane per person for the day).
+  // "Everyone's Day" — the all-crew swimlane board (one lane per person for the day). Crew Board
+  // off (0352): its doors are gone, and opened from a link it carries the Off line.
   if (sp.view === "crew") {
-    return <CrewBoardPanel date={date} />;
+    return (
+      <>
+        <div className="mx-auto max-w-6xl">
+          <FeatureOffLineFor feature="crew_board" />
+        </div>
+        <CrewBoardPanel date={date} />
+      </>
+    );
   }
 
   // Unknown/legacy views (calendar, board, voice's view=calendar, …)

@@ -24,7 +24,7 @@ import { SectionSubnav } from "@/components/section-subnav";
 import { RouteOffLine } from "@/components/route-off-line";
 import { ToastProvider } from "@/components/toast";
 import { offFeatureKey } from "@/lib/features";
-import { shellDoors } from "@/lib/feature-doors";
+import { countTeammates, shellDoors } from "@/lib/feature-doors";
 import { Suspense } from "react";
 import type { Profile, GeoPoint } from "@/lib/types";
 import { jobLabel } from "@/lib/schedule-options";
@@ -142,16 +142,8 @@ export default async function AppLayout({
     // members aren't the owner. Anyone else looking IS one, so only the owner's view needs the
     // read; a failed read is null, which shows the doors exactly as before.
     (async (): Promise<number | null> => {
-      if (profile.role !== "owner") return 1;
       try {
-        const { count, error } = await supabase
-          .from("profiles")
-          .select("id", { count: "exact", head: true })
-          .eq("org_id", profile.org_id)
-          .eq("active", true)
-          .neq("role", "owner");
-        if (error) return null;
-        return count ?? 0;
+        return await countTeammates(supabase, profile);
       } catch (e) {
         reportError("app-layout:teammates", e);
         return null;

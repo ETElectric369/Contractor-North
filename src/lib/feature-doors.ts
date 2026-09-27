@@ -5,6 +5,7 @@
  *
  * A SWITCH HIDES DOORS ONLY. Nothing here deletes a row, changes a number or blocks a page.
  */
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { featureOn, type FeatureKey, type FeatureMap } from "@/lib/features";
 
 /**
@@ -21,6 +22,26 @@ import { featureOn, type FeatureKey, type FeatureMap } from "@/lib/features";
 export function shellDoors(features: FeatureMap, teammates: number | null): FeatureMap {
   if (teammates === null || teammates > 0 || !features.crew_payroll) return features;
   return { ...features, crew_payroll: false };
+}
+
+/**
+ * shellDoors' `teammates`: the active members who aren't the owner. Anyone else looking IS one, so
+ * only the owner's view reads. A read that fails is null (the doors show, as today). The one count
+ * the layout and every page that draws a payroll door use, so they can't disagree.
+ */
+export async function countTeammates(
+  supabase: SupabaseClient,
+  viewer: { role?: string | null; org_id?: string | null } | null,
+): Promise<number | null> {
+  if (viewer?.role !== "owner") return 1;
+  if (!viewer.org_id) return null;
+  const { count, error } = await supabase
+    .from("profiles")
+    .select("id", { count: "exact", head: true })
+    .eq("org_id", viewer.org_id)
+    .eq("active", true)
+    .neq("role", "owner");
+  return error ? null : (count ?? 0);
 }
 
 /**

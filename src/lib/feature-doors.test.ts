@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ALL_ON, FEATURE_KEYS, type FeatureMap } from "@/lib/features";
 import { DOCK, basePath } from "@/lib/dock";
-import { FEATURE_ROUTES, featureForPath, requestHref, shellDoors } from "@/lib/feature-doors";
+import { FEATURE_ROUTES, countTeammates, featureForPath, requestHref, shellDoors } from "@/lib/feature-doors";
 
 /**
  * THE SHELL'S DOORS (the switch board, 0352): the map the shell draws from, where a new request
@@ -29,6 +29,48 @@ describe("shellDoors — Crew & Payroll is quiet until a second person (rule j)"
     const m = off("leads", "nort");
     const d = shellDoors(m, 0);
     for (const k of FEATURE_KEYS) if (k !== "crew_payroll") expect(d[k], k).toBe(m[k]);
+  });
+});
+
+describe("countTeammates — the one head-count behind the quiet rule", () => {
+  const client = (res: { count: number | null; error: unknown }) => {
+    const filters: [string, unknown][] = [];
+    const b: any = {
+      select: () => b,
+      eq: (c: string, v: unknown) => (filters.push([c, v]), b),
+      neq: (c: string, v: unknown) => (filters.push([`not ${c}`, v]), b),
+      then: (ok: any, err?: any) => Promise.resolve(res).then(ok, err),
+    };
+    return { sb: { from: () => b } as any, filters };
+  };
+
+  it("anyone but the owner is a teammate himself: no read", async () => {
+    const { sb, filters } = client({ count: 0, error: null });
+    expect(await countTeammates(sb, { role: "admin", org_id: "org-1" })).toBe(1);
+    expect(filters).toEqual([]);
+  });
+
+  it("the owner: active members of HIS company who aren't the owner", async () => {
+    const { sb, filters } = client({ count: 2, error: null });
+    expect(await countTeammates(sb, { role: "owner", org_id: "org-1" })).toBe(2);
+    expect(filters).toEqual([["org_id", "org-1"], ["active", true], ["not role", "owner"]]);
+  });
+
+  it("a failed read, or no company, is null (the doors show, as today)", async () => {
+    expect(await countTeammates(client({ count: null, error: { message: "x" } }).sb, { role: "owner", org_id: "org-1" })).toBeNull();
+    expect(await countTeammates(client({ count: 0, error: null }).sb, { role: "owner", org_id: null })).toBeNull();
+  });
+
+  it("the layout, /timeclock and /timecards all count with it, so their payroll doors agree", () => {
+    for (const rel of ["src/app/(app)/layout.tsx", "src/app/(app)/timeclock/page.tsx", "src/app/(app)/timecards/page.tsx"]) {
+      const src = readFileSync(join(process.cwd(), rel), "utf8");
+      expect(src, rel).toContain("countTeammates(supabase, ");
+    }
+    const clock = readFileSync(join(process.cwd(), "src/app/(app)/timeclock/page.tsx"), "utf8");
+    expect(clock).toContain('featureOn(orgSettings.features, "crew_board")');
+    expect(clock).toContain('featureOn(doors, "crew_payroll")');
+    const cards = readFileSync(join(process.cwd(), "src/app/(app)/timecards/page.tsx"), "utf8");
+    expect(cards).toContain('featureOn(payDoors, "crew_payroll")');
   });
 });
 

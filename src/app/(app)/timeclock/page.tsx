@@ -13,6 +13,7 @@ import { AutoClockoutPrompt } from "./auto-clockout-prompt";
 import { autoClockoutPromptState } from "./close-math";
 import { getOrgSettings } from "@/lib/org-settings";
 import { featureOn } from "@/lib/features";
+import { countTeammates, shellDoors } from "@/lib/feature-doors";
 import { AddEntryButton } from "./add-entry-button";
 import { aggregatePayrollEntries } from "@/lib/payroll-math";
 import { hoursBetween, formatCurrency, formatDate, formatDuration, formatTime } from "@/lib/utils";
@@ -44,7 +45,7 @@ export default async function TimeclockPage() {
   // fallback was therefore 0, so a tech with no per-entry rate_override saw a real week of work
   // priced at $0.00 under an "unpaid" badge. A wrong number on a pay screen is worse than none.
   const [{ data: prof }, { data: selfPay }] = await Promise.all([
-    supabase.from("profiles").select("language, role").eq("id", user?.id ?? "").maybeSingle(),
+    supabase.from("profiles").select("language, role, org_id").eq("id", user?.id ?? "").maybeSingle(),
     supabase.from("profile_pay").select("home_address, hourly_rate").eq("id", user?.id ?? "").maybeSingle(),
   ]);
   const lang = prof?.language ?? "en";
@@ -63,7 +64,7 @@ export default async function TimeclockPage() {
         .order("full_name")
     : { data: [] as { id: string; full_name: string | null }[] };
 
-  const [openRes, codesRes, jobsRes, weekRes, orgRes, leadRes] = await Promise.all([
+  const [openRes, codesRes, jobsRes, weekRes, orgRes, leadRes, teammates] = await Promise.all([
     supabase
       .from("time_entries")
       .select("*")
@@ -97,10 +98,15 @@ export default async function TimeclockPage() {
     // keeps working even if migration 0128 hasn't landed yet — an unknown column
     // would fail the whole profile read and de-staff the page.
     supabase.from("profiles").select("crew_lead").eq("id", user?.id ?? "").maybeSingle(),
+    // Crew & Payroll's Pay door is quiet until a second person, as on the dock (rule j). Staff only.
+    isStaff ? countTeammates(supabase, prof).catch(() => null) : Promise.resolve(null),
   ]);
   const orgSettings = getOrgSettings((orgRes.data as any)?.settings);
   // A crew lead files an end-of-day report at clock-out, only while Daily Reports is on (0352).
   const crewLead = !!(leadRes.data as any)?.crew_lead && featureOn(orgSettings.features, "daily_reports");
+  // The staff doors below follow the switches the way the dock does (0352): Crew Board's
+  // Who's On What Today, and Crew & Payroll's Pay (quiet for an owner alone, rule j).
+  const doors = shellDoors(orgSettings.features, teammates);
   // Codes on (default) = today's behavior everywhere. Codes off = no code pickers on
   // any timeclock surface, and job labels lead with customer · street address.
   const jobCodesOn = orgSettings.timeclock_job_codes;
@@ -467,18 +473,20 @@ export default async function TimeclockPage() {
          *  and the whole row is the target (44px, easier to hit than a link inside it). */}
         {isStaff && (
           <div className="grid gap-2 sm:grid-cols-3">
-            <Link
-              href="/schedule?view=crew"
-              className="flex min-h-[44px] flex-col justify-center rounded-lg border border-slate-200 bg-white px-4 py-3 active:bg-slate-50"
-            >
-              {/* TODAY, not "this week" — the door is named for what it OPENS. /schedule?view=crew
-                *  renders CrewBoardPanel, which is Everyone's DAY: one day, paged a day at a time
-                *  (crew-board-panel.tsx prevHref/nextHref shift by one). A door promising a week
-                *  and opening a day is the same small lie Erik reported about the box this row
-                *  replaces, and it is the thing NOT-ANNOYING and NOTHING SILENT exist to stop. */}
-              <span className="text-sm font-semibold text-slate-900">Who&apos;s On What Today</span>
-              <span className="text-xs text-slate-500">Everyone&apos;s Day on the schedule, one lane per person</span>
-            </Link>
+            {featureOn(orgSettings.features, "crew_board") && (
+              <Link
+                href="/schedule?view=crew"
+                className="flex min-h-[44px] flex-col justify-center rounded-lg border border-slate-200 bg-white px-4 py-3 active:bg-slate-50"
+              >
+                {/* TODAY, not "this week" — the door is named for what it OPENS. /schedule?view=crew
+                  *  renders CrewBoardPanel, which is Everyone's DAY: one day, paged a day at a time
+                  *  (crew-board-panel.tsx prevHref/nextHref shift by one). A door promising a week
+                  *  and opening a day is the same small lie Erik reported about the box this row
+                  *  replaces, and it is the thing NOT-ANNOYING and NOTHING SILENT exist to stop. */}
+                <span className="text-sm font-semibold text-slate-900">Who&apos;s On What Today</span>
+                <span className="text-xs text-slate-500">Everyone&apos;s Day on the schedule, one lane per person</span>
+              </Link>
+            )}
             <Link
               href="/timecards"
               className="flex min-h-[44px] flex-col justify-center rounded-lg border border-slate-200 bg-white px-4 py-3 active:bg-slate-50"
@@ -486,13 +494,15 @@ export default async function TimeclockPage() {
               <span className="text-sm font-semibold text-slate-900">Crew Hours</span>
               <span className="text-xs text-slate-500">The whole crew&apos;s week, and what needs a human</span>
             </Link>
-            <Link
-              href="/payroll"
-              className="flex min-h-[44px] flex-col justify-center rounded-lg border border-slate-200 bg-white px-4 py-3 active:bg-slate-50"
-            >
-              <span className="text-sm font-semibold text-slate-900">Pay</span>
-              <span className="text-xs text-slate-500">What everyone is owed, and marking it paid</span>
-            </Link>
+            {featureOn(doors, "crew_payroll") && (
+              <Link
+                href="/payroll"
+                className="flex min-h-[44px] flex-col justify-center rounded-lg border border-slate-200 bg-white px-4 py-3 active:bg-slate-50"
+              >
+                <span className="text-sm font-semibold text-slate-900">Pay</span>
+                <span className="text-xs text-slate-500">What everyone is owed, and marking it paid</span>
+              </Link>
+            )}
           </div>
         )}
 
