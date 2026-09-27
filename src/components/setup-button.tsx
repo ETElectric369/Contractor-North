@@ -6,7 +6,7 @@ import { unlockAudio } from "@/lib/tts";
 import { Modal } from "@/components/ui/modal";
 import { SetupInterview } from "@/components/setup-interview";
 import { TourDriver } from "@/components/tour/tour-driver";
-import { LESSONS, lessonByKey } from "@/lib/onboarding/tour";
+import { LESSONS, lessonBlurb, lessonByKey } from "@/lib/onboarding/tour";
 import { missingNeeds } from "@/lib/playbook/resolve";
 import { SETUP_PLAYBOOK } from "@/lib/onboarding/setup-playbook";
 import type { Answers } from "@/lib/playbook/types";
@@ -36,11 +36,16 @@ export function SetupButton({
   initial,
   isStaff,
   onboarded,
+  nortOn = true,
 }: {
   initial: Answers;
   isStaff: boolean;
   /** profiles.onboarded_at (0180) — has THIS PERSON been walked through, not "are the fields full". */
   onboarded: boolean;
+  /** The Nort switch (0352). Off, the button's words don't promise him ("a quick walk-through"), and
+   *  it opens the setup questions instead of the tour, which is Nort talking and pointing at his own
+   *  button (gone from the top bar while he's off). The Lessons still run, in their neutral words. */
+  nortOn?: boolean;
 }) {
   const [mode, setMode] = useState<null | "tour" | "questions" | "finish">(null);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -80,19 +85,19 @@ export function SetupButton({
           // opens a menu of the LESSONS — the teaching that used to be steps 6–22 of the tour,
           // replayable one topic at a time instead of only as a 24-step march.
           if (state === "finish") setMode("finish");
-          else if (state === "start") setMode("tour");
+          else if (state === "start") setMode(nortOn ? "tour" : "questions");
           else setMenuOpen((v) => !v);
         }}
         title={
           state === "start"
-            ? "Start here — Nort will show you around"
+            ? nortOn ? "Start here — Nort will show you around" : "Start here — a quick walk-through"
             : state === "finish"
               ? `Finish setting up — still missing: ${missing.map((n) => n.label.toLowerCase()).join(", ")}`
               : "Take the walk-through again"
         }
         aria-label={
           state === "start"
-            ? "Start here, Nort will show you around"
+            ? nortOn ? "Start here, Nort will show you around" : "Start here, a quick walk-through"
             : state === "finish"
               ? `Finish setting up, ${missing.length} question${missing.length === 1 ? "" : "s"} left`
               : "Take the walk-through again"
@@ -137,7 +142,7 @@ export function SetupButton({
               className="block w-full rounded-lg px-2 py-2 text-left hover:bg-slate-50"
             >
               <span className="block text-sm font-medium text-slate-900">{l.title}</span>
-              <span className="block text-xs text-slate-500">{l.blurb}</span>
+              <span className="block text-xs text-slate-500">{lessonBlurb(l, nortOn)}</span>
             </button>
           ))}
           <div className="mt-1 border-t border-slate-100 pt-1">
@@ -146,11 +151,11 @@ export function SetupButton({
               onClick={() => {
                 unlockAudio();
                 setMenuOpen(false);
-                setMode("tour");
+                setMode(nortOn ? "tour" : "questions");
               }}
               className="block w-full rounded-lg px-2 py-2 text-left text-sm text-slate-600 hover:bg-slate-50"
             >
-              Take the Setup Again
+              Take The Setup Again
             </button>
           </div>
         </div>
@@ -165,6 +170,7 @@ export function SetupButton({
           steps={lessonByKey(lessonKey)!.steps}
           storageKey={`cn.lesson.${lessonKey}`}
           onClose={() => setLessonKey(null)}
+          nortOn={nortOn}
         />
       )}
 
@@ -178,15 +184,17 @@ export function SetupButton({
 
       {/* The topbar carries a translucent background but NO backdrop-filter (see topbar.tsx), so
           the overlay isn't trapped and needs no portal. */}
+      {/* After the tour it opens on the draft (step 2), because the tour already asked the questions.
+          With Nort off there was no tour, so it opens on the questions (step 1). */}
       <Modal open={mode === "questions"} onClose={() => setMode(null)} title="Your questions, and your why lines" size="lg">
-        <SetupInterview initial={initial} startAt={2} onSaved={() => setMode(null)} />
+        <SetupInterview initial={initial} startAt={nortOn ? 2 : 1} onSaved={() => setMode(null)} nortOn={nortOn} />
       </Modal>
 
       {/* THE FINISH DOOR — the teal state's target. Opens on the SETUP QUESTIONS (step 1), not the
           tour: this person has already been walked through, and what's left is a couple of boxes
           with their whys beside them. */}
-      <Modal open={mode === "finish"} onClose={() => setMode(null)} title="A couple of things I still don't know" size="lg">
-        <SetupInterview initial={initial} startAt={1} onSaved={() => setMode(null)} />
+      <Modal open={mode === "finish"} onClose={() => setMode(null)} title={nortOn ? "A couple of things I still don't know" : "A couple of things still missing"} size="lg">
+        <SetupInterview initial={initial} startAt={1} onSaved={() => setMode(null)} nortOn={nortOn} />
       </Modal>
     </>
   );

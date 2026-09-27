@@ -17,6 +17,7 @@ import { PortfolioGallery } from "../estimate/[handle]/portfolio-gallery";
 import { SpecialtyShowcase } from "./specialty-showcase";
 import { ContactForm } from "./contact-form";
 import { AskNort } from "./ask-nort";
+import { featureOn } from "@/lib/features";
 
 /**
  * The org marketing homepage — one template, 100% data-driven from the org record + settings.
@@ -509,7 +510,8 @@ export async function OrgSite({ org, articlesHref, pageLinks = [], appHost = fal
       {/* Footer / contact — the shared site chrome (same footer every public page wears). */}
       <SiteFooter chrome={chrome} extInPlace={appHost} />
 
-      {handle && <AskNort handle={handle} orgName={org.name} brand={brand} />}
+      {/* Site Chat (0352): the switch removes only this bubble; the chat route refuses as well. */}
+      {handle && featureOn(s.features, "site_chat") && <AskNort handle={handle} orgName={org.name} brand={brand} />}
     </div>
   );
 }

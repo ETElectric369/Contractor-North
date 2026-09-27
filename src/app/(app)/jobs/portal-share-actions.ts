@@ -330,7 +330,7 @@ function sharesNotReady(err: unknown): boolean {
   const msg = String((err as { message?: string })?.message ?? "");
   return code === "42P01" || code === "PGRST205" || (/job_shared_documents/.test(msg) && /does not exist|could not find/i.test(msg));
 }
-const NOT_READY = "Showing plans and drawings on the customer's page isn't switched on yet (migration 0326). Photos still work from the Photos tab.";
+const NOT_READY = "Showing plans and drawings on the customer's page isn't available yet. Photos still work from the Photos tab.";
 
 type PaperDoc = { id: string; job_id: string | null; name: string | null; category: string | null; file_url: string | null };
 

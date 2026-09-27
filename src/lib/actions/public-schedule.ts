@@ -34,6 +34,7 @@ import { clientIp, rateLimited } from "@/lib/rate-limit";
 import { revalidatePath } from "next/cache";
 import { createServiceClient } from "@/lib/supabase/server";
 import { getOrgSettings } from "@/lib/org-settings";
+import { requestHref } from "@/lib/feature-doors";
 import { todayStrInTz } from "@/lib/tz";
 import { createNotifications } from "@/lib/notifications";
 import { orgStaffIds, sendPushToProfiles } from "@/lib/push";
@@ -198,12 +199,15 @@ export async function publicScheduleInspection(
   // Tell the office — bell (always works) + push (if the recipient enabled it),
   // the same dual channel as quote-accept.
   const staff = await orgStaffIds(orgId);
+  // Leads switched off (0352, rule d): My Day, where the request waits with Call Back, and the
+  // words name where it opens.
+  const url = requestHref(settings.features);
   const payload = {
     title: `${inquiry.name || name} wants a site inspection — send them times`,
     body:
       [phone ?? email, inquiry.address ?? address].filter(Boolean).join(" · ") ||
-      "Open the lead to send time options.",
-    url: "/leads",
+      (url === "/leads" ? "Open the lead to send time options." : "Open My Day to send time options."),
+    url,
   };
   await createNotifications(orgId, staff, { type: "inquiry", ...payload });
   await sendPushToProfiles(staff, "inquiry", payload);

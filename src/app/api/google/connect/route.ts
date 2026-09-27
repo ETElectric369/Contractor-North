@@ -11,7 +11,7 @@ export async function GET(req: Request) {
   const site = process.env.NEXT_PUBLIC_SITE_URL || "";
   if (!gcalConfigured()) {
     return new NextResponse(
-      "Google Calendar isn't configured. Add GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET.",
+      "Google Calendar can't be connected right now.",
       { status: 503 },
     );
   }

@@ -5,6 +5,7 @@ import { dbError } from "@/lib/db-error";
 import { requireStaff } from "@/lib/staff-guard";
 import { isSha256 } from "@/lib/content-hash";
 import { parseCedDocuments } from "@/lib/ced-invoice-parse";
+import { shortSupplierName, supplierAccountFor, type SupplierAccountLite } from "@/lib/supplier-name";
 import { formatDate } from "@/lib/utils";
 import { linesPointWithTotal, paperTypeOf, proposalOf, readinessOf, type PaperProposal } from "@/lib/paperwork";
 import { importCedInvoices } from "@/app/(app)/bills/supplier-import-actions";
@@ -118,6 +119,16 @@ export async function addPaperwork(input: {
     const good = read.flatMap((r) => (r.ok ? [r.invoice] : []));
     const refused = read.flatMap((r) => (r.ok ? [] : [{ number: r.invoiceNumber, error: r.error }]));
     if (good.length) {
+      // WHO IT IS FROM, off the company's own supplier account (the importer's matcher: the account
+      // number it prints, else the branch in its number), never the word "CED": any distributor on
+      // the same paper layout reads here (Wave 0). No match: no vendor, and the title says Supplier.
+      const { data: accounts } = await ctx.supabase
+        .from("supplier_accounts")
+        .select("id, name, account_number, branch_code")
+        .eq("org_id", ctx.orgId)
+        .limit(500);
+      const account = supplierAccountFor((accounts ?? []) as SupplierAccountLite[], good[0]);
+      vendor = account?.name?.trim() || null;
       const total = Math.round(good.reduce((s, d) => s + d.total, 0) * 100) / 100;
       proposal = {
         ced: {
@@ -130,7 +141,6 @@ export async function addPaperwork(input: {
         },
       };
       doc_type = "supplier_documents";
-      vendor = "CED";
       amount = total;
       item_date = good[0].invoiceDate;
       doc_number = good.length === 1 ? good[0].invoiceNumber : null;
@@ -166,7 +176,7 @@ export async function addPaperwork(input: {
   }
 
   const placed = await insertPaperRow(ctx.supabase, {
-    title: doc_type ? `CED ${proposal?.ced?.numbers.join(", ")}`.slice(0, 200) : name,
+    title: doc_type ? `${vendor ? shortSupplierName(vendor) : "Supplier"} ${proposal?.ced?.numbers.join(", ")}`.slice(0, 200) : name,
     file_url: input.path,
     created_by: ctx.userId,
     content_sha256: input.sha256,
@@ -196,11 +206,11 @@ export async function addPaperwork(input: {
 function cedDropLine(p: PaperProposal | null): string {
   const n = p?.ced?.numbers.length ?? 0;
   const refused = p?.ced?.refused ?? [];
-  const found = `${n} CED ${n === 1 ? "document" : "documents"} found in it`;
+  const found = `${n} supplier ${n === 1 ? "document" : "documents"} found in it`;
   const bad = refused.length
     ? `; ${refused.length} didn't add up and won't be added: ${refused.map((r) => r.error).join("; ")}`
     : "";
-  return `${found}${bad}. Waiting below: press Add To CED Documents.`;
+  return `${found}${bad}. Waiting below: press Add To Supplier Documents.`;
 }
 
 /**
@@ -235,7 +245,7 @@ export async function updatePaperwork(
 
   const type = paperTypeOf(fields.doc_type);
   if (fields.doc_type !== undefined && !type) return { ok: false, error: "Pick what kind of paper it is." };
-  if (type === "supplier_documents") return { ok: false, error: "CED documents are recognised from the PDF itself; pick Bill instead." };
+  if (type === "supplier_documents") return { ok: false, error: "Supplier documents are recognised from the PDF itself; pick Bill instead." };
   const amount = fields.amount === null || fields.amount === undefined || (fields.amount as unknown) === "" ? null : Number(fields.amount);
   if (amount !== null && !Number.isFinite(amount)) return { ok: false, error: "The total has to be a number." };
   const itemDate = /^\d{4}-\d{2}-\d{2}$/.test(String(fields.item_date ?? "")) ? String(fields.item_date) : null;
@@ -345,20 +355,23 @@ export async function addSupplierDocuments(id: string): Promise<PaperResult> {
   if (!item) return { ok: false, error: "That paper isn't here any more." };
   if (item.status !== "needs_review") return { ok: false, error: "This is already filed. Undo it first." };
   const p = proposalOf(item);
-  if (!p.ced?.text) return { ok: false, error: "No CED documents were found in this paper's text, so there is nothing to add." };
+  if (!p.ced?.text) return { ok: false, error: "No supplier documents were found in this paper's text, so there is nothing to add." };
 
   // THE PDF GOES WITH ITS TEXT: the importer keeps it (once, by content) where Open Bill reads it,
   // so it outlives this tray row (Delete takes the tray's own copy). A download that fails costs
   // only that: the documents still land, and Open Bill still finds this row's copy while it stands.
   const pdf = await downloadPaper(ctx.supabase, item.file_url, ctx.orgId);
-  const result = await importCedInvoices({ files: [{ name: p.ced.name || String(item.title ?? "CED PDF"), text: p.ced.text, pdf }] });
+  const result = await importCedInvoices({ files: [{ name: p.ced.name || String(item.title ?? "Supplier PDF"), text: p.ced.text, pdf }] });
   if (!result.ok) return { ok: false, error: result.error ?? "Nothing was added." };
   // MERGED, never replaced: a second Add lands nothing (the importer only reports fresh inserts),
   // and overwriting the list with [] left Undo unable to remove what this paper first added.
   const landed = [...new Set([...(p.filed?.landed ?? []), ...result.landed.map((d) => d.invoiceNumber)])];
+  // BY ID, TOO: since 0354 two suppliers can each hold a document with the same number, so Undo takes
+  // off the rows THIS paper wrote, never another supplier's.
+  const landedIds = [...new Set([...(p.filed?.landedIds ?? []), ...result.landed.flatMap((d) => (d.id ? [d.id] : []))])];
   const { data: back, error } = await ctx.supabase
     .from("organized_items")
-    .update({ status: "filed", proposal: { ...p, filed: { how: "supplier_documents", landed } } })
+    .update({ status: "filed", proposal: { ...p, filed: { how: "supplier_documents", landed, landedIds } } })
     .eq("id", id)
     .eq("org_id", ctx.orgId)
     .eq("status", "needs_review")
@@ -372,5 +385,5 @@ export async function addSupplierDocuments(id: string): Promise<PaperResult> {
   }
   revalidatePath("/bills");
   revalidatePath("/organize");
-  return { ok: true, message: result.message ?? "Added to the CED documents." };
+  return { ok: true, message: result.message ?? "Added to the supplier documents." };
 }

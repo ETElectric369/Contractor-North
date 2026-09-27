@@ -15,6 +15,7 @@ import {
   CreditCard,
   MessageSquare,
   Images,
+  ToggleRight,
   type LucideIcon,
 } from "lucide-react";
 import type { DockNode, DockSection } from "@/lib/dock";
@@ -33,6 +34,7 @@ const CLUSTER_ICONS: Record<string, LucideIcon> = {
   you: User,
   company: Building2,
   playbook: ClipboardList,
+  features: ToggleRight,
   website: Globe,
   money: Wallet,
   // cn-v695 split the four fat clusters into eleven nameable ones. `scheduling` stays in the

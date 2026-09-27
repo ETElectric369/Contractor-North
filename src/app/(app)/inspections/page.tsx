@@ -14,6 +14,7 @@ import { ESTIMATE_VISIT_TYPES, appointmentTypeLabel } from "@/lib/statuses";
 import { bucketInspections, hasCaptureData } from "@/lib/inspections";
 import { AppointmentButton } from "../appointments/appointment-button";
 import { NewInspectionButton } from "../appointments/new-inspection-button";
+import { featureOn } from "@/lib/features";
 
 export const dynamic = "force-dynamic";
 
@@ -62,7 +63,14 @@ export default async function InspectionsPage({
     getSchedulePickerOptions(supabase),
   ]);
 
-  const tz = getOrgSettings((org as { settings?: unknown } | null)?.settings).timezone;
+  const orgS = getOrgSettings((org as { settings?: unknown } | null)?.settings);
+  const tz = orgS.timezone;
+  // THE SWITCH BOARD (0352), from the settings and role already read. Walk-throughs are part of
+  // Leads: off, this list still opens from a link, under the Off line, with no new-inspection doors.
+  // Estimates off: no Create Estimate on a row.
+  const sw = { features: orgS.features, isOwner: me.role === "owner" };
+  const leadsOn = featureOn(sw.features, "leads");
+  const estimateDoor = featureOn(sw.features, "estimates");
   const rows = (apptData ?? []) as any[];
   const estimateInquiryIds = new Set<string>(
     (quoteLinks ?? []).map((q: any) => q.inquiry_id).filter(Boolean),
@@ -115,7 +123,7 @@ export default async function InspectionsPage({
       >
         {/* The shared two-mode affordance: Inspect now (one tap → capture) or the EXISTING
             appointment flow (Set a Time | Propose Times), preset to the inspection type. */}
-        <NewInspectionButton schedule={scheduleInspection} />
+        {leadsOn && <NewInspectionButton schedule={scheduleInspection} />}
       </PageHeader>
 
       {/* Open work is the default view; settled paperwork files away (estimates pattern). */}
@@ -153,14 +161,14 @@ export default async function InspectionsPage({
         <EmptyState
           icon={ClipboardCheck}
           title="No open inspections"
-          description="Start one from a lead, schedule one, or tap Inspect now when you're already onsite."
+          description={leadsOn ? "Start one from a lead, schedule one, or tap Inspect now when you're already onsite." : "Nothing open right now."}
         >
-          <NewInspectionButton schedule={scheduleInspection} />
+          {leadsOn && <NewInspectionButton schedule={scheduleInspection} />}
         </EmptyState>
       ) : (
         <div className="space-y-6">
           {toWriteUp.length > 0 && (
-            <Section title={`To write up (${toWriteUp.length})`} rows={toWriteUp} tz={tz} writeUp />
+            <Section title={`To write up (${toWriteUp.length})`} rows={toWriteUp} tz={tz} writeUp estimateDoor={estimateDoor} />
           )}
           {upcoming.length > 0 && <Section title="Upcoming & proposed" rows={upcoming} tz={tz} />}
         </div>
@@ -174,11 +182,13 @@ function Section({
   rows,
   tz,
   writeUp = false,
+  estimateDoor = true,
 }: {
   title: string;
   rows: any[];
   tz: string;
   writeUp?: boolean;
+  estimateDoor?: boolean;
 }) {
   return (
     <section>
@@ -186,7 +196,7 @@ function Section({
       <Card>
         <ul className="divide-y divide-slate-100">
           {rows.map((a) => (
-            <InspectionRow key={a.id} a={a} tz={tz} writeUp={writeUp} />
+            <InspectionRow key={a.id} a={a} tz={tz} writeUp={writeUp} estimateDoor={estimateDoor} />
           ))}
         </ul>
       </Card>
@@ -194,7 +204,7 @@ function Section({
   );
 }
 
-function InspectionRow({ a, tz, writeUp }: { a: any; tz: string; writeUp: boolean }) {
+function InspectionRow({ a, tz, writeUp, estimateDoor }: { a: any; tz: string; writeUp: boolean; estimateDoor: boolean }) {
   const who = a.customers?.name ?? a.inquiries?.name ?? null;
   // NEXT-STEP: the capture prefills the estimator scope; the inquiry keeps the lead threading
   // (quotes/new also recovers it from the capture appointment when absent).
@@ -222,7 +232,7 @@ function InspectionRow({ a, tz, writeUp }: { a: any; tz: string; writeUp: boolea
           </div>
         </Link>
       </div>
-      {writeUp && (
+      {writeUp && estimateDoor && (
         <Link href={estimateHref} className="shrink-0">
           <Button size="sm">
             <FileText className="h-4 w-4" /> Create Estimate

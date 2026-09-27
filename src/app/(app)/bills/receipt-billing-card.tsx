@@ -123,7 +123,10 @@ type LineOverride = Partial<Pick<ReceiptBillingLine, "billable" | "billedAmount"
  * did incur. So there is a third state now, and the card asks for it the way he says it out loud:
  * how many are in the box, and how many did you use. It never answers either question itself.
  */
-export function ReceiptLines({ receipt: r }: { receipt: ReceiptForBilling }) {
+/** `shopStock` false = the Shop Stock switch is off (0352): Put The Rest On The Shelf isn't offered.
+ *  A roll already on the shelf keeps its line and Take It Off The Shelf, and what the customer is
+ *  billed never moves. Absent = on. */
+export function ReceiptLines({ receipt: r, shopStock = true }: { receipt: ReceiptForBilling; shopStock?: boolean }) {
   const router = useRouter();
   const toast = useToast();
   const [, start] = useTransition();
@@ -394,6 +397,7 @@ export function ReceiptLines({ receipt: r }: { receipt: ReceiptForBilling }) {
                   )}
                 </div>
               ) : (
+                shopStock &&
                 !locked &&
                 l.amount > 0 &&
                 !/tax/i.test(String(l.category ?? "")) &&

@@ -14,9 +14,13 @@ import { saveNumbering } from "./actions";
 export function NumberingSettings({
   prefixes,
   counters,
+  hiddenKeys = [],
 }: {
   prefixes: Record<string, string>;
   counters: Record<string, number> | null;
+  /** Document types whose feature is switched off (0352): not drawn and not sent, so their stored
+   *  prefix and counter stay exactly as they are (saveNumbering merges what it is given). */
+  hiddenKeys?: string[];
 }) {
   const live = counters !== null;
   const initialNext = (key: string) => (counters && counters[key] != null ? counters[key] + 1 : 1);
@@ -47,6 +51,7 @@ export function NumberingSettings({
     const prefixMap: Record<string, string> = {};
     const nextMap: Record<string, number> = {};
     for (const r of rows) {
+      if (hiddenKeys.includes(r.key)) continue;
       const p = r.prefix.trim();
       if (!p) return setError(`${r.label} needs a prefix.`);
       prefixMap[r.key] = p;
@@ -87,7 +92,7 @@ export function NumberingSettings({
           <span>Next #</span>
           <span>Preview</span>
         </div>
-        {rows.map((r) => (
+        {rows.filter((r) => !hiddenKeys.includes(r.key)).map((r) => (
           <div
             key={r.key}
             className="grid grid-cols-2 items-center gap-3 sm:grid-cols-[1fr_110px_110px_minmax(0,1fr)]"

@@ -211,7 +211,7 @@ describe("Waiting For The Shelf: suggested, never moved", () => {
         { ...base, lineId: "done", description: "NMB 12/2 250 ft coil", quantity: 250, amount: 165.29, billedAmount: 0, hasLot: true },
       ],
       stockDocuments: [
-        { id: "si", number: "8802-1103061", total: "114.40", words: "STOCK", accountId: "acct-ced" },
+        { id: "si", number: "8802-1103061", total: "114.40", words: "STOCK", accountId: "acct-ced", supplier: "Consolidated Electrical Distributors" },
         { id: "si2", number: "8802-1103999", total: "10.00", words: "STOCK" },
       ],
       linelessPapers: [{ id: "p", title: "CED ticket", words: "STOCK" }],

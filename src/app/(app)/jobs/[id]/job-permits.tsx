@@ -37,7 +37,9 @@ export interface Permit {
 }
 
 
-export function JobPermits({ jobId, permits }: { jobId: string; permits: Permit[] }) {
+/** `canAdd` = the Permits & Inspections switch (0352). Off, Add Permit goes; the permits already on
+ *  the job stay listed and editable (the tab shows the Off line above them). */
+export function JobPermits({ jobId, permits, canAdd = true }: { jobId: string; permits: Permit[]; canAdd?: boolean }) {
   const router = useRouter();
   const toast = useToast();
   const [pending, start] = useTransition();
@@ -76,16 +78,16 @@ export function JobPermits({ jobId, permits }: { jobId: string; permits: Permit[
     <div>
       <div className="mb-3 flex items-center justify-between">
         <div className="text-sm text-slate-500">{permits.length} permit{permits.length === 1 ? "" : "s"}</div>
-        <Button size="sm" variant="outline" onClick={() => setAdding((a) => !a)}><Plus className="h-3.5 w-3.5" /> Add Permit</Button>
+        {canAdd && <Button variant="outline" onClick={() => setAdding((a) => !a)}><Plus className="h-3.5 w-3.5" /> Add Permit</Button>}
       </div>
 
-      {adding && (
+      {canAdd && adding && (
         <div className="mb-3 space-y-3 rounded-lg border border-slate-200 p-3">
           {error && <p className="text-sm text-red-600">{error}</p>}
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
             <div><Label htmlFor="p-type">Type</Label><Select id="p-type" value={type} onChange={(e) => setType(e.target.value)}>{TYPES.map((t) => <option key={t} value={t}>{t}</option>)}</Select></div>
             <div><Label htmlFor="p-num">Permit #</Label><Input id="p-num" value={num} onChange={(e) => setNum(e.target.value)} /></div>
-            <div><Label htmlFor="p-auth">Authority</Label><Input id="p-auth" value={authority} onChange={(e) => setAuthority(e.target.value)} placeholder="e.g. Washoe County" /></div>
+            <div><Label htmlFor="p-auth">Authority</Label><Input id="p-auth" value={authority} onChange={(e) => setAuthority(e.target.value)} placeholder="e.g. County Building Department" /></div>
             <div><Label htmlFor="p-status">Status</Label><Select id="p-status" value={status} onChange={(e) => setStatus(e.target.value)}>{STATUSES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</Select></div>
             <div><Label htmlFor="p-applied">Applied date</Label><Input id="p-applied" type="date" value={applied} onChange={(e) => setApplied(e.target.value)} /></div>
             <div><Label htmlFor="p-fee">Fee</Label><NumberInput id="p-fee" value={fee} onValueChange={setFee} /></div>

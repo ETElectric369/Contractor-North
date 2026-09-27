@@ -3,6 +3,7 @@ import { firstThatWorks, kitsSelectRungs } from "@/lib/kit-line";
 import { BackLink } from "@/components/back-link";
 import { PageHeader } from "@/components/page-header";
 import { getOrgSettings } from "@/lib/org-settings";
+import { featureOn } from "@/lib/features";
 import { measurementsFromAnswers, tolerateMissingColumns } from "@/lib/inspection/schema";
 import { factsForEstimatorByProvenance } from "@/lib/playbook/answers";
 import { briefProvenanceKeys, parsePlanBrief } from "@/lib/plan-brief";
@@ -358,9 +359,14 @@ export default async function NewQuotePage({
   // breakdown, so they're hidden from the estimate picker here. Research orgs (ET Electric)
   // still see every kit — nothing changes for them.
   const catalogMode = settings.estimating_mode === "catalog";
-  const estimateKits = catalogMode
-    ? (kits ?? []).filter((k: any) => k.name === "Decks" || k.name === "Remodels")
-    : (kits ?? []);
+  // KITS OFF (the switch board, 0352) hides the kit chips, a door. Never in catalog mode: there the
+  // kits ARE how an estimate is priced (rule i), so nothing a catalog estimate prices from is gated.
+  const kitDoors = featureOn(settings.features, "kits") || catalogMode;
+  const estimateKits = !kitDoors
+    ? []
+    : catalogMode
+      ? (kits ?? []).filter((k: any) => k.name === "Decks" || k.name === "Remodels")
+      : (kits ?? []);
   // Deck generator rows (catalog orgs) — the deck price codes as RAW {code, buy, markup_pct}
   // rows. The office builder prices them client-side through THE markup rule (effectiveMarkupPct
   // with the selected customer's level + org default), so generator lines re-price when the
@@ -385,7 +391,7 @@ export default async function NewQuotePage({
         {/* Onsite with no capture yet? Start the inspection from where you'll end up — one
             tap creates it (threaded to the lead when this builder came from one) and lands
             on the capture page; Start estimate there routes back here prefilled. */}
-        {!capture && <NewInspectionButton inquiryId={inquiry} size="sm" variant="outline" />}
+        {!capture && featureOn(settings.features, "leads") && <NewInspectionButton inquiryId={inquiry} size="sm" variant="outline" />}
       </PageHeader>
       {/* NOTHING SILENT, AND THE CONSEQUENCE NAMED. The price book and its makers arrive in one
           read, so a failure hands the picker below an empty list — which on screen reads as "you
@@ -426,6 +432,7 @@ export default async function NewQuotePage({
         quoteExpiryDays={expiryDays}
         defaultMarkupPct={settings.default_markup_pct}
         deckRateRows={deckRateRows}
+        salesTax={featureOn(settings.features, "sales_tax")}
       />
     </div>
   );

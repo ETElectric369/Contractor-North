@@ -124,9 +124,15 @@ function orgOf(ctx: { orgId: string | null }): { orgId: string } | { error: stri
 
 /** Today in the ORG's timezone. A check written at 5pm in Truckee is not tomorrow's check, which
  *  is what `current_date` on a UTC server would have called it. */
-async function orgToday(supabase: any): Promise<string> {
+/** The company's clock: its today and its timezone. */
+async function orgClock(supabase: any): Promise<{ today: string; tz: string }> {
   const { data: org } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
-  return todayStrInTz(getOrgSettings(org?.settings).timezone);
+  const tz = getOrgSettings(org?.settings).timezone;
+  return { today: todayStrInTz(tz), tz };
+}
+
+async function orgToday(supabase: any): Promise<string> {
+  return (await orgClock(supabase)).today;
 }
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
@@ -163,7 +169,7 @@ export async function createSupplierAccount(input: {
   if ("error" in org) return { ok: false, error: org.error };
 
   const name = text(input?.name);
-  if (!name) return { ok: false, error: "Give the supplier a name first, like CED Truckee." };
+  if (!name) return { ok: false, error: "Give the supplier a name first, like Main Street Supply." };
 
   const made = await makeAccount(ctx.supabase, org.orgId, ctx.userId, {
     name,
@@ -789,7 +795,7 @@ export async function acceptSupplierMerge(input: {
   const supabase = ctx.supabase;
 
   const name = text(input?.name);
-  if (!name) return { ok: false, error: "Give the account a name you will recognise, like CED Truckee." };
+  if (!name) return { ok: false, error: "Give the account a name you will recognise, like Main Street Supply." };
 
   const wanted = (input?.spellings ?? []).map((s) => ({ alias: String(s?.alias ?? "").trim(), branchLabel: text(s?.branchLabel) })).filter((s) => s.alias);
   if (!wanted.length) return { ok: false, error: "There are no supplier names in that suggestion. Reload the page." };
@@ -1681,7 +1687,8 @@ export async function recordSupplierInvoiceAsBill(input: {
    * wait runs. After CREDIT_WAIT_DAYS the paper is a card again by itself, and records as any card.
    * The stamp is read with the paper itself; the org's today only when there is one.
    */
-  const wait = row.waiting_credit_since ? creditWait({ waitingCreditSince: row.waiting_credit_since }, await orgToday(ctx.supabase)) : null;
+  const clock = row.waiting_credit_since ? await orgClock(ctx.supabase) : null;
+  const wait = clock ? creditWait({ waitingCreditSince: row.waiting_credit_since }, clock.today, clock.tz) : null;
   if (wait && !wait.overdue) {
     return { ok: false, error: `${number} is waiting on a credit; press Stop Waiting on Bills first.` };
   }

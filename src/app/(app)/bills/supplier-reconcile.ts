@@ -40,31 +40,38 @@ import {
   reversedInvoiceIds,
   reversedPurchaseIds,
   creditArrivedFor,
+  documentDiscount,
 } from "./supplier-balance";
 import { DEFAULT_TIMEZONE } from "@/lib/utils";
 import { todayStrInTz } from "@/lib/tz";
 
-// ── THE CLEAR LINE: WHERE HIS BOOKS IN NORTH BEGIN ──────────────────────────────────────────────
+// ── THE CLEAR LINE: WHERE A COMPANY'S BOOKS IN NORTH BEGIN ─────────────────────────────────────
 //
-// "june 8 is good" (Erik, 2026-09-25). ET Electric made its first job in North on 2026-06-08
-// (J-002 Tao Zhu, 03:06 in Truckee). A supplier paper dated BEFORE that day was bought before
-// there was anywhere to put it: it never makes a card and never counts anywhere as needing a
-// person. That drops the two 5/28 Saddle Rd papers already on J-050 and the two 5/28 Rhodesia ones.
+// "june 8 is good" (Erik, 2026-09-25). ET Electric made its first job in North on 2026-06-08. A
+// supplier paper dated BEFORE a company's line was bought before there was anywhere to put it: it
+// never makes a card and never counts anywhere as needing a person.
 //
-// A CONSTANT FOR ET, NOT DERIVED, AND WHY. "The org's first job" reads as 2026-06-08 tonight, but
-// J-001 is already gone: jobs get deleted, and deleting J-002 would quietly move the line to
-// June 11 and hide three days of real CED paper with nothing said. A date Erik named cannot drift.
-// Another org gets no line (every paper counts) until it names one; per-org is a later wave.
+// A DATE A PERSON NAMED, NOT DERIVED, AND WHY. "The org's first job" drifts: jobs get deleted, and
+// deleting the first one would quietly move the line and hide days of real supplier paper with
+// nothing said. A date someone named cannot drift.
+//
+// PER COMPANY (Wave 0): organizations.settings.books_begin, changed from the /bills Needs You card.
+// It was a constant keyed to ET's org id, the one org id in the app's logic, so every other company
+// got a line it never chose and no way to set one. 0354 stores ET's June 8 as ET's own setting. A
+// company that has not named a day falls back to its earliest scanned bill (booksBeginOn).
 
-/** ET Electric's org id. */
-const ET_ELECTRIC_ORG_ID = "60195593-2e18-4230-bc8e-7a32d36d038d";
+/** A real calendar day, "YYYY-MM-DD". */
+const isRealDay = (v: unknown): v is string => {
+  if (typeof v !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(v)) return false;
+  const t = Date.parse(`${v}T12:00:00Z`);
+  return Number.isFinite(t) && new Date(t).toISOString().slice(0, 10) === v;
+};
 
-/** The day ET made its first job in North. Supplier paper dated before it never needs a person. */
-export const ET_BOOKS_BEGIN = "2026-06-08";
-
-/** The day an org's books in North begin, or null when it has not named one (every paper counts). */
-export function supplierPaperLine(orgId: string | null | undefined): string | null {
-  return orgId === ET_ELECTRIC_ORG_ID ? ET_BOOKS_BEGIN : null;
+/** The day a company's books in North begin, as it named it (settings.books_begin), or null when
+ *  it has not named one. Takes the settings object (raw or normalized); anything else reads null. */
+export function supplierPaperLine(settings: unknown): string | null {
+  const v = settings && typeof settings === "object" ? (settings as { books_begin?: unknown }).books_begin : null;
+  return isRealDay(v) ? v : null;
 }
 
 /** Dated before the line. An undated paper is never "before": not knowing when is not a reason to
@@ -275,8 +282,10 @@ export interface DiscountReading {
  * it was taken or it was not, and there is nothing left to decide - so it never reads "live".
  */
 export function discountReading(inv: SupplierInvoiceRow, today: string): DiscountReading {
-  const amount = r2(Number(inv.discountAmount) || 0);
-  if (!(amount > 0.005)) return { state: "none", amount: 0, by: inv.discountBy ?? null, daysLeft: null };
+  // documentDiscount: a credit memo's negative discount is the supplier's too (it comes back off
+  // the credit on the same day), so it reads live and lands in the same sum the supplier makes.
+  const amount = documentDiscount(inv);
+  if (!(Math.abs(amount) > 0.005)) return { state: "none", amount: 0, by: inv.discountBy ?? null, daysLeft: null };
   const by = inv.discountBy ?? null;
   const daysLeft = daysBetweenYmd(today, by);
   // No date on it means nothing can be said about a deadline, and a deadline this app invented
@@ -326,7 +335,8 @@ export function claimableDiscounts(invoices: SupplierInvoiceRow[], today: string
     if (reading.state !== "live") continue;
     rows.push({ invoice, reading });
     total = r2(total + reading.amount);
-    if (reading.by && (!nextDeadline || reading.by < nextDeadline)) nextDeadline = reading.by;
+    // Only a real discount names the deadline: a memo's take-back alone is no reason to pay by a day.
+    if (reading.amount > 0 && reading.by && (!nextDeadline || reading.by < nextDeadline)) nextDeadline = reading.by;
   }
   rows.sort(
     (a, b) =>
@@ -363,7 +373,8 @@ export function missedDiscounts(invoices: SupplierInvoiceRow[], today: string): 
   for (const invoice of invoices ?? []) {
     if (reversed.has(String((invoice as { id?: unknown })?.id ?? ""))) continue;
     const reading = discountReading(invoice, today);
-    if (reading.state !== "expired") continue;
+    // A memo's take-back that ran out is not discount he lost.
+    if (reading.state !== "expired" || !(reading.amount > 0)) continue;
     rows.push({ invoice, reading });
     total = r2(total + reading.amount);
   }
@@ -578,7 +589,7 @@ export function matchJobName(raw: string | null | undefined, jobs: ReconcileJob[
     return {
       verdict: "stock",
       ranked: [],
-      because: "CED booked this to shop stock, not to a job.",
+      because: "The supplier booked this to shop stock, not to a job.",
     };
   }
   if (!isUsableJobName(raw)) {
@@ -587,7 +598,7 @@ export function matchJobName(raw: string | null | undefined, jobs: ReconcileJob[
       // Nothing to rank on, so the order is his jobs as they were handed over. The caller sorts
       // them the way the rest of the app does; inventing an order here would look like a guess.
       ranked: all.map((job) => ({ job, score: 0 })),
-      because: "CED's copy has no job name on it, so there is nothing to go on but your own memory.",
+      because: "The supplier's copy has no job name on it, so there is nothing to go on but your own memory.",
     };
   }
 
@@ -942,12 +953,14 @@ function addDaysYmd(ymd: string, days: number): string {
 export function creditWait(
   inv: Pick<SupplierInvoiceRow, "waitingCreditSince">,
   today?: string | null,
+  /** The ORG's timezone (Wave 0): the day the stamp fell on is the company's day, not the deploy's. */
+  tz?: string | null,
 ): { since: string; back: string; overdue: boolean } | null {
   const stamp = String(inv?.waitingCreditSince ?? "");
   // The DAY he tapped it, in the business's day (5pm in Truckee is not tomorrow): a full stamp is
-  // read in the default timezone, a bare date as itself.
+  // read in the company's timezone, a bare date as itself.
   const at = /^\d{4}-\d{2}-\d{2}T/.test(stamp) ? new Date(stamp) : null;
-  const since = at && Number.isFinite(at.getTime()) ? todayStrInTz(DEFAULT_TIMEZONE, at) : stamp.slice(0, 10);
+  const since = at && Number.isFinite(at.getTime()) ? todayStrInTz(tz || DEFAULT_TIMEZONE, at) : stamp.slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(since)) return null;
   const back = addDaysYmd(since, CREDIT_WAIT_DAYS);
   const days = daysBetweenYmd(since, today || utcToday());
@@ -973,20 +986,9 @@ export function paperJob(job: ReconcileJob): PaperJob {
 /** How many of the matcher's nearest jobs a "weak" card puts at the top of its picker. */
 const MAX_CLOSEST = 5;
 
-/**
- * A supplier's name, short enough to lead a card on a phone. "Consolidated Electrical
- * Distributors" is "CED" everywhere he goes; "Swigard's Hardware" is already short. A bracketed
- * short form the account itself carries ("Outdoor Supply Hardware (OSH - Cupertino)") wins.
- */
-export function shortSupplierName(name: string | null | undefined): string {
-  const raw = String(name ?? "").trim();
-  if (!raw) return "The Supplier";
-  const aside = /\(([^)]+)\)/.exec(raw)?.[1]?.trim();
-  if (aside) return aside;
-  const words = raw.split(/\s+/).filter((w) => /^[A-Za-z]/.test(w) && !/^(inc|llc|co|corp|of|and|the)\.?,?$/i.test(w));
-  if (raw.length > 24 && words.length >= 3) return words.map((w) => w[0].toUpperCase()).join("");
-  return raw;
-}
+/** A supplier's name, short enough to lead a card on a phone (lib/supplier-name, where the shelf
+ *  and the paperwork tray read it too). */
+export { shortSupplierName } from "@/lib/supplier-name";
 
 /**
  * EVERY SUPPLIER PAPER THAT NEEDS A PERSON, newest first. The rule, in one place:
@@ -1036,6 +1038,8 @@ export type PaperCardOpts = {
   supplierName?: (accountId: string | null) => string;
   /** The ORG's today (YYYY-MM-DD): it decides when a bill waiting on a credit comes back. */
   today?: string | null;
+  /** The ORG's timezone, for the day a wait was stamped (creditWait). */
+  tz?: string | null;
 };
 
 function paperCards(invoices: SupplierInvoiceRow[], jobs: ReconcileJob[], opts: PaperCardOpts): SupplierPaperCard[] {
@@ -1077,7 +1081,7 @@ function paperCards(invoices: SupplierInvoiceRow[], jobs: ReconcileJob[], opts: 
     const supplier = opts.supplierName ? opts.supplierName(accountId) : "The Supplier";
     // A wait counts only on a supplier account: the credit pairs there and the fold lives there. A
     // stamp on a paper with no account (its account taken off later) is a card, never hidden.
-    const wait = accountId ? creditWait(inv, opts.today) : null;
+    const wait = accountId ? creditWait(inv, opts.today, opts.tz) : null;
     cards.push({
       invoiceId: String(inv.id),
       invoiceNumber: String(inv.invoiceNumber ?? ""),

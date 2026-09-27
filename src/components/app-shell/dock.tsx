@@ -3,12 +3,16 @@
 import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
-import { DOCK, activeSection, basePath } from "@/lib/dock";
+import { activeSection, basePath, visibleDock } from "@/lib/dock";
+import type { FeatureMap } from "@/lib/features";
 
 type Badges = Record<string, number>;
 type DockProps = {
   branding?: { name: string | null; logo: string | null };
   role?: string;
+  /** The shell's switch map (lib/feature-doors shellDoors): a switched-off feature's rows aren't
+   *  drawn. Left out = everything on. */
+  features?: FeatureMap;
   /** Counts per href. Accepts a PROMISE (2026-09-08): the app shell hands the Needs-action
    *  fan-out over unresolved so a cosmetic dot never delays the page behind it — see the note in
    *  (app)/layout.tsx. Server render and first paint show no dots; they arrive a beat later. */
@@ -80,22 +84,23 @@ export function Dock(props: DockProps) {
   );
 }
 
-function DockInner({ branding, role, badges: badgesProp }: DockProps) {
+function DockInner({ branding, role, badges: badgesProp, features }: DockProps) {
   const badges = useBadges(badgesProp);
   const pathname = usePathname();
   const search = useSearchParams();
   const current = pathname + (search.toString() ? `?${search.toString()}` : "");
   const isStaff = role === "owner" || role === "admin" || role === "office";
   const logo = branding?.logo;
-  // staffOnly hides from techs; techOnly hides from staff. Both filters run here so every
-  // renderer below — rail tiles, the page column, the phone bottom bar — sees the same list.
-  const sections = DOCK.filter((s) => (isStaff || !s.staffOnly) && (!isStaff || !s.techOnly));
+  // THE ONE DOCK FILTER (lib/dock visibleDock): role (staffOnly/techOnly) and the switches, on
+  // tiles and rows alike, so every renderer below — rail tiles, the page column, the phone
+  // bottom bar — sees the same list. The badge sum below only counts rows that are drawn.
+  const sections = visibleDock({ isStaff, features });
   // THE shared matcher (src/lib/dock.ts) — child detail routes (/quotes/[id], /forms/[id],
   // /purchasing/[id]…) light their owning section. No match → NOTHING lit and no rail: the
   // old `?? sections[0]` fallback lit "Today" (and railed My day/Tasks/Organize) on every
   // orphan route — an actively wrong map, never a lie again.
   const active = activeSection(pathname, sections);
-  const items = (active?.children ?? []).filter((c) => isStaff || !c.staffOnly);
+  const items = active?.children ?? [];
   // Exactly ONE rail row lights: prefer the exact href-with-query match (the ?status=
   // children), else the query-less page whose base path matches — SectionSubnav's rule.
   const exact = items.find((c) => c.href === current);

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Plus, Zap, ListTodo, Briefcase, CalendarPlus, FileText, Receipt, UserPlus, UserSearch, X, type LucideIcon } from "lucide-react";
 import { QuickCaptureSheet } from "@/components/quick-capture";
 import { GLASS_MENU_CLASS } from "@/components/ui/glass-menu";
+import { featureOn, type FeatureKey, type FeatureMap } from "@/lib/features";
 
 // Add-cost is NOT here — it lives on My Day's Now card + the job header (job-scoped,
 // works cleanly). A self-loading copy in this dropdown was redundant + fiddly.
@@ -16,16 +17,23 @@ import { GLASS_MENU_CLASS } from "@/components/ui/glass-menu";
 // /crm already uses), or a route that IS the form (/quotes/new). Don't drop the
 // user on a list and make them find the + again.
 // staffOnly mirrors the dock/strip/palette gating — a tech tapping "New appointment"
-// was silently redirected to /planner by the staff gate; techs create tasks + jobs.
-const ACTIONS: { label: string; href: string; icon: LucideIcon; staffOnly?: boolean }[] = [
+// was silently redirected to /planner by the staff gate. Techs create tasks; a job is made by
+// the office (createJob is requireStaff, so a tech's New Job failed on Save).
+// `feature` is the switch a verb belongs to (the switch board, 0352): off, the verb isn't offered.
+export const ACTIONS: { label: string; href: string; icon: LucideIcon; staffOnly?: boolean; feature?: FeatureKey }[] = [
   { label: "New Task", href: "/tasks?new=1", icon: ListTodo },
-  { label: "New Lead", href: "/leads?new=1", icon: UserSearch, staffOnly: true },
+  { label: "New Lead", href: "/leads?new=1", icon: UserSearch, staffOnly: true, feature: "leads" },
   { label: "New Customer", href: "/crm?new=1", icon: UserPlus, staffOnly: true },
-  { label: "New Job", href: "/jobs?new=1", icon: Briefcase },
+  { label: "New Job", href: "/jobs?new=1", icon: Briefcase, staffOnly: true },
   { label: "New Appointment", href: "/schedule?new=appointment", icon: CalendarPlus, staffOnly: true },
-  { label: "New Estimate", href: "/quotes/new", icon: FileText, staffOnly: true },
+  { label: "New Estimate", href: "/quotes/new", icon: FileText, staffOnly: true, feature: "estimates" },
   { label: "New Invoice", href: "/billing?new=1", icon: Receipt, staffOnly: true },
 ];
+
+/** The + menu's verbs for this person: role first, then the switches. No map = everything on. */
+export function quickAddActions(isStaff: boolean, features?: FeatureMap | null) {
+  return ACTIONS.filter((a) => (isStaff || !a.staffOnly) && (!a.feature || featureOn(features, a.feature)));
+}
 
 /** Quick "+" create menu. `placement="topbar"` renders an inline button with a
  *  dropdown; the default is a movable floating FAB. `isStaff` gates the staff-only
@@ -34,9 +42,12 @@ const ACTIONS: { label: string; href: string; icon: LucideIcon; staffOnly?: bool
 export function GlobalQuickAdd({
   placement = "fab",
   isStaff = false,
+  features,
 }: {
   placement?: "fab" | "topbar";
   isStaff?: boolean;
+  /** The shell's switch map: a switched-off feature's "New …" verb isn't offered. */
+  features?: FeatureMap;
 }) {
   const router = useRouter();
   const [pos, setPos] = useState({ x: 20, y: 168 }); // above the mic, clearing the floating glass bottom nav
@@ -65,7 +76,7 @@ export function GlobalQuickAdd({
       >
         <Zap className="h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" /> Capture Anything
       </button>
-      {ACTIONS.filter((a) => isStaff || !a.staffOnly).map((a) => (
+      {quickAddActions(isStaff, features).map((a) => (
         <button
           key={a.href}
           onClick={() => {

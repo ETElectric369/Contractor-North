@@ -128,6 +128,8 @@ export interface ActionItem {
   affordances: Affordance[]; // canonical verbs valid for THIS item
   /** supplier_paper only: the cards the rollup carries, and the jobs their pickers offer. */
   supplierPapers?: SupplierPaperFeed | null;
+  /** inquiry with Leads switched off only (action-items/switches): the number Call Back dials. */
+  phone?: string | null;
 }
 
 export const KIND_META: Record<ActionKind, { label: string; tone: "slate" | "blue" | "amber" | "green" }> = {
@@ -158,6 +160,13 @@ export const KIND_META: Record<ActionKind, { label: string; tone: "slate" | "blu
   supplier_paper: { label: "Supplier Bills", tone: "amber" },
   supplier_pay: { label: "Discount", tone: "green" },
 };
+
+/** A TECH'S APPOINTMENT ROW OPENS, NOTHING MORE (Wave 0). Done and Delete dispatch to
+ *  appointment.setStatus, which is staff-only, so on a tech's row they were doors that only
+ *  refused. The appointment page itself is his to read. */
+export function appointmentAffordances(isStaff: boolean): Affordance[] {
+  return isStaff ? AFFORDANCES.appointment : ["open"];
+}
 
 // The affordance matrix — which verbs each kind exposes. THE contract, consumed
 // by both the UI (<ActionList>) and (later) the voice registry. (Assign/Convert

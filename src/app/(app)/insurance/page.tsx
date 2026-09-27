@@ -1,5 +1,8 @@
 import { signDocumentUrls } from "@/lib/signed-docs";
 import { createClient } from "@/lib/supabase/server";
+import { isStaffRole } from "@/lib/actions/perms";
+import { featureOn } from "@/lib/features";
+import { viewerSwitches } from "@/lib/viewer-switches";
 import { PageHeader } from "@/components/page-header";
 import { InsuranceManager } from "./insurance-manager";
 import { INSURANCE_FILTER } from "@/lib/compliance-types";
@@ -13,9 +16,14 @@ export default async function InsurancePage() {
   } = await supabase.auth.getUser();
   const { data: me } = await supabase
     .from("profiles")
-    .select("org_id")
+    .select("org_id, role")
     .eq("id", user?.id ?? "")
     .maybeSingle();
+  // A tech reads; every write here is requireStaff, so its doors don't render for him.
+  const canEdit = isStaffRole(me?.role);
+  // The switch off (0352): the page still opens under the shell's Off line, and existing rows keep
+  // edit and delete, but nothing new is added here until it's back on.
+  const canAdd = canEdit && featureOn((await viewerSwitches()).features, "licenses");
 
   // Insurance lives in the shared compliance tracker (compliance_items). This view routes the
   // policy types here; the default-typed legacy "Insurance" rows come along too.
@@ -37,9 +45,9 @@ export default async function InsurancePage() {
     <div>
       <PageHeader
         title="Insurance"
-        description="Policies & coverage — workers' comp, general liability, auto — with renewal alerts so nothing lapses."
+        description="Policies & coverage — workers' comp, general liability, auto — with their renewal dates."
       />
-      <InsuranceManager items={withDocs as any} orgId={me?.org_id ?? ""} />
+      <InsuranceManager items={withDocs as any} orgId={me?.org_id ?? ""} canEdit={canEdit} canAdd={canAdd} />
     </div>
   );
 }

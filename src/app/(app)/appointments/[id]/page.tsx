@@ -28,6 +28,8 @@ import { isStaffRole } from "@/lib/actions/perms";
 import { jobShort, visitIsOver } from "@/lib/appointments/visit-start";
 import { loadLinkInstead } from "@/lib/appointments/visit-start-read";
 import { VisitStartCard } from "./visit-start-card";
+import { FeatureOffLine } from "@/components/feature-off-line";
+import { featureOn } from "@/lib/features";
 
 export const dynamic = "force-dynamic";
 
@@ -126,6 +128,16 @@ export default async function AppointmentCapturePage({
 
   const orgSettings = getOrgSettings((org as { settings?: unknown } | null)?.settings);
   const tz = orgSettings.timezone;
+  // THE SWITCH BOARD (0352). On a walk-through the Inspector below is Leads & Walk-Throughs': off, it
+  // shows only on a visit that already captured something, never as a blank sheet to start. Every
+  // other visit (service, consult) keeps it: it is that page's only notes, photos and sheet surface.
+  const estimatesOn = featureOn(orgSettings.features, "estimates");
+  const walkThrough = isInspectionType((appt as { type?: string | null }).type);
+  const showInspector =
+    featureOn(orgSettings.features, "leads") ||
+    !walkThrough ||
+    hasCaptureData((appt as { capture?: unknown }).capture) ||
+    Object.keys((inspection?.inspection_answers ?? {}) as Record<string, unknown>).length > 0;
   const a = appt as any;
   const capture = (a.capture ?? {}) as {
     notes?: string;
@@ -254,7 +266,11 @@ export default async function AppointmentCapturePage({
 
   return (
     <div className="mx-auto max-w-2xl">
-      <BackLink fallback={dayStr ? `/schedule?view=day&date=${dayStr}` : "/schedule"} fallbackLabel="Back to Schedule" />
+      {viewerIsStaff ? (
+        <BackLink fallback={dayStr ? `/schedule?view=day&date=${dayStr}` : "/schedule"} fallbackLabel="Back To Schedule" />
+      ) : (
+        <BackLink fallback="/planner" fallbackLabel="Back To My Day" />
+      )}
 
       <div className="mb-5">
         <div className="flex flex-wrap items-center gap-2">
@@ -273,7 +289,10 @@ export default async function AppointmentCapturePage({
               noise. It stays on the visit types where work happens and money changes hands on the
               spot (a legacy service_call/job appointment — new ones become real jobs at booking,
               and pay from the job page). */}
-          {a.status !== "cancelled" && !isInspectionType(a.type) && (
+          {/* THE OFFICE'S VERBS. Pay Now, Mark Complete, Delete, Cancel, Unschedule and Edit Details
+              all save through requireStaff, and Pay Now puts money in front of a tech: a tech gets
+              the badges and the page, not the doors (Wave 0). */}
+          {viewerIsStaff && a.status !== "cancelled" && !isInspectionType(a.type) && (
             <SettleUpButton
               source="appointment"
               id={a.id}
@@ -283,7 +302,7 @@ export default async function AppointmentCapturePage({
               textReady={smsReadiness(org as { settings?: unknown } | null).ready}
             />
           )}
-          {(a.status === "scheduled" || a.status === "proposed") && (
+          {viewerIsStaff && (a.status === "scheduled" || a.status === "proposed") && (
             <MarkCompleteButton
               id={a.id}
               label={isInspectionType(a.type) ? "Mark inspection complete" : "Mark complete"}
@@ -293,7 +312,7 @@ export default async function AppointmentCapturePage({
               another at 01:10 because the ✗ he tapped said "Cancel" and left the row on his
               screen. Offered ONLY when nothing was captured — see delete-empty-button.tsx for
               why a walk-through with real data stays behind Edit Details. */}
-          {!hasCaptureData(a.capture) &&
+          {viewerIsStaff && !hasCaptureData(a.capture) &&
             !(inspection?.inspection_answers && JSON.stringify(inspection.inspection_answers) !== "{}") && (
               <DeleteEmptyInspectionButton
                 id={a.id}
@@ -303,7 +322,7 @@ export default async function AppointmentCapturePage({
           {/* CANCEL — the filed bug. This page offered only "Mark complete" (a lie, if it never
               happened) and Delete (which destroys the capture and photos with it). The verb
               already existed and was wired up on the calendar row only; it belongs here too. */}
-          {(a.status === "scheduled" || a.status === "proposed") && (
+          {viewerIsStaff && (a.status === "scheduled" || a.status === "proposed") && (
             <ApptQuickActions
               id={a.id}
               status={a.status}
@@ -313,19 +332,21 @@ export default async function AppointmentCapturePage({
           )}
           {/* Postponed-indefinitely is a real answer: back to the waiting board, date cleared,
               everything else kept. Only shown while a date exists to clear. */}
-          {(a.status === "scheduled" || a.status === "proposed") && a.starts_at && (
+          {viewerIsStaff && (a.status === "scheduled" || a.status === "proposed") && a.starts_at && (
             <UnscheduleButton id={a.id} />
           )}
           {/* Edit details — the shared appointment modal, prefilled (Erik 7/15:
               "need a way to edit inspection/appointment details"). */}
-          <AppointmentButton
-            jobs={picker.jobOpts}
-            customers={picker.custOpts}
-            staff={picker.staffOpts}
-            appointment={apptValue}
-            editLabel="Edit Details"
-            afterDeleteHref={dayStr ? `/schedule?view=day&date=${dayStr}` : "/schedule"}
-          />
+          {viewerIsStaff && (
+            <AppointmentButton
+              jobs={picker.jobOpts}
+              customers={picker.custOpts}
+              staff={picker.staffOpts}
+              appointment={apptValue}
+              editLabel="Edit Details"
+              afterDeleteHref={dayStr ? `/schedule?view=day&date=${dayStr}` : "/schedule"}
+            />
+          )}
         </div>
         <h1 className="mt-2 text-xl font-bold text-slate-900">{a.title}</h1>
         <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-sm text-slate-500">
@@ -417,46 +438,59 @@ export default async function AppointmentCapturePage({
           Nothing was dropped in the merge: the prose boxes, the photos and the typed sheet are all
           still here, reordered so the ask comes first and everything captured reads as one list. */}
       {/* The walk-through and the estimate, for the visits that need them. Under their own heading
-          so the page reads: start the work (above), or walk it through and price it (here). */}
-      <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500">Walk Through Or Estimate</h2>
-      <Inspector
-        appointmentId={a.id}
-        orgId={a.org_id}
-        userId={viewerId}
-        templates={sheets ?? []}
-        priceBook={(priceBook ?? []).map((p) => ({
-          code: p.code,
-          description: p.description ?? "",
-          unit: p.unit ?? "EA",
-          price: Number(p.buy_price ?? 0),
-        }))}
-        initialTemplateId={inspection?.inspection_template_id ?? null}
-        initialAnswers={(inspection?.inspection_answers ?? {}) as never}
-        initialCapture={capture}
-        initialPhotos={photos}
-        initialLocation={a.location ?? ""}
-        linked={
-          a.inquiry_id && a.inquiries?.name
-            ? { kind: "lead" as const, name: a.inquiries.name }
-            : a.customer_id && a.customers?.name
-              ? { kind: "customer" as const, name: a.customers.name }
-              : a.job_id
-                ? { kind: "job" as const, name: "This job" }
+          so the page reads: start the work (above), or walk it through and price it (here).
+          THE SWITCH BOARD (0352): the walk-through is Leads', so with Leads off it shows only on a
+          visit that already holds one (under the Off line); Estimates off drops Start The Estimate. */}
+      {showInspector && (
+        <>
+          <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500">{estimatesOn ? "Walk Through Or Estimate" : "Walk Through"}</h2>
+          {walkThrough && (
+            <FeatureOffLine feature="leads" features={orgSettings.features} isOwner={(meRow as { role?: string } | null)?.role === "owner"} />
+          )}
+          <Inspector
+            appointmentId={a.id}
+            orgId={a.org_id}
+            userId={viewerId}
+            templates={sheets ?? []}
+            // The price book carries buy prices: a tech never gets it (and can't save a scope anyway).
+            readOnly={!viewerIsStaff}
+            priceBook={(viewerIsStaff ? (priceBook ?? []) : []).map((p) => ({
+              code: p.code,
+              description: p.description ?? "",
+              unit: p.unit ?? "EA",
+              price: Number(p.buy_price ?? 0),
+            }))}
+            initialTemplateId={inspection?.inspection_template_id ?? null}
+            initialAnswers={(inspection?.inspection_answers ?? {}) as never}
+            initialCapture={capture}
+            initialPhotos={photos}
+            initialLocation={a.location ?? ""}
+            linked={
+              a.inquiry_id && a.inquiries?.name
+                ? { kind: "lead" as const, name: a.inquiries.name }
+                : a.customer_id && a.customers?.name
+                  ? { kind: "customer" as const, name: a.customers.name }
+                  : a.job_id
+                    ? { kind: "job" as const, name: "This job" }
+                    : null
+            }
+            estimateHref={estimatesOn ? `/quotes/new?capture=${a.id}${a.inquiry_id ? `&inquiry=${a.inquiry_id}` : ""}` : null}
+            nortOn={featureOn(orgSettings.features, "nort")}
+            buildOwn={featureOn(orgSettings.features, "safety_log")}
+            // The linked lead's preliminary plan report — parsed server-side so the card is in the
+            // initial HTML (Zone A must not grow after mount). Ready briefs only; the lead row owns
+            // the pending/failed lifecycle.
+            planBrief={
+              a.inquiry_id
+                ? (() => {
+                    const b = parsePlanBrief((a.inquiries as { intake?: unknown } | null)?.intake);
+                    return b?.status === "ready" ? b : null;
+                  })()
                 : null
-        }
-        estimateHref={`/quotes/new?capture=${a.id}${a.inquiry_id ? `&inquiry=${a.inquiry_id}` : ""}`}
-        // The linked lead's preliminary plan report — parsed server-side so the card is in the
-        // initial HTML (Zone A must not grow after mount). Ready briefs only; the lead row owns
-        // the pending/failed lifecycle.
-        planBrief={
-          a.inquiry_id
-            ? (() => {
-                const b = parsePlanBrief((a.inquiries as { intake?: unknown } | null)?.intake);
-                return b?.status === "ready" ? b : null;
-              })()
-            : null
-        }
-      />
+            }
+          />
+        </>
+      )}
     </div>
   );
 }

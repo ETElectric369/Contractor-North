@@ -5,7 +5,7 @@ import { GraduationCap, Loader2 } from "lucide-react";
 import { unlockAudio } from "@/lib/tts";
 import { TourDriver } from "@/components/tour/tour-driver";
 import { markLessonSeen } from "@/app/(app)/setup-actions";
-import { lessonByKey } from "@/lib/onboarding/tour";
+import { lessonBlurb, lessonByKey } from "@/lib/onboarding/tour";
 import type { Answers } from "@/lib/playbook/types";
 
 /**
@@ -27,11 +27,14 @@ export function LessonOffer({
   lessonKey,
   seen,
   initial,
+  nortOn = true,
 }: {
   lessonKey: string;
   /** profiles.lessons_seen (0197) — offered already means never offered again here. */
   seen: string[];
   initial: Answers;
+  /** The Nort switch (0352): off, the strip and the lesson read their neutral words. */
+  nortOn?: boolean;
 }) {
   const lesson = lessonByKey(lessonKey);
   const [running, setRunning] = useState(false);
@@ -54,7 +57,7 @@ export function LessonOffer({
       <div className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-brand/30 bg-brand-light/30 px-3 py-2">
         <GraduationCap className="h-4 w-4 shrink-0 text-brand" />
         <span className="min-w-0 text-sm text-slate-700">
-          <strong className="font-medium">First time here?</strong> {lesson.blurb}
+          <strong className="font-medium">First time here?</strong> {lessonBlurb(lesson, nortOn)}
         </span>
         <span className="ml-auto flex shrink-0 items-center gap-2">
           <button
@@ -96,6 +99,7 @@ export function LessonOffer({
             setRunning(false);
             setDismissed(true);
           }}
+          nortOn={nortOn}
         />
       )}
     </>

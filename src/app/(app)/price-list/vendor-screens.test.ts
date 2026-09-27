@@ -118,4 +118,16 @@ describe("the Items list", () => {
     const html = renderToStaticMarkup(createElement(PriceListManager, { items: [w830], defaultMarkupPct: 25, optionsByItem: null }));
     expect(html).not.toContain("Open this item");
   });
+
+  // Kits & Sizing off (0352): the row checkboxes exist only to build a kit, so they go with Add to
+  // Kit; the item itself, its price and its Kits column stay. On (or no prop): exactly as before.
+  it("Kits off: no row checkboxes to build a kit with; the item and its price stay", () => {
+    const on = renderToStaticMarkup(createElement(PriceListManager, { items: [w830], defaultMarkupPct: 25, optionsByItem: null }));
+    expect(on).toContain('aria-label="Select all shown"');
+    expect(on).toContain('aria-label="Select Windows (Materials) (Allowance)"');
+    const off = renderToStaticMarkup(createElement(PriceListManager, { items: [w830], defaultMarkupPct: 25, optionsByItem: null, kitDoors: false }));
+    expect(off).not.toContain('type="checkbox"');
+    expect(off).toContain("Windows (Materials) (Allowance)");
+    expect(off).toContain(">Kits<");
+  });
 });

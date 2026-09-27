@@ -37,14 +37,20 @@ const SEV: Record<string, { tone: "slate" | "amber" | "red"; label: string }> = 
   lost_time: { tone: "red", label: "Lost time" },
 };
 
+/** `canEdit` is false for a tech: add, edit and delete are requireStaff, so they don't render.
+ *  `canAdd` false (Safety Log is off, 0352): no new record form; existing rows keep edit and delete. */
 export function SafetyManager({
   employees,
   jobs,
   records,
+  canEdit,
+  canAdd = canEdit,
 }: {
   employees: Person[];
   jobs: JobOpt[];
   records: Rec[];
+  canEdit: boolean;
+  canAdd?: boolean;
 }) {
   const incidents = records.filter((r) => r.kind === "incident");
   const toolbox = records.filter((r) => r.kind === "toolbox");
@@ -58,14 +64,14 @@ export function SafetyManager({
           label: "Incidents",
           count: incidents.length,
           icon: <AlertTriangle className="h-4 w-4" />,
-          content: <SafetyPanel kind="incident" employees={employees} jobs={jobs} records={incidents} />,
+          content: <SafetyPanel kind="incident" employees={employees} jobs={jobs} records={incidents} canEdit={canEdit} canAdd={canAdd} />,
         },
         {
           id: "toolbox",
           label: "Toolbox Talks",
           count: toolbox.length,
           icon: <Users className="h-4 w-4" />,
-          content: <SafetyPanel kind="toolbox" employees={employees} jobs={jobs} records={toolbox} />,
+          content: <SafetyPanel kind="toolbox" employees={employees} jobs={jobs} records={toolbox} canEdit={canEdit} canAdd={canAdd} />,
         },
       ]}
     />
@@ -77,11 +83,15 @@ function SafetyPanel({
   employees,
   jobs,
   records,
+  canEdit,
+  canAdd,
 }: {
   kind: "incident" | "toolbox";
   employees: Person[];
   jobs: JobOpt[];
   records: Rec[];
+  canEdit: boolean;
+  canAdd: boolean;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -121,7 +131,8 @@ function SafetyPanel({
 
   return (
     <div className="space-y-4">
-      <Card className="space-y-3 p-4">
+      {!canEdit && <p className="text-sm text-slate-500">The office logs these.</p>}
+      {canAdd && <Card className="space-y-3 p-4">
         {error && <p className="text-sm text-red-600">{error}</p>}
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           <div><Label htmlFor="s-date">Date</Label><Input id="s-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} /></div>
@@ -139,7 +150,7 @@ function SafetyPanel({
         </div>
         <div><Label htmlFor="s-desc">{isIncident ? "Details / corrective action" : "Notes"}</Label><Textarea id="s-desc" rows={2} value={description} onChange={(e) => setDescription(e.target.value)} /></div>
         <div className="flex justify-end"><Button size="sm" onClick={add} disabled={pending || !title.trim()}><Plus className="h-3.5 w-3.5" /> Add {isIncident ? "Incident" : "Talk"}</Button></div>
-      </Card>
+      </Card>}
 
       <ul className="space-y-2">
         {records.map((r) => (
@@ -160,8 +171,8 @@ function SafetyPanel({
                 <div className="flex items-center gap-2">
                   {r.severity && SEV[r.severity] && <Badge tone={SEV[r.severity].tone}>{SEV[r.severity].label}</Badge>}
                   {r.recordable && <Badge tone="red">OSHA 300</Badge>}
-                  <EditSafetyButton kind={kind} employees={employees} jobs={jobs} record={r} />
-                  <button onClick={() => { if (!confirm("Delete this safety record? This removes a legal OSHA record.")) return; start(async () => { const res = await deleteSafetyRecord(r.id); if (!res.ok) return alert(res.error ?? "Could not delete."); router.refresh(); }); }} className="text-slate-300 hover:text-red-600" title="Delete"><Trash2 className="h-4 w-4" /></button>
+                  {canEdit && <EditSafetyButton kind={kind} employees={employees} jobs={jobs} record={r} />}
+                  {canEdit && <button onClick={() => { if (!confirm("Delete this safety record? This removes a legal OSHA record.")) return; start(async () => { const res = await deleteSafetyRecord(r.id); if (!res.ok) return alert(res.error ?? "Could not delete."); router.refresh(); }); }} className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-slate-300 hover:text-red-600" title="Delete" aria-label="Delete"><Trash2 className="h-4 w-4" /></button>}
                 </div>
               </div>
             </Card>
@@ -237,7 +248,7 @@ function EditSafetyButton({
 
   return (
     <>
-      <button onClick={() => { reset(); setOpen(true); }} className="text-slate-300 hover:text-brand" title="Edit"><Pencil className="h-4 w-4" /></button>
+      <button type="button" onClick={() => { reset(); setOpen(true); }} className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-slate-300 hover:text-brand" title="Edit" aria-label="Edit"><Pencil className="h-4 w-4" /></button>
       <Modal
         open={open}
         onClose={() => setOpen(false)}

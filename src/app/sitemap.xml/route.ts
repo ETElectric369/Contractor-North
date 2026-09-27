@@ -1,5 +1,5 @@
 import { headers } from "next/headers";
-import { getPublicOrgByHandle, getPublicOrgByDomain } from "@/lib/public-org";
+import { getPublicOrgByHandle, getPublicOrgByDomain, publicSite } from "@/lib/public-org";
 import { createServiceClient } from "@/lib/supabase/server";
 import { orgPublicBaseUrl } from "@/lib/org-settings";
 import { isReservedSlug } from "@/lib/site-reserved";
@@ -26,7 +26,12 @@ async function orgForHost(host: string) {
 export async function GET() {
   const host = (await headers()).get("host") || SITES_DOMAIN;
   const proto = host.startsWith("localhost") || host.startsWith("127.") ? "http" : "https";
-  const org = await orgForHost(host);
+  const found = await orgForHost(host);
+  // WEBSITE OFF (the switch board, 0352, rule e): the company's host lists nothing at all, not even
+  // its home page, which no longer renders. Never the app host's root list: that would advertise a
+  // page that isn't there.
+  const org = publicSite(found);
+  if (found && !org) return new Response(sitemapXml([]), { headers: { "Content-Type": "application/xml; charset=utf-8" } });
 
   // For an org, always advertise the CANONICAL base (the custom domain when set, else the free
   // subdomain) — never the request host — so the sitemap can't list non-canonical duplicates of the
@@ -88,9 +93,12 @@ export async function GET() {
     entries.push(urlEntry(`${base}/`));
   }
 
-  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+  return new Response(sitemapXml(entries), { headers: { "Content-Type": "application/xml; charset=utf-8" } });
+}
+
+function sitemapXml(entries: string[]): string {
+  return `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
 ${entries.join("\n")}
 </urlset>`;
-  return new Response(xml, { headers: { "Content-Type": "application/xml; charset=utf-8" } });
 }

@@ -1,4 +1,5 @@
 import { billLineCost, isTaxLine, shelfLotCost, type BillLine } from "@/lib/bill-itemisation";
+import { shortSupplierName } from "@/lib/supplier-name";
 import {
   containerCountInDescription,
   perUnitCost,
@@ -602,6 +603,8 @@ export function waitingForShelf(input: {
     total: unknown;
     words: string;
     accountId?: string | null;
+    /** The supplier account's name, for the title ("CED 8802-1108330"); "Supplier" without one. */
+    supplier?: string | null;
     /**
      * Where it stands on /bills (supplierPaperHomes, audit v1018 class 14): Record To Shelf is only
      * offered when the supplier's Not In Your Books fold holds it. "unchecked": that reading
@@ -653,7 +656,7 @@ export function waitingForShelf(input: {
     });
   }
   for (const d of input.stockDocuments ?? []) {
-    const title = `CED ${d.number}, ${dollars(Number(d.total) || 0)}`;
+    const title = `${d.supplier ? shortSupplierName(d.supplier) : "Supplier"} ${d.number}, ${dollars(Number(d.total) || 0)}`;
     const base = { key: `doc:${d.id}`, kind: "stock_document" as const, title };
     // A DOOR ONLY WHERE THE BUTTON IS (audit v1018, class 14): the fold that holds Record To Shelf
     // lists a paper only when /bills would (supplierPaperHomes). Anywhere else, the door goes where

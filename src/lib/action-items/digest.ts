@@ -1,6 +1,7 @@
 import "server-only";
 import { todayStrInTz } from "@/lib/tz";
 import { getOrgSettings } from "@/lib/org-settings";
+import { featureOn } from "@/lib/features";
 import { orgStaffIds, pushConfigured, sendPushToProfiles } from "@/lib/push";
 import { rankSix } from "@/lib/six-rank";
 import { daysAgoStr } from "./leak-detectors";
@@ -108,7 +109,8 @@ export async function sendDayAheadDigests(supabase: any): Promise<{ orgs: number
     // Decision titles in stream order (money → leads), "+N more" for the rest.
     const decisionTitles: string[] = [
       ...((invR.data ?? []) as any[]).map((i) => `Invoice ${i.invoice_number} overdue`),
-      ...((leadR.data ?? []) as any[]).map((l) => `New lead: ${l.name}`),
+      // Leads switched off (0352): the same people, called what My Day calls them.
+      ...((leadR.data ?? []) as any[]).map((l) => `${featureOn(getOrgSettings(org.settings).features, "leads") ? "New lead" : "New request"}: ${l.name}`),
     ].slice(0, 2);
     const moreDecisions = decisions - decisionTitles.length;
     const decisionLine = decisionTitles.join(" · ") + (moreDecisions > 0 ? ` · +${moreDecisions} more` : "");

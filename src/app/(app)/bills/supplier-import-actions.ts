@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { dbError } from "@/lib/db-error";
+import { supplierAccountFor, type SupplierAccountLite } from "@/lib/supplier-name";
 import { reportError } from "@/lib/observe";
 import { requireStaff } from "@/lib/staff-guard";
 import { parseCedDocuments, type CedInvoice } from "@/lib/ced-invoice-parse";
@@ -96,6 +97,9 @@ export interface ImportedDocument {
   jobNameRaw: string | null;
   /** Which file it was read out of, so a figure on screen can be traced to a document. */
   sourceFile: string | null;
+  /** The row this import wrote (landed only), so a paper's Undo takes off exactly that row and never
+   *  another supplier's document with the same number (0354 allows both). */
+  id?: string;
 }
 
 export interface SupplierImportResult {
@@ -235,7 +239,7 @@ export async function importCedInvoices(input: SupplierImportInput): Promise<Sup
       // NOT A DEAD END: it names the file and it names the way forward.
       refused.push({
         invoiceNumber: null,
-        error: `${name} reached here as raw PDF bytes, not its text. Pick it with Choose CED PDFs, which reads the text out of it, or drop it on Drop Paperwork.`,
+        error: `${name} reached here as raw PDF bytes, not its text. Pick it with Choose Supplier PDFs, which reads the text out of it, or drop it on Drop Paperwork.`,
       });
       continue;
     }
@@ -253,7 +257,7 @@ export async function importCedInvoices(input: SupplierImportInput): Promise<Sup
   if (!sources.length && !refused.length) {
     return {
       ok: false,
-      error: "Paste the text of a CED invoice first, or pick the files you downloaded from the portal.",
+      error: "Paste the text of a supplier invoice first, or pick the files you downloaded from its portal.",
       ...empty(),
     };
   }
@@ -281,7 +285,7 @@ export async function importCedInvoices(input: SupplierImportInput): Promise<Sup
     if (!results.length) {
       refused.push({
         invoiceNumber: null,
-        error: `${source.name ?? "That text"} has no CED invoice number in it, so there was nothing to read.`,
+        error: `${source.name ?? "That text"} has no supplier invoice number in it, so there was nothing to read.`,
       });
       continue;
     }
@@ -323,7 +327,7 @@ export async function importCedInvoices(input: SupplierImportInput): Promise<Sup
       ok: false,
       error: refused.length
         ? `Nothing could be read. ${sayList(refused.map((r) => r.error))}`
-        : "Nothing in that looked like a CED invoice.",
+        : "Nothing in that looked like a supplier invoice.",
       ...empty(),
       refused,
     };
@@ -341,21 +345,10 @@ export async function importCedInvoices(input: SupplierImportInput): Promise<Sup
     .select("id, name, account_number, branch_code")
     .eq("org_id", org.orgId)
     .limit(500);
-  const byAccountNumber = new Map<string, { id: string; name: string }>();
-  const byBranch = new Map<string, { id: string; name: string }>();
-  for (const a of (accountRows ?? []) as { id: string; name: string; account_number: string | null; branch_code: string | null }[]) {
-    const key = String(a.account_number ?? "").trim().toLowerCase();
-    if (key) byAccountNumber.set(key, { id: String(a.id), name: String(a.name ?? "") });
-    const branch = String(a.branch_code ?? "").trim().toLowerCase();
-    if (branch && !byBranch.has(branch)) byBranch.set(branch, { id: String(a.id), name: String(a.name ?? "") });
-  }
-  const accountFor = (invoice: CedInvoice): { id: string; name: string } | null => {
-    const number = String(invoice.accountNumber ?? "").trim().toLowerCase();
-    if (number && byAccountNumber.has(number)) return byAccountNumber.get(number) ?? null;
-    const branch = invoice.invoiceNumber.split("-")[0]?.trim().toLowerCase() ?? "";
-    if (branch && byBranch.has(branch)) return byBranch.get(branch) ?? null;
-    return null;
-  };
+  // One matcher (lib/supplier-name), shared with the paperwork tray's drop, so a dropped paper and
+  // an imported one land on the same account.
+  const accountFor = (invoice: CedInvoice): { id: string; name: string } | null =>
+    supplierAccountFor((accountRows ?? []) as SupplierAccountLite[], invoice);
 
   // ── WHAT IS ALREADY ON FILE ────────────────────────────────────────────────────────────────
   type ExistingRow = {
@@ -392,8 +385,30 @@ export async function importCedInvoices(input: SupplierImportInput): Promise<Sup
       refused,
     };
   }
+  // ON FILE PER SUPPLIER ACCOUNT, NOT PER NUMBER (Wave 0; 0354 makes the table unique on
+  // org + account + number). Two suppliers can print the same bare number, and reading "already
+  // on file" by number alone skipped the second supplier's paper, or refused it as "two different
+  // totals". A paper is the row on ITS account; a row on no account yet is adopted (the account is
+  // written onto it below, as before). Never another supplier's row.
+  //
+  // A PAPER THAT MATCHES NO ACCOUNT (the account has no number or branch on file, or the paper prints
+  // another) can't say whose it is, while its row may already sit on an account a person picked (an
+  // open list's Apply). Then the ONE row with that number is it, as before 0354. Two or more: none is
+  // assumed.
   const existing = new Map<string, ExistingRow>();
-  for (const row of (existingRows ?? []) as ExistingRow[]) existing.set(String(row.invoice_number), row);
+  const byNumber = new Map<string, ExistingRow[]>();
+  const fileKey = (accountId: string | null | undefined, number: string) => `${accountId ?? ""}|${number}`;
+  for (const row of (existingRows ?? []) as ExistingRow[]) {
+    existing.set(fileKey(row.supplier_account_id, String(row.invoice_number)), row);
+    byNumber.set(String(row.invoice_number), [...(byNumber.get(String(row.invoice_number)) ?? []), row]);
+  }
+  const onFile = (invoice: CedInvoice): ExistingRow | undefined => {
+    const accountId = accountFor(invoice)?.id ?? null;
+    const n = invoice.invoiceNumber;
+    if (accountId) return existing.get(fileKey(accountId, n)) ?? existing.get(fileKey(null, n));
+    const same = byNumber.get(n) ?? [];
+    return same.length === 1 ? same[0] : undefined;
+  };
 
   // ── THE PDFs THEMSELVES, ONCE PER FILE ─────────────────────────────────────────────────────
   // Only a file that gave us at least one document is kept (a file that read as nothing has no
@@ -449,7 +464,7 @@ export async function importCedInvoices(input: SupplierImportInput): Promise<Sup
   // The new ones go in as ONE insert. Forty-seven separate round trips from a phone on a job site
   // is the latency class audit v921 was about, and a partial failure halfway down that list would
   // leave him with a ledger nobody could reason about.
-  const fresh = [...parsed.values()].filter((p) => !existing.has(p.invoice.invoiceNumber));
+  const fresh = [...parsed.values()].filter((p) => !onFile(p.invoice));
   if (fresh.length) {
     const rows = fresh.map((p) => ({ invoice: p.invoice, sourceFile: sourceFileOf(p) })).map(({ invoice, sourceFile }) => ({
       org_id: org.orgId,
@@ -479,7 +494,7 @@ export async function importCedInvoices(input: SupplierImportInput): Promise<Sup
       .select("id, invoice_number");
     if (insErr) {
       // TWO IMPORTS AT ONCE. Both read "not on file", both insert, and the unique index on
-      // (org_id, invoice_number) refuses the second batch whole - which is the index doing exactly
+      // (org_id, account, invoice_number) refuses the second batch whole - which is the index doing exactly
       // its job. Saying "try it again" is the truth: the second run finds them already there and
       // writes nothing, because that is what this importer does with a document it already holds.
       const duplicate = /duplicate key value/i.test(String((insErr as { message?: string }).message ?? ""));
@@ -510,7 +525,7 @@ export async function importCedInvoices(input: SupplierImportInput): Promise<Sup
         });
         continue;
       }
-      landed.push(said(invoice, sourceFile));
+      landed.push({ ...said(invoice, sourceFile), id });
       if (invoice.lines.length) linesToWrite.push({ invoiceId: id, invoice });
     }
   }
@@ -518,7 +533,7 @@ export async function importCedInvoices(input: SupplierImportInput): Promise<Sup
   // The ones already on file: written only where the paper says something the row does not.
   for (const p of parsed.values()) {
     const { invoice, sourceFile } = p;
-    const row = existing.get(invoice.invoiceNumber);
+    const row = onFile(invoice);
     if (!row) continue;
 
     const patch: Record<string, unknown> = {};
@@ -684,7 +699,7 @@ export async function importCedInvoices(input: SupplierImportInput): Promise<Sup
     // NOTHING SILENT, AND NOT A DEAD END: the documents are in; this names the PDF that isn't, why,
     // and the way to keep it.
     detail.push(
-      `${pdfUnsaved.length === 1 ? "This PDF" : "These PDFs"} didn't save, so Open Bill can't show ${pdfUnsaved.length === 1 ? "it" : "them"}: ${sayList(pdfUnsaved)}. The documents are in. Choose ${pdfUnsaved.length === 1 ? "it" : "them"} again with Choose CED PDFs to keep the PDF.`,
+      `${pdfUnsaved.length === 1 ? "This PDF" : "These PDFs"} didn't save, so Open Bill can't show ${pdfUnsaved.length === 1 ? "it" : "them"}: ${sayList(pdfUnsaved)}. The documents are in. Choose ${pdfUnsaved.length === 1 ? "it" : "them"} again with Choose Supplier PDFs to keep the PDF.`,
     );
   }
   if (refused.length) {

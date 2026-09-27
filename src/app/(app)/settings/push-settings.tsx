@@ -14,6 +14,7 @@ import { isNativeShell } from "@/lib/native-shell";
 import { isStaffRole } from "@/lib/actions/perms";
 import { registerForNativePush, nativePushPermission } from "@/lib/native-push";
 import { LONG_SHIFT_HOURS } from "@/lib/long-shift";
+import { featureOn, type FeatureKey, type FeatureMap } from "@/lib/features";
 
 const PUBLIC_KEY = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
 
@@ -35,9 +36,17 @@ const PUBLIC_KEY = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
  */
 type Audience = "all" | "staff" | "tech";
 
-const TRIGGERS: { key: string; label: string; help?: string; soon?: boolean; audience: Audience }[] = [
+/**
+ * AND THE SWITCH BOARD (0352). `feature`: an alert only a switched-on feature sends, so its switch
+ * goes with it (with Daily Reports off no report is filed, and a switch that can never fire is a
+ * dead door). `whenOff`: an alert that KEEPS COMING with its feature off, reworded: a request from
+ * the website still buzzes with Leads off (it lands on My Day), so its switch stays, in plain
+ * words. "Quotes accepted" carries neither on purpose: an estimate already sent can still be
+ * accepted with Estimates off, and that buzz is worth keeping (and muting).
+ */
+const TRIGGERS: { key: string; label: string; help?: string; soon?: boolean; audience: Audience; feature?: FeatureKey; whenOff?: { feature: FeatureKey; label: string } }[] = [
   { key: "assigned", label: "Jobs & appointments assigned to me", audience: "all" },
-  { key: "inquiry", label: "New inquiries / leads", audience: "staff" },
+  { key: "inquiry", label: "New inquiries / leads", audience: "staff", whenOff: { feature: "leads", label: "New requests from customers" } },
   { key: "quote_accepted", label: "Quotes accepted by a customer", audience: "staff" },
   { key: "invoice_paid", label: "Invoices paid", audience: "staff" },
   // day_ahead's sender is LIVE (sendDayAheadDigests via /api/automations/daily) — the toggle
@@ -60,7 +69,7 @@ const TRIGGERS: { key: string; label: string; help?: string; soon?: boolean; aud
     help: "Buzzes when somebody on your crew has been clocked in that long, so you can clock them out.",
     audience: "staff",
   },
-  { key: "daily_report", label: "Daily reports from crew leads", audience: "staff" },
+  { key: "daily_report", label: "Daily reports from crew leads", audience: "staff", feature: "daily_reports" },
   // Its own row, not folded into "Invoices paid": Apple's Tap to Pay on iPhone requirements (the
   // launch announcement, 3.3; a decline the tech never saw, 5.12) must not go quiet as a side
   // effect of muting an unrelated alert. The help line says what it actually covers. Staff-only
@@ -84,6 +93,17 @@ const DEFAULTS: Record<string, boolean> = {
   long_shift: true,
 };
 
+/** The alert switches this person sees: by role (until the role is known, only the alerts every
+ *  role receives — never a switch that can't work), then by the company's feature switches. */
+export function pushTriggersFor(role: string | null, features?: FeatureMap | null) {
+  return TRIGGERS.filter((t) => {
+    if (t.feature && !featureOn(features, t.feature)) return false;
+    if (t.audience === "all") return true;
+    if (!role) return false;
+    return t.audience === "staff" ? isStaffRole(role) : !isStaffRole(role);
+  }).map((t) => (t.whenOff && !featureOn(features, t.whenOff.feature) ? { ...t, label: t.whenOff.label } : t));
+}
+
 function urlB64ToUint8(base64String: string) {
   const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
   const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
@@ -96,10 +116,15 @@ function urlB64ToUint8(base64String: string) {
 export function PushSettings({
   initialPrefs,
   role: initialRole,
+  features,
 }: {
   initialPrefs: Record<string, boolean>;
+  /** The company's switches (0352): an alert that only a switched-off feature sends isn't offered. */
+  features?: FeatureMap;
   /** The viewer's role, when the server already has it. Left out, this asks for it once. */
   role?: string | null;
+  /** Alerts whose feature is switched off (0352): not drawn. The stored choice is kept. */
+  hiddenKeys?: string[];
 }) {
   const [supported, setSupported] = useState(true);
   const [enabled, setEnabled] = useState(false);
@@ -284,12 +309,7 @@ export function PushSettings({
       </p>
     );
 
-  // Until the role is known, only the alerts every role receives — never a switch that can't work.
-  const visibleTriggers = TRIGGERS.filter((t) => {
-    if (t.audience === "all") return true;
-    if (!role) return false;
-    return t.audience === "staff" ? isStaffRole(role) : !isStaffRole(role);
-  });
+  const visibleTriggers = pushTriggersFor(role, features);
 
   return (
     <div className="space-y-4">

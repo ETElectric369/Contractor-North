@@ -7,6 +7,7 @@ import { Input, Label, Select } from "@/components/ui/input";
 import { PhoneInput } from "@/components/ui/phone-input";
 import type { Organization } from "@/lib/types";
 import { getOrgSettings, CURRENCIES, TIMEZONES } from "@/lib/org-settings";
+import { featureOn } from "@/lib/features";
 import { updateOrganization } from "./actions";
 
 export function OrgSettingsForm({ org }: { org: Organization }) {
@@ -72,19 +73,23 @@ export function OrgSettingsForm({ org }: { org: Organization }) {
           <Input id="email" name="email" type="email" defaultValue={org.email ?? ""} />
         </div>
         <div>
-          <Label htmlFor="license">License # (TECL/EC)</Label>
+          <Label htmlFor="license">License #</Label>
           <Input id="license" name="license" defaultValue={org.license ?? ""} />
         </div>
-        <div>
-          <Label htmlFor="default_tax_pct">Default tax rate %</Label>
-          <Input
-            id="default_tax_pct"
-            name="default_tax_pct"
-            type="number"
-            step="any"
-            defaultValue={(org.default_tax_rate * 100).toString()}
-          />
-        </div>
+        {/* Sales Tax off (the switch board, 0352): not drawn, so the form doesn't send it and the
+            stored rate is left exactly as it is (updateOrganization saves only the keys it gets). */}
+        {featureOn(s.features, "sales_tax") && (
+          <div>
+            <Label htmlFor="default_tax_pct">Default tax rate %</Label>
+            <Input
+              id="default_tax_pct"
+              name="default_tax_pct"
+              type="number"
+              step="any"
+              defaultValue={(org.default_tax_rate * 100).toString()}
+            />
+          </div>
+        )}
         <div>
           <Label htmlFor="glass_tint">Your color</Label>
           <div className="flex items-center gap-2">

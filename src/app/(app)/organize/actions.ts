@@ -70,6 +70,7 @@ import {
   returnTiedPapers,
   standingRefusal,
   takeDownLanded,
+  landedKeptSaid,
   tradeOf,
   updateItemTolerant,
   type BillLine,
@@ -664,7 +665,7 @@ ${MASKED_PRICE_PROMPT_RULE}`,
     });
   }
   const linkWarning = linkMissing
-    ? "The cost is recorded, but this receipt did not get marked as billed. Tapping Record as Cost on it again would write a second bill, so check the job's costs first."
+    ? "The cost is recorded, but this receipt did not get marked as billed. Tapping Record As Cost on it again would write a second bill, so check the job's costs first."
     : null;
 
   revalidatePath("/bills");
@@ -1200,10 +1201,10 @@ export async function fileItem(id: string, dest: FileDestination, opts: FileOpti
         .insert({ org_id: ctx.orgId, bill_id: billId, supplier_invoice_id: si.id })
         .select("id");
       if (linkErr && String((linkErr as { code?: string }).code ?? "") === "23505")
-        return backToTray(`CED ${si.number} was just covered by another bill, so this was not filed. It is back in the tray; look again and tie it to that bill.`);
+        return backToTray(`Supplier document ${si.number} was just covered by another bill, so this was not filed. It is back in the tray; look again and tie it to that bill.`);
       if (linkErr || !linked?.length) {
         reportError("organize:fileItem.link", linkErr ?? new Error("bill_supplier_invoices insert wrote no rows"), { billId, supplierInvoiceId: si.id });
-        linkNote = ` The link to CED ${si.number} didn't save; the cost is on the books, and Record It As A Bill on that document will tie the two.`;
+        linkNote = ` The link to supplier document ${si.number} didn't save; the cost is on the books, and Record It As A Bill on that document will tie the two.`;
       }
     }
   }
@@ -1241,7 +1242,7 @@ export async function fileItem(id: string, dest: FileDestination, opts: FileOpti
   if (jobId) revalidatePath(`/jobs/${jobId}`);
   if (prevJob) revalidatePath(`/jobs/${prevJob}`);
   revalidatePath("/inventory");
-  const linkedSaid = linkTo.length && !linkNote ? ` Linked to CED ${linkTo.map((l) => l.number).join(", ")}.` : "";
+  const linkedSaid = linkTo.length && !linkNote ? ` Linked to supplier document ${linkTo.map((l) => l.number).join(", ")}.` : "";
   if (shelfSaid) return { ok: true, message: `Filed on the shop shelf.${shelfSaid}${linkedSaid}${linkNote}` };
   return linkedSaid || linkNote ? { ok: true, message: `Filed.${linkedSaid}${linkNote}` } : { ok: true };
 }
@@ -1277,7 +1278,7 @@ export async function undoPaperwork(id: string): Promise<Result & { message?: st
   if (item.status === "needs_review" && !item.bill_id && !item.document_id && !item.petty_cash_id && !tied)
     return { ok: false, error: "Nothing to undo: this paper is still waiting to be filed." };
 
-  let kept: string[] = [];
+  let landedLeft: { kept: string[]; shared: string[] } = { kept: [], shared: [] };
   let torn: Extract<Teardown, { refused: null }> | null = null;
   /** A supplier's open list: what Apply changed is put back, and the list waits again. */
   let listLeft: string[] | null = null;
@@ -1291,9 +1292,9 @@ export async function undoPaperwork(id: string): Promise<Result & { message?: st
       listLeft = [];
     }
   } else if (p.filed?.how === "supplier_documents" && p.filed.landed?.length) {
-    const down = await takeDownLanded(supabase, ctx.orgId, p.filed.landed);
+    const down = await takeDownLanded(supabase, ctx.orgId, p.filed.landed, p.filed.landedIds);
     if (down.error) return { ok: false, error: `${down.error} Nothing was undone.` };
-    kept = down.kept;
+    landedLeft = down;
   } else if (p.filed?.how === "task" && p.filed.taskId) {
     // THE TASK A NOTE BECAME comes off the list first; a task already gone is simply gone.
     let q = supabase.from("tasks").delete().eq("id", p.filed.taskId);
@@ -1326,7 +1327,7 @@ export async function undoPaperwork(id: string): Promise<Result & { message?: st
     if (item.job_id) revalidatePath(`/jobs/${item.job_id}`);
     return {
       ok: true,
-      message: `Undone: its cost is off the job. The receipt stays on the job; press Record as Cost there to make it a cost again.${papersBackSaid(torn.papersBack)}`,
+      message: `Undone: its cost is off the job. The receipt stays on the job; press Record As Cost there to make it a cost again.${papersBackSaid(torn.papersBack)}`,
     };
   }
 
@@ -1379,7 +1380,7 @@ export async function undoPaperwork(id: string): Promise<Result & { message?: st
       `${tied ? "Untied" : "Undone"}. It is back in the tray, waiting for File It.` +
       (keptLines ? keptChoicesSaid(keptLines) : "") +
       papersBackSaid(torn?.papersBack ?? []) +
-      (kept.length ? ` ${kept.join(", ")} stayed on the CED documents list, because a bill, a job or another paper already points at ${kept.length === 1 ? "it" : "them"}.` : ""),
+      landedKeptSaid(landedLeft),
   };
 }
 
@@ -1425,7 +1426,7 @@ export async function tiePaperwork(id: string, target: { billId: string }): Prom
   revalidatePath("/organize");
   revalidatePath("/bills");
   const against = hit.sentence
-    .replace(/^(Maybe )?[Aa]lready on the (books|CED documents list): /, "Filed against ")
+    .replace(/^(Maybe )?[Aa]lready on the (books|CED documents list|supplier documents list): /, "Filed against ")
     .replace(/ It carries this number, but the supplier is spelled another way.*$/, "");
   return { ok: true, message: `Tied. ${against} Nothing new was added.` };
 }
@@ -1446,11 +1447,11 @@ export async function deleteOrganizedItem(id: string): Promise<Result & { messag
 
   // THE CED DOCUMENTS IT ADDED (TD4): the confirm says Delete removes whatever it filed, and a
   // supplier-documents filing records what it added only on its proposal.
-  let kept: string[] = [];
+  let landedLeft: { kept: string[]; shared: string[] } = { kept: [], shared: [] };
   if (p.filed?.how === "supplier_documents" && p.filed.landed?.length) {
-    const down = await takeDownLanded(supabase, ctx.orgId, p.filed.landed);
+    const down = await takeDownLanded(supabase, ctx.orgId, p.filed.landed, p.filed.landedIds);
     if (down.error) return { ok: false, error: `${down.error} Nothing was deleted.` };
-    kept = down.kept;
+    landedLeft = down;
   }
   // AN APPLIED SUPPLIER LIST: Delete puts back what it changed first (the same Undo), because the
   // record of what it changed lives on this row and goes with it.
@@ -1497,7 +1498,7 @@ export async function deleteOrganizedItem(id: string): Promise<Result & { messag
   const said =
     (jobsOwnFile && item.document_id ? " The receipt stays on the job." : "") +
     papersBackSaid(torn.papersBack) +
-    (kept.length ? ` ${kept.join(", ")} stayed on the CED documents list, because a bill, a job or another paper already points at ${kept.length === 1 ? "it" : "them"}.` : "") +
+    landedKeptSaid(landedLeft) +
     (listPutBack
       ? ` Every paper the list changed is back as it was.${listPutBack.length ? ` Left as they are now: ${listPutBack.join(", ")}.` : ""}`
       : "");
@@ -1749,7 +1750,7 @@ ${jobLines.join("\n") || "(none)"}`,
   } catch (e: any) {
     return {
       ok: false,
-      message: e?.message?.includes("ANTHROPIC_API_KEY") ? "AI review needs the API key set." : "AI couldn't review this one.",
+      message: e?.message?.includes("ANTHROPIC_API_KEY") ? "AI review isn't available right now. Try again later." : "AI couldn't review this one.",
     };
   }
 

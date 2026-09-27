@@ -5,6 +5,7 @@ import { Check, ExternalLink, Globe } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
 import type { OrgSettings } from "@/lib/org-settings";
+import { featureOn } from "@/lib/features";
 import { setPublicHandle, setCustomDomain, updateOrgSettings } from "./actions";
 
 const THEMES: { id: OrgSettings["site_theme"]; label: string; blurb: string; swatch: string }[] = [
@@ -47,6 +48,10 @@ export function WebsiteSettings({
     theme: settings.site_theme ?? "classic",
   });
 
+  // WEBSITE OFF (the switch board, 0352): every site route answers 404, so the site's own words and
+  // its Live at / View link go (they'd open nothing). The address fields stay: the request and
+  // estimate links are built on them.
+  const siteOn = featureOn(settings.features, "website");
   const base = (siteUrl || "https://contractor-north.vercel.app").replace(/\/$/, "");
   const subUrl = handle ? `https://${handle}.${sitesDomain}` : "";
 
@@ -95,11 +100,13 @@ export function WebsiteSettings({
 
   return (
     <div className="space-y-4">
-      <p className="text-sm text-slate-500">
-        Your public website — a full marketing page with your work, services, and an estimate button.
-      </p>
+      {siteOn && (
+        <p className="text-sm text-slate-500">
+          Your public website — a full marketing page with your work, services, and an estimate button.
+        </p>
+      )}
 
-      {handle && (
+      {siteOn && handle && (
         <div className="space-y-2 rounded-lg bg-slate-50 p-3">
           <div className="flex flex-wrap items-center gap-2">
             <Globe className="h-4 w-4 text-slate-400" />
@@ -119,7 +126,7 @@ export function WebsiteSettings({
           <Input id="ws-handle" value={handle} onChange={(e) => setHandle(e.target.value)} placeholder="your-company" className="max-w-[200px]" />
           <span className="text-sm text-slate-400">.{sitesDomain}</span>
         </div>
-        <p className="mt-1 text-xs text-slate-400">Your free address — live immediately, no setup.</p>
+        {siteOn && <p className="mt-1 text-xs text-slate-400">Your free address — live immediately, no setup.</p>}
       </div>
 
       <div>
@@ -130,7 +137,7 @@ export function WebsiteSettings({
 
       <div>
         <Label htmlFor="ws-area">Service area</Label>
-        <Input id="ws-area" value={area} onChange={(e) => setArea(e.target.value)} placeholder="e.g. Truckee & North Tahoe" />
+        <Input id="ws-area" value={area} onChange={(e) => setArea(e.target.value)} placeholder="e.g. Springfield & nearby towns" />
         <p className="mt-1 text-xs text-slate-400">Shown in the hero, trust bar, and footer.</p>
       </div>
 

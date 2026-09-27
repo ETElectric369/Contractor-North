@@ -147,5 +147,7 @@ export function JobPortalPanel({ jobId, who }: { jobId: string; who: string }) {
       </div>
     );
   }
+  // Panel Map off (0352): the panel's door to the customer's page goes with the Panel tab.
+  if (state.panelMapOn === false) return null;
   return <PanelCardView who={who} jobId={jobId} panels={state.panels} preview={state.preview} circuitMap={state.circuitMap} busy={busy} onFlip={(n) => void flip(n)} />;
 }

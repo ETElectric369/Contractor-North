@@ -3,7 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Search, Sparkles, Plus, ArrowRight } from "lucide-react";
-import { DOCK } from "@/lib/dock";
+import { visibleDock } from "@/lib/dock";
+import { featureOn, type FeatureKey, type FeatureMap } from "@/lib/features";
 
 type Item = { kind: string; label: string; sub?: string; href: string; staffOnly?: boolean; aliases?: string[] };
 
@@ -14,13 +15,12 @@ const NAV_ALIASES: Record<string, string[]> = {
   "/billing": ["money", "billing", "invoice"],
   "/billing/ar": ["ar", "owed", "receivables", "accounts receivable", "who owes", "aging"],
   "/payments": ["paid", "received", "deposit", "collections"],
-  "/bills": ["ap", "accounts payable", "purchase order", "po", "vendor", "expense"],
+  "/bills": ["ap", "accounts payable", "vendor", "expense"],
   "/payroll": ["wages", "pay", "salary", "paycheck", "hours pay"],
   "/tax-report": ["taxes", "1099", "irs", "tax"],
   "/analytics": ["reports", "reporting", "kpi", "dashboard", "numbers", "profit"],
-  "/recurring": ["subscription", "repeat invoice", "auto invoice"],
   "/petty-cash": ["cash", "reimbursement"],
-  "/price-list": ["pricing", "rates", "catalog", "kit", "kits", "price book", "materials list", "line items"],
+  "/price-list": ["pricing", "rates", "catalog", "price book", "materials list", "line items"],
   "/leads": ["prospects", "inquiries", "pipeline"],
   "/quotes": ["estimate", "proposal", "bid"],
   "/crm": ["customers", "clients", "people", "contact"],
@@ -37,6 +37,19 @@ const NAV_ALIASES: Record<string, string[]> = {
   // lands on New Estimate, where the Upload Plans take-off actually is.
   "/quotes/new": ["plan", "plans", "blueprint", "drawing", "take-off", "takeoff", "upload plans"],
 };
+// Words that belong to a SWITCH, not to the page they land on (the switch board, 0352): they
+// leave the palette with their feature, so "po" can't find Bills while Purchase Orders is off.
+// (Words that ride on a page, like "/leads" or "/inventory" above, go with the page's dock row.)
+const SWITCH_ALIASES: { href: string; feature: FeatureKey; words: string[] }[] = [
+  { href: "/bills", feature: "purchase_orders", words: ["purchase order", "po"] },
+  { href: "/price-list", feature: "kits", words: ["kit", "kits"] },
+  { href: "/recurring", feature: "recurring_billing", words: ["subscription", "repeat invoice", "auto invoice"] },
+];
+function aliasesFor(href: string, features: FeatureMap | null | undefined): string[] | undefined {
+  const extra = SWITCH_ALIASES.filter((a) => a.href === href && featureOn(features, a.feature)).flatMap((a) => a.words);
+  const base = NAV_ALIASES[href];
+  return extra.length ? [...(base ?? []), ...extra] : base;
+}
 
 // ONE source of truth: the command bar's "go to" list is derived from the SAME dock that
 // drives the dock + sub-nav, so they can never drift again. Carry staffOnly (section OR item)
@@ -44,13 +57,15 @@ const NAV_ALIASES: Record<string, string[]> = {
 // Query-param children (the generated /jobs?status=… filters) stay OUT of the palette:
 // stripped of their section context they collide — "est" surfaced "Estimate · Jobs" (a jobs
 // filter) beside "Estimates · Sales" (/quotes). Status filtering is the dock/strip's job.
+// THE SWITCH BOARD (0352) rides on the same list: it is built from visibleDock (role AND
+// switches), so a page whose dock row is switched off is not offered here either.
 type DockLeaf = { label: string; href?: string; children?: DockLeaf[]; staffOnly?: boolean };
-function navLeaves(nodes: DockLeaf[], sub: string, sectionStaff?: boolean): Item[] {
+function navLeaves(nodes: DockLeaf[], sub: string, features: FeatureMap | null | undefined, sectionStaff?: boolean): Item[] {
   return nodes.flatMap((n) =>
     n.children?.length
-      ? navLeaves(n.children, n.label, sectionStaff || n.staffOnly)
+      ? navLeaves(n.children, n.label, features, sectionStaff || n.staffOnly)
       : n.href && !n.href.includes("?")
-        ? [{ kind: "Go to", label: n.label, sub, href: n.href, staffOnly: sectionStaff || n.staffOnly, aliases: NAV_ALIASES[n.href] }]
+        ? [{ kind: "Go to", label: n.label, sub, href: n.href, staffOnly: sectionStaff || n.staffOnly, aliases: aliasesFor(n.href, features) }]
         : [],
   );
 }
@@ -58,13 +73,19 @@ function navLeaves(nodes: DockLeaf[], sub: string, sectionStaff?: boolean): Item
 // /jobs href anymore — which orphaned the "projects"/"work" aliases. One hand-written entry
 // points typing "jobs"/"work" at the default working view; the GENERATED ?status= children
 // stay out of the palette (see the collision note above).
-const NAV_ITEMS: Item[] = [
-  ...DOCK.flatMap((s) => navLeaves(s.children, s.label, s.staffOnly)),
-  { kind: "Go to", label: "Jobs", sub: "Jobs", href: "/jobs?status=in_progress", aliases: NAV_ALIASES["/jobs?status=in_progress"] },
-  // New Estimate isn't a dock leaf, but it's where plan take-offs live now (Upload Plans) —
-  // give plan/blueprint/take-off searches somewhere real to land.
-  { kind: "Go to", label: "New Estimate", sub: "Sales", href: "/quotes/new", staffOnly: true, aliases: NAV_ALIASES["/quotes/new"] },
-];
+/** The palette's "go to" list for this person: exported so the switch rule is pinned in a test. */
+export function commandNavItems(isStaff: boolean, features?: FeatureMap | null): Item[] {
+  const items: Item[] = [
+    ...visibleDock({ isStaff, features }).flatMap((s) => navLeaves(s.children, s.label, features, s.staffOnly)),
+    { kind: "Go to", label: "Jobs", sub: "Jobs", href: "/jobs?status=in_progress", aliases: NAV_ALIASES["/jobs?status=in_progress"] },
+    // New Estimate isn't a dock leaf, but it's where plan take-offs live now (Upload Plans) —
+    // give plan/blueprint/take-off searches somewhere real to land. It goes with Estimates.
+    ...(featureOn(features, "estimates")
+      ? [{ kind: "Go to", label: "New Estimate", sub: "Sales", href: "/quotes/new", staffOnly: true, aliases: NAV_ALIASES["/quotes/new"] }]
+      : []),
+  ];
+  return isStaff ? items : items.filter((i) => !i.staffOnly);
+}
 
 function LeadIcon({ kind }: { kind: string }) {
   if (kind === "Assistant") return <Sparkles className="h-4 w-4 text-brand" />;
@@ -78,9 +99,11 @@ function LeadIcon({ kind }: { kind: string }) {
  * the org's jobs/customers/quotes/invoices, jumps to any page, or hands the
  * query to the Assistant. Deep-links use Wave-1's ?tab= where useful.
  */
-export function CommandBar({ isStaff }: { isStaff?: boolean }) {
+export function CommandBar({ isStaff, features }: { isStaff?: boolean; features?: FeatureMap }) {
   const router = useRouter();
-  const navItems = useMemo(() => (isStaff ? NAV_ITEMS : NAV_ITEMS.filter((i) => !i.staffOnly)), [isStaff]);
+  const navItems = useMemo(() => commandNavItems(!!isStaff, features), [isStaff, features]);
+  // Nort off: no "Ask Nort" row and no promise that Enter asks him (the drawer isn't mounted).
+  const nortOn = featureOn(features, "nort");
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const [results, setResults] = useState<Item[]>([]);
@@ -161,7 +184,7 @@ export function CommandBar({ isStaff }: { isStaff?: boolean }) {
     return scored.slice(0, 6).map((s) => s.i);
   }, [q, navItems]);
 
-  const askItem: Item | null = q.trim()
+  const askItem: Item | null = q.trim() && nortOn
     ? { kind: "Assistant", label: `Ask Nort: “${q.trim()}”`, href: `/assistant?q=${encodeURIComponent(q.trim())}` }
     : null;
 
@@ -222,7 +245,7 @@ export function CommandBar({ isStaff }: { isStaff?: boolean }) {
         <div className="max-h-[55vh] overflow-y-auto py-1">
           {flat.length === 0 && (
             <div className="px-4 py-6 text-center text-sm text-slate-400">
-              No matches. Press Enter to ask Nort.
+              {nortOn ? "No matches. Press Enter to ask Nort." : "No matches."}
             </div>
           )}
           {flat.map((it, i) => (

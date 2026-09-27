@@ -9,13 +9,15 @@ import { NewChangeOrderButton } from "./new-co-button";
 import { CoStatusControl } from "./co-status-control";
 import { CoRowActions } from "./co-row-actions";
 import { jobLabel } from "@/lib/schedule-options";
+import { viewerSwitches } from "@/lib/viewer-switches";
+import { featureOn } from "@/lib/features";
 
 export const dynamic = "force-dynamic";
 
 export default async function ChangeOrdersPage() {
   const supabase = await createClient();
 
-  const [{ data: cos }, { data: jobs }] = await Promise.all([
+  const [{ data: cos }, { data: jobs }, sw] = await Promise.all([
     supabase
       .from("change_orders")
       .select("*, jobs(job_number, name)")
@@ -25,7 +27,10 @@ export default async function ChangeOrdersPage() {
       .select("id, job_number, name")
       .order("created_at", { ascending: false })
       .limit(100),
+    // The switch board (0352): change orders are part of Estimates.
+    viewerSwitches(),
   ]);
+  const estimatesOn = featureOn(sw.features, "estimates");
 
   const changeOrders = cos ?? [];
   const approvedTotal = changeOrders
@@ -41,7 +46,7 @@ export default async function ChangeOrdersPage() {
         title="Change orders"
         description="Track and approve scope changes."
       >
-        <NewChangeOrderButton jobs={jobs ?? []} />
+        {estimatesOn && <NewChangeOrderButton jobs={jobs ?? []} />}
       </PageHeader>
 
       {changeOrders.length === 0 ? (
@@ -50,7 +55,7 @@ export default async function ChangeOrdersPage() {
           title="No change orders yet"
           description="Log a change order when a job's scope grows."
         >
-          <NewChangeOrderButton jobs={jobs ?? []} />
+          {estimatesOn && <NewChangeOrderButton jobs={jobs ?? []} />}
         </EmptyState>
       ) : (
         <>

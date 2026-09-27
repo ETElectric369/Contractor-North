@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { CalendarPlus, Clock3, X, ChevronRight, Check, UserPlus, ArrowRightLeft } from "lucide-react";
+import { CalendarPlus, Clock3, X, ChevronRight, Check, UserPlus, ArrowRightLeft, Phone } from "lucide-react";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { Button } from "@/components/ui/button";
 import { Label, Select } from "@/components/ui/input";
@@ -60,6 +60,7 @@ export function ActionList({
   emptyLabel = "All caught up.",
   todayStr,
   tz = DEFAULT_TIMEZONE,
+  leadsOn = true,
 }: {
   items: ActionItem[];
   people?: { id: string; full_name: string | null }[];
@@ -70,6 +71,9 @@ export function ActionList({
   /** The ORG's timezone — must be the same clock todayStr was computed in, or a chip can
    *  read "Today · 9:00 PM" for an item the day math already counted as tomorrow. */
   tz?: string;
+  /** The Leads switch (0352). Off, a request lands here as a request: its section reads Requests
+   *  and its chip Request, not a lead list the company switched off. Absent = on, as always. */
+  leadsOn?: boolean;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -320,7 +324,7 @@ export function ActionList({
       {groups.map(({ stream, items: groupItems }) => (
         <div key={stream} className="space-y-1.5">
           <div className="px-1 pt-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-            {STREAM_LABEL[stream]}
+            {stream === "leads" && !leadsOn ? "Requests" : STREAM_LABEL[stream]}
           </div>
           {groupItems.map((item) => {
             const can = (v: Affordance) => item.affordances.includes(v);
@@ -366,12 +370,23 @@ export function ActionList({
                   </button>
                   <div className="mt-0.5 flex items-center gap-1.5">
                     <button onClick={() => router.push(item.href)} className="flex min-w-0 flex-1 items-center gap-1.5 truncate text-left text-xs text-slate-500">
-                      <Badge tone={meta.tone}>{meta.label}</Badge>
+                      <Badge tone={meta.tone}>{item.kind === "inquiry" && !leadsOn ? "Request" : meta.label}</Badge>
                       {item.subtitle && <span className="truncate">{item.subtitle}</span>}
                       {item.who && <span className="truncate">· {item.who}</span>}
                     </button>
 
                 <div className="flex shrink-0 items-center gap-0.5">
+                  {/* CALL BACK: a request that came in while Leads is switched off (0352). The lead
+                      list is out of the way, the person asking for work is not: one tap dials
+                      them. 44px tall without growing the row (the negative margin). */}
+                  {item.phone && (
+                    <a
+                      href={`tel:${item.phone}`}
+                      className="-my-3 inline-flex h-11 items-center gap-1 rounded-md px-2 text-xs font-semibold text-brand hover:bg-brand-light/40"
+                    >
+                      <Phone className="h-3.5 w-3.5 shrink-0" /> Call Back
+                    </a>
+                  )}
                   {can("schedule") && (
                     <MoveToDay
                       label="Schedule / set a date"

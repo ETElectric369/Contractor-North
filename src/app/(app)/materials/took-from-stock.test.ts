@@ -14,7 +14,7 @@ vi.mock("@/components/toast", () => ({ useToast: () => () => {} }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh() {}, replace() {} }), usePathname: () => "/jobs/j", useSearchParams: () => new URLSearchParams() }));
 vi.mock("./stock-actions", () => ({ loadShelf: vi.fn(), takeFromStockAction: vi.fn(), undoTakeAction: vi.fn() }));
 
-import { TakeSheetView, TakesListView, padPress } from "./took-from-stock";
+import { TakeSheetView, TakesListView, TookFromStock, padPress } from "./took-from-stock";
 import type { JobTake, ShelfRow } from "@/lib/stock-take";
 
 // A row as it might arrive if a cost ever leaked into the payload: the view must not draw it.
@@ -112,6 +112,40 @@ describe("the number pad", () => {
     expect(padPress("1.5", ".")).toBe("1.5");
     expect(padPress("1.125", "5")).toBe("1.125");
     expect(padPress("60", "back")).toBe("6");
+  });
+});
+
+describe("Took From Stock and the Shop Stock switch (0352)", () => {
+  const take: JobTake = {
+    drawGroup: "g1",
+    takenAt: "2026-09-24T17:00:00Z",
+    itemId: "i1",
+    item: "12/2 NM-B",
+    unit: "ft",
+    qty: 60,
+    short: 0,
+    back: 0,
+    who: "Brian",
+    mine: true,
+    billedOn: null,
+    partBilled: false,
+    billedInvoiceId: null,
+    canUndo: true,
+    settledByOffice: false,
+  };
+  const door = (p: Record<string, unknown> = {}) =>
+    renderToStaticMarkup(createElement(TookFromStock, { jobId: "j1", takes: [take], viewerIsStaff: false, ...p }));
+
+  it("on / not passed: today's door, the button and the takes", () => {
+    expect(door({ canTake: true })).toBe(door());
+    expect(buttons(door()).map((b) => b.text)).toContain("Took From Stock");
+  });
+
+  it("off: no Took From Stock button, and the takes already made stay listed with their Undo", () => {
+    const off = door({ canTake: false });
+    expect(buttons(off).map((b) => b.text)).not.toContain("Took From Stock");
+    expect(textOf(off)).toContain("Brian took 60 ft of 12/2 NM-B");
+    expect(buttons(off).map((b) => b.text)).toContain("Undo");
   });
 });
 

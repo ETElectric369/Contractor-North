@@ -382,6 +382,20 @@ describe("loadSupplierDesk: one read, the cards and the pay line", () => {
       expect(filters).toContain(`${t}.org_id=${ORG}`);
   });
 
+  it("My Day's cards follow the Shop Stock switch (0352), read on the same profile row; not stored = today's", async () => {
+    const withSettings = (settings: unknown) =>
+      fakeSupabase({
+        profiles: { data: { org_id: ORG, organizations: { settings } } },
+        supplier_invoices: { data: hisDocuments() },
+        supplier_accounts: { data: ACCOUNTS },
+      }).client;
+    const today = await loadSupplierDesk(withSettings({}), "user-1", TONIGHT);
+    expect(today?.papers && "shopStock" in today.papers).toBe(false);
+    const off = await loadSupplierDesk(withSettings({ features: { shop_stock: false } }), "user-1", TONIGHT);
+    expect(off?.papers?.shopStock).toBe(false);
+    expect(off?.papers?.cards).toEqual(today?.papers?.cards);
+  });
+
   it("reads his payments: a cheque dated in this cycle clears the line", async () => {
     const { client } = fakeSupabase({
       profiles: { data: { org_id: ORG } },

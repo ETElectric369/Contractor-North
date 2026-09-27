@@ -32,7 +32,9 @@ function jobCategories(tasks: Task[]): string[] {
   return Array.from(seen.values()).sort((a, b) => a.localeCompare(b));
 }
 
-export function JobTasks({ jobId, tasks }: { jobId: string; tasks: Task[] }) {
+/** `extras` = the To-Do Extras switch (0352). Off, the High Priority boxes go; a task that already
+ *  has a priority keeps its flag, and editing it keeps the priority it has. */
+export function JobTasks({ jobId, tasks, extras = true }: { jobId: string; tasks: Task[]; extras?: boolean }) {
   const router = useRouter();
   const toast = useToast();
   const [pending, start] = useTransition();
@@ -190,10 +192,12 @@ export function JobTasks({ jobId, tasks }: { jobId: string; tasks: Task[] }) {
               </datalist>
             )}
           </div>
-          <label className="flex items-end gap-2 pb-2 text-sm text-slate-600">
-            <input type="checkbox" checked={high} onChange={(e) => setHigh(e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-brand" />
-            High priority
-          </label>
+          {extras && (
+            <label className="flex items-end gap-2 pb-2 text-sm text-slate-600">
+              <input type="checkbox" checked={high} onChange={(e) => setHigh(e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-brand" />
+              High priority
+            </label>
+          )}
           <div className="flex items-end">
             <Button size="sm" onClick={add} disabled={pending || !title.trim()} className="w-full">
               <Plus className="h-3.5 w-3.5" /> Add
@@ -212,7 +216,7 @@ export function JobTasks({ jobId, tasks }: { jobId: string; tasks: Task[] }) {
       )}
 
       {editTask && (
-        <JobTaskEditModal key={editTask.id} task={editTask} jobId={jobId} categories={categories} onClose={() => setEditTask(null)} />
+        <JobTaskEditModal key={editTask.id} task={editTask} jobId={jobId} categories={categories} extras={extras} onClose={() => setEditTask(null)} />
       )}
     </div>
   );
@@ -220,7 +224,7 @@ export function JobTasks({ jobId, tasks }: { jobId: string; tasks: Task[] }) {
 
 /** Edit a job task's title / due date / category / priority. Uses updateTask's
  *  partial patch, so it never touches the assignee or tags set elsewhere. */
-function JobTaskEditModal({ task, jobId, categories = [], onClose }: { task: Task; jobId: string; categories?: string[]; onClose: () => void }) {
+function JobTaskEditModal({ task, jobId, categories = [], extras = true, onClose }: { task: Task; jobId: string; categories?: string[]; extras?: boolean; onClose: () => void }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [title, setTitle] = useState(task.title);
@@ -280,10 +284,12 @@ function JobTaskEditModal({ task, jobId, categories = [], onClose }: { task: Tas
             )}
           </div>
         </div>
-        <label className="flex items-center gap-2 text-sm text-slate-600">
-          <input type="checkbox" checked={high} onChange={(e) => setHigh(e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-brand" />
-          High priority
-        </label>
+        {extras && (
+          <label className="flex items-center gap-2 text-sm text-slate-600">
+            <input type="checkbox" checked={high} onChange={(e) => setHigh(e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-brand" />
+            High priority
+          </label>
+        )}
       </div>
     </Modal>
   );

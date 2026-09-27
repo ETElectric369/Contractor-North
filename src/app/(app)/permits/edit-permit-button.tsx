@@ -90,7 +90,7 @@ export function EditPermitButton({ permit, jobId }: { permit: Permit; jobId?: st
           <div className="grid grid-cols-2 gap-3">
             <div><Label htmlFor="ep-type">Type</Label><Select id="ep-type" value={type} onChange={(e) => setType(e.target.value)}>{TYPES.map((t) => <option key={t} value={t}>{t}</option>)}</Select></div>
             <div><Label htmlFor="ep-num">Permit #</Label><Input id="ep-num" value={num} onChange={(e) => setNum(e.target.value)} /></div>
-            <div><Label htmlFor="ep-auth">Authority</Label><Input id="ep-auth" value={authority} onChange={(e) => setAuthority(e.target.value)} placeholder="e.g. Washoe County" /></div>
+            <div><Label htmlFor="ep-auth">Authority</Label><Input id="ep-auth" value={authority} onChange={(e) => setAuthority(e.target.value)} placeholder="e.g. County Building Department" /></div>
             <div><Label htmlFor="ep-status">Status</Label><Select id="ep-status" value={status} onChange={(e) => setStatus(e.target.value)}>{STATUSES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</Select></div>
             <div><Label htmlFor="ep-applied">Applied date</Label><Input id="ep-applied" type="date" value={applied} onChange={(e) => setApplied(e.target.value)} /></div>
             <div><Label htmlFor="ep-issued">Issued date</Label><Input id="ep-issued" type="date" value={issued} onChange={(e) => setIssued(e.target.value)} /></div>

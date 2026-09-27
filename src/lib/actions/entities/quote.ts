@@ -3,6 +3,21 @@ import { saveQuote, addQuoteItem, updateQuoteItem, deleteQuoteItem, createJobFro
 import { createClient } from "@/lib/supabase/server";
 import { resolveCustomerId, resolveJobId, resolveQuoteId } from "../resolve-id";
 import type { ActionDef } from "../types";
+import { getOrgSettings } from "@/lib/org-settings";
+import { featureOn } from "@/lib/features";
+
+/**
+ * SALES TAX OFF (the switch board, 0352, rule g): an estimate gets no NEW tax from Nort. A rate of 0
+ * (or none) always passes, so a carried rate can still be taken off; a real rate is refused in words
+ * the model can act on, never saved silently as 0. One org read, only when a rate was actually sent.
+ */
+async function taxRefusal(rate: number | undefined): Promise<string | null> {
+  if (!rate) return null;
+  const supabase = await createClient();
+  const { data } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
+  if (featureOn(getOrgSettings((data as { settings?: unknown } | null)?.settings).features, "sales_tax")) return null;
+  return "Sales Tax is off for this company, so no tax rate can be put on an estimate. Leave tax_rate out (0 takes a rate off), and tell the user the owner can turn Sales Tax on in Settings, Features.";
+}
 
 export const quoteActions: Record<string, ActionDef> = {
   "quote.setStatus": {
@@ -100,7 +115,11 @@ export const quoteActions: Record<string, ActionDef> = {
     }),
     auth: "staff",
     effect: "write",
-    handler: ({ id, ...patch }) => updateQuoteMeta(id, patch),
+    handler: async ({ id, ...patch }) => {
+      const refused = await taxRefusal(patch.tax_rate);
+      if (refused) return { ok: false, error: refused };
+      return updateQuoteMeta(id, patch);
+    },
   },
   "quote.setCustomer": {
     name: "quote.setCustomer",
@@ -191,6 +210,8 @@ export const quoteActions: Record<string, ActionDef> = {
       // Fragment-first safety net: Nort sometimes passes a NAME ("John Chmura") where the
       // customer_id belongs. Resolve it (and any job name) to a real id BEFORE the dup check
       // and save — a single match resolves; zero/several ASK rather than attach the wrong one.
+      const refused = await taxRefusal(i.tax_rate);
+      if (refused) return { ok: false, error: refused };
       const supabase = await createClient();
       const cust = await resolveCustomerId(supabase, i.customer_id ?? null);
       if ("error" in cust) return { ok: false, error: cust.error };

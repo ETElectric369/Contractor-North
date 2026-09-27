@@ -3,10 +3,11 @@ import { NextResponse } from "next/server";
 import type Anthropic from "@anthropic-ai/sdk";
 import { getAnthropic } from "@/lib/anthropic";
 import { getPublicOrgByHandle, type PublicOrg } from "@/lib/public-org";
+import { featureOn } from "@/lib/features";
 import { createServiceClient } from "@/lib/supabase/server";
 import { createTriagedInquiry } from "@/lib/inquiries/create-triaged-inquiry";
 import type { LeadIntake } from "@/lib/lead-triage";
-import { computeDeckEstimate, buildDeckRates, DECK_ESTIMATE_CODES, type DeckAnswers } from "@/lib/estimate/deck";
+import { computeDeckEstimate, buildDeckRates, deckAsksTrpa, DECK_ESTIMATE_CODES, type DeckAnswers } from "@/lib/estimate/deck";
 import { rateLimited, clientIp } from "@/lib/rate-limit";
 import { effectiveMarkupPct } from "@/lib/pricing/markup";
 
@@ -97,6 +98,14 @@ const DECK_TOOL = {
     required: ["projectType", "lengthFt", "widthFt"],
   },
 } as unknown as Anthropic.Tool;
+/** The deck tool as THIS company asks it: the TRPA question only where the company priced its own
+ *  TRPA line (deckAsksTrpa); every other deck company's visitors are never asked about a region. */
+function deckTool(asksTrpa: boolean): Anthropic.Tool {
+  if (asksTrpa) return DECK_TOOL;
+  const t = DECK_TOOL as unknown as { input_schema: { properties: Record<string, unknown> } };
+  const { trpa: _trpa, ...properties } = t.input_schema.properties;
+  return { ...t, input_schema: { ...t.input_schema, properties } } as unknown as Anthropic.Tool;
+}
 
 // Anthropic's SERVER-SIDE web search — the SAME tool the internal quote drafter uses, so a
 // research-mode org (no fixed price list; prices market-researched + buffered) can quote live.
@@ -181,7 +190,7 @@ function deckEstimate(input: unknown, deckRates: Record<string, number>): { summ
   return { summary, est };
 }
 
-function systemPrompt(org: PublicOrg, area: string, threshold: number, isDeck: boolean, canWebSearch: boolean): string {
+function systemPrompt(org: PublicOrg, area: string, threshold: number, isDeck: boolean, canWebSearch: boolean, asksTrpa = false): string {
   const s = org.settings;
   const buffer = Math.round(Number(s.material_buffer_percent) || 0);
   const about = [
@@ -206,7 +215,7 @@ ${pricingHow}
 - If the customer attaches a PHOTO, look at it: identify what you can (e.g. panel brand & amperage, wiring/condition, access, deck size/shape) and use it to sharpen your questions and the estimate. Mention what you noticed so they know you saw it.
 - ALWAYS call it a preliminary estimate, subject to confirmation once ${org.name} reviews the details.${
       isDeck
-        ? `\n- THIS IS A DECK COMPANY: for any deck job, gather the measurements (length, width, tallest-point height, wood or composite, railing feet, sets of stairs plus the total step count, whether the stairs get railing, doors onto the deck, and whether it's in the Tahoe/TRPA basin), then call deck_estimate for an EXACT preliminary number — prefer it over doing the math yourself.`
+        ? `\n- THIS IS A DECK COMPANY: for any deck job, gather the measurements (length, width, tallest-point height, wood or composite, railing feet, sets of stairs plus the total step count, whether the stairs get railing, doors onto the deck${asksTrpa ? ", and whether it's in the Tahoe/TRPA basin" : ""}), then call deck_estimate for an EXACT preliminary number — prefer it over doing the math yourself.`
         : ""
     }
 - For a large or complex job (roughly over $${Math.round(threshold).toLocaleString()}), or anything you can't price with confidence, do NOT give a firm number — explain it needs a quick on-site visit for an exact price, and offer to have ${org.name} reach out.
@@ -357,7 +366,9 @@ export async function POST(req: Request) {
   }
 
   const org = await getPublicOrgByHandle(handle);
-  if (!org) return NextResponse.json({ error: "Not available." }, { status: 404 });
+  // Site Chat off (0352, rule e): the bubble isn't drawn, and a page left open (or a direct POST)
+  // gets the same answer as an unknown handle, before a cent is spent at the model.
+  if (!org || !featureOn(org.settings.features, "site_chat")) return NextResponse.json({ error: "Not available." }, { status: 404 });
 
   // DAILY SPEND CEILINGS, resolved AFTER the org (so an unknown handle can't burn a real org's
   // budget) but BEFORE any model call. Per-minute-per-IP alone bounds nothing over a day, and
@@ -427,16 +438,17 @@ export async function POST(req: Request) {
     .order("updated_at", { ascending: false });
   const deckRates = buildDeckRates((deckCat ?? []) as { code: string | null; buy_price: number | null; markup_pct: number | null }[]);
   const isDeck = Object.keys(deckRates).length >= 3;
+  const asksTrpa = isDeck && deckAsksTrpa(deckRates);
   // Research-mode orgs (electricians etc.) get live web-priced materials; catalog orgs (decks)
   // price from their own list + the deterministic deck engine, so they don't need it.
   const canWebSearch = org.settings.estimating_mode === "research" && !isDeck;
   const tools = [
     ...TOOLS,
-    ...(isDeck ? [DECK_TOOL] : []),
+    ...(isDeck ? [deckTool(asksTrpa)] : []),
     ...(canWebSearch ? [WEB_SEARCH_TOOL] : []),
   ] as Anthropic.Tool[];
 
-  const system = systemPrompt(org, area, threshold, isDeck, canWebSearch);
+  const system = systemPrompt(org, area, threshold, isDeck, canWebSearch, asksTrpa);
   const client = getAnthropic();
 
   let leadCaptured = false;

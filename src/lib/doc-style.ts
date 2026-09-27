@@ -33,7 +33,13 @@ export interface DocStyle {
   margin_x: number;
   /** Page top/bottom margins, inches. */
   margin_y: number;
+  /** The company's own line under its name on the letterhead and in document emails. "" prints
+   *  none: there is no default, because a default is some other company's words. */
+  tagline: string;
 }
+
+/** The longest tagline a letterhead prints (one line under the name). */
+export const TAGLINE_MAX = 80;
 
 export const DEFAULT_DOC_STYLE: DocStyle = {
   col_gap: 20, // = the pl-5 the layout shipped with
@@ -44,6 +50,7 @@ export const DEFAULT_DOC_STYLE: DocStyle = {
   closing_quote: "",
   margin_x: 0.75, // = globals.css .print-page 0.6in 0.75in
   margin_y: 0.6,
+  tagline: "",
 };
 
 const clamp = (v: unknown, lo: number, hi: number, dflt: number): number => {
@@ -63,6 +70,7 @@ export function normalizeDocStyle(raw: unknown): DocStyle {
     closing_quote: typeof r.closing_quote === "string" ? r.closing_quote.slice(0, 300) : "",
     margin_x: clamp(r.margin_x, 0.3, 1.5, d.margin_x),
     margin_y: clamp(r.margin_y, 0.3, 1.5, d.margin_y),
+    tagline: typeof r.tagline === "string" ? r.tagline.trim().slice(0, TAGLINE_MAX).trim() : "",
   };
 }
 

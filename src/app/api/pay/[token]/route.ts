@@ -88,7 +88,7 @@ export async function GET(
 
   if (!billingEnabled) {
     return new NextResponse(
-      "Online payments aren't set up yet. Add STRIPE_SECRET_KEY to enable.",
+      "Online payment isn't available for this invoice yet. Contact the business to pay.",
       { status: 503 },
     );
   }
@@ -97,7 +97,7 @@ export async function GET(
   try {
     supabase = createServiceClient();
   } catch {
-    return new NextResponse("Server not configured.", { status: 500 });
+    return new NextResponse("Online payment isn't available right now. Contact the business to pay.", { status: 500 });
   }
 
   const { data: inv } = await supabase

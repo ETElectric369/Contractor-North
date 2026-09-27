@@ -20,6 +20,7 @@ import { createServiceClient } from "@/lib/supabase/server";
 import { customerForInquiry } from "@/lib/actions/win-customer";
 import { formatPhone, formatState, formatZip, titleCase } from "@/lib/utils";
 import { getOrgSettings } from "@/lib/org-settings";
+import { featureOn } from "@/lib/features";
 import { PROJECT_TYPES, estimateLinesFromIntake } from "@/lib/lead-triage";
 import { tzDateTimeUtc, todayStrInTz } from "@/lib/tz";
 import { createProposalCore, cleanSlots, type ProposalSlot } from "@/lib/appointments/proposal";
@@ -596,14 +597,18 @@ export async function convertInquiry(
     // fuzzy dedup and could mint a duplicate). Mirrors the inspection branch's pattern.
     const linkedCustomer = opts.customerId ?? inq.customer_id ?? null;
     let redirect: string;
+    const { data: orgRow } = await supabase.from("organizations").select("settings").maybeSingle();
+    const orgSettings = getOrgSettings(orgRow?.settings);
+    // ESTIMATES OFF (the switch board, 0352): no new estimate from a lead, from the row's button
+    // (hidden) or from Nort's inquiry.convert. Said in words; the lead is left exactly as it was.
+    if (!featureOn(orgSettings.features, "estimates"))
+      return { ok: false, error: "Estimates are off for this company. The owner can turn them on in Settings, Features." };
     const lines = estimateLinesFromIntake(inq.intake);
     if (lines.length) {
       // Lead arrived with a priced estimate (Tahoe Deck configurator) → seed a real draft and open it.
-      const { data: orgRow } = await supabase.from("organizations").select("settings").maybeSingle();
       // Count the expiry from the ORG's today, and add days on the CALENDAR — a bare new Date()
       // is the server's UTC day (after 5pm Pacific that is already tomorrow) and adding ms across
       // a DST night lands a day out (audit v921).
-      const orgSettings = getOrgSettings(orgRow?.settings);
       const seedDay = todayStrInTz(orgSettings.timezone);
       const validUntilStr = new Date(
         Date.parse(seedDay + "T00:00:00Z") + (orgSettings.quote_expiry_days || 30) * 86_400_000,

@@ -33,6 +33,7 @@ import { rateLimited } from "@/lib/rate-limit";
 import type Anthropic from "@anthropic-ai/sdk";
 import { getOrgSettings, accentHex, orgDocUrl } from "@/lib/org-settings";
 import { rowPlace } from "@/lib/doc-place";
+import { companyFromOrg } from "@/components/doc-letterhead";
 import { mapEstimatorLine, type DraftLineItem, type BookRow, type LadderPrice } from "@/lib/estimate/line-map";
 import { priceMaterial } from "@/lib/pricing/price-material";
 import { sendEmail, renderQuoteNoticeEmail, ownerBcc } from "@/lib/email";
@@ -222,6 +223,8 @@ export async function emailQuote(
     company: {
       name: org?.name ?? "Contractor North",
       brand: accentHex(getOrgSettings((org as any)?.settings).glass_tint),
+      // The company's own tagline (doc_style.tagline), the one its letterhead prints.
+      tagline: companyFromOrg(org as any).tagline,
       phone: org?.phone,
       email: org?.email,
     },
@@ -1642,7 +1645,7 @@ function estimatorError(e: any) {
   return {
     ok: false as const,
     error: e?.message?.includes("ANTHROPIC_API_KEY")
-      ? "Add your ANTHROPIC_API_KEY to enable AI drafting."
+      ? "AI isn't available right now. Try again later."
       : `Estimator failed: ${e?.message ?? "unknown error"}`,
   };
 }
@@ -2123,7 +2126,7 @@ export async function generateCircuitSchedule(
     return {
       ok: false,
       error: e?.message?.includes("ANTHROPIC_API_KEY")
-        ? "Add your ANTHROPIC_API_KEY to enable this."
+        ? "AI isn't available right now. Try again later."
         : `Circuit schedule failed: ${e?.message ?? "unknown error"}`,
     };
   }

@@ -23,17 +23,22 @@ interface Member {
 /** Owner/admin edit for a team member: name/role/active + login email/password.
  *  `menuItem` renders the trigger as a full-width menu row (for the /team ⋯ menu)
  *  instead of the pencil icon; the modal renders IN-PLACE, so the menu that owns
- *  this must stay mounted while it's open (see TeamMemberMenu's modal-rule handler). */
+ *  this must stay mounted while it's open (see TeamMemberMenu's modal-rule handler).
+ *  `crewLeadDoor` is the Daily Reports switch (0352): off, no Crew Leader box (the flag a member
+ *  has is kept as it is). The home address and commute baseline stay whatever the switches: the
+ *  Tax Report's mileage deduction reads them. */
 export function EditMemberButton({
   member,
   isSelf,
   authConfigured,
+  crewLeadDoor = true,
   menuItem = false,
   rowClassName,
 }: {
   member: Member;
   isSelf: boolean;
   authConfigured: boolean;
+  crewLeadDoor?: boolean;
   menuItem?: boolean;
   rowClassName?: string;
 }) {
@@ -165,26 +170,28 @@ export function EditMemberButton({
           )}
           {/* Crew lead (any role): Nort asks them the end-of-day debrief — "what did you
               do today?" + "what materials tomorrow?" — right after they clock out. */}
-          <label className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2.5 text-sm">
-            <input
-              type="checkbox"
-              checked={crewLead}
-              onChange={(e) => setCrewLead(e.target.checked)}
-              className="h-4 w-4 rounded border-slate-300 text-brand"
-            />
-            <span className="text-slate-700">
-              Crew leader
-              <span className="block text-xs text-slate-400">
-                Files a daily report at clock-out (what got done + materials for tomorrow).
+          {crewLeadDoor && (
+            <label className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2.5 text-sm">
+              <input
+                type="checkbox"
+                checked={crewLead}
+                onChange={(e) => setCrewLead(e.target.checked)}
+                className="h-4 w-4 rounded border-slate-300 text-brand"
+              />
+              <span className="text-slate-700">
+                Crew Leader
+                <span className="block text-xs text-slate-400">
+                  Files a daily report at clock-out (what got done + materials for tomorrow).
+                </span>
               </span>
-            </span>
-          </label>
+            </label>
+          )}
 
           <div className="border-t border-slate-100 pt-4">
             <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Login</div>
             {!authConfigured && (
               <div className="mb-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                Changing email or password needs <code>SUPABASE_SERVICE_ROLE_KEY</code> in Vercel. Until then this is read-only.
+                Changing a login&apos;s email or password isn&apos;t available yet, so this is read-only.
               </div>
             )}
             <div>

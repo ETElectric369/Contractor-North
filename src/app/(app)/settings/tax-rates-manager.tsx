@@ -8,6 +8,7 @@ import { Input, Label } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { Badge } from "@/components/ui/badge";
 import type { OrgSettings } from "@/lib/org-settings";
+import { featureOn } from "@/lib/features";
 import {
   createTaxRate, updateTaxRate, setDefaultTaxRate, deleteTaxRate, updateOrgSettings,
   createPricingLevel, updatePricingLevel, setDefaultPricingLevel, deletePricingLevel,
@@ -107,71 +108,79 @@ export function TaxRatesManager({
     });
   }
 
+  // SALES TAX OFF (the switch board, 0352): the tax-rate list is the feature's card, so it goes;
+  // the rates stay stored. Mileage, labor and markups below are not Sales Tax and always show.
+  const salesTax = featureOn(settings.features, "sales_tax");
+
   return (
     <div className="space-y-6">
-      <div>
-        <h4 className="mb-2 text-sm font-semibold text-slate-900">Tax rates</h4>
-        <p className="mb-3 text-sm text-slate-500">
-          Add named rates for the areas you work (e.g. Reno vs Truckee). The default applies to new quotes & invoices.
-        </p>
-        {error && <p className="mb-2 text-sm text-red-600">{error}</p>}
-        {taxRates.length > 0 && (
-          <ul className="mb-3 divide-y divide-slate-100 rounded-lg border border-slate-200">
-            {taxRates.map((t) => (
-              <li key={t.id} className="flex items-center gap-3 px-4 py-2.5 text-sm">
-                <span className="flex-1 font-medium text-slate-900">{t.name}</span>
-                <span className="text-slate-700">{Number(t.rate).toFixed(3)}%</span>
-                {t.is_default ? (
-                  <Badge tone="green">default</Badge>
-                ) : (
+      {salesTax && (
+        <div>
+          <h4 className="mb-2 text-sm font-semibold text-slate-900">Tax rates</h4>
+          <p className="mb-3 text-sm text-slate-500">
+            Add named rates for the areas you work (e.g. City vs County). The default applies to new quotes & invoices.
+          </p>
+          {error && <p className="mb-2 text-sm text-red-600">{error}</p>}
+          {taxRates.length > 0 && (
+            <ul className="mb-3 divide-y divide-slate-100 rounded-lg border border-slate-200">
+              {taxRates.map((t) => (
+                <li key={t.id} className="flex items-center gap-3 px-4 py-2.5 text-sm">
+                  <span className="flex-1 font-medium text-slate-900">{t.name}</span>
+                  <span className="text-slate-700">{Number(t.rate).toFixed(3)}%</span>
+                  {t.is_default ? (
+                    <Badge tone="green">default</Badge>
+                  ) : (
+                    <button
+                      onClick={() => start(async () => { await setDefaultTaxRate(t.id); router.refresh(); })}
+                      className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-slate-400 hover:text-amber-500"
+                      title="Make Default"
+                      aria-label="Make Default"
+                    >
+                      <Star className="h-4 w-4" />
+                    </button>
+                  )}
                   <button
-                    onClick={() => start(async () => { await setDefaultTaxRate(t.id); router.refresh(); })}
-                    className="text-slate-400 hover:text-amber-500"
-                    title="Make default"
+                    onClick={() => editRate(t)}
+                    className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-slate-400 hover:text-brand"
+                    title="Edit"
+                    aria-label="Edit Tax Rate"
                   >
-                    <Star className="h-4 w-4" />
+                    <Pencil className="h-4 w-4" />
                   </button>
-                )}
-                <button
-                  onClick={() => editRate(t)}
-                  className="text-slate-400 hover:text-brand"
-                  title="Edit"
-                  aria-label="Edit tax rate"
-                >
-                  <Pencil className="h-4 w-4" />
-                </button>
-                <button
-                  onClick={() => { if (confirm("Delete this tax rate?")) start(async () => { await deleteTaxRate(t.id); if (editingId === t.id) cancelEdit(); router.refresh(); }); }}
-                  className="text-slate-400 hover:text-red-600"
-                  title="Delete"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-        <div className="flex items-end gap-2">
-          <div className="flex-1">
-            <Label htmlFor="tr-name">Name</Label>
-            <Input id="tr-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Truckee" />
-          </div>
-          <div className="w-28">
-            <Label htmlFor="tr-rate">Rate %</Label>
-            <NumberInput id="tr-rate" value={rate} onValueChange={setRate} />
-          </div>
-          <Button size="sm" onClick={add} disabled={pending || !name.trim()}>
-            {editingId ? <><Check className="h-3.5 w-3.5" /> Save</> : <><Plus className="h-3.5 w-3.5" /> Add</>}
-          </Button>
-          {editingId && (
-            <Button size="sm" variant="outline" onClick={cancelEdit} disabled={pending} title="Cancel edit">
-              <X className="h-3.5 w-3.5" />
-            </Button>
+                  <button
+                    onClick={() => { if (confirm("Delete this tax rate?")) start(async () => { await deleteTaxRate(t.id); if (editingId === t.id) cancelEdit(); router.refresh(); }); }}
+                    className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-slate-400 hover:text-red-600"
+                    title="Delete"
+                    aria-label="Delete"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </li>
+              ))}
+            </ul>
           )}
+          <div className="flex items-end gap-2">
+            <div className="flex-1">
+              <Label htmlFor="tr-name">Name</Label>
+              <Input id="tr-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. City sales tax" />
+            </div>
+            <div className="w-28">
+              <Label htmlFor="tr-rate">Rate %</Label>
+              <NumberInput id="tr-rate" value={rate} onValueChange={setRate} />
+            </div>
+            <Button onClick={add} disabled={pending || !name.trim()}>
+              {editingId ? <><Check className="h-3.5 w-3.5" /> Save</> : <><Plus className="h-3.5 w-3.5" /> Add</>}
+            </Button>
+            {editingId && (
+              <Button size="icon" variant="outline" onClick={cancelEdit} disabled={pending} title="Cancel Edit" aria-label="Cancel Edit">
+                <X className="h-3.5 w-3.5" />
+              </Button>
+            )}
+          </div>
         </div>
-      </div>
+      )}
 
-      <div className="border-t border-slate-100 pt-4">
+      <div className={salesTax ? "border-t border-slate-100 pt-4" : undefined}>
         <h4 className="mb-2 text-sm font-semibold text-slate-900">Defaults</h4>
         {defaultMarkup !== materialMarkup && (
           <p className="mb-3 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">
@@ -227,7 +236,7 @@ export function TaxRatesManager({
       <div className="border-t border-slate-100 pt-4">
         <h4 className="mb-2 text-sm font-semibold text-slate-900">Pricing levels</h4>
         <p className="mb-3 text-sm text-slate-500">
-          Customer tiers — each level's markup % sets price-list sell prices on quotes (e.g. Retail vs Trade/Builder), and an optional labor rate sets the estimator's $/hr for customers on that level. Assign a level on the customer's page.
+          Customer tiers — each level&apos;s markup % sets price-list sell prices on quotes (e.g. Retail vs Trade/Builder), and an optional labor rate sets the estimator&apos;s $/hr for customers on that level. Assign a level on the customer&apos;s page.
         </p>
         {pricingLevels.length > 0 && (
           <ul className="mb-3 divide-y divide-slate-100 rounded-lg border border-slate-200">

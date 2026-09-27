@@ -4,6 +4,8 @@ import { headers } from "next/headers";
 import { createServiceClient } from "@/lib/supabase/server";
 import { sendPushToProfiles, orgStaffIds } from "@/lib/push";
 import { clientIp, rateLimited } from "@/lib/rate-limit";
+import { getOrgSettings } from "@/lib/org-settings";
+import { requestHref } from "@/lib/feature-doors";
 
 export interface PublicInquiryPayload {
   /** Honeypot — a real person never fills it. */
@@ -111,10 +113,13 @@ async function notifyNewInquiry(orgId: string): Promise<void> {
 
     const who = (inq.name || "Someone").trim();
     const snippet = (inq.message || "").trim().slice(0, 80);
+    // LEADS OFF, THE REQUEST STILL LANDS (the switch board, rule d): the push opens My Day, where
+    // it waits with Call Back, instead of the switched-off list. Service client: org filtered here.
+    const { data: orgRow } = await sb.from("organizations").select("settings").eq("id", orgId).maybeSingle();
     await sendPushToProfiles(await orgStaffIds(orgId), "inquiry", {
       title: "New inquiry",
       body: snippet ? `${who}: ${snippet}` : `${who} sent a new request`,
-      url: "/leads",
+      url: requestHref(getOrgSettings((orgRow as { settings?: unknown } | null)?.settings).features),
     });
   } catch {
     /* best-effort — never surface to the public form */

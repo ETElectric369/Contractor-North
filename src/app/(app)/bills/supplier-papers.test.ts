@@ -1,6 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { booksBeginOn, readSupplierDocuments, reconcileJobsOf, supplierDocumentRows, supplierPaperFeed, supplierPaperHomes } from "./supplier-papers";
-import { creditWait, ET_BOOKS_BEGIN, invoicesNeedingBill, shortSupplierName, supplierPaperLine, supplierPaperNeeds, supplierPapersWaitingOnCredit, supplierPaperTotals } from "./supplier-reconcile";
+import { booksBeginOn, readPaperSettings, readSupplierDocuments, reconcileJobsOf, supplierDocumentRows, supplierPaperFeed, supplierPaperHomes } from "./supplier-papers";
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
+import { getOrgSettings } from "@/lib/org-settings";
+import { creditWait, invoicesNeedingBill, shortSupplierName, supplierPaperLine, supplierPaperNeeds, supplierPapersWaitingOnCredit, supplierPaperTotals } from "./supplier-reconcile";
 import { supplierPaperActionItem, SUPPLIER_PAPERS_ITEM_ID } from "@/lib/action-items/supplier-paper-item";
 import { creditArrivedFor, reversedPurchaseIds } from "./supplier-balance";
 import { fold, searchBills, wordsOf, moneyWords, type BillsSearchRow } from "./bills-search";
@@ -16,6 +19,8 @@ import { fold, searchBills, wordsOf, moneyWords, type BillsSearchRow } from "./b
  */
 
 const ET = "60195593-2e18-4230-bc8e-7a32d36d038d";
+/** ET's own settings row, books_begin as 0354 stores it. */
+const ET_SETTINGS = { books_begin: "2026-06-08" };
 const CED = "acct-ced";
 
 const JOB_ROWS = [
@@ -133,21 +138,91 @@ const LINKS = [{ bill_id: "64451b80", supplier_invoice_id: "taozhu" }];
 function feedTonight(over: { documents?: any[]; bills?: any[]; links?: any[] } = {}) {
   const bills = over.bills ?? hisBills();
   const { rows } = supplierDocumentRows({ documents: over.documents ?? hisDocuments(), bills, links: over.links ?? LINKS, aliasRows: [] });
-  return supplierPaperFeed({ since: booksBeginOn(ET, bills), rows, jobs: JOBS, accounts: ACCOUNTS });
+  return supplierPaperFeed({ since: booksBeginOn(ET_SETTINGS, bills), rows, jobs: JOBS, accounts: ACCOUNTS });
 }
 const card = (feed: ReturnType<typeof feedTonight>, number: string) => feed.cards.find((c) => c.invoiceNumber === number);
 
+describe("the Shop Stock switch on the feed (0352)", () => {
+  it("not passed or on: exactly today's feed, no new key; off: the feed says so and nothing else moves", () => {
+    const bills = hisBills();
+    const { rows } = supplierDocumentRows({ documents: hisDocuments(), bills, links: LINKS, aliasRows: [] });
+    const input = { since: booksBeginOn(ET, bills), rows, jobs: JOBS, accounts: ACCOUNTS };
+    const today = supplierPaperFeed(input);
+    expect(supplierPaperFeed({ ...input, shopStock: true })).toEqual(today);
+    expect("shopStock" in supplierPaperFeed({ ...input, shopStock: true })).toBe(false);
+    const off = supplierPaperFeed({ ...input, shopStock: false });
+    expect(off).toEqual({ ...today, shopStock: false });
+  });
+});
+
 describe("the June 8 line (Erik: \"june 8 is good\")", () => {
-  it("is ET's first-job day, named once, and only ET has one", () => {
-    expect(ET_BOOKS_BEGIN).toBe("2026-06-08");
-    expect(supplierPaperLine(ET)).toBe("2026-06-08");
-    expect(supplierPaperLine("some-other-org")).toBeNull();
+  // A COMPANY'S OWN SETTING (Wave 0), not a constant keyed to ET's org id: ET's June 8 is ET's
+  // settings.books_begin (0354), and any company can name its own day.
+  it("is the day the company named, read from its settings; a company that named none has no line", () => {
+    expect(supplierPaperLine(ET_SETTINGS)).toBe("2026-06-08");
+    expect(supplierPaperLine({})).toBeNull();
+    expect(supplierPaperLine(null)).toBeNull();
+    // A day that isn't one is no line, never a guess.
+    expect(supplierPaperLine({ books_begin: "2026-02-30" })).toBeNull();
+    expect(supplierPaperLine({ books_begin: "June 8" })).toBeNull();
+    // An org id is not a setting: no id in the app's logic draws anyone's line.
+    expect(supplierPaperLine(ET)).toBeNull();
   });
 
-  it("beats ET's earliest scanned bill (2026-04-20), and another org falls back to its own first bill", () => {
-    expect(booksBeginOn(ET, [{ bill_date: "2026-04-20" }, { bill_date: "2026-09-01" }])).toBe("2026-06-08");
-    expect(booksBeginOn("tahoe-deck", [{ bill_date: "2026-07-02" }, { bill_date: "2026-06-30" }])).toBe("2026-06-30");
-    expect(booksBeginOn("tahoe-deck", [])).toBeNull();
+  it("beats the earliest scanned bill (2026-04-20), and a company with no day falls back to its own first bill", () => {
+    expect(booksBeginOn(ET_SETTINGS, [{ bill_date: "2026-04-20" }, { bill_date: "2026-09-01" }])).toBe("2026-06-08");
+    expect(booksBeginOn({}, [{ bill_date: "2026-07-02" }, { bill_date: "2026-06-30" }])).toBe("2026-06-30");
+    expect(booksBeginOn({ books_begin: "2026-08-01" }, [{ bill_date: "2026-06-30" }])).toBe("2026-08-01");
+    expect(booksBeginOn({}, [])).toBeNull();
+  });
+
+  it("is a whitelisted setting, sanitized on read: a day or nothing", () => {
+    expect(getOrgSettings({}).books_begin).toBeNull();
+    expect(getOrgSettings({ books_begin: "2026-06-08" }).books_begin).toBe("2026-06-08");
+    expect(getOrgSettings({ books_begin: "2026-13-01" }).books_begin).toBeNull();
+    expect(getOrgSettings({ books_begin: 20260608 }).books_begin).toBeNull();
+  });
+
+  it("is read with the company's clock, for this company only, and a failed read throws", async () => {
+    const seen: string[] = [];
+    const client = (answer: { data: unknown; error: unknown }) => ({
+      from: (t: string) => {
+        const chain: any = {
+          select: (cols: string) => (seen.push(`${t}:${cols}`), chain),
+          eq: (c: string, v: string) => (seen.push(`${c}=${v}`), chain),
+          maybeSingle: async () => answer,
+        };
+        return chain;
+      },
+    });
+    expect(await readPaperSettings(client({ data: { settings: { books_begin: "2026-06-08", timezone: "America/New_York" } }, error: null }), "org-9")).toEqual({
+      books_begin: "2026-06-08",
+      timezone: "America/New_York",
+    });
+    expect(seen).toContain("id=org-9");
+    // Nothing named, a bad zone: no line, the default clock.
+    expect(await readPaperSettings(client({ data: { settings: { books_begin: null, timezone: "Mars/Olympus" } }, error: null }), "org-9")).toEqual({
+      books_begin: null,
+      timezone: "America/Los_Angeles",
+    });
+    await expect(readPaperSettings(client({ data: null, error: { message: "down" } }), "org-9")).rejects.toBeTruthy();
+  });
+
+  it("no company's id sits in the app's logic (ET's day lives only in its own settings, via 0354)", () => {
+    const root = join(process.cwd(), "src");
+    const walk = (d: string): string[] =>
+      readdirSync(d).flatMap((n) => {
+        const p = join(d, n);
+        return statSync(p).isDirectory() ? walk(p) : /\.(ts|tsx)$/.test(p) && !/\.(test|db-fixture)\.tsx?$/.test(p) ? [p] : [];
+      });
+    const hits = walk(root).filter((f) => readFileSync(f, "utf8").includes(ET));
+    expect(hits).toEqual([]);
+  });
+
+  it("the /bills Needs You card says the line and offers Change to whoever can change settings", () => {
+    const page = readFileSync(join(process.cwd(), "src/app/(app)/bills/page.tsx"), "utf8");
+    expect(page).toContain("booksBeginOn(orgSettingsRaw, liveBills)");
+    expect(page).toContain("<BooksBeginLine since={recordsSince} named={!!booksNamed} canChange={canChangeSettings} />");
   });
 
   it("no Saddle Rd card and nothing from before June 8, but June 8 itself counts", () => {
@@ -432,7 +507,7 @@ describe("Waiting On A Credit: 8802-1107139, $59.17, 13683 HILLSIDE", () => {
   const feedWith = (extra: any[], today: string) => {
     const bills = hisBills();
     const { rows } = supplierDocumentRows({ documents: [...hisDocuments(), ...extra], bills, links: LINKS, aliasRows: [] });
-    return supplierPaperFeed({ since: booksBeginOn(ET, bills), rows, jobs: JOBS, accounts: ACCOUNTS, today });
+    return supplierPaperFeed({ since: booksBeginOn(ET_SETTINGS, bills), rows, jobs: JOBS, accounts: ACCOUNTS, today });
   };
   // Tapped at 5pm in Truckee on Sep 26: still Sep 26 there, though it is Sep 27 in UTC.
   const TAPPED = "2026-09-27T00:10:00+00:00";
@@ -555,6 +630,19 @@ describe("Waiting On A Credit: 8802-1107139, $59.17, 13683 HILLSIDE", () => {
     expect(creditWait({ waitingCreditSince: "2026-09-01" }, "2026-09-30")).toEqual({ since: "2026-09-01", back: "2026-10-01", overdue: false });
     expect(creditWait({ waitingCreditSince: "2026-09-01" }, "2026-10-01")?.overdue).toBe(true);
   });
+
+  // THE COMPANY'S DAY, NOT THE DEPLOY'S (Wave 0): 12:30 AM in New York is still 9:30 PM Pacific.
+  it("reads the stamp's day in the company's timezone", () => {
+    const stamp = { waitingCreditSince: "2026-09-26T04:30:00Z" };
+    expect(creditWait(stamp, "2026-09-26", "America/New_York")?.since).toBe("2026-09-26");
+    expect(creditWait(stamp, "2026-09-26", "America/Los_Angeles")?.since).toBe("2026-09-25");
+  });
+
+  it("no supplier-paper screen works out its day in the deploy's timezone", () => {
+    for (const f of ["src/app/(app)/jobs/[id]/job-papers.ts", "src/app/(app)/inventory/page.tsx"]) {
+      expect(readFileSync(join(process.cwd(), f), "utf8")).not.toContain("DEFAULT_TIMEZONE");
+    }
+  });
 });
 
 /**
@@ -565,7 +653,7 @@ describe("supplierPaperHomes: the page's own lists, read once for other screens"
   const stock = (over: Record<string, unknown>) => doc({ job_name_raw: "STOCK", invoice_date: "2026-07-21", total: "114.40", ...over });
   const homesOf = (documents: any[], bills: any[] = []) => {
     const { rows } = supplierDocumentRows({ documents, bills, links: [], aliasRows: [] });
-    return supplierPaperHomes(rows, { since: booksBeginOn(ET, bills), today: "2026-09-26" });
+    return supplierPaperHomes(rows, { since: booksBeginOn(ET_SETTINGS, bills), today: "2026-09-26" });
   };
 
   it("a STOCK paper after the June 8 line, in nobody's books, is in the fold", () => {

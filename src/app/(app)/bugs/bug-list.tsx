@@ -5,6 +5,7 @@ import { Image as ImageIcon, Check, X, RotateCcw } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { EmptyState } from "@/components/page-header";
 import { formatDate } from "@/lib/utils";
+import { useToast } from "@/components/toast";
 import { setBugReportStatus, type BugReport } from "@/app/(app)/bug-report-actions";
 
 const TABS = [
@@ -19,11 +20,17 @@ const statusOf = (r: BugReport) => r.status || "open";
 export function BugList({ initial }: { initial: BugReport[] }) {
   const [reports, setReports] = useState<BugReport[]>(initial);
   const [tab, setTab] = useState<(typeof TABS)[number]["key"]>("open");
+  const toast = useToast();
 
-  function setStatus(id: string, status: string) {
-    // Optimistic: the server action (RLS staff-gated) runs in the background.
+  async function setStatus(id: string, status: string) {
+    // Optimistic, and never silent: a refused write puts the row back and says why.
+    const before = reports.find((r) => r.id === id)?.status ?? "open";
     setReports((p) => p.map((r) => (r.id === id ? { ...r, status } : r)));
-    setBugReportStatus(id, status);
+    const res = await setBugReportStatus(id, status).catch(() => ({ ok: false, error: "Couldn't reach the server. Try again." }));
+    if (!res.ok) {
+      setReports((p) => p.map((r) => (r.id === id ? { ...r, status: before } : r)));
+      toast(res.error ?? "Couldn't update that report.", "error");
+    }
   }
 
   async function viewShot(path: string) {

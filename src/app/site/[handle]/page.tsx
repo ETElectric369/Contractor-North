@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { getPublicOrgByHandle } from "@/lib/public-org";
+// publicSite: the Website switch (0352, rule e). Off, and this page is a 404 like an unpublished site.
+import { getPublicOrgByHandle, publicSite } from "@/lib/public-org";
 import { getOrgSettings, orgPublicBaseUrl } from "@/lib/org-settings";
 import { applySiteDoc, extractSiteDoc } from "@/lib/site-doc";
 import { OrgSite, orgSiteMetadata } from "../org-site";
@@ -23,7 +24,7 @@ export async function generateMetadata({
   searchParams: SearchParams;
 }): Promise<Metadata> {
   const { handle } = await params;
-  const org = await getPublicOrgByHandle(handle);
+  const org = publicSite(await getPublicOrgByHandle(handle));
   if (!org) return {};
   // A preview request never advertises a canonical and never indexes — same law as page/post
   // drafts. (Applies on the preview PARAM alone, authorized or not: the safe direction.)
@@ -41,7 +42,7 @@ export default async function SiteHome({
   searchParams: SearchParams;
 }) {
   const { handle } = await params;
-  const org = await getPublicOrgByHandle(handle);
+  const org = publicSite(await getPublicOrgByHandle(handle));
   if (!org) notFound();
   // Design-studio preview: ?preview=1&sv=<version> overlays a draft site document onto the live
   // settings for THIS render only — authorized previewers see the redesign at its real URL, the

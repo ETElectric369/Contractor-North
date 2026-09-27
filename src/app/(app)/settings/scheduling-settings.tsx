@@ -1,24 +1,33 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
 import type { OrgSettings } from "@/lib/org-settings";
 import { TEXTS_NOT_READY_LINE, TEXTING_CARD_PLACE } from "@/lib/sms-readiness";
 import { updateOrgSettings } from "./actions";
+import { setFeature } from "./features-actions";
 
 export function SchedulingSettings({
   settings,
   employees = [],
   ownerName,
   textReady = true,
+  isOwner = false,
+  payroll = true,
 }: {
   settings: OrgSettings;
   employees?: { id: string; full_name: string | null }[];
   ownerName?: string;
   /** Can this org text (lib/sms-readiness)? false: the text option shows as not active. */
   textReady?: boolean;
+  /** Only the owner moves the Job Codes switch (0352); everyone else reads it. */
+  isOwner?: boolean;
+  /** Crew & Payroll is on and somebody besides the owner is on the team (0352, rule j). Off, the
+   *  pay period isn't drawn; Save still sends the stored one, unchanged. */
+  payroll?: boolean;
 }) {
   const [start, setStart] = useState(settings.work_day_start);
   const [end, setEnd] = useState(settings.work_day_end);
@@ -34,6 +43,24 @@ export function SchedulingSettings({
   const [pending, startT] = useTransition();
   const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [codesPending, startCodes] = useTransition();
+  const [codesError, setCodesError] = useState<string | null>(null);
+  const router = useRouter();
+
+  // The owner's tap moves the Job Codes switch at once; a refusal puts the box back and says why.
+  function flipJobCodes(on: boolean) {
+    setCodesError(null);
+    setAskJobCodes(on);
+    startCodes(async () => {
+      const res = await setFeature("job_codes", on);
+      if (!res.ok) {
+        setAskJobCodes(!on);
+        setCodesError(res.error);
+        return;
+      }
+      router.refresh();
+    });
+  }
 
   function save() {
     setError(null);
@@ -45,7 +72,6 @@ export function SchedulingSettings({
         week_start: weekStart,
         time_tracking_method: method,
         remind_timeclock: remindClock,
-        timeclock_job_codes: askJobCodes,
         geofence_logout: geofence,
         geofence_radius_m: Math.max(50, Math.round(Number(radius) || 300)),
         timecard_supervisor_id: supervisor,
@@ -127,10 +153,29 @@ export function SchedulingSettings({
 
       <div className="space-y-2 border-t border-slate-100 pt-4">
         <div className="text-sm font-medium text-slate-700">Job codes on the timeclock</div>
-        <label className="flex items-start gap-2 text-sm text-slate-600">
-          <input type="checkbox" checked={askJobCodes} onChange={(e) => setAskJobCodes(e.target.checked)} className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand" />
-          <span>Ask the crew for job codes (the clock-out code breakdown and the code pickers).</span>
-        </label>
+        {/* THE JOB CODES SWITCH (0352). This box used to ride Save Changes as timeclock_job_codes;
+            that key is now the switch board's, which only the owner moves, so the box saves on its
+            own tap through setFeature and says so if it can't. Anyone else reads the state and who
+            can change it: never a box that looks like it saved and didn't. */}
+        {isOwner ? (
+          <label className="flex min-h-11 items-start gap-2 py-1 text-sm text-slate-600">
+            <input
+              type="checkbox"
+              checked={askJobCodes}
+              disabled={codesPending}
+              onChange={(e) => flipJobCodes(e.target.checked)}
+              className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand"
+            />
+            <span>
+              Ask the crew for job codes (the clock-out code breakdown and the code pickers). Saves as soon as you tap it.
+              {codesError && <span className="mt-0.5 block text-xs text-red-700">{codesError}</span>}
+            </span>
+          </label>
+        ) : (
+          <p className="text-sm text-slate-600">
+            Job codes are {askJobCodes ? "on" : "off"}. Only the owner can change this.
+          </p>
+        )}
         {!askJobCodes && (
           <p className="pl-6 text-xs text-slate-400">
             Codes off: each entry just carries its job — no code questions anywhere on the clock —
@@ -167,31 +212,33 @@ export function SchedulingSettings({
         <p className="text-xs text-slate-400">Who reviews &amp; approves timecards. Defaults to the owner.</p>
       </div>
 
-      <div className="space-y-3 border-t border-slate-100 pt-4">
-        <div className="text-sm font-medium text-slate-700">Payroll</div>
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <Label htmlFor="pay-sched">Pay period</Label>
-            <Select id="pay-sched" value={paySchedule} onChange={(e) => setPaySchedule(e.target.value as any)}>
-              <option value="weekly">Weekly</option>
-              <option value="biweekly">Every 2 weeks (biweekly)</option>
-              <option value="semimonthly">Twice a month (1st &amp; 16th)</option>
-              <option value="monthly">Monthly</option>
-            </Select>
-          </div>
-          {(paySchedule === "weekly" || paySchedule === "biweekly") && (
+      {payroll && (
+        <div className="space-y-3 border-t border-slate-100 pt-4">
+          <div className="text-sm font-medium text-slate-700">Payroll</div>
+          <div className="grid grid-cols-2 gap-3">
             <div>
-              <Label htmlFor="pay-anchor">A period start date</Label>
-              <Input id="pay-anchor" type="date" value={payAnchor} onChange={(e) => setPayAnchor(e.target.value)} />
+              <Label htmlFor="pay-sched">Pay period</Label>
+              <Select id="pay-sched" value={paySchedule} onChange={(e) => setPaySchedule(e.target.value as any)}>
+                <option value="weekly">Weekly</option>
+                <option value="biweekly">Every 2 weeks (biweekly)</option>
+                <option value="semimonthly">Twice a month (1st &amp; 16th)</option>
+                <option value="monthly">Monthly</option>
+              </Select>
             </div>
-          )}
+            {(paySchedule === "weekly" || paySchedule === "biweekly") && (
+              <div>
+                <Label htmlFor="pay-anchor">A period start date</Label>
+                <Input id="pay-anchor" type="date" value={payAnchor} onChange={(e) => setPayAnchor(e.target.value)} />
+              </div>
+            )}
+          </div>
+          <p className="text-xs text-slate-400">
+            Sets the boundaries for &ldquo;hours this pay period&rdquo; and payroll runs. We report gross
+            hours, pay &amp; mileage in the export — tax deductions &amp; withholdings stay with your
+            accountant / payroll service.
+          </p>
         </div>
-        <p className="text-xs text-slate-400">
-          Sets the boundaries for &ldquo;hours this pay period&rdquo; and payroll runs. We report gross
-          hours, pay &amp; mileage in the export — tax deductions &amp; withholdings stay with your
-          accountant / payroll service.
-        </p>
-      </div>
+      )}
 
       <div className="flex items-center gap-3">
         <Button onClick={save} disabled={pending}>{pending ? "Saving…" : "Save Changes"}</Button>

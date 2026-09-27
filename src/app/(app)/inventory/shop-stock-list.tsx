@@ -37,7 +37,7 @@ export type ShelfLotView = {
   /** It came in on a ticket bought for the shelf: there is no job to send it back to, so it has no
    *  Take It Off The Shelf (the ticket's Undo in the tray is the way back). */
   shelfTicket: boolean;
-  /** The supplier on its ticket (null for a roll counted in): names Return To CED. */
+  /** The supplier on its ticket (null for a roll counted in): names the Return To door. */
   supplier: string | null;
 };
 

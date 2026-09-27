@@ -35,15 +35,24 @@ async function captureScreen(): Promise<Blob | null> {
   }
 }
 
-/** One-tap "Report a bug" button (staff only — mounted by the app layout). Auto-attaches
- *  the page, captured console errors, browser/viewport + reporter to each report, and
- *  shows the org's recent reports so the team can track what's logged/fixed.
+/** One-tap Report A Problem, for EVERYONE in the company (Wave 0; the insert policy always let any
+ *  member file, 0082/0135). Auto-attaches the page, captured console errors, browser/viewport +
+ *  reporter to each report. The recent-reports list and Mark Fixed are North's own triage, so they
+ *  show only for a platform admin (`platformAdmin`); a company never sees its bug list.
  *
  *  `collaborator` = the /content mount (external SEO pros): orgId is their GRANTED org and
  *  travels with the report (their profile has no org for the trigger to stamp). No
  *  screenshot (the documents bucket denies them via storage RLS) and no recent-reports
  *  panel (bug_reports reads are staff-only). Default (absent) keeps the staff path as is. */
-export function BugReporter({ orgId, collaborator = false }: { orgId: string; collaborator?: boolean }) {
+export function BugReporter({
+  orgId,
+  collaborator = false,
+  platformAdmin = false,
+}: {
+  orgId: string;
+  collaborator?: boolean;
+  platformAdmin?: boolean;
+}) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const [note, setNote] = useState("");
@@ -71,7 +80,7 @@ export function BugReporter({ orgId, collaborator = false }: { orgId: string; co
     setNote("");
     setError(null);
     setErrCount(getLogs().filter((l) => l.level === "error").length);
-    if (!collaborator) listBugReports().then(setReports).catch(() => {});
+    if (platformAdmin) listBugReports().then(setReports).catch(() => {});
   }
 
   function submit() {
@@ -124,13 +133,18 @@ export function BugReporter({ orgId, collaborator = false }: { orgId: string; co
       // closes its own sheet. The beat before closing is deliberate: the green "Sent"
       // is the only proof it went, and at 60mph an instant vanish reads as a crash.
       setTimeout(() => setOpen(false), 1200);
-      if (!collaborator) listBugReports().then(setReports).catch(() => {});
+      if (platformAdmin) listBugReports().then(setReports).catch(() => {});
     });
   }
 
-  function markFixed(id: string) {
+  async function markFixed(id: string) {
+    // Never silent: a refused write puts the row back and says why.
     setReports((p) => p.map((r) => (r.id === id ? { ...r, status: "fixed" } : r)));
-    setBugReportStatus(id, "fixed");
+    const res = await setBugReportStatus(id, "fixed").catch(() => ({ ok: false, error: "Couldn't reach the server. Try again." }));
+    if (!res.ok) {
+      setReports((p) => p.map((r) => (r.id === id ? { ...r, status: "open" } : r)));
+      setError(res.error ?? "Couldn't mark that one fixed.");
+    }
   }
 
   async function viewShot(path: string) {
@@ -148,8 +162,8 @@ export function BugReporter({ orgId, collaborator = false }: { orgId: string; co
         onClick={openPanel}
         data-bug-ignore="1"
         disabled={capturing}
-        title="Report a bug"
-        aria-label="Report a bug"
+        title="Report A Problem"
+        aria-label="Report A Problem"
         // /content has no mobile bottom nav to clear, so the collaborator mount sits at the corner.
         // In-app the clearance must follow the SHELL rule, not a width rule: the old `sm:bottom-4`
         // dropped the FAB onto the glass bottom nav on any coarse-pointer viewport 640-1023px wide
@@ -163,7 +177,7 @@ export function BugReporter({ orgId, collaborator = false }: { orgId: string; co
         {capturing ? <Loader2 className="h-5 w-5 animate-spin" /> : <Bug className="h-5 w-5" />}
       </button>
 
-      <Modal open={open} onClose={() => setOpen(false)} title="Report a bug">
+      <Modal open={open} onClose={() => setOpen(false)} title="Report A Problem">
         <div className="space-y-4">
           {sent ? (
             <div className="flex items-center gap-2 rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">
@@ -193,7 +207,7 @@ export function BugReporter({ orgId, collaborator = false }: { orgId: string; co
             </div>
           )}
 
-          {reports.length > 0 && (
+          {platformAdmin && reports.length > 0 && (
             <div>
               <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Recent reports</div>
               <ul className="max-h-56 divide-y divide-slate-100 overflow-y-auto rounded-lg border border-slate-200 text-sm">

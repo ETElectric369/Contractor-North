@@ -50,6 +50,7 @@ export function ConvertMenu({
   inquiryName,
   workKind: workKindProp = null,
   businessPhone = null,
+  estimateDoor = true,
 }: {
   inquiryId: string;
   inquiryName: string;
@@ -71,6 +72,8 @@ export function ConvertMenu({
    * next to Copy Link is the honest version, and Copy Link is the working route to it.
    */
   businessPhone?: string | null;
+  /** The Estimates switch (0352): off, no Estimate button (convertInquiry refuses it too). */
+  estimateDoor?: boolean;
 }) {
   const kind = workKind({ kind: "lead", workKind: workKindProp });
   const isWork = kind === "job" || kind === "service";
@@ -194,9 +197,11 @@ export function ConvertMenu({
         >
           <CalendarPlus className="h-4 w-4" /> Schedule
         </Button>
-        <Button size="sm" onClick={() => run("estimate")} disabled={busy !== null}>
-          <FileText className="h-4 w-4" /> {busy === "estimate" ? "Opening…" : "Estimate"}
-        </Button>
+        {estimateDoor && (
+          <Button size="sm" onClick={() => run("estimate")} disabled={busy !== null}>
+            <FileText className="h-4 w-4" /> {busy === "estimate" ? "Opening…" : "Estimate"}
+          </Button>
+        )}
         {/* THE CONTACT BUTTON IS GONE — the NAME is that control now (see inquiry-row).
             Erik: "have the name be the contact button or create contact option to clear up all
             that much more space … lets unify and simplfy in all we do." Two things saying the

@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { CAL_WINDOW_BACK_DAYS, CAL_WINDOW_FWD_DAYS } from "@/lib/schedule/cal-window";
 import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 import { getOrgSettings, workDayWindowHm } from "@/lib/org-settings";
+import { featureOn } from "@/lib/features";
 import { getSchedulePickerOptions } from "@/lib/schedule-options";
 import {
   CalendarView,
@@ -117,6 +118,7 @@ export async function CalendarPanel() {
         tz={getOrgSettings((org as any)?.settings).timezone}
         workDayStart={workDayWindowHm((org as any)?.settings).start}
         workDayEnd={workDayWindowHm((org as any)?.settings).end}
+        crewBoard={featureOn(getOrgSettings((org as any)?.settings).features, "crew_board")}
       />
     </div>
   );

@@ -6,6 +6,8 @@ import { PageHeader, EmptyState } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { QUOTE_STATUSES, QUOTE_STATUS_PRIORITY, type QuoteStatus } from "@/lib/statuses";
 import { QuotesList } from "./quotes-list";
+import { switchesFromRow } from "@/lib/viewer-switches";
+import { featureOn } from "@/lib/features";
 
 export const dynamic = "force-dynamic";
 
@@ -27,10 +29,13 @@ export default async function QuotesPage({
   const {
     data: { user },
   } = await supabase.auth.getUser();
+  // The company's switches ride the same row (the switch board, 0352): no extra round trip.
   const { data: me } = user
-    ? await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle()
+    ? await supabase.from("profiles").select("role, active, organizations(settings)").eq("id", user.id).maybeSingle()
     : { data: null };
   const isStaff = !!me && isStaffRole((me as { role?: string }).role ?? "");
+  const sw = switchesFromRow(me);
+  const estimatesOn = featureOn(sw.features, "estimates");
 
   // inquiry:inquiry_id — so a deferred-customer estimate (customer_id null until accepted) still
   // shows WHO it's for (the lead's name) instead of a blank dash.
@@ -62,11 +67,13 @@ export default async function QuotesPage({
   return (
     <div>
       <PageHeader title={heading} description="Estimates are time-&-materials by default — switch any one to a fixed-price quote.">
-        <Link href="/quotes/new">
-          <Button>
-            <Plus className="h-4 w-4" /> New Estimate
-          </Button>
-        </Link>
+        {estimatesOn && (
+          <Link href="/quotes/new">
+            <Button>
+              <Plus className="h-4 w-4" /> New Estimate
+            </Button>
+          </Link>
+        )}
       </PageHeader>
 
       {statusFilter && (
@@ -85,7 +92,7 @@ export default async function QuotesPage({
         <EmptyState
           icon={FileText}
           title="No estimates yet"
-          description="Create your first estimate with New Estimate above — the AI can draft line items from a scope of work."
+          description={estimatesOn ? "Create your first estimate with New Estimate above — the AI can draft line items from a scope of work." : "Estimates are off for this company."}
         />
       ) : (
         <QuotesList quotes={quotes} clusters={clusters} isStaff={isStaff} />

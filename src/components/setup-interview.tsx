@@ -48,9 +48,13 @@ export function SetupInterview({
   initial,
   onSaved,
   startAt = 1,
+  nortOn = true,
 }: {
   initial: Answers;
   onSaved?: () => void;
+  /** The Nort switch (0352, rule k). Off, Start Here opens these questions instead of the tour, so
+   *  they say nothing as Nort: the say-it box still fills the boxes, under its plain name. */
+  nortOn?: boolean;
   /** Where to open. The TOUR already asks the company questions out loud and already explains what
    *  a why line is, so it hands off at 2 — straight to the draft it just promised. Opening at 1
    *  after that would ask everything twice, which is how a tutorial teaches people to skip. */
@@ -181,8 +185,9 @@ export function SetupInterview({
             hear={hearSetup}
             answers={answers}
             hint={open[0]?.ask}
+            nortOn={nortOn}
             label="Tell Nort about your business"
-            placeholder="I'm Justin Vivian, general contractor out of Truckee — I sub out electrical and plumbing, I cover Nevada County, and I bill 150 an hour."
+            placeholder="I'm Sam Rivera, a general contractor — I sub out electrical and plumbing, I cover the whole county, and I bill 150 an hour."
             onFilled={(next) => {
               setAnswers(next);
               setDirty(true);
@@ -267,11 +272,19 @@ export function SetupInterview({
             err ? (
               <div className="mt-3 space-y-2">
                 <p className="text-sm text-rose-700">{err}</p>
-                <p className="text-sm text-slate-500">
-                  That usually means I never got your trade, so there are no questions to draft yet.
-                  Take the walk-through again from the cap button and tell me your trade &mdash; or
-                  write them yourself under Settings &rarr; Playbook.
-                </p>
+                {nortOn ? (
+                  <p className="text-sm text-slate-500">
+                    That usually means I never got your trade, so there are no questions to draft yet.
+                    Take the walk-through again from the cap button and tell me your trade &mdash; or
+                    write them yourself under Settings &rarr; Playbook.
+                  </p>
+                ) : (
+                  <p className="text-sm text-slate-500">
+                    That usually means no trade is on file, so there are no questions to draft yet.
+                    Take the setup again from the cap button and give your trade &mdash; or write them
+                    yourself under Settings &rarr; Playbook.
+                  </p>
+                )}
               </div>
             ) : (
               <p className="mt-3 flex items-center gap-2 text-sm text-slate-500">
@@ -327,7 +340,7 @@ export function SetupInterview({
                       </Button>
                     ) : (
                       <button type="button" disabled={pending} onClick={toWhere} className="text-sm text-slate-500 underline-offset-2 hover:underline">
-                        Save Nort&rsquo;s drafts and read them later
+                        {nortOn ? <>Save Nort&rsquo;s drafts and read them later</> : "Save The Drafts And Read Them Later"}
                       </button>
                     )}
                   </div>
@@ -350,8 +363,8 @@ export function SetupInterview({
             <li className="flex gap-3">
               <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-brand" />
               <span>
-                <strong className="font-medium text-slate-900">Just tell Nort</strong> — on a walk-through, say the whole job
-                the way you&rsquo;d say it to a person. The boxes fill in. Check them before you price it; Nort won&rsquo;t work out a
+                <strong className="font-medium text-slate-900">{nortOn ? "Just tell Nort" : "Just Say It"}</strong> — on a walk-through, say the whole job
+                the way you&rsquo;d say it to a person. The boxes fill in. Check them before you price it; {nortOn ? "Nort" : "it"} won&rsquo;t work out a
                 measurement you didn&rsquo;t say.
               </span>
             </li>

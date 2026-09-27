@@ -12,6 +12,8 @@ import { defaultDueDateIsoForOrg } from "@/lib/invoice-due";
 import { standardBillingBlockerOnJob, standardBillingConflictError } from "@/lib/billing-guards";
 import { runTemplate, runInvoiceTemplate, generateDueTemplates } from "@/lib/recurring-engine";
 import { BUSINESS_COST_BUCKETS, isBusinessCostBucket } from "@/lib/business-cost-buckets";
+import { featureOn } from "@/lib/features";
+import { featureOffSentence } from "@/lib/viewer-switches";
 
 /** Default invoice due date = today (org tz) + the org's net terms (invoice_due_days, else
  *  Net 30), stamped to NOON in the org tz — same convention billing/actions uses. A draw
@@ -33,6 +35,19 @@ export async function saveRecurring(formData: FormData, id?: string): Promise<Re
   if (!title) return { ok: false, error: "Title is required." };
   const nextDate = String(formData.get("next_date") ?? "");
   if (!/^\d{4}-\d{2}-\d{2}$/.test(nextDate)) return { ok: false, error: "Pick a next date." };
+
+  // RECURRING BILLING OFF (0352, rule h): no new repeat invoice is set up, from a blank form or by
+  // turning a job or expense into one; the engine wouldn't make it. Said plainly. A template that
+  // already is an invoice still saves its edits. Jobs and expenses aren't the switch's.
+  if (kind === "invoice") {
+    const { data: orgRow } = await supabase.from("organizations").select("settings").maybeSingle();
+    if (!featureOn(getOrgSettings((orgRow as { settings?: unknown } | null)?.settings).features, "recurring_billing")) {
+      const { data: was } = id
+        ? await supabase.from("recurring_templates").select("kind").eq("id", id).maybeSingle()
+        : { data: null };
+      if ((was as { kind?: string } | null)?.kind !== "invoice") return { ok: false, error: featureOffSentence("recurring_billing") };
+    }
+  }
 
   const amountRaw = String(formData.get("amount") ?? "").trim();
   const taxRaw = String(formData.get("tax_pct") ?? "").trim();
@@ -143,6 +158,11 @@ export async function generateOne(id: string): Promise<Result> {
   // Org-local today + settings (tz / work-day window) for the generated occurrence.
   const { data: orgRow } = await supabase.from("organizations").select("settings").maybeSingle();
   const raw = (orgRow as { settings?: unknown } | null)?.settings;
+  // RECURRING BILLING OFF (0352, rule h): no repeat invoice is generated for this company, by hand or
+  // by the engine. Said plainly, never a quiet "Already generated". Jobs and expenses aren't the
+  // switch's: they generate as before.
+  if (t.kind === "invoice" && !featureOn(getOrgSettings(raw).features, "recurring_billing"))
+    return { ok: false, error: featureOffSentence("recurring_billing") };
   const today = todayStrInTz(getOrgSettings(raw).timezone);
   const ok =
     t.kind === "invoice"
@@ -159,6 +179,8 @@ export async function generateDue(): Promise<Result> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
+  // Recurring Billing off: the engine skips this company's repeat invoices itself and makes its jobs
+  // and expenses as before (0352, rule h).
   const count = await generateDueTemplates(supabase, ctx.userId);
   revalidatePath("/recurring");
   revalidatePath("/jobs");

@@ -1,11 +1,11 @@
 import { z } from "zod";
-import { createBugReport, setBugReportStatus } from "@/app/(app)/bug-report-actions";
+import { createBugReport } from "@/app/(app)/bug-report-actions";
 import type { ActionDef } from "../types";
 
 export const bugActions: Record<string, ActionDef> = {
-  // Closes a known capability hole: Nort could LIST bug reports but not FILE one (it once
-  // faked a capture because of exactly this class of gap). Same insert path as the UI's
-  // report button (createBugReport — org-scoped via the set_org_id trigger + RLS).
+  // Nort can FILE a report for anyone (it once faked a capture because it couldn't). Same insert
+  // path as Report A Problem (createBugReport — org-scoped via the set_org_id trigger + RLS).
+  // Reading and resolving reports is North's own work on Bug Watch, not a company's (Wave 0).
   "bug.report": {
     name: "bug.report",
     group: "bug",
@@ -28,16 +28,5 @@ export const bugActions: Record<string, ActionDef> = {
       });
       return res.ok ? { ...res, speak: "Filed — the dev team will see it." } : res;
     },
-  },
-  "bug.resolve": {
-    name: "bug.resolve",
-    group: "bug",
-    label: "Resolve a bug report",
-    description:
-      "Mark a bug report fixed, won't-fix, or re-open it — 'mark the scheduler nav bug as fixed'. Resolve the report with list_bug_reports first and pass its id (and the new status: fixed, wontfix, or open).",
-    input: z.object({ id: z.string(), status: z.enum(["fixed", "wontfix", "open"]).default("fixed") }),
-    auth: "staff",
-    effect: "write",
-    handler: (i) => setBugReportStatus(i.id, i.status),
   },
 };

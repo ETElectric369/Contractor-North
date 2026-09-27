@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Label, Textarea } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import type { OrgSettings } from "@/lib/org-settings";
+import { featureOn } from "@/lib/features";
 import { updateOrgSettings } from "./actions";
 
 export function DocumentSettings({ settings }: { settings: OrgSettings }) {
@@ -19,6 +20,10 @@ export function DocumentSettings({ settings }: { settings: OrgSettings }) {
   const [pending, start] = useTransition();
   const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // THE SWITCH BOARD (0352): Estimates off hides the estimate fields, Contracts off the contract
+  // terms. Save still sends what they hold, unchanged, so a hidden value is never cleared.
+  const estimates = featureOn(settings.features, "estimates");
+  const contracts = featureOn(settings.features, "contracts");
 
   function save() {
     setError(null);
@@ -43,10 +48,12 @@ export function DocumentSettings({ settings }: { settings: OrgSettings }) {
     <div className="space-y-4">
       {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <div>
-          <Label htmlFor="ds-expiry">Estimate valid for (days)</Label>
-          <NumberInput id="ds-expiry" value={expiry} onValueChange={setExpiry} />
-        </div>
+        {estimates && (
+          <div>
+            <Label htmlFor="ds-expiry">Estimate valid for (days)</Label>
+            <NumberInput id="ds-expiry" value={expiry} onValueChange={setExpiry} />
+          </div>
+        )}
         <div>
           <Label htmlFor="ds-due">Invoice due in (days)</Label>
           <NumberInput id="ds-due" value={due} onValueChange={setDue} />
@@ -56,18 +63,24 @@ export function DocumentSettings({ settings }: { settings: OrgSettings }) {
           <NumberInput id="ds-deposit" value={deposit} onValueChange={setDeposit} />
         </div>
       </div>
-      <div>
-        <Label htmlFor="ds-qterms">Default estimate terms</Label>
-        <Textarea id="ds-qterms" rows={2} value={quoteTerms} onChange={(e) => setQuoteTerms(e.target.value)} placeholder="e.g. Estimate valid for 30 days. 50% deposit required to schedule." />
-      </div>
+      {estimates && (
+        <div>
+          <Label htmlFor="ds-qterms">Default estimate terms</Label>
+          <Textarea id="ds-qterms" rows={2} value={quoteTerms} onChange={(e) => setQuoteTerms(e.target.value)} placeholder="e.g. Estimate valid for 30 days. 50% deposit required to schedule." />
+        </div>
+      )}
       <div>
         <Label htmlFor="ds-iterms">Default invoice terms</Label>
         <Textarea id="ds-iterms" rows={2} value={invoiceTerms} onChange={(e) => setInvoiceTerms(e.target.value)} placeholder="e.g. Payment due within 14 days. 1.5% monthly late fee." />
       </div>
-      <div>
-        <Label htmlFor="ds-cterms">Default contract terms</Label>
-        <Textarea id="ds-cterms" rows={4} value={contractTerms} onChange={(e) => setContractTerms(e.target.value)} placeholder="The standard terms section of your service contracts (payment, change orders, warranty, cancellation, governing law)." />
-      </div>
+      {/* Contracts & Lien Rights off (0352): the field isn't drawn; Save still sends the stored terms
+          back unchanged, and a contract already written keeps the terms it was written with. */}
+      {contracts && (
+        <div>
+          <Label htmlFor="ds-cterms">Default contract terms</Label>
+          <Textarea id="ds-cterms" rows={4} value={contractTerms} onChange={(e) => setContractTerms(e.target.value)} placeholder="The standard terms section of your service contracts (payment, change orders, warranty, cancellation, governing law)." />
+        </div>
+      )}
       <div>
         <Label htmlFor="ds-footer">Document footer</Label>
         <Textarea id="ds-footer" rows={2} value={footer} onChange={(e) => setFooter(e.target.value)} placeholder="Shown at the bottom of estimates, invoices & work orders (license #, thank-you note, etc.)" />

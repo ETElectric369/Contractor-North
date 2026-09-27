@@ -583,9 +583,12 @@ export function SupplierPaperCards({
           <Button type="button" variant="outline" disabled={busy === c.invoiceId} onClick={() => toggle("job")}>
             {hasGuess ? "Another Job" : "Pick A Job"}
           </Button>
-          <Button type="button" variant="outline" disabled={busy === c.invoiceId} onClick={() => openShelf(c)}>
-            Shop Stock
-          </Button>
+          {/* Shop Stock off (0352): the feed says so, and the shelf isn't offered. */}
+          {feed.shopStock !== false && (
+            <Button type="button" variant="outline" disabled={busy === c.invoiceId} onClick={() => openShelf(c)}>
+              Shop Stock
+            </Button>
+          )}
           <Button type="button" variant="outline" disabled={busy === c.invoiceId} onClick={() => toggle("bucket")}>
             Business Cost
           </Button>

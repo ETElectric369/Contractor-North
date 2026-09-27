@@ -46,7 +46,9 @@ export function expiryBadge(date: string | null) {
   return { tone: "green" as const, label: `Active` };
 }
 
-export function ComplianceManager({ items, orgId }: { items: ComplianceItem[]; orgId: string }) {
+/** `canEdit` is false for a tech: every write here is requireStaff, so the doors don't render.
+ *  `canAdd` false (its switch is off, 0352): no Add or Import; existing rows keep edit and delete. */
+export function ComplianceManager({ items, orgId, canEdit, canAdd = canEdit }: { items: ComplianceItem[]; orgId: string; canEdit: boolean; canAdd?: boolean }) {
   const router = useRouter();
   const toast = useToast();
   const [pending, start] = useTransition();
@@ -116,12 +118,14 @@ export function ComplianceManager({ items, orgId }: { items: ComplianceItem[]; o
     <div className="space-y-4">
       {/* flex-wrap + items-center so the 3 action buttons wrap as a neat group on
           a narrow phone instead of cramping/overflowing (bug: button alignment). */}
-      <div className="flex flex-wrap items-center justify-end gap-2">
-        <ImportDocsButton orgId={orgId} page="Compliance" />
-        <Button size="sm" onClick={() => setAdding((a) => !a)}><Plus className="h-3.5 w-3.5" /> Add Item</Button>
-      </div>
+      {canAdd && (
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <ImportDocsButton orgId={orgId} page="Compliance" />
+          <Button onClick={() => setAdding((a) => !a)}><Plus className="h-3.5 w-3.5" /> Add Item</Button>
+        </div>
+      )}
 
-      {adding && (
+      {canAdd && adding && (
         <Card className="space-y-3 p-4">
           {error && <p className="text-sm text-red-600">{error}</p>}
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
@@ -142,7 +146,7 @@ export function ComplianceManager({ items, orgId }: { items: ComplianceItem[]; o
 
       {items.length === 0 ? (
         <p className="py-10 text-center text-sm text-slate-400">
-          Track insurance, workers' comp, bonds, and licenses here so nothing lapses.
+          Track insurance, workers&apos; comp, bonds, and licenses here, with the day each one expires.
         </p>
       ) : (
         <div className="grid gap-3 sm:grid-cols-2">
@@ -160,15 +164,17 @@ export function ComplianceManager({ items, orgId }: { items: ComplianceItem[]; o
                       {c.type}{c.policy_number ? ` · #${c.policy_number}` : ""}
                     </div>
                   </div>
-                  <div className="flex items-center gap-1">
-                    <button onClick={() => openEdit(c)} className="text-slate-300 hover:text-slate-700" title="Edit"><Pencil className="h-4 w-4" /></button>
-                    <DeleteButton action={() => deleteCompliance(c.id)} confirm="Delete this item?" done="Item deleted" className="text-slate-300 hover:text-red-600 disabled:opacity-50" />
-                  </div>
+                  {canEdit && (
+                    <div className="flex items-center gap-1">
+                      <button type="button" onClick={() => openEdit(c)} className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-slate-300 hover:text-slate-700" title="Edit" aria-label="Edit"><Pencil className="h-4 w-4" /></button>
+                      <DeleteButton action={() => deleteCompliance(c.id)} confirm="Delete this item?" done="Item deleted" className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-slate-300 hover:text-red-600 disabled:opacity-50" />
+                    </div>
+                  )}
                 </div>
                 <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
                   <Badge tone={b.tone}>{b.label}</Badge>
                   {c.expires_date && <span>Renews {formatDate(c.expires_date)}</span>}
-                  {Number(c.amount) > 0 && <span>· {formatCurrency(c.amount)}/yr</span>}
+                  {canEdit && Number(c.amount) > 0 && <span>· {formatCurrency(c.amount)}/yr</span>}
                   {c.signedUrl && (
                     <a href={c.signedUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 font-medium text-sky-700 hover:underline">
                       <FileText className="h-3.5 w-3.5" /> Document

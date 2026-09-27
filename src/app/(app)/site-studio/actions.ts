@@ -178,7 +178,7 @@ async function runDesignModel(args: {
     const message = e instanceof Error ? e.message : "The design pass failed.";
     return {
       ok: false,
-      error: /ANTHROPIC_API_KEY/i.test(message) ? "AI isn't configured on this server." : `Design pass failed: ${message.slice(0, 300)}`,
+      error: /ANTHROPIC_API_KEY/i.test(message) ? "AI isn't available right now. Try again later." : `Design pass failed: ${message.slice(0, 300)}`,
     };
   }
 }

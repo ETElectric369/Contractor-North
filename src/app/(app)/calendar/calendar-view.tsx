@@ -241,6 +241,7 @@ export function CalendarView({
   tz,
   workDayStart = "08:00",
   workDayEnd = "16:00",
+  crewBoard = true,
 }: {
   jobs: CalJob[];
   segments?: CalSegment[];
@@ -263,6 +264,8 @@ export function CalendarView({
   /** The org's work_day_end ("HH:MM") — an all-day job's block on the time
    *  grid spans start→end (the org's real work window, not a faked time). */
   workDayEnd?: string;
+  /** Crew Board's switch (0352): off, no Everyone's Day door in the header. Absent = on. */
+  crewBoard?: boolean;
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -826,14 +829,16 @@ export function CalendarView({
           </button>
         )}
         <span className="ml-1 min-w-0 flex-1 truncate text-sm font-semibold text-slate-900">{title}</span>
-        <Link
-          href="/schedule?view=crew"
-          aria-label="Everyone's Day (crew board)"
-          title="Everyone's Day — the whole crew, side by side"
-          className={`${iconBtn} text-slate-400 hover:bg-slate-100 hover:text-slate-700`}
-        >
-          <Columns3 className="h-4 w-4" />
-        </Link>
+        {crewBoard && (
+          <Link
+            href="/schedule?view=crew"
+            aria-label="Everyone's Day (crew board)"
+            title="Everyone's Day — the whole crew, side by side"
+            className={`${iconBtn} text-slate-400 hover:bg-slate-100 hover:text-slate-700`}
+          >
+            <Columns3 className="h-4 w-4" />
+          </Link>
+        )}
         <Link
           href="/schedule?view=map"
           aria-label="Job map"

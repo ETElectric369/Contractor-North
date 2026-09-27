@@ -105,7 +105,8 @@ export function TimeclockPanel({
   lang?: string;
   homeAddress?: string;
   isStaff?: boolean;
-  /** Crew leads (any role) get the Nort end-of-day debrief after clocking out. */
+  /** Crew leads (any role) get the Nort end-of-day debrief after clocking out (false while Daily
+   *  Reports is off). */
   crewLead?: boolean;
   /** org setting timeclock_job_codes: false = no code pickers anywhere on the clock,
    *  and job labels lead with customer · street address. Default true = today's flow. */

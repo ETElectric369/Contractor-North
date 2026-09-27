@@ -137,7 +137,7 @@ export function PoDetail({
       {priceItems.length > 0 && (
         <div className="relative">
           <Input
-            placeholder="Add from Price List — search CED parts…"
+            placeholder="Add from Price List — search your parts…"
             value={plQuery}
             onChange={(e) => { setPlQuery(e.target.value); setPlOpen(true); }}
             onFocus={() => setPlOpen(true)}

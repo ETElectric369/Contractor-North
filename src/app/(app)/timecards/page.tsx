@@ -17,6 +17,8 @@ import {
   hoursBetween,
 } from "@/lib/utils";
 import { getOrgSettings, workDayWindowHm } from "@/lib/org-settings";
+import { featureOn } from "@/lib/features";
+import { countTeammates, shellDoors } from "@/lib/feature-doors";
 import { formatDateTimeTz, timeEntryGridSpan, tzDayStartUtc, tzMinutesOfDay, todayStrInTz } from "@/lib/tz";
 import { balanceForPerson, drawIdsFrom, toPayPaymentRow, wagesOnly, type PayPaymentRow, type PersonBalance } from "@/lib/payroll-math";
 import { getCrewStatus } from "@/lib/crew-status";
@@ -124,14 +126,14 @@ export default async function TimecardsPage({
   } = await supabase.auth.getUser();
   const { data: me } = await supabase
     .from("profiles")
-    .select("role")
+    .select("role, org_id")
     .eq("id", user?.id ?? "")
     .maybeSingle();
   if (!me || !isStaffRole(me.role)) {
     redirect("/timeclock");
   }
 
-  const [{ data: members }, { data: jobCodes }, { data: jobs }, { data: org }, crew] = await Promise.all([
+  const [{ data: members }, { data: jobCodes }, { data: jobs }, { data: org }, crew, teammates] = await Promise.all([
     // hourly_rate + bill_rate feed the edit/add modals' pay-rate anchor + the
     // bill-rate tripwire. Safe to select flat here — the page redirects non-staff
     // above, so the rates never serialize into a tech's props.
@@ -146,10 +148,13 @@ export default async function TimecardsPage({
     // The live crew pulse (who's on the clock now) — moved here from My Day's
     // CrewBoard so presence lives next to the hours it becomes.
     getCrewStatus(supabase),
+    // Crew & Payroll's door below is quiet until a second person, as on the dock (rule j).
+    countTeammates(supabase, me).catch(() => null),
   ]);
   // Render times in the BUSINESS timezone, not the UTC server's, so the list
   // matches the (browser-local) edit modal instead of being hours off.
   const orgSettings = getOrgSettings((org as any)?.settings);
+  const payDoors = shellDoors(orgSettings.features, teammates);
   const tz = orgSettings.timezone;
 
   const { start, end, days: weekDayStrs } = weekRange(offset, tz, orgSettings.week_start);
@@ -879,37 +884,40 @@ export default async function TimecardsPage({
           behind it; this is its headline and the door. The WHOLE ROW is the target (a link inside
           a row is a smaller thing to hit than the row), 44px, and the figure is the same
           balanceForPerson arithmetic that page runs — or no figure at all. */}
-      <Link
-        href="/payroll"
-        className="mb-4 flex min-h-[44px] w-full items-center gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3 active:bg-slate-50"
-      >
-        <span className="min-w-0 flex-1">
-          {owedUnreadable ? (
-            <>
-              <span className="block text-base font-semibold text-slate-900">Open Pay</span>
-              {/* NOTHING SILENT, and never a figure he could act on that might be wrong. */}
-              <span className="block text-sm text-slate-500">
-                No amount is shown here right now because the pay records could not be read whole. Your hours below are
-                fine.
-              </span>
-            </>
-          ) : owedPeople === 0 ? (
-            <>
-              {/* "The crew": the owner is paid by owner's draw and is never on this figure (0286). */}
-              <span className="block text-base font-semibold text-slate-900">The crew is paid up</span>
-              <span className="block text-sm text-slate-500">Open Pay</span>
-            </>
-          ) : (
-            <>
-              <span className="block text-base font-semibold text-slate-900">You Owe {formatCurrency(owedTotal)}</span>
-              <span className="block text-sm text-slate-500">
-                across {owedPeople} {owedPeople === 1 ? "person" : "people"} · Open Pay
-              </span>
-            </>
-          )}
-        </span>
-        <ChevronRight className="h-5 w-5 shrink-0 text-slate-400" aria-hidden />
-      </Link>
+      {/* Crew & Payroll off, or quiet for an owner alone (0352, rule j): no Pay door here, as on the dock. */}
+      {featureOn(payDoors, "crew_payroll") && (
+        <Link
+          href="/payroll"
+          className="mb-4 flex min-h-[44px] w-full items-center gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3 active:bg-slate-50"
+        >
+          <span className="min-w-0 flex-1">
+            {owedUnreadable ? (
+              <>
+                <span className="block text-base font-semibold text-slate-900">Open Pay</span>
+                {/* NOTHING SILENT, and never a figure he could act on that might be wrong. */}
+                <span className="block text-sm text-slate-500">
+                  No amount is shown here right now because the pay records could not be read whole. Your hours below are
+                  fine.
+                </span>
+              </>
+            ) : owedPeople === 0 ? (
+              <>
+                {/* "The crew": the owner is paid by owner's draw and is never on this figure (0286). */}
+                <span className="block text-base font-semibold text-slate-900">The crew is paid up</span>
+                <span className="block text-sm text-slate-500">Open Pay</span>
+              </>
+            ) : (
+              <>
+                <span className="block text-base font-semibold text-slate-900">You Owe {formatCurrency(owedTotal)}</span>
+                <span className="block text-sm text-slate-500">
+                  across {owedPeople} {owedPeople === 1 ? "person" : "people"} · Open Pay
+                </span>
+              </>
+            )}
+          </span>
+          <ChevronRight className="h-5 w-5 shrink-0 text-slate-400" aria-hidden />
+        </Link>
+      )}
 
       {/* ── FIX THESE: the broken shifts, each with the verb that fixes it (see brokenRows). ── */}
       {fixCount > 0 ? (

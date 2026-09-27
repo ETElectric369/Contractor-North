@@ -1,10 +1,12 @@
 "use server";
 
 import { executeAction } from "@/lib/actions/execute";
-import { AGENT_WRITE_ALLOWED } from "@/lib/actions/agent-tools";
+import { AGENT_WRITE_ALLOWED, agentInputForSwitches, agentToolOff } from "@/lib/actions/agent-tools";
+import { featureOffSentence, viewerSwitches } from "@/lib/viewer-switches";
 import { createClient } from "@/lib/supabase/server";
 import { requireStaff } from "@/lib/staff-guard";
 import { getOrgSettings } from "@/lib/org-settings";
+import { featureOn } from "@/lib/features";
 import { resolveCustomerId } from "@/lib/actions/resolve-id";
 import { todayStrInTz } from "@/lib/tz";
 import type { AgentDraft } from "@/lib/assistant-protocol";
@@ -166,9 +168,12 @@ export async function saveQuoteFromDraft(
     supabase.from("tax_rates").select("rate").eq("is_default", true).limit(1).maybeSingle(),
     supabase.from("organizations").select("settings").limit(1).maybeSingle(),
   ]);
-  const taxRate =
-    draft.tax_rate != null ? draft.tax_rate : defTax ? Number((defTax as { rate: number }).rate) / 100 : 0;
   const orgS = getOrgSettings((org as { settings?: unknown } | null)?.settings);
+  // SALES TAX OFF (the switch board, rule g): a new estimate is untaxed, whatever the default rate or
+  // the draft says. The live preview never offered a rate either (api/chat drops quote_draft's tax_rate).
+  const taxRate = !featureOn(orgS.features, "sales_tax")
+    ? 0
+    : draft.tax_rate != null ? draft.tax_rate : defTax ? Number((defTax as { rate: number }).rate) / 100 : 0;
   const expiryDays = orgS.quote_expiry_days;
   // audit v921: expiry was counted off the SERVER's day (UTC on Vercel), so a 6 PM Pacific estimate
   // was dated a day long. Count the calendar days off the ORG's today, noon-anchored so a DST day
@@ -217,7 +222,13 @@ export async function confirmAgentAction(
   if (!AGENT_WRITE_ALLOWED.has(name)) {
     return { ok: false, message: "That action can't be done from here." };
   }
-  const res = await executeAction(name, input, { source: "agent", confirmed: true });
+  // THE SWITCHES AT THE YES (0352): a card proposed before a switch moved runs by the switches as
+  // they are now, the same rule the chat used to offer the tool, with the same fields taken off.
+  const { features } = await viewerSwitches();
+  const off = agentToolOff(name, features);
+  if (off) return { ok: false, message: featureOffSentence(off) };
+  const switched = agentInputForSwitches(name, input, features);
+  const res = await executeAction(name, switched.input, { source: "agent", confirmed: true });
   // Money-MOVEMENT would need a WebAuthn tap; none of the agent-allowed set is, but guard.
   if (res.needsStepUp) {
     return { ok: false, message: "That one needs a Face ID tap, which isn't wired into chat yet." };
@@ -225,5 +236,6 @@ export async function confirmAgentAction(
   if (!res.ok) {
     return { ok: false, message: res.error ? `Sorry — ${res.error}` : "That didn't work." };
   }
-  return { ok: true, message: res.speak ?? "Done." };
+  const done = res.speak ?? "Done.";
+  return { ok: true, message: switched.dropped ? `${done} ${switched.dropped}` : done };
 }

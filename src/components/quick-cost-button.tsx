@@ -74,6 +74,7 @@ export function QuickCostButton({
   snapFirst = false,
   onOpen,
   onClose,
+  nortOn = true,
 }: {
   orgId?: string;
   jobId?: string;
@@ -96,6 +97,9 @@ export function QuickCostButton({
   onOpen?: () => void;
   /** Fired when the modal CLOSES — e.g. a host dropdown closes itself then. */
   onClose?: () => void;
+  /** The Nort switch (0352, rule k). The receipt reader works either way; with Nort off it is
+   *  never called Nort. Default on: a mount that doesn't pass it reads as today. */
+  nortOn?: boolean;
 }) {
   const router = useRouter();
   const fileRef = useRef<HTMLInputElement>(null);
@@ -390,7 +394,7 @@ export function QuickCostButton({
       setSavedBillId(fb.id ?? null);
       setWarn(
         typedAmount > 0
-          ? `Nort couldn't read it (${res.error ?? "unreadable"}) — saved your typed ${formatCurrency(typedAmount)} instead, receipt attached.`
+          ? `${nortOn ? "Nort couldn't" : "Couldn't"} read it (${res.error ?? "unreadable"}) — saved your typed ${formatCurrency(typedAmount)} instead, receipt attached.`
           : `Couldn't read a total (${res.error ?? "unreadable"}) — saved as $0. Open the bill to enter the amount.`,
       );
       setCostSaved(true);
@@ -475,7 +479,7 @@ export function QuickCostButton({
     // away believing it was recorded. The reader is the door that gets the number off the paper
     // without typing, so the refusal names it — or, off a job (where Nort can't read), the field.
     if (receipt && !(amount > 0))
-      return setError(canRead ? "Type the amount, or switch to Read the Receipt." : "Type the amount — or pick a job and Nort can read it off the receipt.");
+      return setError(canRead ? "Type the amount, or switch to Read the Receipt." : `Type the amount — or pick a job and ${nortOn ? "Nort can read it" : "it can be read"} off the receipt.`);
     // No job means a business cost, and a business cost goes in a bucket the person picked. A
     // preselected bucket would file every cost nobody looked at under the same word.
     if (!targetJob && !bucket) return setError("Pick the bucket this business cost goes in, or pick a job.");
@@ -614,8 +618,8 @@ export function QuickCostButton({
           />
           <p className="text-xs text-slate-500">
             {useReader
-              ? "Nort reads the supplier, total, lines and date off the paper; change the date to override it. Category and Already Paid are yours."
-              : "Saves the amount you type, with the receipt attached. Nort won't read it."}
+              ? `${nortOn ? "Nort reads" : "Reads"} the supplier, total, lines and date off the paper; change the date to override it. Category and Already Paid are yours.`
+              : `Saves the amount you type, with the receipt attached. ${nortOn ? "Nort won't read it." : "It won't be read."}`}
           </p>
         </div>
       )}
@@ -655,7 +659,7 @@ export function QuickCostButton({
                 reads it (Read the Receipt) or the bill says "From receipt — add supplier"
                 (Type It In), so a greyed, starred field was a demand the form never made. */}
             <Label htmlFor="qc-supplier">Paid to / supplier{receipt ? "" : " *"}</Label>
-            <Input id="qc-supplier" value={supplier} onChange={(e) => setSupplier(e.target.value)} placeholder={useReader ? "Nort reads it off the receipt" : "e.g. CED, Home Depot"} autoFocus={!snapTop} disabled={costSaved || useReader} />
+            <Input id="qc-supplier" value={supplier} onChange={(e) => setSupplier(e.target.value)} placeholder={useReader ? (nortOn ? "Nort reads it off the receipt" : "Read off the receipt") : "e.g. Main Street Supply"} autoFocus={!snapTop} disabled={costSaved || useReader} />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>

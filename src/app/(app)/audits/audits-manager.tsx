@@ -23,7 +23,9 @@ function dueBadge(date: string | null) {
   return { tone: "green" as const, label: `Due ${d}d` };
 }
 
-export function AuditsManager({ items }: { items: ComplianceItem[] }) {
+/** `canEdit` is false for a tech: every write here is requireStaff, so the doors don't render.
+ *  `canAdd` false (its switch is off, 0352): no Log Audit; existing rows keep edit and delete. */
+export function AuditsManager({ items, canEdit, canAdd = canEdit }: { items: ComplianceItem[]; canEdit: boolean; canAdd?: boolean }) {
   const router = useRouter();
   const toast = useToast();
   const [pending, start] = useTransition();
@@ -89,11 +91,13 @@ export function AuditsManager({ items }: { items: ComplianceItem[] }) {
 
   return (
     <div className="space-y-4">
-      <div className="flex justify-end">
-        <Button size="sm" onClick={() => setAdding((a) => !a)}><Plus className="h-3.5 w-3.5" /> Log audit</Button>
-      </div>
+      {canAdd && (
+        <div className="flex justify-end">
+          <Button onClick={() => setAdding((a) => !a)}><Plus className="h-3.5 w-3.5" /> Log Audit</Button>
+        </div>
+      )}
 
-      {adding && (
+      {canAdd && adding && (
         <Card className="space-y-3 p-4">
           {error && <p className="text-sm text-red-600">{error}</p>}
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
@@ -134,10 +138,10 @@ export function AuditsManager({ items }: { items: ComplianceItem[] }) {
                       {c.issued_date ? ` · ${formatDate(c.issued_date)}` : ""}
                     </div>
                   </div>
-                  <div className="flex items-center gap-1">
-                    <button onClick={() => openEdit(c)} className="text-slate-300 hover:text-slate-700" title="Edit"><Pencil className="h-4 w-4" /></button>
-                    <button onClick={() => { if (!confirm("Delete this audit?")) return; start(async () => { const res = await deleteCompliance(c.id); if (!res?.ok) { toast(res?.error ?? "Couldn't delete — try again.", "error"); return; } toast("Audit deleted", "success"); router.refresh(); }); }} className="text-slate-300 hover:text-red-600" title="Delete"><Trash2 className="h-4 w-4" /></button>
-                  </div>
+                  {canEdit && <div className="flex items-center gap-1">
+                    <button type="button" onClick={() => openEdit(c)} className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-slate-300 hover:text-slate-700" title="Edit" aria-label="Edit"><Pencil className="h-4 w-4" /></button>
+                    <button onClick={() => { if (!confirm("Delete this audit?")) return; start(async () => { const res = await deleteCompliance(c.id); if (!res?.ok) { toast(res?.error ?? "Couldn't delete — try again.", "error"); return; } toast("Audit deleted", "success"); router.refresh(); }); }} className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-slate-300 hover:text-red-600" title="Delete" aria-label="Delete"><Trash2 className="h-4 w-4" /></button>
+                  </div>}
                 </div>
                 <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
                   <Badge tone={b.tone}>{b.label}</Badge>

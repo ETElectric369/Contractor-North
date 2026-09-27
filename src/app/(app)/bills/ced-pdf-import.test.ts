@@ -231,7 +231,7 @@ describe("a CED PDF is kept once, and every invoice in it can open it", () => {
     const rows = did("supplier_invoices", "insert")[0].payload as any[];
     expect(rows.map((r) => r.source_file)).toEqual(["invoice_8802-1101363.pdf", "invoice_8802-1101363.pdf"]);
     expect(res.message).toContain("This PDF didn't save, so Open Bill can't show it: invoice_8802-1101363.pdf (the upload failed (Bucket unreachable))");
-    expect(res.message).toContain("Choose it again with Choose CED PDFs to keep the PDF.");
+    expect(res.message).toContain("Choose it again with Choose Supplier PDFs to keep the PDF.");
   });
 
   it("storage saying the object is already there is the answer we wanted: the path is recorded", async () => {
@@ -282,5 +282,114 @@ describe("a CED PDF is kept once, and every invoice in it can open it", () => {
     expect(res.ok).toBe(true);
     expect(did("supplier_invoices", "update")).toEqual([]);
     expect(res.unchanged.map((d) => d.invoiceNumber)).toEqual(["8802-1101363"]);
+  });
+});
+
+describe("already on file is per supplier account, not per number (Wave 0, 0354)", () => {
+  // Timber Creek prints account TR-34426. Another supplier's paper can carry the same bare number.
+  const row = (account: string | null) => ({
+    id: `si-${account ?? "none"}`,
+    invoice_number: "8802-1101363",
+    kind: "invoice",
+    invoice_date: "2026-06-15",
+    job_name_raw: "235 TIMBER CREEK",
+    job_id: null,
+    supplier_account_id: account,
+    merchandise: 149.04,
+    tax: 13.41,
+    shipping: 0,
+    total: 162.45,
+    discount_amount: 1.38,
+    discount_by: "2026-07-10",
+    open_balance: 162.45,
+    closed: false,
+    source_file: PATH,
+  });
+  const ACCOUNTS = [
+    { id: "acct-ced", name: "Consolidated Electrical Distributors", account_number: "TR-34426", branch_code: null },
+    { id: "acct-other", name: "Main Street Supply", account_number: "MS-1", branch_code: null },
+  ];
+
+  it("another supplier's row with the same number is not this paper: this one lands on its own account", async () => {
+    state.client = fakeSupabase(
+      {
+        "supplier_accounts.select": [{ data: ACCOUNTS, error: null }],
+        "supplier_invoices.select": [{ data: [row("acct-other")], error: null }],
+        "supplier_invoice_lines.select": [{ data: [], error: null }],
+        "supplier_invoices.insert": [{ data: [{ id: "si-new", invoice_number: "8802-1101363" }], error: null }],
+        "supplier_invoice_lines.insert": [{ data: Array.from({ length: 10 }, (_, i) => ({ id: `l${i}` })), error: null }],
+      },
+      calls,
+    );
+    const res = await importCedInvoices({ text: TIMBER_CREEK });
+    expect(res.ok).toBe(true);
+    const insert = did("supplier_invoices", "insert")[0];
+    expect(insert.payload).toEqual([expect.objectContaining({ invoice_number: "8802-1101363", supplier_account_id: "acct-ced" })]);
+    expect(did("supplier_invoices", "update")).toEqual([]);
+  });
+
+  it("the paper's own account row is the one on file", async () => {
+    state.client = fakeSupabase(
+      {
+        "supplier_accounts.select": [{ data: ACCOUNTS, error: null }],
+        "supplier_invoices.select": [{ data: [row("acct-other"), row("acct-ced")], error: null }],
+        "supplier_invoice_lines.select": [{ data: [{ supplier_invoice_id: "si-acct-ced" }], error: null }],
+      },
+      calls,
+    );
+    const res = await importCedInvoices({ text: TIMBER_CREEK });
+    expect(res.ok).toBe(true);
+    expect(did("supplier_invoices", "insert")).toEqual([]);
+    expect(res.unchanged.map((d) => d.invoiceNumber)).toEqual(["8802-1101363"]);
+  });
+
+  it("a paper that matches no account finds its one row on the account a person picked: no second copy", async () => {
+    // No account on file carries TR-34426, so the paper can't say whose it is; an open list's Apply
+    // had already filed its row onto Main Street Supply.
+    state.client = fakeSupabase(
+      {
+        "supplier_accounts.select": [{ data: [ACCOUNTS[1]], error: null }],
+        "supplier_invoices.select": [{ data: [row("acct-other")], error: null }],
+        "supplier_invoice_lines.select": [{ data: [{ supplier_invoice_id: "si-acct-other" }], error: null }],
+      },
+      calls,
+    );
+    const res = await importCedInvoices({ text: TIMBER_CREEK });
+    expect(res.ok).toBe(true);
+    expect(did("supplier_invoices", "insert")).toEqual([]);
+    expect(res.unchanged.map((d) => d.invoiceNumber)).toEqual(["8802-1101363"]);
+  });
+
+  it("a paper that matches no account, with two suppliers' rows under its number: neither is assumed", async () => {
+    state.client = fakeSupabase(
+      {
+        "supplier_accounts.select": [{ data: [], error: null }],
+        "supplier_invoices.select": [{ data: [row("acct-other"), row("acct-ced")], error: null }],
+        "supplier_invoice_lines.select": [{ data: [], error: null }],
+        "supplier_invoices.insert": [{ data: [{ id: "si-new", invoice_number: "8802-1101363" }], error: null }],
+        "supplier_invoice_lines.insert": [{ data: Array.from({ length: 10 }, (_, i) => ({ id: `l${i}` })), error: null }],
+      },
+      calls,
+    );
+    const res = await importCedInvoices({ text: TIMBER_CREEK });
+    expect(res.ok).toBe(true);
+    // Neither supplier's row is touched.
+    expect(did("supplier_invoices", "update")).toEqual([]);
+  });
+
+  it("a row on no account yet is adopted onto the paper's account, as before", async () => {
+    state.client = fakeSupabase(
+      {
+        "supplier_accounts.select": [{ data: ACCOUNTS, error: null }],
+        "supplier_invoices.select": [{ data: [row(null)], error: null }],
+        "supplier_invoice_lines.select": [{ data: [{ supplier_invoice_id: "si-none" }], error: null }],
+        "supplier_invoices.update": [{ data: [{ id: "si-none" }], error: null }],
+      },
+      calls,
+    );
+    const res = await importCedInvoices({ text: TIMBER_CREEK });
+    expect(res.ok).toBe(true);
+    expect(did("supplier_invoices", "insert")).toEqual([]);
+    expect(did("supplier_invoices", "update")[0].payload).toEqual({ supplier_account_id: "acct-ced" });
   });
 });

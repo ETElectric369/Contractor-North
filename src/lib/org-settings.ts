@@ -3,6 +3,7 @@
 
 import type { Block } from "@/lib/site-blocks";
 import { withPlace } from "@/lib/doc-place";
+import { ALL_ON, normalizeFeatures, normalizeTradeKey, type FeatureMap, type TradeKey } from "@/lib/features";
 
 export interface OrgSettings {
   // Company
@@ -58,6 +59,12 @@ export interface OrgSettings {
    *  an electrician who'd been instructed to calculate conduit fill per NEC. Empty
    *  falls back to the neutral "contractor". */
   trade_label: string;
+  /** The trade picked at sign-up, as a key (lib/trade-codes TRADE_ORDER); "" = blank or not listed.
+   *  trade_label stays the words. Written only at sign-up and by 0355 (the pin trigger, 0352). */
+  trade: TradeKey | "";
+  /** THE SWITCH BOARD (0352, lib/features). Normalized on read: missing = ON. Written only by the
+   *  owner's set_org_feature; updateOrgSettings refuses it. */
+  features: FeatureMap;
   /** Employee handbook text (simple #/## headings + paragraphs). */
   employee_handbook: string;
 
@@ -338,6 +345,10 @@ export interface OrgSettings {
    *  strips the key, and the guard_owner_money_visibility trigger refuses anyone else at the DB.
    *  Sanitized on read: anything but a real `false` reads as on. */
   office_sees_owner_money: boolean;
+  /** The day this company's books in North begin, "YYYY-MM-DD" (Wave 0; supplier-reconcile.ts
+   *  supplierPaperLine). A supplier paper dated before it never needs a person. Null: the company
+   *  has not named one, and its earliest scanned bill stands in. Sanitized on read. */
+  books_begin: string | null;
 }
 
 export const DEFAULT_SETTINGS: OrgSettings = {
@@ -363,6 +374,8 @@ export const DEFAULT_SETTINGS: OrgSettings = {
   quote_playbook: "",
   estimating_mode: "research",
   trade_label: "",
+  trade: "",
+  features: ALL_ON,
   employee_handbook: "",
   work_day_start: "08:00",
   work_day_end: "17:00",
@@ -441,6 +454,7 @@ export const DEFAULT_SETTINGS: OrgSettings = {
   sms_from_number: "",
   calendly_url: "",
   office_sees_owner_money: true,
+  books_begin: null,
 };
 
 /** Pull a { lat, lng } from a pasted Google Maps URL if one is present. Prefers the place
@@ -563,11 +577,11 @@ export function getOrgSettings(raw: unknown): OrgSettings {
   // the bad one silently gets no invoices and no reminders. One tenant, three tenants broken.
   //
   // SANITIZED ON READ, not on write, which is this project's own doctrine and the only version
-  // that actually closes it: settings/actions.ts has TWO writers, and the second (updateOrgSettings)
-  // merges a caller-supplied patch and strips only custom_domain / public_handle /
-  // lead_inbound_secret — so a write-side whitelist on the first would have left the easier bypass
-  // wide open. Fixing it here also heals any row already poisoned, and covers every writer added
-  // later without anyone remembering to.
+  // that actually closes it: settings has MANY writers (updateOrgSettings merges a caller-supplied
+  // patch and strips only its protected keys; the guarded setters, the switch board, the site
+  // studio and the analytics toggle each write it too), so a write-side whitelist on any one of
+  // them would leave the others open. Fixing it here also heals any row already poisoned, and
+  // covers every writer added later without anyone remembering to.
   if (!isValidTz(merged.timezone)) merged.timezone = DEFAULT_SETTINGS.timezone;
   // SANITIZE THE LEVER FIELDS ON READ (same doctrine as the timezone heal above): the studio
   // write path clamps via site-doc, but settings has other writers — a hostile or drifted
@@ -616,6 +630,18 @@ export function getOrgSettings(raw: unknown): OrgSettings {
   // "false" string or a stray 0 must not quietly hide the card, so only a real boolean false turns
   // it off, and a missing key reads as the default, on.
   merged.office_sees_owner_money = merged.office_sees_owner_money !== false;
+  // THE SWITCH BOARD (0352): missing = ON. The old Job Codes key now READS the switch, so its
+  // readers (timecards, timeclock, planner, the job page) follow it without an edit each; while
+  // the switch is missing, the old checkbox's stored false still reads as off.
+  merged.trade = normalizeTradeKey((stored as { trade?: unknown }).trade);
+  merged.features = normalizeFeatures((stored as { features?: unknown }).features, (stored as { timeclock_job_codes?: unknown }).timeclock_job_codes);
+  merged.timeclock_job_codes = merged.features.job_codes;
+  // A day or nothing: a hand-edited "June 8" must not move a company's line somewhere unnamed.
+  {
+    const b = merged.books_begin;
+    const t = typeof b === "string" && /^\d{4}-\d{2}-\d{2}$/.test(b) ? Date.parse(`${b}T12:00:00Z`) : NaN;
+    merged.books_begin = Number.isFinite(t) && new Date(t).toISOString().slice(0, 10) === b ? b : null;
+  }
   return merged;
 }
 

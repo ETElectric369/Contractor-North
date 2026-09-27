@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { DOCK } from "@/lib/dock";
-import { LESSONS, TOUR, lessonByKey, sayOf, tourIndex, type TourCtx } from "./tour";
+import { LESSONS, TOUR, lessonBlurb, lessonByKey, sayOf, stepWords, tourIndex, type TourCtx } from "./tour";
 
 /**
  * THE SPLIT (cn-v726): TOUR is now ONLY the setup — every step asks something saveSetup writes,
@@ -385,5 +385,41 @@ describe("no claim in the onboarding promises something the code does not do", (
   it("does not describe the estimator appending its lines to the estimate", () => {
     // cn-v716: Generate proposes; nothing lands until the user ticks rows and presses Add.
     expect(SPOKEN).not.toMatch(/marked as measured/i);
+  });
+});
+
+/**
+ * NORT SWITCHED OFF (0352, rule k): the Lessons still run from the cap and the Playbook strip, but
+ * nobody is speaking as Nort. Neutral words when off, the same words when on.
+ */
+describe("with Nort off, a lesson speaks as nobody", () => {
+  const AS_NORT = /\bI\b|\bI['’]|\bme\b|\bmy\b|\bmine\b|\bNort\b/;
+
+  it("no lesson title, line or blurb says 'I' or names Nort", () => {
+    for (const l of LESSONS) {
+      expect(lessonBlurb(l, false), l.key).not.toMatch(AS_NORT);
+      for (const s of l.steps) {
+        const w = stepWords(s, false);
+        expect(w.title, s.key).not.toMatch(AS_NORT);
+        for (const c of [STRANGER, KNOWN]) expect(sayOf(w.say, c), s.key).not.toMatch(AS_NORT);
+      }
+    }
+  });
+
+  it("with Nort on, every lesson reads exactly as it did", () => {
+    for (const l of LESSONS) {
+      expect(lessonBlurb(l, true)).toBe(l.blurb);
+      for (const s of l.steps) expect(stepWords(s, true)).toEqual({ title: s.title, say: s.say });
+    }
+  });
+
+  it("the neutral words keep the promises the Nort words make", () => {
+    const off = LESSONS.flatMap((l) => l.steps).map((s) => sayOf(stepWords(s, false).say, STRANGER)).join(" ").toLowerCase();
+    expect(off).toContain("tick the ones you want");
+    expect(off).toContain("nothing lands until you do");
+    expect(off).toContain("unless you tick the box");
+    expect(off).toContain("you send it");
+    // With Nort off, the walk-through's say-it button is "Just Say It" (tell-nort.tsx).
+    expect(off).toContain("just say it");
   });
 });

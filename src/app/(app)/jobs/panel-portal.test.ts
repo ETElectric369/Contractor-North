@@ -141,15 +141,47 @@ describe("the Customer Page tab's preview", () => {
         },
       ],
       "job_shared_documents.select": [{ data: [], error: null }],
+      // The Panel Map switch (0352), read beside the rest: no switches stored = on.
+      "organizations.select": [{ data: { settings: {} }, error: null }],
     });
     const r = await loadPanelPortal(JOB);
     expect(r.ok).toBe(true);
     if (!r.ok) return;
+    // On: exactly today's answer, no new key.
+    expect("panelMapOn" in r).toBe(false);
     expect(r.panels).toEqual([{ id: "p1", name: "Main Panel", shown: false }]);
     expect(r.preview[0].circuits).toEqual([{ space: 7, half: null, poles: 1, amps: 15, kind: null, room: "Kitchen", label: "Entry Lights", feeds: "Kitchen And Living", isNew: false }]);
     expect(r.circuitMap).toBeNull();
     // Kept circuits only.
     expect(calls.find((c) => c.table === "job_circuits")!.eqs).toEqual(expect.arrayContaining([["state", "kept"]]));
+  });
+});
+
+describe("the panel card and the Panel Map switch (0352)", () => {
+  it("off: the load says so (the card draws nothing), read in this org", async () => {
+    office({
+      "jobs.select": [JOB_ROW],
+      "job_panels.select": [{ data: [], error: null }],
+      "job_circuits.select": [{ data: [], error: null }],
+      "job_shared_documents.select": [{ data: [], error: null }],
+      "organizations.select": [{ data: { settings: { features: { panel_map: false } } }, error: null }],
+    });
+    const r = await loadPanelPortal(JOB);
+    expect(r).toMatchObject({ ok: true, panelMapOn: false });
+    expect(calls.find((c) => c.table === "organizations")!.eqs).toEqual([["id", ORG]]);
+  });
+
+  it("a failed switch read is on: today's card", async () => {
+    office({
+      "jobs.select": [JOB_ROW],
+      "job_panels.select": [{ data: [], error: null }],
+      "job_circuits.select": [{ data: [], error: null }],
+      "job_shared_documents.select": [{ data: [], error: null }],
+      "organizations.select": [{ data: null, error: { message: "boom" } }],
+    });
+    const r = await loadPanelPortal(JOB);
+    expect(r.ok).toBe(true);
+    expect("panelMapOn" in r).toBe(false);
   });
 });
 

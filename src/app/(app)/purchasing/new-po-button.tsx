@@ -35,7 +35,7 @@ export function NewPoButton({
   defaultListId?: string;
 }) {
   const [open, setOpen] = useState(false);
-  const [vendor, setVendor] = useState("CED");
+  const [vendor, setVendor] = useState("");
   const [jobId, setJobId] = useState(defaultJobId ?? "");
   const [listId, setListId] = useState(defaultListId ?? "");
   const [error, setError] = useState<string | null>(null);
@@ -87,7 +87,7 @@ export function NewPoButton({
           <div className="grid grid-cols-2 gap-3">
             <div>
               <Label htmlFor="vendor">Vendor</Label>
-              <Input id="vendor" value={vendor} onChange={(e) => setVendor(e.target.value)} />
+              <Input id="vendor" value={vendor} onChange={(e) => setVendor(e.target.value)} placeholder="e.g. Main Street Supply" />
             </div>
             <div>
               <Label htmlFor="po-job">Job (optional)</Label>

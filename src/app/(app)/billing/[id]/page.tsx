@@ -4,7 +4,7 @@ import { User, FileText, Printer } from "lucide-react";
 import { BackLink } from "@/components/back-link";
 import { canAcceptPayments, connectStateFromOrg } from "@/lib/stripe-connect";
 import { PayNowButton, RecordPaymentButton } from "@/components/settle-up-button";
-import { qboConfigured } from "@/lib/quickbooks";
+import { qboConnected } from "@/lib/quickbooks";
 import { QboInvoiceButton } from "./qbo-button";
 import { createClient } from "@/lib/supabase/server";
 import { firstThatWorks, kitsSelectRungs } from "@/lib/kit-line";
@@ -19,6 +19,7 @@ import { SectionActionsMenu } from "@/components/section-actions-menu";
 import { invoiceSectionTree } from "@/lib/nav-tree";
 import { deleteInvoice, invoiceShareText } from "../actions";
 import { getOrgSettings } from "@/lib/org-settings";
+import { featureOn } from "@/lib/features";
 import { reportError } from "@/lib/observe";
 import { ITEM_OPTIONS_EMBED, ITEM_OPTIONS_UNAVAILABLE } from "@/lib/pricing/item-options";
 import { smsReadiness } from "@/lib/sms";
@@ -119,6 +120,9 @@ export default async function InvoicePage({
   if (itemsErr) throw itemsErr;
   if (paymentsErr) throw paymentsErr;
   const orgSettings = getOrgSettings((org as any)?.settings);
+  // Kits off (the switch board, 0352) hides the kit chips on the line picker, a door; never in
+  // catalog mode, where kits are how the work is priced (rule i, as on the estimate pages).
+  const kitDoors = featureOn(orgSettings.features, "kits") || orgSettings.estimating_mode === "catalog";
   const paymentMethods = orgSettings.payment_methods;
   // The card door is the ORG's Connect state, not merely "the platform has a Stripe key".
   const cardEnabled = canAcceptPayments(connectStateFromOrg((org ?? {}) as any));
@@ -134,7 +138,7 @@ export default async function InvoicePage({
      for that person's own rate. profile_pay is the staff-scoped view (0215/0286): an owner's figure
      is already folded into bill_rate there, so he is never "unrated". */
   const hasCostLines = ((items ?? []) as { import_source?: string | null }[]).some((i) => i.import_source === "costs");
-  const [supplierNames, { data: payRows }, markupRead] = await Promise.all([
+  const [supplierNames, { data: payRows }, markupRead, qboOn] = await Promise.all([
     fetchSupplierNames(supabase),
     supabase.from("profile_pay").select("id, bill_rate"),
     /* WHAT THIS INVOICE IS PRICED AT (Erik, 2026-09-25: "i changed andrew's invoice to 11% ... but
@@ -143,6 +147,8 @@ export default async function InvoicePage({
        and touching the box can never send the customer's usual back over an invoice priced at
        something else. No materials lines yet: nothing to read, the box starts at the usual. */
     (inv as any).job_id && hasCostLines ? readInvoiceMarkup(supabase, inv.id, (inv as any).job_id) : Promise.resolve(null),
+    // Send To QuickBooks shows only when THIS company has connected (qboConnected).
+    qboConnected(String((inv as any).org_id ?? "")),
   ]);
   const usualMarkup = (inv as any).customers?.pricing_levels?.markup_pct ?? orgSettings.material_markup_percent;
   const markupSeed = markupBoxSeed(markupRead ? (markupRead.ok ? markupRead.reading : "unread") : null, usualMarkup);
@@ -346,7 +352,7 @@ export default async function InvoicePage({
               // flags it — otherwise a refund gets computed one way and announced another.
               defaultAmount={invoiceOverpayment(inv.total, inv.amount_paid)}
             />
-            {qboConfigured() && <QboInvoiceButton menuItem id={inv.id} />}
+            {qboOn && <QboInvoiceButton menuItem id={inv.id} />}
           </SectionActionsMenu>
         </div>
       </div>
@@ -398,7 +404,7 @@ export default async function InvoicePage({
         items={(items ?? []) as InvoiceItem[]}
         payments={(payments ?? []) as Payment[]}
         priceItems={(priceItems ?? []) as any}
-        kits={(kits ?? []) as any}
+        kits={(kitDoors ? kits ?? [] : []) as any}
         taxRates={(taxRates ?? []) as any}
         paymentMethods={paymentMethods}
         markupSeed={markupSeed}
@@ -416,6 +422,7 @@ export default async function InvoicePage({
         supplierNames={[...supplierNames]}
         noBillRateIds={noBillRateIds}
         tz={orgSettings.timezone}
+        salesTax={featureOn(orgSettings.features, "sales_tax")}
         customerHoldsOlderCopy={customerHoldsOlderCopy(
           (inv as { sent_at?: string | null }).sent_at,
           (inv as { revised_at?: string | null }).revised_at,

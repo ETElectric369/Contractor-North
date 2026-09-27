@@ -66,6 +66,9 @@ export interface SupplierInvoiceActions {
 /** How many rows a section shows before it says how many more there are. */
 const LIST_LIMIT = 6;
 
+/** "$4.10 off"; a credit memo's negative discount comes back off the credit instead. */
+const offWords = (amount: number) => (amount < 0 ? `${formatCurrency(-amount)} less credit` : `${formatCurrency(amount)} off`);
+
 const KIND_TONE: Record<SupplierInvoiceKind, Tone> = {
   invoice: "slate",
   credit_memo: "green",
@@ -505,7 +508,7 @@ export function SupplierPaperLists({
                 {actions.recordToShelf && actions.shelfLines && !(invoice.samePurchase?.length && actions.tieToBill) && (
                   <div className="mt-2 space-y-1">
                     {companyUseWord(invoice.jobNameRaw)?.shelf && (
-                      <p className="text-xs text-sky-800">CED wrote &ldquo;{invoice.jobNameRaw!.trim()}&rdquo; on it: this reads like shop stock.</p>
+                      <p className="text-xs text-sky-800">{accountName} wrote &ldquo;{invoice.jobNameRaw!.trim()}&rdquo; on it: this reads like shop stock.</p>
                     )}
                     <Button variant="outline" className="h-11 w-full" disabled={pending} onClick={() => openShelf(invoice.id, invoice.invoiceNumber, false)}>
                       {busy === `shelf:${invoice.id}` ? "Reading Its Lines…" : "Record To Shelf"}
@@ -555,7 +558,7 @@ export function SupplierPaperLists({
           {/* The figure and its date are on the supplier's line; the body is the invoices. */}
           {!(claimable.total > 0.005) && (
             <p className="text-xs leading-relaxed text-green-900">
-              Nothing is claimable today. {accountName} takes a cut off every invoice paid by the tenth of the month after you buy.
+              Nothing is claimable today.
             </p>
           )}
           {claimable.rows.length > 0 && (
@@ -571,7 +574,7 @@ export function SupplierPaperLists({
                       {formatCurrency(documentOpenAmount(invoice))} open · pay by {formatDate(reading.by)}
                     </span>
                   </span>
-                  <span className="shrink-0 text-sm font-semibold tabular-nums text-green-700">{formatCurrency(reading.amount)} off</span>
+                  <span className="shrink-0 text-sm font-semibold tabular-nums text-green-700">{offWords(reading.amount)}</span>
                 </li>
               ))}
             </ul>
@@ -630,12 +633,12 @@ export function SupplierPaperLists({
                           </span>
                           {disc.state === "live" && (
                             <span className="block text-xs text-green-700">
-                              {formatCurrency(disc.amount)} off by {formatDate(disc.by)}
+                              {offWords(disc.amount)} by {formatDate(disc.by)}
                             </span>
                           )}
                           {disc.state === "expired" && (
                             <span className="block text-xs text-slate-400">
-                              {formatCurrency(disc.amount)} off expired {formatDate(disc.by)}
+                              {offWords(disc.amount)} expired {formatDate(disc.by)}
                             </span>
                           )}
                         </span>

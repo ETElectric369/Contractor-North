@@ -42,6 +42,8 @@ import {
   type SupplierPaperCard,
 } from "./supplier-reconcile";
 import { supplierPayDue, type SupplierPayDue } from "./supplier-pay-due";
+import { getOrgSettings } from "@/lib/org-settings";
+import { featureOn } from "@/lib/features";
 
 /** The four kinds migration 0273's check constraint allows. A fifth could only arrive from a
  *  later migration, and showing it as an invoice is a far smaller wrong than a crashed page. */
@@ -221,23 +223,40 @@ export interface SupplierPaperFeed {
   /** Papers a person said wait on a credit, not back yet (0346): folded under their supplier on
    *  /bills, never a card. Absent on a feed built by hand (My Day never draws them). */
   waiting?: SupplierPaperCard[];
+  /** false = Shop Stock is switched off (0352): no card offers the shelf. Absent = on, so a feed
+   *  built without the switch is exactly today's. */
+  shopStock?: false;
 }
 
 /**
- * THE DAY HIS BOOKS BEGIN: the line an org named (supplierPaperLine: ET's June 8, "june 8 is
- * good"), or, for an org that has not named one, its earliest scanned bill. A supplier paper dated
- * before it could not have been recorded here, so it never needs a person. /bills and My Day both
- * read this, so a paper cannot be a card on one screen and "from before your books" on the other.
+ * THE DAY A COMPANY'S BOOKS BEGIN: the day it named (settings.books_begin, supplierPaperLine), or,
+ * for a company that has not named one, its earliest scanned bill. A supplier paper dated before it
+ * could not have been recorded here, so it never needs a person. /bills, My Day, Shop Stock and the
+ * job page all read this, so a paper cannot be a card on one screen and "from before your books" on
+ * another. `settings` is the org's settings object (or just `{ books_begin }`, readPaperSettings).
  */
-export function booksBeginOn(orgId: string | null | undefined, liveBills: { bill_date?: string | null }[]): string | null {
+export function booksBeginOn(settings: unknown, liveBills: { bill_date?: string | null }[]): string | null {
   return (
-    supplierPaperLine(orgId) ??
+    supplierPaperLine(settings) ??
     (liveBills ?? [])
       .map((b) => String(b?.bill_date ?? "").slice(0, 10))
       .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d))
       .sort()[0] ??
     null
   );
+}
+
+/**
+ * THE TWO SETTINGS A SUPPLIER-PAPER READ NEEDS: the day the company's books begin and its clock,
+ * read off the company's settings the way every page reads them (getOrgSettings). Org-filtered;
+ * throws on a failed read so the caller says it couldn't check rather than drawing the line in the
+ * wrong place.
+ */
+export async function readPaperSettings(supabase: any, orgId: string): Promise<{ books_begin: string | null; timezone: string }> {
+  const { data, error } = await supabase.from("organizations").select("settings").eq("id", orgId).maybeSingle();
+  if (error) throw error;
+  const settings = getOrgSettings(data && !Array.isArray(data) ? (data as { settings?: unknown }).settings : null);
+  return { books_begin: settings.books_begin, timezone: settings.timezone };
 }
 
 /** The cards, from rows already read. The ONE call My Day and /bills both make. */
@@ -249,18 +268,23 @@ export function supplierPaperFeed(input: {
   accounts: { id: string; name: string | null }[];
   /** The ORG's today: a bill waiting on a credit comes back on its own after 30 days of it. */
   today?: string | null;
+  /** The ORG's timezone: the day a wait was stamped is the company's day. */
+  tz?: string | null;
+  /** The Shop Stock switch (0352). false: the cards don't offer the shelf. Absent = on. */
+  shopStock?: boolean;
 }): SupplierPaperFeed {
   const names = new Map((input.accounts ?? []).map((a) => [String(a.id), shortSupplierName(a.name)]));
   const opts = {
     since: input.since,
     today: input.today ?? null,
+    tz: input.tz ?? null,
     supplierName: (accountId: string | null) => (accountId && names.get(accountId)) || "The Supplier",
   };
   const cards = supplierPaperNeeds(input.rows, input.jobs, opts);
   const waiting = supplierPapersWaitingOnCredit(input.rows, input.jobs, opts);
   // Cancelled jobs are never offered in a picker; the matcher still sees them, as /bills's does.
   const jobs = (input.jobs ?? []).filter((j) => j.status !== "cancelled").map(paperJob);
-  return { cards, jobs, waiting };
+  return { cards, jobs, waiting, ...(input.shopStock === false ? { shopStock: false as const } : {}) };
 }
 
 /**
@@ -280,7 +304,7 @@ export type SupplierPaperHome = "covered" | "taken_back" | "on_card" | "waiting"
 
 export function supplierPaperHomes(
   rows: SupplierInvoiceRow[],
-  opts: { since: string | null; today?: string | null },
+  opts: { since: string | null; today?: string | null; tz?: string | null },
 ): Map<string, SupplierPaperHome> {
   const out = new Map<string, SupplierPaperHome>();
   const cards = new Set(supplierPaperNeeds(rows, [], opts).map((c) => c.invoiceId));
@@ -320,7 +344,7 @@ export function supplierPaperHomes(
  * hold the paper.
  */
 export async function readSupplierPaperHomes(supabase: any, orgId: string, today: string): Promise<Map<string, SupplierPaperHome>> {
-  const [docsRes, billsRes, linksRes, aliasRes] = await Promise.all([
+  const [docsRes, billsRes, linksRes, aliasRes, paperSettings] = await Promise.all([
     readSupplierDocuments(supabase, orgId),
     supabase
       .from("bills")
@@ -330,11 +354,12 @@ export async function readSupplierPaperHomes(supabase: any, orgId: string, today
       .limit(5000),
     supabase.from("bill_supplier_invoices").select("bill_id, supplier_invoice_id").eq("org_id", orgId).limit(5000),
     supabase.from("supplier_aliases").select("alias, supplier_account_id").eq("org_id", orgId).limit(2000),
+    readPaperSettings(supabase, orgId),
   ]);
   for (const r of [docsRes, billsRes, linksRes, aliasRes]) if (r?.error) throw r.error;
   const bills = (billsRes.data ?? []) as any[];
   const { rows } = supplierDocumentRows({ documents: docsRes.data ?? [], bills, links: linksRes.data ?? [], aliasRows: aliasRes.data ?? [] });
-  return supplierPaperHomes(rows, { since: booksBeginOn(orgId, bills), today });
+  return supplierPaperHomes(rows, { since: booksBeginOn(paperSettings, bills), today, tz: paperSettings.timezone });
 }
 
 /** What My Day brings from the supplier's own papers: the cards, and the Pay By lines. */
@@ -365,11 +390,15 @@ export interface SupplierDesk {
  */
 export async function loadSupplierDesk(supabase: any, userId: string, today: string): Promise<SupplierDesk | null> {
   if (!userId) return null;
-  const { data: me, error: meErr } = await supabase.from("profiles").select("org_id").eq("id", userId).maybeSingle();
+  // The company's settings ride on the same read (the embed follows profiles.org_id): the cards
+  // follow the Shop Stock switch (0352) on My Day exactly as on /bills.
+  const { data: me, error: meErr } = await supabase.from("profiles").select("org_id, organizations(settings)").eq("id", userId).maybeSingle();
   const orgId = String((me as { org_id?: string } | null)?.org_id ?? "");
+  const orgRow = (me as { organizations?: { settings?: unknown } | { settings?: unknown }[] | null } | null)?.organizations;
+  const shopStock = featureOn(getOrgSettings((Array.isArray(orgRow) ? orgRow[0] : orgRow)?.settings).features, "shop_stock");
   if (meErr) return { papers: null, payDue: [], failed: { papers: true, pay: true } };
   if (!orgId) return null;
-  const [docsRes, billsRes, linksRes, aliasRes, jobsRes, acctRes, payRes] = await Promise.all([
+  const [docsRes, billsRes, linksRes, aliasRes, jobsRes, acctRes, payRes, settingsRes] = await Promise.all([
     readSupplierDocuments(supabase, orgId),
     supabase
       .from("bills")
@@ -388,6 +417,11 @@ export async function loadSupplierDesk(supabase: any, userId: string, today: str
       .is("voided_at", null)
       .order("paid_on", { ascending: false })
       .limit(500),
+    // The company's own line (books_begin); a lost read is no cards, never the line in the wrong place.
+    readPaperSettings(supabase, orgId).then(
+      (data) => ({ data, error: null }),
+      (error: unknown) => ({ data: null, error }),
+    ),
   ]);
   // The supplier's papers unread: neither the cards nor the pay line can be worked out, and saying
   // nothing would read as "nothing waiting". No supplier documents at all: nothing to bring him.
@@ -395,7 +429,7 @@ export async function loadSupplierDesk(supabase: any, userId: string, today: str
   if (!(docsRes?.data ?? []).length) return null;
   const accounts = acctRes?.error ? [] : ((acctRes?.data ?? []) as any[]);
   // A failed bills, links or aliases read would make covered papers look uncovered: false cards.
-  const papersReadable = !(billsRes?.error || linksRes?.error || aliasRes?.error || jobsRes?.error);
+  const papersReadable = !(billsRes?.error || linksRes?.error || aliasRes?.error || jobsRes?.error || settingsRes?.error);
   const { rows } = supplierDocumentRows({
     documents: docsRes.data ?? [],
     bills: papersReadable ? (billsRes.data ?? []) : [],
@@ -404,11 +438,13 @@ export async function loadSupplierDesk(supabase: any, userId: string, today: str
   });
   const papers = papersReadable
     ? supplierPaperFeed({
-        since: booksBeginOn(orgId, (billsRes.data ?? []) as any[]),
+        since: booksBeginOn(settingsRes.data, (billsRes.data ?? []) as any[]),
         rows,
         jobs: reconcileJobsOf(jobsRes.data ?? []),
         accounts,
         today,
+        tz: settingsRes.data?.timezone ?? null,
+        shopStock,
       })
     : null;
   // The pay line reads only the documents' own money (open balance, discount, its date), none of

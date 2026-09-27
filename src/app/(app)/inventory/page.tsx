@@ -6,7 +6,7 @@ import { isMissingShelf } from "@/lib/job-cost";
 import { PageHeader, EmptyState } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { DEFAULT_TIMEZONE, formatCurrency, sanitizeSearch } from "@/lib/utils";
+import { formatCurrency, sanitizeSearch } from "@/lib/utils";
 import { companyUseWord, proposalOf, storedMarks } from "@/lib/paperwork";
 import { cleanLines } from "@/lib/paper-lines";
 import { waitingForShelf, type WaitingLineIn } from "@/lib/shelf-plan";
@@ -16,6 +16,7 @@ import { reportError } from "@/lib/observe";
 import { todayStrInTz } from "@/lib/tz";
 import { getOrgSettings } from "@/lib/org-settings";
 import { NewItemButton } from "./new-item-button";
+import { featureOn } from "@/lib/features";
 import { ShopStockList, type ShelfItemView, type ShelfLotView, type ShelfMoveView } from "./shop-stock-list";
 
 export const dynamic = "force-dynamic";
@@ -88,7 +89,7 @@ export default async function ShopStockPage({
     // Signal 3: CED documents whose job box names the shelf.
     supabase
       .from("supplier_invoices")
-      .select("id, supplier_account_id, invoice_number, kind, total, job_name_raw")
+      .select("id, supplier_account_id, invoice_number, kind, total, job_name_raw, supplier_accounts(name)")
       .eq("org_id", orgId)
       .eq("kind", "invoice")
       .or("job_name_raw.ilike.%stock%,job_name_raw.ilike.%inventory%")
@@ -289,7 +290,7 @@ export default async function ShopStockPage({
   // Record To Shelf is offered only where its fold holds the paper. A paper a bill covers by its
   // number, or a credit memo took back, is not waiting for the shelf at all. A failed read says so.
   const homes = stockCandidates.length
-    ? await readSupplierPaperHomes(supabase, orgId, todayStrInTz(DEFAULT_TIMEZONE)).catch((e: unknown) => {
+    ? await readSupplierPaperHomes(supabase, orgId, todayStrInTz(orgTz)).catch((e: unknown) => {
         reportError("inventory.stock-paper-homes", e, { orgId });
         return null;
       })
@@ -304,6 +305,7 @@ export default async function ShopStockPage({
         total: d.total,
         words: String(d.job_name_raw ?? "").trim(),
         accountId: d.supplier_account_id ? String(d.supplier_account_id) : null,
+        supplier: d.supplier_accounts?.name ?? null,
         home,
       },
     ];
@@ -319,6 +321,8 @@ export default async function ShopStockPage({
 
   const linkClass = "inline-flex min-h-[44px] items-center rounded-lg border px-4 text-sm font-medium transition-colors";
 
+  // SHOP STOCK OFF (0352): the shelf still opens from a link (and from Needs You's short-stock
+  // card), with the shell's Off line on top. Nothing here is hidden or changed: it is the record.
   return (
     <div>
       <PageHeader title="Shop Stock" description="What's on the shelf, what it cost, where every roll came from and where every piece went.">
@@ -328,7 +332,8 @@ export default async function ShopStockPage({
         >
           Export For Accountant
         </Link>
-        <NewItemButton />
+        {/* Shop Stock off (the switch board, 0352): no New Item; the shelf stays readable below. */}
+        {featureOn(getOrgSettings((orgRow.data as { settings?: unknown } | null)?.settings).features, "shop_stock") && <NewItemButton />}
       </PageHeader>
 
       {itemViews.length > 0 && (
@@ -392,7 +397,7 @@ export default async function ShopStockPage({
               ? "Everything with a reorder point set is above it."
               : q
                 ? "Try a different search."
-                : "Put the rest of a roll on the shelf from a job's receipt (Bills), file a STOCK ticket to Shop Stock from the tray, or Record To Shelf on a CED document. New Item is for something already on the shelf with no receipt here."
+                : "Put the rest of a roll on the shelf from a job's receipt (Bills), file a STOCK ticket to Shop Stock from the tray, or Record To Shelf on a supplier document. New Item is for something already on the shelf with no receipt here."
           }
         >
           {(lowOnly || q) && (

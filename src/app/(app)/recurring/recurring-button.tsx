@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { NewCustomerInline } from "@/components/new-customer-inline";
 import { useRouter } from "next/navigation";
+import { taxFieldShown } from "@/lib/sales-tax-switch";
 import { Plus, Pencil, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Modal, ModalActions } from "@/components/ui/modal";
@@ -33,9 +34,17 @@ export interface RecurringValue {
 export function RecurringButton({
   customers,
   template,
+  salesTax = true,
+  invoiceKind = true,
 }: {
   customers: CustomerOpt[];
   template?: RecurringValue;
+  /** SALES TAX OFF (the switch board, rule g): a repeat invoice with no tax draws no tax field (the
+   *  save writes 0, as a blank field does). One that already carries tax keeps its field. */
+  salesTax?: boolean;
+  /** RECURRING BILLING OFF (0352): no "Recurring invoice" type to pick, since saveRecurring would
+   *  refuse a new one. A template that already is an invoice keeps its type (its edits still save). */
+  invoiceKind?: boolean;
 }) {
   const router = useRouter();
   const editing = !!template;
@@ -118,7 +127,7 @@ export function RecurringButton({
               <Label htmlFor="r-kind">Type</Label>
               <Select id="r-kind" name="kind" value={kind} onChange={(e) => setKind(e.target.value)}>
                 <option value="job">Recurring job</option>
-                <option value="invoice">Recurring invoice</option>
+                {(invoiceKind || template?.kind === "invoice") && <option value="invoice">Recurring invoice</option>}
                 <option value="expense">Recurring expense</option>
               </Select>
             </div>
@@ -191,10 +200,12 @@ export function RecurringButton({
                 </div>
                 <input type="hidden" name="line_items" value={JSON.stringify(items)} />
               </div>
-              <div className="w-32">
-                <Label htmlFor="r-itax">Tax (%)</Label>
-                <Input id="r-itax" name="tax_pct" type="number" step="0.001" min="0" defaultValue={(template as { tax_rate?: number } | undefined)?.tax_rate ? Number((template as { tax_rate?: number }).tax_rate) * 100 : ""} placeholder="0" />
-              </div>
+              {taxFieldShown(salesTax, template) && (
+                <div className="w-32">
+                  <Label htmlFor="r-itax">Tax (%)</Label>
+                  <Input id="r-itax" name="tax_pct" type="number" step="0.001" min="0" defaultValue={(template as { tax_rate?: number } | undefined)?.tax_rate ? Number((template as { tax_rate?: number }).tax_rate) * 100 : ""} placeholder="0" />
+                </div>
+              )}
               <label className="flex items-start gap-2 text-sm text-slate-700">
                 <input type="checkbox" name="auto_send" defaultChecked={(template as { auto_send?: boolean } | undefined)?.auto_send ?? false} className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand" />
                 <span>Email it to the customer automatically each time<span className="block text-xs text-slate-500">Off = generated as a draft for you to review and send.</span></span>

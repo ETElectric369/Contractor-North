@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { isStaffRole } from "@/lib/actions/perms";
 import { BackLink } from "@/components/back-link";
 import { Card, CardContent } from "@/components/ui/card";
 import { formatDateTime } from "@/lib/utils";
@@ -11,6 +12,7 @@ import { DeleteSubmissionButton } from "./delete-submission-button";
 import type { FormField } from "../actions";
 import { jobLabel } from "@/lib/schedule-options";
 import { parsePlaybook } from "@/lib/playbook/parse";
+import { FeatureOffLineFor } from "@/components/feature-off-line-for";
 
 export const dynamic = "force-dynamic";
 
@@ -27,6 +29,12 @@ export default async function FormDetailPage({
 }) {
   const { id } = await params;
   const supabase = await createClient();
+  // A tech fills this form (0195); editing, deleting and the Playbook link are staff-only.
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  const { data: me } = await supabase.from("profiles").select("role").eq("id", user?.id ?? "").maybeSingle();
+  const isStaff = isStaffRole(me?.role);
 
   const { data: form } = await supabase
     .from("forms")
@@ -59,6 +67,11 @@ export default async function FormDetailPage({
   return (
     <div className="mx-auto max-w-4xl">
       <BackLink fallback="/forms" fallbackLabel="Back to Forms" />
+      {/* Safety Log's Off line (the switch board, 0352) belongs on a crew checklist only: a
+          walk-through sheet is Leads', and the website's intake form is a public door. */}
+      {!(form as { is_inspection?: boolean | null }).is_inspection && !(form as { is_public_intake?: boolean | null }).is_public_intake && (
+        <FeatureOffLineFor feature="safety_log" />
+      )}
 
       <div className="mb-6 flex items-start justify-between gap-4">
         <div>
@@ -67,7 +80,7 @@ export default async function FormDetailPage({
             <p className="mt-1 text-sm text-slate-500">{form.description}</p>
           )}
         </div>
-        <div className="flex items-center gap-1">
+        {isStaff && <div className="flex items-center gap-1">
           {/* THE BUTTON STAYS; THE FIELDS HALF OF IT DOES NOT.
               Hiding the whole editor on a playbook-backed form was my first pass and it took the
               only UI that can RENAME a form with it — and every form here is playbook-backed the
@@ -83,13 +96,13 @@ export default async function FormDetailPage({
             fieldsLocked={isPlaybook}
           />
           <DeleteFormButton formId={form.id} />
-        </div>
+        </div>}
       </div>
 
       {/* A SHEET EDITOR THAT SILENTLY DOES NOTHING IS WORSE THAN NO EDITOR. Once this form has a
           playbook (0179) the inspector asks from the playbook, so editing the fields here would
           look like it worked and change nothing on a job site. Say where the real edit lives. */}
-      {isPlaybook ? (
+      {isStaff && isPlaybook ? (
         <div className="mb-6 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">
           <span>
             {(form as { is_public_intake?: boolean }).is_public_intake
@@ -132,7 +145,7 @@ export default async function FormDetailPage({
                     <span>{s.profiles?.full_name ?? "—"}</span>
                     <div className="flex items-center gap-1.5">
                       <span>{formatDateTime(s.created_at)}</span>
-                      <DeleteSubmissionButton submissionId={s.id} formId={form.id} />
+                      {isStaff && <DeleteSubmissionButton submissionId={s.id} formId={form.id} />}
                     </div>
                   </div>
                   {s.jobs?.name && (

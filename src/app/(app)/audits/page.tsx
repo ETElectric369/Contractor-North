@@ -1,4 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
+import { isStaffRole } from "@/lib/actions/perms";
+import { featureOn } from "@/lib/features";
+import { viewerSwitches } from "@/lib/viewer-switches";
 import { PageHeader } from "@/components/page-header";
 import { AuditsManager } from "./audits-manager";
 import { AUDIT_TYPES } from "@/lib/compliance-types";
@@ -7,6 +10,15 @@ export const dynamic = "force-dynamic";
 
 export default async function AuditsPage() {
   const supabase = await createClient();
+  // A tech reads; every write here is requireStaff, so its doors don't render for him.
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  const { data: me } = await supabase.from("profiles").select("role").eq("id", user?.id ?? "").maybeSingle();
+  const canEdit = isStaffRole(me?.role);
+  // The switch off (0352): the page still opens under the shell's Off line, and existing rows keep
+  // edit and delete, but nothing new is added here until it's back on.
+  const canAdd = canEdit && featureOn((await viewerSwitches()).features, "licenses");
   // Audits ride on the shared compliance tracker (compliance_items), filtered to audit types.
   const { data: items } = await supabase
     .from("compliance_items")
@@ -20,7 +32,7 @@ export default async function AuditsPage() {
         title="Audits"
         description="Safety, OSHA, insurance & financial audits — findings, follow-up dates, nothing missed."
       />
-      <AuditsManager items={(items ?? []) as any} />
+      <AuditsManager items={(items ?? []) as any} canEdit={canEdit} canAdd={canAdd} />
     </div>
   );
 }

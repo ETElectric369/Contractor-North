@@ -48,7 +48,9 @@ export async function createPurchaseOrder(input: {
   const { data: po, error } = await supabase
     .from("purchase_orders")
     .insert({
-      vendor: input.vendor.trim() || "CED",
+      // The vendor the person typed, or none (Wave 0): a blank used to become "CED", so a deck
+      // builder's PO named an electrical distributor. 0354 makes the column default '' too.
+      vendor: input.vendor.trim(),
       job_id: input.job_id,
       status: "draft",
       created_by: user.id,
@@ -184,7 +186,7 @@ export async function updatePurchaseOrder(
   if (!user) return { ok: false, error: "Not signed in." };
 
   const clean: Record<string, unknown> = {};
-  if (patch.vendor !== undefined) clean.vendor = patch.vendor.trim() || "CED";
+  if (patch.vendor !== undefined) clean.vendor = patch.vendor.trim();
   if (patch.description !== undefined) clean.description = patch.description?.trim() || null;
   if (patch.job_id !== undefined) {
     // Only accept a job the caller can actually see (RLS-scoped); otherwise clear it.

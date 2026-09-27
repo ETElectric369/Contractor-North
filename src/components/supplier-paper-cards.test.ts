@@ -74,6 +74,14 @@ describe("a supplier paper card", () => {
     expect(html).toContain("Only you know which");
   });
 
+  it("Shop Stock switched off (0352): the feed says so and the card doesn't offer the shelf; on is today's card", () => {
+    const feed = { cards: [base], jobs: [J011] };
+    const card = (f: Record<string, unknown>) => renderToStaticMarkup(createElement(SupplierPaperCards, { feed: f as any, emptyLabel: "Nothing waiting." }));
+    expect(card(feed)).toBe(render([base]));
+    const off = card({ ...feed, shopStock: false });
+    expect(buttons(off)).toEqual(["Put It On J-011", "Another Job", "Business Cost"]);
+  });
+
   it("says Pick A Job when there is nothing to go on", () => {
     const html = render([{ ...base, said: null, verdict: "blank", suggestion: null }]);
     expect(html).toContain("CED Sent A Bill · $301.81 · No Job Name On It");

@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { Zap, Building2 } from "lucide-react";
+import { Building2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { createOrganization, acceptInvitation } from "./actions";
 import { Button } from "@/components/ui/button";
@@ -50,9 +50,9 @@ export default async function OnboardingPage({
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-brand to-brand-dark px-4">
       <div className="w-full max-w-md">
         <div className="mb-8 text-center text-white">
-          <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl bg-white/15 backdrop-blur">
-            <Zap className="h-7 w-7" />
-          </div>
+          {/* North's own mark, the one asset the login tile uses: never a trade's icon (Wave 0). */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/icon-192.png" alt="Contractor North" className="mx-auto mb-3 h-14 w-14 rounded-2xl shadow-lg ring-1 ring-white/15" />
           <h1 className="text-2xl font-bold tracking-tight">Welcome to Contractor North</h1>
           {/* AN INVITEE IS NOT STARTING A COMPANY. This said "Let's set up your company" to
               everyone — including the person who just clicked Join-my-crew in an invite email —
@@ -87,7 +87,7 @@ export default async function OnboardingPage({
                 className="mb-5 rounded-xl border border-brand/30 bg-brand-light/50 p-4"
               >
                 <div className="mb-1 flex items-center gap-2 text-sm font-semibold text-slate-900">
-                  <Building2 className="h-4 w-4 text-brand" /> You've been invited
+                  <Building2 className="h-4 w-4 text-brand" /> You&apos;ve been invited
                 </div>
                 <p className="text-sm text-slate-600">
                   Join <span className="font-semibold">{invite.org_name}</span> as{" "}
@@ -119,17 +119,26 @@ export default async function OnboardingPage({
                 // "Company name" is what makes starting a rival empty org the path of least
                 // resistance for a tech who just wanted to join the crew.
                 autoFocus={!invite}
-                placeholder="e.g. Tahoe Deck"
+                placeholder="e.g. Main Street Builders"
               />
             </div>
             <div>
               <Label htmlFor="trade">Your trade</Label>
-              <Select id="trade" name="trade" defaultValue="general">
+              {/* No default: a pre-picked "General contractor" handed everybody who didn't touch it
+                  the builder's switches. The trade is kept now (0352) and sets which features
+                  start on, so it is asked for, with a real way out for a trade that isn't listed. */}
+              <Select id="trade" name="trade" defaultValue="" required>
+                <option value="" disabled>
+                  Pick Your Trade
+                </option>
                 {TRADE_ORDER.map((t) => (
                   <option key={t} value={t}>{TRADE_PRESETS[t].label}</option>
                 ))}
+                <option value="other">Other / Not Listed</option>
               </Select>
-              <p className="mt-1 text-xs text-slate-500">Sets your starter job codes — you can change them anytime in Settings.</p>
+              <p className="mt-1 text-xs text-slate-500">
+                Sets your starter job codes and which features start on. You can change both anytime in Settings.
+              </p>
             </div>
             <Button type="submit" size="lg" className="w-full">
               Create Company & Continue
@@ -137,9 +146,6 @@ export default async function OnboardingPage({
           </form>
         </div>
 
-        <p className="mt-6 text-center text-xs text-white/60">
-          Service · Integrity · Reliability
-        </p>
       </div>
     </div>
   );

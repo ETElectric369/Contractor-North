@@ -183,13 +183,19 @@ function toIsoDate(raw: string | null): string | null {
 }
 
 /**
- * THE 10TH OF THE MONTH FOLLOWING PURCHASE, worked out from the invoice date rather than trusted
- * from the page, because CED prints the deadline in words and only the amount in figures. This is
- * the date that makes the discount real: $29.62 of his is still claimable by 10 October and
- * $25.99 expired unclaimed, and he paid $60.42 of interest in between.
+ * THE DAY OF THE MONTH FOLLOWING PURCHASE THE PAPER NAMES ("...IF PAID BY THE 10TH OF THE MONTH
+ * FOLLOWING PURCHASE"), worked out from the invoice date, because the deadline is printed in words
+ * and only the amount in figures. This is the date that makes the discount real: $29.62 of his
+ * was still claimable by 10 October and $25.99 expired unclaimed, and he paid $60.42 of interest
+ * in between.
+ *
+ * THE PAPER'S DAY, NOT CED'S (Wave 0). This always said the 10th, whatever the paper said, so a
+ * supplier whose terms read "BY THE 15TH" got a wrong claim-by date on money. No day in the
+ * words (or terms like "WITHIN 10 DAYS"): no date, and the discount still shows, undated. A day
+ * past the month's end is that month's last day.
  */
-function tenthOfFollowingMonth(invoiceDate: string | null): string | null {
-  if (!invoiceDate) return null;
+function dayOfFollowingMonth(invoiceDate: string | null, day: number | null): string | null {
+  if (!invoiceDate || !day || day < 1 || day > 31) return null;
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(invoiceDate);
   if (!m) return null;
   let year = Number(m[1]);
@@ -198,7 +204,8 @@ function tenthOfFollowingMonth(invoiceDate: string | null): string | null {
     month = 1;
     year += 1;
   }
-  return `${year}-${String(month).padStart(2, "0")}-10`;
+  const last = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  return `${year}-${String(month).padStart(2, "0")}-${String(Math.min(day, last)).padStart(2, "0")}`;
 }
 
 /** The text as lines, with the blanks dropped and every run of spaces squeezed. Keeping the line
@@ -569,7 +576,7 @@ function readLines(doc: string[], itemsFrom: number, totalsAt: number): CedInvoi
   const price = findLabel(doc, H_PRICE, qtyShipped?.after ?? itemsFrom);
   const extension = findLabel(doc, H_EXTENSION, price?.after ?? itemsFrom);
   if (!productCode || !qtyShipped || !price || !extension) {
-    return { error: "the line item columns are not laid out the way a CED invoice lays them out" };
+    return { error: "the line item columns are not laid out the way this reader expects a supplier invoice" };
   }
 
   const orderedTokens = tokensOf(doc, qtyOrdered.after, productCode.start).filter((t) => NUMBER.test(t));
@@ -679,7 +686,7 @@ function refuseStatement(doc: string[]): CedParseResult {
   return {
     ok: false,
     invoiceNumber: null,
-    error: `A CED monthly statement${which} is a summary of the account, not an invoice, so nothing was read from it. Every invoice it lists has its own document in the portal, and those are what to paste.`,
+    error: `A supplier's monthly statement${which} is a summary of the account, not an invoice, so nothing was read from it. Every invoice it lists has its own document in the portal, and those are what to paste.`,
   };
 }
 
@@ -843,6 +850,10 @@ function readDocument(pages: string[][], invoiceNumber: string): CedParseResult 
   // matched against the flattened text rather than a line.
   const discountHit = /CASH\s+DISCOUNT\s+(-?[\d,]+\.\d{2})\s+OFF\s+TOTAL\s+DUE/i.exec(flat);
   const discountAmount = discountHit ? toMoney(discountHit[1]) : null;
+  // The day, from the same sentence: "...IF PAID BY THE 10TH OF THE MONTH FOLLOWING".
+  const discountDayHit =
+    /CASH\s+DISCOUNT\s+-?[\d,]+\.\d{2}\s+OFF\s+TOTAL\s+DUE\s+IF\s+PAID\s+BY\s+THE\s+(\d{1,2})(?:ST|ND|RD|TH)\s+OF\s+THE\s+MONTH\s+FOLLOWING/i.exec(flat);
+  const discountDay = discountDayHit ? Number(discountDayHit[1]) : null;
 
   // EVERY PAGE'S ITEM TABLE, READ ON ITS OWN AND THEN JOINED. A two-page invoice repeats its
   // header, splits its rows across both pages and prints its totals only on the last - so the
@@ -891,7 +902,7 @@ function readDocument(pages: string[][], invoiceNumber: string): CedParseResult 
       shipping,
       total,
       discountAmount,
-      discountBy: discountAmount === null ? null : tenthOfFollowingMonth(invoiceDate),
+      discountBy: discountAmount === null ? null : dayOfFollowingMonth(invoiceDate, discountDay),
       // "***PAID IN FULL*** INVOICE NO." - CED stamps it across its own header, and the supplier
       // is the only voice that can say it. Nine of his bills were settled weeks before the app
       // stopped calling them owed.
@@ -928,7 +939,7 @@ export function parseCedDocuments(text: string): CedParseResult[] {
 export function parseCedInvoice(text: string): CedParseResult {
   const all = parseCedDocuments(text);
   if (!all.length) {
-    return { ok: false, invoiceNumber: null, error: "no CED invoice number was found in that text" };
+    return { ok: false, invoiceNumber: null, error: "no supplier invoice number was found in that text" };
   }
   if (all.length > 1) {
     const numbers = all.map((r) => (r.ok ? r.invoice.invoiceNumber : r.invoiceNumber ?? "?"));

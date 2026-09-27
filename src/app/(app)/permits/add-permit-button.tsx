@@ -74,7 +74,7 @@ export function AddPermitButton({ jobs }: { jobs: JobOpt[] }) {
           <div className="grid grid-cols-2 gap-3">
             <div><Label htmlFor="ap-type">Type</Label><Select id="ap-type" value={type} onChange={(e) => setType(e.target.value)}>{TYPES.map((t) => <option key={t} value={t}>{t}</option>)}</Select></div>
             <div><Label htmlFor="ap-num">Permit #</Label><Input id="ap-num" value={num} onChange={(e) => setNum(e.target.value)} /></div>
-            <div><Label htmlFor="ap-auth">Authority</Label><Input id="ap-auth" value={authority} onChange={(e) => setAuthority(e.target.value)} placeholder="e.g. Washoe County" /></div>
+            <div><Label htmlFor="ap-auth">Authority</Label><Input id="ap-auth" value={authority} onChange={(e) => setAuthority(e.target.value)} placeholder="e.g. County Building Department" /></div>
             <div><Label htmlFor="ap-status">Status</Label><Select id="ap-status" value={status} onChange={(e) => setStatus(e.target.value)}>{STATUSES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</Select></div>
             <div><Label htmlFor="ap-applied">Applied date</Label><Input id="ap-applied" type="date" value={applied} onChange={(e) => setApplied(e.target.value)} /></div>
             <div><Label htmlFor="ap-insp">Inspection date</Label><Input id="ap-insp" type="date" value={inspDate} onChange={(e) => setInspDate(e.target.value)} /></div>

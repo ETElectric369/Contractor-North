@@ -95,8 +95,7 @@ export function AddEmployeeButton({ configured }: { configured: boolean }) {
           <div className="space-y-4">
             {!configured && (
               <div className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
-                This needs <code>SUPABASE_SERVICE_ROLE_KEY</code> set in Vercel (Settings → Environment
-                Variables, Production). Until then, use the email invite above.
+                Adding someone with a password isn&apos;t available yet. Use the email invite above.
               </div>
             )}
             {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}

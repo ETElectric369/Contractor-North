@@ -15,6 +15,10 @@ export function portalGate(access: PortalAccess, token: string): React.ReactNode
       return null;
     case "missing":
       return notFound();
+    case "portal_off":
+      // The company switched its Customer Portal off (0352, rule f). Not "turned off, ask for a new
+      // one": this same link works again the moment the switch is back on.
+      return <PortalNotice title="This page is off for now.">Ask your contractor.</PortalNotice>;
     case "off":
       return <PortalTurnedOff orgName={access.orgName} />;
     case "office_ended":
@@ -51,6 +55,7 @@ export function portalGate(access: PortalAccess, token: string): React.ReactNode
 /** The page title while the door is shut: never a job's or a customer's name. */
 export function gateTitle(access: PortalAccess): string | null {
   if (access.kind === "off") return `${access.orgName ? `${access.orgName} — ` : ""}Link turned off`;
+  if (access.kind === "portal_off") return `${access.orgName ? `${access.orgName} — ` : ""}Page off`;
   if (access.kind === "gate") return `${access.org.name} — Sign in`;
   if (access.kind === "office_ended") return `${access.orgName ? `${access.orgName} — ` : ""}Look ended`;
   if (access.kind === "in") return null;

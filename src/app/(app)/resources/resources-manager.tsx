@@ -38,7 +38,8 @@ function withProtocol(url: string) {
   return /^https?:\/\//i.test(url) ? url : `https://${url}`;
 }
 
-export function ResourcesManager({ resources }: { resources: Resource[] }) {
+/** `canEdit` is false for a tech: add, edit and delete are staff-only, so they don't render. */
+export function ResourcesManager({ resources, canEdit }: { resources: Resource[]; canEdit: boolean }) {
   const router = useRouter();
   const toast = useToast();
   const [pending, start] = useTransition();
@@ -118,20 +119,20 @@ export function ResourcesManager({ resources }: { resources: Resource[] }) {
           <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
           <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search contacts…" className="pl-9" />
         </div>
-        <Button size="sm" onClick={() => { if (adding) { closeForm(); } else { setEditingId(null); setError(null); resetForm(); setAdding(true); } }}><Plus className="h-3.5 w-3.5" /> Add Contact</Button>
+        {canEdit && <Button onClick={() => { if (adding) { closeForm(); } else { setEditingId(null); setError(null); resetForm(); setAdding(true); } }}><Plus className="h-3.5 w-3.5" /> Add Contact</Button>}
       </div>
 
-      {(adding || editingId) && (
+      {canEdit && (adding || editingId) && (
         <Card className="space-y-3 p-4">
           <div className="text-sm font-semibold text-slate-700">{editingId ? "Edit contact" : "New contact"}</div>
           {error && <p className="text-sm text-red-600">{error}</p>}
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-            <div className="col-span-2 sm:col-span-1"><Label htmlFor="r-name">Name *</Label><Input id="r-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Washoe County Building" /></div>
+            <div className="col-span-2 sm:col-span-1"><Label htmlFor="r-name">Name *</Label><Input id="r-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. County Building Department" /></div>
             <div><Label htmlFor="r-cat">Category</Label><Select id="r-cat" value={category} onChange={(e) => setCategory(e.target.value)}>{CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}</Select></div>
             <div><Label htmlFor="r-contact">Contact person</Label><Input id="r-contact" value={contact} onChange={(e) => setContact(e.target.value)} /></div>
             <div><Label htmlFor="r-phone">Phone</Label><Input id="r-phone" value={phone} onChange={(e) => setPhone(e.target.value)} /></div>
             <div><Label htmlFor="r-email">Email</Label><Input id="r-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} /></div>
-            <div className="col-span-2"><Label htmlFor="r-web">Website / portal</Label><Input id="r-web" value={website} onChange={(e) => setWebsite(e.target.value)} placeholder="e.g. washoecounty.gov/building" /></div>
+            <div className="col-span-2"><Label htmlFor="r-web">Website / portal</Label><Input id="r-web" value={website} onChange={(e) => setWebsite(e.target.value)} placeholder="e.g. yourcounty.gov/building" /></div>
             <div className="col-span-2 sm:col-span-1"><Label htmlFor="r-addr">Address</Label><Input id="r-addr" value={address} onChange={(e) => setAddress(e.target.value)} /></div>
           </div>
           <div><Label htmlFor="r-notes">Notes</Label><Textarea id="r-notes" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Hours, account #, inspection request line, etc." /></div>
@@ -146,7 +147,7 @@ export function ResourcesManager({ resources }: { resources: Resource[] }) {
         <EmptyState
           icon={MapPin}
           title="No contacts yet"
-          description="Add your building department, inspectors, utilities (e.g. NV Energy), and permit portals."
+          description={canEdit ? "Add your building department, inspectors, utilities, and permit portals." : "The office adds these."}
         />
       ) : (
         groups.map(([cat, list]) => (
@@ -163,10 +164,10 @@ export function ResourcesManager({ resources }: { resources: Resource[] }) {
                       <div className="font-medium text-slate-900">{r.name}</div>
                       {r.contact_name && <div className="text-xs text-slate-400">{r.contact_name}</div>}
                     </div>
-                    <div className="flex shrink-0 items-center gap-2">
-                      <button onClick={() => startEdit(r)} className="text-slate-300 hover:text-brand" title="Edit"><Pencil className="h-4 w-4" /></button>
-                      <button onClick={() => { if (confirm(`Delete ${r.name}?`)) start(async () => { const res = await deleteResource(r.id); if (!res?.ok) { toast(res?.error ?? "Couldn't delete — try again.", "error"); return; } toast("Contact deleted", "success"); router.refresh(); }); }} className="text-slate-300 hover:text-red-600" title="Delete"><Trash2 className="h-4 w-4" /></button>
-                    </div>
+                    {canEdit && <div className="flex shrink-0 items-center gap-2">
+                      <button type="button" onClick={() => startEdit(r)} className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-slate-300 hover:text-brand" title="Edit" aria-label="Edit"><Pencil className="h-4 w-4" /></button>
+                      <button onClick={() => { if (confirm(`Delete ${r.name}?`)) start(async () => { const res = await deleteResource(r.id); if (!res?.ok) { toast(res?.error ?? "Couldn't delete — try again.", "error"); return; } toast("Contact deleted", "success"); router.refresh(); }); }} className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-slate-300 hover:text-red-600" title="Delete" aria-label="Delete"><Trash2 className="h-4 w-4" /></button>
+                    </div>}
                   </div>
                   <div className="mt-2 space-y-1 text-sm">
                     {r.phone && <a href={`tel:${r.phone}`} className="flex items-center gap-2 text-slate-600 hover:text-brand"><Phone className="h-3.5 w-3.5 text-slate-400" /> {r.phone}</a>}

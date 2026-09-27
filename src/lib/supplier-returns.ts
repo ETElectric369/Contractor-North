@@ -1,4 +1,5 @@
 import { formatCurrency } from "@/lib/utils";
+import { shortSupplierName } from "@/lib/supplier-name";
 import {
   PART_USED_SUFFIX,
   billItemisation,
@@ -328,8 +329,6 @@ export function returnsSummaryParts(credited: ReturnOutcome[], notCredited: Retu
    roll it came off, never to a job.
    ════════════════════════════════════════════════════════════════════════════════════════════ */
 
-const CED_WORDS = /\bced\b|consolidated\s+elec|contractors\s+electrical/i;
-
 /** A supplier's credit filed to the shop shelf: below $0, on no job, and on the shelf. The one kind
  *  of return that never reaches a customer's invoice. */
 export function isShelfCredit(bill: { amount?: unknown; job_id?: unknown; on_shelf?: unknown } | null | undefined): boolean {
@@ -343,9 +342,12 @@ export function canTieToShelfReturn(bill: { amount?: unknown; job_id?: unknown; 
   return !!bill && isReturnBill(bill.amount) && !bill.job_id && !bill.superseded_by_bill_id;
 }
 
-/** "Return To CED" for CED's rolls (the supplier Erik returns to), "Return To Supplier" otherwise. */
+/** "Return To CED": the supplier named on the roll's ticket, said short (shortSupplierName), for
+ *  every supplier; "Return To Supplier" for a roll with no supplier on it (Wave 0: a name regex
+ *  hard-coded one supplier and folded a different company into it). */
 export function returnDoorLabel(supplier: string | null | undefined): string {
-  return CED_WORDS.test(String(supplier ?? "")) ? "Return To CED" : "Return To Supplier";
+  const name = String(supplier ?? "").trim();
+  return name ? `Return To ${shortSupplierName(name)}` : "Return To Supplier";
 }
 
 export type ShelfReturnMoney = {
@@ -374,7 +376,7 @@ export function shelfReturnMoney(input: {
   creditAmount: number | null;
   otherReturnsCost?: number;
 }): ShelfReturnMoney {
-  const who = CED_WORDS.test(String(input.supplier ?? "")) ? "CED" : String(input.supplier ?? "").trim() || "the supplier";
+  const who = String(input.supplier ?? "").trim() ? shortSupplierName(input.supplier) : "the supplier";
   const qty = Math.round(Number(input.qty) * 1000) / 1000;
   const unit = String(input.unit ?? "").trim();
   const own = cents(Number(input.cost) || 0);

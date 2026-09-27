@@ -41,6 +41,7 @@ export function InquiryRow({
   focused = false,
   inspections = null,
   businessPhone = null,
+  estimateDoor = true,
 }: {
   inquiry: Inquiry;
   customers: { id: string; name: string }[];
@@ -53,6 +54,8 @@ export function InquiryRow({
   inspections?: { done: number; upcoming: number } | null;
   /** The org's own line (organizations.phone) — the "Text it" handoff has to be able to name it. */
   businessPhone?: string | null;
+  /** The Estimates switch (0352): off, the row has no Estimate button. */
+  estimateDoor?: boolean;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -283,7 +286,7 @@ export function InquiryRow({
           Already converted — its estimate or job carries the work now.
         </p>
       ) : (
-        <ConvertMenu inquiryId={inquiry.id} inquiryName={inquiry.name} customers={customers} workKind={(inquiry as { work_kind?: string | null }).work_kind ?? null} businessPhone={businessPhone} />
+        <ConvertMenu inquiryId={inquiry.id} inquiryName={inquiry.name} customers={customers} workKind={(inquiry as { work_kind?: string | null }).work_kind ?? null} businessPhone={businessPhone} estimateDoor={estimateDoor} />
       )}
 
       {/* The message rides collapsed as ONE clamped line — the single biggest source of the old

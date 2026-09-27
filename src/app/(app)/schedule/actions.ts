@@ -423,7 +423,7 @@ async function writeScheduleRanges(
   // Surface ANY segment-write failure (not just multi-range) so the editor
   // never silently shows a stale range while the mirror moved underneath it.
   if (!segOk && clean.length > 1) {
-    return { ok: false, error: "Multiple date ranges need a quick database update (migration 0040). The first range was saved." };
+    return { ok: false, error: "Multiple date ranges can't be saved yet. The first range was saved." };
   }
   if (!segOk && clean.length === 1) {
     return { ok: false, error: "Couldn't save the date range — please try again. The job's overall window was updated." };

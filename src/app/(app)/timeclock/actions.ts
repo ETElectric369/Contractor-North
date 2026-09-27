@@ -13,6 +13,8 @@ import { splitPreview } from "@/lib/split-preview";
 import { resolveOfflinePunchTime } from "@/lib/offline/punch-time";
 import { runOnce } from "@/lib/offline/run-once";
 import { getOrgSettings } from "@/lib/org-settings";
+import { featureOn } from "@/lib/features";
+import { featureOffSentence } from "@/lib/viewer-switches";
 import { todayBoundsInTz } from "@/lib/tz";
 import { createNotifications } from "@/lib/notifications";
 import { sendPushToProfiles, orgStaffIds } from "@/lib/push";
@@ -2372,7 +2374,11 @@ export async function fileDailyReport(input: {
 
   // "Today" is the ORG's local day — the same boundary the clock pages use.
   const { data: org } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
-  const tz = getOrgSettings((org as { settings?: unknown } | null)?.settings).timezone;
+  const orgS = getOrgSettings((org as { settings?: unknown } | null)?.settings);
+  // DAILY REPORTS OFF (0352): no report is filed, so no bell entry and no push reach an office that
+  // can no longer mute them (the push toggle hides with the switch). The debrief isn't drawn either.
+  if (!featureOn(orgS.features, "daily_reports")) return { ok: false, error: featureOffSentence("daily_reports") };
+  const tz = orgS.timezone;
   const { dayStart, dayEnd, todayStr } = todayBoundsInTz(tz);
 
   // GPS summary — the caller's own day: entries that STARTED today (a split day is several

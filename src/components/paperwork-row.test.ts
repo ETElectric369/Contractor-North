@@ -125,13 +125,13 @@ describe("PaperworkRow", () => {
         kind: "supplier_invoice",
         supplierInvoiceId: "si-1",
         invoiceNumber: "8802-1108330",
-        sentence: "On the CED documents list with no bill yet: 8802-1108330, $653.25. File It makes the bill and links it to that document.",
+        sentence: "On the supplier documents list with no bill yet: 8802-1108330, $653.25. File It makes the bill and links it to that document.",
       },
     ]);
     expect(html).not.toContain("Same Purchase: Tie Them");
     expect(html).not.toContain("Different Purchase");
-    expect(html).toContain("File It And Link To CED 8802-1108330");
-    expect(html).toContain("On the CED documents list with no bill yet");
+    expect(html).toContain("File It And Link To 8802-1108330");
+    expect(html).toContain("On the supplier documents list with no bill yet");
   });
 
   it("a bucket a model liked is a guess too: offered, never picked", () => {
@@ -186,8 +186,8 @@ describe("PaperworkRow", () => {
       kind: "job_document",
       proposal: { ced: { numbers: ["8802-1101363"], total: 162.45, kinds: ["invoice"], text: "x", name: "a.pdf" } },
     });
-    expect(html).toContain("Add To CED Documents");
-    expect(html).toContain("CED document, 8802-1101363, $162.45");
+    expect(html).toContain("Add To Supplier Documents");
+    expect(html).toContain("Supplier document, 8802-1101363, $162.45");
   });
 
   // ── Paper A (audit v994): PO "TOOLS", the reader's bucket, read before marks were kept ──────
@@ -232,6 +232,37 @@ describe("PaperworkRow", () => {
     expect(html).toMatch(/>Where does this go\?<\/p>/);
     expect(html).toContain("On the paper: PO STOCK");
     expect(html).not.toMatch(/<option value="[^"]+" selected=""/);
+  });
+
+  // ── The Shop Stock switch (0352) ────────────────────────────────────────────────────────────
+  const renderWith = (item: Partial<PaperRowItem>, shopStock?: boolean) =>
+    renderToStaticMarkup(
+      createElement(PaperworkRow, { item: { ...base, ...item }, jobs: JOBS, matches: [], onFiled: () => {}, ...(shopStock === undefined ? {} : { shopStock }) }),
+    );
+  const SHELF_TICKET: Partial<PaperRowItem> = {
+    ...TOOLS_TICKET,
+    proposal: { po: "STOCK", companyUse: { bucket: null, from: "po", words: "STOCK", shelf: true } },
+    on_paper: "PO STOCK",
+  };
+
+  it("Shop Stock on (or the switch not passed): exactly today's row, the shelf offered and a STOCK paper picking it", () => {
+    for (const item of [{}, SHELF_TICKET]) expect(renderWith(item, true)).toBe(renderWith(item));
+    expect(renderWith(SHELF_TICKET)).toMatch(/<option value="stock" selected="">Shop Stock(<!-- -->)? \(On The Paper\)<\/option>/);
+  });
+
+  it("Shop Stock off: no shelf option, the chooser says Or A Business Cost, and a STOCK paper picks nothing but still says so", () => {
+    const html = renderWith({}, false);
+    expect(html).not.toContain('value="stock"');
+    expect(html).toMatch(/<select[^>]*aria-label="Or A Business Cost"/);
+    expect(html).toContain("Or A Business Cost…");
+    expect(html).not.toContain("Shop Stock");
+    const marked = renderWith(SHELF_TICKET, false);
+    expect(marked).not.toContain('value="stock"');
+    expect(marked).not.toMatch(/<option value="[^"]+" selected=""/);
+    expect(marked).toMatch(/>Where does this go\?<\/p>/);
+    expect(marked).toContain("On the paper: PO STOCK");
+    // File It stays shut until a person picks a job or a bucket.
+    expect(marked).toMatch(/<button[^>]*disabled=""[^>]*title="Pick where it goes first/);
   });
 
   it("a hint that was only the company's own name says nothing: the server's null is an answer", () => {

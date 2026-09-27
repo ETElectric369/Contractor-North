@@ -49,7 +49,7 @@ import { insertItemizedBill } from "./paperwork-core";
 import { RETURN_ON_JOB_NEEDS_LINES } from "@/lib/paperwork";
 import { importCedInvoices } from "@/app/(app)/bills/supplier-import-actions";
 
-type Call = { table: string; verb: string; payload?: any; selected?: boolean; eqs: [string, unknown][] };
+type Call = { table: string; verb: string; payload?: any; selected?: boolean; eqs: [string, unknown][]; ins?: [string, unknown[]][] };
 
 /** A scriptable PostgREST fake that also records every .eq(), so the org boundary can be seen. */
 function fakeSupabase(script: Record<string, any[]>, calls: Call[]) {
@@ -102,7 +102,7 @@ function fakeSupabase(script: Record<string, any[]>, calls: Call[]) {
         is() { return chain; },
         limit() { return chain; },
         neq() { return chain; },
-        in() { return chain; },
+        in(col: string, vals: unknown[]) { (mine.ins ??= []).push([col, vals]); return chain; },
         single: () => Promise.resolve(next(`${table}.${verb}`)),
         maybeSingle: () => Promise.resolve(next(`${table}.${verb}`)),
         then(resolve: any, reject: any) {
@@ -933,7 +933,7 @@ describe("a CED document with the same number: link it, don't make the person li
       calls,
     );
     const res = await fileItem("oi-9", { type: "job", jobId: "job-046" });
-    expect(res).toEqual({ ok: true, message: "Filed. Linked to CED 8802-1108330." });
+    expect(res).toEqual({ ok: true, message: "Filed. Linked to supplier document 8802-1108330." });
     // The job the person picked is kept, and the cost is a real bill on it.
     expect(did("bills", "insert")!.payload).toMatchObject({ job_id: "job-046", amount: 653.25 });
     // No false "a person checked: a different purchase" note.
@@ -959,7 +959,7 @@ describe("a CED document with the same number: link it, don't make the person li
     );
     const res = await fileItem("oi-9", { type: "job", jobId: "job-046" });
     expect(res.ok).toBe(false);
-    expect(res.error).toContain("Already on the books: CED document 8802-1108330, $653.25, covered by a bill on J-046 Jason Waldow.");
+    expect(res.error).toContain("Already on the books: supplier document 8802-1108330, $653.25, covered by a bill on J-046 Jason Waldow.");
     expect(did("bills", "insert")).toBeUndefined();
     expect(did("organized_items", "update")).toBeUndefined();
   });
@@ -1016,7 +1016,7 @@ describe("a CED document with the same number: link it, don't make the person li
     );
     const res = await fileItem("oi-9", { type: "job", jobId: "job-046" });
     expect(res.ok).toBe(false);
-    expect(res.error).toContain("CED 8802-1108330 was just covered by another bill");
+    expect(res.error).toContain("Supplier document 8802-1108330 was just covered by another bill");
     expect(did("bills", "delete")!.eqs).toContainEqual(["id", "bill-2"]);
     expect(lastDid("organized_items", "update")!.payload).toMatchObject({ status: "needs_review", bill_id: null });
   });
@@ -1490,7 +1490,7 @@ describe("Undo, Delete and a deleted bill leave nothing wrong behind (audit v994
     expect(did("documents", "delete")).toBeUndefined();
     expect(did("organized_items", "update")).toBeUndefined();
     expect(did("organized_items", "delete")!.eqs).toContainEqual(["org_id", "org-1"]);
-    expect(res.message).toContain("The receipt stays on the job; press Record as Cost there");
+    expect(res.message).toContain("The receipt stays on the job; press Record As Cost there");
   });
 
   it("TD1: a link row written by Record as Cost says so (source 'job'), whatever its dates", async () => {
@@ -1528,7 +1528,7 @@ describe("Undo, Delete and a deleted bill leave nothing wrong behind (audit v994
     const res = await deleteOrganizedItem("oi-9");
     expect(res.ok).toBe(true);
     expect(did("supplier_invoices", "delete")!.eqs).toContainEqual(["org_id", "org-1"]);
-    expect(res.message).toContain("8802-2 stayed on the CED documents list");
+    expect(res.message).toContain("8802-2 stayed on the supplier documents list");
     expect(did("organized_items", "select")!.eqs).toContainEqual(["org_id", "org-1"]);
   });
 });
@@ -1891,6 +1891,8 @@ describe("Drop Paperwork: the row a file becomes", () => {
     state.client = fakeSupabase(
       {
         "organized_items.select": [{ data: [], error: null }],
+        // The company's own account for the number the paper prints (TR-34426).
+        "supplier_accounts.select": [{ data: [{ id: "acct-1", name: "Consolidated Electrical Distributors", account_number: "TR-34426", branch_code: null }], error: null }],
         "organized_items.insert": [{ data: { id: "oi-5" }, error: null }],
       },
       calls,
@@ -1899,14 +1901,32 @@ describe("Drop Paperwork: the row a file becomes", () => {
     expect(res).toMatchObject({ ok: true, id: "oi-5", needsRead: false });
     const row = did("organized_items", "insert")!.payload;
     expect(row).toMatchObject({ doc_type: "supplier_documents", doc_number: "8802-1101363", amount: 162.45, source: "bills_drop", status: "needs_review" });
+    // WHO IT IS FROM is the company's own account, shortened for the title (Wave 0), never a word
+    // the code knows.
+    expect(row).toMatchObject({ vendor: "Consolidated Electrical Distributors", title: "CED 8802-1101363" });
+    expect(did("supplier_accounts", "select")!.eqs).toContainEqual(["org_id", "org-1"]);
     expect(row.proposal.ced.numbers).toEqual(["8802-1101363"]);
     expect(ai.systems).toHaveLength(0);
+  });
+
+  it("the same paper from a supplier the company has no account for names no vendor", async () => {
+    state.client = fakeSupabase(
+      {
+        "organized_items.select": [{ data: [], error: null }],
+        "supplier_accounts.select": [{ data: [{ id: "acct-9", name: "Main Street Supply", account_number: "MS-1", branch_code: "0101" }], error: null }],
+        "organized_items.insert": [{ data: { id: "oi-8" }, error: null }],
+      },
+      calls,
+    );
+    await addPaperwork({ ...input, pdfText: TIMBER_CREEK });
+    expect(did("organized_items", "insert")!.payload).toMatchObject({ vendor: null, title: "Supplier 8802-1101363" });
   });
 
   it("PR3: the same CED PDF dropped on ORGANIZE is read from its own text too, and says which door it came in by", async () => {
     state.client = fakeSupabase(
       {
         "organized_items.select": [{ data: [], error: null }],
+        "supplier_accounts.select": [{ data: [], error: null }],
         "organized_items.insert": [{ data: { id: "oi-6" }, error: null }],
       },
       calls,
@@ -1953,7 +1973,7 @@ describe("importCedInvoices knows a PDF by its content, never its name", () => {
     const res = await importCedInvoices({ files: [{ name: "statement.txt", text: "%PDF-1.7\n1 0 obj << >>" }] });
     expect(res.ok).toBe(false);
     expect(res.error).toContain("statement.txt reached here as raw PDF bytes");
-    expect(res.error).toContain("Choose CED PDFs");
+    expect(res.error).toContain("Choose Supplier PDFs");
   });
 });
 
@@ -2004,7 +2024,7 @@ describe("CED documents a paper added: Restore, Undo and a second Add", () => {
     const res = await undoPaperwork("oi-5");
     expect(res.ok).toBe(true);
     expect(did("supplier_invoices", "delete")).toBeUndefined();
-    expect(res.message).toContain("8802-1101363 stayed on the CED documents list");
+    expect(res.message).toContain("8802-1101363 stayed on the supplier documents list");
     expect(all("organized_items", "select")[1].eqs).toContainEqual(["org_id", "org-1"]);
   });
 
@@ -2020,8 +2040,78 @@ describe("CED documents a paper added: Restore, Undo and a second Add", () => {
     const res = await addSupplierDocuments("oi-5");
     expect(res.ok).toBe(true);
     const u = did("organized_items", "update")!;
-    expect(u.payload.proposal.filed).toEqual({ how: "supplier_documents", landed: ["8802-1101363"] });
+    expect(u.payload.proposal.filed).toEqual({ how: "supplier_documents", landed: ["8802-1101363"], landedIds: [] });
     expect(u.eqs).toContainEqual(["status", "needs_review"]);
+  });
+
+  it("Add keeps the ids of the rows it wrote beside their numbers", async () => {
+    vi.mocked(importCedInvoices).mockResolvedValueOnce({
+      ok: true,
+      message: "Added.",
+      landed: [{ invoiceNumber: "100234", kind: "invoice", total: 10, jobNameRaw: null, sourceFile: null, id: "si-a" }],
+      refused: [],
+    } as never);
+    state.client = fakeSupabase(
+      {
+        "organized_items.select": [{ data: { ...CED_PAPER, status: "needs_review", proposal: { ...CED_PAPER.proposal, filed: null } }, error: null }],
+        "organized_items.update": [{ data: [{ id: "oi-5" }], error: null }],
+      },
+      calls,
+    );
+    await addSupplierDocuments("oi-5");
+    expect(did("organized_items", "update")!.payload.proposal.filed).toEqual({ how: "supplier_documents", landed: ["100234"], landedIds: ["si-a"] });
+  });
+
+  it("Undo takes off exactly the rows this paper wrote, by id: never another supplier's document with the same number (0354)", async () => {
+    const paper = { ...CED_PAPER, proposal: { ...CED_PAPER.proposal, filed: { how: "supplier_documents", landed: ["100234"], landedIds: ["si-a"] } } };
+    state.client = fakeSupabase(
+      {
+        "organized_items.select": [
+          { data: paper, error: null },
+          { data: [], error: null }, // papers tied to them
+        ],
+        "supplier_invoices.select": [{ data: [{ id: "si-a", invoice_number: "100234", job_id: null }], error: null }],
+        "bill_supplier_invoices.select": [{ data: [], error: null }],
+        "supplier_invoices.delete": [{ data: [{ id: "si-a" }], error: null }],
+        "organized_items.update": [{ data: [{ id: "oi-5" }], error: null }],
+      },
+      calls,
+    );
+    const res = await undoPaperwork("oi-5");
+    expect(res.ok).toBe(true);
+    expect(did("supplier_invoices", "select")!.ins).toEqual([["id", ["si-a"]]]);
+    expect(did("supplier_invoices", "delete")!.ins).toEqual([["id", ["si-a"]]]);
+  });
+
+  it("a paper filed before ids were kept: a number two suppliers share is kept and named, never guessed at", async () => {
+    const paper = { ...CED_PAPER, proposal: { ...CED_PAPER.proposal, filed: { how: "supplier_documents", landed: ["100234", "8802-1101363"] } } };
+    state.client = fakeSupabase(
+      {
+        "organized_items.select": [
+          { data: paper, error: null },
+          { data: [], error: null }, // papers tied to them
+        ],
+        "supplier_invoices.select": [
+          {
+            data: [
+              { id: "si-a", invoice_number: "100234", job_id: null },
+              { id: "si-b", invoice_number: "100234", job_id: null },
+              { id: "si-9", invoice_number: "8802-1101363", job_id: null },
+            ],
+            error: null,
+          },
+        ],
+        "bill_supplier_invoices.select": [{ data: [], error: null }],
+        "supplier_invoices.delete": [{ data: [{ id: "si-9" }], error: null }],
+        "organized_items.update": [{ data: [{ id: "oi-5" }], error: null }],
+      },
+      calls,
+    );
+    const res = await undoPaperwork("oi-5");
+    expect(res.ok).toBe(true);
+    expect(did("supplier_invoices", "select")!.ins).toEqual([["invoice_number", ["100234", "8802-1101363"]]]);
+    expect(did("supplier_invoices", "delete")!.ins).toEqual([["id", ["si-9"]]]);
+    expect(res.message).toContain("100234 stayed on the supplier documents list too, because more than one supplier has a document with that number.");
   });
 
   it("Add hands the importer the tray's own PDF bytes, so the PDF is kept where Open Bill reads it", async () => {
@@ -2047,6 +2137,7 @@ describe("a CED PDF with one document that doesn't add up says so", () => {
     state.client = fakeSupabase(
       {
         "organized_items.select": [{ data: [], error: null }],
+        "supplier_accounts.select": [{ data: [], error: null }],
         "organized_items.insert": [{ data: { id: "oi-7" }, error: null }],
       },
       calls,
@@ -2063,7 +2154,7 @@ describe("a CED PDF with one document that doesn't add up says so", () => {
     const ced = did("organized_items", "insert")!.payload.proposal.ced;
     expect(ced.numbers).toEqual(["8802-1101363"]);
     expect(ced.refused).toEqual([expect.objectContaining({ number: "8802-1101999" })]);
-    expect(res.line).toMatch(/^1 CED document found in it; 1 didn't add up and won't be added: 8802-1101999/);
+    expect(res.line).toMatch(/^1 supplier document found in it; 1 didn't add up and won't be added: 8802-1101999/);
   });
 });
 

@@ -17,6 +17,14 @@ import { join } from "node:path";
  */
 const SRC = readFileSync(join(process.cwd(), "src/app/(app)/bills/bills-receipts.tsx"), "utf8");
 
+describe("the Receipts tab is a list, not a second upload door (Wave 0)", () => {
+  it("never files a picture as a receipt without reading it", () => {
+    expect(SRC).not.toContain("addDocument(");
+    expect(SRC).not.toContain("<DropTarget");
+    expect(SRC).toContain("Add one with Drop Paperwork at the top of this page.");
+  });
+});
+
 describe("a bill's status says how it was bought, in words", () => {
   it("never prints the raw database word on the badge", () => {
     expect(SRC).toContain('{b.status === "paid" ? "Settled" : "On Account"}');
