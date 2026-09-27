@@ -243,8 +243,9 @@ export function NowCard({
             </div>
             {job ? (
               <>
-                {/* The ONE link to the job: its name. */}
-                <Link href={job.href} className="mt-0.5 block text-lg font-bold text-slate-900 hover:text-brand">
+                {/* The ONE link to the job: its name. 44px to the thumb (py-2), the same line height
+                    to the eye (the negative margins give the padding back). */}
+                <Link href={job.href} className="-mb-2 -mt-1.5 block py-2 text-lg font-bold text-slate-900 hover:text-brand">
                   {job.name}
                 </Link>
                 {job.sub && <div className="text-sm text-slate-500">{job.sub}</div>}
@@ -270,8 +271,11 @@ export function NowCard({
               </>
             )}
           </div>
-          <div className="flex items-center gap-3 border-t border-brand/20 px-5 py-2">
-            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-4">
+          {/* WRAP, don't cover: the left side never shrinks under its words (min width), so a wide
+              button (Set When You Stopped, or Clock Out on a 320px phone) takes its own line on the
+              right instead of sitting over the Timeclock link. */}
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-brand/20 px-5 py-2">
+            <div className="flex min-w-[8.5rem] flex-1 flex-wrap items-center gap-x-4">
               {/* The one lunch question, off by default. This card is where most days end, so it
                   is answerable here and not only on /timeclock. A forgotten clock closes on
                   Timeclock, which asks it there with the stop time, so it isn't offered twice. */}
@@ -298,12 +302,12 @@ export function NowCard({
                  the door, not the guard. It REPLACES Clock Out, never sits beside it. */
               <Link
                 href="/timeclock"
-                className="inline-flex h-12 shrink-0 items-center gap-2 rounded-lg bg-red-600 px-5 text-base font-medium text-white hover:bg-red-700"
+                className="ml-auto inline-flex h-12 shrink-0 items-center gap-2 rounded-lg bg-red-600 px-5 text-base font-medium text-white hover:bg-red-700"
               >
                 <Square className="h-5 w-5" /> Set When You Stopped
               </Link>
             ) : (
-              <Button variant="destructive" size="lg" onClick={doClockOut} disabled={pending} className="shrink-0">
+              <Button variant="destructive" size="lg" onClick={doClockOut} disabled={pending} className="ml-auto shrink-0">
                 {pending ? <Loader2 className="h-5 w-5 animate-spin" /> : <Square className="h-5 w-5" />} Clock Out
               </Button>
             )}

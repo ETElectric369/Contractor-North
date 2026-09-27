@@ -67,6 +67,12 @@ describe("the row's ⋯", () => {
     expect(row).toContain("<NavLink address={i.address}");
   });
 
+  it("at 375px the row's title keeps its own line, and the row is a 44px door", () => {
+    const row = code.slice(code.indexOf("const agendaRows"), code.indexOf("<AgendaRowMenu"));
+    expect(row).toContain('<Link href={i.href} className="-my-1 min-w-0 flex-1 py-1 hover:opacity-80">');
+    expect(row).toMatch(/<Link href=\{i\.href\}[^>]*>\s*<div className="truncate text-sm font-medium text-slate-900">\{i\.title\}<\/div>/);
+  });
+
   it("a job's Move starts from the ROW's day: today in the day view, that day in the week view", () => {
     expect(code).toContain("const agendaRows = (items: Agenda[], day: string) =>");
     expect(code).toContain("fromDate={day}");

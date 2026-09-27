@@ -602,21 +602,32 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
     items.map((i) => (
       <li key={i.key} className="flex items-center gap-3 px-5 py-3">
         <div className="w-14 shrink-0 text-sm font-medium text-slate-700">{i.time ? fmtTime(i.time) : "—"}</div>
-        <Link href={i.href} className="min-w-0 flex-1 hover:opacity-80">
-          <div className="flex items-center gap-2">
+        {/* 44px to the thumb (py-1 over the row's own padding), the row's height unchanged. The
+            title has its own line, so the verbs on the right can never squeeze it to nothing at
+            375px; the kind badge sits with the where. */}
+        <Link href={i.href} className="-my-1 min-w-0 flex-1 py-1 hover:opacity-80">
+          <div className="truncate text-sm font-medium text-slate-900">{i.title}</div>
+          <div className="mt-0.5 flex min-w-0 items-center gap-1.5">
             {i.kind === "appt" ? (
               <>
-                <Badge tone={isInspectionType(i.apptType) ? "amber" : "blue"}>{appointmentTypeLabel(i.apptType)}</Badge>
+                <Badge tone={isInspectionType(i.apptType) ? "amber" : "blue"} className="shrink-0">
+                  {appointmentTypeLabel(i.apptType)}
+                </Badge>
                 {/* audit v921: the same "pending pick" marker the calendar and the appointment
                     page carry — My Day drew an unconfirmed visit like a firm booking. */}
-                {i.status === "proposed" && <Badge tone="amber">pending pick</Badge>}
+                {i.status === "proposed" && (
+                  <Badge tone="amber" className="shrink-0">
+                    pending pick
+                  </Badge>
+                )}
               </>
             ) : i.status ? (
-              <Badge tone={statusTone(i.status)}>{jobStatusLabel(i.status)}</Badge>
+              <Badge tone={statusTone(i.status)} className="shrink-0">
+                {jobStatusLabel(i.status)}
+              </Badge>
             ) : null}
-            <span className="truncate text-sm font-medium text-slate-900">{i.title}</span>
+            {i.sub && <span className="min-w-0 truncate text-xs text-slate-400">{i.sub}</span>}
           </div>
-          {i.sub && <div className="truncate text-xs text-slate-400">{i.sub}</div>}
         </Link>
         {/* WRAP, don't cover. Andrew (mobile): "the Navigate field/button covers up the other
             items on the Today view." A shrink-0 no-wrap cluster of up to four 44px buttons ate the

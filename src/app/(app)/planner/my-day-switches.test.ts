@@ -285,6 +285,16 @@ describe("the Now card (rendered)", () => {
     expect(html).toMatch(/<label[^>]*class="[^"]*min-h-11[^"]*"[^>]*>/);
     // The old one-liner is cut.
     expect(html).not.toContain("On the clock ·");
+    // The job's name is 44px to the thumb too (py-2 on a 28px line, the margins given back).
+    expect(html).toMatch(/<a class="[^"]*\bpy-2\b[^"]*" href="\/jobs\/j55">/);
+  });
+
+  it("the footer wraps rather than covers: a wide button takes its own line, never over Timeclock", () => {
+    const card = readFileSync(join(process.cwd(), "src/app/(app)/planner/now-card.tsx"), "utf8");
+    expect(card).toContain('className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-brand/20 px-5 py-2"');
+    expect(card).toContain('className="flex min-w-[8.5rem] flex-1 flex-wrap items-center gap-x-4"');
+    expect(card.match(/className="ml-auto /g)?.length ?? 0).toBeGreaterThanOrEqual(1);
+    expect(card).toMatch(/className="ml-auto shrink-0">\s*\{pending/);
   });
 
   it("a forgotten clock: Set When You Stopped REPLACES Clock Out, and goes to Timeclock", () => {
