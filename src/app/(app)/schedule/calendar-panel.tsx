@@ -55,11 +55,14 @@ export async function CalendarPanel() {
         .lte("starts_at", jobTo)
         .neq("status", "cancelled")
         .order("starts_at"),
-      // Open tasks with a due date in the window — the calendar shows tasks IN
-      // TIME (week "N tasks due" lines + the day drill); /tasks stays the workbench.
+      // Open REMINDERS with a due date in the window — the calendar shows them IN TIME (week "N
+      // tasks due" lines + the day drill); /tasks stays the workbench. Job tasks left the calendar
+      // in 0358 (they are the job's list, with no dates), and RLS shows each person only their own
+      // Reminders (0358's tasks_read).
       supabase
         .from("tasks")
         .select("id, title, due_date, job_id, category, assigned_to, assignee:assigned_to(full_name), jobs(job_number, name)")
+        .is("job_id", null)
         .eq("status", "open")
         .gte("due_date", jobFrom.slice(0, 10))
         .lte("due_date", jobTo.slice(0, 10))

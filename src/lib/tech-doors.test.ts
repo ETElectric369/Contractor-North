@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { ACTIONS } from "@/components/global-quick-add";
 import { appointmentAffordances } from "@/lib/action-items/types";
 import { canDeletePhoto } from "@/app/(app)/jobs/[id]/job-photos";
+import { canDeleteTask } from "@/lib/job-tasks";
 
 /**
  * NO DOOR A TECH CAN'T USE (Wave 0). Every page below was reachable by a tech and offered him a
@@ -73,6 +74,18 @@ describe("the job's side doors", () => {
     expect(s).toContain("(viewerIsStaff ? (priceBook ?? []) : [])");
   });
 
+  it("the job's Tasks card is the crew's too: the Overview and the Tasks tab render it for every role (0358)", () => {
+    const s = src("jobs/[id]/page.tsx");
+    // Not behind a role gate: the same card, the same list, for the office and the crew.
+    expect(s).toMatch(/\n\s*<JobTaskList mode="card" \{\.\.\.taskListProps\} \/>/);
+    expect(s).toContain('content: <JobTaskList mode="tab" {...taskListProps} />');
+    expect(s).not.toMatch(/viewerIsStaff\s*&&\s*<JobTaskList/);
+    // The role decides only the Delete (canDeleteTask), passed down, never the list.
+    expect(s).toMatch(/taskListProps = \{[\s\S]*viewerIsStaff,[\s\S]*\};/);
+    // The dock's Tasks slot is gone: the pinned chip next to Overview is the one door.
+    expect(src("jobs/[id]/job-action-dock.tsx")).not.toContain("?tab=tasks");
+  });
+
   it("the jobs list offers New Job only to the office", () => {
     const s = src("jobs/page.tsx");
     expect(s).not.toMatch(/^\s*<NewJobButton/m);
@@ -82,12 +95,19 @@ describe("the job's side doors", () => {
 
 describe("pure rules", () => {
   it("the quick-add menu gives a tech only New Task", () => {
-    expect(ACTIONS.filter((a) => !a.staffOnly).map((a) => a.label)).toEqual(["New Task"]);
+    expect(ACTIONS.filter((a) => !a.staffOnly).map((a) => a.label)).toEqual(["New Reminder"]);
   });
 
   it("a tech's appointment row only opens", () => {
     expect(appointmentAffordances(false)).toEqual(["open"]);
     expect(appointmentAffordances(true)).toContain("do");
+  });
+
+  it("a job task's Delete shows for the office, or for the one who added it (0358)", () => {
+    expect(canDeleteTask({ created_by: "someone" }, "me", true)).toBe(true);
+    expect(canDeleteTask({ created_by: "me" }, "me", false)).toBe(true);
+    expect(canDeleteTask({ created_by: "someone" }, "me", false)).toBe(false);
+    expect(canDeleteTask({ created_by: null }, "me", false)).toBe(false);
   });
 
   it("a photo's trash shows for the office, or for the one who took it", () => {

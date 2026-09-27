@@ -12,16 +12,18 @@
 //   2. FRESH OVERDUE — due < today; priority desc, then due DESC (the freshest
 //      missed deadline first — a yesterday-miss beats a June-8 zombie). Capped at
 //      3 auto-fill slots so a stale backlog can't monopolize the whole day and
-//      starve ranks 3-4. (Pinned overdue rows ride rank 1, not this cap; an
-//      over-cap overdue task tied to today's site can still re-enter via rank 4.)
+//      starve ranks 3-4. (Pinned overdue rows ride rank 1, not this cap.)
 //   3. DUE TODAY — priority desc.
-//   4. ON SITE TODAY — task.job_id ∈ today's scheduled-job set, priority desc:
-//      the six lean toward the places the truck is already going.
-//   5. FLAGGED UNDATED — priority ≥ 1 with no due date. category='office' is
+//   4. FLAGGED UNDATED — priority ≥ 1 with no due date. category='office' is
 //      excluded from THIS rank only: office work is batch-by-nature and lives
 //      behind the Office door, but a DATED office task (payroll day, a license
 //      renewal) enters ranks 2-3 like everything else — a stated date beats the
 //      category.
+//
+// ONLY REMINDERS RANK (0358). A task with a job is the JOB's list, worked on the job and in My Day's
+// Now block, never anyone's six (Erik, 2026-09-26: My Day was "stockpiled with things i cant act
+// on"). The old rank 4, "on a job the truck goes to today", is gone with them, and a job row handed
+// in anyway is dropped here too, so no caller can put one back.
 //
 // PLAIN UNDATED TASKS NEVER AUTO-PROMOTE — undated is not "due now"; it lives
 // behind the Everything-else door until someone dates, flags, or pins it. And
@@ -43,8 +45,9 @@ export interface SixRankTask {
   due_date?: string | null;
   /** yyyy-mm-dd — equal to today means PINNED into today's six. */
   focus_date?: string | null;
-  /** tasks.category — 'office' is excluded from rank 5 (flagged-undated) only. */
+  /** tasks.category — 'office' is excluded from rank 4 (flagged-undated) only. */
   category?: string | null;
+  /** A job task never ranks (0358): the six are Reminders. */
   job_id?: string | null;
   /** Subtasks (parent_id set) never rank — they nest under their parent. */
   parent_id?: string | null;
@@ -53,27 +56,26 @@ export interface SixRankTask {
 export interface SixRankContext {
   /** The org-local day, yyyy-mm-dd. */
   todayStr: string;
-  /** Jobs the crew stands on today (scheduled today + segments covering today). */
-  scheduledJobIds?: ReadonlySet<string>;
   /** Slot count — defaults to SIX_SLOTS; exists for tests, not for tuning. */
   slots?: number;
 }
 
 /**
  * Pick today's six from an open-task pool. Returns at most `slots` tasks in slot
- * order (rank 1 → 5; ties resolved priority-first, then input order — feed rows
+ * order (rank 1 → 4; ties resolved priority-first, then input order — feed rows
  * pre-sorted by due date so date ties stay nearest-first). Never mutates input.
  */
 export function rankSix<T extends SixRankTask>(tasks: T[], ctx: SixRankContext): T[] {
   const { todayStr } = ctx;
   const slots = ctx.slots ?? SIX_SLOTS;
-  const onSite = ctx.scheduledJobIds ?? new Set<string>();
   const prio = (t: SixRankTask) => Number(t.priority) || 0;
   // Sort helpers copy via filter() first, so sort() never touches the caller's array.
   const byPriority = (a: T, b: T) => prio(b) - prio(a); // stable sort keeps input order on ties
 
-  // Top-level OPEN tasks only — subtasks and done/cancelled rows never rank.
-  const pool = tasks.filter((t) => t.parent_id == null && (t.status == null || t.status === "open"));
+  // Top-level OPEN Reminders only — subtasks, done/cancelled rows and job tasks never rank.
+  const pool = tasks.filter(
+    (t) => t.parent_id == null && t.job_id == null && (t.status == null || t.status === "open"),
+  );
 
   const picked: T[] = [];
   const taken = new Set<string>();
@@ -98,9 +100,7 @@ export function rankSix<T extends SixRankTask>(tasks: T[], ctx: SixRankContext):
   );
   // 3. Due today.
   take(pool.filter((t) => t.due_date === todayStr).sort(byPriority), slots);
-  // 4. On a job the crew stands on today (any due state — the truck is going there).
-  take(pool.filter((t) => !!t.job_id && onSite.has(t.job_id as string)).sort(byPriority), slots);
-  // 5. Flagged undated — office excluded from this rank ONLY.
+  // 4. Flagged undated — office excluded from this rank ONLY.
   take(
     pool.filter((t) => t.due_date == null && prio(t) >= 1 && t.category !== "office").sort(byPriority),
     slots,

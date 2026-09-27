@@ -205,6 +205,10 @@ export function agentToolOff(name: string, features: FeatureMap = ALL_ON): Featu
  * warning to pass on; a confirm card shows it): never silent. Sales Tax needs nothing here: the
  * quote tools themselves refuse a new rate in words (entities/quote.ts). Everything else, and every
  * input while the switches are on, runs exactly as given.
+ *
+ * REMINDERS ONLY (0358). To-Do Extras is the Reminders' switch: a JOB's task (job_id given) never
+ * carries a priority or steps in the first place, and task.create itself leaves those off and says
+ * so, whatever this switch says. So a job task's input passes here untouched.
  */
 export function agentInputForSwitches(
   name: string,
@@ -214,12 +218,13 @@ export function agentInputForSwitches(
   if (name !== "task.create" || featureOn(features, "todo_extras") || !input || typeof input !== "object") {
     return { input, dropped: null };
   }
+  if ((input as Record<string, unknown>).job_id) return { input, dropped: null };
   const { priority, parent_id, ...rest } = input as Record<string, unknown>;
   const cut = [priority ? "a priority" : null, parent_id ? "a parent task" : null].filter(Boolean);
   if (!cut.length) return { input: rest, dropped: null };
   return {
     input: rest,
-    dropped: `To-Do Extras is off, so this to-do was saved without ${cut.join(" or ")}. The owner can turn it on in Settings, Features.`,
+    dropped: `To-Do Extras is off, so this Reminder was saved without ${cut.join(" or ")}. The owner can turn it on in Settings, Features.`,
   };
 }
 
