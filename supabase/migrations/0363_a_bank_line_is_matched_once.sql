@@ -54,7 +54,7 @@
 -- ORDER: after 0285 (the buckets) and 0362 (fuel is its own bucket, Gas & Truck is Auto: the
 -- bucket CHECKs below name the seven buckets 0362 leaves). A Fuel answer is simply the Fuel bucket.
 -- Safe before or after the code: the door says "the bank download needs one database update"
--- until this is applied, and nothing crashes. Additive only. Safe to re-run.
+-- until this is applied, and nothing crashes. Additive only. Safe to re-run, before or after 0365.
 -- ═══════════════════════════════════════════════════════════════════════════
 
 set local lock_timeout = '3s';
@@ -130,8 +130,14 @@ create table if not exists public.bank_rules (
   constraint bank_rules_income_is_in check ((direction = 'in') = (choice in ('other_income', 'not_income')))
 );
 
-comment on table public.bank_rules is
-  'A company''s own answer for a merchant on its bank downloads (0363), written only when a person taps it: one per company + direction + merchant key. Never shared between companies. Read and written only by whoever sorts the bank (viewer_sorts_bank).';
+-- Run again after 0365, the table keeps 0365's own words (one per merchant AND answer).
+do $$
+begin
+  if coalesce(obj_description('public.bank_rules'::regclass, 'pg_class'), '') not like '%0365%' then
+    execute $c$comment on table public.bank_rules is
+      'A company''s own answer for a merchant on its bank downloads (0363), written only when a person taps it: one per company + direction + merchant key. Never shared between companies. Read and written only by whoever sorts the bank (viewer_sorts_bank).'$c$;
+  end if;
+end $$;
 
 -- ── WHO SORTS THE BANK: the owner, and office staff while the owner's switch is on ─────────────
 -- lib/bank-viewer.ts viewerSortsBank, in SQL: active, of a company, and the owner, or admin/office
@@ -236,7 +242,12 @@ begin
   if not exists (select 1 from pg_constraint where conrelid = 'public.bank_lines'::regclass and conname = 'bank_lines_one_per_company' and contype = 'u') then
     raise exception '0363: bank_lines is missing its one-line-per-company key. Nothing was changed.';
   end if;
-  if not exists (select 1 from pg_constraint where conrelid = 'public.bank_rules'::regclass and conname = 'bank_rules_one_per_key' and contype = 'u') then
+  -- Either key: 0365 swaps one per merchant for one per merchant AND answer, and this file run again
+  -- after 0365 (create table if not exists skips the table) must not call that a missing key.
+  if not exists (
+    select 1 from pg_constraint
+     where conrelid = 'public.bank_rules'::regclass and conname in ('bank_rules_one_per_key', 'bank_rules_one_per_answer') and contype = 'u'
+  ) then
     raise exception '0363: bank_rules is missing its one-rule-per-merchant key. Nothing was changed.';
   end if;
   raise notice '0363: a bank line is matched once.';
