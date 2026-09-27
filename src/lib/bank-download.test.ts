@@ -20,6 +20,7 @@ import {
   readBankTable,
   redactDigits,
   ruleFor,
+  depositKindOf,
   swapDownloadSigns,
   last4FromName,
   withAccountLast4,
@@ -422,6 +423,34 @@ describe("matching what is already on the books (exact cents, each row once)", (
     });
     const plan = planBankDownload(dl, books);
     expect(plan.dispositions.get(lineBy(dl, "DEPOSIT").key)).toEqual({ how: "match", table: "payments", ids: ["pay-1"], said: "Payment on INV-1001" });
+  });
+
+  it("a check deposited weeks after it was recorded is that payment; a deposit never takes a Venmo payment", () => {
+    const dl = readBankTable(
+      parseCSV(`Date,Description,Amount
+09/12/2026,MOBILE DEPOSIT,450.00
+09/14/2026,VENMO CASHOUT,450.00
+09/15/2026,MOBILE DEPOSIT,900.00
+`),
+      "x.csv",
+      hash,
+    )!;
+    const books = ORG_BOOKS({
+      payments: [
+        { id: "venmo1", invoiceId: "i1", invoiceNumber: "INV-1", cents: 45000, day: "2026-09-10", method: "venmo", feeCents: null, stripe: false },
+        { id: "check1", invoiceId: "i2", invoiceNumber: "INV-2", cents: 90000, day: "2026-08-24", method: "check", feeCents: null, stripe: false },
+      ],
+    });
+    const plan = planBankDownload(dl, books);
+    const [mobile450, venmo450, mobile900] = dl.lines;
+    // The Venmo payout takes the Venmo payment, though the mobile deposit of the same amount came first.
+    expect(plan.dispositions.get(venmo450.key)).toMatchObject({ how: "match", ids: ["venmo1"] });
+    expect(plan.dispositions.get(mobile450.key)).toMatchObject({ how: "need" });
+    // A check recorded 22 days before it was deposited.
+    expect(plan.dispositions.get(mobile900.key)).toMatchObject({ how: "match", ids: ["check1"], said: "Payment on INV-2" });
+    expect(depositKindOf("REGULAR DEPOSIT")).toBe("paper");
+    expect(depositKindOf("STRIPE TRANSFER ST-AB12")).toBe("card");
+    expect(depositKindOf("ACME CORP")).toBeNull();
   });
 
   it("a card payout is exactly one group of payments less their fees; a Venmo sweep one group of Venmo payments", () => {

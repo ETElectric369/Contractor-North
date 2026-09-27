@@ -110,7 +110,8 @@ export async function loadBankBooks(supabase: Db, orgId: string, dl: BankDownloa
   const to = shiftDay(dl.to, 10);
   // Crew and supplier payments reach back further: a check can be cashed weeks after it was written.
   const payFrom = shiftDay(dl.from, -PAY_WINDOW.before);
-  const startIso = tzDayStartUtc(from, tz).toISOString();
+  // A deposit may be a payment recorded up to 30 days before it posts (a check held a while).
+  const startIso = tzDayStartUtc(shiftDay(dl.from, -30), tz).toISOString();
   const endIso = tzDayStartUtc(shiftDay(to, 1), tz).toISOString();
   const keys = dl.lines.map((l) => l.key);
 

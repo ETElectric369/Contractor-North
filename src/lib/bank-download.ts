@@ -10,9 +10,12 @@ import { findHeaderRow, fingerprintOf, headerKey, readDate, readHeaderRow, readH
  * cost), the dentist was personal. This module does exactly that, in plain code, no model:
  *
  *   1. ALREADY DOWNLOADED: a line whose key is already in bank_lines is counted, never shown.
- *   2. MATCH, exact cents, each money row once:
- *        · a deposit is one payment (paid 3 days after to 7 days before it posts), or exactly one
- *          group of up to 6: a card payout (amounts less Stripe's fee) or a Venmo sweep;
+ *   2. MATCH, exact cents, each money row once, in two passes over every line (a sure match first,
+ *      so a looser one can never take a row a later line was surely for):
+ *        · a deposit is one payment paid the way the bank says the money came (a check or cash for
+ *          a deposit, Venmo for a Venmo payout, a card for a Stripe payout) up to 30 days before it
+ *          posts, or exactly one group of up to 6 (a card payout less Stripe's fee, a Venmo sweep);
+ *          only then, a payment the bank's words or the payment's method can't place, up to 7 days;
  *        · a check or a debit to a crew member is a live crew payment (by check number, or by amount
  *          from 5 days before it was recorded to 60 after: a check can sit in a wallet for weeks,
  *          and the office may record the pay a few days after the bank posts it);
@@ -912,6 +915,42 @@ function groupsSumming(pool: { id: string; cents: number }[], target: number): s
   return found;
 }
 
+/** How the bank says money came in, from its words: a card processor's payout, a payment app's, a
+ *  transfer, or paper (a check or cash deposited). Null when the words don't say. */
+export type DepositKind = "card" | "venmo" | "zelle" | "paypal" | "cashapp" | "transfer" | "paper";
+export function depositKindOf(description: string): DepositKind | null {
+  const d = String(description ?? "").toLowerCase();
+  if (/\b(stripe|square|sq|clover|toast|shopify|intuit|quickbooks|merchant|card)\b/.test(d)) return "card";
+  if (/\bvenmo\b/.test(d)) return "venmo";
+  if (/\bzelle\b/.test(d)) return "zelle";
+  if (/\bpaypal\b/.test(d)) return "paypal";
+  if (/\bcash\s*app\b/.test(d)) return "cashapp";
+  if (/\b(ach|transfer|xfer|wire)\b/.test(d)) return "transfer";
+  if (/\b(deposits?|dep|mobile|remote|branch|atm|regular|teller|check|cheque|counter|dslip|cash)\b/.test(d)) return "paper";
+  return null;
+}
+
+/** The payment methods (0287 keys) each kind of deposit carries; a method not listed here (other, a
+ *  custom one) says nothing. */
+const KIND_METHODS: Record<DepositKind, readonly string[]> = {
+  card: ["card"],
+  venmo: ["venmo"],
+  zelle: ["zelle"],
+  paypal: ["paypal"],
+  cashapp: ["cashapp"],
+  transfer: ["ach", "transfer"],
+  paper: ["check", "cash"],
+};
+const KNOWN_METHODS = new Set(Object.values(KIND_METHODS).flat());
+
+/** A payment's kind of deposit, or null when its method says nothing. */
+function paymentKindOf(p: BooksPayment): DepositKind | null {
+  if (p.stripe) return "card";
+  const m = String(p.method ?? "").toLowerCase();
+  if (!KNOWN_METHODS.has(m)) return null;
+  return (Object.keys(KIND_METHODS) as DepositKind[]).find((k) => KIND_METHODS[k].includes(m)) ?? null;
+}
+
 /** What a payment put in the bank: a card payment arrives less the card fee (0284), and an unknown
  *  fee means an unknown deposit (never read NULL as $0). */
 function bankCentsOf(p: BooksPayment): number | null {
@@ -931,12 +970,22 @@ export function planBankDownload(dl: BankDownload, books: BankBooks): BankPlan {
   const byDistance = <T extends { day: string | null; id: string }>(day: string) => (a: T, b: T) =>
     Math.abs(dayDiff(day, a.day ?? day)) - Math.abs(dayDiff(day, b.day ?? day)) || a.id.localeCompare(b.id);
 
-  const match = (line: BankLine): Disposition | null => {
+  /** SURE: the bank's words and the payment's method agree (up to 30 days back). LOOSE: one of
+   *  them says nothing (up to 7 days back), only after every line had its sure pass. */
+  type Pass = "sure" | "loose";
+  const match = (line: BankLine, pass: Pass): Disposition | null => {
     if (line.cents > 0) {
-      // ONE PAYMENT: recorded 7 days before the deposit posts, up to 3 days after.
+      const kind = depositKindOf(line.description);
+      const fits = (p: BooksPayment) => {
+        const pk = paymentKindOf(p);
+        return pass === "sure" ? kind !== null && pk === kind : kind === null || pk === null;
+      };
+      // ONE PAYMENT: recorded before the deposit posts (30 days when sure, 7 when not), or up to 3
+      // days after it.
+      const back = pass === "sure" ? 30 : 7;
       const window = (p: BooksPayment) => {
         const d = dayDiff(line.postedOn, p.day);
-        return d >= -3 && d <= 7 && !used.has(p.id);
+        return d >= -3 && d <= back && !used.has(p.id) && fits(p);
       };
       const one = books.payments.filter((p) => window(p) && bankCentsOf(p) === line.cents).sort(byDistance(line.postedOn));
       if (one.length) {
@@ -959,6 +1008,8 @@ export function planBankDownload(dl: BankDownload, books: BankBooks): BankPlan {
       }
       return null;
     }
+    // Money out is matched in the sure pass only.
+    if (pass === "loose") return null;
     const amount = -line.cents;
     // A CHECK BY ITS NUMBER: a crew payment or a supplier payment that wrote it down.
     if (line.check) {
@@ -1008,20 +1059,26 @@ export function planBankDownload(dl: BankDownload, books: BankBooks): BankPlan {
     return null;
   };
 
-  const groups = new Map<string, NeedGroup>();
+  // ALREADY, then MATCHES in two passes over every line, then rules and questions.
   for (const line of lines) {
-    if (books.already.has(line.key)) {
-      dispositions.set(line.key, { how: "already" });
-      counts.already++;
-      continue;
-    }
-    const m = match(line);
-    if (m && m.how === "match") {
+    if (!books.already.has(line.key)) continue;
+    dispositions.set(line.key, { how: "already" });
+    counts.already++;
+  }
+  for (const pass of ["sure", "loose"] as const) {
+    for (const line of lines) {
+      if (dispositions.has(line.key)) continue;
+      const m = match(line, pass);
+      if (!m || m.how !== "match") continue;
       for (const id of m.ids) used.add(id);
       dispositions.set(line.key, m);
       counts.matched++;
-      continue;
     }
+  }
+
+  const groups = new Map<string, NeedGroup>();
+  for (const line of lines) {
+    if (dispositions.has(line.key)) continue;
     const rule = ruleFor(line, books.rules);
     const rc = rule ? ruleChoice(rule, books) : null;
     // Money in that is exactly an open invoice's balance is asked, whatever a rule says.
