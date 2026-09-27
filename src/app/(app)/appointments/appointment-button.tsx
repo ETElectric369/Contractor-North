@@ -161,13 +161,21 @@ export function AppointmentButton({
   editLabel,
   afterDeleteHref,
   triggerClassName,
+  rowLabel,
+  onSaved,
 }: {
   jobs: Opt[];
   customers: Opt[];
   staff: Opt[];
   appointment?: ApptValue;
-  /** Override for the bare-pencil edit trigger — lets a verb ROW size the pencil to its box. */
+  /** Override for the bare-pencil edit trigger's box (and the row trigger's, with rowLabel). */
   triggerClassName?: string;
+  /** Edit-mode trigger as a WORDED ROW ("Edit Details…") in a ⋯ sheet: a plain button wearing
+   *  `triggerClassName` (the sheet's SHEET_ROW), words only. The pencil stays the default, for the
+   *  calendar. */
+  rowLabel?: string;
+  /** Told after a save or a delete lands, so a ⋯ sheet holding this row can close with it. */
+  onSaved?: () => void;
   defaultDate?: string;
   /** Preselect a customer in create mode (e.g. mounted on that customer's page). */
   defaultCustomerId?: string;
@@ -435,6 +443,7 @@ export function AppointmentButton({
       }
       setOpen(false);
       router.refresh();
+      onSaved?.();
     });
   }
 
@@ -464,21 +473,26 @@ export function AppointmentButton({
       setOpen(false);
       if (afterDeleteHref) router.push(afterDeleteHref);
       else router.refresh();
+      onSaved?.();
     });
   }
 
   return (
     <>
       {editing ? (
-        editLabel ? (
+        rowLabel ? (
+          <button type="button" onClick={openModal} className={triggerClassName}>
+            {rowLabel}
+          </button>
+        ) : editLabel ? (
           <Button size="sm" variant="outline" onClick={openModal}>
             <Pencil className="h-4 w-4" /> {editLabel}
           </Button>
         ) : (
           <button
             onClick={openModal}
-            // Sized by the ROW it sits in: My Day's verb cluster passes its h-9 box so the pencil
-            // isn't the one small target in the set; the calendar drill keeps the quiet default.
+            // Sized by the ROW it sits in when a caller passes a box; the calendar drill keeps the
+            // quiet default. (My Day's agenda rows use the worded row in their ⋯ sheet instead.)
             className={triggerClassName ?? "rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"}
             title="Edit"
           >

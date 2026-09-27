@@ -11,7 +11,7 @@ import { buyMaterialsCounts, type BuyMaterials } from "@/lib/materials-checklist
  * who made it and the person it is for.
  *
  * This file is the list's shared shape and words, used by the job's Overview card and Tasks tab, and
- * by My Day's Now block. The reader is safe on a database without 0358: it asks for the new columns
+ * by My Day's Now card. The reader is safe on a database without 0358: it asks for the new columns
  * and, when the database doesn't have them yet, reads the old ones (stamps: false) so the list still
  * works and only photos and who-checked-it-off wait for the migration.
  */
@@ -182,7 +182,7 @@ export function doneWords(
 
 const steps = (n: number) => (n === 1 ? "step" : `${n} steps`);
 
-/** The check-off toast on the job's card and My Day's Now block: "Checked off: Rough-in", and when
+/** The check-off toast on the job's card and My Day's Now card: "Checked off: Rough-in", and when
  *  the check-off closed the task's open steps with it (the cascade), "…and its 2 open steps", so
  *  the Undo beside it plainly takes those back too. */
 export function checkedOffWords(title: string, closedSteps: number): string {
@@ -212,7 +212,7 @@ export function undoneWords(title: string, asked: number, res: UndoAnswer): Undo
 }
 
 /**
- * UNDO OF A CHECK-OFF (the 10-second toast on the job's card and the Now block). Reopens the task and,
+ * UNDO OF A CHECK-OFF (the 10-second toast on the job's card and the Now card). Reopens the task and,
  * when its check-off cascaded, exactly the steps that check-off closed (its closedSteps), never a
  * step that was already done before it. `reopen` is tasks/actions toggleTask.
  */

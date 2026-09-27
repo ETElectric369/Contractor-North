@@ -3,29 +3,27 @@ import { splitAgenda } from "@/lib/agenda-split";
 import { isInspectionType, appointmentTypeLabel } from "@/lib/statuses";
 import { isStaffRole } from "@/lib/actions/perms";
 import { redirect } from "next/navigation";
-import { CalendarCheck, ChevronLeft, ChevronRight, ClipboardList, UserPlus, Navigation, MessageSquare } from "lucide-react";
+import { CalendarCheck, ChevronLeft, ChevronRight, ClipboardList, Navigation, MessageSquare } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { RefreshOnVisible } from "@/components/refresh-on-visible";
 import { WeatherWidget } from "@/components/weather-widget";
-import { MyDayClock } from "./my-day-clock";
+import { NowCard } from "./now-card";
 import { Card } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { jobStatusLabel } from "@/lib/job-status";
-import { formatTime, formatCityStateZip, formatDateShort, formatFullAddress, formatDate, formatDuration } from "@/lib/utils";
+import { formatTime, formatCityStateZip, formatFullAddress, formatDate, formatDuration } from "@/lib/utils";
 import { directionsTarget } from "@/lib/maps";
 import { getOrgSettings } from "@/lib/org-settings";
 import { NavLink } from "@/components/nav-link";
 import { toJobOptions, toCustomerOptions, toStaffOptions, listActiveTechs, listCustomerOptions, jobLabel } from "@/lib/schedule-options";
 import { todayBoundsInTz, prettyDay, tzDayStartUtc, todayStrInTz } from "@/lib/tz";
 import { YourList } from "./your-list";
-// The Now block for a punch on no job: its door opens the clock's own "Which Job Are You On?" sheet.
-import { WhichJob } from "./which-job";
 import { rankSix } from "@/lib/six-rank";
 import { getActionItems } from "@/lib/action-items/query";
 import { ActionList } from "@/components/action-items/action-list";
 import { SupplierPaperDoneTrail, SUPPLIER_PAPERS_SCOPE } from "@/components/supplier-paper-cards";
-import { AppointmentButton, type ApptValue } from "../appointments/appointment-button";
-import { JobMoveButton, ApptMoveButton, ApptDoneButton } from "./agenda-move";
+import type { ApptValue } from "../appointments/appointment-button";
+import { AgendaRowMenu } from "./agenda-move";
 import { NowTasks } from "./now-tasks";
 import { QuickCostButton } from "@/components/quick-cost-button";
 import { MarkReportReviewedButton } from "./mark-report-reviewed-button";
@@ -60,9 +58,10 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
     .maybeSingle();
   const tz = getOrgSettings((orgRow as any)?.settings).timezone || "America/Los_Angeles";
   const { dayStart, dayEnd, todayStr } = todayBoundsInTz(tz);
-  // THE SWITCH BOARD (0352): a switched-off feature's cards leave My Day (the Open Leads card,
-  // the Daily Reports card once nothing is left to review, To-Do Extras on the task box).
-  // No stored map = everything on = My Day as it was.
+  // THE SWITCH BOARD (0352): a switched-off feature's cards leave My Day (the Daily Reports card
+  // once nothing is left to review). No stored map = everything on = My Day as it was.
+  // Leads have no card of their own here: a new request is a Needs You row, and the Sales tile's
+  // badge counts the new, uncontacted ones. leadsOn stays because Needs You's rows hear it.
   const features = getOrgSettings((orgRow as any)?.settings).features;
   const leadsOn = featureOn(features, "leads");
 
@@ -71,14 +70,14 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
   // (The DayClock's today/pay-week hour queries left with it — /timeclock owns those now.)
   const [
     { data: jobs }, { data: segJobs }, { data: appts }, { data: openRows },
-    { data: customers }, { data: staff }, { data: jobOptRows }, { data: me }, leadsRes,
+    { data: customers }, { data: staff }, { data: jobOptRows }, { data: me },
   ] = await Promise.all([
     supabase.from("jobs").select("id, job_number, name, status, address, scheduled_start, customers(name, phone)").gte("scheduled_start", dayStart.toISOString()).lt("scheduled_start", dayEnd.toISOString()).order("scheduled_start"),
     // Multi-range jobs whose segment covers today.
     supabase.from("job_schedule_segments").select("job_id, jobs(id, job_number, name, status, address, customers(name, phone))").lte("start_date", todayStr).gte("end_date", todayStr),
     supabase.from("appointments").select("id, type, title, starts_at, ends_at, location, notes, status, job_id, customer_id, assigned_to, jobs(address), customers(phone), inquiries(phone)").gte("starts_at", dayStart.toISOString()).lt("starts_at", dayEnd.toISOString()).not("status", "in", "(cancelled,completed)").eq("absorbed", false).order("starts_at"),
     // The open entry, regardless of when it started (overnight shift, etc.). The job
-    // on THIS entry is the "Now" hero — scoped to the caller, not the org's latest
+    // on THIS entry is the Now card's job — scoped to the caller, not the org's latest
     // in_progress job (which could be a coworker's site across town).
     // notes rides along so the My Day one-tap clock-out can round-trip a mid-shift note.
     supabase.from("time_entries").select("id, profile_id, job_id, clock_in, clock_out, lunch_minutes, status, notes, split_from").eq("profile_id", user?.id ?? "").eq("status", "open").order("clock_in", { ascending: false }).limit(1),
@@ -90,19 +89,8 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
     // full_name rides along for the setup card — it's the first thing it asks and the first thing
     // that would otherwise be asked again after it was already answered at signup.
     supabase.from("profiles").select("role, full_name").eq("id", user?.id ?? "").maybeSingle(),
-    // Open-leads snapshot for the staff top row: the count + the few newest
-    // open inquiries (name + next follow-up). Same open-lead definition as
-    // /leads; RLS keeps inquiries staff-only, so a tech simply gets zero rows.
-    // Leads off: no card, so no read (a new request still reaches Needs You below).
-    leadsOn
-      ? supabase
-          .from("inquiries")
-          .select("id, name, next_follow_up_at", { count: "exact" })
-          .is("converted_at", null)
-          .neq("status", "lost")
-          .order("created_at", { ascending: false })
-          .limit(3)
-      : Promise.resolve({ data: [] as any[], count: 0 }),
+    // (No leads read: the Open Leads card is gone. A new request reaches Needs You below through
+    // its own feeder, and the Sales tile's badge counts the new, uncontacted ones.)
   ]);
 
   const openEntry = (openRows ?? [])[0] as any | undefined;
@@ -136,7 +124,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
   // MY REMINDERS (0358): a task with no job, that is for me, or that I made for nobody else. The
   // same cut for every role now (a tech's own "remind me" lands in his six, not only what the office
   // assigned him), and job tasks never ride it: they are the JOB's list, worked from the job and from
-  // the Now block below, never a person's six (Erik, 2026-09-26: My Day is "stockpiled with things i
+  // the Now card above, never a person's six (Erik, 2026-09-26: My Day is "stockpiled with things i
   // cant act on"). 0358's RLS makes a Reminder private to its maker and its person; this cut says the
   // same on a database without it.
   const mineCut = <T,>(q: T): T =>
@@ -152,17 +140,17 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
   const headCount = () => supabase.from("tasks").select("id", { count: "exact", head: true });
 
   // The reads that depend on a result above — the caller's current job (the job on
-  // their OWN open time entry, so the "Now" hero is their site, not a coworker's),
+  // their OWN open time entry, so the Now card is their site, not a coworker's),
   // the six-slot pool, and the head-counts that feed Today's 6 — run together in
   // one final round. (The money-pipeline fetch left with the Money line — the AR
   // page owns that view now; the office/else DOOR links left too, so the only
-  // count consumers below are the Today's-6 card's Grab-One gate + its "2/6".)
+  // count consumers below are the Today's-6 card's Grab-One gate + its six marks.)
   //
   // The daily-report window: 14 ORG-local days back from today (lib/tz, never the
   // UTC server's day — a Pacific evening debrief must not fall out of the window a
   // day early).
   const reportsSince = todayStrInTz(tz, new Date(Date.now() - 14 * 86_400_000));
-  // (An open punch with NO job reads no job list here: the Now block's Pick The Job opens the
+  // (An open punch with NO job reads no job list here: the Now card's Pick The Job opens the
   // clock's own "Which Job Are You On?" sheet, which loads its list when it opens: the job he
   // punched last, today's schedule, the jobs in progress. One list at every door.)
   const [curJobRes, poolR, restCountR, doneTodayR, dailyReportsR] = await Promise.all([
@@ -189,7 +177,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
     // and All Reminders links. The ones FOR ME: /tasks also lists the Reminders I made for someone
     // else (theirs to do, never in my six), so the link says "More For You", not a /tasks count.
     mineCut(headCount().eq("status", "open").is("parent_id", null)),
-    // My Reminders completed today — the durable half of the card's "2/6".
+    // My Reminders completed today — the durable half of the card's six marks.
     mineCut(
       headCount()
         .eq("status", "done")
@@ -227,7 +215,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
   const reportsOn = featureOn(features, "daily_reports");
   const isOwner = (me as any)?.role === "owner";
   const currentJob = ((curJobRes as any)?.data as any) ?? undefined;
-  // Navigate target for the "Now" hero: structured address → customer address → job
+  // Navigate target for the Now card: structured address → customer address → job
   // name (so the button never vanishes when the address lives in the name). Same rule
   // the job dock uses (directionsTarget).
   const currentNavTarget = currentJob
@@ -249,14 +237,14 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
   // (Pins beyond six used to badge the door line; the doors are gone — overflow
   // pins still surface at /tasks like everything else past the six.)
 
-  // The current job's materials and its open tasks (need its id), the "Needs action" inbox (needs
+  // The current job's materials and its open tasks (need its id), the Needs You inbox (needs
   // the role), and the six's subtasks (need the chosen six) — one final round.
   const [mlRes, actionItems, kidsRes, nowTasksRes] = await Promise.all([
     // NEWEST by created_at — the same pick the job tab and ensureJobMaterialList make, so the
     // Materials button below lands on the ONE list the crew and the office both call "the"
     // list. order("id") sorted UUIDs: arbitrary, and on a two-list job a different list from
     // the one the job page shows (Erik: "just one, the same one"). Its lines' two checklist columns
-    // ride along (no money: purchased and is_tool) for the Now block's live Buy Materials row.
+    // ride along (no money: purchased and is_tool) for the Now card's live Buy Materials row.
     currentJob
       ? supabase
           .from("material_lists")
@@ -278,7 +266,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
           .in("parent_id", six.map((t) => t.id))
           .order("created_at", { ascending: true })
       : Promise.resolve({ data: [] as any[] }),
-    // THE CLOCKED-IN JOB'S TASKS for the Now block (0358): how many are left and the next three,
+    // THE CLOCKED-IN JOB'S TASKS for the Now card (0358): how many are left and the next three,
     // in the list's order. Off the clock (no currentJob) there is nothing to read. A head count and
     // three rows, one query; a lost read shows no Tasks line rather than a wrong "0 left".
     currentJob
@@ -295,7 +283,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
     ((mlRes as any)?.data as any) ?? null;
   const sixKids = ((kidsRes as any)?.data ?? []) as any[];
   // THE JOB'S MATERIALS, AS ONE TASK (lib/materials-checklist): "Buy Materials · N Open" leads the
-  // Now block while anything on the list is left to buy, and counts as one of the tasks left. It opens
+  // Now card while anything on the list is left to buy, and counts as one of the tasks left. It opens
   // the same list the Materials button does.
   const nowBuy = buyMaterials(currentMaterials?.material_list_items ?? []);
   const currentMaterialsHref = currentMaterials
@@ -376,22 +364,20 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
   const custOpts = toCustomerOptions(customers);
   const staffOpts = toStaffOptions(staff);
   const people = (staff ?? []).map((s: any) => ({ id: s.id, full_name: s.full_name }));
-  const openInquiries = leadsRes.count ?? 0;
-  const recentLeads = ((leadsRes.data ?? []) as { id: string; name: string | null; next_follow_up_at: string | null }[]);
 
   const niceDay = prettyDay(todayStr);
   const empty = (label: string) => <p className="px-5 py-6 text-center text-sm text-slate-400">{label}</p>;
 
-  // Needs-action shows the top 5 (the query already sorts urgent-first);
+  // Needs You shows the top 5 (the query already sorts urgent-first);
   // ?actions=all expands to the full list without a client component.
   const showAllActions = actionsRaw === "all";
   const visibleActions = showAllActions ? actionItems : actionItems.slice(0, 5);
 
-  // ── Agenda (Now / Next / Later) ─────────────────────────────────────────────
+  // ── Agenda (Earlier / Next / Later) ─────────────────────────────────────────
   // One chronological stream of WHERE YOU'LL BE — timed jobs + appointments,
   // nothing else. Tasks live in Today's 6 above (doctrine law 2: a due-today task
   // rendering as slot AND agenda row would be a double map). The job you're ON is
-  // the "Now" hero block; the rest groups into Next (soonest) and Later.
+  // the Now card at the top; the rest groups into Earlier, Next (soonest) and Later.
   type Agenda = {
     key: string;
     kind: "job" | "appt";
@@ -402,8 +388,9 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
     href: string;
     status?: string;
     apptType?: string;
-    // Row verbs (staff, day view only): the appt record powers the edit pencil +
-    // move; jobs carry just what their move contract needs.
+    // The row's ⋯ (staff, day view AND week view): a visit's record powers Mark Done, Move and Edit
+    // Details; a job carries just what its move contract needs (its id; the row's day is handed to
+    // agendaRows). The week view's visits carry no record, so they get no ⋯.
     appt?: ApptValue;
     jobId?: string;
     /** The person waiting — powers the running-late one-tap text on the NEXT visit. */
@@ -608,25 +595,39 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
 
   const navBtnCls =
     "inline-flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center gap-1.5 rounded-lg border border-brand/30 bg-brand-light/40 px-3 text-xs font-medium text-brand hover:bg-brand-light";
-  const agendaRows = (items: Agenda[]) =>
+  // `day` is the ROW's own day (org tz): today in the day view, that day in the week view. A job's
+  // Move moves the range that day sits in (moveJobDay's fromDate), so Thursday's row of a Mon-Tue +
+  // Thu-Fri job moves Thu-Fri, never Mon-Tue.
+  const agendaRows = (items: Agenda[], day: string) =>
     items.map((i) => (
       <li key={i.key} className="flex items-center gap-3 px-5 py-3">
         <div className="w-14 shrink-0 text-sm font-medium text-slate-700">{i.time ? fmtTime(i.time) : "—"}</div>
-        <Link href={i.href} className="min-w-0 flex-1 hover:opacity-80">
-          <div className="flex items-center gap-2">
+        {/* 44px to the thumb (py-1 over the row's own padding), the row's height unchanged. The
+            title has its own line, so the verbs on the right can never squeeze it to nothing at
+            375px; the kind badge sits with the where. */}
+        <Link href={i.href} className="-my-1 min-w-0 flex-1 py-1 hover:opacity-80">
+          <div className="truncate text-sm font-medium text-slate-900">{i.title}</div>
+          <div className="mt-0.5 flex min-w-0 items-center gap-1.5">
             {i.kind === "appt" ? (
               <>
-                <Badge tone={isInspectionType(i.apptType) ? "amber" : "blue"}>{appointmentTypeLabel(i.apptType)}</Badge>
+                <Badge tone={isInspectionType(i.apptType) ? "amber" : "blue"} className="shrink-0">
+                  {appointmentTypeLabel(i.apptType)}
+                </Badge>
                 {/* audit v921: the same "pending pick" marker the calendar and the appointment
                     page carry — My Day drew an unconfirmed visit like a firm booking. */}
-                {i.status === "proposed" && <Badge tone="amber">pending pick</Badge>}
+                {i.status === "proposed" && (
+                  <Badge tone="amber" className="shrink-0">
+                    pending pick
+                  </Badge>
+                )}
               </>
             ) : i.status ? (
-              <Badge tone={statusTone(i.status)}>{jobStatusLabel(i.status)}</Badge>
+              <Badge tone={statusTone(i.status)} className="shrink-0">
+                {jobStatusLabel(i.status)}
+              </Badge>
             ) : null}
-            <span className="truncate text-sm font-medium text-slate-900">{i.title}</span>
+            {i.sub && <span className="min-w-0 truncate text-xs text-slate-400">{i.sub}</span>}
           </div>
-          {i.sub && <div className="truncate text-xs text-slate-400">{i.sub}</div>}
         </Link>
         {/* WRAP, don't cover. Andrew (mobile): "the Navigate field/button covers up the other
             items on the Today view." A shrink-0 no-wrap cluster of up to four 44px buttons ate the
@@ -639,7 +640,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
               className={navBtnCls}
               title="Running late? Opens a heads-up text from this phone"
             >
-              <MessageSquare className="h-4 w-4 shrink-0" /> <span className="hidden sm:inline">Running late?</span>
+              <MessageSquare className="h-4 w-4 shrink-0" /> <span className="hidden sm:inline">Running Late?</span>
             </a>
           )}
           {i.address && (
@@ -647,22 +648,24 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
               <Navigation className="h-4 w-4 shrink-0" /> <span className="hidden sm:inline">Navigate</span>
             </NavLink>
           )}
-          {/* Row verbs (staff): the edit pencil kills the old dead-end (appt row →
-              the job page's read-only tab); MoveToDay is the ONE reschedule
-              grammar app-wide. Techs keep plain rows — the actions are
-              staff-gated server-side. */}
-          {isStaff && i.appt && (
-            <AppointmentButton
+          {/* THE OFFICE'S VERBS, behind one 44px ⋯ (the app's one row sheet): a visit's Mark Done,
+              Move To Another Day… and Edit Details… (the edit kills the old dead end, appt row →
+              the job page's read-only tab); a job's Move To Another Day… only. MoveToDay is the ONE
+              reschedule grammar app-wide. Techs keep plain rows, no ⋯: the actions are staff-gated
+              server-side. A week-view visit carries no record, so it gets no ⋯. */}
+          {isStaff && (i.appt || i.jobId) && (
+            <AgendaRowMenu
+              title={i.title}
+              subline={[i.time ? fmtTime(i.time) : null, i.sub].filter(Boolean).join(" · ") || null}
+              appt={i.appt}
+              jobId={i.jobId}
+              fromDate={day}
+              tz={tz}
               jobs={jobOpts}
               customers={custOpts}
               staff={staffOpts}
-              appointment={i.appt}
-              triggerClassName="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-brand"
             />
           )}
-          {isStaff && i.appt && <ApptDoneButton id={i.appt.id} title={i.appt.title ?? "appointment"} />}
-          {isStaff && i.appt && <ApptMoveButton id={i.appt.id} startsAt={i.appt.starts_at} endsAt={i.appt.ends_at} tz={tz} />}
-          {isStaff && i.jobId && <JobMoveButton jobId={i.jobId} fromDate={todayStr} />}
         </div>
       </li>
     ));
@@ -673,8 +676,8 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
       <RefreshOnVisible />
       {/* Header + weather (Erik-spec): the bigger weather widget fills the space to the RIGHT
           of the date at EVERY width (a plain flex row, not PageHeader's stack-on-mobile). The
-          daily quote gets its OWN line below so it never truncates or crowds the clock box. */}
-      <div className="mb-2 flex items-center justify-between gap-3">
+          daily quote gets its OWN line under the Now card so it never truncates or crowds it. */}
+      <div className="mb-4 flex items-center justify-between gap-3">
         <div className="min-w-0">
           <h1 className="text-2xl font-bold tracking-tight text-slate-900">My Day</h1>
           <p className="mt-1 text-sm text-slate-500">{niceDay}</p>
@@ -686,73 +689,97 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
           source={getOrgSettings((org as any)?.settings).weather_source}
         />
       </div>
-      <p className="mb-4 text-sm italic text-slate-400">&ldquo;{dailyQuote}&rdquo;</p>
 
-      {/* TOP ROW (Erik 7/15) — staff get a 2-col split (stacked on the phone):
-          the MINIMAL clock (cn-v502) LEFT, the open-leads snapshot RIGHT — the
-          old bottom-of-page "Owner snapshot" tile MOVED up here (count + the
-          few newest open leads + follow-ups), not duplicated. Techs keep the
-          full-width clock; /leads is staff territory. With Leads switched off (0352) staff
-          get the tech's full-width clock too: the card goes with the switch. */}
-      {isStaff && leadsOn ? (
-        <div className="mb-4 @container">
-          {/* Container query, not a viewport breakpoint: in the fine-pointer shell band
-              (840-1023px) the dock + subnav leave ~500px of content while sm/md still say
-              "tablet" — the two cards would squeeze to ~280px and crush the clock button.
-              Columns split only when THIS row actually has the room. */}
-          <div className="grid gap-3 @[42rem]:grid-cols-2">
-          <MyDayClock
-            userId={user?.id ?? null}
-            className="h-full"
-            open={openEntry ? { id: openEntry.id, clock_in: openEntry.clock_in, notes: openEntry.notes ?? null, shift_start: openShiftStart } : null}
-            jobLabel={currentJob ? jobLabel(currentJob) : null}
-          />
-          <Link
-            href="/leads"
-            className="block h-full rounded-xl border border-slate-200 bg-white px-4 py-3 hover:bg-slate-50"
-          >
-            <div className="flex items-center gap-2.5">
-              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600">
-                <UserPlus className="h-4 w-4" />
-              </span>
-              <span className="text-lg font-bold leading-none text-slate-900">{openInquiries}</span>
-              <span className="text-xs text-slate-500">Open leads</span>
-              <span className="ml-auto text-xs font-medium text-brand">/leads →</span>
+      {/* THE NOW CARD, full width, for every role: the clock, the job on the punch and its doors, in
+          one card (it replaced the clock card, the Today card's Now block and the Which Job block).
+          The Open Leads card that once sat beside the clock for staff is gone too: a lead is a Needs
+          You row below, and the Sales tile's badge counts the new, uncontacted ones.
+          The card is keyed to the OPEN PUNCH's job. A punch that carries none asks "Which job are you
+          on?" with one Pick The Job door (the clock's own sheet), so the doors are never gone without
+          a sentence (Erik 2026-09-11, "what happened to my materials button").
+          Only the job's name, customer · address and its href cross into the client card; the doors
+          below render here, on the server. */}
+      <NowCard
+        userId={user?.id ?? null}
+        open={
+          openEntry
+            ? {
+                id: openEntry.id,
+                clock_in: openEntry.clock_in,
+                notes: openEntry.notes ?? null,
+                shift_start: openShiftStart,
+                onJob: !!openEntry.job_id,
+              }
+            : null
+        }
+        job={
+          currentJob
+            ? {
+                name: jobLabel(currentJob),
+                sub: [currentJob.customers?.name, currentJob.address].filter(Boolean).join(" · ") || null,
+                href: `/jobs/${currentJob.id}`,
+              }
+            : null
+        }
+      >
+        {currentJob && (
+          <>
+            {/* THE JOB'S DOORS, each 44px: Navigate (only when there is somewhere to go), Materials
+                (the job's one list) and, for the office, Add Cost. Add Cost is the office's —
+                createBill is requireStaff — so a tech never fills a form that refuses on save (NO
+                DEAD ENDS). Two columns for a tech, three for the office (two below ~360px). */}
+            <div className={`mt-3 grid gap-2 text-sm font-medium ${isStaff ? "grid-cols-2 min-[360px]:grid-cols-3" : "grid-cols-2"}`}>
+              {currentNavTarget && (
+                <NavLink
+                  address={currentNavTarget}
+                  className="flex min-h-[44px] items-center justify-center gap-2 rounded-lg bg-[rgb(var(--glass-ink))] text-white shadow-sm hover:bg-[rgb(var(--glass-ink))]/90"
+                >
+                  <Navigation className="h-4 w-4 shrink-0" /> Navigate
+                </NavLink>
+              )}
+              <Link
+                href={currentMaterialsHref}
+                className="flex min-h-[44px] items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+              >
+                Materials
+              </Link>
+              {/* snapFirst: on the clock, a cost is a bill in his hand, so the sheet opens on
+                  Snap the Bill instead of a focused Supplier field. */}
+              {isStaff && (
+                <QuickCostButton
+                  orgId={(org as any)?.id ?? ""}
+                  jobId={currentJob.id}
+                  snapFirst
+                  nortOn={featureOn(features, "nort")}
+                  className="flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+                />
+              )}
             </div>
-            {recentLeads.length > 0 && (
-              <ul className="mt-2 space-y-1">
-                {recentLeads.map((l) => (
-                  <li key={l.id} className="flex items-center justify-between gap-2 text-xs">
-                    <span className="min-w-0 truncate font-medium text-slate-700">{l.name ?? "—"}</span>
-                    <span className="shrink-0 text-slate-400">
-                      {l.next_follow_up_at ? `follow up ${formatDateShort(l.next_follow_up_at)}` : "no follow-up set"}
-                    </span>
-                  </li>
-                ))}
-              </ul>
+            {/* THE JOB'S TASKS, while he's on it (0358): "Tasks: 3 left", the next three to check
+                off right here, and All Tasks for the rest. Only on the clock, only this job;
+                nothing when the list is done or empty. */}
+            {nowTasks && nowTasks.left > 0 && (
+              <NowTasks
+                jobId={currentJob.id}
+                left={nowTasks.left}
+                next={nowTasks.next}
+                materials={nowBuyOpen > 0 ? { open: nowBuyOpen, href: currentMaterialsHref } : null}
+              />
             )}
-          </Link>
-          </div>
-        </div>
-      ) : (
-        <MyDayClock
-            userId={user?.id ?? null}
-          open={openEntry ? { id: openEntry.id, clock_in: openEntry.clock_in, notes: openEntry.notes ?? null, shift_start: openShiftStart } : null}
-          jobLabel={currentJob ? jobLabel(currentJob) : null}
-        />
-      )}
-
-
+          </>
+        )}
+      </NowCard>
+      <p className="mb-4 text-sm italic text-slate-400">&ldquo;{dailyQuote}&rdquo;</p>
 
       {/* The CrewBoard that sat here is GONE (Erik changed his mind, cn-v503):
           crew presence + hours live together on /timecards now — the "on the
-          clock" strip above its week grid. My Day keeps the clock + reports. */}
+          clock" strip above its week grid. My Day keeps the Now card + reports. */}
 
       {/* CREW-LEAD DAILY REPORTS (staff only) — THE debrief surface, moved here whole from
           /timecards (cn-v958). A debrief answers "what got done" and "WHAT MATERIALS DO WE NEED
           TOMORROW", and tomorrow is a My Day question; on a payroll-review page it was the
           biggest block standing between Erik and the money he opens that page for. It sits in
-          slot 2, straight under the clock: the debrief is the other end of the same shift, and
+          slot 2, straight under the Now card: the debrief is the other end of the same shift, and
           it has to be read BEFORE today's agenda, not after it — the materials line is what
           changes the morning.
           The footer link to /timecards is gone with the move: this IS the review list now, so
@@ -856,8 +883,9 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
         </Card>
       )}
 
-      {/* TODAY — the execution feed in slot 2, so the 3-second glance (clock
-          status + what's happening when) fits in one viewport, zero scroll. */}
+      {/* TODAY — the execution feed right under the Now card (and the office's debriefs), so the
+          3-second glance (where I am + what's happening when) fits in one viewport. It holds only
+          Earlier / Next / Later: the job you're on is the Now card. */}
       {view === "week" ? (
         /* Tech week — the agenda grouped by day (Sun–Sat), paged via ?week=. */
         <Card className="mb-4 overflow-hidden">
@@ -866,23 +894,24 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
               <CalendarCheck className="h-4 w-4 shrink-0 text-brand" />
               <span className="truncate">{weekOffset === 0 ? "This week" : `Week of ${weekOfLabel}`}</span>
             </div>
-            <div className="-my-1 flex shrink-0 items-center gap-0.5">
+            {/* 44px, all three (the paging arrows were 36px): -my-3 keeps the header its height. */}
+            <div className="-my-3 flex shrink-0 items-center gap-0.5">
               <Link
                 href={`/planner?view=week&week=${weekOffset - 1}`}
                 aria-label="Previous week"
-                className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                className="flex h-11 w-11 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700"
               >
                 <ChevronLeft className="h-4 w-4" />
               </Link>
               {weekOffset !== 0 && (
-                <Link href="/planner?view=week" className="px-1 text-xs font-medium text-brand hover:underline">
+                <Link href="/planner?view=week" className="inline-flex min-h-11 items-center px-1 text-xs font-medium text-brand hover:underline">
                   This Week
                 </Link>
               )}
               <Link
                 href={`/planner?view=week&week=${weekOffset + 1}`}
                 aria-label="Next week"
-                className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                className="flex h-11 w-11 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700"
               >
                 <ChevronRight className="h-4 w-4" />
               </Link>
@@ -901,7 +930,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
                   {d.label}{d.dayStr === todayStr ? " · Today" : ""}
                 </div>
                 {d.items.length > 0 ? (
-                  <ul className="divide-y divide-slate-100">{agendaRows(d.items)}</ul>
+                  <ul className="divide-y divide-slate-100">{agendaRows(d.items, d.dayStr)}</ul>
                 ) : (
                   <p className="px-5 py-2 text-xs text-slate-300">Open</p>
                 )}
@@ -910,95 +939,26 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
           )}
         </Card>
       ) : (
-        /* Day — ONE card: the job you're ON as its header block (2×2 field
-           actions intact), then Next / Later. */
+        /* Day — the Today card holds only Earlier / Next / Later: the job you're ON is the Now
+           card at the top of the page, with its doors. */
         <Card className="mb-4 overflow-hidden">
           <div className="flex items-center justify-between gap-2 border-b border-slate-100 px-5 py-3">
             <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
               <CalendarCheck className="h-4 w-4 text-brand" /> Today
             </div>
-            <div className="flex shrink-0 items-center gap-2.5">
-              {isStaff && <AppointmentButton jobs={jobOpts} customers={custOpts} staff={staffOpts} defaultDate={todayStr} compact />}
-              {/* THE week lives at /schedule (staff); techs page their own week here. */}
+            {/* A tech pages his own week here. The office has no doors in this header: a new
+                appointment is + › New Appointment, and THE week is the Schedule tile (a staff
+                /planner?view=week still lands on /schedule?view=week, above). */}
+            {!isStaff && (
               <Link
-                href={isStaff ? "/schedule?view=week" : "/planner?view=week"}
-                className="whitespace-nowrap text-xs font-medium text-brand hover:underline"
+                href="/planner?view=week"
+                className="-my-3 inline-flex min-h-11 shrink-0 items-center whitespace-nowrap px-2 text-xs font-medium text-brand hover:underline"
               >
                 Week →
               </Link>
-            </div>
+            )}
           </div>
 
-          {/* NOW — the job you're on, folded in as the card's header block. The
-              action grid stays: Navigate / Open / Materials are the field crew's #1
-              affordances. Add Cost is the office's — createBill is requireStaff — so
-              it renders for staff only; a tech never fills a form that refuses on
-              save (NO DEAD ENDS). The other three doors are the crew's: the whole job,
-              and the job's one materials list, are theirs to read and work.
-              The block is keyed to the OPEN PUNCH's job. A punch that carries none (the
-              resolver found nothing to attach) used to drop the whole block silently — the
-              four doors gone with no sentence (Erik 2026-09-11, "what happened to my materials
-              button"). Now that punch gets the WhichJob block below instead: one pick puts the
-              whole entry on the job and this block takes its place on the refresh. */}
-          {currentJob && (
-            <div className="border-b border-brand/20 bg-brand-light/30 px-5 py-4">
-              <div className="text-[11px] font-semibold uppercase tracking-wide text-brand">Now</div>
-              <Link href={`/jobs/${currentJob.id}`} className="mt-0.5 block text-lg font-bold text-slate-900 hover:text-brand">
-                {jobLabel(currentJob)}
-              </Link>
-              {(currentJob.customers?.name || currentJob.address) && (
-                <div className="text-sm text-slate-500">
-                  {currentJob.customers?.name ?? ""}{currentJob.address ? ` · ${currentJob.address}` : ""}
-                </div>
-              )}
-              <div className="mt-3 grid grid-cols-2 gap-2 text-sm font-medium">
-                {currentNavTarget && (
-                  <NavLink
-                    address={currentNavTarget}
-                    className="flex min-h-[44px] items-center justify-center gap-2 rounded-lg bg-[rgb(var(--glass-ink))] text-white shadow-sm hover:bg-[rgb(var(--glass-ink))]/90"
-                  >
-                    <Navigation className="h-4 w-4 shrink-0" /> Navigate
-                  </NavLink>
-                )}
-                <Link href={`/jobs/${currentJob.id}`} className="flex min-h-[44px] items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50">
-                  Open
-                </Link>
-                <Link
-                  href={currentMaterialsHref}
-                  className="flex min-h-[44px] items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
-                >
-                  Materials
-                </Link>
-                {/* snapFirst: on the clock, a cost is a bill in his hand, so the sheet opens on
-                    Snap the Bill instead of a focused Supplier field. */}
-                {isStaff && (
-                  <QuickCostButton
-                    orgId={(org as any)?.id ?? ""}
-                    jobId={currentJob.id}
-                    snapFirst
-                    nortOn={featureOn(features, "nort")}
-                    className="flex min-h-[44px] items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
-                  />
-                )}
-              </div>
-              {/* THE JOB'S TASKS, while he's on it (0358): "Tasks: 3 left", the next three to check
-                  off right here, and All Tasks for the rest. Only on the clock, only this job;
-                  nothing when the list is done or empty. */}
-              {nowTasks && nowTasks.left > 0 && (
-                <NowTasks
-                  jobId={currentJob.id}
-                  left={nowTasks.left}
-                  next={nowTasks.next}
-                  materials={nowBuyOpen > 0 ? { open: nowBuyOpen, href: currentMaterialsHref } : null}
-                />
-              )}
-            </div>
-          )}
-          {/* On the clock with NO job on the punch: ask, don't vanish. Keyed on the punch's own
-              job_id being empty — a punch that carries a job never lands here. */}
-          {openEntry && !openEntry.job_id && (
-            <WhichJob entryId={openEntry.id} />
-          )}
 
           {nextAgenda.length === 0 && laterAgenda.length === 0 && earlierAgenda.length === 0 ? (
             empty(currentJob ? "Nothing else on the schedule today." : "Nothing left on the schedule today.")
@@ -1007,19 +967,19 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
               {earlierAgenda.length > 0 && (
                 <>
                   <div className="bg-slate-50/70 px-5 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Earlier today</div>
-                  <ul className="divide-y divide-slate-100">{agendaRows(earlierAgenda)}</ul>
+                  <ul className="divide-y divide-slate-100">{agendaRows(earlierAgenda, todayStr)}</ul>
                 </>
               )}
               {nextAgenda.length > 0 && (
                 <>
                   <div className="bg-slate-50/70 px-5 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-brand">Next</div>
-                  <ul className="divide-y divide-slate-100">{agendaRows(nextAgenda)}</ul>
+                  <ul className="divide-y divide-slate-100">{agendaRows(nextAgenda, todayStr)}</ul>
                 </>
               )}
               {laterAgenda.length > 0 && (
                 <>
                   <div className="bg-slate-50/70 px-5 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Later</div>
-                  <ul className="divide-y divide-slate-100">{agendaRows(laterAgenda)}</ul>
+                  <ul className="divide-y divide-slate-100">{agendaRows(laterAgenda, todayStr)}</ul>
                 </>
               )}
             </>
@@ -1031,7 +991,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
           2026-09-26: "fold that into Today's 6 with an add reminder/task up top as that will be
           the most useful"): the Add line leads it — type the words; pick a job and it goes on that
           job's Tasks, leave it and it's my Reminder for today. The six below are my own Reminders
-          (pins + the ranked pool); job tasks live on their job and in the Now block above. */}
+          (pins + the ranked pool); job tasks live on their job and in the Now card above. */}
       <YourList
         six={six as any}
         subtasks={sixKids as any}
@@ -1043,10 +1003,10 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
 
       {/* The office/else DOOR LINES that sat here were removed (Erik's declutter):
           office tasks live at /tasks, and flagged items already surface via
-          Needs-attention below. The backlog stays reachable through the Today's-6
+          Needs You below. The backlog stays reachable through the Today's-6
           Grab-One link + the dock. */}
 
-      {/* Needs action — the pure DECISION inbox (money, leads, waiting, leak
+      {/* NEEDS YOU — the pure DECISION inbox (money, leads, waiting, leak
           detectors), right under the day so pull-work follows the plan. Tasks
           live in Today's 6 + the doors above, never here. */}
       {/* A supplier paper filed from the LAST card leaves no "Supplier Bills" line to hold its
@@ -1055,7 +1015,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
       {actionItems.length > 0 && (
         <Card className="mb-4 overflow-hidden">
           <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3">
-            <h2 className="text-sm font-semibold text-slate-900">Needs action</h2>
+            <h2 className="text-sm font-semibold text-slate-900">Needs You</h2>
             <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-bold text-amber-700">
               {actionItems.length}
             </span>
@@ -1066,7 +1026,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
           {!showAllActions && actionItems.length > 5 && (
             <Link
               href={view === "week" ? `/planner?view=week${weekOffset ? `&week=${weekOffset}` : ""}&actions=all` : "/planner?actions=all"}
-              className="block border-t border-slate-100 px-5 py-2.5 text-center text-sm font-medium text-brand hover:bg-slate-50"
+              className="flex min-h-11 items-center justify-center border-t border-slate-100 px-5 text-center text-sm font-medium text-brand hover:bg-slate-50"
             >
               Show All {actionItems.length} →
             </Link>
@@ -1078,10 +1038,11 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
 
       {/* The MONEY LINE (getMoneyPipeline totals) left this page — the AR page owns
           that view now, and overdue/draft invoices already surface as actionable
-          rows in the Needs-action inbox above. My Day carries no money map. */}
+          rows in the Needs You inbox above. My Day carries no money map. */}
 
-      {/* The "Owner snapshot" open-leads tile that closed the page MOVED to the
-          top row beside the clock (Erik 7/15) — one leads snapshot, better slot. */}
+      {/* No leads snapshot anywhere on this page (the "Owner snapshot" tile, then the Open Leads
+          card beside the clock, are both gone): leads live in Needs You's rows and on the Sales
+          tile's badge, which counts the new, uncontacted ones. */}
     </div>
   );
 }

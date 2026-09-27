@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
 /**
  * REMINDERS (0358). /tasks is the one Reminders page: the tasks with no job that are yours (you made
  * them, or they were made for you), and nobody else's. A job's tasks live on the job (its Tasks chip)
- * and in My Day's Now block. The old ?mine / ?else doors mean nothing now (every Reminder here is
+ * and in My Day's Now card. The old ?mine / ?else doors mean nothing now (every Reminder here is
  * already yours) and are ignored; the /tasks/<category> pages are gone (By Category below).
  */
 export default async function TasksPage({

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { createElement, isValidElement, type ReactElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 /**
@@ -20,8 +20,11 @@ vi.mock("./which-job-actions", () => ({
   whichJobChoices: vi.fn(async () => ({ ok: true, jobs: [], isStaff: false })),
   putPunchOnJob: vi.fn(async () => ({ ok: true })),
 }));
+// My Day's Now card punches through the clock's own actions; the tests below only render it.
+vi.mock("./actions", () => ({ clockIn: vi.fn(), clockOut: vi.fn() }));
 
-import { WhichJob, WhichJobSheetView, type SheetPhase } from "../planner/which-job";
+import { WhichJobSheetView, type SheetPhase } from "../planner/which-job";
+import { NowCard } from "../planner/now-card";
 import { Modal } from "@/components/ui/modal";
 import { askAfterPunch, orderWhichJobChoices, pickOutcome, routePick, sheetAfterLoad, whichJobLabel, type WhichJobOption } from "./which-job-choices";
 
@@ -231,25 +234,36 @@ describe("where a pick's answer lands", () => {
 
 describe("My Day asks from the same list the clock asked from", () => {
   const src = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+  const onNoJob = { id: "p1", clock_in: "2026-09-27T14:00:00Z", notes: null, onJob: false };
 
-  it("the Now block's door opens the clock's own sheet: no list of its own to fall short of it", () => {
-    const html = renderToStaticMarkup(createElement(WhichJob, { entryId: "p1" }));
+  it("the Now card on a punch with no job has ONE door, Pick The Job, and it opens the clock's own sheet", () => {
+    const html = renderToStaticMarkup(createElement(NowCard, { userId: "u1", open: onNoJob, job: null }));
     expect(html).toContain("Which job are you on?");
-    expect(html).toMatch(/<button[^>]*min-h-\[44px\][^>]*>Pick The Job<\/button>/);
+    expect(html).toContain("You’re on the clock, but this punch has no job yet.");
+    // One door, 44px (the default button is h-11), and no list of its own to fall short of the sheet.
+    expect(html.match(/Pick The Job/g)).toHaveLength(1);
+    expect(html).toMatch(/<button[^>]*class="[^"]*h-11[^"]*"[^>]*>Pick The Job<\/button>/);
     expect(html).not.toContain("<select");
-    const block = src("src/app/(app)/planner/which-job.tsx");
-    expect(block).toContain('{asking && <WhichJobSheet entryId={entryId} moment="in" onClose={() => setAsking(false)} />}');
-    // The page reads no in-progress-only list for it any more (a tech helping on a crewmate's job
-    // scheduled today found it on the sheet, tapped Skip, and couldn't find it here).
-    const page = src("src/app/(app)/planner/page.tsx");
-    expect(page).toContain("<WhichJob entryId={openEntry.id} />");
-    expect(page).not.toMatch(/\.eq\("status", "in_progress"\)\.order\("created_at"/);
+    expect(html).not.toContain("Put It on the Job");
+    const card = src("src/app/(app)/planner/now-card.tsx");
+    expect(card).toMatch(/onClick=\{\(\) => setAsk\(\{ entryId: open\.id, moment: "in" \}\)\}>\s*Pick The Job/);
+    // The card mounts the sheet once: the same one the clock opens after a punch on no job.
+    expect(card.match(/<WhichJobSheet /g)).toHaveLength(1);
+    expect(card).not.toContain("/planner#which-job");
   });
 
-  it("the clock card's Put It on the Job opens that sheet too, instead of scrolling to a picker", () => {
-    const card = src("src/app/(app)/planner/my-day-clock.tsx");
-    expect(card).toMatch(/onClick=\{\(\) => setAsk\(\{ entryId: open\.id, moment: "in" \}\)\}[\s\S]{0,120}Put It on the Job/);
-    expect(card).not.toContain("/planner#which-job");
+  it("the page draws no Which Job block of its own and reads no in-progress-only list for it", () => {
+    // A tech helping on a crewmate's job scheduled today found it on the sheet, tapped Skip, and
+    // couldn't find it in the page's own shorter list. One list now, the sheet's.
+    const page = src("src/app/(app)/planner/page.tsx");
+    expect(page).not.toContain("<WhichJob entryId=");
+    expect(page).not.toMatch(/\.eq\("status", "in_progress"\)\.order\("created_at"/);
+    const block = src("src/app/(app)/planner/which-job.tsx");
+    expect(block).not.toMatch(/export function WhichJob\(/);
+    // The sheet and its view keep their names and props: Timeclock and the offline queue open it too.
+    expect(block).toContain("export function WhichJobSheet({");
+    expect(block).toContain("export function WhichJobSheetView({");
+    expect(existsSync(join(process.cwd(), "src/app/(app)/planner/my-day-clock.tsx"))).toBe(false);
   });
 });
 

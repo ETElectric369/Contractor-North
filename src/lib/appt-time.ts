@@ -1,7 +1,7 @@
 // THE one place a calendar move recomputes an appointment's instant. A move
 // changes the DAY, never the time-of-day: the appointment stays booked for the
 // wall-clock hour:minute it was set to, and its duration is preserved. Both the
-// month/day calendar move and the My Day ApptMoveButton call this, so the two
+// month/day calendar move and My Day's agenda ⋯ (Move To Another Day…) call this, so the two
 // paths can't drift — especially across a DST boundary, where the naive
 // "add N milliseconds" math would slide the start by an hour.
 
