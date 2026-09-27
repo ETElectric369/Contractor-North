@@ -98,6 +98,9 @@ export function ResourcesManager({ resources, canEdit }: { resources: Resource[]
 
   function resetForm() {
     live.current.session++;
+    // A read still out belongs to the form that was open: its answer is thrown away (the session
+    // check), and the new form is not left "Reading Their Site…" with Save disabled waiting for it.
+    setReading(false);
     setForm(EMPTY_FORM);
     setCategoryTouched(false);
     setFromSite(new Set());
@@ -151,7 +154,9 @@ export function ResourcesManager({ resources, canEdit }: { resources: Resource[]
     } catch {
       if (session === live.current.session) setFillNote({ tone: "error", text: "Couldn't read that site. Check your connection, or type the details in." });
     } finally {
-      setReading(false);
+      // Only this form's read may end this form's reading: a read from a form since closed or
+      // switched must not end one the new form started.
+      if (session === live.current.session) setReading(false);
     }
   }
 
