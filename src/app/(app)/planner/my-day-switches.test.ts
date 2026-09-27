@@ -23,7 +23,7 @@ import { YourList, AddReminderLine } from "./your-list";
 import { NewReminderBox } from "../tasks/tasks-view";
 
 const JOBS = [{ id: "j1", label: "J-055 Smith Panel", number: "J-055" }];
-const line = (jobs = JOBS) => renderToStaticMarkup(createElement(AddReminderLine, { jobs, todayStr: "2026-09-26", sixFull: false }));
+const line = (jobs = JOBS) => renderToStaticMarkup(createElement(AddReminderLine, { jobs, todayStr: "2026-09-26", pinsFull: false, bumps: null }));
 
 describe("Today's 6: the one Add line up top (Erik, 2026-09-26)", () => {
   it("one line, Title Case, 44px: type the words, an optional job chip, Add", () => {

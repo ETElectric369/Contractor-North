@@ -72,9 +72,23 @@ const SHEET_ROW =
  * THE ADD LINE at the top of Today's 6. One line, one optional chip, one button:
  *   · no job  → a Reminder, pinned to today (focus_date) so it shows in the six it was added to;
  *   · a job   → that job's task, on its list for whoever is on the job ("Added To J-055's Tasks").
- * The toast always says where it went (nothing silent).
+ * The toast always says where it went (nothing silent). A pin ranks first (lib/six-rank), so a new
+ * Reminder takes a slot unless six pins already hold them all; on a full card the last slot, never a
+ * pin, is the one it moves to Reminders, and the toast names it.
  */
-export function AddReminderLine({ jobs, todayStr, sixFull }: { jobs: AddJob[]; todayStr: string; sixFull: boolean }) {
+export function AddReminderLine({
+  jobs,
+  todayStr,
+  pinsFull,
+  bumps,
+}: {
+  jobs: AddJob[];
+  todayStr: string;
+  /** Six pins already: a seventh pin can't be sure of a slot. */
+  pinsFull: boolean;
+  /** The six are full (not all pins): the title of the last slot, which a new pin moves out. */
+  bumps: string | null;
+}) {
   const router = useRouter();
   const toast = useToast();
   const [pending, start] = useTransition();
@@ -92,7 +106,8 @@ export function AddReminderLine({ jobs, todayStr, sixFull }: { jobs: AddJob[]; t
       }
       if (res.duplicate) toast(res.speak ?? "Already on the list.", "info");
       else if (job) toast(`Added To ${job.number || job.label}'s Tasks`, "success");
-      else if (sixFull) toast("Reminder added. Today's 6 is full, so it's on your Reminders list.", "success");
+      else if (pinsFull) toast("Reminder added and pinned. Today's 6 already holds six pins, so one of them waits on your Reminders list.", "success");
+      else if (bumps) toast(`Added To Today's 6. "${bumps}" moved to your Reminders list.`, "success");
       else toast("Added To Today's 6", "success");
       setTitle("");
       setJobId("");
@@ -253,7 +268,12 @@ export function YourList({
         <span className="text-xs font-medium text-slate-500">{Math.min(doneCount, 6)}/6</span>
       </div>
 
-      <AddReminderLine jobs={jobs} todayStr={todayStr} sixFull={six.length >= 6} />
+      <AddReminderLine
+        jobs={jobs}
+        todayStr={todayStr}
+        pinsFull={six.filter((t) => t.pinned).length >= 6}
+        bumps={six.length >= 6 ? six[six.length - 1].title : null}
+      />
 
       {six.length === 0 ? (
         <p className="px-5 py-5 text-center text-sm text-slate-400">
