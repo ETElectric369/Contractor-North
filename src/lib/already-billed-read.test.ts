@@ -237,6 +237,14 @@ describe("loadNoJobHoursSheet: TTUSD's days on INV-055", () => {
     expect(res.data.invoices.map((x) => [x.invoice.invoice_number, x.invoice.lines.map((l) => l.id), x.preselect])).toEqual([["INV-073", ["li-t5"], null]]);
   });
 
+  it("the shift he pressed is listed first, the rest newest first", async () => {
+    const res = await loadNoJobHoursSheet(fake(route()), ORG, ["t-806"]);
+    expect(res.ok && res.data.entries.map((e) => e.id)).toEqual(["t-806", "t-807"]);
+    const later = await loadNoJobHoursSheet(fake(route()), ORG, ["t-807"]);
+    expect(later.ok && later.data.entries.map((e) => e.id)).toEqual(["t-807", "t-806"]);
+    expect(later.ok && later.data.preticked).toEqual(["t-807"]);
+  });
+
   it("a shift the door named that is no longer open says so; the rest can still be marked", async () => {
     const res = await loadNoJobHoursSheet(fake(route()), ORG, ["t-billed"]);
     expect(res.ok && res.data.note).toMatch(/isn't open to mark any more/);

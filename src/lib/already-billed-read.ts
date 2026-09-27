@@ -38,6 +38,7 @@ import {
   eligibleLines,
   jobReach,
   noJobCanHoldHours,
+  noJobListOrder,
   noJobPreticked,
   preselectLine,
   sortInvoicesFor,
@@ -489,7 +490,8 @@ export async function readAlreadyBilledReach(
 
 // ── Hours on NO job ──────────────────────────────────────────────────────────────────────────────
 
-/** The most shifts on no job the sheet lists, newest first (the ones the door names always ride). */
+/** The most shifts on no job the sheet reads, the newest (the ones the door names always ride). It
+ *  lists what he pressed on first, then the rest newest first (noJobListOrder). */
 export const NO_JOB_SHEET_CAP = 150;
 
 const NO_JOB_ENTRY_COLUMNS = "id, clock_in, clock_out, lunch_minutes, job_code, split_from, profiles(id, full_name)";
@@ -557,7 +559,7 @@ export async function loadNoJobHoursSheet(supabase: Db, orgId: string, pressed: 
       l.heldHours = Math.round(held * 100) / 100;
     }
 
-  const open: AbEntry[] = rows
+  const listed: AbEntry[] = rows
     .filter((e) => !claimed.has(String(e.id)))
     .filter((e) => !(e.job_code && nonBillable.has(String(e.job_code).trim())))
     .map(
@@ -570,8 +572,9 @@ export async function loadNoJobHoursSheet(supabase: Db, orgId: string, pressed: 
         hours: entryHours(e),
       }),
     )
-    .filter((e) => e.hours > 0)
-    .sort((a, b) => a.clockIn.localeCompare(b.clockIn));
+    .filter((e) => e.hours > 0);
+  // What he pressed on first, then the rest newest first (noJobListOrder).
+  const open = noJobListOrder(listed, noJobPreticked(listed, want));
   const preticked = noJobPreticked(open, want);
   const gone = want.filter((id) => !open.some((e) => e.id === id));
   const note = gone.length

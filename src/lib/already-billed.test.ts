@@ -16,6 +16,7 @@ import {
   jobReach,
   noJobCanHoldHours,
   noJobHandsShown,
+  noJobListOrder,
   noJobPreticked,
   noJobStrayDoors,
   sortInvoicesFor,
@@ -390,6 +391,20 @@ describe("hours on NO job (TTUSD on INV-055, Ben Ebenezer on INV-058)", () => {
     expect(noJobPreticked(entries, ["t7b"])).toEqual(["t7a", "t7b"]);
     expect(noJobPreticked(entries, ["gone"])).toEqual([]);
     expect(noJobPreticked(entries, [])).toEqual([]);
+  });
+  it("lists what he pressed on first (a split shift's pieces in order), then every other shift newest first", () => {
+    const at = (id: string, clockIn: string, family?: string): AbEntry => ({ id, person: "p-jp", name: "JP Prince", clockIn, hours: 4, family });
+    const entries = [
+      at("jul16", "2026-07-16T15:00:00Z"),
+      at("aug06", "2026-08-06T15:00:00Z"),
+      at("sep25-pm", "2026-09-25T20:00:00Z", "sep25-am"),
+      at("sep25-am", "2026-09-25T15:00:00Z"),
+      at("aug07", "2026-08-07T15:00:00Z"),
+    ];
+    const ids = (pressed: string[]) => noJobListOrder(entries, pressed).map((x) => x.id);
+    expect(ids(["sep25-am", "sep25-pm"])).toEqual(["sep25-am", "sep25-pm", "aug07", "aug06", "jul16"]);
+    expect(ids(["aug06"])).toEqual(["aug06", "sep25-pm", "sep25-am", "aug07", "jul16"]);
+    expect(ids([])).toEqual(["sep25-pm", "sep25-am", "aug07", "aug06", "jul16"]);
   });
   it("Needs You: a shift a live invoice holds is billed (no row); the rest get Already Billed where an invoice with no job could hold them", () => {
     expect(noJobStrayDoors(["a", "b"], { canHold: true, claimed: new Set(["a"]) })).toEqual({ billed: new Set(["a"]), door: new Set(["b"]) });

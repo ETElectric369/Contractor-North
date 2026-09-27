@@ -162,6 +162,18 @@ export function noJobPreticked(entries: readonly AbEntry[], pressed: readonly st
 }
 
 /**
+ * THE ORDER THE NO-JOB SHEET LISTS SHIFTS IN: the ones ticked to start on top (what he pressed on,
+ * oldest piece first, so a split shift reads in order), then every other one newest first. The
+ * shift he pressed is always one of the newest (its Needs You row lives three days), so oldest
+ * first put it at the bottom, under every older shift.
+ */
+export function noJobListOrder<T extends Pick<AbEntry, "id" | "clockIn">>(entries: readonly T[], preticked: readonly string[]): T[] {
+  const on = new Set(preticked);
+  const oldest = (a: T, b: T) => a.clockIn.localeCompare(b.clockIn);
+  return [...entries.filter((e) => on.has(e.id)).sort(oldest), ...entries.filter((e) => !on.has(e.id)).sort((a, b) => oldest(b, a))];
+}
+
+/**
  * THE NEEDS YOU ROWS OF CLOSED SHIFTS ON NO JOB (0357): `billed` are the ones a live invoice already
  * holds (billed by hand on an invoice with no job, so no longer hours nobody can bill: no row);
  * `door` are the rest, when a sent invoice with no job could hold them. `reach` null is a lost read:
