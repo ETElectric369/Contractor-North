@@ -56,11 +56,12 @@ describe("the setup questions (Start Here with Nort off) say nothing as Nort", (
     expect(s).toContain('"Save The Drafts And Read Them Later"');
     // The Nort-voiced lines sit only inside a nortOn branch.
     for (const l of unswitched("src/components/setup-interview.tsx")) expect(l).toMatch(/label="Tell Nort about your business"|I never got your trade|tell me your trade/);
-    const cap = src("src/components/setup-button.tsx");
-    const mounts = cap.split("\n").filter((l) => l.includes("<SetupInterview "));
+    // The cap is gone (W1-09); its two question sheets live in the one setup host now.
+    const host = src("src/components/setup-host.tsx");
+    const mounts = host.split("\n").filter((l) => l.includes("<SetupInterview "));
     expect(mounts).toHaveLength(2);
     for (const l of mounts) expect(l).toContain("nortOn={nortOn}");
-    expect(cap).toContain('"A couple of things still missing"');
+    expect(host).toContain('"A couple of things still missing"');
   });
 
   it("they are the PLAIN questions: no say-it box (a model call) while Nort is off", () => {
@@ -75,21 +76,26 @@ describe("the setup questions (Start Here with Nort off) say nothing as Nort", (
 });
 
 describe("the Lessons run in neutral words while Nort is off", () => {
-  it("the cap's menu and the Playbook strip pass the switch to the lesson", () => {
-    const cap = src("src/components/setup-button.tsx");
-    expect(cap).toContain("lessonBlurb(l, nortOn)");
-    expect(cap).toMatch(/storageKey=\{`cn\.lesson\.\$\{lessonKey\}`\}[\s\S]{0,80}nortOn=\{nortOn\}/);
+  it("Show Me How's rows, the setup host and the Playbook strip pass the switch to the lesson", () => {
+    // Show Me How's rows (under Search Or Ask, or Help with Nort off) come from one builder.
+    expect(src("src/lib/onboarding/help-rows.ts")).toContain("lessonBlurb(l, nortOn)");
+    expect(src("src/components/setup-host.tsx")).toMatch(/storageKey=\{`cn\.lesson\.\$\{lessonKey\}`\}[\s\S]{0,80}nortOn=\{nortOn\}/);
     const offer = src("src/components/tour/lesson-offer.tsx");
     expect(offer).toContain("lessonBlurb(lesson, nortOn)");
     expect(offer).toContain("nortOn={nortOn}");
     expect(src("src/app/(app)/settings/page.tsx")).toMatch(/<LessonOffer[\s\S]{0,300}nortOn=\{on\("nort"\)\}/);
   });
 
+  it("the help rows say Nort only while Nort is on", () => {
+    expect(unswitched("src/lib/onboarding/help-rows.ts")).toEqual([]);
+  });
+
   it("the lesson card reads the neutral words and points at no missing Nort button", () => {
     const d = src("src/components/tour/tour-driver.tsx");
     expect(d).toContain("stepWords(step, nortOn)");
     expect(d).toContain("title={words.title}");
-    expect(d).toContain('anchor={nortOn ? "nort" : undefined}');
+    // Nort's home is Search Or Ask (W1-09); with him off it holds no Nort rows, so no arrow at it.
+    expect(d).toContain('anchor={nortOn ? "ask" : undefined}');
     expect(unswitched("src/components/tour/tour-driver.tsx").filter((l) => !/I&rsquo;m Nort/.test(l))).toEqual([]);
   });
 });

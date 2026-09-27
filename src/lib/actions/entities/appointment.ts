@@ -117,7 +117,7 @@ export const appointmentActions: Record<string, ActionDef> = {
     description:
       "Create an appointment or inspection with a title and a start time (starts_at). Optionally capture whatever else was given: job_id (resolve with list_jobs), customer_id (resolve with list_customers), location, ends_at, notes. " +
       LOCAL_TIME_RULE +
-      " When the person isn't in the contacts yet, book it without a customer; if you then add them with customer.create, its result offers the link.",
+      " When the person isn't in the contacts yet, book it without a customer; if you then add them with customer.create, it links this visit in the same action when it's the one visit booked for that name (its result says `linked`), and otherwise offers the link.",
     // Fragment-first: the columns are nullable and createAppointment already reads every
     // one of these — the old 3-field schema silently DROPPED a spoken job/location/end time.
     // Only starts_at stays required (an appointment without a time isn't schedulable).
@@ -172,7 +172,7 @@ export const appointmentActions: Record<string, ActionDef> = {
     group: "appointment",
     label: "Link appointment to customer",
     description:
-      "Attach a customer to an appointment / inspection ('link Tom to tomorrow's inspection'). Pass the appointment id (from customer.create's link_offer, or schedule_overview) and customer_id (an id, or the exact name). ONLY call this after the user said yes to linking: offering is your job, deciding is theirs. Confirm from the result's `recorded` line.",
+      "Attach a customer to an appointment / inspection ('link Tom to tomorrow's inspection'). Pass the appointment id (from customer.create's or customer.update's link_offer, or schedule_overview) and customer_id (an id, or the exact name). ONLY call this after the user said yes to linking: offering is your job, deciding is theirs. Confirm from the result's `recorded` line.",
     input: z.object({ id: z.string().min(1), customer_id: z.string().min(1) }),
     auth: "staff",
     effect: "write",
@@ -209,7 +209,7 @@ export const appointmentActions: Record<string, ActionDef> = {
     group: "appointment",
     label: "Record how it ended",
     description:
-      "Record how a walk-through ended: 'lost' (didn't win the bid), 'no_bid' (decided not to quote it), or 'won'. Use it when the user says they lost a bid, aren't pursuing it, or already handled the work — it clears the visit from Needs action without inventing an estimate.",
+      "Record how a walk-through ended: 'lost' (didn't win the bid), 'no_bid' (decided not to quote it), or 'won'. Use it when the user says they lost a bid, aren't pursuing it, or already handled the work — it clears the visit from Needs You without inventing an estimate.",
     input: z.object({ id: z.string(), outcome: z.enum(["won", "lost", "no_bid"]) }),
     auth: "staff",
     effect: "write",

@@ -227,7 +227,7 @@ export function ImportCustomersButton({ csv = true, label }: { csv?: boolean; la
           onClick={() => fileRef.current?.click()}
           title={!csv ? "iPhone: open a contact → Share Contact → Save to Files, then pick it here" : undefined}
         >
-          <Upload className="h-4 w-4" /> {label ?? (csv ? "Import Contacts" : "Import a Contact")}
+          <Upload className="h-4 w-4" /> {label ?? (csv ? "Import Customers" : "Import a Contact")}
         </Button>
         {!csv && (
           <span className="text-[11px] text-slate-400">

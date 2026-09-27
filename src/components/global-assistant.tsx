@@ -4,7 +4,7 @@ import { Suspense, useEffect, useRef, useState } from "react";
 import { safeAreaTop } from "@/lib/native-shell";
 import { isStaffRole } from "@/lib/actions/perms";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { AudioLines, Square, X, ChevronDown, ChevronUp, GripHorizontal } from "lucide-react";
+import { X, ChevronDown, ChevronUp, GripHorizontal } from "lucide-react";
 import { AssistantChat } from "@/app/(app)/assistant/assistant-chat";
 import { createClient } from "@/lib/supabase/client";
 import { unlockAudio, stopSpeaking } from "@/lib/tts";
@@ -12,6 +12,7 @@ import { isNativeShell } from "@/lib/native-shell";
 import { standDownReaderForVoice } from "@/lib/native-tap";
 import * as speech from "@/lib/voice";
 import { useEstimator } from "@/lib/estimator-store";
+import { NORT_TALK_EVENT } from "@/lib/onboarding/help-rows";
 
 const PANEL_W = 384; // 24rem
 
@@ -58,27 +59,52 @@ function DeepLinkOpener({ param, onLaunch }: { param: string; onLaunch: () => vo
 }
 
 /**
- * ONE assistant, everywhere. The topbar waveform is the single source-of-truth control — Talk
- * (open + listen + re-listen) / red Stop. The panel itself is a slim, draggable, collapsible
- * command box docked centered on the page: just the live status + estimate lines, no header text
- * and no in-panel mic. Voice + stop come from the topbar button; the handle moves/collapses/closes.
+ * ONE assistant, everywhere — and no button of its own in the top bar any more (W1-09).
+ *
+ * The voice starts from TALK TO NORT, the first row under Search Or Ask (command-bar.tsx), whose
+ * click dispatches `cn:nort-talk`; the listener below runs launch() inside that dispatch, so the
+ * mic starts in the tap's own call stack (iOS). While Nort listens, thinks or speaks, Search Or Ask
+ * itself turns into the red Stop Nort (topbar.tsx), so the bar still has exactly one voice control.
+ * What stays here: the panel — a slim, draggable, collapsible command box docked centered on the
+ * page, the live status + estimate lines, no header text and no in-panel mic — and the ?debrief= /
+ * ?attention= openers. Mounted while Nort is on.
  */
 export function GlobalAssistant() {
-  const [open, setOpen] = useState(false);
-  const [voiceLaunch, setVoiceLaunch] = useState(false); // Talk button → voice; command bar → text
+  const [open, setOpenState] = useState(false);
+  // THE PANEL'S OPEN STATE, READABLE FROM A LISTENER ADDED ONCE. launch() now runs from a window
+  // event whose listener is registered on mount; a closure over `open` would see the value from
+  // that first render forever, so a second Talk To Nort into an OPEN panel would remount the chat
+  // instead of resuming it. The ref is written in the same breath as the state.
+  const openRef = useRef(false);
+  const setOpen = (v: boolean) => {
+    openRef.current = v;
+    setOpenState(v);
+  };
+  const [voiceLaunch, setVoiceLaunch] = useState(false); // Talk To Nort → voice; command bar → text
   const [pendingQuery, setPendingQuery] = useState<string | null>(null); // a typed question from Cmd-K
   const [collapsed, setCollapsed] = useState(false);
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null); // null until first open
   const drag = useRef<{ sx: number; sy: number; bx: number; by: number } | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
-  const { draft, speaking, streaming, listening } = useEstimator();
-  const active = speaking || streaming || listening; // listening / thinking / talking → red STOP
+  const { draft } = useEstimator();
 
   // Default dock: centered horizontally, just under the topbar.
   function centeredPos() {
     const w = Math.min(PANEL_W, window.innerWidth - 16);
     return { x: Math.round((window.innerWidth - w) / 2), y: 68 + safeAreaTop() };
   }
+
+  // The listener is added once, so it calls whatever launch() is CURRENT through this ref.
+  const launchRef = useRef<() => void>(() => {});
+  launchRef.current = launch;
+  useEffect(() => {
+    // SYNCHRONOUS, ON PURPOSE: dispatchEvent runs this before the tap's handler returns, so
+    // launch() — and speech.startListening() inside it — is still inside the user gesture. Never
+    // put a setTimeout, a promise or an await in front of it (the mic-never-starts-on-iPhone bug).
+    const onTalk = () => launchRef.current();
+    window.addEventListener(NORT_TALK_EVENT, onTalk);
+    return () => window.removeEventListener(NORT_TALK_EVENT, onTalk);
+  }, []);
 
   function launch() {
     // Prime audio + TTS INSIDE this tap (the gesture) so the spoken reply plays on iOS and the mic
@@ -95,8 +121,9 @@ export function GlobalAssistant() {
     // user gesture — starting it later (the old post-mount effect) was the "mic never starts on iPhone"
     // bug. The chat panel (mounted next / already mounted) picks up the transcript via the shared service.
     speech.startListening();
-    // Already open → the Talk button just re-opened the mic; tell the panel to resume the conversation.
-    if (open) { window.dispatchEvent(new Event("cn:assistant-talk")); setCollapsed(false); return; }
+    // Already open → Talk To Nort just re-opened the mic; tell the panel to resume the conversation.
+    // openRef, not `open`: this runs from a listener registered once (see above).
+    if (openRef.current) { window.dispatchEvent(new Event("cn:assistant-talk")); setCollapsed(false); return; }
     setPendingQuery(null);
     setVoiceLaunch(true);
     setCollapsed(false);
@@ -197,25 +224,6 @@ export function GlobalAssistant() {
         <DeepLinkOpener param="debrief" onLaunch={launchDebrief} />
         <DeepLinkOpener param="attention" onLaunch={launchAttention} />
       </Suspense>
-      {active ? (
-        <button
-          onClick={() => window.dispatchEvent(new Event("cn:assistant-stop"))}
-          title="Stop"
-          aria-label="Stop Nort"
-          className="btn-gloss inline-flex h-10 w-10 items-center justify-center rounded-full bg-red-600 text-white shadow-sm transition-colors hover:bg-red-700"
-        >
-          <Square className="h-4 w-4 fill-current" />
-        </button>
-      ) : (
-        <button
-          onClick={launch}
-          title="Talk to Nort"
-          aria-label="Open Nort"
-          className="btn-gloss inline-flex h-10 w-10 items-center justify-center rounded-full bg-brand text-white shadow-sm transition-colors hover:bg-brand-dark"
-        >
-          <AudioLines className="h-5 w-5" />
-        </button>
-      )}
 
       {open && (
         <div

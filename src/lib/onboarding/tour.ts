@@ -1,4 +1,5 @@
 import { WHY_SHAPES } from "@/lib/playbook/why";
+import { featureOn, type FeatureKey, type FeatureMap } from "@/lib/features";
 
 /**
  * THE GUIDED TOUR — Nort walks you round the app, out loud, pointing at real buttons.
@@ -20,9 +21,9 @@ import { WHY_SHAPES } from "@/lib/playbook/why";
  *
  * ── FOUR RULES THIS SCRIPT OBEYS ────────────────────────────────────────────────────────────
  *
- * NORT FIRST. Step one is the Talk button and step one is a QUESTION he answers out loud, because
- * every other thing in this app is easier once you know the assistant is real and listening. The
- * old version put five text boxes first, which teaches that Nort is a garnish.
+ * NORT FIRST. Step one points at Search Or Ask, where Nort lives, and step one is a QUESTION he
+ * answers out loud, because every other thing in this app is easier once you know the assistant is
+ * real and listening. The old version put five text boxes first, which teaches that Nort is a garnish.
  *
  * POINT AT THE REAL THING. Every step names a live element by `data-tour`, so the arrow lands on
  * the button he will actually press tomorrow — not a screenshot, not a diagram. A step whose
@@ -59,12 +60,50 @@ export interface TourCtx {
   rate: string;
   /** They have finished the tour before; this is a revisit, not an introduction. */
   returning: boolean;
+  /**
+   * THE COMPANY'S SWITCHES (0352), so a line names only what THIS company's screens hold: the
+   * avatar menu's estimate QR only with Leads on, its Tools row only with Calculators on. Left out
+   * = everything on, which is what every line said before the switches.
+   */
+  features?: FeatureMap | null;
 }
 
 /** A line, or a line that knows who it is talking to. */
 export type Line = string | ((c: TourCtx) => string);
 
 export const sayOf = (l: Line, c: TourCtx): string => (typeof l === "function" ? l(c) : l);
+
+/**
+ * THE TOUR READS THE SWITCHES. A step or a lesson can belong to a switch: one key, or several
+ * meaning ANY of them (the why-lines lesson is Leads' walk-through questions or Estimates'). A gated
+ * step whose switch is off is skipped, and a gated lesson isn't offered, so nobody is walked to a
+ * page the company switched off. A switch only hides; the words for everything else don't move.
+ */
+export type FeatureGate = FeatureKey | readonly FeatureKey[];
+
+export const gateOn = (gate: FeatureGate | undefined, features: FeatureMap | null | undefined): boolean =>
+  !gate || (typeof gate === "string" ? featureOn(features, gate) : gate.some((k) => featureOn(features, k)));
+
+/** The steps of a script this company runs: gated steps whose switch is off are skipped. */
+export const stepsOn = <S extends { feature?: FeatureGate }>(steps: readonly S[], features: FeatureMap | null | undefined): S[] =>
+  steps.filter((s) => gateOn(s.feature, features));
+
+/**
+ * WHAT THE AVATAR MENU HOLDS FOR THIS COMPANY (account-menu.tsx), in the order it draws them:
+ * sign out and the language always, the estimate QR only with Leads on (it hands out the lead
+ * link), Office always, and Tools only with Calculators on. With Nort off (the plain words) the
+ * walk-through and the lessons sit there too, under Help. The settings-door step opens that menu
+ * and then names it, so it names the one it opened.
+ */
+function menuHolds(c: TourCtx, nortOff = false): string {
+  return (
+    "Sign out, your language" +
+    (featureOn(c.features, "leads") ? ", your estimate QR code for the truck" : "") +
+    ", Office" +
+    (featureOn(c.features, "calculators") ? ", Tools" : "") +
+    (nortOff ? ", Help" : "")
+  );
+}
 
 export interface TourStep {
   key: string;
@@ -104,6 +143,8 @@ export interface TourStep {
    * is used, so every lesson reads exactly as it did (tour.test pins both halves).
    */
   plain?: { title?: string; say?: Line };
+  /** The switch this step belongs to (see FeatureGate): off, the driver skips it. */
+  feature?: FeatureGate;
 }
 
 /** The title and the line a step shows, for the Nort switch's state. */
@@ -122,15 +163,16 @@ export const stepWords = (s: TourStep, nortOn: boolean): { title: string; say: L
  * So: TOUR is now ONLY the setup — every step either asks something saveSetup writes, or closes
  * the loop (recap, tone, done). The teaching became LESSONS: named, self-contained, offered ONCE
  * on the surface each explains (the why-lines lesson at the playbook editor — the one thing
- * "nobody is going to figure out without holding their hand"), and replayable forever from the
- * cap. A lesson that lives next to the button it describes goes stale LOUDLY, which is the whole
- * point of the move.
+ * "nobody is going to figure out without holding their hand"), and replayable forever from Show
+ * Me How (under Search Or Ask; under Help, behind the initials, with Nort off). A lesson that lives
+ * next to the button it describes goes stale LOUDLY, which is the whole point of the move.
  */
 export const TOUR: TourStep[] = [
   // ── 1. MEET NORT. A question, out loud, before anything else. ───────────────────────────────
   {
     key: "hello",
-    anchor: "nort",
+    // Search Or Ask (topbar.tsx): Talk To Nort is its first row, so that button is where he lives.
+    anchor: "ask",
     route: "/planner",
     title: "This is Nort",
     // "Press Talk" has to say WHICH Talk — the lit-up button behind the card is the real Nort and
@@ -138,20 +180,20 @@ export const TOUR: TourStep[] = [
     // "down here" sends people tapping a button that can't respond.
     say: (c) =>
       c.first
-        ? `Hey ${c.first} — I'm Nort. That button up there is me, and I'm on every screen in here. ` +
+        ? `Hey ${c.first} — I'm Nort. I live in that button up there, Search Or Ask, on every screen in here. ` +
           // "your trade as …", never "as <trade>": the words can be the key's ("painter"), which
           // needs an article, or a company's own ("Construction"), which can't take one.
           `I've already got you as ${c.first}${c.city ? ` out of ${c.city}` : ""}${c.trade ? `, and your trade as ${c.trade}` : ""}. ` +
           `Press the Talk button down here and say hello, just so you can hear how this works. ` +
           `Say a different name and I'll take that instead.`
-        : "Hi — I'm Nort. That button up there is me, and I'm on every screen in here. " +
+        : "Hi — I'm Nort. I live in that button up there, Search Or Ask, on every screen in here. " +
           "Press the Talk button down here and tell me your name and what you do, the way you'd tell " +
           "a person. Type it instead if you'd rather — I'm not fussy.",
     ask: "full_name",
   },
   {
     key: "trade",
-    anchor: "nort",
+    anchor: "ask",
     title: "What you do",
     // NEVER ASKED TWICE. Sign-up already asked the trade (0352), and the layout hands it in through
     // the one trade reader (lib/org-trade), so a company that picked one hears it back instead of
@@ -172,7 +214,7 @@ export const TOUR: TourStep[] = [
   },
   {
     key: "where",
-    anchor: "nort",
+    anchor: "ask",
     title: "Where you work",
     say: (c) =>
       (c.city ? `And you're out of ${c.city}. ` : "") +
@@ -182,7 +224,7 @@ export const TOUR: TourStep[] = [
   },
   {
     key: "reach",
-    anchor: "nort",
+    anchor: "ask",
     title: "How far you go",
     say: (c) =>
       (c.city ? `And from ${c.city} — ` : "And ") +
@@ -196,7 +238,7 @@ export const TOUR: TourStep[] = [
   },
   {
     key: "rate",
-    anchor: "nort",
+    anchor: "ask",
     title: "What you charge",
     say:
       "Last one about the business — what do you charge an hour? " +
@@ -217,7 +259,7 @@ export const TOUR: TourStep[] = [
   // everything after it lands differently because of it.
   {
     key: "recap",
-    anchor: "nort",
+    anchor: "ask",
     title: "So — here's you, and here's me",
     say: (c) => {
       const bits = [c.first, c.trade, c.city ? `out of ${c.city}` : "", c.rate ? `at ${c.rate} an hour` : ""]
@@ -252,27 +294,36 @@ export const TOUR: TourStep[] = [
   {
     key: "done",
     route: "/planner",
-    anchor: "setup",
+    anchor: "ask",
     title: "That's it",
+    // TRUE TO THE ROWS UNDER SEARCH OR ASK (command-bar.tsx, lib/onboarding/help-rows): Take The
+    // Setup Again is what replays THIS walk-through (it asks the questions again, so it is also
+    // how an answer changes), and Show Me How holds the lessons. Show Me How does not replay the
+    // setup, so the line doesn't say it does.
     say:
-      "That's the whole thing. This cap button is where I live — take this again any time, " +
-      "or come back to change what you told me. Let's get you a job in here.",
+      "That's the whole thing. Tap Search Or Ask any time — Take The Setup Again replays this and " +
+      "changes anything you told me, and Show Me How has the rest. Let's get you a job in here.",
     next: "Done",
   },
 ];
 
 export interface Lesson {
   key: string;
-  /** The menu label on the cap, and the offer strip's name for itself. */
+  /** Its row under Show Me How, and the offer strip's name for itself. */
   title: string;
-  /** One sentence: what you'll know after. Shown on the cap menu and the offer strip. */
+  /** One sentence: what you'll know after. Shown under Show Me How and on the offer strip. */
   blurb: string;
   /** The blurb with Nort switched off, where the blurb names him (see TourStep.plain). */
   plainBlurb?: string;
+  /** The switch this lesson belongs to (see FeatureGate): off, Show Me How doesn't list it. */
+  feature?: FeatureGate;
   steps: TourStep[];
 }
 
 export const lessonBlurb = (l: Lesson, nortOn: boolean): string => (nortOn ? l.blurb : l.plainBlurb ?? l.blurb);
+
+/** Is this lesson offered to this company? (its gate is on) */
+export const lessonOn = (l: Lesson, features: FeatureMap | null | undefined): boolean => gateOn(l.feature, features);
 
 /**
  * DOES THE ESTIMATE READ WHY LINES? Not today. This lesson used to say "when I write the estimate,
@@ -318,8 +369,12 @@ const WHY_USES = WHY_LINE_FEEDS_ESTIMATE
 export const LESSONS: Lesson[] = [
   {
     key: "why-lines",
-    title: "Why lines",
+    // Lesson titles are rows under Show Me How now, so they are Title Case (clickables).
+    title: "Why Lines",
     blurb: "What a why line is, the three shapes it takes, how to write yours — the part nobody guesses.",
+    // The Playbook's questions and their why lines are Leads' walk-through and Estimates' business:
+    // with both switched off, Show Me How doesn't offer this one.
+    feature: ["leads", "estimates"],
     steps: [
   // ── 2. THE WHY LINE. The part nobody figures out unaided. ──────────────────────────────────
   {
@@ -384,6 +439,7 @@ export const LESSONS: Lesson[] = [
     key: "playbook-tab",
     route: "/settings?tab=playbook",
     anchor: "settings-playbook",
+    feature: ["leads", "estimates"],
     title: "And this is your Playbook",
     say:
       "That's the one to remember in here. Every question I'll ask you on a job is in this tab, " +
@@ -400,7 +456,7 @@ export const LESSONS: Lesson[] = [
   },
   {
     key: "getting-around",
-    title: "Getting around",
+    title: "Getting Around",
     blurb: "The dock, the top bar, and the one door worth remembering — Settings, behind your initials.",
     steps: [
   // ── 3. THE ROOM. Where everything is. ──────────────────────────────────────────────────────
@@ -415,12 +471,21 @@ export const LESSONS: Lesson[] = [
   {
     key: "topbar",
     anchor: "quickadd",
-    title: "Plus, search, bell",
+    title: "Plus, Search Or Ask, the bell",
+    // Plus names no customer and no task (lane 3 takes those rows off it this release); the bell
+    // is the record of every notice, not "what's waiting on you" (that is Needs You, on My Day).
     say:
-      "Three in this corner. Plus makes anything new — a job, a customer, an estimate, a task — " +
-      "from any screen. The magnifying glass finds your jobs, customers, estimates, invoices and " +
-      "appointments by name or number. " +
-      "And the bell is what's waiting on you, whether or not you switch on phone notifications.",
+      "Plus is where new work starts — a job, an appointment, an invoice — from any screen. " +
+      "Search Or Ask finds your jobs, customers, estimates, invoices and appointments by name or " +
+      "number, and you can ask me anything there. " +
+      "And the bell keeps your notices, whether or not you switch on phone notifications.",
+    plain: {
+      title: "Plus, Search, the bell",
+      say:
+        "Plus is where new work starts — a job, an appointment, an invoice — from any screen. " +
+        "Search finds your jobs, customers, estimates, invoices and appointments by name or number. " +
+        "And the bell keeps your notices, whether or not you switch on phone notifications.",
+    },
   },
   // THE DOOR, NOT THE ROOM. Erik: "ive been asked multiple times where settings is located and in
   // the tour it shows it open but not where the button is." The old step navigated straight to
@@ -441,15 +506,13 @@ export const LESSONS: Lesson[] = [
     // paying a step for a beat of suspense.
     say: (c) =>
       `Your initials, top right${c.first ? `, ${c.first}` : ""} — that's your corner, on every ` +
-      "single screen, and I've opened it. Sign out, your language, your estimate QR code for the " +
-      "truck — and Settings, right there in the middle. That's the door. " +
-      "That's the one thing worth remembering.",
+      `single screen, and I've opened it. ${menuHolds(c)} — and Settings, right there in the middle. ` +
+      "That's the door. That's the one thing worth remembering.",
     plain: {
       say: (c) =>
         `Your initials, top right${c.first ? `, ${c.first}` : ""} — that's your corner, on every ` +
-        "single screen, and it's open now. Sign out, your language, your estimate QR code for the " +
-        "truck — and Settings, right there in the middle. That's the door. " +
-        "That's the one thing worth remembering.",
+        `single screen, and it's open now. ${menuHolds(c, true)} — and Settings, right there in the middle. ` +
+        "That's the door. That's the one thing worth remembering.",
     },
   },
   {
@@ -460,14 +523,14 @@ export const LESSONS: Lesson[] = [
     say:
       "And this is it. Money and tax, your crew's scheduling and job codes, your website, the " +
       "connections to Google and the rest — all behind those sections. (Your people have their own " +
-      "page, under Office.) You don't have to remember any of it. " +
+      "page: Office, behind your initials.) You don't have to remember any of it. " +
       "You only have to remember your initials.",
   },
     ],
   },
   {
     key: "how-a-job-runs",
-    title: "How a job runs",
+    title: "How a Job Runs",
     blurb: "Phone call to paid — lead, walk-through, estimate, job, money — and what Nort does at each step.",
     plainBlurb: "Phone call to paid — lead, walk-through, estimate, job, money — and what the app does at each step.",
     steps: [
@@ -488,9 +551,13 @@ export const LESSONS: Lesson[] = [
   // which is honest at the walk-through fill and near zero at getting a lead in. What replaced it
   // is the version true at every stage: a fact typed once rides all the way through. A man who
   // thinks his estimate priced itself is a man who sends one without reading it.
+  // THE SWITCHES WALK THE RUN TOO: with Leads off there is no lead and no walk-through to walk to
+  // (run-lead, run-walk, and trust, which is welded to the walk-through), and with Estimates off
+  // no estimate (run-estimate). The driver skips a gated step; the rest of the run still reads.
   {
     key: "run-lead",
     anchor: "dock-sales",
+    feature: "leads",
     title: "It starts with a phone call",
     say:
       "Let's walk one job the whole way. Work runs one direction through here — Sales, then Jobs, " +
@@ -509,6 +576,7 @@ export const LESSONS: Lesson[] = [
   },
   {
     key: "run-walk",
+    feature: "leads",
     title: "Then you're stood in the yard",
     say:
       "Day of, you're on site with your phone. Open the walk-through, press Talk, and say the whole " +
@@ -526,6 +594,7 @@ export const LESSONS: Lesson[] = [
   // meant nothing to a deck builder.
   {
     key: "trust",
+    feature: "leads",
     title: "One thing to know about me",
     say:
       "And a promise, because it's your money. I only fill in what you actually said. " +
@@ -543,6 +612,7 @@ export const LESSONS: Lesson[] = [
   },
   {
     key: "run-estimate",
+    feature: "estimates",
     title: "Writing it up",
     say:
       "Back in the truck you press Start The Estimate, and the answers from that walk-through are " +
