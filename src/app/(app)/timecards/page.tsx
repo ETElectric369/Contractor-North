@@ -666,6 +666,10 @@ export default async function TimecardsPage({
   // The read's cap was full and nothing in it could be listed (all billed, empty or today's): older
   // shifts on no job were not checked, which is not the same as none. Said, never hidden.
   const noJobUnlisted = !!noJob?.capped && noJobRows.length === 0;
+  // "PAID LIKE ANY SHIFT" ONLY WHEN IT IS. The owner is paid by draw (0286; drawIds, the same set
+  // You Owe leaves him out of), and at ET every shift on this list was Erik's: the words said wages
+  // nobody pays. Said only when someone listed is paid by the hour.
+  const noJobPaidWords = (noJob?.shifts ?? []).some((s) => !drawIds.has(s.profileId)) ? "On no invoice, and paid like any shift." : "On no invoice.";
   const noJobUnlistedWords = `Couldn't list every shift on no job: the newest ${NO_JOB_READ_CAP} are all billed, empty or today's, so older ones weren't checked.`;
   const fixCount = brokenRows.length + noJobRows.length;
 
@@ -989,7 +993,9 @@ export default async function TimecardsPage({
                   Hours On No Job ({noJobRows.length}
                   {noJob?.capped ? "+" : ""} · {formatDuration(noJob?.hours ?? 0)})
                 </h4>
-                <p className="text-xs text-amber-800">On no invoice, and paid like any shift. {noJobAdvice(companyCode)}</p>
+                <p className="text-xs text-amber-800">
+                  {noJobPaidWords} {noJobAdvice(companyCode)}
+                </p>
                 {/* NO NOT-BILLED CODE, NO COMPANY TIME DOOR (Tahoe's codes all bill): the way to get
                     one, instead of a sentence offering a button that isn't there. */}
                 {!companyCode && (
