@@ -228,6 +228,12 @@ describe("the door", () => {
     for (const l of kept.lines) expect(l.description).not.toMatch(/\d{6,}/);
     expect(JSON.stringify(item.proposal)).not.toContain("0123456789");
     expect(JSON.stringify(item.proposal)).not.toContain("XXXXX1234");
+    // Nor does its name: a file named after the full account number keeps its last 4.
+    const named = await addOpenList({ name: "Export_000123456789.csv", sha256: null, table: parseCSV(CHECKING_CSV.replace("DENTAL CARE LLC", "DENTAL CARE CO")), listDate: "2026-09-26", source: "bills_drop" });
+    expect(named.ok).toBe(true);
+    const row = db.organized_items.find((i) => i.id === named.id)!;
+    expect(row.title).toBe("Export_••6789.csv");
+    expect(JSON.stringify(row)).not.toContain("123456789");
     // Nothing is written until Apply: no line, no bill, no rule, no payment marked.
     expect(db.bank_lines).toHaveLength(0);
     expect(db.bills).toHaveLength(0);
@@ -330,6 +336,10 @@ describe("Apply", () => {
     expect(pay).toMatchObject({ org_id: "org-1", amount: 1275, method: "check" });
     expect(pay.paid_at.slice(0, 10)).toBe("2026-09-04");
     expect(db.invoices.find((i) => i.id === "inv-1")).toMatchObject({ amount_paid: 1275, status: "paid" });
+
+    // No money row carries the file's name.
+    for (const t of ["bills", "payments", "pay_payments"]) for (const r of db[t]) expect(String(r.note ?? r.notes ?? "")).not.toContain("Checking.csv");
+    expect(db.bills[0].notes).toBe("From the bank download (••1234) of Sep 2–Sep 24.");
 
     // The check to Pat, as crew pay with its number.
     expect(db.pay_payments).toEqual([expect.objectContaining({ org_id: "org-1", profile_id: "pat", amount: 640, reference: "1043", method: "check" })]);

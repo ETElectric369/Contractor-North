@@ -19,7 +19,7 @@ import {
   type OpenListColumns,
   type StoredOpenList,
 } from "@/lib/supplier-open-list";
-import { looksLikeBankTable, noLinesSaid } from "@/lib/bank-download";
+import { looksLikeBankTable, noLinesSaid, redactDigits } from "@/lib/bank-download";
 import { bankLine, bankTableTooLong, capBankTable, createBankPaper, readBankDownload } from "./bank-core";
 import { applyOpenListCore, createOpenListPaper, loadAccounts, loadPapers, openListLine, orgToday, resolveAccount } from "./open-list-core";
 import { fingerprintSeen } from "@/app/(app)/organize/paperwork-actions";
@@ -70,8 +70,11 @@ export async function addOpenList(input: {
     if (looksLikeBankTable(bankTable, supplierRef)) {
       const tooLong = bankTableTooLong(input.table, name);
       if (tooLong) return { ok: false, error: tooLong };
-      const download = readBankDownload(bankTable, name);
-      if (!download) return { ok: false, error: `${name} reads like a bank download, but none of its lines did.` };
+      // THE FILE'S NAME IS KEPT REDACTED like every line ("Export_000123456789.csv" keeps ••6789):
+      // it is the card's title. The reader sees it whole only to take an account's last 4 from it.
+      const read = readBankDownload(bankTable, name);
+      if (!read) return { ok: false, error: `${name} reads like a bank download, but none of its lines did.` };
+      const download = { ...read, name: redactDigits(name) };
       if (!download.lines.length) return { ok: false, error: noLinesSaid(download, name) };
       if (sha) {
         const seen = await fingerprintSeen(sha);
@@ -79,7 +82,7 @@ export async function addOpenList(input: {
       }
       const placed = await createBankPaper(ctx.supabase, {
         userId: ctx.userId,
-        name,
+        name: download.name,
         download,
         sha256: sha,
         source: input?.source === "organize" ? "organize" : "bills_drop",

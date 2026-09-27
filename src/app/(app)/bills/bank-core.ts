@@ -17,6 +17,7 @@ import {
   groupTitle,
   planBankDownload,
   readBankTable,
+  sayRange,
   validPicks,
   type BankAppliedPass,
   type BankBooks,
@@ -466,7 +467,8 @@ export async function applyBankCore(
 
   // 3. WHAT THE ANSWERS WRITE.
   const today = todayStrInTz(tz);
-  const note = `From the bank download${dl.last4 ? ` (••${dl.last4})` : ""}, ${item.title ?? "file"}.`;
+  // The file's name never rides on a money row: only which account and which days.
+  const note = `From the bank download${dl.last4 ? ` (••${dl.last4})` : ""} of ${sayRange(dl.from, dl.to)}.`;
   const written = (w: Work) => lineId.has(w.line.key);
   const costs = work.filter((w) => written(w) && w.choice?.choice === "cost");
   if (costs.length) {
