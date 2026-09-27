@@ -52,6 +52,15 @@ describe("44px targets on the controls Wave 0 re-wrapped", () => {
     expect(rec).not.toContain("rounded-md p-1 ");
   });
 
+  it("Settings' Print Business Cards and Open The Design Studio are 44px targets", () => {
+    const s = src("src/app/(app)/settings/page.tsx");
+    for (const label of ["Print Business Cards →", "Open The Design Studio"]) {
+      const at = s.indexOf(label);
+      const tag = s.slice(Math.max(s.lastIndexOf("<a\n", at), s.lastIndexOf("<Link", at)), at);
+      expect(tag, label).toContain("min-h-11");
+    }
+  });
+
   it("Record As Cost is a 44px target", () => {
     const s = src("src/app/(app)/jobs/[id]/job-documents.tsx");
     const at = s.indexOf("Record As Cost");

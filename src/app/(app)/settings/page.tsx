@@ -801,7 +801,7 @@ export default async function SettingsPage({
                       </p>
                       <a
                         href="/print/business-card"
-                        className="inline-flex items-center rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-800 hover:bg-slate-50"
+                        className="inline-flex min-h-11 items-center rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-800 hover:bg-slate-50"
                       >
                         Print Business Cards →
                       </a>
@@ -837,7 +837,7 @@ export default async function SettingsPage({
                     </p>
                     <Link
                       href="/site-studio"
-                      className="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-800"
+                      className="inline-flex min-h-11 items-center gap-1.5 rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-800"
                     >
                       Open The Design Studio
                     </Link>
