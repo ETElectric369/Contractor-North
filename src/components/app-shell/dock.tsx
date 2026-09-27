@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
-import { activeSection, basePath, visibleDock } from "@/lib/dock";
+import { activeRowHref, activeSection, dockTiles, visibleDock } from "@/lib/dock";
 import type { FeatureMap } from "@/lib/features";
 
 type Badges = Record<string, number>;
@@ -95,18 +95,18 @@ function DockInner({ branding, role, badges: badgesProp, features }: DockProps) 
   // tiles and rows alike, so every renderer below — rail tiles, the page column, the phone
   // bottom bar — sees the same list. The badge sum below only counts rows that are drawn.
   const sections = visibleDock({ isStaff, features });
+  // THE TILES: every visible section but Office and Tools, which live behind the initials
+  // (inMenu, W1-07): five for staff, four for a tech. They stay SECTIONS — below, the active match
+  // and the page column still see them, so /team or /tools keeps its page list.
+  const tiles = dockTiles(sections);
   // THE shared matcher (src/lib/dock.ts) — child detail routes (/quotes/[id], /forms/[id],
   // /purchasing/[id]…) light their owning section. No match → NOTHING lit and no rail: the
   // old `?? sections[0]` fallback lit "Today" (and railed My day/Tasks/Organize) on every
   // orphan route — an actively wrong map, never a lie again.
   const active = activeSection(pathname, sections);
   const items = active?.children ?? [];
-  // Exactly ONE rail row lights: prefer the exact href-with-query match (the ?status=
-  // children), else the query-less page whose base path matches — SectionSubnav's rule.
-  const exact = items.find((c) => c.href === current);
-  const activeHref =
-    exact?.href ??
-    items.find((c) => c.href && basePath(c.href) === pathname && !c.href.includes("?"))?.href;
+  // Exactly ONE rail row lights — the one rule the strip and the sheet use too (lib/dock).
+  const activeHref = activeRowHref(items, pathname, current);
 
   return (
     <>
@@ -125,7 +125,7 @@ function DockInner({ branding, role, badges: badgesProp, features }: DockProps) 
             )}
           </Link>
           <div className="flex flex-1 flex-col items-center gap-0.5 overflow-y-auto">
-            {sections.map((s) => {
+            {tiles.map((s) => {
               const Icon = s.icon;
               const on = s.key === active?.key;
               const badge = s.children.reduce((sum, c) => sum + (c.href ? badges?.[c.href] ?? 0 : 0), 0);
@@ -138,7 +138,7 @@ function DockInner({ branding, role, badges: badgesProp, features }: DockProps) 
                   // the same name; the spotlight takes whichever is visible.
                   data-tour={`dock-${s.key}`}
                   title={s.label}
-                  className={`group relative flex w-[74px] flex-col items-center gap-0.5 rounded-2xl px-1 py-1.5 transition-transform ${
+                  className={`group relative flex min-h-[44px] w-[74px] flex-col items-center justify-center gap-0.5 rounded-2xl px-1 py-1.5 transition-transform ${
                     on ? "seaglass-active" : "hover:scale-[1.05]"
                   }`}
                 >
@@ -217,7 +217,7 @@ function DockInner({ branding, role, badges: badgesProp, features }: DockProps) 
         // the home indicator instead of riding high with dead space below it.
         className="app-bottom-nav glass fixed inset-x-2 bottom-2 z-[70] flex items-center gap-1 rounded-2xl border-white/40 px-1 pt-1 pb-[max(0.25rem,min(env(safe-area-inset-bottom),0.5rem))] shell:hidden"
       >
-        {sections.map((s) => {
+        {tiles.map((s) => {
           const Icon = s.icon;
           const onRoute = s.key === active?.key;
           return (
@@ -225,16 +225,16 @@ function DockInner({ branding, role, badges: badgesProp, features }: DockProps) 
               key={s.key}
               href={s.href}
               data-tour={`dock-${s.key}`}
-              // gap-1 (not 0.5) between icon and label for readability; 10px label (not 9px)
-              // reads better in the field and still fits all tiles at 375px.
-              className={`relative flex flex-1 flex-col items-center gap-1 rounded-xl px-1 py-1.5 text-[10px] font-medium ${
+              // A 44px target (W1-07): five tiles for staff and four for a tech share the width,
+              // so each is ~67px wide at 375px — room for a 20px icon and an 11px label.
+              className={`relative flex min-h-[44px] flex-1 flex-col items-center justify-center gap-1 rounded-xl px-1 py-1.5 text-[11px] font-medium ${
                 // Same `.seaglass-active` fill (tint + gloss + ink) as the desktop rail tile.
                 // Icon+label carry `relative z-10` to sit above the gloss sheen.
                 onRoute ? "seaglass-active" : "text-slate-600"
               }`}
               aria-label={s.label}
             >
-              <Icon className="relative z-10 h-[18px] w-[18px] shrink-0" />
+              <Icon className="relative z-10 h-5 w-5 shrink-0" />
               <span className="relative z-10 whitespace-nowrap leading-none">{s.short ?? s.label}</span>
             </Link>
           );

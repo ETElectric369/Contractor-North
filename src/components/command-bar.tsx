@@ -23,7 +23,9 @@ const NAV_ALIASES: Record<string, string[]> = {
   "/price-list": ["pricing", "rates", "catalog", "price book", "materials list", "line items"],
   "/leads": ["prospects", "inquiries", "pipeline"],
   "/quotes": ["estimate", "proposal", "bid"],
-  "/crm": ["customers", "clients", "people", "contact"],
+  "/crm": ["customers", "clients", "people", "contact", "contacts"],
+  // The Reminders page was "Tasks" until 0358, and people still type the old word.
+  "/tasks": ["tasks", "to-do", "todo"],
   "/timeclock": ["clock in", "punch", "clock"],
   "/timecards": ["hours", "timesheet"],
   "/schedule": ["calendar", "dispatch", "appointments"],
@@ -78,6 +80,10 @@ export function commandNavItems(isStaff: boolean, features?: FeatureMap | null):
   const items: Item[] = [
     ...visibleDock({ isStaff, features }).flatMap((s) => navLeaves(s.children, s.label, features, s.staffOnly)),
     { kind: "Go to", label: "Jobs", sub: "Jobs", href: "/jobs?status=in_progress", aliases: NAV_ALIASES["/jobs?status=in_progress"] },
+    // Today is My Day alone on the dock (W1-03), so its two old pills are found here by name:
+    // Reminders for everyone, Organize for the office (every save on it is requireStaff).
+    { kind: "Go to", label: "Reminders", sub: "Today", href: "/tasks", aliases: NAV_ALIASES["/tasks"] },
+    { kind: "Go to", label: "Organize", sub: "Today", href: "/organize", staffOnly: true },
     // New Estimate isn't a dock leaf, but it's where plan take-offs live now (Upload Plans) —
     // give plan/blueprint/take-off searches somewhere real to land. It goes with Estimates.
     ...(featureOn(features, "estimates")

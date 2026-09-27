@@ -70,6 +70,29 @@ describe("commandNavItems", () => {
     expect(find(commandNavItems(true, off("estimates")), "/price-list")?.aliases).not.toContain("kits");
   });
 
+  it("Reminders and Organize are found by name now Today is My Day alone: a tech gets Reminders, not Organize", () => {
+    const staff = commandNavItems(true, ALL_ON);
+    const tech = commandNavItems(false, ALL_ON);
+    expect(find(staff, "/tasks")).toMatchObject({ label: "Reminders", sub: "Today" });
+    expect(find(staff, "/organize")).toMatchObject({ label: "Organize", sub: "Today" });
+    expect(find(tech, "/tasks")).toMatchObject({ label: "Reminders", sub: "Today" });
+    expect(find(tech, "/organize")).toBeUndefined();
+    // The old word still finds the Reminders page.
+    expect(find(tech, "/tasks")?.aliases).toContain("tasks");
+  });
+
+  it("each page is offered once: /handbook once for a tech (under You) and once for staff (Office)", () => {
+    for (const isStaff of [true, false]) {
+      const items = commandNavItems(isStaff, ALL_ON);
+      expect(items.filter((i) => i.href === "/handbook"), String(isStaff)).toHaveLength(1);
+      expect(items.filter((i) => i.href === "/crm"), String(isStaff)).toHaveLength(isStaff ? 1 : 0);
+    }
+    expect(find(commandNavItems(false, ALL_ON), "/handbook")?.sub).toBe("You");
+    expect(find(commandNavItems(true, ALL_ON), "/crm")).toMatchObject({ label: "Customers", sub: "Sales" });
+    // Office and Tools live behind the initials, but search still finds their pages.
+    expect(hrefs(commandNavItems(true, ALL_ON))).toEqual(expect.arrayContaining(["/team", "/inventory", "/tools"]));
+  });
+
   it("Shop Stock, Crew & Payroll, Licenses, Calculators off: their pages go", () => {
     const items = commandNavItems(true, off("shop_stock", "crew_payroll", "licenses", "calculators"));
     for (const h of ["/inventory", "/payroll", "/employee-docs", "/handbook", "/compliance", "/insurance", "/safety", "/audits", "/tools"])

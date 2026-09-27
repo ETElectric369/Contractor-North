@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
-import { activeSection, basePath, visibleDock } from "@/lib/dock";
+import { activeRowHref, activeSection, visibleDock } from "@/lib/dock";
 import type { FeatureMap } from "@/lib/features";
 import { SectionSheet } from "./section-sheet";
 
@@ -10,7 +10,7 @@ import { SectionSheet } from "./section-sheet";
  *  current page belongs to (via the ONE shared matcher in src/lib/dock.ts) and renders its
  *  siblings — in one of TWO shapes, by how many there are:
  *
- *  ≤4 pages (Today, Clock, Sales…): the horizontal pill strip, flex-1 filling the full phone
+ *  ≤4 pages (Sales, a tech's You…; a one-page section draws nothing): the horizontal pill strip, flex-1 filling the full phone
  *  width — 2–4 pills share it evenly with no horizontal scroll, so they stay glanceable.
  *
  *  >4 pages (Jobs' 13, Office's 12, Money's 9): the strip died as a blind sideways scroll,
@@ -43,9 +43,9 @@ export function SectionSubnav({ isStaff, features }: { isStaff?: boolean; featur
   const tabs = group.children.filter((c) => c.href);
   if (tabs.length < 2) return null;
 
-  const exact = tabs.find((c) => c.href === current);
-  const activeHref =
-    exact?.href ?? tabs.find((c) => c.href && basePath(c.href) === pathname && !c.href.includes("?"))?.href;
+  // The dock's own rule (lib/dock activeRowHref): exact, then the query-less row, then the one row
+  // on this page — so a tech's bare /settings lights Your Settings in the You strip.
+  const activeHref = activeRowHref(tabs, pathname, current);
 
   // The ADHD principle, doubled down responsively: past 4 pages the strip stops fitting a
   // phone width, so the long sections swap it for the left-edge handle + vertical sheet

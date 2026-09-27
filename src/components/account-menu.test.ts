@@ -29,8 +29,12 @@ vi.mock("next/link", () => ({ default: ({ children, href }: { children: unknown;
 import { AccountMenu } from "./account-menu";
 import { ALL_ON } from "@/lib/features";
 
-const render = (features?: FeatureMap) =>
-  renderToStaticMarkup(createElement(AccountMenu, { profile: { id: "u1", role: "owner", full_name: "Pat" } as never, features }));
+const off = (...keys: (keyof FeatureMap)[]) => ({ ...ALL_ON, ...Object.fromEntries(keys.map((k) => [k, false])) }) as FeatureMap;
+const render = (features?: FeatureMap, role = "owner") =>
+  renderToStaticMarkup(createElement(AccountMenu, { profile: { id: "u1", role, full_name: "Pat" } as never, features }));
+/** The links the menu draws, in order, as "href:words". */
+const links = (html: string) =>
+  [...html.matchAll(/<a href="([^"]+)">([\s\S]*?)<\/a>/g)].map((m) => `${m[1]}:${m[2].replace(/<[^>]+>/g, "").trim()}`);
 
 describe("AccountMenu", () => {
   it("everything on (or no map): the Estimate QR row is there, as before", () => {
@@ -44,5 +48,24 @@ describe("AccountMenu", () => {
     expect(html).toContain("Language");
     expect(html).toContain("Settings");
     expect(html).toContain("Sign Out");
+  });
+});
+
+/**
+ * OFFICE AND TOOLS, BEHIND THE INITIALS (W1-07): one row per section the dock keeps off the bar,
+ * right after Settings, landing where the dock would land THIS person.
+ */
+describe("the Office and Tools rows follow the role and the Calculators switch", () => {
+  it("staff: Settings, then Office (Team), then Tools", () => {
+    expect(links(render(ALL_ON))).toEqual(["/settings:Settings", "/team:Office", "/tools:Tools"]);
+  });
+
+  it("a tech: Office lands on Compliance (Team would send him away), or Forms with Licenses off", () => {
+    expect(links(render(ALL_ON, "tech"))).toEqual(["/settings:Settings", "/compliance:Office", "/tools:Tools"]);
+    expect(links(render(off("licenses"), "tech"))).toContain("/forms:Office");
+  });
+
+  it("Calculators off: no Tools row, for anyone", () => {
+    for (const role of ["owner", "tech"]) expect(links(render(off("calculators"), role)).some((l) => l.startsWith("/tools"))).toBe(false);
   });
 });

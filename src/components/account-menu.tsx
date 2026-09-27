@@ -17,7 +17,12 @@ import {
 import { isNativeShell } from "@/lib/native-shell";
 import { nativePushPermission, registerForNativePush } from "@/lib/native-push";
 import { featureOn, type FeatureMap } from "@/lib/features";
+import { menuSections, visibleDock } from "@/lib/dock";
+import { isStaffRole } from "@/lib/actions/perms";
 import type { Profile } from "@/lib/types";
+
+/** Every row in this menu: a 44px target, icon then words, the glass tint on hover. */
+const ROW = "relative z-10 flex min-h-[44px] w-full items-center gap-3 px-4 py-2.5 text-left text-sm font-medium text-slate-700 hover:bg-[rgb(var(--glass-tint))]/15";
 
 /**
  * The topbar's ACCOUNT seek door — the avatar, always visible, far right.
@@ -26,6 +31,10 @@ import type { Profile } from "@/lib/types";
  * door (the phone-app convention — settings live behind the avatar), and Sign out
  * (the app's most destructive one-tap verb, now one deliberate tap away
  * instead of beside Quick-add).
+ *
+ * OFFICE AND TOOLS LIVE HERE TOO (W1-07): one row per section the dock keeps behind the initials
+ * (lib/dock inMenu), landing where visibleDock lands THIS person — Team for staff, Compliance for a
+ * tech (Forms with Licenses off) — and Tools only with Calculators on.
  *
  * THE MODAL RULE: ShareQrButton renders its QR <Modal> PORTALED to <body> (fixed-inset inside a backdrop-filter panel would clip),
  * so this panel must stay MOUNTED while that modal is open. The outside-click
@@ -53,6 +62,9 @@ export function AccountMenu({
   // yank the menu out from under the step that is pointing at it.
   const [byTour, setByTour] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const isStaff = isStaffRole(profile?.role ?? "");
+  // The sections the dock keeps behind the initials, for THIS person and these switches.
+  const inMenu = menuSections(visibleDock({ isStaff, features }));
 
   // Nort drives this menu during the guided tour — see TourStep.opens. A plain window event so no
   // component has to know a tour exists beyond this one listener.
@@ -164,15 +176,24 @@ export function AccountMenu({
             // The tour points HERE, not at the /settings page — it's the door people can't find.
             data-tour="settings-link"
             onClick={() => setOpen(false)}
-            className="relative z-10 flex min-h-[44px] w-full items-center gap-3 px-4 py-2.5 text-left text-sm font-medium text-slate-700 hover:bg-[rgb(var(--glass-tint))]/15"
+            className={ROW}
           >
             <Settings className="h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" /> Settings
           </Link>
+          {/* Office, then Tools (Calculators on): the sections off the bar, with their own icons. */}
+          {inMenu.map((s) => {
+            const Icon = s.icon;
+            return (
+              <Link key={s.key} href={s.href} data-tour={`menu-${s.key}`} onClick={() => setOpen(false)} className={ROW}>
+                <Icon className="h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" /> {s.label}
+              </Link>
+            );
+          })}
           {platformAdmin && (
             <Link
               href="/bugs"
               onClick={() => setOpen(false)}
-              className="relative z-10 flex min-h-[44px] w-full items-center gap-3 px-4 py-2.5 text-left text-sm font-medium text-slate-700 hover:bg-[rgb(var(--glass-tint))]/15"
+              className={ROW}
             >
               <Bug className="h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" /> Bug Watch
             </Link>
