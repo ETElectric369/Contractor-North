@@ -23,7 +23,7 @@ vi.mock("../tasks/actions", () => ({ createTask: vi.fn(), toggleTask: vi.fn(), d
 vi.mock("../timeclock/actions", () => ({ clockIn: vi.fn(), clockOut: vi.fn() }));
 vi.mock("../timeclock/which-job-actions", () => ({ whichJobChoices: vi.fn(), putPunchOnJob: vi.fn() }));
 
-import { YourList, AddReminderLine } from "./your-list";
+import { YourList, AddReminderLine, LATER_CHOICE, addDaysStr, laterRow, movedWords } from "./your-list";
 import { NewReminderBox } from "../tasks/tasks-view";
 import { NowCard } from "./now-card";
 import { LUNCH_LABEL } from "@/lib/lunch-rule";
@@ -73,6 +73,66 @@ describe("Today's 6: the one Add line up top (Erik, 2026-09-26)", () => {
     // "For You": the count is the Reminders for this person; /tasks also lists the ones they made for others.
     expect(html).toContain("All Reminders · 4 More For You");
     expect(html).toContain('href="/tasks"');
+  });
+});
+
+describe("Today's 6: the polish (six marks, 44px steps, one ⋯ per row)", () => {
+  const six = [
+    { id: "r1", title: "Call PUD", category: "office", priority: 0, due_date: "2026-09-26", job_id: null, pinned: false },
+    { id: "r2", title: "Order the meter base", category: "field", priority: 1, due_date: null, job_id: null, pinned: true },
+  ];
+  const subtasks = [{ id: "s1", title: "Find the account number", status: "open", parent_id: "r1" }];
+  const render = (doneToday: number) =>
+    renderToStaticMarkup(createElement(YourList, { six, subtasks, todayStr: "2026-09-26", doneToday, restCount: 0, jobs: JOBS }));
+
+  it("six small marks beside the title, one filled for each done today: a progress mark, not a count", () => {
+    const html = render(2);
+    const header = html.slice(0, html.indexOf("Add A Reminder Or Task"));
+    expect(header).toContain("Today’s 6");
+    expect(header).toContain('aria-label="2 of 6 done today"');
+    expect(header.match(/data-mark="done"/g)).toHaveLength(2);
+    expect(header.match(/data-mark="open"/g)).toHaveLength(4);
+    expect(html).not.toMatch(/\d\/6/);
+    // Never more than six, never a badge pill.
+    expect(render(9).match(/data-mark="done"/g)).toHaveLength(6);
+    expect(header).not.toContain("rounded-full");
+  });
+
+  it("a step's check row is 44px, like every other target", () => {
+    const html = render(0);
+    expect(html).toMatch(/<button type="button" class="flex min-h-\[44px\] w-full[^"]*"[^>]*aria-label="Mark Find the account number done"/);
+    expect(html).not.toContain("min-h-[36px]");
+  });
+
+  it("each Reminder's ⋯ is the app's one row sheet: 44px, named for its row", () => {
+    const html = render(0);
+    expect(html).toMatch(/<button type="button" aria-label="More For Call PUD"[^>]*class="[^"]*h-11 w-11/);
+    expect(html).toMatch(/aria-label="More For Order the meter base"/);
+    const src = readFileSync(join(process.cwd(), "src/app/(app)/planner/your-list.tsx"), "utf8");
+    expect(src).toContain('import { RowMoreSheet, SHEET_ROW } from "@/components/row-more-sheet";');
+    expect(src).not.toMatch(/const SHEET_ROW\s*=/);
+  });
+});
+
+describe("nothing goes quiet without a day: In A Week, not Someday (Erik's open question, the plan's pick)", () => {
+  it("the sheet's later row is In A Week, due seven days out on the company's day", () => {
+    expect(LATER_CHOICE).toBe("in_a_week");
+    expect(laterRow(LATER_CHOICE, "2026-09-26")).toEqual({ label: "In A Week", due: "2026-10-03" });
+    expect(addDaysStr("2026-12-29", 7)).toBe("2027-01-05");
+    // One line flips it back.
+    expect(laterRow("someday", "2026-09-26")).toEqual({ label: "Someday (Clear Date)", due: null });
+    const src = readFileSync(join(process.cwd(), "src/app/(app)/planner/your-list.tsx"), "utf8");
+    expect(src).toContain("{later.label}");
+    expect(src).toContain("updateTask(t.id, { due_date: later.due }, opts)");
+  });
+
+  it("a Reminder that leaves the six says where it went; a pin, or a day of today or earlier, needs no word", () => {
+    const today = "2026-09-26";
+    expect(movedWords({ pinned: false }, "2026-09-27", today)).toBe("Due tomorrow. It waits on your Reminders list till then.");
+    expect(movedWords({ pinned: false }, "2026-10-03", today)).toBe("Due Oct 3, 2026. It waits on your Reminders list till then.");
+    expect(movedWords({ pinned: true }, "2026-10-03", today)).toBeNull();
+    expect(movedWords({ pinned: false }, today, today)).toBeNull();
+    expect(movedWords({ pinned: false }, null, today)).toBe("No due date now. It waits on your Reminders list under Someday.");
   });
 });
 

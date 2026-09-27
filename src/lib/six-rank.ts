@@ -25,10 +25,14 @@
 // on"). The old rank 4, "on a job the truck goes to today", is gone with them, and a job row handed
 // in anyway is dropped here too, so no caller can put one back.
 //
-// PLAIN UNDATED TASKS NEVER AUTO-PROMOTE — undated is not "due now"; it lives
-// behind the Everything-else door until someone dates, flags, or pins it. And
-// SUBTASKS (parent_id set) are never slots — they render nested under their
-// parent and are never counted anywhere as top-level work.
+// PLAIN UNDATED TASKS NEVER AUTO-PROMOTE — undated is not "due now"; it waits on
+// the Reminders page (/tasks, under Someday) until someone dates, flags, or pins
+// it. Because an undated, unflagged Reminder never comes back here by itself, My
+// Day's ⋯ sheet offers "In A Week" rather than "Someday (Clear Date)": nothing goes
+// quiet without a day (Erik's rule; planner/your-list's LATER_CHOICE flips it).
+// Reminders already undated keep ranking exactly as before. And SUBTASKS
+// (parent_id set) are never slots — they render nested under their parent and
+// are never counted anywhere as top-level work.
 
 export const SIX_SLOTS = 6;
 

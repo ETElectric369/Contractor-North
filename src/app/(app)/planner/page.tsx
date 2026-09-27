@@ -144,7 +144,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
   // the six-slot pool, and the head-counts that feed Today's 6 — run together in
   // one final round. (The money-pipeline fetch left with the Money line — the AR
   // page owns that view now; the office/else DOOR links left too, so the only
-  // count consumers below are the Today's-6 card's Grab-One gate + its "2/6".)
+  // count consumers below are the Today's-6 card's Grab-One gate + its six marks.)
   //
   // The daily-report window: 14 ORG-local days back from today (lib/tz, never the
   // UTC server's day — a Pacific evening debrief must not fall out of the window a
@@ -177,7 +177,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
     // and All Reminders links. The ones FOR ME: /tasks also lists the Reminders I made for someone
     // else (theirs to do, never in my six), so the link says "More For You", not a /tasks count.
     mineCut(headCount().eq("status", "open").is("parent_id", null)),
-    // My Reminders completed today — the durable half of the card's "2/6".
+    // My Reminders completed today — the durable half of the card's six marks.
     mineCut(
       headCount()
         .eq("status", "done")
