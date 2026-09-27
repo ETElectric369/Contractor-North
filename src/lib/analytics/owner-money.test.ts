@@ -278,13 +278,17 @@ describe("computeOwnerMoney: the shelf counts in the month it is bought", () => 
   it("the card folds stock bought into Materials & Bills, still adds up to the cent, and says so in one line", () => {
     const lots = [{ lot_id: "L1", bill_id: "h1", cost: 180.17, cost_left: 100, live: true }];
     const moves = [{ id: "w1", lot_id: "L1", kind: "write_off", cost: 36.93, created_at: "2026-09-10T18:00:00Z" }];
-    const both = { ...inputs([jobTicket], lots), shelfMoves: moves };
+    // A fill-up in the same month: Fuel is its own line on the card (0362), never inside Materials &
+    // Bills, so the card adds up only when it counts once.
+    const fuel = { id: "f9", job_id: null, amount: 42.17, bill_date: "2026-08-12", created_at: "2026-08-12T18:00:00Z", category: "Fuel", status: "paid" };
+    const both = { ...inputs([jobTicket, fuel], lots), shelfMoves: moves };
     const cardAddsUp = (f: OwnerMoneyFigures) =>
       cents(f.received) ===
-      cents(materialsWithStock(f)) + cents(f.crewPay) + cents(f.crewMileagePaid) + cents(f.businessCostsTotal) + cents(f.shopStockLost) + cents(f.left);
+      cents(materialsWithStock(f)) + cents(f.crewPay) + cents(f.crewMileagePaid) + cents(f.fuel) + cents(f.businessCostsTotal) + cents(f.shopStockLost) + cents(f.left);
     const aug = computeOwnerMoney(both, AUG, TZ, TODAY);
     const sep = computeOwnerMoney(both, ownerMoneyWindow("2026-09", TODAY), TZ, TODAY);
     const year = computeOwnerMoney(both, YEAR, TZ, TODAY);
+    expect(aug.totals.fuel).toBe(42.17);
     for (const f of [aug.totals, sep.totals, year.totals, ...year.months]) expect(cardAddsUp(f)).toBe(true);
     // August reads as the ticket did before any of it went into stock: the whole $199.48.
     expect(materialsWithStock(aug.totals)).toBe(199.48);
