@@ -675,6 +675,35 @@ export function EditEntryButton({
                 </Select>
               </div>
             )}
+            {/* CODES OFF, BUT THIS SHIFT CARRIES ONE (Company Time files SHOP whatever the switch
+                says). Hidden, it rode along onto any job the shift was moved to, and a non-billable
+                code keeps those hours off the invoice with nobody the wiser. So it shows, says
+                whether it bills, and can be cleared. */}
+            {!jobCodesEnabled && !!entry.job_code && (
+              <div className="col-span-2 sm:col-span-4">
+                <Label>Time code</Label>
+                <div className="flex min-h-[44px] flex-wrap items-center gap-2 text-sm text-slate-700">
+                  {jobCode ? (
+                    <>
+                      <span>
+                        <span className="font-medium">{jobCode}</span>
+                        {jobCodes.find((c) => c.code === jobCode)?.billable === false ? ", not billed: these hours stay off every invoice." : ""}
+                      </span>
+                      <Button type="button" variant="ghost" className="h-11" onClick={() => setJobCode("")} disabled={pending}>
+                        Clear
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      <span>No code (was {entry.job_code}). Saves without it.</span>
+                      <Button type="button" variant="ghost" className="h-11" onClick={() => setJobCode(entry.job_code ?? "")} disabled={pending}>
+                        Put Back
+                      </Button>
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
             <div>
               <Label htmlFor="e-miles">Miles</Label>
               <NumberInput id="e-miles" value={miles} onValueChange={setMiles} />
