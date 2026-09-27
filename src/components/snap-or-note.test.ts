@@ -268,6 +268,12 @@ describe("notes", () => {
     expect(lines()[0]).toMatchObject({ tone: "ok", text: "Saved for the office." });
     // A tech's note is never read.
     expect(fetched).toEqual([]);
+    // A lost answer sends him to the office, never to Organize (a door he doesn't have).
+    m.saveVoiceNote.mockRejectedValue(new TypeError("network"));
+    expect(await snapNote("second note")).toBe(false);
+    expect(lines()[1].text).toBe(
+      "Couldn't tell whether it saved: the connection dropped before the answer came back. Ask the office if it came in before you save it again; your words are still in the box.",
+    );
   });
 
   it("the note box has no maxLength: a long paste is never trimmed without a word", () => {

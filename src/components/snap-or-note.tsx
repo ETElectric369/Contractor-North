@@ -476,10 +476,11 @@ export async function snapNote(text: string): Promise<boolean> {
     try {
       res = await saveVoiceNote(clean);
     } catch {
+      // Organize is the office's; a tech is sent to the people who can see it.
       say(
         id,
         name,
-        "Couldn't tell whether it saved: the connection dropped before the answer came back. Check Organize before you save it again; your words are still in the box.",
+        `Couldn't tell whether it saved: the connection dropped before the answer came back. ${ctx.staff ? "Check Organize" : "Ask the office if it came in"} before you save it again; your words are still in the box.`,
         "error",
       );
       return false;
