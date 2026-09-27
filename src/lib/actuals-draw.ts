@@ -377,6 +377,24 @@ const STEP_NAME: Record<BringInStep, string> = {
 
 const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
+/** An importer's plain "there's nothing on the job yet": the head's "Nothing new to bring in." says it. */
+const PLAIN_NOTHING = /^(No (billable hours|approved change orders|change orders|purchase orders)\b[^.]*|Nothing here to bill yet)\./;
+
+/**
+ * WHY AN EMPTY PART BROUGHT NOTHING. An importer that finds every row already billed answers
+ * EMPTY, with the reason only in `error`: "Every hour on this job is already on INV-061 - nothing new
+ * to bill." That sentence is the only place the office learns the work is on another invoice (and
+ * so must not be typed in again by hand), and a receipt whose every line is marked as the company's
+ * own cost says where the switch is the same way. So an empty part keeps its reason - unless it is
+ * the plain "No billable hours on this job yet." kind, which the head already says; then only its
+ * `emptyNote` (a stock or return note an empty run still passes on) rides along.
+ */
+function emptyReason(o: BringInOutcome): string {
+  const err = (o.error ?? "").trim();
+  if (err && !PLAIN_NOTHING.test(/\.$/.test(err) ? err : `${err}.`)) return err;
+  return (o.emptyNote ?? "").trim();
+}
+
 /**
  * ONE RESULT SENTENCE FOR THE WHOLE PRESS: "Brought in: 5 time entries · 2 bills · 1 change order ·
  * 3 of your edits kept". What each importer left on another invoice is said too ("9 time entries
@@ -397,7 +415,7 @@ export function bringInSentence(outcomes: readonly BringInOutcome[]): { sentence
   for (const o of outcomes) {
     if (!o.ok) {
       if (o.empty) {
-        const why = (o.emptyNote ?? "").trim();
+        const why = emptyReason(o);
         if (why) notes.push(why.replace(/\.$/, ""));
       } else {
         failed.push(`${STEP_NAME[o.step]} didn't come in: ${(o.error ?? "try again").replace(/\.$/, "")}`);

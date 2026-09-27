@@ -138,6 +138,29 @@ describe("the one sentence Bring In New Work says", () => {
     const said = bringInSentence([{ step: "labor", ok: true, stats: stats({ skipped_claimed: 9, claimed_on: ["INV-061"] }) }]);
     expect(said.sentence).toBe("Nothing new to bring in. 9 time entries already on INV-061.");
   });
+  it("a part whose every row is already billed elsewhere says where, even though it answered empty", () => {
+    // The importers' own answer when every hour / change order is claimed: empty, the reason in `error`.
+    const said = bringInSentence([
+      { step: "labor", ok: false, empty: true, error: "Every hour on this job is already on INV-061 — nothing new to bill." },
+      { step: "materials", ok: false, empty: true, error: "No purchase orders or bills on this job yet." },
+      { step: "change_orders", ok: false, empty: true, error: "No approved change orders on this job yet." },
+    ]);
+    expect(said.sentence).toBe("Nothing new to bring in. Every hour on this job is already on INV-061 — nothing new to bill.");
+    expect(said.partial).toBe(false);
+    // Beside work that did land, the held part is still named.
+    const mixed = bringInSentence([
+      { step: "labor", ok: false, empty: true, error: "Every hour on this job is already on INV-061 — nothing new to bill." },
+      { step: "materials", ok: true, stats: stats({ inserted: 2, pulled_in: 2 }) },
+    ]);
+    expect(mixed.sentence).toBe("Brought in: 2 bills. Every hour on this job is already on INV-061 — nothing new to bill.");
+    // A receipt whose every line is the company's own cost says where the switch is.
+    const own = "Nothing here to bill: on that receipt, every line is marked as your own cost rather than the customer's. Open the bill to change what the customer pays for.";
+    expect(bringInSentence([{ step: "materials", ok: false, empty: true, error: own }]).sentence).toBe(`Nothing new to bring in. ${own}`);
+    // A plain "nothing yet" with a stock note: only the note rides along.
+    expect(bringInSentence([{ step: "materials", ok: false, empty: true, error: "Nothing here to bill yet. 2 pieces taken past the stock.", emptyNote: "2 pieces taken past the stock" }]).sentence).toBe(
+      "Nothing new to bring in. 2 pieces taken past the stock.",
+    );
+  });
   it("a part that had rows to place and placed none is stuck (Start It Over is offered for it)", () => {
     expect(bringInSentence([{ step: "materials", ok: true, stats: stats({ pulled_in: 4 }) }]).stuck).toEqual(["materials"]);
     expect(bringInSentence([{ step: "materials", ok: true, stats: stats({ pulled_in: 0 }) }]).stuck).toEqual([]);
