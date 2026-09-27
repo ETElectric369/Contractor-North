@@ -93,9 +93,14 @@ export function invoiceSectionTree(
   rel: { jobId?: string | null },
   del: DeleteVerb,
   invoice?: { status?: string | null; hasPayments?: boolean },
+  /** THE PAGE COMPOSES THE JOB LINK ITSELF (W1-26): the invoice ⋯ has an order - Preview / Print,
+   *  Send Again, Get Paid, Job, Credit / Refund, QuickBooks, the status deeds, then Delete - and the
+   *  menu draws its children before its nodes, so a Job node here would land after all of them.
+   *  `false` leaves it out; absent keeps it, for any caller that composes nothing. */
+  opts: { jobNode?: boolean } = {},
 ): NavTree {
   const nodes: TreeNode[] = [];
-  if (rel.jobId) nodes.push({ id: "i-job", label: "Job", icon: "briefcase", href: `/jobs/${rel.jobId}` });
+  if (rel.jobId && opts.jobNode !== false) nodes.push({ id: "i-job", label: "Job", icon: "briefcase", href: `/jobs/${rel.jobId}` });
 
   // THE WORDING FOLLOWS THE RULE, NOT THE CALL SITE. deleteNode normally lets the page own the
   // confirm copy, and that is how this one came to describe a rule the action does not have.
@@ -127,11 +132,75 @@ export function invoiceSectionTree(
       status === "void"
         ? "Voided, so it can't be deleted. Void is the record that this bill was cancelled, and it stays on the books."
         : status === "draft"
-          ? "Payments are recorded on this one, so it can't be deleted. Remove those first, or set it to Void."
-          : "Sent, so it can't be deleted. Set it to Void instead: that keeps the record and puts the hours and materials it billed back to unbilled.";
+          ? "Payments are recorded on this one, so it can't be deleted. Remove those first, or use Void Invoice above."
+          : "Sent, so it can't be deleted. Void Invoice above keeps the record and puts the hours and materials it billed back to unbilled.";
     nodes.push({ id: "i-del-note", label: text, icon: "note", note: text });
   }
   return { center: { label, icon: "receipt" }, nodes };
+}
+
+/**
+ * THE INVOICE'S STATUS DEEDS, AS ⋯ ROWS (W1-27). The Status <select> left the invoice body: the
+ * header's Badge is the one place a status shows, and what used to be the picker's gated options
+ * are deeds a person does, each a row calling setInvoiceStatus exactly as the select did:
+ *
+ *   Mark Sent - I Sent It Myself       a draft: the person handed it over outside the app.
+ *   Mark Sent Again - I Re-Sent It     a delivered bill that changed since (customerHoldsOlderCopy):
+ *                                      the corrected copy went out by hand.
+ *   Back To Draft                      only where the server allows it (not with money on a bill
+ *                                      the customer holds - INV-069's rule); on a void one, it is
+ *                                      the way back from a mistaken Void.
+ *   the sentence why Draft is gone     where Back To Draft can't be offered, never a blank.
+ *   Void Invoice                       above Delete, behind a confirm.
+ *
+ * THE CLASS THE OLD PICKER GUARDED STILL HOLDS (INV-071, status-picker-options.test.ts): no status
+ * is offered twice, none is offered as what the invoice already IS, and the two send declarations
+ * carry their own value ("sent-by-hand"), translated back to "sent" by statusToSend before the
+ * server sees it (its whitelist is real statuses; its `redelivered` branch keys off "sent").
+ */
+export type InvoiceStatusDeed =
+  | { id: string; label: string; value: "sent-by-hand" | "draft" | "void"; confirm?: string }
+  | { id: string; note: string };
+
+export const SENT_BY_HAND = "sent-by-hand" as const;
+
+export function invoiceStatusItems(inv: {
+  status: string;
+  invoiceNumber?: string | null;
+  /** invoices.sent_at: the bill really reached the customer (0267). */
+  sentAt?: string | null;
+  amountPaid?: number | null;
+  /** lib/invoice-revision's answer, decided on the server (0269). */
+  customerHoldsOlderCopy?: boolean;
+}): InvoiceStatusDeed[] {
+  const isDraft = inv.status === "draft";
+  const isVoid = inv.status === "void";
+  const canReturnToDraft = !(Number(inv.amountPaid ?? 0) > 0 && !!inv.sentAt);
+  const items: InvoiceStatusDeed[] = [];
+  if (isDraft) items.push({ id: "st-sent", label: "Mark Sent - I Sent It Myself", value: SENT_BY_HAND });
+  else if (!isVoid && inv.customerHoldsOlderCopy) items.push({ id: "st-resent", label: "Mark Sent Again - I Re-Sent It", value: SENT_BY_HAND });
+  if (!isDraft && canReturnToDraft) items.push({ id: "st-draft", label: "Back To Draft", value: "draft" });
+  if (!isDraft && !isVoid && !canReturnToDraft) {
+    items.push({
+      id: "st-draft-note",
+      note: "This one is with the customer and has money on it, so it can't go back to Draft. You don't need Draft to fix it: change the lines, then send it again.",
+    });
+  }
+  if (!isVoid) {
+    const doc = inv.invoiceNumber || "this invoice";
+    items.push({
+      id: "st-void",
+      label: "Void Invoice",
+      value: "void",
+      confirm: `Void ${doc}? It stays on the books as cancelled and bills nothing; the hours and materials it billed go back to unbilled.`,
+    });
+  }
+  return items;
+}
+
+/** The deed's value, as the one status the server takes: the send declarations become "sent". */
+export function statusToSend(value: string): string {
+  return value === SENT_BY_HAND ? "sent" : value;
 }
 
 /** The work order ⋯ — the page already shows Job and Customer cards and a solid

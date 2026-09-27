@@ -9,7 +9,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
  * is still handled here, untouched.
  */
 
-const state = vi.hoisted(() => ({ client: null as any, drawDoor: vi.fn() }));
+const state = vi.hoisted(() => ({ client: null as any, drawDoor: vi.fn(), taxRate: vi.fn(async () => ({ ok: true })) }));
 
 vi.mock("@/lib/staff-guard", () => ({
   requireStaff: vi.fn(async () => ({ supabase: state.client, userId: "user-1", orgId: "org-1" })),
@@ -28,9 +28,23 @@ vi.mock("../billing/actions", () => ({
   importChangeOrdersIntoInvoice: vi.fn(async () => ({ ok: false, empty: true })),
   createProgressReportInvoice: state.drawDoor,
   emailInvoice: vi.fn(),
+  setInvoiceTaxRate: state.taxRate,
 }));
 
 import { createInvoiceForJob } from "./actions";
+import {
+  estimateBilledInFullWords,
+  invoicePresetFromParam,
+  newInvoiceChoices,
+  newInvoicePageFacts,
+  newInvoiceRoute,
+  newInvoiceSaveLabel,
+  WORK_SO_FAR_UNREAD,
+  workSoFarDoor,
+  workSoFarNote,
+} from "@/lib/actuals-draw";
+import { createParamClaim } from "@/lib/param-claim";
+import { formatCurrency } from "@/lib/utils";
 
 const JOB = "8760a051-b6f8-4a6b-b3a5-6ac7078f9ac1";
 
@@ -145,7 +159,11 @@ describe("createInvoiceForJob — the open draft is the door, whatever its kind"
     expect(state.drawDoor).not.toHaveBeenCalled();
     expect(res.ok).toBe(false);
     expect(res.billedOn).toEqual({ id: "dep-1", number: "INV-090" });
-    expect(res.error).toMatch(/Progress Payment/);
+    // THE REFUSAL IS A DOOR (W1-24): named by the job's New Invoice, never a tab, and carried as
+    // `door` so the job's button opens its sheet on Part Of The Estimate and /billing links there.
+    expect(res.error).toMatch(/the job's New Invoice → Part Of The Estimate/);
+    expect(res.error).not.toMatch(/Progress Payment|Invoices tab/);
+    expect(res.door).toBe("part-of-estimate");
   });
 
   it("Tao J-002 (T&M): the estimate is a guide - with only the estimate's deposit out, the next bill is still the progress report of the actuals", async () => {
@@ -237,5 +255,346 @@ describe("createInvoiceForJob — the open draft is the door, whatever its kind"
     expect(state.drawDoor).not.toHaveBeenCalled();
     expect(res.ok).toBe(true);
     expect(res.id).toBe("inv-062");
+  });
+});
+
+/**
+ * ONE NEW INVOICE ON THE JOB (W1-24): THE BUTTON GOES WHERE THE SERVER GOES.
+ *
+ * The job's New Invoice decides what one tap does from the facts its page already read
+ * (newInvoicePageFacts → newInvoiceRoute → newInvoiceChoices). Each case below builds the page's
+ * facts, asks the button what it would do, and asks the server (createInvoiceForJob) the same
+ * question on the same job, so the button can never offer a door the server refuses.
+ */
+describe("the job's New Invoice routes like the server, case by case (W1-24)", () => {
+  const money = formatCurrency;
+  const TAO_WORK = { hours: 19.5, billsCount: 0, stockCount: 0, returnsCount: 0, total: 2437.5, laborAmount: 2437.5, billsBilled: 0, stockBilled: 0 };
+  const facts = (f: { billingType: string; estimate?: number; quotes?: any[]; invoices?: any[]; milestones?: number }) =>
+    newInvoicePageFacts({ billingType: f.billingType, estimate: f.estimate ?? 0, quotes: f.quotes ?? [], invoices: f.invoices ?? [], milestoneCount: f.milestones ?? 0 });
+
+  it("an open draw draft that takes new work: no sheet, the draft (INV-078) is brought up to date", async () => {
+    const f = facts({ billingType: "tm", invoices: [{ status: "draft", invoice_kind: "progress" }] });
+    expect(newInvoiceRoute({ ...f, openDraft: { id: "inv-078", number: "INV-078", refreshable: true } })).toEqual({ kind: "draft", adds: true });
+    state.client = jobWithDraft({ id: "inv-078", number: "INV-078", kind: "progress", sources: ["labor"] });
+    state.drawDoor.mockResolvedValue({ ok: true, id: "inv-078", note: "Pulled 6 hours and 1 bill into INV-078." });
+    expect(await createInvoiceForJob(JOB)).toEqual({ ok: true, id: "inv-078", importWarning: "Pulled 6 hours and 1 bill into INV-078." });
+  });
+
+  it("an open draft for set amounts: no sheet, it opens (the server would only refuse new work on it)", async () => {
+    const f = facts({ billingType: "fixed", estimate: 12000, quotes: [{ status: "accepted", total: 12000 }], invoices: [{ status: "draft", invoice_kind: "progress" }] });
+    expect(newInvoiceRoute({ ...f, openDraft: { id: "inv-080", number: "INV-080", refreshable: false } })).toEqual({ kind: "draft", adds: false });
+    // A preset never opens a sheet the server would refuse while that draft is open.
+    expect(newInvoiceRoute({ ...f, openDraft: { id: "inv-080", number: "INV-080", refreshable: false } }, "part").kind).toBe("draft");
+  });
+
+  it("draws that bill actuals (Tao J-002, T&M): the sheet, and Bill The Work So Far is the card's own progress-payment door, the default", async () => {
+    const f = facts({ billingType: "tm", estimate: 17325, quotes: [{ status: "accepted", total: 17325 }], invoices: [{ status: "paid", invoice_kind: "deposit" }, { status: "paid", invoice_kind: "progress" }] });
+    expect(f).toMatchObject({ drawBilled: true, billsActuals: true, wholeEstimate: null, scheduleActive: false });
+    expect(newInvoiceRoute({ ...f, openDraft: null })).toEqual({ kind: "sheet" });
+    const workDoor = workSoFarDoor(TAO_WORK, 0, f.drawBilled, money);
+    expect(workDoor).toEqual({ kind: "draw", label: "Create Progress Payment for $2,437.50", amount: 2437.5 });
+    expect(newInvoiceChoices({ ...f, billingType: "tm", estimate: 17325, workDoor })).toEqual({ choices: ["deposit", "part", "work"], initial: "work" });
+    // The server takes the same job to the same door.
+    state.client = fake((table, cols, single) => {
+      if (table === "payment_milestones") return single ? null : [];
+      if (table === "jobs" && cols === "billing_type") return { billing_type: "tm" };
+      if (table === "invoices" && cols.startsWith("id, invoice_number, invoice_kind, dismissed_import_keys")) return [];
+      if (table === "invoices" && cols.startsWith("id, invoice_number, status, quote_id")) return [];
+      if (table === "quotes") return [{ id: "q-tao", status: "accepted" }];
+      if (table === "invoices" && cols === "id, invoice_number") return [{ id: "inv-00028", invoice_number: "INV-00028" }];
+      throw new Error(`unrouted ${table} [${cols}]`);
+    });
+    state.drawDoor.mockResolvedValue({ ok: true, id: "inv-new", note: "Started INV-082 for the work not yet billed - its total is that work." });
+    expect(await createInvoiceForJob(JOB)).toMatchObject({ ok: true, id: "inv-new" });
+    expect(state.drawDoor).toHaveBeenCalledWith(JOB, "progress");
+  });
+
+  it("draws that are set parts of the estimate: the sheet offers Deposit and Part Of The Estimate only - never actuals behind a contract", async () => {
+    const f = facts({ billingType: "fixed", estimate: 20000, quotes: [{ status: "accepted", total: 20000 }], invoices: [{ status: "paid", invoice_kind: "deposit" }] });
+    expect(f).toMatchObject({ drawBilled: true, billsActuals: false, wholeEstimate: null });
+    expect(newInvoiceRoute({ ...f, openDraft: null })).toEqual({ kind: "sheet" });
+    expect(newInvoiceChoices({ ...f, billingType: "fixed", estimate: 20000, workDoor: null })).toEqual({ choices: ["deposit", "part"], initial: "part" });
+    // …and a door that went to the server anyway comes back as the same choice (the `door`).
+    expect(newInvoiceChoices({ ...f, billingType: "fixed", estimate: 20000, workDoor: null }, "part").initial).toBe("part");
+  });
+
+  it("a standard draft beside a live draw is no door: the sheet (openDraftOnJob reports none), and the server bills the work through the draw door", async () => {
+    state.client = jobWithDraft({ id: "inv-079", number: "INV-079", kind: "standard", sources: [] }, true);
+    const { openDraftOnJob } = await import("@/lib/actuals-draw");
+    expect(await openDraftOnJob(state.client, JOB)).toBeNull();
+    const f = facts({ billingType: "tm", invoices: [{ status: "draft", invoice_kind: "standard" }, { status: "sent", invoice_kind: "progress" }] });
+    expect(newInvoiceRoute({ ...f, openDraft: null })).toEqual({ kind: "sheet" });
+    state.drawDoor.mockResolvedValue({ ok: true, id: "inv-081", note: "Started INV-081 for the work not yet billed - its total is that work." });
+    expect(await createInvoiceForJob(JOB)).toMatchObject({ ok: true, id: "inv-081" });
+  });
+
+  it("a payment schedule: no sheet, the schedule's own Request Next Payment (the server refuses any other bill)", async () => {
+    const f = facts({ billingType: "fixed", estimate: 30000, quotes: [{ status: "accepted", total: 30000 }], milestones: 3 });
+    expect(newInvoiceRoute({ ...f, openDraft: null })).toEqual({ kind: "schedule" });
+    expect(newInvoiceRoute({ ...f, openDraft: null }, "deposit")).toEqual({ kind: "schedule" });
+    state.client = fake((table, _cols, single) => {
+      if (table === "payment_milestones") return single ? { id: "m-1" } : [{ id: "m-1" }];
+      throw new Error(`unrouted ${table}`);
+    });
+    const res = await createInvoiceForJob(JOB);
+    expect(res.ok).toBe(false);
+    expect(res.error).toMatch(/payment schedule/);
+  });
+
+  it("no estimate and no draw (a service call): one tap, createInvoiceForJob exactly as before; Take A Deposit Instead opens the sheet on Deposit", async () => {
+    const f = facts({ billingType: "fixed", quotes: [{ status: "declined", total: 900 }] });
+    expect(f).toMatchObject({ hasEstimate: false, drawBilled: false, billsActuals: true });
+    expect(newInvoiceRoute({ ...f, openDraft: null })).toEqual({ kind: "direct" });
+    expect(newInvoiceRoute({ ...f, openDraft: null }, "deposit")).toEqual({ kind: "sheet" });
+    expect(newInvoiceChoices({ ...f, billingType: "fixed", estimate: 0, workDoor: workSoFarDoor(TAO_WORK, 0, false, money) }, "deposit")).toEqual({
+      choices: ["deposit", "work"],
+      initial: "deposit",
+    });
+    const billing = await import("../billing/actions");
+    const createBlankInvoice = billing.createBlankInvoice as unknown as ReturnType<typeof vi.fn>;
+    createBlankInvoice.mockClear();
+    createBlankInvoice.mockResolvedValueOnce({ ok: true, id: "inv-svc" });
+    state.client = fake((table, cols, single) => {
+      if (table === "payment_milestones") return single ? null : [];
+      if (table === "jobs" && cols === "billing_type") return { billing_type: "fixed" };
+      if (table === "jobs") return { customer_id: "c-1", name: "Service call", description: null };
+      if (table === "invoices") return [];
+      if (table === "quotes") return [{ id: "q-no", status: "declined" }];
+      if (table === "organizations") return { settings: {} };
+      throw new Error(`unrouted ${table} [${cols}]`);
+    });
+    expect(await createInvoiceForJob(JOB)).toMatchObject({ ok: true, id: "inv-svc" });
+    // No rate asked: untaxed, exactly as the old button.
+    expect(createBlankInvoice).toHaveBeenCalledWith(expect.objectContaining({ job_id: JOB, tax_rate: 0 }));
+  });
+
+  it("a fixed-price job with an estimate and nothing billed: Deposit, Part Of The Estimate, and The Whole Estimate at the figure New Invoice copies", async () => {
+    const quotes = [
+      { status: "declined", total: 9000, created_at: "2026-09-02" },
+      { status: "accepted", total: 12400, created_at: "2026-09-01" },
+    ];
+    const f = facts({ billingType: "fixed", estimate: 12400, quotes });
+    expect(f).toMatchObject({ hasEstimate: true, drawBilled: false, billsActuals: false, wholeEstimate: 12400 });
+    expect(newInvoiceRoute({ ...f, openDraft: null })).toEqual({ kind: "sheet" });
+    expect(newInvoiceChoices({ ...f, billingType: "fixed", estimate: 12400, workDoor: null })).toEqual({ choices: ["deposit", "part", "whole"], initial: "part" });
+    // A bill that already went out may be the estimate's: The Whole Estimate isn't offered then.
+    expect(facts({ billingType: "fixed", estimate: 12400, quotes, invoices: [{ status: "sent", invoice_kind: "standard" }] }).wholeEstimate).toBeNull();
+    // A T&M job's estimate is a guide, never copied whole.
+    expect(facts({ billingType: "tm", estimate: 12400, quotes }).wholeEstimate).toBeNull();
+    // The server copies that estimate.
+    const billing = await import("../billing/actions");
+    const createInvoiceFromQuote = billing.createInvoiceFromQuote as unknown as ReturnType<typeof vi.fn>;
+    createInvoiceFromQuote.mockReset();
+    createInvoiceFromQuote.mockResolvedValueOnce({ ok: true, id: "inv-est" });
+    state.client = fake((table, cols, single) => {
+      if (table === "payment_milestones") return single ? null : [];
+      if (table === "jobs" && cols === "billing_type") return { billing_type: "fixed" };
+      if (table === "jobs") return null; // pricing levels: none
+      if (table === "invoices" && cols.startsWith("id, invoice_number, invoice_kind, dismissed_import_keys")) return [];
+      if (table === "invoices" && cols.startsWith("id, invoice_number, status, quote_id")) return [];
+      if (table === "invoices" && cols === "id") return []; // nothing made from the estimate yet
+      if (table === "invoices" && cols === "id, invoice_number") return []; // no draws
+      if (table === "quotes") return [{ id: "q-acc", status: "accepted" }];
+      if (table === "organizations") return { settings: {} };
+      throw new Error(`unrouted ${table} [${cols}]`);
+    });
+    expect(await createInvoiceForJob(JOB)).toMatchObject({ ok: true, id: "inv-est" });
+    expect(createInvoiceFromQuote).toHaveBeenCalledWith("q-acc");
+  });
+
+  it("fixed price, the estimate's invoice sent, no draws, a change order approved since: Bill The Change Orders is the door (never a typed-amount draw)", async () => {
+    const quotes = [{ status: "accepted", total: 12400, created_at: "2026-09-01" }];
+    const invoices = [{ status: "sent", invoice_kind: "standard" }];
+    const changeOrders = [
+      { status: "approved", amount: 850 },
+      { status: "pending", amount: 400 }, // not approved: not billed
+      { status: "approved", amount: 0 }, // $0: nothing to bill
+    ];
+    const f = facts({ billingType: "fixed", estimate: 12400, quotes, invoices });
+    const withCOs = newInvoicePageFacts({ billingType: "fixed", estimate: 12400, quotes, invoices, milestoneCount: 0, changeOrders });
+    expect(withCOs).toMatchObject({ hasEstimate: true, drawBilled: false, billsActuals: false, wholeEstimate: null, changeOrdersToBill: 1 });
+    expect(newInvoiceRoute({ ...withCOs, openDraft: null })).toEqual({ kind: "sheet" });
+    expect(newInvoiceChoices({ ...withCOs, billingType: "fixed", estimate: 12400, workDoor: null })).toEqual({ choices: ["deposit", "part", "changes"], initial: "changes" });
+    // No approved change order yet: no such choice, and the words send an extra to one, not to a draw.
+    expect(f.changeOrdersToBill).toBe(0);
+    expect(newInvoiceChoices({ ...f, billingType: "fixed", estimate: 12400, workDoor: null }).choices).toEqual(["deposit", "part"]);
+    expect(estimateBilledInFullWords({ changesOffered: false, drawBilled: false, billingType: "fixed" })).toMatch(/change order/);
+    expect(estimateBilledInFullWords({ changesOffered: false, drawBilled: false, billingType: "fixed" })).not.toMatch(/type an amount/);
+    expect(estimateBilledInFullWords({ changesOffered: true, drawBilled: false, billingType: "fixed" })).toMatch(/Bill The Change Orders/);
+    // A job already billed in draws bills its extra as one more part (the server refuses a standard bill there).
+    expect(estimateBilledInFullWords({ changesOffered: false, drawBilled: true, billingType: "fixed" })).toMatch(/type an amount instead/);
+    // Where the server would never bring change orders in, they aren't counted: a draw on the job, a
+    // schedule, a T&M job, or an estimate not billed yet (The Whole Estimate is the door then).
+    for (const other of [
+      { billingType: "fixed", invoices: [...invoices, { status: "paid", invoice_kind: "deposit" }], milestoneCount: 0 },
+      { billingType: "fixed", invoices, milestoneCount: 2 },
+      { billingType: "tm", invoices, milestoneCount: 0 },
+      { billingType: "fixed", invoices: [], milestoneCount: 0 },
+    ]) {
+      expect(newInvoicePageFacts({ estimate: 12400, quotes, changeOrders, ...other }).changeOrdersToBill).toBe(0);
+    }
+    expect(newInvoiceSaveLabel("changes", false, null, formatCurrency)).toBe("Create Invoice");
+
+    // The server, on the same job: a second invoice, with the approved change orders brought in.
+    const billing = await import("../billing/actions");
+    const createBlankInvoice = billing.createBlankInvoice as unknown as ReturnType<typeof vi.fn>;
+    const importChangeOrdersIntoInvoice = billing.importChangeOrdersIntoInvoice as unknown as ReturnType<typeof vi.fn>;
+    createBlankInvoice.mockClear();
+    createBlankInvoice.mockResolvedValueOnce({ ok: true, id: "inv-co" });
+    importChangeOrdersIntoInvoice.mockClear();
+    importChangeOrdersIntoInvoice.mockResolvedValueOnce({ ok: true, stats: { inserted: 1, updated: 0, removed: 0, kept_edited: 0, pulled_in: 1 } });
+    state.client = fake((table, cols, single) => {
+      if (table === "payment_milestones") return single ? null : [];
+      if (table === "jobs" && cols === "billing_type") return { billing_type: "fixed" };
+      if (table === "jobs") return { customer_id: "c-1", name: "Timbercreek", description: null };
+      if (table === "invoices" && cols.startsWith("id, invoice_number, invoice_kind, dismissed_import_keys")) return [];
+      if (table === "invoices" && cols.startsWith("id, invoice_number, status, quote_id")) return [{ id: "inv-061", invoice_number: "INV-061", status: "sent", quote_id: "q-acc" }];
+      if (table === "invoices" && cols === "id, invoice_number") return []; // no draws
+      if (table === "quotes") return [{ id: "q-acc", status: "accepted" }];
+      if (table === "organizations") return { settings: {} };
+      // The approved change order, on no bill yet (nothing claims it).
+      if (table === "change_orders") return [{ id: "co-1", co_number: "CO-1", description: "Add a 20A circuit", amount: 850 }];
+      // The new invoice, read back: the change order's line landed on it.
+      if (table === "invoices" && cols === "invoice_number, invoice_items(id)") return { invoice_number: "INV-082", invoice_items: [{ id: "ii-co-1" }] };
+      return single ? null : [];
+    });
+    expect(await createInvoiceForJob(JOB)).toMatchObject({ ok: true, id: "inv-co" });
+    expect(createBlankInvoice).toHaveBeenCalledWith(expect.objectContaining({ job_id: JOB }));
+    expect(importChangeOrdersIntoInvoice).toHaveBeenCalledWith("inv-co");
+  });
+
+  it("a job that bills its actuals whose unbilled work couldn't be read: the sheet says so, never a choice that silently isn't there", () => {
+    const f = facts({ billingType: "tm", estimate: 17325, quotes: [{ status: "accepted", total: 17325 }] });
+    expect(f.billsActuals).toBe(true);
+    // The page passes no figure when its read failed: no Bill The Work So Far…
+    expect(newInvoiceChoices({ ...f, billingType: "tm", estimate: 17325, workDoor: workSoFarDoor(null, 0, false, formatCurrency) }).choices).toEqual(["deposit", "part"]);
+    // …and the sheet says why, and how to get it back.
+    expect(workSoFarNote({ billsActuals: true, unbilledRead: false, workDoor: null })).toBe(WORK_SO_FAR_UNREAD);
+    // Read, and nothing new: said as that - a different sentence.
+    expect(workSoFarNote({ billsActuals: true, unbilledRead: true, workDoor: null })).toBe("Every hour and bill so far is on a bill - nothing new to bill.");
+    // The choice is there: nothing to add. A job that doesn't bill its actuals: nothing to say.
+    expect(workSoFarNote({ billsActuals: true, unbilledRead: true, workDoor: workSoFarDoor(TAO_WORK, 0, false, formatCurrency) })).toBeNull();
+    expect(workSoFarNote({ billsActuals: false, unbilledRead: false, workDoor: null })).toBeNull();
+  });
+
+  it("Save names what it makes, and The Rest is the last part", () => {
+    expect(newInvoiceSaveLabel("deposit", false, 500, formatCurrency)).toBe("Create Deposit $500.00");
+    expect(newInvoiceSaveLabel("part", false, 6000, formatCurrency)).toBe("Create Invoice $6,000.00");
+    expect(newInvoiceSaveLabel("part", true, 6200, formatCurrency)).toBe("Create Final Invoice $6,200.00");
+    expect(newInvoiceSaveLabel("deposit", false, 0, formatCurrency)).toBe("Create Deposit");
+  });
+});
+
+describe("?invoice=part opens the job's New Invoice sheet once (W1-24)", () => {
+  it("only part and deposit are presets; anything else is none", () => {
+    expect(invoicePresetFromParam("part")).toBe("part");
+    expect(invoicePresetFromParam("deposit")).toBe("deposit");
+    expect(invoicePresetFromParam("final")).toBeNull();
+    expect(invoicePresetFromParam(null)).toBeNull();
+  });
+
+  it("the first New Invoice on the page answers the param; a second one never opens a second sheet, and the claim frees when its holder lets go", () => {
+    const claim = createParamClaim();
+    const answers = (id: string) => (invoicePresetFromParam("part") && claim.take(id) ? "opens" : "stays shut");
+    expect(answers("overview-card")).toBe("opens");
+    expect(answers("invoices-tab")).toBe("stays shut");
+    // The same holder asking again (a re-render) doesn't re-open it either: the param is stripped
+    // after the first answer, and the claim is still held.
+    expect(claim.take("overview-card")).toBe(false);
+    claim.release("invoices-tab"); // not the holder: nothing changes
+    expect(claim.take("invoices-tab")).toBe(false);
+    claim.release("overview-card");
+    expect(claim.take("invoices-tab")).toBe(true);
+  });
+
+  it("the job's button reads the param through the one claim and strips it after answering", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const src = readFileSync(join(process.cwd(), "src/app/(app)/jobs/[id]/new-invoice-button.tsx"), "utf8");
+    expect(src).toContain('invoicePresetFromParam(searchParams.get("invoice"))');
+    expect(src).toContain("if (!presetParam.take(claimant)) return;");
+    expect(src).toContain('params.delete("invoice");');
+  });
+});
+
+describe("a sales-tax rate asked for on a new invoice (W1-28)", () => {
+  it("the blank invoice starts at it", async () => {
+    const billing = await import("../billing/actions");
+    const createBlankInvoice = billing.createBlankInvoice as unknown as ReturnType<typeof vi.fn>;
+    createBlankInvoice.mockClear();
+    createBlankInvoice.mockResolvedValueOnce({ ok: true, id: "inv-taxed" });
+    state.client = fake((table, cols, single) => {
+      if (table === "payment_milestones") return single ? null : [];
+      if (table === "jobs" && cols === "billing_type") return { billing_type: "tm" };
+      if (table === "jobs") return { customer_id: "c-1", name: "Deck", description: null };
+      if (table === "invoices") return [];
+      if (table === "quotes") return [];
+      if (table === "organizations") return { settings: {} };
+      throw new Error(`unrouted ${table} [${cols}]`);
+    });
+    const res = await createInvoiceForJob(JOB, { taxRate: 0.0825 });
+    expect(res).toMatchObject({ ok: true, id: "inv-taxed", startedAtTaxRate: 0.0825 });
+    expect(createBlankInvoice).toHaveBeenCalledWith(expect.objectContaining({ tax_rate: 0.0825 }));
+  });
+
+  it("no rate asked: untaxed, and nothing claims a rate", async () => {
+    const billing = await import("../billing/actions");
+    const createBlankInvoice = billing.createBlankInvoice as unknown as ReturnType<typeof vi.fn>;
+    createBlankInvoice.mockClear();
+    createBlankInvoice.mockResolvedValueOnce({ ok: true, id: "inv-plain" });
+    state.client = fake((table, cols, single) => {
+      if (table === "payment_milestones") return single ? null : [];
+      if (table === "jobs" && cols === "billing_type") return { billing_type: "tm" };
+      if (table === "jobs") return { customer_id: "c-1", name: "Deck", description: null };
+      if (table === "invoices") return [];
+      if (table === "quotes") return [];
+      if (table === "organizations") return { settings: {} };
+      throw new Error(`unrouted ${table} [${cols}]`);
+    });
+    const res = await createInvoiceForJob(JOB);
+    expect(res).toMatchObject({ ok: true, id: "inv-plain" });
+    expect(res.startedAtTaxRate).toBeUndefined();
+    expect(createBlankInvoice).toHaveBeenCalledWith(expect.objectContaining({ tax_rate: 0 }));
+  });
+
+  it("landing on an open draft ignores it, and says the draft keeps its own tax", async () => {
+    state.client = jobWithDraft({ id: "inv-062", number: "INV-062", kind: "standard", sources: ["labor"] });
+    const res = await createInvoiceForJob(JOB, { taxRate: 0.0825 });
+    expect(res).toMatchObject({ ok: true, id: "inv-062" });
+    expect(res.importWarning).toMatch(/INV-062 keeps its own sales tax\./);
+    expect(res.startedAtTaxRate).toBeUndefined();
+    state.drawDoor.mockResolvedValue({ ok: true, id: "inv-078", note: "Pulled 2 hours into INV-078." });
+    state.client = jobWithDraft({ id: "inv-078", number: "INV-078", kind: "progress", sources: ["labor"] });
+    expect((await createInvoiceForJob(JOB, { taxRate: 0.0825 })).importWarning).toBe("Pulled 2 hours into INV-078. INV-078 keeps its own sales tax.");
+  });
+
+  it("an estimate copy keeps the estimate's own tax; one with no tax takes the rate asked for", async () => {
+    const billing = await import("../billing/actions");
+    const createInvoiceFromQuote = billing.createInvoiceFromQuote as unknown as ReturnType<typeof vi.fn>;
+    const route = (ownRate: number) =>
+      fake((table, cols, single) => {
+        if (table === "payment_milestones") return single ? null : [];
+        if (table === "jobs" && cols === "billing_type") return { billing_type: "fixed" };
+        if (table === "jobs") return null; // pricing levels: none
+        if (table === "invoices" && cols.startsWith("id, invoice_number, invoice_kind, dismissed_import_keys")) return [];
+        if (table === "invoices" && cols.startsWith("id, invoice_number, status, quote_id")) return [];
+        if (table === "invoices" && (cols === "id" || cols === "id, invoice_number")) return [];
+        if (table === "invoices" && cols === "tax_rate") return { tax_rate: ownRate };
+        if (table === "quotes") return [{ id: "q-acc", status: "accepted" }];
+        if (table === "organizations") return { settings: {} };
+        throw new Error(`unrouted ${table} [${cols}]`);
+      });
+    state.taxRate.mockClear();
+    createInvoiceFromQuote.mockReset();
+    createInvoiceFromQuote.mockResolvedValue({ ok: true, id: "inv-est" });
+    state.client = route(0.0725);
+    const kept = await createInvoiceForJob(JOB, { taxRate: 0.0825 });
+    expect(kept.importWarning).toBe("It keeps the estimate's own sales tax, 7.25%.");
+    expect(kept.startedAtTaxRate).toBeUndefined();
+    expect(state.taxRate).not.toHaveBeenCalled();
+    state.client = route(0);
+    const seeded = await createInvoiceForJob(JOB, { taxRate: 0.0825 });
+    expect(seeded).toMatchObject({ ok: true, id: "inv-est", startedAtTaxRate: 0.0825 });
+    expect(state.taxRate).toHaveBeenCalledWith("inv-est", 8.25);
   });
 });

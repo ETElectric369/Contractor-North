@@ -268,7 +268,7 @@ describe("the 12-hour question, as a text too", () => {
 });
 
 describe("Text on an invoice", () => {
-  const routes = (updates: Q[]) => (q: Q): Reply => {
+  const routes = (updates: Q[], row: { status?: string; sent_at?: string | null } = {}, restamp?: Reply) => (q: Q): Reply => {
     if (q.table === "invoices" && q.verb === "select")
       return {
         data: {
@@ -276,16 +276,19 @@ describe("Text on an invoice", () => {
           total: 150,
           amount_paid: 0,
           status: "draft",
+          sent_at: null,
           public_token: "tok",
           org_id: "org-1",
           customers: { name: "Nora", phone: "(530) 555-0142" },
+          ...row,
         },
       };
     if (q.table === "invoices" && q.verb === "update") {
       updates.push(q);
+      if (restamp && "due_date" in (q.payload ?? {})) return restamp;
       return { data: [{ id: "inv-1" }] };
     }
-    if (q.table === "organizations") return { data: ORG };
+    if (q.table === "organizations") return { data: { ...ORG, settings: { ...ORG.settings, invoice_due_days: 14 } } };
     return undefined;
   };
 
@@ -304,6 +307,58 @@ describe("Text on an invoice", () => {
     expect(await textInvoice("inv-1")).toEqual({ ok: true });
     expect(sentTexts()).toEqual([{ to: "+15305550142", body: expect.stringMatching(/^ET Electric: Invoice INV-070, balance \$150\.00\. View\/pay: .+\/i\/tok$/) }]);
     expect(updates[0].payload).toMatchObject({ status: "sent" });
+  });
+
+  /**
+   * THE FIRST SEND STARTS THE CLOCK (W1-27): a SECOND write after the status write has landed
+   * (updates[0] stays the status write itself), restamping the due date to send day + the terms -
+   * only where nobody picked it by hand, scoped to the invoice's own org, and never failing the send.
+   */
+  it("the first send restamps the due date to send day + the terms, as a second write the status write never waits on", async () => {
+    textingReady();
+    const updates: Q[] = [];
+    state.client = fakeSupabase(routes(updates));
+    expect(await textInvoice("inv-1")).toEqual({ ok: true });
+    expect(updates).toHaveLength(2);
+    expect(updates[0].payload).toMatchObject({ status: "sent" });
+    expect(updates[0].payload).not.toHaveProperty("due_date");
+    expect(Object.keys(updates[1].payload)).toEqual(["due_date"]);
+    // Send day (in the company's timezone) + Net 14, at noon there.
+    const sendDay = new Date().toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" });
+    const due = new Date(Date.parse(`${sendDay}T00:00:00Z`) + 14 * 86_400_000).toISOString().slice(0, 10);
+    expect(new Date(updates[1].payload.due_date).toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" })).toBe(due);
+    // A date a person picked is theirs: the guard is in the WHERE, and the write is org-scoped.
+    expect(updates[1].filters).toContainEqual(["eq", "due_date_by_hand", false]);
+    expect(updates[1].filters).toContainEqual(["eq", "org_id", "org-1"]);
+  });
+
+  it("before 0366 (no due_date_by_hand) or on any restamp failure, the date stays and the send still succeeds", async () => {
+    textingReady();
+    for (const failure of [{ error: { code: "42703", message: 'column "due_date_by_hand" does not exist' } }, { error: { code: "PGRST204" } }, { error: { code: "57014", message: "canceling statement" } }]) {
+      const updates: Q[] = [];
+      state.client = fakeSupabase(routes(updates, {}, failure));
+      expect(await textInvoice("inv-1")).toEqual({ ok: true });
+      expect(updates[0].payload).toMatchObject({ status: "sent" });
+    }
+  });
+
+  it("a re-send never moves the date: it stamps only when the bill went out again", async () => {
+    textingReady();
+    const updates: Q[] = [];
+    state.client = fakeSupabase(routes(updates, { status: "sent", sent_at: "2026-09-19T20:54:55.199Z" }));
+    expect(await textInvoice("inv-1")).toEqual({ ok: true });
+    expect(updates.map((u) => Object.keys(u.payload))).toEqual([["sent_at"]]);
+  });
+
+  it("a bill that went out, came Back To Draft and goes out again keeps its due date: that isn't the first send", async () => {
+    textingReady();
+    const updates: Q[] = [];
+    // Back To Draft keeps sent_at (Aug 1), so the draft still says the customer has held it since.
+    state.client = fakeSupabase(routes(updates, { status: "draft", sent_at: "2026-08-01T18:00:00.000Z" }));
+    expect(await textInvoice("inv-1")).toEqual({ ok: true });
+    expect(updates).toHaveLength(1);
+    expect(updates[0].payload).toMatchObject({ status: "sent" });
+    expect(updates.some((u) => "due_date" in (u.payload ?? {}))).toBe(false);
   });
 
   it("ready but refused by the service: said plainly, and nothing is stamped", async () => {

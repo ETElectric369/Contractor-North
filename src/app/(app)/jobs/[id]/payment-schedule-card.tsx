@@ -121,11 +121,11 @@ export function PaymentScheduleCard({
             {drawsBilled ? (
               // NOT A BLANK BOX WHERE THE BUTTON WAS. The job is already being billed a draw at
               // a time, which is a way of working, not a fault — so the box says that, and
-              // points at the control on this same tab that keeps doing it.
+              // points at the one door that keeps doing it (the job's New Invoice).
               <>
                 <div className="text-sm text-slate-600">No payment schedule on this job.</div>
                 <div className="mt-0.5 text-xs text-slate-500">
-                  Draws have already been billed here, so a schedule can&apos;t be set up now. Keep billing with Progress Payment above.
+                  Draws have already been billed here, so a schedule can&apos;t be set up now. Keep billing with the job&apos;s New Invoice.
                 </div>
               </>
             ) : (

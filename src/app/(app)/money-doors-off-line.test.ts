@@ -75,6 +75,19 @@ describe("doors outside the job page", () => {
     expect(src).toContain('{portalOn ? "Choose them on the Photos tab with Show Customer under each photo. " : null}');
     expect(src).toMatch(/\{portalOn && \(\s*<Link href=\{`\/jobs\/\$\{jobId\}\?tab=photos`\}/);
   });
+  it("every way to take money on a bill is the one Get Paid sheet (W1-26): the invoice page mounts it; the job hub and the visit keep SettleUpButton, which renders it", () => {
+    const invoice = read("billing/[id]/page.tsx");
+    expect(invoice).toContain('import { GetPaidButton } from "@/components/settle-up-button";');
+    expect(invoice).not.toMatch(/PayNowButton|RecordPaymentButton/);
+    // A draft's small "Getting Paid Now?", the ⋯'s Get Paid on a draft, and the primary Get Paid $X.
+    expect(invoice).toContain('<GetPaidButton {...payDoor} trigger="link" />');
+    expect(invoice).toContain('<GetPaidButton {...payDoor} trigger="menuItem" />');
+    expect(invoice).toContain("<GetPaidButton {...payDoor} label={`Get Paid ${formatCurrency(balance)}`} />");
+    const settle = readFileSync(join(process.cwd(), "src/components/settle-up-button.tsx"), "utf8");
+    expect(settle).toMatch(/export function SettleUpButton\([\s\S]*?return <GetPaidButton /);
+    for (const page of ["jobs/[id]/page.tsx", "appointments/[id]/page.tsx"]) expect(read(page)).toContain("<SettleUpButton");
+  });
+
   it("the invoice page's kit chips follow Kits, except in catalog mode (as on the estimate pages)", () => {
     const src = read("billing/[id]/page.tsx");
     expect(src).toContain('const kitDoors = featureOn(orgSettings.features, "kits") || orgSettings.estimating_mode === "catalog";');

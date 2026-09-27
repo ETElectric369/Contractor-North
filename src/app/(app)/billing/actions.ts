@@ -13,7 +13,7 @@ import { bustDocPdf, warmDocPdf } from "@/lib/pdf-cache";
 import { revalidateMoney } from "@/lib/revalidate-money";
 import { createClient } from "@/lib/supabase/server";
 import { deliverInvoiceEmail } from "@/lib/invoice-email";
-import { markInvoiceResent, markInvoiceSent } from "@/lib/invoice-sent-stamp";
+import { markInvoiceResent, markInvoiceSent, restampDueOnFirstSend } from "@/lib/invoice-sent-stamp";
 import { needsSendRefusal, sendDraftForPayment } from "@/lib/pay-door-send";
 import { jobBillForPayment, type JobBillRow } from "@/lib/job-bill-for-payment";
 import { hasUnsentRevision, invoiceLineEditRefusal, stampInvoiceRevised } from "@/lib/invoice-revision";
@@ -31,7 +31,7 @@ import { claimedIdsOfLines, claimedSourcesOnJob, claimantNumbers, fixedBillingsN
 import { livePurchaseOrders } from "@/lib/job-progress-math";
 import { resolveDrawCredit, shouldBlockStandardImport, invoiceBalance, isDrawKind, DRAW_KINDS, kindFromPriceBook, pickableLineKind, LINE_KIND_LABEL, type PickableLineKind } from "@/lib/invoice-math";
 import { readPriceBookUnits } from "@/lib/price-book-kind";
-import { contractDrawRefusal, isActualsDraw, openDraftOnJob, pulledIntoSentence, readDraftShape, type OpenDraft } from "@/lib/actuals-draw";
+import { BRING_IN_NEW_WORK, contractDrawRefusal, isActualsDraw, openDraftOnJob, pulledIntoSentence, readDraftShape, type OpenDraft } from "@/lib/actuals-draw";
 import { hoursWords, joinedSentence, leftOffSentence, planLaborOffer, type LaborJoin, type OwnLaborLine } from "@/lib/labor-offer";
 import { claimsOffTheirPerson } from "@/lib/labor-claim-owner";
 import { HELD_HERE_READ_FAILED, costsKeyNames, idKeyNames, laborKeyNames, readHeldHere, withHeldHere } from "@/lib/held-here";
@@ -42,6 +42,7 @@ import { defaultDueDateIsoForOrg } from "@/lib/invoice-due";
 import { standardBillingBlockerOnJob, standardBillingConflictError } from "@/lib/billing-guards";
 import { scheduleStatus, contractTotalFromQuotes, type Milestone } from "@/lib/payment-schedule-math";
 import { sendPushToProfiles, orgStaffIds } from "@/lib/push";
+import { createNotifications } from "@/lib/notifications";
 import { formatCurrency } from "@/lib/utils";
 import { paymentMethodKey } from "@/lib/payment-method";
 import { reportError } from "@/lib/observe";
@@ -736,7 +737,7 @@ export async function createInvoiceFromQuote(quoteId: string): Promise<Result> {
       ok: false,
       id: ex.id,
       error: isDrawKind(ex.invoice_kind)
-        ? `This estimate is billed with progress payments - ${label} came from it. Bill the next part with Progress Payment on the job's Invoices tab.`
+        ? `This estimate is billed in parts - ${label} came from it. Bill the next part with the job's New Invoice → Part Of The Estimate.`
         : `This estimate is already billed on ${label}. Open it from Billing, or bill anything extra as a change order.`,
     };
   }
@@ -1548,7 +1549,7 @@ export async function reimportFromScratch(
   invoiceId: string,
   source: "labor" | "costs" | "quote" | "change_orders",
   /** The % showing in the card's markup box. "Start it over" sits directly under "Materials
-   *  From Costs" and must price identically (audit v800 verification): without this the two
+   *  From Costs" (now Bring In New Work) and must price identically (audit v800 verification): without this the two
    *  buttons in one card produced different money — the box's number for one, the customer's
    *  resolved default for the other — and neither the confirm nor the toast names a percent. */
   markupPercent?: number,
@@ -1771,7 +1772,7 @@ async function importLaborCore(invoiceId: string, trustedActuals: boolean): Prom
   );
   if (crossed.length) {
     reportError("importLabor.crossed", "a labor line would claim another person's shifts", { invoiceId, crossed });
-    return { ok: false, error: "Labor wasn't imported: some hours would have landed on another person's labor line. Nothing was written - try Labor from Timecards again." };
+    return { ok: false, error: `Labor wasn't imported: some hours would have landed on another person's labor line. Nothing was written - try ${BRING_IN_NEW_WORK} again.` };
   }
 
   // What the invoice's labor lines claim BEFORE the RPC, so the toast counts only the entries this
@@ -1981,7 +1982,7 @@ export async function importCostsIntoInvoice(
  * Request Next Payment, New Invoice landing on a draft): the markup the invoice's own untouched
  * lines are priced at wins over `markupPercent` (lib/invoice-markup), so a % the office typed on
  * the invoice is not quietly put back to the customer's default by the next refresh. On the invoice
- * itself, Materials from Costs sets it too unless a number was typed in the % box: only a typed
+ * itself, Bring In New Work sets it too unless a number was typed in the % box: only a typed
  * number is the office choosing the markup (lib/invoice-markup materialsImportPlan).
  */
 async function importCostsCore(
@@ -2077,7 +2078,7 @@ async function importCostsCore(
   if (blis.error) return { ok: false, error: blis.error };
   // A RECEIPT THIS INVOICE ALREADY CHARGES BY HAND IS TAKEN (lib/held-here): INV-00023's typed
   // "Materials" line holds Purple Sage's CED bill, and INV-060's edited Home Depot line holds the
-  // two Ace receipts beside it. Without this, Materials From Costs on that paid invoice offered
+  // two Ace receipts beside it. Without this, the materials import on that paid invoice offered
   // them again as new lines (the claim trigger allows a repeat on one invoice).
   const hereRead = await readHeldHere(
     supabase,
@@ -3394,6 +3395,13 @@ export async function setInvoiceStatus(
   const { data: wroteS, error } = await supabase.from("invoices").update(patch).eq("id", id).select("id");
   if (error) return { ok: false, error: dbError(error) };
   if (!wroteS?.length) return { ok: false, error: "Invoice not found." };
+  // THE FIRST SEND STARTS THE CLOCK here too (W1-27). A draft that never went out, declared sent by
+  // hand, is the customer's first copy: the draft page promised "Due N days after you send it", so
+  // the same guarded, best-effort second write as email / text / share moves an untouched due date
+  // to today + the terms (a date picked by hand stays; a failure leaves the date and never fails
+  // this). A draft that already carries a sent_at went out before and came Back To Draft: its date
+  // is the one the customer holds, so it stays. Before recalc, so the PDF reads the stamped row.
+  if (status === "sent" && cur.status === "draft" && sentAtKnown && !cur.sent_at) await restampDueOnFirstSend(supabase, id);
   // A DRAFT never auto-advances on payment (cn-v549), so a draft that was fully prepaid
   // (Jackie's Venmo before the invoice went out) leaves this call marked 'sent' and stays
   // there forever — never 'paid', permanently on the AR list. Recompute once the row is no
@@ -3480,16 +3488,21 @@ export async function recordPayment(input: {
 
   await recalcInvoice(supabase, input.invoice_id);
   // Cash-in ping to the OTHER office staff (the recorder already knows).
+  //
+  // THE BELL RECORDS THE PUSH (W1-10, Erik: "where would push notifications be recorded?"). A push
+  // is gone once it is swiped away, and a phone with pushes off never gets one at all; the bell line
+  // is the record. Same people, same words, written first (createNotifications never throws, and a
+  // lost line is reported there), then the push - one pair, so the two can never disagree about who
+  // was told.
   const cust = (inv as any).customers?.name as string | undefined;
-  void sendPushToProfiles(
-    (await orgStaffIds(inv.org_id)).filter((id) => id !== ctx.userId),
-    "invoice_paid",
-    {
-      title: "Payment recorded",
-      body: `${formatCurrency(input.amount)} on ${inv.invoice_number || "an invoice"}${cust ? ` — ${cust}` : ""}`,
-      url: `/billing/${input.invoice_id}`,
-    },
-  );
+  const paidTo = (await orgStaffIds(inv.org_id)).filter((id) => id !== ctx.userId);
+  const paidLine = {
+    title: "Payment recorded",
+    body: `${formatCurrency(input.amount)} on ${inv.invoice_number || "an invoice"}${cust ? ` — ${cust}` : ""}`,
+    url: `/billing/${input.invoice_id}`,
+  };
+  await createNotifications(inv.org_id, paidTo, { type: "invoice_paid", ...paidLine });
+  void sendPushToProfiles(paidTo, "invoice_paid", paidLine);
   revalidateMoney(input.invoice_id);
   revalidateMoney();
   return { ok: true };
@@ -3766,10 +3779,18 @@ export async function setInvoiceTitle(
 }
 
 /** Set (or clear) the invoice due date — the field the Overdue tracker reads.
- *  Stamps a "YYYY-MM-DD" input to noon in the org tz, same as payment dates. */
+ *  Stamps a "YYYY-MM-DD" input to noon in the org tz, same as payment dates.
+ *
+ *  A DATE A PERSON PICKED IS THEIRS (W1-27, 0366's invoices.due_date_by_hand). The first send
+ *  restamps an untouched draft's due date to send day + the company's terms (markInvoiceSent); a
+ *  date set here is flagged so that restamp leaves it alone. `byHand: false` is the Undo of a pick
+ *  on a date nobody had typed, so the untouched date goes back to being the terms'. Before 0366 the
+ *  column isn't there: the date still saves (the flag is best effort), and with no column the send
+ *  never restamps, so nothing is lost. */
 export async function setInvoiceDueDate(
   invoiceId: string,
   date: string | null,
+  opts: { byHand?: boolean } = {},
 ): Promise<{ ok: boolean; error?: string }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
@@ -3778,11 +3799,14 @@ export async function setInvoiceDueDate(
   // Same law again, and this one moves money's DEADLINE: pulling a delivered invoice's due date
   // from the 30th to the 15th starts the Overdue tracker chasing a customer whose copy still says
   // the 30th. A record, not a lock - 0269's whole shape.
-  const { data: wrote, error } = await supabase
+  let { data: wrote, error } = await supabase
     .from("invoices")
-    .update({ due_date: dueDate })
+    .update({ due_date: dueDate, due_date_by_hand: opts.byHand !== false })
     .eq("id", invoiceId)
     .select("id");
+  if (error && isMissingColumn(error, "due_date_by_hand")) {
+    ({ data: wrote, error } = await supabase.from("invoices").update({ due_date: dueDate }).eq("id", invoiceId).select("id"));
+  }
   if (error) return { ok: false, error: dbError(error) };
   if (!wrote?.length) return { ok: false, error: "That didn't save - check your access and try again." };
   await stampInvoiceRevised(supabase, invoiceId, "setInvoiceDueDate");
@@ -4135,7 +4159,7 @@ export async function settleUp(input: {
   if (noFigure) {
     return {
       ok: false,
-      error: "There's no open bill here to pay by card yet. Record Payment writes one for what they paid, or make the invoice first and take the card from it.",
+      error: "There's no open bill here to take a card on yet. Record what they paid under Or They Paid Another Way (that writes the bill), or make the invoice first and take the card from it.",
     };
   }
 

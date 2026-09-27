@@ -126,7 +126,7 @@ describe("finishJob on a FIXED-PRICE job billed with progress payments (unchange
     const res = await finishJob(JOB, {});
     expect(res.ok).toBe(true);
     expect(res.warning).toBe(
-      "19.5 h ($2,437.50) of work on this job is not on a bill yet. Finishing didn't bill it - bill it with Progress Payment → Final on the job's Invoices tab.",
+      "19.5 h ($2,437.50) of work on this job is not on a bill yet. Finishing didn't bill it - bill it with the job's New Invoice → This Is The Last Bill.",
     );
     expect(res.speak).toMatch(/^Job finished\. 19\.5 h/);
     // The only write is the job's status: no invoice is written, sent or promoted.
@@ -141,6 +141,15 @@ describe("finishJob on a FIXED-PRICE job billed with progress payments (unchange
     const res = await finishJob(JOB, {});
     expect(res.warning).toBeUndefined();
     expect(res.speak).toMatch(/already on a progress payment/);
+  });
+
+  it("the work couldn't be read: finishes, and the warning names the one door that bills the rest (W1-24) - never a tab, never Progress Payment", async () => {
+    state.billingType = "fixed";
+    state.unbilledFails = true;
+    const res = await finishJob(JOB, {});
+    expect(res.ok).toBe(true);
+    expect(res.warning).toBe("Couldn't check just now whether any hours or bills are still off a bill - bill what's left with the job's New Invoice → This Is The Last Bill.");
+    expect(res.warning).not.toMatch(/Progress Payment|Invoices tab/);
   });
 });
 

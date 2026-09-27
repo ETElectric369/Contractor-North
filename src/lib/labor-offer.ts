@@ -40,6 +40,7 @@
  */
 
 import type { LaborLine } from "./labor-billing";
+import { BRING_IN_NEW_WORK } from "./actuals-draw";
 
 export type OwnLaborLine = {
   id?: string | null;
@@ -199,7 +200,7 @@ export function joinedSentence(j: Pick<LaborJoin, "addHours" | "description" | "
 export function leftOffSentence(l: LaborLeftOff, invoiceLabel: string): string {
   const they = l.hours === 1 ? "It stays" : "They stay";
   if (l.why === "drift") {
-    return `${l.lineDescription ?? `${l.name}'s labor line`} shows ${hoursWords(l.overBy ?? 0)} more than the time entries it holds, so ${l.name}'s new ${hoursWords(l.hours)} ${l.hours === 1 ? "was" : "were"} not added. ${they} unbilled on the job - check the line's hours, then Labor from Timecards again`;
+    return `${l.lineDescription ?? `${l.name}'s labor line`} shows ${hoursWords(l.overBy ?? 0)} more than the time entries it holds, so ${l.name}'s new ${hoursWords(l.hours)} ${l.hours === 1 ? "was" : "were"} not added. ${they} unbilled on the job - check the line's hours, then ${BRING_IN_NEW_WORK} again`;
   }
   if (l.why === "deleted") {
     return `${l.name}'s labor line was deleted from ${invoiceLabel}, so ${l.name}'s ${hoursWords(l.hours)} ${l.hours === 1 ? "was" : "were"} not added. ${they} unbilled on the job - Start It Over on Labor brings the line back`;

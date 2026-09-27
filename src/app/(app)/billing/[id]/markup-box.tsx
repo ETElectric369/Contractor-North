@@ -2,7 +2,7 @@ import { Button } from "@/components/ui/button";
 import { NumberInput } from "@/components/ui/number-input";
 
 /**
- * THE % BOX BESIDE MATERIALS FROM COSTS, AND THE WORDS THAT SAY WHAT IT MEANS (2026-09-25).
+ * THE % BOX BESIDE BRING IN NEW WORK, AND THE WORDS THAT SAY WHAT IT MEANS (2026-09-25; W1-27).
  *
  * Stateless: InvoiceDetail holds what is typed and what the lines were last set to
  * (lib/invoice-markup's MarkupBoxState). This only draws them and hands the taps back.
@@ -29,7 +29,7 @@ export function MarkupBox({
   /** What the lines were last set to from here (the seed until something is applied). */
   applied: number;
   /** Is there anything to reprice? No materials lines yet: the box is only the figure the
-   *  Materials from Costs button will use, and an Apply with nothing to apply would be a dead door. */
+   *  Bring In New Work button will use for materials, and an Apply with nothing to apply would be a dead door. */
   canApply: boolean;
   pending: boolean;
   words: { main: string | null; usual: string | null };
@@ -46,11 +46,11 @@ export function MarkupBox({
           if (typed && canApply && !pending) onApply();
         }}
       >
-        <NumberInput value={value} onValueChange={onChange} className="h-8 w-14 text-center text-sm" aria-label="Material markup percent" />
+        <NumberInput value={value} onValueChange={onChange} className="h-11 w-16 text-center text-sm" aria-label="Material markup percent" />
       </span>
       <span className="text-xs text-slate-400">% markup</span>
       {typed && canApply && (
-        <Button size="sm" onClick={onApply} disabled={pending}>
+        <Button onClick={onApply} disabled={pending}>
           Apply
         </Button>
       )}

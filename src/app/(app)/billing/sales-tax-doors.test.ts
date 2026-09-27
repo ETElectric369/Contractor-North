@@ -27,12 +27,14 @@ vi.mock("@/components/ui/modal", () => ({
 }));
 vi.mock("@/lib/supabase/client", () => ({ createClient: () => ({}) }));
 vi.mock("./actions", () => ({ createInvoiceFromQuote: vi.fn(), createBlankInvoice: vi.fn() }));
+vi.mock("@/app/(app)/jobs/actions", () => ({ createInvoiceForJob: vi.fn() }));
 vi.mock("@/app/(app)/quotes/actions", () => ({}));
 vi.mock("@/app/(app)/recurring/actions", () => ({ saveRecurring: vi.fn(), deleteRecurring: vi.fn() }));
 vi.mock("@/app/(app)/settings/actions", () => ({}));
 vi.mock("@/components/new-customer-inline", () => ({ NewCustomerInline: () => null }));
 
-const { NewInvoiceButton } = await import("./new-invoice-button");
+const { NewInvoiceButton, NewInvoicePickBody } = await import("./new-invoice-button");
+const { showsTaxRate, routePick } = await import("./new-invoice-pick");
 const { RecurringButton } = await import("@/app/(app)/recurring/recurring-button");
 const { TaxRatesManager } = await import("@/app/(app)/settings/tax-rates-manager");
 const { OrgSettingsForm } = await import("@/app/(app)/settings/org-settings-form");
@@ -53,18 +55,51 @@ describe("the one rule (lib/sales-tax-switch)", () => {
   });
 });
 
-describe("New Invoice (a blank invoice)", () => {
-  const props = { quotes: [], customers: [], jobs: [] };
-  it("no switches stored / on: exactly today's form, with its Tax rate % field", () => {
+describe("New Invoice on /billing (W1-28: one question, Which Job Or Customer?)", () => {
+  const props = { customers: [{ id: "c-tao", name: "Tao Zhu" }], jobs: [{ id: "j-011", job_number: "J-011", name: "Timbercreek", customer_id: "c-tao", customer_name: "Tao Zhu" }] };
+  const body = (pick: { kind: "job" | "customer"; id: string; label: string } | null, salesTax: boolean) =>
+    html(NewInvoicePickBody, {
+      query: "",
+      onQuery: () => {},
+      rows: [],
+      pick,
+      onPick: () => {},
+      onCustomerCreated: () => {},
+      salesTax,
+      taxRate: 0.0825,
+      onTaxRate: () => {},
+      refusal: null,
+      onStartBlank: () => {},
+    });
+  const JOB = { kind: "job" as const, id: "j-011", label: "J-011 · Timbercreek · Tao Zhu" };
+  const CUSTOMER = { kind: "customer" as const, id: "c-tao", label: "Tao Zhu" };
+
+  it("no switches stored / on: the same form, and nothing to tax until something is picked", () => {
     const today = html(NewInvoiceButton, props);
     expect(html(NewInvoiceButton, { ...props, salesTax: true })).toBe(today);
-    expect(today).toContain('id="inv-tax"');
+    expect(today).toContain('id="inv-pick"');
+    expect(today).not.toContain('id="inv-tax"');
   });
-  it("off: no tax field (so nothing seeds one: the invoice starts untaxed)", () => {
-    const off = html(NewInvoiceButton, { ...props, salesTax: false });
-    expect(off).not.toContain('id="inv-tax"');
-    expect(off).not.toContain("Tax rate");
-    expect(off).toContain('id="inv-title"');
+
+  it("a job pick with Sales Tax on shows the rate (seeded from the default); a customer pick too", () => {
+    expect(showsTaxRate(JOB, true)).toBe(true);
+    const job = body(JOB, true);
+    expect(job).toContain('id="inv-tax"');
+    expect(job).toContain('value="8.25"');
+    expect(body(CUSTOMER, true)).toContain('id="inv-tax"');
+    // The rate goes to the job's door only as the rate a NEW invoice starts at.
+    expect(routePick(JOB, { salesTax: true, taxRate: 0.0825 })).toEqual({ action: "job", jobId: "j-011", taxRate: 0.0825 });
+  });
+
+  it("off: no tax field for either pick (so nothing seeds one: the invoice starts untaxed)", () => {
+    expect(showsTaxRate(JOB, false)).toBe(false);
+    for (const pick of [JOB, CUSTOMER]) {
+      const off = body(pick, false);
+      expect(off).not.toContain('id="inv-tax"');
+      expect(off).not.toContain("Tax Rate");
+    }
+    expect(routePick(JOB, { salesTax: false, taxRate: 0.0825 })).toEqual({ action: "job", jobId: "j-011" });
+    expect(routePick(CUSTOMER, { salesTax: false, taxRate: 0.0825 })).toEqual({ action: "customer", customerId: "c-tao", taxRate: 0 });
   });
 });
 

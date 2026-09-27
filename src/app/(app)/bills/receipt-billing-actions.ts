@@ -8,6 +8,7 @@ import { formatCurrency } from "@/lib/utils";
 import { putOnShelf, restampLotsForBill, unshelveLot, type ShelfPick } from "@/lib/stock-ledger";
 import { isMissingShelf } from "@/lib/job-cost";
 import { importCostsIntoInvoice } from "@/app/(app)/billing/actions";
+import { BRING_IN_NEW_WORK } from "@/lib/actuals-draw";
 import { round2, splitContradictsReceipt } from "./receipt-billing";
 
 export type Result = { ok: boolean; error?: string; note?: string };
@@ -307,7 +308,7 @@ export async function putRestOnShelf(input: ShelfPick): Promise<ReceiptLineUsage
     if (up.ok) draftNotes.push(` ${d.number} (a draft) now bills this receipt as it stands.`);
     else
       draftNotes.push(
-        ` ${d.number} (a draft) still bills the whole line: its materials didn't refresh (${up.error ?? "try again"}). Press Materials from Costs on ${d.number} before you send it.`,
+        ` ${d.number} (a draft) still bills the whole line: its materials didn't refresh (${up.error ?? "try again"}). Press ${BRING_IN_NEW_WORK} on ${d.number} before you send it.`,
       );
   }
   const draftNote = draftNotes.join("");

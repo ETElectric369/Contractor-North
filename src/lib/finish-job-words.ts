@@ -40,16 +40,24 @@ export function notBilledWords(u: NotBilled | null | undefined): string | null {
   return `${parts.join(" and ")} (${formatCurrency(amount)})`;
 }
 
+/**
+ * THE DOOR IS NAMED BY WHAT IT IS, NEVER BY WHERE IT SITS (W1-24). The job has one New Invoice
+ * now (Progress Payment is gone), and the tab it lives on moves with the job page's next wave, so
+ * the words name the button and the choice that makes the last bill: "This Is The Last Bill", the
+ * one checkbox the sheet shows on both Part Of The Estimate and Bill The Work So Far.
+ */
+export const LAST_BILL_DOOR = "the job's New Invoice → This Is The Last Bill";
+
 /** After the press, on a job billed with progress payments and no open draft to take the work. */
 export function finishedWithWorkOffBill(u: NotBilled | null | undefined): string | null {
   const w = notBilledWords(u);
-  return w ? `${w} of work on this job is not on a bill yet. Finishing didn't bill it - bill it with Progress Payment → Final on the job's Invoices tab.` : null;
+  return w ? `${w} of work on this job is not on a bill yet. Finishing didn't bill it - bill it with ${LAST_BILL_DOOR}.` : null;
 }
 
 /** Before the press, same job: the amber line in the Finish modal. */
 export function finishWouldLeaveOffBill(u: NotBilled | null | undefined): string | null {
   const w = notBilledWords(u);
-  return w ? `Not billed yet: ${w}. Finishing marks the job complete and does not bill it. To bill it first: Invoices tab → Progress Payment → Final → Actual T&M.` : null;
+  return w ? `Not billed yet: ${w}. Finishing marks the job complete and does not bill it. To bill it first: ${LAST_BILL_DOOR}.` : null;
 }
 
 /**

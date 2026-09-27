@@ -391,7 +391,7 @@ export function TapToPaySettingsSection({ isAdmin, canAccept }: { isAdmin: boole
               // Apple 3.9: the invitation to try it, right after the terms and the walkthrough.
               <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-3 text-emerald-800">
                 <p className="font-medium">You are set. Try it out.</p>
-                <p className="mt-1">Open any unpaid invoice → Pay Now → Tap to Pay on iPhone.</p>
+                <p className="mt-1">Open the unpaid invoice → Get Paid → Tap to Pay on iPhone.</p>
                 <Link
                   href="/billing"
                   className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-brand px-3 py-2 text-sm font-medium text-white hover:bg-brand-dark"
@@ -423,7 +423,7 @@ export function TapToPaySettingsSection({ isAdmin, canAccept }: { isAdmin: boole
             <div className="rounded-lg bg-slate-50 px-3 py-2 text-slate-600">
               <p>{guide.note}</p>
               <p className="mt-2">
-                The written steps: open the unpaid invoice, tap Pay Now, then Tap to Pay on iPhone. Hold the iPhone
+                The written steps: open the unpaid invoice, tap Get Paid, then Tap to Pay on iPhone. Hold the iPhone
                 still and ask the customer to hold their contactless card, iPhone or Apple Watch to the top of it
                 until the screen shows Done. If Apple asks for a PIN, hand the customer the iPhone. The PIN screen
                 has accessibility options for anyone who can&apos;t see it. A card that won&apos;t read can pay by

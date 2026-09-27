@@ -4,9 +4,10 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { BadgeDollarSign, Check, Copy, CreditCard, Loader2, Mail, MessageSquare, QrCode, Share } from "lucide-react";
+import { BadgeDollarSign, Check, Copy, Loader2, Mail, MessageSquare, QrCode, Share } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Modal, ModalActions } from "@/components/ui/modal";
+import { ACTIONS_ROW_CLS } from "@/components/section-actions-menu";
 import { useToast } from "@/components/toast";
 import { collectArtifacts, emailInvoice, invoiceCollectStatus, recordPayment, settleUp, textInvoice, venmoQrFor } from "@/app/(app)/billing/actions";
 import { invoiceBalance } from "@/lib/invoice-math";
@@ -28,6 +29,21 @@ import {
 } from "@/lib/native-tap";
 
 /**
+ * ONE GET PAID SHEET (W1-26, 2026-09-27). Pay Now and Record Payment were two buttons with two sheets
+ * side by side on the invoice, the job hub and the visit; they are two PANELS of one sheet now, "Get
+ * Paid $<balance>", with their state machines composed exactly as they were (the gen / closed-sheet
+ * guard, ensureInvoice, settleUp at the doorstep, venmoQrFor writing nothing). Top to bottom:
+ *
+ *   1. the card, only where the company takes cards: Tap to Pay FIRST - primary, full width, on the
+ *      first paint, never greyed (Apple 5.1/5.2/5.3) - then Show Card QR / Text The Pay Link, which
+ *      watches until the webhook writes the payment;
+ *   2. "Or They Paid Another Way": the amount, the company's non-card methods, Date Paid and Note,
+ *      saved with Record It (Venmo keeps Show Venmo QR);
+ *   3. the sentences a person must read before money moves: the draft's "Send INV-0xx as the bill
+ *      first?" and a bank transfer on its way ("don't record it by hand").
+ *
+ * What follows is the history of the two halves, kept because every rule in it still holds.
+ *
  * TWO VERBS, SPLIT BY WHERE THE MONEY MOVES (Erik 2026-09-10: "the pay now button should have the
  * credit card stuff and the record payment is everything else").
  *
@@ -486,19 +502,25 @@ function TapOutcomeBox({ tap, onRetry }: { tap: Extract<TapState, { kind: "error
   );
 }
 
-export function PayNowButton(props: Mode & {
-  /** canAcceptPayments(org) from the page. False = the screen explains where cards get switched
-   *  on instead of pretending; nothing is minted, sent or recorded. */
-  cardEnabled: boolean;
-  compact?: boolean;
-  label?: string;
-  /** smsReadiness(org).ready from the page: the receipt row's Text door reads it. */
-  textReady?: boolean;
-}) {
+/**
+ * THE CARD PANEL'S STATE MACHINE - Pay Now's, composed into the Get Paid sheet unchanged in what it
+ * does. `open` is the sheet's; `onOpen` is what the old Pay Now button did when pressed, `reset`
+ * what its close did (the sheet itself closes and refreshes); `onDone` closes the sheet (Done after
+ * a card is paid).
+ */
+function useCardDoor(
+  props: Mode & {
+    /** canAcceptPayments(org) from the page. False = no card panel; nothing is minted, sent or recorded. */
+    cardEnabled: boolean;
+    /** smsReadiness(org).ready from the page: the receipt row's Text door reads it. */
+    textReady?: boolean;
+  },
+  open: boolean,
+  onDone: () => void,
+) {
   const router = useRouter();
   const toast = useToast();
   const [pending, start] = useTransition();
-  const [open, setOpen] = useState(false);
   const [art, setArt] = useState<Art | null>(null);
   const [invoiceId, setInvoiceId] = useState<string | null>(props.source === "invoice" ? props.invoiceId : null);
   const [paid, setPaid] = useState<number | null>(null);
@@ -554,7 +576,10 @@ export function PayNowButton(props: Mode & {
    * open of the sheet) goes back with `sendIt`. `then` is what the person was doing when it asked:
    * building the QR, tapping, or the open-time mint.
    */
-  const [ask, setAsk] = useState<{ invoiceNumber: string | null; then: "qr" | "tap" | "mint" } | null>(null);
+  const [ask, setAsk] = useState<{ invoiceNumber: string | null; then: "qr" | "tap" } | null>(null);
+  /** The open-time mint found a DRAFT (needsSend): no sheet is taken over for it (W1-26) - the one
+   *  line under the card buttons says a card asks first, and Tap to Pay / Show Card QR ask. */
+  const [draftAtOpen, setDraftAtOpen] = useState<string | null | undefined>(undefined);
   const sendOk = useRef(false);
   /** settleUp's needsSend for a job's open draft, carried out of invoiceDoor to whoever awaited it. */
   const askFromDoor = useRef<string | null | undefined>(undefined);
@@ -932,7 +957,7 @@ export function PayNowButton(props: Mode & {
     };
   }, []);
 
-  function close() {
+  function reset() {
     // The next open is a new generation: every step still awaiting from this one stops on return.
     gen.current += 1;
     // A reader still waiting for a card must not stay armed behind a closed sheet — in ANY busy
@@ -946,7 +971,6 @@ export function PayNowButton(props: Mode & {
     // confirm is refused by Stripe and logged, never charged twice.
     const unused = tapPi.current;
     if (unused) void cancelTapPaymentIntent(unused.paymentIntentId).catch(() => {});
-    setOpen(false);
     setArt(null);
     setPaid(null);
     setCopied(false);
@@ -955,11 +979,11 @@ export function PayNowButton(props: Mode & {
     setProgress(null);
     setReceipt(null);
     setAsk(null);
+    setDraftAtOpen(undefined);
     sendOk.current = false;
     askFromDoor.current = undefined;
     tapPi.current = null;
     preMint.current = null;
-    router.refresh();
   }
 
   /**
@@ -974,25 +998,7 @@ export function PayNowButton(props: Mode & {
     setAsk(null);
     toast(`Sending ${a.invoiceNumber ?? "the invoice"} as the bill.`, "info");
     if (a.then === "qr") { prepare(); return; }
-    if (a.then === "tap") { void tapToPay(); return; }
-    // The open-time mint: send it and hold the door now, so the press goes straight to the reader.
-    const invId = props.source === "invoice" ? props.invoiceId : invoiceId;
-    if (!invId) return;
-    const g = gen.current;
-    preMint.current = createTapPaymentIntent(invId, { sendIt: true }).then(
-      (r) => {
-        if (gen.current !== g) {
-          if (r.ok) void cancelTapPaymentIntent(r.paymentIntentId).catch(() => {});
-          return;
-        }
-        if (!r.ok) { setTap({ kind: "error", error: r.error, outcome: "setup" }); return; }
-        noteTapIdentity(r.identity);
-        tapPi.current = { invoiceId: invId, clientSecret: r.clientSecret, paymentIntentId: r.paymentIntentId, amount: r.amount };
-        balanceRef.current = r.balance;
-        toast(`${a.invoiceNumber ?? "The invoice"} is sent. Tap to Pay is ready.`, "success");
-      },
-      () => {},
-    );
+    void tapToPay();
   }
 
   const amount = art?.balance ?? balanceRef.current;
@@ -1012,283 +1018,274 @@ export function PayNowButton(props: Mode & {
     ) : null;
   const busy = tap.kind === "busy" ? busyLine(tap.label, progress) : null;
 
-  return (
-    <>
-      <Button
-        size={props.compact ? "sm" : "md"}
-        variant={props.compact ? "outline" : "primary"}
-        onClick={() => {
-          // A NEW GENERATION and a clean slate. Whatever the last open left — a Declined box, a
-          // Confirmed spinner, a receipt link, a PaymentIntent — belongs to that open. close()
-          // clears these too; this is for the open that follows a close that never finished, or
-          // an outcome that landed between the two.
-          const g = ++gen.current;
-          setTap({ kind: "idle" });
-          setTapStarted(false);
-          setProgress(null);
-          setReceipt(null);
-          setPaid(null);
-          setCopied(false);
-          setAsk(null);
-          sendOk.current = false;
-          askFromDoor.current = undefined;
-          tapPi.current = null;
-          preMint.current = null;
-          setOpen(true);
-          if (props.cardEnabled) {
-            // Is this the iPhone app? Answered synchronously, so the button is on the first
-            // paint (Apple 5.1/5.2). Then: can THIS phone be the reader? Never throws; when it
-            // can't answer at all the button stays — a press then gets the bridge's sentence.
-            const shell = tapToPayPluginPresent();
-            // An invoice's door can be built the moment the screen opens — one read, no side
-            // effects — but only where the QR is the first card door. In the iPhone app the
-            // phone is the reader (Apple 5.1/5.2: Tap to Pay first, primary, on top), so the
-            // sheet opens on the two buttons and the QR is one press away; building it on open
-            // would land the screen on a 224px code with Tap to Pay somewhere under it. A
-            // visit/job waits for the explicit tap either way, because building it SENDS a bill.
-            if (props.source === "invoice" && !art && !shell) prepare();
-            setTapOk(shell);
-            setTapNote(null);
-            probe.current = shell
-              ? tapToPayDeviceStatus().then(
-                  (d) => {
-                    if (gen.current !== g) return;
-                    // Apple 5.6: the phone can tap — mint the PaymentIntent now, so the press
-                    // goes straight to the reader. Invoice source only: a visit/job mints AND
-                    // sends its bill on the explicit tap, never on open.
-                    if (d.ok && d.supported && props.source === "invoice") {
-                      const invId = props.invoiceId;
-                      // OPENING A SHEET CHANGES NOTHING ON THE INVOICE (INV-069, 2026-09-18).
-                      // This mint used to promote a draft to sent, which is how a $6,412 invoice
-                      // Erik was still building became a sent bill he could not take back — from
-                      // a sheet he opened and closed. `send: false` was the opt-out, and it only
-                      // moved the promotion to the press: still a door being opened, still not a
-                      // payment. The mint is a Stripe call and nothing else now, and on a DRAFT it
-                      // mints nothing: it answers needsSend and the sheet asks "Send INV-078 as
-                      // the bill first?" (Connected North Phase 1 — the webhook no longer moves it).
-                      preMint.current = createTapPaymentIntent(invId).then(
-                        (r) => {
-                          // A draft mints nothing and writes nothing: the sheet asks first.
-                          if (!r.ok) {
-                            if (r.needsSend && gen.current === g) setAsk({ invoiceNumber: r.invoiceNumber, then: "mint" });
-                            return;
-                          }
-                          // Minted after the person hit Done. close() couldn't cancel it — tapPi
-                          // was still empty when it ran — so this door cancels itself rather than
-                          // sit open on the tenant's Stripe account.
-                          if (gen.current !== g) {
-                            void cancelTapPaymentIntent(r.paymentIntentId).catch(() => {});
-                            return;
-                          }
-                          noteTapIdentity(r.identity);
-                          tapPi.current = { invoiceId: invId, clientSecret: r.clientSecret, paymentIntentId: r.paymentIntentId, amount: r.amount };
-                          balanceRef.current = r.balance;
-                        },
-                        () => {},
-                      );
+  function onOpen() {
+    // A NEW GENERATION and a clean slate. Whatever the last open left — a Declined box, a
+    // Confirmed spinner, a receipt link, a PaymentIntent — belongs to that open. close()
+    // clears these too; this is for the open that follows a close that never finished, or
+    // an outcome that landed between the two.
+    const g = ++gen.current;
+    setTap({ kind: "idle" });
+    setTapStarted(false);
+    setProgress(null);
+    setReceipt(null);
+    setPaid(null);
+    setCopied(false);
+    setAsk(null);
+    sendOk.current = false;
+    askFromDoor.current = undefined;
+    tapPi.current = null;
+    preMint.current = null;
+    setDraftAtOpen(undefined);
+    if (props.cardEnabled) {
+      // Is this the iPhone app? Answered synchronously, so the button is on the first
+      // paint (Apple 5.1/5.2). Then: can THIS phone be the reader? Never throws; when it
+      // can't answer at all the button stays — a press then gets the bridge's sentence.
+      const shell = tapToPayPluginPresent();
+      // THE QR IS ONE PRESS AWAY, EVERYWHERE (W1-26). The card panel sits above "Or They Paid
+      // Another Way" now, so a 224px code built on open would push the other half of the sheet
+      // down for the customer paying cash; Show Card QR builds it (one read on an invoice). A
+      // visit/job waits for the explicit tap either way, because building it SENDS a bill.
+      setTapOk(shell);
+      setTapNote(null);
+      probe.current = shell
+        ? tapToPayDeviceStatus().then(
+            (d) => {
+              if (gen.current !== g) return;
+              // Apple 5.6: the phone can tap — mint the PaymentIntent now, so the press
+              // goes straight to the reader. Invoice source only: a visit/job mints AND
+              // sends its bill on the explicit tap, never on open.
+              if (d.ok && d.supported && props.source === "invoice") {
+                const invId = props.invoiceId;
+                // OPENING A SHEET CHANGES NOTHING ON THE INVOICE (INV-069, 2026-09-18).
+                // This mint used to promote a draft to sent, which is how a $6,412 invoice
+                // Erik was still building became a sent bill he could not take back — from
+                // a sheet he opened and closed. `send: false` was the opt-out, and it only
+                // moved the promotion to the press: still a door being opened, still not a
+                // payment. The mint is a Stripe call and nothing else now, and on a DRAFT it
+                // mints nothing: it answers needsSend and the sheet asks "Send INV-078 as
+                // the bill first?" (Connected North Phase 1 — the webhook no longer moves it).
+                preMint.current = createTapPaymentIntent(invId).then(
+                  (r) => {
+                    // A draft mints nothing and writes nothing. The card doors ask when they are
+                    // pressed; until then the panel says it in one line (draftAtOpen).
+                    if (!r.ok) {
+                      if (r.needsSend && gen.current === g) setDraftAtOpen(r.invoiceNumber ?? null);
                       return;
                     }
-                    if (!d.ok || d.supported) return;
-                    setTapOk(false);
-                    // Apple 1.4: an iOS that can't run it is told to update. A model that can't
-                    // simply has no button — the QR is the card door on that phone, so it is
-                    // built on open the way the web builds it.
-                    setTapNote(d.osTooOld ? UPDATE_IOS : null);
-                    if (props.source === "invoice") prepare();
+                    // Minted after the person hit Done. close() couldn't cancel it — tapPi
+                    // was still empty when it ran — so this door cancels itself rather than
+                    // sit open on the tenant's Stripe account.
+                    if (gen.current !== g) {
+                      void cancelTapPaymentIntent(r.paymentIntentId).catch(() => {});
+                      return;
+                    }
+                    noteTapIdentity(r.identity);
+                    tapPi.current = { invoiceId: invId, clientSecret: r.clientSecret, paymentIntentId: r.paymentIntentId, amount: r.amount };
+                    balanceRef.current = r.balance;
                   },
                   () => {},
-                )
-              : null;
-          }
-        }}
-      >
-        <CreditCard className="h-4 w-4" /> {props.label ?? "Pay Now"}
-      </Button>
+                );
+                return;
+              }
+              if (!d.ok || d.supported) return;
+              setTapOk(false);
+              // Apple 1.4: an iOS that can't run it is told to update. A model that can't
+              // simply has no button — Show Card QR is the card door on that phone.
+              setTapNote(d.osTooOld ? UPDATE_IOS : null);
+            },
+            () => {},
+          )
+        : null;
+    }
+  }
 
-      <Modal open={open} onClose={close} title="Pay by card" size="sm" portal>
-        {!props.cardEnabled ? (
-          <div className="space-y-3 text-sm text-slate-600">
-            <p>Card payments aren&apos;t switched on for this company yet.</p>
-            <p>
-              Settings → Getting Paid → <span className="font-medium text-slate-800">Set Up Card Payments</span> takes
-              about five minutes. Until then, cash, check and Venmo go through Record Payment.
-            </p>
-          </div>
-        ) : paid != null ? (
-          <div className="flex flex-col items-center gap-2 py-4 text-center">
-            <span className="flex h-12 w-12 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
-              <Check className="h-6 w-6" />
-            </span>
-            <div className="text-lg font-semibold text-slate-900">Paid — {money(paid)}</div>
-            <p className="text-xs text-slate-500">Recorded on the invoice. The money lands in your Stripe balance.</p>
-            {/* Apple 5.10: the receipt, sendable from the approved outcome — the paid invoice. */}
-            {invoiceId && (
-              <div className="mt-2 w-full">
-                <ReceiptRow outcome="paid" receipt={receipt} invoiceId={invoiceId} amount={paid} qr={art?.payQr} toast={toast} textReady={props.textReady} />
-              </div>
-            )}
-            <Button size="sm" className="mt-2" onClick={close}>Done</Button>
-          </div>
-        ) : ask ? (
-          // "Send INV-078 as the bill first?" — asked, never assumed. Not Now closes the sheet with
-          // nothing written; Send It goes on with the door the person was using.
-          <div className="space-y-3">
-            <div className="text-base font-semibold text-slate-900">{sendFirstQuestion(ask.invoiceNumber)}</div>
-            <p className="text-sm text-slate-600">{sendFirstDetail(ask.invoiceNumber)}</p>
-            <div className="grid grid-cols-2 gap-2">
-              <Button variant="outline" onClick={close}>Not Now</Button>
-              <Button onClick={sendAndGo} disabled={pending}>Send It</Button>
+  // ── THE VIEWS: a screen that takes the whole sheet (the phone is the reader, a card was paid,
+  // the send-first question), or the panel that sits above "Or They Paid Another Way". ────────
+  let takeover: React.ReactNode = null;
+  if (props.cardEnabled) {
+    if (paid != null) {
+      takeover = (
+        <div className="flex flex-col items-center gap-2 py-4 text-center">
+          <span className="flex h-12 w-12 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
+            <Check className="h-6 w-6" />
+          </span>
+          <div className="text-lg font-semibold text-slate-900">Paid — {money(paid)}</div>
+          <p className="text-xs text-slate-500">Recorded on the invoice. The money lands in your Stripe balance.</p>
+          {/* Apple 5.10: the receipt, sendable from the approved outcome — the paid invoice. */}
+          {invoiceId && (
+            <div className="mt-2 w-full">
+              <ReceiptRow outcome="paid" receipt={receipt} invoiceId={invoiceId} amount={paid} qr={art?.payQr} toast={toast} textReady={props.textReady} />
             </div>
+          )}
+          <Button className="mt-2" onClick={onDone}>Done</Button>
+        </div>
+      );
+    } else if (ask) {
+      // "Send INV-078 as the bill first?" — asked when a card door was pressed, never assumed. Not
+      // Now goes back to the sheet with nothing written; Send It goes on with the door pressed.
+      takeover = (
+        <div className="space-y-3">
+          <div className="text-base font-semibold text-slate-900">{sendFirstQuestion(ask.invoiceNumber)}</div>
+          <p className="text-sm text-slate-600">{sendFirstDetail(ask.invoiceNumber)}</p>
+          <div className="grid grid-cols-2 gap-2">
+            <Button variant="outline" onClick={() => setAsk(null)}>Not Now</Button>
+            <Button onClick={sendAndGo} disabled={pending}>Send It</Button>
           </div>
-        ) : busy && tap.kind === "busy" ? (
-          // Apple owns the screen while the card is read; this is what shows before and after —
-          // and while the phone is still being configured (Apple 5.7), with the SDK's own percent
-          // when it reports one (3.9.1: determinate bar) and a plain spinner when it doesn't.
-          <div className="flex flex-col items-center gap-3 py-4 text-center">
-            <Loader2 className="h-6 w-6 animate-spin text-slate-500" />
-            <div className="text-sm font-medium text-slate-800">{busy.title}</div>
-            {busy.percent != null && (
-              <div className="h-1.5 w-48 overflow-hidden rounded-full bg-slate-200" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={busy.percent}>
-                <div className="h-full rounded-full bg-[rgb(var(--glass-ink))] transition-[width]" style={{ width: `${busy.percent}%` }} />
-              </div>
-            )}
-            {busy.detail && <p className="max-w-64 text-xs text-slate-500">{busy.detail}</p>}
-            {tap.phase === "pay" ? (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => {
-                  tapPress.current += 1;
-                  void cancelTapPayment();
-                  // Before the collect nothing else will answer this press, so the sheet goes back
-                  // now; during it the reader's own cancelled/charged answer sets the screen.
-                  if (!tapCollecting.current) setTap({ kind: "idle" });
-                }}
-              >
-                Cancel
-              </Button>
-            ) : tap.phase === "enable" ? (
-              // Apple's terms sheet is a native screen with its own Cancel; a button here that
-              // couldn't stop it would be a silent one.
-              <p className="max-w-64 text-xs text-slate-500">Apple&rsquo;s sheet closes on its own once the terms are accepted or declined.</p>
-            ) : (
-              // Apple's how-to guide (4.2), the same: native, its own Done — and the card is
-              // what comes next, so the person knows the tap hasn't been lost behind it.
-              <p className="max-w-64 text-xs text-slate-500">Close Apple&rsquo;s guide when you&rsquo;re done — the card is next.</p>
-            )}
-          </div>
-        ) : tap.kind === "confirmed" ? (
-          <div className="flex flex-col items-center gap-2 py-4 text-center">
-            <Loader2 className="h-5 w-5 animate-spin text-slate-500" />
-            <div className="text-sm font-medium text-slate-800">Card approved — recording it on the invoice…</div>
-            <p className="text-xs text-slate-500">Stripe confirmed the charge. This flips to Paid the moment it lands.</p>
-          </div>
-        ) : !art ? (
-          <div className="space-y-4">
-            <div className="flex items-baseline justify-between">
-              <span className="text-sm text-slate-500">Balance due</span>
-              <span className="text-2xl font-bold tabular-nums text-slate-900">{money(balanceRef.current)}</span>
+        </div>
+      );
+    } else if (busy && tap.kind === "busy") {
+      // Apple owns the screen while the card is read; this is what shows before and after —
+      // and while the phone is still being configured (Apple 5.7), with the SDK's own percent
+      // when it reports one (3.9.1: determinate bar) and a plain spinner when it doesn't.
+      takeover = (
+        <div className="flex flex-col items-center gap-3 py-4 text-center">
+          <Loader2 className="h-6 w-6 animate-spin text-slate-500" />
+          <div className="text-sm font-medium text-slate-800">{busy.title}</div>
+          {busy.percent != null && (
+            <div className="h-1.5 w-48 overflow-hidden rounded-full bg-slate-200" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={busy.percent}>
+              <div className="h-full rounded-full bg-[rgb(var(--glass-ink))] transition-[width]" style={{ width: `${busy.percent}%` }} />
             </div>
-            {props.source !== "invoice" && (
-              <p className="text-xs text-slate-500">
-                {props.source === "job"
-                  ? "This takes the card on the job's open bill (or writes one if there's none), then puts the card door in front of the customer."
-                  : "This writes the bill, sends it, and marks the visit done — then puts the card door in front of the customer."}
-              </p>
-            )}
-            {tap.kind === "error" && <TapOutcomeBox tap={tap} onRetry={retry} />}
-            {declinedReceipt}
-            {/* Apple 5.1/5.2: Tap to Pay FIRST — on top, full width, primary, the same height as
-                the QR button under it, and never disabled (5.3); the QR button is the outline
-                second. The QR button alone (and primary) everywhere the phone can't be the
-                reader; the "update iOS" line (1.4) takes the button's place. */}
-            <div className="grid gap-2">
-              {tapNote && <p className="text-xs text-slate-500">{tapNote}</p>}
-              {tapOk && (
-                <Button className="w-full" onClick={() => void tapToPay()}>
-                  <TapToPayGlyph /> Tap to Pay
-                </Button>
-              )}
-              <Button className="w-full" variant={tapOk ? "outline" : "primary"} onClick={prepare} disabled={pending}>
-                {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <CreditCard className="h-4 w-4" />}
-                {pending ? "Getting it ready…" : props.source === "invoice" ? "Show the QR" : "Send the bill & show the QR"}
-              </Button>
-            </div>
-          </div>
-        ) : (
-          <div className="flex flex-col items-center gap-3">
-            {/* Apple 5.1/5.2 again: ABOVE the code, full width, primary, never disabled — the
-                phone is the reader first; the QR under it is for the customer who'd rather use
-                their own. */}
-            {tapOk && (
-              <Button className="w-full" onClick={() => void tapToPay()}>
-                <TapToPayGlyph /> Tap to Pay
-              </Button>
-            )}
-            <div className="text-sm font-semibold text-slate-900">Scan to pay — {money(amount)}</div>
-            <img src={art.payQr} alt="Scan to pay by card" className="h-56 w-56 rounded-lg" />
-            <p className="max-w-64 text-center text-xs text-slate-500">
-              Card, Apple Pay or Google Pay on their phone. It records itself the moment it lands.
-            </p>
-            {tap.kind === "error" && <TapOutcomeBox tap={tap} onRetry={retry} />}
-            {declinedReceipt}
-            {tapNote && <p className="text-xs text-slate-500">{tapNote}</p>}
-            <div className="flex w-full flex-wrap justify-center gap-2">
-              <a
-                href={`sms:?body=${smsBody}`}
-                className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 text-sm font-medium text-slate-800 hover:bg-slate-50"
-              >
-                <MessageSquare className="h-4 w-4" /> Text the Link
-              </a>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => {
-                  if (!art.payUrl) return;
-                  navigator.clipboard?.writeText(art.payUrl);
-                  setCopied(true);
-                  setTimeout(() => setCopied(false), 1500);
-                }}
-              >
-                {copied ? <Check className="h-4 w-4 text-emerald-600" /> : <Copy className="h-4 w-4" />} {copied ? "Copied" : "Copy Link"}
-              </Button>
-            </div>
-            <div className="flex items-center gap-2 text-xs text-slate-400">
-              <Loader2 className="h-3.5 w-3.5 animate-spin" /> Waiting for the payment…
-            </div>
-            {/* Text the Link opens THIS phone's messages, not the business line — same honesty
-                the lead-texting doors carry. */}
-            <p className="max-w-64 text-center text-[11px] text-slate-400">
-              Text the Link sends from this phone&rsquo;s number. Copy Link to send it from the business line.
-            </p>
-          </div>
+          )}
+          {busy.detail && <p className="max-w-64 text-xs text-slate-500">{busy.detail}</p>}
+          {tap.phase === "pay" ? (
+            <Button
+              variant="outline"
+              onClick={() => {
+                tapPress.current += 1;
+                void cancelTapPayment();
+                // Before the collect nothing else will answer this press, so the sheet goes back
+                // now; during it the reader's own cancelled/charged answer sets the screen.
+                if (!tapCollecting.current) setTap({ kind: "idle" });
+              }}
+            >
+              Cancel
+            </Button>
+          ) : tap.phase === "enable" ? (
+            // Apple's terms sheet is a native screen with its own Cancel; a button here that
+            // couldn't stop it would be a silent one.
+            <p className="max-w-64 text-xs text-slate-500">Apple&rsquo;s sheet closes on its own once the terms are accepted or declined.</p>
+          ) : (
+            // Apple's how-to guide (4.2), the same: native, its own Done — and the card is
+            // what comes next, so the person knows the tap hasn't been lost behind it.
+            <p className="max-w-64 text-xs text-slate-500">Close Apple&rsquo;s guide when you&rsquo;re done — the card is next.</p>
+          )}
+        </div>
+      );
+    } else if (tap.kind === "confirmed") {
+      takeover = (
+        <div className="flex flex-col items-center gap-2 py-4 text-center">
+          <Loader2 className="h-5 w-5 animate-spin text-slate-500" />
+          <div className="text-sm font-medium text-slate-800">Card approved — recording it on the invoice…</div>
+          <p className="text-xs text-slate-500">Stripe confirmed the charge. This flips to Paid the moment it lands.</p>
+        </div>
+      );
+    }
+  }
+
+  const panel: React.ReactNode = !props.cardEnabled ? null : !art ? (
+    <div className="space-y-3">
+      {props.source !== "invoice" && (
+        <p className="text-xs text-slate-500">
+          {props.source === "job"
+            ? "A card is taken on the job's open bill (or writes one if there's none), then the card door goes in front of the customer."
+            : "A card writes the bill, sends it, and marks the visit done — then the card door goes in front of the customer."}
+        </p>
+      )}
+      {tap.kind === "error" && <TapOutcomeBox tap={tap} onRetry={retry} />}
+      {declinedReceipt}
+      {/* Apple 5.1/5.2: Tap to Pay FIRST — on top, full width, primary, and never disabled (5.3);
+          Show Card QR is the outline second. Show Card QR alone (and primary) everywhere the
+          phone can't be the reader; the "update iOS" line (1.4) takes the button's place. */}
+      <div className="grid gap-2">
+        {tapNote && <p className="text-xs text-slate-500">{tapNote}</p>}
+        {tapOk && (
+          <Button className="w-full" onClick={() => void tapToPay()}>
+            <TapToPayGlyph /> Tap to Pay
+          </Button>
         )}
-      </Modal>
-    </>
+        <Button className="w-full" variant={tapOk ? "outline" : "primary"} onClick={prepare} disabled={pending}>
+          {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <QrCode className="h-4 w-4" />}
+          {pending ? "Getting It Ready…" : props.source === "invoice" ? "Show Card QR" : "Send The Bill & Show Card QR"}
+        </Button>
+        {draftAtOpen !== undefined && (
+          <p className="text-xs text-slate-500">
+            {`${draftAtOpen ?? "This invoice"} is still a draft, so a card asks to send it as the bill first. Money recorded below doesn't.`}
+          </p>
+        )}
+      </div>
+    </div>
+  ) : (
+    <div className="flex flex-col items-center gap-3">
+      {/* Apple 5.1/5.2 again: ABOVE the code, full width, primary, never disabled — the phone is
+          the reader first; the QR under it is for the customer who'd rather use their own. */}
+      {tapOk && (
+        <Button className="w-full" onClick={() => void tapToPay()}>
+          <TapToPayGlyph /> Tap to Pay
+        </Button>
+      )}
+      <div className="text-sm font-semibold text-slate-900">Scan to pay — {money(amount)}</div>
+      <img src={art.payQr} alt="Scan to pay by card" className="h-56 w-56 rounded-lg" />
+      <p className="max-w-64 text-center text-xs text-slate-500">
+        Card, Apple Pay or Google Pay on their phone. It records itself the moment it lands.
+      </p>
+      {tap.kind === "error" && <TapOutcomeBox tap={tap} onRetry={retry} />}
+      {declinedReceipt}
+      {tapNote && <p className="text-xs text-slate-500">{tapNote}</p>}
+      <div className="flex w-full flex-wrap justify-center gap-2">
+        <a
+          href={`sms:?body=${smsBody}`}
+          className="inline-flex h-11 items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 text-sm font-medium text-slate-800 hover:bg-slate-50"
+        >
+          <MessageSquare className="h-4 w-4" /> Text The Pay Link
+        </a>
+        <Button
+          variant="outline"
+          onClick={() => {
+            if (!art.payUrl) return;
+            navigator.clipboard?.writeText(art.payUrl);
+            setCopied(true);
+            setTimeout(() => setCopied(false), 1500);
+          }}
+        >
+          {copied ? <Check className="h-4 w-4 text-emerald-600" /> : <Copy className="h-4 w-4" />} {copied ? "Copied" : "Copy Link"}
+        </Button>
+      </div>
+      <div className="flex items-center gap-2 text-xs text-slate-400">
+        <Loader2 className="h-3.5 w-3.5 animate-spin" /> Waiting for the payment…
+      </div>
+      {/* Text The Pay Link opens THIS phone's messages, not the business line — same honesty the
+          lead-texting doors carry. */}
+      <p className="max-w-64 text-center text-[11px] text-slate-400">
+        Text The Pay Link sends from this phone&rsquo;s number. Copy Link to send it from the business line.
+      </p>
+    </div>
   );
+
+  return { onOpen, reset, takeover, panel };
 }
 
-// ─────────────────────────────────────────────────────────────────────────────────────────────
-// RECORD PAYMENT — everything that isn't a card, as a sheet the same size as Pay Now
-// ─────────────────────────────────────────────────────────────────────────────────────────────
-
-export function RecordPaymentButton(props: Mode & {
-  /** The org's Settings → Payment methods list. Card is filtered OUT here — it belongs to Pay
-   *  Now — so an org that lists "Card" can't record a phantom through this door. Filtered by
-   *  KEY, not spelling: "Credit Card" or "Debit" is stored as card too (paymentMethodKey). */
-  methods?: string[];
-  /** false = no Venmo handle: the optional QR button is hidden; recording a Venmo payment always works. */
-  venmoConfigured?: boolean;
-  compact?: boolean;
-  label?: string;
-}) {
+/**
+ * "OR THEY PAID ANOTHER WAY" - Record Payment's state machine, composed into the Get Paid sheet
+ * unchanged in what it does. `onDone` closes the sheet (a payment recorded); `reset` is what its
+ * close did to the form.
+ */
+function useOtherWay(
+  props: Mode & {
+    /** The org's Settings → Payment methods list. Card is filtered OUT here — it belongs to the
+     *  card panel — so an org that lists "Card" can't record a phantom through this door. Filtered by
+     *  KEY, not spelling: "Credit Card" or "Debit" is stored as card too (paymentMethodKey). */
+    methods?: string[];
+    /** false = no Venmo handle: the optional QR button is hidden; recording a Venmo payment always works. */
+    venmoConfigured?: boolean;
+  },
+  onDone: () => void,
+) {
   const router = useRouter();
   const toast = useToast();
   const [pending, start] = useTransition();
   // The QR fetch has its own pending: on an invoice it only READS, so the sheet must not say
   // "Saving…" over a payment nobody is recording.
   const [qrPending, startQr] = useTransition();
-  const [open, setOpen] = useState(false);
   const [amount, setAmount] = useState(props.source === "invoice" ? String(props.balance || "") : "");
   const [note, setNote] = useState("");
   const [paidAt, setPaidAt] = useState("");
@@ -1317,11 +1314,8 @@ export function RecordPaymentButton(props: Mode & {
     sendOk.current = false;
     setAmount(props.source === "invoice" ? String(props.balance || "") : "");
   }
-  function close() {
-    setOpen(false);
-    reset();
-    router.refresh();
-  }
+  /** The recorded payment is the end of the sheet: it closes (and resets this form). */
+  const close = onDone;
 
   /**
    * RECORD IT — every method, Venmo included (2026-09-24, INV-078). A Venmo payment that landed
@@ -1393,113 +1387,195 @@ export function RecordPaymentButton(props: Mode & {
     });
   }
 
+  /** What the sheet opening does to this panel: an invoice's balance is the first figure. */
+  function onOpen() {
+    if (props.source === "invoice") setAmount(String(props.balance || ""));
+  }
+
+  // ── THE VIEWS ────────────────────────────────────────────────────────────────────────────
+  let takeover: React.ReactNode = null;
+  let footer: React.ReactNode = null;
+  if (ask) {
+    // Asked, never assumed. Not Now goes back to the sheet with nothing written.
+    takeover = (
+      <div className="space-y-3">
+        <div className="text-base font-semibold text-slate-900">{sendFirstQuestion(ask.invoiceNumber)}</div>
+        <p className="text-sm text-slate-600">{sendFirstDetail(ask.invoiceNumber, "payment")}</p>
+      </div>
+    );
+    footer = <ModalActions onCancel={() => setAsk(null)} onSave={sendAndGo} saving={pending} saveLabel="Send It" cancelLabel="Not Now" />;
+  } else if (venmo) {
+    takeover = (
+      <div className="flex flex-col items-center gap-2">
+        <span className="text-sm font-semibold text-slate-900">Venmo @{venmo.handle} — {money(venmo.amount)}</span>
+        <img src={venmo.qr} alt="Venmo QR code" className="h-56 w-56 rounded-lg" />
+        <p className="max-w-64 text-center text-xs text-slate-500">
+          They scan, they pay. Venmo can&apos;t tell the app when it lands — tap the button when it does.
+        </p>
+      </div>
+    );
+    footer = <ModalActions onCancel={() => setVenmo(null)} onSave={venmoPaid} saving={pending} saveLabel="They Paid — Record It" cancelLabel="Back" />;
+  }
+
+  /** The panel under the card (`underCard`), or the sheet's only half where cards aren't on. */
+  function panel(underCard: boolean, transferPending?: string | null): React.ReactNode {
+    return (
+      <section className={`space-y-4 ${underCard ? "border-t border-slate-100 pt-4" : ""}`}>
+        <div>
+          <h3 className="text-sm font-semibold text-slate-900">{underCard ? "Or They Paid Another Way" : "How They Paid"}</h3>
+          <p className="mt-0.5 text-xs text-slate-500">Money that moved outside Stripe — cash, a check, a transfer, Venmo.</p>
+        </div>
+        {/* A BANK TRANSFER ON ITS WAY (0338): recorded by hand as well, it would count twice. */}
+        {transferPending && (
+          <p className="rounded-lg bg-sky-50 px-3 py-2 text-xs text-sky-900">
+            {transferPending} Don&apos;t record it by hand, or it counts twice.
+          </p>
+        )}
+        <div>
+          <label htmlFor="rp-amount" className="mb-1 block text-xs font-medium text-slate-600">Amount</label>
+          <input
+            id="rp-amount"
+            inputMode="decimal"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); go(); } }}
+            placeholder="$ amount"
+            className="h-11 w-full rounded-lg border border-slate-200 px-3 text-lg font-semibold tabular-nums"
+          />
+        </div>
+        <div>
+          <div className="mb-1 text-xs font-medium text-slate-600">How they paid</div>
+          <div className="flex flex-wrap gap-1.5">
+            {chips.map((m) => (
+              <button
+                key={m}
+                type="button"
+                onClick={() => setMethod(m)}
+                className={`inline-flex min-h-11 items-center rounded-lg border px-3 text-sm font-semibold capitalize ${
+                  method === m ? "border-brand bg-brand text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                }`}
+              >
+                {m}
+              </button>
+            ))}
+          </div>
+        </div>
+        {/* THE OPTIONAL QR, in the body at full width: a 44px target for a customer standing
+            right there. Away from an invoice it mints and sends the bill first (settleUp at the
+            doorstep), so it says so, the way the card panel's Send The Bill & Show Card QR does. */}
+        {key === "venmo" && props.venmoConfigured !== false && (
+          <Button type="button" variant="outline" className="w-full" onClick={showVenmoQr} disabled={pending || qrPending}>
+            {qrPending ? (
+              <><Loader2 className="animate-spin" /> Getting It Ready…</>
+            ) : (
+              <><QrCode /> {props.source === "invoice" ? "Show Venmo QR" : "Send the Bill & Show Venmo QR"}</>
+            )}
+          </Button>
+        )}
+        {/* The two bookkeeping fields the old form had: WHEN it was paid (a check that arrived
+            last Tuesday) and a note (the check number). Date only means something on an
+            existing invoice — a visit being settled right now was paid right now. */}
+        <div className="grid grid-cols-2 gap-2">
+          {props.source === "invoice" && (
+            <div>
+              <label htmlFor="rp-date" className="mb-1 block text-xs font-medium text-slate-600">Date Paid</label>
+              <input id="rp-date" type="date" value={paidAt} onChange={(e) => setPaidAt(e.target.value)} className="h-11 w-full rounded-lg border border-slate-200 px-2 text-sm" />
+            </div>
+          )}
+          <div className={props.source === "invoice" ? "" : "col-span-2"}>
+            <label htmlFor="rp-note" className="mb-1 block text-xs font-medium text-slate-600">Note</label>
+            <input id="rp-note" value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. check #1042" className="h-11 w-full rounded-lg border border-slate-200 px-2 text-sm" />
+          </div>
+        </div>
+        {/* RECORD IT — every method, whatever chip is picked (Venmo included, with its paid date). */}
+        <Button type="button" className="w-full" onClick={go} disabled={pending || qrPending}>
+          {pending ? "Saving…" : "Record It"}
+        </Button>
+      </section>
+    );
+  }
+
+  return { onOpen, reset, dirty, takeover, footer, panel };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// GET PAID — the one sheet (W1-26). The invoice header, its ⋯, the job hub and the visit mount it.
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+
+export function GetPaidButton(
+  props: Mode & {
+    cardEnabled?: boolean;
+    methods?: string[];
+    venmoConfigured?: boolean;
+    /** smsReadiness(org).ready (lib/sms-readiness): the card receipt's Text door reads it. */
+    textReady?: boolean;
+    /** A bank transfer on its way for this bill (lib/bank-transfer's sentence), said in the sheet. */
+    transferPending?: string | null;
+    /** How the door looks: the header's primary, an outline (the job hub), a ⋯ row, or the small
+     *  "Getting Paid Now?" link under a draft's Send. */
+    trigger?: "primary" | "outline" | "menuItem" | "link";
+    label?: string;
+  },
+) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const { cardEnabled = false, methods, venmoConfigured, textReady, transferPending, trigger = "primary", label, ...rest } = props;
+  const mode = rest as Mode;
+  const card = useCardDoor({ ...mode, cardEnabled, textReady }, open, close);
+  const other = useOtherWay({ ...mode, methods, venmoConfigured }, close);
+
+  function openSheet() {
+    other.onOpen();
+    card.onOpen();
+    setOpen(true);
+  }
+  /** Every way out of the sheet: both halves let go of what this open held, then the page reads again. */
+  function close() {
+    card.reset();
+    other.reset();
+    setOpen(false);
+    router.refresh();
+  }
+
+  const title = mode.source === "invoice" ? `Get Paid ${money(mode.balance)}` : "Get Paid";
+  const words = label ?? (trigger === "link" ? "Getting Paid Now?" : "Get Paid");
+  const button =
+    trigger === "menuItem" ? (
+      <button type="button" onClick={openSheet} className={ACTIONS_ROW_CLS}>
+        <BadgeDollarSign className="h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" /> {words}
+      </button>
+    ) : trigger === "link" ? (
+      <button type="button" onClick={openSheet} className="inline-flex min-h-11 items-center text-sm font-medium text-brand hover:underline">
+        {words}
+      </button>
+    ) : (
+      <Button variant={trigger === "outline" ? "outline" : "primary"} onClick={openSheet}>
+        <BadgeDollarSign className="h-4 w-4" /> {words}
+      </Button>
+    );
+
   return (
     <>
-      <Button
-        size={props.compact ? "sm" : "md"}
-        variant={props.compact ? "outline" : "primary"}
-        onClick={() => {
-          if (props.source === "invoice") setAmount(String(props.balance || ""));
-          setOpen(true);
-        }}
-      >
-        <BadgeDollarSign className="h-4 w-4" /> {props.label ?? "Record Payment"}
-      </Button>
-
+      {button}
       <Modal
         open={open}
         onClose={close}
-        title="Record Payment"
+        title={title}
         size="sm"
         portal
-        dirty={dirty}
-        footer={
-          ask ? (
-            <ModalActions onCancel={() => setAsk(null)} onSave={sendAndGo} saving={pending} saveLabel="Send It" cancelLabel="Not Now" />
-          ) : venmo ? (
-            <ModalActions onCancel={close} onSave={venmoPaid} saving={pending} saveLabel="They Paid — Record It" cancelLabel="Close" />
-          ) : (
-            <ModalActions onCancel={close} onSave={go} saving={pending} saveLabel="Record It" disabled={qrPending} />
-          )
-        }
+        dirty={other.dirty && !card.takeover && !other.takeover}
+        footer={card.takeover ? undefined : (other.footer ?? undefined)}
       >
-        {ask ? (
-          // Asked, never assumed. Not Now goes back to the form with nothing written.
-          <div className="space-y-3">
-            <div className="text-base font-semibold text-slate-900">{sendFirstQuestion(ask.invoiceNumber)}</div>
-            <p className="text-sm text-slate-600">{sendFirstDetail(ask.invoiceNumber, "payment")}</p>
-          </div>
-        ) : venmo ? (
-          <div className="flex flex-col items-center gap-2">
-            <span className="text-sm font-semibold text-slate-900">Venmo @{venmo.handle} — {money(venmo.amount)}</span>
-            <img src={venmo.qr} alt="Venmo QR code" className="h-56 w-56 rounded-lg" />
-            <p className="max-w-64 text-center text-xs text-slate-500">
-              They scan, they pay. Venmo can&apos;t tell the app when it lands — tap the button when it does.
-            </p>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            <p className="text-xs text-slate-500">
-              Money that moved outside Stripe — cash, a check, a transfer, Venmo. Card payments go through Pay Now.
-            </p>
-            <div>
-              <label htmlFor="rp-amount" className="mb-1 block text-xs font-medium text-slate-600">Amount</label>
-              <input
-                id="rp-amount"
-                autoFocus
-                inputMode="decimal"
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); go(); } }}
-                placeholder="$ amount"
-                className="h-11 w-full rounded-lg border border-slate-200 px-3 text-lg font-semibold tabular-nums"
-              />
-            </div>
-            <div>
-              <div className="mb-1 text-xs font-medium text-slate-600">How they paid</div>
-              <div className="flex flex-wrap gap-1.5">
-                {chips.map((m) => (
-                  <button
-                    key={m}
-                    type="button"
-                    onClick={() => setMethod(m)}
-                    className={`inline-flex h-9 items-center rounded-lg border px-3 text-sm font-semibold capitalize ${
-                      method === m ? "border-brand bg-brand text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
-                    }`}
-                  >
-                    {m}
-                  </button>
-                ))}
-              </div>
-            </div>
-            {/* THE OPTIONAL QR, in the body at full width: a 44px target for a customer standing
-                right there, and the footer keeps two buttons that fit a 375px sheet. Away from an
-                invoice it mints and sends the bill first (settleUp at the doorstep), so it says so,
-                the way Pay Now's "Send the bill & show the QR" does. */}
-            {key === "venmo" && props.venmoConfigured !== false && (
-              <Button type="button" variant="outline" className="w-full" onClick={showVenmoQr} disabled={pending || qrPending}>
-                {qrPending ? (
-                  <><Loader2 className="animate-spin" /> Getting It Ready…</>
-                ) : (
-                  <><QrCode /> {props.source === "invoice" ? "Show Venmo QR" : "Send the Bill & Show Venmo QR"}</>
-                )}
-              </Button>
+        {card.takeover ?? other.takeover ?? (
+          <div className="space-y-5">
+            {card.panel}
+            {other.panel(!!card.panel, transferPending)}
+            {!cardEnabled && (
+              <p className="text-xs text-slate-500">
+                Cards aren&apos;t switched on for this company yet: Settings → Getting Paid → Set Up Card Payments takes about five
+                minutes.
+              </p>
             )}
-            {/* The two bookkeeping fields the old form had: WHEN it was paid (a check that arrived
-                last Tuesday) and a note (the check number). Date only means something on an
-                existing invoice — a visit being settled right now was paid right now. */}
-            <div className="grid grid-cols-2 gap-2">
-              {props.source === "invoice" && (
-                <div>
-                  <label htmlFor="rp-date" className="mb-1 block text-xs font-medium text-slate-600">Date paid</label>
-                  <input id="rp-date" type="date" value={paidAt} onChange={(e) => setPaidAt(e.target.value)} className="h-10 w-full rounded-lg border border-slate-200 px-2 text-sm" />
-                </div>
-              )}
-              <div className={props.source === "invoice" ? "" : "col-span-2"}>
-                <label htmlFor="rp-note" className="mb-1 block text-xs font-medium text-slate-600">Note</label>
-                <input id="rp-note" value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. check #1042" className="h-10 w-full rounded-lg border border-slate-200 px-2 text-sm" />
-              </div>
-            </div>
           </div>
         )}
       </Modal>
@@ -1507,10 +1583,11 @@ export function RecordPaymentButton(props: Mode & {
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────────────────────
-// Both verbs side by side — the job hub and the appointment page mount this.
-// ─────────────────────────────────────────────────────────────────────────────────────────────
-
+/**
+ * THE JOB HUB'S AND THE VISIT'S DOOR, UNDER ITS OLD NAME AND PROPS (tech-doors pins it inside
+ * {viewerIsStaff && …}). It renders the one Get Paid button now, so every surface opens the same
+ * sheet; source modes appointment / job / invoice are unchanged.
+ */
 export function SettleUpButton(props: Mode & {
   cardEnabled?: boolean;
   methods?: string[];
@@ -1519,11 +1596,6 @@ export function SettleUpButton(props: Mode & {
   /** smsReadiness(org).ready from the page (lib/sms-readiness). */
   textReady?: boolean;
 }) {
-  const { cardEnabled = false, methods, venmoConfigured, compact, textReady, ...mode } = props;
-  return (
-    <span className="inline-flex flex-wrap items-center gap-2">
-      <PayNowButton {...(mode as Mode)} cardEnabled={cardEnabled} compact={compact} textReady={textReady} />
-      <RecordPaymentButton {...(mode as Mode)} methods={methods} venmoConfigured={venmoConfigured} compact={compact} />
-    </span>
-  );
+  const { compact, ...rest } = props;
+  return <GetPaidButton {...(rest as Mode & Omit<typeof rest, "source">)} trigger={compact ? "outline" : "primary"} />;
 }
