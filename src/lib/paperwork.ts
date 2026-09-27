@@ -1186,8 +1186,9 @@ export function fileRefusal(item: PaperItem, dest: PaperDestination | null): str
 
 // ── IS THIS PURCHASE ALREADY ON THE BOOKS? ─────────────────────────────────────────────────
 
-/** A bill on the books, as the number check reads it (same-purchase.ts: one reading for every door). */
-export type BookedBill = LedgerBill;
+/** A bill on the books, as the number check reads it (same-purchase.ts: one reading for every door).
+ *  `from_bank`: a bank download wrote or matched it (bank_line_id), said so by sameMoneyFromBank. */
+export type BookedBill = LedgerBill & { from_bank?: boolean };
 export type BookedPaper = {
   id: string;
   vendor: string | null;
@@ -1322,6 +1323,12 @@ export function findSameNumber(
  * bill of the SAME MONEY, dated within 3 days of a bill a bank download wrote, is that bill (a
  * "bill" match: Same Purchase: Tie Them, or Different Purchase: File It Anyway). The reverse order,
  * the receipt first, is the bank download's own match.
+ *
+ * NOT ONLY THE BANK DOOR'S (review of release/v1026): a business cost with no job and no number
+ * written any other way (Add Business Cost, or a company's fill-ups loaded by hand from a bank
+ * export before the bank door existed) is the same shape, and a pump receipt of its money within 3
+ * days is the same purchase just as surely. loadBooks brings both; only the bank door's says "from
+ * the bank download".
  */
 export function sameMoneyFromBank(item: PaperItem, bankBills: readonly BookedBill[], already: readonly NumberMatch[] = []): NumberMatch[] {
   const type = paperTypeOfItem(item);
@@ -1346,7 +1353,9 @@ export function sameMoneyFromBank(item: PaperItem, bankBills: readonly BookedBil
       kind: "bill" as const,
       billId: b.id,
       jobId: null,
-      sentence: `Already on the books: ${b.supplier ?? "a bank line"}, ${money(amount)}, ${b.bill_date}, from the bank download (a business cost).`,
+      sentence: b.from_bank
+        ? `Already on the books: ${b.supplier ?? "a bank line"}, ${money(amount)}, ${b.bill_date}, from the bank download (a business cost).`
+        : `Already on the books: ${b.supplier ?? "a business cost"}, ${money(amount)}, ${b.bill_date}, a business cost with no number.`,
     }));
 }
 

@@ -598,7 +598,13 @@ describe("a bank download, described", () => {
 });
 
 describe("sameMoneyFromBank: a purchase a bank download already wrote", () => {
-  const bankBill = { id: "bill-bank", supplier: "1111-SHELL OIL 12345 ANYTOWN", bill_number: null, amount: 62.1, bill_date: "2026-09-12", job_id: null, superseded_by_bill_id: null };
+  const bankBill = { id: "bill-bank", supplier: "1111-SHELL OIL 12345 ANYTOWN", bill_number: null, amount: 62.1, bill_date: "2026-09-12", job_id: null, superseded_by_bill_id: null, from_bank: true };
+  it("a business cost with no number written any other way (by hand, before the bank door) is the same purchase too, said as what it is", () => {
+    const byHand = { ...bankBill, id: "bill-hand", supplier: "SHELL OIL ANYTOWN", from_bank: undefined };
+    expect(sameMoneyFromBank(receipt({ vendor: "Shell", amount: 62.1, item_date: "2026-09-14", doc_number: null }), [byHand])).toEqual([
+      { kind: "bill", billId: "bill-hand", jobId: null, sentence: "Already on the books: SHELL OIL ANYTOWN, $62.10, 2026-09-12, a business cost with no number." },
+    ]);
+  });
   it("a receipt of the same money within 3 days is that bill, whatever its number", () => {
     const pump = receipt({ vendor: "Shell", amount: 62.1, item_date: "2026-09-13", doc_number: null });
     const m = sameMoneyFromBank(pump, [bankBill]);

@@ -606,6 +606,28 @@ describe("a receipt snapped after the download", () => {
     expect(res.error).toMatch(/Different Purchase: File It Anyway/);
     expect(db.bills).toHaveLength(3);
   });
+
+  // Review of release/v1026: a company's fill-ups loaded by hand from a bank export before the bank
+  // door carry no bank_line_id, so the check never saw them and the pump receipt filed a second cost.
+  it("a fill-up already on the books by hand (no bank line, no number) is found the same way; a job's bill or a numbered one is not", async () => {
+    db.bills.push(
+      { id: "hand-fuel", org_id: "org-1", job_id: null, supplier: "SHELL OIL ANYTOWN", bill_number: null, supplier_invoice_number: null, amount: 54.2, bill_date: "2026-09-20", category: "Fuel", status: "paid", superseded_by_bill_id: null, bank_line_id: null },
+      { id: "job-bill", org_id: "org-1", job_id: "job-1", supplier: "SHELL OIL ANYTOWN", bill_number: null, supplier_invoice_number: null, amount: 77.7, bill_date: "2026-09-20", category: "Fuel", status: "paid", superseded_by_bill_id: null, bank_line_id: null },
+      { id: "other-co", org_id: "org-2", job_id: null, supplier: "SHELL OIL ANYTOWN", bill_number: null, supplier_invoice_number: null, amount: 33.3, bill_date: "2026-09-20", category: "Fuel", status: "paid", superseded_by_bill_id: null, bank_line_id: null },
+    );
+    const pump = (id: string, amount: number) =>
+      db.organized_items.push({ id, org_id: "org-1", kind: "receipt", status: "needs_review", doc_type: "receipt", title: "Shell receipt", vendor: "Shell", amount, item_date: "2026-09-21", payment: "paid_at_purchase", proposal: {} });
+    pump("pump-1", 54.2);
+    const res = await fileItem("pump-1", { type: "overhead", category: "Fuel" });
+    expect(res.ok).toBe(false);
+    expect(res.error).toMatch(/^Already on the books: SHELL OIL ANYTOWN, \$54\.20, 2026-09-20, a business cost with no number\./);
+    expect(db.bills).toHaveLength(3);
+    // A job's bill of the same money, or another company's, is not this purchase.
+    pump("pump-2", 77.7);
+    pump("pump-3", 33.3);
+    expect(await fileItem("pump-2", { type: "overhead", category: "Fuel" })).toMatchObject({ ok: true });
+    expect(await fileItem("pump-3", { type: "overhead", category: "Fuel" })).toMatchObject({ ok: true });
+  });
 });
 
 describe("a merchant with two answers", () => {

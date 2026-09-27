@@ -2,7 +2,7 @@ import "server-only";
 
 import { reportError } from "@/lib/observe";
 import { dbError } from "@/lib/db-error";
-import { AUTO_FILE_BUCKETS, bucketOf, looksLikeSupplierFee } from "@/lib/business-cost-buckets";
+import { AUTO_FILE_BUCKETS, BUSINESS_COST_BUCKETS, LEGACY_GAS_AND_TRUCK, bucketOf, looksLikeSupplierFee } from "@/lib/business-cost-buckets";
 import { getOrgSettings } from "@/lib/org-settings";
 import { tradeWordsOr, withArticle } from "@/lib/org-trade";
 import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
@@ -557,7 +557,8 @@ export type Books = {
   papers: BookedPaper[];
   supplierInvoices: BookedSupplierInvoice[];
   aliases: SupplierAliasIndex;
-  /** Business costs a bank download wrote (no number on them): the same purchase by money and day. */
+  /** Business costs with no number (a bank download's, from_bank, and any other no-job cost in a
+   *  bucket): the same purchase by money and day. */
   bankBills?: BookedBill[];
 };
 
@@ -580,7 +581,7 @@ export async function loadBooks(supabase: any, orgId: string | null | undefined)
       return [];
     }
   };
-  const [bills, papers, supplierInvoices, aliasRows, links, bankBills] = await Promise.all([
+  const [bills, papers, supplierInvoices, aliasRows, links, bankBills, plainCosts] = await Promise.all([
     safe<BookedBill>(() =>
       supabase
         .from("bills")
@@ -636,6 +637,24 @@ export async function loadBooks(supabase: any, orgId: string | null | undefined)
         .order("bill_date", { ascending: false })
         .limit(2000),
     ),
+    // EVERY OTHER BUSINESS COST WITH NO NUMBER (review of release/v1026): the same shape written by
+    // Add Business Cost, or a company's fill-ups loaded by hand from a bank export before the bank
+    // door, carry no bank_line_id, so the read above never sees them and a pump receipt of the same
+    // money filed a second cost. No job, live, no number in either column, in a bucket (or the
+    // pre-0362 Gas & Truck). Never names bank_line_id, so it answers before 0363 too.
+    safe<BookedBill>(() =>
+      supabase
+        .from("bills")
+        .select("id, supplier, bill_number, supplier_invoice_number, supplier_account_id, superseded_by_bill_id, amount, bill_date, job_id")
+        .eq("org_id", orgId)
+        .is("job_id", null)
+        .is("superseded_by_bill_id", null)
+        .is("bill_number", null)
+        .is("supplier_invoice_number", null)
+        .in("category", [...BUSINESS_COST_BUCKETS, LEGACY_GAS_AND_TRUCK])
+        .order("bill_date", { ascending: false })
+        .limit(2000),
+    ),
   ]);
   const cover = new Map<string, NonNullable<BookedSupplierInvoice["covered_by"]>>();
   for (const l of links) {
@@ -647,7 +666,11 @@ export async function loadBooks(supabase: any, orgId: string | null | undefined)
     papers,
     supplierInvoices: supplierInvoices.map((si) => ({ ...si, covered_by: cover.get(String(si.id)) ?? null })),
     aliases: indexSupplierAliases(aliasRows),
-    bankBills,
+    // One list, each bill once: the bank door's say so.
+    bankBills: [
+      ...bankBills.map((b) => ({ ...b, from_bank: true })),
+      ...plainCosts.filter((b) => !bankBills.some((x) => x.id === b.id)),
+    ],
   };
 }
 
