@@ -33,10 +33,10 @@ export interface TabBarItem {
   pinned?: boolean;
   /** Tiles look only: this tab's CONTENT still renders when it is the active tab, but its chip is
    *  not drawn on the strip or inside More. For a tab that already has a better door somewhere
-   *  else on the page — a job's Tasks, which sits in the action dock — a second chip in the
-   *  dropdown is the same door listed twice (Erik, 2026-09-18: "Remove tasks from the dropdown
-   *  menu"). Never use it to hide a tab that has no other way in. The one other use: a switched-off
-   *  feature's tab (the switch board, 0352), whose way in is a link and the Off line's Turn On. */
+   *  else on the page, where a second chip would be the same door listed twice. Never use it to
+   *  hide a tab that has no other way in. Today's use: a switched-off feature's tab (the switch
+   *  board, 0352), whose way in is a link and the Off line's Turn On. (A job's Tasks rode it while
+   *  its door was the action dock; since 0358 Tasks is a pinned chip.) */
   offStrip?: boolean;
 }
 

@@ -783,11 +783,10 @@ export async function requestMaterials(jobId: string, what: string): Promise<Res
   const who = (me as { full_name?: string } | null)?.full_name?.trim() || "A crew member";
   const label = jobLabel(job as { job_number?: string | null; name?: string | null });
 
-  // A TASK, not a bespoke table. It already lands in Needs Action and My Day, it already carries a
-  // job, and it is already something the office can assign, schedule and tick off. Unassigned so it
-  // reads as the office's to pick up — the same shape as any other staff capture.
+  // A TASK on the job's one list (0358), and the bell below. The TITLE carries his words, because the
+  // job's Tasks card and the Now block show titles only; the note keeps who asked and the whole text.
   const t = await createTask({
-    title: `Materials needed — ${label}`,
+    title: `Materials: ${text.length > 120 ? `${text.slice(0, 117)}...` : text}`,
     job_id: jobId,
     priority: 1,
     notes: `${who} on site: ${text}`,
