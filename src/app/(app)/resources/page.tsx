@@ -4,6 +4,9 @@ import { PageHeader } from "@/components/page-header";
 import { ResourcesManager } from "./resources-manager";
 
 export const dynamic = "force-dynamic";
+// Fill From Their Site runs in this page's function: up to 8 s reading the site, then at most one
+// small model call (12 s budget). 30 s holds both with room.
+export const maxDuration = 30;
 
 export default async function ResourcesPage() {
   const supabase = await createClient();
