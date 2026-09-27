@@ -12,6 +12,7 @@ import {
   precheckHours,
   preselectLine,
   sortInvoicesFor,
+  tickTogether,
   type AbEntry,
   type AbInvoice,
   type AbLine,
@@ -172,6 +173,22 @@ describe("the hours a line charged: its person, up to the day the bill was WRITT
     expect(personOfLine({ import_key: null, description: "Labor - Taylor crew" }, entries)).toBeNull();
     expect(personOfLine({ import_key: null, description: "Materials" }, entries)).toBeNull();
     expect(precheckHours(entries, { import_key: null, description: "Labor" }, "2026-06-22T04:57:19Z", TZ).checked).toEqual([]);
+  });
+
+  it("a split shift is ticked whole: to start, and when one piece is ticked or unticked", () => {
+    const split = [
+      { ...e("s1", "p-brian", "Brian Taylor", "2026-06-20T15:00:00Z", 4), family: "s1" },
+      { ...e("s2", "p-brian", "Brian Taylor", "2026-06-20T19:00:00Z", 4), family: "s1" },
+      e("other", "p-brian", "Brian Taylor", "2026-06-21T15:00:00Z", 2),
+    ];
+    expect(tickTogether(split, new Set(), "s2", true)).toEqual(new Set(["s1", "s2"]));
+    expect(tickTogether(split, new Set(["s1", "s2", "other"]), "s1", false)).toEqual(new Set(["other"]));
+    // A piece worked after the cutoff still goes with the piece before it.
+    const late = [
+      { ...e("a", "p-brian", "Brian Taylor", "2026-06-22T06:00:00Z", 1), family: "a" },
+      { ...e("b", "p-brian", "Brian Taylor", "2026-06-22T08:00:00Z", 1), family: "a" },
+    ];
+    expect(precheckHours(late, { import_key: null, description: "Labor - Brian" }, "2026-06-22T06:30:00Z", TZ).checked).toEqual(["a", "b"]);
   });
 
   it("says the line's hours beside what is ticked: Line: 13 h · Checked: 12.5 h", () => {

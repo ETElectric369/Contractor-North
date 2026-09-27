@@ -32,8 +32,9 @@
 --        no rows (invoice-math lumpLineRule); a $0 line; a line filed as Other, for a charge; an
 --        imported line nobody edited (the next import rewrites its claims, 0255); a return onto
 --        anything but a line typed by hand that takes money off, or a purchase onto one; anything
---        that is not a live bill, a live purchase order, a closed shift or a WHOLE live take from
---        stock on the invoice's job (an invoice with no job: on one of its customer's jobs; a take
+--        that is not a live bill, a live purchase order, a closed shift (a split one WHOLE: every
+--        unbilled closed piece of it on the job) or a WHOLE live take from stock on the invoice's
+--        job (an invoice with no job: on one of its customer's jobs; a take
 --        only ever on its own job's invoice, 0343); an id already on any live invoice, this one
 --        included (0258 allows a repeat on one invoice; this does not).
 --      It changes the claim lists and nothing else, and it checks: if the line's total, the
@@ -349,6 +350,35 @@ begin
        and not (m.id = any (v_ids))
   ) then
     raise exception 'A take from stock is billed whole: mark every piece of it, or none. Nothing was changed.' using errcode = 'P0001';
+  end if;
+
+  -- A SPLIT SHIFT IS BILLED WHOLE: every piece of each shift named here that is on the same job,
+  -- closed, billable, of some length and on no live invoice (every piece the sheet lists), or none.
+  -- Then the only piece that joins a hand claim later is one split_time_entry cuts from a piece
+  -- already held (the trigger's carry), never a free piece an importer bills on the same line.
+  if exists (
+    select 1
+      from public.time_entries t
+      join public.time_entries m
+        on m.id = any (v_ids)
+       and m.org_id = v_org
+       and coalesce(t.split_from, t.id) = coalesce(m.split_from, m.id)
+       and t.job_id = m.job_id
+     where t.org_id = v_org
+       and not (t.id = any (v_ids))
+       and t.status = 'closed'
+       and t.clock_out is not null
+       and extract(epoch from (t.clock_out - t.clock_in)) / 3600.0 - greatest(coalesce(t.lunch_minutes, 0), 0) / 60.0 > 0
+       and not (t.job_code is not null and exists (
+             select 1 from public.job_codes jc
+              where jc.org_id = v_org and jc.billable = false and btrim(jc.code) = btrim(t.job_code)))
+       and not exists (
+             select 1
+               from public.invoice_items x
+               join public.invoices xi on xi.id = x.invoice_id
+              where xi.org_id = v_org and xi.status <> 'void' and x.source_ids @> array[t.id])
+  ) then
+    raise exception 'A split shift is billed whole: tick every part of it, or none. Nothing was changed.' using errcode = 'P0001';
   end if;
 
   -- NEVER TWICE: not on any live invoice, this one included.

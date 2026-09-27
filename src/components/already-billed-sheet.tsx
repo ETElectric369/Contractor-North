@@ -30,6 +30,7 @@ import {
   hoursOf,
   lineLabel,
   precheckHours,
+  tickTogether,
   type AbEntry,
   type AlreadyBilledKind,
 } from "@/lib/already-billed";
@@ -348,14 +349,11 @@ export function AlreadyBilledSheet({
                         type="checkbox"
                         className="h-5 w-5 shrink-0"
                         checked={checked.has(e.id)}
-                        onChange={(ev) =>
-                          setChecked((s) => {
-                            const n = new Set(s);
-                            if (ev.target.checked) n.add(e.id);
-                            else n.delete(e.id);
-                            return n;
-                          })
-                        }
+                        // A split shift is ticked whole: its other pieces follow this one.
+                        onChange={(ev) => {
+                          const on = ev.target.checked;
+                          setChecked((s) => tickTogether(data.entries, s, e.id, on));
+                        }}
                       />
                       <span className="min-w-0 flex-1">
                         {formatDateShort(e.clockIn, data.tz)} · {e.name} · {e.hours} h

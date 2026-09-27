@@ -481,6 +481,28 @@ d("0357: Already Billed", () => {
     expect(st.hand).toEqual([]);
   });
 
+  it("a split shift is marked whole: every unbilled piece of it on the job, or none (a piece nobody pays for is not asked for)", async () => {
+    if (!go()) return;
+    const inv = await invoice(jobA, "paid");
+    const labor = await line(inv, { description: "Labor - TEST Tech", qty: 8, unit: "hr", price: 95 });
+    await settleTotal(inv);
+    const p = await shift(jobA, "2001-09-03");
+    await as(staff);
+    const s2 = (await one("select public.split_time_entry($1, $2, $3, null, null, null) as r", [p, "2001-09-03T19:00:00Z", jobA])).r.right_id as string;
+    await asServer();
+    expect((await tryMark(staff, labor, [p]))?.message).toMatch(/A split shift is billed whole: tick every part of it, or none\. Nothing was changed\./);
+    expect((await tryMark(staff, labor, [s2]))?.message).toMatch(/A split shift is billed whole/);
+    expect((await state(labor)).hand).toEqual([]);
+    expect([...(await mark(staff, labor, [p, s2])).added].sort()).toEqual([p, s2].sort());
+    // A piece cut onto a code the company doesn't bill (shop time) is never billed, so it isn't asked for.
+    await c.query("insert into public.job_codes (org_id, code, description, billable) values ($1, 'TEST-AB-SHOP', 'TEST shop time', false)", [org]);
+    const q = await shift(jobA, "2001-09-04");
+    await as(staff);
+    await one("select public.split_time_entry($1, $2, $3, 'TEST-AB-SHOP', null, null) as r", [q, "2001-09-04T19:00:00Z", jobA]);
+    await asServer();
+    expect((await mark(staff, labor, [q])).added).toEqual([q]);
+  });
+
   it("a mark's own Undo takes off exactly what it added: an earlier, separate mark of the same shift stays on", async () => {
     if (!go()) return;
     const inv = await invoice(jobA, "paid");

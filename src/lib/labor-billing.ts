@@ -265,7 +265,9 @@ export async function fetchJobLaborRows(
     // job_code on the ENTRY: an un-billable code (SHOP, PTO) is read here and nowhere else.
     // `id` (0255): the row's identity is what a labor line CLAIMS. The projection law: the fix
     // for "which hours did that invoice cover" was a select list.
-    .select("id, clock_in, clock_out, lunch_minutes, job_code, profiles(id, full_name)")
+    // split_from: a split shift is one family (coalesce(split_from, id), 0288); Already Billed ticks
+    // and marks it whole.
+    .select("id, clock_in, clock_out, lunch_minutes, job_code, split_from, profiles(id, full_name)")
     .eq("job_id", jobId)
     .eq("status", "closed");
   // The org's own answer to "which of these hours does a customer pay for". Fetched HERE so all

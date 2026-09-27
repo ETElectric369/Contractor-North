@@ -132,8 +132,27 @@ export function askUsedAll(o: { shopStock: boolean; billHasLines: boolean; billC
 // ── Hours ────────────────────────────────────────────────────────────────────────────────────────
 
 /** One closed shift nobody has billed, as the sheet lists it. `person` is the key the importer puts
- *  a person's line under (labor:<person>): the profile id, or the name when there is none. */
-export type AbEntry = { id: string; person: string; name: string; clockIn: string; hours: number };
+ *  a person's line under (labor:<person>): the profile id, or the name when there is none. `family`:
+ *  the shift a split piece was cut from (coalesce(split_from, id), 0288); missing = its own. */
+export type AbEntry = { id: string; person: string; name: string; clockIn: string; hours: number; family?: string };
+
+const familyOf = (e: Pick<AbEntry, "id" | "family">) => e.family || e.id;
+
+/**
+ * A SPLIT SHIFT IS TICKED WHOLE (mark_already_billed bills it whole): ticking or unticking one piece
+ * does the same to every piece of the same shift the sheet lists.
+ */
+export function tickTogether(entries: readonly AbEntry[], checked: ReadonlySet<string>, id: string, on: boolean): Set<string> {
+  const e = entries.find((x) => x.id === id);
+  const fam = e ? familyOf(e) : id;
+  const next = new Set(checked);
+  for (const x of entries) {
+    if (x.id !== id && familyOf(x) !== fam) continue;
+    if (on) next.add(x.id);
+    else next.delete(x.id);
+  }
+  return next;
+}
 
 const wordRe = (w: string) => new RegExp(`(^|[^a-z])${w.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}($|[^a-z])`);
 
@@ -176,7 +195,10 @@ export function precheckHours(
   const person = personOfLine(line, entries);
   if (!person) return { person: null, checked: [] };
   const cutoff = todayStrInTz(tz, new Date(writtenAt));
-  const checked = entries.filter((e) => e.person === person && todayStrInTz(tz, new Date(e.clockIn)) <= cutoff).map((e) => e.id);
+  const picked = entries.filter((e) => e.person === person && todayStrInTz(tz, new Date(e.clockIn)) <= cutoff);
+  // A split shift goes whole: a piece ticked ticks the rest of it.
+  const fams = new Set(picked.map(familyOf));
+  const checked = entries.filter((e) => fams.has(familyOf(e))).map((e) => e.id);
   return { person, checked };
 }
 

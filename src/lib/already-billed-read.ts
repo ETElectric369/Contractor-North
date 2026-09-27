@@ -245,6 +245,7 @@ export async function loadAlreadyBilledSheet(supabase: Db, orgId: string, jobId:
             person: laborPersonKey(e.profiles),
             name: String(e.profiles?.full_name ?? "Crew"),
             clockIn: String(e.clock_in),
+            family: String(e.split_from ?? e.id),
             hours: Math.max(0, Math.round(((new Date(e.clock_out).getTime() - new Date(e.clock_in).getTime()) / 3_600_000 - (Math.max(0, Number(e.lunch_minutes) || 0)) / 60) * 100) / 100),
           }),
         )
