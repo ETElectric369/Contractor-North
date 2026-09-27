@@ -823,7 +823,8 @@ type LineRow = { id: string; choice: string; amount: number | string; bucket: st
  *   · a bill it wrote is deleted while it is still that business cost (0278 still refuses one an
  *     invoice bills); a payment it put on an invoice is deleted and the invoice recomputed;
  *   · a supplier or crew payment it wrote is voided (never deleted: the undo-trail law);
- *   · a petty cash top-up it wrote is deleted;
+ *   · a petty cash top-up it wrote is deleted while it is still that top-up (same amount, still a
+ *     replenish);
  *   · a row it only MATCHED keeps everything and loses the mark;
  *   · the rules it learned come off, and its lines are deleted (every mark with them, ON DELETE SET
  *     NULL). A line whose row stays (changed since, or refused) stays counted, and is named.
@@ -889,6 +890,12 @@ export async function undoBankCore(supabase: Db, orgId: string, userId: string, 
             say(l, e ? dbError(e) : "its payment wouldn't come off");
           } else recalc.add(String(row.invoice_id));
         } else if (table === "petty_cash") {
+          // Petty cash rows can be edited (amount, kind, day): a top-up someone changed since stays.
+          if (centsOf(row.amount) !== cents || String(row.kind ?? "") !== "replenish") {
+            keep.add(l.id);
+            say(l, "its petty cash row was changed since, so it stays");
+            continue;
+          }
           const { data: gone, error: e } = await supabase.from("petty_cash").delete().eq("org_id", orgId).eq("id", row.id).select("id");
           if (e || !gone?.length) {
             keep.add(l.id);

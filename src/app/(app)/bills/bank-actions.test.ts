@@ -615,6 +615,18 @@ describe("Undo", () => {
     expect(db.organized_items[0].proposal.bankImport.applied).toBeNull();
   });
 
+  it("a petty cash top-up it wrote is taken back only while it is still that top-up", async () => {
+    const id = await drop(`Date,Description,Amount\n09/15/2026,ATM WITHDRAWAL MAIN ST,-200.00\n09/16/2026,ATM WITHDRAWAL MAIN ST,-100.00\n`, "Atm1234.csv");
+    const v = await view(id);
+    await applyBankDownload(id, { fingerprint: v.fingerprint, picks: Object.fromEntries(v.rows.map((r) => [r.id, "petty_cash"])) });
+    expect(db.petty_cash).toHaveLength(2);
+    // Someone corrects one of them since.
+    db.petty_cash.find((p) => p.amount === 200)!.amount = 180;
+    const res = await undoBankDownload(id);
+    expect(res.message).toMatch(/its petty cash row was changed since, so it stays/);
+    expect(db.petty_cash.map((p) => p.amount)).toEqual([180]);
+  });
+
   it("an Apply still writing holds Undo back; a claim nobody finished (a lost request) does not trap the card", async () => {
     const id = await drop();
     const v = await view(id);
