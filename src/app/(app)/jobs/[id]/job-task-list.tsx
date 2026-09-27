@@ -198,7 +198,10 @@ export function JobTaskList({
     </li>
   );
 
-  const header = total > 0 && (
+  // A list that couldn't be read has no "X of Y done": the tally would be the Buy Materials row alone
+  // ("Tasks: 0 of 1 done" over "Couldn't read this job's tasks"). The row itself still shows, because
+  // it is read from the materials list, not the tasks.
+  const header = !failed && total > 0 && (
     <div className="flex items-center justify-between gap-2 border-b border-slate-100 px-4">
       <h2 className="py-3 text-sm font-semibold text-slate-900">{tasksHeader(total, tally.done)}</h2>
       {mode === "card" && (
@@ -237,7 +240,7 @@ export function JobTaskList({
         </p>
       )}
       {!failed && <AddTaskLine jobId={jobId} orgId={orgId} photoDoor={stamps} bordered={total > 0} />}
-      {mode === "tab" && tally.done > 0 && (
+      {mode === "tab" && !failed && tally.done > 0 && (
         <div className="border-t border-slate-100">
           <button
             type="button"

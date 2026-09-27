@@ -143,6 +143,11 @@ describe("every tab count in the app is an open count", () => {
     expect(tab("materials")).toContain("count: materialsOpen");
     expect(page).not.toContain("count: canonicalItems?.length");
   });
+
+  it("the job's Tasks chip draws no number when the tasks couldn't be read (never the Buy Materials row alone)", () => {
+    const page = read("app/(app)/jobs/[id]/page.tsx");
+    expect(page).toContain("const openTaskCount = jobTasks.failed ? undefined : jobTaskTally(jobTasks.rows, buy).open;");
+  });
 });
 
 describe("the chrome's other numbers", () => {

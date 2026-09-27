@@ -107,6 +107,19 @@ describe("the Overview card (mode card)", () => {
     expect(html).toContain("Couldn’t read this job’s tasks just now. Reload to try again.");
     expect(html).not.toContain("Add A Task");
   });
+
+  it("a list that couldn't be read gives no count: no 'X of Y done' built from the Buy Materials row alone", () => {
+    for (const mode of ["card", "tab"] as const) {
+      const html = office({ mode, tasks: [], photos: {}, failed: true, materials: { open: 3 } });
+      expect(html).toContain("Couldn’t read this job’s tasks just now. Reload to try again.");
+      expect(html).not.toContain("Tasks:");
+      // The row is read from the materials list, so it still shows.
+      expect(html).toContain("Buy Materials · 3 Open");
+      const bought = office({ mode, tasks: [], photos: {}, failed: true, materials: { open: 0 }, doneOpen: true });
+      expect(bought).not.toContain("Tasks:");
+      expect(bought).not.toMatch(/>\d+ Done</);
+    }
+  });
 });
 
 describe("the Tasks tab (mode tab)", () => {

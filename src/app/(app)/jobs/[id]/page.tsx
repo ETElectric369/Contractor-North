@@ -840,7 +840,9 @@ export default async function JobDetailPage({
   // so the chip, the row and the list can't disagree.
   const buy = buyMaterials((canonicalItems ?? []) as { purchased?: boolean; is_tool?: boolean }[]);
   const materialsOpen = openToBuyCount((canonicalItems ?? []) as { purchased?: boolean; is_tool?: boolean }[]);
-  const openTaskCount = jobTaskTally(jobTasks.rows, buy).open;
+  // A tasks read that failed has no count at all (the card says it couldn't read them), never the
+  // Buy Materials row alone passed off as the job's open tasks.
+  const openTaskCount = jobTasks.failed ? undefined : jobTaskTally(jobTasks.rows, buy).open;
   // The Costs chip: Not Billed Yet rows + unrecorded papers naming this job (see the tab below).
   const costsOpen =
     (costGroups?.open.ids.length ?? 0) + (paperViews ?? []).filter((p) => !p.waitingOnCredit).length;
