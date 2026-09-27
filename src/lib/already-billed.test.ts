@@ -11,6 +11,7 @@ import {
   personOfLine,
   precheckHours,
   preselectLine,
+  jobCanHold,
   sortInvoicesFor,
   tickTogether,
   type AbEntry,
@@ -222,9 +223,10 @@ describe("the hours a line charged: its person, up to the day the bill was WRITT
 });
 
 describe("the Costs tab's doors, from what the page read", () => {
-  const groups = { open: { ids: ["bill-open", "po-open", "stock:g1"] }, billed: [{ ids: ["bill-hand", "bill-imported", "stock:g2"] }] };
+  const groups = { open: { ids: ["bill-open", "po-open", "stock:g1", "bill-return"] }, billed: [{ ids: ["bill-hand", "bill-imported", "stock:g2"] }] };
   const bills = [
     { id: "bill-open", supplier: "OSH", bill_number: null },
+    { id: "bill-return", supplier: "CED", bill_number: "8802-R", amount: -40 },
     { id: "bill-hand", supplier: "Consolidated Electrical Distributors", bill_number: "8802-1101475" },
     { id: "bill-imported", supplier: "CED", bill_number: "8802-1" },
   ];
@@ -238,24 +240,39 @@ describe("the Costs tab's doors, from what the page read", () => {
     ["m3", { lineId: "li-x", invoiceNumber: "INV-00024" }],
   ]);
 
+  const both = { charge: true, ret: true };
   it("Already Billed on every open row when a sent bill could hold it; a take marks every move", () => {
-    const d = jobAlreadyBilledDoors({ groups, bills, pos, takes, hands, offer: true });
-    expect(Object.keys(d.open)).toEqual(["bill-open", "po-open", "stock:g1"]);
+    const d = jobAlreadyBilledDoors({ groups, bills, pos, takes, hands, offer: both });
+    expect(Object.keys(d.open)).toEqual(["bill-open", "po-open", "stock:g1", "bill-return"]);
     expect(d.open["stock:g1"]).toEqual({ kind: "stock", ids: ["m1", "m2"], what: "From Stock · 12/2 NM-B, 40 ft" });
     expect(d.open["po-open"].what).toBe("PO-00012 · CED");
   });
 
-  it("no sent bill on the job (or its customer's with no job): no door, not a door that can only refuse", () => {
-    expect(jobAlreadyBilledDoors({ groups, bills, pos, takes, hands, offer: false }).open).toEqual({});
+  it("no line on a sent bill could hold it: no door, not a door onto a sheet with nothing to pick", () => {
+    expect(jobAlreadyBilledDoors({ groups, bills, pos, takes, hands, offer: { charge: false, ret: false } }).open).toEqual({});
+    // Lines that can hold a charge but none that takes money off: the return gets no door.
+    expect(Object.keys(jobAlreadyBilledDoors({ groups, bills, pos, takes, hands, offer: { charge: true, ret: false } }).open)).toEqual(["bill-open", "po-open", "stock:g1"]);
+    // Only a line that takes money off: only the return.
+    expect(Object.keys(jobAlreadyBilledDoors({ groups, bills, pos, takes, hands, offer: { charge: false, ret: true } }).open)).toEqual(["bill-return"]);
+  });
+
+  it("which bills can hold what: an invoice of imports nobody edited holds nothing; a typed Discount holds a return", () => {
+    const imported = inv({ lines: [line({ id: "i1", description: "14-2 NM", line_total: 186.48, import_source: "costs", import_key: "bli:x" })] });
+    expect(jobCanHold([imported])).toEqual({ charge: false, ret: false });
+    expect(jobCanHold([INV00023])).toEqual({ charge: true, ret: false });
+    const withDiscount = inv({ lines: [line({ id: "d", description: "Discount", line_total: -120 })] });
+    expect(jobCanHold([imported, withDiscount])).toEqual({ charge: false, ret: true });
+    // A draft holds nothing yet.
+    expect(jobCanHold([{ ...INV00023, status: "draft" }])).toEqual({ charge: false, ret: false });
   });
 
   it("Not Billed After All only on rows a person marked, never on an importer's claim", () => {
-    const d = jobAlreadyBilledDoors({ groups, bills, pos, takes, hands, offer: true });
+    const d = jobAlreadyBilledDoors({ groups, bills, pos, takes, hands, offer: both });
     expect(d.hands).toEqual({
       "bill-hand": { lineId: "li-materials", ids: ["bill-hand"], invoiceNumber: "INV-00023", what: "Consolidated Electrical Distributors 8802-1101475" },
       "stock:g2": { lineId: "li-x", ids: ["m3"], invoiceNumber: "INV-00024", what: "From Stock · GFCI, 2 ea" },
     });
-    expect(jobAlreadyBilledDoors({ groups, bills, pos, takes, hands: null, offer: true }).hands).toEqual({});
+    expect(jobAlreadyBilledDoors({ groups, bills, pos, takes, hands: null, offer: both }).hands).toEqual({});
   });
 
   it("the hours a person marked, per line: INV-059's 'Labor - Brian' holds 2 shifts, 6.5 h", () => {

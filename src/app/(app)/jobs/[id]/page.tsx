@@ -41,7 +41,7 @@ import { JobPaperList, type JobPaperView } from "./job-paper-list";
 import { tmWorkToDate } from "@/lib/job-financials";
 import { readJobStock, stockCostLabel, stockKey, stockShortsSentence } from "@/lib/stock-billing";
 import { readHandClaimsForJob, type HandClaims } from "@/lib/already-billed-read";
-import { eligibleInvoice as alreadyBilledEligible, hoursByHand, jobAlreadyBilledDoors } from "@/lib/already-billed";
+import { abLineOf, eligibleInvoice as alreadyBilledEligible, hoursByHand, jobAlreadyBilledDoors, jobCanHold } from "@/lib/already-billed";
 import { AlreadyBilledButton, NotBilledAfterAllButton } from "@/components/already-billed-sheet";
 import { openDraftOnJob, type OpenDraft } from "@/lib/actuals-draw";
 import { jobBillsItsActuals } from "@/lib/invoice-import-rule";
@@ -313,6 +313,7 @@ export default async function JobDetailPage({
     papers,
     jobStock,
     handClaims,
+    abLines,
   ] = await Promise.all([
     // THE job's items, role-shaped (projection law): staff read every column, a tech reads
     // TECH_ITEM_COLUMNS — no est_cost, no vendor — the same list /materials/[id] uses, so the one
@@ -475,6 +476,31 @@ export default async function JobDetailPage({
           return null;
         })
       : Promise.resolve(null as HandClaims | null),
+    // ALREADY BILLED'S DOORS ASK WHETHER A LINE COULD HOLD THE COST: the lines of the job's bills
+    // that went out, read only where the doors can show. A door onto a sheet with no line to pick is
+    // a dead end. A lost read is logged and the doors show as before (the sheet says what it finds).
+    viewerIsStaff && billsActuals && ((invoices ?? []) as any[]).some((i) => alreadyBilledEligible(i))
+      ? supabase
+          .from("invoice_items")
+          .select("id, invoice_id, description, quantity, unit, unit_price, line_total, import_source, import_key, edited, line_kind, sort_order")
+          .in(
+            "invoice_id",
+            ((invoices ?? []) as any[]).filter((i) => alreadyBilledEligible(i)).map((i) => i.id),
+          )
+          .then(
+            (r: { data: any[] | null; error: unknown }) => {
+              if (r.error) {
+                reportError("jobs.[id].alreadyBilledLines", r.error, { jobId: id });
+                return null;
+              }
+              return r.data ?? [];
+            },
+            (e: unknown) => {
+              reportError("jobs.[id].alreadyBilledLines", e, { jobId: id });
+              return null;
+            },
+          )
+      : Promise.resolve(null as any[] | null),
   ]);
   // PROJECTION at the boundary: staff get the money; a tech's view is HOURS ONLY — no rate, no
   // amount, no bills, no crew (a tech reads only his own rows, so the hours ARE his) — built here
@@ -517,6 +543,23 @@ export default async function JobDetailPage({
   // counts only its own invoices); Billed By Hand · Not Billed After All on a row a person marked.
   // The hours line gets the same pair below.
   const alreadyBilledOffer = ((invoices ?? []) as any[]).some((i) => alreadyBilledEligible(i));
+  // ...and only where one of those bills has a line that could hold it: a charge on a line of work
+  // typed or changed by hand, a supplier return on a line typed by hand that takes money off.
+  const alreadyBilledCan = abLines
+    ? jobCanHold(
+        ((invoices ?? []) as any[])
+          .filter((i) => alreadyBilledEligible(i))
+          .map((i) => ({
+            id: String(i.id),
+            invoice_number: i.invoice_number ?? null,
+            status: String(i.status ?? ""),
+            invoice_kind: i.invoice_kind ?? null,
+            job_id: id,
+            created_at: "",
+            lines: abLines.filter((l) => String(l.invoice_id) === String(i.id)).map(abLineOf),
+          })),
+      )
+    : { charge: alreadyBilledOffer, ret: alreadyBilledOffer };
   const handById = handClaims?.ready ? handClaims.byId : null;
   const alreadyBilledDoors = costGroups
     ? jobAlreadyBilledDoors({
@@ -525,7 +568,7 @@ export default async function JobDetailPage({
         pos: (pos ?? []) as any[],
         takes: (jobStock?.takes ?? []).map((t) => ({ key: stockKey(t.group), moveIds: t.moveIds, label: stockCostLabel(t) })),
         hands: handById,
-        offer: alreadyBilledOffer,
+        offer: alreadyBilledCan,
       })
     : null;
   const hoursMarked = costGroups ? hoursByHand((laborRows?.jobEntries ?? []) as any[], handById) : [];
@@ -1363,7 +1406,7 @@ export default async function JobDetailPage({
                       )}
                       {/* The open hours were charged by hand on a bill that went out: pick the line,
                           then the shifts (0357). Only when a sent bill could hold them. */}
-                      {unbilled.hours > 0 && alreadyBilledOffer && (
+                      {unbilled.hours > 0 && alreadyBilledCan.charge && (
                         <AlreadyBilledButton jobId={j.id} target={{ kind: "time", ids: [], what: "Those hours" }} label="Already Billed: The Hours" />
                       )}
                       {/* Hours a person marked, with the way back. */}

@@ -18,7 +18,7 @@ import { executeAction } from "@/lib/actions/execute";
 
 /**
  * ALREADY BILLED ON THE COSTS TAB (0357). `open`: the Not Billed Yet rows the door can mark (a row
- * with no entry has no door: there is no sent bill it could have gone on). `hands`: the Billed rows
+ * with no entry has no door: no line on a sent bill could hold it). `hands`: the Billed rows
  * a person marked, with the line and ids Not Billed After All takes back off. Staff only, and only
  * on a job that bills its actual costs (the page decides; a fixed-price job passes nothing).
  */

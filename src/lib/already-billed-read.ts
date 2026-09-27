@@ -24,6 +24,7 @@ import { readJobStock, stockCostLabel } from "@/lib/stock-billing";
 import { claimedSourcesOnJob, laborRowIds } from "@/lib/unbilled-work";
 import {
   NEEDS_UPDATE,
+  abLineOf,
   eligibleInvoice,
   eligibleLines,
   preselectLine,
@@ -188,19 +189,7 @@ export async function loadAlreadyBilledSheet(supabase: Db, orgId: string, jobId:
     created_at: String(r.created_at ?? ""),
     lines: ((r.invoice_items ?? []) as any[]).map((l): AbLine => {
       claimsOf.set(String(l.id), ((l.source_ids ?? []) as unknown[]).map(String));
-      return {
-        id: String(l.id),
-        description: String(l.description ?? ""),
-        quantity: Number(l.quantity) || 0,
-        unit: l.unit ?? null,
-        unit_price: Number(l.unit_price) || 0,
-        line_total: Number(l.line_total) || 0,
-        import_source: l.import_source ?? null,
-        import_key: l.import_key ?? null,
-        edited: l.edited === true,
-        line_kind: l.line_kind ?? null,
-        sort_order: l.sort_order ?? null,
-      };
+      return abLineOf(l);
     }),
   }));
 

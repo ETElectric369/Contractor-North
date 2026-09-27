@@ -109,6 +109,36 @@ export function eligibleLines(inv: AbInvoice, target: { kind: AlreadyBilledKind;
   return ok.sort((a, b) => rank(a) - rank(b) || (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0));
 }
 
+/** An invoice line as the database returns it, in the shape the rules read (numbers as numbers). */
+export function abLineOf(l: any): AbLine {
+  return {
+    id: String(l?.id ?? ""),
+    description: String(l?.description ?? ""),
+    quantity: Number(l?.quantity) || 0,
+    unit: l?.unit ?? null,
+    unit_price: Number(l?.unit_price) || 0,
+    line_total: Number(l?.line_total) || 0,
+    import_source: l?.import_source ?? null,
+    import_key: l?.import_key ?? null,
+    edited: l?.edited === true,
+    line_kind: l?.line_kind ?? null,
+    sort_order: l?.sort_order ?? null,
+  };
+}
+
+/**
+ * CAN ANY BILL THAT WENT OUT HOLD IT? A charge needs a line of work typed or changed by hand; a
+ * supplier return needs a line typed by hand that takes money off. The Costs tab shows a door only
+ * where the sheet it opens has a line to pick (a door onto an empty sheet is a dead end).
+ */
+export function jobCanHold(invoices: readonly AbInvoice[]): { charge: boolean; ret: boolean } {
+  const live = invoices.filter(eligibleInvoice);
+  return {
+    charge: live.some((i) => eligibleLines(i, { kind: "bill" }).length > 0),
+    ret: live.some((i) => eligibleLines(i, { kind: "bill", negative: true }).length > 0),
+  };
+}
+
 /** One tap when it is obvious: the one line of the matching kind, or the only line there is. */
 export function preselectLine(inv: AbInvoice, lines: readonly AbLine[], kind: AlreadyBilledKind): string | null {
   const want = matchingGroup(kind);
@@ -267,16 +297,17 @@ type Piles = { open: { ids: string[] }; billed: { ids: string[] }[] };
 
 /**
  * What the Costs tab offers, row by row: Already Billed on each Not Billed Yet row (only when some
- * sent bill could hold it: `offer`), and Billed By Hand · Not Billed After All on each billed row a
- * person marked. A take's row id is its stock key; its ids are every move of it (a take bills whole).
+ * sent bill has a line that could hold it: `offer.charge`, or for a supplier return `offer.ret`),
+ * and Billed By Hand · Not Billed After All on each billed row a person marked. A take's row id is its
+ * stock key; its ids are every move of it (a take bills whole).
  */
 export function jobAlreadyBilledDoors(input: {
   groups: Piles;
-  bills: readonly { id: string; supplier?: string | null; bill_number?: string | null }[];
+  bills: readonly { id: string; supplier?: string | null; bill_number?: string | null; amount?: number | string | null }[];
   pos: readonly { id: string; po_number?: string | null; vendor?: string | null }[];
   takes: readonly { key: string; moveIds: readonly string[]; label: string }[];
   hands: HandById | null;
-  offer: boolean;
+  offer: { charge: boolean; ret: boolean };
 }): {
   open: Record<string, { kind: "bill" | "po" | "stock"; ids: string[]; what: string }>;
   hands: Record<string, { lineId: string; ids: string[]; invoiceNumber: string | null; what: string }>;
@@ -294,9 +325,11 @@ export function jobAlreadyBilledDoors(input: {
     return null;
   };
   const open: Record<string, { kind: "bill" | "po" | "stock"; ids: string[]; what: string }> = {};
-  if (input.offer) for (const id of input.groups.open.ids) {
+  for (const id of input.groups.open.ids) {
     const w = words(id);
-    if (w) open[id] = w;
+    if (!w) continue;
+    const isReturn = w.kind === "bill" && (Number(bill.get(id)?.amount) || 0) < 0;
+    if (isReturn ? input.offer.ret : input.offer.charge) open[id] = w;
   }
   const hands: Record<string, { lineId: string; ids: string[]; invoiceNumber: string | null; what: string }> = {};
   if (input.hands) {

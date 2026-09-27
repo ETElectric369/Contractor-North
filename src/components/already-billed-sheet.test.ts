@@ -114,6 +114,12 @@ describe("the sheet, Purple Sage", () => {
     const html = render({ state: "ok", data: data({ target: { ...data().target, negative: true, cost: -40 } }) });
     expect(text(html)).toContain("This return: $40.00 back from the supplier");
   });
+
+  it("a return with no line to hold it says which line could, not one that can't", () => {
+    const t = text(render({ state: "ok", data: data({ invoices: [], target: { ...data().target, negative: true, cost: -40 } }) }));
+    expect(t).toContain("Only a line typed by hand that takes money off can hold a return.");
+    expect(t).not.toContain("or one you changed");
+  });
 });
 
 describe("the sheet, hours", () => {

@@ -335,8 +335,10 @@ export function AlreadyBilledSheet({
             {data.target.words && <p className="-mt-2 text-xs text-slate-500">{data.target.words}</p>}
             {data.invoices.length === 0 ? (
               <p className="rounded-lg bg-slate-50 px-3 py-2 text-slate-600">
-                No bill that went out on {data.jobNumber} has a line that could have charged for this. A line you typed, or one you
-                changed, on a sent bill can hold it.
+                No bill that went out on {data.jobNumber} has a line that could have charged for this.{" "}
+                {data.target.negative
+                  ? "Only a line typed by hand that takes money off can hold a return."
+                  : "A line you typed, or one you changed, on a sent bill can hold it."}
               </p>
             ) : (
               <fieldset className="space-y-1">
