@@ -1,4 +1,5 @@
 import { computeCollected } from "@/lib/analytics/money-metrics";
+import { readAllPages } from "@/lib/read-all-pages";
 import { todayStrInTz, tzDayStartUtc } from "@/lib/tz";
 
 /**
@@ -133,22 +134,24 @@ export function weekLabel(start: string): string {
 }
 
 /**
- * THE ONE READ: every fuel bill (a company's fuel rows are few) and the money received over the
- * window. RLS holds both to the signed-in company's staff. A database before 0362 has no cost_kind:
- * there is no fuel yet, and the card simply isn't drawn (never an error).
+ * THE READS: the fuel bills inside the 13 weeks (every page of them: PostgREST cuts a select at
+ * 1,000 rows without a word, and a busy fleet passes that), the one earliest fuel bill ever (so the
+ * average knows the first week the books have fuel), and the money received over the window, every
+ * page. RLS holds all of them to the signed-in company's staff. A database before 0362 has no
+ * cost_kind: there is no fuel yet, and the card simply isn't drawn (never an error).
  */
 export async function getFuelTrend(supabase: any, tz: string, todayYmd: string): Promise<FuelTrend | null> {
   const win = fuelWindow(todayYmd);
-  const { data: bills, error } = await supabase
-    .from("bills")
-    .select("amount, bill_date, created_at, category, job_id, cost_kind")
-    .eq("cost_kind", "fuel")
-    .eq("category", "Gas & Truck")
-    .is("job_id", null)
-    .is("superseded_by_bill_id", null)
-    .order("bill_date", { ascending: true })
-    .limit(5000);
-  if (error || !Array.isArray(bills)) return null;
+  const fuelBills = () =>
+    supabase.from("bills").select("id, amount, bill_date, created_at, category, job_id, cost_kind").eq("cost_kind", "fuel").eq("category", "Gas & Truck").is("job_id", null).is("superseded_by_bill_id", null);
+  const [inside, first] = await Promise.all([
+    readAllPages<FuelBillRow & { id: string }>((f, t) => fuelBills().or(`bill_date.gte.${win.start},bill_date.is.null`).order("id").range(f, t), 20),
+    fuelBills().not("bill_date", "is", null).order("bill_date", { ascending: true }).limit(1),
+  ]);
+  if (inside.error || first.error || !Array.isArray(first.data)) return null;
+  // The earliest fuel ever, when it is before the window: it says when the books start, nothing more.
+  const before = (first.data as FuelBillRow[]).filter((r) => (r.bill_date ?? "") < win.start);
+  const bills = [...before, ...inside.rows];
   if (!bills.length) return computeFuelTrend([], 0, todayYmd, tz);
   // How far the bank downloads reach: fuel is written from them, so a week past the last one isn't
   // in yet. No bank lines (or none readable): today.
@@ -156,9 +159,12 @@ export async function getFuelTrend(supabase: any, tz: string, todayYmd: string):
   const coveredThrough = Array.isArray(reach) && reach[0]?.posted_on ? String(reach[0].posted_on).slice(0, 10) : null;
   const startIso = tzDayStartUtc(win.start, tz).toISOString();
   const endIso = tzDayStartUtc(win.end, tz).toISOString();
-  const [{ data: pays, error: payErr }, { data: refunds, error: refErr }] = await Promise.all([
-    supabase.from("payments").select("amount, paid_at, invoices(status)").gte("paid_at", startIso).lt("paid_at", endIso).limit(50000),
-    supabase.from("customer_credits").select("amount, created_at").eq("disposition", "refund").gte("created_at", startIso).lt("created_at", endIso).limit(50000),
+  const [{ rows: pays, error: payErr }, { rows: refunds, error: refErr }] = await Promise.all([
+    readAllPages<any>((f, t) => supabase.from("payments").select("id, amount, paid_at, invoices(status)").gte("paid_at", startIso).lt("paid_at", endIso).order("id").range(f, t), 50),
+    readAllPages<any>(
+      (f, t) => supabase.from("customer_credits").select("id, amount, created_at").eq("disposition", "refund").gte("created_at", startIso).lt("created_at", endIso).order("id").range(f, t),
+      50,
+    ),
   ]);
   if (payErr || refErr) return null;
   const moneyIn = (from: string, to: string) => {

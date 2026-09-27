@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeFuelTrend, fuelWindow, isFuelBill, mondayOf, type FuelBillRow } from "./fuel-trend";
+import { computeFuelTrend, fuelWindow, getFuelTrend, isFuelBill, mondayOf, type FuelBillRow } from "./fuel-trend";
 
 /**
  * THE FUEL TREND'S MATH (2026-09-27). Made-up fuel bills, never a real company's: 13 weeks, Monday
@@ -95,5 +95,54 @@ describe("computeFuelTrend", () => {
     expect(t.hasFuel).toBe(false);
     expect(t.avgWeekCents).toBe(0);
     expect(t.weeksCounted).toBe(0);
+  });
+});
+
+describe("getFuelTrend: every page, the window's rows, and the first fuel ever", () => {
+  /** A PostgREST-shaped fake that cuts every select at 1,000 rows (db-max-rows) and records filters. */
+  function fake(tables: Record<string, Record<string, unknown>[]>) {
+    return {
+      from(table: string) {
+        const rows = tables[table] ?? [];
+        const filters: ((r: Record<string, unknown>) => boolean)[] = [];
+        let order: { col: string; asc: boolean } | null = null;
+        let range: [number, number] | null = null;
+        let cap = 1000;
+        const chain: any = {
+          select: () => chain,
+          eq: (c: string, v: unknown) => (filters.push((r) => r[c] === v), chain),
+          is: (c: string, v: unknown) => (filters.push((r) => (r[c] ?? null) === v), chain),
+          not: (c: string, _op: string, v: unknown) => (filters.push((r) => (r[c] ?? null) !== v), chain),
+          gte: (c: string, v: string) => (filters.push((r) => String(r[c]) >= v), chain),
+          lt: (c: string, v: string) => (filters.push((r) => String(r[c]) < v), chain),
+          or: (s: string) => {
+            const since = /bill_date\.gte\.([0-9-]+)/.exec(s)?.[1] ?? "";
+            filters.push((r) => r.bill_date == null || String(r.bill_date) >= since);
+            return chain;
+          },
+          order: (col: string, o?: { ascending?: boolean }) => ((order = { col, asc: o?.ascending !== false }), chain),
+          range: (a: number, b: number) => ((range = [a, b]), chain),
+          limit: (n: number) => ((cap = Math.min(n, 1000)), chain),
+          then: (res: any) => {
+            let hit = rows.filter((r) => filters.every((f) => f(r)));
+            if (order) hit = [...hit].sort((a, b) => (String(a[order!.col]) < String(b[order!.col]) ? -1 : 1) * (order!.asc ? 1 : -1));
+            hit = range ? hit.slice(range[0], Math.min(range[1] + 1, range[0] + 1000)) : hit.slice(0, cap);
+            return Promise.resolve({ data: hit, error: null }).then(res);
+          },
+        };
+        return chain;
+      },
+    };
+  }
+
+  it("reads the recent weeks even past 1,000 fuel rows, and knows the first week from the earliest", async () => {
+    // 1,500 old fills before the window, then $50 every day of the window's first 12 weeks.
+    const old = Array.from({ length: 1500 }, (_, i) => ({ id: `o${String(i).padStart(4, "0")}`, ...fuel("2025-01-01", 10) }));
+    const recent = Array.from({ length: 84 }, (_, i) => ({ id: `r${String(i).padStart(4, "0")}`, ...fuel(new Date(Date.UTC(2026, 5, 29 + i)).toISOString().slice(0, 10), 50) }));
+    const t = await getFuelTrend(fake({ bills: [...old, ...recent], payments: [], customer_credits: [], bank_lines: [] }), "UTC", TODAY);
+    expect(t).not.toBeNull();
+    expect(t!.weeksCounted).toBe(12);
+    expect(t!.avgWeekCents).toBe(35000);
+    expect(t!.fills).toBe(84);
   });
 });
