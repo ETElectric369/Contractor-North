@@ -1,6 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { isReservedSlug } from "@/lib/site-reserved";
+import { loginRedirectUrl } from "@/lib/safe-next";
 
 const PUBLIC_PATHS = [
   "/.well-known", // apple-app-site-association (and friends): fetched by Apple's CDN, never signed in
@@ -144,10 +145,7 @@ export async function updateSession(request: NextRequest, onOrgSite = false) {
       }
     }
 
-    const url = request.nextUrl.clone();
-    url.pathname = "/login";
-    url.searchParams.set("next", pathname);
-    return NextResponse.redirect(url);
+    return NextResponse.redirect(loginRedirectUrl(request.nextUrl));
   }
 
   return response;
