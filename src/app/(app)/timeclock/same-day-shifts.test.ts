@@ -16,7 +16,7 @@ vi.mock("./actions", () => ({
   takeShiftOffJob: vi.fn(async () => ({ ok: true })),
 }));
 
-import { SameDayShiftsList } from "./same-day-shifts";
+import { SameDayShiftsList, notCarriedWords } from "./same-day-shifts";
 import type { DayShift } from "./actions";
 
 const TZ = "America/Los_Angeles";
@@ -74,6 +74,26 @@ describe("the day's shifts, above the form", () => {
 
   it("an empty day renders nothing at all", () => {
     expect(render([], { id: "j28", label: "85 Whitney" })).toBe("");
+  });
+});
+
+describe("Put This On moves the punch only, and the form says what it typed that the punch didn't get", () => {
+  it("names each field typed, and nothing when nothing was", () => {
+    expect(notCarriedWords({ miles: 12, lunch: true, code: "ROUGH", rate: 30, notes: "panel" })).toBe(
+      "Not added to that shift: 12 miles, the lunch, code ROUGH, the rate and the notes typed on the form. Open it to add them.",
+    );
+    expect(notCarriedWords({ miles: 12 })).toBe("Not added to that shift: 12 miles typed on the form. Open it to add that.");
+    expect(notCarriedWords({ miles: 0, lunch: false, code: "", rate: 0, notes: "  " })).toBeNull();
+  });
+
+  it("both forms say it when the door closes them", () => {
+    const src = (rel: string) => readFileSync(new URL(rel, import.meta.url), "utf8");
+    for (const rel of ["./add-entry-button.tsx", "../jobs/[id]/job-add-time.tsx"]) {
+      const s = src(rel);
+      expect(s).toContain("onPlaced={(_sentence, shift) => {");
+      expect(s).toContain("notCarriedWords({ miles, lunch: tookLunch,");
+      expect(s).toContain('router.push(`/timecards?entry=${shift.id}`)');
+    }
   });
 });
 

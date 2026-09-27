@@ -33,6 +33,24 @@ export function shiftLine(s: DayShift, tz: string): { when: string; where: strin
   return { when, where: s.billedBy ? `${where} · on ${s.billedBy}` : where };
 }
 
+/**
+ * WHAT PUT THIS ON LEAVES BEHIND. The door moves the punch onto the job and nothing else, so miles,
+ * a lunch, a code, a rate or notes already typed on the form reach no shift when it closes. Miles
+ * are paid on their own (payroll's second bucket) and a lunch changes the paid hours, so the form
+ * says which ones, instead of closing over them. Null when nothing was typed.
+ */
+export function notCarriedWords(f: { miles?: number; lunch?: boolean; code?: string | null; rate?: number; notes?: string | null }): string | null {
+  const parts: string[] = [];
+  if ((f.miles ?? 0) > 0) parts.push(`${f.miles} miles`);
+  if (f.lunch) parts.push("the lunch");
+  if ((f.code ?? "").trim()) parts.push(`code ${(f.code ?? "").trim()}`);
+  if ((f.rate ?? 0) > 0) parts.push("the rate");
+  if ((f.notes ?? "").trim()) parts.push("the notes");
+  if (!parts.length) return null;
+  const list = parts.length === 1 ? parts[0] : `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
+  return `Not added to that shift: ${list} typed on the form. Open it to add ${parts.length === 1 ? "that" : "them"}.`;
+}
+
 /** The list, given what shiftsOnDay answered. Presentational: the doors are the caller's. */
 export function SameDayShiftsList({
   data,
@@ -108,7 +126,8 @@ export function SameDayShiftsList({
 /**
  * The live list: reads shiftsOnDay whenever the person, the day or the job changes (a short pause
  * first, so typing a date does not fire a read per keystroke). `refreshKey` re-reads after a
- * refusal; `onPlaced` hears a Put This On that landed, with its sentence (the form closes on it).
+ * refusal; `onPlaced` hears a Put This On that landed, with its sentence and the shift it moved (the
+ * form closes on it, and says what it typed that the shift did not get: notCarriedWords).
  */
 export function SameDayShifts({
   profileId,
@@ -123,7 +142,7 @@ export function SameDayShifts({
   jobId: string | null;
   highlightId?: string | null;
   refreshKey?: number;
-  onPlaced?: (sentence: string) => void;
+  onPlaced?: (sentence: string, shift: DayShift) => void;
 }) {
   const toast = useToast();
   const router = useRouter();
@@ -175,7 +194,7 @@ export function SameDayShifts({
           });
         },
       });
-      onPlaced?.(r.sentence ?? "");
+      onPlaced?.(r.sentence ?? "", s);
     } finally {
       setBusyId(null);
     }

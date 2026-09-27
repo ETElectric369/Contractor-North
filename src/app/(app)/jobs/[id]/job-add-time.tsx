@@ -11,7 +11,8 @@ import { drivingDistanceMiles } from "@/lib/google-maps";
 import { lunchMinutesFor } from "@/lib/lunch-rule";
 import { LunchCheckbox } from "@/components/lunch-checkbox";
 import { createManualEntry } from "../../timeclock/actions";
-import { SameDayShifts } from "../../timeclock/same-day-shifts";
+import { SameDayShifts, notCarriedWords } from "../../timeclock/same-day-shifts";
+import { useToast } from "@/components/toast";
 import type { JobCode } from "@/lib/types";
 
 interface Tech {
@@ -46,6 +47,7 @@ export function JobAddTimeEntry({
   jobCodesEnabled?: boolean;
 }) {
   const router = useRouter();
+  const toast = useToast();
   const key = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -177,10 +179,13 @@ export function JobAddTimeEntry({
             jobId={jobId}
             highlightId={clashId}
             refreshKey={dayKey}
-            onPlaced={() => {
+            onPlaced={(_sentence, shift) => {
               setOpen(false);
               setError(null);
               setClashId(null);
+              // The door moved the punch only: say what was typed here that it did not get.
+              const left = notCarriedWords({ miles, lunch: tookLunch, code: jobCodesEnabled ? jobCode : null, rate: ownerShift ? 0 : rate, notes });
+              if (left) toast(left, "info", { label: "Open That Shift", onClick: () => router.push(`/timecards?entry=${shift.id}`) });
               router.refresh();
             }}
           />

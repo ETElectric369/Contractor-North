@@ -10,7 +10,7 @@ import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { createManualEntry } from "./actions";
 import { NewJobInline, type CreatedJob } from "./new-job-inline";
-import { SameDayShifts } from "./same-day-shifts";
+import { SameDayShifts, notCarriedWords } from "./same-day-shifts";
 import { buildShiftSpan } from "./shift-span";
 import { lunchMinutesFor } from "@/lib/lunch-rule";
 import { LunchCheckbox } from "@/components/lunch-checkbox";
@@ -300,10 +300,13 @@ export function AddEntryButton({
             jobId={jobId || null}
             highlightId={clashId}
             refreshKey={dayKey}
-            onPlaced={() => {
+            onPlaced={(_sentence, shift) => {
               setOpen(false);
               setError(null);
               setClashId(null);
+              // The door moved the punch only: say what was typed here that it did not get.
+              const left = notCarriedWords({ miles, lunch: tookLunch, code: jobCodesEnabled ? jobCode : null, rate: ownerShift ? 0 : rate, notes });
+              if (left) toast(left, "info", { label: "Open That Shift", onClick: () => router.push(`/timecards?entry=${shift.id}`) });
               router.refresh();
             }}
           />
