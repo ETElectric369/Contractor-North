@@ -15,6 +15,9 @@ import {
   centsOf,
   choiceId,
   groupTitle,
+  inPayWindow,
+  PAY_WINDOW,
+  dayDiff,
   planBankDownload,
   readBankTable,
   sayRange,
@@ -105,6 +108,8 @@ export async function loadBankBooks(supabase: Db, orgId: string, dl: BankDownloa
   if (!dl.from || !dl.to) return { books: null, problem: "This download has no dated lines to sort." };
   const from = shiftDay(dl.from, -14);
   const to = shiftDay(dl.to, 10);
+  // Crew and supplier payments reach back further: a check can be cashed weeks after it was written.
+  const payFrom = shiftDay(dl.from, -PAY_WINDOW.before);
   const startIso = tzDayStartUtc(from, tz).toISOString();
   const endIso = tzDayStartUtc(shiftDay(to, 1), tz).toISOString();
   const keys = dl.lines.map((l) => l.key);
@@ -133,7 +138,7 @@ export async function loadBankBooks(supabase: Db, orgId: string, dl: BankDownloa
         .eq("org_id", orgId)
         .is("voided_at", null)
         .is("bank_line_id", null)
-        .gte("paid_on", from)
+        .gte("paid_on", payFrom)
         .lte("paid_on", to)
         .order("id")
         .range(f, t),
@@ -145,7 +150,7 @@ export async function loadBankBooks(supabase: Db, orgId: string, dl: BankDownloa
         .eq("org_id", orgId)
         .is("voided_at", null)
         .is("bank_line_id", null)
-        .gte("paid_on", from)
+        .gte("paid_on", payFrom)
         .lte("paid_on", to)
         .order("id")
         .range(f, t),
@@ -391,6 +396,25 @@ export async function applyBankCore(
     }
   }
   if (!work.length) return { ok: false, error: "Nothing to apply yet: answer a row first, or press Not Now." };
+
+  // CREW PAY ALREADY RECORDED: a person's "Pay Pat" on a line whose \$800 to Pat is already in North
+  // (recorded after the bank posted it, or a check cashed late, and no bank line on it yet) MARKS
+  // that payment. Writing another would pay Pat twice.
+  const taken = new Set<string>();
+  let crewMarked = 0;
+  for (const d of plan.dispositions.values()) if (d.how === "match") for (const id of d.ids) taken.add(id);
+  for (const w of work) {
+    if (w.sortedBy !== "person" || w.choice?.choice !== "crew") continue;
+    const who = w.choice.profileId;
+    const recorded = books.payPayments
+      .filter((pp) => !taken.has(pp.id) && pp.profileId === who && pp.cents === -w.line.cents && inPayWindow(w.line.postedOn, pp.day))
+      .sort((a, b) => Math.abs(dayDiff(w.line.postedOn, a.day)) - Math.abs(dayDiff(w.line.postedOn, b.day)) || a.id.localeCompare(b.id))[0];
+    if (!recorded) continue;
+    taken.add(recorded.id);
+    w.match = { table: "pay_payments", ids: [recorded.id] };
+    w.choice = null;
+    crewMarked++;
+  }
 
   // CLAIM THE ROW before anything is written.
   const claimed = await supabase
@@ -665,6 +689,7 @@ export async function applyBankCore(
     (pass.ruled ? `, ${pass.ruled} by your rules` : "") +
     (pass.picked ? `, ${pass.picked} you answered` : "") +
     "." +
+    (crewMarked ? ` ${crewMarked === 1 ? "1 crew payment was" : `${crewMarked} crew payments were`} already recorded, so ${crewMarked === 1 ? "it was" : "they were"} marked, never written twice.` : "") +
     (leftLines ? ` ${leftLines} left for later ${leftLines === 1 ? "is" : "are"} not counted yet and wait${leftLines === 1 ? "s" : ""} on the card.` : "");
   return problems.length ? { ok: true, message: `${said} But: ${problems.join(" ")}` } : { ok: true, message: said };
 }

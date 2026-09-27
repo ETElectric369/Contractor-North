@@ -476,6 +476,21 @@ describe("matching what is already on the books (exact cents, each row once)", (
     expect(plan.dispositions.get(lineBy(dl, "SHELL 456").key)).toMatchObject({ how: "need" });
   });
 
+  it("crew pay recorded after the bank posted it, or a check cashed weeks later, is that payment", () => {
+    const dl = readBankTable(parseCSV(`Date,Description,Check,Amount\n09/12/2026,CHECK,1044,-800.00\n09/20/2026,CHECK,1051,-450.00\n`), "x.csv", hash)!;
+    const plan = planBankDownload(
+      dl,
+      ORG_BOOKS({
+        payPayments: [
+          { id: "pp-late", profileId: "crew-pat", cents: 80000, day: "2026-09-15", reference: null },
+          { id: "pp-old", profileId: "crew-pat", cents: 45000, day: "2026-07-30", reference: null },
+        ],
+      }),
+    );
+    expect(plan.dispositions.get(dl.lines[0].key)).toMatchObject({ how: "match", table: "pay_payments", ids: ["pp-late"] });
+    expect(plan.dispositions.get(dl.lines[1].key)).toMatchObject({ how: "match", table: "pay_payments", ids: ["pp-old"] });
+  });
+
   it("a transfer between the company's own accounts is never crew pay of the same amount", () => {
     const dl = readBankTable(
       parseCSV(`Date,Description,Amount\n09/10/2026,ONLINE TRANSFER TO CHK XXXXXX9876,-1000.00\n09/12/2026,Zelle payment to Pat Crew,-1000.00\n`),

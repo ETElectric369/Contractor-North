@@ -412,6 +412,21 @@ describe("Apply", () => {
     expect(new Set(db.bank_lines.map((l) => l.line_key)).size).toBe(db.bank_lines.length);
   });
 
+  it("a person's Pay Pat on a line whose payment to Pat is already recorded marks it, never writes a second", async () => {
+    db.pay_payments.push({ id: "pp-rec", org_id: "org-1", profile_id: "pat", amount: 150, paid_on: "2026-09-26", reference: null, voided_at: null, bank_line_id: null });
+    const id = await drop();
+    const v = await view(id);
+    const res = await applyBankDownload(id, { fingerprint: v.fingerprint, picks: { [rowBy(v, "DENTAL").id]: "crew:pat" } });
+    expect(res.message).toMatch(/1 crew payment was already recorded, so it was marked, never written twice\./);
+    expect(db.pay_payments).toHaveLength(1);
+    const line = db.bank_lines.find((l) => l.description.includes("DENTAL"))!;
+    expect(line).toMatchObject({ choice: "matched", sorted_by: "person" });
+    expect(db.pay_payments[0].bank_line_id).toBe(line.id);
+    // Undo takes the mark off and leaves the payment as it was.
+    await undoBankDownload(id);
+    expect(db.pay_payments[0]).toMatchObject({ bank_line_id: null, voided_at: null });
+  });
+
   it("refuses an answer that doesn't fit, and writes nothing", async () => {
     const id = await drop();
     const v = await view(id);

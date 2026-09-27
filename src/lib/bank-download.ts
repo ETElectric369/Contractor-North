@@ -14,7 +14,8 @@ import { findHeaderRow, fingerprintOf, headerKey, readDate, readHeaderRow, readH
  *        · a deposit is one payment (paid 3 days after to 7 days before it posts), or exactly one
  *          group of up to 6: a card payout (amounts less Stripe's fee) or a Venmo sweep;
  *        · a check or a debit to a crew member is a live crew payment (by check number, or by amount
- *          0 to 14 days after it was recorded);
+ *          from 5 days before it was recorded to 60 after: a check can sit in a wallet for weeks,
+ *          and the office may record the pay a few days after the bank posts it);
  *        · a payment to an on-account supplier whose name, spelling or number the line carries is
  *          that supplier's payment;
  *        · an ATM withdrawal is a petty-cash top-up of the same amount within 3 days;
@@ -770,6 +771,14 @@ export function dayDiff(a: string, b: string): number {
   return Math.round((Date.parse(`${a}T12:00:00Z`) - Date.parse(`${b}T12:00:00Z`)) / 86_400_000);
 }
 
+/** How far a payment the company wrote (crew pay, a supplier's) may be from the bank's day: up to
+ *  60 days before it posts (a check cashed late), up to 5 after (recorded after the bank posted). */
+export const PAY_WINDOW = { before: 60, after: 5 } as const;
+export function inPayWindow(postedOn: string, recordedOn: string): boolean {
+  const d = dayDiff(postedOn, recordedOn);
+  return d >= -PAY_WINDOW.after && d <= PAY_WINDOW.before;
+}
+
 const compact = (s: string) => String(s ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
 
 /** Does the line name this supplier account: its number, branch, name or a spelling of it? */
@@ -965,7 +974,7 @@ export function planBankDownload(dl: BankDownload, books: BankBooks): BankPlan {
     const ownTransfer = TRANSFER_RE.test(line.description) && !PROCESSOR_RE.test(line.description) && !named;
     if (!ownTransfer && (line.check || /\bcheck\b/i.test(line.description) || PAY_WORDS_RE.test(line.description) || named)) {
       const hits = books.payPayments
-        .filter((p) => !used.has(p.id) && p.cents === amount && dayDiff(line.postedOn, p.day) >= 0 && dayDiff(line.postedOn, p.day) <= 14)
+        .filter((p) => !used.has(p.id) && p.cents === amount && inPayWindow(line.postedOn, p.day))
         .sort(byDistance(line.postedOn));
       if (hits.length) return { how: "match", table: "pay_payments", ids: [hits[0].id], said: "Crew pay already recorded" };
     }
@@ -973,7 +982,7 @@ export function planBankDownload(dl: BankDownload, books: BankBooks): BankPlan {
     const accountsNamed = books.accounts.filter((a) => lineNamesAccount(line.description, a)).map((a) => a.id);
     if (accountsNamed.length) {
       const hits = books.supplierPayments
-        .filter((p) => !used.has(p.id) && accountsNamed.includes(p.accountId) && p.cents === amount && dayDiff(line.postedOn, p.day) >= -3 && dayDiff(line.postedOn, p.day) <= 14)
+        .filter((p) => !used.has(p.id) && accountsNamed.includes(p.accountId) && p.cents === amount && inPayWindow(line.postedOn, p.day))
         .sort(byDistance(line.postedOn));
       if (hits.length) {
         const who = books.accounts.find((a) => a.id === hits[0].accountId)?.name ?? "the supplier";
