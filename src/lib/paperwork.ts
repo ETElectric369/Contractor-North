@@ -553,11 +553,17 @@ function markedShelf(item: PaperItem): boolean {
 /**
  * The business cost the PAPER names (a company-use word in its PO or job box, matched exactly), on
  * a receipt or a bill that names no job and says nothing that disagrees. Never Fees.
+ *
+ * A TRUCK WORD ON A FILL-UP PICKS NOTHING. "TRUCK 2" or "VAN" in the box says which truck, and a
+ * contractor writes that on a pump receipt as often as on a repair: it cannot tell Fuel from Auto,
+ * and before Fuel was its own bucket (0362) the two were one. So when a model read the paper as Fuel
+ * (the reader, or AI Suggest) and the word says Auto, the row asks, with Fuel as the guess chip.
  */
 function markedCost(item: PaperItem): BusinessCostBucket | null {
   const p = proposalOf(item);
   const b = p.companyUse?.bucket;
   if (!b || !isBusinessCostBucket(b) || b === "Fees") return null;
+  if (b === "Auto" && p.bucket === "Fuel") return null;
   if (markedJob(p) || p.jobConflict) return null;
   const t = paperTypeOfItem(item);
   return t === "receipt" || t === "bill" ? b : null;

@@ -9,6 +9,7 @@ import {
   pickedBecause,
   pickProvenance,
   placeFromMarks,
+  proposalOf,
   rematchPaper,
   suggestedDestination,
   type MarkJob,
@@ -130,6 +131,48 @@ describe("Paper A in the tray, replayed from its stored row", () => {
     expect(suggestedDestination(stock, ["j11"])).toBe("stock");
     expect(pickedBecause(stock)).toMatch(/^Shelf picked from the PO on the (bill|receipt|invoice): STOCK$/);
     expect(onPaperWords({ ...LIVE_A, po: "STOCK" }, SELF)).toBe("PO STOCK");
+  });
+});
+
+describe("a truck word on a fill-up picks nothing: Fuel or Auto is a person's call", () => {
+  // A made-up pump receipt with the truck written in the job box, the way a crew marks a fill-up.
+  const pump = (proposal: Record<string, unknown>) =>
+    rematchPaper(
+      paperA(proposal, { doc_type: "receipt", category: "Receipt", title: "Corner Gas — $61.20", vendor: "Corner Gas", amount: "61.20", doc_number: null }),
+      JOBS,
+      [],
+      SELF,
+    );
+  const fillUp = { jobId: null, jobFrom: null, jobHint: null, guessJobId: null, jobConflict: null, bucket: "Fuel", bucketFrom: "reader" };
+
+  it("the reader read Fuel and the box says TRUCK 2: the row asks, with Fuel as the guess", () => {
+    const shown = pump({ ...fillUp, marks: { jobName: "TRUCK 2" } });
+    expect(proposalOf(shown).companyUse).toMatchObject({ bucket: "Auto", from: "job_name" });
+    expect(suggestedDestination(shown, ["j11"])).toBe("");
+    expect(paperPickOf(shown)).toBe("");
+    expect(pickedBecause(shown)).toBeNull();
+    expect(guessOf(shown, ["j11"])).toBe("cost:Fuel");
+  });
+
+  it("the same in the PO box, and when AI Suggest is the one that read Fuel", () => {
+    const shown = pump({ ...fillUp, bucketFrom: "ai", why: "A fuel purchase.", marks: { po: "VAN" } });
+    expect(paperPickOf(shown)).toBe("");
+    expect(guessOf(shown, ["j11"])).toBe("cost:Fuel");
+  });
+
+  it("a truck word on a paper nobody read as Fuel still picks Auto", () => {
+    const repair = pump({ ...fillUp, bucket: "Auto", marks: { jobName: "TRUCK 2" } });
+    expect(paperPickOf(repair)).toBe("cost:Auto");
+    expect(pickedBecause(repair)).toBe("Business cost picked from the job name on the receipt: TRUCK 2");
+    const unread = pump({ ...fillUp, bucket: null, bucketFrom: null, marks: { jobName: "TRUCK 2" } });
+    expect(paperPickOf(unread)).toBe("cost:Auto");
+  });
+
+  it("tapping the Fuel chip is the reader's guess, and says so", () => {
+    const shown = pump({ ...fillUp, marks: { jobName: "TRUCK 2" } });
+    const { filed, note } = pickProvenance(shown, "cost:Fuel");
+    expect(filed.picked).toBe("guess");
+    expect(note).toBe("A person picked the reader's guess; it was not read off the paper.");
   });
 });
 
