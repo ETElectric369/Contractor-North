@@ -392,6 +392,10 @@ type Work = {
 
 const MATCH_TABLES: MatchTable[] = ["payments", "bills", "supplier_payments", "pay_payments", "petty_cash"];
 
+/** The note on a crew payment Apply writes. The crew member it pays can read their own row, so it
+ *  says where it came from and nothing about the company's account. */
+export const CREW_NOTE = "Recorded from a bank download.";
+
 /** How a deposit put on an invoice was paid, from what the bank calls it. */
 export function depositMethod(description: string): string {
   const d = description.toLowerCase();
@@ -619,7 +623,9 @@ export async function applyBankCore(
         paid_on: w.line.postedOn,
         method: w.line.check ? "check" : "transfer",
         reference: w.line.check,
-        note,
+        // THE PAID PERSON CAN READ THIS ROW (pay_payments_read: their own): never the company's
+        // account or the file, just where it came from.
+        note: CREW_NOTE,
         created_by: who.userId,
         bank_line_id: lineId.get(w.line.key),
       })

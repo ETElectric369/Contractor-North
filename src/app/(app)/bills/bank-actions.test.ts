@@ -372,8 +372,9 @@ describe("Apply", () => {
     for (const t of ["bills", "payments", "pay_payments"]) for (const r of db[t]) expect(String(r.note ?? r.notes ?? "")).not.toContain("Checking.csv");
     expect(db.bills[0].notes).toBe("From the bank download (••1234) of Sep 2–Sep 24.");
 
-    // The check to Pat, as crew pay with its number.
-    expect(db.pay_payments).toEqual([expect.objectContaining({ org_id: "org-1", profile_id: "pat", amount: 640, reference: "1043", method: "check" })]);
+    // The check to Pat, as crew pay with its number. Pat can read this row: its note says where it
+    // came from and nothing of the company's account.
+    expect(db.pay_payments).toEqual([expect.objectContaining({ org_id: "org-1", profile_id: "pat", amount: 640, reference: "1043", method: "check", note: "Recorded from a bank download." })]);
 
     // The payout MARKED the two card payments; nothing new was written for them.
     const payout = lines.find((l) => l.description.includes("STRIPE"))!;
