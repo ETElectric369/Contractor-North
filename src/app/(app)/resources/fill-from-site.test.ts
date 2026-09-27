@@ -16,6 +16,7 @@ const state = vi.hoisted(() => ({
   noKey: false,
   reply: "" as string,
   throws: false,
+  extractThrows: false,
   calls: [] as any[],
   metered: [] as any[],
   reported: [] as any[],
@@ -31,6 +32,17 @@ vi.mock("@/lib/site-read/fetch-page", () => ({
     return state.page;
   }),
 }));
+// The real extractor, unless a test says it throws (it is meant to be total; the action still guards).
+vi.mock("@/lib/site-read/extract", async (importOriginal) => {
+  const real = await importOriginal<typeof import("@/lib/site-read/extract")>();
+  return {
+    ...real,
+    extractContact: vi.fn((...a: Parameters<typeof real.extractContact>) => {
+      if (state.extractThrows) throw new TypeError("Cannot convert object to primitive value");
+      return real.extractContact(...a);
+    }),
+  };
+});
 vi.mock("@/lib/ai-cost", () => ({
   modelFor: () => "claude-haiku-4-5",
   aiSpendExceeded: vi.fn(async () => state.over),
@@ -90,6 +102,7 @@ beforeEach(() => {
   state.over = false;
   state.noKey = false;
   state.throws = false;
+  state.extractThrows = false;
   state.reply = JSON.stringify({
     name: "Acme Electric Supply",
     phones: ["(530) 555-0150", "(530) 555-0666"], // the second is on no page: the guard drops it
@@ -146,6 +159,15 @@ describe("fillFromSite: plain failures", () => {
     const r = await fillFromSite({ url: "acme-supply.example" });
     expect(r.ok).toBe(false);
     expect(!r.ok && r.error).toMatch(words);
+    expect(state.calls).toEqual([]);
+  });
+
+  it("if the page makes the reader throw, says so in words and reports it (never 'check your connection')", async () => {
+    state.extractThrows = true;
+    expect(await fillFromSite({ url: "acme-supply.example" })).toEqual({ ok: false, error: "Couldn't read that page. Type the details in." });
+    expect(state.reported).toHaveLength(1);
+    expect(state.reported[0][0]).toBe("fillFromSite.extract");
+    expect(state.reported[0][2]).toEqual({ orgId: "org-1" });
     expect(state.calls).toEqual([]);
   });
 });

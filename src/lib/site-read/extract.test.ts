@@ -162,6 +162,15 @@ describe("extractContact", () => {
     expect(extractContact(html, "https://crest.example/").fields.name).toBe("Crest Electric");
   });
 
+  it("never throws on JSON-LD values that aren't strings where a string belongs", () => {
+    // String() on {"toString":1} throws "Cannot convert object to primitive value".
+    const badType = `<script type="application/ld+json">{"@type":{"toString":1},"name":"X"}</script><p>Call (530) 555-0101</p>`;
+    expect(extractContact(badType, "https://x.example/").fields).toEqual({ phones: ["(530) 555-0101"] });
+    const badDay = `<script type="application/ld+json">{"@type":["LocalBusiness",{"toString":1}],"name":"Crest Electric",
+      "openingHoursSpecification":[{"dayOfWeek":{"toString":1},"opens":"08:00","closes":"17:00"},{"dayOfWeek":["Mo",{"toString":1},7],"opens":"08:00","closes":"17:00"}]}</script>`;
+    expect(extractContact(badDay, "https://crest.example/").fields).toEqual({ name: "Crest Electric", hours: "Mon 8 AM–5 PM" });
+  });
+
   it("gives back an empty card for a page with nothing on it, or garbage", () => {
     expect(extractContact("", "https://x.example/")).toEqual({ fields: {}, weak: [] });
     expect(extractContact("<<<>>>\u0000&#xZZ;", "not a url").fields).toEqual({});

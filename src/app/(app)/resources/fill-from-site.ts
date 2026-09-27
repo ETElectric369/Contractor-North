@@ -88,7 +88,16 @@ export async function fillFromSite(input: { url: string; need?: string[] }): Pro
   const page = await readPublicPage(url);
   if (!page.ok) return { ok: false, error: failureWords(page.why, page.status) };
 
-  const { fields, weak } = extractContact(page.html, page.finalUrl);
+  // The extractor is meant to be total, but the page is a stranger's: if it ever throws, say so in
+  // words (and report it) rather than letting the browser blame the person's connection.
+  let read: ReturnType<typeof extractContact>;
+  try {
+    read = extractContact(page.html, page.finalUrl);
+  } catch (e) {
+    reportError("fillFromSite.extract", e, { orgId });
+    return { ok: false, error: "Couldn't read that page. Type the details in." };
+  }
+  const { fields, weak } = read;
   const gaps = gapsFor(need, fields, weak);
   if (!gaps.length) return { ok: true, fields };
 

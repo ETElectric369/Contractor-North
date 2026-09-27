@@ -293,8 +293,10 @@ function textHours(text: string): string | undefined {
 const DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const DAY_INDEX: Record<string, number> = { mo: 0, tu: 1, we: 2, th: 3, fr: 4, sa: 5, su: 6 };
 
+/** A JSON-LD value is anything the page wrote, so only a string is read: String() on an object whose
+ *  "toString" is 1 throws, and one bad day must not take the whole card down with it. */
 function dayIndex(v: unknown): number | null {
-  const s = String(v ?? "").replace(/^https?:\/\/schema\.org\//i, "").trim().toLowerCase();
+  const s = (typeof v === "string" ? v : "").replace(/^https?:\/\/schema\.org\//i, "").trim().toLowerCase();
   return s.length >= 2 && s.slice(0, 2) in DAY_INDEX ? DAY_INDEX[s.slice(0, 2)] : null;
 }
 
@@ -411,7 +413,8 @@ function jsonLdNodes(html: string): Node[] {
 function typesOf(n: Node): string[] {
   return ([] as unknown[])
     .concat(n["@type"] ?? [])
-    .map((t) => String(t).replace(/^https?:\/\/schema\.org\//i, ""))
+    .filter((t): t is string => typeof t === "string")
+    .map((t) => t.replace(/^https?:\/\/schema\.org\//i, ""))
     .filter(Boolean);
 }
 
