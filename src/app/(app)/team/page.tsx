@@ -62,10 +62,12 @@ export default async function TeamPage() {
       : Promise.resolve({ data: [] }),
     viewerSwitches(),
   ]);
-  // THE SWITCH BOARD (0352). Daily Reports off: no Crew Lead badge and no Crew Leader box (the flag
-  // is kept; it asks for nothing while the switch is off). Crew & Payroll moves nothing here: pay
-  // and charge rates price labor, and the home address and commute baseline feed the Tax Report's
-  // mileage deduction.
+  // THE SWITCH BOARD (0352). The Crew Lead badge and the Crew Leader box are drawn whatever the
+  // switches say: since 0356 the flag also lets its holder fill in the walk-through on a visit
+  // they're on, which reads no switch, so the office must always be able to see it, grant it and
+  // take it away. Daily Reports only picks the box's line (off, it says nothing about a clock-out
+  // report). Crew & Payroll moves nothing here: pay and charge rates price labor, and the home
+  // address and commute baseline feed the Tax Report's mileage deduction.
   const dailyReports = featureOn(sw.features, "daily_reports");
 
   const payRows = payById(pay as ProfilePayRow[] | null);
@@ -123,7 +125,7 @@ export default async function TeamPage() {
                     />
                   )}
                   {!m.active && <Badge tone="red">inactive</Badge>}
-                  {dailyReports && !!(m as any).crew_lead && <Badge tone="green">crew lead</Badge>}
+                  {!!(m as any).crew_lead && <Badge tone="green">crew lead</Badge>}
                   <Badge tone={roleTone[m.role]}>{m.role}</Badge>
                   {isAdmin && (
                     <TeamMemberMenu
@@ -131,7 +133,7 @@ export default async function TeamPage() {
                       isSelf={m.id === profile.id}
                       isOwnerRow={m.role === "owner"}
                       authConfigured={adminConfigured()}
-                      crewLeadDoor={dailyReports}
+                      dailyReports={dailyReports}
                     />
                   )}
                 </li>
