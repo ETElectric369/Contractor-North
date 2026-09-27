@@ -23,7 +23,7 @@ vi.mock("@/lib/observe", () => ({ reportError: () => {} }));
 vi.mock("@/lib/pdf-cache", () => ({ bustDocPdf: vi.fn(async () => {}), warmDocPdf: vi.fn(async () => {}) }));
 
 import { addOpenList } from "./open-list-actions";
-import { applyBankDownload, setBankAccount, swapBankDownload, undoBankDownload } from "./bank-actions";
+import { applyBankDownload, forgetBankRule, setBankAccount, swapBankDownload, undoBankDownload } from "./bank-actions";
 import { applyBankCore, bankViews, BANK_NEEDS_UPDATE } from "./bank-core";
 import { undoPaperwork } from "@/app/(app)/organize/actions";
 
@@ -32,7 +32,11 @@ let db: Record<string, Row[]>;
 let seq = 0;
 let missingBank = false;
 
-const UNIQUE: Record<string, string[]> = { bank_lines: ["org_id", "line_key"], bank_rules: ["org_id", "direction", "merchant_key"] };
+// bank_rules: one per merchant AND answer (0363's generated `answer` column, spelled out here).
+const UNIQUE: Record<string, string[]> = {
+  bank_lines: ["org_id", "line_key"],
+  bank_rules: ["org_id", "direction", "merchant_key", "choice", "bucket", "cost_kind", "supplier_account_id", "profile_id"],
+};
 
 function fakeDb() {
   return {
@@ -337,6 +341,8 @@ describe("Apply", () => {
     const { res } = await applyWithAnswers(id);
     expect(res.ok).toBe(true);
     expect(res.message).toMatch(/^Applied: 8 lines counted, 1 matched to what was already here, 7 you answered\. 1 left for later is not counted yet/);
+    // It says what it remembered, and for which amounts.
+    expect(res.message).toContain("Remembered for next time: DENTAL CARE LLC → Personal ($150.00); SHELL 123 ANYTOWN ST → Fuel ($88.45 to $100.00)");
 
     const lines = db.bank_lines;
     expect(lines).toHaveLength(8);
@@ -381,6 +387,7 @@ describe("Apply", () => {
       ["out", "transfer 9876", "draw", null],
     ]);
     expect(db.bank_rules.every((r) => r.learned_import_id === id && r.org_id === "org-1")).toBe(true);
+    expect(db.bank_rules.find((r) => r.merchant_key === "shell")).toMatchObject({ min_cents: 8845, max_cents: 10000 });
 
     // ANOTHER COMPANY'S ROWS: untouched.
     expect(db.payments.find((p) => p.id === "pay-x")!.bank_line_id).toBeNull();
@@ -504,6 +511,59 @@ describe("the next download", () => {
     expect(again.ok).toBe(false);
     expect(again.already).toMatch(/^Already In/);
     expect(db.organized_items).toHaveLength(1);
+  });
+});
+
+describe("a merchant with two answers", () => {
+  const STORE = (rows: string) => `Account Number,Post Date,Check,Description,Debit,Credit,Status,Balance\n${rows}`;
+
+  it("a fill-up and a coffee at one store are two rows, two answers, and each is placed only near its own amounts", async () => {
+    const id = await drop(
+      STORE(`XXXXX1234,09/02/2026,,1111-CORNER STORE ANYTOWN,138.62,,Posted,1000.00
+XXXXX1234,09/05/2026,,1111-CORNER STORE ANYTOWN,13.31,,Posted,986.69
+XXXXX1234,09/12/2026,,1111-CORNER STORE ANYTOWN,120.00,,Posted,866.69
+`),
+      "Store1234.csv",
+    );
+    const v = await view(id);
+    const rows = v.rows.filter((r) => r.title.includes("CORNER STORE"));
+    expect(rows.map((r) => r.money)).toEqual(["2× $258.62", "$13.31"]);
+    await applyBankDownload(id, { fingerprint: v.fingerprint, picks: { [rows[0].id]: "cost:Gas & Truck:fuel", [rows[1].id]: "cost:Other" } });
+    expect(db.bank_rules.map((r) => [r.choice, r.bucket, r.cost_kind, r.min_cents, r.max_cents]).sort()).toEqual([
+      ["cost", "Gas & Truck", "fuel", 12000, 13862],
+      ["cost", "Other", null, 1331, 1331],
+    ]);
+    // Next month: a fill-up and a coffee go by their own answers; a $40 purchase, far from both, asks
+    // with the nearest answer as the guess.
+    const next = await drop(
+      STORE(`XXXXX1234,10/02/2026,,1111-CORNER STORE ANYTOWN,110.00,,Posted,700.00
+XXXXX1234,10/03/2026,,1111-CORNER STORE ANYTOWN,9.80,,Posted,690.20
+XXXXX1234,10/04/2026,,1111-CORNER STORE ANYTOWN,40.00,,Posted,650.20
+`),
+      "Store1234-oct.csv",
+    );
+    const nv = await view(next);
+    expect(nv.sorted.map((s) => [s.label, s.n])).toEqual([
+      ["Fuel (Your Rule)", 1],
+      ["Other (Your Rule)", 1],
+    ]);
+    expect(nv.rows).toHaveLength(1);
+    expect(nv.rows[0].guess).toBe("cost:Gas & Truck:fuel");
+    expect(nv.rules.map((r) => r.label)).toEqual(["CORNER → Fuel ($120.00 to $138.62)", "CORNER → Other ($13.31)"]);
+  });
+
+  it("Forget takes an answer off, and its lines are asked again", async () => {
+    const id = await drop();
+    const v = await view(id);
+    await applyBankDownload(id, { fingerprint: v.fingerprint, picks: { [rowBy(v, "SHELL").id]: "cost:Gas & Truck:fuel" } });
+    const next = await drop(NEXT_CSV, "Next.csv");
+    const before = await view(next);
+    expect(before.rules).toHaveLength(1);
+    const res = await forgetBankRule(before.rules[0].id);
+    expect(res).toMatchObject({ ok: true, message: "Forgotten: SHELL is asked again from now on." });
+    const after = await view(next);
+    expect(after.rules).toHaveLength(0);
+    expect(after.rows.some((r) => r.title.includes("SHELL"))).toBe(true);
   });
 });
 

@@ -30,8 +30,12 @@ import { findHeaderRow, fingerprintOf, headerKey, readDate, readHeaderRow, readH
  *          paid through the account), and never for a transfer between the company's own accounts.
  *          Only a line that names nobody (a bare check) takes a bill by amount alone, in the loose
  *          pass; a line that names someone else asks.
- *   3. A RULE THE COMPANY MADE (bank_rules) → its choice. Written only by a person's tap.
- *   4. OTHERWISE IT NEEDS YOU: one row per merchant, the app's guess first, never picked for you.
+ *   3. A RULE THE COMPANY MADE (bank_rules) → its choice. Written only by a person's tap, and only
+ *      for the amounts it was answered for (its band, stretched 2x either way): one merchant may
+ *      have two answers ("fill-up-sized is Fuel, coffee-sized is Other"). A line outside every
+ *      band for its merchant asks, with the nearest band's answer as the guess.
+ *   4. OTHERWISE IT NEEDS YOU: one row per merchant (split when its amounts are far apart), the
+ *      app's guess first, never picked for you.
  *
  * BUILD FOR MILLIONS: no company, bank, supplier or person is named in here. Columns are found by
  * header words (BANK_WORDS); the guesses are generic words (FUEL, INSURANCE, FEE) and the
@@ -715,6 +719,9 @@ export type BooksRule = {
   costKind: string | null;
   supplierAccountId: string | null;
   profileId: string | null;
+  /** The amounts (cents, positive) it was answered for; null = every amount. */
+  minCents?: number | null;
+  maxCents?: number | null;
 };
 export type AlreadyLine = { choice: string; bucket: string | null; costKind: string | null; amountCents: number };
 /** A line already in bank_lines around this download's days, whatever download counted it. */
@@ -916,21 +923,58 @@ export function guessFor(line: BankLine, books: BankBooks): BankChoice | null {
   return null;
 }
 
-/** The rule that places this line: same direction, its key a word-prefix of the line's words, the
- *  longest such key winning. Checks with no payee and bare deposits are never placed by a rule. */
-export function ruleFor(line: BankLine, rules: readonly BooksRule[]): BooksRule | null {
+/** How far past its band a rule still reaches: half its smallest amount to twice its largest. */
+export const RULE_STRETCH = 2;
+/** Amounts further apart than this (largest over smallest) are two rows, and two answers. */
+export const SPLIT_RATIO = 4;
+
+/** The company's rules for this line's merchant: same direction, the key a word-prefix of the line's
+ *  words, the longest such key winning (all its answers). Checks with no payee and bare deposits
+ *  have none. */
+export function rulesFor(line: BankLine, rules: readonly BooksRule[]): BooksRule[] {
   const direction = line.cents > 0 ? "in" : "out";
-  if (isBareCheck(line) || isGenericKey(line.merchantKey) || !line.merchantKey || isCustomerMoneyIn(line)) return null;
+  if (isBareCheck(line) || isGenericKey(line.merchantKey) || !line.merchantKey || isCustomerMoneyIn(line)) return [];
   const words = merchantWords(line.description).join(" ");
   const own = line.merchantKey;
-  let best: BooksRule | null = null;
-  for (const r of rules) {
-    if (r.direction !== direction) continue;
-    const hit = r.key === own || words === r.key || words.startsWith(`${r.key} `) || own.startsWith(`${r.key} `);
-    if (!hit) continue;
-    if (!best || r.key.length > best.key.length) best = r;
-  }
-  return best;
+  const hits = rules.filter((r) => r.direction === direction && (r.key === own || words === r.key || words.startsWith(`${r.key} `) || own.startsWith(`${r.key} `)));
+  const longest = Math.max(0, ...hits.map((r) => r.key.length));
+  return hits.filter((r) => r.key.length === longest).sort((a, b) => a.id.localeCompare(b.id));
+}
+
+/** Is this amount (cents, positive) inside the rule's band, stretched `stretch` times either way? */
+function inBand(r: BooksRule, amount: number, stretch = RULE_STRETCH): boolean {
+  if (r.minCents == null || r.maxCents == null) return true;
+  return amount * stretch >= r.minCents && amount <= r.maxCents * stretch;
+}
+
+/** How far the amount is from the rule's band, as a ratio (1 inside it). */
+function bandDistance(r: BooksRule, amount: number): number {
+  if (r.minCents == null || r.maxCents == null || amount <= 0) return 1;
+  if (amount < r.minCents) return r.minCents / amount;
+  if (amount > r.maxCents) return amount / r.maxCents;
+  return 1;
+}
+
+/** THE RULE THAT PLACES THIS LINE: the one answer whose band holds its amount. Two that both hold
+ *  it (bands that overlap) settle on the one whose own band holds it exactly, or ask. */
+export function ruleFor(line: BankLine, rules: readonly BooksRule[]): BooksRule | null {
+  const amount = Math.abs(line.cents);
+  const fitting = rulesFor(line, rules).filter((r) => inBand(r, amount));
+  if (fitting.length <= 1) return fitting[0] ?? null;
+  const exact = fitting.filter((r) => inBand(r, amount, 1));
+  return exact.length === 1 ? exact[0] : null;
+}
+
+/** The merchant's nearest answer, for a line no band holds: the guess, never the answer. */
+export function ruleHintFor(line: BankLine, rules: readonly BooksRule[]): BooksRule | null {
+  const amount = Math.abs(line.cents);
+  return [...rulesFor(line, rules)].sort((a, b) => bandDistance(a, amount) - bandDistance(b, amount) || a.id.localeCompare(b.id))[0] ?? null;
+}
+
+/** "$40.00 to $140.00", "$88.45", or "" for a rule with no band. */
+export function sayBand(r: Pick<BooksRule, "minCents" | "maxCents">): string {
+  if (r.minCents == null || r.maxCents == null) return "";
+  return r.minCents === r.maxCents ? sayDollars(r.minCents / 100) : `${sayDollars(r.minCents / 100)} to ${sayDollars(r.maxCents / 100)}`;
 }
 
 /** A rule's choice, if it can still be used (its supplier or crew member is still here). */
@@ -1159,25 +1203,57 @@ export function planBankDownload(dl: BankDownload, books: BankBooks): BankPlan {
     }
   }
 
-  const groups = new Map<string, NeedGroup>();
+  // RULES, then the questions that are left.
+  const asking: { line: BankLine; direction: "in" | "out"; guess: BankChoice | null; single: boolean }[] = [];
   for (const line of lines) {
     if (dispositions.has(line.key)) continue;
+    const direction = line.cents > 0 ? "in" : "out";
     const rule = ruleFor(line, books.rules);
     const rc = rule ? ruleChoice(rule, books) : null;
     // Money in that is exactly an open invoice's balance is asked, whatever a rule says.
     const onInvoice = line.cents > 0 && guessFor(line, books)?.choice === "invoice";
-    if (rule && rc && !onInvoice && choiceFits(rc, line.cents > 0 ? "in" : "out")) {
+    if (rule && rc && !onInvoice && choiceFits(rc, direction)) {
       dispositions.set(line.key, { how: "rule", ruleId: rule.id, choice: rc });
       counts.ruled++;
       continue;
     }
-    // A QUESTION: one row per merchant; a check, a deposit an invoice may be, or a line with no
-    // merchant words is a row of its own.
-    const direction = line.cents > 0 ? "in" : "out";
-    const guess = guessFor(line, books);
+    // Outside every band the merchant has: its nearest answer is the guess (asked, never placed).
+    const hint = rule ? null : ruleHintFor(line, books.rules);
+    const hinted = hint ? ruleChoice(hint, books) : null;
+    const guess = onInvoice ? guessFor(line, books) : hinted && choiceFits(hinted, direction) ? hinted : guessFor(line, books);
     const single =
       isBareCheck(line) || !line.merchantKey || isGenericKey(line.merchantKey) || guess?.choice === "invoice" || (direction === "out" && !!line.check) || isCustomerMoneyIn(line);
-    const id = single ? `line:${line.key.slice(-16)}` : `${direction}:${line.merchantKey}`;
+    asking.push({ line, direction, guess, single });
+  }
+  // ONE ROW PER MERCHANT, SPLIT BY AMOUNT: a merchant's lines far apart in size (a fill-up and a
+  // coffee at one store) are separate rows, so one tap never answers both.
+  const bandOf = new Map<string, number>();
+  const bandsPer = new Map<string, number>();
+  const amountsBy = new Map<string, number[]>();
+  for (const a of asking) {
+    if (a.single) continue;
+    const k = `${a.direction}:${a.line.merchantKey}`;
+    amountsBy.set(k, [...(amountsBy.get(k) ?? []), Math.abs(a.line.cents)]);
+  }
+  for (const [k, amounts] of amountsBy) {
+    const sorted = [...new Set(amounts)].sort((a, b) => a - b);
+    let band = 0;
+    let low = sorted[0];
+    for (const amt of sorted) {
+      if (amt > low * SPLIT_RATIO) {
+        band++;
+        low = amt;
+      }
+      bandOf.set(`${k}|${amt}`, band);
+    }
+    bandsPer.set(k, band + 1);
+  }
+  const groups = new Map<string, NeedGroup>();
+  for (const { line, direction, guess, single } of asking) {
+    // A QUESTION: one row per merchant (and amount band); a check, a deposit an invoice may be, or a
+    // line with no merchant words is a row of its own.
+    const k = `${direction}:${line.merchantKey}`;
+    const id = single ? `line:${line.key.slice(-16)}` : (bandsPer.get(k) ?? 1) > 1 ? `${k}#${(bandOf.get(`${k}|${Math.abs(line.cents)}`) ?? 0) + 1}` : k;
     let g = groups.get(id);
     if (!g) {
       g = {
@@ -1497,6 +1573,8 @@ export type BankView = {
   canSwap: boolean;
   /** No account on the file or its name: a person may say its last 4 (before anything applies). */
   askAccount: boolean;
+  /** The company's rules that placed lines on this card, each with a way to forget it. */
+  rules: { id: string; label: string; n: number }[];
   problem: string | null;
 };
 
@@ -1507,6 +1585,22 @@ const MATCH_LABEL: Record<MatchTable, string> = {
   pay_payments: "Crew Pay Already Recorded",
   petty_cash: "Petty Cash Already Recorded",
 };
+
+/** "shell → Fuel ($40.00 to $140.00) · 3 lines": each rule that placed a line here. */
+function rulesUsed(plan: BankPlan, books: BankBooks, names: BankNames): BankView["rules"] {
+  const n = new Map<string, number>();
+  for (const d of plan.dispositions.values()) if (d.how === "rule") n.set(d.ruleId, (n.get(d.ruleId) ?? 0) + 1);
+  return [...n.entries()]
+    .map(([id, count]) => {
+      const r = books.rules.find((x) => x.id === id);
+      const c = r ? ruleChoice(r, books) : null;
+      if (!r || !c) return null;
+      const band = sayBand(r);
+      return { id, label: `${r.key.toUpperCase()} → ${choiceLabel(c, names)}${band ? ` (${band})` : ""}`, n: count };
+    })
+    .filter((x): x is { id: string; label: string; n: number } => !!x)
+    .sort((a, b) => b.n - a.n || a.label.localeCompare(b.label));
+}
 
 export function namesOf(books: Pick<BankBooks, "accounts" | "crew" | "invoices">): BankNames {
   return {
@@ -1575,6 +1669,7 @@ export function bankViewOf(dl: BankDownload, plan: BankPlan, books: BankBooks, o
     swapped: !!dl.swapped,
     canSwap: passes.length === 0 && dl.lines.length > 0,
     askAccount: passes.length === 0 && dl.lines.length > 0 && !dl.last4,
+    rules: rulesUsed(plan, books, names),
     problem: null,
   };
 }

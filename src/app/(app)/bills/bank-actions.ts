@@ -52,6 +52,22 @@ export async function swapBankDownload(id: string): Promise<Result> {
 }
 
 /**
+ * FORGET A RULE: an answer the company remembered for a merchant (from a tap on an earlier download)
+ * comes off, and that merchant's lines are asked again from the next look. The lines it already
+ * placed stay as they were counted; Undo on their download is how those come off.
+ */
+export async function forgetBankRule(ruleId: string): Promise<Result> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  if (!ctx.orgId) return { ok: false, error: "Your sign-in isn't attached to a company yet." };
+  const { data, error } = await ctx.supabase.from("bank_rules").delete().eq("id", String(ruleId ?? "")).eq("org_id", ctx.orgId).select("merchant_key");
+  if (error) return { ok: false, error: `Nothing was forgotten. ${dbError(error)}` };
+  if (!data?.length) return { ok: false, error: "That answer was already forgotten." };
+  revalidateBank();
+  return { ok: true, message: `Forgotten: ${String(data[0].merchant_key ?? "").toUpperCase()} is asked again from now on.` };
+}
+
+/**
  * WHICH ACCOUNT IS IT: a download with no account column (and none in its name) is told its last 4,
  * so the same fee on two accounts' downloads is never taken for one line. Four digits and no more.
  */

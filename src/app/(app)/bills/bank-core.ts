@@ -17,7 +17,11 @@ import {
   choiceId,
   groupTitle,
   inPayWindow,
+  namesOf,
   PAY_WINDOW,
+  ruleChoice,
+  sayBand,
+  choiceLabel,
   dayDiff,
   planBankDownload,
   readBankTable,
@@ -176,7 +180,7 @@ export async function loadBankBooks(supabase: Db, orgId: string, dl: BankDownloa
     supabase.from("supplier_aliases").select("supplier_account_id, alias").eq("org_id", orgId).limit(5000),
     supabase.from("invoices").select("id, invoice_number, total, amount_paid, status").eq("org_id", orgId).in("status", ["sent", "partial", "overdue"]).order("created_at", { ascending: false }).limit(500),
     supabase.from("profiles").select("id, full_name, role, active").eq("org_id", orgId).eq("active", true).neq("role", "owner").limit(200),
-    supabase.from("bank_rules").select("id, direction, merchant_key, choice, bucket, cost_kind, supplier_account_id, profile_id").eq("org_id", orgId).limit(5000),
+    supabase.from("bank_rules").select("id, direction, merchant_key, choice, bucket, cost_kind, supplier_account_id, profile_id, min_cents, max_cents").eq("org_id", orgId).limit(5000),
     supabase.from("pay_payments").select("profile_id, amount").eq("org_id", orgId).is("voided_at", null).order("paid_on", { ascending: false }).limit(2000),
     // Each account's own papers, newest first, for the branch a counter payment is printed with.
     supabase
@@ -280,6 +284,8 @@ export async function loadBankBooks(supabase: Db, orgId: string, dl: BankDownloa
       costKind: r.cost_kind ?? null,
       supplierAccountId: r.supplier_account_id ?? null,
       profileId: r.profile_id ?? null,
+      minCents: r.min_cents === null || r.min_cents === undefined ? null : Number(r.min_cents),
+      maxCents: r.max_cents === null || r.max_cents === undefined ? null : Number(r.max_cents),
     })),
     crewPaid: ((paidR.data ?? []) as any[]).map((p) => ({ profileId: String(p.profile_id), cents: centsOf(p.amount) })),
     stored: (storedR.rows as any[]).map((l) => ({
@@ -650,9 +656,10 @@ export async function applyBankCore(
     if (!ok) problems.push("An invoice's balance didn't recompute; open it once to refresh it.");
   }
 
-  // 4. THE COMPANY'S OWN RULES, from what a person tapped (one per merchant; an answer already
-  //    remembered for that merchant stays as it was).
-  const learned = new Map<string, { direction: "in" | "out"; key: string; c: BankChoice }>();
+  // 4. THE COMPANY'S OWN RULES, from what a person tapped: one per merchant AND answer, for the
+  //    amounts it was answered for (its band). The same answer again widens its band; another
+  //    answer for the same merchant is a rule of its own (a fill-up is Fuel, a coffee is Other).
+  const learned = new Map<string, { direction: "in" | "out"; key: string; c: BankChoice; min: number; max: number; title: string }>();
   const groupsById = new Map(plan.groups.map((g) => [g.id, g]));
   for (const w of work) {
     // Never an invoice (one deposit, one invoice) and never Other Income (0363: money in is a
@@ -662,24 +669,79 @@ export async function applyBankCore(
     // Money in teaches only Not Income (0363); a refund's bucket is answered each time.
     if (g?.direction === "in" && w.choice.choice !== "not_income") continue;
     if (!g?.learnable || g.merchantKey.length < 2) continue;
-    learned.set(`${g.direction}:${g.merchantKey}`, { direction: g.direction, key: g.merchantKey, c: w.choice });
+    const k = `${g.direction}:${g.merchantKey}:${choiceId(w.choice)}`;
+    const amt = Math.abs(w.line.cents);
+    const had = learned.get(k);
+    learned.set(k, {
+      direction: g.direction,
+      key: g.merchantKey,
+      c: w.choice,
+      min: Math.min(had?.min ?? amt, amt),
+      max: Math.max(had?.max ?? amt, amt),
+      title: had?.title ?? groupTitle(g),
+    });
   }
+  const remembered: string[] = [];
   if (learned.size) {
-    const rows = [...learned.values()].map(({ direction, key, c }) => ({
-      org_id: who.orgId,
-      direction,
-      merchant_key: key,
-      choice: c.choice,
-      bucket: c.choice === "cost" ? c.bucket : null,
-      cost_kind: c.choice === "cost" ? c.costKind : null,
-      supplier_account_id: c.choice === "supplier" ? c.supplierAccountId : null,
-      profile_id: c.choice === "crew" ? c.profileId : null,
-      learned_import_id: itemId,
-      created_by: who.userId,
-    }));
-    const { error } = await supabase.from("bank_rules").upsert(rows, { onConflict: "org_id,direction,merchant_key", ignoreDuplicates: true }).select("id");
-    if (error) {
-      reportError("bills:bank.apply.rules", error, { itemId });
+    const answerOf = (r: (typeof books.rules)[number]) => {
+      const c = ruleChoice(r, books);
+      return c ? choiceId(c) : null;
+    };
+    const fresh: {
+      org_id: string;
+      direction: "in" | "out";
+      merchant_key: string;
+      choice: string;
+      bucket: string | null;
+      cost_kind: string | null;
+      supplier_account_id: string | null;
+      profile_id: string | null;
+      min_cents: number;
+      max_cents: number;
+      learned_import_id: string;
+      created_by: string;
+    }[] = [];
+    let failed = false;
+    for (const l of learned.values()) {
+      const same = books.rules.find((r) => r.direction === l.direction && r.key === l.key && answerOf(r) === choiceId(l.c));
+      const band = sayBand({ minCents: Math.min(same?.minCents ?? l.min, l.min), maxCents: Math.max(same?.maxCents ?? l.max, l.max) });
+      remembered.push(`${l.title} → ${choiceLabel(l.c, namesOf(books))}${band ? ` (${band})` : ""}`);
+      if (same) {
+        // The same answer again: its band grows to hold these amounts too.
+        if (same.minCents == null || same.maxCents == null || (l.min >= same.minCents && l.max <= same.maxCents)) continue;
+        const { error } = await supabase
+          .from("bank_rules")
+          .update({ min_cents: Math.min(same.minCents, l.min), max_cents: Math.max(same.maxCents, l.max), updated_at: new Date().toISOString() })
+          .eq("id", same.id)
+          .eq("org_id", who.orgId)
+          .select("id");
+        if (error) failed = true;
+        continue;
+      }
+      fresh.push({
+        org_id: who.orgId,
+        direction: l.direction,
+        merchant_key: l.key,
+        choice: l.c.choice,
+        bucket: l.c.choice === "cost" ? l.c.bucket : null,
+        cost_kind: l.c.choice === "cost" ? l.c.costKind : null,
+        supplier_account_id: l.c.choice === "supplier" ? l.c.supplierAccountId : null,
+        profile_id: l.c.choice === "crew" ? l.c.profileId : null,
+        min_cents: l.min,
+        max_cents: l.max,
+        learned_import_id: itemId,
+        created_by: who.userId,
+      });
+    }
+    if (fresh.length) {
+      const { error } = await supabase.from("bank_rules").upsert(fresh, { onConflict: "org_id,direction,merchant_key,answer", ignoreDuplicates: true }).select("id");
+      if (error) {
+        failed = true;
+        reportError("bills:bank.apply.rules", error, { itemId });
+      }
+    }
+    if (failed) {
+      remembered.length = 0;
       problems.push("Your answers weren't remembered for next time, so the next download may ask again.");
     }
   }
@@ -735,7 +797,8 @@ export async function applyBankCore(
     (pass.picked ? `, ${pass.picked} you answered` : "") +
     "." +
     (crewMarked ? ` ${crewMarked === 1 ? "1 crew payment was" : `${crewMarked} crew payments were`} already recorded, so ${crewMarked === 1 ? "it was" : "they were"} marked, never written twice.` : "") +
-    (leftLines ? ` ${leftLines} left for later ${leftLines === 1 ? "is" : "are"} not counted yet and wait${leftLines === 1 ? "s" : ""} on the card.` : "");
+    (leftLines ? ` ${leftLines} left for later ${leftLines === 1 ? "is" : "are"} not counted yet and wait${leftLines === 1 ? "s" : ""} on the card.` : "") +
+    (remembered.length ? ` Remembered for next time: ${remembered.join("; ")}. Forget one under See How It Sorted.` : "");
   return problems.length ? { ok: true, message: `${said} But: ${problems.join(" ")}` } : { ok: true, message: said };
 }
 

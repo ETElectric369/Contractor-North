@@ -14,7 +14,8 @@ import { assertTestDatabase, notOnThisDatabase } from "@/lib/db-guard";
  *     reads nothing and changes nothing, and anon can't even ask;
  *   · a line is counted once per company (UNIQUE org_id + line_key) and a description can't hold a
  *     run of 6+ digits (the privacy boundary lives in the database, not only the app);
- *   · the company's rules: one per merchant, a cost names its bucket, income only goes in;
+ *   · the company's rules: one per merchant and answer, each for the amounts it was given for, a
+ *     cost names its bucket, and money in only ever says Not Income (0365);
  *   · a money row's bank_line_id comes off by itself when its line is deleted (Undo);
  *   · bills.cost_kind takes fuel or truck only, and only rides a Gas & Truck business cost.
  *
@@ -173,11 +174,16 @@ d("0362 + 0363: bank lines and rules are the company's own, and a line counts on
     expect(await refused("insert into bank_lines (org_id, import_id, line_key, posted_on, amount, choice, sorted_by) values ($1, $2, $3, '2001-01-02', -1, 'cost', 'person')", [orgA, importA, KEY(5)])).toBe("23514");
     expect(await refused("insert into bank_lines (org_id, import_id, line_key, posted_on, amount, choice, bucket, cost_kind, sorted_by) values ($1, $2, $3, '2001-01-02', -1, 'cost', 'Fees', 'fuel', 'person')", [orgA, importA, KEY(6)])).toBe("23514");
     expect(await refused("insert into bank_lines (org_id, import_id, line_key, posted_on, amount, choice, sorted_by) values ($1, $2, 'not-a-key', '2001-01-02', -1, 'personal', 'person')", [orgA, importA])).toBe("23514");
-    // A rule: money in may only say Not Income (Other Income is never a rule's); one rule per merchant.
+    // A rule: money in may only say Not Income (Other Income is never a rule's); one rule per merchant
+    // AND answer (a second answer for the same merchant is its own rule), each with a sane band.
     expect(await refused("insert into bank_rules (org_id, direction, merchant_key, choice) values ($1, 'out', 'venmo', 'other_income')", [orgA])).toBe("23514");
     expect(await refused("insert into bank_rules (org_id, direction, merchant_key, choice) values ($1, 'in', 'regular', 'other_income')", [orgA])).toBe("23514");
     expect(await refused("insert into bank_rules (org_id, direction, merchant_key, choice) values ($1, 'in', 'savings', 'not_income')", [orgA])).toBeNull();
-    expect(await refused("insert into bank_rules (org_id, direction, merchant_key, choice) values ($1, 'out', 'shell', 'personal')", [orgA])).toBe("23505");
+    expect(await refused("insert into bank_rules (org_id, direction, merchant_key, choice, bucket, cost_kind) values ($1, 'out', 'shell', 'cost', 'Gas & Truck', 'fuel')", [orgA])).toBe("23505");
+    expect(await refused("insert into bank_rules (org_id, direction, merchant_key, choice, min_cents, max_cents) values ($1, 'out', 'shell', 'personal', 100, 2000)", [orgA])).toBeNull();
+    expect((await one("select answer from bank_rules where org_id = $1 and merchant_key = 'shell' and choice = 'cost'", [orgA])).answer).toBe("cost:Gas & Truck:fuel");
+    expect(await refused("insert into bank_rules (org_id, direction, merchant_key, choice, min_cents, max_cents) values ($1, 'out', 'dental', 'personal', 500, 100)", [orgA])).toBe("23514");
+    expect(await refused("insert into bank_rules (org_id, direction, merchant_key, choice, min_cents) values ($1, 'out', 'dental', 'personal', 500)", [orgA])).toBe("23514");
   });
 
   it("deleting a line takes its mark off the money row (Undo)", async () => {

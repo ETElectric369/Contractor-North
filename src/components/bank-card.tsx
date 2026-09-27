@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input, Select } from "@/components/ui/input";
 import { sayDollars } from "@/lib/supplier-open-list";
 import type { BankRowView, BankView, FlowSegment } from "@/lib/bank-download";
-import { applyBankDownload, setBankAccount, swapBankDownload, undoBankDownload } from "@/app/(app)/bills/bank-actions";
+import { applyBankDownload, forgetBankRule, setBankAccount, swapBankDownload, undoBankDownload } from "@/app/(app)/bills/bank-actions";
 import { keepPaperwork } from "@/app/(app)/organize/paperwork-actions";
 
 /**
@@ -289,6 +289,23 @@ export function BankCard({ itemId, view, run, busy, working }: { itemId: string;
             <p className="text-xs text-slate-500">
               Matched means it is already in North (a payment, a bill, a supplier or crew payment): Apply only marks it, never adds it again. Owner&apos;s Draw and Personal are kept as the bank line only, never a cost.
             </p>
+            {view.rules.length > 0 && (
+              <div>
+                <p className="font-medium text-slate-800">Your Answers Used Here</p>
+                <p className="text-xs text-slate-500">Each was remembered from a tap on an earlier download, for amounts like those. Forget one and its lines are asked again.</p>
+                <ul className="mt-1 space-y-1">
+                  {view.rules.map((r) => (
+                    <li key={r.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 text-slate-700">
+                      <span className="min-w-0 break-words">{r.label}</span>
+                      <span className="text-xs text-slate-500">{r.n === 1 ? "1 line" : `${r.n} lines`}</span>
+                      <Button variant="outline" className="ml-auto" onClick={() => run(`forget:${r.id}`, () => forgetBankRule(r.id))} disabled={working}>
+                        {busy === `forget:${r.id}` ? <Loader2 className="animate-spin" /> : null} Forget
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
             {view.canSwap && (
               <div className="space-y-1.5">
                 <p className="text-xs text-slate-500">
