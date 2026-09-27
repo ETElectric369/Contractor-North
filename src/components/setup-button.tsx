@@ -42,7 +42,9 @@ export function SetupButton({
   isStaff: boolean;
   /** profiles.onboarded_at (0180) — has THIS PERSON been walked through, not "are the fields full". */
   onboarded: boolean;
-  /** The Nort switch (0352). Off, the button's words don't promise him: "a quick walk-through". */
+  /** The Nort switch (0352). Off, the button's words don't promise him ("a quick walk-through"), and
+   *  it opens the setup questions instead of the tour, which is Nort talking and pointing at his own
+   *  button (gone from the top bar while he's off). */
   nortOn?: boolean;
 }) {
   const [mode, setMode] = useState<null | "tour" | "questions" | "finish">(null);
@@ -83,7 +85,7 @@ export function SetupButton({
           // opens a menu of the LESSONS — the teaching that used to be steps 6–22 of the tour,
           // replayable one topic at a time instead of only as a 24-step march.
           if (state === "finish") setMode("finish");
-          else if (state === "start") setMode("tour");
+          else if (state === "start") setMode(nortOn ? "tour" : "questions");
           else setMenuOpen((v) => !v);
         }}
         title={
@@ -149,7 +151,7 @@ export function SetupButton({
               onClick={() => {
                 unlockAudio();
                 setMenuOpen(false);
-                setMode("tour");
+                setMode(nortOn ? "tour" : "questions");
               }}
               className="block w-full rounded-lg px-2 py-2 text-left text-sm text-slate-600 hover:bg-slate-50"
             >
@@ -181,8 +183,10 @@ export function SetupButton({
 
       {/* The topbar carries a translucent background but NO backdrop-filter (see topbar.tsx), so
           the overlay isn't trapped and needs no portal. */}
+      {/* After the tour it opens on the draft (step 2), because the tour already asked the questions.
+          With Nort off there was no tour, so it opens on the questions (step 1). */}
       <Modal open={mode === "questions"} onClose={() => setMode(null)} title="Your questions, and your why lines" size="lg">
-        <SetupInterview initial={initial} startAt={2} onSaved={() => setMode(null)} />
+        <SetupInterview initial={initial} startAt={nortOn ? 2 : 1} onSaved={() => setMode(null)} />
       </Modal>
 
       {/* THE FINISH DOOR — the teal state's target. Opens on the SETUP QUESTIONS (step 1), not the
