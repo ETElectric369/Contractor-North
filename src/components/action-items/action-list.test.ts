@@ -20,7 +20,7 @@ import { KIND_STREAM } from "@/lib/action-items/types";
 const row = { id: "i1", name: "Dana Reyes", status: "new", next_follow_up_at: null, phone: "(530) 555-0142" };
 const render = (leadsOn: boolean) => {
   const item = { ...inquiryActionItem(row, "2026-09-26", leadsOn), stream: KIND_STREAM.inquiry };
-  return renderToStaticMarkup(createElement(ActionList, { items: [item], todayStr: "2026-09-26" }));
+  return renderToStaticMarkup(createElement(ActionList, { items: [item], todayStr: "2026-09-26", leadsOn }));
 };
 
 describe("ActionList — a request with Leads off", () => {
@@ -38,5 +38,16 @@ describe("ActionList — a request with Leads off", () => {
     expect(a).toContain('href="tel:(530) 555-0142"');
     expect(a).toContain("Call Back");
     expect(a).toMatch(/\bh-11\b/);
+  });
+
+  it("Leads off: its section reads Requests and its chip Request; Leads on: Leads and Lead, as always", () => {
+    const off = render(false).replace(/<[^>]+>/g, "\n");
+    expect(off).toMatch(/\nRequests\n/);
+    expect(off).toMatch(/\nRequest\n/);
+    expect(off).not.toMatch(/\nLeads?\n/);
+    const on = render(true).replace(/<[^>]+>/g, "\n");
+    expect(on).toMatch(/\nLeads\n/);
+    expect(on).toMatch(/\nLead\n/);
+    expect(on).not.toMatch(/\nRequests?\n/);
   });
 });
