@@ -80,11 +80,20 @@ export function laterRow(choice: typeof LATER_CHOICE, todayStr: string): { label
 /**
  * NOTHING SILENT: a Reminder whose new due day takes it out of the six says where it went. A pin
  * stays in today's six whatever its date, and a date of today or earlier still ranks, so neither
- * needs a sentence.
+ * needs a sentence. Nor does a flagged, non-office Reminder whose date is cleared (Someday, if the
+ * later row is flipped back): lib/six-rank's rank 4 (flagged undated) takes it straight back into
+ * the six, so "it waits under Someday" would be untrue.
  */
-export function movedWords(t: { pinned: boolean }, due: string | null, todayStr: string): string | null {
+export function movedWords(
+  t: { pinned: boolean; priority: number | null; category: string | null },
+  due: string | null,
+  todayStr: string,
+): string | null {
   if (t.pinned || (due !== null && due <= todayStr)) return null;
-  if (due === null) return "No due date now. It waits on your Reminders list under Someday.";
+  if (due === null) {
+    if ((Number(t.priority) || 0) >= 1 && t.category !== "office") return null;
+    return "No due date now. It waits on your Reminders list under Someday.";
+  }
   const when = due === addDaysStr(todayStr, 1) ? "tomorrow" : formatDate(due);
   return `Due ${when}. It waits on your Reminders list till then.`;
 }

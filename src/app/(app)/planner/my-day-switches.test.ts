@@ -27,6 +27,7 @@ import { YourList, AddReminderLine, LATER_CHOICE, addDaysStr, laterRow, movedWor
 import { NewReminderBox } from "../tasks/tasks-view";
 import { NowCard } from "./now-card";
 import { LUNCH_LABEL } from "@/lib/lunch-rule";
+import { rankSix } from "@/lib/six-rank";
 
 const JOBS = [{ id: "j1", label: "J-055 Smith Panel", number: "J-055" }];
 const line = (jobs = JOBS) => renderToStaticMarkup(createElement(AddReminderLine, { jobs, todayStr: "2026-09-26", pinsFull: false, bumps: null }));
@@ -131,11 +132,33 @@ describe("nothing goes quiet without a day: In A Week, not Someday (Erik's open 
 
   it("a Reminder that leaves the six says where it went; a pin, or a day of today or earlier, needs no word", () => {
     const today = "2026-09-26";
-    expect(movedWords({ pinned: false }, "2026-09-27", today)).toBe("Due tomorrow. It waits on your Reminders list till then.");
-    expect(movedWords({ pinned: false }, "2026-10-03", today)).toBe("Due Oct 3, 2026. It waits on your Reminders list till then.");
-    expect(movedWords({ pinned: true }, "2026-10-03", today)).toBeNull();
-    expect(movedWords({ pinned: false }, today, today)).toBeNull();
-    expect(movedWords({ pinned: false }, null, today)).toBe("No due date now. It waits on your Reminders list under Someday.");
+    const plain = { pinned: false, priority: 0, category: "general" };
+    expect(movedWords(plain, "2026-09-27", today)).toBe("Due tomorrow. It waits on your Reminders list till then.");
+    expect(movedWords(plain, "2026-10-03", today)).toBe("Due Oct 3, 2026. It waits on your Reminders list till then.");
+    expect(movedWords({ ...plain, pinned: true }, "2026-10-03", today)).toBeNull();
+    expect(movedWords(plain, today, today)).toBeNull();
+    expect(movedWords(plain, null, today)).toBe("No due date now. It waits on your Reminders list under Someday.");
+    // A flagged Reminder with a future day never ranks, so it does leave the six and says so.
+    expect(movedWords({ ...plain, priority: 1 }, "2026-10-03", today)).toBe("Due Oct 3, 2026. It waits on your Reminders list till then.");
+  });
+
+  it("if Someday is flipped back on, a flagged non-office Reminder whose date is cleared stays in the six (rank 4), so no toast says it left", () => {
+    const today = "2026-09-26";
+    const due = laterRow("someday", today).due;
+    expect(due).toBeNull();
+    const flagged = { pinned: false, priority: 1, category: "general" };
+    expect(movedWords(flagged, due, today)).toBeNull();
+    expect(movedWords({ ...flagged, priority: 2 }, due, today)).toBeNull();
+    // The six agrees: cleared of its date, a flagged Reminder still ranks; an office one does not.
+    const row = { id: "r1", status: "open", due_date: null, focus_date: null, priority: 1, category: "general", job_id: null, parent_id: null };
+    expect(rankSix([row], { todayStr: today }).map((r) => r.id)).toEqual(["r1"]);
+    expect(rankSix([{ ...row, category: "office" }], { todayStr: today })).toEqual([]);
+    expect(rankSix([{ ...row, priority: 0 }], { todayStr: today })).toEqual([]);
+    // Office work and unflagged Reminders do leave the six, so they say where they went.
+    const someday = "No due date now. It waits on your Reminders list under Someday.";
+    expect(movedWords({ ...flagged, category: "office" }, due, today)).toBe(someday);
+    expect(movedWords({ ...flagged, priority: 0 }, due, today)).toBe(someday);
+    expect(movedWords({ ...flagged, priority: null }, due, today)).toBe(someday);
   });
 });
 
