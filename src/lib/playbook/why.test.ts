@@ -85,6 +85,21 @@ describe("what it actually catches", () => {
     expect(whyProblems("Next, the box.")).toContain("no_destination");
   });
 
+  it("...and a spoken operator inside another word isn't either", () => {
+    // Unanchored, `per\s`, `times` and `total` matched inside these, and they passed as arithmetic.
+    expect(whyProblems("Super important to ask.")).toEqual(["no_destination"]);
+    expect(whyProblems("Sometimes it matters.")).toEqual(["no_destination"]);
+    expect(whyProblems("Totally need to know.")).toEqual(["no_destination"]);
+  });
+
+  it("...while the spoken operators as words still are", () => {
+    expect(whyProblems("Length times width.")).toEqual([]);
+    expect(whyProblems("Rate per linear foot.")).toEqual([]);
+    expect(whyProblems("Squared, then totaled.")).toEqual([]);
+    expect(whyProblems("Each one adds up.")).toEqual([]);
+    expect(whyProblems("Area divided by coverage.")).toEqual([]);
+  });
+
   it("...but x as an operator still is, and so are the real symbols", () => {
     expect(whyProblems("Length x width is the square footage.")).toEqual([]);
     expect(whyProblems("20x16 on the tape, then the rate.")).toEqual([]);
