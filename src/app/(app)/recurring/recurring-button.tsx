@@ -35,12 +35,16 @@ export function RecurringButton({
   customers,
   template,
   salesTax = true,
+  invoiceKind = true,
 }: {
   customers: CustomerOpt[];
   template?: RecurringValue;
   /** SALES TAX OFF (the switch board, rule g): a repeat invoice with no tax draws no tax field (the
    *  save writes 0, as a blank field does). One that already carries tax keeps its field. */
   salesTax?: boolean;
+  /** RECURRING BILLING OFF (0352): no "Recurring invoice" type to pick, since saveRecurring would
+   *  refuse a new one. A template that already is an invoice keeps its type (its edits still save). */
+  invoiceKind?: boolean;
 }) {
   const router = useRouter();
   const editing = !!template;
@@ -123,7 +127,7 @@ export function RecurringButton({
               <Label htmlFor="r-kind">Type</Label>
               <Select id="r-kind" name="kind" value={kind} onChange={(e) => setKind(e.target.value)}>
                 <option value="job">Recurring job</option>
-                <option value="invoice">Recurring invoice</option>
+                {(invoiceKind || template?.kind === "invoice") && <option value="invoice">Recurring invoice</option>}
                 <option value="expense">Recurring expense</option>
               </Select>
             </div>

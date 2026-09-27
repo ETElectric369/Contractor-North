@@ -36,6 +36,19 @@ export async function saveRecurring(formData: FormData, id?: string): Promise<Re
   const nextDate = String(formData.get("next_date") ?? "");
   if (!/^\d{4}-\d{2}-\d{2}$/.test(nextDate)) return { ok: false, error: "Pick a next date." };
 
+  // RECURRING BILLING OFF (0352, rule h): no new repeat invoice is set up, from a blank form or by
+  // turning a job or expense into one; the engine wouldn't make it. Said plainly. A template that
+  // already is an invoice still saves its edits. Jobs and expenses aren't the switch's.
+  if (kind === "invoice") {
+    const { data: orgRow } = await supabase.from("organizations").select("settings").maybeSingle();
+    if (!featureOn(getOrgSettings((orgRow as { settings?: unknown } | null)?.settings).features, "recurring_billing")) {
+      const { data: was } = id
+        ? await supabase.from("recurring_templates").select("kind").eq("id", id).maybeSingle()
+        : { data: null };
+      if ((was as { kind?: string } | null)?.kind !== "invoice") return { ok: false, error: featureOffSentence("recurring_billing") };
+    }
+  }
+
   const amountRaw = String(formData.get("amount") ?? "").trim();
   const taxRaw = String(formData.get("tax_pct") ?? "").trim();
   const customerId = kind === "job" || kind === "invoice" ? emptyToNull(formData.get("customer_id")) : null;

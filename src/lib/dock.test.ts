@@ -374,9 +374,9 @@ describe("visibleDock — role and switches, one filter", () => {
     expect(rows(tech)).toEqual(rows(legacy(false)).filter((id) => id !== "o-handbook"));
   });
 
-  it("Recurring Billing off: the Recurring row goes; the Tax Report stays whatever Sales Tax says", () => {
+  it("Recurring Billing off: the Recurring row stays (repeat jobs and expenses live there); the Tax Report stays whatever Sales Tax says", () => {
     const d = visibleDock({ isStaff: true, features: off("recurring_billing", "sales_tax") });
-    expect(rows(d)).not.toContain("ma-recur");
+    expect(rows(d)).toContain("ma-recur");
     expect(rows(d)).toContain("ma-tax");
   });
 

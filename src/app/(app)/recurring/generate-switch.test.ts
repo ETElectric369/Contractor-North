@@ -10,11 +10,15 @@ import { renderToStaticMarkup } from "react-dom/server";
  */
 let settings: unknown = {};
 let kind = "invoice";
+const writes: string[] = [];
 const client = {
   from: (table: string) => {
     const b: any = {
       select: () => b,
       eq: () => b,
+      insert: () => (writes.push(`insert ${table}`), b),
+      update: () => (writes.push(`update ${table}`), b),
+      then: (ok: any, err?: any) => Promise.resolve({ data: [{ id: "t1" }], error: null }).then(ok, err),
       maybeSingle: async () =>
         table === "recurring_templates"
           ? { data: { id: "t1", kind, next_date: "2026-09-01", frequency: "monthly" }, error: null }
@@ -36,12 +40,13 @@ vi.mock("@/lib/recurring-engine", () => ({
   generateDueTemplates: (...a: unknown[]) => (generateDueTemplates as any)(...a),
 }));
 
-const { generateOne, generateDue } = await import("./actions");
+const { generateOne, generateDue, saveRecurring } = await import("./actions");
 const { RecurringRowActions } = await import("./recurring-actions-ui");
 
 beforeEach(() => {
   settings = {};
   kind = "invoice";
+  writes.length = 0;
   runInvoiceTemplate.mockClear();
   runTemplate.mockClear();
   generateDueTemplates.mockClear();
@@ -107,5 +112,46 @@ describe("Generate while Recurring Billing is off", () => {
   it("another switch off changes nothing", async () => {
     settings = { features: { sales_tax: false } };
     expect(await generateOne("t1")).toEqual({ ok: true });
+  });
+});
+
+describe("New Recurring while Recurring Billing is off (the switch takes only repeat invoices)", () => {
+  const form = (k: string) => {
+    const f = new FormData();
+    f.set("kind", k);
+    f.set("title", "Monthly");
+    f.set("next_date", "2026-10-01");
+    f.set("frequency", "monthly");
+    f.set("customer_id", "c1");
+    f.set("line_items", JSON.stringify([{ description: "Service", quantity: 1, unit_price: 100 }]));
+    f.set("category", "Other");
+    return f;
+  };
+
+  it("no switches stored: a new repeat invoice saves exactly as today", async () => {
+    expect(await saveRecurring(form("invoice"))).toEqual({ ok: true });
+    expect(writes).toEqual(["insert recurring_templates"]);
+  });
+
+  it("off: a new repeat invoice is refused in words, and nothing is written", async () => {
+    settings = { features: { recurring_billing: false } };
+    const r = await saveRecurring(form("invoice"));
+    expect(r).toEqual({ ok: false, error: "Recurring Billing is off. The owner can turn it on in Settings, Features." });
+    expect(writes).toEqual([]);
+  });
+
+  it("off: a job or expense can't be turned into a repeat invoice either", async () => {
+    settings = { features: { recurring_billing: false } };
+    kind = "job"; // the stored template
+    expect((await saveRecurring(form("invoice"), "t1")).ok).toBe(false);
+    expect(writes).toEqual([]);
+  });
+
+  it("off: an existing repeat invoice still saves its edits; a new job or expense saves as today", async () => {
+    settings = { features: { recurring_billing: false } };
+    expect(await saveRecurring(form("invoice"), "t1")).toEqual({ ok: true });
+    expect(await saveRecurring(form("job"))).toEqual({ ok: true });
+    expect(await saveRecurring(form("expense"))).toEqual({ ok: true });
+    expect(writes).toEqual(["update recurring_templates", "insert recurring_templates", "insert recurring_templates"]);
   });
 });

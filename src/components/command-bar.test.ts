@@ -20,7 +20,14 @@ describe("commandNavItems", () => {
     expect(hrefs(staff)).toEqual(expect.arrayContaining(["/leads", "/quotes", "/quotes/new", "/payroll", "/inventory", "/tools"]));
     expect(find(staff, "/bills")?.aliases).toEqual(expect.arrayContaining(["purchase order", "po", "vendor"]));
     expect(find(staff, "/price-list")?.aliases).toEqual(expect.arrayContaining(["kit", "kits", "pricing"]));
+    expect(find(staff, "/recurring")?.aliases).toEqual(["subscription", "repeat invoice", "auto invoice"]);
     expect(find(staff, "/bills")?.label).toBe("Bills & POs");
+  });
+
+  it("Recurring Billing off: Recurring stays (repeat jobs and expenses), only the invoice words go", () => {
+    const rec = find(commandNavItems(true, off("recurring_billing")), "/recurring");
+    expect(rec).toBeDefined();
+    expect(rec?.aliases ?? []).not.toContain("repeat invoice");
   });
 
   it("a tech is never offered a staff page, switches or not", () => {
@@ -63,9 +70,9 @@ describe("commandNavItems", () => {
     expect(find(commandNavItems(true, off("estimates")), "/price-list")?.aliases).not.toContain("kits");
   });
 
-  it("Shop Stock, Crew & Payroll, Recurring, Licenses, Calculators off: their pages go", () => {
-    const items = commandNavItems(true, off("shop_stock", "crew_payroll", "recurring_billing", "licenses", "calculators"));
-    for (const h of ["/inventory", "/payroll", "/employee-docs", "/handbook", "/recurring", "/compliance", "/insurance", "/safety", "/audits", "/tools"])
+  it("Shop Stock, Crew & Payroll, Licenses, Calculators off: their pages go", () => {
+    const items = commandNavItems(true, off("shop_stock", "crew_payroll", "licenses", "calculators"));
+    for (const h of ["/inventory", "/payroll", "/employee-docs", "/handbook", "/compliance", "/insurance", "/safety", "/audits", "/tools"])
       expect(hrefs(items), h).not.toContain(h);
     // Never a Sales Tax door: the Tax Report carries the mileage deduction.
     expect(hrefs(commandNavItems(true, off("sales_tax")))).toContain("/tax-report");

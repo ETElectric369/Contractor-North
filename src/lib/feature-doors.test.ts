@@ -114,9 +114,11 @@ describe("FEATURE_ROUTES — the pages that carry the Off line when opened by li
     expect(featureForPath("/leadsy")).toBeNull();
   });
 
-  it("never the Tax Report (the mileage deduction is not Sales Tax), Forms, or a job page", () => {
+  it("never the Tax Report (the mileage deduction is not Sales Tax), Forms, Recurring, or a job page", () => {
     expect(featureForPath("/tax-report")).toBeNull();
     expect(featureForPath("/forms/abc")).toBeNull();
+    // Recurring Billing takes only repeat invoices; the page is repeat jobs' and expenses' only door.
+    expect(featureForPath("/recurring")).toBeNull();
     expect(featureForPath("/jobs/abc")).toBeNull();
     expect(featureForPath("/planner")).toBeNull();
   });

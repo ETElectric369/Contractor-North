@@ -59,6 +59,7 @@ export function requestHref(features: FeatureMap | null | undefined): "/leads" |
  * it. Path prefixes only: a page's own tabs (?tab=) are the page's business. Not here on purpose:
  *   /tax-report  the mileage deduction lives there, and it is not Sales Tax (rule g);
  *   /forms       it also holds every company's walk-through sheet and intake form;
+ *   /recurring   Recurring Billing takes only its repeat invoices; repeat jobs and expenses live there;
  *   /jobs/…      the job page switches its own tabs (offStrip).
  */
 export const FEATURE_ROUTES: readonly { path: string; feature: FeatureKey }[] = [
@@ -72,7 +73,6 @@ export const FEATURE_ROUTES: readonly { path: string; feature: FeatureKey }[] = 
   { path: "/payroll", feature: "crew_payroll" },
   { path: "/employee-docs", feature: "crew_payroll" },
   { path: "/handbook", feature: "crew_payroll" },
-  { path: "/recurring", feature: "recurring_billing" },
   { path: "/compliance", feature: "licenses" },
   { path: "/insurance", feature: "licenses" },
   { path: "/audits", feature: "licenses" },

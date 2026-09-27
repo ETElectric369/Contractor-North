@@ -210,7 +210,9 @@ export const DOCK: DockSection[] = [
       // No switch: the Tax Report carries the mileage deduction, which is not Sales Tax.
       { id: "ma-tax", label: "Tax Report", icon: Calculator, href: "/tax-report" },
       { id: "ma-analytics", label: "Analytics", icon: TrendingUp, href: "/analytics" },
-      { id: "ma-recur", label: "Recurring", icon: Repeat, href: "/recurring", feature: "recurring_billing" },
+      // No switch: Recurring Billing takes only repeat INVOICES; repeat jobs and expenses keep
+      // running, and this page is their only door (it draws its own Off line for the invoices).
+      { id: "ma-recur", label: "Recurring", icon: Repeat, href: "/recurring" },
       { id: "ma-petty", label: "Petty Cash", icon: Coins, href: "/petty-cash" },
     ],
   },

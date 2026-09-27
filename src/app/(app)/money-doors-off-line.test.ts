@@ -17,7 +17,6 @@ import { featureForPath } from "@/lib/feature-doors";
 const read = (rel: string) => readFileSync(join(process.cwd(), "src/app/(app)", rel), "utf8");
 
 const PAGES: [string, string, string][] = [
-  ["recurring/page.tsx", "/recurring", "recurring_billing"],
   ["compliance/page.tsx", "/compliance", "licenses"],
   ["insurance/page.tsx", "/insurance", "licenses"],
   ["audits/page.tsx", "/audits", "licenses"],
@@ -105,11 +104,17 @@ describe("doors outside the job page", () => {
     // A link that names a walk-through (the form page's banner) still opens it with Leads off.
     expect(src).toContain("playbookForms.filter((f) => f.isWebsite || f.id === linkedForm)");
   });
-  it("the recurring page draws no Generate or New while the switch is off (a repeat job or expense row keeps Generate One Now); editing and pausing stay", () => {
+  it("the recurring page keeps its doors for repeat jobs and expenses while the switch is off; only the invoice doors go", () => {
     const src = read("recurring/page.tsx");
-    expect(src).toContain("{recurringOn && dueCount > 0 && <GenerateDueButton count={dueCount} />}");
-    expect(src).toContain("{recurringOn && <RecurringButton customers={custOpts} salesTax={salesTax} />}");
+    // Not a switch route: the page draws its own Off line and never gates itself away.
+    expect(featureForPath("/recurring")).toBeNull();
+    expect(src).toContain('<FeatureOffLine feature="recurring_billing" features={sw.features} isOwner={sw.isOwner} />');
+    expect(src).not.toMatch(/if \(!featureOn\([^)]*\)\) (return|notFound|redirect)/);
+    // Generate Due counts only what the engine makes while off (it skips repeat invoices).
+    expect(src).toContain('t.active && t.next_date <= today && (recurringOn || t.kind !== "invoice")');
+    expect(src).toContain("{dueCount > 0 && <GenerateDueButton count={dueCount} />}");
+    expect(src).toContain("<RecurringButton customers={custOpts} salesTax={salesTax} invoiceKind={recurringOn} />");
     expect(src).toContain('<RecurringRowActions id={t.id} active={t.active} kind={t.kind} canGenerate={recurringOn || t.kind !== "invoice"} />');
-    expect(src).toContain("<RecurringButton customers={custOpts} template={value} salesTax={salesTax} />");
+    expect(src).toContain("<RecurringButton customers={custOpts} template={value} salesTax={salesTax} invoiceKind={recurringOn} />");
   });
 });

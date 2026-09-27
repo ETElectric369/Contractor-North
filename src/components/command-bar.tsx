@@ -19,7 +19,6 @@ const NAV_ALIASES: Record<string, string[]> = {
   "/payroll": ["wages", "pay", "salary", "paycheck", "hours pay"],
   "/tax-report": ["taxes", "1099", "irs", "tax"],
   "/analytics": ["reports", "reporting", "kpi", "dashboard", "numbers", "profit"],
-  "/recurring": ["subscription", "repeat invoice", "auto invoice"],
   "/petty-cash": ["cash", "reimbursement"],
   "/price-list": ["pricing", "rates", "catalog", "price book", "materials list", "line items"],
   "/leads": ["prospects", "inquiries", "pipeline"],
@@ -44,6 +43,7 @@ const NAV_ALIASES: Record<string, string[]> = {
 const SWITCH_ALIASES: { href: string; feature: FeatureKey; words: string[] }[] = [
   { href: "/bills", feature: "purchase_orders", words: ["purchase order", "po"] },
   { href: "/price-list", feature: "kits", words: ["kit", "kits"] },
+  { href: "/recurring", feature: "recurring_billing", words: ["subscription", "repeat invoice", "auto invoice"] },
 ];
 function aliasesFor(href: string, features: FeatureMap | null | undefined): string[] | undefined {
   const extra = SWITCH_ALIASES.filter((a) => a.href === href && featureOn(features, a.feature)).flatMap((a) => a.words);
