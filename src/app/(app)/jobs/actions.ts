@@ -8,7 +8,7 @@ import { adminConfigured, createAdminClient } from "@/lib/supabase/admin";
 import { pushCalendarItem, deleteCalendarItem } from "@/lib/calendar-sync";
 import { JOB_STATUSES } from "@/lib/job-status";
 import { DRAW_KINDS, isDrawKind } from "@/lib/invoice-math";
-import { openDraftOnJob, unbilledCardDoor, type CardDoor, type OpenDraft } from "@/lib/actuals-draw";
+import { BRING_IN_NEW_WORK, openDraftOnJob, unbilledCardDoor, type CardDoor, type OpenDraft } from "@/lib/actuals-draw";
 import { emptyToNull } from "@/lib/forms";
 import { notifyJobCrewAdded } from "@/lib/crew-notify";
 import { visibleJobIdOrNull, visiblePoIdOnJobOrNull, visibleTemplateIdOrNull } from "@/lib/job-visibility";
@@ -22,7 +22,7 @@ import { estimateIsTheContract, jobBillsItsActuals, shouldImportActuals } from "
 import { revalidateMoney } from "@/lib/revalidate-money";
 import { claimedSourcesOnJob, fixedBillingsNotYetNetted, unbilledWorkForJob } from "@/lib/unbilled-work";
 import { changeOrderLines, type ChangeOrderRow } from "@/lib/change-order-billing";
-import { depositCoversWords, finalFinishWords, finishedWithWorkOffBill, finishWouldLeaveOffBill } from "@/lib/finish-job-words";
+import { depositCoversWords, finalFinishWords, finishedWithWorkOffBill, finishWouldLeaveOffBill, LAST_BILL_DOOR } from "@/lib/finish-job-words";
 import { guardedFieldsMoved, planBillEdit, type BillClaimHolder } from "./bill-claims";
 import { bucketOf } from "@/lib/business-cost-buckets";
 import { restampLotsForBill } from "@/lib/stock-ledger";
@@ -36,6 +36,7 @@ import {
   importChangeOrdersIntoInvoice,
   createProgressReportInvoice,
   emailInvoice,
+  setInvoiceTaxRate,
   type ProgressReportResult,
 } from "../billing/actions";
 
@@ -64,6 +65,11 @@ export type CreateInvoiceForJobResult = {
   /** The refusal was "nothing new to bill" — not a failure. finishJob treats it as success
    *  (the ordinary invoice → paid → finish rhythm); every other ok:false is a real failure. */
   nothingNew?: true;
+  /** THE REFUSAL IS A DOOR (W1-24): this fixed-price job bills its estimate in set parts, so its
+   *  next bill is the job's New Invoice with Part Of The Estimate chosen. The job's own button opens
+   *  its sheet on that choice; /billing's New Invoice offers "Open The Job's New Invoice"
+   *  (/jobs/<id>?tab=invoices&invoice=part, which the job's button claims). */
+  door?: "part-of-estimate";
 };
 
 /**
@@ -224,16 +230,57 @@ async function unclaimedChangeOrderLines(supabase: SupabaseClient, jobId: string
 /** The draw door's answer in this door's shape: its sentence is THE note the caller shows (tone
  *  from `partial`), and a refusal that names a document becomes `billedOn`, so the card's toast
  *  and Nort offer "Open INV-0xx" instead of a dead end. */
-function fromDrawDoor(r: ProgressReportResult): CreateInvoiceForJobResult {
-  if (r.ok && r.id) return { ok: true, id: r.id, ...(r.note ? { importWarning: r.note } : {}), ...(r.partial ? { partial: true as const } : {}) };
+function fromDrawDoor(r: ProgressReportResult, taxSaid = ""): CreateInvoiceForJobResult {
+  if (r.ok && r.id) {
+    const note = `${r.note ?? ""}${taxSaid}`.trim();
+    return { ok: true, id: r.id, ...(note ? { importWarning: note } : {}), ...(r.partial ? { partial: true as const } : {}) };
+  }
   return { ok: false, error: r.error ?? "Could not bill the new work.", ...(r.openDraft ? { billedOn: r.openDraft } : {}) };
 }
 
+/**
+ * A SALES-TAX RATE ASKED FOR ON A NEW INVOICE (W1-28), as a fraction (0.0825). Anything that is not
+ * a real rate is no rate at all, never a guess: the invoice then starts untaxed, as before.
+ */
+function taxRateAsked(rate: number | null | undefined): number | undefined {
+  return typeof rate === "number" && Number.isFinite(rate) && rate >= 0 && rate < 1 ? rate : undefined;
+}
+
+/** "8.25%" — the rate as the office reads it. */
+const pctWords = (rate: number) => `${Math.round(rate * 1_000_000) / 10_000}%`;
+
+/**
+ * THE RATE ON AN ESTIMATE COPY (W1-28). The estimate's own sales tax is part of the price the
+ * customer agreed to, so it is kept; a rate asked for lands only on an estimate that carries none.
+ * Either way the sentence says which rate the invoice has when it isn't the one asked for, and a
+ * write that doesn't land is said, never swallowed.
+ */
+async function seedEstimateCopyTax(supabase: SupabaseClient, invoiceId: string, rate: number): Promise<string> {
+  const { data, error } = await supabase.from("invoices").select("tax_rate").eq("id", invoiceId).maybeSingle();
+  if (error) {
+    reportError("createInvoiceForJob.estimateTaxRead", error, { invoiceId });
+    return ` Couldn't check the estimate's sales tax just now, so check the tax on the invoice before sending.`;
+  }
+  const own = Number((data as { tax_rate?: number | string | null } | null)?.tax_rate) || 0;
+  if (own > 0.0000005) {
+    return Math.abs(own - rate) < 0.0000005 ? "" : ` It keeps the estimate's own sales tax, ${pctWords(own)}.`;
+  }
+  if (rate <= 0.0000005) return "";
+  const set = await setInvoiceTaxRate(invoiceId, rate * 100);
+  return set.ok ? "" : ` Sales tax couldn't be set to ${pctWords(rate)} (${set.error ?? "try again"}) - set it on the invoice before sending.`;
+}
+
 /** Create an invoice for a job — from its quote if it has one, else blank — carrying only the
- *  work not already on another invoice. */
+ *  work not already on another invoice.
+ *
+ *  `taxRate` (W1-28, a fraction): the sales tax a NEW invoice starts at — the blank one, or an
+ *  estimate copy whose estimate carries no tax of its own (an estimate's own tax is part of its
+ *  agreed price and is kept). Landing on an open draft ignores it, and the note says the draft keeps
+ *  its own tax. Money never changes as a side effect: every caller that passes it shows the rate
+ *  first (/billing's Tax Rate %, the job sheet's), and a caller that shows none passes none. */
 export async function createInvoiceForJob(
   jobId: string,
-  opts: { importLabor?: boolean; importCosts?: boolean } = {},
+  opts: { importLabor?: boolean; importCosts?: boolean; taxRate?: number | null } = {},
 ): Promise<CreateInvoiceForJobResult> {
   // Defaults are decided AFTER we know whether this invoice came from a quote — see
   // fromQuote below. A quoted job is billed by its CONTRACT; auto-importing the actuals
@@ -275,7 +322,12 @@ export async function createInvoiceForJob(
     reportError("createInvoiceForJob.openDraft", e, { jobId });
     return { ok: false, error: "Couldn't read this job's invoices just now, so nothing was billed. Try again in a moment." };
   }
-  if (openDraft && isDrawKind(openDraft.kind)) return fromDrawDoor(await createProgressReportInvoice(jobId, "progress"));
+  const taxRate = taxRateAsked(opts.taxRate);
+  /** Said wherever this lands on a bill that already exists: the rate asked for is not applied. */
+  const keepsOwnTax = (label: string) => (taxRate !== undefined ? ` ${label} keeps its own sales tax.` : "");
+  if (openDraft && isDrawKind(openDraft.kind)) {
+    return fromDrawDoor(await createProgressReportInvoice(jobId, "progress"), keepsOwnTax(openDraft.number ?? "The open draft"));
+  }
 
   // ONLY A DRAFT CAPTURES THE CLICK (85 Whitney, 2026-09-11). cn-v479 handed back the newest
   // non-void standard invoice whatever its status, so once INV-061 was PAID every "New Invoice"
@@ -349,7 +401,8 @@ export async function createInvoiceForJob(
   // no contract (every T&M job - its estimate is a guide - so Tao's next hours go on the next report,
   // netting the deposit), and on a fixed-price quoted job whose draws already bill its actuals. A
   // fixed-price quoted job whose draws are all slices of the contract is not billed from actuals
-  // behind anyone's back: it is told the door (Progress Payment), with the latest draw to open.
+  // behind anyone's back: it is told the door (the job's New Invoice, Part Of The Estimate chosen -
+  // `door` carries it), with the latest draw to open.
   // A STANDARD draft beside a live draw is not a door either (every importer refuses content on it -
   // H4), so it doesn't stop this: the draw door is the one that works (openDraftOnJob agrees, and
   // the card offers "Create Invoice", not "Add to" that draft). The draw door still refuses beside
@@ -376,11 +429,12 @@ export async function createInvoiceForJob(
         if (linesErr) return { ok: false, error: dbError(linesErr) };
         billsActuals = (actualLines ?? []).length > 0;
       }
-      if (billsActuals) return fromDrawDoor(await createProgressReportInvoice(jobId, "progress"));
+      if (billsActuals) return fromDrawDoor(await createProgressReportInvoice(jobId, "progress"), keepsOwnTax("The progress payment"));
       const latest = draws[0];
       return {
         ok: false,
-        error: `This job bills its estimate with progress payments${latest.invoice_number ? ` (latest: ${latest.invoice_number})` : ""}, so a new invoice isn't the door. Bill the next part with Progress Payment on the job's Invoices tab.`,
+        error: `This job bills its estimate in parts${latest.invoice_number ? ` (latest: ${latest.invoice_number})` : ""}, so its next bill is the next part. Bill it with the job's New Invoice → Part Of The Estimate.`,
+        door: "part-of-estimate",
         ...(latest.invoice_number ? { billedOn: { id: latest.id, number: latest.invoice_number } } : {}),
       };
     }
@@ -401,7 +455,7 @@ export async function createInvoiceForJob(
   // invoice.
   const wantChangeOrders = !!prior && !!quote;
   // The customer's pricing-level markup when they have one, else the org default — the same seed
-  // the manual "Materials from Costs" box uses, so a level customer can't be billed at the org
+  // the invoice's Bring In New Work (the % box beside it) uses, so a level customer can't be billed at the org
   // rate here and their negotiated rate there.
   // A lost read is refused, never priced at a default (audit v1018 money-1).
   let markup: number;
@@ -434,12 +488,12 @@ export async function createInvoiceForJob(
         ok: true,
         id: draft.id,
         partial: true,
-        importWarning: `Opened ${label}. It carries the estimate's lines, so the hours and receipts weren't added to it - that would bill the estimate and the work on one bill. Send it as it is (or delete it), then bill the work.`,
+        importWarning: `Opened ${label}. It carries the estimate's lines, so the hours and receipts weren't added to it - that would bill the estimate and the work on one bill. Send it as it is (or delete it), then bill the work.${keepsOwnTax(label)}`,
       };
     }
     const pulled = await pullNewWorkInto(supabase, jobId, draft.id, { labor: wantLabor, costs: wantCosts, changeOrders: wantChangeOrders }, markup);
     const extras = importExtras(pulled.results);
-    const said = extrasSentence(extras);
+    const said = extrasSentence(extras) + keepsOwnTax(label);
     const heads = extras.warnings.length ? { partial: true as const } : {};
     if (pulled.missed.length) {
       return { ok: true, id: draft.id, partial: true, importWarning: `Opened ${label}, but ${joinAnd(pulled.missed)} couldn't be pulled in — review the line items before sending.${said}` };
@@ -453,9 +507,9 @@ export async function createInvoiceForJob(
     // says "nothing new".
     const still = await unbilledPicture(supabase, jobId, { changeOrders: wantChangeOrders });
     const stillOff: string[] = [];
-    if (still && !quote && still.labor) stillOff.push(`${fmtHours(still.hours)} of time (Labor from Timecards pulls it in)`);
-    if (still && !quote && still.costs) stillOff.push(`${materialsWords(still)} (Materials from Costs pulls ${still.billsCount + still.stockCount === 1 ? "it" : "them"} in)`);
-    if (still && quote && still.changeOrders > 0) stillOff.push(`${still.changeOrders} approved change ${still.changeOrders === 1 ? "order" : "orders"} (Change Orders pulls ${still.changeOrders === 1 ? "it" : "them"} in)`);
+    if (still && !quote && still.labor) stillOff.push(`${fmtHours(still.hours)} of time (${BRING_IN_NEW_WORK} pulls it in)`);
+    if (still && !quote && still.costs) stillOff.push(`${materialsWords(still)} (${BRING_IN_NEW_WORK} pulls ${still.billsCount + still.stockCount === 1 ? "it" : "them"} in)`);
+    if (still && quote && still.changeOrders > 0) stillOff.push(`${still.changeOrders} approved change ${still.changeOrders === 1 ? "order" : "orders"} (${BRING_IN_NEW_WORK} pulls ${still.changeOrders === 1 ? "it" : "them"} in)`);
     return {
       ok: true,
       id: draft.id,
@@ -494,14 +548,17 @@ export async function createInvoiceForJob(
   // is still minted — blank, or with the rest — and the note names what stayed unbilled and the
   // button on the invoice that pulls it in. Never a refusal that contradicts the Overview card.
   const leftOff: string[] = [];
-  if (picture && !quote && picture.labor && !wantLabor) leftOff.push(`${fmtHours(picture.hours)} of time (Labor from Timecards pulls it in)`);
+  if (picture && !quote && picture.labor && !wantLabor) leftOff.push(`${fmtHours(picture.hours)} of time (${BRING_IN_NEW_WORK} pulls it in)`);
   if (picture && !quote && picture.costs && !wantCosts) {
-    leftOff.push(`${materialsWords(picture)} (Materials from Costs pulls ${picture.billsCount + picture.stockCount === 1 ? "it" : "them"} in)`);
+    leftOff.push(`${materialsWords(picture)} (${BRING_IN_NEW_WORK} pulls ${picture.billsCount + picture.stockCount === 1 ? "it" : "them"} in)`);
   }
 
   let res: { ok: boolean; error?: string; id?: string };
+  /** What became of a rate asked for on an estimate copy, said after the pull-in note. */
+  let taxSaid = "";
   if (fromQuote && quote) {
     res = await createInvoiceFromQuote(quote.id);
+    if (res.ok && res.id && taxRate !== undefined) taxSaid = await seedEstimateCopyTax(supabase, res.id, taxRate);
   } else {
     const { data: job } = await supabase
       .from("jobs")
@@ -514,7 +571,8 @@ export async function createInvoiceForJob(
       job_id: jobId, // keep the job link so the invoice can pull Labor/Materials
       title: job.name ?? "",
       description: (job as any)?.description ?? null, // scope shown above the line items
-      tax_rate: 0,
+      // The rate the caller showed and asked for (W1-28); none asked, untaxed as it always was.
+      tax_rate: taxRate ?? 0,
     });
   }
 
@@ -528,7 +586,7 @@ export async function createInvoiceForJob(
     const said = extrasSentence(extras);
     const heads = extras.warnings.length ? { partial: true as const } : {};
     if (pulled.missed.length) {
-      return { ...res, partial: true, importWarning: `Invoice created, but ${joinAnd(pulled.missed)} couldn't be pulled in — review the line items before sending.${said}` };
+      return { ...res, partial: true, importWarning: `Invoice created, but ${joinAnd(pulled.missed)} couldn't be pulled in — review the line items before sending.${said}${taxSaid}` };
     }
     if (prior) {
       const { data: made } = await supabase
@@ -570,7 +628,9 @@ export async function createInvoiceForJob(
           importWarning:
             (leftOff.length
               ? `Started ${newNumber} empty, as asked — still unbilled since ${priorLabel}: ${joinAnd(leftOff)}.`
-              : `Started ${newNumber} empty, as asked.`) + said,
+              : `Started ${newNumber} empty, as asked.`) +
+            said +
+            taxSaid,
         };
       }
       return {
@@ -579,12 +639,13 @@ export async function createInvoiceForJob(
         importWarning:
           `Started ${newNumber} for what's new since ${priorLabel} — ${landed} ${landed === 1 ? "line" : "lines"} pulled in.` +
           (leftOff.length ? ` Left off, as asked: ${joinAnd(leftOff)}.` : "") +
-          said,
+          said +
+          taxSaid,
       };
     }
     // The first invoice on the job: its count is on the page, but what the importers flagged is
     // not, so it is said here too (audit v994 SI5).
-    if (said) return { ...res, ...heads, importWarning: said.trim() };
+    if (said || taxSaid) return { ...res, ...heads, importWarning: (said + taxSaid).trim() };
   }
   return res;
 }
@@ -899,7 +960,7 @@ export async function finishJob(
         ok: true,
         id: draws[0].id,
         speak: "Job finished. It bills with progress payments.",
-        warning: "Couldn't check just now whether any hours or bills are still off a bill - look at the job's Invoices tab, and bill what's left with Progress Payment → Final.",
+        warning: `Couldn't check just now whether any hours or bills are still off a bill - bill what's left with ${LAST_BILL_DOOR}.`,
       };
     }
     return { ok: true, id: draws[0].id, speak: "Job finished. Every hour and bill on it is already on a progress payment." };

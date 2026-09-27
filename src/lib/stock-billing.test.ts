@@ -316,7 +316,7 @@ describe("the takes reach every figure an invoice is built from", () => {
   it("Finish Job and a refresh say the takes in the office's words", () => {
     expect(finishWouldLeaveOffBill({ hours: 0, laborAmount: 0, billsCount: 0, billsBilled: 0, stockCount: 2, stockBilled: 66.3 })).toContain("2 takes from stock ($66.30)");
     expect(pulledIntoSentence("INV-078", { hours: 0, bills: 1, stock: 1 }, { hours: 0, bills: 0, stock: 2 })).toBe(
-      "Pulled 1 bill and 1 take from stock into INV-078. Still not on it: 2 takes from stock - open INV-078 and tap Materials from Costs to see what is holding them back.",
+      "Pulled 1 bill and 1 take from stock into INV-078. Still not on it: 2 takes from stock - open INV-078 and tap Bring In New Work to see what is holding them back.",
     );
   });
 });

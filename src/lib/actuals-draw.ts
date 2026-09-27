@@ -32,6 +32,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { isDrawKind, resolveDrawCredit, DRAW_KINDS } from "./invoice-math";
+import { isLiveQuote, nextInvoiceImportsActuals } from "./invoice-import-rule";
 
 /** Line sources only the actuals importers (and the report's own prior-billings credit) write. */
 const ACTUALS_SOURCES = new Set(["labor", "costs", "draw_credit"]);
@@ -269,8 +270,9 @@ const hoursWord = (h: number) => {
  * unbilled picture before and after (so an hour a deleted line holds back is never counted as
  * pulled). A supplier return the refresh credited is counted too - "Nothing new" after a click
  * that wrote a credit onto the draw would be false. `left` names what is still not on it and
- * WHERE THE REASON IS SAID: the Import row is blank until one of its buttons is tapped, so the
- * sentence names the button, never "the Import row says why".
+ * WHERE THE REASON IS SAID: the invoice's one Bring In New Work button (W1-27) runs every import
+ * and says, part by part, what landed and what held back - so the sentence names that button,
+ * never "the Import row says why" and never a button that no longer exists.
  */
 export function pulledIntoSentence(
   number: string,
@@ -290,27 +292,218 @@ export function pulledIntoSentence(
   }
   const head = parts.length ? `Pulled ${joinParts(parts)} into ${number}.` : `Nothing new to pull into ${number}.`;
   const rest: string[] = [];
-  const doors: string[] = [];
-  if (left && left.hours > 0.005) {
-    rest.push(hoursWord(left.hours));
-    doors.push("Labor from Timecards");
-  }
-  if (left && left.bills > 0) {
-    rest.push(`${left.bills} ${left.bills === 1 ? "bill" : "bills"}`);
-    doors.push("Materials from Costs");
-  }
-  if (left && (left.stock ?? 0) > 0) {
-    rest.push(takes(left.stock ?? 0));
-    if (!doors.includes("Materials from Costs")) doors.push("Materials from Costs");
-  }
+  if (left && left.hours > 0.005) rest.push(hoursWord(left.hours));
+  if (left && left.bills > 0) rest.push(`${left.bills} ${left.bills === 1 ? "bill" : "bills"}`);
+  if (left && (left.stock ?? 0) > 0) rest.push(takes(left.stock ?? 0));
   if (left && (left.returns ?? 0) > 0) {
     const n = left.returns ?? 0;
     rest.push(n === 1 ? "a supplier return" : `${n} supplier returns`);
-    if (!doors.includes("Materials from Costs")) doors.push("Materials from Costs");
   }
   return rest.length
-    ? `${head} Still not on it: ${joinParts(rest)} - open ${number} and tap ${doors.join(" or ")} to see what is holding ${rest.length === 1 && !/s$/.test(rest[0]) && !/^\d+ takes /.test(rest[0]) ? "it" : "them"} back.`
+    ? `${head} Still not on it: ${joinParts(rest)} - open ${number} and tap ${BRING_IN_NEW_WORK} to see what is holding ${rest.length === 1 && !/s$/.test(rest[0]) && !/^\d+ takes /.test(rest[0]) ? "it" : "them"} back.`
     : head;
+}
+
+/** The invoice page's one import button (W1-27): every sentence that sends a person to pull new
+ *  hours, bills or change orders onto an invoice names it by this, so none points at a button
+ *  that is gone ("Labor from Timecards" and "Materials from Costs" were folded into it). */
+export const BRING_IN_NEW_WORK = "Bring In New Work";
+
+// ── What the job's New Invoice does (W1-24) ────────────────────────────────────────────────────
+
+/**
+ * ONE NEW INVOICE ON THE JOB (W1-24, 2026-09-27). The Invoices tab had two billing buttons, New
+ * Invoice and Progress Payment, and the second opened a hub with a Record a Payment mode, a draw
+ * type, a billing mode and a figure - four decisions before a bill existed. It is one button now.
+ * What one tap does is decided HERE, from the facts the page already reads, in the server's own
+ * order (createInvoiceForJob), so the button never offers a door the server refuses:
+ *
+ *   an open draft on the job    → no sheet: the button goes where the server goes. A draft that
+ *                                 takes new work is brought up to date ("Pulled 6 hours and 1 bill
+ *                                 into INV-078"); a draft for set amounts is opened and named,
+ *                                 because nothing new can go on it.
+ *   a payment schedule          → no sheet: "This job bills on its payment schedule", and the
+ *                                 schedule's own Request Next Payment.
+ *   no estimate and no draw yet → no sheet: createInvoiceForJob, exactly as the old button did.
+ *   anything else               → the New Invoice sheet (newInvoiceChoices).
+ *
+ * A preset from another door (?invoice=deposit|part, Take A Deposit Instead) opens the sheet with
+ * that choice made - except where the sheet could only be refused (an open draft, a schedule).
+ */
+export type NewInvoiceFacts = {
+  /** The job's open draft and whether new work goes on it (openDraftOnJob, read by the page). */
+  openDraft: Pick<OpenDraft, "id" | "number" | "refreshable"> | null;
+  /** payment_milestones rows exist on the job. */
+  scheduleActive: boolean;
+  /** An estimate that still stands (not declined, not expired) and bills more than $0. */
+  hasEstimate: boolean;
+  /** A live draw (a deposit, a progress payment, a final) is on the job. */
+  drawBilled: boolean;
+};
+
+export type NewInvoicePreset = "deposit" | "part";
+
+export type NewInvoiceRoute =
+  /** Lands on the open draft: `adds` = new work goes on it (createInvoiceForJob brings it up to
+   *  date); otherwise the draft is opened and named. */
+  | { kind: "draft"; adds: boolean }
+  | { kind: "schedule" }
+  /** createInvoiceForJob, one tap, exactly as before (its toast and any door it returns). */
+  | { kind: "direct" }
+  | { kind: "sheet" };
+
+export function newInvoiceRoute(f: NewInvoiceFacts, preset?: NewInvoicePreset | null): NewInvoiceRoute {
+  if (f.openDraft) return { kind: "draft", adds: !!f.openDraft.refreshable };
+  if (f.scheduleActive) return { kind: "schedule" };
+  if (preset) return { kind: "sheet" };
+  if (!f.hasEstimate && !f.drawBilled) return { kind: "direct" };
+  return { kind: "sheet" };
+}
+
+/** ?invoice=part|deposit, read once: anything else is no preset (never a guess). */
+export function invoicePresetFromParam(value: string | null | undefined): NewInvoicePreset | null {
+  return value === "deposit" || value === "part" ? value : null;
+}
+
+/**
+ * THE SHEET'S CHOICES (2 or 3 buttons), each one a door the server takes:
+ *
+ *   Deposit                 always (createProgressInvoice, kind deposit, a fixed amount).
+ *   Part Of The Estimate    when there is an estimate to take a part of (a %, or an amount typed
+ *                           instead; createProgressInvoice kind progress, or final).
+ *   Bill The Work So Far    only on a job that bills its actuals, and only when there is work to
+ *                           bill: its figure is the Overview card's own door (workSoFarDoor), so
+ *                           the sheet and the card can never show two numbers. The default there.
+ *   The Whole Estimate      on a fixed-price job whose estimate isn't on a bill yet and that has
+ *                           no draws (createInvoiceForJob copies the estimate's lines).
+ */
+export type NewInvoiceChoice = "deposit" | "part" | "work" | "whole";
+
+export type NewInvoiceSheetFacts = {
+  billingType: string | null | undefined;
+  /** The figure the draw doors bill a part of (the page's contract estimate); 0 = none. */
+  estimate: number;
+  hasEstimate: boolean;
+  /** The next New Invoice pulls the job's hours and receipts (nextInvoiceImportsActuals). */
+  billsActuals: boolean;
+  /** workSoFarDoor's answer: null where there is nothing (or nothing readable) to bill. */
+  workDoor: CardDoor;
+  /** The estimate a New Invoice would copy, when it is not on a bill yet (fixed price, no draws);
+   *  null otherwise. Its total is the figure on The Whole Estimate. */
+  wholeEstimate: number | null;
+};
+
+export function newInvoiceChoices(
+  f: NewInvoiceSheetFacts,
+  preset?: NewInvoicePreset | null,
+): { choices: NewInvoiceChoice[]; initial: NewInvoiceChoice } {
+  const choices: NewInvoiceChoice[] = ["deposit"];
+  if (f.hasEstimate && f.estimate > 0.005) choices.push("part");
+  const work = f.billsActuals && !!f.workDoor && (f.workDoor.kind === "create" || f.workDoor.kind === "draw");
+  if (work) choices.push("work");
+  else if (f.billingType !== "tm" && f.wholeEstimate != null && f.wholeEstimate > 0.005) choices.push("whole");
+  const initial: NewInvoiceChoice =
+    preset && choices.includes(preset) ? preset : work ? "work" : choices.includes("part") ? "part" : choices[0];
+  return { choices, initial };
+}
+
+/** The Overview card's unbilled work, as much of it as the door needs (lib/unbilled-work). */
+export type WorkSoFar = {
+  hours: number;
+  billsCount: number;
+  stockCount?: number;
+  returnsCount?: number;
+  total: number;
+  laborAmount: number;
+  billsBilled: number;
+  stockBilled?: number;
+};
+
+/**
+ * BILL THE WORK SO FAR IS THE OVERVIEW CARD'S DOOR, WITH NO DRAFT OPEN (the sheet only exists
+ * when none is). The same inputs the card hands unbilledCardDoor (unbilled-card.tsx cardDoorFor),
+ * so the sheet's figure and the card's "Open: $X" are one number: "create" is a standard invoice
+ * (createInvoiceForJob), "draw" the progress report that nets a deposit not yet taken off a bill,
+ * "covered" no bill at all, null nothing to bill.
+ */
+export function workSoFarDoor(
+  w: WorkSoFar | null | undefined,
+  lumpToNet: number,
+  drawBilled: boolean,
+  money: (n: number) => string,
+): CardDoor {
+  if (!w) return null;
+  const takes = w.stockCount ?? 0;
+  const newWork = Math.round((w.laborAmount + w.billsBilled + (w.stockBilled ?? 0)) * 100) / 100;
+  return unbilledCardDoor({
+    openDraft: null,
+    workPending: w.hours > 0 || w.billsCount > 0 || takes > 0,
+    returns: w.returnsCount ?? 0,
+    total: w.total,
+    newWork,
+    lumpToNet,
+    drawBilled,
+    money,
+  });
+}
+
+/**
+ * THE ESTIMATE A NEW INVOICE COPIES: createInvoiceForJob's own pick - of the quotes that still
+ * stand (not declined, not expired), the accepted one, else the newest. Its total is the figure
+ * on The Whole Estimate. null when none bills above $0.
+ */
+export function estimateANewInvoiceCopies(
+  quotes: readonly { total?: number | string | null; status?: string | null; created_at?: string | null }[],
+): number | null {
+  const live = quotes
+    .filter((q) => isLiveQuote(q.status))
+    .slice()
+    .sort((a, b) => String(b.created_at ?? "").localeCompare(String(a.created_at ?? "")));
+  const pick = live.find((q) => q.status === "accepted") ?? live[0];
+  const total = Number(pick?.total);
+  return pick && Number.isFinite(total) && total > 0.005 ? Math.round(total * 100) / 100 : null;
+}
+
+/**
+ * THE JOB PAGE'S FACTS FOR NEW INVOICE, derived once from what the page already read (its quotes,
+ * its invoices, its milestones and its contract estimate), so the page and the tests that pin the
+ * routing compute them the same way:
+ *
+ *   hasEstimate    an estimate still stands (not declined, not expired) and the contract is > $0
+ *   drawBilled     a live deposit / progress / final is on the job
+ *   scheduleActive payment_milestones rows exist
+ *   billsActuals   the next New Invoice pulls the hours and receipts (nextInvoiceImportsActuals:
+ *                  no schedule, no estimate that is the contract)
+ *   wholeEstimate  the estimate New Invoice would copy, while nothing bills it yet: a fixed-price
+ *                  job with no draw and no bill that went out (a sent bill may already be it)
+ */
+export function newInvoicePageFacts(input: {
+  billingType: string | null | undefined;
+  estimate: number;
+  quotes: readonly { total?: number | string | null; status?: string | null; created_at?: string | null }[];
+  invoices: readonly { status?: string | null; invoice_kind?: string | null }[];
+  milestoneCount: number;
+}): { hasEstimate: boolean; drawBilled: boolean; scheduleActive: boolean; billsActuals: boolean; wholeEstimate: number | null } {
+  const live = input.quotes.filter((q) => isLiveQuote(q.status));
+  const hasEstimate = Number(input.estimate) > 0.005 && live.some((q) => Number(q.total) > 0.005);
+  const drawBilled = input.invoices.some((i) => isDrawKind(i.invoice_kind) && i.status !== "void");
+  const scheduleActive = input.milestoneCount > 0;
+  const billsActuals = nextInvoiceImportsActuals(input.billingType, input.milestoneCount, live.length > 0);
+  const wentOut = input.invoices.some((i) => i.status !== "void" && i.status !== "draft");
+  const wholeEstimate = input.billingType !== "tm" && !drawBilled && !wentOut ? estimateANewInvoiceCopies(input.quotes) : null;
+  return { hasEstimate, drawBilled, scheduleActive, billsActuals, wholeEstimate };
+}
+
+/** What Save says it makes: "Create Deposit $500.00", "Create Invoice $1,572.27", "Create Final
+ *  Invoice $2,400.00". No figure while there is none to name (an empty amount box). */
+export function newInvoiceSaveLabel(
+  choice: NewInvoiceChoice,
+  last: boolean,
+  amount: number | null,
+  money: (n: number) => string,
+): string {
+  const verb = choice === "deposit" ? "Create Deposit" : last ? "Create Final Invoice" : "Create Invoice";
+  return amount != null && amount > 0.005 ? `${verb} ${money(amount)}` : verb;
 }
 
 /** "a, b and c" - the office's list phrasing. */

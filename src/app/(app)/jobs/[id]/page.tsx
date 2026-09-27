@@ -43,7 +43,7 @@ import { readJobStock, stockCostLabel, stockKey, stockShortsSentence } from "@/l
 import { readAlreadyBilledReach, readHandClaimsForJob, type HandClaims } from "@/lib/already-billed-read";
 import { hoursByHand, jobAlreadyBilledDoors } from "@/lib/already-billed";
 import { AlreadyBilledButton } from "@/components/already-billed-sheet";
-import { openDraftOnJob, type OpenDraft } from "@/lib/actuals-draw";
+import { newInvoicePageFacts, openDraftOnJob, type OpenDraft } from "@/lib/actuals-draw";
 import { isLiveQuote, jobBillsItsActuals, nextInvoiceImportsActuals } from "@/lib/invoice-import-rule";
 import { reportError } from "@/lib/observe";
 import { loadShiftChains } from "@/lib/shift-chain";
@@ -77,7 +77,6 @@ import { documentsForViewer } from "@/lib/tech-documents";
 import { billPapers, papersOffThisJob, sortJobPapers, type PaperTie } from "@/lib/job-photos";
 import { jobLabel } from "@/lib/schedule-options";
 import { directionsTarget } from "@/lib/maps";
-import { ProgressInvoiceButton } from "./progress-invoice-button";
 import { NewInvoiceButton } from "./new-invoice-button";
 import { NewWorkOrderButton } from "../../work-orders/new-wo-button";
 import { NewChangeOrderButton } from "../../change-orders/new-co-button";
@@ -423,7 +422,7 @@ export default async function JobDetailPage({
       ? supabase.from("petty_cash").select("amount, kind").eq("job_id", id)
       : Promise.resolve({ data: [] as any[] }),
     // THE OPEN DRAFT AND WHETHER NEW WORK CAN GO ON IT (lib/actuals-draw, J-011). The Overview
-    // card's button and the Progress Payment modal both read it, so neither offers a door the
+    // card's button and the job's New Invoice both read it, so neither offers a door the
     // server refuses: an actuals draw says "Add to INV-078", a contract draw says "Open INV-0xx".
     // Staff only (a tech's card has no button) and only when a draft exists at all. A failed read
     // falls back to the invoices already in hand, treating any draw as one to open, not add to.
@@ -462,8 +461,8 @@ export default async function JobDetailPage({
       ),
     // A TIME & MATERIAL JOB'S WORK TO DATE IS WHAT WAS BILLED, AT THE PRICE BILLED, PLUS WHAT THE
     // NEXT BILL WOULD CHARGE (tmWorkToDate, the reader behind the Progress Summary and Nort). Staff
-    // only: the Progress Payment modal on the Invoices tab is its one reader here. A failed read is
-    // logged and the modal says it couldn't total - never a figure priced some other way.
+    // only: the New Invoice sheet's "Work so far" is its one reader here. A failed read is
+    // logged and the sheet says it couldn't total - never a figure priced some other way.
     viewerIsStaff && (j as any).billing_type === "tm"
       ? tmWorkToDate(supabase, id).catch((e: unknown) => {
           reportError("jobs.[id].tmWorkToDate", e, { jobId: id });
@@ -481,8 +480,8 @@ export default async function JobDetailPage({
         })
       : Promise.resolve([]),
     // THE JOB'S TAKES FROM STOCK (Shop Stock, Phase 3), read once for two things: the pieces taken
-    // past the shelf, said before an invoice is built (New Invoice and Progress Payment carry the
-    // sentence beside the button), and the takes themselves, which are a FIXED-PRICE job's work to
+    // past the shelf, said before an invoice is built (the job's New Invoice carries the sentence,
+    // in its sheet or beside it), and the takes themselves, which are a FIXED-PRICE job's work to
     // date exactly as the invoice page and the /print report count them (jobProgressFinancials). A
     // Time & Material job's takes are in tmWork above (billed ones as their lines, open ones in
     // unbilledWorkForJob), never counted a second way here. Staff only (a tech's page reads no stock
@@ -825,14 +824,6 @@ export default async function JobDetailPage({
   const isDrawBilled = (invoices ?? []).some(
     (i: any) => isDrawKind(i.invoice_kind) && i.status !== "void",
   );
-  // Open invoices (non-void, balance still owed) — targets for "record a payment".
-  const openInvoices = (invoices ?? [])
-    .filter((i: any) => i.status !== "void" && invoiceBalance(i.total, i.amount_paid) > 0.005)
-    .map((i: any) => ({
-      id: i.id,
-      number: i.invoice_number,
-      balance: invoiceBalance(i.total, i.amount_paid),
-    }));
   const jobRefunds = (refundRows ?? []).reduce((s: number, r: any) => s + Number(r.amount ?? 0), 0);
   const revenue = Math.max(0, collected - jobRefunds);
   // Profit excludes mileage on PURPOSE so this hub and /analytics show the SAME number
@@ -1788,16 +1779,53 @@ export default async function JobDetailPage({
         <div className="space-y-3">
           {/* Lead with the INVOICES (this is the Invoices tab) — the contract / payment
               schedule / lien cards live below, since they're supporting deal-to-cash context. */}
-          {/* Billing actions live HERE, on the Invoices tab, where you'd look to bill — a plain
-              "New invoice" (it used to hide in the Manage ⋯ menu, so a T&M job looked like it could
-              only do Progress payment) next to the progress/payment hub. */}
-          <div className="flex flex-wrap justify-end gap-2">
-            {viewerIsStaff && <NewInvoiceButton jobId={j.id} />}
-            <ProgressInvoiceButton jobId={j.id} billingType={(j as any).billing_type ?? "fixed"} estimate={quoted} worked={workedToDate} invoiced={billedToDate} paid={collected} openInvoices={openInvoices} scheduleActive={((paymentMilestones as any) ?? []).length > 0} openDraft={openDraft && isDrawKind(openDraft.kind) ? openDraft : null} warning={stockShortsWords} />
-          </div>
-          {/* Pieces taken past the shelf: said at the two buttons that build an invoice, BEFORE the
-              tap, because the invoice they build leaves those pieces off (Shop Stock, Phase 3). */}
-          {stockShortsWords && <p className="text-right text-sm text-amber-700">{stockShortsWords}</p>}
+          {/* ONE NEW INVOICE (W1-24). The Progress Payment hub beside it is gone: its draw builder is
+              the New Invoice sheet (Deposit / Part Of The Estimate / Bill The Work So Far), and its
+              Record a Payment left this tab for each open bill's Get Paid below. Every prop is a fact
+              this page already read; what one tap does is lib/actuals-draw newInvoiceRoute. Staff only
+              (a tech never sees this tab, and never a price). */}
+          {viewerIsStaff && (
+            <div className="flex justify-end">
+              <NewInvoiceButton
+                jobId={j.id}
+                billingType={(j as any).billing_type ?? "fixed"}
+                estimate={quoted}
+                // hasEstimate, drawBilled, scheduleActive, billsActuals and wholeEstimate, derived
+                // once from this page's own reads (lib/actuals-draw newInvoicePageFacts).
+                {...newInvoicePageFacts({
+                  billingType: (j as any).billing_type ?? "fixed",
+                  estimate: quoted,
+                  quotes: (quotes ?? []) as any[],
+                  invoices: (invoices ?? []) as any[],
+                  milestoneCount: ((paymentMilestones as any) ?? []).length,
+                })}
+                worked={workedToDate}
+                billed={billedToDate}
+                paid={collected}
+                openDraft={openDraft ? { id: openDraft.id, number: openDraft.number, refreshable: openDraft.refreshable } : null}
+                // The Overview card's own figures (the same door, so the sheet and the card agree).
+                unbilled={
+                  unbilled && unbilled.schemaReady
+                    ? {
+                        hours: unbilled.hours,
+                        billsCount: unbilled.billsCount,
+                        stockCount: unbilled.stockCount,
+                        returnsCount: unbilled.returnsCount,
+                        total: unbilled.total,
+                        laborAmount: unbilled.laborAmount,
+                        billsBilled: unbilled.billsBilled,
+                        stockBilled: unbilled.stockBilled,
+                      }
+                    : null
+                }
+                lumpToNet={lumpToNet}
+                depositPercent={getOrgSettings((org as any)?.settings).deposit_percent}
+                // Pieces taken past the stock: said BEFORE a bill is built (the sheet says it above Save).
+                stockShortsWords={stockShortsWords}
+                salesTax={on("sales_tax")}
+              />
+            </div>
+          )}
           <Card className="overflow-hidden">
           <ul className="divide-y divide-slate-100">
             {(invoices ?? []).map((iv: any) => (
@@ -1813,6 +1841,16 @@ export default async function JobDetailPage({
                   </span>
                   <span className="flex shrink-0 items-center gap-3"><InvoiceAmount total={iv.total} paid={iv.amount_paid} status={iv.status} /><Badge tone={statusTone(iv.status)}>{iv.status}</Badge></span>
                 </Link>
+                {/* GET PAID, ON THE BILL IT PAYS (W1-24). Record a Payment left this tab with the
+                    Progress Payment hub: money is taken on its invoice, whose Get Paid is one sheet
+                    (card first, then every other way). Its own line, so the row never squeezes. */}
+                {iv.status !== "void" && invoiceBalance(iv.total, iv.amount_paid) > 0.005 && (
+                  <div className="-mt-2 flex justify-end px-3 pb-1">
+                    <Link href={`/billing/${iv.id}`} className="inline-flex min-h-11 items-center px-2 text-sm font-medium text-brand hover:underline">
+                      Get Paid
+                    </Link>
+                  </div>
+                )}
               </li>
             ))}
             {(!invoices || invoices.length === 0) && empty("invoices")}

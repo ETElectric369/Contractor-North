@@ -54,7 +54,7 @@ export const jobActions: Record<string, ActionDef> = {
     group: "job",
     label: "Open a job",
     description:
-      "Open a new JOB — e.g. 'start a job for the Miller deck'. Resolve the customer first with list_customers and pass customer_id (or pass new_customer_name to create one). Optional description, address, status (to_be_scheduled, scheduled, in_progress, on_hold, complete, cancelled; default in_progress), and billing_type (fixed or draw). Returns the job id — then you can schedule it, assign it, add costs, or quote it.",
+      "Open a new JOB — e.g. 'start a job for the Miller deck'. Resolve the customer first with list_customers and pass customer_id (or pass new_customer_name to create one). Optional description, address, status (to_be_scheduled, scheduled, in_progress, complete, cancelled; default in_progress — a job is put on hold after it exists, with its reason and a day, never at creation), and billing_type (tm for Time & Material, the default, or fixed for a fixed price). Returns the job id — then you can schedule it, assign it, add costs, or quote it.",
     input: z.object({
       name: z.string().min(1),
       customer_id: z.string().nullable().optional(),
@@ -62,7 +62,9 @@ export const jobActions: Record<string, ActionDef> = {
       description: z.string().nullable().optional(),
       address: z.string().nullable().optional(),
       status: z.string().optional(),
-      billing_type: z.enum(["fixed", "draw"]).optional(),
+      // The database's own check allows exactly these two (jobs.billing_type): "draw" was offered and
+      // failed on every save, and Time & Material could not be asked for at all (W1-22).
+      billing_type: z.enum(["tm", "fixed"]).optional(),
     }),
     auth: "staff",
     effect: "write",
@@ -101,7 +103,7 @@ export const jobActions: Record<string, ActionDef> = {
     group: "job",
     label: "Finish a job",
     description:
-      "Finish a job: mark it complete. On an ordinary job it also builds a DRAFT invoice (from the accepted estimate if there is one, else the logged labor + materials); it never sends. On a job billed with PROGRESS PAYMENTS (a deposit / progress / final draw) it builds no new bill: an open progress report built from actuals takes the last hours and bills; otherwise any hours or bills not on a bill yet are NAMED in the result's warning (e.g. '<hours> h ($<amount>) of work on this job is not on a bill yet') and stay unbilled until a Progress Payment → Final is made. Read the result's speak AND warning back to the user. Resolve the job with list_jobs. The app asks to confirm first.",
+      "Finish a job: mark it complete. On an ordinary job it also builds a DRAFT invoice (from the accepted estimate if there is one, else the logged labor + materials); it never sends. On a job billed with PROGRESS PAYMENTS (a deposit / progress / final draw) it builds no new bill: an open progress report built from actuals takes the last hours and bills; otherwise any hours or bills not on a bill yet are NAMED in the result's warning (e.g. '<hours> h ($<amount>) of work on this job is not on a bill yet') and stay unbilled until the last bill is made with the job's New Invoice → This Is The Last Bill. Read the result's speak AND warning back to the user. Resolve the job with list_jobs. The app asks to confirm first.",
     input: z.object({ id: z.string() }),
     auth: "staff",
     effect: "write",

@@ -1,5 +1,7 @@
 import "server-only";
 import { dbError } from "@/lib/db-error";
+import { defaultDueDateIsoForOrg } from "@/lib/invoice-due";
+import { reportError } from "@/lib/observe";
 
 /**
  * THE SEND STAMP — ONE WRITE PATH, BECAUSE "SENT" HAS TO MEAN THE DEED (INV-069, 2026-09-18).
@@ -36,7 +38,51 @@ export async function markInvoiceSent(
   }
   if (res.error) return { ok: false, error: dbError(res.error) };
   if (!res.data?.length) return { ok: false, error: "Invoice not found." };
+  // The status write has landed: the send IS done. Anything after this line is a second write that
+  // may fail on its own without taking the send back with it.
+  await restampDueOnFirstSend(supabase, id);
   return { ok: true };
+}
+
+/**
+ * THE FIRST SEND STARTS THE CLOCK (W1-27). A draft's due date was stamped the day the draft was
+ * made (today + the company's terms), so a draft that sat for three weeks went out already three
+ * weeks into its Net 30 - or overdue on arrival. The terms run from the day the customer has the
+ * bill. So the first send (this function; a re-send goes through markInvoiceResent and never moves
+ * the date) restamps the due date to send day + the terms (Settings › Documents, Net 30 when unset)
+ * - unless a person picked the date by hand (0366's invoices.due_date_by_hand, set by
+ * setInvoiceDueDate), which is theirs and stays.
+ *
+ * A SECOND WRITE, BEST EFFORT, AFTER THE STATUS WRITE HAS LANDED - never folded into the status
+ * patch: the send is the deed, and a date that can't be moved must never fail it. The guard is in
+ * the WHERE (`due_date_by_hand = false`), so a date picked a moment ago is never overwritten, and
+ * .select("id") says whether a row moved (a zero-row UPDATE is a 204). Before 0366 the column isn't
+ * there: the guard fails as a missing column (42703 / PGRST204) and the date stays exactly as it
+ * was, which is today's behaviour. Any other failure is reported and the date stays. Scoped to the
+ * invoice's own org (the recurring cron sends on a service client, which has no boundary but the
+ * one typed here). The callers recalc (and so drop the stored PDF) after this, so the PDF and the
+ * customer's page read the stamped row.
+ */
+async function restampDueOnFirstSend(supabase: { from: (t: string) => any }, id: string): Promise<void> {
+  try {
+    const { data: row, error: readErr } = await supabase.from("invoices").select("org_id").eq("id", id).maybeSingle();
+    const orgId = (row as { org_id?: string | null } | null)?.org_id ?? null;
+    if (readErr || !orgId) {
+      if (readErr) reportError("markInvoiceSent.restampRead", readErr, { invoiceId: id });
+      return;
+    }
+    const due = await defaultDueDateIsoForOrg(supabase, orgId);
+    const { error } = await supabase
+      .from("invoices")
+      .update({ due_date: due })
+      .eq("id", id)
+      .eq("org_id", orgId)
+      .eq("due_date_by_hand", false)
+      .select("id");
+    if (error && !isMissingColumn(error, "due_date_by_hand")) reportError("markInvoiceSent.restampDue", error, { invoiceId: id });
+  } catch (e) {
+    reportError("markInvoiceSent.restampDue", e, { invoiceId: id });
+  }
 }
 
 /**
@@ -77,7 +123,12 @@ export async function markInvoiceResent(
 /** Postgres 42703 and PostgREST's schema-cache miss — the one error shape a not-yet-applied
  *  0267 produces, and nothing else, so a real failure still surfaces as itself. */
 function isMissingSentAt(err: unknown): boolean {
+  return isMissingColumn(err, "sent_at");
+}
+
+/** The same shape for any column a migration adds (0366's due_date_by_hand for the restamp). */
+function isMissingColumn(err: unknown, column: string): boolean {
   const code = String((err as { code?: string })?.code ?? "");
   const msg = String((err as { message?: string })?.message ?? "");
-  return code === "42703" || code === "PGRST204" || (msg.includes("sent_at") && /does not exist|could not find/i.test(msg));
+  return code === "42703" || code === "PGRST204" || (msg.includes(column) && /does not exist|could not find/i.test(msg));
 }

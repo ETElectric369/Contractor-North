@@ -16,7 +16,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
  */
 
 const state = vi.hoisted(() => ({ client: null as any }));
-const spies = vi.hoisted(() => ({ reportError: (..._a: any[]) => {} }));
+const spies = vi.hoisted(() => ({ reportError: (..._a: any[]) => {}, bell: [] as any[][], push: [] as any[][] }));
 
 vi.mock("@/lib/staff-guard", () => ({
   requireStaff: vi.fn(async () => ({ supabase: state.client, userId: "user-1", orgId: "org-1" })),
@@ -28,6 +28,18 @@ vi.mock("next/server", () => ({ after: vi.fn((fn: any) => fn?.()) }));
 vi.mock("@/lib/pdf-cache", () => ({ bustDocPdf: vi.fn(async () => {}), warmDocPdf: vi.fn(async () => {}) }));
 vi.mock("@/lib/revalidate-money", () => ({ revalidateMoney: vi.fn() }));
 vi.mock("@/lib/observe", () => ({ reportError: vi.fn((...a: any[]) => spies.reportError(...a)) }));
+// The bell line and the push (W1-10): recorded, never sent.
+vi.mock("@/lib/notifications", () => ({
+  createNotifications: vi.fn(async (...a: any[]) => {
+    spies.bell.push(a);
+    return true;
+  }),
+}));
+vi.mock("@/lib/push", () => ({
+  sendPushToProfiles: vi.fn(async (...a: any[]) => void spies.push.push(a)),
+  orgStaffIds: vi.fn(async () => ["user-1", "office-2", "office-3"]),
+  orgStaffIdsOrThrow: vi.fn(async () => ["user-1", "office-2", "office-3"]),
+}));
 
 import {
   importCostsIntoInvoice,
@@ -38,6 +50,7 @@ import {
   setInvoiceTitle,
   setInvoiceDueDate,
   settleUp,
+  recordPayment,
 } from "./actions";
 import { HELD_HERE_COLUMNS } from "@/lib/held-here";
 
@@ -843,7 +856,7 @@ function openDrawRoute(opts: { actuals: boolean; schedule?: boolean; lump?: numb
 }
 
 describe("J-011 — a draw built from actuals takes new work; a contract draw refuses it (server)", () => {
-  it("Progress Payment → Actual T&M with INV-078 open lands on INV-078: no second draw, new hours JOIN the negotiated line, says what it pulled", async () => {
+  it("Bill The Work So Far (the progress report) with INV-078 open lands on INV-078: no second draw, new hours JOIN the negotiated line, says what it pulled", async () => {
     spies.reportError = () => {};
     state.client = fakeSupabase(openDrawRoute({ actuals: true }), calls);
     const res = await createProgressReportInvoice(JOB, "progress");
@@ -876,7 +889,7 @@ describe("J-011 — a draw built from actuals takes new work; a contract draw re
     expect(res.ok).toBe(true);
     expect(calls.some((c) => c.table === "invoice_items" && c.verb === "update")).toBe(false);
     expect((res as any).stats.warnings).toContain(
-      "Labor - Erik shows 3 h more than the time entries it holds, so Erik's new 6 h were not added. They stay unbilled on the job - check the line's hours, then Labor from Timecards again",
+      "Labor - Erik shows 3 h more than the time entries it holds, so Erik's new 6 h were not added. They stay unbilled on the job - check the line's hours, then Bring In New Work again",
     );
   });
 
@@ -908,7 +921,7 @@ describe("J-011 — a draw built from actuals takes new work; a contract draw re
     expect(calls.some((c) => c.table === "rpc:upsert_imported_invoice_items")).toBe(false);
   });
 
-  it("the invoice page's Materials from Costs on INV-078 imports (the markup box reaches a draw built from actuals)", async () => {
+  it("the invoice page's Bring In New Work (its materials half) on INV-078 imports (the markup box reaches a draw built from actuals)", async () => {
     spies.reportError = () => {};
     state.client = fakeSupabase(openDrawRoute({ actuals: true }), calls);
     const cos: any = await importCostsIntoInvoice(OPEN_DRAW, 20);
@@ -1003,7 +1016,7 @@ describe("importLaborIntoInvoice — a line keyed to a person claims only that p
     const res: any = await importLaborIntoInvoice(OPEN_DRAW);
     expect(res).toEqual({
       ok: false,
-      error: "Labor wasn't imported: some hours would have landed on another person's labor line. Nothing was written - try Labor from Timecards again.",
+      error: "Labor wasn't imported: some hours would have landed on another person's labor line. Nothing was written - try Bring In New Work again.",
     });
     expect(calls.some((c) => c.table === "rpc:upsert_imported_invoice_items")).toBe(false);
     expect(calls.some((c) => c.verb === "update" || c.verb === "insert" || c.verb === "delete")).toBe(false);
@@ -1364,5 +1377,49 @@ describe("Already Billed, wave 1 — the importers leave a by-hand charge on the
     expect(res.ok).toBe(true);
     const join = calls.find((c) => c.table === "invoice_items" && c.verb === "update");
     expect(join?.payload).toEqual({ quantity: 14, source_ids: [TE_OLD, TE_NEW] });
+  });
+});
+
+/**
+ * THE BELL RECORDS THE PUSH (W1-10, Erik: "where would push notifications be recorded?"). A push is
+ * gone once it is swiped away, and a phone with pushes off never gets one; the payment-recorded push
+ * in recordPayment now writes its bell line first, to the same people, in the same words. Lane 2's
+ * guard counts this file's pushes (one) and names it as writing its own line - this pins that line.
+ */
+describe("recordPayment — the payment push is paired with its bell line (W1-10)", () => {
+  const PAID_INV = "5b3c0000-0000-4000-8000-000000000074";
+  const route = (q: Q): Reply => {
+    if (q.table === "invoices" && q.verb === "select" && q.cols === "id, org_id, invoice_number, total, amount_paid, customers(name)") {
+      return { data: { id: PAID_INV, org_id: "org-1", invoice_number: "INV-074", total: 624.49, amount_paid: 0, customers: { name: "Jason Waldow" } } };
+    }
+    if (q.table === "organizations") return { data: { settings: { timezone: "America/Los_Angeles" } } };
+    if (q.table === "payments" && q.verb === "insert") return { data: null };
+    // recalcInvoice's reads and its one write.
+    if (q.table === "invoice_items" && q.verb === "select" && q.cols === "line_total") return { data: [{ line_total: 624.49 }] };
+    if (q.table === "payments" && q.verb === "select" && q.cols === "amount") return { data: [{ amount: 624.49 }] };
+    if (q.table === "customer_credits") return { data: [] };
+    if (q.table === "invoices" && q.verb === "select" && q.cols === "tax_rate, status") return { data: { tax_rate: 0, status: "sent" } };
+    if (q.table === "invoices" && q.verb === "update") return { data: [{ id: PAID_INV }] };
+    return undefined;
+  };
+
+  it("the same people and the same words reach the bell and the push, the recorder left out of both", async () => {
+    spies.bell = [];
+    spies.push = [];
+    state.client = fakeSupabase(route, calls);
+    const res = await recordPayment({ invoice_id: PAID_INV, amount: 624.49, method: "Check", note: "#1042" });
+    expect(res).toEqual({ ok: true });
+    const line = { title: "Payment recorded", body: "$624.49 on INV-074 — Jason Waldow", url: `/billing/${PAID_INV}` };
+    expect(spies.bell).toEqual([["org-1", ["office-2", "office-3"], { type: "invoice_paid", ...line }]]);
+    expect(spies.push).toEqual([[["office-2", "office-3"], "invoice_paid", line]]);
+  });
+
+  it("in the source, the one push in this file sits beside its createNotifications line", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const src = readFileSync(join(process.cwd(), "src/app/(app)/billing/actions.ts"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|\s)\/\/[^\n]*/g, "$1");
+    expect([...src.matchAll(/sendPushToProfiles\(/g)]).toHaveLength(1);
+    expect([...src.matchAll(/createNotifications\(/g)]).toHaveLength(1);
+    expect(src).toMatch(/await createNotifications\(inv\.org_id, paidTo, \{ type: "invoice_paid", \.\.\.paidLine \}\);\s*void sendPushToProfiles\(paidTo, "invoice_paid", paidLine\);/);
   });
 });
