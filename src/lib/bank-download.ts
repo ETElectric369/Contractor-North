@@ -720,7 +720,7 @@ export type BooksBill = {
 };
 export type BooksPetty = { id: string; cents: number; day: string; kind: string };
 export type BooksAccount = { id: string; name: string; number: string | null; branch: string | null; onAccount: boolean; aliases: string[] };
-export type BooksInvoice = { id: string; number: string; balanceCents: number };
+export type BooksInvoice = { id: string; number: string; balanceCents: number; customer?: string | null };
 export type BooksCrew = { id: string; name: string };
 export type BooksRule = {
   id: string;
@@ -1604,6 +1604,9 @@ export type BankRowView = {
   dates: string;
   /** "Maybe the payment on INV-1001 of Sep 1, already in North." or null. */
   hint?: string | null;
+  /** A single deposit's own Other… list: only the invoices open for at least its money, each said
+   *  in full ("On INV-1001 · Pat Customer · $1,275.00 open"). Absent: the card's shared list. */
+  others?: BankButton[];
   direction: "in" | "out";
   single: boolean;
   guess: string | null;
@@ -1680,6 +1683,17 @@ export function bankViewOf(dl: BankDownload, plan: BankPlan, books: BankBooks, o
   const button = (c: BankChoice): BankButton => ({ id: choiceId(c), label: choiceLabel(c, names) });
   /** On money in, a bucket is a refund of that cost. */
   const inButton = (c: BankChoice): BankButton => ({ id: choiceId(c), label: c.choice === "cost" ? `Refund: ${choiceLabel(c, names)}` : choiceLabel(c, names) });
+  /** An invoice in an Other… list, said in full: its number, its customer, what is open on it. */
+  const invoiceButton = (i: BooksInvoice): BankButton => ({
+    id: choiceId({ choice: "invoice", invoiceId: i.id }),
+    label: [`On ${i.number}`, i.customer?.trim() || null, `${sayDollars(i.balanceCents / 100)} open`].filter(Boolean).join(" · "),
+  });
+  /** A single deposit's Other… list: the invoices it can go on (open for at least its money), then
+   *  the rest of the money-in answers. */
+  const othersForDeposit = (cents: number): BankButton[] => [
+    ...books.invoices.filter((i) => i.balanceCents >= cents).map(invoiceButton),
+    ...everyChoice("in", books, false).map(inButton),
+  ];
   const byKey = new Map(dl.lines.map((l) => [l.key, l]));
   const sorted = new Map<string, { label: string; n: number; cents: number }>();
   for (const [key, d] of plan.dispositions) {
@@ -1715,6 +1729,7 @@ export function bankViewOf(dl: BankDownload, plan: BankPlan, books: BankBooks, o
         guess: g.guess,
         hint: g.hint ?? null,
         buttons: g.buttons.map((id) => ({ id, label: label(id) })),
+        ...(g.direction === "in" && g.single ? { others: othersForDeposit(g.cents) } : {}),
       };
     }),
     otherOut: everyChoice("out", books, false).map(button),

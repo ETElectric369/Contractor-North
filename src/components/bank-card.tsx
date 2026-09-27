@@ -250,7 +250,7 @@ export function BankCard({ itemId, view, run, busy, working }: { itemId: string;
                   return next;
                 })
               }
-              others={r.direction === "in" ? (r.single ? view.otherInSingle : view.otherIn) : view.otherOut}
+              others={r.others ?? (r.direction === "in" ? (r.single ? view.otherInSingle : view.otherIn) : view.otherOut)}
               working={working}
             />
           ))}

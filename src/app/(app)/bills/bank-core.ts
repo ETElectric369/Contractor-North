@@ -179,7 +179,13 @@ export async function loadBankBooks(supabase: Db, orgId: string, dl: BankDownloa
     ),
     supabase.from("supplier_accounts").select("id, name, account_number, branch_code, on_account").eq("org_id", orgId).order("name").limit(500),
     supabase.from("supplier_aliases").select("supplier_account_id, alias").eq("org_id", orgId).limit(5000),
-    supabase.from("invoices").select("id, invoice_number, total, amount_paid, status").eq("org_id", orgId).in("status", ["sent", "partial", "overdue"]).order("created_at", { ascending: false }).limit(500),
+    supabase
+      .from("invoices")
+      .select("id, invoice_number, total, amount_paid, status, customers(name)")
+      .eq("org_id", orgId)
+      .in("status", ["sent", "partial", "overdue"])
+      .order("created_at", { ascending: false })
+      .limit(500),
     supabase.from("profiles").select("id, full_name, role, active").eq("org_id", orgId).eq("active", true).neq("role", "owner").limit(200),
     supabase.from("bank_rules").select("id, direction, merchant_key, choice, bucket, cost_kind, supplier_account_id, profile_id, min_cents, max_cents").eq("org_id", orgId).limit(5000),
     supabase.from("pay_payments").select("profile_id, amount").eq("org_id", orgId).is("voided_at", null).order("paid_on", { ascending: false }).limit(2000),
@@ -274,7 +280,12 @@ export async function loadBankBooks(supabase: Db, orgId: string, dl: BankDownloa
     pettyCash: (pettyR.rows as any[]).map((p) => ({ id: String(p.id), cents: centsOf(p.amount), day: String(p.tx_date), kind: String(p.kind ?? "") })),
     accounts,
     invoices: ((invR.data ?? []) as any[])
-      .map((i) => ({ id: String(i.id), number: String(i.invoice_number ?? "Invoice"), balanceCents: centsOf(invoiceBalance(i.total, i.amount_paid)) }))
+      .map((i) => ({
+        id: String(i.id),
+        number: String(i.invoice_number ?? "Invoice"),
+        balanceCents: centsOf(invoiceBalance(i.total, i.amount_paid)),
+        customer: (Array.isArray(i.customers) ? i.customers[0]?.name : i.customers?.name) ?? null,
+      }))
       .filter((i) => i.balanceCents > 0),
     crew: ((peopleR.data ?? []) as any[]).map((p) => ({ id: String(p.id), name: String(p.full_name ?? "").trim() || "Crew" })),
     rules: ((ruleR.data ?? []) as any[]).map((r) => ({

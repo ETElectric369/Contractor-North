@@ -836,6 +836,21 @@ describe("the card and the person's answers", () => {
     expect(stranger.refused[0]).toMatch(/isn't on your crew/);
   });
 
+  it("a deposit's Other… list offers only the invoices open for its money, each said in full", () => {
+    const dl = readBankTable(parseCSV(`Date,Description,Amount\n09/12/2026,DEPOSIT,1275.00\n`), "x.csv", hash)!;
+    const books = ORG_BOOKS({
+      invoices: [
+        { id: "inv-2", number: "INV-2", balanceCents: 5000, customer: "Small Job Co" },
+        { id: "inv-3", number: "INV-3", balanceCents: 200000, customer: "Pat Customer" },
+      ],
+    });
+    const view = bankViewOf(dl, planBankDownload(dl, books), books);
+    const others = view.rows[0].others!;
+    expect(others[0]).toEqual({ id: "invoice:inv-3", label: "On INV-3 · Pat Customer · $2,000.00 open" });
+    expect(others.some((o) => o.id === "invoice:inv-2")).toBe(false);
+    expect(others.map((o) => o.id)).toContain("other_income");
+  });
+
   it("two deposits on one invoice are held to its balance together", () => {
     const dl = readBankTable(parseCSV(`Date,Description,Amount\n09/10/2026,DEPOSIT,500.00\n09/12/2026,DEPOSIT,500.00\n`), "x.csv", hash)!;
     const books = ORG_BOOKS({ invoices: [{ id: "inv-9", number: "INV-9", balanceCents: 50000 }] });
