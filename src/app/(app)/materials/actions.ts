@@ -737,7 +737,7 @@ export async function generateMaterialDraft(
     return {
       ok: false,
       error: e?.message?.includes("ANTHROPIC_API_KEY")
-        ? "Add your ANTHROPIC_API_KEY to enable AI generation."
+        ? "AI isn't available right now. Try again later."
         : `AI generation failed: ${e?.message ?? "unknown error"}`,
     };
   }

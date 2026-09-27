@@ -11,7 +11,7 @@ export async function GET(req: Request) {
   const site = process.env.NEXT_PUBLIC_SITE_URL || "";
   if (!qboConfigured()) {
     return new NextResponse(
-      "QuickBooks isn't configured. Add QBO_CLIENT_ID and QBO_CLIENT_SECRET.",
+      "QuickBooks can't be connected right now.",
       { status: 503 },
     );
   }

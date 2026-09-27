@@ -1750,7 +1750,7 @@ ${jobLines.join("\n") || "(none)"}`,
   } catch (e: any) {
     return {
       ok: false,
-      message: e?.message?.includes("ANTHROPIC_API_KEY") ? "AI review needs the API key set." : "AI couldn't review this one.",
+      message: e?.message?.includes("ANTHROPIC_API_KEY") ? "AI review isn't available right now. Try again later." : "AI couldn't review this one.",
     };
   }
 
