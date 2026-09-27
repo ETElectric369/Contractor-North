@@ -82,9 +82,10 @@ d("0357: Already Billed", () => {
       await asServer();
     }
   };
-  const unmark = async (who: string, line: string, ids: string[]) => {
+  const unmark = async (who: string, line: string, ids: string[], whole?: boolean) => {
     await as(who);
     try {
+      if (whole !== undefined) return (await one("select public.unmark_already_billed($1, $2::uuid[], $3) as r", [line, ids, whole])).r;
       return (await one("select public.unmark_already_billed($1, $2::uuid[]) as r", [line, ids])).r;
     } finally {
       await asServer();
@@ -478,6 +479,34 @@ d("0357: Already Billed", () => {
     st = await state(labor);
     expect(st.source_ids).toEqual([]);
     expect(st.hand).toEqual([]);
+  });
+
+  it("a mark's own Undo takes off exactly what it added: an earlier, separate mark of the same shift stays on", async () => {
+    if (!go()) return;
+    const inv = await invoice(jobA, "paid");
+    const labor = await line(inv, { description: "Labor - TEST Tech", qty: 8, unit: "hr", price: 95 });
+    await settleTotal(inv);
+    // The first piece is marked while the second (a Switch Job's piece) is still running.
+    const p = await shift(jobA, "2001-08-10");
+    const s2 = (
+      await one(
+        `insert into public.time_entries (org_id, profile_id, job_id, clock_in, lunch_minutes, status, source, split_from, split_how)
+         values ($1, $2, $3, '2001-08-10T23:00:00Z', 0, 'open', 'app', $4, 'live') returning id`,
+        [org, tech, jobA, p],
+      )
+    ).id as string;
+    await mark(staff, labor, [p]);
+    await c.query("update public.time_entries set clock_out = '2001-08-11T01:00:00Z', status = 'closed' where id = $1", [s2]);
+    await mark(staff, labor, [s2]);
+    expect((await state(labor)).hand).toEqual([p, s2]);
+    // Undo of the second mark: only the second piece comes off.
+    const r = await unmark(staff, labor, [s2], false);
+    expect(r.removed).toEqual([s2]);
+    expect((await state(labor)).hand).toEqual([p]);
+    // Not Billed After All (whole, the default) takes the shift off whole.
+    await mark(staff, labor, [s2]);
+    expect([...(await unmark(staff, labor, [s2])).removed].sort()).toEqual([p, s2].sort());
+    expect((await state(labor)).hand).toEqual([]);
   });
 
   it("a piece the importer joins to an edited labor line stays the importer's claim: Not Billed After All never releases hours the line still charges for", async () => {

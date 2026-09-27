@@ -24,7 +24,7 @@
 --          holds the parent; without this, Undo would release half a shift and say nothing. Only on
 --          a write that leaves the line's quantity and price alone: an importer that joins a piece
 --          to an edited line raises its quantity, and that piece stays the importer's claim.
---   3. mark_already_billed(line, ids) and unmark_already_billed(line, ids), SECURITY INVOKER: they
+--   3. mark_already_billed(line, ids) and unmark_already_billed(line, ids, whole), SECURITY INVOKER: they
 --      run as the person, so RLS decides who (invoice lines are staff-only, 0056: a tech is
 --      refused). Mark refuses, in words, with nothing changed:
 --        another company's line or rows; a draft (Add To puts it there), void or deposit invoice; a
@@ -402,7 +402,10 @@ $$;
 comment on function public.mark_already_billed(uuid, uuid[]) is
   'Already Billed (0357): a line on a sent invoice claims receipts, orders, shifts or whole takes it already charged for by hand. Claim lists only; refuses anything that would move a total or status. SECURITY INVOKER: RLS decides who.';
 
-create or replace function public.unmark_already_billed(p_line uuid, p_ids uuid[])
+-- One signature: an earlier copy of this migration made it (uuid, uuid[]), and a call naming only
+-- p_line and p_ids would find both.
+drop function if exists public.unmark_already_billed(uuid, uuid[]);
+create or replace function public.unmark_already_billed(p_line uuid, p_ids uuid[], p_whole boolean default true)
 returns jsonb
 language plpgsql
 security invoker
@@ -453,16 +456,19 @@ begin
   if exists (select 1 from unnest(v_ids) as x where not (x = any (v_line.hand_claims))) then
     raise exception 'Only what was marked as already billed by hand comes off here; the rest is on % from an import. Nothing was changed.', v_num using errcode = 'P0001';
   end if;
-  -- A SPLIT SHIFT COMES OFF WHOLE: every piece of the same shift this line holds by hand goes with it.
-  -- A TAKE FROM STOCK COMES OFF WHOLE too, as it went on (0343 judges only ids that are added, so a
-  -- take left half on would read as billed and its other half would never be).
+  -- A SPLIT SHIFT COMES OFF WHOLE: every piece of the same shift this line holds by hand goes with it
+  -- (Not Billed After All). p_whole false is a mark's own Undo: exactly what that mark added, so an
+  -- earlier, separate mark of another piece of the same shift stays on.
+  -- A TAKE FROM STOCK COMES OFF WHOLE, always, as it went on (0343 judges only ids that are added, so
+  -- a take left half on would read as billed and its other half would never be).
   select coalesce(array_agg(distinct h), '{}'::uuid[]) into v_remove
     from (
       select unnest(v_ids) as h
       union
       select t.id
         from public.time_entries t
-       where t.id = any (v_line.hand_claims)
+       where coalesce(p_whole, true)
+         and t.id = any (v_line.hand_claims)
          and t.org_id = v_org
          and coalesce(t.split_from, t.id) in (select coalesce(t2.split_from, t2.id) from public.time_entries t2 where t2.id = any (v_ids) and t2.org_id = v_org)
       union
@@ -500,21 +506,21 @@ begin
 end;
 $$;
 
-comment on function public.unmark_already_billed(uuid, uuid[]) is
-  'Not Billed After All (0357): takes ids a person marked as already billed back off a line (a split shift''s pieces together, a take''s moves together). Never an importer''s claim; refuses anything that would move a total or status. SECURITY INVOKER.';
+comment on function public.unmark_already_billed(uuid, uuid[], boolean) is
+  'Not Billed After All (0357): takes ids a person marked as already billed back off a line (a split shift''s pieces together unless p_whole is false, a mark''s own Undo; a take''s moves together always). Never an importer''s claim; refuses anything that would move a total or status. SECURITY INVOKER.';
 
 revoke all on function public.mark_already_billed(uuid, uuid[]) from public;
-revoke all on function public.unmark_already_billed(uuid, uuid[]) from public;
+revoke all on function public.unmark_already_billed(uuid, uuid[], boolean) from public;
 revoke all on function public.keep_hand_claims_honest() from public;
 do $$
 begin
   if exists (select 1 from pg_roles where rolname = 'anon') then
     execute 'revoke all on function public.mark_already_billed(uuid, uuid[]) from anon';
-    execute 'revoke all on function public.unmark_already_billed(uuid, uuid[]) from anon';
+    execute 'revoke all on function public.unmark_already_billed(uuid, uuid[], boolean) from anon';
   end if;
   if exists (select 1 from pg_roles where rolname = 'authenticated') then
     execute 'grant execute on function public.mark_already_billed(uuid, uuid[]) to authenticated';
-    execute 'grant execute on function public.unmark_already_billed(uuid, uuid[]) to authenticated';
+    execute 'grant execute on function public.unmark_already_billed(uuid, uuid[], boolean) to authenticated';
   end if;
 end $$;
 
@@ -569,7 +575,7 @@ begin
     raise exception '0357: keep_hand_claims_honest must be SECURITY DEFINER (it reads a split shift''s pieces). Nothing was changed.';
   end if;
   if exists (select 1 from pg_proc where oid in ('public.mark_already_billed(uuid, uuid[])'::regprocedure,
-                                                 'public.unmark_already_billed(uuid, uuid[])'::regprocedure) and prosecdef) then
+                                                 'public.unmark_already_billed(uuid, uuid[], boolean)'::regprocedure) and prosecdef) then
     raise exception '0357: mark/unmark_already_billed must run as the person (SECURITY INVOKER), so RLS refuses a tech. Nothing was changed.';
   end if;
   if not exists (select 1 from pg_trigger where tgname = 'invoice_items_unstamp_draw_pdfs_upd' and tgrelid = 'public.invoice_items'::regclass

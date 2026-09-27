@@ -139,7 +139,8 @@ describe("after it", () => {
     const res = await markAlreadyBilled({ jobId: J010, lineId: "li-mat", ids: ["bill-ps"], what: "Consolidated Electrical Distributors 8802-1101475" });
     expect(res.ok).toBe(true);
     expect(res.message).toBe("Consolidated Electrical Distributors 8802-1101475 is billed on INV-00023 (Materials $110.00). Nothing on INV-00023 changed.");
-    expect(res.undo).toEqual({ jobId: J010, lineId: "li-mat", ids: ["bill-ps"], what: "Consolidated Electrical Distributors 8802-1101475" });
+    // Its Undo takes off exactly what it added (whole: false), never an earlier mark of the same shift.
+    expect(res.undo).toEqual({ jobId: J010, lineId: "li-mat", ids: ["bill-ps"], what: "Consolidated Electrical Distributors 8802-1101475", whole: false });
     expect(calls.find((c) => c.table === "rpc:mark_already_billed")?.args).toEqual({ p_line: "li-mat", p_ids: ["bill-ps"] });
   });
 
@@ -161,6 +162,32 @@ describe("after it", () => {
     state.client = fake(() => ({ data: { line_id: "li-mat", invoice_id: "inv-23", invoice_number: "INV-00023", removed: ["bill-ps"] } }), calls);
     const res = await unmarkAlreadyBilled({ jobId: J010, lineId: "li-mat", ids: ["bill-ps"], what: "CED 8802-1101475" });
     expect(res.message).toBe("CED 8802-1101475 is off INV-00023 and back in Not Billed Yet. Nothing on INV-00023 changed.");
+    // Not Billed After All takes a split shift off whole (p_whole true)...
+    expect(calls.find((c) => c.table === "rpc:unmark_already_billed")?.args).toEqual({ p_line: "li-mat", p_ids: ["bill-ps"], p_whole: true });
+  });
+
+  it("a mark's own Undo asks for exactly what it added (p_whole false)", async () => {
+    state.client = fake(() => ({ data: { line_id: "li-b", invoice_id: "inv-59", invoice_number: "INV-059", removed: ["t2"] } }), calls);
+    await unmarkAlreadyBilled({ jobId: J010, lineId: "li-b", ids: ["t2"], what: "3 h of Brian Taylor's time", whole: false });
+    expect(calls.find((c) => c.table === "rpc:unmark_already_billed")?.args).toEqual({ p_line: "li-b", p_ids: ["t2"], p_whole: false });
+  });
+
+  it("when more came off than was named (the rest of a split shift), the sentence names what came off", async () => {
+    state.client = fake(
+      (table) =>
+        table === "time_entries"
+          ? {
+              data: [
+                { id: "t1", clock_in: "2026-08-10T15:00:00Z", clock_out: "2026-08-10T19:00:00Z", lunch_minutes: 0, profiles: { full_name: "Brian Taylor" } },
+                { id: "t2", clock_in: "2026-08-10T19:00:00Z", clock_out: "2026-08-10T21:30:00Z", lunch_minutes: 0, profiles: { full_name: "Brian Taylor" } },
+              ],
+            }
+          : { data: { line_id: "li-b", invoice_id: "inv-59", invoice_number: "INV-059", removed: ["t2", "t1"] } },
+      calls,
+    );
+    const res = await unmarkAlreadyBilled({ jobId: J010, lineId: "li-b", ids: ["t2"], what: "2.5 h of Brian Taylor's time" });
+    expect(res.message).toBe("6.5 h of Brian Taylor's time is off INV-059 and back in Not Billed Yet. Nothing on INV-059 changed.");
+    expect(res.undo).toEqual({ jobId: J010, lineId: "li-b", ids: ["t2", "t1"], what: "6.5 h of Brian Taylor's time" });
   });
 
   it("Purple Sage's sheet: INV-00023's typed Materials line, picked; the draft said, the deposit left out; the bill at what it cost this job", async () => {
