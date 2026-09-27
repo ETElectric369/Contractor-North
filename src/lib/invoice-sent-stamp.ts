@@ -27,6 +27,13 @@ export async function markInvoiceSent(
   supabase: { from: (t: string) => any },
   id: string,
 ): Promise<{ ok: boolean; error?: string }> {
+  // Was this bill ever in the customer's hands before? Read BEFORE the status write, because the
+  // write moves sent_at to now. A draft that already carries a sent_at went out once, came Back To
+  // Draft (which keeps the stamp) and is going out again: that is not the FIRST send, and its due
+  // date is the one the customer has been holding since, so the restamp below stands down. A read
+  // that fails says nothing either way, and the date stays - the safe side of a best-effort write.
+  const before = await supabase.from("invoices").select("sent_at").eq("id", id).maybeSingle();
+  const firstSend = !before?.error && !!before?.data && (before.data as { sent_at?: string | null }).sent_at == null;
   const patch = { status: "sent", sent_at: new Date().toISOString() };
   let res = await supabase.from("invoices").update(patch).eq("id", id).select("id");
   // A push deploys before its migration runs (cn-v576 lesson): a write naming a column that isn't
@@ -40,7 +47,7 @@ export async function markInvoiceSent(
   if (!res.data?.length) return { ok: false, error: "Invoice not found." };
   // The status write has landed: the send IS done. Anything after this line is a second write that
   // may fail on its own without taking the send back with it.
-  await restampDueOnFirstSend(supabase, id);
+  if (firstSend) await restampDueOnFirstSend(supabase, id);
   return { ok: true };
 }
 
@@ -62,8 +69,13 @@ export async function markInvoiceSent(
  * invoice's own org (the recurring cron sends on a service client, which has no boundary but the
  * one typed here). The callers recalc (and so drop the stored PDF) after this, so the PDF and the
  * customer's page read the stamped row.
+ *
+ * Exported for the one first-send door that doesn't go through markInvoiceSent: setInvoiceStatus's
+ * "Mark Sent - I Sent It Myself" on a draft that never went out. It is the same deed (the customer
+ * has the bill from today), and the draft page promised "Due N days after you send it" for it too.
+ * Every caller decides "first" the same way: the row was a draft with no sent_at before this send.
  */
-async function restampDueOnFirstSend(supabase: { from: (t: string) => any }, id: string): Promise<void> {
+export async function restampDueOnFirstSend(supabase: { from: (t: string) => any }, id: string): Promise<void> {
   try {
     const { data: row, error: readErr } = await supabase.from("invoices").select("org_id").eq("id", id).maybeSingle();
     const orgId = (row as { org_id?: string | null } | null)?.org_id ?? null;

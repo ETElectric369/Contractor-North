@@ -350,6 +350,17 @@ describe("Text on an invoice", () => {
     expect(updates.map((u) => Object.keys(u.payload))).toEqual([["sent_at"]]);
   });
 
+  it("a bill that went out, came Back To Draft and goes out again keeps its due date: that isn't the first send", async () => {
+    textingReady();
+    const updates: Q[] = [];
+    // Back To Draft keeps sent_at (Aug 1), so the draft still says the customer has held it since.
+    state.client = fakeSupabase(routes(updates, { status: "draft", sent_at: "2026-08-01T18:00:00.000Z" }));
+    expect(await textInvoice("inv-1")).toEqual({ ok: true });
+    expect(updates).toHaveLength(1);
+    expect(updates[0].payload).toMatchObject({ status: "sent" });
+    expect(updates.some((u) => "due_date" in (u.payload ?? {}))).toBe(false);
+  });
+
   it("ready but refused by the service: said plainly, and nothing is stamped", async () => {
     textingReady();
     fetchSpy.mockResolvedValueOnce(new Response("21211", { status: 400 }));

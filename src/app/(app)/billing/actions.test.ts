@@ -51,6 +51,7 @@ import {
   setInvoiceDueDate,
   settleUp,
   recordPayment,
+  setInvoiceStatus,
 } from "./actions";
 import { HELD_HERE_COLUMNS } from "@/lib/held-here";
 
@@ -1421,5 +1422,63 @@ describe("recordPayment — the payment push is paired with its bell line (W1-10
     expect([...src.matchAll(/sendPushToProfiles\(/g)]).toHaveLength(1);
     expect([...src.matchAll(/createNotifications\(/g)]).toHaveLength(1);
     expect(src).toMatch(/await createNotifications\(inv\.org_id, paidTo, \{ type: "invoice_paid", \.\.\.paidLine \}\);\s*void sendPushToProfiles\(paidTo, "invoice_paid", paidLine\);/);
+  });
+});
+
+/**
+ * MARK SENT - I SENT IT MYSELF IS A FIRST SEND TOO (W1-27). The draft page says "Due N days after
+ * you send it" for any draft whose date nobody picked, and email / text / share keep that through
+ * markInvoiceSent's restamp. The ⋯ declaration lands in setInvoiceStatus instead, so it runs the
+ * same guarded second write - only for a draft that never went out (no sent_at); a draft that came
+ * Back To Draft after it went out keeps the date the customer has been holding.
+ */
+describe("setInvoiceStatus — a draft marked sent by hand starts its terms from today (W1-27)", () => {
+  const DRAFT = "d4af0000-0000-4000-8000-000000000081";
+  const route = (row: { status: string; sent_at: string | null }, updates: Q[]) => (q: Q): Reply => {
+    if (q.table === "invoices" && q.verb === "select" && q.cols.startsWith("id, status, job_id, invoice_number, amount_paid, sent_at")) {
+      return { data: { id: DRAFT, job_id: null, invoice_number: "INV-081", amount_paid: 0, invoice_items: [], ...row } };
+    }
+    if (q.table === "invoices" && q.verb === "select" && q.cols.startsWith("status, sent_at, revised_at")) {
+      return { data: { ...row, revised_at: null, total: 900, amount_paid: 0, payments: [] } };
+    }
+    if (q.table === "invoices" && q.verb === "select" && q.cols === "org_id") return { data: { org_id: "org-1" } };
+    if (q.table === "organizations") return { data: { settings: { timezone: "America/Los_Angeles", invoice_due_days: 14 } } };
+    if (q.table === "invoices" && q.verb === "update") {
+      updates.push(q);
+      return { data: [{ id: DRAFT }] };
+    }
+    // recalcInvoice's reads (and the milestone unlink on a void).
+    if (q.table === "invoice_items" && q.verb === "select" && q.cols === "line_total") return { data: [{ line_total: 900 }] };
+    if (q.table === "payments" && q.verb === "select" && q.cols === "amount") return { data: [] };
+    if (q.table === "customer_credits") return { data: [] };
+    if (q.table === "invoices" && q.verb === "select" && q.cols === "tax_rate, status") return { data: { tax_rate: 0, status: "sent" } };
+    if (q.table === "payment_milestones") return { data: null };
+    return undefined;
+  };
+
+  it("a draft that never went out: the status write, then the due date moves to today + Net 14", async () => {
+    const updates: Q[] = [];
+    state.client = fakeSupabase(route({ status: "draft", sent_at: null }, updates), calls);
+    expect(await setInvoiceStatus(DRAFT, "sent")).toEqual({ ok: true });
+    expect(updates[0].payload).toMatchObject({ status: "sent" });
+    expect(updates[0].payload).not.toHaveProperty("due_date");
+    expect(Object.keys(updates[1].payload)).toEqual(["due_date"]);
+    const sendDay = new Date().toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" });
+    const due = new Date(Date.parse(`${sendDay}T00:00:00Z`) + 14 * 86_400_000).toISOString().slice(0, 10);
+    expect(new Date(updates[1].payload.due_date).toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" })).toBe(due);
+  });
+
+  it("a bill that went out and came Back To Draft keeps the date the customer holds", async () => {
+    const updates: Q[] = [];
+    state.client = fakeSupabase(route({ status: "draft", sent_at: "2026-08-01T18:00:00Z" }, updates), calls);
+    expect(await setInvoiceStatus(DRAFT, "sent")).toEqual({ ok: true });
+    expect(updates.some((u) => "due_date" in (u.payload ?? {}))).toBe(false);
+  });
+
+  it("any other status move never touches the date", async () => {
+    const updates: Q[] = [];
+    state.client = fakeSupabase(route({ status: "sent", sent_at: "2026-08-01T18:00:00Z" }, updates), calls);
+    expect(await setInvoiceStatus(DRAFT, "void")).toEqual({ ok: true });
+    expect(updates.some((u) => "due_date" in (u.payload ?? {}))).toBe(false);
   });
 });

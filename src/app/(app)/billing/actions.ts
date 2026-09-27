@@ -13,7 +13,7 @@ import { bustDocPdf, warmDocPdf } from "@/lib/pdf-cache";
 import { revalidateMoney } from "@/lib/revalidate-money";
 import { createClient } from "@/lib/supabase/server";
 import { deliverInvoiceEmail } from "@/lib/invoice-email";
-import { markInvoiceResent, markInvoiceSent } from "@/lib/invoice-sent-stamp";
+import { markInvoiceResent, markInvoiceSent, restampDueOnFirstSend } from "@/lib/invoice-sent-stamp";
 import { needsSendRefusal, sendDraftForPayment } from "@/lib/pay-door-send";
 import { jobBillForPayment, type JobBillRow } from "@/lib/job-bill-for-payment";
 import { hasUnsentRevision, invoiceLineEditRefusal, stampInvoiceRevised } from "@/lib/invoice-revision";
@@ -3395,6 +3395,13 @@ export async function setInvoiceStatus(
   const { data: wroteS, error } = await supabase.from("invoices").update(patch).eq("id", id).select("id");
   if (error) return { ok: false, error: dbError(error) };
   if (!wroteS?.length) return { ok: false, error: "Invoice not found." };
+  // THE FIRST SEND STARTS THE CLOCK here too (W1-27). A draft that never went out, declared sent by
+  // hand, is the customer's first copy: the draft page promised "Due N days after you send it", so
+  // the same guarded, best-effort second write as email / text / share moves an untouched due date
+  // to today + the terms (a date picked by hand stays; a failure leaves the date and never fails
+  // this). A draft that already carries a sent_at went out before and came Back To Draft: its date
+  // is the one the customer holds, so it stays. Before recalc, so the PDF reads the stamped row.
+  if (status === "sent" && cur.status === "draft" && sentAtKnown && !cur.sent_at) await restampDueOnFirstSend(supabase, id);
   // A DRAFT never auto-advances on payment (cn-v549), so a draft that was fully prepaid
   // (Jackie's Venmo before the invoice went out) leaves this call marked 'sent' and stays
   // there forever — never 'paid', permanently on the AR list. Recompute once the row is no
