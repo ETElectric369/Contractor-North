@@ -149,6 +149,14 @@ describe("extractContact", () => {
     });
   });
 
+  it("reads a JSON-LD week that repeats its days as the days it names, once each", () => {
+    const html = `<script type="application/ld+json">{"@type":"LocalBusiness","name":"Crest Electric","openingHoursSpecification":[
+      {"dayOfWeek":["Mo","Mo","Tu","We","Th","Fr","Fr"],"opens":"07:00","closes":"15:30"},
+      {"dayOfWeek":"Tu","opens":"07:00","closes":"15:30"},
+      {"dayOfWeek":["Sa"],"opens":"08:00","closes":"12:00"}]}</script>`;
+    expect(extractContact(html, "https://crest.example/").fields.hours).toBe("Mon–Fri 7 AM–3:30 PM; Sat 8 AM–12 PM");
+  });
+
   it("never takes an offered Service's name as the business's", () => {
     const html = `<script type="application/ld+json">[{"@type":"Service","name":"Panel Upgrades"},{"@type":"Organization","name":"Crest Electric"}]</script>`;
     expect(extractContact(html, "https://crest.example/").fields.name).toBe("Crest Electric");
@@ -183,6 +191,15 @@ describe("extractContact", () => {
     ["one closed itemprop tag", `<span ${'itemprop="telephone" '.repeat(70_000)}>(530) 555-0123`],
     ["street-number bait", "1 a1 Main ".repeat(140_000)],
     ["hours bait", "Mon 1-".repeat(230_000)],
+    // A JSON-LD week can be as long as the page likes: 300k days in one spec, or 30k specs of one time.
+    [
+      "repeated opening days",
+      `<script type="application/ld+json">{"@type":"LocalBusiness","name":"X","openingHoursSpecification":[{"dayOfWeek":[${'"Mo",'.repeat(300_000)}"Tu"],"opens":"08:00","closes":"17:00"}]}</script>`,
+    ],
+    [
+      "repeated opening specs",
+      `<script type="application/ld+json">{"@type":"LocalBusiness","name":"X","openingHoursSpecification":[${'{"dayOfWeek":["Mo","Tu"],"opens":"08:00","closes":"17:00"},'.repeat(25_000)}{}]}</script>`,
+    ],
   ])("stays fast on 1.5 MB of %s (a hostile page can't make it scan once per tag)", (_what, html) => {
     const t = Date.now();
     extractContact(html, "https://x.example/");

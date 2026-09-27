@@ -309,7 +309,7 @@ function time12(t: string): string {
 }
 
 /** Days as runs: [0,1,2,3,4] → "Mon–Fri", [0,2] → "Mon, Wed". */
-function dayRuns(days: number[]): string {
+function dayRuns(days: readonly number[]): string {
   const d = [...new Set(days)].sort((a, b) => a - b);
   const runs: string[] = [];
   for (let i = 0; i < d.length; ) {
@@ -321,11 +321,14 @@ function dayRuns(days: number[]): string {
   return runs.join(", ");
 }
 
-/** schema.org openingHours ("Mo-Fr 08:00-17:00") or openingHoursSpecification, in plain words. */
+/** schema.org openingHours ("Mo-Fr 08:00-17:00") or openingHoursSpecification, in plain words.
+ *  A real week is 7 days in a handful of specs, so both lists are capped: a page's own arrays are
+ *  otherwise as long as it likes (300k copies of "Mo" in 1.5 MB). Each day is SET once, so every
+ *  list stays at most 7 long whatever the page repeats. */
 function ldHours(node: Record<string, unknown>): string | undefined {
-  const spec = ([] as unknown[]).concat(node.openingHoursSpecification ?? []);
+  const spec = ([] as unknown[]).concat(node.openingHoursSpecification ?? []).slice(0, 50);
   if (spec.length) {
-    const byTime = new Map<string, number[]>();
+    const byTime = new Map<string, Set<number>>();
     for (const s of spec) {
       if (!s || typeof s !== "object") continue;
       const o = s as Record<string, unknown>;
@@ -333,15 +336,25 @@ function ldHours(node: Record<string, unknown>): string | undefined {
       const closes = clean(o.closes, 8);
       if (!opens || !closes || (opens.startsWith("00:00") && closes.startsWith("00:00"))) continue;
       const key = `${time12(opens)}–${time12(closes)}`;
-      for (const d of ([] as unknown[]).concat(o.dayOfWeek ?? [])) {
+      for (const d of ([] as unknown[]).concat(o.dayOfWeek ?? []).slice(0, 14)) {
         const i = dayIndex(d);
-        if (i !== null) byTime.set(key, [...(byTime.get(key) ?? []), i]);
+        if (i === null) continue;
+        const days = byTime.get(key) ?? new Set<number>();
+        days.add(i);
+        byTime.set(key, days);
       }
     }
-    const parts = [...byTime.entries()].sort((a, b) => Math.min(...a[1]) - Math.min(...b[1])).map(([t, days]) => `${dayRuns(days)} ${t}`);
+    const parts = [...byTime.entries()]
+      .map(([t, days]) => [t, [...days]] as const)
+      .sort((a, b) => Math.min(...a[1]) - Math.min(...b[1]))
+      .map(([t, days]) => `${dayRuns(days)} ${t}`);
     if (parts.length) return parts.join("; ");
   }
-  const oh = ([] as unknown[]).concat(node.openingHours ?? []).map((x) => clean(x, 60)).filter(Boolean) as string[];
+  const oh = ([] as unknown[])
+    .concat(node.openingHours ?? [])
+    .slice(0, 50)
+    .map((x) => clean(x, 60))
+    .filter(Boolean) as string[];
   if (!oh.length) return undefined;
   return oh
     .slice(0, 4)
