@@ -4,6 +4,7 @@ import {
   describePaper,
   fileRefusal,
   findSameNumber,
+  sameMoneyFromBank,
   guessOf,
   isPicture,
   isLinelessReturn,
@@ -195,7 +196,7 @@ describe("the bill carries what the paper IS, never a hard-coded Receipt", () =>
     expect(billCategoryFor({ doc_type: null, category: "Invoice" })).toBe("Invoice");
   });
   it("a bucket name left on the row after a business-cost filing does not become the paper's type", () => {
-    expect(billCategoryFor({ doc_type: null, category: "Gas & Truck" })).toBe("Receipt");
+    expect(billCategoryFor({ doc_type: null, category: "Auto" })).toBe("Receipt");
   });
 });
 
@@ -211,7 +212,7 @@ describe("where it goes: only the paper picks a job (Erik, 2026-09-24)", () => {
     expect(suggestedDestination(marked, ["job-2"])).toBe("");
   });
   it("an UNMARKED bill picks nothing, not even the bucket a model liked, and has no reason line", () => {
-    const unmarked = receipt({ proposal: { bucket: "Gas & Truck" } });
+    const unmarked = receipt({ proposal: { bucket: "Fuel" } });
     expect(suggestedDestination(unmarked, ["job-1"])).toBe("");
     expect(shownDestination(null, unmarked, ["job-1"])).toBe("");
     expect(pickedBecause(unmarked)).toBeNull();
@@ -219,7 +220,7 @@ describe("where it goes: only the paper picks a job (Erik, 2026-09-24)", () => {
     // until one is.
     expect(fileRefusal(unmarked, null)).toMatch(/Pick where it goes first: a job, or a business cost bucket/);
     expect(fileRefusal(unmarked, parseDestination("job:job-1"))).toBeNull();
-    expect(fileRefusal(unmarked, parseDestination("cost:Gas & Truck"))).toBeNull();
+    expect(fileRefusal(unmarked, parseDestination("cost:Fuel"))).toBeNull();
   });
   it("a MODEL'S GUESS never pre-selects: it is a one-tap chip", () => {
     // The reader's own job_id, AI Suggest's pick, and a job a model wrote before marks existed.
@@ -230,7 +231,7 @@ describe("where it goes: only the paper picks a job (Erik, 2026-09-24)", () => {
       expect(guessOf(guessed, ["job-1"])).toBe("job:job-1");
     }
     // A bucket guess is a chip too, and Fees is never offered.
-    expect(guessOf(receipt({ proposal: { bucket: "Gas & Truck" } }), [])).toBe("cost:Gas & Truck");
+    expect(guessOf(receipt({ proposal: { bucket: "Fuel" } }), [])).toBe("cost:Fuel");
     expect(guessOf(receipt({ proposal: { bucket: "Fees" } }), [])).toBeNull();
     // A guess that is the job the paper already picked is not offered twice.
     expect(guessOf(receipt({ proposal: { jobId: "job-1", jobFrom: "address", guessJobId: "job-1" } }), ["job-1"])).toBeNull();
@@ -586,6 +587,32 @@ describe("a plain picture asks what it is first", () => {
   it("Something Else keeps the picture on a job or in files, as any paper that isn't a cost", () => {
     expect(fileRefusal(picture(), parseDestination("keep"))).toBeNull();
     expect(fileRefusal(picture(), parseDestination("job:job-1"))).toBeNull();
+  });
+});
+
+describe("a bank download, described", () => {
+  it("says what it is and how many lines, and leaves the account to the card's headline", () => {
+    const item = receipt({ doc_type: "statement", proposal: { bankImport: { download: { v: 1, name: "x", last4: "1234", from: null, to: null, lines: [{}, {}] as never, skipped: [], header: [] } } } });
+    expect(describePaper(item)).toBe("Bank Download, 2 lines");
+  });
+});
+
+describe("sameMoneyFromBank: a purchase a bank download already wrote", () => {
+  const bankBill = { id: "bill-bank", supplier: "1111-SHELL OIL 12345 ANYTOWN", bill_number: null, amount: 62.1, bill_date: "2026-09-12", job_id: null, superseded_by_bill_id: null };
+  it("a receipt of the same money within 3 days is that bill, whatever its number", () => {
+    const pump = receipt({ vendor: "Shell", amount: 62.1, item_date: "2026-09-13", doc_number: null });
+    const m = sameMoneyFromBank(pump, [bankBill]);
+    expect(m).toEqual([
+      { kind: "bill", billId: "bill-bank", jobId: null, sentence: "Already on the books: 1111-SHELL OIL 12345 ANYTOWN, $62.10, 2026-09-12, from the bank download (a business cost)." },
+    ]);
+  });
+  it("another amount, a day 4 apart, a job's bill, or a paper that isn't a cost is not", () => {
+    expect(sameMoneyFromBank(receipt({ amount: 62.11, item_date: "2026-09-12" }), [bankBill])).toEqual([]);
+    expect(sameMoneyFromBank(receipt({ amount: 62.1, item_date: "2026-09-16" }), [bankBill])).toEqual([]);
+    expect(sameMoneyFromBank(receipt({ amount: 62.1, item_date: "2026-09-12" }), [{ ...bankBill, job_id: "job-1" }])).toEqual([]);
+    expect(sameMoneyFromBank(receipt({ amount: 62.1, item_date: "2026-09-12", doc_type: "not_a_cost" }), [bankBill])).toEqual([]);
+    // The bill this paper made is never its own twin.
+    expect(sameMoneyFromBank(receipt({ amount: 62.1, item_date: "2026-09-12", bill_id: "bill-bank" }), [bankBill])).toEqual([]);
   });
 });
 

@@ -145,7 +145,7 @@ const BILLS = [
   bill("b-dup-a", { amount: 95.27, bill_date: "2026-07-29", job_id: J030, jobs: jobRef(J030), supplier_account_id: CED, notes: "TR-34426_20260729_1.pdf", bill_line_items: ticketLines() }),
   bill("b-dup-b", { amount: 95.27, bill_date: "2026-08-28", job_id: J028, jobs: jobRef(J028), supplier_account_id: CED, notes: "85 Whit.pdf", bill_line_items: ticketLines() }),
   // A business cost with no job.
-  bill("b-gas", { supplier: "Gas & Truck", amount: 64.1, status: "paid", bill_date: "2026-09-10", category: "Gas & Truck" }),
+  bill("b-gas", { supplier: "Fuel", amount: 64.1, status: "paid", bill_date: "2026-09-10", category: "Fuel" }),
 ];
 
 const doc = (id: string, over: Record<string, unknown>) => ({

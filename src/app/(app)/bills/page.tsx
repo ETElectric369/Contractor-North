@@ -15,7 +15,7 @@ import { Card } from "@/components/ui/card";
 import { FormSubmit } from "@/components/form-submit";
 import { BillsReceipts } from "./bills-receipts";
 import { AddBusinessCostButton } from "./add-business-cost";
-import { isBusinessCostBucket } from "@/lib/business-cost-buckets";
+import { namesABucket } from "@/lib/business-cost-buckets";
 import type { ReceiptForBilling } from "./receipt-billing-card";
 import { SupplierCandidateReview, SupplierMergeReview, SupplierUnfiledSpellings } from "./supplier-merge-review";
 import { SupplierDuplicates } from "./supplier-duplicates";
@@ -54,6 +54,8 @@ import { CedPdfPicker } from "./ced-pdf-picker";
 import { BooksBeginLine } from "./books-begin-line";
 import { DropPaperworkButton, PaperworkDropZone, SortThese } from "./bills-drop";
 import { openListViews } from "./open-list-core";
+import { bankViews } from "./bank-core";
+import type { BankView } from "@/lib/bank-download";
 import type { OpenListView } from "@/lib/supplier-open-list";
 import type { PaperRowItem } from "@/components/paperwork-row";
 import type { NumberMatch } from "@/lib/paperwork";
@@ -436,11 +438,18 @@ export default async function BillsPage({
   const signBillPapers = async () => {
     billPaperUrls = await signDocumentUrls(supabase, billTies.map((t) => t.file_url));
   };
-  await Promise.all([signPaths(), readClaims(), signPapers(), viewLists(), readAbReach(), signBillPapers()]);
+  // A BANK DOWNLOAD waiting in Sort These is sorted against the books as the page loads (bank-core),
+  // so its card is never stale. Nothing waiting, nothing read.
+  let bankCards: Record<string, BankView> = {};
+  const viewBanks = async () => {
+    bankCards = await bankViews(supabase, orgId, papers);
+  };
+  await Promise.all([signPaths(), readClaims(), signPapers(), viewLists(), readAbReach(), signBillPapers(), viewBanks()]);
   const paperItems: PaperRowItem[] = rematchTray(papers, markCtx).map((i) => ({
     ...i,
     signedUrl: (i.file_url && paperUrls.get(i.file_url)) || null,
     open_list: listViews[i.id] ?? null,
+    bank: bankCards[i.id] ?? null,
   }));
   const paperMatches: Record<string, NumberMatch[]> = Object.fromEntries(paperItems.map((i) => [i.id, matchesOnBooks(i, books)]));
   // Open AND finished jobs (audit v994, PR1): a ticket that lands after a job is complete is still
@@ -802,10 +811,10 @@ export default async function BillsPage({
     // exactly as it reads today, rather than becoming a nameless row in a card about names.
     if (!alias) continue;
     // Nor is a business cost saved with no Where: Add Business Cost puts the bucket's own name in
-    // the supplier field ("Gas & Truck"), and offering to give "Gas & Truck" its own supplier
-    // account would be a door to nothing. Only a settled one, though: anything still owed stays
-    // in the count, so no unpaid dollar drops out of the amber line.
-    if (!b.job_id && isBusinessCostBucket(alias) && !isOnAccountBill({ status: String(b.status ?? "") })) continue;
+    // the supplier field ("Fuel"), and offering to give "Fuel" its own supplier account would be a
+    // door to nothing (nor "Gas & Truck", the name Auto had before 0362). Only a settled one,
+    // though: anything still owed stays in the count, so no unpaid dollar drops out of the amber line.
+    if (!b.job_id && namesABucket(alias) && !isOnAccountBill({ status: String(b.status ?? "") })) continue;
     const key = spellingKey(alias);
     const g = unfiled.get(key) ?? { alias, bills: 0, total: 0, unpaid: 0, unpaidBills: 0 };
     const amount = Number(b.amount) || 0;

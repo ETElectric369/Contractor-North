@@ -60,8 +60,9 @@ describe("PaperworkRow", () => {
     expect(html).not.toMatch(/<option value="[^"]+" selected=""/);
     expect(html).not.toContain("Job picked from");
     expect(html).toMatch(/<button[^>]*disabled=""[^>]*title="Pick where it goes first/);
-    // The six buckets are offered for a cost.
-    for (const b of ["Gas &amp; Truck", "Tools &amp; Supplies", "Phone &amp; Office", "Insurance &amp; Licenses", "Fees", "Other"]) expect(html).toContain(b);
+    // Every bucket is offered for a cost, Fuel and Auto included.
+    for (const b of ["Fuel", "Auto", "Tools &amp; Supplies", "Phone &amp; Office", "Insurance &amp; Licenses", "Fees", "Other"]) expect(html).toContain(`value="cost:${b}"`);
+    expect(html).not.toContain("Gas &amp; Truck");
   });
 
   it("a bill whose PAPER names the job comes in with it picked, and says why in a few words; File It is open", () => {
@@ -135,9 +136,9 @@ describe("PaperworkRow", () => {
   });
 
   it("a bucket a model liked is a guess too: offered, never picked", () => {
-    const html = render({ proposal: { bucket: "Gas & Truck" } });
+    const html = render({ proposal: { bucket: "Fuel" } });
     expect(html).not.toMatch(/<option value="[^"]+" selected=""/);
-    expect(html).toMatch(/A Guess: (<!-- -->)?Business Cost, Gas &amp; Truck/);
+    expect(html).toMatch(/A Guess: (<!-- -->)?Business Cost, Fuel/);
     expect(html).toMatch(/>Where does this go\?<\/p>/);
   });
 

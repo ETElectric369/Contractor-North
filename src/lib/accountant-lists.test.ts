@@ -252,6 +252,30 @@ describe("Tools: Tools & Supplies tickets, and tools the company kept off other 
     expect(bought.rows[0].slice(0, 5)).toEqual(["2026-09-20", "12/2 NM-B", 250, "ft", 180.17]);
     expect(bought.total).toBe(180.17);
   });
+  it("a tool bought on a Fuel or an Auto ticket says which: Fuel and Auto are two buckets, and a Gas & Truck row not yet renamed reads Auto", () => {
+    const inp = inputs();
+    inp.bills.push(
+      { id: "fu", supplier: "Corner Store", bill_number: null, bill_date: "2026-09-05", created_at: "2026-09-05T20:00:00Z", job_id: null, amount: "80", category: "Fuel", on_shelf: false },
+      { id: "au", supplier: "Auto Parts Co", bill_number: null, bill_date: "2026-09-06", created_at: "2026-09-06T20:00:00Z", job_id: null, amount: "30", category: "Auto", on_shelf: false },
+      { id: "gt", supplier: "Auto Parts Co", bill_number: null, bill_date: "2026-09-07", created_at: "2026-09-07T20:00:00Z", job_id: null, amount: "12", category: "Gas & Truck", on_shelf: false },
+    );
+    inp.lines.push(
+      { id: "fu1", bill_id: "fu", description: "Unleaded", quantity: 1, unit_price: 70, amount: 70, category: "Fuel", billable: true, billed_amount: null },
+      { id: "fu2", bill_id: "fu", description: "Tire gauge", quantity: 1, unit_price: 10, amount: 10, category: "Tools", billable: true, billed_amount: null },
+      { id: "au1", bill_id: "au", description: "Socket set", quantity: 1, unit_price: 30, amount: 30, category: "Tools", billable: true, billed_amount: null },
+      { id: "gt1", bill_id: "gt", description: "Tow strap", quantity: 1, unit_price: 12, amount: 12, category: "Tools", billable: true, billed_amount: null },
+    );
+    const filedAs = Object.fromEntries(
+      toolsList(inp, SEPT, TZ)
+        .rows.filter((r) => r[0] !== "Total")
+        .map((r) => [r[3], r[col("tools", "Filed As")]]),
+    );
+    expect(filedAs["Tire gauge"]).toBe("Fuel");
+    expect(filedAs["Socket set"]).toBe("Auto");
+    expect(filedAs["Tow strap"]).toBe("Auto");
+    expect(Object.values(filedAs)).not.toContain("Gas & Truck");
+  });
+
   it("a tool billed to the customer is not the company's: it is on the report-only list, with its invoice, never changed", () => {
     const b = toolsBilledList(inputs(), TZ);
     expect(b.header).toEqual(["Date", "Supplier", "Job Number", "Job", "What", "Billed To Customer (At Cost)", "Invoice"]);

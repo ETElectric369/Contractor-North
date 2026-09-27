@@ -1609,8 +1609,8 @@ export async function recordSupplierInvoiceAsBill(input: {
   toShelf?: TicketLineChoice[] | null;
   /**
    * BUSINESS COST (Bills plan, Wave A): a person says this paper is the company's own, in one of
-   * the six buckets. The bill has no job and carries the bucket as its category, exactly the shape
-   * Add Business Cost writes. Anything that is not one of the six is refused, never guessed at.
+   * the business-cost buckets. The bill has no job and carries the bucket as its category, exactly the shape
+   * Add Business Cost writes. Anything that is not one of them is refused, never guessed at.
    */
   businessCost?: string | null;
   /**
@@ -1632,7 +1632,7 @@ export async function recordSupplierInvoiceAsBill(input: {
   const notSameAs = new Set((cardDoor ? (input.notSameAs as unknown[]) : []).map((id) => String(id ?? "")).filter(Boolean));
   const wantsBucket = input?.businessCost != null && String(input.businessCost).trim() !== "";
   if (wantsBucket && !isBusinessCostBucket(input.businessCost))
-    return { ok: false, error: `Pick one of the six business-cost buckets: ${BUSINESS_COST_BUCKETS.join(", ")}. Nothing was written.` };
+    return { ok: false, error: `Pick one of the business-cost buckets: ${BUSINESS_COST_BUCKETS.join(", ")}. Nothing was written.` };
   const bucket: BusinessCostBucket | null = wantsBucket && !toShelf ? (input.businessCost as BusinessCostBucket) : null;
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };

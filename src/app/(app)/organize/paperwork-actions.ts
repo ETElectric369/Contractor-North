@@ -44,6 +44,7 @@ const ALREADY = (row: {
   // that isn't there; the way back is the paper's own Undo.
   const how = proposalOf(row).filed?.how;
   if (how === "open_list") return `Already In: this supplier list was applied ${when}. Undo it in Organize, under Archive, to apply it again.`;
+  if (how === "bank_download") return `Already In: this bank download was applied ${when}. Undo it in Organize, under Archive, to apply it again.`;
   if (!row.bill_id && !row.tied_bill_id && !row.document_id && !row.petty_cash_id && (!how || how === "bill" || how === "photo"))
     return `Already In: filed ${when}, but what it filed is gone. Find it in Organize, under Archive, and press Back to file it again.`;
   const where = row.jobs?.job_number ? `on ${row.jobs.job_number}${row.jobs.name ? ` ${row.jobs.name}` : ""}` : row.bill_id ? "as a business cost" : "in files";

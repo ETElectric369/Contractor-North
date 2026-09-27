@@ -90,7 +90,9 @@ describe("every door that writes payments.method writes a key", () => {
   it("no other code writes a method into payments", () => {
     // If a third writer appears it has to be added here on purpose, with its key. (The database
     // trigger from 0287 backs all of them regardless.)
-    const writers = new Set(["src/app/(app)/billing/actions.ts", "src/app/api/stripe/webhook/route.ts"]);
+    // The bank download (2026-09-27) puts a deposit a person placed on an invoice, keyed.
+    const writers = new Set(["src/app/(app)/billing/actions.ts", "src/app/api/stripe/webhook/route.ts", "src/app/(app)/bills/bank-core.ts"]);
+    expect(code("src/app/(app)/bills/bank-core.ts")).toContain("method: paymentMethodKey(depositMethod(w.line.description))");
     const files = (readdirSync(join(process.cwd(), "src"), { recursive: true }) as string[])
       .filter((f) => /\.(ts|tsx)$/.test(f) && !/\.test\.tsx?$/.test(f))
       .map((f) => join("src", f));

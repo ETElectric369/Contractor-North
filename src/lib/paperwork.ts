@@ -18,6 +18,7 @@
 import { BUSINESS_COST_BUCKETS, isBusinessCostBucket, looksLikeSupplierFee, type BusinessCostBucket } from "@/lib/business-cost-buckets";
 import { accountForSupplier, type SupplierAliasIndex } from "@/lib/supplier-identity";
 import type { StoredOpenList } from "@/lib/supplier-open-list";
+import type { StoredBank } from "@/lib/bank-download";
 import { billsCarryingLongNumberElsewhere, billsCarryingNumber, normalizeDocNumber, sameSupplier, type LedgerBill } from "@/lib/same-purchase";
 import { cleanLines, type BillLine as PaperLine } from "@/lib/paper-lines";
 import { SHELF_NEEDS_LINES, SHELF_NO_RETURNS } from "@/lib/shelf-plan";
@@ -53,6 +54,9 @@ export const NOT_FILED_YET = "Not filed: this kind of paper goes in a later upda
 
 /** A supplier's open list is never filed as a cost or a document: its card's Apply is its door. */
 export const OPEN_LIST_NOT_FILED = "This is a supplier's list of open papers. Press Apply on its card to bring the books in line with it.";
+
+/** A bank download is never filed as a cost or a document: its card's Apply is its door. */
+export const BANK_NOT_FILED = "This is a bank download. Answer the rows that need you on its card, then press Apply.";
 
 export function paperTypeOf(raw: unknown): PaperType | null {
   const s = String(raw ?? "").trim().toLowerCase().replace(/[\s-]+/g, "_");
@@ -176,6 +180,13 @@ export type PaperProposal = {
    * changes until a person presses Apply.
    */
   openList?: StoredOpenList | null;
+  /**
+   * A BANK'S DOWNLOAD (2026-09-27): its lines as read (last 4 of the account, descriptions with long
+   * digit runs cut to their last 4; never the raw file), and what each Apply did. The page sorts it
+   * against the books every time it is shown (src/lib/bank-download.ts); nothing is written until a
+   * person presses Apply.
+   */
+  bankImport?: StoredBank | null;
   /** What AI Suggest said, kept beside the row it suggested for. */
   why?: string | null;
   /**
@@ -212,7 +223,7 @@ export function billDeletedSaid(item: PaperItem): string | null {
  * proposal: Undo clears `filed`, and the paper goes back exactly as it was read.
  */
 export type PaperFiled = {
-  how: "bill" | "tie" | "supplier_documents" | "kept" | "photo" | "task" | "note" | "open_list";
+  how: "bill" | "tie" | "supplier_documents" | "kept" | "photo" | "task" | "note" | "open_list" | "bank_download";
   /** The supplier documents a paper added, by number (what the screen names). */
   landed?: string[];
   /** The same documents by row id: what Undo and Delete take off. A paper filed before ids were kept
@@ -363,7 +374,7 @@ export const RETURN_ON_JOB_NEEDS_LINES =
 /** Has anything read this paper yet? A placeholder row is a file name and nothing else. */
 export function isRead(item: PaperItem): boolean {
   if (item.doc_type) return true;
-  if (proposalOf(item).ced || proposalOf(item).openList) return true;
+  if (proposalOf(item).ced || proposalOf(item).openList || proposalOf(item).bankImport) return true;
   // Rows read before 0295 carry what the old reader wrote, and no doc_type.
   return item.kind === "receipt" || item.kind === "note" || !!item.summary || amountOf(item) !== null;
 }
@@ -386,7 +397,7 @@ export function isPicture(item: PaperItem): boolean {
   const t = paperTypeOfItem(item);
   if (t !== "not_a_cost" && t !== "other") return false;
   const p = proposalOf(item);
-  if (p.ced || p.openList) return false;
+  if (p.ced || p.openList || p.bankImport) return false;
   return p.picture === true || String(item.category ?? "") === "Photo";
 }
 
@@ -399,6 +410,11 @@ export function describePaper(item: PaperItem): string {
   if (isPicture(item)) {
     const title = String(item.title ?? "").trim();
     return title ? `Picture, ${title}` : "Picture";
+  }
+  if (p.bankImport) {
+    // The account's last 4 is the card's own headline ("Bank ••1234 · Sep 2–Sep 25 · …"): said once.
+    const n = p.bankImport.download?.lines?.length ?? 0;
+    return `Bank Download, ${n} ${n === 1 ? "line" : "lines"}`;
   }
   if (p.openList) {
     const list = p.openList.list;
@@ -427,6 +443,7 @@ export type Readiness =
   | { state: "ready"; sentence: string }
   | { state: "supplier_documents"; sentence: string }
   | { state: "open_list"; sentence: string }
+  | { state: "bank_download"; sentence: string }
   | { state: "later"; sentence: string }
   | { state: "keep"; sentence: string }
   | { state: "picture"; sentence: string }
@@ -437,6 +454,7 @@ export function readinessOf(item: PaperItem): Readiness {
   const p = proposalOf(item);
   if (p.ced) return { state: "supplier_documents", sentence: "Ready To File: these go on the supplier documents list." };
   if (p.openList) return { state: "open_list", sentence: "Check what it changes, then Apply." };
+  if (p.bankImport) return { state: "bank_download", sentence: "Answer the rows that need you, then Apply." };
   if (p.tooBig && !isRead(item)) return { state: "too_big", sentence: "Too big to read: fill it in yourself." };
   if (!isRead(item))
     return {
@@ -535,11 +553,17 @@ function markedShelf(item: PaperItem): boolean {
 /**
  * The business cost the PAPER names (a company-use word in its PO or job box, matched exactly), on
  * a receipt or a bill that names no job and says nothing that disagrees. Never Fees.
+ *
+ * A TRUCK WORD ON A FILL-UP PICKS NOTHING. "TRUCK 2" or "VAN" in the box says which truck, and a
+ * contractor writes that on a pump receipt as often as on a repair: it cannot tell Fuel from Auto,
+ * and before Fuel was its own bucket (0362) the two were one. So when a model read the paper as Fuel
+ * (the reader, or AI Suggest) and the word says Auto, the row asks, with Fuel as the guess chip.
  */
 function markedCost(item: PaperItem): BusinessCostBucket | null {
   const p = proposalOf(item);
   const b = p.companyUse?.bucket;
   if (!b || !isBusinessCostBucket(b) || b === "Fees") return null;
+  if (b === "Auto" && p.bucket === "Fuel") return null;
   if (markedJob(p) || p.jobConflict) return null;
   const t = paperTypeOfItem(item);
   return t === "receipt" || t === "bill" ? b : null;
@@ -667,8 +691,8 @@ export function pickProvenance(settled: PaperItem, destValue: string): { filed: 
  */
 const COMPANY_WORDS: { re: RegExp; bucket: BusinessCostBucket | null; shelf?: true }[] = [
   { re: /^(SHOP )?TOOLS?$/, bucket: "Tools & Supplies" },
-  { re: /^(TRUCK|VAN)( \d{1,3})?$/, bucket: "Gas & Truck" },
-  { re: /^\d{1,3} (TRUCK|VAN)$/, bucket: "Gas & Truck" },
+  { re: /^(TRUCK|VAN)( \d{1,3})?$/, bucket: "Auto" },
+  { re: /^\d{1,3} (TRUCK|VAN)$/, bucket: "Auto" },
   { re: /^OFFICE$/, bucket: "Phone & Office" },
   { re: /^(SHOP )?STOCK$/, bucket: null, shelf: true },
   { re: /^INVENTORY$/, bucket: null, shelf: true },
@@ -1057,7 +1081,7 @@ export function rematchPaper<T extends PaperItem>(
 ): T {
   if (item.status && item.status !== "needs_review") return item;
   const p = proposalOf(item);
-  if (p.jobConflict || p.ced || p.openList) return item;
+  if (p.jobConflict || p.ced || p.openList || p.bankImport) return item;
   if (!isRead(item)) return item;
   if (markedJob(p)) {
     // A PICK A STREET MADE BEFORE FINISHED JOBS COUNTED (PR1) is asked again: if today's rules say
@@ -1124,12 +1148,14 @@ export function fileRefusal(item: PaperItem, dest: PaperDestination | null): str
     if (r.state === "filed") return "This is already filed. Undo it first to file it somewhere else.";
     if (r.state === "not_read") return "This hasn't been read yet. Press Read Now first.";
     if (r.state === "open_list") return OPEN_LIST_NOT_FILED;
+    if (r.state === "bank_download") return BANK_NOT_FILED;
     if (r.state === "picture" || r.state === "keep") return null;
     return "This was read as paper, not a picture. File it as it is, or change its type in Fix Details.";
   }
   if (r.state === "filed") return "This is already filed. Undo it first to file it somewhere else.";
   if (r.state === "not_read") return "This hasn't been read yet. Press Read Now, or Fix Details and fill it in.";
   if (r.state === "open_list") return OPEN_LIST_NOT_FILED;
+  if (r.state === "bank_download") return BANK_NOT_FILED;
   if (dest.type === "stock") {
     // THE SHOP SHELF (Phase 2): a receipt or bill, with its total, read line by line. A roll on
     // the shelf IS a line (pieces are taken from it), so a ticket with no lines can't go there yet.
@@ -1288,6 +1314,41 @@ export function findSameNumber(
 }
 
 /**
+ * THE SAME PURCHASE, WRITTEN BY A BANK DOWNLOAD (2026-09-27). A bank line placed as a business cost
+ * becomes a no-job bill with no number (the bank prints none), so the number check above can never
+ * find it: a pump receipt snapped after the download filed that fill-up a second time. A receipt or
+ * bill of the SAME MONEY, dated within 3 days of a bill a bank download wrote, is that bill (a
+ * "bill" match: Same Purchase: Tie Them, or Different Purchase: File It Anyway). The reverse order,
+ * the receipt first, is the bank download's own match.
+ */
+export function sameMoneyFromBank(item: PaperItem, bankBills: readonly BookedBill[], already: readonly NumberMatch[] = []): NumberMatch[] {
+  const type = paperTypeOfItem(item);
+  if (type !== "receipt" && type !== "bill") return [];
+  const amount = amountOf(item);
+  const day = String(item.item_date ?? "").slice(0, 10);
+  if (amount === null || !/^\d{4}-\d{2}-\d{2}$/.test(day)) return [];
+  const cents = Math.round(amount * 100);
+  const apart = (a: string, b: string) => Math.abs(Date.parse(`${a}T12:00:00Z`) - Date.parse(`${b}T12:00:00Z`)) / 86_400_000;
+  return bankBills
+    .filter(
+      (b) =>
+        b.id !== item.bill_id &&
+        !b.job_id &&
+        !b.superseded_by_bill_id &&
+        !already.some((m) => (m.kind === "bill" || m.kind === "maybe_bill") && m.billId === b.id) &&
+        Math.round(Number(b.amount) * 100) === cents &&
+        !!b.bill_date &&
+        apart(String(b.bill_date).slice(0, 10), day) <= 3,
+    )
+    .map((b) => ({
+      kind: "bill" as const,
+      billId: b.id,
+      jobId: null,
+      sentence: `Already on the books: ${b.supplier ?? "a bank line"}, ${money(amount)}, ${b.bill_date}, from the bank download (a business cost).`,
+    }));
+}
+
+/**
  * THE LINES A PAPER FILED TO THE SHELF WILL HAVE, in the order its bill will hold them (File It
  * writes cleanLines, pointed with the total, with sort_order = this index). The tray row counts
  * each of these and the server keys the answers back by index, so both read them from here.
@@ -1297,5 +1358,5 @@ export function shelfRowsOf(item: PaperItem): ShelfRow[] {
   return linesPointWithTotal(amountOf(item), cleanLines(item.line_items)).map((l, index) => ({ ...l, index }));
 }
 
-/** The six buckets, re-exported so a picker never needs a second import to list them. */
+/** The business-cost buckets, re-exported so a picker never needs a second import to list them. */
 export const PAPER_BUCKETS = BUSINESS_COST_BUCKETS;

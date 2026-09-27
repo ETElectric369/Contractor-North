@@ -2,8 +2,8 @@ import { ChevronRight } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { SegmentedControl } from "@/components/ui/segmented";
 import { formatCurrency } from "@/lib/utils";
-import { BUSINESS_COST_BUCKETS } from "@/lib/business-cost-buckets";
 import {
+  BUCKETS_BESIDE_FUEL,
   OWNER_MONEY_WINDOWS,
   costFigure,
   countedNotPaidLine,
@@ -90,6 +90,15 @@ export function LeftForCard({
           <>
             <div className="divide-y divide-slate-100">
               {row("Received", formatCurrency(t.received))}
+              {/* OTHER INCOME (0363): deposits a bank download placed as income no invoice holds.
+                  Already inside Received; its own chip so it is never mistaken for paid work. */}
+              {Math.abs(t.otherIncome ?? 0) >= 0.005 && (
+                <div className="flex justify-end pb-1.5">
+                  <span className="rounded-full bg-green-50 px-2.5 py-0.5 text-xs font-medium text-green-800">
+                    Includes Other Income {formatCurrency(t.otherIncome ?? 0)}
+                  </span>
+                </div>
+              )}
               {/* SHOP STOCK (0303, decision 1): what was bought for stock counts in the month it was
                   bought, because the cash is already gone. It is materials, so it rides inside
                   Materials & Bills (Erik, 2026-09-27: no line of its own); stockLine below says how
@@ -98,6 +107,17 @@ export function LeftForCard({
               {row("Crew Pay", cost(t.crewPay))}
               {Math.abs(t.crewMileagePaid) >= 0.005 && row("Crew Mileage", cost(t.crewMileagePaid))}
               {Math.abs(t.shopStockLost) >= 0.005 && row("Shop Stock Lost", cost(t.shopStockLost))}
+              {/* FUEL STANDS OUT (Erik, 2026-09-27): the Fuel bucket on its own line, never folded
+                  into Business Costs below. Said only when there is some, like the lines above. */}
+              {Math.abs(t.fuel) >= 0.005 && (
+                <div className="flex items-baseline justify-between gap-4 py-1.5">
+                  <span className="flex items-center gap-1.5 text-sm text-slate-600">
+                    <span className="inline-block h-2.5 w-2.5 shrink-0 rounded-sm bg-pink-800" aria-hidden="true" />
+                    Fuel
+                  </span>
+                  <span className="text-sm font-medium tabular-nums text-slate-800">{cost(t.fuel)}</span>
+                </div>
+              )}
               <details className="group">
                 <summary className="flex min-h-[44px] cursor-pointer list-none items-center justify-between gap-4 py-1.5 [&::-webkit-details-marker]:hidden">
                   <span className="flex items-center gap-1 text-sm text-slate-600">
@@ -107,7 +127,7 @@ export function LeftForCard({
                   <span className="text-sm font-medium tabular-nums text-slate-800">{cost(t.businessCostsTotal)}</span>
                 </summary>
                 <div className="mb-2 ml-5 border-l border-slate-100 pl-3">
-                  {BUSINESS_COST_BUCKETS.map((b) => (
+                  {BUCKETS_BESIDE_FUEL.map((b) => (
                     <div key={b} className="flex items-baseline justify-between gap-4 py-1">
                       <span className="text-xs text-slate-500">
                         {b}
