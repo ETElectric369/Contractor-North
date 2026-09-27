@@ -795,7 +795,10 @@ describe("the owner's money", () => {
     expect(describePaper(office as any)).toBe("Bank Download");
     expect(readinessOf(office as any).state).toBe("bank_download");
     // A filed download has no card: still no line, and no count.
-    expect(JSON.stringify(bankLinesStayHere({ ...row, status: "filed" }, undefined))).not.toMatch(/DENTAL|SHELL/);
+    const filed: Row = { ...row, status: "filed" };
+    const filedOut = bankLinesStayHere(filed, undefined);
+    expect(JSON.stringify(filedOut)).not.toMatch(/DENTAL|SHELL/);
+    expect(describePaper(filedOut as any)).toBe("Bank Download");
     // Any other paper goes as it is.
     const plain = { id: "p", proposal: { picture: true } };
     expect(bankLinesStayHere(plain, undefined)).toBe(plain);
