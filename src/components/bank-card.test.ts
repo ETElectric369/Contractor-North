@@ -14,7 +14,7 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh() {} }) }));
 vi.mock("@/app/(app)/bills/bank-actions", () => ({ applyBankDownload: vi.fn(), undoBankDownload: vi.fn(), swapBankDownload: vi.fn(), setBankAccount: vi.fn(), forgetBankRule: vi.fn() }));
 vi.mock("@/app/(app)/organize/paperwork-actions", () => ({ keepPaperwork: vi.fn() }));
 
-import { BankCard } from "./bank-card";
+import { BankCard, livePicks } from "./bank-card";
 import { FuelTrendCard } from "@/app/(app)/analytics/fuel-trend-card";
 
 const textOf = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/&#x27;/g, "'").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
@@ -158,5 +158,15 @@ describe("the fuel card", () => {
     for (const b of bars) expect(b.markup).toContain("min-w-11");
     expect(text).toContain("312"); // this week's figure on its bar
     expect(html).toContain("border-dashed"); // the average line
+  });
+});
+
+describe("a pick on a row that left the card", () => {
+  it("is never sent: Apply sends only the rows on the card now", () => {
+    const picks = { "out:shell": "cost:Gas & Truck:fuel", "line:abc": "other_income" };
+    // The books changed: the deposit matched, its row is gone.
+    const rows = VIEW.rows.filter((r) => r.id !== "line:abc");
+    expect(livePicks(picks, rows)).toEqual({ "out:shell": "cost:Gas & Truck:fuel" });
+    expect(livePicks(picks, VIEW.rows)).toEqual(picks);
   });
 });

@@ -148,6 +148,11 @@ function Row({
   );
 }
 
+/** The picks for rows still on the card: a row the books took away since keeps no answer. */
+export function livePicks(picks: Record<string, string>, rows: readonly { id: string }[]): Record<string, string> {
+  return Object.fromEntries(Object.entries(picks).filter(([id]) => rows.some((r) => r.id === id)));
+}
+
 export function BankCard({ itemId, view, run, busy, working }: { itemId: string; view: BankView | null | undefined; run: Run; busy: string | null; working: boolean }) {
   const router = useRouter();
   const [picks, setPicks] = useState<Record<string, string>>({});
@@ -192,7 +197,11 @@ export function BankCard({ itemId, view, run, busy, working }: { itemId: string;
     );
   }
 
-  const answered = view.rows.filter((r) => picks[r.id]).length;
+  // ONLY THE ROWS ON THE CARD NOW: after a 'books changed' refresh a picked row may be gone (its
+  // deposit matched the payment just recorded). Its pick would refuse every later Apply, and there
+  // is no row left on screen to clear it.
+  const live = livePicks(picks, view.rows);
+  const answered = view.rows.filter((r) => live[r.id]).length;
   const leftRows = view.rows.length - answered;
   const sorted = view.counts.matched + view.counts.ruled;
   const canApply = sorted + answered > 0;
@@ -200,7 +209,7 @@ export function BankCard({ itemId, view, run, busy, working }: { itemId: string;
     run(
       "apply",
       async () => {
-        const res = await applyBankDownload(itemId, { fingerprint: view.fingerprint, picks });
+        const res = await applyBankDownload(itemId, { fingerprint: view.fingerprint, picks: live });
         if (res.stale) router.refresh();
         if (res.ok) setPicks({});
         return res;
