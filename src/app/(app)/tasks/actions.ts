@@ -131,6 +131,10 @@ export async function createTask(input: {
   // …and same JOB: a same-title task for a DIFFERENT job is real work, not a twin
   // ("inspection" on two jobs). Only same-job (or both jobless) collapses.
   dupQ = jobId ? dupQ.eq("job_id", jobId) : dupQ.is("job_id", null);
+  // A REMINDER ONLY COLLAPSES ONTO ONE THE CALLER CAN SEE (0358: private to its maker and its
+  // person). 0358's read says it; this says it on a database without 0358, where the read was
+  // company-wide and a teammate's same-title Reminder answered "Already on the list" and saved nothing.
+  if (!jobId) dupQ = dupQ.or(`created_by.eq.${user.id},assigned_to.eq.${user.id}`);
   const { data: dup } = await dupQ.limit(1).maybeSingle();
   if (dup) {
     const openedOn = new Date(dup.created_at as string).toLocaleDateString("en-US", {
