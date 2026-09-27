@@ -34,6 +34,7 @@ import { readPriceBookUnits } from "@/lib/price-book-kind";
 import { contractDrawRefusal, isActualsDraw, openDraftOnJob, pulledIntoSentence, readDraftShape, type OpenDraft } from "@/lib/actuals-draw";
 import { hoursWords, joinedSentence, leftOffSentence, planLaborOffer, type LaborJoin, type OwnLaborLine } from "@/lib/labor-offer";
 import { claimsOffTheirPerson } from "@/lib/labor-claim-owner";
+import { HELD_HERE_READ_FAILED, costsKeyNames, idKeyNames, laborKeyNames, readHeldHere, withHeldHere } from "@/lib/held-here";
 import { removedLines, removedSentence, staleTombstones, textArrayLiteral } from "@/lib/import-reconcile";
 import { linesByBillId, readBillLines, readInvoiceMarkup } from "@/lib/invoice-markup-read";
 import { recalcInvoice } from "@/lib/invoice-recalc";
@@ -1262,7 +1263,14 @@ export async function importQuoteItemsIntoInvoice(invoiceId: string): Promise<Im
   // An estimate line already on another non-void invoice of this job stays there (0255): this
   // invoice takes only what nobody billed yet, instead of being refused outright as under cn-v479.
   // Read by id as well as by job, so a line billed before the quote moved is still seen as claimed.
-  const claims = await claimedSourcesOnJob(supabase, inv.job_id ?? null, invoiceId, (items as any[]).map((it) => String(it.id)));
+  const claimsElsewhere = await claimedSourcesOnJob(supabase, inv.job_id ?? null, invoiceId, (items as any[]).map((it) => String(it.id)));
+  // An estimate line this invoice already charges on another line is taken (lib/held-here).
+  const hereRead = await readHeldHere(supabase, invoiceId, "quote", idKeyNames("quote"));
+  if (!hereRead.ok) {
+    reportError("importQuote.heldHere", hereRead.error, { invoiceId });
+    return { ok: false, error: HELD_HERE_READ_FAILED };
+  }
+  const claims = withHeldHere(claimsElsewhere, hereRead.here, hereRead.ids);
   const skippedIds = (items as any[]).filter((it) => claims.owner.has(String(it.id))).map((it) => String(it.id));
   const free = (items as any[]).filter((it) => !claims.owner.has(String(it.id)));
   if (!free.length) {
@@ -1662,10 +1670,19 @@ async function importLaborCore(invoiceId: string, trustedActuals: boolean): Prom
   }
   // Claims AFTER the rows, never beside them: the read looks every candidate up BY ID as well as by
   // job, so an entry billed on another job and moved here since is still seen as claimed.
-  const claims = await claimedSourcesOnJob(supabase, inv.job_id, invoiceId, laborRowIds(labor));
+  const claimsElsewhere = await claimedSourcesOnJob(supabase, inv.job_id, invoiceId, laborRowIds(labor));
   // Migration 0255 hasn't landed yet: labor claims are unknowable, so for these few minutes the
   // old rule has to hold — never bill a second invoice's labor blind (one sentence with costs).
-  if (!claims.schemaReady && claims.invoices.length) return midUpgradeRefusal(claims);
+  if (!claimsElsewhere.schemaReady && claimsElsewhere.invoices.length) return midUpgradeRefusal(claimsElsewhere);
+  // HOURS THIS INVOICE ALREADY CHARGES BY HAND ARE TAKEN (lib/held-here): a "Labor - Brian" line
+  // typed by hand, or a shift on another person's edited line. Only the person's own edited line
+  // keeps its entries in play, so new hours still join it (labor-offer, INV-078).
+  const hereRead = await readHeldHere(supabase, invoiceId, "labor", laborKeyNames(labor.jobEntries));
+  if (!hereRead.ok) {
+    reportError("importLabor.heldHere", hereRead.error, { invoiceId });
+    return { ok: false, error: HELD_HERE_READ_FAILED };
+  }
+  const claims = withHeldHere(claimsElsewhere, hereRead.here, hereRead.ids);
   const defaultRate = getOrgSettings((org as any)?.settings).default_labor_rate; // via the settings SSOT
   // A split is a cut into ordinary entries (0288), and a piece that carries billed hours carries
   // the claim by its own id, so the free rows are simply the entries no other invoice holds.
@@ -1906,7 +1923,14 @@ async function importChangeOrdersCore(invoiceId: string, trustedActuals: boolean
   // on a job that has thousands of dollars of approved extras.
   if (readErr) return { ok: false, error: dbError(readErr) };
   // Claims AFTER the read: looked up by id as well as by job (claimedSourcesOnJob).
-  const claims = await claimedSourcesOnJob(supabase, inv.job_id, invoiceId, ((cos ?? []) as ChangeOrderRow[]).map((c) => String(c.id)));
+  const claimsElsewhere = await claimedSourcesOnJob(supabase, inv.job_id, invoiceId, ((cos ?? []) as ChangeOrderRow[]).map((c) => String(c.id)));
+  // A change order this invoice already charges on another line is taken (lib/held-here).
+  const hereRead = await readHeldHere(supabase, invoiceId, "change_orders", idKeyNames("co"));
+  if (!hereRead.ok) {
+    reportError("importChangeOrders.heldHere", hereRead.error, { invoiceId });
+    return { ok: false, error: HELD_HERE_READ_FAILED };
+  }
+  const claims = withHeldHere(claimsElsewhere, hereRead.here, hereRead.ids);
   // The two decisions worth pinning — which ones count as money, and what the customer reads —
   // live in lib/change-order-billing where they are unit-tested. A credit (negative amount) is a
   // real change order and passes straight through; only $0 is dropped.
@@ -2042,7 +2066,7 @@ async function importCostsCore(
   // lines goes onto the invoice item-by-item — real descriptions, quantities, per-item prices —
   // instead of one opaque "vendor · 1 lot" lump (Erik, 7/24). A bill without lines (hand-entered)
   // still imports as its lump.
-  const [claims, blis] = await Promise.all([
+  const [claimsElsewhere, blis] = await Promise.all([
     claimedSourcesOnJob(supabase, inv.job_id, invoiceId, [
       ...((pos ?? []) as any[]).map((p) => String(p.id)),
       ...billIds,
@@ -2051,6 +2075,24 @@ async function importCostsCore(
     readBillLines(supabase, billIds),
   ]);
   if (blis.error) return { ok: false, error: blis.error };
+  // A RECEIPT THIS INVOICE ALREADY CHARGES BY HAND IS TAKEN (lib/held-here): INV-00023's typed
+  // "Materials" line holds Purple Sage's CED bill, and INV-060's edited Home Depot line holds the
+  // two Ace receipts beside it. Without this, Materials From Costs on that paid invoice offered
+  // them again as new lines (the claim trigger allows a repeat on one invoice).
+  const hereRead = await readHeldHere(
+    supabase,
+    invoiceId,
+    "costs",
+    costsKeyNames({
+      billOfLine: new Map(blis.lines.map((l) => [String(l.id), String(l.bill_id)] as const)),
+      movesOfTake: new Map(stock.takes.map((t) => [t.group, t.moveIds] as const)),
+    }),
+  );
+  if (!hereRead.ok) {
+    reportError("importCosts.heldHere", hereRead.error, { invoiceId });
+    return { ok: false, error: HELD_HERE_READ_FAILED };
+  }
+  const claims = withHeldHere(claimsElsewhere, hereRead.here, hereRead.ids);
   // THE INVOICE'S OWN MARKUP, READ BACK FROM ITS LINES (see keepInvoiceMarkup above). A lost read
   // is not "no lines": refuse, nothing written - repricing on a guess is the bug this closes. The
   // read is lib/invoice-markup-read's, the same one the invoice page seeds its % box from, handed

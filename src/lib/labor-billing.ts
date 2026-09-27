@@ -20,6 +20,13 @@ export type LaborLine = {
   rateFrom: "bill_rate" | "level" | "default" | "none";
 };
 
+/** WHO A LABOR LINE IS FOR: the key computeJobLaborBilling groups a person's hours under, and the
+ *  `<person>` in an imported line's `labor:<person>` key. On id, falling back to name so two distinct
+ *  rate-less workers don't collapse into one bucket. One spelling, shared (lib/held-here reads it). */
+export function laborPersonKey(prof: { id?: unknown; full_name?: unknown } | null | undefined): string {
+  return String(prof?.id ?? prof?.full_name ?? "unknown");
+}
+
 /**
  * DROP THE HOURS ANOTHER INVOICE ALREADY BILLS (0255, "the invariant moves to the row").
  *
@@ -159,7 +166,7 @@ export function computeJobLaborBilling(
   // A row that adds no hours claims nothing: nothing was billed off it.
   const addHours = (prof: any, hrs: number, sourceId?: unknown) => {
     if (!(hrs > 0)) return;
-    const key = String(prof?.id ?? prof?.full_name ?? "unknown");
+    const key = laborPersonKey(prof);
     // BILL rate (what the customer is charged), NOT pay: never hourly_rate, and never a time
     // entry's rate_override (a PAY-rate override, payroll only, see payRateForEntry).
     const raw = Number(prof?.bill_rate ?? 0);
@@ -259,7 +266,9 @@ export async function fetchJobLaborRows(
     // `id` (0255): the row's identity is what a labor line CLAIMS. The projection law: the fix
     // for "which hours did that invoice cover" was a select list. `profile_id`: whose shift it is,
     // by the row's own column, which the importer checks every claim against (lib/labor-claim-owner).
-    .select("id, profile_id, clock_in, clock_out, lunch_minutes, job_code, profiles(id, full_name)")
+    // split_from: a split shift is one family (coalesce(split_from, id), 0288); Already Billed ticks
+    // and marks it whole.
+    .select("id, profile_id, clock_in, clock_out, lunch_minutes, job_code, split_from, profiles(id, full_name)")
     .eq("job_id", jobId)
     .eq("status", "closed");
   // The org's own answer to "which of these hours does a customer pay for". Fetched HERE so all

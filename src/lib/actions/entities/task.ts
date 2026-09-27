@@ -31,6 +31,18 @@ async function refuseCrossAssigneeChild(
   return null;
 }
 
+/** A JOB'S TASK HAS NO DATE, PIN OR PERSON (0358): the job's list shows a title and a checkbox, so a
+ *  date or pin put on one would be stored and never seen. Refused in words, not silently kept. */
+async function refuseOnJobTask(id: string, what: string): Promise<ActionResult | null> {
+  const supabase = await createClient();
+  const { data: t } = await supabase.from("tasks").select("job_id").eq("id", id).maybeSingle();
+  if (!t?.job_id) return null;
+  return {
+    ok: false,
+    error: `That's a job's task, and a job's list has no ${what}: it's there for whoever is on the job. For a dated nudge, make a Reminder with no job.`,
+  };
+}
+
 // BULK TRIAGE (T2): one confirmed verb sweeps MANY open tasks ("push all follow-ups to
 // Monday", "clear everything about ZZ TEST") instead of N single-task calls — the chat
 // caps writes per turn, so per-task calls can never triage a real list. Filter fields
@@ -71,12 +83,14 @@ function filterWords(f: BulkFilter): string {
 /** Resolve the filter to matching OPEN task ids through the caller's RLS-scoped client
  *  (org-wide for staff — the registry gates both verbs auth:"staff"). Bounded: more
  *  than 100 matches → refuse with an error, never sweep. */
-async function matchOpenTasks(f: BulkFilter): Promise<{ ids: string[] } | { error: string }> {
+async function matchOpenTasks(f: BulkFilter, opts?: { remindersOnly?: boolean }): Promise<{ ids: string[] } | { error: string }> {
   const supabase = await createClient();
   // Parents only (amendment 5b): subtasks never match a sweep on their own — a bulk
   // reschedule would date children the six can never show, and a bulk complete could
   // finish a child under a still-open parent. bulkComplete cascades children itself.
   let q = supabase.from("tasks").select("id").eq("status", "open").is("parent_id", null);
+  // A reschedule dates Reminders only: a job's task has no due date to move (0358).
+  if (opts?.remindersOnly) q = q.is("job_id", null);
   // Escape LIKE wildcards so a title with % / _ matches literally, not as a pattern.
   if (f.title_contains) q = q.ilike("title", `%${f.title_contains.replace(/[\\%_]/g, "\\$&")}%`);
   // ilike with wildcards escaped = case-insensitive EXACT match — the vocabulary is
@@ -93,13 +107,8 @@ async function matchOpenTasks(f: BulkFilter): Promise<{ ids: string[] } | { erro
 }
 
 function revalidateBulkViews(f: BulkFilter) {
-  revalidatePath("/tasks");
+  revalidatePath("/tasks"); // the Reminders page (the /tasks/<category> pages are gone, 0358)
   revalidatePath("/planner"); // task sweeps change My Day
-  // Only the 3 LEGACY categories have their own /tasks/<slug> page (free-form categories
-  // live on the /tasks workbench, revalidated above): the touched one when the filter names
-  // it, all three when the sweep spans categories.
-  const legacy = ["office", "operations", "sales"];
-  for (const c of legacy) if (!f.category || f.category.toLowerCase() === c) revalidatePath(`/tasks/${c}`);
   if (f.job_id) revalidatePath(`/jobs/${f.job_id}`);
 }
 
@@ -110,7 +119,7 @@ export const taskActions: Record<string, ActionDef> = {
     group: "task",
     label: "Add task",
     description:
-      "Create a task with a title. category is FREE-FORM org vocabulary (e.g. the classics office | operations | sales, or anything the org already uses like Permits) — pass the user's word verbatim, and OMIT it when none was given (the task stores as uncategorized; never invent one). Optionally capture whatever else was given: due_date (YYYY-MM-DD), job_id (resolve with list_jobs), assigned_to (a profile id), notes, priority (0 normal | 1 high | 2 urgent). Steps of ONE deliverable become subtasks: pass parent_id (an existing task's id) per step instead of minting siblings — the due date lives on the parent, never on children. focus_date (YYYY-MM-DD) pins it into that day's six on My Day — set it ONLY when the user explicitly says today/tomorrow, never inferred. A same-title open task from the last 48h is returned instead of duplicated.",
+      "Create a REMINDER or a JOB TASK. 'Remind me to…' is a Reminder: NO job_id — it is private to the person who made it (and assigned_to, if it's for someone else), and lands in their Today's 6 when dated or pinned. A job task goes on a job's one list for whoever works the job: pass job_id ONLY when the user names a job or asks for it on the job (resolve with list_jobs) — never default to the job someone is clocked into. A job task has NO assignee (the crew lead hands them out out loud) and no due date or priority: never send assigned_to with job_id. category is FREE-FORM org vocabulary (pass the user's word verbatim; OMIT when none was given). For a Reminder, optionally: due_date (YYYY-MM-DD), assigned_to (a profile id), notes, priority (0 normal | 1 high | 2 urgent). Steps of ONE deliverable become subtasks: pass parent_id (an existing task's id) per step — the due date lives on the parent. focus_date (YYYY-MM-DD) pins a Reminder into that day's six — ONLY when the user explicitly says today/tomorrow. A same-title open task from the last 48h is returned instead of duplicated. Read back where it went (the result's speak line says).",
     // Fragment-first: createTask already takes all of these — the old 2-field schema
     // silently DROPPED a spoken due date / job / assignee / note.
     input: z.object({
@@ -140,17 +149,41 @@ export const taskActions: Record<string, ActionDef> = {
         const refusal = await refuseCrossAssigneeChild(i.parent_id, person.id);
         if (refusal) return refusal;
       }
-      return createTask({
+      // WHERE IT LANDS, not only what was sent: a step with no job_id goes on its parent's job
+      // (createTask puts a step where its task lives), so the parent's job decides.
+      let jobId: string | null = job.id ?? null;
+      if (!jobId && i.parent_id) {
+        const { data: parent } = await supabase.from("tasks").select("job_id").eq("id", i.parent_id).maybeSingle();
+        jobId = (parent as { job_id?: string | null } | null)?.job_id ?? null;
+      }
+      // A JOB'S TASK HAS NO DATE, PIN OR PRIORITY (0358): the list shows a title and a checkbox, so a
+      // date put there would be stored and never seen. Left off, and the read-back says so.
+      const onJob = !!jobId;
+      const leftOff = onJob
+        ? [i.due_date ? "due date" : null, i.focus_date ? "day pin" : null, i.priority ? "priority" : null].filter(Boolean)
+        : [];
+      const res = await createTask({
         title: i.title,
         category: i.category ?? null, // createTask nulls blank → uncategorized
-        due_date: i.due_date ?? null,
-        job_id: job.id,
-        assigned_to: person.id,
+        due_date: onJob ? null : (i.due_date ?? null),
+        job_id: jobId,
+        assigned_to: person.id, // createTask refuses a name on a job's task, in words (0358)
         notes: i.notes ?? null,
-        priority: i.priority ?? 0,
+        priority: onJob ? 0 : (i.priority ?? 0),
         parent_id: i.parent_id ?? null,
-        focus_date: i.focus_date ?? null,
+        focus_date: onJob ? null : (i.focus_date ?? null),
       });
+      if (!res.ok || res.duplicate) return res;
+      // THE READ-BACK SAYS WHERE IT WENT (0358): on the crew's job list, or a private Reminder.
+      let where = "Added to your Reminders.";
+      if (onJob) {
+        const { data: j } = await supabase.from("jobs").select("job_number, name").eq("id", jobId).maybeSingle();
+        where = `Added to ${(j as { job_number?: string | null } | null)?.job_number || "the job"}'s Tasks, for whoever is on the job.`;
+        if (leftOff.length) where += ` A job's task has no ${leftOff.join(" or ")}, so that part wasn't saved.`;
+      } else if (person.id && person.id !== (await supabase.auth.getUser()).data.user?.id) {
+        where = "Added as a Reminder for them. Only the two of you see it.";
+      }
+      return { ...res, speak: where };
     },
   },
   "task.complete": {
@@ -168,36 +201,55 @@ export const taskActions: Record<string, ActionDef> = {
     name: "task.setDue",
     group: "task",
     label: "Reschedule task",
-    description: "Set or clear a task's due date (YYYY-MM-DD, or null to clear).",
+    description: "Set or clear a REMINDER's due date (YYYY-MM-DD, or null to clear). A job's task has no due date (0358): this refuses on one.",
     input: z.object({ id: z.string(), due_date: z.string().nullable() }),
     auth: "any",
     effect: "write",
-    handler: (i) => updateTask(i.id, { due_date: i.due_date }),
+    handler: async (i) => {
+      if (i.due_date) {
+        const refusal = await refuseOnJobTask(i.id, "due dates");
+        if (refusal) return refusal;
+      }
+      return updateTask(i.id, { due_date: i.due_date });
+    },
   },
   "task.setFocus": {
     name: "task.setFocus",
     group: "task",
     label: "Pin task to a day",
     description:
-      "Pin or unpin a task into a day's six on My Day: focus_date YYYY-MM-DD — today for 'do this today', tomorrow for the debrief's tomorrow picks, null to unpin. Does NOT touch the due date (that's task.setDue).",
+      "Pin or unpin a REMINDER into a day's six on My Day: focus_date YYYY-MM-DD — today for 'do this today', tomorrow for the debrief's tomorrow picks, null to unpin. Does NOT touch the due date (that's task.setDue). A job's task is never in the six (it's on the job's list and the clocked-in Now block): this refuses on one.",
     input: z.object({ id: z.string(), focus_date: z.string().nullable() }),
     auth: "any",
     effect: "write",
-    handler: (i) => updateTask(i.id, { focus_date: i.focus_date }),
+    handler: async (i) => {
+      if (i.focus_date) {
+        const refusal = await refuseOnJobTask(i.id, "day pins (it's never in Today's 6)");
+        if (refusal) return refusal;
+      }
+      return updateTask(i.id, { focus_date: i.focus_date });
+    },
   },
   "task.assign": {
     name: "task.assign",
     group: "task",
     label: "Assign task",
     description:
-      "Assign a task to a person (profile id), or null to unassign. A SUBTASK can't be handed to someone other than its parent's assignee — hoist it to its own task instead.",
+      "Say who a REMINDER is for (a profile id), or null for whoever made it. A job's task is never assigned (0358: the crew lead hands job tasks out out loud) — this refuses on one. A SUBTASK can't be handed to someone other than its parent's assignee — hoist it to its own task instead.",
     input: z.object({ id: z.string(), assigned_to: z.string().nullable() }),
     auth: "any",
     effect: "write",
     handler: async (i) => {
       if (i.assigned_to) {
         const supabase = await createClient();
-        const { data: t } = await supabase.from("tasks").select("parent_id").eq("id", i.id).maybeSingle();
+        const { data: t } = await supabase.from("tasks").select("parent_id, job_id").eq("id", i.id).maybeSingle();
+        if (t?.job_id) {
+          return {
+            ok: false,
+            error:
+              "That's a job's task, and a job's tasks aren't assigned to one person: the crew lead hands them out. To remind someone, make them a Reminder with no job.",
+          };
+        }
         if (t?.parent_id) {
           const refusal = await refuseCrossAssigneeChild(t.parent_id as string, i.assigned_to);
           if (refusal) return refusal;
@@ -271,7 +323,7 @@ export const taskActions: Record<string, ActionDef> = {
     group: "task",
     label: "Reschedule tasks in bulk",
     description:
-      "Move MANY open tasks to ONE new due date — 'push all follow-ups to Monday', 'move everything overdue to Friday'. new_due (YYYY-MM-DD) is required, plus at least one filter: title_contains, category (free-form org vocabulary, matched case-insensitively — e.g. office, operations, sales, or the org's own like Permits), job_id (resolve with list_jobs), due_before (YYYY-MM-DD — overdue = due before today), undated_only (true = only tasks with no due date). Filters AND together. It proposes a confirm naming the filter and refuses over 100 matches. For ONE known task use task.setDue.",
+      "Move MANY open REMINDERS to ONE new due date — 'push all follow-ups to Monday', 'move everything overdue to Friday'. A job's tasks have no due dates and are never moved (a job_id filter is refused). new_due (YYYY-MM-DD) is required, plus at least one filter: title_contains, category (free-form org vocabulary, matched case-insensitively — e.g. office, operations, sales, or the org's own like Permits), due_before (YYYY-MM-DD — overdue = due before today), undated_only (true = only tasks with no due date). Filters AND together. It proposes a confirm naming the filter and refuses over 100 matches. For ONE known task use task.setDue.",
     input: BULK_FILTER_FIELDS.extend({
       new_due: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD"),
     }).superRefine(requireFilter),
@@ -280,9 +332,13 @@ export const taskActions: Record<string, ActionDef> = {
     confirm: "destructive", // tier-2: propose → the user hears the filter + date → explicit yes
     describe: (i) => `Move ${filterWords(i)} to ${i.new_due} — say yes to confirm.`,
     handler: async (i) => {
-      const m = await matchOpenTasks(i);
+      // A job's tasks have no due dates (0358): a sweep naming a job would date rows nobody sees.
+      if (i.job_id) {
+        return { ok: false, error: "A job's tasks have no due dates: they're the job's list, done in whatever order the crew lead hands them out. Only Reminders are rescheduled." };
+      }
+      const m = await matchOpenTasks(i, { remindersOnly: true });
       if ("error" in m) return { ok: false, error: m.error };
-      if (!m.ids.length) return { ok: true, data: { affected: 0 }, speak: "No open tasks match that." };
+      if (!m.ids.length) return { ok: true, data: { affected: 0 }, speak: "No open Reminders match that." };
       const supabase = await createClient();
       // Silent-write law (audit v921): report the rows the update RETURNED, not the ids the match
       // found — a zero-row update is a 204, and "Moved 6 tasks" over nothing is the lie it makes.

@@ -114,7 +114,8 @@ export const DOCK: DockSection[] = [
     href: "/planner",
     children: [
       { id: "t-day", label: "My Day", icon: Sun, href: "/planner" },
-      { id: "t-tasks", label: "Tasks", icon: ListChecks, href: "/tasks" },
+      // /tasks is the Reminders page since 0358 (a job's tasks are on the job), so the pill says so.
+      { id: "t-tasks", label: "Reminders", icon: ListChecks, href: "/tasks" },
       // Staff only: Take Photo, Upload, File It and AI Review all save through requireStaff.
       { id: "t-org", label: "Organize", icon: Wand2, href: "/organize", staffOnly: true },
     ],

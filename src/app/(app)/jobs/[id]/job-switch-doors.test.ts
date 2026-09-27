@@ -1,4 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
@@ -13,7 +15,7 @@ vi.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams(),
 }));
 vi.mock("@/components/toast", () => ({ useToast: () => () => {} }));
-vi.mock("@/app/(app)/tasks/actions", () => ({ createTask: vi.fn(), toggleTask: vi.fn(), deleteTask: vi.fn(), updateTask: vi.fn() }));
+vi.mock("@/app/(app)/tasks/actions", () => ({ createTask: vi.fn(), toggleTask: vi.fn(), deleteTask: vi.fn(), updateTask: vi.fn(), setTaskDonePhoto: vi.fn() }));
 vi.mock("@/app/(app)/permits/actions", () => ({ createPermit: vi.fn(), updatePermit: vi.fn(), deletePermit: vi.fn() }));
 vi.mock("@/app/(app)/permits/edit-permit-button", () => ({ EditPermitButton: () => null }));
 vi.mock("@/app/(app)/materials/stock-actions", () => ({ loadShelf: vi.fn(), takeFromStockAction: vi.fn(), undoTakeAction: vi.fn() }));
@@ -25,7 +27,7 @@ vi.mock("@/components/use-org-public-base", () => ({ useOrgPublicBase: () => "ht
 vi.mock("@/app/(app)/jobs/actions", () => ({ deleteDocument: vi.fn(), updateDocument: vi.fn() }));
 vi.mock("@/lib/receipt-capture", () => ({ captureReceipt: vi.fn(), prettyBytes: () => "1 KB", readReceiptDocument: vi.fn() }));
 
-import { JobTasks } from "./job-tasks";
+import { JobTaskList } from "./job-task-list";
 import { JobDocuments } from "./job-documents";
 import { TellNort } from "@/components/tell-nort";
 import { JobPermits } from "./job-permits";
@@ -35,16 +37,23 @@ import { ConvertMenu } from "../../leads/convert-menu";
 
 const r = (c: any, p: any) => renderToStaticMarkup(createElement(c, p));
 
-describe("To-Do Extras on the job's Tasks tab", () => {
-  const tasks = [{ id: "t1", title: "Pull the permit", category: null, status: "open", priority: 1, due_date: null }];
-  it("on (the default): the High Priority box", () => {
-    expect(r(JobTasks, { jobId: "j1", tasks })).toContain("High priority");
+describe("To-Do Extras never reaches a job's Tasks (0358: the switch is the Reminders' now)", () => {
+  const tasks = [
+    { id: "t1", title: "Pull the permit", status: "open", created_by: "u1", created_at: "2026-09-20T17:00:00Z", completed_at: null, done_by: null, done_by_name: null, photo_path: null, done_photo_path: null, sort_order: 0 },
+  ];
+  const base = { jobId: "j1", orgId: "o1", tasks, viewerId: "u1", viewerIsStaff: true, tz: "America/Los_Angeles", nowIso: "2026-09-26T19:00:00Z", stamps: true };
+  it("the job's list asks no priority and draws no flag, card or tab, whatever the switch says", () => {
+    for (const mode of ["card", "tab"] as const) {
+      const html = r(JobTaskList, { ...base, mode });
+      expect(html).toContain("Pull the permit");
+      expect(html).not.toMatch(/priority/i);
+      expect(html).not.toMatch(/due date/i);
+    }
   });
-  it("off: no box; a task that has a priority keeps its flag", () => {
-    const html = r(JobTasks, { jobId: "j1", tasks, extras: false });
-    expect(html).not.toContain("High priority");
-    expect(html).toContain("Pull the permit");
-    expect(html).toContain("text-red-500"); // the flag on the task that already has one
+  it("the job page hands the Tasks tab no switch at all", () => {
+    const page = readFileSync(join(process.cwd(), "src/app/(app)/jobs/[id]/page.tsx"), "utf8");
+    expect(page).not.toContain('extras={on("todo_extras")}');
+    expect(page).toContain('<JobTaskList mode="tab" {...taskListProps} />');
   });
 });
 

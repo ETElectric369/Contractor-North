@@ -130,6 +130,13 @@ export interface ActionItem {
   supplierPapers?: SupplierPaperFeed | null;
   /** inquiry with Leads switched off only (action-items/switches): the number Call Back dials. */
   phone?: string | null;
+  /**
+   * HOURS ON NO JOB (0357): a closed shift nobody put on a job may have been billed by hand on an
+   * invoice with no job (TTUSD on INV-055). When a sent invoice with no job could hold it, the row
+   * carries the shifts its Already Billed door ticks to start (the sheet lists every other one).
+   * Staff only, like every Already Billed door; absent: no such door.
+   */
+  noJobHours?: { entryIds: string[] } | null;
 }
 
 export const KIND_META: Record<ActionKind, { label: string; tone: "slate" | "blue" | "amber" | "green" }> = {

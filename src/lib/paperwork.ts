@@ -220,6 +220,9 @@ export type PaperFiled = {
   landedIds?: string[];
   /** A note a person turned into a task (AI Suggest's proposal, PR2): Undo takes the task off. */
   taskId?: string | null;
+  /** Who pressed Make Task. The task is that person's private Reminder (0358), so only they can take
+   *  it off: another person's Undo can't tell "still there, not mine" from "already gone". */
+  taskBy?: string | null;
   /** The category the paper had before a task replaced it with "Task", given back by Undo. */
   category?: string | null;
   /** "paper": what the paper names (a printed mark, matched exactly); "guess": a model's guess a

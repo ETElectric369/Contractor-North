@@ -91,13 +91,24 @@ describe("badge economy: the inbox is decisions-only (the task feeder stays dead
     // planner's poolCut — so the phone and the app pick the same six.
     expect(digestSrc).toContain("and(due_date.is.null,priority.gte.1)");
     // The phone's morning number/read-back must come from the same rank as the
-    // planner's six — a parallel cut would drift (phone says 18, app says 4).
-    expect(digestSrc).toContain('from "@/lib/six-rank"');
-    expect(digestSrc).toContain("rankSix(");
+    // planner's six — a parallel cut would drift (phone says 18, app says 4). Since
+    // 0358 it ranks each PERSON's own Reminders (digest-six), through the same rank.
+    expect(digestSrc).toContain('from "./digest-six"');
+    expect(digestSrc).toContain("sixForPerson(pool, personId, today)");
+    const sixSrc = src("lib/action-items/digest-six.ts");
+    expect(sixSrc).toContain('from "@/lib/six-rank"');
+    expect(sixSrc).toContain("rankSix(");
+  });
+
+  it("the digest's pool is Reminders only and pushes one person at a time (0358)", () => {
+    const digestSrc = src("lib/action-items/digest.ts");
+    expect(digestSrc).toContain('.is("job_id", null)');
+    expect(digestSrc).toContain("sendPushToProfiles(\n        [personId],");
+    expect(digestSrc).not.toContain("scheduledJobIds");
   });
 });
 
-// ── rankSix: pinned > fresh-overdue (cap 3) > due-today > on-site > flagged ──
+// ── rankSix: pinned > fresh-overdue (cap 3) > due-today > flagged (Reminders only, 0358) ──
 
 const TODAY = "2026-07-02";
 let seq = 0;
@@ -152,27 +163,44 @@ describe("rankSix: slot order", () => {
     expect(six.map((t) => t.id)).toEqual([flagged.id, fresh.id, zombie.id]);
   });
 
-  it("fills the full slot order: pinned → overdue → due-today → on-site → flagged undated", () => {
-    const flagged = task({ priority: 1 }); // undated + flagged → rank 5
-    const onSite = task({ job_id: "job-1" }); // undated, on today's job → rank 4
+  it("fills the full slot order: pinned → overdue → due-today → flagged undated", () => {
+    const flagged = task({ priority: 1 }); // undated + flagged → rank 4
     const dueToday = task({ due_date: TODAY }); // rank 3
     const overdue = task({ due_date: "2026-07-01" }); // rank 2
     const pinned = task({ focus_date: TODAY }); // rank 1
-    const six = rankSix([flagged, onSite, dueToday, overdue, pinned], {
-      todayStr: TODAY,
-      scheduledJobIds: new Set(["job-1"]),
-    });
-    expect(six.map((t) => t.id)).toEqual([pinned.id, overdue.id, dueToday.id, onSite.id, flagged.id]);
+    const six = rankSix([flagged, dueToday, overdue, pinned], { todayStr: TODAY });
+    expect(six.map((t) => t.id)).toEqual([pinned.id, overdue.id, dueToday.id, flagged.id]);
   });
 
-  it("an over-cap overdue task on today's site still re-enters via the on-site rank", () => {
+  it("an over-cap overdue Reminder stays out: the on-site rank is gone with job tasks (0358)", () => {
     const a = task({ priority: 2, due_date: "2026-07-01" });
     const b = task({ priority: 1, due_date: "2026-07-01" });
     const c = task({ priority: 0, due_date: "2026-07-01" });
-    const d = task({ priority: 0, due_date: "2026-06-20", job_id: "job-1" }); // past the cap, but the truck goes there
+    const d = task({ priority: 0, due_date: "2026-06-20" }); // past the cap
     const dueToday = task({ due_date: TODAY });
-    const six = rankSix([a, b, c, d, dueToday], { todayStr: TODAY, scheduledJobIds: new Set(["job-1"]) });
-    expect(six.map((t) => t.id)).toEqual([a.id, b.id, c.id, dueToday.id, d.id]);
+    const six = rankSix([a, b, c, d, dueToday], { todayStr: TODAY });
+    expect(six.map((t) => t.id)).toEqual([a.id, b.id, c.id, dueToday.id]);
+  });
+});
+
+describe("rankSix: a job's task is never a slot (0358: Today's 6 are Reminders)", () => {
+  it("pinned, overdue, due today or flagged, a row with a job never ranks", () => {
+    const onJob = [
+      task({ job_id: "job-1", focus_date: TODAY, priority: 2 }),
+      task({ job_id: "job-1", due_date: "2026-07-01" }),
+      task({ job_id: "job-1", due_date: TODAY }),
+      task({ job_id: "job-1", priority: 1 }),
+    ];
+    const reminder = task({ due_date: TODAY });
+    const six = rankSix([...onJob, reminder], { todayStr: TODAY });
+    expect(six.map((t) => t.id)).toEqual([reminder.id]);
+  });
+
+  it("the My Day pool never asks for them either: the cut names job_id null and no on-site arm", () => {
+    const planner = src("app/(app)/planner/page.tsx");
+    expect(planner).toContain('(q as any).is("job_id", null).or(');
+    expect(planner).not.toContain("job_id.in.(");
+    expect(planner).not.toContain("scheduledJobIds");
   });
 });
 

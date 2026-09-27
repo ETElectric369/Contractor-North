@@ -17,11 +17,13 @@ import { featureOn, type FeatureKey, type FeatureMap } from "@/lib/features";
 // /crm already uses), or a route that IS the form (/quotes/new). Don't drop the
 // user on a list and make them find the + again.
 // staffOnly mirrors the dock/strip/palette gating — a tech tapping "New appointment"
-// was silently redirected to /planner by the staff gate. Techs create tasks; a job is made by
+// was silently redirected to /planner by the staff gate. Techs make Reminders; a job is made by
 // the office (createJob is requireStaff, so a tech's New Job failed on Save).
 // `feature` is the switch a verb belongs to (the switch board, 0352): off, the verb isn't offered.
+// New Reminder (0358): /tasks is the Reminders page, and its add line makes a Reminder. A job's task
+// is added on the job, or from My Day's Add line with a job picked, so the verb says what it makes.
 export const ACTIONS: { label: string; href: string; icon: LucideIcon; staffOnly?: boolean; feature?: FeatureKey }[] = [
-  { label: "New Task", href: "/tasks?new=1", icon: ListTodo },
+  { label: "New Reminder", href: "/tasks?new=1", icon: ListTodo },
   { label: "New Lead", href: "/leads?new=1", icon: UserSearch, staffOnly: true, feature: "leads" },
   { label: "New Customer", href: "/crm?new=1", icon: UserPlus, staffOnly: true },
   { label: "New Job", href: "/jobs?new=1", icon: Briefcase, staffOnly: true },

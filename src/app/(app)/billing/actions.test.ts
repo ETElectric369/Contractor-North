@@ -39,6 +39,7 @@ import {
   setInvoiceDueDate,
   settleUp,
 } from "./actions";
+import { HELD_HERE_COLUMNS } from "@/lib/held-here";
 
 // ── A scriptable PostgREST fake, ROUTED not queued ────────────────────────────────────────────
 // Keyed on the table plus the select list (or the payload's keys on a write), because these
@@ -65,6 +66,11 @@ function fakeSupabase(route: (q: Q) => Reply, calls: Q[]) {
     // The job's takes from stock (Shop Stock, Phase 3): an empty shelf, as every org is today,
     // unless a test routes its own.
     if (r === undefined && q.table === "stock_moves" && q.verb === "select") r = { data: [] };
+    // The importers' read of this invoice's own lines (lib/held-here): nothing on it charges a row
+    // by hand, unless a test routes its own.
+    if (r === undefined && q.table === "invoices" && q.verb === "select" && q.cols === HELD_HERE_COLUMNS) {
+      r = { data: { invoice_number: null, status: "draft", created_at: "", job_id: null, invoice_items: [] } };
+    }
     if (r === undefined) throw new Error(`unrouted: ${q.table}.${q.verb} [${q.cols}] ${JSON.stringify(q.payload ?? null)}`);
     return { data: r.data ?? null, error: r.error ?? null };
   };
@@ -1213,5 +1219,150 @@ describe("importCostsIntoInvoice — pieces taken from stock are billed once, on
     expect(res.ok).toBe(false);
     expect(res.error).toContain("pieces taken from stock");
     expect(calls.some((c) => c.table === "rpc:upsert_imported_invoice_items")).toBe(false);
+  });
+});
+
+/**
+ * ALREADY BILLED, WAVE 1: A CHARGE THIS INVOICE MADE BY HAND IS NEVER OFFERED AGAIN (lib/held-here).
+ *
+ * The importers read every OTHER invoice's claims, so a by-hand claim on the invoice being imported
+ * into read as free: Materials From Costs on paid INV-060 put the two Ace receipts on it a second
+ * time, and Labor From Timecards gave Brian a new line beside his hand-typed one. INV-060 and
+ * INV-078 exactly as they stand in ET's books.
+ */
+describe("Already Billed, wave 1 — the importers leave a by-hand charge on the same invoice alone", () => {
+  const INV060 = "0600aaaa-0000-4000-8000-000000000060";
+  const J039 = "0390aaaa-0000-4000-8000-000000000039";
+  const HD = "5e1b0b67-f0f3-4ee6-b420-004413d79a48";
+  const ACE1 = "5b12146d-514a-4f7c-a34b-a68ad292dbda";
+  const ACE2 = "d66d55a9-5b45-42d4-a68f-66f996509a32";
+  const P_ERIK = "d358effe-e352-401b-93bb-7dde456e9bc0";
+  const P_BRIAN = "07b85435-02ff-4382-a4f1-1f932c561d9f";
+  const E1 = "e0600000-0000-4000-8000-000000000001";
+  const E2 = "e0600000-0000-4000-8000-000000000002";
+  const BR = ["297671dc-5596-4d60-9c7c-97b4c852e897", "6edc3395-5711-4283-aba9-7603a690df94", "4b72bee8-4458-41e7-a372-f9f60c258b8d"];
+  const shift = (id: string, person: string, name: string, day: string) => ({
+    id, clock_in: `${day}T15:00:00Z`, clock_out: `${day}T23:00:00Z`, lunch_minutes: 0, job_code: null, profiles: { id: person, full_name: name },
+  });
+
+  function inv060Route() {
+    return (q: Q): Reply => {
+      if (q.table === "jobs") return { data: { customers: { pricing_levels: { markup_pct: 25, labor_rate: null } } } };
+      if (q.table === "organizations") return { data: { settings: { default_labor_rate: 95, material_markup_percent: 25 } } };
+      if (q.table === "invoices" && q.verb === "select") {
+        if (q.cols === HELD_HERE_COLUMNS) {
+          return {
+            data: {
+              invoice_number: "INV-060", status: "paid", created_at: "2026-08-18T22:44:42Z", job_id: J039,
+              invoice_items: [
+                { import_source: "labor", import_key: `labor:${P_ERIK}`, edited: true, source_ids: [E1, E2] },
+                { import_source: null, import_key: null, edited: false, source_ids: BR }, // "Labor - Brian", typed
+                { import_source: "costs", import_key: `bill:${HD}`, edited: true, source_ids: [HD, ACE1, ACE2] },
+              ],
+            },
+          };
+        }
+        if (q.cols === "status") return { data: { status: "paid" } };
+        if (q.cols === "dismissed_import_keys") return { data: { dismissed_import_keys: [] } };
+        if (q.single && q.cols.includes("invoice_kind") && q.cols.includes("job_id")) return { data: { id: INV060, job_id: J039, invoice_kind: "standard", invoice_number: "INV-060" } };
+        if (q.cols.includes("sent_at")) return { data: { sent_at: "2026-09-09T06:24:21Z" } };
+        if (q.cols.includes("tax_rate")) return { data: { tax_rate: 0, status: "paid" } };
+        return { data: [] }; // no draw on the job; no OTHER invoice holds anything of J-039's
+      }
+      if (q.table === "invoices" && q.verb === "update") return { data: null };
+      if (q.table === "purchase_orders") return { data: [] };
+      if (q.table === "bills") {
+        return {
+          data: [
+            { id: HD, supplier: "The Home Depot", bill_number: "HD-1", amount: "196.18", po_id: null, pricing_provisional: false, created_at: "2026-08-12T00:00:00Z" },
+            { id: ACE1, supplier: "Ace Hardware", bill_number: "A-1", amount: "68.66", po_id: null, pricing_provisional: false, created_at: "2026-08-17T00:00:00Z" },
+            { id: ACE2, supplier: "Ace Hardware", bill_number: "A-2", amount: "47.94", po_id: null, pricing_provisional: false, created_at: "2026-08-17T00:01:00Z" },
+          ],
+        };
+      }
+      if (q.table === "bill_line_items") return { data: [] };
+      if (q.table === "time_entries") {
+        return {
+          data: [
+            shift(E1, P_ERIK, "Erik Taylor", "2026-08-12"),
+            shift(E2, P_ERIK, "Erik Taylor", "2026-08-13"),
+            ...BR.map((id, i) => shift(id, P_BRIAN, "Brian Taylor", `2026-08-1${2 + i}`)),
+          ],
+        };
+      }
+      if (q.table === "job_codes") return { data: [] };
+      if (q.table === "profile_pay") return { data: [{ id: P_ERIK, hourly_rate: null, bill_rate: 150 }, { id: P_BRIAN, hourly_rate: 30, bill_rate: 95 }] };
+      if (q.table === "invoice_items" && q.verb === "select") {
+        if (q.cols.includes("invoices!inner")) return { data: [] };
+        if (q.cols === "id, source_ids, import_key, edited, quantity, unit_price, unit, description") {
+          return { data: [{ id: "li-erik", import_key: `labor:${P_ERIK}`, edited: true, source_ids: [E1, E2], quantity: "16.00", unit_price: "72.50", unit: "hr", description: "Labor — Erik" }] };
+        }
+        if (q.cols.includes("import_key, edited")) return { data: [] };
+        if (q.cols === "line_total") return { data: [] };
+        if (q.cols === "import_key, line_total, edited") return { data: [] };
+        if (q.cols === "import_source, import_key, line_total, edited") return { data: [] };
+      }
+      if (q.table === "payments") return { data: [] };
+      if (q.table === "customer_credits") return { data: [] };
+      if (q.table === "rpc:upsert_imported_invoice_items") return { data: { inserted: 0, updated: 0, kept_edited: 1, removed: 0 } };
+      return undefined;
+    };
+  }
+
+  it("INV-060, Materials From Costs: only the Home Depot bill its edited line is keyed to is offered (and kept); the two Ace receipts added by hand are not", async () => {
+    spies.reportError = () => {};
+    state.client = fakeSupabase(inv060Route(), calls);
+    const res: any = await importCostsIntoInvoice(INV060, 25);
+    expect(res.ok).toBe(true);
+    const rpc = calls.find((c) => c.table === "rpc:upsert_imported_invoice_items")!;
+    expect(rpc.payload.p_rows.flatMap((r: any) => r.source_ids)).toEqual([HD]);
+    expect(res.stats.summary).toContain("2 already on INV-060 skipped");
+  });
+
+  it("INV-060, Labor From Timecards: Brian's shifts on his hand-typed line get no second line", async () => {
+    spies.reportError = () => {};
+    state.client = fakeSupabase(inv060Route(), calls);
+    const res: any = await importLaborIntoInvoice(INV060);
+    expect(res.ok).toBe(true);
+    const rpc = calls.find((c) => c.table === "rpc:upsert_imported_invoice_items")!;
+    expect(rpc.payload.p_rows.map((r: any) => r.import_key)).toEqual([`labor:${P_ERIK}`]);
+    expect(rpc.payload.p_rows.flatMap((r: any) => r.source_ids)).not.toContain(BR[0]);
+    expect(res.stats.summary).toContain("3 already on INV-060 skipped");
+    expect(calls.some((c) => c.table === "invoice_items" && c.verb === "update")).toBe(false); // nothing joined
+  });
+
+  it("a lost read of the invoice's own lines imports nothing and says so", async () => {
+    spies.reportError = () => {};
+    const base = inv060Route();
+    state.client = fakeSupabase((q) => (q.table === "invoices" && q.cols === HELD_HERE_COLUMNS ? { error: { code: "57014", message: "canceling statement" } } : base(q)), calls);
+    for (const res of [await importCostsIntoInvoice(INV060, 25), await importLaborIntoInvoice(INV060)] as any[]) {
+      expect(res.ok).toBe(false);
+      expect(res.error).toBe("Couldn't read this invoice's lines just now, so nothing was imported - try again in a moment.");
+    }
+    expect(calls.some((c) => c.table === "rpc:upsert_imported_invoice_items")).toBe(false);
+  });
+
+  it("INV-078, with its real lines read: new hours still JOIN Erik's edited line at Andrew's $100", async () => {
+    spies.reportError = () => {};
+    const base = openDrawRoute({ actuals: true });
+    state.client = fakeSupabase(
+      (q) =>
+        q.table === "invoices" && q.cols === HELD_HERE_COLUMNS
+          ? {
+              data: {
+                invoice_number: "INV-078", status: "draft", created_at: "2026-08-02T00:00:00Z", job_id: JOB,
+                invoice_items: [
+                  { import_source: "labor", import_key: "labor:p-1", edited: true, source_ids: [TE_OLD] },
+                  { import_source: "costs", import_key: `bill:${B_OLD}`, edited: false, source_ids: [B_OLD] },
+                ],
+              },
+            }
+          : base(q),
+      calls,
+    );
+    const res: any = await importLaborIntoInvoice(OPEN_DRAW);
+    expect(res.ok).toBe(true);
+    const join = calls.find((c) => c.table === "invoice_items" && c.verb === "update");
+    expect(join?.payload).toEqual({ quantity: 14, source_ids: [TE_OLD, TE_NEW] });
   });
 });

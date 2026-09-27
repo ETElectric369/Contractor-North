@@ -10,7 +10,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
 vi.mock("@/app/(app)/settings/features-actions", () => ({ setFeature: vi.fn(async () => ({ ok: true })) }));
 
-import { arrangeJobTabs, JOB_TAB_FEATURE, JOB_TAB_ORDER } from "./job-tabs";
+import { arrangeJobTabs, JOB_PINNED_STAFF, JOB_PINNED_TECH, JOB_STAFF_ONLY, JOB_TAB_FEATURE, JOB_TAB_ORDER } from "./job-tabs";
 import { ALL_ON, FEATURE_KEYS, type FeatureMap } from "@/lib/features";
 import type { TabDef } from "@/components/tabs";
 
@@ -22,13 +22,53 @@ const byId = (tabs: TabDef[]) => Object.fromEntries(tabs.map((t) => [t.id, t]));
 
 describe("arrangeJobTabs with every feature on", () => {
   for (const staff of [true, false]) {
-    it(`${staff ? "staff" : "a tech"}: only Tasks is off the strip, and every tab's content is untouched`, () => {
+    it(`${staff ? "staff" : "a tech"}: nothing is off the strip, and every tab's content is untouched`, () => {
       for (const arranged of [arrangeJobTabs(TABS, staff), arrangeJobTabs(TABS, staff, { features: ALL_ON, isOwner: true })]) {
-        expect(arranged.filter((t) => t.offStrip).map((t) => t.id)).toEqual(["tasks"]);
+        expect(arranged.filter((t) => t.offStrip).map((t) => t.id)).toEqual([]);
         for (const t of arranged) expect(t.content).toBe(TABS.find((x) => x.id === t.id)!.content);
       }
     });
   }
+});
+
+describe("the Tasks chip (Erik, 2026-09-26: \"put it on the bottom bar next to overview\")", () => {
+  const pinnedIds = (staff: boolean) =>
+    arrangeJobTabs(TABS, staff)
+      .filter((t) => !t.staffOnly || staff)
+      .filter((t) => t.pinned && !t.offStrip)
+      .map((t) => t.id);
+
+  it("the office: Overview, Tasks, Time, Materials, Costs — Tasks right after Overview", () => {
+    expect(pinnedIds(true)).toEqual(["job", "tasks", "time", "materials", "costs"]);
+  });
+
+  it("the crew: Overview, Tasks, Time, Materials, Photos — the same place, no money chip", () => {
+    expect(pinnedIds(false)).toEqual(["job", "tasks", "time", "materials", "photos"]);
+    for (const id of JOB_PINNED_TECH) expect(JOB_STAFF_ONLY.has(id), id).toBe(false);
+  });
+
+  it("six chips on a phone, never seven: five pinned + More for both (7 would be 43.9px at 375)", () => {
+    expect(JOB_PINNED_STAFF.size).toBe(5);
+    expect(JOB_PINNED_TECH.size).toBe(5);
+  });
+
+  it("the office's last pinned chip, Invoices, rides More (its Money cluster), never gone", () => {
+    const inv = byId(arrangeJobTabs(TABS, true)).invoices;
+    expect(inv.pinned).toBe(false);
+    expect(inv.offStrip).toBe(false);
+    expect(inv.group).toBe("Money");
+  });
+
+  it("Tasks is a real chip for both roles: pinned, on the strip, not staff-only, its own icon", () => {
+    for (const staff of [true, false]) {
+      const t = byId(arrangeJobTabs(TABS, staff)).tasks;
+      expect(t.pinned).toBe(true);
+      expect(t.offStrip).toBe(false);
+      expect(t.staffOnly).toBe(false);
+      expect(t.icon).toBeTruthy();
+    }
+    expect(JOB_TAB_ORDER.indexOf("tasks")).toBe(JOB_TAB_ORDER.indexOf("job") + 1);
+  });
 });
 
 describe("a switched-off feature's tab", () => {
@@ -52,7 +92,7 @@ describe("a switched-off feature's tab", () => {
       expect(out.indexOf(" · Off")).toBeLessThan(out.indexOf(`${tab}-BODY`));
       // Nothing else moved.
       const rest = arrangeJobTabs(TABS, true, { features: off(feature), isOwner: true }).filter(
-        (x) => x.offStrip && x.id !== "tasks" && JOB_TAB_FEATURE[x.id] !== feature,
+        (x) => x.offStrip && JOB_TAB_FEATURE[x.id] !== feature,
       );
       expect(rest).toEqual([]);
     });

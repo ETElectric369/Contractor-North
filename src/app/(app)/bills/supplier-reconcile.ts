@@ -931,6 +931,14 @@ export interface SupplierPaperCard {
   /** The supplier account it is on. Null: on none yet, so it can't wait on a credit (a credit pairs
    *  on its account, and the folded line lives under it). */
   accountId?: string | null;
+  /**
+   * ALREADY BILLED (0357, Erik: "on supplier bills on my day inside needs action should also be a
+   * button for already charged"): the one job the paper names or the matcher guesses (onJob, or the
+   * suggestion), when a bill that went out on it could hold this paper's cost. The card's Already
+   * Billed On J-010 files the paper there (the same guards as Put It On) and opens the sheet to pick
+   * the line. Set by withAlreadyBilledDoors (supplier-papers.ts); absent: no such door.
+   */
+  alreadyBilledOn?: PaperJob;
 }
 
 /** How long a bill waits on its credit before it comes back as a card by itself (Erik: 30 days). */
