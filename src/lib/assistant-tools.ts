@@ -26,7 +26,7 @@ import { isStaffRole } from "@/lib/actions/perms";
 import { resolveJobId } from "@/lib/actions/resolve-id";
 import { TECH_ITEM_COLUMNS } from "@/lib/materials-columns";
 import { billLineBilledCost, billableBillCost } from "@/lib/bill-itemisation";
-import { bucketOf } from "@/lib/business-cost-buckets";
+import { BUSINESS_COST_BUCKETS, bucketOf } from "@/lib/business-cost-buckets";
 import { isShelfTicket } from "@/lib/shelf-plan";
 import { parseShelf } from "@/lib/stock-take";
 import { readBillShelfOff } from "@/lib/job-cost";
@@ -549,7 +549,7 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
   {
     name: "get_bill",
     description:
-      "Read ONE supplier BILL in full — supplier, the receipt's whole amount, what of it the CUSTOMER is billed (billable_amount, at cost before markup), status, category, the linked job, and every line item (qty, unit price, amount, and whether the customer is billed for it: a line can be the company's own — snacks, a tool for the truck — or a container billed in part with the rest kept as shop stock). Pass a bill_id (from list_bills). Use to read a bill's breakdown back before paying or categorizing it, and NEVER quote the receipt total as the customer's cost. A bill with NO job is a business cost in one of the six buckets (counted before owner's draw): no customer is billed for it, so it has no billable_amount (null) and its lines carry no billed flag.",
+      `Read ONE supplier BILL in full — supplier, the receipt's whole amount, what of it the CUSTOMER is billed (billable_amount, at cost before markup), status, category, the linked job, and every line item (qty, unit price, amount, and whether the customer is billed for it: a line can be the company's own — snacks, a tool for the truck — or a container billed in part with the rest kept as shop stock). Pass a bill_id (from list_bills). Use to read a bill's breakdown back before paying or categorizing it, and NEVER quote the receipt total as the customer's cost. A bill with NO job is a business cost in one of the business-cost buckets (${BUSINESS_COST_BUCKETS.join(", ")}; Fuel is its own, Auto is the truck's other costs; counted before owner's draw): no customer is billed for it, so it has no billable_amount (null) and its lines carry no billed flag.`,
     input_schema: { type: "object", properties: { bill_id: { type: "string", description: "The bill's id (from list_bills)." } }, required: ["bill_id"] },
   },
   {

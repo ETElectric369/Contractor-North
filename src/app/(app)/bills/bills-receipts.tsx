@@ -544,7 +544,7 @@ function BillEditModal({
   const [status, setStatus] = useState(bill.status);
   const [billDate, setBillDate] = useState(bill.bill_date ?? "");
   const [billJob, setBillJob] = useState(bill.job_id ?? "__overhead");
-  // A business cost opens on its own bucket (an old word like "Fuel" read as Gas & Truck). A job
+  // A business cost opens on its own bucket (an old word like "Vehicle", or "Gas & Truck", read as Auto). A job
   // bill's category is a paper kind ("Receipt"), not a bucket, so moving one off its job starts
   // with no bucket and asks for one.
   const [billCategory, setBillCategory] = useState<string>(bill.job_id ? "" : bucketOf(bill.category));

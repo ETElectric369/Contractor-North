@@ -6,7 +6,9 @@ import {
   bankViewOf,
   branchFromNumbers,
   choiceId,
+  choiceLabel,
   cleanDescription,
+  everyChoice,
   findBankHeader,
   guessFor,
   isBareCheck,
@@ -15,6 +17,7 @@ import {
   merchantKeyOf,
   parseChoiceId,
   planBankDownload,
+  ruleHintFor,
   noLinesSaid,
   sayGroupMoney,
   readBankDate,
@@ -426,7 +429,7 @@ describe("the same line never twice", () => {
   it("a line already in North is counted, never shown", () => {
     const dl = download();
     const fee = lineBy(dl, "SERVICE FEE");
-    const plan = planBankDownload(dl, ORG_BOOKS({ already: new Map([[fee.key, { choice: "cost", bucket: "Fees", costKind: null, amountCents: -1200 }]]) }));
+    const plan = planBankDownload(dl, ORG_BOOKS({ already: new Map([[fee.key, { choice: "cost", bucket: "Fees", amountCents: -1200 }]]) }));
     expect(plan.dispositions.get(fee.key)).toEqual({ how: "already" });
     expect(plan.counts.already).toBe(1);
     expect(plan.groups.some((g) => g.keys.includes(fee.key))).toBe(false);
@@ -608,23 +611,26 @@ describe("matching what is already on the books (exact cents, each row once)", (
     expect(view.otherIn.map((b) => b.label)).toContain("Refund: Tools & Supplies");
   });
 
-  it("a fill-up already on the books is tagged Fuel by the company's answer for that merchant, never by its words alone", () => {
-    const dl = readBankTable(parseCSV(`Date,Description,Amount\n09/12/2026,1111-CORNER STORE ANYTOWN,-138.62\n09/14/2026,1111-SHELL OIL ANYTOWN,-60.00\n`), "x.csv", hash)!;
-    const bill = (id: string, cents: number, supplier: string) => ({ id, cents, day: "2026-09-12", supplier, jobId: null, category: "Gas & Truck", onAccount: false, costKind: null });
+  it("a fill-up already on the books is matched and keeps the bucket it was filed in: a match marks, never re-files", () => {
+    const dl = readBankTable(parseCSV(`Date,Description,Amount\n09/12/2026,1111-CORNER STORE ANYTOWN,-131.20\n09/14/2026,1111-SHELL OIL ANYTOWN,-60.00\n`), "x.csv", hash)!;
+    const bill = (id: string, cents: number, supplier: string, category: string) => ({ id, cents, day: "2026-09-12", supplier, jobId: null, category, onAccount: false });
     const books = ORG_BOOKS({
-      bills: [bill("b-store", 13862, "Corner Store"), { ...bill("b-shell", 6000, "Shell Oil"), day: "2026-09-14" }],
-      rules: [{ id: "r-store", direction: "out", key: "corner", choice: "cost", bucket: "Gas & Truck", costKind: "fuel", supplierAccountId: null, profileId: null, minCents: 12000, maxCents: 14000 }],
+      // A pump receipt filed as Fuel, and one a person filed as Auto (a stop for oil, say).
+      bills: [bill("b-store", 13120, "Corner Store", "Fuel"), { ...bill("b-shell", 6000, "Shell Oil", "Auto"), day: "2026-09-14" }],
+      rules: [{ id: "r-store", direction: "out", key: "corner", choice: "cost", bucket: "Fuel", supplierAccountId: null, profileId: null, minCents: 12000, maxCents: 14000 }],
     });
     const plan = planBankDownload(dl, books);
-    expect(plan.dispositions.get(dl.lines[0].key)).toMatchObject({ how: "match", ids: ["b-store"], tag: "fuel" });
-    // No answer for SHELL yet: matched, untagged (the person's tap on a later SHELL row is what says).
-    expect(plan.dispositions.get(dl.lines[1].key)).toMatchObject({ how: "match", ids: ["b-shell"] });
-    expect((plan.dispositions.get(dl.lines[1].key) as { tag?: string }).tag).toBeUndefined();
+    expect(plan.dispositions.get(dl.lines[0].key)).toEqual({ how: "match", table: "bills", ids: ["b-store"], said: "Corner Store already on the books" });
+    expect(plan.dispositions.get(dl.lines[1].key)).toEqual({ how: "match", table: "bills", ids: ["b-shell"], said: "Shell Oil already on the books" });
+    // Where the money went reads each bill's own bucket: the Fuel one is Fuel, the Auto one a business cost.
+    const flow = bankViewOf(dl, plan, books).flow;
+    expect(flow.find((s) => s.key === "fuel")!.cents).toBe(13120);
+    expect(flow.find((s) => s.key === "business")!.cents).toBe(6000);
   });
 
   it("one bill is matched once, even when two lines could take it", () => {
     const dl = download();
-    const books = ORG_BOOKS({ bills: [{ id: "b-shell", cents: 10000, day: "2026-09-12", supplier: "Shell", jobId: null, category: "Gas & Truck", onAccount: false }] });
+    const books = ORG_BOOKS({ bills: [{ id: "b-shell", cents: 10000, day: "2026-09-12", supplier: "Shell", jobId: null, category: "Fuel", onAccount: false }] });
     const plan = planBankDownload(dl, books);
     const matched = [...plan.dispositions.values()].filter((d) => d.how === "match");
     expect(matched).toHaveLength(1);
@@ -638,16 +644,16 @@ describe("matching what is already on the books (exact cents, each row once)", (
 });
 
 describe("the company's own rules", () => {
-  const rule = (over: Partial<BooksRule>): BooksRule => ({ id: "r", direction: "out", key: "shell", choice: "cost", bucket: "Gas & Truck", costKind: "fuel", supplierAccountId: null, profileId: null, ...over });
+  const rule = (over: Partial<BooksRule>): BooksRule => ({ id: "r", direction: "out", key: "shell", choice: "cost", bucket: "Fuel", supplierAccountId: null, profileId: null, ...over });
 
   it("a rule the company made places every line of that merchant, and the longest key wins", () => {
     const dl = download();
     const books = ORG_BOOKS({
       rules: [
         rule({ id: "r-shell", key: "shell" }),
-        rule({ id: "r-draw", key: "transfer 9876", choice: "draw", bucket: null, costKind: null }),
-        rule({ id: "r-home", key: "home", choice: "personal", bucket: null, costKind: null }),
-        rule({ id: "r-home-hw", key: "home hardware", choice: "cost", bucket: "Tools & Supplies", costKind: null }),
+        rule({ id: "r-draw", key: "transfer 9876", choice: "draw", bucket: null }),
+        rule({ id: "r-home", key: "home", choice: "personal", bucket: null }),
+        rule({ id: "r-home-hw", key: "home hardware", choice: "cost", bucket: "Tools & Supplies" }),
       ],
     });
     const plan = planBankDownload(dl, books);
@@ -662,9 +668,9 @@ describe("the company's own rules", () => {
     const dl = download();
     const books = ORG_BOOKS({
       rules: [
-        rule({ id: "r-in", direction: "in", key: "shell", choice: "other_income", bucket: null, costKind: null }),
-        rule({ id: "r-check", key: "check", choice: "personal", bucket: null, costKind: null }),
-        rule({ id: "r-dep", direction: "in", key: "deposit", choice: "other_income", bucket: null, costKind: null }),
+        rule({ id: "r-in", direction: "in", key: "shell", choice: "other_income", bucket: null }),
+        rule({ id: "r-check", key: "check", choice: "personal", bucket: null }),
+        rule({ id: "r-dep", direction: "in", key: "deposit", choice: "other_income", bucket: null }),
       ],
     });
     const plan = planBankDownload(dl, books);
@@ -688,9 +694,9 @@ describe("the company's own rules", () => {
     const books = ORG_BOOKS({
       invoices: [{ id: "inv-1", number: "INV-1", balanceCents: 125000 }],
       rules: [
-        rule({ id: "r-reg", direction: "in", key: "regular", choice: "other_income", bucket: null, costKind: null }),
-        rule({ id: "r-acme", direction: "in", key: "acme", choice: "other_income", bucket: null, costKind: null }),
-        rule({ id: "r-jane", direction: "in", key: "jane", choice: "not_income", bucket: null, costKind: null }),
+        rule({ id: "r-reg", direction: "in", key: "regular", choice: "other_income", bucket: null }),
+        rule({ id: "r-acme", direction: "in", key: "acme", choice: "other_income", bucket: null }),
+        rule({ id: "r-jane", direction: "in", key: "jane", choice: "not_income", bucket: null }),
       ],
     });
     const plan = planBankDownload(dl, books);
@@ -706,9 +712,41 @@ describe("the company's own rules", () => {
     expect(row("ZELLE").learnable).toBe(false);
   });
 
+  it("a store with two answers: a fill-up is Fuel, a coffee is Personal (no Meals bucket), and an amount between them is ASKED", () => {
+    // Filed two ways before: fill-ups of $120-$140 as Fuel, an $11.75 coffee as Personal. A coffee is
+    // no business-cost bucket (there is no Meals), so the person said Personal, or could say Other.
+    const dl = readBankTable(
+      parseCSV(`Date,Description,Amount
+09/12/2026,1111-CORNER STORE ANYTOWN,-131.20
+09/13/2026,1111-CORNER STORE ANYTOWN,-11.75
+09/14/2026,1111-CORNER STORE ANYTOWN,-45.00
+`),
+      "x.csv",
+      hash,
+    )!;
+    const books = ORG_BOOKS({
+      rules: [
+        rule({ id: "r-fuel", key: "corner", choice: "cost", bucket: "Fuel", minCents: 12000, maxCents: 14000 }),
+        rule({ id: "r-coffee", key: "corner", choice: "personal", bucket: null, minCents: 1175, maxCents: 1175 }),
+      ],
+    });
+    const plan = planBankDownload(dl, books);
+    const at = (cents: number) => plan.dispositions.get(dl.lines.find((l) => l.cents === cents)!.key);
+    expect(at(-13120)).toEqual({ how: "rule", ruleId: "r-fuel", choice: { choice: "cost", bucket: "Fuel" } });
+    expect(at(-1175)).toEqual({ how: "rule", ruleId: "r-coffee", choice: { choice: "personal" } });
+    // $45 is in neither band (Fuel reaches down to $60, the coffee up to $23.50): asked, never forced.
+    expect(at(-4500)).toMatchObject({ how: "need" });
+    const row = plan.groups.find((g) => g.keys.includes(dl.lines.find((l) => l.cents === -4500)!.key))!;
+    // Its guess is the nearest answer, marked Guess and never picked; the other answer is a tap away.
+    expect(ruleHintFor(dl.lines.find((l) => l.cents === -4500)!, books.rules)!.id).toBe("r-fuel");
+    expect(row.guess).toBe("cost:Fuel");
+    expect(row.buttons).toEqual(["cost:Fuel", "cost:Auto", "personal"]);
+    expect(plan.counts).toMatchObject({ ruled: 2, needLines: 1 });
+  });
+
   it("a rule for a supplier or a person no longer here is not used", () => {
     const dl = download();
-    const plan = planBankDownload(dl, ORG_BOOKS({ rules: [rule({ id: "r-gone", key: "dental", choice: "crew", bucket: null, costKind: null, profileId: "someone-gone" })] }));
+    const plan = planBankDownload(dl, ORG_BOOKS({ rules: [rule({ id: "r-gone", key: "dental", choice: "crew", bucket: null, profileId: "someone-gone" })] }));
     expect(plan.dispositions.get(lineBy(dl, "DENTAL").key)).toMatchObject({ how: "need" });
   });
 });
@@ -720,8 +758,8 @@ describe("what needs a person: one row per merchant, the guess first and never p
     const shell = plan.groups.find((g) => g.merchantKey === "shell")!;
     expect(shell.keys).toHaveLength(3);
     expect(shell.cents).toBe(-28845);
-    expect(shell.guess).toBe("cost:Gas & Truck:fuel");
-    expect(shell.buttons).toEqual(["cost:Gas & Truck:fuel", "cost:Gas & Truck:truck", "personal"]);
+    expect(shell.guess).toBe("cost:Fuel");
+    expect(shell.buttons).toEqual(["cost:Fuel", "cost:Auto", "personal"]);
     expect(plan.groups.find((g) => g.label.includes("ACME INSURANCE"))!.guess).toBe("cost:Insurance & Licenses");
     expect(plan.groups.find((g) => g.label.includes("SERVICE FEE"))!.guess).toBe("cost:Fees");
     expect(plan.groups.find((g) => g.label.includes("ATM"))!.guess).toBe("petty_cash");
@@ -733,10 +771,10 @@ describe("what needs a person: one row per merchant, the guess first and never p
   it("a bare Withdrawal is never an ATM, and Point Of Sale never a merchant", () => {
     const line = (description: string, cents = -6210) => ({ row: 2, postedOn: "2026-09-10", cents, description, check: null, last4: null, merchantKey: merchantKeyOf(description), key: "k" });
     const books = ORG_BOOKS();
-    expect(guessFor(line("POINT OF SALE WITHDRAWAL SHELL OIL 57444 ANYTOWN CA"), books)).toEqual({ choice: "cost", bucket: "Gas & Truck", costKind: "fuel" });
-    expect(guessFor(line("Withdrawal POS #123456 SHELL OIL"), books)).toEqual({ choice: "cost", bucket: "Gas & Truck", costKind: "fuel" });
+    expect(guessFor(line("POINT OF SALE WITHDRAWAL SHELL OIL 57444 ANYTOWN CA"), books)).toEqual({ choice: "cost", bucket: "Fuel" });
+    expect(guessFor(line("Withdrawal POS #123456 SHELL OIL"), books)).toEqual({ choice: "cost", bucket: "Fuel" });
     expect(guessFor(line("ONLINE TRANSFER WITHDRAWAL TO XXXXXX9876"), books)).toEqual({ choice: "draw" });
-    expect(guessFor(line("Withdrawal ACH ACME INSURANCE"), books)).toEqual({ choice: "cost", bucket: "Insurance & Licenses", costKind: null });
+    expect(guessFor(line("Withdrawal ACH ACME INSURANCE"), books)).toEqual({ choice: "cost", bucket: "Insurance & Licenses" });
     expect(guessFor(line("ATM WITHDRAWAL 000123 MAIN ST"), books)).toEqual({ choice: "petty_cash" });
     expect(merchantKeyOf("POINT OF SALE WITHDRAWAL SHELL OIL 57444 ANYTOWN CA")).toBe("shell");
     expect(merchantKeyOf("POINT OF SALE WITHDRAWAL HOME DEPOT 4410")).toBe("home");
@@ -752,7 +790,7 @@ describe("what needs a person: one row per merchant, the guess first and never p
     expect(dep.buttons).toEqual(["invoice:inv-1", "other_income", "not_income"]);
     const check = plan.groups.find((g) => g.check === "1043")!;
     expect(check.guess).toBe("crew:crew-pat");
-    expect(guessFor(lineBy(dl, "SHELL 456"), books)).toEqual({ choice: "cost", bucket: "Gas & Truck", costKind: "fuel" });
+    expect(guessFor(lineBy(dl, "SHELL 456"), books)).toEqual({ choice: "cost", bucket: "Fuel" });
   });
 
   it("names a supplier account by its number or spelling", () => {
@@ -790,9 +828,9 @@ describe("the card and the person's answers", () => {
     const dl = download();
     const fee = lineBy(dl, "SERVICE FEE");
     const books = ORG_BOOKS({
-      already: new Map([[fee.key, { choice: "cost", bucket: "Fees", costKind: null, amountCents: -1200 }]]),
+      already: new Map([[fee.key, { choice: "cost", bucket: "Fees", amountCents: -1200 }]]),
       payments: [{ id: "pay-1", invoiceId: "inv-1", invoiceNumber: "INV-1001", cents: 127500, day: "2026-09-03", method: "check", feeCents: null, stripe: false }],
-      rules: [{ id: "r", direction: "out", key: "shell", choice: "cost", bucket: "Gas & Truck", costKind: "fuel", supplierAccountId: null, profileId: null }],
+      rules: [{ id: "r", direction: "out", key: "shell", choice: "cost", bucket: "Fuel", supplierAccountId: null, profileId: null }],
     });
     const plan = planBankDownload(dl, books);
     expect(bankHeadline(dl, plan.counts, "2026-09-27")).toBe("Bank ••1234 · Sep 2–Sep 25 · 4 sorted · 1 already in North · 9 need you");
@@ -822,7 +860,7 @@ describe("the card and the person's answers", () => {
     const shell = plan.groups.find((g) => g.merchantKey === "shell")!;
     const dep = plan.groups.find((g) => g.label === "DEPOSIT")!;
     const out = validPicks(
-      { [shell.id]: "cost:Gas & Truck:fuel", [dep.id]: "invoice:inv-1", "out:nobody": "personal" },
+      { [shell.id]: "cost:Fuel", [dep.id]: "invoice:inv-1", "out:nobody": "personal" },
       plan,
       books,
     );
@@ -862,12 +900,25 @@ describe("the card and the person's answers", () => {
     expect(validPicks({ [plan.groups[0].id]: "invoice:inv-9" }, plan, books).ok.size).toBe(1);
   });
 
-  it("choice ids read back exactly, and a kind rides only on Gas & Truck", () => {
-    for (const id of ["cost:Gas & Truck:fuel", "cost:Fees", "draw", "personal", "petty_cash", "not_cost", "other_income", "not_income", "crew:abcdef12", "supplier:abcdef12", "invoice:abcdef12"]) {
+  it("choice ids read back exactly; a bucket is the whole answer, Fuel and Auto included", () => {
+    for (const id of ["cost:Fuel", "cost:Auto", "cost:Fees", "draw", "personal", "petty_cash", "not_cost", "other_income", "not_income", "crew:abcdef12", "supplier:abcdef12", "invoice:abcdef12"]) {
       expect(choiceId(parseChoiceId(id)!)).toBe(id);
     }
-    expect(parseChoiceId("cost:Fees:fuel")).toBeNull();
+    expect(parseChoiceId("cost:Fuel")).toEqual({ choice: "cost", bucket: "Fuel" });
+    expect(choiceLabel(parseChoiceId("cost:Fuel")!, { accounts: new Map(), crew: new Map(), invoices: new Map() })).toBe("Fuel");
+    expect(choiceLabel(parseChoiceId("cost:Auto")!, { accounts: new Map(), crew: new Map(), invoices: new Map() })).toBe("Auto");
+    // The retired kind-inside-a-bucket answers are no answer: the row asks again.
+    expect(parseChoiceId("cost:Gas & Truck:fuel")).toBeNull();
+    expect(parseChoiceId("cost:Gas & Truck")).toBeNull();
+    expect(parseChoiceId("cost:Fuel:fuel")).toBeNull();
     expect(parseChoiceId("cost:Seventh Bucket")).toBeNull();
     expect(parseChoiceId("drawx")).toBeNull();
+  });
+
+  it("every out answer offers each bucket once, Fuel and Auto first, and a refund may go back on any bucket", () => {
+    const outs = everyChoice("out", ORG_BOOKS(), true).filter((c) => c.choice === "cost").map(choiceId);
+    expect(outs).toEqual(["cost:Fuel", "cost:Auto", "cost:Tools & Supplies", "cost:Phone & Office", "cost:Insurance & Licenses", "cost:Fees", "cost:Other"]);
+    const ins = everyChoice("in", ORG_BOOKS(), true).filter((c) => c.choice === "cost").map(choiceId);
+    expect(ins).toEqual(outs);
   });
 });

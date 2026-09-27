@@ -1,4 +1,5 @@
 import { computeCollected } from "@/lib/analytics/money-metrics";
+import { bucketOf } from "@/lib/business-cost-buckets";
 import { readAllPages } from "@/lib/read-all-pages";
 import { todayStrInTz, tzDayStartUtc } from "@/lib/tz";
 
@@ -6,18 +7,21 @@ import { todayStrInTz, tzDayStartUtc } from "@/lib/tz";
  * THE FUEL TREND (Erik, 2026-09-27: "ok so how much fuel am i burning is the main one i want to
  * evaluate and put into the app").
  *
- * Fuel is a kind inside the Gas & Truck bucket (bills.cost_kind = 'fuel', 0362): a business cost
- * with no job, tagged when a person tapped Fuel on a bank download (or a rule the company made from
- * such a tap). This reads those bills over the last 13 weeks, Monday to Sunday on the company's own
+ * Fuel is a business-cost bucket of its own (0362, business-cost-buckets.ts): a bill with no job
+ * whose category is Fuel, however it came in (a fill-up tapped Fuel on a bank download or placed by
+ * the company's own answer, a pump receipt filed as Fuel, Add Business Cost, a recurring expense).
+ * The same bills the Owner's Draw card counts on its Fuel line. This reads them over the last 13
+ * weeks, Monday to Sunday on the company's own
  * calendar, and says one number: what fuel costs a week. Under the bars, one line: fuel as a share
  * of money in (the Owner's Draw card's Received: computeCollected, the /analytics "Collected" rule,
  * plus a bank download's Other Income, over the same weeks), the average fill, and how many fills.
  *
  * THE AVERAGE COUNTS ONLY WEEKS THE BOOKS COVER: from the first week any fuel was recorded (or the
  * window's start, when fuel was recorded before it) to the last FINISHED week the bank downloads
- * reach. A company whose first fuel is 5 weeks old is averaged over 5 weeks, never 13; and this
- * week, still going (or past the last download, where fuel isn't in yet), is drawn but never
- * averaged, or every Monday would read about a thirteenth low.
+ * reach (a company that sorts its downloads gets most fills from them; one that never drops a
+ * download is covered through yesterday). A company whose first fuel is 5 weeks old is averaged
+ * over 5 weeks, never 13; and this week, still going (or past the last download, where fuel isn't
+ * in yet), is drawn but never averaged, or every Monday would read about a thirteenth low.
  *
  * PURE: rows in, figures out, integer cents throughout. getFuelTrend is the one read.
  */
@@ -30,7 +34,6 @@ export type FuelBillRow = {
   created_at?: string | null;
   category?: string | null;
   job_id?: string | null;
-  cost_kind?: string | null;
 };
 
 export type FuelWeek = { start: string; end: string; cents: number; fills: number };
@@ -66,9 +69,10 @@ export function fuelWindow(todayYmd: string): { start: string; end: string } {
 
 const cents = (v: unknown) => Math.round((Number(v) || 0) * 100);
 
-/** Is this bill fuel: a Gas & Truck business cost (no job) tagged fuel? */
+/** Is this bill fuel: a business cost (no job) in the Fuel bucket? bucketOf, the rule the Owner's
+ *  Draw card sums buckets by, so the two never disagree about which bill is fuel. */
 export function isFuelBill(r: FuelBillRow): boolean {
-  return r.cost_kind === "fuel" && r.category === "Gas & Truck" && !r.job_id;
+  return !r.job_id && bucketOf(r.category) === "Fuel";
 }
 
 /**
@@ -81,7 +85,7 @@ export function computeFuelTrend(
   moneyIn: number | ((from: string, to: string) => number),
   todayYmd: string,
   tz = "UTC",
-  /** The last day a bank download reached (fuel is written from them); null: today. */
+  /** The last day a bank download reached (most fills come from them); null: today. */
   coveredThrough: string | null = null,
 ): FuelTrend {
   const win = fuelWindow(todayYmd);
@@ -137,13 +141,13 @@ export function weekLabel(start: string): string {
  * THE READS: the fuel bills inside the 13 weeks (every page of them: PostgREST cuts a select at
  * 1,000 rows without a word, and a busy fleet passes that), the one earliest fuel bill ever (so the
  * average knows the first week the books have fuel), and the money received over the window, every
- * page. RLS holds all of them to the signed-in company's staff. A database before 0362 has no
- * cost_kind: there is no fuel yet, and the card simply isn't drawn (never an error).
+ * page. RLS holds all of them to the signed-in company's staff. Every door writes the bucket as
+ * bucketOf spells it, so the read asks for exactly "Fuel"; a company with none simply gets no card.
  */
 export async function getFuelTrend(supabase: any, tz: string, todayYmd: string): Promise<FuelTrend | null> {
   const win = fuelWindow(todayYmd);
   const fuelBills = () =>
-    supabase.from("bills").select("id, amount, bill_date, created_at, category, job_id, cost_kind").eq("cost_kind", "fuel").eq("category", "Gas & Truck").is("job_id", null).is("superseded_by_bill_id", null);
+    supabase.from("bills").select("id, amount, bill_date, created_at, category, job_id").eq("category", "Fuel").is("job_id", null).is("superseded_by_bill_id", null);
   const [inside, first] = await Promise.all([
     readAllPages<FuelBillRow & { id: string }>((f, t) => fuelBills().or(`bill_date.gte.${win.start},bill_date.is.null`).order("id").range(f, t), 20),
     fuelBills().not("bill_date", "is", null).order("bill_date", { ascending: true }).limit(1),
@@ -153,8 +157,8 @@ export async function getFuelTrend(supabase: any, tz: string, todayYmd: string):
   const before = (first.data as FuelBillRow[]).filter((r) => (r.bill_date ?? "") < win.start);
   const bills = [...before, ...inside.rows];
   if (!bills.length) return computeFuelTrend([], 0, todayYmd, tz);
-  // How far the bank downloads reach: fuel is written from them, so a week past the last one isn't
-  // in yet. No bank lines (or none readable): today.
+  // How far the bank downloads reach: most fills are written from them, so a week past the last one
+  // isn't in yet. No bank lines (or none readable): today.
   const { data: reach } = await supabase.from("bank_lines").select("posted_on").order("posted_on", { ascending: false }).limit(1);
   const coveredThrough = Array.isArray(reach) && reach[0]?.posted_on ? String(reach[0].posted_on).slice(0, 10) : null;
   const startIso = tzDayStartUtc(win.start, tz).toISOString();

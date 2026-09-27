@@ -18,8 +18,7 @@ import {
   type MoneyChartMonth,
   type MoneySeriesKey,
 } from "@/lib/analytics/money-chart";
-import { computeOwnerMoney, ownerMoneyChartWindow, type OwnerMoney, type OwnerMoneyMonth } from "@/lib/analytics/owner-money";
-import { BUSINESS_COST_BUCKETS } from "@/lib/business-cost-buckets";
+import { BUCKETS_BESIDE_FUEL, computeOwnerMoney, ownerMoneyChartWindow, type OwnerMoney, type OwnerMoneyMonth } from "@/lib/analytics/owner-money";
 import { MoneyChartSvg } from "@/app/(app)/analytics/money-chart-svg";
 
 const TODAY = "2026-09-24";
@@ -30,6 +29,7 @@ const row = (month: string, f: Partial<OwnerMoneyMonth> = {}): OwnerMoneyMonth =
   const materialsAndBills = f.materialsAndBills ?? 0;
   const crewPay = f.crewPay ?? 0;
   const crewMileagePaid = f.crewMileagePaid ?? 0;
+  const fuel = f.fuel ?? 0;
   const businessCostsTotal = f.businessCostsTotal ?? 0;
   const putOnShelf = f.putOnShelf ?? 0;
   const shopStockLost = f.shopStockLost ?? 0;
@@ -39,12 +39,13 @@ const row = (month: string, f: Partial<OwnerMoneyMonth> = {}): OwnerMoneyMonth =
     materialsAndBills,
     crewPay,
     crewMileagePaid,
-    businessCosts: Object.fromEntries(BUSINESS_COST_BUCKETS.map((b) => [b, 0])) as OwnerMoneyMonth["businessCosts"],
+    fuel,
+    businessCosts: Object.fromEntries(BUCKETS_BESIDE_FUEL.map((b) => [b, 0])) as OwnerMoneyMonth["businessCosts"],
     businessCostsTotal,
     processorFees: 0,
     putOnShelf,
     shopStockLost,
-    left: Math.round((received - materialsAndBills - crewPay - crewMileagePaid - businessCostsTotal - putOnShelf - shopStockLost) * 100) / 100,
+    left: Math.round((received - materialsAndBills - crewPay - crewMileagePaid - fuel - businessCostsTotal - putOnShelf - shopStockLost) * 100) / 100,
     ownerHours: 0,
     perOwnerHour: null,
   };
@@ -219,6 +220,33 @@ describe("buildMoneyChartData: what this viewer's chart holds", () => {
     expect(d.series.map((s) => s.key)).toEqual(["collected", "left", "materials", "crewPay", "business"]);
     expect(d.series.find((s) => s.key === "left")!.label).toBe("Left For Erik");
     expect(defaultSeriesOn(d.series)).toEqual(["collected", "left"]);
+  });
+
+  it("FUEL STANDS OUT: its own series in its own colour, beside Business Costs and never inside it", () => {
+    const m = money([
+      row("2026-08", { received: 5000, materialsAndBills: 900, fuel: 312.4, businessCostsTotal: 120 }),
+      row("2026-09", { received: 4000, fuel: 0, businessCostsTotal: 60 }),
+    ]);
+    const d = buildMoneyChartData(m, { ownerFigures: true, leftLabel: "Owner's Draw" });
+    expect(d.series.map((s) => s.key)).toEqual(["collected", "left", "materials", "fuel", "business"]);
+    const fuel = d.series.find((s) => s.key === "fuel")!;
+    const business = d.series.find((s) => s.key === "business")!;
+    expect(fuel.label).toBe("Fuel");
+    expect(fuel.fill).not.toBe(business.fill);
+    expect(fuel.swatch).toBe("bg-pink-800"); // the Fuel card's and the bank card's colour
+    expect(fuel.defaultOn).toBe(false); // Collected and Owner's Draw stay the two default bars
+    expect(d.months[0].values).toMatchObject({ fuel: 312.4, business: 120 });
+    // EVERY CENT ACCOUNTED FOR: Collected = Owner's Draw + every cost series, Fuel counted once.
+    for (const mo of d.months) {
+      const v = mo.values;
+      const costs = (v.materials ?? 0) + (v.crewPay ?? 0) + (v.mileage ?? 0) + (v.fuel ?? 0) + (v.business ?? 0) + (v.shelf ?? 0) + (v.lost ?? 0);
+      expect(Math.round(((v.left ?? 0) + costs) * 100)).toBe(Math.round((v.collected ?? 0) * 100));
+    }
+  });
+
+  it("no fuel in any month shown: no Fuel chip", () => {
+    const d = buildMoneyChartData(money([row("2026-08", { received: 4000, businessCostsTotal: 60 })]), { ownerFigures: true, leftLabel: "Owner's Draw" });
+    expect(d.series.map((s) => s.key)).not.toContain("fuel");
   });
 
   it("Crew Mileage is offered only when the months hold some", () => {

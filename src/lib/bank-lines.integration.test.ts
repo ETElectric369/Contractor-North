@@ -5,7 +5,7 @@ import pg from "pg";
 import { assertTestDatabase, notOnThisDatabase } from "@/lib/db-guard";
 
 /**
- * Migrations 0362 + 0363 + 0365: fuel is its own kind; a bank line is matched once; bank answers are
+ * Migrations 0362 + 0363 + 0365: fuel is its own bucket; a bank line is matched once; bank answers are
  * asked, not assumed (2026-09-27).
  *
  * Pinned here, against the real database, inside ONE transaction that is always rolled back:
@@ -17,7 +17,8 @@ import { assertTestDatabase, notOnThisDatabase } from "@/lib/db-guard";
  *   · the company's rules: one per merchant and answer, each for the amounts it was given for, a
  *     cost names its bucket, and money in only ever says Not Income (0365);
  *   · a money row's bank_line_id comes off by itself when its line is deleted (Undo);
- *   · bills.cost_kind takes fuel or truck only, and only rides a Gas & Truck business cost.
+ *   · a cost's bucket is one of the seven (Fuel and Auto, never the old Gas & Truck), and there is no
+ *     fuel "kind" column anywhere: a Fuel answer is the Fuel bucket (0362).
  *
  * Makes its own two companies and three people inside that transaction (the test database may hold
  * nobody), and speaks as each by planting request.jwt.claims under `set local role authenticated`.
@@ -25,13 +26,15 @@ import { assertTestDatabase, notOnThisDatabase } from "@/lib/db-guard";
  *
  * Until 0363 and 0365 are applied the suite waits, loudly; WAIT_APPLY_0363=1 applies whichever of
  * 0362, 0363 and 0365 is missing INSIDE the test's own transaction, which is rolled back, so the
- * database is left exactly as it was.
+ * database is left exactly as it was. A database built from the never-shipped draft of these
+ * (fuel as a kind inside Gas & Truck) waits the same way, and with WAIT_APPLY_0363=1 is taken back
+ * to before the draft and rebuilt, inside that same rolled-back transaction.
  *
  *   TEST_DB_HOST=… TEST_DB_USER=… TEST_DBPW=… [WAIT_APPLY_0363=1] npx vitest run <this file>
  */
 const { TEST_DBPW, TEST_DB_HOST, TEST_DB_USER, WAIT_APPLY_0363 } = process.env;
 const d = TEST_DBPW && TEST_DB_HOST && TEST_DB_USER ? describe : describe.skip;
-const M0362 = fileURLToPath(new URL("../../supabase/migrations/0362_fuel_is_its_own_kind.sql", import.meta.url));
+const M0362 = fileURLToPath(new URL("../../supabase/migrations/0362_fuel_is_its_own_bucket.sql", import.meta.url));
 const M0363 = fileURLToPath(new URL("../../supabase/migrations/0363_a_bank_line_is_matched_once.sql", import.meta.url));
 const M0365 = fileURLToPath(new URL("../../supabase/migrations/0365_bank_answers_are_asked_not_assumed.sql", import.meta.url));
 
@@ -69,9 +72,12 @@ d("0362 + 0363: bank lines and rules are the company's own, and a line counts on
     }
   };
   const ready = () =>
-    !waiting || notOnThisDatabase("[bank-lines] 0363 or 0365 is not on this database yet; set WAIT_APPLY_0363=1 to apply them inside the rolled-back transaction.");
+    !waiting ||
+    notOnThisDatabase(
+      "[bank-lines] 0363 or 0365 is not on this database yet (or it carries their never-shipped draft); set WAIT_APPLY_0363=1 to apply them inside the rolled-back transaction.",
+    );
   const line = (org: string, n: number, over: Record<string, unknown> = {}) => {
-    const row = { org_id: org, import_id: importA, line_key: KEY(n), posted_on: "2001-01-02", amount: -12.5, description: "SHELL 123 ANYTOWN", merchant_key: "shell", choice: "cost", bucket: "Gas & Truck", cost_kind: "fuel", sorted_by: "person", ...over };
+    const row = { org_id: org, import_id: importA, line_key: KEY(n), posted_on: "2001-01-02", amount: -12.5, description: "SHELL 123 ANYTOWN", merchant_key: "shell", choice: "cost", bucket: "Fuel", sorted_by: "person", ...over };
     const cols = Object.keys(row);
     return c.query(`insert into bank_lines (${cols.join(", ")}) values (${cols.map((_, i) => `$${i + 1}`).join(", ")}) returning id`, Object.values(row));
   };
@@ -84,16 +90,33 @@ d("0362 + 0363: bank lines and rules are the company's own, and a line counts on
     await c.query("begin");
     await c.query("set local lock_timeout = '3s'");
     await c.query("set local statement_timeout = '15s'");
+    // THE NEVER-SHIPPED DRAFT (fuel as a kind inside Gas & Truck: bills.cost_kind, bank_lines.
+    // cost_kind / matched_kind). A test database built from it is taken back to before it, inside
+    // this transaction, and then built from the migrations as they are now.
+    const draft = (await one("select exists (select 1 from information_schema.columns where table_schema = 'public' and column_name = 'cost_kind' and table_name in ('bills', 'bank_lines', 'bank_rules')) as yes")).yes;
     const has = await one("select to_regclass('public.bank_lines') is not null as yes");
     // 0365 says so on bank_rules' own comment.
     const has0365 = async () => (await one("select coalesce(obj_description(to_regclass('public.bank_rules'), 'pg_class'), '') like '%0365%' as yes")).yes;
-    if ((!has.yes || !(await has0365())) && WAIT_APPLY_0363 !== "1") {
+    if ((draft || !has.yes || !(await has0365())) && WAIT_APPLY_0363 !== "1") {
       waiting = true;
       return;
     }
-    if (!has.yes) {
-      const kind = await one("select exists (select 1 from information_schema.columns where table_schema='public' and table_name='bills' and column_name='cost_kind') as yes");
-      if (!kind.yes) await c.query(readFileSync(M0362, "utf8"));
+    if (draft) {
+      await c.query(`
+        drop policy if exists organized_items_bank_is_staff on public.organized_items;
+        alter table public.payments drop column if exists bank_line_id;
+        alter table public.bills drop column if exists bank_line_id;
+        alter table public.supplier_payments drop column if exists bank_line_id;
+        alter table public.pay_payments drop column if exists bank_line_id;
+        alter table public.petty_cash drop column if exists bank_line_id;
+        drop table if exists public.bank_rules;
+        drop table if exists public.bank_lines;
+        drop trigger if exists cost_kind_rides_gas_and_truck on public.bills;
+        drop function if exists public.cost_kind_rides_gas_and_truck();
+        alter table public.bills drop column if exists cost_kind;`);
+    }
+    if (draft || !has.yes) {
+      await c.query(readFileSync(M0362, "utf8"));
       await c.query(readFileSync(M0363, "utf8"));
     }
     if (!(await has0365())) await c.query(readFileSync(M0365, "utf8"));
@@ -125,7 +148,7 @@ d("0362 + 0363: bank lines and rules are the company's own, and a line counts on
     await as(staffA);
     expect((await line(orgA, 1)).rowCount).toBe(1);
     const rule = await c.query(
-      "insert into bank_rules (org_id, direction, merchant_key, choice, bucket, cost_kind, learned_import_id) values ($1, 'out', 'shell', 'cost', 'Gas & Truck', 'fuel', $2) returning id",
+      "insert into bank_rules (org_id, direction, merchant_key, choice, bucket, learned_import_id) values ($1, 'out', 'shell', 'cost', 'Fuel', $2) returning id",
       [orgA, importA],
     );
     expect(rule.rowCount).toBe(1);
@@ -166,25 +189,31 @@ d("0362 + 0363: bank lines and rules are the company's own, and a line counts on
     expect((await line(orgB, 1)).rowCount).toBe(1);
   });
 
-  it("the database refuses a long number in a description, a $0 line, a cost with no bucket, and a kind off Gas & Truck", async () => {
+  it("the database refuses a long number in a description, a $0 line, a cost with no bucket, and a bucket that isn't one", async () => {
     if (!ready()) return;
     expect(await refused("insert into bank_lines (org_id, import_id, line_key, posted_on, amount, description, choice, sorted_by) values ($1, $2, $3, '2001-01-02', -1, 'ACH 123456789', 'personal', 'person')", [orgA, importA, KEY(3)])).toBe("23514");
     expect(await refused("insert into bank_lines (org_id, import_id, line_key, posted_on, amount, description, choice, sorted_by) values ($1, $2, $3, '2001-01-02', -1, 'ACH ••6789', 'personal', 'person')", [orgA, importA, KEY(3)])).toBeNull();
     expect(await refused("insert into bank_lines (org_id, import_id, line_key, posted_on, amount, choice, sorted_by) values ($1, $2, $3, '2001-01-02', 0, 'personal', 'person')", [orgA, importA, KEY(4)])).toBe("23514");
     expect(await refused("insert into bank_lines (org_id, import_id, line_key, posted_on, amount, choice, sorted_by) values ($1, $2, $3, '2001-01-02', -1, 'cost', 'person')", [orgA, importA, KEY(5)])).toBe("23514");
-    expect(await refused("insert into bank_lines (org_id, import_id, line_key, posted_on, amount, choice, bucket, cost_kind, sorted_by) values ($1, $2, $3, '2001-01-02', -1, 'cost', 'Fees', 'fuel', 'person')", [orgA, importA, KEY(6)])).toBe("23514");
+    // The seven buckets (0362): Fuel and Auto are, the old Gas & Truck is not.
+    expect(await refused("insert into bank_lines (org_id, import_id, line_key, posted_on, amount, choice, bucket, sorted_by) values ($1, $2, $3, '2001-01-02', -1, 'cost', 'Gas & Truck', 'person')", [orgA, importA, KEY(6)])).toBe("23514");
+    expect(await refused("insert into bank_lines (org_id, import_id, line_key, posted_on, amount, choice, bucket, sorted_by) values ($1, $2, $3, '2001-01-02', -1, 'cost', 'Auto', 'person')", [orgA, importA, KEY(8)])).toBeNull();
+    expect(await refused("insert into bank_rules (org_id, direction, merchant_key, choice, bucket) values ($1, 'out', 'garage', 'cost', 'Gas & Truck')", [orgA])).toBe("23514");
     expect(await refused("insert into bank_lines (org_id, import_id, line_key, posted_on, amount, choice, sorted_by) values ($1, $2, 'not-a-key', '2001-01-02', -1, 'personal', 'person')", [orgA, importA])).toBe("23514");
-    // A matched line may remember the fuel/truck tag it put on its bill (0365); nothing else may.
-    expect(await refused("insert into bank_lines (org_id, import_id, line_key, posted_on, amount, choice, matched_kind, sorted_by) values ($1, $2, $3, '2001-01-02', -1, 'personal', 'fuel', 'person')", [orgA, importA, KEY(8)])).toBe("23514");
-    expect(await refused("insert into bank_lines (org_id, import_id, line_key, posted_on, amount, choice, matched_kind, sorted_by) values ($1, $2, $3, '2001-01-02', -1, 'matched', 'fuel', 'match')", [orgA, importA, KEY(9)])).toBeNull();
+    // No fuel "kind" anywhere: a Fuel answer is the Fuel bucket.
+    expect(
+      (await one("select count(*)::int as n from information_schema.columns where table_schema = 'public' and table_name in ('bills', 'bank_lines', 'bank_rules') and column_name in ('cost_kind', 'matched_kind')")).n,
+    ).toBe(0);
     // A rule: money in may only say Not Income (Other Income is never a rule's); one rule per merchant
     // AND answer (a second answer for the same merchant is its own rule), each with a sane band.
     expect(await refused("insert into bank_rules (org_id, direction, merchant_key, choice) values ($1, 'out', 'venmo', 'other_income')", [orgA])).toBe("23514");
     expect(await refused("insert into bank_rules (org_id, direction, merchant_key, choice) values ($1, 'in', 'regular', 'other_income')", [orgA])).toBe("23514");
     expect(await refused("insert into bank_rules (org_id, direction, merchant_key, choice) values ($1, 'in', 'savings', 'not_income')", [orgA])).toBeNull();
-    expect(await refused("insert into bank_rules (org_id, direction, merchant_key, choice, bucket, cost_kind) values ($1, 'out', 'shell', 'cost', 'Gas & Truck', 'fuel')", [orgA])).toBe("23505");
+    expect(await refused("insert into bank_rules (org_id, direction, merchant_key, choice, bucket) values ($1, 'out', 'shell', 'cost', 'Fuel')", [orgA])).toBe("23505");
     expect(await refused("insert into bank_rules (org_id, direction, merchant_key, choice, min_cents, max_cents) values ($1, 'out', 'shell', 'personal', 100, 2000)", [orgA])).toBeNull();
-    expect((await one("select answer from bank_rules where org_id = $1 and merchant_key = 'shell' and choice = 'cost'", [orgA])).answer).toBe("cost:Gas & Truck:fuel");
+    // A second COST answer for the same merchant is its own rule too (a fill-up Fuel, oil Auto).
+    expect(await refused("insert into bank_rules (org_id, direction, merchant_key, choice, bucket, min_cents, max_cents) values ($1, 'out', 'shell', 'cost', 'Auto', 800, 900)", [orgA])).toBeNull();
+    expect((await c.query("select answer from bank_rules where org_id = $1 and merchant_key = 'shell' order by answer", [orgA])).rows.map((r) => r.answer)).toEqual(["cost:Auto", "cost:Fuel", "personal"]);
     expect(await refused("insert into bank_rules (org_id, direction, merchant_key, choice, min_cents, max_cents) values ($1, 'out', 'dental', 'personal', 500, 100)", [orgA])).toBe("23514");
     expect(await refused("insert into bank_rules (org_id, direction, merchant_key, choice, min_cents) values ($1, 'out', 'dental', 'personal', 500)", [orgA])).toBe("23514");
   });
@@ -218,7 +247,7 @@ d("0362 + 0363: bank lines and rules are the company's own, and a line counts on
     const lid = (await line(orgA, 7, { description: "HOME HARDWARE" })).rows[0].id;
     const bill = (
       await one(
-        "insert into bills (org_id, job_id, supplier, amount, status, bill_date, category, cost_kind, bank_line_id) values ($1, null, 'TEST 0363 SHELL', 12.5, 'paid', '2001-01-02', 'Gas & Truck', 'fuel', $2) returning id",
+        "insert into bills (org_id, job_id, supplier, amount, status, bill_date, category, bank_line_id) values ($1, null, 'TEST 0363 SHELL', 12.5, 'paid', '2001-01-02', 'Fuel', $2) returning id",
         [orgA, lid],
       )
     ).id;
@@ -230,14 +259,10 @@ d("0362 + 0363: bank lines and rules are the company's own, and a line counts on
     expect((await one("select bank_line_id from bills where id = $1", [bill])).bank_line_id).toBeNull();
   });
 
-  it("fuel rides only on a Gas & Truck business cost: re-filing it clears the kind, never fails", async () => {
+  it("a Fuel bill re-filed to another bucket is simply that bucket: nothing rides along to clear", async () => {
     if (!ready()) return;
-    const id = (await one("insert into bills (org_id, job_id, supplier, amount, status, bill_date, category, cost_kind) values ($1, null, 'TEST 0363 FUEL', 40, 'paid', '2001-01-03', 'Gas & Truck', 'fuel') returning id", [orgA])).id;
-    expect((await one("select cost_kind from bills where id = $1", [id])).cost_kind).toBe("fuel");
-    await c.query("update bills set category = 'Other' where id = $1", [id]);
-    expect((await one("select cost_kind from bills where id = $1", [id])).cost_kind).toBeNull();
-    const other = (await one("insert into bills (org_id, job_id, supplier, amount, status, bill_date, category, cost_kind) values ($1, null, 'TEST 0363 TRUCK', 40, 'paid', '2001-01-03', 'Tools & Supplies', 'truck') returning cost_kind", [orgA])).cost_kind;
-    expect(other).toBeNull();
-    expect(await refused("insert into bills (org_id, job_id, supplier, amount, status, bill_date, category, cost_kind) values ($1, null, 'TEST 0363 X', 1, 'paid', '2001-01-03', 'Gas & Truck', 'diesel')", [orgA])).toBe("23514");
+    const id = (await one("insert into bills (org_id, job_id, supplier, amount, status, bill_date, category) values ($1, null, 'TEST 0363 FUEL', 40, 'paid', '2001-01-03', 'Fuel') returning id", [orgA])).id;
+    expect((await c.query("update bills set category = 'Auto' where id = $1 returning category", [id])).rows[0].category).toBe("Auto");
+    expect(await one("select tgname from pg_trigger where tgrelid = 'public.bills'::regclass and tgname = 'cost_kind_rides_gas_and_truck'")).toBeUndefined();
   });
 });

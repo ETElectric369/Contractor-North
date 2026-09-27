@@ -15,7 +15,7 @@ import { Card } from "@/components/ui/card";
 import { FormSubmit } from "@/components/form-submit";
 import { BillsReceipts } from "./bills-receipts";
 import { AddBusinessCostButton } from "./add-business-cost";
-import { isBusinessCostBucket } from "@/lib/business-cost-buckets";
+import { namesABucket } from "@/lib/business-cost-buckets";
 import type { ReceiptForBilling } from "./receipt-billing-card";
 import { SupplierCandidateReview, SupplierMergeReview, SupplierUnfiledSpellings } from "./supplier-merge-review";
 import { SupplierDuplicates } from "./supplier-duplicates";
@@ -790,10 +790,10 @@ export default async function BillsPage({
     // exactly as it reads today, rather than becoming a nameless row in a card about names.
     if (!alias) continue;
     // Nor is a business cost saved with no Where: Add Business Cost puts the bucket's own name in
-    // the supplier field ("Gas & Truck"), and offering to give "Gas & Truck" its own supplier
-    // account would be a door to nothing. Only a settled one, though: anything still owed stays
-    // in the count, so no unpaid dollar drops out of the amber line.
-    if (!b.job_id && isBusinessCostBucket(alias) && !isOnAccountBill({ status: String(b.status ?? "") })) continue;
+    // the supplier field ("Fuel"), and offering to give "Fuel" its own supplier account would be a
+    // door to nothing (nor "Gas & Truck", the name Auto had before 0362). Only a settled one,
+    // though: anything still owed stays in the count, so no unpaid dollar drops out of the amber line.
+    if (!b.job_id && namesABucket(alias) && !isOnAccountBill({ status: String(b.status ?? "") })) continue;
     const key = spellingKey(alias);
     const g = unfiled.get(key) ?? { alias, bills: 0, total: 0, unpaid: 0, unpaidBills: 0 };
     const amount = Number(b.amount) || 0;

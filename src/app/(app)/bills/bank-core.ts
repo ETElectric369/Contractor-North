@@ -56,12 +56,12 @@ type Db = any;
 
 export const BANK_NEEDS_UPDATE = "Sorting a bank download needs one database update first. It is waiting here and nothing was changed.";
 
-/** bank_lines / bank_rules / a bank_line_id or cost_kind column not on this database yet. */
+/** bank_lines / bank_rules / a bank_line_id column not on this database yet. */
 export function isMissingBank(err: unknown): boolean {
   const code = String((err as { code?: string } | null)?.code ?? "");
   const msg = String((err as { message?: string } | null)?.message ?? "");
   if (code === "42P01" || code === "PGRST205" || code === "42703" || code === "PGRST204") return true;
-  return /bank_lines|bank_rules|bank_line_id|cost_kind/i.test(msg) && /does not exist|could not find|schema cache/i.test(msg);
+  return /bank_lines|bank_rules|bank_line_id/i.test(msg) && /does not exist|could not find|schema cache/i.test(msg);
 }
 
 export const sha256Hex = (text: string) => createHash("sha256").update(text).digest("hex");
@@ -122,7 +122,7 @@ export async function loadBankBooks(supabase: Db, orgId: string, dl: BankDownloa
   const keys = dl.lines.map((l) => l.key);
 
   const already = Promise.all(
-    chunks(keys, 150).map((ks) => supabase.from("bank_lines").select("line_key, choice, bucket, cost_kind, amount").eq("org_id", orgId).in("line_key", ks)),
+    chunks(keys, 150).map((ks) => supabase.from("bank_lines").select("line_key, choice, bucket, amount").eq("org_id", orgId).in("line_key", ks)),
   );
   const paged = <T,>(q: (f: number, t: number) => PromiseLike<{ data: T[] | null; error: unknown }>) => readAllPages<T>(q, 20);
   const [alreadyR, payR, crewR, supR, billR, pettyR, acctR, aliasR, invR, peopleR, ruleR, paidR, docR, storedR] = await Promise.all([
@@ -165,7 +165,7 @@ export async function loadBankBooks(supabase: Db, orgId: string, dl: BankDownloa
     paged<any>((f, t) =>
       supabase
         .from("bills")
-        .select("id, amount, bill_date, supplier, job_id, category, supplier_account_id, cost_kind")
+        .select("id, amount, bill_date, supplier, job_id, category, supplier_account_id")
         .eq("org_id", orgId)
         .is("superseded_by_bill_id", null)
         .is("bank_line_id", null)
@@ -187,7 +187,7 @@ export async function loadBankBooks(supabase: Db, orgId: string, dl: BankDownloa
       .order("created_at", { ascending: false })
       .limit(500),
     supabase.from("profiles").select("id, full_name, role, active").eq("org_id", orgId).eq("active", true).neq("role", "owner").limit(200),
-    supabase.from("bank_rules").select("id, direction, merchant_key, choice, bucket, cost_kind, supplier_account_id, profile_id, min_cents, max_cents").eq("org_id", orgId).limit(5000),
+    supabase.from("bank_rules").select("id, direction, merchant_key, choice, bucket, supplier_account_id, profile_id, min_cents, max_cents").eq("org_id", orgId).limit(5000),
     supabase.from("pay_payments").select("profile_id, amount").eq("org_id", orgId).is("voided_at", null).order("paid_on", { ascending: false }).limit(2000),
     // Each account's own papers, newest first, for the branch a counter payment is printed with.
     supabase
@@ -224,7 +224,7 @@ export async function loadBankBooks(supabase: Db, orgId: string, dl: BankDownloa
   const alreadyMap: BankBooks["already"] = new Map();
   for (const r of alreadyR as { data: any[] | null }[]) {
     for (const row of r.data ?? []) {
-      alreadyMap.set(String(row.line_key), { choice: String(row.choice), bucket: row.bucket ?? null, costKind: row.cost_kind ?? null, amountCents: centsOf(row.amount) });
+      alreadyMap.set(String(row.line_key), { choice: String(row.choice), bucket: row.bucket ?? null, amountCents: centsOf(row.amount) });
     }
   }
   const aliases = new Map<string, string[]>();
@@ -275,7 +275,6 @@ export async function loadBankBooks(supabase: Db, orgId: string, dl: BankDownloa
       jobId: b.job_id ?? null,
       category: b.category ?? null,
       onAccount: !!b.supplier_account_id && onAccount.has(String(b.supplier_account_id)),
-      costKind: b.cost_kind ?? null,
     })),
     pettyCash: (pettyR.rows as any[]).map((p) => ({ id: String(p.id), cents: centsOf(p.amount), day: String(p.tx_date), kind: String(p.kind ?? "") })),
     accounts,
@@ -294,7 +293,6 @@ export async function loadBankBooks(supabase: Db, orgId: string, dl: BankDownloa
       key: String(r.merchant_key ?? ""),
       choice: r.choice,
       bucket: r.bucket ?? null,
-      costKind: r.cost_kind ?? null,
       supplierAccountId: r.supplier_account_id ?? null,
       profileId: r.profile_id ?? null,
       minCents: r.min_cents === null || r.min_cents === undefined ? null : Number(r.min_cents),
@@ -414,7 +412,7 @@ type Work = {
   line: BankLine;
   sortedBy: "match" | "rule" | "person";
   choice: BankChoice | null;
-  match?: { table: MatchTable; ids: string[]; tag?: "fuel" | "truck" };
+  match?: { table: MatchTable; ids: string[] };
   ruleId?: string;
   group?: string;
 };
@@ -472,7 +470,7 @@ export async function applyBankCore(
   for (const line of dl.lines) {
     const d = plan.dispositions.get(line.key);
     if (!d || d.how === "already") continue;
-    if (d.how === "match") work.push({ line, sortedBy: "match", choice: null, match: { table: d.table, ids: d.ids, ...(d.tag ? { tag: d.tag } : {}) } });
+    if (d.how === "match") work.push({ line, sortedBy: "match", choice: null, match: { table: d.table, ids: d.ids } });
     else if (d.how === "rule") work.push({ line, sortedBy: "rule", choice: d.choice, ruleId: d.ruleId });
     else {
       const c = picks.ok.get(d.group);
@@ -529,12 +527,9 @@ export async function applyBankCore(
       merchant_key: w.line.merchantKey,
       choice: c ? c.choice : "matched",
       bucket: c?.choice === "cost" ? c.bucket : null,
-      cost_kind: c?.choice === "cost" ? c.costKind : null,
       supplier_account_id: c?.choice === "supplier" ? c.supplierAccountId : null,
       profile_id: c?.choice === "crew" ? c.profileId : null,
       invoice_id: c?.choice === "invoice" ? c.invoiceId : null,
-      // The kind a match tagged on the bill it matched (0365), so Undo takes the tag off again.
-      matched_kind: w.match?.tag ?? null,
       sorted_by: w.sortedBy,
       created_by: who.userId,
     };
@@ -566,12 +561,10 @@ export async function applyBankCore(
   for (const table of MATCH_TABLES) {
     for (const w of work.filter((x) => x.match?.table === table && lineId.has(x.line.key))) {
       const id = lineId.get(w.line.key)!;
-      // A fill-up already on the books takes the fuel (or truck) tag the company's answer gave it.
-      const tag = table === "bills" && w.match!.tag ? { cost_kind: w.match!.tag } : {};
-      const { data, error } = await supabase.from(table).update({ bank_line_id: id, ...tag }).eq("org_id", who.orgId).in("id", w.match!.ids).is("bank_line_id", null).select("id");
+      const { data, error } = await supabase.from(table).update({ bank_line_id: id }).eq("org_id", who.orgId).in("id", w.match!.ids).is("bank_line_id", null).select("id");
       const got = ((data ?? []) as { id: string }[]).map((r) => String(r.id));
       if (error || got.length !== w.match!.ids.length) {
-        if (got.length) await supabase.from(table).update({ bank_line_id: null, ...(w.match!.tag ? { cost_kind: null } : {}) }).eq("org_id", who.orgId).in("id", got).eq("bank_line_id", id).select("id");
+        if (got.length) await supabase.from(table).update({ bank_line_id: null }).eq("org_id", who.orgId).in("id", got).eq("bank_line_id", id).select("id");
         await unwrite([w.line.key], `${w.line.description} (${w.line.postedOn}) wasn't matched: what it matched changed a moment ago.${error ? ` ${dbError(error)}` : ""}`);
       }
     }
@@ -598,7 +591,6 @@ export async function applyBankCore(
         bill_date: w.line.postedOn,
         notes: note,
         category: c.bucket,
-        cost_kind: c.costKind,
         bank_line_id: lineId.get(w.line.key),
         created_by: who.userId,
       };
@@ -705,7 +697,7 @@ export async function applyBankCore(
 
   // 4. THE COMPANY'S OWN RULES, from what a person tapped: one per merchant AND answer, for the
   //    amounts it was answered for (its band). The same answer again widens its band; another
-  //    answer for the same merchant is a rule of its own (a fill-up is Fuel, a coffee is Other).
+  //    answer for the same merchant is a rule of its own (a fill-up is Fuel, a coffee is Personal).
   const learned = new Map<string, { direction: "in" | "out"; key: string; c: BankChoice; min: number; max: number; title: string }>();
   const groupsById = new Map(plan.groups.map((g) => [g.id, g]));
   for (const w of work) {
@@ -740,7 +732,6 @@ export async function applyBankCore(
       merchant_key: string;
       choice: string;
       bucket: string | null;
-      cost_kind: string | null;
       supplier_account_id: string | null;
       profile_id: string | null;
       min_cents: number;
@@ -771,7 +762,6 @@ export async function applyBankCore(
         merchant_key: l.key,
         choice: l.c.choice,
         bucket: l.c.choice === "cost" ? l.c.bucket : null,
-        cost_kind: l.c.choice === "cost" ? l.c.costKind : null,
         supplier_account_id: l.c.choice === "supplier" ? l.c.supplierAccountId : null,
         profile_id: l.c.choice === "crew" ? l.c.profileId : null,
         min_cents: l.min,
@@ -851,7 +841,7 @@ export async function applyBankCore(
 
 // ── UNDO ───────────────────────────────────────────────────────────────────────────────────────
 
-type LineRow = { id: string; choice: string; amount: number | string; bucket: string | null; invoice_id: string | null; posted_on: string; description: string; matched_kind: string | null };
+type LineRow = { id: string; choice: string; amount: number | string; bucket: string | null; invoice_id: string | null; posted_on: string; description: string };
 
 /**
  * TAKE A WHOLE DOWNLOAD BACK: only what it wrote, and only what nobody has changed since.
@@ -867,7 +857,7 @@ type LineRow = { id: string; choice: string; amount: number | string; bucket: st
 export async function undoBankCore(supabase: Db, orgId: string, userId: string, importId: string): Promise<{ ok: true; left: string[]; undone: number } | { ok: false; error: string }> {
   const read = await readAllPages<LineRow>(
     (f, t) =>
-      supabase.from("bank_lines").select("id, choice, amount, bucket, invoice_id, posted_on, description, matched_kind").eq("org_id", orgId).eq("import_id", importId).order("id").range(f, t),
+      supabase.from("bank_lines").select("id, choice, amount, bucket, invoice_id, posted_on, description").eq("org_id", orgId).eq("import_id", importId).order("id").range(f, t),
     20,
   );
   if (read.error) return { ok: false, error: isMissingBank(read.error) ? BANK_NEEDS_UPDATE : `The download's lines couldn't be read, so nothing was undone. ${dbError(read.error as never)}` };
@@ -881,7 +871,7 @@ export async function undoBankCore(supabase: Db, orgId: string, userId: string, 
 
   for (const table of MATCH_TABLES) {
     const cols =
-      table === "bills" ? "id, bank_line_id, amount, job_id, category, cost_kind" : table === "payments" ? "id, bank_line_id, amount, invoice_id" : table === "petty_cash" ? "id, bank_line_id, amount, kind" : "id, bank_line_id, amount, voided_at";
+      table === "bills" ? "id, bank_line_id, amount, job_id, category" : table === "payments" ? "id, bank_line_id, amount, invoice_id" : table === "petty_cash" ? "id, bank_line_id, amount, kind" : "id, bank_line_id, amount, voided_at";
     for (const part of chunks(ids, 150)) {
       const { data, error } = await supabase.from(table).select(cols).eq("org_id", orgId).in("bank_line_id", part);
       if (error) return { ok: false, error: `${table.replace(/_/g, " ")} couldn't be read, so the rest wasn't undone. ${dbError(error)}` };
@@ -890,10 +880,7 @@ export async function undoBankCore(supabase: Db, orgId: string, userId: string, 
         if (!l) continue;
         const cents = Math.abs(centsOf(l.amount));
         if (l.choice === "matched") {
-          // The fuel/truck tag the match put on a bill comes off with the mark, unless a person has
-          // said something else since.
-          const untag = table === "bills" && l.matched_kind && row.cost_kind === l.matched_kind ? { cost_kind: null } : {};
-          const { error: e } = await supabase.from(table).update({ bank_line_id: null, ...untag }).eq("org_id", orgId).eq("id", row.id).select("id");
+          const { error: e } = await supabase.from(table).update({ bank_line_id: null }).eq("org_id", orgId).eq("id", row.id).select("id");
           if (e) {
             keep.add(l.id);
             say(l, `its mark wouldn't come off: ${dbError(e)}`);

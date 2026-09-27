@@ -1277,9 +1277,9 @@ export async function createBill(input: {
   // may only supersede a PO on its own job, or the supersede silently drops another job's
   // order from the cost rollup. A mismatched/foreign id is ignored (the bill still saves).
   const poId = await visiblePoIdOnJobOrNull(supabase, input.po_id ?? null, jobId);
-  // A COST WITH NO JOB IS A BUSINESS COST, AND IT LANDS IN ONE OF THE SIX BUCKETS whichever door
+  // A COST WITH NO JOB IS A BUSINESS COST, AND IT LANDS IN ONE OF THE BUCKETS whichever door
   // sent it: the Bills page, Add Business Cost, Add Cost, or Nort. bucketOf reads an old word
-  // ("Fuel") as its bucket and anything unknown as Other, so no door can start a seventh list.
+  // ("Vehicle") as its bucket and anything unknown as Other, so no door can start a list of its own.
   // A job bill's category is the kind of paper it is (Receipt, Materials) and passes untouched.
   const category = jobId ? (input.category ?? null) : bucketOf(input.category);
 
@@ -1453,7 +1453,7 @@ export async function updateBill(
   if (patch.bill_date !== undefined) clean.bill_date = patch.bill_date || null;
   if (patch.notes !== undefined) clean.notes = patch.notes?.trim() || null;
   // The same rule as createBill: an edit that says this bill has no job puts its category in one
-  // of the six buckets. (A patch that leaves job_id out is not told which it is, and passes as sent.)
+  // of the buckets. (A patch that leaves job_id out is not told which it is, and passes as sent.)
   if (patch.category !== undefined)
     clean.category = patch.job_id !== undefined && !patch.job_id ? bucketOf(patch.category) : (patch.category ?? null);
   if (patch.job_id !== undefined) clean.job_id = patch.job_id || null;

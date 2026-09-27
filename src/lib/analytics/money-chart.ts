@@ -14,7 +14,7 @@ import type { OwnerMoney } from "@/lib/analytics/owner-money";
 
 // ── Series ───────────────────────────────────────────────────────────────────
 
-export type MoneySeriesKey = "collected" | "left" | "materials" | "crewPay" | "mileage" | "business" | "shelf" | "lost";
+export type MoneySeriesKey = "collected" | "left" | "materials" | "crewPay" | "mileage" | "fuel" | "business" | "shelf" | "lost";
 
 export type MoneySeries = {
   key: MoneySeriesKey;
@@ -36,12 +36,16 @@ const SERIES: Record<MoneySeriesKey, Omit<MoneySeries, "key" | "label"> & { labe
   materials: { label: "Materials & Bills", fill: "fill-indigo-500", swatch: "bg-indigo-500", defaultOn: false },
   crewPay: { label: "Crew Pay", fill: "fill-amber-600", swatch: "bg-amber-600", defaultOn: false },
   mileage: { label: "Crew Mileage", fill: "fill-sky-600", swatch: "bg-sky-600", defaultOn: false },
+  // FUEL STANDS OUT (0362; Erik, 2026-09-27): the Fuel bucket is its own series, never inside
+  // Business Costs, in the pink-800 the Fuel card and the bank card draw it in. Validated against
+  // its neighbours (sky-600, pink-500): CVD ΔE 18.8, normal-vision ΔE 20.6, inside the lightness band.
+  fuel: { label: "Fuel", fill: "fill-pink-800", swatch: "bg-pink-800", defaultOn: false },
   business: { label: "Business Costs", fill: "fill-pink-500", swatch: "bg-pink-500", defaultOn: false },
   // Shop stock (0303): offered only in a year that has some, like every cost series.
   shelf: { label: "Put On The Shelf", fill: "fill-teal-600", swatch: "bg-teal-600", defaultOn: false },
   lost: { label: "Shop Stock Lost", fill: "fill-slate-500", swatch: "bg-slate-500", defaultOn: false },
 };
-export const MONEY_SERIES_ORDER: MoneySeriesKey[] = ["collected", "left", "materials", "crewPay", "mileage", "business", "shelf", "lost"];
+export const MONEY_SERIES_ORDER: MoneySeriesKey[] = ["collected", "left", "materials", "crewPay", "mileage", "fuel", "business", "shelf", "lost"];
 
 export type MoneyChartMonth = { month: string; values: Partial<Record<MoneySeriesKey, number>> };
 export type MoneyChartData = { series: MoneySeries[]; months: MoneyChartMonth[] };
@@ -54,10 +58,11 @@ const tiny = (v: number | undefined) => !v || Math.abs(v) < 0.005;
  * the other series are not hidden in the browser, they are never put in the data, so nothing about
  * the owner's figures reaches an office viewer the owner has not allowed.
  *
- * A COST series (Materials & Bills, Crew Pay, Crew Mileage, Business Costs) is offered only when some
- * month on the chart holds some, the way the card only prints a line when there is one: a solo owner
- * with no crew never gets a Crew Pay chip that would draw nothing. Crew Mileage is its own series (the
- * two-bucket law: never folded into crew pay). Collected and Left are always offered to the owner.
+ * A COST series (Materials & Bills, Crew Pay, Crew Mileage, Fuel, Business Costs) is offered only when
+ * some month on the chart holds some, the way the card only prints a line when there is one: a solo
+ * owner with no crew never gets a Crew Pay chip that would draw nothing. Crew Mileage is its own series
+ * (the two-bucket law: never folded into crew pay), and so is Fuel (never folded into Business Costs).
+ * Collected and Left are always offered to the owner.
  *
  * Leading months where nothing came in or went out are trimmed, so a company whose books start in
  * April shows April onward, not six empty slots. A $0 month AFTER the first one keeps its slot.
@@ -76,6 +81,8 @@ export function buildMoneyChartData(money: OwnerMoney, opts: { ownerFigures: boo
         return m.crewPay;
       case "mileage":
         return m.crewMileagePaid;
+      case "fuel":
+        return m.fuel;
       case "business":
         return m.businessCostsTotal;
       case "shelf":

@@ -35,7 +35,7 @@ let missingBank = false;
 // bank_rules: one per merchant AND answer (0363's generated `answer` column, spelled out here).
 const UNIQUE: Record<string, string[]> = {
   bank_lines: ["org_id", "line_key"],
-  bank_rules: ["org_id", "direction", "merchant_key", "choice", "bucket", "cost_kind", "supplier_account_id", "profile_id"],
+  bank_rules: ["org_id", "direction", "merchant_key", "choice", "bucket", "supplier_account_id", "profile_id"],
 };
 
 function fakeDb() {
@@ -103,7 +103,7 @@ function fakeDb() {
       const chain: any = {
         select: (c?: string) => {
           cols = c ?? "";
-          if (/bank_line_id|cost_kind/.test(cols)) touchesBank ||= false;
+          if (/bank_line_id/.test(cols)) touchesBank ||= false;
           return chain;
         },
         insert: (p: any) => {
@@ -289,7 +289,7 @@ describe("the door", () => {
     const shell = rowBy(v, "SHELL");
     // The total of three different fills, said as a total (never "3×", which reads as each).
     expect(shell.money).toBe("3 charges · $288.45");
-    expect(shell.buttons.map((b) => b.label)).toEqual(["Fuel", "Truck", "Personal"]);
+    expect(shell.buttons.map((b) => b.label)).toEqual(["Fuel", "Auto", "Personal"]);
     expect(rowBy(v, "Deposit").buttons.map((b) => b.label)).toEqual(["On INV-1001", "Other Income", "Already Counted Or Not Income"]);
     expect(rowBy(v, "Check 1043").buttons.map((b) => b.label)).toEqual(["Pay Pat Crew", "Personal"]);
     // Another company's supplier, invoice and crew are never offered.
@@ -308,7 +308,7 @@ describe("Swap Money In And Out", () => {
     const v = await view(id);
     expect(v.swapped).toBe(true);
     expect(v.rows.every((r) => r.direction === "out")).toBe(true);
-    await applyBankDownload(id, { fingerprint: v.fingerprint, picks: { [rowBy(v, "SHELL").id]: "cost:Gas & Truck:fuel" } });
+    await applyBankDownload(id, { fingerprint: v.fingerprint, picks: { [rowBy(v, "SHELL").id]: "cost:Fuel" } });
     expect(db.bills).toHaveLength(1);
     expect((await swapBankDownload(id)).error).toMatch(/Undo it first/);
   });
@@ -329,7 +329,7 @@ describe("Apply", () => {
   async function applyWithAnswers(id: string, leave: string[] = ["ACME INSURANCE"]) {
     const v = await view(id);
     const answer: Record<string, string> = {
-      SHELL: "cost:Gas & Truck:fuel",
+      SHELL: "cost:Fuel",
       DENTAL: "personal",
       "ONLINE TRANSFER": "draw",
       Deposit: "invoice:inv-1",
@@ -356,11 +356,16 @@ describe("Apply", () => {
     expect(lines.find((l) => l.description.includes("DENTAL"))).toMatchObject({ choice: "personal" });
     expect(lines.find((l) => l.description.includes("STRIPE"))).toMatchObject({ choice: "matched", sorted_by: "match" });
 
-    // FUEL: three paid business costs in Add Business Cost's shape, tagged fuel, each marked.
+    // FUEL: three paid business costs in Add Business Cost's shape, in the Fuel bucket, each marked.
     expect(db.bills).toHaveLength(3);
     for (const b of db.bills) {
-      expect(b).toMatchObject({ org_id: "org-1", job_id: null, status: "paid", category: "Gas & Truck", cost_kind: "fuel" });
-      expect(lines.some((l) => l.id === b.bank_line_id && l.choice === "cost")).toBe(true);
+      expect(b).toMatchObject({ org_id: "org-1", job_id: null, status: "paid", category: "Fuel" });
+      expect(b).not.toHaveProperty("cost_kind");
+      expect(lines.some((l) => l.id === b.bank_line_id && l.choice === "cost" && l.bucket === "Fuel")).toBe(true);
+    }
+    for (const l of lines) {
+      expect(l).not.toHaveProperty("cost_kind");
+      expect(l).not.toHaveProperty("matched_kind");
     }
     expect(db.bills.map((b) => b.amount).sort()).toEqual([100, 100, 88.45]);
 
@@ -387,11 +392,12 @@ describe("Apply", () => {
     expect(db.payments).toHaveLength(4);
 
     // RULES from the taps, one per merchant; never from the deposit's invoice or the check.
-    expect(db.bank_rules.map((r) => [r.direction, r.merchant_key, r.choice, r.cost_kind]).sort()).toEqual([
+    expect(db.bank_rules.map((r) => [r.direction, r.merchant_key, r.choice, r.bucket]).sort()).toEqual([
       ["out", "dental", "personal", null],
-      ["out", "shell", "cost", "fuel"],
+      ["out", "shell", "cost", "Fuel"],
       ["out", "transfer 9876", "draw", null],
     ]);
+    expect(db.bank_rules.some((r) => "cost_kind" in r)).toBe(false);
     expect(db.bank_rules.every((r) => r.learned_import_id === id && r.org_id === "org-1")).toBe(true);
     expect(db.bank_rules.find((r) => r.merchant_key === "shell")).toMatchObject({ min_cents: 8845, max_cents: 10000 });
 
@@ -413,7 +419,7 @@ describe("Apply", () => {
     await applyWithAnswers(id, []);
     expect(db.organized_items[0].status).toBe("filed");
     expect(db.organized_items[0].proposal.filed).toEqual({ how: "bank_download" });
-    expect(db.bills.find((b) => b.category === "Insurance & Licenses")).toMatchObject({ amount: 31.90, cost_kind: null });
+    expect(db.bills.find((b) => b.category === "Insurance & Licenses")).toMatchObject({ amount: 31.90 });
   });
 
   it("a stale card writes nothing; two presses write once", async () => {
@@ -428,8 +434,8 @@ describe("Apply", () => {
     const fresh = await view(id);
     const shell = rowBy(fresh, "SHELL").id;
     const [a, b] = await Promise.all([
-      applyBankDownload(id, { fingerprint: fresh.fingerprint, picks: { [shell]: "cost:Gas & Truck:fuel" } }),
-      applyBankDownload(id, { fingerprint: fresh.fingerprint, picks: { [shell]: "cost:Gas & Truck:fuel" } }),
+      applyBankDownload(id, { fingerprint: fresh.fingerprint, picks: { [shell]: "cost:Fuel" } }),
+      applyBankDownload(id, { fingerprint: fresh.fingerprint, picks: { [shell]: "cost:Fuel" } }),
     ]);
     expect([a.ok, b.ok].sort()).toEqual([false, true]);
     expect([a, b].find((r) => !r.ok)!.error).toMatch(/applied from another screen|already applied/);
@@ -479,7 +485,7 @@ describe("the next download", () => {
     const v = await view(first);
     const shell = rowBy(v, "SHELL").id;
     const dental = rowBy(v, "DENTAL").id;
-    await applyBankDownload(first, { fingerprint: v.fingerprint, picks: { [shell]: "cost:Gas & Truck:fuel", [dental]: "personal" } });
+    await applyBankDownload(first, { fingerprint: v.fingerprint, picks: { [shell]: "cost:Fuel", [dental]: "personal" } });
     const next = await drop(NEXT_CSV, "Next.csv");
     const nv = await view(next);
     // 3 overlap (DENTAL, STRIPE, SHELL 9/16); the two new SHELL fills go by the rule; nothing asks.
@@ -495,7 +501,7 @@ describe("the next download", () => {
   it("the same weeks downloaded again in another format count once: no second fuel bill", async () => {
     const first = await drop();
     const v = await view(first);
-    await applyBankDownload(first, { fingerprint: v.fingerprint, picks: { [rowBy(v, "SHELL").id]: "cost:Gas & Truck:fuel" } });
+    await applyBankDownload(first, { fingerprint: v.fingerprint, picks: { [rowBy(v, "SHELL").id]: "cost:Fuel" } });
     expect(db.bills).toHaveLength(3);
     // The bank's QFX of the same days: its own ids, its own words for the same fill-ups.
     const qfx = [
@@ -521,20 +527,33 @@ describe("the next download", () => {
 });
 
 describe("a fill-up already on the books", () => {
-  it("is tagged Fuel by the company's answer when its line matches it, and Undo takes the tag off", async () => {
+  it("is matched, keeps the bucket a person filed it in, and Undo takes only the mark off", async () => {
     const first = await drop();
     const v = await view(first);
-    await applyBankDownload(first, { fingerprint: v.fingerprint, picks: { [rowBy(v, "SHELL").id]: "cost:Gas & Truck:fuel" } });
-    // A pump receipt filed from Organize before the next download: Gas & Truck, no kind.
-    db.bills.push({ id: "b-receipt", org_id: "org-1", job_id: null, supplier: "Shell", amount: 60, bill_date: "2026-09-28", category: "Gas & Truck", cost_kind: null, bank_line_id: null, superseded_by_bill_id: null });
+    await applyBankDownload(first, { fingerprint: v.fingerprint, picks: { [rowBy(v, "SHELL").id]: "cost:Fuel" } });
+    // A pump receipt filed from Organize as Fuel before the next download, and one a person filed
+    // as Auto: the company's Fuel answer for SHELL never re-files the second.
+    db.bills.push({ id: "b-receipt", org_id: "org-1", job_id: null, supplier: "Shell", amount: 60, bill_date: "2026-09-28", category: "Fuel", bank_line_id: null, superseded_by_bill_id: null });
     const next = await drop(NEXT_CSV, "Next.csv");
     const nv = await view(next);
     await applyBankDownload(next, { fingerprint: nv.fingerprint, picks: {} });
     const receipt = db.bills.find((b) => b.id === "b-receipt")!;
-    expect(receipt.cost_kind).toBe("fuel");
-    expect(db.bank_lines.find((l) => l.id === receipt.bank_line_id)).toMatchObject({ choice: "matched", matched_kind: "fuel" });
+    expect(receipt.category).toBe("Fuel");
+    expect(db.bank_lines.find((l) => l.id === receipt.bank_line_id)).toMatchObject({ choice: "matched", bucket: null });
     await undoBankDownload(next);
-    expect(db.bills.find((b) => b.id === "b-receipt")).toMatchObject({ cost_kind: null, bank_line_id: null });
+    expect(db.bills.find((b) => b.id === "b-receipt")).toMatchObject({ category: "Fuel", bank_line_id: null });
+  });
+
+  it("a receipt filed as Auto stays Auto when its line matches, whatever the merchant's answer says", async () => {
+    const first = await drop();
+    const v = await view(first);
+    await applyBankDownload(first, { fingerprint: v.fingerprint, picks: { [rowBy(v, "SHELL").id]: "cost:Fuel" } });
+    db.bills.push({ id: "b-oil", org_id: "org-1", job_id: null, supplier: "Shell", amount: 60, bill_date: "2026-09-28", category: "Auto", bank_line_id: null, superseded_by_bill_id: null });
+    const next = await drop(NEXT_CSV, "Next.csv");
+    const nv = await view(next);
+    await applyBankDownload(next, { fingerprint: nv.fingerprint, picks: {} });
+    expect(db.bills.find((b) => b.id === "b-oil")).toMatchObject({ category: "Auto" });
+    expect(db.bills.find((b) => b.id === "b-oil")!.bank_line_id).not.toBeNull();
   });
 });
 
@@ -542,7 +561,7 @@ describe("a receipt snapped after the download", () => {
   it("is found on the books by its money and day, and File It asks instead of writing a second cost", async () => {
     const id = await drop();
     const v = await view(id);
-    await applyBankDownload(id, { fingerprint: v.fingerprint, picks: { [rowBy(v, "SHELL").id]: "cost:Gas & Truck:fuel" } });
+    await applyBankDownload(id, { fingerprint: v.fingerprint, picks: { [rowBy(v, "SHELL").id]: "cost:Fuel" } });
     expect(db.bills).toHaveLength(3);
     db.organized_items.push({
       id: "pump",
@@ -557,7 +576,7 @@ describe("a receipt snapped after the download", () => {
       payment: "paid_at_purchase",
       proposal: {},
     });
-    const res = await fileItem("pump", { type: "overhead", category: "Gas & Truck" });
+    const res = await fileItem("pump", { type: "overhead", category: "Fuel" });
     expect(res.ok).toBe(false);
     expect(res.error).toMatch(/^Already on the books: 1111-SHELL 123 ANYTOWN ST, \$100\.00, 2026-09-16, from the bank download/);
     expect(res.error).toMatch(/Different Purchase: File It Anyway/);
@@ -579,10 +598,10 @@ XXXXX1234,09/12/2026,,1111-CORNER STORE ANYTOWN,120.00,,Posted,866.69
     const v = await view(id);
     const rows = v.rows.filter((r) => r.title.includes("CORNER STORE"));
     expect(rows.map((r) => r.money)).toEqual(["2 charges · $258.62", "$13.31"]);
-    await applyBankDownload(id, { fingerprint: v.fingerprint, picks: { [rows[0].id]: "cost:Gas & Truck:fuel", [rows[1].id]: "cost:Other" } });
-    expect(db.bank_rules.map((r) => [r.choice, r.bucket, r.cost_kind, r.min_cents, r.max_cents]).sort()).toEqual([
-      ["cost", "Gas & Truck", "fuel", 12000, 13862],
-      ["cost", "Other", null, 1331, 1331],
+    await applyBankDownload(id, { fingerprint: v.fingerprint, picks: { [rows[0].id]: "cost:Fuel", [rows[1].id]: "cost:Other" } });
+    expect(db.bank_rules.map((r) => [r.choice, r.bucket, r.min_cents, r.max_cents]).sort()).toEqual([
+      ["cost", "Fuel", 12000, 13862],
+      ["cost", "Other", 1331, 1331],
     ]);
     // Next month: a fill-up and a coffee go by their own answers; a $40 purchase, far from both, asks
     // with the nearest answer as the guess.
@@ -599,14 +618,14 @@ XXXXX1234,10/04/2026,,1111-CORNER STORE ANYTOWN,40.00,,Posted,650.20
       ["Other (Your Rule)", 1],
     ]);
     expect(nv.rows).toHaveLength(1);
-    expect(nv.rows[0].guess).toBe("cost:Gas & Truck:fuel");
+    expect(nv.rows[0].guess).toBe("cost:Fuel");
     expect(nv.rules.map((r) => r.label)).toEqual(["CORNER → Fuel ($120.00 to $138.62)", "CORNER → Other ($13.31)"]);
   });
 
   it("Forget takes an answer off, and its lines are asked again", async () => {
     const id = await drop();
     const v = await view(id);
-    await applyBankDownload(id, { fingerprint: v.fingerprint, picks: { [rowBy(v, "SHELL").id]: "cost:Gas & Truck:fuel" } });
+    await applyBankDownload(id, { fingerprint: v.fingerprint, picks: { [rowBy(v, "SHELL").id]: "cost:Fuel" } });
     const next = await drop(NEXT_CSV, "Next.csv");
     const before = await view(next);
     expect(before.rules).toHaveLength(1);
@@ -623,7 +642,7 @@ describe("Undo", () => {
     const id = await drop();
     const v = await view(id);
     const picks = {
-      [rowBy(v, "SHELL").id]: "cost:Gas & Truck:fuel",
+      [rowBy(v, "SHELL").id]: "cost:Fuel",
       [rowBy(v, "Deposit").id]: "invoice:inv-1",
       [rowBy(v, "Check 1043").id]: "crew:pat",
       [rowBy(v, "ONLINE TRANSFER").id]: "draw",
@@ -663,7 +682,7 @@ describe("Undo", () => {
   it("an Apply still writing holds Undo back; a claim nobody finished (a lost request) does not trap the card", async () => {
     const id = await drop();
     const v = await view(id);
-    await applyBankDownload(id, { fingerprint: v.fingerprint, picks: { [rowBy(v, "SHELL").id]: "cost:Gas & Truck:fuel" } });
+    await applyBankDownload(id, { fingerprint: v.fingerprint, picks: { [rowBy(v, "SHELL").id]: "cost:Fuel" } });
     const item = db.organized_items[0];
     item.proposal.bankImport.pending = new Date().toISOString();
     expect(await undoBankDownload(id)).toMatchObject({ ok: false, error: expect.stringMatching(/being applied right now/) });

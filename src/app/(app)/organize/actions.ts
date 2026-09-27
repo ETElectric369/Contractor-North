@@ -714,7 +714,7 @@ function billClaimRefusal(err: unknown, tail: string): string | null {
 // NO PETTY CASH DESTINATION (2026-09-24). Filing a receipt to petty cash wrote an expense with no
 // job and replaced the receipt's category with "Receipt", so a job purchase quietly became a
 // business cost: that is how CED 8802-1101094, $379.35 of parts for the Rhodesia job, ended up in
-// the cash box. A receipt now goes to a job or to one of the six business-cost buckets. An item
+// the cash box. A receipt now goes to a job or to one of the business-cost buckets. An item
 // filed to petty cash before this still has its petty_cash_id, and re-filing it tears that row
 // down below exactly as before.
 export type FileDestination =
@@ -892,7 +892,7 @@ export async function fileItem(id: string, dest: FileDestination, opts: FileOpti
   const supabase = ctx.supabase;
   // Checked BEFORE anything is torn down, so a bad bucket costs nothing.
   if (dest.type === "overhead" && !isBusinessCostBucket(dest.category))
-    return { ok: false, error: "Pick one of the six business cost buckets. Nothing was moved." };
+    return { ok: false, error: "Pick one of the business cost buckets. Nothing was moved." };
   // THE JOB IS OURS, asked before anything is claimed or torn down (audit v994 TL2). The job id
   // arrives from the browser; a crafted call naming another company's job would write a bill and a
   // document pointing at a job this company can't see (0340 refuses it in the database too).
@@ -1841,7 +1841,7 @@ ${jobLines.join("\n") || "(none)"}`,
       return { ok: true, message: `A guess: ${label}. Tap it on the row to pick it, then press File It if that's right. ${reason}`.trim() };
     }
     if (action === "overhead") {
-      // The bucket is one of the six, and Fees is never the AI's suggestion, because a supplier's
+      // The bucket is one of the list, and Fees is never the AI's suggestion, because a supplier's
       // late or service charge is already on that supplier's own paperwork.
       const cat = bucketOf(parsed.overhead_category);
       // Only a bill or a receipt can be a business cost, and only its row has a bucket to tap.

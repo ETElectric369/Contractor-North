@@ -685,8 +685,8 @@ export function pickProvenance(settled: PaperItem, destValue: string): { filed: 
  */
 const COMPANY_WORDS: { re: RegExp; bucket: BusinessCostBucket | null; shelf?: true }[] = [
   { re: /^(SHOP )?TOOLS?$/, bucket: "Tools & Supplies" },
-  { re: /^(TRUCK|VAN)( \d{1,3})?$/, bucket: "Gas & Truck" },
-  { re: /^\d{1,3} (TRUCK|VAN)$/, bucket: "Gas & Truck" },
+  { re: /^(TRUCK|VAN)( \d{1,3})?$/, bucket: "Auto" },
+  { re: /^\d{1,3} (TRUCK|VAN)$/, bucket: "Auto" },
   { re: /^OFFICE$/, bucket: "Phone & Office" },
   { re: /^(SHOP )?STOCK$/, bucket: null, shelf: true },
   { re: /^INVENTORY$/, bucket: null, shelf: true },
@@ -1352,5 +1352,5 @@ export function shelfRowsOf(item: PaperItem): ShelfRow[] {
   return linesPointWithTotal(amountOf(item), cleanLines(item.line_items)).map((l, index) => ({ ...l, index }));
 }
 
-/** The six buckets, re-exported so a picker never needs a second import to list them. */
+/** The business-cost buckets, re-exported so a picker never needs a second import to list them. */
 export const PAPER_BUCKETS = BUSINESS_COST_BUCKETS;

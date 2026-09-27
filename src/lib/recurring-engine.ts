@@ -102,8 +102,8 @@ async function createOccurrence(supabase: any, t: any, userId: string | null, or
       amount: t.amount ?? 0,
       status: "unpaid",
       bill_date: t.next_date,
-      // A no-job bill is a business cost, so it lands in one of the six buckets even from a
-      // template saved before the Recurring form offered only those (0285 moves the stored ones).
+      // A no-job bill is a business cost, so it lands in one of the buckets even from a
+      // template saved before the Recurring form offered only those (0285 and 0362 move the stored ones).
       category: bucketOf(t.category),
       notes: `Recurring expense: ${t.title}`,
       created_by: userId,

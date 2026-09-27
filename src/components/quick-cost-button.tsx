@@ -20,7 +20,7 @@ import { jobLabel } from "@/lib/schedule-options";
 import { useToast } from "@/components/toast";
 import { BUSINESS_COST_BUCKETS } from "@/lib/business-cost-buckets";
 
-// What a cost ON A JOB is. A cost with no job is a business cost and picks from the six buckets
+// What a cost ON A JOB is. A cost with no job is a business cost and picks from the business-cost buckets
 // instead (lib/business-cost-buckets), the same list every other no-job door uses.
 const CATEGORIES = ["Materials", "Fuel", "Shop supplies", "Tools", "Subcontractor", "Permit", "Equipment rental", "Office", "Other"];
 // A PRE-prep sanity ceiling on the raw pick, not the reader's cap: the reader's 8 MB applies to
@@ -51,7 +51,7 @@ const DEFAULT_TRIGGER =
 /**
  * THE one "add a cost" everywhere — supplier + amount + category + an optional
  * receipt photo (the camera on mobile), scoped to a job or to the business (a business cost,
- * in one of the six buckets). Wraps
+ * in one of the business-cost buckets). Wraps
  * createBill (a cost = a bill) plus THE receipt pipeline (lib/receipt-capture) for the photo, so every surface
  * logs a cost the same way.
  *

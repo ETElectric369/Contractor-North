@@ -301,14 +301,19 @@ describe("fileSupplierPaper: Business Cost", () => {
     expect(calls.some((c) => c.table === "supplier_invoices" && c.verb === "update")).toBe(false);
   });
 
-  it("a bucket that is not one of the six is refused, never guessed at", async () => {
+  it("a bucket that is not one of the list is refused, never guessed at (the old Gas & Truck too)", async () => {
     state.client = fakeSupabase(
-      { "profiles.select": [STAFF], "supplier_invoices.select": [OK({ id: INVOICE, invoice_number: NUMBER, kind: "invoice", job_id: null })] },
+      {
+        "profiles.select": [STAFF, STAFF],
+        "supplier_invoices.select": [OK({ id: INVOICE, invoice_number: NUMBER, kind: "invoice", job_id: null }), OK({ id: INVOICE, invoice_number: NUMBER, kind: "invoice", job_id: null })],
+      },
       calls,
     );
-    const res = await fileSupplierPaper({ invoiceId: INVOICE, businessCost: "Gas" });
-    expect(res.ok).toBe(false);
-    expect(res.error).toContain("Pick one of the six business-cost buckets");
+    for (const word of ["Gas", "Gas & Truck"]) {
+      const res = await fileSupplierPaper({ invoiceId: INVOICE, businessCost: word });
+      expect(res.ok).toBe(false);
+      expect(res.error).toContain("Pick one of the business-cost buckets: Fuel, Auto, Tools & Supplies");
+    }
     expect(calls.some((c) => c.verb === "insert")).toBe(false);
   });
 });

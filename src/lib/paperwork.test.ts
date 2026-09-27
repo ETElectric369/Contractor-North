@@ -196,7 +196,7 @@ describe("the bill carries what the paper IS, never a hard-coded Receipt", () =>
     expect(billCategoryFor({ doc_type: null, category: "Invoice" })).toBe("Invoice");
   });
   it("a bucket name left on the row after a business-cost filing does not become the paper's type", () => {
-    expect(billCategoryFor({ doc_type: null, category: "Gas & Truck" })).toBe("Receipt");
+    expect(billCategoryFor({ doc_type: null, category: "Auto" })).toBe("Receipt");
   });
 });
 
@@ -212,7 +212,7 @@ describe("where it goes: only the paper picks a job (Erik, 2026-09-24)", () => {
     expect(suggestedDestination(marked, ["job-2"])).toBe("");
   });
   it("an UNMARKED bill picks nothing, not even the bucket a model liked, and has no reason line", () => {
-    const unmarked = receipt({ proposal: { bucket: "Gas & Truck" } });
+    const unmarked = receipt({ proposal: { bucket: "Fuel" } });
     expect(suggestedDestination(unmarked, ["job-1"])).toBe("");
     expect(shownDestination(null, unmarked, ["job-1"])).toBe("");
     expect(pickedBecause(unmarked)).toBeNull();
@@ -220,7 +220,7 @@ describe("where it goes: only the paper picks a job (Erik, 2026-09-24)", () => {
     // until one is.
     expect(fileRefusal(unmarked, null)).toMatch(/Pick where it goes first: a job, or a business cost bucket/);
     expect(fileRefusal(unmarked, parseDestination("job:job-1"))).toBeNull();
-    expect(fileRefusal(unmarked, parseDestination("cost:Gas & Truck"))).toBeNull();
+    expect(fileRefusal(unmarked, parseDestination("cost:Fuel"))).toBeNull();
   });
   it("a MODEL'S GUESS never pre-selects: it is a one-tap chip", () => {
     // The reader's own job_id, AI Suggest's pick, and a job a model wrote before marks existed.
@@ -231,7 +231,7 @@ describe("where it goes: only the paper picks a job (Erik, 2026-09-24)", () => {
       expect(guessOf(guessed, ["job-1"])).toBe("job:job-1");
     }
     // A bucket guess is a chip too, and Fees is never offered.
-    expect(guessOf(receipt({ proposal: { bucket: "Gas & Truck" } }), [])).toBe("cost:Gas & Truck");
+    expect(guessOf(receipt({ proposal: { bucket: "Fuel" } }), [])).toBe("cost:Fuel");
     expect(guessOf(receipt({ proposal: { bucket: "Fees" } }), [])).toBeNull();
     // A guess that is the job the paper already picked is not offered twice.
     expect(guessOf(receipt({ proposal: { jobId: "job-1", jobFrom: "address", guessJobId: "job-1" } }), ["job-1"])).toBeNull();

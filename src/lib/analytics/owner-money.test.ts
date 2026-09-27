@@ -27,6 +27,7 @@ import {
 import { computeRevenueTrend } from "@/lib/analytics/money-metrics";
 import { balanceForPerson } from "@/lib/payroll-math";
 import { BUSINESS_COST_BUCKETS } from "@/lib/business-cost-buckets";
+import { BUCKETS_BESIDE_FUEL } from "@/lib/analytics/owner-money";
 
 const TZ = "America/Los_Angeles";
 const TODAY = "2026-09-24";
@@ -75,14 +76,15 @@ const base = (): OwnerMoneyInputs => ({
 });
 
 const cents = (n: number) => Math.round(n * 100);
-const bizTotal = (f: OwnerMoneyFigures) => BUSINESS_COST_BUCKETS.reduce((s, b) => s + cents(f.businessCosts[b]), 0);
-/** THE INVARIANT, in cents: received = materials + crew pay + mileage + business costs
+const bizTotal = (f: OwnerMoneyFigures) => BUCKETS_BESIDE_FUEL.reduce((s, b) => s + cents(f.businessCosts[b]), 0);
+/** THE INVARIANT, in cents: received = materials + crew pay + mileage + fuel + business costs
  *  + put on the shelf + shop stock lost (0303) + left. */
 const holds = (f: OwnerMoneyFigures) =>
   cents(f.received) ===
   cents(f.materialsAndBills) +
     cents(f.crewPay) +
     cents(f.crewMileagePaid) +
+    cents(f.fuel) +
     cents(f.businessCostsTotal) +
     cents(f.putOnShelf) +
     cents(f.shopStockLost) +
@@ -274,9 +276,9 @@ describe("computeOwnerMoney: what is left for the owner", () => {
 
   it("covers Jan through the current month, and the months sum to the total", () => {
     expect(m.months.map((x) => x.month)).toEqual(["2026-01", "2026-02", "2026-03", "2026-04", "2026-05", "2026-06", "2026-07", "2026-08", "2026-09"]);
-    const fields = ["received", "materialsAndBills", "crewPay", "crewMileagePaid", "businessCostsTotal", "processorFees", "left"] as const;
+    const fields = ["received", "materialsAndBills", "crewPay", "crewMileagePaid", "fuel", "businessCostsTotal", "processorFees", "left"] as const;
     for (const f of fields) expect(m.months.reduce((s, x) => s + cents(x[f]), 0)).toBe(cents(m.totals[f]));
-    for (const b of BUSINESS_COST_BUCKETS) expect(m.months.reduce((s, x) => s + cents(x.businessCosts[b]), 0)).toBe(cents(m.totals.businessCosts[b]));
+    for (const b of BUCKETS_BESIDE_FUEL) expect(m.months.reduce((s, x) => s + cents(x.businessCosts[b]), 0)).toBe(cents(m.totals.businessCosts[b]));
     expect(m.months.reduce((s, x) => s + x.ownerHours * 100, 0)).toBe(Math.round(m.totals.ownerHours * 100));
   });
 
@@ -307,10 +309,43 @@ describe("computeOwnerMoney: what is left for the owner", () => {
   });
 
   it("a no-job bill lands in its bucket; blank is Other; petty cash with no job too; a refill is not a cost", () => {
-    expect(m.totals.businessCosts["Gas & Truck"]).toBe(138.62); // "Fuel" → Gas & Truck
+    expect(m.totals.fuel).toBe(138.62); // the Fuel bucket, its own line
+    expect(m.totals.businessCosts.Auto).toBe(0);
     expect(m.totals.businessCosts.Other).toBe(47.44);
     expect(m.totals.businessCosts["Tools & Supplies"]).toBe(20);
     expect(m.months.find((x) => x.month === "2026-09")!.businessCosts.Other).toBe(47.44); // created_at read in Pacific
+  });
+
+  it("FUEL STANDS OUT: its own line, never inside Business Costs, and every cent still adds up", () => {
+    const withTruck = computeOwnerMoney(
+      {
+        ...yearInputs(),
+        bills: [
+          ...yearInputs().bills,
+          { id: "t1", job_id: null, amount: 480, bill_date: "2026-09-11", created_at: "2026-09-11T18:00:00Z", category: "Auto", status: "paid" },
+          // A row 0362 has not renamed yet: the old Gas & Truck is Auto, never Fuel.
+          { id: "t2", job_id: null, amount: 96.4, bill_date: "2026-09-11", created_at: "2026-09-11T18:00:00Z", category: "Gas & Truck", status: "paid" },
+          { id: "f2", job_id: null, amount: 60, bill_date: "2026-09-12", created_at: "2026-09-12T18:00:00Z", category: "Fuel", status: "paid" },
+        ],
+        pettyCash: [...yearInputs().pettyCash, { job_id: null, amount: 12.5, kind: "expense", category: "gas", tx_date: "2026-09-12", created_at: "2026-09-12T18:00:00Z" }],
+      },
+      YEAR,
+      TZ,
+      TODAY,
+    );
+    const t = withTruck.totals;
+    expect(t.fuel).toBe(211.12); // 138.62 + 60 + 12.50 of petty cash filed as "gas"
+    expect(t.businessCosts.Auto).toBe(576.4);
+    expect("Fuel" in t.businessCosts).toBe(false);
+    expect(cents(t.businessCostsTotal)).toBe(bizTotal(t));
+    // Moving fuel onto its own line moves no money: Left is exactly the old Left less the new costs.
+    expect(cents(t.left)).toBe(cents(m.totals.left) - cents(480 + 96.4 + 60 + 12.5));
+    for (const f of [t, ...withTruck.months]) expect(holds(f)).toBe(true);
+    const sep = withTruck.months.find((x) => x.month === "2026-09")!;
+    expect(sep.fuel).toBe(72.5);
+    expect(sep.businessCosts.Auto).toBe(576.4);
+    // Every bucket is somewhere: Fuel on its own, the rest in Business Costs.
+    expect([...BUCKETS_BESIDE_FUEL, "Fuel"].sort()).toEqual([...BUSINESS_COST_BUCKETS].sort());
   });
 
   it("Stripe's real fee lands in Fees; a NULL fee is UNKNOWN, reported, and never $0", () => {
@@ -831,9 +866,9 @@ describe("the windows agree with each other", () => {
   it("This Year's totals are the field-by-field sum of each month run on its own", () => {
     const year = computeOwnerMoney(yearInputs(), YEAR, TZ, TODAY);
     const monthly = year.months.map((x) => computeOwnerMoney(yearInputs(), ownerMoneyWindow("this_month", `${x.month}-15`), TZ, TODAY));
-    const fields = ["received", "materialsAndBills", "crewPay", "crewMileagePaid", "businessCostsTotal", "processorFees", "left"] as const;
+    const fields = ["received", "materialsAndBills", "crewPay", "crewMileagePaid", "fuel", "businessCostsTotal", "processorFees", "left"] as const;
     for (const f of fields) expect(monthly.reduce((s, m) => s + cents(m.totals[f]), 0)).toBe(cents(year.totals[f]));
-    for (const b of BUSINESS_COST_BUCKETS) {
+    for (const b of BUCKETS_BESIDE_FUEL) {
       expect(monthly.reduce((s, m) => s + cents(m.totals.businessCosts[b]), 0)).toBe(cents(year.totals.businessCosts[b]));
     }
     expect(monthly.reduce((s, m) => s + Math.round(m.totals.ownerHours * 100), 0)).toBe(Math.round(year.totals.ownerHours * 100));
@@ -949,7 +984,7 @@ describe("getOwnerMoney: the fetch half", () => {
     expect(money!.totals.crewPay).toBe(320);
     expect(money!.totals.ownerHours).toBe(5);
     expect(money!.totals.businessCosts.Fees).toBe(13.35);
-    expect(money!.totals.businessCosts["Gas & Truck"]).toBe(30);
+    expect(money!.totals.fuel).toBe(30);
     expect(money!.owners).toEqual([{ id: ERIK, name: "Erik Taylor" }]);
   });
 

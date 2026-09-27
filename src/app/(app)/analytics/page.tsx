@@ -172,7 +172,7 @@ export default async function AnalyticsPage({
 
   // The old "Overhead (all time)" tile and "Overhead by category" block are gone (0286). They
   // counted only no-job bills, all time, in the old category words, and disagreed with Business
-  // Costs. The Left For You card carries business costs now, in the six buckets, for the window.
+  // Costs. The Left For You card carries business costs now, in its buckets (Fuel on a line of its own), for the window.
 
   const stat = (label: string, value: string, Icon: any, tone: string) => (
     <Card key={label}>

@@ -345,7 +345,7 @@ Respond with ONLY a JSON object (no prose):
   "confidence": "low" | "medium" | "high"
 }
 
-Rules: copy job_marks only from what is on the paper; never fill one in from anything else. A gas-station or convenience receipt is overhead (Gas & Truck). Generic supply-house receipts with no job reference are "unsure", not overhead. A supplier's finance charge, service charge, late fee or interest is "unsure", never overhead. In every "description", write inches as the word in (e.g. "6 in EMT", not 6") and never put a raw double-quote character inside a JSON string.
+Rules: copy job_marks only from what is on the paper; never fill one in from anything else. A fuel receipt (a gas station, a pump, a fill-up at a store) is overhead (Fuel); truck parts, repairs, tires, oil changes and registration are overhead (Auto). Generic supply-house receipts with no job reference are "unsure", not overhead. A supplier's finance charge, service charge, late fee or interest is "unsure", never overhead. In every "description", write inches as the word in (e.g. "6 in EMT", not 6") and never put a raw double-quote character inside a JSON string.
 
 ${FOOD_AND_DRINK_PROMPT_RULE}
 

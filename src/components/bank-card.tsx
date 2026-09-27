@@ -15,7 +15,7 @@ import { keepPaperwork } from "@/app/(app)/organize/paperwork-actions";
  *
  *   Bank ••1234 · Aug 26–Sep 25 · 96 sorted · 17 already in North · 5 need you, in 3 rows
  *   [one bar: where the money went]
- *   SHELL 123 ANYTOWN · 3 charges · $288.45   [Fuel] [Truck] [Personal] [Other…]
+ *   SHELL 123 ANYTOWN · 3 charges · $288.45   [Fuel] [Auto] [Personal] [Other…]
  *   Deposit Sep 4 · $1,275.00        [On INV-1001] [Other Income] [Already Counted Or Not Income] [Other…]
  *   Check 1043 · $640.00             [Pay Pat] [Other…]
  *   [Apply] [Set Aside]
@@ -37,8 +37,9 @@ const ANSWER = "h-auto min-h-11 max-w-full whitespace-normal py-2 text-left";
 type Run = (key: string, fn: () => Promise<{ ok: boolean; error?: string; message?: string }>, filedSentence?: string) => void;
 
 /** Each segment its own colour. Where Money by Month (money-chart.ts) has the same money, the same
- *  colour: Business Costs pink-500, Materials & Bills indigo-500, Crew Pay amber-600, Owner's Draw
- *  green-600; Fuel is the fuel card's deeper pink. The bank's own segments take colours that chart
+ *  colour: Fuel pink-800 (the Fuel bucket, as on the chart and the Fuel card), Business Costs
+ *  pink-500, Materials & Bills indigo-500, Crew Pay amber-600, Owner's Draw green-600. The bank's
+ *  own segments take colours that chart
  *  doesn't use, so no colour means two things. Identity is never colour alone: every segment is
  *  named with its figure in the legend under the bar. */
 const TONES: Record<string, string> = {

@@ -56,10 +56,10 @@ describe("companyUseWord: the whole box, exactly", () => {
     ["TOOLS", "Tools & Supplies"],
     ["Tool", "Tools & Supplies"],
     ["SHOP TOOLS", "Tools & Supplies"],
-    ["TRUCK", "Gas & Truck"],
-    ["TRUCK #2", "Gas & Truck"],
-    ["#2 TRUCK", "Gas & Truck"],
-    ["VAN 1", "Gas & Truck"],
+    ["TRUCK", "Auto"],
+    ["TRUCK #2", "Auto"],
+    ["#2 TRUCK", "Auto"],
+    ["VAN 1", "Auto"],
     ["OFFICE", "Phone & Office"],
   ])("%s picks %s", (word, bucket) => {
     expect(companyUseWord(word)).toEqual({ bucket, words: word });

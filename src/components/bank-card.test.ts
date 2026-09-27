@@ -33,10 +33,10 @@ const VIEW: BankView = {
       dates: "Sep 2–Sep 16",
       direction: "out",
       single: false,
-      guess: "cost:Gas & Truck:fuel",
+      guess: "cost:Fuel",
       buttons: [
-        { id: "cost:Gas & Truck:fuel", label: "Fuel" },
-        { id: "cost:Gas & Truck:truck", label: "Truck" },
+        { id: "cost:Fuel", label: "Fuel" },
+        { id: "cost:Auto", label: "Auto" },
         { id: "personal", label: "Personal" },
       ],
     },
@@ -90,7 +90,7 @@ describe("the bank card", () => {
     // The guess is marked, and NOT picked: no button is pressed until a person taps.
     expect(html).not.toContain('aria-pressed="true"');
     const labels = buttons(html).map((b) => b.text);
-    expect(labels.slice(0, 4)).toEqual(["Fuel Guess", "Truck", "Personal", "Other…"]);
+    expect(labels.slice(0, 4)).toEqual(["Fuel Guess", "Auto", "Personal", "Other…"]);
     expect(labels).toContain("On INV-1001 Guess");
     expect(labels).toContain("Pay Pat Crew Guess");
     expect(text).toContain("A button marked Guess is the app's guess.");
@@ -169,15 +169,25 @@ describe("the fuel card", () => {
     for (const b of bars) expect(b.markup).toContain("min-w-11");
     expect(text).toContain("312"); // this week's figure on its bar
     expect(html).toContain("border-dashed"); // the average line
+    // It counts the Fuel bucket (0362), and says so; Auto is not in it.
+    expect(text).toContain("Counts every business cost filed as Fuel");
+    expect(text).toContain("Truck repairs and parts are Auto, not in it.");
+    expect(text).not.toContain("Gas & Truck");
+  });
+
+  it("draws fuel in the one Fuel colour the chart and the bank card use", () => {
+    const html = renderToStaticMarkup(createElement(FuelTrendCard, { trend }));
+    expect(html).toContain("bg-pink-800");
+    expect(toneOf("fuel")).toBe("bg-pink-800");
   });
 });
 
 describe("a pick on a row that left the card", () => {
   it("is never sent: Apply sends only the rows on the card now", () => {
-    const picks = { "out:shell": "cost:Gas & Truck:fuel", "line:abc": "other_income" };
+    const picks = { "out:shell": "cost:Fuel", "line:abc": "other_income" };
     // The books changed: the deposit matched, its row is gone.
     const rows = VIEW.rows.filter((r) => r.id !== "line:abc");
-    expect(livePicks(picks, rows)).toEqual({ "out:shell": "cost:Gas & Truck:fuel" });
+    expect(livePicks(picks, rows)).toEqual({ "out:shell": "cost:Fuel" });
     expect(livePicks(picks, VIEW.rows)).toEqual(picks);
   });
 });

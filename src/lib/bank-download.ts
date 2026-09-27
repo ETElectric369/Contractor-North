@@ -1,4 +1,4 @@
-import { BUSINESS_COST_BUCKETS, isBusinessCostBucket, type BusinessCostBucket } from "@/lib/business-cost-buckets";
+import { BUSINESS_COST_BUCKETS, bucketOf, isBusinessCostBucket, type BusinessCostBucket } from "@/lib/business-cost-buckets";
 import { findHeaderRow, fingerprintOf, headerKey, readDate, readHeaderRow, readHeaderWith, readMoney, sayDollars } from "@/lib/supplier-open-list";
 
 /**
@@ -594,10 +594,10 @@ export function readBankTable(table: readonly (readonly string[])[], name: strin
 
 // ── CHOICES ────────────────────────────────────────────────────────────────────────────────────
 
-export type CostKind = "fuel" | "truck";
-
+/** A business cost is its bucket and nothing more: Fuel is a bucket of its own (0362), so a fill-up
+ *  is "cost:Fuel" and the truck's repairs "cost:Auto". */
 export type BankChoice =
-  | { choice: "cost"; bucket: BusinessCostBucket; costKind: CostKind | null }
+  | { choice: "cost"; bucket: BusinessCostBucket }
   | { choice: "draw" }
   | { choice: "personal" }
   | { choice: "petty_cash" }
@@ -614,7 +614,7 @@ export type ChoiceName = BankChoice["choice"];
 export function choiceId(c: BankChoice): string {
   switch (c.choice) {
     case "cost":
-      return `cost:${c.bucket}${c.costKind ? `:${c.costKind}` : ""}`;
+      return `cost:${c.bucket}`;
     case "supplier":
       return `supplier:${c.supplierAccountId}`;
     case "crew":
@@ -631,15 +631,12 @@ const UUIDISH = /^[A-Za-z0-9_-]{1,64}$/;
 
 export function parseChoiceId(id: unknown): BankChoice | null {
   const s = String(id ?? "");
-  const [head, a, b] = s.split(":");
+  const [head, a] = s.split(":");
   switch (head) {
-    case "cost": {
-      if (!isBusinessCostBucket(a)) return null;
-      const kind = b === "fuel" || b === "truck" ? b : null;
-      if (b && !kind) return null;
-      if (kind && a !== "Gas & Truck") return null;
-      return { choice: "cost", bucket: a, costKind: kind };
-    }
+    case "cost":
+      // Exactly "cost:<bucket>": anything after the bucket (a retired "cost:<bucket>:<kind>" id)
+      // is no answer, and the row asks again.
+      return isBusinessCostBucket(a) && s === `cost:${a}` ? { choice: "cost", bucket: a } : null;
     case "supplier":
       return UUIDISH.test(a ?? "") ? { choice: "supplier", supplierAccountId: a } : null;
     case "crew":
@@ -676,8 +673,6 @@ export type BankNames = {
 export function choiceLabel(c: BankChoice, names: BankNames): string {
   switch (c.choice) {
     case "cost":
-      if (c.costKind === "fuel") return "Fuel";
-      if (c.costKind === "truck") return "Truck";
       return c.bucket;
     case "draw":
       return "Owner's Draw";
@@ -715,8 +710,6 @@ export type BooksBill = {
   jobId: string | null;
   category: string | null;
   onAccount: boolean;
-  /** Fuel or truck inside Gas & Truck (0362), or null: not said. */
-  costKind?: string | null;
 };
 export type BooksPetty = { id: string; cents: number; day: string; kind: string };
 export type BooksAccount = { id: string; name: string; number: string | null; branch: string | null; onAccount: boolean; aliases: string[] };
@@ -728,14 +721,13 @@ export type BooksRule = {
   key: string;
   choice: Exclude<ChoiceName, "invoice">;
   bucket: string | null;
-  costKind: string | null;
   supplierAccountId: string | null;
   profileId: string | null;
   /** The amounts (cents, positive) it was answered for; null = every amount. */
   minCents?: number | null;
   maxCents?: number | null;
 };
-export type AlreadyLine = { choice: string; bucket: string | null; costKind: string | null; amountCents: number };
+export type AlreadyLine = { choice: string; bucket: string | null; amountCents: number };
 /** A line already in bank_lines around this download's days, whatever download counted it. */
 export type StoredLine = { key: string; postedOn: string; cents: number; last4: string | null; description: string; check: string | null };
 
@@ -764,7 +756,7 @@ export type MatchTable = "payments" | "bills" | "supplier_payments" | "pay_payme
 
 export type Disposition =
   | { how: "already" }
-  | { how: "match"; table: MatchTable; ids: string[]; said: string; tag?: CostKind }
+  | { how: "match"; table: MatchTable; ids: string[]; said: string }
   | { how: "rule"; ruleId: string; choice: BankChoice }
   | { how: "need"; group: string };
 
@@ -882,7 +874,7 @@ export function lineNamesSupplier(description: string, supplier: string): boolea
 }
 
 const FUEL_RE = /\b(fuel|gas|gasoline|diesel|petrol|shell|chevron|texaco|exxon|mobil|arco|valero|sinclair|conoco|phillips|marathon|citgo|sunoco|maverik|pilot|loves|flying j|circle k|speedway|costco gas|gas station|fuel stop)\b/i;
-const TRUCK_RE = /\b(auto parts|autozone|o ?reilly|napa|jiffy|lube|oil change|tire|tires|car wash|smog|dmv|registration|towing|mechanic|auto repair|truck)\b/i;
+const AUTO_RE = /\b(auto parts|autozone|o ?reilly|napa|jiffy|lube|oil change|tire|tires|car wash|smog|dmv|registration|towing|mechanic|auto repair|truck)\b/i;
 const INSURANCE_RE = /\b(insur\w*|ins prem|premium|liability|bond|bonding|licen[cs]e\w*|cslb)\b/i;
 const FEE_RE = /\b(fee|fees|service charge|overdraft|nsf|interest charge|finance charge|monthly maintenance|wire fee)\b/i;
 const PHONE_RE = /\b(verizon|at&t|att|t-mobile|tmobile|sprint|comcast|xfinity|spectrum|internet|wireless|phone|google|microsoft|adobe|dropbox|quickbooks|intuit|office)\b/i;
@@ -892,8 +884,8 @@ const TOOLS_RE = /\b(home depot|lowes|lowe s|harbor freight|ace hardware|hardwar
 const ATM_RE = /\b(atm|cash withdrawal)\b/i;
 const PAY_WORDS_RE = /\b(zelle|venmo|cash app|cashapp|payroll|transfer|xfer)\b/i;
 
-const FUEL: BankChoice = { choice: "cost", bucket: "Gas & Truck", costKind: "fuel" };
-const TRUCK: BankChoice = { choice: "cost", bucket: "Gas & Truck", costKind: "truck" };
+const FUEL: BankChoice = { choice: "cost", bucket: "Fuel" };
+const AUTO: BankChoice = { choice: "cost", bucket: "Auto" };
 
 /** A crew member the line names by first name. */
 function crewNamed(description: string, crew: readonly BooksCrew[]): BooksCrew | null {
@@ -947,12 +939,12 @@ export function guessFor(line: BankLine, books: BankBooks, used?: ReadonlySet<st
   // A transfer is asked first: "ONLINE TRANSFER WITHDRAWAL TO XXXX9876" is the owner's, not an ATM.
   if (TRANSFER_RE.test(d) && !PROCESSOR_RE.test(d)) return { choice: "draw" };
   if (ATM_RE.test(d)) return { choice: "petty_cash" };
-  if (INSURANCE_RE.test(d)) return { choice: "cost", bucket: "Insurance & Licenses", costKind: null };
-  if (FEE_RE.test(d)) return { choice: "cost", bucket: "Fees", costKind: null };
-  if (TRUCK_RE.test(d)) return TRUCK;
+  if (INSURANCE_RE.test(d)) return { choice: "cost", bucket: "Insurance & Licenses" };
+  if (FEE_RE.test(d)) return { choice: "cost", bucket: "Fees" };
+  if (AUTO_RE.test(d)) return AUTO;
   if (FUEL_RE.test(d)) return FUEL;
-  if (PHONE_RE.test(d)) return { choice: "cost", bucket: "Phone & Office", costKind: null };
-  if (TOOLS_RE.test(d)) return { choice: "cost", bucket: "Tools & Supplies", costKind: null };
+  if (PHONE_RE.test(d)) return { choice: "cost", bucket: "Phone & Office" };
+  if (TOOLS_RE.test(d)) return { choice: "cost", bucket: "Tools & Supplies" };
   return null;
 }
 
@@ -1018,8 +1010,7 @@ export function ruleChoice(r: BooksRule, books: Pick<BankBooks, "accounts" | "cr
     case "other_income":
       return null;
     case "cost":
-      if (!isBusinessCostBucket(r.bucket)) return null;
-      return { choice: "cost", bucket: r.bucket, costKind: r.bucket === "Gas & Truck" && (r.costKind === "fuel" || r.costKind === "truck") ? r.costKind : null };
+      return isBusinessCostBucket(r.bucket) ? { choice: "cost", bucket: r.bucket } : null;
     case "supplier":
       return r.supplierAccountId && books.accounts.some((a) => a.id === r.supplierAccountId) ? { choice: "supplier", supplierAccountId: r.supplierAccountId } : null;
     case "crew":
@@ -1126,13 +1117,9 @@ export function planBankDownload(dl: BankDownload, books: BankBooks): BankPlan {
       if (!hits.length) return null;
       hits.sort(byDistance(line.postedOn));
       const b = hits[0];
-      // A FILL-UP ALREADY ON THE BOOKS (a pump receipt snapped before the download) is fuel when the
-      // company's own answer for this merchant, at this amount, says so: the match tags it, and the
-      // line remembers the tag so Undo takes it off again. Never guessed from the words alone.
-      const r = b.category === "Gas & Truck" && !b.jobId && !b.costKind && line.cents < 0 ? ruleFor(line, books.rules) : null;
-      const rc = r ? ruleChoice(r, books) : null;
-      const tag = rc?.choice === "cost" && rc.bucket === "Gas & Truck" && rc.costKind ? rc.costKind : undefined;
-      return { how: "match", table: "bills", ids: [b.id], said: `${line.cents > 0 ? "Return from " : ""}${b.supplier} already on the books${tag ? ` (${tag === "fuel" ? "Fuel" : "Truck"}, by your answer)` : ""}`, ...(tag ? { tag } : {}) };
+      // A MATCH ONLY MARKS: the bill keeps the bucket (or job) it was filed in. A pump receipt a
+      // person filed as Fuel is already Fuel (0362); the line never re-files it.
+      return { how: "match", table: "bills", ids: [b.id], said: `${line.cents > 0 ? "Return from " : ""}${b.supplier} already on the books` };
     };
     if (line.cents > 0) {
       const kind = depositKindOf(line.description);
@@ -1337,7 +1324,7 @@ export function planBankDownload(dl: BankDownload, books: BankBooks): BankPlan {
   const fingerprint = fingerprintOf(
     lines.map((l) => {
       const d = dispositions.get(l.key)!;
-      const tail = d.how === "match" ? `${d.table}:${d.ids.join(",")}${d.tag ? `:${d.tag}` : ""}` : d.how === "rule" ? `${d.ruleId}:${choiceId(d.choice)}` : d.how === "need" ? d.group : "";
+      const tail = d.how === "match" ? `${d.table}:${d.ids.join(",")}` : d.how === "rule" ? `${d.ruleId}:${choiceId(d.choice)}` : d.how === "need" ? d.group : "";
       return `${l.key}:${d.how}:${tail}`;
     }),
   );
@@ -1364,8 +1351,9 @@ function buttonsFor(g: NeedGroup, books: BankBooks): string[] {
     if (out.length < 2) add("personal");
     return out.slice(0, 2);
   }
-  if (g.guess === choiceId(FUEL)) add(choiceId(TRUCK));
-  if (g.guess === choiceId(TRUCK)) add(choiceId(FUEL));
+  // Fuel and Auto are each other's second: a fill-up guessed as a repair, or the other way round.
+  if (g.guess === choiceId(FUEL)) add(choiceId(AUTO));
+  if (g.guess === choiceId(AUTO)) add(choiceId(FUEL));
   add("personal");
   add("draw");
   add(choiceId(FUEL));
@@ -1379,12 +1367,11 @@ export function everyChoice(direction: "in" | "out", books: Pick<BankBooks, "acc
     if (single) for (const i of books.invoices) out.push({ choice: "invoice", invoiceId: i.id });
     out.push({ choice: "other_income" }, { choice: "not_income" });
     // A REFUND OF A COST: money back from a store or a supplier comes off that bucket.
-    out.push(FUEL, TRUCK);
-    for (const b of BUSINESS_COST_BUCKETS) out.push({ choice: "cost", bucket: b, costKind: null });
+    for (const b of BUSINESS_COST_BUCKETS) out.push({ choice: "cost", bucket: b });
     return out;
   }
-  const out: BankChoice[] = [FUEL, TRUCK];
-  for (const b of BUSINESS_COST_BUCKETS) out.push({ choice: "cost", bucket: b, costKind: null });
+  // Every bucket, Fuel and Auto first (the list's own order).
+  const out: BankChoice[] = BUSINESS_COST_BUCKETS.map((b): BankChoice => ({ choice: "cost", bucket: b }));
   out.push({ choice: "draw" }, { choice: "personal" }, { choice: "petty_cash" }, { choice: "not_cost" });
   for (const a of books.accounts) if (a.onAccount) out.push({ choice: "supplier", supplierAccountId: a.id });
   for (const c of books.crew) out.push({ choice: "crew", profileId: c.id });
@@ -1421,16 +1408,16 @@ export function bankHeadline(dl: Pick<BankDownload, "last4" | "from" | "to">, co
 export type FlowSegment = { key: string; label: string; cents: number };
 
 /**
- * THE BAR'S SEGMENTS, in Money by Month's words (money-chart.ts): Fuel on its own (the one Erik
- * watches), every other business cost as ONE Business Costs segment (six pinks side by side read
- * as one colour anyway, and the legend is the place for names), Materials & Bills, Crew Pay,
- * Owner's Draw. The rest are the bank's own: Suppliers, Petty Cash, Transfers, Personal, Already In
- * North, Needs You.
+ * THE BAR'S SEGMENTS, in Money by Month's words (money-chart.ts): Fuel on its own (the Fuel
+ * bucket, the one Erik watches), every other business cost as ONE Business Costs segment (six
+ * pinks side by side read as one colour anyway, and the legend is the place for names), Materials &
+ * Bills, Crew Pay, Owner's Draw. The rest are the bank's own: Suppliers, Petty Cash, Transfers,
+ * Personal, Already In North, Needs You.
  */
-export function flowLabelOf(choice: string, bucket: string | null, costKind: string | null): { key: string; label: string } {
+export function flowLabelOf(choice: string, bucket: string | null): { key: string; label: string } {
   switch (choice) {
     case "cost":
-      if (bucket === "Gas & Truck" && costKind === "fuel") return { key: "fuel", label: "Fuel" };
+      if (bucketOf(bucket) === "Fuel") return { key: "fuel", label: "Fuel" };
       return { key: "business", label: "Business Costs" };
     case "draw":
       return { key: "draw", label: "Owner's Draw" };
@@ -1471,17 +1458,17 @@ export function moneyFlow(dl: BankDownload, plan: BankPlan, books: BankBooks): {
     if (d.how === "already") {
       const a = books.already.get(l.key);
       if (a?.choice === "matched" || !a) add({ key: "books", label: "Already In North" }, amt);
-      else add(flowLabelOf(a.choice, a.bucket, a.costKind), amt);
+      else add(flowLabelOf(a.choice, a.bucket), amt);
     } else if (d.how === "rule") {
       const c = d.choice;
-      add(flowLabelOf(c.choice, c.choice === "cost" ? c.bucket : null, c.choice === "cost" ? c.costKind : null), amt);
+      add(flowLabelOf(c.choice, c.choice === "cost" ? c.bucket : null), amt);
     } else if (d.how === "match") {
       if (d.table === "supplier_payments") add({ key: "suppliers", label: "Suppliers" }, amt);
       else if (d.table === "pay_payments") add({ key: "crew", label: "Crew Pay" }, amt);
       else if (d.table === "petty_cash") add({ key: "petty", label: "Petty Cash" }, amt);
       else {
         const b = billOf.get(d.ids[0]);
-        add(b && !b.jobId ? flowLabelOf("cost", b.category, b.costKind ?? d.tag ?? null) : { key: "materials", label: "Materials & Bills" }, amt);
+        add(b && !b.jobId ? flowLabelOf("cost", b.category) : { key: "materials", label: "Materials & Bills" }, amt);
       }
     } else add({ key: "need", label: "Needs You" }, amt);
   }
@@ -1561,7 +1548,7 @@ export function validPicks(
   return { ok, refused };
 }
 
-/** The same bucket words the six-bucket list uses, for a check in the migration tests. */
+/** The same bucket words the business-cost list uses, for a check in the migration tests. */
 export const BANK_BUCKETS: readonly BusinessCostBucket[] = BUSINESS_COST_BUCKETS;
 
 // ── THE CARD, AS THE PAGE HANDS IT OVER ────────────────────────────────────────────────────────

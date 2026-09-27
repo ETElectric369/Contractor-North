@@ -9,9 +9,8 @@ import { computeFuelTrend, fuelWindow, getFuelTrend, isFuelBill, mondayOf, type 
 const fuel = (day: string, amount: number, over: Partial<FuelBillRow> = {}): FuelBillRow => ({
   amount,
   bill_date: day,
-  category: "Gas & Truck",
+  category: "Fuel",
   job_id: null,
-  cost_kind: "fuel",
   ...over,
 });
 
@@ -62,12 +61,14 @@ describe("computeFuelTrend", () => {
     expect(t.sharePct).toBe(10);
   });
 
-  it("only fuel counts: truck, other buckets and job costs are not fuel", () => {
+  it("only the Fuel bucket counts: Auto (the old Gas & Truck), other buckets and job costs are not fuel", () => {
     expect(isFuelBill(fuel("2026-09-01", 1))).toBe(true);
-    expect(isFuelBill(fuel("2026-09-01", 1, { cost_kind: "truck" }))).toBe(false);
+    expect(isFuelBill(fuel("2026-09-01", 1, { category: "Auto" }))).toBe(false);
+    // A row 0362 hasn't renamed yet is Auto, never fuel: the old bucket held repairs too.
+    expect(isFuelBill(fuel("2026-09-01", 1, { category: "Gas & Truck" }))).toBe(false);
     expect(isFuelBill(fuel("2026-09-01", 1, { category: "Other" }))).toBe(false);
     expect(isFuelBill(fuel("2026-09-01", 1, { job_id: "job-1" }))).toBe(false);
-    const t = computeFuelTrend([fuel("2026-09-22", 60), fuel("2026-09-22", 999, { cost_kind: "truck" })], 0, TODAY);
+    const t = computeFuelTrend([fuel("2026-09-22", 60), fuel("2026-09-22", 999, { category: "Auto" })], 0, TODAY);
     expect(t.totalCents).toBe(6000);
     expect(t.sharePct).toBeNull(); // no money in: no share, never a divide by zero
   });
@@ -144,6 +145,27 @@ describe("getFuelTrend: every page, the window's rows, and the first fuel ever",
     expect(t!.weeksCounted).toBe(12);
     expect(t!.avgWeekCents).toBe(35000);
     expect(t!.fills).toBe(84);
+  });
+
+  it("reads the Fuel bucket, whatever door wrote it, and never Auto or a job's fuel", async () => {
+    const t = await getFuelTrend(
+      fake({
+        bills: [
+          { id: "f1", ...fuel("2026-09-08", 100) }, // a bank download's fill-up
+          { id: "f2", ...fuel("2026-09-09", 40) }, // a pump receipt filed as Fuel
+          { id: "a1", ...fuel("2026-09-09", 500, { category: "Auto" }) },
+          { id: "j1", ...fuel("2026-09-09", 70, { job_id: "job-1" }) },
+          { id: "s1", ...fuel("2026-09-10", 90), superseded_by_bill_id: "f1" },
+        ],
+        payments: [],
+        customer_credits: [],
+        bank_lines: [],
+      }),
+      "UTC",
+      TODAY,
+    );
+    expect(t!.weeks.reduce((n, w) => n + w.cents, 0)).toBe(14000);
+    expect(t!.fills).toBe(2);
   });
 
   it("money in is the Owner's Draw card's Received: payments and a bank download's Other Income", async () => {

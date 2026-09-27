@@ -17,7 +17,7 @@ import { billsCarryingNumber, namedNumbersOf, type LedgerBill } from "@/lib/same
  * is a sole proprietorship, so there is no owner salary: money received, minus the real costs, is
  * what is left for him. That one subtraction, done honestly, is this module.
  *
- *   left = received - materials_and_bills - crew_pay - crew_mileage_paid - business_costs
+ *   left = received - materials_and_bills - crew_pay - crew_mileage_paid - fuel - business_costs
  *               - put_on_the_shelf - shop_stock_lost
  *
  * EVERY LINE COMES FROM A RULE THAT ALREADY EXISTS, never a new definition:
@@ -52,7 +52,10 @@ import { billsCarryingNumber, namedNumbersOf, type LedgerBill } from "@/lib/same
  *                         Lost: what the pieces cost minus the credit is what the company lost.
  *                         Only rolls bought on a ticket: an opening count was never a month's Put
  *                         On The Shelf, so its pieces going are never a month's loss.
- *   · business costs    = bills and petty cash with no job, in the six buckets
+ *   · fuel              = bills and petty cash with no job in the Fuel bucket (0362). A business
+ *                         cost like the rest, said on its OWN line and never inside Business Costs
+ *                         (Erik, 2026-09-27: "lets make fuel stand out from business costs").
+ *   · business costs    = bills and petty cash with no job, in every other bucket
  *                         (business-cost-buckets.ts). The Fees bucket also carries Stripe's real
  *                         card fee on each payment (payments.processor_fee, 0284). A NULL fee is
  *                         UNKNOWN, never $0: it is counted as a caveat, not as money.
@@ -64,9 +67,13 @@ import { billsCarryingNumber, namedNumbersOf, type LedgerBill } from "@/lib/same
  * Pure half (computeOwnerMoney) + a fetch half (getOwnerMoney) that reads the SAME row sources the
  * existing readers use, so the chart the next build puts on top of this cannot disagree with the
  * card. Everything is summed in integer CENTS so the invariant holds to the cent, per month and in
- * total: received = materials_and_bills + crew_pay + crew_mileage_paid + business_costs
+ * total: received = materials_and_bills + crew_pay + crew_mileage_paid + fuel + business_costs
  *                   + put_on_the_shelf + shop_stock_lost + left.
  */
+
+/** The buckets Business Costs holds: every one but Fuel, which is its own line (0362). */
+export type BesideFuelBucket = Exclude<BusinessCostBucket, "Fuel">;
+export const BUCKETS_BESIDE_FUEL: readonly BesideFuelBucket[] = BUSINESS_COST_BUCKETS.filter((b): b is BesideFuelBucket => b !== "Fuel");
 
 // ── Windows ──────────────────────────────────────────────────────────────────
 
@@ -205,7 +212,8 @@ export function windowMonths(win: { start: string; end: string }, todayYmd?: str
 
 // ── Shapes ───────────────────────────────────────────────────────────────────
 
-export type BucketAmounts = Record<BusinessCostBucket, number>;
+/** Business Costs by bucket: every bucket but Fuel (its own figure, `fuel`). */
+export type BucketAmounts = Record<BesideFuelBucket, number>;
 
 /** One month (or the window's total). Dollars, rounded to cents; every sum was done in cents. */
 export type OwnerMoneyFigures = {
@@ -217,8 +225,11 @@ export type OwnerMoneyFigures = {
   materialsAndBills: number;
   crewPay: number;
   crewMileagePaid: number;
-  /** The six buckets. Fees INCLUDES processorFees below. */
+  /** The Fuel bucket (0362): a business cost said on its own line, never inside businessCosts. */
+  fuel: number;
+  /** Every other bucket. Fees INCLUDES processorFees below. */
   businessCosts: BucketAmounts;
+  /** The sum of businessCosts: Fuel is NOT in it. */
   businessCostsTotal: number;
   /** Stripe's real card/bank fees on payments received in the period (already inside Fees). */
   processorFees: number;
@@ -615,7 +626,8 @@ export function computeOwnerMoney(inp: OwnerMoneyInputs, win: OwnerMoneyWindow, 
     if (pc.job_id) a.materials += toCents(pc.amount);
     else a.buckets[bucketOf(pc.category)] += toCents(pc.amount);
   }
-  // BUSINESS COSTS: bills with no job, in their bucket. A ticket bought for the shelf is its rolls
+  // BUSINESS COSTS: bills with no job, in their bucket (Fuel's is said on its own line, below). A
+  // ticket bought for the shelf is its rolls
   // (Put On The Shelf, above); whatever of it has no roll behind it (Not Stock lines, their tax,
   // freight, a roll taken back off) is supplies the business used, in Tools & Supplies - named,
   // never "Other" (bucketOf would call the category "Shop Stock" that).
@@ -670,8 +682,9 @@ export function computeOwnerMoney(inp: OwnerMoneyInputs, win: OwnerMoneyWindow, 
   const figures = (a: Acc): OwnerMoneyFigures => {
     const buckets = { ...a.buckets };
     buckets.Fees += a.fees;
-    const bizCents = BUSINESS_COST_BUCKETS.reduce((s, b) => s + buckets[b], 0);
-    const leftCents = a.received - a.materials - a.crewPay - a.mileage - bizCents - a.shelf - a.lost;
+    const fuelCents = buckets.Fuel;
+    const bizCents = BUCKETS_BESIDE_FUEL.reduce((s, b) => s + buckets[b], 0);
+    const leftCents = a.received - a.materials - a.crewPay - a.mileage - fuelCents - bizCents - a.shelf - a.lost;
     const hours = a.ownerHours / 100;
     return {
       received: fromCents(a.received),
@@ -679,7 +692,8 @@ export function computeOwnerMoney(inp: OwnerMoneyInputs, win: OwnerMoneyWindow, 
       materialsAndBills: fromCents(a.materials),
       crewPay: fromCents(a.crewPay),
       crewMileagePaid: fromCents(a.mileage),
-      businessCosts: Object.fromEntries(BUSINESS_COST_BUCKETS.map((b) => [b, fromCents(buckets[b])])) as BucketAmounts,
+      fuel: fromCents(fuelCents),
+      businessCosts: Object.fromEntries(BUCKETS_BESIDE_FUEL.map((b) => [b, fromCents(buckets[b])])) as BucketAmounts,
       businessCostsTotal: fromCents(bizCents),
       processorFees: fromCents(a.fees),
       putOnShelf: fromCents(a.shelf),

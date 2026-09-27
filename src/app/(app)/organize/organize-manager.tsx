@@ -376,7 +376,7 @@ export function OrganizeManager({
   function filedBadge(item: OrganizedItemRow) {
     if (item.status === "archived") return <Badge tone="slate">Archived</Badge>;
     if (item.job_id && item.jobs) return <Badge tone="blue">{jobLabel(item.jobs)}</Badge>;
-    // A bill with no job is a business cost. bucketOf reads an old word ("Fuel") as its bucket, so
+    // A bill with no job is a business cost. bucketOf reads an old word ("Vehicle") as its bucket, so
     // the archive and the Bills page name the same cost the same way.
     // A shelf ticket is never a business cost (Shop Stock, Phase 2): its bucket would read "Other".
     if (item.bill_id && !item.job_id && isShelfTicket({ category: item.category })) return <Badge tone="indigo">Shop Stock</Badge>;

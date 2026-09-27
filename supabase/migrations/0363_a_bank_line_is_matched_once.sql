@@ -18,7 +18,7 @@
 --                transaction id (FITID) when the file has one, else a hash of the line; UNIQUE per
 --                company, so two overlapping downloads can never count one line twice, and two
 --                Apply presses can never write it twice.
---   bank_rules   The company's own choices: "SHELL -> Gas & Truck, fuel". Written only when a person
+--   bank_rules   The company's own choices: "SHELL -> Fuel". Written only when a person
 --                taps an answer, one per company + direction + merchant key. Every company starts
 --                with none; one company's rules are never read for another (RLS + the org filter).
 --
@@ -43,9 +43,10 @@
 -- UNCHANGED: every policy on the five money tables. organized_items (where the download waits as
 -- one card) is already staff-only for anything staff made (0201).
 --
--- ORDER: after 0362 (fuel is its own kind; bank_lines.cost_kind uses the same two words) and
--- 0285 (the six buckets). Safe before or after the code: the door says "the bank download needs one
--- database update" until this is applied, and nothing crashes. Additive only. Safe to re-run.
+-- ORDER: after 0285 (the buckets) and 0362 (fuel is its own bucket, Gas & Truck is Auto: the
+-- bucket CHECKs below name the seven buckets 0362 leaves). A Fuel answer is simply the Fuel bucket.
+-- Safe before or after the code: the door says "the bank download needs one database update"
+-- until this is applied, and nothing crashes. Additive only. Safe to re-run.
 -- ═══════════════════════════════════════════════════════════════════════════
 
 set local lock_timeout = '3s';
@@ -55,9 +56,6 @@ do $$
 begin
   if to_regclass('public.supplier_payments') is null or to_regclass('public.pay_payments') is null or to_regclass('public.petty_cash') is null then
     raise exception '0363: supplier_payments (0270), pay_payments or petty_cash is not on this database. Nothing was changed.';
-  end if;
-  if not exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'bills' and column_name = 'cost_kind') then
-    raise exception '0363: apply 0362 (fuel is its own kind) first. Nothing was changed.';
   end if;
 end $$;
 
@@ -81,8 +79,7 @@ create table if not exists public.bank_lines (
     'matched', 'cost', 'draw', 'personal', 'petty_cash', 'not_cost', 'supplier', 'crew',
     'invoice', 'other_income', 'not_income'
   )),
-  bucket text check (bucket is null or bucket in ('Gas & Truck', 'Tools & Supplies', 'Phone & Office', 'Insurance & Licenses', 'Fees', 'Other')),
-  cost_kind text check (cost_kind is null or cost_kind in ('fuel', 'truck')),
+  bucket text check (bucket is null or bucket in ('Fuel', 'Auto', 'Tools & Supplies', 'Phone & Office', 'Insurance & Licenses', 'Fees', 'Other')),
   supplier_account_id uuid,
   profile_id uuid,
   invoice_id uuid,
@@ -91,8 +88,7 @@ create table if not exists public.bank_lines (
   created_by uuid,
   created_at timestamptz not null default now(),
   constraint bank_lines_one_per_company unique (org_id, line_key),
-  constraint bank_lines_cost_has_bucket check ((choice = 'cost') = (bucket is not null)),
-  constraint bank_lines_kind_rides_gas check (cost_kind is null or bucket = 'Gas & Truck')
+  constraint bank_lines_cost_has_bucket check ((choice = 'cost') = (bucket is not null))
 );
 
 comment on table public.bank_lines is
@@ -110,8 +106,7 @@ create table if not exists public.bank_rules (
   choice text not null check (choice in (
     'cost', 'draw', 'personal', 'petty_cash', 'not_cost', 'supplier', 'crew', 'other_income', 'not_income'
   )),
-  bucket text check (bucket is null or bucket in ('Gas & Truck', 'Tools & Supplies', 'Phone & Office', 'Insurance & Licenses', 'Fees', 'Other')),
-  cost_kind text check (cost_kind is null or cost_kind in ('fuel', 'truck')),
+  bucket text check (bucket is null or bucket in ('Fuel', 'Auto', 'Tools & Supplies', 'Phone & Office', 'Insurance & Licenses', 'Fees', 'Other')),
   supplier_account_id uuid,
   profile_id uuid,
   -- The download whose tap taught it: that download's Undo takes the rule back off.
@@ -122,7 +117,6 @@ create table if not exists public.bank_rules (
   updated_at timestamptz not null default now(),
   constraint bank_rules_one_per_key unique (org_id, direction, merchant_key),
   constraint bank_rules_cost_has_bucket check ((choice = 'cost') = (bucket is not null)),
-  constraint bank_rules_kind_rides_gas check (cost_kind is null or bucket = 'Gas & Truck'),
   constraint bank_rules_supplier_named check (choice <> 'supplier' or supplier_account_id is not null),
   constraint bank_rules_crew_named check (choice <> 'crew' or profile_id is not null),
   constraint bank_rules_income_is_in check ((direction = 'in') = (choice in ('other_income', 'not_income')))

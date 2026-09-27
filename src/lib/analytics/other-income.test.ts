@@ -13,7 +13,7 @@ const TODAY = "2026-09-27";
 const inputs = (over: Partial<OwnerMoneyInputs> = {}): OwnerMoneyInputs => ({
   payments: [{ id: "p1", amount: 1000, paid_at: "2026-09-04T19:00:00Z", processor_fee: null, stripe_payment_intent: null, invoices: { status: "paid" } }],
   refunds: [],
-  bills: [{ id: "b1", job_id: null, amount: 100, bill_date: "2026-09-10", category: "Gas & Truck", status: "paid", superseded_by_bill_id: null }],
+  bills: [{ id: "b1", job_id: null, amount: 100, bill_date: "2026-09-10", category: "Fuel", status: "paid", superseded_by_bill_id: null }],
   pos: [],
   pettyCash: [],
   entries: [],

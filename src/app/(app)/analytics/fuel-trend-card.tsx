@@ -13,7 +13,8 @@ import { weekLabel, type FuelTrend } from "@/lib/analytics/fuel-trend";
  *
  * AT 375px every week is a 44px column (a thumb's width) and the row scrolls sideways inside the
  * card, starting at this week. Identity is never colour alone: one series, named by the title, and
- * every bar carries its figure.
+ * every bar carries its figure. Fuel is pink-800 wherever it is drawn (this card, Money by Month's
+ * Fuel bars, the bank card's Where The Money Went).
  */
 
 const PLOT = 112; // px the tallest bar may use
@@ -75,7 +76,7 @@ export function FuelTrendCard({ trend }: { trend: FuelTrend }) {
                   {w.cents ? Math.round(w.cents / 100).toLocaleString("en-US") : ""}
                 </span>
                 <span
-                  className={`mt-0.5 block w-6 rounded-t-[4px] ${on ? "bg-pink-700" : "bg-pink-600"} ${dim ? "opacity-40" : ""}`}
+                  className={`mt-0.5 block w-6 rounded-t-[4px] ${on ? "bg-pink-900" : "bg-pink-800"} ${dim ? "opacity-40" : ""}`}
                   style={{ height: heightOf(w.cents) }}
                 />
                 <span className="mt-1 h-3.5 text-[10px] leading-3 text-slate-500">{`${Number(w.start.slice(5, 7))}/${Number(w.start.slice(8, 10))}`}</span>
@@ -85,9 +86,9 @@ export function FuelTrendCard({ trend }: { trend: FuelTrend }) {
         </div>
       </div>
       <p className="mt-2 text-sm text-slate-600">{facts.join(" · ")}</p>
-      {/* WHAT IT COUNTS, said: a Gas & Truck business cost tagged Fuel, which a bank download does
-          (a tap on Fuel, the company's answer, or a fill-up it matched by that answer). */}
-      <p className="mt-1 text-xs text-slate-500">Counts Gas &amp; Truck costs marked Fuel on a bank download. A receipt not marked Fuel isn&apos;t in it.</p>
+      {/* WHAT IT COUNTS, said: every business cost in the Fuel bucket (0362), however it came in:
+          a bank download's fill-ups, a pump receipt filed as Fuel, a cost added by hand. */}
+      <p className="mt-1 text-xs text-slate-500">Counts every business cost filed as Fuel: bank download fill-ups, pump receipts and costs added by hand. Truck repairs and parts are Auto, not in it.</p>
     </Card>
   );
 }

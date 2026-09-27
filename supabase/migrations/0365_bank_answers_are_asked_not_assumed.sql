@@ -11,25 +11,22 @@
 --   writes one now; this CHECK holds the database to it.
 --
 --   A RULE IS FOR THE AMOUNTS IT WAS ANSWERED FOR. One merchant can take two answers: at a
---   general store a fill-up-sized charge is Fuel and a coffee-sized one is Other (Erik's own
---   ruling). One rule per merchant, the first answer kept forever, filed every later line of that
---   merchant the same way without asking. Now:
+--   general store a fill-up-sized charge is Fuel and a coffee-sized one is something else (Erik's
+--   own ruling; a coffee is no business-cost bucket, so Personal or Other, as the person says).
+--   One rule per merchant, the first answer kept forever, filed every later line of that merchant
+--   the same way without asking. Now:
 --     bank_rules.min_cents / max_cents   the amounts (cents, positive) the answer was given for;
 --                                        the app places a line from half the smallest to twice
 --                                        the largest, and asks (the nearest answer as its guess)
 --                                        outside every band. NULL = every amount.
 --     bank_rules.answer                  the answer as one word, the app's choice id
---                                        ("cost:Gas & Truck:fuel", "crew:<id>"), generated from the
---                                        columns it names.
+--                                        ("cost:Fuel", "crew:<id>"), generated from the columns
+--                                        it names.
 --     UNIQUE (org_id, direction, merchant_key, answer)   one rule per merchant AND answer, in
 --                                        place of one per merchant.
 --
---   A FILL-UP ALREADY ON THE BOOKS IS FUEL BY THE COMPANY'S ANSWER. A pump receipt snapped (and
---   filed as Gas & Truck) before the download is matched by its bank line, and never reached the
---   fuel trend, because only the bank door writes cost_kind (0362). When the company's answer for
---   that merchant at that amount says Fuel (or Truck), the match now tags the bill, and the line
---   remembers the tag it put there so its Undo takes the tag off again:
---     bank_lines.matched_kind   'fuel' | 'truck' | NULL: the kind a matched line tagged on its bill.
+--   A FILL-UP IS THE FUEL BUCKET (0362), wherever it came in: a receipt filed as Fuel and matched
+--   by its bank line is already Fuel, and a match only marks the row, never re-files it.
 --
 --   A BANK DOWNLOAD (OR A SUPPLIER'S LIST) WAITING IN SORT THESE IS STAFF-ONLY. 0363 said
 --   organized_items was "already staff-only for anything staff made (0201)". It isn't: its read and
@@ -42,9 +39,8 @@
 --
 -- LOCKS: 0363's own tables (staff-only, new): bank_rules gets one CHECK swapped, two nullable
 -- columns, one generated column (a rewrite of a table this small is nothing) and one UNIQUE
--- swapped; bank_lines one nullable column and its CHECK. organized_items gets one policy (catalog
--- only, a moment's lock). lock_timeout 3s: a busy table fails fast and changes nothing. Run it
--- again.
+-- swapped. organized_items gets one policy (catalog only, a moment's lock). lock_timeout 3s: a
+-- busy table fails fast and changes nothing. Run it again.
 --
 -- ORDER: after 0363. Safe before or after the code (the code never writes what this refuses).
 -- A company that already holds an Other Income rule (none can yet: 0363 is new) loses it here,
@@ -74,17 +70,11 @@ alter table public.bank_rules drop constraint if exists bank_rules_band;
 alter table public.bank_rules add constraint bank_rules_band
   check ((min_cents is null) = (max_cents is null) and (min_cents is null or (min_cents > 0 and max_cents >= min_cents)));
 alter table public.bank_rules add column if not exists answer text generated always as (
-  choice || coalesce(':' || bucket, '') || coalesce(':' || cost_kind, '') || coalesce(':' || supplier_account_id::text, '') || coalesce(':' || profile_id::text, '')
+  choice || coalesce(':' || bucket, '') || coalesce(':' || supplier_account_id::text, '') || coalesce(':' || profile_id::text, '')
 ) stored;
 alter table public.bank_rules drop constraint if exists bank_rules_one_per_key;
 alter table public.bank_rules drop constraint if exists bank_rules_one_per_answer;
 alter table public.bank_rules add constraint bank_rules_one_per_answer unique (org_id, direction, merchant_key, answer);
-
--- ── The tag a match put on a bill ───────────────────────────────────────────────────────────────
-alter table public.bank_lines add column if not exists matched_kind text;
-alter table public.bank_lines drop constraint if exists bank_lines_matched_kind_words;
-alter table public.bank_lines add constraint bank_lines_matched_kind_words check (matched_kind is null or (choice = 'matched' and matched_kind in ('fuel', 'truck')));
-comment on column public.bank_lines.matched_kind is 'The fuel/truck kind this MATCHED line tagged on the Gas & Truck bill it matched (0365), by the company''s own answer; Undo takes it off again.';
 
 -- ── A bank download or a supplier's list waiting in the tray: staff only ────────────────────────
 drop policy if exists organized_items_bank_is_staff on public.organized_items;
