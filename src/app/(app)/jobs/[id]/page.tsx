@@ -1230,10 +1230,11 @@ export default async function JobDetailPage({
     {
       // THE ONE TOTAL BADGE (Erik, 2026-09-27, minutes after "all badges only show whats open":
       // "keep the badge for total job photos"). Every other chip counts only what's open; Photos
-      // keeps how many job-site photos the job has (tests/badges-show-open names the exception).
+      // keeps how many job-site photos the job has (tests/badges-show-open names the exception):
+      // the grid only, never the Plans & Other Papers fold under it, a receipt or a bill.
       id: "photos",
       label: "Photos",
-      count: paperSort.photos.length + paperSort.pictures.length,
+      count: paperSort.photos.length,
       content: (
         <Card>
           <CardContent className="py-5">

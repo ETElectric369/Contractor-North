@@ -95,13 +95,11 @@ const OPEN_TAB_COUNTS: Record<string, string> = {
 };
 
 /** Erik's one exception, a TOTAL on purpose: "keep the badge for total job photos". The job's Photos
- *  chip counts the job's photos: the image files on the job today, and fix/photos-vs-bills' job-site
- *  photos (its photos and pictures, never its receipts) once that lands, when the first entry goes.
- *  Nothing else may use a total. */
+ *  chip counts the job-site photos: fix/photos-vs-bills' Photos grid, never the Plans & Other Papers
+ *  fold under it (a plan or a permit is no job-site photo), a receipt or a bill. Nothing else may
+ *  use a total. */
 const PHOTOS_TOTAL_EXCEPTION: Record<string, string> = {
-  "docs.filter((d: any) => /\\.(jpe?g|png|webp|gif|heic)($|\\?)/i.test(d.signedUrl ?? d.name)).length":
-    "Erik's exception: total job-site photos (the image files on the job)",
-  "paperSort.photos.length + paperSort.pictures.length": "Erik's exception: total job-site photos (photos-vs-bills split)",
+  "paperSort.photos.length": "Erik's exception: total job-site photos (the Photos grid, photos-vs-bills split)",
 };
 
 describe("every tab count in the app is an open count", () => {
@@ -139,6 +137,8 @@ describe("every tab count in the app is an open count", () => {
     // "keep the badge for total job photos": the one total badge, and only the job-site photos.
     const photos = tab("photos").match(/^\s*count:\s*(.+?),?\s*$/m)?.[1]?.trim();
     expect(photos && photos in PHOTOS_TOTAL_EXCEPTION, `Photos count: ${photos}`).toBe(true);
+    // Job-site photos only: no plan or permit (pictures), no receipt, no bill rides the total.
+    expect(photos).not.toMatch(/pictures|byBill|moneyPictures|docs\./);
     expect(tab("time")).not.toMatch(/\bcount:/);
     expect(tab("materials")).toContain("count: materialsOpen");
     expect(page).not.toContain("count: canonicalItems?.length");
