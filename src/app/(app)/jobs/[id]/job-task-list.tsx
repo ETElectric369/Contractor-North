@@ -98,6 +98,23 @@ export function JobTaskList({
         toast(res.error ?? "Couldn't update the task. Try again.", "error");
         return;
       }
+      // The card shows open tasks only, so a checked one leaves it: an Undo, never a mis-tap that
+      // takes the Tasks tab and the Done fold to take back.
+      if (next && mode === "card") {
+        toast(`Checked off: ${t.title}`, "success", {
+          label: "Undo",
+          onClick: () => {
+            setOverride((m) => new Map(m).set(t.id, false));
+            void toggleTask(t.id, false, { jobId }).then((back) => {
+              if (!back.ok) {
+                setOverride((m) => new Map(m).set(t.id, true));
+                toast(back.error ?? "Couldn't reopen the task. Try again.", "error");
+              }
+              router.refresh();
+            });
+          },
+        });
+      }
       router.refresh();
     });
   }

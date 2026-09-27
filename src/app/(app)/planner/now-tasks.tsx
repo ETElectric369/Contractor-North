@@ -51,6 +51,24 @@ export function NowTasks({ jobId, left, next }: { jobId: string; left: number; n
         toast(res.error ?? "Couldn't update the task. Try again.", "error");
         return;
       }
+      // The block reads open tasks only, so a checked one leaves it on the refresh: an Undo keeps a
+      // mis-tap one tap away.
+      if (nowDone) {
+        toast(`Checked off: ${t.title}`, "success", {
+          label: "Undo",
+          onClick: () => {
+            setChecked((s) => {
+              const n = new Set(s);
+              n.delete(t.id);
+              return n;
+            });
+            void toggleTask(t.id, false, { jobId }).then((back) => {
+              if (!back.ok) toast(back.error ?? "Couldn't reopen the task. Try again.", "error");
+              router.refresh();
+            });
+          },
+        });
+      }
       router.refresh();
     });
   }
