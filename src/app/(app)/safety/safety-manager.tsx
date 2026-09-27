@@ -60,16 +60,16 @@ export function SafetyManager({
       paramKey="kind"
       tabs={[
         {
+          // No badges: a safety record is a record, not an open item (no record here waits on anyone),
+          // so how many there are is a total (Erik, 2026-09-27: "all badges only show whats open").
           id: "incident",
           label: "Incidents",
-          count: incidents.length,
           icon: <AlertTriangle className="h-4 w-4" />,
           content: <SafetyPanel kind="incident" employees={employees} jobs={jobs} records={incidents} canEdit={canEdit} canAdd={canAdd} />,
         },
         {
           id: "toolbox",
           label: "Toolbox Talks",
-          count: toolbox.length,
           icon: <Users className="h-4 w-4" />,
           content: <SafetyPanel kind="toolbox" employees={employees} jobs={jobs} records={toolbox} canEdit={canEdit} canAdd={canAdd} />,
         },

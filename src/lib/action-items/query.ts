@@ -20,6 +20,7 @@ import { readNoJobHoursReach } from "@/lib/already-billed-read";
 import { noJobStrayDoors } from "@/lib/already-billed";
 import { noJobHoursActionItem } from "./no-job-hours-item";
 import { readNoJobHours, type NoJobHours } from "@/lib/no-job-hours";
+import { isOpenToBuy, newestListPerJob } from "@/lib/materials-checklist";
 import { feederOn, inquiryActionItem } from "./switches";
 import { featureOn, featuresFromOffKey } from "@/lib/features";
 import {
@@ -1000,17 +1001,23 @@ async function buildActionItems(ctx: {
   // {job}" + the first few item names, deep-linked to the job's materials tab.
   if (isStaff && matCandidates.size > 0) {
     const matJobIds = [...matCandidates.keys()].slice(0, 30);
+    // Newest first, so the limit keeps each job's own list; newestListPerJob then keeps only THE
+    // job's list (the one its Materials tab shows), never an older one's lines.
     const { data: matLists } = await supabase
       .from("material_lists")
-      .select("job_id, material_list_items(description, quantity, purchased, is_tool)")
+      .select("id, job_id, created_at, material_list_items(description, quantity, purchased, is_tool)")
       .in("job_id", matJobIds)
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: false })
       .limit(100);
     const needByJob = new Map<string, { description: string; quantity: number }[]>();
-    for (const ml of (matLists ?? []) as any[]) {
+    for (const ml of newestListPerJob((matLists ?? []) as any[]).values()) {
       for (const it of (ml.material_list_items ?? []) as any[]) {
         // Tools are brought from the shop, not bought — an owned tool would sit
-        // "unpurchased" forever and nag the shopping run daily.
-        if (it.purchased || it.is_tool) continue;
+        // "unpurchased" forever and nag the shopping run daily. The ONE rule for "still to buy"
+        // (lib/materials-checklist), on the ONE list (the newest): the job's Materials badge and its
+        // Buy Materials row count exactly these lines.
+        if (!isOpenToBuy(it)) continue;
         if (!needByJob.has(ml.job_id)) needByJob.set(ml.job_id, []);
         needByJob.get(ml.job_id)!.push({ description: it.description, quantity: Number(it.quantity ?? 1) });
       }
@@ -1055,14 +1062,17 @@ async function buildActionItems(ctx: {
       // Infer the blocker from the material take-off: a list with unpurchased (non-tool) items = the
       // job is waiting on a materials order. (A task-based reason is a later add — the inbox may not
       // read the tasks table here, by the badge-economy guard.)
+      // The job's own list only (the newest, as above), so the reason matches its Materials tab.
       const { data: heldMat } = await supabase
         .from("material_lists")
-        .select("job_id, material_list_items(purchased, is_tool)")
+        .select("id, job_id, created_at, material_list_items(purchased, is_tool)")
         .in("job_id", heldIds)
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: false })
         .limit(100);
       const unorderedMatJobs = new Set<string>();
-      for (const ml of (heldMat ?? []) as any[]) {
-        if (((ml.material_list_items ?? []) as any[]).some((it) => !it.purchased && !it.is_tool)) unorderedMatJobs.add(ml.job_id);
+      for (const ml of newestListPerJob((heldMat ?? []) as any[]).values()) {
+        if (((ml.material_list_items ?? []) as any[]).some(isOpenToBuy)) unorderedMatJobs.add(ml.job_id);
       }
       for (const j of held) {
         // updated_at is only a PROXY for "held since" (any edit resets it), so we don't quote a

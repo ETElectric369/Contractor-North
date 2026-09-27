@@ -6,7 +6,6 @@ import { Plus, Pencil, Trash2, Search, Phone, Mail, Globe, MapPin } from "lucide
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/page-header";
 import { useToast } from "@/components/toast";
 import { createResource, updateResource, deleteResource } from "./actions";
@@ -154,7 +153,9 @@ export function ResourcesManager({ resources, canEdit }: { resources: Resource[]
           <div key={cat}>
             <div className="mb-2 flex items-center gap-2">
               <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-400">{cat}</h3>
-              <Badge tone="slate">{list.length}</Badge>
+              {/* How many contacts: a total, so plain muted text, never a badge (every badge counts
+                  only what's open, Erik 2026-09-27). */}
+              <span className="text-xs text-slate-400">{list.length}</span>
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
               {list.map((r) => (

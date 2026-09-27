@@ -11,6 +11,10 @@ import { cn } from "@/lib/utils";
 export interface TabBarItem {
   id: string;
   label: string;
+  /** THE OPEN COUNT, never a total (Erik, 2026-09-27: "and all badges only show whats open"): how
+   *  many things behind this tab still need someone (open tasks, lines to buy, bills owed…). 0 or
+   *  undefined draws nothing. A size (12 photos, 40 items) is not a badge: leave it out and say it
+   *  inside the tab. The per-kind rules live in lib/open-counts and lib/materials-checklist. */
   count?: number;
   /** Two shapes, two homes: an already-rendered ELEMENT (e.g. <Archive className=… />)
    *  shows inline in the strip as before; a LucideIcon COMPONENT reference shows ONLY
@@ -360,9 +364,9 @@ function Tile({ item, active, onSelect }: { item: TabBarItem; active: boolean; o
 }
 
 /** The corner count — the dock badge's idea (dock.tsx:140-146), but NOT its amber: amber on
- *  the dock means "needs you"; a tab's count (12 time entries, 40 items) is a size, not a
- *  summons. Capped at 99+ (the dock's 9+ is for action items; here the exact figure is the
- *  information). Sits in the chip's top lane (see TILE_CLS): 12px tall at top-px, so its
+ *  the dock means "needs you" today; a tab's count is what's still open behind it (3 lines to buy,
+ *  2 invoices owed), never a size (since 2026-09-27, TabBarItem.count). Capped at 99+ (the dock's
+ *  9+ is for action items; here the exact figure is the information). Sits in the chip's top lane (see TILE_CLS): 12px tall at top-px, so its
  *  bottom edge meets the icon's top edge and never crosses it; right-1 keeps its rounded end
  *  clear of the chip's rounded-xl corner, which overflow:hidden would otherwise nick. */
 function TileCount({ count, active }: { count?: number; active: boolean }) {

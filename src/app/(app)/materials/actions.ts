@@ -15,8 +15,8 @@ import { isStaffRole } from "@/lib/actions/perms";
 import { createNotifications, officeRecipients, ringOffice } from "@/lib/notifications";
 import { reportError } from "@/lib/observe";
 import { sendPushToProfiles } from "@/lib/push";
-import { createTask } from "@/app/(app)/tasks/actions";
 import { jobLabel } from "@/lib/schedule-options";
+import { askLine } from "@/lib/materials-checklist";
 
 export interface DraftMaterial {
   description: string;
@@ -293,13 +293,10 @@ async function tellOfficeAboutAddition(supabase: Db, actor: Actor, listId: strin
   }
 }
 
-export async function addMaterialItem(
-  listId: string,
-  item: DraftMaterial,
-): Promise<Result> {
-  const supabase = await createClient();
-  const actor = await actorOf(supabase);
-  if (!actor) return { ok: false, error: "Not signed in." };
+/** ONE LINE ONTO A LIST, the insert every door shares (the editor's Add, and a crew member's
+ *  Tell The Office ask): the next sort_order, the money stripped for a non-staff writer, and the
+ *  row proven (a refusal is an error, never a 204). Telling the office is the caller's business. */
+async function insertMaterialLine(supabase: Db, actor: Actor, listId: string, item: DraftMaterial): Promise<Result & { description?: string }> {
   const description = String(item.description ?? "").trim();
   if (!description) return { ok: false, error: "Say what the item is." };
 
@@ -330,6 +327,19 @@ export async function addMaterialItem(
   if (error) return { ok: false, error: dbError(error) };
   if (!inserted) return { ok: false, error: "You don't have permission to change this list." };
   revalidatePath(`/materials/${listId}`);
+  return { ok: true, id: (inserted as { id: string }).id, description };
+}
+
+export async function addMaterialItem(
+  listId: string,
+  item: DraftMaterial,
+): Promise<Result> {
+  const supabase = await createClient();
+  const actor = await actorOf(supabase);
+  if (!actor) return { ok: false, error: "Not signed in." };
+  const line = await insertMaterialLine(supabase, actor, listId, item);
+  if (!line.ok || !line.id) return { ok: false, error: line.error };
+  const description = line.description ?? String(item.description ?? "").trim();
   // THE ID OF THE ROW THIS CALL MADE (audit, 2026-09-17). It was selected and thrown away, so
   // Nort's material.addLine had to go back and re-find "its" line by description, newest first —
   // a guess, not an identity. Two people adding the same item to one list in the same minute, or
@@ -345,7 +355,7 @@ export async function addMaterialItem(
     const added = { ...item, description };
     after(() => tellOfficeAboutAddition(supabase, actor, listId, added));
   }
-  return { ok: true, id: (inserted as { id: string }).id };
+  return { ok: true, id: line.id };
 }
 
 export async function updateMaterialItem(
@@ -756,17 +766,29 @@ export async function generateMaterialDraft(
  * priced take-off to the crew, and hiding the tab leaves a man on site who needs conduit with
  * nowhere to say so.
  *
- * This is the third thing. The list stays the office's. The tech gets the one verb he actually
- * wants — I NEED THIS — and it becomes a real, assignable item with the job attached, plus a push,
- * because a request nobody sees is the same as no request.
+ * This was the third thing: the tech gets the one verb he actually wants — I NEED THIS — with the
+ * job attached, plus a push, because a request nobody sees is the same as no request. (It began as
+ * a task; since 2026-09-11 the crew writes the list itself, and since 2026-09-27 the ask is a line.)
  *
- * NO ROLE GATE ON PURPOSE: asking is not writing. It creates a task, which every member may already
- * do, and touches nothing on the list itself.
+ * ON THE LIST, NOT A SECOND TASK (Erik, 2026-09-27: "the badge should only show whats open to be
+ * purchased which creates a task"). The job's open materials already ARE a task: the one live "Buy
+ * Materials · N Open" row on the job's Tasks, read from the list (lib/materials-checklist). A request
+ * that ALSO made its own "Materials: ..." task put the same need on the Tasks list twice, once as a
+ * row nobody could check off by buying. So the ask is now a LINE on the job's one list (every member
+ * may add one since 0254; the first line on a list-less job starts the list, as the editor's Add
+ * does), and the live row, the Materials badge and My Day's Now block all count it. The office's bell
+ * and push below are unchanged: the ask still lands on the boss's phone at once, with the job
+ * attached, and now opens the list it is on.
+ *
+ * THE LINE IS A LINE (audit, 2026-09-27). The ask is a thing to buy, so the line is his words folded
+ * onto one line and cut to a line's length (askLine: 120, the old task title's cap), with no price:
+ * it rides the badge, Buy Materials, the PO seed and the pick-list print. The WHOLE ask, however
+ * long, is in the office's bell (the push keeps its 140).
  */
 export async function requestMaterials(jobId: string, what: string): Promise<Result> {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: "Sign in first." };
+  const actor = await actorOf(supabase);
+  if (!actor) return { ok: false, error: "Sign in first." };
   const text = String(what ?? "").trim();
   if (!text) return { ok: false, error: "Say what you need." };
   if (text.length > 2000) return { ok: false, error: "That's a lot — trim it down a bit." };
@@ -779,28 +801,29 @@ export async function requestMaterials(jobId: string, what: string): Promise<Res
     .maybeSingle();
   if (!job) return { ok: false, error: "That job no longer exists." };
 
-  const { data: me } = await supabase.from("profiles").select("full_name").eq("id", user.id).maybeSingle();
-  const who = (me as { full_name?: string } | null)?.full_name?.trim() || "A crew member";
+  const who = actor.name;
   const label = jobLabel(job as { job_number?: string | null; name?: string | null });
 
-  // A TASK on the job's one list (0358), and the bell below. The TITLE carries his words, because the
-  // job's Tasks card and the Now block show titles only; the note keeps who asked and the whole text,
-  // and tapping the task opens it (the Task sheet shows the note).
-  const t = await createTask({
-    title: `Materials: ${text.length > 120 ? `${text.slice(0, 117)}...` : text}`,
-    job_id: jobId,
-    priority: 1,
-    notes: `${who} on site: ${text}`,
-    category: "Materials",
+  // A LINE on the job's one list (the canonical one; the first line on a list-less job starts it),
+  // never a task: the live Buy Materials row on the job's Tasks already carries every open line.
+  const list = await ensureJobMaterialList(jobId);
+  if (!list.ok || !list.id) return { ok: false, error: list.error ?? "Couldn't reach this job's materials list." };
+  const line = await insertMaterialLine(supabase, actor, list.id, {
+    description: askLine(text),
+    part_number: null,
+    quantity: 1,
+    unit: "ea",
+    vendor: null,
+    est_cost: null,
   });
-  if (!t.ok) return { ok: false, error: t.error };
+  if (!line.ok) return { ok: false, error: line.error };
 
   // AND TELL SOMEBODY. A request sitting in a list nobody opened is the same as no request — he is
   // standing at a job without the part.
   const { data: staff } = await supabase
     .from("profiles")
     .select("id, role")
-    .neq("id", user.id)
+    .neq("id", actor.id)
     .eq("active", true);
   const bosses = (staff ?? [])
     .filter((p) => isStaffRole((p as { role?: string }).role ?? ""))
@@ -809,20 +832,20 @@ export async function requestMaterials(jobId: string, what: string): Promise<Res
     await createNotifications((job as { org_id?: string }).org_id, bosses, {
       type: "general",
       title: `Materials needed — ${label}`,
-      body: `${who}: ${text.slice(0, 140)}`,
-      url: `/jobs/${jobId}`,
+      // The whole ask: the line on the list is cut to a line's length, so the words live here.
+      body: `${who}: ${text}`,
+      url: `/jobs/${jobId}?tab=materials`,
     });
     // "assigned" is the kind for "something landed that is yours to deal with", which is exactly
     // what this is — and it means the request respects each boss's own push toggle.
     await sendPushToProfiles(bosses, "assigned", {
       title: `Materials needed — ${label}`,
       body: `${who}: ${text.slice(0, 140)}`,
-      url: `/jobs/${jobId}`,
+      url: `/jobs/${jobId}?tab=materials`,
     }).catch(() => {});
   }
 
   revalidatePath(`/jobs/${jobId}`);
   revalidatePath("/planner");
-  revalidatePath("/tasks");
-  return { ok: true };
+  return { ok: true, id: line.id };
 }

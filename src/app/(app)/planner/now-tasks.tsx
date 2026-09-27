@@ -3,9 +3,10 @@
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Check } from "lucide-react";
+import { Check, ChevronRight, Package } from "lucide-react";
 import { useToast } from "@/components/toast";
 import { checkedOffWords, undoCheckOff } from "@/lib/job-tasks";
+import { buyMaterialsTitle } from "@/lib/materials-checklist";
 import { toggleTask, type ToggleTaskResult } from "../tasks/actions";
 
 /**
@@ -13,8 +14,23 @@ import { toggleTask, type ToggleTaskResult } from "../tasks/actions";
  * "Tasks: 3 left", the next three to check off with his thumb, and All Tasks for the job's whole list
  * (the job's Tasks tab). Off the clock there is no Now block and so none of this: a job's list is
  * worked from the job, never piled into anyone's six. Every row is a 44px target.
+ *
+ * While the job's materials list has lines left to buy, the block leads with the one live "Buy
+ * Materials · N Open" row (lib/materials-checklist, never a task row), which opens the list, the same
+ * door as the Materials button above; `left` already counts it as one task.
  */
-export function NowTasks({ jobId, left, next }: { jobId: string; left: number; next: { id: string; title: string }[] }) {
+export function NowTasks({
+  jobId,
+  left,
+  next,
+  materials = null,
+}: {
+  jobId: string;
+  left: number;
+  next: { id: string; title: string }[];
+  /** Lines left to buy on the job's list, and where the list is. null: nothing to buy. */
+  materials?: { open: number; href: string } | null;
+}) {
   const router = useRouter();
   const toast = useToast();
   const [pending, start] = useTransition();
@@ -88,7 +104,16 @@ export function NowTasks({ jobId, left, next }: { jobId: string; left: number; n
         </Link>
       </div>
       <ul className="divide-y divide-slate-100">
-        {next.map((t) => {
+        {materials && materials.open > 0 && (
+          <li>
+            <Link href={materials.href} className="flex min-h-[44px] w-full items-center gap-3 px-3 py-1.5 hover:bg-slate-50">
+              <Package className="h-5 w-5 shrink-0 text-brand" aria-hidden />
+              <span className="min-w-0 flex-1 text-sm font-medium text-slate-900">{buyMaterialsTitle(materials)}</span>
+              <ChevronRight className="h-4 w-4 shrink-0 text-slate-400" aria-hidden />
+            </Link>
+          </li>
+        )}
+        {next.slice(0, materials && materials.open > 0 ? 2 : 3).map((t) => {
           const done = checked.has(t.id);
           return (
             <li key={t.id}>

@@ -107,6 +107,19 @@ describe("the Overview card (mode card)", () => {
     expect(html).toContain("Couldn’t read this job’s tasks just now. Reload to try again.");
     expect(html).not.toContain("Add A Task");
   });
+
+  it("a list that couldn't be read gives no count: no 'X of Y done' built from the Buy Materials row alone", () => {
+    for (const mode of ["card", "tab"] as const) {
+      const html = office({ mode, tasks: [], photos: {}, failed: true, materials: { open: 3 } });
+      expect(html).toContain("Couldn’t read this job’s tasks just now. Reload to try again.");
+      expect(html).not.toContain("Tasks:");
+      // The row is read from the materials list, so it still shows.
+      expect(html).toContain("Buy Materials · 3 Open");
+      const bought = office({ mode, tasks: [], photos: {}, failed: true, materials: { open: 0 }, doneOpen: true });
+      expect(bought).not.toContain("Tasks:");
+      expect(bought).not.toMatch(/>\d+ Done</);
+    }
+  });
 });
 
 describe("the Tasks tab (mode tab)", () => {
@@ -178,5 +191,56 @@ describe("the Done fold", () => {
     }
     // Before 0358 a done row offers no photo door.
     expect(office({ mode: "tab", doneOpen: true, stamps: false })).not.toContain("Add Photo");
+  });
+});
+
+describe("the live Buy Materials row (Erik, 2026-09-27: open materials create a task)", () => {
+  const buyLink = /<a[^>]*href="\?tab=materials"[^>]*>[\s\S]*?Buy Materials · (\d+) Open[\s\S]*?<\/a>/;
+
+  it("leads the card while anything is left to buy, opens the Materials tab, and counts as one task", () => {
+    const html = office({ materials: { open: 3 } });
+    expect(html).toMatch(buyLink);
+    expect(html.match(buyLink)?.[1]).toBe("3");
+    // One more task in the count: 7 tasks + the row = 8, and the row is open.
+    expect(html).toContain("Tasks: 2 of 8 done");
+    // Still three rows on the small card: the row first, then the next two tasks.
+    expect(html.indexOf("Buy Materials")).toBeLessThan(html.indexOf("Pull the permit"));
+    expect(html).toContain("Set the meter base");
+    expect(html).not.toContain("Run the feeder");
+    expect(html).toContain("+3 more on the Tasks tab");
+  });
+
+  it("is a door, not a checkbox: no one checks it off by hand, the list does", () => {
+    const html = office({ tasks: [], photos: {}, materials: { open: 2 } });
+    expect(html).not.toMatch(/<input[^>]*type="checkbox"/);
+    expect(html).toContain("Tasks: 0 of 1 done");
+    expect(html).toMatch(buyLink);
+  });
+
+  it("the crew sees the same row (no price on it)", () => {
+    const html = tech({ materials: { open: 3 } });
+    expect(html).toMatch(buyLink);
+    expect(html).not.toMatch(/\$\s?\d/);
+  });
+
+  it("gone from the open list once everything is bought; reads All Bought in the tab's Done fold", () => {
+    const card = office({ materials: { open: 0 } });
+    expect(card).not.toContain("Buy Materials");
+    expect(card).toContain("Tasks: 3 of 8 done");
+    const tab = office({ mode: "tab", materials: { open: 0 }, doneOpen: true });
+    expect(tab).toMatch(/>3 Done<svg|>3 Done</);
+    expect(tab).toContain("Buy Materials · All Bought");
+  });
+
+  it("no row, and no change to the count, when nothing on the list is to buy", () => {
+    const html = office({ materials: null });
+    expect(html).not.toContain("Buy Materials");
+    expect(html).toContain("Tasks: 2 of 7 done");
+  });
+
+  it("keeps the laws: 44px door, Title Case words", () => {
+    const html = office({ mode: "tab", materials: { open: 4 } });
+    expect(html).toMatch(/<a[^>]*min-h-\[44px\][^>]*href="\?tab=materials"/);
+    expect(clickables(html)).toContain("Buy Materials · 4 Open");
   });
 });

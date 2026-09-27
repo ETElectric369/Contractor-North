@@ -3,7 +3,7 @@
 import { useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Camera, ChevronDown, Loader2, Plus } from "lucide-react";
+import { Camera, ChevronDown, ChevronRight, Loader2, Package, Plus } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
@@ -14,12 +14,14 @@ import {
   canDeleteTask,
   checkedOffWords,
   doneWords,
+  jobTaskTally,
   splitJobTasks,
   tasksHeader,
   undoCheckOff,
   type JobTaskRow,
   type TaskPhoto,
 } from "@/lib/job-tasks";
+import { buyMaterialsTitle, type BuyMaterials } from "@/lib/materials-checklist";
 import { createTask, deleteTask, setTaskDonePhoto, toggleTask, updateTask, type ToggleTaskResult } from "../../tasks/actions";
 import { uploadJobPhotos } from "./upload-job-photos";
 import { PhotoTaskSheet } from "./photo-task-sheet";
@@ -42,6 +44,13 @@ export type TaskPhotos = Record<string, { task: TaskPhoto; done: TaskPhoto }>;
  *
  * Deleting follows 0358's rule, said before the tap: the office or whoever added the task. A tech
  * opens an office task to read it and checks it off; there is no Delete for him to press.
+ *
+ * BUY MATERIALS, THE ONE LIVE ROW (Erik, 2026-09-27: the materials badge "should only show whats open
+ * to be purchased which creates a task"). While the job's materials list has lines left to buy, the
+ * list leads with "Buy Materials · 3 Open", read from the materials list (lib/materials-checklist),
+ * never a row in the tasks table: there is nothing to sync and nothing to check off by hand. Tapping
+ * it opens the Materials tab, where buying is checking lines off. When everything is bought it moves
+ * to the tab's Done fold as "Buy Materials · All Bought". It counts as ONE task (jobTaskTally).
  */
 export function JobTaskList({
   jobId,
@@ -56,6 +65,7 @@ export function JobTaskList({
   stamps,
   failed = false,
   doneOpen = false,
+  materials = null,
 }: {
   jobId: string;
   orgId: string;
@@ -74,6 +84,8 @@ export function JobTaskList({
   failed?: boolean;
   /** The tab's Done fold starts open (it starts closed: the open work leads). */
   doneOpen?: boolean;
+  /** The job's materials list, as the live Buy Materials row (null: nothing on it to buy). */
+  materials?: BuyMaterials;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -86,7 +98,9 @@ export function JobTaskList({
   const now = new Date(nowIso);
 
   const { open, done } = splitJobTasks(tasks);
-  const total = tasks.length;
+  const tally = jobTaskTally(tasks, materials);
+  const total = tally.total;
+  const buyOpen = !!materials && materials.open > 0;
   const isDone = (t: JobTaskRow) => override.get(t.id) ?? t.status === "done";
 
   function toggle(t: JobTaskRow) {
@@ -167,9 +181,29 @@ export function JobTaskList({
     );
   };
 
-  const header = total > 0 && (
+  // The live row: a door to the Materials tab, not a checkbox (buying is checking lines off there).
+  const buyRow = materials && (
+    <li key="buy-materials">
+      <Link
+        href="?tab=materials"
+        scroll={false}
+        className="flex min-h-[44px] items-center gap-1 pr-3 hover:bg-slate-50"
+      >
+        <span className="flex h-11 w-11 shrink-0 items-center justify-center">
+          <Package className={`h-5 w-5 ${buyOpen ? "text-brand" : "text-slate-400"}`} aria-hidden />
+        </span>
+        <span className={`min-w-0 flex-1 text-sm ${buyOpen ? "font-medium text-slate-900" : "text-slate-400"}`}>{buyMaterialsTitle(materials)}</span>
+        <ChevronRight className="h-4 w-4 shrink-0 text-slate-400" aria-hidden />
+      </Link>
+    </li>
+  );
+
+  // A list that couldn't be read has no "X of Y done": the tally would be the Buy Materials row alone
+  // ("Tasks: 0 of 1 done" over "Couldn't read this job's tasks"). The row itself still shows, because
+  // it is read from the materials list, not the tasks.
+  const header = !failed && total > 0 && (
     <div className="flex items-center justify-between gap-2 border-b border-slate-100 px-4">
-      <h2 className="py-3 text-sm font-semibold text-slate-900">{tasksHeader(total, done.length)}</h2>
+      <h2 className="py-3 text-sm font-semibold text-slate-900">{tasksHeader(total, tally.done)}</h2>
       {mode === "card" && (
         <Link
           href="?tab=tasks"
@@ -182,7 +216,8 @@ export function JobTaskList({
     </div>
   );
 
-  const shownOpen = mode === "card" ? open.slice(0, 3) : open;
+  // The card shows three open rows, the live Buy Materials row first when it is open.
+  const shownOpen = mode === "card" ? open.slice(0, buyOpen ? 2 : 3) : open;
 
   return (
     <Card className="overflow-hidden">
@@ -190,8 +225,13 @@ export function JobTaskList({
       {failed && (
         <p className="px-4 py-3 text-sm text-red-600">Couldn&rsquo;t read this job&rsquo;s tasks just now. Reload to try again.</p>
       )}
-      {shownOpen.length > 0 && <ul className="divide-y divide-slate-100">{shownOpen.map(row)}</ul>}
-      {!failed && total > 0 && open.length === 0 && (
+      {(shownOpen.length > 0 || buyOpen) && (
+        <ul className="divide-y divide-slate-100">
+          {buyOpen && buyRow}
+          {shownOpen.map(row)}
+        </ul>
+      )}
+      {!failed && total > 0 && tally.open === 0 && (
         <p className="px-4 py-3 text-sm text-slate-500">Everything on this list is done.</p>
       )}
       {mode === "card" && open.length > shownOpen.length && (
@@ -200,7 +240,7 @@ export function JobTaskList({
         </p>
       )}
       {!failed && <AddTaskLine jobId={jobId} orgId={orgId} photoDoor={stamps} bordered={total > 0} />}
-      {mode === "tab" && done.length > 0 && (
+      {mode === "tab" && !failed && tally.done > 0 && (
         <div className="border-t border-slate-100">
           <button
             type="button"
@@ -208,10 +248,15 @@ export function JobTaskList({
             aria-expanded={foldOpen}
             className="flex min-h-[44px] w-full items-center justify-between px-4 text-left text-sm font-medium text-slate-600 hover:bg-slate-50"
           >
-            {done.length} Done
+            {tally.done} Done
             <ChevronDown className={`h-4 w-4 transition-transform ${foldOpen ? "rotate-180" : ""}`} />
           </button>
-          {foldOpen && <ul className="divide-y divide-slate-100 border-t border-slate-100">{done.map(row)}</ul>}
+          {foldOpen && (
+            <ul className="divide-y divide-slate-100 border-t border-slate-100">
+              {!buyOpen && buyRow}
+              {done.map(row)}
+            </ul>
+          )}
         </div>
       )}
       {mode === "tab" && !stamps && !failed && (
@@ -468,7 +513,7 @@ function TaskEditSheet({
             className="h-11"
           />
         </div>
-        {/* The note: a long materials request's whole text and who asked (the title stops at 120). */}
+        {/* The note: e.g. an older materials request's whole text and who asked (the title stops at 120). */}
         {task.notes && <p className="whitespace-pre-wrap text-sm text-slate-600">{task.notes}</p>}
         {!canDelete && (
           <p className="text-xs text-slate-500">

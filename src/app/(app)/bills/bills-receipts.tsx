@@ -28,6 +28,7 @@ import { splitReceiptBilling } from "./receipt-billing";
 import { ReceiptLines, type ReceiptForBilling } from "./receipt-billing-card";
 import { AlreadyBilledButton, NotBilledAfterAllButton } from "@/components/already-billed-sheet";
 import type { BillAlreadyBilled } from "@/lib/already-billed";
+import { countOpen, isOpenBill, isOpenPurchaseOrder } from "@/lib/open-counts";
 
 interface JobOption {
   id: string;
@@ -277,9 +278,12 @@ export function BillsReceipts({
           activeId={tab}
           onChange={(id) => setTab(id as LedgerTab)}
           tabs={[
-            { id: "bills", label: "Bills", count: bills.length },
-            { id: "po", label: "Purchase Orders", count: pos.length, offStrip: !poOn },
-            { id: "receipts", label: "Receipts", count: docs.length },
+            // Open only (Erik, 2026-09-27: "all badges only show whats open"): the bills still owed
+            // and the orders not in yet. Receipts are files, never open, so no badge; the ledger's
+            // own size is said in plain words on its summary line above.
+            { id: "bills", label: "Bills", count: countOpen(bills, isOpenBill) },
+            { id: "po", label: "Purchase Orders", count: countOpen(pos, (p) => isOpenPurchaseOrder(p.status)), offStrip: !poOn },
+            { id: "receipts", label: "Receipts" },
           ]}
         />
 

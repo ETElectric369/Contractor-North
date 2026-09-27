@@ -208,9 +208,10 @@ export default async function PriceListPage() {
       <Tabs
         tabs={[
           {
+            // NO BADGES ON THESE TABS (Erik, 2026-09-27: "all badges only show whats open"): how many
+            // items, vendors or kits the book holds is a total, nothing waiting on anyone.
             id: "items",
             label: "Price List",
-            count: activeItems.length,
             content: (
               <PriceListManager
                 items={allItems}
@@ -232,7 +233,6 @@ export default async function PriceListPage() {
                 {
                   id: "options",
                   label: "Vendors",
-                  count: vendors.length,
                   content: (
                     <VendorsManager
                       vendors={vendors}
@@ -252,7 +252,6 @@ export default async function PriceListPage() {
           {
             id: "kits",
             label: "Kits",
-            count: kits.length,
             offStrip: !kitsOn,
             content: (
               <>

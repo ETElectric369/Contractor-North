@@ -51,8 +51,11 @@ export function CompletedJobsSection({ jobs, total }: { jobs: JobRowData[]; tota
         aria-expanded={open}
         className="flex w-full items-center gap-2 px-5 py-3 text-left hover:bg-slate-50"
       >
-        <span className="text-sm font-semibold text-slate-700">Completed</span>
-        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-500">{total}</span>
+        {/* The shelf's size in plain words, never a badge: finished jobs wait on nobody (Erik,
+            2026-09-27: "all badges only show whats open"). */}
+        <span className="text-sm font-semibold text-slate-700">
+          Completed <span className="font-normal text-slate-500">({total})</span>
+        </span>
         <ChevronDown
           className={`ml-auto h-4 w-4 text-slate-400 transition-transform ${open ? "rotate-180" : ""}`}
         />
