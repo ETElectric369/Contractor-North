@@ -1146,10 +1146,12 @@ export default async function JobDetailPage({
       ),
     },
     {
+      // THE ONE TOTAL BADGE (Erik, 2026-09-27, minutes after "all badges only show whats open":
+      // "keep the badge for total job photos"). Every other chip counts only what's open; Photos
+      // keeps how many job-site photos the job has (tests/badges-show-open names the exception).
       id: "photos",
       label: "Photos",
-      // No badge: how many photos a job has is a total, never something waiting on someone (Erik,
-      // 2026-09-27: "all badges only show whats open"). The tab itself shows them.
+      count: docs.filter((d: any) => /\.(jpe?g|png|webp|gif|heic)($|\?)/i.test(d.signedUrl ?? d.name)).length,
       content: (
         <Card>
           <CardContent className="py-5">

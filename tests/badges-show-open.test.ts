@@ -18,9 +18,12 @@ import {
 /**
  * EVERY BADGE COUNTS ONLY WHAT'S OPEN (Erik, 2026-09-27: "and all badges only show whats open").
  * A number on a chip, a tab or a tile is the rows that still need someone, and nothing at zero. A
- * total (photos, shifts, items in the book, safety records, filed papers) is not a badge. Pinned two
- * ways: the per-kind rules (lib/open-counts), and every tab count in the app named here, so a new
- * one is a decision, not an accident.
+ * total (shifts, items in the book, safety records, filed papers) is not a badge. Pinned two ways:
+ * the per-kind rules (lib/open-counts), and every tab count in the app named here, so a new one is
+ * a decision, not an accident.
+ *
+ * ONE NAMED EXCEPTION (Erik, minutes later: "keep the badge for total job photos"): the job's Photos
+ * chip keeps a TOTAL, the number of job-site photos. It is the only total badge in the app.
  */
 
 describe("the per-kind 'still needs someone' rules", () => {
@@ -91,6 +94,16 @@ const OPEN_TAB_COUNTS: Record<string, string> = {
   "tray.length": "Organize's Needs Attention tray",
 };
 
+/** Erik's one exception, a TOTAL on purpose: "keep the badge for total job photos". The job's Photos
+ *  chip counts the job's photos: the image files on the job today, and fix/photos-vs-bills' job-site
+ *  photos (its photos and pictures, never its receipts) once that lands, when the first entry goes.
+ *  Nothing else may use a total. */
+const PHOTOS_TOTAL_EXCEPTION: Record<string, string> = {
+  "docs.filter((d: any) => /\\.(jpe?g|png|webp|gif|heic)($|\\?)/i.test(d.signedUrl ?? d.name)).length":
+    "Erik's exception: total job-site photos (the image files on the job)",
+  "paperSort.photos.length + paperSort.pictures.length": "Erik's exception: total job-site photos (photos-vs-bills split)",
+};
+
 describe("every tab count in the app is an open count", () => {
   const files = walk(SRC).filter((f) => /<Tabs\b/.test(readFileSync(f, "utf8")));
 
@@ -110,7 +123,7 @@ describe("every tab count in the app is an open count", () => {
         if (!expr || /^number\b/.test(expr)) continue; // no count here, or a type annotation
         seen += 1;
         if (/^countOpen\(/.test(expr) && /isOpen[A-Z]\w*/.test(expr)) continue;
-        if (expr in OPEN_TAB_COUNTS) continue;
+        if (expr in OPEN_TAB_COUNTS || expr in PHOTOS_TOTAL_EXCEPTION) continue;
         bad.push(`${f.replace(SRC, "")}: count: ${expr}`);
       }
     }
@@ -120,10 +133,12 @@ describe("every tab count in the app is an open count", () => {
     expect(seen).toBeGreaterThanOrEqual(16);
   });
 
-  it("the job's Photos and Time chips carry no badge (a total), and Materials counts only what's to buy", () => {
+  it("the job's Photos chip keeps its total (Erik's exception), Time carries no badge, and Materials counts only what's to buy", () => {
     const page = read("app/(app)/jobs/[id]/page.tsx");
     const tab = (id: string) => page.slice(page.indexOf(`id: "${id}",`), page.indexOf("content:", page.indexOf(`id: "${id}",`)));
-    expect(tab("photos")).not.toMatch(/\bcount:/);
+    // "keep the badge for total job photos": the one total badge, and only the job-site photos.
+    const photos = tab("photos").match(/^\s*count:\s*(.+?),?\s*$/m)?.[1]?.trim();
+    expect(photos && photos in PHOTOS_TOTAL_EXCEPTION, `Photos count: ${photos}`).toBe(true);
     expect(tab("time")).not.toMatch(/\bcount:/);
     expect(tab("materials")).toContain("count: materialsOpen");
     expect(page).not.toContain("count: canonicalItems?.length");
