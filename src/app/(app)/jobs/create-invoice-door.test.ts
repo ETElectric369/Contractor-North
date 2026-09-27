@@ -454,8 +454,29 @@ describe("a sales-tax rate asked for on a new invoice (W1-28)", () => {
       if (table === "organizations") return { settings: {} };
       throw new Error(`unrouted ${table} [${cols}]`);
     });
-    expect(await createInvoiceForJob(JOB, { taxRate: 0.0825 })).toMatchObject({ ok: true, id: "inv-taxed" });
+    const res = await createInvoiceForJob(JOB, { taxRate: 0.0825 });
+    expect(res).toMatchObject({ ok: true, id: "inv-taxed", startedAtTaxRate: 0.0825 });
     expect(createBlankInvoice).toHaveBeenCalledWith(expect.objectContaining({ tax_rate: 0.0825 }));
+  });
+
+  it("no rate asked: untaxed, and nothing claims a rate", async () => {
+    const billing = await import("../billing/actions");
+    const createBlankInvoice = billing.createBlankInvoice as unknown as ReturnType<typeof vi.fn>;
+    createBlankInvoice.mockClear();
+    createBlankInvoice.mockResolvedValueOnce({ ok: true, id: "inv-plain" });
+    state.client = fake((table, cols, single) => {
+      if (table === "payment_milestones") return single ? null : [];
+      if (table === "jobs" && cols === "billing_type") return { billing_type: "tm" };
+      if (table === "jobs") return { customer_id: "c-1", name: "Deck", description: null };
+      if (table === "invoices") return [];
+      if (table === "quotes") return [];
+      if (table === "organizations") return { settings: {} };
+      throw new Error(`unrouted ${table} [${cols}]`);
+    });
+    const res = await createInvoiceForJob(JOB);
+    expect(res).toMatchObject({ ok: true, id: "inv-plain" });
+    expect(res.startedAtTaxRate).toBeUndefined();
+    expect(createBlankInvoice).toHaveBeenCalledWith(expect.objectContaining({ tax_rate: 0 }));
   });
 
   it("landing on an open draft ignores it, and says the draft keeps its own tax", async () => {
@@ -463,6 +484,7 @@ describe("a sales-tax rate asked for on a new invoice (W1-28)", () => {
     const res = await createInvoiceForJob(JOB, { taxRate: 0.0825 });
     expect(res).toMatchObject({ ok: true, id: "inv-062" });
     expect(res.importWarning).toMatch(/INV-062 keeps its own sales tax\./);
+    expect(res.startedAtTaxRate).toBeUndefined();
     state.drawDoor.mockResolvedValue({ ok: true, id: "inv-078", note: "Pulled 2 hours into INV-078." });
     state.client = jobWithDraft({ id: "inv-078", number: "INV-078", kind: "progress", sources: ["labor"] });
     expect((await createInvoiceForJob(JOB, { taxRate: 0.0825 })).importWarning).toBe("Pulled 2 hours into INV-078. INV-078 keeps its own sales tax.");
@@ -490,10 +512,11 @@ describe("a sales-tax rate asked for on a new invoice (W1-28)", () => {
     state.client = route(0.0725);
     const kept = await createInvoiceForJob(JOB, { taxRate: 0.0825 });
     expect(kept.importWarning).toBe("It keeps the estimate's own sales tax, 7.25%.");
+    expect(kept.startedAtTaxRate).toBeUndefined();
     expect(state.taxRate).not.toHaveBeenCalled();
     state.client = route(0);
     const seeded = await createInvoiceForJob(JOB, { taxRate: 0.0825 });
-    expect(seeded).toMatchObject({ ok: true, id: "inv-est" });
+    expect(seeded).toMatchObject({ ok: true, id: "inv-est", startedAtTaxRate: 0.0825 });
     expect(state.taxRate).toHaveBeenCalledWith("inv-est", 8.25);
   });
 });

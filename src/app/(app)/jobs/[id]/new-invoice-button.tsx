@@ -190,14 +190,14 @@ export function NewInvoiceButton(p: NewInvoiceButtonProps) {
         return;
       }
       // No estimate, no draw: the one-tap invoice, exactly as before - at the company's rate when
-      // Sales Tax is on (the toast names it; nothing about money is silent).
+      // Sales Tax is on. There is no sheet to show that rate on first, so it is said, and it stays
+      // until it is read (a money sentence, never a glimpse), only when the new invoice really
+      // started at it (the server's startedAtTaxRate).
       const rate = await defaultRate().catch(() => 0);
       const res = await createInvoiceForJob(p.jobId, rate > 0 ? { taxRate: rate } : {});
-      if (res.ok && res.id && rate > 0) {
-        const taxWords = `Sales tax is ${pct(rate)}, your usual rate - change it on the invoice if this one is different.`;
-        res.importWarning = res.importWarning ? `${res.importWarning} ${taxWords}` : taxWords;
+      if (land(res) && res.startedAtTaxRate) {
+        toast(`Sales tax on this invoice is ${pct(res.startedAtTaxRate)}, your usual rate. Change it on the invoice if this job's is different.`, "info", undefined, { sticky: true });
       }
-      land(res);
     });
   }
 

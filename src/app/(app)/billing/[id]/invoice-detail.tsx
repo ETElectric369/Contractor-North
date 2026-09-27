@@ -408,11 +408,25 @@ export function InvoiceDetail({
       refresh();
     });
   }
-  function pickDue(v: string) {
-    setDueEditing(false);
+  /* A PICKED DATE SAVES; A TYPED ONE SAVES WHEN THE TYPING STOPS. A phone's picker changes the box
+     once, but typing a date on a keyboard passes through a valid date at nearly every keystroke
+     (0002-10-12, 0020-10-12…), and each would have saved and toasted. So a change waits 700 ms for
+     the next one, leaving the box saves at once, and only a whole date from this century is sent. */
+  const dueTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const duePending = useRef<string | null>(null);
+  function flushDue() {
+    if (dueTimer.current) clearTimeout(dueTimer.current);
+    const v = duePending.current;
+    duePending.current = null;
+    if (!v || !/^\d{4}-\d{2}-\d{2}$/.test(v) || Number(v.slice(0, 4)) < 2000) return;
     const prev = toDateInput(invoice.due_date);
-    if (!v || v === prev) return;
+    if (v === prev) return;
     writeDue(v, true, { date: prev || null, byHand: dueByHand !== false });
+  }
+  function pickDue(v: string) {
+    duePending.current = v;
+    if (dueTimer.current) clearTimeout(dueTimer.current);
+    dueTimer.current = setTimeout(flushDue, 700);
   }
 
   // draft-only customer/job correction
@@ -827,7 +841,11 @@ export function InvoiceDetail({
             ) : (
               <button
                 type="button"
-                onClick={() => setTitleEditing(true)}
+                onClick={() => {
+                  // A fresh edit: an Escape that removed the box without a blur must not swallow this save.
+                  titleCancelled.current = false;
+                  setTitleEditing(true);
+                }}
                 className="group flex min-h-11 w-full items-center gap-2 text-left"
                 title="Edit title"
               >
@@ -849,7 +867,10 @@ export function InvoiceDetail({
                 type="date"
                 defaultValue={toDateInput(invoice.due_date)}
                 onChange={(e) => pickDue(e.target.value)}
-                onBlur={() => setDueEditing(false)}
+                onBlur={() => {
+                  flushDue();
+                  setDueEditing(false);
+                }}
                 disabled={pending}
                 className="h-11 w-48"
                 autoFocus

@@ -70,6 +70,9 @@ export type CreateInvoiceForJobResult = {
    *  its sheet on that choice; /billing's New Invoice offers "Open The Job's New Invoice"
    *  (/jobs/<id>?tab=invoices&invoice=part, which the job's button claims). */
   door?: "part-of-estimate";
+  /** The sales-tax rate a NEW invoice started at because the caller asked for it (a fraction). Set
+   *  only when a rate was asked for and landed; never on a draft that kept its own. */
+  startedAtTaxRate?: number;
 };
 
 /**
@@ -255,19 +258,21 @@ const pctWords = (rate: number) => `${Math.round(rate * 1_000_000) / 10_000}%`;
  * Either way the sentence says which rate the invoice has when it isn't the one asked for, and a
  * write that doesn't land is said, never swallowed.
  */
-async function seedEstimateCopyTax(supabase: SupabaseClient, invoiceId: string, rate: number): Promise<string> {
+async function seedEstimateCopyTax(supabase: SupabaseClient, invoiceId: string, rate: number): Promise<{ said: string; applied: boolean }> {
   const { data, error } = await supabase.from("invoices").select("tax_rate").eq("id", invoiceId).maybeSingle();
   if (error) {
     reportError("createInvoiceForJob.estimateTaxRead", error, { invoiceId });
-    return ` Couldn't check the estimate's sales tax just now, so check the tax on the invoice before sending.`;
+    return { said: ` Couldn't check the estimate's sales tax just now, so check the tax on the invoice before sending.`, applied: false };
   }
   const own = Number((data as { tax_rate?: number | string | null } | null)?.tax_rate) || 0;
   if (own > 0.0000005) {
-    return Math.abs(own - rate) < 0.0000005 ? "" : ` It keeps the estimate's own sales tax, ${pctWords(own)}.`;
+    return { said: Math.abs(own - rate) < 0.0000005 ? "" : ` It keeps the estimate's own sales tax, ${pctWords(own)}.`, applied: false };
   }
-  if (rate <= 0.0000005) return "";
+  if (rate <= 0.0000005) return { said: "", applied: false };
   const set = await setInvoiceTaxRate(invoiceId, rate * 100);
-  return set.ok ? "" : ` Sales tax couldn't be set to ${pctWords(rate)} (${set.error ?? "try again"}) - set it on the invoice before sending.`;
+  return set.ok
+    ? { said: "", applied: true }
+    : { said: ` Sales tax couldn't be set to ${pctWords(rate)} (${set.error ?? "try again"}) - set it on the invoice before sending.`, applied: false };
 }
 
 /** Create an invoice for a job — from its quote if it has one, else blank — carrying only the
@@ -301,7 +306,7 @@ export async function createInvoiceForJob(
     .limit(1)
     .maybeSingle();
   if (milestone)
-    return { ok: false, error: "This job bills on a payment schedule — request the next draw from Billing instead." };
+    return { ok: false, error: "This job bills on its payment schedule, so its next bill is the next payment on it: Request Next Payment on the job." };
   // The job's billing type decides whether its estimate is the contract (estimateIsTheContract).
   // A lost read is not "fixed price": that would copy a T&M job's estimate onto its bill.
   const { data: jobRow, error: jobErr } = await supabase.from("jobs").select("billing_type").eq("id", jobId).maybeSingle();
@@ -556,9 +561,15 @@ export async function createInvoiceForJob(
   let res: { ok: boolean; error?: string; id?: string };
   /** What became of a rate asked for on an estimate copy, said after the pull-in note. */
   let taxSaid = "";
+  /** The rate the new invoice really started at, when one was asked for and landed. */
+  let startedAt: number | undefined;
   if (fromQuote && quote) {
     res = await createInvoiceFromQuote(quote.id);
-    if (res.ok && res.id && taxRate !== undefined) taxSaid = await seedEstimateCopyTax(supabase, res.id, taxRate);
+    if (res.ok && res.id && taxRate !== undefined) {
+      const seeded = await seedEstimateCopyTax(supabase, res.id, taxRate);
+      taxSaid = seeded.said;
+      if (seeded.applied) startedAt = taxRate;
+    }
   } else {
     const { data: job } = await supabase
       .from("jobs")
@@ -574,7 +585,9 @@ export async function createInvoiceForJob(
       // The rate the caller showed and asked for (W1-28); none asked, untaxed as it always was.
       tax_rate: taxRate ?? 0,
     });
+    if (res.ok && taxRate !== undefined && taxRate > 0.0000005) startedAt = taxRate;
   }
+  const taxed = startedAt !== undefined ? { startedAtTaxRate: startedAt } : {};
 
   // Pre-fill the draft from the job's logged LABOR (hours × rate) + MATERIALS (POs/bills,
   // marked up), best-effort — both importers no-op cleanly when there's nothing to pull.
@@ -586,7 +599,7 @@ export async function createInvoiceForJob(
     const said = extrasSentence(extras);
     const heads = extras.warnings.length ? { partial: true as const } : {};
     if (pulled.missed.length) {
-      return { ...res, partial: true, importWarning: `Invoice created, but ${joinAnd(pulled.missed)} couldn't be pulled in — review the line items before sending.${said}${taxSaid}` };
+      return { ...res, ...taxed, partial: true, importWarning: `Invoice created, but ${joinAnd(pulled.missed)} couldn't be pulled in — review the line items before sending.${said}${taxSaid}` };
     }
     if (prior) {
       const { data: made } = await supabase
@@ -624,6 +637,7 @@ export async function createInvoiceForJob(
         // draft can never read as "nothing new" while the Overview card shows a figure.
         return {
           ...res,
+          ...taxed,
           ...heads,
           importWarning:
             (leftOff.length
@@ -635,6 +649,7 @@ export async function createInvoiceForJob(
       }
       return {
         ...res,
+        ...taxed,
         ...heads,
         importWarning:
           `Started ${newNumber} for what's new since ${priorLabel} — ${landed} ${landed === 1 ? "line" : "lines"} pulled in.` +
@@ -645,9 +660,9 @@ export async function createInvoiceForJob(
     }
     // The first invoice on the job: its count is on the page, but what the importers flagged is
     // not, so it is said here too (audit v994 SI5).
-    if (said || taxSaid) return { ...res, ...heads, importWarning: (said + taxSaid).trim() };
+    if (said || taxSaid) return { ...res, ...taxed, ...heads, importWarning: (said + taxSaid).trim() };
   }
-  return res;
+  return res.ok ? { ...res, ...taxed } : res;
 }
 
 /** Set a job's status (partial — keeps everything else). For voice: "mark the Miller job on
