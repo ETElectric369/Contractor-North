@@ -74,6 +74,29 @@ export function buyMaterialsCounts(row: BuyMaterials): { total: number; done: nu
   return row.open > 0 ? { total: 1, done: 0, open: 1 } : { total: 1, done: 1, open: 0 };
 }
 
+/**
+ * THE JOB'S LIST, when a reader has every list on a set of jobs: the newest per job, id breaking a
+ * created_at tie (canonicalListIdForJob's rule in materials/actions, the job page's jobLists[0], the
+ * planner's Now block). A job can hold an older list too (the office's New List, a lost race in
+ * ensureJobMaterialList), and a reader that summed every list would badge lines nobody can see on
+ * the job's Materials tab. Order-independent: it never trusts the rows' order.
+ */
+export function newestListPerJob<T extends { job_id: string | null; created_at: string | null; id: string }>(
+  lists: readonly T[] | null | undefined,
+): Map<string, T> {
+  const out = new Map<string, T>();
+  for (const l of lists ?? []) {
+    if (!l.job_id) continue;
+    const have = out.get(l.job_id);
+    const newer =
+      !have ||
+      (l.created_at ?? "") > (have.created_at ?? "") ||
+      ((l.created_at ?? "") === (have.created_at ?? "") && l.id > have.id);
+    if (newer) out.set(l.job_id, l);
+  }
+  return out;
+}
+
 /** What a tick on this line means, in words: a tool is GOT from the shop, never bought ("Got: Hammer
  *  drill", "Not Got Yet: Hammer drill"); everything else is bought. The tick is the same column. */
 export function tickWord(line: ChecklistLine): "Got" | "Bought" {

@@ -5,6 +5,7 @@ import {
   buyMaterialsTitle,
   checklistGroups,
   isOpenToBuy,
+  newestListPerJob,
   openToBuyCount,
   tickWord,
   toBuyWords,
@@ -121,5 +122,27 @@ describe("what a tick means, said", () => {
     expect(tickWord({ is_tool: true })).toBe("Got");
     expect(tickWord({ is_tool: false })).toBe("Bought");
     expect(tickWord({})).toBe("Bought");
+  });
+});
+
+describe("the job's list, among every list on a set of jobs", () => {
+  const L = (id: string, job_id: string | null, created_at: string) => ({ id, job_id, created_at });
+
+  it("the newest per job, whatever order the rows come in", () => {
+    const rows = [L("a", "j1", "2026-09-01T00:00:00Z"), L("b", "j1", "2026-09-20T00:00:00Z"), L("c", "j2", "2026-09-05T00:00:00Z")];
+    for (const order of [rows, [...rows].reverse()]) {
+      const m = newestListPerJob(order);
+      expect(m.get("j1")?.id).toBe("b");
+      expect(m.get("j2")?.id).toBe("c");
+      expect(m.size).toBe(2);
+    }
+  });
+
+  it("a created_at tie goes to the higher id (canonicalListIdForJob's order), and a list with no job is skipped", () => {
+    const t = "2026-09-20T00:00:00Z";
+    expect(newestListPerJob([L("a1", "j1", t), L("b2", "j1", t)]).get("j1")?.id).toBe("b2");
+    expect(newestListPerJob([L("b2", "j1", t), L("a1", "j1", t)]).get("j1")?.id).toBe("b2");
+    expect(newestListPerJob([L("x", null, t)]).size).toBe(0);
+    expect(newestListPerJob(null).size).toBe(0);
   });
 });

@@ -242,7 +242,8 @@ export default async function JobDetailPage({
       .from("material_lists")
       .select("id, name, created_at, material_list_items(count)")
       .eq("job_id", id)
-      .order("created_at", { ascending: false }),
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: false }),
     // Full ApptValue fields so each row can open the edit modal in place.
     supabase
       .from("appointments")

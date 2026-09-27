@@ -347,6 +347,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
           .select("id, name, material_list_items(purchased, is_tool)")
           .eq("job_id", currentJob.id)
           .order("created_at", { ascending: false })
+          .order("id", { ascending: false })
           .limit(1)
           .maybeSingle()
       : Promise.resolve({ data: null }),
