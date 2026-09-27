@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { billedPartMoved, claimedMoveRefusal } from "./claim-words";
+import { billedPartMoved, claimedMoveRefusal, claimedPersonRefusal } from "./claim-words";
 
 describe("claim words", () => {
   it("claimedMoveRefusal names the invoice and the way out", () => {
@@ -11,6 +11,16 @@ describe("claim words", () => {
 
   it("names an invoice with no number yet", () => {
     expect(claimedMoveRefusal({ id: "x", invoice_number: null })).toMatch(/^an invoice already bills/);
+  });
+
+  it("claimedPersonRefusal names the invoice, whose hours it billed, and the way out", () => {
+    expect(claimedPersonRefusal({ id: "x", invoice_number: "INV-048" }, " Erik Taylor ")).toBe(
+      "INV-048 already bills this shift as Erik Taylor's hours — void or adjust that invoice before handing the shift to someone else. Nothing was changed.",
+    );
+    // No name to hand (a hidden profile): still one plain sentence, never "as 's hours".
+    expect(claimedPersonRefusal({ id: "x", invoice_number: null }, "")).toBe(
+      "an invoice already bills this shift — void or adjust that invoice before handing the shift to someone else. Nothing was changed.",
+    );
   });
 
   it("billedPartMoved says both figures and that the invoice keeps its own", () => {
