@@ -10,7 +10,7 @@ import { Badge, toneClasses } from "@/components/ui/badge";
 import { EmptyState } from "@/components/page-header";
 import { useToast } from "@/components/toast";
 import { cn, formatPhone } from "@/lib/utils";
-import { applySiteFill, emptyBoxes, fillSummary, looksLikeWebAddress, siteToForm, withoutSiteFill, type FillKey } from "@/lib/site-read/form-fill";
+import { applySiteFill, emptyBoxes, fillSummary, looksLikeWebAddress, siteToForm, siteUrl, withoutSiteFill, type FillKey } from "@/lib/site-read/form-fill";
 import { createResource, updateResource, deleteResource } from "./actions";
 import { fillFromSite } from "./fill-from-site";
 import { RESOURCE_CATEGORIES } from "./categories";
@@ -62,7 +62,8 @@ export function ResourcesManager({ resources, canEdit }: { resources: Resource[]
   // The form as it is NOW, for a site read that lands after the person kept typing: it fills what
   // is empty then, never what was empty when the read began. `session` changes whenever the form
   // is opened, closed or switched to another contact, so a late answer never fills the wrong one.
-  const live = useRef({ form, categoryOpen, fromSite, session: 0 });
+  // `readingUrl` is the address being read now (null: none), `nextUrl` one pasted meanwhile.
+  const live = useRef({ form, categoryOpen, fromSite, session: 0, readingUrl: null as string | null, nextUrl: null as string | null });
   live.current.form = form;
   live.current.categoryOpen = categoryOpen;
   live.current.fromSite = fromSite;
@@ -104,6 +105,8 @@ export function ResourcesManager({ resources, canEdit }: { resources: Resource[]
     live.current.session++;
     // A read still out belongs to the form that was open: its answer is thrown away (the session
     // check), and the new form is not left "Reading Their Site…" with Save disabled waiting for it.
+    live.current.readingUrl = null;
+    live.current.nextUrl = null;
     setReading(false);
     setForm(EMPTY_FORM);
     setCategoryTouched(false);
@@ -136,15 +139,32 @@ export function ResourcesManager({ resources, canEdit }: { resources: Resource[]
     });
   }
 
-  /** FILL FROM THEIR SITE: read the page, fill the EMPTY boxes, mark them. Nothing saves until Save. */
+  /** FILL FROM THEIR SITE: read the page, fill the EMPTY boxes, mark them. Nothing saves until Save.
+   *  Everything it reads goes through `live` (never this render's state), because it outlives the
+   *  render it started in: a paste calls it from a timer, and a queued address calls it again. */
   async function fillFromTheirSite(url: string) {
-    if (reading || !looksLikeWebAddress(url)) return;
-    const session = live.current.session;
+    if (!looksLikeWebAddress(url)) return;
+    const now = live.current;
+    // One read at a time. An address pasted while one is out is read NEXT (the newest wins, and
+    // re-pasting the one being read cancels the queue); the one out is then thrown away, since its
+    // answer is for an address no longer in the box. The spinner stays up throughout.
+    if (now.readingUrl !== null) {
+      now.nextUrl = siteUrl(url) === siteUrl(now.readingUrl) ? null : url;
+      return;
+    }
+    const session = now.session;
+    now.readingUrl = url;
     setReading(true);
     setFillNote(null);
+    const superseded = () => session !== live.current.session || live.current.nextUrl !== null;
     try {
       const res = await fillFromSite({ url, need: emptyBoxes(openForm(), { categoryOpen: live.current.categoryOpen }) });
-      if (session !== live.current.session) return;
+      if (superseded()) return;
+      // The Website box was changed by hand while this read was out: its details aren't the box's.
+      if (siteUrl(live.current.form.website) !== siteUrl(url)) {
+        setFillNote({ tone: "warn", text: "The address changed while reading, so nothing was filled. Tap Fill From Their Site." });
+        return;
+      }
       if (!res.ok) {
         setFillNote({ tone: "error", text: res.error });
         return;
@@ -158,11 +178,17 @@ export function ResourcesManager({ resources, canEdit }: { resources: Resource[]
       setFromSite(new Set(filled));
       setFillNote({ tone: filled.length ? "ok" : "warn", text: [fillSummary(before, found, filled), res.note].filter(Boolean).join(" ") });
     } catch {
-      if (session === live.current.session) setFillNote({ tone: "error", text: "Couldn't read that site. Check your connection, or type the details in." });
+      if (!superseded()) setFillNote({ tone: "error", text: "Couldn't read that site. Check your connection, or type the details in." });
     } finally {
       // Only this form's read may end this form's reading: a read from a form since closed or
       // switched must not end one the new form started.
-      if (session === live.current.session) setReading(false);
+      if (session === live.current.session) {
+        const next = live.current.nextUrl;
+        live.current.readingUrl = null;
+        live.current.nextUrl = null;
+        if (next) void fillFromTheirSite(next);
+        else setReading(false);
+      }
     }
   }
 
