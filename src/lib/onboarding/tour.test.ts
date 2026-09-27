@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { DOCK } from "@/lib/dock";
-import { LESSONS, TOUR, lessonBlurb, lessonByKey, sayOf, stepWords, tourIndex, type TourCtx } from "./tour";
+import { LESSONS, TOUR, WHY_LINE_FEEDS_ESTIMATE, lessonBlurb, lessonByKey, sayOf, stepWords, tourIndex, type TourCtx } from "./tour";
+import { factsForEstimatorByProvenance } from "@/lib/playbook/answers";
 
 /**
  * THE SPLIT (cn-v726): TOUR is now ONLY the setup — every step asks something saveSetup writes,
@@ -373,6 +374,33 @@ describe("no claim in the onboarding promises something the code does not do", (
     // removed the last need that was gated on the promise.
     expect(SPOKEN).not.toMatch(/worked out from something you already said/i);
     expect(SPOKEN).not.toMatch(/I don'?t make you count it/i);
+  });
+
+  it("says the estimate reads why lines ONLY when the estimator really does", () => {
+    // "when I write the estimate, your why line is what tells me where that answer lands" was
+    // false: Start The Estimate hands the estimator "label: answer" and nothing else. The switch is
+    // held to the estimator's own output, so making it read why lines fails here until the lesson
+    // is flipped with it.
+    const why = "Sets the trip count, which is the labor line.";
+    const pb = { needs: [{ key: "trips", label: "Trips", ask: "How many trips?", slot: { type: "number" as const }, why }] };
+    const facts = factsForEstimatorByProvenance(pb, { trips: 2 }, new Set()).hand;
+    expect(facts).toContain("Trips");
+    expect(facts.includes(why)).toBe(WHY_LINE_FEEDS_ESTIMATE);
+
+    const uses = findStep("why-uses");
+    const on = sayOf(stepWords(uses, true).say, STRANGER).toLowerCase();
+    const off = sayOf(stepWords(uses, false).say, STRANGER).toLowerCase();
+    for (const t of [on, off]) {
+      if (!WHY_LINE_FEEDS_ESTIMATE) {
+        expect(t).not.toMatch(/write the estimate, your why line|estimate gets written, your why line/);
+        // What IS true today: the walk-through fill reads it, and it shows under the question.
+        expect(t).toContain("walk-through");
+        expect(t).toContain("under the question");
+      }
+    }
+    // Either way, it still never claims to run the sum.
+    expect(on).toContain("i don't run the sum");
+    expect(off).toContain("nothing runs the sum");
   });
 
   it("does not promise to RUN the arithmetic in a why line", () => {

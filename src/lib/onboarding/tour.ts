@@ -270,6 +270,47 @@ export interface Lesson {
 
 export const lessonBlurb = (l: Lesson, nortOn: boolean): string => (nortOn ? l.blurb : l.plainBlurb ?? l.blurb);
 
+/**
+ * DOES THE ESTIMATE READ WHY LINES? Not today. This lesson used to say "when I write the estimate,
+ * your why line is what tells me where that answer lands in the price", and nothing on the estimate
+ * path reads one: Start The Estimate hands the estimator "label: answer" only
+ * (lib/playbook/answers factsForEstimatorByProvenance), and Generate Line Items reads the separate
+ * "How Nort writes an estimate" text. Where a why line IS read today: the walk-through fill
+ * (lib/playbook/hear, "where the answer lands") and the grey line under each question on the
+ * walk-through.
+ *
+ * ONE SWITCH, so the lesson stays true whichever way the estimate goes (Erik is deciding whether it
+ * should read them). Flip it in the same change that makes the estimator read why lines;
+ * tour.test holds it to the estimator's own output.
+ */
+export const WHY_LINE_FEEDS_ESTIMATE = false;
+
+const WHY_USES = WHY_LINE_FEEDS_ESTIMATE
+  ? {
+      nort:
+        "Two reasons. If you already told me something, I don't ask you twice — that one I really do. " +
+        "And when I write the estimate, your why line is what tells me where that answer lands in the " +
+        "price. It's for reading, mine and yours. I don't run the sum in it, and I never work out a " +
+        "number you didn't give me.",
+      plain:
+        "Two reasons. If something's already been answered, the walk-through doesn't ask it twice. " +
+        "And when an estimate gets written, your why line is what says where that answer lands in the " +
+        "price. It's for reading. Nothing runs the sum in it, and no number you didn't give gets worked out.",
+    }
+  : {
+      nort:
+        "Two reasons. If you already told me something, I don't ask you twice — that one I really do. " +
+        "And when you say a job out loud on the walk-through, your why line helps me put each answer in " +
+        "the right box, and it sits under the question so whoever's asking can see where it lands. " +
+        "It's for reading, mine and yours. I don't run the sum in it, and I never work out a number " +
+        "you didn't give me.",
+      plain:
+        "Two reasons. If something's already been answered, the walk-through doesn't ask it twice. " +
+        "And when a job gets said out loud on the walk-through, your why line helps put each answer in " +
+        "the right box, and it sits under the question so whoever's asking can see where it lands. " +
+        "It's for reading. Nothing runs the sum in it, and no number you didn't give gets worked out.",
+    };
+
 export const LESSONS: Lesson[] = [
   {
     key: "why-lines",
@@ -324,17 +365,10 @@ export const LESSONS: Lesson[] = [
   {
     key: "why-uses",
     title: "And why I need them",
-    say:
-      "Two reasons. If you already told me something, I don't ask you twice — that one I really do. " +
-      "And when I write the estimate, your why line is what tells me where that answer lands in the " +
-      "price. It's for reading, mine and yours. I don't run the sum in it, and I never work out a " +
-      "number you didn't give me.",
+    say: WHY_USES.nort,
     plain: {
       title: "And what they're for",
-      say:
-        "Two reasons. If something's already been answered, the walk-through doesn't ask it twice. " +
-        "And when an estimate gets written, your why line is what says where that answer lands in the " +
-        "price. It's for reading. Nothing runs the sum in it, and no number you didn't give gets worked out.",
+      say: WHY_USES.plain,
     },
   },
   {
