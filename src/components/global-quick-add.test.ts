@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
-vi.mock("@/components/quick-capture", () => ({ QuickCaptureSheet: () => null }));
+vi.mock("@/components/snap-or-note", () => ({ SnapOrNoteProvider: () => null, openSnapOrNote: vi.fn() }));
 
 import { quickAddActions } from "./global-quick-add";
 import { ALL_ON, type FeatureMap } from "@/lib/features";

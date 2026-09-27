@@ -1,7 +1,6 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
 import { dbError } from "@/lib/db-error";
 import { supplierAccountFor, type SupplierAccountLite } from "@/lib/supplier-name";
 import { reportError } from "@/lib/observe";
@@ -79,10 +78,11 @@ import { createOpenListPaper, orgToday } from "./open-list-core";
  * source_file, so Open Bill can open it. Two ways in: Choose CED PDFs uploads the PDF straight to
  * storage from the browser and sends only its `path` (Vercel caps a request body at ~4.5 MB, so
  * the bytes never ride in this action; a path is taken only in this org's organize/ced/<sha256>.pdf
- * shape), and Drop Paperwork's Add To CED Documents hands over the `pdf` bytes it already holds,
- * server side. A PDF
- * that doesn't save never blocks the import: its documents land with the file's name, as before,
- * and the sentence says which PDF didn't save and how to keep it.
+ * shape), and a portal PDF put in through Snap Or Note (W1-30: the one paper door) waits as one
+ * card whose Add To Supplier Documents hands over the `pdf` bytes the tray already holds, server
+ * side. Pasted invoice text comes from Snap Or Note's note box (routePastedText); Bills' own paste
+ * box is gone. A PDF that doesn't save never blocks the import: its documents land with the file's
+ * name, as before, and the sentence says which PDF didn't save and how to keep it.
  */
 
 /** Cents, so a fraction of a penny can never ride into a balance. */
@@ -239,7 +239,7 @@ export async function importCedInvoices(input: SupplierImportInput): Promise<Sup
       // NOT A DEAD END: it names the file and it names the way forward.
       refused.push({
         invoiceNumber: null,
-        error: `${name} reached here as raw PDF bytes, not its text. Pick it with Choose Supplier PDFs, which reads the text out of it, or drop it on Drop Paperwork.`,
+        error: `${name} reached here as raw PDF bytes, not its text. Put it in through Snap Or Note, or pick it with Choose Supplier PDFs; both read the text out of it.`,
       });
       continue;
     }
@@ -714,45 +714,4 @@ export async function importCedInvoices(input: SupplierImportInput): Promise<Sup
     unchanged,
     refused,
   };
-}
-
-// ─────────────────────────────────────────────────────────────────────────────────────────────
-// THE DOOR ON THE PAGE
-// ─────────────────────────────────────────────────────────────────────────────────────────────
-
-/** How much of the summary is allowed into the URL. Long enough for every refusal on a normal
- *  night, short enough that no browser truncates it into half a sentence. */
-const SUMMARY_LIMIT = 900;
-
-/**
- * THE IMPORT BOX ON /bills, POSTED THE WAY THE REST OF THIS APP POSTS A SERVER FORM.
- *
- * The bills page is a server component and the supplier card is somebody else's file, so this is a
- * plain <form action={...}>: it works with no JavaScript, it works on the first paint, and it
- * works on a phone with one thumb. The result comes back the way settings/page.tsx already brings
- * a Stripe or QuickBooks result back - a redirect carrying the sentence, rendered as a banner -
- * because NOTHING SILENT applies just as hard to an import that read nothing as to one that read
- * forty-seven.
- */
-export async function importCedInvoicesFromForm(formData: FormData): Promise<void> {
-  const text = String(formData.get("text") ?? "");
-
-  // A file input posts File objects. Their TEXT is read here, whatever they are named; a real PDF
-  // arrives as its "%PDF-" bytes and looksLikePdf refuses it by its CONTENT, with the way forward.
-  const files: { name: string; text: string }[] = [];
-  for (const entry of formData.getAll("files")) {
-    if (typeof entry === "string") continue;
-    const file = entry as File;
-    if (!file || !file.size) continue;
-    try {
-      files.push({ name: file.name, text: await file.text() });
-    } catch {
-      files.push({ name: file.name, text: "" });
-    }
-  }
-
-  const result = await importCedInvoices({ text, files });
-  const summary = (result.ok ? result.message ?? "Imported." : result.error ?? "Nothing was imported.").slice(0, SUMMARY_LIMIT);
-  // redirect() throws to unwind, so it is the last thing that happens and it is never inside a try.
-  redirect(`/bills?import=${encodeURIComponent(summary)}&importOk=${result.ok ? "1" : "0"}#ced-import`);
 }

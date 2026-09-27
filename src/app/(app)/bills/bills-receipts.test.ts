@@ -21,7 +21,9 @@ describe("the Receipts tab is a list, not a second upload door (Wave 0)", () => 
   it("never files a picture as a receipt without reading it", () => {
     expect(SRC).not.toContain("addDocument(");
     expect(SRC).not.toContain("<DropTarget");
-    expect(SRC).toContain("Add one with Drop Paperwork at the top of this page.");
+    // The one paper door (W1-30): the sentence names the door that is at the top of the page.
+    expect(SRC).toContain("Add one with Snap Or Note at the top of this page.");
+    expect(SRC).not.toContain("Drop Paperwork at the top");
   });
 });
 

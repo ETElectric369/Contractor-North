@@ -1562,29 +1562,53 @@ export async function deleteOrganizedItem(id: string): Promise<Result & { messag
   return said ? { ok: true, message: `Deleted.${said}` } : { ok: true };
 }
 
-/** Save a typed/dictated note as a needs-review item (no photo). */
-export async function saveVoiceNote(text: string): Promise<Result> {
+/**
+ * Save a typed/dictated note as a needs-review item (no photo). THE ONE NOTE WRITER: Nort's
+ * organize.saveNote and Snap Or Note's note box both land here.
+ *
+ * `read` (Snap Or Note's office note, W1-30): once the note is saved, AI Suggest looks at it once
+ * (aiReviewItem: the routine model, metered under Organize), and what it suggests rides on the note
+ * as a chip a person taps. The note is saved FIRST: a look that fails or never answers leaves the
+ * note exactly as typed, and `read: false` says so ("Saved, Not Read"). A crew member's note is
+ * never read (aiReviewItem is the office's), and Nort's saves ask for no read.
+ */
+export async function saveVoiceNote(text: string, opts: { read?: boolean } = {}): Promise<Result & { id?: string; read?: boolean }> {
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "Not signed in." };
-  const clean = text.trim();
+  const clean = String(text ?? "").trim();
   if (!clean) return { ok: false, error: "Nothing to save." };
   const title = clean.length > 60 ? clean.slice(0, 57) + "…" : clean;
-  const { error } = await supabase.from("organized_items").insert({
-    kind: "note",
-    title,
-    summary: clean,
-    category: "Note",
-    confidence: "high",
-    status: "needs_review",
-    file_url: null,
-    created_by: user.id,
-  });
+  const { data, error } = await supabase
+    .from("organized_items")
+    .insert({
+      kind: "note",
+      title,
+      summary: clean,
+      category: "Note",
+      confidence: "high",
+      status: "needs_review",
+      file_url: null,
+      created_by: user.id,
+    })
+    .select("id");
   if (error) return { ok: false, error: dbError(error) };
+  // SILENT-WRITE LAW: an insert that comes back with no row did not land, and says so.
+  const id = (data as { id?: string }[] | null)?.[0]?.id;
+  if (!id) return { ok: false, error: "The note didn't save, so nothing was kept. Try again." };
   revalidatePath("/organize");
-  return { ok: true };
+  revalidatePath("/planner");
+  if (!opts.read) return { ok: true, id: String(id) };
+  let read = false;
+  try {
+    read = (await aiReviewItem(String(id))).ok === true;
+  } catch (e) {
+    reportError("organize:saveVoiceNote.read", e, { id });
+    read = false;
+  }
+  return { ok: true, id: String(id), read };
 }
 
 /**

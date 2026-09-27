@@ -319,8 +319,9 @@ describe("the page, in Wave B's order", () => {
  * row.
  */
 const HOMES: { door: string | RegExp; was: string; home: string; times?: number }[] = [
-  // 0. The header
-  { door: "Drop Paperwork", was: "header", home: "header" },
+  // 0. The header. Drop Paperwork is the one paper door now (W1-30): Snap Or Note, the same sheet
+  // and queue as + on every page.
+  { door: "Snap Or Note", was: "header (Drop Paperwork)", home: "header", times: 1 },
   { door: "Add Business Cost", was: "header", home: "header" },
   // Needs You (cn-v1014): the one place the supplier-paper decisions happen.
   { door: "Put It On J-028", was: "Needs You", home: "needs-you" },
@@ -377,10 +378,10 @@ const HOMES: { door: string | RegExp; was: string; home: string; times?: number 
   { door: "IMG_0412.jpg", was: "Receipts tab file link", home: "all-bills" },
   // 4-8. Housekeeping and the import -> More
   { door: /^More · /, was: "(new fold)", home: "more" },
-  { door: "Import Supplier Invoices", was: "Import fold", home: "more" },
+  // Import Supplier Invoices is one line now (W1-30); Paste Text Instead and its Import Documents
+  // went into Snap Or Note's note box. Choose Supplier PDFs stays one more release (three sentences
+  // outside this lane still name it).
   { door: "Choose Supplier PDFs", was: "Import fold", home: "more" },
-  { door: "Paste Text Instead", was: "Import fold", home: "more" },
-  { door: "Import Documents", was: "Import fold", home: "more" },
   { door: /^Accept And (File Them There|Make The Account)$/, was: "Supplier Names That Look Like One Account", home: "more" },
   { door: "Not The Same", was: "Supplier Names That Look Like One Account", home: "more" },
   { door: "Give It Its Own Account", was: "Supplier Names Not On An Account Yet", home: "more" },
@@ -463,13 +464,25 @@ describe("every door keeps exactly one home", () => {
   });
 });
 
-describe("one door for papers (Wave 0)", () => {
+describe("one door for papers (Wave 0; W1-30)", () => {
   // The Receipts tab's Upload / Photo / drop box filed a picture and never recorded a cost, and its
-  // drop box caught drops meant for Drop Paperwork. It is a list now; Drop Paperwork reads papers.
+  // drop box caught drops meant for the page's own drop. It is a list now; Snap Or Note reads papers.
   it("the Receipts tab has no Upload or Photo door, and still lists what is on file", () => {
     expect(count(doors(html), "Upload")).toBe(0);
     expect(count(doors(html), "Photo")).toBe(0);
     expect(count(doors(section("all-bills")), "IMG_0412.jpg")).toBe(1);
+  });
+
+  it("one paper door: Snap Or Note in the header, no Drop Paperwork, no Paste Text Instead, and the import is one line with a Why?", () => {
+    expect(count(doors(html.slice(0, html.indexOf('id="bills-search"'))), "Snap Or Note")).toBe(1);
+    expect(text(html)).not.toContain("Drop Paperwork");
+    expect(count(doors(html), "Paste Text Instead")).toBe(0);
+    expect(count(doors(html), "Import Documents")).toBe(0);
+    expect(html).not.toContain('name="text"');
+    const imp = section("ced-import");
+    expect(text(imp)).toContain("Import Supplier Invoices");
+    expect(text(imp)).toContain("Supplier PDFs, statements and open lists go in through Snap Or Note.");
+    expect(count(doors(imp), "Why?")).toBe(1);
   });
 });
 

@@ -258,8 +258,8 @@ export function BillsReceipts({
 
   // ── Receipts: a list, not an upload ──
   // The Upload / Photo / drop box that lived here filed a picture on the job and never recorded a
-  // cost, and its drop box caught drops meant for the page's Drop Paperwork (Wave 0). A receipt or
-  // bill goes in through Drop Paperwork, which reads it; this tab lists what is on file.
+  // cost, and its drop box caught drops meant for the page's own drop (Wave 0). A receipt or bill
+  // goes in through Snap Or Note (W1-30), which reads it; this tab lists what is on file.
 
   return (
     <Card className="mb-6 px-4 py-1">
@@ -503,7 +503,7 @@ export function BillsReceipts({
 
         <div hidden={tab !== "receipts"} className="pb-3">
           {docs.length === 0 ? (
-            <p className="py-4 text-center text-sm text-slate-400">No receipts on file. Add one with Drop Paperwork at the top of this page.</p>
+            <p className="py-4 text-center text-sm text-slate-400">No receipts on file. Add one with Snap Or Note at the top of this page.</p>
           ) : (
             <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
               {docs.map((d) => (

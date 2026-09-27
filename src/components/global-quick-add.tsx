@@ -2,8 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Zap, ListTodo, Briefcase, CalendarPlus, FileText, Receipt, UserPlus, UserSearch, X, type LucideIcon } from "lucide-react";
-import { QuickCaptureSheet } from "@/components/quick-capture";
+import { Plus, Camera, ListTodo, Briefcase, CalendarPlus, FileText, Receipt, UserPlus, UserSearch, X, type LucideIcon } from "lucide-react";
+import { SnapOrNoteProvider, openSnapOrNote } from "@/components/snap-or-note";
 import { GLASS_MENU_CLASS } from "@/components/ui/glass-menu";
 import { featureOn, type FeatureKey, type FeatureMap } from "@/lib/features";
 
@@ -54,7 +54,6 @@ export function GlobalQuickAdd({
   const router = useRouter();
   const [pos, setPos] = useState({ x: 20, y: 168 }); // above the mic, clearing the floating glass bottom nav
   const [open, setOpen] = useState(false);
-  const [captureOpen, setCaptureOpen] = useState(false);
   const drag = useRef<{ sx: number; sy: number; bx: number; by: number; moved: boolean } | null>(null);
 
   useEffect(() => {
@@ -72,11 +71,11 @@ export function GlobalQuickAdd({
       <button
         onClick={() => {
           setOpen(false);
-          setCaptureOpen(true);
+          openSnapOrNote();
         }}
         className="relative z-10 flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm font-medium text-slate-700 hover:bg-[rgb(var(--glass-tint))]/15"
       >
-        <Zap className="h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" /> Capture Anything
+        <Camera className="h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" /> Snap Or Note
       </button>
       {quickAddActions(isStaff, features).map((a) => (
         <button
@@ -93,8 +92,8 @@ export function GlobalQuickAdd({
     </>
   );
 
-  // Rendered in BOTH placements (Modal renders null while closed — costless).
-  const captureSheet = <QuickCaptureSheet open={captureOpen} onClose={() => setCaptureOpen(false)} />;
+  // Rendered in BOTH placements: the one paper door's queue and sheet (renders nothing while closed).
+  const captureSheet = <SnapOrNoteProvider isStaff={isStaff} />;
 
   // Top-bar variant: inline + button with a dropdown anchored below it.
   if (placement === "topbar") {
