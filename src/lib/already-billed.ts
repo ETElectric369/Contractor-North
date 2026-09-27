@@ -291,7 +291,7 @@ export const NEEDS_UPDATE = "Already Billed needs an update to the app's databas
 // ── The Costs tab's doors, from what the page already read ───────────────────────────────────────
 
 /** Which of a job's rows a person marked, by the row's id (lib/already-billed-read's HandClaims). */
-export type HandById = ReadonlyMap<string, { lineId: string; invoiceNumber: string | null }>;
+export type HandById = ReadonlyMap<string, { lineId: string; invoiceNumber: string | null; invoiceId?: string | null }>;
 
 type Piles = { open: { ids: string[] }; billed: { ids: string[] }[] };
 
@@ -356,14 +356,14 @@ export function jobAlreadyBilledDoors(input: {
 export function hoursByHand(
   entries: readonly { id: string; clock_in: string; clock_out?: string | null; lunch_minutes?: number | null; profiles?: { full_name?: string | null } | null }[],
   hands: HandById | null,
-): { lineId: string; invoiceNumber: string | null; ids: string[]; hours: number; what: string }[] {
+): { lineId: string; invoiceId: string | null; invoiceNumber: string | null; ids: string[]; hours: number; what: string }[] {
   if (!hands) return [];
-  const by = new Map<string, { lineId: string; invoiceNumber: string | null; ids: string[]; hours: number; names: Set<string> }>();
+  const by = new Map<string, { lineId: string; invoiceId: string | null; invoiceNumber: string | null; ids: string[]; hours: number; names: Set<string> }>();
   for (const e of entries ?? []) {
     const h = hands.get(String(e.id));
     if (!h || !e.clock_out) continue;
     const hrs = (new Date(e.clock_out).getTime() - new Date(e.clock_in).getTime()) / 3_600_000 - Math.max(0, Number(e.lunch_minutes) || 0) / 60;
-    const cur = by.get(h.lineId) ?? { lineId: h.lineId, invoiceNumber: h.invoiceNumber, ids: [], hours: 0, names: new Set<string>() };
+    const cur = by.get(h.lineId) ?? { lineId: h.lineId, invoiceId: h.invoiceId ?? null, invoiceNumber: h.invoiceNumber, ids: [], hours: 0, names: new Set<string>() };
     cur.ids.push(String(e.id));
     cur.hours += Math.max(0, hrs);
     if (e.profiles?.full_name) cur.names.add(String(e.profiles.full_name));
@@ -372,6 +372,6 @@ export function hoursByHand(
   return [...by.values()].map((x) => {
     const hours = cents(x.hours);
     const names = [...x.names];
-    return { lineId: x.lineId, invoiceNumber: x.invoiceNumber, ids: x.ids, hours, what: names.length === 1 ? `${hours} h of ${names[0]}'s time` : `${hours} h of time` };
+    return { lineId: x.lineId, invoiceId: x.invoiceId, invoiceNumber: x.invoiceNumber, ids: x.ids, hours, what: names.length === 1 ? `${hours} h of ${names[0]}'s time` : `${hours} h of time` };
   });
 }

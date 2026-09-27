@@ -10,7 +10,7 @@ import { Input, Label, Select } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { Modal, ModalActions } from "@/components/ui/modal";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatCurrency, formatDate, formatDuration } from "@/lib/utils";
 import { createBill } from "../actions";
 import { BillRowDoors } from "@/components/bill-row-doors";
 import { AlreadyBilledButton, NotBilledAfterAllButton } from "@/components/already-billed-sheet";
@@ -26,6 +26,10 @@ export type JobAlreadyBilled = {
   open: Record<string, { kind: "bill" | "po" | "stock"; ids: string[]; what: string }>;
   hands: Record<string, { lineId: string; ids: string[]; invoiceNumber: string | null; what: string }>;
 };
+
+/** Hours a person marked as billed, per line (lib/already-billed hoursByHand): they are billed, so
+ *  they sit in the Billed fold under their invoice, with the way back. */
+export type JobBilledHours = { lineId: string; invoiceId: string | null; invoiceNumber: string | null; ids: string[]; hours: number; what: string }[];
 
 type Pile = "open" | "billed" | "nothing" | "plain";
 
@@ -75,6 +79,7 @@ export function JobBills({
   openAside,
   groupsNote,
   alreadyBilled,
+  billedHours = [],
 }: {
   jobId: string;
   bills: Bill[];
@@ -86,6 +91,8 @@ export function JobBills({
   groupsNote?: string | null;
   /** Already Billed's doors (0357), when the page offers them. */
   alreadyBilled?: JobAlreadyBilled | null;
+  /** Hours a person marked as billed (0357): in the Billed fold under their invoice. */
+  billedHours?: JobBilledHours;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -215,6 +222,20 @@ export function JobBills({
     );
   };
 
+  /** "Billed By Hand On INV-059: 6h 30m · Not Billed After All": hours a person marked. */
+  const hoursRow = (h: JobBilledHours[number]) => (
+    <div key={h.lineId} className="flex flex-wrap items-center gap-2 text-sm text-slate-600">
+      <span>
+        Billed By Hand On {h.invoiceNumber ?? "That Invoice"}: {formatDuration(h.hours)}
+      </span>
+      <NotBilledAfterAllButton jobId={jobId} lineId={h.lineId} ids={h.ids} what={h.what} />
+    </div>
+  );
+  const foldIds = new Set((groups?.billed ?? []).map((g) => g.invoice.id));
+  const hoursIn = (invoiceId: string) => billedHours.filter((h) => h.invoiceId === invoiceId);
+  // Marked hours on an invoice that holds none of the job's bills: their own line under Billed.
+  const hoursLoose = billedHours.filter((h) => !h.invoiceId || !foldIds.has(h.invoiceId));
+
   const rowsOf = (ids: string[], whyOf?: (id: string) => string | undefined, pile: Pile = "plain") => (
     <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
       {ids.map((id) => {
@@ -331,9 +352,10 @@ export function JobBills({
             </p>
           )}
 
-          {groups.billed.length > 0 && (
+          {(groups.billed.length > 0 || billedHours.length > 0) && (
             <div className="mt-5">
               <div className="mb-2 text-sm font-semibold text-slate-900">Billed</div>
+              {hoursLoose.length > 0 && <div className="mb-2 space-y-2">{hoursLoose.map(hoursRow)}</div>}
               <div className="space-y-2">
                 {groups.billed.map((g) => (
                   // Closed until tapped: what is already on an invoice is the part he does not
@@ -350,6 +372,7 @@ export function JobBills({
                     </summary>
                     <div className="border-t border-slate-100 px-3 pb-2 pt-3">
                       {rowsOf(g.ids, undefined, "billed")}
+                      {hoursIn(g.invoice.id).length > 0 && <div className="mt-2 space-y-2">{hoursIn(g.invoice.id).map(hoursRow)}</div>}
                       <Link
                         href={`/billing/${g.invoice.id}`}
                         className="mt-1 inline-flex min-h-11 items-center text-sm font-medium text-brand hover:underline"

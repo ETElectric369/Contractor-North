@@ -42,7 +42,7 @@ import { tmWorkToDate } from "@/lib/job-financials";
 import { readJobStock, stockCostLabel, stockKey, stockShortsSentence } from "@/lib/stock-billing";
 import { readHandClaimsForJob, type HandClaims } from "@/lib/already-billed-read";
 import { abLineOf, eligibleInvoice as alreadyBilledEligible, hoursByHand, jobAlreadyBilledDoors, jobCanHold } from "@/lib/already-billed";
-import { AlreadyBilledButton, NotBilledAfterAllButton } from "@/components/already-billed-sheet";
+import { AlreadyBilledButton } from "@/components/already-billed-sheet";
 import { openDraftOnJob, type OpenDraft } from "@/lib/actuals-draw";
 import { jobBillsItsActuals } from "@/lib/invoice-import-rule";
 import { reportError } from "@/lib/observe";
@@ -1384,6 +1384,7 @@ export default async function JobDetailPage({
                 groups={costGroups}
                 groupsNote={costGroupsNote}
                 alreadyBilled={alreadyBilledDoors}
+                billedHours={hoursMarked}
                 openAside={
                   costGroups && unbilled ? (
                     <div className="space-y-2">
@@ -1409,15 +1410,6 @@ export default async function JobDetailPage({
                       {unbilled.hours > 0 && alreadyBilledCan.charge && (
                         <AlreadyBilledButton jobId={j.id} target={{ kind: "time", ids: [], what: "Those hours" }} label="Already Billed: The Hours" />
                       )}
-                      {/* Hours a person marked, with the way back. */}
-                      {hoursMarked.map((h) => (
-                        <div key={h.lineId} className="flex flex-wrap items-center gap-2 text-sm text-slate-600">
-                          <span>
-                            Billed By Hand On {h.invoiceNumber ?? "That Invoice"}: {formatDuration(h.hours)}
-                          </span>
-                          <NotBilledAfterAllButton jobId={j.id} lineId={h.lineId} ids={h.ids} what={h.what} />
-                        </div>
-                      ))}
                       {/* Pieces taken past the shelf with no roll behind them: not in the pile and
                           not on the next bill until settled. Said here too, never silent. */}
                       {unbilled.stockShortsWords && <p className="text-sm text-amber-700">{unbilled.stockShortsWords}</p>}

@@ -130,6 +130,31 @@ describe("the Costs tab's Already Billed doors", () => {
     expect(html.match(/Billed By Hand On/g)).toHaveLength(1);
   });
 
+  it("hours a person marked sit in the Billed fold under their invoice, never under Not Billed Yet", () => {
+    const hours = [
+      { lineId: "li-brian", invoiceId: "inv-23", invoiceNumber: "INV-00023", ids: ["t1"], hours: 6, what: "6 h of Brian Taylor's time" },
+      // INV-060 holds none of this job's bills: its own line under Billed.
+      { lineId: "li-60", invoiceId: "inv-60", invoiceNumber: "INV-060", ids: ["t2"], hours: 10.5, what: "10.5 h of Brian Taylor's time" },
+    ];
+    const html = renderToStaticMarkup(createElement(JobBills, { jobId: "j-010", bills: PS as any, pos: [], groups: groups as any, alreadyBilled: doors, billedHours: hours }));
+    const billedAt = html.indexOf(">Billed<");
+    expect(billedAt).toBeGreaterThan(-1);
+    const on23 = html.indexOf("Billed By Hand On INV-00023: 6h");
+    const on60 = html.indexOf("Billed By Hand On INV-060: 10h 30m");
+    expect(on23).toBeGreaterThan(billedAt);
+    expect(on60).toBeGreaterThan(billedAt);
+    // INV-00023's hours are inside its fold.
+    const fold = html.slice(html.indexOf("<details"), html.indexOf("</details>"));
+    expect(fold).toContain("Billed By Hand On INV-00023: 6h");
+    expect(words(html).filter((x) => x.words === "Not Billed After All")).toHaveLength(3);
+    // Only marked hours and no billed bills: the Billed section is still drawn.
+    const only = renderToStaticMarkup(
+      createElement(JobBills, { jobId: "j-010", bills: PS as any, pos: [], groups: { ...groups, billed: [] } as any, alreadyBilled: doors, billedHours: hours }),
+    );
+    expect(only).toContain(">Billed<");
+    expect(only).toContain("Billed By Hand On INV-060: 10h 30m");
+  });
+
   it("no doors when the page offers none (a tech's view, a fixed-price job's plain list, or no sent bill to hold it)", () => {
     for (const html of [
       renderToStaticMarkup(createElement(JobBills, { jobId: "j-010", bills: PS as any, pos: [], groups: groups as any, alreadyBilled: null })),

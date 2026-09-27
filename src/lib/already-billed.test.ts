@@ -287,7 +287,7 @@ describe("the Costs tab's doors, from what the page read", () => {
         ["t2", { lineId: "li-brian", invoiceNumber: "INV-059" }],
       ]),
     );
-    expect(rows).toEqual([{ lineId: "li-brian", invoiceNumber: "INV-059", ids: ["t1", "t2"], hours: 6.5, what: "6.5 h of Brian Taylor's time" }]);
+    expect(rows).toEqual([{ lineId: "li-brian", invoiceId: null, invoiceNumber: "INV-059", ids: ["t1", "t2"], hours: 6.5, what: "6.5 h of Brian Taylor's time" }]);
   });
 });
 
