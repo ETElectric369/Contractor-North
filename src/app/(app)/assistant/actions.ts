@@ -1,7 +1,8 @@
 "use server";
 
 import { executeAction } from "@/lib/actions/execute";
-import { AGENT_WRITE_ALLOWED } from "@/lib/actions/agent-tools";
+import { AGENT_WRITE_ALLOWED, agentInputForSwitches, agentToolOff } from "@/lib/actions/agent-tools";
+import { featureOffSentence, viewerSwitches } from "@/lib/viewer-switches";
 import { createClient } from "@/lib/supabase/server";
 import { requireStaff } from "@/lib/staff-guard";
 import { getOrgSettings } from "@/lib/org-settings";
@@ -221,7 +222,13 @@ export async function confirmAgentAction(
   if (!AGENT_WRITE_ALLOWED.has(name)) {
     return { ok: false, message: "That action can't be done from here." };
   }
-  const res = await executeAction(name, input, { source: "agent", confirmed: true });
+  // THE SWITCHES AT THE YES (0352): a card proposed before a switch moved runs by the switches as
+  // they are now, the same rule the chat used to offer the tool, with the same fields taken off.
+  const { features } = await viewerSwitches();
+  const off = agentToolOff(name, features);
+  if (off) return { ok: false, message: featureOffSentence(off) };
+  const switched = agentInputForSwitches(name, input, features);
+  const res = await executeAction(name, switched.input, { source: "agent", confirmed: true });
   // Money-MOVEMENT would need a WebAuthn tap; none of the agent-allowed set is, but guard.
   if (res.needsStepUp) {
     return { ok: false, message: "That one needs a Face ID tap, which isn't wired into chat yet." };
@@ -229,5 +236,6 @@ export async function confirmAgentAction(
   if (!res.ok) {
     return { ok: false, message: res.error ? `Sorry — ${res.error}` : "That didn't work." };
   }
-  return { ok: true, message: res.speak ?? "Done." };
+  const done = res.speak ?? "Done.";
+  return { ok: true, message: switched.dropped ? `${done} ${switched.dropped}` : done };
 }
