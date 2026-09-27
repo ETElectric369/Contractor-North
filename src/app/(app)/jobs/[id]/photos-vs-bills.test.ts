@@ -192,4 +192,21 @@ describe("/bills, All Bills: the bill's row opens its receipt too", () => {
     expect(ced).toMatch(/<button[^>]*\bh-11\b[^>]*aria-label="Open the receipt: ced-ticket.jpg"/);
     expect(rows.find((x) => x.startsWith("b-typed"))).not.toContain("Open the receipt");
   });
+
+  it("a folded row downloads nothing: the face is lazy, and React hoists no preload for it", () => {
+    const raw = renderToStaticMarkup(
+      createElement(BillsReceipts, {
+        orgId: "org1",
+        jobs: [],
+        lists: [],
+        pos: [],
+        docs: [],
+        bills: BILLS.map((b) => ({ ...b, job_id: "j1", category: "Receipt", papers: papers[b.id] ?? null })),
+      }),
+    );
+    expect(raw).not.toMatch(/<link[^>]*rel="preload"[^>]*ced-ticket/);
+    const face = raw.match(/<img[^>]*ced-ticket\.jpg[^>]*>/);
+    expect(face).not.toBeNull();
+    expect(face![0]).toContain('loading="lazy"');
+  });
 });

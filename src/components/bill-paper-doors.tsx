@@ -10,6 +10,12 @@ import type { BillPaper } from "@/lib/job-photos";
  * that used to sit in the job's Photos grid opens from the bill it made: a 44px door with the picture
  * itself as its face (a page icon for a PDF), and its word, "Receipt". One copy for the job's Costs
  * tab and the bill's row on /bills. A paper whose link couldn't be made says so, never a dead tap.
+ *
+ * THE FACE LOADS WHEN IT IS SEEN. On /bills every bill's row is a closed <details> inside the closed
+ * All Bills fold, and both render their children, so an eager face would be downloaded for every
+ * bill on every load (ET: 35 receipt pictures, about 1.4 MB each, freshly signed each time so never
+ * cached). React also hoists a preload for any img that isn't lazy. `loading="lazy"` stops both: the
+ * picture is fetched when its row is opened.
  */
 export function BillPaperDoors({ papers }: { papers?: readonly BillPaper[] | null }) {
   const [viewing, setViewing] = useState<BillPaper | null>(null);
@@ -17,7 +23,7 @@ export function BillPaperDoors({ papers }: { papers?: readonly BillPaper[] | nul
   const face = (p: BillPaper) =>
     p.kind === "image" && p.url ? (
       // eslint-disable-next-line @next/next/no-img-element
-      <img src={p.url} alt="" className="h-9 w-9 shrink-0 rounded-md object-cover" />
+      <img src={p.url} alt="" loading="lazy" decoding="async" className="h-9 w-9 shrink-0 rounded-md object-cover" />
     ) : (
       <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-slate-100">
         <FileText className="h-4 w-4 text-slate-400" />
