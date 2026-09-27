@@ -476,6 +476,18 @@ describe("matching what is already on the books (exact cents, each row once)", (
     expect(plan.dispositions.get(lineBy(dl, "SHELL 456").key)).toMatchObject({ how: "need" });
   });
 
+  it("a transfer between the company's own accounts is never crew pay of the same amount", () => {
+    const dl = readBankTable(
+      parseCSV(`Date,Description,Amount\n09/10/2026,ONLINE TRANSFER TO CHK XXXXXX9876,-1000.00\n09/12/2026,Zelle payment to Pat Crew,-1000.00\n`),
+      "x.csv",
+      hash,
+    )!;
+    const plan = planBankDownload(dl, ORG_BOOKS({ payPayments: [{ id: "pp1", profileId: "crew-pat", cents: 100000, day: "2026-09-08", reference: null }] }));
+    expect(plan.dispositions.get(dl.lines[0].key)).toMatchObject({ how: "need" });
+    expect(plan.dispositions.get(dl.lines[1].key)).toMatchObject({ how: "match", table: "pay_payments", ids: ["pp1"] });
+    expect(plan.groups[0].guess).toBe("draw");
+  });
+
   it("one bill is matched once, even when two lines could take it", () => {
     const dl = download();
     const books = ORG_BOOKS({ bills: [{ id: "b-shell", cents: 10000, day: "2026-09-12", supplier: "Shell", jobId: null, category: "Gas & Truck", onAccount: false }] });

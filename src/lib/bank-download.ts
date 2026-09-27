@@ -958,18 +958,22 @@ export function planBankDownload(dl: BankDownload, books: BankBooks): BankPlan {
       const sup = books.supplierPayments.find((p) => !used.has(p.id) && digitsOnly(p.reference).replace(/^0+/, "") === line.check && p.cents === amount);
       if (sup) return { how: "match", table: "supplier_payments", ids: [sup.id], said: `Check ${line.check}, supplier payment` };
     }
-    // CREW PAY BY AMOUNT, on a check or a line that names a way crew are paid (or the person).
-    if (line.check || /\bcheck\b/i.test(line.description) || PAY_WORDS_RE.test(line.description) || crewNamed(line.description, books.crew)) {
+    // CREW PAY BY AMOUNT, on a check or a line that names a way crew are paid (or the person). A
+    // transfer between the company's own accounts is never crew pay, however much it moved: it
+    // names no crew member and no payment app, so it is the owner's (a draw) or a move to savings.
+    const named = crewNamed(line.description, books.crew);
+    const ownTransfer = TRANSFER_RE.test(line.description) && !PROCESSOR_RE.test(line.description) && !named;
+    if (!ownTransfer && (line.check || /\bcheck\b/i.test(line.description) || PAY_WORDS_RE.test(line.description) || named)) {
       const hits = books.payPayments
         .filter((p) => !used.has(p.id) && p.cents === amount && dayDiff(line.postedOn, p.day) >= 0 && dayDiff(line.postedOn, p.day) <= 14)
         .sort(byDistance(line.postedOn));
       if (hits.length) return { how: "match", table: "pay_payments", ids: [hits[0].id], said: "Crew pay already recorded" };
     }
     // A SUPPLIER'S OWN PAYMENT, when the line names the account.
-    const named = books.accounts.filter((a) => lineNamesAccount(line.description, a)).map((a) => a.id);
-    if (named.length) {
+    const accountsNamed = books.accounts.filter((a) => lineNamesAccount(line.description, a)).map((a) => a.id);
+    if (accountsNamed.length) {
       const hits = books.supplierPayments
-        .filter((p) => !used.has(p.id) && named.includes(p.accountId) && p.cents === amount && dayDiff(line.postedOn, p.day) >= -3 && dayDiff(line.postedOn, p.day) <= 14)
+        .filter((p) => !used.has(p.id) && accountsNamed.includes(p.accountId) && p.cents === amount && dayDiff(line.postedOn, p.day) >= -3 && dayDiff(line.postedOn, p.day) <= 14)
         .sort(byDistance(line.postedOn));
       if (hits.length) {
         const who = books.accounts.find((a) => a.id === hits[0].accountId)?.name ?? "the supplier";
