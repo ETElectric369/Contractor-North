@@ -534,6 +534,58 @@ describe("the tour reads the switches", () => {
     expect(k).toEqual(["run-estimate", "run-job", "run-money", "run-win"]);
   });
 
+  /** Every word a company with these switches reads in How a Job Runs: blurb, titles, lines, Nort on and off. */
+  const runWords = (features: FeatureMap) => {
+    const lesson = lessonByKey("how-a-job-runs")!;
+    const out: string[] = [];
+    for (const nortOn of [true, false]) {
+      out.push(lessonBlurb(lesson, nortOn));
+      for (const s of stepsOn(lesson.steps, features)) {
+        const w = stepWords(s, nortOn);
+        for (const c of [STRANGER, KNOWN]) out.push(`${w.title} ${sayOf(w.say, { ...c, features })}`);
+      }
+    }
+    return out.join("\n");
+  };
+
+  it("Leads and Estimates both off: the run that's left names no lead, no walk-through and no estimate", () => {
+    const words = runWords(off("leads", "estimates"));
+    expect(words).not.toMatch(/estimate accepted/i);
+    expect(words).not.toMatch(/\blead\b/i);
+    expect(words).not.toMatch(/walk-through/i);
+    expect(words).not.toMatch(/estimate/i);
+    // It says where their job starts instead, and where the address was first typed.
+    expect(words).toContain("tap Plus, then New Job");
+    expect(words).toContain("You typed that address once, on the job,");
+  });
+
+  it("Leads off alone: no lead and no walk-through in what's left; the estimate starts under Plus", () => {
+    const words = runWords(off("leads"));
+    expect(words).not.toMatch(/\blead\b/i);
+    expect(words).not.toMatch(/walk-through/i);
+    expect(words).not.toContain("Start The Estimate");
+    expect(words).toContain("tap Plus, then New Estimate");
+    expect(words).toContain("You mark the estimate accepted and the job builds itself — same customer, same site address, plus a work order");
+    expect(words).toContain("You typed that address once, on the estimate,");
+  });
+
+  it("Estimates off alone: no estimate to accept or to be the bill; the lead and walk-through still read", () => {
+    const words = runWords(off("estimates"));
+    expect(words).not.toMatch(/estimate/i);
+    expect(words).toContain("tap Plus, then New Job");
+    expect(words).toContain("Press Finish Job and the invoice is already written — every person's hours at the right rate plus every receipt");
+    expect(words).toContain("You typed that address once, on the phone call,");
+  });
+
+  it("everything on: the run's words are the ones it always had", () => {
+    const words = runWords(ALL_ON);
+    expect(words).toContain("the lead it came from, plus a work order and a material list off the estimate");
+    expect(words).toContain("You typed that address once, on the phone call, and it was still with you at the invoice");
+    expect(words).toContain("same with the numbers off the walk-through and the hours off the clock. So you're not typing it four times");
+    expect(words).toContain("if there's an accepted estimate, that estimate IS the bill");
+    expect(words).toContain("Back in the truck you press Start The Estimate");
+  });
+
   it("Estimates off: no run-estimate; everything on: the whole run, as before", () => {
     expect(keys(stepsOn(run, off("estimates")))).not.toContain("run-estimate");
     expect(keys(stepsOn(run, ALL_ON))).toEqual(keys(run));

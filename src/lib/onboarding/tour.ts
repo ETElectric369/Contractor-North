@@ -105,6 +105,34 @@ function menuHolds(c: TourCtx, nortOff = false): string {
   );
 }
 
+/**
+ * THE RUN READS THE SWITCHES TOO (How a Job Runs). A company with Leads off has no lead and no
+ * walk-through; one with Estimates off has no estimate to accept. The steps that remain for them say
+ * only what their screens hold: where the job starts (New Estimate, or New Job, under Plus), and where
+ * an address was first typed. Everything on reads exactly as before.
+ */
+const leadsOn = (c: TourCtx): boolean => featureOn(c.features, "leads");
+const estimatesOn = (c: TourCtx): boolean => featureOn(c.features, "estimates");
+/** Where the address was first typed, for this company's run. */
+const typedOnce = (c: TourCtx): string => (leadsOn(c) ? "on the phone call" : estimatesOn(c) ? "on the estimate" : "on the job");
+/** run-job's first sentence: the accepted estimate builds the job, or (Estimates off) New Job does. */
+const jobStarts = (c: TourCtx): string =>
+  estimatesOn(c)
+    ? "You mark the estimate accepted and the job builds itself — same customer, same site address, " +
+      (leadsOn(c) ? "the lead it came from, " : "") +
+      "plus a work order and a material list off the estimate. "
+    : "They say go ahead, and you make the job: tap Plus, then New Job, with the customer, the site address " +
+      "and the work typed once. ";
+/** run-win up to its last sentence (which is the only part that names Nort). */
+const winSaved = (c: TourCtx): string =>
+  `You typed that address once, ${typedOnce(c)}, and it was still with you at the invoice — ` +
+  (leadsOn(c) ? "same with the numbers off the walk-through and the hours off the clock. " : "same with the hours off the clock. ") +
+  (leadsOn(c) ? "So you're not typing it four times, " : "So you're not typing it again at every step, ") +
+  "you're not carrying the job round in your head between the yard and the desk, " +
+  "and your customer gets a price off your real numbers instead of a guess made in a truck. " +
+  (leadsOn(c) ? "Which lead, " : "Which job, ") +
+  "what date, what price, what goes out — that's all still yours. ";
+
 export interface TourStep {
   key: string;
   /** `data-tour` value of the element to spotlight. Absent = a centred card with no arrow. */
@@ -531,8 +559,10 @@ export const LESSONS: Lesson[] = [
   {
     key: "how-a-job-runs",
     title: "How a Job Runs",
-    blurb: "Phone call to paid — lead, walk-through, estimate, job, money — and what Nort does at each step.",
-    plainBlurb: "Phone call to paid — lead, walk-through, estimate, job, money — and what the app does at each step.",
+    // No list of stages here: the blurb is one string for every company, and a company with Leads
+    // or Estimates off has no lead, walk-through or estimate in its run (the steps read the switches).
+    blurb: "Phone call to paid — one job, every step, and what Nort does at each one.",
+    plainBlurb: "Phone call to paid — one job, every step, and what the app does at each one.",
     steps: [
   // ── 4. THE RUN. One job, phone call to money, pointing at the tile each time. ───────────────
   //
@@ -553,7 +583,9 @@ export const LESSONS: Lesson[] = [
   // thinks his estimate priced itself is a man who sends one without reading it.
   // THE SWITCHES WALK THE RUN TOO: with Leads off there is no lead and no walk-through to walk to
   // (run-lead, run-walk, and trust, which is welded to the walk-through), and with Estimates off
-  // no estimate (run-estimate). The driver skips a gated step; the rest of the run still reads.
+  // no estimate (run-estimate). The driver skips a gated step, and the steps that remain read the
+  // switches themselves (leadsOn / estimatesOn above): no lead, walk-through or accepted estimate is
+  // named to a company that switched it off. tour.test pins the words, not only the keys.
   {
     key: "run-lead",
     anchor: "dock-sales",
@@ -614,18 +646,24 @@ export const LESSONS: Lesson[] = [
     key: "run-estimate",
     feature: "estimates",
     title: "Writing it up",
-    say:
-      "Back in the truck you press Start The Estimate, and the answers from that walk-through are " +
-      "already in it, in your own words, taken as given rather than read back to you. Anything you " +
-      "priced standing on site is already a line. Press Generate Line Items and I don't touch your " +
+    say: (c) =>
+      (leadsOn(c)
+        ? "Back in the truck you press Start The Estimate, and the answers from that walk-through are " +
+          "already in it, in your own words, taken as given rather than read back to you. Anything you " +
+          "priced standing on site is already a line. "
+        : "It starts with the estimate: tap Plus, then New Estimate, and pick the customer. ") +
+      "Press Generate Line Items and I don't touch your " +
       "estimate — I hand you a list of PROPOSED lines. Tick the ones you want, fix any number I got " +
       "wrong, and press Add. Nothing of mine lands until you do. I work off your own price list and " +
       "I flag anything that isn't in it yet as my guess and not your price.",
     plain: {
-      say:
-        "Back in the truck you press Start The Estimate, and the answers from that walk-through are " +
-        "already in it, in your own words, taken as given rather than read back to you. Anything you " +
-        "priced standing on site is already a line. Press Generate Line Items and your estimate isn't " +
+      say: (c) =>
+        (leadsOn(c)
+          ? "Back in the truck you press Start The Estimate, and the answers from that walk-through are " +
+            "already in it, in your own words, taken as given rather than read back to you. Anything you " +
+            "priced standing on site is already a line. "
+          : "It starts with the estimate: tap Plus, then New Estimate, and pick the customer. ") +
+        "Press Generate Line Items and your estimate isn't " +
         "touched — you get a list of PROPOSED lines. Tick the ones you want, fix any number that's " +
         "wrong, and press Add. Nothing lands until you do. The lines come off your own price list, and " +
         "anything that isn't in it yet is flagged as a guess, not your price.",
@@ -635,16 +673,16 @@ export const LESSONS: Lesson[] = [
     key: "run-job",
     anchor: "dock-jobs",
     title: "They say yes",
-    say:
-      "You mark the estimate accepted and the job builds itself — same customer, same site address, " +
-      "the lead it came from, plus a work order and a material list off the estimate. Then it " +
+    say: (c) =>
+      jobStarts(c) +
+      "Then it " +
       "starts collecting: clock in on that job and the hours land on it, photograph a supply house " +
       "receipt and I read it and file it on as a cost. The ones I'm not certain about I put in a " +
       "pile for you rather than guess.",
     plain: {
-      say:
-        "You mark the estimate accepted and the job builds itself — same customer, same site address, " +
-        "the lead it came from, plus a work order and a material list off the estimate. Then it " +
+      say: (c) =>
+        jobStarts(c) +
+        "Then it " +
         "starts collecting: clock in on that job and the hours land on it, photograph a supply house " +
         "receipt and it's read and filed on as a cost. The ones it isn't certain about go in a " +
         "pile for you rather than a guess.",
@@ -654,17 +692,23 @@ export const LESSONS: Lesson[] = [
     key: "run-money",
     anchor: "dock-invoices",
     title: "And the money",
-    say:
-      "Job's done. Press Finish Job and the invoice is already written — if there's an accepted " +
-      "estimate, that estimate IS the bill, and I won't stack the hours on top of a price they " +
-      "already agreed to. If there isn't one, it's every person's hours at the right rate plus " +
+    say: (c) =>
+      "Job's done. Press Finish Job and the invoice is already written — " +
+      (estimatesOn(c)
+        ? "if there's an accepted " +
+          "estimate, that estimate IS the bill, and I won't stack the hours on top of a price they " +
+          "already agreed to. If there isn't one, it's every person's hours at the right rate plus "
+        : "every person's hours at the right rate plus ") +
       "every receipt with your markup on. It lands as a draft, and nothing reaches your customer " +
       "unless you tick the box that sends it.",
     plain: {
-      say:
-        "Job's done. Press Finish Job and the invoice is already written — if there's an accepted " +
-        "estimate, that estimate IS the bill, and the hours are never stacked on top of a price they " +
-        "already agreed to. If there isn't one, it's every person's hours at the right rate plus " +
+      say: (c) =>
+        "Job's done. Press Finish Job and the invoice is already written — " +
+        (estimatesOn(c)
+          ? "if there's an accepted " +
+            "estimate, that estimate IS the bill, and the hours are never stacked on top of a price they " +
+            "already agreed to. If there isn't one, it's every person's hours at the right rate plus "
+          : "every person's hours at the right rate plus ") +
         "every receipt with your markup on. It lands as a draft, and nothing reaches your customer " +
         "unless you tick the box that sends it.",
     },
@@ -676,20 +720,14 @@ export const LESSONS: Lesson[] = [
   {
     key: "run-win",
     title: "So what did that just save you",
-    say:
-      "You typed that address once, on the phone call, and it was still with you at the invoice — " +
-      "same with the numbers off the walk-through and the hours off the clock. So you're not typing " +
-      "it four times, you're not carrying the job round in your head between the yard and the desk, " +
-      "and your customer gets a price off your real numbers instead of a guess made in a truck. " +
-      "Which lead, what date, what price, what goes out — that's all still yours. I do the typing " +
+    say: (c) =>
+      winSaved(c) +
+      "I do the typing " +
       "and the remembering, you do the trade.",
     plain: {
-      say:
-        "You typed that address once, on the phone call, and it was still with you at the invoice — " +
-        "same with the numbers off the walk-through and the hours off the clock. So you're not typing " +
-        "it four times, you're not carrying the job round in your head between the yard and the desk, " +
-        "and your customer gets a price off your real numbers instead of a guess made in a truck. " +
-        "Which lead, what date, what price, what goes out — that's all still yours. The app does the " +
+      say: (c) =>
+        winSaved(c) +
+        "The app does the " +
         "typing and the remembering, you do the trade.",
     },
   },
