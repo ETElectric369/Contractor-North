@@ -2,6 +2,17 @@ import { NO_JOB_READ_CAP, type NoJobHours } from "@/lib/no-job-hours";
 import { formatDateShort } from "@/lib/utils";
 import { AFFORDANCES, KIND_STREAM, type ActionItem } from "./types";
 
+/**
+ * What to do with a shift on no job, in words that match the doors the company actually has: with a
+ * not-billed code (companyTimeCode) Company Time files it; without one, the way to get that door.
+ * Shared by this line and the Timecards Hours On No Job section.
+ */
+export function noJobAdvice(companyCode: string | null): string {
+  return companyCode
+    ? "Put each on its job, or file it as company time."
+    : "Put each on its job. To file one as company time, first add a not-billed code like Shop in Settings.";
+}
+
 /** The rollup's id. Synthetic: open-only, never dispatched (types.ts AFFORDANCES.time_stray). */
 export const NO_JOB_HOURS_ITEM_ID = "stray-no-job";
 
@@ -66,7 +77,9 @@ export function noJobHoursActionItem(summary: NoJobHours | null | undefined, opt
     kind: "time_stray",
     stream: KIND_STREAM.time_stray,
     title: `Hours On No Job · ${shifts.length}${summary?.capped ? "+" : ""}`,
-    subtitle: `${hours} h ${span}${people.length <= 3 ? ` (${people.join(", ")})` : ""}, on no job and no invoice. Put each on its job, or file it as company time.`,
+    // ONE COMPANY CODE DECIDES THE WORDS, the same one that draws the Company Time door on
+    // Timecards: without a not-billed code there is no such door, so the line never offers it.
+    subtitle: `${hours} h ${span}${people.length <= 3 ? ` (${people.join(", ")})` : ""}, on no job and no invoice. ${noJobAdvice(summary?.companyCode ?? null)}`,
     who: null,
     // Undated on purpose, like the supplier bills: the oldest shift is weeks old, and a red
     // "overdue" would be a deadline nobody set. The rows on Timecards say their own days.

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { NO_JOB_READ_CAP, companyTimeCode, noJobShiftsFrom, notCompanyTimeFilter, readNoJobHours, type NoJobRow } from "@/lib/no-job-hours";
-import { noJobHoursActionItem, NO_JOB_HOURS_HREF } from "@/lib/action-items/no-job-hours-item";
+import { noJobAdvice, noJobHoursActionItem, NO_JOB_HOURS_HREF } from "@/lib/action-items/no-job-hours-item";
 
 /**
  * HOURS ON NO JOB (the duplicate punches, 2026-09-26): a shift nobody put on a job stays findable
@@ -71,25 +71,33 @@ describe("the Needs You line: one rollup, never one row per shift, never gone af
       ],
       opts(),
     );
-    const item = noJobHoursActionItem({ shifts, hours: 16.43, capped: false });
+    const item = noJobHoursActionItem({ shifts, hours: 16.43, capped: false, companyCode: "SHOP" });
     expect(item).toMatchObject({ id: "stray-no-job", kind: "time_stray", title: "Hours On No Job · 2", href: NO_JOB_HOURS_HREF, when: null });
     expect(item?.subtitle).toBe("16.4 h from Jul 1 to Sep 11 (Brian, Erik), on no job and no invoice. Put each on its job, or file it as company time.");
     expect(item?.affordances).toEqual(["open"]);
   });
 
+  it("a company with no not-billed code (Tahoe) is never offered company time, only the way to get it", () => {
+    const shifts = noJobShiftsFrom([row()], opts({ nonBillableCodes: new Set() }));
+    const item = noJobHoursActionItem({ shifts, hours: 8.43, capped: false, companyCode: null });
+    expect(item?.subtitle).not.toContain("or file it as company time");
+    expect(item?.subtitle).toContain("first add a not-billed code like Shop in Settings");
+    expect(noJobAdvice(null)).not.toBe(noJobAdvice("SHOP"));
+  });
+
   it("says 'couldn't check' when the read failed, and nothing when there is nothing", () => {
-    expect(noJobHoursActionItem({ shifts: [], hours: 0, capped: false })).toBeNull();
+    expect(noJobHoursActionItem({ shifts: [], hours: 0, capped: false, companyCode: "SHOP" })).toBeNull();
     expect(noJobHoursActionItem(null)).toBeNull();
     expect(noJobHoursActionItem(null, { failed: true })?.title).toBe("Hours On No Job · Couldn't Check");
   });
 
   it("a capped read says there may be more", () => {
     const shifts = noJobShiftsFrom([row()], opts());
-    expect(noJobHoursActionItem({ shifts, hours: 8.43, capped: true })?.title).toBe("Hours On No Job · 1+");
+    expect(noJobHoursActionItem({ shifts, hours: 8.43, capped: true, companyCode: "SHOP" })?.title).toBe("Hours On No Job · 1+");
   });
 
   it("a full cap with nothing listable in it is its own line, never null", () => {
-    const item = noJobHoursActionItem({ shifts: [], hours: 0, capped: true });
+    const item = noJobHoursActionItem({ shifts: [], hours: 0, capped: true, companyCode: "SHOP" });
     expect(item).toMatchObject({ id: "stray-no-job", title: "Hours On No Job · Couldn't List Them All", href: NO_JOB_HOURS_HREF });
     expect(item?.subtitle).toContain(`newest ${NO_JOB_READ_CAP}`);
   });
@@ -121,13 +129,11 @@ describe("the cap counts only rows that could be listed", () => {
     const supabase = {
       from: (table: string) =>
         table === "job_codes"
-          ? chain(table, { data: [{ code: "SHOP" }, { code: "PTO" }], error: null })
-          : table === "time_entries"
-            ? chain(table, { data: [], error: null })
-            : chain(table, { data: [], error: null }),
+          ? chain(table, { data: [{ code: "SHOP", active: true }, { code: "PTO", active: true }], error: null })
+          : chain(table, { data: [], error: null }),
     };
     const out = await readNoJobHours(supabase as never, { tz: TZ, todayStr: TODAY });
-    expect(out).toEqual({ shifts: [], hours: 0, capped: false });
+    expect(out).toEqual({ shifts: [], hours: 0, capped: false, companyCode: "SHOP" });
     expect(calls.map((c) => c.table)).toEqual(["job_codes", "time_entries"]);
     const time = calls[1].ops;
     expect(time).toContainEqual(["or", ['job_code.is.null,job_code.not.in.("PTO","SHOP")']]);

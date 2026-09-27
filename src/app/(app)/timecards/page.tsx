@@ -35,7 +35,8 @@ import { jobLabel } from "@/lib/schedule-options";
 import { LONG_SHIFT_HOURS, clockDoorWords, isLongOpenShift } from "@/lib/long-shift";
 import { loadShiftChains } from "@/lib/shift-chain";
 import { reportError } from "@/lib/observe";
-import { NO_JOB_READ_CAP, companyTimeCode, readNoJobHours } from "@/lib/no-job-hours";
+import { NO_JOB_READ_CAP, readNoJobHours } from "@/lib/no-job-hours";
+import { noJobAdvice } from "@/lib/action-items/no-job-hours-item";
 import { CompanyTimeButton } from "./company-time-button";
 
 export const dynamic = "force-dynamic";
@@ -651,7 +652,9 @@ export default async function TimecardsPage({
    *  says what it was: Pick A Job (the row opens its editor) or Company Time (the company's own
    *  non-billable code). Needs You's Hours On No Job line opens this list (#no-job). */
   const noJob = await noJobP;
-  const companyCode = companyTimeCode((jobCodes ?? []) as { code?: string | null; billable?: boolean | null; active?: boolean | null }[]);
+  // The read's own code (companyTimeCode over the not-billed codes): the one Needs You words its
+  // line from, so the Company Time door and both sentences can never disagree.
+  const companyCode = noJob?.companyCode ?? null;
   const noJobRows = (noJob?.shifts ?? []).map((s) => ({
     id: s.id,
     name: s.name,
@@ -986,9 +989,18 @@ export default async function TimecardsPage({
                   Hours On No Job ({noJobRows.length}
                   {noJob?.capped ? "+" : ""} · {formatDuration(noJob?.hours ?? 0)})
                 </h4>
-                <p className="text-xs text-amber-800">
-                  On no invoice, and paid like any shift. Put each on its job, or file it as the company&apos;s own time.
-                </p>
+                <p className="text-xs text-amber-800">On no invoice, and paid like any shift. {noJobAdvice(companyCode)}</p>
+                {/* NO NOT-BILLED CODE, NO COMPANY TIME DOOR (Tahoe's codes all bill): the way to get
+                    one, instead of a sentence offering a button that isn't there. */}
+                {!companyCode && (
+                  <Link
+                    href="/settings?tab=crew"
+                    className="inline-flex min-h-[44px] items-center gap-0.5 text-sm font-medium text-amber-800"
+                  >
+                    Add A Not-Billed Code
+                    <ChevronRight className="h-4 w-4 text-amber-700" aria-hidden />
+                  </Link>
+                )}
                 <ul className="divide-y divide-amber-200/60">
                   {noJobRows.map((r) => (
                     <li key={r.id} className="flex min-h-[44px] flex-wrap items-center gap-x-2 py-1 text-sm">

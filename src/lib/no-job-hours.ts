@@ -59,6 +59,9 @@ export type NoJobHours = {
   hours: number;
   /** The read hit NO_JOB_READ_CAP: there may be older ones than these. Said, never hidden. */
   capped: boolean;
+  /** The code Company Time files under (companyTimeCode), or null when the company has no
+   *  not-billed code yet: then no door files company time, and no sentence may offer one. */
+  companyCode: string | null;
 };
 
 const nameOf = (p: NoJobRow["profiles"]): string => {
@@ -121,9 +124,10 @@ export function notCompanyTimeFilter(nonBillableCodes: Iterable<string>): string
  * real no-job punch, that punch dropped off the list with nothing saying so.
  */
 export async function readNoJobHours(supabase: SupabaseClient, opts: { tz: string; todayStr: string }): Promise<NoJobHours | null> {
-  const codesR = await supabase.from("job_codes").select("code").eq("billable", false);
+  const codesR = await supabase.from("job_codes").select("code, active").eq("billable", false);
   if (codesR.error) return null;
-  const nonBillableCodes = new Set(((codesR.data ?? []) as { code?: string | null }[]).map((c) => String(c.code ?? "").trim()).filter(Boolean));
+  const codeRows = (codesR.data ?? []) as { code?: string | null; active?: boolean | null }[];
+  const nonBillableCodes = new Set(codeRows.map((c) => String(c.code ?? "").trim()).filter(Boolean));
   let read = supabase
     .from("time_entries")
     .select("id, profile_id, clock_in, clock_out, lunch_minutes, job_code, auto_closed_reason, profiles:profile_id(full_name)")
@@ -149,6 +153,7 @@ export async function readNoJobHours(supabase: SupabaseClient, opts: { tz: strin
     shifts,
     hours: Math.round(shifts.reduce((s, x) => s + x.hours, 0) * 100) / 100,
     capped: rows.length >= NO_JOB_READ_CAP,
+    companyCode: companyTimeCode(codeRows.map((c) => ({ ...c, billable: false }))),
   };
 }
 
