@@ -258,6 +258,51 @@ d("walk-through prices stay in the office (0366)", () => {
     expect((await tryAs(null, "select id from form_playbooks limit 1")).code).toBe("42501");
   });
 
+  it("both views are read-only: a tech can't insert, update or delete through them (42501), not even into another company", async () => {
+    const otherOrg = (await one("select org_id::text as id from profiles where id = $1", [otherOwnerId])).id;
+    const writes: [string, string, unknown[]][] = [
+      ["delete a company sheet", "delete from form_playbooks where id = $1 returning id", [sheetId]],
+      ["delete a crew checklist", "delete from form_playbooks where id = $1 returning id", [checklistId]],
+      ["rename a sheet", "update form_playbooks set name = 'renamed by tech' where id = $1 returning id", [sheetId]],
+      ["move a sheet to another company", "update form_playbooks set org_id = $2 where id = $1 returning id", [sheetId, otherOrg]],
+      ["plant a form in another company", "insert into form_playbooks (org_id, name, schema) values ($1, 'TEST 0366 planted', '[]'::jsonb) returning id", [otherOrg]],
+      ["plant a form in his own company", "insert into form_playbooks (org_id, name, schema) values ($1, 'TEST 0366 planted', '[]'::jsonb) returning id", [orgId]],
+      ["move his visit", "update appointment_answers set starts_at = now() + interval '9 days' where id = $1 returning id", [visitTech]],
+      ["re-link his visit", "update appointment_answers set org_id = $2, inquiry_id = null where id = $1 returning id", [visitTech, otherOrg]],
+      ["delete his visit", "delete from appointment_answers where id = $1 returning id", [visitTech]],
+      ["insert a visit", "insert into appointment_answers (org_id, starts_at) values ($1, now()) returning id", [otherOrg]],
+    ];
+    for (const who of [techId, leadId, ownerId]) {
+      for (const [what, sql, params] of writes) {
+        const r = await tryAs(who, sql, params);
+        expect(r.code, `${who}: ${what}`).toBe("42501");
+      }
+    }
+    for (const [what, sql, params] of writes) expect((await tryAs(null, sql, params)).code, `anon: ${what}`).toBe("42501");
+    // Nothing moved: the sheet, the checklist and his visit are exactly where they were.
+    expect(await one("select name, org_id::text as org from forms where id = $1", [sheetId])).toEqual({ name: "TEST 0366 sheet", org: orgId });
+    expect((await one("select count(*)::int as n from forms where id = $1", [checklistId])).n).toBe(1);
+    expect((await one("select count(*)::int as n from forms where name = 'TEST 0366 planted'")).n).toBe(0);
+    expect(await one("select org_id::text as org, inquiry_id::text as inquiry from appointments where id = $1", [visitTech])).toEqual({ org: orgId, inquiry: inquiryId });
+    // The privileges say so, and the trigger behind them refuses even a role that still could write.
+    const p = await one(
+      `select bool_or(has_table_privilege(r, v, x)) as any
+         from unnest(array['authenticated', 'anon']) r, unnest(array['public.appointment_answers', 'public.form_playbooks']) v,
+              unnest(array['INSERT', 'UPDATE', 'DELETE', 'TRUNCATE']) x`,
+    );
+    expect(p.any).toBe(false);
+    await c.query("savepoint owner_write");
+    try {
+      // As the server's own role (the views' owner, every privilege): an insert reaches the trigger whatever the WHERE says.
+      for (const v of ["form_playbooks", "appointment_answers"]) {
+        await expect(c.query(`insert into ${v} (org_id) values ($1)`, [orgId]), v).rejects.toMatchObject({ code: "42501", message: expect.stringContaining("read-only") });
+        await c.query("rollback to savepoint owner_write");
+      }
+    } finally {
+      await c.query("rollback to savepoint owner_write");
+    }
+  });
+
   it("the leads: a tech reads no lead at all, the one on his own visit included; the office reads it", async () => {
     expect((await tryAs(techId, "select id from inquiries where id = $1", [inquiryId])).rows).toEqual([]);
     expect((await tryAs(leadId, "select count(*)::int as n from inquiries where org_id = $1", [orgId])).rows).toEqual([{ n: 0 }]);

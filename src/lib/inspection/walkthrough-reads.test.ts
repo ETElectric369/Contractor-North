@@ -164,5 +164,10 @@ describe("readViaView: the view, or the table only while the view is missing", (
     expect(sql).toContain("create or replace view public.appointment_answers");
     expect(sql).toContain("create or replace view public.form_playbooks");
     expect(sql).toContain("revoke select on public.appointments from authenticated, anon;");
+    // Read-only (the 0218 lesson): a write through a one-table view runs as its owner, past RLS.
+    for (const v of ["appointment_answers", "form_playbooks"]) {
+      expect(sql).toContain(`revoke all on public.${v} from public, anon, authenticated;`);
+      expect(sql).toContain(`create trigger ${v}_read_only\n  instead of insert or update or delete on public.${v}`);
+    }
   });
 });

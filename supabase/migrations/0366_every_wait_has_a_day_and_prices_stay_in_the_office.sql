@@ -27,7 +27,8 @@
 -- forms, it gives up in five seconds and changes nothing, instead of stalling the app.
 --
 -- SAFE TO RUN TWICE: add column if not exists, create or replace, drop-then-create for the one
--- policy it replaces, a grant list rebuilt from the live columns. It writes NO company data and
+-- policy it replaces and the two views' read-only triggers, revoke/grant (idempotent), a grant
+-- list rebuilt from the live columns. It writes NO company data and
 -- backfills nothing.
 --
 -- NOTHING IS REPLACED FROM AN OLD BODY except one policy: forms_read, whose live text (read from
@@ -87,6 +88,12 @@
 --                                          anyone else. Its WHERE restates 0227's row rule (the
 --                                          office sees the company's visits, anyone else only the
 --                                          ones assigned to him), because the owner reads past RLS.
+--                                          READ-ONLY, like profile_pay after 0218: every privilege
+--                                          comes off public, anon and authenticated, SELECT goes back
+--                                          to authenticated, and an INSTEAD OF trigger
+--                                          (refuse_view_write) refuses any write that still reaches
+--                                          it. A write through a one-table view runs as its owner,
+--                                          past every row rule. form_playbooks (C) is locked the same.
 --   the revoke                             SELECT on appointments comes off the signed-in and anon
 --                                          roles and goes back to the signed-in role for every live
 --                                          column EXCEPT inspection_answers (the list is built from
@@ -250,8 +257,33 @@ alter view public.appointment_answers owner to postgres;
 comment on view public.appointment_answers is
   'THE ONLY READ OF WALK-THROUGH ANSWERS (0366). The office reads a visit''s inspection_answers as stored; anyone else (a tech or crew lead, on a visit assigned to him: 0227''s rule, restated here because the owner reads past RLS) reads them through answers_without_prices. appointments.inspection_answers itself is revoked from the signed-in role.';
 
+-- READ-ONLY (the 0218 lesson). A view over one table is auto-updatable, Supabase's default
+-- privileges hand anon AND authenticated every privilege on a new public relation, and a write
+-- through this view runs as its owner, past appointments_write (office-only, 0227) and past RLS. So
+-- everything comes off every role and only SELECT goes back to the signed-in role; then a trigger
+-- refuses any write that still reaches the view (a later grant, or a role this file didn't name).
+revoke all on public.appointment_answers from public, anon, authenticated;
 grant select on public.appointment_answers to authenticated;
-revoke all on public.appointment_answers from anon;
+
+create or replace function public.refuse_view_write()
+returns trigger
+language plpgsql
+as $fn$
+begin
+  raise exception '% is read-only (0366): write to the table itself, where its own rules apply.', tg_table_name
+    using errcode = '42501';
+end
+$fn$;
+
+comment on function public.refuse_view_write() is
+  'INSTEAD OF trigger for a read-only view (0366): refuses every INSERT, UPDATE and DELETE through appointment_answers and form_playbooks with 42501, so a write can never run as the view owner past the table''s RLS.';
+
+revoke all on function public.refuse_view_write() from public, anon, authenticated;
+
+drop trigger if exists appointment_answers_read_only on public.appointment_answers;
+create trigger appointment_answers_read_only
+  instead of insert or update or delete on public.appointment_answers
+  for each row execute function public.refuse_view_write();
 
 -- The column comes off the signed-in role; every other live column goes back on. Built from the
 -- live columns at apply time, so a column added before this runs is granted and one added after it
@@ -357,8 +389,15 @@ alter view public.form_playbooks owner to postgres;
 comment on view public.form_playbooks is
   'Every form of the company, as the viewer may read it (0366). The office reads the playbook as written; anyone else reads it through playbook_without_money (no note, no dollar figure in a why). forms_read lets a non-office person read directly only a form with no playbook, so this is how a crew lead''s walk-through reads its sheet.';
 
+-- READ-ONLY, like appointment_answers: without this a tech could delete or edit every form of his
+-- company, or plant one in another company (no check option, and set_org_id keeps an org_id given).
+revoke all on public.form_playbooks from public, anon, authenticated;
 grant select on public.form_playbooks to authenticated;
-revoke all on public.form_playbooks from anon;
+
+drop trigger if exists form_playbooks_read_only on public.form_playbooks;
+create trigger form_playbooks_read_only
+  instead of insert or update or delete on public.form_playbooks
+  for each row execute function public.refuse_view_write();
 
 -- ── THE CHECKS ──────────────────────────────────────────────────────────────────────────────
 do $chk$
@@ -437,6 +476,27 @@ begin
   if not has_table_privilege('authenticated', 'public.appointment_answers', 'SELECT')
      or not has_table_privilege('authenticated', 'public.form_playbooks', 'SELECT') then
     raise exception '0366: the signed-in role cannot read appointment_answers or form_playbooks. Nothing was changed.';
+  end if;
+  -- Read-only, both ways: no write privilege for anyone signed in or anon, and a trigger behind it.
+  select string_agg(format('%s %s %s', r.role, p.priv, v.name), ', ') into v_names
+    from unnest(array['public.appointment_answers', 'public.form_playbooks']) as v(name)
+    cross join unnest(array['authenticated', 'anon', 'public']) as r(role)
+    cross join unnest(array['INSERT', 'UPDATE', 'DELETE', 'TRUNCATE']) as p(priv)
+   where has_table_privilege(r.role, v.name, p.priv);
+  if v_names is not null then
+    raise exception '0366: a view can still be written through: %. Nothing was changed.', v_names;
+  end if;
+  select string_agg(v.name, ', ') into v_names
+    from unnest(array['appointment_answers', 'form_playbooks']) as v(name)
+   where not exists (
+     select 1 from pg_trigger t
+      where t.tgrelid = ('public.' || v.name)::regclass
+        and t.tgname = v.name || '_read_only'
+        and t.tgfoid = 'public.refuse_view_write()'::regprocedure
+        and t.tgtype & 64 = 64      -- INSTEAD OF
+        and t.tgtype & 28 = 28);    -- INSERT, DELETE and UPDATE
+  if v_names is not null then
+    raise exception '0366: these views have no read-only trigger: %. Nothing was changed.', v_names;
   end if;
 
   -- A function running as the signed-in person that names the column would start failing.
