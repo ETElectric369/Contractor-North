@@ -129,7 +129,7 @@ export function applyDraft(pb: Playbook, raw: unknown): Playbook {
  * WHAT to do about it. By the third or fourth the shape is obvious, which is the point at which
  * somebody can write their own — and that is the only definition of "taught" that matters here.
  */
-export function explainWhy(n: Need, i: number, total: number): string {
+export function explainWhy(n: Need, i: number, total: number, nortOn = true): string {
   const { shape } = whyHint(n);
   const opener =
     i === 0
@@ -151,8 +151,11 @@ export function explainWhy(n: Need, i: number, total: number): string {
   // ASK HIM, don't lecture him. The draft is a thing to agree with or correct in three seconds —
   // reading a paragraph at somebody and then inviting edits is how fifteen of these became
   // homework. If there's no draft, the question stands on its own and the shape shows him the form.
+  // THE NORT SWITCH (0352): off, nothing here speaks as him. Same three beats, no "I".
   return drafted
-    ? `${opener}"${n.ask}" — I've got that landing here: ${drafted} That right?${tail}`
+    ? nortOn
+      ? `${opener}"${n.ask}" — I've got that landing here: ${drafted} That right?${tail}`
+      : `${opener}"${n.ask}" — it lands here: ${drafted} Is that right?${tail}`
     : `${opener}"${n.ask}" — ${WHY_ASK} Something like: "${shape.example}"${tail}`;
 }
 

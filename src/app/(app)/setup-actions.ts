@@ -12,6 +12,7 @@ import { asRegister, clampHumor, toneDirective } from "@/lib/nort/tone";
 import { playbookForForm } from "@/lib/playbook/parse";
 import { getAnthropic, DEFAULT_MODEL } from "@/lib/anthropic";
 import { getOrgSettings } from "@/lib/org-settings";
+import { featureOn } from "@/lib/features";
 import { orgTrade } from "@/lib/org-trade";
 import { SETUP_PLAYBOOK } from "@/lib/onboarding/setup-playbook";
 import { aboutFromSetup, applyDraft, draftRequest, DRAFT_SYSTEM } from "@/lib/onboarding/draft-playbook";
@@ -28,6 +29,28 @@ export type DraftResult =
 export type TalkResult =
   | { ok: true; say: string; answers: Answers; filled: string[] }
   | { ok: false; error: string };
+
+type Supa = Awaited<ReturnType<typeof createClient>>;
+
+/**
+ * THE NORT SWITCH GOVERNS THE SETUP AI TOO (0352). The chat route answers in words when Nort is off,
+ * but the setup's three model calls (setup:converse, setup:talk, setup:draft) never asked, so a
+ * company that switched Nort off still paid a model to phrase its setup. With Nort off, setup is the
+ * plain questions: no model call, and nothing here says it's Nort.
+ *
+ * Read for the caller's own company (RLS scopes it; the org id pins it when we have one). A read
+ * that fails or finds nothing counts as OFF: the plain path always works, so the careful answer
+ * costs nobody a dead end.
+ */
+async function nortSwitchedOn(supabase: Supa, orgId: string | null): Promise<boolean> {
+  const q = supabase.from("organizations").select("settings");
+  const { data, error } = await (orgId ? q.eq("id", orgId) : q.limit(1)).maybeSingle();
+  if (error || !data) return false;
+  return featureOn(getOrgSettings((data as { settings?: unknown }).settings).features, "nort");
+}
+
+/** What a setup AI door says when Nort is off. Plain, and never "I". */
+const NORT_OFF_SETUP = "Nort is off for your company, so type your answers into the boxes.";
 
 /**
  * A TURN OF CONVERSATION during setup — Nort replies AND fills, in one call.
@@ -50,6 +73,9 @@ export async function talkSetup(needKey: string | null, answers: Answers, said: 
   const text = String(said ?? "").trim();
   if (!text) return { ok: false, error: "Nothing to go on yet." };
   if (text.length > 4000) return { ok: false, error: "That's a lot at once — break it up a bit." };
+  // Nort off: no model call and no Nort voice. The boxes still take a typed answer.
+  const orgId = await currentOrgId();
+  if (!(await nortSwitchedOn(supabase, orgId))) return { ok: false, error: NORT_OFF_SETUP };
 
   const known = coerceByPlaybook(SETUP_PLAYBOOK, answers);
   const need = needKey ? SETUP_PLAYBOOK.needs.find((n) => n.key === needKey) : undefined;
@@ -72,7 +98,7 @@ export async function talkSetup(needKey: string | null, answers: Answers, said: 
   // Over the ceiling, the interview keeps WORKING — it just stops paying a model to phrase it.
   // fallbackSay is the same escape used when the API key is absent, so somebody setting their
   // company up is never blocked; they get the plain question instead of the spoken one.
-  if (await aiSpendExceeded(await currentOrgId()))
+  if (await aiSpendExceeded(orgId))
     return { ok: true, say: fallbackSay(need, false, first), answers: known, filled: [] };
 
   let raw = "";
@@ -86,7 +112,7 @@ export async function talkSetup(needKey: string | null, answers: Answers, said: 
       ],
       messages: [{ role: "user", content: conversePrompt(need, known, text, first) }],
     });
-    void recordAiUsage({ orgId: await currentOrgId(), model: DEFAULT_MODEL, surface: "setup:converse", usage: resp.usage as never });
+    void recordAiUsage({ orgId, model: DEFAULT_MODEL, surface: "setup:converse", usage: resp.usage as never });
     raw = resp.content.filter((b) => b.type === "text").map((b) => (b as { text: string }).text).join("\n").trim();
   } catch {
     // A model that is down must not become an error message about a model being down.
@@ -126,7 +152,10 @@ export async function hearSetup(answers: Answers, transcript: string): Promise<H
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "Sign in first." };
-  return runHear(SETUP_PLAYBOOK, answers, transcript, { orgId: await currentOrgId(), surface: "setup:talk" });
+  // Nort off: the setup questions are typed into their boxes; nothing is sent to a model.
+  const orgId = await currentOrgId();
+  if (!(await nortSwitchedOn(supabase, orgId))) return { ok: false, error: NORT_OFF_SETUP };
+  return runHear(SETUP_PLAYBOOK, answers, transcript, { orgId, surface: "setup:talk" });
 }
 
 /**
@@ -223,9 +252,17 @@ export async function draftMyPlaybook(): Promise<DraftResult> {
 
   const pb = playbookForForm(form as { schema?: unknown; playbook?: unknown });
   if (!pb.needs.length) return { ok: false, error: "That walk-through has no questions in it yet." };
-  if (!process.env.ANTHROPIC_API_KEY) return { ok: true, formId: (form as { id: string }).id, needs: pb.needs, wasDrafted: false };
+  // THE PLAIN QUESTIONS, UNDRAFTED, whenever a model shouldn't be paid to draft them: no key, Nort
+  // switched off (0352), or this month's ceiling reached (talkSetup's own escape, which this door
+  // never had). Their own questions and any why lines already written come back as they are.
+  const undrafted: DraftResult = { ok: true, formId: (form as { id: string }).id, needs: pb.needs, wasDrafted: false };
+  if (!process.env.ANTHROPIC_API_KEY) return undrafted;
+  const orgId = await currentOrgId();
+  if (!(await nortSwitchedOn(supabase, orgId))) return undrafted;
+  if (await aiSpendExceeded(orgId)) return undrafted;
 
-  const { data: org } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
+  const orgQ = supabase.from("organizations").select("settings");
+  const { data: org } = await (orgId ? orgQ.eq("id", orgId) : orgQ.limit(1)).maybeSingle();
   const s = getOrgSettings((org as { settings?: unknown } | null)?.settings);
   const about = aboutFromSetup({
     trade: orgTrade(s).label,
@@ -242,7 +279,7 @@ export async function draftMyPlaybook(): Promise<DraftResult> {
       system: [{ type: "text", text: DRAFT_SYSTEM, cache_control: { type: "ephemeral" } }],
       messages: [{ role: "user", content: draftRequest(pb, about) }],
     });
-    void recordAiUsage({ orgId: await currentOrgId(), model: DEFAULT_MODEL, surface: "setup:draft", usage: resp.usage as never });
+    void recordAiUsage({ orgId, model: DEFAULT_MODEL, surface: "setup:draft", usage: resp.usage as never });
     text = resp.content.filter((b) => b.type === "text").map((b) => (b as { text: string }).text).join("\n").trim();
   } catch {
     // A drafting failure is not a dead end — they can still read and write their own lines.

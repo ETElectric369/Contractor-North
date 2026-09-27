@@ -62,6 +62,16 @@ describe("the setup questions (Start Here with Nort off) say nothing as Nort", (
     for (const l of mounts) expect(l).toContain("nortOn={nortOn}");
     expect(cap).toContain('"A couple of things still missing"');
   });
+
+  it("they are the PLAIN questions: no say-it box (a model call) while Nort is off", () => {
+    // setup:talk sends what's said to a model; with Nort off the card is its boxes, and the server
+    // refuses the call too (setup-actions.test).
+    const s = src("src/components/setup-interview.tsx");
+    expect(s).toMatch(/\{nortOn && \(\s*<TellNort\b/);
+    expect(s.match(/<TellNort\b/g)).toHaveLength(1);
+    // The walk through each why line speaks as nobody while he's off.
+    expect(s).toContain("explainWhy(n, i, needs.length, nortOn)");
+  });
 });
 
 describe("the Lessons run in neutral words while Nort is off", () => {

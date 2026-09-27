@@ -135,6 +135,18 @@ describe("walking one why line, out loud", () => {
     expect(blank).toContain("second trip"); // the trigger-shaped example, fitted to a prose need
   });
 
+  it("with Nort off it says the same three things as nobody", () => {
+    const AS_NORT = /\bI\b|\bI['’]|\bme\b|\bmy\b|\bNort\b/;
+    for (const i of [0, 3, 5]) {
+      const off = explainWhy(n, i, 6, false);
+      expect(off, `${i}`).not.toMatch(AS_NORT);
+      expect(off).toContain("It's a second trip.");
+      expect(off.toLowerCase()).toContain("right?");
+    }
+    // ...and with Nort on, nothing changed.
+    expect(explainWhy(n, 1, 6, true)).toBe(explainWhy(n, 1, 6));
+  });
+
   it("and it always ends somewhere — last one says so", () => {
     expect(explainWhy(n, 5, 6)).toContain("Last one");
   });
