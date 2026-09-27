@@ -175,24 +175,40 @@ export function SameDayShifts({
     return <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">{data.error} Check Timecards before adding hours twice.</p>;
   }
 
+  // THE 60MPH LAW (job-time-button.tsx): a server action that rejects (no signal, a dropped
+  // connection) throws. Every await below has its catch, so a dead zone is a sentence, never a
+  // silent button or a page torn down to the error boundary.
   const put = async (s: DayShift) => {
     if (!jobId || busyId) return;
     setBusyId(s.id);
     try {
-      const r = await putShiftOnJob({ entry_id: s.id, job_id: jobId });
+      let r: Awaited<ReturnType<typeof putShiftOnJob>>;
+      try {
+        r = await putShiftOnJob({ entry_id: s.id, job_id: jobId });
+      } catch {
+        toast("No connection, so that shift may not have moved. Try again when you have a bar or two.", "error");
+        return;
+      }
       if (!r.ok) {
         toast(r.error ?? "That shift didn't move.", "error");
         seq.current++;
-        setData(await shiftsOnDay({ profile_id: profileId || null, date, for_job_id: jobId }));
+        try {
+          setData(await shiftsOnDay({ profile_id: profileId || null, date, for_job_id: jobId }));
+        } catch {
+          setData({ ok: false, error: "Couldn't check this person's day just now." });
+        }
         return;
       }
       toast(r.sentence ?? "Put on the job.", "success", {
         label: "Undo",
         onClick: () => {
-          void takeShiftOffJob({ entry_id: s.id, job_id: jobId }).then((u) => {
-            toast(u.ok ? "Back to no job." : (u.error ?? "Couldn't undo."), u.ok ? "success" : "error");
-            router.refresh();
-          });
+          void takeShiftOffJob({ entry_id: s.id, job_id: jobId }).then(
+            (u) => {
+              toast(u.ok ? "Back to no job." : (u.error ?? "Couldn't undo."), u.ok ? "success" : "error");
+              router.refresh();
+            },
+            () => toast("No connection, so the Undo didn't go through. The shift may still be on the job: check it on Timecards when you have a bar or two.", "error"),
+          );
         },
       });
       onPlaced?.(r.sentence ?? "", s);

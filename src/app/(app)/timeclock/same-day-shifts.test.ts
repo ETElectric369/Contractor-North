@@ -117,6 +117,14 @@ describe("one tap, one entry", () => {
       expect(s).toContain("setClashId(res.clash?.id ?? null)");
     });
   }
+  it("a dropped connection on Put This On, Company Time or either Undo is a sentence (the 60mph law)", () => {
+    const put = src("./same-day-shifts.tsx");
+    expect(put).toMatch(/try \{\s*r = await putShiftOnJob\([^)]*\);\s*\} catch \{\s*toast\("No connection/);
+    expect(put).toMatch(/takeShiftOffJob\([^)]*\)\.then\(\s*\(u\) => \{[\s\S]*?\},\s*\(\) => toast\("No connection/);
+    const company = src("../timecards/company-time-button.tsx");
+    expect(company).toMatch(/try \{\s*r = await fileShiftAsCompanyTime\([^)]*\);\s*\} catch \{\s*toast\("No connection/);
+    expect(company).toMatch(/\.then\(\s*\(u\) => \{[\s\S]*?\},\s*\(\) =>\s*toast\(\s*`No connection/);
+  });
   it("Log Hours on the job shows the day's shifts too", () => {
     expect(src("../jobs/[id]/job-time-button.tsx")).toContain("<SameDayShifts");
   });

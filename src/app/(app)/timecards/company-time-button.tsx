@@ -21,8 +21,16 @@ export function CompanyTimeButton({ entryId, code }: { entryId: string; code: st
     if (inFlight.current || pending) return;
     inFlight.current = true;
     start(async () => {
+      // THE 60MPH LAW (job-time-button.tsx): an action that rejects inside a transition tears the
+      // whole Timecards page down to the error boundary. A dead zone is a sentence instead.
       try {
-        const r = await fileShiftAsCompanyTime({ entry_id: entryId });
+        let r: Awaited<ReturnType<typeof fileShiftAsCompanyTime>>;
+        try {
+          r = await fileShiftAsCompanyTime({ entry_id: entryId });
+        } catch {
+          toast("No connection, so that shift may not have been filed. Try again when you have a bar or two.", "error");
+          return;
+        }
         if (!r.ok) {
           toast(r.error ?? "That shift didn't change.", "error");
           return;
@@ -31,10 +39,17 @@ export function CompanyTimeButton({ entryId, code }: { entryId: string; code: st
         toast(r.sentence ?? `Filed as ${filed}.`, "success", {
           label: "Undo",
           onClick: () => {
-            void fileShiftAsCompanyTime({ entry_id: entryId, undo: { code: filed, previous: r.previous ?? null } }).then((u) => {
-              toast(u.ok ? "Back on Hours On No Job." : (u.error ?? "Couldn't undo."), u.ok ? "success" : "error");
-              router.refresh();
-            });
+            void fileShiftAsCompanyTime({ entry_id: entryId, undo: { code: filed, previous: r.previous ?? null } }).then(
+              (u) => {
+                toast(u.ok ? "Back on Hours On No Job." : (u.error ?? "Couldn't undo."), u.ok ? "success" : "error");
+                router.refresh();
+              },
+              () =>
+                toast(
+                  `No connection, so the Undo didn't go through. The shift may still be filed as ${filed}: check it on Timecards when you have a bar or two.`,
+                  "error",
+                ),
+            );
           },
         });
         router.refresh();
