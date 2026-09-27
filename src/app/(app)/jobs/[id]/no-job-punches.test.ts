@@ -178,7 +178,20 @@ describe("the list on the Time tab", () => {
 
   it("is the office's: computed and rendered only for staff on the job page", () => {
     const page = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
-    expect(page).toContain("if (viewerIsStaff) {\n    try {\n      const shifts = await readNoJobPunchesNearJob(");
+    expect(page).toContain("const nearPunchesP: Promise<NearPunch[] | null> = viewerIsStaff\n    ? readNoJobPunchesNearJob(");
     expect(page).toMatch(/\{viewerIsStaff && \(\s*<NoJobPunches jobId=\{j\.id\}/);
+  });
+
+  it("never holds the page up on its own: started beside the page's other reads, awaited after them", () => {
+    const page = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
+    const started = page.indexOf("const nearPunchesP");
+    // Up to three round trips one after another; started once tz is known, before the shelf,
+    // takes, documents and split reads are awaited, so it overlaps them instead of following them.
+    expect(started).toBeGreaterThan(page.indexOf("const tz = getOrgSettings"));
+    for (const later of ["await shelfNetP", "await takesP", "await signDocumentUrls", "await nearPunchesP"]) {
+      expect(page.indexOf(later)).toBeGreaterThan(started);
+    }
+    // A failed read is reported and said (null), never a rejected promise the page trips on.
+    expect(page).toContain('reportError("jobs.[id].noJobPunches", e, { jobId: id });\n          return null;');
   });
 });
