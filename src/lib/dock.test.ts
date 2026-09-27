@@ -261,21 +261,32 @@ describe("the You tile is a tech's door and nobody else's", () => {
 /**
  * NO TECH TILE BOUNCES (Wave 0). The Office tile landed a tech on /team, which sends him straight
  * back to My Day, and Organize's Take Photo / File It all save through requireStaff. A door that
- * can't work for this person doesn't render.
+ * can't work for this person doesn't render. Office stays on his dock (he fills Forms and reads the
+ * Handbook, Resources, Compliance and Safety there); it lands him on its first row he can open.
  */
 describe("a tech's dock has no dead doors", () => {
-  const tech = DOCK.filter((s) => !s.staffOnly);
+  const tech = visibleDock({ isStaff: false });
   const STAFF_REDIRECTS = ["/team", "/schedule", "/leads", "/billing", "/crm", "/organize"];
 
-  it("is Today, Clock, Jobs, You and Tools", () => {
-    expect(tech.map((s) => s.key)).toEqual(["today", "clock", "jobs", "you", "tools"]);
+  it("is Today, Clock, Jobs, Office, You and Tools", () => {
+    expect(tech.map((s) => s.key)).toEqual(["today", "clock", "jobs", "office", "you", "tools"]);
   });
 
   it("never lands on a page that sends a tech away", () => {
     for (const s of tech) {
       expect(STAFF_REDIRECTS).not.toContain(basePath(s.href));
-      for (const c of s.children) if (!c.staffOnly && c.href) expect(STAFF_REDIRECTS).not.toContain(basePath(c.href));
+      for (const c of s.children) if (c.href) expect(STAFF_REDIRECTS).not.toContain(basePath(c.href));
     }
+  });
+
+  it("keeps his Office doors: Forms, Resources, the Handbook and the read-only Liabilities pages", () => {
+    const office = tech.find((s) => s.key === "office")!;
+    expect(office.href).toBe("/compliance");
+    expect(office.children.filter((c) => c.href).map((c) => c.href)).toEqual([
+      "/compliance", "/insurance", "/safety", "/audits", "/forms", "/resources", "/handbook",
+    ]);
+    // Staff still land on Team, as Erik set it.
+    expect(visibleDock({ isStaff: true }).find((s) => s.key === "office")?.href).toBe("/team");
   });
 
   it("carries no bug door: Bug Watch is North's, in the avatar menu for platform admins", () => {
@@ -300,10 +311,12 @@ describe("visibleDock — role and switches, one filter", () => {
   const ids = (sections: Sections) =>
     sections.map((s) => `${s.key}>${s.href}:${s.children.map((c) => `${c.id}=${c.label}`).join(",")}`);
   // The role filter every renderer carried before the switches (dock.tsx, section-subnav.tsx,
-  // command-bar.tsx): staffOnly/techOnly on tiles, staffOnly on rows.
+  // command-bar.tsx): staffOnly/techOnly on tiles, staffOnly on rows. A tech's Office lands on its
+  // first row he sees, not on staff-only Team (which bounced him).
   const legacy = (isStaff: boolean): Sections =>
     DOCK.filter((s) => (isStaff || !s.staffOnly) && (!isStaff || !s.techOnly)).map((s) => ({
       ...s,
+      href: !isStaff && s.key === "office" ? "/compliance" : s.href,
       children: s.children.filter((c) => isStaff || !c.staffOnly),
     }));
   const off = (...keys: FeatureKey[]) => ({ ...ALL_ON, ...Object.fromEntries(keys.map((k) => [k, false])) }) as FeatureMap;
@@ -355,11 +368,10 @@ describe("visibleDock — role and switches, one filter", () => {
     const d = visibleDock({ isStaff: true, features: off("crew_payroll") });
     for (const id of ["ma-payroll", "o-docs", "o-handbook"]) expect(rows(d)).not.toContain(id);
     expect(rows(d)).toContain("o-team");
-    // A tech keeps everything he had (Office is staff-only since Wave 0, so the Handbook was
-    // never one of his doors).
+    // A tech loses the Handbook too (he sees it today) and keeps everything else he had.
     const tech = visibleDock({ isStaff: false, features: off("crew_payroll") });
     expect(rows(tech)).not.toContain("o-handbook");
-    expect(rows(tech)).toEqual(rows(legacy(false)));
+    expect(rows(tech)).toEqual(rows(legacy(false)).filter((id) => id !== "o-handbook"));
   });
 
   it("Recurring Billing off: the Recurring row goes; the Tax Report stays whatever Sales Tax says", () => {
@@ -369,10 +381,11 @@ describe("visibleDock — role and switches, one filter", () => {
   });
 
   it("Licenses off: the whole Liabilities group (heading included) goes; Safety Log alone takes only Safety", () => {
-    // Office is staff-only (Wave 0: no tech tile bounces), so the Liabilities rows are the office's.
-    const d = visibleDock({ isStaff: true, features: off("licenses") });
+    const d = visibleDock({ isStaff: false, features: off("licenses") });
     for (const id of ["o-liab-h", "o-comply", "o-insurance", "o-safety", "o-audits"]) expect(rows(d)).not.toContain(id);
-    const s = visibleDock({ isStaff: true, features: off("safety_log") });
+    // A tech's Office then lands on the first row left: Forms.
+    expect(tile(d, "office")?.href).toBe("/forms");
+    const s = visibleDock({ isStaff: false, features: off("safety_log") });
     expect(rows(s)).not.toContain("o-safety");
     expect(rows(s)).toEqual(expect.arrayContaining(["o-liab-h", "o-comply", "o-insurance", "o-audits"]));
     // Forms is not a Safety Log door: it also holds the walk-through sheet and the intake form.

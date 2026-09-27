@@ -219,9 +219,9 @@ export const DOCK: DockSection[] = [
     label: "Office",
     icon: Building2,
     href: "/team", // Erik 2026-07-20: Office lands on Team (was /compliance)
-    // Office is the company's desk: /team sends a tech back to My Day, and every form in here
-    // saves through requireStaff. A tech tile that bounces is a dead door (Wave 0).
-    staffOnly: true,
+    // Not staff-only: a tech fills Forms (0195) and reads Compliance, Safety, Resources and the
+    // Handbook from here. Team is staff-only (/team sends a tech back to My Day), so a tech's Office
+    // lands on its first row he can open instead (visibleDock), never on a tile that bounces.
     children: [
       // Liabilities (Alexa's grouping). Insurance (e.g. workers' comp) + compliance Audits are
       // the next pages to build — flagged, not stubbed as dead links.
@@ -301,7 +301,8 @@ export const basePath = (href: string) => href.split("?")[0];
  * bar, the section strip/sheet and the command bar all draw from it, so the role rule and the
  * switch rule can't drift between them (the role filter used to be copied into each renderer).
  *
- *   role      staffOnly hides from techs, techOnly hides from staff (tiles and rows).
+ *   role      staffOnly hides from techs, techOnly hides from staff (tiles and rows). A tile whose
+ *             landing row is staff-only lands a tech on its first row he sees (Office: /compliance).
  *   switches  a row or tile whose switch is off is not drawn. A heading left with no rows under
  *             it goes; a tile whose rows were all switched off goes (Sales, with Leads and
  *             Estimates both off); a tile whose own landing page was switched off lands on its
@@ -309,7 +310,7 @@ export const basePath = (href: string) => href.split("?")[0];
  *
  * A SWITCH HIDES DOORS ONLY: a page behind a hidden row still opens from a link, with the Off
  * line on top (components/route-off-line). `features` is what the layout hands the shell (lib/
- * feature-doors shellDoors); no map is everything on, which returns exactly the old role filter.
+ * feature-doors shellDoors); no map is everything on, which is the role filter alone.
  */
 export function visibleDock({ isStaff, features }: { isStaff: boolean; features?: FeatureMap | null }): DockSection[] {
   const on = (k?: FeatureKey) => !k || featureOn(features, k);
@@ -325,13 +326,16 @@ export function visibleDock({ isStaff, features }: { isStaff: boolean; features?
       const next = rest.findIndex((r) => r.header);
       return rest.slice(0, next < 0 ? undefined : next).some((r) => r.href);
     });
-    // Measured against the rows a SWITCH hid, never the ones the role hid: a tile a tech sees with
-    // fewer rows keeps its landing page exactly as before, and the tech-only "You" tile (no rows
+    // A tile goes when a SWITCH hid all its rows, never the role: the tech-only "You" tile (no rows
     // at all) stays.
     const switchedOff = s.children.filter((c) => mine(c) && !on(c.feature));
     if (switchedOff.length && !children.some((c) => c.href)) return [];
-    const landingOff = switchedOff.some((c) => c.href && basePath(c.href) === basePath(s.href));
-    const href = landingOff ? (children.find((c) => c.href)?.href ?? s.href) : s.href;
+    // A tile whose own landing row isn't drawn for this person (switched off, or staff-only for a
+    // tech: Office's Team) lands on its first row still drawn, so no tile bounces.
+    const landingHidden = s.children.some(
+      (c) => c.href && basePath(c.href) === basePath(s.href) && (!mine(c) || !on(c.feature)),
+    );
+    const href = landingHidden ? (children.find((c) => c.href)?.href ?? s.href) : s.href;
     return [{ ...s, href, children }];
   });
 }
