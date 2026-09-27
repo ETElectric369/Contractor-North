@@ -13,8 +13,10 @@ import { todayStrInTz, tzDayStartUtc } from "@/lib/tz";
  * fill, and how many fills.
  *
  * THE AVERAGE COUNTS ONLY WEEKS THE BOOKS COVER: from the first week any fuel was recorded (or the
- * window's start, when fuel was recorded before it) to this week. A company whose first fuel is 5
- * weeks old is averaged over 5 weeks, never 13 (which would say fuel costs less than it does).
+ * window's start, when fuel was recorded before it) to the last FINISHED week the bank downloads
+ * reach. A company whose first fuel is 5 weeks old is averaged over 5 weeks, never 13; and this
+ * week, still going (or past the last download, where fuel isn't in yet), is drawn but never
+ * averaged, or every Monday would read about a thirteenth low.
  *
  * PURE: rows in, figures out, integer cents throughout. getFuelTrend is the one read.
  */
@@ -78,6 +80,8 @@ export function computeFuelTrend(
   moneyIn: number | ((from: string, to: string) => number),
   todayYmd: string,
   tz = "UTC",
+  /** The last day a bank download reached (fuel is written from them); null: today. */
+  coveredThrough: string | null = null,
 ): FuelTrend {
   const win = fuelWindow(todayYmd);
   const weeks: FuelWeek[] = [];
@@ -100,10 +104,16 @@ export function computeFuelTrend(
     if (c > 0) w.fills += 1;
   }
   const firstWeek = earliest && earliest > win.start ? mondayOf(earliest) : win.start;
-  const counted = weeks.filter((w) => w.start >= firstWeek);
+  // FINISHED WEEKS ONLY, up to the last day the downloads reach (and never today, still going).
+  const yesterday = addDays(todayYmd, -1);
+  const through = coveredThrough && coveredThrough < yesterday ? coveredThrough : yesterday;
+  const finished = weeks.filter((w) => w.start >= firstWeek && w.end <= through);
+  // Every week of it still going (fuel first recorded this week): the weeks there are, as before.
+  const counted = finished.length ? finished : weeks.filter((w) => w.start >= firstWeek);
   const totalCents = counted.reduce((n, w) => n + w.cents, 0);
   const fills = counted.reduce((n, w) => n + w.fills, 0);
-  const inCents = typeof moneyIn === "function" ? cents(moneyIn(firstWeek, win.end)) : cents(moneyIn);
+  const spanEnd = counted.length ? addDays(counted[counted.length - 1].start, 7) : win.end;
+  const inCents = typeof moneyIn === "function" ? cents(moneyIn(firstWeek, spanEnd)) : cents(moneyIn);
   return {
     weeks,
     weeksCounted: earliest ? counted.length : 0,
@@ -140,6 +150,10 @@ export async function getFuelTrend(supabase: any, tz: string, todayYmd: string):
     .limit(5000);
   if (error || !Array.isArray(bills)) return null;
   if (!bills.length) return computeFuelTrend([], 0, todayYmd, tz);
+  // How far the bank downloads reach: fuel is written from them, so a week past the last one isn't
+  // in yet. No bank lines (or none readable): today.
+  const { data: reach } = await supabase.from("bank_lines").select("posted_on").order("posted_on", { ascending: false }).limit(1);
+  const coveredThrough = Array.isArray(reach) && reach[0]?.posted_on ? String(reach[0].posted_on).slice(0, 10) : null;
   const startIso = tzDayStartUtc(win.start, tz).toISOString();
   const endIso = tzDayStartUtc(win.end, tz).toISOString();
   const [{ data: pays, error: payErr }, { data: refunds, error: refErr }] = await Promise.all([
@@ -159,5 +173,5 @@ export async function getFuelTrend(supabase: any, tz: string, todayYmd: string):
       ((refunds ?? []) as any[]).filter((r) => inside(r.created_at)),
     );
   };
-  return computeFuelTrend(bills as FuelBillRow[], moneyIn, todayYmd, tz);
+  return computeFuelTrend(bills as FuelBillRow[], moneyIn, todayYmd, tz, coveredThrough);
 }
