@@ -1,11 +1,14 @@
 import { describe, it, expect, vi } from "vitest";
+import { createElement } from "react";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { renderToStaticMarkup } from "react-dom/server";
 
 // The detail's ⋯ runs registry verbs only when tapped; the action registry is not this file's business.
 vi.mock("@/lib/actions/execute", () => ({ executeAction: vi.fn() }));
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }) }));
 
-import { discountDeadlineSentence, paymentLine, supplierChecks } from "./suppliers-card";
+import { SuppliersCard, discountDeadlineSentence, paymentLine, supplierChecks } from "./suppliers-card";
 import { claimableDiscounts, type SupplierInvoiceRow } from "./supplier-reconcile";
 import { supplierBalance, type SupplierAccountRow } from "./supplier-balance";
 
@@ -221,6 +224,31 @@ describe("the supplier detail: Check These", () => {
     expect(paymentLine({ account: a, balance: supplierBalance(a, "2026-09-26"), paymentsUnread: false })).toBe("$100.00 charged less $40.00 you've sent.");
     expect(paymentLine({ account: a, balance: supplierBalance(a, "2026-09-26"), paymentsUnread: true })).toBe("Couldn't read your payments just now.");
     expect(paymentLine({ account: acct({ onAccount: false }), balance: supplierBalance(acct({ onAccount: false }), "2026-09-26"), paymentsUnread: false })).toBeNull();
+  });
+
+  it("on screen: a quiet account draws no N To Check and no Check These; a live one counts only its live checks", () => {
+    const render = (accounts: SupplierAccountRow[]) =>
+      renderToStaticMarkup(
+        createElement(SuppliersCard, {
+          accounts,
+          today: "2026-09-26",
+          actions: { recordPayment: async () => ({ ok: true }), voidPayment: async () => ({ ok: true }), setOnAccount: async () => ({ ok: true }), updateAccount: async () => ({ ok: true }) },
+        }),
+      );
+    const quiet = render([acct({ bills: [bill("b1", 100)], payments: [pay("p1", 40, "2026-09-05")] })]);
+    expect(quiet).not.toContain("To Check");
+    expect(quiet).not.toContain("Check These");
+    expect(quiet).not.toContain('id="supplier-checks-a1"');
+    // The detail opens on Record A Payment, the slate line under it, and the ⋯ holding Edit Account.
+    expect(quiet).toContain("Record A Payment");
+    expect(quiet).toContain("$100.00 charged less $40.00 you&#x27;ve sent.");
+    expect(quiet).toMatch(/<button[^>]*aria-label="Actions"/);
+    const live = render([acct({ onAccount: false, bills: [bill("b3", 16.28)] })]);
+    expect(live).toContain("1 To Check");
+    expect(live).toContain('id="supplier-checks-a1"');
+    expect(live).toContain("Check These (1)");
+    expect(live).toContain("1 bill marked On Account, $16.28, but you pay Valley Supply at the register.");
+    expect(live).toContain("Turn On A Running Balance");
   });
 
   it("the card: N To Check replaces the '+ $N they never sent paper for' line; the failure line stays; grids and Why Don't These Subtract? are gone", () => {
