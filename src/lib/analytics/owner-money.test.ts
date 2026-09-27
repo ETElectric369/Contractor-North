@@ -299,6 +299,45 @@ describe("computeOwnerMoney: the shelf counts in the month it is bought", () => 
     // No stock money and nothing in stock: no line at all.
     expect(stockLine(computeOwnerMoney(inputs([jobTicket]), AUG, TZ, TODAY))).toBeNull();
   });
+
+  // Review of fix/stock-not-shelf: "less what moved" said Shop Stock Lost held stock money when it
+  // held only a supplier's credit, and said nothing when a move and a credit cancelled to $0.
+  it("'less what moved to Shop Stock Lost' keys on what MOVED, never on a credit sitting in Shop Stock Lost", () => {
+    // August: 50 ft of the August roll went back to CED ($36.03). September: a new $50 roll, and
+    // CED's -$20 credit for the August return, dated in September.
+    const sepTicket = { ...jobTicket, id: "h2", amount: 50, bill_date: "2026-09-02", created_at: "2026-09-02T18:00:00Z" };
+    const credit = { id: "cr1", job_id: null, on_shelf: true, amount: -20, bill_date: "2026-09-03", created_at: "2026-09-03T18:00:00Z", category: "Credit", status: "paid" };
+    const lots = [
+      { lot_id: "L1", bill_id: "h1", cost: 180.17, cost_left: 144.14, live: true },
+      { lot_id: "L2", bill_id: "h2", cost: 50, cost_left: 50, live: true },
+    ];
+    const ret = { id: "r1", lot_id: "L1", kind: "supplier_return", cost: 36.03, created_at: "2026-08-25T19:00:00Z", credit_bill_id: "cr1" };
+    const SEP = ownerMoneyWindow("2026-09", TODAY);
+    const creditOnly = computeOwnerMoney({ ...inputs([jobTicket, sepTicket, credit], lots), shelfMoves: [ret] }, SEP, TZ, TODAY);
+    expect(creditOnly.totals.putOnShelf).toBe(50);
+    expect(creditOnly.totals.shopStockLost).toBe(-20); // only the credit: nothing moved in September
+    expect(creditOnly.totals.stockMovedOut).toBe(0);
+    expect(stockLine(creditOnly)).toBe(
+      "Materials & Bills includes $50.00 of shop stock, counted the month it was bought. In Stock Now: $194.14 at cost. It moves onto a job's profit as pieces are taken, and never counts against the draw twice.",
+    );
+    // The same September with $20 written off the new roll: Shop Stock Lost nets to $0, but the $30
+    // is $50 bought less $20 moved out, and the line says so.
+    const off = { id: "w2", lot_id: "L2", kind: "write_off", cost: 20, created_at: "2026-09-10T18:00:00Z" };
+    const lotsAfter = [lots[0], { ...lots[1], cost_left: 30 }];
+    const cancel = computeOwnerMoney({ ...inputs([jobTicket, sepTicket, credit], lotsAfter), shelfMoves: [ret, off] }, SEP, TZ, TODAY);
+    expect(cancel.totals.putOnShelf).toBe(30);
+    expect(cancel.totals.shopStockLost).toBe(0);
+    expect(cancel.totals.stockMovedOut).toBe(20);
+    expect(stockLine(cancel)).toContain("Materials & Bills includes $30.00 of shop stock, counted the month it was bought, less what moved to Shop Stock Lost.");
+    // A credit for an OPENING roll sent back moves nothing out of any month's stock, whole year included.
+    const opening = [{ lot_id: "L0", bill_id: null, kind: "opening", cost: 40, cost_left: 10, live: true }, lots[1]];
+    const back = { ...ret, lot_id: "L0", cost: 30, created_at: "2026-09-01T19:00:00Z" };
+    const year = computeOwnerMoney({ ...inputs([sepTicket, credit], opening), shelfMoves: [back] }, YEAR, TZ, TODAY);
+    expect(year.totals.shopStockLost).toBe(-20);
+    expect(year.totals.stockMovedOut).toBe(0);
+    expect(stockLine(year)).toContain("Materials & Bills includes $50.00 of shop stock, counted the month it was bought.");
+    for (const m of [creditOnly, cancel, year]) for (const f of [m.totals, ...m.months]) expect(holds(f)).toBe(true);
+  });
 });
 
 describe("computeOwnerMoney: what is left for the owner", () => {
