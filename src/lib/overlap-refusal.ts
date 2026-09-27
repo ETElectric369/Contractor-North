@@ -6,6 +6,7 @@
 import { dbError } from "@/lib/db-error";
 import { getOrgSettings } from "@/lib/org-settings";
 import { clockDoorWords, clockedOutWords } from "@/lib/long-shift";
+import { jobLabel } from "@/lib/schedule-options";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 /**
@@ -33,23 +34,72 @@ export async function overlapRefusal(
   profileId: string,
   startMs: number,
   endMs: number,
-  opts?: {
-    /** The row being edited or copied — it is allowed to overlap itself. */
-    excludeId?: string;
-    /** Already in the caller's hand (the copy reads both to name its target); else read here. */
-    name?: string;
-    tz?: string;
-    /** A copy onto the SAME person: the exact match it finds IS the original, so say that. */
-    samePerson?: boolean;
-  },
+  opts?: OverlapOpts,
 ): Promise<string | null> {
+  return (await findOverlap(supabase, profileId, startMs, endMs, opts))?.sentence ?? null;
+}
+
+type OverlapOpts = {
+  /** The row being edited or copied — it is allowed to overlap itself. */
+  excludeId?: string;
+  /** Already in the caller's hand (the copy reads both to name its target); else read here. */
+  name?: string;
+  tz?: string;
+  /** A copy onto the SAME person: the exact match it finds IS the original, so say that. */
+  samePerson?: boolean;
+  /** Leave running clocks out: a clock-in's check, where a stale open shift is closed at zero by the
+   *  punch itself (0193) and a live one is the database's "You're already clocked in." */
+  ignoreOpen?: boolean;
+};
+
+/**
+ * THE SHIFT IN THE WAY, not just a sentence about it (the duplicate punches, 2026-09-26).
+ *
+ * "Edit that entry instead" was a dead end: it named no entry and linked nowhere, and the one in
+ * the way was usually a clock punch with NO JOB that the job page never shows. So the refusal
+ * carries the shift itself, and the form that got refused can offer the real move: put that punch
+ * on the job (keeping its clock times) instead of typing the day a second time.
+ */
+export type OverlapClash = {
+  id: string;
+  clockIn: string;
+  /** Null: the clock is still running. */
+  clockOut: string | null;
+  jobId: string | null;
+  jobCode: string | null;
+  /** The job's name (jobLabel, the SSOT), when it is on one. */
+  jobLabel: string | null;
+  /** Closed, on no job and no code: the door is "put it on the job". */
+  noJob: boolean;
+  /** The very same times: a double submit. */
+  exact: boolean;
+};
+
+type NearRow = {
+  id: string;
+  clock_in: string;
+  clock_out: string | null;
+  job_id?: string | null;
+  job_code?: string | null;
+  job?: { job_number?: string | null; name?: string | null } | { job_number?: string | null; name?: string | null }[] | null;
+};
+
+/** The overlap test with the clashing shift attached. `clash` is null only when the check itself
+ *  could not be made (the sentence then says so: a failed read is not a clear day). */
+export async function findOverlap(
+  supabase: SupabaseClient,
+  profileId: string,
+  startMs: number,
+  endMs: number,
+  opts?: OverlapOpts,
+): Promise<{ sentence: string; clash: OverlapClash | null } | null> {
   if (!profileId || !Number.isFinite(startMs) || !Number.isFinite(endMs)) return null;
 
   // 0217 caps a shift at 18 hours, so a day back catches every entry that could still be running
   // into this one.
   const { data: near, error: nearErr } = await supabase
     .from("time_entries")
-    .select("id, clock_in, clock_out")
+    .select("id, clock_in, clock_out, job_id, job_code, job:job_id(job_number, name)")
     .eq("profile_id", profileId)
     .gte("clock_in", new Date(startMs - 24 * 3_600_000).toISOString())
     .lte("clock_in", new Date(endMs).toISOString())
@@ -57,10 +107,10 @@ export async function overlapRefusal(
   // A FAILED READ IS NOT A CLEAR DAY. Waving the write through on the one occasion the check could
   // not be made is how the pair in the ledger got there; 0278 would still refuse it, but the
   // office would be reading the database's words instead of ours.
-  if (nearErr) return dbError(nearErr);
+  if (nearErr) return { sentence: dbError(nearErr), clash: null };
 
-  const rows = ((near ?? []) as { id: string; clock_in: string; clock_out: string | null }[]).filter(
-    (r) => r.id !== opts?.excludeId && Number.isFinite(new Date(r.clock_in).getTime()),
+  const rows = ((Array.isArray(near) ? near : []) as NearRow[]).filter(
+    (r) => r.id !== opts?.excludeId && Number.isFinite(new Date(r.clock_in).getTime()) && !(opts?.ignoreOpen && !r.clock_out),
   );
   // An OPEN entry has no end, so it counts as running until now — a man still clocked in cannot
   // also have worked these hours somewhere else.
@@ -91,17 +141,62 @@ export async function overlapRefusal(
     tz = getOrgSettings((org as { settings?: unknown } | null)?.settings).timezone;
   }
 
+  const job = Array.isArray(clash.job) ? (clash.job[0] ?? null) : (clash.job ?? null);
+  const code = (clash.job_code ?? "").trim() || null;
+  const found: OverlapClash = {
+    id: clash.id,
+    clockIn: clash.clock_in,
+    clockOut: clash.clock_out ?? null,
+    jobId: clash.job_id ?? null,
+    jobCode: code,
+    jobLabel: clash.job_id && job ? jobLabel(job) : null,
+    noJob: !!clash.clock_out && !clash.job_id && !code,
+    exact: !!exact,
+  };
+
   if (exact) {
     const when = shiftWhen(new Date(startMs).toISOString(), new Date(endMs).toISOString(), tz);
-    return opts?.samePerson
-      ? `${name} already has ${when}. Pick the person who worked it with them, or edit that entry.`
-      : `${name} already has ${when} on another entry. Open that one to change it.`;
+    return {
+      clash: found,
+      sentence: opts?.samePerson
+        ? `${name} already has ${when}. Pick the person who worked it with them, or edit that entry.`
+        : `${name} already has ${when} on another entry. Open that one to change it.`,
+    };
   }
   // An open shift has no finish to name, so it gets its start instead of a made-up one.
   const startedAt = shiftWhen(clash.clock_in, clash.clock_in, tz).split(" to ")[0];
-  return clash.clock_out
-    ? `${name} is already on the clock ${shiftWhen(clash.clock_in, clash.clock_out, tz)}, so these hours would be counted twice. Edit that entry instead.`
-    : `${name} has been clocked in since ${startedAt}, so these hours would be counted twice. ${clockedOutWords(fullName, false).clockOutFirst}: tap their shift on Timecards and use ${clockDoorWords(fullName).clockOut}.`;
+  if (!clash.clock_out) {
+    return {
+      clash: found,
+      sentence: `${name} has been clocked in since ${startedAt}, so these hours would be counted twice. ${clockedOutWords(fullName, false).clockOutFirst}: tap their shift on Timecards and use ${clockDoorWords(fullName).clockOut}.`,
+    };
+  }
+  const when = shiftWhen(clash.clock_in, clash.clock_out, tz);
+  return {
+    clash: found,
+    // A punch with NO JOB is the 85 Whitney case: the hours are real and already recorded, they
+    // are just not on the job. The move is to put that punch on the job, not to type them again.
+    sentence: found.noJob
+      ? `${name} is already on the clock ${when} with no job, so these hours would be counted twice. Put that shift on the job instead of adding them again.`
+      : `${name} is already on the clock ${when}${found.jobLabel ? ` on ${found.jobLabel}` : code ? ` (${code})` : ""}, so these hours would be counted twice. Edit that entry instead.`,
+  };
+}
+
+/**
+ * THE CLOCK-IN'S OWN SENTENCE for a start time over hours already recorded (a back-dated staff
+ * clock-in, an offline punch delivered late). 0360 refuses it underneath; this says it the way the
+ * person tapping the clock can act on: start after the other shift ends, or have it fixed.
+ */
+export function clockInClashWords(input: { clash: OverlapClash; startIso: string; tz: string; isStaff: boolean }): string {
+  const { clash, startIso, tz, isStaff } = input;
+  const at = (iso: string) =>
+    new Date(iso).toLocaleTimeString("en-US", { timeZone: tz, hour: "numeric", minute: "2-digit" }).replace(/ /g, " ");
+  const when = clash.clockOut ? shiftWhen(clash.clockIn, clash.clockOut, tz) : shiftWhen(clash.clockIn, clash.clockIn, tz).split(" to ")[0];
+  const where = clash.jobLabel ? ` on ${clash.jobLabel}` : clash.noJob ? " with no job" : "";
+  const fix = isStaff ? "fix that shift on Timecards" : "ask the office to fix that shift";
+  return clash.clockOut
+    ? `You already have hours recorded ${when}${where}, so a clock started at ${at(startIso)} would count them twice. Nothing was recorded. Start the clock at ${at(clash.clockOut)} or later, or ${fix}.`
+    : `You already have a clock running since ${when}${where}. Nothing was recorded.`;
 }
 
 /** "Thursday Sep 17, 11:00 AM to 9:00 PM" in the ORG's day (days are org-local, never the

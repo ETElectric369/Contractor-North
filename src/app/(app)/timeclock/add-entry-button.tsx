@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -10,6 +10,7 @@ import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { createManualEntry } from "./actions";
 import { NewJobInline, type CreatedJob } from "./new-job-inline";
+import { SameDayShifts } from "./same-day-shifts";
 import { buildShiftSpan } from "./shift-span";
 import { lunchMinutesFor } from "@/lib/lunch-rule";
 import { LunchCheckbox } from "@/components/lunch-checkbox";
@@ -136,7 +137,19 @@ export function AddEntryButton({
   // the End date field. The derivation is a fallback only when the two dates match.
   const span = buildShiftSpan(date, startT, endT, endDate);
 
+  /**
+   * ONE TAP, ONE ENTRY (Brian's Aug 18: two identical J-039 entries saved 52 seconds apart). Save
+   * greys out while it works (`pending`), but a double tap can land both clicks before that
+   * re-render; the ref closes the gap in the same tick. Underneath, 0360 refuses the same hours
+   * twice for one person, simultaneous saves included.
+   */
+  const inFlight = useRef(false);
+  /** The shift a refusal named, bolded in the list above; and a nudge to re-read that list. */
+  const [clashId, setClashId] = useState<string | null>(null);
+  const [dayKey, setDayKey] = useState(0);
+
   function submit() {
+    if (inFlight.current || pending) return;
     setError(null);
     // Build ISO from local date + time so the user's timezone is respected; an end time
     // before the start rolls onto the next day (overnight shift).
@@ -149,7 +162,18 @@ export function AddEntryButton({
       setError("End time must be after start time.");
       return;
     }
+    inFlight.current = true;
     start(async () => {
+      try {
+        await save(clockIn, clockOut);
+      } finally {
+        inFlight.current = false;
+      }
+    });
+  }
+
+  async function save(clockIn: Date, clockOut: Date) {
+    {
       const res = await createManualEntry({
         profile_id: member,
         clock_in: clockIn.toISOString(),
@@ -165,8 +189,13 @@ export function AddEntryButton({
       });
       if (!res.ok) {
         setError(res.error ?? "Could not add entry.");
+        // The shift in the way is in the list above: bold it, and re-read the day so a shift saved
+        // a moment ago (another tab, a second phone) is there too.
+        setClashId(res.clash?.id ?? null);
+        setDayKey((k) => k + 1);
         return;
       }
+      setClashId(null);
       setOpen(false);
       setNotes("");
       // SAY WHERE IT WENT (Erik 2026-09-08: "Time card entry not appearing"). /timeclock is a
@@ -181,7 +210,7 @@ export function AddEntryButton({
         onClick: () => router.push("/timecards"),
       });
       router.refresh();
-    });
+    }
   }
 
   if (!isStaff) return null; // techs clock in/out live — only the office adds entries
@@ -261,6 +290,23 @@ export function AddEntryButton({
               <Input id="end" type="time" value={endT} onChange={(e) => setEndT(e.target.value)} />
             </div>
           </div>
+
+          {/* What this person already has on that day, with Put This On <job> for a punch on no
+              job (the duplicate punches, 2026-09-26). Reads again when the person, day or job
+              changes, and after a refusal. */}
+          <SameDayShifts
+            profileId={member || viewerId || ""}
+            date={date}
+            jobId={jobId || null}
+            highlightId={clashId}
+            refreshKey={dayKey}
+            onPlaced={() => {
+              setOpen(false);
+              setError(null);
+              setClashId(null);
+              router.refresh();
+            }}
+          />
 
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
             {/* Codes off: no code question — the entry carries just its job below. */}
