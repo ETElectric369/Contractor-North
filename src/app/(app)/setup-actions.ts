@@ -348,8 +348,9 @@ export async function draftMyPlaybook(): Promise<DraftResult> {
  * Deliberately a RECORDED FACT, not a derived one. A populated settings row is evidence somebody
  * typed, not evidence anybody learned — Andrew filled Vivian Builders in and the old card decided
  * he was finished, having never seen a why line. Erik: "everyone should go through it even if they
- * have a lot of it setup to learn the system." Per person (0180), never a gate, re-takeable from
- * the top bar forever.
+ * have a lot of it setup to learn the system." Per person (0180), never a gate, re-takeable
+ * forever from Take The Setup Again (under Search Or Ask; under Help, behind the initials, with
+ * Nort off).
  */
 export async function finishOnboarding(): Promise<{ ok: boolean; error?: string }> {
   const supabase = await createClient();
@@ -365,9 +366,10 @@ export async function finishOnboarding(): Promise<{ ok: boolean; error?: string 
 }
 
 /**
- * RECORD A LESSON OFFER (0197) — pressed "Show me" or "No thanks", both count. The inline offer
+ * RECORD A LESSON OFFER (0197) — pressed "Show Me" or "No Thanks", both count. The inline offer
  * strip shows only while the key is absent, so recording the decline is what stops it nagging;
- * replay always lives behind the cap, so declining loses nothing. Read-modify-write on the
+ * replay always lives under Show Me How (Search Or Ask; Help, behind the initials, with Nort
+ * off), so declining loses nothing. Read-modify-write on the
  * caller's own row (RLS scopes it), and duplicates are dropped so a double-tap can't grow the
  * array forever.
  */

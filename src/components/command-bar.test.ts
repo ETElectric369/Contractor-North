@@ -1,12 +1,15 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
+const calls = vi.hoisted(() => ({ order: [] as string[] }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
+vi.mock("@/lib/tts", () => ({ unlockAudio: vi.fn(() => calls.order.push("unlockAudio")) }));
 
-import { commandNavItems } from "./command-bar";
+import { commandNavItems, idleRows } from "./command-bar";
 import { ALL_ON, type FeatureMap } from "@/lib/features";
 import { isApplePlatform, modKeyLabel } from "@/lib/mod-key";
+import { NORT_TALK_EVENT, SETUP_EVENT } from "@/lib/onboarding/help-rows";
 
 const barSrc = readFileSync(join(process.cwd(), "src/components/command-bar.tsx"), "utf8");
 
@@ -140,5 +143,103 @@ describe("the command bar's footer", () => {
     expect(barSrc).toContain('e.key === "Enter"');
     expect(barSrc).toContain('e.key === "Escape"');
     expect(barSrc).toContain('"No matches. Press Enter to ask Nort."');
+  });
+});
+
+/**
+ * SEARCH OR ASK, NOTHING TYPED (W1-09): Talk To Nort first (Nort on), then — for staff — the rows
+ * the graduation cap held. Nort off, none of them: the setup rows sit under Help in the avatar menu.
+ */
+describe("Search Or Ask's rows before anything is typed", () => {
+  const DONE = { full_name: "Pat Lee", trade: "Electrical", city: "Truckee", service_area: "Tahoe", labor_rate: 120 };
+  const labels = (rows: ReturnType<typeof idleRows>) => rows.map((r) => r.label);
+
+  it("Nort on, staff never walked through: Talk To Nort, Start Here, Show Me How, Take The Setup Again", () => {
+    expect(labels(idleRows({ isStaff: true, features: ALL_ON, setup: {}, onboarded: false }))).toEqual([
+      "Talk To Nort", "Start Here", "Show Me How", "Take The Setup Again",
+    ]);
+  });
+
+  it("walked through, two setup questions still open: Finish Setting Up · 2 Left", () => {
+    const rows = idleRows({ isStaff: true, features: ALL_ON, setup: { ...DONE, service_area: null, labor_rate: null }, onboarded: true });
+    expect(labels(rows)).toEqual(["Talk To Nort", "Finish Setting Up · 2 Left", "Show Me How", "Take The Setup Again"]);
+  });
+
+  it("walked through, nothing open: no Start Here and no Finish row", () => {
+    expect(labels(idleRows({ isStaff: true, features: ALL_ON, setup: DONE, onboarded: true }))).toEqual([
+      "Talk To Nort", "Show Me How", "Take The Setup Again",
+    ]);
+  });
+
+  it("a tech: Talk To Nort only — no setup rows", () => {
+    expect(labels(idleRows({ isStaff: false, features: ALL_ON, setup: {}, onboarded: false }))).toEqual(["Talk To Nort"]);
+  });
+
+  it("Nort off: nothing here (Search only; the setup rows live under Help, behind the initials)", () => {
+    expect(idleRows({ isStaff: true, features: off("nort"), setup: {}, onboarded: false })).toEqual([]);
+    expect(barSrc).toContain('placeholder={nortOn ? "Search or ask Nort…"');
+  });
+
+  it("Show Me How folds its lessons open under it, and lists only lessons whose switch is on", () => {
+    const open = labels(idleRows({ isStaff: true, features: ALL_ON, setup: DONE, onboarded: true, lessonsOpen: true }));
+    expect(open).toEqual(["Talk To Nort", "Show Me How", "Why Lines", "Getting Around", "How a Job Runs", "Take The Setup Again"]);
+    const noSales = labels(idleRows({ isStaff: true, features: off("leads", "estimates"), setup: DONE, onboarded: true, lessonsOpen: true }));
+    expect(noSales).not.toContain("Why Lines");
+    // Its own row keeps the sheet open (it only folds) and says which way it's folded.
+    const show = idleRows({ isStaff: true, features: ALL_ON, setup: DONE, onboarded: true }).find((r) => r.label === "Show Me How")!;
+    expect(show).toMatchObject({ keepOpen: true, expanded: false });
+  });
+});
+
+describe("a doing row runs inside the tap that picked it", () => {
+  let target: EventTarget;
+  beforeEach(() => {
+    target = new EventTarget();
+    vi.stubGlobal("window", target);
+    calls.order = [];
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("Talk To Nort dispatches cn:nort-talk SYNCHRONOUSLY: the listener has run before run() returns", () => {
+    let heard = false;
+    target.addEventListener(NORT_TALK_EVENT, () => (heard = true));
+    const talk = idleRows({ isStaff: false, features: ALL_ON, onboarded: true })[0];
+    expect(talk.label).toBe("Talk To Nort");
+    talk.run!();
+    // No await between: if dispatching were deferred (a timer, a promise), this would still be false,
+    // and on an iPhone the mic would start outside the gesture and never open.
+    expect(heard).toBe(true);
+  });
+
+  it("the palette's go() runs a doing row first, before closing the sheet or anything asynchronous", () => {
+    const go = barSrc.slice(barSrc.indexOf("function go(item: Item)"), barSrc.indexOf("if (!open) return null;"));
+    const runAt = go.indexOf("item.run();");
+    expect(runAt).toBeGreaterThan(-1);
+    expect(runAt).toBeLessThan(go.indexOf("setOpen(false)"));
+    expect(go.slice(0, runAt)).not.toMatch(/await|setTimeout|then\(/);
+    // A row's click and Enter both go through go().
+    expect(barSrc).toContain("onClick={() => go(it)}");
+    expect(barSrc).toContain("if (it) go(it);");
+  });
+
+  it("every help row unlocks audio INSIDE the tap, then asks the setup host (cn:setup)", () => {
+    const heard: string[] = [];
+    target.addEventListener(SETUP_EVENT, (e) => {
+      calls.order.push("dispatch");
+      heard.push((e as CustomEvent<string>).detail);
+    });
+    const rows = idleRows({ isStaff: true, features: ALL_ON, setup: {}, onboarded: false, lessonsOpen: true }).filter((r) => r.kind === "Help" && !r.keepOpen);
+    for (const r of rows) r.run!();
+    expect(heard).toEqual(["tour", "lesson:why-lines", "lesson:getting-around", "lesson:how-a-job-runs", "tour"]);
+    // Unlock, dispatch — per row, in that order, every time.
+    expect(calls.order).toEqual(rows.flatMap(() => ["unlockAudio", "dispatch"]));
+  });
+
+  it("with Nort off Start Here and Take The Setup Again open the questions (no tour: the tour is Nort talking)", async () => {
+    const { helpRows } = await import("@/lib/onboarding/help-rows");
+    const rows = helpRows({ isStaff: true, onboarded: false, setup: {}, nortOn: false, features: off("nort") });
+    expect(rows.flatMap((r) => ("request" in r ? [`${r.label}=${r.request}`] : [r.label]))).toEqual([
+      "Start Here=questions", "Show Me How", "Take The Setup Again=questions",
+    ]);
   });
 });

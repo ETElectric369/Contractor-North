@@ -1,13 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ArrowRight, Check, Loader2, Mic, Square, Volume2, VolumeX } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { TourSpotlight } from "./tour-spotlight";
 import { useDictation } from "@/lib/use-dictation";
-import { TOUR, sayOf, stepWords, type TourCtx } from "@/lib/onboarding/tour";
+import { TOUR, sayOf, stepWords, stepsOn, type TourCtx } from "@/lib/onboarding/tour";
+import type { FeatureMap } from "@/lib/features";
 import { SETUP_PLAYBOOK } from "@/lib/onboarding/setup-playbook";
 import { speakSmart, stopSpeaking, unlockAudio } from "@/lib/tts";
 import { saveSetup, talkSetup } from "@/app/(app)/setup-actions";
@@ -38,9 +39,10 @@ export function TourDriver({
   initial,
   returning = false,
   onClose,
-  steps = TOUR,
+  steps: script = TOUR,
   storageKey = KEY,
   nortOn = true,
+  features,
 }: {
   initial: Answers;
   /** They've finished before — this is a revisit, not an introduction. */
@@ -55,13 +57,21 @@ export function TourDriver({
    *  at step 3 of a different list. */
   storageKey?: string;
   /** The Nort switch (0352, rule k). Off, a lesson reads its neutral words (TourStep.plain): no
-   *  "I", no Nort, and no card pointing at his top-bar button, which isn't drawn. The setup tour
-   *  itself never runs with Nort off (SetupButton opens the questions instead). */
+   *  "I", no Nort, and no first card pointing at Search Or Ask as his home (it reads "Search" and
+   *  holds no Nort rows then). The setup tour itself never runs with Nort off (SetupHost opens the
+   *  questions instead). */
   nortOn?: boolean;
+  /** The company's switches (the shell's doors map). A step gated on a switched-off feature is
+   *  skipped (lib/onboarding/tour stepsOn), and every line gets them (TourCtx.features), so the
+   *  avatar menu is described as THIS company's menu. Left out = everything on. */
+  features?: FeatureMap | null;
 }) {
   const router = useRouter();
   const pathname = usePathname();
   const search = useSearchParams();
+  // THE SCRIPT THIS COMPANY RUNS: gated steps whose switch is off never show (no Leads, no walk to
+  // the lead list). Everything below works on this list, so the count and resume agree with it.
+  const steps = useMemo(() => stepsOn(script, features), [script, features]);
 
   const [i, setI] = useState(() => {
     if (typeof window === "undefined") return 0;
@@ -110,6 +120,7 @@ export function TourDriver({
     city: str("city"),
     rate: typeof answers.labor_rate === "number" && answers.labor_rate > 0 ? `$${answers.labor_rate}` : "",
     returning,
+    features,
   };
 
   const step = steps[i];
@@ -317,7 +328,7 @@ export function TourDriver({
   const asksAnything = steps.some((st) => st.ask);
   if (!started)
     return (
-      <TourSpotlight anchor={nortOn ? "nort" : undefined} title="Two minutes, out loud" onExit={() => onClose(false)} step={1} total={steps.length}>
+      <TourSpotlight anchor={nortOn ? "ask" : undefined} title="Two minutes, out loud" onExit={() => onClose(false)} step={1} total={steps.length}>
         <p className="text-sm leading-relaxed text-slate-600">
           {asksAnything ? (
             <>

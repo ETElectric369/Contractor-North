@@ -373,14 +373,14 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
   // links to the quote (the permanent log in /quotes).
   const [saved, setSaved] = useState<{ id: string; title: string; total: number; customer?: string }[]>([]);
 
-  // Publish the live estimate + speaking state to the shared store so the COMPACTED Estimator
-  // (total + stop) can live on the topbar Talk button even when this drawer is closed.
+  // Publish the live estimate + speaking state to the shared store, so what lives outside this
+  // drawer (the top bar's Stop Nort, the collapsed ESTIMATOR summary) sees it even while it's closed.
   useEffect(() => { estimatorStore.setDraft(draft); }, [draft]);
   useEffect(() => { estimatorStore.setCard(card); }, [card]);
   useEffect(() => { estimatorStore.setSpeaking(speaking); }, [speaking]);
   useEffect(() => { estimatorStore.setStreaming(streaming); }, [streaming]);
-  // Publish listening too, so the topbar button can show a real red STOP whenever the mic is hot
-  // (not just while thinking/talking) — it's the only voice control now.
+  // Publish listening too, so Search Or Ask turns into the red Stop Nort whenever the mic is hot
+  // (not just while thinking/talking) — the bar's one voice control while Nort works.
   useEffect(() => { estimatorStore.setListening(listening); }, [listening]);
   // Tear the voice session down on unmount (close), so a live recognizer + any in-flight speech
   // (streaming queue / barge-in monitor) never outlive the panel.
@@ -394,7 +394,7 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
     estimatorStore.setSpeaking(false);
     estimatorStore.setStreaming(false);
   }, []);
-  // The topbar STOP (and Close / Collapse, which dispatch this) fully ends the turn: abort the
+  // Stop Nort in the top bar (and Close / Collapse, which dispatch this) fully ends the turn: abort the
   // in-flight stream, cut TTS, AND stop the mic + leave voice mode — so "stop" deterministically
   // means stop (no orphaned recognizer, no auto-re-listen loop left armed).
   const abortRef = useRef<AbortController | null>(null);
@@ -431,9 +431,10 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // The topbar Talk button is the ONLY voice control now (no in-panel mic). When the panel is already
-  // open, the tap ALREADY (re)started the mic in-gesture (launch → speech.startListening) — here we just
-  // enter voice mode + point the next transcript at a normal spoken turn.
+  // Talk To Nort (the first row under Search Or Ask) is the ONLY way the voice starts now (no in-panel
+  // mic). When the panel is already open, its tap ALREADY (re)started the mic in-gesture (cn:nort-talk →
+  // launch → speech.startListening) — here we just enter voice mode + point the next transcript at a
+  // normal spoken turn.
   useEffect(() => {
     const talk = () => {
       setVoiceMode(true);
@@ -504,7 +505,7 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
   }
 
   // The active streaming speak queue for the current reply, and the barge-in monitor teardown.
-  // Held in refs so the topbar Stop / stopVoice paths can tear them down deterministically.
+  // Held in refs so the Stop Nort / stopVoice paths can tear them down deterministically.
   const speakQueueRef = useRef<SpeakQueue | null>(null);
   const bargeStopRef = useRef<(() => void) | null>(null);
 
@@ -607,13 +608,13 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
     return () => cancelAnimationFrame(raf);
   }, [voiceMode]);
 
-  // Voice-first: the topbar tap ALREADY started the mic in-gesture (global-assistant launch →
-  // speech.startListening) — iOS only honors a start inside the gesture. So here we just enter voice
-  // mode (do NOT start the mic from this post-commit effect; iOS would reject it).
+  // Voice-first: the Talk To Nort tap ALREADY started the mic in-gesture (cn:nort-talk → global-assistant
+  // launch → speech.startListening) — iOS only honors a start inside the gesture. So here we just enter
+  // voice mode (do NOT start the mic from this post-commit effect; iOS would reject it).
   useEffect(() => {
     if (!autoStart) return;
     setVoiceMode(true);
-    // The mic was started in-gesture by the topbar tap. If it took, mirror "listening". The stream
+    // The mic was started in-gesture by the Talk To Nort tap. If it took, mirror "listening". The stream
     // backend narrates its own start ("Connecting to the mic…", then ready, blocked, or not
     // answering), and onStatus replays the line it is on, so writing over it here is what left
     // "Tap the mic to answer" on screen in a panel that has no mic button. Only the fallback
@@ -696,7 +697,7 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
         confirmRef.current = rec.confirm;
         setPendingConfirm(rec.confirm);
       }
-      // Opened by the Talk button: the turn is read out, as it would have been. With a proposal
+      // Opened by Talk To Nort: the turn is read out, as it would have been. With a proposal
       // waiting, what gets read is the read-back — and the mic re-opens for yes or no, the same
       // explicit human answer the live path waits for.
       if (autoStart) {
@@ -815,7 +816,7 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
     // door, and the marker is what makes a reload check. So does a STOP: it ends the stream, not
     // the question; the server still finishes, and the next open shows what it said.
     let turnSettled = false;
-    // The controller the topbar STOP reaches during a drop-recovery loop. The fetch's own is
+    // The controller Stop Nort reaches during a drop-recovery loop. The fetch's own is
     // already spent by then (dropStream fired it), so the loop needs a live one of its own.
     let recoverAbort: AbortController | null = null;
     // WHEN THE PHONE LOSES THE STREAM. Three ways the shell drops a reply the server still
@@ -1019,7 +1020,7 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
         // `full` is every byte the route sent; empty = nothing ever arrived, so the short budget.
         const tries = full.length ? RECOVERY_TRIES_FULL : RECOVERY_TRIES_NO_BYTE;
         recoverAbort = new AbortController();
-        abortRef.current = recoverAbort; // what the topbar STOP aborts from here on
+        abortRef.current = recoverAbort; // what Stop Nort aborts from here on
         if (!recoveredEarly && !isOffline()) setStatus("The connection dropped. Catching up with Nort…");
         const reply = recoveredEarly ?? (await fetchRecoveredReply(content, sentAt, tries, recoverAbort.signal));
         if (recoverAbort.signal.aborted) {
@@ -1200,8 +1201,8 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
       ) : null}
       {/* GLASS: a clean command box — the ESTIMATOR summary + its line items, the live status line,
           a one-line text box, then one line per conversation turn expanding down. No header/footer
-          chrome; the topbar waveform button is the only VOICE control (voice + stop), the panel
-          handle moves/collapses it. */}
+          chrome; Talk To Nort (under Search Or Ask) starts the voice and the top bar's Stop Nort
+          ends it, and the panel handle moves/collapses it. */}
       {glass && (
         <div className="flex min-h-0 flex-1 flex-col">
           {draft && (
@@ -1248,8 +1249,9 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
                   thing working, "0s · 0 tokens · Hearing you…" (Erik's 2026-09-11 screenshot)
                   reads as a reply that isn't coming. */}
               {/* Wraps when it isn't a live reply (review of the 09-23 wave): at 375px one truncated
-                  line holds about 48 characters, which cut "Tap the Nort button up top to try again,
-                  or type below" off every mic failure line. The streaming readout stays one line. */}
+                  line holds about 48 characters, which cut the try-again line (then "Tap the Nort
+                  button up top…", now "Tap Talk To Nort to try again, or type below.") off every
+                  mic failure line. The streaming readout stays one line. */}
               <span className={`text-sm text-slate-500 ${streaming ? "truncate" : "line-clamp-3 break-words"}`}>
                 {streaming ? `${elapsedStr} · ${tokens} tokens · ${statusText}` : statusText}
               </span>
@@ -1462,7 +1464,8 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
         </div>
       ) : glass ? null : voiceMode ? (
           // Voice mode (full page only) — chat-style. It listens / thinks / talks; the big mic is
-          // "your turn". In the glass drawer the topbar waveform button is the only voice control.
+          // "your turn". In the glass drawer the voice starts from Talk To Nort (under Search Or Ask)
+          // and stops at the top bar's Stop Nort.
           <div className="flex flex-col items-center gap-2 border-t border-slate-100 p-4">
             <VoiceWave active={listening || speaking} />
             <div className="text-sm font-medium text-slate-600">

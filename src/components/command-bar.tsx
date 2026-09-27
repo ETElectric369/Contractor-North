@@ -2,12 +2,28 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Search, Sparkles, Plus, ArrowRight } from "lucide-react";
+import { Search, Sparkles, Plus, ArrowRight, Mic, GraduationCap, ChevronDown } from "lucide-react";
 import { visibleDock } from "@/lib/dock";
 import { featureOn, type FeatureKey, type FeatureMap } from "@/lib/features";
 import { isApplePlatform, modKeyLabel } from "@/lib/mod-key";
+import { helpRows, openSetup, talkToNort } from "@/lib/onboarding/help-rows";
+import type { Answers } from "@/lib/playbook/types";
 
-type Item = { kind: string; label: string; sub?: string; href: string; staffOnly?: boolean; aliases?: string[] };
+type Item = {
+  kind: string;
+  label: string;
+  sub?: string;
+  href: string;
+  staffOnly?: boolean;
+  aliases?: string[];
+  /** A row that DOES something instead of going somewhere (Talk To Nort, the help rows). It runs
+   *  first thing in the tap (go), before anything else, so iOS still counts it as the gesture. */
+  run?: () => void;
+  /** Show Me How: folding its lessons open keeps the sheet open. */
+  keepOpen?: boolean;
+  /** Show Me How's fold state, for its chevron and aria-expanded. */
+  expanded?: boolean;
+};
 
 // Synonyms so search finds a page by what the owner CALLS it, not just its label. Keyed by the
 // page's href (the stable id) so it survives label/section renames. Lowercase; matched as
@@ -94,7 +110,47 @@ export function commandNavItems(isStaff: boolean, features?: FeatureMap | null):
   return isStaff ? items : items.filter((i) => !i.staffOnly);
 }
 
+/**
+ * WHAT SEARCH OR ASK SHOWS BEFORE ANYTHING IS TYPED (W1-09), above the first pages:
+ *   Talk To Nort   first, with Nort on (it starts the mic inside its own tap: talkToNort)
+ *   the help rows  staff, with Nort on (lib/onboarding/help-rows): Start Here or Finish Setting Up,
+ *                  Show Me How (its lessons fold open under it), Take The Setup Again. With Nort
+ *                  off the same rows sit under Help in the avatar menu instead.
+ * Exported so the rows, their order and their switch rules are pinned in a test.
+ */
+export function idleRows({
+  isStaff,
+  features,
+  setup,
+  onboarded,
+  lessonsOpen = false,
+  toggleLessons = () => {},
+}: {
+  isStaff: boolean;
+  features?: FeatureMap | null;
+  setup?: Answers | null;
+  onboarded: boolean;
+  lessonsOpen?: boolean;
+  toggleLessons?: () => void;
+}): Item[] {
+  if (!featureOn(features, "nort")) return [];
+  const rows: Item[] = [{ kind: "Nort", label: "Talk To Nort", sub: "Say it out loud", href: "#talk-to-nort", run: talkToNort }];
+  for (const r of helpRows({ isStaff, onboarded, setup, nortOn: true, features })) {
+    if (r.key === "lessons") {
+      rows.push({ kind: "Help", label: r.label, sub: r.sub, href: "#show-me-how", run: toggleLessons, keepOpen: true, expanded: lessonsOpen });
+      if (lessonsOpen) {
+        for (const l of r.lessons) rows.push({ kind: "Help", label: l.label, sub: l.sub, href: `#${l.request}`, run: () => openSetup(l.request) });
+      }
+    } else {
+      rows.push({ kind: "Help", label: r.label, sub: r.sub, href: `#${r.request}`, run: () => openSetup(r.request) });
+    }
+  }
+  return rows;
+}
+
 function LeadIcon({ kind }: { kind: string }) {
+  if (kind === "Nort") return <Mic className="h-4 w-4 text-brand" />;
+  if (kind === "Help") return <GraduationCap className="h-4 w-4 text-slate-400" />;
   if (kind === "Assistant") return <Sparkles className="h-4 w-4 text-brand" />;
   if (kind === "Create") return <Plus className="h-4 w-4 text-slate-400" />;
   if (kind === "Go to") return <ArrowRight className="h-4 w-4 text-slate-400" />;
@@ -102,20 +158,36 @@ function LeadIcon({ kind }: { kind: string }) {
 }
 
 /**
- * Global command palette (⌘K / Ctrl-K, or the topbar search button). Searches
- * the org's jobs/customers/quotes/invoices, jumps to any page, or hands the
- * query to the Assistant. Deep-links use Wave-1's ?tab= where useful.
+ * SEARCH OR ASK — the global command palette (⌘K / Ctrl-K, or the top bar's Search Or Ask).
+ * Searches the org's jobs/customers/quotes/invoices, jumps to any page, or hands the query to
+ * Nort. With nothing typed it leads with Talk To Nort and, for staff, the setup rows the old
+ * graduation cap held (idleRows). Deep-links use Wave-1's ?tab= where useful.
  */
-export function CommandBar({ isStaff, features }: { isStaff?: boolean; features?: FeatureMap }) {
+export function CommandBar({
+  isStaff,
+  features,
+  setup,
+  onboarded = true,
+}: {
+  isStaff?: boolean;
+  features?: FeatureMap;
+  /** The company's setup answers (the layout's), for Finish Setting Up · N Left. */
+  setup?: Answers;
+  /** profiles.onboarded_at: Start Here shows until this person has been walked through. */
+  onboarded?: boolean;
+}) {
   const router = useRouter();
   const navItems = useMemo(() => commandNavItems(!!isStaff, features), [isStaff, features]);
-  // Nort off: no "Ask Nort" row and no promise that Enter asks him (the drawer isn't mounted).
+  // Nort off: no "Ask Nort" row, no Talk To Nort, no help rows (they're under Help in the avatar
+  // menu), and no promise that Enter asks him (the drawer isn't mounted).
   const nortOn = featureOn(features, "nort");
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const [results, setResults] = useState<Item[]>([]);
   const [loading, setLoading] = useState(false);
   const [sel, setSel] = useState(0);
+  // Show Me How's lessons, folded under it until it's picked.
+  const [lessonsOpen, setLessonsOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Open via ⌘K / Ctrl-K, or the topbar "cn:command" event. Esc closes.
@@ -144,6 +216,7 @@ export function CommandBar({ isStaff, features }: { isStaff?: boolean; features?
       setQ("");
       setResults([]);
       setSel(0);
+      setLessonsOpen(false);
       const t = setTimeout(() => inputRef.current?.focus(), 30);
       return () => clearTimeout(t);
     }
@@ -174,9 +247,14 @@ export function CommandBar({ isStaff, features }: { isStaff?: boolean; features?
     return () => clearTimeout(t);
   }, [q]);
 
+  const idle = useMemo(
+    () => idleRows({ isStaff: !!isStaff, features, setup, onboarded, lessonsOpen, toggleLessons: () => setLessonsOpen((v) => !v) }),
+    [isStaff, features, setup, onboarded, lessonsOpen],
+  );
+
   const staticMatches = useMemo(() => {
     const term = q.trim().toLowerCase();
-    if (!term) return navItems.slice(0, 7);
+    if (!term) return [...idle, ...navItems.slice(0, 7)];
     // Match the label, the parent section, OR any synonym — so "owed"/"AR" finds Invoices and
     // "wages" finds Payroll. Label hits rank above alias-only hits.
     const scored = navItems
@@ -189,7 +267,7 @@ export function CommandBar({ isStaff, features }: { isStaff?: boolean; features?
       .filter((s) => s.hit)
       .sort((a, b) => a.rank - b.rank);
     return scored.slice(0, 6).map((s) => s.i);
-  }, [q, navItems]);
+  }, [q, navItems, idle]);
 
   const askItem: Item | null = q.trim() && nortOn
     ? { kind: "Assistant", label: `Ask Nort: “${q.trim()}”`, href: `/assistant?q=${encodeURIComponent(q.trim())}` }
@@ -205,6 +283,14 @@ export function CommandBar({ isStaff, features }: { isStaff?: boolean; features?
   }, [q]);
 
   function go(item: Item) {
+    // A row that DOES something runs FIRST, synchronously, in the tap that picked it: Talk To Nort
+    // starts the mic from inside this click (iOS refuses it any later), and a help row unlocks
+    // audio here so Nort's first line plays. Nothing may come between the tap and run().
+    if (item.run) {
+      item.run();
+      if (!item.keepOpen) setOpen(false);
+      return;
+    }
     setOpen(false);
     // The assistant is the slim drawer now — open it (with the typed question) instead of a page.
     if (item.kind === "Assistant") {
@@ -243,7 +329,7 @@ export function CommandBar({ isStaff, features }: { isStaff?: boolean; features?
                 if (it) go(it);
               }
             }}
-            placeholder="Search jobs, customers, quotes… or jump to a page"
+            placeholder={nortOn ? "Search or ask Nort…" : "Search jobs, customers, quotes… or jump to a page"}
             className="flex-1 bg-transparent py-3.5 text-sm outline-none placeholder:text-slate-400"
           />
           {loading && <span className="shrink-0 text-[11px] text-slate-400">…</span>}
@@ -259,14 +345,19 @@ export function CommandBar({ isStaff, features }: { isStaff?: boolean; features?
             <button
               key={`${i}-${it.href}`}
               onMouseEnter={() => setSel(i)}
+              // go() runs a doing row (Talk To Nort, a help row) before anything else in this tap.
               onClick={() => go(it)}
-              className={`flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm ${i === sel ? "bg-brand-light/50" : "hover:bg-slate-50"}`}
+              aria-expanded={it.expanded}
+              className={`flex min-h-11 w-full items-center gap-3 px-4 py-2.5 text-left text-sm ${i === sel ? "bg-brand-light/50" : "hover:bg-slate-50"}`}
             >
               <span className="shrink-0">
                 <LeadIcon kind={it.kind} />
               </span>
               <span className="min-w-0 flex-1 truncate text-slate-800">{it.label}</span>
-              {it.sub && <span className="hidden shrink-0 text-xs text-slate-400 sm:inline">{it.sub}</span>}
+              {it.sub && <span className="hidden min-w-0 max-w-[45%] shrink truncate text-xs text-slate-400 sm:inline">{it.sub}</span>}
+              {it.expanded !== undefined && (
+                <ChevronDown className={`h-4 w-4 shrink-0 text-slate-400 transition-transform ${it.expanded ? "rotate-180" : ""}`} />
+              )}
               <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-500">{it.kind}</span>
             </button>
           ))}

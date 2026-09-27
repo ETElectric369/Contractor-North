@@ -39,7 +39,8 @@ import type { Answers, AnswerValue, Need } from "@/lib/playbook/types";
  *   3. WHERE IT LIVES  the short orientation, so nobody has to hunt for what they just made.
  *
  * Finishing records a fact (profiles.onboarded_at, 0180) rather than deriving one. Never a gate,
- * and re-takeable forever from the top bar.
+ * and re-takeable forever from Take The Setup Again (under Search Or Ask; under Help, behind the
+ * initials, with Nort off).
  */
 
 type Step = 1 | 2 | 3;
@@ -279,17 +280,19 @@ export function SetupInterview({
             err ? (
               <div className="mt-3 space-y-2">
                 <p className="text-sm text-rose-700">{err}</p>
+                {/* The door is named where it really is: Take The Setup Again sits under Search Or
+                    Ask with Nort on, and under Help behind the initials with him off. */}
                 {nortOn ? (
                   <p className="text-sm text-slate-500">
                     That usually means I never got your trade, so there are no questions to draft yet.
-                    Take the walk-through again from the cap button and tell me your trade &mdash; or
+                    Take the walk-through again from Search Or Ask and tell me your trade &mdash; or
                     write them yourself under Settings &rarr; Playbook.
                   </p>
                 ) : (
                   <p className="text-sm text-slate-500">
                     That usually means no trade is on file, so there are no questions to draft yet.
-                    Take the setup again from the cap button and give your trade &mdash; or write them
-                    yourself under Settings &rarr; Playbook.
+                    Take the setup again from Help, behind your initials, and give your trade &mdash; or
+                    write them yourself under Settings &rarr; Playbook.
                   </p>
                 )}
               </div>
@@ -399,8 +402,9 @@ export function SetupInterview({
             <li className="flex gap-3">
               <ArrowRight className="mt-0.5 h-4 w-4 shrink-0 text-brand" />
               <span>
-                <strong className="font-medium text-slate-900">This walk-through</strong> stays in the top bar. Take it again
-                whenever you want — nothing here is one-time.
+                <strong className="font-medium text-slate-900">This walk-through</strong>{" "}
+                {nortOn ? "is under Search Or Ask" : "is under Help, behind your initials"}. Take it again whenever you
+                want.
               </span>
             </li>
           </ul>
