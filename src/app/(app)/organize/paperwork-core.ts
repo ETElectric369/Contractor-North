@@ -19,6 +19,7 @@ import {
   type MarkJob,
   type MarkPo,
   type PaperMarks,
+  sameMoneyFromBank,
   type BookedBill,
   type BookedPaper,
   type BookedSupplierInvoice,
@@ -555,6 +556,8 @@ export type Books = {
   papers: BookedPaper[];
   supplierInvoices: BookedSupplierInvoice[];
   aliases: SupplierAliasIndex;
+  /** Business costs a bank download wrote (no number on them): the same purchase by money and day. */
+  bankBills?: BookedBill[];
 };
 
 /**
@@ -566,16 +569,18 @@ export type Books = {
 export async function loadBooks(supabase: any, orgId: string | null | undefined): Promise<Books> {
   const empty: Books = { bills: [], papers: [], supplierInvoices: [], aliases: new Map() };
   if (!orgId) return empty;
-  const safe = async <T,>(p: PromiseLike<{ data: unknown; error: unknown }>): Promise<T[]> => {
+  // A THUNK, so a query that can't even be built (a client without a filter, a column not on this
+  // database) is an empty list too, never a thrown error in the File It path.
+  const safe = async <T,>(q: () => PromiseLike<{ data: unknown; error: unknown }>): Promise<T[]> => {
     try {
-      const { data, error } = await p;
-      return error ? [] : ((data ?? []) as T[]);
+      const { data, error } = await q();
+      return error || !Array.isArray(data) ? [] : (data as T[]);
     } catch {
       return [];
     }
   };
-  const [bills, papers, supplierInvoices, aliasRows, links] = await Promise.all([
-    safe<BookedBill>(
+  const [bills, papers, supplierInvoices, aliasRows, links, bankBills] = await Promise.all([
+    safe<BookedBill>(() =>
       supabase
         .from("bills")
         // BOTH NUMBER COLUMNS, and whether it was set aside (audit v994, DB1): a bill Record It As
@@ -593,7 +598,7 @@ export async function loadBooks(supabase: any, orgId: string | null | undefined)
         .order("created_at", { ascending: false })
         .limit(5000),
     ),
-    safe<BookedPaper>(
+    safe<BookedPaper>(() =>
       supabase
         .from("organized_items")
         .select("id, vendor, doc_number, status, bill_id, title")
@@ -601,20 +606,34 @@ export async function loadBooks(supabase: any, orgId: string | null | undefined)
         .not("doc_number", "is", null)
         .limit(5000),
     ),
-    safe<BookedSupplierInvoice>(
+    safe<BookedSupplierInvoice>(() =>
       supabase.from("supplier_invoices").select("id, invoice_number, supplier_account_id, total, invoice_date").eq("org_id", orgId).limit(5000),
     ),
-    safe<{ alias: string; supplier_account_id: string }>(
+    safe<{ alias: string; supplier_account_id: string }>(() =>
       supabase.from("supplier_aliases").select("alias, supplier_account_id").eq("org_id", orgId).limit(5000),
     ),
     // WHICH CED DOCUMENTS A BILL ALREADY COVERS (0273/0277). A document with a bill behind it is
     // that bill's purchase; one without is not a cost at all, and File It links the new bill to it.
-    safe<{ supplier_invoice_id: string; bill_id: string; bills?: { id?: string; job_id?: string | null; jobs?: { job_number?: string | null; name?: string | null } | null } | null }>(
+    safe<{ supplier_invoice_id: string; bill_id: string; bills?: { id?: string; job_id?: string | null; jobs?: { job_number?: string | null; name?: string | null } | null } | null }>(() =>
       supabase
         .from("bill_supplier_invoices")
         .select("supplier_invoice_id, bill_id, bills(id, job_id, jobs(job_number, name))")
         .eq("org_id", orgId)
         .limit(5000),
+    ),
+    // THE BUSINESS COSTS A BANK DOWNLOAD WROTE (0363): they carry no number, so a receipt for the
+    // same purchase is found by its money and day (sameMoneyFromBank). Newest first; a database
+    // before 0363 has no bank_line_id and this is simply empty.
+    safe<BookedBill>(() =>
+      supabase
+        .from("bills")
+        .select("id, supplier, bill_number, supplier_invoice_number, supplier_account_id, superseded_by_bill_id, amount, bill_date, job_id")
+        .eq("org_id", orgId)
+        .not("bank_line_id", "is", null)
+        .is("job_id", null)
+        .is("superseded_by_bill_id", null)
+        .order("bill_date", { ascending: false })
+        .limit(2000),
     ),
   ]);
   const cover = new Map<string, NonNullable<BookedSupplierInvoice["covered_by"]>>();
@@ -627,11 +646,13 @@ export async function loadBooks(supabase: any, orgId: string | null | undefined)
     papers,
     supplierInvoices: supplierInvoices.map((si) => ({ ...si, covered_by: cover.get(String(si.id)) ?? null })),
     aliases: indexSupplierAliases(aliasRows),
+    bankBills,
   };
 }
 
 export function matchesOnBooks(item: PaperItem, books: Books): NumberMatch[] {
-  return findSameNumber(item, books, books.aliases);
+  const byNumber = findSameNumber(item, books, books.aliases);
+  return [...byNumber, ...sameMoneyFromBank(item, books.bankBills ?? [], byNumber)];
 }
 
 /**

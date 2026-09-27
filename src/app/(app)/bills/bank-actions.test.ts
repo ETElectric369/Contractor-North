@@ -25,7 +25,7 @@ vi.mock("@/lib/pdf-cache", () => ({ bustDocPdf: vi.fn(async () => {}), warmDocPd
 import { addOpenList } from "./open-list-actions";
 import { applyBankDownload, forgetBankRule, setBankAccount, swapBankDownload, undoBankDownload } from "./bank-actions";
 import { applyBankCore, bankViews, BANK_NEEDS_UPDATE } from "./bank-core";
-import { undoPaperwork } from "@/app/(app)/organize/actions";
+import { fileItem, undoPaperwork } from "@/app/(app)/organize/actions";
 
 type Row = Record<string, any>;
 let db: Record<string, Row[]>;
@@ -533,6 +533,33 @@ describe("a fill-up already on the books", () => {
     expect(db.bank_lines.find((l) => l.id === receipt.bank_line_id)).toMatchObject({ choice: "matched", matched_kind: "fuel" });
     await undoBankDownload(next);
     expect(db.bills.find((b) => b.id === "b-receipt")).toMatchObject({ cost_kind: null, bank_line_id: null });
+  });
+});
+
+describe("a receipt snapped after the download", () => {
+  it("is found on the books by its money and day, and File It asks instead of writing a second cost", async () => {
+    const id = await drop();
+    const v = await view(id);
+    await applyBankDownload(id, { fingerprint: v.fingerprint, picks: { [rowBy(v, "SHELL").id]: "cost:Gas & Truck:fuel" } });
+    expect(db.bills).toHaveLength(3);
+    db.organized_items.push({
+      id: "pump",
+      org_id: "org-1",
+      kind: "receipt",
+      status: "needs_review",
+      doc_type: "receipt",
+      title: "Shell receipt",
+      vendor: "Shell",
+      amount: 100,
+      item_date: "2026-09-17",
+      payment: "paid_at_purchase",
+      proposal: {},
+    });
+    const res = await fileItem("pump", { type: "overhead", category: "Gas & Truck" });
+    expect(res.ok).toBe(false);
+    expect(res.error).toMatch(/^Already on the books: 1111-SHELL 123 ANYTOWN ST, \$100\.00, 2026-09-16, from the bank download/);
+    expect(res.error).toMatch(/Different Purchase: File It Anyway/);
+    expect(db.bills).toHaveLength(3);
   });
 });
 

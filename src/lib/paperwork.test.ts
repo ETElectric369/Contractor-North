@@ -4,6 +4,7 @@ import {
   describePaper,
   fileRefusal,
   findSameNumber,
+  sameMoneyFromBank,
   guessOf,
   isPicture,
   isLinelessReturn,
@@ -586,6 +587,25 @@ describe("a plain picture asks what it is first", () => {
   it("Something Else keeps the picture on a job or in files, as any paper that isn't a cost", () => {
     expect(fileRefusal(picture(), parseDestination("keep"))).toBeNull();
     expect(fileRefusal(picture(), parseDestination("job:job-1"))).toBeNull();
+  });
+});
+
+describe("sameMoneyFromBank: a purchase a bank download already wrote", () => {
+  const bankBill = { id: "bill-bank", supplier: "1111-SHELL OIL 12345 ANYTOWN", bill_number: null, amount: 62.1, bill_date: "2026-09-12", job_id: null, superseded_by_bill_id: null };
+  it("a receipt of the same money within 3 days is that bill, whatever its number", () => {
+    const pump = receipt({ vendor: "Shell", amount: 62.1, item_date: "2026-09-13", doc_number: null });
+    const m = sameMoneyFromBank(pump, [bankBill]);
+    expect(m).toEqual([
+      { kind: "bill", billId: "bill-bank", jobId: null, sentence: "Already on the books: 1111-SHELL OIL 12345 ANYTOWN, $62.10, 2026-09-12, from the bank download (a business cost)." },
+    ]);
+  });
+  it("another amount, a day 4 apart, a job's bill, or a paper that isn't a cost is not", () => {
+    expect(sameMoneyFromBank(receipt({ amount: 62.11, item_date: "2026-09-12" }), [bankBill])).toEqual([]);
+    expect(sameMoneyFromBank(receipt({ amount: 62.1, item_date: "2026-09-16" }), [bankBill])).toEqual([]);
+    expect(sameMoneyFromBank(receipt({ amount: 62.1, item_date: "2026-09-12" }), [{ ...bankBill, job_id: "job-1" }])).toEqual([]);
+    expect(sameMoneyFromBank(receipt({ amount: 62.1, item_date: "2026-09-12", doc_type: "not_a_cost" }), [bankBill])).toEqual([]);
+    // The bill this paper made is never its own twin.
+    expect(sameMoneyFromBank(receipt({ amount: 62.1, item_date: "2026-09-12", bill_id: "bill-bank" }), [bankBill])).toEqual([]);
   });
 });
 

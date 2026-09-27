@@ -1308,6 +1308,41 @@ export function findSameNumber(
 }
 
 /**
+ * THE SAME PURCHASE, WRITTEN BY A BANK DOWNLOAD (2026-09-27). A bank line placed as a business cost
+ * becomes a no-job bill with no number (the bank prints none), so the number check above can never
+ * find it: a pump receipt snapped after the download filed that fill-up a second time. A receipt or
+ * bill of the SAME MONEY, dated within 3 days of a bill a bank download wrote, is that bill (a
+ * "bill" match: Same Purchase: Tie Them, or Different Purchase: File It Anyway). The reverse order,
+ * the receipt first, is the bank download's own match.
+ */
+export function sameMoneyFromBank(item: PaperItem, bankBills: readonly BookedBill[], already: readonly NumberMatch[] = []): NumberMatch[] {
+  const type = paperTypeOfItem(item);
+  if (type !== "receipt" && type !== "bill") return [];
+  const amount = amountOf(item);
+  const day = String(item.item_date ?? "").slice(0, 10);
+  if (amount === null || !/^\d{4}-\d{2}-\d{2}$/.test(day)) return [];
+  const cents = Math.round(amount * 100);
+  const apart = (a: string, b: string) => Math.abs(Date.parse(`${a}T12:00:00Z`) - Date.parse(`${b}T12:00:00Z`)) / 86_400_000;
+  return bankBills
+    .filter(
+      (b) =>
+        b.id !== item.bill_id &&
+        !b.job_id &&
+        !b.superseded_by_bill_id &&
+        !already.some((m) => (m.kind === "bill" || m.kind === "maybe_bill") && m.billId === b.id) &&
+        Math.round(Number(b.amount) * 100) === cents &&
+        !!b.bill_date &&
+        apart(String(b.bill_date).slice(0, 10), day) <= 3,
+    )
+    .map((b) => ({
+      kind: "bill" as const,
+      billId: b.id,
+      jobId: null,
+      sentence: `Already on the books: ${b.supplier ?? "a bank line"}, ${money(amount)}, ${b.bill_date}, from the bank download (a business cost).`,
+    }));
+}
+
+/**
  * THE LINES A PAPER FILED TO THE SHELF WILL HAVE, in the order its bill will hold them (File It
  * writes cleanLines, pointed with the total, with sort_order = this index). The tray row counts
  * each of these and the server keys the answers back by index, so both read them from here.

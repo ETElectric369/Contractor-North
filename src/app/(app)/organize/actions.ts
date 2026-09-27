@@ -940,7 +940,10 @@ export async function fileItem(id: string, dest: FileDestination, opts: FileOpti
   // refusal: the row showed it with Same Purchase: Tie Them, a person pressed File It anyway, and
   // the bill says so, so two bills with one number are known to have been decided, not missed.
   let maybeSaid = "";
-  if (dest.type !== "unfiled" && dest.type !== "photo" && isCost && item.doc_number && !opts.differentPurchase) {
+  // A receipt with no number is still asked the first time it is filed: a bank download may have
+  // written its purchase already (matchesOnBooks finds that bill by money and day). Moving a paper
+  // that already made its own bill never is: a download after it matched that bill instead.
+  if (dest.type !== "unfiled" && dest.type !== "photo" && isCost && (item.doc_number || !item.bill_id) && !opts.differentPurchase) {
     const books = await loadBooks(supabase, ctx.orgId);
     const found = matchesOnBooks(item, books);
     const onBooks = found.filter((m) => m.kind === "bill");
