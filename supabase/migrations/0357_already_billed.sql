@@ -38,6 +38,10 @@
 --        whose work to date counts only its own invoices; a take only ever on its own job's
 --        invoice, 0343); an id already on any live invoice, this one
 --        included (0258 allows a repeat on one invoice; this does not).
+--      HOURS ON NO JOB: a closed shift nobody put on a job goes only on an invoice with no job,
+--      whoever its customer is (none needed): TTUSD's 8/6-8/7 days typed by hand on INV-055 and Ben
+--      Ebenezer's 8/8 on INV-058. Every other guard holds for it (closed, a split shift whole, never
+--      twice, a line of work, nothing on the bill moves); on a job's invoice it is refused.
 --      It changes the claim lists and nothing else, and it checks: if the line's total, the
 --      invoice's total or its status moved, it raises and nothing is kept. Unmark removes only ids
 --      a person added (a split shift's pieces, and a take's moves, go together), with the same
@@ -309,7 +313,12 @@ begin
     if found then
       if v_t.org_id is distinct from v_org then
         raise exception 'That shift isn''t in your company''s books. Nothing was changed.' using errcode = '42501';
-      elsif v_t.job_id is null or not (v_t.job_id = any (v_jobs)) then
+      -- HOURS ON NO JOB (TTUSD on INV-055, Ben Ebenezer on INV-058): a shift nobody put on a job was
+      -- billed by hand on an invoice with no job. Only there: on a job's invoice it would count as
+      -- that job's work, and a shift on no job belongs to none.
+      elsif v_t.job_id is null and v_inv.job_id is not null then
+        raise exception 'That shift is on no job, so only an invoice with no job can hold it, not %. Nothing was changed.', v_num using errcode = 'P0001';
+      elsif v_t.job_id is not null and not (v_t.job_id = any (v_jobs)) then
         raise exception 'That shift is on another job, not on %''s. Nothing was changed.', v_num using errcode = 'P0001';
       elsif v_t.status <> 'closed' or v_t.clock_out is null then
         raise exception 'That shift is still running. Clock it out first. Nothing was changed.' using errcode = 'P0001';
@@ -370,10 +379,11 @@ begin
     raise exception 'A take from stock is billed whole: mark every piece of it, or none. Nothing was changed.' using errcode = 'P0001';
   end if;
 
-  -- A SPLIT SHIFT IS BILLED WHOLE: every piece of each shift named here that is on the same job,
-  -- closed, billable, of some length and on no live invoice (every piece the sheet lists), or none.
-  -- Then the only piece that joins a hand claim later is one split_time_entry cuts from a piece
-  -- already held (the trigger's carry), never a free piece an importer bills on the same line.
+  -- A SPLIT SHIFT IS BILLED WHOLE: every piece of each shift named here that is on the same job
+  -- (or, like it, on no job), closed, billable, of some length and on no live invoice (every piece
+  -- the sheet lists), or none. Then the only piece that joins a hand claim later is one
+  -- split_time_entry cuts from a piece already held (the trigger's carry), never a free piece an
+  -- importer bills on the same line.
   if exists (
     select 1
       from public.time_entries t
@@ -381,7 +391,7 @@ begin
         on m.id = any (v_ids)
        and m.org_id = v_org
        and coalesce(t.split_from, t.id) = coalesce(m.split_from, m.id)
-       and t.job_id = m.job_id
+       and t.job_id is not distinct from m.job_id
      where t.org_id = v_org
        and not (t.id = any (v_ids))
        and t.status = 'closed'
@@ -448,7 +458,7 @@ end;
 $$;
 
 comment on function public.mark_already_billed(uuid, uuid[]) is
-  'Already Billed (0357): a line on a sent invoice claims receipts, orders, shifts or whole takes it already charged for by hand. Claim lists only; refuses anything that would move a total or status. SECURITY INVOKER: RLS decides who.';
+  'Already Billed (0357): a line on a sent invoice claims receipts, orders, shifts or whole takes it already charged for by hand (a shift on no job only on an invoice with no job). Claim lists only; refuses anything that would move a total or status. SECURITY INVOKER: RLS decides who.';
 
 -- One signature: an earlier copy of this migration made it (uuid, uuid[]), and a call naming only
 -- p_line and p_ids would find both.
@@ -625,6 +635,9 @@ begin
   if exists (select 1 from pg_proc where oid in ('public.mark_already_billed(uuid, uuid[])'::regprocedure,
                                                  'public.unmark_already_billed(uuid, uuid[], boolean)'::regprocedure) and prosecdef) then
     raise exception '0357: mark/unmark_already_billed must run as the person (SECURITY INVOKER), so RLS refuses a tech. Nothing was changed.';
+  end if;
+  if pg_get_functiondef('public.mark_already_billed(uuid, uuid[])'::regprocedure) not like '%only an invoice with no job can hold it%' then
+    raise exception '0357: mark_already_billed is an older copy without hours on no job. Nothing was changed.';
   end if;
   if not exists (select 1 from pg_trigger where tgname = 'invoice_items_unstamp_draw_pdfs_upd' and tgrelid = 'public.invoice_items'::regclass
                     and tgfoid = 'public.unstamp_job_invoice_pdfs()'::regprocedure

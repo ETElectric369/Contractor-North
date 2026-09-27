@@ -103,7 +103,7 @@ d("0357: Already Billed", () => {
         [orgId, customer, `TEST-AB-${label}`, billing],
       )
     ).id as string;
-  const invoice = async (job: string | null, status: string, kind = "standard", customer = cust, orgId = org) =>
+  const invoice = async (job: string | null, status: string, kind = "standard", customer: string | null = cust, orgId = org) =>
     (
       await one(
         `insert into public.invoices (org_id, customer_id, job_id, invoice_number, status, invoice_kind, subtotal, total)
@@ -148,7 +148,7 @@ d("0357: Already Billed", () => {
     ).id as string;
   // One person is in one place at a time (0360): each day's shift is its own, and a running clock is
   // someone else's (the office's), so it never overlaps the tech's later shifts.
-  const shift = async (job: string, day: string, open = false, who = tech) =>
+  const shift = async (job: string | null, day: string, open = false, who = tech) =>
     (
       await one(
         `insert into public.time_entries (org_id, profile_id, job_id, clock_in, clock_out, lunch_minutes, status, source)
@@ -622,5 +622,78 @@ d("0357: Already Billed", () => {
     // 4. Not Billed After All: the claim comes off, and the shelf opens again.
     await unmark(staff, materials, [receipt]);
     expect(await refusal(staff, shelvePlates)).toBeNull();
+  });
+
+  it("hours on no job billed by hand on an invoice with no job (TTUSD on INV-055): they land there, no customer needed, and every other guard holds", async () => {
+    if (!go()) return;
+    // INV-055's shape: no job (and here no customer either), a labor line typed by hand.
+    const inv = await invoice(null, "paid", "standard", null);
+    const labor = await line(inv, { description: "Labor - JP Prince", qty: 23, unit: "hr", price: 95 });
+    const fee = await line(inv, { description: "Card fee", price: 12, kind: "other" });
+    await settleTotal(inv);
+    const d1 = await shift(null, "2001-10-01");
+    const d2 = await shift(null, "2001-10-02");
+    // A running clock on no job: the tech's last day here, so it overlaps none of his closed shifts (0360).
+    const running = await shift(null, "2001-12-31", true);
+    const onJob = await shift(jobA, "2001-10-04");
+    // A job's invoice never holds a shift on no job: it would count as that job's work.
+    const jobInv = await invoice(jobA, "paid");
+    const jobLabor = await line(jobInv, { description: "Labor - TEST Tech", qty: 8, unit: "hr", price: 95 });
+    await settleTotal(jobInv);
+    // A customer's invoice with no job still takes it (the customer is not what decides).
+    const custInv = await invoice(null, "sent", "standard", cust);
+    const custLabor = await line(custInv, { description: "Labor", qty: 5, unit: "hr", price: 95 });
+    await settleTotal(custInv);
+
+    const before = await state(labor);
+    const cases: [string, { message: string; code: string } | null, RegExp][] = [
+      ["onto a job's invoice", await tryMark(staff, jobLabor, [d1]), /That shift is on no job, so only an invoice with no job can hold it, not TEST-AB-\d+\. Nothing was changed\./],
+      ["a running shift", await tryMark(staff, labor, [running]), /still running/],
+      ["a shift on a job, onto an invoice with no job and no customer", await tryMark(staff, labor, [onJob]), /on another job/],
+      ["a tech", await tryMark(tech, labor, [d1]), /Only the office/],
+      ["another company's office", await tryMark(stranger, labor, [d1]), /not found/],
+      ["a line filed as Other", await tryMark(staff, fee, [d1]), /filed as Other/],
+    ];
+    for (const [name, r, re] of cases) {
+      expect(r, name).not.toBeNull();
+      expect(r!.message, name).toMatch(re);
+    }
+    expect(await state(labor)).toEqual(before);
+
+    const r = await mark(staff, labor, [d1, d2]);
+    expect(r.added).toEqual(expect.arrayContaining([d1, d2]));
+    const after = await state(labor);
+    expect(after.hand).toEqual(expect.arrayContaining([d1, d2]));
+    expect(after.line_total).toBe(before.line_total);
+    expect(after.total).toBe(before.total);
+    expect(after.status).toBe("paid");
+    expect(after.edited).toBe(before.edited);
+    // Never twice: another invoice with no job can't hold the same day too.
+    expect((await tryMark(staff, custLabor, [d1]))?.message).toMatch(/already billed on TEST-AB-\d+/);
+    // Not Billed After All takes them back off, and nothing on the bill moves.
+    const off = await unmark(staff, labor, [d1, d2]);
+    expect(off.removed).toEqual(expect.arrayContaining([d1, d2]));
+    const back = await state(labor);
+    expect(back.source_ids).toEqual([]);
+    expect(back.hand).toEqual([]);
+    expect(back.total).toBe(before.total);
+    // Then the customer's invoice with no job may hold them.
+    expect((await mark(staff, custLabor, [d1])).added).toEqual([d1]);
+  });
+
+  it("a split shift on no job is marked whole, like one on a job", async () => {
+    if (!go()) return;
+    const inv = await invoice(null, "paid", "standard", null);
+    const labor = await line(inv, { description: "Labor - TEST Tech", qty: 8, unit: "hr", price: 95 });
+    await settleTotal(inv);
+    const p = await shift(null, "2001-10-05");
+    await as(staff);
+    // The new part on no job needs a code to say what it was (split_time_entry asks for one).
+    const s2 = (await one("select public.split_time_entry($1, $2, null, $3, null, null) as r", [p, "2001-10-05T19:00:00Z", "TEST-AB-ROUGH"])).r.right_id as string;
+    await asServer();
+    expect((await tryMark(staff, labor, [p]))?.message).toMatch(/A split shift is billed whole: tick every part of it, or none\. Nothing was changed\./);
+    expect((await mark(staff, labor, [p, s2])).added).toEqual(expect.arrayContaining([p, s2]));
+    const r = await unmark(staff, labor, [p]);
+    expect(r.removed).toEqual(expect.arrayContaining([p, s2]));
   });
 });
