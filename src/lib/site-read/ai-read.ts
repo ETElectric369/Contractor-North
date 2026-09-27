@@ -14,9 +14,10 @@ import { cleanEmail, looksLikeHours, phoneDigits, stateCode, type SiteFields } f
  * surface "resource-from-link" (never a second: a reply that isn't JSON is not sent off for repair).
  * THE PAGE IS UNTRUSTED: it goes in fenced as <page>…</page>, the system prompt says it is data to
  * extract from and never instructions, and the answer is then GUARDED: a phone, email, zip, street
- * number or city the page's own words don't show is dropped; so is a name, a line about them or their
- * hours with an email, a web address or a phone number in it, and hours that don't read as hours. A
- * category outside the list is dropped. The model's word is never enough on its own.
+ * number or city the page's own words don't show is dropped, and so are hours whose clock numbers it
+ * doesn't show; so is a name, a line about them or their hours with an email, a web address or a
+ * phone number in it, and hours that don't read as hours. A category outside the list is dropped.
+ * The model's word is never enough on its own.
  */
 
 export const SITE_FILL_SURFACE = "resource-from-link";
@@ -47,6 +48,26 @@ const str = (v: unknown, max: number): string | undefined => {
 const CONTACT_SHAPED = /@|https?:|www\.|\d{3}\D{0,3}\d{3}\D{0,3}\d{4}/i;
 /** A name is words: never an email, a web address, or a phone number's worth of digits. */
 const NOT_A_NAME = /@|https?:|www\.|(?:\d[\s().-]{0,2}){7,}/i;
+
+/** Every clock number in the model's hours is on the page, the way the zip is checked: "8 AM–5:30 PM"
+ *  needs an 8 (or the 08 or 20 of a 24-hour clock), a 5 (or 05 or 17) and a ":30". Noon and midnight
+ *  count as 12. Hours with no number at all say nothing the page can back up, so they're dropped. */
+function hoursOnPage(hours: string, pageText: string): boolean {
+  const lower = pageText.toLowerCase();
+  const clocks = [...hours.matchAll(/(?<!\d)(\d{1,2})(?:[:.](\d{2}))?(?!\d)/g)];
+  if (!clocks.length) return false;
+  const shown = (n: number) => {
+    const forms = new Set([String(n), `0${n}`.slice(-2)]);
+    if (n > 0 && n < 12) forms.add(String(n + 12));
+    if (n > 12 && n <= 24) forms.add(String(n - 12));
+    if (n === 0 || n === 12 || n === 24) {
+      if (/\b(noon|midnight)\b/.test(lower)) return true;
+      for (const f of ["0", "00", "12", "24"]) forms.add(f);
+    }
+    return [...forms].some((f) => new RegExp(`(?<!\\d)${f}(?!\\d)`).test(pageText));
+  };
+  return clocks.every(([, h, mm]) => shown(Number(h)) && (!mm || mm === "00" || new RegExp(`[:.]${mm}(?!\\d)`).test(pageText)));
+}
 
 /** Keep only what the page's own words back up. `pageText` is exactly what the model was shown. */
 export function guardModelFields(raw: unknown, pageText: string, categories: readonly string[]): SiteFields {
@@ -81,7 +102,7 @@ export function guardModelFields(raw: unknown, pageText: string, categories: rea
   if (zip && /^\d{5}(-\d{4})?$/.test(zip) && pageText.includes(zip.slice(0, 5))) out.zip = zip;
 
   const hours = str(o.hours, 120);
-  if (hours && !CONTACT_SHAPED.test(hours) && looksLikeHours(hours)) out.hours = hours;
+  if (hours && !CONTACT_SHAPED.test(hours) && looksLikeHours(hours) && hoursOnPage(hours, pageText)) out.hours = hours;
   const about = str(o.about, 80);
   if (about && !CONTACT_SHAPED.test(about)) out.about = about;
   const category = str(o.category, 40);

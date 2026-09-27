@@ -108,6 +108,31 @@ describe("guardModelFields: the page's own words back up every contact detail", 
       ),
     ).toEqual({ name: "Acme Supply 2", hours: "Mon–Fri 8 AM–5 PM", about: "Electrical supply house — since 1972" });
     expect(guardModelFields({ hours: "Open 24/7" }, "Open 24/7", CATEGORIES)).toEqual({ hours: "Open 24/7" });
-    expect(guardModelFields({ hours: "Tuesdays and Thursdays" }, "Tuesdays and Thursdays", CATEGORIES)).toEqual({ hours: "Tuesdays and Thursdays" });
+    expect(guardModelFields({ hours: "Tue, Thu 9 AM–1 PM" }, "Counter open Tuesdays and Thursdays, 9 to 1.", CATEGORIES)).toEqual({
+      hours: "Tue, Thu 9 AM–1 PM",
+    });
+  });
+});
+
+describe("guardModelFields: the model's hours are the page's hours", () => {
+  const PAGE = "Pine County Building Department. Counter: Monday through Friday, 8:00 to 4:30. Closed 12-1 for lunch.";
+
+  it("keeps hours whose every clock number the page shows", () => {
+    expect(guardModelFields({ hours: "Mon–Fri 8 AM–4:30 PM" }, PAGE, CATEGORIES)).toEqual({ hours: "Mon–Fri 8 AM–4:30 PM" });
+  });
+
+  it.each([
+    ["an hour the page never shows", "Mon–Fri 9 AM–6 PM"],
+    ["minutes the page never shows", "Mon–Fri 8 AM–4:45 PM"],
+    ["no clock at all", "Weekdays"],
+    ["only days", "Mon–Fri"],
+  ])("drops hours with %s (made up, or nothing the page can back up)", (_what, hours) => {
+    expect(guardModelFields({ hours }, PAGE, CATEGORIES)).toEqual({});
+  });
+
+  it("reads a 24-hour page, a 12-hour page, and noon, the way the model writes them", () => {
+    expect(guardModelFields({ hours: "Mon–Fri 8 AM–5 PM" }, "Hours 08:00-17:00 weekdays", CATEGORIES)).toEqual({ hours: "Mon–Fri 8 AM–5 PM" });
+    expect(guardModelFields({ hours: "Mon–Fri 08:00–17:00" }, "Open weekdays 8 to 5", CATEGORIES)).toEqual({ hours: "Mon–Fri 08:00–17:00" });
+    expect(guardModelFields({ hours: "Sat 9 AM–12 PM" }, "Saturday 9 until noon", CATEGORIES)).toEqual({ hours: "Sat 9 AM–12 PM" });
   });
 });
