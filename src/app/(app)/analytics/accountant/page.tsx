@@ -6,145 +6,180 @@ import { todayStrInTz } from "@/lib/tz";
 import { formatCurrency } from "@/lib/utils";
 import { PageHeader } from "@/components/page-header";
 import { Card } from "@/components/ui/card";
-import { Input, Label } from "@/components/ui/input";
-import { ACCOUNTANT_LISTS, accountantList, dataRowCount, isMissingExportRecord, parseWindow, readAccountantInputs, toolsBilledList } from "@/lib/accountant-lists";
-import { DownloadCsvButton } from "./download-csv-button";
+import { computeOwnerMoney, notCountedLine, readOwnerMoneyInputs, type OwnerMoney } from "@/lib/analytics/owner-money";
+import {
+  NET_LABEL,
+  OWNER_HIDDEN_NOTE,
+  OWNER_HIDDEN_WHY,
+  PERIOD_KINDS,
+  TAB_NAMES,
+  accountantFileName,
+  accountantReadSpan,
+  beforeRecordsLine,
+  defaultAccountantPeriod,
+  lastDayShown,
+  parseAccountantPeriod,
+  periodChoices,
+  periodContaining,
+  periodWindow,
+  type AccountantPeriodKind,
+} from "@/lib/accountant-workbook";
+import { AccountantDownload } from "./accountant-download";
+import { AccountantPeriodPicker, AccountantPeriodScope } from "./period-picker";
+import { accountantPageViewer } from "./viewer";
 
 export const dynamic = "force-dynamic";
 
+const isKind = (v: unknown): v is AccountantPeriodKind => v === "month" || v === "quarter" || v === "year";
+
 /**
- * EXPORT FOR ACCOUNTANT (Shop Stock, Phase 4). One page: a date range and four Download CSV buttons,
- * each showing how many rows and what they add up to before anyone taps it. Below, for the office
- * only, the tools already billed to customers: listed, never changed.
+ * FOR YOUR ACCOUNTANT: one download (approved 2026-09-27; accountant-workbook.ts).
  *
- * OFFICE ONLY (requireStaff; a tech is sent to My Day). The downloads themselves are the route next
- * to this page, which checks again. The app does no depreciation math: "Depreciation is your
- * accountant's call." is the whole of its advice.
+ * Pick a Month, a Quarter or a Year (whole months only: the money engine counts whole months, and a
+ * mid-month day would quietly pull in the whole month). The page shows the two figures that matter,
+ * Received and Net, then one button, Download For Your Accountant, and one small link, Same Thing As
+ * CSV Files. The Shop Stock page links here.
+ *
+ * OFFICE ONLY (requireStaff; a tech is sent to My Day). The totals follow the owner's switch: an
+ * office viewer the owner hasn't shared Owner's Draw with sees no totals, and the file leaves them
+ * and the owner's rows out too (the route checks again). The figures are read over the SAME span the
+ * route reads (accountantReadSpan), so they are the file's to the cent.
  */
-export default async function AccountantPage({ searchParams }: { searchParams: Promise<{ from?: string; to?: string }> }) {
+export default async function AccountantPage({ searchParams }: { searchParams: Promise<{ period?: string; kind?: string }> }) {
   const ctx = await requireStaff();
   if ("error" in ctx) redirect("/planner");
-  const { supabase, orgId } = ctx;
+  const { supabase, orgId, userId } = ctx;
   if (!orgId) redirect("/planner");
-  const { from, to } = await searchParams;
+  const { period: periodRaw, kind: kindRaw } = await searchParams;
 
-  const { data: orgRow } = await supabase.from("organizations").select("settings").eq("id", orgId).maybeSingle();
-  const tz = getOrgSettings((orgRow as { settings?: unknown } | null)?.settings).timezone;
-  const w = parseWindow(from, to, todayStrInTz(tz));
-
-  const [read, exportsRead] = await Promise.all([
-    readAccountantInputs(supabase, orgId),
-    supabase.from("accountant_exports").select("list, from_at, to_at, row_count, created_at").eq("org_id", orgId).order("created_at", { ascending: false }).limit(8),
+  const [orgRead, meRead] = await Promise.all([
+    supabase.from("organizations").select("name, settings").eq("id", orgId).maybeSingle(),
+    supabase.from("profiles").select("role").eq("id", userId).maybeSingle(),
   ]);
-  // Only the table itself missing is "0350 isn't applied"; any other failed read is not a promise
-  // either way, so the page says the downloads are remembered (the route refuses if it can't record).
-  const remembered = !exportsRead.error || !isMissingExportRecord(exportsRead.error);
-  const recent = (exportsRead.error ? [] : exportsRead.data ?? []) as { list: string; from_at: string | null; to_at: string; row_count: number; created_at: string }[];
+  const org = orgRead.error ? null : (orgRead.data as { name?: string | null; settings?: unknown } | null);
+  const settings = getOrgSettings(org?.settings);
+  const tz = settings.timezone;
+  const todayYmd = todayStrInTz(tz);
+  const period =
+    parseAccountantPeriod(periodRaw, todayYmd) ?? (isKind(kindRaw) ? periodContaining(kindRaw, todayYmd) : defaultAccountantPeriod(todayYmd));
+  const { showOwner, why } = accountantPageViewer(orgRead, meRead);
 
-  const q = (key: string) => `/analytics/accountant/export?${new URLSearchParams({ list: key, from: w.from, to: w.to }).toString()}`;
-  const day = (ymd: string) => `${Number(ymd.slice(5, 7))}/${Number(ymd.slice(8, 10))}/${ymd.slice(0, 4)}`;
-  const billed = read.ok ? toolsBilledList(read.inputs, tz) : null;
-  const titleOf = (k: string) => ACCOUNTANT_LISTS.find((l) => l.key === k)?.title ?? k;
+  // The totals are read only for a viewer who may see them.
+  let cur: OwnerMoney | null = null;
+  let problem: string | null = null;
+  // A period before North's records: "nothing in it" only when every figure is zero; otherwise the
+  // figures, with the records-start line under them (a backdated receipt still counts).
+  let beforeRecords: { text: string; nothing: boolean } | null = null;
+  if (showOwner) {
+    const read = await readOwnerMoneyInputs(supabase, accountantReadSpan(period), tz, todayYmd);
+    if (read.inputs) {
+      cur = computeOwnerMoney(read.inputs, periodWindow(period), tz, todayYmd);
+      beforeRecords = beforeRecordsLine(period, read.inputs.recordsStart, cur.totals);
+    } else problem = read.problem;
+  }
+  const figures = cur?.totals ?? null;
+  const recordsStart = (cur?.caveats.find((c) => c.kind === "records_start") as { date: string } | undefined)?.date ?? null;
+  const notCounted = cur ? notCountedLine(cur) : null;
+  const through = lastDayShown(period, todayYmd);
+  const unfinished = period.end > todayYmd;
+  const day = (ymd: string) => new Date(`${ymd}T12:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
+
+  const href = (as: "xlsx" | "csv") => `/analytics/accountant/export?${new URLSearchParams({ period: period.key, as }).toString()}`;
+  const segment = "inline-flex min-h-[44px] flex-1 items-center justify-center rounded-lg border px-3 text-sm font-medium";
+  const kindLabel = PERIOD_KINDS.find((k) => k.kind === period.kind)?.label ?? "Period";
 
   return (
-    <div className="mx-auto max-w-3xl">
-      <PageHeader title="Export For Accountant" description="Plain lists your accountant can open in a spreadsheet: shop stock, and tools.">
-        <Link
-          href="/analytics"
-          className="inline-flex min-h-[44px] items-center rounded-lg border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-50"
-        >
-          Back To Analytics
-        </Link>
-      </PageHeader>
+    <AccountantPeriodScope>
+      <div className="mx-auto max-w-3xl">
+        <PageHeader title="For Your Accountant" description="One spreadsheet for a month, a quarter or a year: what came in, what went out, who was paid, what's still open and what's in stock.">
+          <Link
+            href="/analytics"
+            className="inline-flex min-h-[44px] items-center rounded-lg border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-50"
+          >
+            Back To Analytics
+          </Link>
+        </PageHeader>
 
-      <Card className="mb-4 p-4">
-        <form className="flex flex-wrap items-end gap-3">
-          <div>
-            <Label htmlFor="acct-from">From</Label>
-            <Input id="acct-from" type="date" name="from" defaultValue={w.from} className="h-11" />
-          </div>
-          <div>
-            <Label htmlFor="acct-to">To</Label>
-            <Input id="acct-to" type="date" name="to" defaultValue={w.to} className="h-11" />
-          </div>
-          <button type="submit" className="inline-flex min-h-[44px] items-center rounded-lg bg-brand px-4 text-sm font-medium text-white">
-            Show These Dates
-          </button>
-        </form>
-        <p className="mt-2 text-xs text-slate-500">
-          {day(w.from)} to {day(w.to)}. On Hand is what was in stock at the end of {day(w.to)}.
-        </p>
-      </Card>
-
-      {!read.ok ? (
         <Card className="mb-4 p-4">
-          <p className="text-sm text-amber-800">{read.error}</p>
+          <div className="mb-3 flex gap-2" role="group" aria-label="Period">
+            {PERIOD_KINDS.map((k) => (
+              <Link
+                key={k.kind}
+                href={`/analytics/accountant?kind=${k.kind}`}
+                aria-current={period.kind === k.kind ? "true" : undefined}
+                className={`${segment} ${period.kind === k.kind ? "border-transparent bg-brand text-white" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"}`}
+              >
+                {k.label}
+              </Link>
+            ))}
+          </div>
+          {/* Keyed on the period: whatever changed it (a pick, a Month / Quarter / Year tap, Back), the picker shows it. */}
+          <AccountantPeriodPicker
+            key={period.key}
+            current={period.key}
+            kindLabel={kindLabel}
+            choices={periodChoices(period.kind, todayYmd, period).map((p) => ({ key: p.key, label: p.label }))}
+          />
         </Card>
-      ) : (
-        <div className="mb-4 space-y-3">
-          {ACCOUNTANT_LISTS.map((l) => {
-            const t = accountantList(l.key, read.inputs, w, tz);
-            const n = dataRowCount(t);
-            return (
-              <Card key={l.key} className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
-                <div className="min-w-0">
-                  <h2 className="text-base font-semibold text-slate-900">{l.title}</h2>
-                  <p className="text-sm text-slate-500">{l.says}</p>
-                  <p className="mt-0.5 text-xs text-slate-400">
-                    {n === 0 ? "Nothing in these dates." : `${n} ${n === 1 ? "row" : "rows"}, ${formatCurrency(t.total ?? 0)} at cost.`}
-                    {!read.shelf && l.key !== "tools" ? " Shop Stock isn't switched on for this database yet." : ""}
-                  </p>
-                </div>
-                <DownloadCsvButton href={q(l.key)} fallbackName={l.key === "on_hand" ? `${l.file}-${w.to}.csv` : `${l.file}-${w.from}-to-${w.to}.csv`} />
-              </Card>
-            );
-          })}
-          <p className="text-sm font-medium text-slate-700">Depreciation is your accountant&apos;s call.</p>
-          <p className="text-xs text-slate-500">
-            {remembered
-              ? "Every download is remembered. A write-off, a return or a count that went out in a Stock Used or On Hand download stays as it is; Count It puts things right from today. Takes onto jobs, pieces brought back, a roll taken back out of stock and a supplier credit's amount can still change after a download; the next download carries the change."
-              : "Downloads aren't remembered yet (one database update, 0350, isn't applied), so a write-off can still be undone after it went to your accountant."}
-          </p>
-        </div>
-      )}
 
-      {billed && (
         <Card className="mb-4 p-4">
-          <h2 className="text-base font-semibold text-slate-900">Tools Billed To Customers</h2>
-          <p className="mt-0.5 text-sm text-slate-500">
-            For you, not the accountant: tools on a job&apos;s receipt that the customer was billed for. Listed only; nothing here changes them.
+          <h2 className="text-base font-semibold text-slate-900">
+            {period.label}
+            {recordsStart ? <span className="font-normal text-slate-500"> (records start {day(recordsStart)})</span> : null}
+          </h2>
+          <p className="text-xs text-slate-500">
+            Cash basis: money counts on the day it came in or went out.{unfinished ? ` The period isn't over: figures run through ${day(through)}.` : ""}
           </p>
-          {billed.rows.length === 0 ? (
-            <p className="mt-2 text-sm text-slate-400">None.</p>
+          {!showOwner && why === OWNER_HIDDEN_WHY ? (
+            <div className="mt-3 text-sm text-slate-700">
+              <p className="font-medium">{OWNER_HIDDEN_NOTE}</p>
+              <p className="mt-1 text-xs text-slate-500">{why}</p>
+            </div>
+          ) : !showOwner ? (
+            // A read failed: said as that, never as the owner's switch (the viewer may be the owner).
+            <p role="alert" className="mt-3 text-sm text-amber-800">
+              {why}
+            </p>
+          ) : !figures ? (
+            <p role="alert" className="mt-3 text-sm text-amber-800">
+              The figures couldn&apos;t be read just now{problem ? `: ${problem}` : ""}. Try again in a moment.
+            </p>
+          ) : beforeRecords?.nothing ? (
+            <p className="mt-3 text-sm text-slate-700">{beforeRecords.text}</p>
           ) : (
-            <ul className="mt-2 divide-y divide-slate-100 rounded-lg border border-slate-200">
-              {billed.rows.map((r, i) => (
-                <li key={i} className="px-3 py-2 text-sm">
-                  <p className="font-medium text-slate-900">{String(r[4] ?? "")}</p>
-                  <p className="text-xs text-slate-500">
-                    {[r[0] ? day(String(r[0])) : null, r[1], r[2] ? `${r[2]}${r[3] ? ` ${r[3]}` : ""}` : r[3], `${formatCurrency(Number(r[5]) || 0)} at cost`, String(r[6] ?? "")]
-                      .filter(Boolean)
-                      .join(" · ")}
-                  </p>
-                </li>
-              ))}
-            </ul>
+            <>
+              <div className="mt-3 grid grid-cols-2 gap-3">
+                <div>
+                  <div className="text-xs text-slate-500">Received</div>
+                  <div className="text-2xl font-bold tabular-nums text-slate-900">{formatCurrency(figures.received)}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-slate-500">{NET_LABEL}</div>
+                  <div className={`text-2xl font-bold tabular-nums ${figures.left < 0 ? "text-red-700" : "text-slate-900"}`}>{formatCurrency(figures.left)}</div>
+                </div>
+              </div>
+              {beforeRecords && <p className="mt-2 text-xs text-slate-500">{beforeRecords.text}</p>}
+              {notCounted && <p className="mt-2 text-xs text-amber-800">{notCounted}</p>}
+            </>
           )}
         </Card>
-      )}
 
-      {recent.length > 0 && (
-        <Card className="p-4">
-          <h2 className="text-base font-semibold text-slate-900">Recent Downloads</h2>
-          <ul className="mt-2 space-y-1 text-sm text-slate-600">
-            {recent.map((e, i) => (
-              <li key={i}>
-                {titleOf(e.list)}, {e.row_count} {e.row_count === 1 ? "row" : "rows"}, downloaded {day(todayStrInTz(tz, new Date(e.created_at)))}
-              </li>
-            ))}
-          </ul>
+        <Card className="mb-4 p-4">
+          {/* Keyed on the period too: a file kept for Save The File (or a line about it) belongs to the
+              period it was made for, and a new period starts the card fresh. */}
+          <AccountantDownload
+            key={period.key}
+            xlsxHref={href("xlsx")}
+            csvHref={href("csv")}
+            xlsxName={accountantFileName(org?.name, period, "xlsx")}
+            csvName={accountantFileName(org?.name, period, "csv")}
+          />
+          <p className="mt-3 text-xs text-slate-500">
+            {TAB_NAMES.length} tabs: {TAB_NAMES.join(", ")}. Open is as of the day you download it ({day(todayYmd)}). Stock is what was in stock on {day(through)}. Depreciation is
+            your accountant&apos;s call.
+          </p>
         </Card>
-      )}
-    </div>
+      </div>
+    </AccountantPeriodScope>
   );
 }

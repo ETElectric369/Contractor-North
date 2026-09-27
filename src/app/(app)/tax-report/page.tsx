@@ -9,6 +9,7 @@ import { DataTable } from "@/components/ui/data-table";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { getOrgSettings } from "@/lib/org-settings";
 import { summarizeMileage } from "@/lib/mileage-math";
+import { SALES_TAX_INVOICE_COLS, summarizeSalesTax } from "@/lib/sales-tax";
 import { todayStrInTz, tzDayStartUtc } from "@/lib/tz";
 
 export const dynamic = "force-dynamic";
@@ -56,7 +57,7 @@ export default async function TaxReportPage({
   const [{ data: invoices }, { data: taxRates }, { data: entries }] = await Promise.all([
     supabase
       .from("invoices")
-      .select("tax_rate, tax, subtotal, total, status, created_at")
+      .select(SALES_TAX_INVOICE_COLS)
       .gte("created_at", start.toISOString())
       .lt("created_at", end.toISOString()),
     supabase.from("tax_rates").select("name, rate").order("rate"),
@@ -98,38 +99,8 @@ export default async function TaxReportPage({
   const businessMiles = Math.round(businessMilesRaw * 10) / 10; // display only
   const loggedMiles = Math.round(loggedMilesRaw * 10) / 10; // display only
 
-  // Only count real (issued) invoices — exclude drafts & voids.
-  const real = (invoices ?? []).filter((i: any) => !["void", "draft"].includes(i.status));
-
-  // Map a decimal tax_rate to a named jurisdiction when possible.
-  const nameFor = (rateDec: number) => {
-    const pct = rateDec * 100;
-    // 0.001 was tighter than the rounding the old numeric(6,4) column forced (7.38 vs 7.375), so
-    // a filing report showed "7.380%" with no jurisdiction. 0243 widened the column; keep a
-    // tolerance that survives float round-tripping either way (audit v921).
-    const match = (taxRates ?? []).find((t: any) => Math.abs(Number(t.rate) - pct) < 0.0005);
-    return match?.name ?? (pct === 0 ? "No tax" : `${pct.toFixed(3)}%`);
-  };
-
-  // Group by rate.
-  const groups = new Map<string, { name: string; pct: number; taxable: number; tax: number; count: number }>();
-  let totalTaxable = 0;
-  let totalTax = 0;
-  for (const i of real) {
-    const rateDec = Number(i.tax_rate ?? 0);
-    const key = (rateDec * 100).toFixed(3);
-    const g = groups.get(key) ?? { name: nameFor(rateDec), pct: rateDec * 100, taxable: 0, tax: 0, count: 0 };
-    g.taxable += Number(i.subtotal ?? 0);
-    g.tax += Number(i.tax ?? 0);
-    g.count += 1;
-    groups.set(key, g);
-    // "Taxable sales" = sales that actually carry tax. A 0% / exempt invoice is part of
-    // total sales but NOT taxable — counting it here would overstate the taxable base
-    // and mismatch what's owed. (It still shows in the per-rate breakdown under "No tax".)
-    if (rateDec > 0) totalTaxable += Number(i.subtotal ?? 0);
-    totalTax += Number(i.tax ?? 0);
-  }
-  const rows = [...groups.values()].sort((a, b) => b.tax - a.tax);
+  // Issued invoices only, grouped by rate: the one arithmetic the accountant download reads too.
+  const { rows, totalTaxable, totalTax } = summarizeSalesTax(invoices as any[], taxRates as any[]);
 
   return (
     <div>

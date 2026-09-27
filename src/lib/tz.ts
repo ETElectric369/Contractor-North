@@ -23,6 +23,13 @@ export function tzOffsetMs(tz: string, at: Date): number {
   return asIfUtc - at.getTime();
 }
 
+/** `at` as the org's wall clock, carried in a Date's UTC fields: for a format with no zone of its
+ *  own (a zip's DOS time), which every reader takes as local time. 5:30 PM Pacific on Sep 27 comes
+ *  back as 2026-09-27T17:30:00Z, never 00:30 the next day. */
+export function wallClockInTz(tz: string, at: Date = new Date()): Date {
+  return new Date(at.getTime() + tzOffsetMs(tz, at));
+}
+
 /** "YYYY-MM-DD" for `at` (default now) in the given timezone. */
 export function todayStrInTz(tz: string, at: Date = new Date()): string {
   return new Intl.DateTimeFormat("en-CA", {

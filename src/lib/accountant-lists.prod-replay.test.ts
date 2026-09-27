@@ -1,13 +1,13 @@
 import { describe, it, expect } from "vitest";
 import pg from "pg";
 import { assertReadOnlyReplay } from "@/lib/db-guard";
-import { ACCOUNTANT_LISTS, accountantList, dataRowCount, toCsv, toolsBilledList, type AccountantInputs } from "./accountant-lists";
+import { onHandList, toCsv, toolsBilledList, toolsList, type AccountantInputs } from "./accountant-lists";
 
 /**
- * EXPORT FOR ACCOUNTANT, REPLAYED READ-ONLY ON ET's BOOKS (Shop Stock, Phase 4): what each of the four
- * downloads would hold for this month, and the report-only tools list, printed - WITHOUT WRITING (no
- * download is recorded; the session is read-only before its first statement). It reads the same rows
- * readAccountantInputs reads, org-pinned, and runs the page's own pure builders.
+ * THE ACCOUNTANT'S STOCK AND TOOLS LISTS, REPLAYED READ-ONLY ON ET's BOOKS: what the download's Stock
+ * tab (On Hand) and its two tools lists would hold for this month, printed - WITHOUT WRITING (the
+ * session is read-only before its first statement). It reads the same rows readAccountantInputs
+ * reads, org-pinned, and runs the download's own pure builders.
  */
 // A PRODUCTION REPLAY (db-guard.ts): REPLAY_DB_* creds, opt-in, never in CI, read-only session.
 //   REPLAY_DB_HOST=… REPLAY_DB_USER=… REPLAY_DBPW=… ACCOUNTANT_REPLAY=1 [ACCOUNTANT_FROM=… ACCOUNTANT_TO=…] npx vitest run <this file>
@@ -17,7 +17,7 @@ const d = REPLAY_DBPW && REPLAY_DB_HOST && REPLAY_DB_USER && ACCOUNTANT_REPLAY =
 const ET = "60195593-2e18-4230-bc8e-7a32d36d038d";
 const TZ = "America/Los_Angeles";
 
-d("Export For Accountant, ET, replayed read-only", () => {
+d("The accountant's stock and tools lists, ET, replayed read-only", () => {
   it("prints what each download would hold for the window", async () => {
     const c = new pg.Client({ host: REPLAY_DB_HOST, port: 5432, user: REPLAY_DB_USER, password: REPLAY_DBPW, database: "postgres", ssl: { rejectUnauthorized: false } });
     await c.connect();
@@ -59,13 +59,14 @@ d("Export For Accountant, ET, replayed read-only", () => {
       const today = new Intl.DateTimeFormat("en-CA", { timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
       const w = { from: ACCOUNTANT_FROM || `${today.slice(0, 7)}-01`, to: ACCOUNTANT_TO || today };
       console.log(`\n=== ET Electric, ${w.from} to ${w.to} (On Hand as of ${w.to}) ===`);
-      for (const l of ACCOUNTANT_LISTS) {
-        const t = accountantList(l.key, inputs, w, TZ);
-        console.log(`\n--- ${l.title}: ${dataRowCount(t)} row(s) ---\n${toCsv(t)}`);
+      for (const [title, t] of [
+        ["On Hand", onHandList(inputs, w.to, TZ)],
+        ["Tools Bought", toolsList(inputs, w, TZ)],
+        ["Tools Billed To Customers", toolsBilledList(inputs, TZ)],
+      ] as const) {
+        console.log(`\n--- ${title}: ${t.rows.length} row(s) ---\n${toCsv(t)}`);
         expect(t.header.length).toBeGreaterThan(0);
       }
-      const billed = toolsBilledList(inputs, TZ);
-      console.log(`\n--- Tools Billed To Customers (report only, on the page): ${billed.rows.length} row(s) ---\n${toCsv(billed)}`);
     } finally {
       await c.end();
     }

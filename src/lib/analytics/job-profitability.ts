@@ -65,6 +65,22 @@ export type ProfitInputs = {
   shelfNet: JobShelfNetRow[];
 };
 
+/**
+ * CASH COLLECTED PER JOB: the payments ledger net of voided invoices (THE computeCollected
+ * definition), keyed to a job via the payment's invoice. NOT invoices.amount_paid — that includes
+ * non-cash account credits and overstated "collected". A payment on an invoice with no job is in no
+ * job's figure. Shared by job profit and the accountant's Income list, so the two can't disagree.
+ */
+export function collectedByJob(payments: any[]): Map<string, number> {
+  const byJob = new Map<string, number>();
+  for (const p of payments ?? []) {
+    const inv = (p as any)?.invoices;
+    if (!inv?.job_id || inv.status === "void") continue; // no cash on a voided invoice
+    byJob.set(inv.job_id, (byJob.get(inv.job_id) ?? 0) + Number((p as any).amount ?? 0));
+  }
+  return byJob;
+}
+
 /** Pure — the exact per-job rows /analytics renders, sorted most-profitable first. Callers slice. */
 export function computeJobProfitRows(inp: ProfitInputs): JobProfitRow[] {
   const matCost = new Map<string, number>();
@@ -96,15 +112,7 @@ export function computeJobProfitRows(inp: ProfitInputs): JobProfitRow[] {
     if (jid) refundByJob.set(jid, (refundByJob.get(jid) ?? 0) + Number(r.amount ?? 0));
   }
 
-  // Revenue = CASH collected per job: the payments ledger net of voided invoices (THE
-  // computeCollected definition), keyed to a job via the payment's invoice. NOT
-  // invoices.amount_paid — that includes non-cash account credits and overstated "collected".
-  const revenueByJob = new Map<string, number>();
-  for (const p of inp.payments ?? []) {
-    const inv = (p as any).invoices;
-    if (!inv?.job_id || inv.status === "void") continue; // no cash on a voided invoice
-    revenueByJob.set(inv.job_id, (revenueByJob.get(inv.job_id) ?? 0) + Number((p as any).amount ?? 0));
-  }
+  const revenueByJob = collectedByJob(inp.payments ?? []);
 
   return ((inp.jobs ?? []) as any[])
     .map((j) => {

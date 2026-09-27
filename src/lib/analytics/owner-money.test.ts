@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   OWNER_MONEY_WINDOWS,
   allocateCents,
+  balanceEntries,
   chartMonthKeys,
   computeOwnerMoney,
   costFigure,
@@ -12,10 +13,12 @@ import {
   materialsWithStock,
   notCountedLine,
   ownerMoneyChartWindow,
+  ownerMoneyHoursFrom,
   ownerMoneyReadSpan,
   ownerMoneyWindow,
   supplierDocsNoBillCovers,
   parseOwnerMoneyMonthKey,
+  readOwnerMoneyInputs,
   resolveOwnerMoneySelection,
   stockLine,
   windowInsideSpan,
@@ -25,6 +28,7 @@ import {
   type OwnerMoneyFigures,
   type OwnerMoneyInputs,
   type OwnerMoneyPerson,
+  type OwnerMoneyWindow,
 } from "@/lib/analytics/owner-money";
 import { computeRevenueTrend } from "@/lib/analytics/money-metrics";
 import { balanceForPerson } from "@/lib/payroll-math";
@@ -1200,5 +1204,111 @@ describe("allocateCents", () => {
   });
   it("no positive weight: nothing allocated (the caller decides)", () => {
     expect(allocateCents(500, new Map([["a", 0]])).size).toBe(0);
+  });
+});
+
+// ── THE ACCOUNTANT'S READS (round 1 fixes, 2026-09-27) ────────────────────────
+
+describe("where the hours are read from: a month before the span, and the Pay board's 18 months for what is owed", () => {
+  it("reads a month before the span's start, and never later than the Pay board's first day", () => {
+    // The default download on Sep 24, 2026: Year 2026 and the 2025 before it.
+    expect(ownerMoneyHoursFrom("2025-01-01", TODAY)).toEqual({ from: "2024-12-01", balanceFrom: "2025-03-24" });
+    // /analytics' chart span (Oct 2025 on): the Pay board's own day, as before.
+    expect(ownerMoneyHoursFrom("2025-10-01", TODAY)).toEqual({ from: "2025-03-24", balanceFrom: "2025-03-24" });
+  });
+
+  it("balanceEntries keeps the shifts from the Pay board's first day on (org-local), and all of them with no day", () => {
+    const list = [shift("old", BRIAN, "2025-03-23", 8), shift("new", BRIAN, "2025-03-24", 8)];
+    expect(balanceEntries(list, "2025-03-24", TZ).map((e) => e.id)).toEqual(["new"]);
+    expect(balanceEntries(list, null, TZ)).toHaveLength(2);
+  });
+
+  const table = (entries: any[], runs: any[] = [], payPayments: any[] = []) => ({
+    payments: [],
+    customer_credits: [],
+    bills: [],
+    purchase_orders: [],
+    petty_cash: [],
+    time_entries: entries,
+    payroll_runs: runs,
+    pay_payments: payPayments,
+    supplier_invoices: [],
+    profile_pay: [{ id: BRIAN, full_name: "Brian Taylor", hourly_rate: 40, bill_rate: 85, commute_baseline_miles: null, paid_by_draw: false }],
+  });
+  const read = async (t: Record<string, any[]>, span: { start: string; end: string }) => {
+    const { inputs, problem } = await readOwnerMoneyInputs(fakeClient(t, []), span, TZ, TODAY);
+    expect(problem).toBeNull();
+    return inputs!;
+  };
+  const Y2025: OwnerMoneyWindow = { key: "period", label: "2025", start: "2025-01-01", end: "2026-01-01" };
+
+  it("a locked pay period crossing a year's start splits the same whichever span was read (page, file, file's year-before column)", async () => {
+    // $640 frozen for Dec 22, 2024 to Jan 5, 2025: one 8-hour shift in each year.
+    const t = () =>
+      table(
+        [shift("d", BRIAN, "2024-12-23", 8, { paid_at: "2025-01-06T00:00:00Z" }), shift("j", BRIAN, "2025-01-02", 8, { paid_at: "2025-01-06T00:00:00Z" })],
+        [{ id: "r", profile_id: BRIAN, kind: "base", period_start: "2024-12-22", period_end: "2025-01-05", gross: 640, mileage_amount: 0, created_at: "2025-01-06T00:00:00Z" }],
+      );
+    const spans = [
+      { start: "2025-01-01", end: "2027-01-01" }, // the Year 2026 file (its 2025 column)
+      { start: "2024-01-01", end: "2026-01-01" }, // the Year 2025 file and page
+      { start: "2025-01-01", end: "2026-01-01" }, // 2025 read on its own
+    ];
+    for (const span of spans) {
+      const m = computeOwnerMoney(await read(t(), span), Y2025, TZ, TODAY);
+      expect(m.totals.crewPay, span.start).toBe(320);
+    }
+  });
+
+  it("what is still owed is the Pay board's You Owe whatever span was read: a never-locked shift older than 18 months is not in it", async () => {
+    // Feb 10, 2025 is before the board's first day (Mar 24, 2025); Sep 2, 2026 is inside it. $300 paid.
+    const t = () =>
+      table([shift("old", BRIAN, "2025-02-10", 8), shift("sep", BRIAN, "2026-09-02", 8)], [], [{ id: "pp", profile_id: BRIAN, amount: 300, paid_on: "2026-09-10", method: "cash", voided_at: null }]);
+    const owedOf = (m: OwnerMoney) => (m.caveats.find((c) => c.kind === "crew_owed") as { total: number } | undefined)?.total ?? null;
+    const wide = await read(t(), { start: "2025-01-01", end: "2027-01-01" });
+    expect(wide.entries.map((e) => e.id).sort()).toEqual(["old", "sep"]); // read, for 2025's own crew pay
+    expect(wide.balanceFrom).toBe("2025-03-24");
+    const chart = await read(t(), ownerMoneyReadSpan([ownerMoneyChartWindow(TODAY), YEAR]));
+    expect(chart.entries.map((e) => e.id)).toEqual(["sep"]);
+    // The board: $320 earned in its 18 months, $300 paid, $20 owed. Both reads say $20.
+    expect(owedOf(computeOwnerMoney(wide, YEAR, TZ, TODAY))).toBe(20);
+    expect(owedOf(computeOwnerMoney(chart, YEAR, TZ, TODAY))).toBe(20);
+  });
+});
+
+describe("through a day: the same window, only the records on or before that day", () => {
+  it("through the window's last day is the whole window", () => {
+    const whole = computeOwnerMoney(yearInputs(), YEAR, TZ, TODAY);
+    expect(computeOwnerMoney(yearInputs(), YEAR, TZ, TODAY, { throughDay: "2026-12-31" }).totals).toEqual(whole.totals);
+  });
+
+  it("through a month's last day is the months before it, figure for figure", () => {
+    const janToAug: OwnerMoneyWindow = { key: "period", label: "Jan to Aug", start: "2026-01-01", end: "2026-09-01" };
+    expect(computeOwnerMoney(yearInputs(), YEAR, TZ, TODAY, { throughDay: "2026-08-31" }).totals).toEqual(computeOwnerMoney(yearInputs(), janToAug, TZ, TODAY).totals);
+  });
+
+  it("mid-month: a payment and a shift after the day are left out, each by its own day", () => {
+    const whole = computeOwnerMoney(yearInputs(), YEAR, TZ, TODAY);
+    const cut = computeOwnerMoney(yearInputs(), YEAR, TZ, TODAY, { throughDay: "2026-09-03" });
+    // Sep 4 (1,350 + 450) and Sep 21 (160) are after the day.
+    expect(cents(cut.totals.received)).toBe(cents(whole.totals.received) - 196000);
+    // The Sep 1 evening ticket (47.44) is in; nothing after Sep 3 was bought.
+    expect(cut.totals.businessCostsTotal).toBe(whole.totals.businessCostsTotal);
+    // Jimmy's Sep 3 shift is in, the owner's Sep 2 hours too.
+    expect(cut.totals.crewPay).toBe(whole.totals.crewPay);
+    expect(cut.totals.ownerHours).toBe(whole.totals.ownerHours);
+    expect(holds(cut.totals)).toBe(true);
+    const early = computeOwnerMoney(yearInputs(), YEAR, TZ, TODAY, { throughDay: "2026-09-02" });
+    expect(early.totals.crewPay).toBe(whole.totals.crewPay - 350); // Jimmy's 7 h at $50 fall after it
+  });
+
+  it("a locked pay period crossing the day splits across it by its own shifts", () => {
+    const inputs: OwnerMoneyInputs = {
+      ...base(),
+      entries: [shift("l1", BRIAN, "2026-06-24", 8, { paid_at: "x" }), shift("l2", BRIAN, "2026-07-01", 8, { paid_at: "x" })],
+      runs: [{ profile_id: BRIAN, kind: "base", period_start: "2026-06-22", period_end: "2026-07-06", gross: 640, created_at: "2026-07-07T00:00:00Z" }],
+    };
+    expect(computeOwnerMoney(inputs, YEAR, TZ, TODAY, { throughDay: "2026-06-30" }).totals.crewPay).toBe(320);
+    expect(computeOwnerMoney(inputs, YEAR, TZ, TODAY).totals.crewPay).toBe(640);
   });
 });
