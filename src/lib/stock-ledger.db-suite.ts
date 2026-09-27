@@ -264,9 +264,9 @@ export function defineStockLedgerSuite(connect: () => Promise<SqlClient>) {
       expect((await one("select is_stock from public.bill_line_items where id = $1", [t.lineIds[1]])).is_stock).toBe(true);
       expect(await onHand(it1)).toBe(250);
       await as(staffId);
-      expect((await refusal(() => c.query("update public.bill_line_items set is_stock = false where id = $1", [t.lineIds[1]])))?.message).toContain("Take it off the shelf first");
+      expect((await refusal(() => c.query("update public.bill_line_items set is_stock = false where id = $1", [t.lineIds[1]])))?.message).toContain("Take it out of stock first");
       expect((await refusal(() => c.query("update public.bill_line_items set is_stock = true where id = $1", [bare.lineIds[1]])))?.message).toContain("only while a roll");
-      expect((await refusal(() => c.query("update public.inventory_items set quantity_on_hand = 999 where id = $1", [it1])))?.message).toContain("kept by the shelf");
+      expect((await refusal(() => c.query("update public.inventory_items set quantity_on_hand = 999 where id = $1", [it1])))?.message).toContain("kept by the stock record");
       expect((await refusal(() => c.query("insert into public.inventory_items (org_id, name, quantity_on_hand) values ($1, 'TEST typed', 5)", [orgId])))?.message).toContain("starts with none on hand");
       await asServer();
       expect((await refusal(() => c.query("delete from public.stock_lots")))?.message).toContain("never deleted");
@@ -347,7 +347,7 @@ export function defineStockLedgerSuite(connect: () => Promise<SqlClient>) {
       expect(await onHand(it1)).toBe(-20);
       // Nothing to settle it from yet: refused with the way out.
       await as(staffId);
-      expect((await refusal(() => c.query("select public.settle_short($1)", [r.short_id])))?.message).toContain("File the roll");
+      expect((await refusal(() => c.query("select public.settle_short($1)", [r.short_id])))?.message).toContain("file the roll on Shop Stock first, or Undo the take");
       await asServer();
       // The next roll is filed; the short is settled from it at that roll's real cost.
       await lot(it1, await coilTicket(jobA, "2001-09-04"), 1, 250);

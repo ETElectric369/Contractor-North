@@ -63,7 +63,7 @@ describe("stock.take fills the card", () => {
     expect(d.href).toBe(`/jobs/${JOB}?tab=materials&take=i-122&qty=60`);
     // Fill vs execute at a glance: nothing on the card reads as done.
     expect(d.card).toMatchObject({ kind: "task", eyebrow: "not saved yet", title: "Tap To Take: 60 ft of 12/2 NM-B", href: d.href, next: "Open it and tap Take It to save it." });
-    expect(d.card.scope).toBe("Not taken yet: tap above, then Take It. For Herringbone. On the shelf: 250 ft.");
+    expect(d.card.scope).toBe("Not taken yet: tap above, then Take It. For Herringbone. In stock: 250 ft.");
     expect(`${d.card.eyebrow} ${d.card.title}`).not.toMatch(/\btook\b|recorded|on the job/i);
     expect(r.speak).toContain("Tap Take It to save it.");
     expect(JSON.stringify(r)).not.toMatch(/\$|cost|price/i);
@@ -95,7 +95,7 @@ describe("stock.take fills the card", () => {
   it("an item the shelf doesn't have is said, with what it has", async () => {
     const r = await run({ job_id: JOB, item: "10/3 romex", qty: 30 });
     expect(r.ok).toBe(false);
-    expect(r.error).toContain('Nothing on the shelf is called "10/3 romex"');
+    expect(r.error).toContain('Nothing in stock is called "10/3 romex"');
     expect(r.error).toContain('"Twister 341-Tan wire nut"');
   });
 
@@ -109,7 +109,7 @@ describe("stock.take fills the card", () => {
     db.shelf = [{ id: "i-122", name: "12/2 NM-B", unit: "ft", on_hand: "5" }];
     const r = await run({ job_id: JOB, item: "12/2 NM-B", qty: 20 });
     expect(r.ok).toBe(true);
-    expect((r.data as any).card.scope).toContain("15 ft more than the shelf shows — the office will settle it.");
+    expect((r.data as any).card.scope).toContain("15 ft more than stock shows — the office will settle it.");
   });
 
   it("pieces the count shows but no filed roll holds are said as that, not as 'more than the shelf shows'", async () => {
@@ -120,7 +120,7 @@ describe("stock.take fills the card", () => {
     const d = r.data as any;
     expect(d.short).toBe(40);
     expect(d.card.scope).toContain("40 ft of that isn't on a filed roll yet — it still saves, and the office settles it.");
-    expect(d.card.scope).not.toContain("more than the shelf shows");
+    expect(d.card.scope).not.toContain("more than stock shows");
   });
 
   it("no count said: the card opens on the pad and asks how many", async () => {

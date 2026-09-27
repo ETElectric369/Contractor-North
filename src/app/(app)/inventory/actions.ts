@@ -68,7 +68,7 @@ export async function createInventoryItem(formData: FormData): Promise<Result> {
     });
     if (!roll.ok) {
       revalidatePath("/inventory");
-      return { ok: false, id, error: `The item is made, but its roll didn't go on the shelf: ${roll.error} Add it from the item's row with Add A Roll Counted In.` };
+      return { ok: false, id, error: `The item is made, but its roll didn't go into stock: ${roll.error} Add it from the item's row with Add A Roll Counted In.` };
     }
   }
   revalidatePath("/inventory");
@@ -156,7 +156,7 @@ export async function setInventoryItemActive(id: string, active: boolean): Promi
       const it = item as { name: string; unit: string };
       return {
         ok: false,
-        error: `${it.name} still has ${onHand} ${it.unit} on the shelf's record. Count It to 0 first, so its value doesn't disappear from Shop Stock with it.`,
+        error: `${it.name} still has ${onHand} ${it.unit} on the stock record. Count It to 0 first, so its value doesn't disappear from Shop Stock with it.`,
       };
     }
   }
@@ -207,19 +207,19 @@ export async function countItem(itemId: string, counted: number, note?: string |
   const { supabase, orgId } = ctx;
   if (!orgId) return { ok: false, error: NO_ORG };
   const n = Number(counted);
-  if (!Number.isFinite(n) || n < 0) return { ok: false, error: "Say how many are on the shelf (0 if none)." };
+  if (!Number.isFinite(n) || n < 0) return { ok: false, error: "Say how many are in stock (0 if none)." };
   const { data, error } = await supabase.rpc("stock_recount", { p_item: itemId, p_counted: n, p_note: note ?? null });
-  if (error) return { ok: false, error: isMissingShelfRpc(error) ? SHELF_NEEDS_0328.replace("Putting things on the shelf", "Counting the shelf") : dbError(error) };
+  if (error) return { ok: false, error: isMissingShelfRpc(error) ? SHELF_NEEDS_0328.replace("Putting things in stock", "Counting stock") : dbError(error) };
   const d = (data ?? {}) as { changed?: boolean; on_hand?: unknown; moves?: { kind: string; qty: unknown }[] };
   revalidatePath("/inventory");
-  if (!d.changed) return { ok: true, message: "That matches the shelf's record. Nothing changed." };
+  if (!d.changed) return { ok: true, message: "That matches the stock record. Nothing changed." };
   const down = (d.moves ?? []).filter((m) => m.kind === "recount_down").reduce((s, m) => s + Number(m.qty || 0), 0);
   const up = (d.moves ?? []).filter((m) => m.kind === "recount_up").reduce((s, m) => s + Number(m.qty || 0), 0);
   return {
     ok: true,
     message: down > 0
-      ? `Counted: ${Number(d.on_hand)} on the shelf. ${Math.round(down * 1000) / 1000} short were written off at what they cost (Shop Stock Lost).`
-      : `Counted: ${Number(d.on_hand)} on the shelf. ${Math.round(up * 1000) / 1000} found, at $0 (no receipt behind them).`,
+      ? `Counted: ${Number(d.on_hand)} in stock. ${Math.round(down * 1000) / 1000} short were written off at what they cost (Shop Stock Lost).`
+      : `Counted: ${Number(d.on_hand)} in stock. ${Math.round(up * 1000) / 1000} found, at $0 (no receipt behind them).`,
   };
 }
 
@@ -259,9 +259,9 @@ export async function undoShelfMove(moveId: string): Promise<Result & { message?
   revalidatePath("/analytics");
   let message =
     m.kind === "write_off"
-      ? "Undone: those pieces are back on the shelf, and nothing is written off."
+      ? "Undone: those pieces are back in stock, and nothing is written off."
       : m.kind === "supplier_return"
-        ? "Undone: those pieces are back on the shelf."
+        ? "Undone: those pieces are back in stock."
         : "Undone: that count no longer counts.";
   if (m.kind === "supplier_return" && m.credit_bill_id) {
     message = `${message} ${await untieShelfCredit(supabase, orgId, String(m.credit_bill_id))}`;
@@ -285,10 +285,10 @@ async function untieShelfCredit(supabase: any, orgId: string, creditId: string):
     .eq("kind", "supplier_return")
     .eq("credit_bill_id", creditId)
     .limit(1000);
-  if (error) return "Its credit is still filed to the shelf: whether to take it back off couldn't be checked just now. Reload Shop Stock and look again.";
+  if (error) return "Its credit is still filed to Shop Stock: whether to take it back off couldn't be checked just now. Reload Shop Stock and look again.";
   const rows = (ties ?? []) as { undone_at: string | null; credit_filed_by_return: boolean | null }[];
-  if (rows.some((t) => !t.undone_at)) return "Its credit stays on the shelf: another return is still tied to it.";
-  if (!rows.some((t) => t.credit_filed_by_return === true)) return "Its credit stays on the shelf, where it was filed before the return, untied.";
+  if (rows.some((t) => !t.undone_at)) return "Its credit stays filed to Shop Stock: another return is still tied to it.";
+  if (!rows.some((t) => t.credit_filed_by_return === true)) return "Its credit stays filed to Shop Stock, where it was filed before the return, untied.";
   const { data: back, error: backErr } = await supabase
     .from("bills")
     .update({ on_shelf: false })
@@ -297,9 +297,9 @@ async function untieShelfCredit(supabase: any, orgId: string, creditId: string):
     .is("job_id", null)
     .eq("on_shelf", true)
     .select("id");
-  if (backErr) return `Its credit is still filed to the shelf and couldn't be taken back off: ${dbError(backErr)}`;
+  if (backErr) return `Its credit is still filed to Shop Stock and couldn't be taken back off: ${dbError(backErr)}`;
   if (!back?.length) return "Its credit had already been moved, so it was left as it is.";
-  return "Its credit is off the shelf again: a plain credit on Bills, free to file on a job.";
+  return "Its credit is off Shop Stock again: a plain credit on Bills, free to file on a job.";
 }
 
 /** The office's own upkeep moves: the ones Undo here reaches, and the ones an export freezes. */
@@ -332,7 +332,7 @@ async function exportCarrying(supabase: any, orgId: string, createdAt: string): 
   if (!hit) return null;
   const { data: org } = await supabase.from("organizations").select("settings").eq("id", orgId).maybeSingle();
   const tz = getOrgSettings((org as { settings?: unknown } | null)?.settings).timezone;
-  return `This already went to your accountant in the ${hit.list === "stock_used" ? "Stock Used" : "On Hand"} list downloaded ${shortDay(hit.created_at, tz)}, so it stays as it is. Count the shelf (Count It) to put it right from today.`;
+  return `This already went to your accountant in the ${hit.list === "stock_used" ? "Stock Used" : "On Hand"} list downloaded ${shortDay(hit.created_at, tz)}, so it stays as it is. Count It puts things right from today.`;
 }
 
 /** "Sep 26", the company's own day (an evening download in Pacific time is still that day). */
@@ -352,10 +352,10 @@ async function readRoll(supabase: any, orgId: string, lotId: string) {
     .eq("lot_id", lotId)
     .eq("org_id", orgId)
     .maybeSingle();
-  if (error) return { error: isMissingShelf(error) ? "The shelf isn't switched on for this database yet." : dbError(error) };
+  if (error) return { error: isMissingShelf(error) ? "Shop Stock isn't switched on for this database yet." : dbError(error) };
   const l = lot as { item_id: string; bill_id: string | null; unit: string; pieces_left: unknown; cost_left: unknown; live: boolean; cost_stale: boolean } | null;
-  if (!l || l.live === false) return { error: "That roll isn't on the shelf any more. Reload to see where it stands." };
-  if (l.cost_stale) return { error: "That roll's receipt changed after it went on the shelf, so its cost is being worked out again. Open its receipt on Bills first." };
+  if (!l || l.live === false) return { error: "That roll isn't in stock any more. Reload to see where it stands." };
+  if (l.cost_stale) return { error: "That roll's receipt changed after it went into stock, so its cost is being worked out again. Open its receipt on Bills first." };
   let supplier: string | null = null;
   if (l.bill_id) {
     const { data: bill } = await supabase.from("bills").select("supplier").eq("id", l.bill_id).eq("org_id", orgId).maybeSingle();
@@ -496,7 +496,7 @@ export async function returnToSupplier(input: { lotId: string; qty: number; cred
       return {
         ok: false,
         error: (bill as { job_id?: string | null }).job_id
-          ? "That credit is filed on a job, where it would come off the customer's bill. Clear its job on Bills first if it was really for the shelf."
+          ? "That credit is filed on a job, where it would come off the customer's bill. Clear its job on Bills first if it was really for stock."
           : "That isn't a credit that can be tied to a return. Pick the supplier's credit memo for these pieces.",
       };
     credit = { amount: Number((bill as { amount: unknown }).amount) || 0, onShelf: (bill as { on_shelf?: boolean }).on_shelf === true };
@@ -533,7 +533,7 @@ export async function returnToSupplier(input: { lotId: string; qty: number; cred
     let putBack = "";
     if (creditId && credit && !credit.onShelf) {
       const { error: backErr } = await supabase.from("bills").update({ on_shelf: false }).eq("id", creditId).eq("org_id", orgId).select("id");
-      if (backErr) putBack = " The credit was filed to the shelf and couldn't be put back; it is on the shelf with no return tied to it.";
+      if (backErr) putBack = " The credit was filed to Shop Stock and couldn't be put back; it stays there with no return tied to it.";
     }
     const why = error ? (isMissingCreditColumn(error) ? RETURN_TIE_NEEDS_0350 : dbError(error)) : "The return didn't save. Nothing went back - try again.";
     return { ok: false, error: `${why}${putBack}` };
@@ -582,18 +582,18 @@ export async function addOpeningRoll(input: { itemId: string; pieces: number; co
   const pieces = Number(input.pieces);
   const cost = Math.round((Number(input.cost) || 0) * 100) / 100;
   const note = String(input.note ?? "").trim();
-  if (!(pieces > 0)) return { ok: false, error: "Say how many are on the shelf." };
+  if (!(pieces > 0)) return { ok: false, error: "Say how many are in stock." };
   if (cost < 0) return { ok: false, error: "What it cost can't be below $0." };
   if (!note) return { ok: false, error: "Say where this came from (for example, \"counted in the truck, 9/24\"). A roll with no receipt needs a note." };
   const { data: item, error: itemErr } = await supabase.from("inventory_items").select("id, unit").eq("id", input.itemId).eq("org_id", orgId).maybeSingle();
   if (itemErr) return { ok: false, error: dbError(itemErr) };
-  if (!item) return { ok: false, error: "That item isn't on this company's shelf any more. Reload and try again." };
+  if (!item) return { ok: false, error: "That item isn't in this company's stock any more. Reload and try again." };
   const { data, error } = await supabase
     .from("stock_lots")
     .insert({ org_id: orgId, item_id: input.itemId, kind: "opening", pieces: Math.round(pieces * 1000) / 1000, unit: (item as { unit: string }).unit, cost, note })
     .select("id");
   if (error) return { ok: false, error: dbError(error) };
-  if (!data?.length) return { ok: false, error: "That roll didn't go on the shelf. Nothing changed - try again." };
+  if (!data?.length) return { ok: false, error: "That roll didn't go into stock. Nothing changed - try again." };
   revalidatePath("/inventory");
   return { ok: true, id: String(data[0].id) };
 }

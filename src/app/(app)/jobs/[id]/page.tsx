@@ -802,7 +802,7 @@ export default async function JobDetailPage({
   const stockShortsWords = jobStock
     ? stockShortsSentence(jobStock.shorts)
     : stockReadFailed
-      ? "The pieces taken from stock couldn't be read just now, so any taken past the shelf aren't named here. Reload to try again."
+      ? "The pieces taken from stock couldn't be read just now, so any taken past stock aren't named here. Reload to try again."
       : null;
   const totalMiles = (entries ?? []).reduce((s: number, e: any) => s + Number(e.miles ?? 0), 0);
   // Revenue = CASH COLLECTED on this job (Erik's rule): the amount actually paid

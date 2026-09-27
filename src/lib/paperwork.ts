@@ -351,7 +351,7 @@ export function linesPointWithTotal<T extends { amount?: unknown; unit_price?: u
  */
 export const SHELF_TRAY_NEEDS_LINES = `It was read with no lines. ${SHELF_NEEDS_LINES} Press Read Again so its lines come with it.`;
 export const SHELF_TRAY_NO_LINES_NO_FILE =
-  "It has no lines and no picture to read them from, so it can't go on the shelf. File it on a job or as a business cost.";
+  "It has no lines and no picture to read them from, so it can't go into stock. File it on a job or as a business cost.";
 
 export const RETURN_NEEDS_LINES =
   "This is a return with no lines on it, so on a job it would credit the customer the whole amount, even for parts they were never charged for. Press Read Again so its lines come with it, or file it as a business cost.";
@@ -603,7 +603,7 @@ export function pickedBecause(item: PaperItem): string | null {
   }
   if (markedShelf(item) && p.companyUse) {
     const words = String(p.companyUse.words ?? "").trim();
-    return `Shelf picked from the ${JOB_MARK_WORDS[p.companyUse.from]} on the ${paperWord(item)}${words ? `: ${words}` : ""}`;
+    return `Shop Stock picked from the ${JOB_MARK_WORDS[p.companyUse.from]} on the ${paperWord(item)}${words ? `: ${words}` : ""}`;
   }
   const cost = markedCost(item);
   if (cost && p.companyUse) {
@@ -1135,9 +1135,9 @@ export function fileRefusal(item: PaperItem, dest: PaperDestination | null): str
     // the shelf IS a line (pieces are taken from it), so a ticket with no lines can't go there yet.
     if (r.state === "too_big") return "Too big to read. Fix Details and put the total in, then File It.";
     if (r.state === "later") return NOT_FILED_YET;
-    if (r.state === "supplier_documents") return "These are supplier documents. Press Add To Supplier Documents, then Record To Shelf from there.";
+    if (r.state === "supplier_documents") return "These are supplier documents. Press Add To Supplier Documents, then Record To Stock from there.";
     const st = paperTypeOfItem(item);
-    if (st !== "receipt" && st !== "bill") return "Only a receipt or a bill can go on the shelf. Change its type in Fix Details if it is one.";
+    if (st !== "receipt" && st !== "bill") return "Only a receipt or a bill can go into stock. Change its type in Fix Details if it is one.";
     if (r.state === "needs_total") return r.sentence;
     const total = amountOf(item);
     if (total !== null && total < 0) return SHELF_NO_RETURNS;

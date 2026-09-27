@@ -44,7 +44,7 @@ export function NewItemButton() {
         <Modal
           open={open}
           onClose={() => setOpen(false)}
-          title="New Item On The Shelf"
+          title="New Item In Stock"
           footer={<ModalActions onCancel={() => setOpen(false)} submit formId="new-shelf-item" saving={pending} saveLabel="Create Item" />}
         >
           <div className="space-y-4">
@@ -82,7 +82,7 @@ export function NewItemButton() {
               </div>
             </div>
             <div className="rounded-lg border border-slate-200 p-3">
-              <p className="text-sm font-medium text-slate-900">Already on the shelf? (optional)</p>
+              <p className="text-sm font-medium text-slate-900">Already in stock? (optional)</p>
               <p className="mt-0.5 text-xs text-slate-500">A count, what it cost all together ($0 if you don&apos;t know), and where it came from.</p>
               <div className="mt-2 grid grid-cols-2 gap-3">
                 <div>

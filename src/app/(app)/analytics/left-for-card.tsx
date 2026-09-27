@@ -9,7 +9,9 @@ import {
   countedNotPaidLine,
   hasUnratedHours,
   isOwnerMoneySegmentKey,
+  materialsWithStock,
   notCountedLine,
+  stockLine,
   windowLabel,
   type OwnerMoney,
   type OwnerMoneyWindowKey,
@@ -51,6 +53,7 @@ export function LeftForCard({
   );
   const notCounted = money ? notCountedLine(money) : null;
   const countedNotPaid = money ? countedNotPaidLine(money) : null;
+  const stock = money ? stockLine(money) : null;
 
   return (
     <Card className="mb-6">
@@ -87,12 +90,13 @@ export function LeftForCard({
           <>
             <div className="divide-y divide-slate-100">
               {row("Received", formatCurrency(t.received))}
-              {row("Materials & Bills", cost(t.materialsAndBills))}
+              {/* SHOP STOCK (0303, decision 1): what was bought for stock counts in the month it was
+                  bought, because the cash is already gone. It is materials, so it rides inside
+                  Materials & Bills (Erik, 2026-09-27: no line of its own); stockLine below says how
+                  much, so the lines still add up and nothing is silent. */}
+              {row("Materials & Bills", cost(materialsWithStock(t)))}
               {row("Crew Pay", cost(t.crewPay))}
               {Math.abs(t.crewMileagePaid) >= 0.005 && row("Crew Mileage", cost(t.crewMileagePaid))}
-              {/* SHOP STOCK (0303, decision 1): what was bought for the shelf counts in the month it
-                  was bought, because the cash is already gone. Said only when there is some. */}
-              {Math.abs(t.putOnShelf) >= 0.005 && row("Put On The Shelf", cost(t.putOnShelf))}
               {Math.abs(t.shopStockLost) >= 0.005 && row("Shop Stock Lost", cost(t.shopStockLost))}
               <details className="group">
                 <summary className="flex min-h-[44px] cursor-pointer list-none items-center justify-between gap-4 py-1.5 [&::-webkit-details-marker]:hidden">
@@ -133,12 +137,7 @@ export function LeftForCard({
               )}
             </div>
 
-            {(Math.abs(money.onShelfNow) >= 0.005 || Math.abs(t.putOnShelf) >= 0.005) && (
-              <p className="mt-3 text-xs text-slate-500">
-                On The Shelf Now: {formatCurrency(money.onShelfNow)} at cost. It moves onto a job&apos;s profit as pieces are taken,
-                and never counts against the draw twice.
-              </p>
-            )}
+            {stock && <p className="mt-3 text-xs text-slate-500">{stock}</p>}
 
             {(notCounted || countedNotPaid) && (
               <p className="mt-3 text-xs leading-relaxed text-slate-400">

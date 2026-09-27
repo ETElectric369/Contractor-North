@@ -1862,7 +1862,7 @@ export async function recordSupplierInvoiceAsBill(input: {
     if (overshoot)
       return {
         ok: false,
-        error: `${number}'s lines come to ${sayMoney(lineSum)}, more than the ${sayMoney(total)} ${accountName} is charging, so it can't be itemised onto the shelf. Nothing was written.`,
+        error: `${number}'s lines come to ${sayMoney(lineSum)}, more than the ${sayMoney(total)} ${accountName} is charging, so it can't be itemised into stock. Nothing was written.`,
       };
     if (!lines.length) return { ok: false, error: `${number} has no lines on file. ${SHELF_NEEDS_LINES}` };
     const shelfProblem = ticketShelfProblem(lines, total, toShelf);
@@ -2061,7 +2061,7 @@ async function shelveRecordedBill(
     revalidatePath("/bills");
     if (delErr || !removed?.length) {
       reportError("bills:recordToShelf.rollback", delErr ?? new Error("rollback delete removed no rows"), { billId, number });
-      return { ok: false, error: `${why} The bill this just wrote for ${number} is still in Bills at ${sayMoney(total)} with nothing on the shelf; delete it there and try again.` };
+      return { ok: false, error: `${why} The bill this just wrote for ${number} is still in Bills at ${sayMoney(total)} with nothing in stock; delete it there and try again.` };
     }
     return { ok: false, error: `${why} ${number} is still not in your books.` };
   };
@@ -2071,13 +2071,13 @@ async function shelveRecordedBill(
     .eq("bill_id", billId)
     .eq("org_id", orgId)
     .order("sort_order");
-  if (writtenErr) return takeBack(`Couldn't read ${number}'s lines back, so nothing went on the shelf.`);
+  if (writtenErr) return takeBack(`Couldn't read ${number}'s lines back, so nothing went into stock.`);
   const idAt = new Map(((written ?? []) as { id: string; sort_order: number }[]).map((w) => [Number(w.sort_order), String(w.id)]));
   const picks: ShelfPick[] = [];
   for (const c of choices) {
     if (c.notStock) continue;
     const lineId = idAt.get(Number(c.index));
-    if (!lineId) return takeBack(`${number}'s lines didn't all save, so nothing went on the shelf.`);
+    if (!lineId) return takeBack(`${number}'s lines didn't all save, so nothing went into stock.`);
     picks.push({
       lineId,
       pieces: Number(c.pieces),
@@ -2097,8 +2097,8 @@ async function shelveRecordedBill(
   return {
     ok: true,
     message:
-      `${number} is on the shop shelf now: ${sayMoney(total)}${closed ? ", which the supplier already shows as paid" : ""}. ` +
-      `${shelved.lots.map((l) => `${l.pieces} ${l.unit} (${sayMoney(l.cost)})`).join(", ")} on the shelf.` +
+      `${number} is in shop stock now: ${sayMoney(total)}${closed ? ", which the supplier already shows as paid" : ""}. ` +
+      `${shelved.lots.map((l) => `${l.pieces} ${l.unit} (${sayMoney(l.cost)})`).join(", ")} in stock.` +
       (notStock ? ` ${notStock === 1 ? "1 line" : `${notStock} lines`} marked Not Stock stay on the ticket as Tools & Supplies.` : "") +
       lineNote,
   };
@@ -2359,7 +2359,7 @@ export async function recordSupplierInvoiceToShelf(input: {
   notSameAs?: string[] | null;
   toShelf: TicketLineChoice[];
 }): Promise<SupplierActionResult> {
-  if (!Array.isArray(input?.toShelf)) return { ok: false, error: "Say for every line how many go on the shelf, or tap Not Stock." };
+  if (!Array.isArray(input?.toShelf)) return { ok: false, error: "Say for every line how many go into stock, or tap Not Stock." };
   return recordSupplierInvoiceAsBill({
     invoiceId: input.invoiceId,
     differentPurchase: input.differentPurchase,
@@ -2399,7 +2399,7 @@ export async function supplierInvoiceShelfLines(
   if (invErr) return { ok: false, error: dbError(invErr) };
   if (!inv) return { ok: false, error: "That document isn't here anymore. Reload the page." };
   const row = inv as { invoice_number?: string | null; kind?: string | null; tax?: unknown; shipping?: unknown; total?: unknown };
-  if (String(row.kind ?? "invoice") !== "invoice") return { ok: false, error: "Only an invoice can go on the shelf." };
+  if (String(row.kind ?? "invoice") !== "invoice") return { ok: false, error: "Only an invoice can go into stock." };
   const { data: lineRows, error: lineErr } = await ctx.supabase
     .from("supplier_invoice_lines")
     .select("description, part_number, quantity, unit_price, extension, sort_order")
@@ -2409,7 +2409,7 @@ export async function supplierInvoiceShelfLines(
   if (lineErr) return { ok: false, error: dbError(lineErr) };
   const total = money(row.total);
   const built = supplierBillLines((lineRows ?? []) as any[], { invoiceNumber: text(row.invoice_number) ?? "", tax: row.tax, shipping: row.shipping, total });
-  if (built.overshoot) return { ok: false, error: "Its lines come to more than its total, so it can't be itemised onto the shelf." };
+  if (built.overshoot) return { ok: false, error: "Its lines come to more than its total, so it can't be itemised into stock." };
   if (!built.lines.length) return { ok: false, error: `This document has no lines on file. ${SHELF_NEEDS_LINES}` };
   return {
     ok: true,

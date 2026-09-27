@@ -173,6 +173,21 @@ describe("Stock Used: where every piece went, and what the supplier gave back", 
   it("a window before any of it is empty", () => {
     expect(stockUsedList(inputs(), { from: "2026-08-01", to: "2026-08-31" }, TZ).rows).toEqual([]);
   });
+  it("a count saved with no note has no Note: Count It's own words (either wording, saved before or after 0364) are not a person's", () => {
+    const inp = inputs();
+    const count = (id: string, kind: string, note: string | null, at: string) =>
+      ({ id, item_id: "i-122", lot_id: "L1", job_id: null, kind, qty: "2", cost: "1.44", note, created_at: at, undone_at: null, settled_by: null });
+    inp.moves.push(
+      count("c1", "recount_down", "Counted on the shelf", "2026-09-17T18:00:00Z"),
+      count("c2", "recount_up", "Counted in stock", "2026-09-18T18:00:00Z"),
+      count("c3", "recount_down", "Counted in the truck", "2026-09-19T18:00:00Z"),
+      count("c4", "recount_down", "  ", "2026-09-20T18:00:00Z"),
+    );
+    const notes = stockUsedList(inp, SEPT, TZ)
+      .rows.filter((r) => /^Counted short|^Found on a count/.test(String(r[col("stock_used", "Went To")])))
+      .map((r) => r[col("stock_used", "Note")]);
+    expect(notes).toEqual([null, null, "Counted in the truck", null]);
+  });
   it("a download cut at an instant carries only the moves before it, and records that same instant (0350 freezes exactly what went out)", () => {
     const cut = "2026-09-14T00:00:00.000Z"; // after the 9/12 write-off, before the 9/15 return
     const t = stockUsedList(inputs(), SEPT, TZ, cut);
@@ -230,7 +245,7 @@ describe("Tools: Tools & Supplies tickets, and tools the company kept off other 
     );
     inp.lots.push({ lot_id: "L9", item_id: "i-122", kind: "line", bill_id: "sh", bill_line_id: "sh1", pieces: "250", unit: "ft", cost: "180.17", bought_on: "2026-09-20", live: true, note: null });
     const tools = toolsList(inp, SEPT, TZ).rows.filter((r) => r[0] !== "Total");
-    expect(tools).toContainEqual(["2026-09-20", "Consolidated Electrical Dist.", "8802-ST", "KLEIN NCVT-3 TESTER", 44, "Shelf ticket, not rolls", null]);
+    expect(tools).toContainEqual(["2026-09-20", "Consolidated Electrical Dist.", "8802-ST", "KLEIN NCVT-3 TESTER", 44, "Stock ticket, not rolls", null]);
     // The tied credit (cr1, on the shelf) is Stock Used's, never here.
     expect(tools.some((r) => r[2] === "8802-CM1")).toBe(false);
     const bought = stockBoughtList(inp, SEPT, TZ);

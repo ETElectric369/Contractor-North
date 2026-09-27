@@ -10,6 +10,7 @@ import { formatCurrency, sanitizeSearch } from "@/lib/utils";
 import { companyUseWord, proposalOf, storedMarks } from "@/lib/paperwork";
 import { cleanLines } from "@/lib/paper-lines";
 import { waitingForShelf, type WaitingLineIn } from "@/lib/shelf-plan";
+import { personNote } from "@/lib/stock-take";
 import { claimedIdsOfLines } from "@/lib/unbilled-work";
 import { readSupplierPaperHomes, type SupplierPaperHome } from "@/app/(app)/bills/supplier-papers";
 import { reportError } from "@/lib/observe";
@@ -182,7 +183,7 @@ export default async function ShopStockPage({
       l.kind === "opening"
         ? `Counted in, not off a receipt${meta?.note ? `: ${meta.note}` : ""}`
         : `from ${bill?.supplier ?? "a receipt"}${bill?.bill_date ? `, ${day(bill.bill_date)}` : ""}${
-            bill?.on_shelf ? " (a shelf ticket)" : bill?.job_id ? ` (bought on ${jobName.get(String(bill.job_id)) ?? "a job"})` : ""
+            bill?.on_shelf ? " (a stock ticket)" : bill?.job_id ? ` (bought on ${jobName.get(String(bill.job_id)) ?? "a job"})` : ""
           }`;
     const view: ShelfLotView = {
       id: String(l.lot_id),
@@ -212,9 +213,10 @@ export default async function ShopStockPage({
     const who = m.created_by ? whoOf.get(String(m.created_by)) ?? "Someone" : "The office";
     const job = m.job_id ? jobName.get(String(m.job_id)) ?? "a job" : null;
     const qty = Number(m.qty) || 0;
+    const note = personNote(m.note);
     const words: Record<string, string> = {
       draw: `${who} took ${qty} for ${job}`,
-      short: `${who} took ${qty} for ${job}, past what the shelf showed`,
+      short: `${who} took ${qty} for ${job}, past what stock showed`,
       job_return: `${qty} came back from ${job}`,
       recount_down: `Counted: ${qty} fewer than the record (written off)`,
       recount_up: `Counted: ${qty} more than the record (found, $0)`,
@@ -224,7 +226,7 @@ export default async function ShopStockPage({
     const view: ShelfMoveView = {
       id: String(m.id),
       kind: String(m.kind),
-      text: `${words[m.kind] ?? `${m.kind} ${qty}`}, ${day(m.created_at)}${m.note && !/^Counted on the shelf$/.test(m.note) ? ` · ${m.note}` : ""}`,
+      text: `${words[m.kind] ?? `${m.kind} ${qty}`}, ${day(m.created_at)}${note ? ` · ${note}` : ""}`,
       cost: Number(m.cost) || 0,
       undone: !!m.undone_at,
       drawGroup: m.draw_group ? String(m.draw_group) : null,
@@ -325,7 +327,7 @@ export default async function ShopStockPage({
   // card), with the shell's Off line on top. Nothing here is hidden or changed: it is the record.
   return (
     <div>
-      <PageHeader title="Shop Stock" description="What's on the shelf, what it cost, where every roll came from and where every piece went.">
+      <PageHeader title="Shop Stock" description="What's in stock, what it cost, where every roll came from and where every piece went.">
         <Link
           href="/analytics/accountant"
           className="inline-flex min-h-[44px] items-center rounded-lg border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-50"
@@ -347,7 +349,7 @@ export default async function ShopStockPage({
           <Card>
             <CardContent className="py-4">
               <div className="text-xl font-bold tabular-nums text-slate-900 sm:text-2xl">{lotsReadFailed ? "—" : formatCurrency(totalValue)}</div>
-              <div className="text-xs text-slate-500">On The Shelf Now</div>
+              <div className="text-xs text-slate-500">In Stock Now</div>
             </CardContent>
           </Card>
           <Card className={lowStock.length ? "border-amber-200 bg-amber-50" : ""}>
@@ -363,7 +365,7 @@ export default async function ShopStockPage({
         <form className="min-w-0 flex-1">
           <div className="relative max-w-md">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-            <Input name="q" defaultValue={q} placeholder="Search the shelf…" className="pl-9" />
+            <Input name="q" defaultValue={q} placeholder="Search stock…" className="pl-9" />
             {lowOnly && <input type="hidden" name="low" value="1" />}
             {inactiveOnly && <input type="hidden" name="inactive" value="1" />}
           </div>
@@ -391,13 +393,13 @@ export default async function ShopStockPage({
       {shown.length === 0 ? (
         <EmptyState
           icon={Boxes}
-          title={inactiveOnly ? "No inactive items" : lowOnly ? "Nothing needs reordering" : q ? "No matches" : "Nothing on the shelf yet"}
+          title={inactiveOnly ? "No inactive items" : lowOnly ? "Nothing needs reordering" : q ? "No matches" : "Nothing in stock yet"}
           description={
             lowOnly
               ? "Everything with a reorder point set is above it."
               : q
                 ? "Try a different search."
-                : "Put the rest of a roll on the shelf from a job's receipt (Bills), file a STOCK ticket to Shop Stock from the tray, or Record To Shelf on a supplier document. New Item is for something already on the shelf with no receipt here."
+                : "Put the rest of a roll in stock from a job's receipt (Bills), file a STOCK ticket to Shop Stock from the tray, or Record To Stock on a supplier document. New Item is for something already in stock with no receipt here."
           }
         >
           {(lowOnly || q) && (
@@ -413,14 +415,14 @@ export default async function ShopStockPage({
 
       {lotsReadFailed && (
         <p className="mt-3 max-w-2xl text-xs text-amber-800">
-          The shelf&apos;s rolls couldn&apos;t be read just now, so no value or history is shown. Reload to try again.
+          The rolls in stock couldn&apos;t be read just now, so no value or history is shown. Reload to try again.
         </p>
       )}
 
       <Card className="mt-6 p-4">
-        <h2 className="text-base font-semibold text-slate-900">Waiting For The Shelf</h2>
+        <h2 className="text-base font-semibold text-slate-900">Waiting To Go In Stock</h2>
         <p className="mt-0.5 text-sm text-slate-500">
-          Things that probably belong on the shelf. Nothing here moves on its own: each one names the button that would put it there, and you
+          Things that probably belong in stock. Nothing here moves on its own: each one names the button that would put it there, and you
           decide.
         </p>
         {waitingReadFailed ? (

@@ -328,7 +328,7 @@ const HOMES: { door: string | RegExp; was: string; home: string; times?: number 
   { door: "Record It On J-050", was: "Needs You (and CED 3b Record It As A Bill)", home: "needs-you" },
   { door: "Pick A Job", was: "Needs You", home: "needs-you" },
   { door: "Another Job", was: "Needs You", home: "needs-you", times: 3 },
-  { door: "Shop Stock", was: "Needs You (and CED 3b Record To Shelf)", home: "needs-you", times: 4 },
+  { door: "Shop Stock", was: "Needs You (and CED 3b Record To Stock)", home: "needs-you", times: 4 },
   { door: "Business Cost", was: "Needs You", home: "needs-you", times: 4 },
   { door: "Same Purchase: Tie Them", was: "Needs You (and CED 3b)", home: "needs-you" },
   // 1. Sort These
@@ -346,7 +346,7 @@ const HOMES: { door: string | RegExp; was: string; home: string; times?: number 
   { door: /^Invoices With No Job \(\d+\)/, was: "CED 3a", home: "suppliers" },
   { door: "File It On This Job", was: "CED 3a (row picker)", home: "suppliers" },
   { door: /^Not In Your Books \(\d+\)/, was: "CED 3b", home: "suppliers" },
-  { door: "Record To Shelf", was: "CED 3b", home: "suppliers" },
+  { door: "Record To Stock", was: "CED 3b", home: "suppliers" },
   { door: /^Discount Still On The Table/, was: "CED 3c", home: "suppliers" },
   { door: /^What Consolidated Electrical Distributors Has Open \(7\)$/, was: "CED 3d", home: "suppliers" },
   // CED 'Show The Other N' (x4): still each list's own switch past six rows. In this fixture no
@@ -367,8 +367,8 @@ const HOMES: { door: string | RegExp; was: string; home: string; times?: number 
   { door: "Edit", was: "pencil icon (bare 16px)", home: "all-bills", times: 15 },
   { door: "Delete", was: "trash icon (bare 16px)", home: "all-bills", times: 15 },
   { door: /^Bill Only What This Job Used$/, was: "receipt card, per line", home: "all-bills" },
-  { door: "Put The Rest On The Shelf", was: "receipt card, per line", home: "all-bills" },
-  { door: "Take It Off The Shelf", was: "receipt card, per line", home: "all-bills", times: 1 },
+  { door: "Put The Rest In Stock", was: "receipt card, per line", home: "all-bills" },
+  { door: "Take It Out Of Stock", was: "receipt card, per line", home: "all-bills", times: 1 },
   { door: "New PO", was: "Purchase Orders tab", home: "all-bills" },
   { door: /^PO-001 · CED/, was: "Purchase Orders row", home: "all-bills" },
   { door: "IMG_0412.jpg", was: "Receipts tab file link", home: "all-bills" },
@@ -429,7 +429,7 @@ describe("every door keeps exactly one home", () => {
 
   it("Shop Stock's Record To Shelf door lands on the fold that holds the button (shelf-plan waitingForShelf)", () => {
     const fold = section(`supplier-not-in-books-${CED}`);
-    expect(count(doors(fold), "Record To Shelf")).toBeGreaterThanOrEqual(1);
+    expect(count(doors(fold), "Record To Stock")).toBeGreaterThanOrEqual(1);
     expect(section(`supplier-invoices-${CED}`)).toContain(`id="supplier-not-in-books-${CED}"`);
   });
 

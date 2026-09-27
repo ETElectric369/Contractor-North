@@ -72,7 +72,7 @@ export default async function AccountantPage({ searchParams }: { searchParams: P
           </button>
         </form>
         <p className="mt-2 text-xs text-slate-500">
-          {day(w.from)} to {day(w.to)}. On Hand is what was on the shelf at the end of {day(w.to)}.
+          {day(w.from)} to {day(w.to)}. On Hand is what was in stock at the end of {day(w.to)}.
         </p>
       </Card>
 
@@ -92,7 +92,7 @@ export default async function AccountantPage({ searchParams }: { searchParams: P
                   <p className="text-sm text-slate-500">{l.says}</p>
                   <p className="mt-0.5 text-xs text-slate-400">
                     {n === 0 ? "Nothing in these dates." : `${n} ${n === 1 ? "row" : "rows"}, ${formatCurrency(t.total ?? 0)} at cost.`}
-                    {!read.shelf && l.key !== "tools" ? " The shelf isn't switched on for this database yet." : ""}
+                    {!read.shelf && l.key !== "tools" ? " Shop Stock isn't switched on for this database yet." : ""}
                   </p>
                 </div>
                 <DownloadCsvButton href={q(l.key)} fallbackName={l.key === "on_hand" ? `${l.file}-${w.to}.csv` : `${l.file}-${w.from}-to-${w.to}.csv`} />
@@ -102,7 +102,7 @@ export default async function AccountantPage({ searchParams }: { searchParams: P
           <p className="text-sm font-medium text-slate-700">Depreciation is your accountant&apos;s call.</p>
           <p className="text-xs text-slate-500">
             {remembered
-              ? "Every download is remembered. A write-off, a return or a count that went out in a Stock Used or On Hand download stays as it is; Count It puts things right from today. Takes onto jobs, pieces brought back, a roll taken back off the shelf and a supplier credit's amount can still change after a download; the next download carries the change."
+              ? "Every download is remembered. A write-off, a return or a count that went out in a Stock Used or On Hand download stays as it is; Count It puts things right from today. Takes onto jobs, pieces brought back, a roll taken back out of stock and a supplier credit's amount can still change after a download; the next download carries the change."
               : "Downloads aren't remembered yet (one database update, 0350, isn't applied), so a write-off can still be undone after it went to your accountant."}
           </p>
         </div>

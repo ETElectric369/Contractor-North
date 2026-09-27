@@ -419,7 +419,7 @@ export function SupplierPaperLists({
           <WhyFold>
             <p>
               Bought at {accountName} with no bill anywhere in here, so no job is carrying the cost. Shop stock goes
-              in with Record To Shelf; a purchase with a job goes in with Record It As A Bill.
+              in with Record To Stock; a purchase with a job goes in with Record It As A Bill.
             </p>
           </WhyFold>
           <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
@@ -497,7 +497,7 @@ export function SupplierPaperLists({
                         disabled={pending}
                         onClick={() => openShelf(invoice.id, invoice.invoiceNumber, true)}
                       >
-                        {busy === `shelf:${invoice.id}` ? "Reading Its Lines…" : "Different Purchase: Record To Shelf"}
+                        {busy === `shelf:${invoice.id}` ? "Reading Its Lines…" : "Different Purchase: Record To Stock"}
                       </Button>
                     )}
                   </div>
@@ -511,7 +511,7 @@ export function SupplierPaperLists({
                       <p className="text-xs text-sky-800">{accountName} wrote &ldquo;{invoice.jobNameRaw!.trim()}&rdquo; on it: this reads like shop stock.</p>
                     )}
                     <Button variant="outline" className="h-11 w-full" disabled={pending} onClick={() => openShelf(invoice.id, invoice.invoiceNumber, false)}>
-                      {busy === `shelf:${invoice.id}` ? "Reading Its Lines…" : "Record To Shelf"}
+                      {busy === `shelf:${invoice.id}` ? "Reading Its Lines…" : "Record To Stock"}
                     </Button>
                   </div>
                 )}
@@ -655,10 +655,10 @@ export function SupplierPaperLists({
 
       {shelfSheet && actions.recordToShelf && (
         <ShelfTicketSheet
-          title={`Record ${shelfSheet.number} To The Shelf`}
+          title={`Record ${shelfSheet.number} To Stock`}
           lines={shelfSheet.lines}
           total={shelfSheet.total}
-          fileLabel="Record To Shelf"
+          fileLabel="Record To Stock"
           onClose={() => setShelfSheet(null)}
           onFile={async (choices) => {
             const res = await actions.recordToShelf!({
@@ -668,7 +668,7 @@ export function SupplierPaperLists({
             });
             if (!res.ok) return { ok: false, error: res.error };
             setShelfSheet(null);
-            setDone(res.message ?? `${shelfSheet.number} is on the shop shelf now.`);
+            setDone(res.message ?? `${shelfSheet.number} is in shop stock now.`);
             router.refresh();
             return { ok: true };
           }}

@@ -4,6 +4,7 @@ import { isMissingCreditColumn, isMissingShelf } from "@/lib/job-cost";
 import { todayStrInTz, tzDayStartUtc } from "@/lib/tz";
 import { claimedIdsOfLines } from "@/lib/unbilled-work";
 import { readAllPages } from "@/lib/read-all-pages";
+import { personNote } from "@/lib/stock-take";
 
 /**
  * EXPORT FOR ACCOUNTANT (Shop Stock, Phase 4).
@@ -45,9 +46,9 @@ import { readAllPages } from "@/lib/read-all-pages";
 export type AccountantListKey = "stock_bought" | "stock_used" | "on_hand" | "tools";
 
 export const ACCOUNTANT_LISTS: { key: AccountantListKey; title: string; file: string; says: string }[] = [
-  { key: "stock_bought", title: "Stock Bought", file: "stock-bought", says: "Every roll or box that went on the shelf in these dates, at what it cost off its ticket." },
-  { key: "stock_used", title: "Stock Used", file: "stock-used", says: "Every piece that left the shelf in these dates: onto which job, written off, or back to the supplier." },
-  { key: "on_hand", title: "On Hand", file: "on-hand", says: "What was on the shelf at the end of the last day, roll by roll, at cost." },
+  { key: "stock_bought", title: "Stock Bought", file: "stock-bought", says: "Every roll or box that went into stock in these dates, at what it cost off its ticket." },
+  { key: "stock_used", title: "Stock Used", file: "stock-used", says: "Every piece that left stock in these dates: onto which job, written off, or back to the supplier." },
+  { key: "on_hand", title: "On Hand", file: "on-hand", says: "What was in stock at the end of the last day, roll by roll, at cost." },
   { key: "tools", title: "Tools Bought", file: "tools-bought", says: "Tickets filed as Tools & Supplies, and tools kept off other tickets. Depreciation is your accountant's call." },
 ];
 
@@ -191,7 +192,7 @@ export function stockBoughtList(inp: AccountantInputs, w: Window, tz: string): C
     const day = b ? billDay(b, tz) : l.bought_on ? String(l.bought_on).slice(0, 10) : null;
     if (!day || !inDays(day, w)) continue;
     const j = b?.job_id ? k.job.get(String(b.job_id)) : undefined;
-    const how = l.kind === "opening" ? "Counted in, no receipt" : !b ? "Its ticket isn't in the books" : b.on_shelf ? "Shelf ticket" : b.job_id ? "Rest of a job's receipt" : "Receipt";
+    const how = l.kind === "opening" ? "Counted in, no receipt" : !b ? "Its ticket isn't in the books" : b.on_shelf ? "Stock ticket" : b.job_id ? "Rest of a job's receipt" : "Receipt";
     const cost = cents(num(l.cost));
     const row: Cell[] = [
       day,
@@ -218,7 +219,7 @@ export function stockBoughtList(inp: AccountantInputs, w: Window, tz: string): C
   if (!out.length) return { header: HEADERS.stock_bought, rows: out, summaryRows: 0, total: 0 };
   const width = HEADERS.stock_bought.length;
   const sum = totalRow(width, { 4: total });
-  sum[8] = "Bought on tickets (the app's Put On The Shelf)";
+  sum[8] = "Bought on tickets (the shop stock inside the app's Materials & Bills)";
   out.push(sum);
   let summaryRows = 1;
   if (counted.length) {
@@ -239,7 +240,7 @@ const WENT_TO: Record<string, string> = {
   recount_down: "Counted short (Shop Stock Lost)",
   recount_up: "Found on a count",
   supplier_return: "Returned to supplier",
-  short: "Taken past the shelf, no roll yet",
+  short: "Taken past stock, no roll yet",
 };
 
 export function stockUsedList(inp: AccountantInputs, w: Window, tz: string, cutoffAt?: string | null): CsvTable {
@@ -276,7 +277,7 @@ export function stockUsedList(inp: AccountantInputs, w: Window, tz: string, cuto
         WENT_TO[m.kind] ?? m.kind,
         j?.job_number ?? null,
         j?.name ?? null,
-        m.note ?? null,
+        personNote(m.note),
         null,
       ],
     });
@@ -361,7 +362,7 @@ export function onHandList(inp: AccountantInputs, asOf: string, tz: string, cuto
   for (const [itemId, e] of extra) {
     const it = k.item.get(itemId);
     if (e.found) rows.push([it?.name ?? "An item", it?.unit ?? null, qty3(e.found), 0, null, null, null, "Found on a count, no receipt behind them"]);
-    if (e.short) rows.push([it?.name ?? "An item", it?.unit ?? null, qty3(-e.short), 0, null, null, null, "Taken past the shelf, no roll yet"]);
+    if (e.short) rows.push([it?.name ?? "An item", it?.unit ?? null, qty3(-e.short), 0, null, null, null, "Taken past stock, no roll yet"]);
   }
   if (!rows.length) return { header: HEADERS.on_hand, rows, summaryRows: 0, total: 0 };
   rows.push(totalRow(HEADERS.on_hand.length, { 3: total }));
@@ -412,7 +413,7 @@ export function toolsList(inp: AccountantInputs, w: Window, tz: string): CsvTabl
         .filter(Boolean)
         .join("; ");
       total += rest;
-      rows.push({ day: day!, row: [day, b.supplier ?? null, b.bill_number ?? null, what || "(tax and charges on the ticket)", cents(rest), "Shelf ticket, not rolls", null] });
+      rows.push({ day: day!, row: [day, b.supplier ?? null, b.bill_number ?? null, what || "(tax and charges on the ticket)", cents(rest), "Stock ticket, not rolls", null] });
       continue;
     }
     const bucket = bucketOf(b.category);
@@ -574,14 +575,14 @@ export async function readAccountantInputs(supabase: Sb, orgId: string): Promise
   ]);
   const shelf = !(lotBal.error && isMissingShelf(lotBal.error));
   for (const r of [items, bills, jobs]) if (r.error) return { ok: false, error: "The books couldn't be read just now. Nothing was made; try again." };
-  if (lotBal.error && shelf) return { ok: false, error: "The shelf couldn't be read just now. Nothing was made; try again." };
+  if (lotBal.error && shelf) return { ok: false, error: "Stock couldn't be read just now. Nothing was made; try again." };
 
   let moves: any[] = [];
   if (shelf) {
     const cols = "id, item_id, lot_id, job_id, kind, qty, cost, note, created_at, undone_at, settled_by";
     let r = await all<any>("stock_moves", `${cols}, credit_bill_id`);
     if (r.error && isMissingCreditColumn(r.error)) r = await all<any>("stock_moves", cols);
-    if (r.error) return { ok: false, error: "The shelf's record couldn't be read just now. Nothing was made; try again." };
+    if (r.error) return { ok: false, error: "The stock record couldn't be read just now. Nothing was made; try again." };
     moves = r.rows;
   }
 

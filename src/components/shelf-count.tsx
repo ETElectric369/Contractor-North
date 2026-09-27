@@ -136,7 +136,7 @@ export function ShelfTicketSheet({
     const a = shelfAnswerOf(l, v);
     return [{ index, notStock: false as const, pieces: a.pieces, unit: a.unit, bought: a.bought, itemId: a.itemId, newItemName: a.newItemName, keyPart: a.keyPart }];
   });
-  const problem = loaded ? ticketShelfProblem(lines, total, choices) : "Reading the shelf…";
+  const problem = loaded ? ticketShelfProblem(lines, total, choices) : "Reading stock…";
   const openCount = lines.filter((l) => lineNeedsShelfAnswer(l) && !values[l.key]?.confirmed).length;
 
   function confirmAll() {
@@ -173,11 +173,11 @@ export function ShelfTicketSheet({
       <div className="space-y-3">
         <p className="text-sm text-slate-600">
           Each line opens with the count off the ticket. Confirm it, change it, or tap Not Stock for anything the shop used up. What
-          goes on the shelf counts as Put On The Shelf in the month the ticket is dated; Not Stock lines, their tax and freight count
+          goes into stock counts in Materials &amp; Bills in the month the ticket is dated; Not Stock lines, their tax and freight count
           as Tools &amp; Supplies. Something a job used belongs on that job: file the ticket there instead.
         </p>
         {!loaded ? (
-          <p className="text-sm text-slate-500">Reading the shelf…</p>
+          <p className="text-sm text-slate-500">Reading stock…</p>
         ) : (
           <>
             {openCount > 1 && (
@@ -225,12 +225,12 @@ export function useShelfItems(open: boolean): { items: ShelfPickerItem[]; loaded
       .then((r) => {
         if (!live) return;
         if (r.ok) setItems(r.items);
-        else setError(r.error ?? "The shelf's items couldn't be read.");
+        else setError(r.error ?? "The stock items couldn't be read.");
         setLoaded(true);
       })
       .catch(() => {
         if (!live) return;
-        setError("The shelf's items couldn't be read. You can still name a new item.");
+        setError("The stock items couldn't be read. You can still name a new item.");
         setLoaded(true);
       });
     return () => {
@@ -270,8 +270,8 @@ export function ShelfCountRow({
   const item = items.find((i) => i.id === value.itemId) ?? null;
   const set = (patch: Partial<ShelfCountValue>) => onChange({ ...value, ...patch, confirmed: true, notStock: false });
   const summary = value.notStock
-    ? "Not stock: stays on this ticket, never on the shelf."
-    : `${rest > 0 ? rest : 0} ${value.unit} to the shelf · ${item ? item.name : `New item: ${value.newItemName || line.description}`}`;
+    ? "Not stock: stays on this ticket, never in stock."
+    : `${rest > 0 ? rest : 0} ${value.unit} to stock · ${item ? item.name : `New item: ${value.newItemName || line.description}`}`;
   const baseId = `shelf-${line.key}`;
 
   return (
@@ -355,7 +355,7 @@ export function ShelfCountRow({
             </div>
           )}
           <div>
-            <Label htmlFor={`${baseId}-item`}>Which item on the shelf is it?</Label>
+            <Label htmlFor={`${baseId}-item`}>Which item in stock is it?</Label>
             <Select
               id={`${baseId}-item`}
               value={value.itemId}

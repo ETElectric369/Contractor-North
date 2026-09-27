@@ -178,8 +178,8 @@ describe("File It to Shop Stock (the tray)", () => {
     );
     const res = await fileItem("oi-s", { type: "stock", lines: CHOICES });
     expect(res.ok).toBe(true);
-    expect(res.message).toContain("Filed on the shop shelf.");
-    expect(res.message).toContain("500 ea ($92.49) on the shelf");
+    expect(res.message).toContain("Filed in shop stock.");
+    expect(res.message).toContain("500 ea ($92.49) in stock");
     expect(res.message).toContain("1 line marked Not Stock");
     expect(did("bills", "insert")!.payload).toMatchObject({ job_id: null, on_shelf: true, category: "Shop Stock", amount: 114.4 });
     expect(rpcs).toHaveLength(1);
@@ -284,7 +284,7 @@ describe("Put The Rest On The Shelf (a job's receipt line)", () => {
     const res = await putRestOnShelf({ lineId: "l1", pieces: 250, used: 0, unit: "ft", bought: 250, newItemName: "12/2 NM-B" });
     expect(res.ok).toBe(true);
     expect(res.message).toBe(
-      "250 ft is on the shelf at $180.17 (about 72¢ a foot). 13897 Herringbone's cost drops by $180.17. INV-078 (a draft) now bills this receipt as it stands.",
+      "250 ft is in stock at $180.17 (about 72¢ a foot). 13897 Herringbone's cost drops by $180.17. INV-078 (a draft) now bills this receipt as it stands.",
     );
     // The draft's materials were pulled in again, once, at the markup already on it.
     expect(importCosts.mock.calls).toEqual([["inv-78", undefined, { keepInvoiceMarkup: true }]]);
@@ -314,7 +314,7 @@ describe("Put The Rest On The Shelf (a job's receipt line)", () => {
     );
     const res = await putRestOnShelf({ lineId: "l1", pieces: 250, used: 0, unit: "ft", bought: 250, newItemName: "12/2" });
     expect(res.ok).toBe(false);
-    expect(res.error).toContain("already on the shelf");
+    expect(res.error).toContain("already in stock");
     expect(rpcs).toEqual([]);
   });
 
@@ -370,7 +370,7 @@ describe("Put The Rest On The Shelf: who already bills the receipt (review of Ph
     );
     const res = await putRestOnShelf({ lineId: "l1", pieces: 250, used: 0, unit: "ft", bought: 250, newItemName: "12/2" });
     expect(res.ok).toBe(false);
-    expect(res.error).toBe("INV-050 has gone to the customer and already bills the order this receipt delivered, so what the job used can't change now. Nothing went on the shelf.");
+    expect(res.error).toBe("INV-050 has gone to the customer and already bills the order this receipt delivered, so what the job used can't change now. Nothing went into stock.");
     expect(rpcs).toEqual([]);
     expect(importCosts).not.toHaveBeenCalled();
   });
@@ -427,7 +427,7 @@ describe("A roll on a line fixes what the job used (review of Phase 2)", () => {
     );
     const res = await setReceiptLineBillable("l1", false);
     expect(res.ok).toBe(false);
-    expect(res.error).toContain("Take It Off The Shelf first");
+    expect(res.error).toContain("Take It Out Of Stock first");
     expect(calls.filter((c) => c.verb !== "select")).toEqual([]);
   });
   it("a new 'used' figure refuses under a roll; Bill The Whole Line (null) still goes and takes the roll off", async () => {
@@ -435,7 +435,7 @@ describe("A roll on a line fixes what the job used (review of Phase 2)", () => {
     state.client = fakeSupabase({ "bill_line_items.select": [LINE], "stock_lots.select": [{ data: [{ id: "lot-1" }], error: null }] }, calls, rpcs);
     const no = await setReceiptLineUsage({ lineId: "l1", billedAmount: 39.67, containerCount: 250, boughtQuantity: 250, usedQuantity: 60 });
     expect(no.ok).toBe(false);
-    expect(no.error).toContain("Take It Off The Shelf first");
+    expect(no.error).toContain("Take It Out Of Stock first");
     expect(calls.filter((c) => c.verb !== "select")).toEqual([]);
 
     state.client = fakeSupabase(
@@ -450,7 +450,7 @@ describe("A roll on a line fixes what the job used (review of Phase 2)", () => {
     );
     const whole = await setReceiptLineUsage({ lineId: "l1", billedAmount: null, containerCount: null, usedQuantity: null });
     expect(whole.ok).toBe(true);
-    expect(whole.note).toContain("came off the shelf");
+    expect(whole.note).toContain("came out of stock");
     expect(lastDid("stock_lots", "update")!.payload).toHaveProperty("unshelved_at");
   });
 });
@@ -535,7 +535,7 @@ describe("Record To Shelf (a CED document)", () => {
       ],
     });
     expect(res.ok).toBe(true);
-    expect(res.message).toContain("8802-1103061 is on the shop shelf now: $114.40, which the supplier already shows as paid.");
+    expect(res.message).toContain("8802-1103061 is in shop stock now: $114.40, which the supplier already shows as paid.");
     expect(did("bills", "insert")!.payload).toMatchObject({ job_id: null, on_shelf: true, category: "Shop Stock", amount: 114.4 });
     expect(rpcs[0].args.p_lines).toEqual([
       { line_id: "l0", billed_amount: 0, pieces: 500, unit: "ea", cost: 92.49, item_id: null, item_name: "Red/Yellow connectors", key_part: "RYJUG" },
@@ -554,7 +554,7 @@ describe("Record To Shelf (a CED document)", () => {
         ],
         "stock_lot_balance.select": [{ data: [], error: null }],
         "inventory_items.select": [{ data: [], error: null }],
-        "rpc.shelve_bill_lines": [{ data: null, error: { code: "42501", message: "Only the office puts things on this company's shelf." } }],
+        "rpc.shelve_bill_lines": [{ data: null, error: { code: "42501", message: "Only the office puts things in this company's stock." } }],
         "bills.delete": [{ data: [{ id: "bill-new" }], error: null }],
       }),
       calls,

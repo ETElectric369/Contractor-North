@@ -516,13 +516,13 @@ d("Shop Stock Phase 3 cross-check: a crew take, its bell, its bill, its Undo, it
     expect((await plan(inv2, 11)).rows.map((r) => r.import_key)).toEqual([stockKey(group)]);
     speakAs("tech");
     const undone = await undoTakeAction(group, job);
-    expect(undone).toEqual({ ok: true, message: "Undone: the pieces are back on the shelf." });
+    expect(undone).toEqual({ ok: true, message: "Undone: the pieces are back in stock." });
     expect(await takesAs(techId)).toEqual([]);
     expect((await net()).fromShelf).toBe(0);
     // The way back from void is shut: its pieces are on the shelf again.
     await as(staffId);
     expect(await refusal(() => c.query("update public.invoices set status = 'draft' where id = $1", [inv]))).toContain(
-      "went back on the shelf, so it can't come back from void",
+      "went back into stock, so it can't come back from void",
     );
     await asServer();
 

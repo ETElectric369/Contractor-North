@@ -1511,8 +1511,8 @@ describe("Undo, Delete and a deleted bill leave nothing wrong behind (audit v994
     );
     const res = await undoPaperwork("oi-9");
     expect(res.ok).toBe(false);
-    expect(res.error).toContain("(12/2 Romex, 250 ft) is on the shop shelf");
-    expect(res.error).toContain("Take It Off The Shelf");
+    expect(res.error).toContain("(12/2 Romex, 250 ft) is in shop stock");
+    expect(res.error).toContain("Take It Out Of Stock");
     expect(did("bills", "delete")).toBeUndefined();
   });
 

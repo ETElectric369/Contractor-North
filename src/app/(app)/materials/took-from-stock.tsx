@@ -145,17 +145,17 @@ export function TakeSheetView({
           type="search"
           value={search}
           onChange={(e) => onSearch(e.target.value)}
-          placeholder="Search the shelf"
-          aria-label="Search the shelf"
+          placeholder="Search stock"
+          aria-label="Search stock"
           className="h-11 w-full rounded-lg border border-slate-300 bg-white pl-9 pr-3 text-base"
         />
       </label>
-      {loading && <p className="py-4 text-center text-sm text-slate-500">Reading the shelf…</p>}
+      {loading && <p className="py-4 text-center text-sm text-slate-500">Reading stock…</p>}
       {error && <p className="text-sm text-red-600">{error}</p>}
       {!loading && !error && rows.length === 0 && (
-        <p className="py-4 text-center text-sm text-slate-500">Nothing is on the shelf yet. The office puts rolls and boxes on it from their tickets.</p>
+        <p className="py-4 text-center text-sm text-slate-500">Nothing is in stock yet. The office puts rolls and boxes in stock from their tickets.</p>
       )}
-      {!loading && rows.length > 0 && shown.length === 0 && <p className="py-4 text-center text-sm text-slate-500">Nothing on the shelf is called that.</p>}
+      {!loading && rows.length > 0 && shown.length === 0 && <p className="py-4 text-center text-sm text-slate-500">Nothing in stock is called that.</p>}
       <ul className="divide-y divide-slate-100 rounded-xl border border-slate-200 bg-white">
         {shown.map((r) => (
           <li key={r.id}>
@@ -175,7 +175,7 @@ export function TakeSheetView({
 }
 
 function onHandWords(r: ShelfRow): string {
-  return r.onHand > 0 ? `${fmtQty(r.onHand)} ${r.unit} on the shelf` : `None on the shelf's record`;
+  return r.onHand > 0 ? `${fmtQty(r.onHand)} ${r.unit} in stock` : `None on the stock record`;
 }
 
 /** THE JOB'S TAKES, drawn from the rows alone. */
@@ -295,7 +295,7 @@ export function TookFromStock({
       r = await loadShelf();
     } catch (e) {
       // No signal in the truck: say so and leave the sheet usable, never "Reading the shelf…" forever.
-      r = { ok: false, error: isTransportError(e) ? "No signal, so the shelf couldn't be read. Close this and try again." : "The shelf couldn't be read. Close this and try again." };
+      r = { ok: false, error: isTransportError(e) ? "No signal, so stock couldn't be read. Close this and try again." : "Stock couldn't be read. Close this and try again." };
     } finally {
       setLoading(false);
     }
@@ -322,7 +322,7 @@ export function TookFromStock({
         if (row) {
           setStep({ kind: "count", row });
           setEntry(/^\d*\.?\d{0,3}$/.test(fill.qty) ? fill.qty : "");
-        } else setError("That item isn't on the shelf any more. Pick what you took.");
+        } else setError("That item isn't in stock any more. Pick what you took.");
       }
     },
     [read],

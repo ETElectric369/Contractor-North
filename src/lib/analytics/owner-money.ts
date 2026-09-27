@@ -223,6 +223,11 @@ export type OwnerMoneyFigures = {
   /** Pieces written off, counted short or returned to the supplier in the period, less the
    *  supplier's credit for returns (0350). In the month it happened, never the roll's month. */
   shopStockLost: number;
+  /** What left stock in the period (write-offs, counts short, returns to the supplier), at cost,
+   *  before any supplier credit. Already inside putOnShelf (taken off it) and shopStockLost (added
+   *  to it); kept apart only so stockLine says "less what moved" when something moved, and never
+   *  when Shop Stock Lost holds only a credit, or a move and a credit cancel to $0. */
+  stockMovedOut: number;
   left: number;
   ownerHours: number;
   /** left / ownerHours, or null when the owner logged no hours. */
@@ -383,9 +388,10 @@ type Acc = {
   fees: number;
   shelf: number;
   lost: number;
+  movedOut: number;
   ownerHours: number; // hundredths of an hour, summed from hoursBetween's 2-decimal hours
 };
-const newAcc = (): Acc => ({ received: 0, materials: 0, crewPay: 0, mileage: 0, buckets: emptyBuckets(), fees: 0, shelf: 0, lost: 0, ownerHours: 0 });
+const newAcc = (): Acc => ({ received: 0, materials: 0, crewPay: 0, mileage: 0, buckets: emptyBuckets(), fees: 0, shelf: 0, lost: 0, movedOut: 0, ownerHours: 0 });
 
 // ── THE FROZEN-GROSS RULE ────────────────────────────────────────────────────
 /**
@@ -567,6 +573,7 @@ export function computeOwnerMoney(inp: OwnerMoneyInputs, win: OwnerMoneyWindow, 
     const c = toCents(m.cost);
     a.shelf -= c;
     a.lost += c;
+    a.movedOut += c;
   }
 
   // MATERIALS & BILLS: exactly the job-cost inputs job profit uses - less what went on the shelf,
@@ -667,6 +674,7 @@ export function computeOwnerMoney(inp: OwnerMoneyInputs, win: OwnerMoneyWindow, 
       processorFees: fromCents(a.fees),
       putOnShelf: fromCents(a.shelf),
       shopStockLost: fromCents(a.lost),
+      stockMovedOut: fromCents(a.movedOut),
       left: fromCents(leftCents),
       ownerHours: hours,
       perOwnerHour: hours > 0 ? Math.round((leftCents / 100 / hours) * 100) / 100 : null,
@@ -681,6 +689,7 @@ export function computeOwnerMoney(inp: OwnerMoneyInputs, win: OwnerMoneyWindow, 
     total.fees += a.fees;
     total.shelf += a.shelf;
     total.lost += a.lost;
+    total.movedOut += a.movedOut;
     total.ownerHours += a.ownerHours;
     for (const b of BUSINESS_COST_BUCKETS) total.buckets[b] += a.buckets[b];
   }
@@ -1014,6 +1023,39 @@ const money = (n: number) =>
 export function costFigure(n: number): string {
   if (Math.abs(n) < 0.005) return formatCurrency(0);
   return n > 0 ? `\u2212${formatCurrency(n)}` : `+${formatCurrency(Math.abs(n))}`;
+}
+
+/**
+ * MATERIALS & BILLS AS THE CARD AND THE CHART SAY IT (Erik, 2026-09-27: "we dont need a put on the
+ * shelf on the bar graph"). Shop stock bought is money gone on materials, so both readers show it
+ * INSIDE Materials & Bills, still in the month the ticket is dated (decision 1 is unchanged). The
+ * engine keeps it apart (putOnShelf), because the accountant's Stock Bought list checks against it;
+ * this one sum is the only place the two are joined, so the card and the chart never disagree and
+ * the card's lines still add up to the draw to the cent.
+ */
+export function materialsWithStock(f: Pick<OwnerMoneyFigures, "materialsAndBills" | "putOnShelf">): number {
+  return fromCents(toCents(f.materialsAndBills) + toCents(f.putOnShelf));
+}
+
+/**
+ * The one line under the card that says so (nothing silent): how much of Materials & Bills is shop
+ * stock, and what is in stock now. Null when the window has no stock money and nothing is in stock.
+ * A write-off moves a roll's dollars out of Materials & Bills and into Shop Stock Lost in the month
+ * it happens, so a window can hold less than nothing of stock: that is said as given back, never as
+ * "−$36.93 of shop stock". "Less what moved" keys on what MOVED (stockMovedOut), never on Shop Stock
+ * Lost: a supplier's credit lands there with nothing moving that month, and a write-off and a credit
+ * in the same month can net Shop Stock Lost to $0 while the stock figure is still bought less moved.
+ */
+export function stockLine(m: OwnerMoney): string | null {
+  const stock = m.totals.putOnShelf;
+  const moved = m.totals.stockMovedOut >= 0.005;
+  if (Math.abs(stock) < 0.005 && Math.abs(m.onShelfNow) < 0.005) return null;
+  const parts: string[] = [];
+  if (stock >= 0.005)
+    parts.push(`Materials & Bills includes ${formatCurrency(stock)} of shop stock, counted the month it was bought${moved ? ", less what moved to Shop Stock Lost" : ""}.`);
+  else if (stock <= -0.005) parts.push(`Materials & Bills gives back ${formatCurrency(-stock)} of shop stock bought before, now in Shop Stock Lost.`);
+  parts.push(`In Stock Now: ${formatCurrency(m.onShelfNow)} at cost. It moves onto a job's profit as pieces are taken, and never counts against the draw twice.`);
+  return parts.join(" ");
 }
 
 /** "This Year (records start Jun 11)": the window, with the honest start when records begin late. */

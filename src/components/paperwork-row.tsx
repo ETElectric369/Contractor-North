@@ -354,7 +354,7 @@ export function PaperworkRow({
     if (!d) return "";
     if (d.type === "job" || d.type === "photo") return `on ${destLabel(value)}`;
     if (d.type === "overhead") return `as a business cost, ${d.category}`;
-    if (d.type === "stock") return "on the shop shelf";
+    if (d.type === "stock") return "in shop stock";
     return "in files";
   }
 
@@ -875,7 +875,7 @@ export function PaperworkRow({
       </div>
       {shelfSheet && (
         <ShelfTicketSheet
-          title="File It To The Shelf"
+          title="File It To Stock"
           lines={shelfRowsOf(item).map(
             (l): ShelfCountLine => ({
               key: String(l.index),
@@ -887,13 +887,13 @@ export function PaperworkRow({
             }),
           )}
           total={item.amount == null || item.amount === "" ? null : Number(item.amount)}
-          fileLabel="File It To The Shelf"
+          fileLabel="File It To Stock"
           onClose={() => setShelfSheet(null)}
           onFile={async (choices) => {
             const res = await fileItem(item.id, { type: "stock", lines: choices }, { differentPurchase: shelfSheet.differentPurchase });
             if (!res.ok) return res;
             setShelfSheet(null);
-            const sentence = res.message ?? "Filed on the shop shelf.";
+            const sentence = res.message ?? "Filed in shop stock.";
             onFiled({ id: item.id, sentence: `${describePaper(item)}: ${sentence}` });
             toast(sentence, "success", {
               label: "Undo",

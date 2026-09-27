@@ -1119,7 +1119,7 @@ async function buildActionItems(ctx: {
         items.push({
           id: `stockshort-${r.id}`, // synthetic (kind-prefixed): open-only, settled on Shop Stock
           kind: "stock_short",
-          title: `${q} ${it?.unit ?? ""} Of ${it?.name ?? "An Item"} Taken Past The Shelf · Settle It`.replace(/\s+/g, " "),
+          title: `${q} ${it?.unit ?? ""} Of ${it?.name ?? "An Item"} Taken Past Stock · Settle It`.replace(/\s+/g, " "),
           // Counting can't settle a short (a count has no roll; settle_short walks rolls): name the two
           // ways that work (SHORT_FIX, the bell's own words).
           subtitle: `${who} took them for ${jb ? jobLabel(jb) : "a job"} on ${formatDateShort(r.created_at, tz || undefined)}. ${SHORT_FIX}`,
