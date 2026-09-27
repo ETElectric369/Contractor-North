@@ -47,6 +47,17 @@ export const LAST_JOB_LOOKBACK_MS = 3 * 86_400_000;
 /** A punch that closed longer ago than this is the office's to move (Timecards), not the sheet's. */
 export const CLOSED_PICK_WINDOW_MS = 24 * 3_600_000;
 
+/**
+ * Whether a shift that closed at `clockOut` is still the sheet's to put on a job. ONE rule for both
+ * ends: putPunchOnJob takes a pick only inside it, and the clock-out asks only inside it, so the
+ * question is never put up for a shift whose every answer would be refused (a clock left running
+ * over a weekend, closed Monday at Friday's stop).
+ */
+export function closedPickable(clockOut: string | null | undefined, now: number = Date.now()): boolean {
+  const outMs = Date.parse(clockOut ?? "");
+  return Number.isFinite(outMs) && now - outMs <= CLOSED_PICK_WINDOW_MS;
+}
+
 export type ChoiceJob = {
   id: string;
   job_number?: string | null;

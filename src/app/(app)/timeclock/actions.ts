@@ -39,6 +39,7 @@ import {
 } from "./close-math";
 import { loadShiftChains, type ShiftInfo } from "@/lib/shift-chain";
 import { ADOPT_AFTER_CLOCK_IN_MS, ADOPT_AFTER_SWITCH_MS } from "./adopt-window";
+import { closedPickable } from "./which-job-choices";
 import { billedPartMoved, claimedMoveRefusal, type ClaimHolder, type ClaimIndex } from "./claim-words";
 import { LONG_SHIFT_PHRASE, MAX_SHIFT_HOURS, clockDoorWords, clockedOutWords, isLongOpenShift, stopProblem } from "@/lib/long-shift";
 import { clockInClashWords, findOverlap, overlapRefusal, shiftWhen, type OverlapClash } from "@/lib/overlap-refusal";
@@ -838,7 +839,8 @@ export async function clockOut(input: {
     // removed or reassigned the entry while the panel sat open, this matched nothing and
     // clockOut still returned ok — the tech watched a clean clock-out and had no hours.
     // job_id + job_code ride back: a shift that closes still on no job gets asked about once more.
-    .select("id, job_id, job_code");
+    // clock_out too: only a shift the sheet can still take (closedPickable) is asked about.
+    .select("id, job_id, job_code, clock_out");
 
   if (error) {
     // NOBODY GETS LEFT UNABLE TO CLOCK OUT. 0278 put an overlap ceiling under time_entries, and a
@@ -908,10 +910,18 @@ export async function clockOut(input: {
   // STILL ON NO JOB AT THE END OF IT: the door asks "Which Job Are You On?" once more (Skip is
   // right there). The shift is already closed; the question never holds the clock-out up. Asked
   // only of a person closing his own clock: the geofence close has nobody standing there, and a
-  // row that came back without the columns is not read as "no job".
-  const closed = (closedRows as { id?: string; job_id?: string | null; job_code?: string | null }[])[0];
+  // row that came back without the columns is not read as "no job". And only when the stop is
+  // recent enough for the sheet to take the answer: a clock left running over a weekend and closed
+  // Monday at a picked Friday stop would otherwise ask, then refuse every tap ("closed a while
+  // ago"). That shift is the office's, on Timecards, like any other old one.
+  const closed = (closedRows as { id?: string; job_id?: string | null; job_code?: string | null; clock_out?: string | null }[])[0];
   const askJob =
-    !input.auto && !input.autoClosedReason && !!closed?.id && closed.job_id === null && !(closed.job_code ?? "").trim();
+    !input.auto &&
+    !input.autoClosedReason &&
+    !!closed?.id &&
+    closed.job_id === null &&
+    !(closed.job_code ?? "").trim() &&
+    closedPickable(closed.clock_out);
   const base: ClockResult = askJob ? { ok: true, id: closed.id, noJob: true } : { ok: true };
   return lunchWarning ? { ...base, warning: lunchWarning } : base;
 }

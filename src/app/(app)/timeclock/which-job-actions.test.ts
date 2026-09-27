@@ -25,7 +25,7 @@ vi.mock("../schedule/actions", () => ({ setJobCrew: vi.fn(async () => ({ ok: tru
 
 import { clockIn, clockOut } from "./actions";
 import { putPunchOnJob, whichJobChoices } from "./which-job-actions";
-import { WHICH_JOB_COLUMNS } from "./which-job-choices";
+import { CLOSED_PICK_WINDOW_MS, WHICH_JOB_COLUMNS, closedPickable } from "./which-job-choices";
 
 type Q = {
   table: string;
@@ -146,21 +146,43 @@ describe("the clock asks only when it can't tell the job, and never before the p
     if (q.table === "time_entries" && q.verb === "update") return { data: [row] };
   };
 
+  const justNow = () => new Date().toISOString();
+
   it("a clock-out still on no job asks once more, with the closed shift's id", async () => {
-    state.client = fakeSupabase(closing({ id: PUNCH, job_id: null, job_code: null }), calls);
+    state.client = fakeSupabase(closing({ id: PUNCH, job_id: null, job_code: null, clock_out: justNow() }), calls);
     expect(await clockOut({ entry_id: PUNCH, lunch_minutes: 0, notes: "", gps: null })).toEqual({ ok: true, id: PUNCH, noJob: true });
-    expect(calls.find((c) => c.verb === "update")!.returning).toBe("id, job_id, job_code");
+    expect(calls.find((c) => c.verb === "update")!.returning).toBe("id, job_id, job_code, clock_out");
   });
 
   it("a clock-out on a job, or with a code, asks nothing", async () => {
-    state.client = fakeSupabase(closing({ id: PUNCH, job_id: JOB, job_code: null }), calls);
+    state.client = fakeSupabase(closing({ id: PUNCH, job_id: JOB, job_code: null, clock_out: justNow() }), calls);
     expect(await clockOut({ entry_id: PUNCH, lunch_minutes: 0, notes: "", gps: null })).toEqual({ ok: true });
-    state.client = fakeSupabase(closing({ id: PUNCH, job_id: null, job_code: "SHOP" }), calls);
+    state.client = fakeSupabase(closing({ id: PUNCH, job_id: null, job_code: "SHOP", clock_out: justNow() }), calls);
     expect(await clockOut({ entry_id: PUNCH, lunch_minutes: 0, notes: "", gps: null })).toEqual({ ok: true });
   });
 
-  it("the geofence's unattended close asks nobody", async () => {
+  it("a clock left running over a weekend, closed at a picked Friday stop, asks nothing: every pick would be refused", async () => {
+    // Monday's close of Friday's shift: the stop he picked is 64 hours back, past the day a pick
+    // can still land (putPunchOnJob answers "That shift closed a while ago"). The office has it.
+    const friday = new Date(Date.now() - 64 * H).toISOString();
+    state.client = fakeSupabase(closing({ id: PUNCH, job_id: null, job_code: null, clock_out: friday }), calls);
+    expect(await clockOut({ entry_id: PUNCH, lunch_minutes: 0, notes: "", gps: null })).toEqual({ ok: true });
+    // A row that came back without its stop is not read as "ask".
     state.client = fakeSupabase(closing({ id: PUNCH, job_id: null, job_code: null }), calls);
+    expect(await clockOut({ entry_id: PUNCH, lunch_minutes: 0, notes: "", gps: null })).toEqual({ ok: true });
+  });
+
+  it("the ask and the pick share one window: asked exactly while a pick can still land", () => {
+    const now = Date.parse("2026-09-28T16:00:00Z");
+    expect(closedPickable(new Date(now - 2 * H).toISOString(), now)).toBe(true);
+    expect(closedPickable(new Date(now - CLOSED_PICK_WINDOW_MS).toISOString(), now)).toBe(true);
+    expect(closedPickable(new Date(now - CLOSED_PICK_WINDOW_MS - 60_000).toISOString(), now)).toBe(false);
+    expect(closedPickable(null, now)).toBe(false);
+    expect(closedPickable("not a time", now)).toBe(false);
+  });
+
+  it("the geofence's unattended close asks nobody", async () => {
+    state.client = fakeSupabase(closing({ id: PUNCH, job_id: null, job_code: null, clock_out: justNow() }), calls);
     const r = await clockOut({ entry_id: PUNCH, lunch_minutes: null, notes: "", gps: null, auto: true, autoClosedReason: "left the site" });
     expect(r).toEqual({ ok: true });
   });

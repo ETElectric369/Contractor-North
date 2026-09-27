@@ -8,9 +8,9 @@ import { getOrgSettings } from "@/lib/org-settings";
 import { todayBoundsInTz } from "@/lib/tz";
 import { promoteJobToInProgress } from "@/lib/job-promote";
 import {
-  CLOSED_PICK_WINDOW_MS,
   LAST_JOB_LOOKBACK_MS,
   WHICH_JOB_COLUMNS,
+  closedPickable,
   orderWhichJobChoices,
   whichJobLabel,
   type ChoiceJob,
@@ -150,8 +150,7 @@ export async function putPunchOnJob(entryId: string, jobId: string): Promise<Whi
   if (!open) {
     const code = (entry.job_code ?? "").trim();
     if (code) return { ok: false, stale: true, error: `That shift is filed under ${code}. The office moves it from Timecards.` };
-    const outMs = Date.parse(entry.clock_out ?? "");
-    if (!Number.isFinite(outMs) || Date.now() - outMs > CLOSED_PICK_WINDOW_MS) {
+    if (!closedPickable(entry.clock_out)) {
       return { ok: false, stale: true, error: "That shift closed a while ago, so the office puts it on its job from Timecards." };
     }
   }
