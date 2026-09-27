@@ -274,7 +274,7 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
   {
     name: "profit_by_type",
     description:
-      "Which KIND of work makes money — job profit grouped by work type (the job's code-template, e.g. 'Panel swap', 'Service call', 'Deck build'). Returns per type: job count, revenue, cost, profit, margin %, owner_hours and profit_per_owner_hour. The owner's hours are billed but never a cost (owner's draw); profit_per_owner_hour is what that kind of work left the owner per hour he worked. Use for 'what's my most profitable type of work?', 'am I underpricing panel swaps?'. Jobs with no assigned type group under 'Uncategorized'.",
+      "Which KIND of work makes money — job profit grouped by work type (the job's code-template: the company's own names for its kinds of work). Returns per type: job count, revenue, cost, profit, margin %, owner_hours and profit_per_owner_hour. The owner's hours are billed but never a cost (owner's draw); profit_per_owner_hour is what that kind of work left the owner per hour he worked. Use for 'what's my most profitable type of work?', 'am I underpricing <a kind of work>?'. Jobs with no assigned type group under 'Uncategorized'.",
     input_schema: { type: "object", properties: {} },
   },
   {

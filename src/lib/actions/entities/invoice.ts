@@ -122,7 +122,7 @@ export const invoiceActions: Record<string, ActionDef> = {
     group: "invoice",
     label: "Edit an invoice line",
     description:
-      "Change an existing invoice line - 'bump the panel line to $1,800'. Works on any invoice that is not void, a delivered one included. You need BOTH the line's item_id AND its invoice_id - get them from get_invoice first. Pass ONLY the fields to change (description / quantity / unit_price / kind); anything you omit stays as it is. kind ('labor' | 'materials' | 'other') files the line on the customer's Cost Breakdown without touching its words or price. On a bill that has already gone out this changes what the customer owes, so the app asks the user to confirm first.",
+      "Change an existing invoice line - 'bump the <item> line to $<amount>'. Works on any invoice that is not void, a delivered one included. You need BOTH the line's item_id AND its invoice_id - get them from get_invoice first. Pass ONLY the fields to change (description / quantity / unit_price / kind); anything you omit stays as it is. kind ('labor' | 'materials' | 'other') files the line on the customer's Cost Breakdown without touching its words or price. On a bill that has already gone out this changes what the customer owes, so the app asks the user to confirm first.",
     // A true PATCH: an omitted field must never touch the column (the old defaults
     // silently reset quantity to 1 / price to $0 on a "just fix the description" call).
     input: z.object({
@@ -251,7 +251,7 @@ export const invoiceActions: Record<string, ActionDef> = {
     group: "payment",
     label: "Record a payment",
     description:
-      "Record a payment RECEIVED against an invoice (money IN — e.g. 'the Jones job paid me $3,000 by check'). Resolve the invoice first with get_invoice or list_invoices and pass its id. method is check, cash, card, ach, transfer, venmo, zelle or other. paid_at is the DAY the money came in, YYYY-MM-DD in the company's local calendar; omit it for today. This only RECORDS a received payment against the books; it never moves money. The app asks the user to confirm before it runs.",
+      "Record a payment RECEIVED against an invoice (money IN — e.g. 'the <customer> job paid me $<amount> by check'). Resolve the invoice first with get_invoice or list_invoices and pass its id. method is check, cash, card, ach, transfer, venmo, zelle or other. paid_at is the DAY the money came in, YYYY-MM-DD in the company's local calendar; omit it for today. This only RECORDS a received payment against the books; it never moves money. The app asks the user to confirm before it runs.",
     input: z.object({
       invoice_id: z.string(),
       amount: z.number(),
@@ -298,7 +298,7 @@ export const invoiceActions: Record<string, ActionDef> = {
     group: "payment",
     label: "Set a draw schedule",
     description:
-      "Set a job's PROGRESS-BILLING / draw schedule — the milestones it gets billed in (e.g. '30% deposit, 40% at rough-in, 30% on final'). Resolve the job with list_jobs and pass job_id plus milestones, each with a label and EITHER a percent OR a fixed amount. Can only be set BEFORE any billing starts on the job. Nothing is sent or billed — this just defines the plan.",
+      "Set a job's PROGRESS-BILLING / draw schedule — the milestones it gets billed in (e.g. '<n>% deposit, <n>% at <milestone>, <n>% on final'). Resolve the job with list_jobs and pass job_id plus milestones, each with a label and EITHER a percent OR a fixed amount. Can only be set BEFORE any billing starts on the job. Nothing is sent or billed — this just defines the plan.",
     input: z.object({
       job_id: z.string(),
       milestones: z

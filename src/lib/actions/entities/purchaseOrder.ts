@@ -30,7 +30,7 @@ export const purchaseOrderActions: Record<string, ActionDef> = {
     group: "purchaseorder",
     label: "Receive PO line",
     description:
-      "Mark a PURCHASE-ORDER LINE received — 'received 20 of the 50 breakers'. Pass the line's item_id, its po_id, and received_qty. This flows the received delta into inventory stock (matched by part number) and recomputes the PO status. Reversible — re-receive with a corrected quantity.",
+      "Mark a PURCHASE-ORDER LINE received — 'received <n> of the <m> <item>'. Pass the line's item_id, its po_id, and received_qty. This flows the received delta into inventory stock (matched by part number) and recomputes the PO status. Reversible — re-receive with a corrected quantity.",
     input: z.object({ item_id: z.string(), po_id: z.string(), received_qty: z.number() }),
     auth: "staff",
     effect: "write",

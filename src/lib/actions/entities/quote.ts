@@ -56,7 +56,7 @@ export const quoteActions: Record<string, ActionDef> = {
     group: "quote",
     label: "Add a quote line",
     description:
-      "Add ONE line to an existing quote/estimate — 'add 200ft of 12-gauge at $1.10 to the Jones quote'. Resolve the quote first with list_quotes or get_quote and pass its quote_id, plus the line's description, quantity, unit, and unit_price. Read it back with get_quote after.",
+      "Add ONE line to an existing quote/estimate — 'add <quantity> <unit> of <item> at $<price> to the <customer> quote'. Resolve the quote first with list_quotes or get_quote and pass its quote_id, plus the line's description, quantity, unit, and unit_price. Read it back with get_quote after.",
     input: z.object({
       quote_id: z.string(),
       description: z.string().min(1),
@@ -73,7 +73,7 @@ export const quoteActions: Record<string, ActionDef> = {
     group: "quote",
     label: "Edit a quote line",
     description:
-      "Change an existing quote line — 'bump the panel line to $1,800'. You need BOTH the line's item_id AND its quote_id — get them from get_quote first. Pass ONLY the fields to change (description / quantity / unit / unit_price); anything you omit stays as it is.",
+      "Change an existing quote line — 'bump the <item> line to $<amount>'. You need BOTH the line's item_id AND its quote_id — get them from get_quote first. Pass ONLY the fields to change (description / quantity / unit / unit_price); anything you omit stays as it is.",
     // A true PATCH: an omitted field must never touch the column (the old defaults
     // silently reset quantity to 1 / price to $0 on a "just bump the price" call).
     input: z.object({

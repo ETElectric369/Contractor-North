@@ -13,7 +13,7 @@ export const changeOrderActions: Record<string, ActionDef> = {
     group: "changeorder",
     label: "Create change order",
     description:
-      "Record a CHANGE ORDER on a job — added/changed scope and its dollar amount, e.g. 'add a $1,200 change order for the extra circuit on the Miller job'. Pass a description (required), amount, and job_id (resolve with list_jobs). Starts as pending. The app asks the user to confirm before it runs.",
+      "Record a CHANGE ORDER on a job — added/changed scope and its dollar amount, e.g. 'add a $<amount> change order for <the extra work> on the <job> job'. Pass a description (required), amount, and job_id (resolve with list_jobs). Starts as pending. The app asks the user to confirm before it runs.",
     input: z.object({
       description: z.string().min(1),
       amount: z.number().optional().default(0),

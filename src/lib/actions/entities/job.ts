@@ -43,7 +43,7 @@ export const jobActions: Record<string, ActionDef> = {
     group: "job",
     label: "Set job scope",
     description:
-      "Set a job's scope / description (REPLACES the existing text) — 'set the scope of the Miller job to: rough-in + panel upgrade + final'. Resolve the job with list_jobs first.",
+      "Set a job's scope / description (REPLACES the existing text) — 'set the scope of the <job> job to: <the work>'. Resolve the job with list_jobs first.",
     input: z.object({ job_id: z.string(), description: z.string() }),
     auth: "staff",
     effect: "write",
@@ -101,7 +101,7 @@ export const jobActions: Record<string, ActionDef> = {
     group: "job",
     label: "Finish a job",
     description:
-      "Finish a job: mark it complete. On an ordinary job it also builds a DRAFT invoice (from the accepted estimate if there is one, else the logged labor + materials); it never sends. On a job billed with PROGRESS PAYMENTS (a deposit / progress / final draw) it builds no new bill: an open progress report built from actuals takes the last hours and bills; otherwise any hours or bills not on a bill yet are NAMED in the result's warning (e.g. '19.5 h ($2,437.50) of work on this job is not on a bill yet') and stay unbilled until a Progress Payment → Final is made. Read the result's speak AND warning back to the user. Resolve the job with list_jobs. The app asks to confirm first.",
+      "Finish a job: mark it complete. On an ordinary job it also builds a DRAFT invoice (from the accepted estimate if there is one, else the logged labor + materials); it never sends. On a job billed with PROGRESS PAYMENTS (a deposit / progress / final draw) it builds no new bill: an open progress report built from actuals takes the last hours and bills; otherwise any hours or bills not on a bill yet are NAMED in the result's warning (e.g. '<hours> h ($<amount>) of work on this job is not on a bill yet') and stay unbilled until a Progress Payment → Final is made. Read the result's speak AND warning back to the user. Resolve the job with list_jobs. The app asks to confirm first.",
     input: z.object({ id: z.string() }),
     auth: "staff",
     effect: "write",

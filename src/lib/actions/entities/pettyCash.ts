@@ -10,7 +10,7 @@ export const pettyCashActions: Record<string, ActionDef> = {
     group: "pettycash",
     label: "Log petty cash",
     description:
-      "Log a petty-cash transaction by voice — '$20 cash for fuel' (kind expense) or 'put $200 in the box' (kind replenish). amount is positive; optionally a category, a note, a date (YYYY-MM-DD), or a job. The app asks to confirm the amount first.",
+      "Log a petty-cash transaction by voice — '$<amount> cash for fuel' (kind expense) or 'put $<amount> in the box' (kind replenish). amount is positive; optionally a category, a note, a date (YYYY-MM-DD), or a job. The app asks to confirm the amount first.",
     input: z.object({
       kind: z.enum(["expense", "replenish"]).default("expense"),
       amount: z.number(),

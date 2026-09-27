@@ -78,7 +78,7 @@ const SHOW_CARD_TOOL = {
       address: { type: "string", description: "Street address — the card makes it one tap to Maps." },
       facts: {
         type: "array",
-        description: "Up to 4 big glanceable TILES (gate code, balance, hours, amps).",
+        description: "Up to 4 big glanceable TILES (gate code, balance, hours).",
         items: {
           type: "object",
           properties: {

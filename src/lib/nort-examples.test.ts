@@ -3,6 +3,8 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import ts from "typescript";
 import { NORT_EXAMPLES_RULE, engineeringLine } from "@/lib/nort/trade-prompt";
+import { REGISTRY } from "@/lib/actions/registry";
+import { DATA_TOOLS } from "@/lib/assistant-tools";
 
 /**
  * NO BAKED-IN EXAMPLES FROM ONE COMPANY OR ONE TRADE (Nort-guide Wave A).
@@ -86,10 +88,13 @@ function strayExamples(): string[] {
   return hits;
 }
 
+/** Reading and parsing every source file takes ~3 s alone and far longer beside the whole suite. */
+const SCAN_TIMEOUT = 60_000;
+
 describe("no screen and no Nort instruction carries another company's or another trade's example", () => {
   it("finds none outside the places they belong", () => {
     expect(strayExamples()).toEqual([]);
-  });
+  }, SCAN_TIMEOUT);
 
   it("the guard really reads strings, and only strings", () => {
     // A self-check, so an empty result can't mean a scanner that reads nothing.
@@ -104,6 +109,54 @@ describe("no screen and no Nort instruction carries another company's or another
       const used = strings(file, text).some((s) => [...s.matchAll(EXAMPLE_WORDS)].some((m) => rx.test(m[0])));
       expect(used, `${file} no longer needs its allowance`).toBe(true);
     }
+  });
+});
+
+/**
+ * NORT'S TOOLS ARE DESCRIBED FOR ANY TRADE. Every tool description goes to every company's Nort, and
+ * an example in one is an example Nort learns from: "bump the panel line to $1,800", "received 20 of
+ * the 50 breakers", "a hot tub circuit" taught a deck builder's Nort an electrician's job with made-up
+ * prices. The examples are shapes (<item>, <job>, $<amount>). The Panel tools are the one place
+ * whose subject IS circuits (a switch hides them from trades that don't use them).
+ */
+const ELECTRICIAN_WORDS = /\b(circuits?|breakers?|panels?|amps?|amperage|gauge|hot tub|romex|conduit|outlets?|receptacles?)\b/i;
+/** A dollar figure written into a description: every amount in an example is $<amount>. */
+const MADE_UP_AMOUNT = /\$\d/;
+const PANEL_TOOLS = new Set(["get_job_panel"]);
+
+function tradeHits(name: string, text: string): string[] {
+  return [ELECTRICIAN_WORDS, MADE_UP_AMOUNT].flatMap((rx) => {
+    const m = text.match(rx);
+    return m ? [`${name}: ${m[0]}`] : [];
+  });
+}
+
+describe("Nort's tools are described for any trade", () => {
+  it("no action outside the Panel tools carries an electrician's example or a made-up amount", () => {
+    const hits = Object.values(REGISTRY)
+      .filter((a) => a.group !== "panel")
+      .flatMap((a) => tradeHits(a.name, `${a.label} ${a.description}`));
+    expect(hits).toEqual([]);
+  });
+
+  it("no read tool outside the Panel tools does either (its inputs' descriptions included)", () => {
+    const hits = DATA_TOOLS.filter((t) => !PANEL_TOOLS.has(t.name)).flatMap((t) =>
+      tradeHits(t.name, JSON.stringify({ d: t.description, i: t.input_schema })),
+    );
+    expect(hits).toEqual([]);
+  });
+
+  it("the check can see one (so an empty result can't mean it reads nothing)", () => {
+    expect(tradeHits("x", "bump the panel line to $1,800")).toEqual(["x: panel", "x: $1"]);
+    expect(tradeHits("x", "bump the <item> line to $<amount>")).toEqual([]);
+    expect(Object.values(REGISTRY).some((a) => a.group === "panel" && ELECTRICIAN_WORDS.test(a.description))).toBe(true);
+    expect(DATA_TOOLS.some((t) => PANEL_TOOLS.has(t.name))).toBe(true);
+  });
+
+  it("the windshield card's tiles don't suggest amps", () => {
+    const route = readFileSync(join(ROOT, "src/app/api/chat/route.ts"), "utf8");
+    expect(route).toContain("(gate code, balance, hours)");
+    expect(route).not.toMatch(/hours, amps\)/);
   });
 });
 
