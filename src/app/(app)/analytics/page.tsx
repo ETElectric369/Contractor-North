@@ -19,6 +19,9 @@ import { buildMoneyChartData, drawnMonth, emptyChartSentence } from "@/lib/analy
 import { ownerRegister } from "@/lib/owner-draw";
 import { LeftForCard } from "./left-for-card";
 import { MoneyChartCard } from "./money-chart-card";
+import { getFuelTrend } from "@/lib/analytics/fuel-trend";
+import { FuelTrendCard } from "./fuel-trend-card";
+import { BankDropLine } from "./bank-drop-line";
 
 export const dynamic = "force-dynamic";
 
@@ -65,6 +68,9 @@ export default async function AnalyticsPage({
     ? [ownerMoneyWindow(selection.segment, todayYmd), ...(selection.month ? [ownerMoneyWindow(selection.month, todayYmd)] : [])]
     : [];
   const ownerMoneyP = getOwnerMoneyViews(supabase, [ownerMoneyChartWindow(todayYmd), ...cardWindows], tz, todayYmd);
+  // FUEL BY THE WEEK (0362): shown to whoever sees the Owner's Draw card (it is a cost), and only
+  // when there is fuel to show. Rides with the other reads.
+  const fuelP = showOwnerMoney ? getFuelTrend(supabase, tz, todayYmd) : Promise.resolve(null);
 
   const [{ data: invoices }, { data: quotes }, { data: jobs }, { data: entries }, { data: pos }, { data: bills }, { data: jobRefunds }, { data: jobPayments }, { data: pettyCash }, shelf] =
     await Promise.all([
@@ -139,7 +145,7 @@ export default async function AnalyticsPage({
   const rates = await payRateMap(supabase);
   attachRates((entries ?? []) as any[], rates, (e: any) => ({ id: e.profiles?.id, holder: e }));
 
-  const ownerMoney = await ownerMoneyP;
+  const [ownerMoney, fuel] = await Promise.all([ownerMoneyP, fuelP]);
   const chartMoney = ownerMoney.views?.[0] ?? null;
   // Who "you" is on the card and the chart: the owners by name (from the same names profile_pay
   // carries) and the viewer, in the register payroll-view started (lib/owner-draw).
@@ -212,6 +218,10 @@ export default async function AnalyticsPage({
           officeSees={orgSettings.office_sees_owner_money}
         />
       )}
+
+      <BankDropLine />
+
+      {fuel?.hasFuel && <FuelTrendCard trend={fuel} />}
 
       <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-3">
         {stat("Collected (12 mo)", collected12 == null ? "—" : formatCurrency(collected12), TrendingUp, "bg-green-50 text-green-600")}

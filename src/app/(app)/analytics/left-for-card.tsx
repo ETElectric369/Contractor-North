@@ -87,6 +87,15 @@ export function LeftForCard({
           <>
             <div className="divide-y divide-slate-100">
               {row("Received", formatCurrency(t.received))}
+              {/* OTHER INCOME (0363): deposits a bank download placed as income no invoice holds.
+                  Already inside Received; its own chip so it is never mistaken for paid work. */}
+              {Math.abs(t.otherIncome ?? 0) >= 0.005 && (
+                <div className="flex justify-end pb-1.5">
+                  <span className="rounded-full bg-green-50 px-2.5 py-0.5 text-xs font-medium text-green-800">
+                    Includes Other Income {formatCurrency(t.otherIncome ?? 0)}
+                  </span>
+                </div>
+              )}
               {row("Materials & Bills", cost(t.materialsAndBills))}
               {row("Crew Pay", cost(t.crewPay))}
               {Math.abs(t.crewMileagePaid) >= 0.005 && row("Crew Mileage", cost(t.crewMileagePaid))}

@@ -209,7 +209,11 @@ export type BucketAmounts = Record<BusinessCostBucket, number>;
 
 /** One month (or the window's total). Dollars, rounded to cents; every sum was done in cents. */
 export type OwnerMoneyFigures = {
+  /** Money received: payments (computeCollected) plus Other Income below. */
   received: number;
+  /** Deposits a person said were Other Income on a bank download (0363, choice 'other_income'):
+   *  inside `received`, said as its own chip. Absent when there is none. */
+  otherIncome?: number;
   materialsAndBills: number;
   crewPay: number;
   crewMileagePaid: number;
@@ -323,6 +327,8 @@ export type OwnerMoneyInputs = {
    *  still open (model B), and which bills cover each (supplierDocCoverage), so only a document a
    *  counted bill carries is ever in the "counted" figure. */
   supplierDocuments?: any[];
+  /** bank_lines a person placed as Other Income (0363): amount, posted_on. Absent = none. */
+  otherIncome?: any[];
 };
 
 // ── Arithmetic helpers (cents) ───────────────────────────────────────────────
@@ -376,6 +382,7 @@ const emptyBuckets = (): Record<BusinessCostBucket, number> =>
 
 type Acc = {
   received: number;
+  other: number;
   materials: number;
   crewPay: number;
   mileage: number;
@@ -385,7 +392,7 @@ type Acc = {
   lost: number;
   ownerHours: number; // hundredths of an hour, summed from hoursBetween's 2-decimal hours
 };
-const newAcc = (): Acc => ({ received: 0, materials: 0, crewPay: 0, mileage: 0, buckets: emptyBuckets(), fees: 0, shelf: 0, lost: 0, ownerHours: 0 });
+const newAcc = (): Acc => ({ received: 0, other: 0, materials: 0, crewPay: 0, mileage: 0, buckets: emptyBuckets(), fees: 0, shelf: 0, lost: 0, ownerHours: 0 });
 
 // ── THE FROZEN-GROSS RULE ────────────────────────────────────────────────────
 /**
@@ -524,6 +531,15 @@ export function computeOwnerMoney(inp: OwnerMoneyInputs, win: OwnerMoneyWindow, 
     refundByMonth.set(k, list);
   }
   for (const m of months) acc.get(m)!.received = toCents(computeCollected(payByMonth.get(m) ?? [], refundByMonth.get(m) ?? []));
+  // OTHER INCOME (0363): a deposit a person said was income that no invoice holds (a bank download's
+  // Other Income). Money received, on the day the bank posted it; said as its own chip.
+  for (const o of inp.otherIncome ?? []) {
+    const a = at(monthOfDay(o?.posted_on ?? null));
+    if (!a) continue;
+    const c = toCents(o.amount);
+    a.other += c;
+    a.received += c;
+  }
 
   // CARD FEES: Stripe's real fee on each payment received in the window, into the Fees bucket. A
   // Stripe payment whose fee is still NULL is UNKNOWN: it is counted as a caveat, never as $0.
@@ -659,6 +675,7 @@ export function computeOwnerMoney(inp: OwnerMoneyInputs, win: OwnerMoneyWindow, 
     const hours = a.ownerHours / 100;
     return {
       received: fromCents(a.received),
+      ...(a.other ? { otherIncome: fromCents(a.other) } : {}),
       materialsAndBills: fromCents(a.materials),
       crewPay: fromCents(a.crewPay),
       crewMileagePaid: fromCents(a.mileage),
@@ -675,6 +692,7 @@ export function computeOwnerMoney(inp: OwnerMoneyInputs, win: OwnerMoneyWindow, 
   const total = newAcc();
   for (const a of acc.values()) {
     total.received += a.received;
+    total.other += a.other;
     total.materials += a.materials;
     total.crewPay += a.crewPay;
     total.mileage += a.mileage;
@@ -1223,7 +1241,7 @@ export async function readOwnerMoneyInputs(
   // A locked period can start up to a month before the window and still spread pay into it.
   const entriesFrom = tzDayStartUtc(balanceStart, tz).toISOString();
 
-  const [payments, refunds, bills, pos, petty, entries, runs, payPayments, memos, ratesRead, names, firsts, shelfLots, supplierAccounts, supplierPayments] = await Promise.all([
+  const [payments, refunds, bills, pos, petty, entries, runs, payPayments, memos, ratesRead, names, firsts, shelfLots, supplierAccounts, supplierPayments, otherIncome] = await Promise.all([
     readEvery<any>("payments", (f, t) =>
       supabase
         .from("payments")
@@ -1312,10 +1330,12 @@ export async function readOwnerMoneyInputs(
     readEvery<any>("supplier payments", (f, t) =>
       supabase.from("supplier_payments").select("id, supplier_account_id, amount, paid_on, method, voided_at").order("id").range(f, t),
     ),
+    // OTHER INCOME from bank downloads (0363). A database before 0363 has none: never a lost read.
+    readOtherIncome(supabase, span),
   ]);
 
   const problem =
-    [payments, refunds, bills, pos, petty, entries, runs, payPayments, memos, shelfLots, supplierAccounts, supplierPayments]
+    [payments, refunds, bills, pos, petty, entries, runs, payPayments, memos, shelfLots, supplierAccounts, supplierPayments, otherIncome]
       .map((r) => r.problem)
       .find(Boolean) ??
     ratesRead.problem ??
@@ -1359,9 +1379,34 @@ export async function readOwnerMoneyInputs(
       supplierAccounts: supplierAccounts.rows,
       supplierPayments: supplierPayments.rows,
       supplierDocuments: memos.rows,
+      otherIncome: otherIncome.rows,
     },
     problem: null,
   };
+}
+
+/** bank_lines placed as Other Income in the span. No table yet (before 0363) = none. */
+async function readOtherIncome(supabase: any, span: { start: string; end: string }): Promise<{ rows: any[]; problem: string | null }> {
+  const out: any[] = [];
+  for (let i = 0, from = 0; i < MAX_PAGES; i++) {
+    const { data, error } = await supabase
+      .from("bank_lines")
+      .select("id, amount, posted_on")
+      .eq("choice", "other_income")
+      .gte("posted_on", span.start)
+      .lt("posted_on", span.end)
+      .order("id")
+      .range(from, from + PAGE_ROWS - 1);
+    if (error) {
+      const code = String(error?.code ?? "");
+      if (code === "42P01" || code === "PGRST205" || /bank_lines/.test(String(error?.message ?? ""))) return { rows: [], problem: null };
+      return { rows: [], problem: "the bank lines could not be read" };
+    }
+    if (!Array.isArray(data) || !data.length) return { rows: out, problem: null };
+    out.push(...data);
+    from += data.length;
+  }
+  return { rows: [], problem: "there are too many bank lines to read at once" };
 }
 
 /**
