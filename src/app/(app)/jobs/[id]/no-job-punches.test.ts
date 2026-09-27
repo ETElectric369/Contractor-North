@@ -176,6 +176,15 @@ describe("the list on the Time tab", () => {
     expect(render(props({ errors: { punch: "That shift is already on 22 Pine." } }))).toContain("That shift is already on 22 Pine.");
   });
 
+  it("a refusal is said in a toast too: the refresh after it drops a punch someone else moved, and its line with it", () => {
+    const src = readFileSync(new URL("./no-job-punches.tsx", import.meta.url), "utf8");
+    const refused = src.slice(src.indexOf("if (!r.ok) {"), src.indexOf("setGone((g) => new Set(g).add(p.id));"));
+    expect(refused).toContain("setErrors((e) => ({ ...e, [p.id]: sentence }));");
+    expect(refused).toContain('toast(sentence, "error");');
+    // Said before the refresh that can take the row away.
+    expect(refused.indexOf('toast(sentence, "error");')).toBeLessThan(refused.indexOf("router.refresh();"));
+  });
+
   it("is the office's: computed and rendered only for staff on the job page", () => {
     const page = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
     expect(page).toContain("const nearPunchesP: Promise<NearPunch[] | null> = viewerIsStaff\n    ? readNoJobPunchesNearJob(");

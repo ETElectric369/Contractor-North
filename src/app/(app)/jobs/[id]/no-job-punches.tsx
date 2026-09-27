@@ -140,7 +140,14 @@ export function NoJobPunches({
         return;
       }
       if (!r.ok) {
-        setErrors((e) => ({ ...e, [p.id]: r.error ?? "That shift didn't move." }));
+        // Said twice on purpose. The line under the row stays for a refusal that keeps the row (a
+        // clash with another shift). But most refusals are someone else having acted first (it is
+        // on another job now, it got a job a moment ago, it is gone, an invoice bills it), and the
+        // refresh below drops exactly that punch from this list, taking the row and its line with
+        // it: to the office that looks like a success. The toast outlives the row.
+        const sentence = r.error ?? "That shift didn't move.";
+        setErrors((e) => ({ ...e, [p.id]: sentence }));
+        toast(sentence, "error");
         router.refresh();
         return;
       }
