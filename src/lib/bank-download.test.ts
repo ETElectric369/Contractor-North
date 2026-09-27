@@ -4,6 +4,7 @@ import { parseCSV } from "@/lib/csv";
 import {
   bankHeadline,
   bankViewOf,
+  branchFromNumbers,
   choiceId,
   cleanDescription,
   findBankHeader,
@@ -710,6 +711,21 @@ describe("what needs a person: one row per merchant, the guess first and never p
     expect(lineNamesAccount("CONTRACTOR SUPPLY CO PMT", acct)).toBe(true);
     expect(lineNamesAccount("PAYMENT CS-12345", acct)).toBe(true);
     expect(lineNamesAccount("SHELL 123", acct)).toBe(false);
+  });
+
+  it("a counter payment printed with the branch and nothing else names the account; a short spelling as a word", () => {
+    // An account with no branch on it: its papers' numbers say it (4 of 5 start 4410-).
+    const branch = branchFromNumbers(["4410-1100001", "4410-1100002", "4410-1100003", "4410-1100004", "TR-9"]);
+    expect(branch).toBe("4410");
+    expect(branchFromNumbers(["4410-1100001"])).toBeNull();
+    const acct = { id: "acct-ws", name: "Western Wire Supply", number: "TR-77", branch, onAccount: true, aliases: ["WWS"] };
+    expect(lineNamesAccount("1111-(PC) 4410 T  ANYTOWN CA", acct)).toBe(true);
+    expect(lineNamesAccount("1111-SHELL 44101 ANYTOWN", acct)).toBe(false);
+    expect(lineNamesAccount("1111-WWS ANYTOWN BRANCH", acct)).toBe(true);
+    expect(lineNamesAccount("1111-NEWWSTORE ANYTOWN", acct)).toBe(false);
+    const dl = readBankTable(parseCSV(`Date,Description,Amount\n09/10/2026,1111-(PC) 4410 T  ANYTOWN CA,-1500.00\n`), "x.csv", hash)!;
+    const plan = planBankDownload(dl, ORG_BOOKS({ accounts: [acct], supplierPayments: [{ id: "sp-card", accountId: "acct-ws", cents: 150000, day: "2026-09-10", reference: null }] }));
+    expect(plan.dispositions.get(dl.lines[0].key)).toMatchObject({ how: "match", table: "supplier_payments", ids: ["sp-card"] });
   });
 });
 

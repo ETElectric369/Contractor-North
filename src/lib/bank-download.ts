@@ -788,15 +788,46 @@ export function inPayWindow(postedOn: string, recordedOn: string): boolean {
 
 const compact = (s: string) => String(s ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
 
-/** Does the line name this supplier account: its number, branch, name or a spelling of it? */
+/**
+ * Does the line name this supplier account: its number, its branch, its name or a spelling of it?
+ *   · a branch code of digits is a number on its own ("(PC) 4410 T"), never digits inside another
+ *     number (a store's 44101); an account number with letters in it is found squeezed together;
+ *   · a name or spelling of 5+ letters by its first 12 (a bank cuts names short); a short one
+ *     ("CED", "OSH") as a word of its own, never letters inside another word.
+ */
 export function lineNamesAccount(description: string, a: BooksAccount): boolean {
   const d = compact(description);
   if (!d) return false;
-  const codes = [a.number, a.branch].map((x) => compact(x ?? "")).filter((x) => x.length >= 4);
-  if (codes.some((x) => d.includes(x))) return true;
-  const names = [a.name, ...a.aliases].map(compact).filter((x) => x.length >= 5);
-  // A bank cuts names short, so the first 12 letters of a name are enough.
-  return names.some((x) => d.includes(x.slice(0, 12)));
+  for (const raw of [a.number, a.branch]) {
+    const code = compact(raw ?? "");
+    if (code.length < 4) continue;
+    if (/^\d+$/.test(code) ? new RegExp(`(^|\\D)${code}(\\D|$)`).test(String(description)) : d.includes(code)) return true;
+  }
+  const spellings = [a.name, ...a.aliases];
+  if (spellings.map(compact).filter((x) => x.length >= 5).some((x) => d.includes(x.slice(0, 12)))) return true;
+  const words = ` ${String(description).toLowerCase().replace(/[^a-z0-9]+/g, " ")} `;
+  return spellings
+    .map((x) => String(x ?? "").trim().toLowerCase())
+    .filter((x) => /^[a-z0-9]{3,4}$/.test(x))
+    .some((x) => words.includes(` ${x} `));
+}
+
+/**
+ * A SUPPLIER'S BRANCH, FROM ITS OWN PAPERS when the account doesn't say one: the number in front of
+ * most of its documents ("4410-1100001" → 4410). A card payment at the counter is often printed with
+ * that branch and nothing else. Only when at least two papers carry it and most of them do.
+ */
+export function branchFromNumbers(numbers: readonly (string | null | undefined)[]): string | null {
+  const tally = new Map<string, number>();
+  let n = 0;
+  for (const raw of numbers) {
+    const m = /^\s*(\d{3,6})[-\s]\d{4,}/.exec(String(raw ?? ""));
+    if (!raw) continue;
+    n++;
+    if (m) tally.set(m[1], (tally.get(m[1]) ?? 0) + 1);
+  }
+  const [best, count] = [...tally.entries()].sort((a, b) => b[1] - a[1])[0] ?? [null, 0];
+  return best && count >= 2 && count / n >= 0.6 ? best : null;
 }
 
 /** Does the line name the bill's supplier: a word of 3+ letters they share ("HOME HARDWARE #55" and

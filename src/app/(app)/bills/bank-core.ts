@@ -12,6 +12,7 @@ import { recalcInvoice } from "@/lib/invoice-recalc";
 import { paymentMethodKey } from "@/lib/payment-method";
 import {
   bankViewOf,
+  branchFromNumbers,
   centsOf,
   choiceId,
   groupTitle,
@@ -119,7 +120,7 @@ export async function loadBankBooks(supabase: Db, orgId: string, dl: BankDownloa
     chunks(keys, 150).map((ks) => supabase.from("bank_lines").select("line_key, choice, bucket, cost_kind, amount").eq("org_id", orgId).in("line_key", ks)),
   );
   const paged = <T,>(q: (f: number, t: number) => PromiseLike<{ data: T[] | null; error: unknown }>) => readAllPages<T>(q, 20);
-  const [alreadyR, payR, crewR, supR, billR, pettyR, acctR, aliasR, invR, peopleR, ruleR, paidR] = await Promise.all([
+  const [alreadyR, payR, crewR, supR, billR, pettyR, acctR, aliasR, invR, peopleR, ruleR, paidR, docR] = await Promise.all([
     already,
     paged<any>((f, t) =>
       supabase
@@ -177,6 +178,14 @@ export async function loadBankBooks(supabase: Db, orgId: string, dl: BankDownloa
     supabase.from("profiles").select("id, full_name, role, active").eq("org_id", orgId).eq("active", true).neq("role", "owner").limit(200),
     supabase.from("bank_rules").select("id, direction, merchant_key, choice, bucket, cost_kind, supplier_account_id, profile_id").eq("org_id", orgId).limit(5000),
     supabase.from("pay_payments").select("profile_id, amount").eq("org_id", orgId).is("voided_at", null).order("paid_on", { ascending: false }).limit(2000),
+    // Each account's own papers, newest first, for the branch a counter payment is printed with.
+    supabase
+      .from("supplier_invoices")
+      .select("supplier_account_id, invoice_number")
+      .eq("org_id", orgId)
+      .not("supplier_account_id", "is", null)
+      .order("invoice_date", { ascending: false })
+      .limit(2000),
   ]);
 
   const errors = [
@@ -201,11 +210,18 @@ export async function loadBankBooks(supabase: Db, orgId: string, dl: BankDownloa
     list.push(String(a.alias ?? ""));
     aliases.set(String(a.supplier_account_id), list);
   }
+  // A branch the account doesn't say, from its papers' numbers (a failed read: none derived).
+  const papersOf = new Map<string, string[]>();
+  for (const d of (docR.error ? [] : (docR.data ?? [])) as { supplier_account_id: string; invoice_number: string }[]) {
+    const list = papersOf.get(String(d.supplier_account_id)) ?? [];
+    list.push(String(d.invoice_number ?? ""));
+    papersOf.set(String(d.supplier_account_id), list);
+  }
   const accounts = ((acctR.data ?? []) as any[]).map((a) => ({
     id: String(a.id),
     name: String(a.name ?? ""),
     number: a.account_number ?? null,
-    branch: a.branch_code ?? null,
+    branch: a.branch_code ?? branchFromNumbers(papersOf.get(String(a.id)) ?? []),
     onAccount: a.on_account !== false,
     aliases: aliases.get(String(a.id)) ?? [],
   }));

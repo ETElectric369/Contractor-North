@@ -117,6 +117,7 @@ function fakeDb() {
         delete: () => ((verb = "delete"), chain),
         eq: (c: string, v: unknown) => (filters.push((r) => r[c] === v), chain),
         neq: (c: string, v: unknown) => (filters.push((r) => r[c] !== v), chain),
+        not: (c: string, op: string, v: unknown) => (filters.push((r) => (op === "is" ? (r[c] ?? null) !== v : true)), chain),
         in: (c: string, v: unknown[]) => (filters.push((r) => v.includes(r[c])), chain),
         is: (c: string, v: unknown) => {
           if (c === "bank_line_id") touchesBank = true;
@@ -169,6 +170,7 @@ function seed() {
       { id: "acct-x", org_id: "org-2", name: "Someone Else's Supplier", account_number: "CS-12345", on_account: true },
     ],
     supplier_aliases: [],
+    supplier_invoices: [],
     invoices: [
       { id: "inv-1", org_id: "org-1", invoice_number: "INV-1001", total: 1275, amount_paid: 0, status: "sent", tax_rate: 0 },
       { id: "inv-card1", org_id: "org-1", invoice_number: "INV-1002", total: 250, amount_paid: 250, status: "paid", tax_rate: 0 },
@@ -252,6 +254,16 @@ describe("the door", () => {
     const stored = JSON.stringify(db.organized_items[0].proposal);
     expect(stored).not.toContain("123456789");
     expect(stored).toContain("••6789");
+  });
+
+  it("a counter payment printed with only the branch is the supplier's, by the branch its papers carry", async () => {
+    db.supplier_invoices.push(
+      { id: "si-1", org_id: "org-1", supplier_account_id: "acct-cs", invoice_number: "4410-1100001", invoice_date: "2026-09-01" },
+      { id: "si-2", org_id: "org-1", supplier_account_id: "acct-cs", invoice_number: "4410-1100002", invoice_date: "2026-09-03" },
+    );
+    const id = await drop(`Date,Description,Amount\n09/10/2026,1111-(PC) 4410 T  ANYTOWN CA,-500.00\n`, "Card1234.csv");
+    const v = await view(id);
+    expect(v.rows[0].buttons[0]).toEqual({ id: "supplier:acct-cs", label: "Pay Contractor Supply" });
   });
 
   it("a download longer than 5,000 rows is refused whole, never cut", async () => {
