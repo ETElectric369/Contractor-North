@@ -217,8 +217,14 @@ class Tally {
   }
 }
 
+/** A fax label written AFTER its number, on the same line: "(530) 555-0111 (fax)", "555-0111 Fax",
+ *  "555-0111 [F]". A "Fax" followed by a number is that next number's label, not this one's
+ *  ("Phone (530) 555-0110 Fax (530) 555-0111"). */
+const FAX_AFTER = /^[ ]*(?:[-–—,:][ ]*)?(?:[([][ ]*(?:fax|f)\b|(?:fax|f)\b(?![ ]*[:.#]?[ ]*[(+]?\d))/i;
+
 /** Phone numbers written out in text: "(530) 555-1234", "530-555-1234", "+1 530.555.1234". A bare
- *  run of ten digits is NOT taken (it is as often an order or permit number). Fax lines are skipped. */
+ *  run of ten digits is NOT taken (it is as often an order or permit number). Fax lines are skipped,
+ *  whether the label comes before the number or after it. */
 function textPhones(text: string): string[] {
   const out: string[] = [];
   const re = /(?<![\d-])(?:\+?1[ .-]?)?(?:\(\s?([2-9]\d{2})\s?\)[ .-]?|([2-9]\d{2})[ .-])([2-9]\d{2})[ .-](\d{4})(?!\d)/g;
@@ -226,6 +232,7 @@ function textPhones(text: string): string[] {
   while ((m = re.exec(text))) {
     const before = text.slice(Math.max(0, m.index - 16), m.index);
     if (/\b(fax|f)\s*[:.#]?\s*$/i.test(before)) continue;
+    if (FAX_AFTER.test(text.slice(re.lastIndex, re.lastIndex + 24))) continue;
     out.push(`${m[1] ?? m[2]}${m[3]}${m[4]}`);
   }
   return out;

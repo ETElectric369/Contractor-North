@@ -199,6 +199,22 @@ describe("extractContact", () => {
     expect(extractContact("<<<>>>\u0000&#xZZ;", "not a url").fields).toEqual({});
   });
 
+  it.each([
+    ["(fax) after it", "<p>(530) 555-0112 (main)</p><p>(530) 555-0113 (fax)</p>"],
+    ["fax first, labelled after", "<p>(530) 555-0113 (Fax)</p><p>(530) 555-0112 (main)</p>"],
+    ["a bare Fax after it", "<p>Call (530) 555-0112</p><p>(530) 555-0113 Fax</p>"],
+    ["a dash and F", "<p>(530) 555-0112 - Office</p><p>(530) 555-0113 - F</p>"],
+    ["a bracketed [F]", "<p>(530) 555-0113 [F]</p><p>(530) 555-0112</p>"],
+  ])("skips a fax number labelled %s", (_what, body) => {
+    expect(extractContact(body, "https://x.example/").fields.phones).toEqual(["(530) 555-0112"]);
+  });
+
+  it("keeps a phone followed by the NEXT number's fax label, and a word that only starts with f", () => {
+    expect(extractContact("<p>Phone (530) 555-0112 Fax (530) 555-0113</p>", "https://x.example/").fields.phones).toEqual(["(530) 555-0112"]);
+    expect(extractContact("<p>Phone (530) 555-0112 Fax: 530-555-0113</p>", "https://x.example/").fields.phones).toEqual(["(530) 555-0112"]);
+    expect(extractContact("<p>(530) 555-0112 for service</p>", "https://x.example/").fields.phones).toEqual(["(530) 555-0112"]);
+  });
+
   it("ignores foreign and impossible numbers rather than mangling them", () => {
     const html = `<a href="tel:+44 20 7946 0958">UK</a><a href="tel:123-456-7890">bad</a><p>Call (530) 555-0101</p>`;
     expect(extractContact(html, "https://x.example/").fields.phones).toEqual(["(530) 555-0101"]);
