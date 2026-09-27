@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -11,6 +11,8 @@ import { drivingDistanceMiles } from "@/lib/google-maps";
 import { lunchMinutesFor } from "@/lib/lunch-rule";
 import { LunchCheckbox } from "@/components/lunch-checkbox";
 import { createManualEntry } from "../../timeclock/actions";
+import { SameDayShifts, notCarriedWords } from "../../timeclock/same-day-shifts";
+import { useToast } from "@/components/toast";
 import type { JobCode } from "@/lib/types";
 
 interface Tech {
@@ -45,6 +47,7 @@ export function JobAddTimeEntry({
   jobCodesEnabled?: boolean;
 }) {
   const router = useRouter();
+  const toast = useToast();
   const key = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -89,28 +92,47 @@ export function JobAddTimeEntry({
   const ownerShift = person?.paid_by_draw === true;
 
 
+  // ONE TAP, ONE ENTRY: the ref closes the double-tap gap before `pending` re-renders the button
+  // (0360 refuses the same hours twice underneath). A refusal bolds the shift in the way in the
+  // day's list and re-reads it.
+  const inFlight = useRef(false);
+  const [clashId, setClashId] = useState<string | null>(null);
+  const [dayKey, setDayKey] = useState(0);
+
   function save() {
+    if (inFlight.current || pending) return;
     setError(null);
     const ci = new Date(`${date}T${startT}:00`);
     const co = new Date(`${date}T${endT}:00`);
     if (isNaN(ci.getTime()) || isNaN(co.getTime())) return setError("Invalid date/time.");
     if (co <= ci) return setError("End must be after start.");
+    inFlight.current = true;
     start(async () => {
-      const res = await createManualEntry({
-        profile_id: profileId,
-        clock_in: ci.toISOString(),
-        clock_out: co.toISOString(),
-        job_id: jobId,
-        job_code: jobCode || null,
-        // Stated every time, so 0 is a real answer and not "wasn't asked".
-        lunch_minutes: lunchMinutesFor(tookLunch),
-        notes,
-        miles,
-        rate_override: !ownerShift && rate > 0 ? rate : null,
-      });
-      if (!res.ok) return setError(res.error ?? "Could not save.");
-      setOpen(false);
-      router.refresh();
+      try {
+        const res = await createManualEntry({
+          profile_id: profileId,
+          clock_in: ci.toISOString(),
+          clock_out: co.toISOString(),
+          job_id: jobId,
+          job_code: jobCode || null,
+          // Stated every time, so 0 is a real answer and not "wasn't asked".
+          lunch_minutes: lunchMinutesFor(tookLunch),
+          notes,
+          miles,
+          rate_override: !ownerShift && rate > 0 ? rate : null,
+        });
+        if (!res.ok) {
+          setError(res.error ?? "Could not save.");
+          setClashId(res.clash?.id ?? null);
+          setDayKey((k) => k + 1);
+          return;
+        }
+        setClashId(null);
+        setOpen(false);
+        router.refresh();
+      } finally {
+        inFlight.current = false;
+      }
     });
   }
 
@@ -148,6 +170,25 @@ export function JobAddTimeEntry({
               <Input id="at-end" type="time" value={endT} onChange={(e) => setEndT(e.target.value)} />
             </div>
           </div>
+          {/* What this person already has that day: a punch on no job gets Put This On <this job>,
+              keeping its clock times, instead of the same hours typed a second time (the 85
+              Whitney duplicates, 2026-09-26). */}
+          <SameDayShifts
+            profileId={profileId}
+            date={date}
+            jobId={jobId}
+            highlightId={clashId}
+            refreshKey={dayKey}
+            onPlaced={(_sentence, shift) => {
+              setOpen(false);
+              setError(null);
+              setClashId(null);
+              // The door moved the punch only: say what was typed here that it did not get.
+              const left = notCarriedWords({ miles, lunch: tookLunch, code: jobCodesEnabled ? jobCode : null, rate: ownerShift ? 0 : rate, notes });
+              if (left) toast(left, "info", { label: "Open That Shift", onClick: () => router.push(`/timecards?entry=${shift.id}`) });
+              router.refresh();
+            }}
+          />
           <div className="grid grid-cols-2 gap-3">
             <div>
               <Label htmlFor="at-emp">Employee</Label>

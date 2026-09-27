@@ -78,6 +78,17 @@ describe("badge economy: the inbox is decisions-only (the task feeder stays dead
     expect(PAY_CARD_WINDOW_DAYS).toBeLessThanOrEqual(14);
   });
 
+  it("the shifts on no job ride as ONE rolled-up line, with no three-day window (the duplicate punches)", () => {
+    // Every past-day shift on no job is an unbounded set: it badges +1 through the rollup, and the
+    // per-shift stray rows are only for running clocks (a closed one used to vanish after 3 days).
+    expect(querySrc).toContain("noJobHoursActionItem(noJob.summary, { failed: noJob.failed })");
+    expect(querySrc).toContain(".filter((f) => f.openStill || !tz)");
+    expect(querySrc).toContain("readNoJobHours(supabase, { tz, todayStr })");
+    expect(querySrc).not.toContain('kind: "time_stray",\n      title: `Hours On No Job');
+    expect(KIND_STREAM.time_stray).toBe("today");
+    expect(AFFORDANCES.time_stray).toEqual(["open"]);
+  });
+
   it("the dock's chrome badge display-caps at 9+", () => {
     const dockSrc = src("components/app-shell/dock.tsx");
     expect(dockSrc).toContain('badge > 9 ? "9+" : badge');

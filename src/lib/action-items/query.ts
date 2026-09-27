@@ -18,6 +18,8 @@ import { supplierDeskFailedItem, supplierPaperActionItem } from "./supplier-pape
 import { supplierPayActionItems } from "./supplier-pay-item";
 import { readNoJobHoursReach } from "@/lib/already-billed-read";
 import { noJobStrayDoors } from "@/lib/already-billed";
+import { noJobHoursActionItem } from "./no-job-hours-item";
+import { readNoJobHours, type NoJobHours } from "@/lib/no-job-hours";
 import { feederOn, inquiryActionItem } from "./switches";
 import { featureOn, featuresFromOffKey } from "@/lib/features";
 import {
@@ -162,6 +164,15 @@ async function buildActionItems(ctx: {
     ? loadSupplierDesk(supabase, userId, todayStr).catch((): SupplierDesk => ({ papers: null, payDue: [], failed: { papers: true, pay: true } }))
     : Promise.resolve(null);
   const supplierPapersP: Promise<SupplierPaperFeed | null> = supplierDeskP.then((d) => d?.papers ?? null);
+
+  // HOURS ON NO JOB (the duplicate punches, 2026-09-26): every past-day shift nobody put on a job,
+  // with no age limit, as ONE rolled-up line. Its own read, beside the fan-out; `failed` when the
+  // read broke, which the line says rather than showing nothing.
+  const noJobP: Promise<{ summary: NoJobHours | null; failed: boolean }> = isStaff && tz
+    ? readNoJobHours(supabase, { tz, todayStr })
+        .then((summary) => ({ summary, failed: summary === null }))
+        .catch(() => ({ summary: null, failed: true }))
+    : Promise.resolve({ summary: null, failed: false });
 
   const [jobsR, inqR, apptR, orgR, invR, quoteR, acceptedR, draftR, conR, lienR, bugR, openTimeR, recentTimeR, nonBillableR, matJobsR, matSegR, inspR, inspQuoteR, billedJobR, doneWorkR, draftQuoteR] = await Promise.all([
     // Unscheduled jobs — staff only (the "resting place" for things needing a date).
@@ -806,13 +817,16 @@ async function buildActionItems(ctx: {
   // Detection only, per the hard boundary: each item names the gap and deep-links to
   // the surface that fixes it; nothing infers hours, dollars, or clock-out times.
 
-  // 1) STRAY TIME — an open clock from a past day, or a past-day close with no job.
+  // 1) STRAY TIME — an open clock from a past day, one row per clock. A past-day close with no job
+  // is NOT a row here any more: it rides in the Hours On No Job rollup below, which never drops it
+  // after three days (the window this detector reads is what let Brian's 9/11 punch go quiet).
   const strayFindings = detectStrayTime(
     [...((openTimeR.data ?? []) as any[]), ...((recentTimeR.data ?? []) as any[])],
     todayStr,
     Date.now(),
     new Set(((nonBillableR.data ?? []) as { code?: string | null }[]).map((c) => String(c.code ?? "").trim()).filter(Boolean)),
-  );
+    tz,
+  ).filter((f) => f.openStill || !tz);
   // Whose clock each open finding is, for the words on its door ("Clock Out Brian").
   const openOwner = new Map<string, { profile_id?: string | null; full_name?: string | null }>(
     ((openTimeR.data ?? []) as any[]).map((e) => [String(e.id), { profile_id: e.profile_id, full_name: e.profiles?.full_name }]),
@@ -856,11 +870,34 @@ async function buildActionItems(ctx: {
       when: f.when,
       urgency: f.openStill ? 2 : 1, // a forgotten clock is a wrong week until somebody stops it
       done: false,
-      // The open one lands on its own clock-out sheet (/timecards finds the entry in any week).
-      href: f.openStill ? `/timecards?entry=${f.entryId}` : "/timecards",
+      // The open one lands on its own clock-out sheet (/timecards finds the entry in any week); a
+      // no-job close (only without an org timezone, when the rollup below cannot run) on its editor.
+      href: `/timecards?entry=${f.entryId}`,
       affordances: AFFORDANCES.time_stray,
       ...(!f.openStill && noJob.door.has(f.entryId) ? { noJobHours: { entryIds: [f.entryId] } } : {}),
     });
+  }
+  // 1b) HOURS ON NO JOB — one line for every past-day shift nobody put on a job, however old.
+  {
+    const noJob = await noJobP;
+    const item = noJobHoursActionItem(noJob.summary, { failed: noJob.failed });
+    // THE ROLLUP KEEPS 0357's ALREADY BILLED DOOR (TTUSD on INV-055): a shift on no job may have been
+    // billed by typing a line on an invoice with no job. The line offers the door only when a sent
+    // invoice with no job could hold hours (a door onto a sheet with no line to pick is a dead end),
+    // with nothing ticked to start (the sheet lists every open shift; he ticks what the line charged).
+    // A lost read offers the door, as the per-shift rows did (the sheet says what it finds).
+    if (item && isStaff && noJob.summary?.shifts.length) {
+      let canHold = true;
+      try {
+        const { data: me } = await supabase.from("profiles").select("org_id").eq("id", userId).maybeSingle();
+        const orgId = String((me as { org_id?: string | null } | null)?.org_id ?? "");
+        if (orgId) canHold = (await readNoJobHoursReach(supabase, orgId, [])).canHold;
+      } catch {
+        canHold = true;
+      }
+      if (canHold) item.noJobHours = { entryIds: [] };
+    }
+    if (item) items.push(item);
   }
 
   // ── MATERIALS ROUTING (staff only) — the "who's buying?" feeder. Unpurchased

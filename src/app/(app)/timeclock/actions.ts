@@ -4,8 +4,9 @@ import { reportError } from "@/lib/observe";
 
 import { revalidatePath } from "next/cache";
 import { isStaffRole } from "@/lib/actions/perms";
-import { createClient, createServiceClient } from "@/lib/supabase/server";
+import { createClient } from "@/lib/supabase/server";
 import { visibleJobIdOrNull } from "@/lib/job-visibility";
+import { promoteJobToInProgress } from "@/lib/job-promote";
 import { requireStaff } from "@/lib/staff-guard";
 import { ACTIVE_JOB_STATUSES, pickJobScheduledToday } from "@/lib/job-status";
 import { hoursBetween } from "@/lib/utils";
@@ -15,7 +16,8 @@ import { runOnce } from "@/lib/offline/run-once";
 import { getOrgSettings } from "@/lib/org-settings";
 import { featureOn } from "@/lib/features";
 import { featureOffSentence } from "@/lib/viewer-switches";
-import { todayBoundsInTz } from "@/lib/tz";
+import { todayBoundsInTz, tzDayStartUtc } from "@/lib/tz";
+import { companyTimeCode } from "@/lib/no-job-hours";
 import { createNotifications } from "@/lib/notifications";
 import { sendPushToProfiles, orgStaffIds } from "@/lib/push";
 import { setJobCrew } from "../schedule/actions";
@@ -37,9 +39,10 @@ import {
 } from "./close-math";
 import { loadShiftChains, type ShiftInfo } from "@/lib/shift-chain";
 import { ADOPT_AFTER_CLOCK_IN_MS, ADOPT_AFTER_SWITCH_MS } from "./adopt-window";
+import { closedPickable } from "./which-job-choices";
 import { billedPartMoved, claimedMoveRefusal, type ClaimHolder, type ClaimIndex } from "./claim-words";
 import { LONG_SHIFT_PHRASE, MAX_SHIFT_HOURS, clockDoorWords, clockedOutWords, isLongOpenShift, stopProblem } from "@/lib/long-shift";
-import { overlapRefusal, shiftWhen } from "@/lib/overlap-refusal";
+import { clockInClashWords, findOverlap, overlapRefusal, shiftWhen, type OverlapClash } from "@/lib/overlap-refusal";
 
 export type ClockResult = {
   ok: boolean;
@@ -48,7 +51,23 @@ export type ClockResult = {
   /** The clock has been running LONG_SHIFT_HOURS or more and nobody said when it stopped: the
    *  caller should ask for a stop time instead of closing at now (the Timeclock long-shift block). */
   needsTime?: boolean;
+  /** A refusal because the person already has hours there: the shift in the way, so the form can
+   *  offer its door (Put This On <job> for a no-job punch, Open That Shift otherwise). */
+  clash?: OverlapClash;
+  /** The time entry the punch wrote or closed (clockIn, clockOut). Also runOnce's result_id. */
+  id?: string;
+  /** THE CLOCK COULDN'T TELL THE JOB (Erik, 2026-09-26: "yes"). The punch landed, or closed, with
+   *  no job and no code, so the door asks "Which Job Are You On?" once, with a Skip. Only ever set
+   *  on a punch that is ALREADY saved: the question never holds the clock up. */
+  noJob?: boolean;
 };
+
+/** The shift 0360's overlap refusal names in its DETAIL ("time_entry:<uuid>"), or null. */
+function clashIdFrom(err: unknown): string | null {
+  const detail = String((err as { details?: unknown } | null)?.details ?? "");
+  const m = /^time_entry:([0-9a-f-]{36})$/i.exec(detail.trim());
+  return m ? m[1] : null;
+}
 
 /**
  * The simple clock-in flow's server-side job resolution: the DEFAULT punch carries no
@@ -264,6 +283,22 @@ async function clockInInner(
         const now = Date.now();
         const floor30 = now - (now % 1_800_000); // last :00/:30 boundary
         ms = Math.min(Math.max(ms, floor30), now + 60_000);
+        // ROUNDING BACK STOPS AT HIS OWN LAST CLOCK-OUT. Out at 10:20, back in at 10:25 and rounded
+        // to 10:00 would lay twenty minutes over the shift he just closed: the database refuses
+        // that (0248, 0360), which left him unable to clock in at all. The start rounds back to
+        // where his last shift ended instead, and never past it.
+        if (ms < now - 60_000) {
+          const { data: last } = await supabase
+            .from("time_entries")
+            .select("clock_out")
+            .eq("profile_id", user.id)
+            .gt("clock_out", new Date(ms).toISOString())
+            .order("clock_out", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          const lastOut = Date.parse(String((last as { clock_out?: string | null } | null)?.clock_out ?? ""));
+          if (Number.isFinite(lastOut) && lastOut > ms) ms = Math.min(lastOut, now);
+        }
       }
       if (ms <= Date.now() + 60_000 && ms >= Date.now() - 31 * 86_400_000) {
         clockInIso = new Date(ms).toISOString();
@@ -272,8 +307,29 @@ async function clockInInner(
     }
   }
 
+  /**
+   * A START IN THE PAST MAY NOT COVER HOURS ALREADY RECORDED (0360, the duplicate punches).
+   *
+   * Erik's 9/1: a 7-minute punch at 10:28, then a clock-in back-dated to 10:00 over it. The old
+   * database let the running shift open on top and refused only at clock-out, where it trapped
+   * whoever held the phone. 0360 refuses it at the punch now; this says so in the clock's own
+   * words, naming the shift in the way and the earliest start that fits. Only a start in the past
+   * can cover anything (a live punch starts now). A running clock is left to the database: a
+   * stale one is closed at zero by the punch itself (0193), a live one is "You're already clocked
+   * in." An offline punch refused here stays in the phone's queue, shown as still waiting.
+   */
+  if (backdated || offlinePunch) {
+    const overlap = await findOverlap(supabase, user.id, Date.parse(clockInIso), Date.now(), { ignoreOpen: true });
+    if (overlap) {
+      if (!overlap.clash) return { ok: false, error: overlap.sentence };
+      const tz = await orgTz(supabase);
+      return { ok: false, error: clockInClashWords({ clash: overlap.clash, startIso: clockInIso, tz, isStaff }), clash: overlap.clash };
+    }
+  }
+
   // The DB has a unique index preventing two open entries; surface a friendly msg.
-  const { error } = await supabase.from("time_entries").insert({
+  // The row comes back so the door knows WHICH punch to ask about when it landed on no job.
+  const { data: made, error } = await supabase.from("time_entries").insert({
     profile_id: user.id,
     job_id: jobId,
     job_code: input.job_code,
@@ -283,7 +339,7 @@ async function clockInInner(
     // 'offline' outranks the others: it says the SERVER CLOCK wasn't the authority for this time,
     // which is the fact the office needs when reading the card.
     source: offlinePunch ? "offline" : backdated ? "manual" : input.gps ? "app" : "manual",
-  });
+  }).select("id").maybeSingle();
 
   // "You're already clocked in" now lives in dbError's constraint map, not in a string test here.
   // cn-v702 wrapped the ARGUMENT of this test: dbError translates the duplicate-key message into a
@@ -313,44 +369,18 @@ async function clockInInner(
 
   revalidatePath("/timeclock");
   revalidatePath("/planner");
-  return { ok: true };
+  // WHEN THE CLOCK CAN'T TELL THE JOB, THE DOOR ASKS (Erik, 2026-09-26). The punch above is saved
+  // whatever happens next; `noJob` only tells the door to put one question on screen ("Which Job
+  // Are You On?", with Skip, The Office Will Pick). A punch the person gave a code (Shop, Drive)
+  // was named on purpose and is not asked about. The door loads its own choices, so nothing here
+  // reads a job list and the clock answers as fast as it always did.
+  const id = (made as { id?: string } | null)?.id;
+  if (!id) return { ok: true };
+  return !jobId && !(input.job_code ?? "").trim() ? { ok: true, id, noJob: true } : { ok: true, id };
 }
 
-/**
- * PROMOTE A JOB TO in_progress WHEN SOMEBODY STARTS WORKING ON IT.
- *
- * ONE COPY, called by clock-in and by switch-job. The drift between those two copies IS the bug
- * this fixes: clockIn was moved onto the service client in cn-v650 because `jobs_write` requires
- * is_org_staff(), so a TECH's promotion was a zero-row UPDATE that PostgREST reports as success —
- * Brian starts at 7am, the job sits in to_be_scheduled all day, and the office's board is wrong
- * about what is actually being worked. switchJob kept the old broken copy, so the same silent
- * no-op survived on the other path.
- *
- * THE AUTHORIZATION IS THE READ, on the caller's OWN RLS client. No visible row means no org id
- * and nothing is promoted — so the service write can only ever touch a job this person could
- * already see, in their own org. It writes ONE column on ONE row, and never un-completes a
- * finished or cancelled job.
- *
- * Never throws: the punch is the thing that must land.
- */
-async function promoteJobToInProgress(
-  supabase: Awaited<ReturnType<typeof createClient>>,
-  jobId: string,
-): Promise<void> {
-  try {
-    const { data: jobRow } = await supabase.from("jobs").select("org_id").eq("id", jobId).maybeSingle();
-    const jobOrg = (jobRow as { org_id?: string } | null)?.org_id;
-    if (!jobOrg) return;
-    await createServiceClient()
-      .from("jobs")
-      .update({ status: "in_progress" })
-      .eq("id", jobId)
-      .eq("org_id", jobOrg)
-      .in("status", ACTIVE_JOB_STATUSES.filter((st) => st !== "in_progress"));
-  } catch {
-    /* the punch already landed — a board that lags is not worth failing it over */
-  }
-}
+// promoteJobToInProgress lives in lib/job-promote (one copy for clock-in, switch-job and
+// "Which Job Are You On?"; a plain module, so the service-client write is never a callable action).
 
 export type SwitchJobResult = ClockResult & {
   /** The entry the clock is running on NOW. After a cut it is a new entry; the panel, the job-page
@@ -808,7 +838,9 @@ export async function clockOut(input: {
     // And a zero-row UPDATE is a 204, not a success (the silent-write law): if the office
     // removed or reassigned the entry while the panel sat open, this matched nothing and
     // clockOut still returned ok — the tech watched a clean clock-out and had no hours.
-    .select("id");
+    // job_id + job_code ride back: a shift that closes still on no job gets asked about once more.
+    // clock_out too: only a shift the sheet can still take (closedPickable) is asked about.
+    .select("id, job_id, job_code, clock_out");
 
   if (error) {
     // NOBODY GETS LEFT UNABLE TO CLOCK OUT. 0278 put an overlap ceiling under time_entries, and a
@@ -875,7 +907,23 @@ export async function clockOut(input: {
   revalidatePath("/timeclock");
   revalidatePath("/timecards");
   revalidatePath("/planner"); // clock-in/out status shows on My Day
-  return lunchWarning ? { ok: true, warning: lunchWarning } : { ok: true };
+  // STILL ON NO JOB AT THE END OF IT: the door asks "Which Job Are You On?" once more (Skip is
+  // right there). The shift is already closed; the question never holds the clock-out up. Asked
+  // only of a person closing his own clock: the geofence close has nobody standing there, and a
+  // row that came back without the columns is not read as "no job". And only when the stop is
+  // recent enough for the sheet to take the answer: a clock left running over a weekend and closed
+  // Monday at a picked Friday stop would otherwise ask, then refuse every tap ("closed a while
+  // ago"). That shift is the office's, on Timecards, like any other old one.
+  const closed = (closedRows as { id?: string; job_id?: string | null; job_code?: string | null; clock_out?: string | null }[])[0];
+  const askJob =
+    !input.auto &&
+    !input.autoClosedReason &&
+    !!closed?.id &&
+    closed.job_id === null &&
+    !(closed.job_code ?? "").trim() &&
+    closedPickable(closed.clock_out);
+  const base: ClockResult = askJob ? { ok: true, id: closed.id, noJob: true } : { ok: true };
+  return lunchWarning ? { ...base, warning: lunchWarning } : base;
 }
 
 /** Close the CALLER's currently-open time entry — finds the open entry instead of
@@ -1325,8 +1373,19 @@ export async function createManualEntry(input: {
   // THE EASIEST WAY IN THE APP TO PAY FOR ONE AFTERNOON TWICE was this button: Add Entry wrote a
   // second row for a person who already had those hours and said nothing, because nothing here
   // ever looked. The office reaches for it when it should be EDITING the row that exists.
-  const overlaps = await overlapRefusal(supabase, profileId, ci.getTime(), co.getTime());
-  if (overlaps) return { ok: false, error: overlaps };
+  //
+  // AND THE REFUSAL HANDS BACK THE SHIFT IN THE WAY (the duplicate punches, 2026-09-26). On 9/19
+  // the office billing 85 Whitney typed Brian's 9/11 again because his punch that day had no job
+  // and the job page never showed it. The form now gets that punch, so it can offer "Put This On
+  // 85 Whitney" (the punch's own clock times) instead of a sentence with no door.
+  // "Put that shift on the job" only while no invoice bills that punch: the form's door is for an
+  // unbilled one, and a billed shift keeps its job (0288).
+  const putOnJobIf = async (id: string) => {
+    const claims = await claimsOnSources(supabase, [id]);
+    return !("error" in claims) && !claims.has(id);
+  };
+  const overlap = await findOverlap(supabase, profileId, ci.getTime(), co.getTime(), { putOnJobIf });
+  if (overlap) return { ok: false, error: overlap.sentence, ...(overlap.clash ? { clash: overlap.clash } : {}) };
 
   // Drop a job_id the caller can't see (e.g. a crafted voice/registry call) — never
   // persist a cross-org job reference.
@@ -1345,7 +1404,17 @@ export async function createManualEntry(input: {
     status: "closed",
     source: "manual",
   }).select("id");
-  if (error) return { ok: false, error: dbError(error) };
+  if (error) {
+    // 0360 refused it underneath: a save of the same hours landed a moment before this one (a
+    // double tap, a second device), or a running clock the read above could not see. Its DETAIL
+    // names the shift; the answer carries it like the check above does.
+    const clashId = clashIdFrom(error);
+    if (clashId) {
+      const again = await findOverlap(supabase, profileId, ci.getTime(), co.getTime(), { putOnJobIf });
+      if (again?.clash) return { ok: false, error: again.sentence, clash: again.clash };
+    }
+    return { ok: false, error: dbError(error) };
+  }
   // The silent-write law: an insert that comes back with no row wrote nothing, and this door was
   // reporting that as a saved shift. Hours that never landed are hours nobody gets paid for.
   if (!made?.length) return { ok: false, error: "Those hours didn't save. Reload and try again." };
@@ -2269,6 +2338,252 @@ export async function duplicateTimeEntry(
     ? `The ${dropped.join(" and ")} stayed on the original. Add ${dropped.length > 1 ? "them" : "it"} to ${name}'s entry if ${dropped.length > 1 ? "they apply" : "it applies"}.`
     : undefined;
   return { ok: true, message: `Copied to ${name}, ${when}.`, ...(warning ? { warning } : {}) };
+}
+
+// ── A PUNCH ALREADY THERE IS PUT ON THE JOB, NOT TYPED AGAIN (the duplicate punches) ──────────
+//
+// Erik, 2026-09-26: "yes remove the duplicates and track down the problem causing that please".
+// Seven pairs of shifts were the same hours twice. The main road: a clock punch landed with no job
+// (the schedule did not cover that day), nothing asked which job, the job page never showed it, and
+// days later the office, billing the job, typed the day in again. The punch had the real clock
+// times all along. So wherever the office adds hours for a person and a day, the form first shows
+// what that person already has that day, and a shift on no job gets one tap: Put This On <job>.
+
+export type DayShift = {
+  id: string;
+  clockIn: string;
+  /** Null: still running. */
+  clockOut: string | null;
+  hours: number;
+  jobId: string | null;
+  jobLabel: string | null;
+  jobCode: string | null;
+  /** Closed, on no job and no code: the one the door is for. */
+  noJob: boolean;
+  /** The invoice already billing it, when one does: a billed shift keeps its job (0288). */
+  billedBy: string | null;
+};
+
+export type DayShifts =
+  | { ok: true; name: string; tz: string; shifts: DayShift[]; forJob: { id: string; label: string } | null }
+  | { ok: false; error: string };
+
+/**
+ * What one person already has on one day (the org's day), for the add-hours forms: Add Entry on
+ * Timecards, the job's Add Time Entry and Log Hours. Office only. `for_job_id` is the job the form
+ * would put the hours on, named back so the door can say "Put This On 85 Whitney".
+ */
+export async function shiftsOnDay(input: { profile_id?: string | null; date: string; for_job_id?: string | null }): Promise<DayShifts> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error ?? "This action is staff-only." };
+  const supabase = ctx.supabase;
+  const profileId = input.profile_id || ctx.userId;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.date ?? "")) return { ok: false, error: "Pick a day." };
+  const tz = await orgTz(supabase);
+  const dayStart = tzDayStartUtc(input.date, tz).getTime();
+  const next = new Date(Date.parse(`${input.date}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
+  const dayEnd = tzDayStartUtc(next, tz).getTime();
+
+  const [rowsR, whoR, jobR] = await Promise.all([
+    // A day back catches a shift that started the evening before and ran into this day (18 h cap).
+    supabase
+      .from("time_entries")
+      .select("id, clock_in, clock_out, lunch_minutes, job_id, job_code, job:job_id(job_number, name)")
+      .eq("profile_id", profileId)
+      .gte("clock_in", new Date(dayStart - 24 * 3_600_000).toISOString())
+      .lt("clock_in", new Date(dayEnd).toISOString())
+      .order("clock_in", { ascending: true })
+      .limit(50),
+    supabase.from("profiles").select("full_name").eq("id", profileId).maybeSingle(),
+    input.for_job_id ? supabase.from("jobs").select("id, job_number, name").eq("id", input.for_job_id).maybeSingle() : Promise.resolve({ data: null }),
+  ]);
+  if (rowsR.error) return { ok: false, error: dbError(rowsR.error) };
+  type Row = { id: string; clock_in: string; clock_out: string | null; lunch_minutes: number | null; job_id: string | null; job_code: string | null; job?: unknown };
+  const now = Date.now();
+  const rows = ((rowsR.data ?? []) as Row[]).filter((r) => {
+    const s = Date.parse(r.clock_in);
+    const e = r.clock_out ? Date.parse(r.clock_out) : now;
+    return s < dayEnd && e > dayStart;
+  });
+  const claims = await claimsOnSources(supabase, rows.map((r) => r.id));
+  if ("error" in claims) return { ok: false, error: claims.error };
+  const shifts: DayShift[] = rows.map((r) => {
+    const j = (Array.isArray(r.job) ? r.job[0] : r.job) as { job_number?: string | null; name?: string | null } | null | undefined;
+    const code = (r.job_code ?? "").trim() || null;
+    return {
+      id: r.id,
+      clockIn: r.clock_in,
+      clockOut: r.clock_out,
+      hours: r.clock_out ? hoursBetween(r.clock_in, r.clock_out, r.lunch_minutes ?? 0) : 0,
+      jobId: r.job_id,
+      jobLabel: r.job_id && j ? jobLabel(j) : null,
+      jobCode: code,
+      noJob: !!r.clock_out && !r.job_id && !code,
+      billedBy: claims.get(r.id)?.invoice_number ?? (claims.has(r.id) ? "an invoice" : null),
+    };
+  });
+  const job = jobR.data as { id: string; job_number?: string | null; name?: string | null } | null;
+  return {
+    ok: true,
+    name: ((whoR.data as { full_name?: string | null } | null)?.full_name ?? "").trim() || "This person",
+    tz,
+    shifts,
+    forJob: job ? { id: job.id, label: jobLabel(job) } : null,
+  };
+}
+
+/**
+ * PUT THIS ON <JOB>: the office puts a shift that has no job on a job, keeping its own clock times.
+ * Only the job changes; a shift that already has one is moved on Timecards, where the editor names
+ * what else moves with it. Checked write: a shift that got a job in the meantime is a zero-row
+ * update, answered in words. Undo is takeShiftOffJob.
+ */
+export async function putShiftOnJob(input: { entry_id: string; job_id: string }): Promise<ClockResult & { sentence?: string }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+
+  const { data: row } = await supabase
+    .from("time_entries")
+    .select("id, job_id, clock_in, clock_out, lunch_minutes, profiles:profile_id(full_name), job:job_id(job_number, name)")
+    .eq("id", input.entry_id)
+    .maybeSingle();
+  const e = row as {
+    id: string;
+    job_id: string | null;
+    clock_in: string;
+    clock_out: string | null;
+    lunch_minutes: number | null;
+    profiles?: { full_name?: string | null } | { full_name?: string | null }[] | null;
+    job?: { job_number?: string | null; name?: string | null } | { job_number?: string | null; name?: string | null }[] | null;
+  } | null;
+  if (!e) return { ok: false, error: "That shift is gone. Reload to see the day." };
+  if (e.job_id) {
+    const j = Array.isArray(e.job) ? e.job[0] : e.job;
+    return {
+      ok: false,
+      error:
+        e.job_id === input.job_id
+          ? `That shift is already on ${j ? jobLabel(j) : "this job"}.`
+          : `That shift is already on ${j ? jobLabel(j) : "another job"}. Move it from Timecards if it belongs here.`,
+    };
+  }
+  const jobId = await visibleJobIdOrNull(supabase, input.job_id);
+  if (!jobId) return { ok: false, error: "That job isn't available." };
+  const { data: jobRow } = await supabase.from("jobs").select("job_number, name").eq("id", jobId).maybeSingle();
+  const label = jobRow ? jobLabel(jobRow as { job_number?: string | null; name?: string | null }) : "the job";
+
+  const { data: upd, error } = await supabase
+    .from("time_entries")
+    .update({ job_id: jobId })
+    .eq("id", e.id)
+    .is("job_id", null)
+    .select("id");
+  if (error) return { ok: false, error: dbError(error) };
+  if (!upd?.length) return { ok: false, error: "That shift got a job a moment ago. Reload to see where it went." };
+
+  revalidateTime([jobId]);
+  revalidatePath("/payroll");
+  const tz = await orgTz(supabase);
+  const who = firstName((Array.isArray(e.profiles) ? e.profiles[0] : e.profiles)?.full_name);
+  const sentence = e.clock_out
+    ? `${who}'s ${dayOnly(e.clock_in, tz)} shift, ${clockOnly(e.clock_in, tz)} to ${clockOnly(e.clock_out, tz)} (${hoursBetween(e.clock_in, e.clock_out, e.lunch_minutes ?? 0).toFixed(2)} h), is on ${label} now.`
+    : `${who}'s shift running since ${dayClock(e.clock_in, tz)} is on ${label} now.`;
+  return { ok: true, sentence };
+}
+
+/** Undo for Put This On <job>: back to no job, only while it is still on that job. A shift an
+ *  invoice has billed since keeps its job (0288 refuses the move, and the answer says so). */
+export async function takeShiftOffJob(input: { entry_id: string; job_id: string }): Promise<ClockResult> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const { data: upd, error } = await ctx.supabase
+    .from("time_entries")
+    .update({ job_id: null })
+    .eq("id", input.entry_id)
+    .eq("job_id", input.job_id)
+    .select("id");
+  if (error) return { ok: false, error: dbError(error) };
+  if (!upd?.length) return { ok: false, error: "That shift moved again since. Reload to see it." };
+  revalidateTime([input.job_id]);
+  revalidatePath("/payroll");
+  return { ok: true };
+}
+
+/**
+ * COMPANY TIME: a shift on no job that was the company's own (shop, errands, the office) is filed
+ * under the company's non-billable time code, the one labor billing already leaves off invoices
+ * (job_codes.billable = false; SHOP when there is one). That is the other way a no-job shift
+ * leaves Hours On No Job, and it works whether or not the company shows job codes on its clock.
+ * `undo` puts back the code it had (Undo on the toast), only while it still carries this one.
+ */
+export async function fileShiftAsCompanyTime(input: {
+  entry_id: string;
+  undo?: { code: string; previous: string | null };
+}): Promise<ClockResult & { sentence?: string; code?: string; previous?: string | null }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+
+  if (input.undo) {
+    const { data: back, error: backErr } = await supabase
+      .from("time_entries")
+      .update({ job_code: input.undo.previous })
+      .eq("id", input.entry_id)
+      .eq("job_code", input.undo.code)
+      .is("job_id", null)
+      .select("id");
+    if (backErr) return { ok: false, error: dbError(backErr) };
+    if (!back?.length) return { ok: false, error: "That shift changed again since. Reload to see it." };
+    revalidateTime([]);
+    return { ok: true };
+  }
+
+  const [codesR, rowR] = await Promise.all([
+    supabase.from("job_codes").select("code, billable, active").eq("billable", false),
+    supabase
+      .from("time_entries")
+      .select("id, job_id, job_code, clock_in, clock_out, lunch_minutes, status, profiles:profile_id(full_name)")
+      .eq("id", input.entry_id)
+      .maybeSingle(),
+  ]);
+  if (codesR.error) return { ok: false, error: dbError(codesR.error) };
+  const code = companyTimeCode((codesR.data ?? []) as { code?: string | null; billable?: boolean | null; active?: boolean | null }[]);
+  if (!code) {
+    return { ok: false, error: "Your company has no time code for its own time (like Shop). Add one under Settings, or put the shift on a job." };
+  }
+  const e = rowR.data as {
+    id: string;
+    job_id: string | null;
+    job_code: string | null;
+    clock_in: string;
+    clock_out: string | null;
+    lunch_minutes: number | null;
+    status: string;
+    profiles?: { full_name?: string | null } | { full_name?: string | null }[] | null;
+  } | null;
+  if (!e) return { ok: false, error: "That shift is gone. Reload to see the day." };
+  if (e.job_id) return { ok: false, error: "That shift is on a job. Take it off the job on Timecards first." };
+  if (e.status !== "closed" || !e.clock_out) return { ok: false, error: "That clock is still running. Stop it first." };
+
+  const { data: upd, error } = await supabase
+    .from("time_entries")
+    .update({ job_code: code })
+    .eq("id", e.id)
+    .is("job_id", null)
+    .select("id");
+  if (error) return { ok: false, error: dbError(error) };
+  if (!upd?.length) return { ok: false, error: "That shift changed a moment ago. Reload to see it." };
+
+  revalidateTime([]);
+  const tz = await orgTz(supabase);
+  const who = firstName((Array.isArray(e.profiles) ? e.profiles[0] : e.profiles)?.full_name);
+  return {
+    ok: true,
+    code,
+    previous: e.job_code ?? null,
+    sentence: `${who}'s ${dayOnly(e.clock_in, tz)} shift (${hoursBetween(e.clock_in, e.clock_out, e.lunch_minutes ?? 0).toFixed(2)} h) is filed as ${code}, the company's own time.`,
+  };
 }
 
 /** Save the "what did you do today?" note (and optional translation) mid-shift. */

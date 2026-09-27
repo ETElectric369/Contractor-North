@@ -57,6 +57,8 @@ import { readJobTasks, taskPhoto } from "@/lib/job-tasks";
 import { JobPermits } from "./job-permits";
 import { permitStatusTone, permitResultTone } from "@/lib/permit-options";
 import { JobAddTimeEntry } from "./job-add-time";
+import { NoJobPunches, type NearPunches } from "./no-job-punches";
+import { jobCrewIds, nearJobWindow, readNoJobPunchesNearJob } from "@/lib/no-job-hours";
 import { JobClockButton } from "./job-clock-button";
 import { EditEntryButton } from "../../timecards/edit-entry-button";
 import { JobStatusControl } from "./job-status-control";
@@ -630,6 +632,39 @@ export default async function JobDetailPage({
   const navTarget = directionsTarget(jobAddress, customerAddress, j.name);
   const tz = getOrgSettings((org as any)?.settings).timezone; // business tz for time-entry dates
 
+  // PUNCHES WITH NO JOB near this job (the duplicate punches, 2026-09-26): its crew's closed,
+  // job-less, unbilled shifts from the day before its first day to two days after its last, for
+  // the office's Put This On door on the Time tab. Office only. Null = the read failed (said).
+  // STARTED HERE, awaited below: it is up to three round trips one after another (codes, entries,
+  // claims), and everything it needs is known by now, so it runs beside the shelf, takes, document
+  // and split reads instead of after them on every office open of this page.
+  const nearPunchesP: Promise<NearPunches | null> = viewerIsStaff
+    ? readNoJobPunchesNearJob(supabase as any, {
+        crewIds: jobCrewIds(j.assigned_to, (entries ?? []) as { profile_id?: string | null }[]),
+        window: nearJobWindow({
+          tz,
+          entries: (entries ?? []) as { clock_in?: string | null; clock_out?: string | null }[],
+          scheduledStart: j.scheduled_start,
+          scheduledEnd: j.scheduled_end,
+          segments: (scheduleSegments ?? []) as { start_date?: string | null; end_date?: string | null }[],
+        }),
+        tz,
+        todayStr: todayStrInTz(tz),
+      }).then(
+        (near) =>
+          near
+            ? {
+                punches: near.shifts.map((s) => ({ id: s.id, name: s.name, clockIn: s.clockIn, clockOut: s.clockOut, hours: s.hours, jobCode: s.jobCode })),
+                capped: near.capped,
+              }
+            : null,
+        (e) => {
+          reportError("jobs.[id].noJobPunches", e, { jobId: id });
+          return null;
+        },
+      )
+    : Promise.resolve({ punches: [], capped: false });
+
   // The org's all-day work window (Settings → Scheduling) — the same resolver the
   // schedule writers use, threaded into the schedule/edit controls so their "blank
   // time = all-day" sentinel and default times track the org's window, not a fixed 8-4.
@@ -895,6 +930,9 @@ export default async function JobDetailPage({
       splitParents.set(k.split_from, { converted: cur.converted || k.split_how === "converted" });
     }
   }
+
+  // The punches with no job near this job, started above beside the other reads.
+  const nearPunches = await nearPunchesP;
 
   // Time-tab serialization gate (same class as the gated techs select above):
   // `entries` keeps rate_override + the joined hourly_rate/bill_rate because the
@@ -1274,6 +1312,18 @@ export default async function JobDetailPage({
               )}
             </div>
           </div>
+          {/* Its crew's punches on no job around its days, each one tap onto this job: the hours
+              the office would otherwise type again (office only; nothing to show, nothing shown). */}
+          {viewerIsStaff && (
+            <NoJobPunches
+              jobId={j.id}
+              jobLabel={jobLabel(j)}
+              tz={tz}
+              punches={nearPunches?.punches ?? []}
+              capped={!!nearPunches?.capped}
+              failed={nearPunches === null}
+            />
+          )}
           <ul className="divide-y divide-slate-100">
             {timeTabEntries.map((e) => {
               const h = e.status === "closed" && e.clock_out

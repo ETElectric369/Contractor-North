@@ -19,6 +19,7 @@ export function Modal({
   dirty = false,
   portal = false,
   historyClose = true,
+  holdOpen = false,
 }: {
   open: boolean;
   onClose: () => void;
@@ -58,6 +59,14 @@ export function Modal({
    * or an inline confirm that back should ignore.
    */
   historyClose?: boolean;
+  /**
+   * WHILE A WRITE IS OUT, THE ANSWER NEEDS SOMEWHERE TO LAND. True: the X, a tap outside and Escape
+   * do nothing (the X shows disabled), so a sheet that says its own answer is still there when the
+   * answer comes back. Back still closes: the system has already spent its history entry, and a
+   * sheet held open past it would leave the NEXT Back taking the whole page. The caller clears it
+   * the moment the write settles. Default off.
+   */
+  holdOpen?: boolean;
 }) {
   // Two-tap discard guard state. Auto-disarms after a beat so a stray first
   // tap doesn't leave the modal permanently one tap away from discarding.
@@ -75,6 +84,7 @@ export function Modal({
   // slice. Undefined off-iOS (no visualViewport) → the overlay falls back to `fixed inset-0`.
   const [vvRect, setVvRect] = useState<CSSProperties | undefined>(undefined);
   const requestClose = () => {
+    if (holdOpen) return;
     if (dirty && !confirmDiscard) {
       setConfirmDiscard(true);
       if (disarmTimer.current) clearTimeout(disarmTimer.current);
@@ -290,7 +300,8 @@ export function Modal({
           <h2 className="text-base font-semibold text-slate-900">{title}</h2>
           <button
             onClick={requestClose}
-            className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+            disabled={holdOpen}
+            className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:opacity-40"
             aria-label="Close"
           >
             <X className="h-5 w-5" />

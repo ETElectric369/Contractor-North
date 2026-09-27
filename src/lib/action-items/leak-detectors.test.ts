@@ -51,6 +51,14 @@ describe("detectStrayTime — the forgotten clock and the job-less hours", () =>
     expect(detectStrayTime([today], TODAY, NOW)).toEqual([]);
     expect(detectStrayTime([open, open], TODAY, NOW)).toHaveLength(1);
   });
+  it("with the org's timezone, a Pacific evening close is YESTERDAY, not today (the UTC slice skipped it)", () => {
+    // 01:00 UTC Jul 1 is 6:00 PM Jun 30 in Los Angeles: a past day there, so it is stray.
+    const evening = { id: "e9", status: "closed", job_id: null, clock_in: "2026-06-30T20:00:00Z", clock_out: "2026-07-01T01:00:00Z" };
+    expect(detectStrayTime([evening], TODAY, NOW, new Set(), "America/Los_Angeles").map((f) => f.entryId)).toEqual(["e9"]);
+    // And a Pacific morning close today stays today's.
+    const morning = { id: "e10", status: "closed", job_id: null, clock_in: "2026-07-01T14:00:00Z", clock_out: "2026-07-01T15:00:00Z" };
+    expect(detectStrayTime([morning], TODAY, NOW, new Set(), "America/Los_Angeles")).toEqual([]);
+  });
 });
 
 describe("rollupWorkedJobs — entries → the jobs they touched", () => {

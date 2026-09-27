@@ -118,6 +118,9 @@ export type StackEntry = {
   /** The job, as a link to the job itself. THE NAME, never J-0xx (jobLabel is the SSOT). */
   job: { href: string; label: string } | null;
   jobCode: string | null;
+  /** A closed shift on no job and no code: hours nobody bills, badged so the row never reads like
+   *  any other (the duplicate punches, 2026-09-26: Brian's 9/11 punch showed as just his name). */
+  noJob?: boolean;
   /** DISCLOSURE IS THE GUARD (0168): where this punch's time came from, when it was not the
    *  server clock. Never dropped, in either grouping. */
   source: "manual" | "offline" | null;
@@ -196,6 +199,7 @@ function ShiftRow({ e, lead }: { e: StackEntry; lead: string }) {
           <span className="tabular-nums">{e.sub}</span>
           {e.lunchMin > 0 && <span>· lunch {e.lunchMin}m</span>}
           {e.jobCode && <Badge tone="slate">{e.jobCode}</Badge>}
+          {e.noJob && <Badge tone="amber">No Job</Badge>}
           {/* ── DISCLOSURE IS THE GUARD (0168), AND IT HAS TO BE READABLE ON A PHONE ──────────
               A manual or offline punch's time did not come from the server clock. Nothing can
               prove it was made live rather than backdated, so the row says where it DID come
