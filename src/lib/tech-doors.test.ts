@@ -79,6 +79,8 @@ describe("the job's side doors", () => {
     expect(s).toMatch(/viewerIsStaff\s*\?\s*\(inspection\?\.inspection_answers \?\? \{\}\)\s*:\s*answersWithoutPrices\(/);
     expect(s).toContain("answers: answersWithoutPrices(b.answers)");
     expect(s).toMatch(/estimateHref=\{viewerIsStaff && estimatesOn \?/);
+    // The heading names the estimate only for the people who get its door.
+    expect(s).toContain('{viewerIsStaff && estimatesOn ? "Walk Through Or Estimate" : "Walk Through"}');
   });
 
   it("the jobs list offers New Job only to the office", () => {
