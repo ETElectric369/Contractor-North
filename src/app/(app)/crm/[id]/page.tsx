@@ -25,6 +25,7 @@ import { AppointmentButton } from "../../appointments/appointment-button";
 import { toJobOptions, toStaffOptions, listActiveTechs } from "@/lib/schedule-options";
 import { deleteCustomer } from "../actions";
 import type { Customer, Job, Quote } from "@/lib/types";
+import { countOpen, isOpenInvoice, isOpenJob, isOpenQuote } from "@/lib/open-counts";
 
 export const dynamic = "force-dynamic";
 
@@ -230,7 +231,9 @@ export default async function CustomerDetailPage({
     {
       id: "jobs",
       label: "Jobs",
-      count: (jobs?.length ?? 0) + linkedJobs.length,
+      // Jobs still in flight (Erik, 2026-09-27: "all badges only show whats open"), never how many
+      // this customer has ever had; the linked ones (as a sub / contact) count the same way.
+      count: countOpen([...((jobs ?? []) as { status?: string | null }[]), ...(linkedJobs as { status?: string | null }[])], (j) => isOpenJob(j.status)),
       content: (
         <Card className="overflow-hidden">
           <RowList
@@ -265,7 +268,8 @@ export default async function CustomerDetailPage({
     {
       id: "quotes",
       label: "Estimates",
-      count: quotes?.length ?? 0,
+      // A draft to send, or sent and waiting on the customer.
+      count: countOpen((quotes ?? []) as { status?: string | null }[], (q) => isOpenQuote(q.status)),
       content: (
         <Card className="overflow-hidden">
           <RowList
@@ -284,7 +288,8 @@ export default async function CustomerDetailPage({
     {
       id: "invoices",
       label: "Invoices",
-      count: invoices?.length ?? 0,
+      // Still owed: a draft not sent, or sent with a balance.
+      count: countOpen((invoices ?? []) as any[], isOpenInvoice),
       content: (
         <Card className="overflow-hidden">
           <RowList

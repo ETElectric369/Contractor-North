@@ -98,10 +98,9 @@ export function SectionSheet({
           {handleLabel}
         </span>
         {/* Discoverability (Erik: "only one option shows up"): the handle names WHERE YOU ARE,
-            but nothing said "there's more behind me" — a page count + chevron now do. */}
-        <span className="relative z-10 rounded-full bg-white/70 px-1 text-[10px] font-bold leading-4 text-slate-600">
-          {items.filter((c) => c.href).length}
-        </span>
+            and the chevron says "there's more behind me". The page count that rode here was a
+            number in a pill that nobody had to act on, so it went (Erik, 2026-09-27: "all badges
+            only show whats open"). */}
         <ChevronRight className="relative z-10 h-3.5 w-3.5 shrink-0 opacity-70" />
       </button>
 

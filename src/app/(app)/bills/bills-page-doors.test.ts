@@ -353,9 +353,11 @@ const HOMES: { door: string | RegExp; was: string; home: string; times?: number 
   // list is longer than six once the papers on Needs You cards are left out of What CED Has Open.
   // 9 + 10. What Your Customers Get Billed + the tabs -> All Bills
   { door: /^All Bills \(\d+\)/, was: "the tabs under the page", home: "all-bills" },
-  { door: "Bills 15", was: "tab", home: "all-bills" },
+  // The tabs count only what's open (Erik, 2026-09-27: "all badges only show whats open"): the 9 of
+  // 15 bills still unpaid, the draft PO, and no count on Receipts (files are never open).
+  { door: "Bills 9", was: "tab", home: "all-bills" },
   { door: "Purchase Orders 1", was: "tab (the default, and empty)", home: "all-bills" },
-  { door: "Receipts 1", was: "tab", home: "all-bills" },
+  { door: "Receipts", was: "tab", home: "all-bills" },
   { door: "Add A Bill By Hand", was: "the always-open Add Bill form", home: "all-bills" },
   { door: "Add Bill", was: "Bills tab (size sm)", home: "all-bills" },
   { door: "All (15)", was: "filter pill (~26px)", home: "all-bills" },

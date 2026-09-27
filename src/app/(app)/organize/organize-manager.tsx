@@ -734,7 +734,8 @@ export function OrganizeManager({
           {
             id: "archive",
             label: "Archive",
-            count: archived.length,
+            // No badge: what's been filed is done (Erik, 2026-09-27: "all badges only show whats
+            // open"). Needs Attention's count is the open one.
             icon: <Archive className="h-4 w-4" />,
             content:
               archived.length === 0 ? (

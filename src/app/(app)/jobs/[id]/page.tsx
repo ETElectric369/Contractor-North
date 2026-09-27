@@ -55,6 +55,7 @@ import { JobBills } from "./job-bills";
 import { JobTaskList, type TaskPhotos } from "./job-task-list";
 import { jobTaskTally, readJobTasks, taskPhoto } from "@/lib/job-tasks";
 import { buyMaterials, openToBuyCount } from "@/lib/materials-checklist";
+import { countOpen, isOpenAppointment, isOpenChangeOrder, isOpenInvoice, isOpenPermit, isOpenQuote, isOpenWorkOrder } from "@/lib/open-counts";
 import { JobPermits } from "./job-permits";
 import { permitStatusTone, permitResultTone } from "@/lib/permit-options";
 import { JobAddTimeEntry } from "./job-add-time";
@@ -427,14 +428,16 @@ export default async function JobDetailPage({
           return 0;
         })
       : Promise.resolve(0),
-    // THE PANEL CHIP'S COUNT: one head-only count of the job's kept, live circuits, riding this wave
-    // (no round trip of its own). A database without 0333 yet answers with an error: no count, and
-    // the tab says so itself when opened.
+    // THE PANEL CHIP'S COUNT: one head-only count of the job's live SUGGESTED circuits (the take-off's
+    // and the readers' rows waiting on a Keep or a Not This), riding this wave (no round trip of its
+    // own). Open only (Erik, 2026-09-27: "all badges only show whats open"): the kept circuits are the
+    // panel's contents, not work, so they are never the badge. A database without 0333 yet answers
+    // with an error: no count, and the tab says so itself when opened.
     supabase
       .from("job_circuits")
       .select("id", { count: "exact", head: true })
       .eq("job_id", id)
-      .eq("state", "kept")
+      .eq("state", "suggested")
       .is("removed_at", null)
       .then(
         (r: { count: number | null; error: unknown }) => (r.error ? undefined : (r.count ?? 0)),
@@ -838,6 +841,9 @@ export default async function JobDetailPage({
   const buy = buyMaterials((canonicalItems ?? []) as { purchased?: boolean; is_tool?: boolean }[]);
   const materialsOpen = openToBuyCount((canonicalItems ?? []) as { purchased?: boolean; is_tool?: boolean }[]);
   const openTaskCount = jobTaskTally(jobTasks.rows, buy).open;
+  // The Costs chip: Not Billed Yet rows + unrecorded papers naming this job (see the tab below).
+  const costsOpen =
+    (costGroups?.open.ids.length ?? 0) + (paperViews ?? []).filter((p) => !p.waitingOnCredit).length;
   const taskListProps = {
     materials: buy,
     jobId: j.id as string,
@@ -1142,7 +1148,8 @@ export default async function JobDetailPage({
     {
       id: "photos",
       label: "Photos",
-      count: docs.filter((d: any) => /\.(jpe?g|png|webp|gif|heic)($|\?)/i.test(d.signedUrl ?? d.name)).length,
+      // No badge: how many photos a job has is a total, never something waiting on someone (Erik,
+      // 2026-09-27: "all badges only show whats open"). The tab itself shows them.
       content: (
         <Card>
           <CardContent className="py-5">
@@ -1185,7 +1192,8 @@ export default async function JobDetailPage({
     {
       id: "permits",
       label: "Permits",
-      count: permits?.length ?? 0,
+      // Permits still in motion (not passed, not closed): a failed inspection counts most of all.
+      count: countOpen((permits ?? []) as { status?: string | null }[], (p) => isOpenPermit(p.status)),
       content: (
         <Card>
           <CardContent className="py-5">
@@ -1249,13 +1257,15 @@ export default async function JobDetailPage({
       // THE PANEL (Panel plan, phase 2): the job's own circuit list, loaded when the tab opens.
       id: "panel",
       label: "Panel",
+      // Suggested circuits waiting on a Keep or a Not This (the read above), never the kept ones.
       count: panelCount,
       content: <JobPanelLoader jobId={j.id} />,
     },
     {
       id: "time",
       label: "Time",
-      count: entries?.length ?? 0,
+      // No badge: the number of shifts on a job is a total. The time not billed yet is said on the
+      // Overview's running total and the Costs tab, where the door that bills it is.
       content: (
         <Card className="overflow-hidden">
           {/* THE ROW WRAPS (Erik, from the phone: "can't see the bottom of the list" — his
@@ -1338,7 +1348,8 @@ export default async function JobDetailPage({
     {
       id: "appointments",
       label: "Appointments",
-      count: jobAppts?.length ?? 0,
+      // Visits still ahead (booked, or proposed and waiting on the customer), never past ones.
+      count: countOpen((jobAppts ?? []) as { status?: string | null }[], (a) => isOpenAppointment(a.status)),
       content: (
         <div className="space-y-3">
           {/* Booking and editing are staff writes (appointments_write, 0227: "office only"), so
@@ -1393,10 +1404,12 @@ export default async function JobDetailPage({
     {
       id: "costs",
       label: "Costs",
-      // The job's live supplier bills: the same `bills` rows (set-aside duplicates excluded) that
-      // the Costs total sums and the Supplier bills list prints as "N bills", so the chip and the
-      // tab can't disagree. POs are not counted; they are orders, not money spent yet.
-      count: bills?.length ?? 0,
+      // WHAT'S OPEN ON THE COSTS TAB, never how many bills the job has (Erik, 2026-09-27: "all badges
+      // only show whats open"): the Not Billed Yet pile (the Unbilled card's own verdict, so the chip
+      // is the pile the tab leads with) plus the supplier papers naming this job that are in nobody's
+      // books yet (Named On A Paper; one set aside waiting on a credit is decided, so not counted). A
+      // fixed-price job has no Not Billed Yet pile, so only its unrecorded papers count.
+      count: costsOpen,
       content: (
         <div className="space-y-4">
           {/* THE ADD COST DOOR, camera first, at the top of the tab where the dock's Add Cost
@@ -1618,7 +1631,8 @@ export default async function JobDetailPage({
     {
       id: "quotes",
       label: "Estimates",
-      count: quotes?.length ?? 0,
+      // Estimates still owed a move: a draft to send, or sent and waiting on the customer.
+      count: countOpen((quotes ?? []) as { status?: string | null }[], (q) => isOpenQuote(q.status)),
       content: (
         <div className="space-y-3">
           {on("estimates") && (
@@ -1655,7 +1669,8 @@ export default async function JobDetailPage({
     {
       id: "invoices",
       label: "Invoices",
-      count: invoices?.length ?? 0,
+      // Invoices still owed: a draft not sent, or sent with a balance. Paid and void never badge.
+      count: countOpen((invoices ?? []) as any[], isOpenInvoice),
       content: (
         <div className="space-y-3">
           {/* Lead with the INVOICES (this is the Invoices tab) — the contract / payment
@@ -1738,7 +1753,8 @@ export default async function JobDetailPage({
     {
       id: "change-orders",
       label: "Change Orders",
-      count: changeOrders?.length ?? 0,
+      // Change orders waiting on their answer (pending).
+      count: countOpen((changeOrders ?? []) as { status?: string | null }[], (c) => isOpenChangeOrder(c.status)),
       content: (
         <div className="space-y-3">
           {on("estimates") && (
@@ -1782,7 +1798,8 @@ export default async function JobDetailPage({
     {
       id: "wos",
       label: "Work Orders",
-      count: workOrders?.length ?? 0,
+      // Work orders still to do (not complete, not cancelled).
+      count: countOpen((workOrders ?? []) as { status?: string | null }[], (w) => isOpenWorkOrder(w.status)),
       content: (
         <div className="space-y-3">
           {/* Issuing a work order is a staff write; the list of them is job information. */}
