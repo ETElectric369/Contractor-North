@@ -776,6 +776,12 @@ describe("what needs a person: one row per merchant, the guess first and never p
     expect(guessFor(line("ONLINE TRANSFER WITHDRAWAL TO XXXXXX9876"), books)).toEqual({ choice: "draw" });
     expect(guessFor(line("Withdrawal ACH ACME INSURANCE"), books)).toEqual({ choice: "cost", bucket: "Insurance & Licenses" });
     expect(guessFor(line("ATM WITHDRAWAL 000123 MAIN ST"), books)).toEqual({ choice: "petty_cash" });
+    // A truck stop is a fill-up, never Auto for its "truck"; a truck's repair or a fuel brand's car
+    // wash is still Auto.
+    for (const d of ["FLYING J TRUCK STOP 0612", "PILOT TRUCK STOP 00123", "PILOT_00123 ANYTOWN", "ANYTOWN TRUCK STOPS INC", "TA TRAVEL CENTER 0123", "ANYTOWN TRAVEL PLAZA"])
+      expect([d, guessFor(line(d), books)]).toEqual([d, { choice: "cost", bucket: "Fuel" }]);
+    for (const d of ["ANYTOWN TRUCK REPAIR", "TRUCK PARTS DEPOT 12", "CHEVRON CAR WASH 4410", "JIFFY LUBE #1234"])
+      expect([d, guessFor(line(d), books)]).toEqual([d, { choice: "cost", bucket: "Auto" }]);
     expect(merchantKeyOf("POINT OF SALE WITHDRAWAL SHELL OIL 57444 ANYTOWN CA")).toBe("shell");
     expect(merchantKeyOf("POINT OF SALE WITHDRAWAL HOME DEPOT 4410")).toBe("home");
     expect(merchantKeyOf("VISA DDA PUR 123456 SHELL OIL")).toBe("shell");

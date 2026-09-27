@@ -873,8 +873,11 @@ export function lineNamesSupplier(description: string, supplier: string): boolea
   return start.length >= 4 && compact(description).includes(start);
 }
 
-const FUEL_RE = /\b(fuel|gas|gasoline|diesel|petrol|shell|chevron|texaco|exxon|mobil|arco|valero|sinclair|conoco|phillips|marathon|citgo|sunoco|maverik|pilot|loves|flying j|circle k|speedway|costco gas|gas station|fuel stop)\b/i;
-const AUTO_RE = /\b(auto parts|autozone|o ?reilly|napa|jiffy|lube|oil change|tire|tires|car wash|smog|dmv|registration|towing|mechanic|auto repair|truck)\b/i;
+const FUEL_RE =
+  /\b(fuel|gas|gasoline|diesel|petrol|shell|chevron|texaco|exxon|mobil|arco|valero|sinclair|conoco|phillips|marathon|citgo|sunoco|maverik|pilot|loves|flying j|circle k|speedway|costco gas|gas station|fuel stop|truck stops?|travel cent(er|re)s?|travel plazas?)\b/i;
+/** Auto is asked BEFORE Fuel, so a service at a fuel brand ("CHEVRON CAR WASH", "SHELL OIL CHANGE")
+ *  is Auto. So a bare "truck" must never be a truck stop's: "FLYING J TRUCK STOP" is a fill-up. */
+const AUTO_RE = /\b(auto parts|autozone|o ?reilly|napa|jiffy|lube|oil change|tire|tires|car wash|smog|dmv|registration|towing|mechanic|auto repair|truck(?!\s+stops?\b))\b/i;
 const INSURANCE_RE = /\b(insur\w*|ins prem|premium|liability|bond|bonding|licen[cs]e\w*|cslb)\b/i;
 const FEE_RE = /\b(fee|fees|service charge|overdraft|nsf|interest charge|finance charge|monthly maintenance|wire fee)\b/i;
 const PHONE_RE = /\b(verizon|at&t|att|t-mobile|tmobile|sprint|comcast|xfinity|spectrum|internet|wireless|phone|google|microsoft|adobe|dropbox|quickbooks|intuit|office)\b/i;
