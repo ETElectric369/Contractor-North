@@ -1566,13 +1566,13 @@ export async function deleteOrganizedItem(id: string): Promise<Result & { messag
  * Save a typed/dictated note as a needs-review item (no photo). THE ONE NOTE WRITER: Nort's
  * organize.saveNote and Snap Or Note's note box both land here.
  *
- * `read` (Snap Or Note's office note, W1-30): once the note is saved, AI Suggest looks at it once
- * (aiReviewItem: the routine model, metered under Organize), and what it suggests rides on the note
- * as a chip a person taps. The note is saved FIRST: a look that fails or never answers leaves the
- * note exactly as typed, and `read: false` says so ("Saved, Not Read"). A crew member's note is
- * never read (aiReviewItem is the office's), and Nort's saves ask for no read.
+ * It only saves, and answers quickly with the note's id. Snap Or Note's office note is read AFTER,
+ * on a call of its own (/api/paperwork/read with note: true, which runs aiReviewItem: the routine
+ * model, metered under Organize), so a read that runs out of time or loses signal can only ever say
+ * "Saved, Not Read", never "Not saved" for a note that is in (W1-30; the SI4 class). A crew
+ * member's note is never read (aiReviewItem is the office's), and Nort's saves ask for no read.
  */
-export async function saveVoiceNote(text: string, opts: { read?: boolean } = {}): Promise<Result & { id?: string; read?: boolean }> {
+export async function saveVoiceNote(text: string): Promise<Result & { id?: string }> {
   const supabase = await createClient();
   const {
     data: { user },
@@ -1600,15 +1600,7 @@ export async function saveVoiceNote(text: string, opts: { read?: boolean } = {})
   if (!id) return { ok: false, error: "The note didn't save, so nothing was kept. Try again." };
   revalidatePath("/organize");
   revalidatePath("/planner");
-  if (!opts.read) return { ok: true, id: String(id) };
-  let read = false;
-  try {
-    read = (await aiReviewItem(String(id))).ok === true;
-  } catch (e) {
-    reportError("organize:saveVoiceNote.read", e, { id });
-    read = false;
-  }
-  return { ok: true, id: String(id), read };
+  return { ok: true, id: String(id) };
 }
 
 /**

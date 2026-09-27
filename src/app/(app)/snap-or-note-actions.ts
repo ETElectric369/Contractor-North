@@ -37,6 +37,9 @@ export type SnapJob = { id: string; label: string };
 export type SnapContext =
   | {
       ok: true;
+      /** Who is signed in: the sheet's lines and waiting photos are this person's, and a different
+       *  person (or company) on the same device starts from an empty sheet. */
+      userId: string;
       orgId: string;
       /** Office (owner, admin, office) or crew. The crew's sheet is Take Photo and a note. */
       staff: boolean;
@@ -66,7 +69,7 @@ export async function snapContext(): Promise<SnapContext> {
   const settings = getOrgSettings((orgR.data as { settings?: unknown } | null)?.settings);
   const punchJobId = ((punchR.data as { job_id?: string | null } | null)?.job_id ?? null) || null;
   const shopStock = featureOn(settings.features, "shop_stock");
-  if (staff) return { ok: true, orgId, staff: true, punchJobId, jobs: [], shopStock };
+  if (staff) return { ok: true, userId, orgId, staff: true, punchJobId, jobs: [], shopStock };
 
   // THE CREW'S JOBS, LABELS ONLY: the jobs still going, newest first, his punch's job on top.
   const { data, error } = await supabase
@@ -79,6 +82,7 @@ export async function snapContext(): Promise<SnapContext> {
   if (error)
     return {
       ok: true,
+      userId,
       orgId,
       staff: false,
       punchJobId,
@@ -91,6 +95,7 @@ export async function snapContext(): Promise<SnapContext> {
   const ordered = rows.map((j, n) => ({ j, n })).sort((a, b) => going(a.j) - going(b.j) || a.n - b.n);
   return {
     ok: true,
+    userId,
     orgId,
     staff: false,
     punchJobId,
@@ -166,19 +171,43 @@ export async function snapPaperRows(ids: string[]): Promise<SnapRows> {
   };
 }
 
+/** A pasted invoice's totals block. A note that names an invoice number has none. */
+const TOTALS_BLOCK = /\b(?:TOTAL\s+DUE|MERCHANDISE|INVOICE\s+TOTAL)\b/i;
+
+type PaperReading =
+  /** Something in it reads: the importer takes it. */
+  | { kind: "paper" }
+  /** A plain note (it may name an invoice number: "ask CED about invoice no. 8802110"). */
+  | { kind: "note" }
+  /** It looked like a pasted supplier paper (a totals block, a statement's heading) and nothing in
+   *  it would read: kept as a note, with why, so the words are never handed back to fail again. */
+  | { kind: "unread"; why: string };
+
 /**
- * DOES THIS TEXT READ AS A SUPPLIER'S PAPER? The parser the importer runs on pasted text
- * (parseCedDocuments: an invoice, a credit memo, a service charge or a statement, each by the
- * heading its supplier printed), or a pasted open list whose header names a paper number and money
- * (the importer's own strict reading). A note that merely mentions an invoice number is a note.
+ * DOES THIS TEXT READ AS A SUPPLIER'S PAPER? Only when the importer would take something from it:
+ * at least one document the parser the importer runs actually READ (parseCedDocuments: an invoice,
+ * a credit memo, a service charge), or a pasted open list or statement whose header names a paper
+ * number and money (the importer's own strict reading). A note that merely mentions an invoice
+ * number is a note: the parser anchors on "…invoice no. 8802110" and refuses it for having no
+ * totals block, and that refusal must never turn a note into a failed import.
  */
-function readsAsSupplierPaper(text: string): boolean {
-  if (parseCedDocuments(text).length > 0) return true;
+function readPastedText(text: string): PaperReading {
+  const docs = parseCedDocuments(text);
+  if (docs.some((r) => r.ok)) return { kind: "paper" };
   const list = openListFromText(text, { name: "Pasted text", from: "paste", listDate: null, listDateFrom: "today", parseCsv: parseCSV, strict: true });
-  return !!list?.list;
+  if (list?.list) return { kind: "paper" };
+  // A PASTED PAPER THAT WON'T READ (a statement, an invoice whose totals don't add up) is still said:
+  // the parser's own refusals, and the words kept as a note rather than lost or bounced.
+  const refused = docs.filter((r): r is Extract<typeof r, { ok: false }> => !r.ok);
+  const statement = refused.some((r) => r.invoiceNumber === null);
+  if (refused.length && (statement || TOTALS_BLOCK.test(text))) return { kind: "unread", why: refused.map((r) => r.error).join(" ") };
+  return { kind: "note" };
 }
 
-export type PastedTextRoute = { kind: "note" } | { kind: "imported"; ok: boolean; line: string };
+export type PastedTextRoute =
+  /** Save it as a note. `unread` says why a pasted supplier paper in it didn't import. */
+  | { kind: "note"; unread?: string }
+  | { kind: "imported"; ok: boolean; line: string };
 
 /**
  * A NOTE THAT IS REALLY A SUPPLIER'S PAPER (W1-30: Bills' Paste Text Instead folds into the note
@@ -191,8 +220,14 @@ export async function routePastedText(text: string): Promise<PastedTextRoute> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { kind: "note" };
   const clean = String(text ?? "").trim();
-  if (!clean || !readsAsSupplierPaper(clean)) return { kind: "note" };
+  if (!clean) return { kind: "note" };
+  const reading = readPastedText(clean);
+  if (reading.kind === "unread") return { kind: "note", unread: reading.why };
+  if (reading.kind === "note") return { kind: "note" };
   const res = await importCedInvoices({ text: clean });
+  // Only text the importer reads gets here (readPastedText runs its own parser and its strict list
+  // reading first), so a refusal now is the books that couldn't be checked, two imports at once, or
+  // a list already in: worth saying, and the words go back in the box for another Save.
   if (!res.ok) return { kind: "imported", ok: false, line: `Not imported: ${res.error ?? "nothing in it could be read."}` };
   const n = res.landed.length + res.updated.length + res.unchanged.length;
   return {

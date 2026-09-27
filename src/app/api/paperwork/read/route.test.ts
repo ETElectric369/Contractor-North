@@ -6,9 +6,10 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
  * office's (a paper carries prices), and it reads one paper by id inside the caller's company.
  */
 
-const state = vi.hoisted(() => ({ staff: null as any, read: vi.fn() }));
+const state = vi.hoisted(() => ({ staff: null as any, read: vi.fn(), review: vi.fn() }));
 vi.mock("@/lib/staff-guard", () => ({ requireStaff: vi.fn(async () => state.staff) }));
-vi.mock("@/app/(app)/organize/actions", () => ({ readPaperworkItem: state.read }));
+vi.mock("@/app/(app)/organize/actions", () => ({ readPaperworkItem: state.read, aiReviewItem: state.review }));
+vi.mock("@/lib/observe", () => ({ reportError: () => {} }));
 
 import { POST, maxDuration, runtime } from "./route";
 
@@ -17,6 +18,7 @@ const ask = (body: unknown) => POST(new Request("http://x/api/paperwork/read", {
 
 beforeEach(() => {
   state.read.mockReset();
+  state.review.mockReset();
   state.staff = { supabase: {}, userId: "u", orgId: "org-1" };
 });
 
@@ -54,5 +56,19 @@ describe("/api/paperwork/read", () => {
     state.staff = { supabase: {}, userId: "u", orgId: "org-1" };
     for (const bad of [{ id: "../../etc" }, {}, "not json"]) expect((await ask(bad)).status).toBe(400);
     expect(state.read).not.toHaveBeenCalled();
+  });
+
+  it("an office note, already saved, is read on its own call: the answer is ok or the reader's sentence, and a throw is a sentence too", async () => {
+    state.review.mockResolvedValue({ ok: true, message: "Suggested: make a task." });
+    expect(await (await ask({ id: ID, note: true })).json()).toEqual({ ok: true });
+    expect(state.review).toHaveBeenCalledWith(ID);
+    expect(state.read).not.toHaveBeenCalled();
+    state.review.mockResolvedValue({ ok: false, message: "Item not found." });
+    expect(await (await ask({ id: ID, note: true })).json()).toEqual({ ok: false, error: "Item not found." });
+    state.review.mockRejectedValue(new Error("model unreachable"));
+    expect(await (await ask({ id: ID, note: true })).json()).toEqual({ ok: false, error: "the reader didn't answer." });
+    // The crew never gets a read.
+    state.staff = { error: "This action is staff-only." };
+    expect((await ask({ id: ID, note: true })).status).toBe(403);
   });
 });

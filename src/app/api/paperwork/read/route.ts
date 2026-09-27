@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireStaff } from "@/lib/staff-guard";
-import { readPaperworkItem } from "@/app/(app)/organize/actions";
+import { aiReviewItem, readPaperworkItem } from "@/app/(app)/organize/actions";
+import { reportError } from "@/lib/observe";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -22,13 +23,27 @@ export async function POST(req: Request) {
   if ("error" in ctx) return NextResponse.json({ ok: false, error: ctx.error ?? "This is the office's." }, { status: 403 });
   if (!ctx.orgId) return NextResponse.json({ ok: false, error: "Your sign-in isn't attached to a company yet." }, { status: 403 });
   let id = "";
+  let note = false;
   try {
-    const body = (await req.json()) as { id?: unknown };
+    const body = (await req.json()) as { id?: unknown; note?: unknown };
     id = String(body?.id ?? "");
+    note = body?.note === true;
   } catch {
     return NextResponse.json({ ok: false, error: "That wasn't a paper to read." }, { status: 400 });
   }
   if (!UUID.test(id)) return NextResponse.json({ ok: false, error: "That wasn't a paper to read." }, { status: 400 });
+  if (note) {
+    // AN OFFICE NOTE, ALREADY SAVED (W1-30): the sheet saved it first with no read, so a read that
+    // runs out of time or loses signal can only ever say "Saved, Not Read", never "Not saved".
+    // aiReviewItem is staff-only and reads the row by id AND the caller's company.
+    try {
+      const r = await aiReviewItem(id);
+      return NextResponse.json({ ok: r.ok === true, ...(r.ok ? {} : { error: r.message }) });
+    } catch (e) {
+      reportError("paperwork:read.note", e, { id });
+      return NextResponse.json({ ok: false, error: "the reader didn't answer." });
+    }
+  }
   const res = await readPaperworkItem(id);
   return NextResponse.json(res);
 }

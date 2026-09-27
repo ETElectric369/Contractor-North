@@ -64,16 +64,18 @@ vi.mock("@/lib/open-list-file", async (orig) => {
 import {
   SnapOrNoteSheet,
   closeSnapOrNote,
+  leaveAppForTest,
   openSnapOrNoteForTest,
   resetSnapForTest,
   sendTechPhoto,
   snapNote,
   snapStateForTest,
+  snapStillSending,
   snapTake,
 } from "./snap-or-note";
 
-const STAFF = { ok: true as const, orgId: "org-1", staff: true, punchJobId: null, jobs: [], shopStock: true };
-const TECH = { ok: true as const, orgId: "org-1", staff: false, punchJobId: "j-11", jobs: [{ id: "j-11", label: "13897 Herringbone" }, { id: "j-2", label: "Smith Panel" }], shopStock: true };
+const STAFF = { ok: true as const, userId: "u-office", orgId: "org-1", staff: true, punchJobId: null, jobs: [], shopStock: true };
+const TECH = { ok: true as const, userId: "u-tech", orgId: "org-1", staff: false, punchJobId: "j-11", jobs: [{ id: "j-11", label: "13897 Herringbone" }, { id: "j-2", label: "Smith Panel" }], shopStock: true };
 
 const photo = (name = "receipt.jpg", bytes = "JPEGDATA-1") => new File([bytes], name, { type: "image/jpeg" });
 const pdf = (name = "bill.pdf") => new File(["%PDF-1.7 a bill"], name, { type: "application/pdf" });
@@ -184,23 +186,52 @@ describe("the office's files: one queue, one set of rules", () => {
     closeSnapOrNote();
     expect(snapStateForTest().open).toBe(false);
     expect(lines().some((l) => l.tone === "busy")).toBe(true);
+    // The + asks this before any full reload (which would drop them).
+    expect(snapStillSending()).toBe(2);
     release();
     await running;
+    expect(snapStillSending()).toBe(0);
     expect(lines().map((l) => l.tone)).toEqual(["ok", "ok"]);
     expect(m.addPaperwork).toHaveBeenCalledTimes(2);
   });
 });
 
 describe("notes", () => {
-  it("an office note is saved and read once; a read that fails leaves it saved and says Saved, Not Read", async () => {
+  it("an office note is saved, THEN read on its own call, and the line says where it waits", async () => {
     m.routePastedText.mockResolvedValue({ kind: "note" });
-    m.saveVoiceNote.mockResolvedValue({ ok: true, id: "n-1", read: false });
+    m.saveVoiceNote.mockResolvedValue({ ok: true, id: "n-2" });
+    expect(await snapNote("order more wire nuts")).toBe(true);
+    // The save asks for no read; the read is the reader's own route, by the saved note's id.
+    expect(m.saveVoiceNote).toHaveBeenCalledWith("order more wire nuts");
+    expect(fetched).toEqual(['/api/paperwork/read {"id":"n-2","note":true}']);
+    expect(lines()).toEqual([
+      { name: "order more wire nuts", text: "Saved as a note and read. It waits in Organize under Needs Attention with what the read suggests.", tone: "ok" },
+    ]);
+  });
+
+  it("a read that fails, or never answers (the page's time ran out, the signal dropped), leaves it saved: Saved, Not Read, and the words are NOT handed back", async () => {
+    m.routePastedText.mockResolvedValue({ kind: "note" });
+    m.saveVoiceNote.mockResolvedValue({ ok: true, id: "n-1" });
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new TypeError("network"); }));
     expect(await snapNote("call the inspector Tuesday")).toBe(true);
-    expect(m.saveVoiceNote).toHaveBeenCalledWith("call the inspector Tuesday", { read: true });
-    expect(lines()).toEqual([{ name: "call the inspector Tuesday", text: "Saved, Not Read.", tone: "warn" }]);
-    m.saveVoiceNote.mockResolvedValue({ ok: true, id: "n-2", read: true });
-    await snapNote("order more wire nuts");
-    expect(lines()[1]).toMatchObject({ text: "Saved as a note, and read.", tone: "ok" });
+    expect(lines()).toEqual([{ name: "call the inspector Tuesday", text: "Saved, Not Read. It waits in Organize under Needs Attention.", tone: "warn" }]);
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ ok: false, error: "the reader didn't answer." }))));
+    expect(await snapNote("second")).toBe(true);
+    expect(lines()[1]).toMatchObject({ tone: "warn", text: "Saved, Not Read. It waits in Organize under Needs Attention." });
+    expect(m.saveVoiceNote).toHaveBeenCalledTimes(2);
+  });
+
+  it("a note that only names an invoice number is a note; a pasted paper that won't read is kept as a note and says why", async () => {
+    m.saveVoiceNote.mockResolvedValue({ ok: true, id: "n-5" });
+    m.routePastedText.mockResolvedValue({ kind: "note" });
+    expect(await snapNote("Ask CED about invoice no. 8802110")).toBe(true);
+    expect(lines()[0]).toMatchObject({ tone: "ok", text: expect.stringMatching(/^Saved as a note and read\./) });
+    m.routePastedText.mockResolvedValue({ kind: "note", unread: "8802110: the totals block has no TOTAL DUE line" });
+    expect(await snapNote("INVOICE NO. 8802110\nMERCHANDISE 10.00")).toBe(true);
+    expect(lines()[1]).toMatchObject({
+      tone: "warn",
+      text: "Saved as a note and read. It waits in Organize under Needs Attention with what the read suggests. It didn't import as a supplier's paper: 8802110: the totals block has no TOTAL DUE line",
+    });
   });
 
   it("pasted supplier text is imported instead of saved as a note, and the line says what came in", async () => {
@@ -210,11 +241,22 @@ describe("notes", () => {
     expect(lines()[0]).toMatchObject({ tone: "ok", text: "Imported 2 supplier invoices from the pasted text: Read 2 documents. 2 documents are new." });
   });
 
-  it("a note that didn't save says so, and hands its words back", async () => {
+  it("a save whose answer never came back never claims 'Not saved': it says it can't tell, keeps the words, and says to check Organize first", async () => {
     m.routePastedText.mockResolvedValue({ kind: "note" });
     m.saveVoiceNote.mockRejectedValue(new TypeError("network"));
     expect(await snapNote("don't lose me")).toBe(false);
-    expect(lines()[0]).toMatchObject({ tone: "error", text: "Not saved: the connection dropped. Your words are back in the box." });
+    expect(lines()[0]).toMatchObject({
+      tone: "error",
+      text: "Couldn't tell whether it saved: the connection dropped before the answer came back. Check Organize before you save it again; your words are still in the box.",
+    });
+    expect(fetched).toEqual([]);
+  });
+
+  it("a save that refused says Not saved, and hands its words back", async () => {
+    m.routePastedText.mockResolvedValue({ kind: "note" });
+    m.saveVoiceNote.mockResolvedValue({ ok: false, error: "The note didn't save, so nothing was kept. Try again." });
+    expect(await snapNote("again")).toBe(false);
+    expect(lines()[0]).toMatchObject({ tone: "error", text: "Not saved: The note didn't save, so nothing was kept. Try again." });
   });
 
   it("a tech's note is his own row, never read, never routed to the importer", async () => {
@@ -224,6 +266,58 @@ describe("notes", () => {
     expect(m.saveVoiceNote).toHaveBeenCalledWith("need more 12/2 at Herringbone");
     expect(m.routePastedText).not.toHaveBeenCalled();
     expect(lines()[0]).toMatchObject({ tone: "ok", text: "Saved for the office." });
+    // A tech's note is never read.
+    expect(fetched).toEqual([]);
+  });
+
+  it("the note box has no maxLength: a long paste is never trimmed without a word", () => {
+    const html = renderToStaticMarkup(createElement(SnapOrNoteSheet, { isStaff: true, onClose: () => {} }));
+    expect(html).toMatch(/<textarea[^>]*placeholder="Type A Note…"/);
+    expect(html).not.toMatch(/<textarea[^>]*maxlength/i);
+  });
+});
+
+describe("the next person on this device starts from an empty sheet", () => {
+  it("after the app is left (sign-out), nothing is drawn until a fresh context answers; another person gets none of it", async () => {
+    // The office snaps a supplier bill: its line carries a vendor and an amount.
+    m.addPaperwork.mockResolvedValue({ ok: true, id: "3f2b1c4d-5e6f-4a7b-8c9d-0e1f2a3b4c70", needsRead: true });
+    await snapTake([photo()]);
+    expect(lines()[0].text).toContain("$84.12");
+    // Signed out: the + unmounted. Held: nothing is drawn, and nothing is trusted about who asks.
+    leaveAppForTest();
+    expect(snapStateForTest().held).toBe(true);
+    expect(snapStateForTest().ctx).toBeNull();
+    const held = renderToStaticMarkup(createElement(SnapOrNoteSheet, { isStaff: false, onClose: () => {} }));
+    expect(held).not.toContain("$84.12");
+    expect(held).not.toContain("Home Depot");
+    // A tech signs in on the same tab and taps +: a different person, so everything goes.
+    m.snapContext.mockResolvedValue({ ...TECH, userId: "u-tech-2" });
+    await snapTake([photo("mine.jpg")]);
+    expect(snapStateForTest().held).toBe(false);
+    expect(snapStateForTest().papers).toEqual([]);
+    expect(snapStateForTest().lines).toEqual([]);
+    expect(snapStateForTest().pending.map((p) => p.name)).toEqual(["mine.jpg"]);
+  });
+
+  it("the same person back in the same company gets their lines back", async () => {
+    m.addPaperwork.mockResolvedValue({ ok: true, id: "3f2b1c4d-5e6f-4a7b-8c9d-0e1f2a3b4c71", needsRead: true });
+    await snapTake([photo()]);
+    leaveAppForTest();
+    m.snapContext.mockResolvedValue(STAFF);
+    await snapTake([photo("b.jpg", "B")]);
+    expect(lines().map((l) => l.name)).toEqual(["receipt.jpg", "b.jpg"]);
+  });
+
+  it("a signed-out answer drops everything, and a file still waiting for the last person goes nowhere", async () => {
+    resetSnapForTest(TECH);
+    await snapTake([photo("theirs.jpg")]);
+    leaveAppForTest();
+    m.snapContext.mockResolvedValue({ ok: false, error: "Not signed in." });
+    await snapTake([photo("x.jpg")]);
+    expect(snapStateForTest().pending).toEqual([]);
+    expect(m.captureReceipt).not.toHaveBeenCalled();
+    // Nothing of the tech's is left; the file put in after is said, by name.
+    expect(lines()).toEqual([{ name: "x.jpg", text: "Not added: Not signed in.", tone: "error" }]);
   });
 });
 
@@ -254,12 +348,29 @@ describe("a tech's photo: which job, no read, no amount", () => {
     for (const l of lines()) expect(l.text).not.toMatch(/\$/);
   });
 
-  it("a lost upload says its own sentence, which names no amount", async () => {
+  it("a lost upload names no amount and no office door (Add Cost is the office's), and the photo comes back to wait for another try", async () => {
     await snapTake([photo("t.jpg")]);
+    const id = snapStateForTest().pending[0].id;
     m.captureReceipt.mockResolvedValue({ kind: "lost", tone: "fail", sentence: "Didn't upload (Network error) — try again, or type it in with Add Cost." });
-    await sendTechPhoto(snapStateForTest().pending[0].id, "j-2");
-    expect(lines()[0]).toMatchObject({ tone: "error", text: "Didn't upload (Network error) — try again, or type it in with Add Cost." });
-    expect(lines()[0].text).not.toMatch(/\$/);
+    await sendTechPhoto(id, "j-2");
+    expect(lines()[0]).toMatchObject({
+      tone: "error",
+      text: "Not sent: didn't upload (Network error). It's waiting above: tap Put It On Smith Panel again when you have a bar or two.",
+    });
+    expect(lines()[0].text).not.toMatch(/\$|Add Cost/);
+    // The picture is still here: a camera photo isn't in his library to pick again.
+    expect(snapStateForTest().pending.map((p) => p.name)).toEqual(["t.jpg"]);
+    // A dropped connection the same: back to wait, said in his words.
+    m.captureReceipt.mockRejectedValue(new TypeError("network"));
+    await sendTechPhoto(id, "j-2");
+    expect(lines()).toHaveLength(1);
+    expect(lines()[0].text).toBe("Not sent: the connection dropped. It's waiting above: tap Put It On Smith Panel again when you have a bar or two.");
+    expect(snapStateForTest().pending.map((p) => p.name)).toEqual(["t.jpg"]);
+    // And the next try files it, on the same line.
+    m.captureReceipt.mockResolvedValue({ kind: "filed", docId: "d-9", tone: "ok", why: "not_asked", sentence: "Filed on the job." });
+    await sendTechPhoto(id, "j-2");
+    expect(lines()).toEqual([{ name: "t.jpg", text: "Filed On Smith Panel For The Office.", tone: "ok" }]);
+    expect(snapStateForTest().pending).toEqual([]);
   });
 
   it("a file that isn't a photo is the office's to add, said by name", async () => {

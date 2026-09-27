@@ -67,8 +67,18 @@ type Store = {
   /** Bumped when a file or a note finishes: pages refresh, the sheet reads its cards again. */
   version: number;
   ctx: SnapContext | null;
+  /** Whose lines these are ("<user>:<company>"), from the first context that answered. */
+  owner: string | null;
+  /**
+   * THE APP WAS LEFT (the + unmounted: sign-out goes to /login, outside the app). The store lives
+   * in this page's memory and a sign-out is a soft navigation, so the next person on the device
+   * would be handed the last one's lines (a supplier's name and amount) and waiting photos. Until a
+   * fresh context says it is the same person in the same company, nothing in the store is drawn;
+   * anyone else starts from an empty sheet.
+   */
+  held: boolean;
 };
-const START: Store = { lines: [], papers: [], pending: [], open: false, version: 0, ctx: null };
+const START: Store = { lines: [], papers: [], pending: [], open: false, version: 0, ctx: null, owner: null, held: false };
 let store: Store = START;
 const listeners = new Set<() => void>();
 function put(next: Partial<Store>) {
@@ -90,13 +100,26 @@ function useStore<K extends keyof Store>(key: K): Store[K] {
   );
 }
 
-/** The queue's lines, for any page that draws them (/bills' Sort These). */
+const NO_LINES: SnapLine[] = [];
+const NO_PAPERS: string[] = [];
+const NO_PENDING: PendingPhoto[] = [];
+
+/** The queue's lines, for any page that draws them (/bills' Sort These). None while held. */
 export function useSnapLines(): SnapLine[] {
-  return useStore("lines");
+  const lines = useStore("lines");
+  return useStore("held") ? NO_LINES : lines;
 }
 /** True while a file or a note is still being worked on. */
 export function useSnapBusy(): boolean {
-  return useStore("lines").some((l) => l.tone === "busy");
+  return useSnapLines().some((l) => l.tone === "busy");
+}
+/**
+ * HOW MANY FILES ARE STILL BEING SENT, right now (not a hook: the + asks at the moment of a tap,
+ * before any full reload, which would drop them from this page's memory without a word).
+ */
+export function snapStillSending(): number {
+  // The file being worked on has left the queue; the loop runs while it does.
+  return running ? queue.length + 1 : queue.length;
 }
 /** Clear Finished Lines: every line that has its answer goes; the ones still working stay. */
 export function clearFinishedSnapLines() {
@@ -128,26 +151,62 @@ export function closeSnapOrNote() {
 let queue: { id: number; file: File; jobId?: string | null }[] = [];
 let running: Promise<void> | null = null;
 let seq = 0;
+/** Every line id at or under this belongs to someone who is no longer signed in here: dropped. */
+let floor = 0;
 
 function say(id: number, name: string, text: string, tone: SnapTone) {
+  if (id <= floor) return;
   const line = { id, name, text, tone };
   put({ lines: store.lines.some((l) => l.id === id) ? store.lines.map((l) => (l.id === id ? line : l)) : [...store.lines, line] });
 }
-function remember(paperId: string | null | undefined) {
+function remember(id: number, paperId: string | null | undefined) {
+  if (id <= floor) return;
   if (paperId && !store.papers.includes(paperId)) put({ papers: [paperId, ...store.papers] });
 }
 const finished = () => put({ version: store.version + 1 });
 
+const ownerOf = (ctx: Extract<SnapContext, { ok: true }>) => `${ctx.userId}:${ctx.orgId}`;
+
+/**
+ * THE APP WAS LEFT: forget who was asking and draw nothing until a fresh context answers. The queue
+ * keeps running (a file already sent is saved either way); its lines show again for the same person.
+ */
+function holdTillConfirmed() {
+  if (!store.lines.length && !store.papers.length && !store.pending.length && !store.ctx) return;
+  put({ held: true, ctx: null, open: false });
+}
+
+/**
+ * A DIFFERENT PERSON (OR COMPANY) ON THIS DEVICE: everything the last one left goes, lines, cards,
+ * waiting photos and files not yet sent, and anything still finishing for them says nothing here.
+ */
+function forgetEverything() {
+  floor = seq;
+  queue = [];
+  put({ lines: [], papers: [], pending: [], ctx: null, owner: null, held: false });
+}
+
 /** Who is asking, asked once and kept (the sheet asks again each time it opens, for the punch). */
 async function context(fresh = false): Promise<SnapContext> {
-  if (!fresh && store.ctx?.ok) return store.ctx;
+  if (!fresh && !store.held && store.ctx?.ok) return store.ctx;
   let ctx: SnapContext;
   try {
     ctx = await snapContext();
   } catch {
+    // A dropped connection says nothing about who is signed in: a held store stays held.
     ctx = { ok: false, error: "No connection just now, so nothing could be sent. Check your signal and try again." };
+    put({ ctx: store.held ? null : ctx });
+    return ctx;
   }
-  put({ ctx });
+  if (!ctx.ok) {
+    // Signed out, or no seat: nothing of anyone's is shown to whoever holds the device (and what
+    // they put in themselves after that still gets its line saying why it went nowhere).
+    if (store.owner || store.held) forgetEverything();
+    put({ ctx });
+    return ctx;
+  }
+  if (store.owner && store.owner !== ownerOf(ctx)) forgetEverything();
+  put({ ctx, owner: ownerOf(ctx), held: false });
   return ctx;
 }
 
@@ -194,7 +253,7 @@ async function oneList(id: number, file: File) {
   }
   const added = await addOpenList({ name, sha256: sha, table: read.table, listDate: read.listDate, source: "organize" });
   if (!added.ok) return say(id, name, added.already ? `${added.already} Nothing was added twice.` : (added.error ?? "Not added."), added.already ? "warn" : "error");
-  remember(added.id);
+  remember(id, added.id);
   say(id, name, added.line ?? "Waiting for your answer on its card.", "ok");
 }
 
@@ -252,7 +311,7 @@ async function oneStaff(id: number, file: File, orgId: string) {
     await supabase.storage.from("documents").remove([path]);
     return say(id, name, added.already ? `${added.already} Nothing was added twice.` : (added.error ?? "Not added."), added.already ? "warn" : "error");
   }
-  remember(added.id);
+  remember(id, added.id);
   if (!added.needsRead) {
     return say(id, name, added.line ?? "Supplier documents found in it. Press Add To Supplier Documents on its card.", added.line?.includes("didn't add up") ? "warn" : "ok");
   }
@@ -290,10 +349,17 @@ async function oneTechPhoto(id: number, file: File, jobId: string | null | undef
   try {
     out = await captureReceipt({ orgId: ctx.orgId, jobId: job.id, file: photo, read: false, category: "Receipt" });
   } catch {
-    return say(id, name, "Not sent: the connection dropped. Take it again when you have a bar or two.", "error");
+    out = { kind: "lost", tone: "fail", sentence: "" };
   }
-  // A lost upload's own sentence names no amount (nothing was read).
-  if (out.kind === "lost") return say(id, name, out.sentence, "error");
+  if (out.kind === "lost") {
+    // THE PHOTO COMES BACK TO WAIT, and the sentence is his: captureReceipt's own lost sentence
+    // sends a person to Add Cost, the office's door he never sees, and a camera photo isn't in his
+    // library to pick again. Only the reason is kept (it names no amount: nothing was read).
+    const why = out.sentence.split(" — ")[0].trim().replace(/\.$/, "");
+    if (id > floor) put({ pending: [...store.pending.filter((x) => x.id !== id), { id, file, name }] });
+    const reason = why ? `${why[0].toLowerCase()}${why.slice(1)}` : "the connection dropped";
+    return say(id, name, `Not sent: ${reason}. It's waiting above: tap Put It On ${job.label} again when you have a bar or two.`, "error");
+  }
   say(id, name, `Filed On ${job.label} For The Office.`, "ok");
 }
 
@@ -302,6 +368,8 @@ async function drain() {
     const next = queue.shift()!;
     try {
       const ctx = await context();
+      // Someone else signed in while it waited: it was theirs, and it goes nowhere.
+      if (next.id <= floor) continue;
       if (!ctx.ok) say(next.id, next.file.name || "A file", `Not added: ${ctx.error}`, "error");
       else if (ctx.staff) await oneStaff(next.id, next.file, ctx.orgId);
       else await oneTechPhoto(next.id, next.file, next.jobId, ctx);
@@ -351,11 +419,32 @@ export function dropPendingPhoto(pendingId: number) {
 }
 
 /**
+ * THE READ OF AN OFFICE NOTE THAT IS ALREADY SAVED, on the reader's own route (60 seconds from any
+ * page). Never throws: a read that fails or never answers is only ever "Saved, Not Read".
+ */
+async function readNote(id: string): Promise<boolean> {
+  try {
+    const res = await fetch("/api/paperwork/read", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id, note: true }) });
+    const body = (await res.json().catch(() => null)) as { ok?: boolean } | null;
+    return body?.ok === true;
+  } catch {
+    return false;
+  }
+}
+
+/** Where a saved note waits: the sheet draws papers' cards, never a note's. */
+const NOTE_WAITS = "It waits in Organize under Needs Attention";
+
+/**
  * A NOTE. The office's first goes past the pasted-text router (a supplier's invoices, statement or
  * open list pasted in are imported, not kept as a note); every other note is saved through the one
- * note writer, and read once for the office. The note is saved first: a read that fails leaves it
- * saved, and its line says "Saved, Not Read". Answers true when the words are safe (saved, or
- * imported), so the box can let them go.
+ * note writer, and read once for the office.
+ *
+ * SAVED IS SAVED (audit v994, SI4, for notes): the save is its own quick call and the read is a
+ * second one. A read that fails, runs out of time or loses signal leaves the note saved and its line
+ * says "Saved, Not Read"; the words are never handed back for a second copy. Only a save whose
+ * answer never came back is unknown, and the line says exactly that. Answers true when the words are
+ * safe (saved, or imported), so the box can let them go.
  */
 export async function snapNote(text: string): Promise<boolean> {
   const clean = String(text ?? "").trim();
@@ -369,8 +458,8 @@ export async function snapNote(text: string): Promise<boolean> {
       say(id, name, `Not saved: ${ctx.error}`, "error");
       return false;
     }
+    let route: PastedTextRoute = { kind: "note" };
     if (ctx.staff) {
-      let route: PastedTextRoute = { kind: "note" };
       try {
         route = await routePastedText(clean);
       } catch {
@@ -380,20 +469,37 @@ export async function snapNote(text: string): Promise<boolean> {
         say(id, name, route.line, route.ok ? "ok" : "error");
         return route.ok;
       }
-      const res = await saveVoiceNote(clean, { read: true });
-      if (!res.ok) {
-        say(id, name, `Not saved: ${res.error ?? "the note didn't save."}`, "error");
-        return false;
-      }
-      say(id, name, res.read ? "Saved as a note, and read." : "Saved, Not Read.", res.read ? "ok" : "warn");
-      return true;
     }
-    const res = await saveVoiceNote(clean);
-    if (!res.ok) {
+    // A pasted supplier paper that wouldn't read is kept as a note, and the line says why.
+    const unread = route.kind === "note" && route.unread ? ` It didn't import as a supplier's paper: ${route.unread}` : "";
+    let res: Awaited<ReturnType<typeof saveVoiceNote>>;
+    try {
+      res = await saveVoiceNote(clean);
+    } catch {
+      say(
+        id,
+        name,
+        "Couldn't tell whether it saved: the connection dropped before the answer came back. Check Organize before you save it again; your words are still in the box.",
+        "error",
+      );
+      return false;
+    }
+    if (!res.ok || !res.id) {
       say(id, name, `Not saved: ${res.error ?? "the note didn't save."}`, "error");
       return false;
     }
-    say(id, name, "Saved for the office.", "ok");
+    if (!ctx.staff) {
+      say(id, name, "Saved for the office.", "ok");
+      return true;
+    }
+    say(id, name, "Saved. Reading…", "busy");
+    const read = await readNote(res.id);
+    say(
+      id,
+      name,
+      read ? `Saved as a note and read. ${NOTE_WAITS} with what the read suggests.${unread}` : `Saved, Not Read. ${NOTE_WAITS}.${unread}`,
+      read && !unread ? "ok" : "warn",
+    );
     return true;
   } catch {
     say(id, name, "Not saved: the connection dropped. Your words are back in the box.", "error");
@@ -408,8 +514,13 @@ export function resetSnapForTest(ctx: SnapContext | null = null) {
   queue = [];
   running = null;
   seq = 0;
-  store = { ...START, ctx };
+  floor = 0;
+  store = { ...START, ctx, owner: ctx?.ok ? ownerOf(ctx) : null };
   listeners.forEach((l) => l());
+}
+/** Tests only: the + unmounted (the app was left, as a sign-out does) or mounted again. */
+export function leaveAppForTest() {
+  holdTillConfirmed();
 }
 export function snapStateForTest() {
   return store;
@@ -447,8 +558,13 @@ export function SnapOrNoteProvider({ isStaff }: { isStaff: boolean }) {
     };
     window.addEventListener(SNAP_OPEN_EVENT, onOpen);
     window.addEventListener(SNAP_FILES_EVENT, onFiles);
+    // BACK IN THE APP after leaving it (a sign-out and a sign-in): whose lines are these? Nothing
+    // is drawn until the answer says the same person, in the same company.
+    if (store.held) void context(true);
     return () => {
       wired -= 1;
+      // The app was left (the + is gone from every page: /login is outside the app).
+      if (wired === 0) holdTillConfirmed();
       setHolder(false);
       window.removeEventListener(SNAP_OPEN_EVENT, onOpen);
       window.removeEventListener(SNAP_FILES_EVENT, onFiles);
@@ -520,9 +636,13 @@ function touchDevice(): boolean {
  * and each paper's card as soon as it has one.
  */
 export function SnapOrNoteSheet({ isStaff, onClose }: { isStaff: boolean; onClose: () => void }) {
-  const lines = useStore("lines");
-  const papers = useStore("papers");
-  const pending = useStore("pending");
+  // Nothing of the last person's is drawn until a fresh context says it is still them (held).
+  const lines = useSnapLines();
+  const held = useStore("held");
+  const allPapers = useStore("papers");
+  const allPending = useStore("pending");
+  const papers = held ? NO_PAPERS : allPapers;
+  const pending = held ? NO_PENDING : allPending;
   const ctx = useStore("ctx");
   const version = useStore("version");
   const dragging = useFileDragActive();
@@ -647,7 +767,9 @@ export function SnapOrNoteSheet({ isStaff, onClose }: { isStaff: boolean; onClos
                 }
               }}
               enterKeyHint="send"
-              maxLength={20000}
+              // NO maxLength: a browser trims an over-long paste without a word, and this box is
+              // the one place a month of pasted supplier invoices goes in (the importer reads them
+              // all; the server takes far more than any paste).
               placeholder="Type A Note…"
               aria-label="Type A Note"
               className="max-h-40 min-h-11 flex-1 overflow-y-auto"
@@ -757,7 +879,7 @@ export function SnapOrNoteSheet({ isStaff, onClose }: { isStaff: boolean; onClos
           {!lines.length && !pending.length && !(rows?.ok && rows.items.length) && (
             <p className="text-sm text-slate-500">
               {isStaff
-                ? "Snap a receipt, choose a bill's PDF or a supplier's list, or type a note. Each one is read and waits here for your answer; nothing is filed until you tap one."
+                ? "Snap a receipt, choose a bill's PDF or a supplier's list, or type a note. Each paper is read and waits here for your answer; a note is read and waits in Organize. Nothing is filed until you tap an answer."
                 : "Snap a receipt for the job you're on, or type a note for the office."}
             </p>
           )}

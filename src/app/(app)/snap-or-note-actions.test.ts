@@ -116,10 +116,28 @@ describe("routePastedText: pasted supplier text is imported, not kept as a note"
   });
 
   it("a plain note, even one naming an invoice number, stays a note and never reaches the importer", async () => {
-    for (const note of ["call the inspector Tuesday", "ask CED about invoice 8802-1101363, it looks high"]) {
+    for (const note of [
+      "call the inspector Tuesday",
+      "ask CED about invoice 8802-1101363, it looks high",
+      // The parser anchors on "invoice no. <number>" at a line's end (and on a bare "invoice" with
+      // the number under it) and REFUSES it for having no totals block. A refusal is not a paper:
+      // these were sent to the importer, refused, and handed back to the box on every Save.
+      "Ask CED about invoice no. 8802110",
+      "Ask CED about invoice no. 8802-1101363",
+      "pay the invoice\n88021108",
+    ]) {
       expect(await routePastedText(note)).toEqual({ kind: "note" });
     }
     expect(imports.importCedInvoices).not.toHaveBeenCalled();
+  });
+
+  it("a pasted invoice that doesn't read (its totals don't add up) is kept as a note, and says why, never bounced back", async () => {
+    // Break the invoice's arithmetic: the parser refuses it, so the importer would read nothing.
+    const broken = TIMBER_CREEK.replace(/TOTAL DUE[^\n]*/, "TOTAL DUE 999,999.99");
+    const res = await routePastedText(broken);
+    expect(imports.importCedInvoices).not.toHaveBeenCalled();
+    expect(res.kind).toBe("note");
+    expect((res as { unread?: string }).unread).toMatch(/\S/);
   });
 
   it("a crew member's text is never routed (the importer is the office's): it is a note", async () => {
@@ -146,6 +164,7 @@ describe("snapContext: who is asking, and a tech's jobs as labels only", () => {
     const ctx = await snapContext();
     expect(ctx).toEqual({
       ok: true,
+      userId: "tech-1",
       orgId: "org-1",
       staff: false,
       punchJobId: "j-9",
@@ -171,7 +190,7 @@ describe("snapContext: who is asking, and a tech's jobs as labels only", () => {
       staff: true,
       name: "Erik",
     };
-    expect(await snapContext()).toEqual({ ok: true, orgId: "org-1", staff: true, punchJobId: null, jobs: [], shopStock: true });
+    expect(await snapContext()).toEqual({ ok: true, userId: "u", orgId: "org-1", staff: true, punchJobId: null, jobs: [], shopStock: true });
     state.member = {
       supabase: fake({
         "organizations.select": [{ data: { settings: {} }, error: null }],
@@ -193,39 +212,23 @@ describe("snapContext: who is asking, and a tech's jobs as labels only", () => {
   });
 });
 
-describe("saveVoiceNote: the one note writer, and its read for the office", () => {
-  it("saves the note FIRST, with .select('id'), and a read that fails leaves it saved and says Not Read", async () => {
+describe("saveVoiceNote: the one note writer, and it only saves", () => {
+  it("saves the note with .select('id') and answers with its id; nothing else runs (the read is its own call)", async () => {
     state.aiThrows = true;
-    state.client = fake({
-      "organized_items.insert": [{ data: [{ id: "note-1" }], error: null }],
-      "organized_items.select": [{ data: { id: "note-1", kind: "note", status: "needs_review", title: "call the inspector", summary: "call the inspector", org_id: "org-1", proposal: null }, error: null }],
-      "jobs.select": [{ data: [], error: null }],
-    });
+    state.client = fake({ "organized_items.insert": [{ data: [{ id: "note-1" }], error: null }] });
     state.staff = { supabase: state.client, userId: "user-1", orgId: "org-1" };
-    const res = await saveVoiceNote("call the inspector", { read: true });
-    expect(res).toEqual({ ok: true, id: "note-1", read: false });
+    const res = await saveVoiceNote("call the inspector");
+    expect(res).toEqual({ ok: true, id: "note-1" });
     const ins = calls.find((c) => c.table === "organized_items" && c.verb === "insert")!;
     expect(ins.selected).toBe(true);
     expect(ins.payload).toMatchObject({ kind: "note", summary: "call the inspector", status: "needs_review", created_by: "user-1" });
-  });
-
-  it("a read that answers says so; no read asked (Nort, a tech) reads nothing", async () => {
-    state.client = fake({
-      "organized_items.insert": [{ data: [{ id: "note-2" }], error: null }, { data: [{ id: "note-3" }], error: null }],
-      "organized_items.select": [{ data: { id: "note-2", kind: "note", status: "needs_review", title: "x", summary: "x", org_id: "org-1", proposal: null }, error: null }],
-      "jobs.select": [{ data: [], error: null }],
-      "organized_items.update": [{ data: [{ id: "note-2" }], error: null }],
-    });
-    state.staff = { supabase: state.client, userId: "user-1", orgId: "org-1" };
-    expect(await saveVoiceNote("x", { read: true })).toEqual({ ok: true, id: "note-2", read: true });
-    calls = [];
-    expect(await saveVoiceNote("y")).toEqual({ ok: true, id: "note-3" });
+    // No model call, no second read: a lost answer can never be a note that saved but says it didn't.
     expect(calls.map((c) => `${c.table}.${c.verb}`)).toEqual(["organized_items.insert"]);
   });
 
   it("an insert that comes back with no row did not land, and says so (the silent-write law)", async () => {
     state.client = fake({ "organized_items.insert": [{ data: [], error: null }] });
-    const res = await saveVoiceNote("lost words", { read: true });
+    const res = await saveVoiceNote("lost words");
     expect(res).toEqual({ ok: false, error: "The note didn't save, so nothing was kept. Try again." });
   });
 
