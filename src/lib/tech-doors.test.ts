@@ -141,8 +141,8 @@ describe("the job's side doors", () => {
 });
 
 describe("pure rules", () => {
-  it("the quick-add menu gives a tech only New Task", () => {
-    expect(ACTIONS.filter((a) => !a.staffOnly).map((a) => a.label)).toEqual(["New Reminder"]);
+  it("the + gives a tech no typed verb: his + is Snap Or Note (W1-11)", () => {
+    expect(ACTIONS.filter((a) => !a.staffOnly).map((a) => a.label)).toEqual([]);
   });
 
   it("a tech's appointment row only opens", () => {
