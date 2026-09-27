@@ -3,6 +3,8 @@ import { dbError } from "@/lib/db-error";
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { isStaffRole } from "@/lib/actions/perms";
+import { isMissingColumn } from "@/lib/job-tasks";
 
 export type Result = { ok: boolean; error?: string };
 
@@ -11,12 +13,28 @@ export type Result = { ok: boolean; error?: string };
  *  its My-Day meaning (Office door split, six-rank flagged-undated exclusion). */
 export type TaskCategory = string;
 
-function revalidateTaskViews(category?: string | null, jobId?: string | null) {
+// The Reminders page (/tasks), My Day, and the job whose list changed. (The /tasks/<category> pages
+// are gone: /tasks is the one Reminders page now, 0358.)
+function revalidateTaskViews(_category?: string | null, jobId?: string | null) {
   revalidatePath("/tasks");
   revalidatePath("/planner");
-  if (category) revalidatePath(`/tasks/${category}`);
   if (jobId) revalidatePath(`/jobs/${jobId}`);
 }
+
+/** A JOB'S TASK BELONGS TO THE JOB (Erik, 2026-09-26: "a crew leader can assign them verbally").
+ *  Said, never silently dropped, wherever a name meets a job. */
+const JOB_TASK_HAS_NO_ASSIGNEE =
+  "A job's task belongs to the job, not one person: the crew lead hands it out. Leave the name off, or make it a Reminder for them with no job.";
+
+/** 0358's delete rule, in words, for the tap that crossed it. */
+const TASK_DELETE_RULE = "Only the office or whoever added this task can delete it. You can still check it off.";
+
+/** A storage path a task may carry: a company folder first ({org}/…), nothing climbing out. The
+ *  database checks it is THIS company's folder (0358's task_photo_path_ok); this checks the shape. */
+function photoPathShapeOk(p: string): boolean {
+  return /^[0-9a-f-]{36}\/[^/]/.test(p) && !/(^|\/)\.\.(\/|$)/.test(p);
+}
+const PHOTO_NOT_OURS = "That photo isn't in this company's job files, so it can't go on the task.";
 
 /**
  * THE SILENT-WRITE LAW, applied to every task write. PostgREST answers a zero-row UPDATE or
@@ -34,9 +52,8 @@ async function zeroRowsReason(
   verb: "change" | "delete",
 ): Promise<string> {
   const { data } = await supabase.from("tasks").select("id").eq("id", id).maybeSingle();
-  return data
-    ? `You don't have permission to ${verb} that task.`
-    : "Couldn't find that task. It may already be deleted. Refresh the page to see the current list.";
+  if (data) return verb === "delete" ? TASK_DELETE_RULE : "You don't have permission to change that task.";
+  return "Couldn't find that task. It may already be deleted. Refresh the page to see the current list.";
 }
 
 export type CreateTaskResult = Result & {
@@ -46,6 +63,9 @@ export type CreateTaskResult = Result & {
   duplicate?: boolean;
   /** Voice/toast read-back ("Already on the list: …") so the collapse is never silent. */
   speak?: string;
+  /** The task saved but its photo couldn't be put on it (a database without 0358): the photo is on
+   *  the job's Photos tab, and the caller says so. */
+  photoSkipped?: boolean;
 };
 
 export async function createTask(input: {
@@ -60,6 +80,8 @@ export async function createTask(input: {
   parent_id?: string | null;
   focus_date?: string | null;
   tags?: string[] | null;
+  /** A job task made from a photo: the photo's storage path (documents bucket, this company's). */
+  photo_path?: string | null;
 }): Promise<CreateTaskResult> {
   const supabase = await createClient();
   const {
@@ -68,6 +90,26 @@ export async function createTask(input: {
   if (!user) return { ok: false, error: "Not signed in." };
   const title = input.title.trim();
   if (!title) return { ok: false, error: "Title is required." };
+  if (input.job_id && input.assigned_to) return { ok: false, error: JOB_TASK_HAS_NO_ASSIGNEE };
+  const photoPath = input.photo_path?.trim() || null;
+  if (photoPath && !input.job_id) return { ok: false, error: "A photo goes on a job's task. Pick the job first." };
+  if (photoPath && !photoPathShapeOk(photoPath)) return { ok: false, error: PHOTO_NOT_OURS };
+
+  // A JOB TASK NAMES ONE OF THIS COMPANY'S JOBS. 0358 makes the database say it too; this says it on
+  // a database without 0358, where the policy only checked the company (the RLS-scoped jobs read
+  // returns nothing for another company's id or a stray one).
+  if (input.job_id) {
+    const { data: j } = await supabase.from("jobs").select("id").eq("id", input.job_id).maybeSingle();
+    if (!j) return { ok: false, error: "That job isn't available. Refresh and pick it again." };
+  }
+  // A STEP LIVES WHERE ITS TASK LIVES: a step of a job's task is on that job (so the crew sees it),
+  // a step of a Reminder is private with it. Unless the caller named the job itself.
+  let jobId: string | null = input.job_id || null;
+  if (input.parent_id && !jobId) {
+    const { data: parent } = await supabase.from("tasks").select("job_id").eq("id", input.parent_id).maybeSingle();
+    if (!parent) return { ok: false, error: "Couldn't find the task this step goes under. Refresh and try again." };
+    jobId = (parent.job_id as string | null) ?? null;
+  }
 
   // DUP-CHECK (the Nort "PUD follow-up (2nd check)" class): same trimmed title
   // (case-insensitive — ilike with wildcards escaped so it's an exact match, not a
@@ -88,7 +130,7 @@ export async function createTask(input: {
   dupQ = input.parent_id ? dupQ.eq("parent_id", input.parent_id) : dupQ.is("parent_id", null);
   // …and same JOB: a same-title task for a DIFFERENT job is real work, not a twin
   // ("inspection" on two jobs). Only same-job (or both jobless) collapses.
-  dupQ = input.job_id ? dupQ.eq("job_id", input.job_id) : dupQ.is("job_id", null);
+  dupQ = jobId ? dupQ.eq("job_id", jobId) : dupQ.is("job_id", null);
   const { data: dup } = await dupQ.limit(1).maybeSingle();
   if (dup) {
     const openedOn = new Date(dup.created_at as string).toLocaleDateString("en-US", {
@@ -107,26 +149,34 @@ export async function createTask(input: {
   // Explicit key on purpose: blank → null (uncategorized), never the DB's
   // 'operations' default — that default exists only for paths omitting the column.
   const category = input.category?.trim() || null;
-  const { data: created, error } = await supabase
-    .from("tasks")
-    .insert({
-      title,
-      category,
-      job_id: input.job_id || null,
-      due_date: input.due_date || null,
-      priority: input.priority ?? 0,
-      assigned_to: input.assigned_to || null,
-      notes: input.notes?.trim() || null,
-      parent_id: input.parent_id || null,
-      focus_date: input.focus_date || null,
-      tags: tags.length ? tags : null,
-      created_by: user.id,
-    })
-    .select("id")
-    .single();
+  // created_by is the server's since 0358 (stamp_task_who stamps auth.uid()); sent anyway so a
+  // database without 0358 records the same person.
+  const row: Record<string, unknown> = {
+    title,
+    category,
+    job_id: jobId,
+    due_date: input.due_date || null,
+    priority: input.priority ?? 0,
+    assigned_to: input.assigned_to || null,
+    notes: input.notes?.trim() || null,
+    parent_id: input.parent_id || null,
+    focus_date: input.focus_date || null,
+    tags: tags.length ? tags : null,
+    created_by: user.id,
+  };
+  if (photoPath) row.photo_path = photoPath;
+  let { data: created, error } = await supabase.from("tasks").insert(row).select("id").single();
+  // BEFORE 0358 there is no photo column: the task still saves, without the photo, and the caller
+  // says the photo is on the job's Photos tab. Never a lost task over a missing column.
+  let photoSkipped = false;
+  if (error && photoPath && isMissingColumn(error)) {
+    delete row.photo_path;
+    ({ data: created, error } = await supabase.from("tasks").insert(row).select("id").single());
+    photoSkipped = !error;
+  }
   if (error) return { ok: false, error: dbError(error) };
-  revalidateTaskViews(category, input.job_id);
-  return { ok: true, id: created?.id as string | undefined };
+  revalidateTaskViews(category, jobId);
+  return { ok: true, id: created?.id as string | undefined, ...(photoSkipped ? { photoSkipped } : {}) };
 }
 
 export type ToggleTaskResult = Result & {
@@ -230,6 +280,12 @@ export async function updateTask(
   if (patch.due_date !== undefined) clean.due_date = patch.due_date || null;
   if (patch.focus_date !== undefined) clean.focus_date = patch.focus_date || null;
   if (patch.priority !== undefined) clean.priority = patch.priority;
+  if (patch.assigned_to) {
+    // A job's task has no assignee (0358): refused in words, never stored beside the job.
+    const { data: cur } = await supabase.from("tasks").select("job_id").eq("id", id).maybeSingle();
+    const landsOnJob = patch.job_id !== undefined ? !!clean.job_id : !!cur?.job_id;
+    if (landsOnJob) return { ok: false, error: JOB_TASK_HAS_NO_ASSIGNEE };
+  }
   if (patch.assigned_to !== undefined) {
     // Persist an assignee only if they're actually in the caller's org (the RLS-scoped
     // profiles read returns nothing for a foreign/crafted id) — never a cross-org id.
@@ -261,11 +317,61 @@ export async function deleteTask(
   opts?: { category?: string | null; jobId?: string | null },
 ): Promise<Result> {
   const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Not signed in." };
+  // THE DELETE RULE (Erik, 2026-09-26): a job's task is deleted by the office or whoever added it; a
+  // tech checks an office task off, never deletes it. 0358's tasks_delete policy is the boundary;
+  // this says it first, and holds on a database without 0358.
+  const { data: row } = await supabase.from("tasks").select("id, job_id, created_by").eq("id", id).maybeSingle();
+  if (!row) return { ok: false, error: await zeroRowsReason(supabase, id, "delete") };
+  if (row.job_id && row.created_by !== user.id) {
+    const { data: me } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
+    if (!isStaffRole((me as { role?: string } | null)?.role ?? "")) return { ok: false, error: TASK_DELETE_RULE };
+  }
   // A zero-row delete used to come back ok and the tab said "Task deleted" over a task that
   // was still there; see zeroRowsReason. Children go with the parent (parent_id cascades).
   const { data: gone, error } = await supabase.from("tasks").delete().eq("id", id).select("id");
   if (error) return { ok: false, error: dbError(error) };
   if (!gone?.length) return { ok: false, error: await zeroRowsReason(supabase, id, "delete") };
   revalidateTaskViews(opts?.category, opts?.jobId);
+  return { ok: true };
+}
+
+/**
+ * THE PHOTO OF THE FINISHED WORK (optional and quiet: Erik wanted photos that BECOME tasks; a done
+ * photo is never required). The file is already a job photo (uploadJobPhotos); this puts its path on
+ * the checked-off task. Only on a done task, and reopening one clears it (0358). Before 0358 there is
+ * no such column, and the sentence says the photo is on the Photos tab.
+ */
+export async function setTaskDonePhoto(id: string, path: string, opts?: { jobId?: string | null }): Promise<Result> {
+  const supabase = await createClient();
+  const p = String(path ?? "").trim();
+  if (!p || !photoPathShapeOk(p)) return { ok: false, error: PHOTO_NOT_OURS };
+  const { data: hit, error } = await supabase
+    .from("tasks")
+    .update({ done_photo_path: p })
+    .eq("id", id)
+    .eq("status", "done")
+    .select("id");
+  if (error) {
+    if (isMissingColumn(error)) {
+      return { ok: false, error: "The photo is on the job's Photos tab. Photos on tasks start after the next database update." };
+    }
+    return { ok: false, error: dbError(error) };
+  }
+  if (!hit?.length) {
+    const { data: t } = await supabase.from("tasks").select("status").eq("id", id).maybeSingle();
+    if (!t) return { ok: false, error: "Couldn't find that task. It may already be deleted. Refresh the page to see the current list." };
+    return {
+      ok: false,
+      error:
+        t.status !== "done"
+          ? "That task isn't checked off any more, so the photo stays on the Photos tab."
+          : "You don't have permission to change that task.",
+    };
+  }
+  revalidateTaskViews(null, opts?.jobId);
   return { ok: true };
 }
