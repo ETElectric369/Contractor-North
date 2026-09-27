@@ -8,9 +8,14 @@ import {
   hoursCompareWords,
   invoiceCanHoldNoJobHours,
   jobAlreadyBilledDoors,
+  entriesForLine,
   lineLabel,
+  linePersonNote,
+  markPersonRefusal,
   markedSentence,
+  monthDay,
   personOfLine,
+  setLinePeople,
   precheckHours,
   preselectLine,
   jobCanHold,
@@ -227,6 +232,86 @@ describe("the hours a line charged: its person, up to the day the bill was WRITT
     const lump = precheckHours(erik, { import_key: "labor:p-erik", description: "Labor — Erik", unit: "ea", quantity: 1, heldHours: 6 }, "2026-09-18T20:00:00Z", TZ);
     expect(lump.checked).toEqual([]);
     expect(lump.covered).toBe(true);
+  });
+});
+
+/**
+ * WHOSE HOURS A LINE HOLDS (0361): a line that names one person, by its key or by its words over the
+ * WHOLE company (lib/labor-claim-owner, the rule the database holds), is offered only that person's
+ * shifts, and Mark refuses anyone else's in the database's own words. A crew line takes anyone's.
+ */
+describe("whose hours a line holds (0361)", () => {
+  const TZ = "America/Los_Angeles";
+  /** JP's id is a uuid: a labor key names a person only by one (lib/labor-claim-owner, as 0361 reads it). */
+  const JP = "0a1b2c3d-0000-4000-8000-00000000000a";
+  const TEAM = [
+    { id: "p-erik", name: "Erik Taylor" },
+    { id: "p-brian", name: "Brian Taylor" },
+    { id: JP, name: "JP Prince" },
+  ];
+  const e = (id: string, person: string, name: string, clockIn: string, hours = 8): AbEntry => ({ id, person, name, clockIn, hours });
+  const erikOnly = [e("e1", "p-erik", "Erik Taylor", "2026-09-11T15:00:00Z")];
+  const lines = (): AbInvoice[] => [
+    inv({
+      lines: [
+        line({ id: "brian", description: "Labor - Brian", unit: "hr", quantity: 13 }),
+        line({ id: "crew", description: "Labor - ET Electric hourly with 2 guys", unit: "hr", quantity: 23 }),
+        line({ id: "two", description: "Labor - Erik & Brian", unit: "hr", quantity: 6 }),
+        line({ id: "keyed", description: "Labor", import_source: "labor", import_key: `labor:${JP}:2`, edited: true }),
+        line({ id: "sen", description: "Labor - Eriksen", unit: "hr", quantity: 2 }),
+      ],
+    }),
+  ];
+
+  it("every line says whose it is, read against the whole company, not only the people with open shifts", () => {
+    const invoices = lines();
+    setLinePeople(invoices, TEAM);
+    const got = Object.fromEntries(invoices[0].lines.map((l) => [l.id, [l.person, l.personName]]));
+    expect(got).toEqual({
+      brian: ["p-brian", "Brian Taylor"],
+      crew: [null, null],
+      two: [null, null],
+      keyed: [JP, "JP Prince"],
+      sen: [null, null],
+    });
+    // Brian has no open shift here: his line is still his, so Erik's shift is never offered for it,
+    // and nothing is ticked (the old reading, by the open shifts' people, named nobody and listed Erik).
+    const brian = invoices[0].lines[0];
+    expect(entriesForLine(erikOnly, brian)).toEqual([]);
+    expect(personOfLine(brian, erikOnly)).toBe("p-brian");
+    expect(precheckHours(erikOnly, brian, "2026-09-18T20:00:00Z", TZ).checked).toEqual([]);
+  });
+
+  it("a crew line, or a line not judged, lists every shift", () => {
+    const both = [...erikOnly, e("b1", "p-brian", "Brian Taylor", "2026-09-10T15:00:00Z")];
+    expect(entriesForLine(both, { person: null }).map((x) => x.id)).toEqual(["e1", "b1"]);
+    expect(entriesForLine(both, {}).map((x) => x.id)).toEqual(["e1", "b1"]);
+    expect(entriesForLine(both, null).map((x) => x.id)).toEqual(["e1", "b1"]);
+    expect(entriesForLine(both, { person: "p-brian" }).map((x) => x.id)).toEqual(["b1"]);
+  });
+
+  it("says why only one person's hours are listed", () => {
+    expect(linePersonNote({ description: "Labor - Brian", person: "p-brian", personName: "Brian Taylor" })).toBe(
+      `"Labor - Brian" names Brian Taylor, so only Brian Taylor's hours are listed here. Another person's hours go on their own line, or on a crew line that names nobody.`,
+    );
+    expect(linePersonNote({ description: "Labor - ET Electric hourly with 2 guys", person: null })).toBeNull();
+  });
+
+  it("Mark's refusal is the database's sentence, naming the first shift that isn't the line's person's", () => {
+    const shifts = [
+      { id: "t2", person: "p-erik", name: "Erik Taylor", clockIn: "2026-09-12T15:00:00Z" },
+      { id: "t1", person: "p-erik", name: "Erik Taylor", clockIn: "2026-09-11T16:00:00+00:00" },
+      { id: "t0", person: "p-brian", name: "Brian Taylor", clockIn: "2026-09-10T15:00:00Z" },
+    ];
+    const brianLine = { description: "Labor - Brian", invoiceNumber: "INV-059", person: "p-brian", personName: "Brian Taylor" };
+    expect(markPersonRefusal(brianLine, shifts, TZ)).toBe(
+      `"Labor - Brian" on INV-059 names Brian Taylor, so it holds only Brian Taylor's hours, not Erik Taylor's 9/11 shift. Nothing was changed.`,
+    );
+    expect(markPersonRefusal(brianLine, [shifts[2]], TZ)).toBeNull();
+    expect(markPersonRefusal({ ...brianLine, person: null }, shifts, TZ)).toBeNull();
+    // The company's day, not UTC's: 11 PM on 9/10 in Truckee is 6 AM on 9/11 UTC.
+    expect(markPersonRefusal(brianLine, [{ id: "late", person: "p-erik", name: "Erik Taylor", clockIn: "2026-09-11T06:00:00Z" }], TZ)).toMatch(/Erik Taylor's 9\/10 shift/);
+    expect(monthDay("2026-01-05T20:00:00Z", TZ)).toBe("1/5");
   });
 });
 
