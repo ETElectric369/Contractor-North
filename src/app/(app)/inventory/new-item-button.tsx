@@ -52,7 +52,7 @@ export function NewItemButton() {
             <div className="grid grid-cols-2 gap-3">
               <div className="col-span-2">
                 <Label htmlFor="name">Name *</Label>
-                <Input id="name" name="name" required placeholder="The name on the shelf" />
+                <Input id="name" name="name" required placeholder="The name the crew calls it" />
               </div>
               <div>
                 <Label htmlFor="part_number">Part #</Label>
@@ -70,7 +70,7 @@ export function NewItemButton() {
               </div>
               <div>
                 <Label htmlFor="category">Category</Label>
-                <Input id="category" name="category" placeholder="A group, like the shelf it sits on" />
+                <Input id="category" name="category" placeholder="A group, like the kind of thing it is" />
               </div>
               <div>
                 <Label htmlFor="reorder_point">Reorder At</Label>
