@@ -1299,8 +1299,19 @@ export async function undoPaperwork(id: string): Promise<Result & { message?: st
     // THE TASK A NOTE BECAME comes off the list first; a task already gone is simply gone.
     let q = supabase.from("tasks").delete().eq("id", p.filed.taskId);
     if (ctx.orgId) q = q.eq("org_id", ctx.orgId);
-    const { error: taskErr } = await q.select("id");
+    const { data: goneTask, error: taskErr } = await q.select("id");
     if (taskErr) return { ok: false, error: `${dbError(taskErr)} The task is still on the list, so nothing was undone.` };
+    // The task is its maker's private Reminder (0358): for anyone else zero rows can mean "still there,
+    // just not yours to see", never provably "already gone". Say so, and undo nothing.
+    const taskBy = p.filed.taskBy ?? null;
+    if (!goneTask?.length && taskBy && taskBy !== ctx.userId) {
+      const { data: maker } = await supabase.from("profiles").select("full_name").eq("id", taskBy).maybeSingle();
+      const name = (maker as { full_name?: string | null } | null)?.full_name?.trim();
+      return {
+        ok: false,
+        error: `This note became ${name ? `${name}'s` : "another person's"} Reminder, and only they can take it off, so they have to press Undo. Nothing was undone.`,
+      };
+    }
   } else if (!tied) {
     const down = await tearDownFiling(supabase, ctx.orgId, item, {
       tail: "Void that invoice, or take its materials lines off, then press Undo again. Nothing was undone.",
@@ -1905,7 +1916,10 @@ export async function makeTaskFromPaper(id: string): Promise<Result & { message?
     .update({
       status: "filed",
       category: "Task",
-      proposal: { ...p, filed: { how: "task", taskId: String(task.id), category: item.category ?? null } } satisfies PaperProposal,
+      proposal: {
+        ...p,
+        filed: { how: "task", taskId: String(task.id), taskBy: ctx.userId, category: item.category ?? null },
+      } satisfies PaperProposal,
     })
     .eq("id", id)
     .eq("org_id", ctx.orgId)
