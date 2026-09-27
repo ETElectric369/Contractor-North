@@ -797,6 +797,17 @@ describe("the card and the person's answers", () => {
     expect(stranger.refused[0]).toMatch(/isn't on your crew/);
   });
 
+  it("two deposits on one invoice are held to its balance together", () => {
+    const dl = readBankTable(parseCSV(`Date,Description,Amount\n09/10/2026,DEPOSIT,500.00\n09/12/2026,DEPOSIT,500.00\n`), "x.csv", hash)!;
+    const books = ORG_BOOKS({ invoices: [{ id: "inv-9", number: "INV-9", balanceCents: 50000 }] });
+    const plan = planBankDownload(dl, books);
+    expect(plan.groups.map((g) => g.guess)).toEqual(["invoice:inv-9", "invoice:inv-9"]);
+    const both = validPicks(Object.fromEntries(plan.groups.map((g) => [g.id, "invoice:inv-9"])), plan, books);
+    expect(both.ok.size).toBe(0);
+    expect(both.refused).toEqual(["2 deposits ($1,000.00) are more than the $500.00 open on INV-9"]);
+    expect(validPicks({ [plan.groups[0].id]: "invoice:inv-9" }, plan, books).ok.size).toBe(1);
+  });
+
   it("choice ids read back exactly, and a kind rides only on Gas & Truck", () => {
     for (const id of ["cost:Gas & Truck:fuel", "cost:Fees", "draw", "personal", "petty_cash", "not_cost", "other_income", "not_income", "crew:abcdef12", "supplier:abcdef12", "invoice:abcdef12"]) {
       expect(choiceId(parseChoiceId(id)!)).toBe(id);

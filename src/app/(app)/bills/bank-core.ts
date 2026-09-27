@@ -611,13 +611,16 @@ export async function applyBankCore(
   }
 
   const touchedInvoices = new Set<string>();
+  /** Cents this Apply put on each invoice so far: amount_paid moves only at the recalc after the
+   *  loop, so a second deposit on the same invoice is held to what the first left open. */
+  const putOn = new Map<string, number>();
   for (const w of work.filter((x) => written(x) && x.choice?.choice === "invoice")) {
     const c = w.choice as Extract<BankChoice, { choice: "invoice" }>;
     // THE recordPayment GUARDS: this company's invoice, open, and never more than its balance.
     const { data: inv } = await supabase.from("invoices").select("id, invoice_number, total, amount_paid, status").eq("id", c.invoiceId).eq("org_id", who.orgId).maybeSingle();
-    const cap = inv ? invoiceBalance(inv.total, inv.amount_paid) : 0;
+    const capCents = inv ? centsOf(invoiceBalance(inv.total, inv.amount_paid)) - (putOn.get(c.invoiceId) ?? 0) : 0;
     const amount = w.line.cents / 100;
-    if (!inv || inv.status === "void" || inv.status === "draft" || amount > cap + 0.005) {
+    if (!inv || inv.status === "void" || inv.status === "draft" || w.line.cents > capCents) {
       await unwrite([w.line.key], `The deposit of ${w.line.postedOn} wasn't put on ${inv?.invoice_number ?? "that invoice"}: it is more than what is open on it.`);
       continue;
     }
@@ -639,6 +642,7 @@ export async function applyBankCore(
       await unwrite([w.line.key], `The deposit of ${w.line.postedOn} wasn't put on ${inv.invoice_number}.${error ? ` ${dbError(error)}` : ""}`);
       continue;
     }
+    putOn.set(c.invoiceId, (putOn.get(c.invoiceId) ?? 0) + w.line.cents);
     touchedInvoices.add(c.invoiceId);
   }
   for (const id of touchedInvoices) {

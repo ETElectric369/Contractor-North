@@ -1409,6 +1409,17 @@ export function validPicks(
     }
     ok.set(gid, c);
   }
+  // TWO DEPOSITS ON ONE INVOICE are held to its balance TOGETHER: each alone may fit, both may not.
+  const onInvoice = new Map<string, string[]>();
+  for (const [gid, c] of ok) if (c.choice === "invoice") onInvoice.set(c.invoiceId, [...(onInvoice.get(c.invoiceId) ?? []), gid]);
+  for (const [invoiceId, gids] of onInvoice) {
+    if (gids.length < 2) continue;
+    const inv = books.invoices.find((i) => i.id === invoiceId);
+    const total = gids.reduce((n, gid) => n + (byId.get(gid)?.cents ?? 0), 0);
+    if (inv && total <= inv.balanceCents) continue;
+    for (const gid of gids) ok.delete(gid);
+    refused.push(`${gids.length} deposits (${sayDollars(total / 100)}) are more than the ${sayDollars((inv?.balanceCents ?? 0) / 100)} open on ${inv?.number ?? "that invoice"}`);
+  }
   return { ok, refused };
 }
 
