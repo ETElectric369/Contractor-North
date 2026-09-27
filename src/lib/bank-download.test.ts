@@ -16,6 +16,7 @@ import {
   parseChoiceId,
   planBankDownload,
   noLinesSaid,
+  sayGroupMoney,
   readBankDate,
   readBankMoney,
   readBankTable,
@@ -763,6 +764,13 @@ describe("what needs a person: one row per merchant, the guess first and never p
 });
 
 describe("the card and the person's answers", () => {
+  it("says a row's money as a total, and N× only when every line is that amount", () => {
+    expect(sayGroupMoney({ keys: ["a", "b", "c"], cents: -28845, direction: "out", each: null })).toBe("3 charges · $288.45");
+    expect(sayGroupMoney({ keys: ["a", "b", "c"], cents: -1350, direction: "out", each: -450 })).toBe("3× $4.50");
+    expect(sayGroupMoney({ keys: ["a", "b"], cents: 90000, direction: "in", each: null })).toBe("2 deposits · $900.00");
+    expect(sayGroupMoney({ keys: ["a"], cents: -1200, direction: "out", each: -1200 })).toBe("$12.00");
+  });
+
   it("says the one line: account, dates, sorted, already in North, need you", () => {
     const dl = download();
     const fee = lineBy(dl, "SERVICE FEE");

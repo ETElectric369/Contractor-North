@@ -29,7 +29,7 @@ const VIEW: BankView = {
     {
       id: "out:shell",
       title: "SHELL 123 ANYTOWN",
-      money: "3× $288.45",
+      money: "3 charges · $288.45",
       dates: "Sep 2–Sep 16",
       direction: "out",
       single: false,
@@ -86,7 +86,7 @@ describe("the bank card", () => {
     expect(text).toContain(VIEW.headline);
     expect(text).toContain("Where $3,685.00 Went");
     expect(text).toContain("Owner's Draw $2,500.00");
-    expect(text).toContain("SHELL 123 ANYTOWN 3× $288.45");
+    expect(text).toContain("SHELL 123 ANYTOWN 3 charges · $288.45");
     // The guess is first and NOT picked: no button is pressed until a person taps.
     expect(html).not.toContain('aria-pressed="true"');
     const labels = buttons(html).map((b) => b.text);

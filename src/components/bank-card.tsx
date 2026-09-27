@@ -15,7 +15,7 @@ import { keepPaperwork } from "@/app/(app)/organize/paperwork-actions";
  *
  *   Bank ••1234 · Aug 26–Sep 25 · 96 sorted · 17 already in North · 3 need you
  *   [one bar: where the money went]
- *   SHELL 123 ANYTOWN · 3× $288.45   [Fuel] [Truck] [Personal] [Other…]
+ *   SHELL 123 ANYTOWN · 3 charges · $288.45   [Fuel] [Truck] [Personal] [Other…]
  *   Deposit Sep 4 · $1,275.00        [On INV-1001] [Other Income] [Not Income] [Other…]
  *   Check 1043 · $640.00             [Pay Pat] [Other…]
  *   [Apply] [Not Now]

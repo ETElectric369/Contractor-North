@@ -772,7 +772,10 @@ export type NeedGroup = {
   /** What the row says: the first line's description. */
   label: string;
   keys: string[];
+  /** The group's total (signed cents). */
   cents: number;
+  /** Every line's amount when they are all the same (signed cents), else null. */
+  each: number | null;
   first: string;
   last: string;
   check: string | null;
@@ -1278,6 +1281,7 @@ export function planBankDownload(dl: BankDownload, books: BankBooks): BankPlan {
         label: line.description,
         keys: [],
         cents: 0,
+        each: line.cents,
         first: line.postedOn,
         last: line.postedOn,
         check: line.check,
@@ -1291,6 +1295,7 @@ export function planBankDownload(dl: BankDownload, books: BankBooks): BankPlan {
     }
     g.keys.push(line.key);
     g.cents += line.cents;
+    if (g.each !== line.cents) g.each = null;
     if (line.postedOn < g.first) g.first = line.postedOn;
     if (line.postedOn > g.last) g.last = line.postedOn;
     dispositions.set(line.key, { how: "need", group: id });
@@ -1445,10 +1450,13 @@ export function moneyFlow(dl: BankDownload, plan: BankPlan, books: BankBooks): {
   return { out: [...seg.values()].sort((a, b) => b.cents - a.cents), inCents, outCents };
 }
 
-/** "3× $288.45" or "$288.45". */
-export function sayGroupMoney(g: Pick<NeedGroup, "keys" | "cents">): string {
+/** "$288.45"; several lines: "3 charges · $288.45" (the total), or "3× $96.15" only when every
+ *  line is that same amount (a price after "3×" reads as each one's). */
+export function sayGroupMoney(g: Pick<NeedGroup, "keys" | "cents" | "direction"> & { each?: number | null }): string {
   const n = g.keys.length;
-  return `${n > 1 ? `${n}× ` : ""}${sayDollars(Math.abs(g.cents) / 100)}`;
+  if (n <= 1) return sayDollars(Math.abs(g.cents) / 100);
+  if (g.each != null) return `${n}× ${sayDollars(Math.abs(g.each) / 100)}`;
+  return `${n} ${g.direction === "in" ? "deposits" : "charges"} · ${sayDollars(Math.abs(g.cents) / 100)}`;
 }
 
 /** What a row says on its line: "SHELL 123 ANYTOWN", "Check 1043", "Deposit Sep 4". */

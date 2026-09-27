@@ -286,7 +286,8 @@ describe("the door", () => {
     expect(v.problem).toBeNull();
     expect(v.headline).toBe("Bank ••1234 · Sep 2–Sep 24 · 1 sorted · 6 need you");
     const shell = rowBy(v, "SHELL");
-    expect(shell.money).toBe("3× $288.45");
+    // The total of three different fills, said as a total (never "3×", which reads as each).
+    expect(shell.money).toBe("3 charges · $288.45");
     expect(shell.buttons.map((b) => b.label)).toEqual(["Fuel", "Truck", "Personal"]);
     expect(rowBy(v, "Deposit").buttons.map((b) => b.label)).toEqual(["On INV-1001", "Other Income", "Not Income"]);
     expect(rowBy(v, "Check 1043").buttons.map((b) => b.label)).toEqual(["Pay Pat Crew", "Personal"]);
@@ -576,7 +577,7 @@ XXXXX1234,09/12/2026,,1111-CORNER STORE ANYTOWN,120.00,,Posted,866.69
     );
     const v = await view(id);
     const rows = v.rows.filter((r) => r.title.includes("CORNER STORE"));
-    expect(rows.map((r) => r.money)).toEqual(["2× $258.62", "$13.31"]);
+    expect(rows.map((r) => r.money)).toEqual(["2 charges · $258.62", "$13.31"]);
     await applyBankDownload(id, { fingerprint: v.fingerprint, picks: { [rows[0].id]: "cost:Gas & Truck:fuel", [rows[1].id]: "cost:Other" } });
     expect(db.bank_rules.map((r) => [r.choice, r.bucket, r.cost_kind, r.min_cents, r.max_cents]).sort()).toEqual([
       ["cost", "Gas & Truck", "fuel", 12000, 13862],
