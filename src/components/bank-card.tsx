@@ -13,7 +13,7 @@ import { keepPaperwork } from "@/app/(app)/organize/paperwork-actions";
 /**
  * A BANK DOWNLOAD, AS ONE CARD IN SORT THESE (Erik, 2026-09-27: "yes go for those").
  *
- *   Bank ••1234 · Aug 26–Sep 25 · 96 sorted · 17 already in North · 3 need you
+ *   Bank ••1234 · Aug 26–Sep 25 · 96 sorted · 17 already in North · 5 need you, in 3 rows
  *   [one bar: where the money went]
  *   SHELL 123 ANYTOWN · 3 charges · $288.45   [Fuel] [Truck] [Personal] [Other…]
  *   Deposit Sep 4 · $1,275.00        [On INV-1001] [Other Income] [Already Counted Or Not Income] [Other…]

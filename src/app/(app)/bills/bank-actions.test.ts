@@ -284,7 +284,8 @@ describe("the door", () => {
     const id = await drop();
     const v = await view(id);
     expect(v.problem).toBeNull();
-    expect(v.headline).toBe("Bank ••1234 · Sep 2–Sep 24 · 1 sorted · 6 need you");
+    // Lines everywhere: 8 lines need a person, in 6 rows (the three SHELL fills are one row).
+    expect(v.headline).toBe("Bank ••1234 · Sep 2–Sep 24 · 1 sorted · 8 need you, in 6 rows");
     const shell = rowBy(v, "SHELL");
     // The total of three different fills, said as a total (never "3×", which reads as each).
     expect(shell.money).toBe("3 charges · $288.45");

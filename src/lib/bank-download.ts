@@ -1403,13 +1403,17 @@ export function sayRange(from: string | null, to: string | null, today?: string 
   return from === to ? f(from) : `${f(from)}–${f(to)}`;
 }
 
-/** THE ONE LINE: "Bank ••1234 · Aug 26–Sep 25 · 96 sorted · 17 already in North · 3 need you". */
+/** THE ONE LINE: "Bank ••1234 · Aug 26–Sep 25 · 96 sorted · 17 already in North · 5 need you, in 3
+ *  rows". Every figure counts LINES, as Apply's "N lines left for later" does; the rows are said
+ *  beside them when a row holds several. */
 export function bankHeadline(dl: Pick<BankDownload, "last4" | "from" | "to">, counts: BankPlan["counts"], today?: string | null): string {
   const parts = [dl.last4 ? `Bank ••${dl.last4}` : "Bank download", sayRange(dl.from, dl.to, today)];
   const sorted = counts.matched + counts.ruled;
   if (sorted) parts.push(`${sorted} sorted`);
   if (counts.already) parts.push(`${counts.already} already in North`);
-  parts.push(counts.needRows ? `${counts.needRows} need you` : "nothing needs you");
+  parts.push(
+    !counts.needRows ? "nothing needs you" : counts.needLines === counts.needRows ? `${counts.needLines} need you` : `${counts.needLines} need you, in ${counts.needRows} rows`,
+  );
   return parts.join(" · ");
 }
 
