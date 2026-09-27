@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, Trash2, Pencil, Check, ChevronDown, Wrench } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -29,6 +29,20 @@ interface Item {
   est_cost?: number | null;
   purchased?: boolean;
   is_tool?: boolean;
+}
+
+type Flip = { from: boolean; to: boolean };
+
+/** The optimistic ticks still waiting on the server: a flip leaves once the server's `purchased`
+ *  equals its `to` (settled), when its line is gone, or when it never changed anything (from = to).
+ *  Returns the same map when nothing settled, so the effect re-renders nothing. */
+export function settleFlips(flips: ReadonlyMap<string, Flip>, items: readonly { id: string; purchased?: boolean }[]): Map<string, Flip> {
+  const server = new Map(items.map((i) => [i.id, !!i.purchased]));
+  let next: Map<string, Flip> | null = null;
+  for (const [id, f] of flips) {
+    if (!server.has(id) || server.get(id) === f.to || f.from === f.to) (next ??= new Map(flips)).delete(id);
+  }
+  return next ?? (flips as Map<string, Flip>);
 }
 
 /** The one materials item editor — the /materials/[id] page AND the job hub's
@@ -90,9 +104,16 @@ export function ItemEditor({
   // The Bought fold: closed until someone opens it (the open lines lead).
   const [foldOpen, setFoldOpen] = useState(false);
   // THE TICK LANDS UNDER THE THUMB. A checked line moves to the fold the moment it is tapped, not a
-  // round trip later: `from` is the server's value when it was tapped, so the flip stops applying
-  // the moment the refresh brings the server's own answer (or another person's change) back.
-  const [flips, setFlips] = useState<Map<string, { from: boolean; to: boolean }>>(new Map());
+  // round trip later: `from` is the server's value when it was tapped, so the flip applies only while
+  // the server still says `from` (the save in flight).
+  const [flips, setFlips] = useState<Map<string, Flip>>(new Map());
+  // ...and it is DROPPED the moment the server agrees with it. A settled flip left in the map would
+  // wake up again later: someone else unticks the line, the next refresh brings back `from`, and this
+  // screen would show it Bought while the chip and Buy Materials count it open. An in-flight flip
+  // (the server still says `from`) stays, so an unrelated refresh landing first can't flicker it.
+  useEffect(() => {
+    setFlips((m) => settleFlips(m, items));
+  }, [items]);
 
   const bought = (it: Item) => {
     const f = flips.get(it.id);

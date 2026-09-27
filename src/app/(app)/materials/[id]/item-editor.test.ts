@@ -19,7 +19,7 @@ vi.mock("../actions", () => ({
   ensureJobMaterialList: vi.fn(),
 }));
 
-import { ItemEditor } from "./item-editor";
+import { ItemEditor, settleFlips } from "./item-editor";
 
 const item = (id: string, description: string, over: Record<string, unknown> = {}) => ({
   id,
@@ -111,5 +111,43 @@ describe("44px targets", () => {
       expect(labels.length).toBe(boxes.length);
       for (const b of html.match(/<button[^>]*>/g) ?? []) expect(b, b).toMatch(/h-11|min-h-\[44px\]/);
     }
+  });
+});
+
+describe("an optimistic tick never outlives the server's answer", () => {
+  const F = (from: boolean, to: boolean) => ({ from, to });
+
+  it("in flight (the server still says `from`): kept", () => {
+    const m = new Map([["a", F(false, true)]]);
+    expect(settleFlips(m, [{ id: "a", purchased: false }])).toBe(m);
+  });
+
+  it("settled (the server says `to`): dropped", () => {
+    const m = new Map([["a", F(false, true)]]);
+    expect(settleFlips(m, [{ id: "a", purchased: true }]).has("a")).toBe(false);
+  });
+
+  it("the traced bug: ticked, settled, then the office unticks it: the line is open again, not Bought", () => {
+    let m: Map<string, { from: boolean; to: boolean }> = new Map([["a", F(false, true)]]);
+    m = settleFlips(m, [{ id: "a", purchased: true }]); // Brian's tick lands
+    m = settleFlips(m, [{ id: "a", purchased: false }]); // the office unticks it; a later refresh
+    const f = m.get("a");
+    const server = false;
+    expect(f && f.from === server ? f.to : server).toBe(false);
+  });
+
+  it("a removed line, or a flip that changed nothing, leaves too; nothing settled keeps the same map", () => {
+    const m = new Map([
+      ["gone", F(false, true)],
+      ["noop", F(true, true)],
+      ["live", F(true, false)],
+    ]);
+    const out = settleFlips(m, [
+      { id: "noop", purchased: true },
+      { id: "live", purchased: true },
+    ]);
+    expect([...out.keys()]).toEqual(["live"]);
+    const same = new Map([["live", F(true, false)]]);
+    expect(settleFlips(same, [{ id: "live", purchased: true }])).toBe(same);
   });
 });
