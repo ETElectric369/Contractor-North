@@ -1,7 +1,8 @@
 import { invoiceOverpayment } from "@/lib/invoice-math";
 import { getStripe } from "@/lib/stripe";
 import { createServiceClient } from "@/lib/supabase/server";
-import { sendPushToProfiles, orgStaffIds } from "@/lib/push";
+import { orgStaffIds } from "@/lib/push";
+import { notifyPeople } from "@/lib/notifications";
 import { formatCurrency } from "@/lib/utils";
 import { recalcInvoice } from "@/lib/invoice-recalc";
 import { paymentReachedDraft } from "@/lib/tap-settlement";
@@ -344,7 +345,9 @@ export async function POST(req: Request) {
     // credit. So it does the one thing a machine should: say so, loudly, to the people who can
     // decide.
     const over = invoiceOverpayment((inv as any)?.total, (inv as any)?.amount_paid);
-    await sendPushToProfiles(await orgStaffIds(orgId), "invoice_paid", over > 0.005
+    // THE BELL RECORDS IT (notifyPeople): once, here, on the path that recorded the payment. A replay
+    // of the same event (23505 above) settles and returns before this line, so it never writes twice.
+    await notifyPeople(orgId, await orgStaffIds(orgId), "invoice_paid", over > 0.005
       ? {
           title: "Overpaid — action needed",
           body: `${formatCurrency(amount)} ${via.said} on ${inv?.invoice_number || "an invoice"}${cust ? ` — ${cust}` : ""}. That's ${formatCurrency(over)} MORE than the total. Credit it or refund it.`,
@@ -470,7 +473,7 @@ export async function POST(req: Request) {
           .maybeSingle();
         const orgId = (org as { id?: string } | null)?.id;
         if (orgId) {
-          await sendPushToProfiles(await orgStaffIds(orgId), "invoice_paid", {
+          await notifyPeople(orgId, await orgStaffIds(orgId), "invoice_paid", {
             title: "Card declined",
             body: "Your Contractor North payment didn't go through. Update your card to keep the crew working.",
             url: "/settings",
@@ -579,7 +582,7 @@ export async function POST(req: Request) {
                   .eq("org_id", orgId)
                   .maybeSingle();
                 const cust = (who as { customers?: { name?: string | null } | null } | null)?.customers?.name;
-                await sendPushToProfiles(await orgStaffIds(orgId), "invoice_paid", {
+                await notifyPeople(orgId, await orgStaffIds(orgId), "invoice_paid", {
                   title: "Bank transfer on its way",
                   body: `${formatCurrency(credit)} by bank transfer on ${target.invoice_number || "an invoice"}${cust ? ` — ${cust}` : ""}. It takes a few business days to clear, and nothing is recorded until it does. Don't record it by hand.`,
                   url: `/billing/${invoiceId}`,
@@ -640,7 +643,7 @@ export async function POST(req: Request) {
       // never fail the webhook.
       if (ended.outcome === "resolved" || ended.outcome === "recorded" || ended.outcome === "no_table") {
         try {
-          await sendPushToProfiles(await orgStaffIds(orgId), "invoice_paid", {
+          await notifyPeople(orgId, await orgStaffIds(orgId), "invoice_paid", {
             title: "Bank transfer failed",
             body: `${formatCurrency(amount)} by bank transfer on ${target.invoice_number || "an invoice"} didn't go through. Nothing was recorded, and the invoice is still open.`,
             url: `/billing/${invoiceId}`,
@@ -701,7 +704,7 @@ export async function POST(req: Request) {
         }
         if (orgId) {
           const disputed = event.type === "charge.dispute.created";
-          await sendPushToProfiles(await orgStaffIds(orgId), "invoice_paid", {
+          await notifyPeople(orgId, await orgStaffIds(orgId), "invoice_paid", {
             title: disputed ? "A card payment was disputed" : "An online payment was refunded",
             body: disputed
               ? "The customer's bank opened a dispute — the invoice still reads paid until you decide how to record it."
@@ -849,7 +852,7 @@ export async function POST(req: Request) {
           .eq("id", md.invoice_id)
           .eq("org_id", md.org_id)
           .maybeSingle();
-        // … and the person must be in that org. sendPushToProfiles handles `active` and the
+        // … and the person must be in that org. The push (notifyPeople) handles `active` and the
         // per-user toggle; the org membership is the tenant boundary and is checked HERE.
         const { data: who } = await supabase
           .from("profiles")
@@ -872,7 +875,8 @@ export async function POST(req: Request) {
         // "invoice_paid": 5.12 is an Apple requirement, and muting paid-invoice buzzes must not
         // silently mute it too. Full name in the title — Apple allows "Tap to Pay" on a button
         // only, and a lock-screen line is a sentence.
-        await sendPushToProfiles([userId], "tap_to_pay", {
+        // On his own bell too (notifyPeople): the decline he may never have seen stays there to read.
+        await notifyPeople(md.org_id, [userId], "tap_to_pay", {
           title: "Card declined — Tap to Pay on iPhone",
           body: `${formatCurrency((pi.amount ?? 0) / 100)} by Tap to Pay on iPhone on ${number ? `invoice ${number}` : "an invoice"} wasn't approved — ${declineReason(pi.last_payment_error)}. Nothing was charged; the invoice is still open.`,
           url: `/billing/${md.invoice_id}`,

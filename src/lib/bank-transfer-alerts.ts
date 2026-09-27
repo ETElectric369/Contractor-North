@@ -1,4 +1,5 @@
-import { sendPushToProfiles, orgStaffIds } from "@/lib/push";
+import { orgStaffIds } from "@/lib/push";
+import { notifyPeople } from "@/lib/notifications";
 import { reportError } from "@/lib/observe";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { STALE_TRANSFER_DAYS, staleTransfers } from "@/lib/bank-transfer";
@@ -30,7 +31,8 @@ export async function tellStaleBankTransfers(supabase: any, now: Date = new Date
       new Error(`a bank transfer has been pending more than ${STALE_TRANSFER_DAYS} days`),
       { orgId: t.orgId, invoiceId: t.invoiceId, transferId: t.id },
     );
-    await sendPushToProfiles(await orgStaffIds(t.orgId), "invoice_paid", {
+    // On the bell too (notifyPeople), in that org only.
+    await notifyPeople(t.orgId, await orgStaffIds(t.orgId), "invoice_paid", {
       title: "Bank transfer still not cleared",
       body: `${formatCurrency(t.amount)} by bank transfer on ${number || "an invoice"}, started ${formatDate(t.startedAt)}, has not cleared or failed after ${STALE_TRANSFER_DAYS} days. Check it in your Stripe dashboard before recording anything by hand.`,
       url: `/billing/${t.invoiceId}`,

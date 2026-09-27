@@ -18,7 +18,7 @@ import { featureOn } from "@/lib/features";
 import { featureOffSentence } from "@/lib/viewer-switches";
 import { todayBoundsInTz, tzDayStartUtc } from "@/lib/tz";
 import { companyTimeCode } from "@/lib/no-job-hours";
-import { createNotifications } from "@/lib/notifications";
+import { createNotifications, notifyPeople } from "@/lib/notifications";
 import { sendPushToProfiles, orgStaffIds } from "@/lib/push";
 import { setJobCrew } from "../schedule/actions";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -2858,7 +2858,7 @@ export async function notifyGeofenceExit(jobLabel?: string): Promise<ClockResult
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "Not signed in." };
-  const { data: me } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
+  const { data: me } = await supabase.from("profiles").select("role, org_id").eq("id", user.id).maybeSingle();
   if (isStaffRole((me as { role?: string } | null)?.role ?? "")) return { ok: true }; // techs only
   const { data: open } = await supabase
     .from("time_entries")
@@ -2872,7 +2872,8 @@ export async function notifyGeofenceExit(jobLabel?: string): Promise<ClockResult
   const lastAt = (open as { last_geofence_push_at?: string | null }).last_geofence_push_at;
   if (lastAt && Date.now() - Date.parse(lastAt) < GEOFENCE_PUSH_DEBOUNCE_MS) return { ok: true };
   const label = (jobLabel ?? "").trim().slice(0, 80) || "the job site";
-  await sendPushToProfiles([user.id], "clock_out", {
+  // On his own bell too (notifyPeople): the same words, to the one person the push was for.
+  await notifyPeople((me as { org_id?: string | null } | null)?.org_id ?? null, [user.id], "clock_out", {
     title: "Clock out?",
     body: `Looks like you left ${label} — you're still on the clock.`,
     url: "/timeclock",

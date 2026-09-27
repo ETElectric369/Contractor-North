@@ -15,8 +15,14 @@ vi.mock("@/lib/stripe", () => ({
   getStripe: () => ({ webhooks: { constructEvent: () => state.event } }),
 }));
 vi.mock("@/lib/supabase/server", () => ({ createServiceClient: () => state.db }));
+// The real notifyPeople runs (the Bell records every push): its bell line goes into the fake
+// database's notifications table, and its push lands here.
 vi.mock("@/lib/push", () => ({
-  sendPushToProfiles: vi.fn(async (...a: any[]) => void state.pushes.push(a)),
+  sendPushToProfiles: vi.fn(async (...a: any[]) => {
+    state.pushes.push(a);
+    return a[0] as string[];
+  }),
+  pushKindIsOptIn: vi.fn((kind: string) => kind === "day_ahead"),
   orgStaffIds: vi.fn(async () => ["office-1"]),
 }));
 vi.mock("@/lib/invoice-recalc", () => ({ recalcInvoice: vi.fn(async () => true) }));
@@ -114,6 +120,39 @@ describe("the webhook and a bank transfer", () => {
     expect(state.db.tables.payments).toHaveLength(0);
     expect(state.db.tables.pending_bank_transfers).toHaveLength(0);
     expect(state.pushes).toHaveLength(0);
+  });
+
+  describe("the Bell records what the office is told, once (0366 wave, W1-10)", () => {
+    const lines = () => (state.db.tables.notifications ?? []) as any[];
+
+    it("a payment recorded: one bell line beside the one push, and a replay of the event writes neither again", async () => {
+      const paid = session({ payment_status: "paid", payment_method_types: ["card"], payment_intent: "pi_card", metadata: { ...session().metadata, pay_method: "card" } });
+      await deliver("checkout.session.completed", paid, "evt_paid");
+      expect(state.db.tables.payments).toHaveLength(1);
+      expect(state.pushes).toHaveLength(1);
+      expect(lines()).toHaveLength(1);
+      expect(lines()[0]).toMatchObject({ org_id: ORG, user_id: "office-1", type: "invoice_paid", title: "Payment received", url: "/billing/inv-78" });
+      expect(lines()[0].body).toBe(state.pushes[0][2].body);
+      // Stripe resends the same event: the payment insert is a 23505, settled, and nothing is said again.
+      expect((await deliver("checkout.session.completed", paid, "evt_paid")).status).toBe(200);
+      expect(state.db.tables.payments).toHaveLength(1);
+      expect(state.pushes).toHaveLength(1);
+      expect(lines()).toHaveLength(1);
+    });
+
+    it("a bank transfer on its way, and one that failed: each on the bell once", async () => {
+      await deliver("checkout.session.completed", session());
+      await deliver("checkout.session.completed", session());
+      await deliver("checkout.session.async_payment_failed", session(), "evt_fail");
+      await deliver("checkout.session.async_payment_failed", session(), "evt_fail");
+      expect(lines().map((l) => l.title)).toEqual(["Bank transfer on its way", "Bank transfer failed"]);
+      expect(lines().every((l) => l.user_id === "office-1" && l.org_id === ORG)).toBe(true);
+    });
+
+    it("an account that doesn't own the org puts nothing on anybody's bell", async () => {
+      await deliver("checkout.session.completed", session({ payment_status: "paid" }), "evt_x", "acct_someone_else");
+      expect(lines()).toEqual([]);
+    });
   });
 
   describe("a marker write that fails is retried, never acked", () => {

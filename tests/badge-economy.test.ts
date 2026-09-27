@@ -116,11 +116,16 @@ describe("badge economy: the inbox is decisions-only (the task feeder stays dead
     expect(sixSrc).toContain("rankSix(");
   });
 
-  it("the digest's pool is Reminders only and pushes one person at a time (0358)", () => {
+  it("the digest's pool is Reminders only and pushes one person at a time (0358), each on their own bell too", () => {
     const digestSrc = src("lib/action-items/digest.ts");
     expect(digestSrc).toContain('.is("job_id", null)');
-    expect(digestSrc).toContain("sendPushToProfiles(\n        [personId],");
+    // One person at a time, through the door that writes the bell line for whoever it went to (0366 wave).
+    expect(digestSrc).toContain("notifyPeople(\n        org.id,\n        [personId],\n        \"day_ahead\",");
+    expect(digestSrc).not.toContain("sendPushToProfiles(");
     expect(digestSrc).not.toContain("scheduledJobIds");
+    // The decisions headline is the card's own name: "Needs You: 3", never "Needs action: 3 items".
+    expect(digestSrc).toContain("title: `Needs You: ${decisions}`");
+    expect(digestSrc).not.toContain("Needs action:");
   });
 });
 

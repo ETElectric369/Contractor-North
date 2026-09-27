@@ -25,7 +25,10 @@ vi.mock("@/lib/supabase/server", () => ({
 }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn(), revalidateTag: vi.fn() }));
 vi.mock("@/lib/observe", () => ({ reportError: vi.fn() }));
-vi.mock("@/lib/notifications", () => ({ createNotifications: vi.fn(async (...a: any[]) => void spies.notify.push(a)) }));
+vi.mock("@/lib/notifications", () => ({
+  createNotifications: vi.fn(async (...a: any[]) => void spies.notify.push(a)),
+  notifyPeople: vi.fn(async () => ({ bell: true, pushed: [] })),
+}));
 vi.mock("@/lib/push", () => ({ sendPushToProfiles: vi.fn(async () => {}), orgStaffIds: vi.fn(async () => ["office-1", "user-1"]) }));
 vi.mock("../schedule/actions", () => ({ setJobCrew: vi.fn(async () => ({ ok: true })) }));
 

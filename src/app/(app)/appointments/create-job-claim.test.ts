@@ -27,6 +27,8 @@ vi.mock("@/lib/staff-guard", () => ({
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("@/lib/calendar-sync", () => ({ pushCalendarItem: vi.fn(async () => {}), deleteCalendarItem: vi.fn(async () => {}) }));
 vi.mock("@/lib/push", () => ({ sendPushToProfiles: vi.fn(async () => {}) }));
+// appointments/actions pushes through notifyPeople (the Bell records every push, 0366 wave).
+vi.mock("@/lib/notifications", () => ({ notifyPeople: vi.fn(async () => ({ bell: true, pushed: [] })) }));
 
 import { createJobFromAppointment } from "./actions";
 

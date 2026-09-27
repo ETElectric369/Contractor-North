@@ -10,7 +10,7 @@ import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 import { emptyToNull } from "@/lib/forms";
 import { pushCalendarItem, deleteCalendarItem } from "@/lib/calendar-sync";
 import { requireMember, requireStaff } from "@/lib/staff-guard";
-import { sendPushToProfiles } from "@/lib/push";
+import { notifyPeople } from "@/lib/notifications";
 import { getOrgSettings } from "@/lib/org-settings";
 import { tzDateTimeUtc, todayStrInTz } from "@/lib/tz";
 import { WORK_DAY_MINUTES } from "@/lib/schedule/work-shape";
@@ -129,7 +129,8 @@ export async function createAppointment(formData: FormData): Promise<Result> {
 
   const assignedTo = emptyToNull(formData.get("assigned_to"));
   if (assignedTo && assignedTo !== ctx.userId) {
-    void sendPushToProfiles([assignedTo], "assigned", {
+    // On the bell too (notifyPeople): the line says what the push says, to the one person it was for.
+    await notifyPeople(ctx.orgId, [assignedTo], "assigned", {
       title: "New appointment assigned",
       body: title,
       // Deep-link the appointment's DAY so staff land where its edit/quick actions
