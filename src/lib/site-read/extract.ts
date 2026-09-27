@@ -381,17 +381,34 @@ function ldHours(node: Record<string, unknown>): string | undefined {
 
 type Node = Record<string, unknown>;
 
-function jsonLdNodes(html: string): Node[] {
-  const out: Node[] = [];
-  const walk = (v: unknown, depth: number) => {
+/**
+ * Keys whose value is ANOTHER party, never the site's own card: a product's brand or maker, an
+ * article's author, a parent company, a sponsor, a review. Their names and numbers are not the
+ * contact's (a supply house's product page names Square D, with Square D's phone). publisher,
+ * provider and seller are kept: on the site's own pages they are the site's own organization.
+ */
+const OTHER_PARTY = new Set([
+  "brand", "manufacturer", "author", "creator", "contributor", "editor", "parentorganization", "memberof", "member",
+  "members", "sponsor", "funder", "organizer", "performer", "attendee", "review", "reviews", "itemreviewed",
+  "affiliation", "worksfor", "alumniof", "competitor", "isbasedon", "citation", "mentions",
+]);
+
+/** Every typed node in the page's JSON-LD, with how many typed nodes it sits inside: 0 for a node at
+ *  the top or straight in @graph (the site's own cards), 1+ for one nested in another's field. */
+function jsonLdNodes(html: string): { n: Node; nest: number }[] {
+  const out: { n: Node; nest: number }[] = [];
+  const walk = (v: unknown, depth: number, nest: number) => {
     if (depth > 8 || out.length > 300 || !v || typeof v !== "object") return;
     if (Array.isArray(v)) {
-      for (const x of v.slice(0, 100)) walk(x, depth + 1);
+      for (const x of v.slice(0, 100)) walk(x, depth + 1, nest);
       return;
     }
     const o = v as Node;
-    if (o["@type"]) out.push(o);
-    for (const x of Object.values(o)) if (x && typeof x === "object") walk(x, depth + 1);
+    const typed = !!o["@type"];
+    if (typed) out.push({ n: o, nest });
+    for (const [k, x] of Object.entries(o)) {
+      if (x && typeof x === "object" && !OTHER_PARTY.has(k.toLowerCase())) walk(x, depth + 1, typed ? nest + 1 : nest);
+    }
   };
   const lower = lowerSameLength(html);
   const re = TAG("script");
@@ -413,7 +430,7 @@ function jsonLdNodes(html: string): Node[] {
         continue;
       }
     }
-    walk(data, 0);
+    walk(data, 0, 0);
   }
   return out;
 }
@@ -523,11 +540,12 @@ export function extractContact(html: string, pageUrl: string): Extraction {
     if (!f.zip && a.zip) f.zip = a.zip;
   };
 
-  // 1. JSON-LD, best card first.
+  // 1. JSON-LD, best card first; of two as good, the one the site wrote at the top (not one nested
+  //    in another node's field, like an offer's seller) first.
   const nodes = jsonLdNodes(html)
-    .map((n) => ({ n, rank: rankOf(typesOf(n)) }))
+    .map(({ n, nest }) => ({ n, nest, rank: rankOf(typesOf(n)) }))
     .filter((x) => x.rank > 0)
-    .sort((a, b) => b.rank - a.rank);
+    .sort((a, b) => b.rank - a.rank || a.nest - b.nest);
   for (const { n } of nodes) {
     const nodeName = typeof n.name === "string" ? n.name : typeof n.legalName === "string" ? n.legalName : undefined;
     if (!f.name && nodeName) f.name = clean(decodeEntities(nodeName), 120);

@@ -157,6 +157,23 @@ describe("extractContact", () => {
     expect(extractContact(html, "https://crest.example/").fields.hours).toBe("Mon–Fri 7 AM–3:30 PM; Sat 8 AM–12 PM");
   });
 
+  it("never takes another party's card (a product's brand, an article's author) as the site's own", () => {
+    const html = `<script type="application/ld+json">{"@context":"https://schema.org","@graph":[
+      {"@type":"Product","name":"QO 20 A Breaker","brand":{"@type":"Organization","name":"Square Deal Breakers","telephone":"888-555-0133"},
+       "review":{"@type":"Review","author":{"@type":"Organization","name":"Breaker Reviews Inc","telephone":"877-555-0134"}}},
+      {"@type":"Organization","name":"Acme Electric Supply","telephone":"530-555-0150"}]}</script>`;
+    expect(extractContact(html, "https://acme-supply.example/qo120").fields).toEqual({ name: "Acme Electric Supply", phones: ["(530) 555-0150"] });
+  });
+
+  it("prefers the site's top-level card to one nested in another node, and still reads a nested seller alone", () => {
+    const both = `<script type="application/ld+json">[
+      {"@type":"Product","name":"Wire","offers":{"@type":"Offer","seller":{"@type":"Organization","name":"Marketplace Seller Co"}}},
+      {"@type":"Organization","name":"Acme Electric Supply"}]</script>`;
+    expect(extractContact(both, "https://acme-supply.example/").fields.name).toBe("Acme Electric Supply");
+    const sellerOnly = `<script type="application/ld+json">{"@type":"Product","name":"Wire","offers":{"@type":"Offer","seller":{"@type":"Organization","name":"Acme Electric Supply"}}}</script>`;
+    expect(extractContact(sellerOnly, "https://acme-supply.example/").fields.name).toBe("Acme Electric Supply");
+  });
+
   it("never takes an offered Service's name as the business's", () => {
     const html = `<script type="application/ld+json">[{"@type":"Service","name":"Panel Upgrades"},{"@type":"Organization","name":"Crest Electric"}]</script>`;
     expect(extractContact(html, "https://crest.example/").fields.name).toBe("Crest Electric");
