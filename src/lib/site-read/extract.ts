@@ -100,49 +100,65 @@ function attrsOf(tag: string): Record<string, string> {
  */
 const TAG = (name: string) => new RegExp(`<${name}\\b(?:[^<>"']|"[^"<]*"|'[^'<]*')*>`, "gi");
 
-/** Lowercase A–Z only, so every index still lines up with the original ("İ".toLowerCase() is 2 long). */
-const asciiLower = (s: string) => s.replace(/[A-Z]+/g, (m) => m.toLowerCase());
+/** Lowercased with every index still lined up with the original ("İ".toLowerCase() is 2 long). */
+function lowerSameLength(s: string): string {
+  const l = s.toLowerCase();
+  return l.length === s.length ? l : s.replace(/[A-Z]+/g, (m) => m.toLowerCase());
+}
 
-/** Cut out every `open`…`close` span. An unclosed one loses only its opening marker. */
-function cutSpans(html: string, open: string, close: string, isStart: (next: string) => boolean = () => true): string {
-  const lower = asciiLower(html);
+const CODE = ["script", "style", "template", "svg"];
+const HIDDEN = ["noscript", "select", "iframe", "object", "canvas", "head", "title"];
+
+/**
+ * Cut out comments and the named elements, in ONE left-to-right pass (as a browser reads: a comment
+ * that opens first hides a script, and a script that opens first holds a comment). An unclosed one
+ * loses only its opening marker, and once a closing marker is known to be missing it is never
+ * searched for again: that is what keeps a page of unclosed tags linear.
+ */
+function cutElements(html: string, names: readonly string[]): string {
+  const lower = lowerSameLength(html);
+  const noClose = new Set<string>();
   let out = "";
   let pos = 0;
-  let from = 0;
-  for (;;) {
-    let i = lower.indexOf(open, from);
-    while (i !== -1 && !isStart(lower[i + open.length] ?? "")) i = lower.indexOf(open, i + 1);
-    if (i === -1) break;
-    const j = lower.indexOf(close, i + open.length);
+  let i = lower.indexOf("<");
+  while (i !== -1) {
+    let open = "";
+    let close = "";
+    if (lower.startsWith("!--", i + 1)) {
+      open = "<!--";
+      close = "-->";
+    } else {
+      const n = names.find((x) => lower.startsWith(x, i + 1) && !/[\w:-]/.test(lower[i + 1 + x.length] ?? ""));
+      if (n) {
+        open = `<${n}`;
+        close = `</${n}`;
+      }
+    }
+    if (!open) {
+      i = lower.indexOf("<", i + 1);
+      continue;
+    }
+    const j = noClose.has(close) ? -1 : lower.indexOf(close, i + open.length);
     out += `${html.slice(pos, i)} `;
     if (j === -1) {
-      // Unclosed: drop the marker, keep the rest, and look no further for this close.
+      noClose.add(close);
       pos = i + open.length;
-      out += html.slice(pos);
-      return out;
+    } else {
+      pos = close === "-->" ? j + 3 : lower.indexOf(">", j) + 1 || html.length;
     }
-    const end = close.endsWith(">") ? j + close.length : lower.indexOf(">", j) + 1 || html.length;
-    pos = end;
-    from = end;
+    i = lower.indexOf("<", pos);
   }
   return out + html.slice(pos);
 }
 
-/** Cut out whole elements by name: <script …>…</script>. "<head" never matches "<header". */
-function cutElements(html: string, names: readonly string[]): string {
-  let s = html;
-  for (const n of names) s = cutSpans(s, `<${n}`, `</${n}`, (c) => !/[\w:-]/.test(c));
-  return s;
-}
-
 /** The HTML without comments, scripts, styles and inline pictures: what links and meta are read from. */
 function withoutCode(html: string): string {
-  return cutElements(cutSpans(html, "<!--", "-->"), ["script", "style", "template", "svg"]);
+  return cutElements(html, CODE);
 }
 
 /** The words a person would see, one block per line. */
 export function visibleText(html: string): string {
-  const s = cutElements(withoutCode(html), ["noscript", "select", "iframe", "object", "canvas", "head", "title"])
+  const s = cutElements(html, [...CODE, ...HIDDEN])
     .replace(/<br\b[^<>]*>/gi, "\n")
     .replace(/<\/?(p|div|li|ul|ol|tr|td|th|table|h[1-6]|section|article|header|footer|nav|aside|main|address|dd|dt|dl|form|fieldset|figure|figcaption|blockquote|pre|hr)\b[^<>]*>/gi, "\n")
     .replace(/<[^<>]*>/g, " ");
@@ -354,7 +370,7 @@ function jsonLdNodes(html: string): Node[] {
     if (o["@type"]) out.push(o);
     for (const x of Object.values(o)) if (x && typeof x === "object") walk(x, depth + 1);
   };
-  const lower = asciiLower(html);
+  const lower = lowerSameLength(html);
   const re = TAG("script");
   let m: RegExpExecArray | null;
   while ((m = re.exec(html))) {

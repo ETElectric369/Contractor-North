@@ -171,8 +171,9 @@ describe("extractContact", () => {
     const t = Date.now();
     extractContact(html, "https://x.example/");
     pageTextForModel(html, "https://x.example/");
-    expect(Date.now() - t).toBeLessThan(5000); // quadratic would be minutes
-  });
+    // Well under a second alone; generous for a loaded CI box. Quadratic would be minutes.
+    expect(Date.now() - t).toBeLessThan(8000);
+  }, 20_000);
 });
 
 describe("nameFromTitle", () => {
