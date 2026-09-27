@@ -6,7 +6,7 @@ import type { FuelTrend } from "@/lib/analytics/fuel-trend";
 
 /**
  * THE BANK CARD AND THE FUEL CARD, RENDERED (2026-09-27). The headline, one bar for where the money
- * went, one row per merchant with the guess first and nothing picked, Apply / Not Now; every button
+ * went, one row per merchant with the guess first and nothing picked, Apply / Set Aside; every button
  * Title Case and 44px tall. The fuel card: one number, 13 bars a thumb wide. Made-up figures only.
  */
 
@@ -96,7 +96,9 @@ describe("the bank card", () => {
     expect(text).toContain("A button marked Guess is the app's guess.");
     expect(text).not.toContain("No guess");
     expect(labels).toContain("Apply");
-    expect(labels).toContain("Not Now");
+    expect(labels).toContain("Set Aside");
+    // "Not Now" means nothing here: a pick is cleared by tapping it again.
+    expect(labels).not.toContain("Not Now");
     for (const b of buttons(html)) {
       expect(titleCase(b.text.replace("…", ""))).toBe(true);
       expect(b.markup).toMatch(/h-11|min-h-11/);
@@ -118,11 +120,11 @@ describe("the bank card", () => {
     expect(html).not.toMatch(/>Guess</);
   });
 
-  it("a problem is said, with Not Now; no Apply", () => {
+  it("a problem is said, with Set Aside; no Apply", () => {
     const text = textOf(render({ ...VIEW, problem: "Sorting a bank download needs one database update first. It is waiting here and nothing was changed." }));
     expect(text).toContain("needs one database update");
     expect(text).not.toContain("Apply");
-    expect(text).toContain("Not Now");
+    expect(text).toContain("Set Aside");
   });
 
   it("the same month downloaded again: nothing to Apply, one tap puts it away", () => {

@@ -18,7 +18,10 @@ import { keepPaperwork } from "@/app/(app)/organize/paperwork-actions";
  *   SHELL 123 ANYTOWN · 3 charges · $288.45   [Fuel] [Truck] [Personal] [Other…]
  *   Deposit Sep 4 · $1,275.00        [On INV-1001] [Other Income] [Already Counted Or Not Income] [Other…]
  *   Check 1043 · $640.00             [Pay Pat] [Other…]
- *   [Apply] [Not Now]
+ *   [Apply] [Set Aside]
+ *
+ * ONE WORD, ONE MEANING: a picked answer is cleared by tapping it again (the Other… list's empty
+ * choice is "Choose…"); Set Aside puts the WHOLE download away.
  *
  * THE APP'S GUESS IS MARKED "Guess" AND NEVER PICKED FOR YOU (fill-vs-execute): a row counts only
  * once a person taps an answer. A row with no guess says so; the usual answers beside it are never
@@ -130,11 +133,6 @@ function Row({
         <Button variant="outline" onClick={() => setOpen((o) => !o)} disabled={working} aria-expanded={open}>
           Other…
         </Button>
-        {picked && (
-          <Button variant="outline" onClick={() => onPick(undefined)} disabled={working}>
-            Not Now
-          </Button>
-        )}
       </div>
       {open && (
         <Select
@@ -147,7 +145,7 @@ function Row({
           }}
           disabled={working}
         >
-          <option value="">Not Now</option>
+          <option value="">Choose…</option>
           {others.map((o) => (
             <option key={o.id} value={o.id}>
               {o.label}
@@ -170,8 +168,8 @@ export function BankCard({ itemId, view, run, busy, working }: { itemId: string;
   const [four, setFour] = useState("");
 
   const notNow = (
-    <Button variant="outline" onClick={() => run("keep", () => keepPaperwork(itemId), "Set aside.")} disabled={working} title="Set it aside in Organize's Archive">
-      <Archive /> Not Now
+    <Button variant="outline" onClick={() => run("keep", () => keepPaperwork(itemId), "Set aside.")} disabled={working} title="Set the whole download aside in Organize's Archive">
+      <Archive /> Set Aside
     </Button>
   );
   const undo = view?.canUndo ? (

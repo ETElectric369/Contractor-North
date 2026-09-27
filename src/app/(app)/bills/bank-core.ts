@@ -302,7 +302,7 @@ export async function loadBankBooks(supabase: Db, orgId: string, dl: BankDownloa
   return { books, problem: null };
 }
 
-/** The empty card a problem gives: the headline still reads, nothing can be pressed but Not Now. */
+/** The empty card a problem gives: the headline still reads, nothing can be pressed but Set Aside. */
 function problemView(dl: BankDownload, problem: string): BankView {
   const empty: BankBooks = {
     already: new Map(),
@@ -468,7 +468,7 @@ export async function applyBankCore(
       if (c) work.push({ line, sortedBy: "person", choice: c, group: d.group });
     }
   }
-  if (!work.length) return { ok: false, error: "Nothing to apply yet: answer a row first, or press Not Now." };
+  if (!work.length) return { ok: false, error: "Nothing to apply yet: answer a row first, or press Set Aside." };
 
   // CREW PAY ALREADY RECORDED: a person's "Pay Pat" on a line whose \$800 to Pat is already in North
   // (recorded after the bank posted it, or a check cashed late, and no bank line on it yet) MARKS
