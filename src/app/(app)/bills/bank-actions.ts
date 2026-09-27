@@ -4,8 +4,8 @@ import { revalidatePath } from "next/cache";
 import { dbError } from "@/lib/db-error";
 import { requireStaff } from "@/lib/staff-guard";
 import { proposalOf } from "@/lib/paperwork";
-import { applyingNow } from "@/lib/bank-download";
-import { applyBankCore, proposalAfterUndo, undoBankCore } from "./bank-core";
+import { applyingNow, swapDownloadSigns, type StoredBank } from "@/lib/bank-download";
+import { applyBankCore, proposalAfterUndo, sha256Hex, undoBankCore } from "./bank-core";
 
 /**
  * A BANK DOWNLOAD'S BUTTONS (2026-09-27). There is no import button: the download arrives through
@@ -38,6 +38,36 @@ export async function applyBankDownload(id: string, opts: { fingerprint: string;
   });
   revalidateBank();
   return res;
+}
+
+/**
+ * MONEY IN AND OUT THE OTHER WAY ROUND: a card's download that prints its charges as positive and
+ * wasn't recognised as one (or was, wrongly). Only before anything is applied from it: after that,
+ * its lines are in bank_lines under the sign they were counted with, and Undo comes first.
+ */
+export async function swapBankDownload(id: string): Promise<Result> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  if (!ctx.orgId) return { ok: false, error: "Your sign-in isn't attached to a company yet." };
+  const { data: item } = await ctx.supabase.from("organized_items").select("*").eq("id", id).eq("org_id", ctx.orgId).maybeSingle();
+  if (!item) return { ok: false, error: "That bank download isn't here any more." };
+  const p = proposalOf(item);
+  const stored = p.bankImport as StoredBank | undefined;
+  if (!stored?.download) return { ok: false, error: "This paper isn't a bank download." };
+  if (item.status !== "needs_review" || (stored.applied?.length ?? 0) > 0 || applyingNow(stored))
+    return { ok: false, error: "Some of this download is already counted. Undo it first, then swap money in and out." };
+  const download = swapDownloadSigns(stored.download, sha256Hex);
+  const { data: back, error } = await ctx.supabase
+    .from("organized_items")
+    .update({ proposal: { ...p, bankImport: { ...stored, download } } })
+    .eq("id", id)
+    .eq("org_id", ctx.orgId)
+    .eq("status", "needs_review")
+    .select("id");
+  if (error) return { ok: false, error: `Nothing was changed. ${dbError(error)}` };
+  if (!back?.length) return { ok: false, error: "Nothing was changed: the download was applied or removed from another screen." };
+  revalidateBank();
+  return { ok: true, message: download.swapped ? "Swapped: charges are money out now." : "Swapped back: money in and out read as the file prints them." };
 }
 
 /**

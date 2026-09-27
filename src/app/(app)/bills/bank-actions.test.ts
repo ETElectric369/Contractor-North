@@ -23,7 +23,7 @@ vi.mock("@/lib/observe", () => ({ reportError: () => {} }));
 vi.mock("@/lib/pdf-cache", () => ({ bustDocPdf: vi.fn(async () => {}), warmDocPdf: vi.fn(async () => {}) }));
 
 import { addOpenList } from "./open-list-actions";
-import { applyBankDownload, undoBankDownload } from "./bank-actions";
+import { applyBankDownload, swapBankDownload, undoBankDownload } from "./bank-actions";
 import { applyBankCore, bankViews, BANK_NEEDS_UPDATE } from "./bank-core";
 import { undoPaperwork } from "@/app/(app)/organize/actions";
 
@@ -248,6 +248,22 @@ describe("the door", () => {
     // Another company's supplier, invoice and crew are never offered.
     expect(JSON.stringify(v)).not.toMatch(/Someone Else|INV-9|Other Crew/);
     expect(v.otherOut.map((b) => b.label)).toContain("Pay Contractor Supply");
+  });
+});
+
+describe("Swap Money In And Out", () => {
+  it("flips a download nothing was applied from, and refuses once some of it is counted", async () => {
+    const id = await drop(`Date,Description,Amount\n09/01/2026,SHELL OIL 9 ANYTOWN,62.10\n09/02/2026,COFFEE CART,4.50\n`, "card.csv");
+    expect((await view(id)).rows.every((r) => r.direction === "in")).toBe(true);
+    expect((await view(id)).canSwap).toBe(true);
+    const res = await swapBankDownload(id);
+    expect(res).toMatchObject({ ok: true, message: "Swapped: charges are money out now." });
+    const v = await view(id);
+    expect(v.swapped).toBe(true);
+    expect(v.rows.every((r) => r.direction === "out")).toBe(true);
+    await applyBankDownload(id, { fingerprint: v.fingerprint, picks: { [rowBy(v, "SHELL").id]: "cost:Gas & Truck:fuel" } });
+    expect(db.bills).toHaveLength(1);
+    expect((await swapBankDownload(id)).error).toMatch(/Undo it first/);
   });
 });
 

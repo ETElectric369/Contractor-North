@@ -20,6 +20,7 @@ import {
   readBankTable,
   redactDigits,
   ruleFor,
+  swapDownloadSigns,
   validPicks,
   type BankBooks,
   type BankDownload,
@@ -158,6 +159,50 @@ CHECK,09/05/2026,CHECK 2001,-300.00,CHECK_PAID,1700.00,2001
     expect(dl.skipped[1].why).toMatch(/No date on it/);
     const all = readBankTable(parseCSV(`Date,Description,Amount\n3rd of Sep 2026,SHOP RENT,-650.00\n`), "odd.csv", hash)!;
     expect(noLinesSaid(all, "odd.csv")).toMatch(/^odd\.csv: none of its dates read/);
+  });
+
+  it("a card's download that prints charges as positive is read the other way round", () => {
+    const card = readBankTable(
+      parseCSV(`Date,Description,Amount
+09/01/2026,SHELL OIL 57444 ANYTOWN,62.10
+09/02/2026,HOME HARDWARE 55,45.00
+09/03/2026,COFFEE CART,4.50
+09/05/2026,AUTOPAY PAYMENT - THANK YOU,-500.00
+`),
+      "card.csv",
+      hash,
+    )!;
+    expect(card.swapped).toBe(true);
+    expect(card.lines.map((l) => l.cents)).toEqual([-6210, -4500, -450, 50000]);
+    // The payment is money in on the card's download, and it is not income.
+    expect(guessFor(card.lines[3], ORG_BOOKS())).toEqual({ choice: "not_income" });
+    // A card member column says so on its own.
+    const amex = readBankTable(parseCSV(`Date,Description,Card Member,Amount\n09/01/2026,SHELL OIL,PAT CREW,62.10\n09/02/2026,HOME HARDWARE,PAT CREW,45.00\n`), "amex.csv", hash)!;
+    expect(amex.lines.map((l) => l.cents)).toEqual([-6210, -4500]);
+    // A checking export with a running balance is read as printed, even when its few debits are payments.
+    const checking = readBankTable(
+      parseCSV(`Date,Description,Amount,Balance\n09/01/2026,CUSTOMER DEPOSIT,900.00,900.00\n09/02/2026,DEPOSIT,500.00,1400.00\n09/03/2026,ONLINE PAYMENT THANK YOU,-100.00,1300.00\n`),
+      "chk.csv",
+      hash,
+    )!;
+    expect(checking.swapped).toBeUndefined();
+    expect(checking.lines.map((l) => l.cents)).toEqual([90000, 50000, -10000]);
+    // A Chase-style card export (charges negative, the payment positive) is read as printed.
+    const chase = readBankTable(parseCSV(`Transaction Date,Description,Amount\n09/01/2026,SHELL OIL,-62.10\n09/05/2026,Payment Thank You-Mobile,500.00\n`), "chase.csv", hash)!;
+    expect(chase.lines.map((l) => l.cents)).toEqual([-6210, 50000]);
+    expect(guessFor(chase.lines[1], ORG_BOOKS())).toEqual({ choice: "not_income" });
+  });
+
+  it("a person's Swap flips every line and makes its key again", () => {
+    const dl = readBankTable(parseCSV(`Date,Description,Amount\n09/01/2026,SHELL OIL,62.10\n09/01/2026,SHELL OIL,62.10\n`), "x.csv", hash)!;
+    expect(dl.swapped).toBeUndefined();
+    const flipped = swapDownloadSigns(dl, hash);
+    expect(flipped.swapped).toBe(true);
+    expect(flipped.lines.map((l) => l.cents)).toEqual([-6210, -6210]);
+    expect(new Set(flipped.lines.map((l) => l.key)).size).toBe(2);
+    expect(flipped.lines[0].key).not.toBe(dl.lines[0].key);
+    // Swapped twice is the file as it was.
+    expect(swapDownloadSigns(flipped, hash).lines.map((l) => l.key)).toEqual(dl.lines.map((l) => l.key));
   });
 
   it("an unsigned Amount with a Debit/Credit type column reads the type", () => {

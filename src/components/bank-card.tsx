@@ -2,12 +2,12 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Archive, Check, Loader2, Undo2 } from "lucide-react";
+import { Archive, ArrowLeftRight, Check, Loader2, Undo2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/input";
 import { sayDollars } from "@/lib/supplier-open-list";
 import type { BankRowView, BankView, FlowSegment } from "@/lib/bank-download";
-import { applyBankDownload, undoBankDownload } from "@/app/(app)/bills/bank-actions";
+import { applyBankDownload, swapBankDownload, undoBankDownload } from "@/app/(app)/bills/bank-actions";
 import { keepPaperwork } from "@/app/(app)/organize/paperwork-actions";
 
 /**
@@ -249,7 +249,8 @@ export function BankCard({ itemId, view, run, busy, working }: { itemId: string;
         )}
         {undo}
       </div>
-      {(view.sorted.length > 0 || view.skipped.length > 0) && (
+      {view.swapped && <p className="text-xs text-slate-600">Read as a card&apos;s download: its charges are money out, its payments and credits money in.</p>}
+      {(view.sorted.length > 0 || view.skipped.length > 0 || view.canSwap) && (
         <details className="rounded-lg border border-slate-200 px-3 py-2 text-sm">
           <summary className="flex min-h-11 cursor-pointer items-center font-medium text-slate-700">See How It Sorted</summary>
           <div className="mt-2 space-y-3">
@@ -267,6 +268,18 @@ export function BankCard({ itemId, view, run, busy, working }: { itemId: string;
             <p className="text-xs text-slate-500">
               Matched means it is already in North (a payment, a bill, a supplier or crew payment): Apply only marks it, never adds it again. Owner&apos;s Draw and Personal are kept as the bank line only, never a cost.
             </p>
+            {view.canSwap && (
+              <div className="space-y-1.5">
+                <p className="text-xs text-slate-500">
+                  {view.swapped
+                    ? "This file prints charges as positive, so they were read as money out. If that is wrong, swap them back."
+                    : "Charges showing as Money In? Some card downloads print them that way round."}
+                </p>
+                <Button variant="outline" onClick={() => run("swap", () => swapBankDownload(itemId))} disabled={working}>
+                  {busy === "swap" ? <Loader2 className="animate-spin" /> : <ArrowLeftRight />} Swap Money In And Out
+                </Button>
+              </div>
+            )}
             {view.skipped.length > 0 && (
               <div>
                 <p className="font-medium text-slate-800">Lines That Didn&apos;t Read ({view.skipped.length})</p>

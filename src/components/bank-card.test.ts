@@ -11,7 +11,7 @@ import type { FuelTrend } from "@/lib/analytics/fuel-trend";
  */
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh() {} }) }));
-vi.mock("@/app/(app)/bills/bank-actions", () => ({ applyBankDownload: vi.fn(), undoBankDownload: vi.fn() }));
+vi.mock("@/app/(app)/bills/bank-actions", () => ({ applyBankDownload: vi.fn(), undoBankDownload: vi.fn(), swapBankDownload: vi.fn() }));
 vi.mock("@/app/(app)/organize/paperwork-actions", () => ({ keepPaperwork: vi.fn() }));
 
 import { BankCard } from "./bank-card";
@@ -70,6 +70,8 @@ const VIEW: BankView = {
   skipped: [],
   appliedSaid: null,
   canUndo: false,
+  swapped: false,
+  canSwap: false,
   problem: null,
 };
 

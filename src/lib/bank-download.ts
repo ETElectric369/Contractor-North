@@ -122,6 +122,9 @@ export type BankDownload = {
   skipped: { line: number; why: string }[];
   /** The header's own words, for the column choice a later file with the same headers reuses. */
   header: string[];
+  /** Money in and out were read the other way round from how the file prints them: a card's
+   *  download that prints charges as positive (found by the reader, or a person's Swap). */
+  swapped?: boolean;
 };
 
 /** Every run of 6 or more digits, even printed in groups ("1234-5678-9012"), cut to its last 4. */
@@ -274,6 +277,46 @@ export function noLinesSaid(dl: Pick<BankDownload, "skipped">, name: string): st
 const CREDIT_TYPE = /\b(credit|cr|deposit|dep|directdep|refund|return|dslip|interest|int|div|dividend|incoming|transfer in|xfer in|transfer from)\b/i;
 const DEBIT_TYPE = /\b(debit|dr|withdrawal|check|payment|fee|srvchg|sale|purchase|pos|atm|xfer|transfer|directdebit|ach|cash|repeatpmt)\b/i;
 
+/** What a card company prints on the payment the company made to its card. */
+const CARD_THANKS_RE = /\b(thank you|thankyou|autopay|auto[- ]?pay|auto[- ]?pmt|payment received)\b/i;
+/** A line that takes money OFF a card: its payment, a credit, a return. */
+const CARD_CREDIT_RE = /\b(payment|pymt|pmt|thank you|autopay|auto[- ]?pay|credit|return|refund)\b/i;
+
+/**
+ * A CARD'S DOWNLOAD THAT PRINTS CHARGES AS POSITIVE (many card exports do: a charge adds to what is
+ * owed). Read as printed, every charge would be money in. Swapped only on a strong sign: a card
+ * member column, or (with no running balance, which a checking export carries) every negative line
+ * a payment or credit, at least one of them the card's own "thank you" / autopay words, and most
+ * lines positive. Anything else is read as printed; the card's Swap is the person's way round.
+ */
+function chargesPrintedPositive(lines: readonly { cents: number; description: string }[], header: readonly string[], hasBalance: boolean): boolean {
+  const negatives = lines.filter((l) => l.cents < 0);
+  const positives = lines.length - negatives.length;
+  if (positives <= negatives.length) return false;
+  if (header.some((h) => /card\s*member|cardmember/i.test(String(h ?? "")))) return true;
+  if (hasBalance || !negatives.length) return false;
+  return negatives.some((l) => CARD_THANKS_RE.test(l.description)) && negatives.every((l) => CARD_CREDIT_RE.test(l.description));
+}
+
+/**
+ * MONEY IN AND OUT THE OTHER WAY ROUND (the card's Swap, or the reader's own finding). Each line's
+ * sign flips and a key made from the line (not a bank's own id) is made again from the new sign.
+ * Only for a download nothing has been applied from: no line is in bank_lines under the old key.
+ */
+export function swapDownloadSigns(dl: BankDownload, hash: Hasher): BankDownload {
+  const seen = new Map<string, number>();
+  const lines = dl.lines.map((l) => {
+    const cents = -l.cents;
+    const description = l.description === "Deposit" ? "Withdrawal" : l.description === "Withdrawal" ? "Deposit" : l.description;
+    if (l.key.startsWith("fitid:")) return { ...l, cents, description };
+    const same = `${l.last4 ?? ""}|${l.postedOn}|${cents}|${description.toUpperCase()}`;
+    const repeat = seen.get(same) ?? 0;
+    seen.set(same, repeat + 1);
+    return { ...l, cents, description, key: lineKeyOf(hash, { last4: l.last4, fitid: null, postedOn: l.postedOn, cents, description }, repeat) };
+  });
+  return { ...dl, lines, swapped: !dl.swapped };
+}
+
 /**
  * A TABLE INTO A DOWNLOAD. Null when it isn't one (no bank header). Every row that doesn't read is
  * kept by line with the reason, never dropped: a pending line, a line with no day or no amount.
@@ -353,6 +396,15 @@ export function readBankTable(table: readonly (readonly string[])[], name: strin
     });
     fitids.push(cell(r, c.id) || null);
   });
+  // A card's download that prints its charges as positive is read the other way round.
+  const swapped = c.amount !== undefined && !unsigned && chargesPrintedPositive(raw, (table[header.row] ?? []).map(String), c.balance !== undefined);
+  if (swapped) {
+    for (const l of raw) {
+      l.cents = -l.cents;
+      if (l.description === "Deposit") l.description = "Withdrawal";
+      else if (l.description === "Withdrawal") l.description = "Deposit";
+    }
+  }
   // The account the file is for: its most common last 4 (a file may mix a card and checking).
   const tally = new Map<string, number>();
   for (const l of raw) if (l.last4) tally.set(l.last4, (tally.get(l.last4) ?? 0) + 1);
@@ -374,6 +426,7 @@ export function readBankTable(table: readonly (readonly string[])[], name: strin
     lines,
     skipped,
     header: (table[header.row] ?? []).map((h) => String(h ?? "").trim().slice(0, 60)),
+    ...(swapped ? { swapped: true } : {}),
   };
 }
 
@@ -609,9 +662,10 @@ export function guessFor(line: BankLine, books: BankBooks): BankChoice | null {
   if (line.cents > 0) {
     const hits = books.invoices.filter((i) => i.balanceCents === line.cents);
     if (hits.length === 1) return { choice: "invoice", invoiceId: hits[0].id };
-    // Money moved in from another of the company's own accounts is not income; a processor's
-    // payout of customers' money is, and gets no guess (the person says which).
-    if (TRANSFER_RE.test(line.description) && !PROCESSOR_RE.test(line.description)) return { choice: "not_income" };
+    // Money moved in from another of the company's own accounts is not income, and neither is the
+    // payment that shows as money in on a card's own download ("Payment Thank You"); a processor's
+    // payout of customers' money is income, and gets no guess (the person says which).
+    if ((TRANSFER_RE.test(line.description) || CARD_THANKS_RE.test(line.description)) && !PROCESSOR_RE.test(line.description)) return { choice: "not_income" };
     return null;
   }
   const amount = -line.cents;
@@ -1112,6 +1166,10 @@ export type BankView = {
   skipped: { line: number; why: string }[];
   appliedSaid: string | null;
   canUndo: boolean;
+  /** Money in and out were read the other way round from how the file prints them. */
+  swapped: boolean;
+  /** Nothing applied yet: a person may still swap money in and out. */
+  canSwap: boolean;
   problem: string | null;
 };
 
@@ -1185,6 +1243,8 @@ export function bankViewOf(dl: BankDownload, plan: BankPlan, books: BankBooks, o
     skipped: dl.skipped,
     appliedSaid,
     canUndo: passes.length > 0,
+    swapped: !!dl.swapped,
+    canSwap: passes.length === 0 && dl.lines.length > 0,
     problem: null,
   };
 }
