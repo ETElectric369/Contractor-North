@@ -176,7 +176,7 @@ function EditKitModal({ kit, onClose }: { kit: Kit; onClose: () => void }) {
       footer={<ModalActions onCancel={onClose} onSave={save} saving={pending} disabled={!name.trim()} />}
     >
       <div className="space-y-3">
-        <div><Label htmlFor="ek-name">Kit name</Label><Input id="ek-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. 200A panel upgrade" /></div>
+        <div><Label htmlFor="ek-name">Kit name</Label><Input id="ek-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="A name for the whole assembly" /></div>
         <div><Label htmlFor="ek-cat">Category</Label><Input id="ek-cat" value={category} onChange={(e) => setCategory(e.target.value)} /></div>
         {err && <p className="text-sm text-red-600">{err}</p>}
       </div>
@@ -510,7 +510,7 @@ export function KitsManager({ kits, priceItems, defaultMarkupPct = 0, measuremen
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing) create(); }}
-                placeholder="e.g. 200A panel upgrade"
+                placeholder="A name for the whole assembly"
               />
             </div>
             <div className="sm:w-40"><Label htmlFor="k-cat">Category</Label><Input id="k-cat" value={category} onChange={(e) => setCategory(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing) create(); }} /></div>

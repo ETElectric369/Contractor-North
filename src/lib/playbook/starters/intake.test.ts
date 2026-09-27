@@ -92,7 +92,7 @@ describe("end to end: what a customer fills in is what the inspector already has
       "Decking material",
       "Shape",
       "Wraps the house",
-      "TRPA basin",
+      "Regional permits",
       "Anything else",
     ]);
     expect(answers.length_ft).toBeUndefined();

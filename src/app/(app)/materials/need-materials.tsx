@@ -61,7 +61,7 @@ export function NeedMaterials({ jobId }: { jobId: string }) {
       <Textarea
         rows={2}
         value={text}
-        placeholder="The 12-2 on the list won't do it for the far wall — need it by tomorrow morning."
+        placeholder="A rush, a swap, a question: say what, and by when."
         onChange={(e) => { setText(e.target.value); setErr(null); }}
       />
       <div className="mt-2 flex flex-wrap items-center gap-3">

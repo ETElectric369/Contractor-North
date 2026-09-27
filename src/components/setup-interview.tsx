@@ -193,7 +193,7 @@ export function SetupInterview({
               hint={open[0]?.ask}
               nortOn={nortOn}
               label="Tell Nort about your business"
-              placeholder="I'm Sam Rivera, a general contractor — I sub out electrical and plumbing, I cover the whole county, and I bill 150 an hour."
+              placeholder="Your name, your trade, the town you work out of, how far you go, and what you charge an hour."
               onFilled={(next) => {
                 setAnswers(next);
                 setDirty(true);

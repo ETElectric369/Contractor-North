@@ -1,5 +1,5 @@
 import { askFromLabel } from "@/lib/playbook/from-sheet";
-import { WHY_ASK, whyHint } from "@/lib/playbook/why";
+import { WHY_ASK, WHY_SHAPES, whyHint } from "@/lib/playbook/why";
 import type { Need, Playbook } from "@/lib/playbook/types";
 
 /**
@@ -26,50 +26,58 @@ import type { Need, Playbook } from "@/lib/playbook/types";
  * boundary: unstructured out of a structure that was already decided.
  */
 
+/**
+ * THE DRAFTER'S INSTRUCTIONS NAME NO TRADE. Its examples were a panel, a subpanel fork, a board
+ * count and conduit fill: a painter's draft came back reasoning like an electrician. The shapes
+ * are taught with the same trade-neutral lines every screen shows (lib/playbook/why WHY_SHAPES),
+ * and the trade comes only from ABOUT THEM, the company's own words.
+ */
 export const DRAFT_SYSTEM =
-  "You are helping a contractor write the walk-through questions his own app will ask him on a job " +
-  "site, and — more importantly — WHERE EACH ANSWER ENDS UP IN HIS PRICE.\n\n" +
+  "You are helping a contractor write the walk-through questions their own app will ask them on a job " +
+  "site, and — more importantly — WHERE EACH ANSWER ENDS UP IN THEIR PRICE.\n\n" +
   "For each question, return two things:\n\n" +
   "  ask — the question as a person would SAY it out loud, on site, to another human. Not a form " +
-  "label. 'Panel' is not a question. \"What's the panel — brand, size, any room in it?\" is.\n" +
+  "label. 'Access' is not a question. \"How do we get to it — anything in the way?\" is.\n" +
   "  why — THE PATH FROM THE ANSWER TO THE NUMBER. Not a justification, not a story about what goes " +
-  "wrong. State where the answer LANDS in his estimate. It takes one of three shapes:\n" +
-  "      A CALCULATION — \"Length × width is the square footage, and that drives the board count.\"\n" +
-  "      A FORK        — \"Decides subpanel or home runs, which sets every run length after it.\"\n" +
-  "      A TRIGGER     — \"Permitted means an inspection before cover — that's a second trip.\"\n\n" +
+  "wrong. State where the answer LANDS in their estimate. It takes one of three shapes:\n" +
+  WHY_SHAPES.map((s) => `      ${s.label.toUpperCase()} — "${s.example}"\n`).join("") +
+  "\n" +
   "RULES FOR THE WHY, AND THEY ARE THE WHOLE JOB:\n" +
-  "- ONE SENTENCE. Two at the absolute most. If it needs a paragraph you have written a story " +
+  "- ONE SENTENCE, at most 140 characters. If it needs a paragraph you have written a story " +
   "instead of a path. A contractor reviewing fifteen of these has to be able to read each in about " +
   "three seconds.\n" +
   "- IT MUST NAME A DESTINATION — a number it feeds, a decision it settles, or work it switches on. " +
   "A line that says the question is important and nothing else is worthless.\n" +
-  "- WRITE IT THE WAY HE'D SAY IT ON THE PHONE. Short, blunt, no commas stacked up. \"Tells me how " +
-  "much wire.\" is a better line than three clauses about conduit fill.\n" +
-  "- NEVER RESTATE THE QUESTION. \"I need to know the panel brand\" is the question said backwards " +
+  "- WRITE IT THE WAY THEY'D SAY IT ON THE PHONE. Short, blunt, no commas stacked up. \"Tells me how " +
+  "many hours.\" is a better line than three clauses about why hours matter.\n" +
+  "- NEVER RESTATE THE QUESTION. \"I need to know the access\" is the question said backwards " +
   "and carries nothing.\n" +
   "- If it is a number, say the ARITHMETIC — what it multiplies with and what comes out. That is the " +
-  "most useful kind, because a machine can act on it.\n\n" +
+  "most useful kind, because a machine can act on it.\n" +
+  "- THEIR TRADE, IN THEIR TERMS. Write in the trade ABOUT THEM names, with the words that trade uses. " +
+  "Never borrow another trade's items, and never invent a price code, a rate, an item or a number " +
+  "that isn't in what you were given — say 'the rate' or 'that line' instead.\n\n" +
   "OTHER RULES:\n" +
   "- NEVER invent, remove, merge or reorder questions. You get a list of keys; return exactly those " +
   "keys, no more, no fewer. You are writing prose for questions somebody else chose.\n" +
-  "- Use what he actually told you. If he said he subs out electrical, do not write a why that " +
-  "assumes he pulls his own wire.\n" +
-  "- Never mention this app, 'the system', or the software. He is describing his trade, not ours.\n\n" +
+  "- Use what they actually told you. If they said they sub out part of the work, do not write a " +
+  "why that assumes they do that part themselves.\n" +
+  "- Never mention this app, 'the system', or the software. They are describing their trade, not ours.\n\n" +
   'Return ONLY a JSON object: { "needs": [ { "key": "...", "ask": "...", "why": "..." } ] }.';
 
 /** The questions he already has, described for drafting — keys and shape only, never our prose. */
 export function draftRequest(pb: Playbook, about: string): string {
   const lines = pb.needs.map((n) => {
     const bits = [`- key: ${n.key}`, `  currently called: ${n.label}`];
-    if (n.slot?.type === "select") bits.push(`  he picks one of: ${n.slot.options.join(" | ")}`);
+    if (n.slot?.type === "select") bits.push(`  they pick one of: ${n.slot.options.join(" | ")}`);
     else if (n.slot?.type === "number") bits.push(`  a number${n.slot.unit ? ` in ${n.slot.unit}` : ""}`);
-    else if (n.slot) bits.push("  he types it");
-    else bits.push("  he says it in his own words");
+    else if (n.slot) bits.push("  they type it");
+    else bits.push("  they say it in their own words");
     if (n.measured) bits.push("  measured on site — this number feeds a price");
-    if (n.why) bits.push(`  his existing reason (IMPROVE, do not discard): ${n.why}`);
+    if (n.why) bits.push(`  their existing reason (IMPROVE, do not discard): ${n.why}`);
     return bits.join("\n");
   });
-  return `ABOUT HIM:\n${about}\n\nHIS QUESTIONS:\n${lines.join("\n")}`;
+  return `ABOUT THEM:\n${about}\n\nTHEIR QUESTIONS:\n${lines.join("\n")}`;
 }
 
 /**

@@ -137,7 +137,7 @@ export function SplashSettings({ settings, portfolio = [], orgId }: { settings: 
             ))}
           </div>
         </div>
-        <Input id="sp-headline" value={headline} onChange={(e) => setHeadline(e.target.value)} placeholder="e.g. High-End Custom Lighting" className="mt-1" />
+        <Input id="sp-headline" value={headline} onChange={(e) => setHeadline(e.target.value)} placeholder="e.g. what you're best known for" className="mt-1" />
         <p className="mt-1 text-xs text-slate-400">Leave blank to hide the big headline entirely.</p>
       </div>
       <div>
@@ -146,7 +146,7 @@ export function SplashSettings({ settings, portfolio = [], orgId }: { settings: 
       </div>
       <div>
         <Label htmlFor="sp-bullets">Highlights (one per line)</Label>
-        <Textarea id="sp-bullets" rows={3} value={bullets} onChange={(e) => setBullets(e.target.value)} placeholder={"All phases of electrical infrastructure\nComplex troubleshooting\nCustom lighting design & fabrication"} />
+        <Textarea id="sp-bullets" rows={3} value={bullets} onChange={(e) => setBullets(e.target.value)} placeholder={"What you do, one per line\nWhat you're known for\nWhat sets you apart"} />
       </div>
       <div>
         <Label htmlFor="sp-cred">Below-contact lines (one per line)</Label>

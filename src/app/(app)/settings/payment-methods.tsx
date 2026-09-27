@@ -43,7 +43,7 @@ export function PaymentMethods({ settings }: { settings: OrgSettings }) {
           <Input
             value={venmo}
             onChange={(e) => setVenmo(e.target.value)}
-            placeholder="ETElectric"
+            placeholder="YourBusiness"
             className="h-8 w-48 text-sm"
           />
         </div>

@@ -1,3 +1,5 @@
+import { WHY_SHAPES } from "@/lib/playbook/why";
+
 /**
  * THE GUIDED TOUR — Nort walks you round the app, out loud, pointing at real buttons.
  *
@@ -241,7 +243,7 @@ export const TOUR: TourStep[] = [
     say:
       "Last one, and it's per person, so you and whoever's in the office don't have to agree. " +
       "There's a dial in here for how funny I am and a switch for language, so when you're swearing " +
-      "at a seized breaker I'm not answering you like a call centre. I match you and I never go " +
+      "at a job that's fighting you I'm not answering you like a call centre. I match you and I never go " +
       "first — if you don't swear, you'll never hear it out of me. And none of it ever reaches a " +
       "customer: estimates, invoices, anything a homeowner reads stays clean wherever that dial sits.",
   },
@@ -315,7 +317,7 @@ export const LESSONS: Lesson[] = [
   {
     key: "why-lines",
     title: "Why lines",
-    blurb: "What a why line is, two real ones, how to write yours — the part nobody guesses.",
+    blurb: "What a why line is, the three shapes it takes, how to write yours — the part nobody guesses.",
     steps: [
   // ── 2. THE WHY LINE. The part nobody figures out unaided. ──────────────────────────────────
   {
@@ -334,15 +336,20 @@ export const LESSONS: Lesson[] = [
         "Not why it matters. Where it lands.",
     },
   },
+  // THE SHAPES, NOT SOMEBODY ELSE'S TRADE. This step was "two real ones": a deck builder's board
+  // count and an electrician's subpanel fork, shown to a plumber and a painter alike, and neither
+  // line was even live any more (nothing in the app counts boards or joists). Erik: "Nort cant be
+  // giving examples that dont make sense like in the tour." Until a lesson can show the company's
+  // OWN lines (Wave B), it shows the three shapes in words every trade shares (lib/playbook/why).
   {
     key: "why-example",
-    title: "Two real ones",
+    title: "The three shapes",
     say:
-      "A deck builder asks length and width. His why line: 'Length times width is the square " +
-      "footage, and that drives the board count and the joists.' That's it. That's the whole line. " +
-      "You can follow it from the answer to the number.\n\n" +
-      "An electrician asks about the panel. His: 'Decides subpanel or home runs — which sets every " +
-      "run length after it.' Same shape. The answer goes somewhere specific.",
+      "Every why line takes one of three shapes. It goes into a sum: " +
+      `'${WHY_SHAPES[0].example}' It decides which way the job goes: '${WHY_SHAPES[1].example}' ` +
+      `Or it turns something on: '${WHY_SHAPES[2].example}'\n\n` +
+      "That's it. That's the whole line. You can follow it from the answer to the number, and yours " +
+      "say it with your own questions and your own prices.",
   },
   {
     key: "why-how",
@@ -513,20 +520,21 @@ export const LESSONS: Lesson[] = [
     },
   },
   // The honest half of that same moment, and it stays welded to it: it carries the only concrete
-  // example in the whole tour ("two outlets on each of three walls").
+  // example in the whole tour ("two on each of three walls"), in no trade's words, since "outlets"
+  // meant nothing to a deck builder.
   {
     key: "trust",
     title: "One thing to know about me",
     say:
       "And a promise, because it's your money. I only fill in what you actually said. " +
-      "I won't work out a measurement you didn't give me — if you say two outlets on each of three " +
+      "I won't work out a measurement you didn't give me — if you say two on each of three " +
       "walls, I won't quietly write down six. I'll ask. " +
       "Anything I can't place goes in your notes word for word, so nothing you said gets lost.",
     plain: {
       title: "One thing to know",
       say:
         "And a promise, because it's your money. Only what you actually said gets filled in. " +
-        "A measurement you didn't give is never worked out — say two outlets on each of three " +
+        "A measurement you didn't give is never worked out — say two on each of three " +
         "walls and six is never quietly written down. It asks. " +
         "Anything it can't place goes in your notes word for word, so nothing you said gets lost.",
     },

@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { DOCK } from "@/lib/dock";
 import { LESSONS, TOUR, WHY_LINE_FEEDS_ESTIMATE, lessonBlurb, lessonByKey, sayOf, stepWords, tourIndex, type TourCtx } from "./tour";
 import { factsForEstimatorByProvenance } from "@/lib/playbook/answers";
+import { WHY_SHAPES } from "@/lib/playbook/why";
 
 /**
  * THE SPLIT (cn-v726): TOUR is now ONLY the setup — every step asks something saveSetup writes,
@@ -56,14 +57,14 @@ describe("the why-line lesson is actually in here", () => {
     expect(said).toContain("why line");
   });
 
-  it("the example is a REAL one, not a description of one", () => {
-    // An abstract "explain your reasoning" teaches nothing. The example carries a concrete cost.
-    const ex = sayOf(findStep("why-example").say, STRANGER).toLowerCase();
-    // Both brothers, both shapes: arithmetic and a fork. Erik on the old permit example: "the
-    // example in #7 makes no sense to me nor do my why lines."
-    expect(ex).toContain("board count");
-    expect(ex).toContain("home runs");
-    expect(ex.toLowerCase()).toContain("square footage");
+  it("the example shows all three shapes as whole lines, in no trade's words", () => {
+    // An abstract "explain your reasoning" teaches nothing, so each shape is a whole line. But it
+    // was a deck builder's board count and an electrician's subpanel, shown to every trade, and
+    // neither was even live. Erik: "Nort cant be giving examples that dont make sense like in the
+    // tour." The shapes come from lib/playbook/why, so the lesson and the why box never drift.
+    const ex = sayOf(findStep("why-example").say, STRANGER);
+    for (const s of WHY_SHAPES) expect(ex).toContain(s.example);
+    expect(ex).not.toMatch(/board count|joist|subpanel|home runs?|panel|breaker|outlet|deck builder|electrician/i);
   });
 
   it("and it promises the draft that comes next, so the hand-off isn't a surprise", () => {

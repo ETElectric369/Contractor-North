@@ -1743,7 +1743,7 @@ export async function aiReviewItem(id: string): Promise<{ ok: boolean; message: 
   "task_category": "office" | "operations" | "sales",
   "reason": one short sentence
 }
-Rules: "file_job" when anything on the paper points to one job in the list: its PO or job box (contractors write the job's name or street there, e.g. "13897 HERRINGBONE" is the job at 13897 Herringbone Way), a job name, a street (a street written without "Way", "Rd" and so on is still that street), a job number, or a customer. "overhead" only for a company-expense receipt with an amount; a supplier's finance charge, service charge, late fee or interest is "unsure", never "overhead". "task" when a note describes something to DO (call, order, schedule, follow up). "keep_note" for reference info. "unsure" if you genuinely can't tell.
+Rules: "file_job" when anything on the paper points to one job in the list: its PO or job box (contractors write the job's name or street there, e.g. "<number> <STREET NAME>" is the job at that street address), a job name, a street (a street written without "Way", "Rd" and so on is still that street), a job number, or a customer. "overhead" only for a company-expense receipt with an amount; a supplier's finance charge, service charge, late fee or interest is "unsure", never "overhead". "task" when a note describes something to DO (call, order, schedule, follow up). "keep_note" for reference info. "unsure" if you genuinely can't tell.
 ${selfNames.length ? `These names are the company itself and its people, printed as who the paper was sold to; they are never the customer or the job: ${selfNames.join(", ")}.\n` : ""}
 Open jobs (id — number name; address; customer):
 ${jobLines.join("\n") || "(none)"}`,

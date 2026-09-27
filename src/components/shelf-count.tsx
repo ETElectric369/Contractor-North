@@ -375,7 +375,7 @@ export function ShelfCountRow({
                 value={value.newItemName}
                 onChange={(e) => set({ newItemName: e.target.value })}
                 className="mt-2 h-11"
-                placeholder="12/2 NM-B"
+                placeholder="The item's name"
               />
             )}
             {item && item.unit !== value.unit && (

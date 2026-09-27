@@ -26,10 +26,23 @@ describe("the question never invites an essay", () => {
     expect(whyHint(need({ key: "gotcha" })).shape.key).toBe("trigger");
   });
 
-  it("every shape carries a REAL example, not a template", () => {
+  it("every shape carries a whole-sentence example, not a template", () => {
     for (const s of WHY_SHAPES) {
       expect(s.example.length).toBeGreaterThan(30);
       expect(s.example).not.toContain("…"); // the hint has ellipses; the example must be a real sentence
+      // The example passes the check it teaches, and fits the one-line law.
+      expect(whyProblems(s.example), s.key).toEqual([]);
+      expect(s.example.length).toBeLessThanOrEqual(WHY_MAX_CHARS);
+    }
+  });
+
+  it("...in NO trade's words: every company sees these, for every question", () => {
+    // A plumber's "Water heater type" was shown "subpanel or home runs"; a painter was shown an
+    // inspection trip. Erik: "Nort cant be giving examples that dont make sense."
+    const TRADE_NOUNS = /board|joist|deck|subpanel|home ?run|panel|breaker|wire|circuit|outlet|permit|inspection|pipe|drain|roof|paint|tile|square footage/i;
+    for (const s of WHY_SHAPES) {
+      expect(s.example, s.key).not.toMatch(TRADE_NOUNS);
+      expect(s.hint, s.key).not.toMatch(TRADE_NOUNS);
     }
   });
 });

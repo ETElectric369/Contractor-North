@@ -79,7 +79,9 @@ export const TAHOE_DECK: Playbook = {
       measured: true,
       feeds: ["what"],
       when: [{ key: "project_type", in: ["New deck", "Full deck replacement", "Resurface — new boards, keep the frame", "Add-on / extension"] }],
-      why: "Times the width is the square footage, and that drives the base rate and the board count.",
+      // TRUE TO THE MATH (lib/estimate/deck.ts): nothing counts boards or joists; the area is what
+      // every per-sq-ft rate multiplies.
+      why: "Times the width is the square footage, and every per-sq-ft rate (D1 or DS8, and the upgrades) is priced on it.",
     },
     {
       key: "width_ft",
@@ -153,7 +155,9 @@ export const TAHOE_DECK: Playbook = {
       slot: { type: "number" },
       measured: true,
       feeds: ["what"],
-      why: "Under 3 steps is a flat D3 per set; 3 or more prices per step at D4. The count decides which.",
+      // TRUE TO THE MATH: deck.ts never prices D3. Every step is D4, and a second set is flagged for
+      // a landing. Whether short sets should price at D3 is the company's call, not this line's.
+      why: "More than one set means a landing, flagged to check on site; the steps themselves price at D4 each.",
     },
     {
       key: "stair_steps",
@@ -163,7 +167,7 @@ export const TAHOE_DECK: Playbook = {
       measured: true,
       feeds: ["what"],
       when: [{ key: "stair_flights", known: true }],
-      why: "Times the D4 per-step rate on anything over a short set.",
+      why: "Times the D4 per-step rate — that's the stairs line.",
     },
     {
       key: "stair_railing",
@@ -172,7 +176,8 @@ export const TAHOE_DECK: Playbook = {
       slot: { type: "select", options: ["Yes", "No"] },
       feeds: ["what"],
       when: [{ key: "stair_flights", known: true }],
-      why: "Adds D5 per step of stair railing.",
+      // TRUE TO THE MATH: D5 is per linear foot of rail (deck.ts derives it from the steps).
+      why: "Yes adds D5 stair railing, priced per linear foot of rail.",
     },
     {
       key: "man_doors",
@@ -196,11 +201,13 @@ export const TAHOE_DECK: Playbook = {
     },
     {
       key: "trpa",
-      label: "TRPA basin",
-      ask: "Is the property in the Tahoe basin?",
+      // NEUTRAL WORDS (Wave A): a region is one company's own, and every deck company can start from
+      // this. The key stays `trpa` so a customer's answer still carries in from the public form.
+      label: "Regional permits",
+      ask: "Does a regional agency or district have its own permit rules here?",
       slot: { type: "select", options: ["Yes", "No"] },
       feeds: ["why", "when"],
-      why: "TRPA means the DS3C permitting package and a much longer runway before anyone breaks ground.",
+      why: "Yes means the regional permitting package (DS3C) in the price, and a much longer runway before anyone breaks ground.",
     },
     {
       key: "remodel_scopes",
@@ -211,10 +218,9 @@ export const TAHOE_DECK: Playbook = {
       when: [{ key: "project_type", in: ["Remodel"] }],
       why: "This IS the price — each piece he picks becomes a line, and the total is the estimate.",
       note:
-        "The R codes sit at $0.00 in his price list on purpose. Erik: \"they are based on " +
-        "calculations too, when he chooses remodel he needs to be able to choose from a dropdown of " +
-        "optional line items to add so he can add a value so it can be calculated ... it gets built " +
-        "with the inspection.\" A remodel has no square-foot rate — the scope is chosen standing " +
+        "The R codes sit at $0.00 in the price list on purpose: a remodel is priced by choosing the " +
+        "optional line items that apply and putting a value on each, standing on site, so it gets " +
+        "built with the walk-through. A remodel has no square-foot rate — the scope is chosen standing " +
         "there and priced standing there, and these picks arrive at the estimate as real lines.",
     },
     {

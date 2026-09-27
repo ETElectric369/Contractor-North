@@ -56,27 +56,33 @@ export const WHY_ASK_ALTS = [
 
 /**
  * THE THREE SHAPES A PATH TAKES. Not a setting anybody picks — a set of patterns to show, so the
- * first line somebody writes has something to be shaped like. One real example each, from real
- * playbooks in this app.
+ * first line somebody writes has something to be shaped like.
+ *
+ * THE EXAMPLES ARE SHAPES, NOT SOMEBODY'S TRADE. They were a deck builder's board count and an
+ * electrician's subpanel fork, shown to every company for every question: a plumber's "Water
+ * heater type" got "subpanel or home runs", and a painter got an inspection trip his trade preset
+ * switched off. Erik: "Nort cant be giving examples that dont make sense." So each example names
+ * only what every contractor's estimate has (a count, a unit price, a line, the price) and no
+ * trade's nouns; the company's own lines are the real examples, once it has some.
  */
 export const WHY_SHAPES = [
   {
     key: "formula",
     label: "It goes into a calculation",
     hint: "…times… = …, and that gives me…",
-    example: "Length × width is the square footage, and that drives the board count and the joists.",
+    example: "The count times the unit price is that line on the estimate.",
   },
   {
     key: "fork",
     label: "It decides which way the job goes",
     hint: "Decides… , which sets…",
-    example: "Decides subpanel or home runs — which sets every run length after it.",
+    example: "Decides which way the job goes, and that sets the lines after it.",
   },
   {
     key: "trigger",
     label: "It turns something on",
     hint: "If it's… then I also need…",
-    example: "Permitted means an inspection before cover — that's a second trip in the price.",
+    example: "A yes adds a line to the price; a no leaves it off.",
   },
 ] as const;
 

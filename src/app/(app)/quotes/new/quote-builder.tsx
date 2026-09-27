@@ -885,7 +885,7 @@ export function QuoteBuilder({
             </p>
             <Textarea
               rows={3}
-              placeholder="Describe the work — or, with a plan uploaded, what's already done / excluded. e.g. 'ADU upstairs only — garage & entryway done, panel & 2in conduit already in. 12 cans + 10 inserts + 2 gimbals.'"
+              placeholder="Describe the work — or, with a plan uploaded, what's already done or excluded, in your own words: which parts, how many, and what's already in."
               value={scope}
               onChange={(e) => setScope(e.target.value)}
             />
@@ -1360,7 +1360,7 @@ export function QuoteBuilder({
               <Label htmlFor="title">Title</Label>
               <Input
                 id="title"
-                placeholder="e.g. Panel upgrade"
+                placeholder="What the job is, in a few words"
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
               />
