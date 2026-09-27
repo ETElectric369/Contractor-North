@@ -187,14 +187,14 @@ export function SetupButton({
       {/* After the tour it opens on the draft (step 2), because the tour already asked the questions.
           With Nort off there was no tour, so it opens on the questions (step 1). */}
       <Modal open={mode === "questions"} onClose={() => setMode(null)} title="Your questions, and your why lines" size="lg">
-        <SetupInterview initial={initial} startAt={nortOn ? 2 : 1} onSaved={() => setMode(null)} />
+        <SetupInterview initial={initial} startAt={nortOn ? 2 : 1} onSaved={() => setMode(null)} nortOn={nortOn} />
       </Modal>
 
       {/* THE FINISH DOOR — the teal state's target. Opens on the SETUP QUESTIONS (step 1), not the
           tour: this person has already been walked through, and what's left is a couple of boxes
           with their whys beside them. */}
-      <Modal open={mode === "finish"} onClose={() => setMode(null)} title="A couple of things I still don't know" size="lg">
-        <SetupInterview initial={initial} startAt={1} onSaved={() => setMode(null)} />
+      <Modal open={mode === "finish"} onClose={() => setMode(null)} title={nortOn ? "A couple of things I still don't know" : "A couple of things still missing"} size="lg">
+        <SetupInterview initial={initial} startAt={1} onSaved={() => setMode(null)} nortOn={nortOn} />
       </Modal>
     </>
   );

@@ -47,6 +47,23 @@ describe("the paper readers say Nort only while Nort is on", () => {
   });
 });
 
+describe("the setup questions (Start Here with Nort off) say nothing as Nort", () => {
+  it("each Nort line has its neutral twin, and both mounts pass the switch", () => {
+    const s = src("src/components/setup-interview.tsx");
+    expect(s).toContain("nortOn={nortOn}");
+    expect(s).toContain('{nortOn ? "Just tell Nort" : "Just Say It"}');
+    expect(s).toContain("That usually means no trade is on file");
+    expect(s).toContain('"Save The Drafts And Read Them Later"');
+    // The Nort-voiced lines sit only inside a nortOn branch.
+    for (const l of unswitched("src/components/setup-interview.tsx")) expect(l).toMatch(/label="Tell Nort about your business"|I never got your trade|tell me your trade/);
+    const cap = src("src/components/setup-button.tsx");
+    const mounts = cap.split("\n").filter((l) => l.includes("<SetupInterview "));
+    expect(mounts).toHaveLength(2);
+    for (const l of mounts) expect(l).toContain("nortOn={nortOn}");
+    expect(cap).toContain('"A couple of things still missing"');
+  });
+});
+
 describe("the Lessons run in neutral words while Nort is off", () => {
   it("the cap's menu and the Playbook strip pass the switch to the lesson", () => {
     const cap = src("src/components/setup-button.tsx");
