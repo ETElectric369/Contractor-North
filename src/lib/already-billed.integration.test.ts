@@ -146,12 +146,14 @@ d("0357: Already Billed", () => {
         [org, job, `TEST-AB-PO${++seq}`, status, total],
       )
     ).id as string;
-  const shift = async (job: string, day: string, open = false) =>
+  // One person is in one place at a time (0360): each day's shift is its own, and a running clock is
+  // someone else's (the office's), so it never overlaps the tech's later shifts.
+  const shift = async (job: string, day: string, open = false, who = tech) =>
     (
       await one(
         `insert into public.time_entries (org_id, profile_id, job_id, clock_in, clock_out, lunch_minutes, status, source)
          values ($1, $2, $3, $4, $5, 0, $6, 'manual') returning id`,
-        [org, tech, job, `${day}T15:00:00Z`, open ? null : `${day}T23:00:00Z`, open ? "open" : "closed"],
+        [org, who, job, `${day}T15:00:00Z`, open ? null : `${day}T23:00:00Z`, open ? "open" : "closed"],
       )
     ).id as string;
   const state = async (lineId: string) =>
@@ -264,7 +266,7 @@ d("0357: Already Billed", () => {
     const draftPo = await po(jobA, "draft", 300);
     const billedPo = await po(jobA, "sent", 300);
     await bill(jobA, 300, { po: billedPo });
-    const running = await shift(jobA, "2001-06-20", true);
+    const running = await shift(jobA, "2001-06-20", true, staff);
     const otherJobShift = await shift(jobB, "2001-06-21");
     // Already on another invoice (an import on INV-X), and already on this one.
     const other = await invoice(jobA, "sent");
@@ -512,17 +514,18 @@ d("0357: Already Billed", () => {
     const inv = await invoice(jobA, "paid");
     const labor = await line(inv, { description: "Labor - TEST Tech", qty: 8, unit: "hr", price: 95 });
     await settleTotal(inv);
-    // The first piece is marked while the second (a Switch Job's piece) is still running.
-    const p = await shift(jobA, "2001-08-10");
+    // The first piece is marked while the second (a Switch Job's piece) is still running. The latest
+    // day in this file: a running clock runs until now, past every later shift of the same person.
+    const p = await shift(jobA, "2001-12-10");
     const s2 = (
       await one(
         `insert into public.time_entries (org_id, profile_id, job_id, clock_in, lunch_minutes, status, source, split_from, split_how)
-         values ($1, $2, $3, '2001-08-10T23:00:00Z', 0, 'open', 'app', $4, 'live') returning id`,
+         values ($1, $2, $3, '2001-12-10T23:00:00Z', 0, 'open', 'app', $4, 'live') returning id`,
         [org, tech, jobA, p],
       )
     ).id as string;
     await mark(staff, labor, [p]);
-    await c.query("update public.time_entries set clock_out = '2001-08-11T01:00:00Z', status = 'closed' where id = $1", [s2]);
+    await c.query("update public.time_entries set clock_out = '2001-12-11T01:00:00Z', status = 'closed' where id = $1", [s2]);
     await mark(staff, labor, [s2]);
     expect((await state(labor)).hand).toEqual([p, s2]);
     // Undo of the second mark: only the second piece comes off.
