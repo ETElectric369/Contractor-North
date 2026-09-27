@@ -159,12 +159,19 @@ const openedWords = (j: PaperJob) => (j.opened ? `Opened ${formatDateShort(j.ope
 // mount, and SupplierPaperDoneTrail shows them where the line was while no card set is on screen.
 // Without a `scope` a card set keeps its own (the /bills list never vanishes).
 
-type Scope = { done: Record<string, Done>; live: number };
+//
+// THE OPEN ALREADY BILLED SHEET IS KEPT THERE TOO. Already Billed On J-010 on the LAST card files the
+// paper, and the filing's revalidate clears the line in the same pass that answers the tap: a sheet
+// held in the card set's own state went with it, and so did "It is not marked Already Billed", which
+// only its close can say. Kept in the scope, whichever instance is on screen (the card set, or the
+// trail once the line is gone) draws the same sheet.
+
+type Scope = { done: Record<string, Done>; live: number; marking: Done | null };
 /** My Day's scope: its rollup's cards and the trail under them share it. */
 export const SUPPLIER_PAPERS_SCOPE = "my-day";
 const EMPTY_DONE: Record<string, Done> = {};
 /** One frozen "nothing kept" answer: useSyncExternalStore needs the same object back each time. */
-const EMPTY_SCOPE: Scope = { done: EMPTY_DONE, live: 0 };
+const EMPTY_SCOPE: Scope = { done: EMPTY_DONE, live: 0, marking: null };
 const scopes = new Map<string, Scope>();
 const listeners = new Set<() => void>();
 const scopeOf = (key: string) => scopes.get(key) ?? EMPTY_SCOPE;
@@ -314,7 +321,7 @@ export function SupplierPaperCards({
   // page, lets the kept lines go: they belong to this visit.
   useEffect(() => {
     if (!scope) return;
-    if (trail) return () => putScope(scope, { done: EMPTY_DONE });
+    if (trail) return () => putScope(scope, { done: EMPTY_DONE, marking: null });
     putScope(scope, { live: scopeOf(scope).live + 1 });
     return () => putScope(scope, { live: Math.max(0, scopeOf(scope).live - 1) });
   }, [scope, trail]);
@@ -326,8 +333,14 @@ export function SupplierPaperCards({
   /** What's On It: which cards have it open, and what each read brought back (kept for a re-open). */
   const [reading, setReading] = useState<Record<string, boolean>>({});
   const [contents, setContents] = useState<Record<string, PaperContentsState>>({});
-  /** The Already Billed sheet open over the cards (a card's own door, or a done line's question). */
-  const [marking, setMarking] = useState<Done | null>(null);
+  /** The Already Billed sheet open over the cards (a card's own door, or a done line's question).
+   *  With a `scope` it lives in the store, so it outlives this mount (see THE OPEN SHEET above). */
+  const [ownMarking, setOwnMarking] = useState<Done | null>(null);
+  const marking = scope ? (kept?.marking ?? null) : ownMarking;
+  const setMarking = (next: Done | null) => {
+    if (scope) putScope(scope, { marking: next });
+    else setOwnMarking(next);
+  };
 
   function readContents(card: SupplierPaperCard) {
     const id = card.invoiceId;

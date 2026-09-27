@@ -387,6 +387,20 @@ describe("Already Billed On J-010 on the card", () => {
     expect(closedUnmarked(fromQuestion)).toBe(fromQuestion);
   });
 
+  it("the LAST card on My Day: filing clears the line, and the trail draws the same open sheet (kept in the scope, not the card set's state)", () => {
+    const offer = { jobId: "j-010", billId: "bill-ps", invoiceNumber: "INV-00023", what: "8802-1101475" };
+    const filed = filedForMark(ps, J010, { ok: true, message: "8802-1101475 is a bill on J-010 now.", undo, alreadyBilled: offer })!;
+    setSupplierPaperScopeForTest("t-ab6", { done: { "si-1": filed.done as never }, live: 0, marking: filed.marking as never });
+    const trail = renderToStaticMarkup(createElement(SupplierPaperDoneTrail, { scope: "t-ab6" }));
+    expect(trail).toContain("8802-1101475 is a bill on J-010 now.");
+    expect(trail).toContain("Reading the bills");
+    // While a card set of the scope is up, it draws the sheet and the trail steps aside (one sheet).
+    setSupplierPaperScopeForTest("t-ab6", { live: 1 });
+    expect(renderToStaticMarkup(createElement(SupplierPaperDoneTrail, { scope: "t-ab6" }))).toBe("");
+    const cards = renderToStaticMarkup(createElement(SupplierPaperCards, { feed: { cards: [], jobs: [] }, scope: "t-ab6", refreshAfter: false }));
+    expect(cards.match(/Reading the bills/g)?.length).toBe(1);
+  });
+
   it("a mark whose answer never came back: closing says it may be marked (never 'not marked'), holds the filing's Undo back, and keeps the question", () => {
     const offer = { jobId: "j-010", billId: "bill-ps", invoiceNumber: "INV-00023", what: "8802-1101475" };
     const asked = filedForMark(ps, J010, { ok: true, message: "8802-1101475 is a bill on J-010 now.", undo, alreadyBilled: offer })!.done;
