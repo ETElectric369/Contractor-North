@@ -10,6 +10,7 @@ import { formatCurrency, sanitizeSearch } from "@/lib/utils";
 import { companyUseWord, proposalOf, storedMarks } from "@/lib/paperwork";
 import { cleanLines } from "@/lib/paper-lines";
 import { waitingForShelf, type WaitingLineIn } from "@/lib/shelf-plan";
+import { personNote } from "@/lib/stock-take";
 import { claimedIdsOfLines } from "@/lib/unbilled-work";
 import { readSupplierPaperHomes, type SupplierPaperHome } from "@/app/(app)/bills/supplier-papers";
 import { reportError } from "@/lib/observe";
@@ -212,6 +213,7 @@ export default async function ShopStockPage({
     const who = m.created_by ? whoOf.get(String(m.created_by)) ?? "Someone" : "The office";
     const job = m.job_id ? jobName.get(String(m.job_id)) ?? "a job" : null;
     const qty = Number(m.qty) || 0;
+    const note = personNote(m.note);
     const words: Record<string, string> = {
       draw: `${who} took ${qty} for ${job}`,
       short: `${who} took ${qty} for ${job}, past what stock showed`,
@@ -224,7 +226,7 @@ export default async function ShopStockPage({
     const view: ShelfMoveView = {
       id: String(m.id),
       kind: String(m.kind),
-      text: `${words[m.kind] ?? `${m.kind} ${qty}`}, ${day(m.created_at)}${m.note && !/^Counted (?:on the shelf|in stock)$/.test(m.note) ? ` · ${m.note}` : ""}`,
+      text: `${words[m.kind] ?? `${m.kind} ${qty}`}, ${day(m.created_at)}${note ? ` · ${note}` : ""}`,
       cost: Number(m.cost) || 0,
       undone: !!m.undone_at,
       drawGroup: m.draw_group ? String(m.draw_group) : null,

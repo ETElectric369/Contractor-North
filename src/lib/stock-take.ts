@@ -178,6 +178,17 @@ export function settleRefusalWords(msg: string): string {
   return msg.replace(/File the roll or count the (?:shelf|stock) first\.?/, "A count can't settle it: file the roll on Shop Stock first, or Undo the take.");
 }
 
+/**
+ * A MOVE'S NOTE, AS A PERSON WROTE IT. Count It (stock_recount) saves its own note when nobody typed
+ * one: "Counted in stock" since 0364, the old wording before it, and a row saved then keeps it for
+ * good. That is the app talking, so every reader of a move's note (Shop Stock's history, the
+ * accountant's Stock Used) drops it and shows only what a person wrote. Null when there is none.
+ */
+export function personNote(note: string | null | undefined): string | null {
+  const n = (note ?? "").trim();
+  return !n || /^Counted (?:on the shelf|in stock)$/.test(n) ? null : n;
+}
+
 /** Where the office's bell for a take opens: Shop Stock on the item whenever there is a short to
  *  settle (this take's, or an older one the shelf reading below zero says is open), else the job. */
 export function officeBellOpensShelf(t: { short: number; onHandAfter: number }): boolean {

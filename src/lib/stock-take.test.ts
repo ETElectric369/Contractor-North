@@ -8,6 +8,7 @@ import {
   officeBellWords,
   parseShelf,
   parseTakes,
+  personNote,
   settleRefusalWords,
   shortOf,
   shortWords,
@@ -192,5 +193,18 @@ describe("which item did they mean (Nort's fill)", () => {
   it("the card's link opens the job's Materials tab with the sheet filled in", () => {
     expect(takeHref("job-1", "i-122", 60)).toBe("/jobs/job-1?tab=materials&take=i-122&qty=60");
     expect(takeHref("job-1", "i-122", null)).toBe("/jobs/job-1?tab=materials&take=i-122");
+  });
+});
+
+describe("personNote: a move's note as a person wrote it", () => {
+  it("drops Count It's own note, in either wording, and keeps a person's", () => {
+    expect(personNote("Counted on the shelf")).toBeNull(); // saved before 0364, kept for good
+    expect(personNote("Counted in stock")).toBeNull();
+    expect(personNote(" Counted in stock ")).toBeNull();
+    expect(personNote("Counted in the truck")).toBe("Counted in the truck");
+    expect(personNote("Counted in stock, two rolls behind the ladder")).toBe("Counted in stock, two rolls behind the ladder");
+    expect(personNote("  ")).toBeNull();
+    expect(personNote(null)).toBeNull();
+    expect(personNote(undefined)).toBeNull();
   });
 });

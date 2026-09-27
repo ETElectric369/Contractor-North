@@ -4,6 +4,7 @@ import { isMissingCreditColumn, isMissingShelf } from "@/lib/job-cost";
 import { todayStrInTz, tzDayStartUtc } from "@/lib/tz";
 import { claimedIdsOfLines } from "@/lib/unbilled-work";
 import { readAllPages } from "@/lib/read-all-pages";
+import { personNote } from "@/lib/stock-take";
 
 /**
  * EXPORT FOR ACCOUNTANT (Shop Stock, Phase 4).
@@ -276,7 +277,7 @@ export function stockUsedList(inp: AccountantInputs, w: Window, tz: string, cuto
         WENT_TO[m.kind] ?? m.kind,
         j?.job_number ?? null,
         j?.name ?? null,
-        m.note ?? null,
+        personNote(m.note),
         null,
       ],
     });
