@@ -46,7 +46,9 @@ export function PhotoTaskSheet({
         setError(res.error ?? "Couldn't add the task. Try again.");
         return;
       }
-      if (res.duplicate) toast(res.speak ?? "Already on the list.", "info");
+      // A same-words task was already open: nothing new was made, so the photo isn't on that task.
+      if (res.duplicate)
+        toast(`${res.speak ?? "Already on the list."} The photo is on the Photos tab, not on that task.`, "info", undefined, { sticky: true });
       else if (res.photoSkipped)
         toast("Task added. The photo is on the Photos tab: photos on tasks start after the next database update.", "info", undefined, { sticky: true });
       else toast("Added to this job's Tasks", "success");
