@@ -8,7 +8,9 @@
  *
  * So a no-job shift stays findable until a person decides what it was: put it on its job, or file
  * it as company time (a time code the company marked non-billable, Shop or PTO). No age limit: a
- * window is how it went quiet. The read is capped (newest first) and says so when the cap is hit.
+ * window is how it went quiet. The read is capped (newest first) and says so when the cap is hit,
+ * even when every row inside the cap turned out billed or empty: then there is no list to put a "+"
+ * on, and both places say they could not list them all instead of going quiet.
  *
  * Not on the list:
  *   - a shift with a NON-BILLABLE code (the company's own time, filed on purpose; labor billing's
@@ -99,24 +101,40 @@ export function noJobShiftsFrom(
 }
 
 /**
+ * The PostgREST filter that keeps the company's own time out of the read: a row with no code, or a
+ * code that is none of these. Each code is quoted (a code may hold a comma or a bracket). Null when
+ * the company has no such code, so the read needs no filter.
+ */
+export function notCompanyTimeFilter(nonBillableCodes: Iterable<string>): string | null {
+  const codes = Array.from(new Set(Array.from(nonBillableCodes, (c) => String(c ?? "").trim()).filter(Boolean))).sort();
+  const quoted = codes.map((c) => `"${c.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`);
+  return quoted.length ? `job_code.is.null,job_code.not.in.(${quoted.join(",")})` : null;
+}
+
+/**
  * Read them, RLS-scoped to the caller's company (office staff read every entry of it). A failed
  * read is null, never an empty list: "nothing on no job" and "could not look" are different facts.
+ *
+ * THE CAP COUNTS ONLY ROWS THAT COULD BE LISTED. The codes are read first, and the company's own
+ * time (Shop, PTO) is left out by the query itself. Filtered after the read instead, every shift
+ * Company Time filed stayed inside the newest 200 for good, and once 200 of them were newer than a
+ * real no-job punch, that punch dropped off the list with nothing saying so.
  */
 export async function readNoJobHours(supabase: SupabaseClient, opts: { tz: string; todayStr: string }): Promise<NoJobHours | null> {
-  const [rowsR, codesR] = await Promise.all([
-    supabase
-      .from("time_entries")
-      .select("id, profile_id, clock_in, clock_out, lunch_minutes, job_code, auto_closed_reason, profiles:profile_id(full_name)")
-      .eq("status", "closed")
-      .is("job_id", null)
-      .not("clock_out", "is", null)
-      .order("clock_in", { ascending: false })
-      .limit(NO_JOB_READ_CAP),
-    supabase.from("job_codes").select("code").eq("billable", false),
-  ]);
-  if (rowsR.error || codesR.error) return null;
-  const rows = (rowsR.data ?? []) as NoJobRow[];
+  const codesR = await supabase.from("job_codes").select("code").eq("billable", false);
+  if (codesR.error) return null;
   const nonBillableCodes = new Set(((codesR.data ?? []) as { code?: string | null }[]).map((c) => String(c.code ?? "").trim()).filter(Boolean));
+  let read = supabase
+    .from("time_entries")
+    .select("id, profile_id, clock_in, clock_out, lunch_minutes, job_code, auto_closed_reason, profiles:profile_id(full_name)")
+    .eq("status", "closed")
+    .is("job_id", null)
+    .not("clock_out", "is", null);
+  const notCompanyTime = notCompanyTimeFilter(nonBillableCodes);
+  if (notCompanyTime) read = read.or(notCompanyTime);
+  const rowsR = await read.order("clock_in", { ascending: false }).limit(NO_JOB_READ_CAP);
+  if (rowsR.error) return null;
+  const rows = (rowsR.data ?? []) as NoJobRow[];
   let claimed = new Set<string>();
   if (rows.length) {
     try {

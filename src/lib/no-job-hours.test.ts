@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { companyTimeCode, noJobShiftsFrom, type NoJobRow } from "@/lib/no-job-hours";
+import { NO_JOB_READ_CAP, companyTimeCode, noJobShiftsFrom, notCompanyTimeFilter, readNoJobHours, type NoJobRow } from "@/lib/no-job-hours";
 import { noJobHoursActionItem, NO_JOB_HOURS_HREF } from "@/lib/action-items/no-job-hours-item";
 
 /**
@@ -86,5 +86,51 @@ describe("the Needs You line: one rollup, never one row per shift, never gone af
   it("a capped read says there may be more", () => {
     const shifts = noJobShiftsFrom([row()], opts());
     expect(noJobHoursActionItem({ shifts, hours: 8.43, capped: true })?.title).toBe("Hours On No Job · 1+");
+  });
+
+  it("a full cap with nothing listable in it is its own line, never null", () => {
+    const item = noJobHoursActionItem({ shifts: [], hours: 0, capped: true });
+    expect(item).toMatchObject({ id: "stray-no-job", title: "Hours On No Job · Couldn't List Them All", href: NO_JOB_HOURS_HREF });
+    expect(item?.subtitle).toContain(`newest ${NO_JOB_READ_CAP}`);
+  });
+});
+
+describe("the cap counts only rows that could be listed", () => {
+  it("the company's own codes are left out in the query, each one quoted", () => {
+    expect(notCompanyTimeFilter(new Set(["SHOP", " PTO "]))).toBe('job_code.is.null,job_code.not.in.("PTO","SHOP")');
+    expect(notCompanyTimeFilter(['A,B', 'Say "hi"'])).toBe('job_code.is.null,job_code.not.in.("A,B","Say \\"hi\\"")');
+    expect(notCompanyTimeFilter([])).toBeNull();
+    expect(notCompanyTimeFilter(["", "  "])).toBeNull();
+  });
+
+  it("readNoJobHours reads the codes first and filters the time read with them", async () => {
+    const calls: { table: string; ops: [string, unknown[]][] }[] = [];
+    const chain = (table: string, result: { data: unknown; error: null }) => {
+      const rec = { table, ops: [] as [string, unknown[]][] };
+      calls.push(rec);
+      const q: Record<string, unknown> = {};
+      for (const op of ["select", "eq", "is", "not", "or", "order", "limit", "in"]) {
+        q[op] = (...args: unknown[]) => {
+          rec.ops.push([op, args]);
+          return q;
+        };
+      }
+      q.then = (ok: (v: unknown) => unknown, bad: (e: unknown) => unknown) => Promise.resolve(result).then(ok, bad);
+      return q;
+    };
+    const supabase = {
+      from: (table: string) =>
+        table === "job_codes"
+          ? chain(table, { data: [{ code: "SHOP" }, { code: "PTO" }], error: null })
+          : table === "time_entries"
+            ? chain(table, { data: [], error: null })
+            : chain(table, { data: [], error: null }),
+    };
+    const out = await readNoJobHours(supabase as never, { tz: TZ, todayStr: TODAY });
+    expect(out).toEqual({ shifts: [], hours: 0, capped: false });
+    expect(calls.map((c) => c.table)).toEqual(["job_codes", "time_entries"]);
+    const time = calls[1].ops;
+    expect(time).toContainEqual(["or", ['job_code.is.null,job_code.not.in.("PTO","SHOP")']]);
+    expect(time).toContainEqual(["limit", [NO_JOB_READ_CAP]]);
   });
 });

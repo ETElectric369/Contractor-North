@@ -35,7 +35,7 @@ import { jobLabel } from "@/lib/schedule-options";
 import { LONG_SHIFT_HOURS, clockDoorWords, isLongOpenShift } from "@/lib/long-shift";
 import { loadShiftChains } from "@/lib/shift-chain";
 import { reportError } from "@/lib/observe";
-import { companyTimeCode, readNoJobHours } from "@/lib/no-job-hours";
+import { NO_JOB_READ_CAP, companyTimeCode, readNoJobHours } from "@/lib/no-job-hours";
 import { CompanyTimeButton } from "./company-time-button";
 
 export const dynamic = "force-dynamic";
@@ -660,6 +660,10 @@ export default async function TimecardsPage({
     code: s.jobCode,
     href: hrefFor(weekOf(s.day), `entry=${s.id}`),
   }));
+  // The read's cap was full and nothing in it could be listed (all billed, empty or today's): older
+  // shifts on no job were not checked, which is not the same as none. Said, never hidden.
+  const noJobUnlisted = !!noJob?.capped && noJobRows.length === 0;
+  const noJobUnlistedWords = `Couldn't list every shift on no job: the newest ${NO_JOB_READ_CAP} are all billed, empty or today's, so older ones weren't checked.`;
   const fixCount = brokenRows.length + noJobRows.length;
 
   // The ?entry= deep link (a grid pill tap) — find the entry and auto-open its editor below.
@@ -1015,12 +1019,18 @@ export default async function TimecardsPage({
             {noJob === null && (
               <p className="mt-2 text-xs text-amber-800">Couldn&apos;t check for shifts on no job just now. Reload to try again.</p>
             )}
+            {noJobUnlisted && <p className="mt-2 text-xs text-amber-800">{noJobUnlistedWords}</p>}
           </CardContent>
         </Card>
       ) : noJob === null ? (
         /* A failed read is not a clean week: say which check could not be made. */
         <p className="mb-4 flex min-h-[44px] items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 text-sm font-medium text-amber-900">
           <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden /> Couldn&apos;t check for shifts on no job just now. Reload to try again.
+        </p>
+      ) : noJobUnlisted ? (
+        /* A full cap with nothing listable in it is not a clean week either. */
+        <p className="mb-4 flex min-h-[44px] items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 text-sm font-medium text-amber-900">
+          <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden /> {noJobUnlistedWords}
         </p>
       ) : (
         /* NOTHING SILENT: a missing warning has to be AFFIRMED. Without this line the page looks

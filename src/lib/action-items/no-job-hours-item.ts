@@ -1,4 +1,4 @@
-import type { NoJobHours } from "@/lib/no-job-hours";
+import { NO_JOB_READ_CAP, type NoJobHours } from "@/lib/no-job-hours";
 import { formatDateShort } from "@/lib/utils";
 import { AFFORDANCES, KIND_STREAM, type ActionItem } from "./types";
 
@@ -37,6 +37,23 @@ export function noJobHoursActionItem(summary: NoJobHours | null | undefined, opt
     };
   }
   const shifts = summary?.shifts ?? [];
+  if (!shifts.length && summary?.capped) {
+    // THE CAP WAS FULL AND NOTHING IN IT COULD BE LISTED (every one billed, empty or today's): an
+    // older shift on no job may still be waiting past it. Not "nothing waiting", so not null.
+    return {
+      id: NO_JOB_HOURS_ITEM_ID,
+      kind: "time_stray",
+      stream: KIND_STREAM.time_stray,
+      title: "Hours On No Job · Couldn't List Them All",
+      subtitle: `The newest ${NO_JOB_READ_CAP} shifts on no job are all billed, empty or today's, so older ones weren't checked.`,
+      who: null,
+      when: null,
+      urgency: 1,
+      done: false,
+      href: NO_JOB_HOURS_HREF,
+      affordances: AFFORDANCES.time_stray,
+    };
+  }
   if (!shifts.length) return null;
   const days = shifts.map((s) => s.day).sort();
   const first = formatDateShort(days[0]);
