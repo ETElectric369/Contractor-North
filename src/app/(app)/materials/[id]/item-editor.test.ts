@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { readFileSync } from "node:fs";
 
 /**
  * THE JOB'S MATERIALS LIST, AS IT RENDERS: A CHECKLIST (Erik, 2026-09-27). What's left to buy on
@@ -149,5 +150,14 @@ describe("an optimistic tick never outlives the server's answer", () => {
     expect([...out.keys()]).toEqual(["live"]);
     const same = new Map([["live", F(true, false)]]);
     expect(settleFlips(same, [{ id: "live", purchased: true }])).toBe(same);
+  });
+});
+
+describe("quick ticks at the counter", () => {
+  it("a tick is not the card's shared transition: only the line still saving refuses a second tap", () => {
+    const src = readFileSync(new URL("./item-editor.tsx", import.meta.url), "utf8");
+    expect(src).toMatch(/onChange=\{\(\) => toggleBought\(it\)\}\s*disabled=\{saving\.has\(it\.id\)\}/);
+    const body = src.slice(src.indexOf("function toggleBought("), src.indexOf("function toggleTool("));
+    expect(body).not.toContain("start(");
   });
 });

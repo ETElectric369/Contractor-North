@@ -179,15 +179,31 @@ export function ItemEditor({
     });
   }
 
+  // TICK, TICK, TICK AT THE COUNTER. A tick is not the card's shared transition: it used to be, and
+  // every checkbox went disabled while any one line saved, so the next line (sliding up under the
+  // thumb as the ticked one folded away) ignored a quick second tap. Each line saves on its own
+  // (setMaterialItemPurchased is one row), and only the line still saving refuses a second tap, so
+  // two writes for one line can't race.
+  const [saving, setSaving] = useState<ReadonlySet<string>>(new Set());
+
   function toggleBought(it: Item) {
     const lid = listId;
-    if (!lid) return;
+    if (!lid || saving.has(it.id)) return;
     const next = !bought(it);
     const from = !!it.purchased;
     setFlips((m) => new Map(m).set(it.id, { from, to: next }));
+    setSaving((s) => new Set(s).add(it.id));
     setError(null);
-    start(async () => {
-      const res = await setMaterialItemPurchased(it.id, lid, next);
+    void (async () => {
+      const res = await setMaterialItemPurchased(it.id, lid, next).catch(() => ({
+        ok: false as const,
+        error: "Couldn't reach the server. Try again.",
+      }));
+      setSaving((s) => {
+        const n = new Set(s);
+        n.delete(it.id);
+        return n;
+      });
       if (!res.ok) {
         // Refused: the line goes back where it was, and the sentence says why.
         setFlips((m) => {
@@ -198,7 +214,7 @@ export function ItemEditor({
         return setError(res.error ?? "Could not update.");
       }
       router.refresh();
-    });
+    })();
   }
 
   function toggleTool(it: Item) {
@@ -249,7 +265,7 @@ export function ItemEditor({
             type="checkbox"
             checked={!!it.purchased}
             onChange={() => toggleBought(it)}
-            disabled={pending}
+            disabled={saving.has(it.id)}
             aria-label={it.purchased ? `Not Bought Yet: ${it.description}` : `Bought: ${it.description}`}
             className="h-5 w-5 rounded border-slate-300 text-brand focus:ring-brand"
           />
