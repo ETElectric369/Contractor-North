@@ -245,7 +245,9 @@ function AddTaskLine({ jobId, orgId, photoDoor, bordered }: { jobId: string; org
         toast(res.error ?? "Couldn't add the task. Try again.", "error");
         return;
       }
+      // Said every time: on the Overview card a new task can land past the three it shows.
       if (res.duplicate) toast(res.speak ?? "Already on the list.", "info");
+      else toast("Added to this job's Tasks", "success");
       setTitle("");
       router.refresh();
     });
