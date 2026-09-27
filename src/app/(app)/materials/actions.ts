@@ -784,7 +784,8 @@ export async function requestMaterials(jobId: string, what: string): Promise<Res
   const label = jobLabel(job as { job_number?: string | null; name?: string | null });
 
   // A TASK on the job's one list (0358), and the bell below. The TITLE carries his words, because the
-  // job's Tasks card and the Now block show titles only; the note keeps who asked and the whole text.
+  // job's Tasks card and the Now block show titles only; the note keeps who asked and the whole text,
+  // and tapping the task opens it (the Task sheet shows the note).
   const t = await createTask({
     title: `Materials: ${text.length > 120 ? `${text.slice(0, 117)}...` : text}`,
     job_id: jobId,

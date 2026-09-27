@@ -32,13 +32,16 @@ export interface JobTaskRow {
   /** An optional photo of the finished work. */
   done_photo_path: string | null;
   sort_order: number;
+  /** The task's note: a crew materials request keeps who asked and the whole text here, past the
+   *  title's 120 characters (materials/actions requestMaterials). The Task sheet shows it. */
+  notes: string | null;
 }
 
 /** After 0358: the stamps, the photos and the doer's name ride along. */
 export const JOB_TASK_COLUMNS =
-  "id, title, status, created_by, created_at, completed_at, sort_order, photo_path, done_photo_path, done_by, doer:done_by(full_name)";
-/** Before 0358: the columns every database has. */
-export const JOB_TASK_COLUMNS_BEFORE_0358 = "id, title, status, created_by, created_at, completed_at";
+  "id, title, status, notes, created_by, created_at, completed_at, sort_order, photo_path, done_photo_path, done_by, doer:done_by(full_name)";
+/** Before 0358: the columns every database has (notes is older than 0358). */
+export const JOB_TASK_COLUMNS_BEFORE_0358 = "id, title, status, notes, created_by, created_at, completed_at";
 
 export type JobTasksRead = {
   rows: JobTaskRow[];
@@ -72,6 +75,7 @@ export function toJobTaskRow(r: Record<string, any>): JobTaskRow {
     photo_path: (r.photo_path ?? null) as string | null,
     done_photo_path: (r.done_photo_path ?? null) as string | null,
     sort_order: Number(r.sort_order ?? 0) || 0,
+    notes: (r.notes ?? null) as string | null,
   };
 }
 

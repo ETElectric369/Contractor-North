@@ -439,6 +439,8 @@ function TaskEditSheet({
             className="h-11"
           />
         </div>
+        {/* The note: a long materials request's whole text and who asked (the title stops at 120). */}
+        {task.notes && <p className="whitespace-pre-wrap text-sm text-slate-600">{task.notes}</p>}
         {!canDelete && (
           <p className="text-xs text-slate-500">
             The office or whoever added this task can delete it. You can check it off from the list.

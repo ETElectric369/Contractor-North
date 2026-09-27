@@ -37,6 +37,7 @@ const row = (id: string, over: Partial<JobTaskRow> = {}): JobTaskRow => ({
   photo_path: null,
   done_photo_path: null,
   sort_order: 0,
+  notes: null,
   ...over,
 });
 

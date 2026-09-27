@@ -4,6 +4,8 @@ import {
   doneWhenWords,
   doneWords,
   isMissingColumn,
+  JOB_TASK_COLUMNS,
+  JOB_TASK_COLUMNS_BEFORE_0358,
   readJobTasks,
   splitJobTasks,
   taskPhoto,
@@ -32,6 +34,7 @@ const row = (over: Partial<JobTaskRow> = {}): JobTaskRow => ({
   photo_path: null,
   done_photo_path: null,
   sort_order: 0,
+  notes: null,
   ...over,
 });
 
@@ -177,6 +180,14 @@ describe("readJobTasks: safe before 0358", () => {
   });
 
   it("toJobTaskRow fills what an old row lacks", () => {
-    expect(toJobTaskRow({ id: "t", title: "x", created_at: "c" })).toMatchObject({ status: "open", done_by_name: null, sort_order: 0 });
+    expect(toJobTaskRow({ id: "t", title: "x", created_at: "c" })).toMatchObject({ status: "open", done_by_name: null, sort_order: 0, notes: null });
+  });
+
+  it("the note rides along, before 0358 and after (a long materials request keeps its whole text there)", () => {
+    expect(JOB_TASK_COLUMNS).toMatch(/\bnotes\b/);
+    expect(JOB_TASK_COLUMNS_BEFORE_0358).toMatch(/\bnotes\b/);
+    expect(toJobTaskRow({ id: "t", title: "Materials: 3/4 EMT…", notes: "Brian on site: the whole request" }).notes).toBe(
+      "Brian on site: the whole request",
+    );
   });
 });
