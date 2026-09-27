@@ -702,6 +702,14 @@ export function AssistantChat({ autoStart = false, glass = false, initialQuery }
       // explicit human answer the live path waits for.
       if (autoStart) {
         const spoken = lines.map((l) => l.content).join(" ").replace(/\s*\[[^\]]*\]\s*$/, "");
+        // DROP THE MIC BEFORE SPEAKING, as the live paths do (the cn-v980 crackle fix). Talk To Nort
+        // opened the mic in its tap, so it can still be recording a turn when this missed reply
+        // lands — and say() only drops a mic that is BETWEEN turns (voice-stream setMuted), so on
+        // iOS 27 this one reply played through a live capture and crackled. A live reply never
+        // meets that (its turn already ended), and resolveConfirm stops listening first; so does
+        // this. The re-arm after the reply (startMic / confirmListen) opens the mic again.
+        speech.stopListening({ discard: true });
+        setListening(false);
         if (rec.confirm) say(rec.confirm.prompt, () => { if (voiceModeRef.current) confirmListen(); });
         else say(spoken, () => { if (voiceModeRef.current) startMic(); });
       }
