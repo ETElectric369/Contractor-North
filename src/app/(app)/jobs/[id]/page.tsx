@@ -492,13 +492,15 @@ export default async function JobDetailPage({
     // ALREADY BILLED'S DOORS ASK WHETHER A LINE COULD HOLD THE COST, by the sheet's own reading
     // (readAlreadyBilledReach: the job's sent bills and, on a job that isn't Time & Material, its
     // customer's invoices with no job). A door onto a sheet with no line to pick is a dead end. A lost
-    // read is logged and the doors show as before (the sheet says what it finds). Skipped where
-    // nothing could hold a cost: no sent bill on the job, and (T&M) no other invoice it may use.
+    // read is logged and the doors show as before (the sheet says what it finds). A database without
+    // 0357 (not ready) draws no door, like the Bills page and the supplier cards: every sheet it
+    // opened would only say it needs an update. Skipped where nothing could hold a cost: no sent bill
+    // on the job, and (T&M) no other invoice it may use.
     viewerIsStaff &&
     importsActuals &&
     (((invoices ?? []) as any[]).some((i) => i.status !== "draft" && i.status !== "void") || (j.billing_type !== "tm" && !!j.customer_id))
       ? readAlreadyBilledReach(supabase, j.org_id, [id]).then(
-          (r) => (r.ready ? (r.jobs.get(id) ?? { charge: false, ret: false }) : null),
+          (r) => (r.ready ? (r.jobs.get(id) ?? { charge: false, ret: false }) : { charge: false, ret: false }),
           (e: unknown) => {
             reportError("jobs.[id].alreadyBilledReach", e, { jobId: id });
             return null;

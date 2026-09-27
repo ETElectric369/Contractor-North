@@ -126,6 +126,18 @@ describe("the job's side doors", () => {
     expect(s).toMatch(/costGroups && unbilled \? \(\s*<div className="space-y-2">/);
     expect(s).toContain("alreadyBilled={alreadyBilledDoors}");
   });
+
+  it("a database without 0357 draws no Already Billed door (every sheet it opened would only say it needs an update)", () => {
+    // The job's Costs tab: a reach read that is not ready is "nothing can hold it", never the
+    // lost-read fallback that offers the doors wherever a sent bill is.
+    const job = src("jobs/[id]/page.tsx");
+    expect(job).toMatch(/r\.ready \? \(r\.jobs\.get\(id\) \?\? \{ charge: false, ret: false \}\) : \{ charge: false, ret: false \}/);
+    // The invoice page's Already Billed: Hours On No Job: only once the hands read is ready (a lost
+    // read still shows it; the sheet says what it finds).
+    const inv = src("billing/[id]/page.tsx");
+    expect(inv).toMatch(/const noJobReady = !\(noJobHands && noJobHands !== "failed" && !noJobHands\.ready\);/);
+    expect(inv).toMatch(/const noJobDoor = noJobDoorHere && noJobReady && openNoJob !== 0;/);
+  });
 });
 
 describe("pure rules", () => {

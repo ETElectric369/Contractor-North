@@ -183,8 +183,11 @@ export default async function InvoicePage({
       : Promise.resolve(0),
   ]);
   const noJobHandLines = noJobHands && noJobHands !== "failed" ? noJobHands.lines : [];
-  // openNoJob null: the read was lost, so the door shows (the sheet says what it finds).
-  const noJobDoor = noJobDoorHere && openNoJob !== 0;
+  // openNoJob null: the read was lost, so the door shows (the sheet says what it finds). A database
+  // without 0357 (the hands read came back not ready) shows no door: its sheet could only say it
+  // needs an update.
+  const noJobReady = !(noJobHands && noJobHands !== "failed" && !noJobHands.ready);
+  const noJobDoor = noJobDoorHere && noJobReady && openNoJob !== 0;
   const usualMarkup = (inv as any).customers?.pricing_levels?.markup_pct ?? orgSettings.material_markup_percent;
   const markupSeed = markupBoxSeed(markupRead ? (markupRead.ok ? markupRead.reading : "unread") : null, usualMarkup);
   const noBillRateIds = ((payRows ?? []) as { id: string; bill_rate: number | string | null }[])
