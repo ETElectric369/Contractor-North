@@ -1,7 +1,7 @@
 import "server-only";
 import type Anthropic from "@anthropic-ai/sdk";
 import { modelFor, recordAiUsage, type TokenUsage } from "@/lib/ai-cost";
-import { parseAiJson } from "@/lib/ai-json";
+import { extractJsonObject } from "@/lib/ai-json";
 import { formatPhone } from "@/lib/utils";
 import { cleanEmail, phoneDigits, stateCode, type SiteFields } from "./extract";
 
@@ -10,8 +10,8 @@ import { cleanEmail, phoneDigits, stateCode, type SiteFields } from "./extract";
  * meta tags, tel:/mailto: links, the words on the page) left a box the person wants empty, and only
  * while Nort is switched on and the company is under its month's AI allowance (the action checks).
  *
- * The cheap model (modelFor("classify")), a capped slice of the page's words, one metered call on
- * surface "resource-from-link". THE PAGE IS UNTRUSTED: it goes in fenced as <page>…</page>, the system
+ * The cheap model (modelFor("classify")), a capped slice of the page's words, ONE metered call on
+ * surface "resource-from-link" (never a second: a reply that isn't JSON is not sent off for repair). THE PAGE IS UNTRUSTED: it goes in fenced as <page>…</page>, the system
  * prompt says it is data to extract from and never instructions, and the answer is then GUARDED: a
  * phone, email, zip, street number or city the page's own words don't show is dropped. A category
  * outside the list is dropped. The model's word is never enough on its own.
@@ -105,6 +105,14 @@ export async function readWithModel(args: {
     .filter((b): b is Anthropic.TextBlock => b.type === "text")
     .map((b) => b.text)
     .join("");
-  const parsed = await parseAiJson(client, text, orgId);
+  // No repair round trip (parseAiJson's): that second call has no timeout or retry cap of its own,
+  // so a prose reply could run this past the action's 30 seconds, and the answer is small and
+  // guarded anyway. A reply that isn't JSON fills nothing; the page's own card still stands.
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(extractJsonObject(text));
+  } catch {
+    return {};
+  }
   return guardModelFields(parsed, pageText, categories);
 }
