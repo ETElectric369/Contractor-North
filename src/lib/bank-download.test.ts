@@ -308,6 +308,19 @@ Trans Date,Transaction,Withdrawal Amt,Deposit Amt,Bal
     const statement = parseCSV(`Date,Reference,Description,Amount,Balance\n09/01/2026,INV-100,Invoice,10.00,10.00\n`);
     const sAt = findHeaderRow(statement);
     expect(looksLikeBankTable(statement, sAt >= 0 && readHeaderRow(statement[sAt]).columns.reference !== undefined)).toBe(false);
+    const isBank = (csv: string) => {
+      const t = parseCSV(csv);
+      const a = findHeaderRow(t);
+      return looksLikeBankTable(t, a >= 0 && readHeaderRow(t[a]).columns.reference !== undefined);
+    };
+    // A supplier's open-item list printing Debit and Credit: its open balance says whose it is.
+    expect(isBank(`Date,Invoice #,Description,Debit,Credit,Open Balance\n09/01/2026,INV-1001,Materials,450.00,,450.00\n09/05/2026,INV-1002,Materials,200.00,,200.00\n`)).toBe(false);
+    // With no open balance, its column of paper numbers says so.
+    expect(isBank(`Invoice #,Date,Description,Debit,Credit\n INV-1001,09/01/2026,Materials,450.00,\nPMT-77,09/10/2026,Payment,,300.00\n`)).toBe(false);
+    // A bank's own Transaction column holds words, with Debit, Credit and a running Balance.
+    expect(isBank(`Date,Transaction,Description,Debit,Credit,Balance\n09/01/2026,DEBIT CARD,SHELL OIL,62.10,,938.00\n09/02/2026,DEPOSIT,CUSTOMER,,500.00,1438.00\n`)).toBe(true);
+    // A word only a bank prints still says so over a paper-number column.
+    expect(isBank(`Posted Date,Reference,Description,Debit,Credit\n09/01/2026,100234,SHELL OIL,62.10,\n`)).toBe(true);
   });
 });
 

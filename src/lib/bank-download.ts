@@ -1,5 +1,5 @@
 import { BUSINESS_COST_BUCKETS, isBusinessCostBucket, type BusinessCostBucket } from "@/lib/business-cost-buckets";
-import { fingerprintOf, headerKey, readDate, readHeaderWith, readMoney, sayDollars } from "@/lib/supplier-open-list";
+import { findHeaderRow, fingerprintOf, headerKey, readDate, readHeaderRow, readHeaderWith, readMoney, sayDollars } from "@/lib/supplier-open-list";
 
 /**
  * A BANK'S DOWNLOAD, SORTED THE WAY THE COMPANY SORTS IT (Erik, 2026-09-27, "yes go for those").
@@ -65,7 +65,7 @@ export const BANK_WORDS: Record<BankField, readonly string[]> = {
  *  prints a running balance beside its paper numbers too, and it is the supplier's list. */
 const BANK_ONLY = new Set([
   "debit", "credit", "withdrawal", "withdrawals", "withdrawal amt", "withdrawal amount", "deposit", "deposits", "deposit amt",
-  "deposit amount", "debit amt", "credit amt", "check", "posted", "post date", "posting date", "memo", "payee", "fitid",
+  "deposit amount", "debit amt", "credit amt", "check", "posted", "post date", "posting date", "posted date", "date posted", "memo", "payee", "fitid",
 ]);
 
 /**
@@ -137,15 +137,39 @@ export function redactWordCells(table: readonly (readonly string[])[]): string[]
   return table.map((r) => r.map((c) => (/[a-z]/i.test(String(c ?? "")) ? redactDigits(String(c ?? "")) : String(c ?? ""))));
 }
 
+/** Debit and Credit alone: a supplier's statement prints them over its papers too. */
+const DEBIT_CREDIT = new Set(["debit", "credit", "debits", "credits"]);
+
 /**
  * IS THIS TABLE A BANK DOWNLOAD (rather than a supplier's open list)? It has the bank header, and
- * either no paper-number column or at least one word only a bank prints.
+ * no paper-number column, or a sign only a bank gives:
+ *   · a paper number AND an open balance ("Open Balance", "Balance Due") is a supplier's open-item
+ *     list, whatever else it prints (a plain "Balance" may be a bank's running balance: no sign);
+ *   · a word only a bank prints over a column (Posted, Memo, Payee, Withdrawal, Deposit, Check) is
+ *     a bank's;
+ *   · Debit and Credit and nothing else: the paper-number column decides. A supplier's holds paper
+ *     numbers ("INV-1001"); a bank's "Transaction" column holds words ("DEBIT CARD PURCHASE").
  */
 export function looksLikeBankTable(table: readonly (readonly string[])[], supplierHasReference: boolean): boolean {
   const h = findBankHeader(table);
   if (!h) return false;
   if (!supplierHasReference) return true;
-  return (table[h.row] ?? []).some((c) => BANK_ONLY.has(headerKey(c)));
+  const at = findHeaderRow(table);
+  const cells = table[at] ?? [];
+  const sup = at >= 0 ? readHeaderRow(cells).columns : {};
+  if (sup.openBalance !== undefined && headerKey(cells[sup.openBalance]) !== "balance") return false;
+  const bankOnly = (table[h.row] ?? []).map((c) => headerKey(c)).filter((k) => BANK_ONLY.has(k));
+  if (!bankOnly.length) return false;
+  if (bankOnly.some((k) => !DEBIT_CREDIT.has(k))) return true;
+  if (sup.reference === undefined) return true;
+  const ref = sup.reference;
+  const values = table
+    .slice(at + 1)
+    .map((r) => String(r[ref] ?? "").trim())
+    .filter(Boolean)
+    .slice(0, 30);
+  const paperNumbers = values.filter((v) => /\d/.test(v) && !/\s/.test(v) && v.length <= 30).length;
+  return !(values.length > 0 && paperNumbers / values.length >= 0.6);
 }
 
 // ── ONE LINE ───────────────────────────────────────────────────────────────────────────────────
