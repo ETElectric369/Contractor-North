@@ -35,7 +35,8 @@ const SOURCES: Partial<Record<FeatureKey, Count>> = {
   safety_log: { table: "safety_records" },
   website: { table: "site_pages" },
   site_chat: { table: "inquiries", filter: (q) => q.eq("source", "site_chat") },
-  todo_extras: { table: "tasks", filter: (q) => q.or("parent_id.not.is.null,priority.neq.0") },
+  // Reminders only since 0358 (a job's list has none of these), and tags follow the switch now.
+  todo_extras: { table: "tasks", filter: (q) => q.is("job_id", null).or("parent_id.not.is.null,priority.neq.0,tags.not.is.null") },
 };
 
 export async function featureCounts(

@@ -26,6 +26,8 @@ import { BUSINESS_COST_BUCKETS, bucketOf } from "@/lib/business-cost-buckets";
 import { isShelfTicket } from "@/lib/shelf-plan";
 import { splitReceiptBilling } from "./receipt-billing";
 import { ReceiptLines, type ReceiptForBilling } from "./receipt-billing-card";
+import { AlreadyBilledButton, NotBilledAfterAllButton } from "@/components/already-billed-sheet";
+import type { BillAlreadyBilled } from "@/lib/already-billed";
 
 interface JobOption {
   id: string;
@@ -91,6 +93,22 @@ interface DocRow {
 type LedgerTab = "po" | "bills" | "receipts";
 
 /**
+ * ALREADY BILLED ON THE BILL'S OWN ROW (0357, Erik: "the Already Billed could connect to the bill on
+ * that screen too"): the same sheet the job's Costs tab opens, from the bill he is looking at, or the
+ * mark it carries with its way back. Nothing when the page offers neither.
+ */
+export function BillAlreadyBilledDoor({ bill, door }: { bill: Pick<BillRow, "id">; door?: BillAlreadyBilled | null }) {
+  if (!door) return null;
+  if (door.kind === "open") return <AlreadyBilledButton jobId={door.jobId} target={{ kind: "bill", ids: [bill.id], what: door.what }} />;
+  return (
+    <>
+      <span className="text-xs font-medium text-slate-600">Billed By Hand On {door.invoiceNumber ?? "That Invoice"}</span>
+      <NotBilledAfterAllButton jobId={door.jobId} lineId={door.lineId} ids={door.ids} what={door.what} />
+    </>
+  );
+}
+
+/**
  * ALL BILLS: THE LEDGER, FOLDED (Bills plan, Wave B).
  *
  * One line on the page ("All Bills (58) · $X") that opens to the ledger. Inside, Bills comes first
@@ -112,6 +130,7 @@ export function BillsReceipts({
   docs,
   readFailed = false,
   switches = { features: ALL_ON, isOwner: false },
+  alreadyBilled = {},
 }: {
   orgId: string;
   jobs: JobOption[];
@@ -125,6 +144,10 @@ export function BillsReceipts({
    *  opens it, under the Off line) and New PO goes. The POs themselves are listed as ever. Shop
    *  Stock off: a receipt line isn't offered to the shelf. Absent = all on, today's ledger. */
   switches?: { features: FeatureMap; isOwner: boolean };
+  /** ALREADY BILLED on a bill's own row (0357), by bill id (lib/already-billed billAlreadyBilledDoors):
+   *  Already Billed where its job's sheet could hold it, or Billed By Hand On INV-x with Not Billed
+   *  After All. A bill with no entry has neither. */
+  alreadyBilled?: Record<string, BillAlreadyBilled>;
 }) {
   const poOn = featureOn(switches.features, "purchase_orders");
   const router = useRouter();
@@ -400,6 +423,7 @@ export function BillsReceipts({
                           {/* THIS TICK AND THE SUPPLIER BALANCE ARE THE SAME DOLLAR (review, 2026-09-19): the
                               three doors are BillRowDoors, one copy with the job's Costs tab. */}
                           <BillRowDoors bill={b} onEdit={() => setEditBill(b)} disabled={pending} />
+                          <BillAlreadyBilledDoor bill={b} door={alreadyBilled[b.id]} />
                           {b.job_id && (
                             <Link href={`/jobs/${b.job_id}`} className="flex min-h-11 items-center px-2 text-sm font-medium text-brand hover:underline">
                               Open The Job

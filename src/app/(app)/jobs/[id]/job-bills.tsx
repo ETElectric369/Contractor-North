@@ -10,10 +10,29 @@ import { Input, Label, Select } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { Modal, ModalActions } from "@/components/ui/modal";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatCurrency, formatDate, formatDuration } from "@/lib/utils";
 import { createBill } from "../actions";
 import { BillRowDoors } from "@/components/bill-row-doors";
+import { AlreadyBilledButton, NotBilledAfterAllButton } from "@/components/already-billed-sheet";
 import { executeAction } from "@/lib/actions/execute";
+
+/**
+ * ALREADY BILLED ON THE COSTS TAB (0357). `open`: the Not Billed Yet rows the door can mark (a row
+ * with no entry has no door: no line on a sent bill could hold it). `hands`: the Billed rows
+ * a person marked, with the line and ids Not Billed After All takes back off. Staff only (the page
+ * decides). `open` only where the piles exist (a job that bills its actual costs); `hands` wherever a
+ * mark is, the plain list included (a fixed-price job New Invoice bills from its actuals, J-010).
+ */
+export type JobAlreadyBilled = {
+  open: Record<string, { kind: "bill" | "po" | "stock"; ids: string[]; what: string }>;
+  hands: Record<string, { lineId: string; ids: string[]; invoiceNumber: string | null; what: string }>;
+};
+
+/** Hours a person marked as billed, per line (lib/already-billed hoursByHand): they are billed, so
+ *  they sit in the Billed fold under their invoice, with the way back. */
+export type JobBilledHours = { lineId: string; invoiceId: string | null; invoiceNumber: string | null; ids: string[]; hours: number; what: string }[];
+
+type Pile = "open" | "billed" | "nothing" | "plain";
 
 interface Bill {
   id: string;
@@ -60,6 +79,9 @@ export function JobBills({
   groups,
   openAside,
   groupsNote,
+  alreadyBilled,
+  billedHours = [],
+  handsNote,
 }: {
   jobId: string;
   bills: Bill[];
@@ -69,6 +91,12 @@ export function JobBills({
   openAside?: ReactNode;
   /** Said above the plain list when the piles could not be read. */
   groupsNote?: string | null;
+  /** Already Billed's doors (0357), when the page offers them. */
+  alreadyBilled?: JobAlreadyBilled | null;
+  /** Hours a person marked as billed (0357): in the Billed fold under their invoice. */
+  billedHours?: JobBilledHours;
+  /** Said under Billed when the marks couldn't be read: their Undo can't be shown, never silently. */
+  handsNote?: string | null;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -114,9 +142,28 @@ export function JobBills({
   const billById = new Map(bills.map((b) => [b.id, b] as const));
   const poById = new Map(pos.map((p) => [p.id, p] as const));
 
+  /**
+   * ALREADY BILLED'S DOORS ON A ROW (0357): on an open row, Already Billed (it charged on a sent
+   * bill by hand); on a billed row a person marked, what it says and Not Billed After All. Nothing
+   * on any other row, and nothing at all when the page offers no doors.
+   */
+  const abDoors = (id: string, pile: Pile) => {
+    const open = pile === "open" ? alreadyBilled?.open[id] : undefined;
+    const hand = pile === "billed" || pile === "plain" ? alreadyBilled?.hands[id] : undefined;
+    if (open) return <AlreadyBilledButton jobId={jobId} target={open} />;
+    if (hand)
+      return (
+        <>
+          <span className="text-xs font-medium text-slate-600">Billed By Hand On {hand.invoiceNumber ?? "That Invoice"}</span>
+          <NotBilledAfterAllButton jobId={jobId} lineId={hand.lineId} ids={hand.ids} what={hand.what} />
+        </>
+      );
+    return null;
+  };
+
   /** A bill in a pile: what it is, then the /bills row's own doors (BillRowDoors: Settled / On
    *  Account, Edit, Delete that asks first), each 44px, wrapping under it on a phone. */
-  const billRow = (b: Bill, why?: string) => (
+  const billRow = (b: Bill, why: string | undefined, pile: Pile) => (
     <li key={b.id} className="px-4 py-2.5 text-sm">
       <div className="flex items-center gap-3">
         <div className="min-w-0 flex-1">
@@ -133,29 +180,35 @@ export function JobBills({
       </div>
       <div className="mt-2 flex flex-wrap items-center gap-2">
         <BillRowDoors bill={b} jobId={jobId} onEdit={() => setEditBill(b)} />
+        {abDoors(b.id, pile)}
       </div>
     </li>
   );
 
   /** A live purchase order in a pile: its own page holds its controls. */
-  const poRow = (p: JobPo, why?: string) => (
-    <li key={p.id}>
-      <Link href={`/purchasing/${p.id}`} className="flex min-h-11 items-center gap-3 px-4 py-2.5 text-sm hover:bg-slate-50">
-        <div className="min-w-0 flex-1">
-          <div className="font-medium text-slate-900">{p.vendor || "No vendor yet"}</div>
-          <div className="text-xs text-slate-400">{p.po_number} · purchase order</div>
-          {why && <div className="text-xs text-slate-500">{why}</div>}
-        </div>
-        <span className="font-medium text-slate-800">{formatCurrency(p.total)}</span>
-      </Link>
-    </li>
-  );
+  const poRow = (p: JobPo, why: string | undefined, pile: Pile) => {
+    const doors = abDoors(p.id, pile);
+    return (
+      <li key={p.id}>
+        <Link href={`/purchasing/${p.id}`} className="flex min-h-11 items-center gap-3 px-4 py-2.5 text-sm hover:bg-slate-50">
+          <div className="min-w-0 flex-1">
+            <div className="font-medium text-slate-900">{p.vendor || "No vendor yet"}</div>
+            <div className="text-xs text-slate-400">{p.po_number} · purchase order</div>
+            {why && <div className="text-xs text-slate-500">{why}</div>}
+          </div>
+          <span className="font-medium text-slate-800">{formatCurrency(p.total)}</span>
+        </Link>
+        {doors && <div className="flex flex-wrap items-center gap-2 px-4 pb-2.5">{doors}</div>}
+      </li>
+    );
+  };
 
   /** A take from stock in a pile (Shop Stock, Phase 3): what came off the shelf and what it cost.
    *  Its controls (Undo, Carry Back) live with the takes on the Materials tab, so it goes there. */
-  const stockRow = (id: string, why?: string) => {
+  const stockRow = (id: string, why: string | undefined, pile: Pile) => {
     const t = groups?.stock[id];
     if (!t) return null;
+    const doors = abDoors(id, pile);
     return (
       <li key={id}>
         <Link href={`/jobs/${jobId}?tab=materials`} className="flex min-h-11 items-center gap-3 px-4 py-2.5 text-sm hover:bg-slate-50">
@@ -168,18 +221,33 @@ export function JobBills({
           </div>
           <span className="font-medium text-slate-800">{formatCurrency(t.cost)}</span>
         </Link>
+        {doors && <div className="flex flex-wrap items-center gap-2 px-4 pb-2.5">{doors}</div>}
       </li>
     );
   };
 
-  const rowsOf = (ids: string[], whyOf?: (id: string) => string | undefined) => (
+  /** "Billed By Hand On INV-059: 6h 30m · Not Billed After All": hours a person marked. */
+  const hoursRow = (h: JobBilledHours[number]) => (
+    <div key={h.lineId} className="flex flex-wrap items-center gap-2 text-sm text-slate-600">
+      <span>
+        Billed By Hand On {h.invoiceNumber ?? "That Invoice"}: {formatDuration(h.hours)}
+      </span>
+      <NotBilledAfterAllButton jobId={jobId} lineId={h.lineId} ids={h.ids} what={h.what} />
+    </div>
+  );
+  const foldIds = new Set((groups?.billed ?? []).map((g) => g.invoice.id));
+  const hoursIn = (invoiceId: string) => billedHours.filter((h) => h.invoiceId === invoiceId);
+  // Marked hours on an invoice that holds none of the job's bills: their own line under Billed.
+  const hoursLoose = billedHours.filter((h) => !h.invoiceId || !foldIds.has(h.invoiceId));
+
+  const rowsOf = (ids: string[], whyOf?: (id: string) => string | undefined, pile: Pile = "plain") => (
     <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
       {ids.map((id) => {
         const b = billById.get(id);
-        if (b) return billRow(b, whyOf?.(id));
+        if (b) return billRow(b, whyOf?.(id), pile);
         const p = poById.get(id);
-        if (p) return poRow(p, whyOf?.(id));
-        return stockRow(id, whyOf?.(id));
+        if (p) return poRow(p, whyOf?.(id), pile);
+        return stockRow(id, whyOf?.(id), pile);
       })}
     </ul>
   );
@@ -277,7 +345,7 @@ export function JobBills({
         <>
           {openAside}
           {groups.open.ids.length > 0 ? (
-            <div className={openAside ? "mt-3" : undefined}>{rowsOf(groups.open.ids, (id) => openOwnNote(groups.openOwn[id]))}</div>
+            <div className={openAside ? "mt-3" : undefined}>{rowsOf(groups.open.ids, (id) => openOwnNote(groups.openOwn[id]), "open")}</div>
           ) : (
             <p className="py-3 text-sm text-slate-500">
               {bills.length === 0 && !Object.keys(groups.stock).length
@@ -288,9 +356,11 @@ export function JobBills({
             </p>
           )}
 
-          {groups.billed.length > 0 && (
+          {(groups.billed.length > 0 || billedHours.length > 0 || !!handsNote) && (
             <div className="mt-5">
               <div className="mb-2 text-sm font-semibold text-slate-900">Billed</div>
+              {handsNote && <p className="mb-2 text-sm text-slate-500">{handsNote}</p>}
+              {hoursLoose.length > 0 && <div className="mb-2 space-y-2">{hoursLoose.map(hoursRow)}</div>}
               <div className="space-y-2">
                 {groups.billed.map((g) => (
                   // Closed until tapped: what is already on an invoice is the part he does not
@@ -306,7 +376,8 @@ export function JobBills({
                       <span className="font-medium text-slate-800">{formatCurrency(g.total)}</span>
                     </summary>
                     <div className="border-t border-slate-100 px-3 pb-2 pt-3">
-                      {rowsOf(g.ids)}
+                      {rowsOf(g.ids, undefined, "billed")}
+                      {hoursIn(g.invoice.id).length > 0 && <div className="mt-2 space-y-2">{hoursIn(g.invoice.id).map(hoursRow)}</div>}
                       <Link
                         href={`/billing/${g.invoice.id}`}
                         className="mt-1 inline-flex min-h-11 items-center text-sm font-medium text-brand hover:underline"
@@ -326,6 +397,7 @@ export function JobBills({
               {rowsOf(
                 groups.nothing.map((n) => n.id),
                 (id) => nothingToBillWhy(groups.nothing.find((n) => n.id === id)!.why),
+                "nothing",
               )}
             </div>
           )}
@@ -335,6 +407,9 @@ export function JobBills({
       ) : (
         rowsOf(bills.map((b) => b.id))
       )}
+      {/* The plain list (no piles): hours a person marked still say so, with the way back. */}
+      {!groups && billedHours.length > 0 && <div className="mt-3 space-y-2">{billedHours.map(hoursRow)}</div>}
+      {!groups && handsNote && <p className="mt-3 text-sm text-slate-500">{handsNote}</p>}
 
       {editBill && (
         <JobBillEditModal

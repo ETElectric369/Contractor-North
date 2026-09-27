@@ -292,10 +292,11 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
   {
     name: "list_tasks",
     description:
-      "List this company's tasks (with their id, title, status, due date, and who they're assigned to). Use BEFORE completing, rescheduling, or reassigning a task so you have its id — e.g. 'mark the inspection task done', 'push the permit task to Friday'. Filter by status (open | done) and/or a text search on the title.",
+      "List tasks (with their id, title, status, and job). Two kinds: a JOB TASK is on a job's one list (no assignee, no due date — the crew lead hands them out out loud; anyone on the job checks it off), and a REMINDER has no job and is private to whoever made it and whoever it's for (you only ever see the caller's own). Use BEFORE completing or rescheduling a task so you have its id — e.g. 'mark the inspection task done', 'what's left on the Smith job'. Filter by job_id (resolve with list_jobs) for one job's list, by status (open | done), and/or a text search on the title.",
     input_schema: {
       type: "object",
       properties: {
+        job_id: { type: "string", description: "Optional: only this job's task list (a job id from list_jobs)." },
         status: { type: "string", enum: ["open", "done"], description: "Optional status filter." },
         search: { type: "string", description: "Optional text to match against the task title." },
         limit: { type: "integer", description: "Max rows (default 20, max 40)." },
@@ -1740,22 +1741,32 @@ export async function runDataTool(
         const s = sanitize(input.search);
         let q = supabase
           .from("tasks")
-          .select("id, title, status, due_date, assignee:assigned_to(full_name), jobs(job_number, name)")
+          .select("id, title, status, due_date, job_id, assignee:assigned_to(full_name), jobs(job_number, name)")
           .order("due_date", { ascending: true, nullsFirst: false })
           .limit(lim);
         const st = String(input.status ?? "");
         if (st === "open" || st === "done") q = q.eq("status", st);
         if (s) q = q.ilike("title", `%${escapeLike(s)}%`);
+        // One job's list (0358). An id only: a stray string is refused, never read as "no filter".
+        const jobFilter = String(input.job_id ?? "").trim();
+        if (jobFilter) {
+          if (!/^[0-9a-f-]{36}$/i.test(jobFilter)) {
+            return JSON.stringify({ error: "job_id must be a job id from list_jobs." });
+          }
+          q = q.eq("job_id", jobFilter);
+        }
         const { data, error } = await q;
         if (error) throw error;
         return JSON.stringify({
           count: data?.length ?? 0,
           tasks: (data ?? []).map((t: any) => ({
-            id: t.id, // needed to complete / reschedule / reassign the task
+            id: t.id, // needed to complete / reschedule the task
             title: t.title,
             status: t.status,
+            kind: t.job_id ? "job task" : "reminder",
             due: t.due_date,
             assigned_to: t.assignee?.full_name ?? null,
+            job_id: t.job_id ?? null,
             job: t.jobs ? `${t.jobs.job_number} ${t.jobs.name}` : null,
           })),
         });

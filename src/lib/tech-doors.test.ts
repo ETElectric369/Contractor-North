@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { ACTIONS } from "@/components/global-quick-add";
 import { appointmentAffordances } from "@/lib/action-items/types";
 import { canDeletePhoto } from "@/app/(app)/jobs/[id]/job-photos";
+import { canDeleteTask } from "@/lib/job-tasks";
 
 /**
  * NO DOOR A TECH CAN'T USE (Wave 0). Every page below was reachable by a tech and offered him a
@@ -86,21 +87,74 @@ describe("the job's side doors", () => {
     expect(s).toContain('{viewerIsStaff && estimatesOn ? "Walk Through Or Estimate" : "Walk Through"}');
   });
 
+  it("the job's Tasks card is the crew's too: the Overview and the Tasks tab render it for every role (0358)", () => {
+    const s = src("jobs/[id]/page.tsx");
+    // Not behind a role gate: the same card, the same list, for the office and the crew.
+    expect(s).toMatch(/\n\s*<JobTaskList mode="card" \{\.\.\.taskListProps\} \/>/);
+    expect(s).toContain('content: <JobTaskList mode="tab" {...taskListProps} />');
+    expect(s).not.toMatch(/viewerIsStaff\s*&&\s*<JobTaskList/);
+    // The role decides only the Delete (canDeleteTask), passed down, never the list.
+    expect(s).toMatch(/taskListProps = \{[\s\S]*viewerIsStaff,[\s\S]*\};/);
+    // The dock's Tasks slot is gone: the pinned chip next to Overview is the one door.
+    expect(src("jobs/[id]/job-action-dock.tsx")).not.toContain("?tab=tasks");
+  });
+
   it("the jobs list offers New Job only to the office", () => {
     const s = src("jobs/page.tsx");
     expect(s).not.toMatch(/^\s*<NewJobButton/m);
     expect(s.match(/\{isStaff && <NewJobButton/g)?.length).toBe(2);
   });
+
+  it("Already Billed (0357) is the office's: its doors come off the staff-only piles, its reads are staff-only, and a job New Invoice bills by its contract gets only the way back", () => {
+    const s = src("jobs/[id]/page.tsx");
+    // The piles exist only for staff on a job whose running total was read: one that bills its
+    // actuals, or (for the office) one whose next New Invoice pulls them, New Invoice's own rule.
+    expect(s).toMatch(/const costGroups =\s*viewerIsStaff && unbilled && unbilled\.schemaReady/);
+    expect(s).toMatch(/pilesOn\s*\?\s*unbilledWorkForJob\(/);
+    expect(s).toMatch(/const pilesOn = billsActuals \|\| \(viewerIsStaff && importsActuals\);/);
+    expect(s).toMatch(/const importsActuals = nextInvoiceImportsActuals\(/);
+    // The doors' reach is read for staff only, by the sheet's own rule.
+    expect(s).toMatch(/viewerIsStaff &&\s*importsActuals &&[\s\S]{0,200}\?\s*readAlreadyBilledReach\(/);
+    // The marks are read for staff only (on any job: the way back is wherever a mark is).
+    expect(s).toMatch(/viewerIsStaff\s*\?\s*readHandClaimsForJob\(/);
+    expect(s).toMatch(/const handById = handClaims && handClaims !== "failed" && handClaims\.ready \? handClaims\.byId : null;/);
+    // Every door and Undo is built from the piles or the staff-only marks; an open row's door only from the piles.
+    expect(s).toMatch(/const alreadyBilledDoors =\s*costGroups \|\| \(handById && handById\.size > 0\)/);
+    expect(s).toMatch(/offer: costGroups \? alreadyBilledCan : \{ charge: false, ret: false \}/);
+    expect(s).toMatch(/const hoursMarked = hoursByHand\(\(laborRows\?\.jobEntries \?\? \[\]\) as any\[\], handById\);/);
+    // The hours door sits in the Not Billed Yet aside, which renders only with the piles.
+    expect(s).toMatch(/costGroups && unbilled \? \(\s*<div className="space-y-2">/);
+    expect(s).toContain("alreadyBilled={alreadyBilledDoors}");
+  });
+
+  it("a database without 0357 draws no Already Billed door (every sheet it opened would only say it needs an update)", () => {
+    // The job's Costs tab: a reach read that is not ready is "nothing can hold it", never the
+    // lost-read fallback that offers the doors wherever a sent bill is.
+    const job = src("jobs/[id]/page.tsx");
+    expect(job).toMatch(/r\.ready \? \(r\.jobs\.get\(id\) \?\? \{ charge: false, ret: false \}\) : \{ charge: false, ret: false \}/);
+    // The invoice page's Already Billed: Hours On No Job: only once the hands read is ready (a lost
+    // read still shows it; the sheet says what it finds).
+    const inv = src("billing/[id]/page.tsx");
+    expect(inv).toMatch(/const noJobReady = !\(noJobHands && noJobHands !== "failed" && !noJobHands\.ready\);/);
+    expect(inv).toMatch(/const noJobDoor = noJobDoorHere && noJobReady && openNoJob !== 0;/);
+  });
 });
 
 describe("pure rules", () => {
   it("the quick-add menu gives a tech only New Task", () => {
-    expect(ACTIONS.filter((a) => !a.staffOnly).map((a) => a.label)).toEqual(["New Task"]);
+    expect(ACTIONS.filter((a) => !a.staffOnly).map((a) => a.label)).toEqual(["New Reminder"]);
   });
 
   it("a tech's appointment row only opens", () => {
     expect(appointmentAffordances(false)).toEqual(["open"]);
     expect(appointmentAffordances(true)).toContain("do");
+  });
+
+  it("a job task's Delete shows for the office, or for the one who added it (0358)", () => {
+    expect(canDeleteTask({ created_by: "someone" }, "me", true)).toBe(true);
+    expect(canDeleteTask({ created_by: "me" }, "me", false)).toBe(true);
+    expect(canDeleteTask({ created_by: "someone" }, "me", false)).toBe(false);
+    expect(canDeleteTask({ created_by: null }, "me", false)).toBe(false);
   });
 
   it("a photo's trash shows for the office, or for the one who took it", () => {

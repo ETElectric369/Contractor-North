@@ -64,7 +64,8 @@ export const FEATURES: readonly FeatureDef[] = [
   { key: "site_chat", parent: "website", label: "Site Chat", line: "Visitors can chat on your website." },
   { key: "nort", label: "Nort", line: "Ask Nort by voice or text." },
   { key: "calculators", label: "Calculators", line: "Trade calculators, with your trade's open first." },
-  { key: "todo_extras", label: "To-Do Extras", line: "Subtasks and priority on to-dos." },
+  // Reminders only (0358): a job's task list has no priority, steps or tags to hide.
+  { key: "todo_extras", label: "To-Do Extras", line: "Steps, priority and tags on Reminders." },
 ];
 export const FEATURE_BY_KEY = Object.fromEntries(FEATURES.map((f) => [f.key, f])) as Record<FeatureKey, FeatureDef>;
 export const isFeatureKey = (k: unknown): k is FeatureKey => typeof k === "string" && (FEATURE_KEYS as readonly string[]).includes(k);

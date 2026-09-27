@@ -44,6 +44,8 @@ import {
 import { supplierPayDue, type SupplierPayDue } from "./supplier-pay-due";
 import { getOrgSettings } from "@/lib/org-settings";
 import { featureOn } from "@/lib/features";
+import { readAlreadyBilledReach } from "@/lib/already-billed-read";
+import { reportError } from "@/lib/observe";
 
 /** The four kinds migration 0273's check constraint allows. A fifth could only arrive from a
  *  later migration, and showing it as an invoice is a far smaller wrong than a crashed page. */
@@ -287,6 +289,47 @@ export function supplierPaperFeed(input: {
   return { cards, jobs, waiting, ...(input.shopStock === false ? { shopStock: false as const } : {}) };
 }
 
+/** The one job a card would be filed on by a single tap: where it already sits, or the clear guess. */
+export function cardJob(c: Pick<SupplierPaperCard, "state" | "onJob" | "suggestion">): PaperJob | null {
+  return c.state === "record" ? (c.onJob ?? null) : (c.suggestion ?? null);
+}
+
+/**
+ * ALREADY BILLED ON THE CARDS (0357, Erik 2026-09-26: "on supplier bills on my day inside needs action
+ * should also be a button for already charged"). A card whose paper names or guesses ONE job (the
+ * job it sits on, or the matcher's clear guess) gets Already Billed On J-010, but only where the
+ * sheet it opens has a line to pick: the job's next New Invoice pulls its actuals and a bill that went
+ * out could hold a charge (readAlreadyBilledReach, the same rule as the Costs tab and the sheet). A
+ * card with chips, or nothing to go on, has no such door: the job is his to pick first, and the done
+ * line then asks Already Billed On INV-x? itself. A lost read draws no door and is logged; every
+ * other answer on the card is untouched. Staff only, like the cards.
+ */
+export async function withAlreadyBilledDoors(supabase: any, orgId: string, feed: SupplierPaperFeed): Promise<SupplierPaperFeed> {
+  const jobIds = cardJobIds(feed);
+  if (!orgId || !jobIds.length) return feed;
+  try {
+    const reach = await readAlreadyBilledReach(supabase, orgId, jobIds);
+    return reach.ready ? cardsWithAlreadyBilled(feed, reach.jobs) : feed;
+  } catch (e) {
+    reportError("bills.alreadyBilledDoors", e, { cards: feed.cards.length });
+    return feed;
+  }
+}
+
+/** The jobs the cards would be filed on by one tap (cardJob), once each. */
+export function cardJobIds(feed: SupplierPaperFeed | null | undefined): string[] {
+  return [...new Set((feed?.cards ?? []).map((c) => cardJob(c)?.id).filter((x): x is string => !!x))];
+}
+
+/** Pure: each card whose one job can hold a charge gets Already Billed On that job. */
+export function cardsWithAlreadyBilled(feed: SupplierPaperFeed, reach: ReadonlyMap<string, { charge: boolean }>): SupplierPaperFeed {
+  const cards = feed.cards.map((c) => {
+    const job = cardJob(c);
+    return job && reach.get(job.id)?.charge ? { ...c, alreadyBilledOn: job } : c;
+  });
+  return { ...feed, cards };
+}
+
 /**
  * WHERE AN INVOICE STANDS ON /bills, by the rules the page's own lists use (audit v1018, class 14):
  *
@@ -436,7 +479,7 @@ export async function loadSupplierDesk(supabase: any, userId: string, today: str
     links: papersReadable ? (linksRes.data ?? []) : [],
     aliasRows: papersReadable ? (aliasRes?.data ?? []) : [],
   });
-  const papers = papersReadable
+  const feed = papersReadable
     ? supplierPaperFeed({
         since: booksBeginOn(settingsRes.data, (billsRes.data ?? []) as any[]),
         rows,
@@ -447,6 +490,9 @@ export async function loadSupplierDesk(supabase: any, userId: string, today: str
         shopStock,
       })
     : null;
+  // Already Billed On J-010 (0357) on the cards whose one job could hold it: one more breath, only
+  // when a card waits (and only for the jobs the cards name).
+  const papers = feed && feed.cards.length ? await withAlreadyBilledDoors(supabase, orgId, feed) : feed;
   // The pay line reads only the documents' own money (open balance, discount, its date), none of
   // which a bill or a link changes. It needs the accounts read: without the name and the on-account
   // flag there is no door to open (the /bills sheet is not drawn when that read fails either).

@@ -3,7 +3,7 @@
 import { useEffect, useId, useRef, useState, useTransition, type ReactNode } from "react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import Link from "next/link";
-import { Plus, Trash2, Flag, Briefcase, Pencil, Pin, User, ChevronDown } from "lucide-react";
+import { Plus, Trash2, Flag, Pencil, Pin, User, ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { Modal, ModalActions } from "@/components/ui/modal";
@@ -11,9 +11,15 @@ import { Card } from "@/components/ui/card";
 import { MoveToDay } from "@/components/move-to-day";
 import { useToast } from "@/components/toast";
 import { formatDate } from "@/lib/utils";
-import { createTask, toggleTask, deleteTask, updateTask, type TaskCategory, type ToggleTaskResult } from "./actions";
-import { jobLabel } from "@/lib/schedule-options";
+import { createTask, toggleTask, deleteTask, updateTask, type ToggleTaskResult } from "./actions";
 
+/**
+ * THE REMINDERS PAGE (/tasks, since 0358). A Reminder is a task with no job, and it is private: the
+ * person who made it and the person it is for see it, nobody else (0358's tasks_read; the page's
+ * read says the same on a database without it). A job's tasks are the job's one list, on the job
+ * (its Tasks chip) and in My Day's Now block, never here. To-Do Extras (priority, steps, tags)
+ * reaches Reminders only.
+ */
 export interface ViewTask {
   id: string;
   title: string;
@@ -26,18 +32,14 @@ export interface ViewTask {
   focus_date?: string | null;
   job_id: string | null;
   assigned_to: string | null;
+  /** Who made it: only they hand a Reminder to someone else (0358's tasks_update). */
+  created_by?: string | null;
   notes?: string | null;
   parent_id?: string | null;
   tags?: string[] | null;
-  jobs?: { job_number: string; name: string } | null;
   assignee?: { full_name: string | null } | null;
 }
 
-interface JobOption {
-  id: string;
-  job_number: string;
-  name: string;
-}
 interface Person {
   id: string;
   full_name: string | null;
@@ -107,43 +109,22 @@ const PRIORITIES: { value: number; label: string }[] = [
 ];
 const priorityLabel = (p: number) => PRIORITIES.find((x) => x.value === p)?.label ?? "High";
 
-/** ONE entry box for all tasks — category is optional free text (org-vocabulary autocomplete). */
-export function NewTaskBox({
-  jobs,
-  people,
-  defaultCategory,
-  todayStr,
-  categories,
-  extras = true,
-}: {
-  jobs: JobOption[];
-  people: Person[];
-  defaultCategory?: TaskCategory;
-  /** Org-local today — enables the destination toast ("Added to today's six"). */
-  todayStr?: string;
-  /** Existing category values for the autocomplete datalist. */
-  categories?: string[];
-  /** The To-Do Extras switch (0352): off, the box asks no priority (a new task is Normal). */
-  extras?: boolean;
-}) {
+/**
+ * THE ONE-LINE ADD (0358: the 6-field box — category, job, person, due, priority — became this).
+ * Type the words, Add: a Reminder for yourself, undated (it waits under Someday here; pin it or date
+ * it to put it in Today's 6). Everything else is one tap on the row afterwards. A job's task is added
+ * on the job, or from My Day's Add line with a job picked.
+ */
+export function NewReminderBox() {
   const router = useRouter();
   const toast = useToast();
   const searchParams = useSearchParams();
   const pathname = usePathname();
   const [pending, start] = useTransition();
   const [title, setTitle] = useState("");
-  const [category, setCategory] = useState<string>(defaultCategory ?? "");
-  const [jobId, setJobId] = useState("");
-  const [dueDate, setDueDate] = useState("");
-  const [priority, setPriority] = useState(0);
-  const [assignedTo, setAssignedTo] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  // Collapsed by default: one "Add a task…" field + Add. The category/job/assignee/
-  // due/priority details reveal on focus — the quick capture stays a ~60px row.
-  const [expanded, setExpanded] = useState(false);
   const titleRef = useRef<HTMLInputElement>(null);
 
-  // Land ready to type from the quick-add menu's "New task" (/tasks?new=1),
+  // Land ready to type from the quick-add menu's New Reminder (/tasks?new=1),
   // then strip the param so a refresh doesn't re-grab focus.
   useEffect(() => {
     if (searchParams.get("new") !== "1") return;
@@ -156,128 +137,67 @@ export function NewTaskBox({
 
   function add() {
     if (!title.trim()) return;
-    setError(null);
     start(async () => {
-      const res = await createTask({
-        title,
-        category: category.trim() || null,
-        job_id: jobId || null,
-        due_date: dueDate || null,
-        priority,
-        assigned_to: assignedTo || null,
-      });
-      if (!res.ok) return setError(res.error ?? "Could not save.");
-      // Say where it landed — capture must stay honest now that undated tasks
-      // wait behind My Day's "Everything else" door instead of screaming. A
-      // dup-collapse (createTask handed back the existing task) is never silent.
-      if (res.duplicate) {
-        toast(res.speak ?? "Already on the list.", "info");
-      } else {
-        // Keep the destination claim TRUE (audit cn-v328): an assigned task lands on
-        // THAT person's list, not my six; a backdated task can be squeezed out by the
-        // rank-2 overdue cap so we don't promise the six; only an unassigned due-TODAY
-        // task reliably makes the six (rank 3 admits all of today while slots remain).
-        const landed = assignedTo
-          ? "Added to their list"
-          : !todayStr
-            ? "Task added"
-            : dueDate === todayStr
-              ? "Added to today's six"
-              : dueDate && dueDate < todayStr
-                ? "Added — overdue"
-                : category.trim().toLowerCase() === "office"
-                  ? "Added to Office"
-                  : "Added to Everything else";
-        toast(landed, "success");
+      const res = await createTask({ title });
+      if (!res.ok) {
+        toast(res.error ?? "Couldn't add the reminder. Try again.", "error");
+        return;
       }
+      toast(res.duplicate ? (res.speak ?? "Already on the list.") : "Reminder added", res.duplicate ? "info" : "success");
       setTitle("");
-      setJobId("");
-      setDueDate("");
-      setPriority(0);
-      setAssignedTo("");
       router.refresh();
     });
   }
 
   return (
     <Card className="mb-4">
-      <div className="space-y-2 p-4">
-        {error && <p className="text-sm text-red-600">{error}</p>}
-        <div className="flex flex-wrap items-center gap-2">
-          <Input
-            ref={titleRef}
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            onFocus={() => setExpanded(true)}
-            onKeyDown={(e) => e.key === "Enter" && add()}
-            placeholder="Add a task…"
-            className="min-w-[200px] flex-1"
-          />
-          {expanded && (
-            <CategoryInput value={category} onChange={setCategory} categories={categories} className="w-40" />
-          )}
-          <Button onClick={add} disabled={pending || !title.trim()}>
-            <Plus className="h-4 w-4" /> Add
-          </Button>
-        </div>
-        {expanded && (
-          <div className="flex flex-wrap items-center gap-2">
-            <Select value={jobId} onChange={(e) => setJobId(e.target.value)} className="w-48 text-xs" aria-label="Job">
-              <option value="">No job</option>
-              {jobs.map((j) => (
-                <option key={j.id} value={j.id}>{jobLabel(j)}</option>
-              ))}
-            </Select>
-            {people.length > 0 && (
-              <Select value={assignedTo} onChange={(e) => setAssignedTo(e.target.value)} className="w-40 text-xs" aria-label="Assigned to">
-                <option value="">Unassigned</option>
-                {people.map((p) => (
-                  <option key={p.id} value={p.id}>{p.full_name ?? "Unnamed"}</option>
-                ))}
-              </Select>
-            )}
-            <Input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} className="w-40 text-xs" aria-label="Due date" />
-            {extras && (
-              <Select value={priority} onChange={(e) => setPriority(Number(e.target.value))} className="w-28 text-xs" aria-label="Priority">
-                {PRIORITIES.map((p) => (
-                  <option key={p.value} value={p.value}>{p.label}</option>
-                ))}
-              </Select>
-            )}
-          </div>
-        )}
+      <div className="flex items-center gap-2 p-3">
+        <Input
+          ref={titleRef}
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && add()}
+          placeholder="Add A Reminder…"
+          aria-label="Add A Reminder"
+          className="h-11 min-w-0 flex-1"
+        />
+        <Button onClick={add} disabled={pending || !title.trim()} className="shrink-0 px-3">
+          <Plus className="h-4 w-4" /> Add
+        </Button>
       </div>
     </Card>
   );
 }
 
-/** Full edit modal: title, category, job, due date, priority, and assigned person. */
-function TaskEditModal({
+/** Full edit modal: title, category, due date, priority, who it's for, tags, notes. No job: a
+ *  Reminder is not a job's task (0358); a job's list is worked on the job. */
+export function TaskEditModal({
   t,
-  jobs,
   people,
   category,
   categories,
   open,
   onClose,
   extras = true,
+  viewerId = null,
 }: {
   t: ViewTask;
-  jobs: JobOption[];
   people: Person[];
   category: string | null;
   /** Existing category values for the autocomplete datalist. */
   categories?: string[];
   open: boolean;
   onClose: () => void;
-  /** To-Do Extras (0352): off, no Priority field; the task keeps the priority it has. */
+  /** To-Do Extras (0352): off, no Priority or Tags fields; the reminder keeps what it has. */
   extras?: boolean;
+  /** Who is looking. Only the Reminder's maker gets Who It's For: 0358 refuses anyone else's change. */
+  viewerId?: string | null;
 }) {
   const router = useRouter();
+  const canHandOff = !!viewerId && t.created_by === viewerId;
   const [pending, start] = useTransition();
   const [title, setTitle] = useState(t.title);
   const [cat, setCat] = useState(t.category ?? "");
-  const [jobId, setJobId] = useState(t.job_id ?? "");
   const [dueDate, setDueDate] = useState(t.due_date ?? "");
   const [priority, setPriority] = useState(t.priority);
   const [assignedTo, setAssignedTo] = useState(t.assigned_to ?? "");
@@ -294,11 +214,12 @@ function TaskEditModal({
         {
           title,
           category: cat.trim() || null,
-          job_id: jobId || null,
           due_date: dueDate || null,
           priority,
-          assigned_to: assignedTo || null,
-          tags: tags.split(",").map((s) => s.trim()).filter(Boolean),
+          // Who it's for is the maker's to change; anyone else's save leaves it as it is.
+          ...(canHandOff ? { assigned_to: assignedTo || null } : {}),
+          // Tags follow To-Do Extras: off, the field isn't drawn and the reminder keeps its tags.
+          ...(extras ? { tags: tags.split(",").map((s) => s.trim()).filter(Boolean) } : {}),
           notes: notes || null,
         },
         { category, jobId: t.job_id },
@@ -313,7 +234,7 @@ function TaskEditModal({
     <Modal
       open={open}
       onClose={onClose}
-      title="Edit task"
+      title="Edit Reminder"
       footer={<ModalActions onCancel={onClose} onSave={save} saving={pending} saveLabel="Save Changes" />}
     >
       <div className="space-y-4">
@@ -325,15 +246,6 @@ function TaskEditModal({
         <div>
           <Label htmlFor="te-cat">Category</Label>
           <CategoryInput id="te-cat" value={cat} onChange={setCat} categories={categories} />
-        </div>
-        <div>
-          <Label htmlFor="te-job">Job</Label>
-          <Select id="te-job" value={jobId} onChange={(e) => setJobId(e.target.value)}>
-            <option value="">— No job —</option>
-            {jobs.map((j) => (
-              <option key={j.id} value={j.id}>{jobLabel(j)}</option>
-            ))}
-          </Select>
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div>
@@ -365,18 +277,34 @@ function TaskEditModal({
           )}
         </div>
         <div>
-          <Label htmlFor="te-person">Assigned to</Label>
-          <Select id="te-person" value={assignedTo} onChange={(e) => setAssignedTo(e.target.value)}>
-            <option value="">Unassigned</option>
-            {people.map((p) => (
-              <option key={p.id} value={p.id}>{p.full_name ?? "Unnamed"}</option>
-            ))}
-          </Select>
+          {/* A Reminder is private to its maker and the person it's for (0358): only they see it, and
+              only the maker hands it to someone else, so nobody else is offered a door 0358 refuses. */}
+          {canHandOff ? (
+            <>
+              <Label htmlFor="te-person">Who It&rsquo;s For</Label>
+              <Select id="te-person" value={assignedTo} onChange={(e) => setAssignedTo(e.target.value)}>
+                <option value="">Whoever Made It</option>
+                {people.map((p) => (
+                  <option key={p.id} value={p.id}>{p.full_name ?? "Unnamed"}</option>
+                ))}
+              </Select>
+            </>
+          ) : (
+            <>
+              <Label>Who It&rsquo;s For</Label>
+              <p className="text-sm text-slate-700">
+                {t.assigned_to ? (t.assigned_to === viewerId ? "You" : (t.assignee?.full_name ?? "Someone on the team")) : "Whoever Made It"}
+              </p>
+              <p className="mt-1 text-xs text-slate-500">Only the person who made it can hand it to someone else.</p>
+            </>
+          )}
         </div>
-        <div>
-          <Label htmlFor="te-tags">Tags</Label>
-          <Input id="te-tags" value={tags} onChange={(e) => setTags(e.target.value)} placeholder="comma, separated, tags" />
-        </div>
+        {extras && (
+          <div>
+            <Label htmlFor="te-tags">Tags</Label>
+            <Input id="te-tags" value={tags} onChange={(e) => setTags(e.target.value)} placeholder="comma, separated, tags" />
+          </div>
+        )}
         <div>
           <Label htmlFor="te-notes">Notes</Label>
           <Textarea id="te-notes" value={notes} onChange={(e) => setNotes(e.target.value)} rows={4} placeholder="Add any details or context…" />
@@ -388,7 +316,6 @@ function TaskEditModal({
 
 export function TaskRow({
   t,
-  jobs,
   people,
   category,
   categories,
@@ -397,9 +324,9 @@ export function TaskRow({
   overdue = false,
   todayStr,
   extras = true,
+  viewerId = null,
 }: {
   t: ViewTask;
-  jobs: JobOption[];
   people: Person[];
   category: string | null;
   /** Existing category values — feeds the edit modal's autocomplete. */
@@ -411,6 +338,8 @@ export function TaskRow({
   todayStr?: string;
   /** To-Do Extras (0352): off, no Add Subtask; subtasks already there stay listed and tickable. */
   extras?: boolean;
+  /** Who is looking (the edit modal offers Who It's For to the maker only). */
+  viewerId?: string | null;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -490,19 +419,16 @@ export function TaskRow({
             {t.assignee?.full_name && (
               <span className="flex items-center gap-1"><User className="h-3 w-3" /> {t.assignee.full_name}</span>
             )}
-            {t.jobs && (
-              <Link href={`/jobs/${t.job_id}`} className="flex items-center gap-1 hover:text-brand">
-                <Briefcase className="h-3 w-3" /> {t.jobs.name}
-              </Link>
-            )}
             {showCategory && t.category && (
               <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${CATEGORY_CHIP[t.category.toLowerCase()] ?? "bg-slate-100 text-slate-500"}`}>
                 {categoryLabel(t.category)}
               </span>
             )}
-            {(t.tags ?? []).map((tag) => (
-              <span key={tag} className="rounded-full bg-slate-100 px-2 py-0.5 text-slate-500">#{tag}</span>
-            ))}
+            {/* Tags follow To-Do Extras (0358): off, the chips aren't drawn; the tags stay stored. */}
+            {extras &&
+              (t.tags ?? []).map((tag) => (
+                <span key={tag} className="rounded-full bg-slate-100 px-2 py-0.5 text-slate-500">#{tag}</span>
+              ))}
           </div>
         </div>
         {/* "Do today" — pin into My Day's six (a date, so it self-expires at
@@ -528,7 +454,7 @@ export function TaskRow({
         <button
           onClick={() => {
             if (!confirm(`Delete "${t.title}"? This can't be undone.`)) return;
-            start(async () => { const res = await deleteTask(t.id, { category }); if (!res?.ok) { toast(res?.error ?? "Couldn't delete task — try again.", "error"); return; } toast("Task deleted", "success"); router.refresh(); });
+            start(async () => { const res = await deleteTask(t.id, { category }); if (!res?.ok) { toast(res?.error ?? "Couldn't delete the reminder. Try again.", "error"); return; } toast("Reminder deleted", "success"); router.refresh(); });
           }}
           disabled={pending}
           className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-slate-300 hover:bg-red-50 hover:text-red-600"
@@ -573,7 +499,16 @@ export function TaskRow({
       )}
 
       {editing && (
-        <TaskEditModal t={t} jobs={jobs} people={people} category={category} categories={categories} open={editing} onClose={() => setEditing(false)} extras={extras} />
+        <TaskEditModal
+          t={t}
+          people={people}
+          category={category}
+          categories={categories}
+          open={editing}
+          onClose={() => setEditing(false)}
+          extras={extras}
+          viewerId={viewerId}
+        />
       )}
     </li>
   );
@@ -637,42 +572,39 @@ function TimeSection({
 }
 
 /**
- * Tasks grouped by WHEN by default — Overdue / Today / This week / Later /
+ * Reminders grouped by WHEN by default — Overdue / Today / This week / Later /
  * Someday, in that order, so "what's next" is a 3-second read — with a
- * ?by=category toggle that regroups the same open tasks by the org's own
+ * ?by=category toggle that regroups the same open ones by the org's own
  * category vocabulary (uncategorized last, under "No category"). Empty
  * sections stay hidden; completed sinks to the bottom behind a bounded fetch.
  */
 export function TasksView({
   tasks,
-  jobs,
   people = [],
-  category,
   categories = [],
   todayStr,
   doneTotal = 0,
   showingAllDone = false,
   extras = true,
+  viewerId = null,
 }: {
   tasks: ViewTask[];
-  jobs: JobOption[];
   people?: Person[];
-  category?: TaskCategory;
   /** The org's existing category values (autocomplete + by-category view). */
   categories?: string[];
   todayStr: string;
   doneTotal?: number;
   showingAllDone?: boolean;
-  /** The To-Do Extras switch (0352): priority and subtask doors. Omitted = on (as before). */
+  /** The To-Do Extras switch (0352): priority, step and tag doors. Omitted = on (as before). */
   extras?: boolean;
+  /** Who is looking: only a Reminder's maker is offered Who It's For. */
+  viewerId?: string | null;
 }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  // The by-category regroup only exists on the all-tasks pages — a single
-  // category's page has nothing to regroup.
-  const byCategory = !category && searchParams.get("by") === "category";
+  const byCategory = searchParams.get("by") === "category";
 
-  // Preserve every live filter (?mine / ?else / ?by) when building links —
+  // Preserve every live filter (?by, ?done) when building links —
   // only the transient ?new focus flag is dropped.
   const hrefWith = (mutate: (p: URLSearchParams) => void) => {
     const p = new URLSearchParams(searchParams.toString());
@@ -708,15 +640,15 @@ export function TasksView({
     <TaskRow
       key={t.id}
       t={t}
-      jobs={jobs}
       people={people}
       category={t.category ?? null}
       categories={categories}
       subtasks={childrenByParent.get(t.id) ?? []}
-      showCategory={!category && !byCategory}
+      showCategory={!byCategory}
       overdue={!!t.due_date && t.due_date < todayStr}
       todayStr={todayStr}
       extras={extras}
+      viewerId={viewerId}
     />
   );
 
@@ -753,34 +685,32 @@ export function TasksView({
 
   return (
     <div>
-      <NewTaskBox jobs={jobs} people={people} defaultCategory={category} todayStr={todayStr} categories={categories} extras={extras} />
+      <NewReminderBox />
       {/* View toggle — link pills (the app's filter idiom), URL-driven so the
-          grouping survives reloads and deep links. Hidden on /tasks/[category]. */}
-      {!category && (
-        <div className="mb-4 flex items-center gap-1.5">
-          {([
-            { on: false, label: "By When" },
-            { on: true, label: "By Category" },
-          ] as const).map((p) => (
-            <Link
-              key={p.label}
-              href={hrefWith((q) => (p.on ? q.set("by", "category") : q.delete("by")))}
-              aria-current={byCategory === p.on ? "page" : undefined}
-              className={`inline-flex items-center rounded-full px-3 py-1 text-sm font-medium ${
-                byCategory === p.on
-                  ? "bg-brand text-white shadow-sm"
-                  : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
-              }`}
-            >
-              {p.label}
-            </Link>
-          ))}
-        </div>
-      )}
+          grouping survives reloads and deep links. */}
+      <div className="mb-4 flex items-center gap-1.5">
+        {([
+          { on: false, label: "By When" },
+          { on: true, label: "By Category" },
+        ] as const).map((p) => (
+          <Link
+            key={p.label}
+            href={hrefWith((q) => (p.on ? q.set("by", "category") : q.delete("by")))}
+            aria-current={byCategory === p.on ? "page" : undefined}
+            className={`inline-flex min-h-[44px] items-center rounded-full px-3 text-sm font-medium ${
+              byCategory === p.on
+                ? "bg-brand text-white shadow-sm"
+                : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+            }`}
+          >
+            {p.label}
+          </Link>
+        ))}
+      </div>
       <div className="space-y-4">
         {sections.length === 0 && (
           <Card>
-            <div className="px-4 py-8 text-center text-sm text-slate-400">Nothing open — add a task above.</div>
+            <div className="px-4 py-8 text-center text-sm text-slate-400">Nothing open. Add a reminder above.</div>
           </Card>
         )}
         {sections.map((s) => (
@@ -800,7 +730,7 @@ export function TasksView({
               !showingAllDone && doneTotal > doneFetched ? (
                 <div className="border-t border-slate-200/70 bg-white px-4 py-2.5 text-center">
                   <Link href={hrefWith((q) => q.set("done", "all"))} className="text-xs font-medium text-brand hover:underline">
-                    Show all completed ({doneTotal})
+                    Show All Completed ({doneTotal})
                   </Link>
                 </div>
               ) : undefined

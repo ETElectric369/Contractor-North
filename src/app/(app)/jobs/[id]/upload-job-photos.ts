@@ -7,10 +7,12 @@ import { addDocument } from "../actions";
  * every capture surface — the tab's Take photo/Upload buttons AND the action
  * dock's quick Photo button — files a picture the exact same way:
  * prepareImageForUpload → storage upload → addDocument(category "Photo").
- * Throws on the first failure so the caller can surface it (never silent).
+ * Throws on the first failure so the caller can surface it (never silent). Returns each photo's
+ * storage path, in order, so a caller can put one on a task (Make It A Task, 0358).
  */
-export async function uploadJobPhotos(orgId: string, jobId: string, files: File[]): Promise<void> {
+export async function uploadJobPhotos(orgId: string, jobId: string, files: File[]): Promise<string[]> {
   const supabase = createClient();
+  const paths: string[] = [];
   for (const raw of files) {
     const file = await prepareImageForUpload(raw);
     const safe = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
@@ -19,5 +21,7 @@ export async function uploadJobPhotos(orgId: string, jobId: string, files: File[
     if (upErr) throw upErr;
     const res = await addDocument({ job_id: jobId, name: file.name, category: "Photo", file_url: path, size_bytes: file.size });
     if (!res.ok) throw new Error(res.error);
+    paths.push(path);
   }
+  return paths;
 }

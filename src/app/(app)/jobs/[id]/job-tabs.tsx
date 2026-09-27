@@ -12,23 +12,28 @@ import {
 // In-page nav order — the lifecycle-honest strip. The pinned chips (per role, below)
 // lead in this order; everything else clusters into the More chip in this order.
 export const JOB_TAB_ORDER = [
-  "job", "time", "materials", "costs", "invoices", "photos", "tasks", "appointments",
+  "job", "tasks", "time", "materials", "costs", "invoices", "photos", "appointments",
   "notes", "quotes", "change-orders", "permits", "panel", "wos", "customer",
 ];
 // THE CHIPS THAT STAY PUT (Erik, 2026-09-11: "overview - time - materials - invoices be
 // seaglass buttons that stay put and the little arrow drop down for more"). Two sets,
 // because the money chips can't render for a tech (tech-job-access: a control a role
-// can't use must not render) — his fourth chip is Photos, the crew's other one-tap door.
+// can't use must not render) — his other chip is Photos, the crew's other one-tap door.
 // Pinned chips are never measured or folded (<Tabs look="tiles">), which is what ends
 // Costs and Invoices living behind More on every phone: the old measured strip fit ~3
 // of its four "primaries" at 343px, so the money tabs never once stayed inline.
-const JOB_PINNED_STAFF = new Set(["job", "time", "materials", "costs", "invoices"]);
-const JOB_PINNED_TECH = new Set(["job", "time", "materials", "photos"]);
+//
+// TASKS RIGHT AFTER OVERVIEW, for both (Erik, 2026-09-26: "put it on the bottom bar next to
+// overview"). SIX CHIPS IS THE PHONE'S ROW: at 375 (343px inside the page) the tiles share the
+// width at gap-1.5, and seven would be 43.9px each (under the 44px minimum) with "Overview" (42px of
+// text at 10px Geist) and "Materials" (41px) cut off inside chips that have 39.9px of room — measured
+// in Geist, 2026-09-26. Six is 52.2px each with every word whole. So for the office the LAST pinned
+// chip, Invoices, folds into More (its "Money" cluster, one tap away), and the crew's row is
+// Overview, Tasks, Time, Materials, Photos + More: six, as it was for the office before.
+export const JOB_PINNED_STAFF: ReadonlySet<string> = new Set(["job", "tasks", "time", "materials", "costs"]);
+export const JOB_PINNED_TECH: ReadonlySet<string> = new Set(["job", "tasks", "time", "materials", "photos"]);
 // "customer" (what the customer sees): the link, the stretches and the picks are the office's.
 export const JOB_STAFF_ONLY = new Set(["costs", "quotes", "invoices", "change-orders", "customer"]);
-// Tabs whose chip is NOT drawn on the strip or in More, because a better door to them already
-// exists on the page. Only Tasks so far: the action dock carries it.
-const JOB_OFF_STRIP = new Set(["tasks"]);
 // THE TABS A SWITCH OWNS (the switch board, 0352). While the switch is off the tab loses its chip
 // (offStrip), and a ?tab= link (a bell, a Needs You card, a bookmark) still opens it, with the Off
 // line on top. Nothing on the tab is read differently: its rows, counts and money are the same.
@@ -50,7 +55,7 @@ const JOB_TAB_META: Record<string, { group?: string; icon?: LucideIcon }> = {
   time: { icon: Clock },
   materials: { icon: Package },
   photos: { group: "Docs", icon: Camera },
-  tasks: { group: "Work", icon: ListChecks },
+  tasks: { icon: ListChecks },
   appointments: { group: "Work", icon: CalendarDays },
   wos: { group: "Work", icon: ClipboardCheck },
   quotes: { group: "Money", icon: FileText },
@@ -68,7 +73,7 @@ const JOB_TAB_META: Record<string, { group?: string; icon?: LucideIcon }> = {
 };
 
 /** Order the job tabs and tag each with its pin + cluster + staff-gating, so
- *  <Tabs look="tiles"> keeps the role's five (four) chips put and folds the rest
+ *  <Tabs look="tiles"> keeps the role's five chips put and folds the rest
  *  into a clustered, bloom-skinned "More" chip. staffOnly is honored TWICE: the
  *  page drops those tabs before passing them (so their content never serializes
  *  to a tech), and <Tabs> filters again on the client. `switches` omitted = everything on. */
@@ -88,11 +93,10 @@ export function arrangeJobTabs(
         ...(JOB_TAB_META[t.id] ?? {}),
         pinned: pinned.has(t.id),
         staffOnly: JOB_STAFF_ONLY.has(t.id),
-        // TASKS HAS ITS OWN DOOR. It is a slot in the action dock above (cn-v951, at Erik's ask),
-        // so a chip for it inside More was the same door listed twice — "Remove tasks from the
-        // dropdown menu" (2026-09-18). The TAB itself stays: the dock links to ?tab=tasks and the
-        // content still renders when it is active. A switched-off feature's tab rides the same rail.
-        offStrip: JOB_OFF_STRIP.has(t.id) || off,
+        // A switched-off feature's tab loses its chip and still opens from a ?tab= link. (Tasks used
+        // to ride this rail too, its door a slot in the action dock; since 0358 it is a pinned chip
+        // and the dock slot is gone — one door, not two.)
+        offStrip: off,
         content:
           off && feature ? (
             <>

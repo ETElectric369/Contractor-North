@@ -15,7 +15,7 @@ vi.mock("@/components/move-to-day", () => ({ MoveToDay: ({ children }: { childre
 
 import { ActionList } from "./action-list";
 import { inquiryActionItem } from "@/lib/action-items/switches";
-import { KIND_STREAM } from "@/lib/action-items/types";
+import { AFFORDANCES, KIND_STREAM, type ActionItem } from "@/lib/action-items/types";
 
 const row = { id: "i1", name: "Dana Reyes", status: "new", next_follow_up_at: null, phone: "(530) 555-0142" };
 const render = (leadsOn: boolean) => {
@@ -49,5 +49,40 @@ describe("ActionList — a request with Leads off", () => {
     expect(on).toMatch(/\nLeads\n/);
     expect(on).toMatch(/\nLead\n/);
     expect(on).not.toMatch(/\nRequests?\n/);
+  });
+});
+
+/**
+ * HOURS ON NO JOB, BILLED BY HAND (0357, TTUSD on INV-055): the Needs You row of a closed shift on no
+ * job carries Already Billed when an invoice with no job could hold it (query.ts, noJobStrayDoors).
+ * The door is on the row itself, 44px and Title Case; a row without it (a running clock, or nothing
+ * that could hold it) is the row it always was.
+ */
+describe("ActionList — a shift on no job", () => {
+  const stray = (o: Partial<ActionItem> = {}): ActionItem => ({
+    id: "stray-t6",
+    kind: "time_stray",
+    stream: KIND_STREAM.time_stray,
+    title: "JP's Aug 6 entry has no job",
+    subtitle: "Closed hours nobody can bill",
+    who: "JP",
+    when: "2026-08-06T15:00:00Z",
+    urgency: 1,
+    done: false,
+    href: "/timecards",
+    affordances: AFFORDANCES.time_stray,
+    ...o,
+  });
+  const html = (item: ActionItem) => renderToStaticMarkup(createElement(ActionList, { items: [item], todayStr: "2026-09-26" }));
+
+  it("Already Billed on the row, 44px, when an invoice with no job could hold it", () => {
+    const h = html(stray({ noJobHours: { entryIds: ["t6"] } }));
+    const tag = Array.from(h.matchAll(/<button[^>]*>Already Billed<\/button>/g))[0]?.[0];
+    expect(tag).toBeTruthy();
+    expect(tag).toMatch(/\bh-11\b/);
+  });
+
+  it("no door without it", () => {
+    expect(html(stray())).not.toContain("Already Billed");
   });
 });

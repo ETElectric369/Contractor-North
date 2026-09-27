@@ -50,3 +50,23 @@ export function jobBillsItsActuals(
 ): boolean {
   return billingType === "tm" && milestoneCount === 0;
 }
+
+/** A quote that still stands: not declined, not expired (the customer said no, or it lapsed).
+ *  createInvoiceForJob's own test for which quote could be the contract. */
+export function isLiveQuote(status: string | null | undefined): boolean {
+  return status !== "declined" && status !== "expired";
+}
+
+/**
+ * DOES THE NEXT NEW INVOICE PULL THE JOB'S HOURS AND RECEIPTS? createInvoiceForJob's own rule: no
+ * payment schedule, and no estimate that is the contract. Wider than jobBillsItsActuals: a
+ * fixed-price job with no live estimate (J-010 Purple Sage, INV-00023) is billed from its actuals
+ * too, so a charge made there by hand has to be recordable, or New Invoice bills it again.
+ */
+export function nextInvoiceImportsActuals(
+  billingType: string | null | undefined,
+  milestoneCount: number,
+  hasLiveQuote: boolean,
+): boolean {
+  return milestoneCount === 0 && !estimateIsTheContract(billingType, hasLiveQuote);
+}
