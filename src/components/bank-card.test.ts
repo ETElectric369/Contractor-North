@@ -87,18 +87,26 @@ describe("the bank card", () => {
     expect(text).toContain("Where $3,685.00 Went");
     expect(text).toContain("Owner's Draw $2,500.00");
     expect(text).toContain("SHELL 123 ANYTOWN 3 charges · $288.45");
-    // The guess is first and NOT picked: no button is pressed until a person taps.
+    // The guess is marked, and NOT picked: no button is pressed until a person taps.
     expect(html).not.toContain('aria-pressed="true"');
     const labels = buttons(html).map((b) => b.text);
-    expect(labels.slice(0, 4)).toEqual(["Fuel", "Truck", "Personal", "Other…"]);
-    expect(labels).toContain("On INV-1001");
-    expect(labels).toContain("Pay Pat Crew");
+    expect(labels.slice(0, 4)).toEqual(["Fuel Guess", "Truck", "Personal", "Other…"]);
+    expect(labels).toContain("On INV-1001 Guess");
+    expect(labels).toContain("Pay Pat Crew Guess");
+    expect(text).toContain("A button marked Guess is the app's guess.");
+    expect(text).not.toContain("No guess");
     expect(labels).toContain("Apply");
     expect(labels).toContain("Not Now");
     for (const b of buttons(html)) {
       expect(titleCase(b.text.replace("…", ""))).toBe(true);
       expect(b.markup).toMatch(/h-11|min-h-11/);
     }
+  });
+
+  it("a row with no guess says so, and none of its buttons is called one", () => {
+    const html = render({ ...VIEW, rows: [{ ...VIEW.rows[0], guess: null, buttons: [{ id: "personal", label: "Personal" }, { id: "draw", label: "Owner's Draw" }] }] });
+    expect(textOf(html)).toContain("No guess");
+    expect(html).not.toMatch(/>Guess</);
   });
 
   it("a problem is said, with Not Now; no Apply", () => {

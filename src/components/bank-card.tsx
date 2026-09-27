@@ -20,8 +20,9 @@ import { keepPaperwork } from "@/app/(app)/organize/paperwork-actions";
  *   Check 1043 · $640.00             [Pay Pat] [Other…]
  *   [Apply] [Not Now]
  *
- * THE APP'S GUESS IS THE FIRST BUTTON AND NEVER PICKED FOR YOU (fill-vs-execute): a row counts only
- * once a person taps an answer. A row left alone is left for later: Apply writes the rest and the
+ * THE APP'S GUESS IS MARKED "Guess" AND NEVER PICKED FOR YOU (fill-vs-execute): a row counts only
+ * once a person taps an answer. A row with no guess says so; the usual answers beside it are never
+ * called one. A row left alone is left for later: Apply writes the rest and the
  * card keeps it, named as not counted. The detail (what it sorted, lines that didn't read) is
  * folded. Undo takes the whole download back.
  */
@@ -89,6 +90,7 @@ function Row({
         <span className="tabular-nums text-slate-700">{row.money}</span>
         <span className="text-xs text-slate-500">{row.dates}</span>
         {row.direction === "in" && <span className="text-xs text-green-700">Money In</span>}
+        {!row.guess && <span className="text-xs text-slate-500">No guess</span>}
       </div>
       <div className="flex flex-wrap gap-2">
         {row.buttons.map((b) => (
@@ -101,6 +103,11 @@ function Row({
             title={b.id === row.guess ? "The app's guess. Tap it if it's right." : undefined}
           >
             {picked === b.id && <Check />} {b.label}
+            {b.id === row.guess && (
+              <span className="rounded bg-amber-100 px-1 text-[10px] font-semibold uppercase tracking-wide text-amber-900">
+                Guess
+              </span>
+            )}
           </Button>
         ))}
         {offList && (
@@ -205,7 +212,7 @@ export function BankCard({ itemId, view, run, busy, working }: { itemId: string;
       <p className="text-sm font-medium text-slate-900">{view.headline}</p>
       <FlowBar flow={view.flow} outCents={view.outCents} />
       {view.appliedSaid && <p className="text-xs text-slate-600">{view.appliedSaid}</p>}
-      {view.rows.length > 0 && <p className="text-xs text-slate-500">The first button on a row is the app&apos;s guess. Nothing counts until you tap one.</p>}
+      {view.rows.length > 0 && <p className="text-xs text-slate-500">A button marked Guess is the app&apos;s guess. Nothing counts until you tap one.</p>}
       {view.rows.length > 0 && (
         <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200 px-3">
           {view.rows.map((r) => (
