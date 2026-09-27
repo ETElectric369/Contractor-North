@@ -101,6 +101,11 @@ export function commandNavItems(isStaff: boolean, features?: FeatureMap | null):
     // Reminders for everyone, Organize for the office (every save on it is requireStaff).
     { kind: "Go to", label: "Reminders", sub: "Today", href: "/tasks", aliases: NAV_ALIASES["/tasks"] },
     { kind: "Go to", label: "Organize", sub: "Today", href: "/organize", staffOnly: true },
+    // The Clock tile is a tech's only (W1-08): staff clock in on My Day's Now card, and their
+    // Timecards row only OWNS /timeclock (owns is never a row). So the office finds the Timeclock
+    // (Switch Job, Split) here by name and by its words ("clock in", "punch"); a tech already has
+    // it once, from his Clock tile, so this entry is staff-only and he never sees it twice.
+    { kind: "Go to", label: "Timeclock", sub: "Money", href: "/timeclock", staffOnly: true, aliases: NAV_ALIASES["/timeclock"] },
     // New Estimate isn't a dock leaf, but it's where plan take-offs live now (Upload Plans) —
     // give plan/blueprint/take-off searches somewhere real to land. It goes with Estimates.
     ...(featureOn(features, "estimates")
@@ -108,6 +113,24 @@ export function commandNavItems(isStaff: boolean, features?: FeatureMap | null):
       : []),
   ];
   return isStaff ? items : items.filter((i) => !i.staffOnly);
+}
+
+/** The pages that answer what was typed. Match the label, the parent section, OR any synonym — so
+ *  "owed"/"AR" finds Invoices and "wages" finds Payroll. Label hits rank above alias-only hits.
+ *  Exported so a page's words are pinned in a test (staff typing "clock in" find the Timeclock). */
+export function matchNavItems(navItems: Item[], q: string): Item[] {
+  const term = q.trim().toLowerCase();
+  if (!term) return [];
+  const scored = navItems
+    .map((i) => {
+      const label = i.label.toLowerCase().includes(term);
+      const sub = i.sub?.toLowerCase().includes(term) ?? false;
+      const alias = i.aliases?.some((a) => a.includes(term) || term.includes(a)) ?? false;
+      return { i, hit: label || sub || alias, rank: label ? 0 : sub ? 1 : 2 };
+    })
+    .filter((s) => s.hit)
+    .sort((a, b) => a.rank - b.rank);
+  return scored.slice(0, 6).map((s) => s.i);
 }
 
 /**
@@ -253,20 +276,8 @@ export function CommandBar({
   );
 
   const staticMatches = useMemo(() => {
-    const term = q.trim().toLowerCase();
-    if (!term) return [...idle, ...navItems.slice(0, 7)];
-    // Match the label, the parent section, OR any synonym — so "owed"/"AR" finds Invoices and
-    // "wages" finds Payroll. Label hits rank above alias-only hits.
-    const scored = navItems
-      .map((i) => {
-        const label = i.label.toLowerCase().includes(term);
-        const sub = i.sub?.toLowerCase().includes(term) ?? false;
-        const alias = i.aliases?.some((a) => a.includes(term) || term.includes(a)) ?? false;
-        return { i, hit: label || sub || alias, rank: label ? 0 : sub ? 1 : 2 };
-      })
-      .filter((s) => s.hit)
-      .sort((a, b) => a.rank - b.rank);
-    return scored.slice(0, 6).map((s) => s.i);
+    if (!q.trim()) return [...idle, ...navItems.slice(0, 7)];
+    return matchNavItems(navItems, q);
   }, [q, navItems, idle]);
 
   const askItem: Item | null = q.trim() && nortOn

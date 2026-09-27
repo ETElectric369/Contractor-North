@@ -6,7 +6,7 @@ const calls = vi.hoisted(() => ({ order: [] as string[] }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
 vi.mock("@/lib/tts", () => ({ unlockAudio: vi.fn(() => calls.order.push("unlockAudio")) }));
 
-import { commandNavItems, idleRows } from "./command-bar";
+import { commandNavItems, idleRows, matchNavItems } from "./command-bar";
 import { ALL_ON, type FeatureMap } from "@/lib/features";
 import { isApplePlatform, modKeyLabel } from "@/lib/mod-key";
 import { NORT_TALK_EVENT, SETUP_EVENT } from "@/lib/onboarding/help-rows";
@@ -87,6 +87,19 @@ describe("commandNavItems", () => {
     expect(find(tech, "/organize")).toBeUndefined();
     // The old word still finds the Reminders page.
     expect(find(tech, "/tasks")?.aliases).toContain("tasks");
+  });
+
+  it("the Timeclock is still found by staff (their Clock tile went) and once for a tech, from his Clock tile", () => {
+    const staff = commandNavItems(true, ALL_ON);
+    const tech = commandNavItems(false, ALL_ON);
+    for (const term of ["clock in", "punch", "timeclock", "clock"]) {
+      expect(hrefs(matchNavItems(staff, term)), term).toContain("/timeclock");
+      expect(hrefs(matchNavItems(tech, term)), term).toContain("/timeclock");
+    }
+    expect(staff.filter((i) => i.href === "/timeclock")).toHaveLength(1);
+    expect(find(staff, "/timeclock")).toMatchObject({ label: "Timeclock", sub: "Money" });
+    expect(tech.filter((i) => i.href === "/timeclock")).toHaveLength(1);
+    expect(find(tech, "/timeclock")).toMatchObject({ label: "Timeclock", sub: "Clock" });
   });
 
   it("each page is offered once: /handbook once for a tech (under You) and once for staff (Office)", () => {
