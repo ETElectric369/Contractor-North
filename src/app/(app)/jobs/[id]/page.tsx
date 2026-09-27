@@ -53,7 +53,7 @@ import { JobTasks } from "./job-tasks";
 import { JobPermits } from "./job-permits";
 import { permitStatusTone, permitResultTone } from "@/lib/permit-options";
 import { JobAddTimeEntry } from "./job-add-time";
-import { NoJobPunches, type NearPunch } from "./no-job-punches";
+import { NoJobPunches, type NearPunches } from "./no-job-punches";
 import { jobCrewIds, nearJobWindow, readNoJobPunchesNearJob } from "@/lib/no-job-hours";
 import { JobClockButton } from "./job-clock-button";
 import { EditEntryButton } from "../../timecards/edit-entry-button";
@@ -565,7 +565,7 @@ export default async function JobDetailPage({
   // STARTED HERE, awaited below: it is up to three round trips one after another (codes, entries,
   // claims), and everything it needs is known by now, so it runs beside the shelf, takes, document
   // and split reads instead of after them on every office open of this page.
-  const nearPunchesP: Promise<NearPunch[] | null> = viewerIsStaff
+  const nearPunchesP: Promise<NearPunches | null> = viewerIsStaff
     ? readNoJobPunchesNearJob(supabase as any, {
         crewIds: jobCrewIds(j.assigned_to, (entries ?? []) as { profile_id?: string | null }[]),
         window: nearJobWindow({
@@ -578,14 +578,19 @@ export default async function JobDetailPage({
         tz,
         todayStr: todayStrInTz(tz),
       }).then(
-        (shifts) =>
-          shifts ? shifts.map((s) => ({ id: s.id, name: s.name, clockIn: s.clockIn, clockOut: s.clockOut, hours: s.hours, jobCode: s.jobCode })) : null,
+        (near) =>
+          near
+            ? {
+                punches: near.shifts.map((s) => ({ id: s.id, name: s.name, clockIn: s.clockIn, clockOut: s.clockOut, hours: s.hours, jobCode: s.jobCode })),
+                capped: near.capped,
+              }
+            : null,
         (e) => {
           reportError("jobs.[id].noJobPunches", e, { jobId: id });
           return null;
         },
       )
-    : Promise.resolve([]);
+    : Promise.resolve({ punches: [], capped: false });
 
   // The org's all-day work window (Settings → Scheduling) — the same resolver the
   // schedule writers use, threaded into the schedule/edit controls so their "blank
@@ -1206,7 +1211,14 @@ export default async function JobDetailPage({
           {/* Its crew's punches on no job around its days, each one tap onto this job: the hours
               the office would otherwise type again (office only; nothing to show, nothing shown). */}
           {viewerIsStaff && (
-            <NoJobPunches jobId={j.id} jobLabel={jobLabel(j)} tz={tz} punches={nearPunches ?? []} failed={nearPunches === null} />
+            <NoJobPunches
+              jobId={j.id}
+              jobLabel={jobLabel(j)}
+              tz={tz}
+              punches={nearPunches?.punches ?? []}
+              capped={!!nearPunches?.capped}
+              failed={nearPunches === null}
+            />
           )}
           <ul className="divide-y divide-slate-100">
             {timeTabEntries.map((e) => {

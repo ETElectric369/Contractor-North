@@ -18,8 +18,9 @@ vi.mock("../../timeclock/actions", () => ({
   takeShiftOffJob: vi.fn(async () => ({ ok: true })),
 }));
 
-import { NoJobPunchesList, nearPunchLine, type NearPunch } from "./no-job-punches";
+import { NEAR_REST_HREF, NEAR_SHOWN, NoJobPunchesList, nearPunchLine, type NearPunch } from "./no-job-punches";
 import { NEAR_JOB_CAP, jobCrewIds, nearJobWindow, readNoJobPunchesNearJob, type NoJobRow } from "@/lib/no-job-hours";
+import { NO_JOB_HOURS_HREF } from "@/lib/action-items/no-job-hours-item";
 
 const TZ = "America/Los_Angeles";
 
@@ -106,7 +107,8 @@ describe("the read", () => {
   it("reads only this crew's closed no-job punches inside the window, the company's own time left out, newest first", async () => {
     const { supabase, calls } = fake([row()]);
     const out = await readNoJobPunchesNearJob(supabase, { crewIds: ["brian", "erik"], window, tz: TZ, todayStr: "2026-09-26" });
-    expect(out?.map((s) => [s.id, s.name, s.hours])).toEqual([["punch", "Brian Taylor", 8.43]]);
+    expect(out?.shifts.map((s) => [s.id, s.name, s.hours])).toEqual([["punch", "Brian Taylor", 8.43]]);
+    expect(out?.capped).toBe(false);
     const time = calls.find((c) => c.table === "time_entries")!.ops;
     expect(time).toContainEqual(["in", ["profile_id", ["brian", "erik"]]]);
     expect(time).toContainEqual(["is", ["job_id", null]]);
@@ -123,13 +125,23 @@ describe("the read", () => {
     const today = row({ id: "today", clock_in: "2026-09-26T15:00:00Z", clock_out: "2026-09-26T19:00:00Z" });
     const { supabase } = fake([today, row({ id: "billed" }), row()], ["billed"]);
     const out = await readNoJobPunchesNearJob(supabase, { crewIds: ["brian"], window: { from: "2026-09-09", to: "2026-09-28" }, tz: TZ, todayStr: "2026-09-26" });
-    expect(out?.map((s) => s.id)).toEqual(["today", "punch"]);
+    expect(out?.shifts.map((s) => s.id)).toEqual(["today", "punch"]);
+  });
+
+  it("a read that fills its cap says so: there may be older ones than these", async () => {
+    const full = Array.from({ length: NEAR_JOB_CAP }, (_, i) => row({ id: `p${i}` }));
+    const { supabase } = fake(full, ["p0"]);
+    const out = await readNoJobPunchesNearJob(supabase, { crewIds: ["brian"], window, tz: TZ, todayStr: "2026-09-26" });
+    // Capped by what the read brought back, not by what was left after the billed one came out.
+    expect(out?.capped).toBe(true);
+    expect(out?.shifts).toHaveLength(NEAR_JOB_CAP - 1);
   });
 
   it("no window or no crew reads nothing; a failed read is null (said), never an empty list", async () => {
     const none = fake([row()]);
-    expect(await readNoJobPunchesNearJob(none.supabase, { crewIds: ["brian"], window: null, tz: TZ, todayStr: "2026-09-26" })).toEqual([]);
-    expect(await readNoJobPunchesNearJob(none.supabase, { crewIds: [], window, tz: TZ, todayStr: "2026-09-26" })).toEqual([]);
+    const nothing = { shifts: [], capped: false };
+    expect(await readNoJobPunchesNearJob(none.supabase, { crewIds: ["brian"], window: null, tz: TZ, todayStr: "2026-09-26" })).toEqual(nothing);
+    expect(await readNoJobPunchesNearJob(none.supabase, { crewIds: [], window, tz: TZ, todayStr: "2026-09-26" })).toEqual(nothing);
     expect(none.calls).toEqual([]);
     const broken = fake([row()], [], "time_entries");
     expect(await readNoJobPunchesNearJob(broken.supabase, { crewIds: ["brian"], window, tz: TZ, todayStr: "2026-09-26" })).toBeNull();
@@ -176,6 +188,31 @@ describe("the list on the Time tab", () => {
     expect(render(props({ errors: { punch: "That shift is already on 22 Pine." } }))).toContain("That shift is already on 22 Pine.");
   });
 
+  it("shows the newest five above the job's own entries, and Show All <n> (44px) opens the rest", () => {
+    const many = Array.from({ length: 13 }, (_, i) => ({ ...punch, id: `p${i}` }));
+    const short = render(props({ punches: many }));
+    expect(short.match(/>Put This On 85 Whitney<\/button>/g)).toHaveLength(NEAR_SHOWN);
+    expect(short).toMatch(/<button[^>]*class="[^"]*min-h-11[^"]*"[^>]*>Show All 13<\/button>/);
+    const all = render(props({ punches: many, showAll: true }));
+    expect(all.match(/>Put This On 85 Whitney<\/button>/g)).toHaveLength(13);
+    expect(all).not.toContain("Show All");
+    // Five or fewer: nothing to open.
+    expect(render(props({ punches: many.slice(0, NEAR_SHOWN) }))).not.toContain("Show All");
+  });
+
+  it("a full cap is said, with the door to the rest; a full cap with nothing listable is said too, never hidden", () => {
+    const capped = render(props({ capped: true }));
+    expect(capped).toContain("These are the newest 1. Older ones are under");
+    expect(capped).toContain(`href="${NEAR_REST_HREF}"`);
+    expect(capped).toContain("Hours On No Job, on Timecards");
+    expect(render(props())).not.toContain("Older ones are under");
+    const unlisted = render(props({ punches: [], capped: true }));
+    expect(unlisted).toContain("Couldn’t list every punch with no job around this job’s days");
+    expect(unlisted).toContain(`href="${NEAR_REST_HREF}"`);
+    // The same place Needs You's Hours On No Job line opens.
+    expect(NEAR_REST_HREF).toBe(NO_JOB_HOURS_HREF);
+  });
+
   it("a refusal is said in a toast too: the refresh after it drops a punch someone else moved, and its line with it", () => {
     const src = readFileSync(new URL("./no-job-punches.tsx", import.meta.url), "utf8");
     const refused = src.slice(src.indexOf("if (!r.ok) {"), src.indexOf("setGone((g) => new Set(g).add(p.id));"));
@@ -187,8 +224,10 @@ describe("the list on the Time tab", () => {
 
   it("is the office's: computed and rendered only for staff on the job page", () => {
     const page = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
-    expect(page).toContain("const nearPunchesP: Promise<NearPunch[] | null> = viewerIsStaff\n    ? readNoJobPunchesNearJob(");
-    expect(page).toMatch(/\{viewerIsStaff && \(\s*<NoJobPunches jobId=\{j\.id\}/);
+    expect(page).toContain("const nearPunchesP: Promise<NearPunches | null> = viewerIsStaff\n    ? readNoJobPunchesNearJob(");
+    expect(page).toMatch(/\{viewerIsStaff && \(\s*<NoJobPunches\s+jobId=\{j\.id\}/);
+    // The read's cap reaches the list, so a full cap is said there.
+    expect(page).toContain("capped={!!nearPunches?.capped}");
   });
 
   it("never holds the page up on its own: started beside the page's other reads, awaited after them", () => {

@@ -230,17 +230,22 @@ export function jobCrewIds(assigned: (string | null | undefined)[] | null | unde
   return [...ids].sort();
 }
 
+/** The punches near a job, and whether the read hit NEAR_JOB_CAP (older ones may be left out). */
+export type NearJobPunches = { shifts: NoJobShift[]; capped: boolean };
+
 /**
  * Read them: closed shifts on no job, not the company's own time, not billed, by `crewIds`, that
  * started inside `window` (org-local days). RLS-scoped (the office reads every entry of its
- * company). Newest first, at most NEAR_JOB_CAP. A failed read is null, never an empty list: "none"
- * hides the list, "could not look" says so.
+ * company). Newest first, at most NEAR_JOB_CAP, and `capped` says when the cap was full: the list
+ * says so rather than stopping quietly. A failed read is null, never an empty list: "none" hides
+ * the list, "could not look" says so.
  */
 export async function readNoJobPunchesNearJob(
   supabase: SupabaseClient,
   opts: { crewIds: string[]; window: { from: string; to: string } | null; tz: string; todayStr: string },
-): Promise<NoJobShift[] | null> {
-  if (!opts.window || !opts.crewIds.length) return [];
+): Promise<NearJobPunches | null> {
+  const none: NearJobPunches = { shifts: [], capped: false };
+  if (!opts.window || !opts.crewIds.length) return none;
   const codesR = await supabase.from("job_codes").select("code").eq("billable", false);
   if (codesR.error) return null;
   const nonBillableCodes = new Set(((codesR.data ?? []) as { code?: string | null }[]).map((c) => String(c.code ?? "").trim()).filter(Boolean));
@@ -258,7 +263,7 @@ export async function readNoJobPunchesNearJob(
   const rowsR = await read.order("clock_in", { ascending: false }).limit(NEAR_JOB_CAP);
   if (rowsR.error) return null;
   const rows = (rowsR.data ?? []) as NoJobRow[];
-  if (!rows.length) return [];
+  if (!rows.length) return none;
   let claimed: Set<string>;
   try {
     const claims = await claimedSourcesOnJob(supabase, null, null, rows.map((r) => r.id));
@@ -266,5 +271,8 @@ export async function readNoJobPunchesNearJob(
   } catch {
     return null;
   }
-  return noJobShiftsFrom(rows, { nonBillableCodes, claimed, todayStr: opts.todayStr, tz: opts.tz, includeToday: true });
+  return {
+    shifts: noJobShiftsFrom(rows, { nonBillableCodes, claimed, todayStr: opts.todayStr, tz: opts.tz, includeToday: true }),
+    capped: rows.length >= NEAR_JOB_CAP,
+  };
 }
