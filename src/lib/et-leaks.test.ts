@@ -33,7 +33,8 @@ describe("Document Studio's sample paper names nobody real", () => {
 
 describe("a company's paper says only what the company said", () => {
   it("prints no default tagline", () => {
-    expect(COMPANY.tagline).toBe("");
+    // Each company's own is doc_style.tagline (src/components/doc-letterhead.test.ts); none by default.
+    expect("tagline" in COMPANY).toBe(false);
     expect(companyFromOrg({ name: "Main Street Builders" } as never).tagline).toBe("");
   });
 });

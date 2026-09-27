@@ -3,19 +3,28 @@
 --
 -- The one-company sweep of 2026-09-26 found the database still speaking for one company and one
 -- supplier. Erik's law: every feature works for ANY company and ANY supplier; ET Electric and CED
--- are the test fixture, never the rule. Five small changes, each the smallest that does the job:
+-- are the test fixture, never the rule. Six small changes, each the smallest that does the job:
 --
 --   1. THE JUNE 8 LINE IS ET'S OWN SETTING. The code drew ET's line from a constant keyed to ET's
 --      org id (the only org id in the app's logic). It now reads organizations.settings.books_begin,
---      per company, changed from /bills. This stores ET's day, 2026-06-08, once: the only place
---      ET's id appears. Written only when ET has not named a day already (never overwrites one).
+--      per company, changed from /bills. This stores ET's day, 2026-06-08, once: with 1b, the only
+--      place ET's id appears. Written only when ET has not named a day already (never overwrites one).
+--
+--   1b. THE TAGLINE UNDER A COMPANY'S NAME IS ITS OWN SETTING. "Service · Integrity · Reliability"
+--      was a constant, so it printed under every company's name on every invoice and estimate; it
+--      is now organizations.settings.doc_style.tagline, set in Document Studio (doc_style already
+--      rides the public /i and /q projections as one whitelisted key, so no projection changes).
+--      This stores ET's own words once, beside its June 8 line: only when ET has no tagline yet,
+--      and every other doc_style key (margins, density, closing lines) is kept as it is.
 --
 --   2. A SUPPLIER'S PAPER IS UNIQUE PER SUPPLIER ACCOUNT. supplier_invoices was unique on
 --      (org_id, invoice_number), so a second supplier printing a number already on file (a bare
 --      10-digit number, say) could not be stored at all. The constraint becomes a unique index on
 --      (org_id, coalesce(supplier_account_id, zero uuid), invoice_number): one paper per number
 --      per account, and still one per number among papers on no account. The importer reads what
---      is on file per account in the same release. Prod has no duplicate numbers (checked).
+--      is on file per account in the same release: a paper on a matched account is that account's
+--      row (or adopts a row on no account); a paper that matches no account is the ONE row with its
+--      number on any account (two or more: none is assumed). Prod has no duplicate numbers (checked).
 --
 --   3. THE SHELF CREDIT GUARD NAMES A DOOR THAT EXISTS. guard_shelf_credit_bill (0350) said
 --      "(Return To CED on Shop Stock)"; for any other supplier that button reads "Return To
@@ -38,9 +47,13 @@
 --
 -- ORDER: after 0350 (the guard) and 0273 (supplier_invoices). Independent of 0352/0353.
 -- SAFE BEFORE AND AFTER THE CODE: the code reads books_begin with the earliest bill as fallback, the
--- importer's per-account read works under either uniqueness, and Mark Fixed falls back to the old
--- direct write when platform_set_bug_status is missing. One deploy note: until this runs, ET's line
--- falls back to its first bill (2026-04-20), so its four pre-June-8 CED papers show as cards.
+-- tagline as blank, and Mark Fixed falls back to the old direct write when platform_set_bug_status
+-- is missing. Deploy notes: until this runs, ET's line falls back to its first bill (2026-04-20), so
+-- its four pre-June-8 CED papers show as cards, and ET's documents print no tagline. The importer's
+-- per-account read is NOT the same under both uniquenesses: until this runs, a paper on a matched
+-- account whose number is already on file under ANOTHER account is refused whole by the old
+-- (org_id, invoice_number) constraint, and every retry is refused the same way (nothing is written);
+-- after it runs, that paper goes on file as its own account's.
 -- Idempotent: safe to re-run.
 -- ═══════════════════════════════════════════════════════════════════════════
 
@@ -67,6 +80,18 @@ update public.organizations
    set settings = jsonb_set(coalesce(settings, '{}'::jsonb), '{books_begin}', '"2026-06-08"'::jsonb, true)
  where id = '60195593-2e18-4230-bc8e-7a32d36d038d'
    and coalesce(settings ->> 'books_begin', '') = '';
+
+-- ── 1b. ET's tagline under its name (its own setting now) ────────────────────────────────────────
+-- doc_style is created when missing (or not an object); every key already in it is kept.
+update public.organizations
+   set settings = jsonb_set(
+         coalesce(settings, '{}'::jsonb),
+         '{doc_style}',
+         (case when jsonb_typeof(settings -> 'doc_style') = 'object' then settings -> 'doc_style' else '{}'::jsonb end)
+           || jsonb_build_object('tagline', 'Service · Integrity · Reliability'),
+         true)
+ where id = '60195593-2e18-4230-bc8e-7a32d36d038d'
+   and coalesce(btrim(settings #>> '{doc_style,tagline}'), '') = '';
 
 -- ── 2. one paper per number per supplier account ────────────────────────────────────────────────
 create unique index if not exists supplier_invoices_org_account_number_key
@@ -141,6 +166,12 @@ begin
      ) then
     raise exception '0354: ET''s books_begin is not a day after the migration.';
   end if;
+  if exists (
+       select 1 from public.organizations
+        where id = '60195593-2e18-4230-bc8e-7a32d36d038d' and coalesce(btrim(settings #>> '{doc_style,tagline}'), '') = ''
+     ) then
+    raise exception '0354: ET''s document tagline is blank after the migration.';
+  end if;
   if exists (select 1 from pg_constraint where conname = 'supplier_invoices_org_id_invoice_number_key') then
     raise exception '0354: the per-org unique constraint on supplier_invoices is still there.';
   end if;
@@ -173,5 +204,5 @@ begin
   if not has_function_privilege('authenticated', 'public.platform_set_bug_status(uuid, text)', 'execute') then
     raise exception '0354: a signed-in user cannot reach platform_set_bug_status (it checks the admin inside).';
   end if;
-  raise notice '0354: books_begin is per company (ET: 2026-06-08), supplier papers are unique per account, the shelf guard names no supplier, POs default to no vendor, and platform admins can mark any bug report.';
+  raise notice '0354: books_begin and the document tagline are per company (ET: 2026-06-08, its own tagline), supplier papers are unique per account, the shelf guard names no supplier, POs default to no vendor, and platform admins can mark any bug report.';
 end $$;
