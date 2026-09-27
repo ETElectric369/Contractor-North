@@ -124,8 +124,9 @@ export function NewReminderBox() {
   const [title, setTitle] = useState("");
   const titleRef = useRef<HTMLInputElement>(null);
 
-  // Land ready to type from the quick-add menu's New Reminder (/tasks?new=1),
-  // then strip the param so a refresh doesn't re-grab focus.
+  // Land ready to type from a link to /tasks?new=1 (the + no longer has New Reminder: My Day's Add
+  // line, this page's own line and Nort make Reminders; the deep link still works), then strip the
+  // param so a refresh doesn't re-grab focus.
   useEffect(() => {
     if (searchParams.get("new") !== "1") return;
     titleRef.current?.focus();

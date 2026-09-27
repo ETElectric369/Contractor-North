@@ -736,9 +736,13 @@ export type FileOptions = {
   differentPurchase?: boolean;
 };
 
-/** A number match, said as the sentence File It refuses with. */
+/**
+ * A number match, said as the sentence File It refuses with. The card retired its separate
+ * Different Purchase: File It Anyway button (W1-31): with the match showing on the card, every
+ * answer there carries the flag, so the sentence says that in the old button's own words.
+ */
 function sameNumberRefusal(matches: NumberMatch[]): string {
-  return `${matches[0].sentence} If it is the same purchase, press Same Purchase: Tie Them. If it is not, press Different Purchase: File It Anyway. Nothing was filed.`;
+  return `${matches[0].sentence} If it is the same purchase, press Same Purchase: Tie Them on its card. If it is not, answer where it goes on the card: with this match showing, every answer there is Different Purchase: File It Anyway. Nothing was filed.`;
 }
 
 /** What a teardown did, for the sentence and for the paper's own row. */
@@ -1422,7 +1426,7 @@ export async function undoPaperwork(id: string): Promise<Result & { message?: st
   return {
     ok: true,
     message:
-      `${tied ? "Untied" : "Undone"}. It is back in the tray, waiting for File It.` +
+      `${tied ? "Untied" : "Undone"}. It is back in the tray, waiting for your answer.` +
       (keptLines ? keptChoicesSaid(keptLines) : "") +
       papersBackSaid(torn?.papersBack ?? []) +
       landedKeptSaid(landedLeft),
@@ -1558,29 +1562,45 @@ export async function deleteOrganizedItem(id: string): Promise<Result & { messag
   return said ? { ok: true, message: `Deleted.${said}` } : { ok: true };
 }
 
-/** Save a typed/dictated note as a needs-review item (no photo). */
-export async function saveVoiceNote(text: string): Promise<Result> {
+/**
+ * Save a typed/dictated note as a needs-review item (no photo). THE ONE NOTE WRITER: Nort's
+ * organize.saveNote and Snap Or Note's note box both land here.
+ *
+ * It only saves, and answers quickly with the note's id. Snap Or Note's office note is read AFTER,
+ * on a call of its own (/api/paperwork/read with note: true, which runs aiReviewItem: the routine
+ * model, metered under Organize), so a read that runs out of time or loses signal can only ever say
+ * "Saved, Not Read", never "Not saved" for a note that is in (W1-30; the SI4 class). A crew
+ * member's note is never read (aiReviewItem is the office's), and Nort's saves ask for no read.
+ */
+export async function saveVoiceNote(text: string): Promise<Result & { id?: string }> {
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "Not signed in." };
-  const clean = text.trim();
+  const clean = String(text ?? "").trim();
   if (!clean) return { ok: false, error: "Nothing to save." };
   const title = clean.length > 60 ? clean.slice(0, 57) + "…" : clean;
-  const { error } = await supabase.from("organized_items").insert({
-    kind: "note",
-    title,
-    summary: clean,
-    category: "Note",
-    confidence: "high",
-    status: "needs_review",
-    file_url: null,
-    created_by: user.id,
-  });
+  const { data, error } = await supabase
+    .from("organized_items")
+    .insert({
+      kind: "note",
+      title,
+      summary: clean,
+      category: "Note",
+      confidence: "high",
+      status: "needs_review",
+      file_url: null,
+      created_by: user.id,
+    })
+    .select("id");
   if (error) return { ok: false, error: dbError(error) };
+  // SILENT-WRITE LAW: an insert that comes back with no row did not land, and says so.
+  const id = (data as { id?: string }[] | null)?.[0]?.id;
+  if (!id) return { ok: false, error: "The note didn't save, so nothing was kept. Try again." };
   revalidatePath("/organize");
-  return { ok: true };
+  revalidatePath("/planner");
+  return { ok: true, id: String(id) };
 }
 
 /**
@@ -1887,7 +1907,7 @@ ${jobLines.join("\n") || "(none)"}`,
         };
       // SUGGEST PROPOSES, EVEN HERE (Erik, audit v994 PR2). This used to insert the task and file
       // the note on its own, and the only message saying so vanished with the card on refresh, with
-      // no Undo. Now the proposal is kept on the row as a chip (Make Task: <title>, or Keep As
+      // no Undo. Now the proposal is kept on the row as a chip (Add A Reminder: <title>, or Keep As
       // Note), and a person's tap does it, through a door that says what it did and offers Undo.
       const proposal: PaperProposal =
         action === "task"
@@ -1907,7 +1927,7 @@ ${jobLines.join("\n") || "(none)"}`,
       revalidatePath("/organize");
       return {
         ok: true,
-        message: `Suggested: ${said}. Tap ${action === "task" ? "Make Task" : "Keep As Note"} on the row if that's right; nothing moves until you do. ${reason}`.trim(),
+        message: `Suggested: ${said}. Tap ${action === "task" ? "Add A Reminder" : "Keep As Note"} on the row if that's right; nothing moves until you do. ${reason}`.trim(),
       };
     }
     // NOTHING TO SUGGEST IS AN ANSWER, NOT A FAILURE (Erik, 2026-09-24): said as a plain note on the
@@ -1973,7 +1993,7 @@ export async function makeTaskFromPaper(id: string): Promise<Result & { message?
   }
   revalidatePath("/organize");
   revalidatePath("/tasks");
-  return { ok: true, message: `Made a task: "${title}". The note is filed with it.` };
+  return { ok: true, message: `Added a Reminder: "${title}". The note is filed with it.` };
 }
 
 /** KEEP AS NOTE: a person tapped AI Suggest's proposal (PR2). Filed as a note; Undo brings it back. */

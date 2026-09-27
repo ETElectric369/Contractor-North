@@ -129,6 +129,8 @@ const fake = {
   storage: { from: () => ({ createSignedUrls: async () => ({ data: [] }) }) },
 };
 vi.mock("@/lib/supabase/server", () => ({ createClient: async () => fake, createServiceClient: () => fake }));
+// The ⋯ menus run registry verbs only when tapped; the action registry is not this render's business.
+vi.mock("@/lib/actions/execute", () => ({ executeAction: vi.fn() }));
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: () => {}, push: () => {}, replace: () => {} }),
   useSearchParams: () => new URLSearchParams(),
@@ -261,12 +263,14 @@ describe("the payments unread", () => {
     expect(text).toContain("Consolidated Electrical Distributors says");
   });
 
-  it("CED never reads 'you have sent them $0.00': its payments say they couldn't be read", async () => {
+  it("CED never reads 'you have sent $0.00': its payments say they couldn't be read", async () => {
+    // W1-33: one slate line under Record A Payment, model B's own arithmetic, instead of the grid.
     const whole = await renderWith();
-    expect(whole.text).toContain("$100.00 you have sent them");
+    expect(whole.text).toContain("You've sent $100.00 since Sep 5, 2026. It's already off their figure.");
     const { text } = await renderWith("supplier_payments");
-    expect(text).not.toMatch(/\$0\.00 you have sent them/);
-    expect(text).toContain("Couldn't Read you have sent them");
+    expect(text).not.toMatch(/sent \$0\.00/);
+    expect(text).toContain("Couldn't read your payments just now.");
+    // The failure lines stay exactly as they were: said where they happen, never folded or counted.
     expect(text).toContain("Couldn't read your payments to Consolidated Electrical Distributors just now");
     expect(text).toContain("Couldn't read your payments to Ace Mountain Hardware just now");
   });

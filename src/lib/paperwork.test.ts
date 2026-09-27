@@ -1,9 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
+  BILL_DELETED_SAID,
   billCategoryFor,
+  cardSentence,
   describePaper,
   fileRefusal,
   findSameNumber,
+  firstAnswer,
+  paperKindWords,
+  paperSays,
   sameMoneyFromBank,
   guessOf,
   isPicture,
@@ -262,6 +267,101 @@ describe("where it goes: only the paper picks a job (Erik, 2026-09-24)", () => {
     expect(parseDestination("keep")).toEqual({ type: "keep" });
     expect(parseDestination("photo:abc")).toEqual({ type: "photo", jobId: "abc" });
     expect(parseDestination("")).toBeNull();
+  });
+});
+
+/**
+ * THE CARD'S FIRST ANSWER (W1-31). The tray card is the Supplier Bills card: its first button is
+ * what the paper itself picks, with why; else a guess, marked a guess, with whose; else nothing and
+ * the card asks. It is a button a person presses, never a preselected value.
+ */
+describe("firstAnswer: the paper's own pick first, else a marked guess, else nothing", () => {
+  it("the paper names the job: Put It On that job, and the sentence says why", () => {
+    const marked = receipt({ doc_type: "bill", proposal: { jobId: "job-11", jobFrom: "po", jobHint: "13897 HERRINGBONE" } });
+    expect(firstAnswer(marked, ["job-11"])).toEqual({
+      dest: "job:job-11",
+      because: "Job picked from the PO on the bill: 13897 HERRINGBONE",
+      isGuess: false,
+    });
+    // A job that is no longer on anyone's list is no answer; with no guess, nothing.
+    expect(firstAnswer(marked, ["job-2"])).toEqual({ dest: "", because: null, isGuess: false });
+  });
+
+  it("a model's job guess is the first answer, marked a guess, with 'Not read off the paper'", () => {
+    const guessed = receipt({ proposal: { guessJobId: "job-46", why: "The store is near the job." } });
+    expect(firstAnswer(guessed, ["job-46"])).toEqual({ dest: "job:job-46", because: "Not read off the paper: The store is near the job.", isGuess: true });
+    expect(firstAnswer(receipt({ proposal: { jobId: "job-46" } }), ["job-46"])).toEqual({ dest: "job:job-46", because: "Not read off the paper.", isGuess: true });
+  });
+
+  it("the reader's bucket is 'The reader's guess', with what the paper says; AI Suggest's keeps its reason", () => {
+    const readers = receipt({ doc_type: "bill", proposal: { po: "TOOLS", bucket: "Tools & Supplies" }, on_paper: "PO TOOLS" });
+    expect(firstAnswer(readers, [])).toEqual({ dest: "cost:Tools & Supplies", because: "The reader's guess, from the paper (PO TOOLS).", isGuess: true });
+    const ai = receipt({ proposal: { bucket: "Fuel", bucketFrom: "ai", why: "A pump receipt." } });
+    expect(firstAnswer(ai, [])).toEqual({ dest: "cost:Fuel", because: "Not read off the paper: A pump receipt.", isGuess: true });
+    // Fees is never a guess.
+    expect(firstAnswer(receipt({ proposal: { bucket: "Fees" } }), [])).toEqual({ dest: "", because: null, isGuess: false });
+  });
+
+  it("a company word on the paper is the paper's own pick: TOOLS picks Tools & Supplies, STOCK picks stock", () => {
+    const tools = receipt({ doc_type: "bill", proposal: { po: "TOOLS", companyUse: { bucket: "Tools & Supplies", from: "po", words: "TOOLS" } } });
+    expect(firstAnswer(tools, [])).toEqual({ dest: "cost:Tools & Supplies", because: "Business cost picked from the PO on the bill: TOOLS", isGuess: false });
+    const stock = receipt({ doc_type: "bill", proposal: { po: "STOCK", companyUse: { bucket: null, from: "po", words: "STOCK", shelf: true } } });
+    expect(firstAnswer(stock, [])).toEqual({ dest: "stock", because: "Shop Stock picked from the PO on the bill: STOCK", isGuess: false });
+    // Shop Stock off (0352): the paper's STOCK is no answer; its words still show (paperSays).
+    expect(firstAnswer(stock, [], { shopStock: false })).toEqual({ dest: "", because: null, isGuess: false });
+    expect(paperSays(stock)).toBe("STOCK");
+  });
+
+  it("a paper that names two jobs has no first answer of its own; a model's guess beside it is only a guess", () => {
+    // What rematchPaper leaves on it: no job, the conflict said.
+    const torn = receipt({ proposal: { jobId: null, jobFrom: null, jobConflict: "The paper points to more than one job." } });
+    expect(firstAnswer(torn, ["job-1"])).toEqual({ dest: "", because: null, isGuess: false });
+    const guessed = receipt({ proposal: { jobId: null, jobFrom: null, guessJobId: "job-1", jobConflict: "The paper points to more than one job." } });
+    expect(firstAnswer(guessed, ["job-1"])).toMatchObject({ dest: "job:job-1", isGuess: true });
+    // The paper's own job beats a guess that disagrees; the guess is still a picker's Closest.
+    const both = receipt({ proposal: { jobId: "job-1", jobFrom: "job_number", guessJobId: "job-2" } });
+    expect(firstAnswer(both, ["job-1", "job-2"])).toMatchObject({ dest: "job:job-1", isGuess: false });
+  });
+
+  it("nothing on the paper and no guess: no first answer, and the card asks", () => {
+    expect(firstAnswer(receipt(), ["job-1"])).toEqual({ dest: "", because: null, isGuess: false });
+  });
+});
+
+describe("the card's words (W1-31)", () => {
+  it("paperSays: the words that made the pick, else what is printed where a job goes, else nothing", () => {
+    expect(paperSays(receipt({ proposal: { jobId: "j", jobFrom: "po", jobHint: "13897 HERRINGBONE" } }))).toBe("13897 HERRINGBONE");
+    expect(paperSays(receipt({ proposal: { po: "TOOLS" }, on_paper: "PO TOOLS" }))).toBe("PO TOOLS");
+    // The server's null (only the company's own names were printed) is an answer.
+    expect(paperSays(receipt({ proposal: { jobHint: "ERIK TAYLOR" }, on_paper: null }))).toBeNull();
+    expect(paperSays(receipt())).toBeNull();
+  });
+
+  it("paperKindWords: what the paper is, and how filing it will book it", () => {
+    expect(paperKindWords(receipt())).toBe("Receipt (Paid)");
+    expect(paperKindWords(receipt({ doc_type: "bill", payment: "on_account" }))).toBe("Bill (Still Owed)");
+    expect(paperKindWords(receipt({ payment: "unknown" }))).toBe("Receipt (Not Marked Paid)");
+    expect(paperKindWords(receipt({ doc_type: "bill", payment: null, category: "Bill" }))).toBe("Bill (Still Owed)");
+  });
+
+  it("cardSentence: a server sentence that still says 'press File It' loses that tail on the card, and nothing else", () => {
+    expect(cardSentence("Read as a bill or receipt. Pick where it goes, then press File It.")).toBe("Read as a bill or receipt. Pick where it goes.");
+    expect(cardSentence("Read as a bill or receipt. Job picked from the PO on the receipt: 13897 HERRINGBONE: J-011 13897 Herringbone. Press File It if that's right.")).toBe(
+      "Read as a bill or receipt. Job picked from the PO on the receipt: 13897 HERRINGBONE: J-011 13897 Herringbone.",
+    );
+    expect(cardSentence("Kept in files.")).toBe("Kept in files.");
+    expect(cardSentence(null)).toBe("");
+  });
+
+  it("no card sentence names a File It button", () => {
+    const bits = [
+      BILL_DELETED_SAID,
+      readinessOf(receipt({ amount: null })).sentence,
+      fileRefusal({ id: "x", status: "needs_review", proposal: { tooBig: true } } as PaperItem, { type: "job", jobId: "j" }),
+      readinessOf(receipt({ doc_type: "statement", kind: "job_document" })).sentence,
+    ];
+    for (const b of bits) expect(b).not.toMatch(/\bFile It\b/);
+    expect(readinessOf(receipt({ doc_type: "statement", kind: "job_document" })).sentence).toContain("Snap Or Note");
   });
 });
 
@@ -701,8 +801,9 @@ describe("findSameNumber: the same purchase already on the books", () => {
       aliases,
     );
     expect(m).toEqual([expect.objectContaining({ kind: "supplier_invoice", supplierInvoiceId: "si-1", invoiceNumber: "8802-1108330" })]);
-    // Not a cost, so nothing to tie to: File It links the bill it makes.
-    expect(m[0].sentence).toBe("On the supplier documents list with no bill yet: 8802-1108330, $653.25. File It makes the bill and links it to that document.");
+    // Not a cost, so nothing to tie to: filing it links the bill it makes (the card's answers file;
+    // there is no File It button to name, W1-31).
+    expect(m[0].sentence).toBe("On the supplier documents list with no bill yet: 8802-1108330, $653.25. Filing it makes the bill and links it to that document.");
   });
 
   it("a CED document a bill already covers IS that bill's purchase: offered as a tie to the covering bill", () => {

@@ -270,7 +270,7 @@ describe("recordSupplierInvoiceAsBill - the rollback after a lost race", () => {
     const res = await recordSupplierInvoiceAsBill({ invoiceId: INVOICE_ID });
     expect(res.ok).toBe(false);
     expect(res.error).toContain("taken back out");
-    expect(res.error).toContain("Purchases Not In Your Books");
+    expect(res.error).toContain("Their Papers › Not Recorded Yet");
   });
 
   it("refuses instead of writing when it cannot read whether a bill already carries it", async () => {
@@ -506,7 +506,7 @@ describe("setSupplierInvoiceJob says when the purchase may already be on the job
 
   it("a bill carrying the invoice's own number is said as a fact, and no button is named (/bills shows none)", async () => {
     // /bills counts a bill carrying the number as covering the invoice, so it is never listed
-    // under Purchases Not In Your Books and neither Tie nor Different Purchase renders for it.
+    // under Their Papers › Not Recorded Yet and neither Tie nor Different Purchase renders for it.
     const trayBill = { ...SO_BILL, id: "tray-1", bill_number: "8802-1109999", amount: "400.00", bill_date: "2026-08-01" };
     state.client = fakeSupabase(
       {

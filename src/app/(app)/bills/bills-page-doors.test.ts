@@ -255,6 +255,9 @@ const fake = {
   },
 };
 vi.mock("@/lib/supabase/server", () => ({ createClient: async () => fake, createServiceClient: () => fake }));
+// The ⋯ menus (a paper card's, a supplier's) run registry verbs only when tapped; the whole action
+// registry is not this render's business.
+vi.mock("@/lib/actions/execute", () => ({ executeAction: vi.fn() }));
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: () => {}, push: () => {}, replace: () => {} }),
   useSearchParams: () => new URLSearchParams(),
@@ -319,8 +322,9 @@ describe("the page, in Wave B's order", () => {
  * row.
  */
 const HOMES: { door: string | RegExp; was: string; home: string; times?: number }[] = [
-  // 0. The header
-  { door: "Drop Paperwork", was: "header", home: "header" },
+  // 0. The header. Drop Paperwork is the one paper door now (W1-30): Snap Or Note, the same sheet
+  // and queue as + on every page.
+  { door: "Snap Or Note", was: "header (Drop Paperwork)", home: "header", times: 1 },
   { door: "Add Business Cost", was: "header", home: "header" },
   // Needs You (cn-v1014): the one place the supplier-paper decisions happen.
   { door: "Put It On J-028", was: "Needs You", home: "needs-you" },
@@ -331,21 +335,28 @@ const HOMES: { door: string | RegExp; was: string; home: string; times?: number 
   { door: "Shop Stock", was: "Needs You (and CED 3b Record To Stock)", home: "needs-you", times: 4 },
   { door: "Business Cost", was: "Needs You", home: "needs-you", times: 4 },
   { door: "Same Purchase: Tie Them", was: "Needs You (and CED 3b)", home: "needs-you" },
-  // 1. Sort These
+  // 1. Sort These. A tray paper's card is the Supplier Bills card (W1-31): the same answers, in the
+  // same words, one set per paper. The fixture's Home Depot receipt names no job and has no guess.
   { door: "Add More", was: "Sort These", home: "sort-these" },
-  { door: "File It", was: "Sort These (per paper)", home: "sort-these" },
+  { door: "Pick A Job", was: "Sort These (the job picker; File It)", home: "sort-these", times: 1 },
+  { door: "Shop Stock", was: "Sort These (the Shop Stock option; File It)", home: "sort-these", times: 1 },
+  { door: "Business Cost", was: "Sort These (the bucket picker; File It)", home: "sort-these", times: 1 },
   // 2. What You Owe Your Suppliers -> one line per supplier, its detail
   { door: /^Consolidated Electrical Distributors Account TR-34426/, was: "account row tap", home: "suppliers" },
   { door: "Record A Payment", was: "account row AND the CED discount section", home: "suppliers", times: 1 },
-  { door: "Turn On A Running Balance", was: "account row", home: "suppliers" },
+  { door: "Turn On A Running Balance", was: "account row (now inside Check These)", home: "suppliers" },
   { door: "Undo", was: "account row (per payment)", home: "suppliers" },
-  { door: "Edit Account", was: "account row", home: "suppliers", times: 2 },
-  { door: /^Names It's Filed Under \(\d+\)$/, was: "account row ('Filed under:' text)", home: "suppliers", times: 2 },
+  // W1-33: each account's live contradictions, one fold (CED's never-sent-paper bills; OSH's bills
+  // marked On Account at a register supplier). Edit Account moved to the detail's ⋯ (a closed menu,
+  // pinned below), and Names It's Filed Under to its sheet.
+  { door: "Check These (1)", was: "the amber boxes under each account", home: "suppliers", times: 2 },
+  { door: "Open In All Bills", was: "the never-sent-paper list's All Bills link", home: "suppliers", times: 1 },
   { door: /^\$615\.79 On 2 Bills With No Supplier Account File It$/, was: "amber 'not on a supplier account' line", home: "suppliers" },
   // 3. What CED Says You Owe -> short folded lists inside CED's detail
+  { door: /^Their Papers \(\d+\)$/, was: "(new fold: Where This Comes From, Invoices With No Job, Not In Your Books)", home: "suppliers" },
   { door: /^Invoices With No Job \(\d+\)/, was: "CED 3a", home: "suppliers" },
   { door: "File It On This Job", was: "CED 3a (row picker)", home: "suppliers" },
-  { door: /^Not In Your Books \(\d+\)/, was: "CED 3b", home: "suppliers" },
+  { door: /^Not Recorded Yet \(\d+\)/, was: "CED 3b (Not In Your Books)", home: "suppliers" },
   { door: "Record To Stock", was: "CED 3b", home: "suppliers" },
   { door: /^Discount Still On The Table/, was: "CED 3c", home: "suppliers" },
   { door: /^What Consolidated Electrical Distributors Has Open \(7\)$/, was: "CED 3d", home: "suppliers" },
@@ -374,10 +385,10 @@ const HOMES: { door: string | RegExp; was: string; home: string; times?: number 
   { door: "IMG_0412.jpg", was: "Receipts tab file link", home: "all-bills" },
   // 4-8. Housekeeping and the import -> More
   { door: /^More · /, was: "(new fold)", home: "more" },
-  { door: "Import Supplier Invoices", was: "Import fold", home: "more" },
+  // Import Supplier Invoices is one line now (W1-30); Paste Text Instead and its Import Documents
+  // went into Snap Or Note's note box. Choose Supplier PDFs stays one more release (three sentences
+  // outside this lane still name it).
   { door: "Choose Supplier PDFs", was: "Import fold", home: "more" },
-  { door: "Paste Text Instead", was: "Import fold", home: "more" },
-  { door: "Import Documents", was: "Import fold", home: "more" },
   { door: /^Accept And (File Them There|Make The Account)$/, was: "Supplier Names That Look Like One Account", home: "more" },
   { door: "Not The Same", was: "Supplier Names That Look Like One Account", home: "more" },
   { door: "Give It Its Own Account", was: "Supplier Names Not On An Account Yet", home: "more" },
@@ -390,13 +401,17 @@ describe("every door keeps exactly one home", () => {
   const header = () => html.slice(0, html.indexOf('id="bills-search"'));
   const homeOf = (id: string) => (id === "header" ? header() : section(id));
 
+  /** A door listed in more than one home (a supplier paper's card and a tray paper's card answer in
+   *  the same words, W1-31) is found in each; the page holds exactly the sum. */
+  const sameDoor = (a: string | RegExp, b: string | RegExp) => String(a) === String(b);
   for (const h of HOMES) {
     it(`${String(h.door)} (was: ${h.was}) lives in ${h.home}`, () => {
       const inHome = count(doors(homeOf(h.home)), h.door);
       if (h.times != null) expect(inHome).toBe(h.times);
       else expect(inHome).toBeGreaterThanOrEqual(1);
-      // And nowhere else on the page: the count over the whole page is the count in its home.
-      expect(count(doors(html), h.door)).toBe(inHome);
+      // And nowhere else on the page: the count over the whole page is the count in its homes.
+      const inHomes = HOMES.filter((o) => sameDoor(o.door, h.door)).reduce((n, o) => n + count(doors(homeOf(o.home)), o.door), 0);
+      expect(count(doors(html), h.door)).toBe(inHomes);
     });
   }
 
@@ -431,6 +446,36 @@ describe("every door keeps exactly one home", () => {
     const fold = section(`supplier-not-in-books-${CED}`);
     expect(count(doors(fold), "Record To Stock")).toBeGreaterThanOrEqual(1);
     expect(section(`supplier-invoices-${CED}`)).toContain(`id="supplier-not-in-books-${CED}"`);
+    // Inside Their Papers, a nested <details> (never a menu), so FoldOpener still opens it.
+    expect(section(`supplier-their-papers-${CED}`)).toContain(`id="supplier-not-in-books-${CED}"`);
+  });
+
+  it("the supplier homes (W1-33): Edit Account on each open detail's ⋯, no Names It's Filed Under, Check These, Their Papers counting open papers only", () => {
+    const suppliers = section("suppliers");
+    // The ⋯ is the section menu, labelled Actions, one per account with the Edit Account action.
+    expect((suppliers.match(/<button[^>]*aria-label="Actions"/g) ?? []).length).toBe(2);
+    expect(text(html)).not.toContain("Names It's Filed Under");
+    // N To Check on each closed line, the money in the check's own row.
+    const lines = doors(suppliers).filter((d) => / To Check/.test(d));
+    expect(lines).toHaveLength(2);
+    for (const l of lines) expect(l).toMatch(/\b1 To Check\b/);
+    expect(text(suppliers)).not.toMatch(/\+ \$[\d,.]+ they never sent paper for/);
+    expect(text(section(`supplier-checks-${CED}`))).toMatch(/\$[\d,.]+ on \d+ bills? Consolidated Electrical Distributors never sent paper for\. Still owed; mark (it|them) Settled when you pay\./);
+    expect(text(section(`supplier-checks-${OSH}`))).toContain("1 bill marked On Account, $16.28, but you pay Outdoor Supply Hardware (OSH - Cupertino) at the register.");
+    // The one slate line under Record A Payment, model B's own arithmetic.
+    expect(text(section(`supplier-invoices-${CED}`))).toContain("You've sent $2,000.00 since Sep 5, 2026. It's already off their figure.");
+    expect(text(html)).not.toContain("Why Don't These Subtract?");
+    expect(text(html)).not.toContain("What Does Undo Do?");
+    // Their Papers' number counts the open papers in Invoices With No Job and Not Recorded Yet, each
+    // ONCE, never Where This Comes From. The fixture's STOCK paper 8802-1103061 has no job and no bill,
+    // so it sits in both lists (2 + 1) and is still one paper: two papers in all.
+    const ced = section(`supplier-their-papers-${CED}`);
+    const noJob = Number(/Invoices With No Job \((\d+)\)/.exec(text(ced))![1]);
+    const notRec = Number(/Not Recorded Yet \((\d+)\)/.exec(text(ced))![1]);
+    expect(noJob + notRec).toBe(3);
+    expect(text(ced).match(/8802-1103061/g)?.length).toBe(2);
+    expect(text(ced)).toContain("Their Papers (2)");
+    expect(text(ced)).toContain("Where This Comes From");
   });
 
   it("the same ticket on two jobs is pointed at from Needs You and answered under More", () => {
@@ -444,7 +489,7 @@ describe("every door keeps exactly one home", () => {
     const ced = section(`supplier-invoices-${CED}`);
     // 85 WHITNEY is a card; the only no-job rows left in CED's lists are the credit memo and STOCK.
     expect(text(section("needs-you"))).toContain("It Says 85 WHITNEY");
-    const noJob = ced.slice(ced.indexOf("Invoices With No Job"), ced.indexOf("Not In Your Books"));
+    const noJob = ced.slice(ced.indexOf("Invoices With No Job"), ced.indexOf("Not Recorded Yet"));
     expect(noJob).not.toContain("8802-1107820");
     expect(noJob).toContain("8802-1108541");
     expect(noJob).toContain("8802-1103061");
@@ -456,13 +501,25 @@ describe("every door keeps exactly one home", () => {
   });
 });
 
-describe("one door for papers (Wave 0)", () => {
+describe("one door for papers (Wave 0; W1-30)", () => {
   // The Receipts tab's Upload / Photo / drop box filed a picture and never recorded a cost, and its
-  // drop box caught drops meant for Drop Paperwork. It is a list now; Drop Paperwork reads papers.
+  // drop box caught drops meant for the page's own drop. It is a list now; Snap Or Note reads papers.
   it("the Receipts tab has no Upload or Photo door, and still lists what is on file", () => {
     expect(count(doors(html), "Upload")).toBe(0);
     expect(count(doors(html), "Photo")).toBe(0);
     expect(count(doors(section("all-bills")), "IMG_0412.jpg")).toBe(1);
+  });
+
+  it("one paper door: Snap Or Note in the header, no Drop Paperwork, no Paste Text Instead, and the import is one line with a Why?", () => {
+    expect(count(doors(html.slice(0, html.indexOf('id="bills-search"'))), "Snap Or Note")).toBe(1);
+    expect(text(html)).not.toContain("Drop Paperwork");
+    expect(count(doors(html), "Paste Text Instead")).toBe(0);
+    expect(count(doors(html), "Import Documents")).toBe(0);
+    expect(html).not.toContain('name="text"');
+    const imp = section("ced-import");
+    expect(text(imp)).toContain("Import Supplier Invoices");
+    expect(text(imp)).toContain("Supplier PDFs, statements and open lists go in through Snap Or Note.");
+    expect(count(doors(imp), "Why?")).toBe(1);
   });
 });
 

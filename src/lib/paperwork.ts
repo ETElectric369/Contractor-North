@@ -2,17 +2,18 @@
  * PAPER THAT HAS BEEN READ AND NOT YET FILED (0295; Erik, 2026-09-24).
  *
  * "Organize photos wait for File It": a model read is a proposal, never a filing. Every receipt,
- * bill or invoice that comes in through Organize or Drop Paperwork is read, shown as ONE line
- * ("Receipt, Home Depot, $84.12, paid at the counter"), and becomes money only when a person
- * picks where it goes and presses File It. This module is the pure half of that: what a piece of
- * paper IS, what it can become today, what stops it, and whether the same purchase is already on
- * the books. The server's File It and the button on screen ask the same function, so a door that
- * looks open is open and a refusal on the server is the sentence the screen already showed.
+ * bill or invoice that comes in through Snap Or Note is read, shown as ONE card ("Home Depot ·
+ * $84.12 · It Says 13897 HERRINGBONE"), and becomes money only when a person taps one of the
+ * card's answers (Put It On J-011, Another Job, Shop Stock, Business Cost). This module is the pure
+ * half of that: what a piece of paper IS, what it can become today, what stops it, and whether the
+ * same purchase is already on the books. The server's File It and each answer on screen ask the
+ * same function, so a door that looks open is open and a refusal on the server is the sentence the
+ * screen already showed.
  *
- * The app suggests, a person decides. Nothing in here writes. A job is pre-picked only when the
- * PAPER names it (a printed job number, PO, address, job name or customer matching exactly one
- * open job, jobFromPaperMarks); a model's guess is offered as a guess and never picked, and a
- * picture is asked what it is before it is asked where it goes (Erik, 2026-09-24).
+ * The app suggests, a person decides. Nothing in here writes. The first answer is what the PAPER
+ * names (a printed job number, PO, address, job name or customer matching exactly one open job,
+ * jobFromPaperMarks); a model's guess is offered as a guess, marked so, and never picked for
+ * anyone, and a picture is asked what it is before it is asked where it goes (Erik, 2026-09-24).
  */
 
 import { BUSINESS_COST_BUCKETS, isBusinessCostBucket, looksLikeSupplierFee, type BusinessCostBucket } from "@/lib/business-cost-buckets";
@@ -208,9 +209,10 @@ export type PaperProposal = {
   billDeleted?: { at: string; by: string | null } | null;
 };
 
-/** The row's sentence for a paper whose bill was deleted (billDeleted), or null. */
+/** The row's sentence for a paper whose bill was deleted (billDeleted), or null. Set Aside is on
+ *  the card's ⋯ (Actions); the answers are the card's own buttons. */
 export const BILL_DELETED_SAID =
-  "Its bill was deleted from Bills. If that bill was a duplicate, press Set Aside; if not, File It again.";
+  "Its bill was deleted from Bills. If that bill was a duplicate, Set Aside is under ⋯ on this card; if not, answer where it goes again.";
 export function billDeletedSaid(item: PaperItem): string | null {
   if (item.status && item.status !== "needs_review") return null;
   return proposalOf(item).billDeleted ? BILL_DELETED_SAID : null;
@@ -367,6 +369,9 @@ export const SHELF_TRAY_NO_LINES_NO_FILE =
 export const RETURN_NEEDS_LINES =
   "This is a return with no lines on it, so on a job it would credit the customer the whole amount, even for parts they were never charged for. Press Read Again so its lines come with it, or file it as a business cost.";
 
+/** A paper over the reader's size limit: a person types the total, then answers where it goes. */
+export const TOO_BIG_TO_FILE = "Too big to read. Put the total in with Fix Details, then answer where it goes.";
+
 /** The same refusal where a receipt is read straight onto a job (Snap the Bill, Record as Cost). */
 export const RETURN_ON_JOB_NEEDS_LINES =
   "This reads as a return, and none of its lines could be read, so on this job it would credit the customer the whole amount, even for parts they were never charged for. Nothing was recorded. Try a clearer photo, or drop it in Organize and file it as a business cost.";
@@ -468,11 +473,11 @@ export function readinessOf(item: PaperItem): Readiness {
     return {
       state: "later",
       sentence:
-        "A statement, but its list of open papers couldn't be read. Drop the supplier's open list (Excel, CSV or a PDF with text) or a clearer copy, and it will show what it changes.",
+        "A statement, but its list of open papers couldn't be read. Put the supplier's open list (Excel, CSV or a PDF with text) or a clearer copy in through Snap Or Note, and it will show what it changes.",
     };
   if (t && LATER_PAPER.includes(t)) return { state: "later", sentence: NOT_FILED_YET };
   if (t === "receipt" || t === "bill") {
-    if (amountOf(item) === null) return { state: "needs_total", sentence: "No total was read. Fix Details and put the total in, then File It." };
+    if (amountOf(item) === null) return { state: "needs_total", sentence: "No total was read. Put the total in with Fix Details, then answer where it goes." };
     return { state: "ready", sentence: "Ready To File." };
   }
   if (isPicture(item)) return { state: "picture", sentence: "What is this?" };
@@ -637,6 +642,94 @@ export function pickedBecause(item: PaperItem): string | null {
     return `Business cost picked from the ${JOB_MARK_WORDS[p.companyUse.from]} on the ${paperWord(item)}${words ? `: ${words}` : ""}`;
   }
   return null;
+}
+
+// ── THE CARD (W1-31: a tray paper on the Supplier Bills card grammar) ───────────────────────
+
+/**
+ * WHOSE GUESS, IN WORDS THAT ARE TRUE (audit v994, tray F2), said under a guess on the card. A
+ * bucket the READER gave, looking at the paper (Paper A: Tools & Supplies, off a ticket whose PO box
+ * said TOOLS), is the reader's guess; a job guess and AI Suggest's second look were not read off the
+ * paper, and say so.
+ */
+export function guessWhy(item: PaperItem, guess: string): string {
+  const p = proposalOf(item);
+  if (guess.startsWith("cost:") && bucketIsReaders(p)) {
+    const onPaper = item.on_paper !== undefined ? item.on_paper : onPaperWords(p);
+    return `The reader's guess, from the paper${onPaper ? ` (${onPaper})` : ""}.`;
+  }
+  return `Not read off the paper${p.why ? `: ${p.why}` : "."}`;
+}
+
+export type FirstAnswer = {
+  /** "job:<id>", "cost:<bucket>", "stock", or "" when the card has no first answer to offer. */
+  dest: string;
+  /** The line under the button: why the paper picked it (pickedBecause), or whose guess it is. */
+  because: string | null;
+  /** A model's or the reader's guess, never read off the paper: the button carries a Guess mark. */
+  isGuess: boolean;
+};
+
+/**
+ * THE CARD'S FIRST BUTTON. What the paper itself picks (suggestedDestination: a printed mark
+ * matched exactly), else a model's or the reader's guess (guessOf), else nothing, and the card
+ * asks. Nothing is preselected and nothing files on its own: it is the first of the card's one-tap
+ * answers, and a guess says so on the button. The Shop Stock switch off (0352) takes a paper's STOCK
+ * pick away; its words still show in the headline.
+ */
+export function firstAnswer(item: PaperItem, jobIds: readonly string[], opts: { shopStock?: boolean } = {}): FirstAnswer {
+  const picked = suggestedDestination(item, jobIds);
+  if (picked && !(picked === "stock" && opts.shopStock === false)) return { dest: picked, because: pickedBecause(item), isGuess: false };
+  const guess = guessOf(item, jobIds);
+  if (guess) return { dest: guess, because: guessWhy(item, guess), isGuess: true };
+  return { dest: "", because: null, isGuess: false };
+}
+
+/**
+ * WHAT THE PAPER NAMES, for the card's headline ("Home Depot · $84.12 · It Says 13897 HERRINGBONE",
+ * the supplier card's grammar). The words that made its own pick (a job's printed mark, a
+ * company-use word), else what is printed where a job goes (on_paper: the PO box, else the reader's
+ * hint with the company's own names taken out, worked out on the server). Null when it names
+ * nothing: the headline then says No Job Name On It.
+ */
+export function paperSays(item: PaperItem): string | null {
+  const p = proposalOf(item);
+  if (markedJob(p)) {
+    const words = String(p.jobHint ?? "").trim();
+    if (words) return words;
+  }
+  if ((markedShelf(item) || markedCost(item)) && String(p.companyUse?.words ?? "").trim()) return String(p.companyUse?.words).trim();
+  const onPaper = item.on_paper !== undefined ? item.on_paper : onPaperWords(p);
+  return String(onPaper ?? "").trim() || null;
+}
+
+/** "Receipt (Paid)", "Bill (Still Owed)": what the paper is, and how filing it will book it
+ *  (a paper that says nothing about tender is booked as owed, so it says Not Marked Paid). */
+export function paperKindWords(item: PaperItem): string {
+  const label = paperTypeLabel(paperTypeOfItem(item));
+  const pay =
+    item.payment === "paid_at_purchase"
+      ? "Paid"
+      : item.payment === "on_account"
+        ? "Still Owed"
+        : item.payment === "unknown"
+          ? "Not Marked Paid"
+          : /bill|invoice/i.test(String(item.category ?? "")) || paperTypeOfItem(item) === "bill"
+            ? "Still Owed"
+            : "Paid";
+  return `${label} (${pay})`;
+}
+
+/**
+ * A SERVER SENTENCE, SAID ON THE CARD. A few server sentences still end "press File It", a button
+ * the card retired (its answers file in one tap). On the card that tail comes off, so the card never
+ * names a door it doesn't have; the rest is the server's own words.
+ */
+export function cardSentence(message: string | null | undefined): string {
+  return String(message ?? "")
+    .replace(/\s*Press File It if that's right\.\s*$/, "")
+    .replace(/,? then press File It\.\s*$/, ".")
+    .trim();
 }
 
 /**
@@ -1161,7 +1254,7 @@ export function fileRefusal(item: PaperItem, dest: PaperDestination | null): str
   if (dest.type === "stock") {
     // THE SHOP SHELF (Phase 2): a receipt or bill, with its total, read line by line. A roll on
     // the shelf IS a line (pieces are taken from it), so a ticket with no lines can't go there yet.
-    if (r.state === "too_big") return "Too big to read. Fix Details and put the total in, then File It.";
+    if (r.state === "too_big") return TOO_BIG_TO_FILE;
     if (r.state === "later") return NOT_FILED_YET;
     if (r.state === "supplier_documents") return "These are supplier documents. Press Add To Supplier Documents, then Record To Stock from there.";
     const st = paperTypeOfItem(item);
@@ -1172,7 +1265,7 @@ export function fileRefusal(item: PaperItem, dest: PaperDestination | null): str
     if (!shelfRowsOf(item).length) return item.file_url ? SHELF_TRAY_NEEDS_LINES : SHELF_TRAY_NO_LINES_NO_FILE;
     return null;
   }
-  if (r.state === "too_big") return "Too big to read. Fix Details and put the total in, then File It.";
+  if (r.state === "too_big") return TOO_BIG_TO_FILE;
   if (r.state === "later") return NOT_FILED_YET;
   if (r.state === "supplier_documents") return dest.type === "keep" ? null : "These are supplier documents. Press Add To Supplier Documents.";
   const t = paperTypeOfItem(item);
@@ -1296,7 +1389,7 @@ export function findSameNumber(
       kind: "supplier_invoice",
       supplierInvoiceId: si.id,
       invoiceNumber: si.invoice_number,
-      sentence: `On the supplier documents list with no bill yet: ${said}. File It makes the bill and links it to that document.`,
+      sentence: `On the supplier documents list with no bill yet: ${said}. Filing it makes the bill and links it to that document.`,
     });
   }
   for (const p of books.papers ?? []) {

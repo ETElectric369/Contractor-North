@@ -76,7 +76,7 @@ export async function readPdfText(data: ArrayBuffer, name = "That PDF"): Promise
       pages.push(joinPdfTextItems(content.items as PdfTextItem[]));
     }
     const text = pages.join("\n\n").trim();
-    if (!text) return { ok: false, error: `${name} had no text in it. It is probably a scan; drop it on Drop Paperwork and it will be read as a picture.` };
+    if (!text) return { ok: false, error: `${name} had no text in it. It is probably a scan; put it in through Snap Or Note and it will be read as a picture.` };
     return { ok: true, text, pages: pdf.numPages };
   } catch (e) {
     return { ok: false, error: `${name} wouldn't open as a PDF (${(e as Error)?.message ?? "unknown error"}).` };
