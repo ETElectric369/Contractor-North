@@ -539,7 +539,9 @@ async function buildActionItems(ctx: {
       urgency: 0,
       done: false,
       href: bank ? "/bills#sort-these" : "/organize",
-      affordances: AFFORDANCES.organize,
+      // A bank download only opens: Dismiss archived it, and Back in Archive is its whole Undo,
+      // so a swipe here could take every line it counted back without a question.
+      affordances: bank ? ["open"] : AFFORDANCES.organize,
     });
   }
 
