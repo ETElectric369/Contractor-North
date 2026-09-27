@@ -40,6 +40,7 @@ import { formatCurrency } from "@/lib/utils";
 import { jobInOrg } from "@/lib/job-in-org";
 import { undoOpenListCore } from "@/app/(app)/bills/open-list-core";
 import { proposalAfterUndo, undoBankCore } from "@/app/(app)/bills/bank-core";
+import { OWNER_SORTS_BANK, viewerSortsBank } from "@/lib/bank-viewer";
 import { applyingNow } from "@/lib/bank-download";
 // TWO PROMPTS ITEMISE A RECEIPT and they must offer the model the SAME categories: the paper
 // reader (paperwork-core, any upload) and the job-receipt reader (a receipt already filed to a
@@ -1281,6 +1282,7 @@ export async function undoPaperwork(id: string): Promise<Result & { message?: st
   // One set aside with Not Now just comes back (the ordinary path below): its lines stay counted.
   if (p.bankImport && (p.filed?.how === "bank_download" || (item.status === "needs_review" && (p.bankImport.applied?.length ?? 0) > 0))) {
     if (!ctx.orgId) return { ok: false, error: "Your sign-in isn't attached to a company yet." };
+    if (!(await viewerSortsBank(supabase, ctx.userId))) return { ok: false, error: OWNER_SORTS_BANK };
     if (applyingNow(p.bankImport)) return { ok: false, error: "This download is being applied right now. Wait a moment, then Undo." };
     const down = await undoBankCore(supabase, ctx.orgId, ctx.userId, id);
     if (!down.ok) return { ok: false, error: down.error };
@@ -1502,6 +1504,7 @@ export async function deleteOrganizedItem(id: string): Promise<Result & { messag
   }
   // A BANK DOWNLOAD THAT WAS APPLIED: the same Undo first, because its lines are found by this row.
   if (p.bankImport && (p.filed?.how === "bank_download" || (p.bankImport.applied?.length ?? 0) > 0) && ctx.orgId) {
+    if (!(await viewerSortsBank(supabase, ctx.userId))) return { ok: false, error: OWNER_SORTS_BANK };
     if (applyingNow(p.bankImport)) return { ok: false, error: "This download is being applied right now. Wait a moment, then delete it." };
     const down = await undoBankCore(supabase, ctx.orgId, ctx.userId, id);
     if (!down.ok) return { ok: false, error: `${down.error} Nothing was deleted.` };

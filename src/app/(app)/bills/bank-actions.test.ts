@@ -40,6 +40,7 @@ const UNIQUE: Record<string, string[]> = {
 
 function fakeDb() {
   return {
+    auth: { getUser: async () => ({ data: { user: { id: "user-1" } } }) },
     from(table: string) {
       const rows = (db[table] ??= []);
       const filters: ((r: Row) => boolean)[] = [];
@@ -191,6 +192,8 @@ function seed() {
       { id: "pay-x", org_id: "org-2", invoice_id: "inv-x", amount: 1275, paid_at: "2026-09-03T19:00:00Z", method: "check", processor_fee: null, stripe_payment_intent: null, bank_line_id: null },
     ],
     profiles: [
+      // The signed-in viewer (requireStaff's user-1): an owner.
+      { id: "user-1", org_id: "org-1", full_name: "Owner Two", role: "owner", active: true },
       { id: "pat", org_id: "org-1", full_name: "Pat Crew", role: "tech", active: true },
       { id: "owner-1", org_id: "org-1", full_name: "Owner One", role: "owner", active: true },
       { id: "other-crew", org_id: "org-2", full_name: "Other Crew", role: "tech", active: true },
@@ -652,6 +655,25 @@ describe("Undo", () => {
     expect(res.ok).toBe(true);
     expect(db.bank_lines).toHaveLength(0);
     expect(db.organized_items[0].status).toBe("needs_review");
+  });
+});
+
+describe("the owner's money", () => {
+  it("an office viewer the owner hasn't let see owner money gets no lines, and every door refuses", async () => {
+    const id = await drop();
+    db.organizations[0].settings = { timezone: "America/Los_Angeles", office_sees_owner_money: false };
+    db.profiles.find((p) => p.id === "user-1")!.role = "office";
+    const v = await view(id);
+    expect(v.problem).toMatch(/^The owner sorts bank downloads/);
+    expect(v.rows).toEqual([]);
+    expect(v.flow).toEqual([]);
+    expect(JSON.stringify(v)).not.toMatch(/DENTAL|TRANSFER|SHELL/);
+    expect(await applyBankDownload(id, { fingerprint: "x", picks: {} })).toMatchObject({ ok: false, error: expect.stringMatching(/^The owner sorts/) });
+    expect(await undoBankDownload(id)).toMatchObject({ ok: false });
+    expect(await swapBankDownload(id)).toMatchObject({ ok: false });
+    // The owner sorts it as always.
+    db.profiles.find((p) => p.id === "user-1")!.role = "owner";
+    expect((await view(id)).problem).toBeNull();
   });
 });
 

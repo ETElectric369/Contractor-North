@@ -37,6 +37,7 @@ import {
   type StoredBank,
 } from "@/lib/bank-download";
 import { insertPaperRow } from "@/app/(app)/organize/paperwork-core";
+import { OWNER_SORTS_BANK, viewerSortsBank } from "@/lib/bank-viewer";
 
 /**
  * A BANK DOWNLOAD, ON THE SERVER (2026-09-27): the reads, the one Apply and its Undo. Not a
@@ -320,6 +321,14 @@ function problemView(dl: BankDownload, problem: string): BankView {
   return { ...bankViewOf({ ...dl, lines: [] }, plan, empty), problem };
 }
 
+/** The card an office viewer gets when the owner keeps owner money to themself: its account and
+ *  days, and who sorts it. No line, no amount, no flow. */
+function hiddenView(dl: BankDownload): BankView {
+  const bare = { ...dl, lines: [], skipped: [] };
+  const v = problemView(bare, OWNER_SORTS_BANK);
+  return { ...v, canUndo: false, canSwap: false, askAccount: false };
+}
+
 /** The card for every waiting bank download on a page. */
 export async function bankViews(
   supabase: Db,
@@ -328,9 +337,18 @@ export async function bankViews(
 ): Promise<Record<string, BankView>> {
   const waiting = items.filter((i) => (!i.status || i.status === "needs_review") && proposalOf(i).bankImport?.download);
   if (!waiting.length || !orgId) return {};
+  const out: Record<string, BankView> = {};
+  // THE OWNER'S MONEY (0286): an office viewer the owner hasn't let see it gets a card that says
+  // who sorts it, and nothing of its lines is read or shown.
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!(await viewerSortsBank(supabase, user?.id))) {
+    for (const i of waiting) out[i.id] = hiddenView((proposalOf(i).bankImport as StoredBank).download);
+    return out;
+  }
   const tz = await orgTz(supabase, orgId);
   const today = todayStrInTz(tz);
-  const out: Record<string, BankView> = {};
   for (const i of waiting) {
     const stored = proposalOf(i).bankImport as StoredBank;
     const dl = stored.download;

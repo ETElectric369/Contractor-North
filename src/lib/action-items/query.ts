@@ -1,4 +1,5 @@
 import { cache } from "react";
+import { viewerSortsBank } from "@/lib/bank-viewer";
 import { createClient } from "@/lib/supabase/server";
 import type { ActionItem, ActionKind } from "./types";
 import { AFFORDANCES, KIND_STREAM, appointmentAffordances } from "./types";
@@ -521,10 +522,13 @@ async function buildActionItems(ctx: {
     });
   }
 
+  // A bank download is the owner's money: only a viewer who sorts them sees one here (bank-viewer).
+  const bankOk = ((orgR.data ?? []) as any[]).some((o) => o.category === "Bank Download") ? await viewerSortsBank(supabase, userId) : false;
   for (const o of (orgR.data ?? []) as any[]) {
     // A BANK DOWNLOAD waiting in Sort These (2026-09-27) is on My Day while anything on it needs a
     // person, and opens where its card is.
     const bank = o.category === "Bank Download";
+    if (bank && !bankOk) continue;
     items.push({
       id: o.id,
       kind: "organize",

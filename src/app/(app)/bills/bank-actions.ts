@@ -6,6 +6,7 @@ import { requireStaff } from "@/lib/staff-guard";
 import { proposalOf } from "@/lib/paperwork";
 import { applyingNow, swapDownloadSigns, withAccountLast4, type BankDownload, type StoredBank } from "@/lib/bank-download";
 import { applyBankCore, proposalAfterUndo, sha256Hex, undoBankCore } from "./bank-core";
+import { OWNER_SORTS_BANK, viewerSortsBank } from "@/lib/bank-viewer";
 
 /**
  * A BANK DOWNLOAD'S BUTTONS (2026-09-27). There is no import button: the download arrives through
@@ -31,6 +32,7 @@ export async function applyBankDownload(id: string, opts: { fingerprint: string;
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   if (!ctx.orgId) return { ok: false, error: "Your sign-in isn't attached to a company yet." };
+  if (!(await viewerSortsBank(ctx.supabase, ctx.userId))) return { ok: false, error: OWNER_SORTS_BANK };
   const picks = opts?.picks && typeof opts.picks === "object" ? opts.picks : {};
   const res = await applyBankCore(ctx.supabase, { orgId: ctx.orgId, userId: ctx.userId }, String(id ?? ""), {
     fingerprint: String(opts?.fingerprint ?? ""),
@@ -60,6 +62,7 @@ export async function forgetBankRule(ruleId: string): Promise<Result> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   if (!ctx.orgId) return { ok: false, error: "Your sign-in isn't attached to a company yet." };
+  if (!(await viewerSortsBank(ctx.supabase, ctx.userId))) return { ok: false, error: OWNER_SORTS_BANK };
   const { data, error } = await ctx.supabase.from("bank_rules").delete().eq("id", String(ruleId ?? "")).eq("org_id", ctx.orgId).select("merchant_key");
   if (error) return { ok: false, error: `Nothing was forgotten. ${dbError(error)}` };
   if (!data?.length) return { ok: false, error: "That answer was already forgotten." };
@@ -84,6 +87,7 @@ async function reworkDownload(id: string, what: string, change: (dl: BankDownloa
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: String(ctx.error) };
   if (!ctx.orgId) return { ok: false, error: "Your sign-in isn't attached to a company yet." };
+  if (!(await viewerSortsBank(ctx.supabase, ctx.userId))) return { ok: false, error: OWNER_SORTS_BANK };
   const { data: item } = await ctx.supabase.from("organized_items").select("*").eq("id", id).eq("org_id", ctx.orgId).maybeSingle();
   if (!item) return { ok: false, error: "That bank download isn't here any more." };
   const p = proposalOf(item);
@@ -114,6 +118,7 @@ export async function undoBankDownload(id: string): Promise<Result> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   if (!ctx.orgId) return { ok: false, error: "Your sign-in isn't attached to a company yet." };
+  if (!(await viewerSortsBank(ctx.supabase, ctx.userId))) return { ok: false, error: OWNER_SORTS_BANK };
   const { data: item } = await ctx.supabase.from("organized_items").select("*").eq("id", id).eq("org_id", ctx.orgId).maybeSingle();
   if (!item) return { ok: false, error: "That bank download isn't here any more." };
   const p = proposalOf(item);

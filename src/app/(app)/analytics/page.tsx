@@ -219,7 +219,9 @@ export default async function AnalyticsPage({
         />
       )}
 
-      <BankDropLine />
+      {/* A bank download shows the owner's draw and personal spending: the same switch as the
+          Owner's Draw card says who may drop and sort one (bank-viewer.ts). */}
+      {showOwnerMoney && <BankDropLine />}
 
       {fuel?.hasFuel && <FuelTrendCard trend={fuel} />}
 
