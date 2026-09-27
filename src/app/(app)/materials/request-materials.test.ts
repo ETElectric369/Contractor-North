@@ -132,8 +132,10 @@ describe("requestMaterials: a line on the list, never a duplicate task", () => {
   it("the door asks for an item, not a message", async () => {
     const { readFileSync } = await import("node:fs");
     const door = readFileSync(new URL("./need-materials.tsx", import.meta.url), "utf8");
-    expect(door).toContain('placeholder="Two 3-gang faceplates — need them tomorrow"');
+    // An item, and any company's (no electrician's example: nort-examples.test.ts is the law).
+    expect(door).toContain('placeholder="Two more boxes of screws — need them tomorrow"');
     expect(door).not.toContain("won't do it for the far wall");
+    expect(door).not.toMatch(/placeholder="[^"]*faceplate/i);
   });
 
   it("says what's wrong in words and writes nothing for an empty ask", async () => {
