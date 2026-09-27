@@ -24,7 +24,7 @@
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { hoursBetween } from "@/lib/utils";
-import { todayStrInTz } from "@/lib/tz";
+import { todayStrInTz, tzDayStartUtc } from "@/lib/tz";
 import { claimedSourcesOnJob } from "@/lib/unbilled-work";
 
 /** Newest first, at most this many. The count says when there were more. */
@@ -71,11 +71,13 @@ const nameOf = (p: NoJobRow["profiles"]): string => {
 
 /**
  * The rule, pure: which closed, job-less rows are still waiting on a person. `rows` are closed
- * entries with no job (the read's filter); newest first in, newest first out.
+ * entries with no job (the read's filter); newest first in, newest first out. `includeToday`: a
+ * shift that closed today counts too (the job's Time tab, where the office is looking at the job
+ * the punch may belong to; Needs You still waits for the day to end).
  */
 export function noJobShiftsFrom(
   rows: NoJobRow[],
-  opts: { nonBillableCodes: ReadonlySet<string>; claimed: ReadonlySet<string>; todayStr: string; tz: string },
+  opts: { nonBillableCodes: ReadonlySet<string>; claimed: ReadonlySet<string>; todayStr: string; tz: string; includeToday?: boolean },
 ): NoJobShift[] {
   const out: NoJobShift[] = [];
   const seen = new Set<string>();
@@ -88,7 +90,7 @@ export function noJobShiftsFrom(
     const hours = hoursBetween(r.clock_in, r.clock_out, r.lunch_minutes ?? 0);
     if (hours <= 0) continue;
     const day = todayStrInTz(opts.tz, new Date(r.clock_in));
-    if (day >= opts.todayStr) continue;
+    if (opts.includeToday ? day > opts.todayStr : day >= opts.todayStr) continue;
     out.push({
       id: r.id,
       profileId: String(r.profile_id ?? ""),
@@ -167,4 +169,102 @@ export function companyTimeCode(codes: { code?: string | null; billable?: boolea
     .sort();
   if (!off.length) return null;
   return off.find((c) => c.toUpperCase() === "SHOP") ?? off[0];
+}
+
+// ── PUNCHES WITH NO JOB, NEAR ONE JOB (the job's Time tab) ────────────────────────────────────
+//
+// On 9/19 the office billing 85 Whitney looked at the job's Time tab, found no 9/11 hours and typed
+// the day again: Brian's own 9/11 punch was in the book on no job, and the job page never showed
+// it. So the job's Time tab lists the shifts on no job that its crew clocked around its days, each
+// with "Put This On <job>": the same shifts Hours On No Job lists (this file's rule), cut to this
+// job's people and dates, today's included.
+
+/** At most this many on one job's Time tab, newest first. */
+export const NEAR_JOB_CAP = 50;
+
+const YMD = /^\d{4}-\d{2}-\d{2}$/;
+const addDays = (ymd: string, n: number) => new Date(Date.parse(`${ymd}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);
+
+/**
+ * The days this job's crew may have worked it without the punch saying so: from the day BEFORE its
+ * first worked or scheduled day to TWO days after its last (a job scheduled for one day that ran
+ * into a second, the case that started this). Org-local "yyyy-mm-dd", both ends included. Null when
+ * the job has no day at all (never scheduled, never worked): nothing to be near.
+ */
+export function nearJobWindow(input: {
+  tz: string;
+  /** The job's own time entries. */
+  entries: { clock_in?: string | null; clock_out?: string | null }[];
+  scheduledStart?: string | null;
+  scheduledEnd?: string | null;
+  /** job_schedule_segments rows: already org-local dates. */
+  segments?: { start_date?: string | null; end_date?: string | null }[];
+}): { from: string; to: string } | null {
+  const days: string[] = [];
+  const instant = (v: string | null | undefined) => {
+    const ms = Date.parse(String(v ?? ""));
+    if (Number.isFinite(ms)) days.push(todayStrInTz(input.tz, new Date(ms)));
+  };
+  for (const e of input.entries ?? []) {
+    instant(e.clock_in);
+    instant(e.clock_out);
+  }
+  instant(input.scheduledStart);
+  instant(input.scheduledEnd);
+  for (const s of input.segments ?? []) {
+    for (const d of [s.start_date, s.end_date]) {
+      const ymd = String(d ?? "").slice(0, 10);
+      if (YMD.test(ymd)) days.push(ymd);
+    }
+  }
+  if (!days.length) return null;
+  days.sort();
+  return { from: addDays(days[0], -1), to: addDays(days[days.length - 1], 2) };
+}
+
+/** This job's crew: the people assigned to it, and anyone with hours on it. */
+export function jobCrewIds(assigned: (string | null | undefined)[] | null | undefined, entries: { profile_id?: string | null }[]): string[] {
+  const ids = new Set<string>();
+  for (const a of assigned ?? []) if (a) ids.add(String(a));
+  for (const e of entries ?? []) if (e?.profile_id) ids.add(String(e.profile_id));
+  return [...ids].sort();
+}
+
+/**
+ * Read them: closed shifts on no job, not the company's own time, not billed, by `crewIds`, that
+ * started inside `window` (org-local days). RLS-scoped (the office reads every entry of its
+ * company). Newest first, at most NEAR_JOB_CAP. A failed read is null, never an empty list: "none"
+ * hides the list, "could not look" says so.
+ */
+export async function readNoJobPunchesNearJob(
+  supabase: SupabaseClient,
+  opts: { crewIds: string[]; window: { from: string; to: string } | null; tz: string; todayStr: string },
+): Promise<NoJobShift[] | null> {
+  if (!opts.window || !opts.crewIds.length) return [];
+  const codesR = await supabase.from("job_codes").select("code").eq("billable", false);
+  if (codesR.error) return null;
+  const nonBillableCodes = new Set(((codesR.data ?? []) as { code?: string | null }[]).map((c) => String(c.code ?? "").trim()).filter(Boolean));
+  let read = supabase
+    .from("time_entries")
+    .select("id, profile_id, clock_in, clock_out, lunch_minutes, job_code, auto_closed_reason, profiles:profile_id(full_name)")
+    .in("profile_id", opts.crewIds)
+    .eq("status", "closed")
+    .is("job_id", null)
+    .not("clock_out", "is", null)
+    .gte("clock_in", tzDayStartUtc(opts.window.from, opts.tz).toISOString())
+    .lt("clock_in", tzDayStartUtc(addDays(opts.window.to, 1), opts.tz).toISOString());
+  const notCompanyTime = notCompanyTimeFilter(nonBillableCodes);
+  if (notCompanyTime) read = read.or(notCompanyTime);
+  const rowsR = await read.order("clock_in", { ascending: false }).limit(NEAR_JOB_CAP);
+  if (rowsR.error) return null;
+  const rows = (rowsR.data ?? []) as NoJobRow[];
+  if (!rows.length) return [];
+  let claimed: Set<string>;
+  try {
+    const claims = await claimedSourcesOnJob(supabase, null, null, rows.map((r) => r.id));
+    claimed = new Set(claims.owner.keys());
+  } catch {
+    return null;
+  }
+  return noJobShiftsFrom(rows, { nonBillableCodes, claimed, todayStr: opts.todayStr, tz: opts.tz, includeToday: true });
 }

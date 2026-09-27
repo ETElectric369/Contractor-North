@@ -53,6 +53,8 @@ import { JobTasks } from "./job-tasks";
 import { JobPermits } from "./job-permits";
 import { permitStatusTone, permitResultTone } from "@/lib/permit-options";
 import { JobAddTimeEntry } from "./job-add-time";
+import { NoJobPunches, type NearPunch } from "./no-job-punches";
+import { jobCrewIds, nearJobWindow, readNoJobPunchesNearJob } from "@/lib/no-job-hours";
 import { JobClockButton } from "./job-clock-button";
 import { EditEntryButton } from "../../timecards/edit-entry-button";
 import { JobStatusControl } from "./job-status-control";
@@ -793,6 +795,33 @@ export default async function JobDetailPage({
     }
   }
 
+  // PUNCHES WITH NO JOB near this job (the duplicate punches, 2026-09-26): its crew's closed,
+  // job-less, unbilled shifts from the day before its first day to two days after its last, for
+  // the office's Put This On door on the Time tab. Office only. Null = the read failed (said).
+  let nearPunches: NearPunch[] | null = [];
+  if (viewerIsStaff) {
+    try {
+      const shifts = await readNoJobPunchesNearJob(supabase as any, {
+        crewIds: jobCrewIds(j.assigned_to, (entries ?? []) as { profile_id?: string | null }[]),
+        window: nearJobWindow({
+          tz,
+          entries: (entries ?? []) as { clock_in?: string | null; clock_out?: string | null }[],
+          scheduledStart: j.scheduled_start,
+          scheduledEnd: j.scheduled_end,
+          segments: (scheduleSegments ?? []) as { start_date?: string | null; end_date?: string | null }[],
+        }),
+        tz,
+        todayStr: todayStrInTz(tz),
+      });
+      nearPunches = shifts
+        ? shifts.map((s) => ({ id: s.id, name: s.name, clockIn: s.clockIn, clockOut: s.clockOut, hours: s.hours, jobCode: s.jobCode }))
+        : null;
+    } catch (e) {
+      reportError("jobs.[id].noJobPunches", e, { jobId: id });
+      nearPunches = null;
+    }
+  }
+
   // Time-tab serialization gate (same class as the gated techs select above):
   // `entries` keeps rate_override + the joined hourly_rate/bill_rate because the
   // server-side cost math (laborCostForJob, totalMiles) needs the full rows, but
@@ -1170,6 +1199,11 @@ export default async function JobDetailPage({
               )}
             </div>
           </div>
+          {/* Its crew's punches on no job around its days, each one tap onto this job: the hours
+              the office would otherwise type again (office only; nothing to show, nothing shown). */}
+          {viewerIsStaff && (
+            <NoJobPunches jobId={j.id} jobLabel={jobLabel(j)} tz={tz} punches={nearPunches ?? []} failed={nearPunches === null} />
+          )}
           <ul className="divide-y divide-slate-100">
             {timeTabEntries.map((e) => {
               const h = e.status === "closed" && e.clock_out
