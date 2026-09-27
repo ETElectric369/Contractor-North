@@ -1377,7 +1377,13 @@ export async function createManualEntry(input: {
   // the office billing 85 Whitney typed Brian's 9/11 again because his punch that day had no job
   // and the job page never showed it. The form now gets that punch, so it can offer "Put This On
   // 85 Whitney" (the punch's own clock times) instead of a sentence with no door.
-  const overlap = await findOverlap(supabase, profileId, ci.getTime(), co.getTime());
+  // "Put that shift on the job" only while no invoice bills that punch: the form's door is for an
+  // unbilled one, and a billed shift keeps its job (0288).
+  const putOnJobIf = async (id: string) => {
+    const claims = await claimsOnSources(supabase, [id]);
+    return !("error" in claims) && !claims.has(id);
+  };
+  const overlap = await findOverlap(supabase, profileId, ci.getTime(), co.getTime(), { putOnJobIf });
   if (overlap) return { ok: false, error: overlap.sentence, ...(overlap.clash ? { clash: overlap.clash } : {}) };
 
   // Drop a job_id the caller can't see (e.g. a crafted voice/registry call) — never
@@ -1403,7 +1409,7 @@ export async function createManualEntry(input: {
     // names the shift; the answer carries it like the check above does.
     const clashId = clashIdFrom(error);
     if (clashId) {
-      const again = await findOverlap(supabase, profileId, ci.getTime(), co.getTime());
+      const again = await findOverlap(supabase, profileId, ci.getTime(), co.getTime(), { putOnJobIf });
       if (again?.clash) return { ok: false, error: again.sentence, clash: again.clash };
     }
     return { ok: false, error: dbError(error) };

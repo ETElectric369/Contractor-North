@@ -31,6 +31,7 @@ vi.mock("@/lib/push", () => ({ sendPushToProfiles: vi.fn(async () => undefined),
 vi.mock("../schedule/actions", () => ({ setJobCrew: vi.fn(async () => ({ ok: true })) }));
 
 import { clockIn, createManualEntry, fileShiftAsCompanyTime, putShiftOnJob, shiftsOnDay, takeShiftOffJob } from "./actions";
+import { overlapRefusal } from "@/lib/overlap-refusal";
 
 type Q = { table: string; verb: "select" | "insert" | "update" | "delete" | "rpc"; cols: string; payload?: any; filters: any[] };
 type Reply = { data?: any; error?: any } | undefined;
@@ -87,6 +88,7 @@ describe("Add Entry over a punch that has no job", () => {
   it("is refused with the punch itself handed back, named as a no-job shift, and nothing is written", async () => {
     state.client = fakeSupabase((q) => {
       if (isOverlapRead(q)) return { data: [brianPunch] };
+      if (q.table === "invoice_items") return { data: [] }; // no invoice bills the punch
       if (q.table === "profiles") return { data: { full_name: "Brian Taylor" } };
       if (q.table === "organizations") return ORG_TZ;
     }, calls);
@@ -105,6 +107,34 @@ describe("Add Entry over a punch that has no job", () => {
     );
     expect(r.clash).toMatchObject({ id: PUNCH, noJob: true, jobId: null, exact: false, clockOut: brianPunch.clock_out });
     expect(calls.some((c) => c.verb === "insert")).toBe(false);
+  });
+
+  it("a no-job punch an invoice already bills is not offered 'put it on the job' (it keeps its job, and the form has no door for it)", async () => {
+    state.client = fakeSupabase((q) => {
+      if (isOverlapRead(q)) return { data: [brianPunch] };
+      if (q.table === "invoice_items")
+        return { data: [{ source_ids: [PUNCH], invoices: { id: "inv-55", invoice_number: "INV-055", status: "sent", created_at: "2026-09-12T00:00:00Z" } }] };
+      if (q.table === "profiles") return { data: { full_name: "Brian Taylor" } };
+      if (q.table === "organizations") return ORG_TZ;
+    }, calls);
+    const r = await createManualEntry({ profile_id: "brian-1", clock_in: "2026-09-11T18:00:00Z", clock_out: "2026-09-12T02:30:00Z", job_id: JOB, job_code: null, notes: "" });
+    expect(r.error).toBe(
+      "Brian Taylor is already on the clock Friday Sep 11, 10:31 AM to 6:57 PM with no job, so these hours would be counted twice. Edit that entry instead.",
+    );
+    expect(r.clash).toMatchObject({ id: PUNCH, noJob: true });
+  });
+
+  it("an edit or a copy over a no-job punch keeps 'Edit that entry instead': only Add Entry has the door", async () => {
+    state.client = fakeSupabase((q) => {
+      if (isOverlapRead(q)) return { data: [brianPunch] };
+      if (q.table === "profiles") return { data: { full_name: "Brian Taylor" } };
+      if (q.table === "organizations") return ORG_TZ;
+    }, calls);
+    const sentence = await overlapRefusal(state.client, "brian-1", Date.parse("2026-09-11T18:00:00Z"), Date.parse("2026-09-12T02:30:00Z"), { excludeId: "other" });
+    expect(sentence).toMatch(/with no job, so these hours would be counted twice\. Edit that entry instead\.$/);
+    expect(sentence).not.toMatch(/Put that shift on the job/);
+    // No claims read either: the question is only asked where the answer changes the words.
+    expect(calls.some((c) => c.table === "invoice_items")).toBe(false);
   });
 
   it("a shift on another job is named with its job, and the answer is to edit it", async () => {

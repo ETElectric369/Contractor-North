@@ -363,6 +363,10 @@ describe("a start in the past never lands on hours already recorded", () => {
     expect(res.ok).toBe(false);
     expect(res.error).toContain("9:00 AM to 11:30 AM");
     expect(res.error).toContain("Nothing was started.");
+    // The clock-in's own words: start after that shift, never Add Entry's "put it on the job" (the
+    // job does not exist yet, and this card has no such door).
+    expect(res.error).toContain("Start the clock at 11:30 AM or later");
+    expect(res.error).not.toMatch(/Put that shift on the job/);
     expect(spies.createJob).not.toHaveBeenCalled();
     expect(spies.clockIn).not.toHaveBeenCalled();
   });

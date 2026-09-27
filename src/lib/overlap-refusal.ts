@@ -50,6 +50,13 @@ type OverlapOpts = {
   /** Leave running clocks out: a clock-in's check, where a stale open shift is closed at zero by the
    *  punch itself (0193) and a live one is the database's "You're already clocked in." */
   ignoreOpen?: boolean;
+  /**
+   * ADD ENTRY ONLY: asked about a closed no-job clash, true when "Put that shift on the job" is a
+   * move the office can actually make (the form's Put This On door): no invoice bills that shift.
+   * Every other door (an edit, a copy, a start) and a billed shift keep "Edit that entry instead":
+   * the put-on-job words there pointed at a door that does not exist.
+   */
+  putOnJobIf?: (clashId: string) => Promise<boolean>;
 };
 
 /**
@@ -172,13 +179,23 @@ export async function findOverlap(
     };
   }
   const when = shiftWhen(clash.clock_in, clash.clock_out, tz);
+  // A punch with NO JOB is the 85 Whitney case: the hours are real and already recorded, they are
+  // just not on the job. On Add Entry, where the door is, the move is to put that punch on the job,
+  // not to type them again; only there, and only while no invoice bills it (putOnJobIf).
+  let putOnJob = false;
+  if (found.noJob && opts?.putOnJobIf) {
+    try {
+      putOnJob = await opts.putOnJobIf(found.id);
+    } catch {
+      putOnJob = false;
+    }
+  }
+  const where = found.jobLabel ? ` on ${found.jobLabel}` : code ? ` (${code})` : found.noJob ? " with no job" : "";
   return {
     clash: found,
-    // A punch with NO JOB is the 85 Whitney case: the hours are real and already recorded, they
-    // are just not on the job. The move is to put that punch on the job, not to type them again.
-    sentence: found.noJob
+    sentence: putOnJob
       ? `${name} is already on the clock ${when} with no job, so these hours would be counted twice. Put that shift on the job instead of adding them again.`
-      : `${name} is already on the clock ${when}${found.jobLabel ? ` on ${found.jobLabel}` : code ? ` (${code})` : ""}, so these hours would be counted twice. Edit that entry instead.`,
+      : `${name} is already on the clock ${when}${where}, so these hours would be counted twice. Edit that entry instead.`,
   };
 }
 
@@ -187,16 +204,24 @@ export async function findOverlap(
  * clock-in, an offline punch delivered late). 0360 refuses it underneath; this says it the way the
  * person tapping the clock can act on: start after the other shift ends, or have it fixed.
  */
-export function clockInClashWords(input: { clash: OverlapClash; startIso: string; tz: string; isStaff: boolean }): string {
+export function clockInClashWords(input: {
+  clash: OverlapClash;
+  startIso: string;
+  tz: string;
+  isStaff: boolean;
+  /** What the refused tap did not do: a punch records nothing; the visit's Start The Job starts nothing. */
+  nothing?: string;
+}): string {
   const { clash, startIso, tz, isStaff } = input;
+  const nothing = input.nothing ?? "Nothing was recorded.";
   const at = (iso: string) =>
     new Date(iso).toLocaleTimeString("en-US", { timeZone: tz, hour: "numeric", minute: "2-digit" }).replace(/ /g, " ");
   const when = clash.clockOut ? shiftWhen(clash.clockIn, clash.clockOut, tz) : shiftWhen(clash.clockIn, clash.clockIn, tz).split(" to ")[0];
   const where = clash.jobLabel ? ` on ${clash.jobLabel}` : clash.noJob ? " with no job" : "";
   const fix = isStaff ? "fix that shift on Timecards" : "ask the office to fix that shift";
   return clash.clockOut
-    ? `You already have hours recorded ${when}${where}, so a clock started at ${at(startIso)} would count them twice. Nothing was recorded. Start the clock at ${at(clash.clockOut)} or later, or ${fix}.`
-    : `You already have a clock running since ${when}${where}. Nothing was recorded.`;
+    ? `You already have hours recorded ${when}${where}, so a clock started at ${at(startIso)} would count them twice. ${nothing} Start the clock at ${at(clash.clockOut)} or later, or ${fix}.`
+    : `You already have a clock running since ${when}${where}. ${nothing}`;
 }
 
 /** "Thursday Sep 17, 11:00 AM to 9:00 PM" in the ORG's day (days are org-local, never the
