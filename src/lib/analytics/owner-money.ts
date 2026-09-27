@@ -146,7 +146,7 @@ export function monthLongLabel(month: string): string {
 
 /** A window of ORG-LOCAL days: `start` inclusive, `end` exclusive, both "YYYY-MM-DD". The chart's
  *  own window is "last_12_months". */
-export type OwnerMoneyWindow = { key: OwnerMoneyWindowKey | "last_12_months"; label: string; start: string; end: string };
+export type OwnerMoneyWindow = { key: OwnerMoneyWindowKey | "last_12_months" | "period"; label: string; start: string; end: string };
 
 /** The window for a key, relative to the org's today. Month arithmetic is day-1-pinned. A month key
  *  is that calendar month (the page validated it with parseOwnerMoneyMonthKey). */
@@ -287,7 +287,8 @@ export type OwnerMoney = {
   onShelfNow: number;
 };
 
-export type OwnerMoneyPerson = { name: string; paidByDraw: boolean; hourlyRate: number | null };
+/** `commuteBaselineMiles`: the daily commute the tax report nets out of logged miles (profile_pay). */
+export type OwnerMoneyPerson = { name: string; paidByDraw: boolean; hourlyRate: number | null; commuteBaselineMiles?: number | null };
 
 export type OwnerMoneyInputs = {
   /** payments: amount, paid_at, processor_fee, stripe_payment_intent, invoices { status }. */
@@ -436,7 +437,7 @@ const newAcc = (): Acc => ({ received: 0, other: 0, materials: 0, crewPay: 0, mi
  * Only kind 'base' runs are wages; a kind 'mileage' run is reimbursement and never lands here.
  * Owners (paid by owner's draw) are skipped entirely, including any old run of theirs.
  */
-function crewPayByMonth(
+export function crewPayByMonth(
   entries: any[],
   runs: any[],
   people: Map<string, OwnerMoneyPerson>,
@@ -515,6 +516,191 @@ function crewPayByMonth(
   return out;
 }
 
+// ── THE COST LINES ───────────────────────────────────────────────────────────
+
+/** Where one cost line lands: a row of the Money by Month figures. */
+export type OwnerMoneyCostTarget = "materials" | "stock" | "stock_lost" | BusinessCostBucket;
+
+/**
+ * ONE COST, ONE LINE: the record it came from, its org-local day and month, the figure it lands in
+ * and its cents. computeOwnerMoney adds these up month by month and does nothing else with costs,
+ * so a list built from them (the accountant's Costs tab) holds exactly the money the figures hold.
+ *
+ *   · a bill ON A JOB           -> Materials & Bills, less its rolls (a `stock` line: Put On The Shelf)
+ *   · a bill with NO job        -> its bucket (a ticket bought for stock: Tools & Supplies), less its
+ *                                  rolls; a supplier's credit tied to returned stock -> Shop Stock Lost
+ *   · a live purchase order     -> Materials & Bills, on its order day
+ *   · petty cash (not a refill) -> Materials & Bills on a job, else its bucket
+ *   · a payment's card fee      -> Fees (`card_fee`: processorFees, inside Fees)
+ *   · pieces written off, counted short or returned (off a roll bought on a ticket) -> Shop Stock
+ *     Lost, with the same dollars taken back off Put On The Shelf that month (`movedOut`)
+ *
+ * The rules are the ones spelled out at the top of this file; this is the one place they are written.
+ */
+export type OwnerMoneyCostLine = {
+  source: "bill" | "purchase_order" | "petty_cash" | "card_fee" | "stock_move";
+  /** The record the line came from, as read. */
+  row: any;
+  day: string | null;
+  month: string | null;
+  to: OwnerMoneyCostTarget;
+  cents: number;
+  /** A stock move's own dollars (pieces that left stock), as against a supplier's credit. */
+  movedOut?: boolean;
+};
+
+export function ownerMoneyCostLines(inp: OwnerMoneyInputs, tz: string): OwnerMoneyCostLine[] {
+  const out: OwnerMoneyCostLine[] = [];
+  const push = (source: OwnerMoneyCostLine["source"], row: any, day: string | null, to: OwnerMoneyCostTarget, cents: number, movedOut?: boolean) =>
+    out.push({ source, row, day, month: day ? day.slice(0, 7) : null, to, cents, ...(movedOut ? { movedOut } : {}) });
+
+  // CARD FEES: Stripe's real fee on each payment, in the month it was received (the org's month).
+  for (const p of inp.payments ?? []) {
+    if (!p?.paid_at) continue;
+    if (p.processor_fee == null || p.processor_fee === "") continue;
+    push("card_fee", p, todayStrInTz(tz, new Date(p.paid_at)), "Fees", toCents(p.processor_fee));
+  }
+
+  // THE SHELF'S PART OF EACH TICKET (0303): its live rolls' cost.
+  const shelfByBill = new Map<string, number>();
+  /** The live rolls bought on a ticket: the only ones whose cost is ever a month's Put On The Shelf. */
+  const boughtLots = new Set<string>();
+  for (const l of inp.shelfLots ?? []) {
+    if (!l || l.live === false || !l.bill_id) continue;
+    boughtLots.add(String(l.lot_id));
+    shelfByBill.set(String(l.bill_id), (shelfByBill.get(String(l.bill_id)) ?? 0) + toCents(l.cost));
+  }
+
+  // SHOP STOCK LOST, IN THE MONTH IT HAPPENED (Phase 4). A write-off, a count short, or pieces sent
+  // back to the supplier: the dollars leave Put On The Shelf and land in Shop Stock Lost, the same
+  // month, so Left For You never counts the roll twice. A supplier credit tied to a return is money
+  // back, taken off Shop Stock Lost in the credit's own month (below, with the bills).
+  // ONLY A ROLL BOUGHT ON A TICKET: an opening count (counted in, no receipt) was never a month's
+  // Put On The Shelf in these books, so its pieces going are never a month's loss either (the
+  // shelf's value now still drops). A credit tied to such a return is still money back.
+  const tiedCredits = new Set<string>();
+  for (const m of inp.shelfMoves ?? []) {
+    if (!m || m.undone_at) continue;
+    if (m.kind !== "write_off" && m.kind !== "recount_down" && m.kind !== "supplier_return") continue;
+    if (m.kind === "supplier_return" && m.credit_bill_id) tiedCredits.add(String(m.credit_bill_id));
+    if (!boughtLots.has(String(m.lot_id ?? ""))) continue;
+    const day = recordDay(null, m.created_at, tz);
+    const c = toCents(m.cost);
+    push("stock_move", m, day, "stock", -c, true);
+    push("stock_move", m, day, "stock_lost", c, true);
+  }
+
+  // MATERIALS & BILLS: exactly the job-cost inputs job profit uses - less what went on the shelf,
+  // which is Put On The Shelf in the same month (decision 1: the month the ticket is dated).
+  // THE SAME RULE FOR EVERY TICKET, shelf ticket or job ticket: Put On The Shelf is the live rolls'
+  // cost and nothing else, so Put On The Shelf - drawn - lost = On The Shelf Now holds to the cent.
+  const liveBills = (inp.bills ?? []).filter((b) => b && !b.superseded_by_bill_id);
+  const withShelfPart = (b: any, day: string | null, to: OwnerMoneyCostTarget) => {
+    const s = shelfByBill.get(String(b.id)) ?? 0;
+    push("bill", b, day, to, toCents(b.amount) - s);
+    if (s) push("bill", b, day, "stock", s);
+  };
+  for (const b of liveBills) {
+    const day = recordDay(b.bill_date, b.created_at, tz);
+    if (b.job_id) {
+      withShelfPart(b, day, "materials");
+      continue;
+    }
+    // A SUPPLIER'S CREDIT FOR PIECES RETURNED FROM THE SHELF (0350): money back against what those
+    // pieces cost, so it comes off Shop Stock Lost, never a business bucket and never a customer.
+    if (tiedCredits.has(String(b.id))) {
+      push("bill", b, day, "stock_lost", toCents(b.amount));
+      continue;
+    }
+    // BUSINESS COSTS: bills with no job, in their bucket (Fuel's is said on its own line). A ticket
+    // bought for the shelf is its rolls (Put On The Shelf); whatever of it has no roll behind it (Not
+    // Stock lines, their tax, freight, a roll taken back off) is supplies the business used, in
+    // Tools & Supplies - named, never "Other" (bucketOf would call the category "Shop Stock" that).
+    withShelfPart(b, day, b.on_shelf === true ? "Tools & Supplies" : bucketOf(b.category));
+  }
+  // Live POs over ALL live bills: a PO is superseded by its bill whatever month the bill is in.
+  for (const p of livePurchaseOrders((inp.pos ?? []) as any[], liveBills as any[])) {
+    if (!(p as any).job_id) continue;
+    push("purchase_order", p, recordDay(null, (p as any).ordered_at ?? (p as any).created_at, tz), "materials", toCents((p as any).total));
+  }
+  for (const pc of inp.pettyCash ?? []) {
+    if (!pc || pc.kind === "replenish") continue;
+    push("petty_cash", pc, recordDay(pc.tx_date, pc.created_at, tz), pc.job_id ? "materials" : bucketOf(pc.category), toCents(pc.amount));
+  }
+  return out;
+}
+
+/**
+ * EACH SUPPLIER ACCOUNT AS /bills READS IT (supplierBalance's input): its live bills, the payments
+ * sent it (voided ones included; the balance skips them) and its own documents. Pass `payments` to
+ * build the rows over some other set of payments (one period's).
+ */
+export function supplierAccountRowsOf(inp: OwnerMoneyInputs, tz: string, payments: any[] = inp.supplierPayments ?? []): Map<string, SupplierAccountRow> {
+  const liveBills = (inp.bills ?? []).filter((b) => b && !b.superseded_by_bill_id);
+  const accountRows = new Map<string, SupplierAccountRow>();
+  for (const a of inp.supplierAccounts ?? []) {
+    if (!a?.id) continue;
+    accountRows.set(String(a.id), {
+      id: String(a.id),
+      name: String(a.name ?? "").trim() || "a supplier",
+      accountNumber: null,
+      branchCode: null,
+      onAccount: a.on_account !== false,
+      note: null,
+      aliases: [],
+      bills: [],
+      payments: [],
+    });
+  }
+  for (const b of liveBills) {
+    const row = b.supplier_account_id ? accountRows.get(String(b.supplier_account_id)) : undefined;
+    if (!row) continue;
+    row.bills.push({
+      id: String(b.id),
+      supplier: "",
+      billDate: recordDay(b.bill_date, b.created_at, tz),
+      amount: Number(b.amount) || 0,
+      status: String(b.status ?? ""),
+      jobId: b.job_id ?? null,
+      jobName: null,
+      invoiceNumber: null,
+      isStatement: false,
+    });
+  }
+  for (const p of payments ?? []) {
+    const row = p?.supplier_account_id ? accountRows.get(String(p.supplier_account_id)) : undefined;
+    if (!row) continue;
+    row.payments.push({
+      id: String(p.id ?? ""),
+      amount: Number(p.amount) || 0,
+      paidOn: String(p.paid_on ?? ""),
+      method: String(p.method ?? "other"),
+      reference: null,
+      note: null,
+      voided: !!p.voided_at,
+    });
+  }
+  for (const d of inp.supplierDocuments ?? []) {
+    const row = d?.supplier_account_id ? accountRows.get(String(d.supplier_account_id)) : undefined;
+    if (!row) continue;
+    (row.supplierInvoices ??= []).push({
+      id: String(d.id ?? ""),
+      invoiceNumber: String(d.invoice_number ?? ""),
+      kind: String(d.kind ?? "invoice"),
+      invoiceDate: d.invoice_date ?? null,
+      dueDate: null,
+      jobNameRaw: null,
+      jobId: null,
+      total: Number(d.total) || 0,
+      openBalance: d.open_balance === null || d.open_balance === undefined ? null : Number(d.open_balance),
+      closed: d.closed === true,
+      discountAmount: null,
+      discountBy: null,
+    });
+  }
+  return accountRows;
+}
+
 // ── THE PURE HALF ────────────────────────────────────────────────────────────
 
 export function computeOwnerMoney(inp: OwnerMoneyInputs, win: OwnerMoneyWindow, tz: string, todayYmd?: string): OwnerMoney {
@@ -558,98 +744,37 @@ export function computeOwnerMoney(inp: OwnerMoneyInputs, win: OwnerMoneyWindow, 
     a.received += c;
   }
 
-  // CARD FEES: Stripe's real fee on each payment received in the window, into the Fees bucket. A
-  // Stripe payment whose fee is still NULL is UNKNOWN: it is counted as a caveat, never as $0.
+  // CARD FEES: Stripe's real fee on each payment received in the window, into the Fees bucket (a
+  // card_fee cost line, below). A Stripe payment whose fee is still NULL is UNKNOWN: it is counted as
+  // a caveat, never as $0.
   let unknownFees = 0;
-  for (const [m, list] of payByMonth) {
-    const a = acc.get(m)!;
+  for (const list of payByMonth.values()) {
     for (const p of list) {
-      if (p.processor_fee != null && p.processor_fee !== "") a.fees += toCents(p.processor_fee);
-      else if (p.stripe_payment_intent) unknownFees += 1;
+      if (!(p.processor_fee != null && p.processor_fee !== "") && p.stripe_payment_intent) unknownFees += 1;
     }
   }
 
-  // THE SHELF'S PART OF EACH TICKET (0303): its live rolls' cost.
-  const shelfByBill = new Map<string, number>();
-  /** The live rolls bought on a ticket: the only ones whose cost is ever a month's Put On The Shelf. */
-  const boughtLots = new Set<string>();
+  // What is in stock right now, at cost: every live lot's dollars left.
   let onShelfNow = 0;
   for (const l of inp.shelfLots ?? []) {
     if (!l || l.live === false) continue;
     onShelfNow += toCents(l.cost_left);
-    if (!l.bill_id) continue;
-    boughtLots.add(String(l.lot_id));
-    shelfByBill.set(String(l.bill_id), (shelfByBill.get(String(l.bill_id)) ?? 0) + toCents(l.cost));
   }
 
-  // SHOP STOCK LOST, IN THE MONTH IT HAPPENED (Phase 4). A write-off, a count short, or pieces sent
-  // back to the supplier: the dollars leave Put On The Shelf and land in Shop Stock Lost, the same
-  // month, so Left For You never counts the roll twice. A supplier credit tied to a return is money
-  // back, taken off Shop Stock Lost in the credit's own month (below, with the bills).
-  // ONLY A ROLL BOUGHT ON A TICKET: an opening count (counted in, no receipt) was never a month's
-  // Put On The Shelf in these books, so its pieces going are never a month's loss either (the
-  // shelf's value now still drops). A credit tied to such a return is still money back.
-  const tiedCredits = new Set<string>();
-  for (const m of inp.shelfMoves ?? []) {
-    if (!m || m.undone_at) continue;
-    if (m.kind !== "write_off" && m.kind !== "recount_down" && m.kind !== "supplier_return") continue;
-    if (m.kind === "supplier_return" && m.credit_bill_id) tiedCredits.add(String(m.credit_bill_id));
-    if (!boughtLots.has(String(m.lot_id ?? ""))) continue;
-    const a = at(monthOfDay(recordDay(null, m.created_at, tz)));
-    if (!a) continue;
-    const c = toCents(m.cost);
-    a.shelf -= c;
-    a.lost += c;
-    a.movedOut += c;
-  }
-
-  // MATERIALS & BILLS: exactly the job-cost inputs job profit uses - less what went on the shelf,
-  // which is Put On The Shelf in the same month (decision 1: the month the ticket is dated).
+  // EVERY COST, ONE LINE AT A TIME (ownerMoneyCostLines): Materials & Bills, the business buckets,
+  // the card fees, Put On The Shelf and Shop Stock Lost. The months only add them up, so the
+  // accountant's Costs list and these figures are one computation.
   const liveBills = (inp.bills ?? []).filter((b) => b && !b.superseded_by_bill_id);
-  // THE SAME RULE FOR EVERY TICKET, shelf ticket or job ticket: Put On The Shelf is the live rolls'
-  // cost and nothing else, so Put On The Shelf - drawn - lost = On The Shelf Now holds to the cent.
-  // A shelf ticket used to count its whole amount here, and its Not Stock lines, their tax and any
-  // part of the total no line covered were shelf money with no roll behind them.
-  const shelfPart = (b: any, a: Acc): number => {
-    const s = shelfByBill.get(String(b.id)) ?? 0;
-    a.shelf += s;
-    return s;
-  };
-  for (const b of liveBills) {
-    if (!b.job_id) continue;
-    const a = at(monthOfDay(recordDay(b.bill_date, b.created_at, tz)));
-    if (a) a.materials += toCents(b.amount) - shelfPart(b, a);
-  }
-  // Live POs over ALL live bills: a PO is superseded by its bill whatever month the bill is in.
-  for (const p of livePurchaseOrders((inp.pos ?? []) as any[], liveBills as any[])) {
-    if (!(p as any).job_id) continue;
-    const a = at(monthOfDay(recordDay(null, (p as any).ordered_at ?? (p as any).created_at, tz)));
-    if (a) a.materials += toCents((p as any).total);
-  }
-  for (const pc of inp.pettyCash ?? []) {
-    if (!pc || pc.kind === "replenish") continue;
-    const a = at(monthOfDay(recordDay(pc.tx_date, pc.created_at, tz)));
+  for (const l of ownerMoneyCostLines(inp, tz)) {
+    const a = at(l.month);
     if (!a) continue;
-    if (pc.job_id) a.materials += toCents(pc.amount);
-    else a.buckets[bucketOf(pc.category)] += toCents(pc.amount);
-  }
-  // BUSINESS COSTS: bills with no job, in their bucket (Fuel's is said on its own line, below). A
-  // ticket bought for the shelf is its rolls
-  // (Put On The Shelf, above); whatever of it has no roll behind it (Not Stock lines, their tax,
-  // freight, a roll taken back off) is supplies the business used, in Tools & Supplies - named,
-  // never "Other" (bucketOf would call the category "Shop Stock" that).
-  for (const b of liveBills) {
-    if (b.job_id) continue;
-    const a = at(monthOfDay(recordDay(b.bill_date, b.created_at, tz)));
-    if (!a) continue;
-    // A SUPPLIER'S CREDIT FOR PIECES RETURNED FROM THE SHELF (0350): money back against what those
-    // pieces cost, so it comes off Shop Stock Lost, never a business bucket and never a customer.
-    if (tiedCredits.has(String(b.id))) {
-      a.lost += toCents(b.amount);
-      continue;
-    }
-    const rest = toCents(b.amount) - shelfPart(b, a);
-    a.buckets[b.on_shelf === true ? "Tools & Supplies" : bucketOf(b.category)] += rest;
+    if (l.source === "card_fee") a.fees += l.cents;
+    else if (l.to === "materials") a.materials += l.cents;
+    else if (l.to === "stock") a.shelf += l.cents;
+    else if (l.to === "stock_lost") {
+      a.lost += l.cents;
+      if (l.movedOut) a.movedOut += l.cents;
+    } else a.buckets[l.to] += l.cents;
   }
 
   // CREW PAY: earned, by the month the hours were worked (the frozen-gross rule above).
@@ -849,67 +974,7 @@ export function computeOwnerMoney(inp: OwnerMoneyInputs, win: OwnerMoneyWindow, 
       if (inWindow.has(month)) return "window";
       return month < winStartMonth ? "before" : "after";
     };
-    const accountRows = new Map<string, SupplierAccountRow>();
-    for (const a of inp.supplierAccounts ?? []) {
-      if (!a?.id) continue;
-      accountRows.set(String(a.id), {
-        id: String(a.id),
-        name: String(a.name ?? "").trim() || "a supplier",
-        accountNumber: null,
-        branchCode: null,
-        onAccount: a.on_account !== false,
-        note: null,
-        aliases: [],
-        bills: [],
-        payments: [],
-      });
-    }
-    for (const b of liveBills) {
-      const row = b.supplier_account_id ? accountRows.get(String(b.supplier_account_id)) : undefined;
-      if (!row) continue;
-      row.bills.push({
-        id: String(b.id),
-        supplier: "",
-        billDate: recordDay(b.bill_date, b.created_at, tz),
-        amount: Number(b.amount) || 0,
-        status: String(b.status ?? ""),
-        jobId: b.job_id ?? null,
-        jobName: null,
-        invoiceNumber: null,
-        isStatement: false,
-      });
-    }
-    for (const p of inp.supplierPayments ?? []) {
-      const row = p?.supplier_account_id ? accountRows.get(String(p.supplier_account_id)) : undefined;
-      if (!row) continue;
-      row.payments.push({
-        id: String(p.id ?? ""),
-        amount: Number(p.amount) || 0,
-        paidOn: String(p.paid_on ?? ""),
-        method: String(p.method ?? "other"),
-        reference: null,
-        note: null,
-        voided: !!p.voided_at,
-      });
-    }
-    for (const d of inp.supplierDocuments ?? []) {
-      const row = d?.supplier_account_id ? accountRows.get(String(d.supplier_account_id)) : undefined;
-      if (!row) continue;
-      (row.supplierInvoices ??= []).push({
-        id: String(d.id ?? ""),
-        invoiceNumber: String(d.invoice_number ?? ""),
-        kind: String(d.kind ?? "invoice"),
-        invoiceDate: d.invoice_date ?? null,
-        dueDate: null,
-        jobNameRaw: null,
-        jobId: null,
-        total: Number(d.total) || 0,
-        openBalance: d.open_balance === null || d.open_balance === undefined ? null : Number(d.open_balance),
-        closed: d.closed === true,
-        discountAmount: null,
-        discountBy: null,
-      });
-    }
+    const accountRows = supplierAccountRowsOf(inp, tz);
 
     const accounts: { name: string; owed: number; bySupplier: boolean }[] = [];
     let owedCents = 0;
@@ -1301,7 +1366,9 @@ export async function readOwnerMoneyInputs(
     readEvery<any>("payments", (f, t) =>
       supabase
         .from("payments")
-        .select("id, amount, paid_at, processor_fee, stripe_payment_intent, invoices(status)")
+        // method and the invoice's customer and job ride along for the accountant's Income list
+        // (the same rows, so its totals are these totals).
+        .select("id, amount, paid_at, processor_fee, stripe_payment_intent, method, invoice_id, invoices(status, invoice_number, customer_id, job_id, customers(name))")
         .gte("paid_at", startIso)
         .lt("paid_at", endIso)
         .order("id")
@@ -1310,7 +1377,7 @@ export async function readOwnerMoneyInputs(
     readEvery<any>("refunds", (f, t) =>
       supabase
         .from("customer_credits")
-        .select("id, amount, created_at")
+        .select("id, amount, created_at, invoices(invoice_number, job_id, customers(name))")
         .eq("disposition", "refund")
         .gte("created_at", startIso)
         .lt("created_at", endIso)
@@ -1329,7 +1396,7 @@ export async function readOwnerMoneyInputs(
     readEvery<any>("hours", (f, t) =>
       supabase
         .from("time_entries")
-        .select("id, profile_id, status, clock_in, clock_out, lunch_minutes, rate_override, paid_at, mileage_paid_at, miles, profiles(full_name)")
+        .select("id, profile_id, status, clock_in, clock_out, lunch_minutes, rate_override, paid_at, mileage_paid_at, miles, split_from, profiles(full_name)")
         .gte("clock_in", entriesFrom)
         .order("id")
         .range(f, t),
@@ -1404,7 +1471,7 @@ export async function readOwnerMoneyInputs(
     if (n?.id) nameOf.set(String(n.id), n.full_name ?? "");
   }
   for (const [id, r] of ratesRead.rates as Map<string, PayRates>) {
-    people.set(id, { name: nameOf.get(id) ?? "", paidByDraw: r.paid_by_draw, hourlyRate: r.hourly_rate });
+    people.set(id, { name: nameOf.get(id) ?? "", paidByDraw: r.paid_by_draw, hourlyRate: r.hourly_rate, commuteBaselineMiles: r.commute_baseline_miles });
   }
   // Rates onto each shift the way the Pay board merges them (0215/0216: never an embed).
   attachRates(entries.rows, ratesRead.rates, (e: any) => ({ id: e.profile_id, holder: e }));
