@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { NO_JOB_SHEET_CAP, loadNoJobHoursSheet, noJobCappedWords, readAlreadyBilledReach, readNoJobHandHours, readNoJobHoursReach } from "./already-billed-read";
+import { NO_JOB_SHEET_CAP, loadNoJobHoursSheet, noJobCappedWords, readAlreadyBilledReach, readNoJobHandHours, readNoJobHoursReach, readOpenNoJobShifts } from "./already-billed-read";
 import { NEEDS_UPDATE } from "./already-billed";
 import { withAlreadyBilledDoors } from "@/app/(app)/bills/supplier-papers";
 
@@ -249,6 +249,27 @@ describe("loadNoJobHoursSheet: TTUSD's days on INV-055", () => {
     const full = await loadNoJobHoursSheet(fake(route({ time_entries: { data: many } })), ORG, []);
     expect(full.ok && full.data.note).toBe(noJobCappedWords());
     expect(noJobCappedWords()).toBe("Showing the newest 150 shifts on no job. Older ones aren't listed here or counted in the hours above.");
+  });
+
+  it("from an invoice's own page (Already Billed: Hours On No Job): that invoice first, its obvious line picked, nothing ticked", async () => {
+    const TEST5 = { ...INV055, id: "inv-73", invoice_number: "INV-073", created_at: "2026-09-22T18:00:00Z", invoice_items: [typed("li-t5", "Test 5", 1.11)] };
+    const res = await loadNoJobHoursSheet(fake(route({ invoices: { data: [TEST5, INV055] } })), ORG, [], { invoiceId: "inv-55" });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.data.invoices.map((x) => [x.invoice.invoice_number, x.preselect])).toEqual([
+      ["INV-055", "li-jp"],
+      ["INV-073", null],
+    ]);
+    expect(res.data.preticked).toEqual([]);
+    expect(res.data.entries.map((e) => e.id)).toEqual(["t-807", "t-806"]);
+  });
+
+  it("readOpenNoJobShifts: the shifts open to mark (the invoice page's door shows only when there are some); a lost read says so", async () => {
+    const r = await readOpenNoJobShifts(fake(route()), ORG, []);
+    expect(r.ok && r.listed.map((e) => e.id).sort()).toEqual(["t-806", "t-807"]);
+    expect(r.ok && r.capped).toBe(false);
+    const lost = await readOpenNoJobShifts(fake(route({ job_codes: { error: { message: "timeout" } } })), ORG, []);
+    expect(lost).toEqual({ ok: false, error: expect.stringMatching(/Couldn't read the hours on no job/) });
   });
 
   it("the shift he pressed is listed first, the rest newest first", async () => {

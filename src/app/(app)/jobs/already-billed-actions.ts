@@ -40,15 +40,16 @@ export async function alreadyBilledSheet(jobId: string, target: AlreadyBilledTar
 
 /**
  * HOURS ON NO JOB (TTUSD on INV-055): the sheet for shifts nobody put on a job, ticking `entryIds`
- * (the ones the door was pressed on) to start. Staff only, like every Already Billed door.
+ * (the ones the door was pressed on) to start. `invoiceId`: the invoice whose page the door stood on
+ * (offered first). Staff only, like every Already Billed door.
  */
-export async function noJobHoursSheet(entryIds: string[]): Promise<AlreadyBilledSheetResult> {
+export async function noJobHoursSheet(entryIds: string[], invoiceId?: string | null): Promise<AlreadyBilledSheetResult> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error ?? "This action is staff-only." };
   if (!ctx.orgId) return { ok: false, error: "Your sign-in isn't attached to a company yet." };
   const ids = Array.isArray(entryIds) ? entryIds.map((x) => String(x ?? "")).filter(Boolean) : [];
   try {
-    return await loadNoJobHoursSheet(ctx.supabase, ctx.orgId, ids);
+    return await loadNoJobHoursSheet(ctx.supabase, ctx.orgId, ids, { invoiceId: invoiceId ? String(invoiceId) : null });
   } catch (e) {
     reportError("alreadyBilled.noJobSheet", e, { count: ids.length });
     return { ok: false, error: "Couldn't open that just now. Nothing was changed - try again in a moment." };
@@ -73,7 +74,8 @@ function said(what: string): string {
   return String(what ?? "").trim().slice(0, 200) || "That";
 }
 
-/** `jobId` empty: hours on no job, whose homes are Timecards and the invoice that holds them. */
+/** `jobId` empty: hours on no job, whose doors are their Needs You row and the invoice pages (and
+ *  whose shifts Timecards lists). */
 function revalidateAll(jobId: string, invoiceId?: string | null) {
   if (jobId) revalidatePath(`/jobs/${jobId}`);
   else revalidatePath("/timecards");

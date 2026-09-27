@@ -36,9 +36,9 @@ import { isActualsDraw } from "@/lib/actuals-draw";
 import { fixedBillingsNotYetNetted } from "@/lib/unbilled-work";
 import { fetchSupplierNames } from "@/lib/supplier-names";
 import { readInvoiceMarkup } from "@/lib/invoice-markup-read";
-import { readNoJobHandHours } from "@/lib/already-billed-read";
-import { NotBilledAfterAllButton } from "@/components/already-billed-sheet";
-import { noJobHandsShown } from "@/lib/already-billed";
+import { readNoJobHandHours, readOpenNoJobShifts } from "@/lib/already-billed-read";
+import { AlreadyBilledButton, NotBilledAfterAllButton } from "@/components/already-billed-sheet";
+import { invoiceCanHoldNoJobHours, noJobHandsShown } from "@/lib/already-billed";
 import { markupBoxSeed } from "@/lib/invoice-markup";
 import { pendingTransfers, transferOnItsWaySentence } from "@/lib/bank-transfer";
 import type { Invoice, InvoiceItem, Payment } from "@/lib/types";
@@ -141,7 +141,13 @@ export default async function InvoicePage({
      for that person's own rate. profile_pay is the staff-scoped view (0215/0286): an owner's figure
      is already folded into bill_rate there, so he is never "unrated". */
   const hasCostLines = ((items ?? []) as { import_source?: string | null }[]).some((i) => i.import_source === "costs");
-  const [supplierNames, { data: payRows }, markupRead, qboOn, noJobHands] = await Promise.all([
+  /* THE WAY IN FOR HOURS ON NO JOB (0357): an invoice with no job that went out and has a line that
+     could hold hours offers Already Billed: Hours On No Job, so hours taken back off with Not Billed
+     After All (or never marked) can be marked here any day, not only from a Needs You row that lives
+     three days. Only while some shift on no job is open to mark (a door onto nothing is a dead end);
+     a lost read shows the door, and the sheet says what it finds. */
+  const noJobDoorHere = invoiceCanHoldNoJobHours(inv as any, (items ?? []) as unknown[]);
+  const [supplierNames, { data: payRows }, markupRead, qboOn, noJobHands, openNoJob] = await Promise.all([
     fetchSupplierNames(supabase),
     supabase.from("profile_pay").select("id, bill_rate"),
     /* WHAT THIS INVOICE IS PRICED AT (Erik, 2026-09-25: "i changed andrew's invoice to 11% ... but
@@ -162,7 +168,23 @@ export default async function InvoicePage({
           return "failed" as const;
         })
       : Promise.resolve(null),
+    noJobDoorHere
+      ? readOpenNoJobShifts(supabase, String((inv as any).org_id ?? ""), []).then(
+          (r) => {
+            if (r.ok) return r.listed.length;
+            reportError("billing.[id].openNoJob", r.error, { invoiceId: inv.id });
+            return null;
+          },
+          (e: unknown) => {
+            reportError("billing.[id].openNoJob", e, { invoiceId: inv.id });
+            return null;
+          },
+        )
+      : Promise.resolve(0),
   ]);
+  const noJobHandLines = noJobHands && noJobHands !== "failed" ? noJobHands.lines : [];
+  // openNoJob null: the read was lost, so the door shows (the sheet says what it finds).
+  const noJobDoor = noJobDoorHere && openNoJob !== 0;
   const usualMarkup = (inv as any).customers?.pricing_levels?.markup_pct ?? orgSettings.material_markup_percent;
   const markupSeed = markupBoxSeed(markupRead ? (markupRead.ok ? markupRead.reading : "unread") : null, usualMarkup);
   const noBillRateIds = ((payRows ?? []) as { id: string; bill_rate: number | string | null }[])
@@ -417,10 +439,10 @@ export default async function InvoicePage({
           Couldn&apos;t tell which hours on no job this invoice holds by hand just now, so Not Billed After All isn&apos;t shown. Reload to try again.
         </p>
       )}
-      {noJobHands && noJobHands !== "failed" && noJobHands.lines.length > 0 && (
+      {(noJobHandLines.length > 0 || noJobDoor) && (
         <div className="mb-4 space-y-2 rounded-xl border border-slate-200 bg-white px-4 py-3">
-          <p className="text-sm font-semibold text-slate-900">Hours On No Job, Billed By Hand Here</p>
-          {noJobHands.lines.map((l) => (
+          <p className="text-sm font-semibold text-slate-900">{noJobHandLines.length > 0 ? "Hours On No Job, Billed By Hand Here" : "Hours On No Job"}</p>
+          {noJobHandLines.map((l) => (
             <div key={l.lineId} className="flex flex-wrap items-center gap-2 text-sm text-slate-600">
               <span>
                 {l.description}: {l.what}
@@ -428,6 +450,21 @@ export default async function InvoicePage({
               <NotBilledAfterAllButton jobId={null} lineId={l.lineId} ids={l.ids} what={l.what} />
             </div>
           ))}
+          {noJobDoor && (
+            <div className="space-y-2">
+              {noJobHandLines.length === 0 && !!openNoJob && (
+                <p className="text-sm text-slate-600">
+                  Some shifts nobody put on a job aren&apos;t on any invoice. If {inv.invoice_number ?? "this invoice"} already charged for
+                  some, say which.
+                </p>
+              )}
+              <AlreadyBilledButton
+                jobId={null}
+                target={{ kind: "time", ids: [], what: "Hours On No Job", invoiceId: inv.id }}
+                label="Already Billed: Hours On No Job"
+              />
+            </div>
+          )}
         </div>
       )}
 

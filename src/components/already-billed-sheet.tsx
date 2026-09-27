@@ -43,7 +43,8 @@ import { alreadyBilledSheet, markAlreadyBilled, noJobHoursSheet, unmarkAlreadyBi
 import { receiptForBilling } from "@/app/(app)/bills/receipt-for-billing-action";
 import { ReceiptLines, type ReceiptForBilling } from "@/app/(app)/bills/receipt-billing-card";
 
-export type AlreadyBilledDoorTarget = { kind: AlreadyBilledKind; ids: string[]; what: string };
+/** `invoiceId` (hours on no job only): the invoice whose page the door stands on, offered first. */
+export type AlreadyBilledDoorTarget = { kind: AlreadyBilledKind; ids: string[]; what: string; invoiceId?: string | null };
 
 export type AlreadyBilledLoad = { state: "loading" } | { state: "error"; error: string; needsUpdate?: boolean } | { state: "ok"; data: AlreadyBilledSheetData };
 type Load = AlreadyBilledLoad;
@@ -215,12 +216,13 @@ export function AlreadyBilledSheet({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const idsKey = target.ids.join(",");
+  const onInvoice = target.invoiceId ?? null;
 
   useEffect(() => {
     let live = true;
     setLoad({ state: "loading" });
     const ids = idsKey ? idsKey.split(",") : [];
-    (jobId ? alreadyBilledSheet(jobId, { kind: target.kind, ids }) : noJobHoursSheet(ids)).then(
+    (jobId ? alreadyBilledSheet(jobId, { kind: target.kind, ids }) : noJobHoursSheet(ids, onInvoice)).then(
       (res) => {
         if (!live) return;
         if (!res.ok) return setLoad({ state: "error", error: res.error, needsUpdate: res.needsUpdate });
@@ -231,7 +233,7 @@ export function AlreadyBilledSheet({
     return () => {
       live = false;
     };
-  }, [jobId, target.kind, idsKey, attempt]);
+  }, [jobId, target.kind, idsKey, onInvoice, attempt]);
 
   const data = load.state === "ok" ? load.data : null;
   const rows = useMemo(() => (data ? data.invoices.flatMap(({ invoice }) => invoice.lines.map((line) => ({ invoice, line }))) : []), [data]);

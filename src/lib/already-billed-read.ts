@@ -506,22 +506,25 @@ function postgrestList(words: readonly string[]): string {
 
 const NO_JOB_ENTRY_COLUMNS = "id, clock_in, clock_out, lunch_minutes, job_code, split_from, profiles(id, full_name)";
 
+const NO_JOB_UNREAD = "Couldn't read the hours on no job just now. Nothing was changed - try again in a moment.";
+const NO_JOB_UNCLAIMED = "Couldn't tell which hours on no job are already billed just now. Nothing was changed - try again in a moment.";
+
 /**
- * THE SHEET FOR HOURS ON NO JOB (the TTUSD days on INV-055, Ben Ebenezer's on INV-058): a shift
- * nobody put on a job was billed by typing a line on an invoice with no job. Offered: the company's
- * invoices with no job that went out, with only their lines of work (lib/already-billed eligibleLines,
- * labor first). Listed: every closed shift on no job that no live invoice holds (never a running one,
- * never the company's own time code, never an empty one), and `pressed` ticked to start (a split
- * shift whole). No line is picked to start: he picks it. mark_already_billed accepts a shift on no
- * job only there, so nothing else is offered.
+ * THE SHIFTS ON NO JOB OPEN TO MARK: closed, not empty, never the company's own time code, and no
+ * live invoice holds them. The newest NO_JOB_SHEET_CAP, plus `want` (the ones a door names, always).
+ * `capped`: the read came back full, so older ones aren't here. The sheet lists these; the invoice
+ * page shows its Already Billed: Hours On No Job only when there are some (a door onto nothing to
+ * mark is a dead end). A lost read says so, never an empty list.
  */
-export async function loadNoJobHoursSheet(supabase: Db, orgId: string, pressed: string[]): Promise<Loaded> {
-  const want = [...new Set((pressed ?? []).map((x) => String(x ?? "")).filter(Boolean))].slice(0, IN_CHUNK);
-  const unread = { ok: false as const, error: "Couldn't read the hours on no job just now. Nothing was changed - try again in a moment." };
+export async function readOpenNoJobShifts(
+  supabase: Db,
+  orgId: string,
+  want: string[],
+): Promise<{ ok: true; listed: AbEntry[]; capped: boolean } | { ok: false; error: string }> {
   // The company's own time codes (Shop, PTO) first: they are left out IN the read, so a crew that
   // clocks them every day never crowds the billable shifts out of the newest NO_JOB_SHEET_CAP.
   const codesRead = await supabase.from("job_codes").select("code").eq("org_id", orgId).eq("billable", false);
-  if (codesRead.error) return unread;
+  if (codesRead.error) return { ok: false, error: NO_JOB_UNREAD };
   const nonBillable = new Set(((codesRead.data ?? []) as { code?: string | null }[]).map((c) => String(c.code ?? "").trim()).filter(Boolean));
   const entries = () => {
     const q = supabase
@@ -533,50 +536,24 @@ export async function loadNoJobHoursSheet(supabase: Db, orgId: string, pressed: 
       .not("clock_out", "is", null);
     return nonBillable.size ? q.or(`job_code.is.null,job_code.not.in.${postgrestList([...nonBillable])}`) : q;
   };
-  const [orgRead, invRead, newest, named] = await Promise.all([
-    supabase.from("organizations").select("settings").eq("id", orgId).maybeSingle(),
-    supabase.from("invoices").select(INVOICE_WITH_LINES).eq("org_id", orgId).neq("status", "void").is("job_id", null).limit(2000),
+  const [newest, named] = await Promise.all([
     entries().order("clock_in", { ascending: false }).limit(NO_JOB_SHEET_CAP),
     want.length ? entries().in("id", want) : Promise.resolve({ data: [] as any[], error: null }),
   ]);
-  if (invRead.error) {
-    if (isMissingHandClaims(invRead.error)) return { ok: false, error: NEEDS_UPDATE, needsUpdate: true };
-    return { ok: false, error: "Couldn't read your invoices with no job just now. Nothing was changed - try again in a moment." };
-  }
-  if (orgRead.error || newest.error || named.error) return unread;
-  const settings = getOrgSettings((orgRead.data as { settings?: unknown } | null)?.settings);
+  if (newest.error || named.error) return { ok: false, error: NO_JOB_UNREAD };
   // THE LIST IS CUT SHORT, SAID: only the newest NO_JOB_SHEET_CAP are read, so an older shift (and
-  // its hours in the total above) isn't here.
+  // its hours in the sheet's total) isn't here.
   const capped = ((newest.data ?? []) as unknown[]).length >= NO_JOB_SHEET_CAP;
   const byId = new Map<string, any>();
   for (const e of [...((named.data ?? []) as any[]), ...((newest.data ?? []) as any[])]) if (e?.id) byId.set(String(e.id), e);
   const rows = [...byId.values()];
-
-  const invoiceRows = (invRead.data ?? []) as InvoiceRow[];
-  const all: AbInvoice[] = invoiceRows.map(abInvoiceOf);
-  // What each line already holds, for the hours it already charges beside these (hours only).
-  const claimsOfLine = new Map<string, string[]>();
-  for (const r of invoiceRows)
-    for (const l of (r.invoice_items ?? []) as any[]) claimsOfLine.set(String(l?.id), ((l?.source_ids ?? []) as unknown[]).map(String));
-  const heldIds = [...new Set([...claimsOfLine.values()].flat())];
   let claimed: Set<string>;
-  let heldHours: Map<string, number>;
   try {
-    const [c, held] = await Promise.all([
-      rows.length ? claimedSourcesOnJob(supabase as SupabaseClient, null, null, rows.map((e) => String(e.id)), { orgId }) : Promise.resolve(null),
-      readIn(heldIds, (part) => supabase.from("time_entries").select("id, clock_in, clock_out, lunch_minutes").eq("org_id", orgId).in("id", part) as any),
-    ]);
+    const c = rows.length ? await claimedSourcesOnJob(supabase as SupabaseClient, null, null, rows.map((e) => String(e.id)), { orgId }) : null;
     claimed = new Set([...(c?.owner.keys() ?? [])].map(String));
-    heldHours = new Map(held.filter((e) => e?.clock_out).map((e) => [String(e.id), entryHours(e)] as const));
   } catch {
-    return { ok: false, error: "Couldn't tell which hours on no job are already billed just now. Nothing was changed - try again in a moment." };
+    return { ok: false, error: NO_JOB_UNCLAIMED };
   }
-  for (const inv of all)
-    for (const l of inv.lines) {
-      const held = (claimsOfLine.get(l.id) ?? []).reduce((s, id) => s + (heldHours.get(id) ?? 0), 0);
-      l.heldHours = Math.round(held * 100) / 100;
-    }
-
   const listed: AbEntry[] = rows
     .filter((e) => !claimed.has(String(e.id)))
     .filter((e) => !(e.job_code && nonBillable.has(String(e.job_code).trim())))
@@ -591,6 +568,61 @@ export async function loadNoJobHoursSheet(supabase: Db, orgId: string, pressed: 
       }),
     )
     .filter((e) => e.hours > 0);
+  return { ok: true, listed, capped };
+}
+
+/**
+ * THE SHEET FOR HOURS ON NO JOB (the TTUSD days on INV-055, Ben Ebenezer's on INV-058): a shift
+ * nobody put on a job was billed by typing a line on an invoice with no job. Offered: the company's
+ * invoices with no job that went out, with only their lines of work (lib/already-billed eligibleLines,
+ * labor first). Listed: every closed shift on no job that no live invoice holds (never a running one,
+ * never the company's own time code, never an empty one), and `pressed` ticked to start (a split
+ * shift whole). No line is picked to start: he picks it (on an invoice's own page, that invoice
+ * comes first with its obvious line picked). mark_already_billed accepts a shift on no job only
+ * there, so nothing else is offered.
+ */
+export async function loadNoJobHoursSheet(
+  supabase: Db,
+  orgId: string,
+  pressed: string[],
+  /** The invoice the door stood on (its page's Already Billed: Hours On No Job): offered first. */
+  opts: { invoiceId?: string | null } = {},
+): Promise<Loaded> {
+  const want = [...new Set((pressed ?? []).map((x) => String(x ?? "")).filter(Boolean))].slice(0, IN_CHUNK);
+  const [orgRead, invRead, shifts] = await Promise.all([
+    supabase.from("organizations").select("settings").eq("id", orgId).maybeSingle(),
+    supabase.from("invoices").select(INVOICE_WITH_LINES).eq("org_id", orgId).neq("status", "void").is("job_id", null).limit(2000),
+    readOpenNoJobShifts(supabase, orgId, want),
+  ]);
+  if (invRead.error) {
+    if (isMissingHandClaims(invRead.error)) return { ok: false, error: NEEDS_UPDATE, needsUpdate: true };
+    return { ok: false, error: "Couldn't read your invoices with no job just now. Nothing was changed - try again in a moment." };
+  }
+  if (orgRead.error) return { ok: false, error: NO_JOB_UNREAD };
+  if (!shifts.ok) return shifts;
+  const settings = getOrgSettings((orgRead.data as { settings?: unknown } | null)?.settings);
+  const { listed, capped } = shifts;
+
+  const invoiceRows = (invRead.data ?? []) as InvoiceRow[];
+  const all: AbInvoice[] = invoiceRows.map(abInvoiceOf);
+  // What each line already holds, for the hours it already charges beside these (hours only).
+  const claimsOfLine = new Map<string, string[]>();
+  for (const r of invoiceRows)
+    for (const l of (r.invoice_items ?? []) as any[]) claimsOfLine.set(String(l?.id), ((l?.source_ids ?? []) as unknown[]).map(String));
+  const heldIds = [...new Set([...claimsOfLine.values()].flat())];
+  let heldHours: Map<string, number>;
+  try {
+    const held = await readIn(heldIds, (part) => supabase.from("time_entries").select("id, clock_in, clock_out, lunch_minutes").eq("org_id", orgId).in("id", part) as any);
+    heldHours = new Map(held.filter((e) => e?.clock_out).map((e) => [String(e.id), entryHours(e)] as const));
+  } catch {
+    return { ok: false, error: NO_JOB_UNCLAIMED };
+  }
+  for (const inv of all)
+    for (const l of inv.lines) {
+      const held = (claimsOfLine.get(l.id) ?? []).reduce((s, id) => s + (heldHours.get(id) ?? 0), 0);
+      l.heldHours = Math.round(held * 100) / 100;
+    }
+
   // What he pressed on first, then the rest newest first (noJobListOrder).
   const open = noJobListOrder(listed, noJobPreticked(listed, want));
   const preticked = noJobPreticked(open, want);
@@ -606,9 +638,15 @@ export async function loadNoJobHoursSheet(supabase: Db, orgId: string, pressed: 
   const drafts = all.filter((i) => i.status === "draft").map((i) => `${i.invoice_number ?? "A draft"} is still a draft: open it to add these there.`);
   // NOTHING IS PICKED FOR HIM HERE. These are every invoice with no job the company sent, to any
   // customer or none (INV-073's $1.11 "Test 5" sorts first at ET): an invoice's only line is no clue
-  // that it charged for these hours, and one tap would claim them there.
-  const offered = sortInvoicesFor(all.filter(eligibleInvoice), firstDay)
-    .map((invoice) => ({ invoice: { ...invoice, lines: eligibleLines(invoice, { kind: "time" }) }, preselect: null }))
+  // that it charged for these hours, and one tap would claim them there. The one exception is the
+  // invoice whose own page the door stood on: he named it, so it comes first, its obvious line picked.
+  const here = String(opts.invoiceId ?? "");
+  const sorted = sortInvoicesFor(all.filter(eligibleInvoice), firstDay);
+  const offered = [...sorted.filter((i) => i.id === here), ...sorted.filter((i) => i.id !== here)]
+    .map((invoice) => {
+      const lines = eligibleLines(invoice, { kind: "time" });
+      return { invoice: { ...invoice, lines }, preselect: here && invoice.id === here ? preselectLine(invoice, lines, "time") : null };
+    })
     .filter((x) => x.invoice.lines.length > 0);
   return {
     ok: true,

@@ -198,6 +198,19 @@ export function noJobHandsShown(inv: { job_id?: string | null; status?: string |
   return !inv.job_id && inv.status !== "void";
 }
 
+/**
+ * THE INVOICE PAGE'S WAY IN for hours on no job (Already Billed: Hours On No Job): this invoice has
+ * no job, went out (not a draft, a void or a deposit) and has a line of work typed or changed by hand
+ * that could hold hours. Without it, hours taken back off with Not Billed After All could be marked
+ * again only from a Needs You row, which lives three days.
+ */
+export function invoiceCanHoldNoJobHours(
+  inv: Pick<AbInvoice, "id" | "invoice_number" | "status" | "invoice_kind" | "created_at"> & { job_id?: string | null },
+  items: readonly unknown[],
+): boolean {
+  return noJobCanHoldHours([{ ...inv, job_id: inv.job_id ?? null, lines: (items ?? []).map(abLineOf) }]);
+}
+
 /** Can any invoice with no job that went out hold hours? (a line of work typed or changed by hand) */
 export function noJobCanHoldHours(invoices: readonly AbInvoice[]): boolean {
   return invoices.some((i) => !i.job_id && eligibleInvoice(i) && eligibleLines(i, { kind: "time" }).length > 0);
