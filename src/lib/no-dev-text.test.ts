@@ -78,7 +78,7 @@ describe("no environment variable names reach a company's screen", () => {
       walk(sf);
       return out;
     };
-    const DEV = /\b(ANTHROPIC|QBO|STRIPE|SUPABASE|NEXT_PUBLIC|OPENAI|ELEVENLABS|GOOGLE_OAUTH)_[A-Z_]+\b|\bin Vercel\b|\bthe API key\b/;
+    const DEV = /\b(ANTHROPIC|QBO|STRIPE|SUPABASE|NEXT_PUBLIC|OPENAI|ELEVENLABS|GOOGLE_OAUTH)_[A-Z_]+\b|\bin Vercel\b|\bthe API key\b|\bmigration \d{4}\b/;
     // A literal that IS a name is a lookup (e?.message?.includes("ANTHROPIC_API_KEY")), not words.
     const JUST_A_NAME = /^[A-Z][A-Z0-9_]+$/;
     const hits = tsFiles(join(ROOT, "src/app"))

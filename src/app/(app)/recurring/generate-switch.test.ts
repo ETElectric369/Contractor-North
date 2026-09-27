@@ -58,6 +58,25 @@ describe("Generate One Now on each row", () => {
   });
 });
 
+describe("the toast says what was made", () => {
+  it("Generate One Now: a job is created, an expense added, an invoice generated", async () => {
+    const { madeWords } = await import("./recurring-actions-ui");
+    expect(madeWords("invoice")).toBe("Invoice generated");
+    expect(madeWords("job")).toBe("Job created");
+    expect(madeWords("expense")).toBe("Expense added");
+  });
+
+  it("each row is told its kind, and Generate Due counts recurring items, not invoices", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const dir = join(process.cwd(), "src/app/(app)/recurring");
+    expect(readFileSync(join(dir, "page.tsx"), "utf8")).toContain("<RecurringRowActions id={t.id} active={t.active} kind={t.kind}");
+    const ui = readFileSync(join(dir, "recurring-actions-ui.tsx"), "utf8");
+    expect(ui).not.toMatch(/Generated \$\{n\} invoices|Generated 1 invoice"/);
+    expect(ui).toContain("`Generated ${n} recurring items`");
+  });
+});
+
 describe("Generate while Recurring Billing is off", () => {
   it("no switches stored: both run exactly as today", async () => {
     expect(await generateOne("t1")).toEqual({ ok: true });

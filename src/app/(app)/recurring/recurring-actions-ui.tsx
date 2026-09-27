@@ -7,6 +7,11 @@ import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/toast";
 import { generateDue, generateOne, setRecurringActive } from "./actions";
 
+/** What Generate One Now made, in the words the rest of the app uses for it. */
+export function madeWords(kind: string): string {
+  return kind === "job" ? "Job created" : kind === "expense" ? "Expense added" : "Invoice generated";
+}
+
 export function GenerateDueButton({ count }: { count: number }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -20,7 +25,8 @@ export function GenerateDueButton({ count }: { count: number }) {
             const res = await generateDue();
             if (!res?.ok) { toast(res?.error ?? "Couldn't generate — try again.", "error"); return; }
             const n = res.count ?? 0;
-            toast(n === 1 ? "Generated 1 invoice" : `Generated ${n} invoices`, "success");
+            // The engine makes jobs, invoices and expenses alike, so the count is of recurring items.
+            toast(n === 0 ? "Nothing was due to generate." : n === 1 ? "Generated 1 recurring item" : `Generated ${n} recurring items`, "success");
             router.refresh();
           })
         }
@@ -33,8 +39,19 @@ export function GenerateDueButton({ count }: { count: number }) {
 }
 
 /** `canGenerate` false = a repeat invoice while Recurring Billing is off (0352): Generate One Now
- *  isn't drawn, because generateOne would refuse it. Pause and Resume stay. Absent = on. */
-export function RecurringRowActions({ id, active, canGenerate = true }: { id: string; active: boolean; canGenerate?: boolean }) {
+ *  isn't drawn, because generateOne would refuse it. Pause and Resume stay. Absent = on.
+ *  `kind` names what Generate One Now made, so a repeat job or expense isn't called an invoice. */
+export function RecurringRowActions({
+  id,
+  active,
+  canGenerate = true,
+  kind = "invoice",
+}: {
+  id: string;
+  active: boolean;
+  canGenerate?: boolean;
+  kind?: string;
+}) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const toast = useToast();
@@ -46,7 +63,7 @@ export function RecurringRowActions({ id, active, canGenerate = true }: { id: st
             start(async () => {
               const res = await generateOne(id);
               if (!res?.ok) { toast(res?.error ?? "Couldn't generate — try again.", "error"); return; }
-              toast("Invoice generated", "success");
+              toast(madeWords(kind), "success");
               router.refresh();
             })
           }

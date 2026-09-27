@@ -26,7 +26,7 @@ export async function linkJobContact(jobId: string, customerId: string, role: st
     if ((error as { code?: string }).code === "23505")
       return { ok: false, error: "That contact is already on this job in that role." };
     if ((error as { code?: string }).code === "42P01")
-      return { ok: false, error: "Sublinking isn't set up yet — run migration 0087." };
+      return { ok: false, error: "Linking a contact to a job isn't available yet." };
     return { ok: false, error: dbError(error) };
   }
   revalidatePath(`/jobs/${jobId}`);
