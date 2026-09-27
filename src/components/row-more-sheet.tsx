@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { MoreHorizontal } from "lucide-react";
 import { Modal } from "@/components/ui/modal";
 
@@ -18,6 +20,37 @@ export const ROW_MORE_TRIGGER =
 /** What a sheet's rows get: `close` for the row whose verb landed (a pick, a save, a done). */
 export interface RowMoreSheetApi {
   close: () => void;
+}
+
+/** Is an overlay's history entry (the Modal's marker) the current one? Then a row's link replaces it. */
+export function replacesSheetEntry(historyState: unknown): boolean {
+  return !!(historyState && (historyState as { cnOverlay?: boolean }).cnOverlay);
+}
+
+/**
+ * A ROW THAT GOES SOMEWHERE ("Open"). It never closes the sheet first: closing steps history back to
+ * take the sheet's entry off, and a step back while the new page is still loading is a Back to Next,
+ * which throws the navigation away (billing/new-invoice-button learned it: "it closed the invoice and
+ * hid it somewhere"). So while the sheet's entry is on top, the new page REPLACES it: the sheet goes
+ * with the page, its clean-up leaves history alone, and Back from the new page is one step back here.
+ * A modified click (a new tab) is the browser's, as ever.
+ */
+export function SheetLink({ href, children, className = SHEET_ROW }: { href: string; children: ReactNode; className?: string }) {
+  const router = useRouter();
+  return (
+    <Link
+      href={href}
+      className={className}
+      onClick={(e) => {
+        if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+        if (!replacesSheetEntry(window.history.state)) return; // no entry of ours on top: the Link's own push
+        e.preventDefault();
+        router.replace(href);
+      }}
+    >
+      {children}
+    </Link>
+  );
 }
 
 /**

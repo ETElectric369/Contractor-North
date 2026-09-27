@@ -21,7 +21,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { MoveToDay } from "@/components/move-to-day";
-import { RowMoreSheet, SHEET_ROW } from "@/components/row-more-sheet";
+import { RowMoreSheet, SheetLink, SHEET_ROW } from "@/components/row-more-sheet";
 import { useToast } from "@/components/toast";
 import { formatDate } from "@/lib/utils";
 import { createTask, toggleTask, updateTask, type ToggleTaskResult } from "../tasks/actions";
@@ -358,9 +358,8 @@ export function YourList({
             >
               {t.pinned ? "Unpin From Today" : "Pin to Today"}
             </button>
-            <Link href={taskHref(t)} onClick={close} className={SHEET_ROW}>
-              Open
-            </Link>
+            {/* Goes to the Reminders page; the page change takes the sheet with it (SheetLink). */}
+            <SheetLink href={taskHref(t)}>Open</SheetLink>
           </>
         )}
       </RowMoreSheet>

@@ -683,7 +683,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
           one card (it replaced the clock card, the Today card's Now block and the Which Job block).
           The Open Leads card that once sat beside the clock for staff is gone too: a lead is a Needs
           You row below, and the Sales tile's badge counts the new, uncontacted ones.
-          The card keyed to the OPEN PUNCH's job. A punch that carries none asks "Which job are you
+          The card is keyed to the OPEN PUNCH's job. A punch that carries none asks "Which job are you
           on?" with one Pick The Job door (the clock's own sheet), so the doors are never gone without
           a sentence (Erik 2026-09-11, "what happened to my materials button").
           Only the job's name, customer · address and its href cross into the client card; the doors

@@ -109,8 +109,11 @@ describe("Today's 6: the polish (six marks, 44px steps, one ⋯ per row)", () =>
     expect(html).toMatch(/<button type="button" aria-label="More For Call PUD"[^>]*class="[^"]*h-11 w-11/);
     expect(html).toMatch(/aria-label="More For Order the meter base"/);
     const src = readFileSync(join(process.cwd(), "src/app/(app)/planner/your-list.tsx"), "utf8");
-    expect(src).toContain('import { RowMoreSheet, SHEET_ROW } from "@/components/row-more-sheet";');
+    expect(src).toContain('import { RowMoreSheet, SheetLink, SHEET_ROW } from "@/components/row-more-sheet";');
     expect(src).not.toMatch(/const SHEET_ROW\s*=/);
+    // Open goes to the Reminders page without closing the sheet first (SheetLink).
+    expect(src).toContain("<SheetLink href={taskHref(t)}>Open</SheetLink>");
+    expect(src).not.toContain("onClick={close}");
   });
 });
 

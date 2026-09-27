@@ -3,7 +3,10 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { RowMoreSheet, RowMoreSheetView, SHEET_ROW, ROW_MORE_TRIGGER } from "./row-more-sheet";
+
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn(), replace: vi.fn(), refresh: vi.fn() }) }));
+
+import { RowMoreSheet, RowMoreSheetView, SheetLink, SHEET_ROW, ROW_MORE_TRIGGER, replacesSheetEntry } from "./row-more-sheet";
 import { Modal } from "./ui/modal";
 import { createBackStepper, createOverlayStack } from "./ui/overlay-history";
 
@@ -60,6 +63,20 @@ describe("the sheet", () => {
     expect(childOverlay).toBeLessThan(childTitle);
     // The child is inside the sheet's body: the sheet is still there under it.
     expect(html.lastIndexOf("</div>")).toBeGreaterThan(childTitle);
+  });
+});
+
+describe("a row that goes somewhere", () => {
+  it("is a 44px link that never closes the sheet first; with the sheet's entry on top, the new page replaces it", () => {
+    const html = renderToStaticMarkup(createElement(SheetLink, { href: "/tasks", children: "Open" }));
+    expect(html).toMatch(/<a class="[^"]*min-h-\[44px\][^"]*" href="\/tasks">Open<\/a>/);
+    expect(replacesSheetEntry({ cnOverlay: true, __NA: true })).toBe(true);
+    expect(replacesSheetEntry({ __NA: true })).toBe(false);
+    expect(replacesSheetEntry(null)).toBe(false);
+    const src = readFileSync(join(process.cwd(), "src/components/row-more-sheet.tsx"), "utf8");
+    const link = src.slice(src.indexOf("export function SheetLink"), src.indexOf("export function RowMoreSheetView"));
+    expect(link).toContain("router.replace(href);");
+    expect(link).not.toContain("close");
   });
 });
 
