@@ -663,7 +663,7 @@ function GfciAfci() {
         <Result tone={sel.gfci ? "amber" : "green"}>GFCI: <strong>{sel.gfci ? "Required" : "Not required"}</strong></Result>
         <Result tone={sel.afci ? "amber" : "green"}>AFCI: <strong>{sel.afci ? "Required" : "Not required"}</strong></Result>
       </div>
-      <p className="text-xs text-slate-400">{sel.ref} · dwelling units, ~NEC 2020. The 2023 NEC expands AFCI/GFCI — verify your AHJ's adopted edition.</p>
+      <p className="text-xs text-slate-400">{sel.ref} · dwelling units, ~NEC 2020. The 2023 NEC expands AFCI/GFCI — verify your AHJ&apos;s adopted edition.</p>
     </div>
   );
 }
