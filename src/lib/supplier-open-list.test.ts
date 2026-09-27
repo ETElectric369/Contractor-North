@@ -301,6 +301,35 @@ describe("date-aware closing", () => {
     expect(plan.totals.after).toBe(3304.73);
   });
 
+  it("the same number on two accounts (0354): the list reads its own account's paper, whichever id comes first", () => {
+    const N = "8802-1108330";
+    const own = papersOf().map((p) => (p.invoiceNumber === N ? { ...p, openBalance: 700 } : p));
+    const mine = own.find((p) => p.invoiceNumber === N)!;
+    // Another supplier's paper with the same number, and a copy on no account, both loaded first.
+    const theirs = { ...mine, id: "a-other", supplierAccountId: "someone-else", openBalance: 500 };
+    const loose = { ...mine, id: "a-none", supplierAccountId: null, openBalance: 500 };
+    const plan = reconcileOpenList(cedList(), [theirs, loose, ...own], ACCOUNT);
+    expect(plan.conflicts).toEqual([]);
+    const u = plan.update.filter((x) => x.number === N);
+    expect(u).toEqual([expect.objectContaining({ id: mine.id, wrote: expect.objectContaining({ open_balance: 653.25 }) })]);
+  });
+
+  it("with no paper on this account, a copy on no account comes before another supplier's", () => {
+    const N = "8802-1108330";
+    const rest = papersOf().filter((p) => p.invoiceNumber !== N);
+    const base = papersOf().find((p) => p.invoiceNumber === N)!;
+    const theirs = { ...base, id: "a-other", supplierAccountId: "someone-else" };
+    const loose = { ...base, id: "a-none", supplierAccountId: null };
+    const plan = reconcileOpenList(cedList(), [theirs, loose, ...rest], ACCOUNT);
+    expect(plan.conflicts).toEqual([]);
+    expect(plan.update.filter((x) => x.number === N)).toEqual([
+      expect.objectContaining({ id: "a-none", wrote: { supplier_account_id: ACCOUNT } }),
+    ]);
+    // Only another supplier's paper holds it: left alone, and said.
+    const only = reconcileOpenList(cedList(), [theirs, ...rest], ACCOUNT);
+    expect(only.conflicts.map((c) => c.number)).toEqual([N]);
+  });
+
   it("reopens a paper the supplier still lists as open, and says so", () => {
     const papers = papersOf().map((p) => (p.invoiceNumber === "8802-1108330" ? { ...p, closed: true, openBalance: 0 } : p));
     const plan = reconcileOpenList(cedList(), papers, ACCOUNT);

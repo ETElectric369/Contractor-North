@@ -954,10 +954,15 @@ export function closeCutoff(list: Pick<OpenList, "listDate" | "rows">): string |
 export function reconcileOpenList(list: OpenList, papers: readonly OpenListPaper[], accountId: string): OpenListPlan {
   const listDate = list.listDate;
   const closeBy = closeCutoff(list);
+  // One number can sit on more than one account (0354: unique per supplier account). The list's
+  // own account's paper wins, then a paper on no account, then another supplier's; so the "another
+  // supplier's account" line fires only when neither of the first two holds the number.
+  const rank = (p: OpenListPaper) => (p.supplierAccountId === accountId ? 0 : p.supplierAccountId ? 2 : 1);
   const byKey = new Map<string, OpenListPaper>();
   for (const p of papers) {
     const k = referenceKey(p.invoiceNumber);
-    if (k && !byKey.has(k)) byKey.set(k, p);
+    const cur = k ? byKey.get(k) : undefined;
+    if (k && (!cur || rank(p) < rank(cur))) byKey.set(k, p);
   }
   const listed = new Set<string>();
   const add: PlanAdd[] = [];
