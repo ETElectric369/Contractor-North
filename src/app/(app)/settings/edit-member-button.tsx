@@ -164,7 +164,9 @@ export function EditMemberButton({
             </div>
           )}
           {/* Crew lead (any role): Nort asks them the end-of-day debrief — "what did you
-              do today?" + "what materials tomorrow?" — right after they clock out. */}
+              do today?" + "what materials tomorrow?" — right after they clock out. And (0356) it is
+              the switch that lets them fill in the walk-through on a visit they're on, so the box
+              says both: turning it on for the debrief must not silently hand over the walk-through. */}
           <label className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2.5 text-sm">
             <input
               type="checkbox"
@@ -175,7 +177,8 @@ export function EditMemberButton({
             <span className="text-slate-700">
               Crew leader
               <span className="block text-xs text-slate-400">
-                Files a daily report at clock-out (what got done + materials for tomorrow).
+                Files a daily report at clock-out (what got done + materials for tomorrow), and fills in
+                the walk-through on visits they&rsquo;re assigned to. The office still prices it.
               </span>
             </span>
           </label>
