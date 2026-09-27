@@ -21,7 +21,7 @@
 //      category.
 //
 // ONLY REMINDERS RANK (0358). A task with a job is the JOB's list, worked on the job and in My Day's
-// Now block, never anyone's six (Erik, 2026-09-26: My Day was "stockpiled with things i cant act
+// Now card, never anyone's six (Erik, 2026-09-26: My Day was "stockpiled with things i cant act
 // on"). The old rank 4, "on a job the truck goes to today", is gone with them, and a job row handed
 // in anyway is dropped here too, so no caller can put one back.
 //

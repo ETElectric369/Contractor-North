@@ -13,7 +13,7 @@
  *   Bought        checked. Folds away into one "Bought (N)" fold; unchecking brings it back up.
  *
  * Every reader of "what's open on this list" goes through here: the Materials chip's count, the
- * job's Tasks (the one live "Buy Materials · N Open" row), My Day's Now block and the /materials
+ * job's Tasks (the one live "Buy Materials · N Open" row), My Day's Now card and the /materials
  * cards. So the chip, the row and the list can never disagree about the number.
  */
 
@@ -77,7 +77,7 @@ export function buyMaterialsCounts(row: BuyMaterials): { total: number; done: nu
 /**
  * THE JOB'S LIST, when a reader has every list on a set of jobs: the newest per job, id breaking a
  * created_at tie (canonicalListIdForJob's rule in materials/actions, the job page's jobLists[0], the
- * planner's Now block). A job can hold an older list too (the office's New List, a lost race in
+ * planner's Now card). A job can hold an older list too (the office's New List, a lost race in
  * ensureJobMaterialList), and a reader that summed every list would badge lines nobody can see on
  * the job's Materials tab. Order-independent: it never trusts the rows' order.
  */

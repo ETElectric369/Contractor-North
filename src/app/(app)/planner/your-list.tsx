@@ -6,7 +6,7 @@
 // that job's Tasks ("Added To J-055's Tasks"), leave the chip and it is a Reminder for today.
 //
 // The six are the person's own REMINDERS (tasks with no job): job tasks are the job's list, worked
-// on the job and in the Now block, never stockpiled here. The server picks the six with THE shared
+// on the job and in the Now card, never stockpiled here. The server picks the six with THE shared
 // rank (lib/six-rank: pins, then overdue / due today / flagged — the same function behind the morning
 // digest, so the phone and the card can never disagree) and this card renders them as 44px one-tap
 // check rows with subtasks indented under their parent. Subtasks are NEVER counted anywhere —

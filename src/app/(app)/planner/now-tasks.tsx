@@ -10,12 +10,12 @@ import { buyMaterialsTitle } from "@/lib/materials-checklist";
 import { toggleTask, type ToggleTaskResult } from "../tasks/actions";
 
 /**
- * THE CLOCKED-IN JOB'S TASKS, inside My Day's Now block (0358). A tech on the clock at J-055 sees
+ * THE CLOCKED-IN JOB'S TASKS, inside My Day's Now card (0358). A tech on the clock at J-055 sees
  * "Tasks: 3 left", the next three to check off with his thumb, and All Tasks for the job's whole list
- * (the job's Tasks tab). Off the clock there is no Now block and so none of this: a job's list is
+ * (the job's Tasks tab). Off the clock the Now card has no job and so none of this: a job's list is
  * worked from the job, never piled into anyone's six. Every row is a 44px target.
  *
- * While the job's materials list has lines left to buy, the block leads with the one live "Buy
+ * While the job's materials list has lines left to buy, the list leads with the one live "Buy
  * Materials · N Open" row (lib/materials-checklist, never a task row), which opens the list, the same
  * door as the Materials button above; `left` already counts it as one task.
  */

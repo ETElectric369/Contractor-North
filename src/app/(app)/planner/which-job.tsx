@@ -19,53 +19,37 @@ import {
 
 export type { SheetPhase, WhichJobOption, WhichJobResult } from "../timeclock/which-job-choices";
 
-/**
- * "WHICH JOB ARE YOU ON?" — the Now block for a punch that carries no job.
+/*
+ * "WHICH JOB ARE YOU ON?" — for a punch that carries no job.
  *
- * My Day's Now block is keyed to the caller's OPEN time entry's job_id. A punch lands job-less
+ * My Day's Now card is keyed to the caller's OPEN time entry's job_id. A punch lands job-less
  * whenever the server resolver finds nothing to attach (no crew day-assignment, the job's
- * schedule ended yesterday, more than one job in progress) — and until cn-v947 the whole block
- * simply didn't render, so Navigate / Open / Materials / Add Cost vanished with no sentence and
- * no door (Erik, 2026-09-11: "what happened to my materials button on the job im clocked into").
+ * schedule ended yesterday, more than one job in progress) — and until cn-v947 the job's doors
+ * simply didn't render, so Navigate / Materials / Add Cost vanished with no sentence and no door
+ * (Erik, 2026-09-11: "what happened to my materials button on the job im clocked into").
  *
- * This is that sentence and that door. One pick sets the job on the WHOLE open entry — every
- * hour since the punch, not just the minutes after the tap. After the write lands the route is
- * refreshed and the four doors render in this block's place — no reload, nothing to find.
+ * The Now card says that sentence and has that door: its ONE Pick The Job button opens the sheet
+ * below. One pick sets the job on the WHOLE open entry — every hour since the punch, not just the
+ * minutes after the tap. After the write lands the route is refreshed and the job's doors take the
+ * question's place — no reload, nothing to find.
  *
- * THE DOOR OPENS THE CLOCK'S OWN SHEET (below), not a list of its own. This block once carried a
- * picker fed by the jobs in progress only, while the sheet just before it offered the job he punched
- * last and today's schedule too: a tech helping on a crewmate's scheduled job, who tapped Skip, came
- * here and couldn't find the job the sheet had offered. One list, one write (putPunchOnJob), one set
- * of sentences, whichever door he uses: this block, the clock card's Put It on the Job, or the
- * Timeclock's Pick The Job.
+ * ONE LIST, whichever door: My Day's block once carried a picker fed by the jobs in progress only,
+ * while the sheet just before it offered the job he punched last and today's schedule too: a tech
+ * helping on a crewmate's scheduled job, who tapped Skip, came back and couldn't find the job the
+ * sheet had offered. So every door opens this sheet: one list, one write (putPunchOnJob), one set of
+ * sentences — the Now card's Pick The Job, the Timeclock's Pick The Job, the clock itself after a
+ * punch on no job, and the offline queue once it files.
  *
  * Only ever offered when the punch has NO job. Moving a punch that already carries one stays
  * on Timecards (the office's after-the-fact correction path).
  */
-export function WhichJob({ entryId }: { entryId: string }) {
-  const [asking, setAsking] = useState(false);
-  return (
-    <div id="which-job" className="border-b border-brand/20 bg-brand-light/30 px-5 py-4">
-      <div className="text-[11px] font-semibold uppercase tracking-wide text-brand">Now</div>
-      <div className="mt-0.5 text-lg font-bold text-slate-900">Which job are you on?</div>
-      <p className="text-sm text-slate-500">
-        You&rsquo;re on the clock, but this punch has no job yet. Pick it and the job&rsquo;s doors open here
-        — the whole punch goes on it.
-      </p>
-      <Button type="button" className="mt-3 min-h-[44px]" onClick={() => setAsking(true)}>
-        Pick The Job
-      </Button>
-      {asking && <WhichJobSheet entryId={entryId} moment="in" onClose={() => setAsking(false)} />}
-    </div>
-  );
-}
 
 // ── THE SHEET: "Which Job Are You On?" at the clock (Erik, 2026-09-26: "yes") ─────────────────
 //
 // The duplicate punches began with a clock that couldn't tell the job (the schedule didn't cover
 // the day), saved the punch on no job and asked nothing; days later the office typed the same
 // hours again on the job. So when a clock-in lands on no job, the door that made it (Timeclock, My
-// Day's clock card, the offline queue once it files) puts ONE question up, and the same one once
+// Day's Now card, the offline queue once it files) puts ONE question up, and the same one once
 // more when that shift closes still on no job:
 //   · the punch is ALREADY saved before the sheet appears: the clock never waits on it, and the
 //     sheet loads its own list after the clock has answered;

@@ -19,9 +19,14 @@ vi.mock("next/navigation", () => ({
 }));
 vi.mock("@/components/toast", () => ({ useToast: () => vi.fn() }));
 vi.mock("../tasks/actions", () => ({ createTask: vi.fn(), toggleTask: vi.fn(), deleteTask: vi.fn(), updateTask: vi.fn() }));
+// The Now card punches through the clock's actions and opens the clock's Which Job sheet; rendered only.
+vi.mock("../timeclock/actions", () => ({ clockIn: vi.fn(), clockOut: vi.fn() }));
+vi.mock("../timeclock/which-job-actions", () => ({ whichJobChoices: vi.fn(), putPunchOnJob: vi.fn() }));
 
 import { YourList, AddReminderLine } from "./your-list";
 import { NewReminderBox } from "../tasks/tasks-view";
+import { NowCard } from "./now-card";
+import { LUNCH_LABEL } from "@/lib/lunch-rule";
 
 const JOBS = [{ id: "j1", label: "J-055 Smith Panel", number: "J-055" }];
 const line = (jobs = JOBS) => renderToStaticMarkup(createElement(AddReminderLine, { jobs, todayStr: "2026-09-26", pinsFull: false, bumps: null }));
@@ -110,13 +115,118 @@ describe("My Day's cards (structural: the page is a server component over the da
     expect(page).toContain("off: offFeatureKey(features)");
   });
 
-  it("the Now block carries the clocked-in job's tasks, and only on the clock", () => {
+  it("the Now card carries the clocked-in job's tasks, and only on the clock", () => {
     expect(page).toContain("{nowTasks && nowTasks.left > 0 && (");
     expect(page).toMatch(/currentJob\s*\?\s*supabase\s*\.from\("tasks"\)\s*\.select\("id, title", \{ count: "exact" \}\)\s*\.eq\("job_id", currentJob\.id\)/);
+  });
+
+  it("ONE Now card at the top, for every role: no separate clock card, Now block or Which Job block", () => {
+    expect(pageCode.match(/<NowCard\b/g)).toHaveLength(1);
+    expect(pageCode).not.toContain("MyDayClock");
+    expect(pageCode).not.toContain("<WhichJob entryId=");
+    // The job's name is the one link to the job: the separate Open door is cut. (A week-view day
+    // with nothing on it still reads "Open", as a line, not a door.)
+    expect(pageCode).not.toMatch(/<Link[^>]*>\s*Open\s*<\/Link>/);
+    expect(pageCode.match(/>\s*Open\s*</g) ?? []).toEqual(['>Open<']);
+    expect(pageCode).toContain('<p className="px-5 py-2 text-xs text-slate-300">Open</p>');
+  });
+
+  it("the job's doors render on the server inside the card; Add Cost only inside isStaff &&", () => {
+    const card = pageCode.slice(pageCode.indexOf("<NowCard"), pageCode.indexOf("</NowCard>"));
+    expect(card).toContain("<NavLink");
+    expect(card).toContain("href={currentMaterialsHref}");
+    expect(card).toMatch(/\{isStaff && \(\s*<QuickCostButton[^>]*snapFirst/);
+    expect(pageCode.match(/<QuickCostButton/g)).toHaveLength(1);
+    expect(card).toContain("<NowTasks");
+    // Two columns for a tech, three for the office (two below ~360px).
+    expect(card).toContain('isStaff ? "grid-cols-2 min-[360px]:grid-cols-3" : "grid-cols-2"');
+    // Nothing priced crosses into the client card: its job prop is a name, a line and an href.
+    expect(pageCode).toMatch(/job=\{\s*currentJob\s*\?\s*\{\s*name: jobLabel\(currentJob\),\s*sub: [^\n]+\n\s*href: `\/jobs\/\$\{currentJob\.id\}`,\s*\}/);
+  });
+
+  it("the quote sits below the Now card, then the office's Daily Reports, then the Today card", () => {
+    const nowAt = pageCode.indexOf("</NowCard>");
+    const quoteAt = pageCode.indexOf("{dailyQuote}");
+    const reportsAt = pageCode.indexOf("Daily reports");
+    const todayAt = pageCode.indexOf('<CalendarCheck className="h-4 w-4 text-brand" /> Today');
+    expect(nowAt).toBeGreaterThan(0);
+    expect(quoteAt).toBeGreaterThan(nowAt);
+    expect(reportsAt).toBeGreaterThan(quoteAt);
+    expect(todayAt).toBeGreaterThan(reportsAt);
+    // The Today card keeps its honest empty line when the only job today is the one you're on.
+    expect(page).toContain('empty(currentJob ? "Nothing else on the schedule today." : "Nothing left on the schedule today.")');
   });
 
   it("the Reminders page hears To-Do Extras", () => {
     const tasksPage = readFileSync(join(process.cwd(), "src/app/(app)/tasks/page.tsx"), "utf8");
     expect(tasksPage).toContain('extras={featureOn(sw.features, "todo_extras")}');
+  });
+});
+
+describe("the Now card (rendered)", () => {
+  const at = (hoursAgo: number) => new Date(Date.now() - hoursAgo * 3_600_000).toISOString();
+  const punch = (over: Record<string, unknown> = {}) => ({ id: "p1", clock_in: at(2), notes: null, onJob: true, ...over });
+  const job = { name: "J-055 Smith Panel", sub: "Nora Smith · 85 Whitney", href: "/jobs/j55" };
+  const render = (props: Record<string, unknown>) =>
+    renderToStaticMarkup(createElement(NowCard, { userId: "u1", ...props } as any, createElement("div", null, "THE-DOORS")));
+
+  it("on the clock with a job: Now and the timer, the name as the one link, customer · address, the doors, then the footer", () => {
+    const html = render({ open: punch(), job });
+    expect(html).toContain(">Now<");
+    expect(html).toMatch(/tabular-nums[^>]*>\d+:\d{2}:\d{2}</);
+    expect(html).toMatch(/<a[^>]*href="\/jobs\/j55"[^>]*>J-055 Smith Panel<\/a>/);
+    expect(html.match(/href="\/jobs\/j55"/g)).toHaveLength(1);
+    expect(html).toContain("Nora Smith · 85 Whitney");
+    expect(html).not.toMatch(/>\s*Open\s*</);
+    // Top to bottom: the name, the doors, the lunch box, Timeclock, Clock Out.
+    const order = ["J-055 Smith Panel", "THE-DOORS", LUNCH_LABEL, ">Timeclock<", "Clock Out"].map((w) => html.indexOf(w));
+    expect(order.every((i) => i > 0)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+    // Every door on the card is 44px, the Timeclock link included.
+    expect(html).toMatch(/<a[^>]*class="[^"]*min-h-11[^"]*"[^>]*href="\/timeclock"|<a[^>]*href="\/timeclock"[^>]*class="[^"]*min-h-11/);
+    expect(html).toMatch(/<label[^>]*class="[^"]*min-h-11[^"]*"[^>]*>/);
+    // The old one-liner is cut.
+    expect(html).not.toContain("On the clock ·");
+  });
+
+  it("a forgotten clock: Set When You Stopped REPLACES Clock Out, and goes to Timeclock", () => {
+    const html = render({ open: punch({ clock_in: at(13) }), job });
+    expect(html).toContain("Set When You Stopped");
+    expect(html).not.toContain("Clock Out");
+    expect(html).toMatch(/<a[^>]*href="\/timeclock"[^>]*>(?:(?!<\/a>)[\s\S])*Set When You Stopped/);
+    // After a Switch Job the twelve hours count from the SHIFT's start, not the running part's.
+    expect(render({ open: punch({ clock_in: at(1), shift_start: at(13) }), job })).toContain("Set When You Stopped");
+  });
+
+  it("on the clock with no job: the timer, the question and ONE Pick The Job; no job doors", () => {
+    const html = render({ open: punch({ onJob: false }), job: null });
+    expect(html).toContain("Which job are you on?");
+    expect(html.match(/Pick The Job/g)).toHaveLength(1);
+    expect(html).not.toContain("THE-DOORS");
+    expect(html).toContain("Clock Out");
+    expect(html).toContain(LUNCH_LABEL);
+  });
+
+  it("a punch on a job the page couldn't read says so instead of asking which job", () => {
+    const html = render({ open: punch({ onJob: true }), job: null });
+    expect(html).not.toContain("Pick The Job");
+    expect(html).toContain("Your punch is on a job this page couldn’t load just now. Timeclock shows it.");
+  });
+
+  it("off the clock: Not Clocked In, a big Clock In and the Timeclock link", () => {
+    const html = render({ open: null, job: null });
+    expect(html).toContain("Not Clocked In");
+    expect(html).toMatch(/<button[^>]*class="[^"]*h-12[^"]*"[^>]*>(?:(?!<\/button>)[\s\S])*Clock In<\/button>/);
+    expect(html).toContain('href="/timeclock"');
+    expect(html).not.toContain("THE-DOORS");
+  });
+
+  it("the held line and the offline line keep their exact words (the shell's offline drain keeps the promise)", () => {
+    const card = readFileSync(join(process.cwd(), "src/app/(app)/planner/now-card.tsx"), "utf8");
+    expect(card).toContain("Clocked in — saved on your phone at the right time, and it&rsquo;ll file itself when you have signal.");
+    expect(card).toContain('const OFFLINE_MSG = "No connection — try again when you have bars.";');
+    // Queue first, then the live punch; each punch's warning is toasted and kept until it is read.
+    expect(card.indexOf('await enqueue("time.clockIn"')).toBeLessThan(card.indexOf("await clockIn("));
+    expect(card.match(/if \(res\.warning\) toast\(res\.warning, "info", undefined, \{ sticky: true \}\);/g)).toHaveLength(2);
   });
 });
