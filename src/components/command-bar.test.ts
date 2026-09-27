@@ -1,9 +1,14 @@
 import { describe, it, expect, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
 
 import { commandNavItems } from "./command-bar";
 import { ALL_ON, type FeatureMap } from "@/lib/features";
+import { isApplePlatform, modKeyLabel } from "@/lib/mod-key";
+
+const barSrc = readFileSync(join(process.cwd(), "src/components/command-bar.tsx"), "utf8");
 
 /**
  * THE COMMAND BAR AND THE SWITCH BOARD (0352). Its "go to" list is built from the same dock filter
@@ -99,5 +104,41 @@ describe("commandNavItems", () => {
       expect(hrefs(items), h).not.toContain(h);
     // Never a Sales Tax door: the Tax Report carries the mileage deduction.
     expect(hrefs(commandNavItems(true, off("sales_tax")))).toContain("/tax-report");
+  });
+});
+
+/**
+ * THE KEYBOARD LINE (W1-12): "↑↓ to navigate · ↵ to open · esc to close" names keys a phone
+ * doesn't have, so the footer shows only with a mouse or a trackpad (Tailwind's pointer-fine
+ * variant, never a width breakpoint: an iPad and a laptop can be the same width), and its chip
+ * names this computer's shortcut.
+ */
+describe("the command bar's footer", () => {
+  it("is hidden until a fine pointer (mouse or trackpad) is there", () => {
+    const footer = barSrc.slice(barSrc.indexOf("↑↓ to navigate") - 400, barSrc.indexOf("↑↓ to navigate"));
+    const cls = footer.slice(footer.lastIndexOf('className="') + 11, footer.lastIndexOf('">'));
+    expect(cls.startsWith("hidden pointer-fine:flex")).toBe(true);
+    expect(cls).not.toMatch(/\b(sm|md|lg|xl):flex\b/);
+  });
+
+  it("names ⌘K on Apple devices and Ctrl K elsewhere", () => {
+    expect(barSrc).toContain("{modKeyLabel(isApplePlatform())}");
+    expect(modKeyLabel(isApplePlatform({ platform: "MacIntel" }))).toBe("⌘K");
+    expect(modKeyLabel(isApplePlatform({ userAgentData: { platform: "macOS" } }))).toBe("⌘K");
+    expect(modKeyLabel(isApplePlatform({ platform: "iPad" }))).toBe("⌘K");
+    expect(modKeyLabel(isApplePlatform({ platform: "Win32" }))).toBe("Ctrl K");
+    expect(modKeyLabel(isApplePlatform({ userAgentData: { platform: "Linux" }, platform: "Linux x86_64" }))).toBe("Ctrl K");
+    expect(modKeyLabel(isApplePlatform({ platform: "", userAgent: "Mozilla/5.0 (X11; CrOS x86_64 14541.0.0)" }))).toBe("Ctrl K");
+  });
+
+  it("keeps ⌘K where nothing can be read (the server, an empty navigator): what it said before", () => {
+    expect(isApplePlatform({})).toBe(true);
+  });
+
+  it("keeps its keys and its empty line", () => {
+    expect(barSrc).toContain('e.key === "ArrowDown"');
+    expect(barSrc).toContain('e.key === "Enter"');
+    expect(barSrc).toContain('e.key === "Escape"');
+    expect(barSrc).toContain('"No matches. Press Enter to ask Nort."');
   });
 });

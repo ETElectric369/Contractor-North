@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Search, Sparkles, Plus, ArrowRight } from "lucide-react";
 import { visibleDock } from "@/lib/dock";
 import { featureOn, type FeatureKey, type FeatureMap } from "@/lib/features";
+import { isApplePlatform, modKeyLabel } from "@/lib/mod-key";
 
 type Item = { kind: string; label: string; sub?: string; href: string; staffOnly?: boolean; aliases?: string[] };
 
@@ -271,9 +272,12 @@ export function CommandBar({ isStaff, features }: { isStaff?: boolean; features?
           ))}
         </div>
 
-        <div className="flex items-center justify-between border-t border-slate-100 px-4 py-2 text-[11px] text-slate-400">
+        {/* THE KEYBOARD LINE ONLY WHERE THERE IS A KEYBOARD (W1-12). On a phone it named keys
+            nobody has; a width breakpoint can't tell an iPad from a laptop, the pointer can
+            (Tailwind's pointer-fine: a mouse or a trackpad). The chip names this computer's key. */}
+        <div className="hidden pointer-fine:flex items-center justify-between border-t border-slate-100 px-4 py-2 text-[11px] text-slate-400">
           <span>↑↓ to navigate · ↵ to open · esc to close</span>
-          <span className="rounded border border-slate-200 px-1.5 py-0.5">⌘K</span>
+          <span className="rounded border border-slate-200 px-1.5 py-0.5">{modKeyLabel(isApplePlatform())}</span>
         </div>
       </div>
     </div>
