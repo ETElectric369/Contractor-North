@@ -81,6 +81,7 @@ export function JobBills({
   groupsNote,
   alreadyBilled,
   billedHours = [],
+  handsNote,
 }: {
   jobId: string;
   bills: Bill[];
@@ -94,6 +95,8 @@ export function JobBills({
   alreadyBilled?: JobAlreadyBilled | null;
   /** Hours a person marked as billed (0357): in the Billed fold under their invoice. */
   billedHours?: JobBilledHours;
+  /** Said under Billed when the marks couldn't be read: their Undo can't be shown, never silently. */
+  handsNote?: string | null;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -353,9 +356,10 @@ export function JobBills({
             </p>
           )}
 
-          {(groups.billed.length > 0 || billedHours.length > 0) && (
+          {(groups.billed.length > 0 || billedHours.length > 0 || !!handsNote) && (
             <div className="mt-5">
               <div className="mb-2 text-sm font-semibold text-slate-900">Billed</div>
+              {handsNote && <p className="mb-2 text-sm text-slate-500">{handsNote}</p>}
               {hoursLoose.length > 0 && <div className="mb-2 space-y-2">{hoursLoose.map(hoursRow)}</div>}
               <div className="space-y-2">
                 {groups.billed.map((g) => (
@@ -405,6 +409,7 @@ export function JobBills({
       )}
       {/* The plain list (no piles): hours a person marked still say so, with the way back. */}
       {!groups && billedHours.length > 0 && <div className="mt-3 space-y-2">{billedHours.map(hoursRow)}</div>}
+      {!groups && handsNote && <p className="mt-3 text-sm text-slate-500">{handsNote}</p>}
 
       {editBill && (
         <JobBillEditModal

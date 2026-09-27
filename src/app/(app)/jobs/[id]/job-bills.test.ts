@@ -172,6 +172,17 @@ describe("the Costs tab's Already Billed doors", () => {
     expect(words(html).filter((x) => x.words === "Already Billed")).toHaveLength(0);
   });
 
+  it("a lost read of the marks is said under Billed, never a quiet loss of Not Billed After All", () => {
+    const note = "Couldn't tell which rows were marked billed by hand just now, so Not Billed After All isn't shown. Reload to try again.";
+    const text = (html: string) => html.replace(/&#x27;/g, "'");
+    // Even with nothing else billed, the Billed heading carries the sentence.
+    const piles = renderToStaticMarkup(createElement(JobBills, { jobId: "j-010", bills: PS as any, pos: [], groups: { ...groups, billed: [] } as any, alreadyBilled: null, handsNote: note }));
+    expect(text(piles)).toContain(">Billed<");
+    expect(text(piles)).toContain(note);
+    const plain = renderToStaticMarkup(createElement(JobBills, { jobId: "j-010", bills: PS as any, pos: [], groups: null, handsNote: note }));
+    expect(text(plain)).toContain(note);
+  });
+
   it("no doors when the page offers none (a tech's view, a fixed-price job's plain list, or no sent bill to hold it)", () => {
     for (const html of [
       renderToStaticMarkup(createElement(JobBills, { jobId: "j-010", bills: PS as any, pos: [], groups: groups as any, alreadyBilled: null })),

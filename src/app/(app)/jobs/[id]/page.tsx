@@ -470,14 +470,15 @@ export default async function JobDetailPage({
     // for "Billed By Hand On INV-x · Not Billed After All". Staff only, on EVERY job whatever its
     // billing type: a mark can sit on a fixed-price job New Invoice bills from its actuals (J-010
     // Purple Sage), and the way back has to be there wherever a mark is. A lost read is logged and
-    // the fold simply offers no Undo there (the rows still say which invoice holds them); a
-    // database without 0357 reads as not ready.
+    // SAID (handsNote below): the marks and their Not Billed After All can't be shown, and marked
+    // hours would otherwise vanish from the tab without a word. A database without 0357 reads as
+    // not ready (nothing can have been marked).
     viewerIsStaff
       ? readHandClaimsForJob(supabase, id, (j as any).customer_id ?? null).catch((e: unknown) => {
           reportError("jobs.[id].handClaims", e, { jobId: id });
-          return null;
+          return "failed" as const;
         })
-      : Promise.resolve(null as HandClaims | null),
+      : Promise.resolve(null as HandClaims | "failed" | null),
     // ALREADY BILLED'S DOORS ASK WHETHER A LINE COULD HOLD THE COST: the lines of the job's bills
     // that went out, read only where the doors can show. A door onto a sheet with no line to pick is
     // a dead end. A lost read is logged and the doors show as before (the sheet says what it finds).
@@ -562,7 +563,11 @@ export default async function JobDetailPage({
           })),
       )
     : { charge: alreadyBilledOffer, ret: alreadyBilledOffer };
-  const handById = handClaims?.ready ? handClaims.byId : null;
+  const handById = handClaims && handClaims !== "failed" && handClaims.ready ? handClaims.byId : null;
+  const handsNote =
+    handClaims === "failed"
+      ? "Couldn't tell which rows were marked billed by hand just now, so Not Billed After All isn't shown. Reload to try again."
+      : null;
   // Without the piles (a fixed-price job, or the claims unreadable) the tab is one plain list, and a
   // row a person marked still says so there, with Not Billed After All: every row is a candidate.
   const alreadyBilledDoors =
@@ -1390,6 +1395,7 @@ export default async function JobDetailPage({
                 groupsNote={costGroupsNote}
                 alreadyBilled={alreadyBilledDoors}
                 billedHours={hoursMarked}
+                handsNote={handsNote}
                 openAside={
                   costGroups && unbilled ? (
                     <div className="space-y-2">
