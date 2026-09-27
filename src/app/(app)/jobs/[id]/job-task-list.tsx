@@ -98,6 +98,9 @@ export function JobTaskList({
         toast(res.error ?? "Couldn't update the task. Try again.", "error");
         return;
       }
+      // Reopening takes a task's done photo off it (0358 clears it); the file stays on the job. Said.
+      const doneShot = photos[t.id]?.done;
+      if (!next && doneShot && typeof doneShot === "object") toast("Reopened. Its done photo is still on the Photos tab.", "info");
       // The card shows open tasks only, so a checked one leaves it: an Undo, never a mis-tap that
       // takes the Tasks tab and the Done fold to take back.
       if (next && mode === "card") {
