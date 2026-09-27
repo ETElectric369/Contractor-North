@@ -406,6 +406,13 @@ d("0357: Already Billed", () => {
     expect((await tryUnmark(staff, edited, [own]))?.message).toMatch(/from an import/);
     expect((await tryUnmark(tech, edited, [ace]))?.message).toMatch(/Only the office/);
     expect((await tryUnmark(stranger, edited, [ace]))?.message).toMatch(/not found/);
+    // A void invoice's lines are its record: un-voiding it is judged against them (0259).
+    await c.query("savepoint voided");
+    await c.query("update public.invoices set status = 'void' where id = $1", [inv]);
+    const onVoid = await tryUnmark(staff, edited, [ace]);
+    expect(onVoid?.message).toMatch(/is void: what it held stays as its record\. Nothing was changed\./);
+    expect((await state(edited)).hand).toEqual([ace]);
+    await c.query("rollback to savepoint voided");
     const r = await unmark(staff, edited, [ace]);
     expect(r.removed).toEqual([ace]);
     const after = await state(edited);

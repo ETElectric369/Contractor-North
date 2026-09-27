@@ -38,7 +38,8 @@
 --        included (0258 allows a repeat on one invoice; this does not).
 --      It changes the claim lists and nothing else, and it checks: if the line's total, the
 --      invoice's total or its status moved, it raises and nothing is kept. Unmark removes only ids
---      a person added (a split shift's pieces go together), with the same checks.
+--      a person added (a split shift's pieces go together), with the same checks, and never on a
+--      void invoice (what a void invoice held is its record: un-voiding it is judged against it).
 --   4. A claim that changes is something a draw's Progress Summary prints (work to date = billed
 --      work lines + unbilled work), so source_ids joins the columns that un-stamp the job's stored
 --      draw PDFs (0349's invoice_items_unstamp_draw_pdfs_upd, recreated with one more column).
@@ -441,6 +442,11 @@ begin
     raise exception 'That invoice line was not found. Nothing was changed.' using errcode = 'P0002';
   end if;
   v_num := coalesce(v_inv.invoice_number, 'that invoice');
+  -- A VOID INVOICE'S LINES NEVER CHANGE: what it held is its record, and 0259 reads it when the
+  -- invoice is un-voided. Erasing it would let the un-void land beside a live bill of the same cost.
+  if v_inv.status = 'void' then
+    raise exception '% is void: what it held stays as its record. Nothing was changed.', v_num using errcode = 'P0001';
+  end if;
 
   -- ONLY WHAT A PERSON ADDED.
   if exists (select 1 from unnest(v_ids) as x where not (x = any (v_line.hand_claims))) then
