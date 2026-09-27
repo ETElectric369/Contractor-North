@@ -21,7 +21,8 @@ vi.mock("@/lib/staff-guard", () => ({
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("@/lib/observe", () => ({ reportError: vi.fn() }));
 
-import { alreadyBilledSheet, markAlreadyBilled, unmarkAlreadyBilled } from "./already-billed-actions";
+import { alreadyBilledSheet, markAlreadyBilled, noJobHoursSheet, unmarkAlreadyBilled } from "./already-billed-actions";
+import { revalidatePath } from "next/cache";
 import { NEEDS_UPDATE } from "@/lib/already-billed";
 
 type Reply = { data?: any; error?: any };
@@ -276,5 +277,44 @@ describe("after it", () => {
     expect((await alreadyBilledSheet(J010, { kind: "bill", ids: ["bill-ps"] })).ok).toBe(true);
     state.client = fake(sheetRoute({ billing: "tm", quotes: [{ id: "q1", status: "accepted" }] }), calls);
     expect((await alreadyBilledSheet(J010, { kind: "bill", ids: ["bill-ps"] })).ok).toBe(true);
+  });
+});
+
+/**
+ * HOURS ON NO JOB (TTUSD on INV-055): the same two writes with no job behind them. They refresh
+ * Timecards (the hours' home) and the invoice, never a job page; the way back says the hours are
+ * back with the other hours on no job.
+ */
+describe("hours on no job", () => {
+  it("a mark with no job lands and is said the same way; Timecards and the invoice refresh, no job page", async () => {
+    const paths = revalidatePath as unknown as { mock: { calls: unknown[][] }; mockClear: () => void };
+    paths.mockClear();
+    state.client = fake(
+      () => ({ data: { line_id: "li-jp", invoice_id: "inv-55", invoice_number: "INV-055", description: "Labor - JP Prince", line_total: "2185.00", added: ["t6"] } }),
+      calls,
+    );
+    const res = await markAlreadyBilled({ jobId: null, lineId: "li-jp", ids: ["t6"], what: "11.5 h of JP Prince's time" });
+    expect(res.ok).toBe(true);
+    expect(res.message).toBe("11.5 h of JP Prince's time is billed on INV-055 (Labor - JP Prince $2,185.00). Nothing on INV-055 changed.");
+    expect(res.undo).toMatchObject({ jobId: "", lineId: "li-jp", ids: ["t6"], whole: false });
+    const refreshed = paths.mock.calls.map((c) => c[0]);
+    expect(refreshed).toEqual(expect.arrayContaining(["/timecards", "/billing/inv-55"]));
+    expect(refreshed.some((x) => String(x).startsWith("/jobs/"))).toBe(false);
+  });
+
+  it("its way back says the hours are back with the hours on no job", async () => {
+    state.client = fake(() => ({ data: { line_id: "li-jp", invoice_id: "inv-55", invoice_number: "INV-055", removed: ["t6"] } }), calls);
+    const res = await unmarkAlreadyBilled({ jobId: "", lineId: "li-jp", ids: ["t6"], what: "11.5 h of JP Prince's time" });
+    expect(res.message).toBe("11.5 h of JP Prince's time is off INV-055 and back with the hours on no job. Nothing on INV-055 changed.");
+  });
+
+  it("the sheet is the office's: a lost read is said, never a crash", async () => {
+    state.client = fake((table) => {
+      if (table === "organizations") return { data: { settings: { timezone: "America/Los_Angeles" } } };
+      throw new Error("boom");
+    }, calls);
+    const res = await noJobHoursSheet(["t6"]);
+    expect(res.ok).toBe(false);
+    expect(!res.ok && res.error).toMatch(/Couldn't open that just now|Couldn't read/);
   });
 });

@@ -139,6 +139,48 @@ export function jobCanHold(invoices: readonly AbInvoice[]): { charge: boolean; r
   };
 }
 
+/**
+ * WHERE THE SHEET CAN WORK FOR A JOB (the one rule behind every door that opens it: the Costs tab,
+ * the paper card, the bill's own row): the job's next New Invoice pulls its actuals
+ * (nextInvoiceImportsActuals, which loadAlreadyBilledSheet asks too), and a bill that went out has
+ * a line that could hold it. `invoices` are the ones the sheet would offer: the job's own, and for a
+ * job that isn't Time & Material its customer's invoices with no job.
+ */
+export function jobReach(imports: boolean, invoices: readonly AbInvoice[]): { charge: boolean; ret: boolean } {
+  return imports ? jobCanHold(invoices) : { charge: false, ret: false };
+}
+
+/**
+ * THE SHIFTS TICKED TO START ON THE NO-JOB SHEET: the ones the door was pressed on (a split shift
+ * whole), and nothing else. Hours on no job name no person on an invoice line the app could match,
+ * so the app ticks only what he pointed at; the rest are listed for him to tick.
+ */
+export function noJobPreticked(entries: readonly AbEntry[], pressed: readonly string[]): string[] {
+  let on = new Set<string>();
+  for (const id of pressed ?? []) if (entries.some((e) => e.id === id)) on = tickTogether(entries, on, id, true);
+  return entries.filter((e) => on.has(e.id)).map((e) => e.id);
+}
+
+/**
+ * THE NEEDS YOU ROWS OF CLOSED SHIFTS ON NO JOB (0357): `billed` are the ones a live invoice already
+ * holds (billed by hand on an invoice with no job, so no longer hours nobody can bill: no row);
+ * `door` are the rest, when a sent invoice with no job could hold them. `reach` null is a lost read:
+ * every row stays and every one gets the door (the sheet says what it finds).
+ */
+export function noJobStrayDoors(
+  closedIds: readonly string[],
+  reach: { canHold: boolean; claimed: ReadonlySet<string> } | null,
+): { billed: Set<string>; door: Set<string> } {
+  const billed = new Set((closedIds ?? []).filter((id) => !!reach?.claimed.has(id)));
+  const door = new Set(reach && !reach.canHold ? [] : (closedIds ?? []).filter((id) => !billed.has(id)));
+  return { billed, door };
+}
+
+/** Can any invoice with no job that went out hold hours? (a line of work typed or changed by hand) */
+export function noJobCanHoldHours(invoices: readonly AbInvoice[]): boolean {
+  return invoices.some((i) => !i.job_id && eligibleInvoice(i) && eligibleLines(i, { kind: "time" }).length > 0);
+}
+
 /** One tap when it is obvious: the one line of the matching kind, or the only line there is. */
 export function preselectLine(inv: AbInvoice, lines: readonly AbLine[], kind: AlreadyBilledKind): string | null {
   const want = matchingGroup(kind);
@@ -287,6 +329,43 @@ export function markedSentence(what: string, inv: Pick<AbInvoice, "invoice_numbe
 
 /** Said when 0357 isn't on the database yet: the door is there, and it says why it can't work. */
 export const NEEDS_UPDATE = "Already Billed needs an update to the app's database before it works. Nothing was changed.";
+
+/**
+ * THE BILL'S OWN ROW (Bills → All Bills, Erik: "the Already Billed could connect to the bill on that
+ * screen too"). A bill on a job that no invoice holds gets Already Billed where the job's sheet could
+ * hold it (a charge, or a supplier return); a bill a person marked says Billed By Hand On INV-x with
+ * Not Billed After All. A bill any invoice holds otherwise (an import, or its order billed: the
+ * importer skips a receipt whose order is billed) gets nothing, and so does a $0.00 one.
+ */
+export type BillAlreadyBilled =
+  | { kind: "open"; jobId: string; what: string }
+  | { kind: "hand"; jobId: string; lineId: string; ids: string[]; invoiceNumber: string | null; what: string };
+
+export function billAlreadyBilledDoors(input: {
+  bills: readonly { id: string; job_id?: string | null; po_id?: string | null; amount?: number | string | null; superseded?: boolean; what: string }[];
+  reach: ReadonlyMap<string, { charge: boolean; ret: boolean }>;
+  hands: ReadonlyMap<string, { lineId: string; invoiceNumber: string | null }>;
+  /** Every id some live invoice holds, by an import or by hand. */
+  claimed: ReadonlySet<string>;
+}): Record<string, BillAlreadyBilled> {
+  const out: Record<string, BillAlreadyBilled> = {};
+  for (const b of input.bills ?? []) {
+    const id = String(b.id);
+    const job = b.job_id ? String(b.job_id) : "";
+    if (!job || b.superseded) continue;
+    const hand = input.hands.get(id);
+    if (hand) {
+      out[id] = { kind: "hand", jobId: job, lineId: hand.lineId, ids: [id], invoiceNumber: hand.invoiceNumber, what: b.what };
+      continue;
+    }
+    if (input.claimed.has(id) || (b.po_id && input.claimed.has(String(b.po_id)))) continue;
+    const amount = Number(b.amount) || 0;
+    if (amount === 0) continue;
+    const r = input.reach.get(job);
+    if (r && (amount < 0 ? r.ret : r.charge)) out[id] = { kind: "open", jobId: job, what: b.what };
+  }
+  return out;
+}
 
 // ── The Costs tab's doors, from what the page already read ───────────────────────────────────────
 

@@ -4,7 +4,8 @@
  * ALREADY BILLED: THE DOORS' SERVER HALF (migration 0357).
  *
  *   alreadyBilledSheet      what the sheet offers for one cost (lib/already-billed-read)
- *   markAlreadyBilled       a line on a sent bill claims what it already charged for, by hand
+ *   noJobHoursSheet         what it offers for hours on NO job (invoices with no job, 0357)
+ *   markAlreadyBilled      a line on a sent bill claims what it already charged for, by hand
  *   unmarkAlreadyBilled     Not Billed After All: only what a person marked comes back off
  *
  * Staff only here, and the functions run as the person (SECURITY INVOKER) so RLS refuses a tech in
@@ -19,7 +20,7 @@ import { requireStaff } from "@/lib/staff-guard";
 import { dbError } from "@/lib/db-error";
 import { reportError } from "@/lib/observe";
 import { NEEDS_UPDATE, hoursByHand, markedSentence } from "@/lib/already-billed";
-import { isMissingAlreadyBilledRpc, loadAlreadyBilledSheet, type AlreadyBilledSheetData, type AlreadyBilledTarget } from "@/lib/already-billed-read";
+import { isMissingAlreadyBilledRpc, loadAlreadyBilledSheet, loadNoJobHoursSheet, type AlreadyBilledSheetData, type AlreadyBilledTarget } from "@/lib/already-billed-read";
 
 export type AlreadyBilledSheetResult = { ok: true; data: AlreadyBilledSheetData } | { ok: false; error: string; needsUpdate?: boolean };
 
@@ -33,6 +34,23 @@ export async function alreadyBilledSheet(jobId: string, target: AlreadyBilledTar
     return await loadAlreadyBilledSheet(ctx.supabase, ctx.orgId, id, target);
   } catch (e) {
     reportError("alreadyBilled.sheet", e, { jobId: id, kind: target?.kind });
+    return { ok: false, error: "Couldn't open that just now. Nothing was changed - try again in a moment." };
+  }
+}
+
+/**
+ * HOURS ON NO JOB (TTUSD on INV-055): the sheet for shifts nobody put on a job, ticking `entryIds`
+ * (the ones the door was pressed on) to start. Staff only, like every Already Billed door.
+ */
+export async function noJobHoursSheet(entryIds: string[]): Promise<AlreadyBilledSheetResult> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error ?? "This action is staff-only." };
+  if (!ctx.orgId) return { ok: false, error: "Your sign-in isn't attached to a company yet." };
+  const ids = Array.isArray(entryIds) ? entryIds.map((x) => String(x ?? "")).filter(Boolean) : [];
+  try {
+    return await loadNoJobHoursSheet(ctx.supabase, ctx.orgId, ids);
+  } catch (e) {
+    reportError("alreadyBilled.noJobSheet", e, { count: ids.length });
     return { ok: false, error: "Couldn't open that just now. Nothing was changed - try again in a moment." };
   }
 }
@@ -55,8 +73,10 @@ function said(what: string): string {
   return String(what ?? "").trim().slice(0, 200) || "That";
 }
 
+/** `jobId` empty: hours on no job, whose homes are Timecards and the invoice that holds them. */
 function revalidateAll(jobId: string, invoiceId?: string | null) {
-  revalidatePath(`/jobs/${jobId}`);
+  if (jobId) revalidatePath(`/jobs/${jobId}`);
+  else revalidatePath("/timecards");
   if (invoiceId) revalidatePath(`/billing/${invoiceId}`);
   revalidatePath("/bills");
   revalidatePath("/planner");
@@ -64,16 +84,17 @@ function revalidateAll(jobId: string, invoiceId?: string | null) {
 
 /**
  * MARK BILLED ON INV-x. `what` is the office's words for the thing ("CED 8802-1101475", "12.5 h of
- * Brian's time"), used in the sentence only. The function decides everything else.
+ * Brian's time"), used in the sentence only. The function decides everything else. `jobId` is the
+ * job the door stood on, for what to refresh; empty for hours on no job.
  */
-export async function markAlreadyBilled(input: { jobId: string; lineId: string; ids: string[]; what: string }): Promise<AlreadyBilledWrite> {
+export async function markAlreadyBilled(input: { jobId?: string | null; lineId: string; ids: string[]; what: string }): Promise<AlreadyBilledWrite> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const jobId = String(input?.jobId ?? "");
   const lineId = String(input?.lineId ?? "");
   const ids = [...new Set((input?.ids ?? []).map((x) => String(x ?? "")).filter(Boolean))];
   const what = said(input?.what);
-  if (!jobId || !lineId) return { ok: false, error: "Pick the line that already charged for it. Nothing was changed." };
+  if (!lineId) return { ok: false, error: "Pick the line that already charged for it. Nothing was changed." };
   if (!ids.length) return { ok: false, error: "Pick what that line already charged for. Nothing was changed." };
   const { data, error } = await ctx.supabase.rpc("mark_already_billed", { p_line: lineId, p_ids: ids });
   if (error) {
@@ -117,14 +138,14 @@ async function removedWords(supabase: any, removed: string[]): Promise<string | 
 
 /** NOT BILLED AFTER ALL: only what a person marked comes off (a split shift's pieces together,
  *  unless `whole` is false: a mark's own Undo, exactly what it added). */
-export async function unmarkAlreadyBilled(input: { jobId: string; lineId: string; ids: string[]; what: string; whole?: boolean }): Promise<AlreadyBilledWrite> {
+export async function unmarkAlreadyBilled(input: { jobId?: string | null; lineId: string; ids: string[]; what: string; whole?: boolean }): Promise<AlreadyBilledWrite> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const jobId = String(input?.jobId ?? "");
   const lineId = String(input?.lineId ?? "");
   const ids = [...new Set((input?.ids ?? []).map((x) => String(x ?? "")).filter(Boolean))];
   const what = said(input?.what);
-  if (!jobId || !lineId || !ids.length) return { ok: false, error: "Couldn't tell what should come off. Nothing was changed." };
+  if (!lineId || !ids.length) return { ok: false, error: "Couldn't tell what should come off. Nothing was changed." };
   const { data, error } = await ctx.supabase.rpc("unmark_already_billed", { p_line: lineId, p_ids: ids, p_whole: input?.whole !== false });
   if (error) {
     if (isMissingAlreadyBilledRpc(error)) return { ok: false, error: NEEDS_UPDATE, needsUpdate: true };
@@ -145,7 +166,7 @@ export async function unmarkAlreadyBilled(input: { jobId: string; lineId: string
   const off = more && !read ? `${what} and the rest of the same shift or take are off` : `${words} is off`;
   return {
     ok: true,
-    message: `${off} ${num} and back in Not Billed Yet. Nothing on ${num} changed.`,
+    message: `${off} ${num} and back ${jobId ? "in Not Billed Yet" : "with the hours on no job"}. Nothing on ${num} changed.`,
     undo: { jobId, lineId, ids: removed, what: words },
     invoiceNumber: r.invoice_number ?? null,
   };

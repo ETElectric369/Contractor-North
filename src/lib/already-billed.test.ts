@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   askUsedAll,
+  billAlreadyBilledDoors,
   eligibleInvoice,
   eligibleLines,
   hoursByHand,
@@ -12,6 +13,10 @@ import {
   precheckHours,
   preselectLine,
   jobCanHold,
+  jobReach,
+  noJobCanHoldHours,
+  noJobPreticked,
+  noJobStrayDoors,
   sortInvoicesFor,
   tickTogether,
   type AbEntry,
@@ -296,5 +301,93 @@ describe("the sentence", () => {
     expect(markedSentence("CED 8802-1101475", { invoice_number: "INV-00023" }, { description: "Materials", line_total: 110 })).toBe(
       "CED 8802-1101475 is billed on INV-00023 (Materials $110.00). Nothing on INV-00023 changed.",
     );
+  });
+});
+
+describe("one door rule: the sheet's own (New Invoice's nextInvoiceImportsActuals, then a line that could hold it)", () => {
+  it("a job New Invoice bills by its contract gets no door, whatever its bills hold", () => {
+    expect(jobReach(false, [INV00023])).toEqual({ charge: false, ret: false });
+  });
+  it("a job whose next New Invoice pulls its actuals gets the door where a sent bill could hold it", () => {
+    expect(jobReach(true, [INV00023])).toEqual({ charge: true, ret: false });
+    expect(jobReach(true, [inv({ status: "draft", lines: INV00023.lines })])).toEqual({ charge: false, ret: false });
+  });
+});
+
+describe("the bill's own row on /bills (Erik: 'the Already Billed could connect to the bill on that screen too')", () => {
+  const reach = new Map([
+    ["j-010", { charge: true, ret: false }],
+    ["j-039", { charge: true, ret: true }],
+    ["j-fixed", { charge: false, ret: false }],
+  ]);
+  const b = (o: { id: string; job_id?: string | null; po_id?: string | null; amount?: number; superseded?: boolean }) => ({ what: `CED ${o.id}`, amount: 100, ...o });
+  it("Already Billed on a bill on a job no invoice holds, where the job's sheet could hold it", () => {
+    const doors = billAlreadyBilledDoors({ bills: [b({ id: "ps", job_id: "j-010", amount: 186.93 })], reach, hands: new Map(), claimed: new Set() });
+    expect(doors).toEqual({ ps: { kind: "open", jobId: "j-010", what: "CED ps" } });
+  });
+  it("Billed By Hand On INV-x with its way back on a bill a person marked", () => {
+    const doors = billAlreadyBilledDoors({
+      bills: [b({ id: "ps", job_id: "j-010" })],
+      reach,
+      hands: new Map([["ps", { lineId: "li-mat", invoiceNumber: "INV-00023" }]]),
+      claimed: new Set(["ps"]),
+    });
+    expect(doors).toEqual({ ps: { kind: "hand", jobId: "j-010", lineId: "li-mat", ids: ["ps"], invoiceNumber: "INV-00023", what: "CED ps" } });
+  });
+  it("nothing on a bill an invoice holds (or whose order it holds), a $0.00 one, a set-aside copy, one on no job, or one whose job bills by its contract", () => {
+    const doors = billAlreadyBilledDoors({
+      bills: [
+        b({ id: "imported", job_id: "j-010" }),
+        b({ id: "via-order", job_id: "j-010", po_id: "po-1" }),
+        b({ id: "zero", job_id: "j-010", amount: 0 }),
+        b({ id: "copy", job_id: "j-010", superseded: true }),
+        b({ id: "shop", job_id: null }),
+        b({ id: "fixed", job_id: "j-fixed" }),
+        b({ id: "unread", job_id: "j-nobody-read" }),
+      ],
+      reach,
+      hands: new Map(),
+      claimed: new Set(["imported", "po-1"]),
+    });
+    expect(doors).toEqual({});
+  });
+  it("a supplier return gets the door only where a line typed by hand takes money off", () => {
+    const doors = billAlreadyBilledDoors({
+      bills: [b({ id: "ret-010", job_id: "j-010", amount: -25 }), b({ id: "ret-039", job_id: "j-039", amount: -25 })],
+      reach,
+      hands: new Map(),
+      claimed: new Set(),
+    });
+    expect(Object.keys(doors)).toEqual(["ret-039"]);
+  });
+});
+
+describe("hours on NO job (TTUSD on INV-055, Ben Ebenezer on INV-058)", () => {
+  const INV055 = inv({
+    id: "inv-55",
+    invoice_number: "INV-055",
+    job_id: null,
+    lines: [line({ id: "jp", description: "Labor - JP Prince", quantity: 23, unit: "hr", line_total: 2185 }), line({ id: "fee", description: "Card fee", line_total: 12, line_kind: "other" })],
+  });
+  it("a sent invoice with no job and a line of work typed by hand can hold them; a draft, a void, a job's invoice or an untouched import can't", () => {
+    expect(noJobCanHoldHours([INV055])).toBe(true);
+    expect(noJobCanHoldHours([{ ...INV055, status: "draft" }])).toBe(false);
+    expect(noJobCanHoldHours([{ ...INV055, status: "void" }])).toBe(false);
+    expect(noJobCanHoldHours([{ ...INV055, job_id: "j-010" }])).toBe(false);
+    expect(noJobCanHoldHours([{ ...INV055, lines: [line({ id: "imp", line_total: 500, import_source: "labor", unit: "hr", quantity: 5 })] }])).toBe(false);
+  });
+  const e = (id: string, family?: string): AbEntry => ({ id, person: "p-jp", name: "JP Prince", clockIn: `2026-08-0${id.slice(-1)}T15:00:00Z`, hours: 8, family });
+  it("ticks only the shift the door was pressed on, a split shift whole; a shift no longer open ticks nothing", () => {
+    const entries = [e("t6"), e("t7a"), e("t7b", "t7a"), e("t8")];
+    expect(noJobPreticked(entries, ["t6"])).toEqual(["t6"]);
+    expect(noJobPreticked(entries, ["t7b"])).toEqual(["t7a", "t7b"]);
+    expect(noJobPreticked(entries, ["gone"])).toEqual([]);
+    expect(noJobPreticked(entries, [])).toEqual([]);
+  });
+  it("Needs You: a shift a live invoice holds is billed (no row); the rest get Already Billed where an invoice with no job could hold them", () => {
+    expect(noJobStrayDoors(["a", "b"], { canHold: true, claimed: new Set(["a"]) })).toEqual({ billed: new Set(["a"]), door: new Set(["b"]) });
+    expect(noJobStrayDoors(["a", "b"], { canHold: false, claimed: new Set() })).toEqual({ billed: new Set(), door: new Set() });
+    // A lost read keeps every row and offers the door (the sheet says what it finds).
+    expect(noJobStrayDoors(["a", "b"], null)).toEqual({ billed: new Set(), door: new Set(["a", "b"]) });
   });
 });

@@ -5,7 +5,9 @@
  * sage that was already charged and i have no way to associate it to the paid invoice becuase i did
  * it manually and that will happen for people i assure you").
  *
- *   Already Billed          a Not Billed Yet row (a receipt, an order, a take) or the open hours
+ *   Already Billed          a Not Billed Yet row (a receipt, an order, a take) or the open hours;
+ *                           a supplier paper's card (filed first) and the bill's own row on /bills;
+ *                           a shift on NO job (jobId null: the lines of invoices with no job)
  *   Not Billed After All    a row a person marked, in the Billed fold: only that comes back off
  *
  * The sheet asks "Which line already charged for this?", lists only the lines that can hold it
@@ -37,7 +39,7 @@ import {
   type AlreadyBilledKind,
 } from "@/lib/already-billed";
 import type { AlreadyBilledSheetData } from "@/lib/already-billed-read";
-import { alreadyBilledSheet, markAlreadyBilled, unmarkAlreadyBilled, type AlreadyBilledWrite } from "@/app/(app)/jobs/already-billed-actions";
+import { alreadyBilledSheet, markAlreadyBilled, noJobHoursSheet, unmarkAlreadyBilled, type AlreadyBilledWrite } from "@/app/(app)/jobs/already-billed-actions";
 import { receiptForBilling } from "@/app/(app)/bills/receipt-for-billing-action";
 import { ReceiptLines, type ReceiptForBilling } from "@/app/(app)/bills/receipt-billing-card";
 
@@ -61,11 +63,18 @@ export function hoursWhat(entries: readonly AbEntry[], ids: Iterable<string>): s
  * written, only as many as fit beside what the line already holds, or why nothing is.
  */
 export function precheckWhy(
-  data: Pick<AlreadyBilledSheetData, "entries" | "tz">,
+  data: Pick<AlreadyBilledSheetData, "entries" | "tz" | "noJob" | "preticked">,
   chosen: { invoice: { invoice_number: string | null; created_at: string }; line: AbLine },
 ): string {
-  const pre = precheckHours(data.entries, chosen.line, chosen.invoice.created_at, data.tz);
   const held = Math.max(0, Number(chosen.line.heldHours) || 0);
+  // Hours on no job: only what the door was pressed on is ticked; the line names no one to match.
+  if (data.noJob) {
+    const already = held > 0 ? ` The line already holds ${held} h of shifts.` : "";
+    return (data.preticked ?? []).length
+      ? `Ticked to start: the shift you pressed Already Billed on. Tick any others this line charged for.${already}`
+      : `Nothing is ticked to start. Tick the hours this line charged for.${already}`;
+  }
+  const pre = precheckHours(data.entries, chosen.line, chosen.invoice.created_at, data.tz);
   if (!pre.person) return "Nothing is ticked to start: the line doesn't name one person. Tick the hours it charged for.";
   if (pre.covered)
     return lineHours(chosen.line) == null
@@ -75,7 +84,7 @@ export function precheckWhy(
   return held > 0 ? `${base}, and only as many as fit beside the ${held} h the line already holds.` : `${base}.`;
 }
 
-/** The Already Billed door: opens the sheet for one cost. */
+/** The Already Billed door: opens the sheet for one cost. `jobId` null: hours on no job. */
 export function AlreadyBilledButton({
   jobId,
   target,
@@ -83,7 +92,7 @@ export function AlreadyBilledButton({
   onMarked,
   className,
 }: {
-  jobId: string;
+  jobId: string | null;
   target: AlreadyBilledDoorTarget;
   label?: string;
   /** The caller shows the result itself (the paper card's done line); otherwise it is a toast. */
@@ -109,7 +118,8 @@ export function NotBilledAfterAllButton({
   what,
   className,
 }: {
-  jobId: string;
+  /** The job the row stands on; null for hours on no job (they sit on their invoice). */
+  jobId: string | null;
   lineId: string;
   ids: string[];
   what: string;
@@ -121,7 +131,7 @@ export function NotBilledAfterAllButton({
   const undoMark = useUndoMark();
   function press() {
     setBusy(true);
-    unmarkAlreadyBilled({ jobId, lineId, ids, what }).then(
+    unmarkAlreadyBilled({ jobId: jobId ?? "", lineId, ids, what }).then(
       (res) => {
         setBusy(false);
         if (!res.ok) return toast(res.error ?? "That didn't save. Nothing was changed.", "error");
@@ -184,7 +194,8 @@ export function AlreadyBilledSheet({
   onMarked,
   initial,
 }: {
-  jobId: string;
+  /** null: hours on no job (target.kind "time"; target.ids are the shifts the door was pressed on). */
+  jobId: string | null;
   target: AlreadyBilledDoorTarget;
   onClose: () => void;
   onMarked?: (res: AlreadyBilledWrite) => void;
@@ -208,7 +219,8 @@ export function AlreadyBilledSheet({
   useEffect(() => {
     let live = true;
     setLoad({ state: "loading" });
-    alreadyBilledSheet(jobId, { kind: target.kind, ids: idsKey ? idsKey.split(",") : [] }).then(
+    const ids = idsKey ? idsKey.split(",") : [];
+    (jobId ? alreadyBilledSheet(jobId, { kind: target.kind, ids }) : noJobHoursSheet(ids)).then(
       (res) => {
         if (!live) return;
         if (!res.ok) return setLoad({ state: "error", error: res.error, needsUpdate: res.needsUpdate });
@@ -228,13 +240,16 @@ export function AlreadyBilledSheet({
   function pick(id: string | null, d: AlreadyBilledSheetData | null = data) {
     setLineId(id);
     setError(null);
-    if (!d || d.target.kind !== "time") return;
+    // Hours on no job: the ticks are his (what he pressed on, and what he ticks), whatever the line.
+    if (!d || d.target.kind !== "time" || d.noJob) return;
     const row = d.invoices.flatMap(({ invoice }) => invoice.lines.map((line) => ({ invoice, line }))).find((r) => r.line.id === id);
     setChecked(new Set(row ? precheckHours(d.entries, row.line, row.invoice.created_at, d.tz).checked : []));
   }
 
-  // The obvious line is picked for him (still his to change); nothing else is.
+  // The obvious line is picked for him (still his to change); nothing else is. On no job, the shift
+  // the door was pressed on is ticked (a split shift whole).
   useEffect(() => {
+    if (data?.noJob && checked.size === 0 && (data.preticked ?? []).length) setChecked(new Set(data.preticked));
     if (data && lineId == null) {
       const pre = data.invoices[0]?.preselect ?? null;
       if (pre) pick(pre, data);
@@ -274,7 +289,7 @@ export function AlreadyBilledSheet({
     if (!chosen || !ids.length) return;
     setSaving(true);
     setError(null);
-    markAlreadyBilled({ jobId, lineId: chosen.line.id, ids, what }).then(
+    markAlreadyBilled({ jobId: jobId ?? "", lineId: chosen.line.id, ids, what }).then(
       (res) => {
         setSaving(false);
         // IF MARKING FAILS, NOTHING ELSE MOVES: the sheet stays open with the reason.
@@ -296,7 +311,7 @@ export function AlreadyBilledSheet({
 
   const costWords = (d: AlreadyBilledSheetData): string | null => {
     const t = d.target;
-    if (t.kind === "time") return `Not billed yet: ${hoursOf(d.entries, d.entries.map((e) => e.id))} h`;
+    if (t.kind === "time") return `${d.noJob ? "On no job and not billed" : "Not billed yet"}: ${hoursOf(d.entries, d.entries.map((e) => e.id))} h`;
     if (t.cost == null) return null;
     if (t.negative) return `This return: ${formatCurrency(Math.abs(t.cost))} back from the supplier`;
     const noun = t.kind === "bill" ? "This bill" : t.kind === "po" ? "This order" : "These pieces";
@@ -333,12 +348,20 @@ export function AlreadyBilledSheet({
           <>
             {costWords(data) && <p className="font-medium text-slate-900">{costWords(data)}</p>}
             {data.target.words && <p className="-mt-2 text-xs text-slate-500">{data.target.words}</p>}
+            {data.note && (
+              <p className="rounded-lg bg-amber-50 px-3 py-2 text-amber-800" role="status">
+                {data.note}
+              </p>
+            )}
             {data.invoices.length === 0 ? (
               <p className="rounded-lg bg-slate-50 px-3 py-2 text-slate-600">
-                No bill that went out on {data.jobNumber} has a line that could have charged for this.{" "}
-                {data.target.negative
-                  ? "Only a line typed by hand that takes money off can hold a return."
-                  : "A line you typed, or one you changed, on a sent bill can hold it."}
+                {data.noJob
+                  ? "No invoice with no job that went out has a line that could have charged for these hours. A line you typed, or one you changed, on a sent invoice with no job can hold them."
+                  : `No bill that went out on ${data.jobNumber} has a line that could have charged for this. ${
+                      data.target.negative
+                        ? "Only a line typed by hand that takes money off can hold a return."
+                        : "A line you typed, or one you changed, on a sent bill can hold it."
+                    }`}
               </p>
             ) : (
               <fieldset className="space-y-1">
@@ -364,7 +387,7 @@ export function AlreadyBilledSheet({
               <div className="space-y-1">
                 <p className="font-medium text-slate-900">Which hours did it charge for?</p>
                 {data.entries.length === 0 ? (
-                  <p className="text-slate-500">No hours on {data.jobNumber} are open to mark.</p>
+                  <p className="text-slate-500">{data.noJob ? "No hours on no job are open to mark." : `No hours on ${data.jobNumber} are open to mark.`}</p>
                 ) : (
                   data.entries.map((e) => (
                     <label key={e.id} className="flex min-h-11 cursor-pointer items-center gap-3 rounded-lg border border-slate-200 px-3 py-2">
