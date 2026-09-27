@@ -3,12 +3,13 @@ import { dbError } from "@/lib/db-error";
 import { appointmentTypeFor, bookingTitle, daysNeeded, workingDaysFrom, workKind } from "@/lib/schedule/work-shape";
 
 import { revalidatePath } from "next/cache";
-import { mergeCaptureSections, type CapturePatch } from "@/lib/inspection/capture";
+import { mergeCaptureSections, parseInspectorCapture, type CapturePatch } from "@/lib/inspection/capture";
+import { isMissingRpc, keepStoredPhotos } from "@/lib/inspection/walkthrough-access";
 import { formatFullAddress, formatPhone } from "@/lib/utils";
 import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 import { emptyToNull } from "@/lib/forms";
 import { pushCalendarItem, deleteCalendarItem } from "@/lib/calendar-sync";
-import { requireStaff } from "@/lib/staff-guard";
+import { requireMember, requireStaff } from "@/lib/staff-guard";
 import { sendPushToProfiles } from "@/lib/push";
 import { getOrgSettings } from "@/lib/org-settings";
 import { tzDateTimeUtc, todayStrInTz } from "@/lib/tz";
@@ -39,7 +40,9 @@ async function resolveIso(
   return tzDateTimeUtc(date, time || "08:00", tz);
 }
 
-export type Result = { ok: boolean; error?: string; id?: string };
+/** `refused`: the database said no to WHO is asking, so trying again won't change it (the
+ *  walk-through's autosave stops retrying and says so instead). */
+export type Result = { ok: boolean; error?: string; id?: string; refused?: boolean };
 
 /** Spine guard for appointments.type (mirrors the 0051/0131 check constraint) — a bad
  *  value reads as a clean message instead of a raw Postgres constraint error. */
@@ -597,11 +600,13 @@ export async function saveInspectionCapture(
   id: string,
   patch: CapturePatch,
 ): Promise<Result> {
-  // TODO(contested): requireStaff here vs the capture PAGE rendering for any org member —
-  // a tech doing the walk-through can upload photos but every Save fails; decide whether
-  // capture is member-writable or the page should be staff-gated before touching either.
+  // Decided (Erik, 2026-09-26: "crew leader yes tech no"): the office saves here, unchanged; a crew
+  // lead ON this visit saves through save_walkthrough_capture (0356); a plain tech reads.
   const ctx = await requireStaff(); // defense-in-depth (RLS also scopes the write)
-  if ("error" in ctx) return { ok: false, error: ctx.error };
+  if ("error" in ctx) {
+    if (ctx.error === STAFF_ONLY) return saveCaptureAsCrewLead(id, patch);
+    return { ok: false, error: ctx.error };
+  }
   const supabase = ctx.supabase;
 
   const { data: existing } = await supabase.from("appointments").select("capture").eq("id", id).maybeSingle();
@@ -660,7 +665,10 @@ export async function saveInspectionAnswers(
   clientOpId?: string,
 ): Promise<Result> {
   const ctx = await requireStaff(); // defense-in-depth (RLS also scopes the write)
-  if ("error" in ctx) return { ok: false, error: ctx.error };
+  if ("error" in ctx) {
+    if (ctx.error === STAFF_ONLY) return saveAnswersAsCrewLead(id, templateId, answers, clientOpId);
+    return { ok: false, error: ctx.error };
+  }
   const supabase = ctx.supabase;
   const { data: { user } } = await supabase.auth.getUser();
   const { data: prof } = user
@@ -678,7 +686,34 @@ async function saveInspectionAnswersInner(
   templateId: string | null,
   answers: Record<string, unknown>,
 ): Promise<Result> {
+  const c = await cleanInspectionAnswers(supabase, id, templateId, answers);
+  if (!c.ok) return c;
+  const { data, error } = await supabase
+    .from("appointments")
+    .update({
+      inspection_template_id: templateId,
+      inspection_answers: c.clean,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", id)
+    .select("id");
+  if (error) return { ok: false, error: dbError(error) };
+  if (!data?.length) return { ok: false, error: "Appointment not found." };
+  revalidatePath(`/appointments/${id}`);
+  revalidatePath("/inspections");
+  return { ok: true, id };
+}
 
+/** What gets STORED for these answers: coerced against the sheet's own playbook (re-read from the
+ *  database, never trusted from the client), cleared of inapplicable branches, and carrying forward
+ *  what was answered under questions since retired. The office's write and the crew lead's share it,
+ *  so the two can never store a different truth for the same taps. */
+async function cleanInspectionAnswers(
+  supabase: SupabaseClient,
+  id: string,
+  templateId: string | null,
+  answers: Record<string, unknown>,
+): Promise<{ ok: true; clean: Record<string, unknown> } | { ok: false; error: string }> {
   let clean: Record<string, unknown> = {};
   if (templateId) {
     // RLS confines this read to the caller's org, so a template id from another tenant simply
@@ -734,21 +769,110 @@ async function saveInspectionAnswersInner(
       if (clean[slot] === undefined) clean[slot] = v;
     }
   }
+  return { ok: true, clean };
+}
 
-  const { data, error } = await supabase
+// ── THE CREW LEAD'S WALK-THROUGH (0356) ─────────────────────────────────────────────────────────
+//
+// Erik (2026-09-26), on whether techs fill in walk-throughs: "crew leader yes tech no". A crew lead
+// (profiles.crew_lead, which only an owner or admin sets) who is ON the visit saves the sheet's
+// answers and the capture (notes, measurements, materials, photos) through ONE database door,
+// save_walkthrough_capture, which checks the same rule and holds his save to those columns: he never
+// touches a priced answer, switches a stored sheet or takes a photo off, and holds no UPDATE on
+// appointments. Everything else on the visit stays the office's. A plain tech is refused here, the
+// same "staff-only" answer he always got, in plainer words.
+
+/** requireStaff's refusal for a signed-in, non-staff member: the one refusal a crew lead may get
+ *  past. Typed to its literal, so the comparison fails to compile if requireStaff's words change. */
+const STAFF_ONLY = "This action is staff-only.";
+const CREW_OR_OFFICE = "Only the office, or the crew lead on this visit, can fill in the walk-through.";
+
+/** The crew lead ON this visit, or why not. The database asks all of it again; this is so the
+ *  refusal is plain words before any write is attempted. */
+async function crewLeadOnVisit(
+  id: string,
+): Promise<{ supabase: SupabaseClient; userId: string; orgId: string } | { error: string }> {
+  const ctx = await requireMember();
+  if ("error" in ctx) return { error: ctx.error ?? "Sign in again to fill in the walk-through." };
+  const { data: me } = await ctx.supabase.from("profiles").select("crew_lead").eq("id", ctx.userId).maybeSingle();
+  if (!(me as { crew_lead?: boolean | null } | null)?.crew_lead) return { error: CREW_OR_OFFICE };
+  const { data: appt } = await ctx.supabase
     .from("appointments")
-    .update({
-      inspection_template_id: templateId,
-      inspection_answers: clean,
-      updated_at: new Date().toISOString(),
-    })
+    .select("id, assigned_to")
     .eq("id", id)
-    .select("id");
-  if (error) return { ok: false, error: dbError(error) };
-  if (!data?.length) return { ok: false, error: "Appointment not found." };
-  revalidatePath(`/appointments/${id}`);
+    .eq("org_id", ctx.orgId)
+    .maybeSingle();
+  if (!appt || (appt as { assigned_to?: string | null }).assigned_to !== ctx.userId) return { error: CREW_OR_OFFICE };
+  return { supabase: ctx.supabase, userId: ctx.userId, orgId: ctx.orgId };
+}
+
+/** The database's no, in the words a person reads. `refused` stops the autosave re-trying a save
+ *  that will be refused again. */
+function walkthroughRefusal(error: { code?: string | null; message?: string | null }): Result {
+  if (isMissingRpc(error))
+    return {
+      ok: false,
+      refused: true,
+      error: "Crew leads can't save the walk-through until the office finishes an update. Nothing was saved.",
+    };
+  if (error.code === "42501") return { ok: false, refused: true, error: error.message || CREW_OR_OFFICE };
+  return { ok: false, error: dbError(error) };
+}
+
+function revalidateWalkthrough(id: string) {
+  revalidatePath("/schedule");
+  revalidatePath("/planner");
   revalidatePath("/inspections");
+  revalidatePath(`/appointments/${id}`);
+}
+
+async function saveCaptureAsCrewLead(id: string, patch: CapturePatch): Promise<Result> {
+  const crew = await crewLeadOnVisit(id);
+  if ("error" in crew) return { ok: false, refused: true, error: crew.error };
+  const { data: existing, error: readErr } = await crew.supabase
+    .from("appointments")
+    .select("capture")
+    .eq("id", id)
+    .eq("org_id", crew.orgId)
+    .maybeSingle();
+  if (readErr) return { ok: false, error: dbError(readErr) };
+  if (!existing) return { ok: false, error: "Appointment not found." };
+  const stored = (existing as { capture?: unknown }).capture ?? null;
+  // He adds photos; every one already on the list stays (the office takes one off). Merged here so a
+  // photo the office added while his page was open is kept, not refused.
+  const fixed: CapturePatch =
+    patch.photos !== undefined ? { ...patch, photos: keepStoredPhotos(parseInspectorCapture(stored).photos, patch.photos) } : patch;
+  const merged = mergeCaptureSections(stored, fixed);
+  const { data, error } = await crew.supabase.rpc("save_walkthrough_capture", { p_appointment: id, p_capture: merged });
+  if (error) return walkthroughRefusal(error);
+  // The function returns the id it wrote; nothing back means nothing was written.
+  if (!data) return { ok: false, error: "That didn't save - reload and try again." };
+  revalidateWalkthrough(id);
   return { ok: true, id };
+}
+
+async function saveAnswersAsCrewLead(
+  id: string,
+  templateId: string | null,
+  answers: Record<string, unknown>,
+  clientOpId?: string,
+): Promise<Result> {
+  const crew = await crewLeadOnVisit(id);
+  if ("error" in crew) return { ok: false, refused: true, error: crew.error };
+  return runOnce({ clientOpId, action: "inspection.answers", orgId: crew.orgId, profileId: crew.userId }, async () => {
+    const c = await cleanInspectionAnswers(crew.supabase, id, templateId, answers);
+    if (!c.ok) return c;
+    const { data, error } = await crew.supabase.rpc("save_walkthrough_capture", {
+      p_appointment: id,
+      p_template_id: templateId,
+      p_answers: c.clean,
+    });
+    if (error) return walkthroughRefusal(error);
+    if (!data) return { ok: false, error: "That didn't save - reload and try again." };
+    revalidatePath(`/appointments/${id}`);
+    revalidatePath("/inspections");
+    return { ok: true, id };
+  });
 }
 
 export async function updateAppointment(id: string, formData: FormData): Promise<Result> {
