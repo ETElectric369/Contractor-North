@@ -287,7 +287,9 @@ export function readBankTable(table: readonly (readonly string[])[], name: strin
       postedOn: day,
       cents,
       description,
-      check: checkNumberOf(cell(r, c.check), text),
+      // From the REDACTED words: "transfer to CHK 123456789" is an account number, not a check,
+      // and it must never reach a bill number or a crew payment's reference.
+      check: checkNumberOf(cell(r, c.check), description),
       last4: last4Of(cell(r, c.account)),
     });
     fitids.push(cell(r, c.id) || null);

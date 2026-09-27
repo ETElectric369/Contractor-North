@@ -183,6 +183,19 @@ describe("privacy: what is kept of a line", () => {
     for (const l of dl.lines) expect(l.description).not.toMatch(/\d{6,}/);
     expect(JSON.stringify(dl)).not.toContain("0123456789");
   });
+
+  it("a long number after CHK is an account, never a check number", () => {
+    const dl = readBankTable(
+      parseCSV(`Date,Description,Amount\n09/01/2026,Online Banking transfer to CHK 123456789 Confirmation# 1234567890,-500.00\n09/02/2026,CHECK #1044,-80.00\n`),
+      "x.csv",
+      hash,
+    )!;
+    expect(dl.lines[0].check).toBeNull();
+    expect(dl.lines[0].description).toBe("Online Banking transfer to CHK ••6789 Confirmation# ••7890");
+    expect(JSON.stringify(dl)).not.toContain("123456789");
+    // A real check number printed in the words still reads.
+    expect(dl.lines[1].check).toBe("1044");
+  });
 });
 
 describe("the merchant key", () => {
