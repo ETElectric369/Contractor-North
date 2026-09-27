@@ -42,8 +42,13 @@
 --                  (task_parent_is_mine), so checking the Reminder off never strands a step one of
 --                  them couldn't see.
 --        insert  — a job task must name a job of the caller's own company (0173: a rule at one
---                  read path is a convention, so the policy says it, not only the app).
---        update  — the rows you can read, and the new row still names your company's job.
+--                  read path is a convention, so the policy says it, not only the app). A STEP goes
+--                  only under a task the caller can READ, by the read rule above (task_is_readable):
+--                  a job task of the company, or a Reminder he made or is for. Never under another
+--                  person's private Reminder by its raw id: task_parent_is_mine would then show his
+--                  step to that Reminder's two people, and their check-off would stop to ask about it.
+--        update  — the rows you can read, and the new row still names your company's job. Putting
+--                  a task under another one is a move: the trigger holds it (below).
 --        delete  — a job task: the office or whoever added it. A Reminder: its maker or the person
 --                  it is for. (The job's FK cascade is untouched.)
 --      auth_org_id() is NULL for a deactivated seat (0158), so everything fails closed for anyone
@@ -55,14 +60,21 @@
 -- also holds the delete rule's side doors: only the office or whoever added a task may MOVE it —
 -- off its job (a tech turning an office task into his own Reminder would clear it off the crew's
 -- list), onto another job, or under another task (a step goes when its task is deleted, so an
--- office task put under a tech's own one would go with his Delete).
+-- office task put under a tech's own one would go with his Delete). And a step, added or moved,
+-- goes only under a task the caller can read: the insert policy says it for a new step, and the
+-- trigger is where a MOVE is seen (a policy has no old row), so it says it for both, in words
+-- that don't tell a private Reminder from no task at all.
 --
 -- PRIVILEGED WRITERS (a migration, the service role, an ops repair — is_privileged_writer, 0154)
--- keep what they write for the stamps, the way 0254 treats them. The company checks (job, person,
--- photo folder) hold for every writer.
+-- keep what they write for the stamps, the way 0254 treats them, and have no "can the caller read
+-- it" for a step's task (there is no caller). The company checks (job, a step's task, person, photo
+-- folder) hold for every writer.
 --
 -- LOCKS: tasks (ALTER TABLE, brief — every column is nullable or has a constant default, so no
--- rewrite) and jobs (one nullable-array column with a constant default, no rewrite). lock_timeout 3s.
+-- rewrite) and jobs (one nullable-array column with a constant default, no rewrite). lock_timeout 3s,
+-- statement_timeout 15s: a busy table fails fast and changes nothing; run it again. It checks what
+-- it needs before changing anything (0154, 0158, 0213/0300's helpers), and checks what it built at
+-- the end (the trigger, the four policies, the helpers and who may call them).
 --
 -- ORDER: after 0355. SAFE BEFORE OR AFTER THE CODE. The app reads the new columns with a fallback
 -- to the old ones (lib/job-tasks readJobTasks), so the code runs on a database without this
@@ -72,7 +84,17 @@
 -- ═══════════════════════════════════════════════════════════════════════════
 
 set local lock_timeout = '3s';
-set local statement_timeout = '60s';
+set local statement_timeout = '15s';
+
+do $$
+begin
+  if to_regclass('public.tasks') is null or to_regclass('public.jobs') is null or to_regclass('public.profiles') is null
+     or to_regprocedure('public.auth_org_id()') is null or to_regprocedure('public.is_org_staff()') is null
+     or to_regprocedure('public.is_privileged_writer()') is null
+     or to_regprocedure('public.docs_path_is_staff_only(text)') is null then
+    raise exception '0358: tasks (0018), the trust-root helpers (0154, 0158) or docs_path_is_staff_only (0213/0300) is not on this database. Apply them first. Nothing was changed.';
+  end if;
+end $$;
 
 -- ── 1. columns ────────────────────────────────────────────────────────────────────────────────
 alter table public.tasks
@@ -190,6 +212,17 @@ begin
     end if;
   end if;
 
+  -- A step, added or moved, goes under a task the caller can READ (task_is_readable: a job task of
+  -- this company, or a Reminder he made or is for), never another person's private Reminder, where
+  -- task_parent_is_mine would show it to that Reminder's people. The insert policy says it too; a
+  -- move is only seen here (a policy has no old row). One sentence for a task he can't see and a task
+  -- that isn't there, so a raw id tells him nothing. Privileged writers: the company check below.
+  if new.parent_id is not null and (tg_op = 'INSERT' or new.parent_id is distinct from old.parent_id)
+     and not public.is_privileged_writer() and not public.task_is_readable(new.parent_id) then
+    raise exception 'Couldn''t find that task to put the step under, so the step wasn''t saved.'
+      using errcode = '42501';
+  end if;
+
   -- A subtask sits under a task of this same company.
   if new.parent_id is not null and (tg_op = 'INSERT' or new.parent_id is distinct from old.parent_id) then
     if not exists (select 1 from public.tasks p where p.id = new.parent_id and p.org_id = v_org) then
@@ -226,8 +259,10 @@ end $$;
 comment on function public.stamp_task_who() is
   'Tasks: who added it / who checked it off / when are the server''s (created_by, created_at, '
   'done_by, completed_at — stamped, cleared on reopen, pinned otherwise; privileged writers keep '
-  'what they write). For every writer: a job task names this company''s job, a subtask this '
-  'company''s task, a Reminder this company''s person, a photo this company''s folder (0358).';
+  'what they write). Only the office or whoever added a task moves it, and a step goes only under a '
+  'task the caller can read (task_is_readable). For every writer: a job task names this company''s '
+  'job, a subtask this company''s task, a Reminder this company''s person, a photo this company''s '
+  'folder (0358).';
 
 revoke execute on function public.stamp_task_who() from public, anon;
 
@@ -272,7 +307,44 @@ comment on function public.task_parent_is_mine(uuid) is
 revoke execute on function public.task_parent_is_mine(uuid) from public, anon;
 grant execute on function public.task_parent_is_mine(uuid) to authenticated;
 
+-- ── 3c. a step goes under a task the caller can read ──────────────────────────────────────────
+-- Can the caller READ this task, by tasks_read's rule (section 4)? Its five arms, the same order:
+-- a job task of his company; a Reminder he made; one made for him; a legacy one with neither, if he
+-- is the office; a step of one of his Reminders. The insert policy and stamp_task_who ask it of a
+-- step's parent, so a step never lands under another person's private Reminder. SECURITY DEFINER for
+-- the reason above (a policy on tasks reading tasks). Change tasks_read, change this with it.
+create or replace function public.task_is_readable(p uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1 from public.tasks t
+     where t.id = p
+       and t.org_id = public.auth_org_id()
+       and (
+         t.job_id is not null
+         or t.created_by = auth.uid()
+         or t.assigned_to = auth.uid()
+         or (t.created_by is null and t.assigned_to is null and public.is_org_staff())
+         or (t.parent_id is not null and public.task_parent_is_mine(t.parent_id))
+       )
+  );
+$$;
+
+comment on function public.task_is_readable(uuid) is
+  'Can the caller read this task, by tasks_read''s rule (a job task of his company, a Reminder he '
+  'made or is for, a legacy one the office keeps, a step of his Reminder)? A step''s parent must be '
+  'one (tasks_insert, stamp_task_who), so a step never lands under another person''s private '
+  'Reminder (0358).';
+
+revoke execute on function public.task_is_readable(uuid) from public, anon;
+grant execute on function public.task_is_readable(uuid) to authenticated;
+
 -- ── 4. the rows ───────────────────────────────────────────────────────────────────────────────
+-- tasks_read's five arms are task_is_readable's (3c): change one, change the other.
 drop policy if exists tasks_read on public.tasks;
 create policy tasks_read on public.tasks
   for select
@@ -302,10 +374,12 @@ create policy tasks_insert on public.tasks
       job_id is null
       or exists (select 1 from public.jobs j where j.id = tasks.job_id and j.org_id = public.auth_org_id())
     )
+    and (parent_id is null or public.task_is_readable(parent_id))
   );
 
 comment on policy tasks_insert on public.tasks is
-  'Any active member adds a task; a job task must name a job of the caller''s own company (0358).';
+  'Any active member adds a task; a job task must name a job of the caller''s own company, and a '
+  'step goes only under a task the caller can read — never another person''s private Reminder (0358).';
 
 drop policy if exists tasks_update on public.tasks;
 create policy tasks_update on public.tasks
@@ -362,3 +436,42 @@ comment on policy tasks_delete on public.tasks is
   'A job task: the office or whoever added it (a tech checks an office task off, never deletes it). '
   'A Reminder: its maker or the person it is for; a Reminder''s step, the same people as its '
   'Reminder (0358).';
+
+-- ── Self-check ──────────────────────────────────────────────────────────────────────────────────
+do $$
+declare v_check text;
+begin
+  if not exists (
+    select 1 from pg_trigger
+     where not tgisinternal and tgname = 'tasks_stamp_who' and tgrelid = 'public.tasks'::regclass and tgenabled <> 'D'
+  ) then
+    raise exception '0358: the tasks_stamp_who trigger is not on tasks (or is disabled).';
+  end if;
+  if (select array_agg(policyname::text order by policyname::text) from pg_policies where schemaname = 'public' and tablename = 'tasks')
+     is distinct from array['tasks_delete', 'tasks_insert', 'tasks_read', 'tasks_update'] then
+    raise exception '0358: tasks does not carry exactly tasks_read / tasks_insert / tasks_update / tasks_delete (tasks_write was company-wide and must be gone).';
+  end if;
+  select with_check into v_check from pg_policies where schemaname = 'public' and tablename = 'tasks' and policyname = 'tasks_insert';
+  if v_check is null or v_check not ilike '%task_is_readable(parent_id)%' or v_check not ilike '%j.org_id = %auth_org_id()%' then
+    raise exception '0358: tasks_insert does not hold a step to a task the caller can read, or a job task to the company''s own job.';
+  end if;
+  if not (select prosecdef from pg_proc where oid = 'public.task_is_readable(uuid)'::regprocedure)
+     or not (select prosecdef from pg_proc where oid = 'public.task_parent_is_mine(uuid)'::regprocedure)
+     or not (select prosecdef from pg_proc where oid = 'public.stamp_task_who()'::regprocedure) then
+    raise exception '0358: task_is_readable, task_parent_is_mine or stamp_task_who is not SECURITY DEFINER.';
+  end if;
+  if pg_get_functiondef('public.stamp_task_who()'::regprocedure) not ilike '%task_is_readable(new.parent_id)%' then
+    raise exception '0358: stamp_task_who does not hold a moved step to a task the caller can read.';
+  end if;
+  if has_function_privilege('anon', 'public.task_is_readable(uuid)', 'execute')
+     or has_function_privilege('anon', 'public.task_parent_is_mine(uuid)', 'execute')
+     or has_function_privilege('anon', 'public.stamp_task_who()', 'execute')
+     or has_function_privilege('anon', 'public.task_photo_path_ok(text, uuid)', 'execute') then
+    raise exception '0358: anon can call one of the task helpers.';
+  end if;
+  if not has_function_privilege('authenticated', 'public.task_is_readable(uuid)', 'execute')
+     or not has_function_privilege('authenticated', 'public.task_parent_is_mine(uuid)', 'execute') then
+    raise exception '0358: a signed-in member cannot reach task_is_readable / task_parent_is_mine, which the policies call.';
+  end if;
+  raise notice '0358: the server stamps who and when, a Reminder and its steps are its two people''s, a job''s list is the crew''s, and a step goes only under a task its maker can read.';
+end $$;

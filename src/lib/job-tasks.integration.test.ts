@@ -76,7 +76,7 @@ d("tasks: a job has one task list, and a Reminder is private (0358)", () => {
   const landed = async (id: string) => {
     await asServer();
     const { rows } = await client.query(
-      `select id, status, created_by, created_at, completed_at, done_by, photo_path, done_photo_path, job_id, title,
+      `select id, status, created_by, created_at, completed_at, done_by, photo_path, done_photo_path, job_id, parent_id, title,
               (select now()) as txn_now
          from tasks where id = $1`,
       [id],
@@ -176,9 +176,11 @@ d("tasks: a job has one task list, and a Reminder is private (0358)", () => {
       `select has_function_privilege('anon', 'public.stamp_task_who()', 'execute') as a,
               has_function_privilege('anon', 'public.task_photo_path_ok(text, uuid)', 'execute') as b,
               has_function_privilege('anon', 'public.task_parent_is_mine(uuid)', 'execute') as c,
-              has_function_privilege('authenticated', 'public.task_parent_is_mine(uuid)', 'execute') as d`,
+              has_function_privilege('authenticated', 'public.task_parent_is_mine(uuid)', 'execute') as d,
+              has_function_privilege('anon', 'public.task_is_readable(uuid)', 'execute') as e,
+              has_function_privilege('authenticated', 'public.task_is_readable(uuid)', 'execute') as f`,
     );
-    expect(acl[0]).toEqual({ a: false, b: false, c: false, d: true });
+    expect(acl[0]).toEqual({ a: false, b: false, c: false, d: true, e: false, f: true });
     const { rows: pols } = await client.query("select policyname, cmd from pg_policies where schemaname = 'public' and tablename = 'tasks' order by policyname");
     expect(pols.map((p: any) => `${p.policyname}:${p.cmd}`)).toEqual([
       "tasks_delete:DELETE",
@@ -278,6 +280,8 @@ d("tasks: a job has one task list, and a Reminder is private (0358)", () => {
       "select with_check from pg_policies where schemaname = 'public' and tablename = 'tasks' and policyname = 'tasks_insert'",
     );
     expect(rows[0].with_check).toMatch(/j\.org_id = auth_org_id\(\)/);
+    // …and a step's task is one the caller can read (task_is_readable, tasks_read's rule).
+    expect(rows[0].with_check).toMatch(/parent_id IS NULL\) OR task_is_readable\(parent_id\)/);
   });
 
   // ── delete: the office, or whoever added it ────────────────────────────────────────────────
@@ -389,6 +393,74 @@ d("tasks: a job has one task list, and a Reminder is private (0358)", () => {
     // The person it's for clears the office's step.
     await as(techId);
     expect((await client.query("delete from tasks where id = $1", [officeStep.id])).rowCount).toBe(1);
+  });
+
+  it("a member can't put a step under another person's private Reminder by its raw id (it would show to them)", async () => {
+    await as(officeId);
+    const { rows: [rem] } = await client.query("insert into tasks (title) values ('TEST 0358 the office''s own errand') returning id");
+    await as(techId);
+    // As a Reminder step, and naming a job of his own company beside it: refused either way.
+    const bare = await refused("insert into tasks (title, parent_id) values ('TEST 0358 planted step', $1)", [rem.id]);
+    expect(bare?.code).toBe("42501");
+    expect(bare?.message).toMatch(/Couldn't find that task to put the step under/);
+    const withJob = await refused("insert into tasks (job_id, title, parent_id) values ($1, 'TEST 0358 planted job step', $2)", [jobId, rem.id]);
+    expect(withJob?.code).toBe("42501");
+    // The same words for a task that isn't there and another company's: his raw id tells him nothing.
+    await as(strangerId);
+    const { rows: [theirs] } = await client.query("insert into tasks (job_id, title) values ($1, 'TEST 0358 their task') returning id", [otherJobId]);
+    await as(techId);
+    for (const id of ["00000000-0000-4000-8000-000000000358", theirs.id]) {
+      const r = await refused("insert into tasks (title, parent_id) values ('TEST 0358 step to nowhere', $1)", [id]);
+      expect(r?.code, id).toBe("42501");
+      expect(r?.message, id).toBe(bare?.message);
+    }
+    // Not the office either, under a tech's private Reminder.
+    const { rows: [his] } = await client.query("insert into tasks (title) values ('TEST 0358 his own errand') returning id");
+    await as(officeId);
+    expect((await refused("insert into tasks (title, parent_id) values ('TEST 0358 office step', $1)", [his.id]))?.code).toBe("42501");
+    // Nothing landed under either Reminder, and the office still sees its Reminder with no step.
+    await asServer();
+    expect((await client.query("select count(*)::int as n from tasks where parent_id = any($1::uuid[])", [[rem.id, his.id]])).rows[0].n).toBe(0);
+  });
+
+  it("a step lands under a job task, under his own Reminder, and under one made for him", async () => {
+    await as(techId);
+    const { rows: [onJob] } = await client.query("insert into tasks (job_id, title, parent_id) values ($1, 'TEST 0358 step on the job', $2) returning id", [
+      jobId,
+      officeTaskId,
+    ]);
+    expect((await landed(onJob.id)).parent_id).toBe(officeTaskId);
+    await as(techId);
+    const { rows: [mine] } = await client.query("insert into tasks (title) values ('TEST 0358 his errand with steps') returning id");
+    const { rows: [myStep] } = await client.query("insert into tasks (title, parent_id) values ('TEST 0358 his step', $1) returning id", [mine.id]);
+    expect((await landed(myStep.id)).parent_id).toBe(mine.id);
+    await as(officeId);
+    const { rows: [forHim] } = await client.query("insert into tasks (title, assigned_to) values ('TEST 0358 for Brian', $1) returning id", [techId]);
+    await as(techId);
+    const { rows: [hisStep] } = await client.query("insert into tasks (title, parent_id) values ('TEST 0358 step on his', $1) returning id", [forHim.id]);
+    expect((await landed(hisStep.id)).parent_id).toBe(forHim.id);
+  });
+
+  it("nor can a task be MOVED under another person's private Reminder — the office either; under his own, it moves", async () => {
+    await as(officeId);
+    const { rows: [officeRem] } = await client.query("insert into tasks (title) values ('TEST 0358 office errand to hide under') returning id");
+    await as(techId);
+    const { rows: [hisRem] } = await client.query("insert into tasks (title) values ('TEST 0358 his errand to hide under') returning id");
+    const { rows: [hisTask] } = await client.query("insert into tasks (job_id, title) values ($1, 'TEST 0358 his task to move') returning id", [jobId]);
+    // He added it, so he may move it, but not under the office's private Reminder.
+    const r = await refused("update tasks set parent_id = $2 where id = $1", [hisTask.id, officeRem.id]);
+    expect(r?.code).toBe("42501");
+    expect(r?.message).toMatch(/Couldn't find that task to put the step under/);
+    expect((await landed(hisTask.id)).parent_id).toBeNull();
+    // The office may move any task, but not under his private Reminder.
+    await as(officeId);
+    const o = await refused("update tasks set parent_id = $2 where id = $1", [officeTaskId, hisRem.id]);
+    expect(o?.code).toBe("42501");
+    expect((await landed(officeTaskId)).parent_id).toBeNull();
+    // Under his own Reminder, his task moves.
+    await as(techId);
+    expect((await client.query("update tasks set parent_id = $2 where id = $1", [hisTask.id, hisRem.id])).rowCount).toBe(1);
+    expect((await landed(hisTask.id)).parent_id).toBe(hisRem.id);
   });
 
   it("a Reminder can't be made for someone outside the company", async () => {
