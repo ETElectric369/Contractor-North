@@ -900,26 +900,43 @@ function crewNamed(description: string, crew: readonly BooksCrew[]): BooksCrew |
   return hits.length === 1 ? hits[0] : null;
 }
 
+/** How many days AFTER a deposit posted a payment of its money may have been recorded and still be
+ *  "very likely that payment": the books read payments up to the download's last day + 10
+ *  (bank-core loadBankBooks), and a payment written down a week after the bank took it is common. */
+export const LOOKALIKE_AFTER_DAYS = 10;
+
 /** A payment already in North of this deposit's money, recorded up to 30 days before it posted
- *  (or 3 after), that no line took: the deposit is very likely that payment, just not surely. */
-export function lookalikePayment(line: BankLine, books: Pick<BankBooks, "payments">, used?: ReadonlySet<string>): BooksPayment | null {
+ *  (or 10 after), that no line took: the deposit is very likely that payment, just not surely.
+ *  With `invoiceId`, only a payment on that invoice. */
+export function lookalikePayment(line: BankLine, books: Pick<BankBooks, "payments">, used?: ReadonlySet<string>, invoiceId?: string): BooksPayment | null {
   if (line.cents <= 0) return null;
   const hits = books.payments.filter((p) => {
     if (used?.has(p.id)) return false;
+    if (invoiceId && p.invoiceId !== invoiceId) return false;
     const d = dayDiff(line.postedOn, p.day);
-    return d >= -3 && d <= 30 && (p.cents === line.cents || bankCentsOf(p) === line.cents);
+    return d >= -LOOKALIKE_AFTER_DAYS && d <= 30 && (p.cents === line.cents || bankCentsOf(p) === line.cents);
   });
   return hits.sort((a, b) => Math.abs(dayDiff(line.postedOn, a.day)) - Math.abs(dayDiff(line.postedOn, b.day)) || a.id.localeCompare(b.id))[0] ?? null;
+}
+
+/** The one open invoice whose balance is exactly this deposit, or null (none, or two). */
+export function invoiceByBalance(line: BankLine, books: Pick<BankBooks, "invoices">): BooksInvoice | null {
+  if (line.cents <= 0) return null;
+  const hits = books.invoices.filter((i) => i.balanceCents === line.cents);
+  return hits.length === 1 ? hits[0] : null;
 }
 
 /** THE GUESS for a line nothing matched and no rule placed. Never picked; marked Guess. */
 export function guessFor(line: BankLine, books: BankBooks, used?: ReadonlySet<string>): BankChoice | null {
   if (line.cents > 0) {
-    const hits = books.invoices.filter((i) => i.balanceCents === line.cents);
-    if (hits.length === 1) return { choice: "invoice", invoiceId: hits[0].id };
     // A payment already in North of this money (a way of paying the bank's words don't say, or
-    // further back than a sure match reaches): already counted, never Other Income on top of it.
+    // further back or later than a sure match reaches): already counted, never Other Income on top
+    // of it, and never a SECOND payment on an invoice whose balance happens to be the same money
+    // (a 50% deposit, an equal last installment): that counted Received twice and called the
+    // invoice paid (review of release/v1026). Asked FIRST; the invoice stays a button (buttonsFor).
     if (lookalikePayment(line, books, used)) return { choice: "not_income" };
+    const hit = invoiceByBalance(line, books);
+    if (hit) return { choice: "invoice", invoiceId: hit.id };
     // Money moved in from another of the company's own accounts is not income, and neither is the
     // payment that shows as money in on a card's own download ("Payment Thank You"); a processor's
     // payout of customers' money is income, and gets no guess (the person says which).
@@ -1239,8 +1256,9 @@ export function planBankDownload(dl: BankDownload, books: BankBooks): BankPlan {
     const direction = line.cents > 0 ? "in" : "out";
     const rule = ruleFor(line, books.rules);
     const rc = rule ? ruleChoice(rule, books) : null;
-    // Money in that is exactly an open invoice's balance is asked, whatever a rule says.
-    const onInvoice = line.cents > 0 && guessFor(line, books)?.choice === "invoice";
+    // Money in that is exactly an open invoice's balance is asked, whatever a rule says (even when
+    // the guess is Already Counted: a payment of that money is already in North).
+    const onInvoice = !!invoiceByBalance(line, books);
     if (rule && rc && !onInvoice && choiceFits(rc, direction)) {
       dispositions.set(line.key, { how: "rule", ruleId: rule.id, choice: rc });
       counts.ruled++;
@@ -1251,7 +1269,7 @@ export function planBankDownload(dl: BankDownload, books: BankBooks): BankPlan {
     const hinted = hint ? ruleChoice(hint, books) : null;
     const guess = onInvoice ? guessFor(line, books, used) : hinted && choiceFits(hinted, direction) ? hinted : guessFor(line, books, used);
     const single =
-      isBareCheck(line) || !line.merchantKey || isGenericKey(line.merchantKey) || guess?.choice === "invoice" || (direction === "out" && !!line.check) || isCustomerMoneyIn(line);
+      isBareCheck(line) || !line.merchantKey || isGenericKey(line.merchantKey) || onInvoice || guess?.choice === "invoice" || (direction === "out" && !!line.check) || isCustomerMoneyIn(line);
     asking.push({ line, direction, guess, single });
   }
   // ONE ROW PER MERCHANT, SPLIT BY AMOUNT: a merchant's lines far apart in size (a fill-up and a
@@ -1345,6 +1363,10 @@ function buttonsFor(g: NeedGroup, books: BankBooks): string[] {
     // With no guess, Already Counted comes before Other Income: a deposit already in North counted
     // again as income is money that never came in twice.
     if (!g.guess) add("not_income");
+    // One deposit that is exactly an open invoice's balance keeps that invoice a tap away, even when
+    // the guess is Already Counted (a payment of the same money is already in North).
+    const onInvoice = g.single ? books.invoices.filter((i) => i.balanceCents === g.cents) : [];
+    if (onInvoice.length === 1) add(choiceId({ choice: "invoice", invoiceId: onInvoice[0].id }));
     add("other_income");
     add("not_income");
     return out.slice(0, 3);

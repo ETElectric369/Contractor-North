@@ -12,6 +12,7 @@ import {
   findBankHeader,
   guessFor,
   isBareCheck,
+  lookalikePayment,
   lineNamesAccount,
   looksLikeBankTable,
   merchantKeyOf,
@@ -32,6 +33,7 @@ import {
   validPicks,
   type BankBooks,
   type BankDownload,
+  type BooksPayment,
   type BooksRule,
 } from "./bank-download";
 import { findHeaderRow, readHeaderRow } from "./supplier-open-list";
@@ -490,6 +492,37 @@ describe("matching what is already on the books (exact cents, each row once)", (
     const acme = plan.groups.find((g) => g.label === "ACME CORP")!;
     expect(acme.guess).toBeNull();
     expect(acme.buttons).toEqual(["not_income", "other_income"]);
+  });
+
+  // Review of release/v1026: INV-100 has $5,000 open and a $5,000 payment already recorded on it (a
+  // 50% deposit). The deposit of that money guessed "On INV-100", and the tap wrote a second payment:
+  // Received counted twice, the invoice called paid.
+  it("a deposit already recorded as a payment guesses Already Counted before an invoice of the same balance, which stays a tap away", () => {
+    const inv = { id: "inv-100", number: "INV-100", balanceCents: 500000 };
+    const pay = (over: Partial<BooksPayment> = {}): BooksPayment => ({ id: "p-100", invoiceId: "inv-100", invoiceNumber: "INV-100", cents: 500000, day: "2026-09-11", method: "check", feeCents: null, stripe: false, ...over });
+    const deposit = (description: string) => readBankTable(parseCSV(`Date,Description,Amount\n09/12/2026,${description},5000.00\n`), "x.csv", hash)!;
+    const cases: [BankDownload, BooksPayment, string][] = [
+      [deposit("ONLINE TRANSFER FROM SMITH J REF 123"), pay(), "Sep 11"], // a check; the bank says transfer
+      [deposit("MOBILE DEPOSIT"), pay({ day: "2026-09-16" }), "Sep 16"], // written down 4 days after the bank posted it
+      [deposit("ZELLE FROM JOHN SMITH"), pay({ method: "transfer" }), "Sep 11"], // Zelle, recorded as a transfer
+    ];
+    for (const [dl, p, day] of cases) {
+      const plan = planBankDownload(dl, ORG_BOOKS({ invoices: [inv], payments: [p] }));
+      expect(plan.dispositions.get(dl.lines[0].key)).toMatchObject({ how: "need" });
+      const g = plan.groups[0];
+      expect([dl.lines[0].description, g.guess]).toEqual([dl.lines[0].description, "not_income"]);
+      expect(g.buttons).toEqual(["not_income", "invoice:inv-100", "other_income"]);
+      expect(g.hint).toBe(`Maybe the payment on INV-100 of ${day}, already in North.`);
+      expect(lookalikePayment(dl.lines[0], { payments: [p] }, undefined, "inv-100")?.id).toBe("p-100");
+      expect(lookalikePayment(dl.lines[0], { payments: [p] }, undefined, "inv-other")).toBeNull();
+    }
+    // Nothing of that money in North: the invoice is the guess, as before.
+    const plain = planBankDownload(deposit("MOBILE DEPOSIT"), ORG_BOOKS({ invoices: [inv] }));
+    expect(plain.groups[0].guess).toBe("invoice:inv-100");
+    expect(plain.groups[0].buttons).toEqual(["invoice:inv-100", "other_income", "not_income"]);
+    // A payment recorded more than 10 days after the bank posted it is no lookalike.
+    const late = planBankDownload(deposit("MOBILE DEPOSIT"), ORG_BOOKS({ invoices: [inv], payments: [pay({ day: "2026-09-23" })] }));
+    expect(late.groups[0].guess).toBe("invoice:inv-100");
   });
 
   it("a card payout is exactly one group of payments less their fees; a Venmo sweep one group of Venmo payments", () => {

@@ -14,6 +14,7 @@ import {
   bankViewOf,
   branchFromNumbers,
   centsOf,
+  lookalikePayment,
   choiceId,
   groupTitle,
   inPayWindow,
@@ -514,6 +515,20 @@ export async function applyBankCore(
     w.choice = null;
     crewMarked++;
   }
+  // A PAYMENT ALREADY RECORDED ON THE INVOICE A PERSON PICKED (review of release/v1026): a deposit
+  // put "On INV-100" whose money is already a payment on INV-100 (recorded as a check the day
+  // before, or days after the bank posted it) MARKS that payment. Writing another counted Received
+  // twice and called the invoice paid.
+  let paymentsMarked = 0;
+  for (const w of work) {
+    if (w.sortedBy !== "person" || w.choice?.choice !== "invoice") continue;
+    const recorded = lookalikePayment(w.line, books, taken, w.choice.invoiceId);
+    if (!recorded) continue;
+    taken.add(recorded.id);
+    w.match = { table: "payments", ids: [recorded.id] };
+    w.choice = null;
+    paymentsMarked++;
+  }
 
   // CLAIM THE ROW before anything is written.
   const claimed = await supabase
@@ -851,6 +866,7 @@ export async function applyBankCore(
     (pass.picked ? `, ${pass.picked} you answered` : "") +
     "." +
     (crewMarked ? ` ${crewMarked === 1 ? "1 crew payment was" : `${crewMarked} crew payments were`} already recorded, so ${crewMarked === 1 ? "it was" : "they were"} marked, never written twice.` : "") +
+    (paymentsMarked ? ` ${paymentsMarked === 1 ? "1 deposit was" : `${paymentsMarked} deposits were`} already a payment on ${paymentsMarked === 1 ? "its" : "their"} invoice, so ${paymentsMarked === 1 ? "that payment was" : "those payments were"} marked, never written twice.` : "") +
     (leftLines ? ` ${leftLines} left for later ${leftLines === 1 ? "is" : "are"} not counted yet and wait${leftLines === 1 ? "s" : ""} on the card.` : "") +
     (remembered.length ? ` Remembered for next time: ${remembered.join("; ")}. Forget one under See How It Sorted.` : "");
   return problems.length ? { ok: true, message: `${said} But: ${problems.join(" ")}` } : { ok: true, message: said };

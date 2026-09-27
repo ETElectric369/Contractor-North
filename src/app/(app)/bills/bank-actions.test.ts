@@ -459,6 +459,29 @@ describe("Apply", () => {
     expect(db.pay_payments[0]).toMatchObject({ bank_line_id: null, voided_at: null });
   });
 
+  it("a person's On INV-1001 on a deposit already recorded as a payment on INV-1001 marks that payment, never writes a second", async () => {
+    // INV-1001 was billed at $2,550 and half paid by check, written down 4 days AFTER the bank posted
+    // it: the $1,275 still open is the deposit's money, and no sure match reaches that far.
+    Object.assign(db.invoices.find((i) => i.id === "inv-1")!, { total: 2550, amount_paid: 1275, status: "partial" });
+    db.invoice_items = [{ invoice_id: "inv-1", line_total: 2550 }];
+    db.payments.push({ id: "pay-rec", org_id: "org-1", invoice_id: "inv-1", amount: 1275, paid_at: "2026-09-08T19:00:00Z", method: "check", processor_fee: null, stripe_payment_intent: null, bank_line_id: null });
+    const id = await drop();
+    const v = await view(id);
+    const dep = rowBy(v, "Deposit");
+    // Already Counted is the guess, and the invoice a tap away.
+    expect(dep.buttons.map((b) => b.id)).toEqual(["not_income", "invoice:inv-1", "other_income"]);
+    const res = await applyBankDownload(id, { fingerprint: v.fingerprint, picks: { [dep.id]: "invoice:inv-1" } });
+    expect(res.message).toMatch(/1 deposit was already a payment on its invoice, so that payment was marked, never written twice\./);
+    expect(db.payments.filter((p) => p.invoice_id === "inv-1").map((p) => p.id)).toEqual(["pay-rec"]);
+    const line = db.bank_lines.find((l) => l.description === "DEPOSIT")!;
+    expect(line).toMatchObject({ choice: "matched", sorted_by: "person", invoice_id: null });
+    expect(db.payments.find((p) => p.id === "pay-rec")!.bank_line_id).toBe(line.id);
+    expect(db.invoices.find((i) => i.id === "inv-1")).toMatchObject({ amount_paid: 1275, status: "partial" });
+    // Undo takes the mark off and leaves the payment as it was.
+    await undoBankDownload(id);
+    expect(db.payments.find((p) => p.id === "pay-rec")).toMatchObject({ bank_line_id: null, amount: 1275 });
+  });
+
   it("a refund put back on its bucket is a negative business cost, and Undo takes it off", async () => {
     const id = await drop(`Date,Description,Amount\n09/13/2026,ACME TOOLS RETURN,30.00\n`, "Refund1234.csv");
     const v = await view(id);
