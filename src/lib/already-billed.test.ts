@@ -15,6 +15,7 @@ import {
   jobCanHold,
   jobReach,
   noJobCanHoldHours,
+  noJobHandsShown,
   noJobPreticked,
   noJobStrayDoors,
   sortInvoicesFor,
@@ -375,6 +376,12 @@ describe("hours on NO job (TTUSD on INV-055, Ben Ebenezer on INV-058)", () => {
     expect(noJobCanHoldHours([{ ...INV055, status: "void" }])).toBe(false);
     expect(noJobCanHoldHours([{ ...INV055, job_id: "j-010" }])).toBe(false);
     expect(noJobCanHoldHours([{ ...INV055, lines: [line({ id: "imp", line_total: 500, import_source: "labor", unit: "hr", quantity: 5 })] }])).toBe(false);
+  });
+  it("the invoice page shows its Hours On No Job, Billed By Hand Here only on an invoice with no job that isn't void (a void one's Not Billed After All could only fail)", () => {
+    expect(noJobHandsShown({ job_id: null, status: "sent" })).toBe(true);
+    expect(noJobHandsShown({ job_id: null, status: "paid" })).toBe(true);
+    expect(noJobHandsShown({ job_id: null, status: "void" })).toBe(false);
+    expect(noJobHandsShown({ job_id: "j-010", status: "sent" })).toBe(false);
   });
   const e = (id: string, family?: string): AbEntry => ({ id, person: "p-jp", name: "JP Prince", clockIn: `2026-08-0${id.slice(-1)}T15:00:00Z`, hours: 8, family });
   it("ticks only the shift the door was pressed on, a split shift whole; a shift no longer open ticks nothing", () => {

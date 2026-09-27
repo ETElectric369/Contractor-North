@@ -38,6 +38,7 @@ import { fetchSupplierNames } from "@/lib/supplier-names";
 import { readInvoiceMarkup } from "@/lib/invoice-markup-read";
 import { readNoJobHandHours } from "@/lib/already-billed-read";
 import { NotBilledAfterAllButton } from "@/components/already-billed-sheet";
+import { noJobHandsShown } from "@/lib/already-billed";
 import { markupBoxSeed } from "@/lib/invoice-markup";
 import { pendingTransfers, transferOnItsWaySentence } from "@/lib/bank-transfer";
 import type { Invoice, InvoiceItem, Payment } from "@/lib/types";
@@ -152,9 +153,10 @@ export default async function InvoicePage({
     // Send To QuickBooks shows only when THIS company has connected (qboConnected).
     qboConnected(String((inv as any).org_id ?? "")),
     /* HOURS ON NO JOB MARKED BY HAND ON THIS INVOICE (0357, TTUSD on INV-055): they have no job page,
-       so this is where their Not Billed After All lives. Only on an invoice with no job; a lost
-       read is said below, never an empty list. */
-    !(inv as any).job_id
+       so this is where their Not Billed After All lives. Only on an invoice with no job that isn't
+       void (noJobHandsShown: a void one holds nothing, and the unmark refuses it); a lost read is
+       said below, never an empty list. */
+    noJobHandsShown(inv as { job_id?: string | null; status?: string | null })
       ? readNoJobHandHours(supabase, String((inv as any).org_id ?? ""), inv.id).catch((e: unknown) => {
           reportError("billing.[id].noJobHands", e, { invoiceId: inv.id });
           return "failed" as const;

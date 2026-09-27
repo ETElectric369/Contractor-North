@@ -176,6 +176,16 @@ export function noJobStrayDoors(
   return { billed, door };
 }
 
+/**
+ * THE INVOICE PAGE'S HOURS ON NO JOB, BILLED BY HAND HERE: only on an invoice with no job that isn't
+ * void. A void invoice keeps its lines as its record, but every claims reader skips it (the hours it
+ * held are open again everywhere else) and unmark_already_billed refuses it, so a Not Billed After
+ * All there could only fail.
+ */
+export function noJobHandsShown(inv: { job_id?: string | null; status?: string | null }): boolean {
+  return !inv.job_id && inv.status !== "void";
+}
+
 /** Can any invoice with no job that went out hold hours? (a line of work typed or changed by hand) */
 export function noJobCanHoldHours(invoices: readonly AbInvoice[]): boolean {
   return invoices.some((i) => !i.job_id && eligibleInvoice(i) && eligibleLines(i, { kind: "time" }).length > 0);
