@@ -17,6 +17,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }) }));
 vi.mock("../actions", () => ({
   addInspectionPhotos: vi.fn(),
+  removeInspectionPhoto: vi.fn(),
   saveInspectionAnswers: vi.fn(),
   saveInspectionCapture: vi.fn(),
   setAppointmentPlace: vi.fn(),

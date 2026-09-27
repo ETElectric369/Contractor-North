@@ -650,6 +650,39 @@ export async function addInspectionPhotos(id: string, paths: string[]): Promise<
 }
 
 /**
+ * THE OFFICE TAKES ONE PHOTO OFF THE WALK-THROUGH, AND ITS FILE WITH IT (0356).
+ *
+ * "Taking one off is the office's, and so it STAYS off": 0356 refuses a crew lead's new photo unless
+ * its file is one he uploaded himself. A photo HE took and the office took off still had its file in
+ * the visit's folder with his name on it, so a crafted call could put it straight back. Removing the
+ * file closes that: there is nothing left for his save to point at.
+ *
+ * ONE PATH, NAMED, never the page's whole list. A list is the page's list from when it opened, so a
+ * photo the crew lead added since would be dropped by it, and deleting what a stale list dropped
+ * would destroy a photo nobody in the office ever saw. Only the file the office pressed Remove on
+ * goes, and only when it was on the stored list and sits in this visit's own folder.
+ */
+export async function removeInspectionPhoto(id: string, path: string): Promise<Result> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) {
+    if (ctx.error === STAFF_ONLY) return { ok: false, refused: true, error: "Only the office can take a photo off the walk-through." };
+    return { ok: false, error: ctx.error };
+  }
+  const { data: existing } = await ctx.supabase.from("appointments").select("capture").eq("id", id).maybeSingle();
+  if (!existing) return { ok: false, error: "Appointment not found." };
+  const stored = parseInspectorCapture(existing.capture ?? null).photos;
+  const res = await saveInspectionCapture(id, { photos: stored.filter((p) => p !== path) });
+  if (!res.ok) return res;
+  const ownFolder = `${ctx.orgId}/appointments/${id}/`;
+  if (ctx.orgId && stored.includes(path) && path.startsWith(ownFolder) && !path.includes("..")) {
+    // Best effort: the photo is already off the list, which is what was asked. A file that stays
+    // (a storage hiccup) only means a crafted call could still name it, as before this.
+    await ctx.supabase.storage.from("documents").remove([path]).then(() => undefined, () => undefined);
+  }
+  return res;
+}
+
+/**
  * The legacy four-key entry point, kept as a THIN MERGING WRAPPER.
  *
  * A cached bundle keeps calling this for hours after any deploy, and an op queued offline before

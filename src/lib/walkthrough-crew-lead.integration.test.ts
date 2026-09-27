@@ -261,6 +261,23 @@ d("a crew lead fills in the walk-through (0356)", () => {
     expect((await row(apptA)).capture.photos).toEqual([...before.capture.photos, his]);
   });
 
+  it("his OWN photo the office took off stays off too: the office's Remove deletes its file (removeInspectionPhoto)", async () => {
+    const mine = await plant(`${prefixA}4-lead-own.jpg`, leadId);
+    const on = await row(apptA);
+    expect((await save(leadId, apptA, { photos: [...on.capture.photos, mine] })).error).toBeNull();
+    // The office takes it off the list, then deletes its file under its own session.
+    expect((await save(ownerId, apptA, { photos: on.capture.photos })).error).toBeNull();
+    await c.query("select set_config('storage.allow_delete_query', 'true', true)");
+    const gone = await tryAs(ownerId, "delete from storage.objects where bucket_id = 'documents' and name = $1 returning name", [mine]);
+    await c.query("select set_config('storage.allow_delete_query', 'false', true)");
+    expect(gone.rows).toHaveLength(1);
+    // A crafted call naming it again finds no file of his: refused, and the list is as the office left it.
+    const back = await save(leadId, apptA, { photos: [...on.capture.photos, mine] });
+    expect(back.code).toBe("42501");
+    expect(back.error).toBe("A photo you put on the walk-through has to be one you took for this visit.");
+    expect((await row(apptA)).capture.photos).toEqual(on.capture.photos);
+  });
+
   it("his answers land; a priced answer stays exactly as the office left it, whatever he sends", async () => {
     const r = await save(leadId, apptA, null, sheetId, {
       work: "Remodel",

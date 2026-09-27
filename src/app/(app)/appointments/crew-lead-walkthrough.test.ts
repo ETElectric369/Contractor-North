@@ -26,6 +26,8 @@ const db = vi.hoisted(() => ({
   rpcResult: { data: "appt-1" as unknown, error: null as null | { code: string; message: string } },
   /** When set, answers each call in turn (a race needs the first and second to differ). */
   rpcQueue: [] as { data: unknown; error: null | { code: string; message: string }; before?: () => void }[],
+  /** Every path handed to storage's remove, in order. */
+  removed: [] as string[],
 }));
 
 vi.mock("@/lib/staff-guard", () => ({
@@ -42,11 +44,16 @@ vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("@/lib/calendar-sync", () => ({ pushCalendarItem: vi.fn(async () => {}), deleteCalendarItem: vi.fn(async () => {}) }));
 vi.mock("@/lib/push", () => ({ sendPushToProfiles: vi.fn(async () => {}) }));
 
-import { addInspectionPhotos, saveInspectionAnswers, saveInspectionCapture } from "./actions";
+import { addInspectionPhotos, removeInspectionPhoto, saveInspectionAnswers, saveInspectionCapture } from "./actions";
 
 function client() {
   return {
     auth: { getUser: async () => ({ data: { user: { id: db.staff ? "office-1" : "lead-1" } } }) },
+    storage: {
+      from: () => ({
+        remove: async (paths: string[]) => (db.removed.push(...paths), { data: paths.map((name) => ({ name })), error: null }),
+      }),
+    },
     rpc: async (fn: string, args: any) => {
       db.rpcCalls.push({ fn, args });
       const next = db.rpcQueue.shift();
@@ -115,6 +122,7 @@ beforeEach(() => {
   db.rpcCalls = [];
   db.rpcResult = { data: "appt-1", error: null };
   db.rpcQueue = [];
+  db.removed = [];
 });
 
 describe("the office: unchanged", () => {
@@ -142,6 +150,43 @@ describe("the office: unchanged", () => {
     expect(r).toEqual({ ok: true, id: "appt-1" });
     expect(db.rpcCalls).toEqual([]);
     expect(db.updates[0].inspection_answers).toMatchObject({ work: "Remodel", scope: [{ code: "R1", qty: 2, price: 650 }] });
+  });
+});
+
+describe("the office takes one photo off, and its file with it", () => {
+  it("the crew lead's own photo: off the list and out of the folder, so his save has nothing to put back", async () => {
+    db.staff = true;
+    db.appt.capture.photos = [PHOTO_OFFICE, PHOTO_LEAD];
+    expect(await removeInspectionPhoto("appt-1", PHOTO_LEAD)).toEqual({ ok: true, id: "appt-1" });
+    expect(db.rpcCalls).toEqual([]);
+    expect(db.updates).toHaveLength(1);
+    expect(db.updates[0].capture.photos).toEqual([PHOTO_OFFICE]);
+    expect(db.removed).toEqual([PHOTO_LEAD]);
+  });
+
+  it("names one path, never a page's list: a photo added since the office's page opened stays, file and all", async () => {
+    db.staff = true;
+    db.appt.capture.photos = [PHOTO_OFFICE, PHOTO_LEAD];
+    expect(await removeInspectionPhoto("appt-1", PHOTO_OFFICE)).toEqual({ ok: true, id: "appt-1" });
+    expect(db.updates[0].capture.photos).toEqual([PHOTO_LEAD]);
+    expect(db.removed).toEqual([PHOTO_OFFICE]);
+  });
+
+  it("a file outside this visit's own folder, or not on the list, comes off the list only", async () => {
+    db.staff = true;
+    const elsewhere = "org-1/appointments/appt-2/9-other.jpg";
+    db.appt.capture.photos = [PHOTO_OFFICE, elsewhere];
+    expect(await removeInspectionPhoto("appt-1", elsewhere)).toEqual({ ok: true, id: "appt-1" });
+    expect(db.updates[0].capture.photos).toEqual([PHOTO_OFFICE]);
+    expect(await removeInspectionPhoto("appt-1", "org-1/appointments/appt-1/never-listed.jpg")).toEqual({ ok: true, id: "appt-1" });
+    expect(db.removed).toEqual([]);
+  });
+
+  it("a crew lead can't: refused before any write, no file touched", async () => {
+    expect(await removeInspectionPhoto("appt-1", PHOTO_OFFICE)).toMatchObject({ ok: false, refused: true, error: expect.stringMatching(/Only the office/) });
+    expect(db.rpcCalls).toEqual([]);
+    expect(db.updates).toEqual([]);
+    expect(db.removed).toEqual([]);
   });
 });
 

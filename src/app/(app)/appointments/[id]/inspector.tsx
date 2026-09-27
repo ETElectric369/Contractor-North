@@ -31,7 +31,7 @@ import { AddressAutocomplete } from "@/components/address-autocomplete";
 import { LinkPicker } from "./link-picker";
 import { TellNort } from "@/components/tell-nort";
 import { hearIntoPlaybook } from "../hear-actions";
-import { addInspectionPhotos, saveInspectionAnswers, saveInspectionCapture, setAppointmentPlace } from "../actions";
+import { addInspectionPhotos, removeInspectionPhoto, saveInspectionAnswers, saveInspectionCapture, setAppointmentPlace } from "../actions";
 import type { WalkthroughAccess } from "@/lib/inspection/walkthrough-access";
 
 /** A numeric field that can be EMPTY. Deliberately not NumberInput: its value is a `number` and
@@ -616,9 +616,21 @@ export function Inspector({
 
   function removePhoto(p: CapturePhoto) {
     if (!confirm("Remove this?")) return;
-    const next = photos.filter((x) => x.path !== p.path);
-    setPhotos(next);
-    queueCapture({ photos: next.map((x) => x.path) });
+    setPhotos((cur) => cur.filter((x) => x.path !== p.path));
+    // The one photo, named: the server takes it off the stored list and deletes its file, so a crew
+    // lead's save can't put it back (0356). Never this page's whole list, which may be missing a
+    // photo the crew lead added since it opened.
+    void removeInspectionPhoto(appointmentId, p.path).then(
+      (r) => {
+        if (r.ok) return setSavedAt(Date.now());
+        setPhotos((cur) => (cur.some((x) => x.path === p.path) ? cur : [...cur, p]));
+        setError(r.error ?? "Couldn't remove it.");
+      },
+      () => {
+        setPhotos((cur) => (cur.some((x) => x.path === p.path) ? cur : [...cur, p]));
+        setError("No signal — the photo is still on the walk-through. Try again when you're back in range.");
+      },
+    );
   }
 
   // ── EMPTY STATE ────────────────────────────────────────────────────────────────────────────
