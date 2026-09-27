@@ -696,7 +696,9 @@ export function choiceLabel(c: BankChoice, names: BankNames): string {
     case "other_income":
       return "Other Income";
     case "not_income":
-      return "Not Income";
+      // What it is for: a deposit already in North (a payment recorded), or money that was never
+      // income (a transfer from the company's own account, a loan).
+      return "Already Counted Or Not Income";
   }
 }
 
@@ -787,6 +789,9 @@ export type NeedGroup = {
   buttons: string[];
   /** A rule can be learned from the person's tap on this row. */
   learnable: boolean;
+  /** A sentence for the row when the books hold something that looks like it ("Maybe the payment on
+   *  INV-1001 of Sep 1, already in North"), or null. */
+  hint?: string | null;
   merchantKey: string;
 };
 
@@ -900,11 +905,26 @@ function crewNamed(description: string, crew: readonly BooksCrew[]): BooksCrew |
   return hits.length === 1 ? hits[0] : null;
 }
 
-/** THE GUESS for a line nothing matched and no rule placed. Never picked; the first button. */
-export function guessFor(line: BankLine, books: BankBooks): BankChoice | null {
+/** A payment already in North of this deposit's money, recorded up to 30 days before it posted
+ *  (or 3 after), that no line took: the deposit is very likely that payment, just not surely. */
+export function lookalikePayment(line: BankLine, books: Pick<BankBooks, "payments">, used?: ReadonlySet<string>): BooksPayment | null {
+  if (line.cents <= 0) return null;
+  const hits = books.payments.filter((p) => {
+    if (used?.has(p.id)) return false;
+    const d = dayDiff(line.postedOn, p.day);
+    return d >= -3 && d <= 30 && (p.cents === line.cents || bankCentsOf(p) === line.cents);
+  });
+  return hits.sort((a, b) => Math.abs(dayDiff(line.postedOn, a.day)) - Math.abs(dayDiff(line.postedOn, b.day)) || a.id.localeCompare(b.id))[0] ?? null;
+}
+
+/** THE GUESS for a line nothing matched and no rule placed. Never picked; marked Guess. */
+export function guessFor(line: BankLine, books: BankBooks, used?: ReadonlySet<string>): BankChoice | null {
   if (line.cents > 0) {
     const hits = books.invoices.filter((i) => i.balanceCents === line.cents);
     if (hits.length === 1) return { choice: "invoice", invoiceId: hits[0].id };
+    // A payment already in North of this money (a way of paying the bank's words don't say, or
+    // further back than a sure match reaches): already counted, never Other Income on top of it.
+    if (lookalikePayment(line, books, used)) return { choice: "not_income" };
     // Money moved in from another of the company's own accounts is not income, and neither is the
     // payment that shows as money in on a card's own download ("Payment Thank You"); a processor's
     // payout of customers' money is income, and gets no guess (the person says which).
@@ -1239,7 +1259,7 @@ export function planBankDownload(dl: BankDownload, books: BankBooks): BankPlan {
     // Outside every band the merchant has: its nearest answer is the guess (asked, never placed).
     const hint = rule ? null : ruleHintFor(line, books.rules);
     const hinted = hint ? ruleChoice(hint, books) : null;
-    const guess = onInvoice ? guessFor(line, books) : hinted && choiceFits(hinted, direction) ? hinted : guessFor(line, books);
+    const guess = onInvoice ? guessFor(line, books, used) : hinted && choiceFits(hinted, direction) ? hinted : guessFor(line, books, used);
     const single =
       isBareCheck(line) || !line.merchantKey || isGenericKey(line.merchantKey) || guess?.choice === "invoice" || (direction === "out" && !!line.check) || isCustomerMoneyIn(line);
     asking.push({ line, direction, guess, single });
@@ -1290,6 +1310,10 @@ export function planBankDownload(dl: BankDownload, books: BankBooks): BankPlan {
         buttons: [],
         learnable: !single && !!line.merchantKey && !isGenericKey(line.merchantKey),
         merchantKey: line.merchantKey,
+        hint: (() => {
+          const p = lookalikePayment(line, books, used);
+          return p ? `Maybe the payment on ${p.invoiceNumber} of ${sayRange(p.day, p.day)}, already in North.` : null;
+        })(),
       };
       groups.set(id, g);
     }
@@ -1328,6 +1352,9 @@ function buttonsFor(g: NeedGroup, books: BankBooks): string[] {
   };
   add(g.guess);
   if (g.direction === "in") {
+    // With no guess, Already Counted comes before Other Income: a deposit already in North counted
+    // again as income is money that never came in twice.
+    if (!g.guess) add("not_income");
     add("other_income");
     add("not_income");
     return out.slice(0, 3);
@@ -1568,6 +1595,8 @@ export type BankRowView = {
   title: string;
   money: string;
   dates: string;
+  /** "Maybe the payment on INV-1001 of Sep 1, already in North." or null. */
+  hint?: string | null;
   direction: "in" | "out";
   single: boolean;
   guess: string | null;
@@ -1677,6 +1706,7 @@ export function bankViewOf(dl: BankDownload, plan: BankPlan, books: BankBooks, o
         direction: g.direction,
         single: g.single,
         guess: g.guess,
+        hint: g.hint ?? null,
         buttons: g.buttons.map((id) => ({ id, label: label(id) })),
       };
     }),

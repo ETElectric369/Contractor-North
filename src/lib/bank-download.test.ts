@@ -474,6 +474,21 @@ describe("matching what is already on the books (exact cents, each row once)", (
     expect(depositKindOf("ACME CORP")).toBeNull();
   });
 
+  it("a deposit that looks like a payment already in North says so, and guesses Already Counted, never Other Income first", () => {
+    const dl = readBankTable(parseCSV(`Date,Description,Amount\n09/12/2026,DEPOSIT,1275.00\n09/13/2026,ACME CORP,300.00\n`), "x.csv", hash)!;
+    // Recorded 11 days before, by a way the words don't say ("other"): not a sure match.
+    const books = ORG_BOOKS({ payments: [{ id: "p-other", invoiceId: "i1", invoiceNumber: "INV-1001", cents: 127500, day: "2026-09-01", method: "other", feeCents: null, stripe: false }] });
+    const plan = planBankDownload(dl, books);
+    const dep = plan.groups.find((g) => g.label === "DEPOSIT")!;
+    expect(dep.guess).toBe("not_income");
+    expect(dep.hint).toBe("Maybe the payment on INV-1001 of Sep 1, already in North.");
+    expect(dep.buttons).toEqual(["not_income", "other_income"]);
+    // No guess at all: Already Counted still comes before Other Income.
+    const acme = plan.groups.find((g) => g.label === "ACME CORP")!;
+    expect(acme.guess).toBeNull();
+    expect(acme.buttons).toEqual(["not_income", "other_income"]);
+  });
+
   it("a card payout is exactly one group of payments less their fees; a Venmo sweep one group of Venmo payments", () => {
     const dl = download();
     const books = ORG_BOOKS({

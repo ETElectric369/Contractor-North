@@ -289,7 +289,7 @@ describe("the door", () => {
     // The total of three different fills, said as a total (never "3×", which reads as each).
     expect(shell.money).toBe("3 charges · $288.45");
     expect(shell.buttons.map((b) => b.label)).toEqual(["Fuel", "Truck", "Personal"]);
-    expect(rowBy(v, "Deposit").buttons.map((b) => b.label)).toEqual(["On INV-1001", "Other Income", "Not Income"]);
+    expect(rowBy(v, "Deposit").buttons.map((b) => b.label)).toEqual(["On INV-1001", "Other Income", "Already Counted Or Not Income"]);
     expect(rowBy(v, "Check 1043").buttons.map((b) => b.label)).toEqual(["Pay Pat Crew", "Personal"]);
     // Another company's supplier, invoice and crew are never offered.
     expect(JSON.stringify(v)).not.toMatch(/Someone Else|INV-9|Other Crew/);

@@ -16,7 +16,7 @@ import { keepPaperwork } from "@/app/(app)/organize/paperwork-actions";
  *   Bank ••1234 · Aug 26–Sep 25 · 96 sorted · 17 already in North · 3 need you
  *   [one bar: where the money went]
  *   SHELL 123 ANYTOWN · 3 charges · $288.45   [Fuel] [Truck] [Personal] [Other…]
- *   Deposit Sep 4 · $1,275.00        [On INV-1001] [Other Income] [Not Income] [Other…]
+ *   Deposit Sep 4 · $1,275.00        [On INV-1001] [Other Income] [Already Counted Or Not Income] [Other…]
  *   Check 1043 · $640.00             [Pay Pat] [Other…]
  *   [Apply] [Not Now]
  *
@@ -92,6 +92,7 @@ function Row({
         {row.direction === "in" && <span className="text-xs text-green-700">Money In</span>}
         {!row.guess && <span className="text-xs text-slate-500">No guess</span>}
       </div>
+      {row.hint && <p className="text-xs text-slate-600">{row.hint}</p>}
       <div className="flex flex-wrap gap-2">
         {row.buttons.map((b) => (
           <Button
