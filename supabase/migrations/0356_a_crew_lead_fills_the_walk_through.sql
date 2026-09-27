@@ -83,6 +83,10 @@
 --
 -- Two profiles carry crew_lead: ET Electric's owner and a deactivated Tahoe Deck office seat. No
 -- tech is a crew lead, so nobody gains a door today; the office turns it on per person on /team.
+-- That is a READ from 2026-09-26, not something this migration can take on trust: until the
+-- trigger lands a tech can still hand himself the flag, and the function trusts whoever holds it.
+-- So the self-check names every holder who isn't an owner or admin, as notices and as the last
+-- result, for the office to confirm when the door opens.
 -- No appointment holds a priced answer yet, and every stored photo path is under its own visit's
 -- folder, so none of the rules above would have refused anything already written.
 -- Neither function exists on production (checked), so nothing here replaces a live body.
@@ -407,6 +411,9 @@ create policy docs_delete on storage.objects for delete
 
 -- ── Self-check ──────────────────────────────────────────────────────────────────────────────────
 do $$
+declare
+  r record;
+  n int := 0;
 begin
   if not exists (
     select 1 from pg_trigger t
@@ -446,4 +453,26 @@ begin
     raise exception '0356: docs_update / docs_delete do not hold a visit''s files to the office or their uploader. Nothing was changed.';
   end if;
   raise notice '0356: a crew lead on the visit fills in the walk-through through save_walkthrough_capture; only an owner or admin makes a crew lead; only the office or the uploader deletes, overwrites or moves a visit''s file.';
+  -- WHO HOLDS THE FLAG AS THE DOOR OPENS. guard_crew_lead stops changes from here on; until this
+  -- ran, any tech could set crew_lead on his own row, and the function trusts whatever it holds now.
+  -- So every holder who isn't an owner or admin is named here (and in the result below) for the
+  -- office to confirm on /team; one nobody meant to make a crew lead gets the box unticked there.
+  for r in
+    select o.name as company, p.full_name, p.role::text as role, p.active, p.id
+      from public.profiles p join public.organizations o on o.id = p.org_id
+     where p.crew_lead and coalesce(p.role::text, '') not in ('owner', 'admin')
+     order by o.name, p.full_name
+  loop
+    n := n + 1;
+    raise notice '0356: CONFIRM this crew lead on /team: % at % (role %, %, profile %)',
+      coalesce(r.full_name, '(no name)'), r.company, r.role, case when r.active then 'active' else 'deactivated' end, r.id;
+  end loop;
+  raise notice '0356: % crew lead(s) who aren''t an owner or admin hold the flag now.', n;
 end $$;
+
+-- The same list as a result, so it is on screen whichever way this was run (the SQL editor shows the
+-- last result, not the notices). Empty = nobody but an owner or admin holds crew_lead.
+select o.name as company, p.full_name, p.role::text as role, p.active, p.id as profile_id
+  from public.profiles p join public.organizations o on o.id = p.org_id
+ where p.crew_lead and coalesce(p.role::text, '') not in ('owner', 'admin')
+ order by o.name, p.full_name;
