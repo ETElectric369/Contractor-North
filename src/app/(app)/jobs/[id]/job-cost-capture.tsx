@@ -87,7 +87,7 @@ export function JobCostCapture({ orgId, jobId, billsTotal, nortOn = true }: { or
     setBusy(true);
     say(l.id, l.name, "Recording it as a different purchase…", "busy");
     try {
-      const out = await readReceiptDocument(l.differentDoc, { differentPurchase: true });
+      const out = await readReceiptDocument(l.differentDoc, { differentPurchase: true }, nortOn);
       say(l.id, l.name, out.sentence, out.tone);
       router.refresh();
     } catch (e) {
@@ -119,7 +119,7 @@ export function JobCostCapture({ orgId, jobId, billsTotal, nortOn = true }: { or
         const left = queue.current.length;
         say(p.id, p.name, left ? `Reading the receipt… (${left} more waiting)` : "Reading the receipt…", "busy");
         try {
-          const out = await captureReceipt({ orgId, jobId, file: p.file, read: true });
+          const out = await captureReceipt({ orgId, jobId, file: p.file, read: true, nortOn });
           // "lost" is the only outcome that left nothing on the job; every other one filed the paper.
           if (out.kind !== "lost") touched = true;
           say(p.id, p.name, out.sentence, out.tone, out.kind === "already" && out.samePurchase ? out.docId : undefined);

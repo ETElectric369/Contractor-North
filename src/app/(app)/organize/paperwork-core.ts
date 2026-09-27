@@ -1024,7 +1024,7 @@ export async function papersAfterBillDeleted(
     all.length
       ? `${all.length === 1 ? `Its paper, "${all[0]}", is` : `${all.length} papers behind it are`} back in Sort These. If this bill was a duplicate, press Set Aside on ${all.length === 1 ? "that paper" : "them"}; if not, File It again.`
       : "",
-    onJob.length ? `The receipt stays on the job; Record as Cost there makes it a cost again.` : "",
+    onJob.length ? `The receipt stays on the job; Record As Cost there makes it a cost again.` : "",
   ].filter(Boolean);
   return parts.join(" ");
 }

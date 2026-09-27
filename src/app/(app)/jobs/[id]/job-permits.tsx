@@ -78,7 +78,7 @@ export function JobPermits({ jobId, permits, canAdd = true }: { jobId: string; p
     <div>
       <div className="mb-3 flex items-center justify-between">
         <div className="text-sm text-slate-500">{permits.length} permit{permits.length === 1 ? "" : "s"}</div>
-        {canAdd && <Button size="sm" variant="outline" onClick={() => setAdding((a) => !a)}><Plus className="h-3.5 w-3.5" /> Add Permit</Button>}
+        {canAdd && <Button variant="outline" onClick={() => setAdding((a) => !a)}><Plus className="h-3.5 w-3.5" /> Add Permit</Button>}
       </div>
 
       {canAdd && adding && (

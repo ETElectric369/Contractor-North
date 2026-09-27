@@ -665,7 +665,7 @@ ${MASKED_PRICE_PROMPT_RULE}`,
     });
   }
   const linkWarning = linkMissing
-    ? "The cost is recorded, but this receipt did not get marked as billed. Tapping Record as Cost on it again would write a second bill, so check the job's costs first."
+    ? "The cost is recorded, but this receipt did not get marked as billed. Tapping Record As Cost on it again would write a second bill, so check the job's costs first."
     : null;
 
   revalidatePath("/bills");
@@ -1327,7 +1327,7 @@ export async function undoPaperwork(id: string): Promise<Result & { message?: st
     if (item.job_id) revalidatePath(`/jobs/${item.job_id}`);
     return {
       ok: true,
-      message: `Undone: its cost is off the job. The receipt stays on the job; press Record as Cost there to make it a cost again.${papersBackSaid(torn.papersBack)}`,
+      message: `Undone: its cost is off the job. The receipt stays on the job; press Record As Cost there to make it a cost again.${papersBackSaid(torn.papersBack)}`,
     };
   }
 

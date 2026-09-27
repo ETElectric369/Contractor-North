@@ -126,7 +126,7 @@ export function JobDocuments({
     const lost: string[] = [];
     let touched = false;
     for (const raw of files) {
-      const out = await captureReceipt({ orgId, jobId, file: raw, category, read: COSTABLE(category) });
+      const out = await captureReceipt({ orgId, jobId, file: raw, category, read: COSTABLE(category), nortOn });
       if (out.kind === "lost") {
         lost.push(`${raw.name || "File"}: ${out.sentence}`);
         continue;
@@ -152,7 +152,7 @@ export function JobDocuments({
     setBilling(d.id);
     note(d.id, null);
     try {
-      const out = await readReceiptDocument(d.id, differentPurchase ? { differentPurchase: true } : undefined);
+      const out = await readReceiptDocument(d.id, differentPurchase ? { differentPurchase: true } : undefined, nortOn);
       note(d.id, {
         text: out.sentence,
         done: out.kind !== "filed",
@@ -341,7 +341,7 @@ export function JobDocuments({
                   <button
                     onClick={() => recordCost(d)}
                     disabled={billing === d.id}
-                    className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-brand/30 bg-brand/5 px-2 py-1 text-xs font-medium text-brand hover:bg-brand/10 disabled:opacity-50"
+                    className="inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-md border border-brand/30 bg-brand/5 px-2 py-1 text-xs font-medium text-brand hover:bg-brand/10 disabled:opacity-50"
                     title={`${nortOn ? "Nort reads" : "Reads"} the receipt and adds it to this job's costs`}
                   >
                     {billing === d.id ? (
@@ -349,7 +349,7 @@ export function JobDocuments({
                     ) : (
                       <DollarSign className="h-4 w-4 shrink-0" />
                     )}
-                    Record as Cost
+                    Record As Cost
                   </button>
                 )}
                 {d.category && <Badge tone="blue">{d.category}</Badge>}

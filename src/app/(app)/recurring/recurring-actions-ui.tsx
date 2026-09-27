@@ -51,8 +51,9 @@ export function RecurringRowActions({ id, active, canGenerate = true }: { id: st
             })
           }
           disabled={pending}
-          className="rounded-md p-1 text-slate-400 hover:bg-brand/10 hover:text-brand"
-          title="Generate one now"
+          className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-slate-400 hover:bg-brand/10 hover:text-brand"
+          title="Generate One Now"
+          aria-label="Generate One Now"
         >
           <Zap className="h-4 w-4" />
         </button>
@@ -66,8 +67,9 @@ export function RecurringRowActions({ id, active, canGenerate = true }: { id: st
           })
         }
         disabled={pending}
-        className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+        className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-700"
         title={active ? "Pause" : "Resume"}
+        aria-label={active ? "Pause" : "Resume"}
       >
         {active ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
       </button>

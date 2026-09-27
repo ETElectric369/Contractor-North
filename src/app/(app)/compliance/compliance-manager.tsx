@@ -120,7 +120,7 @@ export function ComplianceManager({ items, orgId, canEdit }: { items: Compliance
       {canEdit && (
         <div className="flex flex-wrap items-center justify-end gap-2">
           <ImportDocsButton orgId={orgId} page="Compliance" />
-          <Button size="sm" onClick={() => setAdding((a) => !a)}><Plus className="h-3.5 w-3.5" /> Add Item</Button>
+          <Button onClick={() => setAdding((a) => !a)}><Plus className="h-3.5 w-3.5" /> Add Item</Button>
         </div>
       )}
 
@@ -165,8 +165,8 @@ export function ComplianceManager({ items, orgId, canEdit }: { items: Compliance
                   </div>
                   {canEdit && (
                     <div className="flex items-center gap-1">
-                      <button onClick={() => openEdit(c)} className="text-slate-300 hover:text-slate-700" title="Edit"><Pencil className="h-4 w-4" /></button>
-                      <DeleteButton action={() => deleteCompliance(c.id)} confirm="Delete this item?" done="Item deleted" className="text-slate-300 hover:text-red-600 disabled:opacity-50" />
+                      <button type="button" onClick={() => openEdit(c)} className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-slate-300 hover:text-slate-700" title="Edit" aria-label="Edit"><Pencil className="h-4 w-4" /></button>
+                      <DeleteButton action={() => deleteCompliance(c.id)} confirm="Delete this item?" done="Item deleted" className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-slate-300 hover:text-red-600 disabled:opacity-50" />
                     </div>
                   )}
                 </div>

@@ -167,7 +167,7 @@ function SafetyPanel({
                   {r.severity && SEV[r.severity] && <Badge tone={SEV[r.severity].tone}>{SEV[r.severity].label}</Badge>}
                   {r.recordable && <Badge tone="red">OSHA 300</Badge>}
                   {canEdit && <EditSafetyButton kind={kind} employees={employees} jobs={jobs} record={r} />}
-                  {canEdit && <button onClick={() => { if (!confirm("Delete this safety record? This removes a legal OSHA record.")) return; start(async () => { const res = await deleteSafetyRecord(r.id); if (!res.ok) return alert(res.error ?? "Could not delete."); router.refresh(); }); }} className="text-slate-300 hover:text-red-600" title="Delete"><Trash2 className="h-4 w-4" /></button>}
+                  {canEdit && <button onClick={() => { if (!confirm("Delete this safety record? This removes a legal OSHA record.")) return; start(async () => { const res = await deleteSafetyRecord(r.id); if (!res.ok) return alert(res.error ?? "Could not delete."); router.refresh(); }); }} className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-slate-300 hover:text-red-600" title="Delete" aria-label="Delete"><Trash2 className="h-4 w-4" /></button>}
                 </div>
               </div>
             </Card>
@@ -243,7 +243,7 @@ function EditSafetyButton({
 
   return (
     <>
-      <button onClick={() => { reset(); setOpen(true); }} className="text-slate-300 hover:text-brand" title="Edit"><Pencil className="h-4 w-4" /></button>
+      <button type="button" onClick={() => { reset(); setOpen(true); }} className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-slate-300 hover:text-brand" title="Edit" aria-label="Edit"><Pencil className="h-4 w-4" /></button>
       <Modal
         open={open}
         onClose={() => setOpen(false)}

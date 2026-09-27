@@ -36,6 +36,15 @@ describe("the paper readers say Nort only while Nort is on", () => {
     expect(src("src/app/(app)/price-list/page.tsx")).toMatch(/<VendorsManager[\s\S]{0,500}nortOn=\{nortOn\}/);
     expect(src("src/app/(app)/price-list/vendors-manager.tsx")).toContain("<VendorImport existing={existingVendors} nortOn={nortOn} />");
   });
+
+  it("Snap The Bill and Receipts & Documents hand the switch to the receipt pipeline", () => {
+    for (const f of ["src/app/(app)/jobs/[id]/job-cost-capture.tsx", "src/app/(app)/jobs/[id]/job-documents.tsx"]) {
+      const s = src(f);
+      expect(s, f).toMatch(/captureReceipt\(\{[^}]*nortOn \}\)/);
+      expect(s, f).toMatch(/readReceiptDocument\([^;]*, nortOn\)/);
+    }
+    expect(unswitched("src/lib/receipt-capture.ts")).toEqual([]);
+  });
 });
 
 describe("the Lessons run in neutral words while Nort is off", () => {

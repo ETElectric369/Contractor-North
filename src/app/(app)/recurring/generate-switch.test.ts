@@ -51,9 +51,9 @@ describe("Generate One Now on each row", () => {
   const row = (p: Record<string, unknown> = {}) => renderToStaticMarkup(createElement(RecurringRowActions as any, { id: "t1", active: true, ...p }));
   it("on / not passed: today's row; off: no Generate button, Pause still there", () => {
     expect(row({ canGenerate: true })).toBe(row());
-    expect(row()).toContain('title="Generate one now"');
+    expect(row()).toContain('title="Generate One Now"');
     const off = row({ canGenerate: false });
-    expect(off).not.toContain('title="Generate one now"');
+    expect(off).not.toContain('title="Generate One Now"');
     expect(off).toContain('title="Pause"');
   });
 });

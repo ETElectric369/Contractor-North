@@ -1490,7 +1490,7 @@ describe("Undo, Delete and a deleted bill leave nothing wrong behind (audit v994
     expect(did("documents", "delete")).toBeUndefined();
     expect(did("organized_items", "update")).toBeUndefined();
     expect(did("organized_items", "delete")!.eqs).toContainEqual(["org_id", "org-1"]);
-    expect(res.message).toContain("The receipt stays on the job; press Record as Cost there");
+    expect(res.message).toContain("The receipt stays on the job; press Record As Cost there");
   });
 
   it("TD1: a link row written by Record as Cost says so (source 'job'), whatever its dates", async () => {
