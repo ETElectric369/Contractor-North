@@ -26,7 +26,7 @@ export function inquiryDueFilter(todayStr: string): string {
  * Only used when the hold_until column exists; before 0366 the feeder reads the old rule alone.
  */
 export function heldJobDueFilter(todayStr: string, staleCutoffIso: string): string {
-  return `hold_until.lte.${todayStr},and(hold_until.is.null,updated_at.lt."${staleCutoffIso}")`;
+  return `hold_until.lte.${todayStr},and(hold_until.is.null,updated_at.lt.${staleCutoffIso})`;
 }
 
 /**
