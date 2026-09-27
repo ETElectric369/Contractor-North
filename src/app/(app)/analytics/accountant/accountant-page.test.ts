@@ -81,7 +81,16 @@ describe("the page and its download agree", () => {
     // An older bookmarked period is among the choices, so the picker shows the period the file is.
     expect(src("page.tsx")).toContain("periodChoices(period.kind, todayYmd, period)");
     const button = src("accountant-download.tsx");
-    expect(button.match(/disabled=\{busy !== null \|\| opening !== null\}/g)).toHaveLength(2);
+    expect(button.match(/disabled=\{busy !== null \|\| opening !== null\}/g)).toHaveLength(3);
     expect(button).toContain('redirect: "manual"');
+  });
+
+  it("a file kept for Save The File never outlives its period: the card is keyed on the period, and Save The File waits while one opens", () => {
+    // Next keeps a page's client state when only the search params change, so without the key a
+    // Q2 file left waiting for Save The File would still be handed over under a card that reads Q3.
+    expect(src("page.tsx")).toMatch(/<AccountantDownload\s+key=\{period\.key\}/);
+    const button = src("accountant-download.tsx");
+    const save = button.slice(button.indexOf("onClick={() => void share(ready, true)}"), button.indexOf("Save The File\n"));
+    expect(save).toContain("disabled={busy !== null || opening !== null}");
   });
 });

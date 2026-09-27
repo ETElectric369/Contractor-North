@@ -165,7 +165,10 @@ export default async function AccountantPage({ searchParams }: { searchParams: P
         </Card>
 
         <Card className="mb-4 p-4">
+          {/* Keyed on the period too: a file kept for Save The File (or a line about it) belongs to the
+              period it was made for, and a new period starts the card fresh. */}
           <AccountantDownload
+            key={period.key}
             xlsxHref={href("xlsx")}
             csvHref={href("csv")}
             xlsxName={accountantFileName(org?.name, period, "xlsx")}

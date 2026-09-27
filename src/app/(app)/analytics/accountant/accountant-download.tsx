@@ -24,7 +24,8 @@ import { useOpeningPeriod } from "./period-picker";
  *
  * SIGNED OUT, OR NOT THE FILE: the fetch never follows a redirect (the middleware's answer to a
  * lost session is a redirect to the login page), and anything that isn't the file is said in words
- * and never saved (download-response.ts). While a newly picked period opens, both wait.
+ * and never saved (download-response.ts). While a newly picked period opens, all three wait, and
+ * the page keys this card on the period, so a file kept for Save The File never outlives its period.
  */
 export function AccountantDownload({ xlsxHref, csvHref, xlsxName, csvName }: { xlsxHref: string; csvHref: string; xlsxName: string; csvName: string }) {
   const [busy, setBusy] = useState<"xlsx" | "csv" | null>(null);
@@ -135,7 +136,8 @@ export function AccountantDownload({ xlsxHref, csvHref, xlsxName, csvName }: { x
         <button
           type="button"
           onClick={() => void share(ready, true)}
-          className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-50"
+          disabled={busy !== null || opening !== null}
+          className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60"
         >
           <Download className="h-4 w-4" /> Save The File
         </button>
