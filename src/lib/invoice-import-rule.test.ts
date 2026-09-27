@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { estimateIsTheContract, jobBillsItsActuals, shouldImportActuals } from "./invoice-import-rule";
+import { estimateIsTheContract, isLiveQuote, jobBillsItsActuals, nextInvoiceImportsActuals, shouldImportActuals } from "./invoice-import-rule";
 
 describe("shouldImportActuals — the contract-vs-actuals rule", () => {
   it("a QUOTED job does not import actuals by default (the double-bill guard)", () => {
@@ -34,5 +34,25 @@ describe("estimateIsTheContract - on T&M the estimate is a guide (Erik, Tao J-00
     expect(estimateIsTheContract(null, true)).toBe(true);
     expect(estimateIsTheContract("fixed", false)).toBe(false);
     expect(estimateIsTheContract("tm", false)).toBe(false);
+  });
+});
+
+describe("nextInvoiceImportsActuals - New Invoice's own rule (Already Billed asks it)", () => {
+  it("Purple Sage J-010: fixed price, no live estimate, no schedule: New Invoice pulls the actuals", () => {
+    expect(nextInvoiceImportsActuals("fixed", 0, false)).toBe(true);
+    // ...where jobBillsItsActuals (the Overview card, the portal) says no.
+    expect(jobBillsItsActuals("fixed", 0)).toBe(false);
+  });
+  it("a T&M job does, estimate or not; a fixed-price job with a live estimate, or any schedule, does not", () => {
+    expect(nextInvoiceImportsActuals("tm", 0, true)).toBe(true);
+    expect(nextInvoiceImportsActuals("fixed", 0, true)).toBe(false);
+    expect(nextInvoiceImportsActuals("tm", 2, false)).toBe(false);
+  });
+  it("a declined or expired estimate is not live", () => {
+    expect(isLiveQuote("declined")).toBe(false);
+    expect(isLiveQuote("expired")).toBe(false);
+    expect(isLiveQuote("accepted")).toBe(true);
+    expect(isLiveQuote("sent")).toBe(true);
+    expect(isLiveQuote(null)).toBe(true);
   });
 });

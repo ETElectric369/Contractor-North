@@ -16,6 +16,8 @@ import { SHORT_FIX } from "@/lib/stock-take";
 import { loadSupplierDesk, type SupplierDesk, type SupplierPaperFeed } from "@/app/(app)/bills/supplier-papers";
 import { supplierDeskFailedItem, supplierPaperActionItem } from "./supplier-paper-item";
 import { supplierPayActionItems } from "./supplier-pay-item";
+import { readNoJobHoursReach } from "@/lib/already-billed-read";
+import { noJobStrayDoors } from "@/lib/already-billed";
 import { feederOn, inquiryActionItem } from "./switches";
 import { featureOn, featuresFromOffKey } from "@/lib/features";
 import {
@@ -815,7 +817,24 @@ async function buildActionItems(ctx: {
   const openOwner = new Map<string, { profile_id?: string | null; full_name?: string | null }>(
     ((openTimeR.data ?? []) as any[]).map((e) => [String(e.id), { profile_id: e.profile_id, full_name: e.profiles?.full_name }]),
   );
+  // A CLOSED SHIFT ON NO JOB MAY HAVE BEEN BILLED BY HAND on an invoice with no job (0357, TTUSD on
+  // INV-055): one that a live invoice already holds is billed, so it is no stray; the rest get
+  // Already Billed when a sent invoice with no job could hold them. Read only when there are some
+  // (one breath, rare). A lost read keeps every row and offers the door (the sheet says what it finds).
+  const closedNoJob = strayFindings.filter((f) => !f.openStill).map((f) => f.entryId);
+  let noJobReach: { canHold: boolean; claimed: Set<string> } | null = null;
+  if (isStaff && closedNoJob.length) {
+    try {
+      const { data: me } = await supabase.from("profiles").select("org_id").eq("id", userId).maybeSingle();
+      const orgId = String((me as { org_id?: string | null } | null)?.org_id ?? "");
+      if (orgId) noJobReach = await readNoJobHoursReach(supabase, orgId, closedNoJob);
+    } catch {
+      noJobReach = null;
+    }
+  }
+  const noJob = noJobStrayDoors(closedNoJob, isStaff ? noJobReach : { canHold: false, claimed: new Set() });
   for (const f of strayFindings) {
+    if (!f.openStill && noJob.billed.has(f.entryId)) continue;
     const owner = openOwner.get(f.entryId);
     const door = clockDoorWords(owner?.full_name, { self: !!owner?.profile_id && owner.profile_id === userId }).clockOut;
     items.push({
@@ -840,6 +859,7 @@ async function buildActionItems(ctx: {
       // The open one lands on its own clock-out sheet (/timecards finds the entry in any week).
       href: f.openStill ? `/timecards?entry=${f.entryId}` : "/timecards",
       affordances: AFFORDANCES.time_stray,
+      ...(!f.openStill && noJob.door.has(f.entryId) ? { noJobHours: { entryIds: [f.entryId] } } : {}),
     });
   }
 

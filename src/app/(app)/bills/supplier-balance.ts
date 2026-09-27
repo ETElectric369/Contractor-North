@@ -1033,6 +1033,12 @@ export type SupplierActionResult = {
    */
   undo?: { invoiceId: string; billId: string; jobSetTo: string | null; jobBefore: string | null };
   /**
+   * ALREADY BILLED (0357): after a paper is filed on a job that bills its actual costs, the bill most
+   * likely to have charged for it already ("Already Billed On INV-00023?"). Absent when no sent bill
+   * on the job could hold it. Asking changes nothing; the sheet it opens is the Costs tab's own.
+   */
+  alreadyBilled?: { jobId: string; billId: string; invoiceNumber: string; what: string };
+  /**
    * waitOnCredit's Undo: the wait the tap replaced (0346). Both null when it wasn't waiting; a
    * stamp when it was ("Wait 30 More Days" on a card that came back), so Undo puts that one back.
    */

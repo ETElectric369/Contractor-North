@@ -13,6 +13,7 @@ import { dispatchAction } from "@/lib/action-items/dispatch";
 import { KIND_META, KIND_STREAM, STREAM_LABEL, STREAM_ORDER, sortActionItems, type ActionItem, type Affordance } from "@/lib/action-items/types";
 import { DEFAULT_TIMEZONE } from "@/lib/utils";
 import { SupplierPaperCards, SUPPLIER_PAPERS_SCOPE } from "@/components/supplier-paper-cards";
+import { AlreadyBilledButton } from "@/components/already-billed-sheet";
 
 /**
  * Friendly relative day for the "when" line; times for datetime values.
@@ -427,6 +428,13 @@ export function ActionList({
                   </div>
                   {/* THE SUPPLIER BILLS ROLLUP carries its cards inside it: one line on the badge,
                       every paper answerable right here with one tap (Bills plan, Wave A). */}
+                  {/* A SHIFT ON NO JOB BILLED BY HAND on an invoice with no job (0357, TTUSD on
+                      INV-055): the office says which line charged it, right here. */}
+                  {item.noJobHours && (
+                    <div className="mt-2">
+                      <AlreadyBilledButton jobId={null} target={{ kind: "time", ids: item.noJobHours.entryIds, what: "Those hours" }} />
+                    </div>
+                  )}
                   {item.kind === "supplier_paper" && item.supplierPapers && (
                     <div className="mt-2">
                       {/* ONE card at a time here (readable at 60mph); the rest are a link to /bills,

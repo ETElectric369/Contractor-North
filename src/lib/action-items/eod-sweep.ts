@@ -3,6 +3,7 @@ import { todayStrInTz } from "@/lib/tz";
 import { getOrgSettings } from "@/lib/org-settings";
 import { featureOn } from "@/lib/features";
 import { orgStaffIds, pushConfigured, sendPushToProfiles } from "@/lib/push";
+import { claimedSourcesOnJob } from "@/lib/unbilled-work";
 import {
   NEEDS_RETURN_DAYS,
   daysAgoStr,
@@ -60,8 +61,25 @@ export async function sendCloseOutNudges(supabase: any): Promise<{ orgs: number;
     ]);
     const nonBillable = new Set<string>(((codesR.data ?? []) as { code?: string | null }[]).map((c) => String(c.code ?? "").trim()).filter(Boolean));
 
-    const stray = detectStrayTime([...((openR.data ?? []) as any[]), ...((recentR.data ?? []) as any[])], today, Date.now(), nonBillable);
+    const found = detectStrayTime([...((openR.data ?? []) as any[]), ...((recentR.data ?? []) as any[])], today, Date.now(), nonBillable);
     const worked = rollupWorkedJobs((recentR.data ?? []) as any[], today);
+
+    /* A CLOSED SHIFT ON NO JOB THAT A LIVE INVOICE HOLDS IS BILLED (0357: billed by hand on an
+       invoice with no job, TTUSD on INV-055). My Day drops its Needs You row for that (query.ts,
+       noJobStrayDoors over the same claims read), so the push does too: it never names a gap the
+       page it links to no longer shows. Pinned to this org by hand (the service client skips RLS).
+       A lost read keeps every finding: a nag too many, never a gap missed. */
+    const closedNoJob = found.filter((f) => !f.openStill).map((f) => f.entryId);
+    let billedNoJob = new Set<string>();
+    if (closedNoJob.length) {
+      try {
+        const held = await claimedSourcesOnJob(supabase, null, null, closedNoJob, { orgId: org.id });
+        billedNoJob = new Set([...held.owner.keys()].map(String));
+      } catch {
+        billedNoJob = new Set();
+      }
+    }
+    const stray = found.filter((f) => f.openStill || !billedNoJob.has(f.entryId));
 
     // Detection only — name the gap, never fill in hours/dollars for the user.
     const gaps: string[] = stray.map((f) =>
