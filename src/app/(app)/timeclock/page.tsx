@@ -12,6 +12,7 @@ import { NextUp } from "./next-up";
 import { AutoClockoutPrompt } from "./auto-clockout-prompt";
 import { autoClockoutPromptState } from "./close-math";
 import { getOrgSettings } from "@/lib/org-settings";
+import { featureOn } from "@/lib/features";
 import { AddEntryButton } from "./add-entry-button";
 import { aggregatePayrollEntries } from "@/lib/payroll-math";
 import { hoursBetween, formatCurrency, formatDate, formatDuration, formatTime } from "@/lib/utils";
@@ -98,7 +99,8 @@ export default async function TimeclockPage() {
     supabase.from("profiles").select("crew_lead").eq("id", user?.id ?? "").maybeSingle(),
   ]);
   const orgSettings = getOrgSettings((orgRes.data as any)?.settings);
-  const crewLead = !!(leadRes.data as any)?.crew_lead;
+  // A crew lead files an end-of-day report at clock-out, only while Daily Reports is on (0352).
+  const crewLead = !!(leadRes.data as any)?.crew_lead && featureOn(orgSettings.features, "daily_reports");
   // Codes on (default) = today's behavior everywhere. Codes off = no code pickers on
   // any timeclock surface, and job labels lead with customer · street address.
   const jobCodesOn = orgSettings.timeclock_job_codes;
