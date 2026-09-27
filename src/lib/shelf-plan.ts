@@ -119,7 +119,7 @@ export function matchItem(
       };
     }
   }
-  return { kind: "create", why: wantPart ? "nothing on the shelf carries this part number" : "nothing on the shelf goes by this name" };
+  return { kind: "create", why: wantPart ? "nothing in stock carries this part number" : "nothing in stock goes by this name" };
 }
 
 export type UnitGuess = {
@@ -258,13 +258,13 @@ export function lotCostDrift(
 /** The sentence a put-on-shelf refuses with, or null to go ahead. */
 export function putOnShelfProblem(input: { pieces: unknown; unit: unknown; lineAmount: unknown; isTax: boolean; share: number }): string | null {
   const pieces = Number(input.pieces);
-  if (!Number.isFinite(pieces) || pieces <= 0) return "Say how many pieces go on the shelf.";
+  if (!Number.isFinite(pieces) || pieces <= 0) return "Say how many pieces go into stock.";
   if (pieces > 1_000_000) return "That count looks too big for one roll. Check it and try again.";
   if (!String(input.unit ?? "").trim()) return "Say what it's counted in (ft, ea).";
-  if (input.isTax) return "Sales tax isn't a thing on a shelf. It rides with the lines it was charged on.";
-  if (!(Number(input.lineAmount) > 0)) return "That line's extension is $0.00, which means nothing shipped, so nothing from it can go on the shelf.";
+  if (input.isTax) return "Sales tax can't go into stock. It rides with the lines it was charged on.";
+  if (!(Number(input.lineAmount) > 0)) return "That line's extension is $0.00, which means nothing shipped, so nothing from it can go into stock.";
   if (!(input.share > 0))
-    return "This whole line is still billed to the job. Say how much this job used first, so the rest can go on the shelf.";
+    return "This whole line is still billed to the job. Say how much this job used first, so the rest can go into stock.";
   return null;
 }
 
@@ -382,34 +382,34 @@ export function planShelving(
   lines: (BillLine & { id: string })[],
   picks: ShelfPick[],
 ): { ok: true; lots: PlannedLot[]; patched: (BillLine & { id: string })[] } | { ok: false; error: string } {
-  if (!picks.length) return { ok: false, error: "Say what goes on the shelf first." };
+  if (!picks.length) return { ok: false, error: "Say what goes into stock first." };
   const answers = new Map<string, { pick: ShelfPick; billedAmount: number; pieces: number; unit: string }>();
   for (const pick of picks) {
     const id = String(pick.lineId ?? "");
-    if (!id || answers.has(id)) return { ok: false, error: "Each line goes on the shelf once. Reload and try again." };
+    if (!id || answers.has(id)) return { ok: false, error: "Each line goes into stock once. Reload and try again." };
     const line = lines.find((l) => String(l.id) === id);
     if (!line) return { ok: false, error: "A line on this ticket isn't there any more. Reload and try again." };
     const label = lineLabel(line);
-    if (isTaxLine(line)) return { ok: false, error: "Sales tax isn't a thing on a shelf. It rides with the lines it was charged on." };
-    if (isFreightLine(line)) return { ok: false, error: "Freight isn't a thing on a shelf. It stays with the ticket it was charged on." };
+    if (isTaxLine(line)) return { ok: false, error: "Sales tax can't go into stock. It rides with the lines it was charged on." };
+    if (isFreightLine(line)) return { ok: false, error: "Freight can't go into stock. It stays with the ticket it was charged on." };
     const cost = billLineCost(line);
     if (!(cost > 0))
-      return { ok: false, error: `${label}: its extension is $0.00, which means nothing shipped, so nothing from it can go on the shelf.` };
+      return { ok: false, error: `${label}: its extension is $0.00, which means nothing shipped, so nothing from it can go into stock.` };
     const total = Number(pick.pieces);
     const used = Number(pick.used ?? 0);
     const unit = unitOf(pick.unit);
     if (!Number.isFinite(total) || total <= 0) return { ok: false, error: `${label}: say how many it bought.` };
     if (total > 1_000_000) return { ok: false, error: `${label}: that count looks too big for one roll. Check it and try again.` };
     if (!Number.isFinite(used) || used < 0) return { ok: false, error: `${label}: say how many this job used (0 if none).` };
-    if (used >= total) return { ok: false, error: `${label}: this job used all of it, so nothing is left for the shelf.` };
+    if (used >= total) return { ok: false, error: `${label}: this job used all of it, so nothing is left for stock.` };
     if (!unit) return { ok: false, error: `${label}: say what it's counted in (ft, ea, box, roll).` };
     if (used > 0 && line.billable === false)
       return {
         ok: false,
-        error: `${label} is off the customer's bill. Switch it back on to bill what this job used, or put all of it on the shelf (0 used).`,
+        error: `${label} is off the customer's bill. Switch it back on to bill what this job used, or put all of it in stock (0 used).`,
       };
     if (!pick.itemId && !String(pick.newItemName ?? "").trim())
-      return { ok: false, error: `${label}: pick the item it goes on the shelf as, or name a new one.` };
+      return { ok: false, error: `${label}: pick the item it goes into stock as, or name a new one.` };
     // The receipt's own price column is the witness to the "1000' REEL, qty 55" counter cut: a
     // count that would make one purchased unit cost something the paper never charged is refused.
     const objection = splitContradictsReceipt({
@@ -422,7 +422,7 @@ export function planShelving(
     if (objection) return { ok: false, error: `${label}: ${objection}` };
     const billedAmount = used > 0 ? usedCost(used, perUnitCost(cost, total)) : 0;
     if (!(billedAmount < round2(cost)))
-      return { ok: false, error: `${label}: what this job used comes to the whole line, so nothing is left for the shelf.` };
+      return { ok: false, error: `${label}: what this job used comes to the whole line, so nothing is left for stock.` };
     answers.set(id, { pick, billedAmount, pieces: Math.round((total - used) * 1000) / 1000, unit });
   }
   const patched = lines.map((l) => {
@@ -504,17 +504,17 @@ export function ticketShelfProblem(
   const byIndex = new Map((choices ?? []).map((c) => [Number(c.index), c]));
   const open = rows.filter((r, i) => lineNeedsShelfAnswer(r) && !byIndex.has(i));
   if (open.length)
-    return `Say for every line how many go on the shelf, or tap Not Stock. ${open.length === 1 ? "1 line is" : `${open.length} lines are`} still open.`;
+    return `Say for every line how many go into stock, or tap Not Stock. ${open.length === 1 ? "1 line is" : `${open.length} lines are`} still open.`;
   const toShelf = (choices ?? []).filter((c) => !c.notStock);
-  if (!toShelf.length) return "Every line is Not Stock, so nothing would go on the shelf. File it on a job or as a business cost instead.";
+  if (!toShelf.length) return "Every line is Not Stock, so nothing would go into stock. File it on a job or as a business cost instead.";
   for (const c of toShelf) {
     if (c.notStock) continue;
     const row = rows[Number(c.index)];
     if (!row) return "A line on this ticket isn't there any more. Reload and try again.";
-    if (!lineNeedsShelfAnswer(row)) return `${lineLabel(row)}: only a line that shipped something can go on the shelf.`;
-    if (!(Number(c.pieces) > 0)) return `${lineLabel(row)}: say how many go on the shelf.`;
+    if (!lineNeedsShelfAnswer(row)) return `${lineLabel(row)}: only a line that shipped something can go into stock.`;
+    if (!(Number(c.pieces) > 0)) return `${lineLabel(row)}: say how many go into stock.`;
     if (!unitOf(c.unit)) return `${lineLabel(row)}: say what it's counted in (ft, ea, box, roll).`;
-    if (!c.itemId && !String(c.newItemName ?? "").trim()) return `${lineLabel(row)}: pick the item it goes on the shelf as, or name a new one.`;
+    if (!c.itemId && !String(c.newItemName ?? "").trim()) return `${lineLabel(row)}: pick the item it goes into stock as, or name a new one.`;
   }
   return null;
 }
@@ -623,7 +623,7 @@ export function waitingForShelf(input: {
     const where = `${l.jobLabel ?? "a job"}${l.billDate ? `, ${String(l.billDate).slice(0, 10)}` : ""}`;
     const billed = l.billedAmount == null || l.billedAmount === "" ? null : Number(l.billedAmount);
     // A receipt the customer already holds: named, with no door (the receipt card has none there).
-    const held = l.heldBy ? ` It's on ${l.heldBy}, which the customer already has, so it can't go on the shelf from here yet.` : "";
+    const held = l.heldBy ? ` It's on ${l.heldBy}, which the customer already has, so it can't go into stock from here yet.` : "";
     const door = (d: string) => (l.heldBy ? { href: null, door: null } : { href: `/bills#bill-${l.billId}`, door: d });
     if (l.billable !== false && billed != null && billed < cost) {
       out.push({
@@ -634,7 +634,7 @@ export function waitingForShelf(input: {
           billed === 0
             ? `None of its ${dollars(cost)} is billed to the customer, and the job still carries all of it.${held}`
             : `The customer is billed ${dollars(billed)} of its ${dollars(cost)}, and the job still carries the rest.${held}`,
-        ...door("Put The Rest On The Shelf"),
+        ...door("Put The Rest In Stock"),
       });
       continue;
     }
@@ -652,7 +652,7 @@ export function waitingForShelf(input: {
         : counted
           ? `Its description counts what's in it, and all ${dollars(cost)} of it is billed to that job.`
           : `The ticket read ${Number(l.quantity)} on it, which is usually a box or a coil, and all ${dollars(cost)} is billed to that job.`) + held,
-      ...door("Put The Rest On The Shelf"),
+      ...door("Put The Rest In Stock"),
     });
   }
   for (const d of input.stockDocuments ?? []) {
@@ -662,7 +662,7 @@ export function waitingForShelf(input: {
     // lists a paper only when /bills would (supplierPaperHomes). Anywhere else, the door goes where
     // this paper's own buttons are, or the card says why there is none.
     if (d.home === "on_card") {
-      out.push({ ...base, why: `"${d.words}" is written on it, and it's waiting under Needs You on Bills, where Shop Stock puts it on the shelf.`, href: "/bills#needs-you", door: "Open Needs You" });
+      out.push({ ...base, why: `"${d.words}" is written on it, and it's waiting under Needs You on Bills, where Shop Stock puts it in stock.`, href: "/bills#needs-you", door: "Open Needs You" });
       continue;
     }
     if (d.home === "waiting") {
@@ -677,7 +677,7 @@ export function waitingForShelf(input: {
     if (d.home === "before_books") {
       out.push({
         ...base,
-        why: `"${d.words}" is written on it, but it's from before your books here began, so Bills has no Record To Shelf for it. If its roll is still on the shelf, add the roll by hand.`,
+        why: `"${d.words}" is written on it, but it's from before your books here began, so Bills has no Record To Stock for it. If its roll is still in stock, add the roll by hand.`,
         href: null,
         door: null,
       });
@@ -698,7 +698,7 @@ export function waitingForShelf(input: {
       // Record To Shelf lives two folds deep (the supplier's line, then Not In Your Books):
       // FoldOpener opens both. With no account, the page's own top is the best it can do.
       href: d.accountId ? `/bills#supplier-not-in-books-${d.accountId}` : "/bills",
-      door: "Record To Shelf",
+      door: "Record To Stock",
     });
   }
   for (const p of input.linelessPapers ?? []) {
@@ -706,7 +706,7 @@ export function waitingForShelf(input: {
       key: `paper:${p.id}`,
       kind: "lineless_paper",
       title: p.title,
-      why: `"${p.words}" is written on it, but it was read with no lines, and a roll on the shelf is a line. Read it again so its lines come with it.`,
+      why: `"${p.words}" is written on it, but it was read with no lines, and a roll in stock is a line. Read it again so its lines come with it.`,
       href: "/organize",
       door: "Read Again",
     });

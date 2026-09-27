@@ -230,7 +230,7 @@ describe("Tools: Tools & Supplies tickets, and tools the company kept off other 
     );
     inp.lots.push({ lot_id: "L9", item_id: "i-122", kind: "line", bill_id: "sh", bill_line_id: "sh1", pieces: "250", unit: "ft", cost: "180.17", bought_on: "2026-09-20", live: true, note: null });
     const tools = toolsList(inp, SEPT, TZ).rows.filter((r) => r[0] !== "Total");
-    expect(tools).toContainEqual(["2026-09-20", "Consolidated Electrical Dist.", "8802-ST", "KLEIN NCVT-3 TESTER", 44, "Shelf ticket, not rolls", null]);
+    expect(tools).toContainEqual(["2026-09-20", "Consolidated Electrical Dist.", "8802-ST", "KLEIN NCVT-3 TESTER", 44, "Stock ticket, not rolls", null]);
     // The tied credit (cr1, on the shelf) is Stock Used's, never here.
     expect(tools.some((r) => r[2] === "8802-CM1")).toBe(false);
     const bought = stockBoughtList(inp, SEPT, TZ);

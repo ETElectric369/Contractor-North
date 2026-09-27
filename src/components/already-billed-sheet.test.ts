@@ -100,7 +100,7 @@ describe("the sheet, Purple Sage", () => {
     const html = render({ state: "ok", data: data() }, { lineId: "materials", step: "ask" });
     expect(text(html)).toContain("Did J-010 Use All Of It?");
     const b = buttons(html).map((x) => x.words);
-    expect(b).toEqual(expect.arrayContaining(["Yes, All Of It", "No, Some Went On The Shelf", "Back"]));
+    expect(b).toEqual(expect.arrayContaining(["Yes, All Of It", "No, Some Went Into Stock", "Back"]));
     for (const x of buttons(html)) expect(titleCase(x.words), x.words).toBe(true);
   });
 

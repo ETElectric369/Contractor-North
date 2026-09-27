@@ -157,7 +157,7 @@ export function ShopStockList({ items, openItem = null }: { items: ShelfItemView
                   </span>
                   <span className="block truncate text-xs text-slate-400">
                     {[it.partNumber ? `#${it.partNumber}` : null, it.category, it.location].filter(Boolean).join(" · ") ||
-                      `${liveLots.length} ${liveLots.length === 1 ? "roll" : "rolls"} on the shelf`}
+                      `${liveLots.length} ${liveLots.length === 1 ? "roll" : "rolls"} in stock`}
                   </span>
                 </span>
                 <span className="shrink-0 text-right">
@@ -191,7 +191,7 @@ export function ShopStockList({ items, openItem = null }: { items: ShelfItemView
                   <div>
                     <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-400">Where It Came From</h3>
                     {liveLots.length === 0 ? (
-                      <p className="mt-1 text-sm text-slate-400">No rolls on the shelf.</p>
+                      <p className="mt-1 text-sm text-slate-400">No rolls in stock.</p>
                     ) : (
                       <ul className="mt-1 space-y-1.5">
                         {liveLots.map((l) => (
@@ -211,18 +211,18 @@ export function ShopStockList({ items, openItem = null }: { items: ShelfItemView
                                   act(
                                     () => takeLotOffShelf(l.id),
                                     l.backTo
-                                      ? `That roll is off the shelf; its ${formatCurrency(l.cost)} is back on ${l.backTo}.`
-                                      : "That roll is off the shelf. It was counted in, not bought on a ticket, so no cost moves.",
+                                      ? `That roll is taken out of stock; its ${formatCurrency(l.cost)} is back on ${l.backTo}.`
+                                      : "That roll is taken out of stock. It was counted in, not bought on a ticket, so no cost moves.",
                                   )
                                 }
                                 className="-ml-1 flex min-h-11 items-center rounded-lg px-1 text-xs font-medium text-brand hover:underline disabled:opacity-50"
                               >
-                                Take It Off The Shelf
+                                Take It Out Of Stock
                               </button>
                             )}
                             {l.liveMoves === 0 && l.shelfTicket && (
                               <p className="text-xs text-slate-500">
-                                Bought for the shelf, so it has no job to go back to. Undo its ticket in the tray to take it back.
+                                Bought for stock, so it has no job to go back to. Undo its ticket in the tray to take it back.
                               </p>
                             )}
                             {/* SHELF UPKEEP (Phase 4): pieces gone for good, or sent back. Each is a
@@ -255,7 +255,7 @@ export function ShopStockList({ items, openItem = null }: { items: ShelfItemView
                       <ul className="mt-1.5 space-y-1 text-xs text-slate-400">
                         {pastLots.map((l) => (
                           <li key={l.id}>
-                            Was on the shelf: {qty(l.pieces)} {l.unit} {l.from}
+                            Was in stock: {qty(l.pieces)} {l.unit} {l.from}
                             {l.offOn ? `, taken off ${l.offOn}` : ""}
                           </li>
                         ))}
@@ -283,7 +283,7 @@ export function ShopStockList({ items, openItem = null }: { items: ShelfItemView
                                 <button
                                   type="button"
                                   disabled={pending}
-                                  onClick={() => act(() => undoShelfTake(m.drawGroup!), "Undone: the pieces are back on the shelf.")}
+                                  onClick={() => act(() => undoShelfTake(m.drawGroup!), "Undone: the pieces are back in stock.")}
                                   className="flex min-h-11 items-center rounded-lg px-1 text-xs font-medium text-brand hover:underline disabled:opacity-50"
                                 >
                                   Undo
@@ -308,10 +308,10 @@ export function ShopStockList({ items, openItem = null }: { items: ShelfItemView
                                 <button
                                   type="button"
                                   disabled={pending}
-                                  onClick={() => act(() => settleShortAction(m.id), "Settled from the shelf.")}
+                                  onClick={() => act(() => settleShortAction(m.id), "Settled from stock.")}
                                   className="flex min-h-11 items-center rounded-lg px-1 text-xs font-medium text-brand hover:underline disabled:opacity-50"
                                 >
-                                  Settle From The Shelf
+                                  Settle From Stock
                                 </button>
                               )}
                             </li>
@@ -368,7 +368,7 @@ export function ShopStockList({ items, openItem = null }: { items: ShelfItemView
           onClose={() => setAdding(null)}
           onDone={() => {
             setAdding(null);
-            toast("On the shelf.", "success");
+            toast("In stock.", "success");
             router.refresh();
           }}
         />
@@ -409,7 +409,7 @@ function CountIt({ item, onClose, onDone }: { item: ShelfItemView; onClose: () =
     >
       <div className="space-y-3">
         <p className="text-sm text-slate-600">
-          The shelf&apos;s record says {qty(item.onHand)} {item.unit}. How many are really there?
+          The stock record says {qty(item.onHand)} {item.unit}. How many are really there?
         </p>
         <div className="flex items-center gap-2">
           <NumberInput value={count} onValueChange={setCount} className="h-11 w-32" aria-label="Counted" />
@@ -426,7 +426,7 @@ function CountIt({ item, onClose, onDone }: { item: ShelfItemView; onClose: () =
         )}
         {diff > 0 && (
           <p className="rounded-lg bg-sky-50 px-3 py-2 text-sm text-sky-900">
-            {qty(diff)} {item.unit} more than the record. They go on the shelf at $0, because there is no receipt behind them.
+            {qty(diff)} {item.unit} more than the record. They go into stock at $0, because there is no receipt behind them.
           </p>
         )}
         {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
@@ -448,12 +448,12 @@ function AddOpeningRoll({ item, onClose, onDone }: { item: ShelfItemView; onClos
     addOpeningRoll({ itemId: item.id, pieces, cost, note })
       .then((res) => {
         setSaving(false);
-        if (!res.ok) return setError(res.error ?? "Nothing went on the shelf.");
+        if (!res.ok) return setError(res.error ?? "Nothing went into stock.");
         onDone();
       })
       .catch(() => {
         setSaving(false);
-        setError("Nothing went on the shelf: the connection dropped.");
+        setError("Nothing went into stock: the connection dropped.");
       });
   }
   return (
@@ -463,11 +463,11 @@ function AddOpeningRoll({ item, onClose, onDone }: { item: ShelfItemView; onClos
       title={`Add A Roll Of ${item.name}`}
       size="sm"
       dirty={pieces > 0 || cost > 0 || !!note}
-      footer={<ModalActions onCancel={onClose} onSave={save} saving={saving} saveLabel="Put It On The Shelf" disabled={saving || !(pieces > 0) || !note.trim()} />}
+      footer={<ModalActions onCancel={onClose} onSave={save} saving={saving} saveLabel="Put It In Stock" disabled={saving || !(pieces > 0) || !note.trim()} />}
     >
       <div className="space-y-3">
         <p className="text-sm text-slate-600">
-          For something already on the shelf that no receipt in the app covers. A roll off a receipt goes on from that receipt instead, so its cost
+          For something already in stock that no receipt in the app covers. A roll off a receipt goes on from that receipt instead, so its cost
           comes off the paper.
         </p>
         <div>
@@ -669,7 +669,7 @@ function ReturnToSupplier({ item, lot, onClose, onDone }: { item: ShelfItemView;
           )}
           {!cantTieWhy && (
             <p className="mt-1 text-xs text-slate-500">
-              Only credits filed to no job are listed, and the one you pick is filed to the shelf (Undo takes it back off).
+              Only credits filed to no job are listed, and the one you pick is filed to Shop Stock (Undo takes it back off).
               {onJobs > 0 ? ` ${onJobs} credit${onJobs === 1 ? " is" : "s are"} filed on jobs and left out: those come off that job's customer bill.` : ""}
             </p>
           )}

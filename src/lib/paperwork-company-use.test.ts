@@ -65,7 +65,7 @@ describe("companyUseWord: the whole box, exactly", () => {
     expect(companyUseWord(word)).toEqual({ bucket, words: word });
   });
 
-  it.each(["STOCK", "SHOP STOCK", "INVENTORY"])("%s names the shop shelf and picks no bucket (Shop Stock, Phase 2)", (word) => {
+  it.each(["STOCK", "SHOP STOCK", "INVENTORY"])("%s names shop stock and picks no bucket (Shop Stock, Phase 2)", (word) => {
     expect(companyUseWord(word)).toEqual({ bucket: null, words: word, shelf: true });
   });
 
@@ -128,7 +128,7 @@ describe("Paper A in the tray, replayed from its stored row", () => {
   it("STOCK suggests the shelf, and says the words that picked it (Shop Stock, Phase 2)", () => {
     const stock = rematchPaper(paperA({ ...LIVE_A, po: "STOCK", bucket: null }), JOBS, [], SELF);
     expect(suggestedDestination(stock, ["j11"])).toBe("stock");
-    expect(pickedBecause(stock)).toMatch(/^Shelf picked from the PO on the (bill|receipt|invoice): STOCK$/);
+    expect(pickedBecause(stock)).toMatch(/^Shop Stock picked from the PO on the (bill|receipt|invoice): STOCK$/);
     expect(onPaperWords({ ...LIVE_A, po: "STOCK" }, SELF)).toBe("PO STOCK");
   });
 });

@@ -165,7 +165,7 @@ describe("get_bill — the three states of a receipt line reach Nort", () => {
     expect(out.amount).toBe(139.65);
     // And off the job's cost, which Nort is told in so many words.
     expect(out.shelf_amount).toBe(104.72);
-    expect(out.money_note).toContain("shop shelf");
+    expect(out.money_note).toContain("shop stock");
   });
 
   it("never calls a line shop stock because a flag says so: only a roll on the shelf makes it so", async () => {
@@ -178,7 +178,7 @@ describe("get_bill — the three states of a receipt line reach Nort", () => {
     const out = await parse("get_bill", { bill_id: flagged.id }, client);
     expect(out.items[0].on_the_shelf).toBe(false);
     expect(out.shelf_amount).toBeUndefined();
-    expect(out.money_note).toContain("nothing from it is on the shop shelf");
+    expect(out.money_note).toContain("nothing from it is in shop stock");
   });
 
   it("says out loud when a receipt was replaced, or priced off a counter ticket", async () => {
@@ -362,7 +362,7 @@ describe("list_inventory — the shelf's items by name, and nothing claimed that
     const { client } = fakeDb({ data: [] });
     const out = await parse("list_inventory", {}, client);
     expect(out.count).toBe(0);
-    expect(out.note).toContain("Nothing is on the shelf");
+    expect(out.note).toContain("Nothing is on the stock record");
   });
 });
 

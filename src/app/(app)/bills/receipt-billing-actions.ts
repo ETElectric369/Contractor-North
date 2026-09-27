@@ -23,10 +23,10 @@ export type Result = { ok: boolean; error?: string; note?: string };
 async function restampAfterLineWrite(supabase: any, orgId: string | null | undefined, billId: string | null | undefined): Promise<string | null> {
   if (!orgId || !billId) return null;
   const r = await restampLotsForBill(supabase, orgId, String(billId));
-  if (!r.ok) return `The line saved, but the roll on the shelf from this ticket couldn't be re-costed: ${r.error}`;
+  if (!r.ok) return `The line saved, but the roll in stock from this ticket couldn't be re-costed: ${r.error}`;
   if (r.unshelved > 0)
-    return `${r.unshelved === 1 ? "The roll" : `${r.unshelved} rolls`} from this ticket came off the shelf, because the customer is billed all of it now. Its cost is back on the job.`;
-  if (r.restamped > 0) return "The roll on the shelf from this ticket was re-costed to match.";
+    return `${r.unshelved === 1 ? "The roll" : `${r.unshelved} rolls`} from this ticket came out of stock, because the customer is billed all of it now. Its cost is back on the job.`;
+  if (r.restamped > 0) return "The roll in stock from this ticket was re-costed to match.";
   return null;
 }
 
@@ -43,12 +43,12 @@ async function liveRollOnLine(supabase: any, orgId: string | null | undefined, l
   let q = supabase.from("stock_lots").select("id").eq("bill_line_id", lineId).is("unshelved_at", null).limit(1);
   if (orgId) q = q.eq("org_id", orgId);
   const { data, error } = await q;
-  if (error) return isMissingShelf(error) ? null : `Couldn't check the shelf for this line, so nothing was changed: ${dbError(error)}`;
+  if (error) return isMissingShelf(error) ? null : `Couldn't check stock for this line, so nothing was changed: ${dbError(error)}`;
   return data?.length ? ROLL_ON_LINE : null;
 }
 
 const ROLL_ON_LINE =
-  "A roll from this line is on the shelf, and it holds the pieces this job didn't use. Take It Off The Shelf first, change what this job used, then put the rest back on the shelf.";
+  "A roll from this line is in stock, and it holds the pieces this job didn't use. Take It Out Of Stock first, change what this job used, then put the rest back in stock.";
 
 /**
  * SWITCH ONE RECEIPT LINE OFF THE CUSTOMER'S BILL (migration 0268).
@@ -286,13 +286,13 @@ export async function putRestOnShelf(input: ShelfPick): Promise<ReceiptLineUsage
   if (held)
     return {
       ok: false,
-      error: `${held.number} has gone to the customer and already bills ${held.via === "po" ? "the order this receipt delivered" : "this receipt"}, so what the job used can't change now. Nothing went on the shelf.`,
+      error: `${held.number} has gone to the customer and already bills ${held.via === "po" ? "the order this receipt delivered" : "this receipt"}, so what the job used can't change now. Nothing went into stock.`,
     };
   const edited = claims.rows.find((c) => c.edited);
   if (edited)
     return {
       ok: false,
-      error: `${edited.number} is a draft with a line from this receipt that was changed by hand, and a changed line doesn't follow the receipt, so the customer would still be billed for what goes on the shelf. Use Start It Over for Materials on ${edited.number}, then put the rest on the shelf. Nothing went on the shelf.`,
+      error: `${edited.number} is a draft with a line from this receipt that was changed by hand, and a changed line doesn't follow the receipt, so the customer would still be billed for what goes into stock. Use Start It Over for Materials on ${edited.number}, then put the rest in stock. Nothing went into stock.`,
     };
 
   const res = await putOnShelf({ ...input, lineId });
@@ -317,7 +317,7 @@ export async function putRestOnShelf(input: ShelfPick): Promise<ReceiptLineUsage
   if (jobId) revalidatePath(`/jobs/${jobId}`);
   return {
     ok: true,
-    message: `${lot.pieces} ${lot.unit} is on the shelf at ${formatCurrency(lot.cost)} (${each} a ${lot.unit === "ft" ? "foot" : lot.unit}). ${jobName}'s cost drops by ${formatCurrency(lot.cost)}.${draftNote}`,
+    message: `${lot.pieces} ${lot.unit} is in stock at ${formatCurrency(lot.cost)} (${each} a ${lot.unit === "ft" ? "foot" : lot.unit}). ${jobName}'s cost drops by ${formatCurrency(lot.cost)}.${draftNote}`,
   };
 }
 
@@ -356,7 +356,7 @@ async function claimantsOfBill(supabase: any, billId: string, poId: string | nul
   const seen = new Set<string>();
   for (let i = 0; i < answers.length; i++) {
     const { data, error } = answers[i] as { data: any[] | null; error: unknown };
-    if (error) return { error: `Couldn't check which invoices already bill this receipt, so nothing went on the shelf: ${dbError(error)}` };
+    if (error) return { error: `Couldn't check which invoices already bill this receipt, so nothing went into stock: ${dbError(error)}` };
     for (const it of data ?? []) {
       if (!it?.id || seen.has(String(it.id))) continue;
       seen.add(String(it.id));

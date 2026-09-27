@@ -48,9 +48,9 @@ const BY_CONSTRAINT: Record<string, string> = {
   job_picks_file_is_its_own: "That file isn't filed on this job's picks.",
   // 0303: the shop shelf. An item is matched on its part number; one roll per receipt line.
   bills_on_shelf_has_no_job:
-    "This is filed to the shop shelf, so it can't go on a job. A ticket from the tray: undo it there first. A supplier's credit tied to a return: undo that return on Shop Stock first. Then file it on the job.",
-  inventory_items_org_key_part_uidx: "An item with that part number is already on the shelf. Pick it instead of making a new one.",
-  stock_lots_one_live_per_line: "A roll from that line is already on the shelf. Take it off the shelf first to count it again.",
+    "This is filed to Shop Stock, so it can't go on a job. A ticket from the tray: undo it there first. A supplier's credit tied to a return: undo that return on Shop Stock first. Then file it on the job.",
+  inventory_items_org_key_part_uidx: "An item with that part number is already in stock. Pick it instead of making a new one.",
+  stock_lots_one_live_per_line: "A roll from that line is already in stock. Take it out of stock first to count it again.",
   // 0333: the job's panel. The guard's own refusals (No Stab, past the end, office-only doors) are
   // already plain words and pass through as the database says them.
   job_panels_one_name_per_job: "This job already has a panel with that name. Give this one another name (Sub Panel, Garage Panel).",

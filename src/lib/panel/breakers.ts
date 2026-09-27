@@ -199,7 +199,7 @@ export function breakerCard(input: {
     const part = partFor({ poles: s.poles, amps: s.amps, kind: s.kind }, brand);
     const alsoOn = [
       ...listed.groups.filter((g) => covers(g, s)).map((g) => `On The List, Not Bought Yet: ${qtyWords(g.qty)} x ${groupLabel(g)}`),
-      ...shelf.groups.filter((g) => covers(g, s)).map((g) => `On The Shelf: ${qtyWords(g.qty)} x ${groupLabel(g)}`),
+      ...shelf.groups.filter((g) => covers(g, s)).map((g) => `In Stock: ${qtyWords(g.qty)} x ${groupLabel(g)}`),
     ];
     return { short: s, part, description: `${part ? `${part} ` : ""}${sizeWords(s.poles, s.amps, s.kind)} Breaker`, qty: s.count, alsoOn };
   });

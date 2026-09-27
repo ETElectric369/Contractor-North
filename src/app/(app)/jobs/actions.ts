@@ -1516,11 +1516,11 @@ export async function updateBill(
     const restamp = await restampLotsForBill(supabase, ctx.orgId, id);
     if (!restamp.ok) {
       reportError("updateBill.restamp", new Error(restamp.error), { billId: id });
-      shelfNote = `The bill saved, but the roll on the shelf from this ticket couldn't be re-costed: ${restamp.error}`;
+      shelfNote = `The bill saved, but the roll in stock from this ticket couldn't be re-costed: ${restamp.error}`;
     } else if (restamp.unshelved > 0) {
-      shelfNote = `${restamp.unshelved === 1 ? "The roll" : `${restamp.unshelved} rolls`} on the shelf from this ticket came off the shelf, because nothing of ${restamp.unshelved === 1 ? "its line" : "their lines"} is left for it.`;
+      shelfNote = `${restamp.unshelved === 1 ? "The roll" : `${restamp.unshelved} rolls`} from this ticket came out of stock, because nothing of ${restamp.unshelved === 1 ? "its line" : "their lines"} is left for it.`;
     } else if (restamp.restamped > 0) {
-      shelfNote = `${restamp.restamped === 1 ? "The roll" : `${restamp.restamped} rolls`} on the shelf from this ticket ${restamp.restamped === 1 ? "was" : "were"} re-costed to match.`;
+      shelfNote = `${restamp.restamped === 1 ? "The roll" : `${restamp.restamped} rolls`} in stock from this ticket ${restamp.restamped === 1 ? "was" : "were"} re-costed to match.`;
     }
   }
   for (const jid of new Set([oldJobId, (data as any)?.job_id].filter(Boolean) as string[])) revalidatePath(`/jobs/${jid}`);

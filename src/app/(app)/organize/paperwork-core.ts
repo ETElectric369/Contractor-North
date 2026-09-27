@@ -771,7 +771,7 @@ export function standingRefusal(st: BillStanding, then: string, nothing: string,
   }
   if (opts.shelf !== false && st.stocked.length) {
     const n = st.stocked.length;
-    return `${n === 1 ? `A line of this receipt (${st.stocked[0]}) is` : `${n} lines of this receipt are`} on the shop shelf, and that can't go back onto the paper. On Bills, press Take It Off The Shelf on ${n === 1 ? "it" : "them"} first, then ${then}. ${nothing}`;
+    return `${n === 1 ? `A line of this receipt (${st.stocked[0]}) is` : `${n} lines of this receipt are`} in shop stock, and that can't go back onto the paper. On Bills, press Take It Out Of Stock on ${n === 1 ? "it" : "them"} first, then ${then}. ${nothing}`;
   }
   return null;
 }

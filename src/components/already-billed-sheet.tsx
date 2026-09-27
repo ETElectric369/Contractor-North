@@ -428,7 +428,7 @@ export function AlreadyBilledSheet({
             <p className="text-base font-semibold text-slate-900">Did {data.jobNumber} Use All Of It?</p>
             <p className="text-slate-600">
               {chosen.line.description.trim() || "The line"} on {num} is {formatCurrency(chosen.line.line_total)}, and this bill cost{" "}
-              {formatCurrency(data.target.cost ?? 0)}. If some of it went on the shop shelf, put it there first: once {num} holds the bill, its
+              {formatCurrency(data.target.cost ?? 0)}. If some of it went into shop stock, put it there first: once {num} holds the bill, its
               lines lock.
             </p>
             <div className="flex flex-wrap gap-2">
@@ -452,7 +452,7 @@ export function AlreadyBilledSheet({
                   if (data.target.billId) readReceipt(data.target.billId);
                 }}
               >
-                No, Some Went On The Shelf
+                No, Some Went Into Stock
               </Button>
               <Button type="button" variant="ghost" onClick={() => setStep("pick")}>
                 Back
@@ -463,7 +463,7 @@ export function AlreadyBilledSheet({
 
         {data && step === "shelf" && (
           <div className="space-y-2">
-            <p className="text-slate-600">Put what {data.jobNumber} didn&apos;t use on the shelf, then press {markLabel}.</p>
+            <p className="text-slate-600">Put what {data.jobNumber} didn&apos;t use in stock, then press {markLabel}.</p>
             {receipt.state === "loading" && <p className="text-slate-500">Opening the receipt…</p>}
             {receipt.state === "error" && (
               <div className="rounded-lg border border-red-200 bg-red-50 p-3" role="alert">

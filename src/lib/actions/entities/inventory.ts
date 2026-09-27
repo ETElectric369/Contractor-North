@@ -28,9 +28,9 @@ export const inventoryActions: Record<string, ActionDef> = {
     group: "stock",
     label: "Fill the Took From Stock card",
     description:
-      "When someone says they TOOK material FROM STOCK / off the shelf / from the shop for a job ('took 60 feet of 12/2 from stock for Herringbone', 'grabbed 10 wire nuts off the shelf for Waldow'): this FILLS the job's Took From Stock card and returns the link and a card that are put on the screen for you. It does NOT take anything: the person taps Take It. NEVER say it's taken, recorded or on the job until they do; say it's ready to tap. " +
+      "When someone says they TOOK material FROM STOCK / from inventory / off the shelf (their words; you always say stock) / from the shop for a job ('took 60 feet of 12/2 from stock for Herringbone', 'grabbed 10 wire nuts off the shelf for Waldow'): this FILLS the job's Took From Stock card and returns the link and a card that are put on the screen for you. It does NOT take anything: the person taps Take It. NEVER say it's taken, recorded or on the job until they do; say it's ready to tap. " +
       "job_id = the job's id from list_jobs OR its name / number as spoken. item = the item's name as they said it ('12/2', '12/2 NM-B', 'wire nuts'). qty = the count they said, only if they said one; unit = the unit they said (feet, each), only if they said one. " +
-      "If it says several items match, read the names back and ask which one; if none match, say what the shelf has (list_shelf). Never guess a count or a price. Taking more than the shelf shows is allowed: say what it says about the office settling it.",
+      "If it says several items match, read the names back and ask which one; if none match, say what's in stock (list_shelf). Never guess a count or a price. Taking more than stock shows is allowed: say what it says about the office settling it.",
     input: z.object({
       job_id: z.string().min(1),
       item: z.string().trim().min(1).max(120),
@@ -54,19 +54,19 @@ export const inventoryActions: Record<string, ActionDef> = {
       const { data: shelfRaw, error: shelfErr } = await supabase.rpc("shelf_for_crew");
       if (shelfErr) return { ok: false, error: dbError(shelfErr) };
       const shelf = parseShelf(shelfRaw);
-      if (!shelf.length) return { ok: false, error: "Nothing is on the shelf yet, so there is nothing to take from. The office puts rolls and boxes on it from their tickets." };
+      if (!shelf.length) return { ok: false, error: "Nothing is in stock yet, so there is nothing to take from. The office puts rolls and boxes in stock from their tickets." };
 
       const m = matchShelfItem(shelf, i.item);
       if (m.kind === "none") {
         return {
           ok: false,
-          error: `Nothing on the shelf is called ${quotedData(i.item)}. The shelf has: ${shelf.slice(0, 12).map((s) => quotedData(s.name)).join(", ")}${shelf.length > 12 ? ", and more" : ""}. Which one?`,
+          error: `Nothing in stock is called ${quotedData(i.item)}. In stock: ${shelf.slice(0, 12).map((s) => quotedData(s.name)).join(", ")}${shelf.length > 12 ? ", and more" : ""}. Which one?`,
         };
       }
       if (m.kind === "many") {
         return {
           ok: false,
-          error: `More than one item on the shelf matches ${quotedData(i.item)}: ${m.rows.map((s) => `${quotedData(s.name)} (${fmtQty(Math.max(s.onHand, 0))} ${s.unit})`).join(", ")}. Ask which one.`,
+          error: `More than one item in stock matches ${quotedData(i.item)}: ${m.rows.map((s) => `${quotedData(s.name)} (${fmtQty(Math.max(s.onHand, 0))} ${s.unit})`).join(", ")}. Ask which one.`,
           data: { candidates: m.rows.map((s) => ({ item_id: s.id, name: s.name, unit: s.unit })) },
         };
       }
@@ -99,7 +99,7 @@ export const inventoryActions: Record<string, ActionDef> = {
             kind: "task",
             eyebrow: "not saved yet",
             title: `Tap To Take: ${what}`,
-            scope: `Not taken yet: tap above, then Take It. For ${label}. On the shelf: ${onShelf}.${shortSaid ? ` ${shortSaid}.` : ""}`,
+            scope: `Not taken yet: tap above, then Take It. For ${label}. In stock: ${onShelf}.${shortSaid ? ` ${shortSaid}.` : ""}`,
             href,
             next: qty ? "Open it and tap Take It to save it." : "Open it, type how many, and tap Take It.",
           },

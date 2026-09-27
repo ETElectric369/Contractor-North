@@ -1163,13 +1163,13 @@ export async function fileItem(id: string, dest: FileDestination, opts: FileOpti
       .eq("bill_id", billId)
       .order("sort_order");
     if (writtenErr || (written ?? []).length !== rows.length)
-      return backToTray("The ticket's lines didn't all save, so nothing went on the shelf and the paper is back in the tray. Try again.");
+      return backToTray("The ticket's lines didn't all save, so nothing went into stock and the paper is back in the tray. Try again.");
     const idAt = new Map(((written ?? []) as { id: string; sort_order: number }[]).map((w) => [Number(w.sort_order), String(w.id)]));
     const picks: ShelfPick[] = [];
     for (const c of dest.lines) {
       if (c.notStock) continue;
       const lineId = idAt.get(Number(c.index));
-      if (!lineId) return backToTray("A line on this ticket didn't save, so nothing went on the shelf. Try again.");
+      if (!lineId) return backToTray("A line on this ticket didn't save, so nothing went into stock. Try again.");
       picks.push({
         lineId,
         pieces: Number(c.pieces),
@@ -1185,8 +1185,8 @@ export async function fileItem(id: string, dest: FileDestination, opts: FileOpti
     if (!shelved.ok) return backToTray(`${shelved.error} Nothing was filed; the paper is back in the tray.`);
     const notStock = dest.lines.filter((c) => c.notStock).length;
     shelfSaid =
-      ` ${shelved.lots.map((l) => `${l.pieces} ${l.unit} (${formatCurrency(l.cost)})`).join(", ")} on the shelf.` +
-      (notStock ? ` ${notStock === 1 ? "1 line" : `${notStock} lines`} marked Not Stock stay on the ticket as Tools & Supplies, never on the shelf.` : "");
+      ` ${shelved.lots.map((l) => `${l.pieces} ${l.unit} (${formatCurrency(l.cost)})`).join(", ")} in stock.` +
+      (notStock ? ` ${notStock === 1 ? "1 line" : `${notStock} lines`} marked Not Stock stay on the ticket as Tools & Supplies, never in stock.` : "");
   }
 
   // THE CED DOCUMENT THIS PAPER IS (see linkTo above). 0277 lets one bill cover an invoice, once:
@@ -1243,7 +1243,7 @@ export async function fileItem(id: string, dest: FileDestination, opts: FileOpti
   if (prevJob) revalidatePath(`/jobs/${prevJob}`);
   revalidatePath("/inventory");
   const linkedSaid = linkTo.length && !linkNote ? ` Linked to supplier document ${linkTo.map((l) => l.number).join(", ")}.` : "";
-  if (shelfSaid) return { ok: true, message: `Filed on the shop shelf.${shelfSaid}${linkedSaid}${linkNote}` };
+  if (shelfSaid) return { ok: true, message: `Filed in shop stock.${shelfSaid}${linkedSaid}${linkNote}` };
   return linkedSaid || linkNote ? { ok: true, message: `Filed.${linkedSaid}${linkNote}` } : { ok: true };
 }
 

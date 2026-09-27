@@ -114,7 +114,7 @@ export function shortOf(onHand: number, qty: number): number {
 
 /** THE SHORT, SAID BEFORE AND AFTER THE TAP. It still saves: nobody hits a dead end in the field. */
 export function shortWords(short: number, unit: string): string {
-  return `${fmtQty(short)} ${unit} more than the shelf shows — the office will settle it`;
+  return `${fmtQty(short)} ${unit} more than stock shows — the office will settle it`;
 }
 
 /** Pieces the shelf's count shows but no filed roll holds (a count with no roll, a roll being repriced). */
@@ -150,7 +150,7 @@ function countBefore(onHandAfter: number, qty: number): number {
  */
 export function belowZeroWords(onHandAfter: number | null | undefined, unit: string): string | null {
   if (onHandAfter == null || !(num(onHandAfter) < 0)) return null;
-  return `The shelf now reads ${fmtQty(num(onHandAfter))} ${unit}, below zero — the office will settle it`;
+  return `Stock now reads ${fmtQty(num(onHandAfter))} ${unit}, below zero — the office will settle it`;
 }
 
 /** The toast after Take It. `onHandAfter` (stock_draw's on_hand) says which short it was. */
@@ -167,7 +167,7 @@ export function tookWords(t: { qty: number; unit: string; item: string; job: str
 
 /** What the office does about a short. Counting can't settle one (a count has no roll, and
  *  settle_short walks rolls), so the words name the two ways that work. */
-export const SHORT_FIX = "File the roll on Shop Stock, then Settle From The Shelf — or Undo the take.";
+export const SHORT_FIX = "File the roll on Shop Stock, then Settle From Stock — or Undo the take.";
 
 /**
  * settle_short (0303) ends its refusal with "File the roll or count the shelf first.", but a count
@@ -175,7 +175,7 @@ export const SHORT_FIX = "File the roll on Shop Stock, then Settle From The Shel
  * office is told the two ways that work instead of being sent round a loop.
  */
 export function settleRefusalWords(msg: string): string {
-  return msg.replace(/File the roll or count the shelf first\.?/, "A count can't settle it: file the roll on the shelf first, or Undo the take.");
+  return msg.replace(/File the roll or count the (?:shelf|stock) first\.?/, "A count can't settle it: file the roll on Shop Stock first, or Undo the take.");
 }
 
 /** Where the office's bell for a take opens: Shop Stock on the item whenever there is a short to
@@ -195,7 +195,7 @@ export function officeBellWords(t: { who: string; qty: number; unit: string; ite
     const past = shortOf(said, t.qty);
     return {
       title: (past > 0
-        ? `${t.who} took ${q} of ${t.item}, the shelf said ${fmtQty(Math.max(said, 0))} ${t.unit}`
+        ? `${t.who} took ${q} of ${t.item}, stock showed ${fmtQty(Math.max(said, 0))} ${t.unit}`
         : `${t.who} took ${q} of ${t.item}; ${fmtQty(t.short)} ${t.unit} of it isn't on a filed roll`
       ).slice(0, 140),
       body: `For ${t.job}. ${SHORT_FIX}`.slice(0, 140),
@@ -203,7 +203,7 @@ export function officeBellWords(t: { who: string; qty: number; unit: string; ite
   }
   if (belowZeroWords(t.onHandAfter, t.unit)) {
     return {
-      title: `${t.who} took ${q} of ${t.item}; the shelf now reads ${fmtQty(t.onHandAfter)} ${t.unit}`.slice(0, 140),
+      title: `${t.who} took ${q} of ${t.item}; stock now reads ${fmtQty(t.onHandAfter)} ${t.unit}`.slice(0, 140),
       // The shelf reads below zero with no short on THIS take: an older take past the shelf is
       // still open (its pieces are what this take used). That short is what the office settles.
       body: `For ${t.job}. An older short on it is still open: ${SHORT_FIX}`.slice(0, 140),
@@ -249,7 +249,7 @@ export function takeDoor(
   }
   if (t.canUndo) return { kind: "undo" };
   // Nothing in the app undoes a return to the shelf yet, so this names no door that isn't there.
-  if (t.back > 0) return { kind: "none", why: "Some of it came back to the shelf, so this take can't be undone." };
+  if (t.back > 0) return { kind: "none", why: "Some of it came back to stock, so this take can't be undone." };
   // stock_undo refuses the crew once the office's settlement is in the take (0303): say who can.
   if (t.settledByOffice) return { kind: "none", why: "The office settled part of this take, so ask the office to undo it." };
   return { kind: "none", why: null };
@@ -258,7 +258,7 @@ export function takeDoor(
 /** A take as one line on the job: "Brian took 60 ft of 12/2 NM-B". */
 export function takeLine(t: Pick<JobTake, "who" | "qty" | "unit" | "item" | "short" | "back">): string {
   const parts = [`${t.who} took ${fmtQty(t.qty)} ${t.unit} of ${t.item}`];
-  if (t.short > 0) parts.push(`${fmtQty(t.short)} ${t.unit} past the shelf, waiting on the office`);
+  if (t.short > 0) parts.push(`${fmtQty(t.short)} ${t.unit} past stock, waiting on the office`);
   if (t.back > 0) parts.push(`${fmtQty(t.back)} ${t.unit} brought back`);
   return parts.join(" · ");
 }

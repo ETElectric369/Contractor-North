@@ -439,7 +439,7 @@ export default async function BillsPage({
     if (!r?.bill_line_id) continue;
     shelfByLine.set(String(r.bill_line_id), {
       lotId: String(r.lot_id),
-      itemName: itemNames.get(String(r.item_id)) ?? "On the shelf",
+      itemName: itemNames.get(String(r.item_id)) ?? "In stock",
       pieces: Number(r.pieces) || 0,
       unit: String(r.unit ?? ""),
       cost: Number(r.cost) || 0,

@@ -422,13 +422,13 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
   {
     name: "list_inventory",
     description:
-      "The office's view of the SHOP SHELF's items (part number, category, how many are on hand vs the reorder point, unit, location). On hand is kept by the shelf's own record, never typed; never offer to type a count over it. For what the shelf holds and what it's worth, and for anyone on the crew, use list_shelf. Pieces come off the shelf with Took From Stock (stock.take fills the card; the person taps Take It). Use for 'what's running low', 'what's below its reorder point'. When it returns nothing, say the shelf has nothing on it yet - never guess stock that isn't listed.",
+      "The office's view of the SHOP STOCK items (part number, category, how many are on hand vs the reorder point, unit, location). On hand is kept by the stock record, never typed; never offer to type a count over it. For what's in stock and what it's worth, and for anyone on the crew, use list_shelf. Pieces come out of stock with Took From Stock (stock.take fills the card; the person taps Take It). Use for 'what's running low', 'what's below its reorder point'. When it returns nothing, say nothing is in stock yet - never guess stock that isn't listed.",
     input_schema: { type: "object", properties: { search: { type: "string" }, low_only: { type: "boolean", description: "Only items at/below reorder point." }, limit: { type: "integer" } } },
   },
   {
     name: "list_shelf",
     description:
-      "What is ON THE SHOP SHELF: each item's id, name, unit and how many are on hand (the shelf's own record, never typed). Open to everyone. For the office it also gives what each item's pieces are worth (value, from the rolls' receipts); the crew never gets a cost, and you never say one to them. Use for 'what's on the shelf', 'do we have 12/2 in stock', 'how much wire nut is left', and before stock.take when you're unsure which item they mean. When it returns nothing, say the shelf has nothing on it yet - never guess stock that isn't listed.",
+      "What is IN SHOP STOCK: each item's id, name, unit and how many are on hand (the stock record, never typed). Open to everyone. For the office it also gives what each item's pieces are worth (value, from the rolls' receipts); the crew never gets a cost, and you never say one to them. Use for 'what's in stock', 'do we have 12/2 in stock', 'how much wire nut is left', and before stock.take when you're unsure which item they mean. When it returns nothing, say nothing is in stock yet - never guess stock that isn't listed.",
     input_schema: { type: "object", properties: { search: { type: "string", description: "Part of the item's name, e.g. '12/2'." }, limit: { type: "integer", description: "Max rows (default 30, max 40)." } } },
   },
   {
@@ -1136,8 +1136,8 @@ export async function runDataTool(
             count: 0,
             items: [],
             note: s
-              ? `Nothing on the shelf matches "${s}". Say so; do not guess.`
-              : "Nothing is on the shelf's record yet. Say so plainly: there is no shop stock to report, and nothing here should be read as a count.",
+              ? `Nothing in stock matches "${s}". Say so; do not guess.`
+              : "Nothing is on the stock record yet. Say so plainly: there is no shop stock to report, and nothing here should be read as a count.",
           });
         }
         let rows = (data ?? []).map((it: any) => ({
@@ -1172,7 +1172,7 @@ export async function runDataTool(
           return JSON.stringify({
             count: 0,
             items: [],
-            note: s ? `Nothing on the shelf matches "${sanitize(s)}". Say so; do not guess.` : "Nothing is on the shelf yet. Say so plainly; nothing here is a count.",
+            note: s ? `Nothing in stock matches "${sanitize(s)}". Say so; do not guess.` : "Nothing is in stock yet. Say so plainly; nothing here is a count.",
           });
         }
         const { data: auth } = await supabase.auth.getUser();
@@ -1198,7 +1198,7 @@ export async function runDataTool(
             name: r.name,
             on_hand: r.onHand,
             unit: r.unit,
-            ...(r.onHand < 0 ? { note: "More was taken than the shelf showed; the office will settle it." } : {}),
+            ...(r.onHand < 0 ? { note: "More was taken than stock showed; the office will settle it." } : {}),
             ...(staff ? { value: value.get(r.id) ?? 0 } : {}),
           })),
           how_to_take: "A take is Took From Stock: call stock.take with the job and the item; it fills the card and the person taps Take It.",
@@ -2510,12 +2510,12 @@ export async function runDataTool(
         // adding the lines up, because the shared tax means they will not match.
         const moneyNote = [
           !hasJob && isShelfTicket(b)
-            ? "No job: a ticket bought for the shop shelf. It is never a job cost and never a business-cost bucket: owner money counts it as Put On The Shelf in the month it is dated, and pieces taken from its rolls cost the jobs that take them. No customer is billed for it here. amount is the whole receipt, and the supplier is owed all of it."
+            ? "No job: a ticket bought for shop stock. It is never a job cost and never a business-cost bucket: owner money counts its rolls as shop stock inside Materials & Bills in the month it is dated, and pieces taken from its rolls cost the jobs that take them. No customer is billed for it here. amount is the whole receipt, and the supplier is owed all of it."
             : !hasJob
             ? `No job: this is a business cost in the ${bucketOf(b.category)} bucket, counted before owner's draw. No customer is billed for it, so there is no billable_amount and its lines carry no billed flag. amount is the whole receipt.`
             : shelfAmount
-              ? `amount is the WHOLE receipt. $${shelfAmount.toFixed(2)} of it went on the shop shelf (shelf_amount), so the job's cost from this receipt is amount less shelf_amount. billable_amount is what an invoice off this receipt charges the customer, at cost before markup: lines with billable false come off, a split line bills only its billed_to_customer, and untouched sales tax comes off in proportion with them. Quote billable_amount — do not add the line figures up, the shared tax is why they will not match it.`
-              : "amount is the WHOLE receipt (the job's cost; nothing from it is on the shop shelf). billable_amount is what an invoice off this receipt charges the customer, at cost before markup: lines with billable false come off, a split line bills only its billed_to_customer, and untouched sales tax comes off in proportion with them. Quote billable_amount — do not add the line figures up, the shared tax is why they will not match it.",
+              ? `amount is the WHOLE receipt. $${shelfAmount.toFixed(2)} of it went into shop stock (shelf_amount), so the job's cost from this receipt is amount less shelf_amount. billable_amount is what an invoice off this receipt charges the customer, at cost before markup: lines with billable false come off, a split line bills only its billed_to_customer, and untouched sales tax comes off in proportion with them. Quote billable_amount — do not add the line figures up, the shared tax is why they will not match it.`
+              : "amount is the WHOLE receipt (the job's cost; nothing from it is in shop stock). billable_amount is what an invoice off this receipt charges the customer, at cost before markup: lines with billable false come off, a split line bills only its billed_to_customer, and untouched sales tax comes off in proportion with them. Quote billable_amount — do not add the line figures up, the shared tax is why they will not match it.",
         ];
         if (b.pricing_provisional === true)
           moneyNote.push(

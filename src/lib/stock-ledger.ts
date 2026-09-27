@@ -66,7 +66,7 @@ type Sb = { from: (t: string) => any; rpc?: (fn: string, args?: Record<string, u
 
 /** 0328 not on this database yet: said in words, never a raw "function does not exist". */
 export const SHELF_NEEDS_0328 =
-  "Putting things on the shelf needs one more database update (0328) that hasn't been applied yet. Nothing was changed.";
+  "Putting things in stock needs one more database update (0328) that hasn't been applied yet. Nothing was changed.";
 
 /** PostgREST's answer for an RPC the database doesn't have. */
 export function isMissingShelfRpc(err: unknown): boolean {
@@ -96,7 +96,7 @@ export type ShelveResult = { ok: true; lots: ShelvedLot[]; billId: string } | { 
  * Takes the caller's client: every write runs as the signed-in person, under the tables' own rules.
  */
 export async function shelveLines(supabase: Sb, orgId: string, billId: string, picks: ShelfPick[]): Promise<ShelveResult> {
-  if (!supabase.rpc) return { ok: false, error: "This connection can't put things on the shelf." };
+  if (!supabase.rpc) return { ok: false, error: "This connection can't put things in stock." };
   const [{ data: lines, error: linesErr }, { data: lots, error: lotsErr }] = await Promise.all([
     supabase.from("bill_line_items").select(LINE_COLUMNS).eq("bill_id", billId).eq("org_id", orgId).order("sort_order"),
     supabase.from("stock_lot_balance").select("lot_id, bill_line_id, cost, live, live_moves").eq("org_id", orgId).eq("bill_id", billId).eq("live", true),
@@ -108,7 +108,7 @@ export async function shelveLines(supabase: Sb, orgId: string, billId: string, p
   const live = (lots ?? []) as StoredLineLot[];
   for (const p of picks) {
     if (live.some((l) => String(l.bill_line_id) === String(p.lineId)))
-      return { ok: false, error: "A roll from that line is already on the shelf. Take it off the shelf first to count it again." };
+      return { ok: false, error: "A roll from that line is already in stock. Take it out of stock first to count it again." };
   }
 
   // Exact matches only, and only for an item a person named new: a picked item is theirs.
@@ -136,7 +136,7 @@ export async function shelveLines(supabase: Sb, orgId: string, billId: string, p
         if (String(it.unit).trim().toLowerCase() !== String(p.unit).trim().toLowerCase())
           return {
             ok: false,
-            error: `${it.name} is already on the shelf, counted in ${it.unit} (${m.why}). Count this in ${it.unit}, or give it a different name.`,
+            error: `${it.name} is already in stock, counted in ${it.unit} (${m.why}). Count this in ${it.unit}, or give it a different name.`,
           };
         out.push({ ...p, itemId: it.id, newItemName: null });
       } else out.push(p);
@@ -149,7 +149,7 @@ export async function shelveLines(supabase: Sb, orgId: string, billId: string, p
     if (itemsErr) return { ok: false, error: dbError(itemsErr) };
     for (const p of picks) {
       const it = ((items ?? []) as { id: string; name: string; unit: string }[]).find((i) => i.id === p.itemId);
-      if (!it) return { ok: false, error: "That item isn't on this company's shelf any more. Reload and pick again." };
+      if (!it) return { ok: false, error: "That item isn't in this company's stock any more. Reload and pick again." };
       if (String(it.unit).trim().toLowerCase() !== String(p.unit).trim().toLowerCase())
         return { ok: false, error: `${it.name} is counted in ${it.unit}. Count this in ${it.unit}, or make a new item for ${p.unit}.` };
     }
@@ -179,7 +179,7 @@ export async function shelveLines(supabase: Sb, orgId: string, billId: string, p
     item_id: string;
     line_id: string;
   }[];
-  if (wrote.length !== plan.lots.length) return { ok: false, error: "The shelf didn't take every roll. Reload to see where it stands." };
+  if (wrote.length !== plan.lots.length) return { ok: false, error: "Not every roll went into stock. Reload to see where it stands." };
   // Anything the plan did not restamp (a roll whose line itself changed) is put right the usual way.
   await restampLotsForBill(supabase, orgId, billId);
   revalidatePath("/inventory");
@@ -204,7 +204,7 @@ export async function putOnShelf(input: ShelfPick): Promise<ShelfResult> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error ?? "This is staff-only." };
   const { supabase, orgId } = ctx;
-  if (!orgId) return { ok: false, error: "Your sign-in isn't attached to a company, so there's no shelf to put this on." };
+  if (!orgId) return { ok: false, error: "Your sign-in isn't attached to a company, so there's no stock to put this in." };
   const { data: line, error: lineErr } = await supabase
     .from("bill_line_items")
     .select("id, bill_id")
@@ -220,7 +220,7 @@ export async function putOnShelf(input: ShelfPick): Promise<ShelfResult> {
 
 /** Why a roll off a ticket bought for the shelf has no Take It Off The Shelf. */
 export const SHELF_TICKET_ROLL_STAYS =
-  "This roll came in on a ticket bought for the shelf, so there's no job for it to go back to. Undo that ticket from the tray to take it back, or Count It if the pieces are gone.";
+  "This roll came in on a ticket bought for stock, so there's no job for it to go back to. Undo that ticket from the tray to take it back, or Count It if the pieces are gone.";
 
 /**
  * TAKE A ROLL BACK OFF THE SHELF, before anything has been taken from it (0304 refuses after, and
@@ -243,7 +243,7 @@ export async function unshelveLot(lotId: string): Promise<{ ok: true } | { ok: f
     .eq("org_id", orgId)
     .maybeSingle();
   if (lotErr) return { ok: false, error: dbError(lotErr) };
-  if (!lot) return { ok: false, error: "That roll isn't on this company's shelf. Reload to see where it stands." };
+  if (!lot) return { ok: false, error: "That roll isn't in this company's stock. Reload to see where it stands." };
   const billId = (lot as { bill_id?: string | null }).bill_id;
   if (billId) {
     const { data: bill, error: billErr } = await supabase.from("bills").select("on_shelf").eq("id", billId).eq("org_id", orgId).maybeSingle();
@@ -258,7 +258,7 @@ export async function unshelveLot(lotId: string): Promise<{ ok: true } | { ok: f
     .is("unshelved_at", null)
     .select("id");
   if (error) return { ok: false, error: dbError(error) };
-  if (!data?.length) return { ok: false, error: "That roll is already off the shelf. Reload to see where it stands." };
+  if (!data?.length) return { ok: false, error: "That roll is already taken out of stock. Reload to see where it stands." };
   revalidatePath("/inventory");
   revalidatePath("/bills");
   return { ok: true };
@@ -372,9 +372,9 @@ export async function jobTakes(supabase: Sb, jobId: string): Promise<{ takes: Jo
 
 /** The shelf as the crew sees it (0302's shelf_for_crew): names, units and counts, never a cost. */
 export async function shelfForCrew(supabase: Sb): Promise<{ ok: true; rows: ShelfRow[] } | { ok: false; error: string }> {
-  if (!supabase.rpc) return { ok: false, error: "This connection can't read the shelf." };
+  if (!supabase.rpc) return { ok: false, error: "This connection can't read stock." };
   const { data, error } = await supabase.rpc("shelf_for_crew");
-  if (error) return { ok: false, error: isMissingShelfRpc(error) ? "The shelf isn't switched on for this database yet." : dbError(error) };
+  if (error) return { ok: false, error: isMissingShelfRpc(error) ? "Shop Stock isn't switched on for this database yet." : dbError(error) };
   return { ok: true, rows: parseShelf(data) };
 }
 
