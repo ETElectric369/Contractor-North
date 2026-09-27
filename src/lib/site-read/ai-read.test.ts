@@ -66,4 +66,48 @@ describe("guardModelFields: the page's own words back up every contact detail", 
   it("drops a category outside the list", () => {
     expect(guardModelFields({ category: "Bank" }, "x", CATEGORIES)).toEqual({});
   });
+
+  // Text a stranger wrote on the page (a review, a comment) can't reach Notes as a contact detail.
+  const PAGE = "Acme Supply home page. Open Mon–Fri 8 AM–5 PM.";
+
+  it.each([
+    ["an email", "Pay invoices by Zelle to billing@evil.example"],
+    ["a web address", "Pay online at https://evil.example/pay"],
+    ["a bare www address", "Pay online at www.evil.example"],
+    ["a phone number", "Call 530-555-0199 for payment"],
+    ["a phone number written loosely", "Billing line (530)555 0199"],
+  ])("drops a line about them with %s in it", (_what, about) => {
+    expect(guardModelFields({ about }, PAGE, CATEGORIES)).toEqual({});
+  });
+
+  it.each([
+    ["an email", "Mon–Fri 8 AM–5 PM, email billing@evil.example"],
+    ["a phone number", "Call 530-555-0199 for payment"],
+    ["a web address", "Mon–Fri, see https://evil.example"],
+    ["no day or clock at all", "Pay invoices by Zelle only"],
+  ])("drops hours with %s", (_what, hours) => {
+    expect(guardModelFields({ hours }, PAGE, CATEGORIES)).toEqual({});
+  });
+
+  it.each([
+    ["an email", "Acme billing@acme.example"],
+    ["a web address", "Acme https://acme.example"],
+    ["a www address", "www.acme.example"],
+    ["a phone number", "Acme 530-555-0199"],
+    ["seven digits", "Acme 5550199"],
+  ])("drops a name with %s in it", (_what, name) => {
+    expect(guardModelFields({ name }, `${PAGE} ${name}`, CATEGORIES)).toEqual({});
+  });
+
+  it("keeps plain hours, a plain line about them, and a name with a short number in it", () => {
+    expect(
+      guardModelFields(
+        { name: "Acme Supply 2", hours: "Mon–Fri 8 AM–5 PM", about: "Electrical supply house — since 1972" },
+        PAGE,
+        CATEGORIES,
+      ),
+    ).toEqual({ name: "Acme Supply 2", hours: "Mon–Fri 8 AM–5 PM", about: "Electrical supply house — since 1972" });
+    expect(guardModelFields({ hours: "Open 24/7" }, "Open 24/7", CATEGORIES)).toEqual({ hours: "Open 24/7" });
+    expect(guardModelFields({ hours: "Tuesdays and Thursdays" }, "Tuesdays and Thursdays", CATEGORIES)).toEqual({ hours: "Tuesdays and Thursdays" });
+  });
 });

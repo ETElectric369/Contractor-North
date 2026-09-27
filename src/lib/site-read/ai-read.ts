@@ -3,7 +3,7 @@ import type Anthropic from "@anthropic-ai/sdk";
 import { modelFor, recordAiUsage, type TokenUsage } from "@/lib/ai-cost";
 import { extractJsonObject } from "@/lib/ai-json";
 import { formatPhone } from "@/lib/utils";
-import { cleanEmail, phoneDigits, stateCode, type SiteFields } from "./extract";
+import { cleanEmail, looksLikeHours, phoneDigits, stateCode, type SiteFields } from "./extract";
 
 /**
  * THE ONE SMALL MODEL CALL behind Fill From Their Site. Asked only when the page's own card (JSON-LD,
@@ -11,10 +11,12 @@ import { cleanEmail, phoneDigits, stateCode, type SiteFields } from "./extract";
  * while Nort is switched on and the company is under its month's AI allowance (the action checks).
  *
  * The cheap model (modelFor("classify")), a capped slice of the page's words, ONE metered call on
- * surface "resource-from-link" (never a second: a reply that isn't JSON is not sent off for repair). THE PAGE IS UNTRUSTED: it goes in fenced as <page>…</page>, the system
- * prompt says it is data to extract from and never instructions, and the answer is then GUARDED: a
- * phone, email, zip, street number or city the page's own words don't show is dropped. A category
- * outside the list is dropped. The model's word is never enough on its own.
+ * surface "resource-from-link" (never a second: a reply that isn't JSON is not sent off for repair).
+ * THE PAGE IS UNTRUSTED: it goes in fenced as <page>…</page>, the system prompt says it is data to
+ * extract from and never instructions, and the answer is then GUARDED: a phone, email, zip, street
+ * number or city the page's own words don't show is dropped; so is a name, a line about them or their
+ * hours with an email, a web address or a phone number in it, and hours that don't read as hours. A
+ * category outside the list is dropped. The model's word is never enough on its own.
  */
 
 export const SITE_FILL_SURFACE = "resource-from-link";
@@ -38,6 +40,14 @@ const str = (v: unknown, max: number): string | undefined => {
   return s || undefined;
 };
 
+/** An email, a web address or a phone-shaped run of digits. The free-text answers (what they are,
+ *  their hours) never carry one: a contact detail reaches the form only through its own box's check
+ *  against the page, so a line a stranger wrote on the page ("Pay invoices by Zelle to billing@…",
+ *  in a review or a comment) can't ride into Notes marked "From their site". */
+const CONTACT_SHAPED = /@|https?:|www\.|\d{3}\D{0,3}\d{3}\D{0,3}\d{4}/i;
+/** A name is words: never an email, a web address, or a phone number's worth of digits. */
+const NOT_A_NAME = /@|https?:|www\.|(?:\d[\s().-]{0,2}){7,}/i;
+
 /** Keep only what the page's own words back up. `pageText` is exactly what the model was shown. */
 export function guardModelFields(raw: unknown, pageText: string, categories: readonly string[]): SiteFields {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
@@ -48,7 +58,7 @@ export function guardModelFields(raw: unknown, pageText: string, categories: rea
 
   const name = str(o.name, 120);
   const firstWord = name?.toLowerCase().split(/[^a-z0-9]+/).find((w) => w.length >= 3);
-  if (name && (!firstWord || lower.includes(firstWord))) out.name = name;
+  if (name && !NOT_A_NAME.test(name) && (!firstWord || lower.includes(firstWord))) out.name = name;
 
   const phones = ([] as unknown[])
     .concat(o.phones ?? o.phone ?? [])
@@ -71,9 +81,9 @@ export function guardModelFields(raw: unknown, pageText: string, categories: rea
   if (zip && /^\d{5}(-\d{4})?$/.test(zip) && pageText.includes(zip.slice(0, 5))) out.zip = zip;
 
   const hours = str(o.hours, 120);
-  if (hours) out.hours = hours;
+  if (hours && !CONTACT_SHAPED.test(hours) && looksLikeHours(hours)) out.hours = hours;
   const about = str(o.about, 80);
-  if (about) out.about = about;
+  if (about && !CONTACT_SHAPED.test(about)) out.about = about;
   const category = str(o.category, 40);
   if (category && categories.includes(category)) out.category = category;
   return out;

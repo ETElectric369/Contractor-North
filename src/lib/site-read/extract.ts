@@ -290,6 +290,14 @@ function textHours(text: string): string | undefined {
   return seen.length ? seen.join("; ") : undefined;
 }
 
+/** A day ("Mon", "Tuesdays"), a clock ("8 AM", "5:30 p.m.", "17:00") or "24/7": what any line of
+ *  opening hours has, and a line that isn't hours ("Pay invoices by Zelle") doesn't. */
+const HOURS_WORD_RE =
+  /\b(?:Mon|Tues?|Wed(?:nes)?|Thu(?:rs?)?|Fri|Sat(?:ur)?|Sun)(?:day)?s?\.?(?![a-z])|\b\d{1,2}(?::\d{2})?[ ]?[ap]\.?[ ]?m\b|\b\d{1,2}:\d{2}\b|\b24\/7\b|\b24 hours\b/i;
+export function looksLikeHours(s: string): boolean {
+  return HOURS_WORD_RE.test(s);
+}
+
 const DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const DAY_INDEX: Record<string, number> = { mo: 0, tu: 1, we: 2, th: 3, fr: 4, sa: 5, su: 6 };
 
