@@ -10,7 +10,36 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
  * keeps the file so the bill still opens it. Unscripted calls throw, so every statement is counted.
  */
 
-const state = vi.hoisted(() => ({ client: null as any, reportError: vi.fn() }));
+const state = vi.hoisted(() => ({
+  client: null as any,
+  reportError: vi.fn(),
+  adminOn: true,
+  // What the service role reads naming the file: by file_url, then by document_id.
+  adminRows: [] as { byFile: any; byDoc: any }[],
+  adminReads: 0,
+}));
+vi.mock("@/lib/supabase/admin", () => ({
+  adminConfigured: () => state.adminOn,
+  createAdminClient: () => ({
+    from(table: string) {
+      if (table !== "organized_items") throw new Error(`unscripted admin table: ${table}`);
+      const eqs: [string, unknown][] = [];
+      const chain: any = {
+        select: () => chain,
+        eq(col: string, val: unknown) { eqs.push([col, val]); return chain; },
+        limit: () => {
+          state.adminReads++;
+          const next = state.adminRows[0];
+          if (!next) throw new Error("unscripted admin read");
+          const byFile = eqs.some(([c]) => c === "file_url");
+          if (!byFile) state.adminRows.shift();
+          return Promise.resolve(byFile ? next.byFile : next.byDoc);
+        },
+      };
+      return chain;
+    },
+  }),
+}));
 
 vi.mock("@/lib/staff-guard", () => ({ requireStaff: vi.fn(async () => ({ supabase: state.client, userId: "user-erik", orgId: ORG })) }));
 vi.mock("@/lib/supabase/server", () => ({ createClient: vi.fn(async () => state.client) }));
@@ -125,5 +154,74 @@ describe("deleting a receipt that made a bill", () => {
     expect(await deleteDocument(DOC, null, JOB)).toEqual({ ok: false, error: "Document not found." });
     expect(calls.some((c) => c.table === "organized_items")).toBe(false);
     expect(removed).toEqual([]);
+  });
+});
+
+/**
+ * A TECH DELETING WHAT THEY PUT THERE (review of release/v1026). Their sign-in sees only the links
+ * they made, so the office's link from a bill to the tech's receipt was invisible: the release found
+ * nothing and the file went out from under the bill. The links are read past RLS first.
+ */
+describe("a tech deleting a receipt or photo they added", () => {
+  const techWith = (script: Record<string, any[]>) =>
+    officeWith({ "profiles.select": [{ data: { role: "tech", active: true }, error: null }], ...script });
+  const none = { data: [], error: null };
+  beforeEach(() => {
+    state.adminOn = true;
+    state.adminRows = [];
+    state.adminReads = 0;
+  });
+
+  it("one the office recorded as a cost is refused in words, and nothing is deleted", async () => {
+    state.adminRows = [{ byFile: { data: [{ id: "tie-1", created_by: "user-office", bill_id: "bill-1" }], error: null }, byDoc: none }];
+    techWith({});
+    const res = await deleteDocument(DOC, null, JOB);
+    expect(res).toEqual({ ok: false, error: expect.stringMatching(/^The office recorded this receipt as a cost, so only the office can delete it/) });
+    expect(calls.some((c) => c.verb === "delete" || c.verb === "update")).toBe(false);
+    expect(removed).toEqual([]);
+  });
+
+  it("a link by the document alone counts too (a receipt tied to a supplier invoice)", async () => {
+    state.adminRows = [{ byFile: none, byDoc: { data: [{ id: "tie-2", created_by: "user-office", tied_supplier_invoice_id: "si-1" }], error: null } }];
+    techWith({});
+    expect(await deleteDocument(DOC, null, JOB)).toMatchObject({ ok: false });
+    expect(removed).toEqual([]);
+  });
+
+  it("a blurry photo nobody else names goes, file and all", async () => {
+    state.adminRows = [{ byFile: none, byDoc: none }];
+    techWith({ "documents.delete": [{ data: [{ id: DOC }], error: null }], "organized_items.update": [none] });
+    expect(await deleteDocument(DOC, null, JOB)).toEqual({ ok: true });
+    expect(state.adminReads).toBe(2);
+    expect(removed).toEqual([[PATH]]);
+  });
+
+  it("a link somebody else made that holds no money: the row goes, the file stays (the link still opens it)", async () => {
+    state.adminRows = [{ byFile: { data: [{ id: "tie-3", created_by: "user-office" }], error: null }, byDoc: none }];
+    techWith({ "documents.delete": [{ data: [{ id: DOC }], error: null }] });
+    expect(await deleteDocument(DOC, null, JOB)).toEqual({ ok: true });
+    expect(calls.some((c) => c.table === "organized_items")).toBe(false);
+    expect(removed).toEqual([]);
+  });
+
+  it("the links can't be read (no service role, or a failed read): the row goes, the file stays", async () => {
+    state.adminOn = false;
+    techWith({ "documents.delete": [{ data: [{ id: DOC }], error: null }] });
+    expect(await deleteDocument(DOC, null, JOB)).toEqual({ ok: true });
+    expect(state.adminReads).toBe(0);
+    expect(removed).toEqual([]);
+    state.adminOn = true;
+    state.adminRows = [{ byFile: { data: null, error: { code: "57014", message: "timeout" } }, byDoc: none }];
+    techWith({ "documents.delete": [{ data: [{ id: DOC }], error: null }] });
+    expect(await deleteDocument(DOC, null, JOB)).toEqual({ ok: true });
+    expect(removed).toEqual([]);
+    expect(state.reportError).toHaveBeenCalledWith("deleteDocument.fileHeldByOthers", expect.anything(), { documentId: DOC });
+  });
+
+  it("staff never need the read: their own sign-in reaches every link", async () => {
+    officeWith({ "documents.delete": [{ data: [{ id: DOC }], error: null }], "organized_items.update": [none] });
+    expect(await deleteDocument(DOC, null, JOB)).toEqual({ ok: true });
+    expect(state.adminReads).toBe(0);
+    expect(removed).toEqual([[PATH]]);
   });
 });

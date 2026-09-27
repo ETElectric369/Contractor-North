@@ -4,6 +4,7 @@ import { importExtras, extrasSentence, type ImportOutcomeLike } from "@/lib/impo
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { adminConfigured, createAdminClient } from "@/lib/supabase/admin";
 import { pushCalendarItem, deleteCalendarItem } from "@/lib/calendar-sync";
 import { JOB_STATUSES } from "@/lib/job-status";
 import { DRAW_KINDS, isDrawKind } from "@/lib/invoice-math";
@@ -1750,10 +1751,23 @@ export async function deleteDocument(
   }
 
   const storedPath = (row as { file_url?: string | null }).file_url ?? null;
+  const orgId = (row as { org_id?: string | null }).org_id ?? null;
+  // Anyone but staff: the links naming the file are read past RLS first (fileHeldByOthers).
+  let keepFile = false;
+  if (!isStaff && storedPath) {
+    const held = await fileHeldByOthers(orgId, storedPath, id, uid);
+    if (held === "money") {
+      return {
+        ok: false,
+        error: "The office recorded this receipt as a cost, so only the office can delete it now. Ask them if it should go.",
+      };
+    }
+    keepFile = held !== "none";
+  }
   const { data: del, error } = await supabase.from("documents").delete().eq("id", id).select("id");
   if (error) return { ok: false, error: dbError(error) };
   if (!del?.length) return { ok: false, error: "Document not found." };
-  if (storedPath && (await tiesLetGoOfFile(supabase, (row as { org_id?: string | null }).org_id ?? null, storedPath, id))) {
+  if (storedPath && !keepFile && (await tiesLetGoOfFile(supabase, orgId, storedPath, id))) {
     await supabase.storage.from("documents").remove([storedPath]);
   }
   revalidatePath(`/jobs/${jobId}`);
@@ -1785,6 +1799,44 @@ async function tiesLetGoOfFile(supabase: SupabaseClient, orgId: string | null, p
     return false;
   }
   return true;
+}
+
+/**
+ * A TECH'S DELETE NEVER STRANDS THE OFFICE'S LINK (review of release/v1026). tiesLetGoOfFile writes
+ * with the caller's own sign-in, and a tech sees only the links they made (organized_items_write,
+ * 0340): the office's link from a bill to a receipt the tech snapped was invisible, the release
+ * found nothing, and the file was removed under the bill's Receipt door. So for anyone but staff,
+ * every link naming the file (by the file, or by the document) is read past RLS first, a read
+ * only: one that made money (a bill, a supplier invoice, petty cash) refuses the delete in words;
+ * one somebody else made keeps the file; a read that couldn't run keeps the file too (a file left
+ * in storage costs nothing, a dead door on a bill does). "none" is the only answer that removes it.
+ */
+async function fileHeldByOthers(orgId: string | null, path: string, documentId: string, uid: string | null): Promise<"money" | "other" | "none" | "unknown"> {
+  if (!orgId || !uid || !adminConfigured()) return "unknown";
+  try {
+    const admin = createAdminClient();
+    const cols = "id, created_by, bill_id, tied_bill_id, tied_supplier_invoice_id, petty_cash_id";
+    const [byFile, byDoc] = await Promise.all([
+      admin.from("organized_items").select(cols).eq("org_id", orgId).eq("file_url", path).limit(50),
+      admin.from("organized_items").select(cols).eq("org_id", orgId).eq("document_id", documentId).limit(50),
+    ]);
+    if (byFile.error || byDoc.error) {
+      reportError("deleteDocument.fileHeldByOthers", byFile.error ?? byDoc.error, { documentId });
+      return "unknown";
+    }
+    const rows = [...(byFile.data ?? []), ...(byDoc.data ?? [])] as {
+      created_by?: string | null;
+      bill_id?: string | null;
+      tied_bill_id?: string | null;
+      tied_supplier_invoice_id?: string | null;
+      petty_cash_id?: string | null;
+    }[];
+    if (rows.some((r) => r.bill_id || r.tied_bill_id || r.tied_supplier_invoice_id || r.petty_cash_id)) return "money";
+    return rows.some((r) => r.created_by !== uid) ? "other" : "none";
+  } catch (e) {
+    reportError("deleteDocument.fileHeldByOthers", e, { documentId });
+    return "unknown";
+  }
 }
 
 export type JobImportRow = {
