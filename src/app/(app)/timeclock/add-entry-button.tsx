@@ -1,7 +1,7 @@
 "use client";
 
-import { useMemo, useRef, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Modal, ModalActions } from "@/components/ui/modal";
@@ -147,6 +147,22 @@ export function AddEntryButton({
   /** The shift a refusal named, bolded in the list above; and a nudge to re-read that list. */
   const [clashId, setClashId] = useState<string | null>(null);
   const [dayKey, setDayKey] = useState(0);
+
+  /**
+   * OPEN THAT SHIFT, ONE MODAL AT A TIME. On Timecards the link only changes ?entry=, so this form
+   * stayed open under the shift's editor and one Back closed both. It closes itself once the URL
+   * names that shift: after the navigation, so its own history step never undoes it (a Modal steps
+   * back only while its marker is still the current entry, overlay-history.ts). From Timeclock the
+   * link leaves the page and this unmounts anyway.
+   */
+  const searchParams = useSearchParams();
+  const [openingShift, setOpeningShift] = useState<string | null>(null);
+  useEffect(() => {
+    if (openingShift && searchParams?.get("entry") === openingShift) {
+      setOpen(false);
+      setOpeningShift(null);
+    }
+  }, [searchParams, openingShift]);
 
   function submit() {
     if (inFlight.current || pending) return;
@@ -309,6 +325,7 @@ export function AddEntryButton({
               if (left) toast(left, "info", { label: "Open That Shift", onClick: () => router.push(`/timecards?entry=${shift.id}`) });
               router.refresh();
             }}
+            onOpenShift={(shift) => setOpeningShift(shift.id)}
           />
 
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">

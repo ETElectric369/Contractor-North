@@ -130,6 +130,13 @@ describe("one tap, one entry", () => {
     expect(s).toContain("<SameDayShifts");
     expect(s).toMatch(/\{\(hours > 0 \|\| workDate !== todayStrInTz\(tz\)\) && \(\s*<SameDayShifts/);
   });
+  it("Open That Shift on Timecards closes Add Entry once the URL names the shift, so one Back closes one modal", () => {
+    const s = src("./add-entry-button.tsx");
+    expect(s).toContain("onOpenShift={(shift) => setOpeningShift(shift.id)}");
+    expect(s).toMatch(/if \(openingShift && searchParams\?\.get\("entry"\) === openingShift\) \{\s*setOpen\(false\);/);
+    // The link itself still navigates, and tells the form it was tapped.
+    expect(src("./same-day-shifts.tsx")).toMatch(/href=\{`\/timecards\?entry=\$\{s\.id\}`\}\s*onClick=\{\(\) => onOpenShift\?\.\(s\)\}/);
+  });
   it("the door is an outline button, never a second primary beside the form's own", () => {
     expect(render([punch], { id: "j28", label: "85 Whitney" })).toMatch(/<button[^>]*class="[^"]*border-slate-300[^"]*"[^>]*>Put This On 85 Whitney<\/button>/);
   });

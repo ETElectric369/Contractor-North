@@ -58,12 +58,16 @@ export function SameDayShiftsList({
   highlightId,
   busyId,
   onPut,
+  onOpenShift,
 }: {
   data: Extract<DayShifts, { ok: true }>;
   date: string;
   highlightId?: string | null;
   busyId?: string | null;
   onPut?: (s: DayShift) => void;
+  /** Open That Shift was tapped (the link still navigates): the form can close itself once the
+   *  shift's editor is up, so two modals never answer one Back. */
+  onOpenShift?: (s: DayShift) => void;
 }) {
   if (!data.shifts.length) return null;
   const first = data.name.split(/\s+/)[0] || data.name;
@@ -104,6 +108,7 @@ export function SameDayShiftsList({
               ) : (
                 <Link
                   href={`/timecards?entry=${s.id}`}
+                  onClick={() => onOpenShift?.(s)}
                   className="inline-flex min-h-[44px] items-center px-1 text-sm font-medium text-brand hover:underline"
                 >
                   Open That Shift
@@ -138,6 +143,7 @@ export function SameDayShifts({
   highlightId,
   refreshKey = 0,
   onPlaced,
+  onOpenShift,
 }: {
   profileId: string;
   date: string;
@@ -145,6 +151,7 @@ export function SameDayShifts({
   highlightId?: string | null;
   refreshKey?: number;
   onPlaced?: (sentence: string, shift: DayShift) => void;
+  onOpenShift?: (shift: DayShift) => void;
 }) {
   const toast = useToast();
   const router = useRouter();
@@ -218,5 +225,5 @@ export function SameDayShifts({
     }
   };
 
-  return <SameDayShiftsList data={data} date={date} highlightId={highlightId} busyId={busyId} onPut={put} />;
+  return <SameDayShiftsList data={data} date={date} highlightId={highlightId} busyId={busyId} onPut={put} onOpenShift={onOpenShift} />;
 }
