@@ -30,7 +30,7 @@ import { loadLinkInstead } from "@/lib/appointments/visit-start-read";
 import { VisitStartCard } from "./visit-start-card";
 import { FeatureOffLine } from "@/components/feature-off-line";
 import { featureOn } from "@/lib/features";
-import { answersWithoutPrices, isMissingRpc, walkthroughAccess } from "@/lib/inspection/walkthrough-access";
+import { answersWithoutPrices, isMissingRpc, sheetsWithoutMoney, walkthroughAccess } from "@/lib/inspection/walkthrough-access";
 
 export const dynamic = "force-dynamic";
 
@@ -475,7 +475,10 @@ export default async function AppointmentCapturePage({
             appointmentId={a.id}
             orgId={a.org_id}
             userId={viewerId}
-            templates={sheets ?? []}
+            // A written why line is where the answer lands in the PRICE and a note is the owner's own
+            // voice: the office gets the sheets as written; anyone else gets them with every note
+            // dropped and every why without its dollar figures (the row goes to the browser whole).
+            templates={viewerIsStaff ? (sheets ?? []) : sheetsWithoutMoney(sheets ?? [])}
             // The office fills in and prices; a crew lead on this visit fills in (0356); anyone else
             // reads. The price book carries buy prices: only the office gets it.
             access={access}

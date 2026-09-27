@@ -14,6 +14,8 @@
  * function: before 0356 is applied a crew lead sees the read-only walk-through, never a Save that
  * cannot work.
  */
+import { parsePlaybook } from "@/lib/playbook/parse";
+
 export type WalkthroughAccess = "office" | "crewLead" | "view";
 
 export function walkthroughAccess(v: {
@@ -50,6 +52,43 @@ export function answersWithoutPrices<T extends Record<string, unknown>>(answers:
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(src)) out[k] = strip(v);
   return out as T;
+}
+
+/** A dollar figure, and the rate unit that follows one: "$400", "$1,250.00", "$4.50/ft", "$2k", "$90 per hr". */
+const MONEY = /\s*\$\s?\d[\d,]*(?:\.\d+)?(?:\s?[kKmM]\b)?(?:\s?(?:\/|per\s+)\s?[A-Za-z][A-Za-z.]*)?/g;
+
+/** The sentence with its dollar figures taken out: "turns a $400 circuit into a panel swap" reads
+ *  "turns a circuit into a panel swap". */
+export function withoutMoney(s: string): string {
+  return s
+    .replace(MONEY, "")
+    .replace(/\s{2,}/g, " ")
+    .replace(/\s+([,.;:!?)])/g, "$1")
+    .trim();
+}
+
+/**
+ * THE SHEETS, WITH NO MONEY IN THEM, for anyone who isn't the office.
+ *
+ * A written playbook's `why` is, by definition, where the answer ends up in the PRICE ("Zinsco or FPE
+ * turns a $400 circuit into a panel swap"), and its `note` is the owner's own voice, which "never
+ * appears on a job" (lib/playbook/types). The Inspector draws the why under every question, and the
+ * page hands the whole forms row to the browser, so both would reach a crew lead or a tech. On the
+ * server, before it goes: every `note` is dropped, and every `why` keeps its words without its dollar
+ * figures (dropped when nothing is left). A sheet with no written playbook carries neither and goes
+ * as it is; one with a playbook still has one, so the Inspector's default-sheet pick doesn't change.
+ */
+export function sheetsWithoutMoney<T extends { playbook?: unknown }>(sheets: readonly T[]): T[] {
+  return sheets.map((s) => {
+    if (!s.playbook) return s;
+    const needs = parsePlaybook(s.playbook).needs.map((need) => {
+      const { note: _note, why, ...rest } = need;
+      void _note;
+      const w = why ? withoutMoney(why) : "";
+      return w ? { ...rest, why: w } : rest;
+    });
+    return { ...s, playbook: { needs } };
+  });
 }
 
 function omitPrice(o: Record<string, unknown>): Record<string, unknown> {

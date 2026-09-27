@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { answersWithoutPrices, isMissingRpc, keepStoredPhotos, walkthroughAccess } from "./walkthrough-access";
+import { answersWithoutPrices, isMissingRpc, keepStoredPhotos, sheetsWithoutMoney, walkthroughAccess, withoutMoney } from "./walkthrough-access";
 
 /**
  * "crew leader yes tech no" (Erik, 2026-09-26), as the page decides it. The database decides it again
@@ -75,5 +75,55 @@ describe("a crew lead adds photos and never takes one off", () => {
     // His page dropped one (or never had the office's newest): it is kept.
     expect(keepStoredPhotos(["a", "b", "office-new"], ["a", "c"])).toEqual(["a", "b", "office-new", "c"]);
     expect(keepStoredPhotos([], ["x"])).toEqual(["x"]);
+  });
+});
+
+describe("the sheets, with no money in them, for anyone who isn't the office", () => {
+  it("a why line keeps its words and loses its dollar figures", () => {
+    expect(withoutMoney("Decides breaker or service change — Zinsco or FPE turns a $400 circuit into a panel swap.")).toBe(
+      "Decides breaker or service change — Zinsco or FPE turns a circuit into a panel swap.",
+    );
+    expect(withoutMoney("Run length × $4.50/ft, plus $1,250.00 for the can.")).toBe("Run length ×, plus for the can.");
+    expect(withoutMoney("$2k minimum")).toBe("minimum");
+    expect(withoutMoney("Labor at $90 per hr")).toBe("Labor at");
+    expect(withoutMoney("How many circuits")).toBe("How many circuits");
+  });
+
+  it("every note goes, every why is stripped (or dropped when nothing is left), and nothing else moves", () => {
+    const sheets = [
+      {
+        id: "s1",
+        name: "Electrical walk-through",
+        schema: [],
+        playbook: {
+          needs: [
+            {
+              key: "panel_condition",
+              label: "Panel",
+              ask: "What shape is the panel in?",
+              slot: { type: "select", options: ["Good", "Zinsco", "FPE"] },
+              why: "Decides breaker or service change — Zinsco or FPE turns a $400 circuit into a panel swap.",
+              note: "A $400 circuit becomes a $3,500 panel swap; never price it before the cover is off.",
+            },
+            { key: "scopes", label: "Scopes", ask: "Which?", slot: { type: "scopes" }, why: "$0.00", note: "The R codes sit at $0.00 in his price list on purpose" },
+            { key: "run", label: "Run", ask: "How far?", slot: { type: "number", unit: "ft" }, why: "Wire run" },
+          ],
+        },
+      },
+      { id: "s2", name: "Converted checklist", schema: [{ key: "a", label: "A", type: "text" }], playbook: null },
+    ];
+    const out = sheetsWithoutMoney(sheets);
+    expect(JSON.stringify(out)).not.toMatch(/\$|400|3,500|0\.00|"note"/);
+    const needs = (out[0].playbook as { needs: Record<string, unknown>[] }).needs;
+    expect(needs.map((n) => n.key)).toEqual(["panel_condition", "scopes", "run"]);
+    expect(needs[0].why).toBe("Decides breaker or service change — Zinsco or FPE turns a circuit into a panel swap.");
+    expect(needs[0].ask).toBe("What shape is the panel in?");
+    expect(needs[0].slot).toEqual({ type: "select", options: ["Good", "Zinsco", "FPE"] });
+    expect(needs[1]).not.toHaveProperty("why");
+    expect(needs[2].why).toBe("Wire run");
+    // A sheet with no written playbook goes as it is (it carries no why or note), still with no playbook.
+    expect(out[1]).toBe(sheets[1]);
+    // The office's rows are not touched.
+    expect(sheets[0].playbook?.needs[0].note).toMatch(/\$400/);
   });
 });

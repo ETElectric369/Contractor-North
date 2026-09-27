@@ -32,7 +32,7 @@ vi.mock("@/components/address-autocomplete", () => ({
 }));
 
 import { Inspector } from "./inspector";
-import type { WalkthroughAccess } from "@/lib/inspection/walkthrough-access";
+import { sheetsWithoutMoney, type WalkthroughAccess } from "@/lib/inspection/walkthrough-access";
 
 const SHEET = {
   id: "sheet-1",
@@ -179,6 +179,31 @@ describe("a crew lead on this visit: fills it in, never a price", () => {
     expect(none).toContain("The office hasn't set up walk-through questions yet. Notes, measurements and photos below still save.");
     expect(none).not.toMatch(/Set Up My Questions/i);
   });
+});
+
+describe("the owner's dollar figures in a why line or a note never reach the crew or a tech", () => {
+  // ET's own panel question, as written on production: the why names a price, and so does the note.
+  const WHY = "Decides breaker or service change — Zinsco or FPE turns a $400 circuit into a panel swap.";
+  const priced = {
+    ...SHEET,
+    playbook: {
+      needs: SHEET.playbook.needs.map((n) =>
+        n.key === "panel" ? { ...n, why: WHY, note: "A $400 circuit becomes a panel swap; never price it with the cover on." } : n,
+      ),
+    },
+  };
+  it("the office reads its own why line, figure and all", () => {
+    expect(textOf(render("office", { templates: [priced] }))).toContain("turns a $400 circuit");
+  });
+  for (const access of ["crewLead", "view"] as const) {
+    it(`${access}: the page's sheets carry the words without the figure, and no note`, () => {
+      const sent = sheetsWithoutMoney([priced]);
+      expect(JSON.stringify(sent)).not.toMatch(/\$|400|"note"/);
+      const t = textOf(render(access, { templates: sent }));
+      expect(t).toContain("Zinsco or FPE turns a circuit into a panel swap.");
+      expect(t).not.toMatch(/\$|400/);
+    });
+  }
 });
 
 describe("a plain tech: reads it", () => {
