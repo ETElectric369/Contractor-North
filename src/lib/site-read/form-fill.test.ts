@@ -121,6 +121,16 @@ describe("the pieces", () => {
     ["not a site", false],
     ["hello", false],
     ["", false],
+    // Copied out of a sentence: the sentence's punctuation doesn't make it not an address.
+    ["www.pge.com.", true],
+    ["https://www.pge.com)", true],
+    ["pge.com,", true],
+    ["(pge.com)", true],
+    ["<https://pge.com>", true],
+    ['"pge.com"', true],
+    ["https://en.example.org/wiki/Panel_(electric)", true],
+    ["...", false],
+    ["hello.", false],
   ])("looksLikeWebAddress(%s) = %s", (s, ok) => {
     expect(looksLikeWebAddress(s)).toBe(ok);
   });
@@ -132,6 +142,12 @@ describe("the pieces", () => {
     ["javascript:alert(1)", "javascript:alert(1)"],
     ["file:///etc/passwd", "file:///etc/passwd"],
     ["", null],
+    ["www.pge.com.", "https://www.pge.com"],
+    ["https://www.pge.com)", "https://www.pge.com"],
+    ["(pge.com),", "https://pge.com"],
+    ["<https://pge.com/contact>.", "https://pge.com/contact"],
+    ["https://en.example.org/wiki/Panel_(electric).", "https://en.example.org/wiki/Panel_(electric)"],
+    [".", null],
   ])("siteUrl(%s) = %s", (s, url) => {
     expect(siteUrl(s)).toBe(url);
   });

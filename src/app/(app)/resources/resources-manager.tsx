@@ -53,6 +53,9 @@ export function ResourcesManager({ resources, canEdit }: { resources: Resource[]
   const [fromSite, setFromSite] = useState<Set<FillKey>>(new Set());
   const [reading, setReading] = useState(false);
   const [fillNote, setFillNote] = useState<FillNote | null>(null);
+  /** Say so when the Website box holds something that can't be read, once the person has left it
+   *  (or pasted), never mid-typing: otherwise the disabled Fill button is a dead end with no reason. */
+  const [webHint, setWebHint] = useState(false);
   const { name, category, contact, phone, email, website, address, notes } = form;
   // Category has a default, so it is "empty" only on a new contact nobody has picked one for.
   const categoryOpen = !editingId && !categoryTouched;
@@ -99,6 +102,7 @@ export function ResourcesManager({ resources, canEdit }: { resources: Resource[]
     setCategoryTouched(false);
     setFromSite(new Set());
     setFillNote(null);
+    setWebHint(false);
   }
 
   function closeForm() {
@@ -156,7 +160,12 @@ export function ResourcesManager({ resources, canEdit }: { resources: Resource[]
     const el = e.currentTarget;
     const pasted = e.clipboardData.getData("text");
     const willBe = (el.value.slice(0, el.selectionStart ?? el.value.length) + pasted + el.value.slice(el.selectionEnd ?? el.value.length)).trim();
-    if (!looksLikeWebAddress(willBe) || emptyBoxes(live.current.form, { categoryOpen: live.current.categoryOpen }).length === 0) return;
+    if (!looksLikeWebAddress(willBe)) {
+      // After the change the paste makes (which clears the hint), so it shows.
+      setTimeout(() => setWebHint(true), 0);
+      return;
+    }
+    if (emptyBoxes(live.current.form, { categoryOpen: live.current.categoryOpen }).length === 0) return;
     setTimeout(() => void fillFromTheirSite(willBe), 0);
   }
 
@@ -203,7 +212,11 @@ export function ResourcesManager({ resources, canEdit }: { resources: Resource[]
                 autoCorrect="off"
                 spellCheck={false}
                 value={website}
-                onChange={(e) => set("website", e.target.value)}
+                onChange={(e) => {
+                  set("website", e.target.value);
+                  setWebHint(false);
+                }}
+                onBlur={() => setWebHint(true)}
                 onPaste={onWebsitePaste}
                 placeholder="Paste their site, e.g. yourcounty.gov/building"
                 className="h-11 min-w-0 flex-1"
@@ -219,6 +232,11 @@ export function ResourcesManager({ resources, canEdit }: { resources: Resource[]
                 {reading ? "Reading Their Site…" : "Fill From Their Site"}
               </Button>
             </div>
+            {webHint && website.trim() && !looksLikeWebAddress(website) && (
+              <p className="mt-1.5 text-sm text-amber-700">
+                That doesn&apos;t look like a web address, so it can&apos;t be read. Paste the site&apos;s address, like yourcounty.gov/building.
+              </p>
+            )}
             {fillNote && (
               <p
                 role="status"

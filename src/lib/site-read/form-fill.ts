@@ -107,17 +107,42 @@ export function fillSummary(before: FillValues, found: Partial<FillValues>, fill
   return ["Every box that site could fill already has something in it, so nothing changed.", didntList].filter(Boolean).join(" ");
 }
 
-/** Does this look like a web address worth reading? "pge.com", "https://yourcounty.gov/building". */
+const count = (s: string, ch: string) => s.split(ch).length - 1;
+
+/** A web address without the sentence it was copied out of: "Visit www.pge.com." pastes as
+ *  "www.pge.com.", an email's "(pge.com)" or "<https://pge.com>" keeps its brackets. The trailing
+ *  period, comma, colon, quote or bracket goes; a ")" or "]" that closes one inside the address
+ *  itself stays ("…/wiki/Panel_(electric)"). */
+export function trimAddress(input: string): string {
+  const t = String(input ?? "").trim().replace(/^[(<[“‘"']+/, "");
+  const opened: Record<string, number> = { ")": count(t, "("), "]": count(t, "[") };
+  const closed: Record<string, number> = { ")": count(t, ")"), "]": count(t, "]") };
+  let end = t.length;
+  while (end > 0) {
+    const c = t[end - 1];
+    if (/[.,;:!?'"”’>\s]/.test(c)) end--;
+    else if ((c === ")" || c === "]") && closed[c] > opened[c]) {
+      closed[c]--;
+      end--;
+    } else break;
+  }
+  return t.slice(0, end);
+}
+
+/** Does this look like a web address worth reading? "pge.com", "https://yourcounty.gov/building",
+ *  and the same with a sentence's punctuation still on it ("www.pge.com."). */
 export function looksLikeWebAddress(s: string): boolean {
-  const t = s.trim();
-  if (!t || t.length > 2000 || /\s/.test(t)) return false;
+  if (!s || s.length > 2000) return false;
+  const t = trimAddress(s);
+  if (!t || /\s/.test(t)) return false;
   return /^(https?:\/\/)?[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+(:\d{2,5})?([/?#]\S*)?$/i.test(t);
 }
 
-/** What the person typed as a URL to read: https:// is added when there's no scheme. Another scheme
- *  (mailto:, javascript:, file:) is kept, so the reader refuses it in words. null = nothing typed. */
+/** What the person typed as a URL to read: https:// is added when there's no scheme, and a
+ *  sentence's trailing punctuation is left off. Another scheme (mailto:, javascript:, file:) is
+ *  kept, so the reader refuses it in words. null = nothing typed. */
 export function siteUrl(input: string): string | null {
-  const t = String(input ?? "").trim();
+  const t = trimAddress(input);
   if (!t) return null;
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(t)) return t;
   if (/^[a-z][a-z0-9+.-]*:(?!\d)/i.test(t)) return t;
