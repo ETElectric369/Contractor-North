@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Check } from "lucide-react";
 import { useToast } from "@/components/toast";
-import { toggleTask } from "../tasks/actions";
+import { toggleTask, type ToggleTaskResult } from "../tasks/actions";
 
 /**
  * THE CLOCKED-IN JOB'S TASKS, inside My Day's Now block (0358). A tech on the clock at J-055 sees
@@ -27,15 +27,27 @@ export function NowTasks({ jobId, left, next }: { jobId: string; left: number; n
       else n.delete(t.id);
       return n;
     });
+    const revert = () =>
+      setChecked((s) => {
+        const n = new Set(s);
+        if (nowDone) n.delete(t.id);
+        else n.add(t.id);
+        return n;
+      });
     start(async () => {
-      const res = await toggleTask(t.id, nowDone, { jobId });
+      let res: ToggleTaskResult = await toggleTask(t.id, nowDone, { jobId });
+      // The toggleTask cascade contract (the job's list does the same): a task with open steps asks
+      // first, then checks them off with it. Never a question toasted with no way to answer it.
+      if (!res.ok && res.needsCascade && nowDone) {
+        const n = res.openChildren ?? 0;
+        if (!confirm(`"${t.title}" has ${n} open step${n === 1 ? "" : "s"}. Mark ${n === 1 ? "it" : "them"} done too?`)) {
+          revert();
+          return;
+        }
+        res = await toggleTask(t.id, true, { jobId, cascade: true });
+      }
       if (!res.ok) {
-        setChecked((s) => {
-          const n = new Set(s);
-          if (nowDone) n.delete(t.id);
-          else n.add(t.id);
-          return n;
-        });
+        revert();
         toast(res.error ?? "Couldn't update the task. Try again.", "error");
         return;
       }
