@@ -829,21 +829,29 @@ function revalidateWalkthrough(id: string) {
 async function saveCaptureAsCrewLead(id: string, patch: CapturePatch): Promise<Result> {
   const crew = await crewLeadOnVisit(id);
   if ("error" in crew) return { ok: false, refused: true, error: crew.error };
-  const { data: existing, error: readErr } = await crew.supabase
-    .from("appointments")
-    .select("capture")
-    .eq("id", id)
-    .eq("org_id", crew.orgId)
-    .maybeSingle();
-  if (readErr) return { ok: false, error: dbError(readErr) };
-  if (!existing) return { ok: false, error: "Appointment not found." };
-  const stored = (existing as { capture?: unknown }).capture ?? null;
-  // He adds photos; every one already on the list stays (the office takes one off). Merged here so a
-  // photo the office added while his page was open is kept, not refused.
-  const fixed: CapturePatch =
-    patch.photos !== undefined ? { ...patch, photos: keepStoredPhotos(parseInspectorCapture(stored).photos, patch.photos) } : patch;
-  const merged = mergeCaptureSections(stored, fixed);
-  const { data, error } = await crew.supabase.rpc("save_walkthrough_capture", { p_appointment: id, p_capture: merged });
+  const attempt = async () => {
+    const { data: existing, error: readErr } = await crew.supabase
+      .from("appointments")
+      .select("capture")
+      .eq("id", id)
+      .eq("org_id", crew.orgId)
+      .maybeSingle();
+    if (readErr) return { failed: { ok: false, error: dbError(readErr) } as Result };
+    if (!existing) return { failed: { ok: false, error: "Appointment not found." } as Result };
+    const stored = (existing as { capture?: unknown }).capture ?? null;
+    // He adds photos; every one already on the list stays (the office takes one off). Merged here so
+    // a photo the office added while his page was open is kept, not refused.
+    const fixed: CapturePatch =
+      patch.photos !== undefined ? { ...patch, photos: keepStoredPhotos(parseInspectorCapture(stored).photos, patch.photos) } : patch;
+    return crew.supabase.rpc("save_walkthrough_capture", { p_appointment: id, p_capture: mergeCaptureSections(stored, fixed) });
+  };
+  let r = await attempt();
+  // A photo the office put on between that read and the save is on the stored list but not on his:
+  // the database refuses that as taking it off. Read again and merge once more; a refusal about WHO
+  // he is comes back the same the second time.
+  if (!("failed" in r) && r.error?.code === "42501") r = await attempt();
+  if ("failed" in r) return r.failed;
+  const { data, error } = r;
   if (error) return walkthroughRefusal(error);
   // The function returns the id it wrote; nothing back means nothing was written.
   if (!data) return { ok: false, error: "That didn't save - reload and try again." };

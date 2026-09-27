@@ -24,6 +24,8 @@ const db = vi.hoisted(() => ({
   updates: [] as any[],
   rpcCalls: [] as { fn: string; args: any }[],
   rpcResult: { data: "appt-1" as unknown, error: null as null | { code: string; message: string } },
+  /** When set, answers each call in turn (a race needs the first and second to differ). */
+  rpcQueue: [] as { data: unknown; error: null | { code: string; message: string }; before?: () => void }[],
 }));
 
 vi.mock("@/lib/staff-guard", () => ({
@@ -47,6 +49,11 @@ function client() {
     auth: { getUser: async () => ({ data: { user: { id: db.staff ? "office-1" : "lead-1" } } }) },
     rpc: async (fn: string, args: any) => {
       db.rpcCalls.push({ fn, args });
+      const next = db.rpcQueue.shift();
+      if (next) {
+        next.before?.();
+        return { data: next.data, error: next.error };
+      }
       return db.rpcResult;
     },
     from(table: string) {
@@ -107,6 +114,7 @@ beforeEach(() => {
   db.updates = [];
   db.rpcCalls = [];
   db.rpcResult = { data: "appt-1", error: null };
+  db.rpcQueue = [];
 });
 
 describe("the office: unchanged", () => {
@@ -160,12 +168,29 @@ describe("a crew lead on the visit: through save_walkthrough_capture", () => {
   });
 
   it("the database's refusal comes back in its own words, and stops the retry", async () => {
-    db.rpcResult = { data: null, error: { code: "42501", message: "Only the office can take a photo off the walk-through." } };
+    db.rpcResult = { data: null, error: { code: "42501", message: "Only the office can fill in the walk-through." } };
     expect(await saveInspectionCapture("appt-1", { photos: [] })).toEqual({
       ok: false,
       refused: true,
-      error: "Only the office can take a photo off the walk-through.",
+      error: "Only the office can fill in the walk-through.",
     });
+    expect(db.rpcCalls).toHaveLength(2); // read again once (see the race below), then said
+  });
+
+  it("a photo the office put on between his read and his save is merged on a second read, not called his removal", async () => {
+    const officeNew = "org-1/appointments/appt-1/3-office-new.jpg";
+    db.rpcQueue = [
+      {
+        // The office's photo lands after his read; the database sees it missing from his list.
+        before: () => db.appt.capture.photos.push(officeNew),
+        data: null,
+        error: { code: "42501", message: "Only the office can take a photo off the walk-through." },
+      },
+      { data: "appt-1", error: null },
+    ];
+    expect(await saveInspectionCapture("appt-1", { photos: [PHOTO_OFFICE, PHOTO_LEAD] })).toEqual({ ok: true, id: "appt-1" });
+    expect(db.rpcCalls).toHaveLength(2);
+    expect(db.rpcCalls[1].args.p_capture.photos).toEqual([PHOTO_OFFICE, officeNew, PHOTO_LEAD]);
   });
 
   it("before 0356 is applied: a plain sentence, nothing saved, never PGRST202", async () => {
