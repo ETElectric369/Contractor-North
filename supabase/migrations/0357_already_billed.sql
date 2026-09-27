@@ -15,6 +15,7 @@
 --      of source_ids, so every guard that judges a claim (0258/0259/0260, 0343) judges these too. The
 --      column exists so Undo removes only what a person added, never an importer's claim.
 --   2. A BEFORE trigger keeps it honest, with no live function rewritten:
+--        - a line typed by hand (import_source null) holds everything by hand: no importer writes it;
 --        - an id that leaves source_ids leaves hand_claims (join_time_entries removes the absorbed
 --          piece with array_remove, 0322; a line edit or re-import rewrites source_ids);
 --        - a SPLIT PIECE FOLLOWS ITS SHIFT: a time entry a write adds to source_ids, when a piece of
@@ -59,7 +60,8 @@
 -- SAFE BEFORE OR AFTER THE CODE: code before this reads no hand_claims and calls neither function;
 -- the new code asks for the column and the functions and, without them, says Already Billed needs an
 -- update (nothing crashes, nothing is written). Safe to re-run: every step is if-not-exists / create
--- or replace / drop-and-create, and the backfill only fills lines whose hand_claims is empty.
+-- or replace / drop-and-create, and the backfill only touches lines not yet marked (a second run
+-- finds none and changes nothing).
 -- ═══════════════════════════════════════════════════════════════════════════
 
 set local lock_timeout = '3s';
@@ -87,7 +89,7 @@ alter table public.invoice_items
   add column if not exists hand_claims uuid[] not null default '{}'::uuid[];
 
 comment on column public.invoice_items.hand_claims is
-  'The ids of source_ids a person added by hand (Already Billed, 0357). Always a subset of source_ids (trigger invoice_items_hand_claims_follow); Undo (unmark_already_billed) removes only these.';
+  'The ids of source_ids a person added by hand (Already Billed, 0357); on a line typed by hand, all of them. Always a subset of source_ids (trigger invoice_items_hand_claims_follow); Undo (unmark_already_billed) removes only these.';
 
 -- ── 2. The trigger that keeps it honest ──────────────────────────────────────────────────────────
 create or replace function public.keep_hand_claims_honest()
@@ -102,6 +104,12 @@ declare
   v_carry uuid[];
 begin
   new.hand_claims := coalesce(new.hand_claims, '{}'::uuid[]);
+
+  -- A LINE TYPED BY HAND HOLDS EVERYTHING BY HAND: no importer ever writes it, so whatever it claims
+  -- a person put there (the Already Billed door, or a claim written by hand like tonight's).
+  if new.import_source is null then
+    new.hand_claims := coalesce(new.source_ids, '{}'::uuid[]);
+  end if;
 
   -- A SPLIT PIECE FOLLOWS ITS SHIFT. Only on an update that adds ids to a line holding something by
   -- hand (an importer's line holds nothing by hand, so an import pays one empty check).
@@ -500,12 +508,12 @@ create trigger invoice_items_unstamp_draw_pdfs_upd
   execute function public.unstamp_job_invoice_pdfs('draws');
 
 -- ── 5. Backfill: the claims people already made by hand ──────────────────────────────────────────
--- Lines typed by hand: everything they hold was put there by a person.
+-- Lines typed by hand: everything they hold was put there by a person (the trigger keeps it so).
 update public.invoice_items
    set hand_claims = source_ids
  where import_source is null
    and cardinality(source_ids) > 0
-   and cardinality(hand_claims) = 0;
+   and not (source_ids <@ hand_claims);
 
 -- An edited materials line keyed to ONE bill or order: any other id on it was put there by a person.
 update public.invoice_items ii

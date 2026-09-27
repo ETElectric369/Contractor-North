@@ -420,6 +420,19 @@ d("0357: Already Billed", () => {
     await c.query("update public.invoice_items set hand_claims = '{}' where id = $1", [edited]);
   });
 
+  it("a claim written straight onto a line typed by hand (tonight's scripts) is held by hand, so Not Billed After All can take it back", async () => {
+    if (!go()) return;
+    const inv = await invoice(jobA, "paid");
+    const materials = await line(inv, { description: "Materials", price: 75 });
+    const r = await bill(jobA, 58.1);
+    await as(staff);
+    await c.query("update public.invoice_items set source_ids = source_ids || $2::uuid where id = $1", [materials, r]);
+    await asServer();
+    expect((await state(materials)).hand).toEqual([r]);
+    await unmark(staff, materials, [r]);
+    expect((await state(materials)).source_ids).toEqual([]);
+  });
+
   it("a split shift keeps its hand claim on every piece, joins back cleanly, and comes off whole", async () => {
     if (!go()) return;
     const inv = await invoice(jobA, "paid");
