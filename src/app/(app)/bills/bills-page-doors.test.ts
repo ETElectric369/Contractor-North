@@ -331,9 +331,12 @@ const HOMES: { door: string | RegExp; was: string; home: string; times?: number 
   { door: "Shop Stock", was: "Needs You (and CED 3b Record To Stock)", home: "needs-you", times: 4 },
   { door: "Business Cost", was: "Needs You", home: "needs-you", times: 4 },
   { door: "Same Purchase: Tie Them", was: "Needs You (and CED 3b)", home: "needs-you" },
-  // 1. Sort These
+  // 1. Sort These. A tray paper's card is the Supplier Bills card (W1-31): the same answers, in the
+  // same words, one set per paper. The fixture's Home Depot receipt names no job and has no guess.
   { door: "Add More", was: "Sort These", home: "sort-these" },
-  { door: "File It", was: "Sort These (per paper)", home: "sort-these" },
+  { door: "Pick A Job", was: "Sort These (the job picker; File It)", home: "sort-these", times: 1 },
+  { door: "Shop Stock", was: "Sort These (the Shop Stock option; File It)", home: "sort-these", times: 1 },
+  { door: "Business Cost", was: "Sort These (the bucket picker; File It)", home: "sort-these", times: 1 },
   // 2. What You Owe Your Suppliers -> one line per supplier, its detail
   { door: /^Consolidated Electrical Distributors Account TR-34426/, was: "account row tap", home: "suppliers" },
   { door: "Record A Payment", was: "account row AND the CED discount section", home: "suppliers", times: 1 },
@@ -390,13 +393,17 @@ describe("every door keeps exactly one home", () => {
   const header = () => html.slice(0, html.indexOf('id="bills-search"'));
   const homeOf = (id: string) => (id === "header" ? header() : section(id));
 
+  /** A door listed in more than one home (a supplier paper's card and a tray paper's card answer in
+   *  the same words, W1-31) is found in each; the page holds exactly the sum. */
+  const sameDoor = (a: string | RegExp, b: string | RegExp) => String(a) === String(b);
   for (const h of HOMES) {
     it(`${String(h.door)} (was: ${h.was}) lives in ${h.home}`, () => {
       const inHome = count(doors(homeOf(h.home)), h.door);
       if (h.times != null) expect(inHome).toBe(h.times);
       else expect(inHome).toBeGreaterThanOrEqual(1);
-      // And nowhere else on the page: the count over the whole page is the count in its home.
-      expect(count(doors(html), h.door)).toBe(inHome);
+      // And nowhere else on the page: the count over the whole page is the count in its homes.
+      const inHomes = HOMES.filter((o) => sameDoor(o.door, h.door)).reduce((n, o) => n + count(doors(homeOf(o.home)), o.door), 0);
+      expect(count(doors(html), h.door)).toBe(inHomes);
     });
   }
 

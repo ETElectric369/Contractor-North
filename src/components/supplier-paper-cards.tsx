@@ -4,10 +4,9 @@ import { useEffect, useState, useSyncExternalStore, useTransition } from "react"
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { Select } from "@/components/ui/input";
 import { ShelfTicketSheet, type ShelfCountLine } from "@/components/shelf-count";
+import { BucketGrid, JobPicker, titleCaseWords } from "@/components/paper-answers";
 import { formatCurrency, formatDateShort } from "@/lib/utils";
-import { BUSINESS_COST_BUCKETS } from "@/lib/business-cost-buckets";
 import type { SupplierPaperFeed } from "@/app/(app)/bills/supplier-papers";
 import type { PaperJob, SupplierPaperCard } from "@/app/(app)/bills/supplier-reconcile";
 import type { SupplierActionResult } from "@/app/(app)/bills/supplier-balance";
@@ -103,13 +102,8 @@ export function notMarkedWords(jobLabel: string | null | undefined): string {
   return `It is not marked Already Billed, so the next New Invoice on ${on} bills it.`;
 }
 
-/** "in progress" reads "In Progress" on a chip: every clickable is Title Case. */
-const titleCase = (s: string | null | undefined) =>
-  String(s ?? "")
-    .split(/\s+/)
-    .filter(Boolean)
-    .map((w) => w[0].toUpperCase() + w.slice(1))
-    .join(" ");
+/** "in progress" reads "In Progress" on a chip: every clickable is Title Case (paper-answers). */
+const titleCase = titleCaseWords;
 
 /**
  * WHAT A CHIP SAYS BEYOND ITS NUMBER (review of Wave A). "J-033 · Complete" and "J-006 · Complete"
@@ -586,70 +580,32 @@ export function SupplierPaperCards({
     </Button>
   );
 
+  /** Another Job / Pick A Job: the shared picker (paper-answers), his best guesses first. A weak
+   *  card's nearest jobs ride there too (card.closest), so "The closest are first" is true. */
   function picker(card: SupplierPaperCard) {
-    // His best guesses first, then everything else, so the job he wants is near the top whether
-    // or not the matcher liked it. Nothing selected until he selects it.
-    // A weak card's nearest jobs ride here too (card.closest), so "The closest are first" is true.
-    const firstIds = new Set<string>();
-    const first = ([card.suggestion, ...card.candidates, ...(card.closest ?? [])].filter(Boolean) as PaperJob[]).filter(
-      (j) => !firstIds.has(j.id) && !!firstIds.add(j.id),
-    );
-    const rest = jobs.filter((j) => !firstIds.has(j.id));
-    const value = picked[card.invoiceId] ?? "";
-    const chosen = jobs.find((j) => j.id === value) ?? first.find((j) => j.id === value) ?? null;
+    const closest = [card.suggestion, ...card.candidates, ...(card.closest ?? [])].filter(Boolean) as PaperJob[];
     return (
-      <div className="mt-2 space-y-2">
-        <Select
-          aria-label={`Which job was ${card.invoiceNumber} for?`}
-          value={value}
-          onChange={(e) => setPicked((p) => ({ ...p, [card.invoiceId]: e.target.value }))}
-          className="min-h-11"
-        >
-          <option value="">— Pick The Job —</option>
-          {first.length > 0 && (
-            <optgroup label="Closest">
-              {first.map((j) => (
-                <option key={j.id} value={j.id}>
-                  {[j.label, j.name, titleCase(j.status)].filter(Boolean).join(" · ")}
-                </option>
-              ))}
-            </optgroup>
-          )}
-          <optgroup label="Every Job">
-            {rest.map((j) => (
-              <option key={j.id} value={j.id}>
-                {[j.label, j.name, titleCase(j.status)].filter(Boolean).join(" · ")}
-              </option>
-            ))}
-          </optgroup>
-        </Select>
-        <div className="flex flex-wrap gap-2">
-          <Button type="button" disabled={!chosen || busy === card.invoiceId} onClick={() => chosen && file(card, { jobId: chosen.id })}>
-            {chosen ? `Put It On ${chosen.label}` : "Put It On This Job"}
-          </Button>
-          <Button type="button" variant="ghost" onClick={() => setOpen((o) => ({ ...o, [card.invoiceId]: undefined }))}>
-            Cancel
-          </Button>
-        </div>
-      </div>
+      <JobPicker
+        ariaLabel={`Which job was ${card.invoiceNumber} for?`}
+        closest={closest}
+        jobs={jobs}
+        value={picked[card.invoiceId] ?? ""}
+        onChange={(v) => setPicked((p) => ({ ...p, [card.invoiceId]: v }))}
+        onPut={(j) => file(card, { jobId: j.id })}
+        onCancel={() => setOpen((o) => ({ ...o, [card.invoiceId]: undefined }))}
+        busy={busy === card.invoiceId}
+      />
     );
   }
 
+  /** Business Cost: the shared grid of the company's own buckets. */
   function buckets(card: SupplierPaperCard) {
     return (
-      <div className="mt-2 space-y-2">
-        <p className="text-xs text-slate-500">The company&apos;s own, on no job. Which bucket?</p>
-        <div className="flex flex-wrap gap-2">
-          {BUSINESS_COST_BUCKETS.map((b) => (
-            <Button key={b} type="button" variant="outline" disabled={busy === card.invoiceId} onClick={() => file(card, { businessCost: b })}>
-              {b}
-            </Button>
-          ))}
-          <Button type="button" variant="ghost" onClick={() => setOpen((o) => ({ ...o, [card.invoiceId]: undefined }))}>
-            Cancel
-          </Button>
-        </div>
-      </div>
+      <BucketGrid
+        onPick={(b) => file(card, { businessCost: b })}
+        onCancel={() => setOpen((o) => ({ ...o, [card.invoiceId]: undefined }))}
+        busy={busy === card.invoiceId}
+      />
     );
   }
 

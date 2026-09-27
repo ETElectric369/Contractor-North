@@ -736,9 +736,13 @@ export type FileOptions = {
   differentPurchase?: boolean;
 };
 
-/** A number match, said as the sentence File It refuses with. */
+/**
+ * A number match, said as the sentence File It refuses with. The card retired its separate
+ * Different Purchase: File It Anyway button (W1-31): with the match showing on the card, every
+ * answer there carries the flag, so the sentence says that in the old button's own words.
+ */
 function sameNumberRefusal(matches: NumberMatch[]): string {
-  return `${matches[0].sentence} If it is the same purchase, press Same Purchase: Tie Them. If it is not, press Different Purchase: File It Anyway. Nothing was filed.`;
+  return `${matches[0].sentence} If it is the same purchase, press Same Purchase: Tie Them on its card. If it is not, answer where it goes on the card: with this match showing, every answer there is Different Purchase: File It Anyway. Nothing was filed.`;
 }
 
 /** What a teardown did, for the sentence and for the paper's own row. */
@@ -1422,7 +1426,7 @@ export async function undoPaperwork(id: string): Promise<Result & { message?: st
   return {
     ok: true,
     message:
-      `${tied ? "Untied" : "Undone"}. It is back in the tray, waiting for File It.` +
+      `${tied ? "Untied" : "Undone"}. It is back in the tray, waiting for your answer.` +
       (keptLines ? keptChoicesSaid(keptLines) : "") +
       papersBackSaid(torn?.papersBack ?? []) +
       landedKeptSaid(landedLeft),
@@ -1887,7 +1891,7 @@ ${jobLines.join("\n") || "(none)"}`,
         };
       // SUGGEST PROPOSES, EVEN HERE (Erik, audit v994 PR2). This used to insert the task and file
       // the note on its own, and the only message saying so vanished with the card on refresh, with
-      // no Undo. Now the proposal is kept on the row as a chip (Make Task: <title>, or Keep As
+      // no Undo. Now the proposal is kept on the row as a chip (Add A Reminder: <title>, or Keep As
       // Note), and a person's tap does it, through a door that says what it did and offers Undo.
       const proposal: PaperProposal =
         action === "task"
@@ -1907,7 +1911,7 @@ ${jobLines.join("\n") || "(none)"}`,
       revalidatePath("/organize");
       return {
         ok: true,
-        message: `Suggested: ${said}. Tap ${action === "task" ? "Make Task" : "Keep As Note"} on the row if that's right; nothing moves until you do. ${reason}`.trim(),
+        message: `Suggested: ${said}. Tap ${action === "task" ? "Add A Reminder" : "Keep As Note"} on the row if that's right; nothing moves until you do. ${reason}`.trim(),
       };
     }
     // NOTHING TO SUGGEST IS AN ANSWER, NOT A FAILURE (Erik, 2026-09-24): said as a plain note on the
@@ -1973,7 +1977,7 @@ export async function makeTaskFromPaper(id: string): Promise<Result & { message?
   }
   revalidatePath("/organize");
   revalidatePath("/tasks");
-  return { ok: true, message: `Made a task: "${title}". The note is filed with it.` };
+  return { ok: true, message: `Added a Reminder: "${title}". The note is filed with it.` };
 }
 
 /** KEEP AS NOTE: a person tapped AI Suggest's proposal (PR2). Filed as a note; Undo brings it back. */

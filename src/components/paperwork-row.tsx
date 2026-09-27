@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Archive, BookOpen, Camera, Check, FileText, Link2, ListTodo, Loader2, Pencil, Receipt, Sparkles, StickyNote, Trash2, Undo2 } from "lucide-react";
+import { Archive, BookOpen, Camera, Check, FileText, Link2, ListTodo, Loader2, Pencil, Receipt, RotateCcw, Sparkles, StickyNote, Trash2, Undo2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
@@ -12,35 +12,38 @@ import { useToast } from "@/components/toast";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { reconcileReceipt } from "@/lib/receipt-reconcile";
 import { callOrLost } from "@/lib/lost-signal";
-import { jobLabel } from "@/lib/schedule-options";
+import { BUSINESS_COST_BUCKETS } from "@/lib/business-cost-buckets";
 import {
-  PAPER_BUCKETS,
-  bucketIsReaders,
+  amountOf,
+  billDeletedSaid,
+  cardSentence,
   describePaper,
   fileRefusal,
-  billDeletedSaid,
+  firstAnswer,
   guessOf,
   isReturnWithoutLines,
-  SHELF_TRAY_NEEDS_LINES,
+  paperKindWords,
+  paperSays,
+  paperTypeLabel,
   paperTypeOfItem,
   parseDestination,
-  pickedBecause,
-  onPaperWords,
   proposalOf,
   readinessOf,
+  RETURN_NEEDS_LINES,
+  SHELF_TRAY_NEEDS_LINES,
   shelfRowsOf,
-  shownDestination,
-  suggestedDestination,
   type NumberMatch,
   type PaperItem,
+  type Readiness,
 } from "@/lib/paperwork";
 import { ShelfTicketSheet, type ShelfCountLine } from "@/components/shelf-count";
 import { OpenListCard } from "@/components/open-list-card";
 import type { OpenListView } from "@/lib/supplier-open-list";
 import { BankCard } from "@/components/bank-card";
 import type { BankView } from "@/lib/bank-download";
+import { SectionActionsMenu, ACTIONS_ROW_CLS } from "@/components/section-actions-menu";
+import { BucketGrid, GuessMark, JobPicker, type PickJob } from "@/components/paper-answers";
 import {
-  aiReviewItem,
   archiveItem,
   deleteOrganizedItem,
   fileItem,
@@ -54,21 +57,31 @@ import {
 import { addSupplierDocuments, keepPaperwork, updatePaperwork } from "@/app/(app)/organize/paperwork-actions";
 
 /**
- * ONE ROW FOR ONE PIECE OF PAPER, ON EVERY PAGE THAT HOLDS PAPER (0295).
+ * ONE CARD FOR ONE PIECE OF PAPER, ON EVERY PAGE THAT HOLDS PAPER (0295; W1-31).
  *
- * The Organize tray and Drop Paperwork on /bills render THIS, so a receipt is filed the same way
- * whichever door it came in by: one line saying what was read, where it could go, and File It.
- * The button asks the same fileRefusal the server asks, so a door that looks open is open, and a
- * closed one says why in the words the server would refuse with.
+ * Snap Or Note's sheet, Organize and Sort These on /bills render THIS, so a receipt is filed the
+ * same way whichever door it came in by. It is built on the Supplier Bills card grammar, so a tray
+ * paper and a supplier's paper look and answer the same way:
  *
- * WHERE IT GOES (Erik, 2026-09-24: "if it's a picture not a bill or a bill with no address or job
- * markings then it should ask where to file it"):
- *   · a bill or receipt whose paper NAMES a job starts with that job picked, and says why;
- *   · one that names nothing starts with nothing picked and asks "Where does this go?", a job and
- *     the business-cost buckets side by side; a model's guess is a chip, never the pick;
- *   · a plain picture asks "What is this?" first: Job Photo, Bill Or Receipt, Something Else.
+ *   Home Depot · $84.12 · It Says 13897 HERRINGBONE
+ *   #8802-1108330 · Sep 24, 2026 · Receipt (Paid)
+ *   [Open Paper]
+ *   [Put It On J-011] [Another Job] [Shop Stock] [Business Cost]
  *
- * Nothing on this row files anything on its own. Choosing in the picker only picks.
+ * Every answer is one tap that files; Undo stays in the list's done trail and the toast. Nothing is
+ * preselected and nothing files by itself: the FIRST answer is what the paper itself picks (a
+ * printed mark matched exactly, with why), else a model's or the reader's guess, marked Guess on the
+ * button with whose guess it is under it. Each answer asks the same fileRefusal the server asks
+ * before it writes a cent, so a door that looks open is open and a shut one says why.
+ *
+ * A number already on the books puts an amber box above the answers with Same Purchase: Tie Them;
+ * with it showing, every other answer records a different purchase (the old Different Purchase: File
+ * It Anyway, folded into the answers: pressing one without the flag would be refused).
+ *
+ * The rarer doors (Fix Details, Read Again, Keep It In Files, Set Aside, Delete) live on the card's
+ * ⋯. A paper the reader couldn't finish shows only the one door it needs (Read Now, or Fix Details:
+ * Put The Total In); its answers appear once it has a total. A picture is asked what it is first
+ * (Erik, 2026-09-24): Job Photo, Bill Or Receipt, Something Else.
  */
 
 export type PaperRowItem = PaperItem & {
@@ -102,6 +115,17 @@ const PAID_CHOICES = [
   { value: "unknown", label: "Not Sure" },
 ];
 
+/** The ⋯ menu's row: the section menu's own row, at 44px. Delete is red and last. */
+const MENU_ROW = `${ACTIONS_ROW_CLS} min-h-11`;
+const MENU_DANGER_ROW =
+  "relative z-10 flex min-h-11 w-full items-center gap-3 px-4 py-2.5 text-left text-sm font-medium text-red-600 hover:bg-red-50/60 disabled:opacity-50";
+/** The section menu with no tree of its own: every row is the card's (children). */
+const CARD_MENU = { center: { label: "Actions", icon: "more" }, nodes: [] };
+
+/** A chip a person taps to take a suggestion (a Reminder, Keep As Note). 44px. */
+const CHIP =
+  "inline-flex min-h-11 items-center gap-1.5 rounded-full border border-dashed border-slate-300 bg-white px-3 text-left text-sm text-slate-700 hover:border-brand hover:text-brand disabled:opacity-50";
+
 function matchKey(m: NumberMatch): string {
   if (m.kind === "bill") return `bill:${m.billId}`;
   if (m.kind === "maybe_bill") return `maybe:${m.billId}`;
@@ -109,31 +133,38 @@ function matchKey(m: NumberMatch): string {
   return `paper:${m.itemId}`;
 }
 
-function badgeFor(item: PaperItem) {
-  const r = readinessOf(item);
-  switch (r.state) {
-    case "ready":
-    case "supplier_documents":
-      return <Badge tone="green">Ready To File</Badge>;
-    case "open_list":
-      return <Badge tone="blue">Supplier&apos;s List</Badge>;
-    case "bank_download":
-      return <Badge tone="blue">Bank Download</Badge>;
-    case "needs_total":
-      return <Badge tone="amber">Needs A Total</Badge>;
-    case "not_read":
-      return <Badge tone="slate">Not Read Yet</Badge>;
-    case "too_big":
-      return <Badge tone="amber">Too Big To Read</Badge>;
-    case "later":
-      return <Badge tone="slate">Not Filed</Badge>;
-    case "keep":
-      return <Badge tone="blue">Not A Cost</Badge>;
-    case "picture":
-      return <Badge tone="blue">Picture</Badge>;
-    default:
-      return <Badge tone="slate">Filed</Badge>;
-  }
+/** A job as the card's buttons say it: its number, or its name when it has none. */
+export function pickJobOf(j: JobOption): PickJob {
+  const num = String(j.job_number ?? "").trim();
+  const name = String(j.name ?? "").trim();
+  return { id: j.id, label: num || name || "That Job", name, status: j.status ?? null };
+}
+
+/**
+ * WITH THE SAME PURCHASE SHOWING, EVERY ANSWER IS A DIFFERENT PURCHASE (W1-31). The card shows a
+ * bill already on the books (or one under another spelling) with Same Purchase: Tie Them and the
+ * line "Any other button below records it as a different purchase.", so every answer then carries
+ * the flag. Missing it, the server would refuse the answer the card just offered.
+ */
+export function differentPurchaseOf(state: Readiness["state"], matches: readonly NumberMatch[]): boolean {
+  return state === "ready" && matches.some((m) => m.kind === "bill" || m.kind === "maybe_bill");
+}
+
+/** The ⋯ rows, per state, minus any door the card already shows (one door, one home). */
+export type PaperMenuRow = "Fix Details" | "Read Again" | "Keep It In Files" | "Set Aside" | "Delete";
+export function paperMenuRows(state: Readiness["state"], hasFile: boolean, onCard: readonly PaperMenuRow[] = []): PaperMenuRow[] {
+  const rows: PaperMenuRow[] = [];
+  // Supplier documents are recognised from the PDF itself; a too-big or totalless paper already
+  // shows Fix Details as its one needed door.
+  if (state !== "supplier_documents" && state !== "too_big" && state !== "needs_total") rows.push("Fix Details");
+  // Never on supplier documents (the reader would overwrite what the PDF's own text said), nor on a
+  // paper whose one door is already Read Now.
+  if (hasFile && (state === "ready" || state === "needs_total" || state === "keep" || state === "later" || state === "picture")) rows.push("Read Again");
+  if (state === "later" || state === "supplier_documents" || state === "not_read" || state === "too_big" || state === "picture") rows.push("Keep It In Files");
+  if (state !== "later" && state !== "supplier_documents") rows.push("Set Aside");
+  // Only paper this update can't file (a statement, a credit memo, a PO); last, and asked first.
+  if (state === "later") rows.push("Delete");
+  return rows.filter((r) => !onCard.includes(r));
 }
 
 function Thumb({ item }: { item: PaperRowItem }) {
@@ -264,17 +295,22 @@ export function PaperworkRow({
   jobs,
   matches,
   onFiled,
-  showAiSuggest = false,
+  onChanged,
   shopStock = true,
+  initialAnswer = null,
 }: {
   item: PaperRowItem;
   jobs: JobOption[];
   matches: NumberMatch[];
   onFiled: (filed: Filed) => void;
-  /** Organize's "AI Suggest" (a second look that suggests a job or bucket; never files). */
-  showAiSuggest?: boolean;
+  /** A picture's answer to What Is This? when the card is drawn already answered (tests; a holder
+   *  that remembers it). Absent: the card asks. */
+  initialAnswer?: "photo" | "else" | null;
+  /** Anything on the card changed on the server (a read, a set aside, a fix): a holder that isn't a
+   *  page (Snap Or Note's sheet) reads its rows again. Pages refresh themselves. */
+  onChanged?: () => void;
   /** SHOP STOCK OFF (the switch board, 0352): the shelf isn't offered, and a paper marked STOCK picks
-   *  nothing; its words still show ("On the paper: STOCK") and a person picks a job or a bucket.
+   *  nothing; its words still show ("It Says STOCK") and a person picks a job or a bucket.
    *  Absent = on. */
   shopStock?: boolean;
 }) {
@@ -284,46 +320,52 @@ export function PaperworkRow({
   const [busy, setBusy] = useState<string | null>(null);
   const [fixing, setFixing] = useState(false);
   const [said, setSaid] = useState<{ text: string; tone: "error" | "info" } | null>(null);
-  const jobIds = jobs.map((j) => j.id);
-  // null until a person picks: until then the picker FOLLOWS what the paper names, which may arrive
-  // after this row is on screen (Drop Paperwork adds the row, then reads it).
-  const [picked, setDest] = useState<string | null>(null);
-  const shown = shownDestination(picked, item, jobIds);
-  const dest = !shopStock && shown === "stock" ? "" : shown;
   // A PICTURE is asked what it is first (Erik, 2026-09-24). Job Photo and Something Else are
-  // answered here and change nothing until a button files it; Bill Or Receipt is answered on the
+  // answered here and change nothing until an answer files it; Bill Or Receipt is answered on the
   // server (readAsCost), because it changes what the row IS.
-  const [answer, setAnswer] = useState<"photo" | "else" | null>(null);
-  const [photoPicked, setPhotoJob] = useState<string | null>(null);
-  /** The Shop Stock sheet: every line counted onto the shelf, or Not Stock, before File It. */
+  const [answer, setAnswer] = useState<"photo" | "else" | null>(initialAnswer);
+  /** Which picker is open under the answers: Another Job's, or Business Cost's buckets. */
+  const [picking, setPicking] = useState<"job" | "bucket" | null>(null);
+  /** What a person has picked in Another Job's list, before they press. Nothing preselected. */
+  const [pickedJob, setPickedJob] = useState("");
+  /** Open Paper: the file and its lines, inline. */
+  const [paperOpen, setPaperOpen] = useState(false);
+  /** The Shop Stock sheet: every line counted into stock, or Not Stock, before it files. */
   const [shelfSheet, setShelfSheet] = useState<{ differentPurchase: boolean } | null>(null);
 
   const r = readinessOf(item);
   const p = proposalOf(item);
   const type = paperTypeOfItem(item);
   const isCost = type === "receipt" || type === "bill";
-  // Only a BILL is "already on the books". A CED document no bill covers is linked by File It.
+  const jobIds = jobs.map((j) => j.id);
+  const pickJobs = jobs.map(pickJobOf);
+  const jobById = new Map(pickJobs.map((j) => [j.id, j] as const));
+  const labelOf = (jobId: string) => {
+    const j = jobById.get(jobId);
+    return j ? `${j.label}${j.name && j.name !== j.label ? ` ${j.name}` : ""}` : "that job";
+  };
+
+  // Only a BILL is "already on the books". A supplier document no bill covers is linked by filing.
   const onBooks = matches.filter((m): m is Extract<NumberMatch, { kind: "bill" }> => m.kind === "bill");
   const toLink = matches.filter((m): m is Extract<NumberMatch, { kind: "supplier_invoice" }> => m.kind === "supplier_invoice");
   const papers = matches.filter((m) => m.kind === "paper");
-  // THE SAME LONG NUMBER UNDER ANOTHER SPELLING (Erik, audit v994 DB5): a warning with a Tie, never
-  // a gate. File It stays File It.
+  // THE SAME LONG NUMBER UNDER ANOTHER SPELLING (Erik, audit v994 DB5): a warning with a Tie.
   const maybes = matches.filter((m): m is Extract<NumberMatch, { kind: "maybe_bill" }> => m.kind === "maybe_bill");
+  const samePurchase = onBooks.length ? onBooks : maybes;
+  // WITH THE SAME PURCHASE SHOWING, EVERY ANSWER IS A DIFFERENT PURCHASE: the card says so above the
+  // answers, and each one carries the flag (without it the server refuses and names the Tie).
+  const differentPurchase = differentPurchaseOf(r.state, matches);
+
   // THE LINES, AND WHETHER THEY ADD UP TO THE TOTAL READ (audit v994, MR6). Shown, never a gate:
-  // the bill File It writes carries the same sentence in its notes.
+  // the bill a filing writes carries the same sentence in its notes.
   const rowLines = isCost ? shelfRowsOf(item) : [];
-  const rowTotal = item.amount === null || item.amount === undefined || item.amount === "" ? null : Number(item.amount);
-  const addsUp = rowTotal !== null && Number.isFinite(rowTotal) && rowLines.length ? reconcileReceipt(rowTotal, rowLines) : null;
-  // What the paper itself picked (a printed mark, matched exactly), and why; a model's guess is
-  // only ever a chip beside the question.
-  const paperPick = suggestedDestination(item, jobIds);
-  const prePick = !shopStock && paperPick === "stock" ? "" : paperPick;
-  const because = pickedBecause(item);
-  const guess = guessOf(item, jobIds);
+  const rowTotal = amountOf(item);
+  const addsUp = rowTotal !== null && rowLines.length ? reconcileReceipt(rowTotal, rowLines) : null;
+  const mismatch = !!addsUp?.mismatch && (r.state === "ready" || r.state === "needs_total");
 
   type Mode = "cost" | "keep" | "ask" | "photo" | "none";
   const mode: Mode =
-    r.state === "ready" || r.state === "needs_total"
+    r.state === "ready"
       ? "cost"
       : r.state === "keep"
         ? "keep"
@@ -334,51 +376,54 @@ export function PaperworkRow({
               ? "keep"
               : "ask"
           : "none";
-  const photoJob = photoPicked ?? (prePick.startsWith("job:") ? prePick.slice(4) : "");
-  const activeDest = mode === "photo" ? (photoJob ? `photo:${photoJob}` : "") : dest;
-  const parsedDest = parseDestination(activeDest);
-  const blocked = fileRefusal(item, parsedDest);
+
+  // THE FIRST ANSWER: what the paper picks, else a guess (marked), else none and the card asks.
+  const first = firstAnswer(item, jobIds, { shopStock });
+  const firstJob = first.dest.startsWith("job:") ? (jobById.get(first.dest.slice(4)) ?? null) : null;
+  // A model's job guess that disagrees with the paper's own pick is not a button; it is the top of
+  // Another Job's Closest, beside the paper's job, so nothing it said is lost.
+  const guess = guessOf(item, jobIds);
+  const guessJob = guess?.startsWith("job:") ? (jobById.get(guess.slice(4)) ?? null) : null;
+  const closestJobs = [firstJob, guessJob].filter((j): j is PickJob => !!j);
+  // A picture's job is only ever a job (the paper's, or a job guess); a cost or stock guess is not a photo's.
+  const firstFor = mode === "cost" ? first.dest : firstJob ? first.dest : "";
+
+  // EACH ANSWER ASKS THE GATE THE SERVER ASKS (fileRefusal), and says why when it is shut.
+  const jobRefusal = fileRefusal(item, mode === "photo" ? { type: "photo", jobId: firstJob?.id ?? "a-job" } : { type: "job", jobId: firstJob?.id ?? "a-job" });
+  const costRefusal = mode === "cost" ? fileRefusal(item, { type: "overhead", category: BUSINESS_COST_BUCKETS[0] }) : null;
+  const stockRefusal = mode === "cost" && shopStock ? fileRefusal(item, { type: "stock" }) : null;
+  const keepRefusal = mode === "keep" ? fileRefusal(item, { type: "keep" }) : null;
   const working = pending || busy !== null;
-  // PR2: AI Suggest's proposal for a note or a kept paper, a tap away and never done for anyone.
-  const suggestTask = mode === "keep" && answer !== "else" ? (p.suggestTask ?? null) : null;
-  const suggestKeep = mode === "keep" && answer !== "else" && p.suggestKeep === true;
 
-  function destLabel(value: string): string {
-    const d = parseDestination(value);
-    if (!d) return "";
-    if (d.type === "job" || d.type === "photo") {
-      const j = jobs.find((x) => x.id === d.jobId);
-      return j ? jobLabel(j) : "a job";
-    }
-    if (d.type === "overhead") return `Business Cost, ${d.category}`;
-    if (d.type === "stock") return "Shop Stock";
-    return "Keep It In Files";
-  }
+  // THE DOOR A REFUSAL NAMES (DB4): a return with no lines, or a ticket with no lines for stock, is
+  // refused with "Press Read Again"; that door sits right under the sentence, not only on the ⋯.
+  const readAgainNamed =
+    mode === "cost" && !!item.file_url && (isReturnWithoutLines(item) || jobRefusal === RETURN_NEEDS_LINES || stockRefusal === SHELF_TRAY_NEEDS_LINES);
 
-  function whereSaid(value: string): string {
-    const d = parseDestination(value);
-    if (!d) return "";
-    if (d.type === "job" || d.type === "photo") return `on ${destLabel(value)}`;
-    if (d.type === "overhead") return `as a business cost, ${d.category}`;
-    if (d.type === "stock") return "in shop stock";
-    return "in files";
-  }
-
-  function run(key: string, fn: () => Promise<{ ok: boolean; error?: string; message?: string }>, filedSentence?: string) {
+  /**
+   * Every write on the card. `filedSentence`: it moved the paper out of the tray, so the list's done
+   * trail and the toast carry the sentence and its Undo. `gone`: it can't be undone (Delete), so the
+   * toast says what happened, with no Undo.
+   */
+  function run(key: string, fn: () => Promise<{ ok: boolean; error?: string; message?: string }>, filedSentence?: string, gone?: string) {
     setSaid(null);
     setBusy(key);
     start(async () => {
-      // A dropped signal rejects (audit v994 SI2): caught here, the pick stays on the row and the
-      // row says so, instead of the page being swapped for the error card.
+      // A dropped signal rejects (audit v994 SI2): caught here, the card stays and says so, instead
+      // of the page being swapped for the error card.
       const res = await callOrLost(fn);
       setBusy(null);
       if (!res.ok) {
-        setSaid({ text: res.error ?? "That didn't work. Nothing changed.", tone: "error" });
+        setSaid({ text: cardSentence(res.error ?? "That didn't work. Nothing changed."), tone: "error" });
         if ("lost" in res) router.refresh();
+        onChanged?.();
         return;
       }
-      if (filedSentence) {
-        const sentence = `${res.message ?? filedSentence}`;
+      setPicking(null);
+      if (gone) {
+        toast(cardSentence(res.message ?? gone), "success");
+      } else if (filedSentence) {
+        const sentence = cardSentence(res.message ?? filedSentence);
         onFiled({ id: item.id, sentence: `${describePaper(item)}: ${sentence}` });
         toast(sentence, "success", {
           label: "Undo",
@@ -386,227 +431,79 @@ export function PaperworkRow({
             void undoPaperwork(item.id).then((u) => {
               toast(u.ok ? u.message ?? "Undone." : u.error ?? "Couldn't undo.", u.ok ? "success" : "error");
               router.refresh();
+              onChanged?.();
             });
           },
         });
       } else if (res.message) {
-        setSaid({ text: res.message, tone: "info" });
+        setSaid({ text: cardSentence(res.message), tone: "info" });
       }
       router.refresh();
+      onChanged?.();
     });
   }
 
-  function fileIt(differentPurchase = false) {
-    const d = parseDestination(activeDest);
-    if (!d) return setSaid({ text: mode === "photo" ? "Pick which job this photo is for first." : "Pick where it goes first: a job, or a business cost bucket.", tone: "error" });
+  /** ONE TAP FILES: a job, a bucket, a job photo, stock (its count sheet first), or kept in files. */
+  function fileTo(value: string) {
+    const d = parseDestination(value);
+    if (!d) return;
+    if (d.type === "stock") return setShelfSheet({ differentPurchase });
     if (d.type === "keep") return run("keep", () => keepPaperwork(item.id), "Kept in files.");
     if (d.type === "photo")
-      return run("photo", () => fileItem(item.id, { type: "photo", jobId: d.jobId }), `Filed as a job photo ${whereSaid(activeDest)}.`);
-    // SHOP STOCK: nothing is filed until every line has a count or Not Stock (the sheet below).
-    if (d.type === "stock") return setShelfSheet({ differentPurchase });
-    const where = whereSaid(dest);
-    const said = isCost ? `Filed ${where}.` : `Kept ${where}.`;
+      return run(`file:${value}`, () => fileItem(item.id, { type: "photo", jobId: d.jobId }), `Filed as a job photo on ${labelOf(d.jobId)}.`);
+    const sentence =
+      d.type === "job" ? (isCost ? `Filed on ${labelOf(d.jobId)}.` : `Kept on ${labelOf(d.jobId)}.`) : `Filed as a business cost, ${d.category}.`;
     run(
-      differentPurchase ? "anyway" : "file",
+      `file:${value}`,
       async () => {
         const res = await fileItem(item.id, d.type === "job" ? { type: "job", jobId: d.jobId } : { type: "overhead", category: d.category }, { differentPurchase });
-        // The server's extra (the CED link, or that it didn't save) rides after where it went.
-        return res.ok && res.message ? { ...res, message: `${said}${res.message.replace(/^Filed\./, "")}` } : res;
+        // The server's extra (the supplier document it linked, or that the link didn't save) rides
+        // after where it went.
+        return res.ok && res.message ? { ...res, message: `${sentence}${res.message.replace(/^Filed\./, "")}` } : res;
       },
-      said,
+      sentence,
     );
   }
 
-  // OPEN JOBS FIRST, THEN THE FINISHED ONES (Erik, audit v994 PR1): a ticket that lands after a
-  // job is complete is still that job's cost. Only an open job is ever picked for anyone.
-  const openJobs = jobs.filter((j) => j.status !== "complete");
-  const doneJobs = jobs.filter((j) => j.status === "complete");
-  const optionFor = (j: JobOption, value: string) => (
-    <option key={j.id} value={value}>
-      {jobLabel(j)}
-      {prePick === `job:${j.id}` ? " (On The Paper)" : ""}
-    </option>
-  );
-  const jobOptions = (
-    <>
-      {openJobs.map((j) => optionFor(j, j.id))}
-      {doneJobs.length > 0 && <optgroup label="Completed Jobs">{doneJobs.map((j) => optionFor(j, j.id))}</optgroup>}
-    </>
-  );
+  const toggle = (what: "job" | "bucket") => setPicking((cur) => (cur === what ? null : what));
+  const spin = (key: string) => busy === key;
 
-  /** What the paper picked, and why; or the question, when it picked nothing. Never silent. */
-  const pickedLine = (showing: string, question: string) =>
-    because && prePick && showing === prePick.replace(/^job:/, "") ? (
-      <p className="flex items-start gap-1.5 text-sm text-emerald-800">
-        <Check className="mt-0.5 h-4 w-4 shrink-0" />
-        <span>{because}. Change it if it&apos;s wrong; nothing is filed until you press the button.</span>
-      </p>
-    ) : !showing ? (
-      <p className="text-sm font-medium text-slate-900">{question}</p>
+  // ── THE HEADLINE: the supplier card's grammar for a cost; the paper's own line otherwise ──
+  const costCard = r.state === "ready" || r.state === "needs_total";
+  const unread = r.state === "not_read" || r.state === "too_big";
+  const says = paperSays(item);
+  const headline = costCard
+    ? `${String(item.vendor ?? "").trim() || paperTypeLabel(type)} · ${rowTotal === null ? "No Total Read" : formatCurrency(rowTotal)} · ${says ? `It Says ${says}` : "No Job Name On It"}`
+    : unread
+      ? String(item.title ?? "").trim() || "A Paper"
+      : describePaper(item);
+  const grey = costCard
+    ? [item.doc_number ? `#${item.doc_number}` : null, item.item_date ? formatDate(item.item_date) : null, paperKindWords(item)]
+    : [item.doc_number ? `#${item.doc_number}` : null, item.item_date ? `Dated ${formatDate(item.item_date)}` : null, `Added ${formatDate(item.created_at)}`];
+  // A badge only when the paper needs something.
+  const badge =
+    r.state === "needs_total" ? (
+      <Badge tone="amber">Needs A Total</Badge>
+    ) : r.state === "not_read" ? (
+      <Badge tone="slate">Not Read Yet</Badge>
+    ) : r.state === "too_big" ? (
+      <Badge tone="amber">Too Big To Read</Badge>
     ) : null;
-
-  /**
-   * WHAT THE PAPER SAYS, when it picked nothing (audit v994, tray F2). Paper A's PO box said TOOLS
-   * and the row never showed it: a person had to open the photo to learn what the reader had
-   * already copied. Shown whenever the paper's own pick isn't what is showing; hidden when the
-   * "picked from the PO" line already says the same words. The company's own names are taken out
-   * of the reader's hint on the server (rematchTray), since they are on every ticket.
-   *
-   * NULL IS AN ANSWER (review of audit v994's fix): the server sends null when nothing is left
-   * once the company's own names are out ("ERIK TAYLOR" alone). `??` read that null as "never
-   * computed" and fell back to the unstripped hint, printing "On the paper: ERIK TAYLOR". Only a
-   * row the server never looked at (no key at all) is worked out here, without the names.
-   */
-  const onPaper = item.on_paper !== undefined ? item.on_paper : onPaperWords(p);
-  const onPaperLine =
-    onPaper && !(because && prePick && dest === prePick) ? (
-      <p className="text-xs text-slate-500">On the paper: {onPaper}</p>
-    ) : null;
-
-  /** A model's guess: one tap picks it, and it is never picked for anyone. */
-  const guessValue = mode === "photo" ? (guess?.startsWith("job:") ? guess : null) : guess;
-  const guessShown = guessValue && (mode === "photo" ? `job:${photoJob}` !== guessValue : dest !== guessValue);
-  /**
-   * WHOSE GUESS, IN WORDS THAT ARE TRUE (audit v994, tray F2). A bucket the READER gave, looking at
-   * the paper (Paper A: Tools & Supplies, off a ticket whose PO box said TOOLS), was labelled "Not
-   * read off the paper", which is false. The reader's bucket says it is the reader's guess; a job
-   * guess and AI Suggest's second look keep "Not read off the paper", because they were not.
-   */
-  const readersGuess = !!guessValue?.startsWith("cost:") && bucketIsReaders(p);
-  const guessWhy = readersGuess
-    ? `The reader's guess, from the paper${onPaper ? ` (${onPaper})` : ""}.`
-    : `Not read off the paper${p.why ? `: ${p.why}` : "."}`;
-  const guessChip = guessShown ? (
-    <div className="flex flex-wrap items-center gap-2">
-      <button
-        type="button"
-        onClick={() => (mode === "photo" ? setPhotoJob(guessValue.slice(4)) : setDest(guessValue))}
-        disabled={working}
-        className="inline-flex min-h-11 items-center gap-1.5 rounded-full border border-dashed border-slate-300 bg-white px-3 text-left text-sm text-slate-700 hover:border-brand hover:text-brand disabled:opacity-50"
-      >
-        <Sparkles className="h-4 w-4 shrink-0 text-brand" />
-        <span>
-          A Guess: {destLabel(guessValue)} <span className="text-xs text-slate-500">(Tap To Pick)</span>
-        </span>
-      </button>
-      <span className="text-xs text-slate-500">{guessWhy}</span>
-    </div>
-  ) : null;
+  // The state's own sentence, where the card has no answers to say it with.
+  const stateSentence =
+    r.state === "keep" || r.state === "later" || r.state === "needs_total" || r.state === "too_big"
+      ? r.sentence
+      : r.state === "not_read" && p.readError
+        ? r.sentence
+        : null;
 
   /** Why it is back in the tray: its bill was deleted, maybe as a duplicate (review of wave 2, TD5). */
   const billBack = billDeletedSaid(item);
-
-  const conflict = p.jobConflict ? (
-    <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900" role="status">
-      {p.jobConflict}
-    </p>
-  ) : null;
-
-  // RULE 1-2: A COST ASKS WHERE IT GOES, with a job and the business-cost buckets side by side.
-  // Only a job the paper names starts picked; otherwise both start empty.
-  const costChooser = (
-    <div className="space-y-2" role="group" aria-label="Where does this go?">
-      {pickedLine(dest.startsWith("job:") ? dest.slice(4) : dest, "Where does this go?")}
-      {onPaperLine}
-      {conflict}
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-        <Select
-          value={dest.startsWith("job:") ? dest.slice(4) : ""}
-          onChange={(e) => setDest(e.target.value ? `job:${e.target.value}` : "")}
-          disabled={working}
-          className="h-11"
-          aria-label="A Job"
-        >
-          <option value="">A Job…</option>
-          {jobOptions}
-        </Select>
-        <Select
-          value={dest.startsWith("cost:") || dest === "stock" ? dest : ""}
-          onChange={(e) => setDest(e.target.value)}
-          disabled={working}
-          className="h-11"
-          aria-label={shopStock ? "Or Shop Stock Or A Business Cost" : "Or A Business Cost"}
-        >
-          <option value="">{shopStock ? "Or Shop Stock Or A Business Cost…" : "Or A Business Cost…"}</option>
-          {/* THE SHOP SHELF, above the buckets (Shop Stock, Phase 2): a ticket bought for stock is
-              never a job cost and never Tools & Supplies or Other. */}
-          {shopStock && <option value="stock">Shop Stock{prePick === "stock" ? " (On The Paper)" : ""}</option>}
-          {PAPER_BUCKETS.map((b) => (
-            <option key={b} value={`cost:${b}`}>
-              {b}
-              {prePick === `cost:${b}` ? " (On The Paper)" : ""}
-            </option>
-          ))}
-        </Select>
-      </div>
-      {guessChip}
-    </div>
-  );
-
-  // Not a cost: a job, or kept in files.
-  const keepPicker = (
-    <Select
-      value={dest.startsWith("job:") || dest === "keep" ? dest : ""}
-      onChange={(e) => setDest(e.target.value)}
-      disabled={working}
-      className="h-11 min-w-0 flex-1 sm:w-64 sm:flex-none"
-      aria-label="Where It Goes"
-    >
-      <option value="">Where Does It Go?</option>
-      <optgroup label="A Job">{openJobs.map((j) => optionFor(j, `job:${j.id}`))}</optgroup>
-      {doneJobs.length > 0 && <optgroup label="Completed Jobs">{doneJobs.map((j) => optionFor(j, `job:${j.id}`))}</optgroup>}
-      <option value="keep">Keep It In Files</option>
-    </Select>
-  );
-
-  const changeAnswer = (
-    <Button variant="outline" onClick={() => setAnswer(null)} disabled={working}>
-      <Undo2 /> Change Answer
-    </Button>
-  );
-
-  // RULE 3: A PICTURE ASKS WHAT IT IS FIRST.
-  const askWhat = (
-    <div className="space-y-2" role="group" aria-label="What is this?">
-      <p className="text-sm font-medium text-slate-900">What is this?</p>
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-        <Button variant="outline" onClick={() => setAnswer("photo")} disabled={working}>
-          <Camera /> Job Photo
-        </Button>
-        <Button variant="outline" onClick={() => run("cost", () => readAsCost(item.id))} disabled={working}>
-          {busy === "cost" ? <Loader2 className="animate-spin" /> : <Receipt />} {busy === "cost" ? "Reading…" : "Bill Or Receipt"}
-        </Button>
-        <Button variant="outline" onClick={() => setAnswer("else")} disabled={working}>
-          <FileText /> Something Else
-        </Button>
-      </div>
-    </div>
-  );
-
-  // Job Photo: which job, then File As Job Photo. A photo on a job, never a cost.
-  const photoChooser = (
-    <div className="space-y-2" role="group" aria-label="Which job is this photo for?">
-      {pickedLine(photoJob, "Which job is this photo for?")}
-      {conflict}
-      <div className="flex flex-wrap items-center gap-2">
-        <Select
-          value={photoJob}
-          onChange={(e) => setPhotoJob(e.target.value)}
-          disabled={working}
-          className="h-11 min-w-0 flex-1 sm:w-64 sm:flex-none"
-          aria-label="Which Job"
-        >
-          <option value="">Which Job?</option>
-          {jobOptions}
-        </Select>
-        <Button onClick={() => fileIt(false)} disabled={working || !!blocked} title={blocked ?? undefined}>
-          {busy === "photo" ? <Loader2 className="animate-spin" /> : <Camera />} File As Job Photo
-        </Button>
-        {changeAnswer}
-      </div>
-      {guessChip}
-    </div>
-  );
+  /** Why the ⋯ may also say a door: what is already on the card. */
+  const onCard: ("Fix Details" | "Read Again" | "Keep It In Files" | "Set Aside" | "Delete")[] = [];
+  if (readAgainNamed) onCard.push("Read Again");
+  if (mode === "keep") onCard.push("Keep It In Files");
+  const menuRows = paperMenuRows(r.state, !!item.file_url, onCard);
 
   // A BANK DOWNLOAD is one card: how it sorted, the rows that need a person, Apply / Not Now.
   if (r.state === "bank_download") {
@@ -644,7 +541,7 @@ export function PaperworkRow({
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
               <span className="font-medium text-slate-900">{describePaper(item)}</span>
-              {badgeFor(item)}
+              <Badge tone="blue">Supplier&apos;s List</Badge>
             </div>
             <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-slate-500">
               <span>Added {formatDate(item.created_at)}</span>
@@ -662,249 +559,371 @@ export function PaperworkRow({
     );
   }
 
+  // ── THE ANSWERS ──────────────────────────────────────────────────────────────────────────
+  const firstJobAnswer = firstFor.startsWith("job:") && firstJob;
+  const firstButton = firstFor ? (
+    firstJobAnswer ? (
+      <Button onClick={() => fileTo(mode === "photo" ? `photo:${firstJob.id}` : `job:${firstJob.id}`)} disabled={working || !!jobRefusal} title={jobRefusal ?? undefined}>
+        {spin(`file:${mode === "photo" ? "photo" : "job"}:${firstJob.id}`) ? <Loader2 className="animate-spin" /> : null}
+        {mode === "photo" ? `Put Photo On ${firstJob.label}` : `Put It On ${firstJob.label}`}
+        {first.isGuess && <GuessMark />}
+      </Button>
+    ) : firstFor === "stock" ? (
+      <Button onClick={() => fileTo("stock")} disabled={working || !!stockRefusal} title={stockRefusal ?? undefined}>
+        Record To Stock
+        {first.isGuess && <GuessMark />}
+      </Button>
+    ) : firstFor.startsWith("cost:") ? (
+      <Button onClick={() => fileTo(firstFor)} disabled={working || !!costRefusal} title={costRefusal ?? undefined}>
+        {spin(`file:${firstFor}`) ? <Loader2 className="animate-spin" /> : null}
+        {`Business Cost · ${firstFor.slice(5)}`}
+        {first.isGuess && <GuessMark />}
+      </Button>
+    ) : null
+  ) : null;
+  /** The line under the first answer: why the paper picked it, or whose guess it is. */
+  const becauseLine =
+    firstButton && first.because ? (
+      <p className={`flex items-start gap-1.5 text-sm ${first.isGuess ? "text-slate-600" : "text-emerald-800"}`}>
+        {first.isGuess ? <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-brand" /> : <Check className="mt-0.5 h-4 w-4 shrink-0" />}
+        <span>{first.because}</span>
+      </p>
+    ) : null;
+  const anotherJob = (
+    <Button variant="outline" onClick={() => toggle("job")} disabled={working || !!jobRefusal} title={jobRefusal ?? undefined} aria-expanded={picking === "job"}>
+      {firstJobAnswer ? "Another Job" : "Pick A Job"}
+    </Button>
+  );
+  const jobPicker =
+    picking === "job" ? (
+      <JobPicker
+        ariaLabel={mode === "photo" ? "Which job is this photo for?" : "Which job is this paper for?"}
+        closest={closestJobs}
+        jobs={pickJobs}
+        value={pickedJob}
+        onChange={setPickedJob}
+        onPut={(j) => fileTo(mode === "photo" ? `photo:${j.id}` : `job:${j.id}`)}
+        onCancel={() => setPicking(null)}
+        busy={working}
+        verb={mode === "photo" ? "Put Photo On" : "Put It On"}
+        refusal={jobRefusal}
+      />
+    ) : null;
+  // Every distinct reason an answer is shut, said once under the answers.
+  const shutWhy = [...new Set([jobRefusal, costRefusal, stockRefusal, keepRefusal].filter((x): x is string => !!x))];
+  const conflict = p.jobConflict ? (
+    <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900" role="status">
+      {p.jobConflict}
+    </p>
+  ) : null;
+
+  const costAnswers = (
+    <div className="space-y-2" role="group" aria-label="Where does this go?">
+      {conflict}
+      {!firstButton && <p className="text-sm font-medium text-slate-900">Where does this go?</p>}
+      <div className="flex flex-wrap gap-2">
+        {firstButton}
+        {anotherJob}
+        {/* Shop Stock off (0352): the shelf isn't offered. A paper that already picked stock has it first. */}
+        {shopStock && firstFor !== "stock" && (
+          <Button variant="outline" onClick={() => fileTo("stock")} disabled={working || !!stockRefusal} title={stockRefusal ?? undefined}>
+            Shop Stock
+          </Button>
+        )}
+        <Button variant="outline" onClick={() => toggle("bucket")} disabled={working || !!costRefusal} title={costRefusal ?? undefined} aria-expanded={picking === "bucket"}>
+          Business Cost
+        </Button>
+      </div>
+      {becauseLine}
+      {jobPicker}
+      {picking === "bucket" && <BucketGrid onPick={(b) => fileTo(`cost:${b}`)} onCancel={() => setPicking(null)} busy={working} refusal={costRefusal} />}
+    </div>
+  );
+
+  const changeAnswer = (
+    <Button variant="outline" onClick={() => setAnswer(null)} disabled={working}>
+      <Undo2 /> Change Answer
+    </Button>
+  );
+
+  // NOT A COST: a job, or kept in files. AI Suggest's old idea for it rides as a chip.
+  const suggestTask = mode === "keep" && answer !== "else" ? (p.suggestTask ?? null) : null;
+  const suggestKeep = mode === "keep" && answer !== "else" && p.suggestKeep === true;
+  const keepAnswers = (
+    <div className="space-y-2" role="group" aria-label="Where does this go?">
+      {conflict}
+      {!firstButton && <p className="text-sm font-medium text-slate-900">Where does this go?</p>}
+      <div className="flex flex-wrap gap-2">
+        {firstButton}
+        {anotherJob}
+        <Button variant="outline" onClick={() => fileTo("keep")} disabled={working || !!keepRefusal} title={keepRefusal ?? undefined}>
+          {spin("keep") ? <Loader2 className="animate-spin" /> : <Archive />} Keep It In Files
+        </Button>
+        {answer === "else" && changeAnswer}
+      </div>
+      {becauseLine}
+      {jobPicker}
+      {(suggestTask || suggestKeep) && (
+        <div className="flex flex-wrap items-center gap-2">
+          {suggestTask && (
+            <button type="button" onClick={() => run("task", () => makeTaskFromPaper(item.id), `Added a Reminder: "${suggestTask.title}".`)} disabled={working} className={CHIP}>
+              {spin("task") ? <Loader2 className="h-4 w-4 shrink-0 animate-spin" /> : <ListTodo className="h-4 w-4 shrink-0 text-brand" />}
+              <span className="min-w-0 break-words">Add A Reminder: {suggestTask.title}</span>
+            </button>
+          )}
+          {suggestKeep && (
+            <button type="button" onClick={() => run("note", () => keepAsNote(item.id), "Kept as a note.")} disabled={working} className={CHIP}>
+              {spin("note") ? <Loader2 className="h-4 w-4 shrink-0 animate-spin" /> : <StickyNote className="h-4 w-4 shrink-0 text-brand" />}
+              Keep As Note
+            </button>
+          )}
+          <span className="text-xs text-slate-500">A suggestion{p.why ? `: ${p.why}` : ""}. Nothing moves until you tap it.</span>
+        </div>
+      )}
+    </div>
+  );
+
+  // A PICTURE ASKS WHAT IT IS FIRST.
+  const askWhat = (
+    <div className="space-y-2" role="group" aria-label="What is this?">
+      <p className="text-sm font-medium text-slate-900">What is this?</p>
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+        <Button variant="outline" onClick={() => setAnswer("photo")} disabled={working}>
+          <Camera /> Job Photo
+        </Button>
+        <Button variant="outline" onClick={() => run("cost", () => readAsCost(item.id))} disabled={working}>
+          {spin("cost") ? <Loader2 className="animate-spin" /> : <Receipt />} {spin("cost") ? "Reading…" : "Bill Or Receipt"}
+        </Button>
+        <Button variant="outline" onClick={() => setAnswer("else")} disabled={working}>
+          <FileText /> Something Else
+        </Button>
+      </div>
+    </div>
+  );
+
+  // Job Photo: which job. A photo on a job, never a cost.
+  const photoAnswers = (
+    <div className="space-y-2" role="group" aria-label="Which job is this photo for?">
+      {conflict}
+      {!firstButton && <p className="text-sm font-medium text-slate-900">Which job is this photo for?</p>}
+      <div className="flex flex-wrap gap-2">
+        {firstButton}
+        {anotherJob}
+        {changeAnswer}
+      </div>
+      {becauseLine}
+      {jobPicker}
+    </div>
+  );
+
+  // THE ONE DOOR A PAPER THE READER COULDN'T FINISH NEEDS. Its answers come once it has a total.
+  const neededDoor =
+    r.state === "not_read" ? (
+      <Button onClick={() => run("read", () => readPaperworkItem(item.id))} disabled={working}>
+        {spin("read") ? <Loader2 className="animate-spin" /> : <Sparkles />} {spin("read") ? "Reading…" : "Read Now"}
+      </Button>
+    ) : r.state === "too_big" || r.state === "needs_total" ? (
+      <Button onClick={() => setFixing(true)} disabled={working}>
+        <Pencil /> Fix Details: Put The Total In
+      </Button>
+    ) : r.state === "supplier_documents" ? (
+      <Button onClick={() => run("ced", () => addSupplierDocuments(item.id), "Added to the supplier documents.")} disabled={working}>
+        {spin("ced") ? <Loader2 className="animate-spin" /> : <BookOpen />} Add To Supplier Documents
+      </Button>
+    ) : null;
+
   return (
     <Card className={r.state === "ready" || r.state === "supplier_documents" ? "border-emerald-200" : "border-amber-200"}>
-      <div className="flex gap-3 p-3 sm:gap-4 sm:p-4">
-        <Thumb item={item} />
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="font-medium text-slate-900">{describePaper(item)}</span>
-            {badgeFor(item)}
+      <div className="p-3 sm:p-4">
+        <div className="flex gap-3">
+          <Thumb item={item} />
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="min-w-0 break-words font-medium text-slate-900">{headline}</span>
+              {badge}
+            </div>
+            <p className="mt-0.5 text-xs text-slate-500">{grey.filter(Boolean).join(" · ")}</p>
           </div>
-          <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-slate-500">
-            {item.doc_number && <span>#{item.doc_number}</span>}
-            {item.item_date && <span>Dated {formatDate(item.item_date)}</span>}
-            <span>Added {formatDate(item.created_at)}</span>
-            <span className="truncate">{item.title}</span>
-          </div>
-          {item.pricing_provisional && (
-            <p className="mt-1 text-xs text-amber-800">
-              The prices on this paper look like a counter preview, not your account&apos;s own. The bill will say so.
-            </p>
-          )}
-          {r.state !== "ready" && r.state !== "supplier_documents" && r.state !== "picture" && (
-            <p className="mt-1 text-sm text-slate-600">{r.sentence}</p>
-          )}
-
-          {onBooks.length > 0 && (r.state === "ready" || r.state === "supplier_documents") && (
-            <div className="mt-2 space-y-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">
-              {onBooks.map((m) => (
-                <div key={matchKey(m)}>
-                  <p>{m.sentence}</p>
-                  <Button
-                    variant="outline"
-                    className="mt-1.5"
-                    disabled={working}
-                    onClick={() => run(`tie`, () => tiePaperwork(item.id, { billId: m.billId }), "Tied to what was already on the books.")}
-                  >
-                    {busy === "tie" ? <Loader2 className="animate-spin" /> : <Link2 />} Same Purchase: Tie Them
-                  </Button>
-                </div>
-              ))}
-              <p className="text-xs">Tying files this paper against it and adds nothing new. If it is a different purchase with the same number, pick where it goes and press Different Purchase: File It Anyway.</p>
-            </div>
-          )}
-          {toLink.length > 0 && onBooks.length === 0 && r.state === "ready" && (
-            <div className="mt-2 rounded-lg bg-brand/5 px-3 py-2 text-sm text-brand-dark">
-              {toLink.map((m) => (
-                <p key={matchKey(m)}>{m.sentence}</p>
-              ))}
-            </div>
-          )}
-          {maybes.length > 0 && onBooks.length === 0 && r.state === "ready" && (
-            <div className="mt-2 space-y-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900" role="status">
-              {maybes.map((m) => (
-                <div key={matchKey(m)}>
-                  <p>{m.sentence}</p>
-                  <Button
-                    variant="outline"
-                    className="mt-1.5"
-                    disabled={working}
-                    onClick={() => run(`tie`, () => tiePaperwork(item.id, { billId: m.billId }), "Tied to what was already on the books.")}
-                  >
-                    {busy === "tie" ? <Loader2 className="animate-spin" /> : <Link2 />} Same Purchase: Tie Them
-                  </Button>
-                </div>
-              ))}
-              <p className="text-xs">A long number like this is usually one purchase. If it is a different purchase, pick where it goes and press File It; the bill will say a person checked.</p>
-            </div>
-          )}
-          {addsUp?.mismatch && (r.state === "ready" || r.state === "needs_total") && (
-            <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900" role="status">
-              The lines add up to {formatCurrency(addsUp.lineSum)}; the total read is {formatCurrency(addsUp.amount)}. If the total is
-              wrong, press Fix Details. File It records the total either way, and the bill says so.
-            </p>
-          )}
-          {rowLines.length > 0 && (
-            <details className="mt-1.5 text-sm">
-              <summary className="flex min-h-11 cursor-pointer items-center text-xs font-medium text-brand">
-                Lines ({rowLines.length})
-              </summary>
-              <ul className="mt-1 divide-y divide-slate-100 rounded-lg border border-slate-200">
-                {rowLines.map((l) => (
-                  <li key={l.index} className="flex items-start gap-2 px-3 py-1.5 text-xs text-slate-700">
-                    <span className="min-w-0 flex-1 break-words">
-                      {l.quantity !== 1 ? `${l.quantity} × ` : ""}
-                      {l.description}
-                      {!l.billable ? <span className="text-slate-500"> (not billed to the customer)</span> : null}
-                      {l.billable && l.billed_amount !== undefined ? (
-                        <span className="text-slate-500"> (bills {formatCurrency(l.billed_amount)} of it)</span>
-                      ) : null}
-                    </span>
-                    <span className="shrink-0 tabular-nums">{formatCurrency(l.amount)}</span>
-                  </li>
-                ))}
-              </ul>
-            </details>
-          )}
-          {p.ced?.refused?.length ? (
-            <div className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900" role="status">
-              {p.ced.refused.map((x, i) => (
-                <p key={`${x.number ?? "none"}-${i}`}>Won&apos;t be added: {x.error}.</p>
-              ))}
-              <p className="text-xs">Only the documents that add up go on the list. Check the paper for the rest.</p>
-            </div>
-          ) : null}
-          {papers.length > 0 && (
-            <div className="mt-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
-              {papers.map((m) => (
-                <p key={matchKey(m)}>{m.sentence}</p>
-              ))}
-            </div>
-          )}
-
-          {billBack && (
-            <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900" role="status">
-              {billBack}
-            </p>
-          )}
-
-          {said && (
-            <p className={`mt-2 rounded-lg px-3 py-2 text-sm ${said.tone === "error" ? "bg-red-50 text-red-700" : "bg-brand/5 text-brand-dark"}`} role={said.tone === "error" ? "alert" : "status"}>
-              {said.text}
-            </p>
-          )}
-
-          {mode === "cost" && <div className="mt-2.5">{costChooser}</div>}
-          {mode === "ask" && <div className="mt-2.5">{askWhat}</div>}
-          {mode === "photo" && <div className="mt-2.5">{photoChooser}</div>}
-          {mode === "keep" && (
-            <div className="mt-2.5 space-y-2 empty:hidden">
-              {pickedLine(dest.startsWith("job:") ? dest.slice(4) : dest, "Where does this go?")}
-              {onPaperLine}
-              {conflict}
-              {guessChip}
-              {(suggestTask || suggestKeep) && (
-                <div className="flex flex-wrap items-center gap-2">
-                  {suggestTask && (
-                    <button
-                      type="button"
-                      onClick={() => run("task", () => makeTaskFromPaper(item.id), `Made a task: "${suggestTask.title}".`)}
-                      disabled={working}
-                      className="inline-flex min-h-11 items-center gap-1.5 rounded-full border border-dashed border-slate-300 bg-white px-3 text-left text-sm text-slate-700 hover:border-brand hover:text-brand disabled:opacity-50"
-                    >
-                      {busy === "task" ? <Loader2 className="h-4 w-4 shrink-0 animate-spin" /> : <ListTodo className="h-4 w-4 shrink-0 text-brand" />}
-                      <span className="min-w-0 break-words">Make Task: {suggestTask.title}</span>
-                    </button>
-                  )}
-                  {suggestKeep && (
-                    <button
-                      type="button"
-                      onClick={() => run("note", () => keepAsNote(item.id), "Kept as a note.")}
-                      disabled={working}
-                      className="inline-flex min-h-11 items-center gap-1.5 rounded-full border border-dashed border-slate-300 bg-white px-3 text-sm text-slate-700 hover:border-brand hover:text-brand disabled:opacity-50"
-                    >
-                      {busy === "note" ? <Loader2 className="h-4 w-4 shrink-0 animate-spin" /> : <StickyNote className="h-4 w-4 shrink-0 text-brand" />}
-                      Keep As Note
-                    </button>
-                  )}
-                  <span className="text-xs text-slate-500">AI Suggest&apos;s idea{p.why ? `: ${p.why}` : ""}. Nothing moves until you tap it.</span>
-                </div>
+          {menuRows.length > 0 && (
+            // THE ⋯: the rarer doors, one row each. The sheets they open (Fix Details) are drawn by
+            // the card itself, so closing the menu never takes a half-filled sheet with it.
+            <SectionActionsMenu tree={CARD_MENU}>
+              {menuRows.includes("Fix Details") && (
+                <button type="button" className={MENU_ROW} onClick={() => setFixing(true)} disabled={working}>
+                  <Pencil className="h-4 w-4 shrink-0" /> Fix Details
+                </button>
               )}
-            </div>
-          )}
-
-          <div className="mt-2.5 flex flex-wrap items-center gap-2">
-            {mode === "keep" && (
-              <>
-                {keepPicker}
-                <Button onClick={() => fileIt(false)} disabled={working || !!blocked} title={blocked ?? undefined}>
-                  {busy === "file" || busy === "keep" ? <Loader2 className="animate-spin" /> : <Check />} Keep It
-                </Button>
-                {answer === "else" && changeAnswer}
-              </>
-            )}
-            {mode === "cost" && (
-              <>
-                {onBooks.length > 0 && r.state === "ready" ? (
-                  <Button onClick={() => fileIt(true)} disabled={working || !!blocked} title={blocked ?? undefined}>
-                    {busy === "anyway" ? <Loader2 className="animate-spin" /> : <Check />} Different Purchase: File It Anyway
-                  </Button>
-                ) : (
-                  <Button onClick={() => fileIt(false)} disabled={working || !!blocked} title={blocked ?? undefined}>
-                    {busy === "file" ? <Loader2 className="animate-spin" /> : <Check />}{" "}
-                    {toLink.length && r.state === "ready" ? `File It And Link To ${toLink.map((m) => m.invoiceNumber).join(", ")}` : "File It"}
-                  </Button>
-                )}
-              </>
-            )}
-            {r.state === "supplier_documents" && (
-              <Button onClick={() => run("ced", () => addSupplierDocuments(item.id), "Added to the supplier documents.")} disabled={working}>
-                {busy === "ced" ? <Loader2 className="animate-spin" /> : <BookOpen />} Add To Supplier Documents
-              </Button>
-            )}
-            {r.state === "not_read" && (
-              <Button onClick={() => run("read", () => readPaperworkItem(item.id))} disabled={working}>
-                {busy === "read" ? <Loader2 className="animate-spin" /> : <Sparkles />} {busy === "read" ? "Reading…" : "Read Now"}
-              </Button>
-            )}
-            {/* A return with no lines can't go on a job (RETURN_NEEDS_LINES says Read Again), and a
-                ticket with no lines can't go on the shelf (SHELF_TRAY_NEEDS_LINES): the door both name. */}
-            {r.state === "ready" && (isReturnWithoutLines(item) || blocked === SHELF_TRAY_NEEDS_LINES) && item.file_url && (
-              <Button variant="outline" onClick={() => run("read", () => readPaperworkItem(item.id))} disabled={working}>
-                {busy === "read" ? <Loader2 className="animate-spin" /> : <Sparkles />} {busy === "read" ? "Reading…" : "Read Again"}
-              </Button>
-            )}
-            {(r.state === "later" || r.state === "supplier_documents") && (
-              <Button variant="outline" onClick={() => run("keep", () => keepPaperwork(item.id), "Kept in files.")} disabled={working}>
-                <Archive /> Keep It In Files
-              </Button>
-            )}
-            {showAiSuggest && mode !== "none" && (
-              <Button
-                variant="outline"
-                onClick={() => run("ai", async () => { const a = await aiReviewItem(item.id); return { ok: a.ok, error: a.message, message: a.message }; })}
-                disabled={working}
-              >
-                {busy === "ai" ? <Loader2 className="animate-spin" /> : <Sparkles />} AI Suggest
-              </Button>
-            )}
-            {r.state !== "supplier_documents" && (
-              <Button variant="outline" onClick={() => setFixing(true)} disabled={working}>
-                <Pencil /> Fix Details
-              </Button>
-            )}
-            {r.state !== "later" && r.state !== "supplier_documents" && (
-              <Button variant="outline" onClick={() => run("archive", () => archiveItem(item.id))} disabled={working} title="Set it aside in Organize's Archive">
-                <Archive /> Set Aside
-              </Button>
-            )}
-            {r.state === "later" && (
-              <Button
-                variant="outline"
-                onClick={() => {
-                  if (confirm(`Delete this ${describePaper(item)}? The file goes too.`)) run("delete", () => deleteOrganizedItem(item.id));
-                }}
-                disabled={working}
-              >
-                <Trash2 /> Delete
-              </Button>
-            )}
-          </div>
-          {blocked && parsedDest && (mode === "cost" || mode === "keep" || mode === "photo") && (
-            <p className="mt-1 text-xs text-slate-500">{blocked}</p>
+              {menuRows.includes("Read Again") && (
+                <button type="button" className={MENU_ROW} onClick={() => run("read", () => readPaperworkItem(item.id))} disabled={working}>
+                  {spin("read") ? <Loader2 className="h-4 w-4 shrink-0 animate-spin" /> : <RotateCcw className="h-4 w-4 shrink-0" />} Read Again
+                </button>
+              )}
+              {menuRows.includes("Keep It In Files") && (
+                <button type="button" className={MENU_ROW} onClick={() => run("keep", () => keepPaperwork(item.id), "Kept in files.")} disabled={working}>
+                  <Archive className="h-4 w-4 shrink-0" /> Keep It In Files
+                </button>
+              )}
+              {menuRows.includes("Set Aside") && (
+                <button type="button" className={MENU_ROW} onClick={() => run("archive", () => archiveItem(item.id), "Set aside. Find it in Organize, under Archive.")} disabled={working}>
+                  <Archive className="h-4 w-4 shrink-0" /> Set Aside
+                </button>
+              )}
+              {menuRows.includes("Delete") && (
+                <button
+                  type="button"
+                  className={MENU_DANGER_ROW}
+                  disabled={working}
+                  onClick={() => {
+                    if (confirm(`Delete this ${describePaper(item)}? The file goes too.`)) run("delete", () => deleteOrganizedItem(item.id), undefined, "Deleted.");
+                  }}
+                >
+                  <Trash2 className="h-4 w-4 shrink-0" /> Delete
+                </button>
+              )}
+            </SectionActionsMenu>
           )}
         </div>
+
+        {item.pricing_provisional && (
+          <p className="mt-2 text-xs text-amber-800">
+            The prices on this paper look like a counter preview, not your account&apos;s own. The bill will say so.
+          </p>
+        )}
+        {stateSentence && <p className="mt-2 text-sm text-slate-600">{stateSentence}</p>}
+
+        {/* OPEN PAPER, the first row: the file and its lines inline, the supplier card's Open Bill. */}
+        {(item.signedUrl || rowLines.length > 0) && (
+          <div className="mt-2">
+            <Button variant="outline" aria-expanded={paperOpen} onClick={() => setPaperOpen((o) => !o)}>
+              {paperOpen ? "Close Paper" : "Open Paper"}
+            </Button>
+            {mismatch && !paperOpen && (
+              <p className="mt-1 text-xs text-amber-800" role="status">
+                Its lines don&apos;t add up to the total read. Open Paper shows both.
+              </p>
+            )}
+            {paperOpen && (
+              <div className="mt-2 space-y-2 rounded-md border border-slate-200 bg-slate-50 px-2 py-2 text-xs text-slate-700">
+                {item.signedUrl ? (
+                  /\.pdf($|\?)/i.test(item.signedUrl) || /\.pdf$/i.test(String(item.file_url ?? "")) ? (
+                    <a href={item.signedUrl} target="_blank" rel="noopener noreferrer" className="flex min-h-11 items-center text-sm font-medium text-brand hover:underline">
+                      Open The PDF
+                    </a>
+                  ) : (
+                    <a href={item.signedUrl} target="_blank" rel="noopener noreferrer" className="block" title="Open The Paper">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={item.signedUrl} alt={item.title} className="max-h-[28rem] w-full rounded object-contain" />
+                    </a>
+                  )
+                ) : (
+                  <p className="py-1 text-slate-500">No file is on this one: it was typed in.</p>
+                )}
+                {rowLines.length > 0 && (
+                  <div>
+                    <p className="py-1 font-medium text-slate-900">Lines ({rowLines.length})</p>
+                    <ul className="divide-y divide-slate-200 rounded border border-slate-200 bg-white">
+                      {rowLines.map((l) => (
+                        <li key={l.index} className="flex items-start gap-2 px-3 py-1.5">
+                          <span className="min-w-0 flex-1 break-words">
+                            {l.quantity !== 1 ? `${l.quantity} × ` : ""}
+                            {l.description}
+                            {!l.billable ? <span className="text-slate-500"> (not billed to the customer)</span> : null}
+                            {l.billable && l.billed_amount !== undefined ? (
+                              <span className="text-slate-500"> (bills {formatCurrency(l.billed_amount)} of it)</span>
+                            ) : null}
+                          </span>
+                          <span className="shrink-0 tabular-nums">{formatCurrency(l.amount)}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {mismatch && addsUp && (
+                  <p className="rounded bg-amber-50 px-2 py-1.5 text-sm text-amber-900" role="status">
+                    The lines add up to {formatCurrency(addsUp.lineSum)}; the total read is {formatCurrency(addsUp.amount)}. If the total is
+                    wrong, fix it with Fix Details. Filing records the total either way, and the bill says so.
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* THE SAME PURCHASE: Tie Them per match, and one line saying what every other answer means. */}
+        {samePurchase.length > 0 && (r.state === "ready" || r.state === "supplier_documents") && (
+          <div className="mt-2 space-y-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900" role="status">
+            {samePurchase.map((m) => (
+              <div key={matchKey(m)}>
+                <p>{m.sentence}</p>
+                <Button
+                  variant="outline"
+                  className="mt-1.5"
+                  disabled={working}
+                  onClick={() => run("tie", () => tiePaperwork(item.id, { billId: m.billId }), "Tied to what was already on the books.")}
+                >
+                  {spin("tie") ? <Loader2 className="animate-spin" /> : <Link2 />} Same Purchase: Tie Them
+                </Button>
+              </div>
+            ))}
+            <p className="text-xs">
+              {r.state === "ready" ? "Any other button below records it as a different purchase." : "Tying files this paper against it and adds nothing new."}
+            </p>
+          </div>
+        )}
+        {toLink.length > 0 && onBooks.length === 0 && r.state === "ready" && (
+          <div className="mt-2 rounded-lg bg-brand/5 px-3 py-2 text-sm text-brand-dark">
+            {toLink.map((m) => (
+              <p key={matchKey(m)}>{m.sentence}</p>
+            ))}
+          </div>
+        )}
+        {p.ced?.refused?.length ? (
+          <div className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900" role="status">
+            {p.ced.refused.map((x, i) => (
+              <p key={`${x.number ?? "none"}-${i}`}>Won&apos;t be added: {x.error}.</p>
+            ))}
+            <p className="text-xs">Only the documents that add up go on the list. Check the paper for the rest.</p>
+          </div>
+        ) : null}
+        {papers.length > 0 && (
+          <div className="mt-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
+            {papers.map((m) => (
+              <p key={matchKey(m)}>{m.sentence}</p>
+            ))}
+          </div>
+        )}
+        {billBack && (
+          <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900" role="status">
+            {billBack}
+          </p>
+        )}
+        {said && (
+          <p className={`mt-2 rounded-lg px-3 py-2 text-sm ${said.tone === "error" ? "bg-red-50 text-red-700" : "bg-brand/5 text-brand-dark"}`} role={said.tone === "error" ? "alert" : "status"}>
+            {said.text}
+          </p>
+        )}
+
+        {mode === "cost" && <div className="mt-2.5">{costAnswers}</div>}
+        {mode === "keep" && <div className="mt-2.5">{keepAnswers}</div>}
+        {mode === "ask" && <div className="mt-2.5">{askWhat}</div>}
+        {mode === "photo" && <div className="mt-2.5">{photoAnswers}</div>}
+        {neededDoor && <div className="mt-2.5 flex flex-wrap gap-2">{neededDoor}</div>}
+
+        {/* WHY AN ANSWER IS SHUT, in the words the server would refuse with, once each. */}
+        {(mode === "cost" || mode === "keep" || mode === "photo") && shutWhy.length > 0 && (
+          <div className="mt-2 space-y-1">
+            {shutWhy.map((why) => (
+              <p key={why} className="text-xs text-slate-600">
+                {why}
+              </p>
+            ))}
+            {readAgainNamed && (
+              <Button variant="outline" onClick={() => run("read", () => readPaperworkItem(item.id))} disabled={working}>
+                {spin("read") ? <Loader2 className="animate-spin" /> : <Sparkles />} {spin("read") ? "Reading…" : "Read Again"}
+              </Button>
+            )}
+          </div>
+        )}
       </div>
       {shelfSheet && (
         <ShelfTicketSheet
@@ -919,12 +938,12 @@ export function PaperworkRow({
               category: l.category,
             }),
           )}
-          total={item.amount == null || item.amount === "" ? null : Number(item.amount)}
+          total={rowTotal}
           fileLabel="File It To Stock"
           onClose={() => setShelfSheet(null)}
           onFile={async (choices) => {
             const res = await fileItem(item.id, { type: "stock", lines: choices }, { differentPurchase: shelfSheet.differentPurchase });
-            if (!res.ok) return res;
+            if (!res.ok) return { ...res, error: cardSentence(res.error) };
             setShelfSheet(null);
             const sentence = res.message ?? "Filed in shop stock.";
             onFiled({ id: item.id, sentence: `${describePaper(item)}: ${sentence}` });
@@ -934,10 +953,12 @@ export function PaperworkRow({
                 void undoPaperwork(item.id).then((u) => {
                   toast(u.ok ? u.message ?? "Undone." : u.error ?? "Couldn't undo.", u.ok ? "success" : "error");
                   router.refresh();
+                  onChanged?.();
                 });
               },
             });
             router.refresh();
+            onChanged?.();
             return res;
           }}
         />
@@ -949,6 +970,7 @@ export function PaperworkRow({
           onSaved={() => {
             setFixing(false);
             router.refresh();
+            onChanged?.();
           }}
         />
       )}
@@ -965,17 +987,18 @@ export function PaperworkList({
   items,
   jobs,
   matches,
-  showAiSuggest = false,
   empty,
   shopStock = true,
+  onChange,
 }: {
   items: PaperRowItem[];
   jobs: JobOption[];
   matches: Record<string, NumberMatch[]>;
-  showAiSuggest?: boolean;
   empty?: React.ReactNode;
   /** The Shop Stock switch (0352), for every row. Absent = on. */
   shopStock?: boolean;
+  /** Something filed, came back, or changed: a holder that isn't a page reads its rows again. */
+  onChange?: () => void;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -993,6 +1016,7 @@ export function PaperworkList({
     setFiled((all) => all.filter((x) => x.id !== f.id));
     toast(res.message ?? "Undone.", "success");
     router.refresh();
+    onChange?.();
   }
 
   return (
@@ -1020,8 +1044,8 @@ export function PaperworkList({
                 item={item}
                 jobs={jobs}
                 matches={matches[item.id] ?? []}
-                showAiSuggest={showAiSuggest}
                 shopStock={shopStock}
+                onChanged={onChange}
                 onFiled={(f) => setFiled((all) => [f, ...all.filter((x) => x.id !== f.id)])}
               />
             </li>
@@ -1031,4 +1055,3 @@ export function PaperworkList({
     </div>
   );
 }
-
