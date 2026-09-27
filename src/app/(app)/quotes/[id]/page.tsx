@@ -159,6 +159,11 @@ export default async function QuoteDetailPage({
     ],
   };
 
+  // Asked of the server rule itself, never guessed from the status: acceptance alone locks nothing,
+  // so a status-only gate would have hidden controls that still work. null = every control stays
+  // live. Read once: the editor shows its reason, and the Duplicate door below follows it.
+  const lock = await quoteEditLock(q.id);
+
   return (
     <div className="mx-auto max-w-3xl">
       <BackLink fallback="/quotes" fallbackLabel="Back to Quotes" />
@@ -214,8 +219,9 @@ export default async function QuoteDetailPage({
           <EmailButton id={q.id} kind="quote" textReady={smsReadiness(orgRow as { settings?: unknown } | null).ready} />
           <StatusControl id={q.id} status={q.status} />
           {/* Duplicate makes a new estimate: a door Estimates off takes away. The rest of the row
-              works this one, which still opens from its link under the Off line. */}
-          {featureOn(orgS.features, "estimates") && <DuplicateQuoteButton id={q.id} />}
+              works this one, which still opens from its link under the Off line. A LOCKED estimate
+              keeps it: the lock's own words send him to "Duplicate it as a revision". */}
+          {(featureOn(orgS.features, "estimates") || lock) && <DuplicateQuoteButton id={q.id} />}
           <SectionActionsMenu tree={quoteMap} />
         </div>
       </div>
@@ -248,10 +254,7 @@ export default async function QuoteDetailPage({
       )}
       <QuoteItemsEditor
         quote={q}
-        // Asked of the server rule itself, never guessed from the status: acceptance alone locks
-        // nothing, so a status-only gate would have hidden controls that still work. null = every
-        // control stays live.
-        lock={await quoteEditLock(q.id)}
+        lock={lock}
         items={lineItems}
         priceItems={(priceItems ?? []) as never}
         kits={(kitDoors ? kits ?? [] : []) as never}
