@@ -92,11 +92,16 @@ describe("the job's side doors", () => {
     expect(s.match(/\{isStaff && <NewJobButton/g)?.length).toBe(2);
   });
 
-  it("Already Billed (0357) is the office's: its doors come off the staff-only piles, its reads are staff-only, and a fixed-price job gets only the way back", () => {
+  it("Already Billed (0357) is the office's: its doors come off the staff-only piles, its reads are staff-only, and a job New Invoice bills by its contract gets only the way back", () => {
     const s = src("jobs/[id]/page.tsx");
-    // The piles exist only for staff on a job whose running total was read (a job that bills its actuals).
+    // The piles exist only for staff on a job whose running total was read: one that bills its
+    // actuals, or (for the office) one whose next New Invoice pulls them, New Invoice's own rule.
     expect(s).toMatch(/const costGroups =\s*viewerIsStaff && unbilled && unbilled\.schemaReady/);
-    expect(s).toMatch(/billsActuals\s*\?\s*unbilledWorkForJob\(/);
+    expect(s).toMatch(/pilesOn\s*\?\s*unbilledWorkForJob\(/);
+    expect(s).toMatch(/const pilesOn = billsActuals \|\| \(viewerIsStaff && importsActuals\);/);
+    expect(s).toMatch(/const importsActuals = nextInvoiceImportsActuals\(/);
+    // The doors' reach is read for staff only, by the sheet's own rule.
+    expect(s).toMatch(/viewerIsStaff &&\s*importsActuals &&[\s\S]{0,200}\?\s*readAlreadyBilledReach\(/);
     // The marks are read for staff only (on any job: the way back is wherever a mark is).
     expect(s).toMatch(/viewerIsStaff\s*\?\s*readHandClaimsForJob\(/);
     expect(s).toMatch(/const handById = handClaims && handClaims !== "failed" && handClaims\.ready \? handClaims\.byId : null;/);

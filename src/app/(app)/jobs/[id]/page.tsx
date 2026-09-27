@@ -40,11 +40,11 @@ import { readJobPapers } from "./job-papers";
 import { JobPaperList, type JobPaperView } from "./job-paper-list";
 import { tmWorkToDate } from "@/lib/job-financials";
 import { readJobStock, stockCostLabel, stockKey, stockShortsSentence } from "@/lib/stock-billing";
-import { readHandClaimsForJob, type HandClaims } from "@/lib/already-billed-read";
-import { abLineOf, eligibleInvoice as alreadyBilledEligible, hoursByHand, jobAlreadyBilledDoors, jobCanHold } from "@/lib/already-billed";
+import { readAlreadyBilledReach, readHandClaimsForJob, type HandClaims } from "@/lib/already-billed-read";
+import { hoursByHand, jobAlreadyBilledDoors } from "@/lib/already-billed";
 import { AlreadyBilledButton } from "@/components/already-billed-sheet";
 import { openDraftOnJob, type OpenDraft } from "@/lib/actuals-draw";
-import { jobBillsItsActuals } from "@/lib/invoice-import-rule";
+import { isLiveQuote, jobBillsItsActuals, nextInvoiceImportsActuals } from "@/lib/invoice-import-rule";
 import { reportError } from "@/lib/observe";
 import { loadShiftChains } from "@/lib/shift-chain";
 import { JobPhotos } from "./job-photos";
@@ -289,6 +289,18 @@ export default async function JobDetailPage({
   // One rule with the customer portal (jobBillsItsActuals), so the customer is shown "not on a
   // bill yet" on exactly the jobs the office is.
   const billsActuals = jobBillsItsActuals(j.billing_type, (paymentMilestones ?? []).length);
+  // THE COSTS TAB'S PILES FOLLOW NEW INVOICE'S OWN RULE (nextInvoiceImportsActuals): wherever the next
+  // New Invoice pulls the job's hours and receipts, the tab says what is Not Billed Yet and offers
+  // Already Billed, fixed-price jobs with no live estimate included (J-010 Purple Sage). The same rule
+  // opens the Already Billed sheet, so no door shows where the sheet refuses and none is missing where
+  // it works. Wider than billsActuals (every Time & Material job with no schedule is in both); the
+  // Overview's running total keeps billsActuals.
+  const importsActuals = nextInvoiceImportsActuals(
+    j.billing_type,
+    (paymentMilestones ?? []).length,
+    ((quotes ?? []) as { status?: string | null }[]).some((q) => isLiveQuote(q.status)),
+  );
+  const pilesOn = billsActuals || (viewerIsStaff && importsActuals);
   const [
     { data: canonicalItems },
     { data: permits },
@@ -313,7 +325,7 @@ export default async function JobDetailPage({
     papers,
     jobStock,
     handClaims,
-    abLines,
+    abReach,
   ] = await Promise.all([
     // THE job's items, role-shaped (projection law): staff read every column, a tech reads
     // TECH_ITEM_COLUMNS — no est_cost, no vendor — the same list /materials/[id] uses, so the one
@@ -376,11 +388,12 @@ export default async function JobDetailPage({
       : Promise.resolve({ data: [] as any[] }),
     // THE RUNNING TOTAL for the Overview's UnbilledCard — the hours and bills no non-void
     // invoice has claimed, the arithmetic Nort's job-numbers tool speaks. Rides this wave
-    // (it needs only the job id) and only on a job that BILLS its actuals (billsActuals, above):
-    // anywhere else the figure isn't what the door would draft, so the page doesn't read it. A
-    // failure here must not take the job page down with it (the 60mph rule): logged, and the
-    // card says it couldn't total and names the tabs.
-    billsActuals
+    // (it needs only the job id) and only on a job that BILLS its actuals (billsActuals, above), or,
+    // for the office's Costs tab piles, one whose next New Invoice pulls them (pilesOn): anywhere
+    // else the figure isn't what the door would draft, so the page doesn't read it. A failure here
+    // must not take the job page down with it (the 60mph rule): logged, and the card says it
+    // couldn't total and names the tabs.
+    pilesOn
       ? unbilledWorkForJob(supabase, id).catch((e) => {
           reportError("jobs.[id].unbilledWork", e, { jobId: id });
           return null;
@@ -410,7 +423,7 @@ export default async function JobDetailPage({
     // bill has taken off yet (resolveDrawCredit). The card names the net - or says the deposit still
     // covers it - instead of a figure the click won't bill. A lost read is logged and counts $0:
     // the button then shows the gross, and the server still nets and says so.
-    viewerIsStaff && billsActuals && (invoices ?? []).some((i: any) => i.status !== "void" && isDrawKind(i.invoice_kind))
+    viewerIsStaff && pilesOn && (invoices ?? []).some((i: any) => i.status !== "void" && isDrawKind(i.invoice_kind))
       ? fixedBillingsNotYetNetted(supabase, id).catch((e) => {
           reportError("jobs.[id].lumpToNet", e, { jobId: id });
           return 0;
@@ -479,31 +492,22 @@ export default async function JobDetailPage({
           return "failed" as const;
         })
       : Promise.resolve(null as HandClaims | "failed" | null),
-    // ALREADY BILLED'S DOORS ASK WHETHER A LINE COULD HOLD THE COST: the lines of the job's bills
-    // that went out, read only where the doors can show. A door onto a sheet with no line to pick is
-    // a dead end. A lost read is logged and the doors show as before (the sheet says what it finds).
-    viewerIsStaff && billsActuals && ((invoices ?? []) as any[]).some((i) => alreadyBilledEligible(i))
-      ? supabase
-          .from("invoice_items")
-          .select("id, invoice_id, description, quantity, unit, unit_price, line_total, import_source, import_key, edited, line_kind, sort_order")
-          .in(
-            "invoice_id",
-            ((invoices ?? []) as any[]).filter((i) => alreadyBilledEligible(i)).map((i) => i.id),
-          )
-          .then(
-            (r: { data: any[] | null; error: unknown }) => {
-              if (r.error) {
-                reportError("jobs.[id].alreadyBilledLines", r.error, { jobId: id });
-                return null;
-              }
-              return r.data ?? [];
-            },
-            (e: unknown) => {
-              reportError("jobs.[id].alreadyBilledLines", e, { jobId: id });
-              return null;
-            },
-          )
-      : Promise.resolve(null as any[] | null),
+    // ALREADY BILLED'S DOORS ASK WHETHER A LINE COULD HOLD THE COST, by the sheet's own reading
+    // (readAlreadyBilledReach: the job's sent bills and, on a job that isn't Time & Material, its
+    // customer's invoices with no job). A door onto a sheet with no line to pick is a dead end. A lost
+    // read is logged and the doors show as before (the sheet says what it finds). Skipped where
+    // nothing could hold a cost: no sent bill on the job, and (T&M) no other invoice it may use.
+    viewerIsStaff &&
+    importsActuals &&
+    (((invoices ?? []) as any[]).some((i) => i.status !== "draft" && i.status !== "void") || (j.billing_type !== "tm" && !!j.customer_id))
+      ? readAlreadyBilledReach(supabase, j.org_id, [id]).then(
+          (r) => (r.ready ? (r.jobs.get(id) ?? { charge: false, ret: false }) : null),
+          (e: unknown) => {
+            reportError("jobs.[id].alreadyBilledReach", e, { jobId: id });
+            return null;
+          },
+        )
+      : Promise.resolve(null as { charge: boolean; ret: boolean } | null),
   ]);
   // PROJECTION at the boundary: staff get the money; a tech's view is HOURS ONLY — no rate, no
   // amount, no bills, no crew (a tech reads only his own rows, so the hours ARE his) — built here
@@ -537,32 +541,17 @@ export default async function JobDetailPage({
         )
       : null;
   const costGroupsNote =
-    viewerIsStaff && billsActuals && !costGroups
+    viewerIsStaff && pilesOn && !costGroups
       ? "Couldn't tell which bills are on an invoice right now, so this is every bill on the job. The Invoices tab has what each invoice holds."
       : null;
-  // ALREADY BILLED (0357, Erik's Purple Sage). Only where the piles exist (staff, a Time & Material
-  // job that bills its actuals, the claims readable): Already Billed on a Not Billed Yet row when
-  // some sent bill of the job's own could hold it (never one with no job: a T&M job's work to date
-  // counts only its own invoices); Billed By Hand · Not Billed After All on a row a person marked.
-  // The hours line gets the same pair below.
-  const alreadyBilledOffer = ((invoices ?? []) as any[]).some((i) => alreadyBilledEligible(i));
-  // ...and only where one of those bills has a line that could hold it: a charge on a line of work
-  // typed or changed by hand, a supplier return on a line typed by hand that takes money off.
-  const alreadyBilledCan = abLines
-    ? jobCanHold(
-        ((invoices ?? []) as any[])
-          .filter((i) => alreadyBilledEligible(i))
-          .map((i) => ({
-            id: String(i.id),
-            invoice_number: i.invoice_number ?? null,
-            status: String(i.status ?? ""),
-            invoice_kind: i.invoice_kind ?? null,
-            job_id: id,
-            created_at: "",
-            lines: abLines.filter((l) => String(l.invoice_id) === String(i.id)).map(abLineOf),
-          })),
-      )
-    : { charge: alreadyBilledOffer, ret: alreadyBilledOffer };
+  // ALREADY BILLED (0357, Erik's Purple Sage). Only where the piles exist (staff, a job whose next New
+  // Invoice pulls its actuals, the claims readable): Already Billed on a Not Billed Yet row when a
+  // sent bill the sheet offers could hold it (never one with no job for a Time & Material job: its
+  // work to date counts only its own invoices); Billed By Hand · Not Billed After All on a row a
+  // person marked. The hours line gets the same pair below. A lost reach read offers the doors
+  // wherever a sent bill is on the job (the sheet says what it finds).
+  const alreadyBilledOffer = ((invoices ?? []) as any[]).some((i) => i.status !== "draft" && i.status !== "void" && (i.invoice_kind ?? "standard") !== "deposit");
+  const alreadyBilledCan = abReach ?? { charge: alreadyBilledOffer, ret: alreadyBilledOffer };
   const handById = handClaims && handClaims !== "failed" && handClaims.ready ? handClaims.byId : null;
   const handsNote =
     handClaims === "failed"
