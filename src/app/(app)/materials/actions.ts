@@ -16,6 +16,7 @@ import { createNotifications, officeRecipients, ringOffice } from "@/lib/notific
 import { reportError } from "@/lib/observe";
 import { sendPushToProfiles } from "@/lib/push";
 import { jobLabel } from "@/lib/schedule-options";
+import { askLine } from "@/lib/materials-checklist";
 
 export interface DraftMaterial {
   description: string;
@@ -777,7 +778,12 @@ export async function generateMaterialDraft(
  * may add one since 0254; the first line on a list-less job starts the list, as the editor's Add
  * does), and the live row, the Materials badge and My Day's Now block all count it. The office's bell
  * and push below are unchanged: the ask still lands on the boss's phone at once, with the job
- * attached, and now opens the list it is on. The line is his words exactly, with no price.
+ * attached, and now opens the list it is on.
+ *
+ * THE LINE IS A LINE (audit, 2026-09-27). The ask is a thing to buy, so the line is his words folded
+ * onto one line and cut to a line's length (askLine: 120, the old task title's cap), with no price:
+ * it rides the badge, Buy Materials, the PO seed and the pick-list print. The WHOLE ask, however
+ * long, is in the office's bell (the push keeps its 140).
  */
 export async function requestMaterials(jobId: string, what: string): Promise<Result> {
   const supabase = await createClient();
@@ -803,7 +809,7 @@ export async function requestMaterials(jobId: string, what: string): Promise<Res
   const list = await ensureJobMaterialList(jobId);
   if (!list.ok || !list.id) return { ok: false, error: list.error ?? "Couldn't reach this job's materials list." };
   const line = await insertMaterialLine(supabase, actor, list.id, {
-    description: text,
+    description: askLine(text),
     part_number: null,
     quantity: 1,
     unit: "ea",
@@ -826,7 +832,8 @@ export async function requestMaterials(jobId: string, what: string): Promise<Res
     await createNotifications((job as { org_id?: string }).org_id, bosses, {
       type: "general",
       title: `Materials needed — ${label}`,
-      body: `${who}: ${text.slice(0, 140)}`,
+      // The whole ask: the line on the list is cut to a line's length, so the words live here.
+      body: `${who}: ${text}`,
       url: `/jobs/${jobId}?tab=materials`,
     });
     // "assigned" is the kind for "something landed that is yours to deal with", which is exactly

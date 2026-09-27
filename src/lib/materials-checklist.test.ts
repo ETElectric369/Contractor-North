@@ -3,6 +3,8 @@ import {
   buyMaterials,
   buyMaterialsCounts,
   buyMaterialsTitle,
+  ASK_LINE_MAX,
+  askLine,
   checklistGroups,
   isOpenToBuy,
   newestListPerJob,
@@ -144,5 +146,22 @@ describe("the job's list, among every list on a set of jobs", () => {
     expect(newestListPerJob([L("b2", "j1", t), L("a1", "j1", t)]).get("j1")?.id).toBe("b2");
     expect(newestListPerJob([L("x", null, t)]).size).toBe(0);
     expect(newestListPerJob(null).size).toBe(0);
+  });
+});
+
+describe("a Tell The Office ask, as a line", () => {
+  it("a short ask is the line, folded onto one line", () => {
+    expect(askLine("  Two 3-gang faceplates \n need them tomorrow ")).toBe("Two 3-gang faceplates need them tomorrow");
+  });
+
+  it("a long one is cut to a line's length, at a word, and marked", () => {
+    const long = "Need two 3-gang faceplates and a box of wire nuts for the kitchen, plus the 12-2 won't reach the far wall so bring another 250 ft roll by tomorrow morning please";
+    const line = askLine(long);
+    expect(line.length).toBeLessThanOrEqual(ASK_LINE_MAX);
+    expect(line.endsWith("…")).toBe(true);
+    expect(long.startsWith(line.slice(0, -1))).toBe(true);
+    expect(line.slice(0, -1)).not.toMatch(/\s$/);
+    // No word near the end: a hard cut, still within the length.
+    expect(askLine("x".repeat(500))).toBe(`${"x".repeat(ASK_LINE_MAX - 1)}…`);
   });
 });

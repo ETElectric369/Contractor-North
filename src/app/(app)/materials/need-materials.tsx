@@ -57,13 +57,13 @@ export function NeedMaterials({ jobId }: { jobId: string }) {
         <PackagePlus className="h-4 w-4 text-brand" /> Need it fast? Tell the office.
       </div>
       <p className="mb-2 text-xs text-slate-500">
-        It goes on the list above and straight to the office&rsquo;s phone, with this job attached. You
-        don&rsquo;t have to chase anybody.
+        Say the item: it goes on the list above as a line to buy, and straight to the office&rsquo;s
+        phone with this job attached. You don&rsquo;t have to chase anybody.
       </p>
       <Textarea
         rows={2}
         value={text}
-        placeholder="The 12-2 on the list won't do it for the far wall — need it by tomorrow morning."
+        placeholder="Two 3-gang faceplates — need them tomorrow"
         onChange={(e) => { setText(e.target.value); setErr(null); }}
       />
       <div className="mt-2 flex flex-wrap items-center gap-3">

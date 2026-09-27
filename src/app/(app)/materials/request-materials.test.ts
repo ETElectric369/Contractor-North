@@ -113,6 +113,29 @@ describe("requestMaterials: a line on the list, never a duplicate task", () => {
     expect((line?.payload as Record<string, unknown>).list_id).toBe("list-new");
   });
 
+  it("a long ask is a line's length on the list; the whole ask is in the office's bell", async () => {
+    const long =
+      "The 12-2 on the list won't do it for the far wall, it's a longer run than the plans show,\nso bring another 250 ft roll and two 3-gang faceplates by tomorrow morning";
+    const r = await requestMaterials("job-1", long);
+    expect(r.ok).toBe(true);
+    const row = ops.find((o) => o.table === "material_list_items" && o.verb === "insert")?.payload as Record<string, unknown>;
+    const description = String(row.description);
+    expect(description.length).toBeLessThanOrEqual(120);
+    expect(description).not.toContain("\n");
+    expect(description.endsWith("…")).toBe(true);
+    const [, , n] = createNotifications.mock.calls[0] as [string, string[], Record<string, string>];
+    expect(n.body).toBe(`Brian Smith: ${long}`);
+    // The push stays a push's length.
+    expect(String((sendPushToProfiles.mock.calls[0] as any[])[2].body).length).toBeLessThanOrEqual("Brian Smith: ".length + 140);
+  });
+
+  it("the door asks for an item, not a message", async () => {
+    const { readFileSync } = await import("node:fs");
+    const door = readFileSync(new URL("./need-materials.tsx", import.meta.url), "utf8");
+    expect(door).toContain('placeholder="Two 3-gang faceplates — need them tomorrow"');
+    expect(door).not.toContain("won't do it for the far wall");
+  });
+
   it("says what's wrong in words and writes nothing for an empty ask", async () => {
     expect(await requestMaterials("job-1", "   ")).toEqual({ ok: false, error: "Say what you need." });
     expect(ops.some((o) => o.verb === "insert")).toBe(false);
