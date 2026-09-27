@@ -428,7 +428,8 @@ export default async function BillsPage({
     }
   };
   // Each bill's own paper, signed in the same breath (never a hop of its own). A lost links read is
-  // logged, and the rows draw no paper door: the Receipts tab below still lists every receipt.
+  // logged, and the rows draw no paper door, so All Bills says so above them (a bill with a receipt
+  // must not look like one that never had any); the Receipts tab below still lists every receipt.
   if (billTiesErr) reportError("bills.paperTies", billTiesErr, {});
   const billTies = (billTieRows ?? []) as PaperTie[];
   let billPaperUrls = new Map<string, string>();
@@ -1336,6 +1337,7 @@ export default async function BillsPage({
         bills={ledgerBills as any}
         docs={docs as any}
         readFailed={!!billsErr}
+        papersNote={billTiesErr ? "Couldn't load which receipt made each bill just now. Reload to try again." : null}
         switches={switches}
         alreadyBilled={billDoors}
       />

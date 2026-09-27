@@ -133,6 +133,7 @@ export function BillsReceipts({
   bills,
   docs,
   readFailed = false,
+  papersNote = null,
   switches = { features: ALL_ON, isOwner: false },
   alreadyBilled = {},
 }: {
@@ -144,6 +145,9 @@ export function BillsReceipts({
   docs: DocRow[];
   /** The bills read failed (audit v1018, class 2): said, never "No bills here yet" and $0.00. */
   readFailed?: boolean;
+  /** Said above the bills when the page couldn't read which receipt made which bill: every row then
+   *  draws no Receipt door, and a bill that has one must not look like one that never had any. */
+  papersNote?: string | null;
   /** The switch board (0352). Purchase Orders off: the tab loses its chip (a ?tab=po link still
    *  opens it, under the Off line) and New PO goes. The POs themselves are listed as ever. Shop
    *  Stock off: a receipt line isn't offered to the shelf. Absent = all on, today's ledger. */
@@ -373,6 +377,7 @@ export function BillsReceipts({
               {formatCurrency(totalBills)}
             </p>
           )}
+          {!readFailed && papersNote && <p className="mb-2 text-sm text-slate-500">{papersNote}</p>}
 
           {readFailed ? (
             <p className="py-4 text-center text-sm text-amber-800" role="alert">
