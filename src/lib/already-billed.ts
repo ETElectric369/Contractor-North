@@ -18,7 +18,8 @@
  *                     labor for hours)
  *   precheckHours     for hours: only the line's own person, only up to the day the invoice was
  *                     WRITTEN (created), never the day it was sent: INV-00023 went out 76 days after it
- *                     was written, and the sent date would have ticked 76 days of unbilled work
+ *                     was written, and the sent date would have ticked 76 days of unbilled work; and
+ *                     only as many as the line has room for beside the hours it already holds
  *   askUsedAll        Purple Sage's question, only when Shop Stock is on and the line is less than the
  *                     receipt's cost ($110 against $186.93): "Did J-010 Use All Of It?"
  */
@@ -42,6 +43,9 @@ export type AbLine = {
   edited: boolean;
   line_kind: string | null;
   sort_order?: number | null;
+  /** For hours: the hours of the job's shifts this line already holds (its claim, by import or by
+   *  hand). A hand-bumped line is usually most of the way covered: only the rest is ticked. */
+  heldHours?: number | null;
 };
 
 export type AbInvoice = {
@@ -185,21 +189,43 @@ export function personOfLine(line: Pick<AbLine, "import_key" | "description">, e
  * invoice was written (its created_at, in the company's time zone). Never the sent date: a bill sent
  * weeks after it was written would tick every hour worked in between, and they would be claimed and
  * never billed. Everything else is listed, unticked, for the office to decide.
+ *
+ * ONLY WHAT THE LINE HAS ROOM FOR (INV-069's "Labor — Erik": 30.5 h on the line, 27.5 h of shifts
+ * already held, so 3 h uncovered). A line billed in hours ticks shifts oldest first only while they
+ * fit in its hours less what it already holds, and nothing when it is already covered: ticking more
+ * would claim hours no line charges for, and they would never be billed. A line not billed in hours
+ * that already holds some ticks nothing (how much it covers can't be told). `covered`: nothing was
+ * ticked because the line already holds all it can.
  */
 export function precheckHours(
   entries: readonly AbEntry[],
-  line: Pick<AbLine, "import_key" | "description">,
+  line: Pick<AbLine, "import_key" | "description"> & Partial<Pick<AbLine, "unit" | "quantity" | "heldHours">>,
   writtenAt: string,
   tz: string,
-): { person: string | null; checked: string[] } {
+): { person: string | null; checked: string[]; covered: boolean } {
   const person = personOfLine(line, entries);
-  if (!person) return { person: null, checked: [] };
+  if (!person) return { person: null, checked: [], covered: false };
   const cutoff = todayStrInTz(tz, new Date(writtenAt));
   const picked = entries.filter((e) => e.person === person && todayStrInTz(tz, new Date(e.clockIn)) <= cutoff);
-  // A split shift goes whole: a piece ticked ticks the rest of it.
-  const fams = new Set(picked.map(familyOf));
-  const checked = entries.filter((e) => fams.has(familyOf(e))).map((e) => e.id);
-  return { person, checked };
+  // A split shift goes whole: a piece ticked ticks the rest of it. Oldest shift first.
+  const fams = [...new Set([...picked].sort((a, b) => a.clockIn.localeCompare(b.clockIn)).map(familyOf))];
+  const ofFam = (f: string) => entries.filter((e) => familyOf(e) === f);
+  const held = Math.max(0, Number(line.heldHours) || 0);
+  const lineH = line.unit === undefined ? null : lineHours({ unit: line.unit, quantity: Number(line.quantity) || 0 });
+  if (lineH == null) {
+    if (held > 0) return { person, checked: [], covered: fams.length > 0 };
+    return { person, checked: fams.flatMap((f) => ofFam(f).map((e) => e.id)), covered: false };
+  }
+  let room = cents(Math.max(0, lineH - held));
+  const checked: string[] = [];
+  for (const f of fams) {
+    const pieces = ofFam(f);
+    const h = hoursOf(pieces, pieces.map((e) => e.id));
+    if (h > room + 0.005) break;
+    checked.push(...pieces.map((e) => e.id));
+    room = cents(room - h);
+  }
+  return { person, checked, covered: fams.length > 0 && checked.length === 0 && cents(lineH - held) <= 0 };
 }
 
 /** The hours a line bills, when it is billed in hours ("13 h"), else null. */
@@ -213,11 +239,13 @@ export function hoursOf(entries: readonly AbEntry[], ids: Iterable<string>): num
   return cents(entries.filter((e) => set.has(e.id)).reduce((s, e) => s + (Number(e.hours) || 0), 0));
 }
 
-/** "Line: 13 h · Checked: 12.5 h" (the line's own hours only when it is billed in hours). */
-export function hoursCompareWords(line: Pick<AbLine, "unit" | "quantity">, checkedHours: number): string {
+/** "Line: 30.5 h · Already Holds: 27.5 h · Checked: 3 h" (the line's own hours only when it is billed
+ *  in hours; what it already holds only when it holds some). */
+export function hoursCompareWords(line: Pick<AbLine, "unit" | "quantity"> & Partial<Pick<AbLine, "heldHours">>, checkedHours: number): string {
   const h = lineHours(line);
+  const held = Math.max(0, Number(line.heldHours) || 0);
   const fmt = (n: number) => `${cents(n)} h`;
-  return h == null ? `Checked: ${fmt(checkedHours)}` : `Line: ${fmt(h)} · Checked: ${fmt(checkedHours)}`;
+  return [h == null ? null : `Line: ${fmt(h)}`, held > 0 ? `Already Holds: ${fmt(held)}` : null, `Checked: ${fmt(checkedHours)}`].filter(Boolean).join(" · ");
 }
 
 /** The sentence after a mark lands: what, where, and that nothing on the bill moved. */

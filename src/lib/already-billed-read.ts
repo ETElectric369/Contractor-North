@@ -126,7 +126,12 @@ export type AlreadyBilledSheetData = {
   entries: AbEntry[];
 };
 
-const LINE_COLUMNS = "id, description, quantity, unit, unit_price, line_total, import_source, import_key, edited, line_kind, sort_order, hand_claims";
+/** A closed shift's hours less lunch, to the hundredth (never below zero). */
+function entryHours(e: { clock_in: string; clock_out: string; lunch_minutes?: number | null }): number {
+  return Math.max(0, Math.round(((new Date(e.clock_out).getTime() - new Date(e.clock_in).getTime()) / 3_600_000 - Math.max(0, Number(e.lunch_minutes) || 0) / 60) * 100) / 100);
+}
+
+const LINE_COLUMNS = "id, description, quantity, unit, unit_price, line_total, import_source, import_key, edited, line_kind, sort_order, hand_claims, source_ids";
 
 type Loaded = { ok: true; data: AlreadyBilledSheetData } | { ok: false; error: string; needsUpdate?: boolean };
 
@@ -172,6 +177,8 @@ export async function loadAlreadyBilledSheet(supabase: Db, orgId: string, jobId:
     if (isMissingHandClaims(invRead.error)) return { ok: false, error: NEEDS_UPDATE, needsUpdate: true };
     return { ok: false, error: "Couldn't read this job's bills just now. Nothing was changed - try again in a moment." };
   }
+  // What each line already claims, for the hours it already holds (hours only, below).
+  const claimsOf = new Map<string, string[]>();
   const all: AbInvoice[] = ((invRead.data ?? []) as any[]).map((r) => ({
     id: String(r.id),
     invoice_number: r.invoice_number ?? null,
@@ -179,8 +186,9 @@ export async function loadAlreadyBilledSheet(supabase: Db, orgId: string, jobId:
     invoice_kind: r.invoice_kind ?? null,
     job_id: r.job_id ?? null,
     created_at: String(r.created_at ?? ""),
-    lines: ((r.invoice_items ?? []) as any[]).map(
-      (l): AbLine => ({
+    lines: ((r.invoice_items ?? []) as any[]).map((l): AbLine => {
+      claimsOf.set(String(l.id), ((l.source_ids ?? []) as unknown[]).map(String));
+      return {
         id: String(l.id),
         description: String(l.description ?? ""),
         quantity: Number(l.quantity) || 0,
@@ -192,8 +200,8 @@ export async function loadAlreadyBilledSheet(supabase: Db, orgId: string, jobId:
         edited: l.edited === true,
         line_kind: l.line_kind ?? null,
         sort_order: l.sort_order ?? null,
-      }),
-    ),
+      };
+    }),
   }));
 
   // What is being marked.
@@ -243,6 +251,15 @@ export async function loadAlreadyBilledSheet(supabase: Db, orgId: string, jobId:
     // HOURS: the job's closed shifts nobody has billed, the ones "Also not billed yet: X h" counts.
     try {
       const labor = await fetchJobLaborRows(supabase, jobId);
+      // THE HOURS EACH LINE ALREADY HOLDS: every closed shift on the job, claimed or not, by id. The
+      // tick to start fills only what a line has room for beside them (precheckHours).
+      const shiftHours = new Map<string, number>();
+      for (const e of labor.jobEntries as any[]) if (e?.id && e?.clock_out) shiftHours.set(String(e.id), entryHours(e));
+      for (const inv of all)
+        for (const l of inv.lines) {
+          const held = (claimsOf.get(l.id) ?? []).reduce((s, id) => s + (shiftHours.get(id) ?? 0), 0);
+          l.heldHours = Math.round(held * 100) / 100;
+        }
       const claims = await claimedSourcesOnJob(supabase as SupabaseClient, jobId, null, laborRowIds(labor));
       const free = withoutClaimedLabor(labor.jobEntries, new Set(claims.owner.keys()));
       entries = free.jobEntries
@@ -254,7 +271,7 @@ export async function loadAlreadyBilledSheet(supabase: Db, orgId: string, jobId:
             name: String(e.profiles?.full_name ?? "Crew"),
             clockIn: String(e.clock_in),
             family: String(e.split_from ?? e.id),
-            hours: Math.max(0, Math.round(((new Date(e.clock_out).getTime() - new Date(e.clock_in).getTime()) / 3_600_000 - (Math.max(0, Number(e.lunch_minutes) || 0)) / 60) * 100) / 100),
+            hours: entryHours(e),
           }),
         )
         .filter((e) => e.hours > 0)

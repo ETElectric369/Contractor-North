@@ -194,6 +194,30 @@ describe("the hours a line charged: its person, up to the day the bill was WRITT
   it("says the line's hours beside what is ticked: Line: 13 h · Checked: 12.5 h", () => {
     expect(hoursCompareWords({ unit: "hr", quantity: 13 }, 12.5)).toBe("Line: 13 h · Checked: 12.5 h");
     expect(hoursCompareWords({ unit: "ea", quantity: 1 }, 12.5)).toBe("Checked: 12.5 h");
+    // What the line already holds, when it holds some (INV-069's hand-bumped "Labor — Erik").
+    expect(hoursCompareWords({ unit: "hr", quantity: 30.5, heldHours: 27.5 }, 3)).toBe("Line: 30.5 h · Already Holds: 27.5 h · Checked: 3 h");
+  });
+
+  it("INV-069: a line of 30.5 h already holding 27.5 h ticks only the 3 h it has room for, oldest first", () => {
+    const erik = [
+      e("x1", "p-erik", "Erik Taylor", "2026-09-10T15:00:00Z", 3),
+      e("x2", "p-erik", "Erik Taylor", "2026-09-11T15:00:00Z", 2),
+      e("x3", "p-erik", "Erik Taylor", "2026-09-12T15:00:00Z", 4),
+    ];
+    const labor = { import_key: "labor:p-erik", description: "Labor — Erik", unit: "hr", quantity: 30.5, heldHours: 27.5 };
+    const r = precheckHours(erik, labor, "2026-09-18T20:00:00Z", TZ);
+    expect(r.checked).toEqual(["x1"]);
+    expect(r.covered).toBe(false);
+    // Already covered: nothing is ticked, and it says why.
+    const full = precheckHours(erik, { ...labor, heldHours: 30.5 }, "2026-09-18T20:00:00Z", TZ);
+    expect(full.checked).toEqual([]);
+    expect(full.covered).toBe(true);
+    // Holding nothing, the line's own hours are still the ceiling.
+    expect(precheckHours(erik, { ...labor, quantity: 5, heldHours: 0 }, "2026-09-18T20:00:00Z", TZ).checked).toEqual(["x1", "x2"]);
+    // A line not billed in hours that already holds some: how much it covers can't be told, so nothing.
+    const lump = precheckHours(erik, { import_key: "labor:p-erik", description: "Labor — Erik", unit: "ea", quantity: 1, heldHours: 6 }, "2026-09-18T20:00:00Z", TZ);
+    expect(lump.checked).toEqual([]);
+    expect(lump.covered).toBe(true);
   });
 });
 

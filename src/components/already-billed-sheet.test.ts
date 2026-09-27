@@ -139,6 +139,14 @@ describe("the sheet, hours", () => {
     expect(Array.from(html.matchAll(/<input type="checkbox"[^>]*>/g))).toHaveLength(3);
   });
 
+  it("a line that already holds most of its hours says so, and ticks only what it has room for", () => {
+    const bumped = { ...INV00023, lines: [{ ...INV00023.lines[1], heldHours: 8 }] };
+    const html = render({ state: "ok", data: { ...hoursData(), invoices: [{ invoice: bumped, preselect: "brian" }] } }, { lineId: "brian", checked: ["b2"] });
+    const t = text(html);
+    expect(t).toContain("Line: 13 h · Already Holds: 8 h · Checked: 4.5 h");
+    expect(t).toContain("and only as many as fit beside the 8 h the line already holds.");
+  });
+
   it("names whose time it is in the sentence", () => {
     expect(hoursWhat(entries, ["b1", "b2"])).toBe("12.5 h of Brian Taylor's time");
   });

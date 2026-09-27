@@ -28,10 +28,12 @@ import {
   askUsedAll,
   hoursCompareWords,
   hoursOf,
+  lineHours,
   lineLabel,
   precheckHours,
   tickTogether,
   type AbEntry,
+  type AbLine,
   type AlreadyBilledKind,
 } from "@/lib/already-billed";
 import type { AlreadyBilledSheetData } from "@/lib/already-billed-read";
@@ -52,6 +54,25 @@ export function hoursWhat(entries: readonly AbEntry[], ids: Iterable<string>): s
   const names = [...new Set(picked.map((e) => e.name))];
   const h = hoursOf(entries, set);
   return names.length === 1 ? `${h} h of ${names[0]}'s time` : `${h} h of time`;
+}
+
+/**
+ * WHY THESE HOURS ARE TICKED TO START (precheckHours): the line's person up to the day the bill was
+ * written, only as many as fit beside what the line already holds, or why nothing is.
+ */
+export function precheckWhy(
+  data: Pick<AlreadyBilledSheetData, "entries" | "tz">,
+  chosen: { invoice: { invoice_number: string | null; created_at: string }; line: AbLine },
+): string {
+  const pre = precheckHours(data.entries, chosen.line, chosen.invoice.created_at, data.tz);
+  const held = Math.max(0, Number(chosen.line.heldHours) || 0);
+  if (!pre.person) return "Nothing is ticked to start: the line doesn't name one person. Tick the hours it charged for.";
+  if (pre.covered)
+    return lineHours(chosen.line) == null
+      ? `Nothing is ticked to start: the line already holds ${held} h of shifts and isn't billed in hours, so what else it charged for is yours to tick.`
+      : `Nothing is ticked to start: the line already holds ${held} h of shifts, all the hours it charges for. Tick any more it charged for.`;
+  const base = `Ticked to start: that person's hours up to the day ${chosen.invoice.invoice_number ?? "the bill"} was written (${formatDateShort(chosen.invoice.created_at, data.tz)}), not the day it was sent`;
+  return held > 0 ? `${base}, and only as many as fit beside the ${held} h the line already holds.` : `${base}.`;
 }
 
 /** The Already Billed door: opens the sheet for one cost. */
@@ -362,11 +383,7 @@ export function AlreadyBilledSheet({
                   ))
                 )}
                 <p className="text-slate-600">{hoursCompareWords(chosen.line, hoursOf(data.entries, checked))}</p>
-                <p className="text-xs text-slate-500">
-                  {precheckHours(data.entries, chosen.line, chosen.invoice.created_at, data.tz).person
-                    ? `Ticked to start: that person's hours up to the day ${chosen.invoice.invoice_number ?? "the bill"} was written (${formatDateShort(chosen.invoice.created_at, data.tz)}), not the day it was sent.`
-                    : "Nothing is ticked to start: the line doesn't name one person. Tick the hours it charged for."}
-                </p>
+                <p className="text-xs text-slate-500">{precheckWhy(data, chosen)}</p>
               </div>
             )}
             {chosen && <p className="text-xs text-slate-500">Nothing on {num} changes: its words, total and status stay as they are.</p>}

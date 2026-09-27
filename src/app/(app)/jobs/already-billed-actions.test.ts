@@ -209,6 +209,33 @@ describe("after it", () => {
     expect(res.data.target.words).toBe("Consolidated Electrical Distributors 8802-1101475");
   });
 
+  it("hours: each line carries the hours of the job's shifts it already holds, and only open shifts are listed", async () => {
+    const withLabor = [
+      {
+        ...INVOICES[0],
+        invoice_items: [
+          ...INVOICES[0].invoice_items,
+          line("li-erik", "Labor — Erik", 950, { quantity: 10, unit: "hr", unit_price: 95, import_source: "labor", import_key: "labor:p-erik", edited: true, source_ids: ["t-held"] }),
+        ],
+      },
+    ];
+    const shift = (id: string, from: string, to: string) => ({ id, clock_in: from, clock_out: to, lunch_minutes: 0, job_code: null, split_from: null, profiles: { id: "p-erik", full_name: "Erik Taylor" } });
+    const base = sheetRoute();
+    state.client = fake((table, cols) => {
+      if (table === "invoices") return { data: withLabor };
+      if (table === "time_entries") return { data: [shift("t-held", "2026-06-16T15:00:00Z", "2026-06-16T23:00:00Z"), shift("t-free", "2026-06-17T15:00:00Z", "2026-06-17T19:00:00Z")] };
+      if (table === "job_codes" || table === "profile_pay" || table === "invoice_items") return { data: [] };
+      return base(table, cols);
+    }, calls);
+    const res = await alreadyBilledSheet(J010, { kind: "time", ids: [] });
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    const erik = res.data.invoices.flatMap((i) => i.invoice.lines).find((l) => l.id === "li-erik");
+    expect(erik?.heldHours).toBe(8);
+    expect(res.data.entries.map((e) => e.id)).toEqual(["t-free"]);
+    expect(res.data.entries[0].family).toBe("t-free");
+  });
+
   it("a fixed-price job whose live estimate is the contract, or a job on a schedule, is refused in words", async () => {
     state.client = fake(sheetRoute({ quotes: [{ id: "q1", status: "accepted" }] }), calls);
     const res = await alreadyBilledSheet(J010, { kind: "bill", ids: ["bill-ps"] });
