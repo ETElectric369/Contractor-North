@@ -343,6 +343,40 @@ describe("already on file is per supplier account, not per number (Wave 0, 0354)
     expect(res.unchanged.map((d) => d.invoiceNumber)).toEqual(["8802-1101363"]);
   });
 
+  it("a paper that matches no account finds its one row on the account a person picked: no second copy", async () => {
+    // No account on file carries TR-34426, so the paper can't say whose it is; an open list's Apply
+    // had already filed its row onto Main Street Supply.
+    state.client = fakeSupabase(
+      {
+        "supplier_accounts.select": [{ data: [ACCOUNTS[1]], error: null }],
+        "supplier_invoices.select": [{ data: [row("acct-other")], error: null }],
+        "supplier_invoice_lines.select": [{ data: [{ supplier_invoice_id: "si-acct-other" }], error: null }],
+      },
+      calls,
+    );
+    const res = await importCedInvoices({ text: TIMBER_CREEK });
+    expect(res.ok).toBe(true);
+    expect(did("supplier_invoices", "insert")).toEqual([]);
+    expect(res.unchanged.map((d) => d.invoiceNumber)).toEqual(["8802-1101363"]);
+  });
+
+  it("a paper that matches no account, with two suppliers' rows under its number: neither is assumed", async () => {
+    state.client = fakeSupabase(
+      {
+        "supplier_accounts.select": [{ data: [], error: null }],
+        "supplier_invoices.select": [{ data: [row("acct-other"), row("acct-ced")], error: null }],
+        "supplier_invoice_lines.select": [{ data: [], error: null }],
+        "supplier_invoices.insert": [{ data: [{ id: "si-new", invoice_number: "8802-1101363" }], error: null }],
+        "supplier_invoice_lines.insert": [{ data: Array.from({ length: 10 }, (_, i) => ({ id: `l${i}` })), error: null }],
+      },
+      calls,
+    );
+    const res = await importCedInvoices({ text: TIMBER_CREEK });
+    expect(res.ok).toBe(true);
+    // Neither supplier's row is touched.
+    expect(did("supplier_invoices", "update")).toEqual([]);
+  });
+
   it("a row on no account yet is adopted onto the paper's account, as before", async () => {
     state.client = fakeSupabase(
       {

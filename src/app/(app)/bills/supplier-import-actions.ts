@@ -390,12 +390,24 @@ export async function importCedInvoices(input: SupplierImportInput): Promise<Sup
   // on file" by number alone skipped the second supplier's paper, or refused it as "two different
   // totals". A paper is the row on ITS account; a row on no account yet is adopted (the account is
   // written onto it below, as before). Never another supplier's row.
+  //
+  // A PAPER THAT MATCHES NO ACCOUNT (the account has no number or branch on file, or the paper prints
+  // another) can't say whose it is, while its row may already sit on an account a person picked (an
+  // open list's Apply). Then the ONE row with that number is it, as before 0354. Two or more: none is
+  // assumed.
   const existing = new Map<string, ExistingRow>();
+  const byNumber = new Map<string, ExistingRow[]>();
   const fileKey = (accountId: string | null | undefined, number: string) => `${accountId ?? ""}|${number}`;
-  for (const row of (existingRows ?? []) as ExistingRow[]) existing.set(fileKey(row.supplier_account_id, String(row.invoice_number)), row);
+  for (const row of (existingRows ?? []) as ExistingRow[]) {
+    existing.set(fileKey(row.supplier_account_id, String(row.invoice_number)), row);
+    byNumber.set(String(row.invoice_number), [...(byNumber.get(String(row.invoice_number)) ?? []), row]);
+  }
   const onFile = (invoice: CedInvoice): ExistingRow | undefined => {
     const accountId = accountFor(invoice)?.id ?? null;
-    return existing.get(fileKey(accountId, invoice.invoiceNumber)) ?? (accountId ? existing.get(fileKey(null, invoice.invoiceNumber)) : undefined);
+    const n = invoice.invoiceNumber;
+    if (accountId) return existing.get(fileKey(accountId, n)) ?? existing.get(fileKey(null, n));
+    const same = byNumber.get(n) ?? [];
+    return same.length === 1 ? same[0] : undefined;
   };
 
   // ── THE PDFs THEMSELVES, ONCE PER FILE ─────────────────────────────────────────────────────
