@@ -229,9 +229,9 @@ export function defineShelfUpkeepSuite(connect: () => Promise<SqlClient>) {
       // ...and while the return is live it can't be moved onto one, taken off the shelf, or deleted.
       await as(staffId);
       const toJob = await refusal(() => c.query("update public.bills set on_shelf = false, job_id = $2 where id = $1", [credit, jobA]));
-      expect(toJob?.message).toMatch(/tied to pieces returned from the shelf/);
+      expect(toJob?.message).toMatch(/tied to pieces returned from (?:the shelf|stock)/);
       const gone = await refusal(() => c.query("delete from public.bills where id = $1", [credit]));
-      expect(gone?.message).toMatch(/tied to pieces returned from the shelf/);
+      expect(gone?.message).toMatch(/tied to pieces returned from (?:the shelf|stock)/);
       // Undo the return: the credit is free again. The return filed it, so the app takes it back
       // off the shelf (untieShelfCredit's exact write), and then it can go on a job.
       await c.query("update public.stock_moves set undone_at = now() where id = $1", [r.id]);

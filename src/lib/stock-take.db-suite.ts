@@ -325,7 +325,7 @@ export function defineStockTakeSuite(connect: () => Promise<SqlClient>, opts: St
       // A short: taken past the shelf, $0 until settled.
       const s = await draw(staffId, it1, jobB, 300);
       expect(num(s.short)).toBe(50);
-      expect((await refusal(() => claim(inv, [s.short_id!])))?.message).toContain("Pieces taken past the shelf aren't billed");
+      expect((await refusal(() => claim(inv, [s.short_id!])))?.message).toMatch(/Pieces taken past (?:the shelf|stock) aren't billed/);
       // A count is never a customer's.
       await as(staffId);
       await c.query("select public.stock_undo($1)", [s.draw_group]);
@@ -360,7 +360,7 @@ export function defineStockTakeSuite(connect: () => Promise<SqlClient>, opts: St
       expect((await one("select public.stock_undo($1) as r", [gone.draw_group])).r.undone).toBe(1);
       await asServer();
       const back = await refusal(() => c.query("update public.invoices set status = 'draft' where id = $1", [invGone]));
-      expect(back?.message).toContain("went back on the shelf, so it can't come back from void");
+      expect(back?.message).toMatch(/went back (?:on the shelf|into stock), so it can't come back from void/);
       // Nothing undone behind the other one: it comes back from void as it always could.
       expect(await refusal(() => c.query("update public.invoices set status = 'draft' where id = $1", [invKept]))).toBeNull();
     });
@@ -404,7 +404,7 @@ export function defineStockTakeSuite(connect: () => Promise<SqlClient>, opts: St
       expect((await takes(techId, jobB))[0]).toMatchObject({ billed_on: null, part_billed: false });
       const inv = await invoice(jobB, `TEST-TAKE-INV-${++seq}`);
       expect(await refusal(() => claim(inv, [...moveIds(r), ...settledIds]))).toBeNull();
-      expect((await refusal(() => claim(inv, [r.short_id!])))?.message).toContain("Pieces taken past the shelf aren't billed");
+      expect((await refusal(() => claim(inv, [r.short_id!])))?.message).toMatch(/Pieces taken past (?:the shelf|stock) aren't billed/);
       expect((await takes(techId, jobB))[0]).toMatchObject({ billed_on: expect.any(String), part_billed: false });
     });
   });

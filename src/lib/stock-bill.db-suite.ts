@@ -296,7 +296,7 @@ export function defineStockBillSuite(connect: () => Promise<SqlClient>, opts: St
     expect((await refusal(claimLine(invA2, moveA)))?.message).toBe("materials already billed on TEST-SB-INV-A");
     expect((await refusal(claimLine(invA, moveA)))?.message).toContain("already on another line of this invoice");
     expect((await refusal(claimLine(invA2, moveB)))?.message).toContain("were taken for TEST-SB-B");
-    expect((await refusal(claimLine(invB, [shortB.short_id])))?.message).toContain("Pieces taken past the shelf aren't billed");
+    expect((await refusal(claimLine(invB, [shortB.short_id])))?.message).toMatch(/Pieces taken past (?:the shelf|stock) aren't billed/);
     expect((await refusal(claimLine(invB, undone.moves.map((m: any) => m.move_id))))?.message).toContain("That take was undone");
     // A billed take can't be undone: the refusal names the invoice to take it off first.
     expect((await refusal(() => c.query("select public.stock_undo($1)", [takeB.draw_group])))?.message).toContain(
@@ -356,9 +356,7 @@ export function defineStockBillSuite(connect: () => Promise<SqlClient>, opts: St
     await as(staffId);
     await c.query("update public.invoices set status = 'void' where id = $1", [invB]);
     expect(num((await one("select public.stock_undo($1) as r", [takeB.draw_group])).r.undone)).toBe(1);
-    expect((await refusal(() => c.query("update public.invoices set status = 'draft' where id = $1", [invB])))?.message).toContain(
-      "went back on the shelf, so it can't come back from void",
-    );
+    expect((await refusal(() => c.query("update public.invoices set status = 'draft' where id = $1", [invB])))?.message).toMatch(/went back (?:on the shelf|into stock), so it can't come back from void/);
     await c.query("update public.invoices set status = 'void' where id = $1", [invA]);
     await claimLine(invA2, moveA)(); // released: A2 may bill A's 60 ft now
     expect((await refusal(() => c.query("update public.invoices set status = 'draft' where id = $1", [invA])))?.message).toContain(

@@ -521,9 +521,7 @@ d("Shop Stock Phase 3 cross-check: a crew take, its bell, its bill, its Undo, it
     expect((await net()).fromShelf).toBe(0);
     // The way back from void is shut: its pieces are on the shelf again.
     await as(staffId);
-    expect(await refusal(() => c.query("update public.invoices set status = 'draft' where id = $1", [inv]))).toContain(
-      "went back on the shelf, so it can't come back from void",
-    );
+    expect(await refusal(() => c.query("update public.invoices set status = 'draft' where id = $1", [inv]))).toMatch(/went back (?:on the shelf|into stock), so it can't come back from void/);
     await asServer();
 
     // ── the shelf still adds up ──
