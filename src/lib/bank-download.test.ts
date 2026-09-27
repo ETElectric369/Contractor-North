@@ -532,6 +532,35 @@ describe("matching what is already on the books (exact cents, each row once)", (
     expect(plan.groups[0].guess).toBe("draw");
   });
 
+  it("a bill is matched by the line that names its supplier, never by a transfer or another merchant's line", () => {
+    const dl = readBankTable(
+      parseCSV(`Date,Description,Amount
+09/10/2026,Transfer to DDA *****5555,-500.00
+09/12/2026,1111-ACMEHARDW S A ANYTOWN,-500.00
+09/11/2026,1111-LOWES #1234 ANYTOWN,-80.00
+09/11/2026,1111-ACME DINER,-80.00
+09/12/2026,CHECK 1050,-210.00
+`),
+      "x.csv",
+      hash,
+    )!;
+    const books = ORG_BOOKS({
+      bills: [
+        { id: "b-acme", cents: 50000, day: "2026-09-09", supplier: "Acmehardware Supply", jobId: "job-1", category: "Receipt", onAccount: false },
+        { id: "b-lowes", cents: 8000, day: "2026-09-11", supplier: "Lowe's", jobId: null, category: "Tools & Supplies", onAccount: false },
+        { id: "b-check", cents: 21000, day: "2026-09-11", supplier: "Anytown Lumber", jobId: "job-2", category: "Bill", onAccount: false },
+      ],
+    });
+    const plan = planBankDownload(dl, books);
+    const by = (w: string) => plan.dispositions.get(dl.lines.find((l) => l.description.includes(w))!.key);
+    expect(by("Transfer")).toMatchObject({ how: "need" });
+    expect(by("ACMEHARDW")).toMatchObject({ how: "match", table: "bills", ids: ["b-acme"] });
+    expect(by("LOWES")).toMatchObject({ how: "match", ids: ["b-lowes"] });
+    expect(by("ACME DINER")).toMatchObject({ how: "need" });
+    // A check names nobody: the amount is all there is, and it is that bill.
+    expect(by("CHECK 1050")).toMatchObject({ how: "match", ids: ["b-check"] });
+  });
+
   it("one bill is matched once, even when two lines could take it", () => {
     const dl = download();
     const books = ORG_BOOKS({ bills: [{ id: "b-shell", cents: 10000, day: "2026-09-12", supplier: "Shell", jobId: null, category: "Gas & Truck", onAccount: false }] });

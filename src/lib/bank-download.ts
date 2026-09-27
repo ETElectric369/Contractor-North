@@ -22,8 +22,11 @@ import { findHeaderRow, fingerprintOf, headerKey, readDate, readHeaderRow, readH
  *        · a payment to an on-account supplier whose name, spelling or number the line carries is
  *          that supplier's payment;
  *        · an ATM withdrawal is a petty-cash top-up of the same amount within 3 days;
- *        · anything else is a bill for the same amount within 3 days (not one a supplier's account
- *          pays: those are paid through the account).
+ *        · anything else is a bill for the same amount within 3 days whose supplier the line names
+ *          (a word they share, or the name's start), never one a supplier's account pays (those are
+ *          paid through the account), and never for a transfer between the company's own accounts.
+ *          Only a line that names nobody (a bare check) takes a bill by amount alone, in the loose
+ *          pass; a line that names someone else asks.
  *   3. A RULE THE COMPANY MADE (bank_rules) → its choice. Written only by a person's tap.
  *   4. OTHERWISE IT NEEDS YOU: one row per merchant, the app's guess first, never picked for you.
  *
@@ -795,6 +798,15 @@ export function lineNamesAccount(description: string, a: BooksAccount): boolean 
   return names.some((x) => d.includes(x.slice(0, 12)));
 }
 
+/** Does the line name the bill's supplier: a word of 3+ letters they share ("HOME HARDWARE #55" and
+ *  "Home Hardware"), or the first 5 letters of the supplier's name ("LOWES #1234" and "Lowe's")? */
+export function lineNamesSupplier(description: string, supplier: string): boolean {
+  const words = new Set(merchantWords(description).filter((w) => w.length >= 3));
+  if (merchantWords(supplier).some((w) => w.length >= 3 && words.has(w))) return true;
+  const start = compact(supplier).slice(0, 5);
+  return start.length >= 4 && compact(description).includes(start);
+}
+
 const FUEL_RE = /\b(fuel|gas|gasoline|diesel|petrol|shell|chevron|texaco|exxon|mobil|arco|valero|sinclair|conoco|phillips|marathon|citgo|sunoco|maverik|pilot|loves|flying j|circle k|speedway|costco gas|gas station|fuel stop)\b/i;
 const TRUCK_RE = /\b(auto parts|autozone|o ?reilly|napa|jiffy|lube|oil change|tire|tires|car wash|smog|dmv|registration|towing|mechanic|auto repair|truck)\b/i;
 const INSURANCE_RE = /\b(insur\w*|ins prem|premium|liability|bond|bonding|licen[cs]e\w*|cslb)\b/i;
@@ -1008,9 +1020,22 @@ export function planBankDownload(dl: BankDownload, books: BankBooks): BankPlan {
       }
       return null;
     }
-    // Money out is matched in the sure pass only.
-    if (pass === "loose") return null;
     const amount = -line.cents;
+    // A BILL FOR THE SAME MONEY within 3 days, not one a supplier account pays. Sure: the line names
+    // the bill's supplier. Loose: the line names nobody, so the amount is all there is to go on. A
+    // transfer between the company's own accounts is never a bill.
+    const billMatch = (): Disposition | null => {
+      if (TRANSFER_RE.test(line.description) && !PROCESSOR_RE.test(line.description)) return null;
+      const namesNobody = isBareCheck(line) || !merchantWords(line.description).some((w) => w.length >= 3);
+      if (pass === "loose" && !namesNobody) return null;
+      const near = books.bills.filter((b) => !used.has(b.id) && !b.onAccount && b.cents === amount && b.day && Math.abs(dayDiff(line.postedOn, b.day)) <= 3);
+      const hits = pass === "sure" ? near.filter((b) => lineNamesSupplier(line.description, b.supplier)) : near;
+      if (!hits.length) return null;
+      hits.sort(byDistance(line.postedOn));
+      const b = hits[0];
+      return { how: "match", table: "bills", ids: [b.id], said: `${b.supplier} already on the books` };
+    };
+    if (pass === "loose") return billMatch();
     // A CHECK BY ITS NUMBER: a crew payment or a supplier payment that wrote it down.
     if (line.check) {
       const crew = books.payPayments.find((p) => !used.has(p.id) && digitsOnly(p.reference).replace(/^0+/, "") === line.check && p.cents === amount);
@@ -1047,16 +1072,7 @@ export function planBankDownload(dl: BankDownload, books: BankBooks): BankPlan {
         .sort(byDistance(line.postedOn));
       if (hits.length) return { how: "match", table: "petty_cash", ids: [hits[0].id], said: "Petty cash top-up already recorded" };
     }
-    // A BILL FOR THE SAME MONEY within 3 days, not one a supplier account pays.
-    const bills = books.bills.filter((b) => !used.has(b.id) && !b.onAccount && b.cents === amount && b.day && Math.abs(dayDiff(line.postedOn, b.day)) <= 3);
-    if (bills.length) {
-      const words = new Set(merchantWords(line.description));
-      const overlap = (b: BooksBill) => merchantWords(b.supplier).filter((w) => w.length >= 3 && words.has(w)).length;
-      bills.sort((a, b) => overlap(b) - overlap(a) || byDistance(line.postedOn)(a, b));
-      const b = bills[0];
-      return { how: "match", table: "bills", ids: [b.id], said: `${b.supplier} already on the books` };
-    }
-    return null;
+    return billMatch();
   };
 
   // ALREADY, then MATCHES in two passes over every line, then rules and questions.
