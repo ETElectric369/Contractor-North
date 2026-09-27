@@ -1,4 +1,6 @@
 import { parseInspectionSchema, type InspectionField } from "./schema";
+import { normalizeTradeKey, type TradeKey } from "@/lib/features";
+import { tradeKeyFromWords } from "@/lib/org-trade";
 
 /**
  * THE SHEET A NEW COMPANY STARTS WITH.
@@ -73,7 +75,7 @@ const STARTERS: Record<StarterTrade, Starter> = {
     ],
   },
 
-  // ── DECK / GENERAL CONTRACTING ────────────────────────────────────────────────
+  // ── DECK ──────────────────────────────────────────────────────────────────────
   deck: {
     name: "Site inspection",
     fields: [
@@ -139,17 +141,34 @@ const STARTERS: Record<StarterTrade, Starter> = {
 };
 
 /**
- * Map a free-text trade label onto a starter. Substring matching on purpose: the label comes from
- * a person saying what they do ("electrical contractor", "I build decks", "general contractor"),
- * not from a dropdown. Unrecognised → generic, never an empty sheet.
+ * WHICH STARTER A TRADE GETS, BY ITS KEY (the sign-up dropdown, 0352). One row per trade, so a new
+ * trade can't silently fall through (the Record type insists). A trade gets its own starter only
+ * where one was written for it; everything else starts on the generic sheet and makes it its own.
+ * HVAC is NOT plumbing (it used to get the water-heater sheet), and a general contractor or a
+ * "Construction" company is NOT a deck builder (they used to get the deck sheet).
  */
-export function starterTradeFor(tradeLabel: string | null | undefined): StarterTrade {
-  const t = (tradeLabel ?? "").toLowerCase();
-  if (!t.trim()) return "generic";
-  if (/electric|sparky|low.?voltage|solar/.test(t)) return "electrical";
-  if (/deck|carpent|framing|general contract|\bgc\b|remodel|builder|construction/.test(t)) return "deck";
-  if (/plumb|pipe|hvac|mechanical|drain/.test(t)) return "plumbing";
-  return "generic";
+export const STARTER_FOR_TRADE: Record<TradeKey, StarterTrade> = {
+  electrical: "electrical",
+  deck: "deck",
+  plumbing: "plumbing",
+  hvac: "generic",
+  general: "generic",
+  roofing: "generic",
+  concrete: "generic",
+  tile: "generic",
+  painting: "generic",
+  landscaping: "generic",
+};
+
+/**
+ * The starter for a company: its trade KEY decides (pass lib/org-trade's key). Free text is the
+ * LAST RESORT, read only when no key is given (a company that picked "Other / Not Listed", then said
+ * its trade in setup), through the same reader as everything else (tradeKeyFromWords).
+ * Unrecognised → generic, never an empty sheet.
+ */
+export function starterTradeFor(key: string | null | undefined, words?: string | null): StarterTrade {
+  const k = normalizeTradeKey(key) || tradeKeyFromWords(words);
+  return k ? STARTER_FOR_TRADE[k] : "generic";
 }
 
 /** The starter sheet for a trade, already parsed + validated through the real schema parser. */

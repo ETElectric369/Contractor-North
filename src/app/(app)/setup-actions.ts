@@ -12,6 +12,7 @@ import { asRegister, clampHumor, toneDirective } from "@/lib/nort/tone";
 import { playbookForForm } from "@/lib/playbook/parse";
 import { getAnthropic, DEFAULT_MODEL } from "@/lib/anthropic";
 import { getOrgSettings } from "@/lib/org-settings";
+import { orgTrade } from "@/lib/org-trade";
 import { SETUP_PLAYBOOK } from "@/lib/onboarding/setup-playbook";
 import { aboutFromSetup, applyDraft, draftRequest, DRAFT_SYSTEM } from "@/lib/onboarding/draft-playbook";
 import { updateOrgSettings } from "./settings/actions";
@@ -227,7 +228,7 @@ export async function draftMyPlaybook(): Promise<DraftResult> {
   const { data: org } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
   const s = getOrgSettings((org as { settings?: unknown } | null)?.settings);
   const about = aboutFromSetup({
-    trade: s.trade_label,
+    trade: orgTrade(s).label,
     city: s.public_city,
     service_area: s.service_area,
     labor_rate: s.default_labor_rate,

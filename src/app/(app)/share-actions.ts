@@ -3,6 +3,7 @@
 import QRCode from "qrcode";
 import { createClient } from "@/lib/supabase/server";
 import { getOrgSettings, orgPublicBaseUrl } from "@/lib/org-settings";
+import { orgTrade } from "@/lib/org-trade";
 
 /**
  * The signed-in user's personal "request an estimate" share link + QR.
@@ -46,7 +47,7 @@ export async function getShareLink(): Promise<{
     url,
     qr,
     orgName: (org as { name?: string } | null)?.name ?? undefined,
-    tradeLabel: settings.trade_label || undefined,
+    tradeLabel: orgTrade(settings).label || undefined,
   };
 }
 

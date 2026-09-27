@@ -32,6 +32,7 @@ import { recordAiUsage, aiSpendExceeded, currentOrgId } from "@/lib/ai-cost";
 import { rateLimited } from "@/lib/rate-limit";
 import type Anthropic from "@anthropic-ai/sdk";
 import { getOrgSettings, accentHex, orgDocUrl } from "@/lib/org-settings";
+import { tradeWordsOr } from "@/lib/org-trade";
 import { rowPlace } from "@/lib/doc-place";
 import { companyFromOrg } from "@/components/doc-letterhead";
 import { mapEstimatorLine, type DraftLineItem, type BookRow, type LadderPrice } from "@/lib/estimate/line-map";
@@ -1418,7 +1419,7 @@ async function runEstimator(
   // a research shop (web-priced + trade calcs); the chat route has branched on it since
   // cn-v80. runEstimator never did.
   const catalogMode = orgS.estimating_mode === "catalog";
-  const trade = orgS.trade_label?.trim() || "contractor";
+  const trade = tradeWordsOr(orgS);
 
   const client = getAnthropic();
   const system: Anthropic.MessageCreateParams["system"] = [

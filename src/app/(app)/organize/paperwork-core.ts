@@ -4,6 +4,7 @@ import { reportError } from "@/lib/observe";
 import { dbError } from "@/lib/db-error";
 import { AUTO_FILE_BUCKETS, bucketOf, looksLikeSupplierFee } from "@/lib/business-cost-buckets";
 import { getOrgSettings } from "@/lib/org-settings";
+import { tradeWordsOr } from "@/lib/org-trade";
 import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 import { indexSupplierAliases, resolveSupplierAccount, type SupplierAliasIndex } from "@/lib/supplier-identity";
 import { openListFromReader } from "@/lib/supplier-open-list";
@@ -167,7 +168,7 @@ export async function tradeOf(supabase: any, orgId: string | null | undefined): 
   if (!orgId) return "contractor";
   try {
     const { data } = await supabase.from("organizations").select("settings").eq("id", orgId).maybeSingle();
-    return getOrgSettings((data as { settings?: unknown } | null)?.settings).trade_label?.trim() || "contractor";
+    return tradeWordsOr(getOrgSettings((data as { settings?: unknown } | null)?.settings));
   } catch {
     return "contractor";
   }

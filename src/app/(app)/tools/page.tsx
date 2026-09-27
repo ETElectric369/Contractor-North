@@ -1,6 +1,7 @@
 import { PageHeader } from "@/components/page-header";
 import { createClient } from "@/lib/supabase/server";
 import { getOrgSettings } from "@/lib/org-settings";
+import { orgTrade } from "@/lib/org-trade";
 import { ToolsView } from "./tools-view";
 
 export const dynamic = "force-dynamic";
@@ -10,7 +11,7 @@ export default async function ToolsPage() {
   // tools are electrical, so without this a deck builder's tools page is 40% somebody else's job.
   const supabase = await createClient();
   const { data: org } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
-  const trade = getOrgSettings((org as { settings?: unknown } | null)?.settings).trade_label;
+  const trade = orgTrade(getOrgSettings((org as { settings?: unknown } | null)?.settings)).key;
 
   return (
     <div className="mx-auto max-w-4xl">

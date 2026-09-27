@@ -183,6 +183,23 @@ describe("well-formed", () => {
     expect(sayOf(TOUR[0].say, STRANGER).toLowerCase()).toContain("tell me your name");
   });
 
+  it("A TRADE PICKED AT SIGN-UP IS NEVER ASKED AGAIN, and the starters are described as they are", () => {
+    // Sign-up keeps the trade key (0352); the layout hands its words in through lib/org-trade.
+    const trade = TOUR.find((s) => s.key === "trade")!;
+    const known = sayOf(trade.say, { ...STRANGER, trade: "plumber" });
+    expect(known).toContain("plumber");
+    expect(known.toLowerCase()).not.toContain("what trade are you in");
+    const cold = sayOf(trade.say, STRANGER).toLowerCase();
+    expect(cold).toContain("what trade are you in");
+    // There are three trade starters and a general set (STARTER_FOR_TRADE), not "four", and a
+    // "first trade word" doesn't pick anything when sign-up already did.
+    for (const t of [known.toLowerCase(), cold]) {
+      expect(t).not.toContain("four starter");
+      expect(t).not.toContain("first trade word");
+    }
+    expect(cold).toMatch(/electrical, deck and plumbing/);
+  });
+
   it("no line leaves a hole when he knows nothing — no 'out of undefined'", () => {
     for (const t of spoken(STRANGER)) {
       expect(t).not.toContain("undefined");

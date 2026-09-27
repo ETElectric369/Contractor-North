@@ -149,13 +149,21 @@ export const TOUR: TourStep[] = [
     key: "trade",
     anchor: "nort",
     title: "What you do",
+    // NEVER ASKED TWICE. Sign-up already asked the trade (0352), and the layout hands it in through
+    // the one trade reader (lib/org-trade), so a company that picked one hears it back instead of
+    // being asked again. WHAT'S TRUE about the starters (lib/inspection/starter-sheets
+    // STARTER_FOR_TRADE): electrical, deck and plumbing each have their own starter questions, and
+    // every other trade starts on a general set. The trade picked at sign-up chooses; words said
+    // here choose only when none was picked.
     say: (c) =>
-      (c.trade ? `Right — I've got you as ${c.trade}. ` : "Good to meet you. ") +
-      "Now the one that matters most — what trade are you in? " +
-      "Say the one word that fits best — there are four starter walk-throughs, electrical, deck, " +
-      "plumbing and a general one, and the first trade word I spot picks it. " +
-      "This builds the questions I'll ask you on site, and tells the estimator what trade it's " +
-      "pricing. Your job codes came from the dropdown at sign-up; change those under Settings.",
+      c.trade
+        ? `Right — I've got you as ${c.trade}. ` +
+          "That's what picks the starter questions I'll ask you on site, and it tells the estimator what " +
+          "trade it's pricing. If that's not how you'd put it, say it your way and I'll use your words."
+        : "Good to meet you. Now the one that matters most — what trade are you in? " +
+          "Say it the way you'd tell a customer. Electrical, deck and plumbing work each have their " +
+          "own starter questions; any other trade starts on a general set you make your own. " +
+          "It also tells the estimator what trade it's pricing.",
     ask: "trade",
   },
   {

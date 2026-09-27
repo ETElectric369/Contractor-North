@@ -5,6 +5,7 @@ import { parseAiJson } from "@/lib/ai-json";
 import { createServiceClient } from "@/lib/supabase/server";
 import { rateLimited } from "@/lib/rate-limit";
 import { getOrgSettings } from "@/lib/org-settings";
+import { tradeWordsOr } from "@/lib/org-trade";
 import { playbookForForm } from "@/lib/playbook/parse";
 import { INTAKE_BUCKET, extOf, intakePaths, isOwnIntakePath, uploadDisplayName } from "@/lib/playbook/uploads";
 import type { Need, Playbook } from "@/lib/playbook/types";
@@ -213,7 +214,7 @@ export async function runPlanBrief(
     ]);
     const pb: Playbook = form ? playbookForForm(form as { schema?: unknown; playbook?: unknown }) : { needs: [] };
     const questions = questionLines(pb.needs);
-    const trade = getOrgSettings((org as { settings?: unknown } | null)?.settings).trade_label?.trim() || "contractor";
+    const trade = tradeWordsOr(getOrgSettings((org as { settings?: unknown } | null)?.settings));
 
     const client = getAnthropic();
     const msg = await client.messages.create({

@@ -10,6 +10,7 @@ import {
   ASSISTANT_SYSTEM_PROMPT,
 } from "@/lib/anthropic";
 import { getOrgSettings } from "@/lib/org-settings";
+import { orgTrade } from "@/lib/org-trade";
 import { featureOn } from "@/lib/features";
 import { quoteDraftShown, quoteDraftToolFor } from "@/lib/nort/quote-draft-tax";
 import { recordAiUsage, aiSpendExceeded, modelFor, type TokenUsage } from "@/lib/ai-cost";
@@ -312,9 +313,12 @@ export async function POST(req: Request) {
   )}`;
   // THE COMPANY'S TRADE, IN THE PROMPT — never left to be guessed from data. The base prompt says
   // "figure out their trade from their jobs" and a fresh org HAS no jobs, which is exactly when
-  // Nort offered panel-and-EV-charger fields to a general contractor.
-  if (orgS.trade_label?.trim())
-    systemPrompt += `\n\nTHIS COMPANY'S TRADE: ${orgS.trade_label.trim()}. Every example, field suggestion and rule of thumb you offer is in THIS trade unless they ask about another.`;
+  // Nort offered panel-and-EV-charger fields to a general contractor. Read through the ONE trade
+  // reader (lib/org-trade): sign-up keeps only the key, so a company that signed up after 0352 had
+  // no words here and got no trade line at all.
+  const trade = orgTrade(orgS);
+  if (trade.label)
+    systemPrompt += `\n\nTHIS COMPANY'S TRADE: ${trade.label}. Every example, field suggestion and rule of thumb you offer is in THIS trade unless they ask about another.`;
 
   // THE ESTIMATING METHOD — mode-aware. "catalog" companies (deck/carpentry & preset-price
   // shops) bid from their OWN price list + kits, quantities from the customer's measurements,

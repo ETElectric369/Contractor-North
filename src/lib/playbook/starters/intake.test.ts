@@ -118,6 +118,19 @@ describe("end to end: what a customer fills in is what the inspector already has
 
 describe("which starter a new door gets", () => {
   it.each([
+    ["deck", DECK_INTAKE],
+    ["electrical", ELECTRICAL_INTAKE],
+    ["general", INTAKE_STARTER],
+    ["plumbing", INTAKE_STARTER],
+    ["hvac", INTAKE_STARTER],
+    ["", INTAKE_STARTER],
+    [null, INTAKE_STARTER],
+  ])("by the sign-up key: %s", (key, expected) => {
+    // Sign-up keeps only the key (0352), so a deck company made yesterday has no words to match.
+    expect(intakeStarterForTrade(key, INTAKE_STARTER)).toBe(expected);
+  });
+
+  it.each([
     ["deck builder", DECK_INTAKE],
     ["Deck & Fence", DECK_INTAKE],
     ["electrical contractor", ELECTRICAL_INTAKE],
@@ -125,15 +138,19 @@ describe("which starter a new door gets", () => {
     ["Construction", INTAKE_STARTER],
     ["", INTAKE_STARTER],
     [null, INTAKE_STARTER],
-  ])("%s", (label, expected) => {
-    expect(intakeStarterForTrade(label, INTAKE_STARTER)).toBe(expected);
+  ])("no key, the words as a last resort: %s", (label, expected) => {
+    expect(intakeStarterForTrade(null, INTAKE_STARTER, label)).toBe(expected);
+  });
+
+  it("the key wins over the words", () => {
+    expect(intakeStarterForTrade("general", INTAKE_STARTER, "deck builder")).toBe(INTAKE_STARTER);
   });
 
   it("does not match a word that merely CONTAINS the trade", () => {
     // "Decking" should match; "Redeck" should not become a deck company by accident, and neither
     // should anything that happens to end in -deck.
-    expect(intakeStarterForTrade("Decking and railings", INTAKE_STARTER)).toBe(DECK_INTAKE);
-    expect(intakeStarterForTrade("Redeckorating", INTAKE_STARTER)).toBe(INTAKE_STARTER);
+    expect(intakeStarterForTrade(null, INTAKE_STARTER, "Decking and railings")).toBe(DECK_INTAKE);
+    expect(intakeStarterForTrade(null, INTAKE_STARTER, "Redeckorating")).toBe(INTAKE_STARTER);
   });
 });
 
