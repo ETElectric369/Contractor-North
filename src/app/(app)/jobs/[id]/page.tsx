@@ -39,7 +39,10 @@ import { groupJobCosts } from "@/lib/job-cost-groups";
 import { readJobPapers } from "./job-papers";
 import { JobPaperList, type JobPaperView } from "./job-paper-list";
 import { tmWorkToDate } from "@/lib/job-financials";
-import { readJobStock, stockShortsSentence } from "@/lib/stock-billing";
+import { readJobStock, stockCostLabel, stockKey, stockShortsSentence } from "@/lib/stock-billing";
+import { readHandClaimsForJob, type HandClaims } from "@/lib/already-billed-read";
+import { eligibleInvoice as alreadyBilledEligible, hoursByHand, jobAlreadyBilledDoors } from "@/lib/already-billed";
+import { AlreadyBilledButton, NotBilledAfterAllButton } from "@/components/already-billed-sheet";
 import { openDraftOnJob, type OpenDraft } from "@/lib/actuals-draw";
 import { jobBillsItsActuals } from "@/lib/invoice-import-rule";
 import { reportError } from "@/lib/observe";
@@ -309,6 +312,8 @@ export default async function JobDetailPage({
     tmWork,
     papers,
     jobStock,
+    handClaims,
+    joblessBills,
   ] = await Promise.all([
     // THE job's items, role-shaped (projection law): staff read every column, a tech reads
     // TECH_ITEM_COLUMNS — no est_cost, no vendor — the same list /materials/[id] uses, so the one
@@ -461,6 +466,32 @@ export default async function JobDetailPage({
           },
         )
       : Promise.resolve(null as Awaited<ReturnType<typeof readJobStock>> | null),
+    // ALREADY BILLED (0357): which of the job's rows a person marked as billed, and on which line,
+    // for the Billed fold's "Billed By Hand On INV-x · Not Billed After All". Staff only, on a job
+    // that bills its actuals. A lost read is logged and the fold simply offers no Undo there (the
+    // rows still say which invoice holds them); a database without 0357 reads as not ready.
+    viewerIsStaff && billsActuals
+      ? readHandClaimsForJob(supabase, id, (j as any).customer_id ?? null).catch((e: unknown) => {
+          reportError("jobs.[id].handClaims", e, { jobId: id });
+          return null;
+        })
+      : Promise.resolve(null as HandClaims | null),
+    // The customer's sent bills with NO job (a charge typed on a blank invoice): Already Billed
+    // offers those too, so the door shows when only one of those could hold the cost. Asked only
+    // when the job has no sent bill of its own; a head count, nothing read.
+    viewerIsStaff && billsActuals && (j as any).customer_id && !((invoices ?? []) as any[]).some((i) => alreadyBilledEligible(i))
+      ? supabase
+          .from("invoices")
+          .select("id", { count: "exact", head: true })
+          .is("job_id", null)
+          .eq("customer_id", (j as any).customer_id)
+          .not("status", "in", "(draft,void)")
+          .or("invoice_kind.is.null,invoice_kind.neq.deposit")
+          .then(
+            (r: { count: number | null; error: unknown }) => (r.error ? 0 : (r.count ?? 0)),
+            () => 0,
+          )
+      : Promise.resolve(0),
   ]);
   // PROJECTION at the boundary: staff get the money; a tech's view is HOURS ONLY — no rate, no
   // amount, no bills, no crew (a tech reads only his own rows, so the hours ARE his) — built here
@@ -497,6 +528,24 @@ export default async function JobDetailPage({
     viewerIsStaff && billsActuals && !costGroups
       ? "Couldn't tell which bills are on an invoice right now, so this is every bill on the job. The Invoices tab has what each invoice holds."
       : null;
+  // ALREADY BILLED (0357, Erik's Purple Sage). Only where the piles exist (staff, a job that bills
+  // its actuals, the claims readable): Already Billed on a Not Billed Yet row when some sent bill
+  // (the job's, or the customer's with no job) could hold it; Billed By Hand · Not Billed After All
+  // on a row a person marked. The hours line gets the same pair below.
+  const alreadyBilledOffer =
+    ((invoices ?? []) as any[]).some((i) => alreadyBilledEligible(i)) || (Number(joblessBills) || 0) > 0;
+  const handById = handClaims?.ready ? handClaims.byId : null;
+  const alreadyBilledDoors = costGroups
+    ? jobAlreadyBilledDoors({
+        groups: costGroups,
+        bills: (bills ?? []) as any[],
+        pos: (pos ?? []) as any[],
+        takes: (jobStock?.takes ?? []).map((t) => ({ key: stockKey(t.group), moveIds: t.moveIds, label: stockCostLabel(t) })),
+        hands: handById,
+        offer: alreadyBilledOffer,
+      })
+    : null;
+  const hoursMarked = costGroups ? hoursByHand((laborRows?.jobEntries ?? []) as any[], handById) : [];
   const paperViews: JobPaperView[] | null = papers
     ? papers.map((p) => ({
         id: p.id,
@@ -1308,6 +1357,7 @@ export default async function JobDetailPage({
                 pos={(pos ?? []) as any}
                 groups={costGroups}
                 groupsNote={costGroupsNote}
+                alreadyBilled={alreadyBilledDoors}
                 openAside={
                   costGroups && unbilled ? (
                     <div className="space-y-2">
@@ -1328,6 +1378,20 @@ export default async function JobDetailPage({
                             .join(" ")}
                         </p>
                       )}
+                      {/* The open hours were charged by hand on a bill that went out: pick the line,
+                          then the shifts (0357). Only when a sent bill could hold them. */}
+                      {unbilled.hours > 0 && alreadyBilledOffer && (
+                        <AlreadyBilledButton jobId={j.id} target={{ kind: "time", ids: [], what: "Those hours" }} label="Already Billed: The Hours" />
+                      )}
+                      {/* Hours a person marked, with the way back. */}
+                      {hoursMarked.map((h) => (
+                        <div key={h.lineId} className="flex flex-wrap items-center gap-2 text-sm text-slate-600">
+                          <span>
+                            Billed By Hand On {h.invoiceNumber ?? "That Invoice"}: {formatDuration(h.hours)}
+                          </span>
+                          <NotBilledAfterAllButton jobId={j.id} lineId={h.lineId} ids={h.ids} what={h.what} />
+                        </div>
+                      ))}
                       {/* Pieces taken past the shelf with no roll behind them: not in the pile and
                           not on the next bill until settled. Said here too, never silent. */}
                       {unbilled.stockShortsWords && <p className="text-sm text-amber-700">{unbilled.stockShortsWords}</p>}

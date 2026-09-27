@@ -13,7 +13,21 @@ import { Modal, ModalActions } from "@/components/ui/modal";
 import { formatCurrency, formatDate } from "@/lib/utils";
 import { createBill } from "../actions";
 import { BillRowDoors } from "@/components/bill-row-doors";
+import { AlreadyBilledButton, NotBilledAfterAllButton } from "@/components/already-billed-sheet";
 import { executeAction } from "@/lib/actions/execute";
+
+/**
+ * ALREADY BILLED ON THE COSTS TAB (0357). `open`: the Not Billed Yet rows the door can mark (a row
+ * with no entry has no door: there is no sent bill it could have gone on). `hands`: the Billed rows
+ * a person marked, with the line and ids Not Billed After All takes back off. Staff only, and only
+ * on a job that bills its actual costs (the page decides; a fixed-price job passes nothing).
+ */
+export type JobAlreadyBilled = {
+  open: Record<string, { kind: "bill" | "po" | "stock"; ids: string[]; what: string }>;
+  hands: Record<string, { lineId: string; ids: string[]; invoiceNumber: string | null; what: string }>;
+};
+
+type Pile = "open" | "billed" | "nothing" | "plain";
 
 interface Bill {
   id: string;
@@ -60,6 +74,7 @@ export function JobBills({
   groups,
   openAside,
   groupsNote,
+  alreadyBilled,
 }: {
   jobId: string;
   bills: Bill[];
@@ -69,6 +84,8 @@ export function JobBills({
   openAside?: ReactNode;
   /** Said above the plain list when the piles could not be read. */
   groupsNote?: string | null;
+  /** Already Billed's doors (0357), when the page offers them. */
+  alreadyBilled?: JobAlreadyBilled | null;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -114,9 +131,28 @@ export function JobBills({
   const billById = new Map(bills.map((b) => [b.id, b] as const));
   const poById = new Map(pos.map((p) => [p.id, p] as const));
 
+  /**
+   * ALREADY BILLED'S DOORS ON A ROW (0357): on an open row, Already Billed (it charged on a sent
+   * bill by hand); on a billed row a person marked, what it says and Not Billed After All. Nothing
+   * on any other row, and nothing at all when the page offers no doors.
+   */
+  const abDoors = (id: string, pile: Pile) => {
+    const open = pile === "open" ? alreadyBilled?.open[id] : undefined;
+    const hand = pile === "billed" ? alreadyBilled?.hands[id] : undefined;
+    if (open) return <AlreadyBilledButton jobId={jobId} target={open} />;
+    if (hand)
+      return (
+        <>
+          <span className="text-xs font-medium text-slate-600">Billed By Hand On {hand.invoiceNumber ?? "That Invoice"}</span>
+          <NotBilledAfterAllButton jobId={jobId} lineId={hand.lineId} ids={hand.ids} what={hand.what} />
+        </>
+      );
+    return null;
+  };
+
   /** A bill in a pile: what it is, then the /bills row's own doors (BillRowDoors: Settled / On
    *  Account, Edit, Delete that asks first), each 44px, wrapping under it on a phone. */
-  const billRow = (b: Bill, why?: string) => (
+  const billRow = (b: Bill, why: string | undefined, pile: Pile) => (
     <li key={b.id} className="px-4 py-2.5 text-sm">
       <div className="flex items-center gap-3">
         <div className="min-w-0 flex-1">
@@ -133,29 +169,35 @@ export function JobBills({
       </div>
       <div className="mt-2 flex flex-wrap items-center gap-2">
         <BillRowDoors bill={b} jobId={jobId} onEdit={() => setEditBill(b)} />
+        {abDoors(b.id, pile)}
       </div>
     </li>
   );
 
   /** A live purchase order in a pile: its own page holds its controls. */
-  const poRow = (p: JobPo, why?: string) => (
-    <li key={p.id}>
-      <Link href={`/purchasing/${p.id}`} className="flex min-h-11 items-center gap-3 px-4 py-2.5 text-sm hover:bg-slate-50">
-        <div className="min-w-0 flex-1">
-          <div className="font-medium text-slate-900">{p.vendor || "No vendor yet"}</div>
-          <div className="text-xs text-slate-400">{p.po_number} · purchase order</div>
-          {why && <div className="text-xs text-slate-500">{why}</div>}
-        </div>
-        <span className="font-medium text-slate-800">{formatCurrency(p.total)}</span>
-      </Link>
-    </li>
-  );
+  const poRow = (p: JobPo, why: string | undefined, pile: Pile) => {
+    const doors = abDoors(p.id, pile);
+    return (
+      <li key={p.id}>
+        <Link href={`/purchasing/${p.id}`} className="flex min-h-11 items-center gap-3 px-4 py-2.5 text-sm hover:bg-slate-50">
+          <div className="min-w-0 flex-1">
+            <div className="font-medium text-slate-900">{p.vendor || "No vendor yet"}</div>
+            <div className="text-xs text-slate-400">{p.po_number} · purchase order</div>
+            {why && <div className="text-xs text-slate-500">{why}</div>}
+          </div>
+          <span className="font-medium text-slate-800">{formatCurrency(p.total)}</span>
+        </Link>
+        {doors && <div className="flex flex-wrap items-center gap-2 px-4 pb-2.5">{doors}</div>}
+      </li>
+    );
+  };
 
   /** A take from stock in a pile (Shop Stock, Phase 3): what came off the shelf and what it cost.
    *  Its controls (Undo, Carry Back) live with the takes on the Materials tab, so it goes there. */
-  const stockRow = (id: string, why?: string) => {
+  const stockRow = (id: string, why: string | undefined, pile: Pile) => {
     const t = groups?.stock[id];
     if (!t) return null;
+    const doors = abDoors(id, pile);
     return (
       <li key={id}>
         <Link href={`/jobs/${jobId}?tab=materials`} className="flex min-h-11 items-center gap-3 px-4 py-2.5 text-sm hover:bg-slate-50">
@@ -168,18 +210,19 @@ export function JobBills({
           </div>
           <span className="font-medium text-slate-800">{formatCurrency(t.cost)}</span>
         </Link>
+        {doors && <div className="flex flex-wrap items-center gap-2 px-4 pb-2.5">{doors}</div>}
       </li>
     );
   };
 
-  const rowsOf = (ids: string[], whyOf?: (id: string) => string | undefined) => (
+  const rowsOf = (ids: string[], whyOf?: (id: string) => string | undefined, pile: Pile = "plain") => (
     <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
       {ids.map((id) => {
         const b = billById.get(id);
-        if (b) return billRow(b, whyOf?.(id));
+        if (b) return billRow(b, whyOf?.(id), pile);
         const p = poById.get(id);
-        if (p) return poRow(p, whyOf?.(id));
-        return stockRow(id, whyOf?.(id));
+        if (p) return poRow(p, whyOf?.(id), pile);
+        return stockRow(id, whyOf?.(id), pile);
       })}
     </ul>
   );
@@ -277,7 +320,7 @@ export function JobBills({
         <>
           {openAside}
           {groups.open.ids.length > 0 ? (
-            <div className={openAside ? "mt-3" : undefined}>{rowsOf(groups.open.ids, (id) => openOwnNote(groups.openOwn[id]))}</div>
+            <div className={openAside ? "mt-3" : undefined}>{rowsOf(groups.open.ids, (id) => openOwnNote(groups.openOwn[id]), "open")}</div>
           ) : (
             <p className="py-3 text-sm text-slate-500">
               {bills.length === 0 && !Object.keys(groups.stock).length
@@ -306,7 +349,7 @@ export function JobBills({
                       <span className="font-medium text-slate-800">{formatCurrency(g.total)}</span>
                     </summary>
                     <div className="border-t border-slate-100 px-3 pb-2 pt-3">
-                      {rowsOf(g.ids)}
+                      {rowsOf(g.ids, undefined, "billed")}
                       <Link
                         href={`/billing/${g.invoice.id}`}
                         className="mt-1 inline-flex min-h-11 items-center text-sm font-medium text-brand hover:underline"
@@ -326,6 +369,7 @@ export function JobBills({
               {rowsOf(
                 groups.nothing.map((n) => n.id),
                 (id) => nothingToBillWhy(groups.nothing.find((n) => n.id === id)!.why),
+                "nothing",
               )}
             </div>
           )}

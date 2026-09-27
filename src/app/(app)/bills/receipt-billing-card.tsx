@@ -126,7 +126,19 @@ type LineOverride = Partial<Pick<ReceiptBillingLine, "billable" | "billedAmount"
 /** `shopStock` false = the Shop Stock switch is off (0352): Put The Rest On The Shelf isn't offered.
  *  A roll already on the shelf keeps its line and Take It Off The Shelf, and what the customer is
  *  billed never moves. Absent = on. */
-export function ReceiptLines({ receipt: r, shopStock = true }: { receipt: ReceiptForBilling; shopStock?: boolean }) {
+export function ReceiptLines({
+  receipt: r,
+  shopStock = true,
+  onChanged,
+  modalPortal = false,
+}: {
+  receipt: ReceiptForBilling;
+  shopStock?: boolean;
+  /** Called after every write that landed (Already Billed's shelf step reads the receipt again). */
+  onChanged?: () => void;
+  /** Its own sheets render into <body>: the card is itself inside a sheet (Already Billed). */
+  modalPortal?: boolean;
+}) {
   const router = useRouter();
   const toast = useToast();
   const [, start] = useTransition();
@@ -175,6 +187,7 @@ export function ReceiptLines({ receipt: r, shopStock = true }: { receipt: Receip
         "success",
       );
       router.refresh();
+      onChanged?.();
     });
   }
 
@@ -204,6 +217,7 @@ export function ReceiptLines({ receipt: r, shopStock = true }: { receipt: Receip
         });
       }
       router.refresh();
+      onChanged?.();
     });
   }
 
@@ -241,6 +255,7 @@ export function ReceiptLines({ receipt: r, shopStock = true }: { receipt: Receip
       else if (next.billedAmount == null) toast("Back to billing the whole line", "success");
       else toast(`This job is billed ${formatCurrency(next.billedAmount)} of that line`, "success");
       router.refresh();
+      onChanged?.();
     });
   }
 
@@ -422,6 +437,7 @@ export function ReceiptLines({ receipt: r, shopStock = true }: { receipt: Receip
           line={editing.line}
           hint={editing.hint}
           jobName={editing.receipt.job_name}
+          portal={modalPortal}
           onClose={() => setEditing(null)}
           onSave={(next) => saveUsage(editing.line, next)}
         />
@@ -431,11 +447,13 @@ export function ReceiptLines({ receipt: r, shopStock = true }: { receipt: Receip
         <PutTheRestOnTheShelf
           line={shelving.line}
           jobName={shelving.receipt.job_name}
+          portal={modalPortal}
           onClose={() => setShelving(null)}
           onDone={(message) => {
             setShelving(null);
             toast(message, "success");
             router.refresh();
+            onChanged?.();
           }}
         />
       )}
@@ -454,11 +472,13 @@ export function ReceiptLines({ receipt: r, shopStock = true }: { receipt: Receip
 function PutTheRestOnTheShelf({
   line,
   jobName,
+  portal = false,
   onClose,
   onDone,
 }: {
   line: ReceiptBillingLine;
   jobName: string | null;
+  portal?: boolean;
   onClose: () => void;
   onDone: (message: string) => void;
 }) {
@@ -512,6 +532,7 @@ function PutTheRestOnTheShelf({
       onClose={onClose}
       title="Put The Rest On The Shelf"
       size="md"
+      portal={portal}
       dirty={!!value?.confirmed}
       footer={
         <ModalActions
@@ -564,6 +585,7 @@ function UsedOnThisJob({
   line,
   hint,
   jobName,
+  portal = false,
   onClose,
   onSave,
 }: {
@@ -571,6 +593,7 @@ function UsedOnThisJob({
   /** The nudge the ROW computed, or null when the row stood it down. Never recomputed here. */
   hint: ContainerHint | null;
   jobName: string | null;
+  portal?: boolean;
   onClose: () => void;
   onSave: (next: {
     billedAmount: number | null;
@@ -630,6 +653,7 @@ function UsedOnThisJob({
       onClose={onClose}
       title="What This Job Used"
       size="md"
+      portal={portal}
       // Dirty means HE typed something, not that the field has a value in it: the dollars box
       // opens holding the split already stored, and treating that as unsaved work would make a
       // backdrop tap ask him to confirm discarding a number he never touched.

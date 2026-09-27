@@ -28,6 +28,7 @@ import { shelveLines } from "@/lib/stock-ledger";
 // and the source_ids array 0255 added. The Bills page reads claims with this same function, so the
 // sentence an action writes and the sentence the card prints can never drift apart.
 import { claimedIdsOfLines } from "@/lib/unbilled-work";
+import { alreadyBilledOffer, isMissingHandClaims } from "@/lib/already-billed-read";
 // "Is this purchase already on the books?" - one reading for every door (audit v994, DB1): the
 // tray, the job page and this card all ask the same functions, so no door can be blind to the
 // bills another door wrote.
@@ -2230,7 +2231,15 @@ export async function fileSupplierPaper(input: {
     return putBack(`Something went wrong recording ${number}, so no bill was written.`);
   }
   if (!rec.ok) return putBack(rec.error ?? `${number} didn't record.`);
-  return { ...rec, undo: rec.billId ? { invoiceId, billId: rec.billId, jobSetTo, jobBefore } : undefined };
+  // ALREADY BILLED ON INV-x? (0357). Filing stays exactly as it was; the done line then asks, when a
+  // sent bill on the job could have charged for this paper already (Purple Sage: typed by hand on
+  // INV-00023). A read that fails only means the card doesn't ask; the Costs tab still can.
+  const offer = rec.billId ? await alreadyBilledOffer(ctx.supabase, org.orgId, jobId!, rec.billId) : null;
+  return {
+    ...rec,
+    undo: rec.billId ? { invoiceId, billId: rec.billId, jobSetTo, jobBefore } : undefined,
+    ...(offer && rec.billId ? { alreadyBilled: { jobId: jobId!, billId: rec.billId, invoiceNumber: offer.invoiceNumber, what: number } } : {}),
+  };
 }
 
 /**
@@ -2269,16 +2278,29 @@ export async function undoFileSupplierPaper(input: {
   if (String((link?.[0] as { bill_id?: string } | undefined)?.bill_id ?? "") !== billId)
     return { ok: false, error: `${number} isn't tied to that bill anymore, so Undo left both alone.` };
 
-  const { data: claims, error: claimErr } = await ctx.supabase
-    .from("invoice_items")
-    .select("import_key, source_ids, invoices!inner(invoice_number, status)")
-    .or(`import_key.eq.bill:${billId},source_ids.cs.{${billId}}`)
-    .neq("invoices.status", "void")
-    .limit(5);
+  // hand_claims (0357) says whether a PERSON marked it billed there; a database without it reads the
+  // claim the old way and gives the old sentence.
+  const claimRead = (withHands: boolean) =>
+    ctx.supabase
+      .from("invoice_items")
+      .select(`import_key, source_ids${withHands ? ", hand_claims" : ""}, invoices!inner(invoice_number, status)`)
+      .or(`import_key.eq.bill:${billId},source_ids.cs.{${billId}}`)
+      .neq("invoices.status", "void")
+      .limit(5);
+  let claimsRead = await claimRead(true);
+  if (claimsRead.error && isMissingHandClaims(claimsRead.error)) claimsRead = await claimRead(false);
+  const { data: claims, error: claimErr } = claimsRead;
   if (claimErr) return { ok: false, error: `Couldn't check whether an invoice bills ${number}, so nothing was undone. ${dbError(claimErr)}` };
   const holder = ((claims ?? []) as any[]).find((c) => claimedIdsOfLines([c]).includes(billId));
   if (holder) {
     const on = text(holder?.invoices?.invoice_number) ?? "An invoice";
+    // MARKED BILLED BY HAND: the way back is the button that took it there.
+    if (((holder?.hand_claims ?? []) as string[]).map(String).includes(billId)) {
+      return {
+        ok: false,
+        error: `${on} already bills ${number}: it was marked Already Billed. Press Not Billed After All (under ${on} on the job's Costs tab) first, then Undo.`,
+      };
+    }
     return {
       ok: false,
       error: `${on} already bills ${number}, so Undo can't take it back. Take its materials lines off ${on} first, or leave it: the cost is on the right job.`,

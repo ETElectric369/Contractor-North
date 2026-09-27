@@ -91,3 +91,52 @@ describe("the Costs tab's bill row", () => {
     }
   });
 });
+
+/**
+ * ALREADY BILLED ON THE COSTS TAB (0357, Purple Sage). An open row gets Already Billed; a billed row
+ * a person marked says so and gets Not Billed After All; an importer's claim gets neither. The page
+ * hands these over only for staff on a job that bills its actuals: a fixed-price job has no piles,
+ * and no doors.
+ */
+describe("the Costs tab's Already Billed doors", () => {
+  const PS = [
+    { id: "ps", supplier: "Consolidated Electrical Distributors", bill_number: "8802-1101475", amount: 186.93, status: "paid", bill_date: "2026-06-16" },
+    { id: "osh", supplier: "OSH", bill_number: null, amount: 16.28, status: "paid", bill_date: "2026-09-18" },
+    { id: "hd", supplier: "The Home Depot", bill_number: "HD-1", amount: 196.18, status: "paid", bill_date: "2026-08-12" },
+  ];
+  const invoice = { id: "inv-23", invoice_number: "INV-00023", status: "paid", created_at: "2026-06-22T04:57:19Z" };
+  const groups = {
+    open: { ids: ["osh"], bills: 1, pos: 0, takes: 0, total: 16.28 },
+    openOwn: {},
+    billed: [{ ids: ["ps", "hd"], bills: 2, pos: 0, takes: 0, total: 383.11, invoice, draft: false, offJobNumber: null }],
+    nothing: [],
+    stock: {},
+  };
+  const doors = {
+    open: { osh: { kind: "bill" as const, ids: ["osh"], what: "OSH" } },
+    hands: { ps: { lineId: "li-materials", ids: ["ps"], invoiceNumber: "INV-00023", what: "Consolidated Electrical Distributors 8802-1101475" } },
+  };
+  const words = (html: string) =>
+    Array.from(html.matchAll(/<button([^>]*)>([\s\S]*?)<\/button>/g)).map((m) => ({ attrs: m[1], words: m[2].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim() }));
+
+  it("Already Billed on the open row, Billed By Hand On INV-00023 · Not Billed After All on the marked one, each 44px", () => {
+    const html = renderToStaticMarkup(createElement(JobBills, { jobId: "j-010", bills: PS as any, pos: [], groups: groups as any, alreadyBilled: doors }));
+    const b = words(html);
+    expect(b.filter((x) => x.words === "Already Billed")).toHaveLength(1);
+    expect(b.filter((x) => x.words === "Not Billed After All")).toHaveLength(1);
+    for (const x of b.filter((y) => ["Already Billed", "Not Billed After All"].includes(y.words))) expect(x.attrs).toMatch(/\bh-11\b/);
+    expect(html).toContain("Billed By Hand On INV-00023");
+    // The Home Depot bill is on INV-00023 by an import: no Undo of anybody's hand there.
+    expect(html.match(/Billed By Hand On/g)).toHaveLength(1);
+  });
+
+  it("no doors when the page offers none (a tech's view, a fixed-price job's plain list, or no sent bill to hold it)", () => {
+    for (const html of [
+      renderToStaticMarkup(createElement(JobBills, { jobId: "j-010", bills: PS as any, pos: [], groups: groups as any, alreadyBilled: null })),
+      renderToStaticMarkup(createElement(JobBills, { jobId: "j-003", bills: PS as any, pos: [] })),
+    ]) {
+      expect(html).not.toContain("Already Billed");
+      expect(html).not.toContain("Not Billed After All");
+    }
+  });
+});

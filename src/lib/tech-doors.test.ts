@@ -91,6 +91,20 @@ describe("the job's side doors", () => {
     expect(s).not.toMatch(/^\s*<NewJobButton/m);
     expect(s.match(/\{isStaff && <NewJobButton/g)?.length).toBe(2);
   });
+
+  it("Already Billed (0357) is the office's: its doors come off the staff-only piles, its reads are staff-only, and a fixed-price job has none", () => {
+    const s = src("jobs/[id]/page.tsx");
+    // The piles exist only for staff on a job whose running total was read (a job that bills its actuals).
+    expect(s).toMatch(/const costGroups =\s*viewerIsStaff && unbilled && unbilled\.schemaReady/);
+    expect(s).toMatch(/billsActuals\s*\?\s*unbilledWorkForJob\(/);
+    // Every Already Billed door and Undo is built from those piles.
+    expect(s).toMatch(/const alreadyBilledDoors = costGroups\s*\?/);
+    expect(s).toMatch(/const hoursMarked = costGroups \?/);
+    expect(s).toMatch(/viewerIsStaff && billsActuals\s*\?\s*readHandClaimsForJob\(/);
+    // The hours door sits in the Not Billed Yet aside, which renders only with the piles.
+    expect(s).toMatch(/costGroups && unbilled \? \(\s*<div className="space-y-2">/);
+    expect(s).toContain("alreadyBilled={alreadyBilledDoors}");
+  });
 });
 
 describe("pure rules", () => {

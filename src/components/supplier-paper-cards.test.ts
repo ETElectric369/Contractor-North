@@ -269,3 +269,44 @@ describe("Waiting On A Credit (Erik, 2026-09-26: the Hillside switch CED will cr
     expect(allButtons(trail)).toEqual(["Undo"]);
   });
 });
+
+/**
+ * ALREADY BILLED ON INV-x? (0357, Purple Sage). Filing works exactly as it did; the done line then
+ * asks, when a sent bill on the job could have charged for the paper already. Once marked, Undo takes
+ * the mark back off first, and the question goes away.
+ */
+describe("the done line's Already Billed question", () => {
+  const undo = { invoiceId: "si-1", billId: "bill-1", jobSetTo: "j-010", jobBefore: null };
+  const offer = { jobId: "j-010", billId: "bill-1", invoiceNumber: "INV-00023", what: "8802-1101475" };
+
+  it("asks Already Billed On INV-00023? beside Undo, 44px and Title Case", () => {
+    setSupplierPaperScopeForTest("t-ab", { done: { "si-1": { card: base, message: "8802-1101475 is a bill on J-010 now.", undo, alreadyBilled: offer } as never }, live: 0 });
+    const trail = renderToStaticMarkup(createElement(SupplierPaperDoneTrail, { scope: "t-ab" }));
+    expect(allButtons(trail)).toEqual(["Undo", "Already Billed On INV-00023?"]);
+    const tag = Array.from(trail.matchAll(/<button[^>]*>Already Billed On INV-00023\?<\/button>/g))[0][0];
+    expect(tag).toMatch(/\bh-11\b/);
+  });
+
+  it("no question when no sent bill could hold it (the filing says what it did and nothing more)", () => {
+    setSupplierPaperScopeForTest("t-ab2", { done: { "si-1": { card: base, message: "8802-1101475 is a bill on J-010 now.", undo } as never }, live: 0 });
+    expect(allButtons(renderToStaticMarkup(createElement(SupplierPaperDoneTrail, { scope: "t-ab2" })))).toEqual(["Undo"]);
+  });
+
+  it("once marked: the sentence says nothing on INV-00023 changed, Undo takes the mark back off, and the question is gone", () => {
+    setSupplierPaperScopeForTest("t-ab3", {
+      done: {
+        "si-1": {
+          card: base,
+          message: "8802-1101475 is billed on INV-00023 (Materials $110.00). Nothing on INV-00023 changed.",
+          undo,
+          alreadyBilled: offer,
+          marked: { jobId: "j-010", lineId: "li-materials", ids: ["bill-1"], what: "8802-1101475" },
+        } as never,
+      },
+      live: 0,
+    });
+    const trail = renderToStaticMarkup(createElement(SupplierPaperDoneTrail, { scope: "t-ab3" }));
+    expect(trail).toContain("Nothing on INV-00023 changed.");
+    expect(allButtons(trail)).toEqual(["Undo"]);
+  });
+});

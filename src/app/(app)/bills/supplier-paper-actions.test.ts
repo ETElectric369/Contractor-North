@@ -118,6 +118,48 @@ describe("fileSupplierPaper: Put It On J-011, one tap", () => {
     expect(calls.find((c) => c.table === "bills" && c.verb === "insert")?.payload).toMatchObject({ job_id: "j-011", amount: 301.81, org_id: "org-1" });
   });
 
+  it("filing stays as it was, then asks Already Billed On INV-x? when a sent bill on the job could hold it (0357)", async () => {
+    state.client = fakeSupabase(
+      happy({
+        "jobs.select": [
+          OK({ id: "j-011", name: "13897 Herringbone", job_number: "J-011" }),
+          // The offer's read (ids as the database returns them: uuids, spliced into its filter).
+          OK({ id: "0110aaaa-0000-4000-8000-000000000011", job_number: "J-011", name: "13897 Herringbone", customer_id: "c0000000-0000-4000-8000-000000000001", billing_type: "tm" }),
+        ],
+        "payment_milestones.select": [OK([])],
+        "organizations.select": [OK({ settings: { timezone: "America/Los_Angeles", features: { shop_stock: true } } })],
+        "invoices.select": [
+          OK([
+            {
+              id: "inv-77",
+              invoice_number: "INV-077",
+              status: "paid",
+              invoice_kind: "standard",
+              job_id: "j-011",
+              created_at: "2026-09-10T00:00:00Z",
+              invoice_items: [{ id: "li-1", description: "Materials", quantity: 1, unit: "ea", unit_price: 380, line_total: 380, import_source: null, import_key: null, edited: false, line_kind: null, sort_order: 0, hand_claims: [] }],
+            },
+          ]),
+        ],
+        "bills.select": [OK([]), OK([]), OK({ id: "bill-new", supplier: "Consolidated Electrical Distributors", bill_number: NUMBER, supplier_invoice_number: NUMBER, amount: 301.81, bill_date: "2026-09-04", job_id: "j-011", bill_line_items: [] })],
+      }),
+      calls,
+    );
+    const res = await fileSupplierPaper({ invoiceId: INVOICE, jobId: "j-011" });
+    expect(res.ok).toBe(true);
+    expect(res.undo).toEqual({ invoiceId: INVOICE, billId: "bill-new", jobSetTo: "j-011", jobBefore: null });
+    expect(res.alreadyBilled).toEqual({ jobId: "j-011", billId: "bill-new", invoiceNumber: "INV-077", what: NUMBER });
+    // Asking wrote nothing: no invoice line was touched.
+    expect(calls.some((c) => c.table === "invoice_items" && c.verb !== "select")).toBe(false);
+  });
+
+  it("no question when no sent bill could hold it (a failed read only means the card doesn't ask)", async () => {
+    state.client = fakeSupabase(happy(), calls);
+    const res = await fileSupplierPaper({ invoiceId: INVOICE, jobId: "j-011" });
+    expect(res.ok).toBe(true);
+    expect(res.alreadyBilled).toBeUndefined();
+  });
+
   it("takes the job back off when the record fails, and says nothing changed", async () => {
     state.client = fakeSupabase(
       happy({
@@ -288,6 +330,39 @@ describe("undoFileSupplierPaper", () => {
     expect(res.ok).toBe(false);
     expect(res.error).toContain(`INV-078 already bills ${NUMBER}, so Undo can't take it back.`);
     expect(calls.some((c) => c.verb === "delete" || c.verb === "update")).toBe(false);
+  });
+
+  it("a claim a person marked (Already Billed, 0357) names the button that takes it back: Not Billed After All", async () => {
+    state.client = fakeSupabase(
+      {
+        "profiles.select": [STAFF],
+        "bill_supplier_invoices.select": [OK([{ bill_id: "bill-new" }])],
+        "bills.select": [BILL],
+        "invoice_items.select": [OK([{ import_key: null, source_ids: ["bill-new"], hand_claims: ["bill-new"], invoices: { invoice_number: "INV-00023", status: "paid" } }])],
+      },
+      calls,
+    );
+    const res = await undoFileSupplierPaper(TOKEN);
+    expect(res.ok).toBe(false);
+    expect(res.error).toBe(`INV-00023 already bills ${NUMBER}: it was marked Already Billed. Press Not Billed After All (under INV-00023 on the job's Costs tab) first, then Undo.`);
+    expect(calls.some((c) => c.verb === "delete" || c.verb === "update")).toBe(false);
+  });
+
+  it("before 0357 (no hand_claims column) it reads the claim the old way and says the old sentence", async () => {
+    state.client = fakeSupabase(
+      {
+        "profiles.select": [STAFF],
+        "bill_supplier_invoices.select": [OK([{ bill_id: "bill-new" }])],
+        "bills.select": [BILL],
+        "invoice_items.select": [
+          { data: null, error: { code: "42703", message: "column invoice_items.hand_claims does not exist" } },
+          OK([{ import_key: "bli:line-1", source_ids: ["bill-new"], invoices: { invoice_number: "INV-078", status: "sent" } }]),
+        ],
+      },
+      calls,
+    );
+    const res = await undoFileSupplierPaper(TOKEN);
+    expect(res.error).toContain(`INV-078 already bills ${NUMBER}, so Undo can't take it back.`);
   });
 
   it("takes the bill back out and the job back off", async () => {

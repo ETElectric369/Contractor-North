@@ -21,6 +21,8 @@ import {
 import { supplierPaperContents } from "@/app/(app)/bills/paper-contents-action";
 import { stopWaitingOnCredit, waitOnCredit } from "@/app/(app)/bills/waiting-credit-actions";
 import { offLinesWords, type PaperContents } from "@/lib/supplier-paper-contents";
+import { AlreadyBilledSheet } from "@/components/already-billed-sheet";
+import { unmarkAlreadyBilled, type AlreadyBilledWrite } from "@/app/(app)/jobs/already-billed-actions";
 
 type UndoToken = NonNullable<SupplierActionResult["undo"]>;
 /** What's On It, per card: reading, read, or a read that failed (said, with Try Again). */
@@ -33,6 +35,12 @@ type Done = {
   undo?: UndoToken;
   undoWait?: { since: string | null; by: string | null };
   error?: string;
+  /** Already Billed On INV-x? (0357): asked after a paper is filed on a job a sent bill could cover. */
+  alreadyBilled?: NonNullable<SupplierActionResult["alreadyBilled"]>;
+  /** It was marked billed there: Undo takes the mark back off (and the filing's Undo returns). */
+  marked?: NonNullable<AlreadyBilledWrite["undo"]>;
+  /** The filing's own sentence, said again once a mark is undone. */
+  filedMessage?: string;
 };
 
 /** "in progress" reads "In Progress" on a chip: every clickable is Title Case. */
@@ -301,7 +309,8 @@ export function SupplierPaperCards({
     }
     setErrors((e) => ({ ...e, [card.invoiceId]: "" }));
     setOpen((o) => ({ ...o, [card.invoiceId]: undefined }));
-    setDone((d) => ({ ...d, [card.invoiceId]: { card, message: res.message ?? fallback, undo: res.undo } }));
+    const message = res.message ?? fallback;
+    setDone((d) => ({ ...d, [card.invoiceId]: { card, message, undo: res.undo, alreadyBilled: res.alreadyBilled, filedMessage: message } }));
     if (refreshAfter) router.refresh();
   }
 
@@ -384,7 +393,35 @@ export function SupplierPaperCards({
     });
   }
 
+  /** The paper filed, then marked billed on INV-x: Undo takes the mark back off first (0357), and
+   *  the line is the filing's again, with its own Undo. */
+  function undoMark(d: Done) {
+    if (!d.marked) return;
+    const marked = d.marked;
+    setBusy(d.card.invoiceId);
+    start(async () => {
+      let res: AlreadyBilledWrite;
+      try {
+        res = await unmarkAlreadyBilled(marked);
+      } catch {
+        res = { ok: false, error: "The connection dropped, so nothing was undone. Try again." };
+      }
+      setBusy(null);
+      setDone((all) => ({
+        ...all,
+        [d.card.invoiceId]: res.ok
+          ? { ...d, marked: undefined, message: d.filedMessage ?? d.message, error: undefined }
+          : { ...d, error: res.error ?? "That didn't save. Nothing was changed." },
+      }));
+      if (res.ok && refreshAfter) router.refresh();
+    });
+  }
+
+  /** The Already Billed sheet this card's done line opened, when one is open. */
+  const [marking, setMarking] = useState<Done | null>(null);
+
   function undo(d: Done) {
+    if (d.marked) return undoMark(d);
     if (!d.undo && !d.undoWait) return;
     const token = d.undo;
     setBusy(d.card.invoiceId);
@@ -414,11 +451,20 @@ export function SupplierPaperCards({
     <div key={`done-${d.card.invoiceId}`} className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2" role="status">
       <p className="text-sm text-emerald-900">{d.message}</p>
       {d.error && <p className="mt-1 text-xs text-red-700" role="alert">{d.error}</p>}
-      {(d.undo || d.undoWait) && (
-        <Button type="button" variant="outline" className="mt-2" disabled={busy === d.card.invoiceId} onClick={() => undo(d)}>
-          Undo
-        </Button>
-      )}
+      <div className="mt-2 flex flex-wrap gap-2">
+        {(d.undo || d.undoWait || d.marked) && (
+          <Button type="button" variant="outline" disabled={busy === d.card.invoiceId} onClick={() => undo(d)}>
+            Undo
+          </Button>
+        )}
+        {/* FILING STAYS AS IT WAS; THEN THE ONE QUESTION (0357): a sent bill on the job may have
+            charged for this paper by hand already (Purple Sage on INV-00023). */}
+        {d.alreadyBilled && !d.marked && (
+          <Button type="button" variant="outline" disabled={busy === d.card.invoiceId} onClick={() => setMarking(d)}>
+            {`Already Billed On ${d.alreadyBilled.invoiceNumber}?`}
+          </Button>
+        )}
+      </div>
     </div>
   );
 
@@ -617,6 +663,20 @@ export function SupplierPaperCards({
         <Link href={moreHref} className="flex min-h-11 items-center text-sm font-medium text-brand hover:underline">
           {`See ${moreCount} More Supplier Bill${moreCount === 1 ? "" : "s"}`}
         </Link>
+      )}
+      {marking?.alreadyBilled && (
+        <AlreadyBilledSheet
+          jobId={marking.alreadyBilled.jobId}
+          target={{ kind: "bill", ids: [marking.alreadyBilled.billId], what: marking.alreadyBilled.what }}
+          onClose={() => setMarking(null)}
+          onMarked={(res) => {
+            const d = marking;
+            setMarking(null);
+            // If marking fails the sheet says so and the paper stays filed; this runs only on a mark
+            // that landed: the done line says it, and its Undo takes the mark back off.
+            setDone((all) => ({ ...all, [d.card.invoiceId]: { ...d, message: res.message ?? d.message, marked: res.undo, error: undefined } }));
+          }}
+        />
       )}
       {shelf && (
         <ShelfTicketSheet
