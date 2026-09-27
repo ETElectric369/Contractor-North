@@ -37,7 +37,10 @@
 --        read    — a job task: anyone in the company (the tech-job-access law: the crew sees all
 --                  pertinent job info). A Reminder: its maker and the person it is for. A Reminder
 --                  with neither (one legacy row) stays the office's, so it can't become a row
---                  nobody can see or clear.
+--                  nobody can see or clear. A Reminder's STEP follows its Reminder: the two people
+--                  on the Reminder both see, check off and clear its steps, whoever added them
+--                  (task_parent_is_mine), so checking the Reminder off never strands a step one of
+--                  them couldn't see.
 --        insert  — a job task must name a job of the caller's own company (0173: a rule at one
 --                  read path is a convention, so the policy says it, not only the app).
 --        update  — the rows you can read, and the new row still names your company's job.
@@ -235,6 +238,40 @@ create trigger tasks_stamp_who
   before insert or update on public.tasks
   for each row execute function public.stamp_task_who();
 
+-- ── 3b. a Reminder's step follows its Reminder ─────────────────────────────────────────────────
+-- Is this task (a step's parent) one of the caller's Reminders: made by them, made for them, or a
+-- legacy one with neither that the office keeps? SECURITY DEFINER so it reads the whole table, not
+-- the caller's view of it: a policy reading its own table through the caller's policies is the
+-- recursion 0254's job_has_material_list note warns about.
+create or replace function public.task_parent_is_mine(p uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1 from public.tasks t
+     where t.id = p
+       and t.org_id = public.auth_org_id()
+       and (
+         t.created_by = auth.uid()
+         or t.assigned_to = auth.uid()
+         or (t.created_by is null and t.assigned_to is null and public.is_org_staff())
+       )
+  );
+$$;
+
+comment on function public.task_parent_is_mine(uuid) is
+  'Is this task one of the caller''s Reminders (made by them, made for them, or a legacy one with '
+  'neither that the office keeps)? A Reminder''s step is read, changed and cleared by the same two '
+  'people as its Reminder, whoever added the step (0358).';
+
+-- PUBLIC and anon both (0254's note: Postgres grants PUBLIC on every new function); authenticated is
+-- the role the policies call it under.
+revoke execute on function public.task_parent_is_mine(uuid) from public, anon;
+grant execute on function public.task_parent_is_mine(uuid) to authenticated;
+
 -- ── 4. the rows ───────────────────────────────────────────────────────────────────────────────
 drop policy if exists tasks_read on public.tasks;
 create policy tasks_read on public.tasks
@@ -246,12 +283,13 @@ create policy tasks_read on public.tasks
       or created_by = auth.uid()
       or assigned_to = auth.uid()
       or (created_by is null and assigned_to is null and public.is_org_staff())
+      or (parent_id is not null and public.task_parent_is_mine(parent_id))
     )
   );
 
 comment on policy tasks_read on public.tasks is
   'A job task: anyone in the company. A Reminder (no job): its maker and the person it is for; one '
-  'with neither stays the office''s (0358).';
+  'with neither stays the office''s; a Reminder''s step, the same people as its Reminder (0358).';
 
 drop policy if exists tasks_write on public.tasks;
 
@@ -279,6 +317,7 @@ create policy tasks_update on public.tasks
       or created_by = auth.uid()
       or assigned_to = auth.uid()
       or (created_by is null and assigned_to is null and public.is_org_staff())
+      or (parent_id is not null and public.task_parent_is_mine(parent_id))
     )
   )
   with check (
@@ -292,6 +331,7 @@ create policy tasks_update on public.tasks
       or created_by = auth.uid()
       or assigned_to = auth.uid()
       or (created_by is null and assigned_to is null and public.is_org_staff())
+      or (parent_id is not null and public.task_parent_is_mine(parent_id))
     )
   );
 
@@ -312,6 +352,7 @@ create policy tasks_delete on public.tasks
           created_by = auth.uid()
           or assigned_to = auth.uid()
           or (created_by is null and assigned_to is null and public.is_org_staff())
+          or (parent_id is not null and public.task_parent_is_mine(parent_id))
         )
       )
     )
@@ -319,4 +360,5 @@ create policy tasks_delete on public.tasks
 
 comment on policy tasks_delete on public.tasks is
   'A job task: the office or whoever added it (a tech checks an office task off, never deletes it). '
-  'A Reminder: its maker or the person it is for (0358).';
+  'A Reminder: its maker or the person it is for; a Reminder''s step, the same people as its '
+  'Reminder (0358).';

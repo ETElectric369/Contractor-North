@@ -47,10 +47,23 @@ export async function getTasksPageData(showAllDone: boolean) {
     .order("completed_at", { ascending: false, nullsFirst: false });
   if (!showAllDone) doneQ = doneQ.limit(DONE_LIMIT);
 
-  const [{ data: orgRow }, openR, doneR, { data: people }, { data: catRows }] = await Promise.all([
+  // A REMINDER'S STEPS FOLLOW IT (0358's task_parent_is_mine): a step the other person on the
+  // Reminder added is theirs to see too, so the steps are read beside the page's Reminders and kept
+  // only under one this page shows (on a database without 0358 the read is company-wide; the cut
+  // below keeps the page private all the same).
+  const stepsQ = supabase
+    .from("tasks")
+    .select(TASK_SELECT)
+    .is("job_id", null)
+    .not("parent_id", "is", null)
+    .order("created_at", { ascending: true })
+    .limit(1000);
+
+  const [{ data: orgRow }, openR, doneR, stepsR, { data: people }, { data: catRows }] = await Promise.all([
     supabase.from("organizations").select("settings").limit(1).maybeSingle(),
     openQ,
     doneQ,
+    stepsQ,
     listActiveTechs(supabase),
     // The viewer's OWN reminder vocabulary (free-form since 0136) — feeds the edit autocomplete and
     // the by-category pills. Recent-first slice, deduped below; no invented taxonomy.
@@ -74,9 +87,15 @@ export async function getTasksPageData(showAllDone: boolean) {
   }
   const categories = Array.from(seen.values()).sort((a, b) => a.localeCompare(b));
 
+  const mineRows = [...(openR.data ?? []), ...(doneR.data ?? [])];
+  const shown = new Set(mineRows.map((t) => t.id as string));
+  const steps = (stepsR.data ?? []).filter(
+    (s) => !shown.has(s.id as string) && !!s.parent_id && shown.has(s.parent_id as string),
+  );
+
   return {
     todayStr: todayStrInTz(tz),
-    tasks: [...(openR.data ?? []), ...(doneR.data ?? [])],
+    tasks: [...mineRows, ...steps],
     doneTotal: doneR.count ?? doneR.data?.length ?? 0,
     people: people ?? [],
     categories,

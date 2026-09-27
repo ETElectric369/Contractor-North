@@ -174,9 +174,11 @@ d("tasks: a job has one task list, and a Reminder is private (0358)", () => {
     expect(rows[0].def).toMatch(/BEFORE INSERT OR UPDATE/);
     const { rows: acl } = await client.query(
       `select has_function_privilege('anon', 'public.stamp_task_who()', 'execute') as a,
-              has_function_privilege('anon', 'public.task_photo_path_ok(text, uuid)', 'execute') as b`,
+              has_function_privilege('anon', 'public.task_photo_path_ok(text, uuid)', 'execute') as b,
+              has_function_privilege('anon', 'public.task_parent_is_mine(uuid)', 'execute') as c,
+              has_function_privilege('authenticated', 'public.task_parent_is_mine(uuid)', 'execute') as d`,
     );
-    expect(acl[0]).toEqual({ a: false, b: false });
+    expect(acl[0]).toEqual({ a: false, b: false, c: false, d: true });
     const { rows: pols } = await client.query("select policyname, cmd from pg_policies where schemaname = 'public' and tablename = 'tasks' order by policyname");
     expect(pols.map((p: any) => `${p.policyname}:${p.cmd}`)).toEqual([
       "tasks_delete:DELETE",
@@ -361,6 +363,32 @@ d("tasks: a job has one task list, and a Reminder is private (0358)", () => {
     expect((await client.query("select id from tasks where id = $1", [rem.id])).rowCount).toBe(0);
     await as(officeId);
     expect((await client.query("select id from tasks where id = $1", [rem.id])).rowCount).toBe(1);
+  });
+
+  it("a Reminder's steps follow the Reminder: both people on it see, check off and clear them; a third doesn't", async () => {
+    await as(officeId);
+    const { rows: [rem] } = await client.query("insert into tasks (title, assigned_to) values ('TEST 0358 stock the van', $1) returning id", [techId]);
+    const { rows: [officeStep] } = await client.query("insert into tasks (title, parent_id) values ('TEST 0358 wire nuts', $1) returning id", [rem.id]);
+    // The person it's for sees the office's step (what toggleTask's open-steps check reads) and checks it off.
+    await as(techId);
+    expect((await client.query("select id from tasks where parent_id = $1 and status = 'open'", [rem.id])).rowCount).toBe(1);
+    expect((await client.query("update tasks set status = 'done' where id = $1", [officeStep.id])).rowCount).toBe(1);
+    expect((await landed(officeStep.id)).status).toBe("done");
+    // His own step under it: the office sees it too.
+    await as(techId);
+    const { rows: [techStep] } = await client.query("insert into tasks (title, parent_id) values ('TEST 0358 tape', $1) returning id", [rem.id]);
+    await as(officeId);
+    expect((await client.query("select id from tasks where id = $1", [techStep.id])).rowCount).toBe(1);
+    // A third member: neither step, to read, change or delete.
+    await as(tech2Id);
+    for (const id of [officeStep.id, techStep.id]) {
+      expect((await client.query("select id from tasks where id = $1", [id])).rowCount).toBe(0);
+      expect((await client.query("update tasks set title = 'x' where id = $1", [id])).rowCount).toBe(0);
+      expect((await client.query("delete from tasks where id = $1", [id])).rowCount).toBe(0);
+    }
+    // The person it's for clears the office's step.
+    await as(techId);
+    expect((await client.query("delete from tasks where id = $1", [officeStep.id])).rowCount).toBe(1);
   });
 
   it("a Reminder can't be made for someone outside the company", async () => {
