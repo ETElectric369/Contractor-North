@@ -313,7 +313,6 @@ export default async function JobDetailPage({
     papers,
     jobStock,
     handClaims,
-    joblessBills,
   ] = await Promise.all([
     // THE job's items, role-shaped (projection law): staff read every column, a tech reads
     // TECH_ITEM_COLUMNS — no est_cost, no vendor — the same list /materials/[id] uses, so the one
@@ -476,22 +475,6 @@ export default async function JobDetailPage({
           return null;
         })
       : Promise.resolve(null as HandClaims | null),
-    // The customer's sent bills with NO job (a charge typed on a blank invoice): Already Billed
-    // offers those too, so the door shows when only one of those could hold the cost. Asked only
-    // when the job has no sent bill of its own; a head count, nothing read.
-    viewerIsStaff && billsActuals && (j as any).customer_id && !((invoices ?? []) as any[]).some((i) => alreadyBilledEligible(i))
-      ? supabase
-          .from("invoices")
-          .select("id", { count: "exact", head: true })
-          .is("job_id", null)
-          .eq("customer_id", (j as any).customer_id)
-          .not("status", "in", "(draft,void)")
-          .or("invoice_kind.is.null,invoice_kind.neq.deposit")
-          .then(
-            (r: { count: number | null; error: unknown }) => (r.error ? 0 : (r.count ?? 0)),
-            () => 0,
-          )
-      : Promise.resolve(0),
   ]);
   // PROJECTION at the boundary: staff get the money; a tech's view is HOURS ONLY — no rate, no
   // amount, no bills, no crew (a tech reads only his own rows, so the hours ARE his) — built here
@@ -528,12 +511,12 @@ export default async function JobDetailPage({
     viewerIsStaff && billsActuals && !costGroups
       ? "Couldn't tell which bills are on an invoice right now, so this is every bill on the job. The Invoices tab has what each invoice holds."
       : null;
-  // ALREADY BILLED (0357, Erik's Purple Sage). Only where the piles exist (staff, a job that bills
-  // its actuals, the claims readable): Already Billed on a Not Billed Yet row when some sent bill
-  // (the job's, or the customer's with no job) could hold it; Billed By Hand · Not Billed After All
-  // on a row a person marked. The hours line gets the same pair below.
-  const alreadyBilledOffer =
-    ((invoices ?? []) as any[]).some((i) => alreadyBilledEligible(i)) || (Number(joblessBills) || 0) > 0;
+  // ALREADY BILLED (0357, Erik's Purple Sage). Only where the piles exist (staff, a Time & Material
+  // job that bills its actuals, the claims readable): Already Billed on a Not Billed Yet row when
+  // some sent bill of the job's own could hold it (never one with no job: a T&M job's work to date
+  // counts only its own invoices); Billed By Hand · Not Billed After All on a row a person marked.
+  // The hours line gets the same pair below.
+  const alreadyBilledOffer = ((invoices ?? []) as any[]).some((i) => alreadyBilledEligible(i));
   const handById = handClaims?.ready ? handClaims.byId : null;
   const alreadyBilledDoors = costGroups
     ? jobAlreadyBilledDoors({

@@ -95,12 +95,12 @@ d("0357: Already Billed", () => {
   const tryUnmark = (who: string, line: string, ids: string[]) => refusal(who, () => c.query("select public.unmark_already_billed($1, $2::uuid[])", [line, ids]));
 
   // ── fixtures, as the server ──
-  const newJob = async (customer: string, label: string, orgId = org) =>
+  const newJob = async (customer: string, label: string, orgId = org, billing = "tm") =>
     (
       await one(
         `insert into public.jobs (org_id, customer_id, name, job_number, status, billing_type)
-         values ($1, $2, $3, $3, 'in_progress', 'tm') returning id`,
-        [orgId, customer, `TEST-AB-${label}`],
+         values ($1, $2, $3, $3, 'in_progress', $4) returning id`,
+        [orgId, customer, `TEST-AB-${label}`, billing],
       )
     ).id as string;
   const invoice = async (job: string | null, status: string, kind = "standard", customer = cust, orgId = org) =>
@@ -385,14 +385,18 @@ d("0357: Already Billed", () => {
     expect((await tryMark(staff, materials, take2.moves.map((m) => m.move_id)))?.message).toMatch(/was undone/);
   });
 
-  it("an invoice with no job takes rows from its customer's jobs, never another customer's", async () => {
+  it("an invoice with no job takes rows from its customer's jobs that aren't Time & Material, never another customer's", async () => {
     if (!go()) return;
     const inv = await invoice(null, "paid");
     const materials = await line(inv, { description: "Materials", price: 80 });
     await settleTotal(inv);
-    const mine = await bill(jobB, 64);
+    const fixedJob = await newJob(cust, "F", org, "fixed");
+    const mine = await bill(fixedJob, 64);
     const notMine = await bill(jobOther, 64);
+    const onTm = await bill(jobB, 64);
     expect((await tryMark(staff, materials, [notMine]))?.message).toMatch(/on another job/);
+    // A Time & Material job's work to date counts only its own invoices: its rows go on one of those.
+    expect((await tryMark(staff, materials, [onTm]))?.message).toMatch(/has no job, and a Time & Material job counts only its own invoices in its work to date\. .*Nothing was changed\./);
     expect((await mark(staff, materials, [mine])).added).toEqual([mine]);
   });
 

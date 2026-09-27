@@ -34,8 +34,9 @@
 --        anything but a line typed by hand that takes money off, or a purchase onto one; anything
 --        that is not a live bill, a live purchase order, a closed shift (a split one WHOLE: every
 --        unbilled closed piece of it on the job) or a WHOLE live take from stock on the invoice's
---        job (an invoice with no job: on one of its customer's jobs; a take
---        only ever on its own job's invoice, 0343); an id already on any live invoice, this one
+--        job (an invoice with no job: on one of its customer's jobs that isn't Time & Material,
+--        whose work to date counts only its own invoices; a take only ever on its own job's
+--        invoice, 0343); an id already on any live invoice, this one
 --        included (0258 allows a repeat on one invoice; this does not).
 --      It changes the claim lists and nothing else, and it checks: if the line's total, the
 --      invoice's total or its status moved, it raises and nothing is kept. Unmark removes only ids
@@ -338,6 +339,23 @@ begin
 
     raise exception 'One of those isn''t a receipt, an order, a shift or a take from stock in your books. Nothing was changed.' using errcode = 'P0002';
   end loop;
+
+  -- A TIME & MATERIAL JOB'S WORK TO DATE COUNTS ITS OWN INVOICES (tmWorkToDate reads billed work from
+  -- the job's invoices): a row of one held on an invoice with no job would drop out of it. So its
+  -- rows go on a line of one of its own invoices.
+  if v_inv.job_id is null and exists (
+    select 1
+      from public.jobs j
+     where j.org_id = v_org
+       and j.billing_type = 'tm'
+       and j.id in (select b.job_id from public.bills b where b.id = any (v_ids) and b.org_id = v_org
+                    union all
+                    select p.job_id from public.purchase_orders p where p.id = any (v_ids) and p.org_id = v_org
+                    union all
+                    select t.job_id from public.time_entries t where t.id = any (v_ids) and t.org_id = v_org)
+  ) then
+    raise exception '% has no job, and a Time & Material job counts only its own invoices in its work to date. Pick a line on one of that job''s invoices. Nothing was changed.', v_num using errcode = 'P0001';
+  end if;
 
   -- A TAKE IS BILLED WHOLE: every live draw of each take named here, or none of it.
   if exists (

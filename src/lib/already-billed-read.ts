@@ -154,12 +154,14 @@ export async function loadAlreadyBilledSheet(supabase: Db, orgId: string, jobId:
   const settings = getOrgSettings((orgRead.data as { settings?: unknown } | null)?.settings);
 
   // The bills: the job's, and its customer's with no job. With hand_claims, which is how 0357 is known.
+  // Never a no-job bill for a Time & Material job: its work to date counts only its own invoices
+  // (tmWorkToDate), so a row held on one would drop out of it (mark_already_billed refuses it too).
   const invRead = await supabase
     .from("invoices")
     .select(`id, invoice_number, status, invoice_kind, job_id, created_at, invoice_items(${LINE_COLUMNS})`)
     .eq("org_id", orgId)
     .neq("status", "void")
-    .or(jobOrCustomersJobless(job.id, job.customer_id));
+    .or(jobOrCustomersJobless(job.id, job.billing_type === "tm" ? null : job.customer_id));
   if (invRead.error) {
     if (isMissingHandClaims(invRead.error)) return { ok: false, error: NEEDS_UPDATE, needsUpdate: true };
     return { ok: false, error: "Couldn't read this job's bills just now. Nothing was changed - try again in a moment." };
