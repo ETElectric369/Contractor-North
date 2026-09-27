@@ -2,7 +2,7 @@
  * ONE RECEIPT UPLOADER — every door that takes a bill's paper on a job runs THIS pipeline.
  *
  * Three doors take a receipt: the Costs tab's Snap the Bill / Upload (job-cost-capture), the
- * Receipts & Documents uploader (job-documents) and the Add Cost sheet's photo (quick-cost-button).
+ * Receipts & Papers uploader (job-documents) and the Add Cost sheet's photo (quick-cost-button).
  * Each carried its own copy of prep → path → upload → file → read, and the copies drifted: one
  * gated at 15 MB where the reader refuses at 8, one handed the reader raw HEICs it could only
  * refuse, one swallowed the reader's sentence. The steps and the numbers now live here once; a
@@ -14,7 +14,7 @@
  * reads the paper and WRITES the itemized bill. Nothing captured is lost on the way and nothing
  * fails silently: a file the reader can't take (over its cap, a name it refuses, no total) is
  * still FILED, and the outcome says so in a sentence that names the retry (Record as Cost under
- * Receipts & Documents) and the typed door (Add Cost).
+ * Receipts & Papers) and the typed door (Add Cost).
  */
 
 import { uploadJobFile } from "@/lib/job-file-upload";
@@ -72,7 +72,7 @@ export function prettyBytes(n: number | null | undefined): string {
 }
 
 const TYPED_DOOR = "or type it in with Add Cost.";
-const RETRY_DOOR = "Filed on the job under Receipts & Documents — Record As Cost there once it's fixed, " + TYPED_DOOR;
+const RETRY_DOOR = "Filed on the job under Receipts & Papers — Record As Cost there once it's fixed, " + TYPED_DOOR;
 
 /**
  * Prep → upload → file. Returns the documents row's id (what the reader and the bill link need).
@@ -167,7 +167,7 @@ export async function captureReceipt(o: {
       docId: filed.docId,
       tone: "warn",
       why: "over_cap",
-      sentence: `Filed on the job, but not read — it's ${prettyBytes(filed.size)} and ${o.nortOn === false ? "receipts are read" : "Nort reads receipts"} up to ${RECEIPT_READ_MAX_LABEL}. Shrink it and tap Record As Cost under Receipts & Documents, ${TYPED_DOOR}`,
+      sentence: `Filed on the job, but not read — it's ${prettyBytes(filed.size)} and ${o.nortOn === false ? "receipts are read" : "Nort reads receipts"} up to ${RECEIPT_READ_MAX_LABEL}. Shrink it and tap Record As Cost under Receipts & Papers, ${TYPED_DOOR}`,
     };
   }
   return readReceiptDocument(filed.docId, o.stated, o.nortOn !== false);
