@@ -24,21 +24,23 @@ interface Member {
  *  `menuItem` renders the trigger as a full-width menu row (for the /team ⋯ menu)
  *  instead of the pencil icon; the modal renders IN-PLACE, so the menu that owns
  *  this must stay mounted while it's open (see TeamMemberMenu's modal-rule handler).
- *  `crewLeadDoor` is the Daily Reports switch (0352): off, no Crew Leader box (the flag a member
- *  has is kept as it is). The home address and commute baseline stay whatever the switches: the
- *  Tax Report's mileage deduction reads them. */
+ *  The Crew Leader box is drawn whatever the switches: since 0356 the flag also lets its holder
+ *  fill in the walk-through on a visit they're on, and that reads no switch, so the office must
+ *  always be able to grant it and take it away. `dailyReports` (the 0352 switch) only picks the
+ *  box's line: off, it says nothing about a clock-out report. The home address and commute
+ *  baseline stay whatever the switches: the Tax Report's mileage deduction reads them. */
 export function EditMemberButton({
   member,
   isSelf,
   authConfigured,
-  crewLeadDoor = true,
+  dailyReports = true,
   menuItem = false,
   rowClassName,
 }: {
   member: Member;
   isSelf: boolean;
   authConfigured: boolean;
-  crewLeadDoor?: boolean;
+  dailyReports?: boolean;
   menuItem?: boolean;
   rowClassName?: string;
 }) {
@@ -168,24 +170,32 @@ export function EditMemberButton({
               </div>
             </div>
           )}
-          {/* Crew lead (any role): Nort asks them the end-of-day debrief — "what did you
-              do today?" + "what materials tomorrow?" — right after they clock out. */}
-          {crewLeadDoor && (
-            <label className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2.5 text-sm">
-              <input
-                type="checkbox"
-                checked={crewLead}
-                onChange={(e) => setCrewLead(e.target.checked)}
-                className="h-4 w-4 rounded border-slate-300 text-brand"
-              />
-              <span className="text-slate-700">
-                Crew Leader
-                <span className="block text-xs text-slate-400">
-                  Files a daily report at clock-out (what got done + materials for tomorrow).
-                </span>
+          {/* Crew lead (any role): with Daily Reports on, Nort asks them the end-of-day debrief —
+              "what did you do today?" + "what materials tomorrow?" — right after they clock out. And
+              (0356) it is the switch that lets them fill in the walk-through on a visit they're on,
+              whatever the switches say, so the box is always here and says both while Daily Reports
+              is on: turning it on for the debrief must not silently hand over the walk-through. */}
+          <label className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2.5 text-sm">
+            <input
+              type="checkbox"
+              checked={crewLead}
+              onChange={(e) => setCrewLead(e.target.checked)}
+              className="h-4 w-4 rounded border-slate-300 text-brand"
+            />
+            <span className="text-slate-700">
+              Crew Leader
+              <span className="block text-xs text-slate-400">
+                {dailyReports ? (
+                  <>
+                    Files a daily report at clock-out (what got done + materials for tomorrow), and fills in
+                    the walk-through on visits they&rsquo;re assigned to. The office still prices it.
+                  </>
+                ) : (
+                  <>Fills in the walk-through on visits they&rsquo;re assigned to. The office still prices it.</>
+                )}
               </span>
-            </label>
-          )}
+            </span>
+          </label>
 
           <div className="border-t border-slate-100 pt-4">
             <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Login</div>

@@ -43,15 +43,16 @@ export function TeamMemberMenu({
   isSelf,
   isOwnerRow,
   authConfigured,
-  crewLeadDoor = true,
+  dailyReports = true,
 }: {
   member: Member;
   isSelf: boolean;
   /** The member being managed is the org owner — never offer deactivate/remove. */
   isOwnerRow: boolean;
   authConfigured: boolean;
-  /** The Daily Reports switch (0352): off, the edit has no Crew Leader box. */
-  crewLeadDoor?: boolean;
+  /** The Daily Reports switch (0352): off, the edit's Crew Leader box says nothing about a
+   *  clock-out report. The box itself is always drawn (0356: it also grants the walk-through). */
+  dailyReports?: boolean;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -176,7 +177,7 @@ export function TeamMemberMenu({
             member={member}
             isSelf={isSelf}
             authConfigured={authConfigured}
-            crewLeadDoor={crewLeadDoor}
+            dailyReports={dailyReports}
             menuItem
             rowClassName={ROW_CLS}
           />
