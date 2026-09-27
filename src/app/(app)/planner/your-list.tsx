@@ -22,6 +22,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
 import { MoveToDay } from "@/components/move-to-day";
+import { SHEET_ROW } from "@/components/row-more-sheet";
 import { useToast } from "@/components/toast";
 import { formatDate } from "@/lib/utils";
 import { createTask, toggleTask, updateTask, type ToggleTaskResult } from "../tasks/actions";
@@ -64,9 +65,6 @@ function dueChip(due: string | null, todayStr: string): { label: string; overdue
   if (due === todayStr) return { label: "Today", overdue: false };
   return { label: formatDate(due), overdue: false };
 }
-
-const SHEET_ROW =
-  "flex min-h-[44px] w-full items-center rounded-lg border border-slate-200 bg-white px-4 text-left text-sm font-medium text-slate-700 hover:border-brand hover:text-brand disabled:opacity-50";
 
 /**
  * THE ADD LINE at the top of Today's 6. One line, one optional chip, one button:

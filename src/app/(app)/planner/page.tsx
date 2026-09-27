@@ -22,8 +22,8 @@ import { rankSix } from "@/lib/six-rank";
 import { getActionItems } from "@/lib/action-items/query";
 import { ActionList } from "@/components/action-items/action-list";
 import { SupplierPaperDoneTrail, SUPPLIER_PAPERS_SCOPE } from "@/components/supplier-paper-cards";
-import { AppointmentButton, type ApptValue } from "../appointments/appointment-button";
-import { JobMoveButton, ApptMoveButton, ApptDoneButton } from "./agenda-move";
+import type { ApptValue } from "../appointments/appointment-button";
+import { AgendaRowMenu } from "./agenda-move";
 import { NowTasks } from "./now-tasks";
 import { QuickCostButton } from "@/components/quick-cost-button";
 import { MarkReportReviewedButton } from "./mark-report-reviewed-button";
@@ -388,8 +388,9 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
     href: string;
     status?: string;
     apptType?: string;
-    // Row verbs (staff, day view only): the appt record powers the edit pencil +
-    // move; jobs carry just what their move contract needs.
+    // The row's ⋯ (staff, day view AND week view): a visit's record powers Mark Done, Move and Edit
+    // Details; a job carries just what its move contract needs (its id; the row's day is handed to
+    // agendaRows). The week view's visits carry no record, so they get no ⋯.
     appt?: ApptValue;
     jobId?: string;
     /** The person waiting — powers the running-late one-tap text on the NEXT visit. */
@@ -594,7 +595,10 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
 
   const navBtnCls =
     "inline-flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center gap-1.5 rounded-lg border border-brand/30 bg-brand-light/40 px-3 text-xs font-medium text-brand hover:bg-brand-light";
-  const agendaRows = (items: Agenda[]) =>
+  // `day` is the ROW's own day (org tz): today in the day view, that day in the week view. A job's
+  // Move moves the range that day sits in (moveJobDay's fromDate), so Thursday's row of a Mon-Tue +
+  // Thu-Fri job moves Thu-Fri, never Mon-Tue.
+  const agendaRows = (items: Agenda[], day: string) =>
     items.map((i) => (
       <li key={i.key} className="flex items-center gap-3 px-5 py-3">
         <div className="w-14 shrink-0 text-sm font-medium text-slate-700">{i.time ? fmtTime(i.time) : "—"}</div>
@@ -625,7 +629,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
               className={navBtnCls}
               title="Running late? Opens a heads-up text from this phone"
             >
-              <MessageSquare className="h-4 w-4 shrink-0" /> <span className="hidden sm:inline">Running late?</span>
+              <MessageSquare className="h-4 w-4 shrink-0" /> <span className="hidden sm:inline">Running Late?</span>
             </a>
           )}
           {i.address && (
@@ -633,22 +637,24 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
               <Navigation className="h-4 w-4 shrink-0" /> <span className="hidden sm:inline">Navigate</span>
             </NavLink>
           )}
-          {/* Row verbs (staff): the edit pencil kills the old dead-end (appt row →
-              the job page's read-only tab); MoveToDay is the ONE reschedule
-              grammar app-wide. Techs keep plain rows — the actions are
-              staff-gated server-side. */}
-          {isStaff && i.appt && (
-            <AppointmentButton
+          {/* THE OFFICE'S VERBS, behind one 44px ⋯ (the app's one row sheet): a visit's Mark Done,
+              Move To Another Day… and Edit Details… (the edit kills the old dead end, appt row →
+              the job page's read-only tab); a job's Move To Another Day… only. MoveToDay is the ONE
+              reschedule grammar app-wide. Techs keep plain rows, no ⋯: the actions are staff-gated
+              server-side. A week-view visit carries no record, so it gets no ⋯. */}
+          {isStaff && (i.appt || i.jobId) && (
+            <AgendaRowMenu
+              title={i.title}
+              subline={[i.time ? fmtTime(i.time) : null, i.sub].filter(Boolean).join(" · ") || null}
+              appt={i.appt}
+              jobId={i.jobId}
+              fromDate={day}
+              tz={tz}
               jobs={jobOpts}
               customers={custOpts}
               staff={staffOpts}
-              appointment={i.appt}
-              triggerClassName="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-brand"
             />
           )}
-          {isStaff && i.appt && <ApptDoneButton id={i.appt.id} title={i.appt.title ?? "appointment"} />}
-          {isStaff && i.appt && <ApptMoveButton id={i.appt.id} startsAt={i.appt.starts_at} endsAt={i.appt.ends_at} tz={tz} />}
-          {isStaff && i.jobId && <JobMoveButton jobId={i.jobId} fromDate={todayStr} />}
         </div>
       </li>
     ));
@@ -913,7 +919,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
                   {d.label}{d.dayStr === todayStr ? " · Today" : ""}
                 </div>
                 {d.items.length > 0 ? (
-                  <ul className="divide-y divide-slate-100">{agendaRows(d.items)}</ul>
+                  <ul className="divide-y divide-slate-100">{agendaRows(d.items, d.dayStr)}</ul>
                 ) : (
                   <p className="px-5 py-2 text-xs text-slate-300">Open</p>
                 )}
@@ -950,19 +956,19 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
               {earlierAgenda.length > 0 && (
                 <>
                   <div className="bg-slate-50/70 px-5 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Earlier today</div>
-                  <ul className="divide-y divide-slate-100">{agendaRows(earlierAgenda)}</ul>
+                  <ul className="divide-y divide-slate-100">{agendaRows(earlierAgenda, todayStr)}</ul>
                 </>
               )}
               {nextAgenda.length > 0 && (
                 <>
                   <div className="bg-slate-50/70 px-5 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-brand">Next</div>
-                  <ul className="divide-y divide-slate-100">{agendaRows(nextAgenda)}</ul>
+                  <ul className="divide-y divide-slate-100">{agendaRows(nextAgenda, todayStr)}</ul>
                 </>
               )}
               {laterAgenda.length > 0 && (
                 <>
                   <div className="bg-slate-50/70 px-5 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400">Later</div>
-                  <ul className="divide-y divide-slate-100">{agendaRows(laterAgenda)}</ul>
+                  <ul className="divide-y divide-slate-100">{agendaRows(laterAgenda, todayStr)}</ul>
                 </>
               )}
             </>

@@ -1,13 +1,19 @@
 "use client";
 
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useId, useRef, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { Button } from "./button";
 import { lockBodyForModal, unlockBodyForModal } from "./modal-lock";
-import { shouldGuardBack, shouldRemoveEntry } from "./overlay-history";
+import { backStack, createBackStepper, escapeStack, shouldGuardBack } from "./overlay-history";
 import { keyboardClosed, revealScroll } from "./modal-keyboard";
 import { safeAreaTop } from "@/lib/native-shell";
+
+/** Every overlay that closes in the same moment steps history back once, together (overlay-history). */
+const stepBack = createBackStepper(
+  (n) => window.history.go(-n),
+  (fn) => queueMicrotask(fn),
+);
 
 export function Modal({
   open,
@@ -125,6 +131,11 @@ export function Modal({
    * DIRTY FORMS GET THE SAME TWO-TAP GUARD as every other dismissal: the first back re-pushes the
    * entry and arms "Tap again to discard", so a second back is what actually discards. Back
    * behaves exactly like tapping the backdrop twice, which is the point — one rule, not two.
+   *
+   * ONE BACK CLOSES ONE OVERLAY. A row's ⋯ sheet opens Move To Another Day or Edit Details above
+   * itself; a Back (or an Escape) closes the one on top and leaves the sheet, and the Move sheet's
+   * Cancel taking its own entry off is not a Back for the sheet under it. The order they opened in
+   * decides, in overlay-history's stack.
    */
   const poppedRef = useRef(false);
   const pushedRef = useRef(false);
@@ -132,6 +143,9 @@ export function Modal({
   onCloseRef.current = onClose;
   const guardRef = useRef({ dirty, confirmDiscard });
   guardRef.current = { dirty, confirmDiscard };
+  // This overlay's place in the page's stacks (overlay-history): a sheet opened above another one
+  // gets the Back and the Escape; the one under it waits its turn.
+  const overlayId = useId();
 
   useEffect(() => {
     if (!open || !historyClose || typeof window === "undefined") return;
@@ -139,8 +153,12 @@ export function Modal({
     const mark = () => window.history.pushState({ ...window.history.state, cnOverlay: true }, "");
     mark();
     pushedRef.current = true;
+    backStack.open(overlayId);
 
     const onPop = () => {
+      // ONE BACK, ONE OVERLAY: an overlay under another leaves the Back to the one on top, and the
+      // pop an overlay above made taking its own entry off (after Cancel) is not a Back at all.
+      if (!backStack.ownsPop(overlayId)) return;
       if (shouldGuardBack(guardRef.current)) {
         // Put the entry back so the user is still "inside" the overlay, and arm the notice.
         mark();
@@ -154,12 +172,12 @@ export function Modal({
     return () => {
       window.removeEventListener("popstate", onPop);
       const stillOurs = !!(window.history.state && (window.history.state as { cnOverlay?: boolean }).cnOverlay);
-      if (shouldRemoveEntry({ pushed: pushedRef.current, popped: poppedRef.current, stillOurs })) {
-        window.history.back();
-      }
+      // The three cases (shouldRemoveEntry), plus an overlay still open above this one: the stack
+      // says how many entries come off now, and the steps of one moment go out as one.
+      stepBack(backStack.close(overlayId, { pushed: pushedRef.current, popped: poppedRef.current, stillOurs }));
       pushedRef.current = false;
     };
-  }, [open, historyClose]);
+  }, [open, historyClose, overlayId]);
 
   // Disarm whenever the modal opens or closes — a fresh open starts clean.
   useEffect(() => {
@@ -180,14 +198,17 @@ export function Modal({
   // so the body.modal-open flag other menus watch) runs in EITHER mode.
   useEffect(() => {
     if (!open) return;
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && requestCloseRef.current();
+    // Escape closes the overlay on top only: the Move sheet, not the ⋯ sheet under it.
+    escapeStack.open(overlayId);
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && escapeStack.isTop(overlayId) && requestCloseRef.current();
     window.addEventListener("keydown", onKey);
     lockBodyForModal();
     return () => {
       window.removeEventListener("keydown", onKey);
+      escapeStack.close(overlayId, { pushed: false, popped: false, stillOurs: false });
       unlockBodyForModal();
     };
-  }, [open]);
+  }, [open, overlayId]);
 
   // Follow the visual viewport (position the overlay) AND cap the panel to it. On iOS the keyboard
   // pans the visual viewport down rather than shrinking the layout viewport, so a `fixed inset-0`
