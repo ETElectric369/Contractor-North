@@ -65,17 +65,20 @@ describe("the checklist", () => {
     }
   });
 
-  it("the footer says what's left to buy (tools are never 'to buy')", () => {
+  it("the footer says what's left to buy (tools are never 'to buy'), and labels the whole list's total", () => {
     expect(office()).toMatch(/2<!-- --> to buy|2 to buy/);
     expect(tech()).toMatch(/2<!-- --> to buy|2 to buy/);
+    // Every line, bought ones too (5 lines x 2 x $12.50), labelled so it never reads as the 2's cost.
+    expect(office()).toMatch(/List Total <span[^>]*>\$\s?125\.00</);
+    expect(tech()).not.toContain("List Total");
   });
 
-  it("everything bought: says so, and every line waits in the fold", () => {
+  it("everything bought: said once, in the footer, and every line waits in the fold", () => {
     const all = ITEMS.map((i) => ({ ...i, purchased: true }));
     const html = office(all);
-    expect(html).toContain("Everything on this list is bought.");
     expect(html).toMatch(/Bought \(<!-- -->5<!-- -->\)|Bought \(5\)/);
-    expect(html).toContain("Nothing left to buy");
+    expect(html.split("Nothing left to buy").length - 1).toBe(1);
+    expect(html).not.toContain("Everything on this list is bought.");
     expect(html).not.toContain("12-2 Romex");
   });
 

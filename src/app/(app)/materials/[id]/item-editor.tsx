@@ -356,8 +356,6 @@ export function ItemEditor({
     });
   }
 
-  const nothingOpen = items.length > 0 && groups.tools.length === 0 && groups.toBuy.length === 0;
-
   return (
     <div className="rounded-xl border border-slate-200 bg-white">
       {error && <div className="border-b border-red-100 bg-red-50 px-4 py-2 text-sm text-red-700">{error}</div>}
@@ -398,7 +396,6 @@ export function ItemEditor({
         )}
         {groups.toBuy.map(renderRow)}
         {items.length === 0 && <li className="px-4 py-6 text-center text-slate-400">No items yet — add one above.</li>}
-        {nothingOpen && <li className="px-4 py-3 text-sm text-slate-500">Everything on this list is bought.</li>}
       </ul>
 
       {/* THE BOUGHT FOLD: every checked line, closed until someone opens it. Unchecking a line in
@@ -418,12 +415,17 @@ export function ItemEditor({
         </div>
       )}
 
-      {/* The footer: what's left to buy, in plain words, and (office only) the list's est. total —
-          money, so it's the office's. */}
+      {/* The footer: what's left to buy, in plain words ("3 to buy", or "Nothing left to buy" once it
+          is all bought: said once, here), and (office only) the WHOLE list's est. total, bought lines
+          too. Labelled, so it never reads as the cost of the 3 beside it. Money, so it's the office's. */}
       {items.length > 0 && (
-        <div className="flex items-center justify-between border-t border-slate-100 px-4 py-2 text-sm">
+        <div className="flex items-center justify-between gap-3 border-t border-slate-100 px-4 py-2 text-sm">
           <span className="text-slate-500">{toBuyWords(openCount)}</span>
-          {viewerIsStaff && <span className="font-semibold text-slate-900">{formatCurrency(total)}</span>}
+          {viewerIsStaff && (
+            <span className="text-slate-500">
+              List Total <span className="font-semibold text-slate-900">{formatCurrency(total)}</span>
+            </span>
+          )}
         </div>
       )}
     </div>
