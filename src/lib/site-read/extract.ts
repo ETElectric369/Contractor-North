@@ -109,6 +109,16 @@ function lowerSameLength(s: string): string {
 const CODE = ["script", "style", "template", "svg"];
 const HIDDEN = ["noscript", "select", "iframe", "object", "canvas", "head", "title"];
 
+/** Where `close` ("</head", "-->") next appears from `from`, as a whole name: "</head" is not the
+ *  start of "</header", which a page that leaves out its </head> would otherwise cut to. Each skip
+ *  moves on past the false match, so the search still reads the page once. */
+function closeAt(lower: string, close: string, from: number): number {
+  let j = lower.indexOf(close, from);
+  if (close === "-->") return j;
+  while (j !== -1 && /[\w:-]/.test(lower[j + close.length] ?? "")) j = lower.indexOf(close, j + 1);
+  return j;
+}
+
 /**
  * Cut out comments and the named elements, in ONE left-to-right pass (as a browser reads: a comment
  * that opens first hides a script, and a script that opens first holds a comment). An unclosed one
@@ -138,7 +148,7 @@ function cutElements(html: string, names: readonly string[]): string {
       i = lower.indexOf("<", i + 1);
       continue;
     }
-    const j = noClose.has(close) ? -1 : lower.indexOf(close, i + open.length);
+    const j = noClose.has(close) ? -1 : closeAt(lower, close, i + open.length);
     out += `${html.slice(pos, i)} `;
     if (j === -1) {
       noClose.add(close);

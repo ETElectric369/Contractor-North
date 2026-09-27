@@ -188,6 +188,12 @@ describe("extractContact", () => {
     expect(extractContact(badDay, "https://crest.example/").fields).toEqual({ name: "Crest Electric", hours: "Mon 8 AM–5 PM" });
   });
 
+  it("reads the site header's words on a page that leaves out </head> (</head is not </header)", () => {
+    const html = `<html><head><title>Acme</title><body><header><p>Phone: (530) 555-0151</p></header><main>Welcome</main>`;
+    expect(visibleText(html)).toContain("Phone: (530) 555-0151\nWelcome");
+    expect(extractContact(html, "https://acme.example/").fields.phones).toEqual(["(530) 555-0151"]);
+  });
+
   it("gives back an empty card for a page with nothing on it, or garbage", () => {
     expect(extractContact("", "https://x.example/")).toEqual({ fields: {}, weak: [] });
     expect(extractContact("<<<>>>\u0000&#xZZ;", "not a url").fields).toEqual({});
@@ -211,6 +217,8 @@ describe("extractContact", () => {
     ["unclosed scripts", '<script type="application/ld+json">'.repeat(40_000)],
     ["unclosed meta quotes", '<meta content="'.repeat(90_000)],
     ["half tags", "<a <a <a ".repeat(160_000)],
+    ["heads and headers", "<head>".concat("</header>".repeat(160_000))],
+    ["heads with headers", "<head></header></head>".repeat(68_000)],
     ["itemprop bait", '<span itemprop="telephone" '.repeat(50_000)],
     // ONE tag, 1.47 MB long: a pattern that looks for itemprop anywhere in a tag re-scans it per attribute.
     ["one itemprop tag", `<span ${'itemprop="telephone" '.repeat(70_000)}`],
