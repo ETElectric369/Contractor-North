@@ -144,6 +144,30 @@ describe("My Day's cards (structural: the page is a server component over the da
     expect(pageCode).toMatch(/job=\{\s*currentJob\s*\?\s*\{\s*name: jobLabel\(currentJob\),\s*sub: [^\n]+\n\s*href: `\/jobs\/\$\{currentJob\.id\}`,\s*\}/);
   });
 
+  it("the Today card's header: no doors for the office, the tech's own Week link at 44px", () => {
+    const header = pageCode.slice(pageCode.indexOf('<CalendarCheck className="h-4 w-4 text-brand" /> Today'), pageCode.indexOf("Nothing else on the schedule today."));
+    expect(header).not.toMatch(/isStaff && <AppointmentButton/);
+    expect(header).not.toContain("<AppointmentButton");
+    expect(pageCode).not.toContain('"/schedule?view=week" : "/planner?view=week"');
+    // The Week link is the tech's, and only the tech's.
+    expect(header).toMatch(/\{!isStaff && \(\s*<Link\s+href="\/planner\?view=week"\s+className="[^"]*min-h-11[^"]*px-2[^"]*"/);
+    expect(pageCode.match(/Week →/g)).toHaveLength(1);
+    // The office still reaches both: THE week redirect stays, New Appointment stays on the + menu
+    // (lane 3's file) and the Schedule tile stays on the dock (lane 1b's file).
+    expect(page).toContain('if (view === "week" && isStaff) redirect("/schedule?view=week");');
+    expect(readFileSync(join(process.cwd(), "src/components/global-quick-add.tsx"), "utf8")).toContain('"New Appointment"');
+    const dock = readFileSync(join(process.cwd(), "src/lib/dock.ts"), "utf8");
+    expect(dock).toContain('key: "schedule"');
+    expect(dock).toContain('label: "Schedule"');
+  });
+
+  it("the tech's week pages at 44px too", () => {
+    for (const label of ["Previous week", "Next week"]) {
+      expect(pageCode).toMatch(new RegExp(`aria-label="${label}"\\s*className="flex h-11 w-11 `));
+    }
+    expect(pageCode).toMatch(/<Link href="\/planner\?view=week" className="inline-flex min-h-11 [^"]*">\s*This Week/);
+  });
+
   it("the quote sits below the Now card, then the office's Daily Reports, then the Today card", () => {
     const nowAt = pageCode.indexOf("</NowCard>");
     const quoteAt = pageCode.indexOf("{dailyQuote}");

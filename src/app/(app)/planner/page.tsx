@@ -877,23 +877,24 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
               <CalendarCheck className="h-4 w-4 shrink-0 text-brand" />
               <span className="truncate">{weekOffset === 0 ? "This week" : `Week of ${weekOfLabel}`}</span>
             </div>
-            <div className="-my-1 flex shrink-0 items-center gap-0.5">
+            {/* 44px, all three (the paging arrows were 36px): -my-3 keeps the header its height. */}
+            <div className="-my-3 flex shrink-0 items-center gap-0.5">
               <Link
                 href={`/planner?view=week&week=${weekOffset - 1}`}
                 aria-label="Previous week"
-                className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                className="flex h-11 w-11 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700"
               >
                 <ChevronLeft className="h-4 w-4" />
               </Link>
               {weekOffset !== 0 && (
-                <Link href="/planner?view=week" className="px-1 text-xs font-medium text-brand hover:underline">
+                <Link href="/planner?view=week" className="inline-flex min-h-11 items-center px-1 text-xs font-medium text-brand hover:underline">
                   This Week
                 </Link>
               )}
               <Link
                 href={`/planner?view=week&week=${weekOffset + 1}`}
                 aria-label="Next week"
-                className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                className="flex h-11 w-11 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700"
               >
                 <ChevronRight className="h-4 w-4" />
               </Link>
@@ -928,16 +929,17 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
             <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
               <CalendarCheck className="h-4 w-4 text-brand" /> Today
             </div>
-            <div className="flex shrink-0 items-center gap-2.5">
-              {isStaff && <AppointmentButton jobs={jobOpts} customers={custOpts} staff={staffOpts} defaultDate={todayStr} compact />}
-              {/* THE week lives at /schedule (staff); techs page their own week here. */}
+            {/* A tech pages his own week here. The office has no doors in this header: a new
+                appointment is + › New Appointment, and THE week is the Schedule tile (a staff
+                /planner?view=week still lands on /schedule?view=week, above). */}
+            {!isStaff && (
               <Link
-                href={isStaff ? "/schedule?view=week" : "/planner?view=week"}
-                className="whitespace-nowrap text-xs font-medium text-brand hover:underline"
+                href="/planner?view=week"
+                className="-my-3 inline-flex min-h-11 shrink-0 items-center whitespace-nowrap px-2 text-xs font-medium text-brand hover:underline"
               >
                 Week →
               </Link>
-            </div>
+            )}
           </div>
 
 
