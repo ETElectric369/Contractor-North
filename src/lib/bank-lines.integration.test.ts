@@ -5,7 +5,8 @@ import pg from "pg";
 import { assertTestDatabase, notOnThisDatabase } from "@/lib/db-guard";
 
 /**
- * Migrations 0362 + 0363: fuel is its own kind; a bank line is matched once (2026-09-27).
+ * Migrations 0362 + 0363 + 0365: fuel is its own kind; a bank line is matched once; bank answers are
+ * asked, not assumed (2026-09-27).
  *
  * Pinned here, against the real database, inside ONE transaction that is always rolled back:
  *   · bank_lines and bank_rules are STAFF-ONLY for every verb: a company's office reads and writes
@@ -21,8 +22,9 @@ import { assertTestDatabase, notOnThisDatabase } from "@/lib/db-guard";
  * nobody), and speaks as each by planting request.jwt.claims under `set local role authenticated`.
  * Everything is named TEST 0363; every date is 2001. Nothing is left behind.
  *
- * Until 0363 is applied the suite waits, loudly; WAIT_APPLY_0363=1 applies 0362 and 0363 INSIDE the
- * test's own transaction, which is rolled back, so the database is left exactly as it was.
+ * Until 0363 and 0365 are applied the suite waits, loudly; WAIT_APPLY_0363=1 applies whichever of
+ * 0362, 0363 and 0365 is missing INSIDE the test's own transaction, which is rolled back, so the
+ * database is left exactly as it was.
  *
  *   TEST_DB_HOST=… TEST_DB_USER=… TEST_DBPW=… [WAIT_APPLY_0363=1] npx vitest run <this file>
  */
@@ -30,6 +32,7 @@ const { TEST_DBPW, TEST_DB_HOST, TEST_DB_USER, WAIT_APPLY_0363 } = process.env;
 const d = TEST_DBPW && TEST_DB_HOST && TEST_DB_USER ? describe : describe.skip;
 const M0362 = fileURLToPath(new URL("../../supabase/migrations/0362_fuel_is_its_own_kind.sql", import.meta.url));
 const M0363 = fileURLToPath(new URL("../../supabase/migrations/0363_a_bank_line_is_matched_once.sql", import.meta.url));
+const M0365 = fileURLToPath(new URL("../../supabase/migrations/0365_bank_answers_are_asked_not_assumed.sql", import.meta.url));
 
 const KEY = (n: number) => `line:${String(n).padStart(64, "0")}`;
 
@@ -65,7 +68,7 @@ d("0362 + 0363: bank lines and rules are the company's own, and a line counts on
     }
   };
   const ready = () =>
-    !waiting || notOnThisDatabase("[bank-lines] 0363 is not on this database yet; set WAIT_APPLY_0363=1 to apply it inside the rolled-back transaction.");
+    !waiting || notOnThisDatabase("[bank-lines] 0363 or 0365 is not on this database yet; set WAIT_APPLY_0363=1 to apply them inside the rolled-back transaction.");
   const line = (org: string, n: number, over: Record<string, unknown> = {}) => {
     const row = { org_id: org, import_id: importA, line_key: KEY(n), posted_on: "2001-01-02", amount: -12.5, description: "SHELL 123 ANYTOWN", merchant_key: "shell", choice: "cost", bucket: "Gas & Truck", cost_kind: "fuel", sorted_by: "person", ...over };
     const cols = Object.keys(row);
@@ -81,7 +84,9 @@ d("0362 + 0363: bank lines and rules are the company's own, and a line counts on
     await c.query("set local lock_timeout = '3s'");
     await c.query("set local statement_timeout = '15s'");
     const has = await one("select to_regclass('public.bank_lines') is not null as yes");
-    if (!has.yes && WAIT_APPLY_0363 !== "1") {
+    // 0365 says so on bank_rules' own comment.
+    const has0365 = async () => (await one("select coalesce(obj_description(to_regclass('public.bank_rules'), 'pg_class'), '') like '%0365%' as yes")).yes;
+    if ((!has.yes || !(await has0365())) && WAIT_APPLY_0363 !== "1") {
       waiting = true;
       return;
     }
@@ -90,6 +95,7 @@ d("0362 + 0363: bank lines and rules are the company's own, and a line counts on
       if (!kind.yes) await c.query(readFileSync(M0362, "utf8"));
       await c.query(readFileSync(M0363, "utf8"));
     }
+    if (!(await has0365())) await c.query(readFileSync(M0365, "utf8"));
     const person = async (org: string, role: string, tag: string) => {
       const email = `test-0363-${tag}@example.test`;
       await c.query("insert into signup_allowlist (email, note) values ($1, 'TEST 0363') on conflict do nothing", [email]);
@@ -167,8 +173,10 @@ d("0362 + 0363: bank lines and rules are the company's own, and a line counts on
     expect(await refused("insert into bank_lines (org_id, import_id, line_key, posted_on, amount, choice, sorted_by) values ($1, $2, $3, '2001-01-02', -1, 'cost', 'person')", [orgA, importA, KEY(5)])).toBe("23514");
     expect(await refused("insert into bank_lines (org_id, import_id, line_key, posted_on, amount, choice, bucket, cost_kind, sorted_by) values ($1, $2, $3, '2001-01-02', -1, 'cost', 'Fees', 'fuel', 'person')", [orgA, importA, KEY(6)])).toBe("23514");
     expect(await refused("insert into bank_lines (org_id, import_id, line_key, posted_on, amount, choice, sorted_by) values ($1, $2, 'not-a-key', '2001-01-02', -1, 'personal', 'person')", [orgA, importA])).toBe("23514");
-    // A rule: income only comes in; one rule per merchant.
+    // A rule: money in may only say Not Income (Other Income is never a rule's); one rule per merchant.
     expect(await refused("insert into bank_rules (org_id, direction, merchant_key, choice) values ($1, 'out', 'venmo', 'other_income')", [orgA])).toBe("23514");
+    expect(await refused("insert into bank_rules (org_id, direction, merchant_key, choice) values ($1, 'in', 'regular', 'other_income')", [orgA])).toBe("23514");
+    expect(await refused("insert into bank_rules (org_id, direction, merchant_key, choice) values ($1, 'in', 'savings', 'not_income')", [orgA])).toBeNull();
     expect(await refused("insert into bank_rules (org_id, direction, merchant_key, choice) values ($1, 'out', 'shell', 'personal')", [orgA])).toBe("23505");
   });
 

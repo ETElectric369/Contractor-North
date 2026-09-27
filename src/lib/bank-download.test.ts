@@ -527,6 +527,39 @@ describe("the company's own rules", () => {
     expect(ruleFor(lineBy(dl, "DEPOSIT"), books.rules)).toBeNull();
   });
 
+  it("money in is never placed as Other Income by a rule, and a deposit or payout is always its own row", () => {
+    const dl = readBankTable(
+      parseCSV(`Date,Description,Amount
+09/02/2026,REGULAR DEPOSIT,900.00
+09/09/2026,REGULAR DEPOSIT,1250.00
+09/10/2026,VENMO CASHOUT,300.00
+09/11/2026,ZELLE FROM JANE CUSTOMER,450.00
+09/12/2026,ACME RENTALS REFUND,80.00
+`),
+      "x.csv",
+      hash,
+    )!;
+    const books = ORG_BOOKS({
+      invoices: [{ id: "inv-1", number: "INV-1", balanceCents: 125000 }],
+      rules: [
+        rule({ id: "r-reg", direction: "in", key: "regular", choice: "other_income", bucket: null, costKind: null }),
+        rule({ id: "r-acme", direction: "in", key: "acme", choice: "other_income", bucket: null, costKind: null }),
+        rule({ id: "r-jane", direction: "in", key: "jane", choice: "not_income", bucket: null, costKind: null }),
+      ],
+    });
+    const plan = planBankDownload(dl, books);
+    // No rule placed any of them: Other Income is never a rule's; Zelle is a payout, asked each time.
+    expect(plan.counts.ruled).toBe(0);
+    const row = (words: string) => plan.groups.find((g) => g.label.includes(words) && g.keys.length)!;
+    // Each deposit is its own row, so the one that is INV-1's balance offers INV-1.
+    const deposits = plan.groups.filter((g) => g.label === "REGULAR DEPOSIT");
+    expect(deposits).toHaveLength(2);
+    expect(deposits.every((g) => g.single && !g.learnable)).toBe(true);
+    expect(deposits.find((g) => g.cents === 125000)!.guess).toBe("invoice:inv-1");
+    expect(row("VENMO").learnable).toBe(false);
+    expect(row("ZELLE").learnable).toBe(false);
+  });
+
   it("a rule for a supplier or a person no longer here is not used", () => {
     const dl = download();
     const plan = planBankDownload(dl, ORG_BOOKS({ rules: [rule({ id: "r-gone", key: "dental", choice: "crew", bucket: null, costKind: null, profileId: "someone-gone" })] }));

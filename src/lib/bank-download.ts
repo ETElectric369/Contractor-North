@@ -300,6 +300,21 @@ export function isGenericKey(key: string): boolean {
   return words.includes("deposit") || words.includes("deposits") || key === "check" || key === "counter" || key === "branch";
 }
 
+/** The words a bank prints on money coming in that say HOW it came, never from whom. */
+const DEPOSIT_WORDS_RE = /\b(deposits?|dep|regular|mobile|branch|atm|counter|remote|teller|dslip|check|cheque|cash|payout|cashout|instant)\b/i;
+
+/**
+ * MONEY IN THAT MAY BE A CUSTOMER'S: a deposit (regular, mobile, branch, ATM, remote) or a payout
+ * from a card processor or payment app (Stripe, Square, Venmo, Zelle, PayPal). Every one of them is
+ * a row of its own, so an invoice can be offered, and none is ever placed by a rule or teaches one:
+ * "REGULAR DEPOSIT" or "VENMO" names how the money came, never whose it was, and a rule on it would
+ * file the next customer payment without asking.
+ */
+export function isCustomerMoneyIn(line: Pick<BankLine, "cents" | "description" | "merchantKey">): boolean {
+  if (line.cents <= 0) return false;
+  return isGenericKey(line.merchantKey) || DEPOSIT_WORDS_RE.test(line.description) || PROCESSOR_RE.test(line.description);
+}
+
 /** A line that is a check and says nothing else about who it paid. */
 export function isBareCheck(line: Pick<BankLine, "check" | "merchantKey">): boolean {
   return !!line.check && (line.merchantKey === "" || line.merchantKey === "check" || line.merchantKey === "chk");
@@ -832,7 +847,7 @@ export function guessFor(line: BankLine, books: BankBooks): BankChoice | null {
  *  longest such key winning. Checks with no payee and bare deposits are never placed by a rule. */
 export function ruleFor(line: BankLine, rules: readonly BooksRule[]): BooksRule | null {
   const direction = line.cents > 0 ? "in" : "out";
-  if (isBareCheck(line) || isGenericKey(line.merchantKey) || !line.merchantKey) return null;
+  if (isBareCheck(line) || isGenericKey(line.merchantKey) || !line.merchantKey || isCustomerMoneyIn(line)) return null;
   const words = merchantWords(line.description).join(" ");
   const own = line.merchantKey;
   let best: BooksRule | null = null;
@@ -848,6 +863,10 @@ export function ruleFor(line: BankLine, rules: readonly BooksRule[]): BooksRule 
 /** A rule's choice, if it can still be used (its supplier or crew member is still here). */
 export function ruleChoice(r: BooksRule, books: Pick<BankBooks, "accounts" | "crew">): BankChoice | null {
   switch (r.choice) {
+    // OTHER INCOME IS NEVER A RULE'S (0363): money in that is income is a customer's until a person
+    // says otherwise, every time. A rule on money in may only say Not Income.
+    case "other_income":
+      return null;
     case "cost":
       if (!isBusinessCostBucket(r.bucket)) return null;
       return { choice: "cost", bucket: r.bucket, costKind: r.bucket === "Gas & Truck" && (r.costKind === "fuel" || r.costKind === "truck") ? r.costKind : null };
@@ -992,7 +1011,9 @@ export function planBankDownload(dl: BankDownload, books: BankBooks): BankPlan {
     }
     const rule = ruleFor(line, books.rules);
     const rc = rule ? ruleChoice(rule, books) : null;
-    if (rule && rc && choiceFits(rc, line.cents > 0 ? "in" : "out")) {
+    // Money in that is exactly an open invoice's balance is asked, whatever a rule says.
+    const onInvoice = line.cents > 0 && guessFor(line, books)?.choice === "invoice";
+    if (rule && rc && !onInvoice && choiceFits(rc, line.cents > 0 ? "in" : "out")) {
       dispositions.set(line.key, { how: "rule", ruleId: rule.id, choice: rc });
       counts.ruled++;
       continue;
@@ -1001,7 +1022,8 @@ export function planBankDownload(dl: BankDownload, books: BankBooks): BankPlan {
     // merchant words is a row of its own.
     const direction = line.cents > 0 ? "in" : "out";
     const guess = guessFor(line, books);
-    const single = isBareCheck(line) || !line.merchantKey || isGenericKey(line.merchantKey) || guess?.choice === "invoice" || (direction === "out" && !!line.check);
+    const single =
+      isBareCheck(line) || !line.merchantKey || isGenericKey(line.merchantKey) || guess?.choice === "invoice" || (direction === "out" && !!line.check) || isCustomerMoneyIn(line);
     const id = single ? `line:${line.key.slice(-16)}` : `${direction}:${line.merchantKey}`;
     let g = groups.get(id);
     if (!g) {

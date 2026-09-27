@@ -588,7 +588,9 @@ export async function applyBankCore(
   const learned = new Map<string, { direction: "in" | "out"; key: string; c: BankChoice }>();
   const groupsById = new Map(plan.groups.map((g) => [g.id, g]));
   for (const w of work) {
-    if (w.sortedBy !== "person" || !w.group || !written(w) || !w.choice || w.choice.choice === "invoice") continue;
+    // Never an invoice (one deposit, one invoice) and never Other Income (0363: money in is a
+    // customer's until a person says otherwise, every time).
+    if (w.sortedBy !== "person" || !w.group || !written(w) || !w.choice || w.choice.choice === "invoice" || w.choice.choice === "other_income") continue;
     const g = groupsById.get(w.group);
     if (!g?.learnable || g.merchantKey.length < 2) continue;
     learned.set(`${g.direction}:${g.merchantKey}`, { direction: g.direction, key: g.merchantKey, c: w.choice });
