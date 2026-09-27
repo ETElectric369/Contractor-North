@@ -5,6 +5,7 @@ import { dirname, extname, join } from "node:path";
 import {
   NET_LABEL,
   OWNER_HIDDEN_NOTE,
+  OWNER_HIDDEN_WHY,
   STOCK_BOUGHT_LABEL,
   STOCK_LOST_LABEL,
   TAB_NAMES,
@@ -16,6 +17,7 @@ import {
   defaultAccountantPeriod,
   fileSafeName,
   lastDayShown,
+  nothingInFigures,
   parseAccountantPeriod,
   periodChoices,
   periodFromKey,
@@ -418,6 +420,34 @@ describe("the owner's switch: an office download without Owner's Draw", () => {
     const costTotal = costRows.reduce((s, l) => s + toCents(l.of(cur.totals)), 0);
     for (const secret of [toCents(cur.totals.left), toCents(cur.totals.received), costTotal]) expect(moneyInTable).not.toContain(secret);
   });
+
+  it("no tab carries a bottom-line figure: no Received row on Income, and Received, Total Costs and Net are nowhere in the file", () => {
+    const costTotal = summaryLines(true)
+      .filter((l) => l.cost)
+      .reduce((s, l) => s + toCents(l.of(cur.totals)), 0);
+    const secrets = [toCents(cur.totals.received), costTotal, toCents(cur.totals.left)];
+    // The fixture keeps the three apart from every list's own sum, so a hit here is a real leak.
+    expect(new Set(secrets).size).toBe(3);
+    for (const t of wb.tabs) {
+      const labels = t.rows.map((r) => r.cells[0]);
+      for (const gone of ["Received", "Total Costs", NET_LABEL]) expect(labels, `${t.name}: ${gone}`).not.toContain(gone);
+      const moneyCells = t.rows.flatMap((r) => r.cells.map(cents)).filter((c): c is number => c != null);
+      for (const secret of secrets) expect(moneyCells, `${t.name}: ${secret}`).not.toContain(secret);
+    }
+    // The owner's own download still has it, to the cent.
+    const own = tab(buildAccountantWorkbook(input()), "Income");
+    expect(cents(rowOf(own, "Received")!.cells[6])).toBe(toCents(cur.totals.received));
+    // And no line in the office's file points to a Received it doesn't carry.
+    expect(everyText(wb).some((s) => /\bin Received\b/.test(s))).toBe(false);
+  });
+
+  it("the page's words say what the file leaves out and what it keeps, and the file keeps its word", () => {
+    expect(OWNER_HIDDEN_WHY).toContain("Received, Total Costs, Net and the owner's own rows are left out, here and in the file");
+    // The lists stay with their own totals: said, not promised away.
+    expect(OWNER_HIDDEN_WHY).toContain("with each list's own total");
+    expect(rowOf(tab(wb, "Income"), "Payments")).toBeTruthy();
+    expect(rowOf(tab(wb, "People"), "Crew Total")).toBeTruthy();
+  });
 });
 
 describe("what suppliers are owed is /bills' rule: an account paid ahead doesn't come off the others", () => {
@@ -486,12 +516,43 @@ describe("a period not over yet is compared with the same days of the period bef
 });
 
 describe("a period before North's records says so, never a silent $0.00", () => {
-  it("the page's line and the file's note", () => {
-    expect(beforeRecordsLine(periodFromKey("2025")!, "2026-02-03")).toBe("North has no records before Feb 3, 2026, so 2025 has nothing in it.");
-    expect(beforeRecordsLine(Q2, "2026-02-03")).toBeNull();
-    expect(beforeRecordsLine(Q2, null)).toBeNull();
-    const s = tab(buildAccountantWorkbook(input({ period: periodFromKey("2025")! })), "Summary");
+  it("the page's line and the file's note, when every figure is zero", () => {
+    const y2025 = periodFromKey("2025")!;
+    const f2025 = computeOwnerMoney(money(), periodWindow(y2025), TZ, TODAY).totals;
+    expect(beforeRecordsLine(y2025, "2026-02-03", f2025)).toEqual({ text: "North has no records before Feb 3, 2026, so 2025 has nothing in it.", nothing: true });
+    const fQ2 = computeOwnerMoney(money(), periodWindow(Q2), TZ, TODAY).totals;
+    expect(beforeRecordsLine(Q2, "2026-02-03", fQ2)).toBeNull();
+    expect(beforeRecordsLine(Q2, null, fQ2)).toBeNull();
+    const s = tab(buildAccountantWorkbook(input({ period: y2025 })), "Summary");
     expect(s.rows.map((r) => r.cells[0])).toContain("North has no records before Feb 3, 2026, so 2025 has nothing in it.");
+  });
+
+  it("a receipt dated before the records still counts: the figures show, and it never says 'nothing in it'", () => {
+    // Records start with the first payment or shift; a bill is never a start (a receipt entered later
+    // with an older date counts in its own month). The fixture's $40 Fuel ticket is dated Mar 3.
+    const m = money();
+    m.recordsStart = "2026-04-01";
+    const march = periodFromKey("2026-03")!;
+    const f = computeOwnerMoney(m, periodWindow(march), TZ, TODAY).totals;
+    expect(f).toMatchObject({ received: 0, fuel: 40, left: -40 });
+    const line = beforeRecordsLine(march, "2026-04-01", f)!;
+    expect(line.nothing).toBe(false); // the page shows Received and Net, with this line under them
+    expect(line.text).not.toContain("nothing in it");
+    expect(line.text).toBe("North's records start Apr 1, 2026. What March 2026 shows was dated before then (a receipt entered later still counts in its own month).");
+    const s = tab(buildAccountantWorkbook(input({ period: march, money: m })), "Summary");
+    const texts = s.rows.map((r) => String(r.cells[0] ?? ""));
+    expect(texts.some((t) => t.includes("nothing in it"))).toBe(false);
+    expect(texts).toContain(line.text);
+    expect(cents(rowOf(s, "Fuel")!.cells[1])).toBe(4000);
+    expect(cents(rowOf(s, NET_LABEL)!.cells[1])).toBe(-4000);
+  });
+
+  it("nothing in it means nothing: any figure, owner hours included, is something", () => {
+    const zero = computeOwnerMoney(money(), periodWindow(periodFromKey("2025")!), TZ, TODAY).totals;
+    expect(nothingInFigures(zero)).toBe(true);
+    expect(nothingInFigures({ ...zero, ownerHours: 2 })).toBe(false);
+    expect(nothingInFigures({ ...zero, businessCosts: { ...zero.businessCosts, Auto: 12 } })).toBe(false);
+    expect(nothingInFigures({ ...zero, crewPay: 0.01 })).toBe(false);
   });
 });
 
@@ -562,6 +623,16 @@ describe("periods: whole months only", () => {
     expect(defaultAccountantPeriod(TODAY).key).toBe("2026");
     expect(periodChoices("quarter", TODAY).map((p) => p.key)).toEqual(["2026-Q3", "2026-Q2", "2026-Q1", "2025-Q4", "2025-Q3", "2025-Q2", "2025-Q1", "2024-Q4"]);
     expect(periodChoices("month", TODAY)).toHaveLength(24);
+    // A bookmarked month older than the list (parseAccountantPeriod takes 20 years): it is among the
+    // choices, in date order, so the picker shows the month the page and the file are.
+    const may2024 = parseAccountantPeriod("2024-05", TODAY)!;
+    const withOld = periodChoices("month", TODAY, may2024).map((p) => p.key);
+    expect(withOld).toHaveLength(25);
+    expect(withOld[0]).toBe("2026-09");
+    expect(withOld.at(-1)).toBe("2024-05");
+    expect(periodChoices("month", TODAY, periodFromKey("2026-03")).map((p) => p.key)).toEqual(periodChoices("month", TODAY).map((p) => p.key));
+    expect(periodChoices("quarter", TODAY, periodFromKey("2019-Q2")).map((p) => p.key).at(-1)).toBe("2019-Q2");
+    expect(periodChoices("year", TODAY, periodFromKey("2010")).map((p) => p.key)).toEqual(["2026", "2025", "2024", "2023", "2022", "2021", "2010"]);
     expect(lastDayShown(periodFromKey("2026-Q3")!, TODAY)).toBe(TODAY);
     expect(lastDayShown(Q2, TODAY)).toBe("2026-06-30");
     // What the page and the route both read: the period and the one before.

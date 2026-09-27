@@ -53,9 +53,11 @@ import { buildZip, type DeflateRaw } from "@/lib/zip-write";
  *
  * THE OWNER'S SWITCH: when the owner has not shared Owner's Draw with the office
  * (office_sees_owner_money), the bottom line is the owner's. An office download then carries NO
- * bottom-line figure at all: no Received total, no Total Costs, no Net, no change on them, and no
- * owner rows; the Summary keeps the cost rows one by one and says "The totals are the owner's." The
- * itemized tabs stay (the office already sees those records in the app).
+ * bottom-line figure on ANY tab: no Received (the Summary's or the Income tab's), no Total Costs, no
+ * Net, no change on them, and no owner rows; the Summary keeps the cost rows one by one and says
+ * "The totals are the owner's." The itemized tabs stay with each list's own total (Payments, what
+ * went to each supplier, Crew Total...): the office already sees those records in the app, and the
+ * page says so in as many words (OWNER_HIDDEN_WHY) rather than promise a secret the lists can't keep.
  *
  * A PERIOD NOT OVER YET is compared with the SAME DAYS of the period before ("2025 Through Sep 27"),
  * never with the whole of it, and its Change column says "So Far".
@@ -146,11 +148,17 @@ export function previousPeriod(p: AccountantPeriod): AccountantPeriod {
   return periodContaining(p.kind, day);
 }
 
-/** The periods the page offers, newest first: 24 months, 8 quarters or 6 years. */
-export function periodChoices(kind: AccountantPeriodKind, todayYmd: string): AccountantPeriod[] {
+/** The periods the page offers, newest first: 24 months, 8 quarters or 6 years. `keep` (the period
+ *  the page is showing) is always among them, in date order, so an older bookmarked period is what
+ *  the picker shows too, never the first choice in its place. */
+export function periodChoices(kind: AccountantPeriodKind, todayYmd: string, keep?: AccountantPeriod | null): AccountantPeriod[] {
   const count = kind === "month" ? 24 : kind === "quarter" ? 8 : 6;
   const out: AccountantPeriod[] = [periodContaining(kind, todayYmd)];
   while (out.length < count) out.push(previousPeriod(out[out.length - 1]));
+  if (keep && keep.kind === kind && !out.some((p) => p.key === keep.key)) {
+    out.push(keep);
+    out.sort((a, b) => b.start.localeCompare(a.start));
+  }
   return out;
 }
 
@@ -199,9 +207,10 @@ export const STOCK_LOST_LABEL = "Stock Lost (Written Off, Counted Short, Returne
 export const TAB_NAMES = ["Summary", "Income", "Costs", "People", "Open", "Stock"] as const;
 /** What an office download's Summary says when the owner hasn't shared Owner's Draw (never a total). */
 export const OWNER_HIDDEN_NOTE = "The totals are the owner's.";
-/** The page's line for that office viewer: why, and what the file leaves out. Never shown to the owner. */
+/** The page's line for that office viewer: why, what the file leaves out, and what it keeps (the
+ *  lists the office already sees in the app, each with its own total). Never shown to the owner. */
 export const OWNER_HIDDEN_WHY =
-  "The owner hasn't shared Owner's Draw with the office, so the Summary's totals (Received, Total Costs and Net) and the owner's own rows are left out, here and in the file.";
+  "The owner hasn't shared Owner's Draw with the office, so Received, Total Costs, Net and the owner's own rows are left out, here and in the file. The file still lists each payment, cost and crew member, with each list's own total, as the app shows them.";
 /** The People tab's line for that office viewer. */
 export const OWNER_ROWS_HIDDEN_NOTE = "The owner's own row is left out: the totals are the owner's.";
 
@@ -343,10 +352,32 @@ export function buildAccountantWorkbook(input: AccountantWorkbookInput): Account
   return { tabs, figures: showOwner ? { received: cur.totals.received, net: cur.totals.left } : { received: null, net: null } };
 }
 
-/** What the page says instead of $0.00 for a period that ends before North's records begin. */
-export function beforeRecordsLine(p: AccountantPeriod, recordsStart: string | null | undefined): string | null {
+/** True when every figure of the period is zero: nothing came in, nothing went out, no crew pay, no
+ *  owner hours. */
+export function nothingInFigures(f: OwnerMoneyFigures): boolean {
+  const nums: unknown[] = [...Object.values(f), ...Object.values(f.businessCosts ?? {})];
+  return nums.every((v) => typeof v !== "number" || !Number.isFinite(v) || Math.abs(v) < 0.005);
+}
+
+/**
+ * A PERIOD THAT ENDS BEFORE NORTH'S RECORDS BEGIN (the first payment or shift). A bill is never a
+ * start (owner-money.ts): a receipt entered later with an older date still counts in its own month.
+ * So the period "has nothing in it" ONLY when every figure is zero, and then the page says so in
+ * place of $0.00 (`nothing`). Otherwise the figures are shown, with the records-start caveat under
+ * them. Null when the period isn't before the records.
+ */
+export function beforeRecordsLine(
+  p: AccountantPeriod,
+  recordsStart: string | null | undefined,
+  f: OwnerMoneyFigures,
+): { text: string; nothing: boolean } | null {
   if (!recordsStart || recordsStart < p.end) return null;
-  return `North has no records before ${shortDay(recordsStart)}, ${recordsStart.slice(0, 4)}, so ${p.label} has nothing in it.`;
+  const when = `${shortDay(recordsStart)}, ${recordsStart.slice(0, 4)}`;
+  if (nothingInFigures(f)) return { text: `North has no records before ${when}, so ${p.label} has nothing in it.`, nothing: true };
+  return {
+    text: `North's records start ${when}. What ${p.label} shows was dated before then (a receipt entered later still counts in its own month).`,
+    nothing: false,
+  };
 }
 
 // ── Summary ──────────────────────────────────────────────────────────────────
@@ -428,11 +459,12 @@ function summaryTab(
   }
   if (cur.totals.processorFees) rows.push(note(`Fees includes ${formatCurrency(cur.totals.processorFees)} of card fees on payments received.`));
   const records = input.money.recordsStart ?? null;
-  const empty = beforeRecordsLine(period, records);
-  if (empty) rows.push(note(empty));
+  // "Has nothing in it" only when every figure is zero: a backdated receipt still counts.
+  const before = beforeRecordsLine(period, records, cur.totals);
+  if (before) rows.push(note(before.text));
   const start = cur.caveats.find((c) => c.kind === "records_start") as { date: string } | undefined;
   if (start) rows.push(note(`Records in North start ${start.date}.`));
-  if (!empty && records && records > prevPeriod.start) {
+  if (!before?.nothing && records && records > prevPeriod.start) {
     rows.push(note(`Records in North start ${records}, so ${prevPeriod.label} isn't a full comparison.`));
   }
   const notCounted = notCountedLine(cur);
@@ -502,7 +534,8 @@ function incomeTab(input: AccountantWorkbookInput, cur: OwnerMoney, months: Set<
   rows.push(total("Payments", null, null, null, null, null, money(paymentsCents), money(cents(cur.totals.processorFees))));
   if (refundCents) rows.push(total("Refunds", null, null, null, null, null, money(-refundCents)));
   if (otherCents) rows.push(total("Other Income", null, null, null, null, null, money(otherCents)));
-  rows.push(total("Received", null, null, null, null, null, money(cents(cur.totals.received))));
+  // THE OWNER'S SWITCH: Received is a bottom-line figure; the lists' own sums above stay.
+  if (input.showOwner) rows.push(total("Received", null, null, null, null, null, money(cents(cur.totals.received))));
 
   // BY CUSTOMER (computeCustomerValue), BY JOB (job profit's cash rule), BY METHOD.
   const names = new Map<string, string>();
@@ -536,7 +569,9 @@ function incomeTab(input: AccountantWorkbookInput, cur: OwnerMoney, months: Set<
     rows.push(line(k, money(cents(computeCollected(list, [])))));
   }
   rows.push(total("Total", money(paymentsCents)));
-  if (refundCents || otherCents) rows.push(note("Refunds and Other Income are in the list above and in Received, not in these three breakdowns."));
+  if (refundCents || otherCents) {
+    rows.push(note(`Refunds and Other Income are in the list above${input.showOwner ? " and in Received" : ""}, not in these three breakdowns.`));
+  }
 
   rows.push(blank(), title("Sales Tax"));
   if (!input.salesTax) {

@@ -68,9 +68,18 @@ describe("the page and its download agree", () => {
     expect(src("export/route.ts")).toContain("const span = accountantReadSpan(period);");
   });
 
+  it("a period before the records hides the figures only when it truly has nothing in it", () => {
+    const page = src("page.tsx");
+    expect(page).toContain("beforeRecordsLine(period, read.inputs.recordsStart, cur.totals)");
+    expect(page).toContain(") : beforeRecords?.nothing ? (");
+    expect(page).not.toMatch(/\) : beforeRecords \? \(/);
+  });
+
   it("the picker is keyed on the period it shows, and the download waits while a newly picked period opens", () => {
     expect(src("page.tsx")).toMatch(/<AccountantPeriodPicker\s+key=\{period\.key\}/);
     expect(src("page.tsx")).not.toContain("defaultValue={period.key}");
+    // An older bookmarked period is among the choices, so the picker shows the period the file is.
+    expect(src("page.tsx")).toContain("periodChoices(period.kind, todayYmd, period)");
     const button = src("accountant-download.tsx");
     expect(button.match(/disabled=\{busy !== null \|\| opening !== null\}/g)).toHaveLength(2);
     expect(button).toContain('redirect: "manual"');

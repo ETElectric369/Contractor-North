@@ -67,12 +67,14 @@ export default async function AccountantPage({ searchParams }: { searchParams: P
   // The totals are read only for a viewer who may see them.
   let cur: OwnerMoney | null = null;
   let problem: string | null = null;
-  let emptyLine: string | null = null;
+  // A period before North's records: "nothing in it" only when every figure is zero; otherwise the
+  // figures, with the records-start line under them (a backdated receipt still counts).
+  let beforeRecords: { text: string; nothing: boolean } | null = null;
   if (showOwner) {
     const read = await readOwnerMoneyInputs(supabase, accountantReadSpan(period), tz, todayYmd);
     if (read.inputs) {
       cur = computeOwnerMoney(read.inputs, periodWindow(period), tz, todayYmd);
-      emptyLine = beforeRecordsLine(period, read.inputs.recordsStart);
+      beforeRecords = beforeRecordsLine(period, read.inputs.recordsStart, cur.totals);
     } else problem = read.problem;
   }
   const figures = cur?.totals ?? null;
@@ -116,7 +118,7 @@ export default async function AccountantPage({ searchParams }: { searchParams: P
             key={period.key}
             current={period.key}
             kindLabel={kindLabel}
-            choices={periodChoices(period.kind, todayYmd).map((p) => ({ key: p.key, label: p.label }))}
+            choices={periodChoices(period.kind, todayYmd, period).map((p) => ({ key: p.key, label: p.label }))}
           />
         </Card>
 
@@ -142,8 +144,8 @@ export default async function AccountantPage({ searchParams }: { searchParams: P
             <p role="alert" className="mt-3 text-sm text-amber-800">
               The figures couldn&apos;t be read just now{problem ? `: ${problem}` : ""}. Try again in a moment.
             </p>
-          ) : emptyLine ? (
-            <p className="mt-3 text-sm text-slate-700">{emptyLine}</p>
+          ) : beforeRecords?.nothing ? (
+            <p className="mt-3 text-sm text-slate-700">{beforeRecords.text}</p>
           ) : (
             <>
               <div className="mt-3 grid grid-cols-2 gap-3">
@@ -156,6 +158,7 @@ export default async function AccountantPage({ searchParams }: { searchParams: P
                   <div className={`text-2xl font-bold tabular-nums ${figures.left < 0 ? "text-red-700" : "text-slate-900"}`}>{formatCurrency(figures.left)}</div>
                 </div>
               </div>
+              {beforeRecords && <p className="mt-2 text-xs text-slate-500">{beforeRecords.text}</p>}
               {notCounted && <p className="mt-2 text-xs text-amber-800">{notCounted}</p>}
             </>
           )}
