@@ -10,7 +10,16 @@ import { Input, Label } from "@/components/ui/input";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { MediaLightbox } from "@/components/media-lightbox";
 import { useToast } from "@/components/toast";
-import { canDeleteTask, doneWords, splitJobTasks, tasksHeader, type JobTaskRow, type TaskPhoto } from "@/lib/job-tasks";
+import {
+  canDeleteTask,
+  checkedOffWords,
+  doneWords,
+  splitJobTasks,
+  tasksHeader,
+  undoCheckOff,
+  type JobTaskRow,
+  type TaskPhoto,
+} from "@/lib/job-tasks";
 import { createTask, deleteTask, setTaskDonePhoto, toggleTask, updateTask, type ToggleTaskResult } from "../../tasks/actions";
 import { uploadJobPhotos } from "./upload-job-photos";
 import { PhotoTaskSheet } from "./photo-task-sheet";
@@ -102,17 +111,17 @@ export function JobTaskList({
       const doneShot = photos[t.id]?.done;
       if (!next && doneShot && typeof doneShot === "object") toast("Reopened. Its done photo is still on the Photos tab.", "info");
       // The card shows open tasks only, so a checked one leaves it: an Undo, never a mis-tap that
-      // takes the Tasks tab and the Done fold to take back.
+      // takes the Tasks tab and the Done fold to take back. A check-off that closed open steps with
+      // it says so, and its Undo reopens exactly those steps (closedSteps), never one already done.
       if (next && mode === "card") {
-        toast(`Checked off: ${t.title}`, "success", {
+        const closed = res.closedSteps ?? [];
+        toast(checkedOffWords(t.title, closed.length), "success", {
           label: "Undo",
           onClick: () => {
             setOverride((m) => new Map(m).set(t.id, false));
-            void toggleTask(t.id, false, { jobId }).then((back) => {
-              if (!back.ok) {
-                setOverride((m) => new Map(m).set(t.id, true));
-                toast(back.error ?? "Couldn't reopen the task. Try again.", "error");
-              }
+            void undoCheckOff(toggleTask, t, closed, jobId).then((back) => {
+              if (!back.ok) setOverride((m) => new Map(m).set(t.id, true));
+              if (back.say) toast(back.say.text, back.say.tone);
               router.refresh();
             });
           },

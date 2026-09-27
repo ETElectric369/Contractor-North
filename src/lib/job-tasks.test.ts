@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   canDeleteTask,
+  checkedOffWords,
   doneWhenWords,
   doneWords,
   isMissingColumn,
@@ -11,6 +12,8 @@ import {
   taskPhoto,
   tasksHeader,
   toJobTaskRow,
+  undoCheckOff,
+  undoneWords,
   type JobTaskRow,
 } from "./job-tasks";
 
@@ -189,5 +192,67 @@ describe("readJobTasks: safe before 0358", () => {
     expect(toJobTaskRow({ id: "t", title: "Materials: 3/4 EMT…", notes: "Brian on site: the whole request" }).notes).toBe(
       "Brian on site: the whole request",
     );
+  });
+});
+
+describe("a check-off's Undo, after the check-off closed open steps with it (the cascade)", () => {
+  const T = { id: "t-rough", title: "Rough-in" };
+
+  it("the toast says the steps went with it; a plain check-off says just the task", () => {
+    expect(checkedOffWords("Rough-in", 0)).toBe("Checked off: Rough-in");
+    expect(checkedOffWords("Rough-in", 1)).toBe("Checked off: Rough-in and its open step");
+    expect(checkedOffWords("Rough-in", 2)).toBe("Checked off: Rough-in and its 2 open steps");
+  });
+
+  it("Undo hands back exactly the steps the check-off closed, and says they came back", async () => {
+    const reopen = vi.fn(async () => ({ ok: true, reopenedSteps: 2, stepsStillDone: 0 }));
+    const u = await undoCheckOff(reopen, T, ["s-homeruns", "s-cans"], "j1");
+    expect(reopen).toHaveBeenCalledTimes(1);
+    expect(reopen).toHaveBeenCalledWith("t-rough", false, { jobId: "j1", reopenSteps: ["s-homeruns", "s-cans"] });
+    expect(u).toEqual({ ok: true, say: { text: "Reopened: Rough-in and its 2 steps.", tone: "info" } });
+  });
+
+  it("a check-off that closed no steps: Undo reopens the task alone, sends no steps, and stays quiet", async () => {
+    const reopen = vi.fn(async () => ({ ok: true }));
+    const u = await undoCheckOff(reopen, T, [], "j1");
+    expect(reopen).toHaveBeenCalledWith("t-rough", false, { jobId: "j1" });
+    expect(u).toEqual({ ok: true, say: null });
+  });
+
+  it("a step that stayed checked off is said, never an all-clear", async () => {
+    const one = await undoCheckOff(async () => ({ ok: true, reopenedSteps: 1, stepsStillDone: 1 }), T, ["a", "b"], "j1");
+    expect(one.ok).toBe(true);
+    expect(one.say).toEqual({
+      text: "Reopened: Rough-in. 1 of its 2 steps is still checked off: reopen it on the job's Tasks tab.",
+      tone: "error",
+    });
+    expect(undoneWords("Rough-in", 3, { ok: true, reopenedSteps: 1, stepsStillDone: 2 })?.text).toBe(
+      "Reopened: Rough-in. 2 of its 3 steps are still checked off: reopen them on the job's Tasks tab.",
+    );
+    expect(undoneWords("Rough-in", 1, { ok: true, reopenedSteps: 0, stepsStillDone: 1 })?.text).toBe(
+      "Reopened: Rough-in. Its step is still checked off: reopen it on the job's Tasks tab.",
+    );
+  });
+
+  it("a step deleted or reopened by someone else meanwhile isn't counted as back, or as stuck", () => {
+    expect(undoneWords("Rough-in", 2, { ok: true, reopenedSteps: 1, stepsStillDone: 0 })).toEqual({
+      text: "Reopened: Rough-in and its step.",
+      tone: "info",
+    });
+    expect(undoneWords("Rough-in", 2, { ok: true, reopenedSteps: 0, stepsStillDone: 0 })).toEqual({ text: "Reopened: Rough-in.", tone: "info" });
+  });
+
+  it("a refused or failed reopen says so and reports not ok (the card puts the check back)", async () => {
+    const refused = await undoCheckOff(async () => ({ ok: false, error: "You don't have permission to change that task." }), T, ["a"], "j1");
+    expect(refused).toEqual({ ok: false, say: { text: "You don't have permission to change that task.", tone: "error" } });
+    const thrown = await undoCheckOff(
+      async () => {
+        throw new Error("offline");
+      },
+      T,
+      [],
+      "j1",
+    );
+    expect(thrown).toEqual({ ok: false, say: { text: "Couldn't reopen the task. Try again.", tone: "error" } });
   });
 });

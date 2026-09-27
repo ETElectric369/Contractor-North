@@ -188,14 +188,42 @@ export type ToggleTaskResult = Result & {
    *  caller must confirm and re-call with cascade:true. Nothing was written. */
   needsCascade?: boolean;
   openChildren?: number;
+  /** A cascaded check-off: the steps THIS call closed with the task — exactly the ones it flipped
+   *  from open, never one that was already done. Its Undo hands them back as reopenSteps. */
+  closedSteps?: string[];
+  /** An Undo's reopenSteps: how many came back open, and how many are still checked off (this
+   *  caller couldn't reopen them). A step deleted or reopened meanwhile counts in neither. */
+  reopenedSteps?: number;
+  stepsStillDone?: number;
 };
+
+/** Of these tasks, how many are still in this status: a short write's second read (the silent-write
+ *  law: fewer rows back is either "not ours to change" or "already so"). A failed read counts every
+ *  one, so a shortfall is said rather than guessed away. */
+async function countStill(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  ids: string[],
+  status: "open" | "done",
+): Promise<number> {
+  if (!ids.length) return 0;
+  const { data, error } = await supabase.from("tasks").select("id").in("id", ids).eq("status", status);
+  return error ? ids.length : (data?.length ?? 0);
+}
 
 export async function toggleTask(
   id: string,
   done: boolean,
-  opts?: { category?: string | null; jobId?: string | null; cascade?: boolean },
+  opts?: {
+    category?: string | null;
+    jobId?: string | null;
+    cascade?: boolean;
+    /** Undo of a cascaded check-off (done:false): the closedSteps it answered with. Reopened with the
+     *  task, and only while they are still this task's steps and still done. */
+    reopenSteps?: string[];
+  },
 ): Promise<ToggleTaskResult> {
   const supabase = await createClient();
+  let closedSteps: string[] = [];
 
   // PARENT-CASCADE GUARD: children are nested everywhere (never counted, never
   // slots), so a done parent with open children would make half-done work invisible.
@@ -223,16 +251,23 @@ export async function toggleTask(
         .from("tasks")
         .update({ status: "done", completed_at: new Date().toISOString() })
         .in("id", kidIds)
+        // Only the ones still open: the rows back are exactly the steps this check-off closed, so
+        // its Undo reopens those and never one a teammate checked off in the same moment.
+        .eq("status", "open")
         .select("id");
       if (cascadeError) return { ok: false, error: dbError(cascadeError) };
-      if ((cascaded?.length ?? 0) < kidIds.length) {
-        // Some children flipped and some didn't: show what did land, then say so.
-        const missed = kidIds.length - (cascaded?.length ?? 0);
-        revalidateTaskViews(opts?.category, opts?.jobId);
-        return {
-          ok: false,
-          error: `Couldn't complete ${missed} of the ${kidIds.length} subtask${kidIds.length === 1 ? "" : "s"}. Refresh the page and try again.`,
-        };
+      closedSteps = (cascaded ?? []).map((k) => k.id as string);
+      if (closedSteps.length < kidIds.length) {
+        // Short. A step someone else checked off meanwhile is done either way; one still open is one
+        // this call couldn't close: show what did land, then say so.
+        const missed = await countStill(supabase, kidIds.filter((k) => !closedSteps.includes(k)), "open");
+        if (missed > 0) {
+          revalidateTaskViews(opts?.category, opts?.jobId);
+          return {
+            ok: false,
+            error: `Couldn't complete ${missed} of the ${kidIds.length} subtask${kidIds.length === 1 ? "" : "s"}. Refresh the page and try again.`,
+          };
+        }
       }
     }
   }
@@ -247,8 +282,27 @@ export async function toggleTask(
     .select("id");
   if (error) return { ok: false, error: dbError(error) };
   if (!flipped?.length) return { ok: false, error: await zeroRowsReason(supabase, id, "change") };
+
+  // UNDO OF A CASCADED CHECK-OFF: the task is open again, so now exactly the steps its check-off
+  // closed (handed back from closedSteps), only while they are still this task's and still done.
+  // After the task, never before: open steps under a done task are the half-done work the cascade
+  // guard above exists to prevent.
+  const back = done ? [] : [...new Set(opts?.reopenSteps ?? [])];
+  let reopened: Pick<ToggleTaskResult, "reopenedSteps" | "stepsStillDone"> = {};
+  if (back.length) {
+    const { data: again, error: againError } = await supabase
+      .from("tasks")
+      .update({ status: "open", completed_at: null })
+      .in("id", back)
+      .eq("parent_id", id)
+      .eq("status", "done")
+      .select("id");
+    const got = againError ? [] : (again ?? []).map((k) => k.id as string);
+    reopened = { reopenedSteps: got.length, stepsStillDone: await countStill(supabase, back.filter((k) => !got.includes(k)), "done") };
+  }
+
   revalidateTaskViews(opts?.category, opts?.jobId);
-  return { ok: true };
+  return { ok: true, ...(closedSteps.length ? { closedSteps } : {}), ...reopened };
 }
 
 export async function updateTask(

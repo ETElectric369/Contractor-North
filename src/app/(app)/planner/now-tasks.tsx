@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Check } from "lucide-react";
 import { useToast } from "@/components/toast";
+import { checkedOffWords, undoCheckOff } from "@/lib/job-tasks";
 import { toggleTask, type ToggleTaskResult } from "../tasks/actions";
 
 /**
@@ -52,9 +53,11 @@ export function NowTasks({ jobId, left, next }: { jobId: string; left: number; n
         return;
       }
       // The block reads open tasks only, so a checked one leaves it on the refresh: an Undo keeps a
-      // mis-tap one tap away.
+      // mis-tap one tap away. A check-off that closed open steps with it says so, and its Undo
+      // reopens exactly those steps (closedSteps), never one that was already done.
       if (nowDone) {
-        toast(`Checked off: ${t.title}`, "success", {
+        const closed = res.closedSteps ?? [];
+        toast(checkedOffWords(t.title, closed.length), "success", {
           label: "Undo",
           onClick: () => {
             setChecked((s) => {
@@ -62,8 +65,8 @@ export function NowTasks({ jobId, left, next }: { jobId: string; left: number; n
               n.delete(t.id);
               return n;
             });
-            void toggleTask(t.id, false, { jobId }).then((back) => {
-              if (!back.ok) toast(back.error ?? "Couldn't reopen the task. Try again.", "error");
+            void undoCheckOff(toggleTask, t, closed, jobId).then((back) => {
+              if (back.say) toast(back.say.text, back.say.tone);
               router.refresh();
             });
           },

@@ -167,6 +167,57 @@ export function doneWords(
   return "Done";
 }
 
+const steps = (n: number) => (n === 1 ? "step" : `${n} steps`);
+
+/** The check-off toast on the job's card and My Day's Now block: "Checked off: Rough-in", and when
+ *  the check-off closed the task's open steps with it (the cascade), "…and its 2 open steps", so
+ *  the Undo beside it plainly takes those back too. */
+export function checkedOffWords(title: string, closedSteps: number): string {
+  if (closedSteps <= 0) return `Checked off: ${title}`;
+  return `Checked off: ${title} and its ${closedSteps === 1 ? "open step" : `${closedSteps} open steps`}`;
+}
+
+/** What a reopen answered, as far as an Undo reads it (tasks/actions ToggleTaskResult). */
+export type UndoAnswer = { ok: boolean; error?: string; reopenedSteps?: number; stepsStillDone?: number };
+export type UndoSay = { text: string; tone: "info" | "error" } | null;
+
+/**
+ * What an Undo says once it ran, for a check-off that closed `asked` steps. A plain check-off's Undo
+ * is quiet: the task back on the list is the answer. With steps, it says they came back, or which
+ * didn't (never "undone" over a step still checked off).
+ */
+export function undoneWords(title: string, asked: number, res: UndoAnswer): UndoSay {
+  if (!res.ok) return { text: res.error ?? "Couldn't reopen the task. Try again.", tone: "error" };
+  if (asked <= 0) return null;
+  const back = res.reopenedSteps ?? 0;
+  const stuck = res.stepsStillDone ?? 0;
+  if (stuck > 0) {
+    const which = asked === 1 ? "Its step is" : `${stuck} of its ${asked} steps ${stuck === 1 ? "is" : "are"}`;
+    return { text: `Reopened: ${title}. ${which} still checked off: reopen ${stuck === 1 ? "it" : "them"} on the job's Tasks tab.`, tone: "error" };
+  }
+  return { text: back > 0 ? `Reopened: ${title} and its ${steps(back)}.` : `Reopened: ${title}.`, tone: "info" };
+}
+
+/**
+ * UNDO OF A CHECK-OFF (the 10-second toast on the job's card and the Now block). Reopens the task and,
+ * when its check-off cascaded, exactly the steps that check-off closed (its closedSteps), never a
+ * step that was already done before it. `reopen` is tasks/actions toggleTask.
+ */
+export async function undoCheckOff(
+  reopen: (id: string, done: false, opts: { jobId: string; reopenSteps?: string[] }) => Promise<UndoAnswer>,
+  task: { id: string; title: string },
+  closedSteps: readonly string[],
+  jobId: string,
+): Promise<{ ok: boolean; say: UndoSay }> {
+  let res: UndoAnswer;
+  try {
+    res = await reopen(task.id, false, closedSteps.length ? { jobId, reopenSteps: [...closedSteps] } : { jobId });
+  } catch {
+    res = { ok: false };
+  }
+  return { ok: res.ok, say: undoneWords(task.title, closedSteps.length, res) };
+}
+
 /** 0358's delete rule, said before the tap: the office, or whoever added the task. A tech checks an
  *  office task off; its trash never renders for him (a door the server would refuse). */
 export function canDeleteTask(t: { created_by: string | null }, viewerId: string | null, viewerIsStaff: boolean): boolean {
