@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import ts from "typescript";
-import { NORT_EXAMPLES_RULE, engineeringLine } from "@/lib/nort/trade-prompt";
+import { NORT_EXAMPLES_RULE, engineeringLine, tradeRuleWords, voiceEstimateRule } from "@/lib/nort/trade-prompt";
 import { REGISTRY } from "@/lib/actions/registry";
 import { DATA_TOOLS } from "@/lib/assistant-tools";
 
@@ -243,9 +243,38 @@ describe("Nort is told the same thing the guard enforces", () => {
     }
   });
 
-  it("the chat route uses both", () => {
+  it("an electrical company keeps its field-tested words word for word (cn-v339: 'Propane or natural gas?')", () => {
+    // The voice rule as it shipped from the cn-v339 field test, before Wave A.
+    expect(voiceEstimateRule("electrical")).toBe(
+      "3. BUILDING AN ESTIMATE OUT LOUD: do NOT narrate each line as you add it — the screen fills in the lines. Jump to the KEY POINTS and the running/final TOTAL. And CONFIRM the make-or-break assumptions FIRST, before you price a big list on them — the ones that change everything: fuel type (propane / natural gas), panel or service size, overhead vs underground, permitted or not. Ask 'Propane or natural gas?' up front so they never have to sit through a whole list and then correct it. When it's built, say the total and one-line summary and ask if it's good — never recite it line by line.\n",
+    );
+    expect(tradeRuleWords("electrical")).toEqual({
+      clarifying: "residential vs commercial, panel size, etc.",
+      webSpecs: "pull real specs like wire/breaker sizes",
+      cardFacts: "gate/lockbox code, balance due, hours today, amp size, next appointment",
+    });
+  });
+
+  it("every other trade gets the same rules in its own terms", () => {
+    for (const k of ["deck", "general", "plumbing", "hvac", "painting", ""] as const) {
+      const rule = voiceEstimateRule(k);
+      expect(rule, k).toContain("in THIS trade");
+      expect(rule, k).toMatch(/^3\. BUILDING AN ESTIMATE OUT LOUD: .* never recite it line by line\.\n$/);
+      expect(rule, k).not.toMatch(/propane|natural gas|panel|overhead vs underground/i);
+      expect(JSON.stringify(tradeRuleWords(k)), k).not.toMatch(ELECTRICIAN_WORDS);
+      expect(JSON.stringify(tradeRuleWords(k)), k).not.toMatch(/\bwire\b/i);
+    }
+  });
+
+  it("the chat route uses them all", () => {
     const route = readFileSync(join(ROOT, "src/app/api/chat/route.ts"), "utf8");
     expect(route).toContain("${NORT_EXAMPLES_RULE}");
     expect(route).toContain("${engineeringLine(trade.key)}");
+    expect(route).toContain("tradeRuleWords(trade.key)");
+    for (const w of ["ruleWords.webSpecs", "ruleWords.clarifying", "ruleWords.cardFacts", "voiceEstimateRule(trade.key)"])
+      expect(route, w).toContain(w);
+    // ...and no copy of either version is left hard-wired into it.
+    expect(route).not.toContain("Propane or natural gas?");
+    expect(route).not.toContain("the size of what's there, permitted or not");
   });
 });

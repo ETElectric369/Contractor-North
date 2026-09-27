@@ -26,3 +26,46 @@ export function engineeringLine(key: TradeKey | ""): string {
     ? "- ENGINEERING: calculate the real numbers per NEC — CALL the calc tools (calc_wire_size, calc_voltage_drop, calc_conduit_fill, calc_box_fill) for exact answers, don't eyeball sizes/quantities, and show what they returned so it's verifiable."
     : "- ENGINEERING: work sizes and quantities out from the measurements and THIS trade's own rules and code — don't eyeball them, and show the arithmetic so it's verifiable. The calc tools (calc_wire_size, calc_voltage_drop, calc_conduit_fill, calc_box_fill) are for electrical work only.";
 }
+
+/**
+ * THE ELECTRICIAN'S FIELD-TESTED WORDS, KEPT FOR ELECTRICAL WORK. Taking ET's examples out of every
+ * company's Nort also took out a fix from a field test: an estimate priced out loud, line by line,
+ * before anyone asked whether it was propane or natural gas (cn-v339). For an electrical company
+ * those words are its own trade, so they stay word for word; every other trade (and a company
+ * whose trade isn't known) gets the same rule in its own terms.
+ */
+export type TradeRuleWords = {
+  /** The clarifying questions a good estimator asks before pricing. */
+  clarifying: string;
+  /** What web research pulls for a line the book can't price. */
+  webSpecs: string;
+  /** The facts worth a tile on the windshield card. */
+  cardFacts: string;
+};
+
+export function tradeRuleWords(key: TradeKey | ""): TradeRuleWords {
+  return key === "electrical"
+    ? {
+        clarifying: "residential vs commercial, panel size, etc.",
+        webSpecs: "pull real specs like wire/breaker sizes",
+        cardFacts: "gate/lockbox code, balance due, hours today, amp size, next appointment",
+      }
+    : {
+        clarifying: "residential vs commercial, the size of what's there, etc.",
+        webSpecs: "pull the real specs and sizes",
+        cardFacts: "gate/lockbox code, balance due, hours today, next appointment",
+      };
+}
+
+/** VOICE RULE 3: confirm the make-or-break assumptions before pricing a big list out loud. */
+export function voiceEstimateRule(key: TradeKey | ""): string {
+  const assumptions =
+    key === "electrical"
+      ? "the ones that change everything: fuel type (propane / natural gas), panel or service size, overhead vs underground, permitted or not. Ask 'Propane or natural gas?' up front"
+      : "the ones that change everything in THIS trade (the kind of work, the size or type of what's there, permitted or not). Ask that one question up front";
+  return (
+    "3. BUILDING AN ESTIMATE OUT LOUD: do NOT narrate each line as you add it — the screen fills in the lines. Jump to the KEY POINTS and the running/final TOTAL. And CONFIRM the make-or-break assumptions FIRST, before you price a big list on them — " +
+    assumptions +
+    " so they never have to sit through a whole list and then correct it. When it's built, say the total and one-line summary and ask if it's good — never recite it line by line.\n"
+  );
+}
