@@ -21,7 +21,9 @@
 --        - a SPLIT PIECE FOLLOWS ITS SHIFT: a time entry a write adds to source_ids, when a piece of
 --          the same shift (the family: coalesce(split_from, id), 0288) is already in hand_claims,
 --          joins hand_claims. split_time_entry (0288/0313) appends the new piece to every line that
---          holds the parent; without this, Undo would release half a shift and say nothing.
+--          holds the parent; without this, Undo would release half a shift and say nothing. Only on
+--          a write that leaves the line's quantity and price alone: an importer that joins a piece
+--          to an edited line raises its quantity, and that piece stays the importer's claim.
 --   3. mark_already_billed(line, ids) and unmark_already_billed(line, ids), SECURITY INVOKER: they
 --      run as the person, so RLS decides who (invoice lines are staff-only, 0056: a tech is
 --      refused). Mark refuses, in words, with nothing changed:
@@ -112,8 +114,14 @@ begin
   end if;
 
   -- A SPLIT PIECE FOLLOWS ITS SHIFT. Only on an update that adds ids to a line holding something by
-  -- hand (an importer's line holds nothing by hand, so an import pays one empty check).
-  if tg_op = 'UPDATE' and cardinality(new.hand_claims) > 0 then
+  -- hand (an importer's line holds nothing by hand, so an import pays one empty check), and only
+  -- when the line's charge stays put: split_time_entry appends the new piece and changes nothing
+  -- else. An importer that joins a piece to an edited line (joinLaborHours) raises its quantity with
+  -- it: those hours are the import's, charged by the line now, so they stay the import's claim and
+  -- Not Billed After All never releases hours the line still charges for.
+  if tg_op = 'UPDATE' and cardinality(new.hand_claims) > 0
+     and new.quantity is not distinct from old.quantity
+     and new.unit_price is not distinct from old.unit_price then
     select coalesce(array_agg(s), '{}'::uuid[]) into v_added
       from unnest(coalesce(new.source_ids, '{}'::uuid[])) as s
      where not (s = any (coalesce(old.source_ids, '{}'::uuid[])));

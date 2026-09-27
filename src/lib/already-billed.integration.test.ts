@@ -25,8 +25,8 @@ import { assertTestDatabase, notOnThisDatabase } from "@/lib/db-guard";
  *     which the shelf refuses it until the claim comes off.
  *
  *   TEST_DB_HOST=… TEST_DB_USER=… TEST_DBPW=… npx vitest run <this file>
- *   ALREADY_BILLED_APPLY=1 applies 0357 inside the rolled-back transaction when the TEST database
- *   lacks it (refused on production).
+ *   ALREADY_BILLED_APPLY=1 applies this checkout's 0357 inside the rolled-back transaction, whether
+ *   or not the TEST database already has a copy of it (refused on production).
  */
 const { TEST_DBPW, TEST_DB_HOST, TEST_DB_USER, ALREADY_BILLED_APPLY } = process.env;
 const d = TEST_DBPW && TEST_DB_HOST && TEST_DB_USER ? describe : describe.skip;
@@ -170,7 +170,7 @@ d("0357: Already Billed", () => {
     await c.query("set local lock_timeout = '3s'");
     await c.query("set local statement_timeout = '15s'");
     let has = (await one("select to_regprocedure('public.mark_already_billed(uuid, uuid[])') is not null as yes")).yes === true;
-    if (!has && ALREADY_BILLED_APPLY === "1" && !isProduction) {
+    if (ALREADY_BILLED_APPLY === "1" && !isProduction) {
       await c.query(readFileSync(MIGRATION, "utf8"));
       has = (await one("select to_regprocedure('public.mark_already_billed(uuid, uuid[])') is not null as yes")).yes === true;
     }
@@ -465,6 +465,36 @@ d("0357: Already Billed", () => {
     expect(r.removed).toEqual(expect.arrayContaining([s, first.right_id]));
     st = await state(labor);
     expect(st.source_ids).toEqual([]);
+    expect(st.hand).toEqual([]);
+  });
+
+  it("a piece the importer joins to an edited labor line stays the importer's claim: Not Billed After All never releases hours the line still charges for", async () => {
+    if (!go()) return;
+    const inv = await invoice(jobA, "sent");
+    // Brian's edited labor:<person> line, bumped by hand to 4 h, holding nothing yet.
+    const labor = await line(inv, { description: "Labor — TEST Tech", qty: 4, unit: "hr", price: 95, source: "labor", key: `labor:${tech}`, edited: true });
+    await settleTotal(inv);
+    const p = await shift(jobA, "2001-08-20");
+    await as(staff);
+    const cut = (await one("select public.split_time_entry($1, $2, $3, null, null, null) as r", [p, "2001-08-20T19:00:00Z", jobA])).r;
+    await asServer();
+    const s2 = cut.right_id as string;
+    // The first piece held by hand (a mark made while the second piece was still running, or a claim
+    // written by hand): the line holds 4 h by hand, the second piece is free.
+    await c.query("update public.invoice_items set source_ids = array[$2::uuid], hand_claims = array[$2::uuid] where id = $1", [labor, p]);
+    expect((await state(labor)).hand).toEqual([p]);
+    // The importer joins the free piece the way joinLaborHours writes it: quantity and claims together.
+    await as(staff);
+    await c.query("update public.invoice_items set quantity = 8, source_ids = source_ids || $2::uuid where id = $1", [labor, s2]);
+    await asServer();
+    let st = await state(labor);
+    expect(st.source_ids).toEqual([p, s2]);
+    expect(st.hand).toEqual([p]);
+    // Not Billed After All on the first piece takes that piece off, and only it.
+    const r = await unmark(staff, labor, [p]);
+    expect(r.removed).toEqual([p]);
+    st = await state(labor);
+    expect(st.source_ids).toEqual([s2]);
     expect(st.hand).toEqual([]);
   });
 
