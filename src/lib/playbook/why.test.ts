@@ -108,6 +108,18 @@ describe("what it actually catches", () => {
     expect(whyProblems("Answer = the line on the estimate.")).toEqual([]);
   });
 
+  it("...and so is a multiplier written on a number: x2, 3x, LxW", () => {
+    // Closing the x hole had flagged these real shorthand lines as naming nothing.
+    expect(whyProblems("Count x2 for both sides.")).toEqual([]);
+    expect(whyProblems("Steps x2, one rail each side.")).toEqual([]);
+    expect(whyProblems("3x on a finished wall.")).toEqual([]);
+    expect(whyProblems("LxW is the area.")).toEqual([]);
+    expect(whyProblems("Count x 2 for both sides.")).toEqual([]);
+    // ...while the letter x inside a word still names nothing.
+    expect(whyProblems("Exterior box, we check it.")).toEqual(["no_destination"]);
+    expect(whyProblems("Max out the box.")).toEqual(["no_destination"]);
+  });
+
   it("ONE LINE IS 140 CHARACTERS (the why-line law), not 220", () => {
     expect(WHY_MAX_CHARS).toBe(140);
     const at = `Sets the ${"a".repeat(WHY_MAX_CHARS - "Sets the ".length)}`;

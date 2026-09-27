@@ -133,8 +133,12 @@ export function whyProblems(why: string | undefined, need?: Need): WhyProblem[] 
   // THE SAME HOLE, IN THE SPOKEN FORMS. Unanchored, `per\s` passed "Super important to ask.",
   // `times` passed "Sometimes it matters." and `total` passed "Totally need to know." — none of
   // them names anything downstream. A spoken operator is a whole word.
+  //
+  // A MULTIPLIER WRITTEN ON A NUMBER IS AN OPERATOR TOO: "x2", "3x", "LxW". Needing digits on both
+  // sides flagged "Count x2 for both sides." as naming nothing. The letters still don't count:
+  // "Exterior box" and "Next" have no number or dimension on either side of their x.
   const arithmetic =
-    /[×*+=÷]|\d\s*x\s*\d|(^|\s)x(\s|$)|sq\.?\s?ft|\b(times|multipl(y|ied|ies)|divid(e|ed|es)|per|squared?|linear|total(s|l?ed)?|adds? up)\b/i.test(t);
+    /[×*+=÷]|\d\s*x\s*\d|\d\s*x\b|\bx\s*\d|\b[lwh]x[lwh]\b|(^|\s)x(\s|$)|sq\.?\s?ft|\b(times|multipl(y|ied|ies)|divid(e|ed|es)|per|squared?|linear|total(s|l?ed)?|adds? up)\b/i.test(t);
   // VERB FORMS ONLY. `size` as a bare noun was matching — "I need the panel brand, size and room"
   // is the QUESTION said back, and it was passing as a destination because the ask itself contained
   // the word. A destination needs something that ACTS. `picks` and `chooses` are the fork said
