@@ -271,3 +271,15 @@ describe("the payments unread", () => {
     expect(text).toContain("Couldn't read your payments to Ace Mountain Hardware just now");
   });
 });
+
+describe("which receipt made which bill, unread", () => {
+  it("All Bills says so above the bills, instead of every Receipt door vanishing without a word", async () => {
+    const whole = await renderWith();
+    expect(whole.text).not.toContain("which receipt made each bill");
+    const { text } = await renderWith("organized_items");
+    expect(text).toContain("Couldn't load which receipt made each bill just now. Reload to try again.");
+    // The bills themselves were read: the ledger still lists them.
+    expect(text).not.toContain("Couldn't read your bills just now");
+    expect(text).toContain("All Bills (3)");
+  });
+});

@@ -59,6 +59,7 @@ import type { PaperRowItem } from "@/components/paperwork-row";
 import type { NumberMatch } from "@/lib/paperwork";
 import { loadBooks, loadMarkContext, matchesOnBooks, PAPER_JOB_STATUSES, rematchTray } from "@/app/(app)/organize/paperwork-core";
 import { signDocumentUrls } from "@/lib/signed-docs";
+import { billPapers, type PaperTie } from "@/lib/job-photos";
 import {
   candidateMoving,
   isOnAccountBill,
@@ -201,6 +202,7 @@ export default async function BillsPage({
     markCtx,
     shelfLotsRead,
     shelfItemsRead,
+    { data: billTieRows, error: billTiesErr },
   ] = await Promise.all([
     supabase
       .from("purchase_orders")
@@ -292,6 +294,16 @@ export default async function BillsPage({
       .limit(5000),
     // The items' names, for the same sentence (a view embed is PostgREST's guess; this is not).
     supabase.from("inventory_items").select("id, name").limit(5000),
+    // EACH BILL'S OWN PAPER (Erik, 2026-09-27: bills and job photos kept separate): the links the
+    // receipt reader, Add Cost and File It write, so a bill's row opens the receipt it was read from.
+    // Small (one row per paper that made or joined a bill) and dependent on nothing above.
+    supabase
+      .from("organized_items")
+      .select("id, kind, category, bill_id, tied_bill_id, file_url")
+      .eq("org_id", orgId)
+      .or("bill_id.not.is.null,tied_bill_id.not.is.null")
+      .not("file_url", "is", null)
+      .limit(5000),
   ]);
   const orgSettings = getOrgSettings((orgRow as { settings?: unknown } | null)?.settings);
   const orgTz = orgSettings.timezone;
@@ -415,7 +427,16 @@ export default async function BillsPage({
       reportError("bills.alreadyBilledReach", e, { bills: abBills.length });
     }
   };
-  await Promise.all([signPaths(), readClaims(), signPapers(), viewLists(), readAbReach()]);
+  // Each bill's own paper, signed in the same breath (never a hop of its own). A lost links read is
+  // logged, and the rows draw no paper door, so All Bills says so above them (a bill with a receipt
+  // must not look like one that never had any); the Receipts tab below still lists every receipt.
+  if (billTiesErr) reportError("bills.paperTies", billTiesErr, {});
+  const billTies = (billTieRows ?? []) as PaperTie[];
+  let billPaperUrls = new Map<string, string>();
+  const signBillPapers = async () => {
+    billPaperUrls = await signDocumentUrls(supabase, billTies.map((t) => t.file_url));
+  };
+  await Promise.all([signPaths(), readClaims(), signPapers(), viewLists(), readAbReach(), signBillPapers()]);
   const paperItems: PaperRowItem[] = rematchTray(papers, markCtx).map((i) => ({
     ...i,
     signedUrl: (i.file_url && paperUrls.get(i.file_url)) || null,
@@ -1128,6 +1149,8 @@ export default async function BillsPage({
   // every row (typed, stored, or read off the PDF name and lines by readBillInvoice), whether it was
   // set aside as a duplicate, and, for a live receipt on a job, its per-line billing switches.
   const receiptById = new Map(receiptsForBilling.map((r) => [r.id, r]));
+  const supplierOfBill = new Map((billsWithLines as any[]).map((b) => [String(b.id), String(b.supplier || "Receipt")]));
+  const paperOfBill = billPapers({}, billTies, billPaperUrls, (billId) => supplierOfBill.get(billId) ?? "Receipt");
   const ledgerBills = (billsWithLines as any[]).map((b) => {
     const reading = readBillInvoice({ notes: b.notes ?? null, lineDescriptions: (b.line_items ?? []).map((l: any) => l.description) });
     return {
@@ -1135,6 +1158,7 @@ export default async function BillsPage({
       shownNumber: b.bill_number || b.supplier_invoice_number || reading.invoiceNumber || null,
       superseded: !!b.superseded_by_bill_id,
       receipt: receiptById.get(String(b.id)) ?? null,
+      papers: paperOfBill[String(b.id)] ?? null,
     };
   });
   // Each bill's Already Billed door, or its Billed By Hand · Not Billed After All (0357).
@@ -1313,6 +1337,7 @@ export default async function BillsPage({
         bills={ledgerBills as any}
         docs={docs as any}
         readFailed={!!billsErr}
+        papersNote={billTiesErr ? "Couldn't load which receipt made each bill just now. Reload to try again." : null}
         switches={switches}
         alreadyBilled={billDoors}
       />

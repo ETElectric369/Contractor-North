@@ -7,7 +7,7 @@ import { OpenInspectorButton } from "./open-inspector-button";
 import Link from "next/link";
 import { isStaffRole } from "@/lib/actions/perms";
 import { notFound } from "next/navigation";
-import { Home, ChevronRight, MapPin, Receipt, Plus, Printer, Phone, HardHat } from "lucide-react";
+import { Home, ChevronRight, MapPin, Plus, Printer, Phone, HardHat } from "lucide-react";
 import { ClipboardCheck, ListChecks } from "./job-tab-icons";
 import { arrangeJobTabs } from "./job-tabs";
 import { FeatureOffLine } from "@/components/feature-off-line";
@@ -74,6 +74,7 @@ import { JobDescription } from "./job-description";
 import { computeJobProgress, livePurchaseOrders } from "@/lib/job-progress-math";
 import { signDocumentUrls } from "@/lib/signed-docs";
 import { documentsForViewer } from "@/lib/tech-documents";
+import { billPapers, papersOffThisJob, sortJobPapers, type PaperTie } from "@/lib/job-photos";
 import { jobLabel } from "@/lib/schedule-options";
 import { directionsTarget } from "@/lib/maps";
 import { ProgressInvoiceButton } from "./progress-invoice-button";
@@ -221,6 +222,8 @@ export default async function JobDetailPage({
    * AND the role, because the select list is role-shaped) and the permits (same reason) ride the
    * third wave with the rest, rather than dragging unrelated queries along behind them.
    */
+  // This job's live bills (ids from the database, so safe inside the filter string below).
+  const liveBillIds = ((bills ?? []) as any[]).map((b: any) => String(b.id));
   const [
     { data: pendingProposal },
     { data: scheduleSegments },
@@ -228,6 +231,7 @@ export default async function JobDetailPage({
     { data: jobAppts },
     { data: jobContactsRaw },
     { data: meRow },
+    { data: tieRows, error: tieErr },
   ] = await Promise.all([
     supabase
       .from("schedule_proposals")
@@ -261,6 +265,16 @@ export default async function JobDetailPage({
       .eq("job_id", j.id)
       .order("created_at"),
     supabase.from("profiles").select("role").eq("id", user?.id ?? "").maybeSingle(),
+    // WHICH PAPER MADE WHICH BILL (Erik, 2026-09-27: bills and job photos kept separate): the links
+    // the receipt reader, Add Cost and File It write, for this job's papers and this job's bills (a
+    // bill moved here keeps its receipt on the old job; its link still names the bill). Rides this
+    // wave because it needs the bills above. Staff only by RLS in effect (a tech reads his own rows
+    // and the page uses none of them for him).
+    supabase
+      .from("organized_items")
+      .select("id, kind, category, document_id, bill_id, tied_bill_id, tied_supplier_invoice_id, petty_cash_id, file_url")
+      .or([`job_id.eq.${j.id}`, ...(liveBillIds.length ? [`bill_id.in.(${liveBillIds})`, `tied_bill_id.in.(${liveBillIds})`] : [])].join(","))
+      .limit(2000),
   ]);
   const viewerIsStaff = isStaffRole((meRow as any)?.role ?? "");
 
@@ -857,11 +871,33 @@ export default async function JobDetailPage({
   const taskPhotoPaths = jobTasks.rows
     .flatMap((t) => [t.photo_path, t.done_photo_path])
     .filter((p): p is string => !!p && !keptFromViewer.has(p));
-  const docUrls = await signDocumentUrls(supabase, [...visibleDocRows.map((d: any) => d.file_url), ...taskPhotoPaths]);
+  // JOB PHOTOS, NOT BILLS (Erik, 2026-09-27; lib/job-photos). The links say which paper made which
+  // bill. A tech is handed none: his pictures sort by their category alone, the same set he saw
+  // before, and he has no bills to carry a door. A lost read (null) claims nothing about any paper.
+  const paperTies: PaperTie[] | null = !viewerIsStaff ? [] : tieErr ? null : ((tieRows ?? []) as PaperTie[]);
+  if (viewerIsStaff && tieErr) reportError("jobs.[id].paperTies", tieErr, { jobId: id });
+  // A bill's receipt that is not one of this job's documents rides the same one signing call.
+  const offJobPapers = viewerIsStaff ? papersOffThisJob(paperTies, visibleDocRows, liveBillIds) : [];
+  const docUrls = await signDocumentUrls(supabase, [
+    ...visibleDocRows.map((d: any) => d.file_url),
+    ...taskPhotoPaths,
+    ...offJobPapers.map((t) => t.file_url),
+  ]);
   const docs = visibleDocRows.map((d: any) => ({
     ...d,
     signedUrl: (d.file_url && docUrls.get(d.file_url)) || null,
   }));
+  // The Photos tab's grid and fold, each bill's own paper, and the receipts on no bill.
+  const paperSort = sortJobPapers(docs, paperTies, liveBillIds);
+  const billById = new Map(((bills ?? []) as any[]).map((b: any) => [String(b.id), b]));
+  const billWords = (billId: string) => {
+    const b = billById.get(billId);
+    return `the ${b?.supplier || "supplier"} bill${b?.bill_number ? ` #${b.bill_number}` : ""}`;
+  };
+  const papersByBill = billPapers(paperSort.byBill, offJobPapers, docUrls, (billId) => billById.get(billId)?.supplier || "Receipt");
+  const billOfPaper: Record<string, string> = Object.fromEntries(
+    Object.entries(paperSort.byBill).flatMap(([billId, ds]) => ds.map((d: any) => [String(d.id), billWords(billId)])),
+  );
   // Each task's photo: the signed URL, or "removed" once the photo was deleted from the job, or
   // "unavailable" when it is still the job's but couldn't be signed just now (lib/job-tasks taskPhoto).
   const jobFiles = new Set(((docRows ?? []) as any[]).map((d: any) => d.file_url).filter(Boolean) as string[]);
@@ -1197,14 +1233,16 @@ export default async function JobDetailPage({
       // keeps how many job-site photos the job has (tests/badges-show-open names the exception).
       id: "photos",
       label: "Photos",
-      count: docs.filter((d: any) => /\.(jpe?g|png|webp|gif|heic)($|\?)/i.test(d.signedUrl ?? d.name)).length,
+      count: paperSort.photos.length + paperSort.pictures.length,
       content: (
         <Card>
           <CardContent className="py-5">
             <JobPhotos
               orgId={j.org_id}
               jobId={j.id}
-              docs={docs}
+              docs={paperSort.photos}
+              pictures={paperSort.pictures}
+              costsNote={viewerIsStaff && paperSort.moneyPictures > 0}
               sharedIds={sharedPhotoIds}
               staleIds={staleSharedIds}
               viewerId={user?.id ?? null}
@@ -1497,6 +1535,7 @@ export default async function JobDetailPage({
                 alreadyBilled={alreadyBilledDoors}
                 billedHours={hoursMarked}
                 handsNote={handsNote}
+                papers={papersByBill}
                 openAside={
                   costGroups && unbilled ? (
                     <div className="space-y-2">
@@ -1532,6 +1571,26 @@ export default async function JobDetailPage({
             </CardContent>
           </Card>
           <JobPaperList jobId={j.id} papers={paperViews} />
+          {/* RECEIPTS & PAPERS, right under the bills (Erik, 2026-09-27: bills and job photos kept
+              separate). The job's filing cabinet, folded: every paper that isn't on the Photos tab,
+              each saying which bill it made, and a receipt on no bill says so and holds the fold
+              open. Receipt pictures left the Photos grid for their bills; this is where any a bill
+              doesn't hold still show. Record As Cost is the retry, as before. The plans door points
+              at the Customer Page tab: Customer Portal's (the switch board). */}
+          <Card>
+            <JobDocuments
+              orgId={j.org_id}
+              jobId={j.id}
+              docs={docs}
+              portalPapers={portalPapers}
+              plansDoor={viewerIsStaff && on("customer_portal")}
+              nortOn={on("nort")}
+              photoTabIds={Array.from(paperSort.photoTabIds)}
+              billOf={billOfPaper}
+              looseIds={paperSort.loose ? paperSort.loose.map((d: any) => String(d.id)) : null}
+              tieNote={paperTies ? null : "Couldn't check which papers made which bill just now. Reload to try again."}
+            />
+          </Card>
           <Card>
             <CardContent className="py-5">
               {/* auto-fit, not viewport breakpoints: at ~675px the window LOOKS "tablet" to sm:
@@ -1599,19 +1658,6 @@ export default async function JobDetailPage({
               </ul>
             </Card>
           )}
-
-          <Card>
-            <div className="flex items-center gap-2 border-b border-slate-100 px-5 py-3 text-sm font-semibold text-slate-900">
-              <Receipt className="h-4 w-4 text-slate-400" /> Receipts &amp; documents
-            </div>
-            <CardContent className="py-5">
-              {/* The job's documents list (plans, permits, every receipt). Its cost role moved up
-                  to the tab's header (Snap the Bill); a receipt uploaded here still auto-posts
-                  as a job cost (same reader, idempotent), and "Record as Cost" is the retry. */}
-              {/* The plans door points at the Customer Page tab: Customer Portal's (the switch board). */}
-              <JobDocuments orgId={j.org_id} jobId={j.id} docs={docs} portalPapers={portalPapers} plansDoor={viewerIsStaff && on("customer_portal")} nortOn={on("nort")} />
-            </CardContent>
-          </Card>
 
         </div>
       ),

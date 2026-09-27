@@ -1,17 +1,20 @@
 "use client";
 
 import { useEffect, useRef, useState, useTransition } from "react";
+import Link from "next/link";
 import { DropTarget } from "@/components/drop-target";
 import { useRouter } from "next/navigation";
 import { Camera, Upload, Trash2, Loader2, ImageOff, Eye, EyeOff, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { MediaLightbox } from "@/components/media-lightbox";
+import { Fold } from "@/components/why-fold";
 import { useToast } from "@/components/toast";
 import { deleteDocument } from "../actions";
 import { uploadJobPhotos } from "./upload-job-photos";
 import { reshowPhoto, setPhotoShared } from "../portal-share-actions";
 import { PHOTO_NOT_IN_JOB_FOLDER } from "@/lib/portal/share-input";
 import { isJobPhotoPath } from "@/lib/portal/job-view-shape";
+import { isImageDoc } from "@/lib/job-photos";
 
 interface Doc {
   id: string;
@@ -30,8 +33,6 @@ export function canDeletePhoto(d: { uploaded_by?: string | null }, viewerId: str
   return viewerIsStaff || (!!viewerId && d.uploaded_by === viewerId);
 }
 
-const isImage = (d: Doc) => /\.(jpe?g|png|webp|gif|heic)($|\?)/i.test(d.signedUrl ?? d.name);
-
 function onPhone() {
   return (
     typeof navigator !== "undefined" &&
@@ -39,7 +40,14 @@ function onPhone() {
   );
 }
 
-/** Photos tab: every job photo as a tappable thumbnail grid.
+/** Photos tab: the job's photos as a tappable thumbnail grid.
+ *
+ *  JOB PHOTOS, NOT BILLS (Erik, 2026-09-27). `docs` is the grid the page sorted (lib/job-photos
+ *  sortJobPapers): what was filed as a Photo, and an unfiled picture no paper reader touched. A
+ *  receipt, bill or invoice lives with its bill on the Costs tab, and `costsNote` (office only, and
+ *  only when this job has such a picture) says so here with the door there, so a receipt that used
+ *  to sit in this grid is never simply gone. `pictures` (a Plan, Permit, Note or Other picture) fold
+ *  under the grid: not job-site photos, not money, and a tech's only view of them.
  *
  *  SHOW CUSTOMER (office only; `sharedIds` is null for a tech, or before 0300): under each PHOTO
  *  a switch puts it on the customer's job page, live. Only a document filed as a Photo gets one: a
@@ -56,6 +64,8 @@ export function JobPhotos({
   orgId,
   jobId,
   docs,
+  pictures = [],
+  costsNote = false,
   sharedIds = null,
   staleIds = [],
   viewerId = null,
@@ -63,7 +73,12 @@ export function JobPhotos({
 }: {
   orgId: string;
   jobId: string;
+  /** The grid: the job's photos (sortJobPapers.photos). */
   docs: Doc[];
+  /** Plans & Other Papers, folded under the grid (sortJobPapers.pictures). */
+  pictures?: Doc[];
+  /** This job has receipt or bill pictures, now on the Costs tab: say where (office only). */
+  costsNote?: boolean;
   /** Who is looking, for the per-photo delete rule (canDeletePhoto). */
   viewerId?: string | null;
   viewerIsStaff?: boolean;
@@ -73,7 +88,8 @@ export function JobPhotos({
 }) {
   const router = useRouter();
   const toast = useToast();
-  const photos = docs.filter(isImage);
+  const photos = docs.filter(isImageDoc);
+  const others = pictures.filter(isImageDoc);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
@@ -210,65 +226,91 @@ export function JobPhotos({
           No photos yet — snap progress shots, panel labels, or the finished work.
         </div>
       ) : (
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4">
-          {photos.map((d) => (
-            <div key={d.id} className="group relative aspect-square overflow-hidden rounded-lg bg-slate-100">
-              <button onClick={() => setViewing(d)} className="h-full w-full">
-                {d.signedUrl && (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={d.signedUrl} alt={d.name} className="h-full w-full object-cover" />
-                )}
-              </button>
-              {canDeletePhoto(d, viewerId, viewerIsStaff) && (
-                <button
-                  onClick={() => remove(d)}
-                  disabled={pending}
-                  className="absolute right-1 top-1 rounded-md bg-black/50 p-1 text-white opacity-0 transition-opacity group-hover:opacity-100"
-                  title="Delete"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </button>
-              )}
-              {sharedIds && d.category === "Photo" && shown.has(d.id) && stale.has(d.id) ? (
-                <div className="absolute inset-x-1 bottom-1 space-y-1">
-                  <button
-                    type="button"
-                    onClick={() => void showAgain(d)}
-                    disabled={sharing === d.id}
-                    title="This photo's file changed after it was shown, so the customer no longer sees it. Tap to show it as it is now."
-                    className="inline-flex h-11 w-full items-center justify-center gap-1.5 rounded-lg bg-amber-100/95 px-2 text-xs font-semibold text-amber-950 shadow-sm backdrop-blur"
-                  >
-                    {sharing === d.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-                    <span className="leading-tight">Changed Since Shown — Show Again</span>
-                  </button>
-                </div>
-              ) : sharedIds && d.category === "Photo" ? (
-                // The position lives on a wrapper: .seaglass-btn is unlayered CSS and sets
-                // position: relative, which beats Tailwind's layered `absolute` on the same element.
-                // The ON state is .seaglass-btn (it carries the white glass base as its last layer),
-                // so the dark ink stays readable over a dark or busy photo.
-                <div className="absolute inset-x-1 bottom-1">
-                  <button
-                    type="button"
-                    onClick={() => void share(d, !shown.has(d.id))}
-                    disabled={sharing === d.id}
-                    aria-pressed={shown.has(d.id)}
-                    title={shown.has(d.id) ? "The customer sees this photo. Tap to take it off their page." : "Show this photo on the customer's page"}
-                    className={`inline-flex h-11 w-full items-center justify-center gap-1.5 rounded-lg px-2 text-xs font-semibold shadow-sm ${
-                      shown.has(d.id) ? "seaglass-btn" : "bg-black/55 text-white backdrop-blur"
-                    }`}
-                  >
-                    <span className="relative z-10 inline-flex items-center gap-1.5">
-                      {sharing === d.id ? <Loader2 className="h-4 w-4 animate-spin" /> : shown.has(d.id) ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
-                      {shown.has(d.id) ? "Customer Sees It" : "Show Customer"}
-                    </span>
-                  </button>
-                </div>
-              ) : null}
-            </div>
-          ))}
-        </div>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4">{photos.map(tile)}</div>
+      )}
+
+      {others.length > 0 && (
+        <Fold
+          className="mt-4 rounded-lg border border-slate-200 px-3"
+          summary={<span className="text-sm font-semibold text-slate-900">Plans &amp; Other Papers</span>}
+        >
+          <p className="mb-2 text-xs text-slate-500">Pictures filed on this job as a plan, permit, note or other paper.</p>
+          <div className="grid grid-cols-2 gap-2 pb-3 sm:grid-cols-3 md:grid-cols-4">{others.map(tile)}</div>
+        </Fold>
+      )}
+
+      {/* Said where the receipts went, with the door there: a picture that used to be in this grid
+          is never simply gone. Office only (the Costs tab is not a tech's), and only when there is one. */}
+      {costsNote && (
+        <p className="mt-4 flex flex-wrap items-center gap-x-2 text-sm text-slate-500">
+          Receipts and bills are kept with their bills on the Costs tab.
+          <Link
+            href={`/jobs/${jobId}?tab=costs`}
+            className="inline-flex min-h-11 items-center font-medium text-brand underline-offset-2 hover:underline"
+          >
+            Open Costs
+          </Link>
+        </p>
       )}
     </div>
   );
+
+  function tile(d: Doc) {
+    return (
+      <div key={d.id} className="group relative aspect-square overflow-hidden rounded-lg bg-slate-100">
+        <button onClick={() => setViewing(d)} className="h-full w-full">
+          {d.signedUrl && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={d.signedUrl} alt={d.name} className="h-full w-full object-cover" />
+          )}
+        </button>
+        {canDeletePhoto(d, viewerId, viewerIsStaff) && (
+          <button
+            onClick={() => remove(d)}
+            disabled={pending}
+            className="absolute right-1 top-1 rounded-md bg-black/50 p-1 text-white opacity-0 transition-opacity group-hover:opacity-100"
+            title="Delete"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        )}
+        {sharedIds && d.category === "Photo" && shown.has(d.id) && stale.has(d.id) ? (
+          <div className="absolute inset-x-1 bottom-1 space-y-1">
+            <button
+              type="button"
+              onClick={() => void showAgain(d)}
+              disabled={sharing === d.id}
+              title="This photo's file changed after it was shown, so the customer no longer sees it. Tap to show it as it is now."
+              className="inline-flex h-11 w-full items-center justify-center gap-1.5 rounded-lg bg-amber-100/95 px-2 text-xs font-semibold text-amber-950 shadow-sm backdrop-blur"
+            >
+              {sharing === d.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+              <span className="leading-tight">Changed Since Shown — Show Again</span>
+            </button>
+          </div>
+        ) : sharedIds && d.category === "Photo" ? (
+          // The position lives on a wrapper: .seaglass-btn is unlayered CSS and sets
+          // position: relative, which beats Tailwind's layered `absolute` on the same element.
+          // The ON state is .seaglass-btn (it carries the white glass base as its last layer),
+          // so the dark ink stays readable over a dark or busy photo.
+          <div className="absolute inset-x-1 bottom-1">
+            <button
+              type="button"
+              onClick={() => void share(d, !shown.has(d.id))}
+              disabled={sharing === d.id}
+              aria-pressed={shown.has(d.id)}
+              title={shown.has(d.id) ? "The customer sees this photo. Tap to take it off their page." : "Show this photo on the customer's page"}
+              className={`inline-flex h-11 w-full items-center justify-center gap-1.5 rounded-lg px-2 text-xs font-semibold shadow-sm ${
+                shown.has(d.id) ? "seaglass-btn" : "bg-black/55 text-white backdrop-blur"
+              }`}
+            >
+              <span className="relative z-10 inline-flex items-center gap-1.5">
+                {sharing === d.id ? <Loader2 className="h-4 w-4 animate-spin" /> : shown.has(d.id) ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+                {shown.has(d.id) ? "Customer Sees It" : "Show Customer"}
+              </span>
+            </button>
+          </div>
+        ) : null}
+      </div>
+    );
+  }
 }

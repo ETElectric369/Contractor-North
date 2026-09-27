@@ -72,13 +72,9 @@ export function JobNotes({
         size_bytes: file.size,
       });
       if (!res.ok) throw new Error(res.error);
-      // Point at a tab the viewer actually has: Costs is staff-only, so a tech is told
-      // where HE will find it.
-      setPhotoMsg(
-        viewerIsStaff
-          ? "Photo saved to this job (Costs → Receipts & documents)."
-          : "Photo saved to this job — it's on the Photos tab.",
-      );
+      // A Photo lives on the Photos tab for everyone now (job photos and bills kept separate,
+      // 2026-09-27), which is also a tab a tech has.
+      setPhotoMsg("Photo saved to this job — it's on the Photos tab.");
       router.refresh();
     } catch (err: any) {
       setPhotoMsg(err?.message ?? "Photo upload failed.");

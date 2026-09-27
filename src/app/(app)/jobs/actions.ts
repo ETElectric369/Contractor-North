@@ -1708,7 +1708,7 @@ export async function deleteDocument(
   const supabase = await createClient();
   // Read the row FIRST (RLS scopes it to the caller's org) so we delete the file it actually
   // points at, not a client path that could name another org's object; row-check the delete.
-  const { data: row } = await supabase.from("documents").select("id, file_url, uploaded_by").eq("id", id).maybeSingle();
+  const { data: row } = await supabase.from("documents").select("id, org_id, file_url, uploaded_by").eq("id", id).maybeSingle();
   if (!row) return { ok: false, error: "Document not found." };
 
   /**
@@ -1743,9 +1743,38 @@ export async function deleteDocument(
   const { data: del, error } = await supabase.from("documents").delete().eq("id", id).select("id");
   if (error) return { ok: false, error: dbError(error) };
   if (!del?.length) return { ok: false, error: "Document not found." };
-  if (storedPath) await supabase.storage.from("documents").remove([storedPath]);
+  if (storedPath && (await tiesLetGoOfFile(supabase, (row as { org_id?: string | null }).org_id ?? null, storedPath, id))) {
+    await supabase.storage.from("documents").remove([storedPath]);
+  }
   revalidatePath(`/jobs/${jobId}`);
   return { ok: true };
+}
+
+/**
+ * A BILL'S TIE LETS GO OF A DELETED FILE (2026-09-27: bills and job photos kept separate).
+ *
+ * The link that says which paper made which bill (organized_items: the reader's, Add Cost's, File
+ * It's) names the file itself, and its document_id is only SET NULL when the documents row goes. So
+ * a receipt deleted from Receipts & Papers left its bill's row opening a file that was about to be
+ * removed from storage: "The receipt couldn't load just now. Reload to try again." on every load,
+ * on the job's Costs tab and on /bills. Every link naming the file lets go of it first (the bill
+ * then draws no paper door, which is the truth), and the file is removed only when that write
+ * answered: a failed write keeps the file, so the bill still opens it. No link at all is the usual
+ * case (a photo, a plan), so zero rows is an answer, not a silent write.
+ */
+async function tiesLetGoOfFile(supabase: SupabaseClient, orgId: string | null, path: string, documentId: string): Promise<boolean> {
+  if (!orgId) return false;
+  const { error } = await supabase
+    .from("organized_items")
+    .update({ file_url: null })
+    .eq("org_id", orgId)
+    .eq("file_url", path)
+    .select("id");
+  if (error) {
+    reportError("deleteDocument.tiesLetGo", error, { documentId });
+    return false;
+  }
+  return true;
 }
 
 export type JobImportRow = {
