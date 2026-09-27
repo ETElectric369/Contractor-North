@@ -111,17 +111,26 @@ describe("agentInputForSwitches: a switched-off feature's fields on a tool that 
     }
   });
 
-  it("To-Do Extras off: priority and parent task come off, the rest stays, and it is said in words", () => {
+  it("To-Do Extras off: a Reminder's priority and parent task come off, the rest stays, and it is said in words", () => {
     const r = agentInputForSwitches("task.create", task, off("todo_extras"));
     expect(r.input).toEqual({ title: "Order the panel", due_date: "2026-10-01" });
     expect(r.dropped).toBe(
-      "To-Do Extras is off, so this to-do was saved without a priority or a parent task. The owner can turn it on in Settings, Features.",
+      "To-Do Extras is off, so this Reminder was saved without a priority or a parent task. The owner can turn it on in Settings, Features.",
     );
     // Only what was actually asked for is named; a normal priority (0) and no parent say nothing.
     expect(agentInputForSwitches("task.create", { title: "x", priority: 1 }, off("todo_extras")).dropped).toContain("without a priority.");
     const plain = agentInputForSwitches("task.create", { title: "x", priority: 0, parent_id: null }, off("todo_extras"));
     expect(plain.input).toEqual({ title: "x" });
     expect(plain.dropped).toBeNull();
+  });
+
+  it("To-Do Extras is the Reminders' switch (0358): a job's task passes untouched (task.create itself leaves a priority off a job's list and says so)", () => {
+    const onJob = { title: "Hang the panel", job_id: "11111111-1111-1111-1111-111111111111", priority: 2 };
+    for (const f of [off("todo_extras"), ALL_ON]) {
+      const r = agentInputForSwitches("task.create", onJob, f);
+      expect(r.input).toBe(onJob);
+      expect(r.dropped).toBeNull();
+    }
   });
 
   it("no other tool's input is touched by To-Do Extras (Sales Tax is refused by the quote tools themselves)", () => {

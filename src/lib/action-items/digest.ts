@@ -3,15 +3,21 @@ import { todayStrInTz } from "@/lib/tz";
 import { getOrgSettings } from "@/lib/org-settings";
 import { featureOn } from "@/lib/features";
 import { orgStaffIds, pushConfigured, sendPushToProfiles } from "@/lib/push";
-import { rankSix } from "@/lib/six-rank";
-import { daysAgoStr } from "./leak-detectors";
+import { sixForPerson, type DigestTask } from "./digest-six";
 
 /**
  * The morning "day ahead" push digest (run by the daily automations cron) — the
- * pull loop's reach into a CLOSED app: one push per org that LEADS WITH TODAY'S
+ * pull loop's reach into a CLOSED app: one push per PERSON that LEADS WITH THEIR
  * SIX read back by title ("Today: Garage door button · PUD follow-up · +4"),
  * with the decision items (overdue A/R, fresh leads) riding the body, deep-
  * linking to /planner where the six and the inbox live.
+ *
+ * EACH PERSON GETS ONLY THEIR OWN (0358, Erik: Reminders are private). The six are
+ * Reminders (tasks with no job), and a Reminder is its maker's and its person's
+ * alone, so the old "the company's six, pushed to every office member" is gone:
+ * each staff member's push carries the six from their own Reminders (digest-six
+ * sixForPerson, My Day's cut), and job tasks are nobody's six. The decision items
+ * are the company's and ride every staff push as before.
  *
  * getActionItems() can't run here (it builds a cookie-scoped RLS client; the cron
  * has no user), so the digest approximates the decision streams with cheap
@@ -37,12 +43,9 @@ export async function sendDayAheadDigests(supabase: any): Promise<{ orgs: number
     counts.orgs++;
     const tz = getOrgSettings(org.settings).timezone; // via the settings SSOT — no inline default
     const today = todayStrInTz(tz);
-    const tomorrow = daysAgoStr(today, -1); // negative offset walks forward
 
-    // Decision head-counts (+2 title rows each) and today's scheduled-job set —
-    // the on-site rank needs to know where the truck is going (same ≤1-day tz
-    // fuzz as the inbox's materials feeder; jobs + multi-day segments).
-    const [invR, leadR, jobR, segR] = await Promise.all([
+    // Decision head-counts (+2 title rows each).
+    const [invR, leadR] = await Promise.all([
       supabase
         .from("invoices")
         .select("invoice_number", { count: "exact" })
@@ -59,52 +62,28 @@ export async function sendDayAheadDigests(supabase: any): Promise<{ orgs: number
         .is("converted_at", null)
         .order("created_at", { ascending: true })
         .limit(2),
-      supabase
-        .from("jobs")
-        .select("id")
-        .eq("org_id", org.id)
-        .gte("scheduled_start", today)
-        .lt("scheduled_start", tomorrow)
-        .limit(50),
-      supabase
-        .from("job_schedule_segments")
-        .select("job_id")
-        .eq("org_id", org.id)
-        .lte("start_date", today)
-        .gte("end_date", today)
-        .limit(50),
     ]);
 
-    const scheduledJobIds = new Set<string>([
-      ...((jobR.data ?? []) as any[]).map((j) => j.id as string),
-      ...((segR.data ?? []) as any[]).map((s) => s.job_id as string),
-    ]);
-
-    // The six candidates — the same pool the planner ranks: open TOP-LEVEL tasks
-    // that are pinned today, dated due/overdue, flagged, or riding today's jobs.
-    // Plain undated tasks are deliberately absent (they live behind the
-    // Everything-else door, not in anyone's morning). Bounded fetch; the or-arm
-    // for today's job set is only added when there ARE jobs today.
-    const onSiteArm = scheduledJobIds.size
-      ? `,job_id.in.(${[...scheduledJobIds].slice(0, 30).join(",")})`
-      : "";
+    // The six candidates — the same pool the planner ranks: open TOP-LEVEL Reminders (no job) that
+    // are pinned today, dated due/overdue, or flagged. Plain undated ones are deliberately absent
+    // (they live on the Reminders page, not in anyone's morning), and job tasks never ride it. Who
+    // made each one and who it is for ride along, so each person is handed only their own. Bounded
+    // fetch (the company's whole pool, then split per person): nulls-first so the cap keeps pins
+    // over dated zombies (audit cn-v328).
     const { data: taskRows } = await supabase
       .from("tasks")
-      .select("id, title, status, priority, due_date, focus_date, category, job_id, parent_id")
+      .select("id, title, status, priority, due_date, focus_date, category, job_id, parent_id, created_by, assigned_to")
       .eq("org_id", org.id)
       .eq("status", "open")
       .is("parent_id", null)
-      // Match the planner's poolCut exactly: flagged means UNDATED+priority (a
-      // future-dated flagged row isn't a today candidate). Nulls-first so the
-      // 60-cap keeps pins over dated zombies (audit cn-v328).
-      .or(`focus_date.eq.${today},due_date.lte.${today},and(due_date.is.null,priority.gte.1)${onSiteArm}`)
+      .is("job_id", null)
+      .or(`focus_date.eq.${today},due_date.lte.${today},and(due_date.is.null,priority.gte.1)`)
       .order("due_date", { ascending: false, nullsFirst: true })
-      .limit(60);
-
-    const six = rankSix((taskRows ?? []) as any[], { todayStr: today, scheduledJobIds });
+      .limit(500);
+    const pool = (taskRows ?? []) as DigestTask[];
 
     const decisions = (invR.count ?? 0) + (leadR.count ?? 0);
-    if (six.length === 0 && decisions === 0) continue; // nothing needs attention → no push
+    if (pool.length === 0 && decisions === 0) continue; // nothing needs attention → no push
 
     // Decision titles in stream order (money → leads), "+N more" for the rest.
     const decisionTitles: string[] = [
@@ -118,30 +97,32 @@ export async function sendDayAheadDigests(supabase: any): Promise<{ orgs: number
     const staff = await orgStaffIds(org.id);
     if (!staff.length) continue;
 
-    // Lead with the six; decisions ride the body. Resilient when the six are
-    // empty: fall back to the old decisions-only shape rather than pushing a
-    // hollow "Today:" header.
-    const sixLine =
-      six.slice(0, 2).map((t: any) => String(t.title)).join(" · ") +
-      (six.length > 2 ? ` · +${six.length - 2}` : "");
-    const sixOverflow = six.slice(2).map((t: any) => String(t.title)).join(" · ");
-
-    await sendPushToProfiles(
-      staff,
-      "day_ahead",
-      six.length
-        ? {
-            title: `Today: ${sixLine}`,
-            body: decisions > 0 ? decisionLine : sixOverflow || "Nothing waiting on a decision.",
-            url: "/planner",
-          }
-        : {
-            title: `Needs action: ${decisions} item${decisions === 1 ? "" : "s"}`,
-            body: decisionLine,
-            url: "/planner",
-          },
-    );
-    counts.pushed++;
+    // ONE PUSH PER PERSON, their own six in it. Lead with the six; decisions ride the body.
+    // Resilient when someone's six are empty: the decisions-only shape rather than a hollow
+    // "Today:" header; nobody with no six and no decisions is pushed at all.
+    for (const personId of staff) {
+      const six = sixForPerson(pool, personId, today);
+      if (six.length === 0 && decisions === 0) continue;
+      const sixLine =
+        six.slice(0, 2).map((t) => String(t.title)).join(" · ") + (six.length > 2 ? ` · +${six.length - 2}` : "");
+      const sixOverflow = six.slice(2).map((t) => String(t.title)).join(" · ");
+      await sendPushToProfiles(
+        [personId],
+        "day_ahead",
+        six.length
+          ? {
+              title: `Today: ${sixLine}`,
+              body: decisions > 0 ? decisionLine : sixOverflow || "Nothing waiting on a decision.",
+              url: "/planner",
+            }
+          : {
+              title: `Needs action: ${decisions} item${decisions === 1 ? "" : "s"}`,
+              body: decisionLine,
+              url: "/planner",
+            },
+      );
+      counts.pushed++;
+    }
   }
 
   return counts;

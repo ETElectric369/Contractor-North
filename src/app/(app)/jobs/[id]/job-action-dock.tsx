@@ -1,5 +1,4 @@
-import Link from "next/link";
-import { Phone, Navigation, ListChecks } from "lucide-react";
+import { Phone, Navigation } from "lucide-react";
 import { NavLink } from "@/components/nav-link";
 import { createInvoiceForJob, deleteJob } from "../actions";
 import { JobTimeButton, type OpenEntry } from "./job-time-button";
@@ -12,31 +11,29 @@ import type { Job } from "@/lib/types";
 
 /** 44px secondary slot. On a phone the label is VISIBLE — a tiny 9px caption under
  *  the icon (60mph rule: an unlabeled glyph is a guess); at md+ it's the familiar
- *  icon+label row. Shared by Photo / Call / Navigate / Tasks / Manage — their label
+ *  icon+label row. Shared by Photo / Call / Navigate / Manage — their label
  *  spans render plain text and inherit the size from here.
  *
  *  px-1 (not 1.5) while stacked: only two captions are wider than the 44px minimum
- *  can hold — "Navigate" (39px in Geist at 9px) and "Manage" (34px) — and the
- *  six-slot budget below needs those slots at 49px and 44px, not 53 and 48. Every
- *  other slot is pinned at min-w-11 with room to spare, so its padding is moot.
+ *  can hold — "Navigate" (39px in Geist at 9px) and "Manage" (34px). Every other slot
+ *  is pinned at min-w-11 with room to spare, so its padding is moot.
  *
- *  The row layout waits for md (not sm): six icon+label slots measure 572px with
- *  "Clock In" and 627px with "On clock · 10:59", and a 640px mouse window wears the
- *  desktop shell (globals.css `shell:`), which leaves 640 − 84 dock − 48 padding =
- *  508px — the row would have scrolled the page sideways there. The stacked slots
- *  fit every width from 375 up; the row fits from 768 (636px beside the shell). */
+ *  The row layout waits for md (not sm): a 640px mouse window wears the desktop shell
+ *  (globals.css `shell:`), which leaves 640 − 84 dock − 48 padding = 508px, too narrow
+ *  for the icon+label row with "On clock · 10:59". The stacked slots fit every width
+ *  from 375 up; the row fits from 768. */
 const ICON_BTN =
   "inline-flex h-11 min-w-11 shrink-0 flex-col items-center justify-center gap-0.5 whitespace-nowrap rounded-lg border border-slate-300 bg-white px-1 text-[9px] font-medium leading-none text-slate-600 hover:bg-slate-50 md:flex-row md:gap-1.5 md:px-3 md:text-sm md:leading-normal";
 
 /**
  * The job action dock — ONE sticky glass bar replacing the old 7-control header
  * row. Slot order: [TIME — the only filled button] [Photo] [Call] [Navigate]
- * [Tasks] [Manage ⋯]. Add Cost left the dock (Erik, 2026-09-11: "combine costs
+ * [Manage ⋯]. Add Cost left the dock (Erik, 2026-09-11: "combine costs
  * with add cost on that upper button and get rid of it below") — the cost door is
  * now the Costs tab's header, camera first (job-cost-capture.tsx), one chip away
- * on the strip. Tasks joined (Erik, 2026-09-16, from a job's Tasks tab on his
- * phone: "Move tasks to the bar to the right of navigate button") as a second
- * door to the Tasks tab, which otherwise sits behind the strip's More chip.
+ * on the strip. The Tasks slot (2026-09-16) left too: Tasks is now a pinned chip
+ * right after Overview on the strip below (Erik, 2026-09-26: "put it on the bottom
+ * bar next to overview"), so a dock slot would be the same door twice.
  * Sticky-TOP inside <main> (the app's scroll container); the bottom edge already
  * belongs to the bottom nav + bug button. NOTE: no .glass-gloss here — it forces
  * position:relative AND overflow:hidden (the documented gotcha), which would
@@ -58,7 +55,7 @@ export function JobActionDock({
   customers,
   templates,
   workDay,
-  openTaskCount,
+  taskPhotos = false,
 }: {
   job: any;
   viewerIsStaff: boolean;
@@ -76,26 +73,21 @@ export function JobActionDock({
   templates: { id: string; name: string }[];
   /** Org work-day window (workDayWindowHm) for the Edit Job modal's time defaults. */
   workDay?: { start: string; end: string };
-  /** Tasks not yet done — the same count the Tasks tab chip shows. Optional: with
-   *  nothing passed the Tasks slot simply carries no badge. */
-  openTaskCount?: number;
+  /** The database holds photos on tasks (0358): the Photo slot's toast then offers Make It A Task. */
+  taskPhotos?: boolean;
 }) {
   // Same lifecycle gate the old header row used for Propose dates / Finish job.
   const schedulable = job.status !== "complete" && job.status !== "invoiced" && job.status !== "cancelled";
 
   return (
-    // Six slots again, so the bar borrows half of main's side padding again at phone
-    // width (-mx-2, still inset 8px) the way the pre-v947 six-slot bar did. The
-    // measured budget at 375, Geist captions, stacked slots: TIME "Clock In" 104 +
-    // Photo 44 + Call 44 + Navigate 49 + Tasks 44 + Manage 44 = 329, plus five 2px
-    // gaps and the bar's 4px padding + 1px border each side = 349px. main's 343 can't
-    // hold that; the borrow makes it 359, ten to spare (the shorter TIME states, "Switch"
-    // 98 and a ticking "10:59" 87, need less). What could NOT give: the 44px touch
-    // minimum — every slot is already pinned there, so dropping the Call caption saves
-    // nothing — and the whole word "Navigate" (see its slot). Inset and roomy at md+.
+    // Five slots, so the bar fits inside main's own padding again (the six-slot bar had
+    // to borrow 8px each side). The measured budget at 375, Geist captions, stacked
+    // slots: TIME "Clock In" 104 + Photo 44 + Call 44 + Navigate 49 + Manage 44 = 285,
+    // plus four 2px gaps and the bar's 4px padding + 1px border each side = 303px of
+    // main's 343. What never gives: the 44px touch minimum and the whole word "Navigate".
     // The negative top offsets match main's p-4/lg:p-6 so the stuck bar sits flush
     // with the scrollport instead of hovering a padding-gap below it.
-    <div className="sticky -top-4 z-40 -mx-2 mb-5 md:mx-0 lg:-top-6">
+    <div className="sticky -top-4 z-40 mb-5 lg:-top-6">
       <div className="glass glass-menu flex items-center gap-0.5 rounded-xl p-1 md:gap-2 md:p-2">
         <JobTimeButton
           jobId={job.id}
@@ -106,7 +98,7 @@ export function JobActionDock({
           techs={techs}
           defaultProfileId={defaultProfileId}
         />
-        <JobPhotoQuick orgId={job.org_id} jobId={job.id} className={ICON_BTN} />
+        <JobPhotoQuick orgId={job.org_id} jobId={job.id} className={ICON_BTN} taskDoor={taskPhotos} />
         {customerPhone && (
           <a href={`tel:${customerPhone}`} title="Call customer" className={ICON_BTN}>
             <Phone className="h-4 w-4 shrink-0" />
@@ -122,24 +114,6 @@ export function JobActionDock({
             <span>Navigate</span>
           </NavLink>
         )}
-        {/* Every role: the Tasks tab isn't staffOnly. A plain ?tab= link is the whole
-            mechanism — the strip follows the URL (cn-v945), so this lands on the tab
-            every time, and scroll={false} keeps the page where it is. */}
-        <Link href="?tab=tasks" scroll={false} title="Tasks" className={`${ICON_BTN} relative`}>
-          <ListChecks className="h-4 w-4 shrink-0" />
-          <span>Tasks</span>
-          {openTaskCount != null && openTaskCount > 0 && (
-            // Hangs off the corner (absolute) so the count never widens the slot — the
-            // 375 budget above has no room for it inline. -top-1 lands exactly on the
-            // bar's inner edge (its 4px phone padding), never past its border.
-            <span
-              aria-label={`${openTaskCount} open`}
-              className="absolute -top-1 right-0 flex h-4 min-w-4 items-center justify-center rounded-full bg-[rgb(var(--glass-ink))] px-1 text-[10px] font-semibold leading-none text-white"
-            >
-              {openTaskCount > 99 ? "99+" : openTaskCount}
-            </span>
-          )}
-        </Link>
         <div className="ml-auto shrink-0">
           <JobManageMenu
             isStaff={viewerIsStaff}

@@ -55,7 +55,7 @@ describe("confirmAgentAction and the switches", () => {
     expect(executeAction).toHaveBeenCalledWith("task.create", { title: "Pull wire" }, { source: "agent", confirmed: true });
     expect(res.ok).toBe(true);
     expect(res.message).toBe(
-      "Done — added. To-Do Extras is off, so this to-do was saved without a priority or a parent task. The owner can turn it on in Settings, Features.",
+      "Done — added. To-Do Extras is off, so this Reminder was saved without a priority or a parent task. The owner can turn it on in Settings, Features.",
     );
   });
 });

@@ -1,28 +1,33 @@
 "use client";
 
-// TODAY'S 6 — the six-slot day card on My Day. The server picks the six with
-// THE shared rank (lib/six-rank: pins first, then overdue/due-today/on-site/
-// flagged — the same function behind the morning digest, so the phone and the
-// card can never disagree) and this card renders them as 44px one-tap check
-// rows with subtasks indented
-// under their parent. Subtasks are NEVER counted anywhere — checking a parent
-// with open children confirm-cascades (the toggleTask needsCascade contract).
-// #7+ never vanishes: it lives at /tasks (the Grab One link when the six run dry).
+// TODAY'S 6 — the six-slot day card on My Day, and since 0358 the ONE place My Day adds anything
+// (Erik, 2026-09-26: "fold that into Today's 6 with an add reminder/task up top as that will be the
+// most useful"). The Add line leads the card: type the words; pick a job on the chip and it goes on
+// that job's Tasks ("Added To J-055's Tasks"), leave the chip and it is a Reminder for today.
+//
+// The six are the person's own REMINDERS (tasks with no job): job tasks are the job's list, worked
+// on the job and in the Now block, never stockpiled here. The server picks the six with THE shared
+// rank (lib/six-rank: pins, then overdue / due today / flagged — the same function behind the morning
+// digest, so the phone and the card can never disagree) and this card renders them as 44px one-tap
+// check rows with subtasks indented under their parent. Subtasks are NEVER counted anywhere —
+// checking a parent with open children confirm-cascades (the toggleTask needsCascade contract).
+// #7+ never vanishes: it lives at /tasks, the Reminders page (Grab One / All Reminders).
 
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Check, Flag, MoreHorizontal, Pin } from "lucide-react";
+import { Check, Flag, MoreHorizontal, Pin, Plus } from "lucide-react";
 import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
 import { MoveToDay } from "@/components/move-to-day";
 import { useToast } from "@/components/toast";
 import { formatDate } from "@/lib/utils";
-import { toggleTask, updateTask, type ToggleTaskResult } from "../tasks/actions";
+import { createTask, toggleTask, updateTask, type ToggleTaskResult } from "../tasks/actions";
 import { taskHref } from "@/lib/task-href";
-import { jobLabel } from "@/lib/schedule-options";
 
-/** A ranked slot (lib/six-rank picks it; planner/page.tsx decorates it). */
+/** A ranked slot (lib/six-rank picks it; planner/page.tsx decorates it). A Reminder: no job. */
 export interface SixSlot {
   id: string;
   title: string;
@@ -30,11 +35,16 @@ export interface SixSlot {
   priority: number;
   due_date: string | null;
   job_id: string | null;
-  jobs?: { job_number: string; name: string } | null;
   /** focus_date = today — an explicit "do today" pin (renders the pin glyph). */
   pinned: boolean;
-  /** The task's job is on today's schedule (renders the "on site" chip). */
-  onSite: boolean;
+}
+
+/** A job the Add line's chip can put a task on (the jobs still being worked, the clocked-in one first). */
+export interface AddJob {
+  id: string;
+  label: string;
+  /** J-055: what the toast names. */
+  number: string | null;
 }
 
 export interface SixSubtask {
@@ -58,20 +68,107 @@ function dueChip(due: string | null, todayStr: string): { label: string; overdue
 const SHEET_ROW =
   "flex min-h-[44px] w-full items-center rounded-lg border border-slate-200 bg-white px-4 text-left text-sm font-medium text-slate-700 hover:border-brand hover:text-brand disabled:opacity-50";
 
+/**
+ * THE ADD LINE at the top of Today's 6. One line, one optional chip, one button:
+ *   · no job  → a Reminder, pinned to today (focus_date) so it shows in the six it was added to;
+ *   · a job   → that job's task, on its list for whoever is on the job ("Added To J-055's Tasks").
+ * The toast always says where it went (nothing silent). A pin ranks first (lib/six-rank), so a new
+ * Reminder takes a slot unless six pins already hold them all; on a full card the last slot, never a
+ * pin, is the one it moves to Reminders, and the toast names it.
+ */
+export function AddReminderLine({
+  jobs,
+  todayStr,
+  pinsFull,
+  bumps,
+}: {
+  jobs: AddJob[];
+  todayStr: string;
+  /** Six pins already: a seventh pin can't be sure of a slot. */
+  pinsFull: boolean;
+  /** The six are full (not all pins): the title of the last slot, which a new pin moves out. */
+  bumps: string | null;
+}) {
+  const router = useRouter();
+  const toast = useToast();
+  const [pending, start] = useTransition();
+  const [title, setTitle] = useState("");
+  const [jobId, setJobId] = useState("");
+
+  function add() {
+    if (!title.trim()) return;
+    const job = jobs.find((j) => j.id === jobId) ?? null;
+    start(async () => {
+      const res = await createTask(job ? { title, job_id: job.id } : { title, focus_date: todayStr });
+      if (!res.ok) {
+        toast(res.error ?? "Couldn't add it. Try again.", "error");
+        return;
+      }
+      if (res.duplicate) toast(res.speak ?? "Already on the list.", "info");
+      else if (job) toast(`Added To ${job.number || job.label}'s Tasks`, "success");
+      else if (pinsFull) toast("Reminder added and pinned. Today's 6 already holds six pins, so one of them waits on your Reminders list.", "success");
+      else if (bumps) toast(`Added To Today's 6. "${bumps}" moved to your Reminders list.`, "success");
+      else toast("Added To Today's 6", "success");
+      setTitle("");
+      setJobId("");
+      router.refresh();
+    });
+  }
+
+  return (
+    <div className="space-y-2 border-b border-slate-100 px-3 py-3">
+      <div className="flex items-center gap-2">
+        <Input
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && add()}
+          placeholder="Add A Reminder Or Task…"
+          aria-label="Add A Reminder Or Task"
+          className="h-11 min-w-0 flex-1"
+        />
+        <Button onClick={add} disabled={pending || !title.trim()} className="shrink-0 px-3">
+          <Plus /> Add
+        </Button>
+      </div>
+      {jobs.length > 0 && (
+        // The optional job chip: a native select, so the phone's own picker lists the jobs.
+        <select
+          value={jobId}
+          onChange={(e) => setJobId(e.target.value)}
+          aria-label="Job (optional)"
+          className={`h-11 max-w-full truncate rounded-full border px-3 text-sm ${
+            jobId ? "border-brand bg-brand-light/40 font-medium text-brand" : "border-slate-300 bg-white text-slate-600"
+          }`}
+        >
+          <option value="">No Job: A Reminder For Me</option>
+          {jobs.map((j) => (
+            <option key={j.id} value={j.id}>
+              On {j.label}
+            </option>
+          ))}
+        </select>
+      )}
+    </div>
+  );
+}
+
 export function YourList({
   six,
   subtasks,
   todayStr,
   doneToday,
-  grabHref,
+  restCount,
+  jobs = [],
 }: {
   six: SixSlot[];
   subtasks: SixSubtask[];
   todayStr: string;
-  /** My tasks completed today (server head-count) — the durable half of "2/6". */
+  /** My Reminders completed today (server head-count) — the durable half of "2/6". */
   doneToday: number;
-  /** Where "Grab one →" points when the six run dry (null = no open backlog to grab). */
-  grabHref: string | null;
+  /** My open Reminders the six don't show (Grab One when the six are empty, All Reminders otherwise). */
+  restCount: number;
+  /** The Add line's job chip. Empty: the line adds Reminders only. */
+  jobs?: AddJob[];
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -161,8 +258,8 @@ export function YourList({
     });
   }
 
-  if (six.length === 0 && doneToday === 0 && !grabHref) return null;
-
+  // Always drawn: the Add line is My Day's one door for a Reminder or a job's task, even on a day
+  // with nothing in the six (no dead end, and never a first Reminder with nowhere to type it).
   return (
     <Card className="mb-4 overflow-hidden">
       <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3">
@@ -171,11 +268,18 @@ export function YourList({
         <span className="text-xs font-medium text-slate-500">{Math.min(doneCount, 6)}/6</span>
       </div>
 
+      <AddReminderLine
+        jobs={jobs}
+        todayStr={todayStr}
+        pinsFull={six.filter((t) => t.pinned).length >= 6}
+        bumps={six.length >= 6 ? six[six.length - 1].title : null}
+      />
+
       {six.length === 0 ? (
-        <p className="px-5 py-6 text-center text-sm text-slate-400">
+        <p className="px-5 py-5 text-center text-sm text-slate-400">
           Nothing urgent today.{" "}
-          {grabHref && (
-            <Link href={grabHref} className="font-medium text-brand hover:underline">
+          {restCount > 0 && (
+            <Link href="/tasks" className="font-medium text-brand hover:underline">
               Grab One →
             </Link>
           )}
@@ -210,26 +314,16 @@ export function YourList({
                         )}
                         {t.title}
                       </span>
-                      {(t.jobs || t.category === "office") && (
+                      {t.category === "office" && (
                         <span className="mt-0.5 flex items-center gap-1.5 text-xs text-slate-400">
-                          {t.category === "office" && (
-                            <span className="rounded-full bg-amber-50 px-1.5 py-px text-[10px] font-medium text-amber-700">Office</span>
-                          )}
-                          {t.jobs && (
-                            <span className="truncate">
-                              {jobLabel(t.jobs)}
-                            </span>
-                          )}
+                          <span className="rounded-full bg-amber-50 px-1.5 py-px text-[10px] font-medium text-amber-700">Office</span>
                         </span>
                       )}
                     </span>
-                    {/* ONE right chip: the due scream wins; else "on site" (the
-                        truck's already going there); else a quiet future date. */}
+                    {/* ONE right chip: the due scream wins; else a quiet future date. */}
                     {!done &&
                       (screaming ? (
                         <span className="shrink-0 text-xs font-medium text-red-600">{chip!.label}</span>
-                      ) : t.onSite ? (
-                        <span className="shrink-0 rounded-full bg-brand-light/60 px-2 py-0.5 text-[11px] font-medium text-brand">on site</span>
                       ) : chip ? (
                         <span className="shrink-0 text-xs text-slate-400">{chip.label}</span>
                       ) : null)}
@@ -238,7 +332,7 @@ export function YourList({
                   <button
                     type="button"
                     onClick={() => setSheetFor(t.id)}
-                    className="flex h-11 w-9 shrink-0 items-center justify-center rounded-lg text-slate-300 hover:bg-slate-100 hover:text-slate-600"
+                    className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-slate-300 hover:bg-slate-100 hover:text-slate-600"
                     aria-label={`More options for ${t.title}`}
                   >
                     <MoreHorizontal className="h-4 w-4" />
@@ -282,6 +376,15 @@ export function YourList({
             );
           })}
         </ul>
+      )}
+      {six.length > 0 && restCount > 0 && (
+        <Link
+          href="/tasks"
+          className="flex min-h-[44px] items-center justify-center border-t border-slate-100 text-sm font-medium text-brand hover:bg-slate-50"
+        >
+          {/* For you: /tasks also lists the ones you made for someone else, which this doesn't count. */}
+          All Reminders · {restCount} More For You
+        </Link>
       )}
 
       {/* Per-row "…" sheet — the swap grammar (amendment 3): every button says

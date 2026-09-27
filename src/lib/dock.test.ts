@@ -297,7 +297,7 @@ describe("a tech's dock has no dead doors", () => {
 
   it("shows a tech only My Day and Tasks under Today", () => {
     const today = DOCK.find((s) => s.key === "today")!;
-    expect(today.children.filter((c) => !c.staffOnly).map((c) => c.label)).toEqual(["My Day", "Tasks"]);
+    expect(today.children.filter((c) => !c.staffOnly).map((c) => c.label)).toEqual(["My Day", "Reminders"]);
   });
 });
 

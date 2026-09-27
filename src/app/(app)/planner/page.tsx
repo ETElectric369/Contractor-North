@@ -27,7 +27,7 @@ import { ActionList } from "@/components/action-items/action-list";
 import { SupplierPaperDoneTrail, SUPPLIER_PAPERS_SCOPE } from "@/components/supplier-paper-cards";
 import { AppointmentButton, type ApptValue } from "../appointments/appointment-button";
 import { JobMoveButton, ApptMoveButton, ApptDoneButton } from "./agenda-move";
-import { NewTaskBox } from "../tasks/tasks-view";
+import { NowTasks } from "./now-tasks";
 import { QuickCostButton } from "@/components/quick-cost-button";
 import { MarkReportReviewedButton } from "./mark-report-reviewed-button";
 import type { DailyReportSummary } from "../timeclock/actions";
@@ -156,7 +156,8 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
     // Options for the inline add/edit controls + the owner snapshot.
     listCustomerOptions(supabase),
     listActiveTechs(supabase),
-    supabase.from("jobs").select("id, job_number, name, address").order("created_at", { ascending: false }).limit(200),
+    // status rides along for Today's 6 Add line: its job chip offers only jobs still being worked.
+    supabase.from("jobs").select("id, job_number, name, address, status").order("created_at", { ascending: false }).limit(200),
     // full_name rides along for the setup card — it's the first thing it asks and the first thing
     // that would otherwise be asked again after it was already answered at signup.
     supabase.from("profiles").select("role, full_name").eq("id", user?.id ?? "").maybeSingle(),
@@ -192,8 +193,8 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
   // who can't see /schedule (office-only). A role-gated single map ≠ duplication.
   if (view === "week" && isStaff) redirect("/schedule?view=week");
 
-  // Merge scheduled-today jobs + segment-today jobs (dedup) — derived BEFORE the
-  // next round because the six-slot pool cut reuses today's job ids (rank 4).
+  // Merge scheduled-today jobs + segment-today jobs (dedup) for the agenda below. (The six no longer
+  // read today's jobs: job tasks left Today's 6 in 0358, so rank 4 "on site" is gone.)
   const jobMap = new Map<string, any>();
   for (const j of jobs ?? []) jobMap.set(j.id, { ...j, time: j.scheduled_start });
   for (const s of (segJobs ?? []) as any[]) {
@@ -201,23 +202,23 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
     if (j && !jobMap.has(j.id)) jobMap.set(j.id, { ...j, time: null });
   }
   const todayJobs = [...jobMap.values()];
-  const todayJobIds = todayJobs.map((j: any) => j.id as string);
 
   const uid = user?.id ?? "";
-  // The ownership cut for MY tasks: techs see what's assigned to THEM; staff
-  // additionally see their own unassigned captures (the boss's loose ends).
+  // MY REMINDERS (0358): a task with no job, that is for me, or that I made for nobody else. The
+  // same cut for every role now (a tech's own "remind me" lands in his six, not only what the office
+  // assigned him), and job tasks never ride it: they are the JOB's list, worked from the job and from
+  // the Now block below, never a person's six (Erik, 2026-09-26: My Day is "stockpiled with things i
+  // cant act on"). 0358's RLS makes a Reminder private to its maker and its person; this cut says the
+  // same on a database without it.
   const mineCut = <T,>(q: T): T =>
-    (isStaff
-      ? (q as any).or(`assigned_to.eq.${uid},and(created_by.eq.${uid},assigned_to.is.null)`)
-      : (q as any).eq("assigned_to", uid)) as T;
-  // TODAY'S 6 pool cut — only rows a rank can claim (pinned / overdue / due today /
-  // riding today's jobs / flagged undated), so a deep dated backlog can't starve
-  // the pool out of the 60-row cap. Plain undated tasks never fetch, never promote.
+    (q as any).is("job_id", null).or(`assigned_to.eq.${uid},and(created_by.eq.${uid},assigned_to.is.null)`) as T;
+  // TODAY'S 6 pool cut — only rows a rank can claim (pinned / overdue / due today / flagged
+  // undated), so a deep dated backlog can't starve the pool out of the 60-row cap. Plain undated
+  // Reminders never fetch, never promote.
   const poolCut = [
     `focus_date.eq.${todayStr}`,
     `due_date.lte.${todayStr}`,
     "and(due_date.is.null,priority.gte.1)",
-    ...(todayJobIds.length ? [`job_id.in.(${todayJobIds.join(",")})`] : []),
   ].join(",");
   const headCount = () => supabase.from("tasks").select("id", { count: "exact", head: true });
 
@@ -232,7 +233,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
   // UTC server's day — a Pacific evening debrief must not fall out of the window a
   // day early).
   const reportsSince = todayStrInTz(tz, new Date(Date.now() - 14 * 86_400_000));
-  const [curJobRes, whichJobsR, poolR, elseCountR, officeCountR, doneTodayR, dailyReportsR] = await Promise.all([
+  const [curJobRes, whichJobsR, poolR, restCountR, doneTodayR, dailyReportsR] = await Promise.all([
     openEntry?.job_id
       ? supabase.from("jobs").select("id, job_number, name, status, address, customers(name, address, city, state, zip)").eq("id", openEntry.job_id).maybeSingle()
       : Promise.resolve({ data: null }),
@@ -244,12 +245,12 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
     openEntry && !openEntry.job_id
       ? supabase.from("jobs").select("id, job_number, name, address, customers(name)").eq("status", "in_progress").order("created_at", { ascending: false })
       : Promise.resolve({ data: [] as any[] }),
-    // TODAY'S 6 pool — my open TOP-LEVEL tasks a rank can claim (subtasks nest
+    // TODAY'S 6 pool — my open TOP-LEVEL Reminders a rank can claim (subtasks nest
     // under their parent and never count; children fetch below).
     mineCut(
       supabase
         .from("tasks")
-        .select("id, title, category, priority, due_date, focus_date, job_id, jobs(job_number, name)")
+        .select("id, title, category, priority, due_date, focus_date, job_id")
         .eq("status", "open")
         .is("parent_id", null),
     )
@@ -260,20 +261,11 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
       .order("due_date", { ascending: false, nullsFirst: true })
       .order("priority", { ascending: false })
       .limit(60),
-    // "Everything else" backlog count — the open top-level backlog. Staff: org-wide
-    // minus office. Techs: THEIR tasks (their grab link carries ?mine=1 so the gate
-    // matches the page it opens). Feeds ONLY the Grab-One gate now — the door links
-    // this used to number are gone (office tasks live at /tasks).
-    isStaff
-      // category is nullable since 0136 (free-form categories) — bare neq drops NULL rows,
-      // which would make this door's count disagree with /tasks?else=1.
-      ? headCount().eq("status", "open").is("parent_id", null).or("category.neq.office,category.is.null")
-      : headCount().eq("status", "open").is("parent_id", null).eq("assigned_to", uid),
-    // Office inventory count (staff only) — the other half of the Grab-One gate.
-    isStaff
-      ? headCount().eq("status", "open").is("parent_id", null).eq("category", "office")
-      : Promise.resolve({ count: 0 } as { count: number | null }),
-    // My tasks completed today — the durable half of the card's "2/6".
+    // MY OPEN REMINDERS, all of them (top-level): what's behind the six feeds the card's Grab One
+    // and All Reminders links. The ones FOR ME: /tasks also lists the Reminders I made for someone
+    // else (theirs to do, never in my six), so the link says "More For You", not a /tasks count.
+    mineCut(headCount().eq("status", "open").is("parent_id", null)),
+    // My Reminders completed today — the durable half of the card's "2/6".
     mineCut(
       headCount()
         .eq("status", "done")
@@ -331,20 +323,18 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
   const sixPool = ((poolR as any)?.data ?? []) as any[];
   // THE shared rank (lib/six-rank — the same function behind the morning digest,
   // pinned by tests/badge-economy.test.ts, so the phone and the card can never
-  // disagree). The card's pin/on-site glyphs are derived HERE, keeping the pure
-  // rank presentation-free.
-  const scheduledJobSet = new Set(todayJobIds);
-  const six = rankSix(sixPool, { todayStr, scheduledJobIds: scheduledJobSet }).map((t: any) => ({
+  // disagree). The card's pin glyph is derived HERE, keeping the pure rank
+  // presentation-free.
+  const six = rankSix(sixPool, { todayStr }).map((t: any) => ({
     ...t,
     pinned: t.focus_date === todayStr,
-    onSite: !!t.job_id && scheduledJobSet.has(t.job_id),
   }));
   // (Pins beyond six used to badge the door line; the doors are gone — overflow
   // pins still surface at /tasks like everything else past the six.)
 
-  // The current job's materials (needs its id), the "Needs action" inbox (needs
+  // The current job's materials and its open tasks (need its id), the "Needs action" inbox (needs
   // the role), and the six's subtasks (need the chosen six) — one final round.
-  const [mlRes, actionItems, kidsRes] = await Promise.all([
+  const [mlRes, actionItems, kidsRes, nowTasksRes] = await Promise.all([
     // NEWEST by created_at — the same pick the job tab and ensureJobMaterialList make, so the
     // Materials button below lands on the ONE list the crew and the office both call "the"
     // list. order("id") sorted UUIDs: arbitrary, and on a two-list job a different list from
@@ -363,21 +353,43 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
           .in("parent_id", six.map((t) => t.id))
           .order("created_at", { ascending: true })
       : Promise.resolve({ data: [] as any[] }),
+    // THE CLOCKED-IN JOB'S TASKS for the Now block (0358): how many are left and the next three,
+    // in the list's order. Off the clock (no currentJob) there is nothing to read. A head count and
+    // three rows, one query; a lost read shows no Tasks line rather than a wrong "0 left".
+    currentJob
+      ? supabase
+          .from("tasks")
+          .select("id, title", { count: "exact" })
+          .eq("job_id", currentJob.id)
+          .eq("status", "open")
+          .order("created_at", { ascending: true })
+          .limit(3)
+      : Promise.resolve({ data: [] as any[], count: 0, error: null }),
   ]);
   const currentMaterials: { id: string; name: string } | null = ((mlRes as any)?.data as any) ?? null;
   const sixKids = ((kidsRes as any)?.data ?? []) as any[];
+  const nowTasks = (nowTasksRes as any)?.error
+    ? null
+    : {
+        left: (((nowTasksRes as any)?.count as number | null) ?? 0),
+        next: (((nowTasksRes as any)?.data ?? []) as { id: string; title: string }[]).map((t) => ({ id: t.id, title: t.title })),
+      };
 
   // ── derived (no awaits) ──
-  // Backlog-behind-the-six, honest by subtraction: whatever the six show doesn't
-  // count as "everything else". These gate ONLY the Today's-6 Grab-One link now
-  // (the door links they used to number were removed — office tasks live at /tasks).
-  const sixNonOffice = six.filter((t) => t.category !== "office").length;
-  const elseCount = Math.max(0, (((elseCountR as any)?.count as number | null) ?? 0) - (isStaff ? sixNonOffice : six.length));
-  const officeCount = (((officeCountR as any)?.count as number | null) ?? 0);
+  // Reminders behind the six, honest by subtraction: whatever the six show isn't "more". Gates the
+  // card's Grab One (when the six are empty) and All Reminders (when there are more) links.
+  const restCount = Math.max(0, ((((restCountR as any)?.count as number | null) ?? 0) - six.length));
   const doneToday = (((doneTodayR as any)?.count as number | null) ?? 0);
-  // Staff grab from an office-free list (?else=1) so the link matches the page;
-  // techs get their own assigned list (audit cn-v328).
-  const elseHref = isStaff ? "/tasks?else=1" : "/tasks?mine=1";
+  // The Add line's job chip: the jobs the crew works right now, the one on the clock first.
+  const addJobs = (() => {
+    const active = ((jobOptRows ?? []) as any[]).filter((j) => !["complete", "invoiced", "cancelled"].includes(String(j.status ?? "")));
+    const first = currentJob ? active.filter((j) => j.id === currentJob.id) : [];
+    return [...first, ...active.filter((j) => j.id !== currentJob?.id)].map((j) => ({
+      id: String(j.id),
+      label: jobLabel(j),
+      number: (j.job_number as string | null) ?? null,
+    }));
+  })();
 
   const org = orgRow;
   const orgLocation = formatCityStateZip((org as any)?.city, (org as any)?.state, (org as any)?.zip) || null;
@@ -1033,6 +1045,12 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
                   />
                 )}
               </div>
+              {/* THE JOB'S TASKS, while he's on it (0358): "Tasks: 3 left", the next three to check
+                  off right here, and All Tasks for the rest. Only on the clock, only this job;
+                  nothing when the list is done or empty. */}
+              {nowTasks && nowTasks.left > 0 && (
+                <NowTasks jobId={currentJob.id} left={nowTasks.left} next={nowTasks.next} />
+              )}
             </div>
           )}
           {/* On the clock with NO job on the punch: ask, don't vanish. Keyed on the punch's own
@@ -1068,15 +1086,18 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
         </Card>
       )}
 
-      {/* TODAY'S 6 — what must get done (the agenda above is where you'll be).
-          Pins + the ranked pool fill six check rows; subtasks nest under their
-          parent and never count anywhere. */}
+      {/* TODAY'S 6 — what must get done (the agenda above is where you'll be). ONE card (Erik,
+          2026-09-26: "fold that into Today's 6 with an add reminder/task up top as that will be
+          the most useful"): the Add line leads it — type the words; pick a job and it goes on that
+          job's Tasks, leave it and it's my Reminder for today. The six below are my own Reminders
+          (pins + the ranked pool); job tasks live on their job and in the Now block above. */}
       <YourList
         six={six as any}
         subtasks={sixKids as any}
         todayStr={todayStr}
         doneToday={doneToday}
-        grabHref={elseCount + officeCount > 0 ? elseHref : null}
+        restCount={restCount}
+        jobs={addJobs}
       />
 
       {/* The office/else DOOR LINES that sat here were removed (Erik's declutter):
@@ -1112,9 +1133,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
         </Card>
       )}
 
-      {/* Quick add-a-task box — the mint door. Its toast says where the task
-          landed (today's six / Office / Everything else) so capture stays honest. */}
-      <NewTaskBox jobs={(jobOptRows ?? []) as any} people={people} todayStr={todayStr} extras={featureOn(features, "todo_extras")} />
+      {/* (The 6-field task box that sat here went in 0358: its one line is the top of Today's 6.) */}
 
       {/* The MONEY LINE (getMoneyPipeline totals) left this page — the AR page owns
           that view now, and overdue/draft invoices already surface as actionable

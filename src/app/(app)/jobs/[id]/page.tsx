@@ -52,7 +52,8 @@ import { JobCustomerPage } from "./job-customer-page";
 import { JobPanelLoader } from "./job-panel-loader";
 import { JobNotes } from "./job-notes";
 import { JobBills } from "./job-bills";
-import { JobTasks } from "./job-tasks";
+import { JobTaskList, type TaskPhotos } from "./job-task-list";
+import { readJobTasks, taskPhoto } from "@/lib/job-tasks";
 import { JobPermits } from "./job-permits";
 import { permitStatusTone, permitResultTone } from "@/lib/permit-options";
 import { JobAddTimeEntry } from "./job-add-time";
@@ -137,7 +138,7 @@ export default async function JobDetailPage({
     { data: docRows },
     { data: staff },
     { data: bills },
-    { data: tasks },
+    jobTasks,
     {
       data: { user },
     },
@@ -185,13 +186,9 @@ export default async function JobDetailPage({
       // reading $1,990.57 on one screen and $1,895.30 on another.
       .is("superseded_by_bill_id", null)
       .order("created_at", { ascending: false }),
-    supabase
-      .from("tasks")
-      .select("id, title, category, status, priority, due_date")
-      .eq("job_id", id)
-      .order("status", { ascending: true })
-      .order("priority", { ascending: false })
-      .order("due_date", { ascending: true, nullsFirst: false }),
+    // THE JOB'S ONE TASK LIST (0358): the Overview card, the Tasks chip's count and the Tasks tab
+    // all read this. Safe on a database without 0358 (readJobTasks falls back to the old columns).
+    readJobTasks(supabase, id),
     // WHO IS LOOKING rides the first wave (cn-v945): the viewer's role picks the select list for
     // the materials items and the permits below (projection law — a tech's rows never carry
     // money), so the role read must land BEFORE those queries, and the role read needs the user.
@@ -809,11 +806,41 @@ export default async function JobDetailPage({
   // A TECH IS HANDED NO COST PAPER (audit v994, HB-2): chosen from an allow-list before anything
   // is signed, so a receipt's picture, its signed URL and its name never reach a tech's page data.
   const visibleDocRows = documentsForViewer((docRows ?? []) as any[], viewerIsStaff);
-  const docUrls = await signDocumentUrls(supabase, visibleDocRows.map((d: any) => d.file_url));
+  // The task photos ride the same one signing call (a task photo is almost always one of these
+  // job photos already; a walk-through photo is not, and gets signed here too). Never a paper the
+  // allow-list above kept from this viewer: a task pointing at one gets no URL (HB-2 holds).
+  const keptFromViewer = new Set(
+    ((docRows ?? []) as any[]).map((d: any) => d.file_url).filter((p: string | null) => p && !visibleDocRows.some((v: any) => v.file_url === p)),
+  );
+  const taskPhotoPaths = jobTasks.rows
+    .flatMap((t) => [t.photo_path, t.done_photo_path])
+    .filter((p): p is string => !!p && !keptFromViewer.has(p));
+  const docUrls = await signDocumentUrls(supabase, [...visibleDocRows.map((d: any) => d.file_url), ...taskPhotoPaths]);
   const docs = visibleDocRows.map((d: any) => ({
     ...d,
     signedUrl: (d.file_url && docUrls.get(d.file_url)) || null,
   }));
+  // Each task's photo: the signed URL, or "removed" once the photo was deleted from the job, or
+  // "unavailable" when it is still the job's but couldn't be signed just now (lib/job-tasks taskPhoto).
+  const jobFiles = new Set(((docRows ?? []) as any[]).map((d: any) => d.file_url).filter(Boolean) as string[]);
+  const taskPhotos: TaskPhotos = Object.fromEntries(
+    jobTasks.rows
+      .filter((t) => t.photo_path || t.done_photo_path)
+      .map((t) => [t.id, { task: taskPhoto(t.photo_path, docUrls, jobFiles), done: taskPhoto(t.done_photo_path, docUrls, jobFiles) }]),
+  );
+  const openTaskCount = jobTasks.rows.filter((t) => t.status !== "done").length;
+  const taskListProps = {
+    jobId: j.id as string,
+    orgId: j.org_id as string,
+    tasks: jobTasks.rows,
+    photos: taskPhotos,
+    viewerId: user?.id ?? null,
+    viewerIsStaff,
+    tz,
+    nowIso: new Date().toISOString(),
+    stamps: jobTasks.stamps,
+    failed: jobTasks.failed,
+  };
 
   // WHICH PHOTOS THE CUSTOMER SEES (0300's job_shared_photos): the office's own table, read only
   // for the office (a tech's Photos tab has no Show Customer control, and RLS would give it no rows
@@ -928,6 +955,9 @@ export default async function JobDetailPage({
           {billsActuals && (
             <UnbilledCard jobId={j.id} customerId={j.customer_id ?? null} view={unbilledView} viewerIsStaff={viewerIsStaff} openDraft={openDraft} lumpToNet={lumpToNet} drawBilled={isDrawBilled} />
           )}
+          {/* THE JOB'S TASKS, small (0358): "Tasks: 7 of 12 done", the next 3 and the Add line; All
+              Tasks opens the Tasks chip's tab. The same card for the crew (no prices on a task). */}
+          <JobTaskList mode="card" {...taskListProps} />
           <Card>
             <CardContent className="space-y-4 py-5">
               <div className="grid gap-4 sm:grid-cols-2">
@@ -1132,17 +1162,15 @@ export default async function JobDetailPage({
           },
         ]
       : []),
+    // THE TASKS CHIP (Erik, 2026-09-26: "put it on the bottom bar next to overview"): pinned right
+    // after Overview for the office and the crew, its count the open tasks. The tab is the job's
+    // whole list: add, check off, the Done fold, photos. To-Do Extras doesn't reach it (a job's
+    // list has no priority or subtasks); that switch is the Reminders' now.
     {
       id: "tasks",
       label: "Tasks",
-      count: (tasks ?? []).filter((t: any) => t.status !== "done").length,
-      content: (
-        <Card>
-          <CardContent className="py-5">
-            <JobTasks jobId={j.id} tasks={(tasks ?? []) as any} extras={on("todo_extras")} />
-          </CardContent>
-        </Card>
-      ),
+      count: openTaskCount,
+      content: <JobTaskList mode="tab" {...taskListProps} />,
     },
     {
       id: "permits",
@@ -1826,7 +1854,7 @@ export default async function JobDetailPage({
           moved to the Costs tab's header, one chip away). */}
       <JobActionDock
         job={j}
-        openTaskCount={(tasks ?? []).filter((t: any) => t.status !== "done").length}
+        taskPhotos={jobTasks.stamps}
         viewerIsStaff={viewerIsStaff}
         tz={tz}
         openEntry={openEntry}

@@ -1120,6 +1120,50 @@ describe("AI Suggest never takes money out of the tray", () => {
     expect(did("organized_items", "update")!.payload).toMatchObject({ status: "needs_review", category: "Note", proposal: expect.objectContaining({ filed: null }) });
   });
 
+  it("Make Task records who pressed it; another person's Undo that takes nothing off undoes nothing and names the maker (0358)", async () => {
+    const proposed = { ...NOTE, proposal: { suggestTask: { title: "Call the inspector", category: "office" } } };
+    state.client = fakeSupabase(
+      {
+        "organized_items.select": [{ data: proposed, error: null }],
+        "tasks.insert": [{ data: { id: "task-1" }, error: null }],
+        "organized_items.update": [{ data: [{ id: "oi-2" }], error: null }],
+      },
+      calls,
+    );
+    expect((await makeTaskFromPaper("oi-2")).ok).toBe(true);
+    const filed = did("organized_items", "update")!.payload.proposal.filed;
+    expect(filed).toMatchObject({ how: "task", taskId: "task-1", taskBy: "user-1" });
+
+    // Alexa presses Undo on Erik's filing: under 0358 his Reminder is invisible to her, so the delete
+    // takes nothing off.
+    calls = [];
+    state.client = fakeSupabase(
+      {
+        "organized_items.select": [{ data: { ...proposed, status: "filed", category: "Task", proposal: { ...proposed.proposal, filed: { ...filed, taskBy: "user-erik" } } }, error: null }],
+        "tasks.delete": [{ data: [], error: null }],
+        "profiles.select": [{ data: { full_name: "Erik Taylor" }, error: null }],
+      },
+      calls,
+    );
+    const theirs = await undoPaperwork("oi-2");
+    expect(theirs.ok).toBe(false);
+    expect(theirs.error).toBe("This note became Erik Taylor's Reminder, and only they can take it off, so they have to press Undo. Nothing was undone.");
+    expect(did("organized_items", "update")).toBeUndefined();
+
+    // Erik's own Undo that finds it already gone carries on: the note comes back.
+    calls = [];
+    state.client = fakeSupabase(
+      {
+        "organized_items.select": [{ data: { ...proposed, status: "filed", category: "Task", proposal: { ...proposed.proposal, filed } }, error: null }],
+        "tasks.delete": [{ data: [], error: null }],
+        "organized_items.update": [{ data: [{ id: "oi-2" }], error: null }],
+      },
+      calls,
+    );
+    expect((await undoPaperwork("oi-2")).ok).toBe(true);
+    expect(did("organized_items", "update")!.payload).toMatchObject({ status: "needs_review" });
+  });
+
   it("Make Task on a note filed meanwhile takes its own task back out: never a task and a waiting note both", async () => {
     const proposed = { ...NOTE, proposal: { suggestTask: { title: "Call the inspector", category: "office" } } };
     state.client = fakeSupabase(
