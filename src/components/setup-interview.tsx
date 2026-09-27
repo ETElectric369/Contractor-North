@@ -83,7 +83,7 @@ export function SetupInterview({
     if (startAt !== 2 || needs || drafting.current) return;
     // NO TRADE, NO DRAFT — GO ASK. Erik: "the tour shouldn't assume a trade exists." Answering is
     // optional on every tour step, so somebody can land here having skipped the trade — and
-    // draftMyPlaybook needs a walk-through sheet that only exists once a trade was saved. Rather
+    // draftMyPlaybook needs a walk-through sheet, which it seeds only when a trade is on file. Rather
     // than fetch a failure and explain it, drop to the questions step: trade is the second box on
     // it, and the step-1→2 transition saves (which seeds the sheet) and then drafts, in order.
     if (!String(answers.trade ?? "").trim()) {

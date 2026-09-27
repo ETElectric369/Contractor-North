@@ -9,12 +9,21 @@ const state = vi.hoisted(() => ({
   hearCalls: 0,
   overCeiling: false,
   reply: "",
+  seeded: 0,
+  seedSchema: [] as unknown[],
 }));
 const QUIET_REPLY = '{"say":"Got it.","fills":[],"needs":[]}';
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("./settings/actions", () => ({ updateOrgSettings: vi.fn(async () => ({ ok: true })) }));
-vi.mock("./forms/actions", () => ({ createStarterInspectionSheet: vi.fn(async () => ({ ok: true, id: "f1" })) }));
+vi.mock("./forms/actions", () => ({
+  // The seed plants the sheet the next read finds, like the real one.
+  createStarterInspectionSheet: vi.fn(async () => {
+    state.seeded++;
+    state.tables.forms = { data: { id: "f-seeded", schema: state.seedSchema, playbook: null }, error: null };
+    return { ok: true, id: "f-seeded" };
+  }),
+}));
 vi.mock("@/lib/ai-cost", () => ({
   recordAiUsage: vi.fn(async () => undefined),
   aiSpendExceeded: vi.fn(async () => state.overCeiling),
@@ -65,6 +74,8 @@ beforeEach(() => {
   state.hearCalls = 0;
   state.overCeiling = false;
   state.reply = QUIET_REPLY;
+  state.seeded = 0;
+  state.seedSchema = SHEET;
 });
 
 describe("Nort off: the plain questions, and no model call", () => {
@@ -97,6 +108,52 @@ describe("Nort off: the plain questions, and no model call", () => {
     expect((await talkSetup("trade", {}, "hi")).ok).toBe(false);
     expect((await draftMyPlaybook())).toMatchObject({ ok: true, wasDrafted: false });
     expect(state.modelCalls).toBe(0);
+  });
+});
+
+/**
+ * A TRADE ON FILE WITH NO SHEET. Sign-up keeps only the key, and only saveSetup seeded the sheet.
+ * The questions step shows the key's words in the Trade box, so Next with nothing edited skipped
+ * the save and was told "Say what trade you're in first" under a filled Trade box.
+ */
+describe("draftMyPlaybook: a company with a trade on file and no walk-through yet", () => {
+  const keyOnly = (nort: boolean) => ({ data: { settings: { trade: "plumbing", features: { nort } } }, error: null });
+
+  it("seeds the starter for its trade and hands back its questions (Nort off: undrafted)", async () => {
+    state.tables.organizations = keyOnly(false);
+    state.tables.forms = { data: null, error: null };
+    const r = await draftMyPlaybook();
+    expect(state.seeded).toBe(1);
+    expect(r).toMatchObject({ ok: true, formId: "f-seeded", wasDrafted: false });
+    expect(state.modelCalls).toBe(0);
+  });
+
+  it("with Nort on, seeds and then drafts", async () => {
+    state.tables.organizations = keyOnly(true);
+    state.tables.forms = { data: null, error: null };
+    const r = await draftMyPlaybook();
+    expect(state.seeded).toBe(1);
+    expect(r).toMatchObject({ ok: true, formId: "f-seeded" });
+    expect(state.modelCalls).toBe(1);
+  });
+
+  it("the company's own words for a trade count too", async () => {
+    state.tables.organizations = { data: { settings: { trade_label: "we do gutters", features: { nort: false } } }, error: null };
+    state.tables.forms = { data: null, error: null };
+    expect(await draftMyPlaybook()).toMatchObject({ ok: true, formId: "f-seeded" });
+  });
+
+  it("no trade at all is still the question to answer first, and nothing is seeded", async () => {
+    state.tables.organizations = { data: { settings: { features: { nort: false } } }, error: null };
+    state.tables.forms = { data: null, error: null };
+    expect(await draftMyPlaybook()).toEqual({ ok: false, error: expect.stringContaining("Say what trade you're in first") });
+    expect(state.seeded).toBe(0);
+  });
+
+  it("a company that already has a sheet is never seeded a second one", async () => {
+    state.tables.organizations = keyOnly(false);
+    expect(await draftMyPlaybook()).toMatchObject({ ok: true, formId: "f1" });
+    expect(state.seeded).toBe(0);
   });
 });
 

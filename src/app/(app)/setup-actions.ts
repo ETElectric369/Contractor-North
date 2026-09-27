@@ -49,6 +49,15 @@ async function nortSwitchedOn(supabase: Supa, orgId: string | null): Promise<boo
   return featureOn(getOrgSettings((data as { settings?: unknown }).settings).features, "nort");
 }
 
+/** Does the company have a trade on file (the sign-up key, or its own words)? Read for its own org. */
+async function tradeOnFile(supabase: Supa): Promise<boolean> {
+  const orgId = await currentOrgId();
+  const q = supabase.from("organizations").select("settings");
+  const { data } = await (orgId ? q.eq("id", orgId) : q.limit(1)).maybeSingle();
+  const t = orgTrade(getOrgSettings((data as { settings?: unknown } | null)?.settings));
+  return Boolean(t.key || t.label);
+}
+
 /** What a setup AI door says when Nort is off. Plain, and never "I". */
 const NORT_OFF_SETUP = "Nort is off for your company, so type your answers into the boxes.";
 
@@ -247,20 +256,35 @@ export async function saveSetup(answers: Answers): Promise<Result> {
  *
  * IT DRAFTS PROSE ONLY. Keys, slots, options and rules come from their own sheet and pass through
  * untouched (see applyDraft) — the model never gets to invent a question, only to phrase one and
- * say what a wrong answer costs. And it SAVES NOTHING: this returns a draft to argue with.
+ * say what a wrong answer costs. And it SAVES NOTHING of the draft: this returns a draft to argue
+ * with. The one write is the starter SHEET the draft is read from, below, and only when there is
+ * none: the same seed saveSetup plants when the trade is named.
  */
 export async function draftMyPlaybook(): Promise<DraftResult> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "Sign in first." };
 
-  const { data: form } = await supabase
-    .from("forms")
-    .select("id, schema, playbook")
-    .eq("is_inspection", true)
-    .order("created_at")
-    .limit(1)
-    .maybeSingle();
+  const readSheet = async () =>
+    (
+      await supabase
+        .from("forms")
+        .select("id, schema, playbook")
+        .eq("is_inspection", true)
+        .order("created_at")
+        .limit(1)
+        .maybeSingle()
+    ).data;
+  let form = await readSheet();
+  // A TRADE ON FILE WITH NO SHEET IS NOT "SAY WHAT TRADE YOU'RE IN". Only saveSetup seeded the
+  // sheet, and only when it wrote the trade's words; sign-up (0352) keeps just the key. The
+  // questions step now shows that key's words in the Trade box, so pressing Next with nothing
+  // edited skipped the save and landed here, told to name a trade that was on screen. The key
+  // picks the starter (createStarterInspectionSheet reads it), so seed it here and carry on.
+  if (!form && (await tradeOnFile(supabase))) {
+    const seeded = await createStarterInspectionSheet();
+    if (seeded.ok) form = await readSheet();
+  }
   if (!form) return { ok: false, error: "Say what trade you're in first — that's what builds your questions." };
 
   const pb = playbookForForm(form as { schema?: unknown; playbook?: unknown });
