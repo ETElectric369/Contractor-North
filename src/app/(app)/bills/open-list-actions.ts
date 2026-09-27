@@ -20,6 +20,7 @@ import {
   type StoredOpenList,
 } from "@/lib/supplier-open-list";
 import { looksLikeBankTable, mayBeBankTable, noLinesSaid, redactDigits, redactWordCells } from "@/lib/bank-download";
+import { OWNER_SORTS_BANK, viewerSortsBank } from "@/lib/bank-viewer";
 import { bankLine, bankTableTooLong, capBankTable, createBankPaper, readBankDownload } from "./bank-core";
 import { applyOpenListCore, createOpenListPaper, loadAccounts, loadPapers, openListLine, orgToday, resolveAccount } from "./open-list-core";
 import { fingerprintSeen } from "@/app/(app)/organize/paperwork-actions";
@@ -71,6 +72,10 @@ export async function addOpenList(input: {
     const at = findHeaderRow(bankTable);
     const supplierRef = at >= 0 && readHeaderRow(bankTable[at] ?? []).columns.reference !== undefined;
     if (looksLikeBankTable(bankTable, supplierRef)) {
+      // THE OWNER'S MONEY (0286, bank-viewer): only whoever sorts the bank may bring a download in.
+      // An office viewer the owner turned off is told so in words; the database holds the same line
+      // (0365: a bank download in the tray is viewer_sorts_bank()'s only).
+      if (!(await viewerSortsBank(ctx.supabase, ctx.userId))) return { ok: false, error: `${name}: ${OWNER_SORTS_BANK}` };
       const tooLong = bankTableTooLong(input.table, name);
       if (tooLong) return { ok: false, error: tooLong };
       // THE FILE'S NAME IS KEPT REDACTED like every line ("Export_000123456789.csv" keeps ••6789):

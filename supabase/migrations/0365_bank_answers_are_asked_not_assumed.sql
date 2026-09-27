@@ -36,6 +36,10 @@
 --   where a staff member's Apply would write what it said. Only the app's staff doors (addOpenList,
 --   requireStaff) ever write either key, so a RESTRICTIVE policy holds them to staff for every verb:
 --   a row carrying one is invisible and untouchable to anyone else. Every other row is as before.
+--   A BANK DOWNLOAD is held tighter, to whoever sorts the bank (0363's viewer_sorts_bank(): the
+--   owner, and office staff while the owner's switch is on): its lines are the owner's draw and
+--   personal spending, and an office viewer the owner turned off reads none of them, in the app or
+--   around it. A supplier's list stays staff-only.
 --
 -- LOCKS: 0363's own tables (staff-only, new): bank_rules gets one CHECK swapped, two nullable
 -- columns, one generated column (a rewrite of a table this small is nothing) and one UNIQUE
@@ -54,6 +58,9 @@ do $$
 begin
   if to_regclass('public.bank_rules') is null then
     raise exception '0365: bank_rules is not on this database. Apply 0363 first. Nothing was changed.';
+  end if;
+  if to_regprocedure('public.viewer_sorts_bank()') is null then
+    raise exception '0365: public.viewer_sorts_bank() is not on this database. Apply 0363 (as it is now) first. Nothing was changed.';
   end if;
 end $$;
 
@@ -76,18 +83,18 @@ alter table public.bank_rules drop constraint if exists bank_rules_one_per_key;
 alter table public.bank_rules drop constraint if exists bank_rules_one_per_answer;
 alter table public.bank_rules add constraint bank_rules_one_per_answer unique (org_id, direction, merchant_key, answer);
 
--- ── A bank download or a supplier's list waiting in the tray: staff only ────────────────────────
+-- ── A bank download in the tray: whoever sorts the bank. A supplier's list: staff only ─────────
 drop policy if exists organized_items_bank_is_staff on public.organized_items;
 create policy organized_items_bank_is_staff on public.organized_items
   as restrictive
   for all
   using (
-    (coalesce(jsonb_typeof(proposal -> 'bankImport'), 'null') = 'null' and coalesce(jsonb_typeof(proposal -> 'openList'), 'null') = 'null')
-    or public.is_org_staff()
+    (coalesce(jsonb_typeof(proposal -> 'bankImport'), 'null') = 'null' or public.viewer_sorts_bank())
+    and (coalesce(jsonb_typeof(proposal -> 'openList'), 'null') = 'null' or public.is_org_staff())
   )
   with check (
-    (coalesce(jsonb_typeof(proposal -> 'bankImport'), 'null') = 'null' and coalesce(jsonb_typeof(proposal -> 'openList'), 'null') = 'null')
-    or public.is_org_staff()
+    (coalesce(jsonb_typeof(proposal -> 'bankImport'), 'null') = 'null' or public.viewer_sorts_bank())
+    and (coalesce(jsonb_typeof(proposal -> 'openList'), 'null') = 'null' or public.is_org_staff())
   );
 
 comment on column public.bank_rules.min_cents is 'The smallest amount (cents, positive) this answer was given for (0365). The app places a line from half of it; NULL = every amount.';
@@ -95,7 +102,7 @@ comment on column public.bank_rules.max_cents is 'The largest amount (cents, pos
 comment on column public.bank_rules.answer is 'The answer as one word, the app''s choice id (0365): one rule per merchant and answer.';
 
 comment on table public.bank_rules is
-  'A company''s own answer for a merchant on its bank downloads (0363, 0365), written only when a person taps it: one per company + direction + merchant key + answer, for the amounts it was answered for (min_cents..max_cents). Money in only ever says Not Income. Never shared between companies. Staff only.';
+  'A company''s own answer for a merchant on its bank downloads (0363, 0365), written only when a person taps it: one per company + direction + merchant key + answer, for the amounts it was answered for (min_cents..max_cents). Money in only ever says Not Income. Never shared between companies. Read and written only by whoever sorts the bank (viewer_sorts_bank).';
 
 -- ── Self-check ──────────────────────────────────────────────────────────────────────────────────
 do $$
@@ -113,8 +120,12 @@ begin
   if exists (select 1 from pg_constraint where conrelid = 'public.bank_rules'::regclass and conname = 'bank_rules_one_per_key') then
     raise exception '0365: bank_rules still holds one rule per merchant. Nothing was changed.';
   end if;
-  if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'organized_items' and policyname = 'organized_items_bank_is_staff' and permissive = 'RESTRICTIVE') then
-    raise exception '0365: organized_items has no staff-only policy for bank downloads. Nothing was changed.';
+  if not exists (
+    select 1 from pg_policies
+     where schemaname = 'public' and tablename = 'organized_items' and policyname = 'organized_items_bank_is_staff' and permissive = 'RESTRICTIVE'
+       and qual like '%viewer_sorts_bank()%' and with_check like '%viewer_sorts_bank()%'
+  ) then
+    raise exception '0365: organized_items does not hold a bank download to whoever sorts the bank. Nothing was changed.';
   end if;
   raise notice '0365: bank answers are asked, not assumed.';
 end $$;

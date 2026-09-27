@@ -11,7 +11,9 @@ import { assertTestDatabase, notOnThisDatabase } from "@/lib/db-guard";
  * Pinned here, against the real database, inside ONE transaction that is always rolled back:
  *   · bank_lines and bank_rules are STAFF-ONLY for every verb: a company's office reads and writes
  *     its own, a tech of the same company reads nothing and writes nothing, another company's staff
- *     reads nothing and changes nothing, and anon can't even ask;
+ *     reads nothing and changes nothing, and anon can't even ask; and they are the OWNER'S money
+ *     (viewer_sorts_bank): an office viewer the owner turned off (office_sees_owner_money false)
+ *     reads and writes no line, rule or waiting download, while the owner does;
  *   · a line is counted once per company (UNIQUE org_id + line_key) and a description can't hold a
  *     run of 6+ digits (the privacy boundary lives in the database, not only the app);
  *   · the company's rules: one per merchant and answer, each for the amounts it was given for, a
@@ -48,6 +50,7 @@ d("0362 + 0363: bank lines and rules are the company's own, and a line counts on
   let staffA = "";
   let techA = "";
   let staffB = "";
+  let ownerA = "";
   let importA = "";
 
   const one = async (sql: string, params: unknown[] = []) => (await c.query(sql, params)).rows[0];
@@ -132,6 +135,7 @@ d("0362 + 0363: bank lines and rules are the company's own, and a line counts on
     staffA = await person(orgA, "office", "staff-a");
     techA = await person(orgA, "tech", "tech-a");
     staffB = await person(orgB, "office", "staff-b");
+    ownerA = await person(orgA, "owner", "owner-a");
     importA = (await one("select gen_random_uuid() as id")).id;
   });
 
@@ -238,6 +242,34 @@ d("0362 + 0363: bank lines and rules are the company's own, and a line counts on
     expect((await c.query("select id from organized_items where title = 'TEST 0365 bank'")).rowCount).toBe(0);
     await asServer();
     await as(staffA);
+    expect((await c.query("select id from organized_items where title = 'TEST 0365 bank'")).rowCount).toBe(1);
+    await asServer();
+  });
+
+  it("an office viewer the owner turned off reads and writes no bank line, rule or waiting download; the owner does", async () => {
+    if (!ready()) return;
+    const list = JSON.stringify({ openList: { list: null, needs: null } });
+    await c.query("insert into organized_items (org_id, title, created_by, status, proposal) values ($1, 'TEST 0365 list', $2, 'needs_review', $3::jsonb)", [orgA, staffA, list]);
+    await c.query("update organizations set settings = coalesce(settings, '{}'::jsonb) || '{\"office_sees_owner_money\": false}'::jsonb where id = $1", [orgA]);
+    await as(staffA);
+    expect((await c.query("select id from bank_lines")).rowCount).toBe(0);
+    expect((await c.query("select id from bank_rules")).rowCount).toBe(0);
+    expect((await c.query("update bank_lines set description = 'x'")).rowCount).toBe(0);
+    expect((await c.query("delete from bank_rules")).rowCount).toBe(0);
+    expect(await refused("insert into bank_rules (org_id, direction, merchant_key, choice) values ($1, 'out', 'cafe', 'personal')", [orgA])).toBe("42501");
+    expect((await c.query("select id from organized_items where title = 'TEST 0365 bank'")).rowCount).toBe(0);
+    // A supplier's list is still the office's to sort.
+    expect((await c.query("select id from organized_items where title = 'TEST 0365 list'")).rowCount).toBe(1);
+    await asServer();
+    await as(ownerA);
+    expect((await c.query("select id from bank_lines")).rowCount).toBeGreaterThan(0);
+    expect((await c.query("select id from bank_rules")).rowCount).toBeGreaterThan(0);
+    expect((await c.query("select id from organized_items where title = 'TEST 0365 bank'")).rowCount).toBe(1);
+    await asServer();
+    // Switched back on (the default), the office reads them again.
+    await c.query("update organizations set settings = settings - 'office_sees_owner_money' where id = $1", [orgA]);
+    await as(staffA);
+    expect((await c.query("select id from bank_lines")).rowCount).toBeGreaterThan(0);
     expect((await c.query("select id from organized_items where title = 'TEST 0365 bank'")).rowCount).toBe(1);
     await asServer();
   });

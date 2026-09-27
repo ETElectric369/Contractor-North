@@ -8,7 +8,7 @@
 -- cost), personal as personal. It asks only about the ones it can't place, and it remembers each
 -- answer for that company's next download.
 --
--- TWO TABLES, BOTH STAFF-ONLY, BOTH KEYED BY org_id:
+-- TWO TABLES, BOTH THE OWNER'S MONEY, BOTH KEYED BY org_id:
 --
 --   bank_lines   One row per bank line a person applied, and ONLY what the app needs to never
 --                count it twice: the last 4 of the account, the day, the signed amount, the
@@ -21,6 +21,14 @@
 --   bank_rules   The company's own choices: "SHELL -> Fuel". Written only when a person
 --                taps an answer, one per company + direction + merchant key. Every company starts
 --                with none; one company's rules are never read for another (RLS + the org filter).
+--
+-- WHO READS THEM: the one who sorts the company's bank downloads, public.viewer_sorts_bank() below.
+-- A download shows the owner's draw and personal spending line by line, so it is the owner's
+-- money: the owner always, and office staff (owner/admin/office) only while the owner's switch
+-- (organizations.settings.office_sees_owner_money, 0286, default on) is on. The same rule as the
+-- app's viewerSortsBank (lib/bank-viewer.ts), held here too so a staff member the owner turned off
+-- can't read the lines with their own sign-in around the app (a rule at one read path is a
+-- convention, not a boundary). A tech never.
 --
 -- ONE COLUMN ON FIVE MONEY TABLES: bank_line_id on payments, bills, supplier_payments, pay_payments
 -- and petty_cash. A row the download MATCHED (a deposit that is a payment already recorded) or
@@ -92,7 +100,7 @@ create table if not exists public.bank_lines (
 );
 
 comment on table public.bank_lines is
-  'One bank line a person applied from a bank download (0363): last 4 of the account, day, signed amount, description with long digit runs cut to their last 4, and where it went. UNIQUE (org_id, line_key): a line is counted once however many downloads carry it. Staff only.';
+  'One bank line a person applied from a bank download (0363): last 4 of the account, day, signed amount, description with long digit runs cut to their last 4, and where it went. UNIQUE (org_id, line_key): a line is counted once however many downloads carry it. Read and written only by whoever sorts the bank (viewer_sorts_bank).';
 
 create index if not exists bank_lines_import_idx on public.bank_lines (org_id, import_id);
 create index if not exists bank_lines_posted_idx on public.bank_lines (org_id, posted_on);
@@ -123,9 +131,31 @@ create table if not exists public.bank_rules (
 );
 
 comment on table public.bank_rules is
-  'A company''s own answer for a merchant on its bank downloads (0363), written only when a person taps it: one per company + direction + merchant key. Never shared between companies. Staff only.';
+  'A company''s own answer for a merchant on its bank downloads (0363), written only when a person taps it: one per company + direction + merchant key. Never shared between companies. Read and written only by whoever sorts the bank (viewer_sorts_bank).';
 
--- ── RLS: staff of the row's own company, for every verb (the supplier_payments shape, 0270) ────
+-- ── WHO SORTS THE BANK: the owner, and office staff while the owner's switch is on ─────────────
+-- lib/bank-viewer.ts viewerSortsBank, in SQL: active, of a company, and the owner, or admin/office
+-- staff whose company hasn't set office_sees_owner_money to false. Anyone else (a tech, a removed
+-- person, anon): false.
+create or replace function public.viewer_sorts_bank()
+returns boolean
+language sql stable security definer set search_path = public
+as $$
+  select coalesce(
+    (select p.role = 'owner'
+            or (p.role in ('admin', 'office')
+                and (o.settings -> 'office_sees_owner_money') is distinct from 'false'::jsonb)
+       from public.profiles p
+       join public.organizations o on o.id = p.org_id
+      where p.id = auth.uid()
+        and coalesce(p.active, true)),
+    false);
+$$;
+
+comment on function public.viewer_sorts_bank() is
+  'Caller sorts the company''s bank downloads (0363): the owner, or active admin/office staff while organizations.settings.office_sees_owner_money is not false (0286). The app''s viewerSortsBank, held by RLS on bank_lines, bank_rules and a bank download in the tray (0365).';
+
+-- ── RLS: who sorts the bank, in the row's own company, for every verb (the 0270 shape) ─────────
 alter table public.bank_lines enable row level security;
 alter table public.bank_rules enable row level security;
 
@@ -135,7 +165,7 @@ begin
   foreach t in array array['bank_lines', 'bank_rules'] loop
     execute format('drop policy if exists %I_staff_all on public.%I', t, t);
     execute format(
-      'create policy %I_staff_all on public.%I for all using (org_id = public.auth_org_id() and public.is_org_staff()) with check (org_id = public.auth_org_id() and public.is_org_staff())',
+      'create policy %I_staff_all on public.%I for all using (org_id = public.auth_org_id() and public.viewer_sorts_bank()) with check (org_id = public.auth_org_id() and public.viewer_sorts_bank())',
       t, t);
   end loop;
 end $$;
@@ -178,8 +208,12 @@ begin
     ) then
       raise exception '0363: % has row level security switched off. Nothing was changed.', t;
     end if;
-    if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = t and policyname = t || '_staff_all') then
-      raise exception '0363: % has no staff-only policy. Nothing was changed.', t;
+    if not exists (
+      select 1 from pg_policies
+       where schemaname = 'public' and tablename = t and policyname = t || '_staff_all'
+         and qual like '%viewer_sorts_bank()%' and with_check like '%viewer_sorts_bank()%'
+    ) then
+      raise exception '0363: % is not held to whoever sorts the bank. Nothing was changed.', t;
     end if;
     if has_table_privilege('anon', 'public.' || t, 'select') then
       raise exception '0363: anon can read %. Nothing was changed.', t;

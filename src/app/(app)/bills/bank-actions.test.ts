@@ -720,6 +720,12 @@ describe("the owner's money", () => {
     expect(await applyBankDownload(id, { fingerprint: "x", picks: {} })).toMatchObject({ ok: false, error: expect.stringMatching(/^The owner sorts/) });
     expect(await undoBankDownload(id)).toMatchObject({ ok: false });
     expect(await swapBankDownload(id)).toMatchObject({ ok: false });
+    // Nor can they bring one in: the drop is refused in words, and nothing is written (0365 holds a
+    // bank download in the tray to whoever sorts the bank, so the database would refuse it too).
+    const before = db.organized_items.length;
+    const dropped = await addOpenList({ name: "Card.csv", sha256: null, table: parseCSV(CHECKING_CSV.replace("DENTAL CARE LLC", "DENTAL CARE CO")), listDate: "2026-09-26", source: "bills_drop" });
+    expect(dropped).toMatchObject({ ok: false, error: expect.stringMatching(/^Card\.csv: The owner sorts bank downloads/) });
+    expect(db.organized_items).toHaveLength(before);
     // The owner sorts it as always.
     db.profiles.find((p) => p.id === "user-1")!.role = "owner";
     expect((await view(id)).problem).toBeNull();
