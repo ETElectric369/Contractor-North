@@ -98,7 +98,8 @@ function route(claimedBy: typeof INV048 | null) {
   return (q: Q): Reply => {
     if (q.table === "time_entries" && q.verb === "select" && q.cols.startsWith("job_id, clock_in")) return { data: stored };
     if (q.table === "time_entries" && q.verb === "select" && q.cols === "id") return { data: [] }; // no split pieces
-    if (q.table === "time_entries" && q.verb === "select" && q.cols === "id, clock_in, clock_out") return { data: [] }; // a clear day
+    // The overlap read (lib/overlap-refusal findOverlap: it carries the clashing shift's job too).
+    if (q.table === "time_entries" && q.verb === "select" && q.cols.startsWith("id, clock_in, clock_out")) return { data: [] }; // a clear day
     if (q.table === "invoice_items" && q.verb === "select") return { data: claimedBy ? [{ source_ids: [SHIFT], invoices: claimedBy }] : [] };
     if (q.table === "time_entries" && q.verb === "update") return { data: [{ id: SHIFT }] };
   };
