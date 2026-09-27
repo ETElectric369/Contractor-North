@@ -1,5 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { AGENT_READ_ALLOWED, AGENT_TOOL_FEATURE, AGENT_WRITE_ALLOWED, agentWriteToolsForRole } from "./agent-tools";
+import {
+  AGENT_READ_ALLOWED,
+  AGENT_TOOL_FEATURE,
+  AGENT_WRITE_ALLOWED,
+  agentInputForSwitches,
+  agentToolOff,
+  agentWriteToolsForRole,
+} from "./agent-tools";
 import { ALL_ON, FEATURE_KEYS, featureOn, type FeatureKey, type FeatureMap } from "@/lib/features";
 
 /**
@@ -68,5 +75,59 @@ describe("agentWriteToolsForRole and the switches", () => {
     const { resolve } = agentWriteToolsForRole("owner", off("permits"));
     expect(resolve("permit__create")).toBeNull();
     expect(resolve("task__create")).toBe("task.create");
+  });
+
+  it("the write tools the round-1 review named each go with their own switch", () => {
+    const own: [string, FeatureKey][] = [
+      ["stock.take", "shop_stock"],
+      ["permit.create", "permits"],
+      ["compliance.create", "licenses"],
+      ["safety.log", "safety_log"],
+      ["form.submit", "safety_log"],
+      ["contract.generate", "contracts"],
+      ["lien.update", "contracts"],
+      ["payment.setSchedule", "contracts"],
+    ];
+    for (const [action, key] of own) {
+      expect(AGENT_TOOL_FEATURE[action], action).toBe(key);
+      expect(agentToolOff(action, off(key)), action).toBe(key);
+      expect(agentToolOff(action, ALL_ON), action).toBeNull();
+    }
+    // A sub-switch goes with its parent; Nort off outranks every tool's own switch.
+    expect(agentToolOff("safety.log", off("licenses"))).toBe("safety_log");
+    expect(agentToolOff("task.create", off("nort"))).toBe("nort");
+    expect(agentToolOff("task.create", off("permits"))).toBeNull();
+  });
+});
+
+describe("agentInputForSwitches: a switched-off feature's fields on a tool that stays", () => {
+  const task = { title: "Order the panel", priority: 2, parent_id: "t-parent", due_date: "2026-10-01" };
+
+  it("To-Do Extras on, or no switches stored: every field runs exactly as given", () => {
+    for (const f of [undefined, ALL_ON]) {
+      const r = agentInputForSwitches("task.create", task, f);
+      expect(r.input).toBe(task);
+      expect(r.dropped).toBeNull();
+    }
+  });
+
+  it("To-Do Extras off: priority and parent task come off, the rest stays, and it is said in words", () => {
+    const r = agentInputForSwitches("task.create", task, off("todo_extras"));
+    expect(r.input).toEqual({ title: "Order the panel", due_date: "2026-10-01" });
+    expect(r.dropped).toBe(
+      "To-Do Extras is off, so this to-do was saved without a priority or a parent task. The owner can turn it on in Settings, Features.",
+    );
+    // Only what was actually asked for is named; a normal priority (0) and no parent say nothing.
+    expect(agentInputForSwitches("task.create", { title: "x", priority: 1 }, off("todo_extras")).dropped).toContain("without a priority.");
+    const plain = agentInputForSwitches("task.create", { title: "x", priority: 0, parent_id: null }, off("todo_extras"));
+    expect(plain.input).toEqual({ title: "x" });
+    expect(plain.dropped).toBeNull();
+  });
+
+  it("no other tool's input is touched by To-Do Extras (Sales Tax is refused by the quote tools themselves)", () => {
+    const quote = { customer_id: null, title: "Panel", tax_rate: 0.0825, items: [] };
+    expect(agentInputForSwitches("quote.create", quote, off("todo_extras", "sales_tax")).input).toBe(quote);
+    const upd = { id: "t1", priority: 2 };
+    expect(agentInputForSwitches("task.setDue", upd, off("todo_extras")).input).toBe(upd);
   });
 });

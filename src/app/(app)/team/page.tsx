@@ -13,6 +13,8 @@ import { AddEmployeeButton } from "../settings/add-employee-button";
 import { CrewImportButton } from "../settings/crew-import-button";
 import { MemberRate } from "../settings/member-rate";
 import { TeamMemberMenu } from "./team-member-menu";
+import { viewerSwitches } from "@/lib/viewer-switches";
+import { featureOn } from "@/lib/features";
 import type { Profile } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -52,13 +54,19 @@ export default async function TeamPage() {
   // staff-scoped `profile_pay` view, which returns the whole org only to office staff. This
   // page is already office-only (the redirect above), so the merge is a shape detail — but a
   // tech who reached the REST API directly now gets nothing instead of everyone's pay.
-  const [{ data: team }, { data: pay }, { data: invites }] = await Promise.all([
+  const [{ data: team }, { data: pay }, { data: invites }, sw] = await Promise.all([
     supabase.from("profiles").select(PROFILE_SAFE_COLS).order("full_name"),
     supabase.from("profile_pay").select(PROFILE_PAY_COLS),
     isAdmin
       ? supabase.from("invitations").select("*").order("created_at", { ascending: false })
       : Promise.resolve({ data: [] }),
+    viewerSwitches(),
   ]);
+  // THE SWITCH BOARD (0352). Daily Reports off: no Crew Lead badge and no Crew Leader box (the flag
+  // is kept; it asks for nothing while the switch is off). Crew & Payroll moves nothing here: pay
+  // and charge rates price labor, and the home address and commute baseline feed the Tax Report's
+  // mileage deduction.
+  const dailyReports = featureOn(sw.features, "daily_reports");
 
   const payRows = payById(pay as ProfilePayRow[] | null);
   const members = ((team ?? []) as Profile[]).map((m) => ({ ...m, ...(payRows.get(String(m.id)) ?? {}) })) as Profile[];
@@ -115,7 +123,7 @@ export default async function TeamPage() {
                     />
                   )}
                   {!m.active && <Badge tone="red">inactive</Badge>}
-                  {!!(m as any).crew_lead && <Badge tone="green">crew lead</Badge>}
+                  {dailyReports && !!(m as any).crew_lead && <Badge tone="green">crew lead</Badge>}
                   <Badge tone={roleTone[m.role]}>{m.role}</Badge>
                   {isAdmin && (
                     <TeamMemberMenu
@@ -123,6 +131,7 @@ export default async function TeamPage() {
                       isSelf={m.id === profile.id}
                       isOwnerRow={m.role === "owner"}
                       authConfigured={adminConfigured()}
+                      crewLeadDoor={dailyReports}
                     />
                   )}
                 </li>

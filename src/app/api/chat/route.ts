@@ -19,7 +19,7 @@ import { after } from "next/server";
 import { todayStrInTz } from "@/lib/tz";
 import { DATA_TOOLS, runDataTool, STAFF_ONLY_DATA_TOOLS } from "@/lib/assistant-tools";
 import { CALC_TOOLS, runCalc, CALC_TOOL_NAMES } from "@/lib/electrical-calc";
-import { agentWriteToolsForRole } from "@/lib/actions/agent-tools";
+import { agentInputForSwitches, agentWriteToolsForRole } from "@/lib/actions/agent-tools";
 import { executeAction } from "@/lib/actions/execute";
 import { REGISTRY } from "@/lib/actions/registry";
 import { needsConsent } from "@/lib/actions/risk";
@@ -916,7 +916,10 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
                 out = JSON.stringify({ ok: false, error: "That's enough changes for one go — ask me to continue if you want more." });
               } else {
                 if (!readOnlyAction) writeCount++;
-                const res = await executeAction(actionName, tu.input, { source: "agent" });
+                // A switched-off feature's fields on a tool that stays (To-Do Extras' priority and
+                // parent task on task.create) come off here, and the model is told what came off.
+                const switched = agentInputForSwitches(actionName, tu.input, features);
+                const res = await executeAction(actionName, switched.input, { source: "agent" });
                 if (res.needsConfirm) {
                   // A confirm-gated action (e.g. record a cost) — DON'T run it. Hand the user
                   // a proposal to approve; the turn ends and the action only runs after their
@@ -925,13 +928,14 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
                     // The VALIDATED input (execute returns parsed.data) so what the card
                     // shows + what confirmAgentAction runs are the exact same object.
                     name: actionName,
-                    input: (res.data ?? tu.input ?? {}) as Record<string, unknown>,
+                    input: (res.data ?? switched.input ?? {}) as Record<string, unknown>,
                     prompt: res.confirmPrompt ?? "Want me to do that?",
                   };
                   out = JSON.stringify({ ok: false, awaitingUserConfirmation: true });
                 } else {
                   // missingFields rides through so Nort can ask for exactly what's absent
                   // ("I've got the job — still need the hours") instead of parroting "Required".
+                  const warning = [res.warning, res.ok ? switched.dropped : null].filter(Boolean).join(" ");
                   const body = JSON.stringify({
                     ok: res.ok,
                     error: res.error ?? null,
@@ -941,7 +945,7 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
                     // `recorded` are the announce-the-deed read-backs — dropping them made the
                     // safety mechanism inert, so Nort announced "3 hours logged" for a 3-second
                     // entry with the correction sitting unread in a stripped field.
-                    ...(res.warning ? { warning: res.warning } : {}),
+                    ...(warning ? { warning } : {}),
                     ...(res.recorded ? { recorded: res.recorded } : {}),
                     ...(res.speak ? { speak: res.speak } : {}),
                     ...(res.data ? { data: res.data } : {}),

@@ -1047,12 +1047,14 @@ export default async function JobDetailPage({
     },
     // WHAT THE CUSTOMER SEES ON THIS JOB (office only): the link to their page, the stretches of
     // work, the picks. Live, so it loads when the tab opens rather than on every hub load.
+    // Customer Portal off: the tab has no chip and opens from a link under the Off line
+    // (arrangeJobTabs); inside it, the doors out to the customer's page aren't drawn.
     ...(viewerIsStaff
       ? [
           {
             id: "customer",
             label: "Customer Page",
-            content: <JobCustomerPage jobId={j.id} orgId={j.org_id} customerName={j.customers?.name ?? null} />,
+            content: <JobCustomerPage jobId={j.id} orgId={j.org_id} customerName={j.customers?.name ?? null} portalOn={on("customer_portal")} />,
           },
         ]
       : []),

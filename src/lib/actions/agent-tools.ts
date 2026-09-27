@@ -189,6 +189,40 @@ export const AGENT_TOOL_FEATURE: Readonly<Record<string, FeatureKey>> = {
   "stock.take": "shop_stock",
 };
 
+/** The switch that keeps this action from Nort right now: "nort" while Nort itself is off, else
+ *  the action's own feature when that is off; null = Nort may run it. One rule for the tools the
+ *  chat offers and the Yes on a confirm card (a card proposed before the switch moved). */
+export function agentToolOff(name: string, features: FeatureMap = ALL_ON): FeatureKey | null {
+  if (!featureOn(features, "nort")) return "nort";
+  const feature = AGENT_TOOL_FEATURE[name];
+  return feature && !featureOn(features, feature) ? feature : null;
+}
+
+/**
+ * A SWITCHED-OFF FEATURE'S FIELDS ON A TOOL THAT STAYS (0352). task.create is core, but its priority
+ * and parent_id are To-Do Extras': with that switch off they come off the input before it runs, and
+ * `dropped` says so in one plain sentence for the person (the chat hands it to the model as a
+ * warning to pass on; a confirm card shows it): never silent. Sales Tax needs nothing here: the
+ * quote tools themselves refuse a new rate in words (entities/quote.ts). Everything else, and every
+ * input while the switches are on, runs exactly as given.
+ */
+export function agentInputForSwitches(
+  name: string,
+  input: unknown,
+  features: FeatureMap = ALL_ON,
+): { input: unknown; dropped: string | null } {
+  if (name !== "task.create" || featureOn(features, "todo_extras") || !input || typeof input !== "object") {
+    return { input, dropped: null };
+  }
+  const { priority, parent_id, ...rest } = input as Record<string, unknown>;
+  const cut = [priority ? "a priority" : null, parent_id ? "a parent task" : null].filter(Boolean);
+  if (!cut.length) return { input: rest, dropped: null };
+  return {
+    input: rest,
+    dropped: `To-Do Extras is off, so this to-do was saved without ${cut.join(" or ")}. The owner can turn it on in Settings, Features.`,
+  };
+}
+
 // Registry names are group.verb (a dot); Anthropic tool names can't contain dots.
 const toToolName = (name: string) => name.replace(/\./g, "__");
 
@@ -204,11 +238,7 @@ export function agentWriteToolsForRole(
   tools: Anthropic.Tool[];
   resolve: (toolName: string) => string | null;
 } {
-  const switchedOn = (name: string) => {
-    if (!featureOn(features, "nort")) return false;
-    const feature = AGENT_TOOL_FEATURE[name];
-    return !feature || featureOn(features, feature);
-  };
+  const switchedOn = (name: string) => agentToolOff(name, features) === null;
   const allowed = [
     ...actionsForRole(role, { effect: "write" }).filter(
       (a) =>

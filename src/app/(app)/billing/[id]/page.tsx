@@ -120,6 +120,9 @@ export default async function InvoicePage({
   if (itemsErr) throw itemsErr;
   if (paymentsErr) throw paymentsErr;
   const orgSettings = getOrgSettings((org as any)?.settings);
+  // Kits off (the switch board, 0352) hides the kit chips on the line picker, a door; never in
+  // catalog mode, where kits are how the work is priced (rule i, as on the estimate pages).
+  const kitDoors = featureOn(orgSettings.features, "kits") || orgSettings.estimating_mode === "catalog";
   const paymentMethods = orgSettings.payment_methods;
   // The card door is the ORG's Connect state, not merely "the platform has a Stripe key".
   const cardEnabled = canAcceptPayments(connectStateFromOrg((org ?? {}) as any));
@@ -401,7 +404,7 @@ export default async function InvoicePage({
         items={(items ?? []) as InvoiceItem[]}
         payments={(payments ?? []) as Payment[]}
         priceItems={(priceItems ?? []) as any}
-        kits={(kits ?? []) as any}
+        kits={(kitDoors ? kits ?? [] : []) as any}
         taxRates={(taxRates ?? []) as any}
         paymentMethods={paymentMethods}
         markupSeed={markupSeed}
