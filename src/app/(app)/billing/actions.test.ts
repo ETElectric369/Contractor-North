@@ -1,4 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { readFileSync, readdirSync, statSync } from "node:fs";
+import { join } from "node:path";
 
 /**
  * THE THREE DOORS cn-v967 CLOSED IN billing/actions.ts, pinned.
@@ -54,6 +56,7 @@ import {
   setInvoiceStatus,
 } from "./actions";
 import { HELD_HERE_COLUMNS } from "@/lib/held-here";
+import { BRING_IN_NEW_WORK } from "@/lib/actuals-draw";
 
 // ── A scriptable PostgREST fake, ROUTED not queued ────────────────────────────────────────────
 // Keyed on the table plus the select list (or the payload's keys on a write), because these
@@ -1378,6 +1381,57 @@ describe("Already Billed, wave 1 — the importers leave a by-hand charge on the
     expect(res.ok).toBe(true);
     const join = calls.find((c) => c.table === "invoice_items" && c.verb === "update");
     expect(join?.payload).toEqual({ quantity: 14, source_ids: [TE_OLD, TE_NEW] });
+  });
+
+  it("the line changed while it ran (the join writes no row): the warning names the one button on the page, Bring In New Work", async () => {
+    spies.reportError = () => {};
+    const base = openDrawRoute({ actuals: true });
+    state.client = fakeSupabase(
+      (q) =>
+        q.table === "invoices" && q.cols === HELD_HERE_COLUMNS
+          ? {
+              data: {
+                invoice_number: "INV-078", status: "draft", created_at: "2026-08-02T00:00:00Z", job_id: JOB,
+                invoice_items: [
+                  { import_source: "labor", import_key: "labor:p-1", edited: true, source_ids: [TE_OLD] },
+                  { import_source: "costs", import_key: `bill:${B_OLD}`, edited: false, source_ids: [B_OLD] },
+                ],
+              },
+            }
+          : q.table === "invoice_items" && q.verb === "update"
+            ? { data: [] }
+            : base(q),
+      calls,
+    );
+    const res: any = await importLaborIntoInvoice(OPEN_DRAW);
+    const said = JSON.stringify(res);
+    expect(said).toContain(`the line changed while this ran. Press ${BRING_IN_NEW_WORK} again.`);
+    expect(said).not.toMatch(/Import Labor|Labor from Timecards/i);
+  });
+});
+
+describe("no sentence the office reads names a removed import button", () => {
+  it("no code line in src (comments aside) names Import Labor, Labor From Timecards or Materials From Costs (the old buttons' names)", () => {
+    const files: string[] = [];
+    const walk = (dir: string) => {
+      for (const n of readdirSync(dir)) {
+        const p = join(dir, n);
+        if (statSync(p).isDirectory()) walk(p);
+        else if (/\.tsx?$/.test(n) && !/\.test\.tsx?$/.test(n)) files.push(p);
+      }
+    };
+    walk(join(process.cwd(), "src"));
+    const hits: string[] = [];
+    for (const f of files) {
+      readFileSync(f, "utf8")
+        .split("\n")
+        .forEach((line, i) => {
+          const code = line.trim();
+          if (/^(\/\/|\*|\/\*|\{\/\*)/.test(code)) return;
+          if (/Import Labor|Labor [Ff]rom Timecards|Materials [Ff]rom Costs/.test(code)) hits.push(`${f}:${i + 1}`);
+        });
+    }
+    expect(hits).toEqual([]);
   });
 });
 

@@ -568,7 +568,7 @@ type RpcStats = { inserted: number; updated: number; kept_edited: number; remove
 /**
  * DID THIS IMPORT CHANGE THE BILL? — the question the revision stamp (0269) asks of an importer.
  *
- * An import is idempotent by design: tapping "Import Labor" again on an invoice whose lines are
+ * An import is idempotent by design: tapping Bring In New Work again on an invoice whose lines are
  * all `kept_edited` writes nothing at all. Stamping `revised_at` for that would tell the office
  * their customer is holding an older copy of a bill that did not move — and a nag that cries wolf
  * is one nobody reads by the third time, which is how NOTHING SILENT quietly stops working.
@@ -1855,7 +1855,7 @@ async function joinLaborHours(
       out.failed.push(
         error
           ? `${j.name}'s ${hoursWords(j.addHours)} couldn't join ${j.description}: ${dbError(error)}`
-          : `${j.name}'s ${hoursWords(j.addHours)} didn't join ${j.description} - the line changed while this ran. Import Labor again`,
+          : `${j.name}'s ${hoursWords(j.addHours)} didn't join ${j.description} - the line changed while this ran. Press ${BRING_IN_NEW_WORK} again.`,
       );
       continue;
     }
