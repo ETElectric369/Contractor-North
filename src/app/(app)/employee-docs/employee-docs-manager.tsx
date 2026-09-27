@@ -128,7 +128,9 @@ export function EmployeeDocsManager({
             <div className="flex items-center gap-3 border-b border-slate-100 px-5 py-3">
               <div className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-100 text-xs font-semibold text-slate-600">{initials(e.full_name)}</div>
               <span className="text-sm font-semibold text-slate-900">{e.full_name ?? "Unnamed"}</span>
-              <Badge tone="slate">{items.length}</Badge>
+              {/* How many papers he has on file: a total, so plain muted text, never a badge (every
+                  badge counts only what's open, Erik 2026-09-27). */}
+              <span className="text-xs text-slate-400">{items.length}</span>
             </div>
             <ul className="divide-y divide-slate-100">
               {items.map((d) => {

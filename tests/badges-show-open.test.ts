@@ -174,6 +174,16 @@ describe("the chrome's other numbers", () => {
     expect(read("components/section-sheet.tsx")).not.toContain('items.filter((c) => c.href).length}');
   });
 
+  it("no badge pill anywhere draws a list's size ({x.length}): a total is plain text", () => {
+    const pills: string[] = [];
+    for (const f of walk(SRC)) {
+      for (const m of readFileSync(f, "utf8").matchAll(/<Badge\b[^>]*>\s*\{[^}]*\.length\}\s*<\/Badge>/g)) {
+        pills.push(`${f.replace(SRC, "")}: ${m[0]}`);
+      }
+    }
+    expect(pills).toEqual([]);
+  });
+
   it("the Completed shelf says its size in plain words, not a pill", () => {
     expect(read("app/(app)/jobs/completed-section.tsx")).not.toMatch(/rounded-full[^"]*">\{total\}/);
   });
