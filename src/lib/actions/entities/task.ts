@@ -149,9 +149,16 @@ export const taskActions: Record<string, ActionDef> = {
         const refusal = await refuseCrossAssigneeChild(i.parent_id, person.id);
         if (refusal) return refusal;
       }
+      // WHERE IT LANDS, not only what was sent: a step with no job_id goes on its parent's job
+      // (createTask puts a step where its task lives), so the parent's job decides.
+      let jobId: string | null = job.id ?? null;
+      if (!jobId && i.parent_id) {
+        const { data: parent } = await supabase.from("tasks").select("job_id").eq("id", i.parent_id).maybeSingle();
+        jobId = (parent as { job_id?: string | null } | null)?.job_id ?? null;
+      }
       // A JOB'S TASK HAS NO DATE, PIN OR PRIORITY (0358): the list shows a title and a checkbox, so a
       // date put there would be stored and never seen. Left off, and the read-back says so.
-      const onJob = !!job.id;
+      const onJob = !!jobId;
       const leftOff = onJob
         ? [i.due_date ? "a due date" : null, i.focus_date ? "a day pin" : null, i.priority ? "a priority" : null].filter(Boolean)
         : [];
@@ -159,7 +166,7 @@ export const taskActions: Record<string, ActionDef> = {
         title: i.title,
         category: i.category ?? null, // createTask nulls blank → uncategorized
         due_date: onJob ? null : (i.due_date ?? null),
-        job_id: job.id,
+        job_id: jobId,
         assigned_to: person.id, // createTask refuses a name on a job's task, in words (0358)
         notes: i.notes ?? null,
         priority: onJob ? 0 : (i.priority ?? 0),
@@ -170,7 +177,7 @@ export const taskActions: Record<string, ActionDef> = {
       // THE READ-BACK SAYS WHERE IT WENT (0358): on the crew's job list, or a private Reminder.
       let where = "Added to your Reminders.";
       if (onJob) {
-        const { data: j } = await supabase.from("jobs").select("job_number, name").eq("id", job.id).maybeSingle();
+        const { data: j } = await supabase.from("jobs").select("job_number, name").eq("id", jobId).maybeSingle();
         where = `Added to ${(j as { job_number?: string | null } | null)?.job_number || "the job"}'s Tasks, for whoever is on the job.`;
         if (leftOff.length) where += ` A job's task has no ${leftOff.join(" or ")}, so that part wasn't saved.`;
       } else if (person.id && person.id !== (await supabase.auth.getUser()).data.user?.id) {
