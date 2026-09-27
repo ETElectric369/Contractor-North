@@ -92,15 +92,18 @@ describe("the job's side doors", () => {
     expect(s.match(/\{isStaff && <NewJobButton/g)?.length).toBe(2);
   });
 
-  it("Already Billed (0357) is the office's: its doors come off the staff-only piles, its reads are staff-only, and a fixed-price job has none", () => {
+  it("Already Billed (0357) is the office's: its doors come off the staff-only piles, its reads are staff-only, and a fixed-price job gets only the way back", () => {
     const s = src("jobs/[id]/page.tsx");
     // The piles exist only for staff on a job whose running total was read (a job that bills its actuals).
     expect(s).toMatch(/const costGroups =\s*viewerIsStaff && unbilled && unbilled\.schemaReady/);
     expect(s).toMatch(/billsActuals\s*\?\s*unbilledWorkForJob\(/);
-    // Every Already Billed door and Undo is built from those piles.
-    expect(s).toMatch(/const alreadyBilledDoors = costGroups\s*\?/);
-    expect(s).toMatch(/const hoursMarked = costGroups \?/);
-    expect(s).toMatch(/viewerIsStaff && billsActuals\s*\?\s*readHandClaimsForJob\(/);
+    // The marks are read for staff only (on any job: the way back is wherever a mark is).
+    expect(s).toMatch(/viewerIsStaff\s*\?\s*readHandClaimsForJob\(/);
+    expect(s).toMatch(/const handById = handClaims && handClaims !== "failed" && handClaims\.ready \? handClaims\.byId : null;/);
+    // Every door and Undo is built from the piles or the staff-only marks; an open row's door only from the piles.
+    expect(s).toMatch(/const alreadyBilledDoors =\s*costGroups \|\| \(handById && handById\.size > 0\)/);
+    expect(s).toMatch(/offer: costGroups \? alreadyBilledCan : \{ charge: false, ret: false \}/);
+    expect(s).toMatch(/const hoursMarked = hoursByHand\(\(laborRows\?\.jobEntries \?\? \[\]\) as any\[\], handById\);/);
     // The hours door sits in the Not Billed Yet aside, which renders only with the piles.
     expect(s).toMatch(/costGroups && unbilled \? \(\s*<div className="space-y-2">/);
     expect(s).toContain("alreadyBilled={alreadyBilledDoors}");
