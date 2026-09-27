@@ -1,5 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { isStaffRole } from "@/lib/actions/perms";
+import { featureOn } from "@/lib/features";
+import { viewerSwitches } from "@/lib/viewer-switches";
 import { PageHeader } from "@/components/page-header";
 import { SafetyManager } from "./safety-manager";
 
@@ -13,6 +15,9 @@ export default async function SafetyPage() {
   } = await supabase.auth.getUser();
   const { data: me } = await supabase.from("profiles").select("role").eq("id", user?.id ?? "").maybeSingle();
   const canEdit = isStaffRole(me?.role);
+  // The switch off (0352): the page still opens under the shell's Off line, and existing rows keep
+  // edit and delete, but nothing new is added here until it's back on.
+  const canAdd = canEdit && featureOn((await viewerSwitches()).features, "safety_log");
   const [{ data: records }, { data: employees }, { data: jobs }] = await Promise.all([
     supabase
       .from("safety_records")
@@ -26,7 +31,7 @@ export default async function SafetyPage() {
   return (
     <div>
       <PageHeader title="Safety / OSHA" description="Log incidents (OSHA recordables) and toolbox-talk safety meetings." />
-      <SafetyManager employees={employees ?? []} jobs={jobs ?? []} records={(records ?? []) as any} canEdit={canEdit} />
+      <SafetyManager employees={employees ?? []} jobs={jobs ?? []} records={(records ?? []) as any} canEdit={canEdit} canAdd={canAdd} />
     </div>
   );
 }

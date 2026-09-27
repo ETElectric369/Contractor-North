@@ -104,6 +104,28 @@ describe("doors outside the job page", () => {
     // A link that names a walk-through (the form page's banner) still opens it with Leads off.
     expect(src).toContain("playbookForms.filter((f) => f.isWebsite || f.id === linkedForm)");
   });
+  it("Licenses / Safety Log off: the record pages keep edit and delete, but draw no Add or Import under the Off line", () => {
+    const pages: [string, string, string][] = [
+      ["compliance/page.tsx", "licenses", "<ComplianceManager"],
+      ["insurance/page.tsx", "licenses", "<InsuranceManager"],
+      ["audits/page.tsx", "licenses", "<AuditsManager"],
+      ["safety/page.tsx", "safety_log", "<SafetyManager"],
+    ];
+    for (const [file, key, tag] of pages) {
+      const src = read(file);
+      expect(src, file).toContain(`const canAdd = canEdit && featureOn((await viewerSwitches()).features, "${key}");`);
+      expect(src, file).toMatch(new RegExp(`${tag}[^>]*canEdit=\\{canEdit\\} canAdd=\\{canAdd\\}`));
+    }
+    for (const file of ["compliance/compliance-manager.tsx", "insurance/insurance-manager.tsx", "audits/audits-manager.tsx"]) {
+      const src = read(file);
+      expect(src, file).toContain("canAdd = canEdit }");
+      expect(src, file).toContain("{canAdd && adding && (");
+    }
+    expect(read("compliance/compliance-manager.tsx")).toMatch(/\{canAdd && \(\s*<div[^>]*>\s*<ImportDocsButton/);
+    expect(read("insurance/insurance-manager.tsx")).toMatch(/\{canAdd && \(\s*<div[^>]*>\s*<ImportDocsButton/);
+    expect(read("safety/safety-manager.tsx")).toContain('{canAdd && <Card className="space-y-3 p-4">');
+  });
+
   it("the recurring page keeps its doors for repeat jobs and expenses while the switch is off; only the invoice doors go", () => {
     const src = read("recurring/page.tsx");
     // Not a switch route: the page draws its own Off line and never gates itself away.

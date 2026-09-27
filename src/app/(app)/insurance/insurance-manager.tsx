@@ -32,8 +32,9 @@ async function uploadCertificate(orgId: string, file: File): Promise<string> {
 }
 
 /** `canEdit` is false for a tech: every write here is requireStaff, so the doors don't render;
- *  the certificate View links stay (a tech on site may need to show one). */
-export function InsuranceManager({ items, orgId, canEdit }: { items: InsuranceItem[]; orgId: string; canEdit: boolean }) {
+ *  the certificate View links stay (a tech on site may need to show one). `canAdd` false (its switch
+ *  is off, 0352): no Add or Import; existing rows keep edit and delete. */
+export function InsuranceManager({ items, orgId, canEdit, canAdd = canEdit }: { items: InsuranceItem[]; orgId: string; canEdit: boolean; canAdd?: boolean }) {
   const router = useRouter();
   const toast = useToast();
   const [pending, start] = useTransition();
@@ -138,14 +139,14 @@ export function InsuranceManager({ items, orgId, canEdit }: { items: InsuranceIt
 
   return (
     <div className="space-y-4">
-      {canEdit && (
+      {canAdd && (
         <div className="flex flex-wrap items-center justify-end gap-2">
           <ImportDocsButton orgId={orgId} page="Insurance" />
           <Button onClick={() => setAdding((a) => !a)}><Plus className="h-3.5 w-3.5" /> Add Policy</Button>
         </div>
       )}
 
-      {canEdit && adding && (
+      {canAdd && adding && (
         <Card className="space-y-3 p-4">
           {error && <p className="text-sm text-red-600">{error}</p>}
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">

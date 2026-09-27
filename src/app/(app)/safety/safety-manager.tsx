@@ -37,17 +37,20 @@ const SEV: Record<string, { tone: "slate" | "amber" | "red"; label: string }> = 
   lost_time: { tone: "red", label: "Lost time" },
 };
 
-/** `canEdit` is false for a tech: add, edit and delete are requireStaff, so they don't render. */
+/** `canEdit` is false for a tech: add, edit and delete are requireStaff, so they don't render.
+ *  `canAdd` false (Safety Log is off, 0352): no new record form; existing rows keep edit and delete. */
 export function SafetyManager({
   employees,
   jobs,
   records,
   canEdit,
+  canAdd = canEdit,
 }: {
   employees: Person[];
   jobs: JobOpt[];
   records: Rec[];
   canEdit: boolean;
+  canAdd?: boolean;
 }) {
   const incidents = records.filter((r) => r.kind === "incident");
   const toolbox = records.filter((r) => r.kind === "toolbox");
@@ -61,14 +64,14 @@ export function SafetyManager({
           label: "Incidents",
           count: incidents.length,
           icon: <AlertTriangle className="h-4 w-4" />,
-          content: <SafetyPanel kind="incident" employees={employees} jobs={jobs} records={incidents} canEdit={canEdit} />,
+          content: <SafetyPanel kind="incident" employees={employees} jobs={jobs} records={incidents} canEdit={canEdit} canAdd={canAdd} />,
         },
         {
           id: "toolbox",
           label: "Toolbox Talks",
           count: toolbox.length,
           icon: <Users className="h-4 w-4" />,
-          content: <SafetyPanel kind="toolbox" employees={employees} jobs={jobs} records={toolbox} canEdit={canEdit} />,
+          content: <SafetyPanel kind="toolbox" employees={employees} jobs={jobs} records={toolbox} canEdit={canEdit} canAdd={canAdd} />,
         },
       ]}
     />
@@ -81,12 +84,14 @@ function SafetyPanel({
   jobs,
   records,
   canEdit,
+  canAdd,
 }: {
   kind: "incident" | "toolbox";
   employees: Person[];
   jobs: JobOpt[];
   records: Rec[];
   canEdit: boolean;
+  canAdd: boolean;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -127,7 +132,7 @@ function SafetyPanel({
   return (
     <div className="space-y-4">
       {!canEdit && <p className="text-sm text-slate-500">The office logs these.</p>}
-      {canEdit && <Card className="space-y-3 p-4">
+      {canAdd && <Card className="space-y-3 p-4">
         {error && <p className="text-sm text-red-600">{error}</p>}
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           <div><Label htmlFor="s-date">Date</Label><Input id="s-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} /></div>

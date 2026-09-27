@@ -46,8 +46,9 @@ export function expiryBadge(date: string | null) {
   return { tone: "green" as const, label: `Active` };
 }
 
-/** `canEdit` is false for a tech: every write here is requireStaff, so the doors don't render. */
-export function ComplianceManager({ items, orgId, canEdit }: { items: ComplianceItem[]; orgId: string; canEdit: boolean }) {
+/** `canEdit` is false for a tech: every write here is requireStaff, so the doors don't render.
+ *  `canAdd` false (its switch is off, 0352): no Add or Import; existing rows keep edit and delete. */
+export function ComplianceManager({ items, orgId, canEdit, canAdd = canEdit }: { items: ComplianceItem[]; orgId: string; canEdit: boolean; canAdd?: boolean }) {
   const router = useRouter();
   const toast = useToast();
   const [pending, start] = useTransition();
@@ -117,14 +118,14 @@ export function ComplianceManager({ items, orgId, canEdit }: { items: Compliance
     <div className="space-y-4">
       {/* flex-wrap + items-center so the 3 action buttons wrap as a neat group on
           a narrow phone instead of cramping/overflowing (bug: button alignment). */}
-      {canEdit && (
+      {canAdd && (
         <div className="flex flex-wrap items-center justify-end gap-2">
           <ImportDocsButton orgId={orgId} page="Compliance" />
           <Button onClick={() => setAdding((a) => !a)}><Plus className="h-3.5 w-3.5" /> Add Item</Button>
         </div>
       )}
 
-      {canEdit && adding && (
+      {canAdd && adding && (
         <Card className="space-y-3 p-4">
           {error && <p className="text-sm text-red-600">{error}</p>}
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">

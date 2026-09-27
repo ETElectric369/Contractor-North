@@ -1,6 +1,8 @@
 import { signDocumentUrls } from "@/lib/signed-docs";
 import { createClient } from "@/lib/supabase/server";
 import { isStaffRole } from "@/lib/actions/perms";
+import { featureOn } from "@/lib/features";
+import { viewerSwitches } from "@/lib/viewer-switches";
 import { PageHeader } from "@/components/page-header";
 import { ComplianceManager } from "./compliance-manager";
 import { EXCLUDED_FROM_COMPLIANCE } from "@/lib/compliance-types";
@@ -19,6 +21,9 @@ export default async function CompliancePage() {
     .maybeSingle();
   // A tech reads; every write here is requireStaff, so its doors don't render for him.
   const canEdit = isStaffRole(me?.role);
+  // The switch off (0352): the page still opens under the shell's Off line, and existing rows keep
+  // edit and delete, but nothing new is added here until it's back on.
+  const canAdd = canEdit && featureOn((await viewerSwitches()).features, "licenses");
   const { data: all } = await supabase
     .from("compliance_items")
     .select("id, type, name, policy_number, amount, issued_date, expires_date, notes, file_url")
@@ -43,7 +48,7 @@ export default async function CompliancePage() {
         title="Compliance"
         description="Licenses, certifications & permits, with their renewal dates. (Policies live in Insurance; reviews in Audits.)"
       />
-      <ComplianceManager items={items as any} orgId={me?.org_id ?? ""} canEdit={canEdit} />
+      <ComplianceManager items={items as any} orgId={me?.org_id ?? ""} canEdit={canEdit} canAdd={canAdd} />
     </div>
   );
 }

@@ -23,8 +23,9 @@ function dueBadge(date: string | null) {
   return { tone: "green" as const, label: `Due ${d}d` };
 }
 
-/** `canEdit` is false for a tech: every write here is requireStaff, so the doors don't render. */
-export function AuditsManager({ items, canEdit }: { items: ComplianceItem[]; canEdit: boolean }) {
+/** `canEdit` is false for a tech: every write here is requireStaff, so the doors don't render.
+ *  `canAdd` false (its switch is off, 0352): no Log Audit; existing rows keep edit and delete. */
+export function AuditsManager({ items, canEdit, canAdd = canEdit }: { items: ComplianceItem[]; canEdit: boolean; canAdd?: boolean }) {
   const router = useRouter();
   const toast = useToast();
   const [pending, start] = useTransition();
@@ -90,13 +91,13 @@ export function AuditsManager({ items, canEdit }: { items: ComplianceItem[]; can
 
   return (
     <div className="space-y-4">
-      {canEdit && (
+      {canAdd && (
         <div className="flex justify-end">
           <Button onClick={() => setAdding((a) => !a)}><Plus className="h-3.5 w-3.5" /> Log Audit</Button>
         </div>
       )}
 
-      {canEdit && adding && (
+      {canAdd && adding && (
         <Card className="space-y-3 p-4">
           {error && <p className="text-sm text-red-600">{error}</p>}
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
