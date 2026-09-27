@@ -9,8 +9,9 @@ import { todayStrInTz, tzDayStartUtc } from "@/lib/tz";
  *
  * Fuel is a business-cost bucket of its own (0362, business-cost-buckets.ts): a bill with no job
  * whose category is Fuel, however it came in (a fill-up tapped Fuel on a bank download or placed by
- * the company's own answer, a pump receipt filed as Fuel, Add Business Cost, a recurring expense).
- * The same bills the Owner's Draw card counts on its Fuel line. This reads them over the last 13
+ * the company's own answer, a pump receipt filed as Fuel, Add Business Cost, a recurring expense),
+ * and petty cash with no job filed as Fuel (never a replenish). The same costs the Owner's Draw card
+ * counts on its Fuel line and Money by Month draws as fuel. This reads them over the last 13
  * weeks, Monday to Sunday on the company's own
  * calendar, and says one number: what fuel costs a week. Under the bars, one line: fuel as a share
  * of money in (the Owner's Draw card's Received: computeCollected, the /analytics "Collected" rule,
@@ -73,6 +74,24 @@ const cents = (v: unknown) => Math.round((Number(v) || 0) * 100);
  *  Draw card sums buckets by, so the two never disagree about which bill is fuel. */
 export function isFuelBill(r: FuelBillRow): boolean {
   return !r.job_id && bucketOf(r.category) === "Fuel";
+}
+
+export type FuelPettyCashRow = {
+  amount: number | string | null;
+  tx_date: string | null;
+  created_at?: string | null;
+  category?: string | null;
+  job_id?: string | null;
+  kind?: string | null;
+};
+
+/** A petty cash row as a fuel row, on its own day (tx_date, created_at when missing), or null when it
+ *  isn't fuel. The Owner's Draw card's rule (computeOwnerMoney): a replenish is cash moving, never a
+ *  cost; one with no job is a business cost in bucketOf(category). */
+export function fuelRowOfPettyCash(pc: FuelPettyCashRow): FuelBillRow | null {
+  if (!pc || pc.kind === "replenish") return null;
+  const row: FuelBillRow = { amount: pc.amount, bill_date: pc.tx_date ?? null, created_at: pc.created_at ?? null, category: pc.category ?? null, job_id: pc.job_id ?? null };
+  return isFuelBill(row) ? row : null;
 }
 
 /**
@@ -149,20 +168,32 @@ export function weekLabel(start: string): string {
  * it on its Fuel line. The window's read takes every business cost and keeps isFuelBill's; the
  * earliest-ever read, which can only ask for one row, asks with bucketCategoryPattern (bucketOf's
  * own words, any letter case) and keeps isFuelBill's too.
+ *
+ * PETTY CASH IS READ THE SAME WAY, twice: the rows with no job in the window (never a replenish), and
+ * the earliest fuel one before it. fuelRowOfPettyCash keeps the fuel, on its own day, as the Owner's
+ * Draw card does; without it a fill-up paid from the cash box was on that card's Fuel line and Money
+ * by Month's fuel, and never here.
  */
 export async function getFuelTrend(supabase: any, tz: string, todayYmd: string): Promise<FuelTrend | null> {
   const win = fuelWindow(todayYmd);
+  const fuelWords = bucketCategoryPattern("Fuel");
   const businessBills = () =>
     supabase.from("bills").select("id, amount, bill_date, created_at, category, job_id").is("job_id", null).is("superseded_by_bill_id", null);
-  const [inside, first] = await Promise.all([
+  const businessPettyCash = () =>
+    supabase.from("petty_cash").select("id, amount, tx_date, created_at, category, job_id, kind").is("job_id", null).neq("kind", "replenish");
+  const [inside, first, pettyInside, pettyFirst] = await Promise.all([
     readAllPages<FuelBillRow & { id: string }>((f, t) => businessBills().or(`bill_date.gte.${win.start},bill_date.is.null`).order("id").range(f, t), 20),
-    businessBills().filter("category", "imatch", bucketCategoryPattern("Fuel")).not("bill_date", "is", null).order("bill_date", { ascending: true }).limit(1),
+    businessBills().filter("category", "imatch", fuelWords).not("bill_date", "is", null).order("bill_date", { ascending: true }).limit(1),
+    readAllPages<FuelPettyCashRow & { id: string }>((f, t) => businessPettyCash().gte("tx_date", win.start).order("id").range(f, t), 20),
+    businessPettyCash().filter("category", "imatch", fuelWords).lt("tx_date", win.start).order("tx_date", { ascending: true }).limit(1),
   ]);
   if (inside.error || first.error || !Array.isArray(first.data)) return null;
+  if (pettyInside.error || pettyFirst.error || !Array.isArray(pettyFirst.data)) return null;
   // The earliest fuel ever, when it is before the window: it says when the books start, nothing more.
   const before = (first.data as FuelBillRow[]).filter((r) => isFuelBill(r) && (r.bill_date ?? "") < win.start);
-  const bills = [...before, ...inside.rows.filter(isFuelBill)];
-  if (!bills.length) return computeFuelTrend([], 0, todayYmd, tz);
+  const petty = [...(pettyFirst.data as FuelPettyCashRow[]), ...pettyInside.rows].map(fuelRowOfPettyCash).filter((r): r is FuelBillRow => !!r);
+  const fuelRows = [...before, ...inside.rows.filter(isFuelBill), ...petty];
+  if (!fuelRows.length) return computeFuelTrend([], 0, todayYmd, tz);
   // How far the bank downloads reach: most fills are written from them, so a week past the last one
   // isn't in yet. No bank lines (or none readable): today.
   const { data: reach } = await supabase.from("bank_lines").select("posted_on").order("posted_on", { ascending: false }).limit(1);
@@ -200,5 +231,5 @@ export async function getFuelTrend(supabase: any, tz: string, todayYmd: string):
       otherCents / 100
     );
   };
-  return computeFuelTrend(bills as FuelBillRow[], moneyIn, todayYmd, tz, coveredThrough);
+  return computeFuelTrend(fuelRows, moneyIn, todayYmd, tz, coveredThrough);
 }

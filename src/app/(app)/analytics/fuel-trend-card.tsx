@@ -87,8 +87,8 @@ export function FuelTrendCard({ trend }: { trend: FuelTrend }) {
       </div>
       <p className="mt-2 text-sm text-slate-600">{facts.join(" · ")}</p>
       {/* WHAT IT COUNTS, said: every business cost in the Fuel bucket (0362), however it came in:
-          a bank download's fill-ups, a pump receipt filed as Fuel, a cost added by hand. */}
-      <p className="mt-1 text-xs text-slate-500">Counts every business cost filed as Fuel: bank download fill-ups, pump receipts and costs added by hand. Truck repairs and parts are Auto, not in it.</p>
+          a bank download's fill-ups, a pump receipt filed as Fuel, petty cash, a cost added by hand. */}
+      <p className="mt-1 text-xs text-slate-500">Counts every business cost filed as Fuel: bank download fill-ups, pump receipts, petty cash and costs added by hand. Truck repairs and parts are Auto, not in it.</p>
     </Card>
   );
 }

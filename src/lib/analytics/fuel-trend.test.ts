@@ -112,6 +112,8 @@ describe("getFuelTrend: every page, the window's rows, and the first fuel ever",
         const chain: any = {
           select: () => chain,
           eq: (c: string, v: unknown) => (filters.push((r) => r[c] === v), chain),
+          // Postgres <> leaves a NULL out, as the database does.
+          neq: (c: string, v: unknown) => (filters.push((r) => r[c] != null && r[c] !== v), chain),
           is: (c: string, v: unknown) => (filters.push((r) => (r[c] ?? null) === v), chain),
           not: (c: string, _op: string, v: unknown) => (filters.push((r) => (r[c] ?? null) !== v), chain),
           // PostgREST's imatch is Postgres ~*: a regular expression, any letter case.
@@ -193,6 +195,40 @@ describe("getFuelTrend: every page, the window's rows, and the first fuel ever",
     );
     expect(t!.weeks.reduce((n, w) => n + w.cents, 0)).toBe(14000);
     expect(t!.fills).toBe(2);
+    expect(t!.weeksCounted).toBe(12);
+  });
+
+  it("counts petty cash with no job filed as fuel, as the Owner's Draw card's Fuel line does, never a replenish or a job's", async () => {
+    const pc = (id: string, tx_date: string, amount: number, o: Record<string, unknown> = {}) => ({
+      id,
+      amount,
+      tx_date,
+      created_at: `${tx_date}T18:00:00Z`,
+      category: "Fuel",
+      job_id: null,
+      kind: "expense",
+      ...o,
+    });
+    const t = await getFuelTrend(
+      fake({
+        bills: [{ id: "f1", ...fuel("2026-09-08", 100) }],
+        petty_cash: [
+          pc("p0", "2025-05-05", 20, { category: "gas" }), // the first fuel ever, before the window
+          pc("p1", "2026-09-09", 30),
+          pc("p2", "2026-09-10", 15, { category: "diesel" }),
+          pc("r1", "2026-09-10", 200, { kind: "replenish" }), // cash into the box, never a cost
+          pc("j1", "2026-09-10", 45, { job_id: "job-1" }), // a job's cost, not a business one
+          pc("t1", "2026-09-10", 60, { category: "Tools" }),
+        ],
+        payments: [],
+        customer_credits: [],
+        bank_lines: [],
+      }),
+      "UTC",
+      TODAY,
+    );
+    expect(t!.weeks.reduce((n, w) => n + w.cents, 0)).toBe(14500);
+    expect(t!.fills).toBe(3);
     expect(t!.weeksCounted).toBe(12);
   });
 
