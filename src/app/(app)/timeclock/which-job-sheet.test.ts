@@ -170,7 +170,11 @@ describe("where a pick's answer lands", () => {
 
   it("the door with no toast says a landed pick on the sheet, with Done", () => {
     expect(routePick(placed, { confirmInline: true, gone: false })).toMatchObject({ refresh: true, toast: null, placed: placed.sentence, close: false });
-    expect(routePick(refused, { confirmInline: true, gone: false })).toMatchObject({ toast: null, inline: refused.sentence, close: false });
+    expect(routePick(refused, { confirmInline: true, gone: false })).toMatchObject({ refresh: false, toast: null, inline: refused.sentence, close: false });
+  });
+
+  it("a punch that moved underneath refreshes the screen behind at the offline queue's door too: its sentence says the screen is catching up", () => {
+    expect(routePick(stale, { confirmInline: true, gone: false })).toEqual({ refresh: true, toast: null, inline: stale.sentence, placed: null, close: false });
   });
 
   it("closed while the write was out (Back, the X, a tap outside): every answer rides a toast, and nothing closes twice", () => {

@@ -195,10 +195,14 @@ export function routePick(out: PickOutcome, door: { confirmInline: boolean; gone
       ? { ...none, refresh: true, placed: out.sentence, close: false }
       : { ...none, refresh: true, toast: { sentence: out.sentence, kind: "success" }, close: true };
   }
-  if (out.kind === "stale" && !door.confirmInline) {
-    // The punch moved underneath (closed, or got its job elsewhere): the screen behind catches up,
-    // and the sentence rides a toast because the sheet goes with it.
-    return { ...none, refresh: true, toast: { sentence: out.sentence, kind: "error" }, close: true };
+  if (out.kind === "stale") {
+    // The punch moved underneath (closed, or got its job elsewhere). Every stale sentence says "the
+    // screen is catching up", and the refusal came back before any revalidate, so the screen behind
+    // only catches up if the sheet refreshes it: at every door, the offline queue's included. The
+    // sentence rides a toast because the sheet goes with it; with no toast it stays on the sheet.
+    return door.confirmInline
+      ? { ...none, refresh: true, inline: out.sentence, close: false }
+      : { ...none, refresh: true, toast: { sentence: out.sentence, kind: "error" }, close: true };
   }
   return { ...none, refresh: false, inline: out.sentence, close: false };
 }
