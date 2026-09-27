@@ -39,15 +39,27 @@ type Supa = Awaited<ReturnType<typeof createClient>>;
  * plain questions: no model call, and nothing here says it's Nort.
  *
  * Read for the caller's own company (RLS scopes it; the org id pins it when we have one). A read
- * that fails or finds nothing counts as OFF: the plain path always works, so the careful answer
- * costs nobody a dead end.
+ * that fails or finds nothing is UNREAD, and calls no model either: the careful answer. But it is
+ * never said as "Nort is off". The tour only runs with Nort on and has no plain boxes of its own,
+ * so a blip in one read told a company with Nort on to type into boxes that refused the same way.
+ * The draft door falls back to the plain questions (it has them); the talk doors say "try again".
  */
-async function nortSwitchedOn(supabase: Supa, orgId: string | null): Promise<boolean> {
+type NortSwitch = "on" | "off" | "unread";
+async function nortSwitch(supabase: Supa, orgId: string | null): Promise<NortSwitch> {
   const q = supabase.from("organizations").select("settings");
   const { data, error } = await (orgId ? q.eq("id", orgId) : q.limit(1)).maybeSingle();
-  if (error || !data) return false;
-  return featureOn(getOrgSettings((data as { settings?: unknown }).settings).features, "nort");
+  if (error || !data) return "unread";
+  return featureOn(getOrgSettings((data as { settings?: unknown }).settings).features, "nort") ? "on" : "off";
 }
+
+/** What a setup AI door says when Nort is off. Plain, and never "I". */
+const NORT_OFF_SETUP = "Nort is off for your company, so type your answers into the boxes.";
+
+/** What a setup talk door says when the switch couldn't be read. Plain, and never "I". */
+const SWITCH_UNREAD = "Couldn't check your company's settings just now. Try that again.";
+
+/** The refusal for a talk door when the switch isn't on: off says off, unread says try again. */
+const notOnSays = (s: NortSwitch) => (s === "off" ? NORT_OFF_SETUP : SWITCH_UNREAD);
 
 /** Does the company have a trade on file (the sign-up key, or its own words)? Read for its own org. */
 async function tradeOnFile(supabase: Supa): Promise<boolean> {
@@ -57,9 +69,6 @@ async function tradeOnFile(supabase: Supa): Promise<boolean> {
   const t = orgTrade(getOrgSettings((data as { settings?: unknown } | null)?.settings));
   return Boolean(t.key || t.label);
 }
-
-/** What a setup AI door says when Nort is off. Plain, and never "I". */
-const NORT_OFF_SETUP = "Nort is off for your company, so type your answers into the boxes.";
 
 /**
  * A TURN OF CONVERSATION during setup — Nort replies AND fills, in one call.
@@ -84,7 +93,8 @@ export async function talkSetup(needKey: string | null, answers: Answers, said: 
   if (text.length > 4000) return { ok: false, error: "That's a lot at once — break it up a bit." };
   // Nort off: no model call and no Nort voice. The boxes still take a typed answer.
   const orgId = await currentOrgId();
-  if (!(await nortSwitchedOn(supabase, orgId))) return { ok: false, error: NORT_OFF_SETUP };
+  const sw = await nortSwitch(supabase, orgId);
+  if (sw !== "on") return { ok: false, error: notOnSays(sw) };
 
   const known = coerceByPlaybook(SETUP_PLAYBOOK, answers);
   const need = needKey ? SETUP_PLAYBOOK.needs.find((n) => n.key === needKey) : undefined;
@@ -176,7 +186,8 @@ export async function hearSetup(answers: Answers, transcript: string): Promise<H
   if (!user) return { ok: false, error: "Sign in first." };
   // Nort off: the setup questions are typed into their boxes; nothing is sent to a model.
   const orgId = await currentOrgId();
-  if (!(await nortSwitchedOn(supabase, orgId))) return { ok: false, error: NORT_OFF_SETUP };
+  const sw = await nortSwitch(supabase, orgId);
+  if (sw !== "on") return { ok: false, error: notOnSays(sw) };
   return runHear(SETUP_PLAYBOOK, answers, transcript, { orgId, surface: "setup:talk" });
 }
 
@@ -295,7 +306,7 @@ export async function draftMyPlaybook(): Promise<DraftResult> {
   const undrafted: DraftResult = { ok: true, formId: (form as { id: string }).id, needs: pb.needs, wasDrafted: false };
   if (!process.env.ANTHROPIC_API_KEY) return undrafted;
   const orgId = await currentOrgId();
-  if (!(await nortSwitchedOn(supabase, orgId))) return undrafted;
+  if ((await nortSwitch(supabase, orgId)) !== "on") return undrafted;
   if (await aiSpendExceeded(orgId)) return undrafted;
 
   const orgQ = supabase.from("organizations").select("settings");

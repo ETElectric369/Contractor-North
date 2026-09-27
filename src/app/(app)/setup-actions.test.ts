@@ -103,10 +103,39 @@ describe("Nort off: the plain questions, and no model call", () => {
     expect(state.modelCalls).toBe(0);
   });
 
-  it("a settings read that fails counts as off: the plain path, never a guess", async () => {
+});
+
+/**
+ * A SETTINGS READ THAT FAILS IS NOT "NORT IS OFF". It still calls no model (the careful answer), but
+ * the tour only runs with Nort on and has no plain boxes of its own, so telling it "Nort is off …
+ * type your answers into the boxes" was false and sent the person to boxes that refused the same way.
+ */
+describe("the switch couldn't be read: no model call, and never said as Nort being off", () => {
+  beforeEach(() => {
     state.tables.organizations = { data: null, error: { message: "boom" } };
-    expect((await talkSetup("trade", {}, "hi")).ok).toBe(false);
-    expect((await draftMyPlaybook())).toMatchObject({ ok: true, wasDrafted: false });
+  });
+
+  it("talkSetup says to try again", async () => {
+    const r = await talkSetup("trade", {}, "hi");
+    expect(r).toEqual({ ok: false, error: expect.stringMatching(/try that again/i) });
+    expect(r.ok ? "" : r.error).not.toMatch(/nort is off|\bI\b/i);
+    expect(state.modelCalls).toBe(0);
+  });
+
+  it("hearSetup says to try again, and extracts nothing", async () => {
+    const r = await hearSetup({}, "I'm a painter");
+    expect(r).toMatchObject({ ok: false, error: expect.stringMatching(/try that again/i) });
+    expect(state.hearCalls).toBe(0);
+  });
+
+  it("a missing row reads the same way as a failed read", async () => {
+    state.tables.organizations = { data: null, error: null };
+    const r = await talkSetup("trade", {}, "hi");
+    expect(r.ok ? "" : r.error).toMatch(/try that again/i);
+  });
+
+  it("draftMyPlaybook hands back the plain questions, as it always could", async () => {
+    expect(await draftMyPlaybook()).toMatchObject({ ok: true, wasDrafted: false });
     expect(state.modelCalls).toBe(0);
   });
 });
