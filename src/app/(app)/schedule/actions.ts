@@ -12,6 +12,8 @@ import { findMatchingCustomerId, type DupCustomer } from "@/lib/crm/duplicates";
 import { JOB_STATUSES } from "@/lib/job-status";
 import { getOrgSettings, workDayWindowHm } from "@/lib/org-settings";
 import { todayStrInTz, tzDateTimeUtc, tzDayStartUtc, tzMinutesOfDay } from "@/lib/tz";
+import { resolveComeBack, type ComeBackWhen } from "@/lib/come-back-days";
+import { isMissingColumn } from "@/lib/job-tasks";
 import { addDaySegment, keepWorkedDays, moveKeepingWorkedDays, workedDaysFrom } from "@/lib/schedule-math";
 import { rescheduleAppointment } from "../appointments/actions";
 import {
@@ -90,6 +92,13 @@ export async function createJob(formData: FormData): Promise<Result> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
+  // A JOB IS NEVER BORN ON HOLD (NY-hold, 0366). A hold is a reason and the day it comes back, and
+  // the new-job form asks neither: made on hold it would park with no reason and a day nobody chose.
+  // The job page's status control and the schedule rail put a job on hold, and both ask. Refused
+  // before anything is written (no customer is minted for a job that isn't made).
+  if (String(formData.get("status") ?? "").trim() === "on_hold") {
+    return { ok: false, error: "Make the job first, then put it on hold. It asks why and for a day." };
+  }
 
   const start = String(formData.get("scheduled_start") ?? "");
   const address = emptyToNull(formData.get("address"));
@@ -627,7 +636,9 @@ export async function placeJobOnDay(
      promotes to_be_scheduled/estimate, so this is its own explicit write. */
   if (row?.status === "on_hold") {
     // The reason leaves WITH the hold — same wake rule as setJobHold, or "waiting on the permit"
-    // keeps haunting a job that's back on the calendar.
+    // keeps haunting a job that's back on the calendar. The day it was coming back and who held it
+    // leave too: the database clears hold_reason, hold_until and hold_by whenever a job comes off
+    // hold (jobs_hold_day, 0366), so this door can never leave a stale day behind.
     await supabase
       .from("jobs")
       .update({ status: "scheduled", hold_reason: null })
@@ -912,8 +923,14 @@ export async function planDayTimes(
  * churn the planner exists to kill. And a hold WITHOUT a reason is a shrug: "on hold — waiting on
  * the permit" is an action wearing a status, so the reason is asked for at the moment of parking,
  * the only moment anybody remembers it.
+ *
+ * EVERY WAIT HAS A DAY (NY-hold, 0366; Erik: "too quiet gets things lost"). `when` is the day it
+ * comes back: a day the door worked out ({ date }), or a chip's name ({ pick }) worked out here in
+ * the company's timezone. Left out, the database gives a job entering hold a week (jobs_hold_day),
+ * and an edit of a held job's reason keeps its day. A day before today is refused in words. Before
+ * 0366 is applied the job parks exactly as it always did, with its reason and no day.
  */
-export async function setJobHold(jobId: string, reason: string | null): Promise<Result> {
+export async function setJobHold(jobId: string, reason: string | null, when?: ComeBackWhen | null): Promise<Result> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
 
@@ -922,16 +939,32 @@ export async function setJobHold(jobId: string, reason: string | null): Promise<
     // job with hold_reason NULL, which is exactly the state the migration was written to end.
     const cleanReason = reason.trim();
     if (!cleanReason) return { ok: false, error: "Say why it's on hold — that's what the crew and the customer will read." };
-    const { data, error } = await ctx.supabase
-      .from("jobs")
-      .update({ status: "on_hold", hold_reason: cleanReason, updated_at: new Date().toISOString() })
-      .eq("id", jobId)
-      .select("id");
+    let holdUntil: string | null = null;
+    if (when) {
+      const day = resolveComeBack(todayStrInTz(await orgTimezone(ctx.supabase)), when);
+      if (!day.ok) return { ok: false, error: day.error };
+      holdUntil = day.day;
+    }
+    const park = (withDay: boolean) =>
+      ctx.supabase
+        .from("jobs")
+        .update({
+          status: "on_hold",
+          hold_reason: cleanReason,
+          ...(withDay && holdUntil ? { hold_until: holdUntil } : {}),
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", jobId)
+        .select("id");
+    let { data, error } = await park(true);
+    // 0366 not applied yet: park exactly as before (the reason), without the day it can't hold yet.
+    if (error && holdUntil && isMissingColumn(error)) ({ data, error } = await park(false));
     if (error) return { ok: false, error: dbError(error) };
     if (!data?.length) return { ok: false, error: "That job isn't available." };
   } else {
     // Waking up: back to where its date says it belongs — scheduled if it has one, the waiting
-    // room if it doesn't. The reason clears with the hold; a stale reason is a false alarm.
+    // room if it doesn't. The reason clears with the hold; a stale reason is a false alarm. (The
+    // database clears the day and who held it as well: jobs_hold_day, 0366.)
     const { data: j } = await ctx.supabase.from("jobs").select("scheduled_start").eq("id", jobId).maybeSingle();
     const { data, error } = await ctx.supabase
       .from("jobs")
@@ -950,6 +983,46 @@ export async function setJobHold(jobId: string, reason: string | null): Promise<
   revalidatePath("/jobs");
   revalidatePath(`/jobs/${jobId}`);
   revalidatePath("/planner");
+  return { ok: true };
+}
+
+/**
+ * STILL WAITING: A HELD JOB COMES BACK ON ANOTHER DAY (NY-hold, 0366). Moves hold_until and nothing
+ * else about the hold: the job stays on hold, held by whoever held it (the database keeps hold_by,
+ * jobs_hold_day). A reason is written only when the job has none saved yet (a hold from before 0234)
+ * and one is given: a snooze never rewrites the reason the office wrote. The write is its own check
+ * (only a job still on hold), and a zero-row write is said, never assumed landed.
+ */
+export async function snoozeJobHold(jobId: string, when: ComeBackWhen, reason?: string | null): Promise<Result> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const day = resolveComeBack(todayStrInTz(await orgTimezone(ctx.supabase)), when);
+  if (!day.ok) return { ok: false, error: day.error };
+
+  const { data: job, error: readErr } = await ctx.supabase.from("jobs").select("id, status, hold_reason").eq("id", jobId).maybeSingle();
+  if (readErr) return { ok: false, error: dbError(readErr) };
+  if (!job) return { ok: false, error: "That job isn't available." };
+  if ((job as { status?: string | null }).status !== "on_hold") return { ok: false, error: "That job isn't on hold." };
+
+  const said = (reason ?? "").trim();
+  const saved = String((job as { hold_reason?: string | null }).hold_reason ?? "").trim();
+  const { data, error } = await ctx.supabase
+    .from("jobs")
+    .update({ hold_until: day.day, ...(!saved && said ? { hold_reason: said } : {}), updated_at: new Date().toISOString() })
+    .eq("id", jobId)
+    .eq("status", "on_hold")
+    .select("id");
+  if (error) {
+    return {
+      ok: false,
+      error: isMissingColumn(error) ? "This needs a quick database update before a hold can take a day." : dbError(error),
+    };
+  }
+  if (!data?.length) return { ok: false, error: "That job isn't on hold." };
+  revalidatePath("/planner");
+  revalidatePath("/schedule");
+  revalidatePath("/jobs");
+  revalidatePath(`/jobs/${jobId}`);
   return { ok: true };
 }
 

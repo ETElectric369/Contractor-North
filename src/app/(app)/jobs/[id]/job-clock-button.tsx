@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Play } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useToast } from "@/components/toast";
 import { clockIn } from "../../timeclock/actions";
 import { ClockStartPicker } from "../../timeclock/clock-start-picker";
 
@@ -11,6 +12,7 @@ import { ClockStartPicker } from "../../timeclock/clock-start-picker";
  *  start time if you forgot to clock in. Clock out from My Day or the Timeclock. */
 export function JobClockButton({ jobId, isStaff = true, tz }: { jobId: string; isStaff?: boolean; tz?: string }) {
   const router = useRouter();
+  const toast = useToast();
   const [pending, start] = useTransition();
   const [startAt, setStartAt] = useState(""); // "" = now; otherwise a chosen ISO
   const [msg, setMsg] = useState<string | null>(null);
@@ -28,6 +30,8 @@ export function JobClockButton({ jobId, isStaff = true, tz }: { jobId: string; i
               if (!res.ok) setMsg(res.error ?? "Couldn't clock in.");
               else {
                 setMsg("Clocked in ✓");
+                // A held job came off hold with the punch (NY-hold, 0366): read, not glimpsed.
+                if (res.warning) toast(res.warning, "info", undefined, { sticky: true });
                 router.refresh();
               }
             });

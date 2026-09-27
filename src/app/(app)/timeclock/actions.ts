@@ -361,22 +361,28 @@ async function clockInInner(
   //   · that job's org must be the caller's org
   //   · only from a pre-work status — never un-complete or un-cancel a finished job
   // It writes ONE column on ONE row, and it is the same promotion the office's own clock-in did.
+  // A HELD JOB COMES OFF HOLD WITH IT, and the clock says so (NY-hold, 0366): the punch landed, the
+  // job is working again, and "J-048 was on hold (waiting on the permit). It's off hold now." rides
+  // back as the result's warning, which every clock door shows.
+  let offHold: string | null = null;
   if (jobId) {
-    await promoteJobToInProgress(supabase, jobId);
+    offHold = (await promoteJobToInProgress(supabase, jobId))?.offHold ?? null;
     revalidatePath(`/jobs/${jobId}`);
     revalidatePath("/jobs");
+    if (offHold) revalidatePath("/schedule"); // the rail's held card goes
   }
 
   revalidatePath("/timeclock");
   revalidatePath("/planner");
+  const said = offHold ? { warning: offHold } : {};
   // WHEN THE CLOCK CAN'T TELL THE JOB, THE DOOR ASKS (Erik, 2026-09-26). The punch above is saved
   // whatever happens next; `noJob` only tells the door to put one question on screen ("Which Job
   // Are You On?", with Skip, The Office Will Pick). A punch the person gave a code (Shop, Drive)
   // was named on purpose and is not asked about. The door loads its own choices, so nothing here
   // reads a job list and the clock answers as fast as it always did.
   const id = (made as { id?: string } | null)?.id;
-  if (!id) return { ok: true };
-  return !jobId && !(input.job_code ?? "").trim() ? { ok: true, id, noJob: true } : { ok: true, id };
+  if (!id) return { ok: true, ...said };
+  return !jobId && !(input.job_code ?? "").trim() ? { ok: true, id, noJob: true } : { ok: true, id, ...said };
 }
 
 // promoteJobToInProgress lives in lib/job-promote (one copy for clock-in, switch-job and
@@ -554,8 +560,13 @@ ${switchBreadcrumb(label, nowIso)}` : switchBreadcrumb(label, nowIso);
   }
 
   // Switching into a job means work has started there (the shared helper, never the caller's
-  // client: for a tech that is a zero-row no-op reported as success).
-  await promoteJobToInProgress(supabase, jobId);
+  // client: for a tech that is a zero-row no-op reported as success). A held job comes off hold with
+  // it, said beside any other warning (NY-hold, 0366).
+  const offHold = (await promoteJobToInProgress(supabase, jobId))?.offHold ?? null;
+  if (offHold) {
+    warnings.push(offHold);
+    revalidatePath("/schedule");
+  }
   revalidatePath(`/jobs/${jobId}`);
   if (entry.job_id) revalidatePath(`/jobs/${entry.job_id}`);
   revalidatePath("/jobs");

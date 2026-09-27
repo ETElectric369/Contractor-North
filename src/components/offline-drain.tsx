@@ -9,8 +9,8 @@ import { listPending, registerReplayer, remove, startAutoDrain, type QueuedOp } 
 /**
  * THE QUEUE DRAINS FROM ANYWHERE IN THE APP (audit 9).
  *
- * The promise on the clock card is "it'll file itself when you have signal" — and the drain that
- * kept that promise was mounted inside the clock card itself, on /planner. Walk to the job page,
+ * The promise on the Now card is "it'll file itself when you have signal" — and the drain that
+ * kept that promise was mounted inside the Now card itself, on /planner. Walk to the job page,
  * open Materials, put the phone away: the listeners were removed with the component, so the punch
  * sat on the phone through the entire drive back into coverage and only filed if the tech happened
  * to return to My Day. Past the server's age bound it is then refused outright — the morning is
@@ -28,6 +28,10 @@ export function OfflineDrain({ userId }: { userId: string | null }) {
   // clock asks, once it is saved. This shell sits outside the toast provider, so the sheet says
   // where the punch went itself (confirmInline).
   const [ask, setAsk] = useState<WhichJobAsk | null>(null);
+  // WHAT ELSE A FILED PUNCH DID, ON ITS OWN LINE (NY-hold, 0366): a punch that filed onto a job on
+  // hold took it off hold, and the clock says so at every door. Outside the toast provider there is
+  // no toast to carry it, so it waits here until Got It.
+  const [said, setSaid] = useState<string[]>([]);
 
   useEffect(() => {
     registerReplayer("time.clockIn", async (args, clientOpId) => {
@@ -35,6 +39,8 @@ export function OfflineDrain({ userId }: { userId: string | null }) {
       const res = await clockIn({ ...a, clock_in_at: null, clientOpId });
       const again = askAfterPunch(res, "in");
       if (again) setAsk(again);
+      const warning = res.ok ? (res.warning ?? "").trim() : "";
+      if (warning) setSaid((s) => (s.includes(warning) ? s : [...s, warning]));
       // A refusal that TIME fixes (a session that hadn't refreshed after hours offline) must not
       // be quarantined as a permanent rejection — the drain waits and tries again instead.
       const transient = !res.ok && /sign(ed)? in|session|expired|temporar|timeout|network|fetch/i.test(res.error ?? "");
@@ -85,12 +91,39 @@ export function OfflineDrain({ userId }: { userId: string | null }) {
     <WhichJobSheet key={ask.entryId} entryId={ask.entryId} moment={ask.moment} confirmInline onClose={() => setAsk(null)} />
   ) : null;
 
-  if (!pending && !blocked) return sheet;
+  const saidLines = said.length ? (
+    <div className="pointer-events-auto w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-3 text-sm shadow-lg">
+      {said.map((line) => (
+        <p key={line} className="text-slate-800">
+          {line}
+        </p>
+      ))}
+      <button
+        type="button"
+        onClick={() => setSaid([])}
+        className="mt-2 inline-flex h-11 items-center rounded-lg border border-slate-300 px-3 text-sm font-medium text-slate-700"
+      >
+        Got It
+      </button>
+    </div>
+  ) : null;
+
+  if (!pending && !blocked) {
+    return (
+      <>
+        {sheet}
+        {saidLines && (
+          <div className="pointer-events-none fixed inset-x-0 bottom-20 z-40 flex flex-col items-center gap-2 px-3 shell:bottom-4">{saidLines}</div>
+        )}
+      </>
+    );
+  }
 
   return (
     <>
     {sheet}
     <div className="pointer-events-none fixed inset-x-0 bottom-20 z-40 flex flex-col items-center gap-2 px-3 shell:bottom-4">
+      {saidLines}
       {blocked > 0 && showBlocked ? (
         <div className="pointer-events-auto w-full max-w-sm rounded-2xl border border-rose-200 bg-white p-3 text-xs shadow-lg">
           <p className="font-medium text-rose-900">These never filed</p>

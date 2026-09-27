@@ -119,7 +119,8 @@ describe("the clock asks only when it can't tell the job, and never before the p
       if (q.table === "profiles" && q.cols === "org_id") return { data: { org_id: "org-1" } };
       if (q.table === "profiles") return { data: { role: "tech" } };
       if (q.table === "jobs" && q.cols === "id") return { data: { id: JOB } };
-      if (q.table === "jobs" && q.cols === "org_id") return { data: { org_id: "org-1" } };
+      // The promotion's read (lib/job-promote): the org, and whether the job is on hold (0366).
+      if (q.table === "jobs" && q.cols.startsWith("org_id")) return { data: { org_id: "org-1" } };
       if (q.table === "jobs" && q.verb === "update") return { data: [] };
       if (q.table === "time_entries" && q.verb === "insert") return { data: { id: PUNCH } };
     }, calls);
@@ -299,7 +300,8 @@ describe("picking puts the punch on the job, checked", () => {
   const pickRoute = (entry: any, jobRow: any, updateReply: Reply = { data: { id: PUNCH } }) => (q: Q): Reply => {
     if (q.table === "time_entries" && q.verb === "select") return { data: entry };
     if (q.table === "time_entries" && q.verb === "update") return updateReply;
-    if (q.table === "jobs" && q.cols === "org_id") return { data: { org_id: "org-1" } };
+    // The promotion's read (lib/job-promote): the org, and whether the job is on hold (0366).
+    if (q.table === "jobs" && q.cols.startsWith("org_id")) return { data: { org_id: "org-1", status: jobRow?.status ?? null } };
     if (q.table === "jobs" && q.verb === "select") return { data: jobRow };
     if (q.table === "jobs" && q.verb === "update") return { data: [] };
     if (q.table === "organizations") return ORG;

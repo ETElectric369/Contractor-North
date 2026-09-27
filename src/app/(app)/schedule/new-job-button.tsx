@@ -17,12 +17,17 @@ import { createParamClaim } from "@/lib/param-claim";
 // The new-job form offers the spine's non-terminal statuses (a brand-new job is never
 // complete/cancelled), in this form's "most likely first" order. Derived from
 // ACTIVE_JOB_STATUSES so a spine change reaches this dropdown automatically.
-const NEW_JOB_STATUS_ORDER = ["in_progress", "to_be_scheduled", "scheduled", "on_hold"];
-const NEW_JOB_STATUSES = [...ACTIVE_JOB_STATUSES].sort((a, b) => {
-  const ia = NEW_JOB_STATUS_ORDER.indexOf(a);
-  const ib = NEW_JOB_STATUS_ORDER.indexOf(b);
-  return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
-});
+// NEVER ON HOLD (NY-hold, 0366): a hold is a reason and the day it comes back, and this form asks
+// neither, so createJob refuses it; the job page's status control and the schedule rail put a job on
+// hold, and both ask.
+const NEW_JOB_STATUS_ORDER = ["in_progress", "to_be_scheduled", "scheduled"];
+const NEW_JOB_STATUSES = [...ACTIVE_JOB_STATUSES]
+  .filter((s) => s !== "on_hold")
+  .sort((a, b) => {
+    const ia = NEW_JOB_STATUS_ORDER.indexOf(a);
+    const ib = NEW_JOB_STATUS_ORDER.indexOf(b);
+    return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+  });
 
 interface CustomerOption {
   id: string;
