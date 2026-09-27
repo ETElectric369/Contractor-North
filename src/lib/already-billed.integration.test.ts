@@ -274,6 +274,10 @@ d("0357: Already Billed", () => {
     await line(other, { description: "TEST imported", source: "costs", key: `bill:${onOther}`, ids: [onOther] });
     const onHere = await bill(jobA, 44);
     await line(paid, { description: "TEST imported", source: "costs", key: `bill:${onHere}`, ids: [onHere], edited: true });
+    // A receipt whose ORDER a live invoice holds: the importer skips it, so it is billed already.
+    const orderOn = await po(jobA, "sent", 90);
+    await line(other, { description: "TEST imported order", source: "costs", key: `po:${orderOn}`, ids: [orderOn] });
+    const itsReceipt = await bill(jobA, 90, { po: orderOn });
 
     const before = await state(hand);
     const cases: [string, { message: string; code: string } | null, RegExp][] = [];
@@ -304,6 +308,7 @@ d("0357: Already Billed", () => {
     await run("a shift on another job", staff, hand, [otherJobShift], /on another job/);
     await run("already on another invoice", staff, hand, [onOther], /already billed on TEST-AB-\d+/);
     await run("already on this invoice", staff, hand, [onHere], /already holds that/);
+    await run("a receipt whose order is billed", staff, hand, [itsReceipt], /order is already billed on TEST-AB-\d+, so the receipt is too/);
     await run("nothing we know", staff, hand, ["0badbeef-0000-4000-8000-000000000000"], /isn't a receipt, an order, a shift or a take/);
     await run("nothing picked", staff, hand, [], /Pick what that line already charged for/);
     // Another company's office on its own line, naming our receipt: RLS hides it, so it is nothing it knows.

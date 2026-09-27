@@ -31,7 +31,8 @@
 --        credit line (draw_credit), a contract line (milestone) or a lump line on a draw that bills
 --        no rows (invoice-math lumpLineRule); a $0 line; a line filed as Other, for a charge; an
 --        imported line nobody edited (the next import rewrites its claims, 0255); a return onto
---        anything but a line typed by hand that takes money off, or a purchase onto one; anything
+--        anything but a line typed by hand that takes money off, or a purchase onto one; a receipt
+--        whose order a live invoice holds (the importer skips it: that order's line billed it); anything
 --        that is not a live bill, a live purchase order, a closed shift (a split one WHOLE: every
 --        unbilled closed piece of it on the job) or a WHOLE live take from stock on the invoice's
 --        job (an invoice with no job: on one of its customer's jobs that isn't Time & Material,
@@ -273,12 +274,21 @@ begin
 
   -- WHAT: each id, in the office's words when it is refused.
   foreach v_id in array v_ids loop
-    select b.id, b.org_id, b.job_id, b.amount, b.superseded_by_bill_id into v_b from public.bills b where b.id = v_id;
+    select b.id, b.org_id, b.job_id, b.amount, b.superseded_by_bill_id, b.po_id into v_b from public.bills b where b.id = v_id;
     if found then
       if v_b.org_id is distinct from v_org then
         raise exception 'That receipt isn''t in your company''s books. Nothing was changed.' using errcode = '42501';
       elsif v_b.superseded_by_bill_id is not null then
         raise exception 'That receipt was set aside as a copy of another one, so it is not a cost. Nothing was changed.' using errcode = 'P0001';
+      -- ITS ORDER IS BILLED, SO IT IS: the importer skips a receipt whose order a live invoice holds
+      -- (the customer paid for the delivery on the order's line). Held again here, it is one cost twice.
+      elsif v_b.po_id is not null and exists (
+              select 1 from public.invoice_items x join public.invoices xi on xi.id = x.invoice_id
+               where xi.org_id = v_org and xi.status <> 'void' and x.source_ids @> array[v_b.po_id]) then
+        raise exception 'That receipt''s order is already billed on %, so the receipt is too. Nothing was changed.',
+          coalesce((select xi.invoice_number from public.invoice_items x join public.invoices xi on xi.id = x.invoice_id
+                     where xi.org_id = v_org and xi.status <> 'void' and x.source_ids @> array[v_b.po_id]
+                     order by xi.created_at, xi.id limit 1), 'another invoice') using errcode = 'P0001';
       elsif v_b.job_id is null or not (v_b.job_id = any (v_jobs)) then
         raise exception 'That receipt is on another job, not on %''s. Nothing was changed.', v_num using errcode = 'P0001';
       elsif coalesce(v_b.amount, 0) = 0 then
