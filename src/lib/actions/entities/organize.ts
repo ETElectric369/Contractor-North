@@ -30,7 +30,7 @@ export const organizeActions: Record<string, ActionDef> = {
     group: "organize",
     label: "Capture a voice note",
     description:
-      "Capture a quick NOTE / reminder into Organize My — 'make a note: call the inspector Tuesday', 'remind me to order more 12-gauge'. Hands-busy field capture so nothing slips. Pass the note text.",
+      "Capture a quick NOTE / reminder into Organize My — 'make a note: call the inspector Tuesday', 'remind me to order more <item>'. Hands-busy field capture so nothing slips. Pass the note text.",
     input: z.object({ text: z.string().min(1) }),
     auth: "any",
     effect: "write",

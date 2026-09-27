@@ -663,7 +663,7 @@ function GfciAfci() {
         <Result tone={sel.gfci ? "amber" : "green"}>GFCI: <strong>{sel.gfci ? "Required" : "Not required"}</strong></Result>
         <Result tone={sel.afci ? "amber" : "green"}>AFCI: <strong>{sel.afci ? "Required" : "Not required"}</strong></Result>
       </div>
-      <p className="text-xs text-slate-400">{sel.ref} · dwelling units, ~NEC 2020. The 2023 NEC expands AFCI/GFCI — verify your AHJ's adopted edition.</p>
+      <p className="text-xs text-slate-400">{sel.ref} · dwelling units, ~NEC 2020. The 2023 NEC expands AFCI/GFCI — verify your AHJ&apos;s adopted edition.</p>
     </div>
   );
 }
@@ -786,11 +786,13 @@ const TOOLS: Tool[] = [
  * Trade-specific packages are HIDDEN, not removed: "Show every tool" brings them straight back,
  * because a deck builder genuinely might want a voltage-drop figure for a lighting run, and
  * silently deleting a capability is worse than showing one too many.
+ *
+ * `trade` is the company's trade KEY (lib/org-trade), so a company that picked Electrical at
+ * sign-up and never typed its trade still opens on its own tools.
  */
 function packagesForTrade(trade: string): Pkg[] {
-  const t = trade.toLowerCase();
   const universal: Pkg[] = ["Estimating", "Money", "Field"];
-  return /electric|sparky/.test(t) ? ["Electrical", ...universal] : universal;
+  return trade === "electrical" ? ["Electrical", ...universal] : universal;
 }
 
 export function ToolsView({ trade = "" }: { trade?: string }) {

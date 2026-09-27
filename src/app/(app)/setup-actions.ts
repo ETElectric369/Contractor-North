@@ -6,12 +6,14 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { runHear, type HearRun } from "@/lib/playbook/hear-run";
 import { coerceByPlaybook } from "@/lib/playbook/answers";
-import { applyFills, clearInapplicable } from "@/lib/playbook/resolve";
+import { applyFills, clearInapplicable, isAnswered } from "@/lib/playbook/resolve";
 import { CONVERSE_SYSTEM, conversePrompt, fallbackSay, parseSpoken } from "@/lib/onboarding/converse";
 import { asRegister, clampHumor, toneDirective } from "@/lib/nort/tone";
 import { playbookForForm } from "@/lib/playbook/parse";
 import { getAnthropic, DEFAULT_MODEL } from "@/lib/anthropic";
 import { getOrgSettings } from "@/lib/org-settings";
+import { featureOn } from "@/lib/features";
+import { orgTrade } from "@/lib/org-trade";
 import { SETUP_PLAYBOOK } from "@/lib/onboarding/setup-playbook";
 import { aboutFromSetup, applyDraft, draftRequest, DRAFT_SYSTEM } from "@/lib/onboarding/draft-playbook";
 import { updateOrgSettings } from "./settings/actions";
@@ -27,6 +29,46 @@ export type DraftResult =
 export type TalkResult =
   | { ok: true; say: string; answers: Answers; filled: string[] }
   | { ok: false; error: string };
+
+type Supa = Awaited<ReturnType<typeof createClient>>;
+
+/**
+ * THE NORT SWITCH GOVERNS THE SETUP AI TOO (0352). The chat route answers in words when Nort is off,
+ * but the setup's three model calls (setup:converse, setup:talk, setup:draft) never asked, so a
+ * company that switched Nort off still paid a model to phrase its setup. With Nort off, setup is the
+ * plain questions: no model call, and nothing here says it's Nort.
+ *
+ * Read for the caller's own company (RLS scopes it; the org id pins it when we have one). A read
+ * that fails or finds nothing is UNREAD, and calls no model either: the careful answer. But it is
+ * never said as "Nort is off". The tour only runs with Nort on and has no plain boxes of its own,
+ * so a blip in one read told a company with Nort on to type into boxes that refused the same way.
+ * The draft door falls back to the plain questions (it has them); the talk doors say "try again".
+ */
+type NortSwitch = "on" | "off" | "unread";
+async function nortSwitch(supabase: Supa, orgId: string | null): Promise<NortSwitch> {
+  const q = supabase.from("organizations").select("settings");
+  const { data, error } = await (orgId ? q.eq("id", orgId) : q.limit(1)).maybeSingle();
+  if (error || !data) return "unread";
+  return featureOn(getOrgSettings((data as { settings?: unknown }).settings).features, "nort") ? "on" : "off";
+}
+
+/** What a setup AI door says when Nort is off. Plain, and never "I". */
+const NORT_OFF_SETUP = "Nort is off for your company, so type your answers into the boxes.";
+
+/** What a setup talk door says when the switch couldn't be read. Plain, and never "I". */
+const SWITCH_UNREAD = "Couldn't check your company's settings just now. Try that again.";
+
+/** The refusal for a talk door when the switch isn't on: off says off, unread says try again. */
+const notOnSays = (s: NortSwitch) => (s === "off" ? NORT_OFF_SETUP : SWITCH_UNREAD);
+
+/** Does the company have a trade on file (the sign-up key, or its own words)? Read for its own org. */
+async function tradeOnFile(supabase: Supa): Promise<boolean> {
+  const orgId = await currentOrgId();
+  const q = supabase.from("organizations").select("settings");
+  const { data } = await (orgId ? q.eq("id", orgId) : q.limit(1)).maybeSingle();
+  const t = orgTrade(getOrgSettings((data as { settings?: unknown } | null)?.settings));
+  return Boolean(t.key || t.label);
+}
 
 /**
  * A TURN OF CONVERSATION during setup — Nort replies AND fills, in one call.
@@ -49,6 +91,10 @@ export async function talkSetup(needKey: string | null, answers: Answers, said: 
   const text = String(said ?? "").trim();
   if (!text) return { ok: false, error: "Nothing to go on yet." };
   if (text.length > 4000) return { ok: false, error: "That's a lot at once — break it up a bit." };
+  // Nort off: no model call and no Nort voice. The boxes still take a typed answer.
+  const orgId = await currentOrgId();
+  const sw = await nortSwitch(supabase, orgId);
+  if (sw !== "on") return { ok: false, error: notOnSays(sw) };
 
   const known = coerceByPlaybook(SETUP_PLAYBOOK, answers);
   const need = needKey ? SETUP_PLAYBOOK.needs.find((n) => n.key === needKey) : undefined;
@@ -71,7 +117,7 @@ export async function talkSetup(needKey: string | null, answers: Answers, said: 
   // Over the ceiling, the interview keeps WORKING — it just stops paying a model to phrase it.
   // fallbackSay is the same escape used when the API key is absent, so somebody setting their
   // company up is never blocked; they get the plain question instead of the spoken one.
-  if (await aiSpendExceeded(await currentOrgId()))
+  if (await aiSpendExceeded(orgId))
     return { ok: true, say: fallbackSay(need, false, first), answers: known, filled: [] };
 
   let raw = "";
@@ -85,7 +131,7 @@ export async function talkSetup(needKey: string | null, answers: Answers, said: 
       ],
       messages: [{ role: "user", content: conversePrompt(need, known, text, first) }],
     });
-    void recordAiUsage({ orgId: await currentOrgId(), model: DEFAULT_MODEL, surface: "setup:converse", usage: resp.usage as never });
+    void recordAiUsage({ orgId, model: DEFAULT_MODEL, surface: "setup:converse", usage: resp.usage as never });
     raw = resp.content.filter((b) => b.type === "text").map((b) => (b as { text: string }).text).join("\n").trim();
   } catch {
     // A model that is down must not become an error message about a model being down.
@@ -93,8 +139,21 @@ export async function talkSetup(needKey: string | null, answers: Answers, said: 
   }
 
   const spoken = parseSpoken(raw);
+  // THE QUESTION ON SCREEN CAN BE ANSWERED AGAIN. The tour hands in what is already on file (the
+  // trade picked at sign-up, the name on the account) and promises "say it your way and I'll use
+  // your words" / "say a different name and I'll take that instead". FILL HOLES NEVER OVERWRITE A
+  // HAND refused every such answer, so Nort said the new words back while the old ones were kept
+  // and saved. The person answering the question in front of them IS the hand: that one key is
+  // opened for this turn, through the same gate, and put back as it was if nothing lands in it.
+  const onScreen = need?.key ?? null;
+  const open = onScreen && spoken.fills.some((f) => f.key === onScreen) ? { ...known, [onScreen]: null } : known;
   // SAME GATE AS EVER: provenance, no overwriting a hand, no undeclared keys.
-  const { answers: next, rejected } = applyFills(SETUP_PLAYBOOK, known, spoken.fills, text);
+  const { answers: applied, rejected } = applyFills(SETUP_PLAYBOOK, open, spoken.fills, text);
+  const next: Answers = { ...applied };
+  if (onScreen && open !== known && !isAnswered(applied[onScreen])) {
+    if (onScreen in known) next[onScreen] = known[onScreen];
+    else delete next[onScreen];
+  }
   const filled = spoken.fills
     .filter((f) => !rejected.includes(f))
     .map((f) => SETUP_PLAYBOOK.needs.find((n) => n.key === f.key)?.label ?? f.key);
@@ -125,7 +184,11 @@ export async function hearSetup(answers: Answers, transcript: string): Promise<H
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "Sign in first." };
-  return runHear(SETUP_PLAYBOOK, answers, transcript, { orgId: await currentOrgId(), surface: "setup:talk" });
+  // Nort off: the setup questions are typed into their boxes; nothing is sent to a model.
+  const orgId = await currentOrgId();
+  const sw = await nortSwitch(supabase, orgId);
+  if (sw !== "on") return { ok: false, error: notOnSays(sw) };
+  return runHear(SETUP_PLAYBOOK, answers, transcript, { orgId, surface: "setup:talk" });
 }
 
 /**
@@ -204,30 +267,53 @@ export async function saveSetup(answers: Answers): Promise<Result> {
  *
  * IT DRAFTS PROSE ONLY. Keys, slots, options and rules come from their own sheet and pass through
  * untouched (see applyDraft) — the model never gets to invent a question, only to phrase one and
- * say what a wrong answer costs. And it SAVES NOTHING: this returns a draft to argue with.
+ * say what a wrong answer costs. And it SAVES NOTHING of the draft: this returns a draft to argue
+ * with. The one write is the starter SHEET the draft is read from, below, and only when there is
+ * none: the same seed saveSetup plants when the trade is named.
  */
 export async function draftMyPlaybook(): Promise<DraftResult> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: "Sign in first." };
 
-  const { data: form } = await supabase
-    .from("forms")
-    .select("id, schema, playbook")
-    .eq("is_inspection", true)
-    .order("created_at")
-    .limit(1)
-    .maybeSingle();
+  const readSheet = async () =>
+    (
+      await supabase
+        .from("forms")
+        .select("id, schema, playbook")
+        .eq("is_inspection", true)
+        .order("created_at")
+        .limit(1)
+        .maybeSingle()
+    ).data;
+  let form = await readSheet();
+  // A TRADE ON FILE WITH NO SHEET IS NOT "SAY WHAT TRADE YOU'RE IN". Only saveSetup seeded the
+  // sheet, and only when it wrote the trade's words; sign-up (0352) keeps just the key. The
+  // questions step now shows that key's words in the Trade box, so pressing Next with nothing
+  // edited skipped the save and landed here, told to name a trade that was on screen. The key
+  // picks the starter (createStarterInspectionSheet reads it), so seed it here and carry on.
+  if (!form && (await tradeOnFile(supabase))) {
+    const seeded = await createStarterInspectionSheet();
+    if (seeded.ok) form = await readSheet();
+  }
   if (!form) return { ok: false, error: "Say what trade you're in first — that's what builds your questions." };
 
   const pb = playbookForForm(form as { schema?: unknown; playbook?: unknown });
   if (!pb.needs.length) return { ok: false, error: "That walk-through has no questions in it yet." };
-  if (!process.env.ANTHROPIC_API_KEY) return { ok: true, formId: (form as { id: string }).id, needs: pb.needs, wasDrafted: false };
+  // THE PLAIN QUESTIONS, UNDRAFTED, whenever a model shouldn't be paid to draft them: no key, Nort
+  // switched off (0352), or this month's ceiling reached (talkSetup's own escape, which this door
+  // never had). Their own questions and any why lines already written come back as they are.
+  const undrafted: DraftResult = { ok: true, formId: (form as { id: string }).id, needs: pb.needs, wasDrafted: false };
+  if (!process.env.ANTHROPIC_API_KEY) return undrafted;
+  const orgId = await currentOrgId();
+  if ((await nortSwitch(supabase, orgId)) !== "on") return undrafted;
+  if (await aiSpendExceeded(orgId)) return undrafted;
 
-  const { data: org } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
+  const orgQ = supabase.from("organizations").select("settings");
+  const { data: org } = await (orgId ? orgQ.eq("id", orgId) : orgQ.limit(1)).maybeSingle();
   const s = getOrgSettings((org as { settings?: unknown } | null)?.settings);
   const about = aboutFromSetup({
-    trade: s.trade_label,
+    trade: orgTrade(s).label,
     city: s.public_city,
     service_area: s.service_area,
     labor_rate: s.default_labor_rate,
@@ -241,7 +327,7 @@ export async function draftMyPlaybook(): Promise<DraftResult> {
       system: [{ type: "text", text: DRAFT_SYSTEM, cache_control: { type: "ephemeral" } }],
       messages: [{ role: "user", content: draftRequest(pb, about) }],
     });
-    void recordAiUsage({ orgId: await currentOrgId(), model: DEFAULT_MODEL, surface: "setup:draft", usage: resp.usage as never });
+    void recordAiUsage({ orgId, model: DEFAULT_MODEL, surface: "setup:draft", usage: resp.usage as never });
     text = resp.content.filter((b) => b.type === "text").map((b) => (b as { text: string }).text).join("\n").trim();
   } catch {
     // A drafting failure is not a dead end — they can still read and write their own lines.

@@ -27,7 +27,7 @@ export const captureActions: Record<string, ActionDef> = {
     group: "capture",
     label: "Capture anything",
     description:
-      "Capture ANY fragment as-is into the review inbox — a name, a number, a half-thought, 'the Hendersons want a hot tub circuit'. Use when the user just wants something WRITTEN DOWN and no more specific action fits. Saves instantly as a private stub (nothing sent, nothing inferred); it gets sorted later. Pass the raw text, plus an optional kind hint (note, task, lead, or job).",
+      "Capture ANY fragment as-is into the review inbox — a name, a number, a half-thought, '<customer> wants <the work>'. Use when the user just wants something WRITTEN DOWN and no more specific action fits. Saves instantly as a private stub (nothing sent, nothing inferred); it gets sorted later. Pass the raw text, plus an optional kind hint (note, task, lead, or job).",
     input: z.object({
       text: z.string().trim().min(1, "Type something to capture.").max(2000),
       kind: z.enum(["note", "task", "lead", "job"]).optional(),

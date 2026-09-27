@@ -259,7 +259,7 @@ export function normalizeSharedPaper(
   }
   if (has("title") || isNew) {
     const t = clean(patch.title, 120) ?? (isNew ? titleFromName(paper.name) || null : null);
-    if (!t) return { ok: false, error: "Give it a title the customer will read, like Circuit Map or Main Floor Plan." };
+    if (!t) return { ok: false, error: "Give it a title the customer will read, like Main Floor Plan or Building Permit." };
     out.title = t;
   }
   if (has("replaces")) {

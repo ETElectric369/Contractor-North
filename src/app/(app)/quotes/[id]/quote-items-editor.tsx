@@ -407,7 +407,7 @@ export function QuoteItemsEditor({
           {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
           <div>
             <Label htmlFor="qd-title">Title</Label>
-            <Input id="qd-title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Panel upgrade — 200A" />
+            <Input id="qd-title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="What the job is, in a few words" />
           </div>
           <div>
             <Label htmlFor="qd-description">Description <span className="font-normal text-slate-400">(shows above the line items)</span></Label>

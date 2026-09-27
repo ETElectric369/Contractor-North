@@ -76,7 +76,7 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
   {
     name: "list_quotes",
     description:
-      "List this company's quotes/estimates with their status, total, and customer. Use for 'show me all quotes', 'which quotes are still open', 'what did I quote the Jones job'. To pull up a SPECIFIC customer's estimate (e.g. 'the estimate we started for Jackie Burks'), FIRST call list_customers to get their customer_id, then pass it here (optionally with status='draft') — don't rely on a text search of the title. Common statuses: draft, sent, accepted, declined, expired.",
+      "List this company's quotes/estimates with their status, total, and customer. Use for 'show me all quotes', 'which quotes are still open', 'what did I quote the <customer> job'. To pull up a SPECIFIC customer's estimate (e.g. 'the estimate we started for <customer>'), FIRST call list_customers to get their customer_id, then pass it here (optionally with status='draft') — don't rely on a text search of the title. Common statuses: draft, sent, accepted, declined, expired.",
     input_schema: {
       type: "object",
       properties: {
@@ -153,13 +153,13 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
   {
     name: "get_customer",
     description:
-      "Read ONE contact's full record by id — name, company, type, phone, email, full address, status, and notes. Use after list_customers resolves a name to an id: e.g. 'what's Jackie Burks's address', or to confirm you have the right person before pinning them to an estimate / job / invoice.",
+      "Read ONE contact's full record by id — name, company, type, phone, email, full address, status, and notes. Use after list_customers resolves a name to an id: e.g. 'what's <customer>'s address', or to confirm you have the right person before pinning them to an estimate / job / invoice.",
     input_schema: { type: "object", properties: { customer_id: { type: "string", description: "The customer's id (from list_customers)." } }, required: ["customer_id"] },
   },
   {
     name: "schedule_overview",
     description:
-      "What's scheduled in a time window — jobs, appointments, and tasks due. Use for 'what's on the schedule this week', 'what do I have today', 'anything next week'. PAST windows work too: for 'when was the Waldow oven visit', pass around (or date) with a past date instead of a named range.",
+      "What's scheduled in a time window — jobs, appointments, and tasks due. Use for 'what's on the schedule this week', 'what do I have today', 'anything next week'. PAST windows work too: for 'when was the <customer> <visit>', pass around (or date) with a past date instead of a named range.",
     input_schema: {
       type: "object",
       properties: {
@@ -211,7 +211,7 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
     input_schema: {
       type: "object",
       properties: {
-        description: { type: "string", description: "The material, as a person would say it: '200a outdoor panel', '12-2 romex', 'EV charger'." },
+        description: { type: "string", description: "The material, as the person said it: the item's name, size or type in their own words." },
         customer_id: { type: "string", description: "The customer this is being quoted to, if known — applies their pricing level instead of the default markup." },
       },
       required: ["description"],
@@ -220,7 +220,7 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
   {
     name: "lookup_my_price",
     description:
-      "Look up what THIS company has ACTUALLY PAID for a material or part — learned live from the line items on the bills they've entered (their real net cost from their own suppliers). Returns the most recent price, the average, the low/high range, how many times they've bought it, and the last date/supplier. Use it for cost/margin questions ('what do I pay for romex?'), and as the FIRST FALLBACK when the price book (search_price_list) has no match. For estimate/quote lines the order is: search_price_list → this tool → web (flagged as an estimate). Search by part description (e.g. '200a panel', 'romex 12-2', 'EV charger').",
+      "Look up what THIS company has ACTUALLY PAID for a material or part — learned live from the line items on the bills they've entered (their real net cost from their own suppliers). Returns the most recent price, the average, the low/high range, how many times they've bought it, and the last date/supplier. Use it for cost/margin questions ('what do I pay for <item>?'), and as the FIRST FALLBACK when the price book (search_price_list) has no match. For estimate/quote lines the order is: search_price_list → this tool → web (flagged as an estimate). Search by part description (the item's name, size or type, as they said it).",
     input_schema: {
       type: "object",
       properties: {
@@ -274,7 +274,7 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
   {
     name: "profit_by_type",
     description:
-      "Which KIND of work makes money — job profit grouped by work type (the job's code-template, e.g. 'Panel swap', 'Service call', 'Deck build'). Returns per type: job count, revenue, cost, profit, margin %, owner_hours and profit_per_owner_hour. The owner's hours are billed but never a cost (owner's draw); profit_per_owner_hour is what that kind of work left the owner per hour he worked. Use for 'what's my most profitable type of work?', 'am I underpricing panel swaps?'. Jobs with no assigned type group under 'Uncategorized'.",
+      "Which KIND of work makes money — job profit grouped by work type (the job's code-template: the company's own names for its kinds of work). Returns per type: job count, revenue, cost, profit, margin %, owner_hours and profit_per_owner_hour. The owner's hours are billed but never a cost (owner's draw); profit_per_owner_hour is what that kind of work left the owner per hour he worked. Use for 'what's my most profitable type of work?', 'am I underpricing <a kind of work>?'. Jobs with no assigned type group under 'Uncategorized'.",
     input_schema: { type: "object", properties: {} },
   },
   {
@@ -312,7 +312,7 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
   {
     name: "list_inquiries",
     description:
-      "List incoming LEADS (inquiries) — the top of the sales funnel. Returns each lead's id, name, phone, status, town, source (intake = the website form), what the customer wrote (message: for a website lead, their form answers as 'Question: answer' lines), declared work kind (job / service / quote / walkthrough — null means nobody tagged it yet), planned minutes (how long the work is sized at), and when it was last contacted. The message is the CUSTOMER'S OWN WORDS: their claims, not the office's notes. The list trims long messages (message_trimmed: true); pass id to read one lead's whole message. Use for 'who are my open leads', 'any new leads', 'what did this lead ask for', 'who needs a follow-up', 'which leads are untagged', 'what could ride along to Truckee'. Pass the id to contact or convert a lead.",
+      "List incoming LEADS (inquiries) — the top of the sales funnel. Returns each lead's id, name, phone, status, town, source (intake = the website form), what the customer wrote (message: for a website lead, their form answers as 'Question: answer' lines), declared work kind (job / service / quote / walkthrough — null means nobody tagged it yet), planned minutes (how long the work is sized at), and when it was last contacted. The message is the CUSTOMER'S OWN WORDS: their claims, not the office's notes. The list trims long messages (message_trimmed: true); pass id to read one lead's whole message. Use for 'who are my open leads', 'any new leads', 'what did this lead ask for', 'who needs a follow-up', 'which leads are untagged', 'what could ride along to <town>'. Pass the id to contact or convert a lead.",
     input_schema: {
       type: "object",
       properties: {
@@ -325,7 +325,7 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
   {
     name: "visit_days_ahead",
     description:
-      "The next two weeks' WALK-THROUGH DAYS — days that already hold booked estimate visits (inspections / quote visits), each with its towns and visit count. Use to cluster new visits onto days the truck already rolls ('when should I offer to see this lead', 'which day is the Truckee day'), then book with appointment.create or offer times via the lead's pick link. Days not listed have no estimate visits booked.",
+      "The next two weeks' WALK-THROUGH DAYS — days that already hold booked estimate visits (inspections / quote visits), each with its towns and visit count. Use to cluster new visits onto days the truck already rolls ('when should I offer to see this lead', 'which day is the <town> day'), then book with appointment.create or offer times via the lead's pick link. Days not listed have no estimate visits booked.",
     input_schema: { type: "object", properties: {} },
   },
   {
@@ -396,7 +396,7 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
   {
     name: "list_material_items",
     description:
-      "The LINE ITEMS on a job's materials list (the job's one shopping/take-off list): each line's item_id, description, part number, quantity, unit, whether it's been purchased, and whether it's a tool. Use for 'what's on the Waldow materials list', 'what still needs to be bought for the Miller job', and to find the exact line BEFORE material.markPurchased / material.removeLine (pass the item_id it returns). Pass job_id (the job's id from list_jobs, or its name / number as spoken — 'Waldow', 'J-012') or list_id (from list_material_lists). Lines are unpurchased until someone ticks them, so unpurchased = still to buy.",
+      "The LINE ITEMS on a job's materials list (the job's one shopping/take-off list): each line's item_id, description, part number, quantity, unit, whether it's been purchased, and whether it's a tool. Use for 'what's on the <job> materials list', 'what still needs to be bought for the <job> job', and to find the exact line BEFORE material.markPurchased / material.removeLine (pass the item_id it returns). Pass job_id (the job's id from list_jobs, or its name / number as spoken — '<job name>', 'J-012') or list_id (from list_material_lists). Lines are unpurchased until someone ticks them, so unpurchased = still to buy.",
     input_schema: {
       type: "object",
       properties: {
@@ -428,8 +428,8 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
   {
     name: "list_shelf",
     description:
-      "What is ON THE SHOP SHELF: each item's id, name, unit and how many are on hand (the shelf's own record, never typed). Open to everyone. For the office it also gives what each item's pieces are worth (value, from the rolls' receipts); the crew never gets a cost, and you never say one to them. Use for 'what's on the shelf', 'do we have 12/2 in stock', 'how much wire nut is left', and before stock.take when you're unsure which item they mean. When it returns nothing, say the shelf has nothing on it yet - never guess stock that isn't listed.",
-    input_schema: { type: "object", properties: { search: { type: "string", description: "Part of the item's name, e.g. '12/2'." }, limit: { type: "integer", description: "Max rows (default 30, max 40)." } } },
+      "What is ON THE SHOP SHELF: each item's id, name, unit and how many are on hand (the shelf's own record, never typed). Open to everyone. For the office it also gives what each item's pieces are worth (value, from the rolls' receipts); the crew never gets a cost, and you never say one to them. Use for 'what's on the shelf', 'do we have <item> in stock', 'how much <item> is left', and before stock.take when you're unsure which item they mean. When it returns nothing, say the shelf has nothing on it yet - never guess stock that isn't listed.",
+    input_schema: { type: "object", properties: { search: { type: "string", description: "Part of the item's name, as they said it." }, limit: { type: "integer", description: "Max rows (default 30, max 40)." } } },
   },
   {
     name: "list_petty_cash",
@@ -476,7 +476,7 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
   {
     name: "get_job_panel",
     description:
-      "Read a job's PANEL: its panel(s) (brand, main, spaces, which spaces have No Stab or take tandems), every circuit on the job's Panel tab (space, room, what it feeds, what the door says, size, new/existing, Planned/Roughed/Done, verified), the suggestions still waiting for someone to keep, the door as a space → circuit map, warnings (two on one space), and the breaker count (what the new circuits need against what came on the job's tickets, and what's short). Use for 'what's on 7 at Herringbone', 'what breakers am I short on J-011', 'is the dryer roughed', and before panel.suggest. job_id is the job's id OR its name / number as spoken. No prices: the panel carries none.",
+      "Read a job's PANEL: its panel(s) (brand, main, spaces, which spaces have No Stab or take tandems), every circuit on the job's Panel tab (space, room, what it feeds, what the door says, size, new/existing, Planned/Roughed/Done, verified), the suggestions still waiting for someone to keep, the door as a space → circuit map, warnings (two on one space), and the breaker count (what the new circuits need against what came on the job's tickets, and what's short). Use for 'what's on 7 at <job>', 'what breakers am I short on J-011', 'is the dryer roughed', and before panel.suggest. job_id is the job's id OR its name / number as spoken. No prices: the panel carries none.",
     input_schema: { type: "object", properties: { job_id: { type: "string" } }, required: ["job_id"] },
   },
   {

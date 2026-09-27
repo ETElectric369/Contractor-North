@@ -12,7 +12,7 @@ export const permitActions: Record<string, ActionDef> = {
     group: "permit",
     label: "Add a permit",
     description:
-      "Log a PERMIT — e.g. 'add an electrical permit for the Miller job, applied today, inspection next Tuesday'. Resolve the job first with list_jobs and pass job_id (optional — a permit can stand alone). type defaults to Electrical, status to applied; dates are YYYY-MM-DD.",
+      "Log a PERMIT — e.g. 'add a <type> permit for the <job> job, applied today, inspection next Tuesday'. Resolve the job first with list_jobs and pass job_id (optional — a permit can stand alone). type defaults to Electrical, status to applied; dates are YYYY-MM-DD.",
     input: z.object({
       job_id: z.string().nullable().optional(),
       permit_number: z.string().nullable().optional(),

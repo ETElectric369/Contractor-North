@@ -82,7 +82,7 @@ export function PhotoTaskSheet({
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && save()}
-            placeholder="e.g. Replace this breaker"
+            placeholder="What needs doing here"
             className="h-11"
           />
         </div>

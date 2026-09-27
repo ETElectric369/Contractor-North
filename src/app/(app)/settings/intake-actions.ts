@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/server";
 import { INTAKE_STARTER } from "@/lib/playbook/public-intake";
 import { intakeStarterForTrade } from "@/lib/playbook/starters/intake";
 import { getOrgSettings } from "@/lib/org-settings";
+import { orgTrade } from "@/lib/org-trade";
 
 /**
  * Flip the public intake door on or off (0185).
@@ -57,7 +58,7 @@ export async function setPublicIntake(on: boolean): Promise<{ ok: true } | { ok:
     // out. The trade intakes reuse the walk-through's keys, so what a customer answers here is
     // already answered when the inspector opens on site (lib/inquiries/carry-intake-answers).
     const { data: org } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
-    const playbook = intakeStarterForTrade(getOrgSettings((org as { settings?: unknown } | null)?.settings).trade_label, INTAKE_STARTER);
+    const playbook = intakeStarterForTrade(orgTrade(getOrgSettings((org as { settings?: unknown } | null)?.settings)).key, INTAKE_STARTER);
     const { data, error } = await supabase
       .from("forms")
       .insert({ name: "Customer intake", schema: [], playbook, is_public_intake: true, is_inspection: false })

@@ -1,4 +1,6 @@
 import type { Need, Playbook } from "../types";
+import { normalizeTradeKey } from "@/lib/features";
+import { tradeKeyFromWords } from "@/lib/org-trade";
 
 /**
  * THE CUSTOMER-FACING QUESTION SETS, ONE PER TRADE.
@@ -209,19 +211,20 @@ export const ELECTRICAL_INTAKE: Playbook = {
 /**
  * WHICH INTAKE A NEW PUBLIC DOOR STARTS FROM.
  *
- * Matched on `trade_label`, because that is the only trade field an org actually has and it is
- * free text a person typed: "electrical contractor", "deck builder", "Construction". So this
- * looks for the word rather than demanding an enum, and anything it does not recognise gets the
- * trade-neutral five — which is the honest answer for "Construction", and is what a general
+ * By the company's trade KEY (lib/org-trade: the sign-up dropdown, 0352). Sign-up keeps only the
+ * key, so matching the typed words alone sent every new deck company the trade-neutral five. The
+ * words a person typed ("electrical contractor", "deck builder", "Construction") are read only as a
+ * LAST RESORT, when no key is given, through the same reader as everything else. Anything else gets
+ * the trade-neutral five, which is the honest answer for "Construction", and is what a general
  * contractor should see anyway.
  *
  * A SEED IS A STARTING POINT, NEVER A REPLACEMENT. setPublicIntake only reaches this when there is
  * no "Customer intake" form at all; an org that already has one gets its own back, edits intact,
  * however many times the door is switched off and on.
  */
-export function intakeStarterForTrade(tradeLabel: string | null | undefined, fallback: Playbook): Playbook {
-  const t = String(tradeLabel ?? "").toLowerCase();
-  if (/\bdeck/.test(t)) return DECK_INTAKE;
-  if (/electric/.test(t)) return ELECTRICAL_INTAKE;
+export function intakeStarterForTrade(key: string | null | undefined, fallback: Playbook, words?: string | null): Playbook {
+  const k = normalizeTradeKey(key) || tradeKeyFromWords(words);
+  if (k === "deck") return DECK_INTAKE;
+  if (k === "electrical") return ELECTRICAL_INTAKE;
   return fallback;
 }

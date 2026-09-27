@@ -250,7 +250,7 @@ export function SiteSeoFields({ settings, orgId }: { settings: OrgSettings; orgI
       </div>
       <div className="border-t border-slate-100 pt-3">
         <Label htmlFor="seo-spec-head">Signature specialty — headline</Label>
-        <Input id="seo-spec-head" value={specHead} onChange={(e) => setSpecHead(e.target.value)} placeholder="e.g. Custom Lighting Design & Fabrication (blank = hide the showcase)" />
+        <Input id="seo-spec-head" value={specHead} onChange={(e) => setSpecHead(e.target.value)} placeholder="Your specialty, in a few words (blank = hide the showcase)" />
         <Label htmlFor="seo-spec-blurb" className="mt-2">Specialty — blurb</Label>
         <Textarea id="seo-spec-blurb" rows={2} value={specBlurb} onChange={(e) => setSpecBlurb(e.target.value)} placeholder="One or two sentences on the thing you most want to be known for." />
       </div>

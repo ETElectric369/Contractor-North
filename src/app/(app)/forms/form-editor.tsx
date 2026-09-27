@@ -298,7 +298,7 @@ export function FormEditor({
                         <span className="shrink-0">is one of</span>
                         <Input
                           className="min-w-[12rem] flex-1"
-                          placeholder="e.g. Service / panel, EV charger"
+                          placeholder="The choices, separated by commas"
                           value={f.showIfIn ?? ""}
                           onChange={(e) => updateField(i, { showIfIn: e.target.value })}
                         />

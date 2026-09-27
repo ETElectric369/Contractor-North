@@ -76,7 +76,7 @@ export function NewWorkOrderButton({
           )}
           <div>
             <Label htmlFor="title">Title *</Label>
-            <Input id="title" name="title" required placeholder="e.g. Install 200A panel" />
+            <Input id="title" name="title" required placeholder="What the crew is doing, in a few words" />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>

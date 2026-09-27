@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { parseInspectionSchema, visibleFields } from "./schema";
-import { STARTER_TRADES, starterSchemaJson, starterSheet, starterTradeFor } from "./starter-sheets";
+import { STARTER_FOR_TRADE, STARTER_TRADES, starterSchemaJson, starterSheet, starterTradeFor } from "./starter-sheets";
+import { TRADE_ORDER } from "@/lib/trade-codes";
+import { orgTrade } from "@/lib/org-trade";
 
 /**
  * These sheets are the difference between a feature and a demo. Nothing in the repo seeded an
@@ -88,13 +90,50 @@ describe("no rule can point forward or sideways", () => {
   });
 });
 
-describe("a trade label maps to a starter, and never to nothing", () => {
-  it("reads what a person actually says out loud", () => {
-    expect(starterTradeFor("electrical contractor")).toBe("electrical");
-    expect(starterTradeFor("I'm an electrician")).toBe("electrical");
-    expect(starterTradeFor("general contractor")).toBe("deck");
-    expect(starterTradeFor("I build decks")).toBe("deck");
-    expect(starterTradeFor("plumbing and HVAC")).toBe("plumbing");
+describe("the trade KEY picks the starter, and never to nothing", () => {
+  it("each sign-up trade gets its own starter only where one was written", () => {
+    expect(starterTradeFor("electrical")).toBe("electrical");
+    expect(starterTradeFor("deck")).toBe("deck");
+    expect(starterTradeFor("plumbing")).toBe("plumbing");
+    // HVAC used to get the water-heater sheet, and a general contractor the deck sheet.
+    expect(starterTradeFor("hvac")).toBe("generic");
+    for (const k of ["general", "roofing", "concrete", "tile", "painting", "landscaping"]) expect(starterTradeFor(k), k).toBe("generic");
+  });
+
+  it("every trade on the sign-up dropdown has a row (a new trade can't fall through silently)", () => {
+    for (const k of TRADE_ORDER) {
+      expect(STARTER_FOR_TRADE[k], k).toBeTruthy();
+      expect(STARTER_TRADES).toContain(STARTER_FOR_TRADE[k]);
+    }
+  });
+
+  it("the key wins over the words", () => {
+    // Sign-up's key is what the company picked; words typed later describe it, they don't re-pick.
+    expect(starterTradeFor("deck", "electrical contractor")).toBe("deck");
+    expect(starterTradeFor("general", "I build decks")).toBe("generic");
+  });
+
+  it("free text is the LAST RESORT, read only with no key", () => {
+    expect(starterTradeFor("", "electrical contractor")).toBe("electrical");
+    expect(starterTradeFor(null, "I'm an electrician")).toBe("electrical");
+    expect(starterTradeFor(undefined, "I build decks")).toBe("deck");
+    expect(starterTradeFor("", "plumbing and HVAC")).toBe("plumbing");
+    // Never construction → deck (Vivian's "Construction" got the deck sheet), and HVAC is not plumbing.
+    expect(starterTradeFor("", "Construction")).toBe("generic");
+    expect(starterTradeFor("", "general contractor")).toBe("generic");
+    expect(starterTradeFor("", "general contractor, I sub out electrical")).toBe("generic");
+    expect(starterTradeFor("", "HVAC")).toBe("generic");
+    // A stored key that isn't one of the app's trades is no key at all.
+    expect(starterTradeFor("other", "deck builder")).toBe("deck");
+  });
+
+  it("the three live companies, by their stored keys", () => {
+    // ET, Tahoe and Vivian are the fixture, never the rule.
+    expect(starterTradeFor(orgTrade({ trade: "electrical", trade_label: "electrical contractor" }).key)).toBe("electrical");
+    expect(starterTradeFor(orgTrade({ trade: "deck", trade_label: "deck builder" }).key)).toBe("deck");
+    expect(starterTradeFor(orgTrade({ trade: "general", trade_label: "Construction" }).key)).toBe("generic");
+    // A company made after 0352: the key alone.
+    expect(starterTradeFor(orgTrade({ trade: "plumbing" }).key)).toBe("plumbing");
   });
 
   it("falls back to generic rather than to an empty sheet", () => {
@@ -102,6 +141,7 @@ describe("a trade label maps to a starter, and never to nothing", () => {
     // questions. A blank inspector reads as a thin product, not a missing template.
     for (const label of ["landscaping", "glazier", "", null, undefined, "   "]) {
       expect(starterTradeFor(label)).toBe("generic");
+      expect(starterTradeFor("", label)).toBe("generic");
     }
     expect(starterSheet(starterTradeFor("landscaping")).fields.length).toBeGreaterThan(1);
   });

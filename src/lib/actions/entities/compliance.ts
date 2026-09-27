@@ -8,7 +8,7 @@ export const complianceActions: Record<string, ActionDef> = {
     group: "compliance",
     label: "Log compliance item",
     description:
-      "Log an insurance policy, license, or bond — 'log our new $2M general liability policy, #ABC123, expires next March'. name is required; type defaults to Insurance; dates are YYYY-MM-DD. So a lapsing policy / license never goes unnoticed.",
+      "Log an insurance policy, license, or bond — 'log our new $<amount> general liability policy, #<policy number>, expires <date>'. name is required; type defaults to Insurance; dates are YYYY-MM-DD. So a lapsing policy / license never goes unnoticed.",
     input: z.object({
       name: z.string().min(1),
       type: z.string().optional(),

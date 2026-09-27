@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { aboutFromSetup, applyDraft, draftRequest, explainWhy } from "./draft-playbook";
+import { DRAFT_SYSTEM, aboutFromSetup, applyDraft, draftRequest, explainWhy } from "./draft-playbook";
+import { WHY_SHAPES } from "@/lib/playbook/why";
 import { playbookFromSheet } from "@/lib/playbook/from-sheet";
 import { starterSchemaJson } from "@/lib/inspection/starter-sheets";
 import { applicableNeeds } from "@/lib/playbook/resolve";
@@ -18,7 +19,7 @@ describe("what the drafter is told", () => {
 
   it("every question, by key, with its shape", () => {
     for (const n of ELECTRICAL.needs) expect(req).toContain(`key: ${n.key}`);
-    expect(req).toContain("he picks one of:");
+    expect(req).toContain("they pick one of:");
   });
 
   it("a measured question is flagged as feeding a price", () => {
@@ -37,6 +38,17 @@ describe("what the drafter is told", () => {
 
   it("nothing known yet still produces a sentence, not an empty prompt", () => {
     expect(aboutFromSetup({})).toContain("Nothing else known");
+  });
+
+  it("the drafter's own instructions name no trade: the trade comes from ABOUT THEM", () => {
+    // Its examples were a panel, a subpanel fork, a board count and conduit fill, so a painter's
+    // draft reasoned like an electrician. The shapes are the same trade-neutral lines every screen
+    // shows, and it is told never to invent a code, rate, item or number.
+    expect(DRAFT_SYSTEM).not.toMatch(/panel|subpanel|home runs?|board count|joist|wire|conduit|square footage|electric|plumb|deck/i);
+    for (const s of WHY_SHAPES) expect(DRAFT_SYSTEM).toContain(s.example);
+    expect(DRAFT_SYSTEM).toContain("never invent a price code");
+    expect(DRAFT_SYSTEM).not.toMatch(/\bhe\b|\bhis\b|\bhim\b/i);
+    expect(draftRequest(ELECTRICAL, "x")).not.toMatch(/\bhe\b|\bhis\b|\bhim\b/i);
   });
 });
 
@@ -132,7 +144,19 @@ describe("walking one why line, out loud", () => {
     // No draft: the QUESTION stands on its own and the shape shows him the form to answer in.
     const blank = explainWhy({ ...n, why: undefined }, 1, 6);
     expect(blank).toContain("Where does this end up in your price?");
-    expect(blank).toContain("second trip"); // the trigger-shaped example, fitted to a prose need
+    expect(blank).toContain(WHY_SHAPES[2].example); // the trigger-shaped example, fitted to a prose need
+  });
+
+  it("with Nort off it says the same three things as nobody", () => {
+    const AS_NORT = /\bI\b|\bI['’]|\bme\b|\bmy\b|\bNort\b/;
+    for (const i of [0, 3, 5]) {
+      const off = explainWhy(n, i, 6, false);
+      expect(off, `${i}`).not.toMatch(AS_NORT);
+      expect(off).toContain("It's a second trip.");
+      expect(off.toLowerCase()).toContain("right?");
+    }
+    // ...and with Nort on, nothing changed.
+    expect(explainWhy(n, 1, 6, true)).toBe(explainWhy(n, 1, 6));
   });
 
   it("and it always ends somewhere — last one says so", () => {

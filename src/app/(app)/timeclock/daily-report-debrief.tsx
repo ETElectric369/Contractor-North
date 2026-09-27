@@ -166,7 +166,7 @@ export function DailyReportDebrief({ open, onClose }: { open: boolean; onClose: 
             <Textarea
               id="dr-did"
               rows={3}
-              placeholder="Finished the panel swap, pulled homeruns for the addition…"
+              placeholder="What got done today, in plain words…"
               value={did}
               onChange={(e) => setDid(e.target.value)}
             />
@@ -180,7 +180,7 @@ export function DailyReportDebrief({ open, onClose }: { open: boolean; onClose: 
             <Textarea
               id="dr-mats"
               rows={3}
-              placeholder="A stick of 3/4 EMT, two 20A breakers, wire nuts…"
+              placeholder="What was used or is still needed, and how much…"
               value={mats}
               onChange={(e) => setMats(e.target.value)}
             />

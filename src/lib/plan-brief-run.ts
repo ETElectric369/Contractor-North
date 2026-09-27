@@ -5,6 +5,7 @@ import { parseAiJson } from "@/lib/ai-json";
 import { createServiceClient } from "@/lib/supabase/server";
 import { rateLimited } from "@/lib/rate-limit";
 import { getOrgSettings } from "@/lib/org-settings";
+import { tradeWordsOr, withArticle } from "@/lib/org-trade";
 import { playbookForForm } from "@/lib/playbook/parse";
 import { INTAKE_BUCKET, extOf, intakePaths, isOwnIntakePath, uploadDisplayName } from "@/lib/playbook/uploads";
 import type { Need, Playbook } from "@/lib/playbook/types";
@@ -213,14 +214,14 @@ export async function runPlanBrief(
     ]);
     const pb: Playbook = form ? playbookForForm(form as { schema?: unknown; playbook?: unknown }) : { needs: [] };
     const questions = questionLines(pb.needs);
-    const trade = getOrgSettings((org as { settings?: unknown } | null)?.settings).trade_label?.trim() || "contractor";
+    const trade = tradeWordsOr(getOrgSettings((org as { settings?: unknown } | null)?.settings));
 
     const client = getAnthropic();
     const msg = await client.messages.create({
       model: DEFAULT_MODEL,
       max_tokens: 4096,
       system:
-        `You prepare a PRELIMINARY walk-through report for a ${trade}, from plan documents a customer uploaded with their request — before anyone has visited the site. ` +
+        `You prepare a PRELIMINARY walk-through report for ${withArticle(trade)}, from plan documents a customer uploaded with their request — before anyone has visited the site. ` +
         "You are a careful reader, not an estimator: report what the documents and the customer's own words actually state, and nothing else. " +
         "THE CUSTOMER'S WORDS OVERRIDE THE DRAWINGS — if they say the work covers only part of the plans (rooms excluded, phases, work already done), the report and every answer must honor that, even where the sheets still show the excluded work. " +
         'Respond with ONLY a JSON object: {"summary": string, "scope_included": string[], "scope_excluded": string[], "answers": object, "observations": string[], "cautions": string[]}. ' +

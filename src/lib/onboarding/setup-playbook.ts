@@ -41,12 +41,14 @@ export const SETUP_PLAYBOOK: Playbook = {
       slot: { type: "text" },
       hold: true,
       feeds: ["what"],
+      // WHAT'S TRUE (lib/inspection/starter-sheets STARTER_FOR_TRADE, lib/org-trade): the trade
+      // picked at sign-up chooses the starter; these words choose only when none was picked, and
+      // a "general contractor" who subs out electrical is read as a general contractor.
       why:
-        "Two things: the questions your walk-through asks on site, and what an estimate thinks " +
+        "Two things: the questions your walk-through starts with, and what an estimate thinks " +
         "it's pricing. (Your job codes came from the dropdown at sign-up — this doesn't change " +
-        "them.) SAY ONE WORD. There are four starter walk-throughs — electrical, deck, plumbing " +
-        "and a general one — and the FIRST trade word in your answer picks it, so " +
-        "\"I sub out electrical\" hands a general contractor an electrician's sheet.",
+        "them.) Electrical, deck and plumbing each have their own starter questions; every other " +
+        "trade starts on a general set you make your own. If you picked a trade at sign-up, that chooses it.",
     },
     {
       key: "city",

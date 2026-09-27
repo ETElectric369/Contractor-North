@@ -38,6 +38,7 @@ import { ticketShelfProblem, type ShelfPick, type TicketLineChoice } from "@/lib
 import { shelveLines } from "@/lib/stock-ledger";
 import { formatCurrency } from "@/lib/utils";
 import { jobInOrg } from "@/lib/job-in-org";
+import { withArticle } from "@/lib/org-trade";
 import { undoOpenListCore } from "@/app/(app)/bills/open-list-core";
 // TWO PROMPTS ITEMISE A RECEIPT and they must offer the model the SAME categories: the paper
 // reader (paperwork-core, any upload) and the job-receipt reader (a receipt already filed to a
@@ -492,7 +493,7 @@ export async function billJobReceipt(
     const msg = await client.messages.create({
       model: DEFAULT_MODEL,
       max_tokens: 4096,
-      system: `You read a purchase receipt for a ${trade} and itemize it as a job cost.
+      system: `You read a purchase receipt for ${withArticle(trade)} and itemize it as a job cost.
 
 Respond with ONLY a JSON object (no prose):
 {
@@ -1734,7 +1735,7 @@ export async function aiReviewItem(id: string): Promise<{ ok: boolean; message: 
       // behind it — not the receipt-reading that becomes billable money.
       model: modelFor("routine"),
       max_tokens: 500,
-      system: `You triage one piece of paperwork for a ${trade} and decide the single best action. Output ONLY a JSON object:
+      system: `You triage one piece of paperwork for ${withArticle(trade)} and decide the single best action. Output ONLY a JSON object:
 {
   "action": "file_job" | "overhead" | "task" | "keep_note" | "unsure",
   "job_id": an id from the list below, or null,
@@ -1743,7 +1744,7 @@ export async function aiReviewItem(id: string): Promise<{ ok: boolean; message: 
   "task_category": "office" | "operations" | "sales",
   "reason": one short sentence
 }
-Rules: "file_job" when anything on the paper points to one job in the list: its PO or job box (contractors write the job's name or street there, e.g. "13897 HERRINGBONE" is the job at 13897 Herringbone Way), a job name, a street (a street written without "Way", "Rd" and so on is still that street), a job number, or a customer. "overhead" only for a company-expense receipt with an amount; a supplier's finance charge, service charge, late fee or interest is "unsure", never "overhead". "task" when a note describes something to DO (call, order, schedule, follow up). "keep_note" for reference info. "unsure" if you genuinely can't tell.
+Rules: "file_job" when anything on the paper points to one job in the list: its PO or job box (contractors write the job's name or street there, e.g. "<number> <STREET NAME>" is the job at that street address), a job name, a street (a street written without "Way", "Rd" and so on is still that street), a job number, or a customer. "overhead" only for a company-expense receipt with an amount; a supplier's finance charge, service charge, late fee or interest is "unsure", never "overhead". "task" when a note describes something to DO (call, order, schedule, follow up). "keep_note" for reference info. "unsure" if you genuinely can't tell.
 ${selfNames.length ? `These names are the company itself and its people, printed as who the paper was sold to; they are never the customer or the job: ${selfNames.join(", ")}.\n` : ""}
 Open jobs (id — number name; address; customer):
 ${jobLines.join("\n") || "(none)"}`,

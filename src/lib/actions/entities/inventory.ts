@@ -28,8 +28,8 @@ export const inventoryActions: Record<string, ActionDef> = {
     group: "stock",
     label: "Fill the Took From Stock card",
     description:
-      "When someone says they TOOK material FROM STOCK / off the shelf / from the shop for a job ('took 60 feet of 12/2 from stock for Herringbone', 'grabbed 10 wire nuts off the shelf for Waldow'): this FILLS the job's Took From Stock card and returns the link and a card that are put on the screen for you. It does NOT take anything: the person taps Take It. NEVER say it's taken, recorded or on the job until they do; say it's ready to tap. " +
-      "job_id = the job's id from list_jobs OR its name / number as spoken. item = the item's name as they said it ('12/2', '12/2 NM-B', 'wire nuts'). qty = the count they said, only if they said one; unit = the unit they said (feet, each), only if they said one. " +
+      "When someone says they TOOK material FROM STOCK / off the shelf / from the shop for a job ('took <amount> of <item> from stock for <job>', 'grabbed <count> <item> off the shelf for <job>'): this FILLS the job's Took From Stock card and returns the link and a card that are put on the screen for you. It does NOT take anything: the person taps Take It. NEVER say it's taken, recorded or on the job until they do; say it's ready to tap. " +
+      "job_id = the job's id from list_jobs OR its name / number as spoken. item = the item's name as they said it (a short name or the full shelf name). qty = the count they said, only if they said one; unit = the unit they said (feet, each), only if they said one. " +
       "If it says several items match, read the names back and ask which one; if none match, say what the shelf has (list_shelf). Never guess a count or a price. Taking more than the shelf shows is allowed: say what it says about the office settling it.",
     input: z.object({
       job_id: z.string().min(1),

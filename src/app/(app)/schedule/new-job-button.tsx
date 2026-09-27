@@ -214,7 +214,7 @@ export function NewJobButton({
               id="name"
               name="name"
               required
-              placeholder="e.g. Smith panel upgrade"
+              placeholder="The customer and the work, in a few words"
               value={form.name}
               onChange={(e) => patch({ name: e.target.value })}
             />

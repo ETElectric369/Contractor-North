@@ -56,27 +56,33 @@ export const WHY_ASK_ALTS = [
 
 /**
  * THE THREE SHAPES A PATH TAKES. Not a setting anybody picks — a set of patterns to show, so the
- * first line somebody writes has something to be shaped like. One real example each, from real
- * playbooks in this app.
+ * first line somebody writes has something to be shaped like.
+ *
+ * THE EXAMPLES ARE SHAPES, NOT SOMEBODY'S TRADE. They were a deck builder's board count and an
+ * electrician's subpanel fork, shown to every company for every question: a plumber's "Water
+ * heater type" got "subpanel or home runs", and a painter got an inspection trip his trade preset
+ * switched off. Erik: "Nort cant be giving examples that dont make sense." So each example names
+ * only what every contractor's estimate has (a count, a unit price, a line, the price) and no
+ * trade's nouns; the company's own lines are the real examples, once it has some.
  */
 export const WHY_SHAPES = [
   {
     key: "formula",
     label: "It goes into a calculation",
     hint: "…times… = …, and that gives me…",
-    example: "Length × width is the square footage, and that drives the board count and the joists.",
+    example: "The count times the unit price is that line on the estimate.",
   },
   {
     key: "fork",
     label: "It decides which way the job goes",
     hint: "Decides… , which sets…",
-    example: "Decides subpanel or home runs — which sets every run length after it.",
+    example: "Decides which way the job goes, and that sets the lines after it.",
   },
   {
     key: "trigger",
     label: "It turns something on",
     hint: "If it's… then I also need…",
-    example: "Permitted means an inspection before cover — that's a second trip in the price.",
+    example: "A yes adds a line to the price; a no leaves it off.",
   },
 ] as const;
 
@@ -95,6 +101,9 @@ export function whyHint(n: Need): { ask: string; shape: (typeof WHY_SHAPES)[numb
 
 export type WhyProblem = "empty" | "too_long" | "no_destination" | "restates_the_question";
 
+/** THE WHY-LINE LAW: one line, at most 140 characters. Longer reasoning goes in `Need.note`. */
+export const WHY_MAX_CHARS = 140;
+
 /**
  * IS THIS A PATH, OR JUST WORDS? The check that makes "precision for every single person" a thing
  * the app can actually help with rather than hope for.
@@ -109,17 +118,34 @@ export function whyProblems(why: string | undefined, need?: Need): WhyProblem[] 
   const out: WhyProblem[] = [];
 
   // An essay is the failure mode this whole file exists to end. Erik's own drafted lines ran to
-  // five sentences and he could not read fifteen of them.
+  // five sentences and he could not read fifteen of them. ONE LINE IS 140 CHARACTERS (the why-line
+  // law); anything longer belongs in the need's note, where length is fine.
   const sentences = t.split(/[.!?]+\s/).filter((s) => s.trim().length > 1).length;
-  if (t.length > 220 || sentences > 3) out.push("too_long");
+  if (t.length > WHY_MAX_CHARS || sentences > 3) out.push("too_long");
 
   // A PATH NAMES A DESTINATION. Either arithmetic, or a verb that lands somewhere.
-  const arithmetic = /[×x*+]|times|multiplied|divided|per\s|square|sq\.?\s?ft|linear|total|adds? up/i.test(t);
+  //
+  // THE "x" HOLE, CLOSED. The operator class used to be [×x*+], so ANY letter x passed as
+  // arithmetic: "Exterior box, we check it" named nothing and passed. An x counts only as an
+  // operator: between two numbers ("20x16", "20 x 16") or standing alone between two terms
+  // ("length x width"). The real symbols (× * + = ÷) and the spoken forms still count.
+  //
+  // THE SAME HOLE, IN THE SPOKEN FORMS. Unanchored, `per\s` passed "Super important to ask.",
+  // `times` passed "Sometimes it matters." and `total` passed "Totally need to know." — none of
+  // them names anything downstream. A spoken operator is a whole word.
+  //
+  // A MULTIPLIER WRITTEN ON A NUMBER IS AN OPERATOR TOO: "x2", "3x", "LxW". Needing digits on both
+  // sides flagged "Count x2 for both sides." as naming nothing. The letters still don't count:
+  // "Exterior box" and "Next" have no number or dimension on either side of their x.
+  const arithmetic =
+    /[×*+=÷]|\d\s*x\s*\d|\d\s*x\b|\bx\s*\d|\b[lwh]x[lwh]\b|(^|\s)x(\s|$)|sq\.?\s?ft|\b(times|multipl(y|ied|ies)|divid(e|ed|es)|per|squared?|linear|total(s|l?ed)?|adds? up)\b/i.test(t);
   // VERB FORMS ONLY. `size` as a bare noun was matching — "I need the panel brand, size and room"
   // is the QUESTION said back, and it was passing as a destination because the ask itself contained
-  // the word. A destination needs something that ACTS.
+  // the word. A destination needs something that ACTS. `picks` and `chooses` are the fork said
+  // another way ("Picks which questions come next"); they were only passing before on the x in
+  // "next", which is how the hole hid them.
   const lands =
-    /\b(decides?|drives?|sets?|feeds?|sizes|tells?|means|gives?|determines?|triggers?|turns?)\b/i.test(t) ||
+    /\b(decides?|drives?|sets?|feeds?|sizes|tells?|means|gives?|determines?|triggers?|turns?|picks|chooses)\b/i.test(t) ||
     /\b(gets? me|comes? out|ends? up|goes into|adds? to)\b/i.test(t) ||
     // The nouns a contractor's price is actually made of. `prices?` not `price` — "prices nothing
     // like an open wall" is a destination and \bprice\b doesn't match inside "prices".

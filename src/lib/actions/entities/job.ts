@@ -43,7 +43,7 @@ export const jobActions: Record<string, ActionDef> = {
     group: "job",
     label: "Set job scope",
     description:
-      "Set a job's scope / description (REPLACES the existing text) — 'set the scope of the Miller job to: rough-in + panel upgrade + final'. Resolve the job with list_jobs first.",
+      "Set a job's scope / description (REPLACES the existing text) — 'set the scope of the <job> job to: <the work>'. Resolve the job with list_jobs first.",
     input: z.object({ job_id: z.string(), description: z.string() }),
     auth: "staff",
     effect: "write",
@@ -101,7 +101,7 @@ export const jobActions: Record<string, ActionDef> = {
     group: "job",
     label: "Finish a job",
     description:
-      "Finish a job: mark it complete. On an ordinary job it also builds a DRAFT invoice (from the accepted estimate if there is one, else the logged labor + materials); it never sends. On a job billed with PROGRESS PAYMENTS (a deposit / progress / final draw) it builds no new bill: an open progress report built from actuals takes the last hours and bills; otherwise any hours or bills not on a bill yet are NAMED in the result's warning (e.g. '19.5 h ($2,437.50) of work on this job is not on a bill yet') and stay unbilled until a Progress Payment → Final is made. Read the result's speak AND warning back to the user. Resolve the job with list_jobs. The app asks to confirm first.",
+      "Finish a job: mark it complete. On an ordinary job it also builds a DRAFT invoice (from the accepted estimate if there is one, else the logged labor + materials); it never sends. On a job billed with PROGRESS PAYMENTS (a deposit / progress / final draw) it builds no new bill: an open progress report built from actuals takes the last hours and bills; otherwise any hours or bills not on a bill yet are NAMED in the result's warning (e.g. '<hours> h ($<amount>) of work on this job is not on a bill yet') and stay unbilled until a Progress Payment → Final is made. Read the result's speak AND warning back to the user. Resolve the job with list_jobs. The app asks to confirm first.",
     input: z.object({ id: z.string() }),
     auth: "staff",
     effect: "write",
@@ -135,7 +135,7 @@ export const jobActions: Record<string, ActionDef> = {
     group: "job",
     label: "Move job to a day",
     description:
-      "Move ONE day/range of a job's schedule to a new day, keeping every other scheduled range — use for 'push the Chmura job to Friday'. (job.scheduleDay REPLACES the planned schedule; this SHIFTS one range.) Days of that range already worked (time logged, or a visit closed out as done) stay where they happened and only the days not yet worked move, so a 3-day range with 2 days worked lands as 1 day; `recorded` says so — tell the user. to_date is YYYY-MM-DD; pass from_date (the day it currently sits on) when the job has multiple ranges so the right one moves. If it fails because a date-pick link is out to the customer, ask the user whether to withdraw the link, then retry with cancel_proposals true.",
+      "Move ONE day/range of a job's schedule to a new day, keeping every other scheduled range — use for 'push the <job> job to Friday'. (job.scheduleDay REPLACES the planned schedule; this SHIFTS one range.) Days of that range already worked (time logged, or a visit closed out as done) stay where they happened and only the days not yet worked move, so a 3-day range with 2 days worked lands as 1 day; `recorded` says so — tell the user. to_date is YYYY-MM-DD; pass from_date (the day it currently sits on) when the job has multiple ranges so the right one moves. If it fails because a date-pick link is out to the customer, ask the user whether to withdraw the link, then retry with cancel_proposals true.",
     input: z.object({
       id: z.string(),
       to_date: z.string(),
