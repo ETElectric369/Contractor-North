@@ -220,12 +220,21 @@ describe("loadNoJobHoursSheet: TTUSD's days on INV-055", () => {
     expect(d.target.kind).toBe("time");
     expect(d.invoices.map((x) => x.invoice.invoice_number)).toEqual(["INV-055"]);
     expect(d.invoices[0].invoice.lines.map((l) => l.id)).toEqual(["li-jp"]);
-    expect(d.invoices[0].preselect).toBe("li-jp");
+    // No line is picked for him: an invoice with no job's only line is no clue it charged these hours.
+    expect(d.invoices[0].preselect).toBeNull();
     // Not the company's own time (SHOP), not one an invoice holds, not an empty one.
     expect(d.entries.map((e) => e.id)).toEqual(["t-806", "t-807"]);
     expect(d.preticked).toEqual(["t-806"]);
     expect(d.drafts).toEqual(["INV-090 is still a draft: open it to add these there."]);
     expect(d.note).toBeNull();
+  });
+
+  it("never picks a line to start, even on an invoice with only one (INV-073's $1.11 'Test 5' sorts first for a shift this week at ET)", async () => {
+    const TEST5 = { ...INV055, id: "inv-73", invoice_number: "INV-073", created_at: "2026-09-22T18:00:00Z", invoice_items: [typed("li-t5", "Test 5", 1.11)] };
+    const res = await loadNoJobHoursSheet(fake(route({ invoices: { data: [TEST5] } })), ORG, ["t-807"]);
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.data.invoices.map((x) => [x.invoice.invoice_number, x.invoice.lines.map((l) => l.id), x.preselect])).toEqual([["INV-073", ["li-t5"], null]]);
   });
 
   it("a shift the door named that is no longer open says so; the rest can still be marked", async () => {

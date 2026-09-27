@@ -500,7 +500,8 @@ const NO_JOB_ENTRY_COLUMNS = "id, clock_in, clock_out, lunch_minutes, job_code, 
  * invoices with no job that went out, with only their lines of work (lib/already-billed eligibleLines,
  * labor first). Listed: every closed shift on no job that no live invoice holds (never a running one,
  * never the company's own time code, never an empty one), and `pressed` ticked to start (a split
- * shift whole). mark_already_billed accepts a shift on no job only there, so nothing else is offered.
+ * shift whole). No line is picked to start: he picks it. mark_already_billed accepts a shift on no
+ * job only there, so nothing else is offered.
  */
 export async function loadNoJobHoursSheet(supabase: Db, orgId: string, pressed: string[]): Promise<Loaded> {
   const want = [...new Set((pressed ?? []).map((x) => String(x ?? "")).filter(Boolean))].slice(0, IN_CHUNK);
@@ -581,11 +582,11 @@ export async function loadNoJobHoursSheet(supabase: Db, orgId: string, pressed: 
 
   const firstDay = open.find((e) => preticked.includes(e.id))?.clockIn ?? null;
   const drafts = all.filter((i) => i.status === "draft").map((i) => `${i.invoice_number ?? "A draft"} is still a draft: open it to add these there.`);
+  // NOTHING IS PICKED FOR HIM HERE. These are every invoice with no job the company sent, to any
+  // customer or none (INV-073's $1.11 "Test 5" sorts first at ET): an invoice's only line is no clue
+  // that it charged for these hours, and one tap would claim them there.
   const offered = sortInvoicesFor(all.filter(eligibleInvoice), firstDay)
-    .map((invoice) => {
-      const lines = eligibleLines(invoice, { kind: "time" });
-      return { invoice: { ...invoice, lines }, preselect: preselectLine(invoice, lines, "time") };
-    })
+    .map((invoice) => ({ invoice: { ...invoice, lines: eligibleLines(invoice, { kind: "time" }) }, preselect: null }))
     .filter((x) => x.invoice.lines.length > 0);
   return {
     ok: true,
