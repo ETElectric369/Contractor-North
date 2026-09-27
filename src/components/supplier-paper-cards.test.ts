@@ -364,6 +364,8 @@ describe("Already Billed On J-010 on the card", () => {
     // No invoice named by the offer (it read nothing): the sheet still opens on the bill, and says what it finds.
     const bare = filedForMark(ps, J010, { ok: true, message: "Filed.", undo })!;
     expect(bare.marking?.alreadyBilled).toEqual({ jobId: "j-010", billId: "bill-ps", invoiceNumber: "", what: "8802-1101475" });
+    // ...and the done line keeps the same question, for after the sheet closes.
+    expect(bare.done.alreadyBilled).toEqual(bare.marking?.alreadyBilled);
     // The bill it wrote can't be named: no sheet, and the done line says where to mark it.
     const lost = filedForMark(ps, J010, { ok: true, message: "Filed." })!;
     expect(lost.marking).toBeNull();
@@ -385,8 +387,9 @@ describe("Already Billed On J-010 on the card", () => {
   });
 
   it("the done line after closing: its Undo, and the question to try again (Already Billed? when no invoice was named)", () => {
+    // The filing's offer came back empty: nothing is added by hand, the question is still there.
     const filed = filedForMark(ps, J010, { ok: true, message: "Filed.", undo })!.done;
-    const d = closedUnmarked({ ...filed, alreadyBilled: { jobId: "j-010", billId: "bill-ps", invoiceNumber: "", what: "x" } })!;
+    const d = closedUnmarked(filed)!;
     setSupplierPaperScopeForTest("t-ab4", { done: { "si-1": d as never }, live: 0 });
     const trail = renderToStaticMarkup(createElement(SupplierPaperDoneTrail, { scope: "t-ab4" }));
     expect(trail).toContain("It is not marked Already Billed, so the next New Invoice on J-010 bills it.");

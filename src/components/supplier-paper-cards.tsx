@@ -64,8 +64,11 @@ export function filedForMark(card: SupplierPaperCard, job: PaperJob, res: Suppli
       done: { card, message: `${message} Already Billed couldn't open here: mark it from ${job.label}'s Costs tab.`, undo: res.undo, filedMessage: message },
       marking: null,
     };
-  const done: Done = { card, message, undo: res.undo, alreadyBilled: res.alreadyBilled, filedMessage: message, asked: true, sheetJob: job.label };
-  return { done, marking: { ...done, alreadyBilled: res.alreadyBilled ?? { jobId: job.id, billId, invoiceNumber: "", what: card.invoiceNumber } } };
+  // The offer names no invoice when its read came back empty: the sheet still opens on the bill, and
+  // the done line keeps the same question (Already Billed?) to try again once the sheet closes.
+  const offer = res.alreadyBilled ?? { jobId: job.id, billId, invoiceNumber: "", what: card.invoiceNumber };
+  const done: Done = { card, message, undo: res.undo, alreadyBilled: offer, filedMessage: message, asked: true, sheetJob: job.label };
+  return { done, marking: done };
 }
 
 /**
