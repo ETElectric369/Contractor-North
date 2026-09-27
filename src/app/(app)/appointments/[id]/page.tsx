@@ -30,6 +30,7 @@ import { loadLinkInstead } from "@/lib/appointments/visit-start-read";
 import { VisitStartCard } from "./visit-start-card";
 import { FeatureOffLine } from "@/components/feature-off-line";
 import { featureOn } from "@/lib/features";
+import { answersWithoutPrices, isMissingRpc, sheetsWithoutMoney, walkthroughAccess } from "@/lib/inspection/walkthrough-access";
 
 export const dynamic = "force-dynamic";
 
@@ -106,7 +107,8 @@ export default async function AppointmentCapturePage({
     ),
     // WHO IS LOOKING, and whether they are on the clock: the top card's four faces (start / ask the
     // office / clock in / you're on the clock here) and its Switch To This Job depend on both.
-    supabase.from("profiles").select("role").eq("id", viewerId ?? "").maybeSingle(),
+    // crew_lead: whether they fill in the walk-through on a visit they are on (0356).
+    supabase.from("profiles").select("role, crew_lead").eq("id", viewerId ?? "").maybeSingle(),
     supabase
       .from("time_entries")
       .select("id, job_id, job_code, clock_in, job:job_id(job_number, name)")
@@ -193,6 +195,28 @@ export default async function AppointmentCapturePage({
         whole: !oe.job_id && !(oe.job_code ?? "").trim(),
       }
     : null;
+  /* WHO FILLS IN THE WALK-THROUGH (0356; Erik, 2026-09-26: "crew leader yes tech no"). The office, as
+     before; a crew lead who is ON this visit, through save_walkthrough_capture; everyone else reads.
+     The probe is that function called with nothing to save: it writes nothing and answers whether
+     they may. Before 0356 is applied it isn't there, so a crew lead gets the read-only walk-through
+     and a plain line, never a Save that can't work. */
+  const viewerIsCrewLead = !!(meRow as { crew_lead?: boolean | null } | null)?.crew_lead;
+  const onThisVisit = !!viewerId && a.assigned_to === viewerId;
+  const crewProbe =
+    showInspector && !viewerIsStaff && viewerIsCrewLead && onThisVisit
+      ? await supabase.rpc("save_walkthrough_capture", { p_appointment: a.id })
+      : null;
+  const access = walkthroughAccess({
+    isStaff: viewerIsStaff,
+    crewLead: viewerIsCrewLead,
+    onThisVisit,
+    rpcReady: !!crewProbe && !crewProbe.error,
+  });
+  const viewNote =
+    crewProbe && isMissingRpc(crewProbe.error)
+      ? "Crew leads can fill this in once the office finishes an update. Until then only the office can change it."
+      : null;
+
   const linkInstead =
     viewerIsStaff && !a.job_id && a.status !== "cancelled"
       ? await loadLinkInstead(supabase, { ...a, inquiry_id: a.inquiry_id ?? null }, tz)
@@ -443,7 +467,7 @@ export default async function AppointmentCapturePage({
           visit that already holds one (under the Off line); Estimates off drops Start The Estimate. */}
       {showInspector && (
         <>
-          <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500">{estimatesOn ? "Walk Through Or Estimate" : "Walk Through"}</h2>
+          <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500">{viewerIsStaff && estimatesOn ? "Walk Through Or Estimate" : "Walk Through"}</h2>
           {walkThrough && (
             <FeatureOffLine feature="leads" features={orgSettings.features} isOwner={(meRow as { role?: string } | null)?.role === "owner"} />
           )}
@@ -451,9 +475,14 @@ export default async function AppointmentCapturePage({
             appointmentId={a.id}
             orgId={a.org_id}
             userId={viewerId}
-            templates={sheets ?? []}
-            // The price book carries buy prices: a tech never gets it (and can't save a scope anyway).
-            readOnly={!viewerIsStaff}
+            // A written why line is where the answer lands in the PRICE and a note is the owner's own
+            // voice: the office gets the sheets as written; anyone else gets them with every note
+            // dropped and every why without its dollar figures (the row goes to the browser whole).
+            templates={viewerIsStaff ? (sheets ?? []) : sheetsWithoutMoney(sheets ?? [])}
+            // The office fills in and prices; a crew lead on this visit fills in (0356); anyone else
+            // reads. The price book carries buy prices: only the office gets it.
+            access={access}
+            viewNote={viewNote}
             priceBook={(viewerIsStaff ? (priceBook ?? []) : []).map((p) => ({
               code: p.code,
               description: p.description ?? "",
@@ -461,7 +490,13 @@ export default async function AppointmentCapturePage({
               price: Number(p.buy_price ?? 0),
             }))}
             initialTemplateId={inspection?.inspection_template_id ?? null}
-            initialAnswers={(inspection?.inspection_answers ?? {}) as never}
+            // A scope pick stores its price: the office's answers go as they are; nobody else's page
+            // carries one (and a crew lead's save can't change a priced answer anyway: 0356).
+            initialAnswers={
+              (viewerIsStaff
+                ? (inspection?.inspection_answers ?? {})
+                : answersWithoutPrices(inspection?.inspection_answers as Record<string, unknown> | null)) as never
+            }
             initialCapture={capture}
             initialPhotos={photos}
             initialLocation={a.location ?? ""}
@@ -474,7 +509,8 @@ export default async function AppointmentCapturePage({
                     ? { kind: "job" as const, name: "This job" }
                     : null
             }
-            estimateHref={estimatesOn ? `/quotes/new?capture=${a.id}${a.inquiry_id ? `&inquiry=${a.inquiry_id}` : ""}` : null}
+            // Pricing is the office's: nobody else is handed the door to the estimator.
+            estimateHref={viewerIsStaff && estimatesOn ? `/quotes/new?capture=${a.id}${a.inquiry_id ? `&inquiry=${a.inquiry_id}` : ""}` : null}
             nortOn={featureOn(orgSettings.features, "nort")}
             buildOwn={featureOn(orgSettings.features, "safety_log")}
             // The linked lead's preliminary plan report — parsed server-side so the card is in the
@@ -484,7 +520,8 @@ export default async function AppointmentCapturePage({
               a.inquiry_id
                 ? (() => {
                     const b = parsePlanBrief((a.inquiries as { intake?: unknown } | null)?.intake);
-                    return b?.status === "ready" ? b : null;
+                    if (b?.status !== "ready") return null;
+                    return viewerIsStaff || !b.answers ? b : { ...b, answers: answersWithoutPrices(b.answers) };
                   })()
                 : null
             }

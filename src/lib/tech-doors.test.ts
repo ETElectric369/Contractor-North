@@ -62,15 +62,28 @@ describe("the job's side doors", () => {
     expect(s).toContain('t.id !== "quotes" && t.id !== "invoices"');
   });
 
-  it("an appointment: the office's verbs don't render for a tech, and the walk-through is read-only", () => {
+  it("an appointment: the office's verbs don't render for a tech; the walk-through is the office's, a crew lead's on his visit (0356), and read-only for anyone else", () => {
     const s = src("appointments/[id]/page.tsx");
     for (const tag of ["<SettleUpButton", "<MarkCompleteButton", "<ApptQuickActions", "<UnscheduleButton"]) {
       expect(s).toMatch(new RegExp(`\\{viewerIsStaff && [^\\n]*\\n\\s*${tag}`));
     }
     expect(s).toContain("{viewerIsStaff && !hasCaptureData(a.capture) &&");
     expect(s).toMatch(/\{viewerIsStaff && \(\s*<AppointmentButton/);
-    expect(s).toContain("readOnly={!viewerIsStaff}");
+    // Who fills it in comes from one rule (lib/inspection/walkthrough-access), and a crew lead's door
+    // is the database's probe of save_walkthrough_capture, never a guess.
+    expect(s).toMatch(/const access = walkthroughAccess\(\{\s*isStaff: viewerIsStaff,/);
+    expect(s).toContain('supabase.rpc("save_walkthrough_capture", { p_appointment: a.id })');
+    expect(s).toContain("rpcReady: !!crewProbe && !crewProbe.error");
+    expect(s).toContain("access={access}");
+    // The price book and scope prices are the office's alone.
     expect(s).toContain("(viewerIsStaff ? (priceBook ?? []) : [])");
+    expect(s).toMatch(/viewerIsStaff\s*\?\s*\(inspection\?\.inspection_answers \?\? \{\}\)\s*:\s*answersWithoutPrices\(/);
+    expect(s).toContain("answers: answersWithoutPrices(b.answers)");
+    // A why line names a price and a note is the owner's own voice: only the office gets the sheets as written.
+    expect(s).toContain("templates={viewerIsStaff ? (sheets ?? []) : sheetsWithoutMoney(sheets ?? [])}");
+    expect(s).toMatch(/estimateHref=\{viewerIsStaff && estimatesOn \?/);
+    // The heading names the estimate only for the people who get its door.
+    expect(s).toContain('{viewerIsStaff && estimatesOn ? "Walk Through Or Estimate" : "Walk Through"}');
   });
 
   it("the jobs list offers New Job only to the office", () => {

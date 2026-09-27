@@ -31,7 +31,8 @@ import { AddressAutocomplete } from "@/components/address-autocomplete";
 import { LinkPicker } from "./link-picker";
 import { TellNort } from "@/components/tell-nort";
 import { hearIntoPlaybook } from "../hear-actions";
-import { saveInspectionAnswers, saveInspectionCapture, setAppointmentPlace } from "../actions";
+import { addInspectionPhotos, saveInspectionAnswers, saveInspectionCapture, setAppointmentPlace } from "../actions";
+import type { WalkthroughAccess } from "@/lib/inspection/walkthrough-access";
 
 /** A numeric field that can be EMPTY. Deliberately not NumberInput: its value is a `number` and
  *  it renders 0 as blank, so "I didn't count it" and "zero of them" become the same stored value —
@@ -146,7 +147,8 @@ export function Inspector({
   initialLocation,
   linked,
   planBrief = null,
-  readOnly = false,
+  access = "office",
+  viewNote = null,
   nortOn = true,
   buildOwn = true,
 }: {
@@ -170,16 +172,24 @@ export function Inspector({
   /** The lead's preliminary plan report (ready only) — server-parsed, so the card is in the
    *  initial HTML and Zone A's height never shifts after mount (the iOS keyboard law). */
   planBrief?: PlanBrief | null;
-  /** A tech reads the walk-through; every save here is requireStaff (0227 made appointments
-   *  staff-writable). Controls go quiet under one disabled fieldset, and the doors that would
-   *  only fail (Take, Add, Save, Start The Estimate, set up questions) don't render. */
-  readOnly?: boolean;
+  /** WHO IS FILLING IT IN (0356, lib/inspection/walkthrough-access). "office": everything. "crewLead"
+   *  (a crew lead on this visit): the answers, notes, measurements, materials and photos save, through
+   *  save_walkthrough_capture; no price, no price book, no Start The Estimate, no address or links, no
+   *  sheet switch once one is saved, and photos are added, never taken off. "view" (anyone else): one
+   *  disabled fieldset, and the doors that would only fail (Take, Add, Save, Start The Estimate, Set Up
+   *  My Questions) don't render. */
+  access?: WalkthroughAccess;
+  /** The line a "view" reader sees instead of the default (a crew lead before 0356 is applied). */
+  viewNote?: string | null;
   /** The Nort switch (0352): the voice fill keeps working, named without Nort. */
   nortOn?: boolean;
-  /** "or build my own" opens /forms, whose New Form is Safety Log's door (0352): with Safety Log
+  /** "Or Build My Own" opens /forms, whose New Form is Safety Log's door (0352): with Safety Log
    *  off the link would land on no way to build one, so it isn't drawn. */
   buildOwn?: boolean;
 }) {
+  const office = access === "office";
+  const crew = access === "crewLead";
+  const readOnly = access === "view";
   const router = useRouter();
   const stored = useMemo(() => parseInspectorCapture(initialCapture), [initialCapture]);
 
@@ -213,6 +223,9 @@ export function Inspector({
   const [materials, setMaterials] = useState(stored.materials);
   const [proseMeasurements, setProseMeasurements] = useState(stored.measurements);
   const [photos, setPhotos] = useState<CapturePhoto[]>(initialPhotos);
+  // A crew lead picks the sheet only while none is saved on the visit: switching a saved one clears
+  // every answer on it, and that is the office's call (0356 refuses it). Set on his first saved answer.
+  const [sheetSaved, setSheetSaved] = useState(!!initialTemplateId);
 
   /**
    * AVAILABLE IS NOT VISIBLE.
@@ -418,7 +431,8 @@ export function Inspector({
     capturePatchRef.current = {};
     answersDirty.current = false;
     const latestPlace = placeRef.current;
-    const placeDirty = latestPlace.trim() !== initialLocation.trim();
+    // The address is the office's (setAppointmentPlace is staff-only); nobody else has the box.
+    const placeDirty = office && latestPlace.trim() !== initialLocation.trim();
     if (!Object.keys(patch).length && !wantAnswers && !placeDirty) {
       // Pressing Save when everything is already written must still ANSWER. Silence reads as a
       // dead button, and the whole point of the press is to be told the work is safe.
@@ -439,27 +453,31 @@ export function Inspector({
     //
     // So: restore, say so, and RE-ARM. Newer keystrokes win the merge, because the retry must not
     // resurrect an old value over something he has since corrected.
-    const restore = (msg: string) => {
+    // A REFUSAL IS NOT A DEAD ZONE. When the database says no to who is asking (a crew lead taken
+    // off the visit, the office's update not in yet), trying again every 900ms changes nothing: the
+    // work is kept and the reason stays on screen, and the next thing he types or presses tries again.
+    const restore = (msg: string, again = true) => {
       capturePatchRef.current = { ...patch, ...capturePatchRef.current };
       if (wantAnswers) answersDirty.current = true;
       setSavedAt(null); // a stale green tick must never stand over unwritten work
       setError(msg);
-      schedule(); // retry without needing him to type another character
+      if (again) schedule(); // retry without needing him to type another character
     };
     start(async () => {
       setError(null);
       try {
         if (Object.keys(patch).length) {
           const r = await saveInspectionCapture(appointmentId, patch as never);
-          if (!r.ok) return restore(r.error ?? "Couldn't save — still trying.");
+          if (!r.ok) return restore(r.error ?? "Couldn't save — still trying.", !r.refused);
         }
-        if (latestPlace.trim() !== initialLocation.trim()) {
+        if (placeDirty) {
           const r = await setAppointmentPlace(appointmentId, latestPlace);
           if (!r.ok) return restore(r.error ?? "Couldn't save the address — still trying.");
         }
         if (wantAnswers) {
           const r = await saveInspectionAnswers(appointmentId, templateId, coerceByPlaybook(playbook, answersRef.current) as never);
-          if (!r.ok) return restore(r.error ?? "Couldn't save — still trying.");
+          if (!r.ok) return restore(r.error ?? "Couldn't save — still trying.", !r.refused);
+          setSheetSaved(true);
         }
         setSavedAt(Date.now());
       } catch {
@@ -581,8 +599,12 @@ export function Inspector({
       }
       const next = [...photos, ...added];
       setPhotos(next);
-      // Persist immediately — a closed tab must not lose the shots.
-      const r = await saveInspectionCapture(appointmentId, { photos: next.map((p) => p.path) });
+      // Persist immediately — a closed tab must not lose the shots. A crew lead sends only the ones
+      // he just took, appended on the server: his page's list is from when it opened, and sending it
+      // whole would put back a photo the office has taken off since (0356).
+      const r = crew
+        ? await addInspectionPhotos(appointmentId, added.map((p) => p.path))
+        : await saveInspectionCapture(appointmentId, { photos: next.map((p) => p.path) });
       if (!r.ok) setError(r.error ?? "Couldn't save the photos.");
       else setSavedAt(Date.now());
     } catch (e: unknown) {
@@ -709,7 +731,7 @@ export function Inspector({
                     : "min-h-[44px] rounded-full border border-dashed border-slate-400 bg-white px-4 text-sm text-slate-600 active:bg-slate-50"
                 }
               >
-                Something else
+                Something Else
               </button>
             )}
           </div>
@@ -755,6 +777,27 @@ export function Inspector({
     // inspection." The rate can be 0.00 in the book on purpose; this is where it gets discovered.
     if (n.slot.type === "scopes") {
       const picked = Array.isArray(v) ? (v as ScopePick[]).filter((x) => x && typeof x === "object") : [];
+      // THE OFFICE PRICES IT. Anyone else sees what was picked and how many, never a price or the
+      // book (the page strips the prices before they leave the server, and 0356 keeps the office's
+      // picks whatever a crew lead's save sends). Nothing here is a control, so nothing here saves.
+      if (!office)
+        return (
+          <div className="rounded-lg border border-slate-200 p-2">
+            {picked.length > 0 ? (
+              <ul className="space-y-1">
+                {picked.map((p) => (
+                  <li key={p.code} className="flex items-center justify-between gap-2 text-sm text-slate-700">
+                    <span className="min-w-0 truncate">{p.code}</span>
+                    <span className="shrink-0 text-slate-500">× {p.qty}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-sm text-slate-500">Nothing picked yet.</p>
+            )}
+            <p className="mt-1.5 text-xs text-slate-400">The office picks and prices these.</p>
+          </div>
+        );
       const allowed = n.slot.codes?.length ? new Set(n.slot.codes) : null;
       const menu = priceBook.filter((b) => (!allowed || allowed.has(b.code)) && !picked.some((p) => p.code === b.code));
       const setPicks = (next: ScopePick[]) => setAnswer(n.key, next.length ? (next as never) : null);
@@ -857,30 +900,39 @@ export function Inspector({
       };
       return (
         <DropTarget onFiles={(files) => void uploadSlotFiles(files)} accept={ACCEPT_ATTR} multiple={n.slot.multi !== false} label="Drop the Plans" className="rounded-lg border border-dashed border-slate-300 p-2">
-          <input
-            type="file"
-            multiple={n.slot.multi !== false}
-            accept={ACCEPT_ATTR}
-            disabled={uploading}
-            onChange={(e) => {
-              const files = Array.from(e.target.files ?? []);
-              e.target.value = "";
-              void uploadSlotFiles(files);
-            }}
-            className="block w-full text-sm text-slate-600 file:mr-3 file:rounded-full file:border-0 file:bg-slate-900 file:px-3 file:py-1.5 file:text-xs file:text-white"
-          />
+          {/* A 44px door, not the browser's own file button (a thumb-sized target on the truck). The
+              input rides inside its label, so tapping anywhere on it opens the picker. */}
+          <label className="inline-flex min-h-[44px] cursor-pointer items-center gap-2 rounded-full bg-slate-900 px-4 text-sm font-medium text-white has-[:disabled]:cursor-default has-[:disabled]:opacity-50">
+            {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />} Add Files
+            <input
+              type="file"
+              multiple={n.slot.multi !== false}
+              accept={ACCEPT_ATTR}
+              disabled={uploading}
+              onChange={(e) => {
+                const files = Array.from(e.target.files ?? []);
+                e.target.value = "";
+                void uploadSlotFiles(files);
+              }}
+              className="sr-only"
+            />
+          </label>
           {have.length > 0 && (
             <ul className="mt-1.5 space-y-0.5">
               {have.map((path) => (
-                <li key={path} className="flex items-center justify-between gap-2 text-xs text-slate-600">
+                <li key={path} className="flex min-h-[44px] items-center justify-between gap-2 text-xs text-slate-600">
                   <span className="truncate">{uploadDisplayName(path)}</span>
-                  <button
-                    type="button"
-                    onClick={() => setAnswer(n.key, have.filter((x) => x !== path))}
-                    className="shrink-0 text-slate-400 underline-offset-2 hover:underline"
-                  >
-                    remove
-                  </button>
+                  {/* Taking a file off is the office's, like a photo: a crew lead adds, and 0356 keeps
+                      every file already on the answer whatever his save sends. */}
+                  {office && (
+                    <button
+                      type="button"
+                      onClick={() => setAnswer(n.key, have.filter((x) => x !== path))}
+                      className="min-h-[44px] shrink-0 px-2 text-slate-400 underline-offset-2 hover:underline"
+                    >
+                      Remove
+                    </button>
+                  )}
                 </li>
               ))}
             </ul>
@@ -915,7 +967,16 @@ export function Inspector({
 
   return (
     <Card className="overflow-hidden p-0">
-      {readOnly && <p className="border-b border-slate-100 px-4 py-2 text-xs text-slate-500">Only the office can change the walk-through.</p>}
+      {readOnly && (
+        <p className="border-b border-slate-100 px-4 py-2 text-xs text-slate-500">
+          {viewNote || "Only the office can change the walk-through."}
+        </p>
+      )}
+      {crew && (
+        <p className="border-b border-slate-100 px-4 py-2 text-xs text-slate-500">
+          You&rsquo;re the crew lead on this visit: fill it in here. The office prices it.
+        </p>
+      )}
       <fieldset disabled={readOnly} className="m-0 min-w-0 border-0 p-0">
       {/* ── ZONE A — THE ASK ──────────────────────────────────────────────────────────────── */}
       <div className="border-b border-slate-100 p-4">
@@ -924,7 +985,9 @@ export function Inspector({
             <ClipboardList className="h-4 w-4 text-slate-400" />
             Walk-through
           </div>
-          {templates.length > 1 && (
+          {/* A crew lead picks the sheet only while none is saved: switching a saved one clears
+              every answer, and that is the office's call. */}
+          {templates.length > 1 && !(crew && sheetSaved) && (
             <Select
               value={templateId ?? ""}
               className="max-w-[10rem]"
@@ -962,27 +1025,41 @@ export function Inspector({
             of visits stops reading "Site inspection" six times. */}
         <div className="mt-3">
           <Label className="mb-1.5">Where</Label>
-          <AddressAutocomplete
-            defaultValue={initialLocation}
-            placeholder="Job address"
-            onTextChange={(v) => { setPlace(v); schedule(); }}
-            onResolved={(parts) => {
-              // `formatted` is the full one-line address — appointments.location is a single
-              // text column, so the whole thing is what belongs in it.
-              const line = parts.formatted || parts.line1 || "";
-              setPlace(line);
-              // Resolved from autocomplete → the PARTS ride along (0177), so the city is stored
-              // rather than left to be guessed out of a string later.
-              if (line && line !== initialLocation)
-                start(async () => {
-                  await setAppointmentPlace(appointmentId, line, { city: parts.city, state: parts.state, zip: parts.zip });
-                  router.refresh();
-                });
-            }}
-          />
+          {office ? (
+            <AddressAutocomplete
+              defaultValue={initialLocation}
+              placeholder="Job address"
+              onTextChange={(v) => { setPlace(v); schedule(); }}
+              onResolved={(parts) => {
+                // `formatted` is the full one-line address — appointments.location is a single
+                // text column, so the whole thing is what belongs in it.
+                const line = parts.formatted || parts.line1 || "";
+                setPlace(line);
+                // Resolved from autocomplete → the PARTS ride along (0177), so the city is stored
+                // rather than left to be guessed out of a string later.
+                if (line && line !== initialLocation)
+                  start(async () => {
+                    await setAppointmentPlace(appointmentId, line, { city: parts.city, state: parts.state, zip: parts.zip });
+                    router.refresh();
+                  });
+              }}
+            />
+          ) : (
+            // The address, like the visit's links, is the office's (setAppointmentPlace is staff-only).
+            <p className="text-sm text-slate-700">{initialLocation.trim() || "No address yet. The office adds it."}</p>
+          )}
         </div>
 
-        <LinkPicker appointmentId={appointmentId} linked={linked} seed={place} />
+        {office ? (
+          <LinkPicker appointmentId={appointmentId} linked={linked} seed={place} />
+        ) : (
+          linked && (
+            <div className="mt-3">
+              <Label className="mb-1.5">For</Label>
+              <p className="text-sm text-slate-700">{linked.name}</p>
+            </div>
+          )
+        )}
 
         {/* THE PRELIMINARY REPORT — what the plans already said, above the questions, because it
             answers some of them before anyone asks. Server-parsed prop (height-stable at mount),
@@ -1034,11 +1111,11 @@ export function Inspector({
                 type="button"
                 onClick={applyBrief}
                 disabled={!briefFills.length}
-                className="mt-2 rounded-lg bg-sky-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-sky-700 disabled:bg-slate-300"
+                className="mt-2 min-h-[44px] rounded-lg bg-sky-600 px-3 text-xs font-semibold text-white hover:bg-sky-700 disabled:bg-slate-300"
               >
                 {briefFills.length
-                  ? `Fill ${briefFills.length} answer${briefFills.length === 1 ? "" : "s"} from the plans`
-                  : "Filled from the plans"}
+                  ? `Fill ${briefFills.length} Answer${briefFills.length === 1 ? "" : "s"} From The Plans`
+                  : "Filled From The Plans"}
               </button>
             )}
           </div>
@@ -1049,6 +1126,7 @@ export function Inspector({
         {!noSheet && (
           <TellNort
             nortOn={nortOn}
+            label="Just Tell Nort"
             hear={(a, said) => hearIntoPlaybook(appointmentId, templateId, a, said)}
             answers={answers}
             hint={ask[0]?.ask}
@@ -1085,11 +1163,19 @@ export function Inspector({
 
         {noSheet ? (
           <div className="mt-3">
-            <p className="text-sm text-slate-500">
-              You don&rsquo;t have a set of walk-through questions yet. Start with the ones for your trade —
-              one question at a time, and only what applies to the job in front of you.
-            </p>
-            {!readOnly && <div className="mt-3 flex flex-wrap items-center gap-3">
+            {office ? (
+              <p className="text-sm text-slate-500">
+                You don&rsquo;t have a set of walk-through questions yet. Start with the ones for your trade —
+                one question at a time, and only what applies to the job in front of you.
+              </p>
+            ) : (
+              // Setting up the questions is the office's (createStarterInspectionSheet is staff-only).
+              <p className="text-sm text-slate-500">
+                The office hasn&rsquo;t set up walk-through questions yet.
+                {crew ? " Notes, measurements and photos below still save." : ""}
+              </p>
+            )}
+            {office && <div className="mt-3 flex flex-wrap items-center gap-3">
               <Button
                 type="button"
                 disabled={seeding}
@@ -1101,9 +1187,9 @@ export function Inspector({
                   })
                 }
               >
-                {seeding ? <><Loader2 className="h-4 w-4 animate-spin" /> Setting up…</> : "Set up my questions"}
+                {seeding ? <><Loader2 className="h-4 w-4 animate-spin" /> Setting Up…</> : "Set Up My Questions"}
               </Button>
-              {buildOwn && <Link href="/forms" className="text-sm text-slate-500 underline-offset-2 hover:underline">or build my own</Link>}
+              {buildOwn && <Link href="/forms" className="inline-flex min-h-[44px] items-center text-sm text-slate-500 underline-offset-2 hover:underline">Or Build My Own</Link>}
             </div>}
           </div>
         ) : open.length === 0 ? (
@@ -1224,14 +1310,15 @@ export function Inspector({
                     setMeasures(next);
                     queueCapture({ measures: next });
                   }}
-                  className="shrink-0 rounded-md p-2 text-slate-400 active:bg-slate-100"
+                  aria-label="Remove This Measurement"
+                  className="flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-md text-slate-400 active:bg-slate-100"
                 >
                   <Trash2 className="h-4 w-4" />
                 </button>
               </div>
             ))}
             <AddRow
-              label="Add a measurement"
+              label="Add A Measurement"
               onClick={() => setMeasures([...measures, { id: captureId(), label: "", value: null, unit: "" }])}
             />
             <Textarea
@@ -1288,14 +1375,15 @@ export function Inspector({
                     setItems(next);
                     queueCapture({ items: next });
                   }}
-                  className="shrink-0 rounded-md p-2 text-slate-400 active:bg-slate-100"
+                  aria-label="Remove This Material"
+                  className="flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-md text-slate-400 active:bg-slate-100"
                 >
                   <Trash2 className="h-4 w-4" />
                 </button>
               </div>
             ))}
             <AddRow
-              label="Add a material"
+              label="Add A Material"
               onClick={() => setItems([...items, { id: captureId(), description: "", quantity: null, unit: "ea" }])}
             />
             <Textarea
@@ -1385,14 +1473,18 @@ export function Inspector({
                       )}
                     </a>
                   )}
-                  <button
-                    type="button"
-                    onClick={() => removePhoto(p)}
-                    // Always visible, not hover-revealed: there is no hover on a phone.
-                    className="absolute right-1 top-1 rounded-md bg-black/50 p-1 text-white"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
+                  {/* Taking a photo off is the office's: a crew lead adds, and 0356 keeps every photo
+                      already on the list whatever his save sends. */}
+                  {office && (
+                    <button
+                      type="button"
+                      onClick={() => removePhoto(p)}
+                      // Always visible, not hover-revealed: there is no hover on a phone.
+                      className="absolute right-1 top-1 rounded-md bg-black/50 p-1 text-white"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  )}
                 </div>
               ))}
             </div>
@@ -1438,7 +1530,7 @@ export function Inspector({
                   key={h.k}
                   type="button"
                   onClick={h.on}
-                  className="flex min-h-[36px] items-center gap-1 rounded-full border border-dashed border-slate-300 px-3 text-sm text-slate-500 active:bg-slate-50"
+                  className="flex min-h-[44px] items-center gap-1 rounded-full border border-dashed border-slate-300 px-3 text-sm text-slate-500 active:bg-slate-50"
                 >
                   <Plus className="h-3.5 w-3.5" /> {h.label}
                 </button>
@@ -1489,7 +1581,9 @@ export function Inspector({
           >
             {pending ? <><Loader2 className="h-4 w-4 animate-spin" /> Saving…</> : <><Check className="h-4 w-4" /> Save</>}
           </Button>
-          {estimateHref && (
+          {/* Pricing is the office's: a crew lead fills the walk-through in and the office starts the
+              estimate from it. */}
+          {office && estimateHref && (
             <Link href={estimateHref}>
               <Button type="button">Start The Estimate</Button>
             </Link>
