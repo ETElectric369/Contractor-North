@@ -6,7 +6,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { runHear, type HearRun } from "@/lib/playbook/hear-run";
 import { coerceByPlaybook } from "@/lib/playbook/answers";
-import { applyFills, clearInapplicable } from "@/lib/playbook/resolve";
+import { applyFills, clearInapplicable, isAnswered } from "@/lib/playbook/resolve";
 import { CONVERSE_SYSTEM, conversePrompt, fallbackSay, parseSpoken } from "@/lib/onboarding/converse";
 import { asRegister, clampHumor, toneDirective } from "@/lib/nort/tone";
 import { playbookForForm } from "@/lib/playbook/parse";
@@ -120,8 +120,21 @@ export async function talkSetup(needKey: string | null, answers: Answers, said: 
   }
 
   const spoken = parseSpoken(raw);
+  // THE QUESTION ON SCREEN CAN BE ANSWERED AGAIN. The tour hands in what is already on file (the
+  // trade picked at sign-up, the name on the account) and promises "say it your way and I'll use
+  // your words" / "say a different name and I'll take that instead". FILL HOLES NEVER OVERWRITE A
+  // HAND refused every such answer, so Nort said the new words back while the old ones were kept
+  // and saved. The person answering the question in front of them IS the hand: that one key is
+  // opened for this turn, through the same gate, and put back as it was if nothing lands in it.
+  const onScreen = need?.key ?? null;
+  const open = onScreen && spoken.fills.some((f) => f.key === onScreen) ? { ...known, [onScreen]: null } : known;
   // SAME GATE AS EVER: provenance, no overwriting a hand, no undeclared keys.
-  const { answers: next, rejected } = applyFills(SETUP_PLAYBOOK, known, spoken.fills, text);
+  const { answers: applied, rejected } = applyFills(SETUP_PLAYBOOK, open, spoken.fills, text);
+  const next: Answers = { ...applied };
+  if (onScreen && open !== known && !isAnswered(applied[onScreen])) {
+    if (onScreen in known) next[onScreen] = known[onScreen];
+    else delete next[onScreen];
+  }
   const filled = spoken.fills
     .filter((f) => !rejected.includes(f))
     .map((f) => SETUP_PLAYBOOK.needs.find((n) => n.key === f.key)?.label ?? f.key);

@@ -8,7 +8,9 @@ const state = vi.hoisted(() => ({
   modelCalls: 0,
   hearCalls: 0,
   overCeiling: false,
+  reply: "",
 }));
+const QUIET_REPLY = '{"say":"Got it.","fills":[],"needs":[]}';
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("./settings/actions", () => ({ updateOrgSettings: vi.fn(async () => ({ ok: true })) }));
@@ -24,7 +26,7 @@ vi.mock("@/lib/anthropic", () => ({
     messages: {
       create: vi.fn(async () => {
         state.modelCalls++;
-        return { content: [{ type: "text", text: '{"say":"Got it.","fills":[],"needs":[]}' }], usage: {} };
+        return { content: [{ type: "text", text: state.reply }], usage: {} };
       }),
     },
   }),
@@ -62,6 +64,7 @@ beforeEach(() => {
   state.modelCalls = 0;
   state.hearCalls = 0;
   state.overCeiling = false;
+  state.reply = QUIET_REPLY;
 });
 
 describe("Nort off: the plain questions, and no model call", () => {
@@ -124,5 +127,47 @@ describe("Nort on: the same doors as before", () => {
     state.tables.organizations = { data: { settings: {} }, error: null };
     expect((await talkSetup("trade", {}, "hi")).ok).toBe(true);
     expect(state.modelCalls).toBe(1);
+  });
+});
+
+/**
+ * THE QUESTION ON SCREEN CAN BE ANSWERED AGAIN. The tour hands in the trade picked at sign-up and
+ * promises "say it your way and I'll use your words"; the fill gate refused every answer for a key
+ * already on file, so Nort repeated the new words while the old ones were kept and saved.
+ */
+describe("talkSetup: an answer to the question on screen replaces what was on file", () => {
+  const says = (fills: unknown[]) => {
+    state.reply = JSON.stringify({ say: "Got it.", fills });
+  };
+
+  it("the person's own words for their trade replace the sign-up key's words", async () => {
+    says([{ key: "trade", value: "master plumber and gas fitter" }]);
+    const r = await talkSetup("trade", { trade: "plumber" }, "master plumber and gas fitter, mostly");
+    expect(r).toMatchObject({ ok: true, answers: { trade: "master plumber and gas fitter" }, filled: ["Your trade"] });
+  });
+
+  it("a different name replaces the one on the account", async () => {
+    says([{ key: "full_name", value: "Sam Ortiz" }]);
+    const r = await talkSetup("full_name", { full_name: "Sam" }, "it's Sam Ortiz");
+    expect(r.ok && r.answers.full_name).toBe("Sam Ortiz");
+  });
+
+  it("chatting without answering keeps what was on file", async () => {
+    says([]);
+    const r = await talkSetup("trade", { trade: "plumber" }, "hello, that works");
+    expect(r.ok && r.answers.trade).toBe("plumber");
+  });
+
+  it("an answer that fails the gate puts the old one back (a rate not in their words)", async () => {
+    says([{ key: "labor_rate", value: 120, heard: "about a hundred" }]);
+    const r = await talkSetup("labor_rate", { labor_rate: 95 }, "about a hundred");
+    expect(r.ok && r.answers.labor_rate).toBe(95);
+    expect(r.ok && r.filled).toEqual([]);
+  });
+
+  it("only the question on screen opens: a filled answer to another question is still never overwritten", async () => {
+    says([{ key: "full_name", value: "Somebody Else" }, { key: "trade", value: "roofer" }]);
+    const r = await talkSetup("trade", { full_name: "Sam", trade: "plumber" }, "Somebody Else, roofer");
+    expect(r.ok && r.answers).toMatchObject({ full_name: "Sam", trade: "roofer" });
   });
 });

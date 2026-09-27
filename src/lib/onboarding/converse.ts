@@ -73,6 +73,11 @@ export function conversePrompt(need: Need | undefined, known: Answers, said: str
     if (need.slot?.type === "select") lines.push(`  they pick one of: ${need.slot.options.join(" | ")}`);
     else if (need.slot?.type === "number") lines.push(`  a number${need.slot.unit ? ` in ${need.slot.unit}` : ""}`);
     if (need.why) lines.push(`  why it matters: ${need.why}`);
+    // What's on file for THIS question can be replaced by what they say (talkSetup opens this one
+    // key): say so, so a person who puts it their own way is filled, not just agreed with.
+    const now = known[need.key];
+    if (now !== null && now !== undefined && String(now).trim() !== "")
+      lines.push(`  on file already: ${Array.isArray(now) ? now.join(", ") : String(now)} — if they give a different answer, fill it: theirs replaces this one`);
   } else {
     lines.push("THERE IS NO QUESTION ON SCREEN — this is a step where you are explaining something.");
   }
