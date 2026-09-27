@@ -44,6 +44,7 @@ import {
 import { supplierPayDue, type SupplierPayDue } from "./supplier-pay-due";
 import { getOrgSettings } from "@/lib/org-settings";
 import { featureOn } from "@/lib/features";
+import { todayStrInTz } from "@/lib/tz";
 import { readAlreadyBilledReach } from "@/lib/already-billed-read";
 import { reportError } from "@/lib/observe";
 
@@ -259,6 +260,38 @@ export async function readPaperSettings(supabase: any, orgId: string): Promise<{
   if (error) throw error;
   const settings = getOrgSettings(data && !Array.isArray(data) ? (data as { settings?: unknown }).settings : null);
   return { books_begin: settings.books_begin, timezone: settings.timezone };
+}
+
+/**
+ * THE DAY A COMPANY'S BOOKS BEGIN, READ ON ITS OWN (NY-feeders, 0366): for a feeder that has no
+ * bills read in hand (booksBeginOn takes the rows the supplier desk already read). The same order:
+ *   1. the day the company named (settings.books_begin, through readPaperSettings);
+ *   2. else its earliest live bill (superseded bills left out, as booksBeginOn's callers do);
+ *   3. else the day the company was made (organizations.created_at, as a day on its own clock).
+ * `orgId` is the signed-in person's company, from their profile: the org is read by that id, never
+ * as "the first organization the session can see". Throws on a failed read (readPaperSettings'
+ * rule), so the caller says it couldn't check rather than drawing the line in the wrong place. Null
+ * only when the company row itself isn't there.
+ */
+export async function readBooksStart(supabase: any, orgId: string): Promise<string | null> {
+  const settings = await readPaperSettings(supabase, orgId);
+  if (settings.books_begin) return settings.books_begin;
+  const { data: first, error: billErr } = await supabase
+    .from("bills")
+    .select("bill_date")
+    .eq("org_id", orgId)
+    .is("superseded_by_bill_id", null)
+    .not("bill_date", "is", null)
+    .order("bill_date", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  if (billErr) throw billErr;
+  const billDay = String((first as { bill_date?: string | null } | null)?.bill_date ?? "").slice(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(billDay)) return billDay;
+  const { data: org, error: orgErr } = await supabase.from("organizations").select("created_at").eq("id", orgId).maybeSingle();
+  if (orgErr) throw orgErr;
+  const made = Date.parse(String((org as { created_at?: string | null } | null)?.created_at ?? ""));
+  return Number.isFinite(made) ? todayStrInTz(settings.timezone, new Date(made)) : null;
 }
 
 /** The cards, from rows already read. The ONE call My Day and /bills both make. */

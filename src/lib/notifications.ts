@@ -2,7 +2,7 @@ import "server-only";
 import { createServiceClient } from "@/lib/supabase/server";
 import { reportError } from "@/lib/observe";
 import { isStaffRole } from "@/lib/actions/perms";
-import { sendPushToProfiles } from "@/lib/push";
+import { pushKindIsOptIn, sendPushToProfiles, type PushKind } from "@/lib/push";
 
 export type NotificationInput = {
   type?: string;
@@ -47,6 +47,52 @@ export async function createNotifications(
     // Best-effort: a notification must never break the caller. But not silent.
     reportError("createNotifications", e, { orgId, type: n.type ?? "general" });
     return false;
+  }
+}
+
+/**
+ * THE BELL RECORDS EVERY PUSH (Wave 1, W1-10 rewritten). Erik kept the Bell: "where would push
+ * notifications be recorded?" Sixteen push sites wrote no bell line, so a push dismissed on the lock
+ * screen (or never delivered: no signal, a muted kind, the app not installed) left nothing to go
+ * back to. This is the one door for a push that doesn't write its own line: it writes the bell line
+ * (createNotifications) and pushes, in that order, so the line is there even when the push isn't.
+ *
+ *   DEFAULT-ON KINDS (every kind but day_ahead): the line goes to every intended recipient, even one
+ *   who muted the push. Muting a buzz is not asking to lose the record.
+ *   OPT-IN KINDS (day_ahead: the morning digest and the 6 PM close-out): the line goes only to the
+ *   people the push went to (sendPushToProfiles' answer). Nobody who never asked for a daily digest
+ *   finds one on the bell every morning.
+ *
+ * Nothing new reaches a tech: the line says exactly what the push to him says, to exactly the people
+ * the push was for. The line's type is the push kind. Never throws: a notification must never unsave
+ * what caused it. Returns whether the line was written and who was pushed.
+ *
+ * NOT for a site that already writes its own line (ringOffice, the materials and stock rings, the
+ * quote-accepted and daily-report alerts, crew-notify, the long-shift job, ...): wrapping those would
+ * put every line on the bell twice. every-push-rings-the-bell.test.ts holds the list.
+ */
+export async function notifyPeople(
+  orgId: string | null | undefined,
+  profileIds: (string | null | undefined)[],
+  kind: PushKind,
+  n: { title: string; body?: string | null; url?: string | null },
+): Promise<{ bell: boolean; pushed: string[] }> {
+  try {
+    const ids = Array.from(new Set(profileIds.filter((x): x is string => !!x)));
+    if (!orgId || !ids.length || !n.title) return { bell: true, pushed: [] };
+    const line = { type: kind, title: n.title, body: n.body ?? null, url: n.url ?? null };
+    const payload = { title: n.title, body: n.body ?? "", ...(n.url ? { url: n.url } : {}) };
+    if (pushKindIsOptIn(kind)) {
+      const pushed = ((await sendPushToProfiles(ids, kind, payload).catch(() => [])) ?? []) as string[];
+      const bell = pushed.length ? await createNotifications(orgId, pushed, line) : true;
+      return { bell, pushed };
+    }
+    const bell = await createNotifications(orgId, ids, line);
+    const pushed = ((await sendPushToProfiles(ids, kind, payload).catch(() => [])) ?? []) as string[];
+    return { bell, pushed };
+  } catch (e) {
+    reportError("notifyPeople", e, { orgId, kind });
+    return { bell: false, pushed: [] };
   }
 }
 

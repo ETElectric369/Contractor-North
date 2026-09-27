@@ -25,7 +25,9 @@ import { isOpenToBuy, newestListPerJob } from "@/lib/materials-checklist";
 import { feederOn, inquiryActionItem } from "./switches";
 import { featureOn, featuresFromOffKey } from "@/lib/features";
 import {
+  COSTED_INVOICE_COLUMNS,
   NEEDS_RETURN_DAYS,
+  costedJobIds,
   daysAgoStr,
   detectNeedsReturn,
   detectStrayTime,
@@ -942,7 +944,9 @@ async function buildActionItems(ctx: {
       supabase.from("bills").select("job_id").in("job_id", jobIds).limit(200),
       supabase.from("purchase_orders").select("job_id").in("job_id", jobIds).limit(200),
       supabase.from("material_lists").select("job_id, material_list_items(id)").in("job_id", jobIds).limit(100),
-      supabase.from("invoices").select("job_id, status").in("job_id", jobIds).limit(200),
+      // Each line's kind rides along: a materials line on a live invoice is costs on the record
+      // (costedJobIds, the one rule the 6 PM push uses too).
+      supabase.from("invoices").select(COSTED_INVOICE_COLUMNS).in("job_id", jobIds).limit(200),
       supabase
         .from("appointments")
         .select("job_id")
@@ -954,13 +958,12 @@ async function buildActionItems(ctx: {
       supabase.from("job_schedule_segments").select("job_id").in("job_id", jobIds).gte("end_date", todayStr).limit(200),
     ]);
 
-    const costedJobIds = new Set<string>([
-      ...((wBillsR.data ?? []) as any[]).map((b) => b.job_id as string),
-      ...((wPosR.data ?? []) as any[]).map((p) => p.job_id as string),
-      ...((wMatR.data ?? []) as any[])
-        .filter((m) => (m.material_list_items?.length ?? 0) > 0)
-        .map((m) => m.job_id as string),
-    ]);
+    const costed = costedJobIds({
+      bills: (wBillsR.data ?? []) as any[],
+      purchaseOrders: (wPosR.data ?? []) as any[],
+      materialLists: (wMatR.data ?? []) as any[],
+      invoices: (wInvR.data ?? []) as any[],
+    });
     const invoicedJobIds = new Set<string>(
       ((wInvR.data ?? []) as any[]).filter((i) => i.status !== "void" && i.job_id).map((i) => i.job_id as string),
     );
@@ -977,7 +980,7 @@ async function buildActionItems(ctx: {
     }
 
     // 2) UNBILLED WORK — time on the job, zero costs/POs/materials. The Romex leak.
-    for (const f of detectUnbilledWork({ jobs: workedJobs, worked, costedJobIds, invoicedJobIds })) {
+    for (const f of detectUnbilledWork({ jobs: workedJobs, worked, costedJobIds: costed, invoicedJobIds })) {
       items.push({
         id: `unbilled-${f.job.id}`,
         kind: "job_unbilled_work",
