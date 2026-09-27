@@ -365,7 +365,9 @@ export function AlreadyBilledSheet({
                 )}
                 <p className="text-slate-600">{hoursCompareWords(chosen.line, hoursOf(data.entries, checked))}</p>
                 <p className="text-xs text-slate-500">
-                  Ticked: {chosen.line.description.trim() || "the line"}&apos;s own person, up to the day {chosen.invoice.invoice_number ?? "the bill"} was written.
+                  {precheckHours(data.entries, chosen.line, chosen.invoice.created_at, data.tz).person
+                    ? `Ticked to start: that person's hours up to the day ${chosen.invoice.invoice_number ?? "the bill"} was written (${formatDateShort(chosen.invoice.created_at, data.tz)}), not the day it was sent.`
+                    : "Nothing is ticked to start: the line doesn't name one person. Tick the hours it charged for."}
                 </p>
               </div>
             )}

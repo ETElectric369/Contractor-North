@@ -135,7 +135,7 @@ describe("the sheet, hours", () => {
     expect(t).toContain("Not billed yet: 20.5 h");
     expect(t).toContain("Which hours did it charge for?");
     expect(t).toContain("Line: 13 h · Checked: 12.5 h");
-    expect(t).toContain("up to the day INV-00023 was written");
+    expect(t).toContain("up to the day INV-00023 was written (Jun 21), not the day it was sent");
     expect(Array.from(html.matchAll(/<input type="checkbox"[^>]*>/g))).toHaveLength(3);
   });
 
