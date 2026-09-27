@@ -209,7 +209,7 @@ export const appointmentActions: Record<string, ActionDef> = {
     group: "appointment",
     label: "Record how it ended",
     description:
-      "Record how a walk-through ended: 'lost' (didn't win the bid), 'no_bid' (decided not to quote it), or 'won'. Use it when the user says they lost a bid, aren't pursuing it, or already handled the work — it clears the visit from Needs action without inventing an estimate.",
+      "Record how a walk-through ended: 'lost' (didn't win the bid), 'no_bid' (decided not to quote it), or 'won'. Use it when the user says they lost a bid, aren't pursuing it, or already handled the work — it clears the visit from Needs You without inventing an estimate.",
     input: z.object({ id: z.string(), outcome: z.enum(["won", "lost", "no_bid"]) }),
     auth: "staff",
     effect: "write",
