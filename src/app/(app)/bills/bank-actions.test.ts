@@ -235,6 +235,13 @@ describe("the door", () => {
     expect(db.payments.every((p) => p.bank_line_id === null)).toBe(true);
   });
 
+  it("a download longer than 5,000 rows is refused whole, never cut", async () => {
+    const rows = [["Date", "Description", "Amount"], ...Array.from({ length: 5001 }, (_, i) => ["09/01/2026", `COFFEE CART ${i}`, "-4.50"])];
+    const res = await addOpenList({ name: "Long.csv", sha256: null, table: rows, listDate: "2026-09-26", source: "bills_drop" });
+    expect(res).toMatchObject({ ok: false, error: "Long.csv has more than 5,000 rows. Download a shorter date range and drop that." });
+    expect(db.organized_items).toHaveLength(0);
+  });
+
   it("the card sorts it against the books: the payout matched, the rest one row per merchant", async () => {
     const id = await drop();
     const v = await view(id);

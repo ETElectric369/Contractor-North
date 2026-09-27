@@ -20,7 +20,7 @@ import {
   type StoredOpenList,
 } from "@/lib/supplier-open-list";
 import { looksLikeBankTable, noLinesSaid } from "@/lib/bank-download";
-import { bankLine, capBankTable, createBankPaper, readBankDownload } from "./bank-core";
+import { bankLine, bankTableTooLong, capBankTable, createBankPaper, readBankDownload } from "./bank-core";
 import { applyOpenListCore, createOpenListPaper, loadAccounts, loadPapers, openListLine, orgToday, resolveAccount } from "./open-list-core";
 import { fingerprintSeen } from "@/app/(app)/organize/paperwork-actions";
 import { isMissingColumnError } from "@/app/(app)/organize/paperwork-core";
@@ -68,6 +68,8 @@ export async function addOpenList(input: {
     const at = findHeaderRow(bankTable);
     const supplierRef = at >= 0 && readHeaderRow(bankTable[at] ?? []).columns.reference !== undefined;
     if (looksLikeBankTable(bankTable, supplierRef)) {
+      const tooLong = bankTableTooLong(input.table, name);
+      if (tooLong) return { ok: false, error: tooLong };
       const download = readBankDownload(bankTable, name);
       if (!download) return { ok: false, error: `${name} reads like a bank download, but none of its lines did.` };
       if (!download.lines.length) return { ok: false, error: noLinesSaid(download, name) };

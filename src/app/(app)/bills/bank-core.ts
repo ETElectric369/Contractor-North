@@ -56,9 +56,19 @@ export function isMissingBank(err: unknown): boolean {
 
 export const sha256Hex = (text: string) => createHash("sha256").update(text).digest("hex");
 
+/** The most rows a bank download may carry (the old .xls reader's own limit, xls-read.ts). */
+export const BANK_MAX_ROWS = 5000;
+
 /** The table as the server keeps looking at it: capped, so a stray export can't bloat a request. */
 export function capBankTable(table: readonly (readonly unknown[])[]): string[][] {
-  return table.slice(0, 5000).map((r) => (Array.isArray(r) ? r : []).slice(0, 30).map((c) => String(c ?? "").slice(0, 300)));
+  return table.slice(0, BANK_MAX_ROWS).map((r) => (Array.isArray(r) ? r : []).slice(0, 30).map((c) => String(c ?? "").slice(0, 300)));
+}
+
+/** A download longer than the cap is refused whole, never cut: a bank that lists newest first
+ *  would lose its oldest lines without a word. Null when it fits. */
+export function bankTableTooLong(table: readonly (readonly unknown[])[], name: string): string | null {
+  const rows = table.filter((r) => Array.isArray(r) && r.some((c) => String(c ?? "").trim() !== "")).length;
+  return rows > BANK_MAX_ROWS ? `${name} has more than ${BANK_MAX_ROWS.toLocaleString("en-US")} rows. Download a shorter date range and drop that.` : null;
 }
 
 /** A table into a bank download (redacted), or null when it isn't one. */
