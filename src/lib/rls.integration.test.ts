@@ -59,7 +59,7 @@ d("RLS multi-tenant isolation invariant", () => {
   // the two checks above stayed green while every tenant could read every job — the exact 0173
   // class this file exists to catch (audit v921). So read the EXPRESSIONS, not the count.
   const orgPoliciesSql = `
-    select p.tablename as tbl, p.policyname as pol,
+    select p.tablename as tbl, p.policyname as pol, p.permissive as permissive,
       coalesce(p.qual,'') as qual, coalesce(p.with_check,'') as with_check
     from pg_policies p
     where p.schemaname='public'
@@ -99,8 +99,18 @@ d("RLS multi-tenant isolation invariant", () => {
 
   it("every non-deny policy on an org-scoped table scopes by org", async () => {
     const { rows } = await client.query(orgPoliciesSql);
+    const orgScoped = (r: any) => /auth_org_id|org_id/.test(`${r.qual} ${r.with_check}`);
+    // A RESTRICTIVE policy never grants a row: Postgres ANDs it onto the permissive ones, so it can
+    // only take rows away (0365's organized_items_bank_is_staff: a bank download in the tray is
+    // staff-only). It needs no org test of its own, but only on top of a permissive policy that
+    // scopes the same table by org: a restrictive rule is never a table's org boundary.
+    const restrictiveAlone = [...new Set(rows.filter((r: any) => r.permissive === "RESTRICTIVE").map((r: any) => r.tbl))].filter(
+      (tbl) => !rows.some((r: any) => r.tbl === tbl && r.permissive !== "RESTRICTIVE" && orgScoped(r)),
+    );
+    expect(restrictiveAlone).toEqual([]);
     const unscoped = rows
       .filter((r: any) => {
+        if (r.permissive === "RESTRICTIVE") return false;
         // `using (false)` / `with check (false)` is a deliberate deny — service-role only.
         const expr = [r.qual, r.with_check].filter((e: string) => e && e.trim() !== "false").join(" ");
         if (!expr) return false;
