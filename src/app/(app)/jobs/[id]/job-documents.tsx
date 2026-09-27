@@ -115,7 +115,8 @@ export function JobDocuments({
    *  its flag would have no Record As Cost). null = not known (the ties weren't read): nothing is
    *  claimed, and Record as Cost stays on every receipt, as before. */
   looseIds?: readonly string[] | null;
-  /** Said when the ties couldn't be read. */
+  /** Said when the ties couldn't be read (the bills then draw no Receipt door): the fold starts open
+   *  so it is seen. */
   tieNote?: string | null;
 }) {
   const router = useRouter();
@@ -125,8 +126,9 @@ export function JobDocuments({
   const loose = looseIds ? new Set(looseIds) : null;
   const looseCount = loose ? papers.filter((d) => loose.has(d.id)).length : 0;
   // Open while a paper is on no bill, as the page loaded: a fold that shut itself the moment the last
-  // one was recorded would hide the line saying it was.
-  const [openAtStart] = useState(() => looseCount > 0);
+  // one was recorded would hide the line saying it was. Open too when the ties couldn't be read: the
+  // bills above draw no Receipt door then, and the sentence saying why is inside this fold.
+  const [openAtStart] = useState(() => looseCount > 0 || !!tieNote);
   const [category, setCategory] = useState("Receipt");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);

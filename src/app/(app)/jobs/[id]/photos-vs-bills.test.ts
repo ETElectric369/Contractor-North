@@ -180,6 +180,8 @@ describe("the Costs tab: Receipts & Papers", () => {
 
   it("the links couldn't be read: no paper is called loose, Record As Cost stays on every receipt, and it says so", () => {
     const lost = r(JobDocuments, { ...props, billOf: {}, looseIds: null, tieNote: "Couldn't check which papers made which bill just now. Reload to try again." });
+    // The bills draw no Receipt door then, so the sentence saying why is never folded out of sight.
+    expect(lost).toMatch(/^<details[^>]*open=""/);
     expect(text(lost)).not.toContain("Not On A Bill");
     expect(text(lost)).toContain("Couldn't check which papers made which bill just now.");
     const lostRows = lost.split(/<li[ >]/).slice(1);
