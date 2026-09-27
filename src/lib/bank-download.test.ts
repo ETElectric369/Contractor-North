@@ -551,6 +551,19 @@ describe("what needs a person: one row per merchant, the guess first and never p
     expect(plan.groups.find((g) => g.label.includes("DENTAL"))!.guess).toBeNull();
   });
 
+  it("a bare Withdrawal is never an ATM, and Point Of Sale never a merchant", () => {
+    const line = (description: string, cents = -6210) => ({ row: 2, postedOn: "2026-09-10", cents, description, check: null, last4: null, merchantKey: merchantKeyOf(description), key: "k" });
+    const books = ORG_BOOKS();
+    expect(guessFor(line("POINT OF SALE WITHDRAWAL SHELL OIL 57444 ANYTOWN CA"), books)).toEqual({ choice: "cost", bucket: "Gas & Truck", costKind: "fuel" });
+    expect(guessFor(line("Withdrawal POS #123456 SHELL OIL"), books)).toEqual({ choice: "cost", bucket: "Gas & Truck", costKind: "fuel" });
+    expect(guessFor(line("ONLINE TRANSFER WITHDRAWAL TO XXXXXX9876"), books)).toEqual({ choice: "draw" });
+    expect(guessFor(line("Withdrawal ACH ACME INSURANCE"), books)).toEqual({ choice: "cost", bucket: "Insurance & Licenses", costKind: null });
+    expect(guessFor(line("ATM WITHDRAWAL 000123 MAIN ST"), books)).toEqual({ choice: "petty_cash" });
+    expect(merchantKeyOf("POINT OF SALE WITHDRAWAL SHELL OIL 57444 ANYTOWN CA")).toBe("shell");
+    expect(merchantKeyOf("POINT OF SALE WITHDRAWAL HOME DEPOT 4410")).toBe("home");
+    expect(merchantKeyOf("VISA DDA PUR 123456 SHELL OIL")).toBe("shell");
+  });
+
   it("a deposit guesses the one open invoice with that balance; a check guesses the crew", () => {
     const dl = download();
     const books = ORG_BOOKS({ invoices: [{ id: "inv-1", number: "INV-1001", balanceCents: 127500 }, { id: "inv-2", number: "INV-1002", balanceCents: 40000 }] });

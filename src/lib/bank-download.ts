@@ -237,7 +237,7 @@ const DROP_LEAD = new Set([
 const NOISE = new Set([
   "pos", "ach", "debit", "credit", "purchase", "card", "checkcard", "dbt", "crd", "recurring", "visa", "mastercard", "mc",
   "authorized", "on", "pending", "withdrawal", "payment", "pmt", "trans", "transaction", "sale", "preauth", "pin", "signature",
-  "usa", "us", "inc", "llc", "co", "corp",
+  "usa", "us", "inc", "llc", "co", "corp", "preauthorized", "dda", "pur", "withdraw",
 ]);
 
 /** A description's words, lowercased, with numbers, dates, card prefixes and bank noise taken out. */
@@ -247,6 +247,8 @@ export function merchantWords(description: string): string[] {
   s = s.replace(/\b\d{1,2}\/\d{1,2}(?:\/\d{2,4})?\b/g, " "); // dates
   s = s.replace(/['’`]/g, " ");
   s = s.replace(/\bcash\s*app\b/g, " cashapp ");
+  // "POINT OF SALE WITHDRAWAL SHELL…": the kind of transaction, in front of every card purchase.
+  s = s.replace(/\bpoint\s+of\s+sale\b/g, " ");
   return s
     .split(/[^a-z0-9&]+/)
     .filter((w) => w && !/\d/.test(w) && !NOISE.has(w));
@@ -772,7 +774,9 @@ const INSURANCE_RE = /\b(insur\w*|ins prem|premium|liability|bond|bonding|licen[
 const FEE_RE = /\b(fee|fees|service charge|overdraft|nsf|interest charge|finance charge|monthly maintenance|wire fee)\b/i;
 const PHONE_RE = /\b(verizon|at&t|att|t-mobile|tmobile|sprint|comcast|xfinity|spectrum|internet|wireless|phone|google|microsoft|adobe|dropbox|quickbooks|intuit|office)\b/i;
 const TOOLS_RE = /\b(home depot|lowes|lowe s|harbor freight|ace hardware|hardware|tool|tools|grainger|fastenal|menards)\b/i;
-const ATM_RE = /\b(atm|cash withdrawal|withdrawal)\b/i;
+/** An ATM, said as one: never a bare "Withdrawal", which many banks print before every debit
+ *  (a card purchase, an ACH bill, a transfer to the owner). */
+const ATM_RE = /\b(atm|cash withdrawal)\b/i;
 const PAY_WORDS_RE = /\b(zelle|venmo|cash app|cashapp|payroll|transfer|xfer)\b/i;
 
 const FUEL: BankChoice = { choice: "cost", bucket: "Gas & Truck", costKind: "fuel" };
@@ -812,8 +816,9 @@ export function guessFor(line: BankLine, books: BankBooks): BankChoice | null {
   const named = PAY_WORDS_RE.test(line.description) ? crewNamed(line.description, books.crew) : null;
   if (named) return { choice: "crew", profileId: named.id };
   const d = line.description.replace(/[*_]/g, " ");
-  if (ATM_RE.test(d)) return { choice: "petty_cash" };
+  // A transfer is asked first: "ONLINE TRANSFER WITHDRAWAL TO XXXX9876" is the owner's, not an ATM.
   if (TRANSFER_RE.test(d) && !PROCESSOR_RE.test(d)) return { choice: "draw" };
+  if (ATM_RE.test(d)) return { choice: "petty_cash" };
   if (INSURANCE_RE.test(d)) return { choice: "cost", bucket: "Insurance & Licenses", costKind: null };
   if (FEE_RE.test(d)) return { choice: "cost", bucket: "Fees", costKind: null };
   if (TRUCK_RE.test(d)) return TRUCK;
