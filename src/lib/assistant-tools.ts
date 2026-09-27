@@ -76,7 +76,7 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
   {
     name: "list_quotes",
     description:
-      "List this company's quotes/estimates with their status, total, and customer. Use for 'show me all quotes', 'which quotes are still open', 'what did I quote the Jones job'. To pull up a SPECIFIC customer's estimate (e.g. 'the estimate we started for Jackie Burks'), FIRST call list_customers to get their customer_id, then pass it here (optionally with status='draft') — don't rely on a text search of the title. Common statuses: draft, sent, accepted, declined, expired.",
+      "List this company's quotes/estimates with their status, total, and customer. Use for 'show me all quotes', 'which quotes are still open', 'what did I quote the <customer> job'. To pull up a SPECIFIC customer's estimate (e.g. 'the estimate we started for <customer>'), FIRST call list_customers to get their customer_id, then pass it here (optionally with status='draft') — don't rely on a text search of the title. Common statuses: draft, sent, accepted, declined, expired.",
     input_schema: {
       type: "object",
       properties: {
@@ -153,13 +153,13 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
   {
     name: "get_customer",
     description:
-      "Read ONE contact's full record by id — name, company, type, phone, email, full address, status, and notes. Use after list_customers resolves a name to an id: e.g. 'what's Jackie Burks's address', or to confirm you have the right person before pinning them to an estimate / job / invoice.",
+      "Read ONE contact's full record by id — name, company, type, phone, email, full address, status, and notes. Use after list_customers resolves a name to an id: e.g. 'what's <customer>'s address', or to confirm you have the right person before pinning them to an estimate / job / invoice.",
     input_schema: { type: "object", properties: { customer_id: { type: "string", description: "The customer's id (from list_customers)." } }, required: ["customer_id"] },
   },
   {
     name: "schedule_overview",
     description:
-      "What's scheduled in a time window — jobs, appointments, and tasks due. Use for 'what's on the schedule this week', 'what do I have today', 'anything next week'. PAST windows work too: for 'when was the Waldow oven visit', pass around (or date) with a past date instead of a named range.",
+      "What's scheduled in a time window — jobs, appointments, and tasks due. Use for 'what's on the schedule this week', 'what do I have today', 'anything next week'. PAST windows work too: for 'when was the <customer> <visit>', pass around (or date) with a past date instead of a named range.",
     input_schema: {
       type: "object",
       properties: {
@@ -396,7 +396,7 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
   {
     name: "list_material_items",
     description:
-      "The LINE ITEMS on a job's materials list (the job's one shopping/take-off list): each line's item_id, description, part number, quantity, unit, whether it's been purchased, and whether it's a tool. Use for 'what's on the Waldow materials list', 'what still needs to be bought for the Miller job', and to find the exact line BEFORE material.markPurchased / material.removeLine (pass the item_id it returns). Pass job_id (the job's id from list_jobs, or its name / number as spoken — 'Waldow', 'J-012') or list_id (from list_material_lists). Lines are unpurchased until someone ticks them, so unpurchased = still to buy.",
+      "The LINE ITEMS on a job's materials list (the job's one shopping/take-off list): each line's item_id, description, part number, quantity, unit, whether it's been purchased, and whether it's a tool. Use for 'what's on the <job> materials list', 'what still needs to be bought for the <job> job', and to find the exact line BEFORE material.markPurchased / material.removeLine (pass the item_id it returns). Pass job_id (the job's id from list_jobs, or its name / number as spoken — '<job name>', 'J-012') or list_id (from list_material_lists). Lines are unpurchased until someone ticks them, so unpurchased = still to buy.",
     input_schema: {
       type: "object",
       properties: {

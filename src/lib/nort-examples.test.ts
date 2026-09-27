@@ -21,7 +21,7 @@ const ROOT = process.cwd();
 
 /** ET's people, jobs, places and account; and the electrician-only examples that leaked everywhere. */
 const EXAMPLE_WORDS =
-  /\b(brian|apache|romex|subpanels?|home ?runs?|homeruns?|board count|joists?|TR-34426|truckee|herringbone)\b|\b1[24][-/]2\b|\b10[-/]3\b/gi;
+  /\b(brian|apache|romex|subpanels?|home ?runs?|homeruns?|board count|joists?|TR-34426|truckee|herringbone|burks|chmura|chamorro|waldow)\b|\b1[24][-/]2\b|\b10[-/]3\b/gi;
 /** The same words, for a yes/no test (no /g, so no lastIndex carried between calls). */
 const ANY_EXAMPLE_WORD = new RegExp(EXAMPLE_WORDS.source, "i");
 
