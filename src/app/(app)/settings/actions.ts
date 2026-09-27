@@ -1096,8 +1096,8 @@ export async function updateOrgSettings(
   // NORMALIZE doc_style ON THE WAY IN TOO (audit v921). public_quote/public_invoice (0239) hand
   // `o.settings->'doc_style'` to anyone holding a share token, verbatim — so whatever extra keys
   // this passthrough stored (an internal note, a pricing comment, a blob) shipped in the anonymous
-  // response body. normalizeDocStyle protects rendering; storing only the eight known keys protects
-  // the wire.
+  // response body. normalizeDocStyle protects rendering; storing only the known keys (the tagline
+  // among them) protects the wire.
   if ("doc_style" in safe) safe.doc_style = normalizeDocStyle(safe.doc_style);
 
   const { data: org } = await ctx.supabase

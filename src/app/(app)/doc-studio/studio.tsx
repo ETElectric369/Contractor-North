@@ -9,7 +9,7 @@ import { Input, Label } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { useToast } from "@/components/toast";
 import { updateOrgSettings, setDocTemplateFor } from "../settings/actions";
-import { DEFAULT_DOC_STYLE, normalizeDocStyle, type DocStyle } from "@/lib/doc-style";
+import { DEFAULT_DOC_STYLE, TAGLINE_MAX, normalizeDocStyle, type DocStyle } from "@/lib/doc-style";
 import {
   SAMPLE_CUSTOMER,
   SAMPLE_DESCRIPTION,
@@ -77,6 +77,7 @@ export function DocStudio({
   const [marks, setMarks] = useState<Marks | null>(null);
   const [dragging, setDragging] = useState<HandleId | null>(null);
   const [dragLabel, setDragLabel] = useState<string | null>(null);
+  const [taglineTyped, setTaglineTyped] = useState<string | null>(null);
 
   const undoRef = useRef<DocStyle[]>([]);
   const redoRef = useRef<DocStyle[]>([]);
@@ -228,6 +229,12 @@ export function DocStudio({
 
   const scale = marks?.scale ?? 96;
   const template = (templates[docKind] || fallbackTemplate || "classic") as Template;
+  // The page wears the tagline being typed, not the one the server read at load.
+  const coLive = { ...co, tagline: style.tagline };
+  // The saved tagline is trimmed, so the box keeps what was typed (a space before the next word)
+  // while it still reads as the saved one; undo or reset put the saved one back in the box.
+  const taglineShown =
+    taglineTyped !== null && normalizeDocStyle({ tagline: taglineTyped }).tagline === style.tagline ? taglineTyped : style.tagline;
 
   function pickTemplate(t: Template) {
     setTemplates((m) => ({ ...m, [docKind]: t }));
@@ -317,7 +324,8 @@ export function DocStudio({
           </button>
           <button
             type="button"
-            onClick={() => apply({ ...DEFAULT_DOC_STYLE })}
+            // The layout goes back to standard; the company's tagline is not layout, so it stays.
+            onClick={() => apply({ ...DEFAULT_DOC_STYLE, tagline: style.tagline })}
             title="Back to the standard layout"
             className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-800"
           >
@@ -331,12 +339,27 @@ export function DocStudio({
         </span>
       </div>
 
-      {/* Closing line + breakdown for the doc being viewed. */}
+      {/* Tagline (every document), closing line + breakdown for the doc being viewed. */}
       <div className="flex flex-wrap items-end gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2">
+        <div className="min-w-64 flex-1">
+          <Label htmlFor="studio-tagline">Tagline Under Your Name</Label>
+          <Input
+            id="studio-tagline"
+            className="h-11"
+            value={taglineShown}
+            maxLength={TAGLINE_MAX}
+            onChange={(e) => {
+              setTaglineTyped(e.target.value);
+              apply({ ...style, tagline: e.target.value });
+            }}
+            placeholder="Blank = no line under your name"
+          />
+        </div>
         <div className="min-w-64 flex-1">
           <Label htmlFor="studio-closing">{docKind === "invoice" ? "Invoice Closing Line" : "Estimate Closing Line"}</Label>
           <Input
             id="studio-closing"
+            className="h-11"
             value={docKind === "invoice" ? style.closing_invoice : style.closing_quote}
             onChange={(e) =>
               apply(docKind === "invoice" ? { ...style, closing_invoice: e.target.value } : { ...style, closing_quote: e.target.value })
@@ -362,7 +385,7 @@ export function DocStudio({
         <div ref={wrapRef} className="relative mx-auto w-fit max-w-full select-none pl-7 pt-7">
           {docKind === "invoice" ? (
             <InvoiceDocument
-              co={co}
+              co={coLive}
               template={template}
               number="INV-001"
               createdAt={"2026-08-29"}
@@ -383,7 +406,7 @@ export function DocStudio({
             />
           ) : (
             <QuoteDocument
-              co={co}
+              co={coLive}
               template={template}
               docLabel="Estimate"
               number="E-001"
