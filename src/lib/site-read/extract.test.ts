@@ -124,6 +124,19 @@ describe("extractContact", () => {
     expect(fields).toMatchObject({ phones: ["(530) 555-0123"], street: "45 Commercial St", city: "Portola", state: "CA", zip: "96122" });
   });
 
+  it("reads microdata the way it is really written: unquoted, a list of props, upper-case tags, nested words", () => {
+    const html = `<P ITEMPROP=telephone>(530) 555-0124</P>
+      <a class="mail" itemprop="email contactPoint" href="#"><b>desk@frl-lumber.example</b></a>
+      <span data-itemprop="streetAddress">not this</span><span itemprop="streetAddress">46 Commercial St</span>
+      <span itemprop="addressLocality">Portola</span>`;
+    expect(extractContact(html, "https://frl.example.com/").fields).toMatchObject({
+      phones: ["(530) 555-0124"],
+      email: "desk@frl-lumber.example",
+      street: "46 Commercial St",
+      city: "Portola",
+    });
+  });
+
   it("takes a JSON-LD address written as one string, and openingHours shorthand", () => {
     const html = `<script type="application/ld+json">{"@type":"Electrician","name":"Bright Line Electric","address":"9 Oak Ave, Graeagle, CA 96103","openingHours":["Mo-Fr 07:00-15:30"],}</script>`;
     expect(extractContact(html, "https://brightline.example/").fields).toMatchObject({
@@ -165,6 +178,9 @@ describe("extractContact", () => {
     ["unclosed meta quotes", '<meta content="'.repeat(90_000)],
     ["half tags", "<a <a <a ".repeat(160_000)],
     ["itemprop bait", '<span itemprop="telephone" '.repeat(50_000)],
+    // ONE tag, 1.47 MB long: a pattern that looks for itemprop anywhere in a tag re-scans it per attribute.
+    ["one itemprop tag", `<span ${'itemprop="telephone" '.repeat(70_000)}`],
+    ["one closed itemprop tag", `<span ${'itemprop="telephone" '.repeat(70_000)}>(530) 555-0123`],
     ["street-number bait", "1 a1 Main ".repeat(140_000)],
     ["hours bait", "Mon 1-".repeat(230_000)],
   ])("stays fast on 1.5 MB of %s (a hostile page can't make it scan once per tag)", (_what, html) => {

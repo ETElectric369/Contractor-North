@@ -429,6 +429,36 @@ function ldAddress(v: unknown): Address | null {
   return out.street || out.city || out.zip ? out : null;
 }
 
+// ── MICRODATA ───────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The first element on the page for each itemprop asked for, and its words (up to 300 characters,
+ * to the element's own closing tag). ONE pass over the tags, with the same linear TAG pattern: a
+ * pattern that hunts for "itemprop" somewhere inside a tag re-scans the rest of a long tag once per
+ * attribute in it, so a single 1.5 MB tag of itemprop="telephone" repeated ran for minutes.
+ */
+function microdata(bare: string, props: readonly string[]): Map<string, string> {
+  const want = new Map(props.map((p) => [p.toLowerCase(), p]));
+  const out = new Map<string, string>();
+  const re = TAG("(\\w+)");
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(bare)) && out.size < want.size) {
+    if (!/itemprop/i.test(m[0])) continue;
+    const keys = (attrsOf(m[0]).itemprop ?? "")
+      .toLowerCase()
+      .split(/\s+/)
+      .filter((k) => want.has(k) && !out.has(want.get(k)!));
+    if (!keys.length) continue;
+    const start = m.index + m[0].length;
+    const window = bare.slice(start, start + 400);
+    const close = new RegExp(`</${m[1]}\\s*>`, "i").exec(window);
+    if (!close || close.index > 300) continue;
+    const words = clean(decodeEntities(window.slice(0, close.index).replace(/<[^<>]*>/g, " ")), 120);
+    if (words) for (const k of keys) out.set(want.get(k)!, words);
+  }
+  return out;
+}
+
 // ── THE READER ──────────────────────────────────────────────────────────────────────────────────
 
 /** Page <title>, split and cleaned: "Home | Acme Electric Supply" → "Acme Electric Supply". */
@@ -512,18 +542,15 @@ export function extractContact(html: string, pageUrl: string): Extraction {
     });
   }
   // Microdata written on the page itself: <span itemprop="telephone">(530) 555-0123</span>.
-  const itemprop = (prop: string): string | undefined => {
-    const r = new RegExp(`<(\\w+)\\b[^<>]*\\bitemprop\\s*=\\s*["']?${prop}\\b[^<>]*>([\\s\\S]{0,300}?)</\\1\\s*>`, "i").exec(bare);
-    return r ? clean(decodeEntities(r[2].replace(/<[^<>]*>/g, " ")), 120) : undefined;
-  };
-  addPhone(itemprop("telephone"), 3);
-  addEmail(itemprop("email"), 3);
+  const itemprop = microdata(bare, ["telephone", "email", "streetAddress", "addressLocality", "addressRegion", "postalCode"]);
+  addPhone(itemprop.get("telephone"), 3);
+  addEmail(itemprop.get("email"), 3);
   if (!f.street && !f.city) {
     setAddress({
-      street: itemprop("streetAddress"),
-      city: itemprop("addressLocality"),
-      state: stateCode(itemprop("addressRegion")),
-      zip: itemprop("postalCode"),
+      street: itemprop.get("streetAddress"),
+      city: itemprop.get("addressLocality"),
+      state: stateCode(itemprop.get("addressRegion")),
+      zip: itemprop.get("postalCode"),
     });
   }
 
