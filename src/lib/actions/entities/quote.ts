@@ -35,7 +35,7 @@ export const quoteActions: Record<string, ActionDef> = {
     group: "quote",
     label: "Follow up on an estimate",
     description:
-      "Set the day to follow up on an estimate the customer hasn't answered — 'remind me about the Miller estimate Monday'. Resolve the estimate with list_quotes and pass its id and date (YYYY-MM-DD, company-local, today or later). It sets only the follow-up day: the estimate's valid-until (the customer's offer window) never moves. Reversible: set another day any time.",
+      "Set the day to follow up on an estimate the customer hasn't answered — 'remind me about the Miller estimate Monday'. Resolve the estimate with list_quotes and pass its id and date (YYYY-MM-DD, company-local, today or later). It sets only the follow-up day: the estimate's valid-until (the customer's offer window) never moves. The estimate stays off Needs You until that day and is back on it that morning. Reversible: set another day any time.",
     input: z.object({ id: z.string(), date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/) }),
     auth: "staff",
     effect: "write",

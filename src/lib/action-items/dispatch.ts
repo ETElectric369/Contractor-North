@@ -31,6 +31,10 @@ function resolve(
   } else if (verb === "schedule" || verb === "snooze") {
     if (!date) return null;
     if (kind === "job_to_schedule") return { name: "job.scheduleDay", input: { id, date } };
+    // SNOOZE IS NOT A CONTACT. The row's Snooze Until is the same deed as Nort's inquiry.snooze: the
+    // lead comes back on that day and nobody is said to have reached anyone (no 'contacted', no
+    // last_contacted_at). Schedule / set a date stays the follow-up after a contact.
+    if (kind === "inquiry" && verb === "snooze") return { name: "inquiry.snooze", input: { id, date } };
     if (kind === "inquiry") return { name: "inquiry.contact", input: { id, follow_up_date: date } };
   } else if (verb === "assign") {
     const assignee = payload?.assignee ?? null;

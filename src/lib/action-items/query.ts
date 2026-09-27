@@ -22,6 +22,8 @@ import { noJobHoursActionItem } from "./no-job-hours-item";
 import { readNoJobHours, type NoJobHours } from "@/lib/no-job-hours";
 import { isOpenToBuy, newestListPerJob } from "@/lib/materials-checklist";
 import { feederOn, inquiryActionItem } from "./switches";
+import { heldJobDueFilter, inquiryDueFilter, quoteFollowUpState } from "./due-filters";
+import { isMissingColumn } from "@/lib/job-tasks";
 import { featureOn, featuresFromOffKey } from "@/lib/features";
 import {
   COSTED_INVOICE_COLUMNS,
@@ -206,18 +208,18 @@ async function buildActionItems(ctx: {
           .order("created_at", { ascending: false })
           .limit(50)
       : empty,
-    // New/uncontacted inquiries due for follow-up — staff only. A snoozed lead
-    // (the snooze verb writes status='contacted' + a future next_follow_up_at via
-    // inquiry.contact) stays OUT until its date — pulling it straight back made
-    // snooze a no-op. 'new' leads always show; contacted ones show when their
-    // follow-up is unset or due. A LIVE OBLIGATION: it runs with Leads off too (phone: Call Back).
+    // New/uncontacted inquiries due for follow-up — staff only. A snoozed lead stays OUT until its
+    // date, new or contacted alike (inquiryDueFilter): the row's Snooze and Nort's inquiry.snooze
+    // both write only next_follow_up_at, and a new lead that ignored it made "bring the Karen lead
+    // back Monday" a confirmed no-op. A new lead lands with no day (or today's), so it still shows
+    // the moment it arrives. A LIVE OBLIGATION: it runs with Leads off too (phone: Call Back).
     isStaff
       ? supabase
           .from("inquiries")
           .select("id, name, phone, status, next_follow_up_at, converted_at")
           .in("status", ["new", "contacted"])
           .is("converted_at", null)
-          .or(`status.eq.new,next_follow_up_at.is.null,next_follow_up_at.lte.${todayStr}`)
+          .or(inquiryDueFilter(todayStr))
           .order("created_at", { ascending: true })
           .limit(50)
       : empty,
@@ -269,14 +271,16 @@ async function buildActionItems(ctx: {
       : empty,
     // Quotes/estimates sent but not answered — the middle of the funnel. The
     // gone-quiet / expiring-soon cut is applied per-row below; the query just
-    // pulls the open sent docs.
+    // pulls the open sent docs. follow_up_at (0366, Nort's quote.followUp) is read when the column
+    // exists; before 0366 the same read runs without it and the old rule alone decides.
     isStaff
-      ? supabase
-          .from("quotes")
-          .select("id, quote_number, doc_type, status, total, valid_until, created_at, customers(name)")
-          .eq("status", "sent")
-          .order("created_at", { ascending: true })
-          .limit(50)
+      ? (async () => {
+          const read = (cols: string) =>
+            supabase.from("quotes").select(cols).eq("status", "sent").order("created_at", { ascending: true }).limit(50);
+          const base = "id, quote_number, doc_type, status, total, valid_until, created_at, customers(name)";
+          const withDay = await read(`${base}, follow_up_at`);
+          return withDay.error && isMissingColumn(withDay.error) ? read(base) : withDay;
+        })()
       : empty,
     // Accepted estimates — THE WIN. The customer said yes; this must scream "schedule the
     // job now" (the signal Erik lost when an accept showed nothing). The job's
@@ -603,22 +607,26 @@ async function buildActionItems(ctx: {
   // Sent quotes/estimates gone quiet — surfaced once the customer has had it
   // QUOTE_QUIET_DAYS+ with no answer, or the valid-until window is closing/past.
   // Open-only: acting on a quote (resend, follow up, mark declined) happens on
-  // its own page, and there's no snooze field that wouldn't alter the offer.
+  // its own page. THE FOLLOW-UP DAY (0366 quotes.follow_up_at, set by Nort's quote.followUp —
+  // never valid_until, which is the customer's offer) wins over the quiet rule: a day after today
+  // keeps the estimate off the list, and on its day it is back even if it isn't 7 days quiet.
   for (const q of (quoteR.data ?? []) as any[]) {
     const daysOut = q.created_at ? Math.floor((todayMs - Date.parse(q.created_at)) / 86_400_000) : 0;
     const daysToExpiry = q.valid_until ? Math.floor((Date.parse(q.valid_until) - todayMs) / 86_400_000) : null;
     const quiet = daysOut >= QUOTE_QUIET_DAYS;
     const expiring = daysToExpiry != null && daysToExpiry <= QUOTE_EXPIRY_SOON_DAYS;
-    if (!quiet && !expiring) continue; // still fresh — give the customer room
+    const followUp = quoteFollowUpState(q.follow_up_at, todayStr);
+    if (followUp === "later") continue; // the day he picked hasn't come yet
+    if (followUp === "none" && !quiet && !expiring) continue; // still fresh — give the customer room
     items.push({
       id: q.id,
       kind: "quote_awaiting",
       title: `${(q.doc_type ?? "quote") === "estimate" ? "Estimate" : "Quote"} ${q.quote_number} awaiting reply`,
       subtitle: q.customers?.name ?? formatCurrency(Number(q.total ?? 0)),
       who: null,
-      // Prefer the expiry for the "when" (that's the clock that matters); fall
-      // back to created so undated offers still sort by age.
-      when: q.valid_until ?? q.created_at ?? null,
+      // The follow-up day he picked, when that's why it's here; else the expiry (that's the clock
+      // that matters); fall back to created so undated offers still sort by age.
+      when: (followUp === "due" ? q.follow_up_at : null) ?? q.valid_until ?? q.created_at ?? null,
       // Past its valid-until the offer is dying — bump it above the routine chase.
       urgency: daysToExpiry != null && daysToExpiry < 0 ? 2 : 1,
       done: false,
@@ -1036,17 +1044,32 @@ async function buildActionItems(ctx: {
   // briefing prepares the decision: resume it, or confirm WHY it's still waiting. "Logic prepared
   // for success" — we look up the likely reason (an open task, or materials not ordered) instead of
   // just saying "on hold". Threshold keeps it a bounded, decide-able set, not a permanent nag.
+  //
+  // THE DAY THE HOLD PICKED (0366 jobs.hold_until): the picker says "Comes back Oct 20" and the rail
+  // says "Back Oct 20", so this list agrees — a held job is here from its day, never a week after
+  // the hold whatever day was picked (heldJobDueFilter). A hold with no day (one from before 0366)
+  // keeps the week-untouched rule. Before 0366 (no column) the old read runs alone.
   if (isStaff) {
     const ON_HOLD_STALE_DAYS = 7;
     const heldCutoff = new Date(Date.now() - ON_HOLD_STALE_DAYS * 864e5).toISOString();
-    const { data: heldJobs } = await supabase
+    const heldBase = "id, job_number, name, updated_at, customers(name)";
+    let heldRes: { data: unknown; error: unknown } = await supabase
       .from("jobs")
-      .select("id, job_number, name, updated_at, customers(name)")
+      .select(`${heldBase}, hold_until`)
       .eq("status", "on_hold")
-      .lt("updated_at", heldCutoff) // last touched (a proxy for "held since") over a week ago
+      .or(heldJobDueFilter(todayStr, heldCutoff))
       .order("updated_at", { ascending: true })
       .limit(20);
-    const held = (heldJobs ?? []) as any[];
+    if (heldRes.error && isMissingColumn(heldRes.error)) {
+      heldRes = await supabase
+        .from("jobs")
+        .select(heldBase)
+        .eq("status", "on_hold")
+        .lt("updated_at", heldCutoff) // last touched (a proxy for "held since") over a week ago
+        .order("updated_at", { ascending: true })
+        .limit(20);
+    }
+    const held = (heldRes.data ?? []) as any[];
     if (held.length) {
       const heldIds = held.map((j) => j.id);
       // Infer the blocker from the material take-off: a list with unpurchased (non-tool) items = the
@@ -1067,9 +1090,17 @@ async function buildActionItems(ctx: {
       for (const j of held) {
         // updated_at is only a PROXY for "held since" (any edit resets it), so we don't quote a
         // precise day count that could be wrong — just that it's been paused past the stale window.
+        // A hold with a day says the day it came back.
+        const back = j.hold_until
+          ? String(j.hold_until).slice(0, 10) >= todayStr
+            ? "Back today"
+            : `Back since ${formatDateShort(String(j.hold_until).slice(0, 10))}`
+          : null;
         const reason = unorderedMatJobs.has(j.id)
           ? "Materials not ordered yet"
-          : "On hold a while — still blocked?";
+          : back
+            ? `${back} — still blocked?`
+            : "On hold a while — still blocked?";
         items.push({
           id: `onhold-${j.id}`,
           kind: "job_on_hold",

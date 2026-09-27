@@ -49,7 +49,7 @@ export const inquiryActions: Record<string, ActionDef> = {
     group: "inquiry",
     label: "Snooze a lead",
     description:
-      "Bring a lead back on a later day without saying anyone reached them — 'bring the Karen lead back Monday'. Pass its id (from list_inquiries) and date (YYYY-MM-DD, company-local, today or later). It sets only the next follow-up day: the lead's status and last contact stay as they are (use inquiry.contact when they were actually reached). Reversible.",
+      "Bring a lead back on a later day without saying anyone reached them — 'bring the Karen lead back Monday'. Pass its id (from list_inquiries) and date (YYYY-MM-DD, company-local, today or later). It sets only the next follow-up day: the lead's status and last contact stay as they are (use inquiry.contact when they were actually reached). The lead, new or contacted, stays off Needs You until that day. Reversible.",
     input: z.object({ id: z.string(), date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/) }),
     auth: "staff",
     effect: "write",
