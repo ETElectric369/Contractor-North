@@ -25,7 +25,7 @@ vi.mock("@/app/(app)/billing/actions", () => ({
   ),
 }));
 
-import { InvoiceDetail } from "./invoice-detail";
+import { InvoiceDetail, dueWords, liveHoldDay } from "./invoice-detail";
 import { markupBoxSeed } from "@/lib/invoice-markup";
 import { bringInNewWorkSteps, bringInSentence } from "@/lib/actuals-draw";
 
@@ -213,10 +213,44 @@ describe("the invoice body (W1-27)", () => {
     expect(out).toContain("Group Materials &amp; Labor");
   });
 
+  it("a two-line invoice can still swap its lines: Move To Top / Move To Bottom show from two lines", async () => {
+    // The line's edit form opens on a tap (state), so the gate is pinned in the source.
+    const { readFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const src = readFileSync(join(process.cwd(), "src/app/(app)/billing/[id]/invoice-detail.tsx"), "utf8");
+    const at = src.indexOf("Move To Top");
+    const gate = src.slice(src.lastIndexOf("{items.length", at), at);
+    expect(gate).toMatch(/^\{items\.length > 1 && \(/);
+  });
+
   it("a set-aside draft says until when and why, with Change and Put Back", () => {
-    const out = html({ hold_until: "2026-10-03", hold_reason: "Waiting on the change order" });
-    expect(out).toContain("Set aside until Oct 3 · Waiting on the change order");
+    // A day still ahead in the company's timezone (the page's default, Pacific).
+    const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" });
+    const ahead = new Date(Date.parse(`${today}T00:00:00Z`) + 6 * 86_400_000).toISOString().slice(0, 10);
+    const said = new Date(`${ahead}T12:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+    const out = html({ hold_until: ahead, hold_reason: "Waiting on the change order" });
+    expect(out).toContain(`Set aside until ${said} · Waiting on the change order`);
     expect(out).toContain(">Change</button>");
     expect(out).toContain(">Put Back</button>");
+  });
+
+  it("a set-aside day that has come is no hold: Needs You has the draft back, so the line is gone", () => {
+    const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" });
+    for (const gone of ["2026-09-20", today]) {
+      const out = html({ hold_until: gone, hold_reason: "Waiting on the change order" });
+      expect(out).not.toContain("Set aside until");
+      expect(out).not.toContain(">Put Back</button>");
+    }
+    // The rule itself: only a day after today is a live hold (the query's hold_until <= today is back).
+    expect(liveHoldDay("2026-09-20", "2026-09-27")).toBeNull();
+    expect(liveHoldDay("2026-09-27", "2026-09-27")).toBeNull();
+    expect(liveHoldDay("2026-10-04", "2026-09-27")).toBe("2026-10-04");
+    expect(liveHoldDay(null, "2026-09-27")).toBeNull();
+  });
+
+  it("a bill that went out and came Back To Draft says its date: its next send keeps it", () => {
+    expect(dueWords({ isDraft: true, dueDate: "2026-08-31", byHand: false, netDays: 30, sentBefore: true })).toBe("Due Aug 31 · Net 30");
+    expect(dueWords({ isDraft: true, dueDate: "2026-08-31", byHand: false, netDays: 30, sentBefore: false })).toBe("Due 30 days after you send it");
+    expect(html({ due_date: "2026-08-31", due_date_by_hand: false, sent_at: "2026-08-01T18:00:00Z" })).not.toContain("after you send it");
   });
 });

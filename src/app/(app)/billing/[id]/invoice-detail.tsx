@@ -478,7 +478,9 @@ export function InvoiceDetail({
    *  Naming each source arms its "Start It Over" beside the message (0204). */
   const [stuckSources, setStuckSources] = useState<("labor" | "costs" | "quote" | "change_orders")[]>([]);
   /** A draft deliberately set aside (0206): the one body line says until when, and why. */
-  const holdUntil = (invoice as { hold_until?: string | null }).hold_until ?? null;
+  const storedHold = (invoice as { hold_until?: string | null }).hold_until ?? null;
+  /** Only a day still ahead is a hold (liveHoldDay): once it comes the draft is back on the list. */
+  const holdUntil = liveHoldDay(storedHold, todayStrInTz(tz));
   const holdReason = (invoice as { hold_reason?: string | null }).hold_reason ?? null;
   /* THE % BOX STARTS WHERE THE INVOICE IS (2026-09-25). It used to start at the customer's usual
      markup whatever the lines said, so on INV-078 - moved to 11% - it read 15, and the next touch
@@ -878,7 +880,7 @@ export function InvoiceDetail({
             ) : (
               <div className="flex flex-wrap items-center gap-x-2">
                 <span className="text-sm text-slate-700">
-                  {dueWords({ isDraft, dueDate: toDateInput(invoice.due_date), byHand: dueByHand, netDays })}
+                  {dueWords({ isDraft, dueDate: toDateInput(invoice.due_date), byHand: dueByHand, netDays, sentBefore: wasDelivered })}
                 </span>
                 {!linesLocked && (
                   <button type="button" onClick={() => setDueEditing(true)} className="inline-flex min-h-11 items-center text-sm font-medium text-brand hover:underline">
@@ -1202,7 +1204,9 @@ export function InvoiceDetail({
                   {/* WHAT THE LINE IS on the customer's breakdown (0342): saved on the tap, apart
                       from the words and price above, which still wait for the check mark. */}
                   <LineKindChips item={it} invoiceId={invoice.id} invoiceKind={(invoice as any).invoice_kind ?? null} disabled={pending} onDone={refresh} />
-                  {items.length > 2 && (
+                  {/* From TWO lines: with the one-step chevrons gone these are the only way to swap
+                      a pair (Group Materials & Labor leaves hand-typed lines where they are). */}
+                  {items.length > 1 && (
                     <div className="flex items-center gap-2">
                       <button
                         type="button"
@@ -1624,12 +1628,25 @@ function shortDay(value: string | null | undefined): string {
  * THE DUE LINE'S WORDS (W1-27). An untouched draft's due date is not its date yet: the first send
  * stamps send day + the terms (markInvoiceSent), so it says so. Everything else says the date and
  * the company's terms. `byHand` undefined = the column isn't there yet (before 0366): the date as
- * stored is the date, so it is said as one.
+ * stored is the date, so it is said as one. `sentBefore`: a draft that already went out once (Back
+ * To Draft keeps its sent_at) is not waiting on a first send - its next send keeps the date the
+ * customer has held since, so the date is said as one.
  */
-export function dueWords(f: { isDraft: boolean; dueDate: string; byHand: boolean | null | undefined; netDays: number }): string {
-  if (f.isDraft && f.byHand === false) return `Due ${f.netDays} days after you send it`;
+export function dueWords(f: { isDraft: boolean; dueDate: string; byHand: boolean | null | undefined; netDays: number; sentBefore?: boolean }): string {
+  if (f.isDraft && f.byHand === false && !f.sentBefore) return `Due ${f.netDays} days after you send it`;
   if (!f.dueDate) return "No due date yet";
   return `Due ${shortDay(f.dueDate)} · Net ${f.netDays}`;
+}
+
+/**
+ * IS IT STILL SET ASIDE? Only while its day is ahead: Needs You brings the draft back the day
+ * hold_until comes (action-items query: hold_until <= today), and nothing clears the column, so a
+ * day that has come is a draft already back on the list - never "set aside until" a day gone by.
+ * Returns the live day (YYYY-MM-DD) or null.
+ */
+export function liveHoldDay(holdUntil: string | null | undefined, today: string): string | null {
+  const d = toDateInput(holdUntil);
+  return d && d > today ? d : null;
 }
 
 /** One week from today in the company's timezone: the Set Aside sheet's first date. */
@@ -1660,11 +1677,20 @@ function SetAsideSheet({
   const router = useRouter();
   const toast = useToast();
   const [pending, start] = useTransition();
-  const [date, setDate] = useState(toDateInput(holdUntil) || weekOutIn(tz));
+  // A day that has already come is no hold: the sheet starts one week out again, and Undo puts
+  // back only a hold that was still live.
+  const liveHold = liveHoldDay(holdUntil, todayStrInTz(tz));
+  const [date, setDate] = useState(liveHold || weekOutIn(tz));
   const [why, setWhy] = useState(holdReason ?? "");
   const [error, setError] = useState<string | null>(null);
   function save() {
     setError(null);
+    // The date box's min isn't a rule on its own (Save doesn't run the form's checks): a day that
+    // has already come would "set it aside" onto a list it never leaves, so it is said here.
+    if (!liveHoldDay(date, todayStrInTz(tz))) {
+      setError("Pick a day after today - on that day it comes back on your list.");
+      return;
+    }
     start(async () => {
       const res = await parkInvoice(invoiceId, date, why);
       if (!res?.ok) {
@@ -1675,7 +1701,7 @@ function SetAsideSheet({
       toast(`Set Aside Until ${shortDay(date)}. It comes back on your list that day.`, "success", {
         label: "Undo",
         onClick: () =>
-          void parkInvoice(invoiceId, toDateInput(holdUntil) || null, holdReason ?? undefined).then((r) => {
+          void parkInvoice(invoiceId, liveHold, holdReason ?? undefined).then((r) => {
             if (!r?.ok) toast(r?.error ?? "Couldn't undo that - try again.", "error");
             router.refresh();
           }),
