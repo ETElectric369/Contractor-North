@@ -494,6 +494,16 @@ export async function readAlreadyBilledReach(
  *  lists what he pressed on first, then the rest newest first (noJobListOrder). */
 export const NO_JOB_SHEET_CAP = 150;
 
+/** Said on the sheet when the read hit NO_JOB_SHEET_CAP: its list and its hours are not all of them. */
+export function noJobCappedWords(): string {
+  return `Showing the newest ${NO_JOB_SHEET_CAP} shifts on no job. Older ones aren't listed here or counted in the hours above.`;
+}
+
+/** A PostgREST `in` list of words, each quoted (a code may hold a comma or a parenthesis). */
+function postgrestList(words: readonly string[]): string {
+  return `(${words.map((w) => `"${w.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`).join(",")})`;
+}
+
 const NO_JOB_ENTRY_COLUMNS = "id, clock_in, clock_out, lunch_minutes, job_code, split_from, profiles(id, full_name)";
 
 /**
@@ -507,29 +517,37 @@ const NO_JOB_ENTRY_COLUMNS = "id, clock_in, clock_out, lunch_minutes, job_code, 
  */
 export async function loadNoJobHoursSheet(supabase: Db, orgId: string, pressed: string[]): Promise<Loaded> {
   const want = [...new Set((pressed ?? []).map((x) => String(x ?? "")).filter(Boolean))].slice(0, IN_CHUNK);
-  const entries = () =>
-    supabase
+  const unread = { ok: false as const, error: "Couldn't read the hours on no job just now. Nothing was changed - try again in a moment." };
+  // The company's own time codes (Shop, PTO) first: they are left out IN the read, so a crew that
+  // clocks them every day never crowds the billable shifts out of the newest NO_JOB_SHEET_CAP.
+  const codesRead = await supabase.from("job_codes").select("code").eq("org_id", orgId).eq("billable", false);
+  if (codesRead.error) return unread;
+  const nonBillable = new Set(((codesRead.data ?? []) as { code?: string | null }[]).map((c) => String(c.code ?? "").trim()).filter(Boolean));
+  const entries = () => {
+    const q = supabase
       .from("time_entries")
       .select(NO_JOB_ENTRY_COLUMNS)
       .eq("org_id", orgId)
       .is("job_id", null)
       .eq("status", "closed")
       .not("clock_out", "is", null);
-  const [orgRead, invRead, newest, named, codesRead] = await Promise.all([
+    return nonBillable.size ? q.or(`job_code.is.null,job_code.not.in.${postgrestList([...nonBillable])}`) : q;
+  };
+  const [orgRead, invRead, newest, named] = await Promise.all([
     supabase.from("organizations").select("settings").eq("id", orgId).maybeSingle(),
     supabase.from("invoices").select(INVOICE_WITH_LINES).eq("org_id", orgId).neq("status", "void").is("job_id", null).limit(2000),
     entries().order("clock_in", { ascending: false }).limit(NO_JOB_SHEET_CAP),
     want.length ? entries().in("id", want) : Promise.resolve({ data: [] as any[], error: null }),
-    supabase.from("job_codes").select("code").eq("org_id", orgId).eq("billable", false),
   ]);
   if (invRead.error) {
     if (isMissingHandClaims(invRead.error)) return { ok: false, error: NEEDS_UPDATE, needsUpdate: true };
     return { ok: false, error: "Couldn't read your invoices with no job just now. Nothing was changed - try again in a moment." };
   }
-  if (orgRead.error || newest.error || named.error || codesRead.error)
-    return { ok: false, error: "Couldn't read the hours on no job just now. Nothing was changed - try again in a moment." };
+  if (orgRead.error || newest.error || named.error) return unread;
   const settings = getOrgSettings((orgRead.data as { settings?: unknown } | null)?.settings);
-  const nonBillable = new Set(((codesRead.data ?? []) as { code?: string | null }[]).map((c) => String(c.code ?? "").trim()).filter(Boolean));
+  // THE LIST IS CUT SHORT, SAID: only the newest NO_JOB_SHEET_CAP are read, so an older shift (and
+  // its hours in the total above) isn't here.
+  const capped = ((newest.data ?? []) as unknown[]).length >= NO_JOB_SHEET_CAP;
   const byId = new Map<string, any>();
   for (const e of [...((named.data ?? []) as any[]), ...((newest.data ?? []) as any[])]) if (e?.id) byId.set(String(e.id), e);
   const rows = [...byId.values()];
@@ -577,11 +595,12 @@ export async function loadNoJobHoursSheet(supabase: Db, orgId: string, pressed: 
   const open = noJobListOrder(listed, noJobPreticked(listed, want));
   const preticked = noJobPreticked(open, want);
   const gone = want.filter((id) => !open.some((e) => e.id === id));
-  const note = gone.length
+  const goneNote = gone.length
     ? gone.length === want.length
       ? "That shift isn't open to mark any more: an invoice already holds it, or it is on a job now. Reload the page."
       : "Some of those shifts aren't open to mark any more: an invoice already holds them, or they are on a job now."
     : null;
+  const note = [goneNote, capped ? noJobCappedWords() : null].filter(Boolean).join(" ") || null;
 
   const firstDay = open.find((e) => preticked.includes(e.id))?.clockIn ?? null;
   const drafts = all.filter((i) => i.status === "draft").map((i) => `${i.invoice_number ?? "A draft"} is still a draft: open it to add these there.`);

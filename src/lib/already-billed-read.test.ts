@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { loadNoJobHoursSheet, readAlreadyBilledReach, readNoJobHandHours, readNoJobHoursReach } from "./already-billed-read";
+import { NO_JOB_SHEET_CAP, loadNoJobHoursSheet, noJobCappedWords, readAlreadyBilledReach, readNoJobHandHours, readNoJobHoursReach } from "./already-billed-read";
 import { NEEDS_UPDATE } from "./already-billed";
 import { withAlreadyBilledDoors } from "@/app/(app)/bills/supplier-papers";
 
@@ -235,6 +235,20 @@ describe("loadNoJobHoursSheet: TTUSD's days on INV-055", () => {
     expect(res.ok).toBe(true);
     if (!res.ok) return;
     expect(res.data.invoices.map((x) => [x.invoice.invoice_number, x.invoice.lines.map((l) => l.id), x.preselect])).toEqual([["INV-073", ["li-t5"], null]]);
+  });
+
+  it("the company's own codes are left out IN the read (they never crowd out the newest 150), and a list cut at 150 says so", async () => {
+    const seen: Q[] = [];
+    const res = await loadNoJobHoursSheet(fake(route(), seen), ORG, ["t-806"]);
+    const reads = seen.filter((q) => q.table === "time_entries" && q.cols.includes("job_code"));
+    expect(reads.length).toBe(2);
+    for (const q of reads) expect(q.filters).toContain('or:job_code.is.null,job_code.not.in.("SHOP"):null');
+    expect(res.ok && res.data.note).toBeNull();
+
+    const many = Array.from({ length: NO_JOB_SHEET_CAP }, (_, i) => shift(`t-${i}`, `2026-0${1 + Math.floor(i / 28)}-${String(1 + (i % 28)).padStart(2, "0")}`));
+    const full = await loadNoJobHoursSheet(fake(route({ time_entries: { data: many } })), ORG, []);
+    expect(full.ok && full.data.note).toBe(noJobCappedWords());
+    expect(noJobCappedWords()).toBe("Showing the newest 150 shifts on no job. Older ones aren't listed here or counted in the hours above.");
   });
 
   it("the shift he pressed is listed first, the rest newest first", async () => {
