@@ -21,7 +21,8 @@ import { TAHOE_DECK } from "./tahoe-deck";
 export interface PlaybookStarter {
   key: string;
   label: string;
-  /** Whose it is and what it was built against — shown when somebody is choosing. */
+  /** What kind of starter it is and what it was built against — shown when somebody is choosing.
+   *  Every company sees it, so it names no company and no person (et-leaks.test). */
   blurb: string;
   playbook: Playbook;
 }
@@ -31,16 +32,16 @@ export const PLAYBOOK_STARTERS: PlaybookStarter[] = [
     key: "et-electric",
     label: "Electrical — residential service & remodel",
     blurb:
-      "Erik's, built against a storage room being converted to living space: the panel fork first, " +
-      "the run length only after it, and the outlet count derived from wall feet when the room was measured.",
+      "An electrical starter, built against a storage room being converted to living space: the panel " +
+      "fork first, the run length only after it, and the outlet count derived from wall feet when the room was measured.",
     playbook: ET_ELECTRIC,
   },
   {
     key: "tahoe-deck",
     label: "Decks — build, resurface, railing & stairs",
     blurb:
-      "Chris's, mirroring his own public estimator question for question so a customer's answers " +
-      "carry in and he confirms rather than re-asks. Formula why lines throughout — each names the " +
+      "A deck-builder starter that mirrors a public deck estimator question for question, so a customer's " +
+      "answers carry in and are confirmed rather than re-asked. Formula why lines throughout — each names the " +
       "price code it feeds, so the questions and the price list can be read against each other.",
     playbook: TAHOE_DECK,
   },

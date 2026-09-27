@@ -83,6 +83,14 @@ function derivedRailingLf(L: number, W: number, wrap: boolean): number {
 export type DeckRateRow = { code: string | null; buy_price: number | null; markup_pct: number | null };
 
 /**
+ * THE REGION QUESTION IS THE COMPANY'S OWN (Wave 0). "Is the property in the Lake Tahoe basin?"
+ * prices one company's permitting package (DS3C, TRPA compliance). It is asked only where the
+ * company priced that code in its own price list: the public configurator, the site chat and the
+ * office generator. Any other deck company's customers are never asked about someone else's region.
+ */
+export const deckAsksTrpa = (rates: Record<string, number>): boolean => (Number(rates.DS3C) || 0) > 0;
+
+/**
  * Build the code→rate map from price-list rows with a CALLER-supplied markup rule: rate =
  * buy × (1 + markupPctFor(item markup_pct)%/100). Dedupes deterministically: pass rows
  * NEWEST-FIRST (order by updated_at desc) and the first row per code wins, so a duplicate

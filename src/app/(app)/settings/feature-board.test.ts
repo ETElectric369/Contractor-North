@@ -77,6 +77,22 @@ describe("the board", () => {
     expect(t).not.toContain("Ask The Owner"); // the owner is not told to ask themselves
   });
 
+  it("anyone but the owner reads a sub-switch as Off while its parent is off; the owner's switch keeps what is stored", () => {
+    const m = { ...ALL_ON, leads: false, referrals: true };
+    const referralsRow = (html: string) => {
+      const t = text(html);
+      const i = t.indexOf("Track Referrals");
+      return t.slice(i, t.indexOf("Estimates", i));
+    };
+    const staff = referralsRow(render({ isOwner: false, features: m, counts: { referrals: 2 } }));
+    expect(staff).toContain("Off while Leads & Walk-Throughs is off.");
+    expect(staff).toContain("Off · 2 saved · Ask The Owner");
+    expect(staff.split("\n")).not.toContain("On");
+    // The owner's switch is the stored value, so turning Leads back on brings Referrals back as it was.
+    const owner = switches(render({ features: m }));
+    expect(owner.find((b) => b.includes("Track Referrals"))).toContain('aria-checked="true"');
+  });
+
   it("Crew & Payroll says it stays quiet until someone joins; a sub-switch says when its parent is off", () => {
     expect(text(render({ crewQuiet: true }))).toContain("Quiet until someone joins your team.");
     expect(text(render({ crewQuiet: false }))).not.toContain("Quiet until");
@@ -98,9 +114,20 @@ describe("the one-line confirm naming what stops", () => {
   it("the website names its address; recurring billing counts its invoices; the rest hide buttons", () => {
     expect(stopsLine("website", "etelectricity.com", undefined)).toBe("Unpublishes etelectricity.com.");
     expect(stopsLine("website", null, undefined)).toBe("Hides its buttons. Nothing is deleted.");
-    expect(stopsLine("recurring_billing", null, 2)).toBe("Stops 2 repeat invoices.");
-    expect(stopsLine("recurring_billing", null, 1)).toBe("Stops 1 repeat invoice.");
-    expect(stopsLine("recurring_billing", null, 0)).toBe("Hides its buttons. Nothing is deleted.");
     expect(stopsLine("panel_map", "x.com", 5)).toBe("Hides its buttons. Nothing is deleted.");
+  });
+
+  it("Recurring Billing says what the engine does: only repeat invoices stop", () => {
+    // recurring-engine skips only kind='invoice' while the switch is off; jobs and expenses run on.
+    expect(stopsLine("recurring_billing", null, 2)).toBe("Stops 2 repeat invoices. Repeat jobs and expenses keep running.");
+    expect(stopsLine("recurring_billing", null, 1)).toBe("Stops 1 repeat invoice. Repeat jobs and expenses keep running.");
+    expect(stopsLine("recurring_billing", null, 0)).toBe("Hides its buttons. Repeat jobs and expenses keep running.");
+    // A count that failed is not "nothing stops".
+    expect(stopsLine("recurring_billing", null, undefined)).toBe("Stops repeat invoices. Repeat jobs and expenses keep running.");
+  });
+
+  it("Customer Portal says its links stop opening, not just that buttons hide", () => {
+    // lib/portal/access answers portal_off before any sign-in; /i and /api/pay never read the switch.
+    expect(stopsLine("customer_portal", "x.com", 4)).toBe("Your customers' portal links stop opening. Invoice and pay links still work.");
   });
 });

@@ -118,7 +118,7 @@ export function TaxRatesManager({
         <div>
           <h4 className="mb-2 text-sm font-semibold text-slate-900">Tax rates</h4>
           <p className="mb-3 text-sm text-slate-500">
-            Add named rates for the areas you work (e.g. Reno vs Truckee). The default applies to new quotes & invoices.
+            Add named rates for the areas you work (e.g. City vs County). The default applies to new quotes & invoices.
           </p>
           {error && <p className="mb-2 text-sm text-red-600">{error}</p>}
           {taxRates.length > 0 && (

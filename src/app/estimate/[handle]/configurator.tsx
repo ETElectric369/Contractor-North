@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { CalendarClock, CheckCircle2, ExternalLink, Loader2, ChevronRight, ChevronLeft, Ruler, ClipboardList, Home, User } from "lucide-react";
-import { computeDeckEstimate, type DeckAnswers, type DeckMaterial, type DeckShape } from "@/lib/estimate/deck";
+import { computeDeckEstimate, deckAsksTrpa, type DeckAnswers, type DeckMaterial, type DeckShape } from "@/lib/estimate/deck";
 import { classifyLead, PROJECT_TYPES, type LeadIntake, type ProjectType } from "@/lib/lead-triage";
 import { AddressAutocomplete } from "@/components/address-autocomplete";
 import { publicScheduleInspection } from "@/lib/actions/public-schedule";
@@ -247,10 +247,13 @@ export function Configurator({
               <L label="Doors onto the deck"><Num v={f.manDoors} on={(n) => set("manDoors", n)} field={field} ring={ring} /></L>
               <L label="Sliding doors onto the deck"><Num v={f.sliderDoors} on={(n) => set("sliderDoors", n)} field={field} ring={ring} /></L>
             </div>
-            <label className="flex items-center gap-2 text-sm text-slate-700">
-              <input type="checkbox" checked={f.trpa} onChange={(e) => set("trpa", e.target.checked)} style={{ accentColor: brand }} />
-              The property is in the Lake Tahoe basin (TRPA)
-            </label>
+            {/* Only a company that priced its own TRPA line asks (deckAsksTrpa). */}
+            {deckAsksTrpa(rates) && (
+              <label className="flex items-center gap-2 text-sm text-slate-700">
+                <input type="checkbox" checked={f.trpa} onChange={(e) => set("trpa", e.target.checked)} style={{ accentColor: brand }} />
+                The property is in the Lake Tahoe basin (TRPA)
+              </label>
+            )}
           </div>
         )}
 
