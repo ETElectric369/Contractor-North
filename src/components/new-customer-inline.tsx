@@ -30,18 +30,31 @@ import { createCustomer } from "@/app/(app)/crm/actions";
  *
  * Name + phone only. Everything else lives on the contact page; a modal that asks eight questions
  * to link one name is why people gave up and picked "None".
+ *
+ * IT READS IN A NARROW COLUMN (bug report, Tahoe, 8/26): the hint used to sit beside the buttons,
+ * where a narrow column squeezed it into a stack of tiny words, and the button changed width the
+ * moment it started saving. Now Name and Phone stack whenever the box itself is narrow (a container
+ * query - the viewport can be wide while the column is not), the hint has its own line under the
+ * buttons, and the button keeps its width while saving ("Saving…" beside the spinner). Every tap
+ * target is 44px.
  */
 export function NewCustomerInline({
   onCreated,
   className,
+  initialName = "",
+  label = "New Customer",
 }: {
   /** Called with the new row so the host can select/attach it immediately — creating without
    *  attaching is the same dead end one step later. */
   onCreated: (c: { id: string; name: string }) => void | Promise<void>;
   className?: string;
+  /** What was typed where nothing matched (/billing's New Invoice): the name box starts with it. */
+  initialName?: string;
+  /** The closed button's words ("New Customer 'Tao Zhu'"). */
+  label?: string;
 }) {
   const [open, setOpen] = useState(false);
-  const [name, setName] = useState("");
+  const [name, setName] = useState(initialName);
   const [phone, setPhone] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const [pending, start] = useTransition();
@@ -50,29 +63,32 @@ export function NewCustomerInline({
     return (
       <button
         type="button"
-        onClick={() => setOpen(true)}
-        className={`inline-flex items-center gap-1 text-sm font-medium text-brand underline-offset-2 hover:underline ${className ?? ""}`}
+        onClick={() => {
+          setName((n) => n || initialName);
+          setOpen(true);
+        }}
+        className={`inline-flex min-h-11 items-center gap-1 text-sm font-medium text-brand underline-offset-2 hover:underline ${className ?? ""}`}
       >
-        <Plus className="h-3.5 w-3.5" /> New Customer
+        <Plus className="h-3.5 w-3.5" /> {label}
       </button>
     );
 
   return (
-    <div className={`space-y-2 rounded-lg border border-slate-200 bg-slate-50/60 p-2 ${className ?? ""}`}>
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+    <div className={`@container space-y-2 rounded-lg border border-slate-200 bg-slate-50/60 p-2 ${className ?? ""}`}>
+      <div className="grid grid-cols-1 gap-2 @sm:grid-cols-2">
         {/* DECLARED FIELDS, so the Mac's own Contacts can fill them. Erik watched Safari's
             AutoFill-from-Contacts offer the guy's real number here EXACTLY ONCE and never again:
             with no autocomplete/name/type, the browser has to GUESS which box is a phone, and it
             guesses inconsistently. Declared, the offer is reliable — no plugin, nothing to pay
             for; it's built into Safari (Settings → AutoFill → "info from my contacts"). */}
-        <Input name="name" autoComplete="name" placeholder="Name *" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
-        <Input name="phone" type="tel" autoComplete="tel" placeholder="Phone" value={phone} onChange={(e) => setPhone(formatPhone(e.target.value))} inputMode="tel" />
+        <Input name="name" autoComplete="name" placeholder="Name *" value={name} onChange={(e) => setName(e.target.value)} className="h-11" autoFocus />
+        <Input name="phone" type="tel" autoComplete="tel" placeholder="Phone" value={phone} onChange={(e) => setPhone(formatPhone(e.target.value))} inputMode="tel" className="h-11" />
       </div>
       {err && <p className="text-sm text-rose-600">{err}</p>}
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <Button
           type="button"
-          size="sm"
+          className="min-w-[9.5rem]"
           disabled={pending || (!name.trim() && !phone.trim())}
           onClick={() =>
             start(async () => {
@@ -89,13 +105,19 @@ export function NewCustomerInline({
             })
           }
         >
-          {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Save Customer"}
+          {pending ? (
+            <>
+              <Loader2 className="h-4 w-4 animate-spin" /> Saving…
+            </>
+          ) : (
+            "Save Customer"
+          )}
         </Button>
-        <button type="button" onClick={() => setOpen(false)} className="text-sm text-slate-500 hover:underline">
+        <button type="button" onClick={() => setOpen(false)} className="inline-flex min-h-11 items-center px-2 text-sm text-slate-500 hover:underline">
           Cancel
         </button>
-        <span className="text-xs text-slate-400">Email and address go in later, on their contact page.</span>
       </div>
+      <p className="text-xs text-slate-400">Email and address go in later, on their contact page.</p>
     </div>
   );
 }

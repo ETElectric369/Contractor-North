@@ -26,12 +26,14 @@ const money = (n: number) => formatCurrency(n);
 export default async function BillingPage() {
   const supabase = await createClient();
 
-  const [pipeline, { data: quotes }, { data: customers }, { data: jobs }, collectedTotals, { data: allInv }, { data: revisedInv }, viewer] =
+  const [pipeline, { data: customers }, { data: jobRows }, collectedTotals, { data: allInv }, { data: revisedInv }, viewer] =
     await Promise.all([
       getMoneyPipeline(supabase),
-      supabase.from("quotes").select("id, quote_number, total, customers(name)").in("status", ["sent", "accepted"]).order("created_at", { ascending: false }).limit(100),
       listCustomerOptions(supabase),
-      supabase.from("jobs").select("id, name, job_number, customer_id").not("status", "in", "(cancelled)").order("created_at", { ascending: false }).limit(300),
+      // NEW INVOICE ASKS "WHICH JOB OR CUSTOMER?" (W1-28): the jobs that aren't cancelled, newest
+      // first, each with its customer's name so a row reads "J-011 · Timbercreek · Tao Zhu". A job
+      // is billed through its own door, which finds its estimate itself - so no quotes are read here.
+      supabase.from("jobs").select("id, name, job_number, customer_id, customers(name)").not("status", "in", "(cancelled)").order("created_at", { ascending: false }).limit(300),
       // "Collected" = cash that landed (the payments table net of voids and refunds), NOT
       // sum(amount_paid) — that field folds in account credits, so writing off a disputed
       // invoice used to RAISE this tile above what /payments, /analytics and Nort report.
@@ -63,6 +65,13 @@ export default async function BillingPage() {
       viewerSwitches(),
     ]);
   const salesTax = featureOn(viewer.features, "sales_tax");
+  const jobs = ((jobRows ?? []) as { id: string; name: string | null; job_number: string | null; customer_id: string | null; customers?: { name?: string | null } | { name?: string | null }[] | null }[]).map((j) => ({
+    id: j.id,
+    name: j.name,
+    job_number: j.job_number,
+    customer_id: j.customer_id,
+    customer_name: (Array.isArray(j.customers) ? j.customers[0] : j.customers)?.name ?? null,
+  }));
 
   const list = (allInv ?? []) as any[];
   const collected = collectedTotals.allTime;
@@ -93,7 +102,7 @@ export default async function BillingPage() {
   return (
     <div>
       <PageHeader title="Billing" description="Your money pipeline — nothing slips through.">
-        <NewInvoiceButton quotes={(quotes as any) ?? []} customers={customers ?? []} jobs={(jobs as any) ?? []} salesTax={salesTax} />
+        <NewInvoiceButton customers={customers ?? []} jobs={jobs} salesTax={salesTax} />
       </PageHeader>
 
       {/* The three numbers that matter */}
@@ -233,7 +242,7 @@ export default async function BillingPage() {
                 </div>
                 <div className="flex shrink-0 items-center gap-3">
                   <InvoiceAmount total={inv.total} paid={inv.paid} overdue={inv.overdue} />
-                  <Verb>Record Payment</Verb>
+                  <Verb>Get Paid</Verb>
                 </div>
               </Link>
             </li>
@@ -248,8 +257,8 @@ export default async function BillingPage() {
           <Link href="/payments" className="text-xs font-medium text-slate-500 hover:text-brand">Collected (All Time) {money(collected)} · Payments →</Link>
         </div>
         {list.length === 0 ? (
-          <EmptyState icon={Receipt} title="No invoices yet" description="Turn an accepted quote into an invoice, or start a blank one.">
-            <NewInvoiceButton quotes={(quotes as any) ?? []} customers={customers ?? []} jobs={(jobs as any) ?? []} salesTax={salesTax} />
+          <EmptyState icon={Receipt} title="No invoices yet" description="Pick a job to bill it, or a customer for a blank invoice.">
+            <NewInvoiceButton customers={customers ?? []} jobs={jobs} salesTax={salesTax} />
           </EmptyState>
         ) : (
           <Card className="overflow-hidden">
