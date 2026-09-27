@@ -139,7 +139,9 @@ export const TOUR: TourStep[] = [
     say: (c) =>
       c.first
         ? `Hey ${c.first} — I'm Nort. That button up there is me, and I'm on every screen in here. ` +
-          `I've already got you as ${c.first}${c.trade ? `, ${c.trade}` : ""}${c.city ? ` out of ${c.city}` : ""}. ` +
+          // "your trade as …", never "as <trade>": the words can be the key's ("painter"), which
+          // needs an article, or a company's own ("Construction"), which can't take one.
+          `I've already got you as ${c.first}${c.city ? ` out of ${c.city}` : ""}${c.trade ? `, and your trade as ${c.trade}` : ""}. ` +
           `Press the Talk button down here and say hello, just so you can hear how this works. ` +
           `Say a different name and I'll take that instead.`
         : "Hi — I'm Nort. That button up there is me, and I'm on every screen in here. " +
@@ -159,7 +161,7 @@ export const TOUR: TourStep[] = [
     // here choose only when none was picked.
     say: (c) =>
       c.trade
-        ? `Right — I've got you as ${c.trade}. ` +
+        ? `Right — I've got your trade down as ${c.trade}. ` +
           "That's what picks the starter questions I'll ask you on site, and it tells the estimator what " +
           "trade it's pricing. If that's not how you'd put it, say it your way and I'll use your words."
         : "Good to meet you. Now the one that matters most — what trade are you in? " +

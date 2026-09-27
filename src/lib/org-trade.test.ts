@@ -5,6 +5,14 @@ import { TRADE_ORDER } from "@/lib/trade-codes";
 import { getOrgSettings } from "@/lib/org-settings";
 import { TRADE_WORDS, orgTrade, tradeKeyFromWords, tradeWordsOr, withArticle } from "./org-trade";
 
+/** Every source file under src (tests and DB suites aside). */
+const walk = (d: string): string[] =>
+  readdirSync(d).flatMap((n) => {
+    const p = join(d, n);
+    if (statSync(p).isDirectory()) return walk(p);
+    return /\.tsx?$/.test(n) && !/\.(test|db-suite)\.tsx?$/.test(n) ? [p] : [];
+  });
+
 /**
  * ONE TRADE READER. Sign-up keeps only the trade KEY (0352); every guide read the WORDS, so a new
  * company was asked its trade twice, its Nort had no trade line, and its starter walk-through was
@@ -87,6 +95,22 @@ describe("the words read as a sentence", () => {
     expect(withArticle("deck builder")).toBe("a deck builder");
     expect(withArticle("  ")).toBe("");
   });
+
+  it("no prompt or screen puts its own article before the trade words ('a electrical contractor')", () => {
+    // The key's own words need "an" as often as "a" (electrical, HVAC). Every "a ${trade}" was
+    // written for "deck builder" and read "a electrical contractor" / "a HVAC contractor".
+    const root = process.cwd();
+    const hits = walk(join(root, "src"))
+      .map((f) => relative(root, f))
+      .flatMap((f) =>
+        readFileSync(join(root, f), "utf8")
+          .split("\n")
+          .map((line, i) => ({ line, at: `${f}:${i + 1}` }))
+          .filter(({ line }) => /\ban? \$\{[^}]*trade[^}]*\}/i.test(line))
+          .map(({ at }) => at),
+      );
+    expect(hits).toEqual([]);
+  });
 });
 
 describe("ONE reader: nothing else reads trade_label to decide anything", () => {
@@ -94,12 +118,6 @@ describe("ONE reader: nothing else reads trade_label to decide anything", () => 
   // trade. The words may be WRITTEN by setup (saveSetup) and are declared in org-settings; every
   // read goes through lib/org-trade.
   const ALLOWED = new Set(["src/lib/org-trade.ts", "src/lib/org-settings.ts", "src/app/(app)/setup-actions.ts"]);
-  const walk = (d: string): string[] =>
-    readdirSync(d).flatMap((n) => {
-      const p = join(d, n);
-      if (statSync(p).isDirectory()) return walk(p);
-      return /\.tsx?$/.test(n) && !/\.(test|db-suite)\.tsx?$/.test(n) ? [p] : [];
-    });
 
   it("reads of trade_label live only in the reader", () => {
     const root = process.cwd();

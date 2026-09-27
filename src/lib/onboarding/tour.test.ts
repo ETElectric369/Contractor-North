@@ -12,6 +12,7 @@ import { WHY_SHAPES } from "@/lib/playbook/why";
 const ALL_STEPS = [...TOUR, ...LESSONS.flatMap((l) => l.steps)];
 const findStep = (key: string) => ALL_STEPS.find((s) => s.key === key)!;
 import { SETUP_PLAYBOOK } from "./setup-playbook";
+import { TRADE_WORDS } from "@/lib/org-trade";
 
 /** A sentence that CLAIMS where something came from, as opposed to where it lives. */
 const ORIGIN_VERB = /\b(came|come|comes|built|builds|build|seeded|seeds|created|creates|set up|sets up|made|makes)\b/i;
@@ -200,6 +201,23 @@ describe("well-formed", () => {
       expect(t).not.toContain("first trade word");
     }
     expect(cold).toMatch(/electrical, deck and plumbing/);
+  });
+
+  it("THE TRADE READS AS A SENTENCE whatever words it is: never 'I've got you as painter'", () => {
+    // The key's own words need an article ("painter"), a company's own may not take one
+    // ("Construction"), so the line says "your trade" and the words follow it.
+    const trade = TOUR.find((s) => s.key === "trade")!;
+    for (const words of [...Object.values(TRADE_WORDS), "Construction"]) {
+      const ctx = { ...KNOWN, trade: words };
+      const lines = [sayOf(trade.say, ctx), sayOf(TOUR[0].say, ctx)];
+      for (const t of lines) {
+        expect(t).toContain(`your trade`);
+        expect(t).toContain(words);
+        expect(t).not.toContain(`got you as ${words}`);
+        expect(t).not.toContain(`, ${words} out of`);
+      }
+    }
+    expect(sayOf(TOUR[0].say, { ...KNOWN, trade: "painter" })).toContain("I've already got you as Erik out of Truckee, and your trade as painter.");
   });
 
   it("no line leaves a hole when he knows nothing — no 'out of undefined'", () => {

@@ -6,7 +6,7 @@ import { aiSpendExceeded, recordAiUsage } from "@/lib/ai-cost";
 import { parseAiJson } from "@/lib/ai-json";
 import { dbError } from "@/lib/db-error";
 import { getOrgSettings } from "@/lib/org-settings";
-import { tradeWordsOr } from "@/lib/org-trade";
+import { tradeWordsOr, withArticle } from "@/lib/org-trade";
 import { rateLimited } from "@/lib/rate-limit";
 import { coerceSiteDoc, diffSiteDoc, extractSiteDoc, knownImageUrls, type SiteDoc } from "@/lib/site-doc";
 import { SECTION_KEYS, normalizeBlocks } from "@/lib/site-blocks";
@@ -99,7 +99,7 @@ async function runDesignModel(args: {
       model: DEFAULT_MODEL,
       max_tokens: 12288,
       system:
-        `You are the design lead for a ${tradeWordsOr(settings)}'s public website, working INSIDE a fixed design system. You edit a SITE DOCUMENT (JSON) that a trusted renderer draws — you never write HTML pages.\n` +
+        `You are the design lead for ${withArticle(tradeWordsOr(settings))}'s public website, working INSIDE a fixed design system. You edit a SITE DOCUMENT (JSON) that a trusted renderer draws — you never write HTML pages.\n` +
         "THE LAWS:\n" +
         "· Copy serves a local contractor's customers: plain, confident, specific about the work and the towns. No hype, no invented claims, no invented credentials or reviews.\n" +
         "· IMAGES: use ONLY urls from the IMAGE LIBRARY, verbatim. You may reorder, re-caption, choose the hero, build galleries — never invent or modify a url.\n" +

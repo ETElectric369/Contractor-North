@@ -38,6 +38,7 @@ import { ticketShelfProblem, type ShelfPick, type TicketLineChoice } from "@/lib
 import { shelveLines } from "@/lib/stock-ledger";
 import { formatCurrency } from "@/lib/utils";
 import { jobInOrg } from "@/lib/job-in-org";
+import { withArticle } from "@/lib/org-trade";
 import { undoOpenListCore } from "@/app/(app)/bills/open-list-core";
 // TWO PROMPTS ITEMISE A RECEIPT and they must offer the model the SAME categories: the paper
 // reader (paperwork-core, any upload) and the job-receipt reader (a receipt already filed to a
@@ -492,7 +493,7 @@ export async function billJobReceipt(
     const msg = await client.messages.create({
       model: DEFAULT_MODEL,
       max_tokens: 4096,
-      system: `You read a purchase receipt for a ${trade} and itemize it as a job cost.
+      system: `You read a purchase receipt for ${withArticle(trade)} and itemize it as a job cost.
 
 Respond with ONLY a JSON object (no prose):
 {
@@ -1734,7 +1735,7 @@ export async function aiReviewItem(id: string): Promise<{ ok: boolean; message: 
       // behind it — not the receipt-reading that becomes billable money.
       model: modelFor("routine"),
       max_tokens: 500,
-      system: `You triage one piece of paperwork for a ${trade} and decide the single best action. Output ONLY a JSON object:
+      system: `You triage one piece of paperwork for ${withArticle(trade)} and decide the single best action. Output ONLY a JSON object:
 {
   "action": "file_job" | "overhead" | "task" | "keep_note" | "unsure",
   "job_id": an id from the list below, or null,
