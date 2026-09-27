@@ -141,13 +141,25 @@ export function pickJobOf(j: JobOption): PickJob {
 }
 
 /**
- * WITH THE SAME PURCHASE SHOWING, EVERY ANSWER IS A DIFFERENT PURCHASE (W1-31). The card shows a
- * bill already on the books (or one under another spelling) with Same Purchase: Tie Them and the
- * line "Any other button below records it as a different purchase.", so every answer then carries
- * the flag. Missing it, the server would refuse the answer the card just offered.
+ * WITH A BILL ON THE BOOKS SHOWING, EVERY ANSWER IS A DIFFERENT PURCHASE (W1-31). The card shows a
+ * bill already on the books with Same Purchase: Tie Them and the line "Any other button below
+ * records it as a different purchase.", so every answer then carries the flag. Missing it, the
+ * server would refuse the answer the card just offered.
+ *
+ * A MAYBE (the same long number under another spelling) never sends it: the server takes a maybe
+ * as a warning, not a refusal, and only without the flag does it still link a supplier document
+ * the card promised to link and write which other-spelling bill the person saw.
  */
 export function differentPurchaseOf(state: Readiness["state"], matches: readonly NumberMatch[]): boolean {
-  return state === "ready" && matches.some((m) => m.kind === "bill" || m.kind === "maybe_bill");
+  return state === "ready" && matches.some((m) => m.kind === "bill");
+}
+
+/** The one line under the Same Purchase box: what every other answer does, per what it shows. */
+export function samePurchaseLine(state: Readiness["state"], onBooks: number): string {
+  if (state !== "ready") return "Tying files this paper against it and adds nothing new.";
+  return onBooks > 0
+    ? "Any other button below records it as a different purchase."
+    : "If it isn't the same purchase, any other button below files it, and its bill notes the other spelling.";
 }
 
 /** The ⋯ rows, per state, minus any door the card already shows (one door, one home). */
@@ -352,8 +364,9 @@ export function PaperworkRow({
   // THE SAME LONG NUMBER UNDER ANOTHER SPELLING (Erik, audit v994 DB5): a warning with a Tie.
   const maybes = matches.filter((m): m is Extract<NumberMatch, { kind: "maybe_bill" }> => m.kind === "maybe_bill");
   const samePurchase = onBooks.length ? onBooks : maybes;
-  // WITH THE SAME PURCHASE SHOWING, EVERY ANSWER IS A DIFFERENT PURCHASE: the card says so above the
-  // answers, and each one carries the flag (without it the server refuses and names the Tie).
+  // WITH A BILL ON THE BOOKS SHOWING, EVERY ANSWER IS A DIFFERENT PURCHASE: the card says so above
+  // the answers, and each one carries the flag (without it the server refuses and names the Tie).
+  // A maybe alone sends no flag, so a supplier document on the card is still linked by filing.
   const differentPurchase = differentPurchaseOf(r.state, matches);
 
   // THE LINES, AND WHETHER THEY ADD UP TO THE TOTAL READ (audit v994, MR6). Shown, never a gate:
@@ -865,9 +878,7 @@ export function PaperworkRow({
                 </Button>
               </div>
             ))}
-            <p className="text-xs">
-              {r.state === "ready" ? "Any other button below records it as a different purchase." : "Tying files this paper against it and adds nothing new."}
-            </p>
+            <p className="text-xs">{samePurchaseLine(r.state, onBooks.length)}</p>
           </div>
         )}
         {toLink.length > 0 && onBooks.length === 0 && r.state === "ready" && (

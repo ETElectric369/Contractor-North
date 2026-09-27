@@ -135,11 +135,31 @@ describe("the cost card: the Supplier Bills grammar", () => {
     expect(answers(html)).toEqual(["Same Purchase: Tie Them", "Pick A Job", "Shop Stock", "Business Cost"]);
     expect(html).toContain("Any other button below records it as a different purchase.");
     expect(html).not.toContain("Different Purchase: File It Anyway");
-    // Every answer then carries the flag, and a maybe (another spelling) does too.
+    // Every answer then carries the flag. A maybe (another spelling) alone does not: the server takes
+    // it as a warning, and only without the flag does it link a supplier document and name the maybe.
     expect(differentPurchaseOf("ready", matches as any)).toBe(true);
-    expect(differentPurchaseOf("ready", [{ kind: "maybe_bill", billId: "b", sentence: "Maybe…" }] as any)).toBe(true);
+    expect(differentPurchaseOf("ready", [{ kind: "maybe_bill", billId: "b", sentence: "Maybe…" }] as any)).toBe(false);
     expect(differentPurchaseOf("ready", [{ kind: "supplier_invoice", supplierInvoiceId: "si", invoiceNumber: "1", sentence: "x" }] as any)).toBe(false);
     expect(differentPurchaseOf("needs_total", matches as any)).toBe(false);
+  });
+
+  it("a maybe beside a supplier document no bill covers: no flag, so filing still links the document, and the box says what the answers do", () => {
+    const matches = [
+      { kind: "maybe_bill", billId: "bill-9", sentence: "Maybe already on the books: C.E.D. Reno #8802110, $120.00. It carries this number under another spelling." },
+      {
+        kind: "supplier_invoice",
+        supplierInvoiceId: "si-1",
+        invoiceNumber: "8802110",
+        sentence: "On the supplier documents list with no bill yet: 8802110, $120.00. Filing it makes the bill and links it to that document.",
+      },
+    ];
+    expect(differentPurchaseOf("ready", matches as any)).toBe(false);
+    const html = render({ doc_type: "bill", vendor: "CED", doc_number: "8802110", proposal: { jobId: "job-046", jobFrom: "po" } }, matches);
+    expect(html).toContain("Same Purchase: Tie Them");
+    expect(html).toContain("Filing it makes the bill and links it to that document.");
+    expect(html).not.toContain("Any other button below records it as a different purchase.");
+    expect(html).toContain("If it isn&#x27;t the same purchase, any other button below files it, and its bill notes the other spelling.");
+    expect(answers(html)[1]).toBe("Put It On J-046");
   });
 
   it("every answer that files sends the flag (missing it recreates the duplicate-bill refusal)", () => {
