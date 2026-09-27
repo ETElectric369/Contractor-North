@@ -218,7 +218,7 @@ export const taskActions: Record<string, ActionDef> = {
     group: "task",
     label: "Pin task to a day",
     description:
-      "Pin or unpin a REMINDER into a day's six on My Day: focus_date YYYY-MM-DD — today for 'do this today', tomorrow for the debrief's tomorrow picks, null to unpin. Does NOT touch the due date (that's task.setDue). A job's task is never in the six (it's on the job's list and the clocked-in Now block): this refuses on one.",
+      "Pin or unpin a REMINDER into a day's six on My Day: focus_date YYYY-MM-DD — today for 'do this today', tomorrow for the debrief's tomorrow picks, null to unpin. Does NOT touch the due date (that's task.setDue). A job's task is never in the six (it's on the job's list, and on My Day's Now card while someone is clocked in on that job): this refuses on one.",
     input: z.object({ id: z.string(), focus_date: z.string().nullable() }),
     auth: "any",
     effect: "write",

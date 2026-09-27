@@ -66,7 +66,7 @@ describe("createTask's duplicate check", () => {
 
 /**
  * toggleTask's cascade, and the Undo that takes it back (the 10-second toast on the job's card and
- * My Day's Now block). A check-off of a task with open steps closes them with it; its Undo must reopen
+ * My Day's Now card). A check-off of a task with open steps closes them with it; its Undo must reopen
  * exactly the steps that check-off closed, never one that was already done. A tiny in-memory tasks
  * table stands in for the database: each write's filters are applied for real, a "locked" row is
  * one RLS won't let this caller change, and the log keeps every query in order.

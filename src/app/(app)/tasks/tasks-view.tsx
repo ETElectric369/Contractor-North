@@ -17,7 +17,7 @@ import { createTask, toggleTask, deleteTask, updateTask, type ToggleTaskResult }
  * THE REMINDERS PAGE (/tasks, since 0358). A Reminder is a task with no job, and it is private: the
  * person who made it and the person it is for see it, nobody else (0358's tasks_read; the page's
  * read says the same on a database without it). A job's tasks are the job's one list, on the job
- * (its Tasks chip) and in My Day's Now block, never here. To-Do Extras (priority, steps, tags)
+ * (its Tasks chip) and on My Day's Now card, never here. To-Do Extras (priority, steps, tags)
  * reaches Reminders only.
  */
 export interface ViewTask {

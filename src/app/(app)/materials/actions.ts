@@ -776,7 +776,7 @@ export async function generateMaterialDraft(
  * that ALSO made its own "Materials: ..." task put the same need on the Tasks list twice, once as a
  * row nobody could check off by buying. So the ask is now a LINE on the job's one list (every member
  * may add one since 0254; the first line on a list-less job starts the list, as the editor's Add
- * does), and the live row, the Materials badge and My Day's Now block all count it. The office's bell
+ * does), and the live row, the Materials badge and My Day's Now card all count it. The office's bell
  * and push below are unchanged: the ask still lands on the boss's phone at once, with the job
  * attached, and now opens the list it is on.
  *
