@@ -29,20 +29,26 @@ import { keepPaperwork } from "@/app/(app)/organize/paperwork-actions";
 
 type Run = (key: string, fn: () => Promise<{ ok: boolean; error?: string; message?: string }>, filedSentence?: string) => void;
 
-/** The segment's colour, in the Money by Month palette (money-chart.ts), so a colour means the
- *  same money on both cards. Identity is never colour alone: every segment is named with its figure
- *  in the legend under the bar. */
-function toneOf(key: string): string {
-  if (key === "fuel") return "bg-pink-600";
-  if (key.startsWith("bucket:")) return "bg-pink-300";
-  if (key === "suppliers" || key === "materials") return "bg-indigo-500";
-  if (key === "crew") return "bg-amber-600";
-  if (key === "draw") return "bg-green-600";
-  if (key === "petty") return "bg-teal-600";
-  if (key === "not_cost") return "bg-sky-600";
-  if (key === "personal") return "bg-slate-500";
-  if (key === "need") return "bg-amber-200";
-  return "bg-slate-300";
+/** Each segment its own colour. Where Money by Month (money-chart.ts) has the same money, the same
+ *  colour: Business Costs pink-500, Materials & Bills indigo-500, Crew Pay amber-600, Owner's Draw
+ *  green-600; Fuel is the fuel card's deeper pink. The bank's own segments take colours that chart
+ *  doesn't use, so no colour means two things. Identity is never colour alone: every segment is
+ *  named with its figure in the legend under the bar. */
+const TONES: Record<string, string> = {
+  fuel: "bg-pink-800",
+  business: "bg-pink-500",
+  materials: "bg-indigo-500",
+  suppliers: "bg-violet-700",
+  crew: "bg-amber-600",
+  draw: "bg-green-600",
+  petty: "bg-orange-400",
+  not_cost: "bg-cyan-800",
+  personal: "bg-slate-600",
+  books: "bg-stone-300",
+  need: "bg-yellow-200",
+};
+export function toneOf(key: string): string {
+  return TONES[key] ?? "bg-slate-300";
 }
 
 function FlowBar({ flow, outCents }: { flow: FlowSegment[]; outCents: number }) {

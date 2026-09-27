@@ -1416,11 +1416,18 @@ export function bankHeadline(dl: Pick<BankDownload, "last4" | "from" | "to">, co
 /** Where the money went, out of the account: one segment per place, biggest first. */
 export type FlowSegment = { key: string; label: string; cents: number };
 
+/**
+ * THE BAR'S SEGMENTS, in Money by Month's words (money-chart.ts): Fuel on its own (the one Erik
+ * watches), every other business cost as ONE Business Costs segment (six pinks side by side read
+ * as one colour anyway, and the legend is the place for names), Materials & Bills, Crew Pay,
+ * Owner's Draw. The rest are the bank's own: Suppliers, Petty Cash, Transfers, Personal, Already In
+ * North, Needs You.
+ */
 export function flowLabelOf(choice: string, bucket: string | null, costKind: string | null): { key: string; label: string } {
   switch (choice) {
     case "cost":
       if (bucket === "Gas & Truck" && costKind === "fuel") return { key: "fuel", label: "Fuel" };
-      return { key: `bucket:${bucket ?? "Other"}`, label: bucket ?? "Other" };
+      return { key: "business", label: "Business Costs" };
     case "draw":
       return { key: "draw", label: "Owner's Draw" };
     case "personal":
@@ -1470,7 +1477,7 @@ export function moneyFlow(dl: BankDownload, plan: BankPlan, books: BankBooks): {
       else if (d.table === "petty_cash") add({ key: "petty", label: "Petty Cash" }, amt);
       else {
         const b = billOf.get(d.ids[0]);
-        add(b && !b.jobId ? flowLabelOf("cost", b.category, null) : { key: "materials", label: "Materials & Bills" }, amt);
+        add(b && !b.jobId ? flowLabelOf("cost", b.category, b.costKind ?? d.tag ?? null) : { key: "materials", label: "Materials & Bills" }, amt);
       }
     } else add({ key: "need", label: "Needs You" }, amt);
   }

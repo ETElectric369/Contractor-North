@@ -14,7 +14,7 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh() {} }) }));
 vi.mock("@/app/(app)/bills/bank-actions", () => ({ applyBankDownload: vi.fn(), undoBankDownload: vi.fn(), swapBankDownload: vi.fn(), setBankAccount: vi.fn(), forgetBankRule: vi.fn() }));
 vi.mock("@/app/(app)/organize/paperwork-actions", () => ({ keepPaperwork: vi.fn() }));
 
-import { BankCard, livePicks } from "./bank-card";
+import { BankCard, livePicks, toneOf } from "./bank-card";
 import { FuelTrendCard } from "@/app/(app)/analytics/fuel-trend-card";
 
 const textOf = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/&#x27;/g, "'").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
@@ -168,5 +168,12 @@ describe("a pick on a row that left the card", () => {
     const rows = VIEW.rows.filter((r) => r.id !== "line:abc");
     expect(livePicks(picks, rows)).toEqual({ "out:shell": "cost:Gas & Truck:fuel" });
     expect(livePicks(picks, VIEW.rows)).toEqual(picks);
+  });
+});
+
+describe("where the money went: one colour per segment", () => {
+  it("no two segments share a colour", () => {
+    const keys = ["fuel", "business", "materials", "suppliers", "crew", "draw", "petty", "not_cost", "personal", "books", "need", "other"];
+    expect(new Set(keys.map(toneOf)).size).toBe(keys.length);
   });
 });
