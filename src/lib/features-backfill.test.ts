@@ -36,4 +36,15 @@ describe("0355's presets are lib/features' presets", () => {
     const mapped = [...sql.matchAll(/then '([a-z]*)'/g)].map((m) => m[1]).filter(Boolean);
     for (const t of mapped) expect(TRADE_ORDER as readonly string[], t).toContain(t);
   });
+
+  it("its known-trade self-check and sign-up's whitelist (0352 create_organization) are TRADE_ORDER", () => {
+    const check = sql.match(/!~ '\^\(\|([a-z|]+)\)\$'/);
+    expect(check, "0355 names its known trades").not.toBeNull();
+    expect(check![1].split("|").sort()).toEqual([...TRADE_ORDER].sort());
+    // Sign-up is the only writer of settings.trade: a trade outside this list would fail 0355's check.
+    const signup = readFileSync(join(dir, readdirSync(dir).find((n) => n.startsWith("0352_"))!), "utf8");
+    const list = signup.match(/v_trade text := case when p_trade = any \(array\[([^\]]+)\]\)/);
+    expect(list, "0352 whitelists the trade").not.toBeNull();
+    expect([...list![1].matchAll(/'([a-z_]+)'/g)].map((m) => m[1]).sort()).toEqual([...TRADE_ORDER].sort());
+  });
 });

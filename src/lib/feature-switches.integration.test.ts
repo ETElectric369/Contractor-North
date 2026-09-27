@@ -251,6 +251,13 @@ d("the switch board, the page-open counter and the backfill (0352, 0353, 0355)",
     expect(s.timeclock_job_codes).toBe(preset.job_codes);
     expect((await one("select role from profiles where id = $1", [a])).role).toBe("owner");
 
+    // Only one of the app's trades is stored: a direct call with any other word keeps no trade (a
+    // stored 'solar' would fail 0355's known-trade check for every company).
+    const odd = await person("signup-odd-trade");
+    const r2 = await tryAs(odd, "select public.create_organization('TEST switch odd trade', null, 'solar', $1::jsonb) as id", [JSON.stringify(preset)]);
+    expect(r2.error).toBeNull();
+    expect((await settingsOf(r2.rows[0].id)).trade).toBeUndefined();
+
     const b = await person("signup-old");
     const old = await tryAs(b, "select public.create_organization('TEST switch old call', null) as id");
     expect(old.error).toBeNull();

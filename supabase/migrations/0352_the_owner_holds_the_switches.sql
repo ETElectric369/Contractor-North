@@ -250,9 +250,13 @@ declare
   uid uuid := auth.uid();
   existing uuid;
   new_org uuid;
-  -- 0352: the picked trade KEY (the words stay in trade_label). Shape-checked here; the app
-  -- normalizes it to one of its trades, and anything else reads as blank.
-  v_trade text := case when p_trade ~ '^[a-z_]{1,32}$' then p_trade else null end;
+  -- 0352: the picked trade KEY (the words stay in trade_label). Only one of the app's trades
+  -- (lib/trade-codes TRADE_ORDER; features-backfill.test holds this list to it): anything else,
+  -- from the app or a direct call, is stored as blank. A stored 'solar' would fail 0355's
+  -- known-trade self-check for every company, and only this function can write settings.trade.
+  v_trade text := case when p_trade = any (array['general','deck','electrical','plumbing','hvac',
+                                                  'landscaping','roofing','concrete','tile','painting'])
+                       then p_trade end;
   v_features jsonb;
 begin
   if uid is null then
