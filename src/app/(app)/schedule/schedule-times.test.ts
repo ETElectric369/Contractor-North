@@ -279,6 +279,111 @@ describe("Clear The Date", () => {
   });
 });
 
+describe("Clear The Date, then put back: lands exactly where and as long as chosen, the history stays history", () => {
+  const cleared = async (id: string) => {
+    state.db.jobs.push({ id, status: "scheduled", scheduled_start: at("2026-09-29", "10:00"), scheduled_end: at("2026-09-29", "12:00"), planned_minutes: null });
+    state.db.job_schedule_segments.push(
+      { job_id: id, start_date: "2026-09-22", end_date: "2026-09-22" },
+      { job_id: id, start_date: "2026-09-29", end_date: "2026-09-29" },
+    );
+    state.db.time_entries.push({ id: `t-${id}`, job_id: id, clock_in: "2026-09-22T17:00:00Z" });
+    expect((await actions.clearJobDate(id)).ok).toBe(true);
+    expect(job(id).scheduled_start).toBeNull();
+  };
+
+  it("placed again from the rail on Oct 5 at 9:00: a 9:00–11:00 block on Oct 5 (the default, said), Sep 22 kept as history", async () => {
+    await cleared("c1");
+    expect(await actions.placeJobOnDay("c1", "2026-10-05", "09:00")).toEqual({ ok: true, defaulted: true });
+    expect(job("c1")).toMatchObject({ scheduled_start: at("2026-10-05", "09:00"), scheduled_end: at("2026-10-05", "11:00") });
+    expect(segs("c1")).toEqual(["2026-09-22..2026-09-22", "2026-10-05..2026-10-05"]);
+  });
+
+  it("a size it had lands with it (sized 2h, placed at 1:00 PM: 1 to 3), never a full day", async () => {
+    await cleared("c2");
+    job("c2").planned_minutes = 120;
+    await actions.placeJobOnDay("c2", "2026-10-05", "13:00");
+    expect(job("c2")).toMatchObject({ scheduled_start: at("2026-10-05", "13:00"), scheduled_end: at("2026-10-05", "15:00") });
+  });
+
+  it("placed from the tray (no time): from the opening, two hours, on the new day", async () => {
+    await cleared("c3");
+    await actions.placeJobOnDay("c3", "2026-10-05");
+    expect(job("c3")).toMatchObject({ scheduled_start: at("2026-10-05", "09:00"), scheduled_end: at("2026-10-05", "11:00") });
+  });
+
+  it("the tray's Undo takes the plan off again and leaves the worked day as history, never as the plan", async () => {
+    await cleared("c4");
+    await actions.placeJobOnDay("c4", "2026-10-05");
+    expect(await actions.unplaceJob("c4")).toEqual({ ok: true });
+    expect(job("c4")).toMatchObject({ scheduled_start: null, scheduled_end: null, status: "to_be_scheduled" });
+    expect(segs("c4")).toEqual(["2026-09-22..2026-09-22"]);
+  });
+
+  it("Move from its history tile gives it a day (a placement), never a block stretched from the worked day", async () => {
+    await cleared("c5");
+    expect((await actions.moveJobDay("c5", "2026-09-22", "2026-10-06")).ok).toBe(true);
+    expect(job("c5")).toMatchObject({ scheduled_start: at("2026-10-06", "09:00"), scheduled_end: at("2026-10-06", "11:00") });
+    expect(segs("c5")).toEqual(["2026-09-22..2026-09-22", "2026-10-06..2026-10-06"]);
+  });
+
+  it("an on-hold job with a stale day nobody worked: the stale day goes, the new day is the plan", async () => {
+    state.db.jobs.push({ id: "h1", status: "on_hold", scheduled_start: at("2026-09-24", "09:00"), scheduled_end: at("2026-09-24", "17:00"), planned_minutes: null });
+    state.db.job_schedule_segments.push({ job_id: "h1", start_date: "2026-09-24", end_date: "2026-09-24" });
+    await actions.placeJobOnDay("h1", "2026-10-05", "09:00");
+    expect(segs("h1")).toEqual(["2026-10-05..2026-10-05"]);
+    expect(job("h1")).toMatchObject({ status: "scheduled", scheduled_start: at("2026-10-05", "09:00"), scheduled_end: at("2026-10-05", "11:00") });
+  });
+
+  it("the same on-hold job with a stale 10-to-5 stamp placed on that day at 1:00 PM: 1 to 3 (the fitter's two hours), never 1 to 8", async () => {
+    state.db.jobs.push({ id: "h2", status: "on_hold", scheduled_start: at("2026-10-05", "10:00"), scheduled_end: at("2026-10-05", "17:00"), planned_minutes: null });
+    state.db.job_schedule_segments.push({ job_id: "h2", start_date: "2026-10-05", end_date: "2026-10-05" });
+    expect(await actions.placeJobOnDay("h2", "2026-10-05", "13:00")).toEqual({ ok: true, defaulted: true });
+    expect(job("h2")).toMatchObject({ scheduled_start: at("2026-10-05", "13:00"), scheduled_end: at("2026-10-05", "15:00") });
+  });
+
+  it("a job with a live plan and a kept worked day: a placed day joins the plan, the listed start never goes back to history", async () => {
+    state.db.jobs.push({ id: "p1", status: "in_progress", scheduled_start: at("2026-10-05", "10:00"), scheduled_end: at("2026-10-05", "12:00"), planned_minutes: null });
+    state.db.job_schedule_segments.push(
+      { job_id: "p1", start_date: "2026-09-22", end_date: "2026-09-22" },
+      { job_id: "p1", start_date: "2026-10-05", end_date: "2026-10-05" },
+    );
+    await actions.placeJobOnDay("p1", "2026-10-06");
+    expect(job("p1").scheduled_start).toBe(at("2026-10-05", "10:00"));
+    expect(job("p1").scheduled_end).toBe(at("2026-10-06", "17:00"));
+  });
+});
+
+describe("a length typed as an End is the block's clock, and the job's load stays one day", () => {
+  it("8:00 to 5:00 PM on an 8-to-5 company, cleared and put back: one day, not two", async () => {
+    state.db.organizations[0].settings = { timezone: LA, work_day_start: "08:00", work_day_end: "17:00" };
+    state.db.jobs.push({ id: "e1", status: "scheduled", scheduled_start: at("2026-10-05", "08:00"), scheduled_end: at("2026-10-05", "10:00"), planned_minutes: null });
+    state.db.job_schedule_segments.push({ job_id: "e1", start_date: "2026-10-05", end_date: "2026-10-05" });
+    expect((await actions.setJobTimes("e1", { length: 540 })).ok).toBe(true);
+    expect(job("e1")).toMatchObject({ scheduled_end: at("2026-10-05", "17:00"), planned_minutes: 480 });
+    await actions.clearJobDate("e1");
+    await actions.placeJobOnDay("e1", "2026-10-07", "08:00");
+    expect(segs("e1")).toEqual(["2026-10-07..2026-10-07"]);
+    // Its size is a day, so the day it lands on is its whole day, 8 to 5, and only that one.
+    expect(job("e1")).toMatchObject({ scheduled_start: at("2026-10-07", "08:00"), scheduled_end: at("2026-10-07", "17:00") });
+  });
+
+  it("7:00–4:00 PM on a 7-to-5 company, moved a day by the tile's Move: still 7:00–4:00 PM", async () => {
+    state.db.organizations[0].settings = { timezone: LA, work_day_start: "07:00", work_day_end: "17:00" };
+    state.db.jobs.push({ id: "e2", status: "scheduled", scheduled_start: at("2026-10-05", "07:00"), scheduled_end: at("2026-10-05", "09:00"), planned_minutes: null });
+    state.db.job_schedule_segments.push({ job_id: "e2", start_date: "2026-10-05", end_date: "2026-10-05" });
+    await actions.setJobTimes("e2", { length: 540 });
+    expect((await actions.moveJobDay("e2", "2026-10-05", "2026-10-06")).ok).toBe(true);
+    expect(job("e2")).toMatchObject({ scheduled_start: at("2026-10-06", "07:00"), scheduled_end: at("2026-10-06", "16:00") });
+  });
+
+  it("J-058 as stored (10 AM to the 5 PM stamp, unsized) with its start moved to 2:00 PM: 2 to 4, said", async () => {
+    state.db.jobs.push({ id: "j058b", status: "scheduled", scheduled_start: at("2026-09-28", "10:00"), scheduled_end: at("2026-09-28", "17:00"), planned_minutes: null });
+    state.db.job_schedule_segments.push({ job_id: "j058b", start_date: "2026-09-28", end_date: "2026-09-28" });
+    expect(await actions.setJobTimes("j058b", { start: "14:00" })).toEqual({ ok: true, defaulted: true });
+    expect(job("j058b")).toMatchObject({ scheduled_start: at("2026-09-28", "14:00"), scheduled_end: at("2026-09-28", "16:00") });
+  });
+});
+
 describe("a visit's times, on the company's clock", () => {
   it("9 to 11 on Mon Nov 2 (after the clocks go back) goes to the visit's own writer as 17:00Z–19:00Z", async () => {
     expect(await actions.setVisitTimes("a1", { day: "2026-11-02", start: "09:00", end: "11:00" })).toEqual({ ok: true });

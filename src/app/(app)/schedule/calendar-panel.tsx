@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
-import { CAL_WINDOW_BACK_DAYS, CAL_WINDOW_FWD_DAYS } from "@/lib/schedule/cal-window";
+import { CAL_WINDOW_BACK_DAYS, CAL_WINDOW_FWD_DAYS, segmentJobsNotLoaded } from "@/lib/schedule/cal-window";
 import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 import { getOrgSettings, workDayWindowHm } from "@/lib/org-settings";
 import { featureOn } from "@/lib/features";
@@ -27,7 +27,8 @@ export async function CalendarPanel({ canEdit = false }: { canEdit?: boolean } =
   const jobFrom = new Date(now - CAL_WINDOW_BACK_DAYS * 86400_000).toISOString();
   const jobTo = new Date(now + CAL_WINDOW_FWD_DAYS * 86400_000).toISOString();
 
-  const [{ data: jobs }, { data: segments }, { data: appointments }, { data: tasks }, { data: unschedRows }, { data: externalRows }, picker, { data: org }] =
+  const JOB_COLS = "id, job_number, name, status, scheduled_start, scheduled_end, planned_minutes, assigned_to, city, customers(name)";
+  const [{ data: listedJobs }, { data: segments }, { data: appointments }, { data: tasks }, { data: unschedRows }, { data: externalRows }, picker, { data: org }] =
     await Promise.all([
       // Overlap test, not a point test on scheduled_start: a job shows if it
       // STARTS before the window end AND (ends after the window start, or is an
@@ -35,7 +36,7 @@ export async function CalendarPanel({ canEdit = false }: { canEdit?: boolean } =
       // far out / long job started a while ago" disappearance.
       supabase
         .from("jobs")
-        .select("id, job_number, name, status, scheduled_start, scheduled_end, planned_minutes, assigned_to, city, customers(name)")
+        .select(JOB_COLS)
         .lte("scheduled_start", jobTo)
         .or(`scheduled_end.gte.${jobFrom},and(scheduled_end.is.null,scheduled_start.gte.${jobFrom})`)
         .order("scheduled_start"),
@@ -97,6 +98,17 @@ export async function CalendarPanel({ canEdit = false }: { canEdit?: boolean } =
       // sentinel the week agenda uses to decide whether to render a start time.
       supabase.from("organizations").select("settings").limit(1).maybeSingle(),
     ]);
+
+  /* HISTORY DRAWS TOO. A job whose date was cleared keeps its worked days as segments with no listed
+     span, so the read above (on scheduled_start) never brings it; its worked day would vanish while
+     Clear The Date's note says it was kept on the calendar. Read those jobs by id: the segments place
+     them on their worked days (drawn all day, the day drill reads "Worked day"). Fail-soft: a failed
+     read draws what the first one brought. */
+  const missing = segmentJobsNotLoaded(((listedJobs ?? []) as { id: string }[]).map((j) => j.id), (segments ?? []) as { job_id: string }[]);
+  const { data: historyJobs } = missing.length
+    ? await supabase.from("jobs").select(JOB_COLS).in("id", missing.slice(0, 500))
+    : { data: [] };
+  const jobs: unknown[] = [...(listedJobs ?? []), ...(historyJobs ?? [])];
 
   const unscheduled = (unschedRows ?? []).map((j: any) => ({
     id: j.id,

@@ -564,6 +564,14 @@ export async function moveJobDay(
     await supabase.from("schedule_proposals").update({ status: "cancelled" }).eq("job_id", jobId).eq("status", "pending");
   }
 
+  // A job with NO PLAN (its date cleared, only worked days left as history) has nothing to move:
+  // "move it to Friday" from its history tile is a placement, the new day its plan and the history
+  // left where it happened. Moving the history day itself would stretch the plan from it.
+  const { data: planRow } = await supabase.from("jobs").select("scheduled_start").eq("id", jobId).maybeSingle();
+  if (planRow && !(planRow as { scheduled_start?: string | null }).scheduled_start) {
+    return placeOnDays(supabase, jobId, toDate);
+  }
+
   const { segments, error: segErr } = await loadJobDaySegments(supabase, jobId);
   if (segErr) return { ok: false, error: segErr };
   // The range's worked days stay where they happened; only its unworked remainder moves.
@@ -652,9 +660,14 @@ export async function scheduleJobWindow(
   return { ...res, kept: plan.kept, note: `${keptLine(plan.kept)} The job is now scheduled ${span}.` };
 }
 
-/** PLACE a job on a day without touching anything already scheduled — the tray
- *  gesture. UNION, not replace: a needs-return job keeps its worked-history
- *  segments on the calendar instead of collapsing to the tapped day. */
+/** PLACE a job on a day — the rail's and the tray's gesture. A needs-return job keeps its
+ *  worked-history segments on the calendar, but they stay HISTORY: the job's listed span (its
+ *  start, its end, its length) is the newly placed day(s) alone, the way moveJobDay and
+ *  scheduleJobWindow write it. Unioning the history into the span made a Clear The Date job put back
+ *  on Oct 5 at 9:00 one block from its Sep 22 worked day to Oct 5 at closing, its chosen time and
+ *  length gone. A job with no live plan (dateless, date cleared, or on hold with a stale date) gets
+ *  the new day(s) as its plan, its worked days kept and its stale unworked days dropped; a job that
+ *  already has a plan gets the day(s) added to it. */
 export async function placeJobOnDay(
   jobId: string,
   dateISO: string,
@@ -667,7 +680,17 @@ export async function placeJobOnDay(
 ): Promise<Result & { defaulted?: boolean }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
-  const supabase = ctx.supabase;
+  return placeOnDays(ctx.supabase, jobId, dateISO, startHHMM);
+}
+
+/** The body of placeJobOnDay, for callers that already passed requireStaff (moveJobDay's move of a
+ *  job with no plan is a placement). */
+async function placeOnDays(
+  supabase: SupabaseClient,
+  jobId: string,
+  dateISO: string,
+  startHHMM?: string,
+): Promise<Result & { defaulted?: boolean }> {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dateISO)) return { ok: false, error: "Pick a day." };
   const { segments, error: segErr } = await loadJobDaySegments(supabase, jobId);
   if (segErr) return { ok: false, error: segErr };
@@ -677,12 +700,38 @@ export async function placeJobOnDay(
      day one; the rest skip the weekend (see workingDaysFrom). */
   const { data: sizeRow } = await supabase
     .from("jobs")
-    .select("planned_minutes, status") // PROJECTION LAW: both columns are read below
+    .select("planned_minutes, status, scheduled_start, scheduled_end") // PROJECTION LAW: all four are read below
     .eq("id", jobId)
     .maybeSingle();
-  const row = sizeRow as { planned_minutes?: number | null; status?: string | null } | null;
+  const row = sizeRow as {
+    planned_minutes?: number | null;
+    status?: string | null;
+    scheduled_start?: string | null;
+    scheduled_end?: string | null;
+  } | null;
   const days = workingDaysFrom(dateISO, daysNeeded(row?.planned_minutes));
-  const withDays = days.reduce((acc, d) => addDaySegment(acc, d), segments);
+  const placed = days.reduce<DateRange[]>((acc, d) => addDaySegment(acc, d), []);
+  const newSpan = { start: days[0], end: days[days.length - 1] };
+
+  /* THE NEW DAY(S) ARE THE PLAN; THE HISTORY STAYS HISTORY. */
+  const tz = await orgTimezone(supabase);
+  let write: { segments: DateRange[]; mirror: DateRange };
+  if (!row?.scheduled_start || row.status === "on_hold") {
+    // No live plan: the kept worked days stay on the calendar, a stale unworked day goes.
+    const w = segments.length ? await workedDaysForJob(supabase, jobId, tz) : { days: [] };
+    if ("error" in w) return { ok: false, error: w.error };
+    const plan = keepWorkedDays(segments, placed, w.days, todayStrInTz(tz));
+    write = { segments: plan.segments, mirror: plan.mirror ?? newSpan };
+  } else {
+    // A live plan: the day(s) join it, and the listed span grows to cover them, never a history day.
+    const first = todayStrInTz(tz, new Date(row.scheduled_start));
+    const lastRaw = row.scheduled_end ? todayStrInTz(tz, new Date(row.scheduled_end)) : first;
+    const last = lastRaw > first ? lastRaw : first;
+    write = {
+      segments: days.reduce((acc, d) => addDaySegment(acc, d), segments),
+      mirror: { start: first < newSpan.start ? first : newSpan.start, end: last > newSpan.end ? last : newSpan.end },
+    };
+  }
 
   /* GIVING SOMETHING A DAY IS THE OPPOSITE OF PARKING IT. An on-hold job now appears on the rail
      even when it carries a stale date (Erik: "we need everything on hold to pop up on that list"),
@@ -700,13 +749,44 @@ export async function placeJobOnDay(
       .eq("id", jobId)
       .eq("status", "on_hold");
   }
-  // setJobScheduleRanges revalidates /schedule, /planner, /jobs, and the job page.
+  // writeScheduleRanges revalidates /schedule, /planner, /jobs, and the job page.
   // undefined (not null) when no time was given, so the preserve-the-job's-own-time branch stands.
-  return setJobScheduleRanges(
+  return writeScheduleRanges(
+    supabase,
     jobId,
-    withDays,
+    write.segments,
     /^\d{2}:\d{2}$/.test(startHHMM ?? "") ? startHHMM : undefined,
+    write.mirror,
   );
+}
+
+/**
+ * UNDO A PLACEMENT of a job that had no day: the plan leaves again and its worked days stay as
+ * history, exactly the state it was placed from. The calendar tray's Undo. It used to write the
+ * snapshot back through setJobScheduleRanges, which turned a kept worked day into the job's plan.
+ */
+export async function unplaceJob(jobId: string): Promise<Result> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const res = await clearPlan(ctx.supabase, jobId);
+  if (!res.ok) return { ok: false, error: res.error };
+  // The placement moved To Be Scheduled to Scheduled; putting it back puts that back too.
+  await ctx.supabase.from("jobs").update({ status: "to_be_scheduled" }).eq("id", jobId).eq("status", "scheduled").select("id");
+  return { ok: true };
+}
+
+/** The plan leaves, the worked days stay as history segments, the listed day goes (mirror "none").
+ *  Clear The Date and the tray's Undo. */
+async function clearPlan(supabase: SupabaseClient, jobId: string): Promise<Result & { kept?: string[] }> {
+  const { segments, error: segErr } = await loadJobDaySegments(supabase, jobId);
+  if (segErr) return { ok: false, error: segErr };
+  const tz = await orgTimezone(supabase);
+  const w = segments.length ? await workedDaysForJob(supabase, jobId, tz) : { days: [] };
+  if ("error" in w) return { ok: false, error: w.error };
+  const plan = keepWorkedDays(segments, [], w.days, todayStrInTz(tz));
+  const res = await writeScheduleRanges(supabase, jobId, plan.segments, undefined, "none");
+  if (!res.ok) return { ok: false, error: res.error };
+  return { ok: true, kept: plan.kept };
 }
 
 /**
@@ -760,14 +840,9 @@ export async function clearJobDate(jobId: string): Promise<Result & { note?: str
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
-  const { segments, error: segErr } = await loadJobDaySegments(supabase, jobId);
-  if (segErr) return { ok: false, error: segErr };
-  const tz = await orgTimezone(supabase);
-  const w = segments.length ? await workedDaysForJob(supabase, jobId, tz) : { days: [] };
-  if ("error" in w) return { ok: false, error: w.error };
-  const plan = keepWorkedDays(segments, [], w.days, todayStrInTz(tz));
-  const res = await writeScheduleRanges(supabase, jobId, plan.segments, undefined, "none");
-  if (!res.ok) return { ok: false, error: res.error };
+  const plan = await clearPlan(supabase, jobId);
+  if (!plan.ok) return { ok: false, error: plan.error };
+  const kept = plan.kept ?? [];
   await supabase.from("jobs").update({ status: "to_be_scheduled" }).eq("id", jobId).eq("status", "scheduled").select("id");
   const { data: withdrawn } = await supabase
     .from("schedule_proposals")
@@ -776,10 +851,10 @@ export async function clearJobDate(jobId: string): Promise<Result & { note?: str
     .eq("status", "pending")
     .select("id");
   const notes = [
-    plan.kept.length ? keptLine(plan.kept) : null,
+    kept.length ? keptLine(kept) : null,
     withdrawn?.length ? "The customer's pick-a-date link was withdrawn." : null,
   ].filter(Boolean);
-  return { ok: true, kept: plan.kept, ...(notes.length ? { note: notes.join(" ") } : {}) };
+  return { ok: true, kept, ...(notes.length ? { note: notes.join(" ") } : {}) };
 }
 
 

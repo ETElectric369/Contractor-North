@@ -200,6 +200,31 @@ d("a job's start and length, stored (schedule writers)", () => {
     expect((await one("select count(*)::int as n from public.job_schedule_segments where job_id = $1", [id])).n).toBe(1);
   });
 
+  it("cleared, its worked day still reaches the calendar, and put back on Oct 5 at 9:00 it is 9 to 11 on Oct 5", async () => {
+    const id = await job("to_be_scheduled");
+    // The state Clear The Date leaves: no listed day, the worked Sep 22 kept as a segment.
+    await asPerson(ownerId, async () => {
+      await c.query("insert into public.job_schedule_segments (job_id, start_date, end_date) values ($1, '2026-09-22', '2026-09-22')", [id]);
+    });
+    // The calendar's second read (CalendarPanel, segmentJobsNotLoaded): the office sees the job by id.
+    const seen = await asPerson(ownerId, async () =>
+      (await c.query("select id::text as id, scheduled_start from public.jobs where id = any($1::uuid[])", [[id]])).rows,
+    );
+    expect(seen).toEqual([{ id, scheduled_start: null }]);
+
+    // placeJobOnDay: the new day is the plan (the mirror), the history stays a segment.
+    const t = planJobTimes({ firstDay: "2026-10-05", lastDay: "2026-10-05", tz: LA, workDay: WORK_DAY, startTime: "09:00", prior: { scheduledStart: null, scheduledEnd: null, plannedMinutes: null } });
+    expect(await writeTimes(ownerId, id, t)).toHaveLength(1);
+    await asPerson(ownerId, async () => {
+      await c.query("delete from public.job_schedule_segments where job_id = $1", [id]);
+      await c.query("insert into public.job_schedule_segments (job_id, start_date, end_date) values ($1, '2026-09-22', '2026-09-22'), ($1, '2026-10-05', '2026-10-05')", [id]);
+    });
+    const s = await stored(id);
+    expect([s.local_start, s.local_end, s.planned_minutes]).toEqual(["2026-10-05 09:00", "2026-10-05 11:00", null]);
+    const days = (await c.query("select start_date::text as d from public.job_schedule_segments where job_id = $1 order by 1", [id])).rows.map((r) => r.d);
+    expect(days).toEqual(["2026-09-22", "2026-10-05"]);
+  });
+
   it("a visit's one person is the office's to set", async () => {
     const v = (
       await one(
