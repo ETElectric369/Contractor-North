@@ -1704,7 +1704,7 @@ export async function updateJobNotes(
   const supabase = ctx.supabase;
   // A ZERO-ROW UPDATE IS A 204 (the silent-write law). When RLS refuses the row — a job that
   // isn't this org's, or one deleted out from under the editor — Postgres answers "0 rows, no
-  // error", and this used to return { ok: true } so the Notes tab flashed "Saved" over text that
+  // error", and this used to return { ok: true } so the notes box flashed "Saved" over text that
   // never landed. Ask for the id back; an empty answer is the refusal it is.
   const { data, error } = await supabase
     .from("jobs")
