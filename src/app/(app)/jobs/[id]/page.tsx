@@ -1248,7 +1248,12 @@ export default async function JobDetailPage({
                         {/* OFFER DATES, beside the dates it fills (W1-17: out of Manage, not cut). Only
                             while the job can still be scheduled. */}
                         {schedulable && (
-                          <ProposeDatesButton jobId={j.id} customerPhone={j.customers?.phone ?? null} pending={(pendingProposal as any) ?? null} />
+                          <ProposeDatesButton
+                            jobId={j.id}
+                            customerPhone={j.customers?.phone ?? null}
+                            pending={(pendingProposal as any) ?? null}
+                            dayStart={workDay.start}
+                          />
                         )}
                       </div>
                     ) : (
