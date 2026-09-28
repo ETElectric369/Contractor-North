@@ -5,6 +5,7 @@ import { featureOn } from "@/lib/features";
 import { orgStaffIds, pushConfigured } from "@/lib/push";
 import { notifyPeople } from "@/lib/notifications";
 import { sixForPerson, type DigestTask } from "./digest-six";
+import { inquiryDueFilter } from "./due-filters";
 
 /**
  * The morning "day ahead" push digest (run by the daily automations cron) — the
@@ -78,6 +79,9 @@ export async function sendDayAheadDigests(supabase: any): Promise<{ orgs: number
         .eq("org_id", org.id)
         .eq("status", "new")
         .is("converted_at", null)
+        // A new lead snoozed to a later day waits for it here too: the rule Needs You and the Sales
+        // badge read with, so the push never names a lead My Day has in its Waiting fold.
+        .or(inquiryDueFilter(today))
         .order("created_at", { ascending: true })
         .limit(2),
     ]);

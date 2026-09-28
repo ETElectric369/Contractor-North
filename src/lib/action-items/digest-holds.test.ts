@@ -79,6 +79,16 @@ describe("the morning push", () => {
     });
   });
 
+  it("a new lead snoozed to a later day waits for it: the lead read carries Needs You's due filter", async () => {
+    const db = fake({ organizations: { data: [ORG] }, jobs: { count: 0 }, invoices: { count: 0 }, inquiries: { count: 0 }, tasks: { data: [] } });
+    await sendDayAheadDigests(db);
+    const leads = db.filters.inquiries;
+    expect(leads).toContainEqual(["eq", "org_id", "org-1"]);
+    expect(leads).toContainEqual(["eq", "status", "new"]);
+    // next_follow_up_at empty, or on/before the company's today: the rule My Day and the Sales badge use.
+    expect(leads.find((f) => f[0] === "or")?.[1]).toMatch(/^next_follow_up_at\.is\.null,next_follow_up_at\.lte\.\d{4}-\d{2}-\d{2}$/);
+  });
+
   it("before 0366 the holds read fails: no line, and nothing to push when nothing else waits", async () => {
     const db = fake({ organizations: { data: [ORG] }, jobs: { error: { code: "42703" }, count: null }, invoices: { count: 0 }, inquiries: { count: 0 }, tasks: { data: [] } });
     expect(await sendDayAheadDigests(db)).toEqual({ orgs: 1, pushed: 0 });
