@@ -722,7 +722,7 @@ describe("the header, for a new company and one with data", () => {
 
   it("a new company: the header and nothing else until something is in it", async () => {
     // Purchase Orders off, as every trade's preset starts (features.ts): nothing to hold New PO.
-    const poOff = [{ ...TABLES.organizations[0], settings: { timezone: "America/Los_Angeles", features: { purchase_orders: false } } }];
+    const poOff = [{ ...(TABLES.organizations[0] as Record<string, unknown>), settings: { timezone: "America/Los_Angeles", features: { purchase_orders: false } } }];
     CURRENT = { profiles: TABLES.profiles, organizations: poOff };
     try {
       const { default: BillsPage } = await import("./page");
@@ -741,7 +741,7 @@ describe("the header, for a new company and one with data", () => {
     CURRENT = { profiles: TABLES.profiles, organizations: TABLES.organizations };
     try {
       const { default: BillsPage } = await import("./page");
-      const fresh = renderToStaticMarkup((await BillsPage({ searchParams: Promise.resolve({ tab: "po" }) })) as React.ReactElement);
+      const fresh = renderToStaticMarkup((await BillsPage({ searchParams: Promise.resolve({}) })) as React.ReactElement);
       expect(fresh).toContain('id="all-bills"');
       expect(fresh).toMatch(/aria-label="More For All Bills"/);
       expect(doors(fresh)).toContain("New PO");
