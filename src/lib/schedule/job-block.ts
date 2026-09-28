@@ -34,6 +34,7 @@
  *  - A job over several days runs full days: the first day from its start, the last to closing.
  */
 import { todayStrInTz, tzDateTimeUtc, tzMinutesOfDay } from "../tz";
+import type { DayHours } from "../schedule-math";
 import { hmToMinutes, minutesToHm } from "./fit-day";
 import { WORK_DAY_MINUTES } from "./work-shape";
 
@@ -66,9 +67,22 @@ export function readHm(hm: string | null | undefined): number | null {
   return hmToMinutes(String(hm ?? "").slice(0, 5));
 }
 
+/** A day's own hours (0370, job_schedule_segments.start_time / end_time) as minutes past midnight, or
+ *  null when the day has none (or they don't read as a start before an end). */
+export function ownDayMinutes(h: DayHours | null | undefined): { startMin: number; endMin: number } | null {
+  if (!h) return null;
+  const startMin = readHm(h.start);
+  const endMin = readHm(h.end);
+  if (startMin == null || endMin == null || endMin <= startMin) return null;
+  return { startMin, endMin };
+}
+
 /**
  * WHERE THE JOB SITS ON ONE DAY of the calendar, in minutes past the company's midnight.
  *
+ *   its own hours (0370): a day that keeps its own hours (Herringbone added today, noon to 5, beside
+ *               its other days) draws exactly those, on any day, in the plan or kept as history. The
+ *               rest of this is the job's USUAL hours, for every day without its own:
  *   one day:    its start to its stored end. A SIZED job whose stored end is just the closing-time stamp
  *               (every write before this fix) draws its size, never closing: the length somebody chose
  *               beats a time the writer made up. An older row with no end runs to closing, as it always
@@ -83,8 +97,12 @@ export function jobDayBlock(p: {
   plannedMinutes?: number | null;
   tz: string;
   wd: WorkDayMin;
+  /** The day's own hours, when it keeps them (null or absent: the job's usual hours). */
+  dayHours?: DayHours | null;
 }): { startMin: number; endMin: number; allDay: boolean } {
   const { day, tz, wd } = p;
+  const own = ownDayMinutes(p.dayHours);
+  if (own) return { ...own, allDay: own.startMin === wd.startMin && own.endMin === wd.endMin };
   const full = { startMin: wd.startMin, endMin: wd.endMin, allDay: true };
   if (!p.scheduledStart) return full;
   const first = todayStrInTz(tz, new Date(p.scheduledStart));
@@ -253,8 +271,18 @@ export function dayBlockWords(p: {
   plannedMinutes?: number | null;
   tz: string;
   workDay: { start: string; end: string };
+  /** The day's own hours (0370), when it keeps them. */
+  dayHours?: DayHours | null;
 }): { words: string; history: boolean } {
   const plan = readJobBlock(p);
+  const history = !plan.day || p.day < plan.day || p.day > (plan.lastDay ?? plan.day);
+  // A DAY WITH ITS OWN HOURS reads them, the way the grid draws it (a worked day kept as history
+  // still says so).
+  const own = ownDayMinutes(p.dayHours);
+  if (own) {
+    const hours = `${hmWords(minutesToHm(own.startMin))} – ${hmWords(minutesToHm(Math.min(LAST_MINUTE, own.endMin)))} · ${lengthWords(own.endMin - own.startMin)}`;
+    return { words: history ? `Worked day · ${hours}` : hours, history };
+  }
   if (!plan.day) return { words: "Worked day · no day planned yet", history: true };
   if (p.day < plan.day || p.day > (plan.lastDay ?? plan.day)) return { words: `Worked day · planned ${dayWords(plan.day)}`, history: true };
   if (!plan.multiDay) return { words: `${hmWords(plan.startHm)} – ${hmWords(plan.endHm)} · ${blockWords(plan)}`, history: false };
