@@ -221,8 +221,10 @@ export function AppointmentButton({
   const [zoneNote, setZoneNote] = useState<string | null>(null);
 
   // THE TYPE SELECT'S OPTIONS (W2-06): the five a person picks, plus the row's OWN old kind when it
-  // carries one, so an edit shows what it is and a Save never silently rewrites it.
-  const typeOptions = appointmentTypeOptions(appointment?.type ?? null);
+  // carries one, so an edit shows what it is and a Save never silently rewrites it. (A caller's
+  // defaultType is always one of the five; were it not, it shows as itself and the save says so,
+  // rather than the select quietly booking its first option.)
+  const typeOptions = appointmentTypeOptions(appointment?.type ?? defaultType ?? null);
 
   /** The title this form would suggest for these fields: follows the type (W2-06), the job's own
    *  name when a job is picked, "Walk-Through: <customer or place>" for a walk-through (W2-10). */

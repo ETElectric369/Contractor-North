@@ -187,7 +187,7 @@ describe("the pickers offer the five (and a row's own old kind)", () => {
   });
   it("the New/Edit Appointment modal maps typeOptions, never the full nine", () => {
     const btn = read("app/(app)/appointments/appointment-button.tsx");
-    expect(btn).toContain("const typeOptions = appointmentTypeOptions(appointment?.type ?? null);");
+    expect(btn).toContain("const typeOptions = appointmentTypeOptions(appointment?.type ?? defaultType ?? null);");
     expect(btn).toContain("{typeOptions.map((t) => (");
     expect(btn).not.toContain("APPOINTMENT_TYPES.map(");
     // The create default: Job from a job, Other anywhere else (the Walk-Throughs tab passes its own).
