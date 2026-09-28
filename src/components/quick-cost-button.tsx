@@ -257,7 +257,7 @@ function SnapCostButton({
     const input = captureRef.current;
     if (!input) {
       if (fileRef.current) return fileRef.current.click();
-      return setError("Couldn't open the camera or your photos on this device. Add the receipt later from the job's Receipts & Papers.");
+      return setError(NO_PICKER_LINE("the camera or your photos"));
     }
     clearSnapWatch();
     try {
@@ -294,7 +294,7 @@ function SnapCostButton({
   function pickFromLibrary() {
     setCameraHint(null);
     if (fileRef.current) return fileRef.current.click();
-    setError("Couldn't open your photos on this device. Add the receipt later from the job's Receipts & Papers.");
+    setError(NO_PICKER_LINE("your photos"));
   }
 
   // THE RELOAD THAT EATS THE SHEET. In the iOS shell the camera can push the web view out of
@@ -474,7 +474,7 @@ function SnapCostButton({
       if (!receipt || !targetJob) return finishOk();
       start(async () => {
         const docId = await attachReceipt(targetJob);
-        if (!docId) return setWarn(`Still couldn't attach it — the receipt ${attachClause()}. You can add it later from the job's Receipts & Papers.`);
+        if (!docId) return setWarn(`Still couldn't attach it — the receipt ${attachClause()}. ${RETRY_HERE_LINE}`);
         // Link it to the cost we already saved, so this file can never be read as a NEW cost.
         if (savedBillId) await linkReceiptToBill(savedBillId, docId);
         finishOk();
@@ -537,7 +537,7 @@ function SnapCostButton({
       setCostSaved(true);
       setSavedBillId(res.id ?? null);
       if (receipt && targetJob && !docId) {
-        setWarn(`Cost saved ✓ — but the receipt ${attachClause()}. Tap Retry Receipt, or close and add it from the job's Receipts & Papers.`);
+        setWarn(`Cost saved ✓ — but the receipt ${attachClause()}. ${RETRY_HERE_LINE}`);
         return;
       }
       finishOk();
@@ -757,6 +757,18 @@ const STOCK = "__stock";
  * becomes a roll with its own cost, which a typed amount has none of. So Shop Stock here is a door,
  * never a guessed save: the paper goes in through Snap Or Note, whose card has Shop Stock.
  */
+/**
+ * WHERE A RECEIPT GOES WHEN THIS SHEET CAN'T TAKE IT (review of W1-23: Receipts & Papers has no
+ * uploader any more, so the old sentences sending a receipt there named a door that isn't there).
+ * Before the cost is saved: the job's Costs tab's Snap The Bill reads the cost off the paper, so it is
+ * one door or the other, never both. After it is saved: only Retry Receipt ties the paper to THIS cost;
+ * Snap The Bill or Upload would read it into a second bill for the same money.
+ */
+export const NO_PICKER_LINE = (what: string) =>
+  `Couldn't open ${what} on this device. Type the cost here without the receipt, or close this and use Snap The Bill on the job's Costs tab, which reads the cost off the paper. Not both: that would record it twice.`;
+export const RETRY_HERE_LINE =
+  "The cost is saved: tap Retry Receipt when you have signal. Don't put this receipt in through the job's Snap The Bill or Upload, which would record the cost a second time.";
+
 /** The typed sheet's jobs couldn't be read: a job's cost waits for a reload, never becomes a business cost. */
 export const JOBS_UNREAD_LINE = "Couldn't load your jobs just now. Reload the page to put this cost on a job.";
 

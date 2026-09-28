@@ -154,6 +154,24 @@ describe("the sheet as it is drawn", () => {
     expect(text(costs)).toContain("A cost on this job, with no paper to snap.");
   });
 
+  it("the snap sheet never sends a receipt to Receipts & Papers (it has no uploader); a saved cost's receipt is retried here", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const src = readFileSync(join(process.cwd(), "src/components/quick-cost-button.tsx"), "utf8");
+    // Every sentence a person reads (quoted), never a comment: no "from the job's Receipts & Papers".
+    const said = Array.from(src.matchAll(/(["`])((?:(?!\1)[^\\\n]|\\.)*)\1/g)).map((m) => m[2]);
+    expect(said.filter((w) => w.includes("Receipts & Papers"))).toEqual([]);
+    const mod = await import("./quick-cost-button");
+    // Before a save: one door or the other, named where it is.
+    expect(mod.NO_PICKER_LINE("your photos")).toContain("Snap The Bill on the job's Costs tab");
+    expect(mod.NO_PICKER_LINE("your photos")).toContain("Not both");
+    // After a save: Retry Receipt, because Snap The Bill or Upload would record it again.
+    expect(mod.RETRY_HERE_LINE).toContain("tap Retry Receipt");
+    expect(mod.RETRY_HERE_LINE).toContain("record the cost a second time");
+    expect(src).toContain("Cost saved ✓ — but the receipt ${attachClause()}. ${RETRY_HERE_LINE}");
+    expect(src).toContain("Still couldn't attach it — the receipt ${attachClause()}. ${RETRY_HERE_LINE}");
+  });
+
   it("the Now card's sheet is the snap sheet, as before (Add Cost, the receipt block)", () => {
     const now = renderToStaticMarkup(createElement(QuickCostButton, { jobId: "job-011", snapFirst: true }));
     expect(buttons(now)[0].words).toBe("Add Cost");
