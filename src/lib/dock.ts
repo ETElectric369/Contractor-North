@@ -10,11 +10,9 @@ import {
   Users,
   FileText,
   Receipt,
-  CreditCard,
   Wallet,
   Tags,
   Boxes,
-  Coins,
   Repeat,
   Calculator,
   Banknote,
@@ -201,8 +199,8 @@ export const DOCK: DockSection[] = [
   },
   {
     // Renamed in spirit to "Money" — this is where the owner looks for everything dollar-shaped.
-    // The money-admin cluster (Payroll / Tax report / Analytics / Recurring / Petty cash) was
-    // promoted UP here out of Office's 3rd-level bucket so it's one reach from the billing hub.
+    // The money-admin cluster (Payroll / Tax report / Analytics / Recurring) was promoted UP here
+    // out of Office's 3rd-level bucket so it's one reach from the billing hub.
     key: "invoices",
     label: "Money",
     short: "Money",
@@ -212,11 +210,10 @@ export const DOCK: DockSection[] = [
     children: [
       // Day-to-day billing.
       { id: "m-billing-h", label: "Billing", icon: Receipt, header: true },
+      // ONE INVOICES PAGE (W1-29): who owes you, what's late, and what came in. Accounts Receivable
+      // (its By Customer fold) and Payments (its Payments In fold) live inside it now; /billing/ar and
+      // /payments redirect there, so they need no row of their own.
       { id: "m-inv", label: "Invoices", icon: Receipt, href: "/billing" },
-      // The AR ledger (lifecycle rework): "invoiced/partial payment" left the job lifecycle —
-      // who-owes-what lives here, fed by invoices, one line per customer.
-      { id: "m-ar", label: "Accounts Receivable", icon: Banknote, href: "/billing/ar" },
-      { id: "m-pay", label: "Payments", icon: CreditCard, href: "/payments" },
       // Hours are money to the office (W1-08): Timecards moved here from the Clock tile, which is
       // the crew's now. It owns /timeclock too, so staff on the Timeclock (reached from the Now
       // card) light Money; a tech never sees this row, so his /timeclock lights Clock.
@@ -234,7 +231,10 @@ export const DOCK: DockSection[] = [
       // No switch: Recurring Billing takes only repeat INVOICES; repeat jobs and expenses keep
       // running, and this page is their only door (it draws its own Off line for the invoices).
       { id: "ma-recur", label: "Recurring", icon: Repeat, href: "/recurring" },
-      { id: "ma-petty", label: "Petty Cash", icon: Coins, href: "/petty-cash" },
+      // PETTY CASH LEFT THE MENU (W1-34): a new cash purchase is a cost like any other (Snap Or Note,
+      // Add By Hand), and a bank's ATM line is Cash Taken Out (Not A Cost). /petty-cash and every
+      // reader of the table stay; a company with petty-cash rows finds the page in Search Or Ask
+      // (the layout's hasPettyCash), and a job's Petty Cash figure links to it.
     ],
   },
   {
@@ -267,7 +267,7 @@ export const DOCK: DockSection[] = [
       { id: "o-resources", label: "Resources", icon: BookUser, href: "/resources" },
       // The office's Handbook row (it writes the handbook). A tech's is under You, so he sees it once.
       { id: "o-handbook", label: "Handbook", icon: BookOpen, href: "/handbook", staffOnly: true, feature: "crew_payroll" },
-      // Stock — the money-admin cluster (Payroll/Tax/Analytics/Recurring/Petty cash) was promoted
+      // Stock — the money-admin cluster (Payroll/Tax/Analytics/Recurring) was promoted
       // up to the Money section; only Inventory (warehouse stock, not a dollar ledger) stays here.
       { id: "o-stock-h", label: "Stock", icon: Boxes, header: true, staffOnly: true },
       { id: "ma-stock", label: "Shop Stock", icon: Boxes, href: "/inventory", staffOnly: true, feature: "shop_stock" },

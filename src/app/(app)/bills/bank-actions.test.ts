@@ -713,11 +713,34 @@ describe("Undo", () => {
     expect(db.organized_items[0].proposal.bankImport.applied).toBeNull();
   });
 
-  it("a petty cash top-up it wrote is taken back only while it is still that top-up", async () => {
+  /**
+   * CASH TAKEN OUT (NOT A COST) (Erik, 2026-09-27; W1-34): an ATM line is guessed as it, and applying
+   * it writes NO petty-cash row (the cash counts when its receipts come in). Its line is kept under
+   * the word 0363 allows, and Undo takes the line off.
+   */
+  it("an ATM line guesses Cash Taken Out, and applying it writes no petty-cash row", async () => {
     const id = await drop(`Date,Description,Amount\n09/15/2026,ATM WITHDRAWAL MAIN ST,-200.00\n09/16/2026,ATM WITHDRAWAL MAIN ST,-100.00\n`, "Atm1234.csv");
     const v = await view(id);
+    expect(v.rows.map((r) => r.guess)).toEqual(v.rows.map(() => "cash_out"));
+    const res = await applyBankDownload(id, { fingerprint: v.fingerprint, picks: Object.fromEntries(v.rows.map((r) => [r.id, "cash_out"])) });
+    expect(res.ok).toBe(true);
+    expect(db.petty_cash ?? []).toHaveLength(0);
+    expect(db.bank_lines.map((l) => l.choice)).toEqual(["petty_cash", "petty_cash"]);
+    // Not a cost either: no bill.
+    expect(db.bills ?? []).toHaveLength(0);
+    await undoBankDownload(id);
+    expect(db.bank_lines).toHaveLength(0);
+    expect(db.petty_cash ?? []).toHaveLength(0);
+  });
+
+  it("a petty cash top-up an ATM line wrote before W1-34 is still taken back only while it is still that top-up", async () => {
+    const id = await drop(`Date,Description,Amount\n09/15/2026,ATM WITHDRAWAL MAIN ST,-200.00\n09/16/2026,ATM WITHDRAWAL MAIN ST,-100.00\n`, "Atm1234.csv");
+    const v = await view(id);
+    // An old card's pick, under the old word: read as Cash Taken Out, so nothing is written now.
     await applyBankDownload(id, { fingerprint: v.fingerprint, picks: Object.fromEntries(v.rows.map((r) => [r.id, "petty_cash"])) });
-    expect(db.petty_cash).toHaveLength(2);
+    expect(db.petty_cash ?? []).toHaveLength(0);
+    // The top-ups the old Apply wrote for these lines (Petty Cash (ATM) wrote one per line).
+    db.petty_cash = db.bank_lines.map((l) => ({ id: `pc-${l.id}`, org_id: l.org_id, kind: "replenish", amount: -Number(l.amount), tx_date: l.posted_on, bank_line_id: l.id }));
     // Someone corrects one of them since.
     db.petty_cash.find((p) => p.amount === 200)!.amount = 180;
     const res = await undoBankDownload(id);

@@ -101,43 +101,51 @@ export default async function AppLayout({
   // every router.refresh and every revalidatePath in the app, and its reads used to run one after
   // another — ~100–200ms of pure round-trip added to time-to-first-byte before the page's own
   // queries started. Only ONE dependency is real: the org row feeds `settings`, which gates the
-  // geofence read and hands the action-items count its timezone. So: {org, lead badge} together
-  // here, {open entry, action items} together below. Each keeps its own try/catch — one failing
-  // read still degrades on its own and never takes the shell down.
-  const [org, freshLeads, platformAdmin, teammates] = await Promise.all([
-    (async (): Promise<OrgLite | null> => {
-      try {
-        const { data } = await supabase
-          .from("organizations")
-          .select("name, logo_url, subscription_status, trial_ends_at, current_period_end, settings")
-          .eq("id", profile.org_id)
-          .maybeSingle();
-        return (data as OrgLite | null) ?? null;
-      } catch (e) {
-        // A transient org-read failure must not tear down the whole shell — degrade to
-        // defaults (branding → nulls, settings → DEFAULT_SETTINGS below, billing gate is
-        // already guarded on `org &&`). Logged so it's visible in the ops sink.
-        reportError("app-layout:org", e);
-        return null;
-      }
-    })(),
-    // THE RED DOT ANDREW ASKED FOR: uncontacted leads on the Sales icon. The dock's badge sum
-    // already reads per-href counts (dock.tsx:75) — this was wired for exactly one href since the
-    // day it shipped. A count is cosmetic, never a crash.
-    (async (): Promise<number> => {
-      if (!isStaff) return 0;
-      try {
-        const { count } = await supabase
-          .from("inquiries")
-          .select("id", { count: "exact", head: true })
-          .eq("status", "new")
-          .is("converted_at", null);
-        return count ?? 0;
-      } catch (e) {
-        reportError("app-layout:lead-badge", e);
-        return 0;
-      }
-    })(),
+  // geofence read and hands the action-items count (and the lead badge) its timezone. So the org
+  // and its neighbours together here, {open entry, action items} together below. Each keeps its own
+  // try/catch — one failing read still degrades on its own and never takes the shell down.
+  const orgP = (async (): Promise<OrgLite | null> => {
+    try {
+      const { data } = await supabase
+        .from("organizations")
+        .select("name, logo_url, subscription_status, trial_ends_at, current_period_end, settings")
+        .eq("id", profile.org_id)
+        .maybeSingle();
+      return (data as OrgLite | null) ?? null;
+    } catch (e) {
+      // A transient org-read failure must not tear down the whole shell — degrade to
+      // defaults (branding → nulls, settings → DEFAULT_SETTINGS below, billing gate is
+      // already guarded on `org &&`). Logged so it's visible in the ops sink.
+      reportError("app-layout:org", e);
+      return null;
+    }
+  })();
+  // THE RED DOT ANDREW ASKED FOR: uncontacted leads on the Sales icon. The dock's badge sum
+  // already reads per-href counts (dock.tsx:75) — this was wired for exactly one href since the
+  // day it shipped. A count is cosmetic, never a crash.
+  //
+  // ONLY THE LEADS DUE NOW (NY-feeders): a lead snoozed from Needs You waits for its day, and so
+  // does its dot, so the badge and the row agree. "Now" is the company's today, so this starts the
+  // moment the org read gives the timezone; it never holds the shell up (the dock gets it with the
+  // other badges, unresolved), and it never rejects.
+  const freshLeadsP: Promise<number> = (async () => {
+    if (!isStaff) return 0;
+    try {
+      const today = todayStrInTz(getOrgSettings((await orgP)?.settings).timezone || "America/Los_Angeles");
+      const { count } = await supabase
+        .from("inquiries")
+        .select("id", { count: "exact", head: true })
+        .eq("status", "new")
+        .is("converted_at", null)
+        .or(`next_follow_up_at.is.null,next_follow_up_at.lte.${today}`);
+      return count ?? 0;
+    } catch (e) {
+      reportError("app-layout:lead-badge", e);
+      return 0;
+    }
+  })();
+  const [org, platformAdmin, teammates, hasPettyCash] = await Promise.all([
+    orgP,
     // North's own team (0176): Bug Watch in the avatar menu, and triage inside Report A Problem.
     // In this first stage, beside the org read, so it costs no extra hop; false on any failure.
     isPlatformAdmin(supabase),
@@ -150,6 +158,23 @@ export default async function AppLayout({
       } catch (e) {
         reportError("app-layout:teammates", e);
         return null;
+      }
+    })(),
+    // PETTY CASH LEFT THE MENU (W1-34), and a company that has petty-cash rows keeps a way in: Search
+    // Or Ask's Petty Cash row. One row at most, this company's, staff only (a tech never reads it);
+    // a failed read offers no row and says so in the ops sink (the job's Petty Cash figure still links).
+    (async (): Promise<boolean> => {
+      if (!isStaff) return false;
+      try {
+        const { data, error } = await supabase.from("petty_cash").select("id").eq("org_id", profile.org_id).limit(1);
+        if (error) {
+          reportError("app-layout:petty-cash", error);
+          return false;
+        }
+        return (data ?? []).length > 0;
+      } catch (e) {
+        reportError("app-layout:petty-cash", e);
+        return false;
       }
     })(),
   ]);
@@ -280,11 +305,13 @@ export default async function AppLayout({
         // share one fan-out (cache() keys on primitives) and the badge counts the list it opens.
         off: offFeatureKey(features),
       });
+      // The lead count ran beside this one (it started with the org read, and never rejects).
+      const freshLeads = await freshLeadsP;
       // "/leads" dots only a Leads row that's drawn: with Leads off the dock has none to sum.
       return { "/planner": needsAction, "/leads": freshLeads };
     } catch (e) {
       reportError("app-layout:action-items", e);
-      return { "/planner": 0, "/leads": freshLeads };
+      return { "/planner": 0, "/leads": await freshLeadsP };
     }
   })();
 
@@ -328,7 +355,7 @@ export default async function AppLayout({
         </main>
       </div>
       {/* Search Or Ask's sheet: with nothing typed, Talk To Nort and (staff) the setup rows. */}
-      <CommandBar isStaff={isStaff} features={doors} setup={setup} onboarded={onboarded} />
+      <CommandBar isStaff={isStaff} features={doors} setup={setup} onboarded={onboarded} hasPettyCash={hasPettyCash} />
       {/* The setup screens (the tour, the questions, a lesson), mounted ONCE here and opened by the
           setup rows through cn:setup, so closing the sheet a row sat in never kills a lesson. */}
       <SetupHost initial={setup} isStaff={isStaff} onboarded={onboarded} features={doors} />

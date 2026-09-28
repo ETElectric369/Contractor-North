@@ -58,7 +58,8 @@ describe("the host", () => {
     const layout = read("src/app/(app)/layout.tsx");
     expect(layout.match(/<SetupHost /g)).toHaveLength(1);
     expect(layout).toContain("<SetupHost initial={setup} isStaff={isStaff} onboarded={onboarded} features={doors} />");
-    expect(layout).toContain("<CommandBar isStaff={isStaff} features={doors} setup={setup} onboarded={onboarded} />");
+    // Petty Cash left the menu (W1-34): the palette offers it by name to a company that has rows.
+    expect(layout).toContain("<CommandBar isStaff={isStaff} features={doors} setup={setup} onboarded={onboarded} hasPettyCash={hasPettyCash} />");
     // The cap itself is gone.
     expect(layout).not.toContain("SetupButton");
     expect(read("src/components/app-shell/topbar.tsx")).not.toContain("SetupButton");

@@ -171,6 +171,14 @@ describe("the chrome's other numbers", () => {
     expect(layout).toMatch(/\.eq\("status", "new"\)\s*\.is\("converted_at", null\)/);
   });
 
+  it("the Sales dot counts only the leads due now: a lead snoozed from Needs You waits for its day, like its row", () => {
+    const layout = read("app/(app)/layout.tsx");
+    // Right after the two pinned calls, the same rule as Needs You's lead read: no day, or a day that
+    // has come, by the company's today.
+    expect(layout).toMatch(/\.eq\("status", "new"\)\s*\.is\("converted_at", null\)\s*\.or\(`next_follow_up_at\.is\.null,next_follow_up_at\.lte\.\$\{today\}`\)/);
+    expect(layout).toMatch(/const today = todayStrInTz\(getOrgSettings\(\(await orgP\)\?\.settings\)\.timezone/);
+  });
+
   it("the bell counts unread notifications only, as the database counts them (never the 20 lines it shows)", () => {
     const bell = read("components/app-shell/notification-bell.tsx");
     expect(bell).toContain("const badge = bellBadge(unread);");

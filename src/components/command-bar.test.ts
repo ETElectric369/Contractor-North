@@ -114,6 +114,31 @@ describe("commandNavItems", () => {
     expect(hrefs(commandNavItems(true, ALL_ON))).toEqual(expect.arrayContaining(["/team", "/inventory", "/tools"]));
   });
 
+  it("Accounts Receivable's and Payments' words find Invoices now (W1-29); their old routes are no rows", () => {
+    const staff = commandNavItems(true, ALL_ON);
+    expect(hrefs(staff)).not.toContain("/billing/ar");
+    expect(hrefs(staff)).not.toContain("/payments");
+    for (const term of ["owed", "who owes", "aging", "paid", "received", "deposit", "collections", "accounts receivable", "payments"]) {
+      expect(hrefs(matchNavItems(staff, term)), term).toContain("/billing");
+    }
+    expect(find(staff, "/billing")).toMatchObject({ label: "Invoices", sub: "Money" });
+  });
+
+  it("Petty Cash left the menu (W1-34): no row by default, one row with its words for a company that has petty cash", () => {
+    for (const isStaff of [true, false]) expect(hrefs(commandNavItems(isStaff, ALL_ON)), String(isStaff)).not.toContain("/petty-cash");
+    const withCash = commandNavItems(true, ALL_ON, true);
+    expect(withCash.filter((i) => i.href === "/petty-cash")).toHaveLength(1);
+    expect(find(withCash, "/petty-cash")).toMatchObject({ label: "Petty Cash", sub: "Money" });
+    expect(find(withCash, "/petty-cash")?.aliases).toEqual(expect.arrayContaining(["petty cash", "cash box", "cash", "atm"]));
+    for (const term of ["petty cash", "cash box", "atm"]) expect(hrefs(matchNavItems(withCash, term)), term).toContain("/petty-cash");
+    // A tech never reads petty cash: no row, whatever the company has.
+    expect(hrefs(commandNavItems(false, ALL_ON, true))).not.toContain("/petty-cash");
+    // The layout checks for rows (this company's, staff only) and hands the answer over.
+    const layout = readFileSync(join(process.cwd(), "src/app/(app)/layout.tsx"), "utf8");
+    expect(layout).toContain('supabase.from("petty_cash").select("id").eq("org_id", profile.org_id).limit(1)');
+    expect(layout).toMatch(/<CommandBar [^\n]*hasPettyCash=\{hasPettyCash\}/);
+  });
+
   it("Shop Stock, Crew & Payroll, Licenses, Calculators off: their pages go", () => {
     const items = commandNavItems(true, off("shop_stock", "crew_payroll", "licenses", "calculators"));
     for (const h of ["/inventory", "/payroll", "/employee-docs", "/handbook", "/compliance", "/insurance", "/safety", "/audits", "/tools"])

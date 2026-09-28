@@ -11,7 +11,6 @@ import { jobActions } from "./entities/job";
 import { organizeActions } from "./entities/organize";
 import { timeActions } from "./entities/time";
 import { permitActions } from "./entities/permit";
-import { pettyCashActions } from "./entities/pettyCash";
 import { inventoryActions } from "./entities/inventory";
 import { safetyActions } from "./entities/safety";
 import { complianceActions } from "./entities/compliance";
@@ -45,7 +44,6 @@ export const REGISTRY: Record<string, ActionDef> = {
   ...organizeActions,
   ...timeActions,
   ...permitActions,
-  ...pettyCashActions,
   ...inventoryActions,
   ...safetyActions,
   ...complianceActions,
