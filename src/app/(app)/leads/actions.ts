@@ -23,6 +23,7 @@ import { getOrgSettings } from "@/lib/org-settings";
 import { featureOn } from "@/lib/features";
 import { PROJECT_TYPES, estimateLinesFromIntake } from "@/lib/lead-triage";
 import { tzDateTimeUtc, todayStrInTz } from "@/lib/tz";
+import { jobNameFrom, jobWho, leadScopeWords } from "@/lib/job-name";
 import { checkComeBackDay } from "@/lib/come-back-days";
 import { createProposalCore, cleanSlots, type ProposalSlot } from "@/lib/appointments/proposal";
 import { ESTIMATE_VISIT_TYPES, INQUIRY_STATUSES, INSPECTION_TYPES } from "@/lib/statuses";
@@ -647,7 +648,9 @@ export async function convertInquiry(
       const res = await saveQuote({
         customer_id: linkedCustomer, // null → the estimate stands alone until accepted
         inquiry_id: id, // provenance: this estimate traces back to the lead
-        title: label ? `${label} — ${inq.name}` : `Estimate — ${inq.name}`,
+        // "Not sure — I need help" is the customer asking, not the work: the estimate is plain
+        // "Estimate — <name>" then (leadScopeWords refuses it for the job's name the same way).
+        title: label && inq.project_type !== "unsure" ? `${label} — ${inq.name}` : `Estimate — ${inq.name}`,
         notes: reason ? `From lead — ${reason}` : "From lead.",
         tax_rate: 0, // never infer tax on a seeded draft; the office sets it on review
         valid_until: validUntilStr,
@@ -679,6 +682,7 @@ export async function convertInquiry(
     return { ok: true, id: inq.customer_id, redirect: `/crm/${inq.customer_id}` };
   }
   let customerId = opts.customerId || null;
+  let mintedFromLead = false; // the card was made from this lead's own name/company/type just now
   if (!customerId) {
     // CROSSCHECK THE BOOK before minting (audit 7): "Save as contact" on a lead from an
     // EXISTING customer silently minted a second card — future jobs then split across the two.
@@ -709,6 +713,7 @@ export async function convertInquiry(
       .single();
     if (cErr) return { ok: false, error: cErr.message };
     customerId = cust.id;
+    mintedFromLead = true;
   }
 
   let redirect = `/crm/${customerId}`;
@@ -718,12 +723,37 @@ export async function convertInquiry(
   if (target === "estimate" || target === "job") {
     // An estimate is still in the pipeline; a scheduled job means the inquiry is won.
     newStatus = target === "estimate" ? "quoted" : "won";
+    // THE NAME IS THE STREET, never where it came from (Erik 2026-09-27 / 09-28, "street number and
+    // name as always"): "Job — Rita Moss" said neither the place nor the work. The one namer
+    // (lib/job-name): the lead's street number and name (" #56" with its unit); with no street, who
+    // and the lead's short scope words ("Rita Moss · 3-way switches": the project type it picked, or
+    // a one-line message, leadScopeWords), never a paragraph; else "New Job · Sep 27".
+    // WHO is the card the job links to, like every other door: a lead linked by phone or email to
+    // an existing card ("Rita Moss") is named for that card, not for what the lead typed ("rita", or
+    // a missed call's phone number). The lead's own fields only when the card was just made from them.
+    const leadWho = { name: inq.name, company_name: inq.company_name, type: inq.type };
+    let card: typeof leadWho | null = null;
+    if (!mintedFromLead && customerId) {
+      const { data: c } = await supabase.from("customers").select("name, company_name, type").eq("id", customerId).maybeSingle();
+      card = (c as typeof leadWho | null) ?? null;
+    }
+    const jobName = jobNameFrom({
+      sourceWords: leadScopeWords({
+        projectType: inq.project_type,
+        projectTypeLabel: PROJECT_TYPES.find((p) => p.value === inq.project_type)?.label,
+        message: inq.message,
+      }),
+      customer: jobWho([card, leadWho]).customer,
+      street: inq.address,
+      unit: inq.unit,
+      todayStr: todayStrInTz(await orgTimezone(supabase)),
+    });
     const { data: job, error: jErr } = await supabase
       .from("jobs")
       .insert({
         customer_id: customerId,
         inquiry_id: id, // provenance: this estimate/job traces back to the lead
-        name: `Job — ${inq.name}`,
+        name: jobName,
         description: inq.message ?? null,
         // The size he set on the lead — the flow's whole point is that a fact stated once
         // survives every step (the appointment path already carries it; the job path dropped it).
@@ -733,6 +763,7 @@ export async function convertInquiry(
         status: "to_be_scheduled",
 
         address: inq.address,
+        unit: inq.unit ?? null, // the lead's unit is the job's (0187), and its name's " #56"
         city: inq.city,
         state: inq.state,
         zip: inq.zip,

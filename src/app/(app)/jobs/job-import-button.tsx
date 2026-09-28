@@ -7,6 +7,8 @@ import { Upload, Check, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { importJobs, type JobImportRow, type JobImportResult } from "./actions";
+import { jobNameFrom } from "@/lib/job-name";
+import { todayStrInTz } from "@/lib/tz";
 
 /**
  * THE ONE PARSER (cn-v700). This file carried a private `splitLine` doing `if (ch === '"') q = !q`
@@ -21,12 +23,19 @@ function num(s: string): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-function parseCsv(text: string): JobImportRow[] {
+export function parseCsv(text: string): JobImportRow[] {
   const rows = parseCSV(text);
   if (rows.length < 2) return [];
   const headers = rows[0].map((h) => h.trim().toLowerCase());
-  const at = (re: RegExp) => headers.findIndex((h) => re.test(h));
-  const iCust = at(/customer|client/), iJob = at(/job|name|project/), iVal = at(/value|amount|contract|price|total/),
+  const at = (re: RegExp, not = -1) => headers.findIndex((h, i) => i !== not && re.test(h));
+  const iCust = at(/customer|client/);
+  // THE JOB'S OWN COLUMN, never the customer's. "Customer Name" matches /name/ too, and read as the
+  // job's name the customer would be kept as typed (Rule 1) instead of the street (Erik 2026-09-28,
+  // "street number and name as always"): a "Job"/"Project" header first, else a "Name" that isn't
+  // the customer's column.
+  const iJobOrProject = at(/job|project/, iCust);
+  const iJob = iJobOrProject >= 0 ? iJobOrProject : at(/name/, iCust);
+  const iVal = at(/value|amount|contract|price|total/),
     iStatus = at(/status|stage/), iAddr = at(/address|street/), iCity = at(/city/), iState = at(/state/),
     iZip = at(/zip|postal/), iEmail = at(/e-?mail/), iPhone = at(/phone|cell|mobile/);
   const v = (c: string[], i: number) => (i >= 0 ? (c[i] ?? "").trim() : "");
@@ -45,6 +54,19 @@ function parseCsv(text: string): JobImportRow[] {
       phone: v(c, iPhone),
     }))
     .filter((r) => r.customer || r.job_name);
+}
+
+/** The name a row's job will get, the way importJobs names it: the row's job name as typed, unless
+ *  it is only a source tag (or a tag and who or where); then the street number and name, else the
+ *  whole customer name. (A card already in the book is named by its company when it has one.) */
+export function previewName(r: Pick<JobImportRow, "job_name" | "customer" | "address">): string {
+  const cname = (r.customer || "").trim();
+  return jobNameFrom({
+    typed: r.job_name,
+    customer: cname ? { company_name: cname } : null,
+    street: r.address,
+    todayStr: todayStrInTz(Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"),
+  });
 }
 
 const fmt = (n: number) => n.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
@@ -122,7 +144,8 @@ export function JobImportButton() {
                 <ul className="max-h-48 divide-y divide-slate-100 overflow-y-auto text-sm">
                   {rows.map((r, i) => (
                     <li key={i} className="flex items-center justify-between gap-2 px-3 py-1.5">
-                      <span className="truncate font-medium text-slate-800">{r.job_name || r.customer}</span>
+                      {/* The name the import will give (lib/job-name): never the old system's source tag. */}
+                      <span className="truncate font-medium text-slate-800">{previewName(r)}</span>
                       <span className="shrink-0 text-xs text-slate-400">{r.customer}{r.value ? ` · ${fmt(r.value)}` : ""}</span>
                     </li>
                   ))}

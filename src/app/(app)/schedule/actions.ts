@@ -11,7 +11,8 @@ import { requireStaff } from "@/lib/staff-guard";
 import { customerForInquiry } from "@/lib/actions/win-customer";
 import { findMatchingCustomerId, type DupCustomer } from "@/lib/crm/duplicates";
 import { matchOrCreateCustomer, typedNewCustomer } from "@/lib/crm/new-customer";
-import { defaultJobName, readUsualBillingKind, statusFromDate } from "@/lib/schedule-options";
+import { readUsualBillingKind, statusFromDate } from "@/lib/schedule-options";
+import { jobNameFrom, typedNameMayBeATag } from "@/lib/job-name";
 import { JOB_STATUSES } from "@/lib/job-status";
 import { getOrgSettings, workDayWindowHm } from "@/lib/org-settings";
 import { todayStrInTz, tzDateTimeUtc, tzDayStartUtc, tzMinutesOfDay } from "@/lib/tz";
@@ -91,7 +92,7 @@ async function advanceToScheduled(supabase: SupabaseClient, id: string): Promise
     .in("status", ["to_be_scheduled", "estimate"]);
 }
 
-export async function createJob(formData: FormData): Promise<Result> {
+export async function createJob(formData: FormData): Promise<Result & { /** The name the job was saved under (a sent name that was only a tag is not it). */ name?: string }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
@@ -146,16 +147,27 @@ export async function createJob(formData: FormData): Promise<Result> {
     customerId = made.id;
   }
 
-  // THE NAME (W1-22). A name that was sent wins (the Timeclock's quick add and Nort send one). With
-  // none, the same line the form showed live: "Smith · 1871 Apache Ct" (the customer's last name or
-  // company · the street line), either half alone, else "New Job · Sep 27" on the company's today
-  // (lib/schedule-options defaultJobName). Fragment-first: nobody is made to invent a name.
-  let name = String(formData.get("name") ?? "").trim();
-  if (!name) {
+  // THE NAME (W1-22; Erik 2026-09-28, "street number and name as always"). A name that was sent is
+  // a name a person typed (the Timeclock's quick add and Nort send one) and is kept exactly as sent.
+  // With none, the same line the form showed live: the street number and name (" #56" with a unit),
+  // else the customer as written, else "New Job · Sep 27" on the company's today (the one namer,
+  // lib/job-name, over lib/schedule-options defaultJobName). Fragment-first: nobody invents a name.
+  //
+  // NEVER ONLY A SOURCE TAG (Erik 2026-09-27). A sent name that is only a tag, or a tag and the
+  // person or the street ("Site inspection: Rita Moss"), is no name: it gets the default above.
+  const sentName = String(formData.get("name") ?? "").trim();
+  let name = sentName;
+  if (typedNameMayBeATag(sentName)) {
     const { data: cust } = customerId
       ? await supabase.from("customers").select("name, company_name, type").eq("id", customerId).maybeSingle()
       : { data: null };
-    name = defaultJobName({ customer: (cust as { name?: string | null; company_name?: string | null; type?: string | null } | null) ?? null, street: address, todayStr });
+    name = jobNameFrom({
+      typed: sentName,
+      customer: (cust as { name?: string | null; company_name?: string | null; type?: string | null } | null) ?? null,
+      street: address,
+      unit: emptyToNull(formData.get("unit")),
+      todayStr,
+    });
   }
 
   // THE STATUS (W1-22). An explicit status on the spine wins (the Timeclock's quick add sends In
@@ -203,7 +215,9 @@ export async function createJob(formData: FormData): Promise<Result> {
 
   revalidatePath("/schedule");
   revalidatePath("/planner"); // My Day reads today's scheduled jobs — keep it in sync
-  return { ok: true, id: data.id };
+  // The name it was SAVED under, so a caller that echoes it (the Timeclock's quick add) never says
+  // one name while the job carries another.
+  return { ok: true, id: data.id, name };
 }
 
 // setJobStatus lived here as an UNGUARDED copy (no requireStaff / no status whitelist) — the job-page

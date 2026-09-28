@@ -16,6 +16,8 @@ import { visibleJobIdOrNull, visiblePoIdOnJobOrNull, visibleTemplateIdOrNull } f
 import { requireStaff } from "@/lib/staff-guard";
 import { isStaffRole } from "@/lib/actions/perms";
 import { getOrgSettings } from "@/lib/org-settings";
+import { todayStrInTz } from "@/lib/tz";
+import { jobNameFrom } from "@/lib/job-name";
 import { customerMaterialMarkupForJob } from "@/lib/labor-billing";
 import { reportError } from "@/lib/observe";
 import { escapeLike, formatCurrency, formatPhone } from "@/lib/utils";
@@ -1946,25 +1948,32 @@ export async function importJobs(
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const { supabase, userId } = ctx;
 
+  // The company's today, for the one namer's "New Job · Sep 27" (lib/job-name).
+  const { data: orgRow } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
+  const todayStr = todayStrInTz(getOrgSettings((orgRow as { settings?: unknown } | null)?.settings).timezone);
+
   const results: JobImportResult[] = [];
   for (const r of (rows ?? []).slice(0, 200)) {
     const cname = (r.customer || "").trim();
-    const jobName = (r.job_name || "").trim() || cname;
-    if (!cname && !jobName) {
+    if (!cname && !(r.job_name || "").trim()) {
       results.push({ name: "(blank)", status: "failed", reason: "Missing customer and job name." });
       continue;
     }
-
     // Find-or-create the customer (match by name, narrowed by email when given) — RLS
     // already scopes this to the caller's org.
     let customerId: string | null = null;
+    // Who the job is named for (below): the matched card as stored (its company, its type).
+    type Who = { name?: string | null; company_name?: string | null; type?: string | null };
+    let who: Who | null = null;
     if (cname) {
       const email = (r.email || "").trim().toLowerCase();
-      let q = supabase.from("customers").select("id").ilike("name", escapeLike(cname)).limit(1);
+      let q = supabase.from("customers").select("id, name, company_name, type").ilike("name", escapeLike(cname)).limit(1);
       if (email) q = q.ilike("email", escapeLike(email));
       const { data: hit } = await q.maybeSingle();
-      if (hit) customerId = hit.id;
-      else {
+      if (hit) {
+        customerId = hit.id;
+        who = hit as Who;
+      } else {
         const { data: nc, error: ce } = await supabase
           .from("customers")
           .insert({
@@ -1981,12 +1990,21 @@ export async function importJobs(
           .select("id")
           .single();
         if (ce) {
-          results.push({ name: jobName, status: "failed", reason: ce.message });
+          results.push({ name: (r.job_name || "").trim() || cname, status: "failed", reason: ce.message });
           continue;
         }
         customerId = nc.id;
+        // The sheet says nothing of the kind of customer, so the name stays whole ("Acme Property
+        // Management", "Rita Moss"): never cut down to a last word that may be "Management" or "Inc".
+        who = { company_name: cname };
       }
     }
+
+    // THE SHEET'S JOB NAME IS A NAME A PERSON TYPED (Erik 2026-09-28): kept exactly as typed, unless
+    // it is only a source tag, or a tag and the customer or the street (an old system's "Service call
+    // — Rita Moss"): then the default, the same as New Job's (lib/job-name, the one namer every door
+    // uses): the street number and name, else the card as it is stored, else "New Job · Sep 27".
+    const jobName = jobNameFrom({ typed: r.job_name, customer: who, street: r.address, todayStr });
 
     // Legacy CSV statuses from the old lifecycle: an "estimate" row is a job waiting to be
     // scheduled; an "invoiced" row is finished work (money owed lives in AR, not job status).

@@ -28,6 +28,7 @@ import { isStaffRole } from "@/lib/actions/perms";
 import { jobShort, visitIsOver } from "@/lib/appointments/visit-start";
 import { loadLinkInstead } from "@/lib/appointments/visit-start-read";
 import { VisitStartCard } from "./visit-start-card";
+import { jobNameFrom, jobWho, visitStreetOf } from "@/lib/job-name";
 import { FeatureOffLine } from "@/components/feature-off-line";
 import { featureOn } from "@/lib/features";
 import {
@@ -78,7 +79,7 @@ export default async function AppointmentCapturePage({
         // jobs(...) is the linked job the top card names ("Clock In On J-055"), and its status is
         // whether a visit that is over still offers a clock on it (a finished job does not); the lead's
         // customer_id is who "Link To J-055 Instead" looks for when the visit has no customer.
-        "id, org_id, type, title, status, starts_at, ends_at, job_id, assigned_to, location, notes, customer_id, inquiry_id, capture, customers(name), inquiries(name, phone, message, intake, customer_id), jobs(id, job_number, name, status)",
+        "id, org_id, type, title, status, starts_at, ends_at, job_id, assigned_to, location, unit, city, state, zip, notes, customer_id, inquiry_id, capture, customers(name, company_name, type), inquiries(name, company_name, type, phone, message, intake, customer_id), jobs(id, job_number, name, status)",
       )
       .eq("id", id)
       .maybeSingle(),
@@ -246,6 +247,24 @@ export default async function AppointmentCapturePage({
     viewerIsStaff && !a.job_id && a.status !== "cancelled"
       ? await loadLinkInstead(supabase, { ...a, inquiry_id: a.inquiry_id ?? null }, tz)
       : null;
+
+  /* THE NAME START THE JOB WILL GIVE, resolved the way createJobFromAppointment resolves it (the
+     visit's card, else the lead's card, else the lead; the lead's own spelling still only-who), so
+     the name this page promises is the name the job gets. A lead that got its card after the visit
+     was booked has it on inquiries.customer_id only. */
+  const leadCardId = !a.customer_id && !a.job_id && a.status !== "cancelled" ? (a.inquiries?.customer_id ?? null) : null;
+  const leadCard = leadCardId
+    ? ((await supabase.from("customers").select("name, company_name, type").eq("id", leadCardId).maybeSingle()).data ?? null)
+    : null;
+  const previewWho = jobWho([a.customer_id ? a.customers : leadCard, a.inquiries ?? null]);
+  const previewJobName = jobNameFrom({
+    sourceWords: a.title,
+    customer: previewWho.customer,
+    aliases: previewWho.aliases,
+    street: visitStreetOf(a.location, a),
+    unit: (a as { unit?: string | null }).unit ?? null,
+    todayStr: todayStrInTz(tz),
+  });
 
   /**
    * WHAT THE CUSTOMER ALREADY TOLD US ONLINE — on the walk-through, as answers, in their name.
@@ -440,7 +459,10 @@ export default async function AppointmentCapturePage({
                   : null
               }
               preview={{
-                name: a.title || "Job from appointment",
+                // The same one namer the Start The Job door uses (lib/job-name): the street number
+                // and name ("12 Elm St #56" with a unit), else "Rita Moss · <the visit's words>",
+                // never its "Site inspection:" tag.
+                name: previewJobName,
                 customer: who,
                 address: a.location ?? null,
                 scheduledStart: a.starts_at ?? null,

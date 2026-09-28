@@ -15,6 +15,7 @@ import { notifyPeople } from "@/lib/notifications";
 import { getOrgSettings } from "@/lib/org-settings";
 import { tzDateTimeUtc, todayStrInTz } from "@/lib/tz";
 import { WORK_DAY_MINUTES } from "@/lib/schedule/work-shape";
+import { jobNameFrom, jobWho, visitStreetOf } from "@/lib/job-name";
 import { createProposalCore, cleanSlots } from "@/lib/appointments/proposal";
 import { endAfterStart, keptEnd } from "@/lib/appointments/times";
 import { APPOINTMENT_STATUSES, APPOINTMENT_TYPES, INSPECTION_TYPES } from "@/lib/statuses";
@@ -1173,7 +1174,7 @@ export async function rescheduleAppointment(
 
 /** Turn an appointment (often a site-visit/estimate walk-through) into a job —
  *  idempotent: if it already spawned one, returns that job. Inherits the
- *  customer, title → name, location → address, and start time. */
+ *  customer, the visit's words (never its tag) → name (lib/job-name), location → address, and start time. */
 export async function createJobFromAppointment(
   appointmentId: string,
 ): Promise<Result & { note?: string; /** The visit already had a job (maybe one made a moment ago on another device); `id` is that job. */ already?: boolean }> {
@@ -1185,7 +1186,7 @@ export async function createJobFromAppointment(
     .from("appointments")
     // PROJECTION LAW: everything the job inherits has to be in the select list. planned_minutes,
     // ends_at and inquiry_id were all missing, which is why none of them survived the conversion.
-    .select("id, title, customer_id, location, city, state, zip, job_id, starts_at, ends_at, planned_minutes, inquiry_id")
+    .select("id, title, customer_id, location, unit, city, state, zip, job_id, starts_at, ends_at, planned_minutes, inquiry_id")
     .eq("id", appointmentId)
     .maybeSingle();
   if (!appt) return { ok: false, error: "Appointment not found." };
@@ -1210,11 +1211,40 @@ export async function createJobFromAppointment(
      paid job missing from its own customer's card and a job page with no contact. If the lead
      already carries a card, the job inherits it here, at the one step that connects the two. */
   const inquiryId = (appt as { inquiry_id?: string | null }).inquiry_id ?? null;
-  let customerId = appt.customer_id ?? null;
-  if (!customerId && inquiryId) {
-    const { data: inq } = await supabase.from("inquiries").select("customer_id").eq("id", inquiryId).maybeSingle();
-    customerId = (inq as { customer_id?: string | null } | null)?.customer_id ?? null;
+  type Who = { name?: string | null; company_name?: string | null; type?: string | null } | null;
+  type Lead = { customer_id?: string | null; name?: string | null; company_name?: string | null; type?: string | null };
+  let lead: Lead | null = null;
+  if (inquiryId) {
+    const { data: iq } = await supabase.from("inquiries").select("customer_id, name, company_name, type").eq("id", inquiryId).maybeSingle();
+    lead = (iq as Lead | null) ?? null;
   }
+  const customerId = appt.customer_id ?? lead?.customer_id ?? null;
+
+  /* THE NAME IS THE STREET, NEVER THE VISIT IT CAME FROM (Erik 2026-09-27: "site inspections are
+     labeled with the tag they shouldnt carry site inspection in the job title"; 09-28: "street
+     number and name as always"). A job was born "Site inspection: Rita Moss" because this copied
+     the visit's title. The one namer (lib/job-name): the visit's street number and name (" #56"
+     with its unit); with no street, who as written and the visit's own words, tag off. Who (jobWho,
+     the same order the visit page's preview uses): the card, else the lead; the lead's own spelling
+     still counts as only-who, since the visit's stock title was built from it. */
+  const { data: orgRow } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
+  const tz = getOrgSettings((orgRow as { settings?: unknown } | null)?.settings).timezone;
+  let card: Who = null;
+  if (customerId) {
+    const { data: c } = await supabase.from("customers").select("name, company_name, type").eq("id", customerId).maybeSingle();
+    card = (c as Who) ?? null;
+  }
+  const { customer: who, aliases } = jobWho([card, lead]);
+  const apptUnit = (appt as { unit?: string | null }).unit ?? null;
+  const jobName = jobNameFrom({
+    sourceWords: appt.title,
+    customer: who,
+    aliases,
+    // The street of the place, never its town: a lead with only a city booked at "Testville, CA 96161".
+    street: visitStreetOf(appt.location, appt),
+    unit: apptUnit,
+    todayStr: todayStrInTz(tz),
+  });
 
   const sized = Number((appt as { planned_minutes?: number | null }).planned_minutes ?? 0);
   const apptEnd = (appt as { ends_at?: string | null }).ends_at ?? null;
@@ -1225,7 +1255,7 @@ export async function createJobFromAppointment(
   const { data: job, error } = await supabase
     .from("jobs")
     .insert({
-      name: appt.title || "Job from appointment",
+      name: jobName,
       customer_id: customerId,
       inquiry_id: inquiryId,
       // A visit waiting for a day (no start, 0368) makes a job that is waiting for one too.
@@ -1234,6 +1264,7 @@ export async function createJobFromAppointment(
       scheduled_start: appt.starts_at,
       scheduled_end: scheduledEnd,
       address: appt.location,
+      unit: apptUnit, // the visit's unit is the job's (0187), and its name's " #56"
       // THE PARTS TRAVEL WITH THE LINE. This selected `location` alone and pushed that one string
       // into jobs.address with city/state/zip null — the exact Waldow/Cohen blob shape, minted
       // fresh on every job born from an appointment. `location` is already a formatted full line,
@@ -1292,8 +1323,6 @@ export async function createJobFromAppointment(
      it was deduped behind the job. Same day-expansion rule the rail's placement uses. */
   const sizedDays = daysNeeded(sized);
   if (sizedDays > 1 && appt.starts_at) {
-    const { data: orgRow } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
-    const tz = getOrgSettings((orgRow as { settings?: unknown } | null)?.settings).timezone;
     const firstDay = todayStrInTz(tz, new Date(appt.starts_at));
     const run = workingDaysFrom(firstDay, sizedDays);
     if (run.length) {

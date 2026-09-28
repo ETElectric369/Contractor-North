@@ -188,12 +188,18 @@ describe("createJob: what the four-field form doesn't ask, the server works out"
     expect(inserted().scheduled_start).toBe(tzDateTimeUtc(day, "13:15", "America/Denver"));
   });
 
-  it("no name sent: the customer's last name · the street, a business by its own name, else New Job on the company's day", async () => {
+  it("no name sent (Erik 2026-09-28, \"street number and name as always\"): the street, #<unit> with a unit; no street, the customer as written; else New Job on the company's day", async () => {
     await createJob(fd({ customer_id: "cust-smith", address: "1871 Apache Ct", scheduled_date: "" }));
-    expect(inserted().name).toBe("Smith · 1871 Apache Ct");
+    expect(inserted().name).toBe("1871 Apache Ct");
     state.calls = [];
-    await createJob(fd({ customer_id: "cust-hoa", address: "300 W Lake Blvd", scheduled_date: "" }));
-    expect(inserted().name).toBe("Tahoe Tavern HOA · 300 W Lake Blvd");
+    await createJob(fd({ customer_id: "cust-hoa", address: "300 W Lake Blvd", unit: "56", scheduled_date: "" }));
+    expect(inserted()).toMatchObject({ name: "300 W Lake Blvd #56", unit: "56" });
+    state.calls = [];
+    await createJob(fd({ customer_id: "cust-smith", address: "", scheduled_date: "" }));
+    expect(inserted().name).toBe("Rita Smith");
+    state.calls = [];
+    await createJob(fd({ customer_id: "cust-hoa", address: "", scheduled_date: "" }));
+    expect(inserted().name).toBe("Tahoe Tavern HOA");
     state.calls = [];
     await createJob(fd({ scheduled_date: "" }));
     const words = new Date(`${today()}T12:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
@@ -203,6 +209,34 @@ describe("createJob: what the four-field form doesn't ask, the server works out"
   it("an explicit status and name still win (the Timeclock's quick add, Nort)", async () => {
     await createJob(fd({ name: "Panel swap", status: "in_progress", scheduled_date: addDays(today(), 5) }));
     expect(inserted()).toMatchObject({ name: "Panel swap", status: "in_progress" });
+  });
+
+  it("a sent name stays as typed unless it is only a tag, or a tag and the person or the street (Erik 2026-09-28)", async () => {
+    // Nort's job.create carrying a visit's title: the tag and the customer's name are no name at all.
+    await createJob(fd({ name: "Site inspection: Rita Smith", customer_id: "cust-smith", address: "1871 Apache Ct", scheduled_date: "" }));
+    expect(inserted().name).toBe("1871 Apache Ct");
+    state.calls = [];
+    await createJob(fd({ name: "Inspection", customer_id: "cust-smith", address: "", scheduled_date: "" }));
+    expect(inserted().name).toBe("Rita Smith");
+    state.calls = [];
+    // The name it was SAVED under comes back, so the Timeclock's quick add never echoes the tag.
+    const res = await createJob(fd({ name: "Service call", status: "in_progress" }));
+    const words = new Date(`${today()}T12:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+    expect(res).toMatchObject({ ok: true, id: "job-new", name: `New Job · ${words}` });
+    expect(inserted().name).toBe(res.name);
+    state.calls = [];
+    // The New Job form's street with the unit already in it, and the Unit box filled: never twice.
+    await createJob(fd({ customer_id: "cust-smith", address: "12 Elm St Apt 4", unit: "4", scheduled_date: "" }));
+    expect(inserted().name).toBe("12 Elm St Apt 4");
+    state.calls = [];
+    // A tag and real words is a name a person typed: kept exactly as typed.
+    await createJob(fd({ name: "Service call — Panel swap", customer_id: "cust-smith", address: "1871 Apache Ct", scheduled_date: "" }));
+    expect(inserted().name).toBe("Service call — Panel swap");
+    state.calls = [];
+    // A name with no leading tag goes in exactly as sent, and the customer isn't even read for it.
+    await createJob(fd({ name: "RV Inspection", customer_id: "cust-smith", address: "1871 Apache Ct", scheduled_date: "" }));
+    expect(inserted().name).toBe("RV Inspection");
+    expect(state.calls.some((c) => c.table === "customers" && c.op === "select")).toBe(false);
   });
 
   it("a caller that sends no date at all keeps In Progress (Nort's job.create)", async () => {

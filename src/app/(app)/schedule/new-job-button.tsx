@@ -154,8 +154,9 @@ const newParam = createParamClaim();
  * NEW JOB IN FOUR FIELDS (W1-22): Customer, Address, Date, Description, and one closed More Options
  * row (Unit / Apt, Start Time, Billing) that opens itself when a restored draft has something inside.
  *
- *   No Job Name field: a live line says "It'll Be Called: Smith · 1871 Apache Ct", and the server
- *   builds the same name (lib/schedule-options defaultJobName) since none is sent.
+ *   No Job Name field: a live line says "It'll Be Called: 1871 Apache Ct" (the street number and
+ *   name, " #56" with a unit; no street, the customer as written), and the server builds the same
+ *   name (lib/schedule-options defaultJobName) since none is sent.
  *   No Status field: the server sets it from the date, on the company's today (today or earlier In
  *   Progress, later Scheduled, none To Be Scheduled). It is never On Hold (createJob refuses that).
  *   The day and the time go to the server as they were picked; the instant is built there on the
@@ -310,7 +311,7 @@ export function NewJobButton({
   }
 
   const picked = form.new_customer ? { name: form.new_customer_name } : (option(form.customer_id) ?? null);
-  const willBeCalled = defaultJobName({ customer: picked, street: form.address, todayStr: today });
+  const willBeCalled = defaultJobName({ customer: picked, street: form.address, unit: form.unit, todayStr: today });
   const storedLine = formatCityStateZip(form.city, form.state, form.zip);
   const unitHint = !form.unit.trim() && streetHasUnits(form.address, unitStreets);
   const statusWords =
