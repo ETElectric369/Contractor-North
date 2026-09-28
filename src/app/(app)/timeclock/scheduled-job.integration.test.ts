@@ -98,7 +98,7 @@ d("where the schedule put someone, read by the office (scheduledJobFor on the TE
   let brianId = "";
   let jimmyId = "";
   let strangerId = "";
-  const jobs = { tuesday: "", segment: "", dayRow: "", evening: "", finished: "" };
+  const jobs = { tuesday: "", segment: "", dayRow: "", evening: "", finished: "", gap: "", seiler: "" };
 
   const one = async (sql: string, params: unknown[] = []) => (await c.query(sql, params)).rows[0];
   /** Run as `uid` (a real sign-in's claims under the authenticated role), inside a savepoint so a
@@ -152,6 +152,14 @@ d("where the schedule put someone, read by the office (scheduledJobFor on the TE
     // its segments' first and last day, 0040).
     jobs.segment = await job("segment", "scheduled", "2001-01-10 16:00+00", "2001-01-11 01:00+00", [brianId]);
     await c.query("insert into job_schedule_segments (org_id, job_id, start_date, end_date) values ($1, $2, '2001-01-10', '2001-01-10')", [orgId, jobs.segment]);
+    // A GAP: day rows on Mon Jan 22 and Fri Jan 26 only, its window mirroring them (Jan 22 8 AM to
+    // Jan 26 5 PM). Seiler is booked Tue Jan 23 at 10 AM with no day rows (its window answers).
+    jobs.gap = await job("gap", "scheduled", "2001-01-22 16:00+00", "2001-01-27 01:00+00", [brianId]);
+    await c.query(
+      "insert into job_schedule_segments (org_id, job_id, start_date, end_date) values ($1, $2, '2001-01-22', '2001-01-22'), ($1, $2, '2001-01-26', '2001-01-26')",
+      [orgId, jobs.gap],
+    );
+    jobs.seiler = await job("seiler", "scheduled", "2001-01-23 18:00+00", null, [brianId]);
     // Booked for Mon Jan 15 at 6 PM: stored as Jan 16, 02:00 UTC.
     jobs.evening = await job("evening", "scheduled", "2001-01-16 02:00+00", null, [brianId]);
     // The office put Brian on this one for Fri Jan 5 on the crew board; nobody rostered him on it.
@@ -219,6 +227,15 @@ d("where the schedule put someone, read by the office (scheduledJobFor on the TE
     const sb = pgAdapter(c) as any;
     expect(await as(ownerId, () => scheduledJobFor(sb, brianId, "2001-01-10", TZ))).toEqual({ off: false, jobId: jobs.segment });
     expect(await as(ownerId, () => scheduledJobFor(sb, brianId, "2001-01-11", TZ))).toEqual(NOTHING_SCHEDULED);
+  });
+
+  it("a gap between a job's day rows is not its day: the job booked that day wins, and a bare gap is nothing", async () => {
+    const sb = pgAdapter(c) as any;
+    // Tue Jan 23: the gap job's window spans it, but its day rows are Jan 22 and Jan 26 only.
+    expect(await as(ownerId, () => scheduledJobFor(sb, brianId, "2001-01-23", TZ))).toEqual({ off: false, jobId: jobs.seiler });
+    expect(await as(ownerId, () => scheduledJobFor(sb, brianId, "2001-01-24", TZ))).toEqual(NOTHING_SCHEDULED);
+    expect(await as(ownerId, () => scheduledJobFor(sb, brianId, "2001-01-22", TZ))).toEqual({ off: false, jobId: jobs.gap });
+    expect(await as(ownerId, () => scheduledJobFor(sb, brianId, "2001-01-26", TZ))).toEqual({ off: false, jobId: jobs.gap });
   });
 
   it("an evening start stays on its own company day", async () => {

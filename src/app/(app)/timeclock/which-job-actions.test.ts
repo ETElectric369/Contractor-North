@@ -211,7 +211,12 @@ describe("the jobs the sheet offers", () => {
     if (q.table === "organizations") return ORG;
     if (q.table === "time_entries" && q.cols === "id, job_id, status") return { data: { id: PUNCH, job_id: null, status: "open" } };
     if (q.table === "time_entries" && q.cols === "job_id, clock_in") return { data: { job_id: "last", clock_in: "2026-09-25T15:00:00Z" } };
-    if (q.table === "job_schedule_segments") return { data: [{ job_id: "seg" }] };
+    if (q.table === "job_schedule_segments") {
+      // The "has it any day rows?" read, by job id: seg and gap have day rows; window has none.
+      const ids = q.filters.find((f) => f[0] === "in" && f[1] === "job_id")?.[2] as string[] | undefined;
+      if (ids) return { data: ids.filter((id) => id === "seg" || id === "gap").map((job_id) => ({ job_id })) };
+      return { data: [{ job_id: "seg" }] };
+    }
     if (q.table === "jobs" && has(q, "eq", "status", "in_progress"))
       return {
         data: [
@@ -225,6 +230,9 @@ describe("the jobs the sheet offers", () => {
       return {
         data: [
           job("window", { scheduled_start: "2026-09-25T15:00:00Z", scheduled_end: "2026-09-27T01:00:00Z" }),
+          // Booked Tue 9/22 and Tue 9/29 (Add To Schedule): its window spans today, but today is a GAP
+          // between its day rows, so it is not on today's schedule and not offered.
+          job("gap", { status: "scheduled", scheduled_start: "2026-09-22T15:00:00Z", scheduled_end: "2026-09-29T23:00:00Z" }),
           // Scheduled, but for Monday: not today, not in progress, not offered.
           job("monday", { status: "scheduled", scheduled_start: "2026-09-28T15:00:00Z" }),
         ],
@@ -241,6 +249,12 @@ describe("the jobs the sheet offers", () => {
     if (!r.ok) return;
     expect(r.isStaff).toBe(false);
     expect(r.jobs.map((j) => j.id)).toEqual(["last", "window", "seg", "newer", "older"]);
+    // A gap day is not a job day: only the jobs the window alone would put on today are asked
+    // whether they have day rows, and "gap" (rows on 9/22 and 9/29, none today) is left out.
+    const dayRows = calls.find((c) => c.table === "job_schedule_segments" && c.filters.some((f) => f[0] === "in"))!;
+    expect(dayRows.cols).toBe("job_id");
+    expect(dayRows.filters).toEqual([["in", "job_id", ["window", "gap"]]]);
+    expect(r.jobs.map((j) => j.id)).not.toContain("gap");
     expect(r.jobs[0]).toEqual({ id: "last", label: "last site", why: "Where you worked last" });
     expect(r.jobs[1].why).toBe("On today's schedule");
     expect(r.jobs[3].why).toBeUndefined();

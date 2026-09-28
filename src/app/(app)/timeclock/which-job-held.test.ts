@@ -58,7 +58,7 @@ const j = (id: string, over: Partial<ChoiceJob> = {}): ChoiceJob => ({
   ...over,
 });
 const order = (jobs: ChoiceJob[], over: Partial<Parameters<typeof orderWhichJobChoices>[0]> = {}) =>
-  orderWhichJobChoices({ jobs, lastJobId: null, segToday: new Set(), todayStr: TODAY, tz: TZ, codesOn: true, ...over });
+  orderWhichJobChoices({ jobs, lastJobId: null, segToday: new Set(), hasSegments: new Set(), todayStr: TODAY, tz: TZ, codesOn: true, ...over });
 
 describe("a held job on the sheet", () => {
   it("the job he worked last, now on hold, goes LAST with its On Hold why", () => {

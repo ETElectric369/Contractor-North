@@ -17,7 +17,8 @@ import { todayStrInTz, tzDayStartUtc } from "@/lib/tz";
  *      a job for a day the office marked him off. A day row naming a job that is no longer in
  *      flight (finished, cancelled) falls through, never resurrects it.
  *   1. Else a job he is ROSTERED on (jobs.assigned_to) whose days cover the date: a
- *      job_schedule_segments row, or the job's own scheduled window, read in COMPANY days. Several
+ *      job_schedule_segments row, or (only for a job with NO segment rows) the job's own scheduled
+ *      window, read in COMPANY days. A gap between a job's booked days is not one of its days. Several
  *      match: the earliest scheduled start that day (pickJobScheduledToday, lib/job-status, given
  *      that day's bounds).
  *
@@ -25,8 +26,13 @@ import { todayStrInTz, tzDayStartUtc } from "@/lib/tz";
  * (String(scheduled_start).slice(0, 10)). A job booked at 6 PM Pacific is stored as 01:00 the next
  * morning UTC, so its window read one day late: the job "covered" the day AFTER it was booked, and a
  * punch that next day landed on it. The window is read on the company's own calendar now
- * (windowCoversDay), the same rule the "Which Job Are You On?" sheet already used. Nothing else about
- * the punch changed: same reads, same order, same statuses.
+ * (windowCoversDay), the same rule the "Which Job Are You On?" sheet already used.
+ *
+ * AND A GAP DAY IS NOT A JOB DAY (release v1030). The window is the fallback ONLY for a job with no
+ * segment rows at all. Add To Schedule and a customer's date picks put a day beside a job's other
+ * days, and its window (their first-to-last mirror) spans the days between; read as the job's days,
+ * a gap day landed a punch, and Add Time Entry's preselect, on the older job instead of the one
+ * booked that day. Same statuses, same order otherwise.
  *
  * Tier 2 (the org's only in-progress job) is the clock's alone and stays in resolveTechJobToday: a
  * form preselecting a job for a past day must not guess from what happens to be running now.
@@ -103,16 +109,21 @@ export async function scheduledJobFor(
     .in("status", ACTIVE_JOB_STATUSES);
   const myJobs = (Array.isArray(mine) ? mine : []) as { id: string; scheduled_start: string | null; scheduled_end: string | null }[];
   if (!myJobs.length) return NOTHING_SCHEDULED;
+  // EVERY segment of those jobs, not only the ones on the date: a job that has day rows at all is
+  // on exactly those days, and its window is only their first-to-last mirror (setJobScheduleRanges).
+  // Reading the window for such a job put a GAP day (9/18, 9/22, 9/24 booked; 9/23 not) back on it,
+  // and its 9/18 start then beat the job actually booked on 9/23. Next Up (next-up.tsx) and the crew
+  // plan (crew-plan.ts) already read it this way; the punch and Add Time Entry now agree with them.
   const { data: segs } = await supabase
     .from("job_schedule_segments")
-    .select("job_id")
-    .in("job_id", myJobs.map((j) => j.id))
-    .lte("start_date", dateStr)
-    .gte("end_date", dateStr);
-  const covered = new Set((Array.isArray(segs) ? (segs as { job_id: string }[]) : []).map((s) => s.job_id));
-  // … or the job's own scheduled window, in company days (windowCoversDay: the one moved answer).
+    .select("job_id, start_date, end_date")
+    .in("job_id", myJobs.map((j) => j.id));
+  const segRows = (Array.isArray(segs) ? segs : []) as { job_id: string; start_date: string; end_date: string }[];
+  const covered = new Set(segRows.filter((s) => s.start_date <= dateStr && dateStr <= s.end_date).map((s) => s.job_id));
+  const hasDays = new Set(segRows.map((s) => s.job_id));
+  // … or, for a job with NO segment rows, its own scheduled window, in company days (windowCoversDay).
   for (const j of myJobs) {
-    if (covered.has(j.id)) continue;
+    if (covered.has(j.id) || hasDays.has(j.id)) continue;
     if (windowCoversDay(j, dateStr, tz)) covered.add(j.id);
   }
   // The shared tier-1 pick (lib/job-status), the one the crew board points members with, given the

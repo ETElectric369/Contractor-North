@@ -278,11 +278,28 @@ describe("the order, and the label", () => {
       ],
       lastJobId: "done",
       segToday: new Set(),
+      hasSegments: new Set(),
       todayStr: "2026-09-26",
       tz: "America/Los_Angeles",
       codesOn: true,
     });
     expect(out).toEqual([{ id: "a", label: "A" }]);
+  });
+
+  it("A GAP DAY IS NOT A JOB DAY: a job booked day 1 and day 3 is not on today's schedule on day 2; the job booked today is", () => {
+    // Herringbone: 9/18, 9/22 and 9/24, its window mirrored 9/18 8 AM to 9/24 4 PM. Seiler: 9/23 only.
+    const herringbone = { id: "herringbone", name: "Herringbone", status: "scheduled", scheduled_start: "2026-09-18T15:00:00Z", scheduled_end: "2026-09-24T23:00:00Z" };
+    const seiler = { id: "seiler", name: "Seiler", status: "scheduled", scheduled_start: "2026-09-23T17:00:00Z", scheduled_end: "2026-09-23T19:00:00Z" };
+    const base = { jobs: [herringbone, seiler], lastJobId: null, tz: "America/Los_Angeles", codesOn: true };
+    // 9/23: Seiler's segment covers it; Herringbone has day rows, none today, so its window is not asked.
+    expect(orderWhichJobChoices({ ...base, segToday: new Set(["seiler"]), hasSegments: new Set(["herringbone", "seiler"]), todayStr: "2026-09-23" })).toEqual([
+      { id: "seiler", label: "Seiler", why: "On today's schedule" },
+    ]);
+    // A job with no day rows at all still rides in on its own window.
+    expect(orderWhichJobChoices({ ...base, segToday: new Set(), hasSegments: new Set(), todayStr: "2026-09-23" }).map((o) => o.id)).toEqual([
+      "herringbone",
+      "seiler",
+    ]);
   });
 
   it("codes off, a job reads the way the crew knows it: customer · street", () => {

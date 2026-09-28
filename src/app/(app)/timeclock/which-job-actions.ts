@@ -13,6 +13,7 @@ import {
   closedPickable,
   orderWhichJobChoices,
   whichJobLabel,
+  windowOnDay,
   type ChoiceJob,
   type WhichJobChoices,
   type WhichJobResult,
@@ -89,10 +90,24 @@ export async function whichJobChoices(entryId: string): Promise<WhichJobChoices>
     ? await supabase.from("jobs").select(WHICH_JOB_COLUMNS).in("id", missing).in("status", ACTIVE_JOB_STATUSES)
     : { data: [] };
 
+  const all = [...((goingR.data ?? []) as ChoiceJob[]), ...((windowR.data ?? []) as ChoiceJob[]), ...(((extraR as { data?: unknown }).data ?? []) as ChoiceJob[])];
+
+  // A GAP DAY IS NOT A JOB DAY. A job whose window reaches today but has day rows (segments) on
+  // other days only is not on today's schedule: its window is just their first-to-last mirror. So
+  // ask, for exactly the jobs the window alone would put on today, whether they have any day rows
+  // (the same rule as scheduledJobFor, Next Up and the crew plan). A read that fails leaves the
+  // window answering, as before.
+  const windowOnly = [...new Set(all.filter((j) => !segToday.has(j.id) && windowOnDay(j, todayStr, tz)).map((j) => j.id))];
+  const hasR = windowOnly.length
+    ? await supabase.from("job_schedule_segments").select("job_id").in("job_id", windowOnly)
+    : { data: [] };
+  const hasSegments = new Set((((hasR as { data?: unknown }).data ?? []) as { job_id: string }[]).map((s) => s.job_id));
+
   const jobs = orderWhichJobChoices({
-    jobs: [...((goingR.data ?? []) as ChoiceJob[]), ...((windowR.data ?? []) as ChoiceJob[]), ...(((extraR as { data?: unknown }).data ?? []) as ChoiceJob[])],
+    jobs: all,
     lastJobId,
     segToday,
+    hasSegments,
     todayStr,
     tz,
     codesOn,

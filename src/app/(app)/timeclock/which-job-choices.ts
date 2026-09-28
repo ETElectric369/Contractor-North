@@ -82,9 +82,20 @@ export function whichJobLabel(j: ChoiceJob, codesOn: boolean): string {
 
 const active = (j: ChoiceJob) => ACTIVE_JOB_STATUSES.includes(String(j.status ?? "") as (typeof ACTIVE_JOB_STATUSES)[number]);
 
-/** Scheduled on the org's `todayStr`: a segment covers it, or (no segment rows) its own window does. */
-function onToday(j: ChoiceJob, segToday: ReadonlySet<string>, todayStr: string, tz: string): boolean {
+/**
+ * Scheduled on the org's `todayStr`: a segment covers it, or, for a job with NO segment rows at all
+ * (`hasSegments` does not name it), its own window does. A job that has day rows is on exactly those
+ * days: its window is only their first-to-last mirror, so a gap day between them is not today's
+ * (the same rule as scheduledJobFor, Next Up and the crew plan).
+ */
+function onToday(j: ChoiceJob, segToday: ReadonlySet<string>, hasSegments: ReadonlySet<string>, todayStr: string, tz: string): boolean {
   if (segToday.has(j.id)) return true;
+  if (hasSegments.has(j.id)) return false;
+  return windowOnDay(j, todayStr, tz);
+}
+
+/** A job's own scheduled window covers `todayStr`, read in COMPANY days (the window fallback's rule). */
+export function windowOnDay(j: Pick<ChoiceJob, "scheduled_start" | "scheduled_end">, todayStr: string, tz: string): boolean {
   if (!j.scheduled_start) return false;
   const s = Date.parse(j.scheduled_start);
   if (!Number.isFinite(s)) return false;
@@ -103,6 +114,8 @@ export function orderWhichJobChoices(input: {
   jobs: ChoiceJob[];
   lastJobId: string | null;
   segToday: ReadonlySet<string>;
+  /** Jobs among `jobs` that have ANY segment rows: their own window never puts them on today. */
+  hasSegments: ReadonlySet<string>;
   todayStr: string;
   tz: string;
   codesOn: boolean;
@@ -122,7 +135,7 @@ export function orderWhichJobChoices(input: {
 
   const all = [...byId.values()].filter(active);
   const today = all
-    .filter((j) => onToday(j, input.segToday, input.todayStr, input.tz))
+    .filter((j) => onToday(j, input.segToday, input.hasSegments, input.todayStr, input.tz))
     .sort((a, b) => String(a.scheduled_start ?? "").localeCompare(String(b.scheduled_start ?? "")));
   for (const j of today) add(j, "On today's schedule");
 
