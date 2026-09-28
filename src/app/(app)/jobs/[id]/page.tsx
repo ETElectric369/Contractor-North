@@ -131,17 +131,17 @@ export default async function JobDetailPage({
   const takesP = jobTakes(supabase, id);
 
   const [
-    { data: quotes },
-    { data: workOrders },
-    { data: changeOrders },
-    { data: invoices },
+    { data: quotes, error: quotesErr },
+    { data: workOrders, error: workOrdersErr },
+    { data: changeOrders, error: changeOrdersErr },
+    { data: invoices, error: invoicesErr },
     { data: paymentMilestones },
     { data: contractRows },
     { data: lienRecord },
     { data: insuranceClaim },
     { data: pos },
     { data: ownEntries },
-    { data: docRows },
+    { data: docRows, error: docsErr },
     { data: staff },
     { data: bills },
     jobTasks,
@@ -229,7 +229,7 @@ export default async function JobDetailPage({
     { data: pendingProposal },
     { data: scheduleSegments },
     { data: jobLists },
-    { data: jobAppts },
+    { data: jobAppts, error: jobApptsErr },
     { data: jobContactsRaw },
     { data: meRow },
     { data: tieRows, error: tieErr },
@@ -320,7 +320,7 @@ export default async function JobDetailPage({
   const pilesOn = billsActuals || (viewerIsStaff && importsActuals);
   const [
     { data: canonicalItems },
-    { data: permits },
+    { data: permits, error: permitsErr },
     { data: techs },
     { data: jobCodes },
     { data: lists },
@@ -338,6 +338,7 @@ export default async function JobDetailPage({
     openDraft,
     lumpToNet,
     panelCount,
+    panelHolds,
     tmWork,
     papers,
     jobStock,
@@ -462,6 +463,17 @@ export default async function JobDetailPage({
         (r: { count: number | null; error: unknown }) => (r.error ? undefined : (r.count ?? 0)),
         () => undefined,
       ),
+    // DOES THE PANEL TAB HOLD ANYTHING (W1-18: More shows what the job has): any panel, or any live
+    // circuit, kept or suggested. Head-only counts riding this wave; the badge stays panelCount (the
+    // open ones). A failed read (a database without 0333 included) counts as holding, so an error
+    // never tucks the tab away.
+    Promise.all([
+      supabase.from("job_panels").select("id", { count: "exact", head: true }).eq("job_id", id).is("removed_at", null),
+      supabase.from("job_circuits").select("id", { count: "exact", head: true }).eq("job_id", id).is("removed_at", null),
+    ]).then(
+      ([p, c]: { count: number | null; error: unknown }[]) => (p.error || c.error ? true : (p.count ?? 0) + (c.count ?? 0) > 0),
+      () => true,
+    ),
     // A TIME & MATERIAL JOB'S WORK TO DATE IS WHAT WAS BILLED, AT THE PRICE BILLED, PLUS WHAT THE
     // NEXT BILL WOULD CHARGE (tmWorkToDate, the reader behind the Progress Summary and Nort). Staff
     // only: the New Invoice sheet's "Work so far" is its one reader here. A failed read is
@@ -1000,12 +1012,28 @@ export default async function JobDetailPage({
   let sharedPhotoIds: string[] | null = null;
   let portalPapers: Record<string, "shown" | "replaced"> | null = null;
   let staleSharedIds: string[] = [];
+  // Does the Customer Page tab hold anything (W1-18): a paper shown, a stretch or a pick, live. Only
+  // read where the tab is the office's and switched on; a failed read counts as holding.
+  let customerPageHolds = true;
   // Customer Portal off (the switch board): no Show Customer / Show On Portal, so no read for them.
   if (viewerIsStaff && on("customer_portal")) {
-    const [{ data: shared, error: sharedErr }, stale] = await Promise.all([
+    const liveCount = (table: "job_stretches" | "job_picks") =>
+      supabase
+        .from(table)
+        .select("id", { count: "exact", head: true })
+        .eq("job_id", id)
+        .is("removed_at", null)
+        .then(
+          (r: { count: number | null; error: unknown }) => (r.error ? null : (r.count ?? 0)),
+          () => null,
+        );
+    const [{ data: shared, error: sharedErr }, stale, stretchCount, pickCount] = await Promise.all([
       supabase.from("job_shared_documents").select("document_id, replaces_document_id").eq("job_id", id).is("removed_at", null),
       staleSharedPhotoIds(supabase, id),
+      liveCount("job_stretches"),
+      liveCount("job_picks"),
     ]);
+    customerPageHolds = !!sharedErr || stretchCount === null || pickCount === null || (shared ?? []).length + stretchCount + pickCount > 0;
     if (!sharedErr) {
       const live = (shared ?? []) as { document_id: string; replaces_document_id: string | null }[];
       const replaced = new Set(live.map((r) => r.replaces_document_id).filter(Boolean));
@@ -1287,6 +1315,8 @@ export default async function JobDetailPage({
       // keeps how many job-site photos the job has (tests/badges-show-open names the exception):
       // the grid only, never the Plans & Other Papers fold under it, a receipt or a bill.
       id: "photos",
+      // Holds a job-site photo or a plan (office only: for the crew Photos is a pinned chip). W1-18.
+      holds: !!docsErr || paperSort.photos.length > 0 || paperSort.pictures.length > 0,
       label: "Photos",
       count: paperSort.photos.length,
       content: (
@@ -1315,6 +1345,7 @@ export default async function JobDetailPage({
       ? [
           {
             id: "customer",
+            holds: customerPageHolds,
             label: "Customer Page",
             content: <JobCustomerPage jobId={j.id} orgId={j.org_id} customerName={j.customers?.name ?? null} portalOn={on("customer_portal")} />,
           },
@@ -1332,6 +1363,7 @@ export default async function JobDetailPage({
     },
     {
       id: "permits",
+      holds: !!permitsErr || (permits ?? []).length > 0,
       label: "Permits",
       // Permits still in motion (not passed, not closed): a failed inspection counts most of all.
       count: countOpen((permits ?? []) as { status?: string | null }[], (p) => isOpenPermit(p.status)),
@@ -1397,6 +1429,7 @@ export default async function JobDetailPage({
     {
       // THE PANEL (Panel plan, phase 2): the job's own circuit list, loaded when the tab opens.
       id: "panel",
+      holds: panelHolds,
       label: "Panel",
       // Suggested circuits waiting on a Keep or a Not This (the read above), never the kept ones.
       count: panelCount,
@@ -1499,6 +1532,8 @@ export default async function JobDetailPage({
     },
     {
       id: "appointments",
+      // Any visit, past or ahead (a tech holds only the visits that are his: RLS).
+      holds: !!jobApptsErr || (jobAppts ?? []).length > 0,
       label: "Appointments",
       // Visits still ahead (booked, or proposed and waiting on the customer), never past ones.
       count: countOpen((jobAppts ?? []) as { status?: string | null }[], (a) => isOpenAppointment(a.status)),
@@ -1767,6 +1802,7 @@ export default async function JobDetailPage({
     },
     {
       id: "quotes",
+      holds: !!quotesErr || (quotes ?? []).length > 0,
       label: "Estimates",
       // Estimates still owed a move: a draft to send, or sent and waiting on the customer.
       count: countOpen((quotes ?? []) as { status?: string | null }[], (q) => isOpenQuote(q.status)),
@@ -1804,6 +1840,7 @@ export default async function JobDetailPage({
     },
     {
       id: "invoices",
+      holds: !!invoicesErr || (invoices ?? []).length > 0,
       label: "Invoices",
       // Invoices still owed: a draft not sent, or sent with a balance. Paid and void never badge.
       count: countOpen((invoices ?? []) as any[], isOpenInvoice),
@@ -1900,6 +1937,7 @@ export default async function JobDetailPage({
     },
     {
       id: "change-orders",
+      holds: !!changeOrdersErr || (changeOrders ?? []).length > 0,
       label: "Change Orders",
       // Change orders waiting on their answer (pending).
       count: countOpen((changeOrders ?? []) as { status?: string | null }[], (c) => isOpenChangeOrder(c.status)),
@@ -1945,6 +1983,7 @@ export default async function JobDetailPage({
     },
     {
       id: "wos",
+      holds: !!workOrdersErr || (workOrders ?? []).length > 0,
       label: "Work Orders",
       // Work orders still to do (not complete, not cancelled).
       count: countOpen((workOrders ?? []) as { status?: string | null }[], (w) => isOpenWorkOrder(w.status)),
