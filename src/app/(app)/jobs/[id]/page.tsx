@@ -65,6 +65,7 @@ import { NoJobPunches, type NearPunches } from "./no-job-punches";
 import { jobCrewIds, nearJobWindow, readNoJobPunchesNearJob } from "@/lib/no-job-hours";
 import { EditEntryButton } from "../../timecards/edit-entry-button";
 import { JobStatusControl } from "./job-status-control";
+import { ProposeDatesButton } from "./propose-dates-button";
 import { JobContacts } from "./job-contacts";
 import { JobScheduleControl } from "./job-schedule-control";
 import { JobActionDock } from "./job-action-dock";
@@ -688,6 +689,9 @@ export default async function JobDetailPage({
   // schedule writers use, threaded into the schedule/edit controls so their "blank
   // time = all-day" sentinel and default times track the org's window, not a fixed 8-4.
   const workDay = workDayWindowHm((org as any)?.settings);
+  // The lifecycle gate the dock's Finish Job and the Overview's Offer Dates share: a done, invoiced
+  // or cancelled job is not offered a schedule.
+  const schedulable = j.status !== "complete" && j.status !== "invoiced" && j.status !== "cancelled";
 
   // THE SCHEDULE AS A SENTENCE, for a tech (cn-v945). The date pickers save on change through
   // setJobScheduleRanges, a staff-only writer — so for him they were inputs that quietly
@@ -1154,24 +1158,6 @@ export default async function JobDetailPage({
                   {j.customers?.phone && <div className="mt-0.5 text-xs text-slate-500">{j.customers.phone}</div>}
                 </div>
                 <div>
-                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Status</div>
-                  <div className="mt-1">
-                    {/* NO DEAD ENDS (cn-v945): setJobStatus is requireStaff, so for a tech the dropdown
-                        was a control he could move and watch snap back. He reads the status; the hold
-                        reason rides along, because "on hold" without its why is a shrug (0234). */}
-                    {viewerIsStaff ? (
-                      <JobStatusControl id={j.id} status={j.status} holdReason={(j as any).hold_reason ?? null} />
-                    ) : (
-                      <span className="inline-flex flex-wrap items-center gap-1.5">
-                        <Badge tone={statusTone(j.status)}>{jobStatusLabel(j.status)}</Badge>
-                        {j.status === "on_hold" && (j as any).hold_reason && (
-                          <span className="text-xs text-slate-500">— {(j as any).hold_reason}</span>
-                        )}
-                      </span>
-                    )}
-                  </div>
-                </div>
-                <div>
                   <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Address</div>
                   {/* One plain line (W1-19): "123 Main · Truckee, CA 96161". The dock's Navigate is
                       the one door that drives there. */}
@@ -1185,7 +1171,14 @@ export default async function JobDetailPage({
                   <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Scheduled</div>
                   <div className="mt-1">
                     {viewerIsStaff ? (
-                      <JobScheduleControl id={j.id} start={j.scheduled_start} end={j.scheduled_end} segments={(scheduleSegments ?? []) as any} workDayStart={workDay.start} />
+                      <div className="flex flex-wrap items-start gap-x-3 gap-y-2">
+                        <JobScheduleControl id={j.id} start={j.scheduled_start} end={j.scheduled_end} segments={(scheduleSegments ?? []) as any} workDayStart={workDay.start} />
+                        {/* OFFER DATES, beside the dates it fills (W1-17: out of Manage, not cut). Only
+                            while the job can still be scheduled. */}
+                        {schedulable && (
+                          <ProposeDatesButton jobId={j.id} customerPhone={j.customers?.phone ?? null} pending={(pendingProposal as any) ?? null} />
+                        )}
+                      </div>
                     ) : (
                       <span className={scheduleText ? "text-sm text-slate-700" : "text-sm text-slate-400"}>
                         {scheduleText ?? "Not scheduled yet."}
@@ -2015,10 +2008,14 @@ export default async function JobDetailPage({
 
   return (
     <div className="mx-auto max-w-5xl">
-      <div className="mb-4 flex items-center gap-1.5 text-sm text-slate-500">
-        <Link href="/planner" className="hover:text-slate-800"><Home className="h-4 w-4" /></Link>
+      {/* THE J-NUMBER ONCE (W1-17): here in the breadcrumb, and nowhere else in the header. The Jobs
+          crumb is the All Jobs door (it left Manage). 44px crumbs, like every tap target. */}
+      <div className="mb-2 flex items-center gap-1.5 text-sm text-slate-500">
+        <Link href="/planner" aria-label="Home" className="inline-flex min-h-11 min-w-11 items-center justify-center hover:text-slate-800">
+          <Home className="h-4 w-4" />
+        </Link>
         <ChevronRight className="h-3.5 w-3.5 text-slate-300" />
-        <Link href="/jobs" className="hover:text-slate-800">Jobs</Link>
+        <Link href="/jobs" className="inline-flex min-h-11 items-center px-1 hover:text-slate-800">Jobs</Link>
         <ChevronRight className="h-3.5 w-3.5 text-slate-300" />
         <span className="font-medium text-slate-700">{j.job_number}</span>
       </div>
@@ -2026,8 +2023,19 @@ export default async function JobDetailPage({
       <div className="mb-4">
         <h1 className="text-2xl font-bold text-slate-900">{j.name}</h1>
         <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-slate-400">
-          <span>{j.job_number}</span>
-          <Badge tone={statusTone(j.status)}>{jobStatusLabel(j.status)}</Badge>
+          {/* THE STATUS BADGE IS THE STATUS CONTROL (W1-17): the office taps it to change the status
+              or put the job on hold (why, and the day it comes back); a held job says its reason and
+              day here, with Snooze. The crew reads the same pill. The day (0366) is shown only when
+              the database has the column (select * carries it then), never a guessed one. */}
+          <JobStatusControl
+            id={j.id}
+            status={j.status}
+            holdReason={(j as any).hold_reason ?? null}
+            holdUntil={"hold_until" in j ? ((j as any).hold_until ?? null) : undefined}
+            holdBy={(j as any).hold_by ? (((techs ?? []) as any[]).find((t) => t.id === (j as any).hold_by)?.full_name ?? null) : null}
+            todayStr={todayStrInTz(tz)}
+            viewerIsStaff={viewerIsStaff}
+          />
           {/* Done & paid — the critical path's last step, on the record itself. Staff only, and
               NOT on a job billed with progress payments (Connected North Phase 1): the comment
               always said so and the condition never did, so INV-078's job carried a Pay Now whose
@@ -2054,7 +2062,7 @@ export default async function JobDetailPage({
               as a lead, live convert menu and all. Erik: "a lead not being a lead anymore doesnt
               include putting it back." The origin lives on in the first chapter below. */}
           {(j as any).inquiry && (
-            <Link href={`/jobs/${j.id}?tab=job#activity`} className="text-brand hover:underline">
+            <Link href={`/jobs/${j.id}?tab=job#activity`} className="inline-flex min-h-11 items-center text-brand hover:underline">
               ← from lead: {(j as any).inquiry.name}
             </Link>
           )}
@@ -2079,7 +2087,6 @@ export default async function JobDetailPage({
         defaultProfileId={user?.id ?? ""}
         jobAddress={navTarget}
         customerPhone={j.customers?.phone ?? null}
-        pendingProposal={(pendingProposal as any) ?? null}
         /* On T&M the estimate is a guide, never the bill: Finish builds the bill from the actuals
            there, so the modal never says the estimate's lines copy over. Every other job keeps the
            prop it always had (any quote row), so its Finish toggles start where they did. */

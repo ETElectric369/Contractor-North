@@ -309,8 +309,10 @@ export async function cancelScheduleProposal(id: string, jobId: string): Promise
   const ctx = await requireStaff(); // defense-in-depth (RLS also blocks non-staff)
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
-  const { error } = await supabase.from("schedule_proposals").update({ status: "cancelled" }).eq("id", id);
+  // SILENT-WRITE LAW: a zero-row update is a 204, so the id comes back or the withdraw says it didn't.
+  const { data, error } = await supabase.from("schedule_proposals").update({ status: "cancelled" }).eq("id", id).select("id");
   if (error) return { ok: false, error: dbError(error) };
+  if (!data?.length) return { ok: false, error: "That link isn't here any more. Reload the job to see where it stands." };
   revalidatePath(`/jobs/${jobId}`);
   return { ok: true };
 }
