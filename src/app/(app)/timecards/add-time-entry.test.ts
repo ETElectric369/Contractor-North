@@ -200,11 +200,24 @@ describe("the schedule starts the Job field, and never overrules a pick", () => 
     const s = src("./add-time-entry.tsx");
     expect(s).toContain("const next = preselectFrom(answer, jobTouched.current);");
     expect(s).toMatch(/function pickJob\(v: string\) \{\s*jobTouched\.current = true;/);
-    expect(s).toMatch(/function whoOrDayChanged\(\) \{\s*if \(!fixedJob && !jobTouched\.current\) setJobValue\(""\);/);
+    expect(s).toMatch(/function whoOrDayChanged\(\) \{\s*if \(fixedJob\) return;\s*setScheduled\(null\);\s*if \(!jobTouched\.current\) setJobValue\(""\);/);
     // The day's list sits between the Job and the Day, reading the person, the day and the picked job.
     expect(s).toMatch(/<SameDayShifts\s+profileId=\{who \|\| viewerId \|\| ""\}\s+date=\{day\}\s+jobId=\{fixedJob \? fixedJob\.id : jobIsReal \? jobValue : null\}/);
     expect(s.indexOf("<SameDayShifts")).toBeGreaterThan(s.indexOf('htmlFor="ate-job"'));
     expect(s.indexOf("<SameDayShifts")).toBeLessThan(s.indexOf('htmlFor="ate-day"'));
+  });
+
+  it("a new person or day takes the last answer's 'On The Schedule That Day' heading away at once, and a pick of that job keeps its name", () => {
+    const s = src("./add-time-entry.tsx");
+    // Both the Who and the Day go through whoOrDayChanged, which clears the heading before the re-ask.
+    expect((s.match(/whoOrDayChanged\(\);/g) ?? []).length).toBeGreaterThanOrEqual(2);
+    const body = s.slice(s.indexOf("function whoOrDayChanged()"), s.indexOf("function addNewJob"));
+    expect(body).toContain("setScheduled(null);");
+    expect(body).not.toMatch(/jobTouched\.current[^\n]*setScheduled/);
+    // setScheduled is only ever handed a fresh answer or null.
+    expect((s.match(/setScheduled\(/g) ?? []).length).toBe(2);
+    expect(s).toContain("if (sched) scheduledLabels.current.set(sched.id, sched.label);");
+    expect(s).toContain('return scheduledLabels.current.get(id) ?? "That job";');
   });
 
   it("the scheduled job leads the list under its own heading", () => {

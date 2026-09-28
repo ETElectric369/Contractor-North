@@ -170,6 +170,9 @@ export function AddTimeEntry({
   const [jobValue, setJobValue] = useState("");
   const jobTouched = useRef(false);
   const [scheduled, setScheduled] = useState<{ id: string; label: string } | null>(null);
+  // Every scheduled job's name this form has heard, so a pick of one keeps its name after a new
+  // person or day clears the heading (the job list may not hold it).
+  const scheduledLabels = useRef(new Map<string, string>());
   // Jobs made from inside this form (New Job): the list is server-rendered and catches up later.
   const [newJobs, setNewJobs] = useState<AddJob[]>([]);
   const knownJobs = useMemo(() => {
@@ -180,7 +183,7 @@ export function AddTimeEntry({
     const j = knownJobs.find((x) => x.id === id);
     if (j) return whichJobLabel(j, jobCodesEnabled);
     if (scheduled?.id === id) return scheduled.label;
-    return "That job";
+    return scheduledLabels.current.get(id) ?? "That job";
   };
   const scheduledOpt = scheduled ? { id: scheduled.id, label: labelOf(scheduled.id) } : null;
   const otherJobs = knownJobs.filter((j) => j.id !== scheduledOpt?.id);
@@ -195,9 +198,13 @@ export function AddTimeEntry({
     setJobValue(v);
   }
   // A new person or a new day: the schedule is asked again, and an untouched Job field waits for it
-  // on "Pick The Job" rather than holding the last day's job while the answer is on its way.
+  // on "Pick The Job" rather than holding the last day's job while the answer is on its way. The
+  // "On The Schedule That Day" heading goes too, so the list never names the last person's or
+  // day's job as this one's while the answer is on its way (or while the Day is blank).
   function whoOrDayChanged() {
-    if (!fixedJob && !jobTouched.current) setJobValue("");
+    if (fixedJob) return;
+    setScheduled(null);
+    if (!jobTouched.current) setJobValue("");
   }
   function addNewJob(j: CreatedJob) {
     setNewJobs((p) => (p.some((x) => x.id === j.id) ? p : [...p, { id: j.id, name: j.name }]));
@@ -396,7 +403,9 @@ export function AddTimeEntry({
             refreshKey={dayKey}
             onRead={(answer) => {
               if (fixedJob) return;
-              setScheduled(answer.ok && !answer.offThatDay ? answer.scheduledJob : null);
+              const sched = answer.ok && !answer.offThatDay ? answer.scheduledJob : null;
+              if (sched) scheduledLabels.current.set(sched.id, sched.label);
+              setScheduled(sched);
               const next = preselectFrom(answer, jobTouched.current);
               if (next !== null) setJobValue(next);
             }}
