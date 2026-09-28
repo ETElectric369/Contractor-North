@@ -268,6 +268,8 @@ describe("the Costs tab: one way to add a cost", () => {
       expect(out.kind).toBe("filed");
       expect(sentence).toBe(notACostSentence(category));
       expect(sentence).toContain("It isn't a cost, so it wasn't read.");
+      // Nort names the same door.
+      expect((await import("@/lib/nort-product-map")).NORT_PRODUCT_MAP).toContain("File A Paper (Not A Cost), which files a plan, permit or other paper on the job");
       expect(sentence).not.toMatch(/cost manually|Record As Cost/);
     }
     expect(notACostSentence("Plan")).toBe("Filed on the job as a Plan. It isn't a cost, so it wasn't read.");

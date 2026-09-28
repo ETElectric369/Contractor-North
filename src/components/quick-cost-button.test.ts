@@ -58,6 +58,16 @@ describe("what the typed sheet refuses, in words", () => {
     expect(typedCostProblem({ ...base, target: "__stock" })).toBe(SHOP_STOCK_BY_PAPER);
     expect(SHOP_STOCK_BY_PAPER).toContain("Snap Or Note");
   });
+
+  it("Nort's product map says the same: Add By Hand never adds stock, and stock comes in through Snap Or Note", async () => {
+    const { NORT_PRODUCT_MAP } = await import("@/lib/nort-product-map");
+    const bills = NORT_PRODUCT_MAP.split("\n").find((l) => l.includes("Money → Bills"))!;
+    const hand = bills.slice(bills.indexOf("Add By Hand ("), bills.indexOf("), and All Bills"));
+    expect(hand).toContain("a job or a business cost in its bucket");
+    expect(hand).not.toMatch(/business cost in its bucket, or stock/);
+    expect(hand).toContain("It never adds stock");
+    expect(hand).toContain("through Snap Or Note");
+  });
 });
 
 describe("what the typed sheet hands createBill", () => {
