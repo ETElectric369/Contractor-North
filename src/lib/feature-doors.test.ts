@@ -61,16 +61,34 @@ describe("countTeammates — the one head-count behind the quiet rule", () => {
     expect(await countTeammates(client({ count: 0, error: null }).sb, { role: "owner", org_id: null })).toBeNull();
   });
 
-  it("the layout, /timeclock and /timecards all count with it, so their payroll doors agree", () => {
-    for (const rel of ["src/app/(app)/layout.tsx", "src/app/(app)/timeclock/page.tsx", "src/app/(app)/timecards/page.tsx"]) {
+  it("the layout and /timecards count with it, so their payroll doors agree; nothing else draws those doors", () => {
+    for (const rel of ["src/app/(app)/layout.tsx", "src/app/(app)/timecards/page.tsx"]) {
       const src = readFileSync(join(process.cwd(), rel), "utf8");
       expect(src, rel).toContain("countTeammates(supabase, ");
     }
-    const clock = readFileSync(join(process.cwd(), "src/app/(app)/timeclock/page.tsx"), "utf8");
-    expect(clock).toContain('featureOn(orgSettings.features, "crew_board")');
-    expect(clock).toContain('featureOn(doors, "crew_payroll")');
     const cards = readFileSync(join(process.cwd(), "src/app/(app)/timecards/page.tsx"), "utf8");
     expect(cards).toContain('featureOn(payDoors, "crew_payroll")');
+    // /timeclock counts nobody: it has no door row left to quiet (W2-01).
+    const clock = readFileSync(join(process.cwd(), "src/app/(app)/timeclock/page.tsx"), "utf8");
+    expect(clock).not.toContain("countTeammates");
+  });
+
+  it("/timeclock is a clock: no Add Entry and no door to Timecards, Pay or Everyone's Day creeps back (W2-01)", () => {
+    const clock = readFileSync(join(process.cwd(), "src/app/(app)/timeclock/page.tsx"), "utf8");
+    for (const door of ["AddEntryButton", "AddTimeEntry", 'href="/timecards"', 'href="/payroll"', "view=crew"]) expect(clock, door).not.toContain(door);
+  });
+
+  it("every door that left /timeclock has its home: Money › Timecards, Money › Payroll, and Everyone's Day on the schedule", () => {
+    const rows = DOCK.flatMap((s) => s.children);
+    // Timecards (Add Time Entry is on it) also owns /timeclock, so staff on the clock light Money.
+    expect(rows.find((c) => c.id === "ck-cards")).toMatchObject({ href: "/timecards", owns: ["/timeclock"] });
+    // Payroll, behind the same Crew & Payroll switch the Pay card had.
+    expect(rows.find((c) => c.id === "ma-payroll")).toMatchObject({ href: "/payroll", feature: "crew_payroll" });
+    // Everyone's Day: the schedule header's icon, behind the Crew Board switch the card had.
+    const cal = readFileSync(join(process.cwd(), "src/app/(app)/calendar/calendar-view.tsx"), "utf8");
+    const at = cal.indexOf('href="/schedule?view=crew"');
+    expect(at).toBeGreaterThan(0);
+    expect(cal.slice(Math.max(0, at - 300), at)).toMatch(/\{crewBoard && \(/);
   });
 });
 

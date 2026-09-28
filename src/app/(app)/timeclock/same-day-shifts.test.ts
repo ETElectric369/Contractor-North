@@ -120,8 +120,9 @@ describe("one tap, one entry", () => {
     expect(s).toContain("<SameDayShifts");
     expect(s).toContain("setClashId(res.clash?.id ?? null)");
   });
-  it("the one form is the only add-hours form of its kind: the job page's own copy is gone, and both pages mount Add Time Entry", () => {
+  it("the one form is the only add-hours form of its kind: both old copies are gone, and both pages mount Add Time Entry", () => {
     expect(() => src("../jobs/[id]/job-add-time.tsx")).toThrow();
+    expect(() => src("./add-entry-button.tsx")).toThrow();
     expect(src("../timecards/page.tsx")).toContain("<AddTimeEntry");
     expect(src("../jobs/[id]/page.tsx")).toContain("<AddTimeEntry");
     expect(src("../jobs/[id]/page.tsx")).toContain("fixedJob={{ id: j.id, label: jobLabel(j) }}");
