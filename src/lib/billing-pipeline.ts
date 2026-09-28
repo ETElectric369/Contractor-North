@@ -3,7 +3,7 @@ import { invoiceBalance } from "@/lib/invoice-math";
 import { contractTotalFromQuotes, milestoneAmount, type Milestone } from "@/lib/payment-schedule-math";
 import { getOrgSettings } from "@/lib/org-settings";
 import { todayStrInTz } from "@/lib/tz";
-import { daysBetweenYmd } from "@/lib/analytics/money-metrics";
+import { arBucketOf, computeArByCustomer, daysBetweenYmd, type ArBuckets, type ArCustomer } from "@/lib/analytics/money-metrics";
 
 /** Org-local "today" (YYYY-MM-DD) — THE date the overdue rule compares due_date against.
  *  A UTC "today" flags a due-today invoice overdue after ~5 PM Pacific, so every overdue
@@ -32,38 +32,28 @@ export type PipelineInvoice = {
    *  not late. What the Invoices page's red "N Days Late" chip and its By Customer fold say. */
   daysLate: number;
   /** Whose it is, so By Customer never folds two customers who share a name into one. */
-  customerId: string | null;
+  customer_id: string | null;
 };
 
 /** "1 Day Late", "12 Days Late": the chip on a late row. */
 export const daysLateWords = (n: number): string => `${n} ${n === 1 ? "Day" : "Days"} Late`;
 
-/** One customer with money open: what they owe, their worst lateness, and the invoices under them. */
-export type OwedByCustomer = { key: string; customer: string; balance: number; worstDaysLate: number; invoices: PipelineInvoice[] };
-
 /**
  * WHO OWES, ROLLED UP (the Accounts Receivable page, folded into Invoices, W1-29): the pipeline's own
- * open invoices grouped by customer, worst lateness first, then the most owed. One read, one total:
- * the balances here add up to the page's Owed To You to the cent. Pure.
+ * open invoices through THE by-customer roll-up (money-metrics' computeArByCustomer, the one the old
+ * Accounts Receivable page used), worst lateness first, then the most owed. One read, one total: the
+ * balances here add up to the page's Owed To You to the cent. Pure.
  */
-export function owedByCustomer(unpaid: readonly PipelineInvoice[]): OwedByCustomer[] {
-  const by = new Map<string, OwedByCustomer>();
-  for (const i of unpaid) {
-    const key = i.customerId ?? `name:${i.customer ?? ""}`;
-    const g = by.get(key) ?? { key, customer: i.customer ?? "No customer", balance: 0, worstDaysLate: 0, invoices: [] };
-    g.balance = Math.round((g.balance + i.balance) * 100) / 100;
-    g.worstDaysLate = Math.max(g.worstDaysLate, i.daysLate);
-    g.invoices.push(i);
-    by.set(key, g);
-  }
-  return [...by.values()].sort((a, b) => b.worstDaysLate - a.worstDaysLate || b.balance - a.balance || a.customer.localeCompare(b.customer));
+export function owedByCustomer(unpaid: readonly PipelineInvoice[]): ArCustomer<PipelineInvoice>[] {
+  return computeArByCustomer({ invoices: unpaid });
 }
 
-/** THE OWED BAR's pieces, by lateness (current, then 1-30, 31-60 and over 60 days late), in dollars. */
-export function owedByLateness(unpaid: readonly PipelineInvoice[]): { current: number; d30: number; d60: number; d90: number } {
-  const out = { current: 0, d30: 0, d60: 0, d90: 0 };
+/** THE OWED BAR's pieces, in dollars: the aging's own buckets (arBucketOf: not late, then 1-30,
+ *  31-60 and over 60 days late), so the bar and Analytics' aging cut the same days the same way. */
+export function owedByLateness(unpaid: readonly PipelineInvoice[]): ArBuckets {
+  const out: ArBuckets = { current: 0, d30: 0, d60: 0, d90: 0 };
   for (const i of unpaid) {
-    const k = i.daysLate <= 0 ? "current" : i.daysLate <= 30 ? "d30" : i.daysLate <= 60 ? "d60" : "d90";
+    const k = arBucketOf(i.daysLate);
     out[k] = Math.round((out[k] + i.balance) * 100) / 100;
   }
   return out;
@@ -150,7 +140,7 @@ export async function getMoneyPipeline(supabase: SupabaseClient): Promise<MoneyP
     // ONE RULE: overdue is a due date before the org's today, and how late is the same two days
     // counted the aging's way (a due-today invoice is neither).
     daysLate: overdue && i.due_date ? Math.max(0, daysBetweenYmd(String(i.due_date).slice(0, 10), today)) : 0,
-    customerId: i.customer_id ?? null,
+    customer_id: i.customer_id ?? null,
   });
 
   const drafts = invoices.filter((i) => i.status === "draft").map((i) => toInv(i, false));

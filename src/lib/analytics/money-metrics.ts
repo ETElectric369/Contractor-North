@@ -40,7 +40,9 @@ export type ArInvoice = { id?: string | null; customer_id?: string | null; invoi
 export type ArAging = { buckets: ArBuckets; outstanding: number; openCount: number; invoices: ArInvoice[] };
 
 const OPEN_EXCLUDED = ["paid", "void", "draft"];
-const bucketOf = (days: number): keyof ArBuckets => (days <= 0 ? "current" : days <= 30 ? "d30" : days <= 60 ? "d60" : "d90");
+/** THE lateness buckets (not late, 1-30, 31-60, over 60 days late): this aging and the Invoices
+ *  page's Owed To You bar (billing-pipeline's owedByLateness) cut the same days the same way. */
+export const arBucketOf = (days: number): keyof ArBuckets => (days <= 0 ? "current" : days <= 30 ? "d30" : days <= 60 ? "d60" : "d90");
 
 /**
  * `todayYmd` is the ORG-local today ("YYYY-MM-DD"). Lateness follows THE app-wide overdue rule
@@ -59,7 +61,7 @@ export function computeArAging(invoices: any[], todayYmd: string): ArAging {
     if (balance <= 0) continue;
     const dueYmd = ymdOf(i.due_date);
     const daysLate = dueYmd ? Math.max(0, daysBetweenYmd(dueYmd, todayYmd)) : 0;
-    const bucket = bucketOf(daysLate);
+    const bucket = arBucketOf(daysLate);
     buckets[bucket] += balance;
     rows.push({ id: i.id ?? null, customer_id: i.customer_id ?? null, invoice_number: i.invoice_number ?? null, customer: i.customers?.name ?? null, balance: round2(balance), total: round2(Number(i.total) || 0), amountPaid: round2(Number(i.amount_paid) || 0), daysLate, bucket });
   }
@@ -91,7 +93,7 @@ export type JobBillingInvoice = { status: string; total?: number | null; amount_
  * ONE definition of "where does this job's money stand", shared by the /jobs
  * completed list and anything else that tags a job — built ON the AR pieces
  * (invoiceBalance + the same status vocabulary computeArAging reads) so the tag
- * and /billing/ar can never disagree. Rules, in precedence order:
+ * and the Invoices page's By Customer can never disagree. Rules, in precedence order:
  *
  *  1. "to_be_invoiced" — no non-draft/non-void invoice exists. A draft-ONLY job
  *     counts here: the finish-job flow parks its auto-invoice as a draft in the
@@ -104,7 +106,7 @@ export type JobBillingInvoice = { status: string; total?: number | null; amount_
  *     (exactly the job getMoneyPipeline would still show in its drafts stage).
  *  3. "partial" — money in (any payment recorded on a billed invoice) but not all.
  *  4. "pending" — billed (sent/partial/overdue), nothing paid yet. Overdue is an AR
- *     concern (aging lives on /billing/ar); here it still reads "pending"/"partial".
+ *     concern (aging lives on the Invoices page); here it still reads "pending"/"partial".
  */
 export function jobBillingStatus(
   invoices: JobBillingInvoice[],
@@ -128,16 +130,20 @@ export function jobBillingStatus(
 }
 
 // ── A/R by customer (WHO owes, rolled up) ────────────────────────────────────
-export type ArCustomer = { customer: string; balance: number; worstDaysLate: number; invoices: ArInvoice[] };
+/** What the roll-up reads off each open invoice: whose it is, its balance, and how late. */
+export type ArRollupRow = { customer_id?: string | null; customer: string | null; balance: number; daysLate: number };
+/** One customer with money open; `key` is whose (their id, else their name), unique per line. */
+export type ArCustomer<R extends ArRollupRow = ArInvoice> = { key: string; customer: string; balance: number; worstDaysLate: number; invoices: R[] };
 
-/** Group the aging rows by customer — the "Accounts Receivable" ledger view: one line per
- *  customer with their total open balance, worst lateness first. Pure transform over
- *  computeArAging's output so the two can never disagree. */
-export function computeArByCustomer(aging: ArAging): ArCustomer[] {
-  const byKey = new Map<string, ArCustomer>();
+/** Group open invoices by customer — the "Accounts Receivable" view: one line per customer with
+ *  their total open balance, worst lateness first. Pure, over computeArAging's rows or the money
+ *  pipeline's open invoices (the Invoices page's By Customer fold, W1-29): ONE roll-up, so the two
+ *  can never disagree. Keyed by customer id, so two customers who share a name stay two lines. */
+export function computeArByCustomer<R extends ArRollupRow = ArInvoice>(aging: { invoices: readonly R[] }): ArCustomer<R>[] {
+  const byKey = new Map<string, ArCustomer<R>>();
   for (const r of aging.invoices) {
     const key = r.customer_id ?? r.customer ?? "—";
-    const entry = byKey.get(key) ?? { customer: r.customer ?? "No customer", balance: 0, worstDaysLate: 0, invoices: [] };
+    const entry = byKey.get(key) ?? { key, customer: r.customer ?? "No customer", balance: 0, worstDaysLate: 0, invoices: [] };
     entry.balance = round2(entry.balance + r.balance);
     entry.worstDaysLate = Math.max(entry.worstDaysLate, r.daysLate);
     entry.invoices.push(r);

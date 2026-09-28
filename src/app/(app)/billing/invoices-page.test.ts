@@ -225,7 +225,7 @@ describe("Payments In: a link, and the ledger only when open", () => {
 });
 
 describe("the pure roll-ups add up to the one figure", () => {
-  const pi = (id: string, customerId: string | null, customer: string, balance: number, daysLate: number): PipelineInvoice => ({
+  const pi = (id: string, customer_id: string | null, customer: string, balance: number, daysLate: number): PipelineInvoice => ({
     id,
     invoice_number: id,
     total: balance,
@@ -237,7 +237,7 @@ describe("the pure roll-ups add up to the one figure", () => {
     overdue: daysLate > 0,
     paid: 0,
     daysLate,
-    customerId,
+    customer_id,
   });
   const UNPAID = [pi("a", "c1", "Pat Lee", 100, 0), pi("b", "c1", "Pat Lee", 50, 45), pi("c", "c2", "Pat Lee", 20, 0), pi("d", null, "Sam Roe", 5, 70)];
 
@@ -255,5 +255,21 @@ describe("the pure roll-ups add up to the one figure", () => {
     const l = owedByLateness(UNPAID);
     expect(l).toEqual({ current: 120, d30: 0, d60: 50, d90: 5 });
     expect(l.current + l.d30 + l.d60 + l.d90).toBe(175);
+  });
+
+  it("the bar, By Customer and Owed To You are Analytics' aging on the same invoices, cut the same way, to the cent", async () => {
+    const { getMoneyPipeline } = await import("@/lib/billing-pipeline");
+    const { computeArAging, computeArByCustomer } = await import("@/lib/analytics/money-metrics");
+    const { unpaid, outstandingTotal } = await getMoneyPipeline(fake as any);
+    const aging = computeArAging(OWING.invoices, "2026-09-27");
+    expect(owedByLateness(unpaid)).toEqual(aging.buckets);
+    expect(outstandingTotal).toBe(aging.outstanding);
+    const rows = (list: { key: string; customer: string; balance: number; worstDaysLate: number; invoices: unknown[] }[]) =>
+      list.map((c) => [c.key, c.customer, c.balance, c.worstDaysLate, c.invoices.length]);
+    expect(rows(owedByCustomer(unpaid))).toEqual(rows(computeArByCustomer(aging)));
+    // One roll-up and one set of buckets, never a second copy of either.
+    const pipelineSrc = readFileSync(join(process.cwd(), "src/lib/billing-pipeline.ts"), "utf8");
+    expect(pipelineSrc).toContain("computeArByCustomer({ invoices: unpaid })");
+    expect(pipelineSrc).toContain("arBucketOf(i.daysLate)");
   });
 });
