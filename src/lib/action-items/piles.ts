@@ -44,8 +44,8 @@ export const PILE_DEFS: Record<PileName, PileDef> = {
   estimates_not_sent: { label: "Estimates Not Sent", verb: "Send It", listHref: "/quotes?status=draft", listLabel: "See All On Estimates" },
   no_answer_yet: { label: "No Answer Yet", verb: "Still Waiting", listHref: "/quotes?status=sent", listLabel: "See All On Estimates" },
   won_needs_a_day: { label: "Won, Needs A Day", verb: "Pick A Day", listHref: "/quotes?status=accepted", listLabel: "See All On Estimates" },
-  late_invoices: { label: "Late Invoices", verb: "Get Paid", listHref: "/billing", listLabel: "See All On Billing" },
-  invoices_not_sent: { label: "Invoices Not Sent", verb: "Send It", listHref: "/billing", listLabel: "See All On Billing" },
+  late_invoices: { label: "Late Invoices", verb: "Get Paid", listHref: "/billing", listLabel: "See All On Invoices" },
+  invoices_not_sent: { label: "Invoices Not Sent", verb: "Send It", listHref: "/billing", listLabel: "See All On Invoices" },
   // No list page holds these two piles' rows (/billing lists finished jobs with no invoice, never a
   // finished visit or a No Costs Yet; /schedule is a calendar with no list of past visits nobody
   // closed out): See All unfolds every row read here instead of opening a page that doesn't list them.
@@ -64,7 +64,7 @@ export const PILE_DEFS: Record<PileName, PileDef> = {
   holds_back: { label: "Holds Back", verb: "Snooze", listHref: "/jobs?status=on_hold", listLabel: "See All On Jobs" },
   papers_to_sort: { label: "Papers To Sort", verb: "Sort It", listHref: "/bills#sort-these", listLabel: "See All On Bills" },
   notes_to_review: { label: "Notes To Review", verb: "File It", listHref: "/organize", listLabel: "See All In Organize" },
-  receipts_not_on_a_bill: { label: "Receipts Not On A Bill", verb: "Record It", listHref: "/bills", listLabel: "See All On Bills" },
+  receipts_not_on_a_bill: { label: "Receipts Not On A Bill", verb: "Record It", listHref: "/bills?tab=receipts#all-bills", listLabel: "See All On Bills" },
   stock_to_settle: { label: "Stock To Settle", verb: "Settle It", listHref: "/inventory", listLabel: "See All On Shop Stock" },
   materials_to_buy: { label: "Materials To Buy", verb: "Buy Materials", listHref: "/materials", listLabel: "See All Materials" },
   contracts_not_signed: { label: "Contracts Not Signed", verb: "See Contract", listHref: null, listLabel: null },
@@ -75,10 +75,10 @@ export const PILE_DEFS: Record<PileName, PileDef> = {
 export const ORGANIZE_PILE_MIXED = "To File In Organize";
 
 /**
- * A PAPER THAT SORTS IN THE /bills TRAY (Sort These), by the filter /bills uses: a receipt, anything
- * dropped on /bills, anything read as a cost paper (a doc_type other than not_a_cost), or a paper
- * nothing has read yet (a file, no reading, no total: Snap Or Note saved it and the reader hasn't
- * answered). The rest (a note, a plan read as not a cost, a picture asking "What is this?") files in
+ * A PAPER THAT SORTS IN THE /bills TRAY (its Needs You card, once Sort These), by the filter /bills
+ * uses: a receipt, anything dropped on /bills, anything read as a cost paper (a doc_type other than
+ * not_a_cost), or a paper nothing has read yet (a file, no reading, no total: Snap Or Note saved it
+ * and the reader hasn't answered). The rest (a note, a plan read as not a cost, a picture asking "What is this?") files in
  * Organize. /bills' own last term reads the reader's proposal, which Needs You doesn't read (it rides
  * the app shell's badge): "nothing has read it" is that term without it.
  */

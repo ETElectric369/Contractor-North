@@ -223,7 +223,7 @@ describe("ActionList — piles (W1-14)", () => {
     expect(html).toContain("Done, Not Billed · 3+");
     expect(html).toMatch(/<button[^>]*aria-expanded="false"[^>]*>See All 3 Here<\/button>/);
     expect(html).not.toContain('href="/billing"');
-    expect(html).not.toContain("See All On Billing");
+    expect(html).not.toMatch(/See All On (Billing|Invoices)/);
   });
 
   it("the unfold and the fold are one client toggle (a second tap folds them)", () => {

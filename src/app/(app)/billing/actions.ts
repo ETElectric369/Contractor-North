@@ -846,7 +846,7 @@ export async function createInvoiceFromQuote(quoteId: string): Promise<Result> {
         reportError("createInvoiceFromQuote.cleanup", delErr ?? new Error("empty invoice not removed"), { quoteId, invoiceId: invoice.id });
         return {
           ok: false,
-          error: `${dbError(itemsErr)} An empty invoice was left behind for this estimate; delete it on Billing before trying again.`,
+          error: `${dbError(itemsErr)} An empty invoice was left behind for this estimate; delete it on Invoices before trying again.`,
         };
       }
       return { ok: false, error: dbError(itemsErr) };

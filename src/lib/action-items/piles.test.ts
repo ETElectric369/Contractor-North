@@ -144,6 +144,15 @@ describe("real counts", () => {
     expect(out[0].href).toBe(out[0].children![0].href);
   });
 
+  it("See All names the page the way its menu does and lands on the rows: Invoices, and the receipt files on Bills", () => {
+    // /billing is titled Invoices (W1-29): no pile names a Billing page.
+    expect(PILE_DEFS.late_invoices.listLabel).toBe("See All On Invoices");
+    expect(PILE_DEFS.invoices_not_sent.listLabel).toBe("See All On Invoices");
+    expect(Object.values(PILE_DEFS).some((d) => /Billing/.test(d.listLabel ?? ""))).toBe(false);
+    // All Bills opens with the receipt files first on ?tab=receipts (bills-receipts.tsx, W1-32).
+    expect(PILE_DEFS.receipts_not_on_a_bill.listHref).toBe("/bills?tab=receipts#all-bills");
+  });
+
   it("money across the pile is staff only, and never on a capped pile (a short sum)", () => {
     const money = [row("invoice_draft", { amount: 1000 }), row("invoice_draft", { amount: 1340 })];
     expect(roll(money)[0].subtitle).toBe("$2,340.00 across 2");
