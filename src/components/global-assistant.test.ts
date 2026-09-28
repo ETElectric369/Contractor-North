@@ -32,7 +32,7 @@ import { NORT_TALK_EVENT } from "@/lib/onboarding/help-rows";
 const src = readFileSync(join(process.cwd(), "src/components/global-assistant.tsx"), "utf8");
 
 describe("GlobalAssistant", () => {
-  it("renders no control of its own, even while Nort is busy: Search Or Ask is the door, and it turns into Stop Nort", () => {
+  it("renders no control of its own, even while Nort is busy: the top bar's Nort button is the door, and it turns into Stop Nort", () => {
     const html = renderToStaticMarkup(createElement(GlobalAssistant));
     expect(html).not.toContain("<button");
   });

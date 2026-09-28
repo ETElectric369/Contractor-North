@@ -59,12 +59,13 @@ function DeepLinkOpener({ param, onLaunch }: { param: string; onLaunch: () => vo
 }
 
 /**
- * ONE assistant, everywhere — and no button of its own in the top bar any more (W1-09).
+ * ONE assistant, everywhere — and no button of its own: the top bar draws Nort's (W1-09).
  *
- * The voice starts from TALK TO NORT, the first row under Search Or Ask (command-bar.tsx), whose
- * click dispatches `cn:nort-talk`; the listener below runs launch() inside that dispatch, so the
- * mic starts in the tap's own call stack (iOS). While Nort listens, thinks or speaks, Search Or Ask
- * itself turns into the red Stop Nort (topbar.tsx), so the bar still has exactly one voice control.
+ * The voice starts from TALK TO NORT — the top bar's one-tap Nort button and the first row under
+ * Search Or Ask (command-bar.tsx) both call talkToNort(), which dispatches `cn:nort-talk`; the
+ * listener below runs launch() inside that dispatch, so the mic starts in the tap's own call stack
+ * (iOS). While Nort listens, thinks or speaks, the bar's Nort button turns into the red Stop Nort
+ * (topbar.tsx), so the bar still has exactly one voice control.
  * What stays here: the panel — a slim, draggable, collapsible command box docked centered on the
  * page, the live status + estimate lines, no header text and no in-panel mic — and the ?debrief= /
  * ?attention= openers. Mounted while Nort is on.
