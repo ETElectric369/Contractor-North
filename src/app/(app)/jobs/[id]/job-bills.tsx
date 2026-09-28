@@ -3,7 +3,7 @@
 import { useState, useTransition, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ChevronRight, Plus } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 import { billedOnLabel, nothingToBillWhy, openOwnNote, pileCount, type JobCostGroups } from "@/lib/job-cost-groups";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
@@ -11,7 +11,6 @@ import { NumberInput } from "@/components/ui/number-input";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { formatCurrency, formatDate, formatDuration } from "@/lib/utils";
-import { createBill } from "../actions";
 import { BillRowDoors } from "@/components/bill-row-doors";
 import { BillPaperDoors } from "@/components/bill-paper-doors";
 import type { BillPaper } from "@/lib/job-photos";
@@ -73,6 +72,9 @@ function poLabel(p: JobPo): string {
  * Billed folded by invoice and closed until tapped, then anything that never goes on an invoice,
  * with why. The sorting is lib/job-cost-groups over UnbilledWork.costRows, never a rule here.
  * Without `groups` it is the one list it always was, and says why when the claims read failed.
+ *
+ * NO ADD BUTTON HERE (W1-23: one way to add a cost). A cost goes in at the top of the tab: Snap The
+ * Bill, or its ⋯ (Upload, Type It In: the one typed sheet, which also takes the job's purchase order).
  */
 export function JobBills({
   jobId,
@@ -104,46 +106,10 @@ export function JobBills({
    *  its row instead of from the Photos grid. A bill with none draws no door. */
   papers?: Record<string, BillPaper[]> | null;
 }) {
-  const router = useRouter();
-  const [pending, start] = useTransition();
-  const [adding, setAdding] = useState(false);
   const [editBill, setEditBill] = useState<Bill | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  const [supplier, setSupplier] = useState("");
-  const [billNumber, setBillNumber] = useState("");
-  const [amount, setAmount] = useState(0);
-  const [status, setStatus] = useState("unpaid");
-  const [billDate, setBillDate] = useState("");
-  const [poId, setPoId] = useState("");
 
   const total = bills.reduce((s, b) => s + Number(b.amount), 0);
-  const poOptions = billablePos(pos);
   const poNumberById = new Map(pos.map((p) => [p.id, p.po_number]));
-
-  function add() {
-    setError(null);
-    start(async () => {
-      const res = await createBill({
-        job_id: jobId,
-        supplier,
-        bill_number: billNumber,
-        amount,
-        status,
-        bill_date: billDate || null,
-        notes: "",
-        po_id: poId || null,
-      });
-      if (!res.ok) return setError(res.error ?? "Could not save.");
-      setSupplier("");
-      setBillNumber("");
-      setAmount(0);
-      setBillDate("");
-      setPoId("");
-      setAdding(false);
-      router.refresh();
-    });
-  }
 
   const billById = new Map(bills.map((b) => [b.id, b] as const));
   const poById = new Map(pos.map((p) => [p.id, p] as const));
@@ -259,94 +225,21 @@ export function JobBills({
     </ul>
   );
 
-  const addBillButton = (
-    <Button variant="outline" onClick={() => setAdding((a) => !a)}>
-      <Plus /> Add Bill
-    </Button>
-  );
-
   return (
     <div>
       {groups ? (
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-          <div className="text-sm font-semibold text-slate-900">
-            Not Billed Yet{" "}
-            <span className="font-normal text-slate-500">
-              · {pileCount(groups.open)} · {formatCurrency(groups.open.total)}
-            </span>
-          </div>
-          {addBillButton}
+        <div className="mb-3 text-sm font-semibold text-slate-900">
+          Not Billed Yet{" "}
+          <span className="font-normal text-slate-500">
+            · {pileCount(groups.open)} · {formatCurrency(groups.open.total)}
+          </span>
         </div>
       ) : (
-        <div className="mb-3 flex items-center justify-between">
-          <div className="text-sm text-slate-500">
-            {bills.length} bill{bills.length === 1 ? "" : "s"} · {formatCurrency(total)}
-          </div>
-          {addBillButton}
+        <div className="mb-3 text-sm text-slate-500">
+          {bills.length} bill{bills.length === 1 ? "" : "s"} · {formatCurrency(total)}
         </div>
       )}
       {!groups && groupsNote && <p className="mb-3 text-sm text-slate-500">{groupsNote}</p>}
-
-      <Modal
-        open={adding}
-        onClose={() => setAdding(false)}
-        title="Add Bill"
-        footer={
-          <ModalActions
-            onCancel={() => setAdding(false)}
-            onSave={add}
-            saving={pending}
-            disabled={!supplier.trim()}
-            saveLabel="Save Changes"
-          />
-        }
-      >
-        <div className="space-y-3">
-          {error && <p className="text-sm text-red-600">{error}</p>}
-          <div className="grid grid-cols-2 gap-3">
-            <div className="col-span-2">
-              <Label htmlFor="b-supplier">Supplier *</Label>
-              <Input id="b-supplier" value={supplier} onChange={(e) => setSupplier(e.target.value)} placeholder="e.g. Main Street Supply" />
-            </div>
-            <div>
-              <Label htmlFor="b-num">Bill #</Label>
-              <Input id="b-num" value={billNumber} onChange={(e) => setBillNumber(e.target.value)} />
-            </div>
-            <div>
-              <Label htmlFor="b-amt">Amount</Label>
-              <NumberInput id="b-amt" value={amount} onValueChange={setAmount} />
-            </div>
-            <div>
-              <Label htmlFor="b-date">Bill date</Label>
-              <Input id="b-date" type="date" value={billDate} onChange={(e) => setBillDate(e.target.value)} />
-            </div>
-            <div>
-              <Label htmlFor="b-status">Status</Label>
-              <Select id="b-status" value={status} onChange={(e) => setStatus(e.target.value)}>
-                <option value="unpaid">On Account</option>
-                <option value="paid">Settled At The Counter</option>
-              </Select>
-            </div>
-            {poOptions.length > 0 && (
-              <div className="col-span-2">
-                <Label htmlFor="b-po">Pays purchase order</Label>
-                <Select id="b-po" value={poId} onChange={(e) => setPoId(e.target.value)}>
-                  <option value="">Not a PO — a separate cost</option>
-                  {poOptions.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {poLabel(p)}
-                    </option>
-                  ))}
-                </Select>
-                <p className="mt-1 text-xs text-slate-500">
-                  Pick the order this supplier invoice pays and it replaces that PO in the job&apos;s
-                  material cost — so the delivery is only charged once.
-                </p>
-              </div>
-            )}
-          </div>
-        </div>
-      </Modal>
 
       {groups ? (
         <>

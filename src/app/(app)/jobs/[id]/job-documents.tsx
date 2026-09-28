@@ -1,31 +1,26 @@
 "use client";
 
-import { useRef, useState, useTransition } from "react";
-import { DropTarget } from "@/components/drop-target";
+import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Upload, Camera, Trash2, Loader2, FileText, DollarSign, Pencil, Globe, Receipt } from "lucide-react";
+import { Trash2, Loader2, FileText, DollarSign, Pencil, Globe, Receipt } from "lucide-react";
 import { categoryIsShowable } from "@/lib/portal/doc-kinds";
 import { Fold } from "@/components/why-fold";
-import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { Badge } from "@/components/ui/badge";
 import { formatDate } from "@/lib/utils";
-import { CameraCapture } from "@/components/camera-capture";
 import { MediaLightbox } from "@/components/media-lightbox";
-import { captureReceipt, prettyBytes, readReceiptDocument, type ReceiptTone } from "@/lib/receipt-capture";
+import { prettyBytes, readReceiptDocument, type ReceiptTone } from "@/lib/receipt-capture";
 import { isCostableCategory } from "@/lib/job-photos";
 import { deleteDocument, updateDocument } from "../actions";
 
-/** A Receipt or a Bill: read into a job cost on upload, and Record As Cost's (lib/job-photos, the
- *  same rule that decides which papers can be "Not On A Bill Yet"). */
+/** A Receipt or a Bill: what Record As Cost reads into a job cost (lib/job-photos, the same rule
+ *  that decides which papers can be "Not On A Bill Yet"). */
 const COSTABLE = isCostableCategory;
 
+/** The pencil's choices: what a filed paper can be re-filed as. */
 const CATEGORIES = ["Receipt", "Bill", "Invoice", "Photo", "Plan", "Permit", "Other"];
-/** A picture filed as one of these shows on the Photos tab (lib/job-photos), not in this list. */
-const ON_PHOTOS_TAB = ["Photo", "Plan", "Permit", "Other"];
-const IMAGE_NAME = /\.(jpe?g|png|webp|gif|heic)$/i;
 
 interface Doc {
   id: string;
@@ -39,13 +34,6 @@ interface Doc {
 
 const isImage = (d: Doc) => /\.(jpe?g|png|webp|gif|heic)($|\?)/i.test(d.signedUrl ?? d.name);
 const isPdf = (d: Doc) => /\.pdf($|\?)/i.test(d.signedUrl ?? d.name);
-
-function onPhone() {
-  return (
-    typeof navigator !== "undefined" &&
-    (navigator.maxTouchPoints > 0 || /iPhone|iPad|iPod|Android|Mobile/i.test(navigator.userAgent))
-  );
-}
 
 /** What the reader said about one document, under its row. `done` = a bill exists for it (created
  *  now, or found already), so the Record as Cost verb goes away — a warning tone can still ride a
@@ -66,16 +54,16 @@ const NOTE_COLOR: Record<ReceiptTone, string> = {
 };
 
 /**
- * The job's filing cabinet (plans, permits, every receipt). Uploads run THE receipt pipeline
- * (lib/receipt-capture — the same one the Costs tab's Snap the Bill and the Add Cost sheet
- * run): a Receipt or Bill is filed and then read into a job cost; anything else is only filed.
- * A file the reader can't take is still filed and its row says why; "Record as Cost" is the retry.
+ * THE JOB'S FILED LIST (plans, permits, every receipt). No uploader of its own (W1-23: one way to
+ * add a cost): papers come in at the top of the Costs tab (Snap The Bill, or its ⋯ Upload), which
+ * run THE receipt pipeline (lib/receipt-capture) and file every paper here, read or not. This card
+ * says what each paper became: which bill it made, or that it is on no bill yet, with Record As Cost
+ * as the retry, the pencil (re-file it as a Plan, a Permit, a Photo) and the trash.
  *
- * PLANS LIVE ON THE CUSTOMER PAGE TAB (2026-09-25). This uploader is for money paper. Plan and
- * Permit stay on its list (old habits still work). A line under the uploader always links to that
- * tab's Add Plans Or Drawings (?plans=add), whatever the dropdown says, so a plan never has to be
- * found through the dropdown. Office only: the Customer
- * Page tab is not a tech's, so a tech is never pointed at it.
+ * PLANS LIVE ON THE CUSTOMER PAGE TAB (2026-09-25). A line always links to that tab's Add Plans Or
+ * Drawings (?plans=add) while the office has it (the Customer Portal switch on); with the portal off,
+ * the empty line says a plan goes in through Upload in ⋯. Office only: the Customer Page tab is not
+ * a tech's, so a tech is never pointed at it.
  *
  * RECEIPTS & PAPERS, FOLDED (Erik, 2026-09-27: bills and job photos kept separate). The list leads
  * with the job's papers; what the Photos tab holds (`photoTabIds`) folds under them, still here for
@@ -85,7 +73,8 @@ const NOTE_COLOR: Record<ReceiptTone, string> = {
  * are any, so an unrecorded receipt is never folded out of sight.
  */
 export function JobDocuments({
-  orgId,
+  // Unused since the uploader went to the top of the tab (W1-23); kept so the page's mount holds.
+  orgId: _orgId,
   jobId,
   docs,
   portalPapers = null,
@@ -103,7 +92,8 @@ export function JobDocuments({
    *  A plan, permit or other job paper gets Show On Portal, which opens the Customer Page tab's
    *  sheet for it; a receipt, bill or invoice never does. */
   portalPapers?: Record<string, "shown" | "replaced"> | null;
-  /** The viewer is office staff, so the Customer Page tab (and its plans door) exists for them. */
+  /** The viewer is office staff and the Customer Portal is on, so the Customer Page tab (and its
+   *  plans door) exists for them. */
   plansDoor?: boolean;
   /** The Nort switch (0352): the receipt reader still reads; its tooltip just doesn't name Nort. */
   nortOn?: boolean;
@@ -129,13 +119,7 @@ export function JobDocuments({
   // one was recorded would hide the line saying it was. Open too when the ties couldn't be read: the
   // bills above draw no Receipt door then, and the sentence saying why is inside this fold.
   const [openAtStart] = useState(() => looseCount > 0 || !!tieNote);
-  const [category, setCategory] = useState("Receipt");
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
   const [pending, start] = useTransition();
-  const fileRef = useRef<HTMLInputElement>(null);
-  const captureRef = useRef<HTMLInputElement>(null);
-  const [showCamera, setShowCamera] = useState(false);
   const [viewing, setViewing] = useState<Doc | null>(null);
   // Inline rename / re-categorize editor — null when closed.
   const [editing, setEditing] = useState<Doc | null>(null);
@@ -146,8 +130,6 @@ export function JobDocuments({
   // Per-document "recorded as a job cost" status, keyed by document id.
   const [billing, setBilling] = useState<string | null>(null);
   const [billMsg, setBillMsg] = useState<Record<string, BillNote>>({});
-  // "Filed on the Photos tab": a picture uploaded here as a Photo or a Plan leaves this list.
-  const [filedNote, setFiledNote] = useState<string | null>(null);
 
   const note = (docId: string, n: BillNote | null) =>
     setBillMsg((m) => {
@@ -157,44 +139,8 @@ export function JobDocuments({
       return next;
     });
 
-  async function uploadFiles(files: File[]) {
-    if (!files.length) return;
-    setError(null);
-    setBusy(true);
-    // Every file gets its turn: one that won't upload is reported by name and the rest still
-    // go through (the old loop threw on the first failure and quietly abandoned the others).
-    const lost: string[] = [];
-    let touched = false;
-    let toPhotos = 0;
-    setFiledNote(null);
-    for (const raw of files) {
-      const out = await captureReceipt({ orgId, jobId, file: raw, category, read: COSTABLE(category), nortOn });
-      if (out.kind === "lost") {
-        lost.push(`${raw.name || "File"}: ${out.sentence}`);
-        continue;
-      }
-      touched = true;
-      // Paper that isn't a cost (a Plan, a Permit) is simply filed — its row is the confirmation.
-      // A picture filed that way lands on the Photos tab, not in this list, so that is said here.
-      if (out.kind === "filed" && out.why === "not_asked") {
-        if (ON_PHOTOS_TAB.includes(category) && (String(raw.type).startsWith("image/") || IMAGE_NAME.test(raw.name))) toPhotos++;
-        continue;
-      }
-      note(out.docId, {
-        text: out.sentence,
-        done: out.kind !== "filed",
-        tone: out.tone,
-        different: out.kind === "already" && out.samePurchase === true,
-      });
-    }
-    if (toPhotos) setFiledNote(`Filed. ${toPhotos === 1 ? "It shows" : `All ${toPhotos} show`} on the Photos tab.`);
-    if (lost.length) setError(lost.join(" "));
-    setBusy(false);
-    if (touched) router.refresh();
-  }
-
   // Convert an already-filed receipt/bill into a job cost on demand — the retry for anything
-  // the upload-time read refused.
+  // the read at Snap The Bill or Upload refused.
   async function recordCost(d: Doc, differentPurchase = false) {
     setBilling(d.id);
     note(d.id, null);
@@ -210,18 +156,6 @@ export function JobDocuments({
     } finally {
       setBilling(null);
     }
-  }
-
-  function onFiles(e: React.ChangeEvent<HTMLInputElement>) {
-    uploadFiles(Array.from(e.target.files ?? []));
-    if (fileRef.current) fileRef.current.value = "";
-    if (captureRef.current) captureRef.current.value = "";
-  }
-
-  // Phones get the real camera app; desktop gets the in-browser capture modal.
-  function takePhoto() {
-    if (onPhone()) captureRef.current?.click();
-    else setShowCamera(true);
   }
 
   function open(d: Doc) {
@@ -382,31 +316,9 @@ export function JobDocuments({
         }
       >
         <div className="border-t border-slate-100 px-5 py-5">
-          <div className="mb-3 flex flex-wrap items-center gap-2">
-            <Select value={category} onChange={(e) => setCategory(e.target.value)} className="w-32">
-              {CATEGORIES.map((c) => (
-                <option key={c} value={c}>{c}</option>
-              ))}
-            </Select>
-            <input ref={fileRef} type="file" multiple accept="image/*,application/pdf" className="hidden" onChange={onFiles} />
-            <input ref={captureRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={onFiles} />
-            <DropTarget onFiles={(files) => void uploadFiles(files)} accept="image/*,application/pdf" label="Drop Files">
-              <Button variant="outline" onClick={() => fileRef.current?.click()} disabled={busy}>
-                {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-                Upload File
-              </Button>
-            </DropTarget>
-            <Button variant="outline" type="button" onClick={takePhoto} disabled={busy}>
-              <Camera className="h-4 w-4" /> Take Photo
-            </Button>
-          </div>
-          {/* Always there for the office, not only after the dropdown says Plan: the dropdown starts
-              on Receipt, so a plan uploaded here without touching it is read as a cost. */}
+          {/* A plan is no cost: its home is the Customer Page tab (the office, Customer Portal on). */}
           {plansDoor && (
             <p className="mb-3 rounded-lg bg-slate-50 px-3 py-1 text-sm text-slate-700">
-              {category === "Plan" || category === "Permit"
-                ? "Plans and drawings live on the Customer Page tab. "
-                : "This is for receipts and bills. "}
               <Link
                 href={`/jobs/${jobId}?tab=customer&plans=add`}
                 className="inline-flex min-h-11 items-center font-semibold text-brand underline-offset-2 hover:underline"
@@ -416,23 +328,12 @@ export function JobDocuments({
             </p>
           )}
 
-          {error && <p className="mb-2 text-sm text-red-600">{error}</p>}
-          {filedNote && (
-            <p className="mb-2 flex flex-wrap items-center gap-x-2 text-sm text-emerald-700">
-              {filedNote}
-              <Link
-                href={`/jobs/${jobId}?tab=photos`}
-                className="inline-flex min-h-11 items-center font-medium text-brand underline-offset-2 hover:underline"
-              >
-                Open Photos
-              </Link>
-            </p>
-          )}
           {tieNote && <p className="mb-2 text-sm text-slate-500">{tieNote}</p>}
 
           {papers.length === 0 ? (
             <p className="text-sm text-slate-400">
-              No receipts or documents yet. Upload a bill, or snap a photo of a receipt.
+              No receipts yet. Use Snap The Bill above.
+              {!plansDoor && " A plan or drawing? Use Upload in ⋯."}
             </p>
           ) : (
             <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">{papers.map(row)}</ul>
@@ -460,15 +361,6 @@ export function JobDocuments({
         </div>
       </Fold>
 
-      {showCamera && (
-        <CameraCapture
-          onCapture={(file) => {
-            setShowCamera(false);
-            uploadFiles([file]);
-          }}
-          onClose={() => setShowCamera(false)}
-        />
-      )}
       {viewing?.signedUrl && (
         <MediaLightbox url={viewing.signedUrl} name={viewing.name} onClose={() => setViewing(null)} />
       )}

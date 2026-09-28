@@ -1,8 +1,8 @@
 /**
  * ONE RECEIPT UPLOADER — every door that takes a bill's paper on a job runs THIS pipeline.
  *
- * Three doors take a receipt: the Costs tab's Snap the Bill / Upload (job-cost-capture), the
- * Receipts & Papers uploader (job-documents) and the Add Cost sheet's photo (quick-cost-button).
+ * The doors that take a receipt: the Costs tab's Snap The Bill / Upload (job-cost-capture), Record
+ * As Cost under Receipts & Papers (job-documents) and the Add Cost sheet's photo (quick-cost-button).
  * Each carried its own copy of prep → path → upload → file → read, and the copies drifted: one
  * gated at 15 MB where the reader refuses at 8, one handed the reader raw HEICs it could only
  * refuse, one swallowed the reader's sentence. The steps and the numbers now live here once; a
@@ -71,7 +71,8 @@ export function prettyBytes(n: number | null | undefined): string {
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
 
-const TYPED_DOOR = "or type it in with Add Cost.";
+// The typed door where these sentences are read, the job's Costs tab (W1-23): ⋯ → Type It In.
+const TYPED_DOOR = "or tap ⋯ beside Snap The Bill and Type It In.";
 const RETRY_DOOR = "Filed on the job under Receipts & Papers — Record As Cost there once it's fixed, " + TYPED_DOOR;
 
 /**
