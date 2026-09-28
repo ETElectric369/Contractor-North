@@ -19,7 +19,7 @@ vi.mock("@/app/(app)/tasks/actions", () => ({ createTask: vi.fn(), toggleTask: v
 vi.mock("@/app/(app)/permits/actions", () => ({ createPermit: vi.fn(), updatePermit: vi.fn(), deletePermit: vi.fn() }));
 vi.mock("@/app/(app)/permits/edit-permit-button", () => ({ EditPermitButton: () => null }));
 vi.mock("@/app/(app)/materials/stock-actions", () => ({ loadShelf: vi.fn(), takeFromStockAction: vi.fn(), undoTakeAction: vi.fn() }));
-vi.mock("@/app/(app)/recurring/actions", () => ({ generateDue: vi.fn(), generateOne: vi.fn(), setRecurringActive: vi.fn() }));
+vi.mock("@/app/(app)/recurring/actions", () => ({ generateOne: vi.fn(), setRecurringActive: vi.fn() }));
 vi.mock("@/app/(app)/leads/actions", () => ({ convertInquiry: vi.fn(), suggestVisitSlots: vi.fn() }));
 vi.mock("@/app/(app)/appointments/new-inspection-button", () => ({ NewInspectionButton: () => createElement("button", null, "Inspect") }));
 vi.mock("@/components/use-org-public-base", () => ({ useOrgPublicBase: () => "https://example.test" }));

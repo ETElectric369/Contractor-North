@@ -1964,7 +1964,6 @@ async function importChangeOrdersCore(invoiceId: string, trustedActuals: boolean
   if (importMovedMoney(rep.stats)) await stampInvoiceRevised(supabase, invoiceId, "importChangeOrdersIntoInvoice");
   await recalcInvoice(supabase, invoiceId);
   revalidateMoney(invoiceId);
-  revalidatePath("/change-orders");
   const after = await landedSourceIds(supabase, invoiceId, "change_orders", offer);
   return { ok: true, stats: sayRemoved(withClaimStats(rep.stats, offer, landedDiff(before, after), skippedIds, claims, "change orders"), rep.removed) };
 }

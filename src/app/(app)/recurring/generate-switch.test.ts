@@ -3,10 +3,13 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 /**
- * RECURRING BILLING OFF (0352, rule h) at the office's own Generate doors: an invoice's Generate is
- * not drawn while off, and refused in plain words if reached anyway, with the engine never asked. A
- * repeat job or expense is not the switch's: it generates as before. On, or no switches stored, they
- * run and render as today. (The engine's own skip is pinned in lib/recurring-switch.test.)
+ * RECURRING BILLING OFF (0352, rule h) at the office's own Generate door: an invoice's Generate One
+ * Now is not drawn while off, and refused in plain words if reached anyway, with the engine never
+ * asked. A repeat job or expense is not the switch's: it generates as before. On, or no switches
+ * stored, it runs and renders as today. (The engine's own skip is pinned in lib/recurring-switch.test.)
+ *
+ * GENERATE DUE IS GONE (W2-12): the daily cron makes every template that is due, so the page has no
+ * "Generate N Due" and the actions no generateDue. Each row keeps Generate One Now.
  */
 let settings: unknown = {};
 let kind = "invoice";
@@ -33,15 +36,15 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
 vi.mock("@/components/toast", () => ({ useToast: () => vi.fn() }));
 const runInvoiceTemplate = vi.fn(async () => true);
 const runTemplate = vi.fn(async () => true);
-const generateDueTemplates = vi.fn(async () => 2);
 vi.mock("@/lib/recurring-engine", () => ({
   runInvoiceTemplate: (...a: unknown[]) => (runInvoiceTemplate as any)(...a),
   runTemplate: (...a: unknown[]) => (runTemplate as any)(...a),
-  generateDueTemplates: (...a: unknown[]) => (generateDueTemplates as any)(...a),
 }));
 
-const { generateOne, generateDue, saveRecurring } = await import("./actions");
-const { RecurringRowActions } = await import("./recurring-actions-ui");
+const actions = await import("./actions");
+const { generateOne, saveRecurring } = actions;
+const ui = await import("./recurring-actions-ui");
+const { RecurringRowActions } = ui;
 
 beforeEach(() => {
   settings = {};
@@ -49,7 +52,6 @@ beforeEach(() => {
   writes.length = 0;
   runInvoiceTemplate.mockClear();
   runTemplate.mockClear();
-  generateDueTemplates.mockClear();
 });
 
 describe("Generate One Now on each row", () => {
@@ -71,23 +73,28 @@ describe("the toast says what was made", () => {
     expect(madeWords("expense")).toBe("Expense added");
   });
 
-  it("each row is told its kind, and Generate Due counts recurring items, not invoices", async () => {
+  it("each row is told its kind; there is no Generate Due to count anything (the cron makes what is due)", async () => {
     const { readFileSync } = await import("node:fs");
     const { join } = await import("node:path");
     const dir = join(process.cwd(), "src/app/(app)/recurring");
-    expect(readFileSync(join(dir, "page.tsx"), "utf8")).toContain("<RecurringRowActions id={t.id} active={t.active} kind={t.kind}");
-    const ui = readFileSync(join(dir, "recurring-actions-ui.tsx"), "utf8");
-    expect(ui).not.toMatch(/Generated \$\{n\} invoices|Generated 1 invoice"/);
-    expect(ui).toContain("`Generated ${n} recurring items`");
+    const page = readFileSync(join(dir, "page.tsx"), "utf8");
+    expect(page).toContain("<RecurringRowActions id={t.id} active={t.active} kind={t.kind}");
+    expect(page).toContain('description="Jobs, invoices, and expenses that repeat. Each one is made on its day, automatically."');
+    expect(page).not.toMatch(/Generate \$\{count\} Due|GenerateDueButton/);
+    const src = readFileSync(join(dir, "recurring-actions-ui.tsx"), "utf8");
+    expect(src).not.toContain("`Generated ${n} recurring items`");
+    expect(src).not.toMatch(/Generated \$\{n\} invoices|Generated 1 invoice"/);
+    expect(src).not.toContain("generateDue");
+    expect("GenerateDueButton" in ui).toBe(false);
+    expect("generateDue" in actions).toBe(false);
+    expect(readFileSync(join(dir, "actions.ts"), "utf8")).not.toMatch(/export async function generateDue\b/);
   });
 });
 
 describe("Generate while Recurring Billing is off", () => {
-  it("no switches stored: both run exactly as today", async () => {
+  it("no switches stored: Generate One Now runs exactly as today", async () => {
     expect(await generateOne("t1")).toEqual({ ok: true });
     expect(runInvoiceTemplate).toHaveBeenCalledTimes(1);
-    expect(await generateDue()).toEqual({ ok: true, count: 2 });
-    expect(generateDueTemplates).toHaveBeenCalledTimes(1);
   });
 
   it("off: an invoice's Generate One Now refuses in words, and the engine is never asked for it", async () => {
@@ -98,15 +105,13 @@ describe("Generate while Recurring Billing is off", () => {
     expect(runInvoiceTemplate).not.toHaveBeenCalled();
   });
 
-  it("off: a repeat job or expense still generates, and Generate Due runs the engine (which skips only invoices)", async () => {
+  it("off: a repeat job or expense still generates", async () => {
     settings = { features: { recurring_billing: false } };
     for (const k of ["job", "expense"]) {
       kind = k;
       expect(await generateOne("t1")).toEqual({ ok: true });
     }
     expect(runTemplate).toHaveBeenCalledTimes(2);
-    expect(await generateDue()).toEqual({ ok: true, count: 2 });
-    expect(generateDueTemplates).toHaveBeenCalledTimes(1);
   });
 
   it("another switch off changes nothing", async () => {

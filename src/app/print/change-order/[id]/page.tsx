@@ -43,9 +43,9 @@ export default async function ChangeOrderPrintPage({
     <div className="min-h-screen bg-slate-100 py-8 print:bg-white print:py-0">
       <div className="no-print mx-auto mb-4 flex max-w-3xl items-center justify-between px-4">
         {/* Back to where the CO lives — its job's Change Orders tab (like the sibling print
-            pages return to their record); /change-orders only for a stray job-less CO. */}
+            pages return to their record); Jobs for a stray job-less CO (there is no list, W2-12). */}
         <BackLink
-          fallback={(co as any).job_id ? `/jobs/${(co as any).job_id}?tab=change-orders` : "/change-orders"}
+          fallback={(co as any).job_id ? `/jobs/${(co as any).job_id}?tab=change-orders` : "/jobs"}
           fallbackLabel="Back"
           className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800"
         />

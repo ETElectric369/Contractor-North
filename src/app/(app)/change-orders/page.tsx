@@ -1,111 +1,17 @@
-import Link from "next/link";
-import { GitPullRequestArrow, Printer } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
-import { PageHeader, EmptyState } from "@/components/page-header";
-import { Card, CardContent } from "@/components/ui/card";
-import { FactsGrid, StatTile } from "@/components/ui/stat-tile";
-import { formatCurrency, formatDate } from "@/lib/utils";
-import { NewChangeOrderButton } from "./new-co-button";
-import { CoStatusControl } from "./co-status-control";
-import { CoRowActions } from "./co-row-actions";
-import { jobLabel } from "@/lib/schedule-options";
-import { viewerSwitches } from "@/lib/viewer-switches";
-import { featureOn } from "@/lib/features";
+import { redirect } from "next/navigation";
 
-export const dynamic = "force-dynamic";
-
-export default async function ChangeOrdersPage() {
-  const supabase = await createClient();
-
-  const [{ data: cos }, { data: jobs }, sw] = await Promise.all([
-    supabase
-      .from("change_orders")
-      .select("*, jobs(job_number, name)")
-      .order("created_at", { ascending: false }),
-    supabase
-      .from("jobs")
-      .select("id, job_number, name")
-      .order("created_at", { ascending: false })
-      .limit(100),
-    // The switch board (0352): change orders are part of Estimates.
-    viewerSwitches(),
-  ]);
-  const estimatesOn = featureOn(sw.features, "estimates");
-
-  const changeOrders = cos ?? [];
-  const approvedTotal = changeOrders
-    .filter((c: any) => c.status === "approved")
-    .reduce((s: number, c: any) => s + Number(c.amount ?? 0), 0);
-  const pendingCount = changeOrders.filter(
-    (c: any) => c.status === "pending",
-  ).length;
-
-  return (
-    <div>
-      <PageHeader
-        title="Change orders"
-        description="Track and approve scope changes."
-      >
-        {estimatesOn && <NewChangeOrderButton jobs={jobs ?? []} />}
-      </PageHeader>
-
-      {changeOrders.length === 0 ? (
-        <EmptyState
-          icon={GitPullRequestArrow}
-          title="No change orders yet"
-          description="Log a change order when a job's scope grows."
-        >
-          {estimatesOn && <NewChangeOrderButton jobs={jobs ?? []} />}
-        </EmptyState>
-      ) : (
-        <>
-          <FactsGrid cols={2} className="mb-4 sm:max-w-md">
-            <StatTile label="Approved changes" value={formatCurrency(approvedTotal)} />
-            <StatTile label="Pending approval" value={pendingCount} />
-          </FactsGrid>
-
-          <Card className="overflow-hidden">
-            <ul className="divide-y divide-slate-100">
-              {changeOrders.map((c: any) => (
-                <li key={c.id} className="flex items-start gap-4 px-5 py-4">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-semibold text-slate-900">
-                        {c.co_number}
-                      </span>
-                      {c.jobs?.name && (
-                        <span className="text-xs text-slate-400">
-                          {jobLabel(c.jobs)}
-                        </span>
-                      )}
-                      <span className="text-xs text-slate-400">
-                        {formatDate(c.created_at)}
-                      </span>
-                    </div>
-                    <p className="mt-1 text-sm text-slate-600">{c.description}</p>
-                  </div>
-                  <div className="flex shrink-0 flex-col items-end gap-2">
-                    <span className="text-sm font-semibold text-slate-900">
-                      {formatCurrency(c.amount)}
-                    </span>
-                    <div className="flex items-center gap-2">
-                      <Link
-                        href={`/print/pdf-preview?doc=change-order&id=${c.id}&back=/change-orders`}
-                        className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-                        title="Print / PDF"
-                      >
-                        <Printer className="h-4 w-4" />
-                      </Link>
-                      <CoRowActions co={c} jobs={jobs ?? []} />
-                      <CoStatusControl id={c.id} status={c.status} />
-                    </div>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          </Card>
-        </>
-      )}
-    </div>
-  );
+/**
+ * The cross-job Change Orders list is RETIRED (W2-12). A change order belongs to its job and lives on
+ * the job's own Change Orders tab (New Change Order, edit, approve, print), the same way Permits,
+ * Materials and Work Orders do; no dock row had linked this list for a long while. The route stays
+ * as a redirect so old links and bookmarks land somewhere real instead of 404ing.
+ *
+ * Nothing is left behind it: a change order always has its job now (createChangeOrder refuses one
+ * without, and an edit can't unlink it), so every one of them opens from its job.
+ *
+ * The route stays in lib/feature-doors FEATURE_ROUTES (owned by Estimates), which is what lets this
+ * page draw no Off line of its own (feature-off-line-wiring.test.ts).
+ */
+export default function ChangeOrdersPage() {
+  redirect("/jobs");
 }

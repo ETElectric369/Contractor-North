@@ -10,7 +10,7 @@ import { getOrgSettings } from "@/lib/org-settings";
 import { todayStrInTz } from "@/lib/tz";
 import { defaultDueDateIsoForOrg } from "@/lib/invoice-due";
 import { standardBillingBlockerOnJob, standardBillingConflictError } from "@/lib/billing-guards";
-import { runTemplate, runInvoiceTemplate, generateDueTemplates } from "@/lib/recurring-engine";
+import { runTemplate, runInvoiceTemplate } from "@/lib/recurring-engine";
 import { BUSINESS_COST_BUCKETS, isBusinessCostBucket } from "@/lib/business-cost-buckets";
 import { featureOn } from "@/lib/features";
 import { featureOffSentence } from "@/lib/viewer-switches";
@@ -174,19 +174,11 @@ export async function generateOne(id: string): Promise<Result> {
   return { ok: true };
 }
 
-/** Generate every active template that is due (next_date on or before today). */
-export async function generateDue(): Promise<Result> {
-  const ctx = await requireStaff();
-  if ("error" in ctx) return { ok: false, error: ctx.error };
-  const supabase = ctx.supabase;
-  // Recurring Billing off: the engine skips this company's repeat invoices itself and makes its jobs
-  // and expenses as before (0352, rule h).
-  const count = await generateDueTemplates(supabase, ctx.userId);
-  revalidatePath("/recurring");
-  revalidatePath("/jobs");
-  revalidatePath("/bills");
-  return { ok: true, count };
-}
+/*
+ * GENERATE DUE IS GONE (W2-12). Every template that is due is made by the daily cron
+ * (/api/automations/daily → generateDueTemplates, 8 AM Pacific), so the page's "Generate N Due" did by
+ * hand what already happens by itself. The one-at-a-time door, generateOne above, stays.
+ */
 
 /** Create a billing DRAW on a job — a deposit, progress payment or final invoice.
  *  Bills either a % of the REMAINING estimate (estimate minus what's already been

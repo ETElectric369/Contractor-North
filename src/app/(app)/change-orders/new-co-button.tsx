@@ -5,9 +5,10 @@ import { useRouter } from "next/navigation";
 import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Modal, ModalActions } from "@/components/ui/modal";
-import { Input, Label, Select, Textarea } from "@/components/ui/input";
+import { Input, Label, Textarea } from "@/components/ui/input";
 import { createChangeOrder } from "./actions";
 import { jobLabel } from "@/lib/schedule-options";
+import { CO_OPEN_A_JOB } from "./co-words";
 
 interface JobOption {
   id: string;
@@ -15,11 +16,20 @@ interface JobOption {
   name: string;
 }
 
+/**
+ * NEW CHANGE ORDER, ON ITS JOB (W2-12). The job's Change Orders tab hands in its one job, and that
+ * job is posted with the form: there is no Job box, so no "no job" choice either, and a change order
+ * can never save without its job (it would show on no job, and nothing else could open it). Handed
+ * anything but exactly one job, it draws a plain line instead of a form that could.
+ */
 export function NewChangeOrderButton({ jobs }: { jobs: JobOption[] }) {
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
   const router = useRouter();
+
+  if (jobs.length !== 1) return <p className="text-sm text-slate-500">{CO_OPEN_A_JOB}</p>;
+  const job = jobs[0];
 
   function onSubmit(formData: FormData) {
     setError(null);
@@ -41,6 +51,7 @@ export function NewChangeOrderButton({ jobs }: { jobs: JobOption[] }) {
       </Button>
 
       <form action={onSubmit}>
+        <input type="hidden" name="job_id" value={job.id} />
         <Modal
           open={open}
           onClose={() => setOpen(false)}
@@ -60,17 +71,7 @@ export function NewChangeOrderButton({ jobs }: { jobs: JobOption[] }) {
               {error}
             </div>
           )}
-          <div>
-            <Label htmlFor="job_id">Job</Label>
-            <Select id="job_id" name="job_id" defaultValue="">
-              <option value="">— None —</option>
-              {jobs.map((j) => (
-                <option key={j.id} value={j.id}>
-                  {jobLabel(j)}
-                </option>
-              ))}
-            </Select>
-          </div>
+          <p className="text-sm text-slate-500">On {jobLabel(job)}.</p>
           <div>
             <Label htmlFor="description">Description of change *</Label>
             <Textarea

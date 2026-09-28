@@ -145,9 +145,12 @@ describe("doors outside the job page", () => {
     expect(featureForPath("/recurring")).toBeNull();
     expect(src).toContain('<FeatureOffLine feature="recurring_billing" features={sw.features} isOwner={sw.isOwner} />');
     expect(src).not.toMatch(/if \(!featureOn\([^)]*\)\) (return|notFound|redirect)/);
-    // Generate Due counts only what the engine makes while off (it skips repeat invoices).
-    expect(src).toContain('t.active && t.next_date <= today && (recurringOn || t.kind !== "invoice")');
-    expect(src).toContain("{dueCount > 0 && <GenerateDueButton count={dueCount} />}");
+    // No Generate Due (W2-12): the daily cron makes what is due. Each row keeps its amber "due" chip,
+    // on the org's own today, beside its Generate One Now.
+    expect(src).not.toContain("GenerateDueButton");
+    expect(src).not.toContain("dueCount");
+    expect(src).toContain("const due = t.active && t.next_date <= today;");
+    expect(src).toContain('{due && <Badge tone="amber">due</Badge>}');
     expect(src).toContain("<RecurringButton customers={custOpts} salesTax={salesTax} invoiceKind={recurringOn} />");
     expect(src).toContain('<RecurringRowActions id={t.id} active={t.active} kind={t.kind} canGenerate={recurringOn || t.kind !== "invoice"} />');
     expect(src).toContain("<RecurringButton customers={custOpts} template={value} salesTax={salesTax} invoiceKind={recurringOn} />");
