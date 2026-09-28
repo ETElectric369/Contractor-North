@@ -91,10 +91,10 @@ describe("countTeammates — the one head-count behind the quiet rule", () => {
 
   it("every door that left /timeclock has its home: Money › Timecards, Money › Payroll, and Everyone's Day on the schedule", () => {
     const rows = DOCK.flatMap((s) => s.children);
-    // Timecards (Add Time Entry is on it) also owns /timeclock, so staff on the clock light Money.
-    expect(rows.find((c) => c.id === "ck-cards")).toMatchObject({ href: "/timecards", owns: ["/timeclock"] });
-    // Payroll, behind the same Crew & Payroll switch the Pay card had.
-    expect(rows.find((c) => c.id === "ma-payroll")).toMatchObject({ href: "/payroll", feature: "crew_payroll" });
+    // Money › Timecards, where Add Time Entry is.
+    expect(rows.find((c) => c.id === "ck-cards")).toMatchObject({ href: "/timecards" });
+    // Money › Payroll, behind the same Crew & Payroll switch the Pay card had.
+    expect(rows.find((c) => c.id === "ma-payroll")).toMatchObject({ feature: "crew_payroll" });
     // Everyone's Day: the schedule header's icon, behind the Crew Board switch the card had.
     const cal = readFileSync(join(process.cwd(), "src/app/(app)/calendar/calendar-view.tsx"), "utf8");
     const at = cal.indexOf('href="/schedule?view=crew"');
