@@ -11,7 +11,7 @@ import { DRAW_KINDS, isDrawKind } from "@/lib/invoice-math";
 import { BRING_IN_NEW_WORK, openDraftOnJob, unbilledCardDoor, type CardDoor, type OpenDraft } from "@/lib/actuals-draw";
 import { emptyToNull } from "@/lib/forms";
 import { notifyJobCrewAdded } from "@/lib/crew-notify";
-import { matchOrCreateCustomer } from "@/lib/crm/new-customer";
+import { matchOrCreateCustomer, typedNewCustomer } from "@/lib/crm/new-customer";
 import { visibleJobIdOrNull, visiblePoIdOnJobOrNull, visibleTemplateIdOrNull } from "@/lib/job-visibility";
 import { requireStaff } from "@/lib/staff-guard";
 import { isStaffRole } from "@/lib/actions/perms";
@@ -1261,13 +1261,11 @@ export async function updateJob(
 
   // The customer: a pick, or one typed inline through the ONE match-then-insert door createJob uses
   // (lib/crm/new-customer), so Edit Job can no longer mint a twin of somebody already in the book.
-  const newCustomerName = String(formData.get("new_customer_name") ?? "").trim();
-  if (newCustomerName && !emptyToNull(formData.get("customer_id"))) {
-    const made = await matchOrCreateCustomer(supabase, ctx.userId, {
-      name: newCustomerName,
-      phone: String(formData.get("new_customer_phone") ?? ""),
-      email: String(formData.get("new_customer_email") ?? ""),
-    });
+  // In "+ New Customer" mode with no name typed, the helper refuses in words: Save Changes never
+  // reports success while quietly keeping the old customer and dropping the typed phone.
+  const typedCustomer = typedNewCustomer(formData);
+  if (typedCustomer) {
+    const made = await matchOrCreateCustomer(supabase, ctx.userId, typedCustomer);
     if (!made.ok) return { ok: false, error: made.error };
     patch.customer_id = made.id;
   } else if (sent("customer_id")) {

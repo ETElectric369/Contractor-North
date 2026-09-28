@@ -80,10 +80,15 @@ export function CustomerPicker({
       </div>
       {isNew ? (
         <div className="grid gap-2 sm:grid-cols-2">
+          {/* The mode travels with the form, so a phone typed with no name is refused in words on the
+              server ("Type the new customer's name, or tap Pick Existing."), never dropped. */}
+          <input type="hidden" name="new_customer" value="1" />
           <Input
             id={`${idPrefix}-new-name`}
             name="new_customer_name"
             placeholder="Name"
+            aria-label="New Customer's Name"
+            required
             autoFocus
             value={newName}
             onChange={(e) => onNewName(e.target.value)}

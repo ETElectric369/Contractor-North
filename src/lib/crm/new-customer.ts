@@ -3,6 +3,27 @@ import { dbError } from "@/lib/db-error";
 import { formatPhone } from "@/lib/utils";
 import { findMatchingCustomerId, type DupCustomer } from "@/lib/crm/duplicates";
 
+export const NEW_CUSTOMER_NEEDS_A_NAME = "Type the new customer's name, or tap Pick Existing.";
+
+/**
+ * WHAT A JOB FORM TYPED FOR A NEW CUSTOMER, or null when it typed none. A form in "+ New Customer"
+ * mode sends new_customer=1 (CustomerPicker's hidden marker); a caller without the marker counts as
+ * typing one when it sent a name, a phone or an email and picked nobody. Either way the name may be
+ * blank, and then matchOrCreateCustomer REFUSES in words: a phone typed with no name is never dropped
+ * while the job is made with no customer (New Job) or quietly keeps the old one (Edit Job).
+ * A picked customer_id always wins.
+ */
+export function typedNewCustomer(formData: FormData): { name: string; phone: string; email: string } | null {
+  const picked = String(formData.get("customer_id") ?? "").trim();
+  if (picked) return null;
+  const name = String(formData.get("new_customer_name") ?? "").trim();
+  const phone = String(formData.get("new_customer_phone") ?? "").trim();
+  const email = String(formData.get("new_customer_email") ?? "").trim();
+  const marked = String(formData.get("new_customer") ?? "") === "1";
+  if (!marked && !name && !phone && !email) return null;
+  return { name, phone, email };
+}
+
 /**
  * ONE DOOR FOR A CUSTOMER TYPED ON A JOB FORM (W1-22): New Job's and Edit Job's "+ New Customer"
  * both come here, so neither can mint a twin. Crosscheck the book first on the CRM's own keys (a
@@ -21,7 +42,7 @@ export async function matchOrCreateCustomer(
   typed: { name: string; phone?: string | null; email?: string | null },
 ): Promise<{ ok: true; id: string; matched: boolean } | { ok: false; error: string }> {
   const name = String(typed.name ?? "").trim();
-  if (!name) return { ok: false, error: "Type the new customer's name." };
+  if (!name) return { ok: false, error: NEW_CUSTOMER_NEEDS_A_NAME };
   const phone = formatPhone(String(typed.phone ?? "").trim());
   const email = String(typed.email ?? "").trim();
 

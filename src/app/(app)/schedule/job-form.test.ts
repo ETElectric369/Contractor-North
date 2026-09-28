@@ -146,6 +146,19 @@ describe("updateJob: the short Edit Job never clears what it didn't send", () =>
     expect(writes("jobs", "update")[0].row!.customer_id).toBe("cust-smith");
   });
 
+  it("+ New Customer with a phone and no name is refused in words; the old customer is not quietly kept", async () => {
+    expect(await updateJob("j1", fd({ name: "X", new_customer: "1", new_customer_name: "", new_customer_phone: "530-555-0100" }))).toEqual({
+      ok: false,
+      error: "Type the new customer's name, or tap Pick Existing.",
+    });
+    expect(writes("jobs", "update")).toEqual([]);
+    expect(writes("customers", "insert")).toEqual([]);
+    // The mode alone (nothing typed) is refused the same way, never a silent success.
+    state.calls = [];
+    expect((await updateJob("j1", fd({ name: "X", new_customer: "1", new_customer_name: "  " }))).ok).toBe(false);
+    expect(writes("jobs", "update")).toEqual([]);
+  });
+
   it("a billing kind the database doesn't know is refused in words, and nothing is written", async () => {
     expect(await updateJob("j1", fd({ name: "X", billing_type: "draw" }))).toEqual({ ok: false, error: "Pick Time & Material or Fixed Price." });
     expect(writes("jobs", "update")).toEqual([]);
@@ -216,6 +229,27 @@ describe("createJob: what the four-field form doesn't ask, the server works out"
     expect(inserted().customer_id).toBe("cust-smith");
   });
 
+  it("+ New Customer with a phone and no name is refused in words, and no job is made without its customer", async () => {
+    expect(await createJob(fd({ new_customer: "1", new_customer_name: "", new_customer_phone: "530-555-0100", address: "9 Pine Rd", scheduled_date: "" }))).toEqual({
+      ok: false,
+      error: "Type the new customer's name, or tap Pick Existing.",
+    });
+    expect(writes("jobs", "insert")).toEqual([]);
+    expect(writes("customers", "insert")).toEqual([]);
+    // A caller without the marker (no picker) that sends only a phone is refused the same way.
+    state.calls = [];
+    expect((await createJob(fd({ new_customer_phone: "530-555-0100", scheduled_date: "" }))).ok).toBe(false);
+    expect(writes("jobs", "insert")).toEqual([]);
+  });
+
+  it("a picked customer wins over anything typed, and a form with no customer at all still makes the job", async () => {
+    await createJob(fd({ customer_id: "cust-hoa", new_customer_phone: "530-555-0100", address: "300 W Lake Blvd", scheduled_date: "" }));
+    expect(inserted().customer_id).toBe("cust-hoa");
+    state.calls = [];
+    await createJob(fd({ customer_id: "", address: "1 A St", scheduled_date: "" }));
+    expect(inserted().customer_id ?? null).toBeNull();
+  });
+
   it("still never born on hold", async () => {
     expect(await createJob(fd({ status: "on_hold", scheduled_date: "" }))).toEqual({
       ok: false,
@@ -248,5 +282,12 @@ describe("the forms (source)", () => {
     expect(s).toContain('title="Edit Job"');
     expect(s).toContain('saveLabel="Save Changes"');
     expect(s).toContain("<CustomerPicker");
+  });
+
+  it("+ New Customer sends its mode with the form and asks for the name", () => {
+    const s = code(read("src/app/(app)/schedule/new-job-button.tsx"));
+    const picker = s.slice(s.indexOf("export function CustomerPicker"));
+    expect(picker).toContain('<input type="hidden" name="new_customer" value="1" />');
+    expect(picker).toMatch(/name="new_customer_name"[\s\S]{0,200}\brequired\b/);
   });
 });

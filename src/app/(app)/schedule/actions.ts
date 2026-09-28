@@ -10,7 +10,7 @@ import { applyCrewChange, type CrewChange } from "@/lib/crew-change";
 import { requireStaff } from "@/lib/staff-guard";
 import { customerForInquiry } from "@/lib/actions/win-customer";
 import { findMatchingCustomerId, type DupCustomer } from "@/lib/crm/duplicates";
-import { matchOrCreateCustomer } from "@/lib/crm/new-customer";
+import { matchOrCreateCustomer, typedNewCustomer } from "@/lib/crm/new-customer";
 import { defaultJobName, readUsualBillingKind, statusFromDate } from "@/lib/schedule-options";
 import { JOB_STATUSES } from "@/lib/job-status";
 import { getOrgSettings, workDayWindowHm } from "@/lib/org-settings";
@@ -136,14 +136,12 @@ export async function createJob(formData: FormData): Promise<Result> {
 
   // Optionally create a customer inline (when no existing one is selected): the one shared
   // match-then-insert door, so no job form mints a twin (lib/crm/new-customer).
+  // A phone typed with no name is refused in words (the helper's refusal), never dropped while the
+  // job is made with no customer.
   let customerId = emptyToNull(formData.get("customer_id"));
-  const newCustomerName = String(formData.get("new_customer_name") ?? "").trim();
-  if (!customerId && newCustomerName) {
-    const made = await matchOrCreateCustomer(supabase, ctx.userId, {
-      name: newCustomerName,
-      phone: String(formData.get("new_customer_phone") ?? ""),
-      email: String(formData.get("new_customer_email") ?? ""),
-    });
+  const typedCustomer = typedNewCustomer(formData);
+  if (!customerId && typedCustomer) {
+    const made = await matchOrCreateCustomer(supabase, ctx.userId, typedCustomer);
     if (!made.ok) return { ok: false, error: made.error };
     customerId = made.id;
   }
