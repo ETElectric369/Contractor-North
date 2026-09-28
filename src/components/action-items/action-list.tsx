@@ -60,7 +60,39 @@ function prettyWhen(when: string | null | undefined, todayStr: string, tz: strin
 export const ROW_BUTTON =
   "-my-3 inline-flex h-11 shrink-0 items-center gap-1 rounded-md px-2 text-xs font-semibold text-brand hover:bg-brand-light/40 disabled:opacity-50";
 
-type Run = (item: ActionItem, verb: Affordance, payload?: DispatchPayload, opts?: { child?: boolean }) => Promise<{ ok: boolean; error?: string }>;
+type Run = (item: ActionItem, verb: Affordance, payload?: DispatchPayload, opts?: RunOpts) => Promise<{ ok: boolean; error?: string }>;
+type RunOpts = {
+  /** A pile's child: acting on it drops it (the pile counts down in place), it never sinks. */
+  child?: boolean;
+  /** Sent from a sheet (⋯, a Snooze or Still Waiting picker, Assign, a confirm, Pick A Day): the
+   *  sheet lives inside its row, and it says the refusal. */
+  sheet?: boolean;
+};
+
+/**
+ * WHAT A ROW DOES WHEN A VERB IS SENT (pure, so it is tested whole):
+ *   · hides: "sink" (Called or Close Out on a plain row: ticked done, sunk to the bottom), "remove"
+ *     (it leaves: the verb ends it or gives it a day), or "none" (Assign: crew puts nothing ahead of a
+ *     job, so the server keeps the row, and hiding it here would drop a job that still has no day
+ *     off the list while the badge still counts it);
+ *   · optimistic: hide it now, before the server answers. Only a bare button's verb is: a sheet's
+ *     verb waits for the answer, because the sheet lives inside its row, and hiding the row first
+ *     would take the sheet (and the refusal it has to say) with it.
+ */
+export function verbLanding(item: Pick<ActionItem, "kind">, verb: Affordance, opts?: RunOpts): { hides: "sink" | "remove" | "none"; optimistic: boolean } {
+  const hides = verb === "assign" ? "none" : verb === "do" && !opts?.child && (item.kind === "inquiry" || item.kind === "appointment") ? "sink" : "remove";
+  return { hides, optimistic: hides !== "none" && !opts?.sheet };
+}
+
+/**
+ * THE SERVER'S LIST DECIDES WHAT SHOWS. When a fresh list arrives (router.refresh after a verb, the
+ * page coming back into view), the rows hidden here are shown again unless their verb is still on
+ * its way: a row the server dropped isn't in the new list anyway, and one it kept (a Snooze to
+ * today, a verb that didn't end it) is back instead of hidden while the badge counts it.
+ */
+export function keepInFlight(hidden: Set<string>, inFlight: Set<string>): Set<string> {
+  return new Set([...hidden].filter((id) => inFlight.has(id)));
+}
 
 /**
  * The one "needs action" list (Needs You on My Day). Renders the NOW list IN THE ORDER THE SERVER SENT
@@ -115,6 +147,16 @@ export function ActionList({
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [openPiles, setOpenPiles] = useState<Set<string>>(new Set());
+  // Rows whose verb is still on its way to the server (keepInFlight).
+  const [inFlight, setInFlight] = useState<Set<string>>(new Set());
+  // A FRESH LIST FROM THE SERVER shows every row it holds, except those whose verb is still on its
+  // way (keepInFlight): state adjusted while rendering, so no frame draws the stale hidden set.
+  const [seenItems, setSeenItems] = useState(items);
+  if (seenItems !== items) {
+    setSeenItems(items);
+    setRemovedIds((s) => keepInFlight(s, inFlight));
+    setDoneIds((s) => keepInFlight(s, inFlight));
+  }
 
   const without = (s: Set<string>, id: string) => {
     const n = new Set(s);
@@ -122,36 +164,44 @@ export function ActionList({
     return n;
   };
 
-  /** Send a verb. Optimistic: the row leaves now (a plain row's done tick, Called or Close Out, sinks
-   *  to the bottom instead), and comes back if the server says no; the refusal is said on the list,
-   *  or in the sheet that asked. A pile's child always leaves: its pile counts down in place. */
+  /** Send a verb (verbLanding says how its row lands). A bare button's verb is optimistic: the row
+   *  leaves now (a plain row's Called or Close Out sinks to the bottom instead) and comes back if the
+   *  server says no, and the refusal is said on the list. A sheet's verb waits for the server, so the
+   *  sheet is still there to say the refusal. A pile's child leaves: its pile counts down in place. */
   const run: Run = async (item, verb, payload, opts) => {
     setError(null);
     setBusyId(item.id);
-    const sinks = verb === "do" && !opts?.child && (item.kind === "inquiry" || item.kind === "appointment");
-    if (sinks) setDoneIds((s) => new Set(s).add(item.id));
-    else setRemovedIds((s) => new Set(s).add(item.id));
+    const landing = verbLanding(item, verb, opts);
+    const hide = () => {
+      if (landing.hides === "sink") setDoneIds((s) => new Set(s).add(item.id));
+      else if (landing.hides === "remove") setRemovedIds((s) => new Set(s).add(item.id));
+    };
+    setInFlight((s) => new Set(s).add(item.id));
+    if (landing.optimistic) hide();
     const res = await dispatchAction({ kind: item.kind, id: item.id, verb, payload, target: item.targetId ?? null }).catch(() => ({
       ok: false,
       error: "That didn't reach the server - check your connection and try again.",
       note: undefined as string | undefined,
     }));
     setBusyId(null);
+    setInFlight((s) => without(s, item.id));
     if (!res.ok) {
       const message = res.error ?? "Couldn't do that.";
       setDoneIds((s) => without(s, item.id));
       setRemovedIds((s) => without(s, item.id));
+      // NOTHING SILENT: a row hidden before the answer took no sheet along, so the list says it.
+      if (!opts?.sheet) setError(message);
       return { ok: false, error: message };
     }
+    if (!landing.optimistic) hide();
     // NOTHING SILENT: what the action says it did (a finished job's draft, what isn't billed yet).
     if (res.note) toast(res.note, "info", undefined, { sticky: true });
     router.refresh();
     return { ok: true };
   };
-  /** A verb straight from a button (no sheet to hold its refusal): said on the list. */
+  /** A verb straight from a button (no sheet to hold its refusal): run() says it on the list. */
   const runOnList = async (item: ActionItem, verb: Affordance, opts?: { child?: boolean }) => {
-    const r = await run(item, verb, undefined, opts);
-    if (!r.ok) setError(r.error ?? "Couldn't do that.");
+    await run(item, verb, undefined, opts);
   };
   const removeHere = (id: string) => setRemovedIds((s) => new Set(s).add(id));
 
@@ -382,7 +432,7 @@ function DoorButton(p: RowProps & { door: RowDoor }) {
   }
   if (a.type === "pickDay") {
     return (
-      <MoveToDay label={door.label} triggerClassName={ROW_BUTTON} onPick={async (d) => (d ? p.run(item, a.verb, { date: d }, { child: p.nested }) : { ok: false, error: "Pick a day." })}>
+      <MoveToDay label={door.label} triggerClassName={ROW_BUTTON} onPick={async (d) => (d ? p.run(item, a.verb, { date: d }, { child: p.nested, sheet: true }) : { ok: false, error: "Pick a day." })}>
         {door.label}
       </MoveToDay>
     );
@@ -435,9 +485,12 @@ function sheetTitle(door: RowDoor, item: ActionItem): string {
 /** What ⋯ holds: one 44px row per door; a door with a question asks it right here. */
 function MoreSheetBody(p: RowProps & { doors: RowDoor[]; close: () => void }) {
   const [asking, setAsking] = useState<RowDoor | null>(null);
+  const [err, setErr] = useState<string | null>(null);
   if (asking) return <DoorForm {...p} door={asking} onBack={() => setAsking(null)} onDone={p.close} />;
   return (
     <>
+      {/* A refused verb says why right here: the row (and this sheet) stay until the server answers. */}
+      {err && <div className="mb-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{err}</div>}
       {p.doors.map((d) => {
         const a = d.act;
         if (a.type === "open") {
@@ -462,9 +515,10 @@ function MoreSheetBody(p: RowProps & { doors: RowDoor[]; close: () => void }) {
               className={SHEET_ROW}
               disabled={p.busyId === p.item.id}
               onClick={async () => {
-                const r = await p.run(p.item, a.verb, undefined, { child: p.nested });
+                setErr(null);
+                const r = await p.run(p.item, a.verb, undefined, { child: p.nested, sheet: true });
                 if (r.ok) p.close();
-                else setAsking(null);
+                else setErr(r.error ?? "Couldn't do that.");
               }}
             >
               {d.label}
@@ -491,7 +545,7 @@ function DoorForm(p: RowProps & { door: RowDoor; onBack: () => void; onDone: () 
   const send = async (verb: Affordance, payload?: DispatchPayload) => {
     setErr(null);
     setPending(true);
-    const r = await p.run(item, verb, payload, { child: p.nested });
+    const r = await p.run(item, verb, payload, { child: p.nested, sheet: true });
     setPending(false);
     if (r.ok) p.onDone();
     else setErr(r.error ?? "Couldn't do that.");

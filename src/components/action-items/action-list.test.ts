@@ -16,7 +16,7 @@ vi.mock("@/components/supplier-paper-cards", () => ({ SupplierPaperCards: () => 
 vi.mock("@/components/move-to-day", () => ({ MoveToDay: ({ children }: { children: unknown }) => children as never }));
 vi.mock("@/components/send-sheet", () => ({ SendSheet: () => null }));
 
-import { ActionList, ROW_BUTTON } from "./action-list";
+import { ActionList, ROW_BUTTON, keepInFlight, verbLanding } from "./action-list";
 import { WaitingFold, waitingLine } from "./waiting-fold";
 import { inquiryActionItem } from "@/lib/action-items/switches";
 import { AFFORDANCES, KIND_STREAM, sortActionItems, waitingForViewer, waitingRow, type ActionItem, type WaitingItem } from "@/lib/action-items/types";
@@ -216,6 +216,16 @@ describe("ActionList — piles (W1-14)", () => {
     expect(html).toMatch(/<a[^>]*href="\/quotes\?status=draft"[^>]*>See All On Estimates<\/a>/);
   });
 
+  it("a capped Done, Not Billed pile has no page that lists its rows: See All unfolds every row read here, never a link to /billing", () => {
+    const done = [1, 2, 3].map((i) => item({ id: `unbilled-a${i}`, kind: "visit_unbilled", title: `Service call ${i}`, when: `2026-09-0${i}`, affordances: AFFORDANCES.visit_unbilled }));
+    const items = rollUpPiles(done, { todayStr: "2026-09-26", isStaff: true, counts: { done_not_billed: { capped: true } } });
+    const html = renderToStaticMarkup(createElement(ActionList, { items, todayStr: "2026-09-26", isStaff: true }));
+    expect(html).toContain("Done, Not Billed · 3+");
+    expect(html).toMatch(/<button[^>]*aria-expanded="false"[^>]*>See All 3 Here<\/button>/);
+    expect(html).not.toContain('href="/billing"');
+    expect(html).not.toContain("See All On Billing");
+  });
+
   it("the unfold and the fold are one client toggle (a second tap folds them)", () => {
     const list = readFileSync(join(process.cwd(), "src/components/action-items/action-list.tsx"), "utf8");
     expect(list).toContain('{open ? "See Less" : `See All ${count}`}');
@@ -223,6 +233,43 @@ describe("ActionList — piles (W1-14)", () => {
     // Acting on a child drops it and counts down in place; a lone one left is a plain row.
     expect(list).toContain("const count = Math.max(0, item.pile.count - gone);");
     expect(list).toContain("if (kids.length === 1 && !item.pile.capped && count <= 1) return <Row key={kids[0].id} item={kids[0]} {...rowProps} />;");
+  });
+});
+
+describe("ActionList — a verb's refusal is always said, and the server's list decides what shows", () => {
+  const list = () => readFileSync(join(process.cwd(), "src/components/action-items/action-list.tsx"), "utf8");
+
+  it("a sheet's verb (⋯, Snooze, Still Waiting, Set Aside Until…, Assign, a confirm, Pick A Day) waits for the server: its row and sheet stay to say a refusal", () => {
+    for (const verb of ["snooze", "dismiss", "schedule", "do"] as const) {
+      expect(verbLanding({ kind: "invoice_draft" }, verb, { sheet: true }).optimistic, verb).toBe(false);
+    }
+    // Every sheet sends with sheet: true (DoorForm, the ⋯ run rows, MoveToDay).
+    const src = list();
+    expect(src).toContain("const r = await p.run(item, verb, payload, { child: p.nested, sheet: true });");
+    expect(src).toContain("const r = await p.run(p.item, a.verb, undefined, { child: p.nested, sheet: true });");
+    expect(src).toContain("p.run(item, a.verb, { date: d }, { child: p.nested, sheet: true })");
+    // The ⋯ run rows say a refusal in the sheet instead of closing on nothing.
+    expect(src).toContain('else setErr(r.error ?? "Couldn\'t do that.");');
+    expect(src).not.toContain("else setAsking(null);");
+  });
+
+  it("a bare button's verb is optimistic, and its refusal is said on the list by run() itself", () => {
+    expect(verbLanding({ kind: "job_to_schedule" }, "schedule")).toEqual({ hides: "remove", optimistic: true });
+    expect(verbLanding({ kind: "inquiry" }, "do")).toEqual({ hides: "sink", optimistic: true });
+    expect(verbLanding({ kind: "inquiry" }, "do", { child: true })).toEqual({ hides: "remove", optimistic: true });
+    expect(list()).toContain("if (!opts?.sheet) setError(message);");
+  });
+
+  it("Assign never hides the job: crew puts nothing ahead of it, so it still needs a day (and the badge still counts it)", () => {
+    expect(verbLanding({ kind: "job_to_schedule" }, "assign")).toEqual({ hides: "none", optimistic: false });
+    expect(verbLanding({ kind: "job_to_schedule" }, "assign", { sheet: true, child: true }).hides).toBe("none");
+  });
+
+  it("a fresh list from the server shows every row it holds again, except a row whose verb is still on its way", () => {
+    expect([...keepInFlight(new Set(["a", "b", "c"]), new Set(["b"]))]).toEqual(["b"]);
+    expect(keepInFlight(new Set(["a"]), new Set()).size).toBe(0);
+    const src = list();
+    expect(src).toMatch(/if \(seenItems !== items\) \{\s*setSeenItems\(items\);\s*setRemovedIds\(\(s\) => keepInFlight\(s, inFlight\)\);\s*setDoneIds\(\(s\) => keepInFlight\(s, inFlight\)\);/);
   });
 });
 
