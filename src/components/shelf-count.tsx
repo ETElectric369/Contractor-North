@@ -213,19 +213,38 @@ export function ShelfTicketSheet({
   );
 }
 
-/** Load the shelf's items once for a sheet: names and units only. */
+/**
+ * What the stock list does next. It is read when the sheet opens and forgotten when it closes, so a
+ * sheet that stays on the page between openings (Add By Hand in /bills' header) reads it again the
+ * next time: an item made a moment ago with New Item is on the list. The last list stays shown while
+ * the new one is read, so an item already picked never drops out from under the person.
+ */
+export function shelfItemsStep(open: boolean, loaded: boolean): "read" | "forget" | "keep" {
+  if (open && !loaded) return "read";
+  if (!open && loaded) return "forget";
+  return "keep";
+}
+
+/** Load the shelf's items for a sheet each time it opens: names and units only. */
 export function useShelfItems(open: boolean): { items: ShelfPickerItem[]; loaded: boolean; error: string | null } {
   const [items, setItems] = useState<ShelfPickerItem[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
-    if (!open || loaded) return;
+    const step = shelfItemsStep(open, loaded);
+    if (step === "forget") {
+      setLoaded(false);
+      return;
+    }
+    if (step !== "read") return;
     let live = true;
     shelfPickerItems()
       .then((r) => {
         if (!live) return;
-        if (r.ok) setItems(r.items);
-        else setError(r.error ?? "The stock items couldn't be read.");
+        if (r.ok) {
+          setItems(r.items);
+          setError(null);
+        } else setError(r.error ?? "The stock items couldn't be read.");
         setLoaded(true);
       })
       .catch(() => {
