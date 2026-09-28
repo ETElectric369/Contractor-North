@@ -239,6 +239,9 @@ describe("the Costs tab: one way to add a cost", () => {
     // No other add door on the header: no Add Cost, no Add Bill.
     expect(rows).not.toContain("Add Cost");
     expect(rows).not.toContain("Add Bill");
+    // File A Paper's question grows the open panel, so it is placed again (never under the dock).
+    const src = readFileSync(join(process.cwd(), "src/app/(app)/jobs/[id]/job-cost-capture.tsx"), "utf8");
+    expect(src).toContain('useGlassMenuPlacement(moreOpen, askPaper ? "which-paper" : "ways")');
   });
 
   it("a paper that isn't money, dropped through Upload, is filed and says so (the pipeline's filed outcome)", () => {

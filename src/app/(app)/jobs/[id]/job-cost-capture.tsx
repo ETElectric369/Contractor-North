@@ -113,7 +113,9 @@ export function JobCostCapture({ orgId, jobId, billsTotal: _billsTotal, nortOn =
   // File A Paper (Not A Cost)'s one question, asked inside the ⋯: which paper is it?
   const [askPaper, setAskPaper] = useState(false);
   const moreRef = useRef<HTMLDivElement>(null);
-  const { panelRef, panelStyle } = useGlassMenuPlacement(moreOpen);
+  // The question is its second view: it adds three rows to a panel already open, so the panel is
+  // measured again (the shared hook's content key) and never hangs under the bottom dock.
+  const { panelRef, panelStyle } = useGlassMenuPlacement(moreOpen, askPaper ? "which-paper" : "ways");
   useEffect(() => {
     if (!moreOpen) return;
     const away = (e: PointerEvent) => {
