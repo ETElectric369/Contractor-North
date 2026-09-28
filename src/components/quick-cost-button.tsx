@@ -875,20 +875,26 @@ function TypeItInButton({
     reset();
     onOpen?.();
     setOpen(true);
-    const supabase = createClient();
-    if (orgTz.current == null) {
-      const { data } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
-      orgTz.current = getOrgSettings((data as { settings?: unknown } | null)?.settings).timezone;
-      if (!dateTouched.current) setDate(todayStrInTz(orgTz.current));
-    }
-    if (!jobId && !jobs && !autoJobs) {
-      const { data } = await supabase
-        .from("jobs")
-        .select("id, job_number, name")
-        .neq("status", "cancelled")
-        .order("created_at", { ascending: false })
-        .limit(200);
-      if (data) setAutoJobs((data as { id: string; job_number: string | null; name: string | null }[]).map((j) => ({ id: j.id, label: jobPickLabel(j) })));
+    // Best effort, both: the day stays the device's today and the picker offers Business Cost when
+    // either read can't be made (no signal), and the save itself says what happened.
+    try {
+      const supabase = createClient();
+      if (orgTz.current == null) {
+        const { data } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
+        orgTz.current = getOrgSettings((data as { settings?: unknown } | null)?.settings).timezone;
+        if (!dateTouched.current) setDate(todayStrInTz(orgTz.current));
+      }
+      if (!jobId && !jobs && !autoJobs) {
+        const { data } = await supabase
+          .from("jobs")
+          .select("id, job_number, name")
+          .neq("status", "cancelled")
+          .order("created_at", { ascending: false })
+          .limit(200);
+        if (data) setAutoJobs((data as { id: string; job_number: string | null; name: string | null }[]).map((j) => ({ id: j.id, label: jobPickLabel(j) })));
+      }
+    } catch {
+      // Nothing to undo: the sheet is open with what it has.
     }
   }
 
@@ -901,14 +907,15 @@ function TypeItInButton({
   useEffect(() => {
     if (!open || !jobTarget || pos?.jobId === jobTarget) return;
     let live = true;
-    createClient()
-      .from("purchase_orders")
-      .select("id, po_number, vendor, total, status")
-      .eq("job_id", jobTarget)
-      .not("status", "in", "(draft,cancelled)")
-      .order("created_at", { ascending: false })
-      .limit(50)
-      .then(({ data, error: readErr }) => {
+    void (async () => {
+      try {
+        const { data, error: readErr } = await createClient()
+          .from("purchase_orders")
+          .select("id, po_number, vendor, total, status")
+          .eq("job_id", jobTarget)
+          .not("status", "in", "(draft,cancelled)")
+          .order("created_at", { ascending: false })
+          .limit(50);
         if (!live) return;
         const list = ((data ?? []) as { id: string; po_number: string | null; vendor: string | null; total: number | string | null }[]).map((p) => ({
           id: String(p.id),
@@ -917,7 +924,11 @@ function TypeItInButton({
           total: Number(p.total) || 0,
         }));
         setPos({ jobId: jobTarget, list, failed: !!readErr });
-      });
+      } catch {
+        // No signal: said under the fields, never a quiet missing picker.
+        if (live) setPos({ jobId: jobTarget, list: [], failed: true });
+      }
+    })();
     return () => {
       live = false;
     };
@@ -1022,6 +1033,7 @@ function TypeItInButton({
                   </option>
                 ))}
               </Select>
+              {pickerJobs.length === 0 && <p className="text-xs text-slate-500">No jobs to pick from yet. A cost with no job is a Business Cost.</p>}
               <div className={`grid gap-2 ${shopStock ? "grid-cols-2" : "grid-cols-1"}`} role="radiogroup" aria-label="Or">
                 <button type="button" role="radio" aria-checked={target === BUSINESS} onClick={() => pickTarget(BUSINESS)} className={choiceCls(target === BUSINESS)}>
                   Business Cost
