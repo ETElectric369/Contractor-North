@@ -291,3 +291,25 @@ describe("which receipt made which bill, unread", () => {
     expect(text).toContain("All Bills · 3 Unpaid $529.45");
   });
 });
+
+describe("Needs You never gives an all-clear over a read that failed", () => {
+  // The fixture's 8802-1106969 (13897 Herringbone) is NOT in the books: with every read answered it
+  // is a card, so "every paper is in your books" beside a failed read is a false all-clear.
+  it("each supplier-half failure carries the alert alone, never 'is in your books'", async () => {
+    for (const table of ["bills", "bill_supplier_invoices", "supplier_invoices", "supplier_accounts", "supplier_aliases", "jobs"]) {
+      const { html, text } = await renderWith(table);
+      expect(html, table).toMatch(/id="needs-you"/);
+      expect(text, table).toMatch(/Couldn't (check your books|read your supplier)/);
+      expect(text, table).not.toContain("is in your books");
+      expect(text, table).not.toContain("Nothing waiting");
+    }
+  });
+
+  it("the waiting papers unread: Needs You says so instead of 'Nothing waiting'", async () => {
+    const { html, text } = await renderWith("organized_items");
+    expect(html).toMatch(/id="needs-you"/);
+    expect(text).toContain("Couldn't read the papers waiting to be sorted just now. Reload the page to try again.");
+    expect(text).not.toContain("is in your books");
+    expect(text).not.toContain("Nothing else waiting on you");
+  });
+});

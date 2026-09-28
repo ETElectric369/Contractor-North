@@ -77,6 +77,7 @@ export function NeedsYou({
   always = false,
   supplier = null,
   emptyLine,
+  trayUnread = false,
 }: {
   items: PaperRowItem[];
   jobs: { id: string; job_number: string; name: string }[];
@@ -89,8 +90,10 @@ export function NeedsYou({
   always?: boolean;
   /** The supplier's half, drawn by the page. */
   supplier?: ReactNode;
-  /** Said when nothing is waiting. */
-  emptyLine: string;
+  /** Said when nothing is waiting; null when a read it speaks for failed (the card says that instead). */
+  emptyLine: string | null;
+  /** The read of the papers waiting to be sorted failed: said in words, never an empty card. */
+  trayUnread?: boolean;
 }) {
   const lines = useSnapLines();
   const open = items.length + supplierCards;
@@ -120,9 +123,14 @@ export function NeedsYou({
         </div>
       )}
       <div className="mt-3 space-y-3">
+        {trayUnread && (
+          <p className="text-sm text-amber-800" role="alert">
+            Couldn&apos;t read the papers waiting to be sorted just now. Reload the page to try again.
+          </p>
+        )}
         <PaperworkList items={items} jobs={jobs} matches={matches} shopStock={shopStock} />
         {supplier}
-        {open === 0 && lines.length === 0 && <p className="text-sm text-slate-500">{emptyLine}</p>}
+        {emptyLine && open === 0 && lines.length === 0 && <p className="text-sm text-slate-500">{emptyLine}</p>}
       </div>
     </Card>
   );

@@ -197,7 +197,7 @@ export default async function BillsPage({
     { data: orgRow },
     { data: invoiceRows, error: invoicesErr },
     { data: billLinkRows, error: linksErr },
-    { data: paperRows },
+    { data: paperRows, error: trayErr },
     books,
     markCtx,
     shelfLotsRead,
@@ -1263,9 +1263,16 @@ export default async function BillsPage({
   const showAllBills = !!billsErr || (billsWithLines as any[]).length > 0 || (pos ?? []).length > 0 || looseDocs.length > 0;
   const showMore = moreWaiting > 0 || proposals.length + questions.length + loose.length > 0 || duplicates.length > 0 || supplierDocuments.length > 0 || liveBills.length > 0;
   // Needs You's empty line: every paper since the books began is in them, unless some wait on a credit.
-  const needsYouEmpty = waitingByAccount.size
-    ? "Nothing else waiting on you."
-    : `Nothing waiting. Every paper${recordsSince ? ` since ${formatDateShort(recordsSince)}` : ""} is in your books.`;
+  // ONLY WHEN IT WAS ALL READ (audit v1018, class 2): with the supplier half unread (its alert is in the
+  // card) or the waiting papers unread, "every paper is in your books" would be a false all-clear right
+  // under the sentence saying it couldn't check, so the card carries the alert alone.
+  const supplierUnread = !paperFeed && readFailed.size > 0;
+  const needsYouEmpty =
+    supplierUnread || trayErr
+      ? null
+      : waitingByAccount.size
+        ? "Nothing else waiting on you."
+        : `Nothing waiting. Every paper${recordsSince ? ` since ${formatDateShort(recordsSince)}` : ""} is in your books.`;
   // The jobs Add By Hand offers: open and finished, never cancelled, the place first and the number second.
   const handJobs = paperJobs.map((j) => ({ id: j.id, label: jobPickLabel(j) }));
 
@@ -1304,10 +1311,11 @@ export default async function BillsPage({
           matches={paperMatches}
           shopStock={shopStock}
           supplierCards={paperFeed?.cards.length ?? 0}
-          always={hasSupplierSide}
+          always={hasSupplierSide || !!trayErr}
           emptyLine={needsYouEmpty}
+          trayUnread={!!trayErr}
           supplier={
-            !paperFeed && readFailed.size > 0 ? (
+            supplierUnread ? (
               <p className="text-sm text-amber-800" role="alert">
                 {invoicesErr
                   ? "Couldn't read your suppliers' own papers just now, so what you owe them and the bills waiting on you aren't shown. Reload the page to try again."
