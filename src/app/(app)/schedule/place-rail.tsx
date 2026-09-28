@@ -17,6 +17,8 @@ import { WorkShapeControls } from "@/components/work-shape-controls";
 import { ComeBackPicker } from "@/components/come-back-picker";
 import { backWords, comeBackDue, type ComeBackWhen } from "@/lib/come-back-days";
 import { armedInstruction } from "@/lib/schedule/placement-plan";
+import { placeLine } from "@/lib/schedule/block-info";
+import { CrewInitials } from "@/components/crew-initials";
 import {
   groupByTown,
   nextAction,
@@ -51,16 +53,25 @@ import {
  * Mike Scrivano has no address but a phone and a real note, so his next move is a call, not the
  * bottom of the list. See lib/schedule/place-by-town.
  */
-/** "14161 Tanager Ln." the job and "14161 Tanager Lane" the address are the same fact — showing
- *  both said the address twice on one card. Compared on bare alphanumerics so punctuation and
- *  abbreviation ("Ln." vs "Lane") don't fake a difference. */
-function sameishPlace(a: string | null | undefined, b: string | null | undefined): boolean {
-  const norm = (v: string | null | undefined) => String(v ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
-  const x = norm(a);
-  const y = norm(b);
-  if (!x || !y) return false;
-  const head = (v: string) => v.slice(0, 12);
-  return x.startsWith(head(y)) || y.startsWith(head(x));
+/** A job's or a visit's place line and crew, for its card: the words its block on the calendar says
+ *  (lib/schedule/block-info). "14161 Tanager Ln." the job and "14161 Tanager Lane" the address are the
+ *  same fact, so a job named for its street reads who instead of the street twice. */
+function PlaceAndCrew({ i }: { i: Placeable }) {
+  const place = placeLine({ name: i.name, street: i.address, customer: i.customer });
+  return (
+    <>
+      {place && (
+        <span className="mt-0.5 flex items-center gap-1 text-xs text-slate-500">
+          {place.kind === "street" && <MapPin className="h-3 w-3 shrink-0" />} {place.text}
+        </span>
+      )}
+      {Array.isArray(i.crew) && (
+        <span className="mt-1 flex">
+          <CrewInitials crew={i.crew} />
+        </span>
+      )}
+    </>
+  );
 }
 
 /** "13:30" is a database. "1:30pm" is a person. The footer reads back what will happen, so it
@@ -219,12 +230,6 @@ export function PlaceRail({
                       <span className="min-w-0 flex-1">
                         <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
                           <span className="text-sm font-medium text-slate-900">{i.name}</span>
-                          {/* The job's own name — but only when it adds something. When the job is
-                              named after its address (most are), showing both said the address
-                              twice on one card (Erik). */}
-                          {i.kind === "job" && i.note && !sameishPlace(i.note, i.address) && (
-                            <span className="text-xs text-slate-400">{i.note}</span>
-                          )}
                           {/* THE TAG AND THE CLOCK — Erik: "a tag showing service call, job,
                               inspection/walk through, or office … and how much time they are going
                               to take". Between them a day is plannable by eye. */}
@@ -252,10 +257,18 @@ export function PlaceRail({
                             <Badge tone={comeBackDue(i.holdUntil, todayStr) ? "amber" : "slate"}>{backWords(i.holdUntil, todayStr)}</Badge>
                           )}
                         </span>
-                        {i.address && (
-                          <span className="mt-0.5 flex items-center gap-1 text-xs text-slate-500">
-                            <MapPin className="h-3 w-3 shrink-0" /> {i.address}
-                          </span>
+                        {/* WHERE AND WHO, as the job's block on the calendar says it: a job or a
+                            visit reads its street number and name (never the city: the group above
+                            is the town), or who when its name already is the street, then who's on
+                            it as initials (a dashed Nobody). A lead keeps the address it was given. */}
+                        {i.kind === "lead" ? (
+                          i.address && (
+                            <span className="mt-0.5 flex items-center gap-1 text-xs text-slate-500">
+                              <MapPin className="h-3 w-3 shrink-0" /> {i.address}
+                            </span>
+                          )
+                        ) : (
+                          <PlaceAndCrew i={i} />
                         )}
                         {/* THE SPOT, NOT THE SERMON. Erik: "i dont like the red letters telling
                             me to go look it up lets make it a spot that just says Phone that i can
@@ -536,6 +549,9 @@ export function PlaceRail({
               {/* HIS working day (Settings → Crew & time), never a literal — the rail used to
                   promise 8am to a shop that opens at 9. */}
               Starting {prettyTime(startAt || (half === "am" ? halfTimes.am : halfTimes.pm))}, in the order shown.
+              {/* THE DEFAULT, SAID BEFORE THE TAP (lib/schedule/job-block): a job with no length
+                  lands as two hours, never the rest of the day. Size it above to land it longer. */}
+              {jobs.some((j) => !j.planned_minutes) && " A job with no length goes down as 2 hours."}
             </span>
             <button
               type="button"

@@ -1,4 +1,4 @@
-import { BUSINESS_COST_BUCKETS, namesABucket } from "@/lib/business-cost-buckets";
+import { namesABucket } from "@/lib/business-cost-buckets";
 import {
   computeOwnerMoney,
   countedNotPaidLine,
@@ -12,11 +12,11 @@ import {
   windowMonths,
   type OwnerMoney,
   type OwnerMoneyCostLine,
-  type OwnerMoneyCostTarget,
   type OwnerMoneyFigures,
   type OwnerMoneyInputs,
   type OwnerMoneyWindow,
 } from "@/lib/analytics/owner-money";
+import { PNL_WORDS, cogsWords, overheadWords, pnlKeyOfCostTarget, pnlLines, pnlRow, profitAndLoss, type PnlKey, type PnlLine } from "@/lib/analytics/profit-and-loss";
 import { computeArAging, computeCollected, computeCustomerValue, monthKeyInTz } from "@/lib/analytics/money-metrics";
 import { collectedByJob } from "@/lib/analytics/job-profitability";
 import { HEADERS, onHandList, toCsv, toolsBilledList, toolsList, type AccountantInputs, type Cell, type CsvTable } from "@/lib/accountant-lists";
@@ -37,14 +37,17 @@ import { buildZip, type DeflateRaw } from "@/lib/zip-write";
  * six tabs, every figure from the engine that already shows it in the app:
  *
  *   Summary  Money by Month's own figures (computeOwnerMoney), month by month, the period's total,
- *            the period before and the change. Every business-cost bucket on its own row, read from
- *            BUSINESS_COST_BUCKETS, so a new bucket (Fuel and Auto, 0362) shows up by itself. The
- *            bottom line is named exactly "Net Profit (before income tax)" (Erik's answer 2).
+ *            the period before and the change, laid out as the accounting industry lays out a profit
+ *            and loss (profit-and-loss.ts, Erik 2026-09-28): Revenue; Cost of Goods Sold (COGS) and
+ *            Total COGS; Gross Profit and Gross Margin %; Overhead and Total Overhead; and the bottom
+ *            line, named exactly "Net Profit (Owner's Draw)". Every business-cost bucket is its own
+ *            row, in the half BUCKET_SECTION puts it in, so a new bucket shows up by itself.
  *   Income   every payment (computeCollected's rows: the same read), by customer
  *            (computeCustomerValue), by job (collectedByJob, job profit's cash rule) and by method;
  *            sales tax only when the company has it switched on, labeled billed basis.
- *   Costs    every cost line Money by Month adds up (ownerMoneyCostLines), what was paid to each
- *            supplier (supplierBalance), and the tools lists (depreciation is the accountant's call).
+ *   Costs    every cost line Money by Month adds up (ownerMoneyCostLines), their totals under the
+ *            Summary's two headings, what was paid to each supplier (supplierBalance), and the tools
+ *            lists (depreciation is the accountant's call).
  *   People   earned (the frozen-gross rule), paid, still owed (balanceForPerson), paid this calendar
  *            year; MILES AS MILES, never dollars; the owner's HOURS, never pay.
  *   Open     what customers owe (computeArAging) and what suppliers say is owed (supplierBalance),
@@ -53,9 +56,10 @@ import { buildZip, type DeflateRaw } from "@/lib/zip-write";
  *
  * THE OWNER'S SWITCH: when the owner has not shared Owner's Draw with the office
  * (office_sees_owner_money), the bottom line is the owner's. An office download then carries NO
- * bottom-line figure on ANY tab: no Received (the Summary's or the Income tab's), no Total Costs, no
- * Net, no change on them, and no owner rows; the Summary keeps the cost rows one by one and says
- * "The totals are the owner's." The itemized tabs stay with each list's own total (Payments, what
+ * bottom-line figure on ANY tab: no Revenue (the Summary's or the Income tab's), no Total COGS, no
+ * Gross Profit or Gross Margin %, no Total Overhead, no Net Profit, no change on them, and no owner
+ * rows; the Summary keeps the cost rows one by one under their two headings and says "The totals
+ * are the owner's." The itemized tabs stay with each list's own total (Payments, what
  * went to each supplier, Crew Total...): the office already sees those records in the app, and the
  * page says so in as many words (OWNER_HIDDEN_WHY) rather than promise a secret the lists can't keep.
  *
@@ -200,17 +204,25 @@ export function lastDayShown(p: AccountantPeriod, todayYmd: string): string {
 
 // ── Names ────────────────────────────────────────────────────────────────────
 
-/** The bottom line's name, exactly (Erik's answer 2, 2026-09-27). */
-export const NET_LABEL = "Net Profit (before income tax)";
-export const STOCK_BOUGHT_LABEL = "Stock Bought";
-export const STOCK_LOST_LABEL = "Stock Lost (Written Off, Counted Short, Returned)";
+/** The bottom line's name, exactly (Erik, 2026-09-28: "Net Profit = Owner's Draw"). It is before
+ *  income tax, and the Summary and the page say so under it. */
+export const NET_LABEL = PNL_WORDS.netProfit;
+export const STOCK_BOUGHT_LABEL = PNL_WORDS.stockBought;
+export const STOCK_LOST_LABEL = PNL_WORDS.stockLost;
 export const TAB_NAMES = ["Summary", "Income", "Costs", "People", "Open", "Stock"] as const;
 /** What an office download's Summary says when the owner hasn't shared Owner's Draw (never a total). */
 export const OWNER_HIDDEN_NOTE = "The totals are the owner's.";
 /** The page's line for that office viewer: why, what the file leaves out, and what it keeps (the
  *  lists the office already sees in the app, each with its own total). Never shown to the owner. */
 export const OWNER_HIDDEN_WHY =
-  "The owner hasn't shared Owner's Draw with the office, so Received, Total Costs, Net and the owner's own rows are left out, here and in the file. The file still lists each payment, cost and crew member, with each list's own total, as the app shows them.";
+  "The owner hasn't shared Owner's Draw with the office, so Revenue, Total COGS, Gross Profit and Gross Margin %, Total Overhead, Net Profit (Owner's Draw) and the owner's own rows are left out, here and in the file. The file still lists each payment, cost and crew member, with each list's own total, as the app shows them.";
+/** Under the bottom line, for whoever sees it. */
+export const BEFORE_TAX_NOTE = `${PNL_WORDS.netProfit} is before income tax.`;
+/** What the two halves of the costs are, in the accounting industry's own test (Erik, 2026-09-28),
+ *  with the lines from the data (profit-and-loss.ts), so the sentence moves when a line does. */
+export function cogsOverheadNote(): string {
+  return `${PNL_WORDS.cogs} is what doing the jobs costs: ${cogsWords()}. ${PNL_WORDS.overhead} is what keeps running whether there is work or not: ${overheadWords()}.`;
+}
 /** The People tab's line for that office viewer. */
 export const OWNER_ROWS_HIDDEN_NOTE = "The owner's own row is left out: the totals are the owner's.";
 
@@ -263,8 +275,9 @@ export type AccountantWorkbookInput = {
 
 export type AccountantWorkbook = {
   tabs: XlsxSheet[];
-  /** The page's two figures. Both null when the viewer may not see the totals (the owner's switch). */
-  figures: { received: number | null; net: number | null };
+  /** The period's Revenue, Gross Profit and Net Profit (Owner's Draw), from the profit and loss. All
+   *  null when the viewer may not see the totals (the owner's switch). */
+  figures: { revenue: number | null; grossProfit: number | null; net: number | null };
 };
 
 type Row = XlsxRow;
@@ -274,6 +287,8 @@ const blank = (): Row => ({ cells: [] });
 const head = (...cells: XlsxValue[]): Row => ({ cells, bold: true });
 const line = (...cells: XlsxValue[]): Row => ({ cells });
 const total = (...cells: XlsxValue[]): Row => ({ cells, bold: true });
+/** A line under its heading on a profit and loss: its name indented one step. */
+const under = (...cells: XlsxValue[]): Row => ({ cells, indent: true });
 const cents = (n: unknown): number => {
   const v = Number(n);
   return Number.isFinite(v) ? Math.round(v * 100) : 0;
@@ -284,6 +299,7 @@ const shortMonth = (m: string) => `${MONTH_NAMES[Number(m.slice(5, 7)) - 1].slic
 /** "Sep 27" from "2025-09-27". */
 const shortDay = (ymd: string) => `${MONTH_NAMES[Number(ymd.slice(5, 7)) - 1].slice(0, 3)} ${Number(ymd.slice(8, 10))}`;
 const round2 = (n: number) => Math.round(n * 100) / 100;
+const round1 = (n: number) => Math.round(n * 10) / 10 + 0; // + 0: never -0
 
 /** A CsvTable (the stock and tools lists) as sheet rows: its header bold, its Total rows bold, the
  *  money columns as money and the date columns as dates. */
@@ -303,8 +319,10 @@ function tableRows(t: CsvTable, moneyCols: number[], dateCols: number[]): Row[] 
   ];
 }
 
-const targetLabel = (to: OwnerMoneyCostTarget): string =>
-  to === "materials" ? "Materials & Bills" : to === "stock" ? STOCK_BOUGHT_LABEL : to === "stock_lost" ? STOCK_LOST_LABEL : to;
+/** Every profit-and-loss line's name, by its key: what a cost line's Goes To says. */
+const PNL_LABEL = new Map<PnlKey, string>(pnlLines().map((l) => [l.key, l.label]));
+/** The profit-and-loss lines whose rows are on the People tab, not the Costs list. */
+const ON_PEOPLE = new Set<PnlKey>(["crew_pay", "crew_mileage"]);
 
 const methodLabel = (m: unknown): string => {
   const s = String(m ?? "").trim();
@@ -349,7 +367,10 @@ export function buildAccountantWorkbook(input: AccountantWorkbookInput): Account
     openTab(input, open),
     stockTab(input, stock, through),
   ];
-  return { tabs, figures: showOwner ? { received: cur.totals.received, net: cur.totals.left } : { received: null, net: null } };
+  if (!showOwner) return { tabs, figures: { revenue: null, grossProfit: null, net: null } };
+  const pnl = profitAndLoss(cur.totals);
+  const amount = (key: PnlKey) => pnlRow(pnl, key)?.amount ?? null;
+  return { tabs, figures: { revenue: amount("revenue"), grossProfit: amount("gross_profit"), net: amount("net_profit") } };
 }
 
 /** True when every figure of the period is zero: nothing came in, nothing went out, no crew pay, no
@@ -382,24 +403,13 @@ export function beforeRecordsLine(
 
 // ── Summary ──────────────────────────────────────────────────────────────────
 
-type SummaryLine = { label: string; of: (f: OwnerMoneyFigures) => number; cost?: boolean };
-
-/** The Summary's rows in order, from BUSINESS_COST_BUCKETS for the buckets (Fuel on its own). */
-export function summaryLines(hasOtherIncome: boolean): SummaryLine[] {
-  return [
-    { label: "Received", of: (f) => f.received },
-    ...(hasOtherIncome ? [{ label: "Other Income (Inside Received)", of: (f: OwnerMoneyFigures) => f.otherIncome ?? 0 }] : []),
-    { label: "Materials & Bills", of: (f) => f.materialsAndBills, cost: true },
-    { label: "Crew Pay (1099)", of: (f) => f.crewPay, cost: true },
-    { label: "Crew Mileage Paid", of: (f) => f.crewMileagePaid, cost: true },
-    ...BUSINESS_COST_BUCKETS.map((b) => ({
-      label: b as string,
-      of: (f: OwnerMoneyFigures) => (b === "Fuel" ? f.fuel : (f.businessCosts as Record<string, number>)[b] ?? 0),
-      cost: true,
-    })),
-    { label: STOCK_BOUGHT_LABEL, of: (f) => f.putOnShelf, cost: true },
-    { label: STOCK_LOST_LABEL, of: (f) => f.shopStockLost, cost: true },
-  ];
+/**
+ * THE SUMMARY'S LINES: the profit and loss (profit-and-loss.ts) for this viewer, Other Income inside
+ * Revenue when either column has some, and Gross Margin % (a spreadsheet has room for a percent).
+ * An office viewer the owner hasn't shared Owner's Draw with gets the headings and the cost rows.
+ */
+export function summaryLines(opts: { hasOtherIncome: boolean; showOwner: boolean }): PnlLine[] {
+  return pnlLines({ otherIncome: opts.hasOtherIncome, margin: true, showOwner: opts.showOwner });
 }
 
 function summaryTab(
@@ -417,14 +427,20 @@ function summaryTab(
   const byMonth = period.kind !== "month";
   const hasOther = [cur.totals, prev.totals].some((f) => Math.abs(f.otherIncome ?? 0) >= 0.005);
   // THE OWNER'S SWITCH: an office viewer the owner hasn't shared Owner's Draw with gets the cost rows
-  // one by one and no total at all (no Received, no Total Costs, no Net): the totals are the owner's.
-  const lines = summaryLines(hasOther).filter((l) => showOwner || l.cost);
-  const cols = (f: (x: OwnerMoneyFigures) => number): XlsxValue[] => {
-    const now = cents(f(cur.totals));
-    const before = cents(f(prev.totals));
-    return [...(byMonth ? cur.months.map((m) => money(cents(f(m)))) : []), money(now), money(before), money(now - before)];
+  // one by one under their two headings and no total at all (no Revenue, no Total COGS, no Gross
+  // Profit or margin, no Total Overhead, no Net Profit): the totals are the owner's.
+  const lines = summaryLines({ hasOtherIncome: hasOther, showOwner });
+  const moneyCols = (l: PnlLine): XlsxValue[] => {
+    const now = l.cents(cur.totals) ?? 0;
+    const before = l.cents(prev.totals) ?? 0;
+    return [...(byMonth ? cur.months.map((m) => money(l.cents(m) ?? 0)) : []), money(now), money(before), money(now - before)];
   };
-  const costCents = (x: OwnerMoneyFigures) => lines.filter((l) => l.cost).reduce((s, l) => s + cents(l.of(x)), 0);
+  // Gross Margin %: a plain number of percent (the row's name carries the unit), its change in points.
+  const pctCols = (l: PnlLine): XlsxValue[] => {
+    const now = l.pct(cur.totals);
+    const before = l.pct(prev.totals);
+    return [...(byMonth ? cur.months.map((m) => l.pct(m)) : []), now, before, now != null && before != null ? round1(now - before) : null];
+  };
   // A period not over yet: the period before through the same day, and the change so far.
   const prevHead = prevThrough ? `${prevPeriod.label} Through ${shortDay(prevThrough)}` : prevPeriod.label;
   const changeHead = prevThrough ? "Change So Far" : "Change";
@@ -434,10 +450,17 @@ function summaryTab(
     blank(),
     head("", ...(byMonth ? cur.months.map((m) => shortMonth(m.month)) : []), `Total ${period.label}`, prevHead, changeHead),
   ];
-  for (const l of lines) rows.push(line(l.label, ...cols(l.of)));
+  // THE PROFIT AND LOSS, as an accountant lays one out: the headings and the figures that are totals
+  // (Revenue, Total COGS, Gross Profit, Total Overhead, Net Profit) bold, each line under its heading
+  // indented.
+  for (const l of lines) {
+    if (l.kind === "heading") rows.push(head(l.label));
+    else if (l.kind === "margin") rows.push(under(l.label, ...pctCols(l)));
+    else if (l.kind === "cost" || l.kind === "part") rows.push(under(l.label, ...moneyCols(l)));
+    else rows.push(total(l.label, ...moneyCols(l)));
+  }
   if (showOwner) {
-    rows.push(total("Total Costs", ...cols((x) => costCents(x) / 100)));
-    rows.push(total(NET_LABEL, ...cols((x) => x.left)));
+    // The owner's time is hours, never pay or a cost: below the line.
     const hours = (x: OwnerMoneyFigures) => round2(x.ownerHours);
     rows.push(line("Owner Hours (not pay)", ...(byMonth ? cur.months.map(hours) : []), hours(cur.totals), hours(prev.totals), round2(cur.totals.ownerHours - prev.totals.ownerHours)));
   } else {
@@ -450,6 +473,8 @@ function summaryTab(
   if (stock) rows.push(line(`In Stock At The End Of ${through}`, money(cents(stock.total ?? 0))));
 
   rows.push(blank());
+  if (showOwner) rows.push(note(BEFORE_TAX_NOTE));
+  rows.push(note(cogsOverheadNote()));
   if (prevThrough) {
     rows.push(note(`${changeHead} compares ${period.label} through ${input.todayYmd} with the same days of ${prevPeriod.label} (through ${prevThrough}), not the whole of it.`));
   }
@@ -534,8 +559,9 @@ function incomeTab(input: AccountantWorkbookInput, cur: OwnerMoney, months: Set<
   rows.push(total("Payments", null, null, null, null, null, money(paymentsCents), money(cents(cur.totals.processorFees))));
   if (refundCents) rows.push(total("Refunds", null, null, null, null, null, money(-refundCents)));
   if (otherCents) rows.push(total("Other Income", null, null, null, null, null, money(otherCents)));
-  // THE OWNER'S SWITCH: Received is a bottom-line figure; the lists' own sums above stay.
-  if (input.showOwner) rows.push(total("Received", null, null, null, null, null, money(cents(cur.totals.received))));
+  // THE OWNER'S SWITCH: Revenue (all of it: payments, less refunds, plus Other Income) is the top of
+  // the Summary's profit and loss, one subtraction from its bottom line; the lists' own sums stay.
+  if (input.showOwner) rows.push(total(PNL_WORDS.revenue, null, null, null, null, null, money(cents(cur.totals.received))));
 
   // BY CUSTOMER (computeCustomerValue), BY JOB (job profit's cash rule), BY METHOD.
   const names = new Map<string, string>();
@@ -570,7 +596,7 @@ function incomeTab(input: AccountantWorkbookInput, cur: OwnerMoney, months: Set<
   }
   rows.push(total("Total", money(paymentsCents)));
   if (refundCents || otherCents) {
-    rows.push(note(`Refunds and Other Income are in the list above${input.showOwner ? " and in Received" : ""}, not in these three breakdowns.`));
+    rows.push(note(`Refunds and Other Income are in the list above${input.showOwner ? ` and in ${PNL_WORDS.revenue}` : ""}, not in these three breakdowns.`));
   }
 
   rows.push(blank(), title("Sales Tax"));
@@ -604,7 +630,7 @@ function costsTab(input: AccountantWorkbookInput, cur: OwnerMoney, months: Set<s
     blank(),
     head("Date", "Where", "Bill Number", "Job Number", "Job", "Goes To", "Amount", "What It Was"),
   ];
-  const sums = new Map<string, number>();
+  const sums = new Map<PnlKey, number>();
   for (const l of lines) {
     const r = l.row ?? {};
     const j = r.job_id ? jobs.get(String(r.job_id)) : undefined;
@@ -629,24 +655,30 @@ function costsTab(input: AccountantWorkbookInput, cur: OwnerMoney, months: Set<s
       const item = itemName.get(String(itemOfLot.get(String(r.lot_id ?? "")) ?? ""));
       what = `${STOCK_MOVE_WORDS[String(r.kind)] ?? "Left stock"}${item ? `: ${item}` : ""}`;
     }
-    const label = targetLabel(l.to);
-    sums.set(label, (sums.get(label) ?? 0) + l.cents);
-    rows.push(line(date(l.day), where, billNo, j?.job_number ?? null, j?.name ?? null, label, money(l.cents), what));
+    const key = pnlKeyOfCostTarget(l.to);
+    sums.set(key, (sums.get(key) ?? 0) + l.cents);
+    rows.push(line(date(l.day), where, billNo, j?.job_number ?? null, j?.name ?? null, PNL_LABEL.get(key) ?? key, money(l.cents), what));
   }
   if (!lines.length) rows.push(note("No costs in this period."));
 
-  // THE TOTALS, ROW FOR ROW WITH THE SUMMARY.
+  // THE TOTALS, ROW FOR ROW WITH THE SUMMARY, UNDER THE SAME TWO HEADINGS (the profit and loss's own
+  // lines, profit-and-loss.ts). Crew pay and mileage are COGS too, but their rows are on People.
   rows.push(blank(), title("Totals By Where It Goes"), head("Goes To", "Amount"));
   let all = 0;
-  for (const l of summaryLines(false).filter((x) => x.cost && x.label !== "Crew Pay (1099)" && x.label !== "Crew Mileage Paid")) {
-    const c = sums.get(l.label) ?? 0;
+  for (const l of pnlLines()) {
+    if (l.kind === "heading") {
+      rows.push(head(l.label));
+      continue;
+    }
+    if (l.kind !== "cost" || ON_PEOPLE.has(l.key)) continue;
+    const c = sums.get(l.key) ?? 0;
     all += c;
-    rows.push(line(l.label, money(c)));
+    rows.push(under(l.label, money(c)));
   }
   rows.push(total("Total", money(all)));
   // No figure here: an office file the owner hasn't shared carries no bottom line, so the note says
   // where the rest is rather than adding it up.
-  rows.push(note("Crew pay and crew mileage are on the People tab, so they are not in this total."));
+  rows.push(note(`${PNL_WORDS.crewPay} and ${PNL_WORDS.crewMileage} are in ${PNL_WORDS.cogs} too, but they are on the People tab, so they are not in this total.`));
   if (cur.totals.processorFees) rows.push(note(`Fees includes ${formatCurrency(cur.totals.processorFees)} of card fees.`));
 
   // WHAT WAS SENT TO EACH SUPPLIER (supplierBalance over the period's payments).

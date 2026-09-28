@@ -35,6 +35,8 @@ const sheets: XlsxSheet[] = [
       { cells: ["Paid On", { date: "2026-07-04" }] },
       { cells: ["Not a date", { date: "2026-02-30" }] },
       { cells: ["=HYPERLINK(\"http://x\")", "Tom & Jerry <b>\"quoted\"</b> it's", "bell\u0007here", NaN, null, "", "tab\tand\nline"] },
+      { cells: ["Materials & Bills", { money: 4655.36 }, "a note"], indent: true },
+      { cells: ["An Indented Total", 12], indent: true, bold: true },
     ],
   },
   { name: "Costs: A/B [draft]?", rows: [{ cells: ["x"] }] },
@@ -80,7 +82,22 @@ describe("the xlsx writer", () => {
     // A date that isn't one is said as the text it was, never a wrong day.
     expect(c.get("B7")).toEqual({ t: "inlineStr", s: null, v: "2026-02-30" });
     expect(parts.get("xl/styles.xml")).toContain('<numFmt numFmtId="164" formatCode="yyyy-mm-dd"/>');
-    expect(parts.get("xl/styles.xml")).toMatch(/<cellXfs count="6">.*numFmtId="4"/);
+    expect(parts.get("xl/styles.xml")).toMatch(/<cellXfs count="8">.*numFmtId="4"/);
+  });
+
+  it("an indented row indents its first cell's text only, the way a statement lays out its lines", () => {
+    const c = cellsOf(parts.get("xl/worksheets/sheet1.xml")!);
+    expect(c.get("A9")).toEqual({ t: "inlineStr", s: "6", v: "Materials & Bills" });
+    expect(c.get("B9")).toEqual({ t: null, s: "2", v: "4655.36" }); // money is money, never indented
+    expect(c.get("C9")).toEqual({ t: "inlineStr", s: null, v: "a note" }); // only the first cell
+    expect(c.get("A10")).toEqual({ t: "inlineStr", s: "7", v: "An Indented Total" });
+    expect(c.get("B10")).toEqual({ t: null, s: "1", v: "12" });
+    const styles = parts.get("xl/styles.xml")!;
+    const xfs = [...styles.slice(styles.indexOf("<cellXfs")).matchAll(/<xf [^>]*?(?:\/>|>.*?<\/xf>)/g)].map((m) => m[0]);
+    expect(xfs).toHaveLength(8);
+    expect(xfs[6]).toContain('<alignment indent="1"/>');
+    expect(xfs[7]).toContain('fontId="1"');
+    expect(xfs[7]).toContain('<alignment indent="1"/>');
   });
 
   it("text is inline text, escaped, with control characters XML can't carry removed; never a formula", () => {
@@ -111,7 +128,7 @@ describe("the xlsx writer", () => {
   it("column widths and the dimension are written; column letters run past Z", () => {
     const xml = parts.get("xl/worksheets/sheet1.xml")!;
     expect(xml).toContain('<col min="1" max="1" width="30" customWidth="1"/>');
-    expect(xml).toContain('<dimension ref="A1:G8"/>');
+    expect(xml).toContain('<dimension ref="A1:G10"/>');
     expect([0, 25, 26, 51, 52, 701, 702].map(columnLetters)).toEqual(["A", "Z", "AA", "AZ", "BA", "ZZ", "AAA"]);
   });
 

@@ -83,13 +83,14 @@ import {
   appointmentTypeFor,
   bookingTitle,
   isWorkKind,
-  jobBlockEnd,
   KIND_FROM_APPT_TYPE,
   KIND_LABEL,
   KIND_TONE,
   WORK_KINDS,
   workKind,
 } from "./work-shape";
+import { jobDayBlock } from "./job-block";
+import { tzDateTimeUtc } from "../tz";
 import { APPOINTMENT_TYPES, appointmentTypeLabel } from "@/lib/statuses";
 
 /**
@@ -150,32 +151,34 @@ describe("every kind the app offers survives the round trip", () => {
 });
 
 describe("a job's block is as long as somebody said, not as long as the shop is open", () => {
-  const wd = 18 * 60; // the org's work-day end
-  const onePm = 13 * 60;
+  // The rule moved to lib/schedule/job-block (jobDayBlock); these are its old cases, on the new rule.
+  const tz = "America/Los_Angeles";
+  const day = "2026-09-02";
+  const wd = { startMin: 8 * 60, endMin: 18 * 60 };
+  const at = (hm: string) => tzDateTimeUtc(day, hm, tz);
+  const draw = (start: string, end: string | null, planned: number | null) =>
+    jobDayBlock({ day, scheduledStart: at(start), scheduledEnd: end ? at(end) : null, plannedMinutes: planned, tz, wd });
 
   // Erik, on a job converted from a 3-hour visit: "im not sure why it says 5 hours."
   it("uses the size when there is no explicit finish", () => {
-    expect(jobBlockEnd(onePm, { plannedMinutes: 180, workDayEndMin: wd })).toBe(16 * 60);
+    expect(draw("13:00", null, 180).endMin).toBe(16 * 60);
   });
 
-  it("still falls back to the shop's hours when nobody sized it", () => {
-    expect(jobBlockEnd(onePm, { plannedMinutes: null, workDayEndMin: wd })).toBe(wd);
+  it("an older row nobody sized, with no end on file, still draws to the shop's close", () => {
+    expect(draw("13:00", null, null).endMin).toBe(18 * 60);
   });
 
-  it("prefers a real scheduled finish over both", () => {
-    expect(jobBlockEnd(onePm, { scheduledEndMin: 15 * 60, plannedMinutes: 180, workDayEndMin: wd }))
-      .toBe(15 * 60);
+  it("a real finish that isn't the closing-time stamp is the finish", () => {
+    expect(draw("13:00", "15:00", 180).endMin).toBe(15 * 60);
   });
 
-  it("never runs a multi-day size past the end of one day", () => {
-    // 3 days is three day segments, not one block to midnight.
-    expect(jobBlockEnd(8 * 60, { plannedMinutes: 1440, workDayEndMin: wd })).toBe(16 * 60);
+  it("the closing-time stamp never beats the size (J-058, 2026-09-28)", () => {
+    expect(draw("13:00", "18:00", 180).endMin).toBe(16 * 60);
   });
 
   it("never inverts, even on nonsense", () => {
-    expect(jobBlockEnd(19 * 60, { plannedMinutes: null, workDayEndMin: wd })).toBe(20 * 60);
-    expect(jobBlockEnd(onePm, { scheduledEndMin: 9 * 60, plannedMinutes: null, workDayEndMin: wd }))
-      .toBe(wd);
+    expect(draw("19:00", null, null).endMin).toBe(20 * 60);
+    expect(draw("13:00", "09:00", null).endMin).toBe(18 * 60);
   });
 });
 

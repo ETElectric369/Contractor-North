@@ -89,8 +89,8 @@ export const listCustomerOptions = (supabase: SupabaseClient, limit?: number) =>
 
 /** The new-job form's customer options — name plus the ONE-LINE site-address prefill
  *  (a job stores a single address string; formatFullAddress is the canonical shape). The company name
- *  and the kind ride along so the form's "It'll Be Called" line names a business by its name and a
- *  person by their last name (defaultJobName). */
+ *  and the kind ride along so the form's "It'll Be Called" line names a business by its name when
+ *  there is no street (defaultJobName). */
 export type NewJobCustomerOption = {
   id: string;
   name: string;
@@ -152,16 +152,13 @@ export function statusFromDate(day: string | null | undefined, todayStr: string)
   return d <= todayStr ? "in_progress" : "scheduled";
 }
 
-/** The person half of a job's name: a company's own name, a business customer's whole name, else a
- *  person's last name ("Rita Moss" → "Moss", "Bob & Mary Smith" → "Smith"). */
+/** Who, in a job's name, as written: the company's own name, else the customer's whole name ("Jackie
+ *  Burks", never cut to a last name). Erik 2026-09-28: with no address his jobs have always been
+ *  named for the person, "Jackie Burks", "Jason Waldow". */
 export function customerNamePart(c: { name?: string | null; company_name?: string | null; type?: string | null } | null | undefined): string {
-  const company = String(c?.company_name ?? "").trim();
+  const company = String(c?.company_name ?? "").trim().replace(/\s+/g, " ");
   if (company) return company;
-  const name = String(c?.name ?? "").trim().replace(/\s+/g, " ");
-  if (!name) return "";
-  if (c?.type && c.type !== "residential") return name;
-  const words = name.split(" ").filter((w) => !/^(jr|sr|ii|iii|iv)\.?,?$/i.test(w));
-  return words[words.length - 1] ?? name;
+  return String(c?.name ?? "").trim().replace(/\s+/g, " ");
 }
 
 /** "Sep 27" for a YYYY-MM-DD, the same in every timezone. */
@@ -169,21 +166,76 @@ function monthDay(ymd: string): string {
   return new Date(`${ymd}T12:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
 }
 
+/** The unit as it rides on a job's name, without its own designator: "56", "#56", "Unit 56",
+ *  "Apt 56" → "56" (the name adds the "#"). Blank → "". */
+export function unitForName(unit: string | null | undefined): string {
+  return String(unit ?? "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .replace(/^(?:#|(?:unit|apt|apartment|ste|suite)\b\.?)\s*#?\s*/i, "")
+    .trim();
+}
+
+/** The most work words a job's name carries (rule 3): about 40 characters, cut at a word. */
+const WORK_WORDS_MAX = 40;
+
+/** A source's work words cut to fit a job's name: whole words up to 40 characters, no dangling
+ *  separator ("Replace the panel, add two circuits, move the…" → "Replace the panel, add two circuits"). */
+export function workWordsForName(words: string | null | undefined): string {
+  let w = String(words ?? "").trim().replace(/\s+/g, " ");
+  // Counted in characters (code points), the way the SQL twin's length()/left() count them: an emoji
+  // is one character, and a cut never splits one in half.
+  const chars = Array.from(w);
+  if (chars.length > WORK_WORDS_MAX) {
+    const cut = chars.slice(0, WORK_WORDS_MAX + 1).lastIndexOf(" ");
+    w = (cut > 0 ? chars.slice(0, cut) : chars.slice(0, WORK_WORDS_MAX)).join("");
+  }
+  return w.replace(/[\s,;:.\-–—·|/]+$/, "");
+}
+
+/** Does the street line already carry this unit ("12 Elm St #5", "12 Elm St Apt 5", "12 Elm St Suite
+ *  5", "12 Elm St # 5")? Then the name adds no " #5": the unit is never on it twice. */
+function streetCarriesUnit(street: string, unit: string): boolean {
+  const s = street.toLowerCase();
+  const u = unit.toLowerCase();
+  if (!u || !s.endsWith(u)) return false;
+  return /(?:#|\b(?:unit|apt|apartment|ste|suite)\.?\s*#?)\s*$/.test(s.slice(0, s.length - u.length));
+}
+
+/** A mailing-only line ("PO Box 123", "P.O. Box 44", "Post Office Box 9") has no street number and
+ *  street name: a job is never named for it (rule 3 names it for who instead). */
+const PO_BOX = /^(?:p\.?\s*o\.?\s*box|post\s+office\s+box)(?![a-z])/i;
+
 /**
- * THE NAME A NEW JOB GETS WHEN NONE IS TYPED (W1-22): "Smith · 1871 Apache Ct", the way the office
- * reads a job (the person and the place, the number second). Either half alone when that is all
- * there is; with neither, "New Job · Sep 27" on the company's today. The form shows the same line
- * live ("It'll Be Called: …") and the server builds it from the same function, so they can't differ.
+ * THE NAME A NEW JOB GETS WHEN NONE IS TYPED (Erik 2026-09-28, final: "street number and name as
+ * always"). The way his company has always named jobs:
+ *   - with a street, the street number and name, and " #<unit>" when the job has one: "3245 West
+ *     Lake Boulevard", "300 West Lake Boulevard #56" (never twice: "12 Elm St Apt 5" stays). Never
+ *     the person, never the town (a one-line address is cut to its street), never a PO box;
+ *   - no street: who, as written ("Jackie Burks", a company by its name), then " · " and the work
+ *     words a source carried when there are any ("Jackie Burks · Panel Upgrade");
+ *   - neither: "New Job · Sep 28" on the company's today (the work words alone when that is all).
+ * The New Job form shows the same line live ("It'll Be Called: …") and the server builds it from the
+ * same function (lib/job-name jobNameFrom), so they can't differ.
  */
 export function defaultJobName(p: {
   customer?: { name?: string | null; company_name?: string | null; type?: string | null } | null;
   street?: string | null;
+  unit?: string | null;
+  /** The work words a source carried, its tag already off (lib/job-name): only used with no street. */
+  work?: string | null;
   todayStr: string;
 }): string {
+  const line = String(p.street ?? "").split(",")[0].trim().replace(/\s+/g, " ");
+  const street = PO_BOX.test(line) ? "" : line;
+  if (street) {
+    const unit = unitForName(p.unit);
+    return unit && !streetCarriesUnit(street, unit) ? `${street} #${unit}` : street;
+  }
   const who = customerNamePart(p.customer);
-  const street = String(p.street ?? "").trim().replace(/\s+/g, " ");
-  const parts = [who, street].filter(Boolean);
-  return parts.length ? parts.join(" · ") : `New Job · ${monthDay(p.todayStr)}`;
+  const work = workWordsForName(p.work);
+  if (who) return work ? `${who} · ${work}` : who;
+  return work || `New Job · ${monthDay(p.todayStr)}`;
 }
 
 /** The kind of billing most of this company's jobs use; Time & Material on a tie or with none yet. */

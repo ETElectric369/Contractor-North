@@ -1,3 +1,5 @@
+import { PNL_WORDS as P, cogsWords, overheadWords } from "@/lib/analytics/profit-and-loss";
+
 /**
  * WHAT THE PRODUCT SHIPS, FOR NORT TO KNOW — the map of user-facing surfaces.
  *
@@ -15,7 +17,16 @@
  * ── PART OF THE SHIP RITUAL ─────────────────────────────────────────────────────────────────
  * When a deploy adds or moves a user-facing surface, this file moves with it, in the same commit.
  * A map that lags the product recreates the exact failure it was built to end.
+ *
+ * THE MONEY WORDS ARE THE PROFIT AND LOSS'S OWN (Erik, 2026-09-28): the Analytics line below is built
+ * from profit-and-loss.ts, so Nort names Revenue, Cost of Goods Sold (COGS), Gross Profit, Overhead
+ * and Net Profit (Owner's Draw), and which lines sit in each half, exactly as the screens do.
  */
+
+/** Analytics, in the profit and loss's words: the card's COGS lines (stock bought inside Materials &
+ *  Bills, as the card shows it) and the Overhead buckets come from the data, never a copy. */
+const ANALYTICS_LINE = `- Analytics (/analytics, office only): Money by Month, a bar for each month's ${P.revenue} and ${P.netProfit}, with chips that add ${P.grossProfit} and each cost line; under it the Owner's Draw card (This Month, Last Month, This Year, or a month tapped on the chart), a profit and loss in the accounting words: ${P.revenue}; ${P.cogs}: ${cogsWords({ stockInMaterials: true })}; ${P.totalCogs}; ${P.grossProfit} and ${P.grossMargin}; ${P.overhead}: ${overheadWords()}; ${P.totalOverhead}; ${P.netProfit}, before income tax. ${P.revenue} is money received. The owner's hours are hours, never a cost. The owner's Office Can See This switch decides whether the office sees the card and the chart's other bars. For Your Accountant (a button on Analytics) opens the page that downloads one spreadsheet for a month, a quarter or a year, its Summary in the same layout. Say these figures in these words; you cannot read the card itself, so point to it.`;
+
 export const NORT_PRODUCT_MAP = `
 WHERE THINGS LIVE (the app's surfaces — point people here; you cannot press these buttons yourself):
 - My Day (/planner): the Now card on top (clock in and out, the job you're on with Navigate and its Materials, Add Cost for staff; staff clock in here, and its Timeclock link opens Switch Job and Split), Today's 6 (the day's reminders and tasks, led by Add A Reminder Or Task), Needs You and the agenda (Earlier, Next, Later), with the weather and, for staff, the crew leads' daily reports.
@@ -30,10 +41,11 @@ WHERE THINGS LIVE (the app's surfaces — point people here; you cannot press th
 - Money → Invoices (/billing): who owes you, late invoices and payments in one page; each invoice has one button, Send $X then Get Paid $X; Bring In New Work pulls new hours and bills onto a draft; a job's New Invoice asks deposit or part of the estimate. Owed To You leads (what's late in red), By Customer is the accounts-receivable roll-up, and Payments In holds every payment, with Get Paid… for a check that arrives without its bill.
 - Snap Or Note (the + menu, Bills, Organize): one door for any paper or note; it reads it and hands back one card, and nothing becomes money until someone taps an answer on it.
 - Money → Bills (/bills): its Needs You card (papers dropped or snapped, and supplier bills not in the books yet), Add By Hand (the typed cost sheet: a job or a business cost in its bucket; it asks Already Paid or On Account. It never adds stock: stock comes in on paper, from the ticket's lines, through Snap Or Note, whose card puts it in stock while the Shop Stock switch is on), and All Bills, one searchable list of every bill, purchase order and receipt file no bill holds yet. Petty Cash is off the menu: a new cash purchase is a cost like any other, a bank's ATM line is Cash Taken Out (Not A Cost), and a company with older cash entries finds /petty-cash in Search Or Ask.
+${ANALYTICS_LINE}
 - Document PDFs: Preview/Print on any invoice, estimate, work/change order or material list shows the real PDF. Unchanged documents open from a stored copy (fast); an edit or payment re-renders automatically. A customer's emailed link gets its own Download PDF button once a copy exists — same file the office sees.
 - Clock (/timeclock): a tech's Clock tile — the 2-button clock and the mid-shift job switch (that is what creates "split" rows on timecards). Staff clock in on My Day's Now card instead; its Timeclock link opens the same page.
 - Money → Timecards (/timecards): the office's timecards with the pay-period view.
-- Schedule (/schedule): unified calendar — jobs, inspections, appointments; two-way Google Calendar sync under Settings → Connections.
+- Schedule (/schedule): unified calendar — jobs, inspections, appointments; each block says where (the street, or the customer when the job is named for its street), the time and who's on it (initials; a dashed Nobody when no one is). The office taps an open time on a day (or the day's +, or Add To Schedule on the day view) to add any job still in flight to that day at its own hours, its other days untouched; tapping a job's block sets This Day's time, that day only, and the job page's time is the usual hours of its other days. A customer's pick from Offer Dates lands at the picked time for the job's length (else two hours), beside its other days. Two-way Google Calendar sync under Settings → Connections.
 - Sales → Customers (/crm): every customer and their pricing levels (per-customer markup + labor rate), linked to their jobs, estimates and invoices.
 - Settings → Playbook: EDIT THE QUESTIONS — two color buttons at the top switch sets: TEAL = the walk-through (only staff see it), AMBER = the website form (customers answer it), and the page washes in the matching color. Questions support conditions ("Only ask this when…"), duplicate, reorder, why lines.
 - Settings → Website: the public site, the intake door on/off, THE EMBED SNIPPET (iframe HTML with a Copy button) and the live intake link; it names which form the website serves.

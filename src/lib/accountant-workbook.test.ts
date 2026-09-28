@@ -3,6 +3,7 @@ import { deflateRawSync } from "node:zlib";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, extname, join } from "node:path";
 import {
+  BEFORE_TAX_NOTE,
   NET_LABEL,
   OWNER_HIDDEN_NOTE,
   OWNER_HIDDEN_WHY,
@@ -13,6 +14,7 @@ import {
   accountantReadSpan,
   beforeRecordsLine,
   buildAccountantWorkbook,
+  cogsOverheadNote,
   comparisonThrough,
   defaultAccountantPeriod,
   fileSafeName,
@@ -31,7 +33,8 @@ import {
   type AccountantWorkbookInput,
 } from "./accountant-workbook";
 import { computeOwnerMoney, type OwnerMoneyFigures, type OwnerMoneyInputs, type OwnerMoneyPerson } from "@/lib/analytics/owner-money";
-import { BUSINESS_COST_BUCKETS } from "@/lib/business-cost-buckets";
+import { pnlLines, pnlRow, profitAndLoss } from "@/lib/analytics/profit-and-loss";
+import { BUCKET_SECTION, BUSINESS_COST_BUCKETS } from "@/lib/business-cost-buckets";
 import type { AccountantInputs } from "@/lib/accountant-lists";
 import { contentDisposition, fileNameFromDisposition } from "@/lib/download-name";
 import type { XlsxSheet, XlsxValue } from "@/lib/xlsx-write";
@@ -207,28 +210,68 @@ const cents = (v: XlsxValue): number | null => (v && typeof v === "object" && "m
 const toCents = (n: number) => Math.round(n * 100);
 const everyText = (wb: AccountantWorkbook) => wb.tabs.flatMap((t) => t.rows.flatMap((r) => r.cells.map((c) => (typeof c === "string" ? c : ""))));
 
-describe("the Summary is Money by Month, to the cent", () => {
+describe("the Summary is Money by Month, to the cent, laid out as a profit and loss", () => {
   const wb = buildAccountantWorkbook(input());
   const summary = tab(wb, "Summary");
   const cur = computeOwnerMoney(money(), periodWindow(Q2), TZ, TODAY);
   const prev = computeOwnerMoney(money(), periodWindow(previousPeriod(Q2)), TZ, TODAY);
-  const header = summary.rows.find((r) => r.bold && r.cells[0] === "" && String(r.cells[1]).startsWith("Apr"))!;
+  const headerAt = summary.rows.findIndex((r) => r.bold && r.cells[0] === "" && String(r.cells[1]).startsWith("Apr"));
+  const header = summary.rows[headerAt];
+  const lines = summaryLines({ hasOtherIncome: true, showOwner: true });
 
   it("has the six tabs, in order", () => {
     expect(wb.tabs.map((t) => t.name)).toEqual([...TAB_NAMES]);
     expect(TAB_NAMES).toEqual(["Summary", "Income", "Costs", "People", "Open", "Stock"]);
   });
 
+  it("its rows are the profit and loss's, in the accounting industry's order and words, then the owner's hours", () => {
+    const labels = summary.rows.slice(headerAt + 1, headerAt + 1 + lines.length + 1).map((r) => r.cells[0]);
+    expect(labels).toEqual([
+      "Revenue",
+      "Other Income (Inside Revenue)",
+      "Cost of Goods Sold (COGS)",
+      "Materials & Bills",
+      "Stock Bought",
+      "Stock Lost (Written Off, Counted Short, Returned)",
+      "Crew Pay (1099)",
+      "Crew Mileage Paid",
+      "Fuel",
+      "Total COGS",
+      "Gross Profit",
+      "Gross Margin %",
+      "Overhead",
+      "Auto",
+      "Tools & Supplies",
+      "Phone & Office",
+      "Insurance & Licenses",
+      "Fees",
+      "Other",
+      "Total Overhead",
+      "Net Profit (Owner's Draw)",
+      "Owner Hours (not pay)",
+    ]);
+    expect(lines.map((l) => l.label)).toEqual(labels.slice(0, -1));
+  });
+
+  it("formatted the way an accountant lays one out: headings and totals bold, every line under its heading indented", () => {
+    for (const l of lines) {
+      const r = rowOf(summary, l.label)!;
+      if (l.kind === "heading") expect(r, l.label).toEqual({ cells: [l.label], bold: true });
+      else if (l.kind === "cost" || l.kind === "part" || l.kind === "margin") expect([r.indent, !!r.bold], l.label).toEqual([true, false]);
+      else expect([!!r.indent, r.bold], l.label).toEqual([false, true]);
+    }
+  });
+
   it("each month, the quarter, the quarter before and the change: every figure computeOwnerMoney's", () => {
     expect(header.cells).toEqual(["", "Apr 2026", "May 2026", "Jun 2026", "Total 2026 Q2", "2026 Q1", "Change"]);
-    const hasOther = true;
-    for (const l of summaryLines(hasOther)) {
+    for (const l of lines.filter((x) => x.kind !== "heading" && x.kind !== "margin")) {
       const r = rowOf(summary, l.label)!;
       expect(r, l.label).toBeTruthy();
-      const want = [...cur.months.map((m) => toCents(l.of(m))), toCents(l.of(cur.totals)), toCents(l.of(prev.totals))];
+      const want = [...cur.months.map((m) => l.cents(m)), l.cents(cur.totals), l.cents(prev.totals)];
       expect(r.cells.slice(1, 6).map(cents), l.label).toEqual(want);
-      expect(cents(r.cells[6]), l.label).toBe(want[3] - want[4]);
+      expect(cents(r.cells[6]), l.label).toBe(want[3]! - want[4]!);
     }
+    // THE BOTTOM LINE IS THE ENGINE'S NET, month by month, to the cent.
     const net = rowOf(summary, NET_LABEL)!;
     expect(net.cells.slice(1, 6).map(cents)).toEqual([...cur.months.map((m) => toCents(m.left)), toCents(cur.totals.left), toCents(prev.totals.left)]);
     // The fixture moves money on every line (a check that the test itself isn't passing on zeros).
@@ -237,30 +280,59 @@ describe("the Summary is Money by Month, to the cent", () => {
     expect(cur.totals.crewPay).toBe(1030);
   });
 
-  it("Received less Total Costs is the Net, and the page's two figures are the same numbers", () => {
-    const received = cents(rowOf(summary, "Received")!.cells[4])!;
-    const costs = cents(rowOf(summary, "Total Costs")!.cells[4])!;
-    expect(received - costs).toBe(toCents(cur.totals.left));
-    expect(wb.figures).toEqual({ received: cur.totals.received, net: cur.totals.left });
+  it("Revenue less Total COGS is Gross Profit, less Total Overhead is Net Profit (Owner's Draw): the engine's net, in every column", () => {
+    const col = (label: string, i: number) => cents(rowOf(summary, label)!.cells[i])!;
+    for (let i = 1; i <= 6; i++) {
+      expect(col("Revenue", i) - col("Total COGS", i), `column ${i}`).toBe(col("Gross Profit", i));
+      expect(col("Gross Profit", i) - col("Total Overhead", i), `column ${i}`).toBe(col(NET_LABEL, i));
+    }
+    // By hand, the quarter: 4,170 in; COGS 1,775 + 130 + 20 + 1,030 + 38 + 85.50 = 3,078.50;
+    // Overhead 300 + 129.99 + 45 + 300 + 72.80 = 847.79; so 1,091.50 gross and 243.71 net.
+    expect([col("Total COGS", 4), col("Gross Profit", 4), col("Total Overhead", 4), col(NET_LABEL, 4)]).toEqual([307850, 109150, 84779, 24371]);
+    expect(toCents(cur.totals.left)).toBe(24371);
+    // The page's figures are the same numbers.
+    expect(wb.figures).toEqual({ revenue: cur.totals.received, grossProfit: 1091.5, net: cur.totals.left });
   });
 
-  it("the bottom line is named exactly Net Profit (before income tax)", () => {
-    expect(NET_LABEL).toBe("Net Profit (before income tax)");
+  it("Gross Margin %: a plain percent in each column, its change in points", () => {
+    const r = rowOf(summary, "Gross Margin %")!;
+    // Q2: 1,091.50 of 4,170 is 26.2%. Q1: 800 in, 40 of Fuel and 160 of crew pay, so 75.0%.
+    expect(r.cells.slice(4)).toEqual([26.2, 75, -48.8]);
+    expect(r.cells.slice(1, 4).every((c) => typeof c === "number")).toBe(true);
+  });
+
+  it("the bottom line is named exactly Net Profit (Owner's Draw), said before income tax", () => {
+    expect(NET_LABEL).toBe("Net Profit (Owner's Draw)");
     expect(summary.rows.filter((r) => r.cells[0] === NET_LABEL)).toHaveLength(1);
-    // Never called a draw: North doesn't track cash the owner took out.
-    expect(summary.rows.some((r) => /^Owner'?s Draw/i.test(String(r.cells[0] ?? "")))).toBe(false);
+    expect(summary.rows.map((r) => r.cells[0])).toContain(BEFORE_TAX_NOTE);
+    expect(BEFORE_TAX_NOTE).toBe("Net Profit (Owner's Draw) is before income tax.");
+    // What the two halves are, in the accounting industry's own test, with the lines from the data.
+    expect(summary.rows.map((r) => r.cells[0])).toContain(cogsOverheadNote());
+    expect(cogsOverheadNote()).toBe(
+      "Cost of Goods Sold (COGS) is what doing the jobs costs: Materials & Bills, Stock Bought, Stock Lost, Crew Pay (1099), Crew Mileage Paid and Fuel. Overhead is what keeps running whether there is work or not: Auto, Tools & Supplies, Phone & Office, Insurance & Licenses, Fees and Other.",
+    );
   });
 
-  it("every business-cost bucket is its own row, from BUSINESS_COST_BUCKETS: Fuel and Auto both, never Gas & Truck", () => {
+  it("every business-cost bucket is its own row, in the half BUCKET_SECTION puts it: Fuel in COGS, Auto in Overhead, never Gas & Truck", () => {
     const labels = summary.rows.map((r) => r.cells[0]);
     const at = BUSINESS_COST_BUCKETS.map((b) => labels.indexOf(b));
     expect(at.every((i) => i > 0)).toBe(true);
-    expect([...at].sort((a, b) => a - b)).toEqual(at); // in the list's own order
-    expect(labels).toContain("Fuel");
-    expect(labels).toContain("Auto");
+    const cogs = labels.indexOf("Cost of Goods Sold (COGS)");
+    const totalCogs = labels.indexOf("Total COGS");
+    const overhead = labels.indexOf("Overhead");
+    const totalOverhead = labels.indexOf("Total Overhead");
+    for (const b of BUSINESS_COST_BUCKETS) {
+      const i = labels.indexOf(b);
+      if (BUCKET_SECTION[b] === "cogs") expect(i > cogs && i < totalCogs, b).toBe(true);
+      else expect(i > overhead && i < totalOverhead, b).toBe(true);
+    }
+    expect(labels.indexOf("Fuel")).toBeLessThan(totalCogs);
+    expect(labels.indexOf("Auto")).toBeGreaterThan(overhead);
     expect(labels).not.toContain("Gas & Truck");
     expect(labels).toContain(STOCK_BOUGHT_LABEL);
     expect(labels).toContain(STOCK_LOST_LABEL);
+    // The old words are gone.
+    for (const old of ["Received", "Total Costs", "Other Income (Inside Received)", "Net Profit (before income tax)"]) expect(labels, old).not.toContain(old);
   });
 
   it("prints what's open as of the download day, with that date", () => {
@@ -293,7 +365,10 @@ describe("Income, Costs and People hold the rows behind the Summary", () => {
     expect(listed).toHaveLength(7); // 5 payments, 1 refund, 1 deposit
     const counted = listed.filter((r) => r.cells[8] !== "Invoice voided: not counted").reduce((s, r) => s + cents(r.cells[6])!, 0);
     expect(counted).toBe(toCents(cur.totals.received));
-    expect(cents(rowOf(income, "Received")!.cells[6])).toBe(toCents(cur.totals.received));
+    // The list's bottom line is the Summary's top one, by the same word.
+    expect(cents(rowOf(income, "Revenue")!.cells[6])).toBe(toCents(cur.totals.received));
+    expect(rowOf(income, "Received")).toBeUndefined();
+    expect(income.rows.map((r) => r.cells[0])).toContain("Refunds and Other Income are in the list above and in Revenue, not in these three breakdowns.");
     expect(listed.find((r) => r.cells[2] === "INV-102")!.cells).toEqual([{ date: "2026-05-15" }, "Birch Street LLC", "INV-102", "J-202", "Birch Street Service", "Card", { money: 2500 }, { money: 72.8 }, null]);
     expect(listed.find((r) => r.cells[2] === "INV-105")!.cells[8]).toBe("Card fee not reported yet");
     // By customer, by job, by method: each adds up to the payments.
@@ -315,18 +390,38 @@ describe("Income, Costs and People hold the rows behind the Summary", () => {
     expect(off.rows.map((r) => r.cells[0])).toContain("Sales Tax is switched off for this company, so none is listed.");
   });
 
-  it("Costs: every cost line, and its totals by where it goes are the Summary's rows", () => {
+  it("Costs: every cost line, and its totals by where it goes are the Summary's rows, under the same two headings", () => {
     const costs = tab(wb, "Costs");
     const at = costs.rows.findIndex((r) => r.cells[0] === "Totals By Where It Goes");
     const totals = costs.rows.slice(at + 2, costs.rows.findIndex((r, i) => i > at && r.cells[0] === "Total"));
+    // The Summary's headings and cost rows, in its order, less the two crew rows (they are on People).
     const want = (f: OwnerMoneyFigures) =>
-      summaryLines(false)
-        .filter((l) => l.cost && l.label !== "Crew Pay (1099)" && l.label !== "Crew Mileage Paid")
-        .map((l) => [l.label, toCents(l.of(f))]);
-    expect(totals.map((r) => [r.cells[0], cents(r.cells[1])])).toEqual(want(cur.totals));
-    // Its Total leaves crew pay out, and says so, so it never reads as the Summary's Total Costs.
+      pnlLines()
+        .filter((l) => l.kind === "heading" || (l.kind === "cost" && l.key !== "crew_pay" && l.key !== "crew_mileage"))
+        .map((l) => [l.label, l.kind === "heading" ? null : l.cents(f)]);
+    expect(totals.map((r) => [r.cells[0], r.cells.length > 1 ? cents(r.cells[1]) : null])).toEqual(want(cur.totals));
+    expect(totals.map((r) => r.cells[0])).toEqual([
+      "Cost of Goods Sold (COGS)",
+      "Materials & Bills",
+      STOCK_BOUGHT_LABEL,
+      STOCK_LOST_LABEL,
+      "Fuel",
+      "Overhead",
+      "Auto",
+      "Tools & Supplies",
+      "Phone & Office",
+      "Insurance & Licenses",
+      "Fees",
+      "Other",
+    ]);
+    // Headings bold, the lines under them indented, as on the Summary.
+    for (const r of totals) expect(r.bold ? "heading" : r.indent ? "line" : "?", String(r.cells[0])).toBe(r.cells.length === 1 ? "heading" : "line");
+    // Its Total is every cost line listed above it, to the cent.
     const totalAt = costs.rows.findIndex((r, i) => i > at && r.cells[0] === "Total");
-    expect(costs.rows[totalAt + 1].cells[0]).toBe("Crew pay and crew mileage are on the People tab, so they are not in this total.");
+    const listed = costs.rows.slice(costs.rows.findIndex((r) => r.cells[0] === "Date") + 1, at - 1).reduce((s, r) => s + (cents(r.cells[6]) ?? 0), 0);
+    expect(cents(costs.rows[totalAt].cells[1])).toBe(listed);
+    // It leaves crew pay out, and says so, so it never reads as the Summary's Total COGS.
+    expect(costs.rows[totalAt + 1].cells[0]).toBe("Crew Pay (1099) and Crew Mileage Paid are in Cost of Goods Sold (COGS) too, but they are on the People tab, so they are not in this total.");
     // The ticket with a roll in it: its rest is Materials & Bills, its roll is Stock Bought.
     const b1 = costs.rows.filter((r) => r.cells[2] === "NS-100");
     expect(b1.map((r) => [r.cells[5], cents(r.cells[6])])).toEqual([
@@ -388,64 +483,87 @@ describe("Income, Costs and People hold the rows behind the Summary", () => {
 describe("the owner's switch: an office download without Owner's Draw", () => {
   const wb = buildAccountantWorkbook(input({ showOwner: false }));
   const cur = computeOwnerMoney(money(), periodWindow(Q2), TZ, TODAY);
+  /** The owner's lines of the profit and loss: every one a total, a profit or Revenue. */
+  const OWNER_LABELS = ["Revenue", "Other Income (Inside Revenue)", "Total COGS", "Gross Profit", "Gross Margin %", "Total Overhead", NET_LABEL];
 
-  it("has no Net anywhere and no owner rows, and says so", () => {
+  it("has no Net Profit anywhere and no owner rows, and says so", () => {
     const texts = everyText(wb);
     expect(texts).not.toContain(NET_LABEL);
     expect(texts.some((s) => s.includes("Dana Pinecrest"))).toBe(false);
     expect(texts.some((s) => s.startsWith("Owner Hours"))).toBe(false);
     expect(texts).toContain(OWNER_HIDDEN_NOTE);
     expect(OWNER_HIDDEN_NOTE).toBe("The totals are the owner's.");
-    expect(wb.figures).toEqual({ received: null, net: null });
+    expect(texts).not.toContain(BEFORE_TAX_NOTE);
+    expect(wb.figures).toEqual({ revenue: null, grossProfit: null, net: null });
     // The itemized tabs stay: the office already sees those records in the app.
     expect(rowOf(tab(wb, "People"), "Sam Rivera")).toBeTruthy();
     expect(rowOf(tab(wb, "Income"), "Payments")).toBeTruthy();
-    // And the files built from it carry no Net either.
+    // And the files built from it carry no Net Profit, Gross Profit or total either.
     const csv = unzip(workbookCsvZip(wb)).map((e) => text(e.data)).join("\n");
-    expect(csv).not.toContain("Net Profit");
     const xml = unzip(workbookXlsx(wb)).map((e) => text(e.data)).join("\n");
-    expect(xml).not.toContain("Net Profit");
+    for (const file of [csv, xml]) for (const gone of ["Net Profit", "Gross Profit", "Gross Margin", "Total COGS", "Total Overhead"]) expect(file, gone).not.toContain(gone);
   });
 
-  it("the Summary carries no bottom-line figure at all: no Received, no Total Costs, so Net is never one subtraction away", () => {
+  it("the Summary is the cost rows one by one under their two headings, and no figure a subtraction from the bottom line", () => {
     const summary = tab(wb, "Summary");
     const labels = summary.rows.map((r) => r.cells[0]);
-    for (const gone of ["Received", "Other Income (Inside Received)", "Total Costs", NET_LABEL, "Owner Hours (not pay)"]) expect(labels, gone).not.toContain(gone);
+    for (const gone of [...OWNER_LABELS, "Owner Hours (not pay)"]) expect(labels, gone).not.toContain(gone);
     // The cost rows stay, one by one, each with its months, the period, the period before and the change.
-    const costRows = summaryLines(true).filter((l) => l.cost);
-    for (const l of costRows) expect(rowOf(summary, l.label)!.cells.slice(1, 5).map(cents), l.label).toEqual([...cur.months.map((m) => toCents(l.of(m))), toCents(l.of(cur.totals))]);
-    // The table is the cost rows and nothing else: no row holds Received, Net or a total of the costs.
+    const officeLines = summaryLines({ hasOtherIncome: true, showOwner: false });
+    const costRows = officeLines.filter((l) => l.kind === "cost");
+    expect(costRows).toHaveLength(12);
+    for (const l of costRows) expect(rowOf(summary, l.label)!.cells.slice(1, 5).map(cents), l.label).toEqual([...cur.months.map((m) => l.cents(m)), l.cents(cur.totals)]);
+    // The table is the two headings and their cost rows and nothing else, then the owner's note.
     const header = summary.rows.findIndex((r) => r.bold && r.cells[0] === "");
-    const table = summary.rows.slice(header + 1, header + 1 + costRows.length);
-    expect(table.map((r) => r.cells[0])).toEqual(costRows.map((l) => l.label));
-    expect(summary.rows[header + 1 + costRows.length].cells).toEqual([OWNER_HIDDEN_NOTE]);
-    const moneyInTable = summary.rows.slice(header + 1).flatMap((r) => r.cells.slice(1).map(cents)).filter((c): c is number => c != null);
-    const costTotal = costRows.reduce((s, l) => s + toCents(l.of(cur.totals)), 0);
-    for (const secret of [toCents(cur.totals.left), toCents(cur.totals.received), costTotal]) expect(moneyInTable).not.toContain(secret);
+    const table = summary.rows.slice(header + 1, header + 1 + officeLines.length);
+    expect(table.map((r) => r.cells[0])).toEqual([
+      "Cost of Goods Sold (COGS)",
+      "Materials & Bills",
+      STOCK_BOUGHT_LABEL,
+      STOCK_LOST_LABEL,
+      "Crew Pay (1099)",
+      "Crew Mileage Paid",
+      "Fuel",
+      "Overhead",
+      "Auto",
+      "Tools & Supplies",
+      "Phone & Office",
+      "Insurance & Licenses",
+      "Fees",
+      "Other",
+    ]);
+    expect(summary.rows[header + 1 + officeLines.length].cells).toEqual([OWNER_HIDDEN_NOTE]);
+    // The headings carry no figure, and neither half is added up anywhere on the tab.
+    const own = profitAndLoss(cur.totals);
+    const secret = (k: Parameters<typeof pnlRow>[1]) => pnlRow(own, k)!.cents!;
+    const moneyInTab = summary.rows.flatMap((r) => r.cells.slice(1).map(cents)).filter((c): c is number => c != null);
+    for (const k of ["revenue", "total_cogs", "gross_profit", "total_overhead", "net_profit"] as const) expect(moneyInTab, k).not.toContain(secret(k));
   });
 
-  it("no tab carries a bottom-line figure: no Received row on Income, and Received, Total Costs and Net are nowhere in the file", () => {
-    const costTotal = summaryLines(true)
-      .filter((l) => l.cost)
-      .reduce((s, l) => s + toCents(l.of(cur.totals)), 0);
-    const secrets = [toCents(cur.totals.received), costTotal, toCents(cur.totals.left)];
-    // The fixture keeps the three apart from every list's own sum, so a hit here is a real leak.
-    expect(new Set(secrets).size).toBe(3);
+  it("no tab carries a bottom-line figure: no Revenue row on Income, and Revenue, the totals and Net Profit are nowhere in the file", () => {
+    const own = profitAndLoss(cur.totals);
+    const at = (k: Parameters<typeof pnlRow>[1]) => pnlRow(own, k)!.cents!;
+    const allCosts = at("total_cogs") + at("total_overhead");
+    const secrets = [at("revenue"), at("total_cogs"), at("gross_profit"), at("total_overhead"), at("net_profit"), allCosts];
+    // The fixture keeps them apart from each other and from every list's own sum, so a hit here is a real leak.
+    expect(new Set(secrets).size).toBe(secrets.length);
     for (const t of wb.tabs) {
       const labels = t.rows.map((r) => r.cells[0]);
-      for (const gone of ["Received", "Total Costs", NET_LABEL]) expect(labels, `${t.name}: ${gone}`).not.toContain(gone);
+      for (const gone of [...OWNER_LABELS, "Received", "Total Costs"]) expect(labels, `${t.name}: ${gone}`).not.toContain(gone);
       const moneyCells = t.rows.flatMap((r) => r.cells.map(cents)).filter((c): c is number => c != null);
       for (const secret of secrets) expect(moneyCells, `${t.name}: ${secret}`).not.toContain(secret);
     }
     // The owner's own download still has it, to the cent.
-    const own = tab(buildAccountantWorkbook(input()), "Income");
-    expect(cents(rowOf(own, "Received")!.cells[6])).toBe(toCents(cur.totals.received));
-    // And no line in the office's file points to a Received it doesn't carry.
-    expect(everyText(wb).some((s) => /\bin Received\b/.test(s))).toBe(false);
+    const ownIncome = tab(buildAccountantWorkbook(input()), "Income");
+    expect(cents(rowOf(ownIncome, "Revenue")!.cells[6])).toBe(toCents(cur.totals.received));
+    // And no line in the office's file points to a Revenue it doesn't carry.
+    expect(everyText(wb).some((s) => /\bin (Revenue|Received)\b/.test(s))).toBe(false);
   });
 
   it("the page's words say what the file leaves out and what it keeps, and the file keeps its word", () => {
-    expect(OWNER_HIDDEN_WHY).toContain("Received, Total Costs, Net and the owner's own rows are left out, here and in the file");
+    expect(OWNER_HIDDEN_WHY).toContain(
+      "Revenue, Total COGS, Gross Profit and Gross Margin %, Total Overhead, Net Profit (Owner's Draw) and the owner's own rows are left out, here and in the file",
+    );
     // The lists stay with their own totals: said, not promised away.
     expect(OWNER_HIDDEN_WHY).toContain("with each list's own total");
     expect(rowOf(tab(wb, "Income"), "Payments")).toBeTruthy();
@@ -506,8 +624,12 @@ describe("a period not over yet is compared with the same days of the period bef
     // The Jun 28 refund and the Jun 30 insurance bill are after the day: not in the comparison.
     expect(soFar.totals.received).toBe(4220);
     expect(whole.totals.received).toBe(4170);
-    expect(cents(rowOf(s, "Received")!.cells[5])).toBe(422000);
+    expect(cents(rowOf(s, "Revenue")!.cells[5])).toBe(422000);
     expect(cents(rowOf(s, NET_LABEL)!.cells[5])).toBe(toCents(soFar.totals.left));
+    // The so-far column is a profit and loss too: its Gross Profit less its Overhead is its net.
+    const col5 = (label: string) => cents(rowOf(s, label)!.cells[5])!;
+    expect(col5("Revenue") - col5("Total COGS")).toBe(col5("Gross Profit"));
+    expect(col5("Gross Profit") - col5("Total Overhead")).toBe(toCents(soFar.totals.left));
     expect(s.rows.some((r) => String(r.cells[0]).startsWith("Change So Far compares 2026 Q3 through 2026-09-27 with the same days of 2026 Q2"))).toBe(true);
   });
 
@@ -539,7 +661,7 @@ describe("a period before North's records says so, never a silent $0.00", () => 
     const f = computeOwnerMoney(m, periodWindow(march), TZ, TODAY).totals;
     expect(f).toMatchObject({ received: 0, fuel: 40, left: -40 });
     const line = beforeRecordsLine(march, "2026-04-01", f)!;
-    expect(line.nothing).toBe(false); // the page shows Received and Net, with this line under them
+    expect(line.nothing).toBe(false); // the page shows Revenue and Net Profit, with this line under them
     expect(line.text).not.toContain("nothing in it");
     expect(line.text).toBe("North's records start Apr 1, 2026. What March 2026 shows was dated before then (a receipt entered later still counts in its own month).");
     const s = tab(buildAccountantWorkbook(input({ period: march, money: m })), "Summary");
@@ -570,7 +692,8 @@ describe("the files", () => {
     expect(income).toContain(`,'${SNEAKY},`); // a leading apostrophe: the spreadsheet shows it as text
     expect(income).not.toMatch(/(^|,)=cmd/m);
     expect(text(files[0].data).split("\r\n")[0]).toBe('"Pinecrest Electric Co: For Your Accountant, 2026 Q2"');
-    expect(tabCsv(tab(wb, "Summary"))).toContain("Net Profit (before income tax),");
+    expect(tabCsv(tab(wb, "Summary"))).toContain("Net Profit (Owner's Draw),");
+    expect(tabCsv(tab(wb, "Summary"))).toContain("Gross Margin %,");
     // Money to the cent, dates as the day.
     expect(income).toContain("2026-05-15,Birch Street LLC,INV-102,J-202,Birch Street Service,Card,2500,72.8,");
   });
@@ -582,7 +705,12 @@ describe("the files", () => {
     const all = [...parts.entries()].filter(([n]) => n.startsWith("xl/worksheets/")).map(([, x]) => x).join("");
     expect(all).not.toMatch(/<f[ >]/);
     expect(all).toContain("=cmd|&apos; /C calc&apos;!A0");
-    expect(parts.get("xl/worksheets/sheet1.xml")).toMatch(/<c r="E5" s="2"><v>4170<\/v><\/c>/); // Received, the quarter
+    const summary = parts.get("xl/worksheets/sheet1.xml")!;
+    expect(summary).toMatch(/<c r="A5" t="inlineStr" s="1"><is><t xml:space="preserve">Revenue<\/t><\/is><\/c>/);
+    expect(summary).toMatch(/<c r="E5" s="3"><v>4170<\/v><\/c>/); // Revenue, the quarter: a bold figure
+    // The line under it is indented, its money plain.
+    expect(summary).toMatch(/<c r="A6" t="inlineStr" s="6"><is><t xml:space="preserve">Other Income \(Inside Revenue\)<\/t><\/is><\/c>/);
+    expect(summary).toMatch(/<c r="E6" s="2"><v>120<\/v><\/c>/);
   });
 
   it("named after the company and the period, safe for a header, with the real name for clients that read it", () => {

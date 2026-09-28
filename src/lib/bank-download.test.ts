@@ -922,8 +922,11 @@ describe("the card and the person's answers", () => {
     const view = bankViewOf(dl, plan, books, { today: "2026-09-27" });
     expect(view.rows.map((r) => r.title)).toContain("Check 1043");
     expect(view.flow.find((s) => s.key === "fuel")!.cents).toBe(28845);
-    // Every other business cost is one Business Costs segment.
+    // Every other business cost is one Overhead segment, in the profit and loss's own word.
     expect(view.flow.every((s) => !s.key.startsWith("bucket:"))).toBe(true);
+    expect(flowLabelOf("cost", "Auto")).toEqual({ key: "business", label: "Overhead" });
+    expect(flowLabelOf("cost", "Gas & Truck")).toEqual({ key: "business", label: "Overhead" });
+    expect(flowLabelOf("cost", "diesel")).toEqual({ key: "fuel", label: "Fuel" });
     expect(view.outCents).toBe(436745);
     expect(view.inCents).toBe(206040);
     expect(view.sorted.find((s) => s.label.startsWith("Fuel"))).toEqual({ label: "Fuel (Your Rule)", n: 3, cents: -28845 });

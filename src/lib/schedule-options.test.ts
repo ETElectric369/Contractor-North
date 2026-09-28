@@ -9,8 +9,10 @@ import {
   streetHasUnits,
   streetKey,
   toNewJobCustomerOptions,
+  unitForName,
   unitStreetKeys,
   usualBillingKind,
+  workWordsForName,
 } from "./schedule-options";
 
 /**
@@ -129,27 +131,89 @@ describe("statusFromDate", () => {
   });
 });
 
-describe("defaultJobName — the person and the place, the number second", () => {
+describe("defaultJobName — street number and name, as always (Erik 2026-09-28)", () => {
   const todayStr = "2026-09-27";
-  it("a person's last name · the street line", () => {
-    expect(defaultJobName({ customer: { name: "Rita Smith" }, street: "1871 Apache Ct", todayStr })).toBe("Smith · 1871 Apache Ct");
-    expect(defaultJobName({ customer: { name: "Bob & Mary Smith Jr." }, street: " 12  Pine St ", todayStr })).toBe("Smith · 12 Pine St");
+  it("with a street: the street number and name only, never the person or the town", () => {
+    expect(defaultJobName({ customer: { name: "Rita Smith" }, street: "1871 Apache Ct", todayStr })).toBe("1871 Apache Ct");
+    expect(defaultJobName({ customer: { name: "Bob & Mary Smith Jr." }, street: " 12  Pine St ", todayStr })).toBe("12 Pine St");
+    expect(defaultJobName({ customer: { name: "Pat Lee", company_name: "Test Tavern HOA" }, street: "300 W Lake Blvd", todayStr })).toBe("300 W Lake Blvd");
+    expect(defaultJobName({ customer: null, street: "12 Elm St, Testville, CA 96161", todayStr })).toBe("12 Elm St");
   });
-  it("a business by its own name", () => {
-    expect(defaultJobName({ customer: { name: "Pat Lee", company_name: "Tahoe Tavern HOA" }, street: "300 W Lake Blvd", todayStr })).toBe(
-      "Tahoe Tavern HOA · 300 W Lake Blvd",
-    );
+  it("the street wins over a source's work words", () => {
+    expect(defaultJobName({ customer: { name: "Rita Smith" }, street: "1871 Apache Ct", work: "Panel Upgrade", todayStr })).toBe("1871 Apache Ct");
+  });
+  it("a unit rides on the street as #<unit>, however it was typed, never twice", () => {
+    for (const unit of ["56", "#56", "# 56", "Unit 56", "unit #56", "Apt 56", "Suite 56"]) {
+      expect(defaultJobName({ customer: null, street: "300 West Lake Boulevard", unit, todayStr }), unit).toBe("300 West Lake Boulevard #56");
+    }
+    expect(defaultJobName({ customer: null, street: "300 West Lake Boulevard #56", unit: "56", todayStr })).toBe("300 West Lake Boulevard #56");
+    expect(defaultJobName({ customer: null, street: "300 West Lake Boulevard", unit: "  ", todayStr })).toBe("300 West Lake Boulevard");
+    // No street: a unit alone says nothing.
+    expect(defaultJobName({ customer: { name: "Rita Smith" }, street: null, unit: "56", todayStr })).toBe("Rita Smith");
+  });
+  it("a street line that already spells the unit gets no second one", () => {
+    for (const [street, unit] of [
+      ["12 Elm St Apt 5", "Apt 5"],
+      ["12 Elm St Apt 5", "5"],
+      ["12 Elm St Unit 4", "Unit 4"],
+      ["12 Elm St # 4", "4"],
+      ["12 Elm St Apt. #4B", "4B"],
+      ["12 Elm St Suite 200", "Suite 200"],
+      ["12 Elm St Ste 200", "200"],
+    ]) {
+      expect(defaultJobName({ customer: null, street, unit, todayStr }), `${street} + ${unit}`).toBe(street);
+    }
+    // Only a designator before the same unit counts: "Apt 45" is not unit 5, and a number isn't one.
+    expect(defaultJobName({ customer: null, street: "12 Elm St Apt 45", unit: "5", todayStr })).toBe("12 Elm St Apt 45 #5");
+    expect(defaultJobName({ customer: null, street: "Crest 5", unit: "5", todayStr })).toBe("Crest 5 #5");
+    // The New Job form's live line: a typed street with the unit in it, and the Unit box filled too.
+    expect(defaultJobName({ customer: { name: "Rita Smith" }, street: "12 Elm St Apt 4", unit: "4", todayStr })).toBe("12 Elm St Apt 4");
+  });
+  it("a PO box is no street: who and the work instead", () => {
+    for (const box of ["PO Box 123", "P.O. Box 123, Testville", "po box 9", "P O Box 44 Testville CA 96118", "Post Office Box 7"]) {
+      expect(defaultJobName({ customer: { name: "Rita Smith" }, street: box, work: "Panel Upgrade", todayStr }), box).toBe("Rita Smith · Panel Upgrade");
+    }
+    expect(defaultJobName({ customer: null, street: "PO Box 123", todayStr })).toBe("New Job · Sep 27");
+    // A street that merely starts with the letters stays a street.
+    expect(defaultJobName({ customer: null, street: "Post Office Lane", todayStr })).toBe("Post Office Lane");
+    expect(defaultJobName({ customer: null, street: "Poplar Boxwood Rd", todayStr })).toBe("Poplar Boxwood Rd");
+    expect(defaultJobName({ customer: null, street: "12 Box Canyon Rd", todayStr })).toBe("12 Box Canyon Rd");
+  });
+  it("no street: who as written, the whole name or the company, then the work words", () => {
+    expect(defaultJobName({ customer: { name: "Jackie Test" }, street: "", todayStr })).toBe("Jackie Test");
+    expect(defaultJobName({ customer: { name: "Bob Moss Jr." }, street: null, todayStr })).toBe("Bob Moss Jr.");
     expect(defaultJobName({ customer: { name: "Truckee Lumber Co", type: "commercial" }, street: null, todayStr })).toBe("Truckee Lumber Co");
+    expect(defaultJobName({ customer: { name: "Pat Lee", company_name: "Test Tavern HOA" }, street: null, todayStr })).toBe("Test Tavern HOA");
+    expect(defaultJobName({ customer: { name: "Jackie Test" }, street: null, work: "Panel Upgrade", todayStr })).toBe("Jackie Test · Panel Upgrade");
+    expect(defaultJobName({ customer: { name: "Jackie Test" }, street: null, work: "  ", todayStr })).toBe("Jackie Test");
   });
-  it("either half alone, and with neither, New Job on the company's day", () => {
-    expect(defaultJobName({ customer: null, street: "1871 Apache Ct", todayStr })).toBe("1871 Apache Ct");
-    expect(defaultJobName({ customer: { name: "Rita Smith" }, street: "", todayStr })).toBe("Smith");
+  it("neither: New Job on the company's day (the work words alone when that is all there is)", () => {
     expect(defaultJobName({ customer: null, street: null, todayStr })).toBe("New Job · Sep 27");
     expect(defaultJobName({ customer: { name: "  " }, street: " ", todayStr: "2027-01-02" })).toBe("New Job · Jan 2");
+    expect(defaultJobName({ customer: null, street: null, work: "Kitchen rewire", todayStr })).toBe("Kitchen rewire");
   });
-  it("customerNamePart: a one-word name is the name", () => {
+  it("customerNamePart: the company, else the whole name as written", () => {
     expect(customerNamePart({ name: "Cher" })).toBe("Cher");
+    expect(customerNamePart({ name: " Rita   Smith ", type: "residential" })).toBe("Rita Smith");
+    expect(customerNamePart({ name: "Pat Lee", company_name: "Test HOA" })).toBe("Test HOA");
     expect(customerNamePart(null)).toBe("");
+  });
+  it("unitForName and workWordsForName", () => {
+    expect(unitForName("Apt. B")).toBe("B");
+    expect(unitForName("Bldg C")).toBe("Bldg C");
+    expect(unitForName(null)).toBe("");
+    expect(workWordsForName("Panel Upgrade")).toBe("Panel Upgrade");
+    const long = "Replace the panel, add two circuits, move the meter and patch the drywall";
+    const cut = workWordsForName(long);
+    expect(cut).toBe("Replace the panel, add two circuits");
+    expect(cut.length).toBeLessThanOrEqual(40);
+    expect(workWordsForName("Replace the panel, add two circuits, mov and more")).toBe("Replace the panel, add two circuits, mov");
+    expect(workWordsForName("x".repeat(60))).toBe("x".repeat(40));
+    // Counted in characters: an emoji is one, and is never cut in half.
+    expect(workWordsForName("Replace kitchen lights and add dimmers 💡")).toBe("Replace kitchen lights and add dimmers 💡");
+    const run = workWordsForName(`${"a".repeat(39)}🔌more`);
+    expect(run).toBe(`${"a".repeat(39)}🔌`);
+    expect(workWordsForName("💡".repeat(50))).toBe("💡".repeat(40));
   });
 });
 

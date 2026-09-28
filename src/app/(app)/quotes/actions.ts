@@ -33,6 +33,7 @@ import { rateLimited } from "@/lib/rate-limit";
 import type Anthropic from "@anthropic-ai/sdk";
 import { getOrgSettings, accentHex, orgDocUrl } from "@/lib/org-settings";
 import { todayStrInTz } from "@/lib/tz";
+import { jobNameFrom } from "@/lib/job-name";
 import { checkComeBackDay } from "@/lib/come-back-days";
 import { isMissingColumn } from "@/lib/job-tasks";
 import { tradeWordsOr, withArticle } from "@/lib/org-trade";
@@ -1176,7 +1177,7 @@ export async function createJobFromQuote(
     // address/city/state/zip (0177) so the job can inherit the site typed on the ESTIMATE. A
     // column you don't select is a column you can't inherit — the specific way the address kept
     // dying at every stage, and it is a `select` list every time, never a missing column.
-    .select("id, job_id, customer_id, title, quote_number, inquiry_id, address, city, state, zip")
+    .select("id, job_id, customer_id, title, quote_number, inquiry_id, address, unit, city, state, zip")
     .eq("id", quoteId)
     .maybeSingle();
   if (!q) return { ok: false, error: "Quote not found." };
@@ -1208,11 +1209,12 @@ export async function createJobFromQuote(
     //
     // Precedence is most-specific-first throughout: the estimate is about THIS job, the lead was
     // about this job, the customer is a person who may own several buildings.
-    if (q.address) return { address: q.address, city: q.city, state: q.state, zip: q.zip };
+    // The unit travels with its street (0187 gave all three a unit): the job's name ends " #56" with it.
+    if (q.address) return { address: q.address, unit: (q as { unit?: string | null }).unit ?? null, city: q.city, state: q.state, zip: q.zip };
     if (q.inquiry_id) {
       const { data: inq } = await supabase
         .from("inquiries")
-        .select("address, city, state, zip")
+        .select("address, unit, city, state, zip")
         .eq("id", q.inquiry_id)
         .maybeSingle();
       if (inq?.address) return inq;
@@ -1221,7 +1223,7 @@ export async function createJobFromQuote(
     if (custId) {
       const { data: cust } = await supabase
         .from("customers")
-        .select("address, city, state, zip")
+        .select("address, unit, city, state, zip")
         .eq("id", custId)
         .maybeSingle();
       if (cust?.address) return cust;
@@ -1229,15 +1231,41 @@ export async function createJobFromQuote(
     return null;
   })();
 
+  /* THE NAME IS THE STREET, NEVER "Estimate — …" OR "Job from Q-0012" (Erik 2026-09-27 / 09-28,
+     "street number and name as always"). The one namer (lib/job-name): the street number and name
+     the job inherits (" #56" with its unit); with no street, the customer as written and the
+     estimate's own words, tag off ("Jackie Burks · Panel Upgrade"). The public accept
+     (accept_public_quote) names it through the SQL twin, public.job_name_from (0369). */
+  const custForName = resolvedCustomerId ?? q.customer_id;
+  const { data: whoRow } = custForName
+    ? await supabase.from("customers").select("name, company_name, type").eq("id", custForName).maybeSingle()
+    : { data: null };
+  const { data: orgForName } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
+  // The lead's own spelling of who: the lead door seeds the estimate "New deck — <the lead's name>",
+  // and a card matched by phone may spell the person differently ("rita" vs "Rita Moss"). The public
+  // accept passes the same inq.name to the SQL twin (p_alias).
+  const { data: leadForName } = q.inquiry_id
+    ? await supabase.from("inquiries").select("name").eq("id", q.inquiry_id).maybeSingle()
+    : { data: null };
+  const jobName = jobNameFrom({
+    sourceWords: q.title,
+    aliases: [(leadForName as { name?: string | null } | null)?.name],
+    customer: (whoRow as { name?: string | null; company_name?: string | null; type?: string | null } | null) ?? null,
+    street: inheritedAddress?.address ?? null,
+    unit: inheritedAddress?.unit ?? null,
+    todayStr: todayStrInTz(getOrgSettings((orgForName as { settings?: unknown } | null)?.settings).timezone),
+  });
+
   const { data: job, error } = await supabase
     .from("jobs")
     .insert({
       customer_id: resolvedCustomerId ?? q.customer_id,
       inquiry_id: q.inquiry_id ?? null, // carry the lead provenance forward: lead → quote → job
-      name: q.title || `Job from ${q.quote_number}`,
+      name: jobName,
       ...(inheritedAddress
         ? {
             address: inheritedAddress.address,
+            unit: inheritedAddress.unit ?? null,
             city: inheritedAddress.city,
             state: inheritedAddress.state,
             zip: inheritedAddress.zip,

@@ -70,6 +70,17 @@ describe("the toast tells the truth about a batch", () => {
     expect(placeMessage({ leadsBooked: 0, leadsFailed: 0, jobsPlaced: 0, jobsFailed: 1, dayLabel: day }).tone)
       .toBe("error");
   });
+
+  // A job placed with no length went down as the two-hour default (lib/schedule/job-block); the
+  // toast says so where the deed is announced, never silently.
+  it("says when a job had no length and went down as 2 hours", () => {
+    expect(placeMessage({ leadsBooked: 0, leadsFailed: 0, jobsPlaced: 1, jobsFailed: 0, jobsDefaulted: 1, dayLabel: day }).text)
+      .toBe("On Thursday, Aug 27. It had no length, so it's down as 2 hours. Tap it on the calendar to change it.");
+    expect(placeMessage({ leadsBooked: 1, leadsFailed: 0, jobsPlaced: 2, jobsFailed: 0, jobsDefaulted: 2, dayLabel: day }).text)
+      .toBe("3 on Thursday, Aug 27. 2 had no length, so they're down as 2 hours. Tap one on the calendar to change it.");
+    expect(placeMessage({ leadsBooked: 0, leadsFailed: 0, jobsPlaced: 1, jobsFailed: 0, jobsDefaulted: 0, dayLabel: day }).text)
+      .toBe("On Thursday, Aug 27.");
+  });
 });
 
 describe("the day in the sentence is the day he tapped", () => {

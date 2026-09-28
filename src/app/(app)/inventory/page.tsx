@@ -220,7 +220,7 @@ export default async function ShopStockPage({
       job_return: `${qty} came back from ${job}`,
       recount_down: `Counted: ${qty} fewer than the record (written off)`,
       recount_up: `Counted: ${qty} more than the record (found, $0)`,
-      write_off: `${qty} written off (Shop Stock Lost)`,
+      write_off: `${qty} written off (Stock Lost)`,
       supplier_return: `${qty} went back to the supplier`,
     };
     const view: ShelfMoveView = {

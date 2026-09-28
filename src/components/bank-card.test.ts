@@ -163,7 +163,7 @@ describe("the fuel card", () => {
     const html = renderToStaticMarkup(createElement(FuelTrendCard, { trend }));
     const text = textOf(html);
     expect(text).toContain("$314 / week");
-    expect(text).toContain("9% of money in · avg fill $76 · 38 fills");
+    expect(text).toContain("9% of revenue · avg fill $76 · 38 fills");
     const bars = buttons(html);
     expect(bars).toHaveLength(13);
     for (const b of bars) expect(b.markup).toContain("min-w-11");

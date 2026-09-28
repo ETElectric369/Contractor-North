@@ -5,6 +5,7 @@ import { join } from "node:path";
 vi.mock("@/lib/tts", () => ({ unlockAudio: vi.fn() }));
 
 import { NORT_PRODUCT_MAP } from "./nort-product-map";
+import { cogsWords, overheadWords } from "./analytics/profit-and-loss";
 import { DOCK, visibleDock } from "./dock";
 import { helpRows } from "./onboarding/help-rows";
 import { ALL_ON } from "./features";
@@ -86,5 +87,54 @@ describe("Nort's product map after the shell wave", () => {
       "No day said → leave until out: a job going on hold comes back in a week (say so); a job already on hold (list_jobs shows its status) keeps the day it has, which you can't see, so say it keeps its day and name none, or pass until when they name a new one.",
     );
     expect(route).not.toContain("it comes back in a week, and say so");
+  });
+
+  it("names Analytics' money in the profit and loss's own words, from the same data the screens read (2026-09-28)", () => {
+    const line = NORT_PRODUCT_MAP.split("\n").find((l) => l.startsWith("- Analytics (/analytics"))!;
+    expect(line).toBeTruthy();
+    // The layout, top to bottom, in the screens' words.
+    let from = 0;
+    for (const w of [
+      "Revenue",
+      "Cost of Goods Sold (COGS): Materials & Bills, Stock Lost, Crew Pay (1099), Crew Mileage Paid and Fuel",
+      "Total COGS",
+      "Gross Profit and Gross Margin %",
+      "Overhead: Auto, Tools & Supplies, Phone & Office, Insurance & Licenses, Fees and Other",
+      "Total Overhead",
+      "Net Profit (Owner's Draw), before income tax",
+    ]) {
+      const i = line.indexOf(w, from);
+      expect(i, w).toBeGreaterThanOrEqual(from);
+      from = i + w.length;
+    }
+    expect(line).toContain("The owner's hours are hours, never a cost.");
+    expect(line).toContain("you cannot read the card itself, so point to it");
+    // True in code: the lines come from profit-and-loss.ts (the card's layout, stock inside
+    // Materials & Bills), and the halves from BUCKET_SECTION.
+    expect(line).toContain(cogsWords({ stockInMaterials: true }));
+    expect(line).toContain(overheadWords());
+    const card = readFileSync(join(process.cwd(), "src/app/(app)/analytics/left-for-card.tsx"), "utf8");
+    expect(card).toContain("stockInMaterials: true, margin: true");
+    const nav = readFileSync(join(process.cwd(), "src/app/(app)/analytics/page.tsx"), "utf8");
+    expect(nav).toContain("For Your Accountant");
+    expect(readFileSync(join(process.cwd(), "src/app/(app)/analytics/office-switch.tsx"), "utf8")).toContain('aria-label="Office Can See This"');
+    // The old money words are gone from Nort's map.
+    expect(NORT_PRODUCT_MAP).not.toMatch(/Business Costs|Left For You|Net Profit \(before income tax\)/);
+  });
+
+  it("names the Schedule's doors by the words on them: Add To Schedule, This Day, Offer Dates", () => {
+    const line = NORT_PRODUCT_MAP.split("\n").find((l) => l.startsWith("- Schedule (/schedule)"))!;
+    for (const part of ["Add To Schedule", "This Day", "Offer Dates", "Nobody", "two hours"]) expect(line, part).toContain(part);
+    // True in code: the open spots and the day view's button say Add To Schedule, the sheet saves
+    // with it, the block's sheet says This Day, the chips say Nobody, and a pick with no length
+    // gets two hours (0370's job_takes_picked_day: 120 minutes).
+    const src = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+    expect(src("src/components/time-grid.tsx")).toContain('addLabel = "Add To Schedule"');
+    expect(src("src/app/(app)/calendar/calendar-view.tsx")).toMatch(/<Plus className="h-4 w-4" \/> Add To Schedule/);
+    expect(src("src/app/(app)/schedule/add-to-schedule-sheet.tsx")).toContain('saveLabel="Add To Schedule"');
+    expect(src("src/app/(app)/schedule/tile-sheet.tsx")).toContain("This Day, {dayWords(day)}");
+    expect(src("src/components/crew-initials.tsx")).toContain("Nobody");
+    expect(src("src/app/(app)/jobs/[id]/propose-dates-button.tsx")).toContain('"Offer Dates"');
+    expect(src("supabase/migrations/0370_each_day_keeps_its_own_hours.sql")).toMatch(/\+ 120\b/);
   });
 });

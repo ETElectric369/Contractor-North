@@ -217,7 +217,7 @@ export function PlaybookManager({
   if (!form)
     return (
       <p className="text-sm text-slate-500">
-        You don&rsquo;t have a walk-through yet. Start one from an inspection and it&rsquo;ll show up here.
+        You don&rsquo;t have a walk-through sheet yet. Start a walk-through and it&rsquo;ll show up here.
       </p>
     );
 

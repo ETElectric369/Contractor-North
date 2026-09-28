@@ -230,8 +230,16 @@ export const jobActions: Record<string, ActionDef> = {
       if ("error" in job) return { ok: false, error: job.error };
       if (!job.id) return { ok: false, error: "Which job should I schedule?" };
       const r = await scheduleJobWindow(job.id, i.date, i.end || i.date);
-      // ANNOUNCE THE DEED: a kept worked day is part of what happened, so it rides on `recorded`.
-      return r.note ? { ...r, recorded: r.note } : r;
+      // ANNOUNCE THE DEED: a kept worked day is part of what happened, so it rides on `recorded`; so
+      // does the two-hour default a job with no length lands with (lib/schedule/job-block), said
+      // from the write's own answer, never guessed.
+      const said = [
+        r.note,
+        r.defaulted
+          ? "It has no length, so it went down as 2 hours from the start of the work day. The length can be changed on the job or by tapping it on the schedule."
+          : null,
+      ].filter(Boolean).join(" ");
+      return said ? { ...r, recorded: said } : r;
     },
   },
   "job.move": {

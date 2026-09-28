@@ -6,6 +6,7 @@ import { Loader2, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { createJob } from "../schedule/actions";
+import { isOnlyASourceTag } from "@/lib/job-name";
 
 /** What the caller gets back — enough to drop the job straight into a picker without
  *  waiting for the page's server-rendered job list to catch up. */
@@ -17,7 +18,7 @@ export interface CreatedJob {
 /**
  * "Can't add new job from this window." — Erik, filing from the truck.
  *
- * Every job picker on the clock (clock-in, the mid-shift switch, the office's Add Entry form)
+ * Every job picker on the clock (clock-in, the mid-shift switch, the office's Add Time Entry)
  * could only offer jobs that ALREADY existed. So the one moment you most need a new job —
  * you're standing on a site nobody has opened a job for — sent you off to /jobs and back,
  * which is precisely the round trip the 60mph rule exists to forbid.
@@ -56,6 +57,13 @@ export function NewJobInline({
       setError("Give it a name first — the street address works fine.");
       return;
     }
+    if (isOnlyASourceTag(trimmed)) {
+      // "Service call" or "Inspection" says what kind of visit, not which job: createJob would save
+      // it as "New Job · Sep 27", the same stub the blank box is refused for (Erik 2026-09-27: a job
+      // never carries the tag).
+      setError(`"${trimmed}" says what kind of visit, not which job. Give it the street or the customer.`);
+      return;
+    }
     setError(null);
     start(async () => {
       const fd = new FormData();
@@ -72,7 +80,9 @@ export function NewJobInline({
           setError(res.error ?? "Could not create the job.");
           return;
         }
-        onCreated({ id: res.id, name: trimmed });
+        // The name it was SAVED under: the picker and the "Created …" toast say what the timecard,
+        // the schedule and the job list will say.
+        onCreated({ id: res.id, name: res.name || trimmed });
         setName("");
         setOpen(false);
         // The page's job list is server-rendered and createJob revalidates /schedule and
@@ -110,7 +120,7 @@ export function NewJobInline({
         onChange={(e) => setName(e.target.value)}
         onKeyDown={(e) => {
           // A phone keyboard's Go key should finish the job, not submit whatever form the
-          // picker happens to be sitting inside (the Add Entry modal's, for one).
+          // picker happens to be sitting inside (Add Time Entry's, for one).
           // GUARDED like the button is: on truck signal the round trip is seconds long, and a
           // double-tap of Go would otherwise mint the job twice — useTransition happily starts a
           // second run while the first is still in flight, and there is no unique key to catch it.

@@ -198,7 +198,7 @@ export async function shelfPickerItems(): Promise<{ ok: true; items: ShelfPicker
 
 /**
  * COUNT IT (Shop Stock, 0328). A person counted what is really on the shelf. Fewer than the record
- * are written off oldest roll first at what they cost (Shop Stock Lost); more are found pieces at
+ * are written off oldest roll first at what they cost (Stock Lost); more are found pieces at
  * $0 (no paper behind them). Nothing is typed over: each difference is a move with an Undo.
  */
 export async function countItem(itemId: string, counted: number, note?: string | null): Promise<Result & { message?: string }> {
@@ -218,7 +218,7 @@ export async function countItem(itemId: string, counted: number, note?: string |
   return {
     ok: true,
     message: down > 0
-      ? `Counted: ${Number(d.on_hand)} in stock. ${Math.round(down * 1000) / 1000} short were written off at what they cost (Shop Stock Lost).`
+      ? `Counted: ${Number(d.on_hand)} in stock. ${Math.round(down * 1000) / 1000} short were written off at what they cost (Stock Lost).`
       : `Counted: ${Number(d.on_hand)} in stock. ${Math.round(up * 1000) / 1000} found, at $0 (no receipt behind them).`,
   };
 }
@@ -366,7 +366,7 @@ async function readRoll(supabase: any, orgId: string, lotId: string) {
 
 /**
  * WRITE OFF (Shop Stock, Phase 4): pieces off one roll that are gone for good (ruined, lost, used on
- * the shop). The database stamps what they cost off the roll; it shows as Shop Stock Lost in the
+ * the shop). The database stamps what they cost off the roll; it shows as Stock Lost in the
  * month written off. The company eats it: a write-off has no job, so no customer is ever charged.
  * Undo while no accountant download has carried it.
  */
@@ -394,7 +394,7 @@ export async function writeOffPieces(input: { lotId: string; qty: number; reason
   return {
     ok: true,
     id: String(row.id),
-    message: `${qty} ${roll.unit} written off at ${formatCurrency(Number(row.cost) || 0)}, what they cost off the roll. It shows as Shop Stock Lost this month. No customer is charged for it.`,
+    message: `${qty} ${roll.unit} written off at ${formatCurrency(Number(row.cost) || 0)}, what they cost off the roll. It shows as Stock Lost this month. No customer is charged for it.`,
   };
 }
 
@@ -465,7 +465,7 @@ const RETURN_TIE_NEEDS_0350 =
  * move lowers the roll by what they cost (the database stamps it). When the supplier's credit memo
  * is in the books it is tied to the return and filed to the shelf (on_shelf, no job), so no job's
  * materials import ever reads it and NO CUSTOMER IS EVER CREDITED for shelf stock. What the pieces
- * cost minus the credit is written off as Shop Stock Lost, and the answer says so in words.
+ * cost minus the credit is written off as Stock Lost, and the answer says so in words.
  */
 export async function returnToSupplier(input: { lotId: string; qty: number; creditBillId?: string | null; note?: string | null }): Promise<Result & { message?: string }> {
   const ctx = await requireStaff();

@@ -18,16 +18,17 @@ import {
 import { MoneyChartSvg } from "./money-chart-svg";
 
 /**
- * MONEY BY MONTH: the first card on /analytics. For each month, Collected and Left For You side by
- * side, each bar drawn to scale with its figure on it, and chips that add the cost lines as more
- * bars in the same group (never stacked, so every bar reads against the same axis).
+ * MONEY BY MONTH: the first card on /analytics. For each month, Revenue and Net Profit (Owner's
+ * Draw) side by side, each bar drawn to scale with its figure on it, and chips that add Gross Profit
+ * and the cost lines as more bars in the same group (never stacked, so every bar reads against the
+ * same axis). Every series is a line of the profit and loss, in its words (profit-and-loss.ts).
  *
- * Tapping a month shows that month in the Left For You card right below (?w=YYYY-MM, validated on
+ * Tapping a month shows that month in the Owner's Draw card right below (?w=YYYY-MM, validated on
  * the server); tapping it again goes back to the segment it was tapped from. The exact figures of
  * the hovered or selected month read out under the chips.
  *
  * `data` is already cut to what this viewer may see (buildMoneyChartData): an office viewer the owner
- * has not allowed gets Collected only, with no chips, and a month tap stays on this card.
+ * has not allowed gets Revenue only, with no chips, and a month tap stays on this card.
  */
 export function MoneyChartCard({
   data,

@@ -324,7 +324,7 @@ export function returnsSummaryParts(credited: ReturnOutcome[], notCredited: Retu
      · a supplier_return move lowers the roll by what those pieces cost (the database stamps it);
      · CED's credit memo is filed to the SHELF (bills.on_shelf, no job) and tied to that move, so no
        job's materials import can ever read it, and no customer is ever credited for it;
-     · what the pieces cost minus what CED gave back is written off (Shop Stock Lost), and said.
+     · what the pieces cost minus what CED gave back is written off (Stock Lost), and said.
    The functions below are the words and the arithmetic for that. They match the return to the
    roll it came off, never to a job.
    ════════════════════════════════════════════════════════════════════════════════════════════ */
@@ -355,7 +355,7 @@ export type ShelfReturnMoney = {
   cost: number;
   /** What the supplier's credit gives back, as a positive figure (0 with no credit tied). */
   credit: number;
-  /** cost - credit: written off as Shop Stock Lost. Below 0 when the supplier gave back more. */
+  /** cost - credit: written off as Stock Lost. Below 0 when the supplier gave back more. */
   lost: number;
   /** The sentence the office reads, before and after. */
   words: string;
@@ -387,7 +387,7 @@ export function shelfReturnMoney(input: {
       cost: own,
       credit: 0,
       lost: own,
-      words: `${qty} ${unit} went back to ${who}. They cost ${formatCurrency(own)} off the roll, and no credit from ${who} is tied to them, so ${formatCurrency(own)} is written off as Shop Stock Lost.${tail}`,
+      words: `${qty} ${unit} went back to ${who}. They cost ${formatCurrency(own)} off the roll, and no credit from ${who} is tied to them, so ${formatCurrency(own)} is written off as Stock Lost.${tail}`,
     };
   }
   const cost = cents(own + others);
@@ -397,7 +397,7 @@ export function shelfReturnMoney(input: {
   const head = `${qty} ${unit} went back to ${who}. ${who}'s credit gives back ${formatCurrency(credit)}, and ${what}`;
   const words =
     lost > 0
-      ? `${head}, so the ${formatCurrency(lost)} difference is written off as Shop Stock Lost.${tail}`
+      ? `${head}, so the ${formatCurrency(lost)} difference is written off as Stock Lost.${tail}`
       : lost < 0
         ? `${head}, so ${who} gave back ${formatCurrency(-lost)} more than they cost. That counts as money back.${tail}`
         : `${head}, so nothing is written off.${tail}`;

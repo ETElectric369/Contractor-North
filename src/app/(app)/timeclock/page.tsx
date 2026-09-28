@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { Suspense } from "react";
 import { isStaffRole } from "@/lib/actions/perms";
 import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
@@ -13,8 +12,6 @@ import { AutoClockoutPrompt } from "./auto-clockout-prompt";
 import { autoClockoutPromptState } from "./close-math";
 import { getOrgSettings } from "@/lib/org-settings";
 import { featureOn } from "@/lib/features";
-import { countTeammates, shellDoors } from "@/lib/feature-doors";
-import { AddEntryButton } from "./add-entry-button";
 import { aggregatePayrollEntries } from "@/lib/payroll-math";
 import { hoursBetween, formatCurrency, formatDate, formatDuration, formatTime } from "@/lib/utils";
 import { translator } from "@/lib/i18n";
@@ -52,19 +49,7 @@ export default async function TimeclockPage() {
   const t = translator(lang);
   const isStaff = !!prof && isStaffRole(prof.role);
 
-  const { data: members } = isStaff
-    ? await supabase
-        // profile_pay, not profiles: those columns are revoked from the authenticated role
-        // (0215/0216) because RLS cannot restrict columns. The view hands the whole org to
-        // office staff and only your own row to anyone else, so this staff branch is now
-        // enforced by the database rather than by the branch itself.
-        .from("profile_pay")
-        .select("id, full_name, hourly_rate, bill_rate, paid_by_draw")
-        .eq("active", true)
-        .order("full_name")
-    : { data: [] as { id: string; full_name: string | null }[] };
-
-  const [openRes, codesRes, jobsRes, weekRes, orgRes, leadRes, teammates] = await Promise.all([
+  const [openRes, codesRes, jobsRes, weekRes, orgRes, leadRes] = await Promise.all([
     supabase
       .from("time_entries")
       .select("*")
@@ -98,15 +83,10 @@ export default async function TimeclockPage() {
     // keeps working even if migration 0128 hasn't landed yet — an unknown column
     // would fail the whole profile read and de-staff the page.
     supabase.from("profiles").select("crew_lead").eq("id", user?.id ?? "").maybeSingle(),
-    // Crew & Payroll's Pay door is quiet until a second person, as on the dock (rule j). Staff only.
-    isStaff ? countTeammates(supabase, prof).catch(() => null) : Promise.resolve(null),
   ]);
   const orgSettings = getOrgSettings((orgRes.data as any)?.settings);
   // A crew lead files an end-of-day report at clock-out, only while Daily Reports is on (0352).
   const crewLead = !!(leadRes.data as any)?.crew_lead && featureOn(orgSettings.features, "daily_reports");
-  // The staff doors below follow the switches the way the dock does (0352): Crew Board's
-  // Who's On What Today, and Crew & Payroll's Pay (quiet for an owner alone, rule j).
-  const doors = shellDoors(orgSettings.features, teammates);
   // Codes on (default) = today's behavior everywhere. Codes off = no code pickers on
   // any timeclock surface, and job labels lead with customer · street address.
   const jobCodesOn = orgSettings.timeclock_job_codes;
@@ -284,7 +264,7 @@ export default async function TimeclockPage() {
   // reach /timecards (office-only), so this is the only place they see their own hours.
   // Staff read it too now: the right-hand card that used to carry their week total is gone,
   // and the office punches a clock as well. Edits stay office work on purpose (no edit
-  // affordances here) — staff have the door to the whole crew's ledger above.
+  // affordances here) — staff reach the whole crew's ledger on Money › Timecards.
   type MyTimecardRow = {
     id: string;
     in: string;
@@ -387,17 +367,9 @@ export default async function TimeclockPage() {
 
   return (
     <div className="mx-auto max-w-4xl">
-      <PageHeader title={t("tc_title")} description={t("tc_desc")}>
-        <AddEntryButton
-          isStaff={isStaff}
-          /* Opens on the viewer BY NAME — no separate "Me" entry beside his own row. */
-          viewerId={user?.id}
-          members={members ?? []}
-          jobCodes={(codesRes.data ?? []) as JobCode[]}
-          jobs={jobOptions}
-          jobCodesEnabled={jobCodesOn}
-        />
-      </PageHeader>
+      {/* A CLOCK, AND ONLY A CLOCK (Wave 2, W2-01): no button in the header. The office adds hours
+          with Add Time Entry on Money › Timecards. */}
+      <PageHeader title={t("tc_title")} description={t("tc_desc")} />
 
       <div className="space-y-6">
         {autoPrompt && (
@@ -450,61 +422,8 @@ export default async function TimeclockPage() {
           </Suspense>
         )}
 
-        {/* WHERE THE CREW WEEK BOARD STOOD — three doors, staff only.
-         *
-         *  Erik: "we have this time off box that was showing the scheduled jobs too but then
-         *  stopped and now its just in the way and doesnt show anything so we still need the
-         *  functionality", and then: "do we need the crew week? lets try and mold as much
-         *  together as possible and simplify, i lean towards the schedule".
-         *
-         *  The board is deleted, not moved. It was a SECOND per-day editor for
-         *  crew_day_assignments, and cn-v590 took away the two things that ever filled it (the
-         *  dashed schedule pill and the "Fill from the schedule" button) on his own instruction —
-         *  so for seven weeks a correctly-empty grid and a dead one looked exactly alike. The
-         *  schedule's Everyone's Day already answers who is on what, off real assignments and
-         *  segments, so this page goes back to its one job: am I on the clock.
-         *
-         *  WHAT SURVIVES THE BOARD: the crew_day_assignments ROWS, and the writers in
-         *  crew-actions.ts that make them. A day-assignment is still tier 0 of the job-less
-         *  clock-in (timeclock/actions.ts, migration 0139 — the precedence law). Deleting those
-         *  writers would break a punch, not a board.
-         *
-         *  NOTHING SILENT / NO DEAD ENDS: a door that closes gets another named where it stood,
-         *  and the whole row is the target (44px, easier to hit than a link inside it). */}
-        {isStaff && (
-          <div className="grid gap-2 sm:grid-cols-3">
-            {featureOn(orgSettings.features, "crew_board") && (
-              <Link
-                href="/schedule?view=crew"
-                className="flex min-h-[44px] flex-col justify-center rounded-lg border border-slate-200 bg-white px-4 py-3 active:bg-slate-50"
-              >
-                {/* TODAY, not "this week" — the door is named for what it OPENS. /schedule?view=crew
-                  *  renders CrewBoardPanel, which is Everyone's DAY: one day, paged a day at a time
-                  *  (crew-board-panel.tsx prevHref/nextHref shift by one). A door promising a week
-                  *  and opening a day is the same small lie Erik reported about the box this row
-                  *  replaces, and it is the thing NOT-ANNOYING and NOTHING SILENT exist to stop. */}
-                <span className="text-sm font-semibold text-slate-900">Who&apos;s On What Today</span>
-                <span className="text-xs text-slate-500">Everyone&apos;s Day on the schedule, one lane per person</span>
-              </Link>
-            )}
-            <Link
-              href="/timecards"
-              className="flex min-h-[44px] flex-col justify-center rounded-lg border border-slate-200 bg-white px-4 py-3 active:bg-slate-50"
-            >
-              <span className="text-sm font-semibold text-slate-900">Crew Hours</span>
-              <span className="text-xs text-slate-500">The whole crew&apos;s week, and what needs a human</span>
-            </Link>
-            {featureOn(doors, "crew_payroll") && (
-              <Link
-                href="/payroll"
-                className="flex min-h-[44px] flex-col justify-center rounded-lg border border-slate-200 bg-white px-4 py-3 active:bg-slate-50"
-              >
-                <span className="text-sm font-semibold text-slate-900">Pay</span>
-                <span className="text-xs text-slate-500">What everyone is owed, and marking it paid</span>
-              </Link>
-            )}
-          </div>
-        )}
+        {/* NO STAFF DOOR ROW (Wave 2): each door has its home. Money › Timecards (the crew's hours, and
+            Add Time Entry), Money › Payroll, and the Everyone's Day icon in the schedule header. */}
 
         {/* MY TIMECARD (everyone) — the caller's own week of punches, grouped by day, read-only:
             date, in-out, lunch, hours, the job by NAME, and the week total that used to live in

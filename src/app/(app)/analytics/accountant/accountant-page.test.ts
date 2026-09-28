@@ -68,6 +68,19 @@ describe("the page and its download agree", () => {
     expect(src("export/route.ts")).toContain("const span = accountantReadSpan(period);");
   });
 
+  it("its two figures are the profit and loss's top and bottom lines, by their own rows and words (Revenue, Net Profit (Owner's Draw))", () => {
+    const page = src("page.tsx");
+    expect(page).toContain("const pnl = figures ? profitAndLoss(figures) : [];");
+    expect(page).toContain('const revenue = pnlRow(pnl, "revenue");');
+    expect(page).toContain('const net = pnlRow(pnl, "net_profit");');
+    expect(page).toContain("{revenue.label}");
+    expect(page).toContain("{net.label}");
+    // The bottom line is before income tax, said under it; the old words are gone.
+    expect(page).toContain("Before income tax.");
+    expect(page).not.toMatch(/>Received</);
+    expect(page).not.toContain("NET_LABEL");
+  });
+
   it("a period before the records hides the figures only when it truly has nothing in it", () => {
     const page = src("page.tsx");
     expect(page).toContain("beforeRecordsLine(period, read.inputs.recordsStart, cur.totals)");

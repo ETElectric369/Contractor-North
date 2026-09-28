@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useState, useTransition, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { Copy } from "lucide-react";
 import { duplicateTimeEntry } from "../timeclock/actions";
@@ -16,7 +16,13 @@ type Member = {
   // modal reads), so the pay columns ride along. Nothing here shows or sends them.
   hourly_rate?: number | null;
   bill_rate?: number | null;
+  /** Off the team (0158): never offered, since a copy onto them can only be refused. The job
+   *  page's list carries everyone; Timecards' is active people already. */
+  active?: boolean | null;
 };
+
+/** The words on the door, wherever it is drawn. */
+export const COPY_TO_SOMEONE_ELSE = "Copy To Someone Else…";
 
 /**
  * COPY THIS TIMECARD *FOR SOMEBODY* (Erik, 2026-09-18).
@@ -31,12 +37,19 @@ type Member = {
  *
  * The refusal, when there is one, is the app's normal toast in plain words, not a red
  * slab across the page.
+ *
+ * ITS DOOR IS IN THE SHIFT'S EDITOR NOW (Wave 2). It used to be a copy icon on every Timecards
+ * row, beside a pencil, on a row whose whole face already opens the editor. The row lost both; the
+ * editor (edit-entry-button.tsx) draws "Copy To Someone Else…" beside Split This Shift through
+ * `trigger`, and the picker behind it is this one, unchanged: the same list, the same toast words,
+ * the same-person guard and the member-load fallback.
  */
 export function DuplicateEntryButton({
   id,
   profileId,
   personName,
   members,
+  trigger,
 }: {
   id: string;
   /** Whose shift this is, so the picker can mark them instead of offering a copy that
@@ -45,6 +58,9 @@ export function DuplicateEntryButton({
   personName?: string | null;
   /** The org's active members, already fetched by the page for the edit modal. */
   members?: Member[];
+  /** Draws the door. It is handed the function that opens the picker. Without one, a plain
+   *  outline "Copy To Someone Else…" button, 44px. */
+  trigger?: (openPicker: () => void) => ReactNode;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -56,7 +72,7 @@ export function DuplicateEntryButton({
   // to hand, the picker loads it itself rather than opening empty: a picker with nobody in
   // it is a dead end, and this control has no other way to do its one job. Same shape the
   // rest of the app reads members with (active, by name); RLS keeps it to this org.
-  const given = members ?? [];
+  const given = (members ?? []).filter((m) => m.active !== false);
   const [loaded, setLoaded] = useState<Member[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -116,41 +132,29 @@ export function DuplicateEntryButton({
     });
   }
 
+  // Reopening is the retry the message promises, so the last failure is cleared here.
+  const openPicker = () => {
+    setLoadError(null);
+    setOpen(true);
+  };
+
   return (
     <>
-      <button
-        type="button"
-        onClick={() => {
-          // Reopening is the retry the message promises, so the last failure is cleared here.
-          setLoadError(null);
-          setOpen(true);
-        }}
-        /* EXACTLY the pencil's className, and nothing more. This carried
-           `relative after:absolute after:-inset-1.5` to grow a 22px icon into a thumb
-           target — but the row wrapper already does that: timecard-stack.tsx stretches
-           BOTH controls with `[&>button]:h-11 [&>button]:w-11`, so this is a real 44x44
-           box before any pseudo-element runs. The ::after was therefore a transparent,
-           still-hit-testable 56x56 overlay reaching 6px past every edge, including 6px
-           over the pencil sitting right beside it with no gap. Positioned descendants
-           paint (and hit-test) above the in-flow content of later siblings, and the
-           pencil is neither positioned nor z-indexed, so a thumb landing on its left
-           edge opened Copy To instead of the editor — on the very row Erik reported
-           for alignment. The row owns the 44px; this button owns the icon. */
-        className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-        title="Copy To…"
-        aria-label="Copy This Timecard To Someone"
-      >
-        <Copy className="h-3.5 w-3.5" />
-      </button>
+      {trigger ? (
+        trigger(openPicker)
+      ) : (
+        <Button type="button" variant="outline" className="h-11" onClick={openPicker}>
+          <Copy className="h-4 w-4" /> {COPY_TO_SOMEONE_ELSE}
+        </Button>
+      )}
 
-      {/* ── PORTAL, BECAUSE THIS PICKER OPENS FROM A ROW INSIDE THE WEEK STACK ──────────────
-          Same trap the pencil beside it just escaped (edit-entry-button.tsx). Modal renders IN
-          PLACE by default, and this one is mounted from the stack's row: inside
-          `<span className="pointer-events-auto …">`, inside `<Card className="overflow-clip">`,
-          inside the stack's own `max-h-[70dvh] overflow-y-auto` scroller. That pair is what
-          catches an in-place fixed overlay on Erik's iPhone — which is report 3, "Alignment and
-          visibility". Without this the fix for report 2 would ship carrying the defect from
-          report 3: he taps Copy and the crew list is clipped inside the week card.
+      {/* ── PORTAL, BECAUSE THIS PICKER OPENS ABOVE ANOTHER SHEET ──────────────────────────────
+          It is drawn from inside the shift's editor, which is itself portaled out of the week
+          stack (edit-entry-button.tsx): an in-place fixed overlay caught inside the stack's
+          clipping Card and its `max-h-[70dvh] overflow-y-auto` scroller is what Erik reported
+          from his iPhone as "Alignment and visibility". Portaled, this picker lands in <body>
+          after the editor, so it sits on top of it, and one Back closes this one and leaves the
+          editor (Modal's back stack).
 
           Safe here by the documented rule: NO <form> wraps this Modal and the footer is a plain
           Button with onClick, so nothing depends on DOM nesting to submit.

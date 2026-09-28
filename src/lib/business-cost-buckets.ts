@@ -10,7 +10,8 @@
  * so every door that files a cost with no job reads THIS list and nothing else.
  *
  * FUEL IS ITS OWN BUCKET, for every company: it is the cost a contractor watches week to week, and
- * Analytics draws it on its own, never inside Business Costs. Auto is everything else the truck
+ * Analytics draws it on its own line, in Cost of Goods Sold (COGS), never inside Overhead
+ * (BUCKET_SECTION below, 2026-09-28). Auto is everything else the truck
  * costs (parts, repairs, tires, registration, a truck payment). Migration 0362 moved every stored
  * "Gas & Truck" to Auto, and bucketOf reads one still stored (before 0362, or typed by hand) as Auto.
  *
@@ -28,6 +29,36 @@ export const BUSINESS_COST_BUCKETS = [
 ] as const;
 
 export type BusinessCostBucket = (typeof BUSINESS_COST_BUCKETS)[number];
+
+/** The two halves of the costs on a profit and loss: Cost of Goods Sold (COGS) and Overhead. */
+export type PnlSection = "cogs" | "overhead";
+
+/**
+ * WHERE EACH BUCKET SITS ON THE PROFIT AND LOSS (Erik, 2026-09-28: "COGS (including fuel as it IS a
+ * direct cost in this case…) Gross Profit is before Overhead"). The accounting industry's own test:
+ * if the cost disappears when you stop doing jobs, it is COGS; if it keeps running whether you have
+ * work or not, it is Overhead. Fuel is COGS here: nearly every fill-up is within a few days of job
+ * work, the driving to and from the jobs. Every other bucket is Overhead.
+ *
+ * THIS IS THE ONE PLACE THE SPLIT IS WRITTEN: every profit and loss the app draws (the Owner's Draw
+ * card, Money by Month, the accountant's Summary, Nort's words) reads it through
+ * analytics/profit-and-loss.ts, never an `if (bucket === "Fuel")` of its own. A Record, so a bucket
+ * added to the list above does not compile until someone says which half it is in.
+ */
+export const BUCKET_SECTION: Record<BusinessCostBucket, PnlSection> = {
+  Fuel: "cogs",
+  Auto: "overhead",
+  "Tools & Supplies": "overhead",
+  "Phone & Office": "overhead",
+  "Insurance & Licenses": "overhead",
+  Fees: "overhead",
+  Other: "overhead",
+};
+
+/** The buckets in one half of the profit and loss, in the list's own order. */
+export function bucketsIn(section: PnlSection): BusinessCostBucket[] {
+  return BUSINESS_COST_BUCKETS.filter((b) => BUCKET_SECTION[b] === section);
+}
 
 /**
  * THE BUCKETS THE ORGANIZE READER MAY FILE ON ITS OWN: every one but Fees.

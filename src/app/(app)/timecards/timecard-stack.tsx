@@ -66,8 +66,9 @@ type WeekData = {
  * two agree on arithmetic. This one stops them being two.
  *
  * The per-person list is now a GROUPING of this stack, chosen by [By Day | By Person] above it,
- * and everything the card carried rides on the row: the job as a link, the code badge, the manual
- * and offline disclosures, lunch, the hours, the notes and the pencil/duplicate controls. A split
+ * and everything the card carried rides on the row: the job as a link, the code badge, the offline
+ * disclosure, lunch, the hours and the notes. The row IS the door to the shift's editor, so it
+ * carries no pencil or copy icon (Wave 2); a running clock keeps its "Clock Out <Name>". A split
  * shift is ordinary entries (0288), bracketed "Split from one shift" so the pieces read as one day. THE ROW IS THE SAME ROW IN BOTH GROUPINGS (see ShiftRow) — By Day leads with the
  * person, By Person leads with the day, and nothing else differs, so the two cannot drift apart
  * again the way the two lists did.
@@ -122,7 +123,10 @@ export type StackEntry = {
    *  any other (the duplicate punches, 2026-09-26: Brian's 9/11 punch showed as just his name). */
   noJob?: boolean;
   /** DISCLOSURE IS THE GUARD (0168): where this punch's time came from, when it was not the
-   *  server clock. Never dropped, in either grouping. */
+   *  server clock. "offline" is said ON THE ROW in either grouping (a phone's clock stood in for the
+   *  server's: the case that protects the office). "manual" rides along but is said in the shift's
+   *  editor, which the row opens (Wave 2): every hand-typed row is the office's own work, and a
+   *  badge on each one was noise. */
   source: "manual" | "offline" | null;
   lunchMin: number;
   notes: string | null;
@@ -130,9 +134,9 @@ export type StackEntry = {
   family?: string | null;
   /** The family was rebuilt from an old split by 0289: labelled "Rebuilt From An Old Split". */
   familyConverted?: boolean;
-  /** Duplicate + pencil, server-rendered on the page that owns the editor's projection. Present
-   *  for the anchored week, and every row is a tap into the editor regardless, so no row is ever
-   *  a dead end. */
+  /** A RUNNING clock's one labelled action, "Clock Out <Name>", server-rendered on the page that
+   *  owns the editor's projection (anchored week only). A closed row has none: the whole row is the
+   *  tap into its editor, so no row is ever a dead end (Wave 2 took the pencil and the copy icon). */
   controls?: ReactNode;
 };
 
@@ -161,8 +165,10 @@ function mileageLine(p: PersonWeek): string {
  *
  * THE WHOLE ROW IS THE DOOR. One tap opens this shift's editor through the ?entry= path the page
  * already answers (OpenEntryEditor), not a second way in. The overlay link sits UNDER the content
- * so the two things that are not "open the editor" — the job link, and the pencil/duplicate pair —
- * can take their own taps on top of it.
+ * so the things that are not "open the editor" — the job link, and a running clock's "Clock Out
+ * <Name>" — can take their own taps on top of it. A closed row has no pencil and no copy icon
+ * (Wave 2): they were second doors to the editor this row already opens, which now holds Copy To
+ * Someone Else… and says where a hand-typed shift's time came from.
  */
 function ShiftRow({ e, lead }: { e: StackEntry; lead: string }) {
   return (
@@ -201,43 +207,36 @@ function ShiftRow({ e, lead }: { e: StackEntry; lead: string }) {
           {e.jobCode && <Badge tone="slate">{e.jobCode}</Badge>}
           {e.noJob && <Badge tone="amber">No Job</Badge>}
           {/* ── DISCLOSURE IS THE GUARD (0168), AND IT HAS TO BE READABLE ON A PHONE ──────────
-              A manual or offline punch's time did not come from the server clock. Nothing can
-              prove it was made live rather than backdated, so the row says where it DID come
-              from and lets the office judge.
+              An offline punch's time did not come from the server clock: the phone said when the
+              button was pressed. Nothing can prove it was made live rather than backdated, so the
+              row says where it DID come from and lets the office judge.
 
               It used to say it in a `title` and nothing else: a hover tooltip, on a page Erik
               reads one-handed on an iPhone, where nothing hovers — and inside this row's
-              pointer-events-none wrapper, so it never fired on a desktop either. The entry
-              editor the row opens does not name the source anywhere. A fact with nowhere left
-              to appear is a silent one. So the words are ON the row now, the title rides along
-              for a desktop hover, and the whole thing is a LINK to the same editor as the rest
-              of the row — taking its own pointer events without turning that strip of the row
-              into a dead spot for a thumb. */}
-          {e.source && (
+              pointer-events-none wrapper, so it never fired on a desktop either. So the words are
+              ON the row, the title rides along for a desktop hover, and the whole thing is a LINK
+              to the same editor as the rest of the row — taking its own pointer events without
+              turning that strip of the row into a dead spot for a thumb.
+
+              A HAND-TYPED ROW IS SAID IN THE EDITOR, NOT HERE (Wave 2). "manual · typed in by
+              hand" sat on every row the office typed itself, which is most of a busy week's rows:
+              noise, on the office's own work. The editor this row opens now says "Typed in by
+              hand, not punched live." at the top (edit-entry-button sourceLine), so the fact still
+              has a place to appear and 0168 is kept. */}
+          {e.source === "offline" && (
             <Link
               href={e.href}
               scroll={false}
-              title={
-                e.source === "offline"
-                  ? "Punched with no signal, so the time came from the phone"
-                  : "Typed in by hand, not punched live"
-              }
+              title="Punched with no signal, so the time came from the phone"
               className="pointer-events-auto flex items-center gap-1"
             >
-              <Badge tone={e.source === "offline" ? "blue" : "amber"}>{e.source}</Badge>
-              <span>{e.source === "offline" ? "time came from the phone" : "typed in by hand"}</span>
+              <Badge tone="blue">offline</Badge>
+              <span>time came from the phone</span>
             </Link>
           )}
-          {e.controls && (
-            <span
-              /* 44px, on the row. The two buttons ship at p-1 from files this page does not own,
-                 so the row stretches them to a thumb instead of centring a 22px target in a 44px
-                 hole. */
-              className="pointer-events-auto ml-auto flex shrink-0 items-center [&>button]:inline-flex [&>button]:h-11 [&>button]:w-11 [&>button]:items-center [&>button]:justify-center"
-            >
-              {e.controls}
-            </span>
-          )}
+          {/* A running clock's "Clock Out <Name>" (the only row control left): a labelled 44px
+              button of its own, taking its own taps above the row's door. */}
+          {e.controls && <span className="pointer-events-auto ml-auto flex shrink-0 items-center">{e.controls}</span>}
         </div>
 
         {e.notes && <p className="pl-[18px] text-xs text-slate-500">{e.notes}</p>}
@@ -541,11 +540,11 @@ export function TimecardStack({
                   IT IS AN ADDITION, NEVER A REPLACEMENT. The grid was briefly the ONLY thing a
                   desktop got in By Day, the list hidden under it at sm:. But a pill is id, day,
                   start, end, label, sub, color, href (TimeGridEvent) and nothing else — so the
-                  manual and offline disclosures, the notes, lunch, the code badge, duplicate,
-                  the pencil and the empty state all vanished at 640px, on the
-                  DEFAULT grouping. That is 0168 broken (a punch that cannot say where its time
-                  came from) and a dead end (no way to duplicate a shift, and a week with no
-                  hours saying nothing at all).
+                  offline disclosure, the notes, lunch, the code badge, a running clock's Clock
+                  Out and the empty state all vanished at 640px, on the DEFAULT grouping. That is
+                  0168 broken (a punch that cannot say where its time came from) and a dead end
+                  (a week with no hours saying nothing at all). The list stays under the grid;
+                  its rows open the editor, which holds Copy To Someone Else… (Wave 2).
 
                   They are not two lists either — the Erik complaint this wave exists to answer.
                   The grid answers "what shape was the week", the list answers "what happened and

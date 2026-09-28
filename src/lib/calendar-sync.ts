@@ -38,6 +38,10 @@ import {
   gcalListEvents,
 } from "@/lib/google-calendar";
 import { jobEventBody, apptEventBody, mapGoogleEvent, isCnEvent } from "@/lib/gcal-map";
+import { getOrgSettings } from "@/lib/org-settings";
+import { tzDateTimeUtc } from "@/lib/tz";
+import { readDayHours } from "@/lib/schedule/day-hours";
+import { segmentCols, withDayHours, type SegmentRow } from "@/lib/schedule/segment-hours";
 
 export type CalendarItemKind = "job" | "appointment";
 
@@ -67,13 +71,26 @@ async function pushJobRow(supabase: any, token: string, calendarId: string, job:
   // Multi-segment jobs: v1 pushes ONE event spanning the overall window (the
   // scheduled_start/end mirror), marked "(multi-day)". One-event-per-segment
   // is the known upgrade; the mirror is maintained by setJobScheduleRanges.
-  const { count } = await supabase
-    .from("job_schedule_segments")
-    .select("id", { count: "exact", head: true })
-    .eq("job_id", job.id);
+  // WHERE IT DRAWS ONE DAY, THAT DAY'S HOURS (0370): a job whose only day keeps its own hours is
+  // pushed as that block. Read with the hours, and without them before 0370 (then as before).
+  const segRead = await withDayHours((h: boolean) =>
+    supabase.from("job_schedule_segments").select(segmentCols("start_date, end_date", h)).eq("job_id", job.id),
+  );
+  const segs = ((segRead.data ?? []) as unknown as SegmentRow[]);
+  let window: { startIso: string; endIso: string } | null = null;
+  const only = segs.length === 1 && segs[0].start_date === segs[0].end_date ? segs[0] : null;
+  const own = only ? readDayHours(only.start_time, only.end_time) : null;
+  if (only && own) {
+    const { data: org } = await supabase.from("organizations").select("settings").eq("id", job.org_id).maybeSingle();
+    const tz = getOrgSettings((org as { settings?: unknown } | null)?.settings).timezone;
+    const s = tzDateTimeUtc(only.start_date, own.start, tz);
+    const e = tzDateTimeUtc(only.start_date, own.end, tz);
+    if (s && e) window = { startIso: s, endIso: e };
+  }
   const body = jobEventBody(job, {
-    multiSegment: (count ?? 0) > 1,
+    multiSegment: segs.length > 1,
     linkUrl: `${appBase()}/jobs/${job.id}`,
+    window,
   });
   const eventId = await gcalUpsertEvent(token, calendarId, job.google_event_id ?? null, body);
   if (eventId !== job.google_event_id) {

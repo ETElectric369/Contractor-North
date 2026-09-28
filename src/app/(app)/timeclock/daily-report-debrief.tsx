@@ -120,7 +120,10 @@ export function DailyReportDebrief({ open, onClose }: { open: boolean; onClose: 
             <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-green-600" />
             <div className="text-sm">
               <div className="font-semibold text-slate-900">Confirmed by Nort — filed for the office.</div>
-              <div className="mt-0.5 text-xs text-slate-500">The office can review and edit it on Crew Hours.</div>
+              {/* Where the office reads it now: My Day's Daily reports card (cn-v958), with Mark
+                  Reviewed. "Crew Hours" was the Timeclock's door card to Timecards, gone in Wave 2,
+                  and Timecards no longer holds the reports. */}
+              <div className="mt-0.5 text-xs text-slate-500">The office reads it on their My Day.</div>
             </div>
           </div>
           {did.trim() && (
