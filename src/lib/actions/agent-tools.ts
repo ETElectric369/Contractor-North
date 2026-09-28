@@ -63,6 +63,11 @@ export const AGENT_WRITE_ALLOWED = new Set<string>([
   "invoice.addItem",
   "invoice.updateItem",
   "invoice.deleteItem",
+  // EVERY WAIT HAS A DAY (Wave 1): set a DRAFT aside until a day, the row's ⋯ Set Aside Until….
+  // Tier-1: it only moves the day the draft comes back to Needs You (nothing sent, no amount
+  // touched), staff-only by its own auth, drafts only, and refused in words when its job is over.
+  // Belongs to no switch, so no AGENT_TOOL_FEATURE entry.
+  "invoice.setAside",
   "payment.record",
   // Connect-the-dots: the funnel's first hop + permits. inquiry.create/contact/convert make the
   // leads->quote->job pipeline voice-walkable end to end; permit.create logs a permit. All tier-1
@@ -86,7 +91,18 @@ export const AGENT_WRITE_ALLOWED = new Set<string>([
   // schedule, assign, set status on, or FINISH one. job.finish is confirm-gated (drafts an
   // invoice — but never sends); the rest are tier-1 reversible.
   "job.create",
-  "job.setStatus",
+  "job.setStatus", // on_hold carries its reason and an optional until (YYYY-MM-DD); no day = a week (0366)
+  // Move the day a held job comes back (the Reminder row's Snooze): tier-1, staff-only by its own
+  // auth, it keeps the hold, its reason and who held it, and only a later day is written. No switch.
+  //
+  // TWO OF THAT WAVE'S WRITES STAY OUT, ON PURPOSE (lane 8's call; the agent-write freeze asks each
+  // new power to earn its place):
+  //   job.takeOffHold: job.setStatus already takes a job off hold (any other status clears the
+  //     reason and the day, 0234 and 0366's trigger), so it would be a second door to the same write;
+  //   job.snoozeNeedsYou: a new table (0367) that quiets a No Costs Yet or To Buy row, and Nort reads
+  //     neither row (needs_attention lists neither), so he couldn't say what he quieted or whether
+  //     it was showing at all. The row's own ⋯ Snooze is the door; Nort points at it.
+  "job.snoozeHold",
   "job.finish",
   "job.scheduleDay",
   "job.move", // shift ONE scheduled range to a new day — read-modify-write, other ranges kept

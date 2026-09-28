@@ -62,4 +62,29 @@ describe("Nort's product map after the shell wave", () => {
     expect(appt).toContain("it clears the visit from Needs You without inventing an estimate");
     expect(appt).not.toMatch(/Needs action/);
   });
+
+  it("names the job's clock by the words on it, not the TIME slot name (W1-20)", () => {
+    const jobLine = NORT_PRODUCT_MAP.split("\n").find((l) => l.startsWith("- Jobs → one job"))!;
+    expect(jobLine).toContain("The job's one clock is the Clock In button at the top of the job");
+    expect(jobLine).toContain("a tech's dock is Clock In, Photo, Call, Navigate");
+    expect(jobLine).toContain("the Time tab lists the hours (and the office's Add Time Entry) but clocks no one in");
+    expect(NORT_PRODUCT_MAP).not.toMatch(/\bTIME\b/);
+    // True in code: the button's three faces, and the Time tab holds no clock of its own.
+    const button = readFileSync(join(process.cwd(), "src/app/(app)/jobs/[id]/job-time-button.tsx"), "utf8");
+    expect(button).toContain('{state === "in" && "Clock In"}');
+    expect(button).toMatch(/Switch<span/);
+    const page = readFileSync(join(process.cwd(), "src/app/(app)/jobs/[id]/page.tsx"), "utf8");
+    expect(page).not.toContain("job-time-button");
+    expect(readFileSync(join(process.cwd(), "src/app/(app)/jobs/[id]/job-action-dock.tsx"), "utf8")).toContain("job-time-button");
+  });
+
+  it("a job already on hold keeps its day: Nort never reads back 'a week' for a re-hold", () => {
+    // 0366's jobs_hold_day gives the week only to a job ENTERING hold; a held job's new reason
+    // keeps its day (setJobHold sends no hold_until), and list_jobs doesn't show that day.
+    const route = readFileSync(join(process.cwd(), "src/app/api/chat/route.ts"), "utf8");
+    expect(route).toContain(
+      "No day said → leave until out: a job going on hold comes back in a week (say so); a job already on hold (list_jobs shows its status) keeps the day it has, which you can't see, so say it keeps its day and name none, or pass until when they name a new one.",
+    );
+    expect(route).not.toContain("it comes back in a week, and say so");
+  });
 });

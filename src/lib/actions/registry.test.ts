@@ -343,3 +343,56 @@ describe("action registry — stock.take is a fill, never a take", () => {
     expect(REGISTRY["inventory.adjust"]).toBeUndefined();
   });
 });
+
+// EVERY WAIT HAS A DAY (Wave 1): the two row verbs that only move a day are Nort's too, so "bring
+// the <job> back Friday" and "hold the <customer> draft till the 15th" do what the row's Snooze and
+// Set Aside Until… do. Staff only by their own auth, tier-1 (nothing sent, no amount touched), and
+// no switch owns them. Take Off Hold and the endless rows' Snooze stay the rows' own doors (the
+// comment in agent-tools.ts says why); job.setStatus carries the hold's reason and day.
+describe("action registry — the waits Nort can move (job.snoozeHold, invoice.setAside)", () => {
+  const offered = (role: string) => agentWriteToolsForRole(role).tools.map((t) => t.name);
+
+  it("an owner is offered both; a tech neither", () => {
+    for (const n of ["job.snoozeHold", "invoice.setAside"]) {
+      expect(AGENT_WRITE_ALLOWED.has(n), n).toBe(true);
+      expect(REGISTRY[n].auth, n).toBe("staff");
+      expect(REGISTRY[n].effect, n).toBe("write");
+      expect(needsConsent(REGISTRY[n], "agent", false), `${n} is a tier-1 day move`).toBe(false);
+    }
+    for (const t of ["job__snoozeHold", "invoice__setAside"]) {
+      expect(offered("owner")).toContain(t);
+      expect(offered("office")).toContain(t);
+      expect(offered("tech")).not.toContain(t);
+    }
+  });
+
+  it("each takes a day, never a day-less wait", () => {
+    const id = "11111111-1111-4111-8111-111111111111";
+    for (const n of ["job.snoozeHold", "invoice.setAside"]) {
+      expect(REGISTRY[n].input.safeParse({ id, date: "2026-10-03" }).success, n).toBe(true);
+      expect(REGISTRY[n].input.safeParse({ id, date: "2026-10-03", reason: "Waiting on the permit" }).success, n).toBe(true);
+      expect(REGISTRY[n].input.safeParse({ id }).success, n).toBe(false);
+      expect(REGISTRY[n].input.safeParse({ id, date: "Friday" }).success, n).toBe(false);
+    }
+  });
+
+  it("job.setStatus carries the hold's reason and day; the other two new writes stay the rows' doors", () => {
+    const s = REGISTRY["job.setStatus"];
+    expect(AGENT_WRITE_ALLOWED.has("job.setStatus")).toBe(true);
+    expect(s.input.safeParse({ id: "j", status: "on_hold", reason: "Waiting on the permit", until: "2026-10-10" }).success).toBe(true);
+    expect(s.input.safeParse({ id: "j", status: "on_hold", until: "the 10th" }).success).toBe(false);
+    expect(s.description).toMatch(/reason/);
+    expect(s.description).toMatch(/a week from today/);
+    for (const n of ["job.takeOffHold", "job.snoozeNeedsYou"]) {
+      expect(REGISTRY[n], n).toBeDefined();
+      expect(AGENT_WRITE_ALLOWED.has(n), n).toBe(false);
+    }
+  });
+
+  it("a snooze moves a day and a lead's ending is Lost, never a delete", () => {
+    expect(REGISTRY["quote.followUp"].description).toMatch(/only the follow-up day/);
+    expect(REGISTRY["inquiry.snooze"].description).toMatch(/only the next follow-up day/);
+    expect(REGISTRY["inquiry.markLost"].description).toMatch(/kept \(not deleted\)/);
+    expect(offered("owner")).not.toContain("inquiry__delete");
+  });
+});
