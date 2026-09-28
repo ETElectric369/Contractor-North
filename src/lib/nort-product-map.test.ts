@@ -62,4 +62,18 @@ describe("Nort's product map after the shell wave", () => {
     expect(appt).toContain("it clears the visit from Needs You without inventing an estimate");
     expect(appt).not.toMatch(/Needs action/);
   });
+
+  it("names the job's clock by the words on it, not the TIME slot name (W1-20)", () => {
+    const jobLine = NORT_PRODUCT_MAP.split("\n").find((l) => l.startsWith("- Jobs → one job"))!;
+    expect(jobLine).toContain("The job's one clock is the Clock In button at the top of the job");
+    expect(jobLine).toContain("a tech's dock is Clock In, Photo, Call, Navigate");
+    expect(jobLine).toContain("the Time tab lists the hours (and the office's Add Time Entry) but clocks no one in");
+    expect(NORT_PRODUCT_MAP).not.toMatch(/\bTIME\b/);
+    // True in code: the button's three faces, and the Time tab holds no clock of its own.
+    const button = readFileSync(join(process.cwd(), "src/app/(app)/jobs/[id]/job-time-button.tsx"), "utf8");
+    expect(button).toContain('{state === "in" && "Clock In"}');
+    expect(button).toMatch(/Switch<span/);
+    const page = readFileSync(join(process.cwd(), "src/app/(app)/jobs/[id]/page.tsx"), "utf8");
+    expect(page).not.toMatch(/<JobTimeButton[^>]*\/>[\s\S]{0,200}Time on this job/);
+  });
 });

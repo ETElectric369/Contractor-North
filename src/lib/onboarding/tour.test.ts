@@ -280,6 +280,20 @@ describe("well-formed", () => {
       expect(findStep("run-money").anchor).toBe("dock-invoices");
     });
 
+    it("names the job's clock by the words on it: Clock In at the top, never TIME (W1-20)", () => {
+      // TIME is the dock slot's name in code and a hover title a phone never shows; the only "Time"
+      // a person can see on a job is the tab, which no longer clocks anyone in.
+      const s = findStep("run-job");
+      for (const c of [STRANGER, KNOWN])
+        for (const say of [s.say, s.plain!.say]) {
+          const line = sayOf(say, c);
+          expect(line).toContain("tap Clock In at the top of the job");
+          expect(line).not.toMatch(/\bTIME\b|Time tab/);
+        }
+      const button = readFileSync(join(process.cwd(), "src/app/(app)/jobs/[id]/job-time-button.tsx"), "utf8");
+      expect(button).toContain('{state === "in" && "Clock In"}');
+    });
+
     it("never claims an automation the code does not do", () => {
       // Each of these was in a draft and was cut against a specific file:
       //   the app texts the customer      -> convert-menu builds an `sms:` href; HE presses send

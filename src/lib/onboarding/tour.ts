@@ -673,7 +673,8 @@ export const LESSONS: Lesson[] = [
     key: "run-job",
     anchor: "dock-jobs",
     title: "They say yes",
-    // TRUE TO THE JOB PAGE (Wave 1): the job's one clock is its TIME button (W1-20), and the Costs
+    // TRUE TO THE JOB PAGE (Wave 1): the job's one clock is the dock's Clock In at the top (W1-20;
+    // named by the words on it, never its TIME slot name or the Time tab, which no longer clocks), and the Costs
     // tab's Snap The Bill runs the receipt pipeline (lib/receipt-capture), which writes the bill or
     // leaves the paper filed on the job. A filed paper no bill holds comes to Needs You as Receipts
     // Not On A Bill (lib/action-items/receipts-not-on-a-bill; a staff row, so "the office's"): that is
@@ -681,7 +682,7 @@ export const LESSONS: Lesson[] = [
     say: (c) =>
       jobStarts(c) +
       "Then it " +
-      "starts collecting: clock in with the job's TIME button and the hours land on it; on its Costs " +
+      "starts collecting: tap Clock In at the top of the job and the hours land on it; on its Costs " +
       "tab, Snap The Bill on a supply house receipt and I read it and write it on as a cost. One I " +
       "can't read stays filed on the job and comes to the office's Needs You as a receipt not on a bill " +
       "yet, rather than a guess.",
@@ -689,7 +690,7 @@ export const LESSONS: Lesson[] = [
       say: (c) =>
         jobStarts(c) +
         "Then it " +
-        "starts collecting: clock in with the job's TIME button and the hours land on it; on its Costs " +
+        "starts collecting: tap Clock In at the top of the job and the hours land on it; on its Costs " +
         "tab, Snap The Bill on a supply house receipt and it's read and written on as a cost. One that " +
         "can't be read stays filed on the job and comes to the office's Needs You as a receipt not on a " +
         "bill yet, rather than a guess.",
