@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { ALL_ON, FEATURE_KEYS, type FeatureMap } from "@/lib/features";
 import { DOCK, basePath } from "@/lib/dock";
@@ -71,6 +71,17 @@ describe("countTeammates — the one head-count behind the quiet rule", () => {
     // /timeclock counts nobody: it has no door row left to quiet (W2-01).
     const clock = readFileSync(join(process.cwd(), "src/app/(app)/timeclock/page.tsx"), "utf8");
     expect(clock).not.toContain("countTeammates");
+    // And no other page counts: the layout (the dock) and /timecards (its Pay row) only.
+    const callers: string[] = [];
+    const walk = (dir: string) => {
+      for (const e of readdirSync(join(process.cwd(), dir), { withFileTypes: true })) {
+        const rel = `${dir}/${e.name}`;
+        if (e.isDirectory()) walk(rel);
+        else if (/\.tsx?$/.test(e.name) && !e.name.includes(".test.") && readFileSync(join(process.cwd(), rel), "utf8").includes("countTeammates(")) callers.push(rel);
+      }
+    };
+    walk("src/app");
+    expect(callers.sort()).toEqual(["src/app/(app)/layout.tsx", "src/app/(app)/timecards/page.tsx"]);
   });
 
   it("/timeclock is a clock: no Add Entry and no door to Timecards, Pay or Everyone's Day creeps back (W2-01)", () => {
