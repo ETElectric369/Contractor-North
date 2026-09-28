@@ -66,7 +66,16 @@
 -- create or replace).
 -- Locks: ALTER TABLE on job_schedule_segments takes ACCESS EXCLUSIVE for an instant (two nullable
 -- columns, no rewrite); the checks validate a table of a few hundred rows.
+--
+-- ONE TRANSACTION. apply-migration.cjs (production) and scripts/test-db/rebuild.cjs (the test
+-- database) wrap the file in begin/commit; the file holds none of its own, so a suite can run it
+-- inside its own rolled-back transaction (lib/each-day-hours.integration.test). lock_timeout 5s /
+-- statement_timeout 15s: queued behind a long transaction on job_schedule_segments, it gives up and
+-- changes nothing instead of stalling the app.
 -- ═══════════════════════════════════════════════════════════════════════════
+
+set local lock_timeout = '5s';
+set local statement_timeout = '15s';
 
 -- ── A. A day's own hours ───────────────────────────────────────────────────────────────────────
 alter table public.job_schedule_segments
