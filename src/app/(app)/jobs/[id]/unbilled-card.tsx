@@ -27,6 +27,9 @@ export type UnbilledView =
       hours: number;
       lastInvoiceNumber: string | null;
       lastInvoiceAt: string | null;
+      /** He is on the clock on this job right now. A running shift is never in `hours` (closed time
+       *  only), so with it the card says his time shows once he clocks out, not "Tap Clock In". */
+      onClockHere?: boolean;
     };
 
 /**
@@ -109,8 +112,16 @@ export function UnbilledCard({
             {since ? `Your time since ${since}` : "Your time not yet invoiced"}
           </div>
           <div className="mt-1 text-2xl font-bold text-slate-900">{formatDuration(view.hours)}</div>
-          {/* The job's one clock is the dock's TIME button at the top of the page (W1-20). */}
-          {view.hours <= 0 && <p className="mt-1 text-sm text-slate-500">No new time yet. Tap Clock In at the top of this job.</p>}
+          {/* The job's one clock is the dock's TIME button at the top of the page (W1-20). While he is
+              on the clock here that button shows his running time, not Clock In, and a running shift
+              is not counted until it closes, so the sentence follows the clock. */}
+          {view.hours <= 0 && (
+            <p className="mt-1 text-sm text-slate-500">
+              {view.onClockHere
+                ? "On the clock here now. Your time shows once you clock out."
+                : "No new time yet. Tap Clock In at the top of this job."}
+            </p>
+          )}
         </CardContent>
       </Card>
     );

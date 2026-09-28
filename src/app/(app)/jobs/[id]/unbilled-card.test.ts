@@ -1,4 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
@@ -93,6 +95,17 @@ describe("UnbilledCard - Open: $X and the door that bills it", () => {
     const html = card({ viewerIsStaff: false, view: { kind: "tech", hours: 0, lastInvoiceNumber: null, lastInvoiceAt: null } });
     expect(html).toContain("No new time yet. Tap Clock In at the top of this job.");
     expect(html).not.toContain("Time tab");
+  });
+
+  it("on the clock here (first shift, nothing closed yet), he is never told to tap a Clock In the dock isn't showing", () => {
+    const html = card({ viewerIsStaff: false, view: { kind: "tech", hours: 0, lastInvoiceNumber: null, lastInvoiceAt: null, onClockHere: true } });
+    expect(html).toContain("On the clock here now. Your time shows once you clock out.");
+    expect(html).not.toContain("Clock In");
+  });
+
+  it("the page tells the card when his open shift is on this job (source)", () => {
+    const s = readFileSync(join(process.cwd(), "src/app/(app)/jobs/[id]/page.tsx"), "utf8");
+    expect(s).toContain("onClockHere: !!openEntryRow && String((openEntryRow as { job_id?: string | null }).job_id ?? \"\") === String(j.id),");
   });
 });
 

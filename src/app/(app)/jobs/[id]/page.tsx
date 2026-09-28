@@ -557,6 +557,9 @@ export default async function JobDetailPage({
           hours: unbilled.hours,
           lastInvoiceNumber: unbilled.lastInvoiceNumber,
           lastInvoiceAt: unbilled.lastInvoiceAt,
+          // His running shift is on THIS job (the dock's TIME button reads the same row): the card
+          // must not send him to a Clock In the dock isn't showing.
+          onClockHere: !!openEntryRow && String((openEntryRow as { job_id?: string | null }).job_id ?? "") === String(j.id),
         };
   // THE COSTS TAB, OPEN FIRST (Erik, 2026-09-25). The job's bills and orders sorted by the Unbilled
   // card's own per-row verdict (UnbilledWork.costRows), so Not Billed Yet is exactly what that
