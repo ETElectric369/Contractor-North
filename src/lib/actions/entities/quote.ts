@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { saveQuote, addQuoteItem, updateQuoteItem, deleteQuoteItem, createJobFromQuote, updateQuoteStatus, setQuoteType, updateQuoteMeta, setQuoteCustomer, setQuoteJob, findRecentDraftQuote, duplicateQuote } from "@/app/(app)/quotes/actions";
+import { saveQuote, addQuoteItem, updateQuoteItem, deleteQuoteItem, createJobFromQuote, updateQuoteStatus, setQuoteType, updateQuoteMeta, setQuoteCustomer, setQuoteJob, findRecentDraftQuote, duplicateQuote, setQuoteFollowUp } from "@/app/(app)/quotes/actions";
 import { createClient } from "@/lib/supabase/server";
 import { resolveCustomerId, resolveJobId, resolveQuoteId } from "../resolve-id";
 import type { ActionDef } from "../types";
@@ -29,6 +29,23 @@ export const quoteActions: Record<string, ActionDef> = {
     auth: "staff",
     effect: "write",
     handler: (i) => updateQuoteStatus(i.id, i.status),
+  },
+  "quote.followUp": {
+    name: "quote.followUp",
+    group: "quote",
+    label: "Follow up on an estimate",
+    description:
+      "Set the day to follow up on an estimate the customer hasn't answered — 'remind me about the Miller estimate Monday'. Resolve the estimate with list_quotes and pass its id and date (YYYY-MM-DD, company-local, today or later). It sets only the follow-up day: the estimate's valid-until (the customer's offer window) never moves. The estimate stays off Needs You until that day and is back on it that morning. Reversible: set another day any time.",
+    input: z.object({ id: z.string(), date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/) }),
+    auth: "staff",
+    effect: "write",
+    handler: async (i) => {
+      const supabase = await createClient();
+      const quote = await resolveQuoteId(supabase, i.id);
+      if ("error" in quote) return { ok: false, error: quote.error };
+      if (!quote.id) return { ok: false, error: "Which estimate? Give me its number (E-010), title, or id." };
+      return setQuoteFollowUp(quote.id, i.date);
+    },
   },
   "quote.setType": {
     name: "quote.setType",

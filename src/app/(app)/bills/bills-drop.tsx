@@ -1,248 +1,43 @@
 "use client";
 
-import { createContext, useContext, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
-import { AlertCircle, Check, FileUp, Loader2 } from "lucide-react";
+import { FileUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { WhyFold } from "@/components/why-fold";
 import { useFileDragActive } from "@/components/drop-target";
 import { PaperworkList, type PaperRowItem } from "@/components/paperwork-row";
-import { createClient } from "@/lib/supabase/client";
-import { prepareImageForUpload } from "@/lib/image-prep";
-import { sha256Hex } from "@/lib/content-hash";
-import { isPdfBytes, readPdfText } from "@/lib/pdf-text";
+import { SnapLinesList, clearFinishedSnapLines, openSnapOrNote, snapFiles, useSnapLines } from "@/components/snap-or-note";
 import type { NumberMatch } from "@/lib/paperwork";
-import { readPaperworkItem } from "@/app/(app)/organize/actions";
-import { addPaperwork, fingerprintSeen } from "@/app/(app)/organize/paperwork-actions";
-import { addOpenList } from "./open-list-actions";
-import { isListFile, LIST_ACCEPT, readListFile } from "@/lib/open-list-file";
 
 /**
- * DROP PAPERWORK (Justin, 2026-09-24 14:14: "drop PDF/JPEG/PNG onto Bills & Purchasing and have it
- * parsed"; dropbox plan, Phase 1).
+ * THE BILLS PAGE'S HALF OF THE ONE PAPER DOOR (W1-30; it was Drop Paperwork, Justin 2026-09-24:
+ * "drop PDF/JPEG/PNG onto Bills & Purchasing and have it parsed").
  *
- * Any number of PDFs and photos at once: dragged anywhere onto the page on a desktop or an iPad,
- * or picked with the button (on a phone the picker offers Photo Library, Take Photo and Files, and
- * the share sheet hands files to the same picker). Each one gets ONE line that moves through
- * checking, reading and waiting, and every file is accounted for by name: read, already in,
- * refused and why. Nothing is filed here. Each paper waits in Sort These below with what was read,
- * and becomes money only when a person presses File It.
+ * The queue is Snap Or Note's now (components/snap-or-note: the + in the top bar, on every page):
+ * one set of rules for a photo, a PDF, a supplier's list or a bank download, whichever way it came
+ * in. This page keeps two things of its own:
  *
- * Per file, in this order, because each step is cheaper than the next:
- *   1. the kind of file (PDF, JPEG, PNG; a HEIC this device can't convert is refused by name);
- *   2. the fingerprint of its ORIGINAL bytes, and "Already In" if this exact file is here, before
- *      anything is uploaded;
- *   3. a PDF's own text layer, read in the browser: CED documents in it go on the CED list, which
- *      is what they are, and never through a language model;
- *   4. upload, the row, and only then the reader.
- *
- * A SUPPLIER'S OPEN LIST (Excel or CSV, the portal's Open tab download) comes in here too, with no
- * button of its own (Erik, 2026-09-26): it is read in the browser into rows and waits in Sort These
- * as one card saying what it changes on that supplier's papers. A statement PDF is recognised from
- * its own text on the server (addPaperwork). Nothing changes until a person presses Apply.
+ *   · THE PAGE-WIDE DROP: drag any number of files anywhere onto the page on a desktop or an iPad,
+ *     and every one goes to the same queue (snapFiles). Nothing is filtered out here, so a file the
+ *     queue can't take gets its own line saying so by name instead of vanishing.
+ *   · SORT THESE: the queue's lines where they always were, then every paper waiting for a person's
+ *     answer. Add More opens the sheet. Nothing is filed until a person taps an answer on a card.
  */
 
-const MAX_FILE = 15 * 1024 * 1024;
 const STRIPES = {
   backgroundImage:
     "repeating-linear-gradient(45deg, transparent 0 10px, color-mix(in srgb, var(--color-brand) 10%, transparent) 10px 20px)",
 } as const;
-const ACCEPT = `application/pdf,.pdf,image/*,.heic,.heif,${LIST_ACCEPT}`;
 
-type Tone = "busy" | "ok" | "warn" | "error";
-type Line = { id: number; name: string; text: string; tone: Tone };
-
-type DropApi = { pick: () => void; take: (files: File[]) => void; busy: boolean; lines: Line[]; clear: () => void };
-const DropCtx = createContext<DropApi | null>(null);
-
-function useDrop(): DropApi {
-  const api = useContext(DropCtx);
-  if (!api) throw new Error("Drop Paperwork used outside its zone.");
-  return api;
-}
-
-export function PaperworkDropZone({ orgId, children }: { orgId: string; children: React.ReactNode }) {
-  const router = useRouter();
-  const inputRef = useRef<HTMLInputElement>(null);
-  const [lines, setLines] = useState<Line[]>([]);
-  const [busy, setBusy] = useState(false);
-  // THE QUEUE (job-cost-capture's rule): every file gets its line the moment it arrives, and one
-  // loop reads them in order, so a drop in the middle of a read is never discarded.
-  const queue = useRef<{ id: number; file: File }[]>([]);
-  const running = useRef(false);
-  const seq = useRef(0);
+export function PaperworkDropZone({ children }: { children: React.ReactNode }) {
   const dragging = useFileDragActive();
-
-  const say = (id: number, name: string, text: string, tone: Tone) =>
-    setLines((ls) => {
-      const next = ls.some((l) => l.id === id) ? ls.map((l) => (l.id === id ? { id, name, text, tone } : l)) : [...ls, { id, name, text, tone }];
-      return next;
-    });
-
-  async function one(id: number, file: File) {
-    const name = file.name || "A file with no name";
-    const type = (file.type || "").toLowerCase();
-    const pdfByName = /\.pdf$/i.test(name);
-    const heic = /image\/hei[cf]/.test(type) || /\.(heic|heif)$/i.test(name);
-    const isImage = type.startsWith("image/") || heic;
-    if (!(type === "application/pdf" || pdfByName || isImage) && isListFile(file)) return oneList(id, file);
-    if (!(type === "application/pdf" || pdfByName || isImage)) {
-      return say(id, name, "Not added: this takes PDFs, JPEGs, PNGs, and a supplier's list as Excel or CSV.", "error");
-    }
-    if (file.size > MAX_FILE) return say(id, name, "Not added: it is over 15 MB. Save a smaller copy and drop it again.", "error");
-
-    say(id, name, "Checking…", "busy");
-    const raw = await file.arrayBuffer();
-    let sha: string;
-    try {
-      sha = await sha256Hex(raw);
-    } catch {
-      return say(id, name, "Not added: this browser couldn't fingerprint it. Try again in Safari or Chrome.", "error");
-    }
-    const seen = await fingerprintSeen(sha);
-    if (seen.seen) return say(id, name, `${seen.seen} Nothing was added twice.`, "warn");
-
-    let upload: File = file;
-    let pdfText: string | null = null;
-    const isPdf = type === "application/pdf" || (pdfByName && !isImage);
-    if (isPdf) {
-      // A PDF by what is IN it. A file named .pdf that isn't one is refused by name, not read.
-      if (!isPdfBytes(raw)) return say(id, name, "Not added: it is named like a PDF but isn't one inside.", "error");
-      const t = await readPdfText(raw, name);
-      if (t.ok) pdfText = t.text; // a scan has no text; the reader looks at it as a picture instead
-    } else {
-      upload = await prepareImageForUpload(file);
-      if (/hei[cf]/i.test(upload.type) || (heic && upload === file)) {
-        return say(id, name, "Not added: this HEIC photo couldn't be converted on this device. Save it as JPEG and drop it again.", "error");
-      }
-    }
-
-    say(id, name, "Uploading…", "busy");
-    const supabase = createClient();
-    let safe = (upload.name || name).replace(/[^a-zA-Z0-9._-]/g, "_");
-    // The reader knows a stored file's kind by its extension, so the path always carries one.
-    if (!/\.(pdf|jpe?g|png|webp|gif)$/i.test(safe))
-      safe += isPdf ? ".pdf" : upload.type === "image/png" ? ".png" : upload.type === "image/webp" ? ".webp" : ".jpg";
-    const path = `${orgId}/organize/${Date.now()}-${safe}`;
-    const { error: upErr } = await supabase.storage.from("documents").upload(path, upload, { upsert: false });
-    if (upErr) return say(id, name, `Not added: the upload failed (${upErr.message}). Drop it again.`, "error");
-
-    const added = await addPaperwork({
-      path,
-      name,
-      mime: isPdf ? "application/pdf" : upload.type,
-      size: upload.size,
-      sha256: sha,
-      source: "bills_drop",
-      pdfText,
-    });
-    if (!added.ok || !added.id) {
-      // The row didn't land, so the file must not linger in storage with nothing pointing at it.
-      await supabase.storage.from("documents").remove([path]);
-      return say(id, name, added.already ? `${added.already} Nothing was added twice.` : added.error ?? "Not added.", added.already ? "warn" : "error");
-    }
-    if (!added.needsRead) {
-      say(id, name, added.line ?? "CED documents found in it. Waiting below: press Add To CED Documents.", added.line?.includes("didn't add up") ? "warn" : "ok");
-      return;
-    }
-    say(id, name, "Reading…", "busy");
-    // SAVED IS SAVED (audit v994, SI4). The row is in; a read that never answers (a function
-    // timeout, a lost connection) used to reach drain()'s catch and say "Not added" over a paper
-    // sitting right below.
-    let read: Awaited<ReturnType<typeof readPaperworkItem>>;
-    try {
-      read = await readPaperworkItem(added.id);
-    } catch {
-      return say(id, name, "Saved, not read yet: the reader didn't answer. It is waiting below; press Read Now.", "warn");
-    }
-    if (!read.ok) return say(id, name, `Saved, not read: ${read.error ?? "the reader didn't answer"} It is waiting below.`, "warn");
-    const it = read.item;
-    const total = it?.amount != null ? `$${it.amount.toFixed(2)}` : "no total read";
-    // The same answer the row gives (Erik, 2026-09-24): a picture is asked what it is; a job the
-    // paper names is picked and says why; anything else asks where it goes.
-    if (it?.picture) return say(id, name, `Read: a picture (${it.title}). Waiting below: what is this?`, "ok");
-    const s = it?.suggestion;
-    const where = s?.picked && s.jobLabel ? `${s.because ?? "Job picked from the paper"}: ${s.jobLabel}. Waiting below for File It.` : "Waiting below: where does this go?";
-    say(id, name, `Read: ${it?.vendor ?? it?.title ?? "paper"}, ${total}. ${where}`, "ok");
-  }
-
-  /** A supplier's open list (Excel, CSV, a text table): rows, then one card in Sort These. */
-  async function oneList(id: number, file: File) {
-    const name = file.name || "A file with no name";
-    say(id, name, "Reading the list…", "busy");
-    const read = await readListFile(file);
-    if (!read.ok) return say(id, name, `Not added: ${read.error}`, "error");
-    let sha: string | null = null;
-    try {
-      sha = await sha256Hex(await file.arrayBuffer());
-    } catch {
-      sha = null; // an old browser: the list still goes in, it just can't be matched as the same file
-    }
-    const added = await addOpenList({ name, sha256: sha, table: read.table, listDate: read.listDate, source: "bills_drop" });
-    if (!added.ok) return say(id, name, added.already ? `${added.already} Nothing was added twice.` : added.error ?? "Not added.", added.already ? "warn" : "error");
-    say(id, name, added.line ?? "Waiting below.", "ok");
-  }
-
-  async function drain() {
-    if (running.current) return;
-    running.current = true;
-    setBusy(true);
-    try {
-      while (queue.current.length) {
-        const next = queue.current.shift()!;
-        try {
-          await one(next.id, next.file);
-        } catch (e) {
-          say(next.id, next.file.name, `Not added: ${(e as Error)?.message ?? "something went wrong"}.`, "error");
-        }
-        router.refresh();
-      }
-    } finally {
-      running.current = false;
-      setBusy(false);
-    }
-  }
-
-  function take(files: File[]) {
-    if (!files.length) return;
-    for (const file of files) {
-      const id = ++seq.current;
-      queue.current.push({ id, file });
-      say(id, file.name || "A file with no name", "Waiting…", "busy");
-    }
-    void drain();
-  }
-
-  const api: DropApi = {
-    pick: () => inputRef.current?.click(),
-    take,
-    busy,
-    lines,
-    clear: () => setLines((ls) => ls.filter((l) => l.tone === "busy")),
-  };
-
   return (
-    <DropCtx.Provider value={api}>
-      {/* No capture attribute, so iOS offers Photo Library, Take Photo AND Choose Files. */}
-      <input
-        ref={inputRef}
-        type="file"
-        multiple
-        accept={ACCEPT}
-        className="hidden"
-        onChange={(e) => {
-          take(Array.from(e.target.files ?? []));
-          e.target.value = "";
-        }}
-      />
+    <>
       {children}
       {/* PAGE-WIDE, AND FIXED TO THE SCREEN. A wrapper zone the height of this page put its label
           halfway down a long list, off screen. This covers the viewport while a file is dragged
-          anywhere over the window, and hands EVERY file to the same queue as the button: nothing
-          is filtered out here, so a file this can't take gets its own line saying so by name
-          instead of vanishing (the mixed-drop rule). No stopPropagation, so the window's own drop
-          listener still clears the drag state. */}
+          anywhere over the window, and hands EVERY file to the queue. No stopPropagation, so the
+          window's own drop listener still clears the drag state. */}
       {dragging && (
         <div
           className="fixed inset-0 z-[60] flex items-center justify-center border-4 border-dashed border-brand bg-white/90 p-4"
@@ -250,27 +45,17 @@ export function PaperworkDropZone({ orgId, children }: { orgId: string; children
           onDragOver={(e) => e.preventDefault()}
           onDrop={(e) => {
             e.preventDefault();
-            take(Array.from(e.dataTransfer?.files ?? []));
+            snapFiles(Array.from(e.dataTransfer?.files ?? []));
           }}
         >
-          <span className="rounded-full bg-white px-4 py-2 text-sm font-semibold text-brand shadow">Drop Paperwork Here</span>
+          <span className="rounded-full bg-white px-4 py-2 text-sm font-semibold text-brand shadow">Drop Papers Here</span>
         </div>
       )}
-    </DropCtx.Provider>
+    </>
   );
 }
 
-/** The header button: the way in on a phone, where nothing can be dragged. */
-export function DropPaperworkButton() {
-  const { pick, busy } = useDrop();
-  return (
-    <Button onClick={pick}>
-      {busy ? <Loader2 className="animate-spin" /> : <FileUp />} Drop Paperwork
-    </Button>
-  );
-}
-
-/** What happened to each file, then every paper waiting for File It. */
+/** What happened to each file, then every paper waiting for an answer. */
 export function SortThese({
   items,
   jobs,
@@ -280,10 +65,10 @@ export function SortThese({
   items: PaperRowItem[];
   jobs: { id: string; job_number: string; name: string }[];
   matches: Record<string, NumberMatch[]>;
-  /** The Shop Stock switch (0352): off, and no row offers the shelf. Absent = on. */
+  /** The Shop Stock switch (0352): off, and no card offers stock. Absent = on. */
   shopStock?: boolean;
 }) {
-  const { lines, clear, pick } = useDrop();
+  const lines = useSnapLines();
   if (!items.length && !lines.length) return null;
   const done = lines.some((l) => l.tone !== "busy");
   return (
@@ -292,38 +77,27 @@ export function SortThese({
         <h2 className="min-w-0 flex-1 text-base font-semibold text-slate-900">
           Sort These{items.length ? ` (${items.length})` : ""}
         </h2>
-        <Button variant="outline" onClick={pick}>
+        <Button variant="outline" onClick={openSnapOrNote}>
           <FileUp /> Add More
         </Button>
       </div>
       {lines.length > 0 && (
-        <ul className="mb-3 divide-y divide-slate-100 rounded-lg border border-slate-200">
-          {lines.map((l) => (
-            <li key={l.id} className="flex items-start gap-2 px-3 py-2 text-sm">
-              {l.tone === "busy" && <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-brand" />}
-              {l.tone === "ok" && <Check className="mt-0.5 h-4 w-4 shrink-0 text-green-600" />}
-              {(l.tone === "warn" || l.tone === "error") && (
-                <AlertCircle className={`mt-0.5 h-4 w-4 shrink-0 ${l.tone === "error" ? "text-red-500" : "text-amber-500"}`} />
-              )}
-              <span className="min-w-0 flex-1">
-                <span className="block truncate font-medium text-slate-800">{l.name}</span>
-                <span className={l.tone === "error" ? "text-red-700" : l.tone === "warn" ? "text-amber-800" : "text-slate-600"}>{l.text}</span>
-              </span>
-            </li>
-          ))}
-        </ul>
+        <div className="mb-3">
+          <SnapLinesList lines={lines} />
+        </div>
       )}
       {done && (
         <div className="mb-3">
-          <Button variant="outline" onClick={clear}>
+          <Button variant="outline" onClick={clearFinishedSnapLines}>
             Clear Finished Lines
           </Button>
         </div>
       )}
       <WhyFold className="mb-2">
         <p>
-          Nothing here is filed until you press File It. Pick a job or a business cost for each one; Undo takes it back. The same
-          file is never filed twice, and a number already on the books offers to tie them together instead of making a second bill.
+          Nothing here is filed until you tap an answer on its card: a job, stock or a business cost. Undo takes it back. The
+          same file is never filed twice, and a number already on the books offers to tie them together instead of making a
+          second bill.
         </p>
       </WhyFold>
       <PaperworkList
@@ -331,7 +105,7 @@ export function SortThese({
         jobs={jobs}
         matches={matches}
         shopStock={shopStock}
-        empty={<p className="py-4 text-center text-sm text-slate-400">Everything dropped here is sorted.</p>}
+        empty={<p className="py-4 text-center text-sm text-slate-400">Everything put in here is sorted.</p>}
       />
     </Card>
   );

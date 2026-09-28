@@ -10,10 +10,10 @@
  * Pure (no browser, no server) so the copy and the payload shape are tested, not assumed.
  */
 
-/** The glass panel's controls: the Nort button in the topbar (the panel has no mic of its own)
- *  and the text box under the status line. Every "what to do now" line names those two and
- *  nothing else. */
-export const TRY_AGAIN_LINE = "Tap the Nort button up top to try again, or type below.";
+/** The glass panel's controls: Talk To Nort (the first row under Search Or Ask; the panel has no
+ *  mic of its own) and the text box under the status line. Every "what to do now" line names
+ *  those two and nothing else. It fits the status line on a 375px phone (48 characters) whole. */
+export const TRY_AGAIN_LINE = "Tap Talk To Nort to try again, or type below.";
 
 /** Shown when the browser has no way to record at all, so trying again cannot help. */
 export const NO_VOICE_LINE = "Voice isn't available here. Type below.";

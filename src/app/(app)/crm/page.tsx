@@ -55,11 +55,14 @@ export default async function CrmPage({
 
   return (
     <div>
-      <PageHeader title="Contacts" description="Everyone you work with — clients and contacts, all linkable to jobs and quotes. New leads live in the Leads tab.">
+      {/* CUSTOMERS, UNDER SALES (W1-07): the Contacts tile folded into Sales as its Customers row,
+          so the page wears the row's name. The description names no Leads tab: that tab is hidden
+          with Leads off, and a customer is a customer whichever switches are on. */}
+      <PageHeader title="Customers" description="Everyone you work for, linked to their jobs, estimates and invoices.">
         <div className="flex flex-wrap items-center gap-2">
           <NewCustomerButton />
           {/* Bulk import (CSV/vCard) — the deliberate, infrequent SEEK door for the whole
-              customer book, moved here from Settings > Company (import belongs to Contacts). */}
+              customer book, moved here from Settings > Company (import belongs to Customers). */}
           <ImportCustomersButton csv label="Import" />
           <DuplicatesButton />
         </div>
@@ -87,7 +90,7 @@ export default async function CrmPage({
         // NOTHING SILENT: past this many contacts the list is cut, and the cut end is the end of
         // whatever order you picked. Say so, and name the way through it.
         <p className="mb-3 text-sm text-amber-700">
-          Showing the first {CRM_PAGE_LIMIT.toLocaleString()} contacts — search to narrow the list.
+          Showing the first {CRM_PAGE_LIMIT.toLocaleString()} customers — search to narrow the list.
         </p>
       )}
 
@@ -98,7 +101,7 @@ export default async function CrmPage({
           description={
             q
               ? "Try a different search."
-              : "Add your first customer or lead to get started."
+              : "Add your first customer to get started."
           }
         >
           {!q && <NewCustomerButton />}

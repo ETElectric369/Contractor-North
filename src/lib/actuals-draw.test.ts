@@ -179,20 +179,22 @@ describe("pulledIntoSentence — says what landed, in hours and bills", () => {
     expect(pulledIntoSentence("INV-078", { hours: 5.25, bills: 0 })).toBe("Pulled 5.25 hours into INV-078.");
     expect(pulledIntoSentence("INV-078", { hours: 0, bills: 0 })).toBe("Nothing new to pull into INV-078.");
   });
-  it("what stayed off is said, never silent - and names the button that says why (the row is blank until tapped)", () => {
+  it("what stayed off is said, never silent - and names the ONE button that says why (W1-27: Bring In New Work runs every import)", () => {
     expect(pulledIntoSentence("INV-078", { hours: 6, bills: 1 }, { hours: 6, bills: 0 })).toBe(
-      "Pulled 6 hours and 1 bill into INV-078. Still not on it: 6 hours - open INV-078 and tap Labor from Timecards to see what is holding them back.",
+      "Pulled 6 hours and 1 bill into INV-078. Still not on it: 6 hours - open INV-078 and tap Bring In New Work to see what is holding them back.",
     );
     expect(pulledIntoSentence("INV-078", { hours: 0, bills: 0 }, { hours: 1, bills: 1 })).toBe(
-      "Nothing new to pull into INV-078. Still not on it: 1 hour and 1 bill - open INV-078 and tap Labor from Timecards or Materials from Costs to see what is holding them back.",
+      "Nothing new to pull into INV-078. Still not on it: 1 hour and 1 bill - open INV-078 and tap Bring In New Work to see what is holding them back.",
     );
+    // Never a button that is gone.
+    expect(pulledIntoSentence("INV-078", { hours: 0, bills: 0 }, { hours: 2, bills: 3, stock: 1, returns: 1 })).not.toMatch(/Labor from Timecards|Materials from Costs/);
   });
   it("a credited supplier return is counted, never 'Nothing new'", () => {
     expect(pulledIntoSentence("INV-078", { hours: 0, bills: 0, returns: 1, returnsCredit: 59.32 }, { hours: 0, bills: 0 }, formatCurrency)).toBe(
       "Pulled a supplier return credit ($59.32 back to the customer) into INV-078.",
     );
     expect(pulledIntoSentence("INV-078", { hours: 0, bills: 0 }, { hours: 0, bills: 0, returns: 1 })).toBe(
-      "Nothing new to pull into INV-078. Still not on it: a supplier return - open INV-078 and tap Materials from Costs to see what is holding it back.",
+      "Nothing new to pull into INV-078. Still not on it: a supplier return - open INV-078 and tap Bring In New Work to see what is holding it back.",
     );
   });
 });

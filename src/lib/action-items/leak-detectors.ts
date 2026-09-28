@@ -151,16 +151,53 @@ export type JobLeakFinding = { job: JobRow; lastWorked: string };
 /** "Apache Ct" / a readable handle for the job in titles and push bodies. */
 export const jobLabel = (j: JobRow): string => j.name || j.job_number || "a job";
 
+/** The invoice columns costedJobIds reads: its status, and the KIND of each line (0342). */
+export const COSTED_INVOICE_COLUMNS = "job_id, status, invoice_items(line_kind)";
+
+/**
+ * WHICH JOBS HAVE COSTS ON THE RECORD — THE ONE RULE (NY-feeders, 0366). My Day's "No Costs Yet" and
+ * the 6 PM "Close out your day" push both ask it, so they can never disagree about a job. A job is
+ * costed when it has ANY of:
+ *   · a bill (a cost recorded on it),
+ *   · a purchase order,
+ *   · a materials list with at least one line,
+ *   · a live (non-void) invoice carrying a MATERIALS line (invoice_items.line_kind 'materials', 0342):
+ *     the materials were billed straight onto the invoice, which is exactly "costs recorded". Before
+ *     this, a job whose parts went on the invoice by hand was told it had "no costs recorded".
+ * Rows as read (the four reads are the caller's; the invoice read names COSTED_INVOICE_COLUMNS).
+ */
+export function costedJobIds(rows: {
+  bills?: readonly { job_id?: string | null }[] | null;
+  purchaseOrders?: readonly { job_id?: string | null }[] | null;
+  materialLists?: readonly { job_id?: string | null; material_list_items?: readonly unknown[] | null }[] | null;
+  invoices?: readonly { job_id?: string | null; status?: string | null; invoice_items?: readonly { line_kind?: string | null }[] | null }[] | null;
+}): Set<string> {
+  const out = new Set<string>();
+  const add = (id: string | null | undefined) => {
+    if (id) out.add(id);
+  };
+  for (const b of rows.bills ?? []) add(b.job_id);
+  for (const p of rows.purchaseOrders ?? []) add(p.job_id);
+  for (const m of rows.materialLists ?? []) if ((m.material_list_items?.length ?? 0) > 0) add(m.job_id);
+  for (const i of rows.invoices ?? []) {
+    if (i.status === "void") continue;
+    if ((i.invoice_items ?? []).some((l) => l?.line_kind === "materials")) add(i.job_id);
+  }
+  return out;
+}
+
 /**
  * Detector 2 — UNBILLED WORK: time logged in the last UNBILLED_WORK_DAYS but ZERO
- * costs (bills), ZERO purchase orders, and ZERO materials-list items. Skips jobs
- * already sitting on the billing board as done-not-invoiced (status complete/
- * invoiced with no real invoice) so the same job isn't reported twice.
+ * costs (bills), ZERO purchase orders, ZERO materials-list items and no materials line on a live
+ * invoice (costedJobIds, the one rule). Skips jobs already sitting on the billing board as
+ * done-not-invoiced (status complete/invoiced with no real invoice) so the same job isn't reported
+ * twice.
  */
 export function detectUnbilledWork(opts: {
   jobs: JobRow[];
   worked: Map<string, WorkedJob>;
-  /** Jobs with ANY bill, PO, or materials-list item — costs exist, no leak. */
+  /** Jobs with costs on the record (costedJobIds: a bill, a PO, a materials-list line, or a
+   *  materials line on a live invoice) — no leak. */
   costedJobIds: Set<string>;
   /** Jobs with ANY non-void invoice — for the done-not-invoiced dedupe. */
   invoicedJobIds: Set<string>;
@@ -184,6 +221,9 @@ export function detectUnbilledWork(opts: {
  * no future/today scheduled_start, no scheduled appointment, no schedule segment.
  * Suppressed while someone is clocked in (you're literally standing on the job) and
  * for jobs the inbox already lists as "to schedule" (estimate/scheduled, undated).
+ * NOT A JOB ON HOLD (NY-hold, 0366): a held job waits on purpose, and it comes back on its own day
+ * with its reason. Asking for a return visit on it, on My Day or in the 6 PM push, is the nag Erik
+ * stopped opening My Day over ("stockpiled with things i cant act on or already have on hold").
  */
 export function detectNeedsReturn(opts: {
   jobs: JobRow[];
@@ -200,6 +240,7 @@ export function detectNeedsReturn(opts: {
     if (!w || w.hasOpenEntry) continue;
     const status = j.status ?? "";
     if (status === "complete" || status === "invoiced" || status === "cancelled") continue;
+    if (status === "on_hold") continue; // waiting on purpose, with its own day (0366)
     // Already surfaced as a job_to_schedule inbox item — same ask, don't say it twice.
     // (to_be_scheduled replaced "estimate" as the waiting-room status, lifecycle rework.)
     if (!j.scheduled_start && (status === "estimate" || status === "to_be_scheduled" || status === "scheduled")) continue;

@@ -70,6 +70,10 @@ export const AGENT_WRITE_ALLOWED = new Set<string>([
   "inquiry.create",
   "inquiry.contact",
   "inquiry.convert",
+  // Every wait has a day (NY-feeders, 0366): bring a lead back on a later day, or record it lost
+  // (kept, status lost). Tier-1 reversible writes Nort runs on a yes, like inquiry.contact.
+  "inquiry.snooze",
+  "inquiry.markLost",
   "permit.create",
   // Mycelium: the office/field nodes — log petty cash (confirm-gated, money), log a safety
   // record. All reversible tier-1 except pettyCash.add (confirm:financial). (inventory.adjust was
@@ -100,6 +104,7 @@ export const AGENT_WRITE_ALLOWED = new Set<string>([
   "quote.attachJob", // pin a saved estimate to a job ("leave it with the job") — reversible link
   "quote.setCustomer", // attach/fix the customer on a saved quote without re-creating it
   "quote.convertToJob",
+  "quote.followUp", // the day to ask again about an unanswered estimate (0366); never its valid-until
   "contract.generate",
   "form.submit", // fill a checklist by voice
   // Sublinking: put a sub/supplier/inspector on a job (and remove). The contact book + the
@@ -168,7 +173,10 @@ export const AGENT_TOOL_FEATURE: Readonly<Record<string, FeatureKey>> = {
   "inquiry.create": "leads",
   "inquiry.contact": "leads",
   "inquiry.convert": "leads",
+  "inquiry.snooze": "leads",
+  "inquiry.markLost": "leads",
   "quote.create": "estimates",
+  "quote.followUp": "estimates",
   "quote.addItem": "estimates",
   "quote.updateItem": "estimates",
   "quote.deleteItem": "estimates",

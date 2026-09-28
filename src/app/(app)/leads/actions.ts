@@ -23,6 +23,7 @@ import { getOrgSettings } from "@/lib/org-settings";
 import { featureOn } from "@/lib/features";
 import { PROJECT_TYPES, estimateLinesFromIntake } from "@/lib/lead-triage";
 import { tzDateTimeUtc, todayStrInTz } from "@/lib/tz";
+import { checkComeBackDay } from "@/lib/come-back-days";
 import { createProposalCore, cleanSlots, type ProposalSlot } from "@/lib/appointments/proposal";
 import { ESTIMATE_VISIT_TYPES, INQUIRY_STATUSES, INSPECTION_TYPES } from "@/lib/statuses";
 import { saveQuote } from "../quotes/actions";
@@ -248,6 +249,30 @@ export async function markInquiryContacted(id: string, nextFollowUp?: string | n
   // My Day's "Needs action" inbox lists open leads — mark-contacted from THERE (Alexa
   // 2026-07-20: "checking the box resets") needs the planner to re-fetch too, else the
   // lead reappears un-contacted. The My-Day-refresh law.
+  revalidatePath("/planner");
+  return { ok: true };
+}
+
+/**
+ * THIS LEAD COMES BACK ON A DAY (NY-feeders, 0366): a Snooze, not a contact. It writes
+ * next_follow_up_at and nothing else: no status, no last_contacted_at, because nobody reached anyone
+ * (markInquiryContacted is the door that says someone did). The day is the company's today or later.
+ * A zero-row write is said, never assumed landed.
+ */
+export async function snoozeInquiry(id: string, date: string): Promise<Result> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+  const day = checkComeBackDay(todayStrInTz(await orgTimezone(supabase)), date);
+  if (!day.ok) return { ok: false, error: day.error };
+  const { data, error } = await supabase
+    .from("inquiries")
+    .update({ next_follow_up_at: day.day, updated_at: new Date().toISOString() })
+    .eq("id", id)
+    .select("id");
+  if (error) return { ok: false, error: dbError(error) };
+  if (!data?.length) return { ok: false, error: "That lead isn't available." };
+  revalidatePath("/leads");
   revalidatePath("/planner");
   return { ok: true };
 }

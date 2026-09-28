@@ -2,9 +2,8 @@ import { cache } from "react";
 import { viewerSortsBank } from "@/lib/bank-viewer";
 import { createClient } from "@/lib/supabase/server";
 import type { ActionItem, ActionKind } from "./types";
-import { AFFORDANCES, KIND_STREAM, appointmentAffordances } from "./types";
+import { AFFORDANCES, KIND_STREAM, appointmentAffordances, sortActionItems } from "./types";
 import { bucketInspections } from "@/lib/inspections";
-import { isPlatformAdmin } from "@/lib/platform-admin";
 import { ESTIMATE_VISIT_TYPES } from "@/lib/statuses";
 import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 import { invoiceBalance } from "@/lib/invoice-math";
@@ -23,9 +22,13 @@ import { noJobHoursActionItem } from "./no-job-hours-item";
 import { readNoJobHours, type NoJobHours } from "@/lib/no-job-hours";
 import { isOpenToBuy, newestListPerJob } from "@/lib/materials-checklist";
 import { feederOn, inquiryActionItem } from "./switches";
+import { heldJobDueFilter, inquiryDueFilter, quoteFollowUpState } from "./due-filters";
+import { isMissingColumn } from "@/lib/job-tasks";
 import { featureOn, featuresFromOffKey } from "@/lib/features";
 import {
+  COSTED_INVOICE_COLUMNS,
   NEEDS_RETURN_DAYS,
+  costedJobIds,
   daysAgoStr,
   detectNeedsReturn,
   detectStrayTime,
@@ -74,7 +77,7 @@ const QUOTE_EXPIRY_SOON_DAYS = 5;
 
 /**
  * THE single union behind the "Needs action" inbox — DECISIONS ONLY: money
- * (overdue/quiet/draft), leads, waiting (contracts/liens/captures/bug rollup),
+ * (overdue/quiet/draft), leads, the rest (contracts/liens/captures),
  * the leak detectors, appointments, and jobs needing a date. Projects rows from
  * the existing tables onto one ActionItem[] — no new tables. RLS already scopes
  * to the org; we additionally scope tech (non-staff) views to their own items.
@@ -189,7 +192,7 @@ async function buildActionItems(ctx: {
     }
   });
 
-  const [jobsR, inqR, apptR, orgR, invR, quoteR, acceptedR, draftR, conR, lienR, bugR, openTimeR, recentTimeR, nonBillableR, matJobsR, matSegR, inspR, inspQuoteR, billedJobR, doneWorkR, draftQuoteR] = await Promise.all([
+  const [jobsR, inqR, apptR, orgR, invR, quoteR, acceptedR, draftR, conR, lienR, openTimeR, recentTimeR, nonBillableR, matJobsR, matSegR, inspR, inspQuoteR, billedJobR, doneWorkR, draftQuoteR] = await Promise.all([
     // Unscheduled jobs — staff only (the "resting place" for things needing a date).
     // EVERY still-in-flight dateless job, not just estimate/scheduled: an in_progress
     // or on_hold job whose date was cleared must not vanish from every scheduling
@@ -205,18 +208,18 @@ async function buildActionItems(ctx: {
           .order("created_at", { ascending: false })
           .limit(50)
       : empty,
-    // New/uncontacted inquiries due for follow-up — staff only. A snoozed lead
-    // (the snooze verb writes status='contacted' + a future next_follow_up_at via
-    // inquiry.contact) stays OUT until its date — pulling it straight back made
-    // snooze a no-op. 'new' leads always show; contacted ones show when their
-    // follow-up is unset or due. A LIVE OBLIGATION: it runs with Leads off too (phone: Call Back).
+    // New/uncontacted inquiries due for follow-up — staff only. A snoozed lead stays OUT until its
+    // date, new or contacted alike (inquiryDueFilter): the row's Snooze and Nort's inquiry.snooze
+    // both write only next_follow_up_at, and a new lead that ignored it made "bring the Karen lead
+    // back Monday" a confirmed no-op. A new lead lands with no day (or today's), so it still shows
+    // the moment it arrives. A LIVE OBLIGATION: it runs with Leads off too (phone: Call Back).
     isStaff
       ? supabase
           .from("inquiries")
           .select("id, name, phone, status, next_follow_up_at, converted_at")
           .in("status", ["new", "contacted"])
           .is("converted_at", null)
-          .or(`status.eq.new,next_follow_up_at.is.null,next_follow_up_at.lte.${todayStr}`)
+          .or(inquiryDueFilter(todayStr))
           .order("created_at", { ascending: true })
           .limit(50)
       : empty,
@@ -268,14 +271,16 @@ async function buildActionItems(ctx: {
       : empty,
     // Quotes/estimates sent but not answered — the middle of the funnel. The
     // gone-quiet / expiring-soon cut is applied per-row below; the query just
-    // pulls the open sent docs.
+    // pulls the open sent docs. follow_up_at (0366, Nort's quote.followUp) is read when the column
+    // exists; before 0366 the same read runs without it and the old rule alone decides.
     isStaff
-      ? supabase
-          .from("quotes")
-          .select("id, quote_number, doc_type, status, total, valid_until, created_at, customers(name)")
-          .eq("status", "sent")
-          .order("created_at", { ascending: true })
-          .limit(50)
+      ? (async () => {
+          const read = (cols: string) =>
+            supabase.from("quotes").select(cols).eq("status", "sent").order("created_at", { ascending: true }).limit(50);
+          const base = "id, quote_number, doc_type, status, total, valid_until, created_at, customers(name)";
+          const withDay = await read(`${base}, follow_up_at`);
+          return withDay.error && isMissingColumn(withDay.error) ? read(base) : withDay;
+        })()
       : empty,
     // Accepted estimates — THE WIN. The customer said yes; this must scream "schedule the
     // job now" (the signal Erik lost when an accept showed nothing). The job's
@@ -317,20 +322,8 @@ async function buildActionItems(ctx: {
           .or("prelim_sent_at.is.null,lien_recorded_at.is.null")
           .limit(100)
       : empty,
-    // Open bug reports — North's own triage, not a company's (Wave 0): only a platform admin
-    // (0176) gets the rollup. Asked only for staff, so a tech's inbox never pays the round trip.
-    isStaff
-      ? isPlatformAdmin(supabase).then(async (admin): Promise<{ data: any[] | null }> =>
-          admin
-            ? await supabase
-                .from("bug_reports")
-                .select("id, note, page, created_at")
-                .eq("status", "open")
-                .order("created_at", { ascending: false })
-                .limit(50)
-            : { data: [] },
-        )
-      : empty,
+    // (North's own bug reports are not read here: they are Bug Watch's, with its own count on the
+    // avatar row. Wave 1, NY-list: a company's Needs You never carries them.)
     // ── The end-of-day money-leak sweep feeders (staff only) ──
     // Every open clock, whatever its age — a handful of rows at most; the stray
     // rule (past-day OR LONG_SHIFT_HOURS+) is applied per-row in detectStrayTime.
@@ -557,6 +550,8 @@ async function buildActionItems(ctx: {
     items.push({
       id: o.id,
       kind: "organize",
+      // A note is read, not filed; a bank download is sorted on its own card.
+      ...(bank ? { chip: "Bank Download" } : o.kind === "note" ? { chip: "Note To Review" } : {}),
       title: bank ? "Bank Download To Sort" : (ORGANIZE_LABEL[o.kind] ?? "To file"),
       subtitle: null,
       who: null,
@@ -612,22 +607,26 @@ async function buildActionItems(ctx: {
   // Sent quotes/estimates gone quiet — surfaced once the customer has had it
   // QUOTE_QUIET_DAYS+ with no answer, or the valid-until window is closing/past.
   // Open-only: acting on a quote (resend, follow up, mark declined) happens on
-  // its own page, and there's no snooze field that wouldn't alter the offer.
+  // its own page. THE FOLLOW-UP DAY (0366 quotes.follow_up_at, set by Nort's quote.followUp —
+  // never valid_until, which is the customer's offer) wins over the quiet rule: a day after today
+  // keeps the estimate off the list, and on its day it is back even if it isn't 7 days quiet.
   for (const q of (quoteR.data ?? []) as any[]) {
     const daysOut = q.created_at ? Math.floor((todayMs - Date.parse(q.created_at)) / 86_400_000) : 0;
     const daysToExpiry = q.valid_until ? Math.floor((Date.parse(q.valid_until) - todayMs) / 86_400_000) : null;
     const quiet = daysOut >= QUOTE_QUIET_DAYS;
     const expiring = daysToExpiry != null && daysToExpiry <= QUOTE_EXPIRY_SOON_DAYS;
-    if (!quiet && !expiring) continue; // still fresh — give the customer room
+    const followUp = quoteFollowUpState(q.follow_up_at, todayStr);
+    if (followUp === "later") continue; // the day he picked hasn't come yet
+    if (followUp === "none" && !quiet && !expiring) continue; // still fresh — give the customer room
     items.push({
       id: q.id,
       kind: "quote_awaiting",
       title: `${(q.doc_type ?? "quote") === "estimate" ? "Estimate" : "Quote"} ${q.quote_number} awaiting reply`,
       subtitle: q.customers?.name ?? formatCurrency(Number(q.total ?? 0)),
       who: null,
-      // Prefer the expiry for the "when" (that's the clock that matters); fall
-      // back to created so undated offers still sort by age.
-      when: q.valid_until ?? q.created_at ?? null,
+      // The follow-up day he picked, when that's why it's here; else the expiry (that's the clock
+      // that matters); fall back to created so undated offers still sort by age.
+      when: (followUp === "due" ? q.follow_up_at : null) ?? q.valid_until ?? q.created_at ?? null,
       // Past its valid-until the offer is dying — bump it above the routine chase.
       urgency: daysToExpiry != null && daysToExpiry < 0 ? 2 : 1,
       done: false,
@@ -698,6 +697,8 @@ async function buildActionItems(ctx: {
       items.push({
         id: `unbilled-${a.id}`,
         kind: "visit_unbilled",
+        // Its chip says the state it is in: billed and waiting on the money, or not billed at all.
+        ...(openInvoice ? { chip: "Billed, Not Paid" } : {}),
         title: `${a.title || "Work done"} — ${openInvoice ? "billed, no money yet" : "no bill yet"}`,
         subtitle: who,
         who: null,
@@ -817,25 +818,6 @@ async function buildActionItems(ctx: {
     });
   }
 
-  // Open bug reports — ONE rollup item (not one per bug) so a backlog of routine field reports
-  // can't flood the dock badge (it stays +1) and the "open" tap lands cleanly on Bug watch.
-  // Low urgency: it sorts below the money/legal items. Triage happens on /bugs.
-  const openBugs = (bugR.data ?? []) as any[];
-  if (openBugs.length) {
-    items.push({
-      id: "bugs-open", // synthetic rollup id — the only affordance is "open" (navigate), no per-row dispatch
-      kind: "bug_report",
-      title: `${openBugs.length} open bug report${openBugs.length > 1 ? "s" : ""}`,
-      subtitle: "Reported from the field",
-      who: null,
-      when: openBugs[0]?.created_at ?? null,
-      urgency: 0,
-      done: false,
-      href: "/bugs",
-      affordances: AFFORDANCES.bug_report,
-    });
-  }
-
   // ── The end-of-day money-leak sweep (staff only) — the "Apache Ct" detectors. ──
   // Detection only, per the hard boundary: each item names the gap and deep-links to
   // the surface that fixes it; nothing infers hours, dollars, or clock-out times.
@@ -877,6 +859,8 @@ async function buildActionItems(ctx: {
     items.push({
       id: `stray-${f.entryId}`, // synthetic (kind-prefixed) — open-only, no per-row dispatch
       kind: "time_stray",
+      // A clock still running says so; a closed shift on no job says where its hours are.
+      chip: f.openStill ? "Clock Left Running" : "On No Job",
       title: f.openStill
         ? `${f.name}'s ${formatDateShort(f.when)} entry is still open`
         : `${f.name}'s ${formatDateShort(f.when)} entry has no job`,
@@ -942,7 +926,9 @@ async function buildActionItems(ctx: {
       supabase.from("bills").select("job_id").in("job_id", jobIds).limit(200),
       supabase.from("purchase_orders").select("job_id").in("job_id", jobIds).limit(200),
       supabase.from("material_lists").select("job_id, material_list_items(id)").in("job_id", jobIds).limit(100),
-      supabase.from("invoices").select("job_id, status").in("job_id", jobIds).limit(200),
+      // Each line's kind rides along: a materials line on a live invoice is costs on the record
+      // (costedJobIds, the one rule the 6 PM push uses too).
+      supabase.from("invoices").select(COSTED_INVOICE_COLUMNS).in("job_id", jobIds).limit(200),
       supabase
         .from("appointments")
         .select("job_id")
@@ -954,13 +940,12 @@ async function buildActionItems(ctx: {
       supabase.from("job_schedule_segments").select("job_id").in("job_id", jobIds).gte("end_date", todayStr).limit(200),
     ]);
 
-    const costedJobIds = new Set<string>([
-      ...((wBillsR.data ?? []) as any[]).map((b) => b.job_id as string),
-      ...((wPosR.data ?? []) as any[]).map((p) => p.job_id as string),
-      ...((wMatR.data ?? []) as any[])
-        .filter((m) => (m.material_list_items?.length ?? 0) > 0)
-        .map((m) => m.job_id as string),
-    ]);
+    const costed = costedJobIds({
+      bills: (wBillsR.data ?? []) as any[],
+      purchaseOrders: (wPosR.data ?? []) as any[],
+      materialLists: (wMatR.data ?? []) as any[],
+      invoices: (wInvR.data ?? []) as any[],
+    });
     const invoicedJobIds = new Set<string>(
       ((wInvR.data ?? []) as any[]).filter((i) => i.status !== "void" && i.job_id).map((i) => i.job_id as string),
     );
@@ -977,7 +962,7 @@ async function buildActionItems(ctx: {
     }
 
     // 2) UNBILLED WORK — time on the job, zero costs/POs/materials. The Romex leak.
-    for (const f of detectUnbilledWork({ jobs: workedJobs, worked, costedJobIds, invoicedJobIds })) {
+    for (const f of detectUnbilledWork({ jobs: workedJobs, worked, costedJobIds: costed, invoicedJobIds })) {
       items.push({
         id: `unbilled-${f.job.id}`,
         kind: "job_unbilled_work",
@@ -1059,17 +1044,32 @@ async function buildActionItems(ctx: {
   // briefing prepares the decision: resume it, or confirm WHY it's still waiting. "Logic prepared
   // for success" — we look up the likely reason (an open task, or materials not ordered) instead of
   // just saying "on hold". Threshold keeps it a bounded, decide-able set, not a permanent nag.
+  //
+  // THE DAY THE HOLD PICKED (0366 jobs.hold_until): the picker says "Comes back Oct 20" and the rail
+  // says "Back Oct 20", so this list agrees — a held job is here from its day, never a week after
+  // the hold whatever day was picked (heldJobDueFilter). A hold with no day (one from before 0366)
+  // keeps the week-untouched rule. Before 0366 (no column) the old read runs alone.
   if (isStaff) {
     const ON_HOLD_STALE_DAYS = 7;
     const heldCutoff = new Date(Date.now() - ON_HOLD_STALE_DAYS * 864e5).toISOString();
-    const { data: heldJobs } = await supabase
+    const heldBase = "id, job_number, name, updated_at, customers(name)";
+    let heldRes: { data: unknown; error: unknown } = await supabase
       .from("jobs")
-      .select("id, job_number, name, updated_at, customers(name)")
+      .select(`${heldBase}, hold_until`)
       .eq("status", "on_hold")
-      .lt("updated_at", heldCutoff) // last touched (a proxy for "held since") over a week ago
+      .or(heldJobDueFilter(todayStr, heldCutoff))
       .order("updated_at", { ascending: true })
       .limit(20);
-    const held = (heldJobs ?? []) as any[];
+    if (heldRes.error && isMissingColumn(heldRes.error)) {
+      heldRes = await supabase
+        .from("jobs")
+        .select(heldBase)
+        .eq("status", "on_hold")
+        .lt("updated_at", heldCutoff) // last touched (a proxy for "held since") over a week ago
+        .order("updated_at", { ascending: true })
+        .limit(20);
+    }
+    const held = (heldRes.data ?? []) as any[];
     if (held.length) {
       const heldIds = held.map((j) => j.id);
       // Infer the blocker from the material take-off: a list with unpurchased (non-tool) items = the
@@ -1090,9 +1090,17 @@ async function buildActionItems(ctx: {
       for (const j of held) {
         // updated_at is only a PROXY for "held since" (any edit resets it), so we don't quote a
         // precise day count that could be wrong — just that it's been paused past the stale window.
+        // A hold with a day says the day it came back.
+        const back = j.hold_until
+          ? String(j.hold_until).slice(0, 10) >= todayStr
+            ? "Back today"
+            : `Back since ${formatDateShort(String(j.hold_until).slice(0, 10))}`
+          : null;
         const reason = unorderedMatJobs.has(j.id)
           ? "Materials not ordered yet"
-          : "On hold a while — still blocked?";
+          : back
+            ? `${back} — still blocked?`
+            : "On hold a while — still blocked?";
         items.push({
           id: `onhold-${j.id}`,
           kind: "job_on_hold",
@@ -1158,5 +1166,11 @@ async function buildActionItems(ctx: {
   const deskUnread = supplierDeskFailedItem(await supplierDeskP);
   if (deskUnread) items.unshift(deskUnread);
 
-  return items.map((it) => ({ ...it, stream: KIND_STREAM[it.kind] }));
+  // SORTED ONCE, HERE (Wave 1, NY-list): money, leads, today, other; then urgency; then oldest first,
+  // an undated row counting as today; ties keep the order built above (types.ts sortActionItems).
+  // Every reader gets it in this order, so My Day's top five are the right five.
+  return sortActionItems(
+    items.map((it) => ({ ...it, stream: KIND_STREAM[it.kind] })),
+    todayStr,
+  );
 }

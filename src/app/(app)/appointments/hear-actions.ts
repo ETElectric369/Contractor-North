@@ -3,6 +3,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { playbookForForm } from "@/lib/playbook/parse";
 import { runHear, type HearRun } from "@/lib/playbook/hear-run";
+import { readViaView } from "@/lib/inspection/walkthrough-access";
 import type { Answers } from "@/lib/playbook/types";
 
 /**
@@ -53,11 +54,15 @@ export async function hearIntoPlaybook(
   // What he's looking at wins; the stored column is the fallback for anything that calls without one.
   const useId = templateId || (appt as { inspection_template_id?: string | null }).inspection_template_id;
   if (!useId) return { ok: false, error: "Pick a walk-through first." };
-  const { data: form } = await supabase
-    .from("forms")
-    .select("schema, playbook, is_inspection")
-    .eq("id", useId)
-    .maybeSingle();
+  // Through form_playbooks (0366): a crew lead can't read a playbook sheet from forms itself any more,
+  // and gets its questions without the owner's notes or dollar figures (which filling never needs).
+  // A failed read is said, never "no sheet".
+  const { data: form, error: formErr } = await readViaView<{ schema?: unknown; playbook?: unknown; is_inspection?: boolean }>(
+    supabase,
+    "sheets",
+    (from) => from.select("schema, playbook, is_inspection").eq("id", useId).maybeSingle(),
+  );
+  if (formErr) return { ok: false, error: "Couldn't read the walk-through just now. Try again." };
   if (!form) return { ok: false, error: "That walk-through no longer exists." };
   // Same bound saveInspectionAnswersInner applies: an id must name a WALK-THROUGH, not any old form.
   if (!(form as { is_inspection?: boolean }).is_inspection)

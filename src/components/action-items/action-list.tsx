@@ -2,15 +2,13 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { CalendarPlus, Clock3, X, ChevronRight, Check, UserPlus, ArrowRightLeft, Phone } from "lucide-react";
+import { CalendarPlus, Clock3, X, ChevronRight, Check, UserPlus, Phone } from "lucide-react";
 import { Modal, ModalActions } from "@/components/ui/modal";
-import { Button } from "@/components/ui/button";
 import { Label, Select } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { MoveToDay } from "@/components/move-to-day";
-import { useToast } from "@/components/toast";
 import { dispatchAction } from "@/lib/action-items/dispatch";
-import { KIND_META, KIND_STREAM, STREAM_LABEL, STREAM_ORDER, sortActionItems, type ActionItem, type Affordance } from "@/lib/action-items/types";
+import { KIND_META, chipOf, type ActionItem, type Affordance } from "@/lib/action-items/types";
 import { DEFAULT_TIMEZONE } from "@/lib/utils";
 import { SupplierPaperCards, SUPPLIER_PAPERS_SCOPE } from "@/components/supplier-paper-cards";
 import { AlreadyBilledButton } from "@/components/already-billed-sheet";
@@ -50,10 +48,15 @@ function prettyWhen(when: string | null | undefined, todayStr: string, tz: strin
 }
 
 /**
- * The one "needs action" list — the action-layer twin of <ModalActions>. Renders
- * any ActionItem[] with the universal done-sinks-to-bottom order, and exposes
- * each item's canonical verbs (Do / Schedule / Snooze / Dismiss / Open) routed
- * through the single dispatcher. One source of truth for every actionable list.
+ * The one "needs action" list (Needs You on My Day) — the action-layer twin of <ModalActions>.
+ * Renders any ActionItem[] IN THE ORDER THE SERVER SENT IT (the build sorts once: money, leads,
+ * today, other; then urgency; then oldest first), only sinking the rows ticked done here; and exposes
+ * each item's canonical verbs (Do / Schedule / Snooze / Dismiss / Open) routed through the single
+ * dispatcher. One source of truth for every actionable list.
+ *
+ * ONE FLAT LIST OF PLAIN CHIPS (Wave 1, W1-15). No Money / Leads / Today / Waiting headers: each
+ * row's chip says the state it is in ("Past Due", "Won", "No Reply Yet", "Clock Left Running"), so
+ * the headers were a second way of saying the same thing, four lines tall.
  */
 export function ActionList({
   items,
@@ -72,44 +75,34 @@ export function ActionList({
   /** The ORG's timezone — must be the same clock todayStr was computed in, or a chip can
    *  read "Today · 9:00 PM" for an item the day math already counted as tomorrow. */
   tz?: string;
-  /** The Leads switch (0352). Off, a request lands here as a request: its section reads Requests
-   *  and its chip Request, not a lead list the company switched off. Absent = on, as always. */
+  /** The Leads switch (0352). Off, a request lands here as a request: its chip reads Request (set on
+   *  the row by inquiryActionItem; this is the fallback for a row built without it), not a lead list
+   *  the company switched off, and its Call Back dials. Absent = on, as always. */
   leadsOn?: boolean;
 }) {
   const router = useRouter();
-  const toast = useToast();
   const [doneIds, setDoneIds] = useState<Set<string>>(new Set());
   const [removedIds, setRemovedIds] = useState<Set<string>>(new Set());
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   // The list banner at the top of the body is PAINTED UNDER an open Modal (overlay z-[120]),
-  // so a failure inside the Assign/Convert sheet was invisible and the button read as dead.
+  // so a failure inside the Assign sheet was invisible and the button read as dead.
   // Every modal-driven failure also lands here, inside the dialog that caused it.
   const [modalError, setModalError] = useState<string | null>(null);
   const [assigning, setAssigning] = useState<ActionItem | null>(null);
   const [assigneeVal, setAssigneeVal] = useState("");
   const [savingAssign, setSavingAssign] = useState(false);
-  const [converting, setConverting] = useState<ActionItem | null>(null);
   const [dismissing, setDismissing] = useState<ActionItem | null>(null);
 
-  const visible = sortActionItems(
-    items.filter((i) => !removedIds.has(i.id)).map((i) => ({ ...i, done: i.done || doneIds.has(i.id) })),
-  );
-
-  // The four urgency streams, rendered as titled sections in fixed order —
-  // Money / Leads / Today / Waiting — with empty groups hidden. Grouping runs on
-  // whatever items arrived (a pre-sliced My Day list groups just its slice) and
-  // the universal ordering rule still holds within each group. The KIND_STREAM
-  // fallback covers any item that reaches us without a stamped stream.
-  const groups = STREAM_ORDER.map((stream) => ({
-    stream,
-    items: visible.filter((i) => (i.stream ?? KIND_STREAM[i.kind]) === stream),
-  })).filter((g) => g.items.length > 0);
+  // THE SERVER'S ORDER (the build sorts once, types.ts sortActionItems), with only the rows ticked
+  // done HERE sunk to the bottom, in their own order.
+  const shown = items.filter((i) => !removedIds.has(i.id)).map((i) => ({ ...i, done: i.done || doneIds.has(i.id) }));
+  const visible = [...shown.filter((i) => !i.done), ...shown.filter((i) => i.done)];
 
   async function run(
     item: ActionItem,
     verb: Affordance,
-    payload?: { date?: string; assignee?: string; target?: "inspection" | "customer" | "quote" | "estimate" | "job" },
+    payload?: { date?: string; assignee?: string },
   ): Promise<{ ok: boolean; error?: string }> {
     setError(null);
     setBusyId(item.id);
@@ -131,9 +124,9 @@ export function ActionList({
     setDoneIds((s) => new Set(s).add(item.id)); // sink it immediately
     run(item, "do");
   }
-  // Dismiss is a HARD DELETE for tasks/inquiries (it can't be undone) — confirm first.
+  // Dismiss is a HARD DELETE for an inquiry (it can't be undone) — confirm first.
   // For appointments/organize it just cancels/archives (reversible), so run it straight.
-  const HARD_DELETE_KINDS = new Set(["task", "work_order", "inquiry"]);
+  const HARD_DELETE_KINDS = new Set(["inquiry"]);
   /**
    * THE ENDINGS THAT AREN'T DELETIONS (0205). "Didn't win it" marks the estimate declined or
    * stamps the walk-through's outcome — a real fact about the deal, reversible on its own page.
@@ -179,10 +172,6 @@ export function ActionList({
     setModalError(null);
     setAssigning(item);
   }
-  function openConvert(item: ActionItem) {
-    setModalError(null);
-    setConverting(item);
-  }
   async function saveAssign() {
     // NEVER dispatch on the "— Unassigned —" default. For a job, an empty assignee is
     // job.assign's documented CLEAR-THE-WHOLE-CREW branch (written for the agent), so a
@@ -196,27 +185,9 @@ export function ActionList({
     if (res.ok) setAssigning(null);
     else setModalError(res.error ?? "Couldn't do that.");
   }
-  async function doConvert(item: ActionItem, target: "inspection" | "customer" | "quote" | "estimate" | "job") {
-    setModalError(null);
-    setRemovedIds((s) => new Set(s).add(item.id)); // converted → leaves the inbox
-    const res = await run(item, "convert", { target });
-    // The convert dispatch drops the redirect, so the row just vanishes — a toast is the only
-    // signal the crew gets that it worked (inspection especially: the site visit is now booked).
-    if (res.ok) {
-      setConverting(null);
-      toast(
-        target === "inspection"
-          ? "Inspection booked — check the schedule"
-          : `Converted to ${target}`,
-        "success",
-      );
-    } else {
-      setModalError(res.error ?? "Couldn't do that.");
-    }
-  }
 
-  // The three sheets, hoisted out of the list body: an optimistic removal (convert) can empty
-  // `visible` mid-request, and the old early return unmounted the OPEN dialog along with the list.
+  // The two sheets, hoisted out of the list body: an optimistic removal (a dismiss) can empty
+  // `visible` mid-request, and an early return would unmount the OPEN dialog along with the list.
   const modals = (
     <>
       <Modal
@@ -246,35 +217,6 @@ export function ActionList({
               ))}
             </Select>
           </div>
-        </div>
-      </Modal>
-
-      <Modal open={!!converting} onClose={() => setConverting(null)} title="Convert inquiry" size="sm">
-        <div className="space-y-3">
-          {modalError && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{modalError}</div>}
-          <p className="text-sm text-slate-500">Turn this inquiry into:</p>
-          <div className="grid grid-cols-2 gap-2">
-            {([
-              ["inspection", "Inspection"],
-              ["estimate", "Estimate"],
-              ["quote", "Quote"],
-              ["job", "Job"],
-              ["customer", "Customer"],
-            ] as const).map(([t, label]) => (
-              <Button
-                key={t}
-                type="button"
-                variant="outline"
-                disabled={busyId === converting?.id}
-                onClick={() => converting && doConvert(converting, t)}
-              >
-                {label}
-              </Button>
-            ))}
-          </div>
-          <p className="text-xs text-slate-400">
-            Inspection books a site visit in ~2 days and keeps the lead open — for big jobs that need a look before a firm price.
-          </p>
         </div>
       </Modal>
 
@@ -322,14 +264,12 @@ export function ActionList({
   return (
     <div className="space-y-1.5">
       {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
-      {groups.map(({ stream, items: groupItems }) => (
-        <div key={stream} className="space-y-1.5">
-          <div className="px-1 pt-1 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-            {stream === "leads" && !leadsOn ? "Requests" : STREAM_LABEL[stream]}
-          </div>
-          {groupItems.map((item) => {
+          {visible.map((item) => {
             const can = (v: Affordance) => item.affordances.includes(v);
             const meta = KIND_META[item.kind];
+            // The row's own words when its state has them, else its kind's; a request with Leads off
+            // reads Request even on a row built without its chip.
+            const chip = item.kind === "inquiry" && !leadsOn && !item.chip ? "Request" : chipOf(item);
             const when = prettyWhen(item.when, todayStr, tz);
             const overdue = item.when && !item.when.includes("T") && item.when < todayStr;
             return (
@@ -371,7 +311,7 @@ export function ActionList({
                   </button>
                   <div className="mt-0.5 flex items-center gap-1.5">
                     <button onClick={() => router.push(item.href)} className="flex min-w-0 flex-1 items-center gap-1.5 truncate text-left text-xs text-slate-500">
-                      <Badge tone={meta.tone}>{item.kind === "inquiry" && !leadsOn ? "Request" : meta.label}</Badge>
+                      <Badge tone={meta.tone}>{chip}</Badge>
                       {item.subtitle && <span className="truncate">{item.subtitle}</span>}
                       {item.who && <span className="truncate">· {item.who}</span>}
                     </button>
@@ -400,11 +340,6 @@ export function ActionList({
                   {can("assign") && (
                     <button onClick={() => openAssign(item)} disabled={busyId === item.id} className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-brand" title="Assign to someone">
                       <UserPlus className="h-4 w-4" />
-                    </button>
-                  )}
-                  {can("convert") && (
-                    <button onClick={() => openConvert(item)} disabled={busyId === item.id} className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-brand" title="Convert">
-                      <ArrowRightLeft className="h-4 w-4" />
                     </button>
                   )}
                   {can("snooze") && (
@@ -452,8 +387,6 @@ export function ActionList({
               </div>
             );
           })}
-        </div>
-      ))}
 
       {modals}
     </div>

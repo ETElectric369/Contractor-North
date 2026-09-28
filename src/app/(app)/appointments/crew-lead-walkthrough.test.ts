@@ -14,8 +14,18 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
  *
  * The fake client holds one appointment row, one sheet and the caller's profile; the database's own
  * half of the rule is walkthrough-crew-lead.integration.test.ts.
+ *
+ * AFTER 0366 (LEAK-0227) the walk-through's reads go through the two views, as the database does:
+ * appointment_answers (the office reads the answers as stored, anyone else without a price) and
+ * form_playbooks (a crew lead can no longer read a playbook sheet from forms itself). `views: false`
+ * is a database before 0366: the views answer PGRST205 and the table is read as before. `viewError`
+ * is any other failure of a view read, which is an error, never an empty row.
  */
 const db = vi.hoisted(() => ({
+  views: true,
+  viewError: null as null | { code: string; message: string },
+  /** Every relation read, in order: which reads went through a view. */
+  reads: [] as string[],
   staff: false,
   member: { ok: true as boolean, error: "" },
   crewLead: true,
@@ -45,6 +55,9 @@ vi.mock("@/lib/calendar-sync", () => ({ pushCalendarItem: vi.fn(async () => {}),
 vi.mock("@/lib/push", () => ({ sendPushToProfiles: vi.fn(async () => {}) }));
 
 import { addInspectionPhotos, removeInspectionPhoto, saveInspectionAnswers, saveInspectionCapture } from "./actions";
+import { answersWithoutPrices } from "@/lib/inspection/walkthrough-access";
+
+const MISSING_VIEW = (name: string) => ({ code: "PGRST205", message: `Could not find the table 'public.${name}' in the schema cache` });
 
 function client() {
   return {
@@ -67,8 +80,18 @@ function client() {
       const q: { op: string; patch?: any; filters: [string, unknown][] } = { op: "select", filters: [] };
       const matches = (row: any) => !!row && q.filters.every(([c, v]) => row[c] === v);
       const run = async () => {
+        if (q.op === "select") db.reads.push(table);
         if (table === "profiles") return { data: q.op === "select" ? { crew_lead: db.crewLead, org_id: "org-1" } : null, error: null };
-        if (table === "forms") return { data: matches(db.form) ? db.form : null, error: null };
+        // THE VIEWS (0366), as the database answers them.
+        if (table === "appointment_answers" || table === "form_playbooks") {
+          if (!db.views) return { data: null, error: MISSING_VIEW(table) };
+          if (db.viewError) return { data: null, error: db.viewError };
+          if (table === "form_playbooks") return { data: matches(db.form) ? db.form : null, error: null };
+          const row = matches(db.appt) ? { ...db.appt } : null;
+          return { data: row && !db.staff ? { ...row, inspection_answers: answersWithoutPrices(row.inspection_answers) } : row, error: null };
+        }
+        // After 0366 a non-office reader reads a playbook sheet from forms only through the view.
+        if (table === "forms") return { data: matches(db.form) && (db.staff || !db.views) ? db.form : null, error: null };
         if (table === "appointments") {
           if (q.op === "update") {
             db.updates.push(q.patch);
@@ -96,6 +119,9 @@ const PHOTO_OFFICE = "org-1/appointments/appt-1/1-office.jpg";
 const PHOTO_LEAD = "org-1/appointments/appt-1/2-lead.jpg";
 
 beforeEach(() => {
+  db.views = true;
+  db.viewError = null;
+  db.reads = [];
   db.staff = false;
   db.member = { ok: true, error: "" };
   db.crewLead = true;
@@ -273,6 +299,53 @@ describe("a crew lead on the visit: through save_walkthrough_capture", () => {
     expect(r).toMatchObject({ ok: false, refused: true });
     expect(r.error).toMatch(/Crew leads can't save the walk-through until the office finishes an update/);
     expect(r.error).not.toMatch(/PGRST|function/);
+  });
+});
+
+describe("the walk-through's reads go through the views (0366, LEAK-0227)", () => {
+  it("the office's save reads the sheet and the stored answers through the views, prices and all", async () => {
+    db.staff = true;
+    db.appt.inspection_answers = { work: "Deck", scope: [{ code: "R1", qty: 1, price: 500 }], retired_q: "kept" };
+    expect(await saveInspectionAnswers("appt-1", "sheet-1", { work: "Remodel" })).toEqual({ ok: true, id: "appt-1" });
+    expect(db.reads).toContain("form_playbooks");
+    expect(db.reads).toContain("appointment_answers");
+    expect(db.reads).not.toContain("forms");
+    // A retired answer rides forward from the stored row (read through the view).
+    expect(db.updates[0].inspection_answers).toMatchObject({ work: "Remodel", retired_q: "kept" });
+  });
+
+  it("a crew lead's save reads them too, the stored answers without a price, and still saves", async () => {
+    db.appt.inspection_answers = { work: "Deck", scope: [{ code: "R1", qty: 1, price: 500 }], retired_q: "kept" };
+    expect(await saveInspectionAnswers("appt-1", "sheet-1", { work: "Remodel" })).toEqual({ ok: true, id: "appt-1" });
+    // The sheet from the view (forms itself would not hand him a playbook sheet any more).
+    expect(db.reads).not.toContain("forms");
+    expect(db.reads).toContain("form_playbooks");
+    expect(db.reads).toContain("appointment_answers");
+    const sent = db.rpcCalls[0].args.p_answers;
+    expect(sent.work).toBe("Remodel");
+    expect(sent.retired_q).toBe("kept");
+    // Nothing he sends back carries the office's price: he never read one.
+    expect(JSON.stringify(sent)).not.toContain("price");
+  });
+
+  it("before 0366 (no views on the database): the table is read exactly as before", async () => {
+    db.views = false;
+    expect(await saveInspectionAnswers("appt-1", "sheet-1", { work: "Remodel" })).toEqual({ ok: true, id: "appt-1" });
+    expect(db.reads).toEqual(expect.arrayContaining(["form_playbooks", "forms", "appointment_answers", "appointments"]));
+    expect(db.rpcCalls[0].args.p_answers.work).toBe("Remodel");
+  });
+
+  it("a view read that fails for any other reason is an error said out loud, and nothing is saved", async () => {
+    db.staff = true;
+    db.viewError = { code: "57014", message: "canceling statement due to statement timeout" };
+    const r = await saveInspectionAnswers("appt-1", "sheet-1", { work: "Remodel" });
+    expect(r.ok).toBe(false);
+    expect(r.error).toBeTruthy();
+    expect(db.updates).toEqual([]);
+    expect(db.rpcCalls).toEqual([]);
+    // Never the table behind the view's back: a timeout is not a missing view.
+    expect(db.reads).not.toContain("forms");
+    expect(db.reads).not.toContain("appointments");
   });
 });
 

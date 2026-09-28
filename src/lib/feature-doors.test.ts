@@ -136,4 +136,17 @@ describe("FEATURE_ROUTES — the pages that carry the Off line when opened by li
   it("every entry names a real switch", () => {
     for (const r of FEATURE_ROUTES) expect(FEATURE_KEYS).toContain(r.feature);
   });
+
+  it("the doors that moved this wave keep their Off line when a link opens them (W1-07/W1-08)", () => {
+    // Tools lives behind the initials now, only with Calculators on; a bookmark still opens it.
+    expect(DOCK.find((s) => s.key === "tools")).toMatchObject({ inMenu: true, feature: "calculators" });
+    expect(featureForPath("/tools")).toBe("calculators");
+    // A tech's Handbook row moved under You: it is still Crew & Payroll's page.
+    expect(DOCK.find((s) => s.key === "you")?.children.find((c) => c.href === "/handbook")?.feature).toBe("crew_payroll");
+    expect(featureForPath("/handbook")).toBe("crew_payroll");
+    // Customers (Sales) and Timecards (Money) belong to no switch, so they never carry an Off line.
+    expect(featureForPath("/crm")).toBeNull();
+    expect(featureForPath("/crm/abc")).toBeNull();
+    expect(featureForPath("/timecards")).toBeNull();
+  });
 });

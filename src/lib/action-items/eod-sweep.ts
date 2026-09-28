@@ -2,10 +2,13 @@ import "server-only";
 import { todayStrInTz } from "@/lib/tz";
 import { getOrgSettings } from "@/lib/org-settings";
 import { featureOn } from "@/lib/features";
-import { orgStaffIds, pushConfigured, sendPushToProfiles } from "@/lib/push";
+import { orgStaffIds, pushConfigured } from "@/lib/push";
+import { notifyPeople } from "@/lib/notifications";
 import { claimedSourcesOnJob } from "@/lib/unbilled-work";
 import {
+  COSTED_INVOICE_COLUMNS,
   NEEDS_RETURN_DAYS,
+  costedJobIds,
   daysAgoStr,
   detectNeedsReturn,
   detectStrayTime,
@@ -96,7 +99,9 @@ export async function sendCloseOutNudges(supabase: any): Promise<{ orgs: number;
         supabase.from("bills").select("job_id").in("job_id", jobIds).limit(200),
         supabase.from("purchase_orders").select("job_id").in("job_id", jobIds).limit(200),
         supabase.from("material_lists").select("job_id, material_list_items(id)").in("job_id", jobIds).limit(100),
-        supabase.from("invoices").select("job_id, status").in("job_id", jobIds).limit(200),
+        // The kind of each invoice line rides along: a materials line on a live invoice is costs on
+        // the record (costedJobIds, the one rule My Day uses too).
+        supabase.from("invoices").select(COSTED_INVOICE_COLUMNS).in("job_id", jobIds).limit(200),
         supabase
           .from("appointments")
           .select("job_id")
@@ -108,13 +113,12 @@ export async function sendCloseOutNudges(supabase: any): Promise<{ orgs: number;
         supabase.from("job_schedule_segments").select("job_id").in("job_id", jobIds).gte("end_date", today).limit(200),
       ]);
 
-      const costedJobIds = new Set<string>([
-        ...((billsR.data ?? []) as any[]).map((b: any) => b.job_id as string),
-        ...((posR.data ?? []) as any[]).map((p: any) => p.job_id as string),
-        ...((matR.data ?? []) as any[])
-          .filter((m: any) => (m.material_list_items?.length ?? 0) > 0)
-          .map((m: any) => m.job_id as string),
-      ]);
+      const costed = costedJobIds({
+        bills: (billsR.data ?? []) as any[],
+        purchaseOrders: (posR.data ?? []) as any[],
+        materialLists: (matR.data ?? []) as any[],
+        invoices: (invR.data ?? []) as any[],
+      });
       const invoicedJobIds = new Set<string>(
         ((invR.data ?? []) as any[]).filter((i: any) => i.status !== "void" && i.job_id).map((i: any) => i.job_id as string),
       );
@@ -122,7 +126,7 @@ export async function sendCloseOutNudges(supabase: any): Promise<{ orgs: number;
       const futureSegmentJobIds = new Set<string>(((segR.data ?? []) as any[]).map((s: any) => s.job_id as string));
       const jobs = (jobsR.data ?? []) as any[];
 
-      for (const f of detectUnbilledWork({ jobs, worked, costedJobIds, invoicedJobIds })) {
+      for (const f of detectUnbilledWork({ jobs, worked, costedJobIds: costed, invoicedJobIds })) {
         gaps.push(`${jobLabel(f.job)} has no costs recorded`);
       }
       for (const f of detectNeedsReturn({ jobs, worked, todayStr: today, futureApptJobIds, futureSegmentJobIds })) {
@@ -137,7 +141,8 @@ export async function sendCloseOutNudges(supabase: any): Promise<{ orgs: number;
 
     const top = gaps.slice(0, 2);
     const more = gaps.length - top.length;
-    await sendPushToProfiles(staff, "day_ahead", {
+    // The bell records it for the people it went to (day_ahead is opt-in: notifyPeople).
+    await notifyPeople(org.id, staff, "day_ahead", {
       title: "Close out your day",
       body: top.join(" · ") + (more > 0 ? ` · +${more} more` : ""),
       // Nort switched off (0352): plain My Day, whose Needs You list names the same gaps. The

@@ -78,7 +78,8 @@ describe("Title Case on the clickables Wave 0 re-wrapped", () => {
     const inspector = src("src/app/(app)/appointments/[id]/inspector.tsx");
     expect(inspector).toContain('<Button type="button">Start The Estimate</Button>');
     expect(inspector).toContain('label="Drop Photos Or PDFs"');
-    expect(src("src/components/setup-button.tsx")).toContain("Take The Setup Again");
+    // The cap is gone (W1-09): its rows are built once, for Search Or Ask and for Help.
+    expect(src("src/lib/onboarding/help-rows.ts")).toContain('label: "Take The Setup Again"');
     const appt = src("src/app/(app)/appointments/[id]/page.tsx");
     expect(appt).toContain('fallbackLabel="Back To Schedule"');
     expect(appt).toContain('fallbackLabel="Back To My Day"');

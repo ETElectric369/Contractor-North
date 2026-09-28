@@ -457,12 +457,15 @@ export default async function SettingsPage({
                     {/* THE WHY-LINES LESSON, offered where why lines live (cn-v726 split). Erik's
                         brief for the tour was that nobody works this out unaided; teaching it on day
                         one, seventeen steps from this screen, is how it drifted. Offered once —
-                        lessons_seen (0197) — and replayable forever from the cap. */}
+                        lessons_seen (0197) — and replayable forever from Show Me How (under Search
+                        Or Ask; under Help, behind the initials, with Nort off). The switches ride
+                        along: the lesson skips a step whose feature is off. */}
                     <LessonOffer
                       lessonKey="why-lines"
                       seen={Array.isArray((me as { lessons_seen?: unknown } | null)?.lessons_seen) ? ((me as { lessons_seen: unknown[] }).lessons_seen as unknown[]).map(String) : []}
                       initial={{}}
                       nortOn={on("nort")}
+                      features={settings.features}
                     />
                     <p className="mb-4 text-sm text-slate-500">
                       {on("leads") || walkThroughOff

@@ -1,7 +1,5 @@
 import {
   Sun,
-  ListChecks,
-  Wand2,
   Ban,
   Briefcase,
   Play,
@@ -53,6 +51,8 @@ export interface DockNode {
   header?: boolean;
   /** Hidden from techs (office/admin/owner only). */
   staffOnly?: boolean;
+  /** The mirror: hidden from staff, a tech's row only. */
+  techOnly?: boolean;
   /** Extra route prefixes this page owns for active-section matching — routes that live
    *  under a different path than the child's href (e.g. Bills & POs owns /purchasing:
    *  PO detail pages live there but belong to Money). Never rendered as links. */
@@ -85,6 +85,19 @@ export interface DockSection {
   /** The switch the whole tile belongs to (Tools = Calculators). A tile whose rows are all
    *  switched off goes too, without a tag (visibleDock). */
   feature?: FeatureKey;
+  /**
+   * BEHIND YOUR INITIALS, NOT ON THE BAR (W1-07). Office and Tools stay whole sections — the
+   * active-section match, the section strip and sheet, the lg page column and search all still
+   * see them — but the rail and the phone bar don't draw them as tiles: the avatar menu carries
+   * one row for each instead. A sixth tile shrank every tile under the 44px tap size.
+   */
+  inMenu?: boolean;
+  /**
+   * THE TILE'S NAME WHEN ONE ROW IS ALL THAT'S LEFT. Sales with Leads and Estimates both off is
+   * only its Customers row, so the tile says Customers (and lands there, which visibleDock does
+   * anyway). A section field, never company code: any tile reduced to `rowId` reads `label`.
+   */
+  whenOnly?: { rowId: string; label: string };
 }
 
 /** First-letter cap for generated labels ("in progress" → "In progress"). The words stay
@@ -101,27 +114,25 @@ const JOB_STATUS_ICONS: Record<JobStatus, LucideIcon> = {
   cancelled: Ban,
 };
 
-// The dock, re-nerved to Alexa's office-designed map (June 26). Flat sections — every title is
-// ONE CLICK to its main page; its pages live in the left sidebar (desktop) or the top strip
-// (mobile). The big move: Customers (CRM) is promoted out of Sales into its own bottom section,
-// "Contacts" — the people hub (clients + leads today; subcontractors next), interlinked with
-// everything via the existing customer_id FKs. Order follows the day, with Contacts at the bottom.
+// The dock, re-nerved to Alexa's office-designed map (June 26), then cut to five tiles for staff
+// and four for a tech (Wave 1, W1-07/W1-08): Today · Schedule · Sales · Jobs · Money for the
+// office, Today · Clock · Jobs · You for the crew. Flat sections — every title is ONE CLICK to its
+// main page; its pages live in the left sidebar (desktop) or the top strip (mobile). Office and
+// Tools are still sections here, but they live behind the initials (inMenu), not on the bar.
 export const DOCK: DockSection[] = [
   {
     key: "today",
     label: "Today",
     icon: Sun,
     href: "/planner",
-    children: [
-      { id: "t-day", label: "My Day", icon: Sun, href: "/planner" },
-      // /tasks is the Reminders page since 0358 (a job's tasks are on the job), so the pill says so.
-      { id: "t-tasks", label: "Reminders", icon: ListChecks, href: "/tasks" },
-      // Staff only: Take Photo, Upload, File It and AI Review all save through requireStaff.
-      { id: "t-org", label: "Organize", icon: Wand2, href: "/organize", staffOnly: true },
-    ],
+    // MY DAY ALONE (W1-03). Reminders and Organize were pills beside it, a strip on every visit to
+    // My Day for two pages its own cards already open (Today's 6 is the Reminders list; the paper
+    // inbox rides in Needs You). One row draws no strip and no desktop column. Both pages keep a
+    // home: they light Today (owns), and the command bar finds them by name (command-bar.tsx).
+    children: [{ id: "t-day", label: "My Day", icon: Sun, href: "/planner", owns: ["/tasks", "/organize"] }],
   },
-  // Schedule PROMOTED to its own tile, between Today and Clock — Erik, by name: "Move: Schedule -
-  // to main dock after Today before Clock". It had been a child pill under Today, and the man
+  // Schedule PROMOTED to its own tile, right after Today — Erik, by name: "Move: Schedule - to
+  // main dock after Today before Clock". It had been a child pill under Today, and the man
   // planning a week lives on this screen too much for it to sit one level down. Office-only
   // (/schedule redirects techs to /planner); /calendar, /appointments and /map are server
   // redirects into /schedule, so no owns[] needed.
@@ -134,29 +145,34 @@ export const DOCK: DockSection[] = [
     children: [{ id: "s-week", label: "Schedule", icon: CalendarDays, href: "/schedule" }],
   },
   {
+    // THE CREW'S CLOCK (W1-08). Staff clock in on My Day's Now card, whose footer keeps a
+    // Timeclock link (Switch Job, Split); the office reads hours under Money › Timecards. So the
+    // tile is a tech's only, and a tech's /timeclock still lights it: the role filter runs first,
+    // so Timecards' claim on /timeclock (it is staff-only) never reaches him.
     key: "clock",
     label: "Clock",
     icon: Clock,
-    href: "/timeclock", // everyone can clock in; timecards are office-only
-    // The WHEN-DID pair only: Timeclock + Timecards. Schedule (the WHEN-WILL map) moved
-    // up to Today so a planning surface no longer hides behind the timeclock's door.
-    children: [
-      { id: "ck-clock", label: "Timeclock", icon: Play, href: "/timeclock" },
-      { id: "ck-cards", label: "Timecards", icon: CalendarClock, href: "/timecards", staffOnly: true },
-    ],
+    href: "/timeclock",
+    techOnly: true,
+    children: [{ id: "ck-clock", label: "Timeclock", icon: Play, href: "/timeclock" }],
   },
   {
     key: "sales",
     label: "Sales",
     icon: TrendingUp,
-    href: "/leads", // Customers moved to Contacts; Sales is the prospect pipeline now
+    href: "/leads",
     staffOnly: true,
+    // Leads and Estimates both off: the one row left is Customers, so the tile says so.
+    whenOnly: { rowId: "sl-customers", label: "Customers" },
     // The pipeline in order: Leads → Inspections (the site walk-through between a lead and
-    // its estimate — an inspection IS an appointment type, Erik 2026-07-14) → Estimates.
+    // its estimate — an inspection IS an appointment type, Erik 2026-07-14) → Estimates, and the
+    // people it all ends up with: Customers (the Contacts tile folded in here, W1-07). Customers
+    // carries no switch, so Sales never disappears; /crm/[id] lights it.
     children: [
       { id: "sl-leads", label: "Leads", icon: UserPlus, href: "/leads", feature: "leads" },
       { id: "sl-inspections", label: "Inspections", icon: ClipboardCheck, href: "/inspections", feature: "leads" },
       { id: "sl-quotes", label: "Estimates", icon: FileText, href: "/quotes", feature: "estimates" },
+      { id: "sl-customers", label: "Customers", icon: Users, href: "/crm" },
     ],
   },
   {
@@ -201,6 +217,10 @@ export const DOCK: DockSection[] = [
       // who-owes-what lives here, fed by invoices, one line per customer.
       { id: "m-ar", label: "Accounts Receivable", icon: Banknote, href: "/billing/ar" },
       { id: "m-pay", label: "Payments", icon: CreditCard, href: "/payments" },
+      // Hours are money to the office (W1-08): Timecards moved here from the Clock tile, which is
+      // the crew's now. It owns /timeclock too, so staff on the Timeclock (reached from the Now
+      // card) light Money; a tech never sees this row, so his /timeclock lights Clock.
+      { id: "ck-cards", label: "Timecards", icon: CalendarClock, href: "/timecards", staffOnly: true, owns: ["/timeclock"] },
       // Purchase Orders off: the row reads "Bills" and still owns /purchasing, so a PO opened by
       // a link lights Money (with the Off line on top).
       { id: "m-bills", label: "Bills & POs", icon: Wallet, href: "/bills", owns: ["/purchasing"], whenOff: { feature: "purchase_orders", label: "Bills" } },
@@ -222,9 +242,11 @@ export const DOCK: DockSection[] = [
     label: "Office",
     icon: Building2,
     href: "/team", // Erik 2026-07-20: Office lands on Team (was /compliance)
-    // Not staff-only: a tech fills Forms (0195) and reads Compliance, Safety, Resources and the
-    // Handbook from here. Team is staff-only (/team sends a tech back to My Day), so a tech's Office
-    // lands on its first row he can open instead (visibleDock), never on a tile that bounces.
+    // Behind the initials (W1-07): the avatar menu's Office row opens this person's landing.
+    inMenu: true,
+    // Not staff-only: a tech fills Forms (0195) and reads Compliance, Safety and Resources from
+    // here. Team is staff-only (/team sends a tech back to My Day), so a tech's Office lands on its
+    // first row he can open instead (visibleDock), never on a tile that bounces.
     children: [
       // Liabilities (Alexa's grouping). Insurance (e.g. workers' comp) + compliance Audits are
       // the next pages to build — flagged, not stubbed as dead links.
@@ -243,7 +265,8 @@ export const DOCK: DockSection[] = [
       // intake form, not only the safety checklists.
       { id: "o-forms", label: "Forms", icon: ClipboardList, href: "/forms" },
       { id: "o-resources", label: "Resources", icon: BookUser, href: "/resources" },
-      { id: "o-handbook", label: "Handbook", icon: BookOpen, href: "/handbook", feature: "crew_payroll" },
+      // The office's Handbook row (it writes the handbook). A tech's is under You, so he sees it once.
+      { id: "o-handbook", label: "Handbook", icon: BookOpen, href: "/handbook", staffOnly: true, feature: "crew_payroll" },
       // Stock — the money-admin cluster (Payroll/Tax/Analytics/Recurring/Petty cash) was promoted
       // up to the Money section; only Inventory (warehouse stock, not a dollar ledger) stays here.
       { id: "o-stock-h", label: "Stock", icon: Boxes, header: true, staffOnly: true },
@@ -261,37 +284,34 @@ export const DOCK: DockSection[] = [
     ],
   },
   {
-    // THE big move: Contacts is its own bottom-of-the-dock section now, not buried in Sales.
-    // Already interlinked with jobs/quotes/invoices/appointments through customer_id. Today it
-    // holds clients (the CRM) + leads; subcontractors join once that record type exists.
-    key: "contacts",
-    label: "Contacts",
-    icon: Users,
-    href: "/crm",
-    staffOnly: true,
-    // Just the one destination — Leads lives under Sales (the pipeline), not duplicated here.
-    children: [{ id: "c-all", label: "All Contacts", icon: Users, href: "/crm" }],
-  },
-  {
     // A TECH'S OWN SETTINGS, ON THE DOCK. Everything else in /settings is the company's and is
     // admin business — but his name, his photo, how Nort talks to him, his language, Face ID and
     // his push notifications are his. Staff never see this tile: they reach the same page (and
     // the other nine groups) through the avatar menu.
+    //
+    // THE HANDBOOK IS HIS TOO (W1-08): it moved here from Office, so he sees it once, and it stays
+    // whenever Crew & Payroll is on, even with no handbook written, because the Phone Setup
+    // checklist lives only on that page. Your Settings is the row for bare /settings as well.
     key: "you",
     label: "You",
     icon: UserCog,
     href: "/settings?tab=you",
     techOnly: true,
-    children: [],
+    children: [
+      { id: "y-settings", label: "Your Settings", icon: UserCog, href: "/settings?tab=you", techOnly: true },
+      { id: "y-handbook", label: "Handbook", icon: BookOpen, href: "/handbook", techOnly: true, feature: "crew_payroll" },
+    ],
   },
   {
-    // Pulled out of Office to its own dock section — the calculators/utilities are a daily
-    // field reach, so they get a one-tap home (everyone, not staff-only).
+    // Pulled out of Office to its own section — the calculators are a daily field reach. Behind
+    // the initials now (W1-07, Erik's call on Calculators): the avatar menu's Tools row, drawn
+    // only with Calculators on.
     key: "tools",
     label: "Tools",
     icon: Wrench,
     href: "/tools",
     feature: "calculators",
+    inMenu: true,
     children: [{ id: "tl-all", label: "Calculators & Tools", icon: Wrench, href: "/tools" }],
   },
 ];
@@ -307,9 +327,13 @@ export const basePath = (href: string) => href.split("?")[0];
  *   role      staffOnly hides from techs, techOnly hides from staff (tiles and rows). A tile whose
  *             landing row is staff-only lands a tech on its first row he sees (Office: /compliance).
  *   switches  a row or tile whose switch is off is not drawn. A heading left with no rows under
- *             it goes; a tile whose rows were all switched off goes (Sales, with Leads and
- *             Estimates both off); a tile whose own landing page was switched off lands on its
- *             first row still drawn (Sales with Leads off: /quotes). "Bills & POs" reads "Bills".
+ *             it goes; a tile whose rows were all switched off goes; a tile whose own landing page
+ *             was switched off lands on its first row still drawn (Sales with Leads off: /quotes;
+ *             with Estimates off too: /crm, and the tile reads Customers). "Bills & POs" reads "Bills".
+ *
+ * inMenu sections (Office, Tools) are returned like any other: the active section, the strip, the
+ * sheet, the lg column and search all need them. Only the rail and the phone bar skip them
+ * (dockTiles), and the avatar menu draws them as rows.
  *
  * A SWITCH HIDES DOORS ONLY: a page behind a hidden row still opens from a link, with the Off
  * line on top (components/route-off-line). `features` is what the layout hands the shell (lib/
@@ -317,7 +341,7 @@ export const basePath = (href: string) => href.split("?")[0];
  */
 export function visibleDock({ isStaff, features }: { isStaff: boolean; features?: FeatureMap | null }): DockSection[] {
   const on = (k?: FeatureKey) => !k || featureOn(features, k);
-  const mine = (c: DockNode) => isStaff || !c.staffOnly;
+  const mine = (c: DockNode) => (isStaff ? !c.techOnly : !c.staffOnly);
   return DOCK.filter((s) => (isStaff || !s.staffOnly) && (!isStaff || !s.techOnly) && on(s.feature)).flatMap((s) => {
     const rows = s.children
       .filter((c) => mine(c) && on(c.feature))
@@ -339,8 +363,37 @@ export function visibleDock({ isStaff, features }: { isStaff: boolean; features?
       (c) => c.href && basePath(c.href) === basePath(s.href) && (!mine(c) || !on(c.feature)),
     );
     const href = landingHidden ? (children.find((c) => c.href)?.href ?? s.href) : s.href;
+    // One row left, and it is the one the section names itself after then: Sales → Customers.
+    const drawn = children.filter((c) => c.href);
+    if (s.whenOnly && drawn.length === 1 && drawn[0].id === s.whenOnly.rowId) {
+      return [{ ...s, label: s.whenOnly.label, short: undefined, href, children }];
+    }
     return [{ ...s, href, children }];
   });
+}
+
+/** The tiles the rail and the phone bar draw: every visible section but the ones that live behind
+ *  the initials (inMenu). The avatar menu draws those as rows (menuSections). */
+export const dockTiles = (sections: DockSection[]): DockSection[] => sections.filter((s) => !s.inMenu);
+/** The sections the avatar menu draws as rows, one each, landing where visibleDock lands them. */
+export const menuSections = (sections: DockSection[]): DockSection[] => sections.filter((s) => s.inMenu);
+
+/**
+ * WHICH ROW OF A SECTION IS LIT — one rule for the lg page column, the pill strip and the sheet.
+ *   1. the row whose href (query and all) is exactly this location (the Jobs ?status= rows);
+ *   2. else the query-less row on this page (/billing lights Invoices on /billing?anything);
+ *   3. else the ONE row whose page this is, whatever its query: a tech's bare /settings lights
+ *      Your Settings (/settings?tab=you). Two or more such rows (the Jobs statuses on bare /jobs)
+ *      light nothing rather than guess.
+ */
+export function activeRowHref(rows: DockNode[], pathname: string, current: string): string | undefined {
+  const links = rows.filter((c): c is DockNode & { href: string } => !!c.href);
+  const exact = links.find((c) => c.href === current);
+  if (exact) return exact.href;
+  const plain = links.find((c) => basePath(c.href) === pathname && !c.href.includes("?"));
+  if (plain) return plain.href;
+  const onPage = links.filter((c) => basePath(c.href) === pathname);
+  return onPage.length === 1 ? onPage[0].href : undefined;
 }
 
 /**

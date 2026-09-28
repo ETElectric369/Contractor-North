@@ -79,6 +79,9 @@ export function inquiryActionItem(q: InquiryRow, todayStr: string, leadsOn: bool
   const who = (q.name ?? "").trim() || "Someone";
   return {
     ...item,
+    // Its chip says Request (Wave 1, W1-15: the row carries its own words; the list has no Leads
+    // header left to rename).
+    chip: "Request",
     title: fresh ? `New Request From ${who}` : `Request From ${who}`,
     subtitle: fresh ? "Call them back" : "Follow up",
     phone: (q.phone ?? "").trim() || null,

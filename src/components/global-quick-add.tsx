@@ -1,193 +1,237 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
-import { Plus, Zap, ListTodo, Briefcase, CalendarPlus, FileText, Receipt, UserPlus, UserSearch, X, type LucideIcon } from "lucide-react";
-import { QuickCaptureSheet } from "@/components/quick-capture";
+import { usePathname, useRouter } from "next/navigation";
+import { Plus, Camera, Briefcase, CalendarPlus, FileText, Receipt, UserSearch, X, type LucideIcon } from "lucide-react";
+import { SnapOrNoteProvider, openSnapOrNote, snapStillSending } from "@/components/snap-or-note";
 import { GLASS_MENU_CLASS } from "@/components/ui/glass-menu";
 import { featureOn, type FeatureKey, type FeatureMap } from "@/lib/features";
 
-// Add-cost is NOT here — it lives on My Day's Now card + the job header (job-scoped,
-// works cleanly). A self-loading copy in this dropdown was redundant + fiddly.
-// "Snap & file (Organize My)" is gone too: it was a second door into the same
-// organized_items inbox "Capture anything" already feeds — one capture door;
-// /organize stays one dock tap away under Today.
-// Every verb lands on the CREATE affordance, not a list to hunt through: a
-// ?new=1 param the target page reads to auto-open its "new" modal (the pattern
-// /crm already uses), or a route that IS the form (/quotes/new). Don't drop the
-// user on a list and make them find the + again.
-// staffOnly mirrors the dock/strip/palette gating — a tech tapping "New appointment"
-// was silently redirected to /planner by the staff gate. Techs make Reminders; a job is made by
-// the office (createJob is requireStaff, so a tech's New Job failed on Save).
-// `feature` is the switch a verb belongs to (the switch board, 0352): off, the verb isn't offered.
-// New Reminder (0358): /tasks is the Reminders page, and its add line makes a Reminder. A job's task
-// is added on the job, or from My Day's Add line with a job picked, so the verb says what it makes.
+/**
+ * THE + (W1-11: eight rows to six). It lives in the top bar on every page.
+ *
+ * The office: Snap Or Note first (the one paper door: a photo, a PDF, a list or a note), then the
+ * typed creates, each landing on its create form, never a list to hunt through (a ?new=1 the page
+ * reads to open its form, or a route that IS the form). A switch that is off removes only its own
+ * row (the switch board, 0352).
+ *
+ * CUT: New Customer (a customer is made inside New Job, New Estimate and New Invoice, and
+ * Customers keeps its own Add) and New Reminder (My Day's Add line, the Reminders page's own line
+ * and Nort make Reminders). /crm?new=1 and /tasks?new=1 still open those forms from a link.
+ *
+ * The crew: the + IS Snap Or Note (a photo of a receipt for the job he's on, or a note for the
+ * office). He is never offered New Job, Appointment, Estimate, Invoice or Lead: those saves are the
+ * office's (createJob is requireStaff; a tech's New Job failed on Save).
+ *
+ * Papers waiting to be filed show up as Needs You rows on My Day; Add Cost stays on My Day's Now
+ * card and the job's own page (job-scoped).
+ */
 export const ACTIONS: { label: string; href: string; icon: LucideIcon; staffOnly?: boolean; feature?: FeatureKey }[] = [
-  { label: "New Reminder", href: "/tasks?new=1", icon: ListTodo },
   { label: "New Lead", href: "/leads?new=1", icon: UserSearch, staffOnly: true, feature: "leads" },
-  { label: "New Customer", href: "/crm?new=1", icon: UserPlus, staffOnly: true },
   { label: "New Job", href: "/jobs?new=1", icon: Briefcase, staffOnly: true },
   { label: "New Appointment", href: "/schedule?new=appointment", icon: CalendarPlus, staffOnly: true },
   { label: "New Estimate", href: "/quotes/new", icon: FileText, staffOnly: true, feature: "estimates" },
   { label: "New Invoice", href: "/billing?new=1", icon: Receipt, staffOnly: true },
 ];
 
-/** The + menu's verbs for this person: role first, then the switches. No map = everything on. */
+/** The + menu's typed verbs for this person: role first, then the switches. No map = everything on. */
 export function quickAddActions(isStaff: boolean, features?: FeatureMap | null) {
   return ACTIONS.filter((a) => (isStaff || !a.staffOnly) && (!a.feature || featureOn(features, a.feature)));
 }
 
-/** Quick "+" create menu. `placement="topbar"` renders an inline button with a
- *  dropdown; the default is a movable floating FAB. `isStaff` gates the staff-only
- *  creates the same way the dock/strip/palette already do (defaults to false —
- *  the mount site passes the role, so an unwired mount never over-shows). */
+/** What a tap on the + does: the office's menu, or (the crew) Snap Or Note itself. */
+export function plusOpens(isStaff: boolean): "menu" | "snap-or-note" {
+  return isStaff ? "menu" : "snap-or-note";
+}
+
+/** A soft navigation that hasn't landed in this long, tapped again, is stuck: the next tap loads. */
+export const STUCK_MS = 10_000;
+
+export type QuickAddGo = { way: "soft" } | { way: "full" } | { way: "offline"; said: string } | { way: "wait"; said: string };
+
+/**
+ * THE TAP THAT DID NOTHING, TWICE (bug-report triage 2026-09-27; the 09-23 sweep's "Didn't open new
+ * job"). With no signal the first New Job tap failed to load and the shell said "That page didn't
+ * load"; a second tap, still with no signal, did nothing and said nothing: Next's router was still
+ * waiting on the failed load, and it never retries a load to the same address.
+ *
+ *   · no signal (navigator.onLine false): say so in words, right where the tap was, and don't try;
+ *   · the last navigation failed (the shell's cn:navigation-failed, cleared as soon as a later
+ *     navigation lands), or the same tap's soft navigation never landed: a FULL load, which really
+ *     retries;
+ *   · but never a full load while Snap Or Note is still sending files: its queue lives in this
+ *     page's memory and a reload would drop them without a word. That tap says so and waits;
+ *   · otherwise the ordinary soft navigation.
+ */
+export function quickAddGo(o: { online: boolean; lastFailed: boolean; stuck: boolean; label: string; sending?: number }): QuickAddGo {
+  if (!o.online) return { way: "offline", said: `No signal right now, so ${o.label} can't open. Tap it again once you have a bar or two.` };
+  if (o.lastFailed || o.stuck) {
+    const n = o.sending ?? 0;
+    if (n > 0)
+      return {
+        way: "wait",
+        said: `Snap Or Note is still sending ${n === 1 ? "1 file" : `${n} files`}, and reloading now would stop ${n === 1 ? "it" : "them"}. Tap ${o.label} again once ${n === 1 ? "it's" : "they're"} in.`,
+      };
+    return { way: "full" };
+  }
+  return { way: "soft" };
+}
+
+const ROW =
+  "relative z-10 flex min-h-11 w-full items-center gap-3 px-4 py-2.5 text-left text-sm font-medium text-slate-700 hover:bg-[rgb(var(--glass-tint))]/15";
+
+/** The office's menu rows: Snap Or Note first, then the typed creates. */
+export function QuickAddMenu({
+  isStaff,
+  features,
+  onSnap,
+  onGo,
+  said = null,
+}: {
+  isStaff: boolean;
+  features?: FeatureMap | null;
+  onSnap: () => void;
+  onGo: (a: (typeof ACTIONS)[number]) => void;
+  /** A tap that couldn't go (no signal), said under the rows. */
+  said?: string | null;
+}) {
+  return (
+    <>
+      <button type="button" onClick={onSnap} className={ROW}>
+        <Camera className="h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" /> Snap Or Note
+      </button>
+      {quickAddActions(isStaff, features).map((a) => (
+        <button type="button" key={a.href} onClick={() => onGo(a)} className={ROW}>
+          <a.icon className="h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" /> {a.label}
+        </button>
+      ))}
+      {said && (
+        <p className="relative z-10 px-4 py-2 text-sm text-amber-900" role="status">
+          {said}
+        </p>
+      )}
+    </>
+  );
+}
+
+/** The + in the top bar. `placement` is accepted and ignored: the + only lives in the top bar now
+ *  (the floating button is gone), and the top bar still names it. */
 export function GlobalQuickAdd({
-  placement = "fab",
   isStaff = false,
   features,
 }: {
-  placement?: "fab" | "topbar";
+  placement?: "topbar";
   isStaff?: boolean;
   /** The shell's switch map: a switched-off feature's "New …" verb isn't offered. */
   features?: FeatureMap;
 }) {
   const router = useRouter();
-  const [pos, setPos] = useState({ x: 20, y: 168 }); // above the mic, clearing the floating glass bottom nav
   const [open, setOpen] = useState(false);
-  const [captureOpen, setCaptureOpen] = useState(false);
-  const drag = useRef<{ sx: number; sy: number; bx: number; by: number; moved: boolean } | null>(null);
+  const [said, setSaid] = useState<string | null>(null);
+  /** The shell said the last navigation failed: the next tap is a full load. */
+  const failed = useRef(false);
+  /** The last soft navigation this + started, until the page it asked for is on screen. */
+  const pending = useRef<{ href: string; from: string; at: number } | null>(null);
 
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem("cn_quickadd_pos");
-      if (saved) setPos(JSON.parse(saved));
-    } catch {}
+    const onFail = () => {
+      failed.current = true;
+    };
+    window.addEventListener("cn:navigation-failed", onFail);
+    return () => window.removeEventListener("cn:navigation-failed", onFail);
   }, []);
 
-  const items = (
-    <>
-      {/* The one-field front door — FIRST, above the typed creates: any fragment is a
-          valid record. Opens the capture sheet IN PLACE (a client sheet, not a nav),
-          so the thought is saved before it can evaporate on a page load. */}
-      <button
-        onClick={() => {
-          setOpen(false);
-          setCaptureOpen(true);
-        }}
-        className="relative z-10 flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm font-medium text-slate-700 hover:bg-[rgb(var(--glass-tint))]/15"
-      >
-        <Zap className="h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" /> Capture Anything
-      </button>
-      {quickAddActions(isStaff, features).map((a) => (
-        <button
-          key={a.href}
-          onClick={() => {
-            setOpen(false);
-            router.push(a.href);
-          }}
-          className="relative z-10 flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm font-medium text-slate-700 hover:bg-[rgb(var(--glass-tint))]/15"
-        >
-          <a.icon className="h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" /> {a.label}
-        </button>
-      ))}
-    </>
-  );
+  // A NAVIGATION LANDED (the dock, a link, anything): the last one no longer failed. Without this,
+  // one offline tap hours ago made every later + tap a full reload.
+  const pathname = usePathname();
+  const landedOn = useRef(pathname);
+  useEffect(() => {
+    if (landedOn.current === pathname) return;
+    landedOn.current = pathname;
+    failed.current = false;
+  }, [pathname]);
 
-  // Rendered in BOTH placements (Modal renders null while closed — costless).
-  const captureSheet = <QuickCaptureSheet open={captureOpen} onClose={() => setCaptureOpen(false)} />;
-
-  // Top-bar variant: inline + button with a dropdown anchored below it.
-  if (placement === "topbar") {
-    return (
-      <div className="relative">
-        <button
-          onClick={() => setOpen((v) => !v)}
-          aria-label="Quick add"
-          title="Quick add"
-          className="btn-gloss inline-flex h-10 w-10 items-center justify-center rounded-full bg-slate-900 text-white shadow-sm hover:bg-slate-700"
-        >
-          {open ? <X className="h-5 w-5" /> : <Plus className="h-5 w-5" />}
-        </button>
-        {open && (
-          <>
-            <div className="fixed inset-0 z-[80]" onClick={() => setOpen(false)} />
-            {/* Anchored to the VIEWPORT, not the button: the topbar can scroll/
-                offset, which dragged an absolute menu up behind the bar so "New
-                task" was unreachable. position is set INLINE because .glass-gloss
-                forces position:relative (for its ::before sheen), which would
-                override a Tailwind `fixed`. top 4.5rem clears the 4rem header.
-                max-height (viewport minus header + mobile bottom nav) + y-scroll
-                keeps the last verbs reachable on short/landscape viewports. */}
-            <div
-              style={{
-                position: "fixed",
-                top: "calc(4.5rem + var(--sat, 0px))",
-                right: "0.5rem",
-                maxHeight: "calc(100dvh - 9.5rem - var(--sat, 0px))",
-                overflowY: "auto",
-              }}
-              className={`${GLASS_MENU_CLASS} w-60`}
-            >
-              {items}
-            </div>
-          </>
-        )}
-        {captureSheet}
-      </div>
-    );
+  function go(a: (typeof ACTIONS)[number]) {
+    const here = window.location.href;
+    const p = pending.current;
+    // Landed: the address moved since that tap.
+    if (p && p.from !== here) pending.current = null;
+    const stuck = !!p && p.from === here && p.href === a.href && Date.now() - p.at > STUCK_MS;
+    const next = quickAddGo({
+      online: typeof navigator === "undefined" || navigator.onLine !== false,
+      lastFailed: failed.current,
+      stuck,
+      label: a.label,
+      sending: snapStillSending(),
+    });
+    if (next.way === "offline" || next.way === "wait") {
+      // Said right where the tap was: the menu stays open with the sentence under the rows.
+      setSaid(next.said);
+      return;
+    }
+    setSaid(null);
+    setOpen(false);
+    if (next.way === "full") {
+      failed.current = false;
+      pending.current = null;
+      window.location.assign(a.href);
+      return;
+    }
+    pending.current = { href: a.href, from: here, at: Date.now() };
+    router.push(a.href);
   }
 
+  const crew = plusOpens(isStaff) === "snap-or-note";
   return (
-    <>
-      {open && (
-        <>
-          <div className="fixed inset-0 z-[80]" onClick={() => setOpen(false)} />
-          <div
-            className="glass glass-gloss glass-menu fixed z-[90] w-60 overflow-hidden rounded-lg py-1.5 shadow-xl"
-            // Opens UP from the FAB; cap to the space above the anchor (+12px
-            // breathing room) + y-scroll so a high-dragged FAB or a short
-            // landscape viewport can't clip the top rows off-screen. The 6rem
-            // floor keeps the panel usable if the FAB was dragged near the top.
-            style={{
-              right: pos.x,
-              bottom: pos.y + 56,
-              maxHeight: `max(6rem, calc(100dvh - ${pos.y + 56 + 12}px))`,
-              overflowY: "auto",
-            }}
-          >
-            {items}
-          </div>
-        </>
-      )}
+    <div className="relative">
       <button
-        onPointerDown={(e) => {
-          drag.current = { sx: e.clientX, sy: e.clientY, bx: pos.x, by: pos.y, moved: false };
-          (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+        type="button"
+        onClick={() => {
+          if (crew) return openSnapOrNote();
+          setSaid(null);
+          setOpen((v) => !v);
         }}
-        onPointerMove={(e) => {
-          if (!drag.current) return;
-          const dx = e.clientX - drag.current.sx;
-          const dy = e.clientY - drag.current.sy;
-          if (Math.abs(dx) > 4 || Math.abs(dy) > 4) drag.current.moved = true;
-          setPos({ x: Math.max(8, drag.current.bx - dx), y: Math.max(8, drag.current.by - dy) });
-        }}
-        onPointerUp={() => {
-          const d = drag.current;
-          drag.current = null;
-          if (d && !d.moved) setOpen((v) => !v);
-          else if (d) {
-            try {
-              localStorage.setItem("cn_quickadd_pos", JSON.stringify(pos));
-            } catch {}
-          }
-        }}
-        style={{ right: pos.x, bottom: pos.y }}
-        title="Quick add — tap for shortcuts; drag to move"
-        className="fixed z-40 flex h-12 w-12 touch-none items-center justify-center rounded-full bg-slate-900 text-white shadow-lg hover:bg-slate-700"
+        aria-label={crew ? "Snap Or Note" : "Quick Add"}
+        title={crew ? "Snap Or Note" : "Quick Add"}
+        aria-haspopup={crew ? undefined : "menu"}
+        aria-expanded={crew ? undefined : open}
+        className="btn-gloss inline-flex h-11 w-11 items-center justify-center rounded-full bg-slate-900 text-white shadow-sm hover:bg-slate-700"
       >
         {open ? <X className="h-5 w-5" /> : <Plus className="h-5 w-5" />}
       </button>
-      {captureSheet}
-    </>
+      {open && !crew && (
+        <>
+          <div className="fixed inset-0 z-[80]" onClick={() => setOpen(false)} />
+          {/* Anchored to the VIEWPORT, not the button: the topbar can scroll/offset, which dragged an
+              absolute menu up behind the bar. position is set INLINE because .glass-gloss forces
+              position:relative (for its ::before sheen), which would override a Tailwind `fixed`.
+              top 4.5rem clears the 4rem header. max-height (viewport minus header + mobile bottom
+              nav) + y-scroll keeps the last verbs reachable on short/landscape viewports. */}
+          <div
+            style={{
+              position: "fixed",
+              top: "calc(4.5rem + var(--sat, 0px))",
+              right: "0.5rem",
+              maxHeight: "calc(100dvh - 9.5rem - var(--sat, 0px))",
+              overflowY: "auto",
+            }}
+            className={`${GLASS_MENU_CLASS} w-60`}
+          >
+            <QuickAddMenu
+              isStaff={isStaff}
+              features={features}
+              said={said}
+              onSnap={() => {
+                setOpen(false);
+                openSnapOrNote();
+              }}
+              onGo={go}
+            />
+          </div>
+        </>
+      )}
+      {/* THE ONE PAPER DOOR'S QUEUE AND SHEET, mounted once, here (it renders nothing while closed). */}
+      <SnapOrNoteProvider isStaff={isStaff} />
+    </div>
   );
 }

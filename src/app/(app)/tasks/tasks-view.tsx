@@ -17,7 +17,7 @@ import { createTask, toggleTask, deleteTask, updateTask, type ToggleTaskResult }
  * THE REMINDERS PAGE (/tasks, since 0358). A Reminder is a task with no job, and it is private: the
  * person who made it and the person it is for see it, nobody else (0358's tasks_read; the page's
  * read says the same on a database without it). A job's tasks are the job's one list, on the job
- * (its Tasks chip) and in My Day's Now block, never here. To-Do Extras (priority, steps, tags)
+ * (its Tasks chip) and on My Day's Now card, never here. To-Do Extras (priority, steps, tags)
  * reaches Reminders only.
  */
 export interface ViewTask {
@@ -124,8 +124,9 @@ export function NewReminderBox() {
   const [title, setTitle] = useState("");
   const titleRef = useRef<HTMLInputElement>(null);
 
-  // Land ready to type from the quick-add menu's New Reminder (/tasks?new=1),
-  // then strip the param so a refresh doesn't re-grab focus.
+  // Land ready to type from a link to /tasks?new=1 (the + no longer has New Reminder: My Day's Add
+  // line, this page's own line and Nort make Reminders; the deep link still works), then strip the
+  // param so a refresh doesn't re-grab focus.
   useEffect(() => {
     if (searchParams.get("new") !== "1") return;
     titleRef.current?.focus();

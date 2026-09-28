@@ -30,9 +30,22 @@ import { loadLinkInstead } from "@/lib/appointments/visit-start-read";
 import { VisitStartCard } from "./visit-start-card";
 import { FeatureOffLine } from "@/components/feature-off-line";
 import { featureOn } from "@/lib/features";
-import { answersWithoutPrices, isMissingRpc, sheetsWithoutMoney, walkthroughAccess } from "@/lib/inspection/walkthrough-access";
+import {
+  WALKTHROUGH_UNREAD,
+  answersWithoutPrices,
+  isMissingRpc,
+  readViaView,
+  sheetsWithoutMoney,
+  walkthroughAccess,
+} from "@/lib/inspection/walkthrough-access";
 
 export const dynamic = "force-dynamic";
+
+/** The table read's pre-0165 shape (the column isn't there yet): the one failure the page still
+ *  reads as "no sheet", as tolerateMissingColumns always did. */
+function tolerableBefore0165(e: unknown): boolean {
+  return String((e as { code?: string } | null)?.code ?? "") === "42703";
+}
 
 /**
  * The appointment CAPTURE surface — where an inspection walk-through gets its
@@ -54,7 +67,7 @@ export default async function AppointmentCapturePage({
   const { data: { user: viewer } } = await supabase.auth.getUser();
   const viewerId = viewer?.id ?? null;
 
-  const [{ data: appt }, { data: org }, picker, sheets, inspection, priceBook, intakeForm, { data: meRow }, { data: openRow }, { data: lastClosedRow }] = await Promise.all([
+  const [{ data: appt }, { data: org }, picker, sheetsRead, answersRead, priceBook, intakeRead, { data: meRow }, { data: openRow }, { data: lastClosedRow }] = await Promise.all([
     supabase
       .from("appointments")
       .select(
@@ -74,17 +87,19 @@ export default async function AppointmentCapturePage({
     // Jobs/customers/staff option lists for the Edit-details modal (the same
     // SSOT helper the schedule's picker uses).
     getSchedulePickerOptions(supabase),
-    // The org's inspection sheets + this appointment's answers (0165). BOTH are read tolerantly:
-    // a deploy lands before its migration, and a select naming a column that doesn't exist yet
-    // fails the entire query rather than degrading. Pre-migration, the sheet is simply absent and
-    // the rest of the page — notes, photos, edit, mark-complete — still works.
+    // The org's inspection sheets + this appointment's answers (0165), THROUGH THE VIEWS 0366 made
+    // (LEAK-0227): the answers from appointment_answers (the office gets them as stored, anyone else
+    // without a price) and the sheets from form_playbooks (anyone but the office gets no note and no
+    // dollar figure). readViaView asks the table as before only while a view isn't on the database
+    // yet, and returns any other failure as a failure: the page then says it couldn't read the
+    // walk-through instead of drawing an empty one (whose first keystroke would save the emptiness).
     // Per-trade questions are DATA (deck questions for the deck company, panel questions for the
     // electrician), which is what keeps a typed inspection from needing a code module per trade.
-    tolerateMissingColumns<InspectionTemplate[]>(() =>
-      supabase.from("forms").select("id, name, schema, playbook").eq("is_inspection", true).order("name"),
+    readViaView<InspectionTemplate[]>(supabase, "sheets", (from) =>
+      from.select("id, name, schema, playbook").eq("is_inspection", true).order("name"),
     ),
-    tolerateMissingColumns<{ inspection_template_id: string | null; inspection_answers: unknown }>(() =>
-      supabase.from("appointments").select("inspection_template_id, inspection_answers").eq("id", id).maybeSingle(),
+    readViaView<{ inspection_template_id: string | null; inspection_answers: unknown }>(supabase, "answers", (from) =>
+      from.select("inspection_template_id, inspection_answers").eq("id", id).maybeSingle(),
     ),
     // THE PRICE BOOK, for any `scopes` question in the playbook — the picker offers the org's own
     // codes in the org's own words, which is what makes it a scope picker rather than a text box.
@@ -100,10 +115,10 @@ export default async function AppointmentCapturePage({
     ),
     // THE FORM THE CUSTOMER FILLED IN. Its playbook is the only place the LABELS for
     // `intake.intake_answers` exist — the answers themselves are a bag of keys, and `q_mst1drw8`
-    // is not a question. Read tolerantly and org-scoped by RLS, like every other read here; an org
-    // with no public door simply has none and the card below never renders.
-    tolerateMissingColumns<{ schema: unknown; playbook: unknown }>(() =>
-      supabase.from("forms").select("schema, playbook").eq("is_public_intake", true).limit(1).maybeSingle(),
+    // is not a question. Through form_playbooks like the sheets (0366), org-scoped; an org with no
+    // public door simply has none and the card below never renders.
+    readViaView<{ schema: unknown; playbook: unknown }>(supabase, "sheets", (from) =>
+      from.select("schema, playbook").eq("is_public_intake", true).limit(1).maybeSingle(),
     ),
     // WHO IS LOOKING, and whether they are on the clock: the top card's four faces (start / ask the
     // office / clock in / you're on the clock here) and its Switch To This Job depend on both.
@@ -127,6 +142,16 @@ export default async function AppointmentCapturePage({
       .maybeSingle(),
   ]);
   if (!appt) notFound();
+
+  // A read that failed is said, never drawn as an empty sheet. The one failure that still reads as
+  // "no sheet" is the table's own pre-0165 shape (no such column), exactly as before.
+  const unread = (r: { error: unknown; via: "view" | "table" }) =>
+    !!r.error && !(r.via === "table" && tolerableBefore0165(r.error));
+  const walkthroughUnread = unread(sheetsRead) || unread(answersRead);
+  const sheets = sheetsRead.error ? null : sheetsRead.data;
+  const inspection = answersRead.error ? null : answersRead.data;
+  const intakeForm = intakeRead.error ? null : intakeRead.data;
+  const intakeUnread = unread(intakeRead);
 
   const orgSettings = getOrgSettings((org as { settings?: unknown } | null)?.settings);
   const tz = orgSettings.timezone;
@@ -336,7 +361,7 @@ export default async function AppointmentCapturePage({
               another at 01:10 because the ✗ he tapped said "Cancel" and left the row on his
               screen. Offered ONLY when nothing was captured — see delete-empty-button.tsx for
               why a walk-through with real data stays behind Edit Details. */}
-          {viewerIsStaff && !hasCaptureData(a.capture) &&
+          {viewerIsStaff && !hasCaptureData(a.capture) && !walkthroughUnread &&
             !(inspection?.inspection_answers && JSON.stringify(inspection.inspection_answers) !== "{}") && (
               <DeleteEmptyInspectionButton
                 id={a.id}
@@ -448,6 +473,10 @@ export default async function AppointmentCapturePage({
             </p>
           </div>
         )}
+        {/* The website form's questions couldn't be read: said, not a card that silently isn't there. */}
+        {a.inquiry_id && lead?.intake && intakeUnread && (
+          <p className="mt-2 text-xs text-slate-500">Couldn&apos;t read the website form&apos;s questions just now, so the customer&apos;s answers aren&apos;t shown. Reload to try again.</p>
+        )}
         {/* What the customer attached at intake — the plans this walk-through prices from. The
             lead leaves the inbox once it converts, so every linked surface carries its files. */}
         {a.inquiry_id && (
@@ -471,6 +500,11 @@ export default async function AppointmentCapturePage({
           {walkThrough && (
             <FeatureOffLine feature="leads" features={orgSettings.features} isOwner={(meRow as { role?: string } | null)?.role === "owner"} />
           )}
+          {/* A walk-through read that failed is SAID, and nothing is drawn that could save over it:
+              an empty sheet's first keystroke would autosave the emptiness over the real answers. */}
+          {walkthroughUnread ? (
+            <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">{WALKTHROUGH_UNREAD}</p>
+          ) : (
           <Inspector
             appointmentId={a.id}
             orgId={a.org_id}
@@ -526,6 +560,7 @@ export default async function AppointmentCapturePage({
                 : null
             }
           />
+          )}
         </>
       )}
     </div>

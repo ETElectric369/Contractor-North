@@ -248,6 +248,9 @@ export function TimeclockPanel({
           setShowTools(false); // fresh punch → the running view's disclosure starts closed
           // The clock couldn't tell the job: the punch is saved, and now it asks (Skip is there).
           setAsk(askAfterPunch(res, "in"));
+          // A held job came off hold with this punch (its reason and day are cleared): say so, and
+          // keep it until it is read, the same as Switch Job and Clock Out.
+          if (res.warning) toast(res.warning, "info", undefined, { sticky: true });
           // GPS is optional, but don't pretend it was captured — if it's off/denied/slow, say the
           // punch isn't location-stamped (this used to fall through to gps:null silently). The note
           // now renders in the clocked-in view too, so the crew actually sees it post-punch.

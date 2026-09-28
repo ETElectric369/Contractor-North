@@ -32,6 +32,9 @@ import { recordAiUsage, aiSpendExceeded, currentOrgId } from "@/lib/ai-cost";
 import { rateLimited } from "@/lib/rate-limit";
 import type Anthropic from "@anthropic-ai/sdk";
 import { getOrgSettings, accentHex, orgDocUrl } from "@/lib/org-settings";
+import { todayStrInTz } from "@/lib/tz";
+import { checkComeBackDay } from "@/lib/come-back-days";
+import { isMissingColumn } from "@/lib/job-tasks";
 import { tradeWordsOr, withArticle } from "@/lib/org-trade";
 import { rowPlace } from "@/lib/doc-place";
 import { companyFromOrg } from "@/components/doc-letterhead";
@@ -1289,6 +1292,33 @@ async function pushQuoteAccepted(id: string): Promise<void> {
   } catch {
     /* best-effort */
   }
+}
+
+/**
+ * FOLLOW UP ON AN ESTIMATE ON A DAY (NY-feeders, 0366): the customer hasn't answered, and this is the
+ * day to ask again. It writes quotes.follow_up_at and nothing else: NEVER valid_until, which is the
+ * customer's own offer window, printed on the estimate they hold (moving it would change the offer,
+ * not the reminder). The day is the company's today or later. A zero-row write is said, and before
+ * 0366 (no such column) the refusal says the database needs its update.
+ */
+export async function setQuoteFollowUp(quoteId: string, date: string): Promise<{ ok: boolean; error?: string }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const { data: org } = await ctx.supabase.from("organizations").select("settings").eq("id", ctx.orgId ?? "").maybeSingle();
+  const day = checkComeBackDay(todayStrInTz(getOrgSettings((org as { settings?: unknown } | null)?.settings).timezone), date);
+  if (!day.ok) return { ok: false, error: day.error };
+  const { data, error } = await ctx.supabase.from("quotes").update({ follow_up_at: day.day }).eq("id", quoteId).select("id");
+  if (error) {
+    return {
+      ok: false,
+      error: isMissingColumn(error) ? "This needs a quick database update before an estimate can take a follow-up day." : dbError(error),
+    };
+  }
+  if (!data?.length) return { ok: false, error: "That estimate could not be found." };
+  revalidatePath("/planner");
+  revalidatePath("/quotes");
+  revalidatePath(`/quotes/${quoteId}`);
+  return { ok: true };
 }
 
 export async function updateQuoteStatus(id: string, status: string) {

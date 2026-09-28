@@ -2,6 +2,7 @@ import { signDocumentUrls } from "@/lib/signed-docs";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
 import { OrganizeManager, type OrganizedItemRow } from "./organize-manager";
+import { SnapOrNoteButton } from "@/components/snap-or-note";
 import { loadBooks, loadMarkContext, matchesOnBooks, OPEN_JOBS_FOR_PAPER, PAPER_JOB_STATUSES, rematchTray } from "./paperwork-core";
 import { openListViews } from "@/app/(app)/bills/open-list-core";
 import { bankLinesStayHere, bankViews } from "@/app/(app)/bills/bank-core";
@@ -9,8 +10,9 @@ import { getOrgSettings } from "@/lib/org-settings";
 import { featureOn } from "@/lib/features";
 
 export const dynamic = "force-dynamic";
-// A 12-page CED PDF or a slow read runs inside this page's server actions; the reader's own time,
-// not the platform's default, decides when it gives up (audit v994, SI4).
+// Read Now and Read Again on a card run inside this page's server actions; the reader's own time,
+// not the platform's default, decides when it gives up (audit v994, SI4). A paper put in through
+// Snap Or Note is read on its own route (/api/paperwork/read), with the same 60 seconds.
 export const maxDuration = 60;
 
 export default async function OrganizePage() {
@@ -63,12 +65,11 @@ export default async function OrganizePage() {
 
   return (
     <div className="mx-auto max-w-3xl">
-      <PageHeader
-        title="Organize My…"
-        description="Receipts, notes, and job documents — photographed and read for you, filed when you say."
-      />
+      {/* ONE PAPER DOOR (W1-30): papers come in through Snap Or Note, this button or + anywhere. */}
+      <PageHeader title="Organize My…" description="Papers you snapped wait here until you file them.">
+        <SnapOrNoteButton />
+      </PageHeader>
       <OrganizeManager
-        orgId={org?.id ?? ""}
         items={withUrls}
         jobs={jobs ?? []}
         matches={Object.fromEntries(withUrls.filter((i) => i.status === "needs_review").map((i) => [i.id, matchesOnBooks(i, books)]))}

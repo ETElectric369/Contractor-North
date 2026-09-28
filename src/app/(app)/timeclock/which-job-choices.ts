@@ -10,7 +10,8 @@
  *   1. the job he last punched on in the past three days, while it is still going;
  *   2. the jobs on today's schedule (anyone's: he may be helping a crewmate);
  *   3. the rest of the jobs in progress, newest first.
- * Nothing else: a job scheduled for another day, or finished, is the office's to pick.
+ * Nothing else: a job scheduled for another day, or finished, is the office's to pick. A job ON HOLD
+ * that lands in 1 or 2 goes LAST instead, its why saying picking it takes it off hold (0366).
  *
  * WHAT A ROW CARRIES: the job's id, the one label the Timeclock uses (codes on: the job's name;
  * codes off: customer · street), and a short reason. Never a price: the read behind it selects no
@@ -31,8 +32,10 @@ export type WhichJobOption = {
  *  `stale` = the refusal is because the PUNCH is no longer what this screen shows (it closed, or
  *  got its job some other way): the block must re-render from the server, not sit on the old
  *  facts. The shell has no pull-to-refresh, so the sentence can't ask for one — the component
- *  does the refresh itself. `label` = the job it landed on, for the sentence that says so. */
-export type WhichJobResult = { ok: boolean; error?: string; stale?: boolean; label?: string };
+ *  does the refresh itself. `label` = the job it landed on, for the sentence that says so.
+ *  `warning` = something else the pick did that nobody chose, said after it: a held job came off
+ *  hold ("J-048 was on hold (waiting on the permit). It's off hold now.", NY-hold 0366). */
+export type WhichJobResult = { ok: boolean; error?: string; stale?: boolean; label?: string; warning?: string };
 
 export type WhichJobChoices =
   | { ok: true; jobs: WhichJobOption[]; isStaff: boolean }
@@ -127,8 +130,19 @@ export function orderWhichJobChoices(input: {
     .filter((j) => j.status === "in_progress")
     .sort((a, b) => String(b.created_at ?? "").localeCompare(String(a.created_at ?? "")));
   for (const j of going) add(j);
-  return out;
+  // A JOB ON HOLD GOES LAST, WHATEVER GROUP IT WAS IN, AND SAYS SO (NY-hold, 0366). Picking it puts
+  // the punch there AND takes it off hold (the one promotion every clock door shares), so the row
+  // says that before the tap, and the answer says it again after.
+  const held = new Set([...byId.values()].filter((j) => j.status === "on_hold").map((j) => j.id));
+  if (!held.size) return out;
+  return [
+    ...out.filter((o) => !held.has(o.id)),
+    ...out.filter((o) => held.has(o.id)).map((o) => ({ ...o, why: ON_HOLD_WHY })),
+  ];
 }
+
+/** The why on a held job's row: what the tap will do besides place the punch. */
+export const ON_HOLD_WHY = "On hold: picking it takes it off hold";
 
 /** Which moment the sheet is asked at: right after the punch in, or right after the clock-out. */
 export type WhichJobMoment = "in" | "out";
@@ -198,7 +212,13 @@ export async function pickOutcome(
   } catch {
     return { kind: "refused", sentence: "No connection, so the punch is still on no job. Try again when you have a bar or two, or skip." };
   }
-  if (res?.ok) return { kind: "placed", sentence: `Your punch is on ${res.label || job.label}.` };
+  // What else the pick did rides after the placed sentence, in the same words, so routePick carries
+  // both to the toast (or to the sheet at the offline queue's door) with nothing of its own to add.
+  if (res?.ok) {
+    const placed = `Your punch is on ${res.label || job.label}.`;
+    const also = (res.warning ?? "").trim();
+    return { kind: "placed", sentence: also ? `${placed} ${also}` : placed };
+  }
   const sentence = res?.error || "That didn't go through. Your punch is saved, still on no job.";
   return res?.stale ? { kind: "stale", sentence } : { kind: "refused", sentence };
 }

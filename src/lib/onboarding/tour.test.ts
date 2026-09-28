@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { DOCK } from "@/lib/dock";
-import { LESSONS, TOUR, WHY_LINE_FEEDS_ESTIMATE, lessonBlurb, lessonByKey, sayOf, stepWords, tourIndex, type TourCtx } from "./tour";
+import { ALL_ON, type FeatureKey, type FeatureMap } from "@/lib/features";
+import { LESSONS, TOUR, WHY_LINE_FEEDS_ESTIMATE, gateOn, lessonBlurb, lessonByKey, lessonOn, sayOf, stepWords, stepsOn, tourIndex, type TourCtx } from "./tour";
 import { factsForEstimatorByProvenance } from "@/lib/playbook/answers";
 import { WHY_SHAPES } from "@/lib/playbook/why";
 
@@ -13,6 +14,11 @@ const ALL_STEPS = [...TOUR, ...LESSONS.flatMap((l) => l.steps)];
 const findStep = (key: string) => ALL_STEPS.find((s) => s.key === key)!;
 import { SETUP_PLAYBOOK } from "./setup-playbook";
 import { TRADE_WORDS } from "@/lib/org-trade";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
+/** Everything on but these switches. */
+const off = (...keys: FeatureKey[]) => ({ ...ALL_ON, ...Object.fromEntries(keys.map((k) => [k, false])) }) as FeatureMap;
 
 /** A sentence that CLAIMS where something came from, as opposed to where it lives. */
 const ORIGIN_VERB = /\b(came|come|comes|built|builds|build|seeded|seeds|created|creates|set up|sets up|made|makes)\b/i;
@@ -42,8 +48,9 @@ describe("every question the tour asks is a real one", () => {
 
   it("NORT IS THE FIRST THING, and he asks rather than tells", () => {
     // Erik: "people need to know how Nort works first and foremost". The old version opened with
-    // five text boxes, which teaches that the assistant is a garnish.
-    expect(TOUR[0].anchor).toBe("nort");
+    // five text boxes, which teaches that the assistant is a garnish. His home is Search Or Ask now
+    // (W1-09: Talk To Nort is its first row), so that is what the first step points at.
+    expect(TOUR[0].anchor).toBe("ask");
     expect(TOUR[0].ask).toBeTruthy();
   });
 });
@@ -75,20 +82,34 @@ describe("the why-line lesson is actually in here", () => {
 
 describe("it points at things that exist", () => {
   // Anchors the SHELL carries, so they're reachable from any route (topbar.tsx, dock.tsx,
-  // setup-button.tsx, account-menu.tsx). `settings-link` is the Settings item INSIDE the account
-  // menu — it is not on the settings page, it is the door to it, which is the whole point.
-  // `account-menu` is the PANEL behind the initials — in the shell, reachable from any route, and
-  // only in the DOM while the menu is open, which is why its step carries `opens`.
-  const SHELL = ["nort", "setup", "quickadd", "search", "bell", "account", "dock", "account-menu"];
+  // account-menu.tsx). `ask` is Search Or Ask (W1-09: it replaced Nort's button, the search button
+  // and the graduation cap, so `nort`, `search` and `setup` are gone). `settings-link` is the
+  // Settings item INSIDE the account menu — it is not on the settings page, it is the door to it,
+  // which is the whole point. `account-menu` is the PANEL behind the initials — in the shell,
+  // reachable from any route, and only in the DOM while the menu is open, which is why its step
+  // carries `opens`.
+  const SHELL = ["ask", "quickadd", "bell", "account", "dock", "account-menu"];
   // dock-<sectionKey> is set per section by dock.tsx, on BOTH the desktop rail and the mobile bar.
   const isDockSection = (a: string) => DOCK.some((d) => a === `dock-${d.key}`);
   // Anchors that only exist once you are standing on /settings.
   const settingsOnly = (a: string) => a === "sections-settings" || (a.startsWith("settings-") && a !== "settings-link");
 
-  it("every anchor is one the app sets", () => {
-    for (const s of TOUR) {
+  it("every anchor is one the app sets — the tour's and every lesson's", () => {
+    for (const s of ALL_STEPS) {
       if (!s.anchor || settingsOnly(s.anchor) || isDockSection(s.anchor)) continue;
       expect(SHELL, `${s.key} points at ${s.anchor}`).toContain(s.anchor);
+    }
+  });
+
+  it("the shell really carries those anchors (topbar.tsx, account-menu.tsx, dock.tsx)", () => {
+    const read = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+    const bar = read("src/components/app-shell/topbar.tsx");
+    for (const a of ["ask", "quickadd", "bell", "account"]) expect(bar, a).toContain(`data-tour="${a}"`);
+    expect(read("src/components/account-menu.tsx")).toContain('data-tour="account-menu"');
+    expect(read("src/components/app-shell/dock.tsx")).toContain('data-tour="dock"');
+    // The dock tiles a step points at are tiles (not behind the initials).
+    for (const s of ALL_STEPS) {
+      if (s.anchor && isDockSection(s.anchor)) expect(DOCK.find((d) => `dock-${d.key}` === s.anchor)?.inMenu, s.key).toBeFalsy();
     }
   });
 
@@ -154,7 +175,8 @@ describe("it points at things that exist", () => {
     // code and all the things"
     const anchored = ALL_STEPS.map((s) => s.anchor);
     // "account-menu" since the merge — the initials are still pointed at, as the opened panel.
-    for (const a of ["nort", "dock", "account-menu"]) expect(anchored).toContain(a);
+    // "ask" since W1-09 — Nort's button is Search Or Ask.
+    for (const a of ["ask", "dock", "account-menu"]) expect(anchored).toContain(a);
     const said = spoken(STRANGER).join(" ").toLowerCase();
     expect(said).toContain("qr code");
     expect(said).toContain("settings");
@@ -485,5 +507,159 @@ describe("with Nort off, a lesson speaks as nobody", () => {
     expect(off).toContain("you send it");
     // With Nort off, the walk-through's say-it button is "Just Say It" (tell-nort.tsx).
     expect(off).toContain("just say it");
+  });
+});
+
+/**
+ * THE TOUR READS THE SWITCHES (W1-09). A gated step whose switch is off is skipped, Show Me How
+ * lists only lessons whose gate is on, and the settings door names what the avatar menu holds for
+ * THIS company — the estimate QR only with Leads on, Tools only with Calculators on.
+ */
+describe("the tour reads the switches", () => {
+  const keys = (steps: { key: string }[]) => steps.map((s) => s.key);
+  const run = lessonByKey("how-a-job-runs")!.steps;
+
+  it("a gate is one switch, or several meaning any of them; no gate is always on", () => {
+    expect(gateOn(undefined, off("leads"))).toBe(true);
+    expect(gateOn("leads", off("leads"))).toBe(false);
+    expect(gateOn(["leads", "estimates"], off("leads"))).toBe(true);
+    expect(gateOn(["leads", "estimates"], off("leads", "estimates"))).toBe(false);
+    // No switches stored: everything on, as before the switches.
+    expect(gateOn("leads", undefined)).toBe(true);
+  });
+
+  it("Leads off: no run-lead, no run-walk and no trust step (welded to the walk-through)", () => {
+    const k = keys(stepsOn(run, off("leads")));
+    for (const gone of ["run-lead", "run-walk", "trust"]) expect(k).not.toContain(gone);
+    expect(k).toEqual(["run-estimate", "run-job", "run-money", "run-win"]);
+  });
+
+  /** Every word a company with these switches reads in How a Job Runs: blurb, titles, lines, Nort on and off. */
+  const runWords = (features: FeatureMap) => {
+    const lesson = lessonByKey("how-a-job-runs")!;
+    const out: string[] = [];
+    for (const nortOn of [true, false]) {
+      out.push(lessonBlurb(lesson, nortOn));
+      for (const s of stepsOn(lesson.steps, features)) {
+        const w = stepWords(s, nortOn);
+        for (const c of [STRANGER, KNOWN]) out.push(`${w.title} ${sayOf(w.say, { ...c, features })}`);
+      }
+    }
+    return out.join("\n");
+  };
+
+  it("Leads and Estimates both off: the run that's left names no lead, no walk-through and no estimate", () => {
+    const words = runWords(off("leads", "estimates"));
+    expect(words).not.toMatch(/estimate accepted/i);
+    expect(words).not.toMatch(/\blead\b/i);
+    expect(words).not.toMatch(/walk-through/i);
+    expect(words).not.toMatch(/estimate/i);
+    // It says where their job starts instead, and where the address was first typed.
+    expect(words).toContain("tap Plus, then New Job");
+    expect(words).toContain("You typed that address once, on the job,");
+  });
+
+  it("Leads off alone: no lead and no walk-through in what's left; the estimate starts under Plus", () => {
+    const words = runWords(off("leads"));
+    expect(words).not.toMatch(/\blead\b/i);
+    expect(words).not.toMatch(/walk-through/i);
+    expect(words).not.toContain("Start The Estimate");
+    expect(words).toContain("tap Plus, then New Estimate");
+    expect(words).toContain("You mark the estimate accepted and the job builds itself — same customer, same site address, plus a work order");
+    expect(words).toContain("You typed that address once, on the estimate,");
+  });
+
+  it("Estimates off alone: no estimate to accept or to be the bill; the lead and walk-through still read", () => {
+    const words = runWords(off("estimates"));
+    expect(words).not.toMatch(/estimate/i);
+    expect(words).toContain("tap Plus, then New Job");
+    expect(words).toContain("Press Finish Job and the invoice is already written — every person's hours at the right rate plus every receipt");
+    expect(words).toContain("You typed that address once, on the phone call,");
+  });
+
+  it("everything on: the run's words are the ones it always had", () => {
+    const words = runWords(ALL_ON);
+    expect(words).toContain("the lead it came from, plus a work order and a material list off the estimate");
+    expect(words).toContain("You typed that address once, on the phone call, and it was still with you at the invoice");
+    expect(words).toContain("same with the numbers off the walk-through and the hours off the clock. So you're not typing it four times");
+    expect(words).toContain("if there's an accepted estimate, that estimate IS the bill");
+    expect(words).toContain("Back in the truck you press Start The Estimate");
+  });
+
+  it("Estimates off: no run-estimate; everything on: the whole run, as before", () => {
+    expect(keys(stepsOn(run, off("estimates")))).not.toContain("run-estimate");
+    expect(keys(stepsOn(run, ALL_ON))).toEqual(keys(run));
+    expect(keys(stepsOn(run, undefined))).toEqual(keys(run));
+  });
+
+  it("the why-lines lesson and the playbook step belong to Leads or Estimates", () => {
+    const why = lessonByKey("why-lines")!;
+    expect(lessonOn(why, off("leads"))).toBe(true);
+    expect(lessonOn(why, off("estimates"))).toBe(true);
+    expect(lessonOn(why, off("leads", "estimates"))).toBe(false);
+    expect(keys(stepsOn(why.steps, off("leads", "estimates")))).not.toContain("playbook-tab");
+    // The setup tour itself carries no gate: every step runs for every company.
+    expect(stepsOn(TOUR, off("leads", "estimates", "calculators"))).toHaveLength(TOUR.length);
+  });
+
+  it("the settings door names THIS company's menu: the QR only with Leads on, Tools only with Calculators on", () => {
+    const door = findStep("settings-door");
+    for (const nortOn of [true, false]) {
+      const line = (features?: FeatureMap) => sayOf(stepWords(door, nortOn).say, { ...STRANGER, features }).toLowerCase();
+      expect(line(undefined)).toContain("your estimate qr code for the truck");
+      expect(line(undefined)).toContain(", office, tools");
+      expect(line(off("leads"))).not.toContain("qr code");
+      expect(line(off("leads"))).toContain("sign out, your language, office");
+      expect(line(off("calculators"))).not.toContain("tools");
+      expect(line(undefined)).toContain("settings");
+    }
+    // With Nort off (the plain words) Help is in that menu too.
+    expect(sayOf(stepWords(door, false).say, STRANGER)).toContain(", Help —");
+    expect(sayOf(stepWords(door, true).say, STRANGER)).not.toContain("Help");
+  });
+
+  it("the settings step says where your people are: Office, behind your initials", () => {
+    expect(sayOf(findStep("settings").say, STRANGER)).toContain("(Your people have their own page: Office, behind your initials.)");
+  });
+
+  it("the top bar step: Plus starts new work, Search Or Ask finds and asks, the bell keeps your notices", () => {
+    const bar = findStep("topbar");
+    const on = sayOf(stepWords(bar, true).say, STRANGER);
+    const plainWords = sayOf(stepWords(bar, false).say, STRANGER);
+    expect(on).toContain("Plus is where new work starts — a job, an appointment, an invoice — from any screen.");
+    expect(on).toContain("Search Or Ask finds your jobs, customers, estimates, invoices and appointments by name or number, and you can ask me anything there.");
+    expect(on).toContain("And the bell keeps your notices, whether or not you switch on phone notifications.");
+    expect(plainWords).toContain("Search finds your jobs");
+    expect(plainWords).not.toMatch(/ask me|Search Or Ask/);
+    // Plus names no customer and no task (those rows leave it this release), and the magnifying
+    // glass and "what's waiting on you" (that's Needs You) are gone from the bell's line.
+    for (const t of [on, plainWords]) expect(t).not.toMatch(/a customer|a task|magnifying glass|waiting on you/);
+  });
+
+  it("the done step points at Search Or Ask and names the rows that are really in it", () => {
+    const done = findStep("done");
+    expect(done.anchor).toBe("ask");
+    const said = sayOf(done.say, STRANGER);
+    expect(said).toContain("Tap Search Or Ask any time");
+    expect(said).toContain("Take The Setup Again replays this");
+    expect(said).toContain("Show Me How");
+    // Show Me How holds the lessons, not the setup: the line must not claim it replays this.
+    expect(said).not.toContain("Show Me How replays");
+  });
+
+  it("no line anywhere still names the graduation cap, a cap button or the magnifying glass", () => {
+    for (const c of [STRANGER, KNOWN]) {
+      for (const s of ALL_STEPS) {
+        for (const nortOn of [true, false]) {
+          const t = sayOf(stepWords(s, nortOn).say, c).toLowerCase();
+          expect(t, s.key).not.toMatch(/\bcap\b|graduation|magnifying/);
+        }
+      }
+    }
+    for (const l of LESSONS) for (const nortOn of [true, false]) expect(lessonBlurb(l, nortOn)).not.toMatch(/\bcap\b/);
+  });
+
+  it("the lessons are rows under Show Me How now, so their titles are Title Case", () => {
+    expect(LESSONS.map((l) => l.title)).toEqual(["Why Lines", "Getting Around", "How a Job Runs"]);
   });
 });

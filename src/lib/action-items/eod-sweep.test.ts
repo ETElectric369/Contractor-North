@@ -8,11 +8,18 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
  */
 
 const sent: { body: string }[] = [];
+// The push goes out through notifyPeople (the Bell records every push, 0366 wave): one call, one
+// message, the bell line and the buzz together.
+const kinds: string[] = [];
 vi.mock("@/lib/push", () => ({
   pushConfigured: () => true,
   orgStaffIds: async () => ["p-erik"],
-  sendPushToProfiles: async (_ids: string[], _kind: string, msg: { body: string }) => {
+}));
+vi.mock("@/lib/notifications", () => ({
+  notifyPeople: async (_org: string, _ids: string[], kind: string, msg: { body: string }) => {
+    kinds.push(kind);
     sent.push(msg);
+    return { bell: true, pushed: ["p-erik"] };
   },
 }));
 
@@ -65,6 +72,7 @@ function route(claims: Reply) {
 describe("the close-out push and hours on no job billed by hand", () => {
   beforeEach(() => {
     sent.length = 0;
+    kinds.length = 0;
   });
 
   it("a shift a live invoice holds is not named; one nobody billed still is", async () => {
@@ -82,5 +90,62 @@ describe("the close-out push and hours on no job billed by hand", () => {
   it("a lost claims read keeps every finding", async () => {
     await sendCloseOutNudges(fake(route({ error: { message: "timeout" } })));
     expect(sent.map((m) => m.body)).toEqual(["JP's entry has no job · Brian's entry has no job"]);
+  });
+
+  it("it goes out as the opt-in day_ahead kind, through the one door that also writes the bell line", async () => {
+    await sendCloseOutNudges(fake(route({ error: { message: "timeout" } })));
+    expect(kinds).toEqual(["day_ahead"]);
+  });
+});
+
+/**
+ * THE JOBS THE PUSH NAMES (NY-feeders and NY-hold, 0366): a job on hold is waiting on purpose, so
+ * "nothing scheduled next" is never said about it; and a job whose live invoice bills materials lines
+ * has costs on the record (costedJobIds, the one rule My Day uses too), so it is never "no costs".
+ */
+describe("the close-out push and the jobs it names", () => {
+  beforeEach(() => {
+    sent.length = 0;
+    kinds.length = 0;
+  });
+
+  const worked = (id: string, job: string) => ({
+    id,
+    status: "closed",
+    job_id: job,
+    clock_in: `${day(1)}T15:00:00Z`,
+    clock_out: `${day(1)}T23:00:00Z`,
+    job_code: null,
+    profiles: { full_name: "Brian Taylor" },
+  });
+  const routeJobs = (jobs: any[], extra: { bills?: any[]; invoices?: any[] } = {}) => (table: string, filters: string[]): Reply => {
+    if (table === "organizations") return { data: [{ id: ORG, settings: { timezone: "America/Los_Angeles" } }] };
+    if (table === "time_entries") return filters.includes("gte:clock_in") ? { data: jobs.map((j, i) => worked(`t${i}`, j.id)) } : { data: [] };
+    if (table === "jobs") return { data: jobs };
+    if (table === "bills") return { data: extra.bills ?? [] };
+    if (table === "invoices") return { data: extra.invoices ?? [] };
+    return { data: [] };
+  };
+
+  it("a held job isn't named: it waits on its own day", async () => {
+    const held = { id: "j-held", job_number: "J-048", name: "Tanager Ln", status: "on_hold", scheduled_start: null };
+    await sendCloseOutNudges(fake(routeJobs([held], { bills: [{ job_id: "j-held" }] })));
+    expect(sent).toEqual([]);
+    // The same job, not held, is asked about.
+    await sendCloseOutNudges(fake(routeJobs([{ ...held, status: "in_progress" }], { bills: [{ job_id: "j-held" }] })));
+    expect(sent.map((m) => m.body)).toEqual(["Tanager Ln has nothing scheduled next"]);
+  });
+
+  it("a job whose live invoice bills materials lines isn't 'no costs'; labor lines alone, or a void invoice, still are", async () => {
+    const job = { id: "j-9", job_number: "J-009", name: "Herringbone", status: "in_progress", scheduled_start: `${day(-3)}T16:00:00Z` };
+    await sendCloseOutNudges(
+      fake(routeJobs([job], { invoices: [{ job_id: "j-9", status: "draft", invoice_items: [{ line_kind: "labor" }, { line_kind: "materials" }] }] })),
+    );
+    expect(sent).toEqual([]);
+    await sendCloseOutNudges(fake(routeJobs([job], { invoices: [{ job_id: "j-9", status: "sent", invoice_items: [{ line_kind: "labor" }] }] })));
+    expect(sent.map((m) => m.body)).toEqual(["Herringbone has no costs recorded"]);
+    sent.length = 0;
+    await sendCloseOutNudges(fake(routeJobs([job], { invoices: [{ job_id: "j-9", status: "void", invoice_items: [{ line_kind: "materials" }] }] })));
+    expect(sent.map((m) => m.body)).toEqual(["Herringbone has no costs recorded"]);
   });
 });

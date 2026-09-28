@@ -43,10 +43,11 @@ export function NewCustomerButton() {
     );
   }, []);
 
-  // Open straight from the quick-add menu's "New customer" (/crm?new=1), then strip
-  // the param so a refresh or back-button doesn't reopen the form. Keyed to searchParams,
-  // not mount: already ON /crm, the quick-add tap only changes the query string — the
-  // mount-once version had already run, so the menu item silently did nothing.
+  // Open straight from a link to /crm?new=1 (the + no longer has New Customer: a customer is made
+  // inside New Job, New Estimate and New Invoice, and this is Customers' own Add; the deep link still
+  // works), then strip the param so a refresh or back-button doesn't reopen the form. Keyed to
+  // searchParams, not mount: already ON /crm, a link only changes the query string — the
+  // mount-once version had already run, so the link silently did nothing.
   useEffect(() => {
     if (searchParams.get("new") !== "1") return;
     openFresh();

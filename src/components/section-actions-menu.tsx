@@ -12,10 +12,15 @@ import { executeAction } from "@/lib/actions/execute";
  *  (Credit / Edit etc. with `menuItem`) use it too, so every row in the panel
  *  looks identical. Mirrors the jobs Manage menu's MANAGE_ROW_CLS. */
 export const ACTIONS_ROW_CLS =
-  "relative z-10 flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm font-medium text-slate-700 hover:bg-[rgb(var(--glass-tint))]/15 disabled:opacity-50";
+  "relative z-10 flex min-h-11 w-full items-center gap-3 px-4 py-2.5 text-left text-sm font-medium text-slate-700 hover:bg-[rgb(var(--glass-tint))]/15 disabled:opacity-50";
+
+/** A READ-ONLY LINE in the panel (W1-26): the sentence where a verb can only be refused (a node's
+ *  `note`, or a composed child such as "why Draft is gone"). Plain text, never a button: a row that
+ *  looks pressable and does nothing is the dead end the note exists to replace. */
+export const ACTIONS_NOTE_CLS = "relative z-10 px-4 py-2.5 text-left text-xs leading-snug text-slate-500";
 
 const DANGER_ROW_CLS =
-  "relative z-10 flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm font-medium text-red-600 hover:bg-red-50/60 disabled:opacity-50";
+  "relative z-10 flex min-h-11 w-full items-center gap-3 px-4 py-2.5 text-left text-sm font-medium text-red-600 hover:bg-red-50/60 disabled:opacity-50";
 
 const DIVIDER = <div className="relative z-10 my-1 border-t border-white/50" />;
 
@@ -156,6 +161,15 @@ export function SectionActionsMenu({
   }
 
   function row(n: BloomNode, isDanger: boolean) {
+    // A node that carries a `note` is a sentence, not a verb (nav-tree's TreeNode.note).
+    const note = rawById.get(n.id)?.note;
+    if (note) {
+      return (
+        <p key={n.id} className={ACTIONS_NOTE_CLS}>
+          {note}
+        </p>
+      );
+    }
     const Icon = isDanger ? Trash2 : n.icon;
     return (
       <button

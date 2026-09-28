@@ -133,7 +133,7 @@ describe("planLaborOffer — new hours join the person's line (Erik's INV-078 ru
     expect(plan.offer.map((o) => o.importKey)).toEqual(["labor:p-erik"]); // the RPC still keeps the edited line as it is
     expect(plan.leftOff).toEqual([{ personId: "p-erik", name: "Erik Taylor", hours: 6, why: "drift", lineDescription: "Labor - Erik Taylor", overBy: 3 }]);
     expect(leftOffSentence(plan.leftOff[0], "INV-078")).toBe(
-      "Labor - Erik Taylor shows 3 h more than the time entries it holds, so Erik Taylor's new 6 h were not added. They stay unbilled on the job - check the line's hours, then Labor from Timecards again",
+      "Labor - Erik Taylor shows 3 h more than the time entries it holds, so Erik Taylor's new 6 h were not added. They stay unbilled on the job - check the line's hours, then Bring In New Work again",
     );
   });
 

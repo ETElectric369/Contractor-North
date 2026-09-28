@@ -67,6 +67,9 @@ export type Placeable = {
   onHold?: boolean;
   /** WHY it's parked (0234) — "waiting on the permit". The reason is the next action. */
   holdReason?: string | null;
+  /** The day a parked job comes back (0366, jobs.hold_until), YYYY-MM-DD. Null: held before the day
+   *  existed ("No Day Set"). Absent: the database doesn't have the column yet, so no chip at all. */
+  holdUntil?: string | null;
   /** A job's status (the spine), so the card's status control shows where it stands. */
   status?: string | null;
   /** appointments.type, when this item IS one — drives the Walk-through / Service call / Office tag. */

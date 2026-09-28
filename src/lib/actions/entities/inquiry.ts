@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { markInquiryContacted, convertInquiry, deleteInquiry, createInquiry } from "@/app/(app)/leads/actions";
+import { markInquiryContacted, convertInquiry, deleteInquiry, createInquiry, snoozeInquiry, setInquiryStatus } from "@/app/(app)/leads/actions";
 import type { ActionDef } from "../types";
 
 export const inquiryActions: Record<string, ActionDef> = {
@@ -43,6 +43,28 @@ export const inquiryActions: Record<string, ActionDef> = {
     auth: "staff",
     effect: "write",
     handler: (i) => markInquiryContacted(i.id, i.follow_up_date ?? undefined),
+  },
+  "inquiry.snooze": {
+    name: "inquiry.snooze",
+    group: "inquiry",
+    label: "Snooze a lead",
+    description:
+      "Bring a lead back on a later day without saying anyone reached them — 'bring the Karen lead back Monday'. Pass its id (from list_inquiries) and date (YYYY-MM-DD, company-local, today or later). It sets only the next follow-up day: the lead's status and last contact stay as they are (use inquiry.contact when they were actually reached). The lead, new or contacted, stays off Needs You until that day. Reversible.",
+    input: z.object({ id: z.string(), date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/) }),
+    auth: "staff",
+    effect: "write",
+    handler: (i) => snoozeInquiry(i.id, i.date),
+  },
+  "inquiry.markLost": {
+    name: "inquiry.markLost",
+    group: "inquiry",
+    label: "Mark a lead lost",
+    description:
+      "Record that a lead went nowhere — 'the Karen lead is lost, she went with someone else'. Pass its id (from list_inquiries). The lead is kept (not deleted) with status lost, so it leaves the follow-up list and the record stays; set it back on /leads if that was wrong.",
+    input: z.object({ id: z.string() }),
+    auth: "staff",
+    effect: "write",
+    handler: (i) => setInquiryStatus(i.id, "lost"),
   },
   "inquiry.convert": {
     name: "inquiry.convert",

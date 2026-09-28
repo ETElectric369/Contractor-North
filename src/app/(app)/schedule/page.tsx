@@ -14,6 +14,7 @@ import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 import type { Placeable } from "@/lib/schedule/place-by-town";
 import { KIND_FROM_APPT_TYPE } from "@/lib/schedule/work-shape";
 import { FeatureOffLineFor } from "@/components/feature-off-line-for";
+import { isMissingColumn } from "@/lib/job-tasks";
 
 export const dynamic = "force-dynamic";
 
@@ -119,19 +120,16 @@ export default async function SchedulePage({
    * RLS scopes both reads to his org. A lead counts as "waiting" when it is open and has no
    * inspection booked yet; a job when it is in flight with no date.
    */
-  const [{ data: leadRows }, { data: dateless }, { data: undated }, { data: orgRow }] = await Promise.all([
-    supabase
-      .from("inquiries")
-      .select("id, name, address, city, phone, email, message, notes, next_follow_up_at, work_kind, planned_minutes")
-      .is("converted_at", null)
-      .neq("status", "lost")
-      .order("created_at", { ascending: false })
-      .limit(500),
+  // A parked job's day (0366, hold_until) rides the rail's job read. A push deploys before its
+  // migration and a select naming a column the database doesn't have yet fails the whole read, so
+  // it asks with the column and, only when the column is missing, again without it (no chip then).
+  const RAIL_JOB_COLS = "id, job_number, name, address, city, planned_minutes, status, hold_reason, customers(name, phone, email)";
+  const railJobs = (cols: string) =>
     supabase
       .from("jobs")
       // `status` is read below to badge a parked job — THE PROJECTION LAW: the column the
       // decision turns on has to be in the select list.
-      .select("id, job_number, name, address, city, planned_minutes, status, hold_reason, customers(name, phone, email)")
+      .select(cols)
       .in("status", ACTIVE_JOB_STATUSES)
       /* EVERYTHING ON HOLD, DATED OR NOT. Erik: "we need everything on hold to pop up on that
          list." A parked job that still carries a date is the worst of both — the calendar draws it
@@ -140,7 +138,21 @@ export default async function SchedulePage({
          leftover, so it belongs on the board with the rest of the work waiting for a real day. */
       .or("scheduled_start.is.null,status.eq.on_hold")
       .order("created_at", { ascending: false })
-      .limit(200),
+      .limit(200);
+  const railJobsWithDay = async () => {
+    const withDay = await railJobs(`${RAIL_JOB_COLS}, hold_until`);
+    return withDay.error && isMissingColumn(withDay.error) ? railJobs(RAIL_JOB_COLS) : withDay;
+  };
+
+  const [{ data: leadRows }, { data: dateless }, { data: undated }, { data: orgRow }] = await Promise.all([
+    supabase
+      .from("inquiries")
+      .select("id, name, address, city, phone, email, message, notes, next_follow_up_at, work_kind, planned_minutes")
+      .is("converted_at", null)
+      .neq("status", "lost")
+      .order("created_at", { ascending: false })
+      .limit(500),
+    railJobsWithDay(),
     // A booking with no time on it yet — proposed, or created without a date.
     supabase
       .from("appointments")
@@ -236,6 +248,9 @@ export default async function SchedulePage({
       // as a thing he has to work out.
       onHold: r.status === "on_hold",
       holdReason: r.hold_reason ?? null,
+      // The day it comes back (0366): absent when the database has no such column yet, so the
+      // card draws no chip rather than a false "No Day Set".
+      ...("hold_until" in r ? { holdUntil: r.hold_until ?? null } : {}),
     })),
     // ── THE BOOKED-BUT-UNPLANNED WALK-THROUGHS. Erik: "we have to roll in the 'to be scheduled'
     //    stuff somehow for example i have a couple inspections that already link to the leads i
@@ -271,7 +286,7 @@ export default async function SchedulePage({
           <h2 className="mb-2 text-sm font-semibold text-slate-900">
             Waiting for a day <span className="font-normal text-slate-400">({waiting.length})</span>
           </h2>
-          <PlaceRail items={waiting} />
+          <PlaceRail items={waiting} todayStr={today} />
         </aside>
         {/* The id is the landing pad for the rail's "tap the day" jump on phones — see place-rail. */}
         <div id="schedule-calendar" className="min-w-0 scroll-mt-4">

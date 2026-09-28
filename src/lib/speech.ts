@@ -5,10 +5,11 @@
  * a user gesture (a tap). The assistant used to start the mic from a post-mount useEffect (first open) and
  * from TTS "speech ended" callbacks (re-listen) — both run AFTER the gesture window closed, so on iPhone
  * the mic just never started. Because the recognizer was owned by <AssistantChat>, which isn't even
- * mounted at the first tap, there was no way to start it in-gesture from the topbar button.
+ * mounted at the first tap, there was no way to start it in-gesture from the tap that opens Nort.
  *
- * This holds the recognizer at MODULE level so the topbar tap (global-assistant launch()) can call
- * startListening() SYNCHRONOUSLY, in-gesture, before the chat panel mounts. The panel, once mounted,
+ * This holds the recognizer at MODULE level so the Talk To Nort tap (the first row under Search Or
+ * Ask: cn:nort-talk → global-assistant launch()) can call startListening() SYNCHRONOUSLY,
+ * in-gesture, before the chat panel mounts. The panel, once mounted,
  * registers the result handler and subscribes to the listening state. Off-gesture re-listen (desktop is
  * fine; iOS rejects) returns false so the caller can fall back to "tap Talk to speak".
  */
@@ -40,7 +41,7 @@ export function isListening(): boolean {
   return listeningNow;
 }
 
-/** Subscribe to listening on/off (drives the mic UI + the topbar red-stop). Returns an unsubscribe. */
+/** Subscribe to listening on/off (drives the mic UI + the top bar's red Stop Nort). Returns an unsubscribe. */
 export function onListeningState(cb: StateCb): () => void {
   stateSubs.add(cb);
   return () => {
@@ -139,7 +140,7 @@ export function startListening(lang = "en-US"): boolean {
   }
 }
 
-/** `discard: true` (the topbar STOP / End conversation / close) drops the final result the
+/** `discard: true` (Stop Nort / End conversation / close) drops the final result the
  *  recognizer hands back on stop() — same contract as voice-stream, so STOP means stop on both
  *  backends. Without it, a plain stop still delivers what was heard (the in-page mic tap). */
 export function stopListening(opts?: { discard?: boolean }) {

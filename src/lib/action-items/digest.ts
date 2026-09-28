@@ -2,7 +2,8 @@ import "server-only";
 import { todayStrInTz } from "@/lib/tz";
 import { getOrgSettings } from "@/lib/org-settings";
 import { featureOn } from "@/lib/features";
-import { orgStaffIds, pushConfigured, sendPushToProfiles } from "@/lib/push";
+import { orgStaffIds, pushConfigured } from "@/lib/push";
+import { notifyPeople } from "@/lib/notifications";
 import { sixForPerson, type DigestTask } from "./digest-six";
 
 /**
@@ -32,6 +33,10 @@ import { sixForPerson, type DigestTask } from "./digest-six";
  * Per-user opt-in is enforced inside sendPushToProfiles (push_prefs.day_ahead,
  * default OFF) — this never pushes to someone who hasn't turned the trigger on.
  * Guard: an org with no six and no decisions gets no push at all.
+ *
+ * THE BELL RECORDS IT (notifyPeople, 0366 wave): day_ahead is an opt-in kind, so the line lands
+ * only on the bell of someone the push went to. The decisions headline says "Needs You: N", the
+ * card's own name on My Day.
  */
 export async function sendDayAheadDigests(supabase: any): Promise<{ orgs: number; pushed: number }> {
   const counts = { orgs: 0, pushed: 0 };
@@ -106,7 +111,8 @@ export async function sendDayAheadDigests(supabase: any): Promise<{ orgs: number
       const sixLine =
         six.slice(0, 2).map((t) => String(t.title)).join(" · ") + (six.length > 2 ? ` · +${six.length - 2}` : "");
       const sixOverflow = six.slice(2).map((t) => String(t.title)).join(" · ");
-      await sendPushToProfiles(
+      await notifyPeople(
+        org.id,
         [personId],
         "day_ahead",
         six.length
@@ -116,7 +122,7 @@ export async function sendDayAheadDigests(supabase: any): Promise<{ orgs: number
               url: "/planner",
             }
           : {
-              title: `Needs action: ${decisions} item${decisions === 1 ? "" : "s"}`,
+              title: `Needs You: ${decisions}`,
               body: decisionLine,
               url: "/planner",
             },

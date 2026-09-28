@@ -5,42 +5,41 @@ import { executeAction } from "@/lib/actions/execute";
 import { blocksCrewWipe } from "./assign-guard";
 import type { ActionKind, Affordance } from "./types";
 
-type ConvertTarget = "inspection" | "customer" | "quote" | "estimate" | "job";
-
 type Result = { ok: boolean; error?: string };
 
 /**
  * The inbox switchboard, now a THIN SHIM over the unified Action Registry. A
  * (kind, verb) pair maps to a canonical registry action name + input, and
  * executeAction() does the lookup / auth / validation / run. Same signature the
- * inbox buttons and voice act_on_item already call — they were not touched.
+ * inbox buttons already call.
+ *
+ * No task arms and no convert branch (Wave 1, W1-16): tasks and Reminders never reach Needs You
+ * (0358), and the Convert sheet went with them. The registry still holds task.* and inquiry.convert
+ * for Nort; nothing here reaches them.
  */
 function resolve(
   kind: ActionKind,
   verb: Affordance,
   id: string,
-  payload?: { date?: string; assignee?: string; target?: ConvertTarget },
+  payload?: { date?: string; assignee?: string },
 ): { name: string; input: Record<string, unknown> } | null {
   const date = payload?.date;
-  const isTask = kind === "task" || kind === "work_order";
 
   if (verb === "do") {
-    if (isTask) return { name: "task.complete", input: { id, done: true } };
     if (kind === "inquiry") return { name: "inquiry.contact", input: { id } };
     if (kind === "appointment") return { name: "appointment.setStatus", input: { id, status: "completed" } };
   } else if (verb === "schedule" || verb === "snooze") {
     if (!date) return null;
     if (kind === "job_to_schedule") return { name: "job.scheduleDay", input: { id, date } };
-    if (isTask) return { name: "task.setDue", input: { id, due_date: date } };
+    // SNOOZE IS NOT A CONTACT. The row's Snooze Until is the same deed as Nort's inquiry.snooze: the
+    // lead comes back on that day and nobody is said to have reached anyone (no 'contacted', no
+    // last_contacted_at). Schedule / set a date stays the follow-up after a contact.
+    if (kind === "inquiry" && verb === "snooze") return { name: "inquiry.snooze", input: { id, date } };
     if (kind === "inquiry") return { name: "inquiry.contact", input: { id, follow_up_date: date } };
   } else if (verb === "assign") {
     const assignee = payload?.assignee ?? null;
-    if (isTask) return { name: "task.assign", input: { id, assigned_to: assignee } };
     if (kind === "job_to_schedule") return { name: "job.assign", input: { id, assignee: assignee ?? "" } };
-  } else if (verb === "convert") {
-    if (kind === "inquiry") return { name: "inquiry.convert", input: { id, target: payload?.target ?? "estimate" } };
   } else if (verb === "dismiss") {
-    if (isTask) return { name: "task.delete", input: { id } };
     if (kind === "inquiry") return { name: "inquiry.delete", input: { id } };
     if (kind === "appointment") return { name: "appointment.setStatus", input: { id, status: "cancelled" } };
     if (kind === "organize") return { name: "organize.archive", input: { id } };
@@ -57,7 +56,7 @@ export async function dispatchAction(input: {
   kind: ActionKind;
   id: string;
   verb: Affordance;
-  payload?: { date?: string; assignee?: string; target?: ConvertTarget };
+  payload?: { date?: string; assignee?: string };
   /** Which surface drove this — flows to the audit log + the confirm gate. */
   source?: "ui" | "voice" | "agent";
 }): Promise<Result> {

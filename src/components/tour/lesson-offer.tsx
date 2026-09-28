@@ -5,7 +5,8 @@ import { GraduationCap, Loader2 } from "lucide-react";
 import { unlockAudio } from "@/lib/tts";
 import { TourDriver } from "@/components/tour/tour-driver";
 import { markLessonSeen } from "@/app/(app)/setup-actions";
-import { lessonBlurb, lessonByKey } from "@/lib/onboarding/tour";
+import { lessonBlurb, lessonByKey, lessonOn } from "@/lib/onboarding/tour";
+import type { FeatureMap } from "@/lib/features";
 import type { Answers } from "@/lib/playbook/types";
 
 /**
@@ -19,15 +20,16 @@ import type { Answers } from "@/lib/playbook/types";
  * their hand through it."
  *
  * NOT AN ⓘ ICON. An icon that waits to be pressed is exactly the thing that doesn't hold a hand;
- * this strip is in the flow, unmissable once, and gone after either answer. "No thanks" records
- * the offer too — the strip must never nag — and replay always lives behind the cap, so declining
- * loses nothing permanently.
+ * this strip is in the flow, unmissable once, and gone after either answer. "No Thanks" records
+ * the offer too — the strip must never nag — and replay always lives under Show Me How (Search Or
+ * Ask; Help, behind the initials, with Nort off), so declining loses nothing permanently.
  */
 export function LessonOffer({
   lessonKey,
   seen,
   initial,
   nortOn = true,
+  features,
 }: {
   lessonKey: string;
   /** profiles.lessons_seen (0197) — offered already means never offered again here. */
@@ -35,15 +37,18 @@ export function LessonOffer({
   initial: Answers;
   /** The Nort switch (0352): off, the strip and the lesson read their neutral words. */
   nortOn?: boolean;
+  /** The company's switches: a lesson whose switch is off isn't offered (Show Me How's rule), and
+   *  the one that runs skips its switched-off steps. Left out = everything on. */
+  features?: FeatureMap | null;
 }) {
   const lesson = lessonByKey(lessonKey);
   const [running, setRunning] = useState(false);
   const [dismissed, setDismissed] = useState(false);
   const [pending, start] = useTransition();
 
-  if (!lesson) return null;
+  if (!lesson || !lessonOn(lesson, features)) return null;
   // THE OFFER MUST NOT KILL ITS OWN LESSON (Erik: "the tour shut off before starting").
-  // "Show me" records the offer, markLessonSeen revalidates /settings, the server re-render hands
+  // "Show Me" records the offer, markLessonSeen revalidates /settings, the server re-render hands
   // this component `seen` WITH the key in it — and the old guard returned null, unmounting the
   // TourDriver a second after it started. The strip goes; the running driver stays.
   const offerGone = dismissed || seen.includes(lesson.key);
@@ -64,15 +69,15 @@ export function LessonOffer({
             type="button"
             disabled={pending}
             onClick={() => {
-              // Same iOS rule as the cap: unlock audio inside the tap, or Nort is silent for the
-              // whole first step on an iPhone.
+              // Same iOS rule as the help rows under Search Or Ask: unlock audio inside the tap, or
+              // Nort is silent for the whole first step on an iPhone.
               unlockAudio();
               setRunning(true);
               record();
             }}
-            className="rounded-lg bg-brand px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-dark"
+            className="inline-flex min-h-11 items-center justify-center rounded-lg bg-brand px-3 text-sm font-medium text-white hover:bg-brand-dark"
           >
-            {pending && !running ? <Loader2 className="h-4 w-4 animate-spin" /> : "Show me (2 min)"}
+            {pending && !running ? <Loader2 className="h-4 w-4 animate-spin" /> : "Show Me (2 Min)"}
           </button>
           <button
             type="button"
@@ -81,9 +86,9 @@ export function LessonOffer({
               setDismissed(true);
               record();
             }}
-            className="text-sm text-slate-500 hover:underline"
+            className="inline-flex min-h-11 items-center justify-center px-2 text-sm text-slate-500 hover:underline"
           >
-            No thanks
+            No Thanks
           </button>
         </span>
       </div>
@@ -100,6 +105,7 @@ export function LessonOffer({
             setDismissed(true);
           }}
           nortOn={nortOn}
+          features={features}
         />
       )}
     </>

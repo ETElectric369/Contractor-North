@@ -92,8 +92,11 @@ describe("where the bug doors are", () => {
     expect(reporter).toContain("{platformAdmin && reports.length > 0 && (");
   });
 
-  it("a company's inbox gets the bug rollup only for a platform admin", () => {
-    expect(src("src/lib/action-items/query.ts")).toMatch(/isPlatformAdmin\(supabase\)\.then\([\s\S]{0,120}admin\s*\?\s*await supabase\s*\.from\("bug_reports"\)/);
+  it("no company inbox reads bug_reports: North's own triage lives on Bug Watch, with its own count (Wave 1, NY-list)", () => {
+    const query = src("src/lib/action-items/query.ts");
+    expect(query).not.toContain('.from("bug_reports")');
+    expect(query).not.toContain('kind: "bug_report"');
+    expect(src("src/lib/action-items/types.ts")).not.toContain('"bug_report"');
   });
 
   it("company Nort files reports but neither lists nor resolves them", () => {

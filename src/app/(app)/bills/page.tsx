@@ -12,7 +12,6 @@ import {
   type BillFingerprint,
 } from "@/lib/supplier-identity";
 import { Card } from "@/components/ui/card";
-import { FormSubmit } from "@/components/form-submit";
 import { BillsReceipts } from "./bills-receipts";
 import { AddBusinessCostButton } from "./add-business-cost";
 import { namesABucket } from "@/lib/business-cost-buckets";
@@ -49,16 +48,16 @@ import {
 import { readAlreadyBilledReach, type AlreadyBilledReach } from "@/lib/already-billed-read";
 import { billAlreadyBilledDoors } from "@/lib/already-billed";
 import { reportError } from "@/lib/observe";
-import { importCedInvoicesFromForm } from "./supplier-import-actions";
 import { CedPdfPicker } from "./ced-pdf-picker";
 import { BooksBeginLine } from "./books-begin-line";
-import { DropPaperworkButton, PaperworkDropZone, SortThese } from "./bills-drop";
+import { PaperworkDropZone, SortThese } from "./bills-drop";
+import { SnapOrNoteButton } from "@/components/snap-or-note";
 import { openListViews } from "./open-list-core";
 import { bankLinesStayHere, bankViews } from "./bank-core";
 import type { BankView } from "@/lib/bank-download";
 import type { OpenListView } from "@/lib/supplier-open-list";
 import type { PaperRowItem } from "@/components/paperwork-row";
-import type { NumberMatch } from "@/lib/paperwork";
+import { readinessOf, type NumberMatch } from "@/lib/paperwork";
 import { loadBooks, loadMarkContext, matchesOnBooks, PAPER_JOB_STATUSES, rematchTray } from "@/app/(app)/organize/paperwork-core";
 import { signDocumentUrls } from "@/lib/signed-docs";
 import { billPapers, type PaperTie } from "@/lib/job-photos";
@@ -93,8 +92,9 @@ import {
 import { stopWaitingOnCredit } from "./waiting-credit-actions";
 
 export const dynamic = "force-dynamic";
-// Drop Paperwork reads a paper inside this page's server actions: a 12-page CED PDF gets the
-// reader's own time, not the platform default (audit v994, SI4).
+// Read Now and Read Again on a card read a paper inside this page's server actions: a 12-page CED
+// PDF gets the reader's own time, not the platform default (audit v994, SI4). A paper put in
+// through Snap Or Note is read on its own route (/api/paperwork/read), with the same 60 seconds.
 export const maxDuration = 60;
 
 /**
@@ -157,18 +157,14 @@ export default async function BillsPage({
   searchParams,
 }: {
   /**
-   * WHAT THE IMPORT JUST DID, carried back the way settings/page.tsx already carries a Stripe or
-   * QuickBooks result: the server action redirects with its own sentence and the banner below
-   * renders it. This page is a server component and the supplier card is another file, so a
-   * plain form and a redirect is what lets an import say out loud what landed and what refused
-   * without a scrap of JavaScript between him and the answer.
-   *
    * `pay` is My Day's "Pay CED $X By Oct 10" door (supplier-pay-item.ts): the account whose
-   * Record A Payment sheet opens on arrival. The sheet is the one that already exists.
+   * Record A Payment sheet opens on arrival. The sheet is the one that already exists. (The paste
+   * box's `?import=` banner went with the paste box: pasted invoice text is imported from Snap Or
+   * Note's note box now, and its line there says what came in.)
    */
-  searchParams?: Promise<{ import?: string; importOk?: string; pay?: string }>;
+  searchParams?: Promise<{ pay?: string }>;
 }) {
-  const { import: importSaid, importOk, pay: payOn } = (await searchParams) ?? {};
+  const { pay: payOn } = (await searchParams) ?? {};
   const supabase = await createClient();
   const {
     data: { user },
@@ -396,8 +392,15 @@ export default async function BillsPage({
   // The claim read and the signing both depend on the first wave's rows and on nothing else, so
   // they ride together. Adding a second serial hop to this page was the phone-lag class all over
   // again (audit v921) and it is not worth one sentence on a card.
+  // ONE PAPER DOOR (W1-30): a paper put in through Snap Or Note is source "organize", so one the
+  // reader hasn't finished (not read yet, or too big) is drawn here too, with its Read Now, exactly
+  // as one dropped on this page always was: it may well be a bill.
   const papers = ((paperRows ?? []) as any[]).filter(
-    (i) => i.kind === "receipt" || i.source === "bills_drop" || (i.doc_type && i.doc_type !== "not_a_cost"),
+    (i) =>
+      i.kind === "receipt" ||
+      i.source === "bills_drop" ||
+      (i.doc_type && i.doc_type !== "not_a_cost") ||
+      (i.kind !== "note" && !!i.file_url && ["not_read", "too_big"].includes(readinessOf(i).state)),
   );
   let paperUrls = new Map<string, string>();
   const signPapers = async () => {
@@ -1209,18 +1212,19 @@ export default async function BillsPage({
 
   return (
     // THE WHOLE PAGE IS THE DROP ZONE (dropbox plan, Phase 1): drag any number of PDFs and photos
-    // anywhere onto it, or press Drop Paperwork. Nothing is filed on drop; each paper waits in
-    // Sort These until a person presses File It.
+    // anywhere onto it, or press Snap Or Note (the one paper door, W1-30: the same queue as + on
+    // every page). Nothing is filed on drop; each paper waits in Sort These until a person taps an
+    // answer on its card.
     //
     // THE ORDER (Bills plan, Wave B): the title and its two doors, the search box, Needs You, one
     // line per supplier, All Bills, More. Everything below Needs You is folded, and every paragraph
     // is a one-line label with a Why? fold ("it looks like one big run-on sentence"). Every door
     // the page had keeps exactly one home (bills-page-doors.test.ts finds each one).
-    <PaperworkDropZone orgId={orgId}>
+    <PaperworkDropZone>
       <FoldOpener />
       <PageHeader title="Bills">
         <div className="flex flex-wrap items-center gap-2">
-          <DropPaperworkButton />
+          <SnapOrNoteButton />
           {/* The door for a cost with no job (gas, phone, insurance), up top where it is found
               without opening anything. It saves through the same createBill as Add Bill. */}
           <AddBusinessCostButton today={today} />
@@ -1357,7 +1361,6 @@ export default async function BillsPage({
       <Card className="mb-6 px-4 py-1">
         <Fold
           id="more"
-          open={!!importSaid}
           summary={
             <span className="text-base font-semibold text-slate-900">
               More
@@ -1369,58 +1372,28 @@ export default async function BillsPage({
             </span>
           }
         >
-          {/* ── THE DOOR THE SUPPLIER'S OWN INVOICES COME IN THROUGH ─────────────────────────────
-              Once a month: pick the CED portal PDFs (read in the browser, lib/pdf-text) or paste the
-              text. It opens itself when there is a result to read. */}
-          <div className="mb-4 scroll-mt-20" id="ced-import">
-            {importSaid && (
-              <div
-                className={`mb-3 rounded-lg px-3 py-2 text-sm ${
-                  importOk === "1" ? "bg-emerald-50 text-emerald-800" : "bg-red-50 text-red-700"
-                }`}
-                role={importOk === "1" ? "status" : "alert"}
-              >
-                {importSaid}
-              </div>
-            )}
-            <details open={!!importSaid}>
-              <summary className="flex min-h-11 cursor-pointer list-none items-center text-sm font-semibold text-slate-900 [&::-webkit-details-marker]:hidden">
-                Import Supplier Invoices
-              </summary>
-              <div className="mt-1 space-y-3">
-                <WhyFold label="What Happens?">
-                  <p>
-                    Pick the PDFs from your supplier&apos;s payment portal, as many as you like. Each is checked against its own
-                    arithmetic before it is saved; anything that does not add up is named and left out. Loading the
-                    same download twice changes nothing, and the job you filed a document on is never touched.
-                  </p>
-                  <p>
-                    A statement, or the portal&apos;s open list (PDF, Excel, CSV or pasted), can come in here or anywhere
-                    you drop paper. It waits in Sort These as one card saying which papers it marks paid and which are
-                    new; nothing changes until you press Apply, and Undo puts it all back.
-                  </p>
-                </WhyFold>
-                <CedPdfPicker orgId={orgId} />
-                <details>
-                  <summary className="flex min-h-11 cursor-pointer list-none items-center text-sm font-medium text-brand [&::-webkit-details-marker]:hidden">
-                    Paste Text Instead
-                  </summary>
-                  <form action={importCedInvoicesFromForm} className="mt-2 space-y-3">
-                    <label className="block text-sm font-medium text-slate-700" htmlFor="ced-import-text">
-                      Invoice Text
-                    </label>
-                    <textarea
-                      id="ced-import-text"
-                      name="text"
-                      rows={8}
-                      placeholder={"INVOICE NO.\n0000-0000000\nINVOICE DATE\n01/15/2026..."}
-                      className="flex w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-xs text-slate-900 placeholder:text-slate-400 focus-visible:border-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
-                    />
-                    <FormSubmit>Import Documents</FormSubmit>
-                  </form>
-                </details>
-              </div>
-            </details>
+          {/* ── THE SUPPLIER'S OWN INVOICES: ONE LINE (W1-30) ───────────────────────────────────
+              They come in through Snap Or Note like every other paper: a portal PDF is read from
+              its own text in the browser and waits as one card (Add To Supplier Documents keeps
+              the PDF for Open Bill); pasted invoice text in the note box is imported. Choose
+              Supplier PDFs stays one more release: three sentences outside this lane still name it. */}
+          <div className="mb-4 scroll-mt-20 space-y-2" id="ced-import">
+            <h3 className="text-sm font-semibold text-slate-900">Import Supplier Invoices</h3>
+            <p className="text-sm text-slate-600">Supplier PDFs, statements and open lists go in through Snap Or Note.</p>
+            <WhyFold>
+              <p>
+                Choose the PDFs from your supplier&apos;s payment portal in Snap Or Note, as many as you like, or paste an
+                invoice&apos;s text into its note box. Each is checked against its own arithmetic before it is saved; anything
+                that does not add up is named and left out. Loading the same download twice changes nothing, and the job
+                you filed a document on is never touched.
+              </p>
+              <p>
+                A statement, or the portal&apos;s open list (PDF, Excel, CSV or pasted), waits in Sort These as one card
+                saying which papers it marks paid and which are new; nothing changes until you press Apply, and Undo puts
+                it all back.
+              </p>
+            </WhyFold>
+            <CedPdfPicker orgId={orgId} />
           </div>
 
           {/* SUPPLIER-NAME HOUSEKEEPING, in the order of how sure the app is: what it thinks, what
