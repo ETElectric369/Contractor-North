@@ -882,7 +882,7 @@ async function whoPicked(
  * FILE IT: THE ONE DOOR A PIECE OF PAPER BECOMES MONEY THROUGH (0295).
  *
  * A person picked where it goes and pressed the button. Every surface that files paper calls this:
- * the Organize tray, Drop Paperwork on /bills, and nothing else. There used to be a second, weaker
+ * the Organize tray, Snap Or Note's cards (on /bills' Needs You), and nothing else. There used to be a second, weaker
  * way in on /organize (a job dropdown that filed the moment it changed, with the category hard-
  * coded to "Receipt", no counter-preview flag and no look at what was already on the books), and a
  * third that let the model file on its own (AI Review & File). Both are gone; this is the only
@@ -971,7 +971,7 @@ export async function fileItem(id: string, dest: FileDestination, opts: FileOpti
   const provenance = dest.type === "unfiled" ? null : await whoPicked(supabase, ctx.orgId, item, dest);
 
   // CLAIM THE PAPER BEFORE WRITING A CENT (check-then-insert, the v951 class). The same paper
-  // shows on /bills Sort These and in the /organize tray, and two presses at once both passed the
+  // shows under Needs You on /bills and in the /organize tray, and two presses at once both passed the
   // gate above, both found no bill, and both made one: two bills for one paper, the row pointing at
   // only one, the other orphaned where Undo could never reach it. The row moves out of
   // needs_review ONLY IF it is still there, so exactly one press gets past this line. Every way

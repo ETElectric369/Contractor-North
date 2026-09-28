@@ -137,11 +137,14 @@ vi.mock("next/navigation", () => ({
   usePathname: () => "/bills",
   redirect: () => {},
 }));
+// The search rows are handed to the page's one query (the provider the box and All Bills share).
 vi.mock("./bills-search-box", () => ({
-  BillsSearchBox: ({ rows }: { rows: BillsSearchRow[] }) => {
+  BillsSearchProvider: ({ rows, children }: { rows: BillsSearchRow[]; children?: React.ReactNode }) => {
     state.rows = rows;
-    return null;
+    return children;
   },
+  BillsSearchBox: () => null,
+  useBillsSearch: () => ({ query: "", setQuery: () => {}, rows: [], keys: null }),
 }));
 
 let BillsPage: (p: { searchParams: Promise<Record<string, string>> }) => Promise<unknown>;
@@ -202,11 +205,12 @@ describe("the supplier's own papers unread", () => {
 });
 
 describe("the bills unread", () => {
-  it("All Bills says it couldn't read them, never 'No bills here yet'", async () => {
+  it("All Bills says it couldn't read them, never 'No bills yet' and never 'Nothing Unpaid'", async () => {
     const { text } = await renderWith("bills");
     expect(text).toContain("Couldn't read your bills just now");
-    expect(text).not.toContain("No bills here yet");
-    expect(text).not.toContain("All Bills (0)");
+    expect(text).toContain("All Bills · Couldn't Read");
+    expect(text).not.toContain("No bills yet");
+    expect(text).not.toContain("Nothing Unpaid");
   });
 
   it("Needs You says it couldn't check; a bills-less-payments account never reads 'ahead'", async () => {
@@ -281,9 +285,9 @@ describe("which receipt made which bill, unread", () => {
     const whole = await renderWith();
     expect(whole.text).not.toContain("which receipt made each bill");
     const { text } = await renderWith("organized_items");
-    expect(text).toContain("Couldn't load which receipt made each bill just now. Reload to try again.");
-    // The bills themselves were read: the ledger still lists them.
+    expect(text).toContain("Couldn't load which receipt made each bill just now, so every receipt file is listed. Reload to try again.");
+    // The bills themselves were read: the ledger still lists them, led by what's open.
     expect(text).not.toContain("Couldn't read your bills just now");
-    expect(text).toContain("All Bills (3)");
+    expect(text).toContain("All Bills · 3 Unpaid $529.45");
   });
 });

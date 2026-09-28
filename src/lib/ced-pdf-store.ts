@@ -58,7 +58,7 @@ export type KeptPdf = { ok: true; path: string; uploaded: boolean } | { ok: fals
 
 /**
  * Store one CED PDF, or say in words why it wasn't. Runs with either client: the importer's (a PDF
- * Drop Paperwork already holds) and the browser's (Choose CED PDFs uploads straight to storage,
+ * Snap Or Note already holds) and the browser's (Choose CED PDFs uploads straight to storage,
  * the drop box's way; the staff-only organize prefix is the RLS). Never throws: a PDF that did not save never
  * blocks the documents inside it from landing. `known` is paths this org's rows already name (the
  * importer reads them in one query), so a PDF already stored is not even sent again.

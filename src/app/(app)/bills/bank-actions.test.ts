@@ -406,7 +406,7 @@ describe("Apply", () => {
     expect(db.payments.find((p) => p.id === "pay-x")!.bank_line_id).toBeNull();
     expect(db.invoices.find((i) => i.id === "inv-x")!.amount_paid).toBe(0);
 
-    // The row left for later keeps the card in Sort These, named as not counted.
+    // The row left for later keeps the card under Needs You, named as not counted.
     expect(db.organized_items[0].status).toBe("needs_review");
     const after = await view(id);
     expect(after.rows.map((r) => r.title)).toEqual(["ACME INSURANCE CO"]);

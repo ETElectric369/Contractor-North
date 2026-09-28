@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeAll, afterAll } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 /**
  * EVERY DOOR ON /bills KEEPS EXACTLY ONE HOME (Bills plan, Wave B).
@@ -234,9 +236,12 @@ const TABLES: Record<string, unknown[]> = {
   invoice_items: [],
 };
 
+/** The database the fake answers from: the fixture, or a new company's (nothing yet). */
+let CURRENT: Record<string, unknown[]> = TABLES;
+
 /** A PostgREST chain whose every read answers with that table's rows. */
 function chain(table: string) {
-  const rows = TABLES[table] ?? [];
+  const rows = CURRENT[table] ?? [];
   const c: Record<string, unknown> = {};
   for (const m of ["select", "eq", "neq", "in", "is", "not", "or", "order", "limit", "gte", "lte", "ilike", "filter", "range"]) c[m] = () => c;
   c.maybeSingle = async () => ({ data: rows[0] ?? null, error: null });
@@ -323,24 +328,21 @@ describe("the page, in Wave B's order", () => {
  */
 const HOMES: { door: string | RegExp; was: string; home: string; times?: number }[] = [
   // 0. The header. Drop Paperwork is the one paper door now (W1-30): Snap Or Note, the same sheet
-  // and queue as + on every page.
+  // and queue as + on every page. Add By Hand (W1-32) is the one typed door: it took Add Business
+  // Cost's place, and the ledger's Add A Bill By Hand and Add Bill with it.
   { door: "Snap Or Note", was: "header (Drop Paperwork)", home: "header", times: 1 },
-  { door: "Add Business Cost", was: "header", home: "header" },
-  // Needs You (cn-v1014): the one place the supplier-paper decisions happen.
+  { door: "Add By Hand", was: "header (Add Business Cost; All Bills' Add A Bill By Hand and Add Bill)", home: "header", times: 1 },
+  // Needs You (cn-v1014): the one place the paper decisions happen. Sort These folded in (W1-32): a
+  // tray paper's card (the Home Depot receipt, no job, no guess) sits above the supplier cards and
+  // answers in the same words (W1-31), so each answer's count is the supplier cards' plus the tray's.
   { door: "Put It On J-028", was: "Needs You", home: "needs-you" },
   { door: /^J-033 · /, was: "Needs You (ASK chips)", home: "needs-you" },
   { door: "Record It On J-050", was: "Needs You (and CED 3b Record It As A Bill)", home: "needs-you" },
-  { door: "Pick A Job", was: "Needs You", home: "needs-you" },
+  { door: "Pick A Job", was: "Needs You (and Sort These' job picker; File It)", home: "needs-you" },
   { door: "Another Job", was: "Needs You", home: "needs-you", times: 3 },
-  { door: "Shop Stock", was: "Needs You (and CED 3b Record To Stock)", home: "needs-you", times: 4 },
-  { door: "Business Cost", was: "Needs You", home: "needs-you", times: 4 },
+  { door: "Shop Stock", was: "Needs You (and CED 3b Record To Stock; and Sort These' Shop Stock option)", home: "needs-you", times: 5 },
+  { door: "Business Cost", was: "Needs You (and Sort These' bucket picker)", home: "needs-you", times: 5 },
   { door: "Same Purchase: Tie Them", was: "Needs You (and CED 3b)", home: "needs-you" },
-  // 1. Sort These. A tray paper's card is the Supplier Bills card (W1-31): the same answers, in the
-  // same words, one set per paper. The fixture's Home Depot receipt names no job and has no guess.
-  { door: "Add More", was: "Sort These", home: "sort-these" },
-  { door: "Pick A Job", was: "Sort These (the job picker; File It)", home: "sort-these", times: 1 },
-  { door: "Shop Stock", was: "Sort These (the Shop Stock option; File It)", home: "sort-these", times: 1 },
-  { door: "Business Cost", was: "Sort These (the bucket picker; File It)", home: "sort-these", times: 1 },
   // 2. What You Owe Your Suppliers -> one line per supplier, its detail
   { door: /^Consolidated Electrical Distributors Account TR-34426/, was: "account row tap", home: "suppliers" },
   { door: "Record A Payment", was: "account row AND the CED discount section", home: "suppliers", times: 1 },
@@ -362,27 +364,20 @@ const HOMES: { door: string | RegExp; was: string; home: string; times?: number 
   { door: /^What Consolidated Electrical Distributors Has Open \(7\)$/, was: "CED 3d", home: "suppliers" },
   // CED 'Show The Other N' (x4): still each list's own switch past six rows. In this fixture no
   // list is longer than six once the papers on Needs You cards are left out of What CED Has Open.
-  // 9 + 10. What Your Customers Get Billed + the tabs -> All Bills
-  { door: /^All Bills \(\d+\)/, was: "the tabs under the page", home: "all-bills" },
-  // The tabs count only what's open (Erik, 2026-09-27: "all badges only show whats open"): the 9 of
-  // 15 bills still unpaid, the draft PO, and no count on Receipts (files are never open).
-  { door: "Bills 9", was: "tab", home: "all-bills" },
-  { door: "Purchase Orders 1", was: "tab (the default, and empty)", home: "all-bills" },
-  { door: "Receipts", was: "tab", home: "all-bills" },
-  { door: "Add A Bill By Hand", was: "the always-open Add Bill form", home: "all-bills" },
-  { door: "Add Bill", was: "Bills tab (size sm)", home: "all-bills" },
-  { door: "All (15)", was: "filter pill (~26px)", home: "all-bills" },
-  { door: /^Job Bills \(\d+\)$/, was: "filter pill", home: "all-bills" },
-  { door: /^Business Costs \(\d+\)$/, was: "filter pill", home: "all-bills" },
+  // 9 + 10. What Your Customers Get Billed + the tabs -> All Bills, one searchable list (W1-32). Its
+  // line leads with what's open (Erik, 2026-09-27: "all badges only show whats open"): the 9 of 15
+  // bills still unpaid and what they come to, never how many rows it holds. The tabs and the filter
+  // chips went: the search box at the top narrows the list in place.
+  { door: /^All Bills · 9 Unpaid \$4,801\.98$/, was: "the tabs under the page (All Bills (15) · $X)", home: "all-bills" },
   { door: /^(Settled|On Account) Switch$/, was: "Settled/On Account badge toggle", home: "all-bills", times: 15 },
   { door: "Edit", was: "pencil icon (bare 16px)", home: "all-bills", times: 15 },
   { door: "Delete", was: "trash icon (bare 16px)", home: "all-bills", times: 15 },
   { door: /^Bill Only What This Job Used$/, was: "receipt card, per line", home: "all-bills" },
   { door: "Put The Rest In Stock", was: "receipt card, per line", home: "all-bills" },
   { door: "Take It Out Of Stock", was: "receipt card, per line", home: "all-bills", times: 1 },
-  { door: "New PO", was: "Purchase Orders tab", home: "all-bills" },
-  { door: /^PO-001 · CED/, was: "Purchase Orders row", home: "all-bills" },
-  { door: "IMG_0412.jpg", was: "Receipts tab file link", home: "all-bills" },
+  { door: "New PO", was: "Purchase Orders tab (the list's ⋯ now)", home: "all-bills", times: 1 },
+  { door: /^PO PO-001 · CED/, was: "Purchase Orders row (a PO chip in the one list now)", home: "all-bills" },
+  { door: "IMG_0412.jpg", was: "Receipts tab file link (a File chip in the one list now)", home: "all-bills" },
   // 4-8. Housekeeping and the import -> More
   { door: /^More · /, was: "(new fold)", home: "more" },
   // Import Supplier Invoices is one line now (W1-30); Paste Text Instead and its Import Documents
@@ -504,7 +499,7 @@ describe("every door keeps exactly one home", () => {
 describe("one door for papers (Wave 0; W1-30)", () => {
   // The Receipts tab's Upload / Photo / drop box filed a picture and never recorded a cost, and its
   // drop box caught drops meant for the page's own drop. It is a list now; Snap Or Note reads papers.
-  it("the Receipts tab has no Upload or Photo door, and still lists what is on file", () => {
+  it("All Bills has no Upload or Photo door, and lists the receipt file no bill holds", () => {
     expect(count(doors(html), "Upload")).toBe(0);
     expect(count(doors(html), "Photo")).toBe(0);
     expect(count(doors(section("all-bills")), "IMG_0412.jpg")).toBe(1);
@@ -523,6 +518,154 @@ describe("one door for papers (Wave 0; W1-30)", () => {
   });
 });
 
+/**
+ * NEEDS YOU HOLDS SORT THESE (W1-32). One card: what was just dropped (the queue's lines, with Clear
+ * Finished Lines), every dropped paper waiting for its answer (a receipt, a bill, a bank download, an
+ * open list or a statement), then the supplier's bills not in the books. Its count is only what is
+ * open; #sort-these stays an anchor inside it (My Day's Papers To Sort lands there).
+ */
+describe("Needs You holds Sort These (W1-32)", () => {
+  it("one card: the papers waiting plus the supplier cards in its count, its line, and #sort-these inside it", () => {
+    const ny = section("needs-you");
+    const cards = Number(/Needs You \((\d+)\)/.exec(text(ny))?.[1] ?? 0);
+    // The Home Depot receipt in the tray, and the supplier's cards (each offers Business Cost once).
+    expect(cards).toBe(1 + (count(doors(ny), "Business Cost") - 1));
+    expect(text(ny)).toContain("Paper to sort and supplier bills not in your books yet.");
+    expect(ny).toContain('id="sort-these"');
+    expect((html.match(/id="sort-these"/g) ?? []).length).toBe(1);
+    // In order: the dropped paper's card, then the supplier's cards.
+    expect(ny.indexOf("Home Depot")).toBeGreaterThan(-1);
+    expect(ny.indexOf("Home Depot")).toBeLessThan(ny.indexOf("It Says 85 WHITNEY"));
+    // Sort These is gone as a card and as a word; Add More's job is the header's and the page's drop.
+    expect(text(html)).not.toContain("Sort These");
+    expect(count(doors(html), "Add More")).toBe(0);
+  });
+
+  it("the bank card's Apply and Undo, and the open list's Apply, live on their cards in Needs You", async () => {
+    const { NeedsYou } = await import("./bills-drop");
+    const { createElement } = await import("react");
+    const bank = {
+      id: "tray-bank",
+      kind: "receipt",
+      status: "needs_review",
+      title: "checking-sep.csv",
+      created_at: "2026-09-26T12:00:00Z",
+      signedUrl: null,
+      file_url: null,
+      proposal: { bankImport: { download: { lines: [] } } },
+      bank: {
+        headline: "Bank ••1234 · Aug 26–Sep 25 · 2 sorted · 1 need you",
+        fingerprint: "fp",
+        counts: { lines: 3, already: 0, matched: 2, ruled: 0, needLines: 1, needRows: 1 },
+        rows: [{ id: "out:shell", title: "SHELL 123 ANYTOWN", money: "$40.00", dates: "Sep 2", direction: "out", single: true, guess: "cost:Fuel", buttons: [{ id: "cost:Fuel", label: "Fuel" }] }],
+        otherOut: [],
+        otherIn: [],
+        otherInSingle: [],
+        flow: [],
+        inCents: 0,
+        outCents: 4000,
+        sorted: [{ label: "Payments Already Recorded", n: 2, cents: 8000 }],
+        skipped: [],
+        appliedSaid: "Applied: 2 lines counted.",
+        canUndo: true,
+        swapped: false,
+        canSwap: false,
+        askAccount: false,
+        rules: [],
+        problem: null,
+      },
+    };
+    const list = {
+      id: "tray-list",
+      kind: "receipt",
+      status: "needs_review",
+      title: "open-items.xlsx",
+      created_at: "2026-09-26T12:00:00Z",
+      signedUrl: null,
+      file_url: null,
+      proposal: { openList: { list: { rows: [] } } },
+      open_list: {
+        supplier: "Consolidated Electrical Distributors",
+        accountId: CED,
+        accountFrom: "number",
+        accounts: [{ id: CED, name: "Consolidated Electrical Distributors" }],
+        needs: null,
+        dateSaid: "Sep 26",
+        problem: null,
+        plan: {
+          headline: "Consolidated Electrical Distributors' open list of Sep 26: 1 paper marked paid ($10.29).",
+          discountLine: null,
+          complete: { ok: true, said: "", overridable: false },
+          fingerprint: "abc",
+          nothing: false,
+          closeBy: "2026-09-23",
+          close: [{ id: "p1", number: "8802-1103832", date: "2026-07-22", open: 10.29 }],
+          keepNewer: [],
+          keepUndated: [],
+          keepPartial: [],
+          add: [],
+          update: [],
+          conflicts: [],
+          payments: [],
+          skipped: [],
+          before: 10.29,
+          after: 0,
+          afterNet: 0,
+          firstList: false,
+        },
+      },
+    };
+    const card = renderToStaticMarkup(createElement(NeedsYou, { items: [bank, list] as any, jobs: [], matches: {}, emptyLine: "Nothing waiting." }));
+    expect(card).toMatch(/^<div[^>]*id="needs-you"/);
+    expect(text(card)).toMatch(/Needs You \(2\)/);
+    expect(count(doors(card), "Apply")).toBe(2);
+    expect(count(doors(card), "Undo This Download")).toBe(1);
+    expect(text(card)).not.toContain("Nothing waiting.");
+  });
+
+  it("the Waiting On A Credit lines stay on Needs You, and the page hands its papers to the one card", () => {
+    const PAGE = readFileSync(join(process.cwd(), "src/app/(app)/bills/page.tsx"), "utf8");
+    expect(PAGE).toContain("{`Waiting On A Credit (${w.count}) · Under ${w.name}`}");
+    expect(PAGE).toMatch(/<NeedsYou\s+items=\{paperItems\}/);
+    expect(PAGE).not.toContain("<SortThese");
+  });
+
+  it("with nothing waiting it says so, dated from the day the books begin", () => {
+    const PAGE = readFileSync(join(process.cwd(), "src/app/(app)/bills/page.tsx"), "utf8");
+    expect(PAGE).toContain("`Nothing waiting. Every paper${recordsSince ? ` since ${formatDateShort(recordsSince)}` : \"\"} is in your books.`");
+  });
+});
+
+/**
+ * ALL BILLS, ONE SEARCHABLE LIST (W1-32): every bill, every purchase order (a PO chip), and each
+ * receipt file no bill holds yet (a File chip, its Delete behind its ⋯). The search box at the top
+ * narrows it in place; a supplier's own paper is a hit that lands on its card.
+ */
+describe("All Bills is one list", () => {
+  it("its line leads with what's open, never a count of rows", () => {
+    const summary = doors(section("all-bills")).find((d) => d.startsWith("All Bills"))!;
+    expect(summary).toBe("All Bills · 9 Unpaid $4,801.98");
+    expect(summary).not.toMatch(/All Bills \(\d+\)/);
+  });
+
+  it("each kind in one list: bills, the order with its PO chip, the file with its File chip and its ⋯", () => {
+    const ledger = section("all-bills");
+    expect(ledger).not.toContain('role="tablist"');
+    expect(ledger).toMatch(/>PO<\/span>[\s\S]*?PO-001 · CED/);
+    expect(ledger).toMatch(/>File<\/span>[\s\S]*?IMG_0412\.jpg/);
+    expect(ledger).toMatch(/aria-label="More For IMG_0412\.jpg"/);
+    // New PO is on the list's own ⋯ (Purchase Orders is on in the fixture).
+    expect(ledger).toMatch(/aria-label="More For All Bills"/);
+  });
+
+  it("the search box filters it in place and still finds a supplier's paper on its card", () => {
+    const BOX = readFileSync(join(process.cwd(), "src/app/(app)/bills/bills-search-box.tsx"), "utf8");
+    expect(BOX).toContain('const papers = useMemo(() => rows.filter((r) => r.kind === "paper"), [rows]);');
+    const LIST = readFileSync(join(process.cwd(), "src/app/(app)/bills/bills-receipts.tsx"), "utf8");
+    expect(LIST).toContain("const kept = (key: string) => !keys || keys.has(key);");
+  });
+});
+
 describe("a one-tap write with no undo says so on screen, not only in a fold", () => {
   it("Not The Same and Keep Them Separate each carry their warning outside the Why? fold", () => {
     const more = section("more");
@@ -536,7 +679,45 @@ describe("a one-tap write with no undo says so on screen, not only in a fold", (
   });
 });
 
+/**
+ * WHAT A NEW COMPANY SEES (W1-32): the title, ONE primary button (Snap Or Note), a plain Add By Hand
+ * link and the drop line. The search, Needs You, Suppliers, All Bills and More each appear once they
+ * hold something. A company with data sees the same header.
+ */
+describe("the header, for a new company and one with data", () => {
+  it("with data: Snap Or Note is the one primary button, Add By Hand a 44px text link, and the drop line", () => {
+    const header = html.slice(0, html.indexOf('id="bills-search"'));
+    expect(text(header)).toContain("Drop a receipt or bill anywhere on this page.");
+    const hand = header.match(/<button[^>]*>\s*Add By Hand\s*<\/button>/);
+    expect(hand).not.toBeNull();
+    expect(hand![0]).toContain("min-h-11");
+    expect(hand![0]).not.toContain("bg-brand");
+    expect(count(doors(header), "Add Business Cost")).toBe(0);
+  });
+
+  it("a new company: the header and nothing else until something is in it", async () => {
+    CURRENT = { profiles: TABLES.profiles, organizations: TABLES.organizations };
+    try {
+      const { default: BillsPage } = await import("./page");
+      const fresh = renderToStaticMarkup((await BillsPage({ searchParams: Promise.resolve({}) })) as React.ReactElement);
+      expect(text(fresh)).toContain("Drop a receipt or bill anywhere on this page.");
+      expect(doors(fresh)).toEqual(["Snap Or Note", "Add By Hand"]);
+      for (const id of ["bills-search", "needs-you", "suppliers", "all-bills", "more"]) expect(fresh, id).not.toContain(`id="${id}"`);
+    } finally {
+      CURRENT = TABLES;
+    }
+  });
+});
+
 describe("the doors Wave B retired, and why none of them was the only way to do its job", () => {
+  it("W1-32: Sort These' Add More, the ledger's tabs and chips, its Add A Bill By Hand and Add Bill, and Add Business Cost", () => {
+    // Add More: the header's Snap Or Note and the page-wide drop. The tabs and chips: one list the
+    // search box narrows. Add A Bill By Hand, Add Bill, Add Business Cost: the header's Add By Hand.
+    for (const gone of ["Add More", "Add A Bill By Hand", "Add Bill", "Add Business Cost", "Receipts", "All (15)"]) expect(count(doors(html), gone), gone).toBe(0);
+    expect(count(doors(html), /^(Bills|Purchase Orders) \d+$/)).toBe(0);
+    expect(count(doors(html), /^(Job Bills|Business Costs) \(\d+\)$/)).toBe(0);
+  });
+
   it("See What {Account} Says and See What They Say: the lists they pointed at are inside the supplier's own detail", () => {
     expect(count(doors(html), /^See What .* Says$/)).toBe(0);
     expect(count(doors(html), /See What They Say/)).toBe(0);
@@ -556,11 +737,10 @@ describe("Title Case and 44px on the old controls the recon named", () => {
       expect(html).not.toContain(bad);
     }
   });
-  it("the filter pills and the status toggle are at least 44px tall", () => {
+  it("no filter pills are left (the search box narrows the list), and the status toggle is at least 44px tall", () => {
     const ledger = section("all-bills");
     const pills = Array.from(ledger.matchAll(/<button[^>]*aria-pressed="(true|false)"[^>]*>/g)).map((m) => m[0]);
-    expect(pills.length).toBe(3);
-    for (const p of pills) expect(p).toContain("min-h-11");
+    expect(pills.length).toBe(0);
     const toggles = Array.from(ledger.matchAll(/<button[^>]*aria-label="How this bill was bought[^"]*"[^>]*>/g)).map((m) => m[0]);
     expect(toggles.length).toBe(15);
     for (const t of toggles) expect(t).toContain("min-h-11");

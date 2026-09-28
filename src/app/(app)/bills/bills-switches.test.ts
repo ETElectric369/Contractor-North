@@ -8,10 +8,10 @@ import { join } from "node:path";
  * PURCHASE ORDERS AND SHOP STOCK ON /bills (the switch board, 0352).
  *
  *  - No switches stored (or on): the ledger renders exactly as before.
- *  - Purchase Orders off: the tab leaves the strip and New PO goes, but ?tab=po still opens the list,
- *    under the Off line (the owner gets Turn On; anyone else Ask The Owner), every PO still listed.
- *    Open POs keep counting in job cost: nothing on this page computes that, and nothing here skips
- *    the purchase_orders read.
+ *  - Purchase Orders off: New PO goes (the list's ⋯ with it), and every PO is still a row of the one
+ *    list (W1-32), under the Off line (the owner gets Turn On; anyone else Ask The Owner). Open POs
+ *    keep counting in job cost: nothing on this page computes that, and nothing here skips the
+ *    purchase_orders read.
  *  - Shop Stock off: a receipt line isn't offered to the shelf, the supplier cards don't offer it,
  *    and Record To Shelf gets neither half; a roll already on the shelf keeps its line.
  */
@@ -49,26 +49,28 @@ const ledger = (p: { features?: Record<string, boolean>; isOwner?: boolean } = {
     }),
   );
 
-describe("the ledger's Purchase Orders tab", () => {
-  it("no switches stored / on: exactly today's ledger", () => {
+describe("the ledger's purchase orders (one list, W1-32)", () => {
+  it("no switches stored / on: the same list, the order listed with its PO chip, New PO on the list's ⋯", () => {
     tab = null;
     expect(ledger({ features: ALL_ON, isOwner: true })).toBe(ledger());
-    expect(ledger()).toContain("Purchase Orders");
+    expect(ledger()).toContain("PO-003");
+    expect(ledger()).toMatch(/>PO<\/span>/);
     tab = "po";
     expect(ledger({ features: ALL_ON, isOwner: true })).toBe(ledger());
     expect(ledger()).toContain("data-new-po");
+    expect(ledger()).toMatch(/aria-label="More For All Bills"/);
     expect(ledger()).not.toContain("Ask The Owner");
+    // No tab strip any more: the orders are rows of the one list.
+    expect(ledger()).not.toMatch(/<button[^>]*>Purchase Orders/);
   });
 
-  it("off: no tab on the strip and no New PO", () => {
+  it("off: no New PO and no list ⋯, and the order is still listed (it counts in job cost)", () => {
     tab = null;
     const off = ledger({ features: { ...ALL_ON, purchase_orders: false } });
-    // Neither a chip on the strip nor in its measuring ghost (the Off line in the hidden panel is
-    // only seen when ?tab=po opens it).
-    expect(off).not.toMatch(/<button[^>]*>Purchase Orders/);
-    expect(off).not.toMatch(/data-gtab="true"[^>]*>Purchase Orders/);
-    expect(ledger()).toMatch(/<button[^>]*>Purchase Orders/);
     expect(off).not.toContain("data-new-po");
+    expect(off).not.toContain("More For All Bills");
+    expect(off).toContain("PO-003");
+    expect(off).toContain('href="/purchasing/po1"');
   });
 
   it("off, opened by ?tab=po: the Off line on top and every PO still listed", () => {
@@ -107,9 +109,10 @@ describe("the page wires the switches (the parts too big to draw here)", () => {
   it("Record To Shelf gets both halves only while Shop Stock is on", () => {
     expect(PAGE).toContain("...(shopStock ? { shelfLines: supplierInvoiceShelfLines, recordToShelf: recordSupplierInvoiceToShelf } : {})");
   });
-  it("the supplier cards and Sort These are told the switch", () => {
+  it("the supplier cards, Needs You's paper cards and Add By Hand are told the switch", () => {
     expect(PAGE).toMatch(/supplierPaperFeed\(\{[\s\S]*?shopStock,\s*\}\)/);
-    expect(PAGE).toContain("<SortThese items={paperItems} jobs={paperJobs} matches={paperMatches} shopStock={shopStock} />");
+    expect(PAGE).toMatch(/<NeedsYou\s+items=\{paperItems\}\s+jobs=\{paperJobs\}\s+matches=\{paperMatches\}\s+shopStock=\{shopStock\}/);
+    expect(PAGE).toContain("<AddByHandButton jobs={handJobs} shopStock={shopStock} />");
   });
   it("the purchase orders are still read whatever the switch (they count in job cost)", () => {
     expect(PAGE).toContain('.from("purchase_orders")');

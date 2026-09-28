@@ -19,6 +19,7 @@ import { DIFFERENT_PURCHASE_DOOR, fileReceiptDocument } from "@/lib/receipt-capt
 import { createBill, deleteBill, linkReceiptToBill } from "@/app/(app)/jobs/actions";
 import { billJobReceipt } from "@/app/(app)/organize/actions";
 import { jobLabel } from "@/lib/schedule-options";
+import { jobPickLabel } from "@/lib/job-pick-label";
 import { useToast } from "@/components/toast";
 import { openSnapOrNote } from "@/components/snap-or-note";
 import { BUSINESS_COST_BUCKETS, type BusinessCostBucket } from "@/lib/business-cost-buckets";
@@ -756,12 +757,7 @@ const STOCK = "__stock";
 export const SHOP_STOCK_BY_PAPER =
   "Stock goes in by the piece, from the ticket's lines, so it comes in on paper: snap or drop the ticket in Snap Or Note, then tap Shop Stock on its card.";
 
-/** A job as Erik reads it in a picker: the place first, the number second. */
-export function jobPickLabel(j: { job_number?: string | null; name?: string | null }): string {
-  const name = (j.name ?? "").trim();
-  const num = (j.job_number ?? "").trim();
-  return name && num ? `${name} · ${num}` : jobLabel(j);
-}
+export { jobPickLabel };
 
 export type TypedCostFields = {
   amount: number;

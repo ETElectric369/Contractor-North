@@ -421,7 +421,7 @@ export function SuppliersCard({
   // (a balance to pay down), and a door that cannot open says why instead of doing nothing. The
   // `pay` param comes off the address afterwards so a refresh after recording does not reopen it.
   const payOnHandled = useRef<string | null>(null);
-  // The why lands where he lands: this card sits below Needs You and Sort These, so on a phone the
+  // The why lands where he lands: this card sits below Needs You, so on a phone the
   // red line would be below the fold and the door would look like it did nothing.
   const errorRef = useRef<HTMLDivElement | null>(null);
   const [showDoorError, setShowDoorError] = useState(false);

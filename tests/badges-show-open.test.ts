@@ -126,9 +126,10 @@ describe("every tab count in the app is an open count", () => {
       }
     }
     expect(bad).toEqual([]);
-    // The scan really reads the strips (job 10, customer 3, bills 2, Organize 1), so it can't pass by
-    // matching nothing.
-    expect(seen).toBeGreaterThanOrEqual(16);
+    // The scan really reads the strips (job 11, customer 3, Organize 1), so it can't pass by matching
+    // nothing. /bills has no tab strip any more: All Bills is one searchable list (W1-32), led by
+    // what's open on its own line.
+    expect(seen).toBeGreaterThanOrEqual(15);
   });
 
   it("the job's Photos chip keeps its total (Erik's exception), Time carries no badge, and Materials counts only what's to buy", () => {

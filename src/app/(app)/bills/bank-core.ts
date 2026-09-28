@@ -49,7 +49,7 @@ import { OWNER_SORTS_BANK, viewerSortsBank } from "@/lib/bank-viewer";
  * on top of RLS, which holds bank_lines and bank_rules to the company's staff (0363). Every write
  * comes back with .select("id"): a zero-row write is a 204, and a 204 reads exactly like success.
  *
- * BEFORE 0363 IS APPLIED nothing crashes: the download still lands in Sort These, and its card
+ * BEFORE 0363 IS APPLIED nothing crashes: the download still lands under Needs You on Bills, and its card
  * says it needs one database update.
  */
 
@@ -459,7 +459,7 @@ export function depositMethod(description: string): string {
  * (org_id, line_key)), and each money row marked once (its UNIQUE bank_line_id).
  *
  * Rows the person left for later write nothing and stay on the card, named as not counted: the row
- * goes back to Sort These with only them.
+ * goes back under Needs You with only them.
  */
 export async function applyBankCore(
   supabase: Db,

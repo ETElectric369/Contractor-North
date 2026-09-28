@@ -65,7 +65,7 @@ export default async function PurchaseOrderPage({
 
   return (
     <div className="mx-auto max-w-4xl">
-      <BackLink fallback="/bills?tab=po" fallbackLabel="Back to Bills" />
+      <BackLink fallback="/bills?tab=po" fallbackLabel="Back To Bills" />
 
       <div className="mb-6 flex flex-col gap-2">
         <div className="flex flex-wrap items-center gap-3">
