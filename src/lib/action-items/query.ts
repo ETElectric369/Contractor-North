@@ -830,6 +830,9 @@ async function buildActionItems(ctx: {
   // cut): it goes out, gets set aside UNTIL A DAY (it waits in the fold with that day and its
   // reason), or is voided. A set-aside draft whose job is finished comes back at once: the day it
   // was waiting for has come.
+  // ONE FACT, ONE ROW: the jobs whose draft is on Now. A finished job whose bill is a draft here is
+  // that draft's row (Send It), never a second "Done, Not Billed" row below.
+  const draftOnNowJobs = new Set<string>();
   for (const d of (draftR.data ?? []) as any[]) {
     const a = invoiceAmount(d.total, d.amount_paid);
     const due = invoiceBalance(d.total, d.amount_paid);
@@ -846,6 +849,7 @@ async function buildActionItems(ctx: {
       }
     }
     const back = state.place === "finished";
+    if (d.job_id) draftOnNowJobs.add(String(d.job_id));
     items.push({
       id: d.id,
       kind: "invoice_draft",
@@ -1027,6 +1031,9 @@ async function buildActionItems(ctx: {
        see. Same kind, same question, same Bill It on the other end — the job page's. */
     for (const j of (doneJobsR.data ?? []) as any[]) {
       if (billedJobs.has(j.id)) continue; // any real (non-draft, non-void) invoice settles it
+      // Its bill is already a draft on Now ("Draft invoice INV-081", or "… Finished · Send INV-081"):
+      // that row, with its Send It, is this job's one row. (A draft past the 50-row read keeps this.)
+      if (draftOnNowJobs.has(String(j.id))) continue;
       items.push({
         id: `jdone-${j.id}`,
         kind: "visit_unbilled",
