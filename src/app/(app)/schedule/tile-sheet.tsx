@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { CalendarOff, CalendarSync } from "lucide-react";
 import { Modal } from "@/components/ui/modal";
@@ -62,20 +62,82 @@ type Shared = {
   team: CrewMember[];
   canEdit: boolean;
   onClose: () => void;
+  /** Where the sheet's writes report: a save out holds the sheet open, a refusal the sheet closed
+   *  before anyone read is said in a toast. Absent (the render test): inline words only. */
+  voice?: SheetVoice;
 };
+
+/** What every writer inside the sheet tells the sheet around it. */
+export type SheetVoice = {
+  /** A write went out (true) or settled (false). Said in the same event as the tap. */
+  pending: (busy: boolean) => void;
+  /** A refusal in words, or null when a new try starts. */
+  refusal: (words: string | null) => void;
+};
+
+/**
+ * NOTHING SAID TO A SHEET NOBODY CAN SEE. The sheet saves as a box is left (no Save button), so the
+ * tap that closes it is often the tap that saved: the backdrop press blurs the End box, the save goes
+ * out, and the same tap's click reached the backdrop and closed the sheet. A refusal then landed on a
+ * line that was gone, and the calendar just kept the old block (the class 21f6e37c fixed on Which
+ * Job). So: while any write is out the sheet holds itself open (Modal holdOpen; the count is said the
+ * moment a write starts), a refusal still standing when the sheet closes is said again in a toast, and
+ * one that comes back after it closed (Back still closes) goes straight to a toast.
+ */
+export function createSheetGuard(say: (words: string) => void, setBusy: (count: number) => void) {
+  let busy = 0;
+  let open = false;
+  let standing: string | null = null;
+  return {
+    opened() {
+      open = true;
+      standing = null;
+    },
+    pending(on: boolean) {
+      busy = Math.max(0, busy + (on ? 1 : -1));
+      setBusy(busy);
+    },
+    refusal(words: string | null) {
+      if (words == null) standing = null;
+      else if (open) standing = words;
+      else say(words);
+    },
+    closing() {
+      open = false;
+      const w = standing;
+      standing = null;
+      if (w) say(w);
+    },
+  };
+}
 
 const BTN = "inline-flex h-11 items-center justify-center gap-1.5 rounded-lg px-4 text-sm font-medium";
 
 export function ScheduleTileSheet({ target, ...rest }: Shared & { target: TileTarget | null }) {
+  const toast = useToast();
+  const sayRef = useRef(toast);
+  sayRef.current = toast;
+  const [busy, setBusy] = useState(0);
+  const [guard] = useState(() => createSheetGuard((w) => sayRef.current(w, "error"), setBusy));
+  const key = !target ? "" : `${target.kind}:${target.kind === "job" ? target.job.id : target.visit.id}:${target.day}`;
+  useEffect(() => {
+    if (key) guard.opened();
+  }, [key, guard]);
+  const close = () => {
+    guard.closing();
+    rest.onClose();
+  };
   const title = !target ? "" : target.kind === "job" ? target.job.name : target.visit.title;
   return (
-    <Modal open={!!target} onClose={rest.onClose} title={title || "Schedule"} size="md">
+    <Modal open={!!target} onClose={close} holdOpen={busy > 0} title={title || "Schedule"} size="md">
       {target && (
         <TileSheetBody
           // A different block (or day) is a fresh sheet: no half-typed time carries over.
-          key={`${target.kind}:${target.kind === "job" ? target.job.id : target.visit.id}:${target.day}`}
+          key={key}
           target={target}
           {...rest}
+          onClose={close}
+          voice={guard}
         />
       )}
     </Modal>
@@ -96,20 +158,47 @@ function Heading({ children }: { children: React.ReactNode }) {
  * THE DAY: the tile's day in a date box and a Move button (a move is two deliberate steps, never a
  * change event: iOS date wheels fire one per spin). `move` returns the writer's answer.
  */
+/** One write from inside the sheet: its pending state and its refusal in words, both also told to the
+ *  sheet (SheetVoice) the moment they happen. `fn` answers with the refusal's words, or null. */
+function useSheetWrite(voice: SheetVoice | undefined) {
+  const [pending, start] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  const refuse = (words: string | null) => {
+    setError(words);
+    voice?.refusal(words);
+  };
+  const run = (fn: () => Promise<string | null>, offline: string) => {
+    refuse(null);
+    voice?.pending(true);
+    start(async () => {
+      try {
+        const words = await fn();
+        if (words) refuse(words);
+      } catch {
+        refuse(offline);
+      } finally {
+        voice?.pending(false);
+      }
+    });
+  };
+  return { pending, error, run };
+}
+
 function DayRow({
   day,
   canEdit,
   move,
   idPrefix,
+  voice,
 }: {
   day: string;
   canEdit: boolean;
   move: (to: string) => Promise<{ ok: boolean; error?: string; note?: string } | null>;
   idPrefix: string;
+  voice?: SheetVoice;
 }) {
   const [to, setTo] = useState(day);
-  const [pending, start] = useTransition();
-  const [error, setError] = useState<string | null>(null);
+  const { pending, error, run } = useSheetWrite(voice);
   if (!canEdit) return <p className="text-sm text-slate-700">{dayWords(day)}</p>;
   return (
     <div>
@@ -128,15 +217,10 @@ function DayRow({
           variant="outline"
           disabled={pending || !/^\d{4}-\d{2}-\d{2}$/.test(to) || to === day}
           onClick={() =>
-            start(async () => {
-              setError(null);
-              try {
-                const res = await move(to);
-                if (res && !res.ok) setError(res.error ?? "It didn't move. Try again.");
-              } catch {
-                setError("It didn't move. You may be offline.");
-              }
-            })
+            run(async () => {
+              const res = await move(to);
+              return res && !res.ok ? (res.error ?? "It didn't move. Try again.") : null;
+            }, "It didn't move. You may be offline.")
           }
         >
           <CalendarSync className="h-4 w-4" /> {pending ? "Moving…" : "Move"}
@@ -148,10 +232,17 @@ function DayRow({
 }
 
 /** The two-tap Clear The Date: the first tap asks, in words, what it will do. */
-function ClearTheDate({ what, clear }: { what: string; clear: () => Promise<{ ok: boolean; error?: string; note?: string }> }) {
+function ClearTheDate({
+  what,
+  clear,
+  voice,
+}: {
+  what: string;
+  clear: () => Promise<{ ok: boolean; error?: string; note?: string }>;
+  voice?: SheetVoice;
+}) {
   const [asking, setAsking] = useState(false);
-  const [pending, start] = useTransition();
-  const [error, setError] = useState<string | null>(null);
+  const { pending, error, run } = useSheetWrite(voice);
   if (!asking) {
     return (
       <Button type="button" variant="outline" onClick={() => setAsking(true)}>
@@ -169,15 +260,10 @@ function ClearTheDate({ what, clear }: { what: string; clear: () => Promise<{ ok
           className="text-red-600"
           disabled={pending}
           onClick={() =>
-            start(async () => {
-              setError(null);
-              try {
-                const res = await clear();
-                if (!res.ok) setError(res.error ?? "The date didn't clear. Try again.");
-              } catch {
-                setError("The date didn't clear. You may be offline.");
-              }
-            })
+            run(async () => {
+              const res = await clear();
+              return res.ok ? null : (res.error ?? "The date didn't clear. Try again.");
+            }, "The date didn't clear. You may be offline.")
           }
         >
           {pending ? "Clearing…" : "Clear It"}
@@ -191,7 +277,7 @@ function ClearTheDate({ what, clear }: { what: string; clear: () => Promise<{ ok
   );
 }
 
-function JobSheet({ day, job, tz, workDay, team, canEdit, onClose }: Shared & { day: string; job: TileJob }) {
+function JobSheet({ day, job, tz, workDay, team, canEdit, onClose, voice }: Shared & { day: string; job: TileJob }) {
   const router = useRouter();
   const toast = useToast();
   const block: JobBlock = readJobBlock({
@@ -202,6 +288,10 @@ function JobSheet({ day, job, tz, workDay, team, canEdit, onClose }: Shared & { 
     workDay,
   });
   const crew: CrewMember[] = (job.assigned_to ?? []).map((id) => team.find((m) => m.id === id) ?? { id, full_name: null });
+  /* THE DAY TAPPED MAY BE HISTORY: a worked day kept on the calendar outside the plan (or with no plan
+     left). The grid draws it all day, so the sheet says what it is, its time controls are the PLAN's
+     and say so, and its Move moves the plan (or, with none, gives it one), never the worked day. */
+  const onPlan = !!block.day && day >= block.day && day <= (block.lastDay ?? block.day);
 
   async function saveTimes(patch: BlockPatch) {
     const res = await setJobTimes(job.id, "start" in patch ? { start: patch.start } : { length: patch.length });
@@ -210,10 +300,11 @@ function JobSheet({ day, job, tz, workDay, team, canEdit, onClose }: Shared & { 
   }
 
   async function move(to: string) {
-    let res = await moveJobDay(job.id, day, to);
+    const from = onPlan ? day : null;
+    let res = await moveJobDay(job.id, from, to);
     if (!res.ok && res.needsProposalConfirm) {
       if (!window.confirm(`${res.error} Move it anyway?`)) return null;
-      res = await moveJobDay(job.id, day, to, { cancelProposals: true });
+      res = await moveJobDay(job.id, from, to, { cancelProposals: true });
     }
     if (res.ok) {
       toast(res.note ?? `Moved to ${dayWords(to)}.`, res.note ? "info" : "success");
@@ -238,23 +329,36 @@ function JobSheet({ day, job, tz, workDay, team, canEdit, onClose }: Shared & { 
       {job.customers?.name && <p className="-mt-2 text-sm text-slate-500">{job.customers.name}</p>}
       <section>
         <Heading>Day</Heading>
-        <DayRow day={day} canEdit={canEdit} move={move} idPrefix={`tile-${job.id}`} />
+        <DayRow day={day} canEdit={canEdit} move={move} idPrefix={`tile-${job.id}`} voice={voice} />
+        {!onPlan && (
+          <p className="mt-1 text-xs text-slate-500">
+            {block.day
+              ? `Work was done this day; it stays as history. The job is planned ${dayWords(block.day)}${canEdit ? ", and Move moves that" : ""}.`
+              : `Work was done this day; it stays as history. No day is planned yet${canEdit ? ": Move gives it one" : ""}.`}
+          </p>
+        )}
       </section>
       <section>
         <Heading>Time</Heading>
         {block.day ? (
-          <BlockTimeControls
-            startHm={block.startHm}
-            endHm={block.endHm}
-            allDay={block.allDay}
-            sized={block.sized}
-            multiDay={block.multiDay}
-            lastDayWords={dayWords(block.lastDay)}
-            workDay={workDay}
-            canEdit={canEdit}
-            save={saveTimes}
-            idPrefix={`tile-${job.id}`}
-          />
+          <>
+            {!onPlan && <p className="mb-1.5 text-xs text-slate-500">The plan&apos;s time, {dayWords(block.day)}:</p>}
+            <BlockTimeControls
+              startHm={block.startHm}
+              endHm={block.endHm}
+              allDay={block.allDay}
+              sized={block.sized}
+              multiDay={block.multiDay}
+              lastDayWords={dayWords(block.lastDay)}
+              workDay={workDay}
+              canEdit={canEdit}
+              save={saveTimes}
+              idPrefix={`tile-${job.id}`}
+              plannedMinutes={job.planned_minutes ?? null}
+              onPending={voice?.pending}
+              onRefusal={voice?.refusal}
+            />
+          </>
         ) : (
           // A day kept as history (worked, its plan cleared): the time belongs to a planned day.
           <p className="text-sm text-slate-500">No day is planned for it yet. Move it to a day, then set its time.</p>
@@ -268,7 +372,7 @@ function JobSheet({ day, job, tz, workDay, team, canEdit, onClose }: Shared & { 
         <Link href={`/jobs/${job.id}`} className={`${BTN} btn-gloss bg-[rgb(var(--glass-ink))] text-white hover:bg-[rgb(var(--glass-ink))]/90`}>
           Open Job
         </Link>
-        {canEdit && <ClearTheDate what="this job" clear={clear} />}
+        {canEdit && block.day && <ClearTheDate what="this job" clear={clear} voice={voice} />}
       </div>
     </div>
   );
@@ -353,7 +457,7 @@ function VisitPerson({ visitId, assigned, team, canEdit }: { visitId: string; as
   );
 }
 
-function VisitSheet({ day, visit, tz, workDay, team, canEdit, onClose }: Shared & { day: string; visit: TileVisit }) {
+function VisitSheet({ day, visit, tz, workDay, team, canEdit, onClose, voice }: Shared & { day: string; visit: TileVisit }) {
   const router = useRouter();
   const toast = useToast();
   const block = readVisitBlock({ startsAt: visit.starts_at, endsAt: visit.ends_at, tz, workDay });
@@ -407,7 +511,7 @@ function VisitSheet({ day, visit, tz, workDay, team, canEdit, onClose }: Shared 
     <div className="space-y-5">
       <section>
         <Heading>Day</Heading>
-        <DayRow day={day} canEdit={canEdit} move={move} idPrefix={`tile-${visit.id}`} />
+        <DayRow day={day} canEdit={canEdit} move={move} idPrefix={`tile-${visit.id}`} voice={voice} />
       </section>
       <section>
         <Heading>Time</Heading>
@@ -422,6 +526,10 @@ function VisitSheet({ day, visit, tz, workDay, team, canEdit, onClose }: Shared 
           canEdit={canEdit}
           save={saveTimes}
           idPrefix={`tile-${visit.id}`}
+          // A visit's length is its own clock (never the job's closing-time stamp): a new start keeps it.
+          plannedMinutes={block.minutes}
+          onPending={voice?.pending}
+          onRefusal={voice?.refusal}
         />
       </section>
       <section>
@@ -432,7 +540,7 @@ function VisitSheet({ day, visit, tz, workDay, team, canEdit, onClose }: Shared 
         <Link href={`/appointments/${visit.id}`} className={`${BTN} btn-gloss bg-[rgb(var(--glass-ink))] text-white hover:bg-[rgb(var(--glass-ink))]/90`}>
           Open Visit
         </Link>
-        {canEdit && open && <ClearTheDate what="this visit" clear={clear} />}
+        {canEdit && open && <ClearTheDate what="this visit" clear={clear} voice={voice} />}
       </div>
     </div>
   );

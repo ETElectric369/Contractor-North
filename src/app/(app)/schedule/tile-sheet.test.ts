@@ -25,7 +25,8 @@ vi.mock("../appointments/actions", () => ({
   unscheduleAppointment: vi.fn(),
 }));
 
-import { TileSheetBody, type TileTarget } from "./tile-sheet";
+import { createSheetGuard, TileSheetBody, type TileTarget } from "./tile-sheet";
+import { segmentJobsNotLoaded } from "@/lib/schedule/cal-window";
 import { JobScheduleCard } from "./job-schedule-card";
 import { tzDateTimeUtc } from "@/lib/tz";
 
@@ -206,5 +207,132 @@ describe("the day drill's job card opens the same sheet", () => {
     expect(html).not.toContain("Move to a Day");
     const src = readFileSync(join(process.cwd(), "src/app/(app)/schedule/job-schedule-card.tsx"), "utf8");
     expect(src).not.toMatch(/setJobCrew\(/);
+  });
+
+  const card = (day: string, over: Record<string, unknown> = {}) =>
+    text(
+      renderToStaticMarkup(
+        createElement(JobScheduleCard, {
+          job: {
+            id: "j058",
+            name: "Seiler · 3-way switches",
+            job_number: "J-058",
+            status: "scheduled",
+            scheduled_start: at("2026-09-29", "09:00"),
+            scheduled_end: at("2026-09-29", "11:00"),
+            planned_minutes: 120,
+            assigned_to: [],
+            customers: { name: "Rich Seiler" },
+            ...over,
+          },
+          members: team,
+          tz: LA,
+          workDay: WORK_DAY,
+          day,
+          onOpen: () => {},
+        }),
+      ),
+    );
+
+  it("on a worked day kept as history the card says so, as the grid draws it (all day), never the plan's 9 to 11", () => {
+    expect(card("2026-09-29")).toContain("9:00 AM – 11:00 AM · 2 hours");
+    expect(card("2026-09-22")).toContain("Worked day · planned Tue, Sep 29");
+    expect(card("2026-09-22")).not.toContain("9:00 AM – 11:00 AM");
+    expect(card("2026-09-22", { scheduled_start: null, scheduled_end: null })).toContain("Worked day · no day planned yet");
+    const view = readFileSync(join(process.cwd(), "src/app/(app)/calendar/calendar-view.tsx"), "utf8");
+    expect(view).toMatch(/<JobScheduleCard[\s\S]*?day=\{dayK\}/);
+  });
+});
+
+describe("a worked day kept as history, tapped", () => {
+  const history = (over: Partial<Extract<TileTarget, { kind: "job" }>["job"]> = {}) => {
+    const t = seiler({ scheduled_start: at("2026-09-29", "10:00"), scheduled_end: at("2026-09-29", "12:00"), ...over });
+    return { ...t, day: "2026-09-22" } as TileTarget;
+  };
+
+  it("says the day was worked and where the plan is; its time controls are labelled the plan's", () => {
+    const t = text(render(history()));
+    expect(t).toContain("Work was done this day; it stays as history. The job is planned Tue, Sep 29, and Move moves that.");
+    expect(t).toContain("The plan's time, Tue, Sep 29:");
+  });
+
+  it("its Move moves the plan (no from-day), never the worked day", () => {
+    const src = readFileSync(join(process.cwd(), "src/app/(app)/schedule/tile-sheet.tsx"), "utf8");
+    expect(src).toContain("const from = onPlan ? day : null;");
+    expect(src).toContain("moveJobDay(job.id, from, to)");
+  });
+
+  it("with no plan left: no time to set and nothing to clear, and Move gives it a day", () => {
+    const t = text(render(history({ scheduled_start: null, scheduled_end: null })));
+    expect(t).toContain("No day is planned yet: Move gives it one.");
+    expect(t).not.toContain("Clear The Date");
+  });
+});
+
+describe("the calendar draws a cleared job's worked day (Clear The Date keeps it there)", () => {
+  it("names the jobs a window segment points at that the listed-span read didn't bring", () => {
+    expect(
+      segmentJobsNotLoaded(["a"], [
+        { job_id: "a" },
+        { job_id: "cleared" },
+        { job_id: "cleared" },
+      ]),
+    ).toEqual(["cleared"]);
+    expect(segmentJobsNotLoaded([], [])).toEqual([]);
+  });
+
+  it("CalendarPanel reads those by id with the same columns and hands them to the view", () => {
+    const src = readFileSync(join(process.cwd(), "src/app/(app)/schedule/calendar-panel.tsx"), "utf8");
+    expect(src).toContain("segmentJobsNotLoaded(");
+    expect(src).toMatch(/\.from\("jobs"\)\.select\(JOB_COLS\)\.in\("id", missing/);
+    expect(src).toContain("const jobs: unknown[] = [...(listedJobs ?? []), ...(historyJobs ?? [])];");
+  });
+});
+
+describe("nothing said to a sheet nobody can see", () => {
+  it("a refusal still standing when the sheet closes is said again in a toast", () => {
+    const said: string[] = [];
+    const g = createSheetGuard((w) => said.push(w), () => {});
+    g.opened();
+    g.refusal("The end has to be after the start.");
+    expect(said).toEqual([]);
+    g.closing();
+    expect(said).toEqual(["The end has to be after the start."]);
+  });
+
+  it("one that comes back after the sheet closed goes straight to a toast; a new try clears a standing one", () => {
+    const said: string[] = [];
+    const g = createSheetGuard((w) => said.push(w), () => {});
+    g.opened();
+    g.refusal("Old words.");
+    g.refusal(null);
+    g.closing();
+    expect(said).toEqual([]);
+    g.refusal("That time didn't save. You may be offline.");
+    expect(said).toEqual(["That time didn't save. You may be offline."]);
+  });
+
+  it("while a write is out the count is up (the sheet holds itself open), and it comes back down", () => {
+    const counts: number[] = [];
+    const g = createSheetGuard(() => {}, (n) => counts.push(n));
+    g.pending(true);
+    g.pending(true);
+    g.pending(false);
+    g.pending(false);
+    g.pending(false);
+    expect(counts).toEqual([1, 2, 1, 0, 0]);
+  });
+
+  it("the Modal holds open on it, every writer in the sheet reports to it, and the time box says it's busy in the same event", () => {
+    const sheet = readFileSync(join(process.cwd(), "src/app/(app)/schedule/tile-sheet.tsx"), "utf8");
+    expect(sheet).toContain("holdOpen={busy > 0}");
+    expect(sheet).toMatch(/<DayRow [^>]*voice=\{voice\}/);
+    expect(sheet.match(/<ClearTheDate [^>]*voice=\{voice\}/g)?.length).toBe(2);
+    expect(sheet.match(/onPending=\{voice\?\.pending\}/g)?.length).toBe(2);
+    expect(sheet.match(/onRefusal=\{voice\?\.refusal\}/g)?.length).toBe(2);
+    const controls = readFileSync(join(process.cwd(), "src/components/block-time-controls.tsx"), "utf8");
+    // Said before the transition starts, so the backdrop click of the same tap finds the sheet held.
+    expect(controls).toMatch(/onPending\?\.\(true\);\s*start\(async/);
+    expect(controls).toContain('refuse("The end has to be after the start.")');
   });
 });

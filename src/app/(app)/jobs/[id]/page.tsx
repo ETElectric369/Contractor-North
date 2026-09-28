@@ -1222,7 +1222,13 @@ export default async function JobDetailPage({
                   <div className="mt-1">
                     {viewerIsStaff ? (
                       <div className="flex flex-wrap items-start gap-x-3 gap-y-2">
-                        <JobScheduleControl id={j.id} segments={(scheduleSegments ?? []) as any} block={block} workDay={workDay} />
+                        <JobScheduleControl
+                          id={j.id}
+                          segments={(scheduleSegments ?? []) as any}
+                          block={block}
+                          workDay={workDay}
+                          plannedMinutes={j.planned_minutes ?? null}
+                        />
                         {/* OFFER DATES, beside the dates it fills (W1-17: out of Manage, not cut). Only
                             while the job can still be scheduled. */}
                         {schedulable && (

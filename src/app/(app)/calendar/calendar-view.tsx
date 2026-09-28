@@ -22,7 +22,7 @@ import { hmToMin, todayStrInTz, tzMinutesOfDay } from "@/lib/tz";
 import { formatTime } from "@/lib/utils";
 import { firstNameOf } from "@/lib/employee-color";
 import { shiftApptToDay } from "@/lib/appt-time";
-import { placeJobOnDay, setJobScheduleRanges } from "../schedule/actions";
+import { placeJobOnDay, unplaceJob } from "../schedule/actions";
 import { rescheduleAppointment } from "../appointments/actions";
 import { updateTask, type TaskCategory } from "../tasks/actions";
 import { taskHref } from "@/lib/task-href";
@@ -494,31 +494,16 @@ export function CalendarView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jobs, segments, appointments, tasks, external, personFilter, tz]);
 
-  /** The job's current ranges as seen by this render — the tray-place undo
-   *  snapshot. An empty result means "was unscheduled", which undo restores by
-   *  writing []. */
-  function snapshotJobRanges(jobId: string): { start: string; end: string }[] {
-    const segs = segments.filter((s) => s.job_id === jobId).map((s) => ({ start: s.start_date, end: s.end_date }));
-    if (segs.length) return segs;
-    const j = jobs.find((x) => x.id === jobId);
-    if (j?.scheduled_start) {
-      const startYmd = dayOf(j.scheduled_start); // org-tz day, matching the grid placement
-      const endYmd = j.scheduled_end ? dayOf(j.scheduled_end) : startYmd;
-      return [{ start: startYmd, end: endYmd < startYmd ? startYmd : endYmd }];
-    }
-    return [];
-  }
-
   /** Place a backlog (dateless) job on a day — the tray's "Schedule" gesture,
-   *  routed to placeJobOnDay (a UNION write: a needs-return job keeps its
-   *  worked-history segments). Runs inside the MoveToDay sheet, so it's already
-   *  a deliberate two-step pick; undo restores the exact pre-place snapshot.
+   *  routed to placeJobOnDay (a needs-return job keeps its worked-history
+   *  segments as history; the new day is its plan). Runs inside the MoveToDay sheet, so it's already
+   *  a deliberate two-step pick. Undo takes the plan off again (unplaceJob) and leaves the history:
+   *  a tray job had no day, and writing its history back as ranges made a worked day its plan.
    *  Returns the MoveToDay result shape so the sheet reports errors inline. */
   async function placeOnDay(job: CalUnscheduled, targetYmd: string) {
-    const prior = snapshotJobRanges(job.id);
     const res = await placeJobOnDay(job.id, targetYmd);
     if (!res.ok) return res;
-    setUndo({ label: `${job.name} → ${prettyYmd(targetYmd)}`, run: () => setJobScheduleRanges(job.id, prior) });
+    setUndo({ label: `${job.name} → ${prettyYmd(targetYmd)}`, run: () => unplaceJob(job.id) });
     router.refresh();
     return res;
   }
@@ -1391,6 +1376,7 @@ function DayDetail({
               members={members}
               tz={tz}
               workDay={workDay}
+              day={dayK}
               onOpen={onOpenJob ? () => onOpenJob(job.id) : undefined}
             />
           ))}

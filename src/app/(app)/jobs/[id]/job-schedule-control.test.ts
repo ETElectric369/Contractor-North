@@ -85,7 +85,11 @@ describe("where each edit goes (source)", () => {
 
   it("the page hands it the block on the company's clock", () => {
     const page = readFileSync(join(process.cwd(), "src/app/(app)/jobs/[id]/page.tsx"), "utf8");
-    expect(page).toContain("<JobScheduleControl id={j.id} segments={(scheduleSegments ?? []) as any} block={block} workDay={workDay} />");
+    expect(page).toMatch(
+      /<JobScheduleControl\s+id=\{j\.id\}\s+segments=\{\(scheduleSegments \?\? \[\]\) as any\}\s+block=\{block\}\s+workDay=\{workDay\}\s+plannedMinutes=\{j\.planned_minutes \?\? null\}\s*\/>/,
+    );
+    // The size reaches the Start box, so the end it predicts is the end the writer keeps.
+    expect(src).toContain("plannedMinutes={plannedMinutes}");
     expect(page).toMatch(/const block = readJobBlock\(\{\s*scheduledStart: j\.scheduled_start \?\? null,\s*scheduledEnd: j\.scheduled_end \?\? null,\s*plannedMinutes: j\.planned_minutes \?\? null,\s*tz,\s*workDay,/);
   });
 });

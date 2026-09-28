@@ -33,6 +33,7 @@ export function JobScheduleControl({
   segments,
   block,
   workDay,
+  plannedMinutes,
 }: {
   id: string;
   segments?: ScheduleSegment[];
@@ -40,6 +41,8 @@ export function JobScheduleControl({
   block: JobBlock;
   /** The company's work day ("HH:MM"): what Full Day means, and where a day with no time starts. */
   workDay: { start: string; end: string };
+  /** The job's size (planned_minutes): the Start box predicts the end the writer will keep. */
+  plannedMinutes?: number | null;
 }) {
   const router = useRouter();
 
@@ -173,6 +176,7 @@ export function JobScheduleControl({
           workDay={workDay}
           save={saveTimes}
           idPrefix={`job-${id}`}
+          plannedMinutes={plannedMinutes}
         />
       ) : (
         <p className="text-xs text-slate-500">Pick a day and it lands as 2 hours from the start of the work day. Change it here after.</p>

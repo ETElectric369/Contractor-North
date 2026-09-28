@@ -4,13 +4,15 @@ import { useState, useTransition } from "react";
 import { Check } from "lucide-react";
 import {
   blockWords,
-  DEFAULT_JOB_MINUTES,
   endAfter,
   hmWords,
+  keptEndMin,
   QUICK_LENGTHS,
   readHm,
+  workDayMinutes,
   type JobLength,
 } from "@/lib/schedule/job-block";
+import { minutesToHm } from "@/lib/schedule/fit-day";
 
 /** What a change asks for: a new start (the length stays), or a length (1h/2h/4h, "full" for the
  *  company's whole day, or the minutes an End time gives). */
@@ -43,6 +45,9 @@ export function BlockTimeControls({
   canEdit = true,
   save,
   idPrefix = "block",
+  plannedMinutes,
+  onPending,
+  onRefusal,
 }: {
   startHm: string;
   endHm: string;
@@ -57,6 +62,15 @@ export function BlockTimeControls({
   canEdit?: boolean;
   save: (patch: BlockPatch) => Promise<{ ok: boolean; error?: string }>;
   idPrefix?: string;
+  /** The job's size (planned_minutes), for the end a new start predicts. Absent (a visit): a block
+   *  with an end is its own length. */
+  plannedMinutes?: number | null;
+  /** A save is out (true) or settled (false), said the moment it starts, so a sheet can hold itself
+   *  open while one is (Modal holdOpen) and its answer has somewhere to land. */
+  onPending?: (busy: boolean) => void;
+  /** Every refusal in words (null when a new try starts): a sheet closed before the words were read
+   *  says them in a toast. */
+  onRefusal?: (words: string | null) => void;
 }) {
   const [pending, start] = useTransition();
   const [start_, setStart] = useState(startHm);
@@ -91,19 +105,27 @@ export function BlockTimeControls({
     );
   }
 
+  function refuse(words: string | null) {
+    setError(words);
+    onRefusal?.(words);
+  }
+
   function run(patch: BlockPatch, optimistic: { start?: string; end?: string }) {
     const prev = { start: start_, end };
-    setError(null);
+    refuse(null);
     setSaved(false);
     if (optimistic.start !== undefined) setStart(optimistic.start);
     if (optimistic.end !== undefined) setEnd(optimistic.end);
+    // Said NOW, in the same event as the tap or the blur, so a sheet already holds itself open when
+    // the rest of that tap lands on its backdrop.
+    onPending?.(true);
     start(async () => {
       try {
         const res = await save(patch);
         if (!res.ok) {
           setStart(prev.start);
           setEnd(prev.end);
-          setError(res.error ?? "That time didn't save. Try again.");
+          refuse(res.error ?? "That time didn't save. Try again.");
           return;
         }
         setSaved(true);
@@ -111,7 +133,9 @@ export function BlockTimeControls({
       } catch {
         setStart(prev.start);
         setEnd(prev.end);
-        setError("That time didn't save. You may be offline.");
+        refuse("That time didn't save. You may be offline.");
+      } finally {
+        onPending?.(false);
       }
     });
   }
@@ -119,10 +143,19 @@ export function BlockTimeControls({
   function commitStart(v: string) {
     const hm = v.slice(0, 5);
     if (readHm(hm) == null || hm === startHm) return;
-    // The length stays with the start, the End box moving with it, by the writer's own keep rule
-    // (lib/schedule/job-block planJobTimes): a timed block keeps its minutes, a Full Day keeps closing,
-    // and an all-day block nobody sized becomes the two-hour default from the new start.
-    const nextEnd = multiDay ? end : allDay ? (sized ? end : endAfter(hm, DEFAULT_JOB_MINUTES)) : endAfter(hm, minutes);
+    // The End box moves by the writer's own keep rule (lib/schedule/job-block keptEndMin): a timed
+    // block keeps its minutes, a Full Day keeps closing, and a length nobody chose (all day, or the old
+    // closing-time stamp) becomes the two-hour default from the new start.
+    const saidMinutes = Math.max(1, (readHm(endHm) ?? 0) - (readHm(startHm) ?? 0));
+    const newStart = readHm(hm) ?? 0;
+    const kept = keptEndMin({
+      startMin: newStart,
+      typedStart: true,
+      before: { multiDay, allDay, endHm, minutes: saidMinutes },
+      plannedMinutes: plannedMinutes ?? (sized ? saidMinutes : 0),
+      wd: workDayMinutes(workDay),
+    }).endMin;
+    const nextEnd = multiDay ? end : minutesToHm(Math.max(newStart + 1, Math.min(23 * 60 + 59, kept)));
     run({ start: hm }, { start: hm, end: nextEnd });
   }
 
@@ -131,7 +164,7 @@ export function BlockTimeControls({
     const em = readHm(hm);
     if (em == null || hm === endHm) return;
     if (em <= s) {
-      setError("The end has to be after the start.");
+      refuse("The end has to be after the start.");
       setEnd(endHm);
       return;
     }

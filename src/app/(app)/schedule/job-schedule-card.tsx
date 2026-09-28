@@ -5,7 +5,7 @@ import { Clock } from "lucide-react";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { jobStatusLabel } from "@/lib/job-status";
 import { initials } from "@/lib/utils";
-import { blockWords, hmWords, readJobBlock } from "@/lib/schedule/job-block";
+import { dayBlockWords, readJobBlock } from "@/lib/schedule/job-block";
 
 interface Member {
   id: string;
@@ -35,27 +35,31 @@ export function JobScheduleCard({
   members,
   tz,
   workDay,
+  day,
   onOpen,
 }: {
   job: SchedJob;
   members: Member[];
   tz: string;
   workDay: { start: string; end: string };
+  /** The day the drill is showing (YYYY-MM-DD, the company's): the line says what the grid draws on it,
+   *  so a worked day kept as history reads "Worked day", never the plan's hours. Absent: the plan's
+   *  first day. */
+  day?: string;
   /** Opens the tile's sheet for this job on this day. Absent (the crew): the block is read, not tapped. */
   onOpen?: () => void;
 }) {
-  const block = readJobBlock({
+  const at = {
     scheduledStart: job.scheduled_start,
     scheduledEnd: job.scheduled_end,
     plannedMinutes: job.planned_minutes ?? null,
     tz,
     workDay,
-  });
+  };
   const nameOf = (id: string) => members.find((m) => m.id === id)?.full_name ?? "Unnamed";
   const crew = (job.assigned_to ?? []).filter(Boolean);
-  const time = block.multiDay
-    ? `From ${hmWords(block.startHm)} · full days`
-    : `${hmWords(block.startHm)} – ${hmWords(block.endHm)} · ${blockWords(block)}`;
+  const onDay = day ?? readJobBlock(at).day;
+  const time = onDay ? dayBlockWords({ day: onDay, ...at }).words : "Worked day · no day planned yet";
 
   const inside = (
     <>
