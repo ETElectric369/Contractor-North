@@ -8,6 +8,7 @@ import { computeCollected, monthKeyInTz, trailing12Months } from "@/lib/analytic
 import { isMissingCreditColumn, isMissingShelf } from "@/lib/job-cost";
 import { isOnAccountBill, openBalanceOf, supplierBalance, type SupplierAccountRow } from "@/app/(app)/bills/supplier-balance";
 import { billsCarryingNumber, namedNumbersOf, type LedgerBill } from "@/lib/same-purchase";
+import { PNL_WORDS, materialsWithStock } from "@/lib/analytics/profit-and-loss";
 
 /**
  * LEFT FOR YOU: what the business kept for its owner (migration 0286's other half).
@@ -54,7 +55,8 @@ import { billsCarryingNumber, namedNumbersOf, type LedgerBill } from "@/lib/same
  *                         On The Shelf, so its pieces going are never a month's loss.
  *   · fuel              = bills and petty cash with no job in the Fuel bucket (0362). A business
  *                         cost like the rest, said on its OWN line and never inside Business Costs
- *                         (Erik, 2026-09-27: "lets make fuel stand out from business costs").
+ *                         (Erik, 2026-09-27: "lets make fuel stand out from business costs"); on the
+ *                         profit and loss it is COGS (2026-09-28), the rest Overhead.
  *   · business costs    = bills and petty cash with no job, in every other bucket
  *                         (business-cost-buckets.ts). The Fees bucket also carries Stripe's real
  *                         card fee on each payment (payments.processor_fee, 0284). A NULL fee is
@@ -63,6 +65,12 @@ import { billsCarryingNumber, namedNumbersOf, type LedgerBill } from "@/lib/same
  * NO TAX MATH, NO DRAW LEDGER. What the owner actually took out is reconciliation and belongs in
  * the accountant's software (Erik: "start fresh on the draw"). This says what was LEFT, before
  * income tax, and the page says so directly under the number.
+ *
+ * HOW EVERY SCREEN SAYS IT (Erik, 2026-09-28): profit-and-loss.ts lays these figures out the
+ * accounting industry's way. Received is Revenue; materials and bills, stock bought and lost, crew
+ * pay and mileage, and Fuel are Cost of Goods Sold (COGS); Revenue less them is Gross Profit; every
+ * other bucket is Overhead; and `left` is the bottom line, Net Profit (Owner's Draw). Which bucket is
+ * which is data (BUCKET_SECTION). This file's figures and arithmetic do not change with the words.
  *
  * Pure half (computeOwnerMoney) + a fetch half (getOwnerMoney) that reads the SAME row sources the
  * existing readers use, so the chart the next build puts on top of this cannot disagree with the
@@ -1151,17 +1159,9 @@ export function costFigure(n: number): string {
   return n > 0 ? `\u2212${formatCurrency(n)}` : `+${formatCurrency(Math.abs(n))}`;
 }
 
-/**
- * MATERIALS & BILLS AS THE CARD AND THE CHART SAY IT (Erik, 2026-09-27: "we dont need a put on the
- * shelf on the bar graph"). Shop stock bought is money gone on materials, so both readers show it
- * INSIDE Materials & Bills, still in the month the ticket is dated (decision 1 is unchanged). The
- * engine keeps it apart (putOnShelf), because the accountant download's Summary shows it as Stock Bought;
- * this one sum is the only place the two are joined, so the card and the chart never disagree and
- * the card's lines still add up to the draw to the cent.
- */
-export function materialsWithStock(f: Pick<OwnerMoneyFigures, "materialsAndBills" | "putOnShelf">): number {
-  return fromCents(toCents(f.materialsAndBills) + toCents(f.putOnShelf));
-}
+/** Materials & Bills with the stock bought inside it, as the card and the chart say it: it lives
+ *  with the profit and loss's other lines now (profit-and-loss.ts), and is still read from here. */
+export { materialsWithStock };
 
 /**
  * The one line under the card that says so (nothing silent): how much of Materials & Bills is shop
@@ -1176,10 +1176,13 @@ export function stockLine(m: OwnerMoney): string | null {
   const stock = m.totals.putOnShelf;
   const moved = m.totals.stockMovedOut >= 0.005;
   if (Math.abs(stock) < 0.005 && Math.abs(m.onShelfNow) < 0.005) return null;
+  // The rows it points at, by the profit and loss's own names (profit-and-loss.ts).
+  const materials = PNL_WORDS.materials;
+  const lost = PNL_WORDS.stockLostShort;
   const parts: string[] = [];
   if (stock >= 0.005)
-    parts.push(`Materials & Bills includes ${formatCurrency(stock)} of shop stock, counted the month it was bought${moved ? ", less what moved to Shop Stock Lost" : ""}.`);
-  else if (stock <= -0.005) parts.push(`Materials & Bills gives back ${formatCurrency(-stock)} of shop stock bought before, now in Shop Stock Lost.`);
+    parts.push(`${materials} includes ${formatCurrency(stock)} of shop stock, counted the month it was bought${moved ? `, less what moved to ${lost}` : ""}.`);
+  else if (stock <= -0.005) parts.push(`${materials} gives back ${formatCurrency(-stock)} of shop stock bought before, now in ${lost}.`);
   parts.push(`In Stock Now: ${formatCurrency(m.onShelfNow)} at cost. It moves onto a job's profit as pieces are taken, and never counts against the draw twice.`);
   return parts.join(" ");
 }

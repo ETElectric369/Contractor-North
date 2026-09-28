@@ -4,12 +4,14 @@ import { useState } from "react";
 import { Card } from "@/components/ui/card";
 import { formatCurrency } from "@/lib/utils";
 import { weekLabel, type FuelTrend } from "@/lib/analytics/fuel-trend";
+import { PNL_WORDS } from "@/lib/analytics/profit-and-loss";
 
 /**
  * FUEL, BY THE WEEK (Erik, 2026-09-27): one number, what fuel costs a week, and the last 13 weeks
  * as bars with their figures on them and a dashed line at the average. Tapping a week puts that
  * week in the headline; tapping it again goes back to the average. One line under the bars: fuel
- * as a share of money in, the average fill, how many fills.
+ * as a share of revenue (the money received, the profit and loss's Revenue), the average fill, how
+ * many fills.
  *
  * AT 375px every week is a 44px column (a thumb's width) and the row scrolls sideways inside the
  * card, starting at this week. Identity is never colour alone: one series, named by the title, and
@@ -29,7 +31,8 @@ export function FuelTrendCard({ trend }: { trend: FuelTrend }) {
   const heightOf = (c: number) => Math.max(c > 0 ? 3 : 0, Math.round((Math.max(0, c) / max) * PLOT));
   const avgY = heightOf(trend.avgWeekCents);
   const facts = [
-    trend.sharePct !== null ? `${trend.sharePct}% of money in` : null,
+    // Revenue in the profit and loss's own word (profit-and-loss.ts): the same money received.
+    trend.sharePct !== null ? `${trend.sharePct}% of ${PNL_WORDS.revenue.toLowerCase()}` : null,
     trend.fills ? `avg fill ${dollars(trend.avgFillCents)}` : null,
     `${trend.fills} ${trend.fills === 1 ? "fill" : "fills"}`,
   ].filter(Boolean);

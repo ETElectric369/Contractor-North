@@ -133,7 +133,11 @@ describe("GET /analytics/accountant/export", () => {
     const parts = new Map(unzip(new Uint8Array(await res.arrayBuffer())).map((e) => [e.name, text(e.data)]));
     const names = [...parts.get("xl/workbook.xml")!.matchAll(/<sheet name="([^"]*)"/g)].map((m) => m[1]);
     expect(names).toEqual(["Summary", "Income", "Costs", "People", "Open", "Stock"]);
-    expect(parts.get("xl/worksheets/sheet1.xml")).toContain("Net Profit (before income tax)");
+    // The Summary is a profit and loss, its bottom line named exactly (XML-escaped in the sheet).
+    const sheet1 = parts.get("xl/worksheets/sheet1.xml")!;
+    for (const line of ["Revenue", "Cost of Goods Sold (COGS)", "Total COGS", "Gross Profit", "Overhead", "Total Overhead", "Net Profit (Owner&apos;s Draw)"]) {
+      expect(sheet1, line).toContain(`<t xml:space="preserve">${line}</t>`);
+    }
     expect(state.reads).not.toContain("accountant_exports");
     expect(state.inserts).toEqual([]);
     // Sales Tax is switched off: its rows are never asked for.
@@ -158,17 +162,22 @@ describe("GET /analytics/accountant/export", () => {
     const files = unzip(new Uint8Array(await res.arrayBuffer()));
     const all = files.map((f) => text(f.data)).join("\n");
     expect(all).not.toContain("Net Profit");
+    expect(all).not.toContain("Gross Profit");
     expect(all).not.toContain("Robin Test");
-    // No bottom-line figure at all on the Summary: Net is never one subtraction away.
+    // No bottom-line figure at all on the Summary: Net Profit is never one subtraction away.
     const summary = text(files.find((f) => f.name === "Summary.csv")!.data);
-    expect(summary.split("\r\n").filter((l) => /^(Received|Total Costs|Other Income)/.test(l))).toEqual([]);
+    expect(summary.split("\r\n").filter((l) => /^(Revenue|Received|Total|Gross|Other Income)/.test(l))).toEqual([]);
+    // The cost rows stay, under their two headings.
+    expect(summary).toContain("\r\nCost of Goods Sold (COGS)\r\nMaterials & Bills,");
+    expect(summary).toContain("\r\nOverhead\r\nAuto,");
     expect(summary).toContain("The totals are the owner's.");
     // The owner may: the same file with the switch off, downloaded by the owner, has it.
     state.role = "owner";
     const own = unzip(new Uint8Array(await (await GET(req("period=2026-Q3&as=csv"))).arrayBuffer()))
       .map((f) => text(f.data))
       .join("\n");
-    expect(own).toContain("Net Profit (before income tax)");
+    expect(own).toContain("Net Profit (Owner's Draw),");
+    expect(own).toContain("\r\nGross Profit,");
   });
 
   it("a read that doesn't come back whole refuses the file in words, never a file with a zero in it", async () => {

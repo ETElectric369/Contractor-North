@@ -15,15 +15,20 @@ import {
   niceScale,
   parseStoredSeries,
   toggleSeries,
+  MONEY_SERIES_ORDER,
+  SERIES_LINE,
   type MoneyChartMonth,
   type MoneySeriesKey,
 } from "@/lib/analytics/money-chart";
 import { BUCKETS_BESIDE_FUEL, computeOwnerMoney, ownerMoneyChartWindow, type OwnerMoney, type OwnerMoneyMonth } from "@/lib/analytics/owner-money";
+import { PNL_WORDS, pnlLines } from "@/lib/analytics/profit-and-loss";
 import { MoneyChartSvg } from "@/app/(app)/analytics/money-chart-svg";
 
 const TODAY = "2026-09-24";
 
-/** A month row the way computeOwnerMoney shapes it; only the money lines matter here. */
+/** A month row the way computeOwnerMoney shapes it; only the money lines matter here. Business
+ *  costs other than Fuel sit in the Other bucket, so the buckets add up to their total, as the
+ *  engine's always do. */
 const row = (month: string, f: Partial<OwnerMoneyMonth> = {}): OwnerMoneyMonth => {
   const received = f.received ?? 0;
   const materialsAndBills = f.materialsAndBills ?? 0;
@@ -40,7 +45,7 @@ const row = (month: string, f: Partial<OwnerMoneyMonth> = {}): OwnerMoneyMonth =
     crewPay,
     crewMileagePaid,
     fuel,
-    businessCosts: Object.fromEntries(BUCKETS_BESIDE_FUEL.map((b) => [b, 0])) as OwnerMoneyMonth["businessCosts"],
+    businessCosts: { ...(Object.fromEntries(BUCKETS_BESIDE_FUEL.map((b) => [b, 0])) as OwnerMoneyMonth["businessCosts"]), Other: businessCostsTotal },
     businessCostsTotal,
     processorFees: 0,
     putOnShelf,
@@ -162,7 +167,7 @@ describe("layoutMoneyChart: the geometry", () => {
   });
 
   it("PHONE: 6 months x 2 bars fit a 375px screen with 10px figures, no sideways scroll", () => {
-    const data = buildMoneyChartData(etYear(), { ownerFigures: true, leftLabel: "Left For You" });
+    const data = buildMoneyChartData(etYear(), { ownerFigures: true });
     const l = layoutMoneyChart(data.months, both);
     // 375 - the page's 16px gutters - the card's border - the plot's 12px padding each side.
     const room = 375 - 32 - 2 - 24;
@@ -203,24 +208,66 @@ describe("month labels", () => {
 
 describe("buildMoneyChartData: what this viewer's chart holds", () => {
   it("trims the leading empty months: ET shows Apr through Sep, not six empty slots", () => {
-    const d = buildMoneyChartData(etYear(), { ownerFigures: true, leftLabel: "Left For You" });
+    const d = buildMoneyChartData(etYear(), { ownerFigures: true });
     expect(d.months.map((m) => m.month)).toEqual(["2026-04", "2026-05", "2026-06", "2026-07", "2026-08", "2026-09"]);
     expect(d.months[0].values).toMatchObject({ collected: 0, left: -47.44, business: 47.44 });
   });
 
   it("a $0 month after the first keeps its slot", () => {
-    const d = buildMoneyChartData(money([row("2026-07", { received: 100 }), row("2026-08"), row("2026-09", { received: 50 })]), {
-      ownerFigures: true,
-      leftLabel: "Left For You",
-    });
+    const d = buildMoneyChartData(money([row("2026-07", { received: 100 }), row("2026-08"), row("2026-09", { received: 50 })]), { ownerFigures: true });
     expect(d.months.map((m) => m.month)).toEqual(["2026-07", "2026-08", "2026-09"]);
   });
 
-  it("the owner gets every series, Collected and Left on by default; the Left series speaks the viewer's register", () => {
-    const d = buildMoneyChartData(etYear(), { ownerFigures: true, leftLabel: "Left For Erik" });
-    expect(d.series.map((s) => s.key)).toEqual(["collected", "left", "materials", "crewPay", "business"]);
-    expect(d.series.find((s) => s.key === "left")!.label).toBe("Left For Erik");
+  it("the owner gets every series, Revenue and Net Profit (Owner's Draw) on by default, each named by its profit-and-loss line", () => {
+    const d = buildMoneyChartData(etYear(), { ownerFigures: true });
+    expect(d.series.map((s) => s.key)).toEqual(["collected", "gross", "left", "materials", "crewPay", "business"]);
+    expect(d.series.map((s) => s.label)).toEqual(["Revenue", "Gross Profit", "Net Profit (Owner's Draw)", "Materials & Bills", "Crew Pay (1099)", "Overhead"]);
     expect(defaultSeriesOn(d.series)).toEqual(["collected", "left"]);
+    // The same words for every viewer: there is no register to pass any more.
+    expect(buildMoneyChartData(etYear(), { ownerFigures: true }).series.find((s) => s.key === "left")!.label).toBe(PNL_WORDS.netProfit);
+  });
+
+  it("every series is a line of the profit and loss: every COGS line has one, Overhead is one, so the bars account for every cent", () => {
+    const cogsLines = pnlLines({ stockInMaterials: true }).filter((l) => l.kind === "cost" && l.section === "cogs");
+    const drawn = new Set(Object.values(SERIES_LINE));
+    for (const l of cogsLines) expect(drawn.has(l.key), l.label).toBe(true);
+    expect(drawn.has("total_overhead")).toBe(true);
+    expect(drawn.has("revenue") && drawn.has("gross_profit") && drawn.has("net_profit")).toBe(true);
+    // Each chip says its line's own words.
+    const words = new Map(pnlLines({ stockInMaterials: true }).map((l) => [l.key, l.short]));
+    const all = buildMoneyChartData(
+      money([row("2026-08", { received: 5000, materialsAndBills: 900, crewPay: 700, crewMileagePaid: 30, fuel: 120, businessCostsTotal: 80, shopStockLost: 12 })]),
+      { ownerFigures: true },
+    );
+    expect(all.series.map((s) => s.key)).toEqual(MONEY_SERIES_ORDER);
+    for (const s of all.series) expect(s.label, s.key).toBe(words.get(SERIES_LINE[s.key]));
+    expect(all.series.map((s) => s.label)).toEqual([
+      "Revenue",
+      "Gross Profit",
+      "Net Profit (Owner's Draw)",
+      "Materials & Bills",
+      "Stock Lost",
+      "Crew Pay (1099)",
+      "Crew Mileage Paid",
+      "Fuel",
+      "Overhead",
+    ]);
+  });
+
+  it("Gross Profit is Revenue less the COGS bars, and Net Profit is Gross Profit less Overhead, in every month", () => {
+    const m = money([
+      row("2026-08", { received: 5000, materialsAndBills: 900, crewPay: 700, crewMileagePaid: 30, fuel: 120, businessCostsTotal: 80, putOnShelf: 45, shopStockLost: 12 }),
+      row("2026-09", { received: 1200, materialsAndBills: 1500, crewPay: 300, businessCostsTotal: 20 }),
+    ]);
+    const d = buildMoneyChartData(m, { ownerFigures: true });
+    for (const [i, mo] of d.months.entries()) {
+      const v = mo.values as Record<MoneySeriesKey, number>;
+      const c = (n: number) => Math.round(n * 100);
+      expect(c(v.gross), mo.month).toBe(c(v.collected) - c(v.materials) - c(v.lost) - c(v.crewPay) - c(v.mileage) - c(v.fuel));
+      expect(c(v.left), mo.month).toBe(c(v.gross) - c(v.business));
+      expect(c(v.left), mo.month).toBe(c(m.months[i].left)); // the engine's own net
+    }
+    expect(d.months[1].values.gross).toBe(-600); // a month that lost money on its jobs draws below zero
   });
 
   it("stock bought has no bar of its own: it is inside Materials & Bills, the same sum the card prints (Erik, 2026-09-27)", () => {
@@ -229,12 +276,12 @@ describe("buildMoneyChartData: what this viewer's chart holds", () => {
       row("2026-08", { received: 1000, materialsAndBills: 19.31, putOnShelf: 180.17 }),
       row("2026-09", { received: 500, putOnShelf: -36.93, shopStockLost: 36.93 }),
     ]);
-    const d = buildMoneyChartData(m, { ownerFigures: true, leftLabel: "Owner's Draw" });
-    expect(d.series.map((s) => s.key)).toEqual(["collected", "left", "materials", "lost"]);
-    for (const s of d.series) expect(s.label).not.toMatch(/shelf/i);
+    const d = buildMoneyChartData(m, { ownerFigures: true });
+    expect(d.series.map((s) => s.key)).toEqual(["collected", "gross", "left", "materials", "lost"]);
+    for (const s of d.series) expect(s.label).not.toMatch(/shelf|stock bought/i);
     expect(d.months.map((x) => x.values.materials)).toEqual([199.48, -36.93]);
     expect(d.months.map((x) => x.values.lost)).toEqual([0, 36.93]);
-    // The bars left standing still account for every dollar: collected = costs + the draw.
+    // The bars left standing still account for every dollar: Revenue = costs + Net Profit.
     for (const [i, x] of d.months.entries()) {
       const v = x.values;
       expect(Math.round(((v.materials ?? 0) + (v.lost ?? 0) + (v.left ?? 0)) * 100)).toBe(Math.round(m.months[i].received * 100));
@@ -243,21 +290,22 @@ describe("buildMoneyChartData: what this viewer's chart holds", () => {
     expect(parseStoredSeries('["collected","shelf"]', d.series)).toEqual(["collected"]);
   });
 
-  it("FUEL STANDS OUT: its own series in its own colour, beside Business Costs and never inside it", () => {
+  it("FUEL STANDS OUT: its own COGS series in its own colour, beside Overhead and never inside it", () => {
     const m = money([
       row("2026-08", { received: 5000, materialsAndBills: 900, fuel: 312.4, businessCostsTotal: 120, putOnShelf: 80 }),
       row("2026-09", { received: 4000, fuel: 0, businessCostsTotal: 60 }),
     ]);
-    const d = buildMoneyChartData(m, { ownerFigures: true, leftLabel: "Owner's Draw" });
-    expect(d.series.map((s) => s.key)).toEqual(["collected", "left", "materials", "fuel", "business"]);
+    const d = buildMoneyChartData(m, { ownerFigures: true });
+    expect(d.series.map((s) => s.key)).toEqual(["collected", "gross", "left", "materials", "fuel", "business"]);
     const fuel = d.series.find((s) => s.key === "fuel")!;
     const business = d.series.find((s) => s.key === "business")!;
     expect(fuel.label).toBe("Fuel");
+    expect(business.label).toBe("Overhead");
     expect(fuel.fill).not.toBe(business.fill);
     expect(fuel.swatch).toBe("bg-pink-800"); // the Fuel card's and the bank card's colour
-    expect(fuel.defaultOn).toBe(false); // Collected and Owner's Draw stay the two default bars
+    expect(fuel.defaultOn).toBe(false); // Revenue and Net Profit stay the two default bars
     expect(d.months[0].values).toMatchObject({ fuel: 312.4, business: 120 });
-    // EVERY CENT ACCOUNTED FOR: Collected = Owner's Draw + every cost series, Fuel counted once and
+    // EVERY CENT ACCOUNTED FOR: Revenue = Net Profit + every cost series, Fuel counted once and
     // stock bought inside Materials & Bills (it has no bar of its own).
     for (const mo of d.months) {
       const v = mo.values;
@@ -267,24 +315,26 @@ describe("buildMoneyChartData: what this viewer's chart holds", () => {
   });
 
   it("no fuel in any month shown: no Fuel chip", () => {
-    const d = buildMoneyChartData(money([row("2026-08", { received: 4000, businessCostsTotal: 60 })]), { ownerFigures: true, leftLabel: "Owner's Draw" });
+    const d = buildMoneyChartData(money([row("2026-08", { received: 4000, businessCostsTotal: 60 })]), { ownerFigures: true });
     expect(d.series.map((s) => s.key)).not.toContain("fuel");
   });
 
   it("Crew Mileage is offered only when the months hold some", () => {
     const m = etYear();
     m.months[9] = row("2026-07", { received: 20754.81, crewMileagePaid: 62.5 });
-    expect(buildMoneyChartData(m, { ownerFigures: true, leftLabel: "Left For You" }).series.map((s) => s.key)).toContain("mileage");
+    expect(buildMoneyChartData(m, { ownerFigures: true }).series.map((s) => s.key)).toContain("mileage");
   });
 
-  it("OFFICE, NOT ALLOWED: Collected only, and no owner figure is anywhere in the data", () => {
-    const d = buildMoneyChartData(etYear(), { ownerFigures: false, leftLabel: "Left For Erik" });
+  it("OFFICE, NOT ALLOWED: Revenue only, and no owner figure is anywhere in the data: no cost, no Gross Profit, no Net Profit", () => {
+    const d = buildMoneyChartData(etYear(), { ownerFigures: false });
     expect(d.series.map((s) => s.key)).toEqual(["collected"]);
+    expect(d.series[0].label).toBe("Revenue");
     for (const m of d.months) expect(Object.keys(m.values)).toEqual(["collected"]);
-    // Trimmed on Collected alone, so even the months cannot hint that April and May had costs.
+    // Trimmed on Revenue alone, so even the months cannot hint that April and May had costs.
     expect(d.months.map((m) => m.month)).toEqual(["2026-06", "2026-07", "2026-08", "2026-09"]);
     const json = JSON.stringify(d);
-    for (const secret of ["Left", "14849.2", "4655.36", "2660", "47.44", "materials", "crewPay"]) expect(json).not.toContain(secret);
+    // July's 14,849.20 and June's 5,188.62 are each month's Gross Profit and Net Profit alike.
+    for (const secret of ["Net Profit", "Gross", "Overhead", "14849.2", "5188.62", "4655.36", "2660", "47.44", "materials", "crewPay", "gross", "left"]) expect(json).not.toContain(secret);
   });
 
   it("a company with no money yet has no months (the card says so in a sentence)", () => {
@@ -294,7 +344,7 @@ describe("buildMoneyChartData: what this viewer's chart holds", () => {
       "America/Los_Angeles",
       TODAY,
     );
-    expect(buildMoneyChartData(empty, { ownerFigures: true, leftLabel: "Left For You" }).months).toEqual([]);
+    expect(buildMoneyChartData(empty, { ownerFigures: true }).months).toEqual([]);
   });
 });
 
@@ -313,20 +363,20 @@ describe("toggles", () => {
     expect(toggleSeries(["collected"], "left", ["collected"])).toEqual(["collected"]);
   });
   it("the remembered choice is read back safely", () => {
-    const d = buildMoneyChartData(etYear(), { ownerFigures: true, leftLabel: "Left For You" });
+    const d = buildMoneyChartData(etYear(), { ownerFigures: true });
     expect(parseStoredSeries('["collected","crewPay"]', d.series)).toEqual(["collected", "crewPay"]);
     expect(parseStoredSeries("not json", d.series)).toEqual(["collected", "left"]);
     expect(parseStoredSeries("[]", d.series)).toEqual(["collected", "left"]);
     expect(parseStoredSeries(null, d.series)).toEqual(["collected", "left"]);
-    // An office viewer whose browser remembers the owner's chips still gets Collected only.
-    const office = buildMoneyChartData(etYear(), { ownerFigures: false, leftLabel: "Left For Erik" });
+    // An office viewer whose browser remembers the owner's chips still gets Revenue only.
+    const office = buildMoneyChartData(etYear(), { ownerFigures: false });
     expect(parseStoredSeries('["left","materials"]', office.series)).toEqual(["collected"]);
   });
 });
 
 describe("MoneyChartSvg: the markup", () => {
   const render = (months: MoneyChartMonth[], on: MoneySeriesKey[], selected: string | null = null) => {
-    const d = buildMoneyChartData(etYear(), { ownerFigures: true, leftLabel: "Left For You" });
+    const d = buildMoneyChartData(etYear(), { ownerFigures: true });
     const series = d.series.filter((s) => on.includes(s.key));
     return renderToStaticMarkup(
       createElement(MoneyChartSvg, { layout: layoutMoneyChart(months, on), months, series, selected, ariaLabel: "Money by Month" }),
@@ -351,7 +401,7 @@ describe("MoneyChartSvg: the markup", () => {
   });
 
   it("ET's six months: every figure printed, the negative ones below zero, a hidden table with the exact numbers", () => {
-    const d = buildMoneyChartData(etYear(), { ownerFigures: true, leftLabel: "Left For You" });
+    const d = buildMoneyChartData(etYear(), { ownerFigures: true });
     const html = render(d.months, ["collected", "left"]);
     for (const f of ["−$47", "−$139", "$13k", "$5.2k", "$21k", "$15k", "$19k", "$11k", "$13k"]) expect(html).toContain(`>${f}<`);
     expect(heights(html).filter((b) => b.value < 0).every((b) => b.h >= 2)).toBe(true);
@@ -363,10 +413,10 @@ describe("MoneyChartSvg: the markup", () => {
   });
 
   it("a selected month is marked pressed and the others step back", () => {
-    const d = buildMoneyChartData(etYear(), { ownerFigures: true, leftLabel: "Left For You" });
+    const d = buildMoneyChartData(etYear(), { ownerFigures: true });
     const html = render(d.months, ["collected", "left"], "2026-08");
     expect(html.match(/aria-pressed="true"/g)).toHaveLength(1);
-    expect(html).toMatch(/aria-pressed="true" aria-label="August 2026: Collected \$19,132\.53, Left For You \$11,482\.30"/);
+    expect(html).toMatch(/aria-pressed="true" aria-label="August 2026: Revenue \$19,132\.53, Net Profit \(Owner&#x27;s Draw\) \$11,482\.30"/);
     expect(html.match(/opacity-40/g)).toHaveLength(5);
   });
 
@@ -379,15 +429,15 @@ describe("MoneyChartSvg: the markup", () => {
 });
 
 describe("review fixes (feat/money-chart-0924)", () => {
-  const owner = () => buildMoneyChartData(etYear(), { ownerFigures: true, leftLabel: "Left For You" });
+  const owner = () => buildMoneyChartData(etYear(), { ownerFigures: true });
 
   it("a ?w= month the chart does not draw is not selected: the page falls back to the segment", () => {
     expect(drawnMonth("2026-08", owner())).toBe("2026-08");
     expect(drawnMonth("2025-11", owner())).toBeNull(); // valid on the server, but before ET's trimmed start
     expect(drawnMonth(null, owner())).toBeNull();
     expect(drawnMonth("2026-08", null)).toBeNull();
-    // An office viewer's Collected-only chart starts in June, so the owner's April link selects nothing.
-    expect(drawnMonth("2026-04", buildMoneyChartData(etYear(), { ownerFigures: false, leftLabel: "Left For Erik" }))).toBeNull();
+    // An office viewer's Revenue-only chart starts in June, so the owner's April link selects nothing.
+    expect(drawnMonth("2026-04", buildMoneyChartData(etYear(), { ownerFigures: false }))).toBeNull();
   });
 
   it("...and the chart itself never fades every month for a month it does not draw", () => {
@@ -446,12 +496,12 @@ describe("review fixes (feat/money-chart-0924)", () => {
 
   it("a cost series that is $0 in every month shown gets no chip (a solo owner has no Crew Pay chip)", () => {
     const solo = money([row("2026-07", { received: 5000, materialsAndBills: 900 }), row("2026-08", { received: 4000, businessCostsTotal: 120 })]);
-    const d = buildMoneyChartData(solo, { ownerFigures: true, leftLabel: "Left For You" });
-    expect(d.series.map((s) => s.key)).toEqual(["collected", "left", "materials", "business"]);
+    const d = buildMoneyChartData(solo, { ownerFigures: true });
+    expect(d.series.map((s) => s.key)).toEqual(["collected", "gross", "left", "materials", "business"]);
     for (const m of d.months) expect(Object.keys(m.values)).not.toContain("crewPay");
-    // Collected and Left are always offered, even with no cost at all.
+    // Revenue, Gross Profit and Net Profit are always offered, even with no cost at all.
     const plain = money([row("2026-08", { received: 4000 })]);
-    expect(buildMoneyChartData(plain, { ownerFigures: true, leftLabel: "Left For You" }).series.map((s) => s.key)).toEqual(["collected", "left"]);
+    expect(buildMoneyChartData(plain, { ownerFigures: true }).series.map((s) => s.key)).toEqual(["collected", "gross", "left"]);
   });
 
   it("every value on is $0: the frame keeps its full height and says so", () => {
@@ -465,7 +515,7 @@ describe("review fixes (feat/money-chart-0924)", () => {
     const html = renderToStaticMarkup(
       createElement(MoneyChartSvg, { layout: flat, months: costsOnly, series: d.series.filter((s) => s.key === "collected"), selected: null, ariaLabel: "x" }),
     );
-    expect(html).toContain("Collected is $0 in every month shown.");
+    expect(html).toContain("Revenue is $0 in every month shown.");
   });
 
   it("EDGES: every figure lies inside the plot, ET with four series on (Erik's toggles) and a month-to-date loss", () => {

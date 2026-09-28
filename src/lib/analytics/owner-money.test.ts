@@ -31,6 +31,7 @@ import {
   type OwnerMoneyWindow,
 } from "@/lib/analytics/owner-money";
 import { computeRevenueTrend } from "@/lib/analytics/money-metrics";
+import { pnlRow, profitAndLoss } from "@/lib/analytics/profit-and-loss";
 import { balanceForPerson } from "@/lib/payroll-math";
 import { BUSINESS_COST_BUCKETS } from "@/lib/business-cost-buckets";
 import { BUCKETS_BESIDE_FUEL } from "@/lib/analytics/owner-money";
@@ -302,9 +303,9 @@ describe("computeOwnerMoney: the shelf counts in the month it is bought", () => 
     // September bought nothing and wrote $36.93 off: said as given back, never "-$36.93 of stock".
     expect(materialsWithStock(sep.totals)).toBe(-36.93);
     expect(stockLine(sep)).toBe(
-      "Materials & Bills gives back $36.93 of shop stock bought before, now in Shop Stock Lost. In Stock Now: $100.00 at cost. It moves onto a job's profit as pieces are taken, and never counts against the draw twice.",
+      "Materials & Bills gives back $36.93 of shop stock bought before, now in Stock Lost. In Stock Now: $100.00 at cost. It moves onto a job's profit as pieces are taken, and never counts against the draw twice.",
     );
-    expect(stockLine(year)).toContain("Materials & Bills includes $143.24 of shop stock, counted the month it was bought, less what moved to Shop Stock Lost.");
+    expect(stockLine(year)).toContain("Materials & Bills includes $143.24 of shop stock, counted the month it was bought, less what moved to Stock Lost.");
     for (const m of [aug, sep, year]) expect(stockLine(m)).not.toMatch(/shelf/i);
     // No stock money and nothing in stock: no line at all.
     expect(stockLine(computeOwnerMoney(inputs([jobTicket]), AUG, TZ, TODAY))).toBeNull();
@@ -312,7 +313,7 @@ describe("computeOwnerMoney: the shelf counts in the month it is bought", () => 
 
   // Review of fix/stock-not-shelf: "less what moved" said Shop Stock Lost held stock money when it
   // held only a supplier's credit, and said nothing when a move and a credit cancelled to $0.
-  it("'less what moved to Shop Stock Lost' keys on what MOVED, never on a credit sitting in Shop Stock Lost", () => {
+  it("'less what moved to Stock Lost' keys on what MOVED, never on a credit sitting in Shop Stock Lost", () => {
     // August: 50 ft of the August roll went back to CED ($36.03). September: a new $50 roll, and
     // CED's -$20 credit for the August return, dated in September.
     const sepTicket = { ...jobTicket, id: "h2", amount: 50, bill_date: "2026-09-02", created_at: "2026-09-02T18:00:00Z" };
@@ -338,7 +339,7 @@ describe("computeOwnerMoney: the shelf counts in the month it is bought", () => 
     expect(cancel.totals.putOnShelf).toBe(30);
     expect(cancel.totals.shopStockLost).toBe(0);
     expect(cancel.totals.stockMovedOut).toBe(20);
-    expect(stockLine(cancel)).toContain("Materials & Bills includes $30.00 of shop stock, counted the month it was bought, less what moved to Shop Stock Lost.");
+    expect(stockLine(cancel)).toContain("Materials & Bills includes $30.00 of shop stock, counted the month it was bought, less what moved to Stock Lost.");
     // A credit for an OPENING roll sent back moves nothing out of any month's stock, whole year included.
     const opening = [{ lot_id: "L0", bill_id: null, kind: "opening", cost: 40, cost_left: 10, live: true }, lots[1]];
     const back = { ...ret, lot_id: "L0", cost: 30, created_at: "2026-09-01T19:00:00Z" };
@@ -1310,5 +1311,84 @@ describe("through a day: the same window, only the records on or before that day
     };
     expect(computeOwnerMoney(inputs, YEAR, TZ, TODAY, { throughDay: "2026-06-30" }).totals.crewPay).toBe(320);
     expect(computeOwnerMoney(inputs, YEAR, TZ, TODAY).totals.crewPay).toBe(640);
+  });
+});
+
+/**
+ * THE PROFIT AND LOSS IS THE SAME DOLLARS (Erik, 2026-09-28). Every surface now says these figures as
+ * Revenue, Cost of Goods Sold (COGS), Gross Profit, Overhead and Net Profit (Owner's Draw)
+ * (profit-and-loss.ts). On this file's own fixtures, in every window and every month, the bottom line
+ * is `left` to the cent, and Gross Profit less Total Overhead lands on it.
+ */
+describe("the profit and loss on these fixtures: Net Profit (Owner's Draw) is the engine's net, to the cent", () => {
+  const jobTicket = { id: "h1", job_id: "J-011", amount: 199.48, bill_date: "2026-08-19", created_at: "2026-08-19T18:00:00Z", category: "Receipt", status: "unpaid" };
+  const credit = { id: "cr1", job_id: null, on_shelf: true, amount: -30, bill_date: "2026-09-12", created_at: "2026-09-12T18:00:00Z", category: "Credit", status: "paid" };
+  const fixtures: [string, OwnerMoneyInputs][] = [
+    ["the year", yearInputs()],
+    ["the year with a late refund", { ...yearInputs(), refunds: [...yearInputs().refunds, { amount: 1500, created_at: "2026-09-01T01:00:00Z" }] }],
+    [
+      "the year with truck and fuel costs",
+      {
+        ...yearInputs(),
+        bills: [
+          ...yearInputs().bills,
+          { id: "t1", job_id: null, amount: 480, bill_date: "2026-09-11", created_at: "2026-09-11T18:00:00Z", category: "Auto", status: "paid" },
+          { id: "t2", job_id: null, amount: 96.4, bill_date: "2026-09-11", created_at: "2026-09-11T18:00:00Z", category: "Gas & Truck", status: "paid" },
+          { id: "f2", job_id: null, amount: 60, bill_date: "2026-09-12", created_at: "2026-09-12T18:00:00Z", category: "Fuel", status: "paid" },
+        ],
+      },
+    ],
+    [
+      "a roll into stock, a write-off and a return with the supplier's credit",
+      {
+        ...base(),
+        payments: [payment(1000, "2026-08-20T18:00:00Z")],
+        bills: [jobTicket, credit],
+        shelfLots: [{ lot_id: "L1", bill_id: "h1", cost: 180.17, cost_left: 100, live: true }],
+        shelfMoves: [
+          { id: "w1", lot_id: "L1", kind: "write_off", cost: 36.93, created_at: "2026-09-10T18:00:00Z" },
+          { id: "r1", lot_id: "L1", kind: "supplier_return", cost: 36.03, created_at: "2026-09-12T19:00:00Z", credit_bill_id: "cr1" },
+        ],
+      },
+    ],
+    ["other income from a bank download", { ...yearInputs(), otherIncome: [{ amount: 250.5, posted_on: "2026-09-20" }, { amount: 99, posted_on: "2026-08-02" }] }],
+  ];
+  const windows = [YEAR, ownerMoneyWindow("this_month", TODAY), ownerMoneyWindow("last_month", TODAY), ownerMoneyChartWindow(TODAY)];
+
+  it("in every window and every month, every layout", () => {
+    let checked = 0;
+    for (const [name, inp] of fixtures) {
+      for (const w of windows) {
+        const m = computeOwnerMoney(inp, w, TZ, TODAY);
+        for (const f of [m.totals, ...m.months]) {
+          for (const opts of [{}, { stockInMaterials: true }, { otherIncome: true, margin: true }]) {
+            const rows = profitAndLoss(f, opts);
+            const at = (k: Parameters<typeof pnlRow>[1]) => pnlRow(rows, k)!.cents!;
+            const label = `${name}, ${w.key}`;
+            expect(at("net_profit"), label).toBe(cents(f.left));
+            expect(at("revenue"), label).toBe(cents(f.received));
+            expect(at("revenue") - at("total_cogs"), label).toBe(at("gross_profit"));
+            expect(at("gross_profit") - at("total_overhead"), label).toBe(at("net_profit"));
+            // The cost rows are every cost the engine counted, each once.
+            const costs = rows.filter((r) => r.kind === "cost").reduce((s, r) => s + r.cents!, 0);
+            expect(costs, label).toBe(cents(f.received) - cents(f.left));
+            // Overhead is what the card called Business Costs: every bucket but Fuel.
+            expect(at("total_overhead"), label).toBe(cents(f.businessCostsTotal));
+            checked += 1;
+          }
+        }
+      }
+    }
+    expect(checked).toBeGreaterThan(300);
+  });
+
+  it("by hand, the year: 5,797.18 in; 843.28 + 940 + 62.50 + 138.62 of COGS; 167.43 of Overhead; 3,645.35 left", () => {
+    const rows = profitAndLoss(computeOwnerMoney(yearInputs(), YEAR, TZ, TODAY).totals);
+    const at = (k: Parameters<typeof pnlRow>[1]) => pnlRow(rows, k)!.amount;
+    expect(at("revenue")).toBe(5797.18);
+    expect(at("total_cogs")).toBe(1984.4);
+    expect(at("gross_profit")).toBe(3812.78);
+    expect(at("total_overhead")).toBe(167.43); // 47.44 Other + 20 Tools & Supplies + 99.99 Fees
+    expect(at("net_profit")).toBe(3645.35);
   });
 });

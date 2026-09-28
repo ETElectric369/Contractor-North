@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { computeOwnerMoney, getOwnerMoney, ownerMoneyWindow, type OwnerMoneyInputs } from "./owner-money";
+import { pnlRow, profitAndLoss } from "./profit-and-loss";
 
 /**
  * OTHER INCOME (0363): a deposit a person placed as Other Income on a bank download is money
@@ -39,6 +40,20 @@ describe("Other Income in Received", () => {
     const year = computeOwnerMoney(inputs({ otherIncome: [{ amount: 250.5, posted_on: "2026-09-20" }, { amount: 99, posted_on: "2026-08-02" }] }), ownerMoneyWindow("this_year", TODAY), TZ, TODAY);
     expect(year.months.find((x) => x.month === "2026-08")!.otherIncome).toBe(99);
     expect(year.totals.received).toBe(1349.5);
+  });
+
+  it("on the profit and loss it is inside Revenue, said on its own line, and moves no cost: Net Profit (Owner's Draw) is still the engine's net", () => {
+    const m = computeOwnerMoney(inputs({ otherIncome: [{ amount: 250.5, posted_on: "2026-09-20" }] }), ownerMoneyWindow("this_month", TODAY), TZ, TODAY);
+    const rows = profitAndLoss(m.totals, { otherIncome: true, margin: true });
+    const at = (k: Parameters<typeof pnlRow>[1]) => pnlRow(rows, k)!;
+    expect(at("revenue").amount).toBe(1250.5);
+    expect(at("other_income")).toMatchObject({ label: "Other Income (Inside Revenue)", amount: 250.5, kind: "part" });
+    // Fuel is Cost of Goods Sold (COGS): 1,250.50 less 100.
+    expect(at("total_cogs").amount).toBe(100);
+    expect(at("gross_profit").amount).toBe(1150.5);
+    expect(at("total_overhead").amount).toBe(0);
+    expect(at("net_profit").amount).toBe(m.totals.left);
+    expect(at("net_profit").amount).toBe(1150.5);
   });
 
   it("none: the figure is absent, and Received is the payments alone", () => {

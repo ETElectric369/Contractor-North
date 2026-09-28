@@ -3,7 +3,7 @@
  *
  * Erik, 2026-09-23: "get rid of the owners wages and make everything not a cost part of the owners
  * draw". The owner is paid by owner's draw, so several screens now say something about HIS hours
- * and HIS money: the job's Costs tab ("Your Hours"), /analytics ("Left For You"), the Pay board ("You
+ * and HIS money: the job's Costs tab ("Your Hours"), /analytics ("Owner's Draw"), the Pay board ("You
  * are paid by owner's draw..."). Each one has two readers, the owner and his office, and the
  * sentence has to be in the register of whoever is reading it: Erik reads "you", Alexa reads
  * "Erik". Written once here so the three screens cannot drift into three different phrasings of the
@@ -32,8 +32,9 @@ export type OwnerRegister = {
   perHourPhrase: string;
   /** "about $X for each hour you worked" uses this: "you" / "Erik" / "the owners". */
   who: string;
-  /** "Owner's Draw": the Analytics card's heading and the chart's series, the same words for every
-   *  viewer (Erik, 2026-09-24: "instead of 'Left for you' lets call it 'Owner's Draw'"). */
+  /** "Owner's Draw": the Analytics card's heading, the same words for every viewer (Erik, 2026-09-24:
+   *  "instead of 'Left for you' lets call it 'Owner's Draw'"). Its bottom line, and the chart's
+   *  series, say Net Profit (Owner's Draw): the profit and loss's own words (profit-and-loss.ts). */
   leftFor: string;
   /** The Pay board's one quiet sentence about why the owner is not on it. */
   notOnPayBoard: string;

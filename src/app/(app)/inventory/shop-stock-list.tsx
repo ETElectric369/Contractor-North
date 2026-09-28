@@ -421,7 +421,7 @@ function CountIt({ item, onClose, onDone }: { item: ShelfItemView; onClose: () =
         </div>
         {diff < 0 && (
           <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">
-            {qty(-diff)} {item.unit} short. They are written off oldest roll first, at what they cost, as Shop Stock Lost.
+            {qty(-diff)} {item.unit} short. They are written off oldest roll first, at what they cost, as Stock Lost.
           </p>
         )}
         {diff > 0 && (
@@ -496,7 +496,7 @@ function aboutCost(lot: ShelfLotView, n: number): number {
   return lot.pieces > 0 ? Math.min(Math.round(((n * lot.cost) / lot.pieces) * 100) / 100, lot.costLeft) : 0;
 }
 
-/** WRITE OFF: pieces off this roll gone for good. Shop Stock Lost this month; never a customer's. */
+/** WRITE OFF: pieces off this roll gone for good. Stock Lost this month; never a customer's. */
 function WriteOff({ item, lot, onClose, onDone }: { item: ShelfItemView; lot: ShelfLotView; onClose: () => void; onDone: (message: string) => void }) {
   const [n, setN] = useState(lot.piecesLeft);
   const [reason, setReason] = useState("");
@@ -548,7 +548,7 @@ function WriteOff({ item, lot, onClose, onDone }: { item: ShelfItemView; lot: Sh
         </div>
         {n > 0 && n <= lot.piecesLeft && (
           <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">
-            About {formatCurrency(aboutCost(lot, n))}, what they cost off the roll, shows as Shop Stock Lost this month. The company eats it: no
+            About {formatCurrency(aboutCost(lot, n))}, what they cost off the roll, shows as Stock Lost this month. The company eats it: no
             customer is charged. You can Undo it from this list.
           </p>
         )}
