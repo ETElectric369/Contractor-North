@@ -6,11 +6,12 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 /**
  * THE CREW ON THE OVERVIEW (W1-22): the office's 44px chips (tap one to take that person off, + Add
- * to put someone on, both through setJobCrew, the one crew writer); the crew reads the same chips.
+ * to put someone on, both as ONE change through changeJobCrew, which writes via setJobCrew, the one
+ * crew writer); the crew reads the same chips.
  */
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh() {} }) }));
 vi.mock("@/components/toast", () => ({ useToast: () => () => {} }));
-vi.mock("../../schedule/actions", () => ({ setJobCrew: vi.fn(async () => ({ ok: true })) }));
+vi.mock("../../schedule/actions", () => ({ changeJobCrew: vi.fn(async () => ({ ok: true })) }));
 
 import { JobCrewCard } from "./job-crew-card";
 
@@ -38,9 +39,37 @@ describe("the office", () => {
 
   it("the one crew writer, and a refusal backs the chips out with words (source)", () => {
     const s = readFileSync(join(process.cwd(), "src/app/(app)/jobs/[id]/job-crew-card.tsx"), "utf8");
-    expect(s).toContain("await setJobCrew(jobId, next)");
+    expect(s).toContain("await changeJobCrew(jobId, change)");
     expect(s).toContain("setCrew(prev)");
     expect(s).toContain("Take {nameOf(asking)} Off This Job?");
+  });
+});
+
+describe("a stale page never takes anyone off (someone else put Brian on meanwhile)", () => {
+  const card = () => readFileSync(join(process.cwd(), "src/app/(app)/jobs/[id]/job-crew-card.tsx"), "utf8");
+
+  it("Add and Take Off send one change, never the whole list the page loaded", () => {
+    const s = card();
+    expect(s).toContain("write({ remove: asking },");
+    expect(s).toContain("write({ add: m.id },");
+    expect(s).not.toMatch(/setJobCrew\(/);
+    expect(s).not.toMatch(/write\(\[\.\.\.crew/);
+    expect(s).not.toMatch(/write\(crew\.filter/);
+  });
+
+  it("the server applies it to the crew as stored now, through the one crew writer", () => {
+    const a = readFileSync(join(process.cwd(), "src/app/(app)/schedule/actions.ts"), "utf8");
+    const fn = a.slice(a.indexOf("export async function changeJobCrew"), a.indexOf("/** Offer the customer up to 3"));
+    expect(fn).toContain('.from("jobs").select("assigned_to").eq("id", id).maybeSingle()');
+    expect(fn).toContain("applyCrewChange(");
+    expect(fn).toContain("await setJobCrew(id, next)");
+    expect(fn).not.toMatch(/\.update\(/);
+  });
+
+  it("when the page refreshes with a new crew and nothing is being written, the chips take it", () => {
+    const s = card();
+    expect(s).toContain('const serverKey = initialCrew.map((c) => c.id).join(",");');
+    expect(s).toMatch(/if \(serverKey !== seenKey && !pending\) \{\s*setSeenKey\(serverKey\);\s*setCrew\(initialCrew\.map\(\(c\) => c\.id\)\);/);
   });
 });
 

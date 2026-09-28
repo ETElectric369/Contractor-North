@@ -7,7 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { useToast } from "@/components/toast";
 import { initials } from "@/lib/utils";
-import { setJobCrew } from "../../schedule/actions";
+import { applyCrewChange, type CrewChange } from "@/lib/crew-change";
+import { changeJobCrew } from "../../schedule/actions";
 
 export type CrewMember = { id: string; full_name: string | null };
 
@@ -25,8 +26,10 @@ function Avatar({ name }: { name: string | null }) {
  * THE CREW, ON THE OVERVIEW (W1-22): who is on this job, where the job is read, instead of a
  * checkbox list inside Edit Job. The office: each person is a 44px chip; tapping one asks "Take Brian
  * Off This Job?" and takes him off; "+ Add" opens the team to put someone on. Both go through
- * setJobCrew, the job's one crew writer (it sends the whole crew, rings the bell and pushes a person
- * newly put on it). The chips move at once and move back if the write is refused, with the refusal
+ * changeJobCrew, which applies that ONE change to the crew as it is saved now and writes it through
+ * setJobCrew, the job's one crew writer (it rings the bell and pushes a person newly put on it). The
+ * chips never send a whole list, so a page gone stale can't take off someone another person put on in
+ * the meantime (a foreman from the time clock, the schedule board, Nort). The chips move at once and move back if the write is refused, with the refusal
  * said in a toast (the schedule board's crew pattern). The crew reads the same chips, not tappable.
  */
 export function JobCrewCard({
@@ -46,6 +49,16 @@ export function JobCrewCard({
   const toast = useToast();
   const [pending, start] = useTransition();
   const [crew, setCrew] = useState<string[]>(initialCrew.map((c) => c.id));
+  // SERVER TRUTH COMES BACK IN. A refresh never remounts this card (any save on the Overview re-renders
+  // the page around it), so when the server's crew changes and no write of ours is in flight, the chips
+  // take it: the card never keeps showing a crew the page no longer has. React's "adjust state while
+  // rendering" idiom, keyed on the server's ids in their stored order.
+  const serverKey = initialCrew.map((c) => c.id).join(",");
+  const [seenKey, setSeenKey] = useState(serverKey);
+  if (serverKey !== seenKey && !pending) {
+    setSeenKey(serverKey);
+    setCrew(initialCrew.map((c) => c.id));
+  }
   const [asking, setAsking] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const known = new Map<string, CrewMember>([...team, ...initialCrew].map((m) => [m.id, m]));
@@ -54,19 +67,21 @@ export function JobCrewCard({
   // The optimistic move must be BACKED OUT when the write fails, or the card lies: a refresh never
   // remounts it, and useState ignores its initializer on re-render. The try/catch is not optional:
   // an async transition's rejection (offline, 5xx) otherwise reaches no handler at all.
-  function write(next: string[], said: string) {
+  function write(change: CrewChange, said: string) {
     const prev = crew;
-    setCrew(next);
+    setCrew(applyCrewChange(crew, change));
     setAsking(null);
     setAdding(false);
     start(async () => {
       try {
-        const res = await setJobCrew(jobId, next);
+        const res = await changeJobCrew(jobId, change);
         if (!res.ok) {
           setCrew(prev);
           toast(res.error ?? `Couldn't ${said}. Try again.`, "error");
           return;
         }
+        // The refresh brings the crew as written (which may hold someone this page hadn't seen yet),
+        // and the server-truth sync above puts it on the chips once this write settles.
         router.refresh();
       } catch {
         setCrew(prev);
@@ -132,7 +147,7 @@ export function JobCrewCard({
         {asking && (
           <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-700">
             <span className="mr-auto">Take {nameOf(asking)} Off This Job?</span>
-            <Button variant="outline" className="text-red-600" onClick={() => write(crew.filter((x) => x !== asking), `take ${nameOf(asking)} off this job`)}>
+            <Button variant="outline" className="text-red-600" onClick={() => write({ remove: asking }, `take ${nameOf(asking)} off this job`)}>
               <X className="h-4 w-4" /> Take Off
             </Button>
             <Button variant="ghost" onClick={() => setAsking(null)}>
@@ -151,7 +166,7 @@ export function JobCrewCard({
                   <li key={m.id}>
                     <button
                       type="button"
-                      onClick={() => write([...crew, m.id], `put ${m.full_name ?? "them"} on this job`)}
+                      onClick={() => write({ add: m.id }, `put ${m.full_name ?? "them"} on this job`)}
                       className="flex min-h-11 w-full items-center gap-2 px-3 text-left text-sm text-slate-700 hover:bg-slate-50"
                     >
                       <Avatar name={m.full_name} />

@@ -6,6 +6,7 @@ import { revalidatePath } from "next/cache";
 import { emptyToNull } from "@/lib/forms";
 import { pushCalendarItem } from "@/lib/calendar-sync";
 import { notifyJobCrewAdded } from "@/lib/crew-notify";
+import { applyCrewChange, type CrewChange } from "@/lib/crew-change";
 import { requireStaff } from "@/lib/staff-guard";
 import { customerForInquiry } from "@/lib/actions/win-customer";
 import { findMatchingCustomerId, type DupCustomer } from "@/lib/crm/duplicates";
@@ -291,6 +292,22 @@ export async function setJobCrew(id: string, employeeIds: string[]): Promise<Res
   revalidatePath("/planner");
   revalidatePath(`/jobs/${id}`);
   return { ok: true };
+}
+
+/** Put ONE person on a job or take ONE off, against the crew as it is saved NOW (the job page's crew
+ *  chips). The chips never send a whole list: a list built on a page that has gone stale would take off,
+ *  with no word to anyone, whoever a foreman, the schedule board or Nort put on in the meantime. Reads
+ *  the stored crew fresh, applies the one change, and writes through setJobCrew, the one crew writer
+ *  (the same shape the time clock's assignMemberToJob uses). Returns the crew as written. */
+export async function changeJobCrew(id: string, change: CrewChange): Promise<Result & { crew?: string[] }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const { data: job, error } = await ctx.supabase.from("jobs").select("assigned_to").eq("id", id).maybeSingle();
+  if (error) return { ok: false, error: dbError(error) };
+  if (!job) return { ok: false, error: "That job isn't available, so the crew didn't change." };
+  const next = applyCrewChange((job as { assigned_to: string[] | null }).assigned_to, change);
+  const res = await setJobCrew(id, next);
+  return res.ok ? { ...res, crew: next } : res;
 }
 
 /** Offer the customer up to 3 date+time slots; returns the public pick token.
