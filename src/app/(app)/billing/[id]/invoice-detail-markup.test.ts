@@ -271,6 +271,18 @@ describe("the invoice body (W1-27)", () => {
     expect(liveHoldDay(null, "2026-09-27")).toBeNull();
   });
 
+  it("a set-aside day on a draft whose job is finished or cancelled is no hold: Needs You has it on top as Finished · Send", () => {
+    const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" });
+    const ahead = new Date(Date.parse(`${today}T00:00:00Z`) + 6 * 86_400_000).toISOString().slice(0, 10);
+    for (const status of ["complete", "cancelled"]) {
+      const out = html({ hold_until: ahead, hold_reason: "Waiting on the change order", jobs: { status } });
+      expect(out).not.toContain("Set aside until");
+      expect(out).not.toContain(">Put Back</button>");
+    }
+    // The job still going: the day stands.
+    expect(html({ hold_until: ahead, jobs: { status: "in_progress" } })).toContain("Set aside until");
+  });
+
   it("a bill that went out and came Back To Draft says its date: its next send keeps it", () => {
     expect(dueWords({ isDraft: true, dueDate: "2026-08-31", byHand: false, netDays: 30, sentBefore: true })).toBe("Due Aug 31 · Net 30");
     expect(dueWords({ isDraft: true, dueDate: "2026-08-31", byHand: false, netDays: 30, sentBefore: false })).toBe("Due 30 days after you send it");

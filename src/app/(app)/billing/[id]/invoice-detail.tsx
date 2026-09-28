@@ -52,6 +52,7 @@ import { ACTIONS_NOTE_CLS, ACTIONS_ROW_CLS } from "@/components/section-actions-
 import { bringInNewWorkSteps, bringInSentence, BRING_IN_NEW_WORK, type BringInOutcome, type BringInStep } from "@/lib/actuals-draw";
 import { invoiceStatusItems, statusToSend } from "@/lib/nav-tree";
 import { todayStrInTz } from "@/lib/tz";
+import { embeddedJob, isFinishedJobStatus } from "@/lib/action-items/due-filters";
 import { MarkupBox } from "./markup-box";
 
 interface PriceItemLite { id: string; code: string | null; description: string; unit: string; buy_price: number; markup_pct: number; }
@@ -479,8 +480,11 @@ export function InvoiceDetail({
   const [stuckSources, setStuckSources] = useState<("labor" | "costs" | "quote" | "change_orders")[]>([]);
   /** A draft deliberately set aside (0206): the one body line says until when, and why. */
   const storedHold = (invoice as { hold_until?: string | null }).hold_until ?? null;
-  /** Only a day still ahead is a hold (liveHoldDay): once it comes the draft is back on the list. */
-  const holdUntil = liveHoldDay(storedHold, todayStrInTz(tz));
+  /** Only a day still ahead is a hold (liveHoldDay): once it comes the draft is back on the list. And
+   *  a draft whose job is finished or cancelled is back on it at once ("Finished · Send"), whatever
+   *  day it was given, so it never says "Set aside until" there. */
+  const jobIsOver = isFinishedJobStatus(embeddedJob<{ status?: string | null }>((invoice as { jobs?: unknown }).jobs)?.status);
+  const holdUntil = jobIsOver ? null : liveHoldDay(storedHold, todayStrInTz(tz));
   const holdReason = (invoice as { hold_reason?: string | null }).hold_reason ?? null;
   /* THE % BOX STARTS WHERE THE INVOICE IS (2026-09-25). It used to start at the customer's usual
      markup whatever the lines said, so on INV-078 - moved to 11% - it read 15, and the next touch

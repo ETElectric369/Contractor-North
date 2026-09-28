@@ -1,3 +1,5 @@
+import { jobWords } from "./words";
+
 /**
  * THE DAY A PERSON PICKED IS THE DAY IT COMES BACK (Wave 1 seam fixes on release/w1a).
  *
@@ -102,4 +104,21 @@ export function draftInvoiceState(
 /** A job that is over: finished or cancelled (a draft on it waits on nothing). */
 export function isFinishedJobStatus(status: string | null | undefined): boolean {
   return status === "complete" || status === "cancelled";
+}
+
+/**
+ * THE ONE REFUSAL FOR SETTING ASIDE A DRAFT WHOSE JOB IS OVER, said by every door (the invoice page's
+ * ⋯ Set Aside Until…, Needs You's, Nort's invoice.setAside, all through parkInvoice). Null when the
+ * job is still going, or there is no job: then a day can quiet the draft and "comes back" is true.
+ */
+export function finishedDraftRefusal(
+  job: { job_number?: string | null; name?: string | null; status?: string | null } | null | undefined,
+): string | null {
+  if (!job || !isFinishedJobStatus(job.status)) return null;
+  return `${jobWords(job)} is ${job.status === "cancelled" ? "cancelled" : "finished"}, so this draft has nothing left to wait for and stays on Needs You. Send it, or void it if it won't be billed.`;
+}
+
+/** The job a PostgREST `jobs:job_id(...)` embed hands back (an object, or a one-row array). */
+export function embeddedJob<T>(rel: unknown): T | null {
+  return ((Array.isArray(rel) ? rel[0] : rel) ?? null) as T | null;
 }

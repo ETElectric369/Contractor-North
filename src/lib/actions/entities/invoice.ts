@@ -21,8 +21,7 @@ import { LINE_KIND_LABEL, type PickableLineKind } from "@/lib/invoice-math";
 import { localDay, orgTimezone, spokenDay } from "@/lib/org-local-time";
 import { checkComeBackDay, shortDay } from "@/lib/come-back-days";
 import { todayStrInTz } from "@/lib/tz";
-import { isFinishedJobStatus } from "@/lib/action-items/due-filters";
-import { jobWords } from "@/lib/action-items/words";
+import { embeddedJob, finishedDraftRefusal } from "@/lib/action-items/due-filters";
 import { resolveJobId } from "../resolve-id";
 import type { ActionDef } from "../types";
 
@@ -261,14 +260,8 @@ export const invoiceActions: Record<string, ActionDef> = {
       // "Finished · Send", so a day written here would never quiet it and "comes back that day"
       // would be untrue. Said in words; nothing is parked. (A lost read lets parkInvoice decide.)
       const { data: inv } = await supabase.from("invoices").select("id, jobs:job_id(job_number, name, status)").eq("id", i.id).maybeSingle();
-      const rel = (inv as { jobs?: unknown } | null)?.jobs;
-      const job = (Array.isArray(rel) ? rel[0] : rel) as { job_number?: string | null; name?: string | null; status?: string | null } | null | undefined;
-      if (job && isFinishedJobStatus(job.status)) {
-        return {
-          ok: false,
-          error: `${jobWords(job)} is ${job.status === "cancelled" ? "cancelled" : "finished"}, so this draft has nothing left to wait for and stays on Needs You. Send it, or void it if it won't be billed.`,
-        };
-      }
+      const refusal = finishedDraftRefusal(embeddedJob((inv as { jobs?: unknown } | null)?.jobs));
+      if (refusal) return { ok: false, error: refusal };
       const r = await parkInvoice(i.id, day.day, (i.reason ?? "").trim() || undefined);
       if (!r.ok) return { ok: false, error: r.error };
       return { ok: true, speak: `Set aside until ${shortDay(day.day)}. It comes back to Needs You that day.` };
