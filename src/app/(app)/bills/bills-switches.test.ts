@@ -112,7 +112,7 @@ describe("the page wires the switches (the parts too big to draw here)", () => {
   it("the supplier cards, Needs You's paper cards and Add By Hand are told the switch", () => {
     expect(PAGE).toMatch(/supplierPaperFeed\(\{[\s\S]*?shopStock,\s*\}\)/);
     expect(PAGE).toMatch(/<NeedsYou\s+items=\{paperItems\}\s+jobs=\{paperJobs\}\s+matches=\{paperMatches\}\s+shopStock=\{shopStock\}/);
-    expect(PAGE).toContain("<AddByHandButton jobs={handJobs} shopStock={shopStock} />");
+    expect(PAGE).toContain("<AddByHandButton jobs={handJobs} shopStock={shopStock} jobsUnread={!!jobsErr} />");
   });
   it("the purchase orders are still read whatever the switch (they count in job cost)", () => {
     expect(PAGE).toContain('.from("purchase_orders")');
