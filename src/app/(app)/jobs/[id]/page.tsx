@@ -93,7 +93,8 @@ import { EditCustomerButton } from "../../crm/[id]/edit-customer-button";
 import { getOrgSettings, workDayWindowHm } from "@/lib/org-settings";
 import { computeJobLaborBilling, customerLaborRateForJob, fetchJobLaborRows, laborCostForJob } from "@/lib/labor-billing";
 import { ownerRegister } from "@/lib/owner-draw";
-import { formatDateTz, hmToMin, todayStrInTz, tzMinutesOfDay } from "@/lib/tz";
+import { formatDateTz, todayStrInTz } from "@/lib/tz";
+import { hmWords, readJobBlock } from "@/lib/schedule/job-block";
 import { InvoiceAmount, InvoiceAmountDetail } from "@/components/invoice-amount";
 import { IntakeFiles } from "../../leads/intake-files";
 import { intakePaths } from "@/lib/playbook/uploads";
@@ -719,12 +720,23 @@ export default async function JobDetailPage({
   // reverted. Segments are date-only strings (formatDate anchors them to noon UTC, so the day
   // never shifts in Pacific); a start time shows only when it's an explicit one, i.e. not the
   // org's all-day sentinel — the same rule the picker uses to decide whether to show a time.
+  // THE JOB'S BLOCK on the company's clock: its start and the end its length gives it, the one rule
+  // the calendar draws and the time controls edit (lib/schedule/job-block).
+  const block = readJobBlock({
+    scheduledStart: j.scheduled_start ?? null,
+    scheduledEnd: j.scheduled_end ?? null,
+    plannedMinutes: j.planned_minutes ?? null,
+    tz,
+    workDay,
+  });
   const scheduleText: string | null = (() => {
     const segs = (scheduleSegments ?? []) as { start_date: string; end_date: string }[];
-    const startTime =
-      j.scheduled_start && tzMinutesOfDay(j.scheduled_start, tz) !== hmToMin(workDay.start)
-        ? new Date(j.scheduled_start).toLocaleTimeString("en-US", { timeZone: tz, hour: "numeric", minute: "2-digit" })
-        : null;
+    // The crew reads the whole block, start AND end ("10:00 AM – 12:00 PM"), never just a start.
+    const startTime = !j.scheduled_start || block.allDay
+      ? null
+      : block.multiDay
+        ? `starts ${hmWords(block.startHm)}`
+        : `${hmWords(block.startHm)} – ${hmWords(block.endHm)}`;
     const days = segs.length
       ? segs
           .map((sg) => (sg.start_date === sg.end_date ? formatDate(sg.start_date) : `${formatDate(sg.start_date)} – ${formatDate(sg.end_date)}`))
@@ -735,7 +747,7 @@ export default async function JobDetailPage({
           : formatDateTz(j.scheduled_start, tz)
         : null;
     if (!days) return null;
-    return startTime ? `${days} · starts ${startTime}` : days;
+    return startTime ? `${days} · ${startTime}` : days;
   })();
 
   // Costing. laborCost = what we PAY (pay rate); billableLabor = what we CHARGE
@@ -1210,7 +1222,7 @@ export default async function JobDetailPage({
                   <div className="mt-1">
                     {viewerIsStaff ? (
                       <div className="flex flex-wrap items-start gap-x-3 gap-y-2">
-                        <JobScheduleControl id={j.id} start={j.scheduled_start} end={j.scheduled_end} segments={(scheduleSegments ?? []) as any} workDayStart={workDay.start} />
+                        <JobScheduleControl id={j.id} segments={(scheduleSegments ?? []) as any} block={block} workDay={workDay} />
                         {/* OFFER DATES, beside the dates it fills (W1-17: out of Manage, not cut). Only
                             while the job can still be scheduled. */}
                         {schedulable && (

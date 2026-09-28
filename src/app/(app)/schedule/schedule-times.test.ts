@@ -124,6 +124,53 @@ beforeEach(() => {
   vi.mocked(rescheduleAppointment).mockClear();
 });
 
+describe("a chosen length is saved WITH the block, in one row write", () => {
+  it("a 2h pick on J-058 (stored 10 AM to the 5 PM stamp) writes 10:00–12:00 and planned_minutes 120 together", async () => {
+    state.db.jobs.push({ id: "j058", status: "scheduled", scheduled_start: at("2026-09-28", "10:00"), scheduled_end: at("2026-09-28", "17:00"), planned_minutes: null });
+    state.db.job_schedule_segments.push({ job_id: "j058", start_date: "2026-09-28", end_date: "2026-09-28" });
+
+    expect(await actions.setJobTimes("j058", { length: 120 })).toEqual({ ok: true });
+    const ups = jobUpdates("j058").filter((w) => "scheduled_start" in (w.row ?? {}));
+    expect(ups).toHaveLength(1);
+    expect(ups[0].row).toMatchObject({
+      scheduled_start: "2026-09-28T17:00:00.000Z",
+      scheduled_end: "2026-09-28T19:00:00.000Z",
+      planned_minutes: 120,
+    });
+  });
+
+  it("Full Day is the company's day, sized as a day", async () => {
+    state.db.jobs.push({ id: "j1", status: "scheduled", scheduled_start: at("2026-09-28", "10:00"), scheduled_end: at("2026-09-28", "12:00"), planned_minutes: null });
+    state.db.job_schedule_segments.push({ job_id: "j1", start_date: "2026-09-28", end_date: "2026-09-28" });
+    await actions.setJobTimes("j1", { length: "full" });
+    expect(job("j1")).toMatchObject({ scheduled_start: at("2026-09-28", "09:00"), scheduled_end: at("2026-09-28", "17:00"), planned_minutes: 480 });
+  });
+
+  it("a new start keeps the length (10–12 moved to 1 PM is 1–3), and writes no size nobody chose", async () => {
+    state.db.jobs.push({ id: "j1", status: "scheduled", scheduled_start: at("2026-09-28", "10:00"), scheduled_end: at("2026-09-28", "12:00"), planned_minutes: null });
+    state.db.job_schedule_segments.push({ job_id: "j1", start_date: "2026-09-28", end_date: "2026-09-28" });
+    await actions.setJobTimes("j1", { start: "13:00" });
+    expect(job("j1")).toMatchObject({ scheduled_start: at("2026-09-28", "13:00"), scheduled_end: at("2026-09-28", "15:00"), planned_minutes: null });
+    const up = jobUpdates("j1").find((w) => "scheduled_start" in (w.row ?? {}))!;
+    expect(up.row).not.toHaveProperty("planned_minutes");
+  });
+});
+
+describe("a length change keeps worked days", () => {
+  it("Sep 22 was worked and stays as history; the plan on the 28th gets its four hours; the listed start stays the 28th", async () => {
+    state.db.jobs.push({ id: "j2", status: "in_progress", scheduled_start: at("2026-09-28", "10:00"), scheduled_end: at("2026-09-28", "12:00"), planned_minutes: null });
+    state.db.job_schedule_segments.push(
+      { job_id: "j2", start_date: "2026-09-22", end_date: "2026-09-22" },
+      { job_id: "j2", start_date: "2026-09-28", end_date: "2026-09-28" },
+    );
+    state.db.time_entries.push({ id: "t1", job_id: "j2", clock_in: "2026-09-22T17:00:00Z" });
+
+    expect((await actions.setJobTimes("j2", { length: 240 })).ok).toBe(true);
+    expect(segs("j2")).toEqual(["2026-09-22..2026-09-22", "2026-09-28..2026-09-28"]);
+    expect(job("j2")).toMatchObject({ scheduled_start: at("2026-09-28", "10:00"), scheduled_end: at("2026-09-28", "14:00"), planned_minutes: 240 });
+  });
+});
+
 describe("a length is saved before the placement reads it", () => {
   it("sized 2h on the rail, then placed at 10:00: the placement reads the stored size and lands 10 to 12", async () => {
     state.db.jobs.push({ id: "j3", status: "to_be_scheduled", scheduled_start: null, scheduled_end: null, planned_minutes: null });
@@ -175,6 +222,31 @@ describe("a move keeps the block", () => {
     state.db.job_schedule_segments.push({ job_id: "j7", start_date: "2026-09-28", end_date: "2026-09-28" });
     await actions.moveJobDay("j7", "2026-09-28", "2026-10-05");
     expect(job("j7")).toMatchObject({ scheduled_start: at("2026-10-05", "09:00"), scheduled_end: at("2026-10-05", "17:00") });
+  });
+});
+
+describe("setJobTimes says no in words", () => {
+  it("a bad start or length is refused in words, and nothing is written", async () => {
+    state.db.jobs.push({ id: "j8", status: "scheduled", scheduled_start: at("2026-09-28", "10:00"), scheduled_end: at("2026-09-28", "12:00"), planned_minutes: null });
+    state.db.job_schedule_segments.push({ job_id: "j8", start_date: "2026-09-28", end_date: "2026-09-28" });
+    expect(await actions.setJobTimes("j8", { start: "noon" })).toEqual({ ok: false, error: "Pick a start time." });
+    expect((await actions.setJobTimes("j8", { length: -30 })).ok).toBe(false);
+    expect(state.writes).toEqual([]);
+  });
+
+  it("a job with no day is asked for one first", async () => {
+    state.db.jobs.push({ id: "j9", status: "to_be_scheduled", scheduled_start: null, scheduled_end: null, planned_minutes: null });
+    expect(await actions.setJobTimes("j9", { length: 120 })).toEqual({ ok: false, error: "Give the job a day first, then its time." });
+    // Nor onto a worked day kept as history after its date was cleared: that past day would become the plan.
+    state.db.jobs.push({ id: "j9b", status: "to_be_scheduled", scheduled_start: null, scheduled_end: null, planned_minutes: null });
+    state.db.job_schedule_segments.push({ job_id: "j9b", start_date: "2026-09-22", end_date: "2026-09-22" });
+    expect(await actions.setJobTimes("j9b", { start: "10:00" })).toEqual({ ok: false, error: "Give the job a day first, then its time." });
+    expect(state.writes).toEqual([]);
+  });
+
+  it("a job that isn't there (another company's, or gone) says so", async () => {
+    expect(await actions.setJobTimes("nope", { length: 120 })).toEqual({ ok: false, error: "Job not found." });
+    expect(state.writes).toEqual([]);
   });
 });
 

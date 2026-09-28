@@ -37,6 +37,7 @@ import {
   endAfter,
   jobDayBlock,
   planJobTimes,
+  readHm,
   workDayMinutes,
   type JobLength,
 } from "@/lib/schedule/job-block";
@@ -706,6 +707,46 @@ export async function placeJobOnDay(
     withDays,
     /^\d{2}:\d{2}$/.test(startHHMM ?? "") ? startHHMM : undefined,
   );
+}
+
+/**
+ * A JOB'S START AND LENGTH, ON THE DAYS IT ALREADY HAS: the job page's time controls and the schedule
+ * tile's sheet. Erik (2026-09-28): "within the job itself i could only set a start time and no end
+ * time and on the schedule itself there should be a time adjustment".
+ *
+ * `start` "HH:MM" (undefined keeps it); `length` minutes or "full" (undefined keeps it). The days are
+ * read fresh here and written back unchanged, so a worked day kept as history stays, and the job's
+ * listed span (the plan) stays where it is. Through writeScheduleRanges, the one writer: the start,
+ * the end and the chosen length land together in one row write, the Google event follows, and a
+ * job that isn't there says so (the silent-write law).
+ */
+export async function setJobTimes(
+  jobId: string,
+  times: { start?: string; length?: JobLength },
+): Promise<Result & { defaulted?: boolean }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+  const start = times?.start;
+  const length = times?.length;
+  if (start !== undefined && readHm(start) == null) return { ok: false, error: "Pick a start time." };
+  const bad = lengthProblem(length);
+  if (bad) return { ok: false, error: bad };
+  if (start === undefined && length === undefined) return { ok: true };
+
+  const { segments, error: segErr } = await loadJobDaySegments(supabase, jobId);
+  if (segErr) return { ok: false, error: segErr };
+  const { data: job } = await supabase.from("jobs").select("scheduled_start, scheduled_end").eq("id", jobId).maybeSingle();
+  const j = (job ?? {}) as { scheduled_start?: string | null; scheduled_end?: string | null };
+  // A time belongs to a PLANNED day. A job with none (never placed, or its date cleared with only
+  // worked days kept as history) gets a day first; a time written onto a history day would make that
+  // past day its plan.
+  if (!segments.length || !j.scheduled_start) return { ok: false, error: "Give the job a day first, then its time." };
+  const tz = await orgTimezone(supabase);
+  const first = todayStrInTz(tz, new Date(j.scheduled_start));
+  const last = j.scheduled_end ? todayStrInTz(tz, new Date(j.scheduled_end)) : first;
+  const mirror = { start: first, end: last > first ? last : first };
+  return writeScheduleRanges(supabase, jobId, segments, start === undefined ? undefined : start.slice(0, 5), mirror, length);
 }
 
 
