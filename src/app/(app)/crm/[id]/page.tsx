@@ -21,6 +21,7 @@ import { PortalLinkButton } from "./portal-link-button";
 import { SectionActionsMenu } from "@/components/section-actions-menu";
 import { customerSectionTree } from "@/lib/nav-tree";
 import { NewJobButton } from "../../schedule/new-job-button";
+import { FIXED_PILL_CLASS, isFixedPrice } from "@/lib/doc-label";
 import { AppointmentButton } from "../../appointments/appointment-button";
 import { toJobOptions, toStaffOptions, listActiveTechs } from "@/lib/schedule-options";
 import { deleteCustomer } from "../actions";
@@ -84,7 +85,8 @@ export default async function CustomerDetailPage({
       .order("created_at", { ascending: false }),
     supabase
       .from("quotes")
-      .select("id, quote_number, total, status")
+      // doc_type: the Estimates tab's Fixed chip (W1-25) turns on it (projection law).
+      .select("id, quote_number, total, status, doc_type")
       .eq("customer_id", id)
       .order("created_at", { ascending: false }),
     supabase
@@ -275,7 +277,13 @@ export default async function CustomerDetailPage({
           <RowList
             items={((quotes as Quote[] | null) ?? []).map((q) => ({
               key: q.id,
-              label: q.quote_number,
+              // THE FIXED CHIP (W1-25): fixed-price rows only; Time & Material wears nothing.
+              label: (
+                <>
+                  {q.quote_number}
+                  {isFixedPrice(q) && <span className={FIXED_PILL_CLASS}>Fixed</span>}
+                </>
+              ),
               value: formatCurrency(q.total),
               badge: { tone: statusTone(q.status), text: q.status },
               href: `/quotes/${q.id}`,

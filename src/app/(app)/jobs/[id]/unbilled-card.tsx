@@ -104,7 +104,8 @@ export function UnbilledCard({
             {since ? `Your time since ${since}` : "Your time not yet invoiced"}
           </div>
           <div className="mt-1 text-2xl font-bold text-slate-900">{formatDuration(view.hours)}</div>
-          {view.hours <= 0 && <p className="mt-1 text-sm text-slate-500">No new time yet — clock in on the Time tab.</p>}
+          {/* The job's one clock is the dock's TIME button at the top of the page (W1-20). */}
+          {view.hours <= 0 && <p className="mt-1 text-sm text-slate-500">No new time yet. Tap Clock In at the top of this job.</p>}
         </CardContent>
       </Card>
     );

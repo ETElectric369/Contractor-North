@@ -61,7 +61,6 @@ import { permitStatusTone, permitResultTone } from "@/lib/permit-options";
 import { JobAddTimeEntry } from "./job-add-time";
 import { NoJobPunches, type NearPunches } from "./no-job-punches";
 import { jobCrewIds, nearJobWindow, readNoJobPunchesNearJob } from "@/lib/no-job-hours";
-import { JobClockButton } from "./job-clock-button";
 import { EditEntryButton } from "../../timecards/edit-entry-button";
 import { JobStatusControl } from "./job-status-control";
 import { JobContacts } from "./job-contacts";
@@ -76,6 +75,7 @@ import { signDocumentUrls } from "@/lib/signed-docs";
 import { documentsForViewer } from "@/lib/tech-documents";
 import { billPapers, papersOffThisJob, sortJobPapers, type PaperTie } from "@/lib/job-photos";
 import { jobLabel } from "@/lib/schedule-options";
+import { FIXED_PILL_CLASS, isFixedPrice } from "@/lib/doc-label";
 import { directionsTarget } from "@/lib/maps";
 import { NewInvoiceButton } from "./new-invoice-button";
 import { NewWorkOrderButton } from "../../work-orders/new-wo-button";
@@ -1350,17 +1350,16 @@ export default async function JobDetailPage({
       // Overview's running total and the Costs tab, where the door that bills it is.
       content: (
         <Card className="overflow-hidden">
-          {/* THE ROW WRAPS (Erik, from the phone: "can't see the bottom of the list" — his
-              screenshot at 402px shows "Add Time Entry" sheared off at the card's edge). Three
-              things share this line — the total, Clock In with its start-time picker underneath,
-              and Add Time Entry — and every Button is whitespace-nowrap, so at phone width the
-              row can't shrink below its content and the Card's overflow-hidden simply cut the
-              last control in half. flex-wrap lets the controls drop to their own line instead of
-              off the card; nothing here is allowed to be a half-visible tap target. */}
+          {/* ONE CLOCK ON A JOB (W1-20). The tab's own Clock In left: the dock's TIME button at the top
+              of the job is the one clock (GPS, Switch, backdating, the long-shift guard, the on-hold
+              toast), always there whatever tab is open. What stays on this line is the total and the
+              office's Add Time Entry. THE ROW STILL WRAPS (Erik, from the phone: "can't see the bottom
+              of the list", Add Time Entry sheared off at 402px): every Button is whitespace-nowrap, so
+              flex-wrap lets the button drop to its own line instead of off the card's overflow-hidden
+              edge; nothing here is allowed to be a half-visible tap target. */}
           <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b border-slate-100 px-5 py-3 text-sm">
             <span className="font-semibold text-slate-900">Time on this job · {formatDuration(laborHours)}</span>
             <div className="flex flex-wrap items-center gap-2">
-              <JobClockButton jobId={j.id} isStaff={viewerIsStaff} tz={tz} />
               {viewerIsStaff && (
                 <JobAddTimeEntry
                   jobId={j.id}
@@ -1756,9 +1755,8 @@ export default async function JobDetailPage({
                 <Link href={`/quotes/${q.id}`} className="flex items-center justify-between px-5 py-3 text-sm hover:bg-slate-50">
                   <span className="font-medium text-slate-900">
                     {q.quote_number}
-                    <span className="ml-2 align-middle rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-                      {(q.doc_type ?? "quote") === "estimate" ? "Est" : "Quote"}
-                    </span>
+                    {/* THE FIXED CHIP (W1-25): fixed-price rows only; Time & Material wears nothing. */}
+                    {isFixedPrice(q) && <span className={FIXED_PILL_CLASS}>Fixed</span>}
                   </span>
                   <span className="flex items-center gap-3"><span className="text-slate-600">{formatCurrency(q.total)}</span><Badge tone={statusTone(q.status)}>{q.status}</Badge></span>
                 </Link>
