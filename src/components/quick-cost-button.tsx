@@ -1342,7 +1342,7 @@ export function StockFields({
             aria-label="New item name"
             value={stockName}
             onChange={(e) => onName(e.target.value)}
-            placeholder="Its name, like 12/2 NM-B"
+            placeholder="The item's name"
             className="mt-2 h-11"
           />
         )}
