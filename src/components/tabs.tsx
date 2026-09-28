@@ -309,7 +309,9 @@ function UnderlineBar({
  * underline strip's ghost-measure did (at 343px only ~3 of its four primaries ever fit, so
  * Costs and Invoices lived behind More on every phone). Everything unpinned sits behind ONE
  * sixth chip, "More ▾", which lights and wears the active overflow tab's icon + label instead
- * of appending a seventh chip the phone has no room for.
+ * of appending a seventh chip the phone has no room for. Inside it the tabs that hold something
+ * lead and the empty (tucked) ones wait behind "+ Add…" (W1-18, MoreMenuRows); with nothing
+ * unpinned left to list, the strip draws no More chip at all.
  */
 function TileBar({ items, activeId, onSelect }: { items: TabBarItem[]; activeId?: string; onSelect?: (id: string) => void }) {
   const pinned = items.filter((t) => t.pinned);

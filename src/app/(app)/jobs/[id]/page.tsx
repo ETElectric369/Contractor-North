@@ -1172,7 +1172,8 @@ export default async function JobDetailPage({
                   <div className="mt-1 flex items-center gap-2">
                     {j.customers ? (
                       <>
-                        <Link href={`/crm/${j.customers.id}`} className="text-sm font-medium text-slate-900 hover:text-brand">
+                        {/* The customer's door (it left Manage, W1-17): a 44px link, like every tap target. */}
+                        <Link href={`/crm/${j.customers.id}`} className="inline-flex min-h-11 items-center text-sm font-medium text-slate-900 hover:text-brand">
                           {j.customers.name}
                         </Link>
                         {/* Editing the customer is a staff write; a tech gets the name and the phone. */}
