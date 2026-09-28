@@ -7,7 +7,7 @@ import { subtotalTaxTotal } from "@/lib/invoice-math";
 import { defaultDueDateIsoForOrg } from "@/lib/invoice-due";
 import { todayStrInTz, tzDateTimeUtc } from "@/lib/tz";
 import { bucketOf } from "@/lib/business-cost-buckets";
-import { jobNameFrom } from "@/lib/job-name";
+import { jobNameFrom, typedNameMayBeATag } from "@/lib/job-name";
 import { featureOn } from "@/lib/features";
 
 /** The recurring jobs/expenses/invoices generation engine, extracted so BOTH the
@@ -84,15 +84,15 @@ async function createOccurrence(supabase: any, t: any, userId: string | null, or
         : (await supabase.from("organizations").select("settings").eq("id", t.org_id).maybeSingle()).data?.settings;
     const tz = getOrgSettings(raw).timezone;
     const win = workDayWindowHm(raw);
-    // THE TEMPLATE'S TITLE IS THE WORK, AS TYPED. A template is not a conversion (Erik 2026-09-27's
-    // "same goes for any conversion"): its title is only ever typed by a person on the Recurring form
-    // ("Inspection — Acme", "Service call — Unit 4B") and is the one place each job says what the work
-    // is, so it is never run through the source-tag stripper. Only a blank title (never saved by the
-    // form) falls to the one default (lib/job-name); the customer is read only then, org_id filtered
-    // by hand because the cron's service client bypasses RLS.
+    // THE TEMPLATE'S TITLE IS A NAME A PERSON TYPED (Erik 2026-09-28): every job it makes keeps it
+    // exactly as typed ("Service call — Unit 4B", "Monthly maintenance — Acme"), unless it is only a
+    // source tag, or a tag and the customer ("Inspection", "Site visit: Rita Moss"): that is no name,
+    // and the job gets the one default (lib/job-name): the customer as written, else "New Job ·
+    // Oct 1". The customer is read only then, org_id filtered by hand because the cron's service
+    // client bypasses RLS. (A template has no street; its jobs are named for who.)
     const title = String(t.title ?? "").trim().replace(/\s+/g, " ");
     let who: { name?: string | null; company_name?: string | null; type?: string | null } | null = null;
-    if (t.customer_id && !title) {
+    if (t.customer_id && typedNameMayBeATag(title)) {
       const { data: c } = await supabase
         .from("customers")
         .select("name, company_name, type")
@@ -103,7 +103,7 @@ async function createOccurrence(supabase: any, t: any, userId: string | null, or
     }
     const { error } = await supabase.from("jobs").insert({
       org_id: t.org_id,
-      name: title || jobNameFrom({ title: null, customer: who, street: null, todayStr: todayStrInTz(tz) }),
+      name: jobNameFrom({ typed: title, customer: who, street: null, todayStr: todayStrInTz(tz) }),
       customer_id: t.customer_id,
       description: t.description,
       status: "scheduled",

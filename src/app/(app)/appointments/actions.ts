@@ -1186,7 +1186,7 @@ export async function createJobFromAppointment(
     .from("appointments")
     // PROJECTION LAW: everything the job inherits has to be in the select list. planned_minutes,
     // ends_at and inquiry_id were all missing, which is why none of them survived the conversion.
-    .select("id, title, customer_id, location, city, state, zip, job_id, starts_at, ends_at, planned_minutes, inquiry_id")
+    .select("id, title, customer_id, location, unit, city, state, zip, job_id, starts_at, ends_at, planned_minutes, inquiry_id")
     .eq("id", appointmentId)
     .maybeSingle();
   if (!appt) return { ok: false, error: "Appointment not found." };
@@ -1220,13 +1220,13 @@ export async function createJobFromAppointment(
   }
   const customerId = appt.customer_id ?? lead?.customer_id ?? null;
 
-  /* THE NAME IS THE WORK, NEVER THE VISIT IT CAME FROM (Erik 2026-09-27: "site inspections are
-     labeled with the tag they shouldnt carry site inspection in the job title"). a job was born
-     "Site inspection: Rita Moss" because this copied the visit's title. The one namer
-     (lib/job-name) takes the tag off; a stock title with only the person left gets the default
-     "Moss · 1871 Apache Ct", on the company's today. Who (jobWho, the same order the visit page's
-     preview uses): the card, else the lead; the lead's own spelling still counts as only-who, since
-     the visit's stock title was built from it. */
+  /* THE NAME IS THE STREET, NEVER THE VISIT IT CAME FROM (Erik 2026-09-27: "site inspections are
+     labeled with the tag they shouldnt carry site inspection in the job title"; 09-28: "street
+     number and name as always"). A job was born "Site inspection: Rita Moss" because this copied
+     the visit's title. The one namer (lib/job-name): the visit's street number and name (" #56"
+     with its unit); with no street, who as written and the visit's own words, tag off. Who (jobWho,
+     the same order the visit page's preview uses): the card, else the lead; the lead's own spelling
+     still counts as only-who, since the visit's stock title was built from it. */
   const { data: orgRow } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
   const tz = getOrgSettings((orgRow as { settings?: unknown } | null)?.settings).timezone;
   let card: Who = null;
@@ -1235,7 +1235,15 @@ export async function createJobFromAppointment(
     card = (c as Who) ?? null;
   }
   const { customer: who, aliases } = jobWho([card, lead]);
-  const jobName = jobNameFrom({ title: appt.title, customer: who, aliases, street: streetOf(appt.location), todayStr: todayStrInTz(tz) });
+  const apptUnit = (appt as { unit?: string | null }).unit ?? null;
+  const jobName = jobNameFrom({
+    sourceWords: appt.title,
+    customer: who,
+    aliases,
+    street: streetOf(appt.location),
+    unit: apptUnit,
+    todayStr: todayStrInTz(tz),
+  });
 
   const sized = Number((appt as { planned_minutes?: number | null }).planned_minutes ?? 0);
   const apptEnd = (appt as { ends_at?: string | null }).ends_at ?? null;
@@ -1255,6 +1263,7 @@ export async function createJobFromAppointment(
       scheduled_start: appt.starts_at,
       scheduled_end: scheduledEnd,
       address: appt.location,
+      unit: apptUnit, // the visit's unit is the job's (0187), and its name's " #56"
       // THE PARTS TRAVEL WITH THE LINE. This selected `location` alone and pushed that one string
       // into jobs.address with city/state/zip null — the exact Waldow/Cohen blob shape, minted
       // fresh on every job born from an appointment. `location` is already a formatted full line,

@@ -2,12 +2,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { runTemplate } from "@/lib/recurring-engine";
 
 /**
- * A RECURRING TEMPLATE'S TITLE IS THE WORK, AS TYPED. Erik's rule (2026-09-27) is that a job never
- * carries where it CAME FROM ("same goes for any conversion"). A template is not a conversion: its
- * title is only ever typed by a person on the Recurring form ("e.g. Monthly maintenance — Acme"), and
- * it is the one place each generated job says what the work is. So a monthly "Inspection" or
- * "Service call — Unit 4B" makes jobs with exactly that name, never "Moss" or "New Job · Oct 1".
- * Synthetic people.
+ * A RECURRING TEMPLATE'S TITLE IS A NAME A PERSON TYPED (Erik 2026-09-28): every job it makes keeps
+ * it exactly as typed ("Service call — Unit 4B", "Monthly maintenance — Acme"), unless it is ONLY a
+ * source tag, or a tag and the customer ("Inspection", "Walk-through", "Site visit: Rita Moss"):
+ * that is no name, and the job is named for who, as written ("Rita Moss"), else "New Job · Sep 26"
+ * on the company's today. Synthetic people.
  */
 function fakeDb(customer: unknown) {
   const inserts: any[] = [];
@@ -58,7 +57,7 @@ beforeEach(() => {
 afterEach(() => vi.useRealTimers());
 
 describe("recurring jobs keep the template's title as typed", () => {
-  for (const title of ["Inspection", "Service call — Unit 4B", "Inspection — Acme Warehouse", "Walk-through", "Monthly maintenance — Acme"]) {
+  for (const title of ["Monthly maintenance — Acme", "RV Inspection", "Panel check"]) {
     it(`"${title}" names every job it makes`, async () => {
       const { client, inserts, reads } = fakeDb(rita);
       expect(await runTemplate(client, tpl(title), null, LA)).toBe(true);
@@ -68,15 +67,25 @@ describe("recurring jobs keep the template's title as typed", () => {
     });
   }
 
-  it("no customer, a bare work word: still the work, never \"New Job · Oct 1\"", async () => {
+  for (const title of ["Inspection — Acme Warehouse", "Service call — Unit 4B"]) {
+    it(`"${title}" is a tag and real words (not the customer): kept as typed`, async () => {
+      const { client, inserts } = fakeDb(rita);
+      await runTemplate(client, tpl(title), null, LA);
+      expect(inserts.find((i) => i.table === "jobs")?.payload.name).toBe(title);
+    });
+  }
+
+  for (const title of ["Inspection", "Walk-through", "Site visit: Rita Moss", "  "]) {
+    it(`"${title}" is only a tag (or nothing): the job is named for the customer as written`, async () => {
+      const { client, inserts } = fakeDb(rita);
+      await runTemplate(client, tpl(title), null, LA);
+      expect(inserts.find((i) => i.table === "jobs")?.payload.name).toBe("Rita Moss");
+    });
+  }
+
+  it("only a tag and no customer: New Job on the company's today", async () => {
     const { client, inserts } = fakeDb(null);
     await runTemplate(client, tpl("Inspection", null), null, LA);
-    expect(inserts.find((i) => i.table === "jobs")?.payload.name).toBe("Inspection");
-  });
-
-  it("only a blank title (never saved by the form) falls to the one default", async () => {
-    const { client, inserts } = fakeDb(rita);
-    await runTemplate(client, tpl("  "), null, LA);
-    expect(inserts.find((i) => i.table === "jobs")?.payload.name).toBe("Moss");
+    expect(inserts.find((i) => i.table === "jobs")?.payload.name).toBe("New Job · Sep 26");
   });
 });

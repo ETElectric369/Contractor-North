@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { jobNameFrom, jobWho, stripSourceTag, streetOf, SOURCE_TAGS } from "./job-name";
+import { jobNameFrom, jobWho, leadScopeWords, stripSourceTag, streetOf, typedNameMayBeATag, SOURCE_TAGS } from "./job-name";
 import { bookingTitle, WORK_KINDS } from "./schedule/work-shape";
 import { JOB_NAME_CASES } from "./job-name.cases";
 
@@ -50,10 +50,12 @@ describe("stripSourceTag", () => {
   });
 });
 
-describe("jobNameFrom", () => {
+describe("jobNameFrom: street number and name, as always (Erik 2026-09-28)", () => {
   for (const c of JOB_NAME_CASES) {
-    it(`${c.why}: "${c.title}" → "${c.want}"`, () => {
-      expect(jobNameFrom({ title: c.title, customer: c.customer, street: c.street, todayStr: c.today })).toBe(c.want);
+    it(`${c.why}: ${c.typed !== null ? `typed "${c.typed}"` : `words "${c.words}"`} → "${c.want}"`, () => {
+      expect(
+        jobNameFrom({ typed: c.typed, sourceWords: c.words, customer: c.customer, street: c.street, unit: c.unit, todayStr: c.today }),
+      ).toBe(c.want);
     });
   }
 
@@ -62,37 +64,65 @@ describe("jobNameFrom", () => {
     expect(streetOf(null)).toBe("");
   });
 
-  it("every stock title bookingTitle makes is no name: the job is named who · where, never the booking", () => {
+  it("every stock title bookingTitle makes is no name: the job is the street, else the person, never the booking", () => {
     const rita = { name: "Rita Moss", company_name: null, type: "residential" };
     for (const kind of WORK_KINDS) {
-      if (kind === "job") continue; // a job booking's title is the person, no tag (kept as typed)
       for (const who of ["Rita Moss", ""]) {
         const title = bookingTitle(kind, who);
-        expect(jobNameFrom({ title, customer: rita, street: "12 Elm St", todayStr: "2026-09-27" }), title).toBe("Moss · 12 Elm St");
+        expect(jobNameFrom({ sourceWords: title, customer: rita, street: "12 Elm St", todayStr: "2026-09-27" }), title).toBe("12 Elm St");
+        if (kind === "job") continue; // a job booking's title is the person, no tag
+        expect(jobNameFrom({ sourceWords: title, customer: rita, street: null, todayStr: "2026-09-27" }), title).toBe("Rita Moss");
+        expect(jobNameFrom({ typed: title, customer: rita, street: null, todayStr: "2026-09-27" }), title).toBe("Rita Moss");
       }
     }
   });
 
-  it("the call form is a tag only with who/where/nothing after it", () => {
+  it("a typed call form is no name only with who/where/nothing after it", () => {
     const rita = { name: "Rita Moss", company_name: null, type: "residential" };
-    const at = (title: string) => jobNameFrom({ title, customer: rita, street: "12 Elm St", todayStr: "2026-09-27" });
-    expect(at("Call Rita Moss")).toBe("Moss · 12 Elm St");
-    expect(at("call  rita moss")).toBe("Moss · 12 Elm St");
-    expect(at("Phone call Rita Moss")).toBe("Moss · 12 Elm St");
-    expect(at("Call 12 Elm St")).toBe("Moss · 12 Elm St");
+    const at = (typed: string) => jobNameFrom({ typed, customer: rita, street: "12 Elm St", todayStr: "2026-09-27" });
+    expect(at("Call Rita Moss")).toBe("12 Elm St");
+    expect(at("call  rita moss")).toBe("12 Elm St");
+    expect(at("Phone call Rita Moss")).toBe("12 Elm St");
+    expect(at("Call 12 Elm St")).toBe("12 Elm St");
     expect(at("Call box install")).toBe("Call box install");
     expect(at("Call center rewire")).toBe("Call center rewire");
     expect(at("Callback: dead outlet")).toBe("Callback: dead outlet");
   });
 
+  it("a typed name wins over a source's words; a source's words never win over the street", () => {
+    const rita = { name: "Rita Moss", company_name: null, type: "residential" };
+    const base = { customer: rita, street: "12 Elm St", todayStr: "2026-09-27" };
+    expect(jobNameFrom({ ...base, typed: "Garage subpanel", sourceWords: "Estimate — Panel Upgrade" })).toBe("Garage subpanel");
+    expect(jobNameFrom({ ...base, typed: "Inspection", sourceWords: "Estimate — Panel Upgrade" })).toBe("12 Elm St");
+    expect(jobNameFrom({ ...base, street: null, typed: "Inspection", sourceWords: "Estimate — Panel Upgrade" })).toBe("Rita Moss · Panel Upgrade");
+  });
+
   it("aliases: the lead's own spelling of who is only-who too (the visit title was built from it)", () => {
     const card = { name: "Richard Test", company_name: null, type: "residential" };
-    const base = { title: "Site inspection: Rich Test", customer: card, street: "12 Elm St", todayStr: "2026-09-27" };
-    expect(jobNameFrom(base)).toBe("Rich Test");
-    expect(jobNameFrom({ ...base, aliases: ["Rich Test"] })).toBe("Test · 12 Elm St");
-    expect(jobNameFrom({ ...base, title: "Call Rich Test", aliases: ["Rich Test"] })).toBe("Test · 12 Elm St");
+    const base = { sourceWords: "Site inspection: Rich Test", customer: card, street: null, todayStr: "2026-09-27" };
+    expect(jobNameFrom(base)).toBe("Richard Test · Rich Test");
+    expect(jobNameFrom({ ...base, aliases: ["Rich Test"] })).toBe("Richard Test");
+    expect(jobNameFrom({ ...base, sourceWords: "Call Rich Test", aliases: ["Rich Test"] })).toBe("Richard Test");
     // An alias never eats real words.
-    expect(jobNameFrom({ ...base, title: "Site inspection: Panel swap", aliases: ["Rich Test"] })).toBe("Panel swap");
+    expect(jobNameFrom({ ...base, sourceWords: "Site inspection: Panel swap", aliases: ["Rich Test"] })).toBe("Richard Test · Panel swap");
+    // With a street, the street, whatever the title.
+    expect(jobNameFrom({ ...base, street: "12 Elm St" })).toBe("12 Elm St");
+  });
+
+  it("typedNameMayBeATag: only a blank, tagged or call-led name needs who and where read", () => {
+    for (const t of ["", "  ", "Inspection", "Site inspection: Rita Moss", "Call Rita Moss", "Job from appointment"]) expect(typedNameMayBeATag(t), t).toBe(true);
+    for (const t of ["RV Inspection", "Garage subpanel", "TTP #56"]) expect(typedNameMayBeATag(t), t).toBe(false);
+  });
+
+  it("leadScopeWords: the project type's head, else a one-line short message, never a paragraph", () => {
+    expect(leadScopeWords({ projectType: "resurface", projectTypeLabel: "Resurface — new boards, keep the frame" })).toBe("Resurface");
+    expect(leadScopeWords({ projectType: "repair", projectTypeLabel: "Repair (rot, damage, loose boards)" })).toBe("Repair");
+    expect(leadScopeWords({ projectType: "new_deck", projectTypeLabel: "New deck", message: "3-way switches" })).toBe("New deck");
+    expect(leadScopeWords({ projectType: "unsure", projectTypeLabel: "Not sure — I need help", message: "3-way switches" })).toBe("3-way switches");
+    expect(leadScopeWords({ message: "  3-way   switches " })).toBe("3-way switches");
+    expect(leadScopeWords({ message: "We bought the house last spring and the kitchen lights flicker whenever the fridge runs" })).toBe("");
+    expect(leadScopeWords({ message: "Hot tub\ncircuit" })).toBe("");
+    expect(leadScopeWords({})).toBe("");
   });
 });
 
@@ -123,8 +153,8 @@ describe("every door that inserts a job names it with jobNameFrom", () => {
     { file: "src/app/(app)/leads/actions.ts", name: "jobName" }, // convertInquiry → estimate / job
     { file: "src/app/(app)/jobs/actions.ts", name: "jobName" }, // importJobs
     { file: "src/app/(app)/schedule/actions.ts", name: "name" }, // createJob (New Job, Timeclock quick add, Nort job.create)
-    // Recurring templates: the typed title as the work (not a conversion), the namer only when blank.
-    { file: "src/lib/recurring-engine.ts", name: "title || jobNameFrom({ title: null" },
+    // Recurring templates: the title is a name a person typed.
+    { file: "src/lib/recurring-engine.ts", name: "jobNameFrom({ typed: title" },
   ];
 
   it("the list is every insert into jobs in the app (a new door has to join it)", () => {
@@ -153,15 +183,22 @@ describe("every door that inserts a job names it with jobNameFrom", () => {
     });
   }
 
-  it("createJob runs a sent name through the namer (Nort's job.create lands here)", () => {
+  it("createJob runs a sent name through the namer as typed, with the job's unit (Nort's job.create lands here)", () => {
     const src = read("src/app/(app)/schedule/actions.ts");
-    expect(src).toMatch(/name = jobNameFrom\(\{ title: sentName/);
+    expect(src).toMatch(/if \(typedNameMayBeATag\(sentName\)\)/);
+    expect(src).toMatch(/name = jobNameFrom\(\{\s*typed: sentName,[\s\S]*?street: address,\s*unit: emptyToNull\(formData\.get\("unit"\)\),/);
     expect(read("src/lib/actions/entities/job.ts")).toMatch(/return createJob\(fd\)/);
+    // The New Job form's live line is the same default, unit and all.
+    expect(read("src/app/(app)/schedule/new-job-button.tsx")).toMatch(
+      /willBeCalled = defaultJobName\(\{ customer: picked, street: form\.address, unit: form\.unit, todayStr: today \}\)/,
+    );
   });
 
   it("the visit page's Start The Job preview names the job the same way the door will", () => {
     const src = read("src/app/(app)/appointments/[id]/page.tsx");
-    expect(src).toMatch(/previewJobName = jobNameFrom\(\{\s*title: a\.title/);
+    expect(src).toMatch(/previewJobName = jobNameFrom\(\{\s*sourceWords: a\.title,/);
+    expect(src).toMatch(/street: streetOf\(a\.location\),\s*unit: \(a as \{ unit\?: string \| null \}\)\.unit \?\? null,/);
+    expect(src).toMatch(/location, unit, notes/); // PROJECTION LAW: the unit is selected
     expect(src).toMatch(/name: previewJobName/);
     expect(src).not.toMatch(/Job from appointment/);
     // Who, in the door's order: the visit's card, else the lead's card, else the lead; the rest are aliases.
@@ -170,20 +207,31 @@ describe("every door that inserts a job names it with jobNameFrom", () => {
     const door = read("src/app/(app)/appointments/actions.ts");
     expect(door).toMatch(/jobWho\(\[card, lead\]\)/);
     expect(door).toMatch(/const customerId = appt\.customer_id \?\? lead\?\.customer_id \?\? null/);
-    expect(door).toMatch(/jobNameFrom\(\{ title: appt\.title, customer: who, aliases,/);
+    expect(door).toMatch(/jobNameFrom\(\{\s*sourceWords: appt\.title,\s*customer: who,\s*aliases,\s*street: streetOf\(appt\.location\),\s*unit: apptUnit,/);
+    expect(door).toMatch(/location, unit, city/);
+    expect(door).toMatch(/unit: apptUnit, \/\/ the visit's unit is the job's/);
   });
 
-  it("a lead's job is named for the card it links to, the lead's own fields only for a card just made from them", () => {
+  it("a lead's job is named for the card it links to, its street and unit, else its short scope words", () => {
     const src = read("src/app/(app)/leads/actions.ts");
     expect(src).toMatch(/mintedFromLead = true;/);
     expect(src).toMatch(/if \(!mintedFromLead && customerId\) \{\s*const \{ data: c \} = await supabase\.from\("customers"\)\.select\("name, company_name, type"\)\.eq\("id", customerId\)/);
-    expect(src).toMatch(/customer: jobWho\(\[card, leadWho\]\)\.customer/);
+    expect(src).toMatch(/sourceWords: leadScopeWords\(\{/);
+    expect(src).toMatch(/customer: jobWho\(\[card, leadWho\]\)\.customer,\s*street: inq\.address,\s*unit: inq\.unit,/);
+    expect(src).toMatch(/unit: inq\.unit \?\? null, \/\/ the lead's unit is the job's/);
   });
 
-  it("an import names its job after the customer is found or made, from the card as stored", () => {
+  it("the office's estimate accept names the job for the street and unit it inherits", () => {
+    const src = read("src/app/(app)/quotes/actions.ts");
+    expect(src).toMatch(/sourceWords: q\.title,[\s\S]*?street: inheritedAddress\?\.address \?\? null,\s*unit: inheritedAddress\?\.unit \?\? null,/);
+    expect(src).toMatch(/unit: inheritedAddress\.unit \?\? null,/);
+    expect(src.match(/select\("address, unit, city, state, zip"\)/g)?.length).toBe(2);
+  });
+
+  it("an import names its job after the customer is found or made, the sheet's job name as typed", () => {
     const src = read("src/app/(app)/jobs/actions.ts");
     const body = src.slice(src.indexOf("export async function importJobs"));
-    const named = body.indexOf("const jobName = jobNameFrom(");
+    const named = body.indexOf("const jobName = jobNameFrom({ typed: r.job_name,");
     expect(named).toBeGreaterThan(body.indexOf('.from("customers")'));
     expect(named).toBeLessThan(body.indexOf('.from("jobs")'));
     expect(body).toMatch(/select\("id, name, company_name, type"\)/);
@@ -198,7 +246,9 @@ describe("every door that inserts a job names it with jobNameFrom", () => {
       .pop()!;
     expect(latest).toMatch(/^0369_/);
     const sql = readFileSync(join(dir, latest), "utf8");
-    expect(sql).toMatch(/public\.job_name_from\(q\.title,/);
+    // No typed name; the estimate's title as the source's words; the street's own unit.
+    expect(sql).toMatch(/public\.job_name_from\(null, q\.title,/);
+    expect(sql).toMatch(/case when coalesce\(site_address, ''\) <> '' then site_unit else cust\.unit end/);
     const code = sql.slice(sql.indexOf("create or replace function public.accept_public_quote")).replace(/--.*$/gm, "");
     expect(code).not.toMatch(/'Job from '/);
   });

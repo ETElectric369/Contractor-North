@@ -188,12 +188,18 @@ describe("createJob: what the four-field form doesn't ask, the server works out"
     expect(inserted().scheduled_start).toBe(tzDateTimeUtc(day, "13:15", "America/Denver"));
   });
 
-  it("no name sent: the customer's last name · the street, a business by its own name, else New Job on the company's day", async () => {
+  it("no name sent (Erik 2026-09-28, \"street number and name as always\"): the street, #<unit> with a unit; no street, the customer as written; else New Job on the company's day", async () => {
     await createJob(fd({ customer_id: "cust-smith", address: "1871 Apache Ct", scheduled_date: "" }));
-    expect(inserted().name).toBe("Smith · 1871 Apache Ct");
+    expect(inserted().name).toBe("1871 Apache Ct");
     state.calls = [];
-    await createJob(fd({ customer_id: "cust-hoa", address: "300 W Lake Blvd", scheduled_date: "" }));
-    expect(inserted().name).toBe("Tahoe Tavern HOA · 300 W Lake Blvd");
+    await createJob(fd({ customer_id: "cust-hoa", address: "300 W Lake Blvd", unit: "56", scheduled_date: "" }));
+    expect(inserted()).toMatchObject({ name: "300 W Lake Blvd #56", unit: "56" });
+    state.calls = [];
+    await createJob(fd({ customer_id: "cust-smith", address: "", scheduled_date: "" }));
+    expect(inserted().name).toBe("Rita Smith");
+    state.calls = [];
+    await createJob(fd({ customer_id: "cust-hoa", address: "", scheduled_date: "" }));
+    expect(inserted().name).toBe("Tahoe Tavern HOA");
     state.calls = [];
     await createJob(fd({ scheduled_date: "" }));
     const words = new Date(`${today()}T12:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
@@ -205,13 +211,17 @@ describe("createJob: what the four-field form doesn't ask, the server works out"
     expect(inserted()).toMatchObject({ name: "Panel swap", status: "in_progress" });
   });
 
-  it("a sent name is never a source tag (Erik 2026-09-27): the tag comes off, a tag and the person is the default, a real name stays", async () => {
+  it("a sent name stays as typed unless it is only a tag, or a tag and the person or the street (Erik 2026-09-28)", async () => {
     // Nort's job.create carrying a visit's title: the tag and the customer's name are no name at all.
     await createJob(fd({ name: "Site inspection: Rita Smith", customer_id: "cust-smith", address: "1871 Apache Ct", scheduled_date: "" }));
-    expect(inserted().name).toBe("Smith · 1871 Apache Ct");
+    expect(inserted().name).toBe("1871 Apache Ct");
     state.calls = [];
+    await createJob(fd({ name: "Inspection", customer_id: "cust-smith", address: "", scheduled_date: "" }));
+    expect(inserted().name).toBe("Rita Smith");
+    state.calls = [];
+    // A tag and real words is a name a person typed: kept exactly as typed.
     await createJob(fd({ name: "Service call — Panel swap", customer_id: "cust-smith", address: "1871 Apache Ct", scheduled_date: "" }));
-    expect(inserted().name).toBe("Panel swap");
+    expect(inserted().name).toBe("Service call — Panel swap");
     state.calls = [];
     // A name with no leading tag goes in exactly as sent, and the customer isn't even read for it.
     await createJob(fd({ name: "RV Inspection", customer_id: "cust-smith", address: "1871 Apache Ct", scheduled_date: "" }));

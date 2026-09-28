@@ -79,7 +79,7 @@ export default async function AppointmentCapturePage({
         // jobs(...) is the linked job the top card names ("Clock In On J-055"), and its status is
         // whether a visit that is over still offers a clock on it (a finished job does not); the lead's
         // customer_id is who "Link To J-055 Instead" looks for when the visit has no customer.
-        "id, org_id, type, title, status, starts_at, ends_at, job_id, assigned_to, location, notes, customer_id, inquiry_id, capture, customers(name, company_name, type), inquiries(name, company_name, type, phone, message, intake, customer_id), jobs(id, job_number, name, status)",
+        "id, org_id, type, title, status, starts_at, ends_at, job_id, assigned_to, location, unit, notes, customer_id, inquiry_id, capture, customers(name, company_name, type), inquiries(name, company_name, type, phone, message, intake, customer_id), jobs(id, job_number, name, status)",
       )
       .eq("id", id)
       .maybeSingle(),
@@ -258,10 +258,11 @@ export default async function AppointmentCapturePage({
     : null;
   const previewWho = jobWho([a.customer_id ? a.customers : leadCard, a.inquiries ?? null]);
   const previewJobName = jobNameFrom({
-    title: a.title,
+    sourceWords: a.title,
     customer: previewWho.customer,
     aliases: previewWho.aliases,
     street: streetOf(a.location),
+    unit: (a as { unit?: string | null }).unit ?? null,
     todayStr: todayStrInTz(tz),
   });
 
@@ -458,8 +459,9 @@ export default async function AppointmentCapturePage({
                   : null
               }
               preview={{
-                // The same one namer the Start The Job door uses (lib/job-name): the visit's words,
-                // never its "Site inspection:" tag, else "Moss · 12 Elm St".
+                // The same one namer the Start The Job door uses (lib/job-name): the street number
+                // and name ("12 Elm St #56" with a unit), else "Rita Moss · <the visit's words>",
+                // never its "Site inspection:" tag.
                 name: previewJobName,
                 customer: who,
                 address: a.location ?? null,

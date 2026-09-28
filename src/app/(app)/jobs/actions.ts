@@ -2000,11 +2000,11 @@ export async function importJobs(
       }
     }
 
-    // THE NAME IS THE WORK, NEVER A SOURCE TAG (Erik 2026-09-27): an old system's "Service call —
-    // Rita Moss" comes in with the tag taken off; a blank or tag-only name gets the default, who
-    // and the street (lib/job-name, the one namer every door uses), named for the card as it is
-    // stored, the same as New Job would name it.
-    const jobName = jobNameFrom({ title: r.job_name, customer: who, street: r.address, todayStr });
+    // THE SHEET'S JOB NAME IS A NAME A PERSON TYPED (Erik 2026-09-28): kept exactly as typed, unless
+    // it is only a source tag, or a tag and the customer or the street (an old system's "Service call
+    // — Rita Moss"): then the default, the same as New Job's (lib/job-name, the one namer every door
+    // uses): the street number and name, else the card as it is stored, else "New Job · Sep 27".
+    const jobName = jobNameFrom({ typed: r.job_name, customer: who, street: r.address, todayStr });
 
     // Legacy CSV statuses from the old lifecycle: an "estimate" row is a job waiting to be
     // scheduled; an "invoiced" row is finished work (money owed lives in AR, not job status).

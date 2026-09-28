@@ -23,7 +23,7 @@ import { getOrgSettings } from "@/lib/org-settings";
 import { featureOn } from "@/lib/features";
 import { PROJECT_TYPES, estimateLinesFromIntake } from "@/lib/lead-triage";
 import { tzDateTimeUtc, todayStrInTz } from "@/lib/tz";
-import { jobNameFrom, jobWho } from "@/lib/job-name";
+import { jobNameFrom, jobWho, leadScopeWords } from "@/lib/job-name";
 import { checkComeBackDay } from "@/lib/come-back-days";
 import { createProposalCore, cleanSlots, type ProposalSlot } from "@/lib/appointments/proposal";
 import { ESTIMATE_VISIT_TYPES, INQUIRY_STATUSES, INSPECTION_TYPES } from "@/lib/statuses";
@@ -721,9 +721,11 @@ export async function convertInquiry(
   if (target === "estimate" || target === "job") {
     // An estimate is still in the pipeline; a scheduled job means the inquiry is won.
     newStatus = target === "estimate" ? "quoted" : "won";
-    // THE NAME SAYS WHO AND WHERE, never where it came from (Erik 2026-09-27): "Job — Rita Moss"
-    // said neither the place nor the work. A lead has no title of its own, so the one namer
-    // (lib/job-name) gives the default: "Moss · 1871 Apache Ct", on the company's today.
+    // THE NAME IS THE STREET, never where it came from (Erik 2026-09-27 / 09-28, "street number and
+    // name as always"): "Job — Rita Moss" said neither the place nor the work. The one namer
+    // (lib/job-name): the lead's street number and name (" #56" with its unit); with no street, who
+    // and the lead's short scope words ("Rita Moss · 3-way switches": the project type it picked, or
+    // a one-line message, leadScopeWords), never a paragraph; else "New Job · Sep 27".
     // WHO is the card the job links to, like every other door: a lead linked by phone or email to
     // an existing card ("Rita Moss") is named for that card, not for what the lead typed ("rita", or
     // a missed call's phone number). The lead's own fields only when the card was just made from them.
@@ -734,9 +736,14 @@ export async function convertInquiry(
       card = (c as typeof leadWho | null) ?? null;
     }
     const jobName = jobNameFrom({
-      title: null,
+      sourceWords: leadScopeWords({
+        projectType: inq.project_type,
+        projectTypeLabel: PROJECT_TYPES.find((p) => p.value === inq.project_type)?.label,
+        message: inq.message,
+      }),
       customer: jobWho([card, leadWho]).customer,
       street: inq.address,
+      unit: inq.unit,
       todayStr: todayStrInTz(await orgTimezone(supabase)),
     });
     const { data: job, error: jErr } = await supabase
@@ -754,6 +761,7 @@ export async function convertInquiry(
         status: "to_be_scheduled",
 
         address: inq.address,
+        unit: inq.unit ?? null, // the lead's unit is the job's (0187), and its name's " #56"
         city: inq.city,
         state: inq.state,
         zip: inq.zip,

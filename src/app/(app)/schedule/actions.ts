@@ -12,7 +12,7 @@ import { customerForInquiry } from "@/lib/actions/win-customer";
 import { findMatchingCustomerId, type DupCustomer } from "@/lib/crm/duplicates";
 import { matchOrCreateCustomer, typedNewCustomer } from "@/lib/crm/new-customer";
 import { readUsualBillingKind, statusFromDate } from "@/lib/schedule-options";
-import { jobNameFrom, stripSourceTag } from "@/lib/job-name";
+import { jobNameFrom, typedNameMayBeATag } from "@/lib/job-name";
 import { JOB_STATUSES } from "@/lib/job-status";
 import { getOrgSettings, workDayWindowHm } from "@/lib/org-settings";
 import { todayStrInTz, tzDateTimeUtc, tzDayStartUtc, tzMinutesOfDay } from "@/lib/tz";
@@ -147,22 +147,27 @@ export async function createJob(formData: FormData): Promise<Result> {
     customerId = made.id;
   }
 
-  // THE NAME (W1-22). A name that was sent wins (the Timeclock's quick add and Nort send one). With
-  // none, the same line the form showed live: "Smith · 1871 Apache Ct" (the customer's last name or
-  // company · the street line), either half alone, else "New Job · Sep 27" on the company's today
-  // (lib/schedule-options defaultJobName). Fragment-first: nobody is made to invent a name.
+  // THE NAME (W1-22; Erik 2026-09-28, "street number and name as always"). A name that was sent is
+  // a name a person typed (the Timeclock's quick add and Nort send one) and is kept exactly as sent.
+  // With none, the same line the form showed live: the street number and name (" #56" with a unit),
+  // else the customer as written, else "New Job · Sep 27" on the company's today (the one namer,
+  // lib/job-name, over lib/schedule-options defaultJobName). Fragment-first: nobody invents a name.
   //
-  // NEVER A SOURCE TAG (Erik 2026-09-27). Nort and the other doors that send a name may send one a
-  // visit or a booking carried ("Site inspection: Rita Moss"); the one namer (lib/job-name) takes
-  // the tag off, and a name that was only a tag and a person gets the default above. A name with no
-  // leading tag ("RV Inspection") is kept exactly as sent.
+  // NEVER ONLY A SOURCE TAG (Erik 2026-09-27). A sent name that is only a tag, or a tag and the
+  // person or the street ("Site inspection: Rita Moss"), is no name: it gets the default above.
   const sentName = String(formData.get("name") ?? "").trim();
   let name = sentName;
-  if (!sentName || stripSourceTag(sentName) !== sentName.replace(/\s+/g, " ")) {
+  if (typedNameMayBeATag(sentName)) {
     const { data: cust } = customerId
       ? await supabase.from("customers").select("name, company_name, type").eq("id", customerId).maybeSingle()
       : { data: null };
-    name = jobNameFrom({ title: sentName, customer: (cust as { name?: string | null; company_name?: string | null; type?: string | null } | null) ?? null, street: address, todayStr });
+    name = jobNameFrom({
+      typed: sentName,
+      customer: (cust as { name?: string | null; company_name?: string | null; type?: string | null } | null) ?? null,
+      street: address,
+      unit: emptyToNull(formData.get("unit")),
+      todayStr,
+    });
   }
 
   // THE STATUS (W1-22). An explicit status on the spine wins (the Timeclock's quick add sends In

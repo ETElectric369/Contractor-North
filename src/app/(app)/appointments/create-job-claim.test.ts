@@ -164,68 +164,98 @@ describe("createJobFromAppointment: the link is the claim", () => {
 });
 
 /**
- * THE JOB IS NAMED FOR THE WORK, NEVER FOR THE VISIT (Erik 2026-09-27: "site inspections are labeled
- * with the tag they shouldnt carry site inspection in the job title"). a job was born "Site
- * inspection: Rita Moss" because this door copied the visit's title.
+ * THE JOB IS NAMED FOR THE STREET, NEVER FOR THE VISIT (Erik 2026-09-27: "site inspections are
+ * labeled with the tag they shouldnt carry site inspection in the job title"; 09-28, final: "street
+ * number and name as always"). A job was born "Site inspection: Rita Moss" because this door copied
+ * the visit's title. Now: the visit's street number and name (" #<unit>" with its unit); with no
+ * street, who as written and the visit's own words, tag off.
  */
-describe("createJobFromAppointment: the job's name is never the visit's tag", () => {
-  const madeName = async () => {
+describe("createJobFromAppointment: the job's name is the street, never the visit's tag", () => {
+  const madeJob = async () => {
     db.release?.();
     db.arrivals = 1;
     const res = await createJobFromAppointment("appt-tom");
     expect(res.ok).toBe(true);
-    return db.jobs.get(res.id!)?.name as string;
+    return db.jobs.get(res.id!) as { name: string; unit?: string | null };
   };
+  const madeName = async () => (await madeJob()).name;
   beforeEach(() => {
     db.appt.location = "12 Test Elm St";
   });
 
-  it("a tag and the customer is the default: last name · the street", async () => {
+  it("with a street, the street, whatever the visit's title says", async () => {
+    for (const title of ["Site inspection: Rita Moss", "Service call — Hot tub circuit", "RV Inspection", "Call Rita Moss", "Call box install", null]) {
+      db.jobs = new Map();
+      db.appt.job_id = null;
+      db.appt.title = title;
+      expect(await madeName(), String(title)).toBe("12 Test Elm St");
+    }
+  });
+
+  it("the street comes off the one-line location, never the town", async () => {
+    db.appt.location = "12 Elm St, Testville, CA 96161";
     db.appt.title = "Site inspection: Rita Moss";
-    expect(await madeName()).toBe("Moss · 12 Test Elm St");
+    expect(await madeName()).toBe("12 Elm St");
   });
 
-  it("the visit's own words stay, with the tag taken off", async () => {
-    db.appt.title = "Service call — Hot tub circuit";
-    expect(await madeName()).toBe("Hot tub circuit");
+  it("the visit's unit rides on the name as #<unit>, and onto the job", async () => {
+    db.appt.location = "300 Test Lake Blvd, Testville, CA 96161";
+    db.appt.unit = "Unit 56";
+    const job = await madeJob();
+    expect(job.name).toBe("300 Test Lake Blvd #56");
+    expect(job.unit).toBe("Unit 56");
   });
 
-  it("a real name that contains the word stays", async () => {
-    db.appt.title = "RV Inspection";
-    expect(await madeName()).toBe("RV Inspection");
-  });
+  describe("no street", () => {
+    beforeEach(() => {
+      db.appt.location = null;
+    });
 
-  it("no card on the visit: the lead's name says who; the street comes off the one-line location", async () => {
-    db.appt.customer_id = null;
-    db.appt.inquiry_id = "inq-1";
-    db.appt.location = "12 Elm St, Testville, CA 96161";
-    db.appt.title = "Site inspection: Rich Test";
-    db.inquiry = { id: "inq-1", customer_id: null, name: "Rich Test", company_name: null, type: "residential" };
-    expect(await madeName()).toBe("Test · 12 Elm St");
-  });
+    it("a tag and the customer is who, as written", async () => {
+      db.appt.title = "Site inspection: Rita Moss";
+      expect(await madeName()).toBe("Rita Moss");
+    });
 
-  it('a phone-call booking ("Call Rita Moss", bookingTitle\'s call kind) is never named after the call', async () => {
-    db.appt.title = "Call Rita Moss";
-    expect(await madeName()).toBe("Moss · 12 Test Elm St");
-  });
+    it("the visit's own words follow who, with the tag taken off", async () => {
+      db.appt.title = "Service call — Hot tub circuit";
+      expect(await madeName()).toBe("Rita Moss · Hot tub circuit");
+    });
 
-  it('"Call box install" typed as the work stays', async () => {
-    db.appt.title = "Call box install";
-    expect(await madeName()).toBe("Call box install");
-  });
+    it("a real name that contains the word is the work", async () => {
+      db.appt.title = "RV Inspection";
+      expect(await madeName()).toBe("Rita Moss · RV Inspection");
+    });
 
-  it("the lead got its card after booking, spelled another way: named for the card, the lead's spelling still only-who", async () => {
-    db.appt.customer_id = null;
-    db.appt.inquiry_id = "inq-2";
-    db.appt.location = "12 Elm St, Testville, CA 96161";
-    db.appt.title = "Site inspection: Rich Test";
-    db.customers["cust-rich"] = { name: "Richard Test", company_name: null, type: "residential" };
-    db.inquiry = { id: "inq-2", customer_id: "cust-rich", name: "Rich Test", company_name: null, type: "residential" };
-    expect(await madeName()).toBe("Test · 12 Elm St");
-  });
+    it('a phone-call booking ("Call Rita Moss", bookingTitle\'s call kind) is never named after the call', async () => {
+      db.appt.title = "Call Rita Moss";
+      expect(await madeName()).toBe("Rita Moss");
+    });
 
-  it('no title at all is never "Job from appointment"', async () => {
-    db.appt.title = null;
-    expect(await madeName()).toBe("Moss · 12 Test Elm St");
+    it('"Call box install" is the work', async () => {
+      db.appt.title = "Call box install";
+      expect(await madeName()).toBe("Rita Moss · Call box install");
+    });
+
+    it("no card on the visit: the lead's name says who", async () => {
+      db.appt.customer_id = null;
+      db.appt.inquiry_id = "inq-1";
+      db.appt.title = "Site inspection: Rich Test";
+      db.inquiry = { id: "inq-1", customer_id: null, name: "Rich Test", company_name: null, type: "residential" };
+      expect(await madeName()).toBe("Rich Test");
+    });
+
+    it("the lead got its card after booking, spelled another way: named for the card, the lead's spelling still only-who", async () => {
+      db.appt.customer_id = null;
+      db.appt.inquiry_id = "inq-2";
+      db.appt.title = "Site inspection: Rich Test";
+      db.customers["cust-rich"] = { name: "Richard Test", company_name: null, type: "residential" };
+      db.inquiry = { id: "inq-2", customer_id: "cust-rich", name: "Rich Test", company_name: null, type: "residential" };
+      expect(await madeName()).toBe("Richard Test");
+    });
+
+    it('no title at all is never "Job from appointment"', async () => {
+      db.appt.title = null;
+      expect(await madeName()).toBe("Rita Moss");
+    });
   });
 });

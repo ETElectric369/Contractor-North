@@ -49,13 +49,13 @@ function parseCsv(text: string): JobImportRow[] {
     .filter((r) => r.customer || r.job_name);
 }
 
-/** The name a row's job will get, the way importJobs names a new card's job: the row's own words
- *  with any source tag off ("Service call — Panel swap" → "Panel swap"), else the whole customer
- *  name and the street. (A card already in the book is named as it is stored, e.g. a last name.) */
+/** The name a row's job will get, the way importJobs names it: the row's job name as typed, unless
+ *  it is only a source tag (or a tag and who or where); then the street number and name, else the
+ *  whole customer name. (A card already in the book is named by its company when it has one.) */
 export function previewName(r: Pick<JobImportRow, "job_name" | "customer" | "address">): string {
   const cname = (r.customer || "").trim();
   return jobNameFrom({
-    title: r.job_name,
+    typed: r.job_name,
     customer: cname ? { company_name: cname } : null,
     street: r.address,
     todayStr: todayStrInTz(Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"),

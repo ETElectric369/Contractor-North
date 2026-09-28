@@ -1,14 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 /**
- * AN IMPORTED JOB IS NAMED FOR THE CARD IT LANDS ON (Erik 2026-09-27: a job's name says who/where and
- * what, never where it came from). importJobs named the job before the customer was found or made,
- * from the sheet's bare customer text, so a business customer with a blank or tag-only job name was
- * cut down to its last word: "Acme Property Management" → "Management · 12 Elm St".
+ * AN IMPORTED JOB'S NAME (Erik 2026-09-28, "street number and name as always"). The sheet's job name is
+ * a name a person typed: kept exactly as typed, unless it is only a source tag (or a tag and who or
+ * where). Then the street number and name; with no street, the card the job lands on, named after it
+ * is found or made (importJobs once named it from the sheet's bare text and cut a business down to
+ * its last word, "Acme Property Management" → "Management").
  *
- *   - a card already in the book is named as it is stored (its company, its type), the same as New Job;
- *   - a card the import makes (the sheet says nothing of its kind) keeps the whole name;
- *   - the sheet's own words still win, with an old system's source tag taken off.
+ *   - a card already in the book is named as it is stored (its company, else its whole name);
+ *   - a card the import makes keeps the whole name.
  * Synthetic people and streets.
  */
 const db = vi.hoisted(() => ({
@@ -65,24 +65,24 @@ beforeEach(() => {
   db.jobs = [];
 });
 
-describe("importJobs: the job is named for the card it lands on", () => {
-  it("an existing business card keeps its whole name, blank or tag-only", async () => {
-    await importJobs([row("Acme Property Management", ""), row("Acme Property Management", "Service call — Acme Property Management")]);
-    expect(db.jobs.map((j) => j.name)).toEqual(["Acme Property Management · 12 Elm St", "Acme Property Management · 12 Elm St"]);
+describe("importJobs: the sheet's name as typed, else the street, else the card it lands on", () => {
+  it("a blank or tag-only name with a street is the street number and name", async () => {
+    await importJobs([row("Acme Property Management", ""), row("Acme Property Management", "Service call — Acme Property Management"), row("Rita Moss", "Inspection")]);
+    expect(db.jobs.map((j) => j.name)).toEqual(["12 Elm St", "12 Elm St", "12 Elm St"]);
   });
 
-  it("an existing person's card is named the way New Job names it", async () => {
-    await importJobs([row("Rita Moss", "")]);
-    expect(db.jobs[0].name).toBe("Moss · 12 Elm St");
+  it("no street: an existing card by its whole name, the way New Job names it", async () => {
+    await importJobs([{ ...row("Rita Moss", ""), address: "" }, { ...row("Acme Property Management", "Inspection"), address: "" }]);
+    expect(db.jobs.map((j) => j.name)).toEqual(["Rita Moss", "Acme Property Management"]);
   });
 
-  it("a card the import makes is never cut to a last word", async () => {
-    await importJobs([row("Smith Electric Inc", ""), row("Tahoe Test HOA", "Inspection")]);
-    expect(db.jobs.map((j) => j.name)).toEqual(["Smith Electric Inc · 12 Elm St", "Tahoe Test HOA · 12 Elm St"]);
+  it("no street: a card the import makes is never cut to a last word", async () => {
+    await importJobs([{ ...row("Smith Electric Inc", ""), address: "" }, { ...row("Tahoe Test HOA", "Inspection"), address: "" }]);
+    expect(db.jobs.map((j) => j.name)).toEqual(["Smith Electric Inc", "Tahoe Test HOA"]);
   });
 
-  it("the sheet's own words win, with the source tag off", async () => {
-    await importJobs([row("Acme Property Management", "Service call — Panel swap"), row("Rita Moss", "RV Inspection")]);
-    expect(db.jobs.map((j) => j.name)).toEqual(["Panel swap", "RV Inspection"]);
+  it("the sheet's own name stays exactly as typed, a tag and real words included", async () => {
+    await importJobs([row("Acme Property Management", "Service call — Panel swap"), row("Rita Moss", "RV Inspection"), row("Rita Moss", "TTP #56")]);
+    expect(db.jobs.map((j) => j.name)).toEqual(["Service call — Panel swap", "RV Inspection", "TTP #56"]);
   });
 });
