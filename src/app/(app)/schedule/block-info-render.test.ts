@@ -131,6 +131,17 @@ describe("the day drill's card", () => {
     expect(t.match(/123 Main St/g)?.length).toBe(1);
   });
 
+  it("a job whose name already says who (and has no street) reads no J-number in its place: only its town", () => {
+    const named = { name: "Jackie Burks · Panel Upgrade", customers: { name: "Jackie Burks" }, address: null };
+    const t = text(card(named));
+    expect(t).not.toContain("J-058");
+    expect(t).toContain("Truckee");
+    expect(t).not.toContain("· Truckee");
+    expect(t.match(/Jackie Burks/g)?.length).toBe(1);
+    const bare = text(card({ ...named, city: null }));
+    expect(bare).not.toContain("J-058");
+  });
+
   it("a day that keeps its own hours reads them", () => {
     const html = renderToStaticMarkup(
       createElement(JobScheduleCard, {
@@ -220,6 +231,26 @@ describe("My Day's rows and the schedule read the same words, with no money", ()
     expect(view).toContain("dayHours: ownHours.get(job.id)?.get(k) ?? null");
     const page = read("src/app/(app)/schedule/page.tsx");
     expect(page).toContain("crew: crewChips((r as unknown as { assigned_to?: string[] | null }).assigned_to ?? [], team)");
+  });
+
+  it("a visit with no place of its own says its job's street on the grid and the day drill, as My Day does", () => {
+    const panel = read("src/app/(app)/schedule/calendar-panel.tsx");
+    expect(panel).toContain("jobs(job_number, name, address), customers(name)");
+    const view = code("src/app/(app)/calendar/calendar-view.tsx");
+    expect(view).toContain("street: streetOf(visitPlace(a))");
+    expect(view).toContain("town: townOf(visitPlace(a))");
+    expect(view).toContain("const place = visitPlace(a);");
+    expect(view).not.toMatch(/\{a\.location && \(/);
+    expect(code("src/app/(app)/planner/page.tsx")).toContain("street: streetOf(visitPlace(a))");
+  });
+
+  it("the To Schedule tray's tiles say where and who like every other tile, never the job number", () => {
+    const panel = read("src/app/(app)/schedule/calendar-panel.tsx");
+    expect(panel).toContain('.select("id, job_number, name, address, assigned_to, customers(name)")');
+    const view = code("src/app/(app)/calendar/calendar-view.tsx");
+    expect(view).toContain("const place = placeLine({ name: j.name, street: j.address, customer: j.customer })?.text ?? null;");
+    expect(view).toContain('<CrewInitials crew={crewChips(j.assigned_to, team)} size="xs" />');
+    expect(view).not.toContain("j.customer ?? j.job_number");
   });
 
   it("no price, amount, total, cost or rate on any of them", () => {

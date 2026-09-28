@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { blockRows, crewChips, hmShort, initialsOf, nameSays, placeLine, spanShort, streetOf, townOf } from "./block-info";
+import { blockRows, crewChips, hmShort, initialsOf, nameSays, placeLine, spanShort, streetOf, townOf, visitPlace } from "./block-info";
 
 /**
  * THE BLOCK SAYS WHERE AND WHO (Erik, 2026-09-28: "we definitly need the address showing up on the job
@@ -24,6 +24,17 @@ describe("the place line", () => {
     expect(placeLine({ name: "Seiler · 3-way switches", street: null, customer: "Rich Seiler" })).toEqual({ text: "Rich Seiler", kind: "customer" });
     expect(placeLine({ name: "Jackie Burks · Panel Upgrade", street: "", customer: "Jackie Burks" })).toBeNull();
     expect(placeLine({ name: "New Job · Sep 28", street: null, customer: null })).toBeNull();
+  });
+
+  it("a visit with no place of its own is at its job's address, on every surface", () => {
+    const inspection = { title: "Inspection", location: null, jobs: { address: "12 Elm St, Kings Beach, CA 96143" }, customers: { name: "Andrew Cohen" } };
+    expect(visitPlace(inspection)).toBe("12 Elm St, Kings Beach, CA 96143");
+    expect(placeLine({ name: inspection.title, street: streetOf(visitPlace(inspection)), customer: inspection.customers.name })).toEqual({ text: "12 Elm St", kind: "street" });
+    expect(townOf(visitPlace(inspection))).toBe("Kings Beach");
+    // Its own place wins; a blank one is no place; no job, no place.
+    expect(visitPlace({ location: "9 Oak Ave", jobs: { address: "12 Elm St" } })).toBe("9 Oak Ave");
+    expect(visitPlace({ location: "  ", jobs: { address: "12 Elm St" } })).toBe("12 Elm St");
+    expect(visitPlace({ location: null, jobs: null })).toBeNull();
   });
 
   it("a visit: its street from the one-line location; a town-only line has no street", () => {

@@ -56,7 +56,8 @@ export async function CalendarPanel({ canEdit = false }: { canEdit?: boolean } =
       supabase
         .from("appointments")
         .select(
-          "id, type, title, starts_at, ends_at, location, notes, status, job_id, customer_id, assigned_to, absorbed, jobs(job_number, name), customers(name), profiles!appointments_assigned_to_fkey(full_name)",
+          // jobs(address): a visit with no place of its own is at its job's street (My Day reads it the same).
+          "id, type, title, starts_at, ends_at, location, notes, status, job_id, customer_id, assigned_to, absorbed, jobs(job_number, name, address), customers(name), profiles!appointments_assigned_to_fkey(full_name)",
         )
         .gte("starts_at", jobFrom)
         .lte("starts_at", jobTo)
@@ -82,7 +83,7 @@ export async function CalendarPanel({ canEdit = false }: { canEdit?: boolean } =
       // nothing next is there too, and a held job waits there with its own day instead.
       supabase
         .from("jobs")
-        .select("id, job_number, name, customers(name)")
+        .select("id, job_number, name, address, assigned_to, customers(name)")
         .is("scheduled_start", null)
         .in("status", ACTIVE_JOB_STATUSES)
         .order("created_at", { ascending: false })
@@ -133,6 +134,9 @@ export async function CalendarPanel({ canEdit = false }: { canEdit?: boolean } =
     job_number: j.job_number,
     name: j.name,
     customer: j.customers?.name ?? null,
+    // Where and who on the tray's tile, as its block and its rail card say them. No money.
+    address: j.address ?? null,
+    assigned_to: Array.isArray(j.assigned_to) ? j.assigned_to : [],
   }));
 
   return (

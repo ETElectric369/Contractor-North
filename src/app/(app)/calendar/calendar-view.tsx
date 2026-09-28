@@ -12,7 +12,7 @@ import { dayTargetLabel } from "@/lib/schedule/placement-plan";
 import { dayLabel, spanLabel } from "@/lib/schedule/span-label";
 import { useEndlessStack } from "@/components/use-endless-stack";
 import { jobDayBlock } from "@/lib/schedule/job-block";
-import { crewChips, initialsOf, placeLine, spanShort, streetOf, townOf } from "@/lib/schedule/block-info";
+import { crewChips, initialsOf, placeLine, spanShort, streetOf, townOf, visitPlace } from "@/lib/schedule/block-info";
 import { CrewInitials } from "@/components/crew-initials";
 import { ownHoursByJobDay } from "@/lib/schedule/segment-hours";
 import { ScheduleTileSheet, type TileTarget } from "../schedule/tile-sheet";
@@ -96,7 +96,8 @@ export interface CalAppt {
   location: string | null;
   notes: string | null;
   assigned_to: string | null;
-  jobs?: { job_number: string; name: string } | null;
+  /** `address`: where a visit with no place of its own is (its job's street). */
+  jobs?: { job_number: string; name: string; address?: string | null } | null;
   customers?: { name: string } | null;
   profiles?: { full_name: string | null } | null;
 }
@@ -133,6 +134,9 @@ export interface CalUnscheduled {
   job_number: string;
   name: string;
   customer: string | null;
+  /** Where and who, as its block and its rail card say them (absent: nothing to say). */
+  address?: string | null;
+  assigned_to?: string[] | null;
 }
 
 /** One job's presence on one day (pos = "d2/3" on multi-day spans).
@@ -681,8 +685,8 @@ export function CalendarView({
         label: a.title,
         // A visit likewise: its street (or who, when the title is the street), its one person going.
         info: {
-          place: placeLine({ name: a.title, street: streetOf(a.location), customer: a.customers?.name ?? a.jobs?.name ?? null })?.text ?? null,
-          town: townOf(a.location) || null,
+          place: placeLine({ name: a.title, street: streetOf(visitPlace(a)), customer: a.customers?.name ?? a.jobs?.name ?? null })?.text ?? null,
+          town: townOf(visitPlace(a)) || null,
           time: spanShort(startMin, endMin),
           crew: crewChips(a.assigned_to ? [a.assigned_to] : [], team),
         },
@@ -961,14 +965,22 @@ export function CalendarView({
               </button>
             </div>
             <div className="flex gap-1.5 overflow-x-auto pb-1">
-              {unscheduled.map((j) => (
+              {unscheduled.map((j) => {
+                /* WHERE AND WHO, as its block and its rail card say them: the street (or who, when the
+                   name is the street; nothing when the name says both, never the job number), and the
+                   crew's initials, a dashed Nobody when no one is on it. */
+                const place = placeLine({ name: j.name, street: j.address, customer: j.customer })?.text ?? null;
+                return (
                 <div
                   key={j.id}
                   className="flex shrink-0 items-center gap-1 rounded-lg border border-slate-200 bg-white pl-2.5 text-xs"
                 >
                   <Link href={`/jobs/${j.id}`} className="min-w-0 py-1.5 text-left">
                     <div className="max-w-[160px] truncate font-medium text-slate-800">{j.name}</div>
-                    <div className="truncate text-[11px] text-slate-400">{j.customer ?? j.job_number}</div>
+                    {place && <div className="max-w-[160px] truncate text-[11px] text-slate-500">{place}</div>}
+                    <div className="mt-0.5">
+                      <CrewInitials crew={crewChips(j.assigned_to, team)} size="xs" />
+                    </div>
                   </Link>
                   {/* The Schedule handle — a deliberate day pick, undo-safe. */}
                   <MoveToDay
@@ -982,7 +994,8 @@ export function CalendarView({
                     <CalendarSync className="h-4 w-4" />
                   </MoveToDay>
                 </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         ) : (
@@ -1492,6 +1505,7 @@ function DayDetail({
  *  quick done/cancel + edit pencil + the Move-to-day glyph. */
 function ApptRow({ a, picker, tz }: { a: CalAppt; picker: SchedulePicker; tz: string }) {
   const router = useRouter();
+  const place = visitPlace(a);
   const appt: ApptValue = {
     id: a.id,
     type: a.type,
@@ -1536,10 +1550,10 @@ function ApptRow({ a, picker, tz }: { a: CalAppt; picker: SchedulePicker; tz: st
           )}
           {/* WHERE, as the visit's block says it: the street (the town small), never the zip; the
               whole line still drives Navigate. WHO'S GOING as the one initials chip, or Nobody. */}
-          {a.location && (
-            <NavLink address={a.location} className="inline-flex items-center gap-0.5 text-brand hover:underline">
-              <MapPin className="h-3 w-3" /> {streetOf(a.location) || a.location}
-              {townOf(a.location) && <span className="text-[11px] text-slate-400"> · {townOf(a.location)}</span>}
+          {place && (
+            <NavLink address={place} className="inline-flex items-center gap-0.5 text-brand hover:underline">
+              <MapPin className="h-3 w-3" /> {streetOf(place) || place}
+              {townOf(place) && <span className="text-[11px] text-slate-400"> · {townOf(place)}</span>}
             </NavLink>
           )}
           <CrewInitials

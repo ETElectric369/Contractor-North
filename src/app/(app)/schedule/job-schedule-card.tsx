@@ -88,12 +88,15 @@ export function JobScheduleCard({
         <Badge tone={statusTone(job.status)}>{jobStatusLabel(job.status)}</Badge>
       </div>
       {/* WHERE: the street, never the city or the zip (the town small beside it); who when the name
-          already is the street. */}
-      <div className="flex min-w-0 items-center gap-1 text-slate-500">
-        {place?.kind === "street" && <MapPin className="h-3 w-3 shrink-0 text-slate-400" />}
-        <span className="min-w-0 truncate">{place?.text ?? job.job_number}</span>
-        {job.city && <span className="shrink-0 text-[11px] text-slate-400">· {job.city}</span>}
-      </div>
+          already is the street; nothing when the name says both ("Jackie Burks · Panel Upgrade"), never
+          the job number in its place (the same as every other block). */}
+      {(place || job.city) && (
+        <div className="flex min-w-0 items-center gap-1 text-slate-500">
+          {place?.kind === "street" && <MapPin className="h-3 w-3 shrink-0 text-slate-400" />}
+          {place && <span className="min-w-0 truncate">{place.text}</span>}
+          {job.city && <span className="shrink-0 text-[11px] text-slate-400">{place ? "· " : ""}{job.city}</span>}
+        </div>
+      )}
       {onOpen ? (
         <button
           type="button"

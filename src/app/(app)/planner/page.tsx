@@ -39,7 +39,7 @@ import { workDayWindowHm } from "@/lib/org-settings";
 import { tzDateTimeUtc } from "@/lib/tz";
 import { hmWords, jobDayBlock, workDayMinutes } from "@/lib/schedule/job-block";
 import { minutesToHm } from "@/lib/schedule/fit-day";
-import { crewChips, placeLine, streetOf, townOf, type CrewChip } from "@/lib/schedule/block-info";
+import { crewChips, placeLine, streetOf, townOf, visitPlace, type CrewChip } from "@/lib/schedule/block-info";
 import { ownHoursByJobDay, segmentCols, withDayHours, type SegmentRow } from "@/lib/schedule/segment-hours";
 import type { DayHours } from "@/lib/schedule-math";
 import { CrewInitials } from "@/components/crew-initials";
@@ -422,8 +422,8 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
       ? a.ends_at
       : new Date(new Date(a.starts_at).getTime() + 3_600_000).toISOString();
     return {
-      place: placeLine({ name: a.title, street: streetOf(a.location ?? a.jobs?.address), customer: a.customers?.name })?.text ?? null,
-      town: townOf(a.location) || null,
+      place: placeLine({ name: a.title, street: streetOf(visitPlace(a)), customer: a.customers?.name })?.text ?? null,
+      town: townOf(visitPlace(a)) || null,
       span: `${formatTime(a.starts_at, tz)} – ${formatTime(endsAt, tz)}`,
       crew: a.assigned_to ? crewChips([a.assigned_to], [...people, { id: a.assigned_to, full_name: a.profiles?.full_name ?? null }]) : [],
     };

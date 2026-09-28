@@ -76,6 +76,13 @@ export function placeLine(p: { name: string | null | undefined; street: string |
   return null;
 }
 
+/** WHERE A VISIT IS: its own place, else its job's address (a visit booked on a job with no location of
+ *  its own, "book an inspection on Herringbone at 9"). My Day's agenda row and the schedule's block and
+ *  day drill all read it from here, so the same visit never says two places. */
+export function visitPlace(a: { location?: string | null; jobs?: { address?: string | null } | null }): string | null {
+  return a.location?.trim() || a.jobs?.address?.trim() || null;
+}
+
 /** A person on the block, as its chip. */
 export type CrewChip = { id: string; initials: string; name: string };
 
