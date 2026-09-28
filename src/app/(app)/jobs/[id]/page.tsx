@@ -72,6 +72,7 @@ import { ContractCard } from "./contract-card";
 import { LienInsuranceCard } from "./lien-insurance-card";
 import { JobTextBox } from "./job-description";
 import { JobCrewCard } from "./job-crew-card";
+import { ProfitLine } from "./profit-line";
 import { computeJobProgress, livePurchaseOrders } from "@/lib/job-progress-math";
 import { signDocumentUrls } from "@/lib/signed-docs";
 import { documentsForViewer } from "@/lib/tech-documents";
@@ -1645,54 +1646,11 @@ export default async function JobDetailPage({
               tieNote={paperTies ? null : "Couldn't check which papers made which bill just now. Reload to try again."}
             />
           </Card>
-          <Card>
-            <CardContent className="py-5">
-              {/* auto-fit, not viewport breakpoints: at ~675px the window LOOKS "tablet" to sm:
-                  media queries but the sidebar eats half the width, so fixed sm:grid-cols-3 +
-                  side-by-side profit overlapped the numbers (Erik's 7/24 screenshot). auto-fit
-                  wraps by the space the card actually has. */}
-              <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-                <div className="grid min-w-0 flex-1 grid-cols-[repeat(auto-fit,minmax(7.5rem,1fr))] gap-x-6 gap-y-3">
-                  <div><div className="text-base font-semibold text-slate-700">{formatCurrency(revenue)}</div><div className="text-[11px] uppercase tracking-wide text-slate-400">Collected</div></div>
-                  <div><div className="text-base font-semibold text-slate-700">{formatCurrency(laborCost)}</div><div className="text-[11px] uppercase tracking-wide text-slate-400">Crew Labor · {formatDuration(crewHours)}</div></div>
-                  {/* HOURS ONLY, NO DOLLARS (0286): the owner is paid by owner's draw, so his time
-                      is not a cost. It is still time the job took, and it is what the "per hour"
-                      figure beside Profit divides by. */}
-                  {ownerHours > 0 && (
-                    <div><div className="text-base font-semibold text-slate-700">{formatDuration(ownerHours)}</div><div className="text-[11px] uppercase tracking-wide text-slate-400">{ownerVoice.hoursLabel}</div></div>
-                  )}
-                  <div><div className="text-base font-semibold text-slate-700">{formatCurrency(materialCost)}</div><div className="text-[11px] uppercase tracking-wide text-slate-400">Materials</div></div>
-                  <div>
-                    <div className="text-base font-semibold text-slate-700">{formatCurrency(billsCost)}</div>
-                    <div className="text-[11px] uppercase tracking-wide text-slate-400">Bills</div>
-                    {/* Said only when the shelf touched this job: its own tickets less what went on
-                        the shelf, and what it took from the shelf. */}
-                    {jobMaterials.shelfTouched && (
-                      <div className="text-[11px] text-slate-500">
-                        Tickets {formatCurrency(jobMaterials.tickets)} · From Stock {formatCurrency(jobMaterials.fromStock)}
-                      </div>
-                    )}
-                  </div>
-                  {Math.abs(pettyCost) > 0.005 && (
-                    <div><div className="text-base font-semibold text-slate-700">{formatCurrency(pettyCost)}</div><div className="text-[11px] uppercase tracking-wide text-slate-400">Petty Cash</div></div>
-                  )}
-                  {/* Miles only — mileage dollars are a /payroll settlement decision,
-                      never an app-computed figure (and never in profit above). */}
-                  <div><div className="text-base font-semibold text-slate-700">{totalMiles.toFixed(1)} mi</div><div className="text-[11px] uppercase tracking-wide text-slate-400">Mileage</div></div>
-                </div>
-                <div className="flex flex-wrap shrink-0 gap-x-6 gap-y-3 border-t border-slate-100 pt-3 xl:border-l xl:border-t-0 xl:pl-6 xl:pt-0">
-                  <div><div className={`text-2xl font-bold ${profit >= 0 ? "text-green-600" : "text-red-600"}`}>{formatCurrency(profit)}</div><div className="text-xs font-medium text-slate-500">Profit</div></div>
-                  <div><div className={`text-2xl font-bold ${profit >= 0 ? "text-green-600" : "text-red-600"}`}>{margin.toFixed(0)}%</div><div className="text-xs font-medium text-slate-500">Margin</div></div>
-                  {perOwnerHour !== null && (
-                    <div><div className={`text-2xl font-bold ${perOwnerHour >= 0 ? "text-green-600" : "text-red-600"}`}>{formatCurrency(perOwnerHour)}</div><div className="text-xs font-medium text-slate-500">{ownerVoice.perHourPhrase}</div></div>
-                  )}
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-          {/* PURCHASE ORDERS OFF (the switch board): no New PO and no empty card, but a job that
-              already has POs keeps listing them under the Off line. They count in cost either way. */}
-          {(on("purchase_orders") || (pos ?? []).length > 0) && (
+          {/* THE ORDERS, ONLY WHEN THERE ARE SOME (W1-23): a job with no purchase order draws no
+              empty card (New PO stays on the Materials tab, off the job's one list). With the
+              switch off, a job that has POs keeps listing them under the Off line. They count in
+              cost either way. */}
+          {(pos ?? []).length > 0 && (
             <Card className="overflow-hidden">
               <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3">
                 <span className="text-sm font-semibold text-slate-900">Material purchase orders</span>
@@ -1708,11 +1666,29 @@ export default async function JobDetailPage({
                     </Link>
                   </li>
                 ))}
-                {(!pos || pos.length === 0) && empty("purchase orders")}
               </ul>
             </Card>
           )}
-
+          {/* PROFIT IN ONE LINE (W1-23), last, so what's open leads the tab. The figures are the
+              ones this page always worked out (collected − crew labor − live orders − bills − petty
+              cash, the same as /analytics); the rows wait in its Why? fold. */}
+          <ProfitLine
+            collected={revenue}
+            crewLabor={laborCost}
+            crewHours={crewHours}
+            ownerHours={ownerHours}
+            ownerHoursLabel={ownerVoice.hoursLabel}
+            materialsAndBills={Math.round((materialCost + billsCost) * 100) / 100}
+            shelfTouched={jobMaterials.shelfTouched}
+            tickets={jobMaterials.tickets}
+            fromStock={jobMaterials.fromStock}
+            pettyCash={pettyCost}
+            miles={totalMiles}
+            profit={profit}
+            margin={margin}
+            perOwnerHour={perOwnerHour}
+            perHourPhrase={ownerVoice.perHourPhrase}
+          />
         </div>
       ),
     },
