@@ -62,8 +62,9 @@ const NOTE_COLOR: Record<ReceiptTone, string> = {
  *
  * PLANS LIVE ON THE CUSTOMER PAGE TAB (2026-09-25). A line always links to that tab's Add Plans Or
  * Drawings (?plans=add) while the office has it (the Customer Portal switch on); with the portal off,
- * the empty line says a plan goes in through Upload in ⋯. Office only: the Customer Page tab is not
- * a tech's, so a tech is never pointed at it.
+ * the empty line says a plan goes in through ⋯ → File A Paper (Not A Cost), which files it as a Plan
+ * and never reads it as a receipt. Office only: the Customer Page tab is not a tech's, so a tech is
+ * never pointed at it.
  *
  * RECEIPTS & PAPERS, FOLDED (Erik, 2026-09-27: bills and job photos kept separate). The list leads
  * with the job's papers; what the Photos tab holds (`photoTabIds`) folds under them, still here for
@@ -333,7 +334,7 @@ export function JobDocuments({
           {papers.length === 0 ? (
             <p className="text-sm text-slate-400">
               No receipts yet. Use Snap The Bill above.
-              {!plansDoor && " A plan or drawing? Use Upload in ⋯."}
+              {!plansDoor && " A plan, permit or other paper? Tap ⋯ and File A Paper (Not A Cost)."}
             </p>
           ) : (
             <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">{papers.map(row)}</ul>
