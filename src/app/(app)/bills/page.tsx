@@ -1260,7 +1260,11 @@ export default async function BillsPage({
   // they hold something (or once a read of theirs failed, which they say).
   const hasSupplierSide = !!paperFeed || readFailed.size > 0;
   const showSuppliers = !!accountsErr || supplierAccounts.length > 0 || unassigned.bills > 0 || typeof payOn === "string";
-  const showAllBills = !!billsErr || (billsWithLines as any[]).length > 0 || (pos ?? []).length > 0 || looseDocs.length > 0;
+  // Purchase Orders on is reason enough: All Bills' ⋯ is New PO's one home on this page, and the Bills &
+  // POs row, /purchasing and "po" in Search Or Ask all land here (review of W1-32: a company that had
+  // just turned the switch on, with nothing yet, found no New PO and no word about orders).
+  const poOn = featureOn(switches.features, "purchase_orders");
+  const showAllBills = !!billsErr || poOn || (billsWithLines as any[]).length > 0 || (pos ?? []).length > 0 || looseDocs.length > 0;
   const showMore = moreWaiting > 0 || proposals.length + questions.length + loose.length > 0 || duplicates.length > 0 || supplierDocuments.length > 0 || liveBills.length > 0;
   // Needs You's empty line: every paper since the books began is in them, unless some wait on a credit.
   // ONLY WHEN IT WAS ALL READ (audit v1018, class 2): with the supplier half unread (its alert is in the

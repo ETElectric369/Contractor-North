@@ -437,7 +437,11 @@ export function BillsReceipts({
             </p>
           ) : rows.length === 0 ? (
             <p className="py-4 text-center text-sm text-slate-400">
-              {keys ? `Nothing in All Bills matches “${query.trim()}”.` : "No bills yet. Add one with Snap Or Note at the top of this page."}
+              {keys
+                ? `Nothing in All Bills matches “${query.trim()}”.`
+                : poOn
+                  ? "No bills or purchase orders yet. Add a bill with Snap Or Note at the top of this page, or tap ⋯ here for New PO."
+                  : "No bills yet. Add one with Snap Or Note at the top of this page."}
             </p>
           ) : (
             <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">{rows}</ul>

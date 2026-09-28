@@ -721,13 +721,32 @@ describe("the header, for a new company and one with data", () => {
   });
 
   it("a new company: the header and nothing else until something is in it", async () => {
-    CURRENT = { profiles: TABLES.profiles, organizations: TABLES.organizations };
+    // Purchase Orders off, as every trade's preset starts (features.ts): nothing to hold New PO.
+    const poOff = [{ ...TABLES.organizations[0], settings: { timezone: "America/Los_Angeles", features: { purchase_orders: false } } }];
+    CURRENT = { profiles: TABLES.profiles, organizations: poOff };
     try {
       const { default: BillsPage } = await import("./page");
       const fresh = renderToStaticMarkup((await BillsPage({ searchParams: Promise.resolve({}) })) as React.ReactElement);
       expect(text(fresh)).toContain("Drop a receipt or bill anywhere on this page.");
       expect(doors(fresh)).toEqual(["Snap Or Note", "Add By Hand"]);
       for (const id of ["bills-search", "needs-you", "suppliers", "all-bills", "more"]) expect(fresh, id).not.toContain(`id="${id}"`);
+    } finally {
+      CURRENT = TABLES;
+    }
+  });
+
+  it("a new company with Purchase Orders on: All Bills is there, empty, saying so, with New PO on its ⋯", async () => {
+    // The Bills & POs row, /purchasing (?tab=po) and "po" in Search Or Ask all land here: never a page
+    // with no PO door and no word about orders.
+    CURRENT = { profiles: TABLES.profiles, organizations: TABLES.organizations };
+    try {
+      const { default: BillsPage } = await import("./page");
+      const fresh = renderToStaticMarkup((await BillsPage({ searchParams: Promise.resolve({ tab: "po" }) })) as React.ReactElement);
+      expect(fresh).toContain('id="all-bills"');
+      expect(fresh).toMatch(/aria-label="More For All Bills"/);
+      expect(doors(fresh)).toContain("New PO");
+      expect(text(fresh)).toContain("No bills or purchase orders yet. Add a bill with Snap Or Note at the top of this page, or tap ⋯ here for New PO.");
+      for (const id of ["bills-search", "needs-you", "suppliers", "more"]) expect(fresh, id).not.toContain(`id="${id}"`);
     } finally {
       CURRENT = TABLES;
     }
