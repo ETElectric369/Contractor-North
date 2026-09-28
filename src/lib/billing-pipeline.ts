@@ -3,6 +3,7 @@ import { invoiceBalance } from "@/lib/invoice-math";
 import { contractTotalFromQuotes, milestoneAmount, type Milestone } from "@/lib/payment-schedule-math";
 import { getOrgSettings } from "@/lib/org-settings";
 import { todayStrInTz } from "@/lib/tz";
+import { arBucketOf, computeArByCustomer, daysBetweenYmd, type ArBuckets, type ArCustomer } from "@/lib/analytics/money-metrics";
 
 /** Org-local "today" (YYYY-MM-DD) — THE date the overdue rule compares due_date against.
  *  A UTC "today" flags a due-today invoice overdue after ~5 PM Pacific, so every overdue
@@ -27,7 +28,36 @@ export type PipelineInvoice = {
   due_date: string | null; customer: string | null; job: string | null; overdue: boolean;
   /** amount_paid, so a row can say what its balance is due against (invoiceAmount). */
   paid: number;
+  /** Whole days past its due date, org-local (daysBetweenYmd, the aging's own arithmetic); 0 when
+   *  not late. What the Invoices page's red "N Days Late" chip and its By Customer fold say. */
+  daysLate: number;
+  /** Whose it is, so By Customer never folds two customers who share a name into one. */
+  customer_id: string | null;
 };
+
+/** "1 Day Late", "12 Days Late": the chip on a late row. */
+export const daysLateWords = (n: number): string => `${n} ${n === 1 ? "Day" : "Days"} Late`;
+
+/**
+ * WHO OWES, ROLLED UP (the Accounts Receivable page, folded into Invoices, W1-29): the pipeline's own
+ * open invoices through THE by-customer roll-up (money-metrics' computeArByCustomer, the one the old
+ * Accounts Receivable page used), worst lateness first, then the most owed. One read, one total: the
+ * balances here add up to the page's Owed To You to the cent. Pure.
+ */
+export function owedByCustomer(unpaid: readonly PipelineInvoice[]): ArCustomer<PipelineInvoice>[] {
+  return computeArByCustomer({ invoices: unpaid });
+}
+
+/** THE OWED BAR's pieces, in dollars: the aging's own buckets (arBucketOf: not late, then 1-30,
+ *  31-60 and over 60 days late), so the bar and Analytics' aging cut the same days the same way. */
+export function owedByLateness(unpaid: readonly PipelineInvoice[]): ArBuckets {
+  const out: ArBuckets = { current: 0, d30: 0, d60: 0, d90: 0 };
+  for (const i of unpaid) {
+    const k = arBucketOf(i.daysLate);
+    out[k] = Math.round((out[k] + i.balance) * 100) / 100;
+  }
+  return out;
+}
 
 export type MoneyPipeline = {
   doneNotInvoiced: PipelineJob[]; // complete jobs, no invoice (or un-drawn schedule draws) → BILL them
@@ -47,7 +77,7 @@ export async function getMoneyPipeline(supabase: SupabaseClient): Promise<MoneyP
     // PostgREST's 1000-row max, and invoicedJobIds below is built from whatever survived —
     // past that cliff a job whose invoice fell outside the window reappears in "Done - Not
     // Invoiced" and the Outstanding/Overdue tiles undercount.
-    supabase.from("invoices").select("id, invoice_number, total, amount_paid, status, due_date, job_id, customers(name), jobs(name)").limit(50000),
+    supabase.from("invoices").select("id, invoice_number, total, amount_paid, status, due_date, job_id, customer_id, customers(name), jobs(name)").limit(50000),
     // 'invoiced' is a RETIRED job status (the lifecycle rework moved every row off it), but
     // a stray legacy row could still carry it — keep it in the filter as stage-1 safety so
     // such a job can't escape the board (jobs with a real invoice are removed by the
@@ -107,6 +137,10 @@ export async function getMoneyPipeline(supabase: SupabaseClient): Promise<MoneyP
     balance: invoiceBalance(i.total, i.amount_paid), status: i.status,
     due_date: i.due_date, customer: i.customers?.name ?? null, job: i.jobs?.name ?? null, overdue,
     paid: Number(i.amount_paid) || 0,
+    // ONE RULE: overdue is a due date before the org's today, and how late is the same two days
+    // counted the aging's way (a due-today invoice is neither).
+    daysLate: overdue && i.due_date ? Math.max(0, daysBetweenYmd(String(i.due_date).slice(0, 10), today)) : 0,
+    customer_id: i.customer_id ?? null,
   });
 
   const drafts = invoices.filter((i) => i.status === "draft").map((i) => toInv(i, false));

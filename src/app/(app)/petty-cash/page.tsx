@@ -19,9 +19,12 @@ export default async function PettyCashPage() {
     0,
   );
 
+  // OFF THE MENU (W1-34), NEVER OFF THE BOOKS: every entry here still counts wherever it always did
+  // (job profit, Analytics, Owner Money, the Fuel card, Nort's list_petty_cash). A company that has
+  // entries finds this page in Search Or Ask; a job's Petty Cash figure links here.
   return (
     <div>
-      <PageHeader title="Petty cash" description="Track your cash box — add cash, log expenses, see the running balance." />
+      <PageHeader title="Petty Cash" description="Cash you took out, and older cash entries. A new cash purchase goes in through Snap Or Note or Add By Hand." />
       <PettyCashManager items={rows as any} balance={balance} />
     </div>
   );

@@ -626,7 +626,8 @@ describe("the tour reads the switches", () => {
     const bar = findStep("topbar");
     const on = sayOf(stepWords(bar, true).say, STRANGER);
     const plainWords = sayOf(stepWords(bar, false).say, STRANGER);
-    expect(on).toContain("Plus is where new work starts — a job, an appointment, an invoice — from any screen.");
+    // The + holds Snap Or Note first (W1-30), so the sentence names a paper to snap too (W1-32 words).
+    expect(on).toContain("Plus is where new work starts — a job, an appointment, an invoice, or a paper to snap — from any screen.");
     expect(on).toContain("Search Or Ask finds your jobs, customers, estimates, invoices and appointments by name or number, and you can ask me anything there.");
     expect(on).toContain("And the bell keeps your notices, whether or not you switch on phone notifications.");
     expect(plainWords).toContain("Search finds your jobs");

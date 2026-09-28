@@ -1,6 +1,8 @@
 import { describe, it, expect, vi } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 /**
  * JOB PHOTOS AND BILLS, KEPT SEPARATE (Erik, 2026-09-27: "photos should have a distinction between
@@ -25,7 +27,10 @@ vi.mock("@/app/(app)/jobs/actions", () => ({
   updateDocument: vi.fn(),
   setBillStatus: vi.fn(),
   deleteBill: vi.fn(),
+  linkReceiptToBill: vi.fn(),
 }));
+vi.mock("@/app/(app)/organize/actions", () => ({ billJobReceipt: vi.fn() }));
+vi.mock("@/components/snap-or-note", () => ({ openSnapOrNote: vi.fn() }));
 vi.mock("@/app/(app)/jobs/portal-share-actions", () => ({ reshowPhoto: vi.fn(), setPhotoShared: vi.fn() }));
 vi.mock("./upload-job-photos", () => ({ uploadJobPhotos: vi.fn() }));
 vi.mock("@/lib/receipt-capture", () => ({ captureReceipt: vi.fn(), prettyBytes: () => "1 KB", readReceiptDocument: vi.fn() }));
@@ -37,6 +42,8 @@ vi.mock("@/app/(app)/bills/receipt-billing-card", () => ({ ReceiptLines: () => n
 import { JobPhotos } from "./job-photos";
 import { JobBills } from "./job-bills";
 import { JobDocuments } from "./job-documents";
+import { JobCostCapture, capturePaper, notACostSentence, NOT_A_COST_PAPERS } from "./job-cost-capture";
+import { captureReceipt, readReceiptDocument } from "@/lib/receipt-capture";
 import { BillsReceipts } from "../../bills/bills-receipts";
 import { billPapers, sortJobPapers, type PaperTie } from "@/lib/job-photos";
 import { documentsForViewer } from "@/lib/tech-documents";
@@ -47,6 +54,9 @@ const r = (c: any, p: any) => renderToStaticMarkup(createElement(c, p)).replace(
 const link = (href: string, words: string) =>
   new RegExp(`<a(?=[^>]*href="${href.replace(/[?/]/g, "\\$&")}")(?=[^>]*min-h-11)[^>]*>${words}</a>`);
 const text = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/&amp;/g, "&").replace(/&#x27;|&apos;/g, "'").replace(/\s+/g, " ");
+/** Every <button>, its attributes and the words on it. */
+const buttons = (html: string) =>
+  Array.from(html.matchAll(/<button([^>]*)>([\s\S]*?)<\/button>/g)).map((m) => ({ attrs: m[1], words: text(m[2]).trim() }));
 
 const doc = (id: string, category: string | null, ext = "jpg") => ({
   id,
@@ -186,6 +196,112 @@ describe("the Costs tab: Receipts & Papers", () => {
     expect(text(lost)).toContain("Couldn't check which papers made which bill just now.");
     const lostRows = lost.split(/<li[ >]/).slice(1);
     for (const id of ["ced-ticket", "loose-receipt"]) expect(text(lostRows.find((x) => x.includes(`${id}.jpg`))!)).toContain("Record As Cost");
+  });
+});
+
+/**
+ * ONE WAY TO ADD A COST (W1-23). The Costs tab's header is one primary Snap The Bill and a 44px ⋯,
+ * More Ways To Add A Cost: Upload (many at once, its own input) and Type It In (the one typed
+ * sheet). Receipts & Papers is the job's filed list, with no uploader of its own.
+ */
+describe("the Costs tab: one way to add a cost", () => {
+  const html = r(JobCostCapture, { orgId: "org1", jobId: "j1", billsTotal: 318.09, nortOn: true });
+
+  it("Snap The Bill is the one primary door, and the job's total is no longer its header", () => {
+    const snap = buttons(html).filter((b) => b.words === "Snap The Bill");
+    expect(snap).toHaveLength(1);
+    expect(snap[0].attrs).toMatch(/\bh-11\b/);
+    expect(text(html)).not.toContain("Costs ·");
+    expect(text(html)).not.toContain("$318.09");
+  });
+
+  it("the camera input takes one shot (never multiple: the iOS rule); Upload's own input takes many", () => {
+    const inputs = Array.from(html.matchAll(/<input[^>]*type="file"[^>]*>/g)).map((m) => m[0]);
+    const camera = inputs.filter((i) => i.includes('capture="environment"'));
+    expect(camera).toHaveLength(1);
+    expect(camera[0]).not.toContain("multiple");
+    const library = inputs.filter((i) => !i.includes("capture="));
+    expect(library).toHaveLength(1);
+    expect(library[0]).toContain("multiple");
+    expect(library[0]).toContain("application/pdf");
+  });
+
+  it("the ⋯ is a 44px button named More Ways To Add A Cost, holding Upload and Type It In", () => {
+    const more = buttons(html).find((b) => /aria-label="More Ways To Add A Cost"/.test(b.attrs))!;
+    expect(more).toBeDefined();
+    expect(more.attrs).toMatch(/\bh-11 w-11\b/);
+    const rows = buttons(html).map((b) => b.words);
+    expect(rows).toContain("Upload");
+    expect(rows).toContain("Type It In");
+    expect(rows).toContain("File A Paper (Not A Cost)");
+    // Its rows stay mounted while it is shut (hidden), so the sheet Type It In opens never unmounts.
+    expect(html).toMatch(/<div hidden=""[^>]*>[\s\S]*Upload[\s\S]*Type It In/);
+    // No other add door on the header: no Add Cost, no Add Bill.
+    expect(rows).not.toContain("Add Cost");
+    expect(rows).not.toContain("Add Bill");
+  });
+
+  it("a paper that isn't money, dropped through Upload, is filed and says so (the pipeline's filed outcome)", () => {
+    const src = readFileSync(join(process.cwd(), "src/app/(app)/jobs/[id]/job-cost-capture.tsx"), "utf8");
+    // Every outcome but "lost" filed the paper and its line is said as the pipeline (or the
+    // not-a-cost door) wrote it.
+    expect(src).toContain('if (out.kind !== "lost") touched = true;');
+    expect(src).toContain("say(p.id, p.name, sentence, out.tone,");
+    // The not-a-cost pick rides the library input only: the camera is always a cost.
+    expect(src).toContain("const as = e.target === fileRef.current ? pickAs.current : null;");
+    // The camera hint names the other two doors.
+    expect(src).toContain("Tap ⋯ for Upload (your photos and PDFs) or Type It In");
+  });
+
+  it("a plan, permit or other paper is filed as that and never reaches the receipt reader", async () => {
+    const capture = vi.mocked(captureReceipt);
+    const read = vi.mocked(readReceiptDocument);
+    const file = new File(["%PDF"], "panel-plan.pdf", { type: "application/pdf" });
+    expect(NOT_A_COST_PAPERS.map((k) => k.label)).toEqual(["Plan", "Permit", "Other Paper"]);
+    for (const { category } of NOT_A_COST_PAPERS) {
+      capture.mockReset();
+      read.mockReset();
+      capture.mockResolvedValueOnce({ kind: "filed", docId: "d1", tone: "ok", why: "not_asked", sentence: "Filed on the job." });
+      const { out, sentence } = await capturePaper({ orgId: "org1", jobId: "j1", file, category, nortOn: true });
+      expect(capture).toHaveBeenCalledWith(expect.objectContaining({ category, read: false }));
+      expect(read).not.toHaveBeenCalled();
+      expect(out.kind).toBe("filed");
+      expect(sentence).toBe(notACostSentence(category));
+      expect(sentence).toContain("It isn't a cost, so it wasn't read.");
+      // Nort names the same door.
+      expect((await import("@/lib/nort-product-map")).NORT_PRODUCT_MAP).toContain("File A Paper (Not A Cost), which files a plan, permit or other paper on the job");
+      expect(sentence).not.toMatch(/cost manually|Record As Cost/);
+    }
+    expect(notACostSentence("Plan")).toBe("Filed on the job as a Plan. It isn't a cost, so it wasn't read.");
+    // Upload and Snap The Bill stay costs: filed as a Receipt (no category) and read.
+    capture.mockReset();
+    capture.mockResolvedValueOnce({ kind: "billed", docId: "d2", tone: "ok", sentence: "Bill created.", vendor: null, amount: 1, lineCount: 1, warning: null });
+    await capturePaper({ orgId: "org1", jobId: "j1", file, nortOn: true });
+    expect(capture).toHaveBeenCalledWith(expect.objectContaining({ category: undefined, read: true }));
+  });
+
+  it("Receipts & Papers has no uploader: no category picker, no Upload File, no Take Photo", () => {
+    const docs = r(JobDocuments, { orgId: "org1", jobId: "j1", docs: DOCS, photoTabIds: Array.from(sorted.photoTabIds), looseIds: [] });
+    const words = buttons(docs).map((b) => b.words);
+    for (const gone of ["Upload File", "Take Photo"]) expect(words).not.toContain(gone);
+    expect(docs).not.toMatch(/<select/);
+    expect(docs).not.toContain('type="file"');
+  });
+
+  it("empty, it points at Snap The Bill; with the portal off it adds where a plan goes", () => {
+    const office = r(JobDocuments, { orgId: "org1", jobId: "j1", docs: [], plansDoor: true, looseIds: [] });
+    expect(text(office)).toContain("No receipts yet. Use Snap The Bill above.");
+    expect(text(office)).not.toContain("File A Paper (Not A Cost)");
+    // The plans door keeps its gate (office, Customer Portal on), a 44px link.
+    const plans = office.match(/<a[^>]*href="\/jobs\/j1\?tab=customer&amp;plans=add"[^>]*>([\s\S]*?)<\/a>/);
+    expect(plans).not.toBeNull();
+    expect(plans![0]).toContain("min-h-11");
+    expect(text(plans![1]).trim()).toBe("Plan Or Drawing? Add It On The Customer Page");
+    const portalOff = r(JobDocuments, { orgId: "org1", jobId: "j1", docs: [], plansDoor: false, looseIds: [] });
+    // Never through Upload: that files a plan as a Receipt and reads it (review of W1-23).
+    expect(text(portalOff)).toContain("No receipts yet. Use Snap The Bill above. A plan, permit or other paper? Tap ⋯ and File A Paper (Not A Cost).");
+    expect(text(portalOff)).not.toContain("Use Upload");
+    expect(portalOff).not.toContain("Add It On The Customer Page");
   });
 });
 

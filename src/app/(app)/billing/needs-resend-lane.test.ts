@@ -162,8 +162,8 @@ describe("the board speaks one language", () => {
     expect(code).toMatch(/const awaiting = unpaid\.filter\(/);
     expect(code).toMatch(/awaiting\.map\(/);
     expect(code).not.toMatch(/unpaid\.map\(\(inv\)/);
-    // The tiles still count every open invoice once.
-    expect(code).toMatch(/Outstanding · \{unpaid\.length\}/);
+    // Owed To You still counts every open invoice once: the pipeline's own outstanding total.
+    expect(code).toContain("const owed = pipeline.outstandingTotal;");
   });
 
   it("prints every row's figure through <InvoiceAmount, never a bare total or balance", () => {
@@ -171,16 +171,16 @@ describe("the board speaks one language", () => {
     expect(code).not.toMatch(/money\(inv\.balance\)/);
     expect(code).not.toMatch(/money\(balance\)/);
     expect(code).not.toMatch(/money\(Number\(inv\.total\)/);
-    // Draft, Revised, Sent and All Invoices (d103cb9f: every row shows the total inline with
-    // what is due).
-    expect([...code.matchAll(/<InvoiceAmount /g)].length).toBe(4);
+    // Draft, Revised, Sent, By Customer and All Invoices (d103cb9f: every row shows the total
+    // inline with what is due).
+    expect([...code.matchAll(/<InvoiceAmount /g)].length).toBe(5);
     expect(src).toContain('from "@/components/invoice-amount"');
   });
 
   it("keeps the wide line out of the shrink-0 column on a phone", () => {
     // At 393px a wide amount beside the verb squeezed the customer to 0-16px. Below sm the whole
     // "$D due of $T" line sits under the left-hand text and the verb is its chevron.
-    expect([...code.matchAll(/<InvoiceAmountDetail /g)].length).toBe(4);
+    expect([...code.matchAll(/<InvoiceAmountDetail /g)].length).toBe(5);
     expect(code).toContain('<span className="hidden sm:inline">{children}&nbsp;</span>');
     expect(code).not.toMatch(/>Review &amp; Send <ChevronRight/);
     expect(code).not.toMatch(/>Record Payment <ChevronRight/);

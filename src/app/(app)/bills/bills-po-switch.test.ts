@@ -3,9 +3,10 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 /**
- * PURCHASE ORDERS ON THE BILLS PAGE AND THE SWITCH BOARD (0352). /purchasing is /bills?tab=po, so
- * the PO list is this tab. Off: its chip goes and New PO goes, and a ?tab=po link still opens the
- * list under the Off line, every PO still there. On (or no switches passed): exactly as before.
+ * PURCHASE ORDERS ON THE BILLS PAGE AND THE SWITCH BOARD (0352). All Bills is one list (W1-32): every
+ * order is a row with a PO chip, whatever the switch (an open PO counts in job cost). /purchasing is
+ * /bills?tab=po, which opens the list with the orders first. Off: New PO goes (the list's ⋯ with it),
+ * and the orders are listed under the Off line. On (or no switches passed): the same list.
  */
 let search = "";
 vi.mock("next/navigation", () => ({
@@ -26,26 +27,37 @@ import { BillsReceipts } from "./bills-receipts";
 import { ALL_ON } from "@/lib/features";
 
 const PO = { id: "po1", po_number: "PO-007", vendor: "Any Supply", status: "open", total: 412.5, jobs: { name: "Deck" } };
-const render = (switches?: { features: typeof ALL_ON; isOwner: boolean }) =>
+const BILL = { id: "b1", supplier: "Any Supply", bill_number: null, amount: 40, status: "unpaid", bill_date: "2026-09-10", job_id: null, category: "Fuel" };
+const render = (switches?: { features: typeof ALL_ON; isOwner: boolean }, bills: unknown[] = []) =>
   renderToStaticMarkup(
-    createElement(BillsReceipts, { orgId: "o1", jobs: [], lists: [], pos: [PO] as never, bills: [], docs: [], ...(switches ? { switches } : {}) }),
+    createElement(BillsReceipts, { orgId: "o1", jobs: [], lists: [], pos: [PO] as never, bills: bills as never, docs: [], ...(switches ? { switches } : {}) }),
   );
 
-describe("the Purchase Orders tab", () => {
-  it("everything on (or nothing passed): the chip, New PO, the list", () => {
+describe("purchase orders in the one list", () => {
+  it("everything on (or nothing passed): the order's row with its PO chip, New PO on the list's ⋯", () => {
     search = "tab=po";
     for (const html of [render(), render({ features: ALL_ON, isOwner: true })]) {
-      expect(html).toMatch(/border-b-2[^>]*>Purchase Orders/);
+      expect(html).not.toMatch(/border-b-2[^>]*>Purchase Orders/);
       expect(html).toContain(">New PO<");
-      expect(html).toContain("PO-007");
+      expect(html).toMatch(/<a[^>]*href="\/purchasing\/po1"[^>]*>[\s\S]*?>PO<\/span>[\s\S]*?PO-007/);
       expect(html).not.toContain(" · Off");
     }
   });
 
-  it("off: no chip and no New PO; ?tab=po still opens every PO, under the Off line", () => {
+  it("?tab=po (from /purchasing): the list opens with the orders first", () => {
+    search = "tab=po";
+    const html = render(undefined, [BILL]);
+    expect(html).toMatch(/<details id="all-bills"[^>]*open=""/);
+    expect(html.indexOf("PO-007")).toBeLessThan(html.indexOf('id="bill-b1"'));
+    search = "";
+    const plain = render(undefined, [BILL]);
+    expect(plain).not.toMatch(/<details id="all-bills"[^>]*open=""/);
+    expect(plain.indexOf('id="bill-b1"')).toBeLessThan(plain.indexOf("PO-007"));
+  });
+
+  it("off: no New PO; ?tab=po still shows every PO, under the Off line", () => {
     search = "tab=po";
     const html = render({ features: { ...ALL_ON, purchase_orders: false }, isOwner: false });
-    expect(html).not.toMatch(/border-b-2[^>]*>Purchase Orders/);
     expect(html).not.toContain(">New PO<");
     expect(html).toContain("PO-007");
     expect(html).toContain("Purchase Orders</span> · Off · Ask The Owner");

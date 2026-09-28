@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 
-// Purchasing is consolidated under Bills & Purchasing. Individual PO pages
-// still live at /purchasing/[id]; the old list URL now points there.
+// Purchase orders live in Bills' one list (All Bills, W1-32), each a row with a PO chip; a PO's own
+// page is still /purchasing/[id]. The old list URL lands there with the orders first (?tab=po).
 export default function PurchasingIndexRedirect() {
   redirect("/bills?tab=po");
 }

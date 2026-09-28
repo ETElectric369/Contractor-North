@@ -49,7 +49,7 @@ const TONES: Record<string, string> = {
   suppliers: "bg-violet-700",
   crew: "bg-amber-600",
   draw: "bg-green-600",
-  petty: "bg-orange-400",
+  cash_out: "bg-orange-400",
   not_cost: "bg-cyan-800",
   personal: "bg-slate-600",
   books: "bg-stone-300",
@@ -317,7 +317,7 @@ export function BankCard({ itemId, view, run, busy, working }: { itemId: string;
               </ul>
             )}
             <p className="text-xs text-slate-500">
-              Matched means it is already in North (a payment, a bill, a supplier or crew payment): Apply only marks it, never adds it again. Owner&apos;s Draw and Personal are kept as the bank line only, never a cost.
+              Matched means it is already in North (a payment, a bill, a supplier or crew payment): Apply only marks it, never adds it again. Owner&apos;s Draw, Personal and Cash Taken Out are kept as the bank line only, never a cost; cash counts when its receipts come in.
             </p>
             {view.rules.length > 0 && (
               <div>

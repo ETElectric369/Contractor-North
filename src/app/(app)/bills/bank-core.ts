@@ -27,6 +27,8 @@ import {
   planBankDownload,
   readBankTable,
   sayRange,
+  storedChoice,
+  storedChoiceName,
   validPicks,
   type BankAppliedPass,
   type BankBooks,
@@ -49,7 +51,7 @@ import { OWNER_SORTS_BANK, viewerSortsBank } from "@/lib/bank-viewer";
  * on top of RLS, which holds bank_lines and bank_rules to the company's staff (0363). Every write
  * comes back with .select("id"): a zero-row write is a 204, and a 204 reads exactly like success.
  *
- * BEFORE 0363 IS APPLIED nothing crashes: the download still lands in Sort These, and its card
+ * BEFORE 0363 IS APPLIED nothing crashes: the download still lands under Needs You on Bills, and its card
  * says it needs one database update.
  */
 
@@ -225,7 +227,7 @@ export async function loadBankBooks(supabase: Db, orgId: string, dl: BankDownloa
   const alreadyMap: BankBooks["already"] = new Map();
   for (const r of alreadyR as { data: any[] | null }[]) {
     for (const row of r.data ?? []) {
-      alreadyMap.set(String(row.line_key), { choice: String(row.choice), bucket: row.bucket ?? null, amountCents: centsOf(row.amount) });
+      alreadyMap.set(String(row.line_key), { choice: storedChoiceName(String(row.choice)), bucket: row.bucket ?? null, amountCents: centsOf(row.amount) });
     }
   }
   const aliases = new Map<string, string[]>();
@@ -292,7 +294,9 @@ export async function loadBankBooks(supabase: Db, orgId: string, dl: BankDownloa
       id: String(r.id),
       direction: r.direction === "in" ? "in" : "out",
       key: String(r.merchant_key ?? ""),
-      choice: r.choice,
+      // A rule stored under the old word for Cash Taken Out (an ATM answered Petty Cash) is Cash
+      // Taken Out now: it writes nothing, and there is no cash-box balance to top up (W1-34).
+      choice: storedChoiceName(String(r.choice)) as BankBooks["rules"][number]["choice"],
       bucket: r.bucket ?? null,
       supplierAccountId: r.supplier_account_id ?? null,
       profileId: r.profile_id ?? null,
@@ -459,7 +463,7 @@ export function depositMethod(description: string): string {
  * (org_id, line_key)), and each money row marked once (its UNIQUE bank_line_id).
  *
  * Rows the person left for later write nothing and stay on the card, named as not counted: the row
- * goes back to Sort These with only them.
+ * goes back under Needs You with only them.
  */
 export async function applyBankCore(
   supabase: Db,
@@ -557,7 +561,8 @@ export async function applyBankCore(
       description: w.line.description,
       check_number: w.line.check,
       merchant_key: w.line.merchantKey,
-      choice: c ? c.choice : "matched",
+      // The stored word (0363's CHECK): Cash Taken Out keeps the word it replaced (storedChoice).
+      choice: c ? storedChoice(c) : "matched",
       bucket: c?.choice === "cost" ? c.bucket : null,
       supplier_account_id: c?.choice === "supplier" ? c.supplierAccountId : null,
       profile_id: c?.choice === "crew" ? c.profileId : null,
@@ -638,13 +643,10 @@ export async function applyBankCore(
     }
   }
 
-  for (const w of work.filter((x) => written(x) && x.choice?.choice === "petty_cash")) {
-    const { data, error } = await supabase
-      .from("petty_cash")
-      .insert({ org_id: who.orgId, tx_date: w.line.postedOn, kind: "replenish", amount: -w.line.cents / 100, description: `ATM withdrawal. ${note}`.slice(0, 300), job_id: null, created_by: who.userId, bank_line_id: lineId.get(w.line.key) })
-      .select("id");
-    if (error || !data?.length) await unwrite([w.line.key], `The petty cash top-up of ${w.line.postedOn} wasn't written.${error ? ` ${dbError(error)}` : ""}`);
-  }
+  // CASH TAKEN OUT (NOT A COST) WRITES NOTHING (Erik, 2026-09-27; W1-34), like Not A Cost (Transfer):
+  // the bank line is counted, and the cash counts only when its receipts come in, each filed as a cost
+  // paid with cash. There is no cash-box balance to top up. (A petty-cash top-up someone had already
+  // written is MATCHED above, so it counts once, and this download's Undo still takes its mark off.)
 
   for (const w of work.filter((x) => written(x) && x.choice?.choice === "supplier")) {
     const c = w.choice as Extract<BankChoice, { choice: "supplier" }>;
@@ -792,7 +794,7 @@ export async function applyBankCore(
         org_id: who.orgId,
         direction: l.direction,
         merchant_key: l.key,
-        choice: l.c.choice,
+        choice: storedChoice(l.c),
         bucket: l.c.choice === "cost" ? l.c.bucket : null,
         supplier_account_id: l.c.choice === "supplier" ? l.c.supplierAccountId : null,
         profile_id: l.c.choice === "crew" ? l.c.profileId : null,
@@ -881,8 +883,9 @@ type LineRow = { id: string; choice: string; amount: number | string; bucket: st
  *   · a bill it wrote is deleted while it is still that business cost (0278 still refuses one an
  *     invoice bills); a payment it put on an invoice is deleted and the invoice recomputed;
  *   · a supplier or crew payment it wrote is voided (never deleted: the undo-trail law);
- *   · a petty cash top-up it wrote is deleted while it is still that top-up (same amount, still a
- *     replenish);
+ *   · a petty cash top-up it wrote (an ATM line applied before W1-34, when it still wrote one) is
+ *     deleted while it is still that top-up (same amount, still a replenish); Cash Taken Out wrote
+ *     nothing, so its line alone comes off;
  *   · a row it only MATCHED keeps everything and loses the mark;
  *   · the rules it learned come off, and its lines are deleted (every mark with them, ON DELETE SET
  *     NULL). A line whose row stays (changed since, or refused) stays counted, and is named.

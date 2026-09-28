@@ -14,7 +14,7 @@ import { normalizeDocNumber } from "@/lib/same-purchase";
  * asks a person once, and the answer is remembered on that supplier's account (the caller keeps it).
  * CED's portal download is the first fixture, never the rule.
  *
- * PURE: no database, no browser. The doors (Drop Paperwork, Organize, the paste box, a statement
+ * PURE: no database, no browser. The doors (Snap Or Note, Organize, the paste box, a statement
  * PDF, a statement a model read off a scan) turn what they hold into an OpenList here; the page
  * reconciles it against the account's papers here; Apply writes what the plan says, and only after
  * a person presses it.

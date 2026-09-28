@@ -10,6 +10,7 @@ import {
   cleanDescription,
   everyChoice,
   findBankHeader,
+  flowLabelOf,
   guessFor,
   isBareCheck,
   lookalikePayment,
@@ -26,7 +27,10 @@ import {
   readBankTable,
   redactDigits,
   ruleFor,
+  ruleChoice,
   depositKindOf,
+  storedChoice,
+  storedChoiceName,
   swapDownloadSigns,
   last4FromName,
   withAccountLast4,
@@ -676,6 +680,47 @@ describe("matching what is already on the books (exact cents, each row once)", (
   });
 });
 
+/**
+ * CASH TAKEN OUT (NOT A COST) (Erik, 2026-09-27; W1-34). A bank's ATM line is cash that left the
+ * bank: no cost yet (its receipts, filed as costs paid with cash, are), never the owner's draw, and no
+ * cash box to top up. It was Petty Cash (ATM), which wrote a top-up; now it writes nothing, is guessed
+ * for an ATM, and has its own segment in Where The Money Went. A top-up someone already wrote still
+ * matches, so it counts once.
+ */
+describe("Cash Taken Out (Not A Cost)", () => {
+  const names = { accounts: new Map(), crew: new Map(), invoices: new Map() };
+
+  it("is the ATM's guess and its button, in Title Case, and Petty Cash (ATM) is no answer any more", () => {
+    const dl = download();
+    const plan = planBankDownload(dl, ORG_BOOKS());
+    const atm = plan.groups.find((g) => g.label.includes("ATM"))!;
+    expect(atm.guess).toBe("cash_out");
+    expect(atm.buttons).toContain("cash_out");
+    expect(choiceLabel({ choice: "cash_out" }, names)).toBe("Cash Taken Out (Not A Cost)");
+    const outs = everyChoice("out", ORG_BOOKS(), true).map((c) => choiceLabel(c, names));
+    expect(outs).toContain("Cash Taken Out (Not A Cost)");
+    expect(outs).not.toContain("Petty Cash (ATM)");
+  });
+
+  it("is stored under the word 0363's CHECK allows, and read back as itself (a pick saved before reads the same)", () => {
+    expect(storedChoice({ choice: "cash_out" })).toBe("petty_cash");
+    expect(storedChoice({ choice: "not_cost" })).toBe("not_cost");
+    expect(storedChoiceName("petty_cash")).toBe("cash_out");
+    expect(storedChoiceName("draw")).toBe("draw");
+    expect(parseChoiceId("petty_cash")).toEqual({ choice: "cash_out" });
+    expect(parseChoiceId("cash_out")).toEqual({ choice: "cash_out" });
+  });
+
+  it("has its own segment in Where The Money Went, for a line applied now and one applied as a top-up before", () => {
+    expect(flowLabelOf("cash_out", null)).toEqual({ key: "cash_out", label: "Cash Taken Out" });
+    expect(flowLabelOf("petty_cash", null)).toEqual({ key: "cash_out", label: "Cash Taken Out" });
+    expect(flowLabelOf("not_cost", null)).toEqual({ key: "not_cost", label: "Transfers" });
+    // A rule a person made when it was still Petty Cash (ATM) now answers Cash Taken Out.
+    const rule: BooksRule = { id: "r-atm", direction: "out", key: "atm withdrawal", choice: storedChoiceName("petty_cash") as BooksRule["choice"], bucket: null, supplierAccountId: null, profileId: null };
+    expect(ruleChoice(rule, ORG_BOOKS())).toEqual({ choice: "cash_out" });
+  });
+});
+
 describe("the company's own rules", () => {
   const rule = (over: Partial<BooksRule>): BooksRule => ({ id: "r", direction: "out", key: "shell", choice: "cost", bucket: "Fuel", supplierAccountId: null, profileId: null, ...over });
 
@@ -795,7 +840,8 @@ describe("what needs a person: one row per merchant, the guess first and never p
     expect(shell.buttons).toEqual(["cost:Fuel", "cost:Auto", "personal"]);
     expect(plan.groups.find((g) => g.label.includes("ACME INSURANCE"))!.guess).toBe("cost:Insurance & Licenses");
     expect(plan.groups.find((g) => g.label.includes("SERVICE FEE"))!.guess).toBe("cost:Fees");
-    expect(plan.groups.find((g) => g.label.includes("ATM"))!.guess).toBe("petty_cash");
+    // An ATM is Cash Taken Out (Not A Cost), W1-34: never a petty-cash top-up any more.
+    expect(plan.groups.find((g) => g.label.includes("ATM"))!.guess).toBe("cash_out");
     expect(plan.groups.find((g) => g.label.includes("ONLINE TRANSFER"))!.guess).toBe("draw");
     // Nothing the words know: no guess, and the row still asks.
     expect(plan.groups.find((g) => g.label.includes("DENTAL"))!.guess).toBeNull();
@@ -808,7 +854,7 @@ describe("what needs a person: one row per merchant, the guess first and never p
     expect(guessFor(line("Withdrawal POS #123456 SHELL OIL"), books)).toEqual({ choice: "cost", bucket: "Fuel" });
     expect(guessFor(line("ONLINE TRANSFER WITHDRAWAL TO XXXXXX9876"), books)).toEqual({ choice: "draw" });
     expect(guessFor(line("Withdrawal ACH ACME INSURANCE"), books)).toEqual({ choice: "cost", bucket: "Insurance & Licenses" });
-    expect(guessFor(line("ATM WITHDRAWAL 000123 MAIN ST"), books)).toEqual({ choice: "petty_cash" });
+    expect(guessFor(line("ATM WITHDRAWAL 000123 MAIN ST"), books)).toEqual({ choice: "cash_out" });
     // A truck stop is a fill-up, never Auto for its "truck"; a truck's repair or a fuel brand's car
     // wash is still Auto.
     for (const d of ["FLYING J TRUCK STOP 0612", "PILOT TRUCK STOP 00123", "PILOT_00123 ANYTOWN", "ANYTOWN TRUCK STOPS INC", "TA TRAVEL CENTER 0123", "ANYTOWN TRAVEL PLAZA"])
@@ -940,7 +986,7 @@ describe("the card and the person's answers", () => {
   });
 
   it("choice ids read back exactly; a bucket is the whole answer, Fuel and Auto included", () => {
-    for (const id of ["cost:Fuel", "cost:Auto", "cost:Fees", "draw", "personal", "petty_cash", "not_cost", "other_income", "not_income", "crew:abcdef12", "supplier:abcdef12", "invoice:abcdef12"]) {
+    for (const id of ["cost:Fuel", "cost:Auto", "cost:Fees", "draw", "personal", "cash_out", "not_cost", "other_income", "not_income", "crew:abcdef12", "supplier:abcdef12", "invoice:abcdef12"]) {
       expect(choiceId(parseChoiceId(id)!)).toBe(id);
     }
     expect(parseChoiceId("cost:Fuel")).toEqual({ choice: "cost", bucket: "Fuel" });

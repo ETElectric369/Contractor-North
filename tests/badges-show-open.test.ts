@@ -126,9 +126,10 @@ describe("every tab count in the app is an open count", () => {
       }
     }
     expect(bad).toEqual([]);
-    // The scan really reads the strips (job 10, customer 3, bills 2, Organize 1), so it can't pass by
-    // matching nothing.
-    expect(seen).toBeGreaterThanOrEqual(16);
+    // The scan really reads the strips (job 11, customer 3, Organize 1), so it can't pass by matching
+    // nothing. /bills has no tab strip any more: All Bills is one searchable list (W1-32), led by
+    // what's open on its own line.
+    expect(seen).toBeGreaterThanOrEqual(15);
   });
 
   it("the job's Photos chip keeps its total (Erik's exception), Time carries no badge, and Materials counts only what's to buy", () => {
@@ -168,6 +169,14 @@ describe("the chrome's other numbers", () => {
     const layout = read("app/(app)/layout.tsx");
     expect(layout).toContain('return { "/planner": needsAction, "/leads": freshLeads };');
     expect(layout).toMatch(/\.eq\("status", "new"\)\s*\.is\("converted_at", null\)/);
+  });
+
+  it("the Sales dot counts only the leads due now: a lead snoozed from Needs You waits for its day, like its row", () => {
+    const layout = read("app/(app)/layout.tsx");
+    // Right after the two pinned calls, the same rule as Needs You's lead read: no day, or a day that
+    // has come, by the company's today.
+    expect(layout).toMatch(/\.eq\("status", "new"\)\s*\.is\("converted_at", null\)\s*\.or\(`next_follow_up_at\.is\.null,next_follow_up_at\.lte\.\$\{today\}`\)/);
+    expect(layout).toMatch(/const today = todayStrInTz\(getOrgSettings\(\(await orgP\)\?\.settings\)\.timezone/);
   });
 
   it("the bell counts unread notifications only, as the database counts them (never the 20 lines it shows)", () => {

@@ -194,7 +194,7 @@ describe("a pick on a row that left the card", () => {
 
 describe("where the money went: one colour per segment", () => {
   it("no two segments share a colour", () => {
-    const keys = ["fuel", "business", "materials", "suppliers", "crew", "draw", "petty", "not_cost", "personal", "books", "need", "other"];
+    const keys = ["fuel", "business", "materials", "suppliers", "crew", "draw", "cash_out", "not_cost", "personal", "books", "need", "other"];
     expect(new Set(keys.map(toneOf)).size).toBe(keys.length);
   });
 });

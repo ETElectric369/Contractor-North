@@ -3,22 +3,26 @@
 import { useEffect, useRef, useState, useTransition } from "react";
 import { DropTarget } from "@/components/drop-target";
 import { useRouter } from "next/navigation";
-import { Wallet, DollarSign, Camera, Check, Paperclip } from "lucide-react";
+import { Wallet, DollarSign, Camera, Check, Paperclip, Keyboard, FileUp } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { Input, Label, Select } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { Button } from "@/components/ui/button";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { SegmentedControl } from "@/components/ui/segmented";
+import { Fold } from "@/components/why-fold";
 import { todayStrInTz } from "@/lib/tz";
 import { getOrgSettings } from "@/lib/org-settings";
-import { formatCurrency } from "@/lib/utils";
+import { formatCurrency, formatDate } from "@/lib/utils";
+import { callOrLost } from "@/lib/lost-signal";
 import { DIFFERENT_PURCHASE_DOOR, fileReceiptDocument } from "@/lib/receipt-capture";
-import { createBill, linkReceiptToBill } from "@/app/(app)/jobs/actions";
+import { createBill, deleteBill, linkReceiptToBill } from "@/app/(app)/jobs/actions";
 import { billJobReceipt } from "@/app/(app)/organize/actions";
 import { jobLabel } from "@/lib/schedule-options";
+import { jobPickLabel } from "@/lib/job-pick-label";
 import { useToast } from "@/components/toast";
-import { BUSINESS_COST_BUCKETS } from "@/lib/business-cost-buckets";
+import { openSnapOrNote } from "@/components/snap-or-note";
+import { BUSINESS_COST_BUCKETS, type BusinessCostBucket } from "@/lib/business-cost-buckets";
 
 // What a cost ON A JOB is. A cost with no job is a business cost and picks from the business-cost buckets
 // instead (lib/business-cost-buckets), the same list every other no-job door uses.
@@ -48,12 +52,52 @@ function onPhone() {
 const DEFAULT_TRIGGER =
   "inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50";
 
+type QuickCostProps = {
+  orgId?: string;
+  jobId?: string;
+  jobs?: { id: string; label: string }[];
+  label?: string;
+  /** On a phone, open the sheet camera first: Snap the Bill leads the sheet and the Supplier
+   *  field doesn't grab focus, so no keyboard comes up over the camera door. My Day sets it (the
+   *  person there is standing at the truck with the paper in hand). */
+  snapFirst?: boolean;
+  /** Trigger glyph. A STRING (not a LucideIcon reference) so server components can
+   *  pick it across the RSC boundary. The job action dock passes "dollar": at icon
+   *  size a wallet and the Materials tab's Package box share the same rounded-rect
+   *  silhouette — $ is unmistakable at a glance (Erik's 60mph feedback, 7/14). "none" is a plain
+   *  text link (/bills' Add By Hand). */
+  icon?: "wallet" | "dollar" | "keyboard" | "none";
+  className?: string;
+  /** Fired when the modal OPENS. Do NOT unmount this component here (it would kill
+   *  the modal) — use it for side effects only. */
+  onOpen?: () => void;
+  /** Fired when the modal CLOSES — e.g. a host dropdown closes itself then. */
+  onClose?: () => void;
+  /** The Nort switch (0352, rule k). The receipt reader works either way; with Nort off it is
+   *  never called Nort. Default on: a mount that doesn't pass it reads as today. */
+  nortOn?: boolean;
+  /**
+   * TYPE IT IN (W1-23, W1-32): THE ONE TYPED COST SHEET, for a cost with no paper to snap. The job's
+   * Costs tab ⋯ opens it with the job preselected; /bills' Add By Hand opens it with the job picker.
+   * No receipt block here: a paper goes in through Snap The Bill or Snap Or Note.
+   */
+  typeOnly?: boolean;
+  /** The Shop Stock switch (0352), for the typed sheet's What's It For?. Absent = off (no row). */
+  shopStock?: boolean;
+  /** The host's read of the jobs failed (its `jobs` is empty for that reason, not because there are
+   *  none): the typed sheet says it couldn't load them, never "no jobs yet". */
+  jobsUnread?: boolean;
+};
+
 /**
- * THE one "add a cost" everywhere — supplier + amount + category + an optional
- * receipt photo (the camera on mobile), scoped to a job or to the business (a business cost,
- * in one of the business-cost buckets). Wraps
- * createBill (a cost = a bill) plus THE receipt pipeline (lib/receipt-capture) for the photo, so every surface
- * logs a cost the same way.
+ * THE one "add a cost" everywhere. Two sheets behind one button:
+ *
+ *   · the snap sheet (My Day's Now card): supplier + amount + category + an optional receipt photo
+ *     (the camera on mobile), with Read the Receipt / Type It In once a paper is attached;
+ *   · TYPE IT IN (`typeOnly`): the one typed cost sheet, for a cost with no paper (the job's Costs
+ *     tab ⋯, and /bills' Add By Hand).
+ *
+ * Both save through createBill (a cost = a bill), so every surface logs a cost the same way.
  *
  * Drop it anywhere: pass `jobId` to pre-scope it, or `jobs` for a picker. If
  * neither `orgId` nor `jobs` is supplied (e.g. the global + menu), it self-loads
@@ -64,7 +108,19 @@ const DEFAULT_TRIGGER =
  * upload is never silently dropped — the modal stays open with a notice and a
  * one-tap retry (the cost is already safe).
  */
-export function QuickCostButton({
+export function QuickCostButton(props: QuickCostProps) {
+  return props.typeOnly ? <TypeItInButton {...props} /> : <SnapCostButton {...props} />;
+}
+
+/** The trigger's glyph, by name. */
+function TriggerIcon({ icon }: { icon: QuickCostProps["icon"] }) {
+  if (icon === "none") return null;
+  if (icon === "dollar") return <DollarSign className="h-4 w-4 shrink-0" />;
+  if (icon === "keyboard") return <Keyboard className="h-4 w-4 shrink-0" />;
+  return <Wallet className="h-4 w-4 shrink-0" />;
+}
+
+function SnapCostButton({
   orgId,
   jobId,
   jobs,
@@ -75,32 +131,7 @@ export function QuickCostButton({
   onOpen,
   onClose,
   nortOn = true,
-}: {
-  orgId?: string;
-  jobId?: string;
-  jobs?: { id: string; label: string }[];
-  label?: string;
-  /** On a phone, open the sheet camera first: Snap the Bill leads the sheet and the Supplier
-   *  field doesn't grab focus, so no keyboard comes up over the camera door. My Day sets it (the
-   *  person there is standing at the truck with the paper in hand). The Costs tab's sheet leaves
-   *  it off, because that sheet is the typed door for costs with no paper, next to its own Snap
-   *  the Bill. */
-  snapFirst?: boolean;
-  /** Trigger glyph. A STRING (not a LucideIcon reference) so server components can
-   *  pick it across the RSC boundary. The job action dock passes "dollar": at icon
-   *  size a wallet and the Materials tab's Package box share the same rounded-rect
-   *  silhouette — $ is unmistakable at a glance (Erik's 60mph feedback, 7/14). */
-  icon?: "wallet" | "dollar";
-  className?: string;
-  /** Fired when the modal OPENS. Do NOT unmount this component here (it would kill
-   *  the modal) — use it for side effects only. */
-  onOpen?: () => void;
-  /** Fired when the modal CLOSES — e.g. a host dropdown closes itself then. */
-  onClose?: () => void;
-  /** The Nort switch (0352, rule k). The receipt reader works either way; with Nort off it is
-   *  never called Nort. Default on: a mount that doesn't pass it reads as today. */
-  nortOn?: boolean;
-}) {
+}: QuickCostProps) {
   const router = useRouter();
   const fileRef = useRef<HTMLInputElement>(null);
   const captureRef = useRef<HTMLInputElement>(null);
@@ -226,7 +257,7 @@ export function QuickCostButton({
     const input = captureRef.current;
     if (!input) {
       if (fileRef.current) return fileRef.current.click();
-      return setError("Couldn't open the camera or your photos on this device. Add the receipt later from the job's Receipts & Papers.");
+      return setError(NO_PICKER_LINE("the camera or your photos"));
     }
     clearSnapWatch();
     try {
@@ -263,7 +294,7 @@ export function QuickCostButton({
   function pickFromLibrary() {
     setCameraHint(null);
     if (fileRef.current) return fileRef.current.click();
-    setError("Couldn't open your photos on this device. Add the receipt later from the job's Receipts & Papers.");
+    setError(NO_PICKER_LINE("your photos"));
   }
 
   // THE RELOAD THAT EATS THE SHEET. In the iOS shell the camera can push the web view out of
@@ -443,7 +474,7 @@ export function QuickCostButton({
       if (!receipt || !targetJob) return finishOk();
       start(async () => {
         const docId = await attachReceipt(targetJob);
-        if (!docId) return setWarn(`Still couldn't attach it — the receipt ${attachClause()}. You can add it later from the job's Receipts & Papers.`);
+        if (!docId) return setWarn(`Still couldn't attach it — the receipt ${attachClause()}. ${RETRY_HERE_LINE}`);
         // Link it to the cost we already saved, so this file can never be read as a NEW cost.
         if (savedBillId) await linkReceiptToBill(savedBillId, docId);
         finishOk();
@@ -506,7 +537,7 @@ export function QuickCostButton({
       setCostSaved(true);
       setSavedBillId(res.id ?? null);
       if (receipt && targetJob && !docId) {
-        setWarn(`Cost saved ✓ — but the receipt ${attachClause()}. Tap Retry Receipt, or close and add it from the job's Receipts & Papers.`);
+        setWarn(`Cost saved ✓ — but the receipt ${attachClause()}. ${RETRY_HERE_LINE}`);
         return;
       }
       finishOk();
@@ -629,7 +660,7 @@ export function QuickCostButton({
   return (
     <>
       <button type="button" className={className ?? DEFAULT_TRIGGER} onClick={openModal}>
-        {icon === "dollar" ? <DollarSign className="h-4 w-4 shrink-0" /> : <Wallet className="h-4 w-4 shrink-0" />} {label}
+        <TriggerIcon icon={icon} /> {label}
       </button>
       {/* portal: one mount of this button sits INSIDE the job action dock's
           `glass glass-menu` bar — backdrop-filter makes that bar the containing
@@ -708,6 +739,427 @@ export function QuickCostButton({
           </label>
           {!snapTop && !sameAsDoc && receiptBlock}
           {warn && <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-700">{warn}</p>}
+          {error && <p className="text-sm text-red-600">{error}</p>}
+        </div>
+      </Modal>
+    </>
+  );
+}
+
+// ── TYPE IT IN: THE ONE TYPED COST SHEET ───────────────────────────────────────────────────────
+
+/** What's It For?, besides a job's id: a cost of running the business, or stock for the shop. */
+const BUSINESS = "__business";
+const STOCK = "__stock";
+
+/**
+ * STOCK GOES IN BY THE PIECE, FROM THE TICKET'S LINES (Shop Stock, 0303): each line a person counts
+ * becomes a roll with its own cost, which a typed amount has none of. So Shop Stock here is a door,
+ * never a guessed save: the paper goes in through Snap Or Note, whose card has Shop Stock.
+ */
+/**
+ * WHERE A RECEIPT GOES WHEN THIS SHEET CAN'T TAKE IT (review of W1-23: Receipts & Papers has no
+ * uploader any more, so the old sentences sending a receipt there named a door that isn't there).
+ * Before the cost is saved: the job's Costs tab's Snap The Bill reads the cost off the paper, so it is
+ * one door or the other, never both. After it is saved: only Retry Receipt ties the paper to THIS cost;
+ * Snap The Bill or Upload would read it into a second bill for the same money.
+ */
+export const NO_PICKER_LINE = (what: string) =>
+  `Couldn't open ${what} on this device. Type the cost here without the receipt, or close this and use Snap The Bill on the job's Costs tab, which reads the cost off the paper. Not both: that would record it twice.`;
+export const RETRY_HERE_LINE =
+  "The cost is saved: tap Retry Receipt when you have signal. Don't put this receipt in through the job's Snap The Bill or Upload, which would record the cost a second time.";
+
+/** The typed sheet's jobs couldn't be read: a job's cost waits for a reload, never becomes a business cost. */
+export const JOBS_UNREAD_LINE = "Couldn't load your jobs just now. Reload the page to put this cost on a job.";
+
+export const SHOP_STOCK_BY_PAPER =
+  "Stock goes in by the piece, from the ticket's lines, so it comes in on paper: snap or drop the ticket in Snap Or Note, then tap Shop Stock on its card.";
+
+export { jobPickLabel };
+
+export type TypedCostFields = {
+  amount: number;
+  date: string;
+  /** A job's id, BUSINESS, STOCK, or "" (nothing picked yet). */
+  target: string;
+  bucket: BusinessCostBucket | null;
+  where: string;
+  paid: "paid" | "unpaid";
+  billNumber: string;
+  poId: string;
+};
+
+/**
+ * WHY A TYPED COST CAN'T BE SAVED YET, in plain words; null when it can. Pure, so the rules are
+ * pinned: A BLANK JOB IS NOT A BUSINESS COST (no job has to be said out loud, with its bucket), NO
+ * BUCKET IS PICKED FOR HIM (a preselected one files every cost nobody looked at under the same
+ * word), and a job's cost says where it was bought (createBill needs a supplier).
+ */
+export function typedCostProblem(f: Pick<TypedCostFields, "amount" | "date" | "target" | "bucket" | "where">): string | null {
+  if (!(f.amount > 0)) return "Type the amount.";
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(f.date)) return "Pick the day it was bought.";
+  if (!f.target) return "Pick the job it's for, or Business Cost and its bucket.";
+  if (f.target === STOCK) return SHOP_STOCK_BY_PAPER;
+  if (f.target === BUSINESS) return f.bucket ? null : "Tap the bucket this business cost goes in.";
+  if (!f.where.trim()) return "Say where it was bought (the supplier).";
+  return null;
+}
+
+/**
+ * WHAT createBill IS HANDED for a typed cost. Pure: ON ACCOUNT IS NEVER SAVED AS PAID; a business
+ * cost with no Where is saved under its bucket's own name (one fixed placeholder per bucket, never
+ * a made-up supplier per month; /bills keeps those out of its supplier-spelling list); a job's cost
+ * is Materials, and says which of the job's orders it pays when one is picked.
+ */
+export function typedCostBill(f: TypedCostFields): Parameters<typeof createBill>[0] {
+  const business = f.target === BUSINESS;
+  return {
+    job_id: business ? null : f.target,
+    supplier: f.where.trim() || (business && f.bucket ? f.bucket : ""),
+    bill_number: f.billNumber.trim(),
+    amount: f.amount,
+    status: f.paid === "unpaid" ? "unpaid" : "paid",
+    bill_date: f.date,
+    notes: "",
+    category: business ? f.bucket : "Materials",
+    po_id: business ? null : f.poId || null,
+  };
+}
+
+/** A purchase order on the chosen job that a bill may say it pays: a real order, never a draft
+ *  that was never sent or a cancelled one (neither is a cost, so paying one would mean nothing). */
+type LivePo = { id: string; po_number: string | null; vendor: string | null; total: number };
+
+/** A 44px either-or button, filled when it is the one picked. */
+const choiceCls = (on: boolean) =>
+  `flex min-h-11 w-full items-center justify-center rounded-lg border px-3 py-2 text-center text-sm font-medium leading-tight ${
+    on ? "border-brand bg-brand text-white" : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+  }`;
+
+/**
+ * THE ONE TYPED COST SHEET (W1-23, W1-32). Amount, the day, What's It For? (a job, Business Cost and
+ * its bucket, or Shop Stock while that switch is on), Where, Paid? (Already Paid, or On Account and
+ * still owed), a Bill # under More, and the job's own purchase order when it has one. It saves
+ * through createBill as it is, then says what landed where, with an Undo (deleteBill).
+ */
+function TypeItInButton({
+  jobId,
+  jobs,
+  label = "Type It In",
+  icon = "keyboard",
+  className,
+  onOpen,
+  onClose,
+  shopStock = false,
+  jobsUnread = false,
+}: QuickCostProps) {
+  const router = useRouter();
+  const toast = useToast();
+  const [open, setOpen] = useState(false);
+  const [amount, setAmount] = useState(0);
+  const [date, setDate] = useState(() => todayStrInTz(getOrgSettings(null).timezone));
+  // Today is only a seed until a person changes the day; the company's today replaces it once read.
+  const dateTouched = useRef(false);
+  const [target, setTarget] = useState<string>(jobId ?? "");
+  const [bucket, setBucket] = useState<BusinessCostBucket | null>(null);
+  const [where, setWhere] = useState("");
+  const [paid, setPaid] = useState<"paid" | "unpaid">("paid");
+  const [billNumber, setBillNumber] = useState("");
+  const [poId, setPoId] = useState("");
+  // The chosen job's live orders, read by the sheet itself so no page has to hand them over.
+  const [pos, setPos] = useState<{ jobId: string; list: LivePo[]; failed: boolean } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [pending, start] = useTransition();
+  const [autoJobs, setAutoJobs] = useState<{ id: string; label: string }[] | null>(null);
+  // The sheet's own jobs read failed (no signal): said as that, never as "no jobs yet".
+  const [autoJobsFailed, setAutoJobsFailed] = useState(false);
+  const orgTz = useRef<string | null>(null);
+
+  const pickerJobs = jobs ?? autoJobs ?? [];
+  const jobTarget = target && target !== BUSINESS && target !== STOCK ? target : null;
+  const dirty = amount > 0 || !!where.trim() || !!bucket || !!billNumber.trim() || (!jobId && !!target);
+
+  function reset() {
+    setAmount(0);
+    dateTouched.current = false;
+    setDate(todayStrInTz(orgTz.current ?? getOrgSettings(null).timezone));
+    setTarget(jobId ?? "");
+    setBucket(null);
+    setWhere("");
+    setPaid("paid");
+    setBillNumber("");
+    setPoId("");
+    setError(null);
+  }
+
+  async function openSheet() {
+    reset();
+    onOpen?.();
+    setOpen(true);
+    // Best effort, both: the day stays the device's today and the picker offers Business Cost when
+    // either read can't be made (no signal), and the save itself says what happened. A jobs read that
+    // failed says so on the sheet, so an empty picker is never read as "no jobs yet".
+    const loadJobs = !jobId && !jobs && !autoJobs;
+    try {
+      const supabase = createClient();
+      if (orgTz.current == null) {
+        const { data } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
+        orgTz.current = getOrgSettings((data as { settings?: unknown } | null)?.settings).timezone;
+        if (!dateTouched.current) setDate(todayStrInTz(orgTz.current));
+      }
+      if (loadJobs) {
+        const { data } = await supabase
+          .from("jobs")
+          .select("id, job_number, name")
+          .neq("status", "cancelled")
+          .order("created_at", { ascending: false })
+          .limit(200);
+        if (data) {
+          setAutoJobsFailed(false);
+          setAutoJobs((data as { id: string; job_number: string | null; name: string | null }[]).map((j) => ({ id: j.id, label: jobPickLabel(j) })));
+        } else setAutoJobsFailed(true);
+      }
+    } catch {
+      // Nothing to undo: the sheet is open with what it has, and says the jobs couldn't load.
+      if (loadJobs) setAutoJobsFailed(true);
+    }
+  }
+
+  function close() {
+    setOpen(false);
+    onClose?.();
+  }
+
+  // THE JOB'S OWN ORDERS: the Purchase Order picker is drawn only when the chosen job has one.
+  useEffect(() => {
+    if (!open || !jobTarget || pos?.jobId === jobTarget) return;
+    let live = true;
+    void (async () => {
+      try {
+        const { data, error: readErr } = await createClient()
+          .from("purchase_orders")
+          .select("id, po_number, vendor, total, status")
+          .eq("job_id", jobTarget)
+          .not("status", "in", "(draft,cancelled)")
+          .order("created_at", { ascending: false })
+          .limit(50);
+        if (!live) return;
+        const list = ((data ?? []) as { id: string; po_number: string | null; vendor: string | null; total: number | string | null }[]).map((p) => ({
+          id: String(p.id),
+          po_number: p.po_number ?? null,
+          vendor: p.vendor ?? null,
+          total: Number(p.total) || 0,
+        }));
+        setPos({ jobId: jobTarget, list, failed: !!readErr });
+      } catch {
+        // No signal: said under the fields, never a quiet missing picker.
+        if (live) setPos({ jobId: jobTarget, list: [], failed: true });
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, [open, jobTarget, pos?.jobId]);
+  const jobPos = pos && pos.jobId === jobTarget ? pos : null;
+
+  function pickTarget(next: string) {
+    setTarget(next);
+    setPoId("");
+    setError(null);
+    if (next !== BUSINESS) setBucket(null);
+  }
+
+  function save() {
+    setError(null);
+    const fields: TypedCostFields = { amount, date, target, bucket, where, paid, billNumber, poId };
+    const problem = typedCostProblem(fields);
+    if (problem) return setError(problem);
+    const bill = typedCostBill(fields);
+    const jobName = jobTarget ? (pickerJobs.find((j) => j.id === jobTarget)?.label ?? null) : null;
+    const owed = paid === "unpaid" ? ", On Account (still owed)" : "";
+    const said =
+      target === BUSINESS
+        ? `${where.trim() ? `${where.trim()} ` : ""}${formatCurrency(amount)} saved as a Business Cost: ${bucket}, ${formatDate(date)}${owed}.`
+        : `${where.trim()} ${formatCurrency(amount)} saved on ${jobName ?? "this job"}, ${formatDate(date)}${owed}.`;
+    start(async () => {
+      // A dropped signal rejects (audit v994 SI2): the sheet and what was typed stay put, and the
+      // sentence says it MAY have saved, because a lost answer can hide a bill that landed.
+      const res = await callOrLost(() => createBill(bill), "Couldn't reach the server, so this may not have saved. Check the list before saving it again.");
+      if (!res.ok) {
+        if ("lost" in res) router.refresh();
+        return setError(res.error ?? "The cost didn't save. Nothing was recorded.");
+      }
+      const id = res.id;
+      toast(
+        said,
+        "success",
+        id
+          ? {
+              label: "Undo",
+              onClick: () => {
+                void deleteBill(id, bill.job_id ?? "").then((undone) => {
+                  toast(undone.ok ? (undone.warning ?? "Cost removed.") : (undone.error ?? "Couldn't remove it. Delete it from the list."), undone.ok ? "success" : "error");
+                  router.refresh();
+                });
+              },
+            }
+          : undefined,
+      );
+      close();
+      router.refresh();
+    });
+  }
+
+  return (
+    <>
+      <button type="button" className={className ?? DEFAULT_TRIGGER} onClick={openSheet}>
+        <TriggerIcon icon={icon} /> {label}
+      </button>
+      {/* Portaled: this sheet opens from the Costs tab's ⋯ panel, a glass (backdrop-filter) box that
+          would otherwise trap its fixed overlay. No <form> wraps it (the footer calls save). */}
+      <Modal
+        open={open}
+        onClose={close}
+        title="Type It In"
+        size="md"
+        portal
+        dirty={dirty}
+        footer={<ModalActions onCancel={close} onSave={save} saving={pending} saveLabel="Save Cost" />}
+      >
+        <div className="space-y-4">
+          {jobId && <p className="text-sm text-slate-500">A cost on this job, with no paper to snap.</p>}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label htmlFor="ti-amount">Amount</Label>
+              <NumberInput id="ti-amount" value={amount} onValueChange={setAmount} placeholder="0.00" autoFocus />
+            </div>
+            <div>
+              <Label htmlFor="ti-date">Date</Label>
+              <Input
+                id="ti-date"
+                type="date"
+                value={date}
+                onChange={(e) => {
+                  dateTouched.current = true;
+                  setDate(e.target.value);
+                }}
+              />
+            </div>
+          </div>
+
+          {!jobId && (
+            <div className="space-y-2">
+              <Label htmlFor="ti-job">What&apos;s It For?</Label>
+              {/* THE JOB PICKER FIRST, then the two things a cost can be besides a job. Nothing is
+                  picked for him: a blank job is not a business cost. */}
+              <Select id="ti-job" className="h-11" value={jobTarget ?? ""} onChange={(e) => pickTarget(e.target.value)}>
+                <option value="">Pick A Job</option>
+                {pickerJobs.map((j) => (
+                  <option key={j.id} value={j.id}>
+                    {j.label}
+                  </option>
+                ))}
+              </Select>
+              {jobsUnread || (autoJobsFailed && pickerJobs.length === 0) ? (
+                <p className="text-xs text-amber-800" role="alert">
+                  {JOBS_UNREAD_LINE}
+                </p>
+              ) : (
+                pickerJobs.length === 0 && <p className="text-xs text-slate-500">No jobs to pick from yet. A cost with no job is a Business Cost.</p>
+              )}
+              <div className={`grid gap-2 ${shopStock ? "grid-cols-2" : "grid-cols-1"}`} role="radiogroup" aria-label="Or">
+                <button type="button" role="radio" aria-checked={target === BUSINESS} onClick={() => pickTarget(BUSINESS)} className={choiceCls(target === BUSINESS)}>
+                  Business Cost
+                </button>
+                {shopStock && (
+                  <button type="button" role="radio" aria-checked={target === STOCK} onClick={() => pickTarget(STOCK)} className={choiceCls(target === STOCK)}>
+                    Shop Stock
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {target === BUSINESS && (
+            <div>
+              <p className="mb-2 text-sm text-slate-600">A cost of running the business, on no job. Which bucket?</p>
+              <div role="radiogroup" aria-label="Business cost bucket" className="grid grid-cols-2 gap-2">
+                {BUSINESS_COST_BUCKETS.map((b) => (
+                  <button key={b} type="button" role="radio" aria-checked={bucket === b} onClick={() => setBucket(b)} className={choiceCls(bucket === b)}>
+                    {b}
+                  </button>
+                ))}
+              </div>
+              {bucket === "Fees" && (
+                <p className="mt-2 text-xs text-slate-500">
+                  Bank and permit fees, or card fees from anything but Stripe (Stripe&apos;s fee is recorded on each payment on its own). A
+                  supplier&apos;s late interest comes in with that supplier&apos;s own papers on Bills, so don&apos;t add it here.
+                </p>
+              )}
+            </div>
+          )}
+
+          {target === STOCK ? (
+            <div className="space-y-2 rounded-lg bg-slate-50 px-3 py-3 text-sm text-slate-700">
+              <p>{SHOP_STOCK_BY_PAPER}</p>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  close();
+                  openSnapOrNote();
+                }}
+              >
+                <FileUp /> Open Snap Or Note
+              </Button>
+            </div>
+          ) : (
+            <>
+              <div>
+                <Label htmlFor="ti-where">{target === BUSINESS ? "Where (Optional)" : "Where"}</Label>
+                <Input id="ti-where" value={where} onChange={(e) => setWhere(e.target.value)} placeholder="The store or company" />
+              </div>
+
+              <div>
+                <Label>Paid?</Label>
+                <div role="radiogroup" aria-label="Paid?" className="grid grid-cols-2 gap-2">
+                  <button type="button" role="radio" aria-checked={paid === "paid"} onClick={() => setPaid("paid")} className={choiceCls(paid === "paid")}>
+                    Already Paid
+                  </button>
+                  <button type="button" role="radio" aria-checked={paid === "unpaid"} onClick={() => setPaid("unpaid")} className={choiceCls(paid === "unpaid")}>
+                    On Account (Still Owed)
+                  </button>
+                </div>
+                {paid === "unpaid" && <p className="mt-1 text-xs text-slate-500">It counts in what you owe that supplier until you pay it.</p>}
+              </div>
+
+              {jobPos && jobPos.list.length > 0 && (
+                <div>
+                  <Label htmlFor="ti-po">Purchase Order</Label>
+                  <Select id="ti-po" className="h-11" value={poId} onChange={(e) => setPoId(e.target.value)}>
+                    <option value="">Not A PO, A Cost Of Its Own</option>
+                    {jobPos.list.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {[p.po_number || "PO", p.vendor || "No Vendor", formatCurrency(p.total)].join(" · ")}
+                      </option>
+                    ))}
+                  </Select>
+                  <p className="mt-1 text-xs text-slate-500">Pick the order this bill pays and it takes that order&apos;s place in the job&apos;s cost, so the delivery counts once.</p>
+                </div>
+              )}
+              {jobPos?.failed && (
+                <p className="text-xs text-amber-700">Couldn&apos;t check this job&apos;s purchase orders just now, so this can&apos;t say it pays one. Edit the bill later to link it.</p>
+              )}
+
+              <Fold summary={<span className="text-sm font-medium text-slate-700">More</span>}>
+                <div className="pb-1">
+                  <Label htmlFor="ti-number">Bill #</Label>
+                  <Input id="ti-number" value={billNumber} onChange={(e) => setBillNumber(e.target.value)} />
+                </div>
+              </Fold>
+            </>
+          )}
+
           {error && <p className="text-sm text-red-600">{error}</p>}
         </div>
       </Modal>

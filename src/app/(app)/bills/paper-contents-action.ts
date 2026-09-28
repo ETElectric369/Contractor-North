@@ -19,7 +19,7 @@ export type SupplierPaperContentsResult = { ok: true; contents: PaperContents } 
  * THE PDF. Since 2026-09-26 the CED import keeps the PDF itself (lib/ced-pdf-store) and
  * supplier_invoices.source_file holds its stored path, under this org's own folder: that is read
  * first. A row imported before then holds only the file's NAME. A PDF was then stored only when
- * the paper came in through Drop Paperwork: its organized_items row holds
+ * the paper came in through Snap Or Note: its organized_items row holds
  * the file (file_url, the documents bucket, signed exactly as the Bills tray signs it) and lists
  * EVERY invoice number read off it (proposal.ced.numbers). Not proposal.filed.landed: that holds
  * only the numbers the paper added for the first time, so a PDF dropped for an invoice already

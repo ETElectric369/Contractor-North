@@ -8,13 +8,17 @@
  * papers the page has ALREADY loaded: no new read, nothing sent anywhere, typed and answered on
  * the phone.
  *
+ * ONE SEARCHABLE LIST (W1-32): the box at the top filters All Bills IN PLACE (a bill, an order, a
+ * file: matchingKeys), and a supplier's own paper, which lives on its card, is still a hit that
+ * lands there (searchBills). A business cost is found by "business cost" and by its bucket ("fuel").
+ *
  * Pure, so the matching is tested without a browser.
  */
 
 export interface BillsSearchRow {
   key: string;
-  /** A supplier's own document, a bill in his books, or a receipt/bill file on a job. */
-  kind: "paper" | "bill" | "file";
+  /** A supplier's own document, a bill in his books, a purchase order, or a receipt/bill file on a job. */
+  kind: "paper" | "bill" | "po" | "file";
   /** The line he reads first: "CED Invoice 8802-1107820". */
   title: string;
   /** Where it is and what it is: "Sep 16 · $187.64 · on J-028 85 Whitney Place · in your books". */
@@ -55,9 +59,26 @@ export function wordsOf(...parts: unknown[]): string {
  * whole book). `more` is how many matched beyond the ones shown, so the list never hides a count.
  */
 export function searchBills(rows: BillsSearchRow[], query: string, limit = 25): { hits: BillsSearchRow[]; more: number } {
-  const q = fold(query);
-  if (q.replace(/\s/g, "").length < 2) return { hits: [], more: 0 };
-  const tokens = q.split(" ").filter(Boolean);
+  const tokens = tokensOf(query);
+  if (!tokens) return { hits: [], more: 0 };
   const all = (rows ?? []).filter((r) => tokens.every((t) => r.words.includes(t)));
   return { hits: all.slice(0, limit), more: Math.max(0, all.length - limit) };
+}
+
+/** The query's words, or null when it is under two characters (too little to narrow anything). */
+function tokensOf(query: string): string[] | null {
+  const q = fold(query);
+  if (q.replace(/\s/g, "").length < 2) return null;
+  return q.split(" ").filter(Boolean);
+}
+
+/**
+ * THE ROWS ALL BILLS KEEPS FOR A QUERY, by key ("bill:<id>", "po:<id>", "file:<id>"): every word
+ * typed appears on the row. null = no filter (nothing typed, or one character), so the list shows
+ * everything, never an empty list for a half-typed word.
+ */
+export function matchingKeys(rows: BillsSearchRow[], query: string): Set<string> | null {
+  const tokens = tokensOf(query);
+  if (!tokens) return null;
+  return new Set((rows ?? []).filter((r) => tokens.every((t) => r.words.includes(t))).map((r) => r.key));
 }

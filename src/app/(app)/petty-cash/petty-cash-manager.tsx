@@ -10,7 +10,6 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { DeleteButton } from "@/components/ui/delete-button";
 import { formatCurrency, formatDate } from "@/lib/utils";
-import { useToast } from "@/components/toast";
 import { addPettyCash, updatePettyCash, deletePettyCash } from "./actions";
 
 /** "YYYY-MM-DD" for the device's own calendar day — the same shape the rest of the app's
@@ -32,7 +31,6 @@ export interface PettyTx {
 
 export function PettyCashManager({ items, balance }: { items: PettyTx[]; balance: number }) {
   const router = useRouter();
-  const toast = useToast();
   const [pending, start] = useTransition();
   const [kind, setKind] = useState<"expense" | "replenish">("expense");
   const [amount, setAmount] = useState(0);
@@ -78,8 +76,8 @@ export function PettyCashManager({ items, balance }: { items: PettyTx[]; balance
           <div>
             <Label htmlFor="pc-kind">Type</Label>
             <Select id="pc-kind" value={kind} onChange={(e) => setKind(e.target.value as any)}>
-              <option value="expense">Expense (−)</option>
-              <option value="replenish">Add cash (+)</option>
+              <option value="expense">Expense</option>
+              <option value="replenish">Add Cash</option>
             </Select>
           </div>
           <div><Label htmlFor="pc-amt">Amount</Label><NumberInput id="pc-amt" value={amount} onValueChange={setAmount} /></div>
@@ -88,7 +86,7 @@ export function PettyCashManager({ items, balance }: { items: PettyTx[]; balance
           <div><Label htmlFor="pc-date">Date</Label><Input id="pc-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} /></div>
         </div>
         <div className="mt-3 flex justify-end">
-          <Button size="sm" onClick={add} disabled={pending || !amount}><Plus className="h-3.5 w-3.5" /> Add</Button>
+          <Button onClick={add} disabled={pending || !amount}><Plus className="h-4 w-4" /> Add</Button>
         </div>
       </Card>
 
@@ -105,10 +103,10 @@ export function PettyCashManager({ items, balance }: { items: PettyTx[]; balance
                 {i.kind === "replenish" ? "+" : "−"}{formatCurrency(i.amount)}
               </span>
               <EditPettyCashButton tx={i} />
-              <DeleteButton action={() => deletePettyCash(i.id)} confirm="Delete this entry?" done="Entry deleted" className="text-slate-300 hover:text-red-600 disabled:opacity-50" />
+              <DeleteButton action={() => deletePettyCash(i.id)} confirm="Delete this entry?" done="Entry deleted" className="flex h-11 w-11 items-center justify-center text-slate-300 hover:text-red-600 disabled:opacity-50" />
             </li>
           ))}
-          {items.length === 0 && <li className="px-4 py-10 text-center text-sm text-slate-400">No transactions yet. Add cash to your box, then log expenses as you spend.</li>}
+          {items.length === 0 && <li className="px-4 py-10 text-center text-sm text-slate-400">No cash entries. A new cash purchase goes in through Snap Or Note or Add By Hand.</li>}
         </ul>
       </Card>
     </div>
@@ -149,7 +147,7 @@ function EditPettyCashButton({ tx }: { tx: PettyTx }) {
 
   return (
     <>
-      <button onClick={openModal} className="text-slate-300 hover:text-brand" title="Edit"><Pencil className="h-4 w-4" /></button>
+      <button onClick={openModal} className="flex h-11 w-11 items-center justify-center text-slate-300 hover:text-brand" title="Edit" aria-label="Edit"><Pencil className="h-4 w-4" /></button>
       <Modal
         open={open}
         onClose={() => setOpen(false)}
@@ -161,8 +159,8 @@ function EditPettyCashButton({ tx }: { tx: PettyTx }) {
           <div>
             <Label htmlFor="epc-kind">Type</Label>
             <Select id="epc-kind" value={kind} onChange={(e) => setKind(e.target.value as any)}>
-              <option value="expense">Expense (−)</option>
-              <option value="replenish">Add cash (+)</option>
+              <option value="expense">Expense</option>
+              <option value="replenish">Add Cash</option>
             </Select>
           </div>
           <div><Label htmlFor="epc-amt">Amount</Label><NumberInput id="epc-amt" value={amount} onValueChange={setAmount} /></div>

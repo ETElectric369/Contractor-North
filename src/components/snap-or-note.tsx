@@ -104,7 +104,7 @@ const NO_LINES: SnapLine[] = [];
 const NO_PAPERS: string[] = [];
 const NO_PENDING: PendingPhoto[] = [];
 
-/** The queue's lines, for any page that draws them (/bills' Sort These). None while held. */
+/** The queue's lines, for any page that draws them (/bills' Needs You). None while held. */
 export function useSnapLines(): SnapLine[] {
   const lines = useStore("lines");
   return useStore("held") ? NO_LINES : lines;
@@ -134,7 +134,7 @@ export const SNAP_FILES_EVENT = "cn:snap-or-note:files";
 export const SNAP_ACCEPT = `application/pdf,.pdf,image/*,.heic,.heif,${LIST_ACCEPT}`;
 const MAX_FILE = 15 * 1024 * 1024;
 
-/** Open the sheet from any button on any page (Bills, Organize, Sort These' Add More). */
+/** Open the sheet from any button on any page (Bills, Organize, the typed sheet's Shop Stock). */
 export function openSnapOrNote() {
   if (typeof window !== "undefined") window.dispatchEvent(new Event(SNAP_OPEN_EVENT));
 }

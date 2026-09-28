@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 /**
  * THE COSTS TAB'S BILL ROW USES THE /bills ROW'S DOORS (audit v1018, class 13).
@@ -47,6 +49,42 @@ const render = () => renderToStaticMarkup(createElement(JobBills, { jobId: "j11"
 beforeEach(() => {
   pressed.buttons = [];
   acts.deleteBill.mockClear();
+});
+
+/**
+ * ONE WAY TO ADD A COST (W1-23). The list has no Add Bill of its own: a cost goes in at the top of
+ * the tab (Snap The Bill, or its ⋯: Upload and Type It In, the one typed sheet). The Not Billed Yet
+ * row keeps its label, its count and its figure.
+ */
+describe("the Costs tab's bills list adds nothing itself", () => {
+  const html = render();
+  const words = Array.from(html.matchAll(/<button[^>]*>([\s\S]*?)<\/button>/g)).map((m) => m[1].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim());
+
+  it("no Add Bill button, no Add Bill sheet, and no createBill behind the list", () => {
+    expect(words).not.toContain("Add Bill");
+    expect(html).not.toContain("Add Bill");
+    const src = readFileSync(join(process.cwd(), "src/app/(app)/jobs/[id]/job-bills.tsx"), "utf8");
+    expect(src).not.toMatch(/\bcreateBill\b/);
+    expect(src).not.toContain('title="Add Bill"');
+  });
+
+  it("the plain list still says how many bills and what they cost", () => {
+    expect(html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ")).toContain("2 bills · $318.09");
+  });
+
+  it("Not Billed Yet keeps its label, count and figure", () => {
+    const groups = {
+      open: { ids: ["b1"], bills: 1, pos: 0, takes: 0, total: 301.81 },
+      openOwn: {},
+      billed: [],
+      nothing: [],
+      stock: {},
+    };
+    const piles = renderToStaticMarkup(createElement(JobBills, { jobId: "j11", bills: BILLS as any, pos: [], groups: groups as any }));
+    const text = piles.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+    expect(text).toContain("Not Billed Yet · 1 bill · $301.81");
+    expect(text).not.toContain("Add Bill");
+  });
 });
 
 describe("the Costs tab's bill row", () => {

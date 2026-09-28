@@ -29,14 +29,17 @@ type Item = {
 // page's href (the stable id) so it survives label/section renames. Lowercase; matched as
 // substrings, same as the label. Extend freely — this is the one place aliases live.
 const NAV_ALIASES: Record<string, string[]> = {
-  "/billing": ["money", "billing", "invoice"],
-  "/billing/ar": ["ar", "owed", "receivables", "accounts receivable", "who owes", "aging"],
-  "/payments": ["paid", "received", "deposit", "collections"],
+  // ONE INVOICES PAGE (W1-29): who owes (Accounts Receivable's words) and what came in (Payments')
+  // both land here now; /billing/ar and /payments are redirects with no row of their own.
+  "/billing": [
+    "money", "billing", "invoice",
+    "ar", "owed", "receivables", "accounts receivable", "who owes", "aging",
+    "payments", "paid", "received", "deposit", "collections",
+  ],
   "/bills": ["ap", "accounts payable", "vendor", "expense"],
   "/payroll": ["wages", "pay", "salary", "paycheck", "hours pay"],
   "/tax-report": ["taxes", "1099", "irs", "tax"],
   "/analytics": ["reports", "reporting", "kpi", "dashboard", "numbers", "profit"],
-  "/petty-cash": ["cash", "reimbursement"],
   "/price-list": ["pricing", "rates", "catalog", "price book", "materials list", "line items"],
   "/leads": ["prospects", "inquiries", "pipeline"],
   "/quotes": ["estimate", "proposal", "bid"],
@@ -92,8 +95,22 @@ function navLeaves(nodes: DockLeaf[], sub: string, features: FeatureMap | null |
 // /jobs href anymore — which orphaned the "projects"/"work" aliases. One hand-written entry
 // points typing "jobs"/"work" at the default working view; the GENERATED ?status= children
 // stay out of the palette (see the collision note above).
+/**
+ * PETTY CASH, FOUND BY NAME (W1-34): it left the Money menu, so a company that already has petty-cash
+ * rows (the layout's staff-only existence check) finds the page here, by its own words. A company
+ * with none sees no row: a new cash purchase is a cost like any other (Snap Or Note, Add By Hand).
+ */
+const PETTY_CASH_ROW: Item = {
+  kind: "Go to",
+  label: "Petty Cash",
+  sub: "Money",
+  href: "/petty-cash",
+  staffOnly: true,
+  aliases: ["petty cash", "cash box", "cash", "atm"],
+};
+
 /** The palette's "go to" list for this person: exported so the switch rule is pinned in a test. */
-export function commandNavItems(isStaff: boolean, features?: FeatureMap | null): Item[] {
+export function commandNavItems(isStaff: boolean, features?: FeatureMap | null, hasPettyCash = false): Item[] {
   const items: Item[] = [
     ...visibleDock({ isStaff, features }).flatMap((s) => navLeaves(s.children, s.label, features, s.staffOnly)),
     { kind: "Go to", label: "Jobs", sub: "Jobs", href: "/jobs?status=in_progress", aliases: NAV_ALIASES["/jobs?status=in_progress"] },
@@ -111,6 +128,7 @@ export function commandNavItems(isStaff: boolean, features?: FeatureMap | null):
     ...(featureOn(features, "estimates")
       ? [{ kind: "Go to", label: "New Estimate", sub: "Sales", href: "/quotes/new", staffOnly: true, aliases: NAV_ALIASES["/quotes/new"] }]
       : []),
+    ...(hasPettyCash ? [PETTY_CASH_ROW] : []),
   ];
   return isStaff ? items : items.filter((i) => !i.staffOnly);
 }
@@ -191,6 +209,7 @@ export function CommandBar({
   features,
   setup,
   onboarded = true,
+  hasPettyCash = false,
 }: {
   isStaff?: boolean;
   features?: FeatureMap;
@@ -198,9 +217,11 @@ export function CommandBar({
   setup?: Answers;
   /** profiles.onboarded_at: Start Here shows until this person has been walked through. */
   onboarded?: boolean;
+  /** The company has petty-cash rows (the layout's staff-only check): offer the Petty Cash row. */
+  hasPettyCash?: boolean;
 }) {
   const router = useRouter();
-  const navItems = useMemo(() => commandNavItems(!!isStaff, features), [isStaff, features]);
+  const navItems = useMemo(() => commandNavItems(!!isStaff, features, hasPettyCash), [isStaff, features, hasPettyCash]);
   // Nort off: no "Ask Nort" row, no Talk To Nort, no help rows (they're under Help in the avatar
   // menu), and no promise that Enter asks him (the drawer isn't mounted).
   const nortOn = featureOn(features, "nort");
@@ -280,9 +301,10 @@ export function CommandBar({
     return matchNavItems(navItems, q);
   }, [q, navItems, idle]);
 
-  const askItem: Item | null = q.trim() && nortOn
-    ? { kind: "Assistant", label: `Ask Nort: “${q.trim()}”`, href: `/assistant?q=${encodeURIComponent(q.trim())}` }
-    : null;
+  const askItem: Item | null = useMemo(
+    () => (q.trim() && nortOn ? { kind: "Assistant", label: `Ask Nort: “${q.trim()}”`, href: `/assistant?q=${encodeURIComponent(q.trim())}` } : null),
+    [q, nortOn],
+  );
 
   const flat: Item[] = useMemo(
     () => [...staticMatches, ...results, ...(askItem ? [askItem] : [])],

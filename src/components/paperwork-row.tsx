@@ -59,7 +59,7 @@ import { addSupplierDocuments, keepPaperwork, updatePaperwork } from "@/app/(app
 /**
  * ONE CARD FOR ONE PIECE OF PAPER, ON EVERY PAGE THAT HOLDS PAPER (0295; W1-31).
  *
- * Snap Or Note's sheet, Organize and Sort These on /bills render THIS, so a receipt is filed the
+ * Snap Or Note's sheet, Organize and Needs You on /bills render THIS, so a receipt is filed the
  * same way whichever door it came in by. It is built on the Supplier Bills card grammar, so a tray
  * paper and a supplier's paper look and answer the same way:
  *
