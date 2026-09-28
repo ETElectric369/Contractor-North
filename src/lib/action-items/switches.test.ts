@@ -48,7 +48,7 @@ describe("feederOn — which Needs You feeders a switch turns off", () => {
 describe("inquiryActionItem — a request on Needs You", () => {
   const row = { id: "i1", name: "Dana Reyes", status: "new", next_follow_up_at: null, phone: "(530) 555-0142" };
 
-  it("Leads on: the lead row exactly as it always was, with no phone and no Call Back", () => {
+  it("Leads on: the lead row, carrying the number its ⋯ Call dials (its button is Called, not Call Back)", () => {
     expect(inquiryActionItem(row, "2026-09-26", true)).toEqual({
       id: "i1",
       kind: "inquiry",
@@ -60,7 +60,21 @@ describe("inquiryActionItem — a request on Needs You", () => {
       done: false,
       href: "/leads?focus=i1",
       affordances: AFFORDANCES.inquiry,
+      phone: "(530) 555-0142",
     });
+    // No number: no phone on the row, so no Call anywhere.
+    expect(inquiryActionItem({ ...row, phone: null }, "2026-09-26", true).phone).toBeUndefined();
+  });
+
+  it("Leads off: Call Back still shows, as the row's own button (row-buttons.ts)", async () => {
+    const { rowButtons } = await import("./row-buttons");
+    const item = { ...inquiryActionItem(row, "2026-09-26", false), stream: KIND_STREAM.inquiry };
+    const b = rowButtons(item, { leadsOn: false, isStaff: true });
+    expect(b.primary).toEqual({ label: "Call Back", act: { type: "call", tel: "(530) 555-0142" } });
+    // Leads on, the same person's button is Called, and the number is behind ⋯.
+    const on = rowButtons({ ...inquiryActionItem(row, "2026-09-26", true), stream: KIND_STREAM.inquiry }, { leadsOn: true, isStaff: true });
+    expect(on.primary?.label).toBe("Called");
+    expect(on.more.map((d) => d.label)).toContain("Call");
   });
 
   it("Leads off: 'New Request From Dana Reyes', Call them back, and the number to dial", () => {

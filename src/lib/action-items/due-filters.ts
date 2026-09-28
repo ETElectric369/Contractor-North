@@ -4,11 +4,11 @@
  * Order 1 gives three waits a day: a lead's Snooze (inquiry.snooze → next_follow_up_at), an
  * estimate's follow-up (quote.followUp → quotes.follow_up_at, 0366) and a job's hold
  * (setJobHold → jobs.hold_until, 0366). Nort and the pickers say "comes back Monday", so Needs You
- * has to agree in the same release: a wait whose day is after today stays off the list, and on its
- * day it is back. Lane 5 (order 2) builds the Waiting fold on top of these same rules.
+ * has to agree: a wait whose day is after today is off Now (it waits in the Waiting fold with that
+ * day), and on its day it is back.
  *
- * The filters are PostgREST `.or()` strings so the rule runs in the database read, not after a
- * `.limit()`; due-filters.test.ts evaluates them over rows.
+ * The lead filter is a PostgREST `.or()` string so the rule runs in the database read, not after a
+ * `.limit()`; due-filters.test.ts evaluates it over rows. The estimate and hold rules run per row.
  */
 
 /**
@@ -21,12 +21,16 @@ export function inquiryDueFilter(todayStr: string): string {
 }
 
 /**
- * A job on hold is on Needs You when its come-back day (0366's hold_until) is today or earlier. A
- * hold with no day (held before 0366) keeps the old rule: untouched for a week (`staleCutoffIso`).
- * Only used when the hold_until column exists; before 0366 the feeder reads the old rule alone.
+ * WHERE A JOB ON HOLD SITS (Wave 1, lane 5; 0366's hold_until), decided on each held row:
+ *   "later"   its day is after today: it waits in the Waiting fold, "Back Oct 3";
+ *   "back"    its day is today or earlier: a Reminder on Needs You ("Back Today", "Back since Sep 30");
+ *   "no_day"  it has no day (held before 0366): a Reminder too, "No Day Set", whose Snooze picks one.
+ * No updated_at proxy any more: a hold was "a week untouched" only because it had no day of its own.
  */
-export function heldJobDueFilter(todayStr: string, staleCutoffIso: string): string {
-  return `hold_until.lte.${todayStr},and(hold_until.is.null,updated_at.lt.${staleCutoffIso})`;
+export function heldJobState(holdUntil: string | null | undefined, todayStr: string): "later" | "back" | "no_day" {
+  const day = String(holdUntil ?? "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return "no_day";
+  return day > todayStr ? "later" : "back";
 }
 
 /**

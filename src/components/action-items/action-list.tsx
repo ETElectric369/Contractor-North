@@ -1,14 +1,23 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { CalendarPlus, Clock3, X, ChevronRight, Check, UserPlus, Phone } from "lucide-react";
-import { Modal, ModalActions } from "@/components/ui/modal";
+import { Phone } from "lucide-react";
+import { Modal } from "@/components/ui/modal";
+import { Button } from "@/components/ui/button";
 import { Label, Select } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { MoveToDay } from "@/components/move-to-day";
+import { RowMoreSheet, SHEET_ROW } from "@/components/row-more-sheet";
+import { ComeBackPicker } from "@/components/come-back-picker";
+import { SendSheet } from "@/components/send-sheet";
+import { useToast } from "@/components/toast";
 import { dispatchAction } from "@/lib/action-items/dispatch";
+import type { DispatchPayload } from "@/lib/action-items/dispatch-map";
 import { KIND_META, chipOf, type ActionItem, type Affordance } from "@/lib/action-items/types";
+import { rowButtons, type RowDoor } from "@/lib/action-items/row-buttons";
+import { pileAges, pileTitle, pileUnfoldsHere } from "@/lib/action-items/piles";
 import { DEFAULT_TIMEZONE } from "@/lib/utils";
 import { SupplierPaperCards, SUPPLIER_PAPERS_SCOPE } from "@/components/supplier-paper-cards";
 import { AlreadyBilledButton } from "@/components/already-billed-sheet";
@@ -47,16 +56,30 @@ function prettyWhen(when: string | null | undefined, todayStr: string, tz: strin
   return rel;
 }
 
+/** A row's named button: 44px tall without growing the row (the Call Back negative-margin pattern). */
+export const ROW_BUTTON =
+  "-my-3 inline-flex h-11 shrink-0 items-center gap-1 rounded-md px-2 text-xs font-semibold text-brand hover:bg-brand-light/40 disabled:opacity-50";
+
+type Run = (item: ActionItem, verb: Affordance, payload?: DispatchPayload, opts?: { child?: boolean }) => Promise<{ ok: boolean; error?: string }>;
+
 /**
- * The one "needs action" list (Needs You on My Day) — the action-layer twin of <ModalActions>.
- * Renders any ActionItem[] IN THE ORDER THE SERVER SENT IT (the build sorts once: money, leads,
- * today, other; then urgency; then oldest first), only sinking the rows ticked done here; and exposes
- * each item's canonical verbs (Do / Schedule / Snooze / Dismiss / Open) routed through the single
- * dispatcher. One source of truth for every actionable list.
+ * The one "needs action" list (Needs You on My Day). Renders the NOW list IN THE ORDER THE SERVER SENT
+ * IT (the build sorts once: money, leads, today, other; then urgency; then oldest first), only
+ * sinking the rows ticked done here.
  *
- * ONE FLAT LIST OF PLAIN CHIPS (Wave 1, W1-15). No Money / Leads / Today / Waiting headers: each
- * row's chip says the state it is in ("Past Due", "Won", "No Reply Yet", "Clock Left Running"), so
- * the headers were a second way of saying the same thing, four lines tall.
+ * ONE NAMED BUTTON PER ROW, AND ⋯ (Wave 1, W1-13). Each row says its verb ("Send It", "Pick A Day",
+ * "Close Out") and keeps only what is real for it behind lane 1a's ⋯: a Snooze that picks a day,
+ * Assign, and its honest ending behind a confirm. The row table is row-buttons.ts, so this list and
+ * anything else that names a row's doors read one table. Tapping the row opens it.
+ *
+ * PILES (Wave 1, W1-14; piles.ts). "Estimates Not Sent · 6" is one row: its count, a pip per estimate
+ * (amber when it has waited over a week), the first estimate as a full row with its own button and
+ * ⋯, then See All, which unfolds the rest in place (a second tap folds them) or, when not every
+ * estimate is here, opens the list page. Acting on a child drops it and counts down in place; the
+ * last one takes the pile away.
+ *
+ * ONE FLAT LIST OF PLAIN CHIPS (Wave 1, W1-15): no section headers; each row's chip says the state
+ * it is in.
  */
 export function ActionList({
   items,
@@ -65,6 +88,8 @@ export function ActionList({
   todayStr,
   tz = DEFAULT_TIMEZONE,
   leadsOn = true,
+  isStaff = false,
+  textReady = true,
 }: {
   items: ActionItem[];
   people?: { id: string; full_name: string | null }[];
@@ -75,320 +100,442 @@ export function ActionList({
   /** The ORG's timezone — must be the same clock todayStr was computed in, or a chip can
    *  read "Today · 9:00 PM" for an item the day math already counted as tomorrow. */
   tz?: string;
-  /** The Leads switch (0352). Off, a request lands here as a request: its chip reads Request (set on
-   *  the row by inquiryActionItem; this is the fallback for a row built without it), not a lead list
-   *  the company switched off, and its Call Back dials. Absent = on, as always. */
+  /** The Leads switch (0352). Off, a request lands here as a request: its chip reads Request, and
+   *  Call Back is its button. Absent = on, as always. */
   leadsOn?: boolean;
+  /** The office: a row's money doors (Pay <Supplier>) are drawn only for staff. */
+  isStaff?: boolean;
+  /** The company can text (smsReadiness, read once on the page): the Send sheet's Text It. */
+  textReady?: boolean;
 }) {
   const router = useRouter();
+  const toast = useToast();
   const [doneIds, setDoneIds] = useState<Set<string>>(new Set());
   const [removedIds, setRemovedIds] = useState<Set<string>>(new Set());
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  // The list banner at the top of the body is PAINTED UNDER an open Modal (overlay z-[120]),
-  // so a failure inside the Assign sheet was invisible and the button read as dead.
-  // Every modal-driven failure also lands here, inside the dialog that caused it.
-  const [modalError, setModalError] = useState<string | null>(null);
-  const [assigning, setAssigning] = useState<ActionItem | null>(null);
-  const [assigneeVal, setAssigneeVal] = useState("");
-  const [savingAssign, setSavingAssign] = useState(false);
-  const [dismissing, setDismissing] = useState<ActionItem | null>(null);
+  const [openPiles, setOpenPiles] = useState<Set<string>>(new Set());
+
+  const without = (s: Set<string>, id: string) => {
+    const n = new Set(s);
+    n.delete(id);
+    return n;
+  };
+
+  /** Send a verb. Optimistic: the row leaves now (a plain row's done tick, Called or Close Out, sinks
+   *  to the bottom instead), and comes back if the server says no; the refusal is said on the list,
+   *  or in the sheet that asked. A pile's child always leaves: its pile counts down in place. */
+  const run: Run = async (item, verb, payload, opts) => {
+    setError(null);
+    setBusyId(item.id);
+    const sinks = verb === "do" && !opts?.child && (item.kind === "inquiry" || item.kind === "appointment");
+    if (sinks) setDoneIds((s) => new Set(s).add(item.id));
+    else setRemovedIds((s) => new Set(s).add(item.id));
+    const res = await dispatchAction({ kind: item.kind, id: item.id, verb, payload, target: item.targetId ?? null }).catch(() => ({
+      ok: false,
+      error: "That didn't reach the server - check your connection and try again.",
+      note: undefined as string | undefined,
+    }));
+    setBusyId(null);
+    if (!res.ok) {
+      const message = res.error ?? "Couldn't do that.";
+      setDoneIds((s) => without(s, item.id));
+      setRemovedIds((s) => without(s, item.id));
+      return { ok: false, error: message };
+    }
+    // NOTHING SILENT: what the action says it did (a finished job's draft, what isn't billed yet).
+    if (res.note) toast(res.note, "info", undefined, { sticky: true });
+    router.refresh();
+    return { ok: true };
+  };
+  /** A verb straight from a button (no sheet to hold its refusal): said on the list. */
+  const runOnList = async (item: ActionItem, verb: Affordance, opts?: { child?: boolean }) => {
+    const r = await run(item, verb, undefined, opts);
+    if (!r.ok) setError(r.error ?? "Couldn't do that.");
+  };
+  const removeHere = (id: string) => setRemovedIds((s) => new Set(s).add(id));
 
   // THE SERVER'S ORDER (the build sorts once, types.ts sortActionItems), with only the rows ticked
   // done HERE sunk to the bottom, in their own order.
   const shown = items.filter((i) => !removedIds.has(i.id)).map((i) => ({ ...i, done: i.done || doneIds.has(i.id) }));
   const visible = [...shown.filter((i) => !i.done), ...shown.filter((i) => i.done)];
 
-  async function run(
-    item: ActionItem,
-    verb: Affordance,
-    payload?: { date?: string; assignee?: string },
-  ): Promise<{ ok: boolean; error?: string }> {
-    setError(null);
-    setBusyId(item.id);
-    const res = await dispatchAction({ kind: item.kind, id: item.id, verb, payload });
-    setBusyId(null);
-    if (!res.ok) {
-      const message = res.error ?? "Couldn't do that.";
-      setError(message);
-      // roll back the optimistic change
-      setDoneIds((s) => { const n = new Set(s); n.delete(item.id); return n; });
-      setRemovedIds((s) => { const n = new Set(s); n.delete(item.id); return n; });
-      return { ok: false, error: message };
-    }
-    router.refresh();
-    return { ok: true };
-  }
+  const rowProps = { todayStr, tz, leadsOn, isStaff, textReady, people, busyId, run, runOnList, removeHere, router };
 
-  function onDo(item: ActionItem) {
-    setDoneIds((s) => new Set(s).add(item.id)); // sink it immediately
-    run(item, "do");
-  }
-  // Dismiss is a HARD DELETE for an inquiry (it can't be undone) — confirm first.
-  // For appointments/organize it just cancels/archives (reversible), so run it straight.
-  const HARD_DELETE_KINDS = new Set(["inquiry"]);
-  /**
-   * THE ENDINGS THAT AREN'T DELETIONS (0205). "Didn't win it" marks the estimate declined or
-   * stamps the walk-through's outcome — a real fact about the deal, reversible on its own page.
-   * It must not be confirmed with "this permanently deletes", which is what the row would have
-   * said, and it deserves a confirm of its own because it records a LOSS.
-   */
-  const OUTCOME_KINDS = new Set(["quote_awaiting", "inspection_writeup"]);
-  function onDismiss(item: ActionItem) {
-    if (HARD_DELETE_KINDS.has(item.kind) || OUTCOME_KINDS.has(item.kind)) {
-      setDismissing(item);
-      return;
-    }
-    setRemovedIds((s) => new Set(s).add(item.id));
-    run(item, "dismiss");
-  }
-  function confirmDismiss() {
-    const item = dismissing;
-    if (!item) return;
-    setDismissing(null);
-    setRemovedIds((s) => new Set(s).add(item.id));
-    run(item, "dismiss");
-  }
-  // Schedule/snooze go through the shared MoveToDay sheet — the ONE reschedule
-  // idiom app-wide (same dispatchAction payload the old bespoke date modal
-  // sent). Returns the result so the sheet shows its own inline error.
-  async function pickDate(item: ActionItem, verb: "schedule" | "snooze", dateISO: string | null) {
-    if (!dateISO) return { ok: false, error: "Pick a day." };
-    setError(null);
-    setBusyId(item.id);
-    setRemovedIds((s) => new Set(s).add(item.id)); // leaves the inbox once dated
-    const res = await dispatchAction({ kind: item.kind, id: item.id, verb, payload: { date: dateISO } });
-    setBusyId(null);
-    if (!res.ok) {
-      // roll back the optimistic removal
-      setRemovedIds((s) => { const n = new Set(s); n.delete(item.id); return n; });
-      return { ok: false, error: res.error ?? "Couldn't do that." };
-    }
-    router.refresh();
-    return { ok: true };
-  }
-  function openAssign(item: ActionItem) {
-    setAssigneeVal("");
-    setModalError(null);
-    setAssigning(item);
-  }
-  async function saveAssign() {
-    // NEVER dispatch on the "— Unassigned —" default. For a job, an empty assignee is
-    // job.assign's documented CLEAR-THE-WHOLE-CREW branch (written for the agent), so a
-    // single tap on the enabled primary silently wiped the crew and reported success.
-    // The footer is disabled in this state too — this is the belt to that suspenders.
-    if (!assigning || !assigneeVal) return;
-    setModalError(null);
-    setSavingAssign(true);
-    const res = await run(assigning, "assign", { assignee: assigneeVal });
-    setSavingAssign(false);
-    if (res.ok) setAssigning(null);
-    else setModalError(res.error ?? "Couldn't do that.");
-  }
+  const drawn = visible
+    .map((item) => {
+      if (!item.pile) return <Row key={item.id} item={item} {...rowProps} />;
+      const kids = (item.children ?? []).filter((c) => !removedIds.has(c.id)).map((c) => ({ ...c, done: c.done || doneIds.has(c.id) }));
+      const gone = (item.children ?? []).length - kids.length;
+      const count = Math.max(0, item.pile.count - gone);
+      // The last child takes the pile away; a lone one left is a plain row, never "· 1".
+      if (!kids.length && !item.pile.capped && count <= 0) return null;
+      if (kids.length === 1 && !item.pile.capped && count <= 1) return <Row key={kids[0].id} item={kids[0]} {...rowProps} />;
+      return (
+        <PileRow
+          key={item.id}
+          item={item}
+          kids={kids}
+          count={count}
+          open={openPiles.has(item.id)}
+          onToggle={() => setOpenPiles((s) => (s.has(item.id) ? without(s, item.id) : new Set(s).add(item.id)))}
+          {...rowProps}
+        />
+      );
+    })
+    .filter(Boolean);
 
-  // The two sheets, hoisted out of the list body: an optimistic removal (a dismiss) can empty
-  // `visible` mid-request, and an early return would unmount the OPEN dialog along with the list.
-  const modals = (
-    <>
-      <Modal
-        open={!!assigning}
-        onClose={() => setAssigning(null)}
-        title="Assign to"
-        size="sm"
-        footer={
-          <ModalActions
-            onCancel={() => setAssigning(null)}
-            onSave={saveAssign}
-            saving={savingAssign}
-            /* No person picked = the crew-clearing empty assignee. Not a tap away. */
-            disabled={!assigneeVal}
-            saveLabel="Assign"
-          />
-        }
-      >
-        <div className="space-y-3">
-          {modalError && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{modalError}</div>}
-          <div>
-            <Label htmlFor="ai-assignee">Person</Label>
-            <Select id="ai-assignee" value={assigneeVal} onChange={(e) => setAssigneeVal(e.target.value)}>
-              <option value="">— Pick a person —</option>
-              {people.map((p) => (
-                <option key={p.id} value={p.id}>{p.full_name ?? "Unnamed"}</option>
-              ))}
-            </Select>
-          </div>
-        </div>
-      </Modal>
-
-      <Modal
-        open={!!dismissing}
-        onClose={() => setDismissing(null)}
-        title={dismissing && OUTCOME_KINDS.has(dismissing.kind) ? "Didn't win it?" : "Delete this?"}
-        size="sm"
-        footer={
-          <ModalActions
-            onCancel={() => setDismissing(null)}
-            onSave={confirmDismiss}
-            saveLabel={dismissing && OUTCOME_KINDS.has(dismissing.kind) ? "Mark It Lost" : "Delete"}
-            destructive
-          />
-        }
-      >
-        <p className="text-sm text-slate-600">
-          {dismissing && OUTCOME_KINDS.has(dismissing.kind) ? (
-            <>
-              Records <span className="font-medium text-slate-900">{dismissing?.title}</span> as lost, so it stops
-              asking. {dismissing?.kind === "quote_awaiting" ? "The estimate is marked declined" : "The walk-through is marked lost"} —
-              you can change it back on its own page.
-            </>
-          ) : (
-            <>
-              This permanently deletes <span className="font-medium text-slate-900">{dismissing?.title}</span>. It
-              can&apos;t be undone.
-            </>
-          )}
-        </p>
-      </Modal>
-    </>
-  );
-
-  if (visible.length === 0) {
-    return (
-      <>
-        <p className="px-1 py-2 text-sm text-slate-400">{emptyLabel}</p>
-        {modals}
-      </>
-    );
-  }
+  if (drawn.length === 0) return <p className="px-1 py-2 text-sm text-slate-400">{emptyLabel}</p>;
 
   return (
     <div className="space-y-1.5">
       {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
-          {visible.map((item) => {
-            const can = (v: Affordance) => item.affordances.includes(v);
-            const meta = KIND_META[item.kind];
-            // The row's own words when its state has them, else its kind's; a request with Leads off
-            // reads Request even on a row built without its chip.
-            const chip = item.kind === "inquiry" && !leadsOn && !item.chip ? "Request" : chipOf(item);
-            const when = prettyWhen(item.when, todayStr, tz);
-            const overdue = item.when && !item.when.includes("T") && item.when < todayStr;
-            return (
-              <div
-                key={item.id}
-                className={`flex items-start gap-2 rounded-xl border bg-white px-3 py-2 ${
-                  item.done ? "border-slate-100 opacity-55" : "border-slate-200"
-                }`}
-              >
-                {can("do") && (
-                  <button
-                    onClick={() => onDo(item)}
-                    disabled={busyId === item.id || item.done}
-                    className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md border ${
-                      item.done ? "border-brand bg-brand text-white" : "border-slate-300 hover:border-brand"
-                    }`}
-                    title="Mark done"
-                    aria-label="Mark done"
-                  >
-                    {item.done && <Check className="h-3.5 w-3.5" />}
-                  </button>
-                )}
-
-                {/* TWO LINES, THE LEAD-BOARD SHAPE (Erik: "i kind of like the idea of using the
-                    same new lead layout"). Line 1 is WHO/WHAT with the date hard right in mono
-                    so the column reads down the page; line 2 is the context and the verbs. Same
-                    decision surface, same shape, so neither has to be learned twice. */}
-                <div className="min-w-0 flex-1">
-                  <button onClick={() => router.push(item.href)} className="flex w-full min-w-0 items-baseline gap-2 text-left">
-                    <span className={`min-w-0 flex-1 truncate text-sm ${item.done ? "text-slate-400 line-through" : "font-medium text-slate-900"}`}>
-                      {item.urgency >= 2 && !item.done && <span className="mr-1 text-red-500">!</span>}
-                      {item.title}
-                    </span>
-                    {when && (
-                      <span className={`shrink-0 font-mono text-[11px] tabular-nums ${overdue ? "font-semibold text-red-600" : "text-slate-400"}`}>
-                        {when}
-                      </span>
-                    )}
-                  </button>
-                  <div className="mt-0.5 flex items-center gap-1.5">
-                    <button onClick={() => router.push(item.href)} className="flex min-w-0 flex-1 items-center gap-1.5 truncate text-left text-xs text-slate-500">
-                      <Badge tone={meta.tone}>{chip}</Badge>
-                      {item.subtitle && <span className="truncate">{item.subtitle}</span>}
-                      {item.who && <span className="truncate">· {item.who}</span>}
-                    </button>
-
-                <div className="flex shrink-0 items-center gap-0.5">
-                  {/* CALL BACK: a request that came in while Leads is switched off (0352). The lead
-                      list is out of the way, the person asking for work is not: one tap dials
-                      them. 44px tall without growing the row (the negative margin). */}
-                  {item.phone && (
-                    <a
-                      href={`tel:${item.phone}`}
-                      className="-my-3 inline-flex h-11 items-center gap-1 rounded-md px-2 text-xs font-semibold text-brand hover:bg-brand-light/40"
-                    >
-                      <Phone className="h-3.5 w-3.5 shrink-0" /> Call Back
-                    </a>
-                  )}
-                  {can("schedule") && (
-                    <MoveToDay
-                      label="Schedule / set a date"
-                      triggerClassName="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-brand"
-                      onPick={(d) => pickDate(item, "schedule", d)}
-                    >
-                      <CalendarPlus className="h-4 w-4" />
-                    </MoveToDay>
-                  )}
-                  {can("assign") && (
-                    <button onClick={() => openAssign(item)} disabled={busyId === item.id} className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-brand" title="Assign to someone">
-                      <UserPlus className="h-4 w-4" />
-                    </button>
-                  )}
-                  {can("snooze") && (
-                    <MoveToDay
-                      label="Snooze until"
-                      triggerClassName="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-                      onPick={(d) => pickDate(item, "snooze", d)}
-                    >
-                      <Clock3 className="h-4 w-4" />
-                    </MoveToDay>
-                  )}
-                  {can("dismiss") && (
-                    <button onClick={() => onDismiss(item)} disabled={busyId === item.id} className="rounded-md p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600" title="Dismiss">
-                      <X className="h-4 w-4" />
-                    </button>
-                  )}
-                  <button onClick={() => router.push(item.href)} className="rounded-md p-1.5 text-slate-300 hover:bg-slate-100 hover:text-slate-600" title="Open">
-                    <ChevronRight className="h-4 w-4" />
-                  </button>
-                    </div>
-                  </div>
-                  {/* THE SUPPLIER BILLS ROLLUP carries its cards inside it: one line on the badge,
-                      every paper answerable right here with one tap (Bills plan, Wave A). */}
-                  {/* A SHIFT ON NO JOB BILLED BY HAND on an invoice with no job (0357, TTUSD on
-                      INV-055): the office says which line charged it, right here. */}
-                  {item.noJobHours && (
-                    <div className="mt-2">
-                      <AlreadyBilledButton jobId={null} target={{ kind: "time", ids: item.noJobHours.entryIds, what: "Those hours" }} />
-                    </div>
-                  )}
-                  {item.kind === "supplier_paper" && item.supplierPapers && (
-                    <div className="mt-2">
-                      {/* ONE card at a time here (readable at 60mph); the rest are a link to /bills,
-                          which draws them all. The done lines outlive this line (scope "my-day"). */}
-                      <SupplierPaperCards
-                        feed={item.supplierPapers}
-                        refreshAfter={false}
-                        scope={SUPPLIER_PAPERS_SCOPE}
-                        limit={1}
-                        moreHref="/bills#needs-you"
-                      />
-                    </div>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-
-      {modals}
+      {drawn}
     </div>
   );
+}
+
+type RowProps = {
+  item: ActionItem;
+  todayStr: string;
+  tz: string;
+  leadsOn: boolean;
+  isStaff: boolean;
+  textReady: boolean;
+  people: { id: string; full_name: string | null }[];
+  busyId: string | null;
+  run: Run;
+  runOnList: (item: ActionItem, verb: Affordance, opts?: { child?: boolean }) => Promise<void>;
+  removeHere: (id: string) => void;
+  router: ReturnType<typeof useRouter>;
+  /** A pile's child: acting on it drops it (the pile counts down in place). */
+  nested?: boolean;
+};
+
+/** One row: two lines (who/what and when; its chip, its context and its button), then ⋯. */
+function Row(p: RowProps) {
+  const { item, todayStr, tz, leadsOn } = p;
+  const meta = KIND_META[item.kind];
+  // The row's own words when its state has them, else its kind's; a request with Leads off
+  // reads Request even on a row built without its chip.
+  const chip = item.kind === "inquiry" && !leadsOn && !item.chip ? "Request" : chipOf(item);
+  const when = prettyWhen(item.when, todayStr, tz);
+  const overdue = item.when && !item.when.includes("T") && item.when < todayStr;
+  const doors = rowButtons(item, { leadsOn, isStaff: p.isStaff });
+  const open = () => p.router.push(item.href);
+  return (
+    <div
+      className={`flex items-center gap-1 rounded-xl border bg-white py-1.5 pl-3 pr-1 ${
+        item.done ? "border-slate-100 opacity-55" : p.nested ? "border-slate-100" : "border-slate-200"
+      }`}
+    >
+      {/* TWO LINES, THE LEAD-BOARD SHAPE. Line 1 is WHO/WHAT with the date hard right in mono so the
+          column reads down the page; line 2 is the chip, the context and the row's one button. */}
+      <div className="min-w-0 flex-1">
+        <button type="button" onClick={open} className="flex w-full min-w-0 items-baseline gap-2 text-left">
+          <span className={`min-w-0 flex-1 truncate text-sm ${item.done ? "text-slate-400 line-through" : "font-medium text-slate-900"}`}>
+            {item.urgency >= 2 && !item.done && <span className="mr-1 text-red-500">!</span>}
+            {item.title}
+          </span>
+          {when && (
+            <span className={`shrink-0 font-mono text-[11px] tabular-nums ${overdue ? "font-semibold text-red-600" : "text-slate-400"}`}>{when}</span>
+          )}
+        </button>
+        <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1">
+          <button type="button" onClick={open} className="flex min-w-0 flex-1 basis-32 items-center gap-1.5 truncate text-left text-xs text-slate-500">
+            <Badge tone={meta.tone}>{chip}</Badge>
+            {item.subtitle && <span className="truncate">{item.subtitle}</span>}
+            {item.who && <span className="truncate">· {item.who}</span>}
+          </button>
+          {!item.done && doors.primary && <DoorButton {...p} door={doors.primary} />}
+          {!item.done && doors.also && <DoorButton {...p} door={doors.also} />}
+        </div>
+        {/* A SHIFT ON NO JOB BILLED BY HAND on an invoice with no job (0357, TTUSD on INV-055): the
+            office says which line charged it, right here. */}
+        {item.noJobHours && (
+          <div className="mt-2">
+            <AlreadyBilledButton jobId={null} target={{ kind: "time", ids: item.noJobHours.entryIds, what: "Those hours" }} />
+          </div>
+        )}
+        {/* THE SUPPLIER BILLS ROLLUP carries its cards inside it: one line on the badge, every paper
+            answerable right here with one tap (Bills plan, Wave A). ONE card at a time (readable at
+            60mph); the rest are a link to /bills, which draws them all. */}
+        {item.kind === "supplier_paper" && item.supplierPapers && (
+          <div className="mt-2">
+            <SupplierPaperCards feed={item.supplierPapers} refreshAfter={false} scope={SUPPLIER_PAPERS_SCOPE} limit={1} moreHref="/bills#needs-you" />
+          </div>
+        )}
+      </div>
+      {!item.done && doors.more.length > 0 && (
+        <RowMoreSheet title={item.title} subline={item.subtitle ?? null}>
+          {({ close }) => <MoreSheetBody {...p} doors={doors.more} close={close} />}
+        </RowMoreSheet>
+      )}
+    </div>
+  );
+}
+
+/** A pile: its count and pips, its verb (opens it), the first child in full, then See All. */
+function PileRow(p: RowProps & { kids: ActionItem[]; count: number; open: boolean; onToggle: () => void }) {
+  const { item, kids, count, open } = p;
+  const pile = item.pile!;
+  const here = pileUnfoldsHere({ count, capped: pile.capped }, kids.length);
+  const { pips, more } = pileAges(kids, p.todayStr);
+  const [first, ...rest] = kids;
+  const title = pileTitle({ label: pile.label, count, capped: pile.capped });
+  const seeAll = here ? (
+    <button type="button" onClick={p.onToggle} aria-expanded={open} className="flex min-h-11 w-full items-center justify-center text-sm font-medium text-brand hover:bg-slate-50">
+      {open ? "See Less" : `See All ${count}`}
+    </button>
+  ) : pile.listHref ? (
+    <Link href={pile.listHref} className="flex min-h-11 w-full items-center justify-center text-sm font-medium text-brand hover:bg-slate-50">
+      {pile.listLabel ?? `See All ${count}${pile.capped ? "+" : ""}`}
+    </Link>
+  ) : (
+    <button type="button" onClick={p.onToggle} aria-expanded={open} className="flex min-h-11 w-full items-center justify-center text-sm font-medium text-brand hover:bg-slate-50">
+      {open ? "See Less" : `See All ${kids.length} Here`}
+    </button>
+  );
+  const unfold = () => (here || !pile.listHref ? p.onToggle() : p.router.push(pile.listHref));
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white" data-pile={pile.name}>
+      <div className="flex items-center gap-1 py-1.5 pl-3 pr-1">
+        <div className="min-w-0 flex-1">
+          <button type="button" onClick={unfold} className="flex w-full min-w-0 items-baseline gap-2 text-left">
+            <span className="min-w-0 flex-1 truncate text-sm font-semibold text-slate-900">
+              {item.urgency >= 2 && <span className="mr-1 text-red-500">!</span>}
+              {title}
+            </span>
+          </button>
+          <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1">
+            <button type="button" onClick={unfold} className="flex min-w-0 flex-1 basis-32 items-center gap-1.5 truncate text-left text-xs text-slate-500">
+              {/* TEXT TO VISUAL: one pip per row in the pile, amber once it has waited over a week. */}
+              <span className="inline-flex shrink-0 items-center gap-0.5" aria-label={`${pips.filter((x) => x === "old").length} waiting over a week`}>
+                {pips.map((age, i) => (
+                  <span key={i} data-pip={age} className={`h-1.5 w-1.5 rounded-full ${age === "old" ? "bg-amber-500" : "bg-slate-300"}`} />
+                ))}
+                {more && <span className="text-[10px] font-semibold text-slate-400">+</span>}
+              </span>
+              {item.subtitle && <span className="truncate">{item.subtitle}</span>}
+            </button>
+            <button type="button" onClick={unfold} className={ROW_BUTTON}>
+              {pile.verb}
+            </button>
+          </div>
+        </div>
+      </div>
+      {first && (
+        <div className="space-y-1.5 border-t border-slate-100 px-1.5 py-1.5">
+          <Row {...p} item={first} nested />
+          {open && rest.map((c) => <Row key={c.id} {...p} item={c} nested />)}
+        </div>
+      )}
+      {(rest.length > 0 || !here) && <div className="border-t border-slate-100">{seeAll}</div>}
+    </div>
+  );
+}
+
+/** A row's named button, whatever its door does. */
+function DoorButton(p: RowProps & { door: RowDoor }) {
+  const { door, item } = p;
+  const [sheet, setSheet] = useState(false);
+  const [sendOpen, setSendOpen] = useState(false);
+  const busy = p.busyId === item.id;
+  const a = door.act;
+  if (a.type === "open") {
+    return (
+      <Link href={a.href} className={ROW_BUTTON}>
+        {door.label}
+      </Link>
+    );
+  }
+  if (a.type === "call") {
+    return (
+      <a href={`tel:${a.tel}`} className={ROW_BUTTON}>
+        <Phone className="h-3.5 w-3.5 shrink-0" /> {door.label}
+      </a>
+    );
+  }
+  if (a.type === "run") {
+    return (
+      <button type="button" onClick={() => p.runOnList(item, a.verb, { child: p.nested })} disabled={busy} className={ROW_BUTTON}>
+        {door.label}
+      </button>
+    );
+  }
+  if (a.type === "pickDay") {
+    return (
+      <MoveToDay label={door.label} triggerClassName={ROW_BUTTON} onPick={async (d) => (d ? p.run(item, a.verb, { date: d }, { child: p.nested }) : { ok: false, error: "Pick a day." })}>
+        {door.label}
+      </MoveToDay>
+    );
+  }
+  if (a.type === "send") {
+    const s = item.send;
+    return (
+      <>
+        <button type="button" onClick={() => setSendOpen(true)} className={ROW_BUTTON}>
+          {door.label}
+        </button>
+        {s && (
+          <SendSheet
+            open={sendOpen}
+            onClose={() => setSendOpen(false)}
+            kind={s.kind}
+            id={s.id}
+            number={s.number}
+            customerName={s.customerName}
+            amount={s.amount}
+            lineCount={s.lineCount}
+            openHref={s.openHref}
+            textReady={p.textReady}
+            onSent={() => p.removeHere(item.id)}
+          />
+        )}
+      </>
+    );
+  }
+  if (a.type === "unfold") return null; // a pile draws its own
+  // comeBack, assign, confirm: the door's question in its own sheet.
+  return (
+    <>
+      <button type="button" onClick={() => setSheet(true)} disabled={busy} className={ROW_BUTTON}>
+        {door.label}
+      </button>
+      <Modal open={sheet} onClose={() => setSheet(false)} title={sheetTitle(door, item)} size="sm">
+        {sheet && <DoorForm {...p} door={door} onBack={() => setSheet(false)} onDone={() => setSheet(false)} />}
+      </Modal>
+    </>
+  );
+}
+
+function sheetTitle(door: RowDoor, item: ActionItem): string {
+  if (door.act.type === "confirm") return door.act.title;
+  if (door.act.type === "assign") return "Assign To";
+  return `${door.label}: ${item.title}`.slice(0, 80);
+}
+
+/** What ⋯ holds: one 44px row per door; a door with a question asks it right here. */
+function MoreSheetBody(p: RowProps & { doors: RowDoor[]; close: () => void }) {
+  const [asking, setAsking] = useState<RowDoor | null>(null);
+  if (asking) return <DoorForm {...p} door={asking} onBack={() => setAsking(null)} onDone={p.close} />;
+  return (
+    <>
+      {p.doors.map((d) => {
+        const a = d.act;
+        if (a.type === "open") {
+          return (
+            <Link key={d.label} href={a.href} className={SHEET_ROW}>
+              {d.label}
+            </Link>
+          );
+        }
+        if (a.type === "call") {
+          return (
+            <a key={d.label} href={`tel:${a.tel}`} className={SHEET_ROW}>
+              <Phone className="mr-2 h-4 w-4 shrink-0" /> {d.label}
+            </a>
+          );
+        }
+        if (a.type === "run") {
+          return (
+            <button
+              key={d.label}
+              type="button"
+              className={SHEET_ROW}
+              disabled={p.busyId === p.item.id}
+              onClick={async () => {
+                const r = await p.run(p.item, a.verb, undefined, { child: p.nested });
+                if (r.ok) p.close();
+                else setAsking(null);
+              }}
+            >
+              {d.label}
+            </button>
+          );
+        }
+        return (
+          <button key={d.label} type="button" className={`${SHEET_ROW} ${a.type === "confirm" ? "text-red-700 hover:text-red-700" : ""}`} onClick={() => setAsking(d)}>
+            {d.label}
+          </button>
+        );
+      })}
+    </>
+  );
+}
+
+/** A door's question: when it comes back, who, or "are you sure?". Its refusal is said right here. */
+function DoorForm(p: RowProps & { door: RowDoor; onBack: () => void; onDone: () => void }) {
+  const { door, item } = p;
+  const a = door.act;
+  const [pending, setPending] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [person, setPerson] = useState("");
+  const send = async (verb: Affordance, payload?: DispatchPayload) => {
+    setErr(null);
+    setPending(true);
+    const r = await p.run(item, verb, payload, { child: p.nested });
+    setPending(false);
+    if (r.ok) p.onDone();
+    else setErr(r.error ?? "Couldn't do that.");
+  };
+  if (a.type === "comeBack") {
+    return (
+      <ComeBackPicker
+        label={a.button}
+        askWhy={a.askWhy}
+        initialWhy={item.holdReason ?? ""}
+        todayStr={p.todayStr}
+        pending={pending}
+        error={err}
+        onCancel={p.onBack}
+        onSubmit={({ why, when }) => send(a.verb, { date: "date" in when ? when.date : undefined, reason: why || undefined })}
+      />
+    );
+  }
+  if (a.type === "assign") {
+    // NEVER on the unpicked default: for a job, an empty assignee is job.assign's clear-the-whole-crew
+    // branch (written for the agent). The button waits for a person (blocksCrewWipe is the belt).
+    return (
+      <div className="space-y-3">
+        {err && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{err}</div>}
+        <div>
+          <Label htmlFor={`assign-${item.id}`}>Person</Label>
+          <Select id={`assign-${item.id}`} value={person} onChange={(e) => setPerson(e.target.value)}>
+            <option value="">— Pick a person —</option>
+            {p.people.map((x) => (
+              <option key={x.id} value={x.id}>
+                {x.full_name ?? "Unnamed"}
+              </option>
+            ))}
+          </Select>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button type="button" onClick={() => send("assign", { assignee: person })} disabled={pending || !person}>
+            {pending ? "Saving…" : "Assign"}
+          </Button>
+          <Button type="button" variant="ghost" onClick={p.onBack} disabled={pending}>
+            Back
+          </Button>
+        </div>
+      </div>
+    );
+  }
+  if (a.type === "confirm") {
+    return (
+      <div className="space-y-3">
+        <p className="text-sm text-slate-600">{a.body}</p>
+        {err && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{err}</div>}
+        <div className="flex flex-wrap gap-2">
+          <Button type="button" variant="destructive" onClick={() => send(a.verb)} disabled={pending}>
+            {pending ? "Saving…" : a.button}
+          </Button>
+          <Button type="button" variant="ghost" onClick={p.onBack} disabled={pending}>
+            {a.keep}
+          </Button>
+        </div>
+      </div>
+    );
+  }
+  return null;
 }

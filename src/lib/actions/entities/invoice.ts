@@ -12,12 +12,15 @@ import {
   setInvoiceTitle,
   setInvoiceCustomerJob,
   setInvoiceStatus,
+  parkInvoice,
 } from "@/app/(app)/billing/actions";
 import { createInvoiceForJob } from "@/app/(app)/jobs/actions";
 import { createClient } from "@/lib/supabase/server";
 import { paymentMethodLabel } from "@/lib/payment-method";
 import { LINE_KIND_LABEL, type PickableLineKind } from "@/lib/invoice-math";
-import { localDay, spokenDay } from "@/lib/org-local-time";
+import { localDay, orgTimezone, spokenDay } from "@/lib/org-local-time";
+import { checkComeBackDay, shortDay } from "@/lib/come-back-days";
+import { todayStrInTz } from "@/lib/tz";
 import { resolveJobId } from "../resolve-id";
 import type { ActionDef } from "../types";
 
@@ -232,6 +235,30 @@ export const invoiceActions: Record<string, ActionDef> = {
     auth: "staff",
     effect: "write",
     handler: ({ invoice_id, ...link }) => setInvoiceCustomerJob(invoice_id, link),
+  },
+  "invoice.setAside": {
+    name: "invoice.setAside",
+    group: "invoice",
+    label: "Set a draft invoice aside",
+    description:
+      "Set a DRAFT invoice aside until a day — 'hold the Miller draft until the change order comes back, the 15th'. Pass the invoice's id (from list_invoices), date (YYYY-MM-DD, company-local, today or later: the day it comes back to Needs You) and an optional reason (said on its waiting row). Drafts only: a bill that already went out is the customer's. Nothing is sent and no money changes; it comes back on that day, or at once when its job is finished.",
+    input: z.object({
+      id: z.string(),
+      date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      reason: z.string().nullable().optional(),
+    }),
+    auth: "staff",
+    effect: "write",
+    handler: async (i) => {
+      // EVERY WAIT HAS A DAY, and it is today or later on the COMPANY's calendar (the come-back rule
+      // the pickers use): a day already gone would bring it straight back and say it was set aside.
+      const supabase = await createClient();
+      const day = checkComeBackDay(todayStrInTz(await orgTimezone(supabase)), i.date);
+      if (!day.ok) return { ok: false, error: day.error };
+      const r = await parkInvoice(i.id, day.day, (i.reason ?? "").trim() || undefined);
+      if (!r.ok) return { ok: false, error: r.error };
+      return { ok: true, speak: `Set aside until ${shortDay(day.day)}. It comes back to Needs You that day.` };
+    },
   },
   "invoice.setStatus": {
     name: "invoice.setStatus",
