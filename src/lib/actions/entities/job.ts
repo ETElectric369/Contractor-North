@@ -76,7 +76,7 @@ export const jobActions: Record<string, ActionDef> = {
     group: "job",
     label: "Open a job",
     description:
-      "Open a new JOB — e.g. 'start a job for the Miller deck'. Resolve the customer first with list_customers and pass customer_id (or pass new_customer_name to create one). Optional description, address, status (to_be_scheduled, scheduled, in_progress, complete, cancelled; default in_progress — a job is put on hold after it exists, with its reason and a day, never at creation), and billing_type (tm for Time & Material, the default, or fixed for a fixed price). Returns the job id — then you can schedule it, assign it, add costs, or quote it.",
+      "Open a new JOB — e.g. 'start a job for the Miller deck'. Resolve the customer first with list_customers and pass customer_id (or pass new_customer_name to create one). Optional description, address, status (to_be_scheduled, scheduled, in_progress, complete, cancelled; default in_progress — a job is put on hold after it exists, with its reason and a day, never at creation), and billing_type (tm for Time & Material or fixed for a fixed price; left out, the job bills the way most of this company's jobs already do, Time & Material when it has none yet or it's a tie). Returns the job id — then you can schedule it, assign it, add costs, or quote it.",
     input: z.object({
       name: z.string().min(1),
       customer_id: z.string().nullable().optional(),

@@ -290,4 +290,11 @@ describe("the forms (source)", () => {
     expect(picker).toContain('<input type="hidden" name="new_customer" value="1" />');
     expect(picker).toMatch(/name="new_customer_name"[\s\S]{0,200}\brequired\b/);
   });
+
+  it("Nort's job.create names the billing createJob really picks when none is sent, never Time & Material for every company", () => {
+    const s = read("src/lib/actions/entities/job.ts");
+    const create = s.slice(s.indexOf('"job.create": {'), s.indexOf('"job.setStatus": {'));
+    expect(create).not.toMatch(/Time & Material, the default/);
+    expect(create).toContain("the way most of this company's jobs already do");
+  });
 });
