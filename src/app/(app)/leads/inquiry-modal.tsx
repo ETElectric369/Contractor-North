@@ -124,7 +124,7 @@ export function InquiryModal({ inquiry, mode = "new" }: { inquiry?: Inquiry; mod
   return (
     <>
       {editing ? (
-        <Button size="sm" variant="outline" onClick={openModal}>
+        <Button variant="outline" onClick={openModal}>
           <Pencil className="h-4 w-4" /> Edit
         </Button>
       ) : (
@@ -137,7 +137,7 @@ export function InquiryModal({ inquiry, mode = "new" }: { inquiry?: Inquiry; mod
         <Modal
           open={open}
           onClose={discard}
-          title={editing ? "Edit lead" : "New lead"}
+          title={editing ? "Edit Lead" : "New Lead"}
           dirty={dirty}
           footer={
             <ModalActions
@@ -152,7 +152,6 @@ export function InquiryModal({ inquiry, mode = "new" }: { inquiry?: Inquiry; mod
                 editing ? (
                   <Button
                     type="button"
-                    size="sm"
                     variant={confirmDel ? "destructive" : "outline"}
                     disabled={pending}
                     onClick={() => {
@@ -166,7 +165,7 @@ export function InquiryModal({ inquiry, mode = "new" }: { inquiry?: Inquiry; mod
                       });
                     }}
                   >
-                    <Trash2 className="h-4 w-4" /> {confirmDel ? "Tap to confirm" : "Delete"}
+                    <Trash2 className="h-4 w-4" /> {confirmDel ? "Tap To Confirm" : "Delete Lead"}
                   </Button>
                 ) : undefined
               }

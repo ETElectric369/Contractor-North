@@ -48,6 +48,9 @@ export type Result = {
   /** Firm inspection booking: WHEN it landed (org-local date + time and the UTC instant), so a
    *  caller — the assistant above all — reads back the real time instead of assuming one. */
   data?: { starts_at: string; date: string; time: string };
+  /** Save As Contact (target 'customer'): the card the lead now carries, and whether the book
+   *  already had them (linked to it) or a new card was made, so the toast says which (W2-07). */
+  contact?: { id: string; name: string; existing: boolean };
 };
 
 function orNull(s: string): string | null {
@@ -70,11 +73,22 @@ async function orgTimezone(supabase: SupabaseClient): Promise<string> {
   return getOrgSettings((data as { settings?: unknown } | null)?.settings).timezone;
 }
 
-/** Fields shared by create + update, read from a FormData. */
+/**
+ * RESIDENTIAL OR COMMERCIAL IS WORKED OUT, NOT ASKED (W2-07). inquiries.type is read in one place,
+ * when a lead becomes a customer, and 43 of 43 production leads were residential with one company
+ * among them: the New Lead form's "Residential or commercial" asked every time for a fact the
+ * Company box already says. A lead with a company is commercial; one without is residential. A type
+ * a caller sends (Nort's inquiry.create can) wins; an Industrial lead is never demoted by an edit.
+ */
+function inferredLeadType(companyName: string | null): "commercial" | "residential" {
+  return companyName ? "commercial" : "residential";
+}
+const LEAD_TYPES: readonly string[] = ["residential", "commercial", "industrial"];
+
+/** Fields shared by create + update, read from a FormData. (No `type`: see inferredLeadType.) */
 function inquiryFields(formData: FormData) {
   return {
     company_name: emptyToNull(formData.get("company_name")),
-    type: String(formData.get("type") ?? "residential"),
     email: emptyToNull(formData.get("email")),
     phone: orNull(formatPhone(String(formData.get("phone") ?? ""))),
     address: emptyToNull(formData.get("address")),
@@ -95,6 +109,9 @@ export async function createInquiry(formData: FormData): Promise<Result & { note
   const supabase = ctx.supabase;
 
   const fields = inquiryFields(formData);
+  // A sent type wins (Nort's inquiry.create); otherwise the Company box decides (inferredLeadType),
+  // after a known customer's company has been carried across (below).
+  const sentType = String(formData.get("type") ?? "").trim();
   // Fragment-first: a bare phone number is a valid lead (the missed-call case) —
   // default the name instead of blocking the capture.
   let name = String(formData.get("name") ?? "").trim();
@@ -164,6 +181,7 @@ export async function createInquiry(formData: FormData): Promise<Result & { note
       name,
       ...fields,
       ...carried,
+      type: LEAD_TYPES.includes(sentType) ? sentType : inferredLeadType(fields.company_name ?? carried.company_name ?? null),
       customer_id: linkedCustomerId,
       source: "manual",
       status: "new",
@@ -206,6 +224,18 @@ export async function updateInquiry(id: string, formData: FormData): Promise<Res
     .select("id");
   if (error) return { ok: false, error: dbError(error) };
   if (!data?.length) return { ok: false, error: "That lead isn't available." };
+
+  // THE TYPE FOLLOWS THE COMPANY BOX (inferredLeadType), written apart and only where the stored type
+  // isn't Industrial, so an edit never demotes an Industrial lead to Commercial. Zero rows here is
+  // that rule holding, not a failed save: the edit itself landed above.
+  const sentType = String(formData.get("type") ?? "").trim();
+  const { error: typeErr } = await supabase
+    .from("inquiries")
+    .update({ type: LEAD_TYPES.includes(sentType) ? sentType : inferredLeadType(fields.company_name) })
+    .eq("id", id)
+    .neq("type", "industrial")
+    .select("id");
+  if (typeErr) return { ok: false, error: `The lead saved, but its residential or commercial type didn't: ${dbError(typeErr)}` };
 
   revalidatePath("/leads");
   return { ok: true };
@@ -441,7 +471,13 @@ export async function convertInquiry(
   // "Save as contact" on an already-converted lead just OPENS the card it already has — the
   // guard below exists to stop double-minting, and opening isn't minting.
   if (target === "customer" && inq.customer_id) {
-    return { ok: true, id: inq.customer_id, redirect: `/crm/${inq.customer_id}` };
+    const { data: card } = await supabase.from("customers").select("name").eq("id", inq.customer_id).maybeSingle();
+    return {
+      ok: true,
+      id: inq.customer_id,
+      redirect: `/crm/${inq.customer_id}`,
+      contact: { id: inq.customer_id, name: String((card as { name?: string | null } | null)?.name ?? inq.name ?? ""), existing: true },
+    };
   }
   if (inq.converted_at && target !== "inspection" && target !== "customer") {
     return { ok: false, error: "This lead was already converted — open its customer or estimate instead." };
@@ -683,6 +719,9 @@ export async function convertInquiry(
   }
   let customerId = opts.customerId || null;
   let mintedFromLead = false; // the card was made from this lead's own name/company/type just now
+  // The name on the card the lead lands on, when the book already had them (Save As Contact says
+  // "Linked To <name>", never a silent link to somebody else's card).
+  let matchedName: string | null = null;
   if (!customerId) {
     // CROSSCHECK THE BOOK before minting (audit 7): "Save as contact" on a lead from an
     // EXISTING customer silently minted a second card — future jobs then split across the two.
@@ -692,6 +731,7 @@ export async function convertInquiry(
       { name: inq.name, email: inq.email, phone: inq.phone },
       (book ?? []) as DupCustomer[],
     );
+    if (customerId) matchedName = ((book ?? []) as DupCustomer[]).find((c) => c.id === customerId)?.name ?? null;
   }
   if (!customerId) {
     const { data: cust, error: cErr } = await supabase
@@ -828,7 +868,15 @@ export async function convertInquiry(
 
   revalidatePath("/leads");
   revalidatePath("/crm");
-  return { ok: true, id: customerId ?? undefined, redirect };
+  return {
+    ok: true,
+    id: customerId ?? undefined,
+    redirect,
+    // Save As Contact says which happened: a new card from this lead, or the card the book had.
+    ...(isContactOnly && customerId
+      ? { contact: { id: customerId, name: String((mintedFromLead ? inq.name : matchedName) ?? inq.name ?? ""), existing: !mintedFromLead } }
+      : {}),
+  };
 }
 
 /**

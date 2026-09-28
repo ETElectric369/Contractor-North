@@ -12,7 +12,7 @@ export const inquiryActions: Record<string, ActionDef> = {
       // next-day follow-up", which is the phantom-booking createInquiry deliberately removed —
       // the lead lands with next_follow_up_at NULL and no appointment. Nort reads this text as
       // fact, so it was telling people about a follow-up nobody had booked.
-      "Capture a new LEAD / inquiry (the top of the funnel) — e.g. 'add a lead, <name>, <phone>, wants <the work>'. Only name is required; phone/email/company/message/type are optional. The lead lands on the follow-up list with no date; set one with inquiry.contact. Afterward you can contact (inquiry.contact) or convert it (inquiry.convert).",
+      "Capture a new LEAD / inquiry (the top of the funnel) — e.g. 'add a lead, <name>, <phone>, wants <the work>'. Only name is required; phone/email/company/message/type are optional. When type isn't given it is inferred from Company: a company is commercial, none is residential. The lead lands on the follow-up list with no date; set one with inquiry.contact. Afterward you can contact (inquiry.contact) or convert it (inquiry.convert).",
     input: z.object({
       name: z.string().min(1),
       phone: z.string().nullable().optional(),
