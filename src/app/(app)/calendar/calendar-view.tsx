@@ -411,11 +411,12 @@ export function CalendarView({
     if (!sheet) return null;
     if (sheet.kind === "job") {
       const job = jobs.find((j) => j.id === sheet.id);
-      return job ? { kind: "job", day: sheet.day, job } : null;
+      // The tapped day's own hours ride along: the sheet's time is This Day's (0370).
+      return job ? { kind: "job", day: sheet.day, job, dayHours: ownHours.get(job.id)?.get(sheet.day) ?? null } : null;
     }
     const visit = appointments.find((a) => a.id === sheet.id);
     return visit ? { kind: "visit", day: sheet.day, visit } : null;
-  }, [sheet, jobs, appointments]);
+  }, [sheet, jobs, appointments, ownHours]);
 
   const byDay = useMemo(() => {
     const m = new Map<string, DayData>();
@@ -1174,6 +1175,7 @@ export function CalendarView({
           workDay={{ start: workDayStart, end: workDayEnd }}
           team={members}
           canEdit={canEdit}
+          perDayHours={perDayHours}
         />
       )}
 

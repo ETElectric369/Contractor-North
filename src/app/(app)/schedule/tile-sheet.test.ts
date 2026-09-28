@@ -16,6 +16,7 @@ vi.mock("./actions", () => ({
   clearJobDate: vi.fn(),
   moveJobDay: vi.fn(),
   setJobTimes: vi.fn(),
+  setJobDayTimes: vi.fn(),
   setVisitTimes: vi.fn(),
   changeJobCrew: vi.fn(),
 }));
@@ -334,5 +335,77 @@ describe("nothing said to a sheet nobody can see", () => {
     // Said before the transition starts, so the backdrop click of the same tap finds the sheet held.
     expect(controls).toMatch(/onPending\?\.\(true\);\s*start\(async/);
     expect(controls).toContain('refuse("The end has to be after the start.")');
+  });
+});
+
+describe("This Day: the tile's time is the tapped day's, once a day can keep its own hours (0370)", () => {
+  const herringbone = (over: Record<string, unknown> = {}): TileTarget =>
+    ({
+      kind: "job",
+      day: "2026-09-28",
+      job: {
+        id: "j011",
+        name: "Herringbone",
+        status: "in_progress",
+        scheduled_start: at("2026-09-24", "09:00"),
+        scheduled_end: at("2026-09-28", "17:00"),
+        planned_minutes: null,
+        assigned_to: ["p-erik"],
+        customers: { name: "Kim Hale" },
+        address: "22 Herringbone Way",
+        city: "Truckee",
+      },
+      dayHours: { start: "12:00", end: "17:00" },
+      ...over,
+    }) as TileTarget;
+  const renderDay = (target: TileTarget, canEdit = true) =>
+    renderToStaticMarkup(createElement(TileSheetBody, { target, tz: LA, workDay: WORK_DAY, team, canEdit, perDayHours: true, onClose: () => {} }));
+
+  it("a day of several with its own hours: This Day's noon to 5, said, the quick lengths, and the way back to the usual hours", () => {
+    const html = renderDay(herringbone());
+    const t = text(html);
+    expect(t).toContain("This Day, Mon, Sep 28: its own hours. The job's other days keep theirs.");
+    expect(html).toMatch(/<input[^>]*type="time"[^>]*value="12:00"/);
+    expect(html).toMatch(/<input[^>]*type="time"[^>]*value="17:00"/);
+    for (const chip of ["1h", "2h", "4h", "Full Day"]) expect(html).toMatch(new RegExp(`<button[^>]*>${chip}</button>`));
+    expect(t).toContain("12:00 PM – 5:00 PM · 5 hours");
+    expect(html).toMatch(/<button[^>]*>Use The Job&#x27;s Usual Hours<\/button>/);
+    for (const d of doors(html)) expect(d, d).toMatch(/\b(min-)?h-11\b/);
+  });
+
+  it("a day of several on the usual hours: only this day changes, and it says so; no way back for hours it doesn't have", () => {
+    const html = renderDay(herringbone({ dayHours: null }));
+    expect(text(html)).toContain("This Day, Mon, Sep 28. Only this day changes; the job page sets the hours of its other days.");
+    expect(html).not.toContain("Usual Hours");
+    // The last day of the run draws the opening to its end: 9 to 5.
+    expect(html).toMatch(/<input[^>]*type="time"[^>]*value="09:00"/);
+  });
+
+  it("the job's one day: This Day is the job's time", () => {
+    const t = text(renderDay(seiler()));
+    expect(t).toContain("This Day, Mon, Sep 28: the job's one day, so this is the job's time.");
+    expect(t).toContain("10:00 AM – 12:00 PM · 2 hours — change it");
+  });
+
+  it("where and who under the name: the street and the town", () => {
+    expect(text(renderDay(herringbone()))).toContain("22 Herringbone Way · Truckee");
+  });
+
+  it("the crew reads This Day's hours with nothing to tap", () => {
+    const html = renderDay(herringbone(), false);
+    expect(html).not.toContain("<button");
+    expect(html).not.toContain("<input");
+  });
+
+  it("This Day saves through setJobDayTimes on the tapped day; the way back asks for the usual hours; the job's time stays setJobTimes", () => {
+    const src = readFileSync(join(process.cwd(), "src/app/(app)/schedule/tile-sheet.tsx"), "utf8");
+    expect(src).toContain('setJobDayTimes(job.id, day, "start" in patch ? { start: patch.start } : { length: patch.length })');
+    expect(src).toContain("setJobDayTimes(job.id, day, { usual: true })");
+    expect(src).toContain("save={thisDay ? saveDayTimes : saveTimes}");
+    const actions = readFileSync(join(process.cwd(), "src/app/(app)/schedule/actions.ts"), "utf8");
+    const from = actions.indexOf("export async function setJobDayTimes(");
+    expect(actions.slice(from, from + 600)).toContain("await requireStaff()");
+    const add = actions.indexOf("export async function addJobDay(");
+    expect(actions.slice(add, add + 600)).toContain("await requireStaff()");
   });
 });

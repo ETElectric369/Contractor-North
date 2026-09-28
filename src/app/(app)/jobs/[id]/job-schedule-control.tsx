@@ -34,9 +34,13 @@ export function JobScheduleControl({
   block,
   workDay,
   plannedMinutes,
+  ownDays = [],
 }: {
   id: string;
   segments?: ScheduleSegment[];
+  /** The days that keep their own hours (0370), in words ("Mon, Sep 28 12:00 PM – 5:00 PM"): the time
+   *  control here sets the job's USUAL hours, every other day, and says so. */
+  ownDays?: string[];
   /** The job's block on the company's clock (lib/schedule/job-block readJobBlock, on the server). */
   block: JobBlock;
   /** The company's work day ("HH:MM"): what Full Day means, and where a day with no time starts. */
@@ -163,6 +167,15 @@ export function JobScheduleControl({
         </div>
         {error && <p className="text-xs text-red-600">{error}</p>}
       </div>
+
+      {/* EACH DAY KEEPS ITS OWN HOURS (0370): the time below is the job's usual hours, and a day with
+          its own keeps them. Said, so a change here that leaves such a day where it was is no surprise. */}
+      {ownDays.length > 0 && (
+        <p className="text-xs text-slate-500">
+          Its own hours: {ownDays.join(" · ")}. The time below is the usual hours of its other days; tap a day&apos;s block on the
+          schedule to change that day.
+        </p>
+      )}
 
       {/* THE BLOCK: the start and the length, once the job has a day. */}
       {block.day ? (

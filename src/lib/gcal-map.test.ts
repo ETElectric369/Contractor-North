@@ -121,6 +121,13 @@ describe("jobEventBody", () => {
     const inverted = jobEventBody({ ...job, scheduled_end: "2026-07-20T10:00:00.000Z" });
     expect(inverted.end.dateTime).toBe("2026-07-20T23:00:00.000Z");
   });
+
+  it("a job whose one day keeps its own hours (0370) is pushed as that block; a window that doesn't run forward is ignored", () => {
+    const own = jobEventBody(job, { window: { startIso: "2026-07-20T19:00:00.000Z", endIso: "2026-07-21T00:00:00.000Z" } });
+    expect([own.start.dateTime, own.end.dateTime]).toEqual(["2026-07-20T19:00:00.000Z", "2026-07-21T00:00:00.000Z"]);
+    const bad = jobEventBody(job, { window: { startIso: "2026-07-20T19:00:00.000Z", endIso: "2026-07-20T18:00:00.000Z" } });
+    expect([bad.start.dateTime, bad.end.dateTime]).toEqual(["2026-07-20T15:00:00.000Z", "2026-07-20T23:00:00.000Z"]);
+  });
 });
 
 describe("apptEventBody", () => {

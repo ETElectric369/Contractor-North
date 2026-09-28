@@ -94,7 +94,9 @@ import { getOrgSettings, workDayWindowHm } from "@/lib/org-settings";
 import { computeJobLaborBilling, customerLaborRateForJob, fetchJobLaborRows, laborCostForJob } from "@/lib/labor-billing";
 import { ownerRegister } from "@/lib/owner-draw";
 import { formatDateTz, todayStrInTz } from "@/lib/tz";
-import { hmWords, readJobBlock } from "@/lib/schedule/job-block";
+import { dayWords, hmWords, readJobBlock } from "@/lib/schedule/job-block";
+import { ownHoursByJobDay, segmentCols, withDayHours, type SegmentRow } from "@/lib/schedule/segment-hours";
+import { datesOnly, type DayHours } from "@/lib/schedule-math";
 import { InvoiceAmount, InvoiceAmountDetail } from "@/components/invoice-amount";
 import { IntakeFiles } from "../../leads/intake-files";
 import { intakePaths } from "@/lib/playbook/uploads";
@@ -241,11 +243,14 @@ export default async function JobDetailPage({
       .eq("job_id", id)
       .eq("status", "pending")
       .maybeSingle(),
-    supabase
-      .from("job_schedule_segments")
-      .select("start_date, end_date")
-      .eq("job_id", id)
-      .order("start_date"),
+    // Each day's own hours ride along (0370; the read without them before the migration).
+    withDayHours((h) =>
+      supabase
+        .from("job_schedule_segments")
+        .select(segmentCols("start_date, end_date", h))
+        .eq("job_id", id)
+        .order("start_date"),
+    ),
     supabase
       .from("material_lists")
       .select("id, name, created_at, material_list_items(count)")
@@ -688,7 +693,7 @@ export default async function JobDetailPage({
           entries: (entries ?? []) as { clock_in?: string | null; clock_out?: string | null }[],
           scheduledStart: j.scheduled_start,
           scheduledEnd: j.scheduled_end,
-          segments: (scheduleSegments ?? []) as { start_date?: string | null; end_date?: string | null }[],
+          segments: (scheduleSegments ?? []) as unknown as { start_date?: string | null; end_date?: string | null }[],
         }),
         tz,
         todayStr: todayStrInTz(tz),
@@ -729,8 +734,16 @@ export default async function JobDetailPage({
     tz,
     workDay,
   });
+  /* THE DAYS, AS DAYS (the range editor and the words list the ranges a person made, never split where
+     a day keeps its own hours), and THE DAYS THAT KEEP THEIR OWN HOURS (0370), said: the time control
+     below sets the job's usual hours, every OTHER day. */
+  const segRows = (scheduleSegments ?? []) as unknown as SegmentRow[];
+  const scheduleDays = datesOnly(segRows.map((s) => ({ start: s.start_date, end: s.end_date }))).map((s) => ({ start_date: s.start, end_date: s.end }));
+  const ownDays = [...(ownHoursByJobDay(segRows.map((s) => ({ ...s, job_id: id }))).get(id) ?? new Map<string, DayHours>()).entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([day, h]) => ({ day, hours: h, words: `${dayWords(day)} ${hmWords(h.start)} – ${hmWords(h.end)}` }));
   const scheduleText: string | null = (() => {
-    const segs = (scheduleSegments ?? []) as { start_date: string; end_date: string }[];
+    const segs = scheduleDays;
     // The crew reads the whole block, start AND end ("10:00 AM – 12:00 PM"), never just a start.
     const startTime = !j.scheduled_start || block.allDay
       ? null
@@ -747,7 +760,9 @@ export default async function JobDetailPage({
           : formatDateTz(j.scheduled_start, tz)
         : null;
     if (!days) return null;
-    return startTime ? `${days} · ${startTime}` : days;
+    const line = startTime ? `${days} · ${startTime}` : days;
+    // A day that keeps its own hours (0370) says them, for the crew as for the office.
+    return ownDays.length ? `${line} · ${ownDays.map((o) => `${o.words}`).join(" · ")}` : line;
   })();
 
   // Costing. laborCost = what we PAY (pay rate); billableLabor = what we CHARGE
@@ -1224,7 +1239,8 @@ export default async function JobDetailPage({
                       <div className="flex flex-wrap items-start gap-x-3 gap-y-2">
                         <JobScheduleControl
                           id={j.id}
-                          segments={(scheduleSegments ?? []) as any}
+                          segments={scheduleDays}
+                          ownDays={ownDays.map((o) => o.words)}
                           block={block}
                           workDay={workDay}
                           plannedMinutes={j.planned_minutes ?? null}

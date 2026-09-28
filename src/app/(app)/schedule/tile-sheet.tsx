@@ -9,9 +9,20 @@ import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/toast";
 import { BlockTimeControls, type BlockPatch } from "@/components/block-time-controls";
 import { JobCrewChips, type CrewMember } from "../jobs/[id]/job-crew-card";
-import { clearJobDate, moveJobDay, setJobTimes, setVisitTimes } from "./actions";
+import { clearJobDate, moveJobDay, setJobDayTimes, setJobTimes, setVisitTimes } from "./actions";
 import { rescheduleAppointment, setAppointmentAssignee, unscheduleAppointment } from "../appointments/actions";
-import { dayWords, endAfter, readJobBlock, readVisitBlock, type JobBlock } from "@/lib/schedule/job-block";
+import {
+  dayWords,
+  endAfter,
+  jobDayBlock,
+  readJobBlock,
+  readVisitBlock,
+  workDayMinutes,
+  type JobBlock,
+} from "@/lib/schedule/job-block";
+import { minutesToHm } from "@/lib/schedule/fit-day";
+import { placeLine } from "@/lib/schedule/block-info";
+import type { DayHours } from "@/lib/schedule-math";
 import { shiftApptToDay } from "@/lib/appt-time";
 import { initials } from "@/lib/utils";
 
@@ -42,6 +53,9 @@ export type TileJob = {
   planned_minutes?: number | null;
   assigned_to?: string[] | null;
   customers?: { name: string } | null;
+  /** The street and the town, for the sheet's where line (lib/schedule/block-info). */
+  address?: string | null;
+  city?: string | null;
 };
 
 export type TileVisit = {
@@ -53,7 +67,15 @@ export type TileVisit = {
   assigned_to: string | null;
 };
 
-export type TileTarget = { kind: "job"; day: string; job: TileJob } | { kind: "visit"; day: string; visit: TileVisit };
+export type TileTarget =
+  | {
+      kind: "job";
+      day: string;
+      job: TileJob;
+      /** The tapped day's own hours (0370), when it keeps them. */
+      dayHours?: DayHours | null;
+    }
+  | { kind: "visit"; day: string; visit: TileVisit };
 
 type Shared = {
   tz: string;
@@ -61,6 +83,9 @@ type Shared = {
   /** The active team (the crew picker's list). */
   team: CrewMember[];
   canEdit: boolean;
+  /** 0370 is applied: a day can keep its own hours, so the time here is THIS DAY's. Absent or false:
+   *  the time is the job's (every day's), as before. */
+  perDayHours?: boolean;
   onClose: () => void;
   /** Where the sheet's writes report: a save out holds the sheet open, a refusal the sheet closed
    *  before anyone read is said in a toast. Absent (the render test): inline words only. */
@@ -146,7 +171,11 @@ export function ScheduleTileSheet({ target, ...rest }: Shared & { target: TileTa
 
 /** The sheet's inside (exported for its render test). */
 export function TileSheetBody({ target, ...rest }: Shared & { target: TileTarget }) {
-  return target.kind === "job" ? <JobSheet day={target.day} job={target.job} {...rest} /> : <VisitSheet day={target.day} visit={target.visit} {...rest} />;
+  return target.kind === "job" ? (
+    <JobSheet day={target.day} job={target.job} dayHours={target.dayHours ?? null} {...rest} />
+  ) : (
+    <VisitSheet day={target.day} visit={target.visit} {...rest} />
+  );
 }
 
 /** A section's small heading. */
@@ -277,7 +306,18 @@ function ClearTheDate({
   );
 }
 
-function JobSheet({ day, job, tz, workDay, team, canEdit, onClose, voice }: Shared & { day: string; job: TileJob }) {
+function JobSheet({
+  day,
+  job,
+  dayHours,
+  tz,
+  workDay,
+  team,
+  canEdit,
+  perDayHours = false,
+  onClose,
+  voice,
+}: Shared & { day: string; job: TileJob; dayHours: DayHours | null }) {
   const router = useRouter();
   const toast = useToast();
   const block: JobBlock = readJobBlock({
@@ -292,11 +332,43 @@ function JobSheet({ day, job, tz, workDay, team, canEdit, onClose, voice }: Shar
      left). The grid draws it all day, so the sheet says what it is, its time controls are the PLAN's
      and say so, and its Move moves the plan (or, with none, gives it one), never the worked day. */
   const onPlan = !!block.day && day >= block.day && day <= (block.lastDay ?? block.day);
+  /* THIS DAY'S TIME (0370). A day can keep its own hours, so the time here is the tapped day's: the
+     job's other days keep theirs, and the job page's control sets the usual hours (every day without
+     its own). The job's ONE day is the job's time (setJobDayTimes moves the job's hours there). Before
+     0370 there are no own hours: the time is the job's, as it always was. */
+  const soleDay = !!block.day && !block.multiDay && block.day === day;
+  const thisDay = perDayHours && !soleDay;
+  const drawn = jobDayBlock({
+    day,
+    scheduledStart: job.scheduled_start,
+    scheduledEnd: job.scheduled_end,
+    plannedMinutes: job.planned_minutes ?? null,
+    tz,
+    wd: workDayMinutes(workDay),
+    dayHours,
+  });
+  const drawnMinutes = Math.max(1, drawn.endMin - drawn.startMin);
 
   async function saveTimes(patch: BlockPatch) {
     const res = await setJobTimes(job.id, "start" in patch ? { start: patch.start } : { length: patch.length });
     if (res.ok) router.refresh();
     return res;
+  }
+
+  async function saveDayTimes(patch: BlockPatch) {
+    const res = await setJobDayTimes(job.id, day, "start" in patch ? { start: patch.start } : { length: patch.length });
+    if (res.ok) router.refresh();
+    return res;
+  }
+
+  const usual = useSheetWrite(voice);
+  function backToUsual() {
+    usual.run(async () => {
+      const res = await setJobDayTimes(job.id, day, { usual: true });
+      if (!res.ok) return res.error ?? "That day's hours didn't change. Try again.";
+      router.refresh();
+      return null;
+    }, "That day's hours didn't change. You may be offline.");
   }
 
   async function move(to: string) {
@@ -324,9 +396,17 @@ function JobSheet({ day, job, tz, workDay, team, canEdit, onClose, voice }: Shar
     return res;
   }
 
+  // WHERE AND WHO under the name, as the block says it: the street (or who, when the name is the
+  // street), the town small.
+  const place = placeLine({ name: job.name, street: job.address, customer: job.customers?.name });
   return (
     <div className="space-y-5">
-      {job.customers?.name && <p className="-mt-2 text-sm text-slate-500">{job.customers.name}</p>}
+      {(place || job.city) && (
+        <p className="-mt-2 text-sm text-slate-500">
+          {place?.text}
+          {job.city && <span className="text-xs text-slate-400">{place ? " · " : ""}{job.city}</span>}
+        </p>
+      )}
       <section>
         <Heading>Day</Heading>
         <DayRow day={day} canEdit={canEdit} move={move} idPrefix={`tile-${job.id}`} voice={voice} />
@@ -340,24 +420,44 @@ function JobSheet({ day, job, tz, workDay, team, canEdit, onClose, voice }: Shar
       </section>
       <section>
         <Heading>Time</Heading>
-        {block.day ? (
+        {thisDay || block.day ? (
           <>
-            {!onPlan && <p className="mb-1.5 text-xs text-slate-500">The plan&apos;s time, {dayWords(block.day)}:</p>}
+            {thisDay ? (
+              <p className="mb-1.5 text-xs text-slate-500">
+                This Day, {dayWords(day)}
+                {dayHours ? ": its own hours. The job's other days keep theirs." : ". Only this day changes; the job page sets the hours of its other days."}
+              </p>
+            ) : !onPlan && block.day ? (
+              <p className="mb-1.5 text-xs text-slate-500">The plan&apos;s time, {dayWords(block.day)}:</p>
+            ) : perDayHours && canEdit ? (
+              <p className="mb-1.5 text-xs text-slate-500">This Day, {dayWords(day)}: the job&apos;s one day, so this is the job&apos;s time.</p>
+            ) : null}
             <BlockTimeControls
-              startHm={block.startHm}
-              endHm={block.endHm}
-              allDay={block.allDay}
-              sized={block.sized}
-              multiDay={block.multiDay}
+              key={thisDay ? "this-day" : "the-job"}
+              startHm={thisDay ? minutesToHm(drawn.startMin) : block.startHm}
+              endHm={thisDay ? minutesToHm(drawn.endMin) : block.endHm}
+              allDay={thisDay ? drawn.allDay : block.allDay}
+              sized={thisDay ? !!dayHours || Number(job.planned_minutes ?? 0) > 0 : block.sized}
+              multiDay={thisDay ? false : block.multiDay}
               lastDayWords={dayWords(block.lastDay)}
               workDay={workDay}
               canEdit={canEdit}
-              save={saveTimes}
+              save={thisDay ? saveDayTimes : saveTimes}
               idPrefix={`tile-${job.id}`}
-              plannedMinutes={job.planned_minutes ?? null}
+              // The Start box predicts the end the writer keeps: a day's own length when it has its own
+              // hours, else the job's size (lib/schedule/day-hours nextDayHours).
+              plannedMinutes={thisDay && dayHours ? drawnMinutes : (job.planned_minutes ?? null)}
               onPending={voice?.pending}
               onRefusal={voice?.refusal}
             />
+            {thisDay && dayHours && canEdit && (
+              <div className="mt-2">
+                <Button type="button" variant="outline" disabled={usual.pending} onClick={backToUsual}>
+                  {usual.pending ? "Saving…" : "Use The Job's Usual Hours"}
+                </Button>
+                {usual.error && <p className="mt-1 text-xs text-red-600">{usual.error}</p>}
+              </div>
+            )}
           </>
         ) : (
           // A day kept as history (worked, its plan cleared): the time belongs to a planned day.

@@ -123,9 +123,19 @@ export interface JobForEvent {
  * "(multi-day)" — one-event-per-segment is the known upgrade). End defaults
  * to start + 8h (the historic push behavior) and is forced after start.
  */
-export function jobEventBody(job: JobForEvent, opts?: { multiSegment?: boolean; linkUrl?: string | null }) {
-  const start = new Date(job.scheduled_start);
-  let end = job.scheduled_end ? new Date(job.scheduled_end) : new Date(start.getTime() + 8 * 3600_000);
+export function jobEventBody(
+  job: JobForEvent,
+  opts?: {
+    multiSegment?: boolean;
+    linkUrl?: string | null;
+    /** THE DAY'S OWN HOURS (0370), as instants: a job whose one day keeps its own hours is that
+     *  block on the phone's calendar too, not its usual hours. */
+    window?: { startIso: string; endIso: string } | null;
+  },
+) {
+  const w = opts?.window && new Date(opts.window.endIso).getTime() > new Date(opts.window.startIso).getTime() ? opts.window : null;
+  const start = new Date(w ? w.startIso : job.scheduled_start);
+  let end = w ? new Date(w.endIso) : job.scheduled_end ? new Date(job.scheduled_end) : new Date(start.getTime() + 8 * 3600_000);
   if (!(end.getTime() > start.getTime())) end = new Date(start.getTime() + 8 * 3600_000);
   const summaryBase = [job.job_number, job.name].filter(Boolean).join(" — ") || "Job";
   const description = [job.description, opts?.linkUrl ? `Contractor North: ${opts.linkUrl}` : null]
