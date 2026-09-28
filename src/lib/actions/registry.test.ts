@@ -396,3 +396,33 @@ describe("action registry — the waits Nort can move (job.snoozeHold, invoice.s
     expect(offered("owner")).not.toContain("inquiry__delete");
   });
 });
+
+/**
+ * NO DESCRIPTION SENDS NORT TO A GONE DOOR (Wave 1 seam fix). Lane 6 moved Propose Dates out of the
+ * job's Manage menu to Offer Dates beside the Overview's Scheduled; job.proposeDates' description,
+ * which the model reads as the tool's own words, still said the link was "under Manage". Every
+ * registry and data-tool description is held to the doors that exist.
+ */
+describe("descriptions name doors that exist", () => {
+  it("none says Propose Dates, or points under Manage", () => {
+    const said = [
+      ...Object.values(REGISTRY).map((d) => [d.name, d.description] as const),
+      ...DATA_TOOLS.map((t) => [t.name, String(t.description ?? "")] as const),
+    ];
+    for (const [name, text] of said) {
+      expect(text, name).not.toMatch(/under Manage/i);
+      expect(text, name).not.toMatch(/Propose Dates/);
+    }
+    expect(REGISTRY["job.proposeDates"].description).toContain("Offer Dates beside Scheduled");
+  });
+
+  it("Offer Dates is where the description says: beside Scheduled on the Overview, not in Manage", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const read = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+    expect(read("src/app/(app)/jobs/[id]/propose-dates-button.tsx")).toContain('"Dates Offered…" : "Offer Dates"');
+    expect(read("src/app/(app)/jobs/[id]/page.tsx")).toContain("<ProposeDatesButton");
+    expect(read("src/app/(app)/jobs/[id]/job-manage-menu.tsx")).not.toContain("ProposeDatesButton");
+    expect(read("src/app/(app)/jobs/[id]/job-action-dock.tsx")).not.toContain("<ProposeDatesButton");
+  });
+});

@@ -262,7 +262,7 @@ export const jobActions: Record<string, ActionDef> = {
     group: "job",
     label: "Propose dates to the customer",
     description:
-      "Offer the customer up to 3 date options for a JOB (each YYYY-MM-DD, optional HH:MM start) — creates a pick-a-date link; the customer's tap schedules the job. NOTHING IS SENT by this action: read the returned link back so the user can share it (it's also on the job page under Manage). Optional note for arrival-window wording. To just set dates yourself, use job.move / job.scheduleDay instead.",
+      "Offer the customer up to 3 date options for a JOB (each YYYY-MM-DD, optional HH:MM start) — creates a pick-a-date link; the customer's tap schedules the job. NOTHING IS SENT by this action: read the returned link back so the user can share it (it's also on the job's Overview: Offer Dates beside Scheduled, which reads Dates Offered… while an offer is out). Optional note for arrival-window wording. To just set dates yourself, use job.move / job.scheduleDay instead.",
     input: z.object({
       id: z.string(),
       slots: z
