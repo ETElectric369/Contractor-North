@@ -209,6 +209,20 @@ export function postgrestShim(c: ShimSql, uid: string | null) {
         where.push(`${col(k)} = any ($${params.length})`);
         return q;
       },
+      /** PostgREST's not: .not(col, "is", null) and .not(col, "in", "(a,b)"). */
+      not(k: string, op: string, v: unknown) {
+        if (op === "is" && v === null) where.push(`${col(k)} is not null`);
+        else if (op === "in") {
+          const list = String(v)
+            .replace(/^\(|\)$/g, "")
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean);
+          params.push(list);
+          where.push(`not (${col(k)} = any ($${params.length}))`);
+        } else throw new Error(`shim: not ${op}`);
+        return q;
+      },
       order(k: string, opts: { ascending?: boolean; nullsFirst?: boolean; referencedTable?: string } = {}) {
         if (opts.referencedTable) return q;
         order.push(`${col(k)} ${opts.ascending === false ? "desc" : "asc"}${opts.nullsFirst ? " nulls first" : ""}`);

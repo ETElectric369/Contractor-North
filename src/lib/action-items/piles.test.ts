@@ -134,6 +134,29 @@ describe("real counts", () => {
     }
   });
 
+  it("Done, Not Billed read whole (0371): 'N+' only when the function counted more rows than it handed back", async () => {
+    const { doneRowsCount } = await import("./done-not-billed");
+    const done = (n: number, total: number) =>
+      Array.from({ length: n }, (_, i) => ({
+        src: "visit" as const,
+        id: `a${i}`,
+        job_id: null,
+        title: null,
+        job_number: null,
+        job_name: null,
+        customer_name: null,
+        at: `2026-07-0${i + 1}T17:00:00Z`,
+        open_invoice_id: null,
+        total_count: total,
+      }));
+    expect(doneRowsCount(done(3, 3))).toEqual({});
+    expect(doneRowsCount(done(3, 240))).toEqual({ capped: true });
+    expect(doneRowsCount([])).toEqual({});
+    const rows = (n: number) => Array.from({ length: n }, () => row("visit_unbilled"));
+    expect(roll(rows(3), { counts: { done_not_billed: doneRowsCount(done(3, 3)) } })[0].title).toBe("Done, Not Billed · 3");
+    expect(roll(rows(3), { counts: { done_not_billed: doneRowsCount(done(3, 240)) } })[0].title).toBe("Done, Not Billed · 3+");
+  });
+
   it("Done, Not Billed and Visits To Close Out have no list page holding their rows: a capped one unfolds every row read here", () => {
     expect(PILE_DEFS.done_not_billed.listHref).toBeNull();
     expect(PILE_DEFS.visits_to_close_out.listHref).toBeNull();
