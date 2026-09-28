@@ -6,7 +6,7 @@ import { X } from "lucide-react";
 import { Button } from "./button";
 import { lockBodyForModal, unlockBodyForModal } from "./modal-lock";
 import { backStack, createBackStepper, escapeStack, shouldGuardBack } from "./overlay-history";
-import { keyboardClosed, revealScroll } from "./modal-keyboard";
+import { keyboardClosed, nextKeyboardBaseline, revealScroll, type KeyboardBaseline } from "./modal-keyboard";
 import { safeAreaTop } from "@/lib/native-shell";
 
 /** Every overlay that closes in the same moment steps history back once, together (overlay-history). */
@@ -219,16 +219,21 @@ export function Modal({
     if (!open || typeof window === "undefined" || !window.visualViewport) return;
     const vv = window.visualViewport;
     let raf = 0;
+    // The visual viewport's own height when this sheet opened, raised to the tallest since and reset
+    // by a rotation: the ruler the keyboard is measured against (modal-keyboard.ts).
+    let baseline: KeyboardBaseline | null = null;
     const update = () => {
       cancelAnimationFrame(raf);
       raf = requestAnimationFrame(() => {
         // Keyboard closed → viewport is full-height again; clamp any residual offset (an iOS
         // WebKit quirk can leave offsetTop stuck briefly after the keyboard dismisses).
-        // Measured against the LAYOUT viewport (documentElement.clientHeight), never innerHeight:
-        // iOS 18 shrinks innerHeight with the keyboard, which read "closed" with the keyboard up,
-        // pinned the overlay 380px above the screen and left only Create Job showing (Erik
-        // 62be0852 — the whole story is in modal-keyboard.ts).
-        const kbClosed = keyboardClosed(vv.height, document.documentElement.clientHeight);
+        // Measured against the visual viewport's OWN height when the sheet opened, never a page
+        // height: iOS 18 shrinks innerHeight with the keyboard, which read "closed" with the
+        // keyboard up, pinned the overlay 380px above the screen and left only Create Job showing
+        // (Erik 62be0852), and a later iOS may move the layout viewport's height the same way.
+        // The whole story is in modal-keyboard.ts.
+        baseline = nextKeyboardBaseline(baseline, { height: vv.height, width: vv.width });
+        const kbClosed = keyboardClosed(vv.height, baseline.height);
         setVvRect({
           position: "fixed",
           top: kbClosed ? 0 : vv.offsetTop,
