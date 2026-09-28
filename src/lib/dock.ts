@@ -18,7 +18,6 @@ import {
   Banknote,
   Clock,
   Building2,
-  Stamp,
   ShieldCheck,
   HardHat,
   BookOpen,

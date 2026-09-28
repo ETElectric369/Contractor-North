@@ -301,9 +301,10 @@ export function CommandBar({
     return matchNavItems(navItems, q);
   }, [q, navItems, idle]);
 
-  const askItem: Item | null = q.trim() && nortOn
-    ? { kind: "Assistant", label: `Ask Nort: “${q.trim()}”`, href: `/assistant?q=${encodeURIComponent(q.trim())}` }
-    : null;
+  const askItem: Item | null = useMemo(
+    () => (q.trim() && nortOn ? { kind: "Assistant", label: `Ask Nort: “${q.trim()}”`, href: `/assistant?q=${encodeURIComponent(q.trim())}` } : null),
+    [q, nortOn],
+  );
 
   const flat: Item[] = useMemo(
     () => [...staticMatches, ...results, ...(askItem ? [askItem] : [])],

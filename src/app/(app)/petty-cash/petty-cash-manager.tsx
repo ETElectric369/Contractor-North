@@ -10,7 +10,6 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { DeleteButton } from "@/components/ui/delete-button";
 import { formatCurrency, formatDate } from "@/lib/utils";
-import { useToast } from "@/components/toast";
 import { addPettyCash, updatePettyCash, deletePettyCash } from "./actions";
 
 /** "YYYY-MM-DD" for the device's own calendar day — the same shape the rest of the app's
@@ -32,7 +31,6 @@ export interface PettyTx {
 
 export function PettyCashManager({ items, balance }: { items: PettyTx[]; balance: number }) {
   const router = useRouter();
-  const toast = useToast();
   const [pending, start] = useTransition();
   const [kind, setKind] = useState<"expense" | "replenish">("expense");
   const [amount, setAmount] = useState(0);

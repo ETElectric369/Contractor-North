@@ -340,7 +340,7 @@ export default async function InvoicePage({
 
   return (
     <div className="mx-auto max-w-4xl">
-      <BackLink fallback="/billing" fallbackLabel="Back to Billing" />
+      <BackLink fallback="/billing" fallbackLabel="Back To Invoices" />
 
       <div className="mb-6 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex flex-col gap-2">

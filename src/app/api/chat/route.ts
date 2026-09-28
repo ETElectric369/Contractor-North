@@ -2,7 +2,7 @@ import type Anthropic from "@anthropic-ai/sdk";
 import { NORT_PRODUCT_MAP } from "@/lib/nort-product-map";
 import { fenceToolData } from "@/lib/tool-data-fence";
 import { isStaffRole } from "@/lib/actions/perms";
-import { asRegister, clampHumor, clampNotes, standingOrders, toneDirective } from "@/lib/nort/tone";
+import { asRegister, clampHumor, standingOrders, toneDirective } from "@/lib/nort/tone";
 import { markCacheTail, runReplayRound } from "@/lib/nort/replay";
 import { createClient, createServiceClient } from "@/lib/supabase/server";
 import {
