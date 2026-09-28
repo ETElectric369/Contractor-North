@@ -1,10 +1,11 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { rankSix, SIX_SLOTS, OVERDUE_AUTO_CAP, type SixRankTask } from "@/lib/six-rank";
-import { KIND_STREAM, AFFORDANCES } from "@/lib/action-items/types";
+import { KIND_STREAM, AFFORDANCES, type ActionItem, type PileName } from "@/lib/action-items/types";
 import { supplierPaperActionItem } from "@/lib/action-items/supplier-paper-item";
 import { supplierPayActionItems } from "@/lib/action-items/supplier-pay-item";
 import { PAY_CARD_WINDOW_DAYS } from "@/app/(app)/bills/supplier-pay-due";
+import { PILE_DEFS, codeCount, rollUpPiles, sqlCount } from "@/lib/action-items/piles";
 
 // THE BADGE INVARIANT (src/lib/action-items/types.ts): a number on chrome =
 // distinct items needing a HUMAN DECISION TODAY that the app cannot defer,
@@ -31,8 +32,12 @@ describe("badge economy: the inbox is decisions-only (the task feeder stays dead
     expect(querySrc).not.toContain("due_date.is.null");
   });
 
-  it("the badge count stays derived from the list (the never-disagree doctrine)", () => {
-    expect(querySrc).toContain("(await getActionItems(ctx)).length");
+  it("the badge count stays derived from the list (the never-disagree doctrine): it is Now's length, never the fold's", () => {
+    expect(querySrc).toContain("(await getActionItems(ctx)).now.length");
+    expect(querySrc).not.toContain("waiting.length");
+    // One build hands back both lists (one cache() fan-out for the badge and the page).
+    expect(querySrc).toMatch(/const actionItemsForRequest = cache\(\s*\(todayStr: string, isStaff: boolean, userId: string, tz: string, off: string\): Promise<NeedsYou> =>/);
+    expect(querySrc).toContain("return { now, waiting: fold };");
   });
 
   it("tasks are gone from Needs You's grammar entirely, and so is the Convert verb (Wave 1, W1-16)", () => {
@@ -53,7 +58,10 @@ describe("badge economy: the inbox is decisions-only (the task feeder stays dead
     // A supplier's backlog is an unbounded set; eleven CED papers must badge +1, not +11. The
     // feeder pushes the rollup once and never an item per paper.
     expect(querySrc).toContain("supplierPaperActionItem(await supplierPapersP)");
-    expect(querySrc).not.toContain('kind: "supplier_paper"');
+    // No Now row per paper: the one `kind: "supplier_paper"` the build writes is a WAITING row, a
+    // paper set aside waiting on a credit (the fold, never the badge).
+    expect(querySrc.match(/kind: "supplier_paper"/g)).toHaveLength(1);
+    expect(querySrc).toMatch(/const row = waitingRow\(\{\s*id: `credit-\$\{c\.invoiceId\}`,\s*kind: "supplier_paper",/);
     expect(KIND_STREAM.supplier_paper).toBe("money");
     expect(AFFORDANCES.supplier_paper).toEqual(["open"]);
     const card = { invoiceId: "x", invoiceNumber: "8802-1", supplier: "CED", date: "2026-09-04", total: 1, closed: false, said: null, state: "needs_job" as const, verdict: "blank" as const, suggestion: null, candidates: [], onJob: null, because: "", samePurchase: [] };
@@ -66,7 +74,7 @@ describe("badge economy: the inbox is decisions-only (the task feeder stays dead
   it("the Pay By line is DATED, one per account, and exists only while the discount does", () => {
     // A number on chrome needs an expiry. Each pay line carries its deadline as `when`, is one line
     // per supplier account (never one per invoice), and supplierPayDue drops it the day after.
-    expect(querySrc).toContain("supplierPayActionItems((await supplierDeskP)?.payDue)");
+    expect(querySrc).toContain("withPayees(supplierPayActionItems((await supplierDeskP)?.payDue), desk?.payDue)");
     expect(querySrc).not.toContain('kind: "supplier_pay"');
     expect(KIND_STREAM.supplier_pay).toBe("money");
     expect(AFFORDANCES.supplier_pay).toEqual(["open"]);
@@ -95,6 +103,51 @@ describe("badge economy: the inbox is decisions-only (the task feeder stays dead
     expect(querySrc).not.toContain('kind: "time_stray",\n      title: `Hours On No Job');
     expect(KIND_STREAM.time_stray).toBe("today");
     expect(AFFORDANCES.time_stray).toEqual(["open"]);
+  });
+
+  it("a pile counts ONE on the badge: seven estimates not sent add 1, a lone one stays a plain row", () => {
+    const draft = (i: number): ActionItem => ({
+      id: `qdraft-q${i}`,
+      kind: "quote_draft",
+      stream: KIND_STREAM.quote_draft,
+      title: `Estimate E-0${i} started, never sent`,
+      when: `2026-09-${String(10 + i).padStart(2, "0")}`,
+      urgency: 0,
+      done: false,
+      href: `/quotes/q${i}`,
+      affordances: AFFORDANCES.quote_draft,
+    });
+    const seven = rollUpPiles(Array.from({ length: 7 }, (_, i) => draft(i)), { todayStr: "2026-09-27", isStaff: true });
+    expect(seven).toHaveLength(1);
+    expect(seven[0].title).toBe("Estimates Not Sent · 7");
+    expect(seven[0].affordances).toEqual(["open"]);
+    const one = rollUpPiles([draft(1)], { todayStr: "2026-09-27", isStaff: true });
+    expect(one).toHaveLength(1);
+    expect(one[0].id).toBe("qdraft-q1");
+    expect(one[0].title).not.toMatch(/· 1$/);
+  });
+
+  it("a capped read never prints a short count: a pile's title is never the read's .limit()", () => {
+    const LIMIT = 50;
+    const rows: ActionItem[] = Array.from({ length: LIMIT }, (_, i) => ({
+      id: `r${i}`,
+      kind: "inquiry",
+      stream: KIND_STREAM.inquiry,
+      title: `Lead ${i}`,
+      urgency: 1,
+      done: false,
+      href: "/leads",
+      affordances: AFFORDANCES.inquiry,
+    }));
+    const read = { data: rows, count: 83 };
+    for (const fact of [sqlCount(read), codeCount(read), codeCount({ data: rows }, LIMIT)]) {
+      const [pile] = rollUpPiles(rows, { todayStr: "2026-09-27", isStaff: true, counts: { leads_to_call: fact } });
+      expect(pile.title).not.toBe(`Leads To Call · ${LIMIT}`);
+      expect(pile.title).toMatch(/^Leads To Call · (83|50\+)$/);
+    }
+    // Every piled feeder in the build hands over a real count (its exact count or its cap).
+    for (const name of Object.keys(PILE_DEFS) as PileName[]) expect(querySrc, name).toContain(`counts.${name} =`);
+    expect(querySrc).not.toMatch(/`[^`]*· \$\{[^}]*\.length\}`/);
   });
 
   it("the dock's chrome badge display-caps at 9+", () => {
@@ -129,6 +182,14 @@ describe("badge economy: the inbox is decisions-only (the task feeder stays dead
     // The decisions headline is the card's own name: "Needs You: 3", never "Needs action: 3 items".
     expect(digestSrc).toContain("title: `Needs You: ${decisions}`");
     expect(digestSrc).not.toContain("Needs action:");
+  });
+
+  it("the morning push counts every hold that is back (its day today or earlier, or no day), filtered to the company, and it joins the decisions", () => {
+    const digestSrc = src("lib/action-items/digest.ts");
+    expect(digestSrc).toMatch(/\.from\("jobs"\)\s*\.select\("id", \{ count: "exact", head: true \}\)\s*\.eq\("org_id", org\.id\)\s*\.eq\("status", "on_hold"\)\s*\.or\(`hold_until\.is\.null,hold_until\.lte\.\$\{today\}`\)/);
+    expect(digestSrc).toContain("const decisions = holdsBack + (invR.count ?? 0) + (leadR.count ?? 0);");
+    // First line, and it stands for every hold it counts.
+    expect(digestSrc.indexOf("decisionTitles.push(holdsBackLine(holdsBack))")).toBeLessThan(digestSrc.indexOf("Invoice ${i.invoice_number} overdue"));
   });
 });
 

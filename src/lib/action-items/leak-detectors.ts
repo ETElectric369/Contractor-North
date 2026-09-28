@@ -216,7 +216,10 @@ export function detectUnbilledWork(opts: {
 }
 
 /**
- * Detector 3 — NO RETURN VISIT: an in-flight job (not complete/invoiced/cancelled)
+ * Detector 3 — NO RETURN VISIT, for the 6 PM "Close out your day" push (eod-sweep). My Day no longer
+ * asks this: its Jobs Needing A Day (jobs-needing-a-day.ts) asks whether ANYTHING is ahead of a job,
+ * with no three-day window. This one stays the evening's question about the day just worked: an
+ * in-flight job (not complete/invoiced/cancelled)
  * worked in the last NEEDS_RETURN_DAYS with NOTHING on the calendar from today on —
  * no future/today scheduled_start, no scheduled appointment, no schedule segment.
  * Suppressed while someone is clocked in (you're literally standing on the job) and

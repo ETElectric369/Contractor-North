@@ -3,60 +3,27 @@
 import { revalidatePath } from "next/cache";
 import { executeAction } from "@/lib/actions/execute";
 import { blocksCrewWipe } from "./assign-guard";
+import { resolveRowVerb, type DispatchPayload } from "./dispatch-map";
 import type { ActionKind, Affordance } from "./types";
 
-type Result = { ok: boolean; error?: string };
+type Result = { ok: boolean; error?: string; note?: string };
 
 /**
- * The inbox switchboard, now a THIN SHIM over the unified Action Registry. A
- * (kind, verb) pair maps to a canonical registry action name + input, and
- * executeAction() does the lookup / auth / validation / run. Same signature the
- * inbox buttons already call.
+ * The inbox switchboard, a THIN SHIM over the unified Action Registry. A (kind, verb) pair maps to a
+ * canonical registry action name + input (dispatch-map.ts, the whole table, tested), and
+ * executeAction() does the lookup / auth / validation / run. Its one caller is ActionList (Needs You's
+ * rows); Nort runs registry actions itself.
  *
- * No task arms and no convert branch (Wave 1, W1-16): tasks and Reminders never reach Needs You
- * (0358), and the Convert sheet went with them. The registry still holds task.* and inquiry.convert
- * for Nort; nothing here reaches them.
+ * NOTHING SILENT: what the action said it did (a finished job's "drafted INV-081", or what isn't on a
+ * bill yet) comes back as `note`, and the list says it.
  */
-function resolve(
-  kind: ActionKind,
-  verb: Affordance,
-  id: string,
-  payload?: { date?: string; assignee?: string },
-): { name: string; input: Record<string, unknown> } | null {
-  const date = payload?.date;
-
-  if (verb === "do") {
-    if (kind === "inquiry") return { name: "inquiry.contact", input: { id } };
-    if (kind === "appointment") return { name: "appointment.setStatus", input: { id, status: "completed" } };
-  } else if (verb === "schedule" || verb === "snooze") {
-    if (!date) return null;
-    if (kind === "job_to_schedule") return { name: "job.scheduleDay", input: { id, date } };
-    // SNOOZE IS NOT A CONTACT. The row's Snooze Until is the same deed as Nort's inquiry.snooze: the
-    // lead comes back on that day and nobody is said to have reached anyone (no 'contacted', no
-    // last_contacted_at). Schedule / set a date stays the follow-up after a contact.
-    if (kind === "inquiry" && verb === "snooze") return { name: "inquiry.snooze", input: { id, date } };
-    if (kind === "inquiry") return { name: "inquiry.contact", input: { id, follow_up_date: date } };
-  } else if (verb === "assign") {
-    const assignee = payload?.assignee ?? null;
-    if (kind === "job_to_schedule") return { name: "job.assign", input: { id, assignee: assignee ?? "" } };
-  } else if (verb === "dismiss") {
-    if (kind === "inquiry") return { name: "inquiry.delete", input: { id } };
-    if (kind === "appointment") return { name: "appointment.setStatus", input: { id, status: "cancelled" } };
-    if (kind === "organize") return { name: "organize.archive", input: { id } };
-    // THE TWO ENDINGS THE MONEY FEEDERS NEVER HAD (0205). Both write a real domain fact — a
-    // declined estimate, a walk-through's outcome — so the inbox stays a projection of reality
-    // and never becomes a list of things somebody clicked away.
-    if (kind === "quote_awaiting") return { name: "quote.setStatus", input: { id, status: "declined" } };
-    if (kind === "inspection_writeup") return { name: "appointment.setOutcome", input: { id, outcome: "lost" } };
-  }
-  return null;
-}
-
 export async function dispatchAction(input: {
   kind: ActionKind;
   id: string;
   verb: Affordance;
-  payload?: { date?: string; assignee?: string };
+  payload?: DispatchPayload;
+  /** The record a verb writes when it isn't the row's own id: a won estimate's job. */
+  target?: string | null;
   /** Which surface drove this — flows to the audit log + the confirm gate. */
   source?: "ui" | "voice" | "agent";
 }): Promise<Result> {
@@ -70,10 +37,11 @@ export async function dispatchAction(input: {
   if (blocksCrewWipe(kind, verb, payload?.assignee, source)) {
     return { ok: false, error: "Pick a person." };
   }
-  const mapped = resolve(kind, verb, id, payload);
+  const mapped = resolveRowVerb(kind, verb, id, payload, input.target);
   if (!mapped) return { ok: false, error: "That action isn't available here." };
 
   const res = await executeAction(mapped.name, mapped.input, { source });
   if (res.ok) revalidatePath("/planner");
-  return { ok: res.ok, error: res.error };
+  const note = res.warning ?? res.speak ?? res.recorded;
+  return { ok: res.ok, error: res.error, ...(res.ok && note ? { note } : {}) };
 }

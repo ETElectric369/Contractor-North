@@ -50,14 +50,16 @@ export type InquiryRow = {
 };
 
 /**
- * One request on Needs You. Leads on: the lead row as it always was. Leads off: the same request,
- * in plain words ("New Request From Dana"), with the phone number the Call Back button dials: the
- * lead list is out of the way, the person asking for work is not. The card still opens the
- * request itself (/leads?focus=, which renders with the Off line).
+ * One request on Needs You. Leads on: the lead row, its button Called, and (when there's a number)
+ * Call behind its ⋯. Leads off: the same request, in plain words ("New Request From Dana"), with the
+ * phone number its Call Back button dials: the lead list is out of the way, the person asking for
+ * work is not. The card still opens the request itself (/leads?focus=, which renders with the Off
+ * line). The row table (row-buttons.ts) decides which button says what.
  */
 export function inquiryActionItem(q: InquiryRow, todayStr: string, leadsOn: boolean): Omit<ActionItem, "stream"> {
   const overdue = q.next_follow_up_at != null && q.next_follow_up_at <= todayStr;
   const fresh = q.status === "new";
+  const phone = (q.phone ?? "").trim() || null;
   const item: Omit<ActionItem, "stream"> = {
     id: q.id,
     kind: "inquiry",
@@ -74,6 +76,7 @@ export function inquiryActionItem(q: InquiryRow, todayStr: string, leadsOn: bool
     // flashes the exact row — the "new leads clickable on My Day" nerve.
     href: `/leads?focus=${q.id}`,
     affordances: AFFORDANCES.inquiry,
+    ...(phone ? { phone } : {}),
   };
   if (leadsOn) return item;
   const who = (q.name ?? "").trim() || "Someone";
@@ -84,6 +87,6 @@ export function inquiryActionItem(q: InquiryRow, todayStr: string, leadsOn: bool
     chip: "Request",
     title: fresh ? `New Request From ${who}` : `Request From ${who}`,
     subtitle: fresh ? "Call them back" : "Follow up",
-    phone: (q.phone ?? "").trim() || null,
+    phone,
   };
 }
