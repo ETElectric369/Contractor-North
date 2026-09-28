@@ -15,6 +15,8 @@ const state = vi.hoisted(() => ({
   db: {} as Record<string, Row[]>,
   writes: [] as Write[],
   noHours: false,
+  /** Every read of the days fails (a timeout): the writer must stop before it writes anything. */
+  failSegRead: false,
 }));
 
 const HOURS = /\b(start_time|end_time)\b/;
@@ -42,6 +44,9 @@ function builder(table: string) {
   const filtersOf = () => Object.fromEntries(q.filters.map(([k, , v]) => [k, v]));
   const run = (single: boolean) => {
     const rows = state.db[table] ?? (state.db[table] = []);
+    if (state.failSegRead && table === "job_schedule_segments" && q.op === "select") {
+      return { data: null, error: { code: "57014", message: "canceling statement due to statement timeout" } };
+    }
     if (state.noHours && table === "job_schedule_segments") {
       const named = q.op === "insert" ? (Array.isArray(q.row) ? q.row : [q.row]).some((r: Row) => "start_time" in r || "end_time" in r) : HOURS.test(q.cols);
       if (named) return { data: null, error: missing };
@@ -142,6 +147,7 @@ const days = (id: string) =>
 beforeEach(() => {
   state.writes = [];
   state.noHours = false;
+  state.failSegRead = false;
   state.db = {
     // ET Electric's shape: Pacific, a 9-to-5 day.
     organizations: [{ id: "org-1", settings: { timezone: LA, work_day_start: "09:00", work_day_end: "17:00" } }],
@@ -273,6 +279,14 @@ describe("Add To Schedule: the day joins the job, at its own hours", () => {
     expect(state.db.schedule_proposals[0].status).toBe("cancelled");
   });
 
+  it("a refused add never withdraws the customer's link", async () => {
+    herringbone();
+    state.db.schedule_proposals.push({ id: "sp2", job_id: "j011", status: "pending" });
+    const r = await actions.addJobDay("j011", { day: "2026-09-24", start: "12:00" }, { cancelProposals: true });
+    expect(r.error).toBe("Herringbone is already on Thu, Sep 24. Tap its block there to change its time or crew.");
+    expect(state.db.schedule_proposals[0].status).toBe("pending");
+  });
+
   it("before 0370 (no hours columns): the day is added at the job's usual hours, and the note says so", async () => {
     herringbone();
     state.noHours = true;
@@ -344,6 +358,18 @@ describe("every rewrite carries each day's hours through (writeScheduleRanges)",
     withOwnDay();
     expect((await actions.setJobScheduleRanges("w1", [{ start: "2026-09-28", end: "2026-10-02" }])).ok).toBe(true);
     expect(days("w1")).toEqual(["2026-09-28..2026-09-28 12:00-17:00", "2026-09-29..2026-10-02 usual"]);
+  });
+
+  it("the days can't be read: nothing is written, and it says so (hours are never dropped by a blind rewrite)", async () => {
+    withOwnDay();
+    state.failSegRead = true;
+    expect(await actions.setJobScheduleRanges("w1", [{ start: "2026-09-28", end: "2026-10-02" }])).toEqual({
+      ok: false,
+      error: "Couldn't read the job's days, so nothing changed. Try again.",
+    });
+    expect(state.writes).toEqual([]);
+    state.failSegRead = false;
+    expect(days("w1")).toEqual(["2026-09-28..2026-09-28 12:00-17:00", "2026-09-29..2026-10-01 usual"]);
   });
 
   it("a move keeps the moved day's own hours on its new day", async () => {

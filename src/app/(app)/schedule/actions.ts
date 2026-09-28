@@ -324,7 +324,8 @@ export async function changeJobCrew(id: string, change: CrewChange): Promise<Res
 }
 
 /** Offer the customer up to 3 date+time slots; returns the public pick token.
- *  A slot with no time schedules the job at 8 AM (legacy behavior). */
+ *  The customer's pick (choose_schedule_slot, 0370) lands at the slot's time, or the company's
+ *  work-day start when it has none, for the job's length (else two hours), beside the job's other days. */
 export async function createScheduleProposal(
   jobId: string,
   slots: { date: string; time?: string }[],
@@ -430,6 +431,22 @@ async function writeScheduleRanges(
     .map((r) => (r.end < r.start ? { ...r, end: r.start } : r))
     .sort((a, b) => a.start.localeCompare(b.start));
 
+  /* EACH DAY KEEPS ITS OWN HOURS (0370) THROUGH THIS REWRITE. The segments are deleted and written
+     again below, so the hours each day has now are read FIRST, before anything is written, and carried
+     onto every day still on the schedule (carryHours); a range that says its hours (a moved range, the
+     day being added, a day given its own time) keeps what it says. Never dropped: a read that fails
+     stops the write here, with nothing changed. Before 0370 the columns aren't there: the days are
+     written exactly as before, without hours. */
+  const priorRead = await withDayHours((h) =>
+    supabase.from("job_schedule_segments").select(segmentCols("start_date, end_date", h)).eq("job_id", jobId),
+  );
+  // A missing TABLE (42P01 / PostgREST PGRST205, a database before 0040) is the legacy path below.
+  const priorCode = String((priorRead.error as { code?: unknown } | null)?.code ?? "");
+  if (priorRead.error && priorCode !== "42P01" && priorCode !== "PGRST205") {
+    return { ok: false, error: "Couldn't read the job's days, so nothing changed. Try again." };
+  }
+  const perDayHours = priorRead.perDayHours && !priorRead.error;
+
   // Mirror the overall window onto the job FIRST — this is what every legacy
   // reader uses, and it must succeed even if the segments table isn't there.
   // Every instant is built in the ORG timezone (this runs server-side in UTC, so a bare
@@ -480,15 +497,7 @@ async function writeScheduleRanges(
   // A scheduled date advances early-stage status (consistent with the other writers).
   if (minStart) await advanceToScheduled(supabase, jobId);
 
-  /* EACH DAY KEEPS ITS OWN HOURS (0370) THROUGH THIS REWRITE. The segments are deleted and written
-     again below, so the hours each day has now are read first and carried onto every day still on
-     the schedule (carryHours); a range that says its hours (a moved range, the day being added, a
-     day given its own time) keeps what it says. Never dropped. Before 0370 the columns aren't there:
-     the days are written exactly as before, without hours. */
-  const priorRead = await withDayHours((h) =>
-    supabase.from("job_schedule_segments").select(segmentCols("start_date, end_date", h)).eq("job_id", jobId),
-  );
-  const perDayHours = priorRead.perDayHours && !priorRead.error;
+  // The days as they will be written: each day's hours carried (read above, before any write).
   let days: DateRange[] = clean;
   if (perDayHours) {
     const prior = ((priorRead.data ?? []) as unknown as SegmentRow[]).map(
@@ -1029,7 +1038,14 @@ export async function addJobDay(
     return { ok: false, error: `${called} is ${jobStatusLabel(String(job.status ?? ""))}, so it can't take another day. Change its status on the job page first.` };
   }
 
-  // A pick-a-date link out: the customer's later tap would land a day the office didn't choose.
+  const { segments, perDayHours, error: segErr } = await loadJobDaySegments(supabase, jobId);
+  if (segErr) return { ok: false, error: segErr };
+  if (coversDay(segments, day)) {
+    return { ok: false, error: `${called} is already on ${dayWords(day)}. Tap its block there to change its time or crew.` };
+  }
+
+  // A pick-a-date link out: the customer's later tap would land a day the office didn't choose. Asked
+  // first, and withdrawn only once nothing else stands in the way of the day going on.
   const { data: pendingPick } = await supabase.from("schedule_proposals").select("id").eq("job_id", jobId).eq("status", "pending").limit(1);
   let withdrew = false;
   if (pendingPick?.length) {
@@ -1038,12 +1054,6 @@ export async function addJobDay(
     }
     const { data: gone } = await supabase.from("schedule_proposals").update({ status: "cancelled" }).eq("job_id", jobId).eq("status", "pending").select("id");
     withdrew = !!gone?.length;
-  }
-
-  const { segments, perDayHours, error: segErr } = await loadJobDaySegments(supabase, jobId);
-  if (segErr) return { ok: false, error: segErr };
-  if (coversDay(segments, day)) {
-    return { ok: false, error: `${called} is already on ${dayWords(day)}. Tap its block there to change its time or crew.` };
   }
 
   // THE DAY'S HOURS, as the sheet showed them: the start (the tapped time, else the work day's start)
