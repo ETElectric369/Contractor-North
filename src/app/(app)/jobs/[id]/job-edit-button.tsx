@@ -5,67 +5,66 @@ import { useRouter } from "next/navigation";
 import { Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Modal, ModalActions } from "@/components/ui/modal";
-import { Input, Label, Textarea, Select } from "@/components/ui/input";
+import { Input, Label, Select } from "@/components/ui/input";
 import { AddressAutocomplete } from "@/components/address-autocomplete";
-import { StateSelect } from "@/components/ui/state-select";
+import { formatCityStateZip } from "@/lib/utils";
+import { CustomerPicker } from "../../schedule/new-job-button";
 import { MANAGE_ROW_CLS } from "./job-manage-menu";
 import { updateJob } from "../actions";
 import type { Job } from "@/lib/types";
 
-/** ISO → yyyy-mm-dd in local time for a date input. */
-function toLocalDate(iso: string | null): string {
-  if (!iso) return "";
-  const d = new Date(iso);
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
-}
-
-/** HH:MM of an ISO timestamp in the viewer's local time, for a <input type="time">. */
-function toLocalTime(iso: string | null, fallback: string): string {
-  if (!iso) return fallback;
-  const d = new Date(iso);
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${p(d.getHours())}:${p(d.getMinutes())}`;
-}
-
+/**
+ * EDIT JOB IN FIVE FIELDS (W1-22): Job Name, Customer (New Job's own picker; + New Customer is a
+ * Name and a Phone, through the one match-then-insert door), Address (the street picker, with what
+ * it stored on a grey line under it), Unit / Apt, and Billing (starting at the job's own). The
+ * job-code template stays exactly as it was, only when Job Codes is on and templates exist.
+ *
+ * What left, to its one editor on the Overview: the dates (Scheduled), the description (its box) and
+ * the crew (the crew chips). updateJob writes a column only when its field is sent, so saving this
+ * short form can never clear the job's dates, its scope or its crew, or push an empty schedule to
+ * Google.
+ */
 export function JobEditButton({
   job,
   customers,
-  techs,
   templates = [],
   menuItem = false,
-  workDay = { start: "08:00", end: "16:00" },
 }: {
   job: Job;
   customers: { id: string; name: string }[];
-  techs: { id: string; full_name: string | null }[];
   templates?: { id: string; name: string }[];
   /** Render the trigger as a Manage-menu row instead of a standalone button. */
   menuItem?: boolean;
-  /** The org's work-day window "HH:MM" (workDayWindowHm, server-fetched) — the
-   *  blank-time defaults, so re-saving an all-day job keeps the org's window
-   *  instead of forcing it back to a fixed 8-4. */
-  workDay?: { start: string; end: string };
 }) {
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
+  const [customerId, setCustomerId] = useState(job.customer_id ?? "");
   const [newCust, setNewCust] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [newPhone, setNewPhone] = useState("");
+  const [street, setStreet] = useState(job.address ?? "");
   const [city, setCity] = useState(job.city ?? "");
   const [state, setState] = useState(job.state ?? "");
   const [zip, setZip] = useState(job.zip ?? "");
-  const [startDate, setStartDate] = useState(toLocalDate(job.scheduled_start));
-  const [endDate, setEndDate] = useState(toLocalDate(job.scheduled_end));
-  const [startTime, setStartTime] = useState(toLocalTime(job.scheduled_start, workDay.start));
-  const [endTime, setEndTime] = useState(toLocalTime(job.scheduled_end, workDay.end));
+  const [formKey, setFormKey] = useState(0);
   const router = useRouter();
+
+  function reset() {
+    setCustomerId(job.customer_id ?? "");
+    setNewCust(false);
+    setNewName("");
+    setNewPhone("");
+    setStreet(job.address ?? "");
+    setCity(job.city ?? "");
+    setState(job.state ?? "");
+    setZip(job.zip ?? "");
+    setFormKey((k) => k + 1);
+    setError(null);
+  }
 
   function onSubmit(formData: FormData) {
     setError(null);
-    // Convert local date + time-of-day to ISO here so the server never guesses the
-    // timezone. The time-of-day is what the planner/Agenda lays the day out by.
-    formData.set("scheduled_start", startDate ? new Date(`${startDate}T${startTime || workDay.start}:00`).toISOString() : "");
-    formData.set("scheduled_end", endDate ? new Date(`${endDate}T${endTime || workDay.end}:00`).toISOString() : "");
     start(async () => {
       const res = await updateJob(job.id, formData);
       if (!res.ok) {
@@ -77,14 +76,29 @@ export function JobEditButton({
     });
   }
 
+  const storedLine = formatCityStateZip(city, state, zip);
+
   return (
     <>
       {menuItem ? (
-        <button type="button" onClick={() => setOpen(true)} className={MANAGE_ROW_CLS}>
+        <button
+          type="button"
+          onClick={() => {
+            reset();
+            setOpen(true);
+          }}
+          className={MANAGE_ROW_CLS}
+        >
           <Pencil className="h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" /> Edit Job
         </button>
       ) : (
-        <Button variant="outline" onClick={() => setOpen(true)}>
+        <Button
+          variant="outline"
+          onClick={() => {
+            reset();
+            setOpen(true);
+          }}
+        >
           <Pencil className="h-4 w-4" /> Edit Job
         </Button>
       )}
@@ -95,145 +109,92 @@ export function JobEditButton({
       <Modal
         open={open}
         onClose={() => setOpen(false)}
-        title="Edit job"
+        title="Edit Job"
         portal
-        footer={
-          <ModalActions onCancel={() => setOpen(false)} submit formId="job-edit-form" saving={pending} saveLabel="Save Changes" />
-        }
+        footer={<ModalActions onCancel={() => setOpen(false)} submit formId="job-edit-form" saving={pending} saveLabel="Save Changes" />}
       >
         <form id="job-edit-form" action={onSubmit} className="space-y-4">
           {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
 
           <div>
-            <Label htmlFor="ej-name">Job name *</Label>
+            <Label htmlFor="ej-name">Job Name *</Label>
             <Input id="ej-name" name="name" required defaultValue={job.name} />
           </div>
 
-          <div>
-            <div className="flex items-center justify-between">
-              <Label htmlFor="ej-customer">Customer</Label>
-              <button
-                type="button"
-                onClick={() => setNewCust((v) => !v)}
-                className="text-xs font-medium text-brand hover:underline"
-              >
-                {newCust ? "Pick Existing" : "+ New Customer"}
-              </button>
-            </div>
-            {newCust ? (
-              <div className="space-y-2">
-                <Input name="new_customer_name" placeholder="New customer name" autoFocus />
-                <div className="grid grid-cols-2 gap-2">
-                  <Input name="new_customer_phone" placeholder="Phone (optional)" />
-                  <Input name="new_customer_email" type="email" placeholder="Email (optional)" />
-                </div>
-              </div>
-            ) : (
-              <Select id="ej-customer" name="customer_id" defaultValue={job.customer_id ?? ""}>
-                <option value="">— None —</option>
-                {customers.map((c) => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
-                ))}
-              </Select>
-            )}
-          </div>
+          <CustomerPicker
+            idPrefix="ej"
+            customers={customers}
+            customerId={customerId}
+            onCustomerId={setCustomerId}
+            isNew={newCust}
+            onIsNew={setNewCust}
+            newName={newName}
+            onNewName={setNewName}
+            newPhone={newPhone}
+            onNewPhone={setNewPhone}
+          />
 
           <div>
-            <Label htmlFor="ej-address">Site address</Label>
+            <Label htmlFor="ej-address">Address</Label>
             <AddressAutocomplete
+              key={formKey}
               id="ej-address"
               name="address"
               streetOnly
-              defaultValue={job.address ?? ""}
+              defaultValue={street}
+              // Typing over the street DROPS the old city, state and zip: they describe the old line
+              // (a city left behind from a different street is the false value 0177 forbids).
+              onTextChange={(v) => {
+                if (v === street) return;
+                setStreet(v);
+                setCity("");
+                setState("");
+                setZip("");
+              }}
               onResolved={(p) => {
-                setCity(p.city);
-                setState(p.state);
-                setZip(p.zip);
+                // The street too, so the text change that follows a pick is not read as typing over it.
+                setStreet(p.line1);
+                setCity(p.city ?? "");
+                setState(p.state ?? "");
+                setZip(p.zip ?? "");
               }}
             />
+            {storedLine && <p className="mt-1 text-xs text-slate-500">{storedLine}</p>}
+            <input type="hidden" name="city" value={city} />
+            <input type="hidden" name="state" value={state} />
+            <input type="hidden" name="zip" value={zip} />
           </div>
+
           <div>
             {/* THE DWELLING. Four Tahoe Tavern jobs share 300 W Lake Blvd and the number lived
-                only inside the job NAME, so every document named the building. Uncontrolled +
-                defaultValue like the rest of this form: the address picker never fills it,
-                because Google returns a street, not somebody's apartment. */}
-            <Label htmlFor="ej-unit">Unit / Apt <span className="font-normal text-slate-400">(optional)</span></Label>
+                only inside the job NAME, so every document named the building. The address picker
+                never fills it: Google returns a street, not somebody's apartment. */}
+            <Label htmlFor="ej-unit">
+              Unit / Apt <span className="font-normal text-slate-400">(optional)</span>
+            </Label>
             <Input id="ej-unit" name="unit" defaultValue={job.unit ?? ""} placeholder="e.g. 224, Apt B" maxLength={24} />
-          </div>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <div className="col-span-2">
-              <Label htmlFor="ej-city">City</Label>
-              <Input id="ej-city" name="city" value={city} onChange={(e) => setCity(e.target.value)} />
-            </div>
-            <div>
-              <Label htmlFor="ej-state">State</Label>
-              <StateSelect id="ej-state" name="state" value={state} onChange={setState} />
-            </div>
-            <div>
-              <Label htmlFor="ej-zip">Zip</Label>
-              <Input id="ej-zip" name="zip" value={zip} onChange={(e) => setZip(e.target.value)} />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label htmlFor="ej-start">Start date</Label>
-              <Input id="ej-start" type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
-            </div>
-            <div>
-              <Label htmlFor="ej-start-time">Start time</Label>
-              <Input id="ej-start-time" type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)} disabled={!startDate} />
-            </div>
-            <div>
-              <Label htmlFor="ej-end">End date</Label>
-              <Input id="ej-end" type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
-            </div>
-            <div>
-              <Label htmlFor="ej-end-time">End time</Label>
-              <Input id="ej-end-time" type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} disabled={!endDate} />
-            </div>
-          </div>
-
-          <div>
-            <Label>Assigned staff</Label>
-            <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1.5 rounded-lg border border-slate-200 px-3 py-2">
-              {techs.length === 0 && <span className="text-sm text-slate-400">No team members yet.</span>}
-              {techs.map((t) => (
-                <label key={t.id} className="flex items-center gap-1.5 text-sm text-slate-700">
-                  <input
-                    type="checkbox"
-                    name="assigned_to"
-                    value={t.id}
-                    defaultChecked={job.assigned_to?.includes(t.id)}
-                    className="h-4 w-4 rounded border-slate-300 text-brand"
-                  />
-                  {t.full_name ?? "Unnamed"}
-                </label>
-              ))}
-            </div>
-          </div>
-
-          <div>
-            <Label htmlFor="ej-desc">Description</Label>
-            <Textarea id="ej-desc" name="description" rows={3} defaultValue={job.description ?? ""} />
           </div>
 
           <div>
             <Label htmlFor="ej-billing">Billing</Label>
-            <Select id="ej-billing" name="billing_type" defaultValue={(job as any).billing_type ?? "fixed"}>
-              <option value="fixed">Fixed price</option>
+            {/* The job's own kind, read the way the money math reads it (computeJobProgress: anything
+                but "tm" is fixed), so re-saving never flips how a job bills as a side effect. */}
+            <Select id="ej-billing" name="billing_type" defaultValue={(job as { billing_type?: string | null }).billing_type === "tm" ? "tm" : "fixed"}>
               <option value="tm">Time &amp; Material</option>
+              <option value="fixed">Fixed Price</option>
             </Select>
-            <p className="mt-1 text-xs text-slate-400">Time &amp; Material bills actual labor + materials; the estimate is a reference, not a cap.</p>
+            <p className="mt-1 text-xs text-slate-400">Time &amp; Material bills the hours and materials; the estimate is a guide, not a cap.</p>
           </div>
 
           {templates.length > 0 && (
             <div>
-              <Label htmlFor="ej-template">Job-code template</Label>
-              <Select id="ej-template" name="code_template_id" defaultValue={(job as any).code_template_id ?? ""}>
+              <Label htmlFor="ej-template">Job-Code Template</Label>
+              <Select id="ej-template" name="code_template_id" defaultValue={(job as { code_template_id?: string | null }).code_template_id ?? ""}>
                 <option value="">All codes</option>
                 {templates.map((t) => (
-                  <option key={t.id} value={t.id}>{t.name}</option>
+                  <option key={t.id} value={t.id}>
+                    {t.name}
+                  </option>
                 ))}
               </Select>
               <p className="mt-1 text-xs text-slate-400">Limits the crew&apos;s clock-in/out code picker to this job&apos;s codes.</p>

@@ -1228,7 +1228,8 @@ export async function createJobFromAppointment(
       name: appt.title || "Job from appointment",
       customer_id: customerId,
       inquiry_id: inquiryId,
-      status: "scheduled",
+      // A visit waiting for a day (no start, 0368) makes a job that is waiting for one too.
+      status: appt.starts_at ? "scheduled" : "to_be_scheduled",
       planned_minutes: sized > 0 ? sized : null, // blank stays blank — never a made-up number
       scheduled_start: appt.starts_at,
       scheduled_end: scheduledEnd,
@@ -1370,7 +1371,15 @@ export async function unscheduleAppointment(id: string): Promise<Result> {
     .eq("id", id)
     .in("status", ["scheduled", "proposed"]) // a completed/cancelled visit's date is history, not a plan
     .select("id");
-  if (error) return { ok: false, error: dbError(error) };
+  if (error) {
+    // A DATABASE WITHOUT 0368 still holds starts_at NOT NULL (0042), and refused every press of this
+    // door with Postgres' own words: the dead door found on production, 2026-09-27. Said plainly
+    // until the migration lands; the visit keeps its date, and says so.
+    if ((error as { code?: string }).code === "23502") {
+      return { ok: false, error: "A visit can't wait without a day until a quick database update is done. Its date is unchanged." };
+    }
+    return { ok: false, error: dbError(error) };
+  }
   if (!data?.length) return { ok: false, error: "Only a scheduled visit can go back to waiting." };
   await supabase
     .from("schedule_proposals")

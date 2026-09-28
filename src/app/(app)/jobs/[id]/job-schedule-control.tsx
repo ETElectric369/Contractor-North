@@ -122,7 +122,7 @@ export function JobScheduleControl({
             value={r.start}
             onChange={(ev) => update(i, { start: ev.target.value })}
             disabled={pending}
-            className="h-9 w-[150px]"
+            className="h-11 w-[150px]"
             aria-label={`Start date ${i + 1}`}
           />
           <span className="text-xs text-slate-400">to</span>
@@ -131,7 +131,7 @@ export function JobScheduleControl({
             value={r.end}
             onChange={(ev) => update(i, { end: ev.target.value })}
             disabled={pending}
-            className="h-9 w-[150px]"
+            className="h-11 w-[150px]"
             aria-label={`End date ${i + 1}`}
           />
           {i === 0 && (
@@ -144,7 +144,7 @@ export function JobScheduleControl({
                 value={startTime}
                 onChange={(ev) => updateTime(ev.target.value)}
                 disabled={pending}
-                className="h-9 w-[120px]"
+                className="h-11 w-[120px]"
                 aria-label="Start time (optional)"
                 title="Optional start time — leave blank for all-day"
               />
@@ -156,7 +156,7 @@ export function JobScheduleControl({
                   type="button"
                   onClick={() => updateTime("")}
                   disabled={pending}
-                  className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                  className="inline-flex h-11 w-11 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-600"
                   aria-label="Clear start time — back to all-day"
                   title="Clear time — back to all-day"
                 >
@@ -169,7 +169,7 @@ export function JobScheduleControl({
             <button
               type="button"
               onClick={() => removeRange(i)}
-              className="rounded-md p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600"
+              className="inline-flex h-11 w-11 items-center justify-center rounded-md text-slate-400 hover:bg-red-50 hover:text-red-600"
               aria-label="Remove date range"
               title="Remove this range"
             >
@@ -183,7 +183,7 @@ export function JobScheduleControl({
         <button
           type="button"
           onClick={addRange}
-          className="inline-flex items-center gap-1 text-xs font-medium text-brand hover:underline"
+          className="inline-flex min-h-11 items-center gap-1 text-xs font-medium text-brand hover:underline"
         >
           <Plus className="h-3.5 w-3.5" /> Add Date Range
         </button>

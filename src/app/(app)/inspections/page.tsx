@@ -54,7 +54,9 @@ export default async function InspectionsPage({
         "id, type, title, status, starts_at, location, capture, inquiry_id, job_id, outcome, customers(name), inquiries(name)",
       )
       .in("type", [...ESTIMATE_VISIT_TYPES])
-      .order("starts_at", { ascending: false })
+      // A visit waiting for a day (no start, 0368) sorts last, never first: Postgres puts nulls
+      // first in a descending sort unless told.
+      .order("starts_at", { ascending: false, nullsFirst: false })
       .limit(500),
     // Which inquiries/jobs already have an estimate — the "written up" signal. Ids too:
     // a lead-less Inspect-now write-up is matched via capture.quote_id (no inquiry/job link).
@@ -222,7 +224,7 @@ function InspectionRow({ a, tz, writeUp, estimateDoor }: { a: any; tz: string; w
             {writeUp && !hasCaptureData(a.capture) && <Badge tone="slate">no field notes</Badge>}
           </div>
           <div className="mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5 text-sm text-slate-500">
-            {a.starts_at && <span>{formatDateTimeTz(a.starts_at, tz)}</span>}
+            {a.starts_at ? <span>{formatDateTimeTz(a.starts_at, tz)}</span> : <span>Waiting For A Day</span>}
             {who && <span>· {who}</span>}
             {a.location && (
               <span className="inline-flex items-center gap-0.5">

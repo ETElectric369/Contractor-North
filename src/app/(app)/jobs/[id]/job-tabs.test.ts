@@ -7,12 +7,17 @@ import { renderToStaticMarkup } from "react-dom/server";
  * (offStrip) and still opens from a ?tab= link, with the Off line on top of exactly the content it
  * always had. With no switches stored (everything on) the strip is byte-for-byte what it was.
  */
-vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
+const nav = vi.hoisted(() => ({ search: "" }));
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ refresh: vi.fn() }),
+  usePathname: () => "/jobs/j1",
+  useSearchParams: () => new URLSearchParams(nav.search),
+}));
 vi.mock("@/app/(app)/settings/features-actions", () => ({ setFeature: vi.fn(async () => ({ ok: true })) }));
 
-import { arrangeJobTabs, JOB_PINNED_STAFF, JOB_PINNED_TECH, JOB_STAFF_ONLY, JOB_TAB_FEATURE, JOB_TAB_ORDER } from "./job-tabs";
+import { arrangeJobTabs, JOB_PINNED_STAFF, JOB_PINNED_TECH, JOB_STAFF_ONLY, JOB_TAB_FEATURE, JOB_TAB_ORDER, JOB_TECH_ADDABLE } from "./job-tabs";
 import { ALL_ON, FEATURE_KEYS, type FeatureMap } from "@/lib/features";
-import type { TabDef } from "@/components/tabs";
+import { MoreMenuRows, Tabs, type TabDef } from "@/components/tabs";
 
 const body = (id: string) => createElement("p", { "data-body": id }, `${id}-BODY`);
 const TABS: TabDef[] = JOB_TAB_ORDER.map((id) => ({ id, label: id, content: body(id) }));
@@ -116,5 +121,75 @@ describe("a switched-off feature's tab", () => {
     const t = byId(arrangeJobTabs(TABS, false, { features: off("estimates", "customer_portal"), isOwner: false }));
     for (const id of ["quotes", "change-orders", "customer", "costs", "invoices"]) expect(t[id].staffOnly, id).toBe(true);
     expect(isValidElement(t.quotes.content)).toBe(true);
+  });
+});
+
+describe("More shows what the job has, plus one + Add… (W1-18)", () => {
+  /** The page's tabs with `holds` set: true for the ids given, false for every other. */
+  const holding = (ids: string[]) => TABS.map((t) => ({ ...t, holds: ids.includes(t.id) }));
+  /** What the strip hands More: this viewer's tabs, minus pinned chips and offStrip ones (TabBar's own filter). */
+  const moreItems = (arranged: TabDef[], staff: boolean) => arranged.filter((t) => (!t.staffOnly || staff) && !t.offStrip && !t.pinned);
+  const rows = (items: TabDef[], view: "main" | "add" = "main") =>
+    renderToStaticMarkup(createElement(MoreMenuRows, { items, view, tile: true }));
+  const labels = (html: string) => Array.from(html.matchAll(/<span class="flex-1">([^<]+)<\/span>/g)).map((m) => m[1]);
+
+  it("no notes tab: the notes are the Overview's second box (W1-21)", () => {
+    expect(JOB_TAB_ORDER).not.toContain("notes");
+  });
+
+  it("tucked is false for pinned and offStrip tabs; with no holds said, nothing is tucked", () => {
+    for (const staff of [true, false]) {
+      for (const t of arrangeJobTabs(holding([]), staff, { features: off("permits", "customer_portal"), isOwner: true })) {
+        if (t.pinned || t.offStrip) expect(t.tucked, t.id).toBe(false);
+      }
+      expect(arrangeJobTabs(TABS, staff).filter((t) => t.tucked)).toEqual([]);
+    }
+  });
+
+  it("a new job's office More is only + Add…, and + Add… lists every empty tab by name", () => {
+    const items = moreItems(arrangeJobTabs(holding([]), true), true);
+    const main = rows(items);
+    expect(labels(main)).toEqual(["Add…"]);
+    const add = rows(items, "add");
+    expect(labels(add)[0]).toBe("More");
+    expect(labels(add).slice(1).sort()).toEqual(items.map((t) => t.label).sort());
+    expect(items.map((t) => t.id).sort()).toEqual(["appointments", "change-orders", "customer", "invoices", "permits", "panel", "photos", "quotes", "wos"].sort());
+  });
+
+  it("a job with invoices and photos lists exactly those two, then + Add…", () => {
+    const items = moreItems(arrangeJobTabs(holding(["invoices", "photos"]), true), true);
+    expect(labels(rows(items))).toEqual(["invoices", "photos", "Add…"]);
+    expect(labels(rows(items, "add"))).not.toContain("invoices");
+  });
+
+  it("the crew is never offered a staff-write tab that is empty: only the Panel, which he works", () => {
+    expect([...JOB_TECH_ADDABLE]).toEqual(["panel"]);
+    const t = byId(arrangeJobTabs(holding([]), false));
+    for (const id of ["permits", "appointments", "wos"]) {
+      expect(t[id].offStrip, id).toBe(true);
+      expect(t[id].tucked, id).toBe(false);
+    }
+    expect(t.panel.tucked).toBe(true);
+    expect(labels(rows(moreItems(arrangeJobTabs(holding([]), false), false), "add"))).toEqual(["More", "panel"]);
+    // A tab that holds something is his to read, empty or not for the office.
+    expect(byId(arrangeJobTabs(holding(["permits"]), false)).permits.offStrip).toBe(false);
+  });
+
+  it("when the crew's More would hold nothing, there is no More chip", () => {
+    nav.search = "";
+    const arranged = arrangeJobTabs(holding([]), false, { features: off("panel_map"), isOwner: false }).filter((x) => !x.staffOnly);
+    const html = renderToStaticMarkup(createElement(Tabs, { tabs: arranged, viewerIsStaff: false, look: "tiles" }));
+    expect(html).not.toMatch(/>More</);
+    expect(html).toMatch(/>job</); // the pinned chips are all there
+  });
+
+  it("a ?tab= link to a tucked tab still opens it, and More wears its name", () => {
+    nav.search = "tab=quotes";
+    const arranged = arrangeJobTabs(holding([]), true);
+    expect(byId(arranged).quotes.tucked).toBe(true);
+    const html = renderToStaticMarkup(createElement(Tabs, { tabs: arranged, viewerIsStaff: true, look: "tiles" }));
+    expect(html).toContain("quotes-BODY");
+    expect(html).toMatch(/aria-current="page"[^>]*>(?:(?!<\/button>)[\s\S])*>quotes</);
+    nav.search = "";
   });
 });

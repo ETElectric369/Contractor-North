@@ -28,9 +28,8 @@ export const metadata: Metadata = {
  *                  (lib/plan-brief-run.ts: the lead's name, message and files go to the model)
  *   subscription   settings/billing-actions.ts startCheckout: a Stripe customer with the company
  *                  name + email, card entered on Stripe Checkout
- *   photos         lib/image-prep.ts (the re-encode strips EXIF) used by jobs/[id]/upload-job-photos.ts
- *                  and job-notes.tsx; only job photos are promised here because other upload doors
- *                  do not all run it
+ *   photos         lib/image-prep.ts (the re-encode strips EXIF) used by jobs/[id]/upload-job-photos.ts;
+ *                  only job photos are promised here because other upload doors do not all run it
  *   voice          app/api/transcribe/route.ts (audio forwarded to ElevenLabs, not stored),
  *                  app/api/tts/route.ts
  *   processors     live in production per `vercel env ls` names: Supabase, Vercel, Anthropic,

@@ -20,7 +20,6 @@ export {
   // unmistakable (Erik's field feedback, 2026-07-14).
   DollarSign,
   Receipt,
-  StickyNote,
   Stamp,
   FileDiff,
   // The Customer Page tab (what the customer sees on this job).

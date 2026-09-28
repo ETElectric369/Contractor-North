@@ -11,6 +11,7 @@ import { DRAW_KINDS, isDrawKind } from "@/lib/invoice-math";
 import { BRING_IN_NEW_WORK, openDraftOnJob, unbilledCardDoor, type CardDoor, type OpenDraft } from "@/lib/actuals-draw";
 import { emptyToNull } from "@/lib/forms";
 import { notifyJobCrewAdded } from "@/lib/crew-notify";
+import { matchOrCreateCustomer, typedNewCustomer } from "@/lib/crm/new-customer";
 import { visibleJobIdOrNull, visiblePoIdOnJobOrNull, visibleTemplateIdOrNull } from "@/lib/job-visibility";
 import { requireStaff } from "@/lib/staff-guard";
 import { isStaffRole } from "@/lib/actions/perms";
@@ -1232,8 +1233,18 @@ export async function deleteJob(
   return { ok: true };
 }
 
-/** Edit every job field in one place: details, address, schedule, customer
- *  (existing or created inline), and assigned staff. */
+/**
+ * Edit a job's details: its name, customer (existing or created inline), address and unit, billing,
+ * and the job-code template.
+ *
+ * EVERY FIELD IS WRITTEN ONLY WHEN THE FORM SENDS IT (W1-22). Edit Job is five fields now: the dates
+ * are the Overview's Scheduled editor, the description the Overview's box, the crew the Overview's
+ * chips (setJobCrew). A writer that set every column from whatever arrived would read "not in the
+ * form" as "clear it": one save of the short form would wipe the job's dates, its scope and its crew,
+ * and push an empty schedule to Google. So each column is written only when its field is in the
+ * form (formData.has), the way billing_type and code_template_id always were, and a caller that
+ * still sends the dates, the description or the crew gets exactly the old behaviour for them.
+ */
 export async function updateJob(
   id: string,
   formData: FormData,
@@ -1245,60 +1256,56 @@ export async function updateJob(
   const name = String(formData.get("name") ?? "").trim();
   if (!name) return { ok: false, error: "Job name is required." };
 
-  // Optionally create a customer inline (when none selected).
-  let customerId = emptyToNull(formData.get("customer_id"));
-  const newCustomerName = String(formData.get("new_customer_name") ?? "").trim();
-  if (!customerId && newCustomerName) {
-    const { data: cust, error: cErr } = await supabase
-      .from("customers")
-      .insert({
-        name: newCustomerName,
-        phone: formatPhone(String(formData.get("new_customer_phone") ?? "")) || null, // the one formatter
-        email: emptyToNull(formData.get("new_customer_email")),
-        status: "active",
-        created_by: ctx.userId,
-      })
-      .select("id")
-      .single();
-    if (cErr) return { ok: false, error: cErr.message };
-    customerId = cust.id;
+  const sent = (key: string) => formData.has(key);
+  const patch: Record<string, unknown> = { name, updated_at: new Date().toISOString() };
+
+  // The customer: a pick, or one typed inline through the ONE match-then-insert door createJob uses
+  // (lib/crm/new-customer), so Edit Job can no longer mint a twin of somebody already in the book.
+  // In "+ New Customer" mode with no name typed, the helper refuses in words: Save Changes never
+  // reports success while quietly keeping the old customer and dropping the typed phone.
+  const typedCustomer = typedNewCustomer(formData);
+  if (typedCustomer) {
+    const made = await matchOrCreateCustomer(supabase, ctx.userId, typedCustomer);
+    if (!made.ok) return { ok: false, error: made.error };
+    patch.customer_id = made.id;
+  } else if (sent("customer_id")) {
+    patch.customer_id = emptyToNull(formData.get("customer_id"));
   }
 
-  const start = String(formData.get("scheduled_start") ?? "");
-  const end = String(formData.get("scheduled_end") ?? "");
-  const assigned = formData.getAll("assigned_to").map(String).filter(Boolean);
-
+  if (sent("billing_type")) {
+    const billing = String(formData.get("billing_type") ?? "").trim();
+    if (billing !== "tm" && billing !== "fixed") return { ok: false, error: "Pick Time & Material or Fixed Price." };
+    patch.billing_type = billing;
+  }
   // Scope the template to the caller's org — a job can't reference another org's template.
-  const codeTemplatePatch = formData.has("code_template_id")
-    ? { code_template_id: await visibleTemplateIdOrNull(supabase, emptyToNull(formData.get("code_template_id")) as string | null) }
-    : {};
+  if (sent("code_template_id")) {
+    patch.code_template_id = await visibleTemplateIdOrNull(supabase, emptyToNull(formData.get("code_template_id")) as string | null);
+  }
+  for (const col of ["address", "unit", "city", "state", "zip", "description"] as const) {
+    if (sent(col)) patch[col] = emptyToNull(formData.get(col));
+  }
+  if (sent("scheduled_start")) {
+    const start = String(formData.get("scheduled_start") ?? "");
+    patch.scheduled_start = start ? new Date(start).toISOString() : null;
+  }
+  if (sent("scheduled_end")) {
+    const end = String(formData.get("scheduled_end") ?? "");
+    patch.scheduled_end = end ? new Date(end).toISOString() : null;
+  }
+  // The crew only when the form carries it: a form with no crew field says nothing about the crew.
+  const crewSent = sent("assigned_to") || sent("assigned_to_sent");
+  const assigned = formData.getAll("assigned_to").map(String).filter(Boolean);
+  if (crewSent) patch.assigned_to = assigned;
 
-  // Old crew first — this writer also changes assigned_to, so newly ADDED members
+  // Old crew first — when this writer changes assigned_to, newly ADDED members
   // get the same bell + "assigned" push as setJobCrew (the shared diff helper).
-  const { data: prevJob } = await supabase
-    .from("jobs")
-    .select("assigned_to, org_id, job_number")
-    .eq("id", id)
-    .maybeSingle();
+  const { data: prevJob } = crewSent
+    ? await supabase.from("jobs").select("assigned_to, org_id, job_number").eq("id", id).maybeSingle()
+    : { data: null };
 
   const { data: saved, error } = await supabase
     .from("jobs")
-    .update({
-      name,
-      description: emptyToNull(formData.get("description")),
-      customer_id: customerId,
-      ...(formData.get("billing_type") != null ? { billing_type: String(formData.get("billing_type")) } : {}),
-      ...codeTemplatePatch,
-      address: emptyToNull(formData.get("address")),
-      unit: emptyToNull(formData.get("unit")),
-      city: emptyToNull(formData.get("city")),
-      state: emptyToNull(formData.get("state")),
-      zip: emptyToNull(formData.get("zip")),
-      scheduled_start: start ? new Date(start).toISOString() : null,
-      scheduled_end: end ? new Date(end).toISOString() : null,
-      assigned_to: assigned,
-      updated_at: new Date().toISOString(),
-    })
+    .update(patch)
     .eq("id", id)
     // THE SILENT-WRITE LAW (audit v921): a zero-row update is a 204, not an error — editing a job
     // that was deleted (or belongs to another org) answered "Saved" and wrote nothing.
@@ -1306,7 +1313,7 @@ export async function updateJob(
   if (error) return { ok: false, error: dbError(error) };
   if (!saved?.length) return { ok: false, error: "That job isn't available." };
 
-  if (prevJob) {
+  if (crewSent && prevJob) {
     const p = prevJob as { assigned_to: string[] | null; org_id: string | null; job_number: string | null };
     // Awaited (not `void`): serverless can drop an un-awaited promise after the action
     // returns. The helper never throws, so this can't break the job update.
@@ -1695,7 +1702,7 @@ export async function updateJobNotes(
   const supabase = ctx.supabase;
   // A ZERO-ROW UPDATE IS A 204 (the silent-write law). When RLS refuses the row — a job that
   // isn't this org's, or one deleted out from under the editor — Postgres answers "0 rows, no
-  // error", and this used to return { ok: true } so the Notes tab flashed "Saved" over text that
+  // error", and this used to return { ok: true } so the notes box flashed "Saved" over text that
   // never landed. Ask for the id back; an empty answer is the refusal it is.
   const { data, error } = await supabase
     .from("jobs")

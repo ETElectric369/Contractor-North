@@ -7,7 +7,6 @@ import { CalendarPlus, Copy, MessageSquare, Check, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { Input, Label } from "@/components/ui/input";
-import { MANAGE_ROW_CLS } from "./job-manage-menu";
 import { createScheduleProposal, cancelScheduleProposal } from "../../schedule/actions";
 
 type Slot = { date: string; time: string };
@@ -34,18 +33,19 @@ function defaultSlots(): Slot[] {
   return out;
 }
 
-/** Offer the customer 3 dates → share a link → they tap one → job schedules. */
+/** Offer the customer 3 dates → share a link → they tap one → job schedules.
+ *
+ *  OFFER DATES LIVES BESIDE THE SCHEDULE (W1-17): it moved out of the Manage menu to the Overview's
+ *  Scheduled cell, next to the dates it would fill, as an outline button (44px). While a link is out
+ *  it reads "Dates Offered…" and opens the link, Text It and Withdraw. */
 export function ProposeDatesButton({
   jobId,
   customerPhone,
   pending: pendingProposal,
-  menuItem = false,
 }: {
   jobId: string;
   customerPhone?: string | null;
   pending?: { id: string; token: string; dates: (string | Slot)[] } | null;
-  /** Render the trigger as a Manage-menu row instead of a standalone button. */
-  menuItem?: boolean;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -59,9 +59,8 @@ export function ProposeDatesButton({
   // The BUSINESS's domain, not the browser's — see useOrgPublicBase.
   const origin = useOrgPublicBase();
   const link = token && origin ? `${origin}/pick/${token}` : null;
-  const smsBody = link
-    ? encodeURIComponent(`Hi! Pick a day that works for your electrical work and we'll lock it in: ${link}`)
-    : "";
+  // "your job", never one trade's words (build for millions: a painter's customer gets this text too).
+  const smsBody = link ? encodeURIComponent(`Hi! Pick a day that works for your job and we'll lock it in: ${link}`) : "";
 
   function create() {
     setError(null);
@@ -76,7 +75,9 @@ export function ProposeDatesButton({
   function cancel() {
     if (!pendingProposal) return;
     start(async () => {
-      await cancelScheduleProposal(pendingProposal.id, jobId);
+      const res = await cancelScheduleProposal(pendingProposal.id, jobId);
+      // Nothing silent: a refused withdraw keeps the link on screen and says why.
+      if (!res.ok) return setError(res.error ?? "Couldn't withdraw the link.");
       setToken(null);
       setOpen(false);
       router.refresh();
@@ -96,17 +97,10 @@ export function ProposeDatesButton({
 
   return (
     <>
-      {menuItem ? (
-        <button type="button" onClick={() => setOpen(true)} className={MANAGE_ROW_CLS}>
-          <CalendarPlus className="h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" />
-          {pendingProposal ? "Dates Offered…" : "Propose Dates"}
-        </button>
-      ) : (
-        <Button variant="outline" onClick={() => setOpen(true)}>
-          <CalendarPlus className="h-4 w-4" />
-          {pendingProposal ? "Dates Offered…" : "Propose Dates"}
-        </Button>
-      )}
+      <Button variant="outline" onClick={() => setOpen(true)} className="min-h-11">
+        <CalendarPlus className="h-4 w-4" />
+        {pendingProposal ? "Dates Offered…" : "Offer Dates"}
+      </Button>
 
       <Modal
         open={open}
@@ -139,18 +133,18 @@ export function ProposeDatesButton({
               )}
               <code className="block break-all rounded-lg bg-slate-100 px-3 py-2 text-xs text-slate-700">{link}</code>
               <div className="flex flex-wrap gap-2">
-                <Button size="sm" onClick={copy}>
+                <Button onClick={copy}>
                   {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
                   {copied ? "Copied" : "Copy Link"}
                 </Button>
                 <a
                   href={`sms:${customerPhone ?? ""}${customerPhone ? "&" : "?"}body=${smsBody}`}
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-dark"
+                  className="inline-flex min-h-11 items-center gap-1.5 rounded-lg bg-brand px-3 text-sm font-medium text-white hover:bg-brand-dark"
                 >
                   <MessageSquare className="h-4 w-4 shrink-0" /> Text It
                 </a>
                 {pendingProposal && (
-                  <Button size="sm" variant="outline" onClick={cancel} disabled={busy} className="text-red-600">
+                  <Button variant="outline" onClick={cancel} disabled={busy} className="text-red-600">
                     <X className="h-3.5 w-3.5" /> Withdraw
                   </Button>
                 )}

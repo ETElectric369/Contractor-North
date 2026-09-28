@@ -7,6 +7,7 @@ import { FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { useToast } from "@/components/toast";
+import { WhyFold } from "@/components/why-fold";
 import { formatCurrency, formatDate, formatDuration } from "@/lib/utils";
 import type { UnbilledWork } from "@/lib/unbilled-work";
 import { createInvoiceForJob } from "../actions";
@@ -26,6 +27,9 @@ export type UnbilledView =
       hours: number;
       lastInvoiceNumber: string | null;
       lastInvoiceAt: string | null;
+      /** He is on the clock on this job right now. A running shift is never in `hours` (closed time
+       *  only), so with it the card says his time shows once he clocks out, not "Tap Clock In". */
+      onClockHere?: boolean;
     };
 
 /**
@@ -44,9 +48,13 @@ export type UnbilledView =
  * deposit); otherwise "Create Invoice" (createInvoiceForJob, the Invoices tab's New Invoice).
  *
  * EVERY T&M JOB (jobBillsItsActuals), estimate or not: on Time & Material the estimate is a guide,
- * never a block (Erik, Tao J-002, where an accepted estimate hid the card). A payment schedule or a
- * fixed-price job bills something else - a figure here would be a number no door produces (MONEY
- * law) - so there the card doesn't exist.
+ * never a block (Erik, Tao J-002, where an accepted estimate hid the card). For the office, also a
+ * fixed-price job with no live estimate (W1-19): its next New Invoice pulls the same hours and
+ * receipts (nextInvoiceImportsActuals, J-010 Purple Sage), so this figure is what that door bills. A
+ * payment schedule or a fixed-price contract bills something else - a figure here would be a number
+ * no door produces (MONEY law) - so there the Overview leads with Left To Bill instead
+ * (left-to-bill-card.tsx). The Labor / Bills / Stock / Credit rows sit in a Why? fold under the one
+ * figure; the sentences that change what the button does stay outside it.
  *
  * `view` null = the total couldn't be computed; the card says so and names the tabs that hold
  * the rows, instead of vanishing (nothing silent).
@@ -104,7 +112,16 @@ export function UnbilledCard({
             {since ? `Your time since ${since}` : "Your time not yet invoiced"}
           </div>
           <div className="mt-1 text-2xl font-bold text-slate-900">{formatDuration(view.hours)}</div>
-          {view.hours <= 0 && <p className="mt-1 text-sm text-slate-500">No new time yet — clock in on the Time tab.</p>}
+          {/* The job's one clock is the dock's TIME button at the top of the page (W1-20). While he is
+              on the clock here that button shows his running time, not Clock In, and a running shift
+              is not counted until it closes, so the sentence follows the clock. */}
+          {view.hours <= 0 && (
+            <p className="mt-1 text-sm text-slate-500">
+              {view.onClockHere
+                ? "On the clock here now. Your time shows once you clock out."
+                : "No new time yet. Tap Clock In at the top of this job."}
+            </p>
+          )}
         </CardContent>
       </Card>
     );
@@ -163,7 +180,12 @@ export function UnbilledCard({
                 {" "}from Billing.
               </p>
             ) : (
-              <dl className="mt-2 space-y-1.5 text-sm">
+              // THE REASONING WAITS IN A FOLD (W1-19): the card leads with one figure and one button;
+              // what makes the figure (each person's hours, the bills and their markup, stock, a
+              // return's credit) sits under "Why?" directly beneath it. The amber and plain sentences
+              // below stay OUT of the fold: they change what the button does, so they are never folded.
+              <WhyFold>
+              <dl className="space-y-1.5 text-sm">
                 <div className="flex gap-2">
                   <dt className="w-12 shrink-0 text-slate-400">Labor</dt>
                   <dd className="min-w-0">
@@ -236,6 +258,7 @@ export function UnbilledCard({
                   </div>
                 )}
               </dl>
+              </WhyFold>
             )}
             {w.stockShortsWords && (
               // TAKEN PAST THE SHELF: said before the invoice is built, never discovered after it

@@ -38,8 +38,8 @@ export function pickerInstant(date: string, time: string, tz: string): string | 
  * now · pick a time" link so the common one-tap path stays clean; expanded it's
  * a free date + time so the start can be ANY time the user chooses (e.g. forgot
  * to clock in). Emits an ISO string, or null when left at "now". Used by every
- * clock-in surface (Timeclock panel, My Day, the job Time tab) so backdating
- * works identically everywhere.
+ * clock-in surface (Timeclock panel, My Day, the job's TIME button at the top of the
+ * job page, a visit's start card) so backdating works identically everywhere.
  */
 export function ClockStartPicker({
   onChange,

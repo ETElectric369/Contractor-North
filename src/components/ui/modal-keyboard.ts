@@ -1,6 +1,6 @@
 /**
- * THE MODAL WITH THE KEYBOARD UP — the two pieces of geometry the shared <Modal> needs, kept pure
- * so they can be tested without a phone.
+ * THE MODAL WITH THE KEYBOARD UP — the geometry the shared <Modal> needs, kept pure so it can be
+ * tested without a phone.
  *
  * Erik, 2026-09-23 (report 62be0852, iPhone 402x874, the CNShell WKWebView): "Typing in new job
  * description at bottom pushed everything up out of sight except the create job button".
@@ -13,17 +13,41 @@
  * The Modal decided "is the keyboard closed?" with `vv.height >= innerHeight - 1`. On iOS 18
  * innerHeight tracks the visual viewport, so that was TRUE with the keyboard up, the overlay was
  * pinned to top 0 of a layout viewport the keyboard had panned 380px above the screen, and all
- * that showed was the bottom of the panel: the Create Job button. The layout viewport's height
- * is documentElement.clientHeight, which does not move with the keyboard, so that is what the
- * keyboard is measured against now.
+ * that showed was the bottom of the panel: the Create Job button. The fix measured the keyboard
+ * against documentElement.clientHeight, which iOS 18 does not move.
+ *
+ * IOS 26 AND LATER (bug triage, 2026-09-27: that fix was only ever tested on iOS 18, and Erik's
+ * phone runs 26). The page's own heights are not a steady ruler across iOS versions and webviews:
+ * whichever one a release decides to move with the keyboard (innerHeight on 18; the layout
+ * viewport's height in a webview that resizes its content), measuring against it reads "closed"
+ * with the keyboard up, which is exactly the 62be0852 failure again. And where the page runs under
+ * a floating toolbar, the visual viewport is shorter than the page with NO keyboard at all. So the
+ * keyboard is measured against the one ruler that means "no keyboard": the visual viewport's OWN
+ * height when the modal opened (a sheet opens from a tap, not mid-typing), raised to the tallest it
+ * has been since (a sheet opened while a keyboard was still up learns the full height the moment
+ * the keyboard goes), and reset when the width changes (a rotation is a new screen).
  */
 
-/** True when the on-screen keyboard is NOT taking space: the visual viewport is as tall as the
- *  layout viewport. `layoutHeight` is documentElement.clientHeight — never innerHeight, which
- *  iOS 18 shrinks along with the visual viewport. */
-export function keyboardClosed(visualHeight: number, layoutHeight: number): boolean {
-  if (!(layoutHeight > 0)) return true;
-  return visualHeight >= layoutHeight - 1;
+/** The visual viewport as the Modal last measured it with no keyboard in the way. */
+export type KeyboardBaseline = { height: number; width: number };
+
+/**
+ * The baseline after one more measurement: the first one sets it, a taller one raises it, and a
+ * change of width (a rotation, a split-screen resize) starts it again from here.
+ */
+export function nextKeyboardBaseline(prev: KeyboardBaseline | null, vv: { height: number; width: number }): KeyboardBaseline {
+  const height = Number(vv.height) || 0;
+  const width = Number(vv.width) || 0;
+  if (!prev || Math.abs(prev.width - width) >= 1) return { height, width };
+  return { height: Math.max(prev.height, height), width };
+}
+
+/** True when the on-screen keyboard is NOT taking space: the visual viewport is as tall as it was
+ *  when the modal opened (the baseline above) — never a page height, which some iOS versions move
+ *  with the keyboard. Nothing to measure against reads closed. */
+export function keyboardClosed(visualHeight: number, baselineHeight: number): boolean {
+  if (!(baselineHeight > 0)) return true;
+  return visualHeight >= baselineHeight - 1;
 }
 
 type Box = { top: number; bottom: number };

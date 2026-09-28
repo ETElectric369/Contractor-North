@@ -1,5 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { addressPrefillOnCustomerPick, jobLabel, jobSiteLabel, toNewJobCustomerOptions } from "./schedule-options";
+import {
+  addressPrefillOnCustomerPick,
+  customerNamePart,
+  defaultJobName,
+  jobLabel,
+  jobSiteLabel,
+  statusFromDate,
+  streetHasUnits,
+  streetKey,
+  toNewJobCustomerOptions,
+  unitStreetKeys,
+  usualBillingKind,
+} from "./schedule-options";
 
 /**
  * The codes-off job identity label (org setting timeclock_job_codes = false): the
@@ -36,12 +48,14 @@ describe("jobSiteLabel — the codes-off customer · address identity", () => {
  */
 
 describe("toNewJobCustomerOptions", () => {
-  it("builds the canonical one-line address from the customer's parts", () => {
+  it("builds the canonical one-line address from the customer's parts, and keeps the parts (W1-22)", () => {
     expect(
       toNewJobCustomerOptions([
         { id: "c1", name: "Ann", address: "123 Main St", city: "Chilcoot", state: "CA", zip: "96105" },
       ]),
-    ).toEqual([{ id: "c1", name: "Ann", address: "123 Main St, Chilcoot, CA 96105" }]);
+    ).toEqual([
+      { id: "c1", name: "Ann", address: "123 Main St, Chilcoot, CA 96105", street: "123 Main St", city: "Chilcoot", state: "CA", zip: "96105" },
+    ]);
   });
 
   it("drops empty parts and yields null when the customer has no address at all", () => {
@@ -51,8 +65,14 @@ describe("toNewJobCustomerOptions", () => {
         { id: "c2", name: "Bob", address: null, city: null, state: null, zip: null },
       ]),
     ).toEqual([
-      { id: "c1", name: "Ann", address: "123 Main St, CA" },
-      { id: "c2", name: "Bob", address: null },
+      { id: "c1", name: "Ann", address: "123 Main St, CA", street: "123 Main St", city: null, state: "CA", zip: null },
+      { id: "c2", name: "Bob", address: null, street: null, city: null, state: null, zip: null },
+    ]);
+  });
+
+  it("carries the company name and the kind when the query read them (the It'll Be Called line)", () => {
+    expect(toNewJobCustomerOptions([{ id: "c3", name: "Pat Lee", company_name: "Tahoe Tavern HOA", type: "commercial" }])).toEqual([
+      { id: "c3", name: "Pat Lee", address: null, company_name: "Tahoe Tavern HOA", type: "commercial" },
     ]);
   });
 
@@ -90,5 +110,72 @@ describe("addressPrefillOnCustomerPick", () => {
 
   it("no-ops when the pick's address already matches the field", () => {
     expect(addressPrefillOnCustomerPick(A, A, A)).toBeNull();
+  });
+});
+
+/**
+ * NEW JOB IN FOUR FIELDS (W1-22): what the server works out when the form doesn't ask, from the
+ * company's today (never the server's UTC day, never the phone's).
+ */
+describe("statusFromDate", () => {
+  const today = "2026-09-27";
+  it("today or earlier is In Progress, a later day Scheduled, no day To Be Scheduled", () => {
+    expect(statusFromDate(today, today)).toBe("in_progress");
+    expect(statusFromDate("2026-09-20", today)).toBe("in_progress");
+    expect(statusFromDate("2026-09-28", today)).toBe("scheduled");
+    expect(statusFromDate("", today)).toBe("to_be_scheduled");
+    expect(statusFromDate(null, today)).toBe("to_be_scheduled");
+    expect(statusFromDate("not a day", today)).toBe("to_be_scheduled");
+  });
+});
+
+describe("defaultJobName — the person and the place, the number second", () => {
+  const todayStr = "2026-09-27";
+  it("a person's last name · the street line", () => {
+    expect(defaultJobName({ customer: { name: "Rita Smith" }, street: "1871 Apache Ct", todayStr })).toBe("Smith · 1871 Apache Ct");
+    expect(defaultJobName({ customer: { name: "Bob & Mary Smith Jr." }, street: " 12  Pine St ", todayStr })).toBe("Smith · 12 Pine St");
+  });
+  it("a business by its own name", () => {
+    expect(defaultJobName({ customer: { name: "Pat Lee", company_name: "Tahoe Tavern HOA" }, street: "300 W Lake Blvd", todayStr })).toBe(
+      "Tahoe Tavern HOA · 300 W Lake Blvd",
+    );
+    expect(defaultJobName({ customer: { name: "Truckee Lumber Co", type: "commercial" }, street: null, todayStr })).toBe("Truckee Lumber Co");
+  });
+  it("either half alone, and with neither, New Job on the company's day", () => {
+    expect(defaultJobName({ customer: null, street: "1871 Apache Ct", todayStr })).toBe("1871 Apache Ct");
+    expect(defaultJobName({ customer: { name: "Rita Smith" }, street: "", todayStr })).toBe("Smith");
+    expect(defaultJobName({ customer: null, street: null, todayStr })).toBe("New Job · Sep 27");
+    expect(defaultJobName({ customer: { name: "  " }, street: " ", todayStr: "2027-01-02" })).toBe("New Job · Jan 2");
+  });
+  it("customerNamePart: a one-word name is the name", () => {
+    expect(customerNamePart({ name: "Cher" })).toBe("Cher");
+    expect(customerNamePart(null)).toBe("");
+  });
+});
+
+describe("usualBillingKind — the kind most of this company's jobs use", () => {
+  it("the majority wins; Time & Material on a tie or with none", () => {
+    expect(usualBillingKind({ tm: 3, fixed: 9 })).toBe("fixed");
+    expect(usualBillingKind({ tm: 9, fixed: 3 })).toBe("tm");
+    expect(usualBillingKind({ tm: 4, fixed: 4 })).toBe("tm");
+    expect(usualBillingKind({})).toBe("tm");
+  });
+});
+
+describe("the unit hint: another job at this street has a unit", () => {
+  const keys = unitStreetKeys([
+    { address: "300 W. Lake Blvd", unit: "224" },
+    { address: "300 W Lake Blvd", unit: "12" },
+    { address: "9 Pine Rd", unit: null },
+    { address: null, unit: "3" },
+  ]);
+  it("reads the streets that carry a unit, once each, whatever the spelling", () => {
+    expect(keys).toEqual(["300 w lake blvd"]);
+    expect(streetKey("300  W. Lake Blvd,")).toBe("300 w lake blvd");
+  });
+  it("a matching street suggests More Options; others don't", () => {
+    expect(streetHasUnits("300 w lake blvd", keys)).toBe(true);
+    expect(streetHasUnits("9 Pine Rd", keys)).toBe(false);
+    expect(streetHasUnits("", keys)).toBe(false);
   });
 });

@@ -399,7 +399,8 @@ export default async function AppointmentCapturePage({
         </div>
         <h1 className="mt-2 text-xl font-bold text-slate-900">{a.title}</h1>
         <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-sm text-slate-500">
-          {a.starts_at && <span>{formatDateTimeTz(a.starts_at, tz)}</span>}
+          {/* A visit with its date cleared waits on the schedule's rail (0368): said, never blank. */}
+          {a.starts_at ? <span>{formatDateTimeTz(a.starts_at, tz)}</span> : <span>Waiting For A Day</span>}
           {who && <span>· {who}</span>}
           {a.location && (
             <NavLink address={a.location} className="inline-flex items-center gap-0.5 text-brand hover:underline">

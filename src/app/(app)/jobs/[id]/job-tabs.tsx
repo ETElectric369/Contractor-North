@@ -6,14 +6,16 @@ import { ALL_ON, featureOn, type FeatureKey, type FeatureMap } from "@/lib/featu
 // component REFERENCES survive the server→client serialization into <Tabs>.
 import {
   LayoutDashboard, Clock, Package, Camera, ListChecks, CalendarDays,
-  ClipboardCheck, FileText, DollarSign, Receipt as ReceiptTab, StickyNote, Stamp, FileDiff, Eye, Zap,
+  ClipboardCheck, FileText, DollarSign, Receipt as ReceiptTab, Stamp, FileDiff, Eye, Zap,
 } from "./job-tab-icons";
 
 // In-page nav order — the lifecycle-honest strip. The pinned chips (per role, below)
 // lead in this order; everything else clusters into the More chip in this order.
+// NO NOTES TAB (W1-21): the job's notes are the Overview's second box (private, never printed),
+// under the Description, so there is no tab of them to find.
 export const JOB_TAB_ORDER = [
   "job", "tasks", "time", "materials", "costs", "invoices", "photos", "appointments",
-  "notes", "quotes", "change-orders", "permits", "panel", "wos", "customer",
+  "quotes", "change-orders", "permits", "panel", "wos", "customer",
 ];
 // THE CHIPS THAT STAY PUT (Erik, 2026-09-11: "overview - time - materials - invoices be
 // seaglass buttons that stay put and the little arrow drop down for more"). Two sets,
@@ -64,7 +66,6 @@ const JOB_TAB_META: Record<string, { group?: string; icon?: LucideIcon }> = {
   costs: { group: "Money", icon: DollarSign },
   invoices: { group: "Money", icon: ReceiptTab },
   "change-orders": { group: "Money", icon: FileDiff },
-  notes: { group: "Docs", icon: StickyNote },
   permits: { group: "Docs", icon: Stamp },
   // THE PANEL (0333): the job's circuits. Not pinned and not staff-only — the crew works it at the
   // panel (Erik's decision 1, 2026-09-25) and nothing on it carries a price.
@@ -72,11 +73,23 @@ const JOB_TAB_META: Record<string, { group?: string; icon?: LucideIcon }> = {
   customer: { group: "Money", icon: Eye },
 };
 
+/** THE TABS A TECH CAN ADD THE FIRST ROW TO (W1-18): the crew works the Panel at the panel (Erik's
+ *  decision 1, 2026-09-25). Permits, visits and work orders are the office's writes, so an empty one
+ *  is never offered to him under "+ Add…" (a door he couldn't use); it still opens by link. */
+export const JOB_TECH_ADDABLE: ReadonlySet<string> = new Set(["panel"]);
+
 /** Order the job tabs and tag each with its pin + cluster + staff-gating, so
  *  <Tabs look="tiles"> keeps the role's five chips put and folds the rest
  *  into a clustered, bloom-skinned "More" chip. staffOnly is honored TWICE: the
  *  page drops those tabs before passing them (so their content never serializes
- *  to a tech), and <Tabs> filters again on the client. `switches` omitted = everything on. */
+ *  to a tech), and <Tabs> filters again on the client. `switches` omitted = everything on.
+ *
+ *  MORE SHOWS WHAT THE JOB HAS (W1-18). The page sets `holds` on each tab (any row of its kind, open
+ *  or closed; a failed read counts as holding, so an error never hides a door). An unpinned tab that
+ *  holds nothing is `tucked`: More lists the holding tabs first and the tucked ones behind "+ Add…".
+ *  A pinned chip is never tucked, and a switched-off tab is never listed at all (offStrip). For the
+ *  crew, an empty tab he can't add to (JOB_TECH_ADDABLE) is not offered either: it leaves his More
+ *  (offStrip) and still opens from a link; when nothing is left his strip draws no More chip. */
 export function arrangeJobTabs(
   tabs: TabDef[],
   viewerIsStaff: boolean,
@@ -88,15 +101,20 @@ export function arrangeJobTabs(
     .map((t) => {
       const feature: FeatureKey | undefined = JOB_TAB_FEATURE[t.id];
       const off = !!feature && !featureOn(switches.features, feature);
+      const isPinned = pinned.has(t.id);
+      const empty = !isPinned && t.holds === false;
+      // Nothing in it and nothing the crew can put in it: no row on his More at all.
+      const notForCrew = empty && !viewerIsStaff && !JOB_TECH_ADDABLE.has(t.id);
       return {
         ...t,
         ...(JOB_TAB_META[t.id] ?? {}),
-        pinned: pinned.has(t.id),
+        pinned: isPinned,
         staffOnly: JOB_STAFF_ONLY.has(t.id),
         // A switched-off feature's tab loses its chip and still opens from a ?tab= link. (Tasks used
         // to ride this rail too, its door a slot in the action dock; since 0358 it is a pinned chip
         // and the dock slot is gone — one door, not two.)
-        offStrip: off,
+        offStrip: off || notForCrew,
+        tucked: empty && !off && !notForCrew,
         content:
           off && feature ? (
             <>
