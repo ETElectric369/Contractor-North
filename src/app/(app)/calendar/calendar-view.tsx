@@ -12,7 +12,8 @@ import { dayTargetLabel } from "@/lib/schedule/placement-plan";
 import { dayLabel, spanLabel } from "@/lib/schedule/span-label";
 import { useEndlessStack } from "@/components/use-endless-stack";
 import { jobDayBlock } from "@/lib/schedule/job-block";
-import { crewChips, initialsOf, placeLine, spanShort, streetOf, townOf, visitPlace } from "@/lib/schedule/block-info";
+import { crewChips, placeLine, spanShort, streetOf, townOf, visitPlace, type CrewChip, type CrewDayRow } from "@/lib/schedule/block-info";
+import { jobWords } from "@/lib/action-items/words";
 import { CrewInitials } from "@/components/crew-initials";
 import { ownHoursByJobDay } from "@/lib/schedule/segment-hours";
 import { ScheduleTileSheet, type TileTarget } from "../schedule/tile-sheet";
@@ -73,6 +74,13 @@ export interface CalJob {
 interface CalMember {
   id: string;
   full_name: string | null;
+}
+
+/** Everyone the company ever had (a chip names someone who left: "No Longer On The Team"). */
+export interface CalPerson {
+  id: string;
+  full_name: string | null;
+  active?: boolean | null;
 }
 
 export interface CalSegment {
@@ -207,6 +215,11 @@ function startOfWeek(d: Date) {
 const PROPOSED_CONFIRM =
   "A pick-a-time link is out to the customer for this — moving it withdraws that link. Move it anyway?";
 
+// Stable empties for the optional data props: a fresh `{}` / `[]` default each render would change
+// every memo and cache keyed on them.
+const EMPTY_DAY_ROWS: Record<string, CrewDayRow[]> = {};
+const EMPTY_PEOPLE: CalPerson[] = [];
+
 // ── Time-grid pill colors (Erik wants blocks IN their time allotment) ──
 // Appointments color by TYPE; jobs stay slate so the crew's work blocks read
 // as one family and the appointment types pop against them.
@@ -260,6 +273,8 @@ export function CalendarView({
   canEdit = false,
   perDayHours = false,
   addableJobs = [],
+  dayRows = EMPTY_DAY_ROWS,
+  people = EMPTY_PEOPLE,
 }: {
   jobs: CalJob[];
   segments?: CalSegment[];
@@ -291,6 +306,11 @@ export function CalendarView({
   perDayHours?: boolean;
   /** The office's Add To Schedule list: every job still in flight (schedule/add-to-schedule-sheet). */
   addableJobs?: AddableJob[];
+  /** Everyone's Day's rows by day (crew_day_assignments, both kinds): THE DAY ROW WINS for that day on
+   *  the chips (off that day, on another job, put on for the day). Absent: the job's crew as it stands. */
+  dayRows?: Record<string, CrewDayRow[]>;
+  /** Everyone the company ever had, so a chip names a person who left. */
+  people?: CalPerson[];
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -418,6 +438,26 @@ export function CalendarView({
     }
     return [...byId.values()];
   }, [members, appointments]);
+  /** Job words by id ("12 Elm St · J-048"), for a chip whose person is on ANOTHER job that day. */
+  const jobNames = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const j of addableJobs) m.set(j.id, jobWords(j));
+    for (const j of jobs) m.set(j.id, jobWords(j));
+    return m;
+  }, [jobs, addableJobs]);
+  /** WHO'S ON IT THAT DAY, as chips (lib/schedule/block-info crewChips): the job's crew with that day's
+   *  Everyone's Day rows applied (the day row wins), a person who left still named. A visit carries
+   *  one person, and only an 'off' row applies to it. */
+  const jobCrewOn = useCallback(
+    (job: Pick<CalJob, "id" | "assigned_to">, day: string): CrewChip[] =>
+      crewChips(job.assigned_to, team, { rows: dayRows[day], jobId: job.id, jobNames, people }),
+    [team, dayRows, jobNames, people],
+  );
+  const visitCrewOn = useCallback(
+    (a: Pick<CalAppt, "assigned_to">, day: string): CrewChip[] =>
+      crewChips(a.assigned_to ? [a.assigned_to] : [], team, { rows: dayRows[day], jobId: null, people }),
+    [team, dayRows, people],
+  );
   const onEventTap = useCallback((tapId: string, day: string) => {
     const [kind, id] = tapId.split(":");
     if ((kind === "job" || kind === "visit") && id) setSheet({ kind, id, day });
@@ -426,12 +466,15 @@ export function CalendarView({
     if (!sheet) return null;
     if (sheet.kind === "job") {
       const job = jobs.find((j) => j.id === sheet.id);
-      // The tapped day's own hours ride along: the sheet's time is This Day's (0370).
-      return job ? { kind: "job", day: sheet.day, job, dayHours: ownHours.get(job.id)?.get(sheet.day) ?? null } : null;
+      // The tapped day's own hours ride along: the sheet's time is This Day's (0370). So does the crew
+      // as that day's rows leave it: the sheet says who is off or on another job that day.
+      return job
+        ? { kind: "job", day: sheet.day, job, dayHours: ownHours.get(job.id)?.get(sheet.day) ?? null, dayCrew: jobCrewOn(job, sheet.day) }
+        : null;
     }
     const visit = appointments.find((a) => a.id === sheet.id);
     return visit ? { kind: "visit", day: sheet.day, visit } : null;
-  }, [sheet, jobs, appointments, ownHours]);
+  }, [sheet, jobs, appointments, ownHours, jobCrewOn]);
 
   const byDay = useMemo(() => {
     const m = new Map<string, DayData>();
@@ -629,11 +672,11 @@ export function CalendarView({
           place: placeLine({ name: job.name, street: job.address, customer: job.customers?.name })?.text ?? null,
           town: job.city ?? null,
           time: pos ? `${spanShort(b.startMin, endMin)} · ${pos}` : spanShort(b.startMin, endMin),
-          crew: crewChips(job.assigned_to, team),
+          crew: jobCrewOn(job, k),
         },
         color: JOB_GRID_TONE,
         href: `/jobs/${job.id}`,
-        // Staff tap the block for its day, its time and its crew (the tile's sheet); Open Job is inside.
+        // Staff tap the block for its day, its time and its crew (the tile's sheet); Open The Job is inside.
         ...(canEdit ? { tapId: `job:${job.id}` } : {}),
       });
     }
@@ -688,14 +731,14 @@ export function CalendarView({
           place: placeLine({ name: a.title, street: streetOf(visitPlace(a)), customer: a.customers?.name ?? a.jobs?.name ?? null })?.text ?? null,
           town: townOf(visitPlace(a)) || null,
           time: spanShort(startMin, endMin),
-          crew: crewChips(a.assigned_to ? [a.assigned_to] : [], team),
+          crew: visitCrewOn(a, k),
         },
         color: apptGridColor(a),
         /* STRAIGHT TO THE THING, from every view. Erik, on a booking whose length was wrong:
            "i now have now way to adjust the time." There WAS a way — tap the pill, land in the day
            drill, find the edit pencil — but a control you have to already know about is not a way,
            it is a rumour. Staff get the tile's sheet (the day, the start, the length and who's
-           going, with Open Visit inside), so the fix is on the tap that saw the problem; the record
+           going, with Open The Visit inside), so the fix is on the tap that saw the problem; the record
            page is the href underneath. */
         href: `/appointments/${a.id}`,
         ...(canEdit ? { tapId: `visit:${a.id}` } : {}),
@@ -1199,6 +1242,9 @@ export function CalendarView({
             workDay={{ start: workDayStart, end: workDayEnd }}
             ownHours={ownHours}
             onOpenJob={canEdit ? (jobId) => setSheet({ kind: "job", id: jobId, day: anchorK }) : undefined}
+            onOpenVisit={canEdit ? (visitId) => setSheet({ kind: "visit", id: visitId, day: anchorK }) : undefined}
+            jobCrewOn={jobCrewOn}
+            visitCrewOn={visitCrewOn}
           />
         </>
       )}
@@ -1212,6 +1258,7 @@ export function CalendarView({
           workDay={{ start: workDayStart, end: workDayEnd }}
           team={members}
           canEdit={canEdit}
+          crewBoard={crewBoard}
           perDayHours={perDayHours}
         />
       )}
@@ -1410,6 +1457,9 @@ function DayDetail({
   workDay,
   ownHours,
   onOpenJob,
+  onOpenVisit,
+  jobCrewOn,
+  visitCrewOn,
 }: {
   dayK: string;
   data?: DayData;
@@ -1421,6 +1471,11 @@ function DayDetail({
   ownHours?: Map<string, Map<string, { start: string; end: string }>>;
   /** The office: a job card opens the tile's sheet (day, time, crew) for this day. */
   onOpenJob?: (jobId: string) => void;
+  /** The office: a visit row's person opens the same sheet for that visit (its day, time, who's going). */
+  onOpenVisit?: (visitId: string) => void;
+  /** The crew as that day's rows leave it (Everyone's Day), for the cards and the rows. */
+  jobCrewOn?: (job: Pick<CalJob, "id" | "assigned_to">, day: string) => CrewChip[];
+  visitCrewOn?: (a: Pick<CalAppt, "assigned_to">, day: string) => CrewChip[];
 }) {
   const appts = data?.appts ?? [];
   const jobsOn = data?.jobs ?? [];
@@ -1440,7 +1495,14 @@ function DayDetail({
         </div>
         <ul className="divide-y divide-slate-100">
           {appts.map((a) => (
-            <ApptRow key={a.id} a={a} picker={picker} tz={tz} />
+            <ApptRow
+              key={a.id}
+              a={a}
+              picker={picker}
+              tz={tz}
+              crew={visitCrewOn ? visitCrewOn(a, dayK) : undefined}
+              onOpenPerson={onOpenVisit ? () => onOpenVisit(a.id) : undefined}
+            />
           ))}
           {!appts.length && (
             <li className="px-5 py-5 text-center text-sm text-slate-400">Nothing booked this day.</li>
@@ -1476,6 +1538,7 @@ function DayDetail({
               day={dayK}
               dayHours={ownHours?.get(job.id)?.get(dayK) ?? null}
               onOpen={onOpenJob ? () => onOpenJob(job.id) : undefined}
+              crew={jobCrewOn ? jobCrewOn(job, dayK) : undefined}
             />
           ))}
           {!jobsOn.length && (
@@ -1503,9 +1566,25 @@ function DayDetail({
 
 /** One appointment on the day drill — the old appointments-tab row, relocated:
  *  quick done/cancel + edit pencil + the Move-to-day glyph. */
-function ApptRow({ a, picker, tz }: { a: CalAppt; picker: SchedulePicker; tz: string }) {
+function ApptRow({
+  a,
+  picker,
+  tz,
+  crew,
+  onOpenPerson,
+}: {
+  a: CalAppt;
+  picker: SchedulePicker;
+  tz: string;
+  /** Who's going, as that day's rows leave them (an 'off' row dims them). Absent: the one person as saved. */
+  crew?: CrewChip[];
+  /** The office: the person opens the tile's sheet for this visit (its day, time and who's going). */
+  onOpenPerson?: () => void;
+}) {
   const router = useRouter();
   const place = visitPlace(a);
+  const going: CrewChip[] =
+    crew ?? (a.assigned_to ? crewChips([a.assigned_to], [{ id: a.assigned_to, full_name: a.profiles?.full_name ?? null }]) : []);
   const appt: ApptValue = {
     id: a.id,
     type: a.type,
@@ -1556,9 +1635,20 @@ function ApptRow({ a, picker, tz }: { a: CalAppt; picker: SchedulePicker; tz: st
               {townOf(place) && <span className="text-[11px] text-slate-400"> · {townOf(place)}</span>}
             </NavLink>
           )}
-          <CrewInitials
-            crew={a.assigned_to ? [{ id: a.assigned_to, initials: initialsOf(a.profiles?.full_name), name: a.profiles?.full_name ?? "Unnamed" }] : []}
-          />
+          {/* WHO'S GOING: marks, in the person's own color. For the office they sit in one 44px tap
+              that opens the visit's sheet (its day, its time and who's going), the job card's twin. */}
+          {onOpenPerson ? (
+            <button
+              type="button"
+              onClick={onOpenPerson}
+              aria-label={`${a.title}: day, time and who's going`}
+              className="inline-flex min-h-11 items-center rounded-md px-1 hover:bg-slate-50"
+            >
+              <CrewInitials crew={going} />
+            </button>
+          ) : (
+            <CrewInitials crew={going} />
+          )}
         </div>
         {a.notes && <p className="mt-1 line-clamp-2 whitespace-pre-wrap text-xs text-slate-500">{a.notes}</p>}
       </div>

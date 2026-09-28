@@ -5,7 +5,7 @@ import { Clock, MapPin } from "lucide-react";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { jobStatusLabel } from "@/lib/job-status";
 import { dayBlockWords, readJobBlock } from "@/lib/schedule/job-block";
-import { crewChips, placeLine } from "@/lib/schedule/block-info";
+import { crewChips, placeLine, type CrewChip } from "@/lib/schedule/block-info";
 import type { DayHours } from "@/lib/schedule-math";
 import { CrewInitials } from "@/components/crew-initials";
 
@@ -44,6 +44,7 @@ export function JobScheduleCard({
   day,
   dayHours,
   onOpen,
+  crew,
 }: {
   job: SchedJob;
   members: Member[];
@@ -57,6 +58,9 @@ export function JobScheduleCard({
   dayHours?: DayHours | null;
   /** Opens the tile's sheet for this job on this day. Absent (the crew): the block is read, not tapped. */
   onOpen?: () => void;
+  /** The crew as THAT DAY's rows leave it (Everyone's Day: off that day, on another job, put on for the
+   *  day; lib/schedule/block-info crewChips). Absent: the job's crew as it stands. */
+  crew?: CrewChip[] | null;
 }) {
   const at = {
     scheduledStart: job.scheduled_start,
@@ -73,7 +77,7 @@ export function JobScheduleCard({
     <>
       <Clock className="h-3.5 w-3.5 shrink-0 text-slate-400" />
       <span className="min-w-0 flex-1 truncate text-left text-slate-700">{time}</span>
-      <CrewInitials crew={crewChips(job.assigned_to, members)} max={4} />
+      <CrewInitials crew={crew ?? crewChips(job.assigned_to, members)} max={4} />
     </>
   );
 

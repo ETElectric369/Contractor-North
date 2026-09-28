@@ -39,7 +39,8 @@ import { workDayWindowHm } from "@/lib/org-settings";
 import { tzDateTimeUtc } from "@/lib/tz";
 import { hmWords, jobDayBlock, workDayMinutes } from "@/lib/schedule/job-block";
 import { minutesToHm } from "@/lib/schedule/fit-day";
-import { crewChips, placeLine, streetOf, townOf, visitPlace, type CrewChip } from "@/lib/schedule/block-info";
+import { crewChips, dayRowsByDay, placeLine, streetOf, townOf, visitPlace, type CrewChip, type CrewDayRow } from "@/lib/schedule/block-info";
+import { jobWords } from "@/lib/action-items/words";
 import { ownHoursByJobDay, segmentCols, withDayHours, type SegmentRow } from "@/lib/schedule/segment-hours";
 import type { DayHours } from "@/lib/schedule-math";
 import { CrewInitials } from "@/components/crew-initials";
@@ -81,7 +82,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
   // (The DayClock's today/pay-week hour queries left with it — /timeclock owns those now.)
   const [
     { data: jobs }, { data: segJobs }, { data: appts }, { data: openRows },
-    { data: customers }, { data: staff }, { data: jobOptRows }, { data: me },
+    { data: customers }, { data: staff }, { data: jobOptRows }, { data: me }, { data: todayCrewRows },
   ] = await Promise.all([
     // The block's end, its size and its crew and town ride along: every agenda row says where, when
     // (start to end) and who (lib/schedule/block-info), for the crew as for the office. No money.
@@ -110,6 +111,9 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
     supabase.from("profiles").select("role, full_name").eq("id", user?.id ?? "").maybeSingle(),
     // (No leads read: the Open Leads card is gone. A new request reaches Needs You below through
     // its own feeder, and the Sales tile's badge counts the new, uncontacted ones.)
+    // Everyone's Day's rows for today (both kinds): the day row wins on the rows' crew chips (someone
+    // off today, or on another job today, is dimmed). Names only, for the crew as for the office.
+    supabase.from("crew_day_assignments").select("profile_id, work_date, kind, job_id").eq("work_date", todayStr).limit(500),
   ]);
 
   const openEntry = (openRows ?? [])[0] as any | undefined;
@@ -394,6 +398,11 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
   const custOpts = toCustomerOptions(customers);
   const staffOpts = toStaffOptions(staff);
   const people = (staff ?? []).map((s: any) => ({ id: s.id, full_name: s.full_name }));
+  /* EACH DAY'S CREW ROWS (Everyone's Day), by day: today's now, the week's in the week view below. The
+     day row wins on that day's chips (lib/schedule/block-info crewChips). */
+  const crewRowsByDay: Record<string, CrewDayRow[]> = dayRowsByDay((todayCrewRows ?? []) as unknown as CrewDayRow[]);
+  /** Job words by id, for a chip whose person is on another job that day ("On 12 Elm St · J-048 That Day"). */
+  const jobNames = new Map<string, string>(((jobOptRows ?? []) as any[]).map((j) => [String(j.id), jobWords(j)]));
 
   /** A job's row on `day`: where (the street, or who when the name is the street; the town small),
    *  that day's block start to end as the calendar draws it (its own hours when it keeps them), and the
@@ -412,7 +421,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
       place: placeLine({ name: j.name, street: j.address, customer: j.customers?.name })?.text ?? null,
       town: (j.city as string | null) ?? null,
       span: b.allDay ? "All day" : `${hmWords(minutesToHm(b.startMin))} – ${hmWords(minutesToHm(b.endMin))}`,
-      crew: crewChips(j.assigned_to, people),
+      crew: crewChips(j.assigned_to, people, { rows: crewRowsByDay[day], jobId: j.id, jobNames }),
     };
   };
   /** A visit's row: its street (its job's, with no place of its own), who, start to end (an hour when
@@ -425,7 +434,13 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
       place: placeLine({ name: a.title, street: streetOf(visitPlace(a)), customer: a.customers?.name })?.text ?? null,
       town: townOf(visitPlace(a)) || null,
       span: `${formatTime(a.starts_at, tz)} – ${formatTime(endsAt, tz)}`,
-      crew: a.assigned_to ? crewChips([a.assigned_to], [...people, { id: a.assigned_to, full_name: a.profiles?.full_name ?? null }]) : [],
+      // The one person going; an 'off' row that day dims them (a visit reads only that kind).
+      crew: a.assigned_to
+        ? crewChips([a.assigned_to], [...people, { id: a.assigned_to, full_name: a.profiles?.full_name ?? null }], {
+            rows: crewRowsByDay[todayStrInTz(tz, new Date(a.starts_at))],
+            jobId: null,
+          })
+        : [],
     };
   };
 
@@ -564,7 +579,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
     weekEndExcl.setUTCDate(weekEndExcl.getUTCDate() + 7);
     const weekStartUtc = tzDayStartUtc(weekStartStr, tz);
     const weekEndUtc = tzDayStartUtc(weekEndExcl.toISOString().slice(0, 10), tz);
-    const [{ data: wJobs }, { data: wAppts }, { data: wSegs }] = await Promise.all([
+    const [{ data: wJobs }, { data: wAppts }, { data: wSegs }, { data: wCrewRows }] = await Promise.all([
       supabase
         .from("jobs")
         .select(`${AGENDA_JOB_COLS}, customers(name)`)
@@ -595,7 +610,16 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
           .lte("start_date", weekEndStr)
           .gte("end_date", weekStartStr),
       ),
+      // The week's crew rows (Everyone's Day, both kinds), so each day's chips read that day.
+      supabase
+        .from("crew_day_assignments")
+        .select("profile_id, work_date, kind, job_id")
+        .gte("work_date", weekStartStr)
+        .lte("work_date", weekEndStr)
+        .limit(2000),
     ]);
+    Object.assign(crewRowsByDay, dayRowsByDay((wCrewRows ?? []) as unknown as CrewDayRow[]));
+    for (const j of (wJobs ?? []) as any[]) jobNames.set(String(j.id), jobWords(j));
     const ownWeek = ownHoursByJobDay((wSegs ?? []) as unknown as SegmentRow[]);
     const timedWeek: Agenda[] = [
       ...((wJobs ?? []) as any[]).map((j) => ({

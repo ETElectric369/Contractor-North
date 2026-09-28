@@ -30,6 +30,8 @@ import { createSheetGuard, TileSheetBody, type TileTarget } from "./tile-sheet";
 import { segmentJobsNotLoaded } from "@/lib/schedule/cal-window";
 import { JobScheduleCard } from "./job-schedule-card";
 import { tzDateTimeUtc } from "@/lib/tz";
+import { crewChips } from "@/lib/schedule/block-info";
+import { pillColorForPerson } from "@/lib/employee-color";
 
 const LA = "America/Los_Angeles";
 const WORK_DAY = { start: "09:00", end: "17:00" };
@@ -73,12 +75,12 @@ const text = (html: string) =>
 describe("a job's sheet, for the office", () => {
   const html = render(seiler());
 
-  it("carries the day, the start and the end, the quick lengths, the crew, Open Job and Clear The Date", () => {
+  it("carries the day, the start and the end, the quick lengths, the crew, Open The Job and Clear The Date", () => {
     expect(html).toMatch(/<input[^>]*type="date"[^>]*value="2026-09-28"/);
     expect(html).toMatch(/<input[^>]*type="time"[^>]*value="10:00"/);
     expect(html).toMatch(/<input[^>]*type="time"[^>]*value="12:00"/);
     for (const chip of ["1h", "2h", "4h", "Full Day"]) expect(html).toMatch(new RegExp(`<button[^>]*>${chip}</button>`));
-    expect(html).toMatch(/<a[^>]*href="\/jobs\/j058"[^>]*>Open Job<\/a>/);
+    expect(html).toMatch(/<a[^>]*href="\/jobs\/j058"[^>]*>Open The Job<\/a>/);
     expect(text(html)).toContain("Clear The Date");
     expect(text(html)).toContain("Move");
   });
@@ -120,13 +122,13 @@ describe("a job's sheet, for the office", () => {
 describe("a visit's sheet", () => {
   const html = render(visit);
 
-  it("the same time controls, who's going as one person, Open Visit and Clear The Date", () => {
+  it("the same time controls, who's going as one person, Open The Visit and Clear The Date", () => {
     expect(html).toMatch(/<input[^>]*type="time"[^>]*value="09:00"/);
     expect(html).toMatch(/<input[^>]*type="time"[^>]*value="10:00"/);
     expect(text(html)).toContain("Who's Going");
     expect(html).toMatch(/<button[^>]*aria-pressed="true"[^>]*border-dashed[^>]*>Nobody<\/button>/);
     expect(html).toMatch(/<button[^>]*aria-label="Brian Cole"[^>]*>BC<\/button>/);
-    expect(html).toMatch(/<a[^>]*href="\/appointments\/v1"[^>]*>Open Visit<\/a>/);
+    expect(html).toMatch(/<a[^>]*href="\/appointments\/v1"[^>]*>Open The Visit<\/a>/);
     expect(text(html)).toContain("Clear The Date");
     expect(text(html)).toContain("9:00 AM – 10:00 AM · 1 hour — change it");
   });
@@ -407,5 +409,51 @@ describe("This Day: the tile's time is the tapped day's, once a day can keep its
     expect(actions.slice(from, from + 600)).toContain("await requireStaff()");
     const add = actions.indexOf("export async function addJobDay(");
     expect(actions.slice(add, add + 600)).toContain("await requireStaff()");
+  });
+});
+
+describe("the crew, each in their own color, and whose crew it is (Wave 2, SV-chips)", () => {
+  const renderWith = (target: TileTarget, extra: Record<string, unknown> = {}) =>
+    renderToStaticMarkup(createElement(TileSheetBody, { target, tz: LA, workDay: WORK_DAY, team, canEdit: true, onClose: () => {}, ...extra }));
+
+  it("a job's crew circles and a visit's people wear each person's color (one person, one color)", () => {
+    const job = renderWith(seiler());
+    expect((job.match(/<button[^>]*aria-label="Erik Taylor"[^>]*>/) ?? [""])[0]).toContain(pillColorForPerson("p-erik").dot);
+    const v = renderWith({ ...visit, visit: { ...(visit as Extract<TileTarget, { kind: "visit" }>).visit, assigned_to: "p-brian" } } as TileTarget);
+    const brian = (v.match(/<button[^>]*aria-label="Brian Cole"[^>]*>/) ?? [""])[0];
+    expect(brian).toContain(pillColorForPerson("p-brian").dot);
+    expect(brian).toContain('aria-pressed="true"');
+    expect(brian).toContain("ring-2");
+    const erik = (v.match(/<button[^>]*aria-label="Erik Taylor"[^>]*>/) ?? [""])[0];
+    expect(erik).toContain(pillColorForPerson("p-erik").dot);
+    expect(erik).toContain("opacity-40");
+    expect(v + job).not.toMatch(/bg-brand text-white ring-2/);
+  });
+
+  it("under a job's crew: the whole job, every day; with the Crew Board on, Everyone's Day for one day", () => {
+    expect(text(renderWith(seiler()))).toContain("The whole job, every day.");
+    expect(text(renderWith(seiler()))).not.toContain("Everyone's Day");
+    expect(text(renderWith(seiler(), { crewBoard: true }))).toContain("The whole job, every day. To change one day, use Everyone's Day.");
+  });
+
+  it("when that day's rows move someone, one more line says so", () => {
+    const t = seiler({ assigned_to: ["p-erik", "p-brian"] }) as Extract<TileTarget, { kind: "job" }>;
+    const dayCrew = crewChips(["p-erik", "p-brian"], team, {
+      rows: [
+        { profile_id: "p-erik", work_date: "2026-09-28", kind: "off", job_id: null },
+        { profile_id: "p-brian", work_date: "2026-09-28", kind: "job", job_id: "j-other" },
+      ],
+      jobId: "j058",
+      jobNames: new Map([["j-other", "12 Elm St · J-048"]]),
+    });
+    const words = text(renderWith({ ...t, dayCrew }));
+    expect(words).toContain("Erik is off that day.");
+    expect(words).toContain("Brian is on 12 Elm St · J-048 that day.");
+  });
+
+  it("the schedule hands the sheet the Crew Board switch and that day's crew", () => {
+    const view = readFileSync(join(process.cwd(), "src/app/(app)/calendar/calendar-view.tsx"), "utf8");
+    expect(view).toMatch(/<ScheduleTileSheet[\s\S]*?crewBoard=\{crewBoard\}/);
+    expect(view).toContain("dayCrew: jobCrewOn(job, sheet.day)");
   });
 });

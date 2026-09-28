@@ -6,6 +6,7 @@ import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 import { getOrgSettings, workDayWindowHm } from "@/lib/org-settings";
 import { featureOn } from "@/lib/features";
 import { getSchedulePickerOptions } from "@/lib/schedule-options";
+import { dayRowsByDay, type CrewDayRow } from "@/lib/schedule/block-info";
 import {
   CalendarView,
   type CalJob,
@@ -31,7 +32,10 @@ export async function CalendarPanel({ canEdit = false }: { canEdit?: boolean } =
 
   // `address` (the street) rides along: every block says where (lib/schedule/block-info).
   const JOB_COLS = "id, job_number, name, status, scheduled_start, scheduled_end, planned_minutes, assigned_to, address, city, customers(name)";
-  const [{ data: listedJobs }, { data: segments, perDayHours }, { data: appointments }, { data: tasks }, { data: unschedRows }, { data: externalRows }, picker, { data: org }, { data: addableRows }] =
+  // EVERYONE'S DAY'S ROWS from today on (a day early, so the company's today is in it in any timezone):
+  // the day row wins for that day on every upcoming chip (lib/schedule/block-info crewChips).
+  const dayRowsFrom = new Date(now - 86400_000).toISOString().slice(0, 10);
+  const [{ data: listedJobs }, { data: segments, perDayHours }, { data: appointments }, { data: tasks }, { data: unschedRows }, { data: externalRows }, picker, { data: org }, { data: addableRows }, { data: dayRowRows }, { data: everyone }] =
     await Promise.all([
       // Overlap test, not a point test on scheduled_start: a job shows if it
       // STARTS before the window end AND (ends after the window start, or is an
@@ -116,6 +120,19 @@ export async function CalendarPanel({ canEdit = false }: { canEdit?: boolean } =
             .order("created_at", { ascending: false })
             .limit(300)
         : Promise.resolve({ data: [] as unknown[] }),
+      /* WHO'S ON IT, THAT DAY (Everyone's Day, crew_day_assignments, both kinds: 'off', and 'job' for
+         this job or another). RLS scopes it to the company. Fail-soft: no rows read, the chips are the
+         job's crew as it stands. */
+      supabase
+        .from("crew_day_assignments")
+        .select("profile_id, work_date, kind, job_id")
+        .gte("work_date", dayRowsFrom)
+        .lte("work_date", jobTo.slice(0, 10))
+        .order("work_date")
+        .limit(2000),
+      /* EVERYONE THE COMPANY EVER HAD (id, name, active), so a chip names someone who has left ("No
+         Longer On The Team") instead of "Unnamed". The pickers still list the active team only. */
+      supabase.from("profiles").select("id, full_name, active").limit(1000),
     ]);
 
   /* HISTORY DRAWS TOO. A job whose date was cleared keeps its worked days as segments with no listed
@@ -165,6 +182,9 @@ export async function CalendarPanel({ canEdit = false }: { canEdit?: boolean } =
         perDayHours={perDayHours}
         // Add To Schedule: an open spot (or a day's "+") opens the sheet with these jobs.
         addableJobs={(addableRows ?? []) as unknown as AddableJob[]}
+        // Each day's crew rows (Everyone's Day), by day, and everyone the company ever had.
+        dayRows={dayRowsByDay((dayRowRows ?? []) as unknown as CrewDayRow[])}
+        people={((everyone ?? []) as { id: string; full_name: string | null; active?: boolean | null }[]).map((p) => ({ id: p.id, full_name: p.full_name, active: p.active ?? null }))}
       />
     </div>
   );

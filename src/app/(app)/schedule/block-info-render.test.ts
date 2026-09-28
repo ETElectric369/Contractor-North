@@ -74,7 +74,7 @@ describe("a grid block, by its height", () => {
     expect(text(hour)).not.toContain("10a–12p");
     const half = grid(block(30));
     expect(text(half)).not.toContain("123 Main St");
-    expect(half).toContain('title="Seiler · 3-way switches · 123 Main St · Truckee · 10a–12p · Erik Taylor"');
+    expect(half).toContain('title="Seiler · 3-way switches · 123 Main St · Truckee · 10a–12p · Crew: Erik Taylor"');
   });
 
   it("nobody on it is a dashed Nobody; the block never grows past its time (overflow is clipped, lines are whole)", () => {
@@ -87,7 +87,7 @@ describe("a grid block, by its height", () => {
 
   it("with the office's tap, the block opens its sheet and says what it holds", () => {
     const html = grid({ ...block(120), tapId: "job:j058" }, { onEventTap: () => {} });
-    expect(html).toMatch(/<button[^>]*aria-label="Seiler · 3-way switches · 123 Main St · Truckee · 10a–12p · Erik Taylor: day, time and crew"/);
+    expect(html).toMatch(/<button[^>]*aria-label="Seiler · 3-way switches · 123 Main St · Truckee · 10a–12p · Crew: Erik Taylor: day, time and crew"/);
   });
 });
 
@@ -227,7 +227,9 @@ describe("My Day's rows and the schedule read the same words, with no money", ()
   it("the calendar's blocks carry the place, the time and the crew; the rail's cards carry who and the crew", () => {
     const view = read("src/app/(app)/calendar/calendar-view.tsx");
     expect(view).toMatch(/info: \{\s*place: placeLine\(\{ name: job\.name, street: job\.address/);
-    expect(view).toContain("crew: crewChips(job.assigned_to, team)");
+    // The crew as that day's Everyone's Day rows leave it (the day row wins; lib/schedule/block-info).
+    expect(view).toContain("crew: jobCrewOn(job, k)");
+    expect(view).toContain("crewChips(job.assigned_to, team, { rows: dayRows[day], jobId: job.id, jobNames, people })");
     expect(view).toContain("dayHours: ownHours.get(job.id)?.get(k) ?? null");
     const page = read("src/app/(app)/schedule/page.tsx");
     expect(page).toContain("crew: crewChips((r as unknown as { assigned_to?: string[] | null }).assigned_to ?? [], team)");

@@ -3,7 +3,7 @@
 import React from "react";
 import { Plus } from "lucide-react";
 import { todayStrInTz, tzMinutesOfDay } from "@/lib/tz";
-import { blockRows, type CrewChip } from "@/lib/schedule/block-info";
+import { blockRows, crewWords, type CrewChip } from "@/lib/schedule/block-info";
 import { CrewInitials } from "./crew-initials";
 
 import { useEffect, useRef, useState } from "react";
@@ -262,8 +262,10 @@ function TimeGridInner({
     d.heavyStart ? "border-l-2 border-l-slate-400" : "border-l border-l-slate-100";
 
   /** A block's lines, as many as its height has room for (lib/schedule/block-info blockRows): the
-   *  name, then the place, the crew, the time, the town. Every line is whole or absent. */
-  const pillBody = (e: TimeGridEvent, heightPx: number) => {
+   *  name, then the place, the crew, the time, the town. Every line is whole or absent. The crew line
+   *  is marks, never a door (pointer-events-none): the block's tap is the block's. A pill squeezed
+   *  beside another in a week (under ~48px) shows two chips and "+N". */
+  const pillBody = (e: TimeGridEvent, heightPx: number, narrow = false) => {
     const info = e.info;
     if (!info) {
       return (
@@ -284,8 +286,8 @@ function TimeGridInner({
         <div className="truncate font-semibold">{e.label}</div>
         {rows.place && <div className="truncate opacity-80">{info.place}</div>}
         {rows.crew && (
-          <div className="mt-0.5 flex h-3.5 items-center overflow-hidden">
-            <CrewInitials crew={info.crew ?? []} size="xs" />
+          <div className="pointer-events-none mt-0.5 flex h-3.5 items-center overflow-hidden">
+            <CrewInitials crew={info.crew ?? []} size="xs" max={narrow ? 2 : 3} />
           </div>
         )}
         {rows.time && <div className="truncate tabular-nums opacity-70">{info.time}</div>}
@@ -298,7 +300,8 @@ function TimeGridInner({
   const pillTitle = (e: TimeGridEvent) => {
     if (!e.info) return e.sub ? `${e.label} · ${e.sub}` : e.label;
     const crew = e.info.crew;
-    const who = Array.isArray(crew) ? (crew.length ? crew.map((c) => c.name).join(", ") : "Nobody") : null;
+    // "Crew: Brian Cole, Erik Taylor" or "Nobody on it": a block too short for its chips still says it.
+    const who = Array.isArray(crew) ? crewWords(crew) : null;
     return [e.label, e.info.place, e.info.town, e.info.time, who].filter(Boolean).join(" · ");
   };
 
@@ -507,6 +510,8 @@ function TimeGridInner({
                   };
                   const cls = `absolute overflow-hidden rounded-md border px-1 py-0.5 text-[10px] leading-tight shadow-sm ${e.color}`;
                   const title = pillTitle(e);
+                  // Two pills side by side in a week column are ~42px each at 375px: two chips and "+N".
+                  const narrow = days.length > 1 && e.cols > 1;
                   /* ARMED, A PILL PLACES TOO. On a busy day the pills cover most of the column,
                      so the natural tap landed on a Link, navigated to that job, unmounted the
                      provider and silently threw away every pick and the AM/PM choice — the worst
@@ -521,7 +526,7 @@ function TimeGridInner({
                       title={`${placement.label} — ${d.label}`}
                       className={`${cls} text-left opacity-60`}
                     >
-                      {pillBody(e, height)}
+                      {pillBody(e, height, narrow)}
                     </button>
                   ) : onEventTap && e.tapId ? (
                     /* THE TILE OPENS ITS SHEET: the day, the time and who's on it, where the block
@@ -536,15 +541,15 @@ function TimeGridInner({
                       aria-label={`${title}: day, time and crew`}
                       className={`${cls} text-left hover:opacity-80`}
                     >
-                      {pillBody(e, height)}
+                      {pillBody(e, height, narrow)}
                     </button>
                   ) : e.href ? (
                     <Link key={e.id} href={e.href} style={style} title={title} className={`${cls} hover:opacity-80`}>
-                      {pillBody(e, height)}
+                      {pillBody(e, height, narrow)}
                     </Link>
                   ) : (
                     <div key={e.id} style={style} title={title} className={cls}>
-                      {pillBody(e, height)}
+                      {pillBody(e, height, narrow)}
                     </div>
                   );
                 })}
