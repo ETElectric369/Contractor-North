@@ -29,7 +29,6 @@ import { AddEntryButton } from "../timeclock/add-entry-button";
 import { EditEntryButton } from "./edit-entry-button";
 import { OpenEntryEditor } from "./open-entry-editor";
 import { familyWasConverted, splitFamilies, splitNeighbors } from "@/lib/split-family";
-import { DuplicateEntryButton } from "./duplicate-entry-button";
 import type { JobCode } from "@/lib/types";
 import { jobLabel } from "@/lib/schedule-options";
 import { LONG_SHIFT_HOURS, clockDoorWords, isLongOpenShift } from "@/lib/long-shift";
@@ -300,9 +299,10 @@ export default async function TimecardsPage({
    *  stack was already drawing. Erik: "it looks like duplicates … lets try and mold as much
    *  together as possible." So the detail moves ONTO the stack's row and the cards go.
    *
-   *  The two controls need the editor's whole projection (the payroll locks, rate_override), which
-   *  is read for the ANCHORED WEEK only. A row from an older week still opens its editor with one
-   *  tap (the ?entry= door below fetches the row it needs), so an older row is never a dead end.
+   *  The one row control left, a running clock's "Clock Out <Name>", needs the editor's whole
+   *  projection (the payroll locks, rate_override), which is read for the ANCHORED WEEK only. Every
+   *  row, of any week, opens its editor with one tap (the ?entry= door below fetches the row it
+   *  needs), so no row is ever a dead end.
    *
    *  A SPLIT SHIFT IS ENTRIES (0288). The pieces of one shift are ordinary rows; the editor offers
    *  Move The Split and Join Back between two touching pieces of the same family, found from the
@@ -345,33 +345,29 @@ export default async function TimecardsPage({
     return [...byId.values()];
   })();
   const familyById = splitFamilies(familyRows);
+  /* ── ONE DOOR PER ROW (Wave 2) ─────────────────────────────────────────────────────────────
+   *  The whole row already opens the shift's editor (the ?entry= door), so a CLOSED row carries no
+   *  controls: the pencil was a second way to the same place, and Copy To… moved into the editor
+   *  it opens ("Copy To Someone Else…"). A RUNNING row keeps its one labelled action, "Clock Out
+   *  <Name>": an action, not a pencil, and the thing the office reaches for on a running clock. */
   const detailById = new Map<string, { controls: ReactNode }>();
   for (const e of weekRows) {
+    if (e.status !== "open") continue;
     detailById.set(String(e.id), {
       controls: (
-        <>
-          {e.status === "closed" && (
-            <DuplicateEntryButton
-              id={e.id}
-              profileId={e.profile_id}
-              personName={e.profiles?.full_name}
-              members={members ?? []}
-            />
-          )}
-          <EditEntryButton
-            entry={e}
-            jobCodes={(jobCodes ?? []) as JobCode[]}
-            jobs={jobs ?? []}
-            members={members ?? []}
-            isStaff
-            jobCodesEnabled={orgSettings.timeclock_job_codes}
-            tz={tz}
-            neighbors={neighborsOf(familyRows, String(e.id))}
-            rebuiltFromOldSplit={rebuiltOf(familyRows, String(e.id))}
-            workDayEnd={workWin.end}
-            viewerId={user?.id}
-          />
-        </>
+        <EditEntryButton
+          entry={e}
+          jobCodes={(jobCodes ?? []) as JobCode[]}
+          jobs={jobs ?? []}
+          members={members ?? []}
+          isStaff
+          jobCodesEnabled={orgSettings.timeclock_job_codes}
+          tz={tz}
+          neighbors={neighborsOf(familyRows, String(e.id))}
+          rebuiltFromOldSplit={rebuiltOf(familyRows, String(e.id))}
+          workDayEnd={workWin.end}
+          viewerId={user?.id}
+        />
       ),
     });
   }
@@ -1085,8 +1081,10 @@ export default async function TimecardsPage({
           reason: they were not a summary of the stack, they were a SECOND RENDERING of its
           shifts, which is the duplicate Erik was actually looking at. Everything they carried —
           the initials header, the week hours, the mileage split, and per shift the times, the job
-          link, the code badge, manual/offline, lunch, the hours, duplicate, pencil and the notes —
-          now rides on the stack's one row, under [By Day | By Person] above.
+          link, the code badge, the offline disclosure, lunch, the hours and the notes — now rides
+          on the stack's one row, under [By Day | By Person] above. The row itself is the door to the
+          shift's editor, which says where a hand-typed shift's time came from and holds Copy To
+          Someone Else… (Wave 2: the pencil and the copy icon were second doors to the same place).
           The EmptyState that stood in for them went too: the stack says "No hours this week" in
           each week it owns, so there is exactly one of those on screen instead of two.
 

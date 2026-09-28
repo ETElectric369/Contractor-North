@@ -161,7 +161,7 @@ export default async function JobDetailPage({
     supabase.from("purchase_orders").select("id, po_number, vendor, status, total").eq("job_id", id),
     supabase
       .from("time_entries")
-      .select("id, profile_id, clock_in, clock_out, lunch_minutes, miles, status, job_id, job_code, notes, rate_override, paid_at, mileage_paid_at, split_from, split_how, profiles(full_name), job:job_id(job_number, name)")
+      .select("id, profile_id, clock_in, clock_out, lunch_minutes, miles, status, job_id, job_code, notes, rate_override, paid_at, mileage_paid_at, split_from, split_how, source, profiles(full_name), job:job_id(job_number, name)")
       .eq("job_id", id)
       .order("clock_in", { ascending: false }),
     supabase
@@ -1105,6 +1105,8 @@ export default async function JobDetailPage({
     // "paid period" banner, which every role should see before a blocked save.
     paid_at?: string | null;
     mileage_paid_at?: string | null;
+    /** 0168: where the time came from; the office's editor says it in words (sourceLine). */
+    source?: string | null;
   }[] = viewerIsStaff
     ? ((entries ?? []) as any[])
     : ((entries ?? []) as any[]).map((e) => ({
