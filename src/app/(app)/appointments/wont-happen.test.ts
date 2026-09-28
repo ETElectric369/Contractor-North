@@ -19,6 +19,8 @@ import {
 type Row = Record<string, unknown>;
 const s = vi.hoisted(() => ({
   row: null as null | Row,
+  /** The row as a read AFTER the delete attempt sees it (somebody changed it in between). */
+  rowAfter: null as null | Row,
   answers: {} as unknown,
   answersError: null as null | { code: string; message: string },
   invoices: 0,
@@ -49,7 +51,7 @@ function builder(table: string) {
       return { data: Array.from({ length: s.updateHits }, () => ({ id: "a1" })), error: null };
     }
     if (head) return { data: null, count: table === "invoices" ? s.invoices : s.links, error: null };
-    if (table === "appointments") return { data: s.gone ? null : s.row, error: null };
+    if (table === "appointments") return { data: s.gone ? null : s.deletes.length && s.rowAfter ? s.rowAfter : s.row, error: null };
     return { data: null, error: null };
   };
   const b: any = {
@@ -92,6 +94,7 @@ const row = (over: Row = {}): Row => ({
 
 beforeEach(() => {
   s.row = row();
+  s.rowAfter = null;
   s.answers = {};
   s.answersError = null;
   s.invoices = 0;
@@ -167,6 +170,13 @@ describe("Won't Happen deletes only a visit with nothing on it", () => {
     s.deleteHits = 0;
     expect(await wontHappenAppointment("a1")).toMatchObject({ ok: true, did: "cancelled" });
     expect(statusWrites()).toEqual(["cancelled"]);
+  });
+
+  it("somebody marked it Done in between: what they did stands, and it is said", async () => {
+    s.deleteHits = 0;
+    s.rowAfter = row({ status: "completed" });
+    expect(await wontHappenAppointment("a1")).toEqual({ ok: false, error: "That visit changed a moment ago: it's marked Done now. Reload to see it." });
+    expect(statusWrites()).toEqual([]);
   });
 
   it("a zero-row write is an error, never 'done'", async () => {

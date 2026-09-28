@@ -1474,10 +1474,14 @@ export async function wontHappenAppointment(
       revalidateVisit(id);
       return { ok: true, did: "deleted" };
     }
-    // Zero rows: the visit changed after it was read (a capture, a status) or it is gone. A visit
-    // that is still there is cancelled, never deleted on a stale read; one that is gone is said.
-    const { data: still } = await supabase.from("appointments").select("id").eq("id", id).maybeSingle();
+    // Zero rows: the visit changed after it was read (a capture, a status) or it is gone. One that is
+    // gone is said; one somebody marked Done or Cancelled in the meantime keeps what they did; one
+    // still booked is cancelled, never deleted on a stale read.
+    const { data: still } = await supabase.from("appointments").select("id, status").eq("id", id).maybeSingle();
     if (!still) return { ok: false, error: "That visit isn't there any more. Reload to see the schedule as it is." };
+    const now = (still as { status?: string }).status;
+    if (now !== "scheduled" && now !== "proposed")
+      return { ok: false, error: `That visit changed a moment ago: it's marked ${now === "completed" ? "Done" : "Cancelled"} now. Reload to see it.` };
   }
 
   const res = await setAppointmentStatus(id, "cancelled");
