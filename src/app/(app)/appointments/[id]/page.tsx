@@ -16,9 +16,11 @@ import { getSchedulePickerOptions } from "@/lib/schedule-options";
 import { AppointmentButton, type ApptValue } from "../appointment-button";
 import { tolerateMissingColumns } from "@/lib/inspection/schema";
 import { MarkCompleteButton } from "./mark-complete-button";
-import { DeleteEmptyInspectionButton } from "./delete-empty-button";
+import { MarkDoneRow, PutBackRow, WontHappenRow } from "./visit-header-actions";
+import { ACTIONS_ROW_CLS, SectionActionsMenu } from "@/components/section-actions-menu";
+import type { NavTree } from "@/lib/nav-tree";
+import { wontHappenVerdict } from "@/lib/appointments/wont-happen";
 import { hasCaptureData } from "@/lib/inspections";
-import { ApptQuickActions } from "../appointment-status";
 import { IntakeFiles } from "../../leads/intake-files";
 import { intakePaths } from "@/lib/playbook/uploads";
 import { playbookForForm } from "@/lib/playbook/parse";
@@ -41,6 +43,10 @@ import {
 } from "@/lib/inspection/walkthrough-access";
 
 export const dynamic = "force-dynamic";
+
+/** The visit's ⋯ (W2-11): every row is a composed child (they each own a toast or a modal), so the
+ *  tree itself is empty — the detail pages' one Actions door, last on the header row. */
+const VISIT_ACTIONS_MENU: NavTree = { center: { label: "Actions", icon: "more" }, nodes: [] };
 
 /** The table read's pre-0165 shape (the column isn't there yet): the one failure the page still
  *  reads as "no sheet", as tolerateMissingColumns always did. */
@@ -248,6 +254,30 @@ export default async function AppointmentCapturePage({
       ? await loadLinkInstead(supabase, { ...a, inquiry_id: a.inquiry_id ?? null }, tz)
       : null;
 
+  /* WON'T HAPPEN'S CONFIRM (W2-11) says which will happen, from the four facts the server asks again
+     at the write (lib/appointments/wont-happen): anything captured, an estimate written from it, an
+     invoice pointing at it, a pick-a-time link waiting. A read that fails counts as "something is
+     there", so the confirm never promises a delete the server won't make. Staff, booked visits only. */
+  const booked = a.status === "scheduled" || a.status === "proposed";
+  const [invoicesOnIt, linksWaiting] =
+    viewerIsStaff && booked
+      ? await Promise.all([
+          supabase.from("invoices").select("id", { count: "exact", head: true }).eq("appointment_id", a.id),
+          supabase.from("schedule_proposals").select("id", { count: "exact", head: true }).eq("appointment_id", a.id).eq("status", "pending"),
+        ])
+      : [null, null];
+  const wontHappenDeletes =
+    viewerIsStaff &&
+    booked &&
+    wontHappenVerdict({
+      capture: a.capture,
+      answers: inspection?.inspection_answers ?? null,
+      answersUnread: !!answersRead.error,
+      invoiceCount: invoicesOnIt && !invoicesOnIt.error ? (invoicesOnIt.count ?? 0) : null,
+      pendingLinks: linksWaiting && !linksWaiting.error ? (linksWaiting.count ?? 0) : null,
+    }) === "delete";
+  const scheduleDayHref = dayStr ? `/schedule?view=day&date=${dayStr}` : "/schedule";
+
   /* THE NAME START THE JOB WILL GIVE, resolved the way createJobFromAppointment resolves it (the
      visit's card, else the lead's card, else the lead; the lead's own spelling still only-who), so
      the name this page promises is the name the job gets. A lead that got its card after the visit
@@ -350,17 +380,16 @@ export default async function AppointmentCapturePage({
           {/* A cancelled appointment showed NO chip at all, so the page looked identical to a
               live one — which is half of why "can't cancel inspection" reads as broken. */}
           {a.status === "cancelled" && <Badge tone="slate">cancelled</Badge>}
-          {/* Status affordance: flips scheduled/proposed → completed so the Inspections
-              tab's buckets work (a captured walk-through stops reading as "upcoming"). */}
-          {/* THE MONEY DOOR — but not on an inspection. Erik: "i dont need a pay now button on
-              the inspection page." An inspection's money path IS the estimate; Pay now there was
-              noise. It stays on the visit types where work happens and money changes hands on the
-              spot (a legacy service_call/job appointment — new ones become real jobs at booking,
-              and pay from the job page). */}
-          {/* THE OFFICE'S VERBS. Pay Now, Mark Complete, Delete, Cancel, Unschedule and Edit Details
-              all save through requireStaff, and Pay Now puts money in front of a tech: a tech gets
-              the badges and the page, not the doors (Wave 0). */}
-          {viewerIsStaff && a.status !== "cancelled" && !isInspectionType(a.type) && (
+          {/* AT MOST ONE MAIN BUTTON, THEN ⋯ (W2-11). The row used to carry up to seven controls
+              (Get Paid, a small "mark complete", Delete, a bare ✓ and ✗, Clear The Date, Edit
+              Details). THE OFFICE'S VERBS all save through requireStaff, and Get Paid puts money
+              in front of a tech: a tech gets the badges and the page, not the doors (Wave 0). */}
+          {/* THE MONEY DOOR — a work visit that is still on. Not on a walk-through: Erik, "i dont
+              need a pay now button on the inspection page." A walk-through's money path IS the
+              estimate. It stays on the visit types where work happens and money changes hands on
+              the spot (a legacy service_call/job appointment — new ones become real jobs at
+              booking, and pay from the job page). */}
+          {viewerIsStaff && a.status !== "cancelled" && !walkThrough && (
             <SettleUpButton
               source="appointment"
               id={a.id}
@@ -370,50 +399,35 @@ export default async function AppointmentCapturePage({
               textReady={smsReadiness(org as { settings?: unknown } | null).ready}
             />
           )}
-          {viewerIsStaff && (a.status === "scheduled" || a.status === "proposed") && (
-            <MarkCompleteButton
-              id={a.id}
-              label={isInspectionType(a.type) ? "Mark inspection complete" : "Mark complete"}
-            />
+          {/* A booked walk-through's main button: done, so the Walk-Throughs tab moves it to
+              To write up. A completed walk-through has none: the Inspector's Start The Estimate
+              is its next step. A cancelled visit has none either. */}
+          {viewerIsStaff && walkThrough && booked && (
+            <MarkCompleteButton id={a.id} label="Mark Walk-Through Done" />
           )}
-          {/* DELETE, for a visit that never happened. Erik cancelled one at 01:08 and made
-              another at 01:10 because the ✗ he tapped said "Cancel" and left the row on his
-              screen. Offered ONLY when nothing was captured — see delete-empty-button.tsx for
-              why a walk-through with real data stays behind Edit Details. */}
-          {viewerIsStaff && !hasCaptureData(a.capture) && !walkthroughUnread &&
-            !(inspection?.inspection_answers && JSON.stringify(inspection.inspection_answers) !== "{}") && (
-              <DeleteEmptyInspectionButton
-                id={a.id}
-                afterHref={dayStr ? `/schedule?view=day&date=${dayStr}` : "/schedule"}
-              />
-            )}
-          {/* CANCEL — the filed bug. This page offered only "Mark complete" (a lie, if it never
-              happened) and Delete (which destroys the capture and photos with it). The verb
-              already existed and was wired up on the calendar row only; it belongs here too. */}
-          {viewerIsStaff && (a.status === "scheduled" || a.status === "proposed") && (
-            <ApptQuickActions
-              id={a.id}
-              status={a.status}
-              title={a.title ?? "this appointment"}
-              boxClassName="flex h-8 w-8 items-center justify-center rounded-lg"
-            />
-          )}
-          {/* Postponed-indefinitely is a real answer: back to the waiting board, date cleared,
-              everything else kept. Only shown while a date exists to clear. */}
-          {viewerIsStaff && (a.status === "scheduled" || a.status === "proposed") && a.starts_at && (
-            <UnscheduleButton id={a.id} />
-          )}
-          {/* Edit details — the shared appointment modal, prefilled (Erik 7/15:
-              "need a way to edit inspection/appointment details"). */}
+          {/* ⋯ ACTIONS, last on the row. Edit Details… is never rendered conditionally inside the
+              open panel (its modal would unmount mid-edit); its footer Delete stays the deliberate
+              way to remove a visit that has captured data. WON'T HAPPEN replaces the ✗ Cancel and
+              the top-row Delete: it deletes only a visit with nothing on it, and otherwise marks
+              it Cancelled with an Undo (lib/appointments/wont-happen). */}
           {viewerIsStaff && (
-            <AppointmentButton
-              jobs={picker.jobOpts}
-              customers={picker.custOpts}
-              staff={picker.staffOpts}
-              appointment={apptValue}
-              editLabel="Edit Details"
-              afterDeleteHref={dayStr ? `/schedule?view=day&date=${dayStr}` : "/schedule"}
-            />
+            <SectionActionsMenu tree={VISIT_ACTIONS_MENU}>
+              {!walkThrough && booked && <MarkDoneRow id={a.id} />}
+              <AppointmentButton
+                jobs={picker.jobOpts}
+                customers={picker.custOpts}
+                staff={picker.staffOpts}
+                appointment={apptValue}
+                rowLabel="Edit Details…"
+                triggerClassName={ACTIONS_ROW_CLS}
+                afterDeleteHref={scheduleDayHref}
+              />
+              {/* Postponed-indefinitely is a real answer: back to the waiting board, date cleared,
+                  everything else kept. Only while a date exists to clear. */}
+              {booked && a.starts_at && <UnscheduleButton id={a.id} menuItem />}
+              {a.status === "cancelled" && <PutBackRow id={a.id} />}
+              {booked && <WontHappenRow id={a.id} deletes={wontHappenDeletes} afterHref={scheduleDayHref} />}
+            </SectionActionsMenu>
           )}
         </div>
         <h1 className="mt-2 text-xl font-bold text-slate-900">{a.title}</h1>

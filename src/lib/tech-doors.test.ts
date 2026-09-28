@@ -65,11 +65,20 @@ describe("the job's side doors", () => {
 
   it("an appointment: the office's verbs don't render for a tech; the walk-through is the office's, a crew lead's on his visit (0356), and read-only for anyone else", () => {
     const s = src("appointments/[id]/page.tsx");
-    for (const tag of ["<SettleUpButton", "<MarkCompleteButton", "<ApptQuickActions", "<UnscheduleButton"]) {
-      expect(s).toMatch(new RegExp(`\\{viewerIsStaff && [^\\n]*\\n\\s*${tag}`));
+    // At most one main button, then the ⋯ Actions (W2-11): each behind the viewer's role.
+    for (const tag of ["<SettleUpButton", "<MarkCompleteButton", "<SectionActionsMenu"]) {
+      expect(s).toMatch(new RegExp(`\\{viewerIsStaff && [^\\n]*\\(\\n\\s*${tag}`));
     }
-    expect(s).toContain("{viewerIsStaff && !hasCaptureData(a.capture) &&");
-    expect(s).toMatch(/\{viewerIsStaff && \(\s*<AppointmentButton/);
+    // Every other verb is a row inside that staff-only menu: Edit Details…, Clear The Date, Put It
+    // Back On The Schedule, Won't Happen.
+    expect(s).toMatch(/\{viewerIsStaff && \(\s*<SectionActionsMenu tree=\{VISIT_ACTIONS_MENU\}>/);
+    const menu = s.slice(s.indexOf("<SectionActionsMenu tree={VISIT_ACTIONS_MENU}>"), s.indexOf("</SectionActionsMenu>"));
+    for (const tag of ["<MarkDoneRow", "<AppointmentButton", "<UnscheduleButton id={a.id} menuItem", "<PutBackRow", "<WontHappenRow"]) {
+      expect(menu, tag).toContain(tag);
+    }
+    // The bare ✓ / ✗ and the top-row Delete are gone from the page (the ✓ / ✗ stay on the calendar row).
+    expect(s).not.toContain("<ApptQuickActions");
+    expect(s).not.toContain("<DeleteEmptyInspectionButton");
     // Who fills it in comes from one rule (lib/inspection/walkthrough-access), and a crew lead's door
     // is the database's probe of save_walkthrough_capture, never a guess.
     expect(s).toMatch(/const access = walkthroughAccess\(\{\s*isStaff: viewerIsStaff,/);

@@ -26,6 +26,7 @@ import { clearInapplicable } from "@/lib/playbook/resolve";
 import { runOnce } from "@/lib/offline/run-once";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { DEFAULT_JOB_MINUTES } from "@/lib/schedule/job-block";
+import { putBackPlan, wontHappenVerdict } from "@/lib/appointments/wont-happen";
 
 /** The browser-computed ISO if present; otherwise build the instant in the ORG
  *  timezone — NEVER the server's UTC (the bare-string parse stored the wrong
@@ -1406,6 +1407,125 @@ export async function deleteAppointment(id: string): Promise<Result> {
   revalidatePath("/planner"); // My Day shows today's appointments — keep it in sync
   revalidatePath("/inspections"); // the Sales → Inspections tab reads appointments too
   return { ok: true };
+}
+
+/** The paths every Won't Happen / Put It Back write revalidates: everywhere a visit shows. */
+function revalidateVisit(id: string) {
+  revalidatePath("/schedule");
+  revalidatePath("/planner");
+  revalidatePath("/inspections");
+  revalidatePath(`/appointments/${id}`);
+}
+
+/**
+ * WON'T HAPPEN (W2-11) — the visit page's one door for a visit that isn't going ahead, in place of
+ * the ✗ Cancel and the top-row Delete. The rule is lib/appointments/wont-happen: DELETED only when
+ * nothing was captured on it, no estimate was written from it, no invoice points at it and no
+ * pick-a-time link is waiting; otherwise CANCELLED through setAppointmentStatus (the pending link is
+ * withdrawn and said so, the Google event goes), with the previous status for Undo.
+ *
+ * Every fact is read again here, at the write: the page's confirm is a hint, and a capture saved in
+ * between wins. The answers come through the appointment_answers view (readViaView), never the table.
+ * A fact that can't be read counts as "something is there". The delete lands only on the row as it
+ * was read (its updated_at): a save that slipped in after the read turns it into a cancel instead.
+ */
+export async function wontHappenAppointment(
+  id: string,
+): Promise<Result & { did?: "deleted" | "cancelled"; previousStatus?: string; note?: string }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+
+  const { data: row, error: rowErr } = await supabase
+    .from("appointments")
+    // PROJECTION LAW: the status it's in, what's on it, and the stamp the delete is checked against.
+    .select("id, status, capture, updated_at")
+    .eq("id", id)
+    .maybeSingle();
+  if (rowErr) return { ok: false, error: dbError(rowErr) };
+  if (!row) return { ok: false, error: "That visit isn't there any more. Reload to see the schedule as it is." };
+  const r = row as { status: string; capture: unknown; updated_at: string | null };
+  if (r.status === "completed")
+    return { ok: false, error: "This visit is marked Done, so it did happen. Edit Details can change or remove it." };
+  if (r.status === "cancelled") return { ok: false, error: "This visit is already marked Cancelled." };
+
+  const [answersRead, invoices, links] = await Promise.all([
+    readViaView<{ inspection_answers: unknown }>(supabase, "answers", (from) =>
+      from.select("inspection_answers").eq("id", id).maybeSingle(),
+    ),
+    supabase.from("invoices").select("id", { count: "exact", head: true }).eq("appointment_id", id),
+    supabase.from("schedule_proposals").select("id", { count: "exact", head: true }).eq("appointment_id", id).eq("status", "pending"),
+  ]);
+  const verdict = wontHappenVerdict({
+    capture: r.capture,
+    answers: (answersRead.data as { inspection_answers?: unknown } | null)?.inspection_answers ?? null,
+    answersUnread: !!answersRead.error,
+    invoiceCount: invoices.error ? null : (invoices.count ?? 0),
+    pendingLinks: links.error ? null : (links.count ?? 0),
+  });
+
+  if (verdict === "delete") {
+    // BEFORE the row goes (it reads google_event_id off the row). Fire-safe.
+    await deleteCalendarItem("appointment", id);
+    const del = supabase.from("appointments").delete().eq("id", id).eq("status", r.status);
+    const { data: gone, error } = await (r.updated_at ? del.eq("updated_at", r.updated_at) : del.is("updated_at", null)).select("id");
+    if (error) return { ok: false, error: dbError(error) };
+    if (gone?.length) {
+      revalidateVisit(id);
+      return { ok: true, did: "deleted" };
+    }
+    // Zero rows: the visit changed after it was read (a capture, a status) or it is gone. A visit
+    // that is still there is cancelled, never deleted on a stale read; one that is gone is said.
+    const { data: still } = await supabase.from("appointments").select("id").eq("id", id).maybeSingle();
+    if (!still) return { ok: false, error: "That visit isn't there any more. Reload to see the schedule as it is." };
+  }
+
+  const res = await setAppointmentStatus(id, "cancelled");
+  if (!res.ok) return res;
+  revalidateVisit(id);
+  return { ok: true, did: "cancelled", previousStatus: res.previousStatus, ...(res.note ? { note: res.note } : {}) };
+}
+
+/**
+ * PUT IT BACK ON THE SCHEDULE (W2-11): a cancelled visit had no way back on its page. It comes back
+ * Scheduled on its own day when that day is still ahead (today counts); a day that has passed, or
+ * none, comes back WAITING FOR A DAY (starts_at and ends_at cleared, 0368), on the rail rather than
+ * sitting on a past day. Only a cancelled visit: anything else is said, never quietly re-stamped.
+ */
+export async function putVisitBackOnSchedule(id: string): Promise<Result & { message?: string }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+  const { data: row, error: rowErr } = await supabase.from("appointments").select("id, status, starts_at").eq("id", id).maybeSingle();
+  if (rowErr) return { ok: false, error: dbError(rowErr) };
+  if (!row || (row as { status?: string }).status !== "cancelled")
+    return { ok: false, error: "Only a cancelled visit can go back on the schedule." };
+
+  const { data: orgRow } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
+  const tz = getOrgSettings((orgRow as { settings?: unknown } | null)?.settings).timezone;
+  const startsAt = (row as { starts_at?: string | null }).starts_at ?? null;
+  const plan = putBackPlan(startsAt ? todayStrInTz(tz, new Date(startsAt)) : null, todayStrInTz(tz));
+
+  const { data: wrote, error } = await supabase
+    .from("appointments")
+    .update({
+      status: "scheduled",
+      ...(plan.keepDay ? {} : { starts_at: null, ends_at: null }),
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", id)
+    .eq("status", "cancelled")
+    .select("id");
+  if (error) {
+    // A database without 0368 still holds starts_at NOT NULL: said plainly, nothing changed.
+    if ((error as { code?: string }).code === "23502")
+      return { ok: false, error: "Its day has passed, and a visit can't wait without a day until a quick database update is done. It stays Cancelled." };
+    return { ok: false, error: dbError(error) };
+  }
+  if (!wrote?.length) return { ok: false, error: "Only a cancelled visit can go back on the schedule." };
+  await pushCalendarItem("appointment", id); // back on the phone's calendar when it has a day (fire-safe)
+  revalidateVisit(id);
+  return { ok: true, message: plan.message };
 }
 
 /**
