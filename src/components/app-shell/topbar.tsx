@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { isStaffRole } from "@/lib/actions/perms";
-import { ArrowLeft, Search, Square } from "lucide-react";
+import { ArrowLeft, AudioLines, Search, Square } from "lucide-react";
 import { GlobalAssistant } from "@/components/global-assistant";
 import { GlobalQuickAdd } from "@/components/global-quick-add";
 import { NotificationBell } from "@/components/app-shell/notification-bell";
@@ -11,21 +11,27 @@ import { AccountMenu } from "@/components/account-menu";
 import { hasInAppHistory } from "@/components/back-link";
 import { featureOn, type FeatureMap } from "@/lib/features";
 import { useEstimator } from "@/lib/estimator-store";
-import { setupWaiting } from "@/lib/onboarding/help-rows";
+import { setupWaiting, talkToNort } from "@/lib/onboarding/help-rows";
 import { isApplePlatform, modKeyLabel } from "@/lib/mod-key";
 import type { Answers } from "@/lib/playbook/types";
 import type { Profile } from "@/lib/types";
 
 /**
- * THE TOP BAR: Back · logo · Search Or Ask · + · Bell · Avatar — the same five controls for every
- * role and every company (W1-09), each a 44px target, with nothing scrolling sideways at 375px.
+ * THE TOP BAR: Back · logo · Search Or Ask · Nort · + · Bell · Avatar — the same controls for every
+ * role and every company (W1-09), each a 44px target, with nothing scrolling sideways at 375px (the
+ * company logo gives way first). Nort off, his button isn't drawn and the bar is one control shorter.
  *
- * SEARCH OR ASK is one door where there were three (Nort's voice button, the Search button and the
- * graduation cap). It opens the command bar (cn:command): search anything; with Nort on, Talk To
- * Nort is its first row, typing a question and pressing Enter asks him, and the setup rows (Start
- * Here, Finish Setting Up, Show Me How, Take The Setup Again) sit inside it for staff. While Nort
- * is listening, thinking or speaking it IS the red Stop Nort, so the bar keeps exactly one voice
- * control. With Nort off it reads Search, and the setup rows move under Help in the avatar menu.
+ * SEARCH OR ASK is one door where there were two (the Search button and the graduation cap). It
+ * opens the command bar (cn:command): search anything; with Nort on, Talk To Nort is its first row,
+ * typing a question and pressing Enter asks him, and the setup rows (Start Here, Finish Setting Up,
+ * Show Me How, Take The Setup Again) sit inside it for staff. With Nort off it reads Search, and the
+ * setup rows move under Help in the avatar menu.
+ *
+ * NORT'S BUTTON, ONE TAP (Erik, 2026-09-27: "theres not Nort button anymore"). He is an intercom,
+ * used hands-busy in the truck — one tap or it isn't safe — so a menu row alone buried him. The
+ * button runs talkToNort(), the very call Search Or Ask's Talk To Nort row makes, inside its own
+ * click so the mic starts inside the tap (iOS). While Nort listens, thinks or speaks it IS the red
+ * Stop Nort, so the bar keeps exactly one voice control and one Stop.
  *
  * Forward is gone (back already falls back to /planner), and Sign out / language / the estimate QR
  * / Office / Tools live behind the ONE account seek door (<AccountMenu>, far right).
@@ -64,7 +70,7 @@ export function Topbar({
   // Nort off: his panel and the ?debrief= / ?attention= openers it hosts aren't mounted, and the
   // door reads Search. The bell STAYS whatever the switches say: it is the record of every push (Erik).
   const nortOn = featureOn(features, "nort");
-  // Nort is working (listening, thinking or talking): the door becomes Stop Nort (the chat
+  // Nort is working (listening, thinking or talking): his button becomes Stop Nort (the chat
   // publishes these to the shared store even while its panel is collapsed).
   const { listening, streaming, speaking } = useEstimator();
   const nortBusy = nortOn && (listening || streaming || speaking);
@@ -112,38 +118,50 @@ export function Topbar({
       <div className="flex-1" />
 
       <div className="flex shrink-0 items-center gap-2 sm:gap-3">
-        {/* Nort's panel and deep-link openers, with no bar button of its own: Talk To Nort (inside
-            Search Or Ask) starts him, and the door below turns into Stop Nort while he works. */}
+        {/* Nort's panel and deep-link openers — no DOM of its own in the bar (the panel floats). */}
         {nortOn && <GlobalAssistant />}
-        {nortBusy ? (
-          <button
-            onClick={() => window.dispatchEvent(new Event("cn:assistant-stop"))}
-            // The same anchor as Search Or Ask: it is the same door, in its other state.
-            data-tour="ask"
-            aria-label="Stop Nort"
-            title="Stop Nort"
-            className="btn-gloss inline-flex h-11 w-11 items-center justify-center gap-2 rounded-full bg-red-600 text-white shadow-sm transition-colors hover:bg-red-700 md:w-auto md:px-4"
-          >
-            <Square className="h-4 w-4 shrink-0 fill-current" />
-            <span className="hidden text-sm font-medium md:inline">Stop Nort</span>
-          </button>
-        ) : (
-          <button
-            onClick={() => window.dispatchEvent(new Event("cn:command"))}
-            data-tour="ask"
-            aria-label={nortOn ? "Search Or Ask" : "Search"}
-            title={`${nortOn ? "Search or ask Nort" : "Search"} (${modKey})${nortOn && waiting ? " — setup is waiting inside" : ""}`}
-            className="relative flex h-11 w-11 items-center justify-center gap-2 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 md:w-auto md:px-3"
-          >
-            <Search className="h-5 w-5 shrink-0" />
-            <span className="hidden text-sm md:inline">{nortOn ? "Search Or Ask" : "Search"}</span>
-            {/* The shortcut only where there is a keyboard to press it on. */}
-            <span className="hidden rounded border border-slate-200 px-1.5 py-0.5 text-[10px] text-slate-400 md:pointer-fine:inline">{modKey}</span>
-            {nortOn && waiting && (
-              <span data-x="setup-dot" className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-rose-500 ring-2 ring-white" />
-            )}
-          </button>
-        )}
+        <button
+          onClick={() => window.dispatchEvent(new Event("cn:command"))}
+          data-tour="ask"
+          aria-label={nortOn ? "Search Or Ask" : "Search"}
+          title={`${nortOn ? "Search or ask Nort" : "Search"} (${modKey})${nortOn && waiting ? " — setup is waiting inside" : ""}`}
+          className="relative flex h-11 w-11 items-center justify-center gap-2 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 md:w-auto md:px-3"
+        >
+          <Search className="h-5 w-5 shrink-0" />
+          <span className="hidden text-sm md:inline">{nortOn ? "Search Or Ask" : "Search"}</span>
+          {/* The shortcut only where there is a keyboard to press it on. */}
+          <span className="hidden rounded border border-slate-200 px-1.5 py-0.5 text-[10px] text-slate-400 md:pointer-fine:inline">{modKey}</span>
+          {nortOn && waiting && (
+            <span data-x="setup-dot" className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-rose-500 ring-2 ring-white" />
+          )}
+        </button>
+        {/* NORT, ONE TAP: Talk To Nort, or the red Stop Nort while he works. Nort off: not drawn. */}
+        {nortOn &&
+          (nortBusy ? (
+            <button
+              onClick={() => window.dispatchEvent(new Event("cn:assistant-stop"))}
+              // The same anchor as Talk To Nort: it is the same button, in its other state.
+              data-tour="nort"
+              aria-label="Stop Nort"
+              title="Stop Nort"
+              className="btn-gloss inline-flex h-11 w-11 items-center justify-center rounded-full bg-red-600 text-white shadow-sm transition-colors hover:bg-red-700"
+            >
+              <Square className="h-4 w-4 shrink-0 fill-current" />
+            </button>
+          ) : (
+            <button
+              // SYNCHRONOUS, ON PURPOSE: talkToNort() (the same call as Search Or Ask's Talk To Nort
+              // row) dispatches cn:nort-talk, and GlobalAssistant's launch() starts the mic before
+              // this click returns — inside the tap, as iOS needs. Never put an await in front of it.
+              onClick={talkToNort}
+              data-tour="nort"
+              aria-label="Talk To Nort"
+              title="Talk To Nort"
+              className="btn-gloss inline-flex h-11 w-11 items-center justify-center rounded-full bg-brand text-white shadow-sm transition-colors hover:bg-brand-dark"
+            >
+              <AudioLines className="h-5 w-5 shrink-0" />
+            </button>
+          ))}
         {/* The + tour anchor is this wrapper span (lane 3 rewrites the component inside it). */}
         <span data-tour="quickadd" className="inline-flex"><GlobalQuickAdd placement="topbar" isStaff={isStaff} features={features} /></span>
         {/* The in-app bell — the always-works notification channel (push-independent). */}
