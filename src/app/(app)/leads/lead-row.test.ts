@@ -125,7 +125,8 @@ describe("A. no silent contact", () => {
 
 describe("B. one next-step chip on the row", () => {
   it("replaces the badges: no status word, no walk-through counts, no follow-up or web badges", () => {
-    const html = row(lead({ status: "contacted", source: "intake", lead_bucket: "A", site_inspection_required: true }), {
+    // 'intake' is a real stored source that lib/types' Inquiry union doesn't list (next-step reads its own type).
+    const html = row(lead({ status: "contacted", source: "intake" as Inquiry["source"], lead_bucket: "A", site_inspection_required: true }), {
       visits: { done: 1, upcoming: 0, nextAt: null },
     });
     for (const gone of [">contacted<", "inspected", "inspection booked", "🚩", ">web<", "deck site", ">follow up"]) expect(html).not.toContain(gone);

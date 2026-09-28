@@ -168,8 +168,8 @@ export async function createAppointment(formData: FormData): Promise<Result> {
   return { ok: true, id: data.id };
 }
 
-/** "Inspect now" — the already-onsite path (Erik: "sometimes we're onsite already — too
- *  many steps today"). Creates a type='inspection' appointment starting NOW (status
+/** "Start A Walk-Through" (it was "Inspect now") — the already-onsite path (Erik: "sometimes we're
+ *  onsite already — too many steps today"). Creates a type='inspection' appointment starting NOW (status
  *  'scheduled'; filling in the capture is what makes it *done*), linked to the lead when
  *  launched from one, so the caller can route STRAIGHT to /appointments/<id> and start
  *  collecting field data. One tap from lead → capturing. */

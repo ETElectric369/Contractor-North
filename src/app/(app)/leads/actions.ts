@@ -570,7 +570,7 @@ export async function convertInquiry(
     // landing the inspection at 2 AM Pacific).
     const startDate = opts.startDate || ymdAddDays(todayStrInTz(tz), 2);
     const startsAtIso = tzDateTimeUtc(startDate, /^\d{2}:\d{2}$/.test(opts.startTime ?? "") ? opts.startTime! : "09:00", tz);
-    if (!startsAtIso) return { ok: false, error: "Pick a valid inspection date." };
+    if (!startsAtIso) return { ok: false, error: "Pick a valid day for the walk-through." };
     const carry = await carryForInquiry(supabase, inq);
     const kindChosen = workKind({ kind: "lead", workKind: (inq as { work_kind?: string | null }).work_kind });
 
