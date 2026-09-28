@@ -12,7 +12,8 @@ import { dayTargetLabel } from "@/lib/schedule/placement-plan";
 import { dayLabel, spanLabel } from "@/lib/schedule/span-label";
 import { useEndlessStack } from "@/components/use-endless-stack";
 import { jobDayBlock } from "@/lib/schedule/job-block";
-import { crewChips, placeLine, spanShort, streetOf, townOf } from "@/lib/schedule/block-info";
+import { crewChips, initialsOf, placeLine, spanShort, streetOf, townOf } from "@/lib/schedule/block-info";
+import { CrewInitials } from "@/components/crew-initials";
 import { ownHoursByJobDay } from "@/lib/schedule/segment-hours";
 import { ScheduleTileSheet, type TileTarget } from "../schedule/tile-sheet";
 import { AddToScheduleSheet, type AddAt, type AddableJob } from "../schedule/add-to-schedule-sheet";
@@ -1526,19 +1527,24 @@ function ApptRow({ a, picker, tz }: { a: CalAppt; picker: SchedulePicker; tz: st
           {a.status === "completed" && <Badge tone="green">done</Badge>}
           {a.status === "proposed" && <Badge tone="amber">pending pick</Badge>}
         </div>
-        <div className="mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-slate-500">
+        <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-slate-500">
           {a.customers?.name && <span>{a.customers.name}</span>}
           {a.jobs && (
             <Link href={`/jobs/${a.job_id}`} className="text-brand hover:underline">
               {jobLabel(a.jobs)}
             </Link>
           )}
-          {a.profiles?.full_name && <span>· {a.profiles.full_name}</span>}
+          {/* WHERE, as the visit's block says it: the street (the town small), never the zip; the
+              whole line still drives Navigate. WHO'S GOING as the one initials chip, or Nobody. */}
           {a.location && (
             <NavLink address={a.location} className="inline-flex items-center gap-0.5 text-brand hover:underline">
-              <MapPin className="h-3 w-3" /> {a.location}
+              <MapPin className="h-3 w-3" /> {streetOf(a.location) || a.location}
+              {townOf(a.location) && <span className="text-[11px] text-slate-400"> · {townOf(a.location)}</span>}
             </NavLink>
           )}
+          <CrewInitials
+            crew={a.assigned_to ? [{ id: a.assigned_to, initials: initialsOf(a.profiles?.full_name), name: a.profiles?.full_name ?? "Unnamed" }] : []}
+          />
         </div>
         {a.notes && <p className="mt-1 line-clamp-2 whitespace-pre-wrap text-xs text-slate-500">{a.notes}</p>}
       </div>
