@@ -1959,21 +1959,21 @@ export async function importJobs(
       results.push({ name: "(blank)", status: "failed", reason: "Missing customer and job name." });
       continue;
     }
-    // THE NAME IS THE WORK, NEVER A SOURCE TAG (Erik 2026-09-27): an old system's "Service call —
-    // Rita Moss" comes in with the tag taken off; a blank or tag-only name gets the default,
-    // "Moss · 12 Elm St" (lib/job-name, the one namer every door uses).
-    const jobName = jobNameFrom({ title: r.job_name, customer: cname ? { name: cname } : null, street: r.address, todayStr });
-
     // Find-or-create the customer (match by name, narrowed by email when given) — RLS
     // already scopes this to the caller's org.
     let customerId: string | null = null;
+    // Who the job is named for (below): the matched card as stored (its company, its type).
+    type Who = { name?: string | null; company_name?: string | null; type?: string | null };
+    let who: Who | null = null;
     if (cname) {
       const email = (r.email || "").trim().toLowerCase();
-      let q = supabase.from("customers").select("id").ilike("name", escapeLike(cname)).limit(1);
+      let q = supabase.from("customers").select("id, name, company_name, type").ilike("name", escapeLike(cname)).limit(1);
       if (email) q = q.ilike("email", escapeLike(email));
       const { data: hit } = await q.maybeSingle();
-      if (hit) customerId = hit.id;
-      else {
+      if (hit) {
+        customerId = hit.id;
+        who = hit as Who;
+      } else {
         const { data: nc, error: ce } = await supabase
           .from("customers")
           .insert({
@@ -1990,12 +1990,21 @@ export async function importJobs(
           .select("id")
           .single();
         if (ce) {
-          results.push({ name: jobName, status: "failed", reason: ce.message });
+          results.push({ name: (r.job_name || "").trim() || cname, status: "failed", reason: ce.message });
           continue;
         }
         customerId = nc.id;
+        // The sheet says nothing of the kind of customer, so the name stays whole ("Acme Property
+        // Management", "Rita Moss"): never cut down to a last word that may be "Management" or "Inc".
+        who = { company_name: cname };
       }
     }
+
+    // THE NAME IS THE WORK, NEVER A SOURCE TAG (Erik 2026-09-27): an old system's "Service call —
+    // Rita Moss" comes in with the tag taken off; a blank or tag-only name gets the default, who
+    // and the street (lib/job-name, the one namer every door uses), named for the card as it is
+    // stored, the same as New Job would name it.
+    const jobName = jobNameFrom({ title: r.job_name, customer: who, street: r.address, todayStr });
 
     // Legacy CSV statuses from the old lifecycle: an "estimate" row is a job waiting to be
     // scheduled; an "invoiced" row is finished work (money owed lives in AR, not job status).

@@ -24,6 +24,13 @@ export const JOB_NAME_CASES: JobNameCase[] = [
   { why: "a tag and the street", title: "Inspection — 12 Elm St", customer: rita, street: "12 Elm St", today: T, want: "Moss · 12 Elm St" },
   { why: "a tag and the whole address line", title: "Site visit: 12 Elm St, Testville, CA", customer: null, street: "12 Elm St", today: T, want: "12 Elm St" },
   { why: "a business by its own name", title: "Walk-through: Tahoe Test HOA", customer: { name: "Pat Lee", company_name: "Tahoe Test HOA", type: "commercial" }, street: "300 Test Blvd", today: T, want: "Tahoe Test HOA · 300 Test Blvd" },
+  // The phone-call booking's stock title has no separator (bookingTitle "call"): who/where/nothing after "Call".
+  { why: "a phone-call booking", title: "Call Rita Moss", customer: rita, street: "12 Elm St", today: T, want: "Moss · 12 Elm St" },
+  { why: "a phone-call booking with no name", title: "Call Visit", customer: rita, street: "12 Elm St", today: T, want: "Moss · 12 Elm St" },
+  { why: "a phone call and the street", title: "Phone call 12 Elm St", customer: null, street: "12 Elm St", today: T, want: "12 Elm St" },
+  { why: "call with a separator", title: "Call: Rita Moss", customer: rita, street: null, today: T, want: "Moss" },
+  { why: "call is the work when real words follow", title: "Call box install", customer: rita, street: "12 Elm St", today: T, want: "Call box install" },
+  { why: "a phone call's words after the tag", title: "Phone call — Panel swap", customer: rita, street: "12 Elm St", today: T, want: "Panel swap" },
   // The work's own words, with the tag taken off.
   { why: "the words after the tag", title: "Service call — Panel swap", customer: rita, street: "12 Elm St", today: T, want: "Panel swap" },
   { why: "every separator: colon", title: "Estimate: Kitchen rewire", customer: null, street: null, today: T, want: "Kitchen rewire" },

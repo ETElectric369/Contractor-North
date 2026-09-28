@@ -15,7 +15,7 @@ import { notifyPeople } from "@/lib/notifications";
 import { getOrgSettings } from "@/lib/org-settings";
 import { tzDateTimeUtc, todayStrInTz } from "@/lib/tz";
 import { WORK_DAY_MINUTES } from "@/lib/schedule/work-shape";
-import { jobNameFrom, streetOf } from "@/lib/job-name";
+import { jobNameFrom, jobWho, streetOf } from "@/lib/job-name";
 import { createProposalCore, cleanSlots } from "@/lib/appointments/proposal";
 import { endAfterStart, keptEnd } from "@/lib/appointments/times";
 import { APPOINTMENT_STATUSES, APPOINTMENT_TYPES, INSPECTION_TYPES } from "@/lib/statuses";
@@ -1211,30 +1211,31 @@ export async function createJobFromAppointment(
      paid job missing from its own customer's card and a job page with no contact. If the lead
      already carries a card, the job inherits it here, at the one step that connects the two. */
   const inquiryId = (appt as { inquiry_id?: string | null }).inquiry_id ?? null;
-  let customerId = appt.customer_id ?? null;
-  if (!customerId && inquiryId) {
-    const { data: inq } = await supabase.from("inquiries").select("customer_id").eq("id", inquiryId).maybeSingle();
-    customerId = (inq as { customer_id?: string | null } | null)?.customer_id ?? null;
+  type Who = { name?: string | null; company_name?: string | null; type?: string | null } | null;
+  type Lead = { customer_id?: string | null; name?: string | null; company_name?: string | null; type?: string | null };
+  let lead: Lead | null = null;
+  if (inquiryId) {
+    const { data: iq } = await supabase.from("inquiries").select("customer_id, name, company_name, type").eq("id", inquiryId).maybeSingle();
+    lead = (iq as Lead | null) ?? null;
   }
+  const customerId = appt.customer_id ?? lead?.customer_id ?? null;
 
   /* THE NAME IS THE WORK, NEVER THE VISIT IT CAME FROM (Erik 2026-09-27: "site inspections are
      labeled with the tag they shouldnt carry site inspection in the job title"). a job was born
      "Site inspection: Rita Moss" because this copied the visit's title. The one namer
      (lib/job-name) takes the tag off; a stock title with only the person left gets the default
-     "Moss · 1871 Apache Ct", on the company's today. Who: the card, else the lead. */
+     "Moss · 1871 Apache Ct", on the company's today. Who (jobWho, the same order the visit page's
+     preview uses): the card, else the lead; the lead's own spelling still counts as only-who, since
+     the visit's stock title was built from it. */
   const { data: orgRow } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
   const tz = getOrgSettings((orgRow as { settings?: unknown } | null)?.settings).timezone;
-  type Who = { name?: string | null; company_name?: string | null; type?: string | null } | null;
-  let who: Who = null;
+  let card: Who = null;
   if (customerId) {
     const { data: c } = await supabase.from("customers").select("name, company_name, type").eq("id", customerId).maybeSingle();
-    who = (c as Who) ?? null;
+    card = (c as Who) ?? null;
   }
-  if (!who?.name && !who?.company_name && inquiryId) {
-    const { data: iq } = await supabase.from("inquiries").select("name, company_name, type").eq("id", inquiryId).maybeSingle();
-    if (iq) who = iq as Who;
-  }
-  const jobName = jobNameFrom({ title: appt.title, customer: who, street: streetOf(appt.location), todayStr: todayStrInTz(tz) });
+  const { customer: who, aliases } = jobWho([card, lead]);
+  const jobName = jobNameFrom({ title: appt.title, customer: who, aliases, street: streetOf(appt.location), todayStr: todayStrInTz(tz) });
 
   const sized = Number((appt as { planned_minutes?: number | null }).planned_minutes ?? 0);
   const apptEnd = (appt as { ends_at?: string | null }).ends_at ?? null;

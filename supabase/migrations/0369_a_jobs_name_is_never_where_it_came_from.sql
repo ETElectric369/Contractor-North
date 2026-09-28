@@ -20,9 +20,12 @@
 -- public.job_name_from, for the one door that makes a job inside the database: a customer tapping
 -- Accept on the emailed /q/<token> link (accept_public_quote). The rule, identical in both:
 --   · the title's own words win, with a LEADING source tag taken off: "Site inspection", "Site
---     visit", "Service call", "Walk-through"/"Walk through"/"Walkthrough", "Inspection",
---     "Appointment", "Estimate", "Inquiry", "Meeting", "Quote", "Lead", "Visit", followed by ":",
---     "—", "–", "·", "|", a hyphen with a space on one side, or the end, any case;
+--     visit", "Service call", "Phone call", "Walk-through"/"Walk through"/"Walkthrough", "Inspection",
+--     "Appointment", "Estimate", "Inquiry", "Meeting", "Quote", "Call", "Lead", "Visit", followed by
+--     ":", "—", "–", "·", "|", a hyphen with a space on one side, or the end, any case;
+--   · the phone-call booking's stock title has no separator ("Call Rita Moss", "Call Visit"): a
+--     leading "Call" is a tag there only when the person, the street or nothing follows it, so
+--     "Call box install" stays;
 --   · the old stock fallbacks ("Job from appointment", "Job from Q-0012") are no words at all;
 --   · a tag with nothing after it, or only the customer's name or the street after it, is the stock
 --     title and no name, so the job gets the default (lib/schedule-options defaultJobName): the
@@ -55,15 +58,24 @@ set search_path to 'public'
 as $function$
 declare
   tag_re constant text :=
-    '^(site\s+inspection|site\s+visit|service\s+call|walk-through|walk\s+through|walkthrough|inspection|appointment|estimate|inquiry|meeting|quote|lead|visit)\s*([—–·|:]|\s-|-\s|$)\s*';
+    '^(site\s+inspection|site\s+visit|service\s+call|phone\s+call|walk-through|walk\s+through|walkthrough|inspection|appointment|estimate|inquiry|meeting|quote|call|lead|visit)\s*([—–·|:]|\s-|-\s|$)\s*';
   stock_re constant text :=
     '^job\s+from\s+(appointment|lead|inquiry|estimate|quote|visit|[a-z]{1,3}-?[0-9][[:alnum:]_-]*)\s*$';
+  -- The phone-call booking's stock title, "Call Rita Moss" (bookingTitle): no separator after the
+  -- word, so a tag only when who, where or nothing follows it ("Call box install" stays).
+  bare_call_re constant text := '^(phone\s+)?call\s+';
   raw text := btrim(regexp_replace(coalesce(p_title, ''), '\s+', ' ', 'g'));
   words text;
+  rest text;
+  tagged boolean;
   nxt text;
-  i int := 0;
-  k_words text;
+  i int;
+  pass int;
+  k text;
+  k_name text;
+  k_company text;
   k_street text;
+  only_who boolean[] := array[false, false];
   company text := regexp_replace(coalesce(p_company_name, ''), '^\s+|\s+$', '', 'g');
   cname text := btrim(regexp_replace(coalesce(p_customer_name, ''), '\s+', ' ', 'g'));
   street text := btrim(regexp_replace(coalesce(p_street, ''), '\s+', ' ', 'g'));
@@ -71,37 +83,55 @@ declare
   parts text[];
   w text;
 begin
-  -- stripSourceTag
-  words := raw;
-  if words ~* stock_re then
-    words := '';
-  else
-    loop
-      i := i + 1;
-      nxt := btrim(regexp_replace(words, tag_re, '', 'i'));
-      exit when nxt = words or i > 4;
-      words := nxt;
-    end loop;
+  k_name := regexp_replace(lower(cname), '[^a-z0-9]', '', 'g');
+  k_company := regexp_replace(lower(company), '[^a-z0-9]', '', 'g');
+  k_street := regexp_replace(lower(street), '[^a-z0-9]', '', 'g');
+
+  -- stripSourceTag, on the title (pass 1) and on what follows a bare "Call" (pass 2).
+  for pass in 1..2 loop
+    if pass = 1 then
+      words := raw;
+    elsif tagged or raw !~* bare_call_re then
+      exit;
+    else
+      words := btrim(regexp_replace(raw, bare_call_re, '', 'i'));
+    end if;
     if words ~* stock_re then
       words := '';
+    else
+      i := 0;
+      loop
+        i := i + 1;
+        nxt := btrim(regexp_replace(words, tag_re, '', 'i'));
+        exit when nxt = words or i > 4;
+        words := nxt;
+      end loop;
+      if words ~* stock_re then
+        words := '';
+      end if;
     end if;
-  end if;
+    -- Only who or where: the customer's name, the company, the street (or an address line on it).
+    k := regexp_replace(lower(words), '[^a-z0-9]', '', 'g');
+    only_who[pass] := k <> '' and (
+      (k_name <> '' and k_name = k)
+      or (k_company <> '' and k_company = k)
+      or (k_street <> '' and (k_street = k
+            or k_street = regexp_replace(lower(btrim(split_part(words, ',', 1))), '[^a-z0-9]', '', 'g'))));
+    if pass = 1 then
+      tagged := words <> raw;
+      rest := words;
+    elsif words = '' or only_who[2] then
+      -- "Call Rita Moss" / "Call Visit": the call booking's stock title.
+      tagged := true;
+      rest := words;
+      only_who[1] := only_who[2];
+    end if;
+  end loop;
+  words := rest;
 
   -- The words win, unless a tag came off and only the customer or the street is left.
-  if words <> '' then
-    if words = raw then
-      return words;
-    end if;
-    k_words := regexp_replace(lower(words), '[^a-z0-9]', '', 'g');
-    k_street := regexp_replace(lower(street), '[^a-z0-9]', '', 'g');
-    if not (
-      (regexp_replace(lower(cname), '[^a-z0-9]', '', 'g') <> '' and regexp_replace(lower(cname), '[^a-z0-9]', '', 'g') = k_words)
-      or (regexp_replace(lower(company), '[^a-z0-9]', '', 'g') <> '' and regexp_replace(lower(company), '[^a-z0-9]', '', 'g') = k_words)
-      or (k_street <> '' and (k_street = k_words
-            or k_street = regexp_replace(lower(btrim(split_part(words, ',', 1))), '[^a-z0-9]', '', 'g')))
-    ) then
-      return words;
-    end if;
+  if words <> '' and (not tagged or not only_who[1]) then
+    return words;
   end if;
 
   -- defaultJobName: customerNamePart · street, else "New Job · Sep 27".

@@ -204,6 +204,26 @@ describe("createJobFromAppointment: the job's name is never the visit's tag", ()
     expect(await madeName()).toBe("Test · 12 Elm St");
   });
 
+  it('a phone-call booking ("Call Rita Moss", bookingTitle\'s call kind) is never named after the call', async () => {
+    db.appt.title = "Call Rita Moss";
+    expect(await madeName()).toBe("Moss · 12 Test Elm St");
+  });
+
+  it('"Call box install" typed as the work stays', async () => {
+    db.appt.title = "Call box install";
+    expect(await madeName()).toBe("Call box install");
+  });
+
+  it("the lead got its card after booking, spelled another way: named for the card, the lead's spelling still only-who", async () => {
+    db.appt.customer_id = null;
+    db.appt.inquiry_id = "inq-2";
+    db.appt.location = "12 Elm St, Testville, CA 96161";
+    db.appt.title = "Site inspection: Rich Test";
+    db.customers["cust-rich"] = { name: "Richard Test", company_name: null, type: "residential" };
+    db.inquiry = { id: "inq-2", customer_id: "cust-rich", name: "Rich Test", company_name: null, type: "residential" };
+    expect(await madeName()).toBe("Test · 12 Elm St");
+  });
+
   it('no title at all is never "Job from appointment"', async () => {
     db.appt.title = null;
     expect(await madeName()).toBe("Moss · 12 Test Elm St");

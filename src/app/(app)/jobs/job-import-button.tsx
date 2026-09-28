@@ -7,6 +7,8 @@ import { Upload, Check, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { importJobs, type JobImportRow, type JobImportResult } from "./actions";
+import { jobNameFrom } from "@/lib/job-name";
+import { todayStrInTz } from "@/lib/tz";
 
 /**
  * THE ONE PARSER (cn-v700). This file carried a private `splitLine` doing `if (ch === '"') q = !q`
@@ -45,6 +47,19 @@ function parseCsv(text: string): JobImportRow[] {
       phone: v(c, iPhone),
     }))
     .filter((r) => r.customer || r.job_name);
+}
+
+/** The name a row's job will get, the way importJobs names a new card's job: the row's own words
+ *  with any source tag off ("Service call — Panel swap" → "Panel swap"), else the whole customer
+ *  name and the street. (A card already in the book is named as it is stored, e.g. a last name.) */
+export function previewName(r: Pick<JobImportRow, "job_name" | "customer" | "address">): string {
+  const cname = (r.customer || "").trim();
+  return jobNameFrom({
+    title: r.job_name,
+    customer: cname ? { company_name: cname } : null,
+    street: r.address,
+    todayStr: todayStrInTz(Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"),
+  });
 }
 
 const fmt = (n: number) => n.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
@@ -122,7 +137,8 @@ export function JobImportButton() {
                 <ul className="max-h-48 divide-y divide-slate-100 overflow-y-auto text-sm">
                   {rows.map((r, i) => (
                     <li key={i} className="flex items-center justify-between gap-2 px-3 py-1.5">
-                      <span className="truncate font-medium text-slate-800">{r.job_name || r.customer}</span>
+                      {/* The name the import will give (lib/job-name): never the old system's source tag. */}
+                      <span className="truncate font-medium text-slate-800">{previewName(r)}</span>
                       <span className="shrink-0 text-xs text-slate-400">{r.customer}{r.value ? ` · ${fmt(r.value)}` : ""}</span>
                     </li>
                   ))}

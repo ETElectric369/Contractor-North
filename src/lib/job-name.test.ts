@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { jobNameFrom, stripSourceTag, streetOf, SOURCE_TAGS } from "./job-name";
+import { jobNameFrom, jobWho, stripSourceTag, streetOf, SOURCE_TAGS } from "./job-name";
+import { bookingTitle, WORK_KINDS } from "./schedule/work-shape";
 import { JOB_NAME_CASES } from "./job-name.cases";
 
 /**
@@ -60,6 +61,52 @@ describe("jobNameFrom", () => {
     expect(streetOf("12 Elm St, Testville, CA 96161")).toBe("12 Elm St");
     expect(streetOf(null)).toBe("");
   });
+
+  it("every stock title bookingTitle makes is no name: the job is named who · where, never the booking", () => {
+    const rita = { name: "Rita Moss", company_name: null, type: "residential" };
+    for (const kind of WORK_KINDS) {
+      if (kind === "job") continue; // a job booking's title is the person, no tag (kept as typed)
+      for (const who of ["Rita Moss", ""]) {
+        const title = bookingTitle(kind, who);
+        expect(jobNameFrom({ title, customer: rita, street: "12 Elm St", todayStr: "2026-09-27" }), title).toBe("Moss · 12 Elm St");
+      }
+    }
+  });
+
+  it("the call form is a tag only with who/where/nothing after it", () => {
+    const rita = { name: "Rita Moss", company_name: null, type: "residential" };
+    const at = (title: string) => jobNameFrom({ title, customer: rita, street: "12 Elm St", todayStr: "2026-09-27" });
+    expect(at("Call Rita Moss")).toBe("Moss · 12 Elm St");
+    expect(at("call  rita moss")).toBe("Moss · 12 Elm St");
+    expect(at("Phone call Rita Moss")).toBe("Moss · 12 Elm St");
+    expect(at("Call 12 Elm St")).toBe("Moss · 12 Elm St");
+    expect(at("Call box install")).toBe("Call box install");
+    expect(at("Call center rewire")).toBe("Call center rewire");
+    expect(at("Callback: dead outlet")).toBe("Callback: dead outlet");
+  });
+
+  it("aliases: the lead's own spelling of who is only-who too (the visit title was built from it)", () => {
+    const card = { name: "Richard Test", company_name: null, type: "residential" };
+    const base = { title: "Site inspection: Rich Test", customer: card, street: "12 Elm St", todayStr: "2026-09-27" };
+    expect(jobNameFrom(base)).toBe("Rich Test");
+    expect(jobNameFrom({ ...base, aliases: ["Rich Test"] })).toBe("Test · 12 Elm St");
+    expect(jobNameFrom({ ...base, title: "Call Rich Test", aliases: ["Rich Test"] })).toBe("Test · 12 Elm St");
+    // An alias never eats real words.
+    expect(jobNameFrom({ ...base, title: "Site inspection: Panel swap", aliases: ["Rich Test"] })).toBe("Panel swap");
+  });
+});
+
+describe("jobWho: one order for the door and its preview", () => {
+  const card = { name: "Richard Test", company_name: null, type: "residential" };
+  const lead = { name: "Rich Test", company_name: "Test Builders", type: "commercial" };
+  it("the first candidate with a name or company is who; the rest are aliases", () => {
+    expect(jobWho([card, lead])).toEqual({ customer: card, aliases: ["Rich Test", "Test Builders"] });
+  });
+  it("a missing or blank card falls through to the lead", () => {
+    expect(jobWho([null, lead])).toEqual({ customer: lead, aliases: [] });
+    expect(jobWho([{ name: " ", company_name: null }, lead])).toEqual({ customer: lead, aliases: [] });
+    expect(jobWho([null, null])).toEqual({ customer: null, aliases: [] });
+  });
 });
 
 // ── EVERY DOOR THAT MAKES A JOB USES THE ONE NAMER ─────────────────────────────────────────────────
@@ -76,7 +123,8 @@ describe("every door that inserts a job names it with jobNameFrom", () => {
     { file: "src/app/(app)/leads/actions.ts", name: "jobName" }, // convertInquiry → estimate / job
     { file: "src/app/(app)/jobs/actions.ts", name: "jobName" }, // importJobs
     { file: "src/app/(app)/schedule/actions.ts", name: "name" }, // createJob (New Job, Timeclock quick add, Nort job.create)
-    { file: "src/lib/recurring-engine.ts", name: "jobNameFrom({ title" }, // recurring templates
+    // Recurring templates: the typed title as the work (not a conversion), the namer only when blank.
+    { file: "src/lib/recurring-engine.ts", name: "title || jobNameFrom({ title: null" },
   ];
 
   it("the list is every insert into jobs in the app (a new door has to join it)", () => {
@@ -113,8 +161,33 @@ describe("every door that inserts a job names it with jobNameFrom", () => {
 
   it("the visit page's Start The Job preview names the job the same way the door will", () => {
     const src = read("src/app/(app)/appointments/[id]/page.tsx");
-    expect(src).toMatch(/name: jobNameFrom\(\{\s*title: a\.title/);
+    expect(src).toMatch(/previewJobName = jobNameFrom\(\{\s*title: a\.title/);
+    expect(src).toMatch(/name: previewJobName/);
     expect(src).not.toMatch(/Job from appointment/);
+    // Who, in the door's order: the visit's card, else the lead's card, else the lead; the rest are aliases.
+    expect(src).toMatch(/jobWho\(\[a\.customer_id \? a\.customers : leadCard, a\.inquiries \?\? null\]\)/);
+    expect(src).toMatch(/aliases: previewWho\.aliases/);
+    const door = read("src/app/(app)/appointments/actions.ts");
+    expect(door).toMatch(/jobWho\(\[card, lead\]\)/);
+    expect(door).toMatch(/const customerId = appt\.customer_id \?\? lead\?\.customer_id \?\? null/);
+    expect(door).toMatch(/jobNameFrom\(\{ title: appt\.title, customer: who, aliases,/);
+  });
+
+  it("a lead's job is named for the card it links to, the lead's own fields only for a card just made from them", () => {
+    const src = read("src/app/(app)/leads/actions.ts");
+    expect(src).toMatch(/mintedFromLead = true;/);
+    expect(src).toMatch(/if \(!mintedFromLead && customerId\) \{\s*const \{ data: c \} = await supabase\.from\("customers"\)\.select\("name, company_name, type"\)\.eq\("id", customerId\)/);
+    expect(src).toMatch(/customer: jobWho\(\[card, leadWho\]\)\.customer/);
+  });
+
+  it("an import names its job after the customer is found or made, from the card as stored", () => {
+    const src = read("src/app/(app)/jobs/actions.ts");
+    const body = src.slice(src.indexOf("export async function importJobs"));
+    const named = body.indexOf("const jobName = jobNameFrom(");
+    expect(named).toBeGreaterThan(body.indexOf('.from("customers")'));
+    expect(named).toBeLessThan(body.indexOf('.from("jobs")'));
+    expect(body).toMatch(/select\("id, name, company_name, type"\)/);
+    expect(body).toMatch(/who = \{ company_name: cname \}/);
   });
 
   it("the public estimate accept names it through the SQL twin (0369), never 'Job from ' || quote_number", () => {

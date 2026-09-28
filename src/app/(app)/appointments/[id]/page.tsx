@@ -28,7 +28,7 @@ import { isStaffRole } from "@/lib/actions/perms";
 import { jobShort, visitIsOver } from "@/lib/appointments/visit-start";
 import { loadLinkInstead } from "@/lib/appointments/visit-start-read";
 import { VisitStartCard } from "./visit-start-card";
-import { jobNameFrom, streetOf } from "@/lib/job-name";
+import { jobNameFrom, jobWho, streetOf } from "@/lib/job-name";
 import { FeatureOffLine } from "@/components/feature-off-line";
 import { featureOn } from "@/lib/features";
 import {
@@ -248,6 +248,23 @@ export default async function AppointmentCapturePage({
       ? await loadLinkInstead(supabase, { ...a, inquiry_id: a.inquiry_id ?? null }, tz)
       : null;
 
+  /* THE NAME START THE JOB WILL GIVE, resolved the way createJobFromAppointment resolves it (the
+     visit's card, else the lead's card, else the lead; the lead's own spelling still only-who), so
+     the name this page promises is the name the job gets. A lead that got its card after the visit
+     was booked has it on inquiries.customer_id only. */
+  const leadCardId = !a.customer_id && !a.job_id && a.status !== "cancelled" ? (a.inquiries?.customer_id ?? null) : null;
+  const leadCard = leadCardId
+    ? ((await supabase.from("customers").select("name, company_name, type").eq("id", leadCardId).maybeSingle()).data ?? null)
+    : null;
+  const previewWho = jobWho([a.customer_id ? a.customers : leadCard, a.inquiries ?? null]);
+  const previewJobName = jobNameFrom({
+    title: a.title,
+    customer: previewWho.customer,
+    aliases: previewWho.aliases,
+    street: streetOf(a.location),
+    todayStr: todayStrInTz(tz),
+  });
+
   /**
    * WHAT THE CUSTOMER ALREADY TOLD US ONLINE — on the walk-through, as answers, in their name.
    *
@@ -442,13 +459,8 @@ export default async function AppointmentCapturePage({
               }
               preview={{
                 // The same one namer the Start The Job door uses (lib/job-name): the visit's words,
-                // never its "Site inspection:" tag, else "Seiler · 1871 Apache Ct".
-                name: jobNameFrom({
-                  title: a.title,
-                  customer: a.customers?.name || a.customers?.company_name ? a.customers : (a.inquiries ?? null),
-                  street: streetOf(a.location),
-                  todayStr: todayStrInTz(tz),
-                }),
+                // never its "Site inspection:" tag, else "Moss · 12 Elm St".
+                name: previewJobName,
                 customer: who,
                 address: a.location ?? null,
                 scheduledStart: a.starts_at ?? null,

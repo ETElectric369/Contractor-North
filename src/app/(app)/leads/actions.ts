@@ -23,7 +23,7 @@ import { getOrgSettings } from "@/lib/org-settings";
 import { featureOn } from "@/lib/features";
 import { PROJECT_TYPES, estimateLinesFromIntake } from "@/lib/lead-triage";
 import { tzDateTimeUtc, todayStrInTz } from "@/lib/tz";
-import { jobNameFrom } from "@/lib/job-name";
+import { jobNameFrom, jobWho } from "@/lib/job-name";
 import { checkComeBackDay } from "@/lib/come-back-days";
 import { createProposalCore, cleanSlots, type ProposalSlot } from "@/lib/appointments/proposal";
 import { ESTIMATE_VISIT_TYPES, INQUIRY_STATUSES, INSPECTION_TYPES } from "@/lib/statuses";
@@ -680,6 +680,7 @@ export async function convertInquiry(
     return { ok: true, id: inq.customer_id, redirect: `/crm/${inq.customer_id}` };
   }
   let customerId = opts.customerId || null;
+  let mintedFromLead = false; // the card was made from this lead's own name/company/type just now
   if (!customerId) {
     // CROSSCHECK THE BOOK before minting (audit 7): "Save as contact" on a lead from an
     // EXISTING customer silently minted a second card — future jobs then split across the two.
@@ -710,6 +711,7 @@ export async function convertInquiry(
       .single();
     if (cErr) return { ok: false, error: cErr.message };
     customerId = cust.id;
+    mintedFromLead = true;
   }
 
   let redirect = `/crm/${customerId}`;
@@ -722,9 +724,18 @@ export async function convertInquiry(
     // THE NAME SAYS WHO AND WHERE, never where it came from (Erik 2026-09-27): "Job — Rita Moss"
     // said neither the place nor the work. A lead has no title of its own, so the one namer
     // (lib/job-name) gives the default: "Moss · 1871 Apache Ct", on the company's today.
+    // WHO is the card the job links to, like every other door: a lead linked by phone or email to
+    // an existing card ("Rita Moss") is named for that card, not for what the lead typed ("rita", or
+    // a missed call's phone number). The lead's own fields only when the card was just made from them.
+    const leadWho = { name: inq.name, company_name: inq.company_name, type: inq.type };
+    let card: typeof leadWho | null = null;
+    if (!mintedFromLead && customerId) {
+      const { data: c } = await supabase.from("customers").select("name, company_name, type").eq("id", customerId).maybeSingle();
+      card = (c as typeof leadWho | null) ?? null;
+    }
     const jobName = jobNameFrom({
       title: null,
-      customer: { name: inq.name, company_name: inq.company_name, type: inq.type },
+      customer: jobWho([card, leadWho]).customer,
       street: inq.address,
       todayStr: todayStrInTz(await orgTimezone(supabase)),
     });
