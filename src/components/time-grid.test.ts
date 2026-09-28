@@ -15,6 +15,7 @@ import { TimeGrid, hollowTone, type TimeGridEvent } from "./time-grid";
 import { pillColorForPerson } from "@/lib/employee-color";
 
 const LA = "America/Los_Angeles";
+const text = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
 const grid = (p: Record<string, unknown>) =>
   renderToStaticMarkup(
     createElement(TimeGrid, {
@@ -163,6 +164,25 @@ describe("what happened, on a past block", () => {
     expect(html).not.toContain("bg-slate-200/80");
     expect(html).toContain("Booked 9–5 · Nobody clocked in");
     expect(html).not.toContain("data-worked-bars");
+  });
+
+  it("a ghost says '<job name> · worked, not booked', its bars inside it, and its tap is its one button", () => {
+    const ghost = block({
+      id: "g-j11-2026-09-22",
+      label: "22 Herringbone Way",
+      sub: "Kim Hale",
+      info: undefined,
+      ghost: true,
+      color: "border-2 border-dashed border-slate-400 bg-white/60 text-slate-700",
+      tapId: "ghost:j11",
+      actual: { people: [{ key: "p-brian", initials: "BC", dot: "bg-rose-500", spans: [{ startMin: 664, endMin: 826, open: false }] }], sentence: "Brian 11:04 AM–1:46 PM" },
+    });
+    const html = grid({ events: [ghost], onEventTap: () => {} });
+    expect(html.match(/<button/g)).toHaveLength(1);
+    expect(html).toMatch(/<button[^>]*aria-label="22 Herringbone Way · worked, not booked · Brian 11:04 AM–1:46 PM"/);
+    expect(html).toContain("border-2 border-dashed border-slate-400 bg-white/60 text-slate-700");
+    expect(html).toContain('data-worked-bars="g-j11-2026-09-22"');
+    expect(text(html)).toContain("Kim Hale");
   });
 
   it("armed, the block with bars still places (the whole column does; the bars never catch the tap)", () => {

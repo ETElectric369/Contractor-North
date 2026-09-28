@@ -25,11 +25,14 @@ import {
   hoursOnDay,
   keepWorkedDays,
   moveKeepingWorkedDays,
+  removeDaySegment,
   segmentDays,
   setDayHours,
   workedDaysFrom,
   type DayHours,
 } from "@/lib/schedule-math";
+import { actualSpans } from "@/lib/schedule/plan-vs-actual";
+import { jobWords } from "@/lib/action-items/words";
 import { dayHoursOf, freezeDrawnDays, nextDayHours, readDayHours } from "@/lib/schedule/day-hours";
 import { ownHoursByJobDay, segmentCols, withDayHours, type SegmentRow } from "@/lib/schedule/segment-hours";
 import { ACTIVE_JOB_STATUSES, jobStatusLabel } from "@/lib/job-status";
@@ -1357,6 +1360,138 @@ export async function clearJobDate(jobId: string): Promise<Result & { note?: str
   return { ok: true, kept, ...(notes.length ? { note: notes.join(" ") } : {}) };
 }
 
+
+/**
+ * WHAT WAS WORKED ON A JOB ON ONE PAST DAY, on the company's clock: the earliest in to the latest out of
+ * every entry on the job that covers the day (an overnight tail included; a stretch never clocked out
+ * counts an hour, the ghost's rule). Null when nobody clocked time on the job that day. A failed read is
+ * an error, never "nobody": that would refuse a real worked day.
+ */
+async function workedSpanOn(
+  supabase: SupabaseClient,
+  jobId: string,
+  day: string,
+  tz: string,
+): Promise<{ span: { startMin: number; endMin: number } | null } | { error: string }> {
+  // From the day before (an overnight shift that ran into this day) to the end of this day.
+  const from = tzDayStartUtc(shiftYmd(day, -1), tz).toISOString();
+  const to = tzDayStartUtc(shiftYmd(day, 1), tz).toISOString();
+  const { data, error } = await supabase
+    .from("time_entries")
+    .select("profile_id, job_id, clock_in, clock_out") // no pay column
+    .eq("job_id", jobId)
+    .gte("clock_in", from)
+    .lt("clock_in", to);
+  if (error) return { error: dbError(error) };
+  const spans = actualSpans(
+    ((data ?? []) as { profile_id: string; job_id: string | null; clock_in: string; clock_out: string | null }[]).map((r) => ({
+      profileId: String(r.profile_id),
+      jobId: r.job_id ? String(r.job_id) : null,
+      clockIn: r.clock_in,
+      clockOut: r.clock_out ?? null,
+    })),
+    tz,
+    todayStrInTz(tz),
+  ).filter((s) => s.dayStr === day && s.jobId === jobId);
+  if (!spans.length) return { span: null };
+  return {
+    span: {
+      startMin: Math.min(...spans.map((s) => s.startMin)),
+      endMin: Math.max(...spans.map((s) => s.endMin ?? s.startMin + 60)),
+    },
+  };
+}
+
+/** YYYY-MM-DD `n` days from `ymd` (date math at UTC noon: a clock change never grows or shrinks a day). */
+function shiftYmd(ymd: string, n: number): string {
+  const d = new Date(`${ymd}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+
+/** The guards a worked day's booking (and its undo) share: the office, a well-formed day before today
+ *  on the company's clock, a job that is there, and clocked time on it that day (never a back-dating
+ *  door). Answers the job, its words, the company's clock and that day's worked span. */
+async function workedDayGuards(
+  supabase: SupabaseClient,
+  jobId: string,
+  day: string,
+): Promise<
+  | { ok: true; job: { scheduled_start: string | null; scheduled_end: string | null }; words: string; tz: string; span: { startMin: number; endMin: number } }
+  | { ok: false; error: string }
+> {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(day ?? ""))) return { ok: false, error: "Pick a day." };
+  const tz = await orgTimezone(supabase);
+  if (day >= todayStrInTz(tz)) return { ok: false, error: "Only a day already past can be booked from the time worked on it." };
+  // PROJECTION LAW: every column read below.
+  const { data: row, error: readErr } = await supabase
+    .from("jobs")
+    .select("id, name, job_number, scheduled_start, scheduled_end")
+    .eq("id", jobId)
+    .maybeSingle();
+  if (readErr) return { ok: false, error: dbError(readErr) };
+  if (!row) return { ok: false, error: "That job isn't available. It may have been deleted." };
+  const job = row as { name: string | null; job_number: string | null; scheduled_start: string | null; scheduled_end: string | null };
+  const words = jobWords(job);
+  const worked = await workedSpanOn(supabase, jobId, day, tz);
+  if ("error" in worked) return { ok: false, error: worked.error };
+  if (!worked.span) return { ok: false, error: `Nobody clocked time on ${words} on ${dayWords(day)}, so there's nothing to book.` };
+  return { ok: true, job, words, tz, span: worked.span };
+}
+
+/**
+ * BOOK THIS DAY (Wave 2, SV-ghost): a past day somebody worked on a job with nothing booked (the dashed
+ * ghost on the schedule) becomes a real block of that job, at the hours actually worked (the earliest in
+ * to the latest out) when a day can keep its own hours (0370), else at the job's usual hours.
+ *
+ * It ADDS THE DAY AND NOTHING ELSE. Never placeJobOnDay or setJobScheduleRanges: those add days forward
+ * for a sized job, pull a held job off hold, promote its status and put the listed start back on the
+ * past day. Here, through writeScheduleRanges with the job's listed span as it is (or none) and the
+ * status held still (promote: false): the status never moves, the listed start never jumps back, a
+ * dateless job stays dateless (and waits on the rail), and no hold flips. The Google push re-sends the
+ * unchanged listed span, which is harmless.
+ *
+ * Refused in words: a day that isn't past, a job that isn't there, and a day nobody clocked time on the
+ * job (this is never a back-dating door). A day already on the schedule is left as it is (twice-safe:
+ * `added` false, and no Undo is offered for it). No Nort verb (the agent-write freeze).
+ */
+export async function bookWorkedDay(jobId: string, day: string): Promise<Result & { note?: string; added?: boolean }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+  const g = await workedDayGuards(supabase, jobId, day);
+  if (!g.ok) return { ok: false, error: g.error };
+  const { segments, perDayHours, error: segErr } = await loadJobDaySegments(supabase, jobId);
+  if (segErr) return { ok: false, error: segErr };
+  if (coversDay(segments, day)) return { ok: true, added: false, note: `${dayWords(day)} is already on ${g.words}'s schedule.` };
+  const hours = perDayHours ? dayHoursOf(g.span.startMin, g.span.endMin) : null;
+  const res = await writeScheduleRanges(supabase, jobId, addDaySegment(segments, day, hours), undefined, planSpan(g.job, g.tz) ?? "none", undefined, {
+    promote: false,
+  });
+  if (!res.ok) return { ok: false, error: res.error };
+  return { ok: true, added: true, note: `Added ${dayWords(day)} to ${g.words}'s schedule.` };
+}
+
+/**
+ * THE UNDO OF BOOK THIS DAY: that one day comes off the job's schedule (removeDaySegment splits a range
+ * the day sits in the middle of), with the same guards and the same held-still status and listed span.
+ * It reads the days fresh and takes off only that day: never a whole set sent back from a snapshot.
+ */
+export async function unbookWorkedDay(jobId: string, day: string): Promise<Result & { note?: string }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+  const g = await workedDayGuards(supabase, jobId, day);
+  if (!g.ok) return { ok: false, error: g.error };
+  const { segments, error: segErr } = await loadJobDaySegments(supabase, jobId);
+  if (segErr) return { ok: false, error: segErr };
+  if (!coversDay(segments, day)) return { ok: true, note: `${dayWords(day)} isn't on ${g.words}'s schedule.` };
+  const res = await writeScheduleRanges(supabase, jobId, removeDaySegment(segments, day), undefined, planSpan(g.job, g.tz) ?? "none", undefined, {
+    promote: false,
+  });
+  if (!res.ok) return { ok: false, error: res.error };
+  return { ok: true, note: `Took ${dayWords(day)} off ${g.words}'s schedule.` };
+}
 
 /**
  * HOW LONG WILL THIS FLOATER TAKE.

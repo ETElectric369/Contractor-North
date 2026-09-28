@@ -19,6 +19,8 @@ vi.mock("./actions", () => ({
   setJobDayTimes: vi.fn(),
   setVisitTimes: vi.fn(),
   changeJobCrew: vi.fn(),
+  bookWorkedDay: vi.fn(),
+  unbookWorkedDay: vi.fn(),
 }));
 vi.mock("../appointments/actions", () => ({
   rescheduleAppointment: vi.fn(),
@@ -32,6 +34,8 @@ import { JobScheduleCard } from "./job-schedule-card";
 import { tzDateTimeUtc } from "@/lib/tz";
 import { crewChips } from "@/lib/schedule/block-info";
 import { pillColorForPerson } from "@/lib/employee-color";
+import { mergePeople } from "@/lib/schedule/plan-vs-actual";
+import { GhostRow, ghostTitle } from "./ghost-sheet";
 
 const LA = "America/Los_Angeles";
 const WORK_DAY = { start: "09:00", end: "17:00" };
@@ -455,5 +459,72 @@ describe("the crew, each in their own color, and whose crew it is (Wave 2, SV-ch
     const view = readFileSync(join(process.cwd(), "src/app/(app)/calendar/calendar-view.tsx"), "utf8");
     expect(view).toMatch(/<ScheduleTileSheet[\s\S]*?crewBoard=\{crewBoard\}/);
     expect(view).toContain("dayCrew: jobCrewOn(job, sheet.day)");
+  });
+});
+
+describe("a ghost, in the one sheet (SV-ghost: work nobody booked)", () => {
+  const people = mergePeople(
+    [
+      { profileId: "p-brian", name: "Brian Cole", jobId: "j11", dayStr: "2026-09-25", startMin: 664, endMin: 826 },
+      { profileId: "p-erik", name: "Erik Taylor", jobId: "j11", dayStr: "2026-09-25", startMin: 750, endMin: 1050 },
+    ],
+    (s) => s + 60,
+  );
+  const ghost: TileTarget = {
+    kind: "ghost",
+    day: "2026-09-25",
+    ghost: { jobId: "j11", name: "22 Herringbone Way", jobNumber: "J-011", customer: "Kim Hale", people },
+  };
+
+  it("who worked it, as a track and in words, and the two doors: Book This Day and Open The Job", () => {
+    const html = render(ghost);
+    const t = text(html);
+    expect(t).toContain("Brian 11:04 AM–1:46 PM · Erik 12:30–5:30 PM. Nothing was booked this day.");
+    expect(t).toContain("J-011");
+    expect(html).toMatch(/<button[^>]*>(?:<svg[\s\S]*?<\/svg>)?\s*Book This Day<\/button>/);
+    expect(html).toMatch(/<a[^>]*href="\/jobs\/j11"[^>]*>Open The Job<\/a>/);
+    for (const d of doors(html)) expect(d, d).toMatch(/\b(min-)?h-11\b/);
+    // Never a time box, a day box or Clear The Date: a ghost is not a booking.
+    expect(html).not.toContain("<input");
+    expect(t).not.toContain("Clear The Date");
+  });
+
+  it("the crew (no office) can read it and open the job, with nothing to book", () => {
+    const html = render(ghost, false);
+    expect(html).not.toContain("<button");
+    expect(html).toMatch(/href="\/jobs\/j11"/);
+  });
+
+  it("titled with the job and who it's for; the number second, small; one sheet per block", () => {
+    expect(ghostTitle({ name: "22 Herringbone Way", customer: "Kim Hale" })).toBe("22 Herringbone Way · Kim Hale");
+    expect(ghostTitle({ name: "Kim Hale · Panel", customer: "Kim Hale" })).toBe("Kim Hale · Panel");
+    const sheet = readFileSync(join(process.cwd(), "src/app/(app)/schedule/tile-sheet.tsx"), "utf8");
+    expect(sheet).toContain('| { kind: "ghost"; day: string; ghost: GhostTarget };');
+    expect(sheet).toContain("return <GhostSheetBody day={target.day} ghost={target.ghost}");
+    const view = readFileSync(join(process.cwd(), "src/app/(app)/calendar/calendar-view.tsx"), "utf8");
+    expect(view).toContain('if ((kind === "job" || kind === "visit" || kind === "ghost") && id) setSheet({ kind, id, day });');
+    expect(view).toContain("...(canEdit ? { tapId: `ghost:${g.jobId}` } : {}),");
+  });
+
+  it("never nags: no badge, no count, no bell, no Needs You row; nothing is saved without the tap", () => {
+    const src = readFileSync(join(process.cwd(), "src/app/(app)/schedule/ghost-sheet.tsx"), "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/(^|\s)\/\/[^\n]*/g, "$1");
+    expect(src).not.toMatch(/Badge|sendPush|notif|action_items|useEffect/);
+    expect(src).toContain("const res = await bookWorkedDay(jobId, day);");
+    // The Undo is offered only for a day the tap added.
+    expect(src).toContain('res.added ? { label: "Undo", onClick: () => void undo() } : undefined');
+    expect(src).toContain("const res = await unbookWorkedDay(jobId, day);");
+  });
+
+  it("the day drill's dashed 'Worked, Not Booked' row: the track, the words, the same two 44px doors", () => {
+    const html = renderToStaticMarkup(createElement(GhostRow, { day: "2026-09-25", ghost: (ghost as Extract<TileTarget, { kind: "ghost" }>).ghost, canEdit: true }));
+    const t = text(html);
+    expect(t).toContain("Worked, Not Booked");
+    expect(t).toContain("22 Herringbone Way · Kim Hale — Brian 11:04 AM–1:46 PM · Erik 12:30–5:30 PM");
+    expect(html).toContain("border-2 border-dashed border-slate-400");
+    expect(t).toContain("Book This Day");
+    expect(t).toContain("Open The Job");
+    for (const d of doors(html)) expect(d, d).toMatch(/\b(min-)?h-11\b/);
   });
 });

@@ -25,6 +25,7 @@ import { chipDot, crewDayLines, placeLine, type CrewChip } from "@/lib/schedule/
 import type { DayHours } from "@/lib/schedule-math";
 import { shiftApptToDay } from "@/lib/appt-time";
 import { initials } from "@/lib/utils";
+import { GhostSheetBody, ghostTitle, type GhostTarget } from "./ghost-sheet";
 
 /**
  * TAP A BLOCK ON THE SCHEDULE: ONE SMALL SHEET with its day, its start and its length, and who's on it.
@@ -78,7 +79,9 @@ export type TileTarget =
        *  off that day or on another job, said under the crew. Absent: no day rows were read. */
       dayCrew?: CrewChip[] | null;
     }
-  | { kind: "visit"; day: string; visit: TileVisit };
+  | { kind: "visit"; day: string; visit: TileVisit }
+  /** Work nobody booked (Wave 2, SV-ghost): who worked a job's past day, and Book This Day. */
+  | { kind: "ghost"; day: string; ghost: GhostTarget };
 
 type Shared = {
   tz: string;
@@ -149,7 +152,7 @@ export function ScheduleTileSheet({ target, ...rest }: Shared & { target: TileTa
   sayRef.current = toast;
   const [busy, setBusy] = useState(0);
   const [guard] = useState(() => createSheetGuard((w) => sayRef.current(w, "error"), setBusy));
-  const key = !target ? "" : `${target.kind}:${target.kind === "job" ? target.job.id : target.visit.id}:${target.day}`;
+  const key = !target ? "" : `${target.kind}:${tileId(target)}:${target.day}`;
   useEffect(() => {
     if (key) guard.opened();
   }, [key, guard]);
@@ -157,7 +160,8 @@ export function ScheduleTileSheet({ target, ...rest }: Shared & { target: TileTa
     guard.closing();
     rest.onClose();
   };
-  const title = !target ? "" : target.kind === "job" ? target.job.name : target.visit.title;
+  // A ghost is titled with its job and who it's for ("12 Elm St · Rita Moss"), its number inside.
+  const title = !target ? "" : target.kind === "job" ? target.job.name : target.kind === "visit" ? target.visit.title : ghostTitle(target.ghost);
   return (
     <Modal open={!!target} onClose={close} holdOpen={busy > 0} title={title || "Schedule"} size="md">
       {target && (
@@ -174,8 +178,16 @@ export function ScheduleTileSheet({ target, ...rest }: Shared & { target: TileTa
   );
 }
 
+/** The record a target is about, for the sheet's key. */
+function tileId(t: TileTarget): string {
+  return t.kind === "job" ? t.job.id : t.kind === "visit" ? t.visit.id : t.ghost.jobId;
+}
+
 /** The sheet's inside (exported for its render test). */
 export function TileSheetBody({ target, ...rest }: Shared & { target: TileTarget }) {
+  if (target.kind === "ghost") {
+    return <GhostSheetBody day={target.day} ghost={target.ghost} canEdit={rest.canEdit} onClose={rest.onClose} voice={rest.voice} />;
+  }
   return target.kind === "job" ? (
     <JobSheet day={target.day} job={target.job} dayHours={target.dayHours ?? null} dayCrew={target.dayCrew ?? null} {...rest} />
   ) : (

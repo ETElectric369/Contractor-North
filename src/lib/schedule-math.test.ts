@@ -1,5 +1,55 @@
 import { describe, expect, it } from "vitest";
-import { keepWorkedDays, moveKeepingWorkedDays, shiftSegmentCovering, workedDaysFrom } from "./schedule-math";
+import { addDaySegment, keepWorkedDays, moveKeepingWorkedDays, removeDaySegment, shiftSegmentCovering, workedDaysFrom } from "./schedule-math";
+
+describe("removeDaySegment: take ONE day off (the undo of Book This Day, Wave 2 SV-ghost)", () => {
+  it("a one-day range goes; the others stay", () => {
+    expect(
+      removeDaySegment(
+        [
+          { start: "2026-09-22", end: "2026-09-22" },
+          { start: "2026-09-25", end: "2026-09-25" },
+        ],
+        "2026-09-25",
+      ),
+    ).toEqual([{ start: "2026-09-22", end: "2026-09-22" }]);
+  });
+
+  it("a day in the middle of a range splits it around the day", () => {
+    expect(removeDaySegment([{ start: "2026-09-21", end: "2026-09-25" }], "2026-09-23")).toEqual([
+      { start: "2026-09-21", end: "2026-09-22" },
+      { start: "2026-09-24", end: "2026-09-25" },
+    ]);
+  });
+
+  it("an edge day trims the range; every other day keeps its own hours", () => {
+    const own = { start: "11:04", end: "13:46" };
+    expect(
+      removeDaySegment(
+        [
+          { start: "2026-09-21", end: "2026-09-23", hours: null },
+          { start: "2026-09-25", end: "2026-09-25", hours: own },
+        ],
+        "2026-09-21",
+      ),
+    ).toEqual([
+      { start: "2026-09-22", end: "2026-09-23", hours: null },
+      { start: "2026-09-25", end: "2026-09-25", hours: own },
+    ]);
+  });
+
+  it("a day no range covers changes nothing; a bad day changes nothing", () => {
+    const segs = [{ start: "2026-09-22", end: "2026-09-22" }];
+    expect(removeDaySegment(segs, "2026-09-30")).toEqual(segs);
+    expect(removeDaySegment(segs, "nope")).toEqual(segs);
+  });
+
+  it("book then undo is where it started (the day added with the hours worked, then taken off)", () => {
+    const before = [{ start: "2026-09-22", end: "2026-09-24", hours: null }];
+    const booked = addDaySegment(before, "2026-09-25", { start: "11:04", end: "13:46" });
+    expect(booked).toHaveLength(2);
+    expect(removeDaySegment(booked, "2026-09-25")).toEqual(before);
+  });
+});
 
 describe("keepWorkedDays: a reschedule moves the plan, not the history", () => {
   it("Herringbone: moving a 22nd-23rd job to the 24th keeps the 22nd, where time was logged", () => {

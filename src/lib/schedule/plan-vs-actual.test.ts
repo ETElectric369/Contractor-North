@@ -10,6 +10,7 @@ import {
   blockSentence,
   clockShort,
   durShort,
+  ghostsFor,
   mergePeople,
   packActuals,
   peopleWords,
@@ -20,6 +21,7 @@ import {
   type ActualEntry,
   type PlanBlock,
 } from "./plan-vs-actual";
+import { bookedKeys } from "./booked-days";
 
 /**
  * WHAT HAPPENED, INSIDE THE BLOCK (Wave 2, SV-actual). The shapes are the real ET weeks that made the
@@ -179,6 +181,18 @@ describe("the calendar reads it and draws it (source)", () => {
     expect(view).toContain("Clocked time didn&apos;t load, so past days show only what was booked.");
   });
 
+  it("ghosts: booked from the raw rows, following the person filter, dashed on the grid and the month, a row in the day drill", () => {
+    const view = read("src/app/(app)/calendar/calendar-view.tsx");
+    expect(view).toContain("for (const g of ghostsFor(spans, booked, todayK)) {");
+    expect(view).toContain("if (!actualsWhole(g.dayStr) || g.dayStr < winFrom) continue;");
+    expect(view).toContain("const mine = g.people.filter((p) => p.profileId === personFilter);");
+    expect(view).toContain('const GHOST_GRID_TONE = "border-2 border-dashed border-slate-400 bg-white/60 text-slate-700";');
+    expect(view).toContain('ghost: "border border-dashed border-slate-400 bg-white/60 text-slate-700"');
+    expect(view).toContain("<GhostRow key={`ghost-${g.jobId}`} day={dayK} ghost={g} canEdit={canEdit} />");
+    // A proposed visit keeps its type's tone with a thin dashed border, faded: never a ghost's look.
+    expect(view).toContain('${a.status === "proposed" ? " border-dashed opacity-75" : ""}');
+  });
+
   it("the stack builds each week's grid once per (week, data), with stable props, so mounted weeks skip", () => {
     const view = read("src/app/(app)/calendar/calendar-view.tsx");
     expect(view).toContain("const gridNow = useMemo(");
@@ -327,5 +341,56 @@ describe("the words", () => {
       (s) => s + 60,
     );
     expect(peopleWords(people)).toBe("Brian 11:04 AM–1:46 PM · Erik 12:30–5:30 PM");
+  });
+});
+
+describe("ghosts: work nobody booked (SV-ghost)", () => {
+  const booked = (p: Partial<Parameters<typeof bookedKeys>[0]>) => bookedKeys({ segments: [], jobs: [], appointments: [], tz: LA, ...p });
+  const ghosts = (entries: ActualEntry[], b = booked({})) => ghostsFor(actualSpans(entries, LA, TODAY), b, TODAY);
+
+  it("J-011 9/25: Brian 11:04 to 1:46 on a day nothing was booked is a ghost", () => {
+    const g = ghosts([entry(BRIAN, "j11", "2026-09-25", "11:04", "13:46")], booked({ segments: [{ job_id: "j11", start_date: "2026-09-24", end_date: "2026-09-24" }] }));
+    expect(g).toHaveLength(1);
+    expect(g[0]).toMatchObject({ jobId: "j11", dayStr: "2026-09-25", startMin: 664, endMin: 826 });
+    expect(g[0].people.map((p) => [p.first, p.startMin, p.endMin])).toEqual([["Brian", 664, 826]]);
+  });
+
+  it("J-011 9/24 (a timed segment) and J-052 9/23 (the scheduled_start mirror) are booked: no ghost", () => {
+    expect(ghosts([entry(ERIK, "j11", "2026-09-24", "09:00", "17:00")], booked({ segments: [{ job_id: "j11", start_date: "2026-09-24", end_date: "2026-09-24" }] }))).toEqual([]);
+    expect(
+      ghosts([entry(ERIK, "j52", "2026-09-23", "09:00", "17:00")], booked({ jobs: [{ id: "j52", scheduled_start: at("2026-09-23", "10:00"), scheduled_end: at("2026-09-23", "12:00") }] })),
+    ).toEqual([]);
+  });
+
+  it("a visit on the job that day is a booking: no ghost", () => {
+    expect(
+      ghosts(
+        [entry(ERIK, "j9", "2026-09-23", "10:00", "12:00")],
+        booked({ appointments: [{ job_id: "j9", starts_at: at("2026-09-23", "10:00"), ends_at: at("2026-09-23", "11:00"), status: "completed", type: "service_call" }] }),
+      ),
+    ).toEqual([]);
+  });
+
+  it("a job whose segments are kept worked days with no listed day is booked on those days", () => {
+    expect(
+      ghosts([entry(ERIK, "cleared", "2026-09-22", "09:00", "15:00")], booked({ segments: [{ job_id: "cleared", start_date: "2026-09-22", end_date: "2026-09-22" }] })),
+    ).toEqual([]);
+  });
+
+  it("an evening Pacific entry lands on the Pacific day (the UTC next day is not the day it was worked)", () => {
+    const g = ghosts([entry(JIMMY, "j9", "2026-09-22", "19:30", "21:00")]);
+    expect(g.map((x) => x.dayStr)).toEqual(["2026-09-22"]);
+  });
+
+  it("two people on one job-day make one ghost with two people; someone never clocked out leaves its end open", () => {
+    const g = ghosts([entry(BRIAN, "j11", "2026-09-25", "11:04", "13:46"), entry(ERIK, "j11", "2026-09-25", "12:30", null)]);
+    expect(g).toHaveLength(1);
+    expect(g[0].people.map((p) => p.first)).toEqual(["Brian", "Erik"]);
+    expect(g[0].endMin).toBeNull();
+    expect(g[0].people[1].spans).toEqual([{ startMin: 750, endMin: 810, open: true }]);
+  });
+
+  it("today and later never get a ghost; a punch on no job is never one", () => {
+    expect(ghosts([entry(ERIK, "j9", TODAY, "08:00", "09:00"), entry(ERIK, null, "2026-09-22", "08:00", "09:00")])).toEqual([]);
   });
 });

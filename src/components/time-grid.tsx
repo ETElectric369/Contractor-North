@@ -64,6 +64,9 @@ export interface TimeGridEvent {
    *  in each person's color beside the block, and the block hollow when nobody did. Optional and
    *  additive: /timecards passes none and renders exactly as before. */
   actual?: TimeGridActual;
+  /** WORK NOBODY BOOKED (the schedule's ghost, SV-ghost): the caller draws it dashed, and it says so in
+   *  its title and label: "<job name> · worked, not booked". */
+  ghost?: boolean;
 }
 
 /** A past block's worked time (see TimeGridEvent.actual). */
@@ -333,6 +336,7 @@ function TimeGridInner({
   const pillTitle = (e: TimeGridEvent) => {
     // A past block's sentence closes its title and label: what was booked, and what happened.
     const said = e.actual?.sentence ?? null;
+    if (e.ghost) return [`${e.label} · worked, not booked`, said].filter(Boolean).join(" · ");
     if (!e.info) return [e.label, e.sub, said].filter(Boolean).join(" · ");
     const crew = e.info.crew;
     // "Crew: Brian Cole, Erik Taylor" or "Nobody on it": a block too short for its chips still says it.
@@ -637,7 +641,7 @@ function TimeGridInner({
                       onClick={() => onEventTap(e.tapId!, d.dayStr)}
                       style={style}
                       title={title}
-                      aria-label={`${title}: day, time and crew`}
+                      aria-label={e.ghost ? title : `${title}: day, time and crew`}
                       className={`${cls} text-left hover:opacity-80`}
                     >
                       {pillBody(e, height, narrow)}
