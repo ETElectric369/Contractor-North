@@ -63,6 +63,18 @@ describe("which receipts are on no bill", () => {
   it("a failed tie read claims nothing: null, never 'every receipt is loose'", () => {
     expect(receiptsNotOnABill([doc(), doc()], null)).toBeNull();
   });
+
+  it("one paper, one row: a paper still waiting in the tray (a needs-review tie) is the tray's row, not a second one here", () => {
+    const inTray = doc();
+    const byFile = doc();
+    const loose2 = doc();
+    const ties = [
+      { ...tie({ document_id: inTray.id, kind: "receipt" }), status: "needs_review" },
+      { ...tie({ file_url: byFile.file_url, kind: "receipt" }), status: "needs_review" },
+      { ...tie({ document_id: loose2.id, kind: "receipt" }), status: "filed" },
+    ];
+    expect(receiptsNotOnABill([inTray, byFile, loose2], ties)?.map((d) => d.id)).toEqual([loose2.id]);
+  });
 });
 
 describe("the row's words", () => {

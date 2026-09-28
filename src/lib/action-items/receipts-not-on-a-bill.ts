@@ -28,8 +28,9 @@ export const RECEIPTS_READ_CAP = 200;
 /** The papers the reader turns into bills: the categories the documents read asks for. */
 export const RECEIPT_CATEGORIES = ["Receipt", "Bill"] as const;
 
-/** The ties' columns: exactly what sortJobPapers reads (the job page asks for the same). */
-export const RECEIPT_TIE_COLUMNS = "id, kind, category, document_id, bill_id, tied_bill_id, tied_supplier_invoice_id, petty_cash_id, file_url";
+/** The ties' columns: what sortJobPapers reads (the job page asks for the same), and whether the tie
+ *  is still waiting for a person (then the paper is already a Papers To Sort row). */
+export const RECEIPT_TIE_COLUMNS = "id, kind, category, status, document_id, bill_id, tied_bill_id, tied_supplier_invoice_id, petty_cash_id, file_url";
 
 /** How many papers one tie read names, so no request's address grows past what a server takes. */
 export const TIE_READ_CHUNK = 60;
@@ -41,10 +42,19 @@ export type ReceiptDoc = JobPaperRow & {
   jobs?: { job_number?: string | null; name?: string | null } | { job_number?: string | null; name?: string | null }[] | null;
 };
 
-/** The receipts on a job that nothing accounts for; null when the ties couldn't be read. */
-export function receiptsNotOnABill<D extends ReceiptDoc>(docs: readonly D[], ties: readonly PaperTie[] | null): D[] | null {
+/**
+ * The receipts on a job that nothing accounts for; null when the ties couldn't be read. One paper,
+ * one row: a paper whose tie is still waiting for a person (status needs_review) is already on Needs
+ * You as a Paper To Sort, so it isn't a second row here.
+ */
+export function receiptsNotOnABill<D extends ReceiptDoc>(docs: readonly D[], ties: readonly (PaperTie & { status?: string | null })[] | null): D[] | null {
   const onJobs = (docs ?? []).filter((d) => !!d?.job_id && isCostableCategory(d.category));
-  return sortJobPapers(onJobs, ties, []).loose;
+  const loose = sortJobPapers(onJobs, ties, []).loose;
+  if (!loose) return null;
+  const waiting = new Set(
+    (ties ?? []).filter((t) => t.status === "needs_review").flatMap((t) => [t.document_id, t.file_url].filter((x): x is string => !!x)),
+  );
+  return loose.filter((d) => !waiting.has(String(d.id)) && !(d.file_url && waiting.has(d.file_url)));
 }
 
 /** A PostgREST `in` list, each value quoted (a file name may hold a comma or a parenthesis). */
