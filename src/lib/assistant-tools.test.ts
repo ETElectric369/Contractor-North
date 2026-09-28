@@ -223,9 +223,32 @@ describe("get_bill — the three states of a receipt line reach Nort", () => {
     expect(out.billable_amount).toBeNull();
     for (const i of out.items) expect(i).toMatchObject({ billable: null, billed_to_customer: null });
     expect(out.money_note).toContain("No job: this is a business cost in the Tools & Supplies bucket");
+    // In the profit and loss's own words (2026-09-28): which half it is in, from BUCKET_SECTION.
+    expect(out.money_note).toContain("which the company's profit and loss counts in Overhead, before Net Profit (Owner's Draw).");
+    expect(out.money_note).not.toContain("owner's draw.");
     expect(out.money_note).toContain("No customer is billed for it");
     expect(out.money_note).not.toContain("job's cost");
     expect(out.money_note).not.toContain("Quote billable_amount");
+  });
+
+  it("a fill-up with no job is Cost of Goods Sold (COGS) on the profit and loss, in Nort's words too (Erik, 2026-09-28)", async () => {
+    const fuel = { ...oshBill, id: "fuel-1", supplier: "Corner Gas", amount: "61.20", category: "Fuel", job_id: null, jobs: null, bill_line_items: [] };
+    const { client } = fakeDb({ data: fuel });
+    const out = await parse("get_bill", { bill_id: fuel.id }, client);
+    expect(out.money_note).toContain("No job: this is a business cost in the Fuel bucket, which the company's profit and loss counts in Cost of Goods Sold (COGS), before Net Profit (Owner's Draw).");
+  });
+
+  it("Nort's money tools say the profit and loss's words: Revenue, and a job's profit is never the company's", async () => {
+    const { DATA_TOOLS } = await import("@/lib/assistant-tools");
+    const desc = (name: string) => String(DATA_TOOLS.find((t) => t.name === name)?.description ?? "");
+    expect(desc("revenue_trend")).toMatch(/^How Revenue is trending/);
+    expect(desc("revenue_trend")).toContain("less any bank deposit someone placed as Other Income");
+    expect(desc("revenue_trend")).toContain("Gross Profit and Net Profit (Owner's Draw) are on Analytics' Owner's Draw card");
+    for (const name of ["list_job_profitability", "profit_by_type"]) {
+      expect(desc(name), name).toContain("never the company's Gross Profit or Net Profit (Owner's Draw)");
+    }
+    // The halves of a no-job bill, from the data.
+    expect(desc("get_bill")).toContain("on the company's profit and loss Fuel is in Cost of Goods Sold (COGS) and the rest in Overhead, all counted before Net Profit (Owner's Draw)");
   });
 
   it("a bill whose row carries only the job's name still reads as on a job (the embed is the fallback)", async () => {

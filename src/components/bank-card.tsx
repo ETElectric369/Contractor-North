@@ -37,7 +37,7 @@ const ANSWER = "h-auto min-h-11 max-w-full whitespace-normal py-2 text-left";
 type Run = (key: string, fn: () => Promise<{ ok: boolean; error?: string; message?: string }>, filedSentence?: string) => void;
 
 /** Each segment its own colour. Where Money by Month (money-chart.ts) has the same money, the same
- *  colour: Fuel pink-800 (the Fuel bucket, as on the chart and the Fuel card), Business Costs
+ *  colour: Fuel pink-800 (the Fuel bucket, as on the chart and the Fuel card), Overhead
  *  pink-500, Materials & Bills indigo-500, Crew Pay amber-600, Owner's Draw green-600. The bank's
  *  own segments take colours that chart
  *  doesn't use, so no colour means two things. Identity is never colour alone: every segment is

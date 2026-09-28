@@ -3,8 +3,10 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
   AUTO_FILE_BUCKETS,
+  BUCKET_SECTION,
   BUSINESS_COST_BUCKETS,
   LEGACY_GAS_AND_TRUCK,
+  bucketsIn,
   bucketCategoryPattern,
   bucketOf,
   isBusinessCostBucket,
@@ -59,6 +61,31 @@ describe("the business-cost bucket list", () => {
     expect(isBusinessCostBucket("")).toBe(false);
     expect(isBusinessCostBucket(null)).toBe(false);
     expect(isBusinessCostBucket(undefined)).toBe(false);
+  });
+});
+
+describe("which half of the profit and loss each bucket is in (Erik, 2026-09-28)", () => {
+  it("Fuel is Cost of Goods Sold (COGS), as a direct cost of the jobs; every other bucket is Overhead", () => {
+    expect(BUCKET_SECTION).toEqual({
+      Fuel: "cogs",
+      Auto: "overhead",
+      "Tools & Supplies": "overhead",
+      "Phone & Office": "overhead",
+      "Insurance & Licenses": "overhead",
+      Fees: "overhead",
+      Other: "overhead",
+    });
+    expect(bucketsIn("cogs")).toEqual(["Fuel"]);
+    expect(bucketsIn("overhead")).toEqual(BUSINESS_COST_BUCKETS.filter((b) => b !== "Fuel"));
+  });
+
+  it("every bucket is in exactly one half, in the list's own order", () => {
+    expect(Object.keys(BUCKET_SECTION).sort()).toEqual([...BUSINESS_COST_BUCKETS].sort());
+    expect([...bucketsIn("cogs"), ...bucketsIn("overhead")].sort()).toEqual([...BUSINESS_COST_BUCKETS].sort());
+    for (const s of ["cogs", "overhead"] as const) {
+      const list = bucketsIn(s);
+      expect(list).toEqual(BUSINESS_COST_BUCKETS.filter((b) => list.includes(b)));
+    }
   });
 });
 

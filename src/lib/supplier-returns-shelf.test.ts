@@ -25,13 +25,13 @@ describe("what a return from the shelf comes to", () => {
     const m = shelfReturnMoney({ qty: 50, unit: "ft", supplier: "Consolidated Electrical Dist.", cost: 36.03, creditAmount: -30 });
     expect(m).toMatchObject({ cost: 36.03, credit: 30, lost: 6.03 });
     expect(m.words).toBe(
-      "50 ft went back to CED. CED's credit gives back $30.00, and they cost $36.03 off the roll, so the $6.03 difference is written off as Shop Stock Lost. No customer is credited for it.",
+      "50 ft went back to CED. CED's credit gives back $30.00, and they cost $36.03 off the roll, so the $6.03 difference is written off as Stock Lost. No customer is credited for it.",
     );
   });
   it("no credit tied: the whole cost is written off, and it says so", () => {
     const m = shelfReturnMoney({ qty: 50, unit: "ft", supplier: "Consolidated Electrical Dist.", cost: 36.03, creditAmount: null });
     expect(m).toMatchObject({ cost: 36.03, credit: 0, lost: 36.03 });
-    expect(m.words).toContain("no credit from CED is tied to them, so $36.03 is written off as Shop Stock Lost");
+    expect(m.words).toContain("no credit from CED is tied to them, so $36.03 is written off as Stock Lost");
   });
   it("the credit covers it exactly: nothing is written off", () => {
     expect(shelfReturnMoney({ qty: 1, unit: "ea", supplier: "CED", cost: 30, creditAmount: -30 }).lost).toBe(0);

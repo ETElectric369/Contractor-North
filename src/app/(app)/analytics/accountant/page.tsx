@@ -7,8 +7,8 @@ import { formatCurrency } from "@/lib/utils";
 import { PageHeader } from "@/components/page-header";
 import { Card } from "@/components/ui/card";
 import { computeOwnerMoney, notCountedLine, readOwnerMoneyInputs, type OwnerMoney } from "@/lib/analytics/owner-money";
+import { pnlRow, profitAndLoss } from "@/lib/analytics/profit-and-loss";
 import {
-  NET_LABEL,
   OWNER_HIDDEN_NOTE,
   OWNER_HIDDEN_WHY,
   PERIOD_KINDS,
@@ -37,8 +37,9 @@ const isKind = (v: unknown): v is AccountantPeriodKind => v === "month" || v ===
  *
  * Pick a Month, a Quarter or a Year (whole months only: the money engine counts whole months, and a
  * mid-month day would quietly pull in the whole month). The page shows the two figures that matter,
- * Received and Net, then one button, Download For Your Accountant, and one small link, Same Thing As
- * CSV Files. The Shop Stock page links here.
+ * the top and the bottom line of the Summary's profit and loss, Revenue and Net Profit (Owner's
+ * Draw), by the profit and loss's own rows and words (profit-and-loss.ts), then one button, Download
+ * For Your Accountant, and one small link, Same Thing As CSV Files. The Shop Stock page links here.
  *
  * OFFICE ONLY (requireStaff; a tech is sent to My Day). The totals follow the owner's switch: an
  * office viewer the owner hasn't shared Owner's Draw with sees no totals, and the file leaves them
@@ -78,6 +79,10 @@ export default async function AccountantPage({ searchParams }: { searchParams: P
     } else problem = read.problem;
   }
   const figures = cur?.totals ?? null;
+  // THE SUMMARY'S TOP AND BOTTOM LINES, by the profit and loss's own rows: the same words and cents.
+  const pnl = figures ? profitAndLoss(figures) : [];
+  const revenue = pnlRow(pnl, "revenue");
+  const net = pnlRow(pnl, "net_profit");
   const recordsStart = (cur?.caveats.find((c) => c.kind === "records_start") as { date: string } | undefined)?.date ?? null;
   const notCounted = cur ? notCountedLine(cur) : null;
   const through = lastDayShown(period, todayYmd);
@@ -140,7 +145,7 @@ export default async function AccountantPage({ searchParams }: { searchParams: P
             <p role="alert" className="mt-3 text-sm text-amber-800">
               {why}
             </p>
-          ) : !figures ? (
+          ) : !figures || !revenue || !net ? (
             <p role="alert" className="mt-3 text-sm text-amber-800">
               The figures couldn&apos;t be read just now{problem ? `: ${problem}` : ""}. Try again in a moment.
             </p>
@@ -150,12 +155,13 @@ export default async function AccountantPage({ searchParams }: { searchParams: P
             <>
               <div className="mt-3 grid grid-cols-2 gap-3">
                 <div>
-                  <div className="text-xs text-slate-500">Received</div>
-                  <div className="text-2xl font-bold tabular-nums text-slate-900">{formatCurrency(figures.received)}</div>
+                  <div className="text-xs text-slate-500">{revenue.label}</div>
+                  <div className="text-2xl font-bold tabular-nums text-slate-900">{formatCurrency(revenue.amount ?? 0)}</div>
                 </div>
                 <div>
-                  <div className="text-xs text-slate-500">{NET_LABEL}</div>
-                  <div className={`text-2xl font-bold tabular-nums ${figures.left < 0 ? "text-red-700" : "text-slate-900"}`}>{formatCurrency(figures.left)}</div>
+                  <div className="text-xs text-slate-500">{net.label}</div>
+                  <div className={`text-2xl font-bold tabular-nums ${(net.amount ?? 0) < 0 ? "text-red-700" : "text-slate-900"}`}>{formatCurrency(net.amount ?? 0)}</div>
+                  <div className="text-xs text-slate-500">Before income tax.</div>
                 </div>
               </div>
               {beforeRecords && <p className="mt-2 text-xs text-slate-500">{beforeRecords.text}</p>}

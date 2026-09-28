@@ -26,7 +26,8 @@ import { isStaffRole } from "@/lib/actions/perms";
 import { resolveJobId } from "@/lib/actions/resolve-id";
 import { TECH_ITEM_COLUMNS } from "@/lib/materials-columns";
 import { billLineBilledCost, billableBillCost } from "@/lib/bill-itemisation";
-import { BUSINESS_COST_BUCKETS, bucketOf } from "@/lib/business-cost-buckets";
+import { BUCKET_SECTION, BUSINESS_COST_BUCKETS, bucketOf, bucketsIn } from "@/lib/business-cost-buckets";
+import { PNL_WORDS } from "@/lib/analytics/profit-and-loss";
 import { isShelfTicket } from "@/lib/shelf-plan";
 import { parseShelf } from "@/lib/stock-take";
 import { readBillShelfOff } from "@/lib/job-cost";
@@ -44,6 +45,16 @@ import type { JobCircuit, JobPanel } from "@/lib/types";
  * ever see the current user's organization. There is no service-role access and
  * no write path here — these tools only SELECT.
  */
+
+/**
+ * THE COMPANY'S PROFIT AND LOSS, IN NORT'S MOUTH (Erik, 2026-09-28): Nort says Revenue, Cost of
+ * Goods Sold (COGS), Gross Profit, Overhead and Net Profit (Owner's Draw) exactly as the screens do
+ * (profit-and-loss.ts), and never calls a job's own profit the company's.
+ */
+const JOB_PROFIT_IS_NOT_THE_PNL = `A job's profit here is that job's own (what came in on it less what it cost), never the company's ${PNL_WORDS.grossProfit} or ${PNL_WORDS.netProfit}: those are on Analytics' Owner's Draw card, the company's profit and loss, and adding job profits up does not give them.`;
+
+/** Which half of the profit and loss a business-cost bucket is in, in its own words (BUCKET_SECTION). */
+const sectionWords = (bucket: keyof typeof BUCKET_SECTION) => (BUCKET_SECTION[bucket] === "cogs" ? PNL_WORDS.cogs : PNL_WORDS.overhead);
 
 export const DATA_TOOLS: Anthropic.Tool[] = [
   {
@@ -244,7 +255,7 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
   {
     name: "list_job_profitability",
     description:
-      "Which jobs made or lost money, ranked. Returns each job's revenue collected (net refunds), cost (CREW labor + materials + bills + petty cash), profit, owner_hours and profit_per_owner_hour. The owner's hours are billed but never a cost (owner's draw), so a job the owner worked alone has cost ≈ materials and its profit is what it left him; profit_per_owner_hour is null until something is collected. sort 'profit' = most profitable first (default); sort 'loss' = biggest loss first (use for 'which jobs am I losing money on'). Optional status filter: a specific job status, or 'active' for all in-progress work. Same cost/revenue math as the job page + /analytics. Disclose the PO+bill double-count caveat if a cost looks inflated.",
+      `Which jobs made or lost money, ranked. Returns each job's revenue collected (net refunds), cost (CREW labor + materials + bills + petty cash), profit, owner_hours and profit_per_owner_hour. The owner's hours are billed but never a cost (owner's draw), so a job the owner worked alone has cost ≈ materials and its profit is what it left him; profit_per_owner_hour is null until something is collected. sort 'profit' = most profitable first (default); sort 'loss' = biggest loss first (use for 'which jobs am I losing money on'). Optional status filter: a specific job status, or 'active' for all in-progress work. Same cost/revenue math as the job page + /analytics. Disclose the PO+bill double-count caveat if a cost looks inflated. ${JOB_PROFIT_IS_NOT_THE_PNL}`,
     input_schema: {
       type: "object",
       properties: {
@@ -263,7 +274,7 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
   {
     name: "revenue_trend",
     description:
-      "How cash collected is trending. Returns money collected per month for the last 12 months (each month net of the refunds made in it, the same figures as the Money by Month chart on Analytics), the total collected over that year, and the best/worst month by those net figures. Use for 'how's revenue?', 'what did I collect this month vs last?', 'my best month?'.",
+      `How ${PNL_WORDS.revenue} is trending: money collected from customers per month for the last 12 months (each month net of the refunds made in it), the total over that year, and the best/worst month by those net figures. These are the ${PNL_WORDS.revenue} bars of the Money by Month chart on Analytics, less any bank deposit someone placed as Other Income (the chart's ${PNL_WORDS.revenue} counts those too; this does not). Call it ${PNL_WORDS.revenue}, and never profit: ${PNL_WORDS.grossProfit} and ${PNL_WORDS.netProfit} are on Analytics' Owner's Draw card. Use for 'how's revenue?', 'what did I collect this month vs last?', 'my best month?'.`,
     input_schema: { type: "object", properties: {} },
   },
   {
@@ -275,7 +286,7 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
   {
     name: "profit_by_type",
     description:
-      "Which KIND of work makes money — job profit grouped by work type (the job's code-template: the company's own names for its kinds of work). Returns per type: job count, revenue, cost, profit, margin %, owner_hours and profit_per_owner_hour. The owner's hours are billed but never a cost (owner's draw); profit_per_owner_hour is what that kind of work left the owner per hour he worked. Use for 'what's my most profitable type of work?', 'am I underpricing <a kind of work>?'. Jobs with no assigned type group under 'Uncategorized'.",
+      `Which KIND of work makes money — job profit grouped by work type (the job's code-template: the company's own names for its kinds of work). Returns per type: job count, revenue, cost, profit, margin %, owner_hours and profit_per_owner_hour. The owner's hours are billed but never a cost (owner's draw); profit_per_owner_hour is what that kind of work left the owner per hour he worked. Use for 'what's my most profitable type of work?', 'am I underpricing <a kind of work>?'. Jobs with no assigned type group under 'Uncategorized'. ${JOB_PROFIT_IS_NOT_THE_PNL}`,
     input_schema: { type: "object", properties: {} },
   },
   {
@@ -550,7 +561,7 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
   {
     name: "get_bill",
     description:
-      `Read ONE supplier BILL in full — supplier, the receipt's whole amount, what of it the CUSTOMER is billed (billable_amount, at cost before markup), status, category, the linked job, and every line item (qty, unit price, amount, and whether the customer is billed for it: a line can be the company's own — snacks, a tool for the truck — or a container billed in part with the rest kept as shop stock). Pass a bill_id (from list_bills). Use to read a bill's breakdown back before paying or categorizing it, and NEVER quote the receipt total as the customer's cost. A bill with NO job is a business cost in one of the business-cost buckets (${BUSINESS_COST_BUCKETS.join(", ")}; Fuel is its own, Auto is the truck's other costs; counted before owner's draw): no customer is billed for it, so it has no billable_amount (null) and its lines carry no billed flag.`,
+      `Read ONE supplier BILL in full — supplier, the receipt's whole amount, what of it the CUSTOMER is billed (billable_amount, at cost before markup), status, category, the linked job, and every line item (qty, unit price, amount, and whether the customer is billed for it: a line can be the company's own — snacks, a tool for the truck — or a container billed in part with the rest kept as shop stock). Pass a bill_id (from list_bills). Use to read a bill's breakdown back before paying or categorizing it, and NEVER quote the receipt total as the customer's cost. A bill with NO job is a business cost in one of the business-cost buckets (${BUSINESS_COST_BUCKETS.join(", ")}; Fuel is its own, Auto is the truck's other costs; on the company's profit and loss ${bucketsIn("cogs").join(", ")} ${bucketsIn("cogs").length === 1 ? "is" : "are"} in ${PNL_WORDS.cogs} and the rest in ${PNL_WORDS.overhead}, all counted before ${PNL_WORDS.netProfit}): no customer is billed for it, so it has no billable_amount (null) and its lines carry no billed flag.`,
     input_schema: { type: "object", properties: { bill_id: { type: "string", description: "The bill's id (from list_bills)." } }, required: ["bill_id"] },
   },
   {
@@ -2538,9 +2549,9 @@ export async function runDataTool(
         // adding the lines up, because the shared tax means they will not match.
         const moneyNote = [
           !hasJob && isShelfTicket(b)
-            ? "No job: a ticket bought for shop stock. It is never a job cost and never a business-cost bucket: owner money counts its rolls as shop stock inside Materials & Bills in the month it is dated, and pieces taken from its rolls cost the jobs that take them. No customer is billed for it here. amount is the whole receipt, and the supplier is owed all of it."
+            ? `No job: a ticket bought for shop stock. It is never a job cost: the company's profit and loss counts its rolls as ${PNL_WORDS.stockBought}, in ${PNL_WORDS.cogs}, in the month it is dated (the Owner's Draw card shows them inside ${PNL_WORDS.materials}), and whatever of it no roll holds (lines not put in stock, their tax, freight) as a business cost in ${sectionWords("Tools & Supplies")}. Pieces taken from its rolls cost the jobs that take them. No customer is billed for it here. amount is the whole receipt, and the supplier is owed all of it.`
             : !hasJob
-            ? `No job: this is a business cost in the ${bucketOf(b.category)} bucket, counted before owner's draw. No customer is billed for it, so there is no billable_amount and its lines carry no billed flag. amount is the whole receipt.`
+            ? `No job: this is a business cost in the ${bucketOf(b.category)} bucket, which the company's profit and loss counts in ${sectionWords(bucketOf(b.category))}, before ${PNL_WORDS.netProfit}. No customer is billed for it, so there is no billable_amount and its lines carry no billed flag. amount is the whole receipt.`
             : shelfAmount
               ? `amount is the WHOLE receipt. $${shelfAmount.toFixed(2)} of it went into shop stock (shelf_amount), so the job's cost from this receipt is amount less shelf_amount. billable_amount is what an invoice off this receipt charges the customer, at cost before markup: lines with billable false come off, a split line bills only its billed_to_customer, and untouched sales tax comes off in proportion with them. Quote billable_amount — do not add the line figures up, the shared tax is why they will not match it.`
               : "amount is the WHOLE receipt (the job's cost; nothing from it is in shop stock). billable_amount is what an invoice off this receipt charges the customer, at cost before markup: lines with billable false come off, a split line bills only its billed_to_customer, and untouched sales tax comes off in proportion with them. Quote billable_amount — do not add the line figures up, the shared tax is why they will not match it.",

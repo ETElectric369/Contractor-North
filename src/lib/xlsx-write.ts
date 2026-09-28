@@ -15,14 +15,17 @@ import { buildZip, type DeflateRaw } from "@/lib/zip-write";
  *   · a number is a number cell; { money } is a number with the money format (#,##0.00), rounded
  *     to the cent; anything not finite is left empty rather than written as NaN.
  *   · { date: "YYYY-MM-DD" } is a real date (Excel's day count) shown as yyyy-mm-dd.
- *   · a bold row (a title, a header, a total) is bold, and nothing else is styled.
+ *   · a bold row (a title, a header, a total) is bold.
+ *   · an indented row (a line under its heading on a profit and loss, 2026-09-28) has its first
+ *     cell's text indented one step, the way an accountant lays out a statement. Nothing else is
+ *     styled.
  *
  * Sheet names follow Excel's own rules (xlsxSheetName): 31 characters at most, none of []:*?/\,
  * not blank, and never two the same.
  */
 
 export type XlsxValue = string | number | null | undefined | { money: number } | { date: string };
-export type XlsxRow = { cells: XlsxValue[]; bold?: boolean };
+export type XlsxRow = { cells: XlsxValue[]; bold?: boolean; indent?: boolean };
 export type XlsxSheet = { name: string; rows: XlsxRow[]; widths?: number[] };
 
 const MAIN_NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
@@ -90,8 +93,9 @@ export function excelDay(ymd: string): number | null {
   return Math.round((t - Date.UTC(1899, 11, 30)) / 86_400_000);
 }
 
-// Styles (cellXfs): 0 plain, 1 bold, 2 money, 3 money bold, 4 date, 5 date bold.
-const STYLE = { plain: 0, bold: 1, money: 2, moneyBold: 3, date: 4, dateBold: 5 } as const;
+// Styles (cellXfs): 0 plain, 1 bold, 2 money, 3 money bold, 4 date, 5 date bold, 6 text indented,
+// 7 text indented bold.
+const STYLE = { plain: 0, bold: 1, money: 2, moneyBold: 3, date: 4, dateBold: 5, indent: 6, indentBold: 7 } as const;
 
 const STYLES_XML =
   `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
@@ -101,13 +105,15 @@ const STYLES_XML =
   `<fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills>` +
   `<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>` +
   `<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>` +
-  `<cellXfs count="6">` +
+  `<cellXfs count="8">` +
   `<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>` +
   `<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/>` +
   `<xf numFmtId="4" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>` +
   `<xf numFmtId="4" fontId="1" fillId="0" borderId="0" xfId="0" applyNumberFormat="1" applyFont="1"/>` +
   `<xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>` +
   `<xf numFmtId="164" fontId="1" fillId="0" borderId="0" xfId="0" applyNumberFormat="1" applyFont="1"/>` +
+  `<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment indent="1"/></xf>` +
+  `<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment indent="1"/></xf>` +
   `</cellXfs>` +
   `<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>` +
   `</styleSheet>`;
@@ -116,7 +122,8 @@ const STYLES_XML =
  *  same double. */
 const numText = (n: number) => String(n);
 
-function cellXml(ref: string, v: XlsxValue, bold: boolean): string {
+/** `indent`: the first cell of an indented row. Only its text is indented; a number never is. */
+function cellXml(ref: string, v: XlsxValue, bold: boolean, indent = false): string {
   if (v == null) return "";
   if (typeof v === "number") {
     if (!Number.isFinite(v)) return "";
@@ -131,15 +138,16 @@ function cellXml(ref: string, v: XlsxValue, bold: boolean): string {
   if (typeof v === "object" && "date" in v) {
     const serial = excelDay(v.date);
     // Not a real date: said as the text it was, never a wrong day.
-    if (serial == null) return textCell(ref, String(v.date ?? ""), bold);
+    if (serial == null) return textCell(ref, String(v.date ?? ""), bold, indent);
     return `<c r="${ref}" s="${bold ? STYLE.dateBold : STYLE.date}"><v>${serial}</v></c>`;
   }
-  return textCell(ref, String(v), bold);
+  return textCell(ref, String(v), bold, indent);
 }
 
-function textCell(ref: string, s: string, bold: boolean): string {
+function textCell(ref: string, s: string, bold: boolean, indent = false): string {
   if (s === "") return "";
-  return `<c r="${ref}" t="inlineStr"${bold ? ` s="${STYLE.bold}"` : ""}><is><t xml:space="preserve">${xmlEscape(s)}</t></is></c>`;
+  const style = indent ? (bold ? STYLE.indentBold : STYLE.indent) : bold ? STYLE.bold : null;
+  return `<c r="${ref}" t="inlineStr"${style != null ? ` s="${style}"` : ""}><is><t xml:space="preserve">${xmlEscape(s)}</t></is></c>`;
 }
 
 function sheetXml(sheet: XlsxSheet): string {
@@ -150,7 +158,7 @@ function sheetXml(sheet: XlsxSheet): string {
   const rows = sheet.rows
     .map((r, i) => {
       const n = i + 1;
-      const cells = r.cells.map((v, c) => cellXml(`${columnLetters(c)}${n}`, v, !!r.bold)).join("");
+      const cells = r.cells.map((v, c) => cellXml(`${columnLetters(c)}${n}`, v, !!r.bold, !!r.indent && c === 0)).join("");
       return `<row r="${n}">${cells}</row>`;
     })
     .join("");

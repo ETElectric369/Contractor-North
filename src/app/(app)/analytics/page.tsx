@@ -16,6 +16,7 @@ import { getOrgSettings } from "@/lib/org-settings";
 import { todayStrInTz } from "@/lib/tz";
 import { getOwnerMoneyViews, ownerMoneyChartWindow, ownerMoneyWindow, resolveOwnerMoneySelection } from "@/lib/analytics/owner-money";
 import { buildMoneyChartData, drawnMonth, emptyChartSentence } from "@/lib/analytics/money-chart";
+import { PNL_WORDS } from "@/lib/analytics/profit-and-loss";
 import { ownerRegister } from "@/lib/owner-draw";
 import { LeftForCard } from "./left-for-card";
 import { MoneyChartCard } from "./money-chart-card";
@@ -57,8 +58,8 @@ export default async function AnalyticsPage({
   // tapped on the chart says otherwise (?w=, validated here against the chart's 12 months). The
   // chart's 12 months and the card's window are computed from the SAME rows, read once over the span
   // covering both, so the chart's August and the card's August are one computation. An office viewer
-  // the owner has not allowed still gets the chart, cut to Collected on this server before it is
-  // handed to the page (buildMoneyChartData), and no card.
+  // the owner has not allowed still gets the chart, cut to Revenue on this server before it is
+  // handed to the page (buildMoneyChartData), and no card: no cost line, no Gross Profit, no Net Profit.
   //
   // A month in ?w= is shown only if the chart DRAWS it (drawnMonth, below): a month before the
   // chart's trimmed start would select nothing on the chart and print a month of $0s from before the
@@ -147,16 +148,18 @@ export default async function AnalyticsPage({
 
   const [ownerMoney, fuel] = await Promise.all([ownerMoneyP, fuelP]);
   const chartMoney = ownerMoney.views?.[0] ?? null;
-  // Who "you" is on the card and the chart: the owners by name (from the same names profile_pay
-  // carries) and the viewer, in the register payroll-view started (lib/owner-draw).
+  // Who "you" is on the card: the owners by name (from the same names profile_pay carries) and the
+  // viewer, in the register payroll-view started (lib/owner-draw).
   const voice = ownerRegister(chartMoney?.owners ?? [...rates.entries()].filter(([, r]) => r.paid_by_draw).map(([id]) => ({ id, name: null })), user?.id ?? null);
-  const chartData = chartMoney ? buildMoneyChartData(chartMoney, { ownerFigures: showOwnerMoney, leftLabel: voice.leftFor }) : null;
+  // The chart's series are the profit and loss's own lines, in its own words (profit-and-loss.ts).
+  const chartData = chartMoney ? buildMoneyChartData(chartMoney, { ownerFigures: showOwnerMoney }) : null;
   const selectedMonth = drawnMonth(selection.month, chartData);
   const windowKey = selectedMonth ?? selection.segment;
   const cardMoney = showOwnerMoney ? (ownerMoney.views?.[selectedMonth ? 2 : 1] ?? null) : null;
-  // "Collected (12 mo)" is the chart's own 12 months (received, net of refunds and voided invoices:
-  // the computeCollected rule), not a second read of the same payments that could drift from it.
-  const collected12 = chartMoney ? chartMoney.totals.received : null;
+  // "Revenue (12 mo)" is the chart's own 12 months (received, net of refunds and voided invoices:
+  // the computeCollected rule, plus Other Income), the profit and loss's Revenue line, not a second
+  // read of the same payments that could drift from it.
+  const revenue12 = chartMoney ? chartMoney.totals.received : null;
   const emptyLine = emptyChartSentence(ownerMoney.firstPaymentDay, ownerMoneyChartWindow(todayYmd).start);
 
   const jobRows = computeJobProfitRows({
@@ -172,7 +175,8 @@ export default async function AnalyticsPage({
 
   // The old "Overhead (all time)" tile and "Overhead by category" block are gone (0286). They
   // counted only no-job bills, all time, in the old category words, and disagreed with Business
-  // Costs. The Left For You card carries business costs now, in its buckets (Fuel on a line of its own), for the window.
+  // Costs. The Owner's Draw card carries them now, for the window, as a profit and loss: Fuel in
+  // Cost of Goods Sold (COGS), every other bucket under Overhead (profit-and-loss.ts).
 
   const stat = (label: string, value: string, Icon: any, tone: string) => (
     <Card key={label}>
@@ -226,7 +230,7 @@ export default async function AnalyticsPage({
       {fuel?.hasFuel && <FuelTrendCard trend={fuel} />}
 
       <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-3">
-        {stat("Collected (12 mo)", collected12 == null ? "—" : formatCurrency(collected12), TrendingUp, "bg-green-50 text-green-600")}
+        {stat(`${PNL_WORDS.revenue} (12 mo)`, revenue12 == null ? "—" : formatCurrency(revenue12), TrendingUp, "bg-green-50 text-green-600")}
         {stat("Outstanding A/R", formatCurrency(ar.outstanding), Receipt, "bg-red-50 text-red-600")}
         {stat("Estimate win rate", qs.winRatePct != null ? `${qs.winRatePct}%` : "—", FileText, "bg-indigo-50 text-indigo-600")}
       </div>

@@ -1,4 +1,5 @@
-import { BUSINESS_COST_BUCKETS, bucketOf, isBusinessCostBucket, type BusinessCostBucket } from "@/lib/business-cost-buckets";
+import { BUCKET_SECTION, BUSINESS_COST_BUCKETS, bucketOf, isBusinessCostBucket, type BusinessCostBucket } from "@/lib/business-cost-buckets";
+import { PNL_WORDS } from "@/lib/analytics/profit-and-loss";
 import { findHeaderRow, fingerprintOf, headerKey, readDate, readHeaderRow, readHeaderWith, readMoney, sayDollars } from "@/lib/supplier-open-list";
 
 /**
@@ -1460,16 +1461,21 @@ export type FlowSegment = { key: string; label: string; cents: number };
 
 /**
  * THE BAR'S SEGMENTS, in Money by Month's words (money-chart.ts): Fuel on its own (the Fuel
- * bucket, the one Erik watches), every other business cost as ONE Business Costs segment (six
- * pinks side by side read as one colour anyway, and the legend is the place for names), Materials &
- * Bills, Crew Pay, Owner's Draw. The rest are the bank's own: Suppliers, Cash Taken Out, Transfers,
- * Personal, Already In North, Needs You.
+ * bucket, the one Erik watches), every other business cost as ONE Overhead segment (the profit and
+ * loss's own word for them, profit-and-loss.ts; six pinks side by side read as one colour anyway,
+ * and the legend is the place for names), Materials & Bills, Crew Pay, Owner's Draw (here: money the
+ * owner took out of the account). The rest are the bank's own: Suppliers, Cash Taken Out,
+ * Transfers, Personal, Already In North, Needs You.
  */
 export function flowLabelOf(choice: string, bucket: string | null): { key: string; label: string } {
   switch (choice) {
-    case "cost":
-      if (bucketOf(bucket) === "Fuel") return { key: "fuel", label: "Fuel" };
-      return { key: "business", label: "Business Costs" };
+    case "cost": {
+      const b = bucketOf(bucket);
+      if (b === "Fuel") return { key: "fuel", label: "Fuel" };
+      // Overhead is the buckets BUCKET_SECTION says it is, never a guess: a bucket it puts in Cost of
+      // Goods Sold (COGS) is its own segment, by its own name.
+      return BUCKET_SECTION[b] === "overhead" ? { key: "business", label: PNL_WORDS.overhead } : { key: `bucket:${b}`, label: b };
+    }
     case "draw":
       return { key: "draw", label: "Owner's Draw" };
     case "personal":

@@ -1,20 +1,55 @@
-import { materialsWithStock, type OwnerMoney } from "@/lib/analytics/owner-money";
+import type { OwnerMoney } from "@/lib/analytics/owner-money";
+import { pnlLines, profitAndLoss, type PnlKey } from "@/lib/analytics/profit-and-loss";
 
 /**
  * MONEY BY MONTH: the chart at the top of /analytics (Erik, 2026-09-24: "Money collected this month
  * with months and numbers with side by side bar graphs ... i need visual and so do most all
  * contractors").
  *
- * Every figure comes from computeOwnerMoney's per-month rows, the same rows the Left For You card
- * below it totals, so the chart and the card can never disagree. This file is the pure half: which
- * series exist for this viewer, which months to draw, the y scale, and where every bar and label
- * goes. The SVG component only draws what this returns, which is what lets the tests check the
- * geometry without a browser.
+ * Every figure comes from computeOwnerMoney's per-month rows, the same rows the Owner's Draw card
+ * below it totals, laid out by the same profit and loss (profit-and-loss.ts, Erik 2026-09-28): each
+ * series IS one of its lines, by its own words, so the chart and the card can never disagree or say
+ * the same money two ways. Revenue and Net Profit (Owner's Draw) are the two bars a month opens
+ * with; Gross Profit, each Cost of Goods Sold (COGS) line and Overhead are chips.
+ *
+ * This file is the pure half: which series exist for this viewer, which months to draw, the y
+ * scale, and where every bar and label goes. The SVG component only draws what this returns, which
+ * is what lets the tests check the geometry without a browser.
  */
 
 // ── Series ───────────────────────────────────────────────────────────────────
 
-export type MoneySeriesKey = "collected" | "left" | "materials" | "crewPay" | "mileage" | "fuel" | "business" | "lost";
+/** Stored in the browser (the remembered chips), so a key never changes: "collected" is Revenue,
+ *  "left" is Net Profit (Owner's Draw), "business" is Overhead. */
+export type MoneySeriesKey = "collected" | "gross" | "left" | "materials" | "lost" | "crewPay" | "mileage" | "fuel" | "business";
+
+/**
+ * THE PROFIT-AND-LOSS LINE EACH SERIES DRAWS. The cost series are every Cost of Goods Sold (COGS)
+ * line (stock bought inside Materials & Bills, as the card says it) and Overhead as one bar, so the
+ * cost bars and Net Profit account for every cent of Revenue; a test holds every COGS line to a
+ * series here, so a bucket moved into COGS can never quietly fall off the chart.
+ */
+export const SERIES_LINE: Record<MoneySeriesKey, PnlKey> = {
+  collected: "revenue",
+  gross: "gross_profit",
+  left: "net_profit",
+  materials: "materials",
+  lost: "stock_lost",
+  crewPay: "crew_pay",
+  mileage: "crew_mileage",
+  fuel: "bucket:Fuel",
+  business: "total_overhead",
+};
+
+/** How the chart lays the profit and loss out: stock bought inside Materials & Bills (Erik,
+ *  2026-09-27: "we dont need a put on the shelf on the bar graph"), the same as the card. */
+const CHART_PNL = { stockInMaterials: true } as const;
+
+/** Each series' name: its line's own words, where it stands alone (profit-and-loss.ts). */
+const SERIES_LABEL = (() => {
+  const short = new Map(pnlLines(CHART_PNL).map((l) => [l.key, l.short]));
+  return Object.fromEntries(Object.entries(SERIES_LINE).map(([k, line]) => [k, short.get(line) ?? line])) as Record<MoneySeriesKey, string>;
+})();
 
 export type MoneySeries = {
   key: MoneySeriesKey;
@@ -27,26 +62,39 @@ export type MoneySeries = {
   defaultOn: boolean;
 };
 
-/** Fixed order: the bars in a month read left to right in this order whichever are on. The palette
- *  was run through the dataviz validator: every adjacent pair clears colour-blind separation, and
- *  every bar also carries its figure, so identity is never colour alone. */
-const SERIES: Record<MoneySeriesKey, Omit<MoneySeries, "key" | "label"> & { label: string }> = {
-  collected: { label: "Collected", fill: "fill-brand", swatch: "bg-brand", defaultOn: true },
-  left: { label: "Owner's Draw", fill: "fill-green-600", swatch: "bg-green-600", defaultOn: true },
-  materials: { label: "Materials & Bills", fill: "fill-indigo-500", swatch: "bg-indigo-500", defaultOn: false },
-  crewPay: { label: "Crew Pay", fill: "fill-amber-600", swatch: "bg-amber-600", defaultOn: false },
-  mileage: { label: "Crew Mileage", fill: "fill-sky-600", swatch: "bg-sky-600", defaultOn: false },
-  // FUEL STANDS OUT (0362; Erik, 2026-09-27): the Fuel bucket is its own series, never inside
-  // Business Costs, in the pink-800 the Fuel card and the bank card draw it in. Validated against
-  // its neighbours (sky-600, pink-500): CVD ΔE 18.8, normal-vision ΔE 20.6, inside the lightness band.
-  fuel: { label: "Fuel", fill: "fill-pink-800", swatch: "bg-pink-800", defaultOn: false },
-  business: { label: "Business Costs", fill: "fill-pink-500", swatch: "bg-pink-500", defaultOn: false },
+/**
+ * Fixed order, the profit and loss's own: Revenue, Gross Profit, Net Profit, then the COGS lines,
+ * then Overhead. The bars in a month read left to right in this order whichever are on. The palette
+ * was run through the dataviz validator (2026-09-28) in this order: every adjacent pair clears
+ * colour-blind separation (the worst, Stock Lost's slate-500 beside Crew Pay's amber-600, ΔE 16.9;
+ * the order before this one put slate-500 beside pink-500 at ΔE 3.4) and the normal-vision floor
+ * (the worst ΔE 19.0). Gross Profit's sky-400 clears its neighbours (brand, green-600) at ΔE 24.5
+ * and every other series at 14.9 or more; it sits under 3:1 against white, so, as for every bar,
+ * its figure is printed on it and the plot has a table view. The brand's dark teal is the brand
+ * (outside the validator's lightness band by design), and Stock Lost's slate reads grey on purpose.
+ * Identity is never colour alone.
+ */
+const SERIES: Record<MoneySeriesKey, Omit<MoneySeries, "key" | "label">> = {
+  collected: { fill: "fill-brand", swatch: "bg-brand", defaultOn: true },
+  gross: { fill: "fill-sky-400", swatch: "bg-sky-400", defaultOn: false },
+  left: { fill: "fill-green-600", swatch: "bg-green-600", defaultOn: true },
+  materials: { fill: "fill-indigo-500", swatch: "bg-indigo-500", defaultOn: false },
   // Shop stock (0303): offered only in a year that has some, like every cost series. Stock BOUGHT
   // has no bar of its own (Erik, 2026-09-27: "we dont need a put on the shelf on the bar graph"):
   // it is inside Materials & Bills, the same sum the card prints (materialsWithStock).
-  lost: { label: "Shop Stock Lost", fill: "fill-slate-500", swatch: "bg-slate-500", defaultOn: false },
+  lost: { fill: "fill-slate-500", swatch: "bg-slate-500", defaultOn: false },
+  crewPay: { fill: "fill-amber-600", swatch: "bg-amber-600", defaultOn: false },
+  mileage: { fill: "fill-sky-600", swatch: "bg-sky-600", defaultOn: false },
+  // FUEL STANDS OUT (0362; Erik, 2026-09-27): the Fuel bucket is its own series, never inside
+  // Overhead, in the pink-800 the Fuel card and the bank card draw it in.
+  fuel: { fill: "fill-pink-800", swatch: "bg-pink-800", defaultOn: false },
+  business: { fill: "fill-pink-500", swatch: "bg-pink-500", defaultOn: false },
 };
-export const MONEY_SERIES_ORDER: MoneySeriesKey[] = ["collected", "left", "materials", "crewPay", "mileage", "fuel", "business", "lost"];
+export const MONEY_SERIES_ORDER: MoneySeriesKey[] = ["collected", "gross", "left", "materials", "lost", "crewPay", "mileage", "fuel", "business"];
+
+/** The series a month is only ever a difference in (Revenue less costs): offered to the owner
+ *  always, like Revenue, never trimmed away for being $0. */
+const ALWAYS_OFFERED = new Set<MoneySeriesKey>(["collected", "gross", "left"]);
 
 export type MoneyChartMonth = { month: string; values: Partial<Record<MoneySeriesKey, number>> };
 export type MoneyChartData = { series: MoneySeries[]; months: MoneyChartMonth[] };
@@ -55,51 +103,39 @@ const tiny = (v: number | undefined) => !v || Math.abs(v) < 0.005;
 
 /**
  * What this viewer's chart holds. `ownerFigures` is the page's existing visibility answer (the
- * owner, or office staff while "Office Can See This" is on). Without it the chart is Collected ONLY:
+ * owner, or office staff while "Office Can See This" is on). Without it the chart is Revenue ONLY:
  * the other series are not hidden in the browser, they are never put in the data, so nothing about
  * the owner's figures reaches an office viewer the owner has not allowed.
  *
- * A COST series (Materials & Bills, Crew Pay, Crew Mileage, Fuel, Business Costs) is offered only when
- * some month on the chart holds some, the way the card only prints a line when there is one: a solo
- * owner with no crew never gets a Crew Pay chip that would draw nothing. Crew Mileage is its own series
- * (the two-bucket law: never folded into crew pay), and so is Fuel (never folded into Business Costs).
- * Collected and Left are always offered to the owner.
+ * A COST series (Materials & Bills, Stock Lost, Crew Pay (1099), Crew Mileage Paid, Fuel, Overhead)
+ * is offered only when some month on the chart holds some, the way the card only prints a line when
+ * there is one: a solo owner with no crew never gets a Crew Pay chip that would draw nothing. Crew
+ * Mileage is its own series (the two-bucket law: never folded into crew pay), and so is Fuel (never
+ * folded into Overhead). Revenue, Gross Profit and Net Profit are always offered to the owner.
+ *
+ * Every value is the month's profit-and-loss line (profitAndLoss), so a bar and the card's row for
+ * the same month are the same cents.
  *
  * Leading months where nothing came in or went out are trimmed, so a company whose books start in
  * April shows April onward, not six empty slots. A $0 month AFTER the first one keeps its slot.
  */
-export function buildMoneyChartData(money: OwnerMoney, opts: { ownerFigures: boolean; leftLabel: string }): MoneyChartData {
+export function buildMoneyChartData(money: OwnerMoney, opts: { ownerFigures: boolean }): MoneyChartData {
   const allowed: MoneySeriesKey[] = opts.ownerFigures ? MONEY_SERIES_ORDER : ["collected"];
-  const valueOf = (m: OwnerMoney["months"][number], k: MoneySeriesKey): number => {
-    switch (k) {
-      case "collected":
-        return m.received;
-      case "left":
-        return m.left;
-      case "materials":
-        return materialsWithStock(m);
-      case "crewPay":
-        return m.crewPay;
-      case "mileage":
-        return m.crewMileagePaid;
-      case "fuel":
-        return m.fuel;
-      case "business":
-        return m.businessCostsTotal;
-      case "lost":
-        return m.shopStockLost;
-    }
+  const valuesOf = (m: OwnerMoney["months"][number]): Record<MoneySeriesKey, number> => {
+    const rows = new Map(profitAndLoss(m, CHART_PNL).map((r) => [r.key, r.amount ?? 0]));
+    return Object.fromEntries(MONEY_SERIES_ORDER.map((k) => [k, rows.get(SERIES_LINE[k]) ?? 0])) as Record<MoneySeriesKey, number>;
   };
+  const all = money.months.map((m) => ({ month: m.month, values: valuesOf(m) }));
   // What decides "nothing happened" is every money line the viewer may see. For the owner that is
-  // received and every cost (left is their difference); for a Collected-only viewer it is received
-  // alone, so even the trim cannot hint that a month had costs.
-  const first = money.months.findIndex((m) => allowed.some((k) => !tiny(valueOf(m, k))));
-  const shown = first < 0 ? [] : money.months.slice(first);
-  const keys = allowed.filter((k) => k === "collected" || k === "left" || shown.some((m) => !tiny(valueOf(m, k))));
-  const series = keys.map((key) => ({ key, ...SERIES[key], label: key === "left" ? opts.leftLabel : SERIES[key].label }));
+  // Revenue and every cost (the profits are their differences); for a Revenue-only viewer it is
+  // Revenue alone, so even the trim cannot hint that a month had costs.
+  const first = all.findIndex((m) => allowed.some((k) => !tiny(m.values[k])));
+  const shown = first < 0 ? [] : all.slice(first);
+  const keys = allowed.filter((k) => ALWAYS_OFFERED.has(k) || shown.some((m) => !tiny(m.values[k])));
+  const series = keys.map((key) => ({ key, ...SERIES[key], label: SERIES_LABEL[key] }));
   const months = shown.map((m) => ({
     month: m.month,
-    values: Object.fromEntries(keys.map((k) => [k, valueOf(m, k)])) as Partial<Record<MoneySeriesKey, number>>,
+    values: Object.fromEntries(keys.map((k) => [k, m.values[k]])) as Partial<Record<MoneySeriesKey, number>>,
   }));
   return { series, months };
 }

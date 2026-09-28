@@ -2,6 +2,8 @@ import { describe, it, expect } from "vitest";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import ts from "typescript";
+import { SERIES_LINE } from "@/lib/analytics/money-chart";
+import { pnlLines } from "@/lib/analytics/profit-and-loss";
 
 /**
  * STOCK SAYS STOCK (Erik, 2026-09-27: "we need to uniform our inventory talk to stock and inventory
@@ -85,11 +87,14 @@ describe("no screen, toast or Nort line says shelf", () => {
   }, 60_000);
 
   it("the Money by Month chart has no stock-bought bar, and the Owner's Draw card no line of its own for it", () => {
+    // Both lay the profit and loss out with stock bought inside Materials & Bills (profit-and-loss.ts).
     const chart = readFileSync(join(ROOT, "src/lib/analytics/money-chart.ts"), "utf8");
     expect(chart).not.toMatch(/Put On The Shelf/);
-    expect(chart).toContain('case "materials":\n        return materialsWithStock(m);');
+    expect(chart).toContain("const CHART_PNL = { stockInMaterials: true } as const;");
+    expect(Object.values(SERIES_LINE)).not.toContain("stock_bought");
     const card = readFileSync(join(ROOT, "src/app/(app)/analytics/left-for-card.tsx"), "utf8");
-    expect(card).toContain('row("Materials & Bills", cost(materialsWithStock(t)))');
-    expect(card).not.toMatch(/row\("[^"]*Shelf/);
+    expect(card).toContain("stockInMaterials: true");
+    expect(card).not.toMatch(/Shelf/);
+    expect(pnlLines({ stockInMaterials: true }).map((l) => l.key)).not.toContain("stock_bought");
   });
 });
