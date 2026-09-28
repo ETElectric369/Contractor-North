@@ -17,7 +17,7 @@ import {
  *  clocked time (WHEN-DID) lives on /timeclock + /timecards, so the old
  *  time_entries fetch and former-employee roster union are gone. The client
  *  slices this preloaded ±window into day/week/month; paging never refetches. */
-export async function CalendarPanel() {
+export async function CalendarPanel({ canEdit = false }: { canEdit?: boolean } = {}) {
   const supabase = await createClient();
 
   const now = Date.now();
@@ -124,6 +124,9 @@ export async function CalendarPanel() {
         workDayStart={workDayWindowHm((org as any)?.settings).start}
         workDayEnd={workDayWindowHm((org as any)?.settings).end}
         crewBoard={featureOn(getOrgSettings((org as any)?.settings).features, "crew_board")}
+        // The office taps a block for its day, time and crew (schedule/tile-sheet). Staff only: the
+        // page sends anyone else to My Day, and every writer behind the sheet asks requireStaff too.
+        canEdit={canEdit}
       />
     </div>
   );

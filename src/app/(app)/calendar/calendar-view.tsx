@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CalendarClock, CalendarSync, Briefcase, ClipboardList, ListTodo, MapPin, Users, Columns3 } from "lucide-react";
@@ -12,6 +12,7 @@ import { dayTargetLabel } from "@/lib/schedule/placement-plan";
 import { dayLabel, spanLabel } from "@/lib/schedule/span-label";
 import { useEndlessStack } from "@/components/use-endless-stack";
 import { jobDayBlock } from "@/lib/schedule/job-block";
+import { ScheduleTileSheet, type TileTarget } from "../schedule/tile-sheet";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/components/toast";
 import { MoveToDay } from "@/components/move-to-day";
@@ -242,6 +243,7 @@ export function CalendarView({
   workDayStart = "08:00",
   workDayEnd = "16:00",
   crewBoard = true,
+  canEdit = false,
 }: {
   jobs: CalJob[];
   segments?: CalSegment[];
@@ -266,6 +268,9 @@ export function CalendarView({
   workDayEnd?: string;
   /** Crew Board's switch (0352): off, no Everyone's Day door in the header. Absent = on. */
   crewBoard?: boolean;
+  /** The office: a tap on a block opens its sheet (day, time, crew). Absent (anyone else): the
+   *  blocks are the links to their records they always were. */
+  canEdit?: boolean;
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -368,6 +373,24 @@ export function CalendarView({
     const t = setTimeout(() => setUndo(null), 8000);
     return () => clearTimeout(t);
   }, [undo]);
+
+  /* THE TILE'S SHEET (schedule/tile-sheet): which block was tapped, on which day. The record is looked
+     up in the loaded jobs and visits at render, so the refresh after a save shows the sheet what was
+     saved, and a job whose date was cleared simply leaves (and the sheet with it). */
+  const [sheet, setSheet] = useState<{ kind: "job" | "visit"; id: string; day: string } | null>(null);
+  const onEventTap = useCallback((tapId: string, day: string) => {
+    const [kind, id] = tapId.split(":");
+    if ((kind === "job" || kind === "visit") && id) setSheet({ kind, id, day });
+  }, []);
+  const sheetTarget = useMemo<TileTarget | null>(() => {
+    if (!sheet) return null;
+    if (sheet.kind === "job") {
+      const job = jobs.find((j) => j.id === sheet.id);
+      return job ? { kind: "job", day: sheet.day, job } : null;
+    }
+    const visit = appointments.find((a) => a.id === sheet.id);
+    return visit ? { kind: "visit", day: sheet.day, visit } : null;
+  }, [sheet, jobs, appointments]);
 
   const byDay = useMemo(() => {
     const m = new Map<string, DayData>();
@@ -574,6 +597,8 @@ export function CalendarView({
         sub: [job.customers?.name, pos].filter(Boolean).join(" · ") || null,
         color: JOB_GRID_TONE,
         href: `/jobs/${job.id}`,
+        // Staff tap the block for its day, its time and its crew (the tile's sheet); Open Job is inside.
+        ...(canEdit ? { tapId: `job:${job.id}` } : {}),
       });
     }
     /* Jobs drawn on THIS day, so an appointment that became one isn't drawn beside itself. */
@@ -627,9 +652,11 @@ export function CalendarView({
         /* STRAIGHT TO THE THING, from every view. Erik, on a booking whose length was wrong:
            "i now have now way to adjust the time." There WAS a way — tap the pill, land in the day
            drill, find the edit pencil — but a control you have to already know about is not a way,
-           it is a rumour. The record page carries the full form (start, end, type, notes), so the
-           pill goes there and the fix is one tap from seeing the problem. */
+           it is a rumour. Staff get the tile's sheet (the day, the start, the length and who's
+           going, with Open Visit inside), so the fix is on the tap that saw the problem; the record
+           page is the href underneath. */
         href: `/appointments/${a.id}`,
+        ...(canEdit ? { tapId: `visit:${a.id}` } : {}),
       });
     }
     for (const t of data.tasks) {
@@ -1056,6 +1083,7 @@ export function CalendarView({
                   initialNow={gridNow}
                   onDayClick={(ds) => nav("day", ds, { push: true })}
                   placement={target.prop}
+                  onEventTap={canEdit ? onEventTap : undefined}
                 />
               </Card>
             );
@@ -1081,6 +1109,7 @@ export function CalendarView({
                 tz={tz}
                 initialNow={gridNow}
                 placement={target.prop}
+                onEventTap={canEdit ? onEventTap : undefined}
               />
             </Card>
           )}
@@ -1097,8 +1126,28 @@ export function CalendarView({
             </button>
           )}
           {/* The drill cards below keep every create/edit/move affordance. */}
-          <DayDetail dayK={anchorK} data={byDay.get(anchorK)} members={members} picker={picker} tz={tz} />
+          <DayDetail
+            dayK={anchorK}
+            data={byDay.get(anchorK)}
+            members={members}
+            picker={picker}
+            tz={tz}
+            workDay={{ start: workDayStart, end: workDayEnd }}
+            onOpenJob={canEdit ? (jobId) => setSheet({ kind: "job", id: jobId, day: anchorK }) : undefined}
+          />
         </>
+      )}
+
+      {/* THE TILE'S SHEET — day, time, crew — for the block just tapped (the office only). */}
+      {canEdit && (
+        <ScheduleTileSheet
+          target={sheetTarget}
+          onClose={() => setSheet(null)}
+          tz={tz}
+          workDay={{ start: workDayStart, end: workDayEnd }}
+          team={members}
+          canEdit={canEdit}
+        />
       )}
 
       {/* Undo — the safety net under a tray placement. */}
@@ -1281,12 +1330,17 @@ function DayDetail({
   members = [],
   picker,
   tz,
+  workDay,
+  onOpenJob,
 }: {
   dayK: string;
   data?: DayData;
   members?: CalMember[];
   picker: SchedulePicker;
   tz: string;
+  workDay: { start: string; end: string };
+  /** The office: a job card opens the tile's sheet (day, time, crew) for this day. */
+  onOpenJob?: (jobId: string) => void;
 }) {
   const appts = data?.appts ?? [];
   const jobsOn = data?.jobs ?? [];
@@ -1329,11 +1383,15 @@ function DayDetail({
                 job_number: job.job_number,
                 status: job.status,
                 scheduled_start: job.scheduled_start,
+                scheduled_end: job.scheduled_end,
+                planned_minutes: job.planned_minutes ?? null,
                 assigned_to: job.assigned_to ?? null,
                 customers: job.customers ?? null,
               }}
               members={members}
-              date={dayK}
+              tz={tz}
+              workDay={workDay}
+              onOpen={onOpenJob ? () => onOpenJob(job.id) : undefined}
             />
           ))}
           {!jobsOn.length && (

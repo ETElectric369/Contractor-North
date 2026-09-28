@@ -50,6 +50,9 @@ export interface TimeGridEvent {
   /** Full Tailwind class string for the pill (border/bg/text + modifiers). */
   color: string;
   href?: string;
+  /** With the grid's onEventTap, a tap opens the caller's sheet for this pill instead of following
+   *  href (the schedule's tile sheet). Absent, the pill is the link it always was. */
+  tapId?: string;
 }
 
 export interface TimeGridAllDay {
@@ -128,6 +131,7 @@ function TimeGridInner({
   initialNow,
   onDayClick,
   placement,
+  onEventTap,
 }: {
   days: TimeGridDay[];
   events: TimeGridEvent[];
@@ -153,6 +157,9 @@ function TimeGridInner({
    * armed days wear a target ring and say what tapping them will do. See lib/schedule/placement-plan.
    */
   placement?: { label: string; onPlace: (dayStr: string) => void };
+  /** A pill carrying a tapId calls this (with its day) instead of following its href: the schedule's
+   *  tile sheet. Never while armed, where every tap on a day places. */
+  onEventTap?: (tapId: string, dayStr: string) => void;
 }) {
   const [now, setNow] = useState<Now | null>(initialNow ?? null);
   useEffect(() => {
@@ -393,6 +400,21 @@ function TimeGridInner({
                       style={style}
                       title={`${placement.label} — ${d.label}`}
                       className={`${cls} text-left opacity-60`}
+                    >
+                      {pillBody(e.label, e.sub)}
+                    </button>
+                  ) : onEventTap && e.tapId ? (
+                    /* THE TILE OPENS ITS SHEET: the day, the time and who's on it, where the block
+                       is (Erik: "on the schedule itself there should be a time adjustment inside the
+                       job itself with the crew picker"). The record is one more tap, inside. */
+                    <button
+                      key={e.id}
+                      type="button"
+                      onClick={() => onEventTap(e.tapId!, d.dayStr)}
+                      style={style}
+                      title={title}
+                      aria-label={`${title}: day, time and crew`}
+                      className={`${cls} text-left hover:opacity-80`}
                     >
                       {pillBody(e.label, e.sub)}
                     </button>

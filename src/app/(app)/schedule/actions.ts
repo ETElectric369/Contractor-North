@@ -749,6 +749,39 @@ export async function setJobTimes(
   return writeScheduleRanges(supabase, jobId, segments, start === undefined ? undefined : start.slice(0, 5), mirror, length);
 }
 
+/**
+ * CLEAR THE DATE: the job goes back to waiting for a day (the schedule's rail), from the tile's sheet.
+ * The plan leaves; a day already WORKED stays on the calendar as history (the Herringbone rule), a
+ * Scheduled job is To Be Scheduled again (one already under way keeps its status), a pending
+ * pick-a-date link is withdrawn so a customer's later tap can't put back a day the office just
+ * cleared, and the Google event goes. What was kept or withdrawn comes back in `note`.
+ */
+export async function clearJobDate(jobId: string): Promise<Result & { note?: string; kept?: string[] }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+  const { segments, error: segErr } = await loadJobDaySegments(supabase, jobId);
+  if (segErr) return { ok: false, error: segErr };
+  const tz = await orgTimezone(supabase);
+  const w = segments.length ? await workedDaysForJob(supabase, jobId, tz) : { days: [] };
+  if ("error" in w) return { ok: false, error: w.error };
+  const plan = keepWorkedDays(segments, [], w.days, todayStrInTz(tz));
+  const res = await writeScheduleRanges(supabase, jobId, plan.segments, undefined, "none");
+  if (!res.ok) return { ok: false, error: res.error };
+  await supabase.from("jobs").update({ status: "to_be_scheduled" }).eq("id", jobId).eq("status", "scheduled").select("id");
+  const { data: withdrawn } = await supabase
+    .from("schedule_proposals")
+    .update({ status: "cancelled" })
+    .eq("job_id", jobId)
+    .eq("status", "pending")
+    .select("id");
+  const notes = [
+    plan.kept.length ? keptLine(plan.kept) : null,
+    withdrawn?.length ? "The customer's pick-a-date link was withdrawn." : null,
+  ].filter(Boolean);
+  return { ok: true, kept: plan.kept, ...(notes.length ? { note: notes.join(" ") } : {}) };
+}
+
 
 /**
  * HOW LONG WILL THIS FLOATER TAKE.
@@ -830,6 +863,34 @@ export async function placeAppointmentOnDay(
 
   const res = await rescheduleAppointment(id, startsAt, endsAt);
   return res.ok ? { ok: true } : res;
+}
+
+/**
+ * A VISIT'S START AND END, from the schedule tile's sheet: the same time controls a job has
+ * (lib/schedule/job-block, components/block-time-controls). Wall-clock in, the instants built here in
+ * the company's timezone on that date (daylight saving included), never on the phone's clock. Written
+ * through rescheduleAppointment, the visit's one time writer: it withdraws a pending pick-a-time link
+ * (a stale tap can't move it back), turns "pending pick" into scheduled, and pushes Google. `endDay`
+ * is for a visit over several days; the end then falls on that day.
+ */
+export async function setVisitTimes(
+  id: string,
+  t: { day: string; start: string; end: string; endDay?: string | null },
+): Promise<Result & { note?: string }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const day = String(t?.day ?? "");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return { ok: false, error: "Pick a day." };
+  const s = readHm(t?.start);
+  const e = readHm(t?.end);
+  if (s == null || e == null) return { ok: false, error: "Pick a start and an end." };
+  const endDay = t.endDay && /^\d{4}-\d{2}-\d{2}$/.test(t.endDay) && t.endDay >= day ? t.endDay : day;
+  if (endDay === day && e <= s) return { ok: false, error: "The end has to be after the start." };
+  const tz = await orgTimezone(ctx.supabase);
+  const startsAt = tzDateTimeUtc(day, String(t.start).slice(0, 5), tz);
+  const endsAt = tzDateTimeUtc(endDay, String(t.end).slice(0, 5), tz);
+  if (!startsAt || !endsAt) return { ok: false, error: "I couldn't read that day." };
+  return rescheduleAppointment(id, startsAt, endsAt);
 }
 
 /**

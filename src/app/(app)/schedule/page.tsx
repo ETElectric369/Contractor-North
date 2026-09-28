@@ -290,7 +290,7 @@ export default async function SchedulePage({
         </aside>
         {/* The id is the landing pad for the rail's "tap the day" jump on phones — see place-rail. */}
         <div id="schedule-calendar" className="min-w-0 scroll-mt-4">
-          <CalendarPanel />
+          <CalendarPanel canEdit={isStaffRole(me.role)} />
         </div>
       </div>
     </PlacementProvider>

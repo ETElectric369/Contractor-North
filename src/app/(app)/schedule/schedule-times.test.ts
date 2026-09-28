@@ -250,6 +250,47 @@ describe("setJobTimes says no in words", () => {
   });
 });
 
+describe("Clear The Date", () => {
+  it("the plan leaves, the worked day stays, and a Scheduled job waits for a day again", async () => {
+    state.db.jobs.push({ id: "j10", status: "scheduled", scheduled_start: at("2026-09-28", "10:00"), scheduled_end: at("2026-09-28", "12:00"), planned_minutes: null });
+    state.db.job_schedule_segments.push(
+      { job_id: "j10", start_date: "2026-09-22", end_date: "2026-09-22" },
+      { job_id: "j10", start_date: "2026-09-28", end_date: "2026-09-28" },
+    );
+    state.db.time_entries.push({ id: "t1", job_id: "j10", clock_in: "2026-09-22T17:00:00Z" });
+    state.db.schedule_proposals.push({ id: "p1", job_id: "j10", status: "pending" });
+
+    const res = await actions.clearJobDate("j10");
+    expect(res.ok).toBe(true);
+    expect(res.kept).toEqual(["2026-09-22"]);
+    expect(res.note).toContain("Kept Sep 22 on the calendar");
+    expect(res.note).toContain("pick-a-date link was withdrawn");
+    expect(job("j10")).toMatchObject({ scheduled_start: null, scheduled_end: null, status: "to_be_scheduled" });
+    expect(segs("j10")).toEqual(["2026-09-22..2026-09-22"]);
+    expect(state.db.schedule_proposals[0].status).toBe("cancelled");
+  });
+
+  it("a job already under way keeps its status", async () => {
+    state.db.jobs.push({ id: "j11", status: "in_progress", scheduled_start: at("2026-09-28", "10:00"), scheduled_end: at("2026-09-28", "12:00"), planned_minutes: null });
+    state.db.job_schedule_segments.push({ job_id: "j11", start_date: "2026-09-28", end_date: "2026-09-28" });
+    expect((await actions.clearJobDate("j11")).ok).toBe(true);
+    expect(job("j11").status).toBe("in_progress");
+    expect(job("j11").scheduled_start).toBeNull();
+  });
+});
+
+describe("a visit's times, on the company's clock", () => {
+  it("9 to 11 on Mon Nov 2 (after the clocks go back) goes to the visit's own writer as 17:00Z–19:00Z", async () => {
+    expect(await actions.setVisitTimes("a1", { day: "2026-11-02", start: "09:00", end: "11:00" })).toEqual({ ok: true });
+    expect(rescheduleAppointment).toHaveBeenCalledWith("a1", "2026-11-02T17:00:00.000Z", "2026-11-02T19:00:00.000Z");
+  });
+
+  it("an end before the start is refused in words, and the writer is never called", async () => {
+    expect(await actions.setVisitTimes("a1", { day: "2026-09-28", start: "11:00", end: "09:00" })).toEqual({ ok: false, error: "The end has to be after the start." });
+    expect(rescheduleAppointment).not.toHaveBeenCalled();
+  });
+});
+
 describe("the fitter: where \"morning\" lands", () => {
   const morning = (jobIds: string[] = ["j058"]) =>
     actions.planDayTimes("2026-09-28", [{ minutes: 120 }], "09:00", { jobIds });

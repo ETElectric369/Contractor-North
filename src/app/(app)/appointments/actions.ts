@@ -1489,3 +1489,42 @@ export async function openJobInspector(jobId: string): Promise<Result & { redire
   revalidatePath(`/jobs/${jobId}`);
   return { ok: true, id: appt.id, redirect: `/appointments/${appt.id}` };
 }
+
+/**
+ * WHO'S GOING ON A VISIT, from the schedule tile's sheet. A visit carries ONE person
+ * (appointments.assigned_to), so this puts one on, swaps them, or takes them off (null): the visit's
+ * twin of the job crew chips. Only someone in this company (the caller's own RLS read of profiles,
+ * never another company's id), written with the id back (the silent-write law), the newly put-on
+ * person told on the bell and by push the way a new booking tells them, and the Google event follows.
+ */
+export async function setAppointmentAssignee(id: string, profileId: string | null): Promise<Result> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+  const who = profileId ? String(profileId) : null;
+  if (who) {
+    const { data: person } = await supabase.from("profiles").select("id").eq("id", who).maybeSingle();
+    if (!person) return { ok: false, error: "That person isn't on this team, so nobody changed." };
+  }
+  const { data: before } = await supabase.from("appointments").select("assigned_to, title").eq("id", id).maybeSingle();
+  if (!before) return { ok: false, error: "That visit isn't available, so nobody changed." };
+  const { data: wrote, error } = await supabase
+    .from("appointments")
+    .update({ assigned_to: who, updated_at: new Date().toISOString() })
+    .eq("id", id)
+    .select("id");
+  if (error) return { ok: false, error: dbError(error) };
+  if (!wrote?.length) return { ok: false, error: "That visit isn't available, so nobody changed." };
+
+  const was = (before as { assigned_to?: string | null }).assigned_to ?? null;
+  if (who && who !== was && who !== ctx.userId) {
+    const orgId = ctx.orgId;
+    const title = (before as { title?: string | null }).title ?? null;
+    after(() => notifyPeople(orgId, [who], "assigned", { title: "New appointment assigned", body: title, url: `/appointments/${id}` }));
+  }
+  await pushCalendarItem("appointment", id); // live Google push (fire-safe)
+  revalidatePath("/schedule");
+  revalidatePath("/planner"); // My Day shows today's appointments, and whose they are
+  revalidatePath(`/appointments/${id}`);
+  return { ok: true };
+}
