@@ -285,7 +285,7 @@ describe("well-formed", () => {
       // a person can see on a job is the tab, which no longer clocks anyone in.
       const s = findStep("run-job");
       for (const c of [STRANGER, KNOWN])
-        for (const say of [s.say, s.plain!.say]) {
+        for (const say of [s.say, s.plain!.say!]) {
           const line = sayOf(say, c);
           expect(line).toContain("tap Clock In at the top of the job");
           expect(line).not.toMatch(/\bTIME\b|Time tab/);
