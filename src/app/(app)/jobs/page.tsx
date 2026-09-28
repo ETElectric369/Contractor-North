@@ -5,7 +5,9 @@ import { createClient } from "@/lib/supabase/server";
 import { PageHeader, EmptyState } from "@/components/page-header";
 import { Card } from "@/components/ui/card";
 import { ACTIVE_JOB_STATUSES, JOB_STATUS_PRIORITY, jobStatusLabel } from "@/lib/job-status";
-import { listNewJobCustomerOptions, toNewJobCustomerOptions } from "@/lib/schedule-options";
+import { listNewJobCustomerOptions, readUsualBillingKind, toNewJobCustomerOptions, unitStreetKeys } from "@/lib/schedule-options";
+import { getOrgSettings, workDayWindowHm } from "@/lib/org-settings";
+import { todayStrInTz } from "@/lib/tz";
 import { jobBillingStatus, type JobBillingInvoice, type JobBillingStatus } from "@/lib/analytics/money-metrics";
 import { NewJobButton } from "../schedule/new-job-button";
 import { JobImportButton } from "./job-import-button";
@@ -47,7 +49,7 @@ export default async function JobsPage({
   // invoices (the same 4 fields the AR/billing SSOT math reads — RLS scopes the
   // org), fired in parallel with the jobs query: no N+1, no jobs→invoices waterfall.
   const needBillingTags = !status || status === "complete";
-  const [{ data: jobsData }, { data: customerRows }, { data: me }, invoiceRes, milestoneRes] = await Promise.all([
+  const [{ data: jobsData }, { data: customerRows }, { data: me }, invoiceRes, milestoneRes, { data: orgRow }, usualBilling, { data: unitRows }] = await Promise.all([
     query,
     listNewJobCustomerOptions(supabase),
     user ? supabase.from("profiles").select("role").eq("id", user.id).maybeSingle() : Promise.resolve({ data: null }),
@@ -66,7 +68,20 @@ export default async function JobsPage({
     needBillingTags
       ? supabase.from("payment_milestones").select("job_id").is("invoice_id", null).limit(1000)
       : Promise.resolve({ data: null }),
+    // NEW JOB'S DEFAULTS (W1-22), riding the same wave: the company's clock (its timezone and
+    // work-day start: a blank Start Time is all day from there), the kind of billing most of its
+    // jobs use, and the streets whose jobs carry a unit (the "add a unit" hint). RLS scopes all three.
+    supabase.from("organizations").select("settings").limit(1).maybeSingle(),
+    readUsualBillingKind(supabase),
+    supabase.from("jobs").select("address, unit").not("unit", "is", null).limit(2000),
   ]);
+  const orgSettings = (orgRow as { settings?: unknown } | null)?.settings;
+  const newJobDefaults = {
+    workDay: workDayWindowHm(orgSettings),
+    todayStr: todayStrInTz(getOrgSettings(orgSettings).timezone),
+    usualBilling,
+    unitStreets: unitStreetKeys((unitRows ?? []) as { address?: string | null; unit?: string | null }[]),
+  };
   const isStaff = isStaffRole((me as { role?: string } | null)?.role ?? "");
   // id/name + the one-line address so picking a customer prefills the site address.
   const customers = toNewJobCustomerOptions(customerRows);
@@ -122,7 +137,7 @@ export default async function JobsPage({
         <div className="flex items-center gap-2">
           {isStaff && <JobImportButton />}
           {/* createJob is requireStaff: a tech's New Job failed on Save. */}
-          {isStaff && <NewJobButton customers={customers} />}
+          {isStaff && <NewJobButton customers={customers} {...newJobDefaults} />}
         </div>
       </PageHeader>
 
@@ -148,7 +163,7 @@ export default async function JobsPage({
           title={!status && allJobs.length > 0 ? "No active jobs" : "No jobs"}
           description={isStaff ? "Create a job to get started." : "The office adds your jobs."}
         >
-          {isStaff && <NewJobButton customers={customers} />}
+          {isStaff && <NewJobButton customers={customers} {...newJobDefaults} />}
         </EmptyState>
       ) : (
         <Card className="overflow-hidden">

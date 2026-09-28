@@ -54,7 +54,6 @@ export function JobActionDock({
   isDrawBilled,
   customers,
   templates,
-  workDay,
   taskPhotos = false,
 }: {
   job: any;
@@ -70,8 +69,6 @@ export function JobActionDock({
   isDrawBilled: boolean;
   customers: { id: string; name: string }[];
   templates: { id: string; name: string }[];
-  /** Org work-day window (workDayWindowHm) for the Edit Job modal's time defaults. */
-  workDay?: { start: string; end: string };
   /** The database holds photos on tasks (0358): the Photo slot's toast then offers Make It A Task. */
   taskPhotos?: boolean;
 }) {
@@ -115,7 +112,7 @@ export function JobActionDock({
         {viewerIsStaff && (
           <div className="ml-auto shrink-0">
             <JobManageMenu jobNumber={job.job_number} deleteJob={deleteJob.bind(null, job.id)} triggerClassName={ICON_BTN}>
-              <JobEditButton menuItem job={job as Job} customers={customers} techs={techs} templates={templates} workDay={workDay} />
+              <JobEditButton menuItem job={job as Job} customers={customers} templates={templates} />
               {schedulable && (
                 <FinishJobButton
                   menuItem

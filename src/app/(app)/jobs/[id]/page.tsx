@@ -27,7 +27,6 @@ import {
   formatDuration,
   formatTime,
   hoursBetween,
-  initials,
   formatCityStateZip,
   formatFullAddress,
   unitLine,
@@ -72,6 +71,7 @@ import { PaymentScheduleCard } from "./payment-schedule-card";
 import { ContractCard } from "./contract-card";
 import { LienInsuranceCard } from "./lien-insurance-card";
 import { JobTextBox } from "./job-description";
+import { JobCrewCard } from "./job-crew-card";
 import { computeJobProgress, livePurchaseOrders } from "@/lib/job-progress-math";
 import { signDocumentUrls } from "@/lib/signed-docs";
 import { documentsForViewer } from "@/lib/tech-documents";
@@ -365,8 +365,9 @@ export default async function JobDetailPage({
     // would hand every tech the whole crew's pay + bill rates — "the modal returns
     // null for non-staff" is not a serialization defense. paid_by_draw (0286) tells the add-time
     // modal to hide the pay-rate override for the owner, whose shifts have no pay rate.
+    // `active` (not money) lets the Overview's crew card offer only people still on the team.
     viewerIsStaff
-      ? supabase.from("profile_pay").select("id, full_name, home_address, hourly_rate, bill_rate, paid_by_draw").order("full_name")
+      ? supabase.from("profile_pay").select("id, full_name, home_address, hourly_rate, bill_rate, paid_by_draw, active").order("full_name")
       : supabase.from("profile_pay").select("id, full_name, home_address").order("full_name"),
     supabase.from("job_codes").select("*").order("code"),
     supabase.from("material_lists").select("id, name").order("created_at", { ascending: false }).limit(100),
@@ -1196,22 +1197,21 @@ export default async function JobDetailPage({
             </CardContent>
           </Card>
 
-          <Card>
-            <CardContent className="py-5">
-              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Assigned staff</div>
-              <div className="flex flex-wrap gap-2">
-                {(staff ?? []).length === 0 && <span className="text-sm text-slate-400">Unassigned</span>}
-                {(staff ?? []).map((s: any) => (
-                  <span key={s.id} className="flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1 text-sm text-slate-700">
-                    <span className="flex h-6 w-6 items-center justify-center rounded-full bg-brand text-[10px] font-semibold text-white">
-                      {initials(s.full_name)}
-                    </span>
-                    {s.full_name}
-                  </span>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
+          {/* THE CREW (W1-22): the office puts people on and takes them off right here (setJobCrew,
+              the one crew writer, which rings the bell for someone new); the crew reads the chips. */}
+          <JobCrewCard
+            jobId={j.id}
+            crew={((j.assigned_to ?? []) as string[])
+              .map((pid) => ((staff ?? []) as any[]).find((s) => s.id === pid))
+              .filter(Boolean)
+              .map((s: any) => ({ id: String(s.id), full_name: s.full_name ?? null }))}
+            team={
+              viewerIsStaff
+                ? ((techs ?? []) as any[]).filter((t) => t.active !== false).map((t) => ({ id: String(t.id), full_name: t.full_name ?? null }))
+                : []
+            }
+            viewerIsStaff={viewerIsStaff}
+          />
 
           {/* SUBS & CONTACTS: the list is job information a tech needs (who the sub is, the
               inspector's number); linking and unlinking are staff writes (job_contacts). The
@@ -2066,9 +2066,9 @@ export default async function JobDetailPage({
         )}
       </div>
 
-      {/* The action dock — one sticky glass bar replacing the old 7-control row:
-          TIME (the only filled button) · Photo · Call · Navigate · Manage ⋯ (Add Cost
-          moved to the Costs tab's header, one chip away). */}
+      {/* The action dock — one sticky glass bar: TIME (the only filled button, the job's one
+          clock) · Photo · Call · Navigate · Manage ⋯ (the office's Edit Job, Finish Job, Delete
+          Job; a tech's dock has no Manage). Add Cost is the Costs tab's header, one chip away. */}
       <JobActionDock
         job={j}
         taskPhotos={jobTasks.stamps}
@@ -2090,7 +2090,6 @@ export default async function JobDetailPage({
         /* Job Codes off: no code picker is left to limit, so Edit Job draws no template select
            (updateJob only writes code_template_id when the field is sent: the stored one stays). */
         templates={on("job_codes") ? ((codeTemplates ?? []) as { id: string; name: string }[]) : []}
-        workDay={workDay}
       />
 
       {/* THE STRIP FOLLOWS THE URL (cn-v945). <Tabs urlSync> re-syncs its active tab whenever
