@@ -25,7 +25,8 @@ import { getCrewStatus } from "@/lib/crew-status";
 import { firstNameOf, pillColorForPerson } from "@/lib/employee-color";
 import { TimecardStack, type Grouping, type StackEntry } from "./timecard-stack";
 import { hmToMin } from "@/lib/tz";
-import { AddEntryButton } from "../timeclock/add-entry-button";
+import { AddTimeEntry, type AddJob } from "./add-time-entry";
+import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 import { EditEntryButton } from "./edit-entry-button";
 import { OpenEntryEditor } from "./open-entry-editor";
 import { familyWasConverted, splitFamilies, splitNeighbors } from "@/lib/split-family";
@@ -34,7 +35,7 @@ import { jobLabel } from "@/lib/schedule-options";
 import { LONG_SHIFT_HOURS, clockDoorWords, isLongOpenShift } from "@/lib/long-shift";
 import { loadShiftChains } from "@/lib/shift-chain";
 import { reportError } from "@/lib/observe";
-import { NO_JOB_READ_CAP, readNoJobHours } from "@/lib/no-job-hours";
+import { NO_JOB_READ_CAP, companyTimeCode, readNoJobHours } from "@/lib/no-job-hours";
 import { noJobAdvice } from "@/lib/action-items/no-job-hours-item";
 import { CompanyTimeButton } from "./company-time-button";
 
@@ -135,12 +136,16 @@ export default async function TimecardsPage({
     redirect("/timeclock");
   }
 
-  const [{ data: members }, { data: jobCodes }, { data: jobs }, { data: org }, crew, teammates] = await Promise.all([
+  /** Add Time Entry's Job list reaches back this far for a FINISHED job (the one read Needs You uses
+   *  for "done lately": complete, touched in the last 30 days). Older: the job's own Time tab. */
+  const doneSince = new Date(Date.now() - 30 * 86_400_000).toISOString();
+  const [{ data: members }, { data: jobCodes }, { data: jobs }, { data: org }, crew, teammates, { data: activeJobs }, { data: doneJobs }] = await Promise.all([
     // hourly_rate + bill_rate feed the edit/add modals' pay-rate anchor + the
     // bill-rate tripwire. Safe to select flat here — the page redirects non-staff
     // above, so the rates never serialize into a tech's props.
     supabase.from("profile_pay").select("id, full_name, hourly_rate, bill_rate, paid_by_draw").eq("active", true).order("full_name"),
     supabase.from("job_codes").select("*").eq("active", true).order("code"),
+    // The EDITOR's and the Split sheet's job list, as it was (the 50 newest, any status).
     supabase
       .from("jobs")
       .select("id, job_number, name")
@@ -152,7 +157,23 @@ export default async function TimecardsPage({
     getCrewStatus(supabase),
     // Crew & Payroll's door below is quiet until a second person, as on the dock (rule j).
     countTeammates(supabase, me).catch(() => null),
+    /* ADD TIME ENTRY'S JOB LIST: every job still in flight (no cap: a cap on newest-first drops the
+       OLDEST running jobs, the long ones a crew is most likely on, the Timeclock's "Not all are
+       listed" lesson), then the ones finished in the last 30 days. Labels and schedule only: no
+       money column rides along. */
+    supabase
+      .from("jobs")
+      .select("id, job_number, name, address, status, scheduled_start, customers(name)")
+      .in("status", ACTIVE_JOB_STATUSES)
+      .order("created_at", { ascending: false }),
+    supabase
+      .from("jobs")
+      .select("id, job_number, name, address, status, scheduled_start, customers(name)")
+      .eq("status", "complete")
+      .gte("updated_at", doneSince)
+      .order("updated_at", { ascending: false }),
   ]);
+  const addJobs = [...((activeJobs ?? []) as AddJob[]), ...((doneJobs ?? []) as AddJob[])];
   // Render times in the BUSINESS timezone, not the UTC server's, so the list
   // matches the (browser-local) edit modal instead of being hours off.
   const orgSettings = getOrgSettings((org as any)?.settings);
@@ -719,16 +740,19 @@ export default async function TimecardsPage({
           approve anything. The setting behind it left Settings too. */}
       <PageHeader title="Timecards" description="Review your crew's hours by week.">
         <div className="flex flex-wrap items-center gap-2">
-          <AddEntryButton
+          {/* THE ONE ADD-HOURS FORM (Wave 2): six fields, the Job started where the schedule put
+              the person that day, never on "No job" (add-time-entry.tsx). Never switched off. */}
+          <AddTimeEntry
             isStaff
             /* Opens on the viewer BY NAME. Erik read his own name twice in this picker — once as
                "Me" and once as himself — and took it for two records of one man. */
             viewerId={user?.id}
             jobCodesEnabled={orgSettings.timeclock_job_codes}
-            members={members ?? []}
+            members={((members ?? []) as { id: string; full_name: string | null }[]).map((m) => ({ id: m.id, full_name: m.full_name }))}
             jobCodes={(jobCodes ?? []) as JobCode[]}
-            jobs={jobs ?? []}
+            jobs={addJobs}
             tz={tz}
+            companyTimeCode={companyTimeCode((jobCodes ?? []) as JobCode[])}
           />
           <Link
             href={hrefFor(offset + 1)}

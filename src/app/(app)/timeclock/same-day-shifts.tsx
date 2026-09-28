@@ -14,12 +14,18 @@ import { putShiftOnJob, shiftsOnDay, takeShiftOffJob, type DayShift, type DayShi
  *
  * On 9/19 the office billing 85 Whitney added Brian's 9/11 by hand. Brian's own clock punch for
  * that day was already in the book, 10:31 AM to 6:57 PM, on no job, and nothing on the form said
- * so. Payroll paid both. So the forms that add hours (Add Entry on Timecards, the job's Add Time
- * Entry, Log Hours) show the person's shifts on the day picked, and a shift on no job gets one tap
- * that puts it on the job with its real clock times: Put This On <job>. Nothing is decided for
- * anyone: the tap is the office's, the form still saves if they meant a second shift, and the
+ * so. Payroll paid both. So the forms that add hours (Add Time Entry, on Timecards and on the job's
+ * Time tab, and Log Hours) show the person's shifts on the day picked, and a shift on no job gets
+ * one tap that puts it on the job with its real clock times: Put This On <job>. Nothing is decided
+ * for anyone: the tap is the office's, the form still saves if they meant a second shift, and the
  * database refuses one that overlaps (0360) in words that name the shift.
+ *
+ * The same read says where the schedule put the person that day (Wave 2): Add Time Entry starts its
+ * Job field there (onRead), and a day the office marked them off says so here.
  */
+
+/** The line a day marked off on the schedule gets (0170's OFF row). */
+export const OFF_THAT_DAY = "Marked off that day on the schedule.";
 
 const at = (iso: string, tz: string) =>
   new Date(iso).toLocaleTimeString("en-US", { timeZone: tz, hour: "numeric", minute: "2-digit" }).replace(/ /g, " ");
@@ -69,7 +75,11 @@ export function SameDayShiftsList({
    *  shift's editor is up, so two modals never answer one Back. */
   onOpenShift?: (s: DayShift) => void;
 }) {
-  if (!data.shifts.length) return null;
+  if (!data.shifts.length) {
+    // Nothing on the day, but the office marked this person off: said, so a day off is never
+    // mistaken for a day nobody planned (and the form never guesses a job for it).
+    return data.offThatDay ? <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">{OFF_THAT_DAY}</p> : null;
+  }
   const first = data.name.split(/\s+/)[0] || data.name;
   const anyNoJob = data.shifts.some((s) => s.noJob && !s.billedBy);
   return (
@@ -122,10 +132,11 @@ export function SameDayShiftsList({
         {anyNoJob && data.forJob
           ? `A shift on no job is usually this same work. Put it on ${data.forJob.label} instead of adding the hours again.`
           : anyNoJob
-            ? // Only Add Entry has no job yet, and its Job field sits below this list.
-              "A shift on no job is usually this same work. Pick the job below to put it there instead of adding the hours again."
+            ? // Only Add Time Entry on Timecards can have no job yet, and its Job field sits above this list.
+              "A shift on no job is usually this same work. Pick the job above to put it there instead of adding the hours again."
             : "Hours that overlap these would be counted twice."}
       </p>
+      {data.offThatDay && <p className="mt-1 text-xs text-amber-800">{OFF_THAT_DAY}</p>}
     </div>
   );
 }
@@ -134,7 +145,9 @@ export function SameDayShiftsList({
  * The live list: reads shiftsOnDay whenever the person, the day or the job changes (a short pause
  * first, so typing a date does not fire a read per keystroke). `refreshKey` re-reads after a
  * refusal; `onPlaced` hears a Put This On that landed, with its sentence and the shift it moved (the
- * form closes on it, and says what it typed that the shift did not get: notCarriedWords).
+ * form closes on it, and says what it typed that the shift did not get: notCarriedWords). `onRead`
+ * hears every answer for the person and day on screen (never a stale one): Add Time Entry starts its
+ * Job field on where the schedule put them.
  */
 export function SameDayShifts({
   profileId,
@@ -144,6 +157,7 @@ export function SameDayShifts({
   refreshKey = 0,
   onPlaced,
   onOpenShift,
+  onRead,
 }: {
   profileId: string;
   date: string;
@@ -152,12 +166,20 @@ export function SameDayShifts({
   refreshKey?: number;
   onPlaced?: (sentence: string, shift: DayShift) => void;
   onOpenShift?: (shift: DayShift) => void;
+  onRead?: (answer: DayShifts) => void;
 }) {
   const toast = useToast();
   const router = useRouter();
   const [data, setData] = useState<DayShifts | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const seq = useRef(0);
+  // The latest callback, so a new function each render never re-arms the read below.
+  const onReadRef = useRef(onRead);
+  onReadRef.current = onRead;
+  const take = (r: DayShifts) => {
+    setData(r);
+    onReadRef.current?.(r);
+  };
 
   useEffect(() => {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
@@ -168,13 +190,15 @@ export function SameDayShifts({
     const t = setTimeout(() => {
       shiftsOnDay({ profile_id: profileId || null, date, for_job_id: jobId })
         .then((r) => {
-          if (mine === seq.current) setData(r);
+          if (mine === seq.current) take(r);
         })
         .catch(() => {
-          if (mine === seq.current) setData({ ok: false, error: "Couldn't check this person's day just now." });
+          if (mine === seq.current) take({ ok: false, error: "Couldn't check this person's day just now." });
         });
     }, 250);
     return () => clearTimeout(t);
+    // `take` reads the callback through a ref, so it is not a dependency.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profileId, date, jobId, refreshKey]);
 
   if (!data) return null;
