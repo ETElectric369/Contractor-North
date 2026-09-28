@@ -94,7 +94,7 @@ export function helpRows({
   rows.push({
     key: "again",
     label: "Take The Setup Again",
-    sub: nortOn ? "The walk-through from the top. Change anything you told Nort." : "The setup questions from the top. Change any answer.",
+    sub: nortOn ? "Setup from the top. Change anything you told Nort." : "The setup questions from the top. Change any answer.",
     request: nortOn ? "tour" : "questions",
   });
   return rows;

@@ -79,8 +79,11 @@ export const isServiceCall = (t: string | null | undefined): boolean => t === "s
 export const isInspectionType = (t: string | null | undefined): boolean =>
   (INSPECTION_TYPES as readonly string[]).includes(t ?? "");
 
+/* ONE WORD FOR THE SITE VISIT (W2-10): the visit before a price is a Walk-Through wherever staff or
+   Nort read it. "Inspection" stays only for the city's inspection (the permit, and the legacy
+   final_inspection rows). The stored value is still 'inspection': a word, not a data change. */
 const APPOINTMENT_TYPE_LABELS: Record<AppointmentType, string> = {
-  inspection: "Inspection",
+  inspection: "Walk-Through",
   final_inspection: "Final Inspection",
   service_call: "Service Call",
   job: "Job",

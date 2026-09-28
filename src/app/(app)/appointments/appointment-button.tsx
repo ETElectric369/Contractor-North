@@ -592,7 +592,7 @@ export function AppointmentButton({
 
           <div>
             <Label htmlFor="ap-title">Title</Label>
-            <Input id="ap-title" name="title" value={form.title} onChange={(e) => patch({ title: e.target.value })} placeholder="e.g. Rough-in inspection, estimate walk-through" required />
+            <Input id="ap-title" name="title" value={form.title} onChange={(e) => patch({ title: e.target.value })} placeholder="e.g. Walk-through at the Smiths', follow-up visit" required />
           </div>
 
           {!editing && (

@@ -56,7 +56,7 @@ beforeEach(() => {
     return { ok: true, id: "78fa75b1-8384-4148-8895-242846abcce5" };
   });
   rescheduleAppointment.mockImplementation(async (_id: string, start: string, end: string | null) => {
-    db.stored = { title: "Inspection — Tom Goodman", starts_at: start, ends_at: end, customers: null };
+    db.stored = { title: "Walk-Through: Tom Goodman", starts_at: start, ends_at: end, customers: null };
     return { ok: true };
   });
 });
@@ -66,11 +66,11 @@ const create = (input: Record<string, unknown>) =>
 
 describe("appointment.create — a spoken local time is stored as that local time", () => {
   it("10 AM Pacific in September is stored 17:00Z and read back as 10:00 AM", async () => {
-    const r = await create({ title: "Inspection — Tom Goodman", type: "inspection", starts_at: "2026-09-25T10:00" });
+    const r = await create({ title: "Walk-Through: Tom Goodman", type: "inspection", starts_at: "2026-09-25T10:00" });
     expect(r.ok).toBe(true);
     const fd = createAppointment.mock.calls[0][0] as FormData;
     expect(fd.get("starts_at_iso")).toBe("2026-09-25T17:00:00.000Z");
-    expect(r.recorded).toBe('Booked: "Inspection — Tom Goodman", Fri Sep 25 at 10:00 AM PDT, no customer linked.');
+    expect(r.recorded).toBe('Booked: "Walk-Through: Tom Goodman", Fri Sep 25 at 10:00 AM PDT, no customer linked.');
   });
 
   it("10 AM Pacific in December (standard time) is stored 18:00Z", async () => {
@@ -87,7 +87,7 @@ describe("appointment.create — a spoken local time is stored as that local tim
   });
 
   it("a stamped Z is honoured, and the read-back SAYS 3 AM, so it can't be confirmed as 10", async () => {
-    const r = await create({ title: "Inspection — Tom Goodman", starts_at: "2026-09-25T10:00:00Z" });
+    const r = await create({ title: "Walk-Through: Tom Goodman", starts_at: "2026-09-25T10:00:00Z" });
     expect(r.recorded).toContain("3:00 AM PDT");
   });
 
@@ -114,7 +114,7 @@ describe("appointment.update — the reschedule door converts the same way", () 
   it("an end on another day says its day; an end before the start is flagged, not read as normal (SI1)", async () => {
     const def = appointmentActions["appointment.update"];
     rescheduleAppointment.mockImplementationOnce(async (_id: string, start: string) => {
-      db.stored = { title: "Inspection", starts_at: start, ends_at: "2026-09-22T17:00:00.000Z", customers: null };
+      db.stored = { title: "Walk-Through", starts_at: start, ends_at: "2026-09-22T17:00:00.000Z", customers: null };
       return { ok: true };
     });
     const r = await def.handler(def.input.parse({ id: "a1", starts_at: "2026-09-24T09:00" }), ctx);
@@ -140,11 +140,11 @@ describe("appointment.update — the reschedule door converts the same way", () 
 describe("appointment.linkCustomer — the yes has a verb now", () => {
   it("links through the inspector's link door and reads the result back", async () => {
     linkAppointmentTo.mockResolvedValue({ ok: true, id: "a1" });
-    db.stored = { title: "Inspection — Tom Goodman", starts_at: "2026-09-25T17:00:00.000Z", ends_at: null, customers: { name: "Tom Goodman" } };
+    db.stored = { title: "Walk-Through: Tom Goodman", starts_at: "2026-09-25T17:00:00.000Z", ends_at: null, customers: { name: "Tom Goodman" } };
     const def = appointmentActions["appointment.linkCustomer"];
     const cid = "0a8dfe84-f1a4-4a8b-b8bd-df250eeb23b2";
     const r = await def.handler(def.input.parse({ id: "a1", customer_id: cid }), ctx);
     expect(linkAppointmentTo).toHaveBeenCalledWith("a1", "customer", cid);
-    expect(r.recorded).toBe('Linked: "Inspection — Tom Goodman", Fri Sep 25 at 10:00 AM PDT, customer "Tom Goodman".');
+    expect(r.recorded).toBe('Linked: "Walk-Through: Tom Goodman", Fri Sep 25 at 10:00 AM PDT, customer "Tom Goodman".');
   });
 });

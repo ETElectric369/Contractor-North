@@ -98,7 +98,8 @@ export function workKind(i: { kind?: "lead" | "job" | "appointment"; type?: stri
 /** Short enough to sit on a chip in a calendar cell. */
 export const KIND_LABEL: Record<WorkKind, string> = {
   job: "Job",
-  walkthrough: "Walk-through",
+  // The site visit's one word, the same as the appointment type's label (W2-10, lib/statuses).
+  walkthrough: "Walk-Through",
   service: "Service Call",
   office: "Office",
   quote: "Quote",
@@ -206,7 +207,7 @@ export function appointmentTypeFor(kind: string | null | undefined): string {
  *
  * "Site inspection: Matt Warren" on a day he booked as a full day of work is the app telling him
  * what he did, incorrectly, in the one place he goes to check. The label follows the kind, and a
- * walk-through keeps the wording it always had.
+ * walk-through is called one: "Walk-Through: Matt Warren" (W2-10; stored titles keep their words).
  */
 export function bookingTitle(kind: WorkKind, name: string): string {
   const who = String(name ?? "").trim() || "Visit";
@@ -216,7 +217,7 @@ export function bookingTitle(kind: WorkKind, name: string): string {
     case "office": return `Meeting: ${who}`;
     case "quote": return `Quote: ${who}`;
     case "call": return `Call ${who}`;
-    default: return `Site inspection: ${who}`;
+    default: return `Walk-Through: ${who}`;
   }
 }
 

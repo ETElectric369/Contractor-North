@@ -220,10 +220,11 @@ describe("the tag he chose is the tag that lands", () => {
   it("stops calling a full day of work a site inspection", () => {
     expect(bookingTitle("job", "Matt Warren")).toBe("Matt Warren");
     expect(bookingTitle("service", "Matt Warren")).toBe("Service call: Matt Warren");
-    expect(bookingTitle("walkthrough", "Matt Warren")).toBe("Site inspection: Matt Warren");
+    // The site visit's one word (W2-10): a new walk-through is titled as one.
+    expect(bookingTitle("walkthrough", "Matt Warren")).toBe("Walk-Through: Matt Warren");
   });
 
   it("never renders a nameless booking as a bare colon", () => {
-    expect(bookingTitle("walkthrough", "  ")).toBe("Site inspection: Visit");
+    expect(bookingTitle("walkthrough", "  ")).toBe("Walk-Through: Visit");
   });
 });

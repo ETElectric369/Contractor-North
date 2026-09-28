@@ -519,7 +519,7 @@ export default async function AppointmentCapturePage({
           visit that already holds one (under the Off line); Estimates off drops Start The Estimate. */}
       {showInspector && (
         <>
-          <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500">{viewerIsStaff && estimatesOn ? "Walk Through Or Estimate" : "Walk Through"}</h2>
+          <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500">{viewerIsStaff && estimatesOn ? "Walk-Through Or Estimate" : "Walk-Through"}</h2>
           {walkThrough && (
             <FeatureOffLine feature="leads" features={orgSettings.features} isOwner={(meRow as { role?: string } | null)?.role === "owner"} />
           )}

@@ -285,7 +285,7 @@ export function SetupInterview({
                 {nortOn ? (
                   <p className="text-sm text-slate-500">
                     That usually means I never got your trade, so there are no questions to draft yet.
-                    Take the walk-through again from Search Or Ask and tell me your trade &mdash; or
+                    Take setup again from Search Or Ask and tell me your trade &mdash; or
                     write them yourself under Settings &rarr; Playbook.
                   </p>
                 ) : (
@@ -402,7 +402,7 @@ export function SetupInterview({
             <li className="flex gap-3">
               <ArrowRight className="mt-0.5 h-4 w-4 shrink-0 text-brand" />
               <span>
-                <strong className="font-medium text-slate-900">This walk-through</strong>{" "}
+                <strong className="font-medium text-slate-900">This setup</strong>{" "}
                 {nortOn ? "is under Search Or Ask" : "is under Help, behind your initials"}. Take it again whenever you
                 want.
               </span>

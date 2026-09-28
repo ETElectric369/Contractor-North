@@ -19,10 +19,12 @@ describe("classifyLead — buckets", () => {
 });
 
 describe("classifyLead — the $20k gate", () => {
-  it("over threshold → site inspection required, no instant price (even for a plan-ready lead)", () => {
+  it("over threshold → needs a walk-through, no instant price (even for a plan-ready lead)", () => {
     const t = classifyLead({ hasPlans: true, plansApproved: "yes", estimateTotal: 25000, contact });
     expect(t.siteInspectionRequired).toBe(true);
     expect(t.showInstantPrice).toBe(false);
+    // The office's reason line says the site visit's one word (W2-10).
+    expect(t.reason).toBe("Over threshold ($25,000) — needs a walk-through");
   });
   it("exactly at the threshold is NOT over it", () => {
     expect(classifyLead({ hasPlans: true, estimateTotal: DEFAULT_SITE_INSPECTION_THRESHOLD }).siteInspectionRequired).toBe(false);

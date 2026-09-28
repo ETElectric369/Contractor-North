@@ -84,7 +84,7 @@ describe("the job's side doors", () => {
     expect(s).toContain("templates={viewerIsStaff ? (sheets ?? []) : sheetsWithoutMoney(sheets ?? [])}");
     expect(s).toMatch(/estimateHref=\{viewerIsStaff && estimatesOn \?/);
     // The heading names the estimate only for the people who get its door.
-    expect(s).toContain('{viewerIsStaff && estimatesOn ? "Walk Through Or Estimate" : "Walk Through"}');
+    expect(s).toContain('{viewerIsStaff && estimatesOn ? "Walk-Through Or Estimate" : "Walk-Through"}');
   });
 
   it("the job's Tasks card is the crew's too: the Overview and the Tasks tab render it for every role (0358)", () => {

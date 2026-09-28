@@ -1,5 +1,5 @@
 /**
- * Bucket logic for the Sales → Inspections tab — pure and unit-tested, because the tab's
+ * Bucket logic for the Sales → Walk-Throughs tab (/inspections) — pure and unit-tested, because the tab's
  * whole promise is TRUTHFUL buckets (Erik's design 2026-07-14: open work first, settled
  * paperwork files away like estimates do).
  *

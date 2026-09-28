@@ -210,11 +210,13 @@ export async function createInspectionNow(
          tapped the row's one-tap door, and got "Site inspection" — the third booking door off one
          lead, and the only one still discarding the declared kind. All three obey it now. */
       type: appointmentTypeFor((inq as { work_kind?: string | null } | null)?.work_kind),
+      // The stock title of a walk-through with no lead is the site visit's one word (W2-10); the
+      // STOCK lists below rename it once an address or a customer arrives.
       title: inq
         ? bookingTitle(workKind({ kind: "lead", workKind: (inq as { work_kind?: string | null }).work_kind }), inq.name)
-        : "Site inspection",
+        : "Walk-Through",
       starts_at: new Date().toISOString(), // now — an instant is an instant in any tz
-      status: "scheduled", // NOT completed: the capture (or "Mark inspection complete") finishes it
+      status: "scheduled", // NOT completed: the capture (or "Mark Walk-Through Done") finishes it
       // The WHOLE address, not just the street line — and the parts alongside it, so nothing
       // downstream has to re-parse a string to learn which city the work is in.
       location: formatFullAddress(inq?.address ?? null, inq?.city ?? null, inq?.state ?? null, inq?.zip ?? null) || inq?.address || null,
@@ -446,7 +448,8 @@ export async function linkAppointmentTo(
 
   const { data: appt } = await supabase
     .from("appointments")
-    .select("id, title, location")
+    // type rides along (PROJECTION LAW): the new title follows the visit's kind, never a guess.
+    .select("id, title, location, type")
     .eq("id", id)
     .maybeSingle();
   if (!appt) return { ok: false, error: "Appointment not found." };
@@ -504,9 +507,12 @@ export async function linkAppointmentTo(
     patch.location = address;
     if (parts) Object.assign(patch, parts);
   }
-  const STOCK = ["site inspection", "inspection", "final inspection", "appointment", ""];
+  // The stock titles the create paths hand out, old spellings and new (W2-10's "Walk-Through"), so an
+  // old stock title still gets renamed. The new title follows the visit's kind (bookingTitle): a
+  // walk-through reads "Walk-Through: <name>"; a job, an Other visit, just the name.
+  const STOCK = ["site inspection", "inspection", "final inspection", "appointment", "walk-through", ""];
   if (name && STOCK.includes(String(appt.title ?? "").trim().toLowerCase())) {
-    patch.title = `Site inspection: ${name}`;
+    patch.title = bookingTitle(workKind({ kind: "appointment", type: (appt as { type?: string | null }).type ?? null }), name);
   }
 
   const { data: linked, error } = await supabase
@@ -557,8 +563,9 @@ export async function setAppointmentPlace(
     .eq("id", id)
     .maybeSingle();
 
-  // The stock titles the create paths hand out. A title a human chose is never touched.
-  const STOCK = ["site inspection", "inspection", "final inspection", "appointment", ""];
+  // The stock titles the create paths hand out, old spellings and new (W2-10). A title a human
+  // chose is never touched.
+  const STOCK = ["site inspection", "inspection", "final inspection", "appointment", "walk-through", ""];
   const isStock = STOCK.includes(String(existing?.title ?? "").trim().toLowerCase());
 
   const { data, error } = await supabase
@@ -787,9 +794,9 @@ async function cleanInspectionAnswers(
       (from) => from.select("schema, is_inspection, playbook").eq("id", templateId).maybeSingle(),
     );
     if (formErr) return { ok: false, error: dbError(formErr) };
-    if (!form) return { ok: false, error: "That inspection sheet no longer exists." };
+    if (!form) return { ok: false, error: "That walk-through sheet no longer exists." };
     if (!(form as { is_inspection?: boolean }).is_inspection)
-      return { ok: false, error: "That form isn't an inspection sheet." };
+      return { ok: false, error: "That form isn't a walk-through sheet." };
     // Coerce, THEN drop anything the rules make inapplicable. Both halves matter and for different
     // reasons: coerce is the type contract, clearing is the truth contract. The client already
     // clears on change, but this row is writable through RLS directly — a payload could set
