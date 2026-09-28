@@ -74,7 +74,8 @@ describe("Nort's product map after the shell wave", () => {
     expect(button).toContain('{state === "in" && "Clock In"}');
     expect(button).toMatch(/Switch<span/);
     const page = readFileSync(join(process.cwd(), "src/app/(app)/jobs/[id]/page.tsx"), "utf8");
-    expect(page).not.toMatch(/<JobTimeButton[^>]*\/>[\s\S]{0,200}Time on this job/);
+    expect(page).not.toContain("job-time-button");
+    expect(readFileSync(join(process.cwd(), "src/app/(app)/jobs/[id]/job-action-dock.tsx"), "utf8")).toContain("job-time-button");
   });
 
   it("a job already on hold keeps its day: Nort never reads back 'a week' for a re-hold", () => {
