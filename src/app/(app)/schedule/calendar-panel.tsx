@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { CAL_WINDOW_BACK_DAYS, CAL_WINDOW_FWD_DAYS, segmentJobsNotLoaded } from "@/lib/schedule/cal-window";
+import { segmentCols, withDayHours } from "@/lib/schedule/segment-hours";
 import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 import { getOrgSettings, workDayWindowHm } from "@/lib/org-settings";
 import { featureOn } from "@/lib/features";
@@ -27,8 +28,9 @@ export async function CalendarPanel({ canEdit = false }: { canEdit?: boolean } =
   const jobFrom = new Date(now - CAL_WINDOW_BACK_DAYS * 86400_000).toISOString();
   const jobTo = new Date(now + CAL_WINDOW_FWD_DAYS * 86400_000).toISOString();
 
-  const JOB_COLS = "id, job_number, name, status, scheduled_start, scheduled_end, planned_minutes, assigned_to, city, customers(name)";
-  const [{ data: listedJobs }, { data: segments }, { data: appointments }, { data: tasks }, { data: unschedRows }, { data: externalRows }, picker, { data: org }] =
+  // `address` (the street) rides along: every block says where (lib/schedule/block-info).
+  const JOB_COLS = "id, job_number, name, status, scheduled_start, scheduled_end, planned_minutes, assigned_to, address, city, customers(name)";
+  const [{ data: listedJobs }, { data: segments, perDayHours }, { data: appointments }, { data: tasks }, { data: unschedRows }, { data: externalRows }, picker, { data: org }] =
     await Promise.all([
       // Overlap test, not a point test on scheduled_start: a job shows if it
       // STARTS before the window end AND (ends after the window start, or is an
@@ -40,11 +42,14 @@ export async function CalendarPanel({ canEdit = false }: { canEdit?: boolean } =
         .lte("scheduled_start", jobTo)
         .or(`scheduled_end.gte.${jobFrom},and(scheduled_end.is.null,scheduled_start.gte.${jobFrom})`)
         .order("scheduled_start"),
-      supabase
-        .from("job_schedule_segments")
-        .select("job_id, start_date, end_date")
-        .gte("end_date", jobFrom.slice(0, 10))
-        .lte("start_date", jobTo.slice(0, 10)),
+      // Each day's own hours ride along (0370); before the migration, the read without them.
+      withDayHours((h) =>
+        supabase
+          .from("job_schedule_segments")
+          .select(segmentCols("job_id, start_date, end_date", h))
+          .gte("end_date", jobFrom.slice(0, 10))
+          .lte("start_date", jobTo.slice(0, 10)),
+      ),
       // Full row (location/notes/links) — the day drill hosts the edit modal
       // and quick actions now that the appointments tab is gone.
       supabase
@@ -104,7 +109,7 @@ export async function CalendarPanel({ canEdit = false }: { canEdit?: boolean } =
      Clear The Date's note says it was kept on the calendar. Read those jobs by id: the segments place
      them on their worked days (drawn all day, the day drill reads "Worked day"). Fail-soft: a failed
      read draws what the first one brought. */
-  const missing = segmentJobsNotLoaded(((listedJobs ?? []) as { id: string }[]).map((j) => j.id), (segments ?? []) as { job_id: string }[]);
+  const missing = segmentJobsNotLoaded(((listedJobs ?? []) as { id: string }[]).map((j) => j.id), (segments ?? []) as unknown as { job_id: string }[]);
   const { data: historyJobs } = missing.length
     ? await supabase.from("jobs").select(JOB_COLS).in("id", missing.slice(0, 500))
     : { data: [] };
@@ -139,6 +144,8 @@ export async function CalendarPanel({ canEdit = false }: { canEdit?: boolean } =
         // The office taps a block for its day, time and crew (schedule/tile-sheet). Staff only: the
         // page sends anyone else to My Day, and every writer behind the sheet asks requireStaff too.
         canEdit={canEdit}
+        // A day can keep its own hours (0370 applied): the tile's time is This Day's.
+        perDayHours={perDayHours}
       />
     </div>
   );

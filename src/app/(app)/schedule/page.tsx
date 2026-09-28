@@ -15,6 +15,8 @@ import type { Placeable } from "@/lib/schedule/place-by-town";
 import { KIND_FROM_APPT_TYPE } from "@/lib/schedule/work-shape";
 import { FeatureOffLineFor } from "@/components/feature-off-line-for";
 import { isMissingColumn } from "@/lib/job-tasks";
+import { listActiveTechs } from "@/lib/schedule-options";
+import { crewChips } from "@/lib/schedule/block-info";
 
 export const dynamic = "force-dynamic";
 
@@ -123,7 +125,8 @@ export default async function SchedulePage({
   // A parked job's day (0366, hold_until) rides the rail's job read. A push deploys before its
   // migration and a select naming a column the database doesn't have yet fails the whole read, so
   // it asks with the column and, only when the column is missing, again without it (no chip then).
-  const RAIL_JOB_COLS = "id, job_number, name, address, city, planned_minutes, status, hold_reason, customers(name, phone, email)";
+  // `assigned_to` rides along: the card says who's on it, as its block on the calendar does.
+  const RAIL_JOB_COLS = "id, job_number, name, address, city, planned_minutes, status, hold_reason, assigned_to, customers(name, phone, email)";
   const railJobs = (cols: string) =>
     supabase
       .from("jobs")
@@ -144,7 +147,7 @@ export default async function SchedulePage({
     return withDay.error && isMissingColumn(withDay.error) ? railJobs(RAIL_JOB_COLS) : withDay;
   };
 
-  const [{ data: leadRows }, { data: dateless }, { data: undated }, { data: orgRow }] = await Promise.all([
+  const [{ data: leadRows }, { data: dateless }, { data: undated }, { data: orgRow }, { data: staffRows }] = await Promise.all([
     supabase
       .from("inquiries")
       .select("id, name, address, city, phone, email, message, notes, next_follow_up_at, work_kind, planned_minutes")
@@ -156,7 +159,8 @@ export default async function SchedulePage({
     // A booking with no time on it yet — proposed, or created without a date.
     supabase
       .from("appointments")
-      .select("id, title, type, location, planned_minutes, customers(phone, email)")
+      // Who (the customer) and who's going (the one person) ride along for the card's words.
+      .select("id, title, type, location, planned_minutes, assigned_to, customers(name, phone, email), profiles!appointments_assigned_to_fkey(full_name)")
       .is("starts_at", null)
       .not("status", "in", "(cancelled,completed)")
       .order("created_at", { ascending: false })
@@ -166,7 +170,10 @@ export default async function SchedulePage({
     // times". This page is the heaviest read in the app; it does not get to wait on a fourth
     // query it could have asked for at the same time as the other three.
     supabase.from("organizations").select("settings").limit(1).maybeSingle(),
+    // The team, for the crew's initials on the cards (the same roster every crew picker reads).
+    listActiveTechs(supabase),
   ]);
+  const team = ((staffRows ?? []) as { id: string; full_name: string | null }[]).map((s) => ({ id: s.id, full_name: s.full_name }));
 
   /* ── A LEAD WITH A DAY ON IT IS NOT WAITING FOR A DAY ─────────────────────────────────────
      The comment above claims this list is leads with "no inspection booked yet". The query said
@@ -227,14 +234,15 @@ export default async function SchedulePage({
     ...((dateless ?? []) as unknown as Record<string, string | null>[]).map((r) => ({
       id: String(r.id),
       kind: "job" as const,
-      /* THE PERSON, NOT THE FILING NUMBER. Erik: "the job number taking up valuable real estate
-         ... have the guy's number right there but cant remember his name to give him a call."
-         J-048 is how the office files it; the person is who you call. The job's own name rides
-         as the small line when it says something the customer's name doesn't. */
-      name: String((r as unknown as { customers?: { name?: string | null } }).customers?.name ?? r.name ?? "Job"),
-      note: (r as unknown as { customers?: { name?: string | null } }).customers?.name && r.name
-        ? String(r.name)
-        : null,
+      /* THE JOB'S NAME, THEN WHERE AND WHO, as its block on the calendar reads (lib/schedule/
+         block-info). Erik: "the job number taking up valuable real estate ... have the guy's number
+         right there but cant remember his name to give him a call." A job's name is its street now
+         (Erik's naming rule), so the card's line under it is the person: never J-048, and never the
+         street said twice. */
+      name: String(r.name || (r as unknown as { customers?: { name?: string | null } }).customers?.name || "Job"),
+      customer: (r as unknown as { customers?: { name?: string | null } }).customers?.name ?? null,
+      crew: crewChips((r as unknown as { assigned_to?: string[] | null }).assigned_to ?? [], team),
+      note: null,
       status: r.status ?? null,
       address: r.address ?? null,
       city: r.city ?? null,
@@ -266,6 +274,14 @@ export default async function SchedulePage({
       name: String(r.title ?? "Site visit"),
       address: r.location ?? null,
       city: null,
+      // Who, and the one person going ([] draws a dashed Nobody).
+      customer: (r as unknown as { customers?: { name?: string | null } }).customers?.name ?? null,
+      crew: r.assigned_to
+        ? crewChips([r.assigned_to], [
+            ...team,
+            { id: String(r.assigned_to), full_name: (r as unknown as { profiles?: { full_name?: string | null } }).profiles?.full_name ?? null },
+          ])
+        : [],
       phone: (r as unknown as { customers?: { phone?: string | null } }).customers?.phone ?? null,
       email: (r as unknown as { customers?: { email?: string | null } }).customers?.email ?? null,
       type: r.type ?? null,

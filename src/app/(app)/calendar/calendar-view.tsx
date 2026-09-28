@@ -12,6 +12,8 @@ import { dayTargetLabel } from "@/lib/schedule/placement-plan";
 import { dayLabel, spanLabel } from "@/lib/schedule/span-label";
 import { useEndlessStack } from "@/components/use-endless-stack";
 import { jobDayBlock } from "@/lib/schedule/job-block";
+import { crewChips, placeLine, spanShort, streetOf, townOf } from "@/lib/schedule/block-info";
+import { ownHoursByJobDay } from "@/lib/schedule/segment-hours";
 import { ScheduleTileSheet, type TileTarget } from "../schedule/tile-sheet";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/components/toast";
@@ -60,6 +62,9 @@ export interface CalJob {
   planned_minutes?: number | null;
   assigned_to?: string[] | null;
   customers?: { name: string } | null;
+  /** The street (jobs.address) and the town: every block says where (lib/schedule/block-info). */
+  address?: string | null;
+  city?: string | null;
 }
 
 // Internal-only since week-agenda.tsx (the last external importer) died in cn-v507.
@@ -72,6 +77,9 @@ export interface CalSegment {
   job_id: string;
   start_date: string; // yyyy-mm-dd
   end_date: string;
+  /** The days' own hours (0370, "HH:MM:SS"), both null for the job's usual hours; absent before 0370. */
+  start_time?: string | null;
+  end_time?: string | null;
 }
 
 export interface CalAppt {
@@ -244,6 +252,7 @@ export function CalendarView({
   workDayEnd = "16:00",
   crewBoard = true,
   canEdit = false,
+  perDayHours = false,
 }: {
   jobs: CalJob[];
   segments?: CalSegment[];
@@ -271,6 +280,8 @@ export function CalendarView({
   /** The office: a tap on a block opens its sheet (day, time, crew). Absent (anyone else): the
    *  blocks are the links to their records they always were. */
   canEdit?: boolean;
+  /** 0370 is applied: a day can keep its own hours, so the tile's time edit is This Day's. */
+  perDayHours?: boolean;
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -378,6 +389,20 @@ export function CalendarView({
      up in the loaded jobs and visits at render, so the refresh after a save shows the sheet what was
      saved, and a job whose date was cleared simply leaves (and the sheet with it). */
   const [sheet, setSheet] = useState<{ kind: "job" | "visit"; id: string; day: string } | null>(null);
+
+  /* EACH DAY'S OWN HOURS (0370), by job and day: the grid draws a day by them, the day drill reads
+     them, and the tile's time is that day's. Empty before 0370 (every day is the job's usual hours). */
+  const ownHours = useMemo(() => ownHoursByJobDay(segments), [segments]);
+  /** The team by id, for the crew's initials on every block (a visit's person too, when the roster
+   *  doesn't carry them: their name rides on the visit). */
+  const team = useMemo(() => {
+    const byId = new Map<string, CalMember>();
+    for (const m of members) byId.set(m.id, m);
+    for (const a of appointments) {
+      if (a.assigned_to && !byId.has(a.assigned_to)) byId.set(a.assigned_to, { id: a.assigned_to, full_name: a.profiles?.full_name ?? null });
+    }
+    return [...byId.values()];
+  }, [members, appointments]);
   const onEventTap = useCallback((tapId: string, day: string) => {
     const [kind, id] = tapId.split(":");
     if ((kind === "job" || kind === "visit") && id) setSheet({ kind, id, day });
@@ -564,7 +589,7 @@ export function CalendarView({
          (lib/schedule/job-block jobDayBlock, the one rule the writer, the fitter and the time
          controls share). THE SENTINEL NEEDS BOTH ENDS (Nora's 9–11 at a 9 o'clock shop is timed); a
          sized job never draws the closing-time stamp older writes put on every end; a job over
-         several days runs full days. */
+         several days runs full days. A DAY WITH ITS OWN HOURS (0370) draws exactly those. */
       const b = jobDayBlock({
         day: k,
         scheduledStart: job.scheduled_start,
@@ -572,14 +597,24 @@ export function CalendarView({
         plannedMinutes: job.planned_minutes,
         tz,
         wd: { startMin: wdStartMin, endMin: wdEndMin },
+        dayHours: ownHours.get(job.id)?.get(k) ?? null,
       });
+      const endMin = b.endMin > b.startMin ? b.endMin : b.startMin + 60;
       events.push({
         id: `j-${job.id}-${k}`,
         dayStr: k,
         startMin: b.startMin,
-        endMin: b.endMin > b.startMin ? b.endMin : b.startMin + 60,
+        endMin,
         label: job.name,
-        sub: [job.customers?.name, pos].filter(Boolean).join(" · ") || null,
+        /* WHERE AND WHO, IN THE BLOCK (Erik: "we definitly need the address showing up on the job
+           block with info too"): the street (or who, when the name is the street), the crew as
+           initials (a dashed Nobody), the time, the town; as much as the block has room for. */
+        info: {
+          place: placeLine({ name: job.name, street: job.address, customer: job.customers?.name })?.text ?? null,
+          town: job.city ?? null,
+          time: pos ? `${spanShort(b.startMin, endMin)} · ${pos}` : spanShort(b.startMin, endMin),
+          crew: crewChips(job.assigned_to, team),
+        },
         color: JOB_GRID_TONE,
         href: `/jobs/${job.id}`,
         // Staff tap the block for its day, its time and its crew (the tile's sheet); Open Job is inside.
@@ -632,7 +667,13 @@ export function CalendarView({
         startMin,
         endMin,
         label: a.title,
-        sub: a.customers?.name ?? a.jobs?.name ?? null,
+        // A visit likewise: its street (or who, when the title is the street), its one person going.
+        info: {
+          place: placeLine({ name: a.title, street: streetOf(a.location), customer: a.customers?.name ?? a.jobs?.name ?? null })?.text ?? null,
+          town: townOf(a.location) || null,
+          time: spanShort(startMin, endMin),
+          crew: crewChips(a.assigned_to ? [a.assigned_to] : [], team),
+        },
         color: apptGridColor(a),
         /* STRAIGHT TO THE THING, from every view. Erik, on a booking whose length was wrong:
            "i now have now way to adjust the time." There WAS a way — tap the pill, land in the day
@@ -1118,6 +1159,7 @@ export function CalendarView({
             picker={picker}
             tz={tz}
             workDay={{ start: workDayStart, end: workDayEnd }}
+            ownHours={ownHours}
             onOpenJob={canEdit ? (jobId) => setSheet({ kind: "job", id: jobId, day: anchorK }) : undefined}
           />
         </>
@@ -1316,6 +1358,7 @@ function DayDetail({
   picker,
   tz,
   workDay,
+  ownHours,
   onOpenJob,
 }: {
   dayK: string;
@@ -1324,6 +1367,8 @@ function DayDetail({
   picker: SchedulePicker;
   tz: string;
   workDay: { start: string; end: string };
+  /** Each job's own hours by day (0370): the card reads the day as the grid draws it. */
+  ownHours?: Map<string, Map<string, { start: string; end: string }>>;
   /** The office: a job card opens the tile's sheet (day, time, crew) for this day. */
   onOpenJob?: (jobId: string) => void;
 }) {
@@ -1372,11 +1417,14 @@ function DayDetail({
                 planned_minutes: job.planned_minutes ?? null,
                 assigned_to: job.assigned_to ?? null,
                 customers: job.customers ?? null,
+                address: job.address ?? null,
+                city: job.city ?? null,
               }}
               members={members}
               tz={tz}
               workDay={workDay}
               day={dayK}
+              dayHours={ownHours?.get(job.id)?.get(dayK) ?? null}
               onOpen={onOpenJob ? () => onOpenJob(job.id) : undefined}
             />
           ))}
