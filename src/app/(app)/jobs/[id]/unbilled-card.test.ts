@@ -103,9 +103,24 @@ describe("UnbilledCard - Open: $X and the door that bills it", () => {
     expect(html).not.toContain("Clock In");
   });
 
+  it("on the clock on another job, or on a punch with no job, he is sent to the Switch the dock is showing", () => {
+    const view = { kind: "tech" as const, hours: 0, lastInvoiceNumber: null, lastInvoiceAt: null };
+    const other = card({ viewerIsStaff: false, view: { ...view, onClockElsewhere: "another_job" } });
+    expect(other).toContain("You&#x27;re on the clock on another job. Tap Switch at the top to move your time here.");
+    expect(other).not.toContain("Clock In");
+    const noJob = card({ viewerIsStaff: false, view: { ...view, onClockElsewhere: "no_job" } });
+    expect(noJob).toContain("You&#x27;re on the clock, but not on a job. Tap Switch at the top to move your time here.");
+    expect(noJob).not.toContain("Clock In");
+    // True in code: the dock's button reads Switch whenever his open entry is not on this job.
+    const button = readFileSync(join(process.cwd(), "src/app/(app)/jobs/[id]/job-time-button.tsx"), "utf8");
+    expect(button).toContain('openEntry.job_id === jobId ? "here" : "switch"');
+    expect(button).toMatch(/Switch<span/);
+  });
+
   it("the page tells the card when his open shift is on this job (source)", () => {
     const s = readFileSync(join(process.cwd(), "src/app/(app)/jobs/[id]/page.tsx"), "utf8");
     expect(s).toContain("onClockHere: !!openEntryRow && String((openEntryRow as { job_id?: string | null }).job_id ?? \"\") === String(j.id),");
+    expect(s).toMatch(/onClockElsewhere: !openEntryRow \|\| [^\n]+\n\s+\? null\n\s+: \(openEntryRow as \{ job_id\?: string \| null \}\)\.job_id \? "another_job" : "no_job",/);
   });
 });
 

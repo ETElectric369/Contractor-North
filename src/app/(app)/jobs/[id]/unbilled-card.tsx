@@ -30,6 +30,10 @@ export type UnbilledView =
       /** He is on the clock on this job right now. A running shift is never in `hours` (closed time
        *  only), so with it the card says his time shows once he clocks out, not "Tap Clock In". */
       onClockHere?: boolean;
+      /** He is on the clock but NOT on this job: on another job ("another_job"), or on a punch with
+       *  no job (a bare punch, Drive or Shop: "no_job"). The dock's button then reads Switch, never
+       *  Clock In (job-time-button's "switch" state), so the card sends him to Switch. */
+      onClockElsewhere?: "another_job" | "no_job" | null;
     };
 
 /**
@@ -119,7 +123,11 @@ export function UnbilledCard({
             <p className="mt-1 text-sm text-slate-500">
               {view.onClockHere
                 ? "On the clock here now. Your time shows once you clock out."
-                : "No new time yet. Tap Clock In at the top of this job."}
+                : view.onClockElsewhere === "another_job"
+                  ? "You're on the clock on another job. Tap Switch at the top to move your time here."
+                  : view.onClockElsewhere === "no_job"
+                    ? "You're on the clock, but not on a job. Tap Switch at the top to move your time here."
+                    : "No new time yet. Tap Clock In at the top of this job."}
             </p>
           )}
         </CardContent>

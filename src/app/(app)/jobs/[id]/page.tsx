@@ -560,6 +560,11 @@ export default async function JobDetailPage({
           // His running shift is on THIS job (the dock's TIME button reads the same row): the card
           // must not send him to a Clock In the dock isn't showing.
           onClockHere: !!openEntryRow && String((openEntryRow as { job_id?: string | null }).job_id ?? "") === String(j.id),
+          // On the clock somewhere else: the same row makes the dock's button read Switch, so the
+          // card names Switch (another job, or a punch with no job), never a Clock In that isn't there.
+          onClockElsewhere: !openEntryRow || String((openEntryRow as { job_id?: string | null }).job_id ?? "") === String(j.id)
+            ? null
+            : (openEntryRow as { job_id?: string | null }).job_id ? "another_job" : "no_job",
         };
   // THE COSTS TAB, OPEN FIRST (Erik, 2026-09-25). The job's bills and orders sorted by the Unbilled
   // card's own per-row verdict (UnbilledWork.costRows), so Not Billed Yet is exactly what that
