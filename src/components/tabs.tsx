@@ -618,7 +618,11 @@ export function MoreMenuRows({
  *  THE PANEL NEVER HIDES UNDER THE DOCK (bug triage, 2026-09-27): on a phone, a short tab left the
  *  More chip low on the screen and the panel dropped under the bottom dock, its last rows out of
  *  reach. It is placed by the shared useGlassMenuPlacement, like the job's Manage and the team menus:
- *  it opens upward, or shrinks and scrolls, above the dock. */
+ *  it opens upward, or shrinks and scrolls, above the dock. The view is its second trigger: a new
+ *  job's More opens on one row ("+ Add…"), which fits below the chip; the Add view it swaps to in
+ *  place is ten rows, so it is measured again rather than hanging down under the dock. When it opens
+ *  upward it sits OVER the job's sticky action dock (z-[90], the glass-menu layer, above the dock's
+ *  z-40), so a tap on a row never lands on Call or Navigate underneath. */
 function MoreMenu({
   items,
   activeId,
@@ -637,7 +641,7 @@ function MoreMenu({
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<"main" | "add">("main");
   const ref = useRef<HTMLDivElement>(null);
-  const { panelRef, panelStyle } = useGlassMenuPlacement(open);
+  const { panelRef, panelStyle } = useGlassMenuPlacement(open, view);
   const activeHere = items.some((t) => t.id === activeId);
   const ActiveIcon = activeOverflow ? componentIcon(activeOverflow.icon) : null;
 
@@ -727,7 +731,7 @@ function MoreMenu({
           ref={panelRef}
           role="menu"
           style={{ ...panelStyle, right: 0 }}
-          className="glass glass-gloss glass-menu z-30 flex max-h-[min(70vh,24rem)] min-w-[180px] flex-col overflow-hidden rounded-xl py-1 shadow-xl"
+          className="glass glass-gloss glass-menu z-[90] flex max-h-[min(70vh,24rem)] min-w-[180px] flex-col overflow-hidden rounded-xl py-1 shadow-xl"
         >
           {/* Opaque backing — the job-manage-menu.tsx pattern (cn-v315's "ghost Edit
               pill" root cause). glass-menu's 40% white let the page's cards/buttons

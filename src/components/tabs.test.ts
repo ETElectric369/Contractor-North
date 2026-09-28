@@ -13,6 +13,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 vi.mock("next/navigation", () => ({ usePathname: () => "/x", useSearchParams: () => new URLSearchParams() }));
 
 import { MoreMenuRows, type TabBarItem } from "./tabs";
+import { placeGlassMenu } from "./ui/glass-menu";
 import { Camera, FileText, Receipt, Stamp } from "lucide-react";
 
 const ITEMS: TabBarItem[] = [
@@ -74,9 +75,49 @@ describe("every row is 44px, in both views and both looks", () => {
 });
 
 describe("the panel never hides under the bottom dock (bug triage 2026-09-27)", () => {
-  it("More is placed by the shared glass-menu placement, like Manage and the team menus", () => {
-    const src = readFileSync(join(process.cwd(), "src/components/tabs.tsx"), "utf8");
-    expect(src).toContain("const { panelRef, panelStyle } = useGlassMenuPlacement(open);");
-    expect(src).toMatch(/ref=\{panelRef\}\s+role="menu"\s+style=\{\{ \.\.\.panelStyle, right: 0 \}\}/);
+  const src = () => readFileSync(join(process.cwd(), "src/components/tabs.tsx"), "utf8");
+
+  it("More is placed by the shared glass-menu placement, like Manage and the team menus, and again when its view changes", () => {
+    expect(src()).toContain("const { panelRef, panelStyle } = useGlassMenuPlacement(open, view);");
+    expect(src()).toMatch(/ref=\{panelRef\}\s+role="menu"\s+style=\{\{ \.\.\.panelStyle, right: 0 \}\}/);
+    // The hook measures on the view as well as the open, and without the cap an earlier measure set.
+    const hook = readFileSync(join(process.cwd(), "src/components/ui/glass-menu.ts"), "utf8");
+    expect(hook).toContain("}, [open, contentKey]);");
+    expect(hook).toContain('panel.style.maxHeight = "";');
+  });
+
+  // A new job's office More on a 667px phone: the strip's More chip spans y 330-382, the bottom dock's
+  // top edge is at 595. The main view is "+ Add…" alone (52px); the Add view is "‹ More", a divider
+  // and nine tucked tabs, which the panel's CSS cap stops at 384px.
+  const chip = { anchorTop: 330, anchorBottom: 382, bottomLimit: 595 };
+
+  it("the one-row main view fits below the chip and drops down", () => {
+    expect(placeGlassMenu({ panelH: 52, ...chip })).toEqual({ dropUp: false, maxHeight: undefined });
+  });
+
+  it("the Add view, measured again, opens upward above the chip instead of hanging under the dock", () => {
+    const p = placeGlassMenu({ panelH: 384, ...chip });
+    expect(p.dropUp).toBe(true);
+    // Room above the chip is 318px, so it also scrolls inside that room: every row can be reached.
+    expect(p.maxHeight).toBe(318);
+  });
+
+  it("wherever it lands, the panel's bottom stays above the dock's top edge", () => {
+    for (const top of [150, 250, 330, 420, 500]) {
+      const a = { anchorTop: top, anchorBottom: top + 52, bottomLimit: 595 };
+      const p = placeGlassMenu({ panelH: 384, ...a });
+      const h = p.maxHeight ?? 384;
+      const bottom = p.dropUp ? a.anchorTop - 4 : a.anchorBottom + 4 + h;
+      expect(bottom).toBeLessThanOrEqual(a.bottomLimit);
+      expect(bottom - h).toBeGreaterThanOrEqual(0);
+    }
+  });
+
+  it("opened upward, it sits over the job's sticky action dock (z-40), so no tap lands on Call or Navigate", () => {
+    const panel = src().match(/role="menu"[\s\S]*?className="([^"]+)"/)?.[1] ?? "";
+    expect(panel).toContain("z-[90]");
+    expect(panel).not.toMatch(/\bz-30\b/);
+    const dock = readFileSync(join(process.cwd(), "src/app/(app)/jobs/[id]/job-action-dock.tsx"), "utf8");
+    expect(dock).toContain("sticky -top-4 z-40");
   });
 });

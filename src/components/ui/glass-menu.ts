@@ -39,6 +39,32 @@ function viewportBottomLimit(): number {
 }
 
 /**
+ * THE PLACEMENT MATH, pure (so it is tested without a browser). Given the panel's height, the trigger's
+ * top and bottom (viewport px) and where content must stop at the bottom (the dock's top edge), it
+ * drops down when the panel fits below; otherwise it opens upward when that fits or there is more room
+ * above; and whichever side it takes, a panel taller than that side's room gets a max-height (it
+ * scrolls) so no row ends up out of reach.
+ */
+export function placeGlassMenu({
+  panelH,
+  anchorTop,
+  anchorBottom,
+  bottomLimit,
+}: {
+  panelH: number;
+  anchorTop: number;
+  anchorBottom: number;
+  bottomLimit: number;
+}): { dropUp: boolean; maxHeight: number | undefined } {
+  const roomBelow = bottomLimit - EDGE - anchorBottom - GAP_PX;
+  const roomAbove = anchorTop - GAP_PX - EDGE;
+  const up = panelH > roomBelow && (panelH <= roomAbove || roomAbove > roomBelow);
+  const room = up ? roomAbove : roomBelow;
+  // The 96px floor keeps a freak short viewport usable (scrollable) rather than sliver-thin.
+  return { dropUp: up, maxHeight: panelH > room ? Math.max(Math.floor(room), 96) : undefined };
+}
+
+/**
  * Viewport-aware vertical placement for a trigger-anchored glass menu panel.
  *
  * The shared mechanism behind every "⋯" menu that hangs off its trigger
@@ -59,7 +85,13 @@ function viewportBottomLimit(): number {
  * there's no flicker. Assumes the panel's parentElement is the relative trigger
  * wrapper (the `<div ref={ref} className="relative">` every menu already has).
  */
-export function useGlassMenuPlacement(open: boolean): {
+export function useGlassMenuPlacement(
+  open: boolean,
+  /** What the panel is showing, when it can change while it stays open (the job's More swaps its
+   *  "+ Add…" view in place). A new value measures the panel again: a short view that fit below the
+   *  trigger must not hand its placement to a tall one that then hangs under the bottom dock. */
+  contentKey?: string | number,
+): {
   panelRef: RefObject<HTMLDivElement | null>;
   panelStyle: CSSProperties;
 } {
@@ -78,15 +110,17 @@ export function useGlassMenuPlacement(open: boolean): {
     const anchor = panel?.parentElement; // the relative wrapper ≈ the trigger's box
     if (!panel || !anchor) return;
     const a = anchor.getBoundingClientRect();
+    // Measure the panel's own height, not the cap an earlier measure put on it (a re-measure after the
+    // content changed runs with the old inline max-height still applied). The CSS cap on the panel's
+    // class still counts; the inline value goes straight back so React's style and the DOM agree.
+    const inlineMax = panel.style.maxHeight;
+    panel.style.maxHeight = "";
     const panelH = panel.offsetHeight;
-    const roomBelow = viewportBottomLimit() - EDGE - a.bottom - GAP_PX;
-    const roomAbove = a.top - GAP_PX - EDGE;
-    const up = panelH > roomBelow && (panelH <= roomAbove || roomAbove > roomBelow);
-    const room = up ? roomAbove : roomBelow;
-    setDropUp(up);
-    // The 96px floor keeps a freak short viewport usable (scrollable) rather than sliver-thin.
-    setMaxHeight(panelH > room ? Math.max(Math.floor(room), 96) : undefined);
-  }, [open]);
+    panel.style.maxHeight = inlineMax;
+    const placed = placeGlassMenu({ panelH, anchorTop: a.top, anchorBottom: a.bottom, bottomLimit: viewportBottomLimit() });
+    setDropUp(placed.dropUp);
+    setMaxHeight(placed.maxHeight);
+  }, [open, contentKey]);
 
   const panelStyle: CSSProperties = {
     position: "absolute",
