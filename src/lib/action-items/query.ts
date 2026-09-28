@@ -24,7 +24,7 @@ import { noJobHoursActionItem } from "./no-job-hours-item";
 import { readNoJobHours, type NoJobHours } from "@/lib/no-job-hours";
 import { isOpenToBuy, newestListPerJob } from "@/lib/materials-checklist";
 import { feederOn, inquiryActionItem } from "./switches";
-import { heldJobState, inquiryDueFilter, quoteFollowUpState } from "./due-filters";
+import { draftInvoiceState, heldJobState, inquiryDueFilter, lateInvoiceFilter, quoteFollowUpState, quoteNoAnswerFilter } from "./due-filters";
 import { isMissingColumn } from "@/lib/job-tasks";
 import { featureOn, featuresFromOffKey } from "@/lib/features";
 import { COSTED_INVOICE_COLUMNS, NEEDS_RETURN_DAYS, costedJobIds, daysAgoStr, detectStrayTime, detectUnbilledWork, rollupWorkedJobs } from "./leak-detectors";
@@ -437,25 +437,41 @@ async function buildActionItems(ctx: {
           .limit(50)
       : empty,
     // Money/legal — staff only. Unpaid invoices (A/R) that need chasing: past their due date, OR
-    // simply old; the age cut is applied per-row below; the query just pulls the open A/R.
+    // simply old. The rule runs IN the read (lateInvoiceFilter), so its exact count is the count of
+    // late invoices, never of all open A/R (a lone late one is a plain row, not "· 1+").
     isStaff
       ? supabase
           .from("invoices")
           .select("id, invoice_number, total, amount_paid, due_date, status, created_at, customers(name)", { count: "exact" })
           .in("status", ["sent", "partial", "overdue"])
+          .or(lateInvoiceFilter(todayStr, INVOICE_STALE_DAYS))
           .order("created_at", { ascending: true })
           .limit(50)
       : empty,
     // Quotes/estimates sent but not answered. follow_up_at (0366, Still Waiting and Nort's
     // quote.followUp) is read when the column exists; before 0366 the same read runs without it,
-    // the old rule alone decides, and no Still Waiting is drawn.
+    // the old rule alone decides, and no Still Waiting is drawn. The Now rule runs IN the read
+    // (quoteNoAnswerFilter), so its exact count is the No Answer Yet pile's, never every sent
+    // estimate; the ones whose follow-up day is later are the fold's, read beside it.
     isStaff
       ? (async () => {
-          const read = (cols: string) =>
-            supabase.from("quotes").select(cols, { count: "exact" }).eq("status", "sent").order("created_at", { ascending: true }).limit(50);
+          const read = (cols: string, rule: string) =>
+            supabase.from("quotes").select(cols, { count: "exact" }).eq("status", "sent").or(rule).order("created_at", { ascending: true }).limit(50);
           const base = "id, quote_number, doc_type, status, total, valid_until, created_at, customers(name)";
-          const withDay = await read(`${base}, follow_up_at`);
-          return withDay.error && isMissingColumn(withDay.error) ? { ...(await read(base)), noFollowUp: true } : withDay;
+          const [withDay, later] = await Promise.all([
+            read(`${base}, follow_up_at`, quoteNoAnswerFilter(todayStr, QUOTE_QUIET_DAYS, QUOTE_EXPIRY_SOON_DAYS, true)),
+            supabase
+              .from("quotes")
+              .select(`${base}, follow_up_at`)
+              .eq("status", "sent")
+              .gt("follow_up_at", todayStr)
+              .order("follow_up_at", { ascending: true })
+              .limit(50),
+          ]);
+          if (withDay.error && isMissingColumn(withDay.error)) {
+            return { ...(await read(base, quoteNoAnswerFilter(todayStr, QUOTE_QUIET_DAYS, QUOTE_EXPIRY_SOON_DAYS, false))), noFollowUp: true, later: { data: [], error: null } };
+          }
+          return { ...withDay, later: later as Read };
         })()
       : empty,
     // Accepted estimates — THE WIN. The job's scheduled_start and status (joined) say whether it has
@@ -569,7 +585,7 @@ async function buildActionItems(ctx: {
     receiptsP,
     waitsP,
   ])) as [
-    Read, Read, Read, Read, Read, Read, Read & { noFollowUp?: boolean }, Read, Read, Read, Read, Read, Read, Read, Read, Read, Read, Read, Read, Read, Read, Read,
+    Read, Read, Read, Read, Read, Read, Read & { noFollowUp?: boolean; later?: Read }, Read, Read, Read, Read, Read, Read, Read, Read, Read, Read, Read, Read, Read, Read, Read,
     Read & { withDay: boolean }, Read | null, NeedsYouWaits,
   ];
 
@@ -608,7 +624,13 @@ async function buildActionItems(ctx: {
         targetId: a.job_id ?? null,
       });
     }
-    counts.won_needs_a_day = codeCount(acceptedR);
+    // THE PILE COUNTS THE WINS READ HERE, never "N+" off the read's exact count: that count is every
+    // accepted estimate the company ever had (accepted is a final state), so past 50 of them one new
+    // win read "Won, Needs A Day · 1+", a pile of one opening a list of old, long-scheduled wins. A
+    // win past the newest 50 whose job still has no day isn't lost: accepting materializes its job,
+    // and jobsNeedingADay skips only the wins read here (wonJobIds), so that job is on Needs You as
+    // Jobs Needing A Day.
+    counts.won_needs_a_day = {};
   }
 
   // ── LEADS. One projection (action-items/switches): with Leads off the same request reads "New
@@ -756,7 +778,12 @@ async function buildActionItems(ctx: {
   // today waits in the fold with that day, and on its day it is back even if it isn't 7 days quiet.
   {
     const followUpReady = !quoteR.noFollowUp;
-    for (const q of (quoteR.data ?? []) as any[]) {
+    // The Now read (its rule in SQL) and the fold's read (a follow-up day after today), one pass: the
+    // per-row rule below still decides, and an estimate in both reads is placed once.
+    const seenQuotes = new Set<string>();
+    for (const q of [...((quoteR.data ?? []) as any[]), ...((quoteR.later?.data ?? []) as any[])]) {
+      if (seenQuotes.has(String(q.id))) continue;
+      seenQuotes.add(String(q.id));
       const daysOut = q.created_at ? Math.floor((todayMs - Date.parse(q.created_at)) / 86_400_000) : 0;
       const daysToExpiry = q.valid_until ? Math.floor((Date.parse(q.valid_until) - todayMs) / 86_400_000) : null;
       const quiet = daysOut >= QUOTE_QUIET_DAYS;
@@ -809,9 +836,8 @@ async function buildActionItems(ctx: {
     const job = one(d.jobs as any) as { job_number?: string | null; name?: string | null; status?: string | null } | null;
     const who = one(d.customers as any)?.name ?? null;
     const until = d.hold_until ? String(d.hold_until).slice(0, 10) : null;
-    const setAside = !!until && until > todayStr;
-    const jobDone = job?.status === "complete" || job?.status === "cancelled";
-    if (setAside && !jobDone) {
+    const state = draftInvoiceState(until, job?.status, todayStr);
+    if (state.place === "waiting" && until) {
       const why = String(d.hold_reason ?? "").trim() || (Number(d.amount_paid ?? 0) > 0 ? "Running Draft" : "Set Aside");
       const row = waitingRow({ id: d.id, kind: "invoice_draft", title: [who, d.invoice_number, a.due].filter(Boolean).join(" · "), why, backOn: until, href: `/billing/${d.id}` });
       if (row) {
@@ -819,21 +845,23 @@ async function buildActionItems(ctx: {
         continue;
       }
     }
+    const back = state.place === "finished";
     items.push({
       id: d.id,
       kind: "invoice_draft",
       title:
-        setAside && jobDone && job
+        back && job
           ? `${jobWords(job)} ${job.status === "complete" ? "Finished" : "Cancelled"} · Send ${d.invoice_number}`
           : `Draft invoice ${d.invoice_number} · ${a.due}`,
-      subtitle: [who, setAside && jobDone ? a.due : null, a.detail].filter(Boolean).join(" · ") || null,
+      subtitle: [who, back ? a.due : null, a.detail].filter(Boolean).join(" · ") || null,
       who: null,
       when: d.created_at ?? null,
       // The day it was set aside for came early: it is back on top.
-      urgency: setAside && jobDone ? 1 : 0,
+      urgency: back ? 1 : 0,
       done: false,
       href: `/billing/${d.id}`,
-      affordances: AFFORDANCES.invoice_draft,
+      // Its job is over: nothing left to wait for, so no Set Aside Until… (it would be straight back).
+      affordances: state.canSetAside ? AFFORDANCES.invoice_draft : AFFORDANCES.invoice_draft.filter((v) => v !== "snooze"),
       amount: due,
     });
   }

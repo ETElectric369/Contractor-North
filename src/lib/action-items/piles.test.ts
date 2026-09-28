@@ -122,6 +122,28 @@ describe("real counts", () => {
     expect(codeCount({ data: [1] }, 2)).toEqual({});
   });
 
+  it("a lone row whose feeder counts its own rule stays a plain row: never '· 1' and never '· 1+'", () => {
+    // The feeders that read a wide set (every accepted estimate, all open A/R, every sent estimate)
+    // count their row's own rule now (due-filters.ts), so one late invoice among 51 open ones, or one
+    // new win among 180 accepted estimates, hands rollUpPiles no cap.
+    for (const [kind, pile] of [["quote_accepted", "won_needs_a_day"], ["invoice_overdue", "late_invoices"], ["quote_awaiting", "no_answer_yet"]] as const) {
+      const lone = row(kind);
+      const out = roll([lone, row("contract_unsigned")], { counts: { [pile]: {} } });
+      expect(out.map((i) => i.id), kind).toContain(lone.id);
+      expect(out.some((i) => /· 1\b/.test(i.title) || /· 1\+/.test(i.title)), kind).toBe(false);
+    }
+  });
+
+  it("Done, Not Billed and Visits To Close Out have no list page holding their rows: a capped one unfolds every row read here", () => {
+    expect(PILE_DEFS.done_not_billed.listHref).toBeNull();
+    expect(PILE_DEFS.visits_to_close_out.listHref).toBeNull();
+    const out = roll([row("visit_unbilled"), row("visit_unbilled"), row("job_unbilled_work")], { counts: { done_not_billed: { capped: true } } });
+    expect(out[0].title).toBe("Done, Not Billed · 3+");
+    expect(out[0].pile?.listHref).toBeNull();
+    // Never a page that doesn't list them (/billing has no finished visits; /schedule is a calendar).
+    expect(out[0].href).toBe(out[0].children![0].href);
+  });
+
   it("money across the pile is staff only, and never on a capped pile (a short sum)", () => {
     const money = [row("invoice_draft", { amount: 1000 }), row("invoice_draft", { amount: 1340 })];
     expect(roll(money)[0].subtitle).toBe("$2,340.00 across 2");

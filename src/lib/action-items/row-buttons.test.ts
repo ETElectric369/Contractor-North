@@ -77,6 +77,15 @@ describe("the table", () => {
     for (const d of rowButtons(row("job_to_schedule"), staff).more.filter((x) => x.label !== "Assign")) expect(d.act.type).toBe("confirm");
   });
 
+  it("a draft whose job is finished ('Herringbone · J-011 Finished · Send INV-078') has no Set Aside Until…: it waits on nothing", () => {
+    // The build leaves snooze off a draft whose job is complete or cancelled (draftInvoiceState):
+    // a day written there would put it straight back on top, so the door would be a dead end.
+    const finished = rowButtons(row("invoice_draft", { title: "Herringbone · J-011 Finished · Send INV-078", affordances: AFFORDANCES.invoice_draft.filter((v) => v !== "snooze") }), staff);
+    expect(finished.primary?.label).toBe("Send It");
+    expect(labels(finished.more)).toEqual([]);
+    expect(allDoors(rowButtons(row("invoice_draft", { affordances: ["open"] }), staff)).map((d) => d.label)).not.toContain("Set Aside Until…");
+  });
+
   it("an endless row gets a Snooze only when its wait can be kept (0367): the build sets its key", () => {
     expect(rowButtons(row("materials_needed"), staff).more).toEqual([]);
     const snoozable = rowButtons(row("materials_needed", { waitKey: "materials_needed:j1", affordances: ["snooze", "open"] }), staff);
@@ -115,7 +124,7 @@ describe("the table", () => {
     const pile = row("appointment", {
       id: "pile:visits_to_close_out",
       affordances: ["open"],
-      pile: { name: "visits_to_close_out", label: "Visits To Close Out", count: 2, capped: false, listHref: "/schedule", listLabel: "See All On Schedule", verb: "Close Out" },
+      pile: { name: "visits_to_close_out", label: "Visits To Close Out", count: 2, capped: false, listHref: null, listLabel: null, verb: "Close Out" },
       children: [visit(), visit()],
     });
     expect(rowButtons(pile, { leadsOn: true, isStaff: false })).toEqual({ primary: null, also: null, more: [] });

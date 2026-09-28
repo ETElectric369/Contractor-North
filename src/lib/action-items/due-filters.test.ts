@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { heldJobState, inquiryDueFilter, quoteFollowUpState } from "./due-filters";
+import { draftInvoiceState, heldJobState, inquiryDueFilter, lateInvoiceFilter, quoteFollowUpState, quoteNoAnswerFilter } from "./due-filters";
 
 /**
  * THE DAY A PERSON PICKED IS THE DAY IT COMES BACK (release/w1a seam fixes). Nort's inquiry.snooze,
@@ -109,8 +109,11 @@ describe("an estimate's follow-up day (0366 quotes.follow_up_at, Nort's quote.fo
 
   it("the quote_awaiting feeder reads follow_up_at (without it before 0366, and then no Still Waiting) and lets the day win over the quiet rule", () => {
     const query = src("src/lib/action-items/query.ts");
-    expect(query).toContain("const withDay = await read(`${base}, follow_up_at`);");
-    expect(query).toContain("return withDay.error && isMissingColumn(withDay.error) ? { ...(await read(base)), noFollowUp: true } : withDay;");
+    expect(query).toContain("read(`${base}, follow_up_at`, quoteNoAnswerFilter(todayStr, QUOTE_QUIET_DAYS, QUOTE_EXPIRY_SOON_DAYS, true)),");
+    expect(query).toContain("if (withDay.error && isMissingColumn(withDay.error)) {");
+    expect(query).toContain(
+      "return { ...(await read(base, quoteNoAnswerFilter(todayStr, QUOTE_QUIET_DAYS, QUOTE_EXPIRY_SOON_DAYS, false))), noFollowUp: true, later: { data: [], error: null } };",
+    );
     expect(query).toContain("const followUp = quoteFollowUpState(q.follow_up_at, todayStr);");
     // A later day waits in the fold with that day; no day and still fresh stays off.
     expect(query).toMatch(/if \(followUp === "later"\) \{[\s\S]{0,400}waiting\.push\(row\);\s*continue;/);
@@ -136,5 +139,88 @@ describe("a held job comes back on the day its hold picked (0366 jobs.hold_until
     expect(query).toContain('if (withDay && state === "later") {');
     expect(query).toContain('affordances: withDay ? AFFORDANCES.job_on_hold : ["do", "open"]');
     expect(query).toMatch(/\.eq\("status", "on_hold"\)\.lt\("updated_at", cutoff\)/);
+  });
+});
+
+describe("a pile's count is the count of its rows, not the whole population (the '· 1+' fix)", () => {
+  // The feeders' per-row rules, as query.ts computes them (UTC-midnight day math from todayStr).
+  const todayMs = Date.parse(TODAY);
+  const days = (ms: number) => Math.floor(ms / 86_400_000);
+  const lateByCode = (r: Row) => {
+    const daysOverDue = r.due_date ? days(todayMs - Date.parse(r.due_date)) : null;
+    const daysOld = r.created_at ? days(todayMs - Date.parse(r.created_at)) : 0;
+    const pastDue = daysOverDue != null && daysOverDue > 0;
+    const stale = daysOld >= 30 && !(daysOverDue != null && daysOverDue <= 0);
+    return pastDue || stale;
+  };
+  const noAnswerByCode = (r: Row, withFollowUp: boolean) => {
+    const followUp = withFollowUp ? quoteFollowUpState(r.follow_up_at, TODAY) : "none";
+    if (followUp === "later") return false; // the Waiting fold's, read on its own
+    if (followUp === "due") return true;
+    const quiet = (r.created_at ? days(todayMs - Date.parse(r.created_at)) : 0) >= 7;
+    const toExpiry = r.valid_until ? days(Date.parse(r.valid_until) - todayMs) : null;
+    return quiet || (toExpiry != null && toExpiry <= 5);
+  };
+  const stamps = [
+    "2026-08-01T15:00:00+00:00",
+    "2026-08-28T00:00:00+00:00",
+    "2026-08-28T00:00:01+00:00",
+    "2026-08-27T23:59:59+00:00",
+    "2026-09-20T00:00:00+00:00",
+    "2026-09-20T09:30:00+00:00",
+    "2026-09-19T23:00:00+00:00",
+    "2026-09-26T18:00:00+00:00",
+  ];
+  const dates = [null, "2026-09-01", "2026-09-26", TODAY, TOMORROW, "2026-10-02", "2026-10-03", "2026-12-01"];
+
+  it("a late invoice: the database read keeps exactly the rows the feeder shows", () => {
+    const f = lateInvoiceFilter(TODAY, 30);
+    for (const created_at of stamps) {
+      for (const due_date of dates) {
+        const r = { created_at, due_date };
+        expect(passes(f, r), JSON.stringify(r)).toBe(lateByCode(r));
+      }
+    }
+  });
+
+  it("an estimate with no answer: the Now read keeps exactly the rows the feeder shows on Now (with and before 0366)", () => {
+    const withDay = quoteNoAnswerFilter(TODAY, 7, 5, true);
+    const before = quoteNoAnswerFilter(TODAY, 7, 5, false);
+    for (const created_at of stamps) {
+      for (const valid_until of dates) {
+        for (const follow_up_at of dates) {
+          const r = { created_at, valid_until, follow_up_at };
+          expect(passes(withDay, r), JSON.stringify(r)).toBe(noAnswerByCode(r, true));
+          expect(passes(before, r), JSON.stringify(r)).toBe(noAnswerByCode(r, false));
+        }
+      }
+    }
+  });
+
+  it("the feeders read with them, so the exact count is the pile's count; the fold's estimates are their own read", () => {
+    const query = src("src/lib/action-items/query.ts");
+    expect(query).toContain(".or(lateInvoiceFilter(todayStr, INVOICE_STALE_DAYS))");
+    expect(query).toContain("quoteNoAnswerFilter(todayStr, QUOTE_QUIET_DAYS, QUOTE_EXPIRY_SOON_DAYS, true)");
+    expect(query).toContain("quoteNoAnswerFilter(todayStr, QUOTE_QUIET_DAYS, QUOTE_EXPIRY_SOON_DAYS, false)");
+    expect(query).toMatch(/\.gt\("follow_up_at", todayStr\)/);
+    // A won estimate past the read is its job's Jobs Needing A Day row: never a "1+" pile of wins.
+    expect(query).not.toContain("counts.won_needs_a_day = codeCount(acceptedR)");
+  });
+});
+
+describe("a draft invoice's place, and whether Set Aside Until… is a door on it", () => {
+  it("set aside with its job going: the fold; set aside with its job over: back on top; neither: a plain row", () => {
+    expect(draftInvoiceState("2026-10-17", "in_progress", TODAY)).toEqual({ place: "waiting", canSetAside: true });
+    expect(draftInvoiceState("2026-10-17", "complete", TODAY)).toEqual({ place: "finished", canSetAside: false });
+    expect(draftInvoiceState("2026-10-17", "cancelled", TODAY)).toEqual({ place: "finished", canSetAside: false });
+    expect(draftInvoiceState(TODAY, "scheduled", TODAY)).toEqual({ place: "now", canSetAside: true });
+    expect(draftInvoiceState(null, null, TODAY)).toEqual({ place: "now", canSetAside: true });
+  });
+
+  it("a draft on a finished job (the usual draft: finishJob drafts it) offers no Set Aside, set aside or not", () => {
+    expect(draftInvoiceState(null, "complete", TODAY).canSetAside).toBe(false);
+    const query = src("src/lib/action-items/query.ts");
+    expect(query).toContain("const state = draftInvoiceState(until, job?.status, todayStr);");
+    expect(query).toContain('affordances: state.canSetAside ? AFFORDANCES.invoice_draft : AFFORDANCES.invoice_draft.filter((v) => v !== "snooze")');
   });
 });

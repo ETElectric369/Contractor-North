@@ -13,6 +13,7 @@ const m = vi.hoisted(() => ({
   saveNeedsYouWait: vi.fn(async () => ({ ok: true })),
   savedReason: null as string | null,
   jobExists: true,
+  invoiceJob: null as { job_number: string; name: string; status: string } | null,
 }));
 
 vi.mock("@/app/(app)/schedule/actions", () => ({
@@ -34,7 +35,7 @@ vi.mock("@/lib/supabase/server", () => ({
       const q: any = {
         select: () => q,
         eq: () => q,
-        maybeSingle: async () => ({ data: m.jobExists ? { id: "11111111-1111-4111-8111-111111111111", hold_reason: m.savedReason } : null, error: null }),
+        maybeSingle: async () => ({ data: m.jobExists ? { id: "11111111-1111-4111-8111-111111111111", hold_reason: m.savedReason, jobs: m.invoiceJob } : null, error: null }),
       };
       return q;
     },
@@ -57,6 +58,7 @@ beforeEach(() => {
   for (const f of [m.setJobHold, m.snoozeJobHold, m.setJobStatus, m.parkInvoice, m.saveNeedsYouWait]) f.mockClear();
   m.savedReason = null;
   m.jobExists = true;
+  m.invoiceJob = null;
 });
 
 describe("job.setStatus puts a job on hold through the hold", () => {
@@ -130,6 +132,21 @@ describe("invoice.setAside", () => {
     const r = await invoiceActions["invoice.setAside"].handler({ id: "inv-1", date: "2020-01-01" }, ctx);
     expect(r).toEqual({ ok: false, error: "Pick today or later" });
     expect(m.parkInvoice).not.toHaveBeenCalled();
+  });
+
+  it("a draft whose job is finished or cancelled is refused in words: it waits on nothing, so no day is written and no 'comes back' is said", async () => {
+    m.invoiceJob = { job_number: "J-011", name: "Herringbone", status: "complete" };
+    const r = await invoiceActions["invoice.setAside"].handler({ id: "inv-78", date: later(20) }, ctx);
+    expect(r.ok).toBe(false);
+    expect(r.error).toBe("Herringbone · J-011 is finished, so this draft has nothing left to wait for and stays on Needs You. Send it, or void it if it won't be billed.");
+    expect(r.speak).toBeUndefined();
+    m.invoiceJob = { job_number: "J-011", name: "Herringbone", status: "cancelled" };
+    expect((await invoiceActions["invoice.setAside"].handler({ id: "inv-78", date: later(20) }, ctx)).error).toMatch(/^Herringbone · J-011 is cancelled,/);
+    expect(m.parkInvoice).not.toHaveBeenCalled();
+    // A job still going: parked as before.
+    m.invoiceJob = { job_number: "J-011", name: "Herringbone", status: "in_progress" };
+    expect((await invoiceActions["invoice.setAside"].handler({ id: "inv-78", date: later(20) }, ctx)).ok).toBe(true);
+    expect(m.parkInvoice).toHaveBeenCalledTimes(1);
   });
 });
 

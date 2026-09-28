@@ -46,7 +46,10 @@ export const PILE_DEFS: Record<PileName, PileDef> = {
   won_needs_a_day: { label: "Won, Needs A Day", verb: "Pick A Day", listHref: "/quotes?status=accepted", listLabel: "See All On Estimates" },
   late_invoices: { label: "Late Invoices", verb: "Get Paid", listHref: "/billing", listLabel: "See All On Billing" },
   invoices_not_sent: { label: "Invoices Not Sent", verb: "Send It", listHref: "/billing", listLabel: "See All On Billing" },
-  done_not_billed: { label: "Done, Not Billed", verb: "Bill It", listHref: "/billing", listLabel: "See All On Billing" },
+  // No list page holds these two piles' rows (/billing lists finished jobs with no invoice, never a
+  // finished visit or a No Costs Yet; /schedule is a calendar with no list of past visits nobody
+  // closed out): See All unfolds every row read here instead of opening a page that doesn't list them.
+  done_not_billed: { label: "Done, Not Billed", verb: "Bill It", listHref: null, listLabel: null },
   leads_to_call: {
     label: "Leads To Call",
     labelLeadsOff: "Requests To Call Back",
@@ -55,7 +58,7 @@ export const PILE_DEFS: Record<PileName, PileDef> = {
     listHref: "/leads",
     listLabel: "See All On Leads",
   },
-  visits_to_close_out: { label: "Visits To Close Out", verb: "Close Out", listHref: "/schedule", listLabel: "See All On Schedule" },
+  visits_to_close_out: { label: "Visits To Close Out", verb: "Close Out", listHref: null, listLabel: null },
   walkthroughs_to_write_up: { label: "Walk-Throughs To Write Up", verb: "Write It Up", listHref: "/inspections", listLabel: "See All Walk-Throughs" },
   jobs_needing_a_day: { label: "Jobs Needing A Day", verb: "Pick A Day", listHref: "/schedule", listLabel: "See All On Schedule" },
   holds_back: { label: "Holds Back", verb: "Snooze", listHref: "/jobs?status=on_hold", listLabel: "See All On Jobs" },
