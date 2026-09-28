@@ -642,6 +642,31 @@ describe("Needs You holds Sort These (W1-32)", () => {
  * narrows it in place; a supplier's own paper is a hit that lands on its card.
  */
 describe("All Bills is one list", () => {
+  it("Already Billed stays on a bill's own row in the one list (0357), with its Billed By Hand · Not Billed After All", async () => {
+    const { BillsReceipts } = await import("./bills-receipts");
+    const { createElement } = await import("react");
+    const row = (id: string) => ({ id, supplier: "Supply House", bill_number: null, amount: 40, status: "unpaid", bill_date: "2026-09-10", job_id: J011, category: null, jobs: { job_number: "J-011", name: "13897 Herringbone" } });
+    const list = renderToStaticMarkup(
+      createElement(BillsReceipts, {
+        orgId: ORG,
+        jobs: [],
+        lists: [],
+        pos: [],
+        docs: [],
+        bills: [row("b-open"), row("b-hand")] as any,
+        alreadyBilled: {
+          "b-open": { kind: "open", jobId: J011, what: "Supply House" },
+          "b-hand": { kind: "hand", jobId: J011, lineId: "li-1", ids: ["b-hand"], invoiceNumber: "INV-060", what: "Supply House" },
+        } as any,
+      }),
+    );
+    const open = list.slice(list.indexOf('id="bill-b-open"'), list.indexOf('id="bill-b-hand"'));
+    expect(count(doors(open), "Already Billed")).toBe(1);
+    const hand = list.slice(list.indexOf('id="bill-b-hand"'));
+    expect(text(hand)).toContain("Billed By Hand On INV-060");
+    expect(count(doors(hand), "Not Billed After All")).toBe(1);
+  });
+
   it("its line leads with what's open, never a count of rows", () => {
     const summary = doors(section("all-bills")).find((d) => d.startsWith("All Bills"))!;
     expect(summary).toBe("All Bills · 9 Unpaid $4,801.98");
