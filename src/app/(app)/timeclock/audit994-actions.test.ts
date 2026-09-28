@@ -420,6 +420,8 @@ describe("SI6: 'Brian worked 8 hours today' logged before the day is over", () =
       const r = await createManualEntry({ profile_id: "brian-1", work_date: "2026-09-24", hours: 8, job_id: null, job_code: null, notes: "" });
       expect(r).toEqual({
         ok: true,
+        // The new shift's id rides back (Wave 2): Add Time Entry's toast opens it.
+        id: NEXT,
         warning: "Today isn't over yet, so the hours are logged ending now: 7:00 AM to 3:00 PM. Change the times on Timecards if that's not right.",
       });
       const ins = calls.find((c) => c.verb === "insert")!;

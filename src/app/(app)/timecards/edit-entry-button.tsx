@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Pencil, Scissors, Trash2, Link2 } from "lucide-react";
+import { Copy, Pencil, Scissors, Trash2, Link2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
@@ -16,7 +16,23 @@ import { atFromClockTime, clockInputValue, splitClock } from "@/lib/split-previe
 import { hoursBetween } from "@/lib/utils";
 import { SplitShiftSheet, type SplitPrefill } from "./split-shift-sheet";
 import { StopClockSheet } from "./stop-clock-sheet";
+import { COPY_TO_SOMEONE_ELSE, DuplicateEntryButton } from "./duplicate-entry-button";
 import { clockDoorWords } from "@/lib/long-shift";
+
+/**
+ * WHERE THIS SHIFT'S TIME CAME FROM, SAID IN THE EDITOR (0168: DISCLOSURE IS THE GUARD).
+ *
+ * The week list used to badge every hand-typed row "manual · typed in by hand", which on the
+ * office's own week was most rows: noise. Wave 2 took the badge off the row (an offline punch keeps
+ * its row badge: that is the case that protects the office), so the fact is said HERE, once, in the
+ * editor the row opens: one quiet line at the top, never a badge. A punch the server clock timed
+ * (app, auto_gps, null) says nothing. Pure, so the words are pinned (timecard-cuts.test.ts).
+ */
+export function sourceLine(source: string | null | undefined): string | null {
+  if (source === "manual") return "Typed in by hand, not punched live.";
+  if (source === "offline") return "Punched with no signal, so the time came from the phone.";
+  return null;
+}
 
 interface Entry {
   id: string;
@@ -44,6 +60,9 @@ interface Entry {
   /** 0288: the first entry of the shift this piece was cut from, and how. */
   split_from?: string | null;
   split_how?: string | null;
+  /** 0168: where the time came from ('manual', 'offline', 'app', 'auto_gps'). Every read that
+   *  feeds this editor selects it; the modal says it in words (sourceLine). */
+  source?: string | null;
 }
 
 /** A touching piece of the same split shift, for Move The Split and Join Back. Its job, lunch and
@@ -69,6 +88,8 @@ interface Member {
   bill_rate?: number | null;
   /** 0286: the owner is paid by owner's draw, so his shifts carry no pay-rate override. */
   paid_by_draw?: boolean | null;
+  /** 0158: off the team. Copy To Someone Else… never offers them. */
+  active?: boolean | null;
 }
 interface JobOption {
   id: string;
@@ -84,6 +105,25 @@ function parts(iso: string | null) {
     date: `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`,
     time: `${p(d.getHours())}:${p(d.getMinutes())}`,
   };
+}
+
+/**
+ * Whether the Rate field holds a change a Save would still write: what save() sends for
+ * rate_override (a typed rate, 0 = none; never a new one for the owner, 0286) against what is
+ * stored. A VALUE, not an "it was edited" flag, so a saved Rate stops counting as unsaved as soon
+ * as the refreshed row comes back.
+ */
+export function rateUnsavedOf(f: { rateDirty: boolean; ownerShift: boolean; rate: number; stored: number | string | null | undefined }): boolean {
+  if (!f.rateDirty || f.ownerShift) return false;
+  const stored = f.stored == null ? null : Number(f.stored);
+  return (f.rate > 0 ? f.rate : null) !== stored;
+}
+
+/** The form's four time fields, as seeded from a stored clock_in / clock_out. */
+export function formTimesOf(clockIn: string, clockOut: string | null) {
+  const a = parts(clockIn);
+  const b = parts(clockOut);
+  return { date: a.date, startT: a.time, endT: b.time || a.time, endDate: b.date || a.date };
 }
 
 export function EditEntryButton({
@@ -183,6 +223,26 @@ export function EditEntryButton({
   // office comes here to fix) would have been silently truncated to a same-day span on
   // save. Seeded from the stored clock_out, so opening and saving is always a no-op.
   const [endDate, setEndDate] = useState(outP.date || inP.date);
+  /* THE STORED TIMES MOVED UNDER THE FORM. Move The Split rewrites this shift's clock_in or
+     clock_out on the server, and the refreshed `entry` arrives while this component stays mounted
+     (the job page's Time tab keeps it; a billed-hours note keeps the modal open). A form still
+     holding the OLD stored times would read as unsaved (Copy To Someone Else… shut behind "Save
+     your changes first") and a Save would put the old times back, undoing the move. So when the
+     stored times change and the form's times were not touched, they follow the stored row;
+     times the person typed are never overwritten. */
+  const [seenSpan, setSeenSpan] = useState({ in: entry.clock_in, out: entry.clock_out });
+  if (seenSpan.in !== entry.clock_in || seenSpan.out !== entry.clock_out) {
+    const was = formTimesOf(seenSpan.in, seenSpan.out);
+    const untouched = date === was.date && startT === was.startT && endT === was.endT && endDate === was.endDate;
+    setSeenSpan({ in: entry.clock_in, out: entry.clock_out });
+    if (untouched) {
+      const now = formTimesOf(entry.clock_in, entry.clock_out);
+      setDate(now.date);
+      setStartT(now.startT);
+      setEndT(now.endT);
+      setEndDate(now.endDate);
+    }
+  }
   const [jobId, setJobId] = useState(entry.job_id ?? "");
   const [jobCode, setJobCode] = useState(entry.job_code ?? "");
   // Real lunch MINUTES (not a 30/0 boolean) so editing an unrelated field can't silently
@@ -220,6 +280,31 @@ export function EditEntryButton({
   // field meant an overnight shift could never be saved OR corrected here — the modal
   // (and updateTimeEntry) rejected it with "End must be after start" every time.
   const span = buildShiftSpan(date, startT, endT, endDate);
+
+  /**
+   * A COPY TAKES THE SHIFT AS IT IS SAVED. Copy To Someone Else… (duplicateTimeEntry) reads the
+   * stored row, so anything changed in this form and not saved yet would NOT come along: fix
+   * Brian's end time, copy to Jimmy before saving, and Jimmy gets the old end time. So while the
+   * form holds unsaved changes the copy waits, and says why (Save is right there).
+   *
+   * Every part compares a VALUE with the stored row, so it clears the moment a save's refresh
+   * brings the row back. The Rate too: a sticky "was edited" flag never cleared, and after a
+   * saved Rate edit the copy stayed shut asking for a save that had already happened. It counts
+   * only while what a Save would send (see rate_override below) differs from what is stored.
+   */
+  const rateUnsaved = rateUnsavedOf({ rateDirty, ownerShift, rate, stored: entry.rate_override });
+  const unsaved =
+    profileId !== (entry.profile_id ?? "") ||
+    date !== inP.date ||
+    startT !== inP.time ||
+    endT !== (outP.time || inP.time) ||
+    endDate !== (outP.date || inP.date) ||
+    jobId !== (entry.job_id ?? "") ||
+    jobCode !== (entry.job_code ?? "") ||
+    lunchMin !== (entry.lunch_minutes ?? 0) ||
+    miles !== (entry.miles ?? 0) ||
+    rateUnsaved ||
+    notes !== (entry.notes ?? "");
 
   function save() {
     setError(null);
@@ -534,6 +619,8 @@ export function EditEntryButton({
         }
       >
         <div className="space-y-4">
+          {/* Where the time came from (0168), one quiet line, never a badge: see sourceLine. */}
+          {sourceLine(entry.source) && <p className="text-xs text-slate-500">{sourceLine(entry.source)}</p>}
           {error && (
             <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>
           )}
@@ -620,12 +707,32 @@ export function EditEntryButton({
           </div>
 
           {/* SPLIT THIS SHIFT (0288): a day on two jobs is two entries. One cut opens its own sheet,
-              and the pieces of a split shift can slide their shared time or join back into one. */}
+              and the pieces of a split shift can slide their shared time or join back into one.
+              COPY TO SOMEONE ELSE… sits beside it (Wave 2): the same shift onto whoever worked it
+              alongside (Erik 2026-09-18, "copy this time card for jimmy who worked with me"), the
+              picker that used to hang off a copy icon on every row. Closed shifts only, like Split;
+              a secondary button, so Delete stays the one red action. */}
           {entry.clock_out && (entry.status ?? "closed") === "closed" && (
             <div className="space-y-2 rounded-lg border border-slate-200 p-3">
-              <Button type="button" variant="outline" className="h-11 w-full" onClick={() => { setOpen(false); setSplitFromForm(true); setSplitting(true); }} disabled={pending}>
-                <Scissors className="h-4 w-4" /> Split This Shift
-              </Button>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <Button type="button" variant="outline" className="h-11 w-full" onClick={() => { setOpen(false); setSplitFromForm(true); setSplitting(true); }} disabled={pending}>
+                  <Scissors className="h-4 w-4" /> Split This Shift
+                </Button>
+                <DuplicateEntryButton
+                  id={entry.id}
+                  profileId={entry.profile_id}
+                  personName={entry.profiles?.full_name}
+                  members={members}
+                  trigger={(openPicker) => (
+                    <Button type="button" variant="outline" className="h-11 w-full" onClick={openPicker} disabled={pending || unsaved}>
+                      <Copy className="h-4 w-4" /> {COPY_TO_SOMEONE_ELSE}
+                    </Button>
+                  )}
+                />
+              </div>
+              {unsaved && (
+                <p className="text-xs text-slate-500">Save your changes first, then copy the shift to someone else. A copy takes the shift as it&apos;s saved.</p>
+              )}
               <p className="text-xs text-slate-500">
                 Worked two jobs, or drove part of it? Cut it at the time you switched. Each part becomes its own entry.
               </p>

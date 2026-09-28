@@ -58,7 +58,7 @@ import { buyMaterials, openToBuyCount } from "@/lib/materials-checklist";
 import { countOpen, isOpenAppointment, isOpenChangeOrder, isOpenInvoice, isOpenPermit, isOpenQuote, isOpenWorkOrder } from "@/lib/open-counts";
 import { JobPermits } from "./job-permits";
 import { permitStatusTone, permitResultTone } from "@/lib/permit-options";
-import { JobAddTimeEntry } from "./job-add-time";
+import { AddTimeEntry } from "../../timecards/add-time-entry";
 import { NoJobPunches, type NearPunches } from "./no-job-punches";
 import { jobCrewIds, nearJobWindow, readNoJobPunchesNearJob } from "@/lib/no-job-hours";
 import { EditEntryButton } from "../../timecards/edit-entry-button";
@@ -164,7 +164,7 @@ export default async function JobDetailPage({
     supabase.from("purchase_orders").select("id, po_number, vendor, status, total").eq("job_id", id),
     supabase
       .from("time_entries")
-      .select("id, profile_id, clock_in, clock_out, lunch_minutes, miles, status, job_id, job_code, notes, rate_override, paid_at, mileage_paid_at, split_from, split_how, profiles(full_name), job:job_id(job_number, name)")
+      .select("id, profile_id, clock_in, clock_out, lunch_minutes, miles, status, job_id, job_code, notes, rate_override, paid_at, mileage_paid_at, split_from, split_how, source, profiles(full_name), job:job_id(job_number, name)")
       .eq("job_id", id)
       .order("clock_in", { ascending: false }),
     supabase
@@ -667,7 +667,6 @@ export default async function JobDetailPage({
   const apptJobOpts = [{ id: j.id, label: jobLabel(j), address: formatFullAddress(j.address, j.city, j.state, j.zip) || null }];
   const apptCustOpts = (allCustomers ?? []).map((c: any) => ({ id: c.id, label: c.name }));
   const apptStaffOpts = (techs ?? []).map((t: any) => ({ id: t.id, label: t.full_name ?? "Unnamed" }));
-  const companyAddress = formatFullAddress(org?.address_line1, org?.city, org?.state, org?.zip);
   const jobAddress = formatFullAddress(j.address, j.city, j.state, j.zip);
   // Where "Navigate" should point. Prefer the job's own structured address, else the
   // customer's saved address (jobs happen at the customer site), else the job NAME —
@@ -1132,6 +1131,8 @@ export default async function JobDetailPage({
     // "paid period" banner, which every role should see before a blocked save.
     paid_at?: string | null;
     mileage_paid_at?: string | null;
+    /** 0168: where the time came from; the office's editor says it in words (sourceLine). */
+    source?: string | null;
   }[] = viewerIsStaff
     ? ((entries ?? []) as any[])
     : ((entries ?? []) as any[]).map((e) => ({
@@ -1500,15 +1501,20 @@ export default async function JobDetailPage({
           <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b border-slate-100 px-5 py-3 text-sm">
             <span className="font-semibold text-slate-900">Time on this job · {formatDuration(laborHours)}</span>
             <div className="flex flex-wrap items-center gap-2">
+              {/* The office's one add-hours form (timecards/add-time-entry), with this job said, not
+                  picked. Its Day starts on the company's today; miles, rate and notes are on the
+                  shift's editor, one tap from the toast after a save. */}
               {viewerIsStaff && (
-                <JobAddTimeEntry
-                  jobId={j.id}
-                  techs={techs ?? []}
+                <AddTimeEntry
+                  isStaff={viewerIsStaff}
+                  fixedJob={{ id: j.id, label: jobLabel(j) }}
+                  members={((techs ?? []) as any[]).filter((t) => t.active !== false).map((t) => ({ id: String(t.id), full_name: t.full_name ?? null }))}
+                  jobs={[]}
                   jobCodes={(jobCodes ?? []) as any}
-                  defaultProfileId={user?.id ?? ""}
-                  companyAddress={companyAddress}
-                  jobAddress={jobAddress}
                   jobCodesEnabled={jobCodesEnabled}
+                  tz={tz}
+                  viewerId={user?.id}
+                  companyTimeCode={null}
                 />
               )}
             </div>

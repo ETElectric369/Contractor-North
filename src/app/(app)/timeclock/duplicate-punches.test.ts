@@ -148,6 +148,20 @@ describe("Add Entry over a punch that has no job", () => {
     expect(r.clash).toMatchObject({ noJob: false, jobLabel: "Herringbone" });
   });
 
+  it("a clear day saves once and hands back the new shift's id (Add Time Entry's Open That Shift)", async () => {
+    const NEW = "e0000000-0000-4000-8000-00000000000e";
+    state.client = fakeSupabase((q) => {
+      if (q.table === "jobs") return { data: { id: JOB } };
+      if (isOverlapRead(q)) return { data: [] };
+      if (q.table === "time_entries" && q.verb === "insert") return { data: [{ id: NEW }] };
+    }, calls);
+    const r = await createManualEntry({ profile_id: "brian-1", clock_in: "2026-09-11T18:00:00Z", clock_out: "2026-09-12T02:30:00Z", job_id: JOB, job_code: null, notes: "" });
+    expect(r).toEqual({ ok: true, id: NEW });
+    const ins = calls.filter((c) => c.verb === "insert");
+    expect(ins).toHaveLength(1);
+    expect(ins[0].payload).toMatchObject({ profile_id: "brian-1", job_id: JOB, status: "closed", source: "manual" });
+  });
+
   it("a save that lost the race to the same hours (0360's DETAIL) still comes back with the shift", async () => {
     let overlapReads = 0;
     state.client = fakeSupabase((q) => {
@@ -251,8 +265,12 @@ describe("Company Time", () => {
 });
 
 describe("shiftsOnDay: what the person already has that day", () => {
-  it("lists the day's shifts (and the one from the evening before that ran into it), flags no-job and billed ones, and names the form's job", async () => {
-    state.client = fakeSupabase((q) => {
+  /** The day's reads. `schedule` answers the schedule's reads (scheduledJobFor); by default Brian has
+   *  no day row and is rostered on nothing, so nothing is preselected. */
+  const dayRoutes = (schedule: (q: Q) => Reply = (q) => (q.table === "crew_day_assignments" ? { data: null } : q.table === "jobs" && q.cols === "id, scheduled_start, scheduled_end" ? { data: [] } : undefined)) =>
+    (q: Q): Reply => {
+      const s = schedule(q);
+      if (s !== undefined) return s;
       if (q.table === "organizations") return ORG_TZ;
       if (q.table === "time_entries" && q.verb === "select")
         return {
@@ -266,7 +284,10 @@ describe("shiftsOnDay: what the person already has that day", () => {
       if (q.table === "profiles") return { data: { full_name: "Brian Taylor" } };
       if (q.table === "jobs") return { data: { id: JOB, job_number: "J-028", name: "85 Whitney" } };
       if (q.table === "invoice_items") return { data: [{ source_ids: ["billed"], invoices: { id: "inv", invoice_number: "INV-081", created_at: "2026-09-26" } }] };
-    }, calls);
+    };
+
+  it("lists the day's shifts (and the one from the evening before that ran into it), flags no-job and billed ones, and names the form's job", async () => {
+    state.client = fakeSupabase(dayRoutes(), calls);
     const r = await shiftsOnDay({ profile_id: "brian-1", date: "2026-09-11", for_job_id: JOB });
     expect(r.ok).toBe(true);
     if (!r.ok) return;
@@ -277,6 +298,51 @@ describe("shiftsOnDay: what the person already has that day", () => {
       ["billed", false, "INV-081", "85 Whitney"],
     ]);
     expect(r.shifts[0].hours).toBe(8.43);
+    // Nothing on the schedule for him that day: nothing to start the Job field on.
+    expect(r.scheduledJob).toBeNull();
+    expect(r.offThatDay).toBe(false);
+    // The schedule was asked about HIS day, not the caller's today.
+    expect(calls.find((c) => c.table === "crew_day_assignments")!.filters).toEqual(
+      expect.arrayContaining([["eq", "profile_id", "brian-1"], ["eq", "work_date", "2026-09-11"]]),
+    );
+  });
+
+  it("names where the schedule put him that day, labelled like the form's Job list (Add Time Entry starts there)", async () => {
+    state.client = fakeSupabase(
+      dayRoutes((q) => {
+        if (q.table === "crew_day_assignments") return { data: { job_id: JOB, kind: "job" } };
+        if (q.table === "jobs" && q.cols === "id" && q.filters.some((f) => f[0] === "in" && f[1] === "status")) return { data: { id: JOB } };
+        if (q.table === "jobs" && q.cols === "id, job_number, name, address, customers(name)")
+          return { data: { id: JOB, job_number: "J-028", name: "85 Whitney", address: "85 Whitney Ave", customers: { name: "Nora Arnoso" } } };
+        return undefined;
+      }),
+      calls,
+    );
+    const r = await shiftsOnDay({ profile_id: "brian-1", date: "2026-09-11", for_job_id: null });
+    expect(r.ok && r.scheduledJob).toEqual({ id: JOB, label: "85 Whitney" });
+    expect(r.ok && r.offThatDay).toBe(false);
+  });
+
+  it("marked off that day: says so, and names no job", async () => {
+    state.client = fakeSupabase(dayRoutes((q) => (q.table === "crew_day_assignments" ? { data: { job_id: null, kind: "off" } } : undefined)), calls);
+    const r = await shiftsOnDay({ profile_id: "brian-1", date: "2026-09-11", for_job_id: null });
+    expect(r.ok && r.offThatDay).toBe(true);
+    expect(r.ok && r.scheduledJob).toBeNull();
+  });
+
+  it("a schedule that can't be read is no preselect, never a refused day", async () => {
+    state.client = fakeSupabase(
+      dayRoutes((q) => {
+        if (q.table === "crew_day_assignments") throw new Error("fetch failed");
+        return undefined;
+      }),
+      calls,
+    );
+    const r = await shiftsOnDay({ profile_id: "brian-1", date: "2026-09-11", for_job_id: JOB });
+    expect(r.ok).toBe(true);
+    expect(r.ok && r.scheduledJob).toBeNull();
+    expect(r.ok && r.offThatDay).toBe(false);
+    expect(r.ok && r.shifts).toHaveLength(2);
   });
 });
 
