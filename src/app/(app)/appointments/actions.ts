@@ -24,6 +24,7 @@ import { playbookForForm } from "@/lib/playbook/parse";
 import { clearInapplicable } from "@/lib/playbook/resolve";
 import { runOnce } from "@/lib/offline/run-once";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { DEFAULT_JOB_MINUTES } from "@/lib/schedule/job-block";
 
 /** The browser-computed ISO if present; otherwise build the instant in the ORG
  *  timezone — NEVER the server's UTC (the bare-string parse stored the wrong
@@ -1220,7 +1221,9 @@ export async function createJobFromAppointment(
   const apptEnd = (appt as { ends_at?: string | null }).ends_at ?? null;
   const scheduledEnd = sized > 0 && appt.starts_at
     ? new Date(new Date(appt.starts_at).getTime() + Math.min(sized, WORK_DAY_MINUTES) * 60_000).toISOString()
-    : apptEnd;
+    : // A visit with no size and no end becomes a job of the default length (two hours, "2 hours —
+      // change it"), never a job with no end, which drew as the rest of the work day.
+      apptEnd ?? (appt.starts_at ? new Date(new Date(appt.starts_at).getTime() + DEFAULT_JOB_MINUTES * 60_000).toISOString() : null);
 
   const { data: job, error } = await supabase
     .from("jobs")

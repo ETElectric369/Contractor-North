@@ -30,9 +30,16 @@ import {
   appointmentTypeFor,
   daysNeeded,
   spanEnd,
-  WORK_DAY_MINUTES,
   workingDaysFrom,
 } from "@/lib/schedule/work-shape";
+import {
+  DEFAULT_JOB_MINUTES,
+  endAfter,
+  jobDayBlock,
+  planJobTimes,
+  workDayMinutes,
+  type JobLength,
+} from "@/lib/schedule/job-block";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 export type Result = { ok: boolean; error?: string; id?: string };
@@ -58,23 +65,6 @@ async function orgSchedulePrefs(
   const raw = (data as any)?.settings;
   const win = workDayWindowHm(raw);
   return { tz: getOrgSettings(raw).timezone, dayStartHm: win.start, dayEndHm: win.end };
-}
-
-/** The stored scheduled_start's wall-clock "HH:MM" in the org timezone, or null.
- *  Lets a day-move preserve an explicit start time instead of snapping back to
- *  the all-day default. A time that reads exactly as the all-day window start
- *  (allDayHm — the org's work_day_start, default 08:00) is treated as "no
- *  explicit time" — the same convention the calendar uses to decide whether to
- *  render a time at all. */
-function localHmInTz(iso: string | null, tz: string, allDayHm: string): string | null {
-  if (!iso) return null;
-  const hm = new Intl.DateTimeFormat("en-GB", {
-    timeZone: tz,
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-  }).format(new Date(iso));
-  return hm === allDayHm ? null : hm;
 }
 
 /** Advance an early-stage job to "scheduled" once it has a date — without ever
@@ -105,7 +95,7 @@ export async function createJob(formData: FormData): Promise<Result> {
 
   const address = emptyToNull(formData.get("address"));
   // THE COMPANY'S CLOCK (W1-22): its timezone, its today, and its work-day start (a day with no time
-  // is all day from there: workDayWindowHm, never a hard-coded 08:00). Server actions run in UTC,
+  // starts there: workDayWindowHm, never a hard-coded 08:00). Server actions run in UTC,
   // so a bare `new Date("…T08:00")` would be 8 AM UTC.
   const { tz, dayStartHm } = await orgSchedulePrefs(supabase);
   const todayStr = todayStrInTz(tz);
@@ -115,13 +105,19 @@ export async function createJob(formData: FormData): Promise<Result> {
   // (scheduled_start); a caller that sends neither sent no date at all.
   const sentDay = formData.has("scheduled_date");
   let startIso: string | null = null;
+  // THE FORM ASKS NO LENGTH, SO A DATED JOB GETS THE DEFAULT: two hours from its start on the company's
+  // clock (lib/schedule/job-block DEFAULT_JOB_MINUTES), the block the calendar draws and the job page
+  // shows as "2 hours — change it". No end at all read as the rest of the work day.
+  let endIso: string | null = null;
   let dayOfStart: string | null = null;
   if (sentDay) {
     const day = String(formData.get("scheduled_date") ?? "").trim();
     const time = String(formData.get("scheduled_time") ?? "").trim();
     if (day) {
-      startIso = /^\d{4}-\d{2}-\d{2}$/.test(day) ? tzDateTimeUtc(day, /^\d{2}:\d{2}$/.test(time) ? time : dayStartHm, tz) : null;
+      const hm = /^\d{2}:\d{2}$/.test(time) ? time : dayStartHm;
+      startIso = /^\d{4}-\d{2}-\d{2}$/.test(day) ? tzDateTimeUtc(day, hm, tz) : null;
       if (!startIso) return { ok: false, error: "That date doesn't look right. Pick it again, or tap Not Scheduled Yet." };
+      endIso = tzDateTimeUtc(day, endAfter(hm, DEFAULT_JOB_MINUTES), tz);
       dayOfStart = day;
     }
   } else {
@@ -129,6 +125,7 @@ export async function createJob(formData: FormData): Promise<Result> {
     const d = legacy ? new Date(legacy) : null;
     if (d && !isNaN(d.getTime())) {
       startIso = d.toISOString();
+      endIso = new Date(d.getTime() + DEFAULT_JOB_MINUTES * 60_000).toISOString();
       dayOfStart = todayStrInTz(tz, d);
     }
   }
@@ -191,6 +188,7 @@ export async function createJob(formData: FormData): Promise<Result> {
       state: emptyToNull(formData.get("state")),
       zip: emptyToNull(formData.get("zip")),
       scheduled_start: startIso,
+      scheduled_end: endIso,
       created_by: ctx.userId,
     })
     .select("id")
@@ -359,28 +357,40 @@ export type DateRange = { start: string; end: string }; // yyyy-mm-dd each
 
 /** Canonical writer for a job's schedule as one or more date ranges. Replaces
  *  all segments, and mirrors the overall min start / max end onto
- *  jobs.scheduled_start/end (the org's work-day window, default 8am–4pm local)
- *  so every legacy reader still works.
+ *  jobs.scheduled_start/end so every legacy reader still works.
  *
- *  `startTime` ("HH:MM", optional) refines ONLY the single primary
- *  scheduled_start mirror — a real time-of-day the calendar renders instead of
- *  the all-day window. Segments stay date-only (a time refines the primary start,
- *  not each span). When omitted, any explicit time already on the job is
- *  preserved (so a day-move keeps it) and otherwise the 8 AM default is used. */
+ *  The mirror carries the job's BLOCK (lib/schedule/job-block planJobTimes): the start on the first
+ *  day and the block's real end, never the closing-time stamp it used to write whatever the length.
+ *  Segments stay date-only. `startTime` and `length` each have three intents: undefined keeps what the
+ *  job has (a day-move keeps its start and its length), a value sets it, and startTime null/"" is all
+ *  day. With no length anywhere, a job getting its first day lands as two hours (DEFAULT_JOB_MINUTES),
+ *  planned_minutes left blank. */
 export async function setJobScheduleRanges(
   jobId: string,
   ranges: DateRange[],
   startTime?: string | null,
-): Promise<Result> {
+  length?: JobLength,
+): Promise<Result & { defaulted?: boolean }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
-  return writeScheduleRanges(ctx.supabase, jobId, ranges, startTime);
+  const bad = lengthProblem(length);
+  if (bad) return { ok: false, error: bad };
+  return writeScheduleRanges(ctx.supabase, jobId, ranges, startTime, undefined, length);
+}
+
+/** A length a writer can store, or the words for why not. */
+function lengthProblem(length: JobLength | undefined): string | null {
+  if (length === undefined || length === "full") return null;
+  const n = Number(length);
+  if (!Number.isFinite(n) || n < 1 || n > 60 * 24 * 30) return "That length isn't one a job can have. Pick 1h, 2h, 4h, Full Day or an end time.";
+  return null;
 }
 
 /** The body of setJobScheduleRanges, for callers that already passed requireStaff. `mirror`
  *  (optional) sets the jobs.scheduled_start/end span on its own instead of the segments' overall
  *  span: the reschedule verbs pass the PLAN, so a kept worked day stays on the calendar as history
- *  without dragging the job's listed start back onto it (moveJobDay, scheduleJobWindow). Not exported: a
+ *  without dragging the job's listed start back onto it (moveJobDay, scheduleJobWindow). "none" clears
+ *  the listed day while the segments stay (Clear The Date keeps the worked days). Not exported: a
  *  "use server" export is callable from the client, and the mirror should never be set apart from
  *  the segments by anyone but this file. */
 async function writeScheduleRanges(
@@ -388,8 +398,9 @@ async function writeScheduleRanges(
   jobId: string,
   ranges: DateRange[],
   startTime?: string | null,
-  mirror?: DateRange | null,
-): Promise<Result> {
+  mirror?: DateRange | null | "none",
+  length?: JobLength,
+): Promise<Result & { defaulted?: boolean }> {
   // Keep only well-formed ranges; default a missing end to the start.
   const clean = ranges
     .map((r) => ({ start: r.start, end: r.end || r.start }))
@@ -399,34 +410,39 @@ async function writeScheduleRanges(
 
   // Mirror the overall window onto the job FIRST — this is what every legacy
   // reader uses, and it must succeed even if the segments table isn't there.
-  // Build the org's work-day window (default 8am–4pm) in the ORG timezone (this
-  // runs server-side in UTC, so a bare `new Date("…T08:00")` would store 8am
-  // UTC = ~midnight Pacific and disagree with the client-side writers — the
-  // root of the "wrong time" bug).
+  // Every instant is built in the ORG timezone (this runs server-side in UTC, so a bare
+  // `new Date("…T08:00")` would store 8am UTC = ~midnight Pacific — the root of the "wrong time" bug).
   const { tz, dayStartHm, dayEndHm } = await orgSchedulePrefs(supabase);
-  const span = mirror && clean.length ? [mirror] : clean;
+  const span = mirror === "none" ? [] : mirror && clean.length ? [mirror] : clean;
   const minStart = span.length ? span[0].start : null;
   const maxEnd = span.length ? span.reduce((m, r) => (r.end > m ? r.end : m), span[0].end) : null;
 
-  // Decide the primary start's time-of-day, with THREE distinct intents:
-  //  • startTime === undefined (movers, undo, registry verb): PRESERVE whatever
-  //    real time the job already carries so a day-move doesn't snap it to 8 AM.
-  //  • startTime "HH:MM": use it (an explicit time-of-day the editor set).
-  //  • startTime null/"" (the editor cleared the time input): back to all-day.
-  let clock: string | null;
-  if (/^\d{2}:\d{2}/.test(startTime ?? "")) {
-    clock = (startTime as string).slice(0, 5);
-  } else if (startTime === undefined && minStart) {
-    const { data: prior } = await supabase.from("jobs").select("scheduled_start").eq("id", jobId).maybeSingle();
-    clock = localHmInTz((prior as any)?.scheduled_start ?? null, tz, dayStartHm);
-  } else {
-    clock = null; // explicit clear (null/"") or no start → the all-day default window
-  }
-  const startIso = minStart ? tzDateTimeUtc(minStart, clock ?? dayStartHm, tz) : null;
+  // THE BLOCK AS IT STANDS is what a move keeps: its start time, its length, its size. PROJECTION LAW:
+  // all three columns planJobTimes reads are in the select list.
+  const { data: prior } = minStart
+    ? await supabase.from("jobs").select("scheduled_start, scheduled_end, planned_minutes").eq("id", jobId).maybeSingle()
+    : { data: null };
+  const was = (prior ?? {}) as { scheduled_start?: string | null; scheduled_end?: string | null; planned_minutes?: number | null };
+  const times = planJobTimes({
+    firstDay: minStart,
+    lastDay: maxEnd,
+    tz,
+    workDay: { start: dayStartHm, end: dayEndHm },
+    startTime,
+    length,
+    prior: {
+      scheduledStart: was.scheduled_start ?? null,
+      scheduledEnd: was.scheduled_end ?? null,
+      plannedMinutes: was.planned_minutes ?? null,
+    },
+  });
 
+  // The start, the end and a chosen length land TOGETHER, in one row write: a length is never saved
+  // apart from the block it draws.
   const patch: Record<string, unknown> = {
-    scheduled_start: startIso,
-    scheduled_end: maxEnd ? tzDateTimeUtc(maxEnd, dayEndHm, tz) : null,
+    scheduled_start: times.startIso,
+    scheduled_end: times.endIso,
+    ...(times.plannedMinutes !== undefined ? { planned_minutes: times.plannedMinutes } : {}),
     updated_at: new Date().toISOString(),
   };
   // The mirror update must PROVE it touched a row: an RLS-invisible or nonexistent
@@ -472,7 +488,8 @@ async function writeScheduleRanges(
   if (!segOk && clean.length === 1) {
     return { ok: false, error: "Couldn't save the date range — please try again. The job's overall window was updated." };
   }
-  return { ok: true };
+  // `defaulted`: nobody gave it a length, so it went down as two hours; the caller can say so.
+  return times.defaulted ? { ok: true, defaulted: true } : { ok: true };
 }
 
 /** A job's schedule as date-only segments, for read-modify-write math. Legacy
@@ -615,7 +632,7 @@ export async function scheduleJobWindow(
   jobId: string,
   start: string,
   end?: string | null,
-): Promise<Result & { note?: string; kept?: string[] }> {
+): Promise<Result & { note?: string; kept?: string[]; defaulted?: boolean }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
@@ -642,9 +659,11 @@ export async function placeJobOnDay(
   dateISO: string,
   /** "HH:MM" in the org's timezone. Omitted preserves whatever real time the job already carries —
    *  the branch a plain day-move relies on. A FLOATER carries none, so without this it silently
-   *  fell back to the all-day window and landed at 8am on an afternoon he had just chosen. */
+   *  fell back to the all-day window and landed at 8am on an afternoon he had just chosen. The
+   *  length is the job's own (its size, else the block it has); a job with neither lands as two
+   *  hours and the answer says so (`defaulted`). */
   startHHMM?: string,
-): Promise<Result> {
+): Promise<Result & { defaulted?: boolean }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
@@ -860,14 +879,23 @@ export async function planDayTimes(
   dateISO: string,
   items: { minutes: number | null; pinned?: boolean }[],
   fromHHMM: string,
+  /** The jobs being placed. They are never in their own way: neither the block a job already has
+   *  on this day nor a visit belonging to it pushes it later (the calendar hides a job's own visit
+   *  behind the job, so a push by it was a jump with nothing on screen to explain it). */
+  opts?: { jobIds?: string[] },
 ): Promise<{ ok: boolean; times: string[]; error?: string }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, times: [], error: ctx.error };
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dateISO)) return { ok: false, times: [], error: "Pick a day." };
+  const own = new Set((opts?.jobIds ?? []).map(String));
 
   const { tz, dayStartHm, dayEndHm } = await orgSchedulePrefs(ctx.supabase);
   const dayStart = tzDayStartUtc(dateISO, tz);
-  const dayEnd = new Date(dayStart.getTime() + 24 * 3600_000);
+  // The day ends at the NEXT local midnight, resolved on the calendar: a clock-change day is 23 or 25
+  // hours long, and start + 24h cut it or ran an hour into tomorrow.
+  const next = new Date(`${dateISO}T00:00:00Z`);
+  next.setUTCDate(next.getUTCDate() + 1);
+  const dayEnd = tzDayStartUtc(next.toISOString().slice(0, 10), tz);
 
   // Everything already holding time on this day. A CALL is excluded — it is pinned to the top and
   // costs the route nothing, so it must not push a real visit later.
@@ -893,29 +921,31 @@ export async function planDayTimes(
                                      Erik squeezes a visit into ("the visit is on the way"), and
                                      blocking it would fight the workflow the rail exists for.
      A work-type appointment SUPERSEDED by its job is skipped — its job now carries the block, and
-     counting both would double-width the day. */
-  const wdStart = hmToMinutes(dayStartHm) ?? 8 * 60;
-  const wdEnd = hmToMinutes(dayEndHm) ?? 17 * 60;
+     counting both would double-width the day.
+     THE SAME BLOCK THE CALENDAR DRAWS (lib/schedule/job-block jobDayBlock): a sized job is busy for its
+     size, a timed one for its real span, and an all-day one that nobody sized stays elastic. */
+  const wd = workDayMinutes({ start: dayStartHm, end: dayEndHm });
   const { data: dayJobs } = await ctx.supabase
     .from("jobs")
-    .select("scheduled_start, scheduled_end, planned_minutes, status")
+    .select("id, scheduled_start, scheduled_end, planned_minutes, status") // PROJECTION LAW: every column read below
     .lt("scheduled_start", dayEnd.toISOString())
     .or(`scheduled_end.gte.${dayStart.toISOString()},and(scheduled_end.is.null,scheduled_start.gte.${dayStart.toISOString()})`)
     .in("status", ["scheduled", "in_progress"])
     .limit(100);
 
   const busy: Busy[] = [];
-  for (const j of (dayJobs ?? []) as { scheduled_start: string | null; scheduled_end: string | null; planned_minutes: number | null }[]) {
-    if (!j.scheduled_start) continue;
-    const startsToday = new Date(j.scheduled_start) >= dayStart;
-    const sMin = startsToday ? tzMinutesOfDay(j.scheduled_start, tz) : wdStart;
-    const endsToday = j.scheduled_end ? new Date(j.scheduled_end) < dayEnd : true;
-    const eMin = j.scheduled_end && endsToday ? tzMinutesOfDay(j.scheduled_end, tz) || wdEnd : wdEnd;
-    const sized = Number(j.planned_minutes ?? 0);
-    const timed = sMin !== wdStart || (eMin !== wdEnd && eMin > sMin);
-    if (timed) busy.push({ startMin: sMin, endMin: Math.max(sMin + 15, eMin) });
-    else if (sized > 0) busy.push({ startMin: wdStart, endMin: wdStart + Math.min(sized, WORK_DAY_MINUTES) });
-    // else: elastic all-day — deliberately open to a squeezed visit.
+  for (const j of (dayJobs ?? []) as { id?: string; scheduled_start: string | null; scheduled_end: string | null; planned_minutes: number | null }[]) {
+    if (!j.scheduled_start || own.has(String(j.id ?? ""))) continue;
+    const b = jobDayBlock({
+      day: dateISO,
+      scheduledStart: j.scheduled_start,
+      scheduledEnd: j.scheduled_end,
+      plannedMinutes: j.planned_minutes,
+      tz,
+      wd,
+    });
+    if (b.allDay && !(Number(j.planned_minutes ?? 0) > 0)) continue; // elastic all-day — open to a squeezed visit
+    busy.push({ startMin: b.startMin, endMin: Math.max(b.startMin + 15, b.endMin) });
   }
 
   for (const a of (appts ?? []) as { starts_at: string; ends_at: string | null; type: string | null; status: string | null; job_id?: string | null; absorbed?: boolean }[]) {
@@ -923,6 +953,8 @@ export async function planDayTimes(
     // Absorbed = its JOB owns the slot now (0237), and the jobs loop above already counted it —
     // reading both would double-book the same block against itself.
     if (a.absorbed) continue;
+    // The visit of a job being placed is that job's own, never a reason to push it later.
+    if (a.job_id && own.has(String(a.job_id))) continue;
     // CLAMPED TO THIS DAY: a span that started yesterday is busy from midnight; one that runs on
     // past tonight is busy to midnight. Only the middle of a multi-day booking reads as full.
     const startsToday = new Date(a.starts_at) >= dayStart;

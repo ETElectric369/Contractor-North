@@ -536,6 +536,9 @@ export function PlaceRail({
               {/* HIS working day (Settings → Crew & time), never a literal — the rail used to
                   promise 8am to a shop that opens at 9. */}
               Starting {prettyTime(startAt || (half === "am" ? halfTimes.am : halfTimes.pm))}, in the order shown.
+              {/* THE DEFAULT, SAID BEFORE THE TAP (lib/schedule/job-block): a job with no length
+                  lands as two hours, never the rest of the day. Size it above to land it longer. */}
+              {jobs.some((j) => !j.planned_minutes) && " A job with no length goes down as 2 hours."}
             </span>
             <button
               type="button"

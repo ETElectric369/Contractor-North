@@ -11,7 +11,7 @@ import { usePlacement } from "../schedule/placement-context";
 import { dayTargetLabel } from "@/lib/schedule/placement-plan";
 import { dayLabel, spanLabel } from "@/lib/schedule/span-label";
 import { useEndlessStack } from "@/components/use-endless-stack";
-import { daysNeeded, jobBlockEnd, WORK_DAY_MINUTES } from "@/lib/schedule/work-shape";
+import { jobDayBlock } from "@/lib/schedule/job-block";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/components/toast";
 import { MoveToDay } from "@/components/move-to-day";
@@ -552,46 +552,24 @@ export function CalendarView({
     const tray: TimeGridAllDay[] = [];
     if (!data) return { events, allDay: tray };
     for (const { job, pos } of data.jobs) {
-      let startMin = wdStartMin;
-      let endMin = wdEndMin;
-      if (job.scheduled_start && dayOf(job.scheduled_start) === k) {
-        // Org-tz minutes: the all-day sentinel is STORED as the org's local
-        // work-day start (tzLocalHourUtc), so only an org-tz read can spot it.
-        const sMin = minOf(job.scheduled_start);
-        const eMin =
-          job.scheduled_end && dayOf(job.scheduled_end) === k ? minOf(job.scheduled_end) : null;
-        /* THE SENTINEL NEEDS BOTH ENDS. Erik: "the service calls arent matching the timeframes
-           assigned." Nora's call is 9–11 — and the shop opens at 9, so a start-only test read her
-           real 9:00 as the all-day sentinel and stretched a two-hour visit across the whole day.
-           A job is all-day only when START and END both sit on the work-day window; a real end
-           that differs makes it timed, wherever it starts. */
-        const explicit = sMin !== wdStartMin || (eMin != null && eMin !== wdEndMin && eMin > sMin);
-        const sized = Number(job.planned_minutes ?? 0);
-        if (explicit) {
-          startMin = sMin;
-          // What was scheduled, then what he sized it at, then the shop's hours — see jobBlockEnd.
-          endMin = jobBlockEnd(startMin, {
-            scheduledEndMin: eMin,
-            plannedMinutes: job.planned_minutes,
-            workDayEndMin: wdEndMin,
-          });
-          if (endMin <= startMin) endMin = startMin + 60;
-        } else if (sized > 0 && daysNeeded(sized) === 1) {
-          /* A SIZED JOB IS NEVER THE BARE SENTINEL. A 2h job placed at the shop's opening hour
-             reads exactly like the all-day marker on both ends (start = wdStart, mirrored end =
-             wdEnd) — and drew all day, silently ignoring the number a person entered. The size
-             breaks the tie: it draws its real span from the open. Multi-day sizes stay all-day
-             per covered day, which is what a day of a multi-day job IS. */
-          startMin = wdStartMin;
-          endMin = Math.min(wdEndMin, wdStartMin + Math.min(sized, WORK_DAY_MINUTES));
-          if (endMin <= startMin) endMin = startMin + 60;
-        }
-      }
+      /* THE BLOCK IS WHAT WAS SAVED: its start, and the end its length gives it, in the org's clock
+         (lib/schedule/job-block jobDayBlock, the one rule the writer, the fitter and the time
+         controls share). THE SENTINEL NEEDS BOTH ENDS (Nora's 9–11 at a 9 o'clock shop is timed); a
+         sized job never draws the closing-time stamp older writes put on every end; a job over
+         several days runs full days. */
+      const b = jobDayBlock({
+        day: k,
+        scheduledStart: job.scheduled_start,
+        scheduledEnd: job.scheduled_end,
+        plannedMinutes: job.planned_minutes,
+        tz,
+        wd: { startMin: wdStartMin, endMin: wdEndMin },
+      });
       events.push({
         id: `j-${job.id}-${k}`,
         dayStr: k,
-        startMin,
-        endMin,
+        startMin: b.startMin,
+        endMin: b.endMin > b.startMin ? b.endMin : b.startMin + 60,
         label: job.name,
         sub: [job.customers?.name, pos].filter(Boolean).join(" · ") || null,
         color: JOB_GRID_TONE,
