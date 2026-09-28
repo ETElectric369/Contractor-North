@@ -225,14 +225,17 @@ function Row(p: RowProps) {
   const open = () => p.router.push(item.href);
   return (
     <div
-      className={`flex items-center gap-1 rounded-xl border bg-white py-1.5 pl-3 pr-1 ${
+      className={`relative flex items-center gap-1 rounded-xl border bg-white py-1.5 pl-3 pr-1 ${
         item.done ? "border-slate-100 opacity-55" : p.nested ? "border-slate-100" : "border-slate-200"
       }`}
     >
+      {/* TAPPING THE ROW OPENS ITS THING: one target the size of the whole row (44px and up), lying
+          under its words; its named buttons and ⋯ sit on top of it. */}
+      <button type="button" onClick={open} aria-label={`Open ${item.title}`} className="absolute inset-0 rounded-xl" />
       {/* TWO LINES, THE LEAD-BOARD SHAPE. Line 1 is WHO/WHAT with the date hard right in mono so the
           column reads down the page; line 2 is the chip, the context and the row's one button. */}
-      <div className="min-w-0 flex-1">
-        <button type="button" onClick={open} className="flex w-full min-w-0 items-baseline gap-2 text-left">
+      <div className="pointer-events-none relative min-w-0 flex-1">
+        <div className="flex w-full min-w-0 items-baseline gap-2">
           <span className={`min-w-0 flex-1 truncate text-sm ${item.done ? "text-slate-400 line-through" : "font-medium text-slate-900"}`}>
             {item.urgency >= 2 && !item.done && <span className="mr-1 text-red-500">!</span>}
             {item.title}
@@ -240,20 +243,26 @@ function Row(p: RowProps) {
           {when && (
             <span className={`shrink-0 font-mono text-[11px] tabular-nums ${overdue ? "font-semibold text-red-600" : "text-slate-400"}`}>{when}</span>
           )}
-        </button>
+        </div>
+        {/* AT PHONE WIDTH the buttons keep 9rem of context beside them, or wrap together onto a line
+            of their own (right-aligned): a long button never squeezes the subtitle to nothing. */}
         <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1">
-          <button type="button" onClick={open} className="flex min-w-0 flex-1 basis-32 items-center gap-1.5 truncate text-left text-xs text-slate-500">
+          <div className="flex min-w-0 flex-[1_1_9rem] items-center gap-1.5 truncate text-xs text-slate-500">
             <Badge tone={meta.tone}>{chip}</Badge>
             {item.subtitle && <span className="truncate">{item.subtitle}</span>}
             {item.who && <span className="truncate">· {item.who}</span>}
-          </button>
-          {!item.done && doors.primary && <DoorButton {...p} door={doors.primary} />}
-          {!item.done && doors.also && <DoorButton {...p} door={doors.also} />}
+          </div>
+          {!item.done && (doors.primary || doors.also) && (
+            <div className="pointer-events-auto ml-auto flex shrink-0 items-center gap-1">
+              {doors.primary && <DoorButton {...p} door={doors.primary} />}
+              {doors.also && <DoorButton {...p} door={doors.also} />}
+            </div>
+          )}
         </div>
         {/* A SHIFT ON NO JOB BILLED BY HAND on an invoice with no job (0357, TTUSD on INV-055): the
             office says which line charged it, right here. */}
         {item.noJobHours && (
-          <div className="mt-2">
+          <div className="pointer-events-auto mt-2">
             <AlreadyBilledButton jobId={null} target={{ kind: "time", ids: item.noJobHours.entryIds, what: "Those hours" }} />
           </div>
         )}
@@ -261,15 +270,17 @@ function Row(p: RowProps) {
             answerable right here with one tap (Bills plan, Wave A). ONE card at a time (readable at
             60mph); the rest are a link to /bills, which draws them all. */}
         {item.kind === "supplier_paper" && item.supplierPapers && (
-          <div className="mt-2">
+          <div className="pointer-events-auto mt-2">
             <SupplierPaperCards feed={item.supplierPapers} refreshAfter={false} scope={SUPPLIER_PAPERS_SCOPE} limit={1} moreHref="/bills#needs-you" />
           </div>
         )}
       </div>
       {!item.done && doors.more.length > 0 && (
-        <RowMoreSheet title={item.title} subline={item.subtitle ?? null}>
-          {({ close }) => <MoreSheetBody {...p} doors={doors.more} close={close} />}
-        </RowMoreSheet>
+        <div className="relative">
+          <RowMoreSheet title={item.title} subline={item.subtitle ?? null}>
+            {({ close }) => <MoreSheetBody {...p} doors={doors.more} close={close} />}
+          </RowMoreSheet>
+        </div>
       )}
     </div>
   );
@@ -299,16 +310,18 @@ function PileRow(p: RowProps & { kids: ActionItem[]; count: number; open: boolea
   const unfold = () => (here || !pile.listHref ? p.onToggle() : p.router.push(pile.listHref));
   return (
     <div className="rounded-xl border border-slate-200 bg-white" data-pile={pile.name}>
-      <div className="flex items-center gap-1 py-1.5 pl-3 pr-1">
-        <div className="min-w-0 flex-1">
-          <button type="button" onClick={unfold} className="flex w-full min-w-0 items-baseline gap-2 text-left">
+      <div className="relative flex items-center gap-1 py-1.5 pl-3 pr-1">
+        {/* The whole header opens the pile: one target the size of the header, under its words. */}
+        <button type="button" onClick={unfold} aria-label={title} aria-expanded={here ? open : undefined} className="absolute inset-0 rounded-t-xl" />
+        <div className="pointer-events-none relative min-w-0 flex-1">
+          <div className="flex w-full min-w-0 items-baseline gap-2">
             <span className="min-w-0 flex-1 truncate text-sm font-semibold text-slate-900">
               {item.urgency >= 2 && <span className="mr-1 text-red-500">!</span>}
               {title}
             </span>
-          </button>
+          </div>
           <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1">
-            <button type="button" onClick={unfold} className="flex min-w-0 flex-1 basis-32 items-center gap-1.5 truncate text-left text-xs text-slate-500">
+            <div className="flex min-w-0 flex-[1_1_9rem] items-center gap-1.5 truncate text-xs text-slate-500">
               {/* TEXT TO VISUAL: one pip per row in the pile, amber once it has waited over a week. */}
               <span className="inline-flex shrink-0 items-center gap-0.5" aria-label={`${pips.filter((x) => x === "old").length} waiting over a week`}>
                 {pips.map((age, i) => (
@@ -317,8 +330,8 @@ function PileRow(p: RowProps & { kids: ActionItem[]; count: number; open: boolea
                 {more && <span className="text-[10px] font-semibold text-slate-400">+</span>}
               </span>
               {item.subtitle && <span className="truncate">{item.subtitle}</span>}
-            </button>
-            <button type="button" onClick={unfold} className={ROW_BUTTON}>
+            </div>
+            <button type="button" onClick={unfold} className={`${ROW_BUTTON} pointer-events-auto ml-auto`}>
               {pile.verb}
             </button>
           </div>

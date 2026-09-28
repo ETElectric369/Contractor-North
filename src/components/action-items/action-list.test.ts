@@ -163,12 +163,16 @@ describe("ActionList — one named button per row, and ⋯ (W1-13)", () => {
     expect(html).not.toContain('aria-label="More For inv"');
   });
 
-  it("every button is 44px: the row's (the Call Back pattern) and the ⋯", () => {
+  it("every button is 44px: the row's (the Call Back pattern) and the ⋯; the row opens from one target the size of the row", () => {
     expect(ROW_BUTTON).toMatch(/\bh-11\b/);
     expect(ROW_BUTTON).toContain("-my-3");
     const html = renderToStaticMarkup(createElement(ActionList, { items: [item({ id: "inv", kind: "invoice_overdue" })], todayStr: "2026-09-26", isStaff: true }));
     const link = html.match(/<a [^>]*>Get Paid<\/a>/)![0];
     expect(link).toMatch(/\bh-11\b/);
+    // The open target covers the whole row (never two 20px lines), under the words.
+    expect(html).toMatch(/<button type="button" aria-label="Open inv" class="absolute inset-0 rounded-xl"><\/button>/);
+    expect(html).toContain('class="pointer-events-none relative min-w-0 flex-1"');
+    expect(html).toMatch(/class="pointer-events-auto ml-auto flex shrink-0 items-center gap-1"><a [^>]*>Get Paid<\/a>/);
   });
 
   it("a tech's visit has no button and no ⋯: it only opens", () => {
