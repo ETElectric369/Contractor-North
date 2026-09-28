@@ -362,7 +362,8 @@ begin
                  + extract(minute from (j.scheduled_start at time zone v_tz))::integer;
     v_start_min := least(v_start_min, 23 * 60 + 58);
     v_new_start := (v_new_first + make_time(v_start_min / 60, v_start_min % 60, 0)) at time zone v_tz;
-    v_new_end := (v_new_last + make_time(v_wd_end / 60, v_wd_end % 60, 0)) at time zone v_tz;
+    -- (closing never past 23:59, so no work-day setting can make the customer's tap an error)
+    v_new_end := (v_new_last + make_time(least(v_wd_end, 23 * 60 + 59) / 60, least(v_wd_end, 23 * 60 + 59) % 60, 0)) at time zone v_tz;
 
     select array_agg(x.day order by x.day) into v_days
       from (
