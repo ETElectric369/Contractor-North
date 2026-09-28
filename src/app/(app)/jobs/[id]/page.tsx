@@ -52,7 +52,6 @@ import { loadShiftChains } from "@/lib/shift-chain";
 import { JobPhotos } from "./job-photos";
 import { JobCustomerPage } from "./job-customer-page";
 import { JobPanelLoader } from "./job-panel-loader";
-import { JobNotes } from "./job-notes";
 import { JobBills } from "./job-bills";
 import { JobTaskList, type TaskPhotos } from "./job-task-list";
 import { jobTaskTally, readJobTasks, taskPhoto } from "@/lib/job-tasks";
@@ -72,7 +71,7 @@ import { JobActionDock } from "./job-action-dock";
 import { PaymentScheduleCard } from "./payment-schedule-card";
 import { ContractCard } from "./contract-card";
 import { LienInsuranceCard } from "./lien-insurance-card";
-import { JobDescription } from "./job-description";
+import { JobTextBox } from "./job-description";
 import { computeJobProgress, livePurchaseOrders } from "@/lib/job-progress-math";
 import { signDocumentUrls } from "@/lib/signed-docs";
 import { documentsForViewer } from "@/lib/tech-documents";
@@ -1187,9 +1186,13 @@ export default async function JobDetailPage({
                   </div>
                 </div>
               </div>
-              {/* A tech reads the description (his scope) and is pointed at the Materials tab —
-                  Brian typed a materials note into this box, which only staff can save. */}
-              <JobDescription jobId={j.id} description={j.description} viewerIsStaff={viewerIsStaff} />
+              {/* TWO BOXES, NEVER ONE (W1-21, Erik's answer): the Description is the scope and prints on
+                  the customer's invoice; the Notes are the company's own (gate codes, access) and never
+                  reach a customer's paper. Each its own column, each saying which it is. A tech reads
+                  both (the Notes only when there are some) and is pointed at the Materials tab once —
+                  Brian typed a materials note into the Description, which only staff can save. */}
+              <JobTextBox jobId={j.id} field="description" value={j.description ?? null} viewerIsStaff={viewerIsStaff} />
+              <JobTextBox jobId={j.id} field="notes" value={(j as any).notes ?? null} viewerIsStaff={viewerIsStaff} />
             </CardContent>
           </Card>
 
@@ -1275,17 +1278,6 @@ export default async function JobDetailPage({
             </Card>
           )}
         </div>
-      ),
-    },
-    {
-      id: "notes",
-      label: "Notes",
-      content: (
-        <Card>
-          <CardContent className="py-5">
-            <JobNotes jobId={j.id} orgId={j.org_id} notes={j.notes} viewerIsStaff={viewerIsStaff} />
-          </CardContent>
-        </Card>
       ),
     },
     {

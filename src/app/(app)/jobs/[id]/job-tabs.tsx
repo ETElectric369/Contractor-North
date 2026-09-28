@@ -6,14 +6,16 @@ import { ALL_ON, featureOn, type FeatureKey, type FeatureMap } from "@/lib/featu
 // component REFERENCES survive the server→client serialization into <Tabs>.
 import {
   LayoutDashboard, Clock, Package, Camera, ListChecks, CalendarDays,
-  ClipboardCheck, FileText, DollarSign, Receipt as ReceiptTab, StickyNote, Stamp, FileDiff, Eye, Zap,
+  ClipboardCheck, FileText, DollarSign, Receipt as ReceiptTab, Stamp, FileDiff, Eye, Zap,
 } from "./job-tab-icons";
 
 // In-page nav order — the lifecycle-honest strip. The pinned chips (per role, below)
 // lead in this order; everything else clusters into the More chip in this order.
+// NO NOTES TAB (W1-21): the job's notes are the Overview's second box (private, never printed),
+// under the Description, so there is no tab of them to find.
 export const JOB_TAB_ORDER = [
   "job", "tasks", "time", "materials", "costs", "invoices", "photos", "appointments",
-  "notes", "quotes", "change-orders", "permits", "panel", "wos", "customer",
+  "quotes", "change-orders", "permits", "panel", "wos", "customer",
 ];
 // THE CHIPS THAT STAY PUT (Erik, 2026-09-11: "overview - time - materials - invoices be
 // seaglass buttons that stay put and the little arrow drop down for more"). Two sets,
@@ -64,7 +66,6 @@ const JOB_TAB_META: Record<string, { group?: string; icon?: LucideIcon }> = {
   costs: { group: "Money", icon: DollarSign },
   invoices: { group: "Money", icon: ReceiptTab },
   "change-orders": { group: "Money", icon: FileDiff },
-  notes: { group: "Docs", icon: StickyNote },
   permits: { group: "Docs", icon: Stamp },
   // THE PANEL (0333): the job's circuits. Not pinned and not staff-only — the crew works it at the
   // panel (Erik's decision 1, 2026-09-25) and nothing on it carries a price.
