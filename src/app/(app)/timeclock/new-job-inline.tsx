@@ -17,7 +17,7 @@ export interface CreatedJob {
 /**
  * "Can't add new job from this window." — Erik, filing from the truck.
  *
- * Every job picker on the clock (clock-in, the mid-shift switch, the office's Add Entry form)
+ * Every job picker on the clock (clock-in, the mid-shift switch, the office's Add Time Entry)
  * could only offer jobs that ALREADY existed. So the one moment you most need a new job —
  * you're standing on a site nobody has opened a job for — sent you off to /jobs and back,
  * which is precisely the round trip the 60mph rule exists to forbid.
@@ -110,7 +110,7 @@ export function NewJobInline({
         onChange={(e) => setName(e.target.value)}
         onKeyDown={(e) => {
           // A phone keyboard's Go key should finish the job, not submit whatever form the
-          // picker happens to be sitting inside (the Add Entry modal's, for one).
+          // picker happens to be sitting inside (Add Time Entry's, for one).
           // GUARDED like the button is: on truck signal the round trip is seconds long, and a
           // double-tap of Go would otherwise mint the job twice — useTransition happily starts a
           // second run while the first is still in flight, and there is no unique key to catch it.

@@ -240,3 +240,13 @@ describe("Copy To Someone Else… lives in the editor, beside Split", () => {
     expect(edit).toContain("Save your changes first, then copy the shift to someone else.");
   });
 });
+
+describe("no sentence sends anyone to a door that left", () => {
+  it("a crew lead's filed report says the office reads it on My Day, not on the gone 'Crew Hours' card", () => {
+    const debrief = src("../timeclock/daily-report-debrief.tsx");
+    expect(debrief).toContain("The office reads it on their My Day.");
+    expect(debrief).not.toMatch(/on Crew Hours\./);
+    // My Day is where the reports are (with Mark Reviewed).
+    expect(src("../planner/page.tsx")).toContain('.from("daily_reports")');
+  });
+});

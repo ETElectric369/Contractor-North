@@ -197,8 +197,6 @@ export function SameDayShifts({
         });
     }, 250);
     return () => clearTimeout(t);
-    // `take` reads the callback through a ref, so it is not a dependency.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profileId, date, jobId, refreshKey]);
 
   if (!data) return null;
