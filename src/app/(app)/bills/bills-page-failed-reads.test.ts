@@ -107,7 +107,7 @@ const BASE: Record<string, unknown[]> = {
   invoice_items: [],
 };
 
-const state = vi.hoisted(() => ({ failing: new Set<string>(), rows: [] as BillsSearchRow[] }));
+const state = vi.hoisted(() => ({ failing: new Set<string>(), rows: [] as BillsSearchRow[], hand: null as null | { jobs: unknown[]; jobsUnread?: boolean } }));
 
 function chain(table: string) {
   const answer = () =>
@@ -145,6 +145,14 @@ vi.mock("./bills-search-box", () => ({
   },
   BillsSearchBox: () => null,
   useBillsSearch: () => ({ query: "", setQuery: () => {}, rows: [], keys: null }),
+}));
+
+// Add By Hand's props are read off the button: its sheet only draws once tapped.
+vi.mock("./add-business-cost", () => ({
+  AddByHandButton: (p: { jobs: unknown[]; jobsUnread?: boolean }) => {
+    state.hand = p;
+    return null;
+  },
 }));
 
 let BillsPage: (p: { searchParams: Promise<Record<string, string>> }) => Promise<unknown>;
@@ -311,5 +319,16 @@ describe("Needs You never gives an all-clear over a read that failed", () => {
     expect(text).toContain("Couldn't read the papers waiting to be sorted just now. Reload the page to try again.");
     expect(text).not.toContain("is in your books");
     expect(text).not.toContain("Nothing else waiting on you");
+  });
+});
+
+describe("the jobs unread", () => {
+  it("Add By Hand is told, so its sheet says it couldn't load the jobs instead of 'no jobs yet'", async () => {
+    await renderWith();
+    expect(state.hand?.jobsUnread).toBe(false);
+    expect(state.hand?.jobs.length).toBe(2);
+    await renderWith("jobs");
+    expect(state.hand?.jobsUnread).toBe(true);
+    expect(state.hand?.jobs.length).toBe(0);
   });
 });

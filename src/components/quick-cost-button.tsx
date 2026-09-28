@@ -84,6 +84,9 @@ type QuickCostProps = {
   typeOnly?: boolean;
   /** The Shop Stock switch (0352), for the typed sheet's What's It For?. Absent = off (no row). */
   shopStock?: boolean;
+  /** The host's read of the jobs failed (its `jobs` is empty for that reason, not because there are
+   *  none): the typed sheet says it couldn't load them, never "no jobs yet". */
+  jobsUnread?: boolean;
 };
 
 /**
@@ -754,6 +757,9 @@ const STOCK = "__stock";
  * becomes a roll with its own cost, which a typed amount has none of. So Shop Stock here is a door,
  * never a guessed save: the paper goes in through Snap Or Note, whose card has Shop Stock.
  */
+/** The typed sheet's jobs couldn't be read: a job's cost waits for a reload, never becomes a business cost. */
+export const JOBS_UNREAD_LINE = "Couldn't load your jobs just now. Reload the page to put this cost on a job.";
+
 export const SHOP_STOCK_BY_PAPER =
   "Stock goes in by the piece, from the ticket's lines, so it comes in on paper: snap or drop the ticket in Snap Or Note, then tap Shop Stock on its card.";
 
@@ -833,6 +839,7 @@ function TypeItInButton({
   onOpen,
   onClose,
   shopStock = false,
+  jobsUnread = false,
 }: QuickCostProps) {
   const router = useRouter();
   const toast = useToast();
@@ -852,6 +859,8 @@ function TypeItInButton({
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
   const [autoJobs, setAutoJobs] = useState<{ id: string; label: string }[] | null>(null);
+  // The sheet's own jobs read failed (no signal): said as that, never as "no jobs yet".
+  const [autoJobsFailed, setAutoJobsFailed] = useState(false);
   const orgTz = useRef<string | null>(null);
 
   const pickerJobs = jobs ?? autoJobs ?? [];
@@ -876,7 +885,9 @@ function TypeItInButton({
     onOpen?.();
     setOpen(true);
     // Best effort, both: the day stays the device's today and the picker offers Business Cost when
-    // either read can't be made (no signal), and the save itself says what happened.
+    // either read can't be made (no signal), and the save itself says what happened. A jobs read that
+    // failed says so on the sheet, so an empty picker is never read as "no jobs yet".
+    const loadJobs = !jobId && !jobs && !autoJobs;
     try {
       const supabase = createClient();
       if (orgTz.current == null) {
@@ -884,17 +895,21 @@ function TypeItInButton({
         orgTz.current = getOrgSettings((data as { settings?: unknown } | null)?.settings).timezone;
         if (!dateTouched.current) setDate(todayStrInTz(orgTz.current));
       }
-      if (!jobId && !jobs && !autoJobs) {
+      if (loadJobs) {
         const { data } = await supabase
           .from("jobs")
           .select("id, job_number, name")
           .neq("status", "cancelled")
           .order("created_at", { ascending: false })
           .limit(200);
-        if (data) setAutoJobs((data as { id: string; job_number: string | null; name: string | null }[]).map((j) => ({ id: j.id, label: jobPickLabel(j) })));
+        if (data) {
+          setAutoJobsFailed(false);
+          setAutoJobs((data as { id: string; job_number: string | null; name: string | null }[]).map((j) => ({ id: j.id, label: jobPickLabel(j) })));
+        } else setAutoJobsFailed(true);
       }
     } catch {
-      // Nothing to undo: the sheet is open with what it has.
+      // Nothing to undo: the sheet is open with what it has, and says the jobs couldn't load.
+      if (loadJobs) setAutoJobsFailed(true);
     }
   }
 
@@ -1033,7 +1048,13 @@ function TypeItInButton({
                   </option>
                 ))}
               </Select>
-              {pickerJobs.length === 0 && <p className="text-xs text-slate-500">No jobs to pick from yet. A cost with no job is a Business Cost.</p>}
+              {jobsUnread || (autoJobsFailed && pickerJobs.length === 0) ? (
+                <p className="text-xs text-amber-800" role="alert">
+                  {JOBS_UNREAD_LINE}
+                </p>
+              ) : (
+                pickerJobs.length === 0 && <p className="text-xs text-slate-500">No jobs to pick from yet. A cost with no job is a Business Cost.</p>
+              )}
               <div className={`grid gap-2 ${shopStock ? "grid-cols-2" : "grid-cols-1"}`} role="radiogroup" aria-label="Or">
                 <button type="button" role="radio" aria-checked={target === BUSINESS} onClick={() => pickTarget(BUSINESS)} className={choiceCls(target === BUSINESS)}>
                   Business Cost

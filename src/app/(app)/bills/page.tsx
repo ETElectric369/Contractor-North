@@ -1293,7 +1293,7 @@ export default async function BillsPage({
           <SnapOrNoteButton />
           {/* The one typed door (W1-32): a job's cost, a business cost in its bucket, or stock, with
               Paid? asked. It saves through the same createBill as every other cost. */}
-          <AddByHandButton jobs={handJobs} shopStock={shopStock} />
+          <AddByHandButton jobs={handJobs} shopStock={shopStock} jobsUnread={!!jobsErr} />
         </div>
       </PageHeader>
 

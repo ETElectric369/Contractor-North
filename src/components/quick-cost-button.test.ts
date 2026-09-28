@@ -27,7 +27,7 @@ vi.mock("@/components/ui/modal", () => ({
   ModalActions: ({ saveLabel }: { saveLabel?: string }) => createElement("button", { "data-save": "" }, saveLabel ?? "Save"),
 }));
 
-const { QuickCostButton, SHOP_STOCK_BY_PAPER, jobPickLabel, typedCostBill, typedCostProblem } = await import("./quick-cost-button");
+const { QuickCostButton, SHOP_STOCK_BY_PAPER, JOBS_UNREAD_LINE, jobPickLabel, typedCostBill, typedCostProblem } = await import("./quick-cost-button");
 
 const base = { amount: 64.1, date: "2026-09-27", target: "", bucket: null, where: "", paid: "paid" as const, billNumber: "", poId: "" };
 const text = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/&#x27;|&apos;/g, "'").replace(/\s+/g, " ");
@@ -110,6 +110,17 @@ describe("the sheet as it is drawn", () => {
     const business = buttons(bills).find((b) => b.words === "Business Cost")!;
     expect(business.attrs).toContain("min-h-11");
     expect(business.attrs).toContain('aria-checked="false"');
+  });
+
+  it("no jobs yet and a jobs read that failed get different sentences (a failed read is never 'no jobs')", () => {
+    const none = text(renderToStaticMarkup(createElement(QuickCostButton, { typeOnly: true, jobs: [], label: "Add By Hand", icon: "none" })));
+    expect(none).toContain("No jobs to pick from yet. A cost with no job is a Business Cost.");
+    expect(none).not.toContain(JOBS_UNREAD_LINE);
+    const failed = renderToStaticMarkup(createElement(QuickCostButton, { typeOnly: true, jobs: [], jobsUnread: true, label: "Add By Hand", icon: "none" }));
+    expect(text(failed)).toContain(JOBS_UNREAD_LINE);
+    expect(text(failed)).not.toContain("No jobs to pick from yet");
+    expect(failed).toMatch(/role="alert"/);
+    expect(JOBS_UNREAD_LINE).toBe("Couldn't load your jobs just now. Reload the page to put this cost on a job.");
   });
 
   it("Shop Stock is offered only while the Shop Stock switch is on", () => {
