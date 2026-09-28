@@ -35,7 +35,7 @@ export async function CalendarPanel({ canEdit = false }: { canEdit?: boolean } =
   // EVERYONE'S DAY'S ROWS from today on (a day early, so the company's today is in it in any timezone):
   // the day row wins for that day on every upcoming chip (lib/schedule/block-info crewChips).
   const dayRowsFrom = new Date(now - 86400_000).toISOString().slice(0, 10);
-  const [{ data: listedJobs }, { data: segments, perDayHours }, { data: appointments }, { data: tasks }, { data: unschedRows }, { data: externalRows }, picker, { data: org }, { data: addableRows }, { data: dayRowRows }, { data: everyone }] =
+  const [{ data: listedJobs }, { data: segments, perDayHours }, { data: appointments }, { data: tasks }, { data: externalRows }, picker, { data: org }, { data: addableRows }, { data: dayRowRows }, { data: everyone }] =
     await Promise.all([
       // Overlap test, not a point test on scheduled_start: a job shows if it
       // STARTS before the window end AND (ends after the window start, or is an
@@ -80,18 +80,6 @@ export async function CalendarPanel({ canEdit = false }: { canEdit?: boolean } =
         .lte("due_date", jobTo.slice(0, 10))
         .order("due_date")
         .limit(500),
-      // "To schedule" tray: every still-in-flight job with no scheduled_start, via the
-      // ACTIVE_JOB_STATUSES spine (held jobs included: the tray places them). Needs You asks a
-      // wider question of the same jobs (action-items/jobs-needing-a-day: is ANYTHING ahead of it?
-      // no day, segment, visit or clock today or later), so a job whose date has passed with
-      // nothing next is there too, and a held job waits there with its own day instead.
-      supabase
-        .from("jobs")
-        .select("id, job_number, name, address, assigned_to, customers(name)")
-        .is("scheduled_start", null)
-        .in("status", ACTIVE_JOB_STATUSES)
-        .order("created_at", { ascending: false })
-        .limit(50),
       // Mirrored Google events (0132 two-way sync) — read-only zinc pills.
       // Fail-soft by construction: a missing table / RLS miss / fetch error
       // returns data:null and the calendar simply renders zero Google pills.
@@ -146,16 +134,6 @@ export async function CalendarPanel({ canEdit = false }: { canEdit?: boolean } =
     : { data: [] };
   const jobs: unknown[] = [...(listedJobs ?? []), ...(historyJobs ?? [])];
 
-  const unscheduled = (unschedRows ?? []).map((j: any) => ({
-    id: j.id,
-    job_number: j.job_number,
-    name: j.name,
-    customer: j.customers?.name ?? null,
-    // Where and who on the tray's tile, as its block and its rail card say them. No money.
-    address: j.address ?? null,
-    assigned_to: Array.isArray(j.assigned_to) ? j.assigned_to : [],
-  }));
-
   return (
     <div className="mx-auto max-w-5xl">
       <CalendarView
@@ -164,7 +142,6 @@ export async function CalendarPanel({ canEdit = false }: { canEdit?: boolean } =
         appointments={(appointments ?? []) as unknown as CalAppt[]}
         tasks={(tasks ?? []) as unknown as CalTask[]}
         external={(externalRows ?? []) as unknown as CalExternal[]}
-        unscheduled={unscheduled}
         members={picker.staff}
         picker={{ jobs: picker.jobOpts, customers: picker.custOpts, staff: picker.staffOpts }}
         now={new Date().toISOString()}

@@ -25,6 +25,7 @@ import {
   hoursOnDay,
   keepWorkedDays,
   moveKeepingWorkedDays,
+  segmentDays,
   setDayHours,
   workedDaysFrom,
   type DayHours,
@@ -435,8 +436,12 @@ async function writeScheduleRanges(
   mirror?: DateRange | null | "none",
   length?: JobLength,
   /** `freshBlock`: the job has no live plan (no day, or a stale one from before a hold), so the block
-   *  it lands with is the start and length given here, never a length kept from that old block. */
-  opts?: { freshBlock?: boolean },
+   *  it lands with is the start and length given here, never a length kept from that old block.
+   *  `promote: false`: the status never moves (a worked day booked after the fact, an Undo putting a
+   *  placement back): advanceToScheduled is skipped. Private to this file, like the mirror.
+   *  `listedAt`: the listed start and end exactly as they were (an Undo), instead of the block the
+   *  write would work out; the length column is left alone. */
+  opts?: { freshBlock?: boolean; promote?: boolean; listedAt?: { start: string | null; end: string | null } },
 ): Promise<Result & { defaulted?: boolean }> {
   // Keep only well-formed ranges; default a missing end to the start. A range's hours ride with it.
   const clean: DateRange[] = ranges
@@ -493,7 +498,8 @@ async function writeScheduleRanges(
       (s) => ({ start: s.start_date, end: s.end_date, hours: readDayHours(s.start_time, s.end_time) }),
     );
     days = carryHours(clean, priorDays);
-    const own = minStart && minStart === maxEnd ? hoursOnDay(days, minStart) : null;
+    // An Undo (listedAt) puts the days back exactly as they were, their own hours included.
+    const own = minStart && minStart === maxEnd && !opts?.listedAt ? hoursOnDay(days, minStart) : null;
     if (minStart && own) {
       soleOwn = { day: minStart, hours: own };
       days = setDayHours(days, minStart, null);
@@ -522,13 +528,15 @@ async function writeScheduleRanges(
   });
 
   // The start, the end and a chosen length land TOGETHER, in one row write: a length is never saved
-  // apart from the block it draws.
-  const patch: Record<string, unknown> = {
-    scheduled_start: times.startIso,
-    scheduled_end: times.endIso,
-    ...(times.plannedMinutes !== undefined ? { planned_minutes: times.plannedMinutes } : {}),
-    updated_at: new Date().toISOString(),
-  };
+  // apart from the block it draws. An Undo puts the listed start and end back exactly as they were.
+  const patch: Record<string, unknown> = opts?.listedAt
+    ? { scheduled_start: opts.listedAt.start, scheduled_end: opts.listedAt.end, updated_at: new Date().toISOString() }
+    : {
+        scheduled_start: times.startIso,
+        scheduled_end: times.endIso,
+        ...(times.plannedMinutes !== undefined ? { planned_minutes: times.plannedMinutes } : {}),
+        updated_at: new Date().toISOString(),
+      };
   // The mirror update must PROVE it touched a row: an RLS-invisible or nonexistent
   // job matches zero rows (no error), and without this guard we'd fall through to the
   // segment insert below, which org-stamps to the CALLER — writing an orphan segment
@@ -539,8 +547,9 @@ async function writeScheduleRanges(
   const { data: upd, error } = await supabase.from("jobs").update(patch).eq("id", jobId).select("id");
   if (error) return { ok: false, error: dbError(error) };
   if (!upd?.length) return { ok: false, error: "Job not found." };
-  // A scheduled date advances early-stage status (consistent with the other writers).
-  if (minStart) await advanceToScheduled(supabase, jobId);
+  // A scheduled date advances early-stage status (consistent with the other writers), unless the
+  // caller said the status never moves (promote: false).
+  if (minStart && opts?.promote !== false) await advanceToScheduled(supabase, jobId);
 
   // Replace segments wholesale. If the table is missing (migration 0040 not yet
   // applied) a single range is already fully saved via the mirror above; only
@@ -772,11 +781,24 @@ export async function placeJobOnDay(
    *  length is the job's own (its size, else the block it has); a job with neither lands as two
    *  hours and the answer says so (`defaulted`). */
   startHHMM?: string,
-): Promise<Result & { defaulted?: boolean }> {
+): Promise<Result & { defaulted?: boolean; prior?: PlacePrior }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   return placeOnDays(ctx.supabase, jobId, dateISO, startHHMM);
 }
+
+/**
+ * WHAT A PLACE CHANGED, READ BEFORE THE WRITE, so the rail's Undo can put it back (W2-05): the days as
+ * they stood (their own hours with them), the status, and the listed span (its company days and its
+ * exact start and end), plus the days the job has AFTER the place, so an Undo can tell the job has
+ * changed since. The tray's old Undo put the days back and left a job 'Scheduled' with no date.
+ */
+export type PlacePrior = {
+  ranges: DateRange[];
+  status: string | null;
+  listed: { start: string; end: string; startIso: string | null; endIso: string | null } | null;
+  days: string[];
+};
 
 /** The body of placeJobOnDay, for callers that already passed requireStaff (moveJobDay's move of a
  *  job with no plan is a placement). */
@@ -785,7 +807,7 @@ async function placeOnDays(
   jobId: string,
   dateISO: string,
   startHHMM?: string,
-): Promise<Result & { defaulted?: boolean }> {
+): Promise<Result & { defaulted?: boolean; prior?: PlacePrior }> {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dateISO)) return { ok: false, error: "Pick a day." };
   const { segments, error: segErr } = await loadJobDaySegments(supabase, jobId);
   if (segErr) return { ok: false, error: segErr };
@@ -834,6 +856,26 @@ async function placeOnDays(
      so placing one has to take it off hold — otherwise it lands on the calendar AND stays on the
      board forever, which is a loop rather than a decision. advanceToScheduled deliberately only
      promotes to_be_scheduled/estimate, so this is its own explicit write. */
+  /* WHAT THIS PLACE CHANGES, READ BEFORE IT WRITES (the rail's Undo). The listed span in company days
+     and its exact instants; the days as they stood; the days as they will be. */
+  const prior: PlacePrior = {
+    ranges: segments,
+    status: row?.status ?? null,
+    listed: row?.scheduled_start
+      ? {
+          start: todayStrInTz(tz, new Date(row.scheduled_start)),
+          end: (() => {
+            const first = todayStrInTz(tz, new Date(row.scheduled_start as string));
+            const last = row.scheduled_end ? todayStrInTz(tz, new Date(row.scheduled_end)) : first;
+            return last > first ? last : first;
+          })(),
+          startIso: row.scheduled_start,
+          endIso: row.scheduled_end ?? null,
+        }
+      : null,
+    days: segmentDays(write.segments),
+  };
+
   if (row?.status === "on_hold") {
     // The reason leaves WITH the hold — same wake rule as setJobHold, or "waiting on the permit"
     // keeps haunting a job that's back on the calendar. The day it was coming back and who held it
@@ -847,13 +889,90 @@ async function placeOnDays(
   }
   // writeScheduleRanges revalidates /schedule, /planner, /jobs, and the job page.
   // undefined (not null) when no time was given, so the preserve-the-job's-own-time branch stands.
-  return writeScheduleRanges(
+  const res = await writeScheduleRanges(
     supabase,
     jobId,
     write.segments,
     /^\d{2}:\d{2}$/.test(startHHMM ?? "") ? startHHMM : undefined,
     write.mirror,
   );
+  return res.ok ? { ...res, prior } : res;
+}
+
+/** The statuses a place moves forward to Scheduled (advanceToScheduled), the only ones an Undo puts back. */
+const PLACE_PROMOTES = ["to_be_scheduled", "estimate"];
+
+/** A PlacePrior as the client sent it back, checked: well-formed days, a real status, at most a year of
+ *  days. Null when it isn't one. */
+function readPlacePrior(p: unknown): PlacePrior | null {
+  if (!p || typeof p !== "object") return null;
+  const o = p as Record<string, unknown>;
+  const ymd = (v: unknown): v is string => typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v);
+  const iso = (v: unknown): string | null => (typeof v === "string" && !isNaN(new Date(v).getTime()) ? v : null);
+  if (!Array.isArray(o.ranges) || o.ranges.length > 400 || !Array.isArray(o.days) || o.days.length > 1000) return null;
+  const ranges: DateRange[] = [];
+  for (const r of o.ranges as Record<string, unknown>[]) {
+    if (!r || !ymd(r.start) || !ymd(r.end)) return null;
+    const h = r.hours as { start?: unknown; end?: unknown } | null | undefined;
+    const hours = h === undefined ? undefined : h === null ? null : readDayHours(h?.start, h?.end);
+    ranges.push(hours === undefined ? { start: r.start, end: r.end } : { start: r.start, end: r.end, hours });
+  }
+  if (!(o.days as unknown[]).every(ymd)) return null;
+  const status = typeof o.status === "string" && (JOB_STATUSES as readonly string[]).includes(o.status) ? o.status : null;
+  let listed: PlacePrior["listed"] = null;
+  if (o.listed) {
+    const l = o.listed as Record<string, unknown>;
+    if (!ymd(l.start) || !ymd(l.end)) return null;
+    listed = { start: l.start, end: l.end, startIso: iso(l.startIso), endIso: iso(l.endIso) };
+  }
+  return { ranges, status, listed, days: [...(o.days as string[])].sort() };
+}
+
+/**
+ * UNDO ON THE RAIL'S PLACE (W2-05): the job goes back to exactly where it was: its days (their own
+ * hours with them), its listed span (none for a dateless job, whose place also gave it the 2-hour
+ * default block: that goes too), and its status when the place moved it to Scheduled. Through the one
+ * writer, with the status held still (promote: false) while the days go back.
+ *
+ * Refused in words, with nothing written, when the job changed since (its days are no longer the days
+ * the place left), and for a job the place took off hold (the rail offers no Undo there: putting a
+ * hold back needs its reason and its day). A status that moved on since (someone started the job) is
+ * left as it is, and the answer says so.
+ */
+export async function undoPlaceJob(jobId: string, prior: PlacePrior): Promise<Result & { note?: string }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+  const p = readPlacePrior(prior);
+  if (!p) return { ok: false, error: "There's nothing to put back." };
+  if (p.status === "on_hold") return { ok: false, error: "Undo can't put a job back on hold. Hold it again from its ⋯ on the rail." };
+
+  const { segments, error: segErr } = await loadJobDaySegments(supabase, jobId);
+  if (segErr) return { ok: false, error: segErr };
+  if (segmentDays(segments).join(",") !== p.days.join(",")) return { ok: false, error: "It changed since, so nothing was undone." };
+
+  const res = await writeScheduleRanges(
+    supabase,
+    jobId,
+    p.ranges,
+    undefined,
+    p.listed ? { start: p.listed.start, end: p.listed.end } : "none",
+    undefined,
+    { promote: false, listedAt: { start: p.listed?.startIso ?? null, end: p.listed?.endIso ?? null } },
+  );
+  if (!res.ok) return { ok: false, error: res.error };
+
+  if (p.status && PLACE_PROMOTES.includes(p.status)) {
+    const { data: back, error } = await supabase
+      .from("jobs")
+      .update({ status: p.status, updated_at: new Date().toISOString() })
+      .eq("id", jobId)
+      .eq("status", "scheduled")
+      .select("id");
+    if (error) return { ok: true, note: "Its days are back, but its status didn't change back. Check it on the job page." };
+    if (!back?.length) return { ok: true, note: "Its days are back. Its status had moved on since, so it stays as it is." };
+  }
+  return { ok: true };
 }
 
 /**
@@ -1291,7 +1410,7 @@ export async function placeAppointmentOnDay(
   dateISO: string,
   startHHMM: string,
   plannedMinutes?: number | null,
-): Promise<Result> {
+): Promise<Result & { note?: string }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dateISO)) return { ok: false, error: "Pick a day." };
@@ -1318,7 +1437,8 @@ export async function placeAppointmentOnDay(
   const endsAt = span ? tzDateTimeUtc(span.lastYmd, span.endHHMM, tz) : null;
 
   const res = await rescheduleAppointment(id, startsAt, endsAt);
-  return res.ok ? { ok: true } : res;
+  // The writer's note (a pick-a-time link it withdrew) rides back: the rail's Undo says it stays withdrawn.
+  return res.ok ? { ok: true, ...(res.note ? { note: res.note } : {}) } : res;
 }
 
 /**

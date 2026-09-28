@@ -1,9 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CalendarClock, CalendarSync, Briefcase, ClipboardList, ListTodo, MapPin, Plus, Users, Columns3 } from "lucide-react";
+import { ChevronLeft, ChevronRight, CalendarClock, Briefcase, ClipboardList, ListTodo, MapPin, Plus, Users, Columns3 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SegmentedControl } from "@/components/ui/segmented";
 import { Card } from "@/components/ui/card";
@@ -27,7 +27,6 @@ import { hmToMin, todayStrInTz, tzMinutesOfDay } from "@/lib/tz";
 import { formatTime } from "@/lib/utils";
 import { firstNameOf } from "@/lib/employee-color";
 import { shiftApptToDay } from "@/lib/appt-time";
-import { placeJobOnDay, unplaceJob } from "../schedule/actions";
 import { rescheduleAppointment } from "../appointments/actions";
 import { updateTask, type TaskCategory } from "../tasks/actions";
 import { taskHref } from "@/lib/task-href";
@@ -46,12 +45,16 @@ import { CAL_WINDOW_BACK_DAYS, CAL_WINDOW_FWD_DAYS } from "@/lib/schedule/cal-wi
 // ?date=) via SHALLOW history writes: the server preloads a wide ±window once
 // and every chevron/day tap slices it client-side — no RSC round-trip per tap.
 //
-// SAFETY (the deliberate-move law): a chip's MAIN tap OPENS its record — it is
-// never a move. There is NO armed "tap a chip, then tap a day" mode: one stray
-// tap while driving can't silently reschedule a real appointment. Every
-// reschedule goes through the MoveToDay sheet (a day-strip + Cancel) hung off a
-// small per-chip move handle, so it takes a deliberate two-step gesture inside
-// a modal. A day tap only ever drills into that day.
+// SAFETY (the deliberate-move law): a block's tap is never a move. The office's
+// tap opens the block's sheet (its day with Move, its time, its crew, Open The
+// Job inside: schedule/tile-sheet); anyone else's opens its record. There is NO
+// armed "tap a block, then tap a day" mode: one stray tap while driving can't
+// silently reschedule a real appointment. Every reschedule is two deliberate
+// steps (a day and Move in the sheet, or the MoveToDay sheet's day-strip). A day
+// tap drills into that day, UNLESS the rail has armed it: ticking waiting work
+// on the rail (Waiting For A Day) turns every day into a target that places it.
+// The old "To Schedule" tray above the grid was cut in W2-05: the rail is the one
+// door for waiting work, and its place's toast carries the Undo the tray had.
 
 export interface CalJob {
   id: string;
@@ -136,17 +139,6 @@ export interface CalExternal {
   all_day: boolean;
 }
 
-/** A job with no date yet — shown in the "To schedule" tray. */
-export interface CalUnscheduled {
-  id: string;
-  job_number: string;
-  name: string;
-  customer: string | null;
-  /** Where and who, as its block and its rail card say them (absent: nothing to say). */
-  address?: string | null;
-  assigned_to?: string[] | null;
-}
-
 /** One job's presence on one day (pos = "d2/3" on multi-day spans).
  *  Internal-only (with DayData) since week-agenda.tsx died in cn-v507. */
 interface JobOnDay {
@@ -202,8 +194,6 @@ const dayKey = (d: Date) => {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 };
 const isYmd = (s: string | null | undefined): s is string => /^\d{4}-\d{2}-\d{2}$/.test(s ?? "");
-const prettyYmd = (ymd: string) =>
-  new Date(`${ymd}T12:00:00`).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
 
 function startOfWeek(d: Date) {
   const r = new Date(d);
@@ -262,7 +252,6 @@ export function CalendarView({
   appointments = [],
   tasks = [],
   external = [],
-  unscheduled = [],
   members = [],
   picker,
   now,
@@ -282,7 +271,6 @@ export function CalendarView({
   tasks?: CalTask[];
   /** Mirrored Google events — read-only zinc pills (0132 two-way sync). */
   external?: CalExternal[];
-  unscheduled?: CalUnscheduled[];
   members?: CalMember[];
   picker: SchedulePicker;
   /** Server's "now" (ISO) — keeps SSR and first client render in sync. */
@@ -312,10 +300,8 @@ export function CalendarView({
   /** Everyone the company ever had, so a chip names a person who left. */
   people?: CalPerson[];
 }) {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const toast = useToast();
-  const [pending, start] = useTransition();
 
   // Seed "today" from the SERVER clock so SSR and hydration agree, then correct
   // to the actual now on mount (the existing calendar pattern). The DAY is
@@ -382,10 +368,6 @@ export function CalendarView({
     nav(view, ymd);
   }
 
-  // "To schedule" tray: a collapsed one-line chip by default — the calendar
-  // grid is the point of the page, not the backlog rail.
-  const [trayOpen, setTrayOpen] = useState(false);
-
   // Person filter (the Users icon) — "who works where tomorrow" by filtering,
   // not by decoding a color legend. Client-only state; color = record TYPE.
   const [filterOpen, setFilterOpen] = useState(false);
@@ -403,16 +385,6 @@ export function CalendarView({
       external.length // Google events carry no CN assignee — a person filter hides them all
     );
   }, [personFilter, jobs, segments, appointments, tasks, external]);
-
-  // Undo for a tray placement — snapshot taken client-side BEFORE the write, so
-  // "Schedule" a backlog job is one deliberate pick with a safety net. (Chip
-  // moves run through the MoveToDay sheet's own confirm/error affordances.)
-  const [undo, setUndo] = useState<{ label: string; run: () => Promise<{ ok: boolean; error?: string } | void> } | null>(null);
-  useEffect(() => {
-    if (!undo) return;
-    const t = setTimeout(() => setUndo(null), 8000);
-    return () => clearTimeout(t);
-  }, [undo]);
 
   /* THE TILE'S SHEET (schedule/tile-sheet): which block was tapped, on which day. The record is looked
      up in the loaded jobs and visits at render, so the refresh after a save shows the sheet what was
@@ -578,33 +550,7 @@ export function CalendarView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jobs, segments, appointments, tasks, external, personFilter, tz]);
 
-  /** Place a backlog (dateless) job on a day — the tray's "Schedule" gesture,
-   *  routed to placeJobOnDay (a needs-return job keeps its worked-history
-   *  segments as history; the new day is its plan). Runs inside the MoveToDay sheet, so it's already
-   *  a deliberate two-step pick. Undo takes the plan off again (unplaceJob) and leaves the history:
-   *  a tray job had no day, and writing its history back as ranges made a worked day its plan.
-   *  Returns the MoveToDay result shape so the sheet reports errors inline. */
-  async function placeOnDay(job: CalUnscheduled, targetYmd: string) {
-    const res = await placeJobOnDay(job.id, targetYmd);
-    if (!res.ok) return res;
-    setUndo({ label: `${job.name} → ${prettyYmd(targetYmd)}`, run: () => unplaceJob(job.id) });
-    router.refresh();
-    return res;
-  }
-
-  function runUndo() {
-    if (!undo || pending) return;
-    const u = undo;
-    setUndo(null);
-    start(async () => {
-      const res = await u.run();
-      if (res && !res.ok) return toast(res.error ?? "Couldn't undo — check the schedule.", "error");
-      toast("Put back where it was.", "success");
-      router.refresh();
-    });
-  }
-
-  /** A day tap only ever drills into that day — never a move. */
+  /** A day tap drills into that day, unless the rail has armed it (then it places the picked work). */
   const target = useDayTarget();
 
   /* THE SAME TAP, TWO MEANINGS — and the armed one wins. Armed, a day places the picked work;
@@ -836,10 +782,6 @@ export function CalendarView({
   }, [anchor, monthStack.back, monthStack.fwd]);
 
 
-  const weekGridDays = weekDays.map((d) => {
-    const k = dayKey(d);
-    return { dayStr: k, label: d.toLocaleDateString(undefined, { weekday: "short", day: "numeric" }), isToday: k === todayK };
-  });
   // Server-computed now in the ORG tz, so SSR and hydration agree on the now
   // line; TimeGrid's own minute ticker (also org-tz via the tz prop) takes over.
   const gridNow = { dayStr: todayStrInTz(tz, new Date(now)), min: tzMinutesOfDay(new Date(now), tz) };
@@ -993,62 +935,6 @@ export function CalendarView({
           )}
         </div>
       )}
-
-      {/* ROW 3 — the "To schedule" tray: a collapsed amber chip (hidden at 0),
-          expanding to the backlog. Each job carries its OWN Schedule handle →
-          the MoveToDay sheet → placeJobOnDay (a UNION write, so a needs-return
-          job keeps its history segments). No arming: pick the day right there. */}
-      {unscheduled.length > 0 &&
-        (trayOpen ? (
-          <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-2">
-            <div className="mb-1.5 flex items-center justify-between px-1 text-xs">
-              <span className="font-semibold text-amber-700">To schedule · {unscheduled.length}</span>
-              <button onClick={() => setTrayOpen(false)} className="rounded p-0.5 text-amber-700 hover:bg-amber-100" aria-label="Collapse">
-                <ChevronUp className="h-3.5 w-3.5" />
-              </button>
-            </div>
-            <div className="flex gap-1.5 overflow-x-auto pb-1">
-              {unscheduled.map((j) => {
-                /* WHERE AND WHO, as its block and its rail card say them: the street (or who, when the
-                   name is the street; nothing when the name says both, never the job number), and the
-                   crew's initials, a dashed Nobody when no one is on it. */
-                const place = placeLine({ name: j.name, street: j.address, customer: j.customer })?.text ?? null;
-                return (
-                <div
-                  key={j.id}
-                  className="flex shrink-0 items-center gap-1 rounded-lg border border-slate-200 bg-white pl-2.5 text-xs"
-                >
-                  <Link href={`/jobs/${j.id}`} className="min-w-0 py-1.5 text-left">
-                    <div className="max-w-[160px] truncate font-medium text-slate-800">{j.name}</div>
-                    {place && <div className="max-w-[160px] truncate text-[11px] text-slate-500">{place}</div>}
-                    <div className="mt-0.5">
-                      <CrewInitials crew={crewChips(j.assigned_to, team)} size="xs" />
-                    </div>
-                  </Link>
-                  {/* The Schedule handle — a deliberate day pick, undo-safe. */}
-                  <MoveToDay
-                    label={`Schedule ${j.name}`}
-                    triggerClassName="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-amber-600 hover:bg-amber-100"
-                    onPick={async (iso) => {
-                      if (!iso) return { ok: false, error: "Pick a day." };
-                      return placeOnDay(j, iso);
-                    }}
-                  >
-                    <CalendarSync className="h-4 w-4" />
-                  </MoveToDay>
-                </div>
-                );
-              })}
-            </div>
-          </div>
-        ) : (
-          <button
-            onClick={() => setTrayOpen(true)}
-            className="inline-flex items-center gap-1.5 rounded-full border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-700 hover:bg-amber-100"
-          >
-            To Schedule · {unscheduled.length} <ChevronDown className="h-3.5 w-3.5" />
-          </button>
-        ))}
 
       {/* ARMED, AND SAYING SO WHERE THE TAP HAPPENS.
           The rail's bar is pinned to the bottom of the RAIL, which on a phone sits above the
@@ -1274,17 +1160,6 @@ export function CalendarView({
         />
       )}
 
-      {/* Undo — the safety net under a tray placement. */}
-      {undo && (
-        <div className="fixed inset-x-0 bottom-[calc(9rem+env(safe-area-inset-bottom))] z-[120] flex justify-center px-4">
-          <div className="flex max-w-sm items-center gap-3 rounded-full bg-slate-900 px-4 py-2 text-sm text-white shadow-lg">
-            <span className="min-w-0 truncate">Moved {undo.label}</span>
-            <button onClick={runUndo} className="shrink-0 font-semibold text-amber-300 hover:text-amber-200">
-              Undo
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

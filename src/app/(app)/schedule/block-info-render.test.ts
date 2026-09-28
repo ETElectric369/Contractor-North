@@ -246,13 +246,16 @@ describe("My Day's rows and the schedule read the same words, with no money", ()
     expect(code("src/app/(app)/planner/page.tsx")).toContain("street: streetOf(visitPlace(a))");
   });
 
-  it("the To Schedule tray's tiles say where and who like every other tile, never the job number", () => {
-    const panel = read("src/app/(app)/schedule/calendar-panel.tsx");
-    expect(panel).toContain('.select("id, job_number, name, address, assigned_to, customers(name)")');
+  it("a dateless job's card says where and who like every other tile, never the job number (its home since the tray was cut, W2-05)", () => {
+    // The To Schedule tray is gone: every job it held waits on the rail, whose card reads the same words.
     const view = code("src/app/(app)/calendar/calendar-view.tsx");
-    expect(view).toContain("const place = placeLine({ name: j.name, street: j.address, customer: j.customer })?.text ?? null;");
-    expect(view).toContain('<CrewInitials crew={crewChips(j.assigned_to, team)} size="xs" />');
-    expect(view).not.toContain("j.customer ?? j.job_number");
+    expect(view).not.toContain("To Schedule ·");
+    const page = read("src/app/(app)/schedule/page.tsx");
+    expect(page).toMatch(/const RAIL_JOB_COLS = "id, job_number, name, address, city, planned_minutes, status, hold_reason, assigned_to, scheduled_start, customers\(name, phone, email\)"/);
+    const rail = code("src/app/(app)/schedule/place-rail.tsx");
+    expect(rail).toContain("const place = placeLine({ name: i.name, street: i.address, customer: i.customer });");
+    expect(rail).toContain("<CrewInitials crew={i.crew} />");
+    expect(rail).not.toContain("job_number");
   });
 
   it("no price, amount, total, cost or rate on any of them", () => {
