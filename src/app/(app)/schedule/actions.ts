@@ -462,6 +462,30 @@ async function writeScheduleRanges(
     ? await supabase.from("jobs").select("scheduled_start, scheduled_end, planned_minutes").eq("id", jobId).maybeSingle()
     : { data: null };
   const was = (prior ?? {}) as { scheduled_start?: string | null; scheduled_end?: string | null; planned_minutes?: number | null };
+
+  // The days as they will be written: each day's hours carried (read above, before any write).
+  let days: DateRange[] = clean;
+  /* A JOB'S ONE DAY RUNS ON ITS TIME. When the plan written is ONE day and that day keeps hours of its
+     own (a day added and then taken off again, a day moved onto another, a leftover), those hours ARE
+     the job's block as it stands: this write keeps them (their start, their clock length) or changes
+     them as asked, and the day goes back to the job's usual hours, which are now the same. Every time,
+     whatever the caller passed: a plan that shrinks back to one day never leaves its only day drawn
+     one way while the job's time (the Jobs list, Nort, the tile sheet, the job page) says another, and
+     the next length tap never moves the block away from where it's drawn. The size (planned_minutes)
+     is left alone. */
+  let soleOwn: { day: string; hours: DayHours } | null = null;
+  if (perDayHours) {
+    const priorDays = ((priorRead.data ?? []) as unknown as SegmentRow[]).map(
+      (s) => ({ start: s.start_date, end: s.end_date, hours: readDayHours(s.start_time, s.end_time) }),
+    );
+    days = carryHours(clean, priorDays);
+    const own = minStart && minStart === maxEnd ? hoursOnDay(days, minStart) : null;
+    if (minStart && own) {
+      soleOwn = { day: minStart, hours: own };
+      days = setDayHours(days, minStart, null);
+    }
+  }
+
   const times = planJobTimes({
     firstDay: minStart,
     lastDay: maxEnd,
@@ -469,11 +493,18 @@ async function writeScheduleRanges(
     workDay: { start: dayStartHm, end: dayEndHm },
     startTime,
     length,
-    prior: {
-      scheduledStart: opts?.freshBlock ? null : (was.scheduled_start ?? null),
-      scheduledEnd: opts?.freshBlock ? null : (was.scheduled_end ?? null),
-      plannedMinutes: was.planned_minutes ?? null,
-    },
+    prior: soleOwn
+      ? {
+          // The one day's own hours: the block as it is drawn, which is what this write keeps.
+          scheduledStart: tzDateTimeUtc(soleOwn.day, soleOwn.hours.start, tz),
+          scheduledEnd: tzDateTimeUtc(soleOwn.day, soleOwn.hours.end, tz),
+          plannedMinutes: was.planned_minutes ?? null,
+        }
+      : {
+          scheduledStart: opts?.freshBlock ? null : (was.scheduled_start ?? null),
+          scheduledEnd: opts?.freshBlock ? null : (was.scheduled_end ?? null),
+          plannedMinutes: was.planned_minutes ?? null,
+        },
   });
 
   // The start, the end and a chosen length land TOGETHER, in one row write: a length is never saved
@@ -496,20 +527,6 @@ async function writeScheduleRanges(
   if (!upd?.length) return { ok: false, error: "Job not found." };
   // A scheduled date advances early-stage status (consistent with the other writers).
   if (minStart) await advanceToScheduled(supabase, jobId);
-
-  // The days as they will be written: each day's hours carried (read above, before any write).
-  let days: DateRange[] = clean;
-  if (perDayHours) {
-    const prior = ((priorRead.data ?? []) as unknown as SegmentRow[]).map(
-      (s) => ({ start: s.start_date, end: s.end_date, hours: readDayHours(s.start_time, s.end_time) }),
-    );
-    days = carryHours(clean, prior);
-    // A JOB'S ONE DAY RUNS ON ITS TIME: a start or a length set for a one-day plan (the job page, a
-    // placement) is that day's, so the day's own hours give way rather than hide the change.
-    if ((startTime !== undefined || length !== undefined) && minStart && minStart === maxEnd && hoursOnDay(days, minStart)) {
-      days = setDayHours(days, minStart, null);
-    }
-  }
 
   // Replace segments wholesale. If the table is missing (migration 0040 not yet
   // applied) a single range is already fully saved via the mirror above; only
@@ -1002,7 +1019,8 @@ export async function setJobDayTimes(
  * Refused in words: a day of its plan it's already on (its block there is where its time is changed; a
  * day it sits on only as history takes the add), a finished job, a pick-a-date link out (asked first,
  * like a move: `needsProposalConfirm`). Before 0370 the day can't keep its own hours: it's added at the
- * job's usual hours and the note says so. Nothing silent.
+ * job's usual hours and the note says the hours it draws, and an add that would redraw another of the
+ * job's days (its span grows past a day with a timed block) is refused in words. Nothing silent.
  */
 export async function addJobDay(
   jobId: string,
@@ -1053,6 +1071,64 @@ export async function addJobDay(
     return { ok: false, error: `${called} is already on ${dayWords(day)}. Tap its block there to change its time or crew.` };
   }
 
+  // THE DAY'S HOURS, as the sheet showed them: the start (the tapped time, else the work day's start)
+  // and the length (chosen; else the job's size; else two hours, said).
+  const wd = workDayMinutes({ start: dayStartHm, end: dayEndHm });
+  const s = readHm(start ?? dayStartHm) ?? wd.startMin;
+  const size = Math.max(0, Number(job.planned_minutes ?? 0) || 0);
+  let defaulted = p.length === undefined && size === 0;
+  let hours: DayHours =
+    p.length === "full"
+      ? dayHoursOf(wd.startMin, wd.endMin)
+      : typeof p.length === "number"
+        ? dayHoursOf(s, s + Math.round(p.length))
+        : size >= WORK_DAY_MINUTES
+          ? dayHoursOf(s, wd.endMin > s ? wd.endMin : s + 60)
+          : dayHoursOf(s, s + (size || DEFAULT_JOB_MINUTES));
+
+  /* A LIVE PLAN: the day joins it with its own hours, the span grows to cover it, and no other day moves
+     (a history day taken back into the plan gets these hours in place of the ones it ran). Worked out
+     BEFORE anything is written or withdrawn, so a refusal below changes nothing. */
+  let live: { mirror: DateRange; days: DateRange[] } | null = null;
+  if (plan) {
+    const mirror = { start: plan.start < day ? plan.start : day, end: plan.end > day ? plan.end : day };
+    // The span as the writer will store it: the same rule, the same inputs (the start and the length kept).
+    const after = planJobTimes({
+      firstDay: mirror.start,
+      lastDay: mirror.end,
+      tz,
+      workDay: { start: dayStartHm, end: dayEndHm },
+      prior: { scheduledStart: job.scheduled_start, scheduledEnd: job.scheduled_end, plannedMinutes: job.planned_minutes },
+    });
+    const afterMirror = { scheduledStart: after.startIso, scheduledEnd: after.endIso, plannedMinutes: after.plannedMinutes ?? job.planned_minutes };
+    const frozen = freezeDrawnDays({
+      segments: addDaySegment(segments, day, perDayHours ? hours : null),
+      before: { scheduledStart: job.scheduled_start, scheduledEnd: job.scheduled_end, plannedMinutes: job.planned_minutes },
+      after: afterMirror,
+      tz,
+      wd,
+      skip: [day],
+    });
+    if (perDayHours) {
+      live = { mirror, days: frozen.segments };
+    } else {
+      /* BEFORE 0370 NO DAY CAN KEEP ITS BLOCK, so a span that grows would redraw the job's other days
+         (Seiler's one day 10 to 12 would draw 10 to 5 the moment Wed joins it, and stay that way after
+         0370 runs): refused in words, nothing written. A day that redraws no other day goes on at the
+         job's usual hours, and the note says the hours it actually draws there. */
+      if (frozen.frozen.length) {
+        return {
+          ok: false,
+          error: `Adding ${dayWords(day)} would redraw ${called} on ${frozen.frozen.map((d) => dayWords(d)).join(", ")} at different hours. A day keeping its own hours needs a quick database update first; until then, set its days and time on the job page.`,
+        };
+      }
+      const drawn = jobDayBlock({ day, ...afterMirror, tz, wd, dayHours: null });
+      hours = dayHoursOf(drawn.startMin, drawn.endMin);
+      defaulted = false;
+      live = { mirror, days: addDaySegment(segments, day, null) };
+    }
+  }
+
   // A pick-a-date link out: the customer's later tap would land a day the office didn't choose. Asked
   // first, and withdrawn only once nothing else stands in the way of the day going on.
   const { data: pendingPick } = await supabase.from("schedule_proposals").select("id").eq("job_id", jobId).eq("status", "pending").limit(1);
@@ -1065,24 +1141,9 @@ export async function addJobDay(
     withdrew = !!gone?.length;
   }
 
-  // THE DAY'S HOURS, as the sheet showed them: the start (the tapped time, else the work day's start)
-  // and the length (chosen; else the job's size; else two hours, said).
-  const wd = workDayMinutes({ start: dayStartHm, end: dayEndHm });
-  const s = readHm(start ?? dayStartHm) ?? wd.startMin;
-  const size = Math.max(0, Number(job.planned_minutes ?? 0) || 0);
-  const defaulted = p.length === undefined && size === 0;
-  const hours: DayHours =
-    p.length === "full"
-      ? dayHoursOf(wd.startMin, wd.endMin)
-      : typeof p.length === "number"
-        ? dayHoursOf(s, s + Math.round(p.length))
-        : size >= WORK_DAY_MINUTES
-          ? dayHoursOf(s, wd.endMin > s ? wd.endMin : s + 60)
-          : dayHoursOf(s, s + (size || DEFAULT_JOB_MINUTES));
-
   const notes: string[] = [];
   let res: Result & { defaulted?: boolean };
-  if (!plan) {
+  if (!live) {
     // NO LIVE PLAN: this day is the plan, at these hours (the job's own, its usual). Worked days stay.
     const w = segments.length ? await workedDaysForJob(supabase, jobId, tz) : { days: [] };
     if ("error" in w) return { ok: false, error: w.error };
@@ -1109,32 +1170,8 @@ export async function addJobDay(
       notes.push(woke?.length ? "It's off hold now." : "It's still marked on hold. Change that on the job page.");
     }
   } else {
-    // A LIVE PLAN: the day joins it with its own hours, the span grows to cover it, and no other day moves
-    // (a history day taken back into the plan gets these hours in place of the ones it ran).
-    const was = plan;
-    const mirror = { start: was.start < day ? was.start : day, end: was.end > day ? was.end : day };
-    let days = addDaySegment(segments, day, perDayHours ? hours : null);
-    if (perDayHours) {
-      // The span as the writer will store it: the same rule, the same inputs (the start and the length kept).
-      const after = planJobTimes({
-        firstDay: mirror.start,
-        lastDay: mirror.end,
-        tz,
-        workDay: { start: dayStartHm, end: dayEndHm },
-        prior: { scheduledStart: job.scheduled_start, scheduledEnd: job.scheduled_end, plannedMinutes: job.planned_minutes },
-      });
-      days = freezeDrawnDays({
-        segments: days,
-        before: { scheduledStart: job.scheduled_start, scheduledEnd: job.scheduled_end, plannedMinutes: job.planned_minutes },
-        after: { scheduledStart: after.startIso, scheduledEnd: after.endIso, plannedMinutes: after.plannedMinutes ?? job.planned_minutes },
-        tz,
-        wd,
-        skip: [day],
-      }).segments;
-    } else {
-      notes.push("A day keeping its own hours needs a quick database update, so for now it shows the job's usual hours.");
-    }
-    res = await writeScheduleRanges(supabase, jobId, days, undefined, mirror);
+    if (!perDayHours) notes.push("A day keeping its own hours needs a quick database update, so for now it shows the job's usual hours.");
+    res = await writeScheduleRanges(supabase, jobId, live.days, undefined, live.mirror);
     if (!res.ok) return res;
   }
   if (withdrew) notes.push("The customer's pick-a-date link was withdrawn.");

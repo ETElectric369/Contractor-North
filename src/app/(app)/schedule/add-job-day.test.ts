@@ -133,6 +133,7 @@ vi.mock("../appointments/actions", () => ({ rescheduleAppointment: vi.fn(async (
 const actions = await import("./actions");
 const { notifyJobCrewAdded } = await import("@/lib/crew-notify");
 const { tzDateTimeUtc } = await import("@/lib/tz");
+const { jobDayBlock } = await import("@/lib/schedule/job-block");
 
 const LA = "America/Los_Angeles";
 const at = (ymd: string, hm: string) => tzDateTimeUtc(ymd, hm, LA);
@@ -356,7 +357,8 @@ describe("This Day: one day's time, that day only (setJobDayTimes)", () => {
     state.db.jobs.push({ id: "o1", name: "Seiler", status: "scheduled", scheduled_start: at("2026-09-28", "10:00"), scheduled_end: at("2026-09-28", "12:00"), planned_minutes: null, assigned_to: [] });
     state.db.job_schedule_segments.push({ job_id: "o1", start_date: "2026-09-28", end_date: "2026-09-28", start_time: "07:00:00", end_time: "08:00:00" });
     expect(await actions.setJobDayTimes("o1", "2026-09-28", { start: "13:00" })).toEqual({ ok: true });
-    expect(job("o1")).toMatchObject({ scheduled_start: at("2026-09-28", "13:00"), scheduled_end: at("2026-09-28", "15:00"), planned_minutes: null });
+    // The block drawn was the day's own 7 to 8: a new start keeps that hour on the clock.
+    expect(job("o1")).toMatchObject({ scheduled_start: at("2026-09-28", "13:00"), scheduled_end: at("2026-09-28", "14:00"), planned_minutes: null });
     expect(days("o1")).toEqual(["2026-09-28..2026-09-28 usual"]);
   });
 
@@ -413,5 +415,67 @@ describe("every rewrite carries each day's hours through (writeScheduleRanges)",
     withOwnDay();
     expect(await actions.planDayTimes("2026-09-28", [{ minutes: 120 }], "09:00", { jobIds: [] })).toEqual({ ok: true, times: ["09:00"] });
     expect(await actions.planDayTimes("2026-09-28", [{ minutes: 240 }], "11:00", { jobIds: [] })).toEqual({ ok: true, times: ["17:00"] });
+  });
+});
+
+describe("a plan that shrinks back to one day: the job's time is the block that day draws", () => {
+  const WD = { startMin: 9 * 60, endMin: 17 * 60 };
+  /** Where the grid draws the job on `day` (its own hours when it keeps them, else the job's usual). */
+  function drawn(id: string, day: string) {
+    const j = job(id);
+    const seg = (state.db.job_schedule_segments ?? []).find((s) => s.job_id === id && s.start_date <= day && day <= s.end_date);
+    const own = seg?.start_time ? { start: String(seg.start_time).slice(0, 5), end: String(seg.end_time).slice(0, 5) } : null;
+    const b = jobDayBlock({ day, scheduledStart: j.scheduled_start, scheduledEnd: j.scheduled_end, plannedMinutes: j.planned_minutes, tz: LA, wd: WD, dayHours: own });
+    return `${b.startMin / 60}-${b.endMin / 60}`;
+  }
+  async function seilerPlusWed() {
+    state.db.jobs.push({ id: "s1", name: "Seiler", status: "scheduled", scheduled_start: at("2026-10-05", "10:00"), scheduled_end: at("2026-10-05", "12:00"), planned_minutes: null, assigned_to: [] });
+    state.db.job_schedule_segments.push({ job_id: "s1", start_date: "2026-10-05", end_date: "2026-10-05", start_time: null, end_time: null });
+    expect((await actions.addJobDay("s1", { day: "2026-10-07", start: "13:00", length: 120 })).ok).toBe(true);
+    expect(days("s1")).toEqual(["2026-10-05..2026-10-05 10:00-12:00", "2026-10-07..2026-10-07 13:00-15:00"]);
+  }
+
+  it("the range editor takes Wed off: Mon's 10 to 12 is the job's time again, not 10 to closing", async () => {
+    await seilerPlusWed();
+    expect((await actions.setJobScheduleRanges("s1", [{ start: "2026-10-05", end: "2026-10-05" }])).ok).toBe(true);
+    expect(job("s1")).toMatchObject({ scheduled_start: at("2026-10-05", "10:00"), scheduled_end: at("2026-10-05", "12:00"), planned_minutes: null });
+    expect(days("s1")).toEqual(["2026-10-05..2026-10-05 usual"]);
+    expect(drawn("s1", "2026-10-05")).toBe("10-12");
+  });
+
+  it("Wed's block moved onto Mon: the job's time is the 1 to 3 drawn there, and a 1h tap keeps its 1 PM start", async () => {
+    await seilerPlusWed();
+    expect((await actions.moveJobDay("s1", "2026-10-07", "2026-10-05")).ok).toBe(true);
+    expect(job("s1")).toMatchObject({ scheduled_start: at("2026-10-05", "13:00"), scheduled_end: at("2026-10-05", "15:00") });
+    expect(days("s1")).toEqual(["2026-10-05..2026-10-05 usual"]);
+    expect(drawn("s1", "2026-10-05")).toBe("13-15");
+    expect((await actions.setJobTimes("s1", { length: 60 })).ok).toBe(true);
+    expect(drawn("s1", "2026-10-05")).toBe("13-14");
+  });
+});
+
+describe("before 0370, Add To Schedule never redraws the job's other days", () => {
+  it("Seiler's one day 10 to 12 would stretch to closing when Wed joins it: refused in words, nothing written", async () => {
+    state.noHours = true;
+    state.db.jobs.push({ id: "s2", name: "Seiler", status: "scheduled", scheduled_start: at("2026-10-05", "10:00"), scheduled_end: at("2026-10-05", "12:00"), planned_minutes: 120, assigned_to: [] });
+    state.db.job_schedule_segments.push({ job_id: "s2", start_date: "2026-10-05", end_date: "2026-10-05" });
+    state.db.schedule_proposals.push({ id: "sp9", job_id: "s2", status: "pending" });
+    const r = await actions.addJobDay("s2", { day: "2026-10-07", start: "13:00", length: 120 }, { cancelProposals: true });
+    expect(r).toEqual({
+      ok: false,
+      error:
+        "Adding Wed, Oct 7 would redraw Seiler on Mon, Oct 5 at different hours. A day keeping its own hours needs a quick database update first; until then, set its days and time on the job page.",
+    });
+    expect(state.writes).toEqual([]);
+    expect(job("s2")).toMatchObject({ scheduled_start: at("2026-10-05", "10:00"), scheduled_end: at("2026-10-05", "12:00") });
+    expect(state.db.schedule_proposals[0].status).toBe("pending");
+  });
+
+  it("a day that redraws no other day goes on, and the note says the hours it draws, not the ones asked", async () => {
+    herringbone();
+    state.noHours = true;
+    const r = await actions.addJobDay("j011", { day: "2026-09-28", start: "12:00", length: 120 });
+    expect(r.ok).toBe(true);
+    expect(r.note).toContain("Added Mon, Sep 28, 9:00 AM – 5:00 PM.");
   });
 });
