@@ -1569,7 +1569,8 @@ export default async function JobDetailPage({
                       {a.status === "completed" && <Badge tone="green">done</Badge>}
                     </div>
                     <div className="flex shrink-0 items-center gap-1.5">
-                      <span className="text-slate-500">{formatDateTime(a.starts_at)}</span>
+                      {/* A visit waiting for a day (0368) sorts last (ascending: nulls last) and says so. */}
+                      <span className="text-slate-500">{a.starts_at ? formatDateTime(a.starts_at) : "Waiting For A Day"}</span>
                       {viewerIsStaff && <AppointmentButton jobs={apptJobOpts} customers={apptCustOpts} staff={apptStaffOpts} appointment={appt} />}
                     </div>
                   </li>
