@@ -22,6 +22,7 @@ vi.mock("@/lib/staff-guard", () => ({
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
 import { importJobs } from "./actions";
+import { parseCsv, previewName } from "./job-import-button";
 
 function client() {
   return {
@@ -84,5 +85,31 @@ describe("importJobs: the sheet's name as typed, else the street, else the card 
   it("the sheet's own name stays exactly as typed, a tag and real words included", async () => {
     await importJobs([row("Acme Property Management", "Service call — Panel swap"), row("Rita Moss", "RV Inspection"), row("Rita Moss", "TTP #56")]);
     expect(db.jobs.map((j) => j.name)).toEqual(["Service call — Panel swap", "RV Inspection", "TTP #56"]);
+  });
+});
+
+describe("parseCsv: the job's name column is never the customer's", () => {
+  it("'Customer Name' with no job column: no job name, so the street names the job", async () => {
+    const rows = parseCsv("Customer Name,Address,Status\nRita Moss,12 Elm St,Scheduled\n");
+    expect(rows).toMatchObject([{ customer: "Rita Moss", job_name: "", address: "12 Elm St" }]);
+    expect(previewName(rows[0])).toBe("12 Elm St");
+    await importJobs(rows);
+    expect(db.jobs.map((j) => j.name)).toEqual(["12 Elm St"]);
+  });
+
+  it("'Client Name' the same", () => {
+    expect(parseCsv("Client Name,Address\nRita Moss,12 Elm St\n")).toMatchObject([{ customer: "Rita Moss", job_name: "" }]);
+  });
+
+  it("'Customer Name, Job Name': the job's own column, never skipped for the customer's", () => {
+    expect(parseCsv("Customer Name,Job Name,Address\nRita Moss,Back porch,12 Elm St\n")).toMatchObject([
+      { customer: "Rita Moss", job_name: "Back porch", address: "12 Elm St" },
+    ]);
+    expect(parseCsv("Customer,Project,Address\nRita Moss,Back porch,12 Elm St\n")).toMatchObject([{ customer: "Rita Moss", job_name: "Back porch" }]);
+  });
+
+  it("the documented 'Customer, Job Name' and a sheet with only 'Name' read as before", () => {
+    expect(parseCsv("Customer,Job Name,Address\nRita Moss,TTP #56,12 Elm St\n")).toMatchObject([{ customer: "Rita Moss", job_name: "TTP #56" }]);
+    expect(parseCsv("Name,Address\nBack porch,12 Elm St\n")).toMatchObject([{ customer: "", job_name: "Back porch" }]);
   });
 });

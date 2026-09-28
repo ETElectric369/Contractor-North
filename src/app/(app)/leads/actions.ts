@@ -648,7 +648,9 @@ export async function convertInquiry(
       const res = await saveQuote({
         customer_id: linkedCustomer, // null → the estimate stands alone until accepted
         inquiry_id: id, // provenance: this estimate traces back to the lead
-        title: label ? `${label} — ${inq.name}` : `Estimate — ${inq.name}`,
+        // "Not sure — I need help" is the customer asking, not the work: the estimate is plain
+        // "Estimate — <name>" then (leadScopeWords refuses it for the job's name the same way).
+        title: label && inq.project_type !== "unsure" ? `${label} — ${inq.name}` : `Estimate — ${inq.name}`,
         notes: reason ? `From lead — ${reason}` : "From lead.",
         tax_rate: 0, // never infer tax on a seeded draft; the office sets it on review
         valid_until: validUntilStr,

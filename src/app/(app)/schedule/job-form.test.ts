@@ -219,6 +219,16 @@ describe("createJob: what the four-field form doesn't ask, the server works out"
     await createJob(fd({ name: "Inspection", customer_id: "cust-smith", address: "", scheduled_date: "" }));
     expect(inserted().name).toBe("Rita Smith");
     state.calls = [];
+    // The name it was SAVED under comes back, so the Timeclock's quick add never echoes the tag.
+    const res = await createJob(fd({ name: "Service call", status: "in_progress" }));
+    const words = new Date(`${today()}T12:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+    expect(res).toMatchObject({ ok: true, id: "job-new", name: `New Job · ${words}` });
+    expect(inserted().name).toBe(res.name);
+    state.calls = [];
+    // The New Job form's street with the unit already in it, and the Unit box filled: never twice.
+    await createJob(fd({ customer_id: "cust-smith", address: "12 Elm St Apt 4", unit: "4", scheduled_date: "" }));
+    expect(inserted().name).toBe("12 Elm St Apt 4");
+    state.calls = [];
     // A tag and real words is a name a person typed: kept exactly as typed.
     await createJob(fd({ name: "Service call — Panel swap", customer_id: "cust-smith", address: "1871 Apache Ct", scheduled_date: "" }));
     expect(inserted().name).toBe("Service call — Panel swap");

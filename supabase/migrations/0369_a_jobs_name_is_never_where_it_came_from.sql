@@ -2,9 +2,10 @@
 -- Contractor North — migration 0369: a job's name is never where it came from
 --
 -- ═══ APPLY ORDER ═══════════════════════════════════════════════════════════════════════════
---   Any time. It adds one pure function and re-creates accept_public_quote with its live (0192)
+--   Any time. It adds pure functions (job_name_from and its three helpers, job_name_key,
+--   job_name_is_who, job_name_who_less) and re-creates accept_public_quote with its live (0192)
 --   body, changed only in the job's name. No table, no column, no lock beyond the function swap;
---   nothing on main reads the new function but accept_public_quote itself.
+--   nothing on main reads the new functions but accept_public_quote itself.
 --   THE TEST DATABASE: src/lib/job-name.integration.test.ts applies this file inside its own
 --   rolled-back transaction when the database doesn't have it yet; CI's check-test-db wants the
 --   file applied to the test database (scripts/test-db/rebuild.cjs, or the integrator's apply).
@@ -27,11 +28,13 @@
 --      tag and the customer or the street: that is no name;
 --   2. with a street: the street number and name (a one-line address cut at its first comma), and
 --      " #<unit>" when there is a unit ("56", "#56", "Unit 56", "Apt 56" all ride as "#56"; never
---      twice). No person, no town. Words a SOURCE carried (p_words: the estimate's title) never
---      replace the street;
+--      twice: "12 Elm St Apt 5" already carries it). No person, no town, never a PO box. Words a
+--      SOURCE carried (p_words: the estimate's title) never replace the street;
 --   3. no street: the customer as written (the company, else the whole name), then " · " and the
 --      source's own words once the tag is off, cut at a word to 40 characters ("Jackie Burks ·
---      Panel Upgrade"); words that are only the customer are no words;
+--      Panel Upgrade"); words that are only the customer are no words, and a part that is only who
+--      or where after a separator comes off ("New deck — Rita Moss" is "New deck"; p_alias, the
+--      lead's own spelling of the person, counts as who);
 --   4. neither: the work words alone if any, else "New Job · Sep 27" on the company's today.
 -- A source tag is a LEADING "Site inspection", "Site visit", "Service call", "Phone call",
 -- "Walk-through"/"Walk through"/"Walkthrough", "Inspection", "Appointment", "Estimate", "Inquiry",
@@ -52,9 +55,86 @@
 set local lock_timeout = '5s';
 set local statement_timeout = '15s';
 
--- An earlier draft of this file had a six-argument twin (no typed name, no unit). Should a database
--- have taken that draft, it goes, so only one twin exists. (A no-op everywhere else.)
+-- Earlier drafts of this file had a six-argument twin (no typed name, no unit) and an eight-argument
+-- one (no alias). Should a database have taken a draft, it goes, so only one twin exists. (A no-op
+-- everywhere else.)
 drop function if exists public.job_name_from(text, text, text, text, text, date);
+drop function if exists public.job_name_from(text, text, text, text, text, text, text, date);
+
+-- A name as a key: case, spacing, punctuation and accents don't make two spellings different; letters
+-- and digits of ANY script count ("Иван Петров" is a key, never ''). The twin of job-name.ts key().
+create or replace function public.job_name_key(p text)
+returns text
+language sql
+immutable
+set search_path to 'public'
+as $function$
+  select regexp_replace(lower(normalize(coalesce(p, ''), NFKD)), '[^[:alnum:]]', '', 'g')
+$function$;
+
+-- WHOLLY who or where: one of the keys (the customer, the company, the street, the street with its
+-- unit, the lead's own spelling), or an address line on the street. The twin of jobNameFrom's isWho.
+create or replace function public.job_name_is_who(p_words text, p_keys text[], p_street_key text)
+returns boolean
+language sql
+immutable
+set search_path to 'public'
+as $function$
+  select coalesce(p_words, '') <> ''
+     and (   (public.job_name_key(p_words) <> '' and public.job_name_key(p_words) = any(p_keys))
+          or (coalesce(p_street_key, '') <> ''
+              and p_street_key = public.job_name_key(btrim(split_part(p_words, ',', 1)))))
+$function$;
+
+-- The words with who and where taken off: all of them when they are only who or where, else a part
+-- at either end, after a separator (" — ", " – ", " · ", " | ", " - ", ", ", ": "), that is: the lead
+-- door's seeded "New deck — Rita Moss" is the work "New deck"; "Rita Moss, 12 Elm St" is nothing.
+-- The twin of job-name.ts whoLess.
+create or replace function public.job_name_who_less(p_words text, p_keys text[], p_street_key text)
+returns text
+language plpgsql
+immutable
+set search_path to 'public'
+as $function$
+declare
+  w text := btrim(coalesce(p_words, ''));
+  parts text[];
+  n int;
+  i int;
+  nxt text;
+  round int;
+begin
+  for round in 1..6 loop
+    if w = '' or public.job_name_is_who(w, p_keys, p_street_key) then
+      return '';
+    end if;
+    -- {part, separator, part, separator, …, part}
+    parts := string_to_array(
+      regexp_replace(w, '(\s*[—–·|]\s*|\s+-\s+|\s*[,:]\s+)', chr(1) || '\1' || chr(1), 'g'), chr(1));
+    n := coalesce(array_length(parts, 1), 0);
+    exit when n < 3;
+    nxt := null;
+    -- The shortest run of parts at the front that is only who or where…
+    i := 1;
+    while i <= n - 2 and nxt is null loop
+      if public.job_name_is_who(array_to_string(parts[1:i], ''), p_keys, p_street_key) then
+        nxt := array_to_string(parts[i + 2:n], '');
+      end if;
+      i := i + 2;
+    end loop;
+    -- …else the shortest at the end.
+    i := n;
+    while i >= 3 and nxt is null loop
+      if public.job_name_is_who(array_to_string(parts[i:n], ''), p_keys, p_street_key) then
+        nxt := array_to_string(parts[1:i - 2], '');
+      end if;
+      i := i - 2;
+    end loop;
+    exit when nxt is null;
+    w := btrim(nxt);
+  end loop;
+  return w;
+end $function$;
 
 create or replace function public.job_name_from(
   p_typed text,
@@ -64,6 +144,7 @@ create or replace function public.job_name_from(
   p_customer_type text,
   p_street text,
   p_unit text,
+  p_alias text,
   p_today date
 )
 returns text
@@ -79,14 +160,15 @@ declare
   -- The phone-call booking's stock title, "Call Rita Moss" (bookingTitle): no separator after the
   -- word, so a tag only when who, where or nothing follows it ("Call box install" stays).
   bare_call_re constant text := '^(phone\s+)?call\s+';
+  -- A mailing-only line has no street number and street name: never a job's name.
+  po_box_re constant text := '^(p\.?\s*o\.?\s*box|post\s+office\s+box)(?![a-z])';
   company text := btrim(regexp_replace(coalesce(p_company_name, ''), '\s+', ' ', 'g'));
   cname text := btrim(regexp_replace(coalesce(p_customer_name, ''), '\s+', ' ', 'g'));
   street_in text := btrim(regexp_replace(coalesce(p_street, ''), '\s+', ' ', 'g'));
+  unit_in text := btrim(regexp_replace(coalesce(p_unit, ''), '\s+', ' ', 'g'));
   street text;
   unit text;
-  k_name text;
-  k_company text;
-  k_street text;
+  keys text[];
   k_street_line text;
   which int;
   pass int;
@@ -95,29 +177,30 @@ declare
   words text;
   rest text;
   nxt text;
-  k text;
   tagged boolean;
-  only_who boolean;
-  w_only boolean;
   work text := '';
   who text;
   head text;
   pos int;
 begin
   street := btrim(split_part(street_in, ',', 1));
-  k_name := regexp_replace(lower(cname), '[^a-z0-9]', '', 'g');
-  k_company := regexp_replace(lower(company), '[^a-z0-9]', '', 'g');
-  k_street := regexp_replace(lower(street_in), '[^a-z0-9]', '', 'g');
-  k_street_line := regexp_replace(lower(street), '[^a-z0-9]', '', 'g');
+  -- The unit without its own designator: "56", "#56", "Unit 56", "Apt 56" all ride as "#56".
+  unit := btrim(regexp_replace(unit_in, '^(#|(unit|apt|apartment|ste|suite)\M\.?)\s*#?\s*', '', 'i'));
+  k_street_line := public.job_name_key(street);
+  keys := array[public.job_name_key(cname), public.job_name_key(company), public.job_name_key(street_in),
+                public.job_name_key(p_alias)];
+  if street <> '' and unit_in <> '' then
+    keys := keys || array[public.job_name_key(street || ' ' || unit), public.job_name_key(street || ' ' || unit_in)];
+  end if;
 
   -- Which 1: the typed name. Which 2: the source's words. Each is untagged the same way
-  -- (stripSourceTag on the words, pass 1, and on what follows a bare "Call", pass 2).
+  -- (stripSourceTag on the words, pass 1, and on what follows a bare "Call", pass 2), then who and
+  -- where come off (job_name_who_less).
   for which in 1..2 loop
     raw := btrim(regexp_replace(coalesce(case when which = 1 then p_typed else p_words end, ''), '\s+', ' ', 'g'));
     continue when raw = '';
     tagged := false;
     rest := raw;
-    only_who := false;
     for pass in 1..2 loop
       if pass = 1 then
         words := raw;
@@ -140,41 +223,36 @@ begin
           words := '';
         end if;
       end if;
-      -- Only who or where: the customer's name, the company, the street (or an address line on it).
-      k := regexp_replace(lower(words), '[^a-z0-9]', '', 'g');
-      w_only := k <> '' and (
-        (k_name <> '' and k_name = k)
-        or (k_company <> '' and k_company = k)
-        or (k_street <> '' and k_street = k)
-        or (k_street_line <> ''
-            and k_street_line = regexp_replace(lower(btrim(split_part(words, ',', 1))), '[^a-z0-9]', '', 'g')));
       if pass = 1 then
         tagged := words <> raw;
         rest := words;
-        only_who := w_only;
-      elsif words = '' or w_only then
+      elsif public.job_name_who_less(words, keys, k_street_line) = '' then
         -- "Call Rita Moss" / "Call Visit": the call booking's stock title.
         tagged := true;
         rest := words;
-        only_who := w_only;
       end if;
     end loop;
+    rest := public.job_name_who_less(rest, keys, k_street_line);
 
     if which = 1 then
       -- 1. A typed name stays exactly as typed, unless it is only a tag, or a tag and who or where.
-      if not tagged or (rest <> '' and not only_who) then
+      if not tagged or rest <> '' then
         return raw;
       end if;
-    elsif rest <> '' and not only_who then
+    else
       work := rest;
     end if;
   end loop;
 
-  -- 2. The street number and name, " #<unit>" with a unit (its own designator off; never twice).
+  -- 2. The street number and name, " #<unit>" with a unit, never twice ("12 Elm St Apt 5" already
+  -- carries it); never a PO box.
+  if street ~* po_box_re then
+    street := '';
+  end if;
   if street <> '' then
-    unit := btrim(regexp_replace(btrim(regexp_replace(coalesce(p_unit, ''), '\s+', ' ', 'g')),
-                                 '^(#|(unit|apt|apartment|ste|suite)\M\.?)\s*#?\s*', '', 'i'));
-    if unit <> '' and right(lower(street), length(unit) + 1) <> lower('#' || unit) then
+    if unit <> '' and not (right(lower(street), length(unit)) = lower(unit)
+                           and left(lower(street), length(street) - length(unit))
+                                 ~ '(#|\m(unit|apt|apartment|ste|suite)\.?\s*#?)\s*$') then
       return street || ' #' || unit;
     end if;
     return street;
@@ -203,11 +281,15 @@ begin
   return 'New Job · ' || to_char(p_today, 'Mon FMDD');
 end $function$;
 
-comment on function public.job_name_from(text, text, text, text, text, text, text, date) is
-  'A new job''s name (0369): a typed name as typed unless only a source tag (or a tag and who/where); else the street number and name (" #<unit>" with a unit); else the customer as written · the source''s words with any leading source tag ("Site inspection:", "Estimate —") taken off; else "New Job · Sep 27". The SQL twin of src/lib/job-name.ts jobNameFrom; pure.';
+comment on function public.job_name_from(text, text, text, text, text, text, text, text, date) is
+  'A new job''s name (0369): a typed name as typed unless only a source tag (or a tag and who/where); else the street number and name (" #<unit>" with a unit, never twice; never a PO box); else the customer as written · the source''s words with any leading source tag ("Site inspection:", "Estimate —") and any who/where part ("— Rita Moss", the lead''s own spelling p_alias) taken off; else "New Job · Sep 27". The SQL twin of src/lib/job-name.ts jobNameFrom; pure.';
 
--- Pure, but only the database's own functions need it.
-revoke all on function public.job_name_from(text, text, text, text, text, text, text, date) from public, anon, authenticated;
+-- Pure, but only the database's own functions need them.
+revoke all on function public.job_name_from(text, text, text, text, text, text, text, text, date) from public, anon, authenticated;
+revoke all on function public.job_name_key(text) from public, anon, authenticated;
+revoke all on function public.job_name_is_who(text, text[], text) from public, anon, authenticated;
+revoke all on function public.job_name_who_less(text, text[], text) from public, anon, authenticated;
+
 
 create or replace function public.accept_public_quote(p_token text)
 returns json
@@ -306,8 +388,9 @@ begin
     -- name as always"): the street number and name (the site above, else the customer's own, as the
     -- staff path's createJobFromQuote reads it) and " #<unit>" with that street's unit; with no
     -- street, the customer as written · the estimate's own words with any source tag taken off
-    -- ("Estimate — Rita Moss" is the tag and the person: no words); else "New Job · Sep 27" on the
-    -- company's today. Was: the title, else 'Job from ' || quote_number.
+    -- ("Estimate — Rita Moss" is the tag and the person: no words; the lead door's "New deck — Rita
+    -- Moss" is "New deck", and the lead's own spelling, inq.name, counts as the person too); else
+    -- "New Job · Sep 27" on the company's today. Was: the title, else 'Job from ' || quote_number.
     if q.customer_id is not null then
       select * into cust from public.customers where id = q.customer_id and org_id = q.org_id;
     end if;
@@ -322,6 +405,7 @@ begin
             public.job_name_from(null, q.title, cust.name, cust.company_name, cust.type::text,
                                  coalesce(nullif(site_address, ''), cust.address),
                                  case when coalesce(site_address, '') <> '' then site_unit else cust.unit end,
+                                 inq.name,
                                  (now() at time zone org_tz)::date),
             'to_be_scheduled',
             site_address, site_unit, site_city, site_state, site_zip,
@@ -336,14 +420,18 @@ end $function$;
 -- ── THE CHECK ───────────────────────────────────────────────────────────────────────────────
 do $chk$
 begin
-  if public.job_name_from(null, 'Site inspection: Rita Moss', 'Rita Moss', null, 'residential', '12 Elm St', null, date '2026-09-27')
+  if public.job_name_from(null, 'Site inspection: Rita Moss', 'Rita Moss', null, 'residential', '12 Elm St', null, null, date '2026-09-27')
        is distinct from '12 Elm St'
-     or public.job_name_from(null, 'Estimate — Panel Upgrade', 'Rita Moss', null, 'residential', null, null, date '2026-09-27')
+     or public.job_name_from(null, 'Estimate — Panel Upgrade', 'Rita Moss', null, 'residential', null, null, null, date '2026-09-27')
        is distinct from 'Rita Moss · Panel Upgrade'
-     or public.job_name_from(null, null, null, null, null, '300 West Lake Boulevard', 'Unit 56', date '2026-09-27')
+     or public.job_name_from(null, 'New deck — Rita Moss', 'Rita Moss', null, 'residential', null, null, null, date '2026-09-27')
+       is distinct from 'Rita Moss · New deck'
+     or public.job_name_from(null, null, null, null, null, '300 West Lake Boulevard', 'Unit 56', null, date '2026-09-27')
        is distinct from '300 West Lake Boulevard #56'
-     or public.job_name_from('RV Inspection', null, null, null, null, '12 Elm St', null, date '2026-09-27') is distinct from 'RV Inspection'
-     or public.job_name_from(null, null, null, null, null, null, null, date '2026-09-27') is distinct from 'New Job · Sep 27' then
+     or public.job_name_from(null, null, null, null, null, '12 Elm St Apt 5', 'Apt 5', null, date '2026-09-27')
+       is distinct from '12 Elm St Apt 5'
+     or public.job_name_from('RV Inspection', null, null, null, null, '12 Elm St', null, null, date '2026-09-27') is distinct from 'RV Inspection'
+     or public.job_name_from(null, null, null, null, null, null, null, null, date '2026-09-27') is distinct from 'New Job · Sep 27' then
     raise exception '0369: job_name_from does not name jobs the way src/lib/job-name.ts does. Nothing was changed.';
   end if;
 end $chk$;

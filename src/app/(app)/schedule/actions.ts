@@ -92,7 +92,7 @@ async function advanceToScheduled(supabase: SupabaseClient, id: string): Promise
     .in("status", ["to_be_scheduled", "estimate"]);
 }
 
-export async function createJob(formData: FormData): Promise<Result> {
+export async function createJob(formData: FormData): Promise<Result & { /** The name the job was saved under (a sent name that was only a tag is not it). */ name?: string }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
@@ -215,7 +215,9 @@ export async function createJob(formData: FormData): Promise<Result> {
 
   revalidatePath("/schedule");
   revalidatePath("/planner"); // My Day reads today's scheduled jobs — keep it in sync
-  return { ok: true, id: data.id };
+  // The name it was SAVED under, so a caller that echoes it (the Timeclock's quick add) never says
+  // one name while the job carries another.
+  return { ok: true, id: data.id, name };
 }
 
 // setJobStatus lived here as an UNGUARDED copy (no requireStaff / no status whitelist) — the job-page

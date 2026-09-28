@@ -1,7 +1,17 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { jobNameFrom, jobWho, leadScopeWords, stripSourceTag, streetOf, typedNameMayBeATag, SOURCE_TAGS } from "./job-name";
+import {
+  isOnlyASourceTag,
+  jobNameFrom,
+  jobWho,
+  leadScopeWords,
+  stripSourceTag,
+  streetOf,
+  typedNameMayBeATag,
+  visitStreetOf,
+  SOURCE_TAGS,
+} from "./job-name";
 import { bookingTitle, WORK_KINDS } from "./schedule/work-shape";
 import { JOB_NAME_CASES } from "./job-name.cases";
 
@@ -54,7 +64,7 @@ describe("jobNameFrom: street number and name, as always (Erik 2026-09-28)", () 
   for (const c of JOB_NAME_CASES) {
     it(`${c.why}: ${c.typed !== null ? `typed "${c.typed}"` : `words "${c.words}"`} → "${c.want}"`, () => {
       expect(
-        jobNameFrom({ typed: c.typed, sourceWords: c.words, customer: c.customer, street: c.street, unit: c.unit, todayStr: c.today }),
+        jobNameFrom({ typed: c.typed, sourceWords: c.words, customer: c.customer, street: c.street, unit: c.unit, aliases: [c.alias], todayStr: c.today }),
       ).toBe(c.want);
     });
   }
@@ -62,6 +72,41 @@ describe("jobNameFrom: street number and name, as always (Erik 2026-09-28)", () 
   it("streetOf takes the street off a one-line address", () => {
     expect(streetOf("12 Elm St, Testville, CA 96161")).toBe("12 Elm St");
     expect(streetOf(null)).toBe("");
+  });
+
+  it("visitStreetOf: a visit booked at only a town has no street, so the job is who, never the town", () => {
+    const place = { city: "Testville", state: "CA", zip: "96161" };
+    expect(visitStreetOf("12 Elm St, Testville, CA 96161", place)).toBe("12 Elm St");
+    expect(visitStreetOf("Testville, CA 96161", place)).toBe("");
+    expect(visitStreetOf("Testville", { city: "Testville" })).toBe("");
+    expect(visitStreetOf("CA 96161", { state: "CA", zip: "96161" })).toBe("");
+    expect(visitStreetOf("96161", {})).toBe("");
+    // The shape alone, when the visit's own columns are blank.
+    expect(visitStreetOf("Testville, CA 96161", {})).toBe("");
+    expect(visitStreetOf("Testville, CA", {})).toBe("");
+    // A street line stays a street, with or without its town.
+    expect(visitStreetOf("12 Elm St", {})).toBe("12 Elm St");
+    expect(visitStreetOf("12 Elm St, Testville", place)).toBe("12 Elm St");
+    expect(visitStreetOf(null, place)).toBe("");
+    const rita = { name: "Rita Moss", company_name: null, type: "residential" };
+    const name = (location: string) =>
+      jobNameFrom({ sourceWords: "Site inspection: Rita Moss", customer: rita, street: visitStreetOf(location, place), todayStr: "2026-09-27" });
+    expect(name("Testville, CA 96161")).toBe("Rita Moss");
+    expect(name("12 Elm St, Testville, CA 96161")).toBe("12 Elm St");
+  });
+
+  it("isOnlyASourceTag: a bare tag or old fallback, nothing else", () => {
+    for (const t of ["Service call", "Inspection", "  walk-through ", "Estimate:", "Job from appointment"]) expect(isOnlyASourceTag(t), t).toBe(true);
+    for (const t of ["", "RV Inspection", "12 Elm St", "Service call — Panel swap", "Call box install"]) expect(isOnlyASourceTag(t), t).toBe(false);
+  });
+
+  it("a tag and a who/where part with real work between keeps the work", () => {
+    const rita = { name: "Rita Moss", company_name: null, type: "residential" };
+    expect(jobNameFrom({ sourceWords: "Site inspection: Rita Moss — Panel swap", customer: rita, todayStr: "2026-09-27" })).toBe("Rita Moss · Panel swap");
+    // A typed name with real words stays as typed, tag and all.
+    expect(jobNameFrom({ typed: "Site inspection: Rita Moss — Panel swap", customer: rita, street: "12 Elm St", todayStr: "2026-09-27" })).toBe(
+      "Site inspection: Rita Moss — Panel swap",
+    );
   });
 
   it("every stock title bookingTitle makes is no name: the job is the street, else the person, never the booking", () => {
@@ -197,8 +242,8 @@ describe("every door that inserts a job names it with jobNameFrom", () => {
   it("the visit page's Start The Job preview names the job the same way the door will", () => {
     const src = read("src/app/(app)/appointments/[id]/page.tsx");
     expect(src).toMatch(/previewJobName = jobNameFrom\(\{\s*sourceWords: a\.title,/);
-    expect(src).toMatch(/street: streetOf\(a\.location\),\s*unit: \(a as \{ unit\?: string \| null \}\)\.unit \?\? null,/);
-    expect(src).toMatch(/location, unit, notes/); // PROJECTION LAW: the unit is selected
+    expect(src).toMatch(/street: visitStreetOf\(a\.location, a\),\s*unit: \(a as \{ unit\?: string \| null \}\)\.unit \?\? null,/);
+    expect(src).toMatch(/location, unit, city, state, zip, notes/); // PROJECTION LAW: the unit and the town are selected
     expect(src).toMatch(/name: previewJobName/);
     expect(src).not.toMatch(/Job from appointment/);
     // Who, in the door's order: the visit's card, else the lead's card, else the lead; the rest are aliases.
@@ -207,7 +252,7 @@ describe("every door that inserts a job names it with jobNameFrom", () => {
     const door = read("src/app/(app)/appointments/actions.ts");
     expect(door).toMatch(/jobWho\(\[card, lead\]\)/);
     expect(door).toMatch(/const customerId = appt\.customer_id \?\? lead\?\.customer_id \?\? null/);
-    expect(door).toMatch(/jobNameFrom\(\{\s*sourceWords: appt\.title,\s*customer: who,\s*aliases,\s*street: streetOf\(appt\.location\),\s*unit: apptUnit,/);
+    expect(door).toMatch(/jobNameFrom\(\{\s*sourceWords: appt\.title,\s*customer: who,\s*aliases,[\s\S]*?street: visitStreetOf\(appt\.location, appt\),\s*unit: apptUnit,/);
     expect(door).toMatch(/location, unit, city/);
     expect(door).toMatch(/unit: apptUnit, \/\/ the visit's unit is the job's/);
   });
@@ -221,9 +266,22 @@ describe("every door that inserts a job names it with jobNameFrom", () => {
     expect(src).toMatch(/unit: inq\.unit \?\? null, \/\/ the lead's unit is the job's/);
   });
 
-  it("the office's estimate accept names the job for the street and unit it inherits", () => {
+  it("the lead door never seeds 'Not sure — I need help' as an estimate's title", () => {
+    const src = read("src/app/(app)/leads/actions.ts");
+    expect(src).toMatch(/title: label && inq\.project_type !== "unsure" \? `\$\{label\} — \$\{inq\.name\}` : `Estimate — \$\{inq\.name\}`,/);
+  });
+
+  it("the Timeclock's quick add refuses a tag-only name and echoes the name the job was saved under", () => {
+    const src = read("src/app/(app)/timeclock/new-job-inline.tsx");
+    expect(src).toMatch(/if \(isOnlyASourceTag\(trimmed\)\) \{/);
+    expect(src).toMatch(/onCreated\(\{ id: res\.id, name: res\.name \|\| trimmed \}\)/);
+    expect(read("src/app/(app)/schedule/actions.ts")).toMatch(/return \{ ok: true, id: data\.id, name \};/);
+  });
+
+  it("the office's estimate accept names the job for the street and unit it inherits, the lead's spelling as who", () => {
     const src = read("src/app/(app)/quotes/actions.ts");
-    expect(src).toMatch(/sourceWords: q\.title,[\s\S]*?street: inheritedAddress\?\.address \?\? null,\s*unit: inheritedAddress\?\.unit \?\? null,/);
+    expect(src).toMatch(/sourceWords: q\.title,\s*aliases: \[\(leadForName as \{ name\?: string \| null \} \| null\)\?\.name\],[\s\S]*?street: inheritedAddress\?\.address \?\? null,\s*unit: inheritedAddress\?\.unit \?\? null,/);
+    expect(src).toMatch(/from\("inquiries"\)\.select\("name"\)\.eq\("id", q\.inquiry_id\)/);
     expect(src).toMatch(/unit: inheritedAddress\.unit \?\? null,/);
     expect(src.match(/select\("address, unit, city, state, zip"\)/g)?.length).toBe(2);
   });
@@ -248,7 +306,7 @@ describe("every door that inserts a job names it with jobNameFrom", () => {
     const sql = readFileSync(join(dir, latest), "utf8");
     // No typed name; the estimate's title as the source's words; the street's own unit.
     expect(sql).toMatch(/public\.job_name_from\(null, q\.title,/);
-    expect(sql).toMatch(/case when coalesce\(site_address, ''\) <> '' then site_unit else cust\.unit end/);
+    expect(sql).toMatch(/case when coalesce\(site_address, ''\) <> '' then site_unit else cust\.unit end,\s*inq\.name,/);
     const code = sql.slice(sql.indexOf("create or replace function public.accept_public_quote")).replace(/--.*$/gm, "");
     expect(code).not.toMatch(/'Job from '/);
   });

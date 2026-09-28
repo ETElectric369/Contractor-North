@@ -23,12 +23,19 @@ function num(s: string): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-function parseCsv(text: string): JobImportRow[] {
+export function parseCsv(text: string): JobImportRow[] {
   const rows = parseCSV(text);
   if (rows.length < 2) return [];
   const headers = rows[0].map((h) => h.trim().toLowerCase());
-  const at = (re: RegExp) => headers.findIndex((h) => re.test(h));
-  const iCust = at(/customer|client/), iJob = at(/job|name|project/), iVal = at(/value|amount|contract|price|total/),
+  const at = (re: RegExp, not = -1) => headers.findIndex((h, i) => i !== not && re.test(h));
+  const iCust = at(/customer|client/);
+  // THE JOB'S OWN COLUMN, never the customer's. "Customer Name" matches /name/ too, and read as the
+  // job's name the customer would be kept as typed (Rule 1) instead of the street (Erik 2026-09-28,
+  // "street number and name as always"): a "Job"/"Project" header first, else a "Name" that isn't
+  // the customer's column.
+  const iJobOrProject = at(/job|project/, iCust);
+  const iJob = iJobOrProject >= 0 ? iJobOrProject : at(/name/, iCust);
+  const iVal = at(/value|amount|contract|price|total/),
     iStatus = at(/status|stage/), iAddr = at(/address|street/), iCity = at(/city/), iState = at(/state/),
     iZip = at(/zip|postal/), iEmail = at(/e-?mail/), iPhone = at(/phone|cell|mobile/);
   const v = (c: string[], i: number) => (i >= 0 ? (c[i] ?? "").trim() : "");

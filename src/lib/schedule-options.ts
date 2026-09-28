@@ -183,19 +183,35 @@ const WORK_WORDS_MAX = 40;
  *  separator ("Replace the panel, add two circuits, move the…" → "Replace the panel, add two circuits"). */
 export function workWordsForName(words: string | null | undefined): string {
   let w = String(words ?? "").trim().replace(/\s+/g, " ");
-  if (w.length > WORK_WORDS_MAX) {
-    const cut = w.slice(0, WORK_WORDS_MAX + 1).lastIndexOf(" ");
-    w = cut > 0 ? w.slice(0, cut) : w.slice(0, WORK_WORDS_MAX);
+  // Counted in characters (code points), the way the SQL twin's length()/left() count them: an emoji
+  // is one character, and a cut never splits one in half.
+  const chars = Array.from(w);
+  if (chars.length > WORK_WORDS_MAX) {
+    const cut = chars.slice(0, WORK_WORDS_MAX + 1).lastIndexOf(" ");
+    w = (cut > 0 ? chars.slice(0, cut) : chars.slice(0, WORK_WORDS_MAX)).join("");
   }
   return w.replace(/[\s,;:.\-–—·|/]+$/, "");
 }
+
+/** Does the street line already carry this unit ("12 Elm St #5", "12 Elm St Apt 5", "12 Elm St Suite
+ *  5", "12 Elm St # 5")? Then the name adds no " #5": the unit is never on it twice. */
+function streetCarriesUnit(street: string, unit: string): boolean {
+  const s = street.toLowerCase();
+  const u = unit.toLowerCase();
+  if (!u || !s.endsWith(u)) return false;
+  return /(?:#|\b(?:unit|apt|apartment|ste|suite)\.?\s*#?)\s*$/.test(s.slice(0, s.length - u.length));
+}
+
+/** A mailing-only line ("PO Box 123", "P.O. Box 44", "Post Office Box 9") has no street number and
+ *  street name: a job is never named for it (rule 3 names it for who instead). */
+const PO_BOX = /^(?:p\.?\s*o\.?\s*box|post\s+office\s+box)(?![a-z])/i;
 
 /**
  * THE NAME A NEW JOB GETS WHEN NONE IS TYPED (Erik 2026-09-28, final: "street number and name as
  * always"). The way his company has always named jobs:
  *   - with a street, the street number and name, and " #<unit>" when the job has one: "3245 West
- *     Lake Boulevard", "300 West Lake Boulevard #56". Never the person, never the town (a one-line
- *     address is cut to its street);
+ *     Lake Boulevard", "300 West Lake Boulevard #56" (never twice: "12 Elm St Apt 5" stays). Never
+ *     the person, never the town (a one-line address is cut to its street), never a PO box;
  *   - no street: who, as written ("Jackie Burks", a company by its name), then " · " and the work
  *     words a source carried when there are any ("Jackie Burks · Panel Upgrade");
  *   - neither: "New Job · Sep 28" on the company's today (the work words alone when that is all).
@@ -210,10 +226,11 @@ export function defaultJobName(p: {
   work?: string | null;
   todayStr: string;
 }): string {
-  const street = String(p.street ?? "").split(",")[0].trim().replace(/\s+/g, " ");
+  const line = String(p.street ?? "").split(",")[0].trim().replace(/\s+/g, " ");
+  const street = PO_BOX.test(line) ? "" : line;
   if (street) {
     const unit = unitForName(p.unit);
-    return unit && !street.toLowerCase().endsWith(`#${unit}`.toLowerCase()) ? `${street} #${unit}` : street;
+    return unit && !streetCarriesUnit(street, unit) ? `${street} #${unit}` : street;
   }
   const who = customerNamePart(p.customer);
   const work = workWordsForName(p.work);

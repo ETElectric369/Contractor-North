@@ -15,7 +15,7 @@ import { notifyPeople } from "@/lib/notifications";
 import { getOrgSettings } from "@/lib/org-settings";
 import { tzDateTimeUtc, todayStrInTz } from "@/lib/tz";
 import { WORK_DAY_MINUTES } from "@/lib/schedule/work-shape";
-import { jobNameFrom, jobWho, streetOf } from "@/lib/job-name";
+import { jobNameFrom, jobWho, visitStreetOf } from "@/lib/job-name";
 import { createProposalCore, cleanSlots } from "@/lib/appointments/proposal";
 import { endAfterStart, keptEnd } from "@/lib/appointments/times";
 import { APPOINTMENT_STATUSES, APPOINTMENT_TYPES, INSPECTION_TYPES } from "@/lib/statuses";
@@ -1240,7 +1240,8 @@ export async function createJobFromAppointment(
     sourceWords: appt.title,
     customer: who,
     aliases,
-    street: streetOf(appt.location),
+    // The street of the place, never its town: a lead with only a city booked at "Testville, CA 96161".
+    street: visitStreetOf(appt.location, appt),
     unit: apptUnit,
     todayStr: todayStrInTz(tz),
   });

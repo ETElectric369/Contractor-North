@@ -28,7 +28,7 @@ import { isStaffRole } from "@/lib/actions/perms";
 import { jobShort, visitIsOver } from "@/lib/appointments/visit-start";
 import { loadLinkInstead } from "@/lib/appointments/visit-start-read";
 import { VisitStartCard } from "./visit-start-card";
-import { jobNameFrom, jobWho, streetOf } from "@/lib/job-name";
+import { jobNameFrom, jobWho, visitStreetOf } from "@/lib/job-name";
 import { FeatureOffLine } from "@/components/feature-off-line";
 import { featureOn } from "@/lib/features";
 import {
@@ -79,7 +79,7 @@ export default async function AppointmentCapturePage({
         // jobs(...) is the linked job the top card names ("Clock In On J-055"), and its status is
         // whether a visit that is over still offers a clock on it (a finished job does not); the lead's
         // customer_id is who "Link To J-055 Instead" looks for when the visit has no customer.
-        "id, org_id, type, title, status, starts_at, ends_at, job_id, assigned_to, location, unit, notes, customer_id, inquiry_id, capture, customers(name, company_name, type), inquiries(name, company_name, type, phone, message, intake, customer_id), jobs(id, job_number, name, status)",
+        "id, org_id, type, title, status, starts_at, ends_at, job_id, assigned_to, location, unit, city, state, zip, notes, customer_id, inquiry_id, capture, customers(name, company_name, type), inquiries(name, company_name, type, phone, message, intake, customer_id), jobs(id, job_number, name, status)",
       )
       .eq("id", id)
       .maybeSingle(),
@@ -261,7 +261,7 @@ export default async function AppointmentCapturePage({
     sourceWords: a.title,
     customer: previewWho.customer,
     aliases: previewWho.aliases,
-    street: streetOf(a.location),
+    street: visitStreetOf(a.location, a),
     unit: (a as { unit?: string | null }).unit ?? null,
     todayStr: todayStrInTz(tz),
   });

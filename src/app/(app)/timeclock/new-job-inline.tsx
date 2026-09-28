@@ -6,6 +6,7 @@ import { Loader2, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { createJob } from "../schedule/actions";
+import { isOnlyASourceTag } from "@/lib/job-name";
 
 /** What the caller gets back — enough to drop the job straight into a picker without
  *  waiting for the page's server-rendered job list to catch up. */
@@ -56,6 +57,13 @@ export function NewJobInline({
       setError("Give it a name first — the street address works fine.");
       return;
     }
+    if (isOnlyASourceTag(trimmed)) {
+      // "Service call" or "Inspection" says what kind of visit, not which job: createJob would save
+      // it as "New Job · Sep 27", the same stub the blank box is refused for (Erik 2026-09-27: a job
+      // never carries the tag).
+      setError(`"${trimmed}" says what kind of visit, not which job. Give it the street or the customer.`);
+      return;
+    }
     setError(null);
     start(async () => {
       const fd = new FormData();
@@ -72,7 +80,9 @@ export function NewJobInline({
           setError(res.error ?? "Could not create the job.");
           return;
         }
-        onCreated({ id: res.id, name: trimmed });
+        // The name it was SAVED under: the picker and the "Created …" toast say what the timecard,
+        // the schedule and the job list will say.
+        onCreated({ id: res.id, name: res.name || trimmed });
         setName("");
         setOpen(false);
         // The page's job list is server-rendered and createJob revalidates /schedule and

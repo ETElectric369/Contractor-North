@@ -1241,8 +1241,15 @@ export async function createJobFromQuote(
     ? await supabase.from("customers").select("name, company_name, type").eq("id", custForName).maybeSingle()
     : { data: null };
   const { data: orgForName } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
+  // The lead's own spelling of who: the lead door seeds the estimate "New deck — <the lead's name>",
+  // and a card matched by phone may spell the person differently ("rita" vs "Rita Moss"). The public
+  // accept passes the same inq.name to the SQL twin (p_alias).
+  const { data: leadForName } = q.inquiry_id
+    ? await supabase.from("inquiries").select("name").eq("id", q.inquiry_id).maybeSingle()
+    : { data: null };
   const jobName = jobNameFrom({
     sourceWords: q.title,
+    aliases: [(leadForName as { name?: string | null } | null)?.name],
     customer: (whoRow as { name?: string | null; company_name?: string | null; type?: string | null } | null) ?? null,
     street: inheritedAddress?.address ?? null,
     unit: inheritedAddress?.unit ?? null,

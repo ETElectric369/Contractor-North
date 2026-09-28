@@ -16,6 +16,9 @@ export type JobNameCase = {
   customer: { name?: string | null; company_name?: string | null; type?: string | null } | null;
   street: string | null;
   unit: string | null;
+  /** Another spelling of who the words may carry (the lead's own name: jobNameFrom's aliases, the
+   *  SQL twin's p_alias). */
+  alias?: string | null;
   today: string;
   want: string;
 };
@@ -112,4 +115,41 @@ export const JOB_NAME_CASES: JobNameCase[] = [
   typed("a typed call and the person, no street", "Call Rita Moss", rita, null, "Rita Moss"),
   typed("a typed tag, no one, nowhere", "Walk-through", null, null, "New Job · Sep 27"),
   typed("a typed old fallback", "Job from appointment", rita, "12 Elm St", "12 Elm St"),
+  // ...a tag and who AND where, in any order, is no name too; so is a tag and the street with its unit.
+  typed("a typed tag, the person and the street", "Inspection: Rita Moss, 12 Elm St", rita, "12 Elm St", "12 Elm St"),
+  typed("a typed tag, the person and the street, dashes", "Service call — Rita Moss — 12 Elm St", rita, "12 Elm St", "12 Elm St"),
+  typed("a typed tag and the street with its unit", "Site inspection: 12 Elm St #4", rita, "12 Elm St", "12 Elm St #4", "4"),
+  typed("a typed tag and the street with its unit spelled out", "Inspection — 12 Elm St Apt 4", rita, "12 Elm St", "12 Elm St #4", "Apt 4"),
+
+  // The lead door's seeded estimate, "<label> — <the lead's name>", accepted with no street anywhere:
+  // the name at the end is who, never work words.
+  src("a seeded estimate's label and the name, no street", "New deck — Rita Moss", rita, null, "Rita Moss · New deck"),
+  src("a seeded estimate's long label and the name", "Resurface — new boards, keep the frame — Rita Moss", rita, null, "Rita Moss · Resurface — new boards, keep the frame"),
+  src("the name at the front, then the work", "Rita Moss — Panel swap", rita, null, "Rita Moss · Panel swap"),
+  src("a business named after the work", "Panel swap — Tahoe Test HOA", hoa, null, "Tahoe Test HOA · Panel swap"),
+  src("the work with a comma stays whole", "Replace the panel, add two circuits", rita, null, "Rita Moss · Replace the panel, add two circuits"),
+  { ...src("the lead's own spelling (a card matched by phone)", "Estimate — rita", rita, null, "Rita Moss"), alias: "rita" },
+  { ...src("the lead's own spelling after the work", "New deck — rita", rita, null, "Rita Moss · New deck"), alias: "rita" },
+
+  // The unit is never on the name twice, however the street line already spells it.
+  src("a street that spells the unit as Apt", null, rita, "12 Elm St Apt 5", "12 Elm St Apt 5", "Apt 5"),
+  src("a street that spells the unit as Unit, a bare unit", null, rita, "12 Elm St Unit 4", "12 Elm St Unit 4", "4"),
+  src("a street with a spaced #", null, rita, "12 Elm St # 4", "12 Elm St # 4", "4"),
+  src("a street that spells the unit as Suite", null, rita, "12 Elm St Suite 200, Testville", "12 Elm St Suite 200", "Suite 200"),
+  src("a street whose unit only ends in the same digit", null, rita, "12 Elm St Apt 45", "12 Elm St Apt 45 #5", "5"),
+
+  // A PO box has no street number and street name: who and the work instead.
+  src("a PO box is no street", "Panel Upgrade", rita, "PO Box 123, Testville", "Rita Moss · Panel Upgrade"),
+  src("a P.O. box, no one", null, null, "P.O. Box 44 Testville CA 96118", "New Job · Sep 27"),
+
+  // Any script: a name with no a-z in it is still who.
+  src("a Cyrillic name in a visit's stock title", "Site inspection: Иван Петров", { name: "Иван Петров", company_name: null, type: "residential" }, null, "Иван Петров"),
+  src("a CJK name in a call booking", "Call 李明", { name: "李明", company_name: null, type: "residential" }, null, "李明"),
+  src("accents don't make two spellings", "Site inspection: Jose Garcia", { name: "José García", company_name: null, type: "residential" }, null, "José García"),
+  typed("a typed tag and a Cyrillic name is no name", "Site inspection: Иван Петров", { name: "Иван Петров", company_name: null, type: "residential" }, "12 Elm St", "12 Elm St"),
+
+  // Work words are counted in characters: an emoji is one, and is never cut in half.
+  src("an emoji counts as one character", "Replace kitchen lights and add dimmers 💡", rita, null, "Rita Moss · Replace kitchen lights and add dimmers 💡"),
+  src("an emoji at the front of long words", "🔌 Replace the main panel and add two new circuits", rita, null, "Rita Moss · 🔌 Replace the main panel and add two new"),
+  src("a long run with no space and an emoji at the cut", "Aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa🔌more", rita, null, "Rita Moss · Aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa🔌m"),
 ];

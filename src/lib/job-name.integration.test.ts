@@ -69,7 +69,7 @@ d("a job's name is never where it came from (0369)", () => {
   it("the SQL twin names every case exactly as jobNameFrom does", async () => {
     for (const k of JOB_NAME_CASES) {
       const got = (
-        await c.query("select public.job_name_from($1, $2, $3, $4, $5, $6, $7, $8::date) as name", [
+        await c.query("select public.job_name_from($1, $2, $3, $4, $5, $6, $7, $8, $9::date) as name", [
           k.typed,
           k.words,
           k.customer?.name ?? null,
@@ -77,12 +77,13 @@ d("a job's name is never where it came from (0369)", () => {
           k.customer?.type ?? null,
           k.street,
           k.unit,
+          k.alias ?? null,
           k.today,
         ])
       ).rows[0].name;
       expect({ why: k.why, got }).toEqual({ why: k.why, got: k.want });
       expect(
-        jobNameFrom({ typed: k.typed, sourceWords: k.words, customer: k.customer, street: k.street, unit: k.unit, todayStr: k.today }),
+        jobNameFrom({ typed: k.typed, sourceWords: k.words, customer: k.customer, street: k.street, unit: k.unit, aliases: [k.alias], todayStr: k.today }),
       ).toBe(got);
     }
   });
@@ -91,8 +92,12 @@ d("a job's name is never where it came from (0369)", () => {
    *  taps Accept. Returns the job's name and unit. */
   const acceptAndName = async (
     title: string | null,
-    o: { custAddress?: string | null; custUnit?: string | null; quoteAddress?: string | null; quoteUnit?: string | null } = {},
+    o: { custAddress?: string | null; custUnit?: string | null; quoteAddress?: string | null; quoteUnit?: string | null; leadName?: string } = {},
   ) => {
+    const inquiryId = o.leadName
+      ? ((await c.query("insert into public.inquiries (org_id, name, status) values ($1, $2, 'new') returning id::text as id", [orgId, o.leadName])).rows[0]
+          .id as string)
+      : null;
     const cust = (
       await c.query(
         "insert into public.customers (org_id, name, type, status, address, unit, created_by) values ($1, 'Rita TestMoss', 'residential', 'active', $2, $3, $4) returning id::text as id",
@@ -102,8 +107,8 @@ d("a job's name is never where it came from (0369)", () => {
     const token = `test-0369-${randomUUID()}`;
     const q = (
       await c.query(
-        "insert into public.quotes (org_id, customer_id, title, status, public_token, address, unit, created_by) values ($1, $2, $3, 'sent', $4, $5, $6, $7) returning id::text as id",
-        [orgId, cust, title, token, o.quoteAddress ?? null, o.quoteUnit ?? null, ownerId],
+        "insert into public.quotes (org_id, customer_id, title, status, public_token, address, unit, created_by, inquiry_id) values ($1, $2, $3, 'sent', $4, $5, $6, $7, $8::uuid) returning id::text as id",
+        [orgId, cust, title, token, o.quoteAddress ?? null, o.quoteUnit ?? null, ownerId, inquiryId],
       )
     ).rows[0].id as string;
     const res = (await c.query("select public.accept_public_quote($1) as r", [token])).rows[0].r;
@@ -132,14 +137,30 @@ d("a job's name is never where it came from (0369)", () => {
     expect(await acceptAndName(null, { custAddress: null })).toBe("Rita TestMoss");
   });
 
+  it("the lead door's seeded title, '<label> — <the lead's name>': the name is who, however the lead spelled it", async () => {
+    expect(await acceptAndName("New deck — Rita TestMoss", { custAddress: null })).toBe("Rita TestMoss · New deck");
+    expect(await acceptAndName("Estimate — rita", { custAddress: null, leadName: "rita" })).toBe("Rita TestMoss");
+    expect(await acceptAndName("New deck — rita", { custAddress: null, leadName: "rita" })).toBe("Rita TestMoss · New deck");
+  });
+
+  it("a PO box on the card is no street: who and the work", async () => {
+    expect(await acceptAndName("Panel Upgrade", { custAddress: "PO Box 123" })).toBe("Rita TestMoss · Panel Upgrade");
+  });
+
   it("the twin is not callable from outside the database, and there is only the one", async () => {
-    const sig = "public.job_name_from(text, text, text, text, text, text, text, date)";
-    const grants = (
-      await c.query(
-        `select has_function_privilege('anon', '${sig}', 'execute') as anon, has_function_privilege('authenticated', '${sig}', 'execute') as authed`,
-      )
-    ).rows[0];
-    expect(grants).toEqual({ anon: false, authed: false });
+    for (const sig of [
+      "public.job_name_from(text, text, text, text, text, text, text, text, date)",
+      "public.job_name_key(text)",
+      "public.job_name_is_who(text, text[], text)",
+      "public.job_name_who_less(text, text[], text)",
+    ]) {
+      const grants = (
+        await c.query(
+          `select has_function_privilege('anon', '${sig}', 'execute') as anon, has_function_privilege('authenticated', '${sig}', 'execute') as authed`,
+        )
+      ).rows[0];
+      expect({ sig, ...grants }).toEqual({ sig, anon: false, authed: false });
+    }
     const n = (await c.query("select count(*)::int as n from pg_proc where proname = 'job_name_from' and pronamespace = 'public'::regnamespace")).rows[0].n;
     expect(n).toBe(1);
   });

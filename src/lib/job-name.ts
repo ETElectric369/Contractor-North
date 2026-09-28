@@ -18,7 +18,8 @@
  *      (`sourceWords`: a visit's title, an estimate's title, a lead's short scope) never replace it.
  *   3. No street: the customer as written (the company, else the whole name: "Jackie Burks"), then
  *      " · " and the source's own work words when any are left once the tag comes off ("Jackie
- *      Burks · Panel Upgrade"), cut to about 40 characters, never a paragraph.
+ *      Burks · Panel Upgrade"), cut to about 40 characters, never a paragraph. A part of the words
+ *      that is only who or where comes off too (the lead door's "New deck — Rita Moss" is "New deck").
  *   4. Neither: "New Job · Sep 28" on the company's today. (Work words with no one and nowhere are
  *      still the work: "Kitchen rewire", never a date.)
  * 2-4 are lib/schedule-options defaultJobName, the line New Job shows live ("It'll Be Called").
@@ -30,7 +31,7 @@
  *
  * Pure (no clock of its own): every caller hands in the company's today, like defaultJobName.
  */
-import { defaultJobName } from "@/lib/schedule-options";
+import { defaultJobName, unitForName } from "@/lib/schedule-options";
 
 type Customer = { name?: string | null; company_name?: string | null; type?: string | null } | null | undefined;
 
@@ -78,7 +79,14 @@ export function stripSourceTag(title: string | null | undefined): string {
   return STOCK_FALLBACK.test(s) ? "" : s;
 }
 
-const key = (s: string | null | undefined) => String(s ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+// A name as a key: case, spacing, punctuation and accents don't make two spellings different. Letters
+// and digits of ANY script count ("Иван Петров" and "李明" are keys too, never ""), the way the SQL
+// twin's lower(normalize(.., NFKD)) and [[:alnum:]] read them.
+const key = (s: string | null | undefined) =>
+  String(s ?? "")
+    .normalize("NFKD")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]/gu, "");
 function tidy(s: string | null | undefined): string {
   return String(s ?? "").trim().replace(/\s+/g, " ");
 }
@@ -105,22 +113,76 @@ export function jobNameFrom(p: {
   todayStr: string;
   aliases?: (string | null | undefined)[];
 }): string {
-  const whoKeys = [p.customer?.name, p.customer?.company_name, p.street, ...(p.aliases ?? [])].map(key).filter(Boolean);
-  const streetLineKey = key(streetOf(p.street));
-  // Only who or where: the customer's name, the company, an alias, the street (or an address line on it).
-  const isOnlyWhoOrWhere = (w: string) => whoKeys.includes(key(w)) || (streetLineKey !== "" && streetLineKey === key(streetOf(w)));
+  const streetLine = streetOf(p.street);
+  const unit = tidy(p.unit);
+  // Who or where, as keys: the customer's name, the company, the street (and the street with its
+  // unit, "12 Elm St #4" / "12 Elm St Apt 4"), an alias.
+  const whoKeys = [
+    p.customer?.name,
+    p.customer?.company_name,
+    p.street,
+    ...(p.aliases ?? []),
+    ...(streetLine && unit ? [`${streetLine} ${unitForName(unit)}`, `${streetLine} ${unit}`] : []),
+  ]
+    .map(key)
+    .filter(Boolean);
+  const streetLineKey = key(streetLine);
+  // WHOLLY who or where: one of the keys, or an address line on the street.
+  const isWho = (w: string) => {
+    const k = key(w);
+    return (k !== "" && whoKeys.includes(k)) || (streetLineKey !== "" && streetLineKey === key(streetOf(w)));
+  };
+  const rest = (w: string) => whoLess(w, isWho);
 
   // 1. A typed name stays exactly as typed, unless it is only a tag, or a tag and who or where.
   const typed = tidy(p.typed);
   if (typed) {
-    const { words, tagged } = untag(typed, isOnlyWhoOrWhere);
-    if (!tagged || (words && !isOnlyWhoOrWhere(words))) return typed;
+    const { words, tagged } = untag(typed, rest);
+    if (!tagged || rest(words)) return typed;
   }
 
   // 2-4. The street (and unit), else who · the source's work words, else "New Job · Sep 28".
-  const { words } = untag(tidy(p.sourceWords), isOnlyWhoOrWhere);
-  const work = words && !isOnlyWhoOrWhere(words) ? words : "";
-  return defaultJobName({ customer: p.customer ?? null, street: p.street ?? null, unit: p.unit ?? null, work, todayStr: p.todayStr });
+  const { words } = untag(tidy(p.sourceWords), rest);
+  return defaultJobName({ customer: p.customer ?? null, street: p.street ?? null, unit: p.unit ?? null, work: rest(words), todayStr: p.todayStr });
+}
+
+/**
+ * The words with who and where taken off: all of them when they are only who or where, else a part
+ * at either end, after a separator (" — ", " – ", " · ", " | ", " - ", ", ", ": "), that is. The
+ * lead door's seeded estimate is titled "New deck — Rita Moss": its work words are "New deck", never
+ * the name again after "Rita Moss ·". "Rita Moss, 12 Elm St" is nothing. The SQL twin (0369,
+ * job_name_who_less) splits and strips the same way.
+ */
+const PART_SEP = /(\s*[—–·|]\s*|\s+-\s+|\s*[,:]\s+)/;
+function whoLess(words: string, isWho: (w: string) => boolean): string {
+  let w = words.trim();
+  for (let round = 0; round < 6; round++) {
+    if (!w || isWho(w)) return "";
+    // [part, separator, part, separator, …, part]
+    const parts = w.split(PART_SEP);
+    const n = parts.length;
+    if (n < 3) break;
+    let next: string | null = null;
+    // The shortest run of parts at the front that is only who or where…
+    for (let i = 0; i <= n - 3 && next === null; i += 2) {
+      if (isWho(parts.slice(0, i + 1).join(""))) next = parts.slice(i + 2).join("");
+    }
+    // …else the shortest at the end.
+    for (let i = n - 1; i >= 2 && next === null; i -= 2) {
+      if (isWho(parts.slice(i).join(""))) next = parts.slice(0, i - 1).join("");
+    }
+    if (next === null) break;
+    w = next.trim();
+  }
+  return w;
+}
+
+/** Is this typed name ONLY a source tag ("Service call", "Inspection", "Job from appointment")? It
+ *  says what kind of visit, not which job: a door that has no one and nowhere to name the job for
+ *  (the Timeclock's quick add) asks for the street or the customer instead. */
+export function isOnlyASourceTag(typed: string | null | undefined): boolean {
+  const t = tidy(typed);
+  return !!t && stripSourceTag(t) === "";
 }
 
 /** Could this typed name be no name (blank, a tag, the call booking's "Call …")? Only then does a
@@ -131,13 +193,14 @@ export function typedNameMayBeATag(typed: string | null | undefined): boolean {
 }
 
 /** The words with any leading source tag off, and whether a tag came off. The phone-call booking's
- *  "Call Rita Moss" / "Call Visit" (no separator) is a tag only with who, where or nothing after it. */
-function untag(raw: string, isOnlyWhoOrWhere: (w: string) => boolean): { words: string; tagged: boolean } {
+ *  "Call Rita Moss" / "Call Visit" (no separator) is a tag only with who, where or nothing after it
+ *  (nothing is left once who and where come off). */
+function untag(raw: string, whoLessOf: (w: string) => string): { words: string; tagged: boolean } {
   const words = stripSourceTag(raw);
   if (words !== raw) return { words, tagged: true };
   if (BARE_CALL.test(raw)) {
     const rest = stripSourceTag(raw.replace(BARE_CALL, ""));
-    if (!rest || isOnlyWhoOrWhere(rest)) return { words: rest, tagged: true };
+    if (!whoLessOf(rest)) return { words: rest, tagged: true };
   }
   return { words: raw, tagged: false };
 }
@@ -164,6 +227,27 @@ export function jobWho(candidates: Customer[]): { customer: Customer; aliases: s
  *  `location` is the whole formatted line; the job's name wants only the street. */
 export function streetOf(line: string | null | undefined): string {
   return String(line ?? "").split(",")[0].trim();
+}
+
+/**
+ * The street of a VISIT's place, or "" when the place has none. A lead with a town and no street books
+ * its visit at "Testville, CA 96161" (formatFullAddress with no street line), whose head is the town:
+ * named for it, the job would be "Testville" (rule 2 is the street number and name, never the town).
+ * The visit's own city/state/zip say which head is the town; a line shaped "Town, ST 12345" (a head
+ * with no number, then only a state and zip) or a bare zip is no street either.
+ */
+export function visitStreetOf(
+  location: string | null | undefined,
+  place: { city?: string | null; state?: string | null; zip?: string | null } = {},
+): string {
+  const parts = String(location ?? "").split(",").map((x) => x.trim());
+  const head = parts[0] ?? "";
+  if (!head) return "";
+  const k = key(head);
+  if ([place.city, place.state, place.zip].some((v) => key(v) !== "" && key(v) === k)) return "";
+  if (/^(?:[a-z]{2}\s*)?\d{5}(?:-\d{4})?$/i.test(head)) return ""; // "96161", "CA 96161"
+  if (parts.length === 2 && !/\d/.test(head) && /^[a-z]{2}(?:\s+\d{5}(?:-\d{4})?)?$/i.test(parts[1])) return "";
+  return head;
 }
 
 /**
