@@ -5,8 +5,8 @@ import {
   DURATION_BUCKETS,
   durationLabel,
   KIND_LABEL,
+  kindOptions,
   parseDuration,
-  WORK_KINDS,
 } from "@/lib/schedule/work-shape";
 
 /**
@@ -21,6 +21,10 @@ import {
  * call" got offered on one surface and refused by another (the WORK_KINDS lesson) — so the lead
  * row and the schedule rail render THIS component, and a kind or a bucket added here exists
  * everywhere at once.
+ *
+ * FIVE KINDS TO PICK (W2-06): Walk-Through, Job, Service Call, Phone Call, Other (kindOptions), plus
+ * the row's own old kind (Quote, Office) when it carries one, so an old row never reads "Kind?" and
+ * re-picking it still saves (the write guards accept any known kind). 44px, like every tap.
  */
 export function WorkShapeControls({
   workKind,
@@ -55,11 +59,11 @@ export function WorkShapeControls({
           value={workKind ?? ""}
           onChange={(e) => onPatch({ workKind: e.target.value })}
           disabled={disabled}
-          className="h-8 rounded-md border border-slate-200 bg-white px-1.5 text-xs disabled:opacity-50"
+          className="h-11 rounded-md border border-slate-200 bg-white px-1.5 text-xs disabled:opacity-50"
           aria-label="What kind of work"
         >
           <option value="">Kind?</option>
-          {WORK_KINDS.map((k) => (
+          {kindOptions(workKind).map((k) => (
             <option key={k} value={k}>{KIND_LABEL[k]}</option>
           ))}
         </select>
@@ -75,7 +79,7 @@ export function WorkShapeControls({
           onPatch({ plannedMinutes: Number(e.target.value) || null });
         }}
         disabled={disabled}
-        className="h-8 rounded-md border border-slate-200 bg-white px-1.5 text-xs disabled:opacity-50"
+        className="h-11 rounded-md border border-slate-200 bg-white px-1.5 text-xs disabled:opacity-50"
         aria-label="How long will it take"
       >
         <option value="">How long?</option>
@@ -99,12 +103,12 @@ export function WorkShapeControls({
             }}
             placeholder="45m, 1.5h, 2d"
             aria-label="Type how long it will take"
-            className="h-8 w-24 rounded-md border border-brand/60 px-1.5 text-xs"
+            className="h-11 w-24 rounded-md border border-brand/60 px-1.5 text-xs"
           />
           <button
             type="button"
             onClick={saveCustom}
-            className="h-8 rounded-md bg-brand px-2 text-xs font-semibold text-white"
+            className="h-11 min-w-11 rounded-md bg-brand px-3 text-xs font-semibold text-white"
           >
             Set
           </button>

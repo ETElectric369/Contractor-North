@@ -103,6 +103,31 @@ describe("appointment.create — a spoken local time is stored as that local tim
   });
 });
 
+describe("appointment.create books one of the five kinds a person picks (W2-06)", () => {
+  it("no type books Other, never a walk-through or the old 'appointment'", async () => {
+    await create({ title: "Dentist", starts_at: "2026-09-25T10:00" });
+    expect((createAppointment.mock.calls[0][0] as FormData).get("type")).toBe("other");
+  });
+
+  it("each of the five goes through as given; a kind nobody picks any more is refused before anything is written", async () => {
+    for (const type of ["inspection", "job", "service_call", "call", "other"]) {
+      createAppointment.mockClear();
+      await create({ title: "x", type, starts_at: "2026-09-25T10:00" });
+      expect((createAppointment.mock.calls[0][0] as FormData).get("type"), type).toBe(type);
+    }
+    for (const type of ["meeting", "quote", "appointment", "final_inspection"]) {
+      expect(() => appointmentActions["appointment.create"].input.parse({ title: "x", type, starts_at: "2026-09-25T10:00" }), type).toThrow();
+    }
+  });
+
+  it("the description names the five, sends a city or final inspection to the permit, and books a meeting as Other", () => {
+    const d = appointmentActions["appointment.create"].description;
+    for (const k of ["'inspection' is a Walk-Through", "'job'", "'service_call'", "'call'", "'other'"]) expect(d).toContain(k);
+    expect(d).toContain("A city or final inspection goes on the job's permit");
+    expect(d).toContain("a meeting books as other");
+  });
+});
+
 describe("appointment.update — the reschedule door converts the same way", () => {
   it("moves to 9 AM local and reads back the stored time", async () => {
     const def = appointmentActions["appointment.update"];

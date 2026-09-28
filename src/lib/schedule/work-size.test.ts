@@ -86,12 +86,15 @@ import {
   KIND_FROM_APPT_TYPE,
   KIND_LABEL,
   KIND_TONE,
+  kindOptions,
+  PICKABLE_WORK_KINDS,
+  suggestedVisitTitle,
   WORK_KINDS,
   workKind,
 } from "./work-shape";
 import { jobDayBlock } from "./job-block";
 import { tzDateTimeUtc } from "../tz";
-import { APPOINTMENT_TYPES, appointmentTypeLabel } from "@/lib/statuses";
+import { APPOINTMENT_TYPES, PICKABLE_APPOINTMENT_TYPES, appointmentTypeLabel } from "@/lib/statuses";
 
 /**
  * THE TEST THAT WOULD HAVE CAUGHT IT.
@@ -147,6 +150,64 @@ describe("every kind the app offers survives the round trip", () => {
     expect(appointmentTypeFor("call")).toBe("call");
     expect(KIND_LABEL.call).toBe("Phone Call");
     expect(bookingTitle("call", "Mike Scrivano")).toBe("Call Mike Scrivano");
+  });
+});
+
+/**
+ * FIVE KINDS TO PICK (W2-06): Walk-Through, Job, Service Call, Phone Call, Other. The pickers offer
+ * exactly these (and a row's own old kind); the guards still accept every known kind, so nothing an
+ * old row already is can be refused.
+ */
+describe("the five kinds a person picks survive the round trip, Other included", () => {
+  it("are the five, in the picker's order, each a kind a writer accepts", () => {
+    expect([...PICKABLE_WORK_KINDS]).toEqual(["walkthrough", "job", "service", "call", "other"]);
+    for (const k of PICKABLE_WORK_KINDS) expect(isWorkKind(k) || k === "other", k).toBe(true);
+    expect(PICKABLE_WORK_KINDS.map((k) => KIND_LABEL[k])).toEqual(["Walk-Through", "Job", "Service Call", "Phone Call", "Other"]);
+  });
+
+  it("book as a type the table allows and a person can pick, and read back as the kind picked", () => {
+    for (const k of PICKABLE_WORK_KINDS) {
+      const type = appointmentTypeFor(k);
+      expect(APPOINTMENT_TYPES as readonly string[]).toContain(type);
+      expect(PICKABLE_APPOINTMENT_TYPES as readonly string[]).toContain(type);
+      expect(workKind({ kind: "appointment", type })).toBe(k);
+      expect(workKind({ kind: "lead", workKind: k })).toBe(k);
+    }
+  });
+
+  it("Other books as Other, never a walk-through (and never the walk-through's title)", () => {
+    expect(appointmentTypeFor("other")).toBe("other");
+    expect(workKind({ kind: "appointment", type: "other" })).toBe("other");
+    expect(bookingTitle("other", "Braden Lang")).toBe("Braden Lang");
+    // …while a lead nobody tagged still books the walk-through it always did.
+    expect(appointmentTypeFor(null)).toBe("inspection");
+    expect(appointmentTypeFor("")).toBe("inspection");
+  });
+
+  it("an old lead tagged Quote or Office still reads back, and its picker still offers it", () => {
+    expect(workKind({ kind: "lead", workKind: "quote" })).toBe("quote");
+    expect(workKind({ kind: "lead", workKind: "office" })).toBe("office");
+    expect(workKind({ kind: "appointment", type: "meeting" })).toBe("office");
+    expect(kindOptions("quote")).toEqual(["walkthrough", "job", "service", "call", "other", "quote"]);
+    expect(kindOptions("office")).toEqual(["walkthrough", "job", "service", "call", "other", "office"]);
+    // A current kind adds nothing; junk or nothing is never offered.
+    expect(kindOptions("job")).toEqual([...PICKABLE_WORK_KINDS]);
+    expect(kindOptions("nonsense")).toEqual([...PICKABLE_WORK_KINDS]);
+    expect(kindOptions(null)).toEqual([...PICKABLE_WORK_KINDS]);
+  });
+
+  it("the New Appointment title follows its type", () => {
+    const ctx = { jobName: "3245 West Lake Boulevard", customerName: "Rita Moss", place: "12 Elm St, Testville, CA 96161" };
+    expect(suggestedVisitTitle("job", ctx)).toBe("3245 West Lake Boulevard"); // the job's own name
+    expect(suggestedVisitTitle("inspection", ctx)).toBe("Walk-Through: Rita Moss");
+    expect(suggestedVisitTitle("inspection", { place: "12 Elm St, Testville, CA 96161" })).toBe("Walk-Through: 12 Elm St");
+    expect(suggestedVisitTitle("other", ctx)).toBe("Rita Moss");
+    expect(suggestedVisitTitle("service_call", ctx)).toBe("Service call: Rita Moss");
+    expect(suggestedVisitTitle("call", ctx)).toBe("Call Rita Moss");
+    expect(suggestedVisitTitle("meeting", ctx)).toBe("Meeting: Rita Moss"); // an old row's own kind
+    // Nothing to name it by: nothing suggested, never a made-up "Visit".
+    expect(suggestedVisitTitle("inspection", {})).toBe("");
+    expect(suggestedVisitTitle("", {})).toBe("");
   });
 });
 

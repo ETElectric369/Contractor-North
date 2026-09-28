@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { APPOINTMENT_TYPES } from "@/lib/statuses";
+import { PICKABLE_APPOINTMENT_TYPES } from "@/lib/statuses";
 import {
   createAppointment,
   linkAppointmentTo,
@@ -115,7 +115,7 @@ export const appointmentActions: Record<string, ActionDef> = {
     group: "appointment",
     label: "Add appointment",
     description:
-      "Create an appointment or walk-through with a title and a start time (starts_at). Title a site visit \"Walk-Through: <customer or place>\"; \"inspection\" means the city's inspection on a permit. Optionally capture whatever else was given: job_id (resolve with list_jobs), customer_id (resolve with list_customers), location, ends_at, notes. " +
+      "Create an appointment or walk-through with a title and a start time (starts_at). Its type is one of five kinds: 'inspection' is a Walk-Through (the site visit before a price), 'job' is the work itself on a day, 'service_call' a service call, 'call' a phone call somebody has to make, and 'other' anything else (the default; a meeting books as other). A city or final inspection goes on the job's permit, never here. Title a site visit \"Walk-Through: <customer or place>\"; \"inspection\" means the city's inspection on a permit. Optionally capture whatever else was given: job_id (resolve with list_jobs), customer_id (resolve with list_customers), location, ends_at, notes. " +
       LOCAL_TIME_RULE +
       " When the person isn't in the contacts yet, book it without a customer; if you then add them with customer.create, it links this visit in the same action when it's the one visit booked for that name (its result says `linked`), and otherwise offers the link.",
     // Fragment-first: the columns are nullable and createAppointment already reads every
@@ -123,7 +123,9 @@ export const appointmentActions: Record<string, ActionDef> = {
     // Only starts_at stays required (an appointment without a time isn't schedulable).
     input: z.object({
       title: z.string().trim().min(1),
-      type: z.enum(APPOINTMENT_TYPES as unknown as [string, ...string[]]).default("appointment"), // spine-derived (statuses.ts) — was a hand-rolled 2-value list that dropped meeting/final_inspection
+      // THE FIVE A PERSON PICKS (W2-06, statuses.ts): spine-derived, so Nort can book exactly what the
+      // New Appointment form offers and createAppointment accepts. No kind is Other, never a walk-through.
+      type: z.enum(PICKABLE_APPOINTMENT_TYPES).default("other"),
       starts_at: z.string().min(1),
       ends_at: z.string().nullable().optional(),
       job_id: z.string().nullable().optional(),

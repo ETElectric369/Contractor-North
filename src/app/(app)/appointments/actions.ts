@@ -18,7 +18,7 @@ import { WORK_DAY_MINUTES } from "@/lib/schedule/work-shape";
 import { jobNameFrom, jobWho, visitStreetOf } from "@/lib/job-name";
 import { createProposalCore, cleanSlots } from "@/lib/appointments/proposal";
 import { endAfterStart, keptEnd } from "@/lib/appointments/times";
-import { APPOINTMENT_STATUSES, APPOINTMENT_TYPES, INSPECTION_TYPES } from "@/lib/statuses";
+import { APPOINTMENT_STATUSES, APPOINTMENT_TYPES, INSPECTION_TYPES, isPickableAppointmentType } from "@/lib/statuses";
 import { briefNote, carriedNote, carryForInquiry } from "@/lib/inquiries/carry-intake-answers";
 import { coerceByPlaybook, orphanedAnswers, retiredAnswers, retiredOptions } from "@/lib/playbook/answers";
 import { playbookForForm } from "@/lib/playbook/parse";
@@ -47,13 +47,27 @@ async function resolveIso(
  *  walk-through's autosave stops retrying and says so instead). */
 export type Result = { ok: boolean; error?: string; id?: string; refused?: boolean };
 
-/** Spine guard for appointments.type (mirrors the 0051/0131 check constraint) — a bad
- *  value reads as a clean message instead of a raw Postgres constraint error. */
-function resolveType(formData: FormData, fallback: string): { type?: string; error?: string } {
-  const type = String(formData.get("type") ?? fallback);
-  if (!(APPOINTMENT_TYPES as readonly string[]).includes(type))
-    return { error: `Type must be one of: ${APPOINTMENT_TYPES.join(", ")}.` };
-  return { type };
+/** The one refusal for a kind nobody can pick (W2-06), in the picker's own words. (Not exported: a
+ *  "use server" file exports only async functions.) */
+const PICK_A_KIND = "Pick a kind: Walk-Through, Job, Service Call, Phone Call or Other.";
+
+/**
+ * THE KIND A NEW OR EDITED VISIT MAY CARRY (W2-06). Create and Propose Times take one of the five a
+ * person can pick (PICKABLE_APPOINTMENT_TYPES); an edit takes one of those, or the row's OWN stored
+ * kind unchanged (a Client Meeting whose time is moved stays a Client Meeting, never refused and
+ * never silently rewritten). Anything else is refused in the picker's words, never Postgres'. A form
+ * that sends no kind gets the fallback: Other for a new visit, the row's own kind for an edit.
+ */
+function resolveType(
+  formData: FormData,
+  fallback: string,
+  own?: string | null,
+): { type?: string; error?: string } {
+  const sent = String(formData.get("type") ?? "").trim();
+  const type = sent || own || fallback;
+  if (isPickableAppointmentType(type)) return { type };
+  if (own && type === own && (APPOINTMENT_TYPES as readonly string[]).includes(type)) return { type };
+  return { error: PICK_A_KIND };
 }
 
 
@@ -106,7 +120,8 @@ export async function createAppointment(formData: FormData): Promise<Result> {
   if (cust.error) return { ok: false, error: cust.error };
   const customerId = cust.customerId;
 
-  const typed = resolveType(formData, "appointment");
+  // No kind sent is Other (W2-06): today's plain "appointment", with no write-up nag after it.
+  const typed = resolveType(formData, "other");
   if (typed.error) return { ok: false, error: typed.error };
 
   const { data, error } = await supabase
@@ -312,7 +327,9 @@ export async function createAppointmentProposal(
   const cust = await resolveCustomer(supabase, formData, ctx.userId);
   if (cust.error) return { ok: false, error: cust.error };
 
-  const typed = resolveType(formData, "quote");
+  // Offering a customer times is how a walk-through gets booked, so that is the kind when none is
+  // sent (it was 'quote', a kind nobody picks any more: W2-06).
+  const typed = resolveType(formData, "inspection");
   if (typed.error) return { ok: false, error: typed.error };
 
   // First slot is the tentative time (browser-computed ISO honors the user's tz).
@@ -981,7 +998,11 @@ export async function updateAppointment(id: string, formData: FormData): Promise
   const endErr = endAfterStart(startIso, endIso);
   if (endErr) return { ok: false, error: endErr };
 
-  const typed = resolveType(formData, "appointment");
+  // THE ROW'S OWN KIND (W2-06): an edit may keep a kind nobody can pick any more (a Client Meeting
+  // stays one), so the guard needs to know what is stored. RLS scopes the read; a missing row is
+  // the zero-row write below, said in words.
+  const { data: cur } = await supabase.from("appointments").select("type").eq("id", id).maybeSingle();
+  const typed = resolveType(formData, "other", (cur as { type?: string | null } | null)?.type ?? null);
   if (typed.error) return { ok: false, error: typed.error };
 
   const { data: wroteAppt, error } = await supabase

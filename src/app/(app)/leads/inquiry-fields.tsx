@@ -1,7 +1,7 @@
 "use client";
 
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
-import { KIND_LABEL, WORK_KINDS } from "@/lib/schedule/work-shape";
+import { KIND_LABEL, kindOptions } from "@/lib/schedule/work-shape";
 import { PhoneInput } from "@/components/ui/phone-input";
 import { AddressAutocomplete } from "@/components/address-autocomplete";
 import { StateSelect } from "@/components/ui/state-select";
@@ -85,7 +85,9 @@ export function InquiryFields({
               validator accepts — the hand-written copies are how "Phone call" came to be offered
               and then refused. */}
           <option value="">Not sure yet</option>
-          {WORK_KINDS.map((k) => (
+          {/* The five a person picks (W2-06), plus this lead's own old kind (Quote, Office) when it
+              carries one, so an edit never silently re-tags it. */}
+          {kindOptions(value.work_kind).map((k) => (
             <option key={k} value={k}>{KIND_LABEL[k]}</option>
           ))}
         </Select>

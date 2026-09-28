@@ -14,7 +14,8 @@ import { useDraft } from "@/lib/use-draft";
 import { createClient } from "@/lib/supabase/client";
 import { getOrgSettings } from "@/lib/org-settings";
 import { todayStrInTz, tzDateTimeUtc, tzMinutesOfDay } from "@/lib/tz";
-import { APPOINTMENT_TYPES, appointmentTypeLabel } from "@/lib/statuses";
+import { appointmentTypeLabel, appointmentTypeOptions } from "@/lib/statuses";
+import { suggestedVisitTitle } from "@/lib/schedule/work-shape";
 import {
   createAppointment,
   updateAppointment,
@@ -146,7 +147,7 @@ interface ApptForm {
 // leave this door shut for the rest of the session.
 const newParam = createParamClaim();
 
-/** Create or edit an appointment / inspection. */
+/** Create or edit an appointment / walk-through. */
 export function AppointmentButton({
   jobs,
   customers,
@@ -179,14 +180,14 @@ export function AppointmentButton({
   defaultDate?: string;
   /** Preselect a customer in create mode (e.g. mounted on that customer's page). */
   defaultCustomerId?: string;
-  /** Preselect a job in create mode (e.g. mounted on that job's page) — prefills the
-   *  location from the job address and suggests an "Inspection — <job#>" title. */
+  /** Preselect a job in create mode (e.g. mounted on that job's page) — prefills the location from
+   *  the job address, books the kind Job, and suggests the job's own name as the title. */
   defaultJobId?: string;
-  /** Preselect a TYPE in create mode (e.g. "inspection" on the Inspections tab) — must be an
-   *  APPOINTMENT_TYPES value. (The old fromLead prop this superseded, and the never-passed
+  /** Preselect a TYPE in create mode (e.g. "inspection" on the Walk-Throughs tab) — one of the five
+   *  PICKABLE_APPOINTMENT_TYPES. (The old fromLead prop this superseded, and the never-passed
    *  dayStarts suggest-a-slot input, were removed in the 2026-07-16 churn audit.) */
   defaultType?: string;
-  /** Create-button copy override ("Schedule inspection" on the Inspections tab). */
+  /** Create-button copy override ("Book A Walk-Through" on the Walk-Throughs tab). */
   buttonLabel?: string;
   /** Tight card-header variant: small button that stays on one line. */
   compact?: boolean;
@@ -219,6 +220,20 @@ export function AppointmentButton({
   // machine there is nothing to explain.
   const [zoneNote, setZoneNote] = useState<string | null>(null);
 
+  // THE TYPE SELECT'S OPTIONS (W2-06): the five a person picks, plus the row's OWN old kind when it
+  // carries one, so an edit shows what it is and a Save never silently rewrites it.
+  const typeOptions = appointmentTypeOptions(appointment?.type ?? null);
+
+  /** The title this form would suggest for these fields: follows the type (W2-06), the job's own
+   *  name when a job is picked, "Walk-Through: <customer or place>" for a walk-through (W2-10). */
+  const suggestFor = (f: Pick<ApptForm, "type" | "job_id" | "customer_id" | "new_customer_name" | "location">): string =>
+    suggestedVisitTitle(f.type, {
+      jobName: jobs.find((j) => j.id === f.job_id)?.label ?? null,
+      customerName:
+        f.customer_id === "__new__" ? f.new_customer_name : (customers.find((c) => c.id === f.customer_id)?.label ?? null),
+      place: f.location,
+    });
+
   const emptyForm = (tz: string | null = formTz.current): ApptForm => {
     // CREATE-with-logic (an entry that "could go anywhere" gets a starting point, never a blank):
     // when mounted from a job or customer, prefill the location + a title from that context, and
@@ -226,38 +241,44 @@ export function AppointmentButton({
     // appointment always shows its OWN stored values untouched — none of this fires.
     const ctxJob = !appointment && defaultJobId ? jobs.find((j) => j.id === defaultJobId) : undefined;
     const ctxCust = !appointment && defaultCustomerId ? customers.find((c) => c.id === defaultCustomerId) : undefined;
-    // Title: job context reads back the job (its label starts with the job number), else the
-    // customer name; a job/customer is an on-site inspection.
-    const suggestedTitle = ctxJob
-      ? `Inspection — ${ctxJob.label}`
-      : ctxCust
-      ? `Appointment — ${ctxCust.label}`
-      : "";
     const date = appointment ? toLocal(appointment.starts_at, tz).date : suggestedDate(defaultDate);
     const st = appointment ? toLocal(appointment.starts_at, tz) : { date, time: "08:00" };
     const en = appointment ? toLocal(appointment.ends_at, tz) : { date: "", time: "" };
-    return {
-      // Default TYPE: caller's explicit defaultType first (the Inspections tab passes
-      // "inspection"), anywhere else → a plain appointment (NOT the old blind "quote"
-      // default that mislabeled every hand-added entry as an estimate).
-      type: appointment?.type ?? defaultType ?? "appointment",
-      assigned_to: appointment?.assigned_to ?? "",
-      title: appointment?.title ?? suggestedTitle,
-      date,
-      start_time: st.time || "08:00",
-      end_time: en.time,
+    const base = {
+      // Default TYPE (W2-06): the caller's explicit defaultType first (the Walk-Throughs tab passes
+      // "inspection"); booked from a job, a Job (the work on that job's day); anywhere else Other,
+      // today's plain appointment, with no write-up nag after it.
+      type: appointment?.type ?? defaultType ?? (defaultJobId ? "job" : "other"),
       customer_id: appointment?.customer_id ?? defaultCustomerId ?? "",
       job_id: appointment?.job_id ?? defaultJobId ?? "",
       new_customer_name: "",
-      new_customer_phone: "",
       // Location from the job address when mounted from a job; picking a customer fills it too
       // (the option carries the address now — see the customer onChange below).
       location: appointment?.location ?? ctxJob?.address ?? ctxCust?.address ?? "",
+    };
+    return {
+      ...base,
+      assigned_to: appointment?.assigned_to ?? "",
+      // The title FOLLOWS THE TYPE (W2-06): the job's name from a job, the customer's name for Other,
+      // "Walk-Through: <customer or place>" on the Walk-Throughs tab. An edit keeps its own.
+      title: appointment?.title ?? suggestFor(base),
+      date,
+      start_time: st.time || "08:00",
+      end_time: en.time,
+      new_customer_phone: "",
       notes: appointment?.notes ?? "",
     };
   };
   const [form, setForm] = useState<ApptForm>(emptyForm);
   const patch = (p: Partial<ApptForm>) => setForm((f) => ({ ...f, ...p }));
+  /** A change to a field the title is built from. While the title is still the one this form
+   *  suggested (or blank), it follows; a title somebody typed is theirs and is never touched. An edit
+   *  never re-suggests: it shows the record's own title. */
+  const patchSuggesting = (p: Partial<ApptForm>) => {
+    const next = { ...form, ...p };
+    if (!editing && (!form.title.trim() || form.title === suggestFor(form))) next.title = suggestFor(next);
+    setForm(next);
+  };
   const newCust = form.customer_id === "__new__";
 
   // Interruption recovery: a deploy reload / iOS killing the tab restores the
@@ -268,7 +289,12 @@ export function AppointmentButton({
     editing ? "appt-edit:" + appointment!.id : "appt-new",
     draftState,
     (d) => {
-      setForm({ ...emptyForm(), ...(d.form ?? {}) });
+      const restored = { ...emptyForm(), ...(d.form ?? {}) };
+      // A draft saved before the five kinds (W2-06) can carry one nobody picks any more ("appointment"
+      // was the old default): it comes back as Other on a new visit, or the row's own kind on an edit,
+      // never as a value the select can't show (which would save whatever option happened to be first).
+      if (!typeOptions.includes(restored.type)) restored.type = appointment?.type ?? "other";
+      setForm(restored);
       setMode(d.mode === "propose" ? "propose" : "set");
       setSlots(Array.isArray(d.slots) && d.slots.length ? d.slots : defaultSlots());
     },
@@ -543,13 +569,13 @@ export function AppointmentButton({
               </div>
               <code className="block break-all rounded-lg bg-slate-100 px-3 py-2 text-xs text-slate-700">{pickLink}</code>
               <div className="flex flex-wrap gap-2">
-                <Button type="button" size="sm" onClick={copyLink}>
+                <Button type="button" onClick={copyLink}>
                   {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
                   {copied ? "Copied" : "Copy Link"}
                 </Button>
                 <a
                   href={`sms:?body=${encodeURIComponent(`Hi! Pick a time that works and we'll lock it in: ${pickLink}`)}`}
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-dark"
+                  className="inline-flex min-h-11 items-center gap-1.5 rounded-lg bg-brand px-4 text-sm font-medium text-white hover:bg-brand-dark"
                 >
                   <MessageSquare className="h-4 w-4 shrink-0" /> Text It
                 </a>
@@ -573,10 +599,11 @@ export function AppointmentButton({
           <div className="grid grid-cols-2 gap-3">
             <div>
               <Label htmlFor="ap-type">Type</Label>
-              {/* Options driven by the APPOINTMENT_TYPES spine (statuses.ts) — the dropdown,
-                  the write-guard and the DB check constraint can't drift apart. */}
-              <Select id="ap-type" name="type" value={form.type} onChange={(e) => patch({ type: e.target.value })}>
-                {APPOINTMENT_TYPES.map((t) => (
+              {/* Options driven by the statuses.ts spine (PICKABLE_APPOINTMENT_TYPES, W2-06) — the
+                  dropdown, the write-guard and the DB check constraint can't drift apart. An old
+                  row's own kind rides along as one extra option (typeOptions). */}
+              <Select id="ap-type" name="type" value={form.type} onChange={(e) => patchSuggesting({ type: e.target.value })}>
+                {typeOptions.map((t) => (
                   <option key={t} value={t}>{appointmentTypeLabel(t)}</option>
                 ))}
               </Select>
@@ -665,7 +692,7 @@ export function AppointmentButton({
                   const prev = customers.find((c) => c.id === form.customer_id)?.address ?? "";
                   const now = customers.find((c) => c.id === next)?.address ?? "";
                   const filled = addressPrefillOnCustomerPick(form.location, prev, now);
-                  patch({ customer_id: next, ...(filled !== null ? { location: filled } : {}) });
+                  patchSuggesting({ customer_id: next, ...(filled !== null ? { location: filled } : {}) });
                 }}
               >
                 <option value="">—</option>
@@ -682,7 +709,7 @@ export function AppointmentButton({
                 onChange={(e) => {
                   // Auto-fill the location from the job's address when it's empty.
                   const job = jobs.find((j) => j.id === e.target.value);
-                  patch({
+                  patchSuggesting({
                     job_id: e.target.value,
                     ...(job?.address && !form.location.trim() ? { location: job.address } : {}),
                   });
@@ -698,7 +725,7 @@ export function AppointmentButton({
             <div className="grid grid-cols-2 gap-3 rounded-lg border border-brand/30 bg-brand-light/30 p-3">
               <div>
                 <Label htmlFor="ap-newname">New customer name</Label>
-                <Input id="ap-newname" name="new_customer_name" value={form.new_customer_name} onChange={(e) => patch({ new_customer_name: e.target.value })} placeholder="Name" required />
+                <Input id="ap-newname" name="new_customer_name" value={form.new_customer_name} onChange={(e) => patchSuggesting({ new_customer_name: e.target.value })} placeholder="Name" required />
               </div>
               <div>
                 <Label htmlFor="ap-newphone">Phone</Label>
@@ -709,7 +736,7 @@ export function AppointmentButton({
 
           <div>
             <Label htmlFor="ap-loc">Location</Label>
-            <Input id="ap-loc" name="location" value={form.location} onChange={(e) => patch({ location: e.target.value })} placeholder="Address or site" />
+            <Input id="ap-loc" name="location" value={form.location} onChange={(e) => patchSuggesting({ location: e.target.value })} placeholder="Address or site" />
           </div>
           <div>
             <Label htmlFor="ap-notes">Notes</Label>

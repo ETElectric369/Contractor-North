@@ -61,7 +61,31 @@ export const APPOINTMENT_TYPES = [
 ] as const;
 export type AppointmentType = (typeof APPOINTMENT_TYPES)[number];
 
-/** The inspection-shaped subset — what the Sales → Inspections tab shows. */
+/**
+ * THE KINDS A PERSON PICKS (W2-06): five, in his words — Walk-Through, Job, Service Call, Phone Call,
+ * Other. Nine was a list nobody could choose from: "Quote / Estimate", "Client Meeting" and
+ * "Appointment" each meant Other in practice, and a final inspection is the city's, on the job's
+ * permit (production: inspection 44, appointment 8, job 4, service_call 2, call 1, quote 1, meeting 1).
+ *
+ * APPOINTMENT_TYPES above stays the database-valid, read set: an old row typed quote / meeting /
+ * appointment / final_inspection still reads truly under its old label, and its own old kind always
+ * saves (appointments/actions resolveType). Only the pickers and the create guards narrow to this.
+ */
+export const PICKABLE_APPOINTMENT_TYPES = ["inspection", "job", "service_call", "call", "other"] as const satisfies readonly AppointmentType[];
+export type PickableAppointmentType = (typeof PICKABLE_APPOINTMENT_TYPES)[number];
+export const isPickableAppointmentType = (t: unknown): t is PickableAppointmentType =>
+  (PICKABLE_APPOINTMENT_TYPES as readonly string[]).includes(String(t ?? ""));
+
+/** The Type select's options for a row: the five, plus the row's OWN old kind when it has one (a
+ *  Client Meeting edited stays a Client Meeting). Without it the controlled select shows the first
+ *  option instead, and a Save silently rewrites the type to something nobody picked. */
+export function appointmentTypeOptions(current?: string | null): string[] {
+  const own = String(current ?? "");
+  const legacy = own && !isPickableAppointmentType(own) && (APPOINTMENT_TYPES as readonly string[]).includes(own);
+  return legacy ? [...PICKABLE_APPOINTMENT_TYPES, own] : [...PICKABLE_APPOINTMENT_TYPES];
+}
+
+/** The inspection-shaped subset — what the Sales → Walk-Throughs tab shows. */
 export const INSPECTION_TYPES = ["inspection", "final_inspection"] as const;
 
 /** Visits whose PRODUCT is an estimate — the write-up-nag set: the walk-throughs plus the
