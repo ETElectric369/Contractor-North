@@ -32,6 +32,7 @@ import { parseShelf } from "@/lib/stock-take";
 import { readBillShelfOff } from "@/lib/job-cost";
 import { boughtLines, breakerCard, groupLabel } from "@/lib/panel/breakers";
 import { jobLabel } from "@/lib/schedule-options";
+import { quoteFollowUpState } from "@/lib/action-items/due-filters";
 import { KIND_WORDS, PROGRESS_WORDS, WORK_WORDS, circuitName, sizeWords, sourceWords, spaceMap, titleWords } from "@/lib/panel/model";
 import type { JobCircuit, JobPanel } from "@/lib/types";
 
@@ -537,7 +538,7 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
   {
     name: "needs_attention",
     description:
-      "THE business-analyst sweep — the ONE call that finds everything slipping through the cracks, as NAMED lists (not just counts). Returns six buckets, each with the specific items to act on: past_due_jobs (active jobs whose scheduled end is in the past — likely finished-but-not-marked or running over), unbilled_complete_jobs (completed work with no invoice — money on the table), overdue_invoices (sent/partial past due), stale_estimates (quotes still draft/sent 14+ days with no answer — chase or drop), leads_to_follow_up (inquiries not contacted, or past their follow-up date), and clocks_running (someone on the clock " + LONG_SHIFT_HOURS + "h+ counted from the start of the shift, across Switch Jobs, or since an earlier day — probably forgot to clock out; each row says since when and why; the office clocks them out at the real time with Clock Out <first name> on Timecards, and can clock anyone out that way at any time). Use for ANY 'what needs my attention / what am I missing / what's slipping / what should I be on top of / anything overdue or unbilled or stale' — call this FIRST and read back the non-empty buckets by NAME, most-urgent first.",
+      "THE business-analyst sweep — the ONE call that finds everything slipping through the cracks, as NAMED lists (not just counts). Returns six buckets, each with the specific items to act on: past_due_jobs (active jobs whose scheduled end is in the past — likely finished-but-not-marked or running over), unbilled_complete_jobs (completed work with no invoice — money on the table), overdue_invoices (sent/partial past due), stale_estimates (quotes still draft/sent 14+ days with no answer — chase or drop), leads_to_follow_up (inquiries not contacted, or past their follow-up date), and clocks_running (someone on the clock " + LONG_SHIFT_HOURS + "h+ counted from the start of the shift, across Switch Jobs, or since an earlier day — probably forgot to clock out; each row says since when and why; the office clocks them out at the real time with Clock Out <first name> on Timecards, and can clock anyone out that way at any time). A lead snoozed or an estimate given a day to ask again is NOT in those buckets until its day: it comes back under waiting with back_on (already handled; never tell them to chase it). Use for ANY 'what needs my attention / what am I missing / what's slipping / what should I be on top of / anything overdue or unbilled or stale' — call this FIRST and read back the non-empty buckets by NAME, most-urgent first.",
     input_schema: { type: "object", properties: {} },
   },
   {
@@ -2236,8 +2237,10 @@ export async function runDataTool(
         const now = Date.now();
         const iso = (ms: number) => new Date(ms).toISOString();
         const daysSince = (t: string | null) => (t ? Math.max(0, Math.round((now - new Date(t).getTime()) / 864e5)) : null);
-        const todayStr = new Date(now).toISOString().slice(0, 10);
         const safe = async <T,>(fn: () => Promise<T>, fallback: T): Promise<T> => { try { return await fn(); } catch { return fallback; } };
+        // THE COMPANY'S TODAY (not UTC's): a day someone picked comes back on that day where they are.
+        const todayStr = await safe(() => orgTodayStr(supabase), new Date(now).toISOString().slice(0, 10));
+        const dayOf = (v: unknown) => String(v ?? "").slice(0, 10);
 
         let unbilled: any[] = [], overdueInvoices: any[] = [];
         try {
@@ -2255,12 +2258,23 @@ export async function runDataTool(
 
         // "Stale estimate" has TWO shapes: a formal quote row still sent/draft, OR a JOB stuck in the
         // 'estimate' stage. Both are unanswered estimates going cold — surface both, 14+ days idle.
-        const staleQuotes = await safe(async () => {
-          const { data } = await supabase.from("quotes").select("quote_number, total, updated_at, valid_until, customers(name)")
+        // EVERY WAIT HAS A DAY (Wave 1): an estimate given a day to ask again (Still Waiting, Nort's
+        // quote.followUp -> follow_up_at) is not slipping until that day comes: it goes in `waiting` with
+        // its day, the way Needs You holds it in the Waiting fold. Before 0366 (no follow_up_at) the
+        // read falls back to the old columns and nothing is parked.
+        const quoteRead = await safe(async () => {
+          const cols = "quote_number, total, updated_at, valid_until, customers(name)";
+          const read = (c: string) => supabase.from("quotes").select(c)
             .in("status", ["draft", "sent"]).lt("updated_at", iso(now - 14 * 864e5))
             .order("updated_at", { ascending: true }).limit(15);
-          return (data ?? []).map((q: any) => ({ ref: q.quote_number, name: null, customer: q.customers?.name ?? null, total: money(q.total), days_since_touch: daysSince(q.updated_at), expired: !!(q.valid_until && q.valid_until < todayStr), kind: "quote" }));
+          let r = await read(`${cols}, follow_up_at`);
+          if (r.error) r = await read(cols);
+          return (r.data ?? []) as any[];
         }, [] as any[]);
+        const parkedQuotes = quoteRead.filter((q: any) => quoteFollowUpState(q.follow_up_at, todayStr) === "later");
+        const staleQuotes = quoteRead
+          .filter((q: any) => quoteFollowUpState(q.follow_up_at, todayStr) !== "later")
+          .map((q: any) => ({ ref: q.quote_number, name: null, customer: q.customers?.name ?? null, total: money(q.total), days_since_touch: daysSince(q.updated_at), expired: !!(q.valid_until && q.valid_until < todayStr), kind: "quote" }));
         const staleJobEstimates = await safe(async () => {
           // Lifecycle rework: the waiting room is to_be_scheduled now — a won job sitting
           // unscheduled for 2+ weeks is exactly the "falling through the cracks" signal.
@@ -2271,15 +2285,27 @@ export async function runDataTool(
         }, [] as any[]);
         const stale_estimates = [...staleJobEstimates, ...staleQuotes];
 
-        const leads_to_follow_up = await safe(async () => {
+        // A lead snoozed to a later day (the row's Snooze, Nort's inquiry.snooze: next_follow_up_at
+        // only, so a new lead stays "new") waits for it, contacted or never contacted alike: the rule
+        // Needs You reads with (due-filters inquiryDueFilter). It goes in `waiting` with its day.
+        const leadRows = await safe(async () => {
           const { data } = await supabase.from("inquiries").select("name, phone, status, next_follow_up_at, last_contacted_at, created_at")
             .is("converted_at", null).order("created_at", { ascending: true }).limit(40);
-          return (data ?? [])
-            .filter((l: any) => !["lost", "archived", "declined", "spam"].includes(String(l.status ?? "")))
-            .filter((l: any) => !l.last_contacted_at || (l.next_follow_up_at && l.next_follow_up_at < iso(now)))
-            .slice(0, 20)
-            .map((l: any) => ({ name: l.name, phone: l.phone, status: l.status, days_since_contact: daysSince(l.last_contacted_at) ?? daysSince(l.created_at), never_contacted: !l.last_contacted_at }));
-        }, []);
+          return ((data ?? []) as any[]).filter((l: any) => !["lost", "archived", "declined", "spam"].includes(String(l.status ?? "")));
+        }, [] as any[]);
+        const leadParked = (l: any) => !!l.next_follow_up_at && dayOf(l.next_follow_up_at) > todayStr;
+        const parkedLeads = leadRows.filter(leadParked);
+        const leads_to_follow_up = leadRows
+          .filter((l: any) => !leadParked(l))
+          .filter((l: any) => !l.last_contacted_at || !!l.next_follow_up_at)
+          .slice(0, 20)
+          .map((l: any) => ({ name: l.name, phone: l.phone, status: l.status, days_since_contact: daysSince(l.last_contacted_at) ?? daysSince(l.created_at), never_contacted: !l.last_contacted_at }));
+
+        // Parked with a day: NOT slipping. Named only so Nort can say when each comes back if asked.
+        const waiting = {
+          leads: parkedLeads.slice(0, 20).map((l: any) => ({ name: l.name, status: l.status, back_on: dayOf(l.next_follow_up_at) })),
+          estimates: parkedQuotes.map((q: any) => ({ ref: q.quote_number, customer: q.customers?.name ?? null, total: money(q.total), back_on: dayOf(q.follow_up_at) })),
+        };
 
         // THE SHIFT, NOT THE PIECE (audit v994 SW1). A Switch Job cuts the running entry (0288), so an
         // open row may be only the part since the last switch: the clock_in prefilter missed a
@@ -2322,12 +2348,14 @@ export async function runDataTool(
           note: total === 0
             ? "Nothing's slipping — billing, jobs, estimates and leads are all current."
             : "Read back the NON-EMPTY buckets by name, most urgent first: past-due jobs + overdue invoices, then unbilled work, then stale estimates, then leads. One line each with the next action. In voice mode, top 2-3 only.",
+          waiting_note: "`waiting` holds leads and estimates the person already parked with a day (back_on). They are not slipping: never tell them to chase one or set a day for it; say when it comes back only if asked.",
           past_due_jobs,
           unbilled_complete_jobs: unbilled,
           overdue_invoices: overdueInvoices,
           stale_estimates,
           leads_to_follow_up,
           clocks_running,
+          waiting,
         });
       }
 
