@@ -107,7 +107,7 @@ const BASE: Record<string, unknown[]> = {
   invoice_items: [],
 };
 
-const state = vi.hoisted(() => ({ failing: new Set<string>(), rows: [] as BillsSearchRow[] }));
+const state = vi.hoisted(() => ({ failing: new Set<string>(), rows: [] as BillsSearchRow[], hand: null as null | { jobs: unknown[]; jobsUnread?: boolean } }));
 
 function chain(table: string) {
   const answer = () =>
@@ -137,9 +137,20 @@ vi.mock("next/navigation", () => ({
   usePathname: () => "/bills",
   redirect: () => {},
 }));
+// The search rows are handed to the page's one query (the provider the box and All Bills share).
 vi.mock("./bills-search-box", () => ({
-  BillsSearchBox: ({ rows }: { rows: BillsSearchRow[] }) => {
+  BillsSearchProvider: ({ rows, children }: { rows: BillsSearchRow[]; children?: React.ReactNode }) => {
     state.rows = rows;
+    return children;
+  },
+  BillsSearchBox: () => null,
+  useBillsSearch: () => ({ query: "", setQuery: () => {}, rows: [], keys: null }),
+}));
+
+// Add By Hand's props are read off the button: its sheet only draws once tapped.
+vi.mock("./add-business-cost", () => ({
+  AddByHandButton: (p: { jobs: unknown[]; jobsUnread?: boolean }) => {
+    state.hand = p;
     return null;
   },
 }));
@@ -202,11 +213,12 @@ describe("the supplier's own papers unread", () => {
 });
 
 describe("the bills unread", () => {
-  it("All Bills says it couldn't read them, never 'No bills here yet'", async () => {
+  it("All Bills says it couldn't read them, never 'No bills yet' and never 'Nothing Unpaid'", async () => {
     const { text } = await renderWith("bills");
     expect(text).toContain("Couldn't read your bills just now");
-    expect(text).not.toContain("No bills here yet");
-    expect(text).not.toContain("All Bills (0)");
+    expect(text).toContain("All Bills · Couldn't Read");
+    expect(text).not.toContain("No bills yet");
+    expect(text).not.toContain("Nothing Unpaid");
   });
 
   it("Needs You says it couldn't check; a bills-less-payments account never reads 'ahead'", async () => {
@@ -281,9 +293,42 @@ describe("which receipt made which bill, unread", () => {
     const whole = await renderWith();
     expect(whole.text).not.toContain("which receipt made each bill");
     const { text } = await renderWith("organized_items");
-    expect(text).toContain("Couldn't load which receipt made each bill just now. Reload to try again.");
-    // The bills themselves were read: the ledger still lists them.
+    expect(text).toContain("Couldn't load which receipt made each bill just now, so every receipt file is listed. Reload to try again.");
+    // The bills themselves were read: the ledger still lists them, led by what's open.
     expect(text).not.toContain("Couldn't read your bills just now");
-    expect(text).toContain("All Bills (3)");
+    expect(text).toContain("All Bills · 3 Unpaid $529.45");
+  });
+});
+
+describe("Needs You never gives an all-clear over a read that failed", () => {
+  // The fixture's 8802-1106969 (13897 Herringbone) is NOT in the books: with every read answered it
+  // is a card, so "every paper is in your books" beside a failed read is a false all-clear.
+  it("each supplier-half failure carries the alert alone, never 'is in your books'", async () => {
+    for (const table of ["bills", "bill_supplier_invoices", "supplier_invoices", "supplier_accounts", "supplier_aliases", "jobs"]) {
+      const { html, text } = await renderWith(table);
+      expect(html, table).toMatch(/id="needs-you"/);
+      expect(text, table).toMatch(/Couldn't (check your books|read your supplier)/);
+      expect(text, table).not.toContain("is in your books");
+      expect(text, table).not.toContain("Nothing waiting");
+    }
+  });
+
+  it("the waiting papers unread: Needs You says so instead of 'Nothing waiting'", async () => {
+    const { html, text } = await renderWith("organized_items");
+    expect(html).toMatch(/id="needs-you"/);
+    expect(text).toContain("Couldn't read the papers waiting to be sorted just now. Reload the page to try again.");
+    expect(text).not.toContain("is in your books");
+    expect(text).not.toContain("Nothing else waiting on you");
+  });
+});
+
+describe("the jobs unread", () => {
+  it("Add By Hand is told, so its sheet says it couldn't load the jobs instead of 'no jobs yet'", async () => {
+    await renderWith();
+    expect(state.hand?.jobsUnread).toBe(false);
+    expect(state.hand?.jobs.length).toBe(2);
+    await renderWith("jobs");
+    expect(state.hand?.jobsUnread).toBe(true);
+    expect(state.hand?.jobs.length).toBe(0);
   });
 });

@@ -5,6 +5,7 @@ import { featureOn } from "@/lib/features";
 import { orgStaffIds, pushConfigured } from "@/lib/push";
 import { notifyPeople } from "@/lib/notifications";
 import { sixForPerson, type DigestTask } from "./digest-six";
+import { inquiryDueFilter } from "./due-filters";
 
 /**
  * The morning "day ahead" push digest (run by the daily automations cron) — the
@@ -37,6 +38,9 @@ import { sixForPerson, type DigestTask } from "./digest-six";
  * THE BELL RECORDS IT (notifyPeople, 0366 wave): day_ahead is an opt-in kind, so the line lands
  * only on the bell of someone the push went to. The decisions headline says "Needs You: N", the
  * card's own name on My Day.
+ *
+ * HOLDS ARE BACK (Wave 1, lane 5): the first decision line counts every job on hold whose day has
+ * come or that has no day ("3 Holds Are Back"), the same holds My Day's "Holds Back" pile shows.
  */
 export async function sendDayAheadDigests(supabase: any): Promise<{ orgs: number; pushed: number }> {
   const counts = { orgs: 0, pushed: 0 };
@@ -49,8 +53,18 @@ export async function sendDayAheadDigests(supabase: any): Promise<{ orgs: number
     const tz = getOrgSettings(org.settings).timezone; // via the settings SSOT — no inline default
     const today = todayStrInTz(tz);
 
-    // Decision head-counts (+2 title rows each).
-    const [invR, leadR] = await Promise.all([
+    // Decision head-counts (+2 title rows each), and first THE HOLDS THAT ARE BACK (Wave 1, lane 5):
+    // every job on hold whose day is today or earlier, or that has no day at all (a hold from before
+    // 0366: it is due now, "No Day Set"), not only the ones that came back today. The service client
+    // reads every company, so it is filtered to this one by hand. Before 0366 (no hold_until) it
+    // counts 0: the old push never had the line, and it never guesses one.
+    const [holdsR, invR, leadR] = await Promise.all([
+      supabase
+        .from("jobs")
+        .select("id", { count: "exact", head: true })
+        .eq("org_id", org.id)
+        .eq("status", "on_hold")
+        .or(`hold_until.is.null,hold_until.lte.${today}`),
       supabase
         .from("invoices")
         .select("invoice_number", { count: "exact" })
@@ -65,6 +79,9 @@ export async function sendDayAheadDigests(supabase: any): Promise<{ orgs: number
         .eq("org_id", org.id)
         .eq("status", "new")
         .is("converted_at", null)
+        // A new lead snoozed to a later day waits for it here too: the rule Needs You and the Sales
+        // badge read with, so the push never names a lead My Day has in its Waiting fold.
+        .or(inquiryDueFilter(today))
         .order("created_at", { ascending: true })
         .limit(2),
     ]);
@@ -87,16 +104,29 @@ export async function sendDayAheadDigests(supabase: any): Promise<{ orgs: number
       .limit(500);
     const pool = (taskRows ?? []) as DigestTask[];
 
-    const decisions = (invR.count ?? 0) + (leadR.count ?? 0);
+    const holdsBack = holdsBackCount(holdsR);
+    // The holds join the decisions: a morning with only holds back still pushes.
+    const decisions = holdsBack + (invR.count ?? 0) + (leadR.count ?? 0);
     if (pool.length === 0 && decisions === 0) continue; // nothing needs attention → no push
 
-    // Decision titles in stream order (money → leads), "+N more" for the rest.
-    const decisionTitles: string[] = [
+    // Decision titles: the holds line first ("2 Holds Are Back", the words the pile on My Day uses;
+    // it stands for all of them), then stream order (money → leads), "+N more" for the rest.
+    const decisionTitles: string[] = [];
+    let named = 0;
+    if (holdsBack > 0) {
+      decisionTitles.push(holdsBackLine(holdsBack));
+      named += holdsBack;
+    }
+    for (const t of [
       ...((invR.data ?? []) as any[]).map((i) => `Invoice ${i.invoice_number} overdue`),
       // Leads switched off (0352): the same people, called what My Day calls them.
       ...((leadR.data ?? []) as any[]).map((l) => `${featureOn(getOrgSettings(org.settings).features, "leads") ? "New lead" : "New request"}: ${l.name}`),
-    ].slice(0, 2);
-    const moreDecisions = decisions - decisionTitles.length;
+    ]) {
+      if (decisionTitles.length >= 2) break;
+      decisionTitles.push(t);
+      named += 1;
+    }
+    const moreDecisions = decisions - named;
     const decisionLine = decisionTitles.join(" · ") + (moreDecisions > 0 ? ` · +${moreDecisions} more` : "");
 
     const staff = await orgStaffIds(org.id);
@@ -132,4 +162,15 @@ export async function sendDayAheadDigests(supabase: any): Promise<{ orgs: number
   }
 
   return counts;
+}
+
+/** "1 Hold Is Back", "3 Holds Are Back": the morning push's first decision line. */
+export function holdsBackLine(n: number): string {
+  return n === 1 ? "1 Hold Is Back" : `${n} Holds Are Back`;
+}
+
+/** The holds read's count; a read that failed because 0366 isn't on the database counts 0. */
+export function holdsBackCount(r: { count?: number | null; error?: unknown } | null | undefined): number {
+  if (!r || r.error) return 0;
+  return Math.max(0, Number(r.count ?? 0) || 0);
 }

@@ -17,13 +17,22 @@ import { join } from "node:path";
  */
 const SRC = readFileSync(join(process.cwd(), "src/app/(app)/bills/bills-receipts.tsx"), "utf8");
 
-describe("the Receipts tab is a list, not a second upload door (Wave 0)", () => {
+describe("All Bills lists receipt files, and is never a second upload door (Wave 0)", () => {
   it("never files a picture as a receipt without reading it", () => {
     expect(SRC).not.toContain("addDocument(");
     expect(SRC).not.toContain("<DropTarget");
     // The one paper door (W1-30): the sentence names the door that is at the top of the page.
     expect(SRC).toContain("Add one with Snap Or Note at the top of this page.");
     expect(SRC).not.toContain("Drop Paperwork at the top");
+  });
+
+  it("one list, no tabs and no chips (W1-32): bills, purchase orders and files, each kind named on its row", () => {
+    expect(SRC).not.toContain("<Tabs");
+    expect(SRC).not.toMatch(/Job Bills \(|Business Costs \(/);
+    expect(SRC).toContain("<Kind>PO</Kind>");
+    expect(SRC).toContain("<Kind>File</Kind>");
+    // A file's Delete is behind its row's ⋯ (the app's one row ⋯), asked first.
+    expect(SRC).toMatch(/<RowMoreSheet title=\{d\.name\}[\s\S]{0,400}confirm\(`Delete "\$\{d\.name\}"\?`\)/);
   });
 });
 
@@ -33,11 +42,18 @@ describe("a bill's status says how it was bought, in words", () => {
     expect(SRC).not.toContain("<Badge tone={statusTone(b.status)}>{b.status}</Badge>");
   });
 
-  it("gives both Status pickers the same two Title Case choices", () => {
-    expect(SRC.match(/<option value="unpaid">On Account<\/option>/g)).toHaveLength(2);
-    expect(SRC.match(/<option value="paid">Settled At The Counter<\/option>/g)).toHaveLength(2);
+  it("gives the Edit Bill Status picker two Title Case choices (the add form went: Add By Hand asks Paid?)", () => {
+    // The ledger's Add A Bill By Hand fold is gone (W1-32); a new cost goes in through Add By Hand,
+    // the one typed sheet, whose Paid? is Already Paid or On Account (Still Owed).
+    expect(SRC.match(/<option value="unpaid">On Account<\/option>/g)).toHaveLength(1);
+    expect(SRC.match(/<option value="paid">Settled At The Counter<\/option>/g)).toHaveLength(1);
     expect(SRC).not.toContain('<option value="paid">Paid</option>');
     expect(SRC).not.toContain('<option value="unpaid">Unpaid</option>');
+    expect(SRC).not.toContain("Add A Bill By Hand");
+    expect(SRC).not.toMatch(/\bcreateBill\b/);
+    const SHEET = readFileSync(join(process.cwd(), "src/components/quick-cost-button.tsx"), "utf8");
+    expect(SHEET).toContain("Already Paid");
+    expect(SHEET).toContain("On Account (Still Owed)");
   });
 
   /**

@@ -1,10 +1,32 @@
 import { z } from "zod";
-import { scheduleJobWindow, setJobCrew, createJob, moveJobDay, createScheduleProposal } from "@/app/(app)/schedule/actions";
+import {
+  scheduleJobWindow,
+  setJobCrew,
+  createJob,
+  moveJobDay,
+  createScheduleProposal,
+  setJobHold,
+  snoozeJobHold,
+} from "@/app/(app)/schedule/actions";
 import { setJobStatus, finishJob, updateJobDescription } from "@/app/(app)/jobs/actions";
 import { linkJobContact, unlinkJobContact } from "@/app/(app)/jobs/[id]/job-contacts-actions";
 import { createClient } from "@/lib/supabase/server";
+import { orgTimezone } from "@/lib/org-local-time";
+import { todayStrInTz } from "@/lib/tz";
+import { WAITABLE_KINDS, saveNeedsYouWait, waitKey } from "@/lib/action-items/needs-you-waits";
 import { resolveCustomerId, resolveContactId, resolveJobId, resolveProfileId } from "../resolve-id";
 import type { ActionDef } from "../types";
+
+const YMD = /^\d{4}-\d{2}-\d{2}$/;
+
+/** A job NAME passed where its id belongs is forgiven; one that matches nothing (or several) asks. */
+async function jobIdOf(value: string, ask: string): Promise<{ id: string } | { error: string }> {
+  const supabase = await createClient();
+  const job = await resolveJobId(supabase, value);
+  if ("error" in job) return { error: job.error };
+  if (!job.id) return { error: ask };
+  return { id: job.id };
+}
 
 export const jobActions: Record<string, ActionDef> = {
   "job.linkContact": {
@@ -54,7 +76,7 @@ export const jobActions: Record<string, ActionDef> = {
     group: "job",
     label: "Open a job",
     description:
-      "Open a new JOB — e.g. 'start a job for the Miller deck'. Resolve the customer first with list_customers and pass customer_id (or pass new_customer_name to create one). Optional description, address, status (to_be_scheduled, scheduled, in_progress, complete, cancelled; default in_progress — a job is put on hold after it exists, with its reason and a day, never at creation), and billing_type (tm for Time & Material, the default, or fixed for a fixed price). Returns the job id — then you can schedule it, assign it, add costs, or quote it.",
+      "Open a new JOB — e.g. 'start a job for the Miller deck'. Resolve the customer first with list_customers and pass customer_id (or pass new_customer_name to create one). Optional description, address, status (to_be_scheduled, scheduled, in_progress, complete, cancelled; default in_progress — a job is put on hold after it exists, with its reason and a day, never at creation), and billing_type (tm for Time & Material or fixed for a fixed price; left out, the job bills the way most of this company's jobs already do, Time & Material when it has none yet or it's a tie). Returns the job id — then you can schedule it, assign it, add costs, or quote it.",
     input: z.object({
       name: z.string().min(1),
       customer_id: z.string().nullable().optional(),
@@ -92,11 +114,91 @@ export const jobActions: Record<string, ActionDef> = {
     group: "job",
     label: "Set job status",
     description:
-      "Change a job's status — 'mark the Miller job on hold / in progress / scheduled'. Resolve the job with list_jobs first. Status: to_be_scheduled, scheduled, in_progress, on_hold, complete, cancelled.",
-    input: z.object({ id: z.string(), status: z.string() }),
+      "Change a job's status — 'mark the Miller job on hold / in progress / scheduled'. Resolve the job with list_jobs first. Status: to_be_scheduled, scheduled, in_progress, on_hold, complete, cancelled. Putting a job ON HOLD needs its reason (what it's waiting on: it is the reminder when the job comes back) and takes an optional until (YYYY-MM-DD, company-local, today or later: the day it comes back to Needs You; left out, a week from today). With no reason it refuses unless the job already has one saved; ask what it's waiting on.",
+    input: z.object({
+      id: z.string(),
+      status: z.string(),
+      reason: z.string().nullable().optional(),
+      until: z.string().regex(YMD).nullable().optional(),
+    }),
     auth: "staff",
     effect: "write",
-    handler: (i) => setJobStatus(i.id, i.status),
+    handler: async (i) => {
+      // ON HOLD GOES THROUGH THE HOLD (NY-hold, 0366): its reason and its day, the same write the
+      // schedule's Hold It makes. Every other status is the plain status write.
+      if (i.status !== "on_hold") return setJobStatus(i.id, i.status);
+      const said = (i.reason ?? "").trim();
+      const when = i.until ? { date: i.until } : null;
+      if (said) return setJobHold(i.id, said, when);
+      // No reason said: the one the job already carries stands (as it always did); with none saved,
+      // setJobStatus refuses in words and nothing is written.
+      if (!when) return setJobStatus(i.id, "on_hold");
+      const supabase = await createClient();
+      const { data } = await supabase.from("jobs").select("hold_reason").eq("id", i.id).maybeSingle();
+      const saved = String((data as { hold_reason?: string | null } | null)?.hold_reason ?? "").trim();
+      return saved ? setJobHold(i.id, saved, when) : setJobStatus(i.id, "on_hold");
+    },
+  },
+  "job.snoozeHold": {
+    name: "job.snoozeHold",
+    group: "job",
+    label: "Snooze a job on hold",
+    description:
+      "A job on hold comes back to Needs You on its day with its reason; this moves that day — 'bring the Miller job back next Friday'. Pass the job's id (from list_jobs) and date (YYYY-MM-DD, company-local, today or later). The job stays on hold, held by whoever held it, with its reason; pass reason only when the hold has none saved yet (it never rewrites a saved one). Reversible: pick another day any time.",
+    input: z.object({ id: z.string(), date: z.string().regex(YMD), reason: z.string().nullable().optional() }),
+    auth: "staff",
+    effect: "write",
+    handler: async (i) => {
+      const job = await jobIdOf(i.id, "Which job? Give me its name or number.");
+      if ("error" in job) return { ok: false, error: job.error };
+      return snoozeJobHold(job.id, { date: i.date }, i.reason ?? null);
+    },
+  },
+  "job.takeOffHold": {
+    name: "job.takeOffHold",
+    group: "job",
+    label: "Take a job off hold",
+    description:
+      "Take a job off hold — 'the permit came in, take the Miller job off hold'. Pass the job's id (from list_jobs). It goes back to scheduled when it has a date, or to be scheduled when it doesn't, and its reason and day are cleared.",
+    input: z.object({ id: z.string() }),
+    auth: "staff",
+    effect: "write",
+    handler: async (i) => {
+      const job = await jobIdOf(i.id, "Which job? Give me its name or number.");
+      if ("error" in job) return { ok: false, error: job.error };
+      return setJobHold(job.id, null);
+    },
+  },
+  "job.snoozeNeedsYou": {
+    name: "job.snoozeNeedsYou",
+    group: "job",
+    label: "Snooze a job's Needs You row",
+    description:
+      "Some Needs You rows about a job have no day of their own and nothing that ends them: No Costs Yet on a labor-only job (kind job_unbilled_work), To Buy while a part is back-ordered (kind materials_needed). This takes that row off Needs You until a day — 'the Miller parts are back-ordered, bring the To Buy back in two weeks'. Pass the job's id (from list_jobs), the kind, date (YYYY-MM-DD, company-local, today or later) and an optional reason (said on the waiting row). It waits in My Day's Waiting fold with that day and comes back on it.",
+    input: z.object({
+      id: z.string(),
+      kind: z.enum(WAITABLE_KINDS),
+      date: z.string().regex(YMD),
+      reason: z.string().nullable().optional(),
+    }),
+    auth: "staff",
+    effect: "write",
+    handler: async (i, ctx) => {
+      const job = await jobIdOf(i.id, "Which job? Give me its name or number.");
+      if ("error" in job) return { ok: false, error: job.error };
+      const supabase = await createClient();
+      const { data: real } = await supabase.from("jobs").select("id").eq("id", job.id).maybeSingle();
+      if (!real) return { ok: false, error: "That job isn't available." };
+      const tz = await orgTimezone(supabase);
+      return saveNeedsYouWait(supabase, {
+        orgId: ctx.orgId,
+        userId: ctx.userId,
+        key: waitKey(i.kind, job.id),
+        date: i.date,
+        reason: i.reason ?? null,
+        todayStr: todayStrInTz(tz),
+      });
+    },
   },
   "job.finish": {
     name: "job.finish",
@@ -160,7 +262,7 @@ export const jobActions: Record<string, ActionDef> = {
     group: "job",
     label: "Propose dates to the customer",
     description:
-      "Offer the customer up to 3 date options for a JOB (each YYYY-MM-DD, optional HH:MM start) — creates a pick-a-date link; the customer's tap schedules the job. NOTHING IS SENT by this action: read the returned link back so the user can share it (it's also on the job page under Manage). Optional note for arrival-window wording. To just set dates yourself, use job.move / job.scheduleDay instead.",
+      "Offer the customer up to 3 date options for a JOB (each YYYY-MM-DD, optional HH:MM start) — creates a pick-a-date link; the customer's tap schedules the job. NOTHING IS SENT by this action: read the returned link back so the user can share it (it's also on the job's Overview: Offer Dates beside Scheduled, which reads Dates Offered… while an offer is out). Optional note for arrival-window wording. To just set dates yourself, use job.move / job.scheduleDay instead.",
     input: z.object({
       id: z.string(),
       slots: z

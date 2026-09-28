@@ -6,9 +6,12 @@ import { revalidatePath } from "next/cache";
 import { emptyToNull } from "@/lib/forms";
 import { pushCalendarItem } from "@/lib/calendar-sync";
 import { notifyJobCrewAdded } from "@/lib/crew-notify";
+import { applyCrewChange, type CrewChange } from "@/lib/crew-change";
 import { requireStaff } from "@/lib/staff-guard";
 import { customerForInquiry } from "@/lib/actions/win-customer";
 import { findMatchingCustomerId, type DupCustomer } from "@/lib/crm/duplicates";
+import { matchOrCreateCustomer, typedNewCustomer } from "@/lib/crm/new-customer";
+import { defaultJobName, readUsualBillingKind, statusFromDate } from "@/lib/schedule-options";
 import { JOB_STATUSES } from "@/lib/job-status";
 import { getOrgSettings, workDayWindowHm } from "@/lib/org-settings";
 import { todayStrInTz, tzDateTimeUtc, tzDayStartUtc, tzMinutesOfDay } from "@/lib/tz";
@@ -100,66 +103,77 @@ export async function createJob(formData: FormData): Promise<Result> {
     return { ok: false, error: "Make the job first, then put it on hold. It asks why and for a day." };
   }
 
-  const start = String(formData.get("scheduled_start") ?? "");
   const address = emptyToNull(formData.get("address"));
+  // THE COMPANY'S CLOCK (W1-22): its timezone, its today, and its work-day start (a day with no time
+  // is all day from there: workDayWindowHm, never a hard-coded 08:00). Server actions run in UTC,
+  // so a bare `new Date("…T08:00")` would be 8 AM UTC.
+  const { tz, dayStartHm } = await orgSchedulePrefs(supabase);
+  const todayStr = todayStrInTz(tz);
 
-  // Optionally create a customer inline (when no existing one is selected).
+  // THE DAY. New Job sends the day (YYYY-MM-DD, or "" for Not Scheduled Yet) and an optional time,
+  // and the instant is built here on the company's clock. An older caller may still send an instant
+  // (scheduled_start); a caller that sends neither sent no date at all.
+  const sentDay = formData.has("scheduled_date");
+  let startIso: string | null = null;
+  let dayOfStart: string | null = null;
+  if (sentDay) {
+    const day = String(formData.get("scheduled_date") ?? "").trim();
+    const time = String(formData.get("scheduled_time") ?? "").trim();
+    if (day) {
+      startIso = /^\d{4}-\d{2}-\d{2}$/.test(day) ? tzDateTimeUtc(day, /^\d{2}:\d{2}$/.test(time) ? time : dayStartHm, tz) : null;
+      if (!startIso) return { ok: false, error: "That date doesn't look right. Pick it again, or tap Not Scheduled Yet." };
+      dayOfStart = day;
+    }
+  } else {
+    const legacy = String(formData.get("scheduled_start") ?? "").trim();
+    const d = legacy ? new Date(legacy) : null;
+    if (d && !isNaN(d.getTime())) {
+      startIso = d.toISOString();
+      dayOfStart = todayStrInTz(tz, d);
+    }
+  }
+  const dateSent = sentDay || formData.has("scheduled_start");
+
+  // Optionally create a customer inline (when no existing one is selected): the one shared
+  // match-then-insert door, so no job form mints a twin (lib/crm/new-customer).
+  // A phone typed with no name is refused in words (the helper's refusal), never dropped while the
+  // job is made with no customer.
   let customerId = emptyToNull(formData.get("customer_id"));
-  const newCustomerName = String(formData.get("new_customer_name") ?? "").trim();
-  if (!customerId && newCustomerName) {
-    /* CROSSCHECK THE BOOK, THEN FORMAT THE NUMBER (audit v921). This door minted blind: "start a
-       job for Mike Scrivano, 5306060045" made a SECOND Mike whose phone read 5306060045 beside the
-       first's (530) 606-0045 — and the job, its invoices and its portal all landed on the twin.
-       Every other customer door (createCustomer, setLeadContact, setJobContact) formats the phone
-       and the win path dedups on the CRM's own keys; this one now does both. */
-    const newPhone = formatPhone(String(formData.get("new_customer_phone") ?? "").trim());
-    const newEmail = String(formData.get("new_customer_email") ?? "").trim();
-    const { data: book } = await supabase.from("customers").select("id, name, company_name, email, phone");
-    customerId = findMatchingCustomerId(
-      { name: newCustomerName, phone: newPhone, email: newEmail },
-      (book ?? []) as DupCustomer[],
-    );
-    if (!customerId) {
-      const { data: cust, error: cErr } = await supabase
-        .from("customers")
-        .insert({
-          name: newCustomerName,
-          phone: newPhone || null,
-          email: newEmail || null,
-          status: "active",
-          created_by: ctx.userId,
-        })
-        .select("id")
-        .single();
-      if (cErr) return { ok: false, error: cErr.message };
-      customerId = cust.id;
-    }
+  const typedCustomer = typedNewCustomer(formData);
+  if (!customerId && typedCustomer) {
+    const made = await matchOrCreateCustomer(supabase, ctx.userId, typedCustomer);
+    if (!made.ok) return { ok: false, error: made.error };
+    customerId = made.id;
   }
 
-  // Fragment-first: a bare address (or just a customer) is a valid start — never
-  // make the caller invent a name. Default: address → customer's name → dated stub.
+  // THE NAME (W1-22). A name that was sent wins (the Timeclock's quick add and Nort send one). With
+  // none, the same line the form showed live: "Smith · 1871 Apache Ct" (the customer's last name or
+  // company · the street line), either half alone, else "New Job · Sep 27" on the company's today
+  // (lib/schedule-options defaultJobName). Fragment-first: nobody is made to invent a name.
   let name = String(formData.get("name") ?? "").trim();
-  if (!name && address) name = address;
-  if (!name && customerId) {
-    if (newCustomerName) {
-      name = newCustomerName;
-    } else {
-      const { data: cust } = await supabase.from("customers").select("name").eq("id", customerId).maybeSingle();
-      name = String(cust?.name ?? "").trim();
-    }
-  }
   if (!name) {
-    const tz = await orgTimezone(supabase); // org-local date, not the server's UTC day
-    const day = new Date(`${todayStrInTz(tz)}T12:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
-    name = `New job — ${day}`;
+    const { data: cust } = customerId
+      ? await supabase.from("customers").select("name, company_name, type").eq("id", customerId).maybeSingle()
+      : { data: null };
+    name = defaultJobName({ customer: (cust as { name?: string | null; company_name?: string | null; type?: string | null } | null) ?? null, street: address, todayStr });
   }
 
-  // In Progress is the default (Erik 2026-07): when he creates a job by hand he's usually
-  // already working it — "estimate" as a default just parked real work in a dead bucket.
-  // Validate against the job-status spine so a caller can't write a retired enum value
-  // ("estimate"/"invoiced") or garbage — anything off-spine lands as in_progress.
+  // THE STATUS (W1-22). An explicit status on the spine wins (the Timeclock's quick add sends In
+  // Progress; Nort sends its own). With none, the date decides, on the company's today: today or
+  // earlier is In Progress (he's usually already working it, Erik 2026-07), a later day Scheduled,
+  // no day To Be Scheduled. A caller that sends no date field at all keeps In Progress, as it always
+  // did. Never on_hold (refused above), never a retired enum value or garbage.
   const rawStatus = String(formData.get("status") ?? "").trim();
-  const status = (JOB_STATUSES as readonly string[]).includes(rawStatus) ? rawStatus : "in_progress";
+  const status = (JOB_STATUSES as readonly string[]).includes(rawStatus)
+    ? rawStatus
+    : dateSent
+      ? statusFromDate(dayOfStart, todayStr)
+      : "in_progress";
+
+  // THE BILLING (W1-22): what was sent, else the kind most of this company's jobs use (Time &
+  // Material with none yet) — never one company's habit written into code.
+  const rawBilling = String(formData.get("billing_type") ?? "").trim();
+  const billingType = rawBilling === "tm" || rawBilling === "fixed" ? rawBilling : await readUsualBillingKind(supabase);
 
   const { data, error } = await supabase
     .from("jobs")
@@ -168,15 +182,15 @@ export async function createJob(formData: FormData): Promise<Result> {
       customer_id: customerId,
       description: emptyToNull(formData.get("description")),
       status,
-      billing_type: String(formData.get("billing_type") ?? "tm"), // T&M is the default now (Estimate); switch to fixed per job
+      billing_type: billingType,
       address,
       // The parts the picker resolved. A fixed form is no help if the insert has nowhere to put
-      // them — same shape updateJob has used all along (jobs/actions.ts:396-398).
+      // them — same shape updateJob has used all along.
       unit: emptyToNull(formData.get("unit")),
       city: emptyToNull(formData.get("city")),
       state: emptyToNull(formData.get("state")),
       zip: emptyToNull(formData.get("zip")),
-      scheduled_start: start ? new Date(start).toISOString() : null,
+      scheduled_start: startIso,
       created_by: ctx.userId,
     })
     .select("id")
@@ -185,7 +199,7 @@ export async function createJob(formData: FormData): Promise<Result> {
   if (error) return { ok: false, error: dbError(error) };
 
   // Live Google push (fire-safe: never throws, no-op when not connected).
-  if (start) await pushCalendarItem("job", data.id);
+  if (startIso) await pushCalendarItem("job", data.id);
 
   revalidatePath("/schedule");
   revalidatePath("/planner"); // My Day reads today's scheduled jobs — keep it in sync
@@ -261,8 +275,11 @@ export async function setJobCrew(id: string, employeeIds: string[]): Promise<Res
     .select("assigned_to, org_id, job_number, name")
     .eq("id", id)
     .maybeSingle();
-  const { error } = await supabase.from("jobs").update({ assigned_to: ids }).eq("id", id);
+  // SILENT-WRITE LAW: the Overview's crew chips roll back on a refusal, so a zero-row write (a job
+  // gone, or not this company's) has to come back as one, never as a saved crew.
+  const { data: saved, error } = await supabase.from("jobs").update({ assigned_to: ids }).eq("id", id).select("id");
   if (error) return { ok: false, error: dbError(error) };
+  if (!saved?.length) return { ok: false, error: "That job isn't available, so the crew didn't change." };
   if (prev) {
     const p = prev as { assigned_to: string[] | null; org_id: string | null; job_number: string | null; name: string | null };
     // Awaited (not `void`): serverless can drop an un-awaited promise after the action
@@ -273,6 +290,22 @@ export async function setJobCrew(id: string, employeeIds: string[]): Promise<Res
   revalidatePath("/planner");
   revalidatePath(`/jobs/${id}`);
   return { ok: true };
+}
+
+/** Put ONE person on a job or take ONE off, against the crew as it is saved NOW (the job page's crew
+ *  chips). The chips never send a whole list: a list built on a page that has gone stale would take off,
+ *  with no word to anyone, whoever a foreman, the schedule board or Nort put on in the meantime. Reads
+ *  the stored crew fresh, applies the one change, and writes through setJobCrew, the one crew writer
+ *  (the same shape the time clock's assignMemberToJob uses). Returns the crew as written. */
+export async function changeJobCrew(id: string, change: CrewChange): Promise<Result & { crew?: string[] }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const { data: job, error } = await ctx.supabase.from("jobs").select("assigned_to").eq("id", id).maybeSingle();
+  if (error) return { ok: false, error: dbError(error) };
+  if (!job) return { ok: false, error: "That job isn't available, so the crew didn't change." };
+  const next = applyCrewChange((job as { assigned_to: string[] | null }).assigned_to, change);
+  const res = await setJobCrew(id, next);
+  return res.ok ? { ...res, crew: next } : res;
 }
 
 /** Offer the customer up to 3 date+time slots; returns the public pick token.
@@ -309,8 +342,10 @@ export async function cancelScheduleProposal(id: string, jobId: string): Promise
   const ctx = await requireStaff(); // defense-in-depth (RLS also blocks non-staff)
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
-  const { error } = await supabase.from("schedule_proposals").update({ status: "cancelled" }).eq("id", id);
+  // SILENT-WRITE LAW: a zero-row update is a 204, so the id comes back or the withdraw says it didn't.
+  const { data, error } = await supabase.from("schedule_proposals").update({ status: "cancelled" }).eq("id", id).select("id");
   if (error) return { ok: false, error: dbError(error) };
+  if (!data?.length) return { ok: false, error: "That link isn't here any more. Reload the job to see where it stands." };
   revalidatePath(`/jobs/${jobId}`);
   return { ok: true };
 }

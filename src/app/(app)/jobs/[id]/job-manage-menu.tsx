@@ -2,22 +2,21 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { MoreHorizontal, Loader2, Receipt, Users, List, Trash2 } from "lucide-react";
+import { MoreHorizontal, Loader2, Trash2 } from "lucide-react";
 import { GLASS_MENU_CLASS, useGlassMenuPlacement } from "@/components/ui/glass-menu";
-import { useToast } from "@/components/toast";
 
-/** The one menu-row style — shared with the modal-owning items (Edit / Propose /
- *  Finish) composed in as children, so every row in the panel looks identical. */
+/** The one menu-row style — shared with the modal-owning items (Edit / Finish) composed in as
+ *  children, so every row in the panel looks identical. 44px rows (min-h-11): every tap target. */
 export const MANAGE_ROW_CLS =
-  "relative z-10 flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm font-medium text-slate-700 hover:bg-[rgb(var(--glass-tint))]/15 disabled:opacity-50";
+  "relative z-10 flex min-h-11 w-full items-center gap-3 px-4 py-2.5 text-left text-sm font-medium text-slate-700 hover:bg-[rgb(var(--glass-tint))]/15 disabled:opacity-50";
 
 /**
- * The job hub's "Manage ⋯" menu — absorbs everything demoted from the old
- * 7-control header row: Edit / Propose dates / Finish job (modal-owning items,
- * composed server-side and passed as `children`), Create invoice, the Customer +
- * All jobs links, and Delete (danger-styled, LAST). Replaces SectionActionsMenu +
- * jobSectionTree on this page (whose "Clock in here" ejected you to /timeclock —
- * the TIME button keeps you on the job now).
+ * The job hub's "Manage ⋯" menu — THREE ROWS FOR THE OFFICE (W1-17): Edit Job, Finish Job (both
+ * modal-owning items, composed server-side and passed as `children`), a divider, and Delete Job
+ * (danger-styled, LAST). What it used to hold found better doors: Create Invoice is the Overview's
+ * one figure and button (W1-19) and the job's New Invoice on every job; Customer is the Overview's
+ * name link; All Jobs is the breadcrumb's Jobs crumb; Propose Dates is Offer Dates beside the
+ * Overview's Scheduled. A tech has no row left, so the dock draws no Manage for him at all.
  *
  * THE MODAL RULE: the Modal renders IN-PLACE by default (it can opt into a `portal`,
  * but even then the child COMPONENT stays in this tree — portaling only moves the
@@ -29,27 +28,12 @@ export const MANAGE_ROW_CLS =
  * on the panel; both silently destroy a half-filled form mid-edit (the Save-eating bug).
  */
 export function JobManageMenu({
-  isStaff,
-  customerId,
   jobNumber,
-  createInvoice,
   deleteJob,
   triggerClassName,
   children,
 }: {
-  isStaff: boolean;
-  customerId?: string | null;
   jobNumber: string;
-  /** Bound server action — creates the invoice, returns its id (staff). `importWarning` is the
-   *  note the user must see before landing there; `billedOn` is the door a "nothing new to
-   *  bill" refusal offers. (The dock binds createInvoiceForJob, which returns both.) */
-  createInvoice?: () => Promise<{
-    ok: boolean;
-    error?: string;
-    id?: string;
-    importWarning?: string;
-    billedOn?: { id: string; number: string };
-  }>;
   /** Bound server action — deletes the job (staff). Called twice when the job has
    *  cascade children: once to LEARN what would be destroyed, then with
    *  confirmDestructive once the user has seen the real list and agreed. */
@@ -60,11 +44,10 @@ export function JobManageMenu({
     destroys?: string[];
   }>;
   triggerClassName?: string;
-  /** Staff modal-owning menu items (JobEditButton etc. with `menuItem`). */
+  /** Staff modal-owning menu items (JobEditButton, FinishJobButton with `menuItem`). */
   children?: React.ReactNode;
 }) {
   const router = useRouter();
-  const toast = useToast();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -94,38 +77,6 @@ export function JobManageMenu({
       document.removeEventListener("keydown", onKey);
     };
   }, [open]);
-
-  async function runCreateInvoice() {
-    if (!createInvoice) return;
-    setErr(null);
-    setBusy("invoice");
-    try {
-      const res = await createInvoice();
-      if (res.ok && res.id) {
-        // THE NOTE GOES FIRST (09-10: "it hid it somewhere"). This row redirected and dropped the
-        // server's sentence — "opened the draft you already started", "labor couldn't be pulled
-        // in" — so the office landed on an invoice with no idea why it looked the way it did.
-        // Toast, then close, then go.
-        if (res.importWarning) toast(res.importWarning, "info");
-        setOpen(false);
-        router.push(`/billing/${res.id}`);
-        return;
-      }
-      // A refusal names its door. When every hour and bill is already on one invoice, the panel
-      // would only show a sentence; the toast carries the button to that invoice instead.
-      const door = res.billedOn;
-      if (door) {
-        setOpen(false);
-        toast(res.error ?? "Nothing new to bill.", "error", { label: `Open ${door.number}`, onClick: () => router.push(`/billing/${door.id}`) });
-        return;
-      }
-      setErr(res.error ?? "Couldn't create the invoice.");
-    } catch {
-      setErr("Couldn't create the invoice.");
-    } finally {
-      setBusy(null);
-    }
-  }
 
   async function runDelete() {
     if (!deleteJob) return;
@@ -160,11 +111,6 @@ export function JobManageMenu({
     } finally {
       setBusy(null);
     }
-  }
-
-  function go(href: string) {
-    setOpen(false);
-    router.push(href);
   }
 
   return (
@@ -206,33 +152,13 @@ export function JobManageMenu({
           <div aria-hidden className="absolute inset-0 -z-10 bg-white/85" />
           <div aria-hidden className="absolute inset-0 -z-10 bg-[rgb(var(--glass-tint))]/10" />
           {children}
-          {isStaff && createInvoice && (
-            <button onClick={runCreateInvoice} disabled={busy !== null} className={MANAGE_ROW_CLS}>
-              {busy === "invoice" ? (
-                <Loader2 className="h-4 w-4 shrink-0 animate-spin text-[rgb(var(--glass-ink))]" />
-              ) : (
-                <Receipt className="h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" />
-              )}
-              Create Invoice
-            </button>
-          )}
-          {/* Techs see just the clean short list (Customer + All jobs) — no divider needed. */}
-          {isStaff && <div className="relative z-10 my-1 border-t border-white/50" />}
-          {customerId && (
-            <button onClick={() => go(`/crm/${customerId}`)} className={MANAGE_ROW_CLS}>
-              <Users className="h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" /> Customer
-            </button>
-          )}
-          <button onClick={() => go("/jobs")} className={MANAGE_ROW_CLS}>
-            <List className="h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" /> All Jobs
-          </button>
-          {isStaff && deleteJob && (
+          {deleteJob && (
             <>
               <div className="relative z-10 my-1 border-t border-white/50" />
               <button
                 onClick={runDelete}
                 disabled={busy !== null}
-                className="relative z-10 flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm font-medium text-red-600 hover:bg-red-50/60 disabled:opacity-50"
+                className="relative z-10 flex min-h-11 w-full items-center gap-3 px-4 py-2.5 text-left text-sm font-medium text-red-600 hover:bg-red-50/60 disabled:opacity-50"
               >
                 {busy === "delete" ? (
                   <Loader2 className="h-4 w-4 shrink-0 animate-spin" />

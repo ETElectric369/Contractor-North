@@ -4,9 +4,10 @@ import { join } from "node:path";
 import { KIND_STREAM, STREAM_ORDER, sortActionItems, type ActionItem, type ActionKind } from "./types";
 
 /**
- * NEEDS YOU'S ONE ORDER (Wave 1, NY-list): sorted ONCE, inside the build, so My Day's top five are the
- * right five. Not done first; then money, leads, today, other; then urgency, high first; then when,
- * oldest first, with an undated row counting as today; ties keep the build's own order.
+ * NEEDS YOU'S ONE ORDER (Wave 1, NY-list): sorted ONCE, inside the build, so every reader reads one
+ * order. Not done first; then money, leads, today, other; then urgency, high first; then when,
+ * oldest first, with an undated row counting as today; ties keep the build's own order. The piles
+ * roll up after it (piles.ts), each in its most pressing child's place.
  */
 const TODAY = "2026-09-27";
 let seq = 0;
@@ -81,8 +82,10 @@ describe("the one order", () => {
 describe("the build sorts once, at its return", () => {
   const query = readFileSync(join(process.cwd(), "src/lib/action-items/query.ts"), "utf8");
 
-  it("query.ts returns the sorted list, stamped with its streams", () => {
-    expect(query).toMatch(/return sortActionItems\(\s*items\.map\(\(it\) => \(\{ \.\.\.it, stream: KIND_STREAM\[it\.kind\] \}\)\),\s*todayStr,\s*\);/);
+  it("query.ts sorts once, stamped with its streams, then rolls the piles up (a pile sits where its most pressing child sat)", () => {
+    expect(query).toMatch(/const sorted = sortActionItems\(\s*folded\.now\.map\(\(it\) => \(\{ \.\.\.it, stream: KIND_STREAM\[it\.kind\] \}\)\),\s*todayStr,\s*\);/);
+    expect(query).toContain("const now = rollUpPiles(sorted, { todayStr, isStaff, leadsOn, counts });");
+    expect(query.match(/sortActionItems\(/g)).toHaveLength(1);
   });
 
   it("the list draws the server's order: action-list.tsx never sorts", () => {

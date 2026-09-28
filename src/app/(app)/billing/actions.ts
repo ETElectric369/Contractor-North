@@ -26,6 +26,7 @@ import { getOrgSettings, orgDocUrl, orgPublicBaseUrl } from "@/lib/org-settings"
 import { rowPlace } from "@/lib/doc-place";
 import { tzLocalHourUtc } from "@/lib/tz";
 import { requireStaff } from "@/lib/staff-guard";
+import { embeddedJob, finishedDraftRefusal } from "@/lib/action-items/due-filters";
 import { computeJobLaborBilling, customerLaborRateForJob, customerMaterialMarkupForJob, fetchJobLaborRows, noBillRateWarnings, withoutClaimedLabor } from "@/lib/labor-billing";
 import { claimedIdsOfLines, claimedSourcesOnJob, claimantNumbers, fixedBillingsNotYetNetted, joinNumbers, laborRowIds, unbilledWorkForJob, type ClaimedSources } from "@/lib/unbilled-work";
 import { livePurchaseOrders } from "@/lib/job-progress-math";
@@ -846,7 +847,7 @@ export async function createInvoiceFromQuote(quoteId: string): Promise<Result> {
         reportError("createInvoiceFromQuote.cleanup", delErr ?? new Error("empty invoice not removed"), { quoteId, invoiceId: invoice.id });
         return {
           ok: false,
-          error: `${dbError(itemsErr)} An empty invoice was left behind for this estimate; delete it on Billing before trying again.`,
+          error: `${dbError(itemsErr)} An empty invoice was left behind for this estimate; delete it on Invoices before trying again.`,
         };
       }
       return { ok: false, error: dbError(itemsErr) };
@@ -957,6 +958,14 @@ export async function parkInvoice(invoiceId: string, until: string | null, reaso
   );
   if (block) return block;
   if (until && !/^\d{4}-\d{2}-\d{2}$/.test(until)) return { ok: false, error: "Pick a date." };
+  // A DRAFT WHOSE JOB IS OVER WAITS ON NOTHING: Needs You puts it straight back on top as "Finished ·
+  // Send", so a day written here would never quiet it and "comes back that day" would be untrue. The
+  // rule lives here so every door says it (the page's ⋯, Needs You, Nort). Put Back (null) always works.
+  if (until) {
+    const { data: onJob } = await supabase.from("invoices").select("jobs:job_id(job_number, name, status)").eq("id", invoiceId).maybeSingle();
+    const refusal = finishedDraftRefusal(embeddedJob((onJob as { jobs?: unknown } | null)?.jobs));
+    if (refusal) return { ok: false, error: refusal };
+  }
 
   const { data: wrote, error } = await supabase
     .from("invoices")

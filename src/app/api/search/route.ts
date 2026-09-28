@@ -49,7 +49,8 @@ export async function GET(req: Request) {
       .select("id, title, starts_at, customers(name), jobs(job_number, name)")
       .ilike("title", like)
       .neq("status", "cancelled")
-      .order("starts_at", { ascending: false })
+      // A visit waiting for a day (no start, 0368) sorts after the dated ones.
+      .order("starts_at", { ascending: false, nullsFirst: false })
       .limit(5),
   ]);
 
@@ -82,10 +83,11 @@ export async function GET(req: Request) {
       type: "Appointment",
       label: a.title,
       // WHEN is the answer being sought — lead the sub with the date.
-      sub: [formatDate(a.starts_at), a.customers?.name ?? (a.jobs ? `${a.jobs.job_number} ${a.jobs.name}` : null)]
+      sub: [a.starts_at ? formatDate(a.starts_at) : "Waiting For A Day", a.customers?.name ?? (a.jobs ? `${a.jobs.job_number} ${a.jobs.name}` : null)]
         .filter(Boolean)
         .join(" · "),
-      href: `/schedule?view=day&date=${todayStrInTz(DEFAULT_TIMEZONE, new Date(a.starts_at))}`,
+      // A visit waiting for a day has no day to drill into (never the calendar's 1970): its own page.
+      href: a.starts_at ? `/schedule?view=day&date=${todayStrInTz(DEFAULT_TIMEZONE, new Date(a.starts_at))}` : `/appointments/${a.id}`,
     })),
   ];
 

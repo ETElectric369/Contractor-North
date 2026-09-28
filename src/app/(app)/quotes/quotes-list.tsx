@@ -9,6 +9,7 @@ import { Badge, statusTone } from "@/components/ui/badge";
 import { DataTable } from "@/components/ui/data-table";
 import { useToast } from "@/components/toast";
 import { formatCurrency, formatDate } from "@/lib/utils";
+import { FIXED_PILL_CLASS, isFixedPrice } from "@/lib/doc-label";
 import { deleteQuote, resolveDuplicateDrafts } from "./actions";
 
 type QuoteRow = {
@@ -66,9 +67,9 @@ export function QuotesList({
               cell: (q) => (
                 <>
                   {q.quote_number}
-                  <span className="ml-2 align-middle rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-                    {(q.doc_type ?? "quote") === "estimate" ? "Est" : "Quote"}
-                  </span>
+                  {/* THE FIXED CHIP (W1-25): a mark on the fixed-price rows only; a Time & Material
+                      row wears nothing. The /quotes words and the ?type= filter are untouched. */}
+                  {isFixedPrice(q) && <span className={FIXED_PILL_CLASS}>Fixed</span>}
                 </>
               ),
             },

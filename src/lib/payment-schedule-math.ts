@@ -157,6 +157,84 @@ export function scheduleStatus(milestones: Milestone[], contractTotal: number): 
   };
 }
 
+/**
+ * LEFT TO BILL (W1-19): the one figure the Overview leads with on a job billed by its CONTRACT, the
+ * twin of the Unbilled card's "Open" on a job billed by its work. Pure, so the card and its tests
+ * read the same arithmetic the pages already hold (never a figure worked out a second way):
+ *
+ *   contract   a fixed-price job with a live estimate and no schedule: the contract
+ *              (contractTotalFromQuotes, the page's progress.estimate) less what went out on sent,
+ *              non-void bills (progress.invoiced; a draft is not a bill). The job's New Invoice bills
+ *              from it (Part Of The Estimate takes a part of exactly this figure).
+ *   schedule   a job on a payment schedule, any billing type: scheduleStatus' own remaining (the
+ *              scheduled dollars not drawn yet), and the next payment Request Next Payment draws.
+ *
+ * `left` is never below zero; `over` says how far a contract's bills went past it (a change order
+ * billed on top, say), and a schedule that draws less or more than the contract says by how much.
+ */
+export type LeftToBill = {
+  kind: "contract" | "schedule";
+  /** The contract the figure is measured against. */
+  contract: number;
+  /** Billed toward it: sent non-void bills (contract), or the payments drawn (schedule). */
+  billed: number;
+  /** Left to bill, never below zero. */
+  left: number;
+  /** Nothing is left: the contract, or every scheduled payment, is billed. */
+  billedInFull: boolean;
+  /** contract: how far the sent bills went past the contract (0 when they didn't). */
+  over: number;
+  /** schedule: every payment the schedule holds, in dollars. */
+  scheduled: number;
+  /** schedule: the next payment Request Next Payment draws; null when all are drawn. */
+  next: { label: string; dollars: number } | null;
+  /** schedule: the schedule draws this much LESS than the contract (0 when it doesn't). */
+  scheduleShort: number;
+  /** schedule: the schedule draws this much MORE than the contract (0 when it doesn't). */
+  scheduleOver: number;
+};
+
+export function leftToBill(
+  progress: { estimate: number; invoiced: number },
+  schedule: ScheduleStatus | null | undefined,
+): LeftToBill {
+  const contract = cents(Math.max(0, fin(progress.estimate)));
+  if (schedule && schedule.rows.length > 0) {
+    const scheduled = cents(Math.max(0, fin(schedule.scheduledTotal)));
+    const billed = cents(Math.max(0, fin(schedule.billedTotal)));
+    const left = cents(Math.max(0, fin(schedule.remaining)));
+    const next = schedule.next ? { label: schedule.next.label, dollars: cents(Math.max(0, fin(schedule.next.dollars))) } : null;
+    // Only against a real contract: a schedule on a job with no estimate yet has nothing to be short of.
+    const gap = contract > 0.005 ? cents(contract - scheduled) : 0;
+    return {
+      kind: "schedule",
+      contract,
+      billed,
+      left,
+      billedInFull: !next && left <= 0.005,
+      over: 0,
+      scheduled,
+      next,
+      scheduleShort: gap > 0.01 ? gap : 0,
+      scheduleOver: gap < -0.01 ? -gap : 0,
+    };
+  }
+  const billed = cents(Math.max(0, fin(progress.invoiced)));
+  const rest = cents(contract - billed);
+  return {
+    kind: "contract",
+    contract,
+    billed,
+    left: rest > 0 ? rest : 0,
+    billedInFull: contract > 0.005 && rest <= 0.005,
+    over: rest < -0.005 ? -rest : 0,
+    scheduled: 0,
+    next: null,
+    scheduleShort: 0,
+    scheduleOver: 0,
+  };
+}
+
 /** A sensible default schedule from the org's deposit %: deposit + progress + final
  *  that always sums to exactly 100. */
 export function defaultSchedule(depositPercent: number): Milestone[] {

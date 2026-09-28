@@ -503,14 +503,14 @@ export const LESSONS: Lesson[] = [
     // Plus names no customer and no task (lane 3 takes those rows off it this release); the bell
     // is the record of every notice, not "what's waiting on you" (that is Needs You, on My Day).
     say:
-      "Plus is where new work starts — a job, an appointment, an invoice — from any screen. " +
+      "Plus is where new work starts — a job, an appointment, an invoice, or a paper to snap — from any screen. " +
       "Search Or Ask finds your jobs, customers, estimates, invoices and appointments by name or " +
       "number, and you can ask me anything there. " +
       "And the bell keeps your notices, whether or not you switch on phone notifications.",
     plain: {
       title: "Plus, Search, the bell",
       say:
-        "Plus is where new work starts — a job, an appointment, an invoice — from any screen. " +
+        "Plus is where new work starts — a job, an appointment, an invoice, or a paper to snap — from any screen. " +
         "Search finds your jobs, customers, estimates, invoices and appointments by name or number. " +
         "And the bell keeps your notices, whether or not you switch on phone notifications.",
     },
@@ -673,19 +673,27 @@ export const LESSONS: Lesson[] = [
     key: "run-job",
     anchor: "dock-jobs",
     title: "They say yes",
+    // TRUE TO THE JOB PAGE (Wave 1): the job's one clock is the dock's Clock In at the top (W1-20;
+    // named by the words on it, never its TIME slot name or the Time tab, which no longer clocks), and the Costs
+    // tab's Snap The Bill runs the receipt pipeline (lib/receipt-capture), which writes the bill or
+    // leaves the paper filed on the job. A filed paper no bill holds comes to Needs You as Receipts
+    // Not On A Bill (lib/action-items/receipts-not-on-a-bill; a staff row, so "the office's"): that is
+    // the old "pile", by its own name.
     say: (c) =>
       jobStarts(c) +
       "Then it " +
-      "starts collecting: clock in on that job and the hours land on it, photograph a supply house " +
-      "receipt and I read it and file it on as a cost. The ones I'm not certain about I put in a " +
-      "pile for you rather than guess.",
+      "starts collecting: tap Clock In at the top of the job and the hours land on it; on its Costs " +
+      "tab, Snap The Bill on a supply house receipt and I read it and write it on as a cost. One I " +
+      "can't read stays filed on the job and comes to the office's Needs You as a receipt not on a bill " +
+      "yet, rather than a guess.",
     plain: {
       say: (c) =>
         jobStarts(c) +
         "Then it " +
-        "starts collecting: clock in on that job and the hours land on it, photograph a supply house " +
-        "receipt and it's read and filed on as a cost. The ones it isn't certain about go in a " +
-        "pile for you rather than a guess.",
+        "starts collecting: tap Clock In at the top of the job and the hours land on it; on its Costs " +
+        "tab, Snap The Bill on a supply house receipt and it's read and written on as a cost. One that " +
+        "can't be read stays filed on the job and comes to the office's Needs You as a receipt not on a " +
+        "bill yet, rather than a guess.",
     },
   },
   {
@@ -700,7 +708,8 @@ export const LESSONS: Lesson[] = [
           "already agreed to. If there isn't one, it's every person's hours at the right rate plus "
         : "every person's hours at the right rate plus ") +
       "every receipt with your markup on. It lands as a draft, and nothing reaches your customer " +
-      "unless you tick the box that sends it.",
+      "unless you tick the box that sends it. On the invoice itself a draft has one button, Send " +
+      "with its total on it, then Email It or Text It.",
     plain: {
       say: (c) =>
         "Job's done. Press Finish Job and the invoice is already written — " +
@@ -710,7 +719,8 @@ export const LESSONS: Lesson[] = [
             "already agreed to. If there isn't one, it's every person's hours at the right rate plus "
           : "every person's hours at the right rate plus ") +
         "every receipt with your markup on. It lands as a draft, and nothing reaches your customer " +
-        "unless you tick the box that sends it.",
+        "unless you tick the box that sends it. On the invoice itself a draft has one button, Send " +
+        "with its total on it, then Email It or Text It.",
     },
   },
   // HIS "everybody wins", stated as something he can CHECK rather than handed back as a slogan.

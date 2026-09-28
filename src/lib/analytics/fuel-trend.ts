@@ -9,7 +9,7 @@ import { todayStrInTz, tzDayStartUtc } from "@/lib/tz";
  *
  * Fuel is a business-cost bucket of its own (0362, business-cost-buckets.ts): a bill with no job
  * whose category is Fuel, however it came in (a fill-up tapped Fuel on a bank download or placed by
- * the company's own answer, a pump receipt filed as Fuel, Add Business Cost, a recurring expense),
+ * the company's own answer, a pump receipt filed as Fuel, Add By Hand, a recurring expense),
  * and petty cash with no job filed as Fuel (never a replenish). The same costs the Owner's Draw card
  * counts on its Fuel line and Money by Month draws as fuel. This reads them over the last 13
  * weeks, Monday to Sunday on the company's own

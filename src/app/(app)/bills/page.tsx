@@ -13,8 +13,10 @@ import {
 } from "@/lib/supplier-identity";
 import { Card } from "@/components/ui/card";
 import { BillsReceipts } from "./bills-receipts";
-import { AddBusinessCostButton } from "./add-business-cost";
-import { namesABucket } from "@/lib/business-cost-buckets";
+import { AddByHandButton } from "./add-business-cost";
+import { bucketOf, namesABucket } from "@/lib/business-cost-buckets";
+import { isShelfTicket } from "@/lib/shelf-plan";
+import { jobPickLabel } from "@/lib/job-pick-label";
 import type { ReceiptForBilling } from "./receipt-billing-card";
 import { SupplierCandidateReview, SupplierMergeReview, SupplierUnfiledSpellings } from "./supplier-merge-review";
 import { SupplierDuplicates } from "./supplier-duplicates";
@@ -32,7 +34,7 @@ import {
 } from "./supplier-reconcile";
 import { moneyWords, wordsOf, type BillsSearchRow } from "./bills-search";
 import { billsPaperDoor } from "./paper-door";
-import { BillsSearchBox } from "./bills-search-box";
+import { BillsSearchBox, BillsSearchProvider } from "./bills-search-box";
 import { SupplierPaperCards } from "@/components/supplier-paper-cards";
 import { formatCurrency, formatDateShort } from "@/lib/utils";
 import {
@@ -50,7 +52,7 @@ import { billAlreadyBilledDoors } from "@/lib/already-billed";
 import { reportError } from "@/lib/observe";
 import { CedPdfPicker } from "./ced-pdf-picker";
 import { BooksBeginLine } from "./books-begin-line";
-import { PaperworkDropZone, SortThese } from "./bills-drop";
+import { NeedsYou, PaperworkDropZone } from "./bills-drop";
 import { SnapOrNoteButton } from "@/components/snap-or-note";
 import { openListViews } from "./open-list-core";
 import { bankLinesStayHere, bankViews } from "./bank-core";
@@ -60,7 +62,7 @@ import type { PaperRowItem } from "@/components/paperwork-row";
 import { readinessOf, type NumberMatch } from "@/lib/paperwork";
 import { loadBooks, loadMarkContext, matchesOnBooks, PAPER_JOB_STATUSES, rematchTray } from "@/app/(app)/organize/paperwork-core";
 import { signDocumentUrls } from "@/lib/signed-docs";
-import { billPapers, type PaperTie } from "@/lib/job-photos";
+import { billOfTie, billPapers, type PaperTie } from "@/lib/job-photos";
 import {
   candidateMoving,
   isOnAccountBill,
@@ -195,7 +197,7 @@ export default async function BillsPage({
     { data: orgRow },
     { data: invoiceRows, error: invoicesErr },
     { data: billLinkRows, error: linksErr },
-    { data: paperRows },
+    { data: paperRows, error: trayErr },
     books,
     markCtx,
     shelfLotsRead,
@@ -294,10 +296,12 @@ export default async function BillsPage({
     supabase.from("inventory_items").select("id, name").limit(5000),
     // EACH BILL'S OWN PAPER (Erik, 2026-09-27: bills and job photos kept separate): the links the
     // receipt reader, Add Cost and File It write, so a bill's row opens the receipt it was read from.
-    // Small (one row per paper that made or joined a bill) and dependent on nothing above.
+    // Small (one row per paper that made or joined a bill) and dependent on nothing above. The
+    // document it names rides along too: a receipt file those links hold is on a bill, and All Bills
+    // lists only the files no bill holds yet (W1-32).
     supabase
       .from("organized_items")
-      .select("id, kind, category, bill_id, tied_bill_id, file_url")
+      .select("id, kind, category, bill_id, tied_bill_id, file_url, document_id")
       .eq("org_id", orgId)
       .or("bill_id.not.is.null,tied_bill_id.not.is.null")
       .not("file_url", "is", null)
@@ -406,7 +410,7 @@ export default async function BillsPage({
   const signPapers = async () => {
     paperUrls = await signDocumentUrls(supabase, papers.map((i) => i.file_url));
   };
-  // A SUPPLIER'S OPEN LIST waiting in Sort These is compared against that supplier's papers as
+  // A SUPPLIER'S OPEN LIST waiting under Needs You is compared against that supplier's papers as
   // the page loads, so its card is never stale (open-list-core). Nothing waiting, nothing read.
   let listViews: Record<string, OpenListView> = {};
   const viewLists = async () => {
@@ -441,7 +445,7 @@ export default async function BillsPage({
   const signBillPapers = async () => {
     billPaperUrls = await signDocumentUrls(supabase, billTies.map((t) => t.file_url));
   };
-  // A BANK DOWNLOAD waiting in Sort These is sorted against the books as the page loads (bank-core),
+  // A BANK DOWNLOAD waiting under Needs You is sorted against the books as the page loads (bank-core),
   // so its card is never stale. Nothing waiting, nothing read.
   let bankCards: Record<string, BankView> = {};
   const viewBanks = async () => {
@@ -463,6 +467,18 @@ export default async function BillsPage({
     (j) => !j.status || paperStatuses.includes(j.status),
   );
   const docs = (docRows ?? []).map((d: any) => ({ ...d, signedUrl: (d.file_url && signed.get(d.file_url)) || null }));
+  // THE RECEIPT FILES NO BILL HOLDS YET (W1-32): All Bills lists a file only while it is on no bill;
+  // one that made a bill opens from that bill's own row. A link names its document, or its file (the
+  // job's Receipts & Papers reads them the same way). With the links unread, every file is listed,
+  // under the sentence saying they couldn't be read.
+  const tiedDocs = new Set<string>();
+  const tiedPaths = new Set<string>();
+  for (const t of (billTieRows ?? []) as PaperTie[]) {
+    if (!billOfTie(t)) continue;
+    if (t.document_id) tiedDocs.add(String(t.document_id));
+    if (t.file_url) tiedPaths.add(String(t.file_url));
+  }
+  const looseDocs = billTiesErr ? docs : docs.filter((d: any) => !tiedDocs.has(String(d.id)) && !(d.file_url && tiedPaths.has(String(d.file_url))));
 
   // Each live roll by the receipt line it came off. A read that failed leaves this empty, and the
   // card then offers Put The Rest On The Shelf on a line whose roll is already there - which the
@@ -814,7 +830,7 @@ export default async function BillsPage({
     // A bill with no supplier name at all is not a spelling to file. It stays in the ledger below
     // exactly as it reads today, rather than becoming a nameless row in a card about names.
     if (!alias) continue;
-    // Nor is a business cost saved with no Where: Add Business Cost puts the bucket's own name in
+    // Nor is a business cost saved with no Where: Add By Hand puts the bucket's own name in
     // the supplier field ("Fuel"), and offering to give "Fuel" its own supplier account would be a
     // door to nothing (nor "Gas & Truck", the name Auto had before 0362). Only a settled one,
     // though: anything still owed stays in the count, so no unpaid dollar drops out of the amber line.
@@ -1125,9 +1141,14 @@ export default async function BillsPage({
       }),
     });
   }
-  for (const b of liveBills as any[]) {
+  // EVERY ROW ALL BILLS HOLDS (W1-32): the box above it filters it in place, by any of these words.
+  // A set-aside duplicate is listed there too, so it is found too.
+  for (const b of billsWithLines as any[]) {
     const reading = readBillInvoice({ notes: b.notes ?? null, lineDescriptions: (b.line_items ?? []).map((l: any) => l.description) });
     const number = b.bill_number || b.supplier_invoice_number || reading.invoiceNumber || null;
+    // What a bill with no job is, in the words he'd type: "business cost" and its bucket ("fuel"),
+    // or "shop stock" for a stock ticket.
+    const kindWords = b.job_id ? [] : isShelfTicket(b) ? ["shop stock"] : ["business cost", bucketOf(b.category)];
     searchRows.push({
       key: `bill:${b.id}`,
       kind: "bill",
@@ -1135,24 +1156,48 @@ export default async function BillsPage({
       sub: [
         formatDateShort(b.bill_date),
         formatCurrency(b.amount),
-        b.job_id ? `on ${jobSaid(b.job_id) ?? b.jobs?.name ?? "a job"}` : `business cost${b.category ? `, ${b.category}` : ""}`,
+        b.job_id ? `on ${jobSaid(b.job_id) ?? b.jobs?.name ?? "a job"}` : isShelfTicket(b) ? "shop stock" : `business cost, ${bucketOf(b.category)}`,
         b.status === "paid" ? "settled" : "on account",
       ]
         .filter(Boolean)
         .join(" · "),
-      words: wordsOf(number, ...(reading.numbers ?? []), b.supplier, moneyWords(b.amount), b.bill_date, b.category, b.jobs?.job_number, b.jobs?.name, ...jobWords(b.job_id), String(b.notes ?? "").split(/\r?\n/)[0]),
+      words: wordsOf(
+        number,
+        ...(reading.numbers ?? []),
+        b.supplier,
+        moneyWords(b.amount),
+        b.bill_date,
+        b.category,
+        ...kindWords,
+        b.status === "paid" ? "settled paid" : "on account unpaid",
+        b.jobs?.job_number,
+        b.jobs?.name,
+        ...jobWords(b.job_id),
+        String(b.notes ?? "").split(/\r?\n/)[0],
+      ),
       // Its own row in All Bills (FoldOpener opens the folds around it): the bill itself, with its
       // number, its lines and its doors, rather than the job page it sits on.
       href: `#bill-${b.id}`,
     });
   }
-  for (const f of docs as any[]) {
+  for (const p of (pos ?? []) as any[]) {
+    const job = Array.isArray(p.jobs) ? p.jobs[0] : p.jobs;
+    searchRows.push({
+      key: `po:${p.id}`,
+      kind: "po",
+      title: `${p.po_number ?? "PO"} · ${p.vendor || "No vendor"}`,
+      sub: [formatCurrency(p.total), job?.name ? `on ${job.name}` : "on no job", p.status].filter(Boolean).join(" · "),
+      words: wordsOf("po purchase order", p.po_number, p.vendor, moneyWords(p.total), p.status, job?.name),
+      href: `/purchasing/${p.id}`,
+    });
+  }
+  for (const f of looseDocs as any[]) {
     searchRows.push({
       key: `file:${f.id}`,
       kind: "file",
       title: String(f.name ?? "A file"),
       sub: [formatDateShort(String(f.created_at ?? "").slice(0, 10) || null), f.category, f.jobs?.name ? `on ${f.jobs.name}` : null].filter(Boolean).join(" · "),
-      words: wordsOf(f.name, f.category, f.jobs?.name, ...jobWords(f.job_id)),
+      words: wordsOf("file", f.name, f.category, f.jobs?.name, ...jobWords(f.job_id)),
       href: f.signedUrl ?? (f.job_id ? `/jobs/${f.job_id}` : null),
     });
   }
@@ -1210,213 +1255,242 @@ export default async function BillsPage({
     waitingByAccount.set(accountId, { name: had.name, count: had.count + 1 });
   }
 
+  // WHAT SHOWS, AND WHEN (W1-32). A new company sees the title, Snap Or Note, Add By Hand and the
+  // drop line, and nothing else: the search, Needs You, Suppliers, All Bills and More each appear once
+  // they hold something (or once a read of theirs failed, which they say).
+  const hasSupplierSide = !!paperFeed || readFailed.size > 0;
+  const showSuppliers = !!accountsErr || supplierAccounts.length > 0 || unassigned.bills > 0 || typeof payOn === "string";
+  // Purchase Orders on is reason enough: All Bills' ⋯ is New PO's one home on this page, and the Bills &
+  // POs row, /purchasing and "po" in Search Or Ask all land here (review of W1-32: a company that had
+  // just turned the switch on, with nothing yet, found no New PO and no word about orders).
+  const poOn = featureOn(switches.features, "purchase_orders");
+  const showAllBills = !!billsErr || poOn || (billsWithLines as any[]).length > 0 || (pos ?? []).length > 0 || looseDocs.length > 0;
+  const showMore = moreWaiting > 0 || proposals.length + questions.length + loose.length > 0 || duplicates.length > 0 || supplierDocuments.length > 0 || liveBills.length > 0;
+  // Needs You's empty line: every paper since the books began is in them, unless some wait on a credit.
+  // ONLY WHEN IT WAS ALL READ (audit v1018, class 2): with the supplier half unread (its alert is in the
+  // card) or the waiting papers unread, "every paper is in your books" would be a false all-clear right
+  // under the sentence saying it couldn't check, so the card carries the alert alone.
+  const supplierUnread = !paperFeed && readFailed.size > 0;
+  const needsYouEmpty =
+    supplierUnread || trayErr
+      ? null
+      : waitingByAccount.size
+        ? "Nothing else waiting on you."
+        : `Nothing waiting. Every paper${recordsSince ? ` since ${formatDateShort(recordsSince)}` : ""} is in your books.`;
+  // The jobs Add By Hand offers: open and finished, never cancelled, the place first and the number second.
+  const handJobs = paperJobs.map((j) => ({ id: j.id, label: jobPickLabel(j) }));
+
   return (
     // THE WHOLE PAGE IS THE DROP ZONE (dropbox plan, Phase 1): drag any number of PDFs and photos
     // anywhere onto it, or press Snap Or Note (the one paper door, W1-30: the same queue as + on
-    // every page). Nothing is filed on drop; each paper waits in Sort These until a person taps an
+    // every page). Nothing is filed on drop; each paper waits under Needs You until a person taps an
     // answer on its card.
     //
-    // THE ORDER (Bills plan, Wave B): the title and its two doors, the search box, Needs You, one
-    // line per supplier, All Bills, More. Everything below Needs You is folded, and every paragraph
-    // is a one-line label with a Why? fold ("it looks like one big run-on sentence"). Every door
-    // the page had keeps exactly one home (bills-page-doors.test.ts finds each one).
+    // THE ORDER (Bills plan, Wave B; W1-32): the title and its two doors, the search box, Needs You,
+    // one line per supplier, All Bills, More. Everything below Needs You is folded, and every paragraph
+    // is a one-line label with a Why? fold ("it looks like one big run-on sentence"). Every door the
+    // page had keeps exactly one home (bills-page-doors.test.ts finds each one).
     <PaperworkDropZone>
       <FoldOpener />
-      <PageHeader title="Bills">
+      <PageHeader title="Bills" description="Drop a receipt or bill anywhere on this page.">
         <div className="flex flex-wrap items-center gap-2">
           <SnapOrNoteButton />
-          {/* The door for a cost with no job (gas, phone, insurance), up top where it is found
-              without opening anything. It saves through the same createBill as Add Bill. */}
-          <AddBusinessCostButton today={today} />
+          {/* The one typed door (W1-32): a job's cost, a business cost in its bucket, or stock, with
+              Paid? asked. It saves through the same createBill as every other cost. */}
+          <AddByHandButton jobs={handJobs} shopStock={shopStock} jobsUnread={!!jobsErr} />
         </div>
       </PageHeader>
 
-      {/* FIND ANY PAPER: number, street, job, what CED wrote, or $ (Bills plan, Wave A). */}
-      <BillsSearchBox rows={searchRows} />
+      <BillsSearchProvider rows={searchRows}>
+        {/* FIND ANY PAPER: number, street, job, supplier, bucket, or $ (Bills plan, Wave A). It filters
+            All Bills in place; a supplier's own paper is a hit that lands on its card. */}
+        {searchRows.length > 0 && <BillsSearchBox />}
 
-      {/* NEEDS YOU: the same "here's a bill, what's it for?" cards My Day shows, from the same
-          call (supplierPaperFeed). The one place these decisions happen. */}
-      {!paperFeed && readFailed.size > 0 && (
-        <Card className="mb-6 scroll-mt-20 p-4" id="needs-you">
-          <h2 className="text-sm font-semibold text-slate-900">Needs You</h2>
-          <p className="mt-0.5 text-sm text-amber-800" role="alert">
-            {invoicesErr
-              ? "Couldn't read your suppliers' own papers just now, so what you owe them and the bills waiting on you aren't shown. Reload the page to try again."
-              : accountsErr
-                ? "Couldn't read your supplier accounts just now, so their balances and the bills waiting on you aren't shown. Reload the page to try again."
-                : "Couldn't check your books just now, so the supplier bills waiting on you aren't shown. Reload the page to try again."}
-          </p>
-        </Card>
-      )}
-      {paperFeed && (
-        <Card className="mb-6 scroll-mt-20 p-4" id="needs-you">
-          <h2 className="text-sm font-semibold text-slate-900">
-            Needs You{paperFeed.cards.length ? ` (${paperFeed.cards.length})` : ""}
-          </h2>
-          <p className="mt-0.5 text-xs text-slate-500">Supplier bills not in your books yet. The same cards are on My Day.</p>
-          <BooksBeginLine since={recordsSince} named={!!booksNamed} canChange={canChangeSettings} />
-          <SupplierPaperCards
-            feed={paperFeed}
-            emptyLabel={
-              waitingByAccount.size
-                ? "Nothing else waiting on you."
-                : `Nothing waiting. Every supplier bill${recordsSince ? ` since ${formatDateShort(recordsSince)}` : ""} is in your books.`
-            }
-          />
-          {[...waitingByAccount.entries()].map(([accountId, w]) => (
-            <a
-              key={accountId}
-              href={`#supplier-waiting-credit-${accountId}`}
-              className="mt-2 flex min-h-11 items-center text-sm font-medium text-brand hover:underline"
-            >
-              {`Waiting On A Credit (${w.count}) · Under ${w.name}`}
-            </a>
-          ))}
-        </Card>
-      )}
-      {/* The same ticket on two jobs is money on the wrong job: it is a decision, so it is pointed at
-          from here, and answered on its card under More. */}
-      {openDuplicates.length > 0 && (
-        <a
-          href="#same-ticket-two-jobs"
-          className="mb-6 flex min-h-11 items-center justify-between gap-3 rounded-lg bg-amber-50 px-4 py-2.5 text-sm text-amber-900 hover:bg-amber-100"
-        >
-          <span className="min-w-0">
-            {openDuplicates.length === 1
-              ? `The Same ${formatCurrency(openDuplicates[0].amount)} Ticket Is On Two Jobs`
-              : `${openDuplicates.length} Tickets Are Each Filed More Than Once`}
-          </span>
-          <span className="shrink-0 font-medium">Sort It Out</span>
-        </a>
-      )}
-
-      <SortThese items={paperItems} jobs={paperJobs} matches={paperMatches} shopStock={shopStock} />
-
-      {/* ONE LINE PER SUPPLIER. When the accounts read came back an error, the card is its heading
-          and one sentence: no buttons that could only refuse, and a My Day ?pay= door lands on
-          words, never on nothing (audit v1018, class 2). */}
-      {accountsErr ? (
-        <Card className="mb-6 p-4" id="suppliers">
-          <h2 className="text-base font-semibold text-slate-900">Suppliers</h2>
-          <p className="mt-1 text-sm text-amber-800" role="alert">
-            Couldn&apos;t read your supplier accounts just now, so what you owe each one isn&apos;t shown and no payment can be recorded here. Reload the page to try again.
-          </p>
-        </Card>
-      ) : (
-        <SuppliersCard
-          accounts={supplierAccounts}
-          today={today}
-          unassigned={unassigned}
-          reconcile={reconcile}
-          needsYouIds={needsYouIds}
-          waitingOnCredit={paperFeed?.waiting ?? []}
-          // The slice of an account's unpaid bills the supplier's own documents do not cover.
-          // Never folded into a balance: named, so money he does owe is not explained away.
-          noSupplierDocument={Object.fromEntries(noSupplierDocument)}
-          payOn={typeof payOn === "string" ? payOn : null}
-          // A lost papers, bills or payments read: a bills-less-payments figure would be wrong
-          // without a word, so those accounts say they couldn't total instead.
-          balancesUnread={balancesUnread}
-          // Each says so where its own figure would have been: "you have sent them $0.00" and
-          // "your paperwork rather than theirs" would be false without a word.
-          paymentsUnread={!!paymentsErr}
-          paperlessUnread={!!linksErr}
-          actions={{
-            recordPayment: recordSupplierPayment,
-            voidPayment: voidSupplierPayment,
-            setOnAccount: setSupplierOnAccount,
-            // WITHOUT THIS LINE THE SUPPLIER'S OWN PAPERS ARE UNREACHABLE (review, 2026-09-19):
-            // suppliers-card gates them on `!!actions.setInvoiceJob`.
-            setInvoiceJob: setSupplierInvoiceJob,
-            // The account's own details, which had no door until the audit counted one.
-            updateAccount: updateSupplierAccount,
-            recordAsBill: recordSupplierInvoiceAsBill,
-            // Same Purchase: Tie Them (audit v994, DB1).
-            tieToBill: tieSupplierInvoiceToBill,
-            // Record To Shelf (Shop Stock, Phase 2): both halves passed, or the button does not render.
-            // Shop Stock off (0352): neither half is passed, so it doesn't.
-            ...(shopStock ? { shelfLines: supplierInvoiceShelfLines, recordToShelf: recordSupplierInvoiceToShelf } : {}),
-            // Waiting On A Credit's way back: Stop Waiting on the folded line puts it on Needs You.
-            stopWaitingOnCredit,
-          }}
+        {/* NEEDS YOU (W1-32): Sort These folded in. What was just dropped, the papers waiting for an
+            answer, then the same "here's a bill, what's it for?" cards My Day shows, from the same call
+            (supplierPaperFeed). The one place these decisions happen. */}
+        <NeedsYou
+          items={paperItems}
+          jobs={paperJobs}
+          matches={paperMatches}
+          shopStock={shopStock}
+          supplierCards={paperFeed?.cards.length ?? 0}
+          always={hasSupplierSide || !!trayErr}
+          emptyLine={needsYouEmpty}
+          trayUnread={!!trayErr}
+          supplier={
+            supplierUnread ? (
+              <p className="text-sm text-amber-800" role="alert">
+                {invoicesErr
+                  ? "Couldn't read your suppliers' own papers just now, so what you owe them and the bills waiting on you aren't shown. Reload the page to try again."
+                  : accountsErr
+                    ? "Couldn't read your supplier accounts just now, so their balances and the bills waiting on you aren't shown. Reload the page to try again."
+                    : "Couldn't check your books just now, so the supplier bills waiting on you aren't shown. Reload the page to try again."}
+              </p>
+            ) : paperFeed ? (
+              <div>
+                <BooksBeginLine since={recordsSince} named={!!booksNamed} canChange={canChangeSettings} />
+                <SupplierPaperCards feed={paperFeed} />
+                {[...waitingByAccount.entries()].map(([accountId, w]) => (
+                  <a
+                    key={accountId}
+                    href={`#supplier-waiting-credit-${accountId}`}
+                    className="mt-2 flex min-h-11 items-center text-sm font-medium text-brand hover:underline"
+                  >
+                    {`Waiting On A Credit (${w.count}) · Under ${w.name}`}
+                  </a>
+                ))}
+              </div>
+            ) : null
+          }
         />
-      )}
+        {/* The same ticket on two jobs is money on the wrong job: it is a decision, so it is pointed at
+            from here, and answered on its card under More. */}
+        {openDuplicates.length > 0 && (
+          <a
+            href="#same-ticket-two-jobs"
+            className="mb-6 flex min-h-11 items-center justify-between gap-3 rounded-lg bg-amber-50 px-4 py-2.5 text-sm text-amber-900 hover:bg-amber-100"
+          >
+            <span className="min-w-0">
+              {openDuplicates.length === 1
+                ? `The Same ${formatCurrency(openDuplicates[0].amount)} Ticket Is On Two Jobs`
+                : `${openDuplicates.length} Tickets Are Each Filed More Than Once`}
+            </span>
+            <span className="shrink-0 font-medium">Sort It Out</span>
+          </a>
+        )}
 
-      {/* ALL BILLS: the ledger, folded; a receipt's billing switches live in its own row. */}
-      <BillsReceipts
-        orgId={orgId}
-        jobs={jobs ?? []}
-        lists={lists ?? []}
-        pos={(pos ?? []) as any}
-        bills={ledgerBills as any}
-        docs={docs as any}
-        readFailed={!!billsErr}
-        papersNote={billTiesErr ? "Couldn't load which receipt made each bill just now. Reload to try again." : null}
-        switches={switches}
-        alreadyBilled={billDoors}
-      />
+        {/* ONE LINE PER SUPPLIER. When the accounts read came back an error, the card is its heading
+            and one sentence: no buttons that could only refuse, and a My Day ?pay= door lands on
+            words, never on nothing (audit v1018, class 2). */}
+        {accountsErr ? (
+          <Card className="mb-6 p-4" id="suppliers">
+            <h2 className="text-base font-semibold text-slate-900">Suppliers</h2>
+            <p className="mt-1 text-sm text-amber-800" role="alert">
+              Couldn&apos;t read your supplier accounts just now, so what you owe each one isn&apos;t shown and no payment can be recorded here. Reload the page to try again.
+            </p>
+          </Card>
+        ) : showSuppliers ? (
+          <SuppliersCard
+            accounts={supplierAccounts}
+            today={today}
+            unassigned={unassigned}
+            reconcile={reconcile}
+            needsYouIds={needsYouIds}
+            waitingOnCredit={paperFeed?.waiting ?? []}
+            // The slice of an account's unpaid bills the supplier's own documents do not cover.
+            // Never folded into a balance: named, so money he does owe is not explained away.
+            noSupplierDocument={Object.fromEntries(noSupplierDocument)}
+            payOn={typeof payOn === "string" ? payOn : null}
+            // A lost papers, bills or payments read: a bills-less-payments figure would be wrong
+            // without a word, so those accounts say they couldn't total instead.
+            balancesUnread={balancesUnread}
+            // Each says so where its own figure would have been: "you have sent them $0.00" and
+            // "your paperwork rather than theirs" would be false without a word.
+            paymentsUnread={!!paymentsErr}
+            paperlessUnread={!!linksErr}
+            actions={{
+              recordPayment: recordSupplierPayment,
+              voidPayment: voidSupplierPayment,
+              setOnAccount: setSupplierOnAccount,
+              // WITHOUT THIS LINE THE SUPPLIER'S OWN PAPERS ARE UNREACHABLE (review, 2026-09-19):
+              // suppliers-card gates them on `!!actions.setInvoiceJob`.
+              setInvoiceJob: setSupplierInvoiceJob,
+              // The account's own details, which had no door until the audit counted one.
+              updateAccount: updateSupplierAccount,
+              recordAsBill: recordSupplierInvoiceAsBill,
+              // Same Purchase: Tie Them (audit v994, DB1).
+              tieToBill: tieSupplierInvoiceToBill,
+              // Record To Shelf (Shop Stock, Phase 2): both halves passed, or the button does not render.
+              // Shop Stock off (0352): neither half is passed, so it doesn't.
+              ...(shopStock ? { shelfLines: supplierInvoiceShelfLines, recordToShelf: recordSupplierInvoiceToShelf } : {}),
+              // Waiting On A Credit's way back: Stop Waiting on the folded line puts it on Needs You.
+              stopWaitingOnCredit,
+            }}
+          />
+        ) : null}
+
+        {/* ALL BILLS: one searchable list (W1-32): every bill, purchase order, and receipt file no bill
+            holds yet; a receipt's billing switches live in its own row. */}
+        {showAllBills && (
+          <BillsReceipts
+            orgId={orgId}
+            jobs={jobs ?? []}
+            lists={lists ?? []}
+            pos={(pos ?? []) as any}
+            bills={ledgerBills as any}
+            docs={looseDocs as any}
+            readFailed={!!billsErr}
+            papersNote={billTiesErr ? "Couldn't load which receipt made each bill just now, so every receipt file is listed. Reload to try again." : null}
+            switches={switches}
+            alreadyBilled={billDoors}
+          />
+        )}
+      </BillsSearchProvider>
 
       {/* MORE: the once-a-month import, and supplier-name housekeeping. Folded, and its one line
           says how many things in it are waiting, so nothing waits silently behind the fold. */}
-      <Card className="mb-6 px-4 py-1">
-        <Fold
-          id="more"
-          summary={
-            <span className="text-base font-semibold text-slate-900">
-              More
-              {moreWaiting > 0 ? (
-                <span className="font-normal text-amber-800"> · {moreWaiting} To Look At</span>
-              ) : (
-                <span className="font-normal text-slate-500"> · Imports And Supplier Names</span>
+      {showMore && (
+        <Card className="mb-6 px-4 py-1">
+          <Fold
+            id="more"
+            summary={
+              <span className="text-base font-semibold text-slate-900">
+                More
+                {moreWaiting > 0 ? (
+                  <span className="font-normal text-amber-800"> · {moreWaiting} To Look At</span>
+                ) : (
+                  <span className="font-normal text-slate-500"> · Imports And Supplier Names</span>
+                )}
+              </span>
+            }
+          >
+            {/* ── THE SUPPLIER'S OWN INVOICES: ONE LINE (W1-30) ───────────────────────────────────
+                They come in through Snap Or Note like every other paper: a portal PDF is read from
+                its own text in the browser and waits as one card (Add To Supplier Documents keeps
+                the PDF for Open Bill); pasted invoice text in the note box is imported. Choose
+                Supplier PDFs stays one more release: three sentences outside this lane still name it. */}
+            <div className="mb-4 scroll-mt-20 space-y-2" id="ced-import">
+              <h3 className="text-sm font-semibold text-slate-900">Import Supplier Invoices</h3>
+              <p className="text-sm text-slate-600">Supplier PDFs, statements and open lists go in through Snap Or Note.</p>
+              <WhyFold>
+                <p>
+                  Choose the PDFs from your supplier&apos;s payment portal in Snap Or Note, as many as you like, or paste an
+                  invoice&apos;s text into its note box. Each is checked against its own arithmetic before it is saved; anything
+                  that does not add up is named and left out. Loading the same download twice changes nothing, and the job
+                  you filed a document on is never touched.
+                </p>
+                <p>
+                  A statement, or the portal&apos;s open list (PDF, Excel, CSV or pasted), waits under Needs You as one card
+                  saying which papers it marks paid and which are new; nothing changes until you press Apply, and Undo puts
+                  it all back.
+                </p>
+              </WhyFold>
+              <CedPdfPicker orgId={orgId} />
+            </div>
+
+            {/* SUPPLIER-NAME HOUSEKEEPING, in the order of how sure the app is: what it thinks, what
+                it cannot tell, what it has no opinion about. */}
+            <div id="supplier-names" className="scroll-mt-20">
+              <SupplierMergeReview proposals={proposals} actions={{ acceptMerge: acceptSupplierMerge, dismissMerge: dismissSupplierMerge }} />
+              <SupplierCandidateReview questions={questions} actions={{ acceptMerge: acceptSupplierMerge, dismissMerge: dismissSupplierMerge }} />
+              <SupplierUnfiledSpellings
+                spellings={loose}
+                canSetOnAccount={!accountsErr}
+                actions={{ fileAsItsOwnAccount: fileSpellingAsItsOwnAccount }}
+              />
+              {proposals.length + questions.length + loose.length === 0 && (
+                <p className="mb-4 text-sm text-slate-400">Every supplier name off your receipts is on an account.</p>
               )}
-            </span>
-          }
-        >
-          {/* ── THE SUPPLIER'S OWN INVOICES: ONE LINE (W1-30) ───────────────────────────────────
-              They come in through Snap Or Note like every other paper: a portal PDF is read from
-              its own text in the browser and waits as one card (Add To Supplier Documents keeps
-              the PDF for Open Bill); pasted invoice text in the note box is imported. Choose
-              Supplier PDFs stays one more release: three sentences outside this lane still name it. */}
-          <div className="mb-4 scroll-mt-20 space-y-2" id="ced-import">
-            <h3 className="text-sm font-semibold text-slate-900">Import Supplier Invoices</h3>
-            <p className="text-sm text-slate-600">Supplier PDFs, statements and open lists go in through Snap Or Note.</p>
-            <WhyFold>
-              <p>
-                Choose the PDFs from your supplier&apos;s payment portal in Snap Or Note, as many as you like, or paste an
-                invoice&apos;s text into its note box. Each is checked against its own arithmetic before it is saved; anything
-                that does not add up is named and left out. Loading the same download twice changes nothing, and the job
-                you filed a document on is never touched.
-              </p>
-              <p>
-                A statement, or the portal&apos;s open list (PDF, Excel, CSV or pasted), waits in Sort These as one card
-                saying which papers it marks paid and which are new; nothing changes until you press Apply, and Undo puts
-                it all back.
-              </p>
-            </WhyFold>
-            <CedPdfPicker orgId={orgId} />
-          </div>
+            </div>
 
-          {/* SUPPLIER-NAME HOUSEKEEPING, in the order of how sure the app is: what it thinks, what
-              it cannot tell, what it has no opinion about. */}
-          <div id="supplier-names" className="scroll-mt-20">
-            <SupplierMergeReview proposals={proposals} actions={{ acceptMerge: acceptSupplierMerge, dismissMerge: dismissSupplierMerge }} />
-            <SupplierCandidateReview questions={questions} actions={{ acceptMerge: acceptSupplierMerge, dismissMerge: dismissSupplierMerge }} />
-            <SupplierUnfiledSpellings
-              spellings={loose}
-              canSetOnAccount={!accountsErr}
-              actions={{ fileAsItsOwnAccount: fileSpellingAsItsOwnAccount }}
+            <SupplierDuplicates
+              groups={duplicates}
+              actions={{ resolveDuplicate: resolveDuplicateBill, unresolveDuplicate: unresolveDuplicateBill }}
             />
-            {proposals.length + questions.length + loose.length === 0 && (
-              <p className="mb-4 text-sm text-slate-400">Every supplier name off your receipts is on an account.</p>
-            )}
-          </div>
-
-          <SupplierDuplicates
-            groups={duplicates}
-            actions={{ resolveDuplicate: resolveDuplicateBill, unresolveDuplicate: unresolveDuplicateBill }}
-          />
-        </Fold>
-      </Card>
+          </Fold>
+        </Card>
+      )}
     </PaperworkDropZone>
   );
 }

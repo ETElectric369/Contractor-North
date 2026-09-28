@@ -30,7 +30,9 @@ describe("the Settle item", () => {
     // Never "3d overdue": nobody set a deadline. The date rides in the subtitle.
     expect(item).toContain("when: null");
     expect(item).toContain("formatDateShort(r.created_at");
-    expect(item).toContain("Taken Past Stock · Settle It");
+    // Settle It is the row's own button now (W1-13, row-buttons.ts), so the title just says what.
+    expect(item).toContain("Taken Past Stock`");
+    expect(item).not.toContain("· Settle It");
     expect(item).not.toMatch(/Recount/);
     // Straight to the item, opened (Shop Stock reads ?item=), and the words name what works.
     expect(src).toContain("/inventory?item=${encodeURIComponent(String(r.item_id))}");

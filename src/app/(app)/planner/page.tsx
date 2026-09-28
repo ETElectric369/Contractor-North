@@ -21,6 +21,8 @@ import { YourList } from "./your-list";
 import { rankSix } from "@/lib/six-rank";
 import { getActionItems } from "@/lib/action-items/query";
 import { ActionList } from "@/components/action-items/action-list";
+import { WaitingFold } from "@/components/action-items/waiting-fold";
+import { smsReadiness } from "@/lib/sms";
 import { SupplierPaperDoneTrail, SUPPLIER_PAPERS_SCOPE } from "@/components/supplier-paper-cards";
 import type { ApptValue } from "../appointments/appointment-button";
 import { AgendaRowMenu } from "./agenda-move";
@@ -38,8 +40,8 @@ export const dynamic = "force-dynamic";
 
 const fmtTime = (iso: string) => formatTime(iso);
 
-export default async function PlannerPage({ searchParams }: { searchParams: Promise<{ view?: string; actions?: string; week?: string }> }) {
-  const { view: viewRaw, actions: actionsRaw, week: weekRaw } = await searchParams;
+export default async function PlannerPage({ searchParams }: { searchParams: Promise<{ view?: string; week?: string }> }) {
+  const { view: viewRaw, week: weekRaw } = await searchParams;
   const view = viewRaw === "week" ? "week" : "day";
   // Tech week paging (?week= signed offset from this week). Staff never render
   // a week here — they're redirected to THE week at /schedule below.
@@ -239,7 +241,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
 
   // The current job's materials and its open tasks (need its id), the Needs You inbox (needs
   // the role), and the six's subtasks (need the chosen six) — one final round.
-  const [mlRes, actionItems, kidsRes, nowTasksRes] = await Promise.all([
+  const [mlRes, needsYou, kidsRes, nowTasksRes] = await Promise.all([
     // NEWEST by created_at — the same pick the job tab and ensureJobMaterialList make, so the
     // Materials button below lands on the ONE list the crew and the office both call "the"
     // list. order("id") sorted UUIDs: arbitrary, and on a two-list job a different list from
@@ -258,6 +260,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
     // audit v921: the feeder's day cuts are calendar-day decisions — hand it the ORG tz so
     // "before today" means org midnight, not UTC's (a 5:30 PM visit surfaced a day late).
     // `off`: the same plain string the app shell's badge passes, so both share one fan-out.
+    // TWO LISTS, ONE BUILD (Wave 1, NY-list): Now (the card, and the badge) and Waiting (the fold).
     getActionItems({ todayStr, isStaff, userId: user?.id ?? "", tz, off: offFeatureKey(features) }),
     six.length
       ? supabase
@@ -368,10 +371,10 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
   const niceDay = prettyDay(todayStr);
   const empty = (label: string) => <p className="px-5 py-6 text-center text-sm text-slate-400">{label}</p>;
 
-  // Needs You shows the top 5 (the query already sorts urgent-first);
-  // ?actions=all expands to the full list without a client component.
-  const showAllActions = actionsRaw === "all";
-  const visibleActions = showAllActions ? actionItems : actionItems.slice(0, 5);
+  // NEEDS YOU, WHOLE (Wave 1, NY-list): no five-row cut and no Show All. The same-kind piles keep it
+  // short ("Estimates Not Sent · 6" is one row), and everything waiting sits in the Waiting fold.
+  // The Send sheet's Text It hears the company's texting, read once here.
+  const textReady = smsReadiness(orgRow as { name?: string | null; settings?: unknown } | null).ready;
 
   // ── Agenda (Earlier / Next / Later) ─────────────────────────────────────────
   // One chronological stream of WHERE YOU'LL BE — timed jobs + appointments,
@@ -1012,25 +1015,30 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
       {/* A supplier paper filed from the LAST card leaves no "Supplier Bills" line to hold its
           sentence and Undo; they land here instead, until he leaves the page. */}
       <SupplierPaperDoneTrail scope={SUPPLIER_PAPERS_SCOPE} />
-      {actionItems.length > 0 && (
+      {(needsYou.now.length > 0 || needsYou.waiting.length > 0) && (
         <Card className="mb-4 overflow-hidden">
           <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3">
             <h2 className="text-sm font-semibold text-slate-900">Needs You</h2>
-            <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-bold text-amber-700">
-              {actionItems.length}
-            </span>
+            {/* The open count (a pile counts one), the same number as the dock's badge. Nothing to
+                act on now: no pill (zero shows no badge). */}
+            {needsYou.now.length > 0 && (
+              <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-bold text-amber-700">{needsYou.now.length}</span>
+            )}
           </div>
           <div className="p-3">
-            <ActionList items={visibleActions} people={people} todayStr={todayStr} tz={tz} leadsOn={leadsOn} />
+            <ActionList
+              items={needsYou.now}
+              people={people}
+              todayStr={todayStr}
+              tz={tz}
+              leadsOn={leadsOn}
+              isStaff={isStaff}
+              textReady={textReady}
+              emptyLabel="Nothing needs you right now."
+            />
           </div>
-          {!showAllActions && actionItems.length > 5 && (
-            <Link
-              href={view === "week" ? `/planner?view=week${weekOffset ? `&week=${weekOffset}` : ""}&actions=all` : "/planner?actions=all"}
-              className="flex min-h-11 items-center justify-center border-t border-slate-100 px-5 text-center text-sm font-medium text-brand hover:bg-slate-50"
-            >
-              Show All {actionItems.length} →
-            </Link>
-          )}
+          {/* WAITING (N): each thing waiting, why, and the day it comes back. Grey, never a badge. */}
+          <WaitingFold items={needsYou.waiting} />
         </Card>
       )}
 

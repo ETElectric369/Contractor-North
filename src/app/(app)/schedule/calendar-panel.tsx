@@ -68,9 +68,11 @@ export async function CalendarPanel() {
         .lte("due_date", jobTo.slice(0, 10))
         .order("due_date")
         .limit(500),
-      // "To schedule" tray — the SAME definition as the action-items
-      // job_to_schedule feeder (query.ts): every still-in-flight dateless job,
-      // via the ACTIVE_JOB_STATUSES spine, so the tray and the inbox can't drift.
+      // "To schedule" tray: every still-in-flight job with no scheduled_start, via the
+      // ACTIVE_JOB_STATUSES spine (held jobs included: the tray places them). Needs You asks a
+      // wider question of the same jobs (action-items/jobs-needing-a-day: is ANYTHING ahead of it?
+      // no day, segment, visit or clock today or later), so a job whose date has passed with
+      // nothing next is there too, and a held job waits there with its own day instead.
       supabase
         .from("jobs")
         .select("id, job_number, name, customers(name)")

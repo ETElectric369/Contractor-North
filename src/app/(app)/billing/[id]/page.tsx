@@ -44,6 +44,7 @@ import { pendingTransfers, transferOnItsWaySentence } from "@/lib/bank-transfer"
 import { netTermsDays } from "@/lib/invoice-due";
 import { estimateIsTheContract, isLiveQuote } from "@/lib/invoice-import-rule";
 import type { Invoice, InvoiceItem, Payment } from "@/lib/types";
+import { embeddedJob, isFinishedJobStatus } from "@/lib/action-items/due-filters";
 
 export const dynamic = "force-dynamic";
 
@@ -70,7 +71,7 @@ export default async function InvoicePage({
      silence cn-v962 traded the edit lock for. */
   const { data: invoice, error: invoiceErr } = await supabase
     .from("invoices")
-    .select("*, customers(id, name, pricing_levels(markup_pct)), quotes(id, quote_number)")
+    .select("*, customers(id, name, pricing_levels(markup_pct)), quotes(id, quote_number), jobs:job_id(status)")
     .eq("id", id)
     .maybeSingle();
 
@@ -84,6 +85,9 @@ export default async function InvoicePage({
   // The customer/job pickers only matter while the invoice is still an editable
   // draft, so only pay for those lookups then.
   const isDraft = inv.status === "draft";
+  // A draft whose job is finished or cancelled waits on nothing (parkInvoice refuses a day, and Needs
+  // You keeps it on top as "Finished · Send"), so Set Aside Until… is not drawn on it.
+  const jobIsOver = isFinishedJobStatus(embeddedJob<{ status?: string | null }>((inv as { jobs?: unknown }).jobs)?.status);
 
   const [{ data: items, error: itemsErr }, { data: payments, error: paymentsErr }, { data: priceItems, error: priceItemsErr }, { data: kits }, { data: taxRates }, { data: org }, { data: customers }, { data: jobs }] =
     await Promise.all([
@@ -340,7 +344,7 @@ export default async function InvoicePage({
 
   return (
     <div className="mx-auto max-w-4xl">
-      <BackLink fallback="/billing" fallbackLabel="Back to Billing" />
+      <BackLink fallback="/billing" fallbackLabel="Back To Invoices" />
 
       <div className="mb-6 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex flex-col gap-2">
@@ -463,7 +467,7 @@ export default async function InvoicePage({
               defaultAmount={invoiceOverpayment(inv.total, inv.amount_paid)}
             />
             {qboOn && <QboInvoiceButton menuItem id={inv.id} />}
-            {isDraft && (
+            {isDraft && !jobIsOver && (
               <SetAsideButton
                 invoiceId={inv.id}
                 tz={orgSettings.timezone}

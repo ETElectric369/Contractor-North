@@ -193,12 +193,22 @@ describe("My Day's cards (structural: the page is a server component over the da
   it("the decision inbox is called Needs You (Nort's words and the morning push say it too, same release)", () => {
     expect(pageCode).toContain('<h2 className="text-sm font-semibold text-slate-900">Needs You</h2>');
     expect(pageCode).not.toMatch(/Needs action/i);
-    // Its list is untouched here: ActionList's props and the one getActionItems call stay as they are.
-    expect(pageCode).toContain("<ActionList items={visibleActions} people={people} todayStr={todayStr} tz={tz} leadsOn={leadsOn} />");
+    // ONE call for both lists (the shell's badge shares its fan-out).
     expect(pageCode).toContain('getActionItems({ todayStr, isStaff, userId: user?.id ?? "", tz, off: offFeatureKey(features) })');
     expect(pageCode.match(/getActionItems\(/g)).toHaveLength(1);
-    // Show All is a 44px door too.
-    expect(pageCode).toMatch(/className="flex min-h-11 items-center justify-center border-t[^"]*"\s*>\s*Show All/);
+  });
+
+  it("Needs You is whole (no five-row cut, no Show All), with the Waiting fold under it (Wave 1, NY-list)", () => {
+    expect(pageCode).toMatch(
+      /<ActionList\s+items=\{needsYou\.now\}\s+people=\{people\}\s+todayStr=\{todayStr\}\s+tz=\{tz\}\s+leadsOn=\{leadsOn\}\s+isStaff=\{isStaff\}\s+textReady=\{textReady\}/,
+    );
+    expect(pageCode).toContain("<WaitingFold items={needsYou.waiting} />");
+    for (const gone of ["slice(0, 5)", "actions=all", "Show All", "visibleActions", "showAllActions"]) expect(pageCode, gone).not.toContain(gone);
+    // The card is drawn when either list has something; its pill is the open count, and none at zero.
+    expect(pageCode).toContain("{(needsYou.now.length > 0 || needsYou.waiting.length > 0) && (");
+    expect(pageCode).toMatch(/\{needsYou\.now\.length > 0 && \(\s*<span className="rounded-full bg-amber-100[^"]*">\{needsYou\.now\.length\}<\/span>/);
+    // The Send sheet's Text It hears the company's texting, read once on the page.
+    expect(pageCode).toContain("const textReady = smsReadiness(");
   });
 
   it("the Daily Reports card stays while a report waits for review, with the Off line on top", () => {

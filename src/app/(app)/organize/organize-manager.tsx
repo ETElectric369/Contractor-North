@@ -93,7 +93,7 @@ export function OrganizeManager({
 
   const tray = items.filter((i) => i.status === "needs_review");
   // ONE INBOX, ONE ACTION (0295): every paper in the tray renders the SAME card Snap Or Note and
-  // Sort These on /bills render, and files through the same answers. A note keeps its own card,
+  // Needs You on /bills render, and files through the same answers. A note keeps its own card,
   // because what matters on a note is the words on it.
   const trayPapers = tray.filter((i) => i.kind !== "note");
   const trayNotes = tray.filter((i) => i.kind === "note");
@@ -128,7 +128,7 @@ export function OrganizeManager({
     // A BANK DOWNLOAD's Back is its whole Undo: everything it wrote comes off. Asked first, as the
     // card's own Undo This Download is.
     const filedHow = proposalOf(item).filed?.how;
-    if (filedHow === "bank_download" && !confirm("Undo this whole bank download? Everything it wrote comes off, and every line waits in Sort These again.")) return;
+    if (filedHow === "bank_download" && !confirm("Undo this whole bank download? Everything it wrote comes off, and every line waits under Needs You on Bills again.")) return;
     start(async () => {
       const res = await unarchiveItem(item.id);
       if (!res?.ok) { toast(res?.error ?? "Couldn't restore — try again.", "error"); return; }

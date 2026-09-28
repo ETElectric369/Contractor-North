@@ -21,8 +21,11 @@ import { PortalLinkButton } from "./portal-link-button";
 import { SectionActionsMenu } from "@/components/section-actions-menu";
 import { customerSectionTree } from "@/lib/nav-tree";
 import { NewJobButton } from "../../schedule/new-job-button";
+import { FIXED_PILL_CLASS, isFixedPrice } from "@/lib/doc-label";
 import { AppointmentButton } from "../../appointments/appointment-button";
-import { toJobOptions, toStaffOptions, listActiveTechs } from "@/lib/schedule-options";
+import { toJobOptions, toStaffOptions, listActiveTechs, readUsualBillingKind, unitStreetKeys } from "@/lib/schedule-options";
+import { getOrgSettings, workDayWindowHm } from "@/lib/org-settings";
+import { todayStrInTz } from "@/lib/tz";
 import { deleteCustomer } from "../actions";
 import type { Customer, Job, Quote } from "@/lib/types";
 import { countOpen, isOpenInvoice, isOpenJob, isOpenQuote } from "@/lib/open-counts";
@@ -58,6 +61,9 @@ export default async function CustomerDetailPage({
   const { data: meRow } = await supabase.from("profiles").select("role, active, organizations(settings)").eq("id", user?.id ?? "").maybeSingle();
   const viewerIsStaff = isStaffRole((meRow as any)?.role ?? "");
   const sw = switchesFromRow(meRow);
+  // The company's settings off the same embed: New Job's clock (its timezone and work-day start).
+  const orgEmbed = (meRow as { organizations?: unknown } | null)?.organizations;
+  const orgSettingsRaw = ((Array.isArray(orgEmbed) ? orgEmbed[0] : orgEmbed) as { settings?: unknown } | null | undefined)?.settings;
 
   // ONE ROUND, NOT THREE (audit v921). The linked-jobs read depends only on `id` and the merge
   // pick-list only on viewerIsStaff — both already known — so they waited behind this batch for
@@ -75,16 +81,19 @@ export default async function CustomerDetailPage({
     { data: otherCustomers },
     { data: portalRow },
     { data: portalDevices },
+    usualBilling,
   ] = await Promise.all([
     supabase
       .from("jobs")
-      // address parts ride along for the appointment picker's site prefill (toJobOptions).
-      .select("id, name, job_number, status, address, city, state, zip")
+      // address parts ride along for the appointment picker's site prefill (toJobOptions); the unit
+      // for New Job's "another job here has a unit" hint.
+      .select("id, name, job_number, status, address, city, state, zip, unit")
       .eq("customer_id", id)
       .order("created_at", { ascending: false }),
     supabase
       .from("quotes")
-      .select("id, quote_number, total, status")
+      // doc_type: the Estimates tab's Fixed chip (W1-25) turns on it (projection law).
+      .select("id, quote_number, total, status, doc_type")
       .eq("customer_id", id)
       .order("created_at", { ascending: false }),
     supabase
@@ -132,6 +141,8 @@ export default async function CustomerDetailPage({
           () => ({ data: null }),
         )
       : Promise.resolve({ data: null }),
+    // New Job's Billing starts at the kind most of this company's jobs use (office only: New Job is).
+    viewerIsStaff ? readUsualBillingKind(supabase) : Promise.resolve("tm" as const),
   ]);
   const deviceCount = Number(portalDevices?.devices);
   // CUSTOMER PORTAL OFF (0352, rule f): the office's link controls aren't drawn. The link row is
@@ -275,7 +286,13 @@ export default async function CustomerDetailPage({
           <RowList
             items={((quotes as Quote[] | null) ?? []).map((q) => ({
               key: q.id,
-              label: q.quote_number,
+              // THE FIXED CHIP (W1-25): fixed-price rows only; Time & Material wears nothing.
+              label: (
+                <>
+                  {q.quote_number}
+                  {isFixedPrice(q) && <span className={FIXED_PILL_CLASS}>Fixed</span>}
+                </>
+              ),
               value: formatCurrency(q.total),
               badge: { tone: statusTone(q.status), text: q.status },
               href: `/quotes/${q.id}`,
@@ -348,8 +365,27 @@ export default async function CustomerDetailPage({
           {viewerIsStaff && (
             <>
               <NewJobButton
-                customers={[{ id: c.id, name: c.name, address: formatFullAddress(c.address, c.city, c.state, c.zip) || null }]}
+                customers={[
+                  {
+                    id: c.id,
+                    name: c.name,
+                    address: formatFullAddress(c.address, c.city, c.state, c.zip) || null,
+                    // The parts, so the street box gets the street and the rest ride hidden (W1-22),
+                    // and the name line calls a business by its name.
+                    company_name: c.company_name ?? null,
+                    type: c.type ?? null,
+                    street: c.address ?? null,
+                    city: c.city ?? null,
+                    state: c.state ?? null,
+                    zip: c.zip ?? null,
+                  },
+                ]}
                 defaultCustomerId={c.id}
+                // The company's clock, its usual billing, and this customer's streets with a unit.
+                workDay={workDayWindowHm(orgSettingsRaw)}
+                todayStr={todayStrInTz(getOrgSettings(orgSettingsRaw).timezone)}
+                usualBilling={usualBilling}
+                unitStreets={unitStreetKeys((jobs ?? []) as { address?: string | null; unit?: string | null }[])}
               />
               <AppointmentButton
                 jobs={toJobOptions(jobs)}

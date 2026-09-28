@@ -70,12 +70,28 @@ describe("DOCK time doors — Schedule after Today, Clock is the crew's, Timecar
     expect((clock?.children ?? []).map((c) => c.href)).toEqual(["/timeclock"]);
   });
 
-  it("Timecards lives under Money, right after Payments, office-only, and owns /timeclock", () => {
+  it("Timecards lives under Money, right after Invoices, office-only, and owns /timeclock", () => {
     const money = DOCK.find((s) => s.key === "invoices")!.children;
     const at = money.findIndex((c) => c.id === "ck-cards");
     expect(money[at]).toMatchObject({ label: "Timecards", href: "/timecards", staffOnly: true, owns: ["/timeclock"] });
-    expect(money[at - 1]?.id).toBe("m-pay");
+    expect(money[at - 1]?.id).toBe("m-inv");
     expect(money[at + 1]?.id).toBe("m-bills");
+  });
+
+  /**
+   * ONE INVOICES PAGE (W1-29): Accounts Receivable and Payments folded into /billing (By Customer and
+   * Payments In), and their old routes redirect there, so they have no row. PETTY CASH LEFT THE MENU
+   * (W1-34): a company with rows finds it in Search Or Ask. No new badge: the Money tile carries none.
+   */
+  it("Money has one row for the money coming in (Invoices), and no Accounts Receivable, Payments or Petty Cash row", () => {
+    const money = DOCK.find((s) => s.key === "invoices")!.children;
+    const ids = money.map((c) => c.id);
+    for (const gone of ["m-ar", "m-pay", "ma-petty"]) expect(ids, gone).not.toContain(gone);
+    const hrefs = money.map((c) => c.href).filter(Boolean).map((h) => basePath(h!));
+    for (const gone of ["/billing/ar", "/payments", "/petty-cash"]) expect(hrefs, gone).not.toContain(gone);
+    expect(money.filter((c) => c.href && basePath(c.href) === "/billing").map((c) => c.id)).toEqual(["m-inv"]);
+    // The old routes still light Money (they're under /billing, or redirect there before they render).
+    expect(activeSection("/billing/ar")?.key).toBe("invoices");
   });
 
   it("zero duplication: /schedule and /timecards each have exactly one dock home", () => {

@@ -24,7 +24,9 @@ import { findHeaderRow, fingerprintOf, headerKey, readDate, readHeaderRow, readH
  *          and the office may record the pay a few days after the bank posts it);
  *        · a payment to an on-account supplier whose name, spelling or number the line carries is
  *          that supplier's payment;
- *        · an ATM withdrawal is a petty-cash top-up of the same amount within 3 days;
+ *        · an ATM withdrawal is a petty-cash top-up of the same amount within 3 days, when one was
+ *          already written (so it counts once); otherwise its guess is Cash Taken Out (Not A Cost),
+ *          which writes nothing (W1-34);
  *        · anything else is a bill for the same amount within 3 days whose supplier the line names
  *          (a word they share, or the name's start), never one a supplier's account pays (those are
  *          paid through the account), and never for a transfer between the company's own accounts.
@@ -595,12 +597,17 @@ export function readBankTable(table: readonly (readonly string[])[], name: strin
 // ── CHOICES ────────────────────────────────────────────────────────────────────────────────────
 
 /** A business cost is its bucket and nothing more: Fuel is a bucket of its own (0362), so a fill-up
- *  is "cost:Fuel" and the truck's repairs "cost:Auto". */
+ *  is "cost:Fuel" and the truck's repairs "cost:Auto".
+ *
+ *  CASH TAKEN OUT (NOT A COST) (Erik, 2026-09-27; W1-34): an ATM withdrawal. It writes NO row, like
+ *  Not A Cost (Transfer): the cash counts only when its receipts come in, filed as costs paid with
+ *  cash. It is never Owner's Draw, and there is no running cash-box balance. It was Petty Cash
+ *  (ATM), which wrote a petty-cash top-up; those already written still count once, and still Undo. */
 export type BankChoice =
   | { choice: "cost"; bucket: BusinessCostBucket }
   | { choice: "draw" }
   | { choice: "personal" }
-  | { choice: "petty_cash" }
+  | { choice: "cash_out" }
   | { choice: "not_cost" }
   | { choice: "supplier"; supplierAccountId: string }
   | { choice: "crew"; profileId: string }
@@ -609,6 +616,21 @@ export type BankChoice =
   | { choice: "not_income" };
 
 export type ChoiceName = BankChoice["choice"];
+
+/**
+ * THE WORD A CHOICE IS STORED AS (bank_lines.choice, bank_rules.choice). 0363's CHECK names the words
+ * a row may hold, and Cash Taken Out is kept under the one it replaced, 'petty_cash': a line applied
+ * that way before W1-34 wrote a top-up, one applied after writes nothing, and both are cash that left
+ * the bank. Read back through storedChoiceName, so the app only ever sees cash_out. No migration.
+ */
+export const CASH_OUT_STORED = "petty_cash";
+export function storedChoice(c: BankChoice): string {
+  return c.choice === "cash_out" ? CASH_OUT_STORED : c.choice;
+}
+/** A stored word as the app's choice name (the legacy word for Cash Taken Out comes back as cash_out). */
+export function storedChoiceName(word: string): string {
+  return word === CASH_OUT_STORED ? "cash_out" : word;
+}
 
 /** A choice as one string, for a button's value and the fingerprint. */
 export function choiceId(c: BankChoice): string {
@@ -643,9 +665,12 @@ export function parseChoiceId(id: unknown): BankChoice | null {
       return UUIDISH.test(a ?? "") ? { choice: "crew", profileId: a } : null;
     case "invoice":
       return UUIDISH.test(a ?? "") ? { choice: "invoice", invoiceId: a } : null;
+    // Cash Taken Out, and the word it had before W1-34 (a card's pick saved under the old name).
+    case "cash_out":
+    case CASH_OUT_STORED:
+      return s === head ? { choice: "cash_out" } : null;
     case "draw":
     case "personal":
-    case "petty_cash":
     case "not_cost":
     case "other_income":
     case "not_income":
@@ -678,8 +703,8 @@ export function choiceLabel(c: BankChoice, names: BankNames): string {
       return "Owner's Draw";
     case "personal":
       return "Personal";
-    case "petty_cash":
-      return "Petty Cash (ATM)";
+    case "cash_out":
+      return "Cash Taken Out (Not A Cost)";
     case "not_cost":
       return "Not A Cost (Transfer)";
     case "supplier":
@@ -958,7 +983,8 @@ export function guessFor(line: BankLine, books: BankBooks, used?: ReadonlySet<st
   const d = line.description.replace(/[*_]/g, " ");
   // A transfer is asked first: "ONLINE TRANSFER WITHDRAWAL TO XXXX9876" is the owner's, not an ATM.
   if (TRANSFER_RE.test(d) && !PROCESSOR_RE.test(d)) return { choice: "draw" };
-  if (ATM_RE.test(d)) return { choice: "petty_cash" };
+  // An ATM: Cash Taken Out (Not A Cost). The cash counts when its receipts come in.
+  if (ATM_RE.test(d)) return { choice: "cash_out" };
   if (INSURANCE_RE.test(d)) return { choice: "cost", bucket: "Insurance & Licenses" };
   if (FEE_RE.test(d)) return { choice: "cost", bucket: "Fees" };
   if (AUTO_RE.test(d)) return AUTO;
@@ -1397,7 +1423,7 @@ export function everyChoice(direction: "in" | "out", books: Pick<BankBooks, "acc
   }
   // Every bucket, Fuel and Auto first (the list's own order).
   const out: BankChoice[] = BUSINESS_COST_BUCKETS.map((b): BankChoice => ({ choice: "cost", bucket: b }));
-  out.push({ choice: "draw" }, { choice: "personal" }, { choice: "petty_cash" }, { choice: "not_cost" });
+  out.push({ choice: "draw" }, { choice: "personal" }, { choice: "cash_out" }, { choice: "not_cost" });
   for (const a of books.accounts) if (a.onAccount) out.push({ choice: "supplier", supplierAccountId: a.id });
   for (const c of books.crew) out.push({ choice: "crew", profileId: c.id });
   return out;
@@ -1436,7 +1462,7 @@ export type FlowSegment = { key: string; label: string; cents: number };
  * THE BAR'S SEGMENTS, in Money by Month's words (money-chart.ts): Fuel on its own (the Fuel
  * bucket, the one Erik watches), every other business cost as ONE Business Costs segment (six
  * pinks side by side read as one colour anyway, and the legend is the place for names), Materials &
- * Bills, Crew Pay, Owner's Draw. The rest are the bank's own: Suppliers, Petty Cash, Transfers,
+ * Bills, Crew Pay, Owner's Draw. The rest are the bank's own: Suppliers, Cash Taken Out, Transfers,
  * Personal, Already In North, Needs You.
  */
 export function flowLabelOf(choice: string, bucket: string | null): { key: string; label: string } {
@@ -1448,8 +1474,11 @@ export function flowLabelOf(choice: string, bucket: string | null): { key: strin
       return { key: "draw", label: "Owner's Draw" };
     case "personal":
       return { key: "personal", label: "Personal" };
-    case "petty_cash":
-      return { key: "petty", label: "Petty Cash" };
+    // An ATM's cash (W1-34), its own segment: no cost yet, and never the owner's. A line stored under
+    // the old word (an ATM top-up applied before) is the same money.
+    case "cash_out":
+    case CASH_OUT_STORED:
+      return { key: "cash_out", label: "Cash Taken Out" };
     case "not_cost":
       return { key: "not_cost", label: "Transfers" };
     case "supplier":
@@ -1490,7 +1519,7 @@ export function moneyFlow(dl: BankDownload, plan: BankPlan, books: BankBooks): {
     } else if (d.how === "match") {
       if (d.table === "supplier_payments") add({ key: "suppliers", label: "Suppliers" }, amt);
       else if (d.table === "pay_payments") add({ key: "crew", label: "Crew Pay" }, amt);
-      else if (d.table === "petty_cash") add({ key: "petty", label: "Petty Cash" }, amt);
+      else if (d.table === "petty_cash") add(flowLabelOf("cash_out", null), amt);
       else {
         const b = billOf.get(d.ids[0]);
         add(b && !b.jobId ? flowLabelOf("cost", b.category) : { key: "materials", label: "Materials & Bills" }, amt);

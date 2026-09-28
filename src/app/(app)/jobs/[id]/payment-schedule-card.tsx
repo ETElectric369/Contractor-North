@@ -15,6 +15,39 @@ import { setPaymentSchedule, requestNextPayment } from "../../billing/actions";
 
 type Row = { label: string; percent: number };
 
+/**
+ * REQUEST NEXT PAYMENT, ONE DOOR (W1-19). The schedule card below and the Overview's Left To Bill
+ * card both ask for the next payment; this is the one click behind both (requestNextPayment on the
+ * server), so the two can never answer differently. A refusal says why in `error`, and one that
+ * names the open draft carries it as a toast's Open door; a new or refreshed draft is opened with the
+ * server's own sentence.
+ */
+export function useRequestNextPayment(jobId: string) {
+  const router = useRouter();
+  const toast = useToast();
+  const [pending, start] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+
+  function requestNext() {
+    setError(null);
+    start(async () => {
+      const res = await requestNextPayment(jobId);
+      if (!res.ok || !res.id) {
+        // A refusal that names the open draw carries it, so the way out is one tap, not a hunt.
+        const door = res.openDraft;
+        setError(res.error ?? "Could not create the payment.");
+        if (door) toast(res.error ?? "", "error", { label: `Open ${door.number}`, onClick: () => router.push(`/billing/${door.id}`) });
+        return;
+      }
+      // Landing on an open time-and-materials draw says what it pulled ("Pulled 12 hours and 1 bill
+      // into INV-078."); a brand-new draw has nothing to add.
+      if (res.note) toast(res.note, res.partial ? "error" : "info");
+      router.push(`/billing/${res.id}`);
+    });
+  }
+  return { pending, error, requestNext };
+}
+
 /** The "payment structure" for a job (the deal-to-cash spine, Phase 1). Fixed-Bid
  *  jobs get a milestone schedule (% of contract) and a one-click "Request next
  *  payment" that drafts the next draw; T&M jobs request the next payment off the
@@ -57,31 +90,11 @@ export function PaymentScheduleCard({
   drawsBilled?: boolean;
 }) {
   const router = useRouter();
-  const toast = useToast();
-  const [pending, start] = useTransition();
-  const [error, setError] = useState<string | null>(null);
+  const { pending, error, requestNext } = useRequestNextPayment(jobId);
   const [editing, setEditing] = useState(false);
 
   const status = scheduleStatus(milestones, contractTotal);
   const billingStarted = status.rows.some((r) => r.billed);
-
-  function requestNext() {
-    setError(null);
-    start(async () => {
-      const res = await requestNextPayment(jobId);
-      if (!res.ok || !res.id) {
-        // A refusal that names the open draw carries it, so the way out is one tap, not a hunt.
-        const door = res.openDraft;
-        setError(res.error ?? "Could not create the payment.");
-        if (door) toast(res.error ?? "", "error", { label: `Open ${door.number}`, onClick: () => router.push(`/billing/${door.id}`) });
-        return;
-      }
-      // Landing on an open time-and-materials draw says what it pulled ("Pulled 12 hours and 1 bill
-      // into INV-078."); a brand-new draw has nothing to add.
-      if (res.note) toast(res.note, res.partial ? "error" : "info");
-      router.push(`/billing/${res.id}`);
-    });
-  }
 
   if (billingType === "tm") {
     return (
@@ -112,7 +125,7 @@ export function PaymentScheduleCard({
             <CalendarClock className="h-4 w-4" /> Payment schedule
           </div>
           {hasSchedule && scheduleEditable && (
-            <button onClick={() => setEditing(true)} className="text-xs font-medium text-brand hover:underline">Edit</button>
+            <button onClick={() => setEditing(true)} className="inline-flex min-h-11 items-center px-1 text-xs font-medium text-brand hover:underline">Edit</button>
           )}
         </div>
 

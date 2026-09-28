@@ -479,12 +479,12 @@ describe("the doors", () => {
     expect(f.proposal.openList?.list?.from).toBe("reader");
   });
 
-  it("the paste box sends a pasted open list to Sort These instead of refusing it", async () => {
+  it("the paste box sends a pasted open list to Needs You instead of refusing it", async () => {
     db.organized_items = [];
     const tsv = parseCSV(CED_OPEN_CSV).map((r) => r.join("\t")).join("\n");
     const res = await importCedInvoices({ text: tsv });
     expect(res.ok).toBe(true);
-    expect(res.message).toContain("waiting in Sort These");
+    expect(res.message).toContain("waiting under Needs You on Bills");
     expect(db.organized_items).toHaveLength(1);
     expect(db.organized_items[0].proposal.openList.list.rows).toHaveLength(11);
     // No supplier paper was touched by the paste itself.

@@ -37,12 +37,15 @@ describe("the paper readers say Nort only while Nort is on", () => {
     expect(src("src/app/(app)/price-list/vendors-manager.tsx")).toContain("<VendorImport existing={existingVendors} nortOn={nortOn} />");
   });
 
-  it("Snap The Bill and Receipts & Documents hand the switch to the receipt pipeline", () => {
-    for (const f of ["src/app/(app)/jobs/[id]/job-cost-capture.tsx", "src/app/(app)/jobs/[id]/job-documents.tsx"]) {
-      const s = src(f);
-      expect(s, f).toMatch(/captureReceipt\(\{[^}]*nortOn \}\)/);
-      expect(s, f).toMatch(/readReceiptDocument\([^;]*, nortOn\)/);
-    }
+  it("Snap The Bill and Receipts & Papers hand the switch to the receipt pipeline", () => {
+    // Snap The Bill (and its ⋯ Upload) is the Costs tab's one way in (W1-23): it files and reads.
+    const capture = src("src/app/(app)/jobs/[id]/job-cost-capture.tsx");
+    expect(capture).toMatch(/captureReceipt\(\{[^}]*nortOn \}\)/);
+    expect(capture).toMatch(/readReceiptDocument\([^;]*, nortOn\)/);
+    // Receipts & Papers is the filed list now, with no uploader of its own: Record As Cost reads.
+    const papers = src("src/app/(app)/jobs/[id]/job-documents.tsx");
+    expect(papers).toMatch(/readReceiptDocument\([^;]*, nortOn\)/);
+    expect(papers).not.toContain("captureReceipt(");
     expect(unswitched("src/lib/receipt-capture.ts")).toEqual([]);
   });
 });

@@ -1223,7 +1223,7 @@ export function rematchPaper<T extends PaperItem>(
 
 /**
  * THE PICKER FOLLOWS THE SUGGESTION UNTIL A PERSON TOUCHES IT. A row renders before its paper is
- * read (Drop Paperwork adds the row, then reads it); a picker seeded once at mount would miss the
+ * read (Snap Or Note adds the row, then reads it); a picker seeded once at mount would miss the
  * job the paper names when the read lands. `picked` is null until a person chooses; after that,
  * theirs wins, including choosing nothing.
  */
@@ -1418,7 +1418,7 @@ export function findSameNumber(
  * the receipt first, is the bank download's own match.
  *
  * NOT ONLY THE BANK DOOR'S (review of release/v1026): a business cost with no job and no number
- * written any other way (Add Business Cost, or a company's fill-ups loaded by hand from a bank
+ * written any other way (Add By Hand, or a company's fill-ups loaded by hand from a bank
  * export before the bank door existed) is the same shape, and a pump receipt of its money within 3
  * days is the same purchase just as surely. loadBooks brings both; only the bank door's says "from
  * the bank download".

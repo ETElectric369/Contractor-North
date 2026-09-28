@@ -5,7 +5,7 @@ import { isCompoundFile, readXls } from "@/lib/xls-read";
 import { looksLikeOfx, readOfx } from "@/lib/ofx-read";
 
 /**
- * A LIST FILE, READ IN THE BROWSER (2026-09-26; bank downloads 2026-09-27). Drop Paperwork and
+ * A LIST FILE, READ IN THE BROWSER (2026-09-26; bank downloads 2026-09-27). Snap Or Note and
  * Organize take a supplier's open-list download or a bank's account download exactly where they
  * take any other paper; this turns the file into rows of cells, and the server decides what the
  * rows are (a bank download: bank-download.ts; a supplier's list: supplier-open-list.ts). Reading

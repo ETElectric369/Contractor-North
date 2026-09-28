@@ -3,19 +3,19 @@
 import { useEffect, useState, useTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { Plus, Trash2, FileText } from "lucide-react";
+import { MoreHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Modal, ModalActions } from "@/components/ui/modal";
-import { Tabs } from "@/components/tabs";
 import { useToast } from "@/components/toast";
 import { Fold, WhyFold } from "@/components/why-fold";
 import { openFoldsTo } from "@/components/fold-opener";
+import { RowMoreSheet, SHEET_ROW } from "@/components/row-more-sheet";
 import { formatCurrency, formatDate } from "@/lib/utils";
-import { createBill, deleteDocument } from "../jobs/actions";
+import { deleteDocument } from "../jobs/actions";
 import { BillRowDoors } from "@/components/bill-row-doors";
 import { BillPaperDoors } from "@/components/bill-paper-doors";
 import type { BillPaper } from "@/lib/job-photos";
@@ -30,7 +30,8 @@ import { splitReceiptBilling } from "./receipt-billing";
 import { ReceiptLines, type ReceiptForBilling } from "./receipt-billing-card";
 import { AlreadyBilledButton, NotBilledAfterAllButton } from "@/components/already-billed-sheet";
 import type { BillAlreadyBilled } from "@/lib/already-billed";
-import { countOpen, isOpenBill, isOpenPurchaseOrder } from "@/lib/open-counts";
+import { isOpenBill } from "@/lib/open-counts";
+import { useBillsSearch } from "./bills-search-box";
 
 interface JobOption {
   id: string;
@@ -95,8 +96,6 @@ interface DocRow {
   jobs?: { name: string } | null;
 }
 
-type LedgerTab = "po" | "bills" | "receipts";
-
 /**
  * ALREADY BILLED ON THE BILL'S OWN ROW (0357, Erik: "the Already Billed could connect to the bill on
  * that screen too"): the same sheet the job's Costs tab opens, from the bill he is looking at, or the
@@ -113,17 +112,25 @@ export function BillAlreadyBilledDoor({ bill, door }: { bill: Pick<BillRow, "id"
   );
 }
 
+/** What kind of row it is, in one small word before its name: a purchase order, or a file. */
+function Kind({ children }: { children: string }) {
+  return <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500">{children}</span>;
+}
+
 /**
- * ALL BILLS: THE LEDGER, FOLDED (Bills plan, Wave B).
+ * ALL BILLS: ONE SEARCHABLE LIST (W1-32; it had Bills, Purchase Orders and Receipts tabs, and All /
+ * Job Bills / Business Costs chips over the bills).
  *
- * One line on the page ("All Bills (58) · $X") that opens to the ledger. Inside, Bills comes first
- * (it opened on the empty Purchase Orders tab), each bill is ONE ROW with the supplier's number on
- * it, and a row opens to that bill's detail: how it was bought, Edit, Delete, and its lines. A
- * receipt's lines carry their billing switches right there, which is where the old 46-row "What
- * Your Customers Get Billed" box (a scroll inside a scroll on a phone) went: one bill, one place.
+ * One line on the page, leading with what is OPEN ("All Bills · 9 Unpaid $X", never a total count),
+ * that opens to every bill (each ONE ROW with the supplier's number, opening to its detail: how it
+ * was bought, Edit, Delete, and its lines with their billing switches), every purchase order (a PO
+ * chip; they count in job cost whatever the switch says, so they are always listed) and every
+ * receipt file no bill holds yet (a File chip; Delete behind its ⋯). The search box at the top of the
+ * page filters it in place (bills-search-box). New PO is on the list's ⋯ while Purchase Orders is on.
  *
- * Every tab's panel is in the page (the inactive ones `hidden`), so a link to a bill ("#bill-...",
- * from the search box) always has somewhere to land, and FoldOpener opens the folds around it.
+ * Every row is in the page, so a link to a bill ("#bill-...") always has somewhere to land and
+ * FoldOpener opens the folds around it; a typed filter that would hide it is cleared first.
+ * /purchasing lands here as ?tab=po: the list open, the orders first.
  */
 export function BillsReceipts({
   // Unused since the Receipts upload went (Wave 0); kept so the page's call doesn't change.
@@ -143,15 +150,15 @@ export function BillsReceipts({
   lists: ListOption[];
   pos: PoRow[];
   bills: BillRow[];
+  /** The receipt files no bill holds yet (the page decides; every file when it couldn't tell). */
   docs: DocRow[];
   /** The bills read failed (audit v1018, class 2): said, never "No bills here yet" and $0.00. */
   readFailed?: boolean;
   /** Said above the bills when the page couldn't read which receipt made which bill: every row then
    *  draws no Receipt door, and a bill that has one must not look like one that never had any. */
   papersNote?: string | null;
-  /** The switch board (0352). Purchase Orders off: the tab loses its chip (a ?tab=po link still
-   *  opens it, under the Off line) and New PO goes. The POs themselves are listed as ever. Shop
-   *  Stock off: a receipt line isn't offered to the shelf. Absent = all on, today's ledger. */
+  /** The switch board (0352). Purchase Orders off: New PO goes, and the orders are still listed,
+   *  under the Off line. Shop Stock off: a receipt line isn't offered to stock. Absent = all on. */
   switches?: { features: FeatureMap; isOwner: boolean };
   /** ALREADY BILLED on a bill's own row (0357), by bill id (lib/already-billed billAlreadyBilledDoors):
    *  Already Billed where its job's sheet could hold it, or Billed By Hand On INV-x with Not Billed
@@ -161,30 +168,18 @@ export function BillsReceipts({
   const poOn = featureOn(switches.features, "purchase_orders");
   const router = useRouter();
   const toast = useToast();
-  // Open straight to a tab from a deep link (?tab=po, ?tab=receipts), and open the fold with it.
-  // WITHOUT ONE IT OPENS ON BILLS (Bills plan, Wave A).
+  const { query, setQuery, keys } = useBillsSearch();
+  // A deep link says what leads: ?tab=po (from /purchasing) puts the orders first, ?tab=receipts
+  // the files. The list opens with it. Without one, bills lead.
   const spTab = useSearchParams().get("tab");
-  const [tab, setTab] = useState<LedgerTab>(spTab === "po" || spTab === "receipts" ? spTab : "bills");
+  const lead: "po" | "files" | null = spTab === "po" ? "po" : spTab === "receipts" ? "files" : null;
   const [pending, start] = useTransition();
-
-  // ── Bills add form ──
-  const [supplier, setSupplier] = useState("");
-  const [billNumber, setBillNumber] = useState("");
-  const [amount, setAmount] = useState(0);
-  const [status, setStatus] = useState("unpaid");
-  const [billDate, setBillDate] = useState("");
-  const [billJob, setBillJob] = useState("");
-  // No bucket is picked for him: a guessed "Shop supplies" default is how a gas receipt gets
-  // filed as supplies because nobody changed the box.
-  const [billCategory, setBillCategory] = useState("");
-  const [billFilter, setBillFilter] = useState<"all" | "jobs" | "overhead">("all");
-  const [billError, setBillError] = useState<string | null>(null);
   const [editBill, setEditBill] = useState<BillRow | null>(null);
 
-  // A LINK TO A BILL ALWAYS LANDS ON IT. FoldOpener opens the folds around "#bill-<id>", but the row
-  // is hidden on the Purchase Orders or Receipts tab and not rendered at all under a filter that
-  // leaves it out. So a bill link first puts the ledger on Bills, All, then opens the row once the
-  // list has re-rendered (the effect below). `n` makes the same link twice in a row land twice.
+  // A LINK TO A BILL ALWAYS LANDS ON IT. FoldOpener opens the folds around "#bill-<id>"; a typed
+  // filter that leaves it out would leave nothing to land on, so a bill link clears the filter first
+  // and opens the row once the list has re-rendered (the effect below). `n` makes the same link twice
+  // in a row land twice.
   const [landOn, setLandOn] = useState<{ id: string; n: number } | null>(null);
   useEffect(() => {
     const idOf = (hash: string) => {
@@ -197,8 +192,7 @@ export function BillsReceipts({
     const land = (hash: string) => {
       const id = idOf(hash);
       if (!id.startsWith("bill-")) return;
-      setTab("bills");
-      setBillFilter("all");
+      setQuery("");
       setLandOn((prev) => ({ id, n: (prev?.n ?? 0) + 1 }));
     };
     land(window.location.hash);
@@ -215,324 +209,246 @@ export function BillsReceipts({
       window.removeEventListener("hashchange", onHash);
       document.removeEventListener("click", onClick);
     };
-  }, []);
+  }, [setQuery]);
   useEffect(() => {
     if (landOn) openFoldsTo(landOn.id);
   }, [landOn]);
+  // Typing in the search box opens the list, so what it kept is there to see.
+  useEffect(() => {
+    if (!keys) return;
+    const fold = document.getElementById("all-bills");
+    if (fold instanceof HTMLDetailsElement && !fold.open) fold.open = true;
+  }, [keys]);
+  // Landing from /purchasing: the list open, and in view.
+  useEffect(() => {
+    if (lead === "po") openFoldsTo("all-bills");
+  }, [lead]);
 
-  const shownBills =
-    billFilter === "all" ? bills : bills.filter((b) => (billFilter === "jobs" ? b.job_id : !b.job_id));
-  // ONE RULE FOR EVERY TOTAL ON THIS LEDGER: a copy set aside as a duplicate is listed (struck
-  // through) but never added, so the fold's line and the list's line always say the same money.
-  const liveAmount = (list: BillRow[]) => list.filter((b) => !b.superseded).reduce((s, b) => s + (Number(b.amount) || 0), 0);
-  const totalBills = liveAmount(shownBills);
-  const shownSetAside = shownBills.filter((b) => b.superseded).length;
-  const totalPos = pos.reduce((s, p) => s + Number(p.total), 0);
-  const liveTotal = liveAmount(bills);
+  const kept = (key: string) => !keys || keys.has(key);
+  const shownBills = bills.filter((b) => kept(`bill:${b.id}`));
+  const shownPos = pos.filter((p) => kept(`po:${p.id}`));
+  const shownDocs = docs.filter((d) => kept(`file:${d.id}`));
+  const shownCount = shownBills.length + shownPos.length + shownDocs.length;
+  const allCount = bills.length + pos.length + docs.length;
+  // WHAT IS OPEN LEADS THE LINE: the bills still owed (a copy set aside as a duplicate is listed,
+  // struck through, and never counted), never how many rows the list holds.
+  const unpaid = bills.filter((b) => isOpenBill(b));
+  const unpaidTotal = unpaid.reduce((s, b) => s + (Number(b.amount) || 0), 0);
 
-  function addBill() {
-    setBillError(null);
-    if (!supplier.trim()) return setBillError("Supplier is required.");
-    // A BLANK JOB IS NOT A BUSINESS COST: no job has to be said out loud, with its bucket.
-    if (!billJob) return setBillError("Pick a job, or pick Business Cost (No Job) and its bucket.");
-    if (billJob === "__overhead" && !billCategory) return setBillError("Pick the bucket this business cost goes in.");
-    start(async () => {
-      const res = await createBill({
-        job_id: billJob === "__overhead" ? null : billJob,
-        supplier,
-        bill_number: billNumber,
-        amount,
-        status,
-        bill_date: billDate || null,
-        notes: "",
-        category: billJob === "__overhead" ? billCategory : null,
-      });
-      if (!res.ok) return setBillError(res.error ?? "Could not save.");
-      setSupplier("");
-      setBillNumber("");
-      setAmount(0);
-      setBillDate("");
-      router.refresh();
-    });
-  }
+  const billRows = shownBills.map((b) => {
+    const lineCount = b.line_items?.length ?? 0;
+    const split = b.receipt ? splitReceiptBilling(b.receipt.amount, b.receipt.lines) : null;
+    const where = b.jobs?.name ?? (b.job_id ? "Job" : isShelfTicket(b) ? "Shop Stock" : `Business Cost · ${bucketOf(b.category)}`);
+    return (
+      <li key={`bill-${b.id}`}>
+        {/* ONE ROW PER BILL; it opens to the bill's detail. `bill-<id>` is where the search box, a
+            supplier's Open In All Bills and the stock's Put The Rest In Stock land. */}
+        <details id={`bill-${b.id}`} className="scroll-mt-20">
+          <summary className="flex min-h-11 cursor-pointer list-none items-center gap-3 px-3 py-2 text-sm hover:bg-slate-50 [&::-webkit-details-marker]:hidden">
+            <span className="min-w-0 flex-1">
+              <span className="block truncate font-medium text-slate-900">
+                {b.supplier}
+                {b.shownNumber ? <span className="font-normal text-slate-500"> #{b.shownNumber}</span> : null}
+              </span>
+              <span className="block truncate text-xs text-slate-400">
+                {b.bill_date ? `${formatDate(b.bill_date)} · ` : ""}
+                {where}
+                {lineCount > 0 ? ` · ${lineCount} ${lineCount === 1 ? "line" : "lines"}` : ""}
+                {b.superseded ? " · set aside as a duplicate" : ""}
+              </span>
+              {split && split.notBilledCount > 0 && (
+                <span className="block text-xs font-medium text-amber-700">
+                  {split.notBilledCount} {split.notBilledCount === 1 ? "line" : "lines"} not billed to the customer
+                </span>
+              )}
+              {split && split.partBilledCount > 0 && (
+                <span className="block text-xs font-medium text-sky-700">
+                  {split.partBilledCount} {split.partBilledCount === 1 ? "line bills" : "lines bill"} only what this job used
+                </span>
+              )}
+            </span>
+            <span className="shrink-0 text-right">
+              <span className={`block font-medium tabular-nums ${b.superseded ? "text-slate-400 line-through" : "text-slate-800"}`}>{formatCurrency(b.amount)}</span>
+              <span className="block text-xs text-slate-400">{b.status === "paid" ? "Settled" : "On Account"}</span>
+            </span>
+          </summary>
 
-  // ── Receipts: a list, not an upload ──
-  // The Upload / Photo / drop box that lived here filed a picture on the job and never recorded a
-  // cost, and its drop box caught drops meant for the page's own drop (Wave 0). A receipt or bill
-  // goes in through Snap Or Note (W1-30), which reads it; this tab lists what is on file.
+          <div className="border-t border-slate-100 bg-slate-50/60 px-3 py-2">
+            <div className="flex flex-wrap items-center gap-2">
+              {/* THIS TICK AND THE SUPPLIER BALANCE ARE THE SAME DOLLAR (review, 2026-09-19): the
+                  three doors are BillRowDoors, one copy with the job's Costs tab. */}
+              {/* The receipt it was read from, with the bill instead of in a job's Photos. */}
+              <BillPaperDoors papers={b.papers} />
+              <BillRowDoors bill={b} onEdit={() => setEditBill(b)} disabled={pending} />
+              <BillAlreadyBilledDoor bill={b} door={alreadyBilled[b.id]} />
+              {b.job_id && (
+                <Link href={`/jobs/${b.job_id}`} className="flex min-h-11 items-center px-2 text-sm font-medium text-brand hover:underline">
+                  Open The Job
+                </Link>
+              )}
+            </div>
+            {b.receipt ? (
+              <div className="mt-2">
+                <ReceiptLines receipt={b.receipt} shopStock={featureOn(switches.features, "shop_stock")} />
+              </div>
+            ) : lineCount > 0 ? (
+              <ul className="mt-2 ml-1 space-y-0.5 border-l-2 border-slate-100 pl-3">
+                {b.line_items!.map((li, i) => (
+                  <li key={i} className="flex items-center justify-between gap-2 text-xs text-slate-500">
+                    <span className="min-w-0 truncate">
+                      {li.quantity && li.quantity !== 1 ? `${li.quantity}× ` : ""}
+                      {li.description}
+                      {li.category ? <span className="ml-1 text-slate-400">· {li.category}</span> : null}
+                    </span>
+                    <span className="shrink-0 tabular-nums">{formatCurrency(li.amount)}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
+        </details>
+      </li>
+    );
+  });
+
+  // Every order, whatever the switch: an open PO counts in the job's cost, so it is never hidden.
+  const poRows = shownPos.map((p) => (
+    <li key={`po-${p.id}`} id={`po-${p.id}`} className="scroll-mt-20">
+      <Link href={`/purchasing/${p.id}`} className="flex min-h-11 items-center gap-3 px-3 py-2 text-sm hover:bg-slate-50">
+        <Kind>PO</Kind>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate font-medium text-slate-900">
+            {p.po_number} · {p.vendor || "No vendor"}
+          </span>
+          <span className="block truncate text-xs text-slate-400">{p.jobs?.name ?? "No job"}</span>
+        </span>
+        <span className="shrink-0 text-right">
+          <span className="block font-medium tabular-nums text-slate-800">{formatCurrency(p.total)}</span>
+          <Badge tone={statusTone(p.status)}>{p.status}</Badge>
+        </span>
+      </Link>
+    </li>
+  ));
+
+  // A receipt file no bill holds yet: open it, and Delete is behind its ⋯ (asked first).
+  const fileRows = shownDocs.map((d) => (
+    <li key={`file-${d.id}`} id={`file-${d.id}`} className="flex items-center gap-3 px-3 py-1 text-sm">
+      <Kind>File</Kind>
+      <div className="min-w-0 flex-1">
+        {d.signedUrl ? (
+          <a href={d.signedUrl} target="_blank" rel="noopener noreferrer" className="flex min-h-11 items-center truncate font-medium text-slate-900 hover:text-brand">
+            {d.name}
+          </a>
+        ) : (
+          <span className="block truncate py-2 font-medium text-slate-900">{d.name}</span>
+        )}
+        <div className="-mt-2 pb-1 text-xs text-slate-400">
+          {formatDate(d.created_at)} · {d.jobs?.name ?? "No job"}
+        </div>
+      </div>
+      {d.category && <Badge tone="blue">{d.category}</Badge>}
+      <RowMoreSheet title={d.name} subline={d.jobs?.name ?? null}>
+        {({ close }) => (
+          <button
+            type="button"
+            className={SHEET_ROW}
+            disabled={pending}
+            onClick={() => {
+              if (!confirm(`Delete "${d.name}"?`)) return;
+              start(async () => {
+                const res = await deleteDocument(d.id, d.file_url, d.job_id ?? "");
+                if (!res?.ok) {
+                  toast(res?.error ?? "Couldn't delete it. Try again.", "error");
+                  return;
+                }
+                close();
+                toast("Deleted.", "success");
+                router.refresh();
+              });
+            }}
+          >
+            Delete
+          </button>
+        )}
+      </RowMoreSheet>
+    </li>
+  ));
+
+  const rows = lead === "po" ? [...poRows, ...billRows, ...fileRows] : lead === "files" ? [...fileRows, ...billRows, ...poRows] : [...billRows, ...poRows, ...fileRows];
 
   return (
     <Card className="mb-6 px-4 py-1">
       <Fold
         id="all-bills"
-        open={!!spTab}
+        open={!!lead}
         summary={
-          <span className="flex items-baseline justify-between gap-3">
-            <span className="text-base font-semibold text-slate-900">{readFailed ? "All Bills" : `All Bills (${bills.length})`}</span>
-            <span className="shrink-0 text-sm tabular-nums text-slate-500">{readFailed ? "Couldn't Read" : formatCurrency(liveTotal)}</span>
+          <span className="text-base font-semibold text-slate-900">
+            All Bills
+            <span className={`font-normal ${!readFailed && unpaid.length ? "text-amber-800" : "text-slate-500"}`}>
+              {readFailed ? " · Couldn't Read" : unpaid.length ? ` · ${unpaid.length} Unpaid ${formatCurrency(unpaidTotal)}` : " · Nothing Unpaid"}
+            </span>
           </span>
         }
       >
         {/* The old receipt card's intro, where the switches now live. */}
         <span id="receipt-billing" className="block scroll-mt-20" />
-        <WhyFold>
-          <p>
-            Every bill, receipt, and order across every job. Open a receipt to say which of its lines the customer
-            pays for: snacks and drinks start out on you, everything else starts out billed, and a box or a spool
-            bought whole can bill just what this job used.
-          </p>
-        </WhyFold>
-        <Tabs
-          activeId={tab}
-          onChange={(id) => setTab(id as LedgerTab)}
-          tabs={[
-            // Open only (Erik, 2026-09-27: "all badges only show whats open"): the bills still owed
-            // and the orders not in yet. Receipts are files, never open, so no badge; the ledger's
-            // own size is said in plain words on its summary line above.
-            { id: "bills", label: "Bills", count: countOpen(bills, isOpenBill) },
-            { id: "po", label: "Purchase Orders", count: countOpen(pos, (p) => isOpenPurchaseOrder(p.status)), offStrip: !poOn },
-            { id: "receipts", label: "Receipts" },
-          ]}
-        />
-
-        <div hidden={tab !== "bills"} className="pb-3">
-          <Fold summary={<span className="text-sm font-medium text-brand">Add A Bill By Hand</span>}>
-            <div className="mb-3 space-y-3 rounded-lg border border-slate-200 p-3">
-              {billError && <p className="text-sm text-red-600">{billError}</p>}
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-                <div className="col-span-2 sm:col-span-1">
-                  <Label htmlFor="b-supplier">Supplier *</Label>
-                  <Input id="b-supplier" value={supplier} onChange={(e) => setSupplier(e.target.value)} placeholder="e.g. Main Street Supply" />
-                </div>
-                <div>
-                  <Label htmlFor="b-job">Job</Label>
-                  <Select id="b-job" value={billJob} onChange={(e) => setBillJob(e.target.value)}>
-                    <option value="">Pick A Job</option>
-                    <option value="__overhead">Business Cost (No Job)</option>
-                    {jobs.map((j) => (
-                      <option key={j.id} value={j.id}>{jobLabel(j)}</option>
-                    ))}
-                  </Select>
-                </div>
-                {billJob === "__overhead" && (
-                  <div>
-                    <Label htmlFor="b-cat">Bucket</Label>
-                    <Select id="b-cat" className="h-11" value={billCategory} onChange={(e) => setBillCategory(e.target.value)}>
-                      <option value="">Pick A Bucket</option>
-                      {BUSINESS_COST_BUCKETS.map((c) => (
-                        <option key={c} value={c}>{c}</option>
-                      ))}
-                    </Select>
-                  </div>
-                )}
-                <div>
-                  <Label htmlFor="b-num">Bill #</Label>
-                  <Input id="b-num" value={billNumber} onChange={(e) => setBillNumber(e.target.value)} />
-                </div>
-                <div>
-                  <Label htmlFor="b-amt">Amount</Label>
-                  <NumberInput id="b-amt" value={amount} onValueChange={setAmount} />
-                </div>
-                <div>
-                  <Label htmlFor="b-date">Bill Date</Label>
-                  <Input id="b-date" type="date" value={billDate} onChange={(e) => setBillDate(e.target.value)} />
-                </div>
-                <div>
-                  <Label htmlFor="b-status">Status</Label>
-                  <Select id="b-status" value={status} onChange={(e) => setStatus(e.target.value)}>
-                    {/* HOW THE BILL WAS BOUGHT, not whether a payment exists: a cheque to a supplier
-                        is Record A Payment on its Suppliers line. */}
-                    <option value="unpaid">On Account</option>
-                    <option value="paid">Settled At The Counter</option>
-                  </Select>
-                </div>
-              </div>
-              <div className="flex justify-end">
-                <Button onClick={addBill} disabled={pending || !supplier.trim()}>
-                  <Plus /> Add Bill
-                </Button>
-              </div>
-            </div>
-          </Fold>
-
-          <div className="mb-2 flex flex-wrap gap-2">
-            {([
-              ["all", `All (${bills.length})`],
-              ["jobs", `Job Bills (${bills.filter((b) => b.job_id).length})`],
-              ["overhead", `Business Costs (${bills.filter((b) => !b.job_id).length})`],
-            ] as const).map(([id, label]) => (
-              <button
-                key={id}
-                type="button"
-                aria-pressed={billFilter === id}
-                onClick={() => setBillFilter(id)}
-                className={`min-h-11 rounded-full px-4 text-sm font-medium ${
-                  billFilter === id ? "seaglass-active" : "bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50"
-                }`}
-              >
-                <span className="relative z-10">{label}</span>
-              </button>
-            ))}
-          </div>
-          {!readFailed && (
-            <p className="mb-2 text-xs text-slate-500">
-              {shownBills.length} {shownBills.length === 1 ? "bill" : "bills"}
-              {shownSetAside > 0 ? ` (${shownSetAside} set aside as ${shownSetAside === 1 ? "a duplicate" : "duplicates"}, not added)` : ""} ·{" "}
-              {formatCurrency(totalBills)}
+        <div className="flex items-start justify-between gap-2">
+          <WhyFold>
+            <p>
+              Every bill and purchase order across every job, and every receipt file no bill holds yet. Open a receipt to say
+              which of its lines the customer pays for: snacks and drinks start out on you, everything else starts out billed,
+              and a box or a spool bought whole can bill just what this job used. The search box at the top of the page
+              narrows this list.
             </p>
+          </WhyFold>
+          {/* THE LIST'S ⋯: New PO, while Purchase Orders is on. A plain panel, so the New PO sheet it
+              opens stays mounted. */}
+          {poOn && (
+            <details className="relative shrink-0">
+              <summary
+                aria-label="More For All Bills"
+                title="More"
+                className="flex h-11 w-11 cursor-pointer list-none items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 [&::-webkit-details-marker]:hidden"
+              >
+                <MoreHorizontal className="h-5 w-5" />
+              </summary>
+              <div className="absolute right-0 z-20 mt-1 rounded-lg border border-slate-200 bg-white p-2 shadow-lg">
+                <NewPoButton jobs={jobs} lists={lists} />
+              </div>
+            </details>
           )}
-          {!readFailed && papersNote && <p className="mb-2 text-sm text-slate-500">{papersNote}</p>}
+        </div>
 
+        {pos.length > 0 && <FeatureOffLine feature="purchase_orders" features={switches.features} isOwner={switches.isOwner} className="mb-2" />}
+        {keys && !readFailed && (
+          <p className="mb-2 flex flex-wrap items-center gap-x-2 text-xs text-slate-500">
+            {shownCount} of {allCount} {shownCount === 1 ? "matches" : "match"} &ldquo;{query.trim()}&rdquo;.
+            <button type="button" onClick={() => setQuery("")} className="inline-flex min-h-11 items-center text-sm font-medium text-brand hover:underline">
+              Show Everything
+            </button>
+          </p>
+        )}
+        {!readFailed && papersNote && <p className="mb-2 text-sm text-slate-500">{papersNote}</p>}
+
+        <div className="pb-3">
           {readFailed ? (
             <p className="py-4 text-center text-sm text-amber-800" role="alert">
               Couldn&apos;t read your bills just now. Reload to try again.
             </p>
-          ) : shownBills.length === 0 ? (
-            <p className="py-4 text-center text-sm text-slate-400">No bills here yet.</p>
+          ) : rows.length === 0 ? (
+            <p className="py-4 text-center text-sm text-slate-400">
+              {keys
+                ? `Nothing in All Bills matches “${query.trim()}”.`
+                : poOn
+                  ? "No bills or purchase orders yet. Add a bill with Snap Or Note at the top of this page, or tap ⋯ here for New PO."
+                  : "No bills yet. Add one with Snap Or Note at the top of this page."}
+            </p>
           ) : (
-            <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
-              {shownBills.map((b) => {
-                const lineCount = b.line_items?.length ?? 0;
-                const split = b.receipt ? splitReceiptBilling(b.receipt.amount, b.receipt.lines) : null;
-                const where = b.jobs?.name ?? (b.job_id ? "Job" : isShelfTicket(b) ? "Shop Stock" : `Business Cost · ${bucketOf(b.category)}`);
-                return (
-                  <li key={b.id}>
-                    {/* ONE ROW PER BILL; it opens to the bill's detail. `bill-<id>` is where the
-                        search box and the shelf's "Put The Rest On The Shelf" land. */}
-                    <details id={`bill-${b.id}`} className="scroll-mt-20">
-                      <summary className="flex min-h-11 cursor-pointer list-none items-center gap-3 px-3 py-2 text-sm hover:bg-slate-50 [&::-webkit-details-marker]:hidden">
-                        <span className="min-w-0 flex-1">
-                          <span className="block truncate font-medium text-slate-900">
-                            {b.supplier}
-                            {b.shownNumber ? <span className="font-normal text-slate-500"> #{b.shownNumber}</span> : null}
-                          </span>
-                          <span className="block truncate text-xs text-slate-400">
-                            {b.bill_date ? `${formatDate(b.bill_date)} · ` : ""}
-                            {where}
-                            {lineCount > 0 ? ` · ${lineCount} ${lineCount === 1 ? "line" : "lines"}` : ""}
-                            {b.superseded ? " · set aside as a duplicate" : ""}
-                          </span>
-                          {split && split.notBilledCount > 0 && (
-                            <span className="block text-xs font-medium text-amber-700">
-                              {split.notBilledCount} {split.notBilledCount === 1 ? "line" : "lines"} not billed to the customer
-                            </span>
-                          )}
-                          {split && split.partBilledCount > 0 && (
-                            <span className="block text-xs font-medium text-sky-700">
-                              {split.partBilledCount} {split.partBilledCount === 1 ? "line bills" : "lines bill"} only what this job used
-                            </span>
-                          )}
-                        </span>
-                        <span className="shrink-0 text-right">
-                          <span className={`block font-medium tabular-nums ${b.superseded ? "text-slate-400 line-through" : "text-slate-800"}`}>
-                            {formatCurrency(b.amount)}
-                          </span>
-                          <span className="block text-xs text-slate-400">{b.status === "paid" ? "Settled" : "On Account"}</span>
-                        </span>
-                      </summary>
-
-                      <div className="border-t border-slate-100 bg-slate-50/60 px-3 py-2">
-                        <div className="flex flex-wrap items-center gap-2">
-                          {/* THIS TICK AND THE SUPPLIER BALANCE ARE THE SAME DOLLAR (review, 2026-09-19): the
-                              three doors are BillRowDoors, one copy with the job's Costs tab. */}
-                          {/* The receipt it was read from, with the bill instead of in a job's Photos. */}
-                          <BillPaperDoors papers={b.papers} />
-                          <BillRowDoors bill={b} onEdit={() => setEditBill(b)} disabled={pending} />
-                          <BillAlreadyBilledDoor bill={b} door={alreadyBilled[b.id]} />
-                          {b.job_id && (
-                            <Link href={`/jobs/${b.job_id}`} className="flex min-h-11 items-center px-2 text-sm font-medium text-brand hover:underline">
-                              Open The Job
-                            </Link>
-                          )}
-                        </div>
-                        {b.receipt ? (
-                          <div className="mt-2">
-                            <ReceiptLines receipt={b.receipt} shopStock={featureOn(switches.features, "shop_stock")} />
-                          </div>
-                        ) : lineCount > 0 ? (
-                          <ul className="mt-2 ml-1 space-y-0.5 border-l-2 border-slate-100 pl-3">
-                            {b.line_items!.map((li, i) => (
-                              <li key={i} className="flex items-center justify-between gap-2 text-xs text-slate-500">
-                                <span className="min-w-0 truncate">
-                                  {li.quantity && li.quantity !== 1 ? `${li.quantity}× ` : ""}{li.description}
-                                  {li.category ? <span className="ml-1 text-slate-400">· {li.category}</span> : null}
-                                </span>
-                                <span className="shrink-0 tabular-nums">{formatCurrency(li.amount)}</span>
-                              </li>
-                            ))}
-                          </ul>
-                        ) : null}
-                      </div>
-                    </details>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-
-          {editBill && (
-            <BillEditModal key={editBill.id} bill={editBill} jobs={jobs} onClose={() => setEditBill(null)} />
+            <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">{rows}</ul>
           )}
         </div>
 
-        <div hidden={tab !== "po"} className="pb-3">
-          <FeatureOffLine feature="purchase_orders" features={switches.features} isOwner={switches.isOwner} />
-          <div className="mb-3 flex items-center justify-between">
-            <span className="text-xs text-slate-500">{pos.length} POs · {formatCurrency(totalPos)} total</span>
-            {poOn && <NewPoButton jobs={jobs} lists={lists} />}
-          </div>
-          {pos.length === 0 ? (
-            <p className="py-4 text-center text-sm text-slate-400">No purchase orders yet.</p>
-          ) : (
-            <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
-              {pos.map((p) => (
-                <li key={p.id}>
-                  <Link href={`/purchasing/${p.id}`} className="flex min-h-11 items-center gap-3 px-4 py-2.5 text-sm hover:bg-slate-50">
-                    <div className="min-w-0 flex-1">
-                      <div className="font-medium text-slate-900">{p.po_number} · {p.vendor || "No vendor"}</div>
-                      <div className="text-xs text-slate-400">{p.jobs?.name ?? "No job"}</div>
-                    </div>
-                    <span className="font-medium text-slate-800">{formatCurrency(p.total)}</span>
-                    <Badge tone={statusTone(p.status)}>{p.status}</Badge>
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-
-        <div hidden={tab !== "receipts"} className="pb-3">
-          {docs.length === 0 ? (
-            <p className="py-4 text-center text-sm text-slate-400">No receipts on file. Add one with Snap Or Note at the top of this page.</p>
-          ) : (
-            <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
-              {docs.map((d) => (
-                <li key={d.id} className="flex items-center gap-3 px-4 py-1">
-                  <FileText className="h-4 w-4 shrink-0 text-slate-400" />
-                  <div className="min-w-0 flex-1">
-                    {d.signedUrl ? (
-                      <a href={d.signedUrl} target="_blank" rel="noopener noreferrer" className="block truncate text-sm font-medium text-slate-900 hover:text-brand">{d.name}</a>
-                    ) : (
-                      <span className="block truncate text-sm font-medium text-slate-900">{d.name}</span>
-                    )}
-                    <div className="text-xs text-slate-400">{formatDate(d.created_at)} · {d.jobs?.name ?? "No job"}</div>
-                  </div>
-                  {d.category && <Badge tone="blue">{d.category}</Badge>}
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    aria-label={`Delete ${d.name}`}
-                    title="Delete"
-                    className="text-slate-400 hover:text-red-600"
-                    onClick={() => { if (confirm(`Delete "${d.name}"?`)) start(async () => { const res = await deleteDocument(d.id, d.file_url, d.job_id ?? ""); if (!res?.ok) { toast(res?.error ?? "Couldn't delete — try again.", "error"); return; } toast("Deleted", "success"); router.refresh(); }); }}
-                  >
-                    <Trash2 />
-                  </Button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
+        {editBill && <BillEditModal key={editBill.id} bill={editBill} jobs={jobs} onClose={() => setEditBill(null)} />}
       </Fold>
     </Card>
   );

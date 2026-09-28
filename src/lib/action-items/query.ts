@@ -1,11 +1,10 @@
 import { cache } from "react";
 import { viewerSortsBank } from "@/lib/bank-viewer";
 import { createClient } from "@/lib/supabase/server";
-import type { ActionItem, ActionKind } from "./types";
-import { AFFORDANCES, KIND_STREAM, appointmentAffordances, sortActionItems } from "./types";
+import type { ActionItem, NeedsYou, PileName, WaitingItem } from "./types";
+import { AFFORDANCES, KIND_STREAM, appointmentAffordances, sortActionItems, waitingForViewer, waitingRow } from "./types";
 import { bucketInspections } from "@/lib/inspections";
 import { ESTIMATE_VISIT_TYPES } from "@/lib/statuses";
-import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 import { invoiceBalance } from "@/lib/invoice-math";
 import { invoiceAmount } from "@/lib/invoice-amount";
 import { lienStatus } from "@/lib/lien-math";
@@ -13,7 +12,10 @@ import { formatCurrency, formatDateShort, formatTime } from "@/lib/utils";
 import { tzDayStartUtc } from "@/lib/tz";
 import { clockDoorWords } from "@/lib/long-shift";
 import { SHORT_FIX } from "@/lib/stock-take";
-import { loadSupplierDesk, type SupplierDesk, type SupplierPaperFeed } from "@/app/(app)/bills/supplier-papers";
+import { shortDay } from "@/lib/come-back-days";
+import { reportError } from "@/lib/observe";
+import { loadSupplierDesk, readBooksStart, type SupplierDesk, type SupplierPaperFeed } from "@/app/(app)/bills/supplier-papers";
+import type { SupplierPayDue } from "@/app/(app)/bills/supplier-pay-due";
 import { supplierDeskFailedItem, supplierPaperActionItem } from "./supplier-paper-item";
 import { supplierPayActionItems } from "./supplier-pay-item";
 import { readNoJobHoursReach } from "@/lib/already-billed-read";
@@ -22,28 +24,31 @@ import { noJobHoursActionItem } from "./no-job-hours-item";
 import { readNoJobHours, type NoJobHours } from "@/lib/no-job-hours";
 import { isOpenToBuy, newestListPerJob } from "@/lib/materials-checklist";
 import { feederOn, inquiryActionItem } from "./switches";
-import { heldJobDueFilter, inquiryDueFilter, quoteFollowUpState } from "./due-filters";
+import { draftInvoiceState, heldJobState, inquiryDueFilter, lateInvoiceFilter, quoteFollowUpState, quoteNoAnswerFilter } from "./due-filters";
 import { isMissingColumn } from "@/lib/job-tasks";
 import { featureOn, featuresFromOffKey } from "@/lib/features";
+import { COSTED_INVOICE_COLUMNS, NEEDS_RETURN_DAYS, costedJobIds, daysAgoStr, detectStrayTime, detectUnbilledWork, rollupWorkedJobs } from "./leak-detectors";
+import { NEEDS_A_DAY_STATUSES, companyDay, jobsNeedingADay, type NeedDayJob } from "./jobs-needing-a-day";
 import {
-  COSTED_INVOICE_COLUMNS,
-  NEEDS_RETURN_DAYS,
-  costedJobIds,
-  daysAgoStr,
-  detectNeedsReturn,
-  detectStrayTime,
-  detectUnbilledWork,
-  jobLabel,
-  rollupWorkedJobs,
-} from "./leak-detectors";
+  RECEIPT_CATEGORIES,
+  RECEIPT_TIE_COLUMNS,
+  RECEIPTS_READ_CAP,
+  receiptRowJob,
+  receiptRowTitle,
+  receiptsNotOnABill,
+  tieReadFilters,
+  type ReceiptDoc,
+} from "./receipts-not-on-a-bill";
+import { foldWaitingRows, readNeedsYouWaits, waitKey, type NeedsYouWaits } from "./needs-you-waits";
+import { codeCount, isTrayPaper, rollUpPiles, sqlCount, type PileCount } from "./piles";
+import { firstNameOf, jobWords } from "./words";
+import type { PaperTie } from "@/lib/job-photos";
 
 /**
- * Count for the dock Home badge. Derived from the SAME projection as the inbox so
- * the badge can never disagree with the list it summarizes — a parallel set of
- * count-only queries inevitably drifts from the list's per-row filters (a paid-but-
- * status-lagging invoice, the §8200(e) prelim-required gate, the NOC-shortened lien
- * window), producing a "phantom badge" that never clears. The fetches are capped and
- * RLS-scoped; correctness of the badge is worth the bounded row payload.
+ * Count for the dock Home badge: the length of NOW, from the SAME build as the list, so the badge
+ * can never disagree with the list it summarizes (a parallel set of count-only queries inevitably
+ * drifts from the list's per-row filters and leaves a "phantom badge" that never clears). A pile
+ * counts one; the Waiting fold never counts.
  */
 export async function getActionItemsCount(ctx: {
   todayStr: string;
@@ -54,7 +59,7 @@ export async function getActionItemsCount(ctx: {
   /** The switched-off features — see getActionItems. */
   off?: string;
 }): Promise<number> {
-  return (await getActionItems(ctx)).length;
+  return (await getActionItems(ctx)).now.length;
 }
 
 const ORGANIZE_LABEL: Record<string, string> = {
@@ -75,12 +80,16 @@ const QUOTE_QUIET_DAYS = 7;
 // passed) is urgent regardless of age — the offer is about to die on the vine.
 const QUOTE_EXPIRY_SOON_DAYS = 5;
 
+/** How many jobs the Jobs Needing A Day read looks at (newest first); more says "N+". */
+const JOBS_DAY_READ_CAP = 200;
+/** Ids per request when a read names many records: no request's address grows too long. */
+const ID_CHUNK = 80;
+
 /**
- * THE single union behind the "Needs action" inbox — DECISIONS ONLY: money
- * (overdue/quiet/draft), leads, the rest (contracts/liens/captures),
- * the leak detectors, appointments, and jobs needing a date. Projects rows from
- * the existing tables onto one ActionItem[] — no new tables. RLS already scopes
- * to the org; we additionally scope tech (non-staff) views to their own items.
+ * THE single union behind Needs You — DECISIONS ONLY: money (overdue/quiet/draft), leads, the rest
+ * (contracts/liens/captures), the leak detectors, visits, and jobs needing a day. Projects rows from
+ * the existing tables onto one ActionItem[] (Now) and one WaitingItem[] (the fold). RLS scopes to the
+ * org; a tech's view is scoped to his own visits.
  *
  * TASKS ARE DELIBERATELY NOT FED HERE. To-dos live in exactly three places —
  * Today's 6 on My Day, /tasks (grouped by due), and the schedule's per-day due
@@ -91,13 +100,13 @@ const QUOTE_EXPIRY_SOON_DAYS = 5;
 /**
  * ONE FAN-OUT PER REQUEST (2026-09-08 — Erik: "taking a super long time to load anything on the
  * phone app"). /planner asks for the LIST and the app shell asks for its COUNT, so opening My Day
- * ran this ~31-query union TWICE. React's cache() memoises on the primitive arguments for the life
- * of a single request, so the second caller now awaits the first one's promise. Keyed on primitives
+ * would run this union TWICE. React's cache() memoises on the primitive arguments for the life of a
+ * single request, so the second caller awaits the first one's promise. Keyed on primitives
  * deliberately: cache() compares arguments with Object.is, and an object literal is a fresh
- * reference every call — it would never hit.
+ * reference every call — it would never hit. Both lists come from this one call.
  */
 const actionItemsForRequest = cache(
-  (todayStr: string, isStaff: boolean, userId: string, tz: string, off: string): Promise<ActionItem[]> =>
+  (todayStr: string, isStaff: boolean, userId: string, tz: string, off: string): Promise<NeedsYou> =>
     buildActionItems({ todayStr, isStaff, userId, tz: tz || undefined, off }),
 );
 
@@ -112,8 +121,23 @@ export function getActionItems(ctx: {
    *  A string, not the map, so the cache() key above still hits (it compares with Object.is).
    *  Left out = everything on. */
   off?: string;
-}): Promise<ActionItem[]> {
+}): Promise<NeedsYou> {
   return actionItemsForRequest(ctx.todayStr, ctx.isStaff, ctx.userId, ctx.tz ?? "", ctx.off ?? "");
+}
+
+type Read = { data: any[] | null; error?: unknown; count?: number | null };
+
+/** An embed PostgREST may hand back as one row or a one-row array. */
+const one = <T,>(v: T | T[] | null | undefined): T | null => (Array.isArray(v) ? (v[0] ?? null) : (v ?? null));
+
+/** A read naming many ids, in chunks side by side: the rows together, the first error if any. */
+async function inChunks(ids: readonly string[], read: (chunk: string[]) => PromiseLike<Read>): Promise<Read> {
+  const uniq = [...new Set(ids.filter(Boolean))];
+  if (!uniq.length) return { data: [], error: null };
+  const parts: string[][] = [];
+  for (let i = 0; i < uniq.length; i += ID_CHUNK) parts.push(uniq.slice(i, i + ID_CHUNK));
+  const res = await Promise.all(parts.map((p) => Promise.resolve(read(p))));
+  return { data: res.flatMap((r) => r?.data ?? []), error: res.find((r) => r?.error)?.error ?? null };
 }
 
 async function buildActionItems(ctx: {
@@ -122,12 +146,13 @@ async function buildActionItems(ctx: {
   userId: string;
   tz?: string;
   off?: string;
-}): Promise<ActionItem[]> {
+}): Promise<NeedsYou> {
   const { todayStr, isStaff, userId, tz } = ctx;
   // A switched-off feature's nudges leave the inbox and their reads are skipped; the live
   // obligations (a request, a sent or accepted estimate, a sent contract, a lien clock) keep
   // coming whatever the switches say (action-items/switches).
   const features = featuresFromOffKey(ctx.off);
+  const leadsOn = featureOn(features, "leads");
   const supabase = await createClient();
   /* ONE LAW TWO CLOCKS ONE MAP (audit v921). starts_at is timestamptz and a bare `T00:00:00`
      literal is parsed in the SESSION zone — UTC on Supabase — so "before today" actually meant
@@ -144,27 +169,57 @@ async function buildActionItems(ctx: {
   // negative offset walks forward). Same ≤1-day tz fuzz as the other feeders.
   const tomorrowStr = daysAgoStr(todayStr, -1);
   const dayAfterTomorrowStr = daysAgoStr(todayStr, -2);
+  const dayOf = (v: string | null | undefined) => companyDay(v, tz ?? null);
 
-  const empty = Promise.resolve({ data: [] as any[] });
+  const empty: Promise<Read> = Promise.resolve({ data: [], error: null, count: 0 });
+
+  // THE COMPANY, READ ONCE: the org filter the hand-filtered reads carry, the books start, the
+  // waits table. Staff only (a tech's build reads his own visits and nothing else).
+  const orgIdP: Promise<string | null> = isStaff && userId
+    ? Promise.resolve(supabase.from("profiles").select("org_id").eq("id", userId).maybeSingle()).then(
+        (r: any) => (r?.data?.org_id ? String(r.data.org_id) : null),
+        () => null,
+      )
+    : Promise.resolve(null);
+
+  /* THE BOOKS START REPLACES THE AGE LIMITS (NY-feeders). A visit nobody closed out, a walk-through
+     nobody wrote up, a visit or a job done and never billed: these aged OUT after 14, 60 or 30 days,
+     so work went quiet by the calendar, never by being done. Now they reach back to the day the
+     company's books begin (readBooksStart: the day it named, else its first bill, else the day it
+     was made), and only work from before that day is left out. Chained onto those four reads
+     only, beside the fan-out, never a serial wave of its own. A failed read falls back to the old
+     windows and is reported (never a crash of the inbox, never the line drawn in the wrong place). */
+  const booksStartP: Promise<string | null> = orgIdP.then(async (orgId) => {
+    if (!orgId) return null;
+    try {
+      return await readBooksStart(supabase, orgId);
+    } catch (e) {
+      reportError("action-items.booksStart", e);
+      return null;
+    }
+  });
+  const floor = (fallbackDays: number): Promise<string> =>
+    booksStartP.then((start) => (start && /^\d{4}-\d{2}-\d{2}$/.test(start) ? start : daysAgoStr(todayStr, fallbackDays)));
+
   // The Recount feeder's read (Shop Stock, Phase 3; used at the end), started beside the big wave
   // below rather than after it: this union is on the app shell's path. Promise.resolve STARTS it (a
   // query builder does nothing until something calls its then).
-  const shortsP: Promise<{ data: any[] | null; error: unknown }> = isStaff
+  const shortsP: Promise<Read> = isStaff
     ? Promise.resolve(supabase
         .from("stock_moves")
-        .select("id, qty, created_at, created_by, job_id, item_id, inventory_items(name, unit), jobs(job_number, name)")
+        .select("id, qty, created_at, created_by, job_id, item_id, inventory_items(name, unit), jobs(job_number, name)", { count: "exact" })
         .eq("kind", "short")
         .is("settled_by", null)
         .is("undone_at", null)
         .order("created_at", { ascending: true })
         .limit(50))
-    : Promise.resolve({ data: [] as any[], error: null });
+    : Promise.resolve({ data: [], error: null });
 
   // "HEY YOU, HERE'S A BILL, WHAT'S IT FOR?" (Bills plan, Wave A). Staff only: the cards carry
   // prices, and a tech never sees one. Started now so its reads ride alongside the fan-out below
   // instead of adding a serial wave; awaited at the end. A failure is never a crash of the inbox,
   // and never silent: a thrown read comes back as `failed`, which My Day says in one line.
-  // The same read brings the Pay By line ("Pay CED $X By Oct 10"): one read of the supplier's papers.
+  // The same read brings the Pay By line ("Pay CED $X By Oct 10") and the papers waiting on a credit.
   const supplierDeskP: Promise<SupplierDesk | null> = isStaff
     ? loadSupplierDesk(supabase, userId, todayStr).catch((): SupplierDesk => ({ papers: null, payDue: [], failed: { papers: true, pay: true } }))
     : Promise.resolve(null);
@@ -184,124 +239,259 @@ async function buildActionItems(ctx: {
   const noJobReachP: Promise<boolean> = noJobP.then(async (n) => {
     if (!isStaff || !n.summary?.shifts.length) return false;
     try {
-      const { data: me } = await supabase.from("profiles").select("org_id").eq("id", userId).maybeSingle();
-      const orgId = String((me as { org_id?: string | null } | null)?.org_id ?? "");
+      const orgId = (await orgIdP) ?? "";
       return orgId ? (await readNoJobHoursReach(supabase, orgId, [])).canHold : true;
     } catch {
       return true;
     }
   });
 
-  const [jobsR, inqR, apptR, orgR, invR, quoteR, acceptedR, draftR, conR, lienR, openTimeR, recentTimeR, nonBillableR, matJobsR, matSegR, inspR, inspQuoteR, billedJobR, doneWorkR, draftQuoteR] = await Promise.all([
-    // Unscheduled jobs — staff only (the "resting place" for things needing a date).
-    // EVERY still-in-flight dateless job, not just estimate/scheduled: an in_progress
-    // or on_hold job whose date was cleared must not vanish from every scheduling
-    // surface. (The schedule rail's "Waiting for a day" runs its OWN queries with the
-    // same definition — rail and inbox deliberately differ only on on_hold, which the
-    // rail shows for placing and this feeder skips as paused-not-actionable.)
+  // ── The four aged reads, floored by the books start (chained, started now) ──
+  // Visits from PAST days nobody closed out. absorbed=false (0237): a booking that became a job is
+  // the job's business now. The ceiling is the org's midnight: today's visits are the agenda's rows.
+  // A tech's own visits keep the two-week window: they only open for him (closing one out is the
+  // office's), and his build reads nothing else.
+  const apptP: Promise<Read> = (isStaff ? floor(14) : Promise.resolve(daysAgoStr(todayStr, 14))).then((from) => {
+    let q = supabase
+      .from("appointments")
+      .select("id, type, title, starts_at, status, job_id, inquiry_id, assigned_to, customers(name)", { count: "exact" })
+      .eq("status", "scheduled")
+      .eq("absorbed", false)
+      .gte("starts_at", dayStartIso(from))
+      .lt("starts_at", dayStartIso(todayStr));
+    if (!isStaff) q = q.eq("assigned_to", userId);
+    return q.order("starts_at", { ascending: true }).limit(50);
+  });
+  // ── Walk-throughs that HAPPENED and have no estimate — staff only ───────────
+  // The visit is the expensive part and it is already spent; until it becomes an estimate it earns
+  // nothing.
+  const inspP: Promise<Read> = isStaff && feederOn("inspection_writeup", features)
+    ? floor(60).then((from) =>
+        supabase
+          .from("appointments")
+          .select("id, type, title, status, starts_at, capture, inquiry_id, job_id, outcome, customers(name), inquiries(name)", { count: "exact" })
+          .eq("absorbed", false) // a booking absorbed into its job stopped being a visit (0237)
+          .in("type", [...ESTIMATE_VISIT_TYPES])
+          .gte("starts_at", dayStartIso(from))
+          .lte("starts_at", endOfToday)
+          .order("starts_at", { ascending: false })
+          .limit(100),
+      )
+    : empty;
+  // ── Service calls / job-days that HAPPENED and have no bill — THE NORA HOLE ──
+  const doneWorkP: Promise<Read> = isStaff
+    ? floor(60).then((from) =>
+        supabase
+          .from("appointments")
+          .select("id, type, title, status, starts_at, job_id, customers(name), inquiries(name)", { count: "exact" })
+          .eq("absorbed", false)
+          .in("type", ["service_call", "job"])
+          .eq("status", "completed")
+          .gte("starts_at", dayStartIso(from))
+          .order("starts_at", { ascending: false })
+          .limit(100),
+      )
+    : empty;
+  // THE JOB-SHAPED NORA HOLE: a job flipped to complete through the status dropdown earned money
+  // the appointment feeder can never see (below).
+  const doneJobsP: Promise<Read> = isStaff
+    ? floor(30).then((from) =>
+        supabase
+          .from("jobs")
+          .select("id, job_number, name, status, updated_at, customers(name)", { count: "exact" })
+          .eq("status", "complete")
+          .gte("updated_at", dayStartIso(from))
+          .order("updated_at", { ascending: false })
+          .limit(50),
+      )
+    : empty;
+
+  // THE HELD JOBS (NY-hold, 0366): every job on hold, with its reason, its day and who held it (the
+  // profile through jobs_hold_by_fkey). A day today or earlier, or no day at all, is a Reminder on
+  // Now; a later day waits in the fold. Before 0366 (no columns) the old rule runs alone: a hold
+  // untouched for a week, with no Snooze.
+  const heldP: Promise<Read & { withDay: boolean }> = isStaff
+    ? orgIdP.then(async (orgId) => {
+        const base = "id, job_number, name, updated_at, hold_reason, customers(name)";
+        const read = (cols: string) => {
+          let q = supabase.from("jobs").select(cols, { count: "exact" }).eq("status", "on_hold");
+          if (orgId) q = q.eq("org_id", orgId);
+          return q.order("updated_at", { ascending: true }).limit(100);
+        };
+        const withDay = await read(`${base}, hold_until, hold_by, holder:profiles!jobs_hold_by_fkey(full_name)`);
+        if (!withDay.error) return { ...(withDay as Read), withDay: true };
+        if (!isMissingColumn(withDay.error)) {
+          // A failed read is no holds on the list (never a crash of the inbox), and it is reported.
+          reportError("action-items.holds", withDay.error);
+          return { data: [], error: withDay.error, withDay: false };
+        }
+        const cutoff = new Date(Date.now() - 7 * 864e5).toISOString();
+        let old = supabase.from("jobs").select(base, { count: "exact" }).eq("status", "on_hold").lt("updated_at", cutoff);
+        if (orgId) old = old.eq("org_id", orgId);
+        const res = await old.order("updated_at", { ascending: true }).limit(100);
+        return { ...(res as Read), withDay: false };
+      })
+    : Promise.resolve({ data: [], error: null, withDay: false });
+
+  // RECEIPTS NOT ON A BILL: the receipt and bill papers on jobs since the books start (the ties
+  // read and the names ride the second wave).
+  const receiptsP: Promise<Read | null> = isStaff
+    ? Promise.all([orgIdP, floor(60)]).then(([orgId, from]) => {
+        if (!orgId) return null;
+        return supabase
+          .from("documents")
+          .select("id, name, category, file_url, job_id, uploaded_by, created_at, jobs(job_number, name)", { count: "exact" })
+          .eq("org_id", orgId)
+          .in("category", [...RECEIPT_CATEGORIES])
+          .not("job_id", "is", null)
+          .gte("created_at", dayStartIso(from))
+          .order("created_at", { ascending: false })
+          .limit(RECEIPTS_READ_CAP) as PromiseLike<Read>;
+      })
+    : Promise.resolve(null);
+
+  // ENDLESS ROWS GET A SNOOZE (0367): this company's waits whose day hasn't come. Not ready (the
+  // table isn't there yet, or the read failed): no Snooze door, and nothing folds.
+  const waitsP: Promise<NeedsYouWaits> = isStaff
+    ? orgIdP.then((orgId) => readNeedsYouWaits(supabase, orgId, todayStr))
+    : Promise.resolve({ ready: false, waits: new Map() });
+
+  const [
+    jobsR,
+    inqR,
+    inqLaterR,
+    apptR,
+    orgR,
+    invR,
+    quoteR,
+    acceptedR,
+    draftR,
+    conR,
+    lienR,
+    openTimeR,
+    recentTimeR,
+    nonBillableR,
+    matJobsR,
+    matSegR,
+    inspR,
+    inspQuoteR,
+    billedJobR,
+    doneWorkR,
+    draftQuoteR,
+    doneJobsR,
+    heldR,
+    receiptsR,
+    waitsR,
+  ] = (await Promise.all([
+    // JOBS NEEDING A DAY — staff only. ONE read of every job still being done (never on hold), with
+    // its schedule segments and its latest time entry; jobsNeedingADay decides which have nothing
+    // ahead of them. It replaced "no scheduled_start" and the three-day "nothing scheduled next".
+    // The entries' foreign key is named: time_entries also points at itself (split_from), and the
+    // embed must never have two paths to choose between.
     isStaff
       ? supabase
           .from("jobs")
-          .select("id, job_number, name, status, scheduled_start, customers(name)")
-          .is("scheduled_start", null)
-          .in("status", ACTIVE_JOB_STATUSES)
+          .select(
+            "id, job_number, name, status, scheduled_start, scheduled_end, created_at, customers(name), job_schedule_segments(start_date, end_date), time_entries!time_entries_job_id_fkey(clock_in)",
+            { count: "exact" },
+          )
+          .in("status", [...NEEDS_A_DAY_STATUSES])
           .order("created_at", { ascending: false })
-          .limit(50)
+          .order("clock_in", { referencedTable: "time_entries", ascending: false })
+          .limit(1, { referencedTable: "time_entries" })
+          .limit(JOBS_DAY_READ_CAP)
       : empty,
-    // New/uncontacted inquiries due for follow-up — staff only. A snoozed lead stays OUT until its
-    // date, new or contacted alike (inquiryDueFilter): the row's Snooze and Nort's inquiry.snooze
-    // both write only next_follow_up_at, and a new lead that ignored it made "bring the Karen lead
-    // back Monday" a confirmed no-op. A new lead lands with no day (or today's), so it still shows
-    // the moment it arrives. A LIVE OBLIGATION: it runs with Leads off too (phone: Call Back).
+    // New/contacted leads due for follow-up — staff only. A snoozed lead (new or contacted) is off
+    // Now until its day (inquiryDueFilter) and waits in the fold (the next read). A LIVE OBLIGATION:
+    // it runs with Leads off too (Call Back).
     isStaff
       ? supabase
           .from("inquiries")
-          .select("id, name, phone, status, next_follow_up_at, converted_at")
+          .select("id, name, phone, status, next_follow_up_at, converted_at, created_at", { count: "exact" })
           .in("status", ["new", "contacted"])
           .is("converted_at", null)
           .or(inquiryDueFilter(todayStr))
           .order("created_at", { ascending: true })
           .limit(50)
       : empty,
-    // Appointments from PAST days that nobody ever closed out.
-    //
-    // WITH A FLOOR. This had no lower bound, so a booking nobody ever closed out nagged forever:
-    // 11 stale rows in TAHOE DECK, oldest from Jul 8, and 4 in ET Electric — a permanent count on
-    // the badge that no amount of work could clear. That is exactly what the badge invariant
-    // forbids (types.ts): no count may be the length of an unbounded set. Two weeks is the window
-    // in which "you didn't mark this done" is still a useful nudge; past that it is furniture, and
-    // the appointment is still findable on the schedule and in /inspections.
-    //
-    // AND A CEILING AT MIDNIGHT: today's visits are the AGENDA's rows, two cards up — this feeder
-    // carried them too, so a 3 PM visit sat in "Needs action" all morning saying nothing the plan
-    // above it didn't. The flow reading: an appointment needs ACTION only once its day has passed
-    // without it being closed out. absorbed=false (0237): a booking that became a job is the
-    // job's business now — its ghost sat here "awaiting completion" forever, since finishing the
-    // job never touches the appointment row.
-    supabase
-      .from("appointments")
-      .select("id, type, title, starts_at, status, job_id, assigned_to")
-      .eq("status", "scheduled")
-      .eq("absorbed", false)
-      .gte("starts_at", dayStartIso(daysAgoStr(todayStr, 14)))
-      .lt("starts_at", dayStartIso(todayStr))
-      .order("starts_at", { ascending: true })
-      .limit(50),
-    // Captures awaiting a filing decision — staff only.
+    // ...and the ones whose day is later: the fold, with the day each comes back.
+    isStaff
+      ? supabase
+          .from("inquiries")
+          .select("id, name, status, next_follow_up_at")
+          .in("status", ["new", "contacted"])
+          .is("converted_at", null)
+          .gt("next_follow_up_at", todayStr)
+          .order("next_follow_up_at", { ascending: true })
+          .limit(50)
+      : empty,
+    apptP,
+    // Captures awaiting a filing decision — staff only. What each one is decides where it sorts
+    // (the /bills tray or Organize: isTrayPaper).
     isStaff
       ? supabase
           .from("organized_items")
-          .select("id, kind, status, job_id, category")
+          .select("id, kind, status, title, job_id, category, source, doc_type, file_url, summary, amount, created_at", { count: "exact" })
           .eq("status", "needs_review")
           .order("created_at", { ascending: false })
           .limit(50)
       : empty,
-    // Money/legal — staff only. Unpaid invoices (A/R) that need chasing: either
-    // past their due date, OR simply old — sent/created AGE_DAYS+ ago — so an unpaid
-    // invoice still reaches the inbox even before due_date logic fully populates
-    // (no due_date UI yet → the Overdue-by-due-date gate alone never fires). The
-    // age cut is applied per-row below; the query just pulls the open A/R.
+    // Money/legal — staff only. Unpaid invoices (A/R) that need chasing: past their due date, OR
+    // simply old. The rule runs IN the read (lateInvoiceFilter), so its exact count is the count of
+    // late invoices, never of all open A/R (a lone late one is a plain row, not "· 1+").
     isStaff
       ? supabase
           .from("invoices")
-          .select("id, invoice_number, total, amount_paid, due_date, status, created_at, customers(name)")
+          .select("id, invoice_number, total, amount_paid, due_date, status, created_at, customers(name)", { count: "exact" })
           .in("status", ["sent", "partial", "overdue"])
+          .or(lateInvoiceFilter(todayStr, INVOICE_STALE_DAYS))
           .order("created_at", { ascending: true })
           .limit(50)
       : empty,
-    // Quotes/estimates sent but not answered — the middle of the funnel. The
-    // gone-quiet / expiring-soon cut is applied per-row below; the query just
-    // pulls the open sent docs. follow_up_at (0366, Nort's quote.followUp) is read when the column
-    // exists; before 0366 the same read runs without it and the old rule alone decides.
+    // Quotes/estimates sent but not answered. follow_up_at (0366, Still Waiting and Nort's
+    // quote.followUp) is read when the column exists; before 0366 the same read runs without it,
+    // the old rule alone decides, and no Still Waiting is drawn. The Now rule runs IN the read
+    // (quoteNoAnswerFilter), so its exact count is the No Answer Yet pile's, never every sent
+    // estimate; the ones whose follow-up day is later are the fold's, read beside it.
     isStaff
       ? (async () => {
-          const read = (cols: string) =>
-            supabase.from("quotes").select(cols).eq("status", "sent").order("created_at", { ascending: true }).limit(50);
+          const read = (cols: string, rule: string) =>
+            supabase.from("quotes").select(cols, { count: "exact" }).eq("status", "sent").or(rule).order("created_at", { ascending: true }).limit(50);
           const base = "id, quote_number, doc_type, status, total, valid_until, created_at, customers(name)";
-          const withDay = await read(`${base}, follow_up_at`);
-          return withDay.error && isMissingColumn(withDay.error) ? read(base) : withDay;
+          const [withDay, later] = await Promise.all([
+            read(`${base}, follow_up_at`, quoteNoAnswerFilter(todayStr, QUOTE_QUIET_DAYS, QUOTE_EXPIRY_SOON_DAYS, true)),
+            supabase
+              .from("quotes")
+              .select(`${base}, follow_up_at`)
+              .eq("status", "sent")
+              .gt("follow_up_at", todayStr)
+              .order("follow_up_at", { ascending: true })
+              .limit(50),
+          ]);
+          if (withDay.error && isMissingColumn(withDay.error)) {
+            return { ...(await read(base, quoteNoAnswerFilter(todayStr, QUOTE_QUIET_DAYS, QUOTE_EXPIRY_SOON_DAYS, false))), noFollowUp: true, later: { data: [], error: null } };
+          }
+          return { ...withDay, later: later as Read };
         })()
       : empty,
-    // Accepted estimates — THE WIN. The customer said yes; this must scream "schedule the
-    // job now" (the signal Erik lost when an accept showed nothing). The job's
-    // scheduled_start (joined) tells us if it's been handled → the item self-clears.
+    // Accepted estimates — THE WIN. The job's scheduled_start and status (joined) say whether it has
+    // been handled; a held job waits with its own day.
     isStaff
       ? supabase
           .from("quotes")
-          .select("id, quote_number, doc_type, accepted_at, job_id, customers(name), jobs:job_id(scheduled_start, status)")
+          .select("id, quote_number, doc_type, accepted_at, job_id, customers(name), jobs:job_id(job_number, name, scheduled_start, status)", { count: "exact" })
           .eq("status", "accepted")
           .order("accepted_at", { ascending: false })
           .limit(50)
       : empty,
-    // Draft invoices — billed-up work that never went out the door.
+    // Draft invoices — billed-up work that never went out the door. Every draft, set aside or not:
+    // a set-aside one waits in the fold with its day, and comes back at once when its job is done.
     isStaff
       ? supabase
           .from("invoices")
           // amount_paid: a draft can carry a deposit, and the item says what is due against it.
-          .select("id, invoice_number, total, amount_paid, status, created_at, hold_until, customers(name)")
+          .select("id, invoice_number, total, amount_paid, status, created_at, hold_until, hold_reason, job_id, customers(name), jobs:job_id(job_number, name, status)", { count: "exact" })
           .eq("status", "draft")
-          // A PARKED draft is not forgotten work (0206) — it comes back when its date passes.
-          .or(`hold_until.is.null,hold_until.lte.${todayStr}`)
           .order("created_at", { ascending: true })
           .limit(50)
       : empty,
@@ -309,7 +499,7 @@ async function buildActionItems(ctx: {
     isStaff
       ? supabase
           .from("contracts")
-          .select("id, contract_number, status, job_id, jobs(job_number, name)")
+          .select("id, contract_number, status, job_id, jobs(job_number, name)", { count: "exact" })
           .eq("status", "sent")
           .order("created_at", { ascending: true })
           .limit(50)
@@ -318,15 +508,14 @@ async function buildActionItems(ctx: {
     isStaff
       ? supabase
           .from("lien_records")
-          .select("id, job_id, first_furnished_date, completion_date, prelim_sent_at, lien_recorded_at, noc_recorded, gc_name, lender_name, jobs(job_number, name)")
+          .select("id, job_id, first_furnished_date, completion_date, prelim_sent_at, lien_recorded_at, noc_recorded, gc_name, lender_name, jobs(job_number, name)", { count: "exact" })
           .or("prelim_sent_at.is.null,lien_recorded_at.is.null")
           .limit(100)
       : empty,
     // (North's own bug reports are not read here: they are Bug Watch's, with its own count on the
     // avatar row. Wave 1, NY-list: a company's Needs You never carries them.)
     // ── The end-of-day money-leak sweep feeders (staff only) ──
-    // Every open clock, whatever its age — a handful of rows at most; the stray
-    // rule (past-day OR LONG_SHIFT_HOURS+) is applied per-row in detectStrayTime.
+    // Every open clock, whatever its age; also who is ON a job right now (Jobs Needing A Day).
     // profile_id: the row's door reads "Clock Out" on the viewer's own clock, his name on anyone else's.
     isStaff
       ? supabase
@@ -336,8 +525,8 @@ async function buildActionItems(ctx: {
           .order("clock_in", { ascending: true })
           .limit(50)
       : empty,
-    // Recent entries (bounded window) — drive the closed-with-no-job stray rule
-    // plus the worked-jobs rollup behind the unbilled-work / needs-return detectors.
+    // Recent entries (bounded window): the closed-with-no-job stray rule and the worked-jobs rollup
+    // behind No Costs Yet.
     isStaff
       ? supabase
           .from("time_entries")
@@ -349,9 +538,8 @@ async function buildActionItems(ctx: {
     // The time codes the org marked non-billable (Shop, PTO): a job-less entry on one of them was
     // filed that way on purpose. Labor billing's own predicate, so the two never disagree.
     isStaff ? supabase.from("job_codes").select("code").eq("billable", false) : empty,
-    // ── Materials-routing candidates (staff only) — jobs the crew is about to
-    // stand on: scheduled today/tomorrow, plus multi-day segments covering the
-    // same window. (Worked-in-the-last-2-days jobs join via the rollup below.)
+    // ── Materials-routing candidates (staff only) — jobs the crew is about to stand on: scheduled
+    // today/tomorrow, plus multi-day segments covering the same window.
     isStaff
       ? supabase
           .from("jobs")
@@ -368,125 +556,105 @@ async function buildActionItems(ctx: {
           .gte("end_date", todayStr)
           .limit(50)
       : empty,
-    // ── Walk-throughs that HAPPENED and have no estimate — staff only ───────────
-    // The visit is the expensive part and it is already spent; until it becomes an
-    // estimate it earns nothing. This existed on exactly one screen (/inspections,
-    // two taps deep under Sales) and on none of the surfaces a person actually opens.
-    // 60 days back: older than that and it is a cold lead, not today's work.
-    isStaff && feederOn("inspection_writeup", features)
-      ? supabase
-          .from("appointments")
-          .select("id, type, title, status, starts_at, capture, inquiry_id, job_id, outcome, customers(name), inquiries(name)")
-          .eq("absorbed", false) // a booking absorbed into its job stopped being a visit (0237)
-          .in("type", [...ESTIMATE_VISIT_TYPES])
-          .gte("starts_at", daysAgoStr(todayStr, 60))
-          .lte("starts_at", endOfToday)
-          .order("starts_at", { ascending: false })
-          .limit(100)
-      : empty,
-    // The "written up" signal — an estimate linked to the lead, the job, or (for a
-    // lead-less Inspect-now) the capture's own quote id.
+    inspP,
+    // The "written up" signal — an estimate linked to the lead, the job, or (for a lead-less
+    // Inspect-now) the capture's own quote id.
     isStaff && feederOn("inspection_writeup", features) ? supabase.from("quotes").select("id, inquiry_id, job_id").limit(2000) : empty,
-    // MONEY IS AN OUTCOME (0205): a walk-through whose job carries real billing is finished,
-    // whether or not an estimate was ever written. Draft invoices don't count — a draft is
-    // work in progress, not a decision.
+    // MONEY IS AN OUTCOME (0205): a job carrying real billing is finished. Draft invoices don't
+    // count — a draft is work in progress, not a decision. (Also: an estimate draft whose job has
+    // real billing is no longer an estimate to send.)
     isStaff
       ? supabase.from("invoices").select("job_id").not("job_id", "is", null).not("status", "in", "(draft,void)").limit(5000)
       : empty,
-    // ── Service calls / job-days that HAPPENED and have no bill — THE NORA HOLE ──
-    // A completed inspection has the write-up feeder above; a completed SERVICE CALL had nothing:
-    // mark it complete and no surface would ever again say the work was unbilled. The one visit
-    // type whose whole point is same-day money was the one type the money machinery ignored.
-    isStaff
-      ? supabase
-          .from("appointments")
-          .select("id, type, title, status, starts_at, job_id, customers(name), inquiries(name)")
-          .eq("absorbed", false).in("type", ["service_call", "job"])
-          .eq("status", "completed")
-          .gte("starts_at", daysAgoStr(todayStr, 60))
-          .limit(100)
-      : empty,
-    // ── Estimates started and never sent ─────────────────────────────────────────
-    // The first autosave stamps the lead converted, so an abandoned draft takes the LEAD off
-    // every list with it — the exact DB state the Nora ringer left behind. Older than 2 days:
-    // a draft he's actively building today isn't nagging material yet.
+    doneWorkP,
+    // ── Estimates started and never sent ───────────────────────────────────────
+    // The first autosave stamps the lead converted, so an abandoned draft takes the LEAD off every
+    // list with it. Older than 2 days: a draft he's actively building today isn't nagging material.
+    // Its job's status and its line count ride along: the Send sheet names how many lines go out.
     isStaff && feederOn("quote_draft", features)
       ? supabase
           .from("quotes")
-          .select("id, quote_number, title, total, created_at, customer_name_snapshot:customers(name), inquiries(name)")
+          .select("id, quote_number, title, total, created_at, job_id, jobs:job_id(status), quote_line_items(count), customer_name_snapshot:customers(name), inquiries(name)", { count: "exact" })
           .eq("status", "draft")
           .lt("created_at", new Date(Date.now() - 2 * 86_400_000).toISOString())
           .order("created_at", { ascending: true })
           .limit(50)
       : empty,
-  ]);
+    doneJobsP,
+    heldP,
+    receiptsP,
+    waitsP,
+  ])) as [
+    Read, Read, Read, Read, Read, Read, Read & { noFollowUp?: boolean; later?: Read }, Read, Read, Read, Read, Read, Read, Read, Read, Read, Read, Read, Read, Read, Read, Read,
+    Read & { withDay: boolean }, Read | null, NeedsYouWaits,
+  ];
 
-  // Built without `stream`, stamped once at the return from KIND_STREAM — one
-  // assignment site means a new kind can't ship with a forgotten/mismatched stream.
+  // Built without `stream`, stamped once at the end from KIND_STREAM — one assignment site means a
+  // new kind can't ship with a forgotten/mismatched stream.
   const items: Omit<ActionItem, "stream">[] = [];
+  const waiting: WaitingItem[] = [];
+  const counts: Partial<Record<PileName, PileCount>> = {};
+  const todayMs = Date.parse(todayStr);
+  const billedJobs = new Set(((billedJobR.data ?? []) as { job_id: string }[]).map((r) => r.job_id).filter(Boolean));
+  const clockedInJobIds = new Set(((openTimeR.data ?? []) as any[]).map((e) => e.job_id).filter(Boolean) as string[]);
 
-  // Accepted estimates whose job isn't scheduled yet surface below as the richer
-  // "Accepted — schedule it" item; hold their job ids so the plain "to schedule" list
-  // doesn't ALSO show them (one won job, one line).
-  const wonUnscheduledJobIds = new Set<string>();
-  for (const a of (acceptedR.data ?? []) as any[]) {
-    if (!a.jobs?.scheduled_start && a.job_id) wonUnscheduledJobIds.add(a.job_id);
+  // ── THE WIN: an accepted estimate whose job still has no date. Urgency 2, money stream → the top,
+  // so a "yes" can never again slip by unseen. Its Pick A Day puts the day on the JOB.
+  const wonJobIds = new Set<string>();
+  {
+    for (const a of (acceptedR.data ?? []) as any[]) {
+      const job = one(a.jobs) as any;
+      if (job?.scheduled_start) continue; // scheduled → win captured, item self-clears
+      // A JOB THAT'S OVER DOESN'T NEED A DATE (work ending is an outcome, 0205), and a held one
+      // waits with its own day and reason (NY-feeders: holds quiet the nudges).
+      if (job?.status === "complete" || job?.status === "cancelled" || job?.status === "on_hold") continue;
+      if (a.job_id) wonJobIds.add(String(a.job_id));
+      const who = one(a.customers as any)?.name ?? null;
+      items.push({
+        id: a.id,
+        kind: "quote_accepted",
+        title: `${who ? `${who} said yes` : "Accepted"} · ${a.quote_number || "Estimate"}`,
+        subtitle: job ? jobWords(job) : null,
+        who: null,
+        when: a.accepted_at ?? null,
+        urgency: 2,
+        done: false,
+        href: a.job_id ? `/jobs/${a.job_id}` : `/quotes/${a.id}`,
+        affordances: a.job_id ? ["schedule", "open"] : AFFORDANCES.quote_accepted,
+        targetId: a.job_id ?? null,
+      });
+    }
+    // THE PILE COUNTS THE WINS READ HERE, never "N+" off the read's exact count: that count is every
+    // accepted estimate the company ever had (accepted is a final state), so past 50 of them one new
+    // win read "Won, Needs A Day · 1+", a pile of one opening a list of old, long-scheduled wins. A
+    // win past the newest 50 whose job still has no day isn't lost: accepting materializes its job,
+    // and jobsNeedingADay skips only the wins read here (wonJobIds), so that job is on Needs You as
+    // Jobs Needing A Day.
+    counts.won_needs_a_day = {};
   }
 
-  for (const j of (jobsR.data ?? []) as any[]) {
-    if (wonUnscheduledJobIds.has(j.id)) continue; // shown as "Accepted — schedule it" instead
-    if (j.status === "on_hold") continue; // paused = "stop bugging me": stays in the schedule tray + /jobs, but off the Needs-action inbox
-    items.push({
-      id: j.id,
-      kind: "job_to_schedule",
-      title: jobLabel(j),
-      subtitle: j.customers?.name ?? null,
-      who: null,
-      when: null,
-      urgency: 1,
-      done: false,
-      href: `/jobs/${j.id}`,
-      affordances: AFFORDANCES.job_to_schedule,
+  // ── LEADS. One projection (action-items/switches): with Leads off the same request reads "New
+  // Request From …" and carries the number its Call Back dials.
+  for (const q of (inqR.data ?? []) as any[]) items.push({ ...inquiryActionItem(q, todayStr, leadsOn), since: q.created_at ?? null });
+  counts.leads_to_call = sqlCount(inqR);
+  for (const q of (inqLaterR.data ?? []) as any[]) {
+    const name = String(q.name ?? "").trim() || "Someone";
+    const row = waitingRow({
+      id: q.id,
+      kind: "inquiry",
+      title: leadsOn ? name : `Request From ${name}`,
+      why: q.status === "new" ? "Snoozed" : "Follow Up",
+      backOn: q.next_follow_up_at,
+      href: `/leads?focus=${q.id}`,
     });
+    if (row) waiting.push(row);
   }
+  // A visit with a lead rides the lead's row (one fact, one row).
+  const leadIds = new Set<string>([...((inqR.data ?? []) as any[]), ...((inqLaterR.data ?? []) as any[])].map((q) => String(q.id)));
 
-  // The WIN: an accepted estimate whose job still has no date. Urgency 2, money stream →
-  // top of the inbox, so a "yes" can never again slip by unseen.
-  for (const a of (acceptedR.data ?? []) as any[]) {
-    if (a.jobs?.scheduled_start) continue; // scheduled → win captured, item self-clears
-    // …AND A JOB THAT'S OVER DOESN'T NEED A DATE. The same join twenty lines up already had
-    // `status` available and never asked: a same-day service call that was accepted, driven to
-    // and finished without anyone setting a date kept shouting "schedule the job" at urgency 2
-    // from the top of the money stream, forever. Work ending is an outcome (0205).
-    if (a.jobs?.status === "complete" || a.jobs?.status === "cancelled") continue;
-    items.push({
-      id: a.id,
-      kind: "quote_accepted",
-      title: `${a.quote_number || "Estimate"} accepted — schedule the job`,
-      subtitle: a.customers?.name ?? null,
-      who: null,
-      when: a.accepted_at ?? null,
-      urgency: 2,
-      done: false,
-      href: a.job_id ? `/jobs/${a.job_id}` : `/quotes/${a.id}`,
-      affordances: AFFORDANCES.quote_accepted,
-    });
-  }
-
-  // One projection (action-items/switches): with Leads off the same request reads "New Request
-  // From …" and carries the number its Call Back dials.
-  const leadsOn = featureOn(features, "leads");
-  for (const q of (inqR.data ?? []) as any[]) items.push(inquiryActionItem(q, todayStr, leadsOn));
-
-  // Ids claimed by the write-up feeder below, so the plain "Appointment" feeder cannot ALSO
-  // emit them. A past visit that still says status=scheduled but has field notes on it counts
-  // as HAPPENED (bucketInspections) — without this it would show twice on My Day, once as a
-  // calendar row and once as the write-up, which is the double-map the nav doctrine forbids.
+  // ── A finished walk-through, waiting to become money. bucketInspections is the SAME function
+  // /inspections uses, so the inbox and the list can never disagree about what is outstanding.
   const writeUpApptIds = new Set<string>();
-
-  // A finished walk-through, waiting to become money. bucketInspections is the SAME
-  // function /inspections uses — "done but not written up" is one definition in one
-  // place, so the inbox and the list can never disagree about what is outstanding.
   {
     const qs = (inspQuoteR.data ?? []) as any[];
     const { toWriteUp } = bucketInspections(
@@ -495,8 +663,7 @@ async function buildActionItems(ctx: {
       new Set(qs.map((q) => q.job_id).filter(Boolean)),
       new Date(),
       new Set(qs.map((q) => q.id).filter(Boolean)),
-      // Jobs with real (non-draft, non-void) billing — the visit already turned into money.
-      new Set(((billedJobR.data ?? []) as { job_id: string }[]).map((r) => r.job_id).filter(Boolean)),
+      billedJobs, // jobs with real (non-draft, non-void) billing — the visit already turned into money
     );
     for (const a of toWriteUp) {
       const who = (a as any).customers?.name ?? (a as any).inquiries?.name ?? null;
@@ -506,10 +673,8 @@ async function buildActionItems(ctx: {
         title: a.title || "Site inspection",
         subtitle: who,
         who: null,
-        // The DAY IT HAPPENED, not a due date — an inbox row that reads "Jul 28" is
-        // telling you how long this has been sitting, which is the whole pressure.
+        // The DAY IT HAPPENED, not a due date — how long this has been sitting is the pressure.
         when: a.starts_at ?? null,
-        // Oldest-first via the sort below; a walk-through going stale is the loss.
         urgency: 1,
         done: false,
         href: `/quotes/new?capture=${a.id}${a.inquiry_id ? `&inquiry=${a.inquiry_id}` : ""}`,
@@ -517,165 +682,319 @@ async function buildActionItems(ctx: {
       });
       writeUpApptIds.add(a.id);
     }
+    counts.walkthroughs_to_write_up = codeCount(inspR);
   }
 
+  // ── VISITS NOBODY CLOSED OUT.
   for (const a of (apptR.data ?? []) as any[]) {
     if (!isStaff && a.assigned_to !== userId) continue;
-    if (writeUpApptIds.has(a.id)) continue; // already surfaced as "Write up the estimate"
+    if (writeUpApptIds.has(a.id)) continue; // already surfaced as a write-up
+    if (a.inquiry_id && leadIds.has(String(a.inquiry_id))) continue; // rides its lead's row
+    const type = a.type ? `${a.type[0].toUpperCase()}${a.type.slice(1)}`.replace(/_/g, " ") : null;
     items.push({
       id: a.id,
       kind: "appointment",
-      title: a.title || (a.type ? `${a.type[0].toUpperCase()}${a.type.slice(1)}` : "Appointment"),
-      subtitle: a.type ?? null,
+      title: a.title || type || "Appointment",
+      subtitle: [one(a.customers as any)?.name ?? null, type].filter(Boolean).join(" · ") || null,
       who: null,
       when: a.starts_at,
       urgency: 0,
       done: false,
       // "When I click on something I wanted to open that thing not the calendar."
-      // cn-v601 fixed this on the My Day AGENDA and missed the Needs-action inbox on the
-      // very same screen — tapping an inspection here still dumped you on the calendar
-      // grid to hunt for the row you just tapped. Open the appointment itself.
       href: `/appointments/${a.id}`,
       affordances: appointmentAffordances(isStaff),
     });
   }
+  counts.visits_to_close_out = codeCount(apptR);
 
-  // A bank download is the owner's money: only a viewer who sorts them sees one here (bank-viewer).
-  const bankOk = ((orgR.data ?? []) as any[]).some((o) => o.category === "Bank Download") ? await viewerSortsBank(supabase, userId) : false;
-  for (const o of (orgR.data ?? []) as any[]) {
-    // A BANK DOWNLOAD waiting in Sort These (2026-09-27) is on My Day while anything on it needs a
-    // person, and opens where its card is.
-    const bank = o.category === "Bank Download";
-    if (bank && !bankOk) continue;
-    items.push({
-      id: o.id,
-      kind: "organize",
-      // A note is read, not filed; a bank download is sorted on its own card.
-      ...(bank ? { chip: "Bank Download" } : o.kind === "note" ? { chip: "Note To Review" } : {}),
-      title: bank ? "Bank Download To Sort" : (ORGANIZE_LABEL[o.kind] ?? "To file"),
-      subtitle: null,
-      who: null,
-      when: null,
-      urgency: 0,
-      done: false,
-      href: bank ? "/bills#sort-these" : "/organize",
-      // A bank download only opens: Dismiss archived it, and Back in Archive is its whole Undo,
-      // so a swipe here could take every line it counted back without a question.
-      affordances: bank ? ["open"] : AFFORDANCES.organize,
-    });
+  // ── PAPERS AND NOTES. A paper the /bills tray sorts (isTrayPaper) is Sort It on /bills; a note, or
+  // a paper Organize files (a plan read as not a cost, a picture asking "What is this?"), is File It
+  // in Organize. A BANK DOWNLOAD is the owner's money: only a viewer who sorts them sees one, on its
+  // own card, never in a pile.
+  {
+    const bankOk = ((orgR.data ?? []) as any[]).some((o) => o.category === "Bank Download") ? await viewerSortsBank(supabase, userId) : false;
+    for (const o of (orgR.data ?? []) as any[]) {
+      const bank = o.category === "Bank Download";
+      if (bank && !bankOk) continue;
+      const tray = !bank && isTrayPaper(o);
+      const note = !bank && !tray && o.kind === "note";
+      items.push({
+        id: o.id,
+        kind: "organize",
+        paper: bank ? "bank" : tray ? "tray" : "organize",
+        chip: bank ? "Bank Download" : tray ? "Paper To Sort" : note ? "Note To Review" : "To File",
+        title: bank ? "Bank Download To Sort" : String(o.title ?? "").trim() || (ORGANIZE_LABEL[o.kind] ?? "To file"),
+        subtitle: null,
+        who: null,
+        when: null,
+        since: o.created_at ?? null,
+        urgency: 0,
+        done: false,
+        href: bank || tray ? "/bills#sort-these" : "/organize",
+        // A bank download only opens: Set Aside archived it, and Back in Archive is its whole Undo,
+        // so a tap here could take every line it counted back without a question.
+        affordances: bank ? ["open"] : AFFORDANCES.organize,
+      });
+    }
+    counts.papers_to_sort = codeCount(orgR);
+    counts.notes_to_review = codeCount(orgR);
   }
 
-  // Unpaid invoices (A/R) — the money the business is owed. Surfaced when past their
-  // due date OR simply old (created INVOICE_STALE_DAYS+ ago), so an unpaid invoice
-  // reaches the inbox by AGE even before a due_date is entered.
-  const todayMs = Date.parse(todayStr);
+  // ── Unpaid invoices (A/R) — the money the business is owed. Surfaced when past their due date OR
+  // simply old (created INVOICE_STALE_DAYS+ ago), so an unpaid invoice reaches the inbox by AGE even
+  // before a due_date is entered. A hold on the job never quiets this: money is never hidden.
   const overdueEmitted = new Set<string>(); // one balance, ONE money row — the visit block checks this
   for (const inv of (invR.data ?? []) as any[]) {
     const balance = invoiceBalance(inv.total, inv.amount_paid);
     if (balance < 0.005) continue; // effectively paid; status just lagging
-    // Days past due (only when a due_date is set) and days since created.
     const daysOverDue = inv.due_date ? Math.floor((todayMs - Date.parse(inv.due_date)) / 86_400_000) : null;
     const daysOld = inv.created_at ? Math.floor((todayMs - Date.parse(inv.created_at)) / 86_400_000) : 0;
     const pastDue = daysOverDue != null && daysOverDue > 0;
-    // AGE ONLY SPEAKS WHEN THE DUE DATE DOESN'T. The age path was written when invoices had no
-    // due-date UI ("chase it after 30 days"); that field shipped, so a net-60 invoice was being
-    // labelled "Overdue" on day 30 while it was not yet due — the app saying something false
-    // about money. A set, future due date is the answer; age is the fallback when there isn't one.
+    // AGE ONLY SPEAKS WHEN THE DUE DATE DOESN'T: a set, future due date is the answer.
     const stale = daysOld >= INVOICE_STALE_DAYS && !(daysOverDue != null && daysOverDue <= 0);
     if (!pastDue && !stale) continue; // not yet worth chasing
-    // Urgency tracks the worse of the two clocks: very overdue, or very old.
     const overWindow = Math.max(daysOverDue ?? 0, stale ? daysOld - INVOICE_STALE_DAYS : 0);
-    // The billing board's amount language (invoiceAmount): the balance up top, and what it is
-    // due against underneath once anything has been paid.
     const a = invoiceAmount(inv.total, inv.amount_paid);
     items.push({
       id: inv.id,
       kind: "invoice_overdue",
       title: `${inv.invoice_number} · ${a.due} due`,
-      subtitle: [inv.customers?.name, a.detail].filter(Boolean).join(" · ") || null,
+      subtitle: [one(inv.customers as any)?.name, a.detail].filter(Boolean).join(" · ") || null,
       who: null,
-      // Prefer the due date for the "when"; fall back to created so undated rows still sort by age.
       when: inv.due_date ?? inv.created_at ?? null,
       urgency: overWindow > 14 ? 2 : 1,
       done: false,
       href: `/billing/${inv.id}`,
       affordances: AFFORDANCES.invoice_overdue,
+      amount: balance,
     });
     overdueEmitted.add(String(inv.id));
   }
+  counts.late_invoices = codeCount(invR);
 
-  // Sent quotes/estimates gone quiet — surfaced once the customer has had it
-  // QUOTE_QUIET_DAYS+ with no answer, or the valid-until window is closing/past.
-  // Open-only: acting on a quote (resend, follow up, mark declined) happens on
-  // its own page. THE FOLLOW-UP DAY (0366 quotes.follow_up_at, set by Nort's quote.followUp —
-  // never valid_until, which is the customer's offer) wins over the quiet rule: a day after today
-  // keeps the estimate off the list, and on its day it is back even if it isn't 7 days quiet.
-  for (const q of (quoteR.data ?? []) as any[]) {
-    const daysOut = q.created_at ? Math.floor((todayMs - Date.parse(q.created_at)) / 86_400_000) : 0;
-    const daysToExpiry = q.valid_until ? Math.floor((Date.parse(q.valid_until) - todayMs) / 86_400_000) : null;
-    const quiet = daysOut >= QUOTE_QUIET_DAYS;
-    const expiring = daysToExpiry != null && daysToExpiry <= QUOTE_EXPIRY_SOON_DAYS;
-    const followUp = quoteFollowUpState(q.follow_up_at, todayStr);
-    if (followUp === "later") continue; // the day he picked hasn't come yet
-    if (followUp === "none" && !quiet && !expiring) continue; // still fresh — give the customer room
-    items.push({
-      id: q.id,
-      kind: "quote_awaiting",
-      title: `${(q.doc_type ?? "quote") === "estimate" ? "Estimate" : "Quote"} ${q.quote_number} awaiting reply`,
-      subtitle: q.customers?.name ?? formatCurrency(Number(q.total ?? 0)),
-      who: null,
-      // The follow-up day he picked, when that's why it's here; else the expiry (that's the clock
-      // that matters); fall back to created so undated offers still sort by age.
-      when: (followUp === "due" ? q.follow_up_at : null) ?? q.valid_until ?? q.created_at ?? null,
-      // Past its valid-until the offer is dying — bump it above the routine chase.
-      urgency: daysToExpiry != null && daysToExpiry < 0 ? 2 : 1,
-      done: false,
-      href: `/quotes/${q.id}`,
-      affordances: AFFORDANCES.quote_awaiting,
-    });
+  // ── Sent estimates gone quiet — once the customer has had it QUOTE_QUIET_DAYS+ with no answer, or
+  // the valid-until window is closing/past. THE FOLLOW-UP DAY (0366 quotes.follow_up_at, Still
+  // Waiting or Nort's quote.followUp; never valid_until, the customer's offer) wins: a day after
+  // today waits in the fold with that day, and on its day it is back even if it isn't 7 days quiet.
+  {
+    const followUpReady = !quoteR.noFollowUp;
+    // The Now read (its rule in SQL) and the fold's read (a follow-up day after today), one pass: the
+    // per-row rule below still decides, and an estimate in both reads is placed once.
+    const seenQuotes = new Set<string>();
+    for (const q of [...((quoteR.data ?? []) as any[]), ...((quoteR.later?.data ?? []) as any[])]) {
+      if (seenQuotes.has(String(q.id))) continue;
+      seenQuotes.add(String(q.id));
+      const daysOut = q.created_at ? Math.floor((todayMs - Date.parse(q.created_at)) / 86_400_000) : 0;
+      const daysToExpiry = q.valid_until ? Math.floor((Date.parse(q.valid_until) - todayMs) / 86_400_000) : null;
+      const quiet = daysOut >= QUOTE_QUIET_DAYS;
+      const expiring = daysToExpiry != null && daysToExpiry <= QUOTE_EXPIRY_SOON_DAYS;
+      const followUp = quoteFollowUpState(q.follow_up_at, todayStr);
+      const who = one(q.customers as any)?.name ?? null;
+      const doc = (q.doc_type ?? "quote") === "estimate" ? "Estimate" : "Quote";
+      if (followUp === "later") {
+        const row = waitingRow({
+          id: q.id,
+          kind: "quote_awaiting",
+          title: [who, q.quote_number || doc].filter(Boolean).join(" · "),
+          why: "No Answer Yet",
+          backOn: q.follow_up_at,
+          href: `/quotes/${q.id}`,
+        });
+        if (row) waiting.push(row);
+        continue;
+      }
+      if (followUp === "none" && !quiet && !expiring) continue; // still fresh — give the customer room
+      items.push({
+        id: q.id,
+        kind: "quote_awaiting",
+        title: `${doc} ${q.quote_number} awaiting reply`,
+        subtitle: who ?? formatCurrency(Number(q.total ?? 0)),
+        who: null,
+        // The follow-up day he picked, when that's why it's here; else the expiry (that's the clock
+        // that matters); fall back to created so undated offers still sort by age.
+        when: (followUp === "due" ? q.follow_up_at : null) ?? q.valid_until ?? q.created_at ?? null,
+        since: q.created_at ?? null,
+        // Past its valid-until the offer is dying — bump it above the routine chase.
+        urgency: daysToExpiry != null && daysToExpiry < 0 ? 2 : 1,
+        done: false,
+        href: `/quotes/${q.id}`,
+        // Still Waiting needs the follow-up day's column (0366); without it, only Lost.
+        affordances: followUpReady ? AFFORDANCES.quote_awaiting : AFFORDANCES.quote_awaiting.filter((v) => v !== "snooze"),
+        amount: Number(q.total ?? 0),
+      });
+    }
+    counts.no_answer_yet = codeCount(quoteR);
   }
 
-  // Draft invoices — money one tap from "sent" sitting in limbo. Every draft
-  // surfaces (no age cut): it either goes out or gets deleted, never forgotten.
+  // ── Draft invoices — money one tap from "sent" sitting in limbo. Every draft surfaces (no age
+  // cut): it goes out, gets set aside UNTIL A DAY (it waits in the fold with that day and its
+  // reason), or is voided. A set-aside draft whose job is finished comes back at once: the day it
+  // was waiting for has come.
+  // ONE FACT, ONE ROW: the jobs whose draft is on Now. A finished job whose bill is a draft here is
+  // that draft's row (Send It), never a second "Done, Not Billed" row below.
+  const draftOnNowJobs = new Set<string>();
   for (const d of (draftR.data ?? []) as any[]) {
     const a = invoiceAmount(d.total, d.amount_paid);
+    const due = invoiceBalance(d.total, d.amount_paid);
+    const job = one(d.jobs as any) as { job_number?: string | null; name?: string | null; status?: string | null } | null;
+    const who = one(d.customers as any)?.name ?? null;
+    const until = d.hold_until ? String(d.hold_until).slice(0, 10) : null;
+    const state = draftInvoiceState(until, job?.status, todayStr);
+    if (state.place === "waiting" && until) {
+      const why = String(d.hold_reason ?? "").trim() || (Number(d.amount_paid ?? 0) > 0 ? "Running Draft" : "Set Aside");
+      const row = waitingRow({ id: d.id, kind: "invoice_draft", title: [who, d.invoice_number, a.due].filter(Boolean).join(" · "), why, backOn: until, href: `/billing/${d.id}` });
+      if (row) {
+        waiting.push(row);
+        continue;
+      }
+    }
+    const back = state.place === "finished";
+    if (d.job_id) draftOnNowJobs.add(String(d.job_id));
     items.push({
       id: d.id,
       kind: "invoice_draft",
-      title: `Draft invoice ${d.invoice_number} · ${a.due}`,
-      subtitle: [d.customers?.name, a.detail].filter(Boolean).join(" · ") || null,
+      title:
+        back && job
+          ? `${jobWords(job)} ${job.status === "complete" ? "Finished" : "Cancelled"} · Send ${d.invoice_number}`
+          : `Draft invoice ${d.invoice_number} · ${a.due}`,
+      subtitle: [who, back ? a.due : null, a.detail].filter(Boolean).join(" · ") || null,
       who: null,
       when: d.created_at ?? null,
-      urgency: 0,
+      // The day it was set aside for came early: it is back on top.
+      urgency: back ? 1 : 0,
       done: false,
       href: `/billing/${d.id}`,
-      affordances: AFFORDANCES.invoice_draft,
+      // Its job is over: nothing left to wait for, so no Set Aside Until… (it would be straight back).
+      affordances: state.canSetAside ? AFFORDANCES.invoice_draft : AFFORDANCES.invoice_draft.filter((v) => v !== "snooze"),
+      amount: due,
     });
   }
+  counts.invoices_not_sent = codeCount(draftR);
 
   // ── WORK DONE, NO BILL (the Nora hole). A completed service call or job-day with no invoice
   //    anchored to it and no billing on its job is money already earned and not yet asked for.
-  //    NOTHING SILENT: this is the row that would have caught the $150 had it not been cash.
+  //    A hold never quiets it (money is never hidden).
+  const doneVisitIds = ((doneWorkR.data ?? []) as { id: string }[]).map((a) => String(a.id));
+
+  // ── THE SECOND WAVE: every read that needs a first-wave answer, side by side. ──
+  const worked = rollupWorkedJobs((recentTimeR.data ?? []) as any[], todayStr);
+  const workedIds = isStaff ? [...worked.keys()].slice(0, 30) : [];
+  // Jobs Needing A Day, before the visits read: the ones nothing else puts a day ahead of.
+  const needDayPre = jobsNeedingADay({
+    jobs: (jobsR.data ?? []) as NeedDayJob[],
+    todayStr,
+    tz,
+    clockedInJobIds,
+    wonJobIds,
+  });
+  const needDayIds = needDayPre.map((f) => f.job.id);
+  // Materials-routing candidates: jobs the crew is about to stand on (today/tomorrow, segments), and
+  // (below) jobs worked in the last two days. Never a held job: it waits with its own day.
+  const matCandidates = new Map<string, { job: { id: string; job_number?: string | null; name?: string | null }; when: string | null }>();
+  const matStatusOk = (s: string | null | undefined) => s !== "cancelled" && s !== "complete" && s !== "invoiced" && s !== "on_hold";
+  for (const j of (matJobsR.data ?? []) as any[]) {
+    if (matStatusOk(j.status)) matCandidates.set(j.id, { job: j, when: j.scheduled_start ?? null });
+  }
+  for (const s of (matSegR.data ?? []) as any[]) {
+    const j = one(s.jobs as any) as any;
+    if (!j || !matStatusOk(j.status) || matCandidates.has(j.id)) continue;
+    // The day the crew is next on it: the segment's start if still ahead, else today.
+    matCandidates.set(j.id, { job: j, when: s.start_date && s.start_date > todayStr ? s.start_date : todayStr });
+  }
+  const heldRows = (heldR.data ?? []) as any[];
+  const receiptDocs = (receiptsR?.data ?? []) as ReceiptDoc[];
+  const shortsR = await shortsP;
+  const shortRows = shortsR.error ? [] : ((shortsR.data ?? []) as any[]);
+
+  // The jobs whose materials lines a row names (Buy Materials' preview, No Costs Yet's costed rule),
+  // and the ones whose open lines are only counted ("· 6 to buy" on a job needing a day or a hold).
+  const previewIds = [...new Set([...matCandidates.keys(), ...workedIds])];
+  const countIds = [...new Set([...needDayIds, ...heldRows.map((j) => String(j.id))])].filter((id) => !previewIds.includes(id));
+
+  const [settledR, futureApptR, previewListsR, countListsR, wBillsR, wPosR, wInvR, wJobsR, tiesR, peopleR] = await Promise.all([
+    // The settled signal for done visits: an invoice anchored to the visit (0233). amount_paid rides
+    // along because ANCHORED IS NOT PAID ("collect later" anchors a bill with zero collected).
+    doneVisitIds.length && isStaff
+      ? inChunks(doneVisitIds, (ids) =>
+          supabase.from("invoices").select("id, appointment_id, amount_paid").in("appointment_id", ids).neq("status", "void").limit(400),
+        )
+      : empty,
+    // A visit booked for a job needing a day, today or later: something IS ahead of it.
+    needDayIds.length
+      ? inChunks(needDayIds, (ids) =>
+          supabase
+            .from("appointments")
+            .select("job_id")
+            .in("job_id", ids)
+            .eq("absorbed", false)
+            .eq("status", "scheduled")
+            .gte("starts_at", dayStartIso(todayStr))
+            .limit(400),
+        )
+      : empty,
+    // THE JOBS' MATERIALS LISTS, newest first, so newestListPerJob keeps the job's own list (the one
+    // its Materials tab shows). The jobs a row previews carry their lines' words...
+    isStaff && previewIds.length
+      ? inChunks(previewIds, (ids) =>
+          supabase
+            .from("material_lists")
+            .select("id, job_id, created_at, material_list_items(description, quantity, purchased, is_tool)")
+            .in("job_id", ids)
+            .order("created_at", { ascending: false })
+            .order("id", { ascending: false })
+            .limit(400),
+        )
+      : empty,
+    // ...and the ones only counted carry the two checklist columns, nothing more (this rides the app
+    // shell's badge on every page).
+    isStaff && countIds.length
+      ? inChunks(countIds, (ids) =>
+          supabase
+            .from("material_lists")
+            .select("id, job_id, created_at, material_list_items(purchased, is_tool)")
+            .in("job_id", ids)
+            .order("created_at", { ascending: false })
+            .order("id", { ascending: false })
+            .limit(400),
+        )
+      : empty,
+    // No Costs Yet's other three reads, for the jobs worked in the last two days.
+    workedIds.length ? supabase.from("bills").select("job_id").in("job_id", workedIds).limit(200) : empty,
+    workedIds.length ? supabase.from("purchase_orders").select("job_id").in("job_id", workedIds).limit(200) : empty,
+    // Each line's kind rides along: a materials line on a live invoice is costs on the record
+    // (costedJobIds, the one rule the 6 PM push uses too).
+    workedIds.length ? supabase.from("invoices").select(COSTED_INVOICE_COLUMNS).in("job_id", workedIds).limit(200) : empty,
+    workedIds.length ? supabase.from("jobs").select("id, job_number, name, status, scheduled_start").in("id", workedIds) : empty,
+    // Receipts Not On A Bill: the ties that account for those papers (a bill, a supplier's
+    // document, petty cash), by document or by file, in chunks side by side.
+    receiptDocs.length
+      ? Promise.all(
+          tieReadFilters(receiptDocs).map((f) =>
+            Promise.resolve(supabase.from("organized_items").select(RECEIPT_TIE_COLUMNS).or(f).limit(1000)) as Promise<Read>,
+          ),
+        ).then((parts): Read => ({ data: parts.flatMap((p) => p?.data ?? []), error: parts.find((p) => p?.error)?.error ?? null }))
+      : empty,
+    // Whose names the rows say: who snapped a receipt, who took pieces past stock.
+    (() => {
+      const ids = [...new Set([...receiptDocs.map((d) => d.uploaded_by), ...shortRows.map((r) => r.created_by)].filter(Boolean) as string[])];
+      return ids.length ? inChunks(ids, (chunk) => supabase.from("profiles").select("id, full_name").in("id", chunk)) : empty;
+    })(),
+  ]);
+  const nameOf = new Map(((peopleR.data ?? []) as any[]).map((p) => [String(p.id), String(p.full_name ?? "").trim()]));
+
+  // Open lines to buy per job, on the job's ONE list (the newest): the Materials badge, the Buy
+  // Materials row and every "to buy" here count exactly these lines. Tools are brought, not bought.
+  // A lost read counts nothing and says nothing it can't know (no "to buy", no Buy Materials row).
+  const lists = [...((previewListsR.data ?? []) as any[]), ...((countListsR.data ?? []) as any[])];
+  const toBuyByJob = new Map<string, { description: string; quantity: number }[]>();
+  for (const ml of newestListPerJob(lists).values()) {
+    const open = ((ml.material_list_items ?? []) as any[]).filter(isOpenToBuy);
+    if (open.length) toBuyByJob.set(ml.job_id, open.map((it) => ({ description: String(it.description ?? ""), quantity: Number(it.quantity ?? 1) })));
+  }
+  const toBuyCount = new Map([...toBuyByJob].map(([id, lines]) => [id, lines.length]));
+
+  // ── Done visits and done jobs, no bill (visit_unbilled). ──
   {
-    // The settled signal: an invoice anchored to its visit (0233 — settleUp writes it).
-    // amount_paid rides along because ANCHORED IS NOT PAID — "collect later" anchors a bill
-    // with zero collected, and treating that as settled re-opened the Nora hole one door down.
-    // Scoped to the done-visit ids (≤100, the 60-day window) instead of the old org-wide
-    // limit(2000), which silently truncated once an org out-earned it and made settled visits
-    // re-nag as unbilled. Runs AFTER the Promise.all because it needs the ids (0233's partial
-    // index on appointment_id backs the .in()).
-    const doneVisitIds = ((doneWorkR.data ?? []) as { id: string }[]).map((a) => String(a.id));
-    const settledR = doneVisitIds.length && isStaff
-      ? await supabase
-          .from("invoices")
-          .select("id, appointment_id, amount_paid")
-          .in("appointment_id", doneVisitIds)
-          .neq("status", "void")
-          .limit(200)
-      : { data: [] as { id: string; appointment_id: string | null; amount_paid: number | null }[] };
-    // Two different endings share the anchor: money landed (settled — the item clears) and
-    // billed-but-unpaid ("collect later" — the item stays, retitled, and opens the INVOICE,
-    // because the next move is collecting, not re-billing).
     const settled = new Set<string>();
     const billedUnpaid = new Map<string, string>(); // appointment id → invoice id
     for (const r of (settledR.data ?? []) as { id: string; appointment_id: string | null; amount_paid: number | null }[]) {
@@ -683,77 +1002,69 @@ async function buildActionItems(ctx: {
       if (Number(r.amount_paid ?? 0) > 0) settled.add(String(r.appointment_id));
       else billedUnpaid.set(String(r.appointment_id), r.id);
     }
-    const billedJobs = new Set(
-      ((billedJobR.data ?? []) as { job_id: string }[]).map((r) => r.job_id).filter(Boolean),
-    );
     for (const a of (doneWorkR.data ?? []) as any[]) {
       if (settled.has(String(a.id))) continue;
       if (a.job_id && billedJobs.has(a.job_id)) continue;
-      const who = a.customers?.name ?? a.inquiries?.name ?? null;
+      const who = one(a.customers as any)?.name ?? one(a.inquiries as any)?.name ?? null;
       const openInvoice = billedUnpaid.get(String(a.id));
-      // ONE balance, ONE row: once the anchored invoice ages into invoice_overdue, the visit's
-      // "billed, no money yet" would be the same dollars nagging twice from two rows.
+      // ONE balance, ONE row: once the anchored invoice ages into invoice_overdue, it isn't twice.
       if (openInvoice && overdueEmitted.has(openInvoice)) continue;
       items.push({
         id: `unbilled-${a.id}`,
         kind: "visit_unbilled",
         // Its chip says the state it is in: billed and waiting on the money, or not billed at all.
         ...(openInvoice ? { chip: "Billed, Not Paid" } : {}),
-        title: `${a.title || "Work done"} — ${openInvoice ? "billed, no money yet" : "no bill yet"}`,
+        title: a.title || "Work done",
         subtitle: who,
         who: null,
         when: a.starts_at ?? null,
         urgency: 1, // earned and unasked-for ages worse than a draft
         done: false,
-        // Unbilled → the visit (it carries Pay now); billed → the open invoice itself.
-        href: openInvoice ? `/billing/${openInvoice}` : `/appointments/${a.id}`,
+        // Billed → the open invoice (Get Paid); not billed → the job's Invoices tab, or the visit
+        // (which carries Pay now) when it has no job (Bill It).
+        href: openInvoice ? `/billing/${openInvoice}` : a.job_id ? `/jobs/${a.job_id}?tab=invoices` : `/appointments/${a.id}`,
         affordances: AFFORDANCES.visit_unbilled,
       });
     }
-
-    /* THE JOB-SHAPED NORA HOLE. "A service call is a job" means the flow's main line now mints
-       JOBS with no appointment row at all — so a job flipped to complete through the status
-       dropdown (finishJob bills atomically; the dropdown doesn't) earned money the appointment
-       feeder above can never see. That state lived ONLY on /billing's done-not-invoiced lane,
-       which nothing counts. Same kind, same question, same Pay now on the other end — the job
-       page's. detectUnbilledWork defers this exact state here-ward (leak-detectors "the billing
-       pipeline owns it"), so this is the one projection, not a second. */
-    if (isStaff) {
-      const { data: doneJobs } = await supabase
-        .from("jobs")
-        .select("id, job_number, name, status, updated_at, customers(name)")
-        .eq("status", "complete")
-        .gte("updated_at", new Date(todayMs - 30 * 86_400_000).toISOString())
-        .order("updated_at", { ascending: false })
-        .limit(50);
-      for (const j of (doneJobs ?? []) as any[]) {
-        if (billedJobs.has(j.id)) continue; // any real (non-draft, non-void) invoice settles it
-        items.push({
-          id: `jdone-${j.id}`,
-          kind: "visit_unbilled",
-          title: `${jobLabel(j)} — done, no bill yet`,
-          subtitle: j.customers?.name ?? null,
-          who: null,
-          when: j.updated_at ?? null,
-          urgency: 1,
-          done: false,
-          href: `/jobs/${j.id}`, // Pay now lives on the job page
-          affordances: AFFORDANCES.visit_unbilled,
-        });
-      }
+    /* THE JOB-SHAPED NORA HOLE. A job flipped to complete through the status dropdown (finishJob
+       bills atomically; the dropdown doesn't) earned money the appointment feeder above can never
+       see. Same kind, same question, same Bill It on the other end — the job page's. */
+    for (const j of (doneJobsR.data ?? []) as any[]) {
+      if (billedJobs.has(j.id)) continue; // any real (non-draft, non-void) invoice settles it
+      // Its bill is already a draft on Now ("Draft invoice INV-081", or "… Finished · Send INV-081"):
+      // that row, with its Send It, is this job's one row. (A draft past the 50-row read keeps this.)
+      if (draftOnNowJobs.has(String(j.id))) continue;
+      items.push({
+        id: `jdone-${j.id}`,
+        kind: "visit_unbilled",
+        title: jobWords(j),
+        subtitle: one(j.customers as any)?.name ?? null,
+        who: null,
+        when: j.updated_at ?? null,
+        urgency: 1,
+        done: false,
+        href: `/jobs/${j.id}?tab=invoices`,
+        affordances: AFFORDANCES.visit_unbilled,
+      });
     }
+    // Both reads drop rows in code (settled, billed): "N+" when either didn't bring every candidate.
+    counts.done_not_billed = codeCount(doneWorkR).capped || codeCount(doneJobsR).capped ? { capped: true } : {};
   }
 
-  // ── ESTIMATES STARTED, NEVER SENT. The first autosave stamps the lead converted, so an
-  //    abandoned draft is a lead that will never resurface anywhere — it reads as handled and is
-  //    in fact abandoned. Sent, accepted, and draft INVOICES all had feeders; draft quotes had
-  //    none, which is why the Nora trail (a $150 draft, a 'quoted' lead, no money) was invisible.
+  // ── ESTIMATES STARTED, NEVER SENT. An abandoned draft is a lead that will never resurface anywhere:
+  //    it reads as handled and is in fact abandoned. Its Send It sends it after one confirm naming
+  //    the customer, the total and the number of lines (lane 4's Send sheet). Dropped only when its
+  //    job is finished, cancelled or billed: then there is nothing left to estimate.
   for (const q of (draftQuoteR.data ?? []) as any[]) {
-    const who = (q as any).customer_name_snapshot?.name ?? (q as any).inquiries?.name ?? null;
+    const job = one(q.jobs as any) as { status?: string | null } | null;
+    if (job?.status === "complete" || job?.status === "invoiced" || job?.status === "cancelled") continue;
+    if (q.job_id && billedJobs.has(q.job_id)) continue;
+    const who = one((q as any).customer_name_snapshot)?.name ?? one((q as any).inquiries)?.name ?? null;
+    const lines = one(q.quote_line_items as any) as { count?: number } | null;
     items.push({
       id: `qdraft-${q.id}`,
       kind: "quote_draft",
-      title: `Estimate ${q.quote_number || ""} started, never sent`.trim(),
+      title: `Estimate ${q.quote_number || ""} started, never sent`.replace(/\s+/g, " ").trim(),
       subtitle: who ?? (q.title || null),
       who: null,
       when: q.created_at ?? null,
@@ -761,17 +1072,29 @@ async function buildActionItems(ctx: {
       done: false,
       href: `/quotes/${q.id}`,
       affordances: AFFORDANCES.quote_draft,
+      amount: Number(q.total ?? 0),
+      send: {
+        kind: "quote",
+        id: String(q.id),
+        number: q.quote_number ?? null,
+        customerName: who,
+        amount: Number(q.total ?? 0),
+        lineCount: typeof lines?.count === "number" ? lines.count : null,
+        openHref: `/quotes/${q.id}`,
+      },
     });
   }
+  counts.estimates_not_sent = codeCount(draftQuoteR);
 
-  // Contracts sent but not yet signed — chase the signature to lock the deal.
+  // ── Contracts sent but not yet signed — chase the signature to lock the deal. A hold never quiets
+  // it (a legal clock).
   for (const cont of (conR.data ?? []) as any[]) {
-    const job = cont.jobs;
+    const job = one(cont.jobs as any);
     items.push({
       id: cont.id,
       kind: "contract_unsigned",
-      title: cont.contract_number ? `Contract ${cont.contract_number} unsigned` : "Contract unsigned",
-      subtitle: job ? jobLabel(job) : "Awaiting signature",
+      title: cont.contract_number ? `Contract ${cont.contract_number}` : "A contract",
+      subtitle: job ? jobWords(job) : "Awaiting signature",
       who: null,
       when: null,
       urgency: 1,
@@ -780,8 +1103,9 @@ async function buildActionItems(ctx: {
       affordances: AFFORDANCES.contract_unsigned,
     });
   }
+  counts.contracts_not_signed = sqlCount(conR);
 
-  // Lien deadlines coming due or past — surface only the pressing one per job.
+  // ── Lien deadlines coming due or past — only the pressing one per job. Never quieted by a hold.
   for (const l of (lienR.data ?? []) as any[]) {
     const st = lienStatus({
       firstFurnishedDate: l.first_furnished_date,
@@ -802,13 +1126,13 @@ async function buildActionItems(ctx: {
     if (!due.length) continue;
     due.sort((a, b) => (a.daysLeft ?? 0) - (b.daysLeft ?? 0));
     const top = due[0];
-    const job = l.jobs;
+    const job = one(l.jobs as any);
     const pastDue = top.daysLeft != null && top.daysLeft < 0;
     items.push({
       id: l.id,
       kind: "lien_deadline",
       title: `${top.label} ${pastDue ? "past due" : "due soon"}`,
-      subtitle: job ? jobLabel(job) : null,
+      subtitle: job ? jobWords(job) : null,
       who: null,
       when: top.when,
       urgency: 2,
@@ -817,14 +1141,14 @@ async function buildActionItems(ctx: {
       affordances: AFFORDANCES.lien_deadline,
     });
   }
+  counts.lien_deadlines = codeCount(lienR);
 
   // ── The end-of-day money-leak sweep (staff only) — the "Apache Ct" detectors. ──
-  // Detection only, per the hard boundary: each item names the gap and deep-links to
-  // the surface that fixes it; nothing infers hours, dollars, or clock-out times.
+  // Detection only, per the hard boundary: each item names the gap and deep-links to the surface
+  // that fixes it; nothing infers hours, dollars, or clock-out times.
 
   // 1) STRAY TIME — an open clock from a past day, one row per clock. A past-day close with no job
-  // is NOT a row here any more: it rides in the Hours On No Job rollup below, which never drops it
-  // after three days (the window this detector reads is what let Brian's 9/11 punch go quiet).
+  // is NOT a row here: it rides in the Hours On No Job rollup below, which never drops it.
   const strayFindings = detectStrayTime(
     [...((openTimeR.data ?? []) as any[]), ...((recentTimeR.data ?? []) as any[])],
     todayStr,
@@ -844,8 +1168,7 @@ async function buildActionItems(ctx: {
   let noJobReach: { canHold: boolean; claimed: Set<string> } | null = null;
   if (isStaff && closedNoJob.length) {
     try {
-      const { data: me } = await supabase.from("profiles").select("org_id").eq("id", userId).maybeSingle();
-      const orgId = String((me as { org_id?: string | null } | null)?.org_id ?? "");
+      const orgId = (await orgIdP) ?? "";
       if (orgId) noJobReach = await readNoJobHoursReach(supabase, orgId, closedNoJob);
     } catch {
       noJobReach = null;
@@ -864,21 +1187,13 @@ async function buildActionItems(ctx: {
       title: f.openStill
         ? `${f.name}'s ${formatDateShort(f.when)} entry is still open`
         : `${f.name}'s ${formatDateShort(f.when)} entry has no job`,
-      // An open shift counts ZERO hours until somebody stops it (payroll never pays on a guess),
-      // so the old line saying its hours were piling up was false. What is true: it is still
-      // running, and the tap is the door that names whose clock it is (Erik, 2026-09-24: "clock
-      // out for them"). Every open finding here is a forgotten one, so the sheet asks when. The door
-      // words LEAD: the row's second line truncates at phone width, and a trailing "Tap to Clock
-      // Out Brian." was the part the ellipsis ate.
-      subtitle: f.openStill
-        ? `${door} · on since ${formatTime(f.when, tz || undefined)}`
-        : "Closed hours nobody can bill",
+      // An open shift counts ZERO hours until somebody stops it; the door words LEAD (the second line
+      // truncates at phone width, and the ellipsis used to eat them).
+      subtitle: f.openStill ? `${door} · on since ${formatTime(f.when, tz || undefined)}` : "Closed hours nobody can bill",
       who: f.name,
       when: f.when,
       urgency: f.openStill ? 2 : 1, // a forgotten clock is a wrong week until somebody stops it
       done: false,
-      // The open one lands on its own clock-out sheet (/timecards finds the entry in any week); a
-      // no-job close (only without an org timezone, when the rollup below cannot run) on its editor.
       href: `/timecards?entry=${f.entryId}`,
       affordances: AFFORDANCES.time_stray,
       ...(!f.openStill && noJob.door.has(f.entryId) ? { noJobHours: { entryIds: [f.entryId] } } : {}),
@@ -888,289 +1203,295 @@ async function buildActionItems(ctx: {
   {
     const noJob = await noJobP;
     const item = noJobHoursActionItem(noJob.summary, { failed: noJob.failed });
-    // THE ROLLUP KEEPS 0357's ALREADY BILLED DOOR (TTUSD on INV-055): a shift on no job may have been
-    // billed by typing a line on an invoice with no job. The line offers the door only when a sent
-    // invoice with no job could hold hours (a door onto a sheet with no line to pick is a dead end),
-    // with nothing ticked to start (the sheet lists every open shift; he ticks what the line charged).
-    // A lost read offers the door, as the per-shift rows did (the sheet says what it finds). The
-    // reach was started with the rollup's read (noJobReachP), never here after the fan-out.
+    // THE ROLLUP KEEPS 0357's ALREADY BILLED DOOR (TTUSD on INV-055): offered only when a sent invoice
+    // with no job could hold hours; a lost read offers the door. The reach was started with the
+    // rollup's read (noJobReachP), never here after the fan-out.
     if (item && isStaff && noJob.summary?.shifts.length && (await noJobReachP)) item.noJobHours = { entryIds: [] };
     if (item) items.push(item);
   }
 
-  // ── MATERIALS ROUTING (staff only) — the "who's buying?" feeder. Unpurchased
-  // take-off items on a job about to be worked route back to whoever is coming
-  // through next. Distinct from job_unbilled_work BY CONSTRUCTION: that one fires
-  // on ZERO recorded materials/costs ("nothing recorded"); this one fires on
-  // recorded-but-unpurchased items ("needed to buy") — having items makes a job
-  // costed, so the same job can never show both.
-  const matCandidates = new Map<string, { job: { id: string; job_number?: string | null; name?: string | null }; when: string | null }>();
-  const matStatusOk = (s: string | null | undefined) => s !== "cancelled" && s !== "complete" && s !== "invoiced";
-  for (const j of (matJobsR.data ?? []) as any[]) {
-    if (matStatusOk(j.status)) matCandidates.set(j.id, { job: j, when: j.scheduled_start ?? null });
-  }
-  for (const s of (matSegR.data ?? []) as any[]) {
-    const j = s.jobs;
-    if (!j || !matStatusOk(j.status) || matCandidates.has(j.id)) continue;
-    // The day the crew is next on it: the segment's start if still ahead, else today.
-    matCandidates.set(j.id, { job: j, when: s.start_date && s.start_date > todayStr ? s.start_date : todayStr });
+  // Jobs worked in the last UNBILLED_WORK_DAYS (2) join the materials candidates — the crew was JUST
+  // there, so leftover unpurchased items are live.
+  const workedJobs = (wJobsR.data ?? []) as any[];
+  for (const j of workedJobs) {
+    if (worked.get(j.id)?.workedInUnbilledWindow && matStatusOk(j.status) && !matCandidates.has(j.id)) {
+      matCandidates.set(j.id, { job: j, when: null });
+    }
   }
 
-  // 2 & 3) Job-level detectors need the worked jobs' costs/schedule — one small
-  // dependent round, bounded by the recent-entries rollup (a couple dozen ids max).
-  const worked = rollupWorkedJobs((recentTimeR.data ?? []) as any[], todayStr);
-  if (isStaff && worked.size > 0) {
-    const jobIds = [...worked.keys()].slice(0, 30);
-    const [wJobsR, wBillsR, wPosR, wMatR, wInvR, wApptR, wSegR] = await Promise.all([
-      supabase.from("jobs").select("id, job_number, name, status, scheduled_start").in("id", jobIds),
-      supabase.from("bills").select("job_id").in("job_id", jobIds).limit(200),
-      supabase.from("purchase_orders").select("job_id").in("job_id", jobIds).limit(200),
-      supabase.from("material_lists").select("job_id, material_list_items(id)").in("job_id", jobIds).limit(100),
-      // Each line's kind rides along: a materials line on a live invoice is costs on the record
-      // (costedJobIds, the one rule the 6 PM push uses too).
-      supabase.from("invoices").select(COSTED_INVOICE_COLUMNS).in("job_id", jobIds).limit(200),
-      supabase
-        .from("appointments")
-        .select("job_id")
-        .in("job_id", jobIds)
-        .eq("absorbed", false) // parity with eod-sweep — the job's own segments carry an absorbed visit (0237)
-        .eq("status", "scheduled")
-        .gte("starts_at", todayStr)
-        .limit(200),
-      supabase.from("job_schedule_segments").select("job_id").in("job_id", jobIds).gte("end_date", todayStr).limit(200),
-    ]);
-
+  // 2) NO COSTS YET — time on the job, zero costs/POs/materials. The Romex leak. A job with no
+  // costs to record (labor only) gets a Snooze that picks a day (0367), never a dismiss. A lost read
+  // of any of the four could make a costed job look bare, so then it says nothing rather than
+  // something false.
+  const costsReadable = ![previewListsR, wBillsR, wPosR, wInvR].some((r) => (r as Read)?.error);
+  if (isStaff && workedJobs.length && costsReadable) {
     const costed = costedJobIds({
       bills: (wBillsR.data ?? []) as any[],
       purchaseOrders: (wPosR.data ?? []) as any[],
-      materialLists: (wMatR.data ?? []) as any[],
+      materialLists: ((previewListsR.data ?? []) as any[]).filter((l) => workedIds.includes(String(l.job_id))),
       invoices: (wInvR.data ?? []) as any[],
     });
     const invoicedJobIds = new Set<string>(
       ((wInvR.data ?? []) as any[]).filter((i) => i.status !== "void" && i.job_id).map((i) => i.job_id as string),
     );
-    const futureApptJobIds = new Set<string>(((wApptR.data ?? []) as any[]).map((a) => a.job_id as string));
-    const futureSegmentJobIds = new Set<string>(((wSegR.data ?? []) as any[]).map((s) => s.job_id as string));
-    const workedJobs = (wJobsR.data ?? []) as any[];
-
-    // Jobs worked in the last UNBILLED_WORK_DAYS (2) join the materials-needed
-    // candidates — the crew was JUST there, so leftover unpurchased items are live.
-    for (const j of workedJobs) {
-      if (worked.get(j.id)?.workedInUnbilledWindow && matStatusOk(j.status) && !matCandidates.has(j.id)) {
-        matCandidates.set(j.id, { job: j, when: null });
-      }
-    }
-
-    // 2) UNBILLED WORK — time on the job, zero costs/POs/materials. The Romex leak.
     for (const f of detectUnbilledWork({ jobs: workedJobs, worked, costedJobIds: costed, invoicedJobIds })) {
       items.push({
-        id: `unbilled-${f.job.id}`,
+        id: `nocosts-${f.job.id}`,
         kind: "job_unbilled_work",
-        title: `Worked ${jobLabel(f.job)} — no materials/costs recorded yet`,
-        subtitle: f.job.job_number ?? null,
+        title: jobWords(f.job),
+        subtitle: `Worked ${formatDateShort(f.lastWorked, tz || undefined)}, no costs on it yet`,
         who: null,
         when: f.lastWorked,
         urgency: 1,
         done: false,
         href: `/jobs/${f.job.id}?tab=costs`,
-        affordances: AFFORDANCES.job_unbilled_work,
+        affordances: waitsR.ready ? ["snooze", "open"] : AFFORDANCES.job_unbilled_work,
+        ...(waitsR.ready ? { waitKey: waitKey("job_unbilled_work", f.job.id) } : {}),
       });
     }
+  }
 
-    // 3) NO RETURN VISIT — worked recently, still in flight, nothing on the calendar.
-    for (const f of detectNeedsReturn({ jobs: workedJobs, worked, todayStr, futureApptJobIds, futureSegmentJobIds })) {
+  // 3) JOBS NEEDING A DAY — nothing ahead of it (jobsNeedingADay), minus a job with a visit booked
+  // today or later; its open lines to buy ride its row. A lost read of the jobs or of their visits
+  // would call every job dateless: one "Couldn't Check" line instead.
+  if (isStaff && (jobsR.error || futureApptR.error)) {
+    items.push({
+      id: "needday-unread",
+      kind: "job_to_schedule",
+      title: "Jobs Needing A Day · Couldn't Check",
+      subtitle: "Couldn't read which jobs have nothing ahead of them just now. Open Schedule to see them.",
+      who: null,
+      when: null,
+      urgency: 1,
+      done: false,
+      href: "/schedule",
+      affordances: ["open"],
+    });
+  } else {
+    const futureAppt = new Set(((futureApptR.data ?? []) as any[]).map((a) => String(a.job_id)));
+    const findings = jobsNeedingADay({
+      jobs: needDayPre.map((f) => f.job),
+      todayStr,
+      tz,
+      futureApptJobIds: futureAppt,
+      clockedInJobIds,
+      wonJobIds,
+      toBuy: toBuyCount,
+    });
+    for (const f of findings) {
+      const j = f.job;
       items.push({
-        id: `return-${f.job.id}`,
-        kind: "job_needs_return",
-        title: `Worked ${jobLabel(f.job)} — nothing scheduled next`,
-        subtitle: f.job.job_number ?? null,
+        id: j.id,
+        kind: "job_to_schedule",
+        title: jobWords(j),
+        subtitle: [f.why, one(j.customers as any)?.name ?? null].filter(Boolean).join(" · "),
         who: null,
-        when: f.lastWorked,
+        // Not a deadline: the why line says the day, and the row never reads "overdue".
+        when: null,
+        since: f.since,
         urgency: 1,
         done: false,
-        href: `/jobs/${f.job.id}`,
-        affordances: AFFORDANCES.job_needs_return,
+        href: `/jobs/${j.id}`,
+        affordances: AFFORDANCES.job_to_schedule,
       });
+      matCandidates.delete(j.id); // its lines to buy ride this row: one job, one row
     }
+    counts.jobs_needing_a_day = codeCount(jobsR, JOBS_DAY_READ_CAP);
   }
 
-  // MATERIALS NEEDED — one dependent round for the candidates' take-off lists,
-  // then ONE item per job with unpurchased (non-tool) items: "Materials needed at
-  // {job}" + the first few item names, deep-linked to the job's materials tab.
-  if (isStaff && matCandidates.size > 0) {
-    const matJobIds = [...matCandidates.keys()].slice(0, 30);
-    // Newest first, so the limit keeps each job's own list; newestListPerJob then keeps only THE
-    // job's list (the one its Materials tab shows), never an older one's lines.
-    const { data: matLists } = await supabase
-      .from("material_lists")
-      .select("id, job_id, created_at, material_list_items(description, quantity, purchased, is_tool)")
-      .in("job_id", matJobIds)
-      .order("created_at", { ascending: false })
-      .order("id", { ascending: false })
-      .limit(100);
-    const needByJob = new Map<string, { description: string; quantity: number }[]>();
-    for (const ml of newestListPerJob((matLists ?? []) as any[]).values()) {
-      for (const it of (ml.material_list_items ?? []) as any[]) {
-        // Tools are brought from the shop, not bought — an owned tool would sit
-        // "unpurchased" forever and nag the shopping run daily. The ONE rule for "still to buy"
-        // (lib/materials-checklist), on the ONE list (the newest): the job's Materials badge and its
-        // Buy Materials row count exactly these lines.
-        if (!isOpenToBuy(it)) continue;
-        if (!needByJob.has(ml.job_id)) needByJob.set(ml.job_id, []);
-        needByJob.get(ml.job_id)!.push({ description: it.description, quantity: Number(it.quantity ?? 1) });
-      }
-    }
-    for (const [jobId, need] of needByJob) {
-      const cand = matCandidates.get(jobId);
-      if (!cand || need.length === 0) continue;
-      const preview = need.slice(0, 3).map((it) => `${it.quantity}× ${it.description}`).join(", ");
-      const more = need.length - 3;
+  // 4) MATERIALS NEEDED — ONE item per job the crew is about to stand on with lines still to buy:
+  // Buy Materials · N Open, the first few named. A part on back-order gets a Snooze that picks a day.
+  for (const [jobId, cand] of matCandidates) {
+    const need = toBuyByJob.get(jobId);
+    if (!need?.length) continue;
+    const preview = need.slice(0, 3).map((it) => `${it.quantity}× ${it.description}`).join(", ");
+    const more = need.length - 3;
+    items.push({
+      id: `materials-${jobId}`, // synthetic (kind-prefixed): its Snooze strips the prefix
+      kind: "materials_needed",
+      title: jobWords(cand.job),
+      subtitle: preview + (more > 0 ? ` +${more} more` : ""),
+      who: null,
+      when: cand.when,
+      urgency: 1,
+      done: false,
+      href: `/jobs/${jobId}?tab=materials`,
+      affordances: waitsR.ready ? ["snooze", "open"] : AFFORDANCES.materials_needed,
+      openToBuy: need.length,
+      ...(waitsR.ready ? { waitKey: waitKey("materials_needed", jobId) } : {}),
+    });
+  }
+  counts.materials_to_buy = codeCount(matJobsR, 50).capped || codeCount(matSegR, 50).capped ? { capped: true } : {};
+
+  // 5) HOLDS (NY-hold, 0366). A hold whose day has come (or that has no day) is a Reminder on Now,
+  // with its reason and its Snooze and Take Off Hold; a later day waits in the fold. "Put on hold by
+  // Erik" only when the hold says who. Money and legal clocks on a held job are never quieted.
+  {
+    const withDay = heldR.withDay;
+    // A lost read says so: a hold whose day came would otherwise go quiet, the one thing a hold with a
+    // day exists to prevent.
+    if (isStaff && heldR.error) {
       items.push({
-        id: `materials-${jobId}`, // synthetic (kind-prefixed) — open-only, no per-row dispatch
-        kind: "materials_needed",
-        title: `Materials needed at ${jobLabel(cand.job)}`,
-        subtitle: preview + (more > 0 ? ` +${more} more` : ""),
+        id: "holds-unread",
+        kind: "job_on_hold",
+        title: "Holds · Couldn't Check",
+        subtitle: "Couldn't read the jobs on hold just now, so one whose day has come may be missing here. Open Jobs to see them.",
         who: null,
-        when: cand.when,
+        when: null,
         urgency: 1,
         done: false,
-        href: `/jobs/${jobId}?tab=materials`,
-        affordances: AFFORDANCES.materials_needed,
+        href: "/jobs?status=on_hold",
+        affordances: ["open"],
       });
     }
+    for (const j of heldRows) {
+      const until = j.hold_until ? String(j.hold_until).slice(0, 10) : null;
+      const state = heldJobState(until, todayStr);
+      const reason = String(j.hold_reason ?? "").trim();
+      if (withDay && state === "later") {
+        const row = waitingRow({ id: `onhold-${j.id}`, kind: "job_on_hold", title: jobWords(j), why: reason || "No reason saved", backOn: until, href: `/jobs/${j.id}` });
+        if (row) {
+          waiting.push(row);
+          continue;
+        }
+      }
+      const by = withDay ? firstNameOf(one(j.holder as any)?.full_name) : null;
+      const back = !withDay ? null : state === "no_day" ? "No Day Set" : until! < todayStr ? `Back since ${shortDay(until!)}` : "Back Today";
+      const toBuy = toBuyCount.get(String(j.id)) ?? 0;
+      items.push({
+        id: `onhold-${j.id}`,
+        kind: "job_on_hold",
+        title: `${jobWords(j)} · ${reason || "No reason saved"}`,
+        subtitle: [by ? `Put on hold by ${by}` : null, back, toBuy > 0 ? `${toBuy} to buy` : null].filter(Boolean).join(" · ") || null,
+        who: null,
+        when: null,
+        // The pip's age. A hold with no day (held before 0366, so among the oldest) ages from its last
+        // touch, the proxy for "held since": age 0 would draw every old hold grey. Words stay "No Day Set".
+        since: until ?? dayOf(j.updated_at),
+        urgency: 1,
+        done: false,
+        href: `/jobs/${j.id}`,
+        // Snooze needs the day's column (0366); Take Off Hold works either way.
+        affordances: withDay ? AFFORDANCES.job_on_hold : ["do", "open"],
+        holdReason: reason || null,
+      });
+    }
+    counts.holds_back = codeCount(heldR);
   }
 
-  // ON HOLD, TOO LONG — a paused job you'd otherwise forget, surfaced WITH its blocker so the
-  // briefing prepares the decision: resume it, or confirm WHY it's still waiting. "Logic prepared
-  // for success" — we look up the likely reason (an open task, or materials not ordered) instead of
-  // just saying "on hold". Threshold keeps it a bounded, decide-able set, not a permanent nag.
-  //
-  // THE DAY THE HOLD PICKED (0366 jobs.hold_until): the picker says "Comes back Oct 20" and the rail
-  // says "Back Oct 20", so this list agrees — a held job is here from its day, never a week after
-  // the hold whatever day was picked (heldJobDueFilter). A hold with no day (one from before 0366)
-  // keeps the week-untouched rule. Before 0366 (no column) the old read runs alone.
-  if (isStaff) {
-    const ON_HOLD_STALE_DAYS = 7;
-    const heldCutoff = new Date(Date.now() - ON_HOLD_STALE_DAYS * 864e5).toISOString();
-    const heldBase = "id, job_number, name, updated_at, customers(name)";
-    let heldRes: { data: unknown; error: unknown } = await supabase
-      .from("jobs")
-      .select(`${heldBase}, hold_until`)
-      .eq("status", "on_hold")
-      .or(heldJobDueFilter(todayStr, heldCutoff))
-      .order("updated_at", { ascending: true })
-      .limit(20);
-    if (heldRes.error && isMissingColumn(heldRes.error)) {
-      heldRes = await supabase
-        .from("jobs")
-        .select(heldBase)
-        .eq("status", "on_hold")
-        .lt("updated_at", heldCutoff) // last touched (a proxy for "held since") over a week ago
-        .order("updated_at", { ascending: true })
-        .limit(20);
-    }
-    const held = (heldRes.data ?? []) as any[];
-    if (held.length) {
-      const heldIds = held.map((j) => j.id);
-      // Infer the blocker from the material take-off: a list with unpurchased (non-tool) items = the
-      // job is waiting on a materials order. (A task-based reason is a later add — the inbox may not
-      // read the tasks table here, by the badge-economy guard.)
-      // The job's own list only (the newest, as above), so the reason matches its Materials tab.
-      const { data: heldMat } = await supabase
-        .from("material_lists")
-        .select("id, job_id, created_at, material_list_items(purchased, is_tool)")
-        .in("job_id", heldIds)
-        .order("created_at", { ascending: false })
-        .order("id", { ascending: false })
-        .limit(100);
-      const unorderedMatJobs = new Set<string>();
-      for (const ml of newestListPerJob((heldMat ?? []) as any[]).values()) {
-        if (((ml.material_list_items ?? []) as any[]).some(isOpenToBuy)) unorderedMatJobs.add(ml.job_id);
-      }
-      for (const j of held) {
-        // updated_at is only a PROXY for "held since" (any edit resets it), so we don't quote a
-        // precise day count that could be wrong — just that it's been paused past the stale window.
-        // A hold with a day says the day it came back.
-        const back = j.hold_until
-          ? String(j.hold_until).slice(0, 10) >= todayStr
-            ? "Back today"
-            : `Back since ${formatDateShort(String(j.hold_until).slice(0, 10))}`
-          : null;
-        const reason = unorderedMatJobs.has(j.id)
-          ? "Materials not ordered yet"
-          : back
-            ? `${back} — still blocked?`
-            : "On hold a while — still blocked?";
+  // 6) RECEIPTS NOT ON A BILL — a receipt or bill on a job that nothing accounts for (a crew photo
+  // from Snap Or Note, a snap whose read failed), by lib/job-photos' own rule. A failed read claims
+  // nothing: one "Couldn't Check" line instead of a row per paper.
+  if (isStaff && receiptsR) {
+    const loose = receiptsR.error || tiesR.error ? null : receiptsNotOnABill(receiptDocs, (tiesR.data ?? []) as PaperTie[]);
+    if (!loose) {
+      items.push({
+        id: "receipts-unread",
+        kind: "receipt_unbilled",
+        title: "Receipts · Couldn't Check",
+        subtitle: "Couldn't tell which receipts on your jobs are on a bill just now. Open Bills to see them.",
+        who: null,
+        when: null,
+        urgency: 1,
+        done: false,
+        href: "/bills",
+        affordances: ["open"],
+      });
+    } else {
+      for (const d of loose) {
         items.push({
-          id: `onhold-${j.id}`,
-          kind: "job_on_hold",
-          title: `On hold: ${jobLabel(j)}`,
-          subtitle: reason,
+          id: `receipt-${d.id}`,
+          kind: "receipt_unbilled",
+          title: receiptRowTitle(d, nameOf.get(String(d.uploaded_by ?? "")) || null, tz),
+          subtitle: receiptRowJob(d),
           who: null,
           when: null,
+          since: dayOf(d.created_at),
           urgency: 1,
           done: false,
-          href: `/jobs/${j.id}`,
-          affordances: AFFORDANCES.job_on_hold,
+          // The job's Costs tab, where Record As Cost is.
+          href: `/jobs/${d.job_id}?tab=costs`,
+          affordances: AFFORDANCES.receipt_unbilled,
         });
       }
+      counts.receipts_not_on_a_bill = codeCount(receiptsR, RECEIPTS_READ_CAP);
     }
   }
 
-  // SETTLE — pieces taken from stock past what the shelf showed (Shop Stock, Phase 3). Took From
-  // Stock never dead-ends in the field, so an over-take saves as a SHORT: $0 on the job and nothing
-  // an invoice can bill until the office files the roll and settles it (or undoes the take). ONE item
-  // per short, and it stays until the short is settled or its take undone: it is a decision the app
-  // cannot defer. It is named for the fix that works (audit v1018: it said "Recount", and a count is
-  // the one thing that can't settle it). Undated, like the supplier bills: the take's date is in the
-  // words, never a "3d overdue" nobody set. Staff only; the shelf's record is staff-read (0303).
-  // Before 0303 is applied the read errors and the feeder is simply empty.
-  if (isStaff) {
-    const { data: shorts, error: shortErr } = await shortsP;
-    const rows = shortErr ? [] : ((shorts ?? []) as any[]);
-    if (rows.length) {
-      const whoIds = [...new Set(rows.map((r) => r.created_by).filter(Boolean))];
-      const { data: people } = whoIds.length ? await supabase.from("profiles").select("id, full_name").in("id", whoIds) : { data: [] };
-      const nameOf = new Map(((people ?? []) as any[]).map((p) => [p.id, String(p.full_name ?? "").trim()]));
-      for (const r of rows) {
-        const it = Array.isArray(r.inventory_items) ? r.inventory_items[0] : r.inventory_items;
-        const jb = Array.isArray(r.jobs) ? r.jobs[0] : r.jobs;
-        const q = Math.round(Number(r.qty ?? 0) * 1000) / 1000;
-        const who = nameOf.get(r.created_by) || "Someone";
-        items.push({
-          id: `stockshort-${r.id}`, // synthetic (kind-prefixed): open-only, settled on Shop Stock
-          kind: "stock_short",
-          title: `${q} ${it?.unit ?? ""} Of ${it?.name ?? "An Item"} Taken Past Stock · Settle It`.replace(/\s+/g, " "),
-          // Counting can't settle a short (a count has no roll; settle_short walks rolls): name the two
-          // ways that work (SHORT_FIX, the bell's own words).
-          subtitle: `${who} took them for ${jb ? jobLabel(jb) : "a job"} on ${formatDateShort(r.created_at, tz || undefined)}. ${SHORT_FIX}`,
-          who: null,
-          when: null,
-          urgency: 1,
-          done: false,
-          // Straight to the item, opened, where Settle From The Shelf is (Shop Stock opens ?item=).
-          href: r.item_id ? `/inventory?item=${encodeURIComponent(String(r.item_id))}` : "/inventory",
-          affordances: AFFORDANCES.stock_short,
-        });
-      }
+  // SETTLE — pieces taken from stock past what stock showed (Shop Stock, Phase 3). $0 on the job and
+  // nothing an invoice can bill until the office files the roll and settles it (or undoes the take).
+  // ONE item per short; it stays until settled. Named for the fix that works (audit v1018). Undated:
+  // the take's date is in the words, never a "3d overdue" nobody set. Staff only (0303).
+  if (isStaff && shortRows.length) {
+    for (const r of shortRows) {
+      const it = one(r.inventory_items as any) as any;
+      const jb = one(r.jobs as any) as any;
+      const q = Math.round(Number(r.qty ?? 0) * 1000) / 1000;
+      const who = nameOf.get(String(r.created_by ?? "")) || "Someone";
+      items.push({
+        id: `stockshort-${r.id}`, // synthetic (kind-prefixed): open-only, settled on Shop Stock
+        kind: "stock_short",
+        title: `${q} ${it?.unit ?? ""} Of ${it?.name ?? "An Item"} Taken Past Stock`.replace(/\s+/g, " "),
+        // Counting can't settle a short (a count has no roll; settle_short walks rolls): name the two
+        // ways that work (SHORT_FIX, the bell's own words).
+        subtitle: `${who} took them for ${jb ? jobWords(jb) : "a job"} on ${formatDateShort(r.created_at, tz || undefined)}. ${SHORT_FIX}`,
+        who: null,
+        when: null,
+        since: dayOf(r.created_at),
+        urgency: 1,
+        done: false,
+        // Straight to the item, opened (Shop Stock opens ?item=).
+        href: r.item_id ? `/inventory?item=${encodeURIComponent(String(r.item_id))}` : "/inventory",
+        affordances: AFFORDANCES.stock_short,
+      });
     }
+    counts.stock_to_settle = sqlCount(shortsR);
   }
-  // THE SUPPLIER BILLS, AS ONE ROLLED-UP LINE (badge +1, however many papers). FIRST, because My Day
-  // shows the top five and the point of the card is that the paper comes to him, not the reverse.
+
+  // THE SUPPLIER BILLS, AS ONE ROLLED-UP LINE (badge +1, however many papers). FIRST, because the
+  // point of the card is that the paper comes to him, not the reverse.
+  const desk = await supplierDeskP;
   const paperItem = supplierPaperActionItem(await supplierPapersP);
   // PAY CED BY THE TENTH (supplier-pay-due.ts): one dated line per account whose discount runs out
   // within two weeks, right under the papers. Staff only (the same read); gone once the deadline is.
-  items.unshift(...supplierPayActionItems((await supplierDeskP)?.payDue));
+  items.unshift(...withPayees(supplierPayActionItems((await supplierDeskP)?.payDue), desk?.payDue));
   if (paperItem) items.unshift(paperItem);
   // A read the desk needed failed: said in one undated line, never a quiet "nothing waiting".
   const deskUnread = supplierDeskFailedItem(await supplierDeskP);
   if (deskUnread) items.unshift(deskUnread);
+  // A paper set aside WAITING ON A CREDIT waits in the fold with the day it comes back as a card by
+  // itself (creditWait: 30 days), never a card and never gone. The same read, no new one.
+  for (const c of desk?.papers?.waiting ?? []) {
+    if (!c.waitingCredit) continue;
+    const row = waitingRow({
+      id: `credit-${c.invoiceId}`,
+      kind: "supplier_paper",
+      title: `${c.supplier} ${c.invoiceNumber} · ${formatCurrency(c.total)}`,
+      why: "Waiting On A Credit",
+      backOn: c.waitingCredit.back,
+      href: "/bills#needs-you",
+    });
+    if (row) waiting.push(row);
+  }
+
+  // THE ENDLESS ROWS SOMEONE SNOOZED wait in the fold with their day (0367); on the day, back.
+  const folded = foldWaitingRows(items, waitsR.waits);
 
   // SORTED ONCE, HERE (Wave 1, NY-list): money, leads, today, other; then urgency; then oldest first,
   // an undated row counting as today; ties keep the order built above (types.ts sortActionItems).
-  // Every reader gets it in this order, so My Day's top five are the right five.
-  return sortActionItems(
-    items.map((it) => ({ ...it, stream: KIND_STREAM[it.kind] })),
+  // Then the same-kind piles roll up (piles.ts): a pile sits where its most pressing child sat, and
+  // counts one on the badge.
+  const sorted = sortActionItems(
+    folded.now.map((it) => ({ ...it, stream: KIND_STREAM[it.kind] })),
     todayStr,
   );
+  const now = rollUpPiles(sorted, { todayStr, isStaff, leadsOn, counts });
+  // The fold, soonest back first. A tech's holds no money kind and no dollar figure, ever.
+  const fold = waitingForViewer([...waiting, ...folded.waiting], isStaff).sort((a, b) => a.backOn.localeCompare(b.backOn) || a.title.localeCompare(b.title));
+  return { now, waiting: fold };
+}
+
+/** "Pay <Supplier>" needs the supplier's name on its line: the same deadlines, in the same order. */
+function withPayees(items: ActionItem[], dues: SupplierPayDue[] | null | undefined): ActionItem[] {
+  return items.map((it, i) => ({ ...it, payee: dues?.[i]?.supplier ?? null }));
 }

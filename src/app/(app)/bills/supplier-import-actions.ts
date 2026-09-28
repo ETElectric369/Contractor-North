@@ -167,7 +167,7 @@ function orgOf(ctx: { orgId: string | null }): { orgId: string } | { error: stri
 }
 
 /**
- * A SOURCE THAT IS A SUPPLIER'S LIST, put in Sort These as one card. Null when it isn't a list
+ * A SOURCE THAT IS A SUPPLIER'S LIST, put under Needs You on Bills as one card. Null when it isn't a list
  * (the caller then says what it always said). Strict: this door mostly sees invoices, so a table
  * counts only when its header names a paper number and money.
  */
@@ -199,10 +199,10 @@ async function routeList(
     fileUrl: source.path,
     source: "bills_drop",
   });
-  if ("duplicate" in placed) return { error: `${name}: Already In. This same list is already in Sort These or Organize, so nothing was added twice.` };
+  if ("duplicate" in placed) return { error: `${name}: Already In. This same list is already under Needs You on Bills, or in Organize, so nothing was added twice.` };
   if ("error" in placed) return { error: `${name} is a supplier's list, and it wasn't added. ${placed.error}` };
   const what = stored.list.from === "statement" ? "a supplier's statement" : "a supplier's open list";
-  return { said: `${name} is ${what}, not invoices: it is waiting in Sort These with what it changes, and nothing changes until you press Apply there.` };
+  return { said: `${name} is ${what}, not invoices: it is waiting under Needs You on Bills with what it changes, and nothing changes until you press Apply there.` };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -266,7 +266,7 @@ export async function importCedInvoices(input: SupplierImportInput): Promise<Sup
   // One downloaded PDF is routinely several invoices - his 07-11 file holds four - so every source
   // is read for ALL the documents in it.
   const parsed = new Map<string, { invoice: CedInvoice; sourceFile: string | null; source: number }>();
-  /** Sources that were a supplier's statement or open list, sent to Sort These instead. */
+  /** Sources that were a supplier's statement or open list, sent to Needs You instead. */
   const lists: string[] = [];
   for (const [sourceIndex, source] of sources.entries()) {
     const results = parseCedDocuments(source.text);

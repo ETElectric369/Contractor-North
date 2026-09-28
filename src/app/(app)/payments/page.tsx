@@ -1,100 +1,10 @@
-import { CreditCard } from "lucide-react";
-import { createClient } from "@/lib/supabase/server";
-import { PageHeader, EmptyState } from "@/components/page-header";
-import { Card } from "@/components/ui/card";
-import { DataTable } from "@/components/ui/data-table";
-import { FactsGrid, StatTile } from "@/components/ui/stat-tile";
-import { formatCurrency, formatDate } from "@/lib/utils";
-import { getOrgSettings } from "@/lib/org-settings";
-import { invoiceBalance } from "@/lib/invoice-math";
-import { paymentMethodLabel } from "@/lib/payment-method";
-import { computeCollected, fetchCollectedRows } from "@/lib/analytics/money-metrics";
-import { todayStrInTz, tzDayStartUtc } from "@/lib/tz";
-import { RecordPaymentButton } from "./record-payment-button";
+import { redirect } from "next/navigation";
 
-export const dynamic = "force-dynamic";
-
-/** All payments received across every invoice — the money actually collected,
- *  which previously lived only inside each invoice. */
-export default async function PaymentsPage() {
-  const supabase = await createClient();
-  const [{ data }, cashRows, { data: orgRow }, { data: openInv }] = await Promise.all([
-    supabase
-      .from("payments")
-      .select("id, amount, method, note, paid_at, invoices(id, invoice_number, status, customers(name))")
-      .order("paid_at", { ascending: false })
-      .limit(500),
-    // The tiles get their OWN unbounded read of the payments table — THE shared cash
-    // definition (@/lib/analytics/money-metrics), the same one /billing, /analytics and
-    // Nort use. It used to sum invoices.amount_paid, which folds in non-cash account
-    // credits, so the "Total collected" tile disagreed with the payment ledger printed
-    // right under it. The 500-row query above stays display-only.
-    fetchCollectedRows(supabase),
-    supabase.from("organizations").select("settings").maybeSingle(),
-    // Invoices the Record-payment picker may offer: billed (non-draft, non-void)
-    // and still carrying a balance — the same set recordPayment will accept.
-    supabase
-      .from("invoices")
-      .select("id, invoice_number, total, amount_paid, customers(name)")
-      .in("status", ["sent", "partial", "overdue"])
-      .order("created_at", { ascending: false })
-      .limit(500),
-  ]);
-
-  // A voided invoice means the money was reversed (Erik's rule), so drop its
-  // payments from the ledger. Keep payments with no invoice link.
-  const payments = ((data ?? []) as any[]).filter((p) => (p.invoices?.status ?? "") !== "void");
-
-  // This-month + all-time totals — net of refunds (money actually kept). The month
-  // boundary is midnight on the 1st in the ORG's timezone — a server-local (UTC on
-  // Vercel) boundary shifts late-month evening payments into the wrong month tile.
-  const orgSettings = getOrgSettings((orgRow as { settings?: unknown } | null)?.settings);
-  const tz = orgSettings.timezone;
-  // Belt-and-suspenders: recalcInvoice flips status on full payment, but a $0
-  // balance under a stale status must still not be offered to the picker.
-  const openInvoices = ((openInv ?? []) as any[]).filter(
-    (i) => invoiceBalance(i.total, i.amount_paid) > 0,
-  );
-  const monthStart = tzDayStartUtc(`${todayStrInTz(tz).slice(0, 7)}-01`, tz);
-  const total = computeCollected(cashRows.payments, cashRows.refunds);
-  const monthTotal = computeCollected(cashRows.payments, cashRows.refunds, monthStart);
-
-  return (
-    <div>
-      <PageHeader title="Payments" description="Every payment collected, newest first.">
-        <RecordPaymentButton invoices={openInvoices} paymentMethods={orgSettings.payment_methods} />
-      </PageHeader>
-
-      {payments.length === 0 ? (
-        <EmptyState
-          icon={CreditCard}
-          title="No payments yet"
-          description="Record a payment with the button above or on any invoice — either way it shows up in this ledger."
-        />
-      ) : (
-        <>
-          <FactsGrid cols={2} className="mb-4 sm:max-w-md">
-            <StatTile label="This month" value={formatCurrency(monthTotal)} tone="accent" />
-            <StatTile label="Total collected" value={formatCurrency(total)} />
-          </FactsGrid>
-
-          <Card className="overflow-hidden">
-            <DataTable<any>
-              rows={payments}
-              rowKey={(p) => p.id}
-              rowHref={(p) => (p.invoices ? `/billing/${p.invoices.id}` : "/billing")}
-              mobileCols={2}
-              columns={[
-                { header: "Date", span: 3, className: "text-sm text-slate-600", cell: (p) => formatDate(p.paid_at) },
-                { header: "Customer", span: 4, className: "text-sm font-medium text-slate-900", cell: (p) => p.invoices?.customers?.name ?? "—" },
-                { header: "Invoice", span: 2, className: "text-sm text-slate-500", cell: (p) => p.invoices?.invoice_number ?? "—" },
-                { header: "Method", span: 1, className: "text-xs text-slate-500", cell: (p) => paymentMethodLabel(p.method) },
-                { header: "Amount", span: 2, align: "right", className: "text-sm font-semibold text-green-700", cell: (p) => formatCurrency(p.amount) },
-              ]}
-            />
-          </Card>
-        </>
-      )}
-    </div>
-  );
+/**
+ * PAYMENTS LIVE ON INVOICES NOW (W1-29): who owes you, and what came in, on one page. Its Payments
+ * In fold holds the ledger (every payment, newest first) and Get Paid… for a check that arrives
+ * without its bill. An old link or a bookmark lands there, open.
+ */
+export default function PaymentsRedirect() {
+  redirect("/billing?open=payments");
 }

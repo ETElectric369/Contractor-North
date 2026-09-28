@@ -39,7 +39,7 @@ import {
 /**
  * THE PARTS OF FILING PAPER THAT MORE THAN ONE DOOR NEEDS (0295).
  *
- * Organize's tray, Drop Paperwork on /bills and a receipt read on a job page all write the same
+ * Organize's tray, Snap Or Note's cards on /bills and a receipt read on a job page all write the same
  * bill from the same row, so the row-to-bill writer, the line cleaner and the reader's prompt live
  * here once. This is NOT a "use server" module: nothing in it can be called from a browser. The
  * doors that can are in actions.ts and paperwork-actions.ts, and each of them checks who is asking
@@ -310,7 +310,7 @@ export function rematchTray<T extends PaperItem>(items: readonly T[], ctx: MarkC
 }
 
 /**
- * ONE PROMPT FOR ANY PIECE OF PAPER (Organize, Drop Paperwork). It reads and classifies; it does
+ * ONE PROMPT FOR ANY PIECE OF PAPER (Organize, Snap Or Note). It reads and classifies; it does
  * not decide where anything goes.
  *
  * IT NEVER SEES THE JOB LIST (Erik, 2026-09-24: a model's guess alone never picks a job). The
@@ -638,7 +638,7 @@ export async function loadBooks(supabase: any, orgId: string | null | undefined)
         .limit(2000),
     ),
     // EVERY OTHER BUSINESS COST WITH NO NUMBER (review of release/v1026): the same shape written by
-    // Add Business Cost, or a company's fill-ups loaded by hand from a bank export before the bank
+    // Add By Hand, or a company's fill-ups loaded by hand from a bank export before the bank
     // door, carry no bank_line_id, so the read above never sees them and a pump receipt of the same
     // money filed a second cost. No job, live, no number in either column, in a bucket (or the
     // pre-0362 Gas & Truck). Never names bank_line_id, so it answers before 0363 too.
@@ -1011,7 +1011,7 @@ export async function papersBehindBill(supabase: any, orgId: string | null | und
  * A BILL DELETED FROM BILLS PUTS ITS PAPER BACK (audit v994, TD5). The paper used to stay "filed"
  * over nothing, and dropping the same file again was refused as "Already In: filed on J-052", a job
  * with no such cost. Now: the copy the filing put on the job comes off, and the paper goes back to
- * Sort These with the lines the bill had (so a re-file keeps a person's choices, TD3). A receipt
+ * Needs You on Bills with the lines the bill had (so a re-file keeps a person's choices, TD3). A receipt
  * recorded as a cost on the job page keeps its receipt on the job; its link row goes, so Record as
  * Cost there makes it a cost again. Returns the sentence to say, or "".
  */
@@ -1070,7 +1070,7 @@ export async function papersAfterBillDeleted(
   const all = [...back, ...tied];
   const parts = [
     all.length
-      ? `${all.length === 1 ? `Its paper, "${all[0]}", is` : `${all.length} papers behind it are`} back in Sort These. If this bill was a duplicate, press Set Aside on ${all.length === 1 ? "that paper" : "them"}; if not, File It again.`
+      ? `${all.length === 1 ? `Its paper, "${all[0]}", is` : `${all.length} papers behind it are`} back under Needs You on Bills. If this bill was a duplicate, press Set Aside on ${all.length === 1 ? "that paper" : "them"}; if not, File It again.`
       : "",
     onJob.length ? `The receipt stays on the job; Record As Cost there makes it a cost again.` : "",
   ].filter(Boolean);

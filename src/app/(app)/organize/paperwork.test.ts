@@ -2513,7 +2513,7 @@ describe("audit v994 wave 2: the paperwork doors say what they did", () => {
     );
     const res = await deleteBill("bill-2", "job-046");
     expect(res.ok).toBe(true);
-    expect(res.warning).toContain('Its paper, "CED — $653.25", is back in Sort These');
+    expect(res.warning).toContain('Its paper, "CED — $653.25", is back under Needs You on Bills');
     // A deleted bill is often a duplicate: the paper is not "ready to file again", it asks.
     expect(res.warning).toContain("If this bill was a duplicate, press Set Aside on that paper; if not, File It again.");
     expect(res.warning).not.toContain("ready to file again");

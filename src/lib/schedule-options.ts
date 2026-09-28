@@ -88,21 +88,38 @@ export const listCustomerOptions = (supabase: SupabaseClient, limit?: number) =>
 };
 
 /** The new-job form's customer options — name plus the ONE-LINE site-address prefill
- *  (a job stores a single address string; formatFullAddress is the canonical shape). */
-export type NewJobCustomerOption = { id: string; name: string; address: string | null };
+ *  (a job stores a single address string; formatFullAddress is the canonical shape). The company name
+ *  and the kind ride along so the form's "It'll Be Called" line names a business by its name and a
+ *  person by their last name (defaultJobName). */
+export type NewJobCustomerOption = {
+  id: string;
+  name: string;
+  address: string | null;
+  company_name?: string | null;
+  type?: string | null;
+  /** The address in its parts: the street goes in New Job's street box and the rest into their own
+   *  columns, never the one-line blob into the street (address-autocomplete's streetOnly rule). */
+  street?: string | null;
+  city?: string | null;
+  state?: string | null;
+  zip?: string | null;
+};
 
 export const toNewJobCustomerOptions = (rows: any[] | null | undefined): NewJobCustomerOption[] =>
   (rows ?? []).map((c) => ({
     id: c.id,
     name: c.name,
     address: formatFullAddress(c.address, c.city, c.state, c.zip) || null,
+    ...(c.company_name !== undefined ? { company_name: c.company_name ?? null } : {}),
+    ...(c.type !== undefined ? { type: c.type ?? null } : {}),
+    ...(c.address !== undefined ? { street: c.address ?? null, city: c.city ?? null, state: c.state ?? null, zip: c.zip ?? null } : {}),
   }));
 
 /** listCustomerOptions + the address parts — ONLY for surfaces that prefill a site
  *  address from the pick (NewJobButton). A separate query so the plain pickers
  *  (e.g. billing's 2000-row list) don't ship four extra columns to the client. */
 export const listNewJobCustomerOptions = (supabase: SupabaseClient) =>
-  supabase.from("customers").select("id, name, address, city, state, zip").order("name");
+  supabase.from("customers").select("id, name, company_name, type, address, city, state, zip").order("name");
 
 /** New-job form: what the site-address field should become when the customer pick
  *  changes. Returns the string to apply (possibly "" — dropping a stale prefill when
@@ -117,6 +134,104 @@ export function addressPrefillOnCustomerPick(
   const untouched = current.trim() === "" || current === prevPrefill;
   if (!untouched || nextPrefill === current) return null;
   return nextPrefill;
+}
+
+// ── NEW JOB IN FOUR FIELDS (W1-22) ────────────────────────────────────────────────────────────────
+// The form asks Customer, Address, Date and Description; the server works out the rest the same way
+// the form's live line says it will. Pure (no clock, no timezone of their own): every caller hands in
+// the company's today, so a phone in another zone and a server on UTC agree.
+
+export type NewJobStatus = "in_progress" | "scheduled" | "to_be_scheduled";
+
+/** A new job's status from its date, against the company's today (YYYY-MM-DD): today or earlier is
+ *  In Progress (he's usually already working it, Erik 2026-07), a later day is Scheduled, and no day
+ *  is To Be Scheduled (the waiting room). */
+export function statusFromDate(day: string | null | undefined, todayStr: string): NewJobStatus {
+  const d = String(day ?? "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return "to_be_scheduled";
+  return d <= todayStr ? "in_progress" : "scheduled";
+}
+
+/** The person half of a job's name: a company's own name, a business customer's whole name, else a
+ *  person's last name ("Rita Moss" → "Moss", "Bob & Mary Smith" → "Smith"). */
+export function customerNamePart(c: { name?: string | null; company_name?: string | null; type?: string | null } | null | undefined): string {
+  const company = String(c?.company_name ?? "").trim();
+  if (company) return company;
+  const name = String(c?.name ?? "").trim().replace(/\s+/g, " ");
+  if (!name) return "";
+  if (c?.type && c.type !== "residential") return name;
+  const words = name.split(" ").filter((w) => !/^(jr|sr|ii|iii|iv)\.?,?$/i.test(w));
+  return words[words.length - 1] ?? name;
+}
+
+/** "Sep 27" for a YYYY-MM-DD, the same in every timezone. */
+function monthDay(ymd: string): string {
+  return new Date(`${ymd}T12:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+}
+
+/**
+ * THE NAME A NEW JOB GETS WHEN NONE IS TYPED (W1-22): "Smith · 1871 Apache Ct", the way the office
+ * reads a job (the person and the place, the number second). Either half alone when that is all
+ * there is; with neither, "New Job · Sep 27" on the company's today. The form shows the same line
+ * live ("It'll Be Called: …") and the server builds it from the same function, so they can't differ.
+ */
+export function defaultJobName(p: {
+  customer?: { name?: string | null; company_name?: string | null; type?: string | null } | null;
+  street?: string | null;
+  todayStr: string;
+}): string {
+  const who = customerNamePart(p.customer);
+  const street = String(p.street ?? "").trim().replace(/\s+/g, " ");
+  const parts = [who, street].filter(Boolean);
+  return parts.length ? parts.join(" · ") : `New Job · ${monthDay(p.todayStr)}`;
+}
+
+/** The kind of billing most of this company's jobs use; Time & Material on a tie or with none yet. */
+export function usualBillingKind(counts: { tm?: number | null; fixed?: number | null }): "tm" | "fixed" {
+  return (Number(counts.fixed) || 0) > (Number(counts.tm) || 0) ? "fixed" : "tm";
+}
+
+/** How many of the company's jobs bill each way: two head-only counts (RLS scopes them to the org).
+ *  A read that fails counts as none, so the answer falls back to Time & Material, never a guess. */
+export async function readUsualBillingKind(supabase: SupabaseClient): Promise<"tm" | "fixed"> {
+  const count = (kind: "tm" | "fixed") =>
+    supabase
+      .from("jobs")
+      .select("id", { count: "exact", head: true })
+      .eq("billing_type", kind)
+      .then(
+        (r: { count: number | null; error: unknown }) => (r.error ? 0 : (r.count ?? 0)),
+        () => 0,
+      );
+  const [tm, fixed] = await Promise.all([count("tm"), count("fixed")]);
+  return usualBillingKind({ tm, fixed });
+}
+
+/** A street line as a key: case, spacing and punctuation don't make two addresses different. */
+export function streetKey(street: string | null | undefined): string {
+  return String(street ?? "")
+    .toLowerCase()
+    .replace(/[.,#]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** The street lines of the jobs that carry a unit, as keys: the New Job form's "another job here has
+ *  a unit" hint reads these. */
+export function unitStreetKeys(jobs: readonly { address?: string | null; unit?: string | null }[] | null | undefined): string[] {
+  const keys = new Set<string>();
+  for (const j of jobs ?? []) {
+    if (!String(j.unit ?? "").trim()) continue;
+    const k = streetKey(j.address);
+    if (k) keys.add(k);
+  }
+  return Array.from(keys);
+}
+
+/** Does another job at this street line have a unit? Then this one probably wants one too. */
+export function streetHasUnits(street: string | null | undefined, unitStreets: readonly string[] | null | undefined): boolean {
+  const k = streetKey(street);
+  return !!k && (unitStreets ?? []).includes(k);
 }
 
 /** Fetch the jobs/customers/staff rows and map them to picker options — for
