@@ -28,6 +28,7 @@ import { isStaffRole } from "@/lib/actions/perms";
 import { jobShort, visitIsOver } from "@/lib/appointments/visit-start";
 import { loadLinkInstead } from "@/lib/appointments/visit-start-read";
 import { VisitStartCard } from "./visit-start-card";
+import { jobNameFrom, streetOf } from "@/lib/job-name";
 import { FeatureOffLine } from "@/components/feature-off-line";
 import { featureOn } from "@/lib/features";
 import {
@@ -78,7 +79,7 @@ export default async function AppointmentCapturePage({
         // jobs(...) is the linked job the top card names ("Clock In On J-055"), and its status is
         // whether a visit that is over still offers a clock on it (a finished job does not); the lead's
         // customer_id is who "Link To J-055 Instead" looks for when the visit has no customer.
-        "id, org_id, type, title, status, starts_at, ends_at, job_id, assigned_to, location, notes, customer_id, inquiry_id, capture, customers(name), inquiries(name, phone, message, intake, customer_id), jobs(id, job_number, name, status)",
+        "id, org_id, type, title, status, starts_at, ends_at, job_id, assigned_to, location, notes, customer_id, inquiry_id, capture, customers(name, company_name, type), inquiries(name, company_name, type, phone, message, intake, customer_id), jobs(id, job_number, name, status)",
       )
       .eq("id", id)
       .maybeSingle(),
@@ -440,7 +441,14 @@ export default async function AppointmentCapturePage({
                   : null
               }
               preview={{
-                name: a.title || "Job from appointment",
+                // The same one namer the Start The Job door uses (lib/job-name): the visit's words,
+                // never its "Site inspection:" tag, else "Seiler · 1871 Apache Ct".
+                name: jobNameFrom({
+                  title: a.title,
+                  customer: a.customers?.name || a.customers?.company_name ? a.customers : (a.inquiries ?? null),
+                  street: streetOf(a.location),
+                  todayStr: todayStrInTz(tz),
+                }),
                 customer: who,
                 address: a.location ?? null,
                 scheduledStart: a.starts_at ?? null,

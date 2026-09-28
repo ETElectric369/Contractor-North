@@ -14,6 +14,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const db = vi.hoisted(() => ({
   appt: null as any,
   jobs: new Map<string, any>(),
+  customers: {} as Record<string, any>,
+  inquiry: null as any,
   deleted: [] as string[],
   seq: 0,
   arrivals: 0,
@@ -67,7 +69,8 @@ function client() {
           }
         }
         if (table === "organizations") return { data: { settings: {} }, error: null };
-        if (table === "inquiries") return { data: null, error: null };
+        if (table === "inquiries") return { data: q.filters.some(([, c, v]) => c === "id" && v === db.inquiry?.id) ? db.inquiry : null, error: null };
+        if (table === "customers") return { data: db.customers[q.filters.find(([, c]) => c === "id")?.[2] as string] ?? null, error: null };
         throw new Error(`unrouted: ${table} ${q.op}`);
       };
       const chain: any = {
@@ -120,6 +123,8 @@ beforeEach(() => {
     inquiry_id: null,
   };
   db.jobs = new Map();
+  db.customers = { "cust-tom": { name: "Rita Moss", company_name: null, type: "residential" } };
+  db.inquiry = null;
   db.deleted = [];
   db.seq = 0;
   db.arrivals = 0;
@@ -155,5 +160,52 @@ describe("createJobFromAppointment: the link is the claim", () => {
     const res = await createJobFromAppointment("appt-tom");
     expect(res).toEqual({ ok: true, id: "job-55", already: true });
     expect(db.jobs.size).toBe(0);
+  });
+});
+
+/**
+ * THE JOB IS NAMED FOR THE WORK, NEVER FOR THE VISIT (Erik 2026-09-27: "site inspections are labeled
+ * with the tag they shouldnt carry site inspection in the job title"). a job was born "Site
+ * inspection: Rita Moss" because this door copied the visit's title.
+ */
+describe("createJobFromAppointment: the job's name is never the visit's tag", () => {
+  const madeName = async () => {
+    db.release?.();
+    db.arrivals = 1;
+    const res = await createJobFromAppointment("appt-tom");
+    expect(res.ok).toBe(true);
+    return db.jobs.get(res.id!)?.name as string;
+  };
+  beforeEach(() => {
+    db.appt.location = "12 Test Elm St";
+  });
+
+  it("a tag and the customer is the default: last name · the street", async () => {
+    db.appt.title = "Site inspection: Rita Moss";
+    expect(await madeName()).toBe("Moss · 12 Test Elm St");
+  });
+
+  it("the visit's own words stay, with the tag taken off", async () => {
+    db.appt.title = "Service call — Hot tub circuit";
+    expect(await madeName()).toBe("Hot tub circuit");
+  });
+
+  it("a real name that contains the word stays", async () => {
+    db.appt.title = "RV Inspection";
+    expect(await madeName()).toBe("RV Inspection");
+  });
+
+  it("no card on the visit: the lead's name says who; the street comes off the one-line location", async () => {
+    db.appt.customer_id = null;
+    db.appt.inquiry_id = "inq-1";
+    db.appt.location = "12 Elm St, Testville, CA 96161";
+    db.appt.title = "Site inspection: Rich Test";
+    db.inquiry = { id: "inq-1", customer_id: null, name: "Rich Test", company_name: null, type: "residential" };
+    expect(await madeName()).toBe("Test · 12 Elm St");
+  });
+
+  it('no title at all is never "Job from appointment"', async () => {
+    db.appt.title = null;
+    expect(await madeName()).toBe("Moss · 12 Test Elm St");
   });
 });

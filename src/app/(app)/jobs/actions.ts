@@ -16,6 +16,8 @@ import { visibleJobIdOrNull, visiblePoIdOnJobOrNull, visibleTemplateIdOrNull } f
 import { requireStaff } from "@/lib/staff-guard";
 import { isStaffRole } from "@/lib/actions/perms";
 import { getOrgSettings } from "@/lib/org-settings";
+import { todayStrInTz } from "@/lib/tz";
+import { jobNameFrom } from "@/lib/job-name";
 import { customerMaterialMarkupForJob } from "@/lib/labor-billing";
 import { reportError } from "@/lib/observe";
 import { escapeLike, formatCurrency, formatPhone } from "@/lib/utils";
@@ -1946,14 +1948,21 @@ export async function importJobs(
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const { supabase, userId } = ctx;
 
+  // The company's today, for the one namer's "New Job · Sep 27" (lib/job-name).
+  const { data: orgRow } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
+  const todayStr = todayStrInTz(getOrgSettings((orgRow as { settings?: unknown } | null)?.settings).timezone);
+
   const results: JobImportResult[] = [];
   for (const r of (rows ?? []).slice(0, 200)) {
     const cname = (r.customer || "").trim();
-    const jobName = (r.job_name || "").trim() || cname;
-    if (!cname && !jobName) {
+    if (!cname && !(r.job_name || "").trim()) {
       results.push({ name: "(blank)", status: "failed", reason: "Missing customer and job name." });
       continue;
     }
+    // THE NAME IS THE WORK, NEVER A SOURCE TAG (Erik 2026-09-27): an old system's "Service call —
+    // Rita Moss" comes in with the tag taken off; a blank or tag-only name gets the default,
+    // "Moss · 12 Elm St" (lib/job-name, the one namer every door uses).
+    const jobName = jobNameFrom({ title: r.job_name, customer: cname ? { name: cname } : null, street: r.address, todayStr });
 
     // Find-or-create the customer (match by name, narrowed by email when given) — RLS
     // already scopes this to the caller's org.

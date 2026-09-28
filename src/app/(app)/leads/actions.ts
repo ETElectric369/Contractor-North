@@ -23,6 +23,7 @@ import { getOrgSettings } from "@/lib/org-settings";
 import { featureOn } from "@/lib/features";
 import { PROJECT_TYPES, estimateLinesFromIntake } from "@/lib/lead-triage";
 import { tzDateTimeUtc, todayStrInTz } from "@/lib/tz";
+import { jobNameFrom } from "@/lib/job-name";
 import { checkComeBackDay } from "@/lib/come-back-days";
 import { createProposalCore, cleanSlots, type ProposalSlot } from "@/lib/appointments/proposal";
 import { ESTIMATE_VISIT_TYPES, INQUIRY_STATUSES, INSPECTION_TYPES } from "@/lib/statuses";
@@ -718,12 +719,21 @@ export async function convertInquiry(
   if (target === "estimate" || target === "job") {
     // An estimate is still in the pipeline; a scheduled job means the inquiry is won.
     newStatus = target === "estimate" ? "quoted" : "won";
+    // THE NAME SAYS WHO AND WHERE, never where it came from (Erik 2026-09-27): "Job — Rita Moss"
+    // said neither the place nor the work. A lead has no title of its own, so the one namer
+    // (lib/job-name) gives the default: "Moss · 1871 Apache Ct", on the company's today.
+    const jobName = jobNameFrom({
+      title: null,
+      customer: { name: inq.name, company_name: inq.company_name, type: inq.type },
+      street: inq.address,
+      todayStr: todayStrInTz(await orgTimezone(supabase)),
+    });
     const { data: job, error: jErr } = await supabase
       .from("jobs")
       .insert({
         customer_id: customerId,
         inquiry_id: id, // provenance: this estimate/job traces back to the lead
-        name: `Job — ${inq.name}`,
+        name: jobName,
         description: inq.message ?? null,
         // The size he set on the lead — the flow's whole point is that a fact stated once
         // survives every step (the appointment path already carries it; the job path dropped it).

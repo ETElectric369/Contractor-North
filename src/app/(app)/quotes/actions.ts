@@ -33,6 +33,7 @@ import { rateLimited } from "@/lib/rate-limit";
 import type Anthropic from "@anthropic-ai/sdk";
 import { getOrgSettings, accentHex, orgDocUrl } from "@/lib/org-settings";
 import { todayStrInTz } from "@/lib/tz";
+import { jobNameFrom } from "@/lib/job-name";
 import { checkComeBackDay } from "@/lib/come-back-days";
 import { isMissingColumn } from "@/lib/job-tasks";
 import { tradeWordsOr, withArticle } from "@/lib/org-trade";
@@ -1229,12 +1230,28 @@ export async function createJobFromQuote(
     return null;
   })();
 
+  /* THE NAME IS THE WORK, NEVER "Estimate — …" OR "Job from Q-0012" (Erik 2026-09-27). The
+     estimate's own title wins with any source tag taken off (lib/job-name, the one namer every door
+     uses); a title that was only a tag and the person, or none, gets "Moss · 1871 Apache Ct". The
+     public accept (accept_public_quote) names it through the SQL twin, public.job_name_from (0369). */
+  const custForName = resolvedCustomerId ?? q.customer_id;
+  const { data: whoRow } = custForName
+    ? await supabase.from("customers").select("name, company_name, type").eq("id", custForName).maybeSingle()
+    : { data: null };
+  const { data: orgForName } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
+  const jobName = jobNameFrom({
+    title: q.title,
+    customer: (whoRow as { name?: string | null; company_name?: string | null; type?: string | null } | null) ?? null,
+    street: inheritedAddress?.address ?? null,
+    todayStr: todayStrInTz(getOrgSettings((orgForName as { settings?: unknown } | null)?.settings).timezone),
+  });
+
   const { data: job, error } = await supabase
     .from("jobs")
     .insert({
       customer_id: resolvedCustomerId ?? q.customer_id,
       inquiry_id: q.inquiry_id ?? null, // carry the lead provenance forward: lead → quote → job
-      name: q.title || `Job from ${q.quote_number}`,
+      name: jobName,
       ...(inheritedAddress
         ? {
             address: inheritedAddress.address,

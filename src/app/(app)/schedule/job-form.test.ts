@@ -205,6 +205,20 @@ describe("createJob: what the four-field form doesn't ask, the server works out"
     expect(inserted()).toMatchObject({ name: "Panel swap", status: "in_progress" });
   });
 
+  it("a sent name is never a source tag (Erik 2026-09-27): the tag comes off, a tag and the person is the default, a real name stays", async () => {
+    // Nort's job.create carrying a visit's title: the tag and the customer's name are no name at all.
+    await createJob(fd({ name: "Site inspection: Rita Smith", customer_id: "cust-smith", address: "1871 Apache Ct", scheduled_date: "" }));
+    expect(inserted().name).toBe("Smith · 1871 Apache Ct");
+    state.calls = [];
+    await createJob(fd({ name: "Service call — Panel swap", customer_id: "cust-smith", address: "1871 Apache Ct", scheduled_date: "" }));
+    expect(inserted().name).toBe("Panel swap");
+    state.calls = [];
+    // A name with no leading tag goes in exactly as sent, and the customer isn't even read for it.
+    await createJob(fd({ name: "RV Inspection", customer_id: "cust-smith", address: "1871 Apache Ct", scheduled_date: "" }));
+    expect(inserted().name).toBe("RV Inspection");
+    expect(state.calls.some((c) => c.table === "customers" && c.op === "select")).toBe(false);
+  });
+
   it("a caller that sends no date at all keeps In Progress (Nort's job.create)", async () => {
     await createJob(fd({ name: "The Miller deck" }));
     expect(inserted().status).toBe("in_progress");

@@ -15,6 +15,7 @@ import { notifyPeople } from "@/lib/notifications";
 import { getOrgSettings } from "@/lib/org-settings";
 import { tzDateTimeUtc, todayStrInTz } from "@/lib/tz";
 import { WORK_DAY_MINUTES } from "@/lib/schedule/work-shape";
+import { jobNameFrom, streetOf } from "@/lib/job-name";
 import { createProposalCore, cleanSlots } from "@/lib/appointments/proposal";
 import { endAfterStart, keptEnd } from "@/lib/appointments/times";
 import { APPOINTMENT_STATUSES, APPOINTMENT_TYPES, INSPECTION_TYPES } from "@/lib/statuses";
@@ -1173,7 +1174,7 @@ export async function rescheduleAppointment(
 
 /** Turn an appointment (often a site-visit/estimate walk-through) into a job —
  *  idempotent: if it already spawned one, returns that job. Inherits the
- *  customer, title → name, location → address, and start time. */
+ *  customer, the visit's words (never its tag) → name (lib/job-name), location → address, and start time. */
 export async function createJobFromAppointment(
   appointmentId: string,
 ): Promise<Result & { note?: string; /** The visit already had a job (maybe one made a moment ago on another device); `id` is that job. */ already?: boolean }> {
@@ -1216,6 +1217,25 @@ export async function createJobFromAppointment(
     customerId = (inq as { customer_id?: string | null } | null)?.customer_id ?? null;
   }
 
+  /* THE NAME IS THE WORK, NEVER THE VISIT IT CAME FROM (Erik 2026-09-27: "site inspections are
+     labeled with the tag they shouldnt carry site inspection in the job title"). a job was born
+     "Site inspection: Rita Moss" because this copied the visit's title. The one namer
+     (lib/job-name) takes the tag off; a stock title with only the person left gets the default
+     "Moss · 1871 Apache Ct", on the company's today. Who: the card, else the lead. */
+  const { data: orgRow } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
+  const tz = getOrgSettings((orgRow as { settings?: unknown } | null)?.settings).timezone;
+  type Who = { name?: string | null; company_name?: string | null; type?: string | null } | null;
+  let who: Who = null;
+  if (customerId) {
+    const { data: c } = await supabase.from("customers").select("name, company_name, type").eq("id", customerId).maybeSingle();
+    who = (c as Who) ?? null;
+  }
+  if (!who?.name && !who?.company_name && inquiryId) {
+    const { data: iq } = await supabase.from("inquiries").select("name, company_name, type").eq("id", inquiryId).maybeSingle();
+    if (iq) who = iq as Who;
+  }
+  const jobName = jobNameFrom({ title: appt.title, customer: who, street: streetOf(appt.location), todayStr: todayStrInTz(tz) });
+
   const sized = Number((appt as { planned_minutes?: number | null }).planned_minutes ?? 0);
   const apptEnd = (appt as { ends_at?: string | null }).ends_at ?? null;
   const scheduledEnd = sized > 0 && appt.starts_at
@@ -1225,7 +1245,7 @@ export async function createJobFromAppointment(
   const { data: job, error } = await supabase
     .from("jobs")
     .insert({
-      name: appt.title || "Job from appointment",
+      name: jobName,
       customer_id: customerId,
       inquiry_id: inquiryId,
       // A visit waiting for a day (no start, 0368) makes a job that is waiting for one too.
@@ -1292,8 +1312,6 @@ export async function createJobFromAppointment(
      it was deduped behind the job. Same day-expansion rule the rail's placement uses. */
   const sizedDays = daysNeeded(sized);
   if (sizedDays > 1 && appt.starts_at) {
-    const { data: orgRow } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
-    const tz = getOrgSettings((orgRow as { settings?: unknown } | null)?.settings).timezone;
     const firstDay = todayStrInTz(tz, new Date(appt.starts_at));
     const run = workingDaysFrom(firstDay, sizedDays);
     if (run.length) {
