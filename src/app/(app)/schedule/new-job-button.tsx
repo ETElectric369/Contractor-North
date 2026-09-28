@@ -20,7 +20,7 @@ import {
 import { createJob } from "./actions";
 import { createParamClaim } from "@/lib/param-claim";
 
-/** "08:00" → "8:00 AM", for the Start Time line (blank = all day from the company's start). */
+/** "08:00" → "8:00 AM", for the Start Time line (blank = from the company's start, two hours). */
 function clockWords(hm: string): string {
   const m = /^(\d{2}):(\d{2})/.exec(hm);
   if (!m) return hm;
@@ -160,7 +160,8 @@ const newParam = createParamClaim();
  *   No Status field: the server sets it from the date, on the company's today (today or earlier In
  *   Progress, later Scheduled, none To Be Scheduled). It is never On Hold (createJob refuses that).
  *   The day and the time go to the server as they were picked; the instant is built there on the
- *   company's clock, and a blank time is all day from the company's work-day start (workDay).
+ *   company's clock, and a blank time is the company's work-day start (workDay); the form asks no
+ *   length, so a dated job lands as two hours (lib/schedule/job-block DEFAULT_JOB_MINUTES).
  *   Billing starts at the kind most of this company's jobs use (usualBilling), else Time & Material.
  *   Picking a customer fills the address (never over one that was typed); the address picker stores
  *   the street, and the city, state and zip it resolved are sent hidden and shown on one grey line.
@@ -176,7 +177,7 @@ export function NewJobButton({
 }: {
   customers: NewJobCustomerOption[];
   defaultCustomerId?: string;
-  /** The company's work-day window (workDayWindowHm): a blank Start Time is all day from its start. */
+  /** The company's work-day window (workDayWindowHm): a blank Start Time starts at its start. */
   workDay?: { start: string; end: string };
   /** The company's today (YYYY-MM-DD); the phone's own day only when it isn't handed over. */
   todayStr?: string;
@@ -461,7 +462,11 @@ export function NewJobButton({
                   <div>
                     <Label htmlFor="nj-time">Start Time</Label>
                     <Input id="nj-time" type="time" value={form.scheduled_time} onChange={(e) => patch({ scheduled_time: e.target.value })} className="w-auto" />
-                    <p className="mt-1 text-xs text-slate-500">Blank is all day, from {clockWords(workDay.start)}.</p>
+                    {/* The truth about the default (lib/schedule/job-block): no length on this form,
+                        so a dated job lands as two hours, never the rest of the day. */}
+                    <p className="mt-1 text-xs text-slate-500">
+                      Blank starts at {clockWords(workDay.start)}. It goes down as 2 hours; change the length on the job.
+                    </p>
                   </div>
                   <div>
                     <Label htmlFor="nj-billing">Billing</Label>

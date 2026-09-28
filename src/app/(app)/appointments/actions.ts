@@ -25,6 +25,7 @@ import { playbookForForm } from "@/lib/playbook/parse";
 import { clearInapplicable } from "@/lib/playbook/resolve";
 import { runOnce } from "@/lib/offline/run-once";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { DEFAULT_JOB_MINUTES } from "@/lib/schedule/job-block";
 
 /** The browser-computed ISO if present; otherwise build the instant in the ORG
  *  timezone — NEVER the server's UTC (the bare-string parse stored the wrong
@@ -1250,7 +1251,9 @@ export async function createJobFromAppointment(
   const apptEnd = (appt as { ends_at?: string | null }).ends_at ?? null;
   const scheduledEnd = sized > 0 && appt.starts_at
     ? new Date(new Date(appt.starts_at).getTime() + Math.min(sized, WORK_DAY_MINUTES) * 60_000).toISOString()
-    : apptEnd;
+    : // A visit with no size and no end becomes a job of the default length (two hours, "2 hours —
+      // change it"), never a job with no end, which drew as the rest of the work day.
+      apptEnd ?? (appt.starts_at ? new Date(new Date(appt.starts_at).getTime() + DEFAULT_JOB_MINUTES * 60_000).toISOString() : null);
 
   const { data: job, error } = await supabase
     .from("jobs")
@@ -1514,4 +1517,43 @@ export async function openJobInspector(jobId: string): Promise<Result & { redire
   if (error || !appt) return { ok: false, error: dbError(error) };
   revalidatePath(`/jobs/${jobId}`);
   return { ok: true, id: appt.id, redirect: `/appointments/${appt.id}` };
+}
+
+/**
+ * WHO'S GOING ON A VISIT, from the schedule tile's sheet. A visit carries ONE person
+ * (appointments.assigned_to), so this puts one on, swaps them, or takes them off (null): the visit's
+ * twin of the job crew chips. Only someone in this company (the caller's own RLS read of profiles,
+ * never another company's id), written with the id back (the silent-write law), the newly put-on
+ * person told on the bell and by push the way a new booking tells them, and the Google event follows.
+ */
+export async function setAppointmentAssignee(id: string, profileId: string | null): Promise<Result> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+  const who = profileId ? String(profileId) : null;
+  if (who) {
+    const { data: person } = await supabase.from("profiles").select("id").eq("id", who).maybeSingle();
+    if (!person) return { ok: false, error: "That person isn't on this team, so nobody changed." };
+  }
+  const { data: before } = await supabase.from("appointments").select("assigned_to, title").eq("id", id).maybeSingle();
+  if (!before) return { ok: false, error: "That visit isn't available, so nobody changed." };
+  const { data: wrote, error } = await supabase
+    .from("appointments")
+    .update({ assigned_to: who, updated_at: new Date().toISOString() })
+    .eq("id", id)
+    .select("id");
+  if (error) return { ok: false, error: dbError(error) };
+  if (!wrote?.length) return { ok: false, error: "That visit isn't available, so nobody changed." };
+
+  const was = (before as { assigned_to?: string | null }).assigned_to ?? null;
+  if (who && who !== was && who !== ctx.userId) {
+    const orgId = ctx.orgId;
+    const title = (before as { title?: string | null }).title ?? null;
+    after(() => notifyPeople(orgId, [who], "assigned", { title: "New appointment assigned", body: title, url: `/appointments/${id}` }));
+  }
+  await pushCalendarItem("appointment", id); // live Google push (fire-safe)
+  revalidatePath("/schedule");
+  revalidatePath("/planner"); // My Day shows today's appointments, and whose they are
+  revalidatePath(`/appointments/${id}`);
+  return { ok: true };
 }

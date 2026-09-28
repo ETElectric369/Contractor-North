@@ -1,7 +1,10 @@
 "use client";
 
 import React from "react";
+import { Plus } from "lucide-react";
 import { todayStrInTz, tzMinutesOfDay } from "@/lib/tz";
+import { blockRows, type CrewChip } from "@/lib/schedule/block-info";
+import { CrewInitials } from "./crew-initials";
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
@@ -50,6 +53,25 @@ export interface TimeGridEvent {
   /** Full Tailwind class string for the pill (border/bg/text + modifiers). */
   color: string;
   href?: string;
+  /** With the grid's onEventTap, a tap opens the caller's sheet for this pill instead of following
+   *  href (the schedule's tile sheet). Absent, the pill is the link it always was. */
+  tapId?: string;
+  /** WHERE AND WHO, inside the block (the schedule's job and visit blocks; lib/schedule/block-info).
+   *  Drawn as tall as the block has room for: the name, then the place, the crew, the time, the town.
+   *  With it, `sub` is not drawn. */
+  info?: TimeGridInfo;
+}
+
+/** A block's own lines under its name (see TimeGridEvent.info). */
+export interface TimeGridInfo {
+  /** The street number and name, or the customer when the name is the street. */
+  place?: string | null;
+  /** The town, small, only when the block is tall enough. */
+  town?: string | null;
+  /** Start to end, short ("10a–12p"). */
+  time?: string | null;
+  /** The crew as initials chips; [] draws a dashed Nobody; absent draws no crew line. */
+  crew?: CrewChip[] | null;
 }
 
 export interface TimeGridAllDay {
@@ -64,6 +86,15 @@ export interface TimeGridAllDay {
 const HOUR_PX = 48;
 const PX_PER_MIN = HOUR_PX / 60;
 const MIN_COL_PX = 92; // 7 columns scroll horizontally on a phone; day view is the zoom-in
+/** An open spot is tapped to the half hour it sits in (12px under a thumb is noise; 24px is a slot). */
+export const SLOT_MIN = 30;
+
+/** The minute an open spot was tapped at: `offsetPx` down a column whose top is `rangeStart`, floored
+ *  to the half hour, never outside the day. */
+export function slotMinute(offsetPx: number, rangeStart: number): number {
+  const raw = rangeStart + Math.max(0, offsetPx) / PX_PER_MIN;
+  return Math.max(0, Math.min(24 * 60 - SLOT_MIN, Math.floor(raw / SLOT_MIN) * SLOT_MIN));
+}
 
 type Now = { dayStr: string; min: number };
 
@@ -128,6 +159,9 @@ function TimeGridInner({
   initialNow,
   onDayClick,
   placement,
+  onEventTap,
+  onSlotTap,
+  addLabel = "Add To Schedule",
 }: {
   days: TimeGridDay[];
   events: TimeGridEvent[];
@@ -153,6 +187,19 @@ function TimeGridInner({
    * armed days wear a target ring and say what tapping them will do. See lib/schedule/placement-plan.
    */
   placement?: { label: string; onPlace: (dayStr: string) => void };
+  /** A pill carrying a tapId calls this (with its day) instead of following its href: the schedule's
+   *  tile sheet. Never while armed, where every tap on a day places. */
+  onEventTap?: (tapId: string, dayStr: string) => void;
+  /**
+   * ADD TO SCHEDULE FROM THE SCHEDULE (Erik, 2026-09-28: "theres no way to add to the schedule from the
+   * schedule page unless its already scripted"). An OPEN spot on a day (the column behind the blocks)
+   * calls this with the day and the half hour tapped (null from a keyboard, where there is no spot:
+   * the caller starts the work day), and each day header carries a "+" that calls it with no time.
+   * Never while armed (every tap on a day places then). Absent: the columns are plain, as on /timecards.
+   */
+  onSlotTap?: (dayStr: string, minute: number | null) => void;
+  /** The words the open spots and the "+" say ("Add To Schedule"). */
+  addLabel?: string;
 }) {
   const [now, setNow] = useState<Now | null>(initialNow ?? null);
   useEffect(() => {
@@ -214,12 +261,46 @@ function TimeGridInner({
   const colBorder = (d: TimeGridDay) =>
     d.heavyStart ? "border-l-2 border-l-slate-400" : "border-l border-l-slate-100";
 
-  const pillBody = (label: string, sub?: string | null) => (
-    <>
-      <div className="truncate font-semibold">{label}</div>
-      {sub && <div className="truncate opacity-70">{sub}</div>}
-    </>
-  );
+  /** A block's lines, as many as its height has room for (lib/schedule/block-info blockRows): the
+   *  name, then the place, the crew, the time, the town. Every line is whole or absent. */
+  const pillBody = (e: TimeGridEvent, heightPx: number) => {
+    const info = e.info;
+    if (!info) {
+      return (
+        <>
+          <div className="truncate font-semibold">{e.label}</div>
+          {e.sub && <div className="truncate opacity-70">{e.sub}</div>}
+        </>
+      );
+    }
+    const rows = blockRows(heightPx, {
+      place: !!info.place,
+      crew: Array.isArray(info.crew),
+      time: !!info.time,
+      town: !!info.town,
+    });
+    return (
+      <>
+        <div className="truncate font-semibold">{e.label}</div>
+        {rows.place && <div className="truncate opacity-80">{info.place}</div>}
+        {rows.crew && (
+          <div className="mt-0.5 flex h-3.5 items-center overflow-hidden">
+            <CrewInitials crew={info.crew ?? []} size="xs" />
+          </div>
+        )}
+        {rows.time && <div className="truncate tabular-nums opacity-70">{info.time}</div>}
+        {rows.town && <div className="truncate text-[9px] opacity-60">{info.town}</div>}
+      </>
+    );
+  };
+  /** Everything the block says, for its title and its label (a small block still says it all to a
+   *  screen reader and on hover). */
+  const pillTitle = (e: TimeGridEvent) => {
+    if (!e.info) return e.sub ? `${e.label} · ${e.sub}` : e.label;
+    const crew = e.info.crew;
+    const who = Array.isArray(crew) ? (crew.length ? crew.map((c) => c.name).join(", ") : "Nobody") : null;
+    return [e.label, e.info.place, e.info.town, e.info.time, who].filter(Boolean).join(" · ");
+  };
 
   return (
     <div ref={scrollRef} className="overflow-x-auto">
@@ -256,6 +337,35 @@ function TimeGridInner({
                     {placement.label}
                   </span>
                 </button>
+              );
+            }
+            /* THE DAY'S "+": Add To Schedule on this day, beside the day's own tap (which drills in).
+               Two sibling buttons, never one inside the other. 44 by 44: a 92px week column still leaves
+               the day's label about 48px. */
+            if (onSlotTap) {
+              return (
+                <div key={d.dayStr} className={`flex min-w-0 flex-1 items-stretch ${colBorder(d)}`}>
+                  {onDayClick ? (
+                    <button
+                      type="button"
+                      onClick={() => onDayClick(d.dayStr)}
+                      className="min-h-11 min-w-0 flex-1 truncate px-1 py-1.5 text-center text-xs font-medium text-slate-600 hover:bg-slate-50"
+                    >
+                      {head}
+                    </button>
+                  ) : (
+                    <div className="min-h-11 min-w-0 flex-1 truncate px-1 py-1.5 text-center text-xs font-medium text-slate-600">{head}</div>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => onSlotTap(d.dayStr, null)}
+                    aria-label={`${addLabel}, ${d.label}`}
+                    title={`${addLabel}, ${d.label}`}
+                    className="flex min-h-11 w-11 shrink-0 items-center justify-center text-brand hover:bg-brand-light/60"
+                  >
+                    <Plus className="h-4 w-4" />
+                  </button>
+                </div>
               );
             }
             return onDayClick ? (
@@ -359,11 +469,28 @@ function TimeGridInner({
                   />
                 )}
 
+                {/* THE OPEN SPOTS: the column behind the blocks. A tap here is Add To Schedule at the
+                    half hour tapped; the blocks sit above it, so a tap on one is still that block. */}
+                {!placement && onSlotTap && (
+                  <button
+                    type="button"
+                    onClick={(ev) => {
+                      // A keyboard press has no spot (detail 0): the caller starts the work day.
+                      if (ev.detail === 0) return onSlotTap(d.dayStr, null);
+                      const box = ev.currentTarget.getBoundingClientRect();
+                      onSlotTap(d.dayStr, slotMinute(ev.clientY - box.top, rangeStart));
+                    }}
+                    aria-label={`${addLabel}, ${d.label}`}
+                    title={`${addLabel}: tap an open time`}
+                    className="absolute inset-0 cursor-copy transition-colors hover:bg-brand-light/10"
+                  />
+                )}
+
                 {/* hour rules */}
                 {hours.slice(1, -1).map((h) => (
                   <div
                     key={h}
-                    className="absolute inset-x-0 border-t border-slate-100"
+                    className="pointer-events-none absolute inset-x-0 border-t border-slate-100"
                     style={{ top: (h * 60 - rangeStart) * PX_PER_MIN }}
                   />
                 ))}
@@ -379,7 +506,7 @@ function TimeGridInner({
                     width: `calc(${100 / e.cols}% - 4px)`,
                   };
                   const cls = `absolute overflow-hidden rounded-md border px-1 py-0.5 text-[10px] leading-tight shadow-sm ${e.color}`;
-                  const title = e.sub ? `${e.label} · ${e.sub}` : e.label;
+                  const title = pillTitle(e);
                   /* ARMED, A PILL PLACES TOO. On a busy day the pills cover most of the column,
                      so the natural tap landed on a Link, navigated to that job, unmounted the
                      provider and silently threw away every pick and the AM/PM choice — the worst
@@ -394,15 +521,30 @@ function TimeGridInner({
                       title={`${placement.label} — ${d.label}`}
                       className={`${cls} text-left opacity-60`}
                     >
-                      {pillBody(e.label, e.sub)}
+                      {pillBody(e, height)}
+                    </button>
+                  ) : onEventTap && e.tapId ? (
+                    /* THE TILE OPENS ITS SHEET: the day, the time and who's on it, where the block
+                       is (Erik: "on the schedule itself there should be a time adjustment inside the
+                       job itself with the crew picker"). The record is one more tap, inside. */
+                    <button
+                      key={e.id}
+                      type="button"
+                      onClick={() => onEventTap(e.tapId!, d.dayStr)}
+                      style={style}
+                      title={title}
+                      aria-label={`${title}: day, time and crew`}
+                      className={`${cls} text-left hover:opacity-80`}
+                    >
+                      {pillBody(e, height)}
                     </button>
                   ) : e.href ? (
                     <Link key={e.id} href={e.href} style={style} title={title} className={`${cls} hover:opacity-80`}>
-                      {pillBody(e.label, e.sub)}
+                      {pillBody(e, height)}
                     </Link>
                   ) : (
                     <div key={e.id} style={style} title={title} className={cls}>
-                      {pillBody(e.label, e.sub)}
+                      {pillBody(e, height)}
                     </div>
                   );
                 })}

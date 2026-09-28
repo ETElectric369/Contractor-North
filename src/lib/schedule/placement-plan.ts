@@ -64,9 +64,19 @@ export type PlaceOutcome = {
   jobsPlaced: number;
   /** Floaters that didn't. */
   jobsFailed: number;
+  /** Placed jobs nobody gave a length, which went down as two hours (lib/schedule/job-block). */
+  jobsDefaulted?: number;
   /** A human day, already formatted by the caller — never a raw YYYY-MM-DD in a sentence. */
   dayLabel: string;
 };
+
+/** The words for jobs that landed with the two-hour default: said once, where the deed is announced. */
+function defaultedWords(n: number | undefined): string {
+  if (!n || n <= 0) return "";
+  return n === 1
+    ? " It had no length, so it's down as 2 hours. Tap it on the calendar to change it."
+    : ` ${n} had no length, so they're down as 2 hours. Tap one on the calendar to change it.`;
+}
 
 /**
  * ANNOUNCE THE DEED, AND NAME WHAT DIDN'T LAND.
@@ -85,10 +95,10 @@ export function placeMessage(o: PlaceOutcome): { text: string; tone: "success" |
     };
   }
   if (failed > 0) {
-    return { text: `${placed} on ${o.dayLabel}. ${failed} didn't — open them and try again.`, tone: "info" };
+    return { text: `${placed} on ${o.dayLabel}. ${failed} didn't — open them and try again.${defaultedWords(o.jobsDefaulted)}`, tone: "info" };
   }
   return {
-    text: placed === 1 ? `On ${o.dayLabel}.` : `${placed} on ${o.dayLabel}.`,
+    text: `${placed === 1 ? `On ${o.dayLabel}.` : `${placed} on ${o.dayLabel}.`}${defaultedWords(o.jobsDefaulted)}`,
     tone: "success",
   };
 }

@@ -1,5 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
-import { CAL_WINDOW_BACK_DAYS, CAL_WINDOW_FWD_DAYS } from "@/lib/schedule/cal-window";
+import { CAL_WINDOW_BACK_DAYS, CAL_WINDOW_FWD_DAYS, segmentJobsNotLoaded } from "@/lib/schedule/cal-window";
+import { segmentCols, withDayHours } from "@/lib/schedule/segment-hours";
+import type { AddableJob } from "./add-to-schedule-sheet";
 import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 import { getOrgSettings, workDayWindowHm } from "@/lib/org-settings";
 import { featureOn } from "@/lib/features";
@@ -17,7 +19,7 @@ import {
  *  clocked time (WHEN-DID) lives on /timeclock + /timecards, so the old
  *  time_entries fetch and former-employee roster union are gone. The client
  *  slices this preloaded ±window into day/week/month; paging never refetches. */
-export async function CalendarPanel() {
+export async function CalendarPanel({ canEdit = false }: { canEdit?: boolean } = {}) {
   const supabase = await createClient();
 
   const now = Date.now();
@@ -27,7 +29,9 @@ export async function CalendarPanel() {
   const jobFrom = new Date(now - CAL_WINDOW_BACK_DAYS * 86400_000).toISOString();
   const jobTo = new Date(now + CAL_WINDOW_FWD_DAYS * 86400_000).toISOString();
 
-  const [{ data: jobs }, { data: segments }, { data: appointments }, { data: tasks }, { data: unschedRows }, { data: externalRows }, picker, { data: org }] =
+  // `address` (the street) rides along: every block says where (lib/schedule/block-info).
+  const JOB_COLS = "id, job_number, name, status, scheduled_start, scheduled_end, planned_minutes, assigned_to, address, city, customers(name)";
+  const [{ data: listedJobs }, { data: segments, perDayHours }, { data: appointments }, { data: tasks }, { data: unschedRows }, { data: externalRows }, picker, { data: org }, { data: addableRows }] =
     await Promise.all([
       // Overlap test, not a point test on scheduled_start: a job shows if it
       // STARTS before the window end AND (ends after the window start, or is an
@@ -35,21 +39,25 @@ export async function CalendarPanel() {
       // far out / long job started a while ago" disappearance.
       supabase
         .from("jobs")
-        .select("id, job_number, name, status, scheduled_start, scheduled_end, planned_minutes, assigned_to, city, customers(name)")
+        .select(JOB_COLS)
         .lte("scheduled_start", jobTo)
         .or(`scheduled_end.gte.${jobFrom},and(scheduled_end.is.null,scheduled_start.gte.${jobFrom})`)
         .order("scheduled_start"),
-      supabase
-        .from("job_schedule_segments")
-        .select("job_id, start_date, end_date")
-        .gte("end_date", jobFrom.slice(0, 10))
-        .lte("start_date", jobTo.slice(0, 10)),
+      // Each day's own hours ride along (0370); before the migration, the read without them.
+      withDayHours((h) =>
+        supabase
+          .from("job_schedule_segments")
+          .select(segmentCols("job_id, start_date, end_date", h))
+          .gte("end_date", jobFrom.slice(0, 10))
+          .lte("start_date", jobTo.slice(0, 10)),
+      ),
       // Full row (location/notes/links) — the day drill hosts the edit modal
       // and quick actions now that the appointments tab is gone.
       supabase
         .from("appointments")
         .select(
-          "id, type, title, starts_at, ends_at, location, notes, status, job_id, customer_id, assigned_to, absorbed, jobs(job_number, name), customers(name), profiles!appointments_assigned_to_fkey(full_name)",
+          // jobs(address): a visit with no place of its own is at its job's street (My Day reads it the same).
+          "id, type, title, starts_at, ends_at, location, notes, status, job_id, customer_id, assigned_to, absorbed, jobs(job_number, name, address), customers(name), profiles!appointments_assigned_to_fkey(full_name)",
         )
         .gte("starts_at", jobFrom)
         .lte("starts_at", jobTo)
@@ -75,7 +83,7 @@ export async function CalendarPanel() {
       // nothing next is there too, and a held job waits there with its own day instead.
       supabase
         .from("jobs")
-        .select("id, job_number, name, customers(name)")
+        .select("id, job_number, name, address, assigned_to, customers(name)")
         .is("scheduled_start", null)
         .in("status", ACTIVE_JOB_STATUSES)
         .order("created_at", { ascending: false })
@@ -96,13 +104,39 @@ export async function CalendarPanel() {
       // Org settings: the configured work-day start is the "all-day job" time
       // sentinel the week agenda uses to decide whether to render a start time.
       supabase.from("organizations").select("settings").limit(1).maybeSingle(),
+      /* ADD TO SCHEDULE's job list (the office only): every job still in flight (to be scheduled,
+         scheduled, in progress, on hold), the most recently worked first, with its street, who, its
+         size (the length it starts with) and its crew. No money. */
+      canEdit
+        ? supabase
+            .from("jobs")
+            .select("id, job_number, name, status, address, city, planned_minutes, assigned_to, customers(name)")
+            .in("status", ACTIVE_JOB_STATUSES)
+            .order("updated_at", { ascending: false, nullsFirst: false })
+            .order("created_at", { ascending: false })
+            .limit(300)
+        : Promise.resolve({ data: [] as unknown[] }),
     ]);
+
+  /* HISTORY DRAWS TOO. A job whose date was cleared keeps its worked days as segments with no listed
+     span, so the read above (on scheduled_start) never brings it; its worked day would vanish while
+     Clear The Date's note says it was kept on the calendar. Read those jobs by id: the segments place
+     them on their worked days (drawn all day, the day drill reads "Worked day"). Fail-soft: a failed
+     read draws what the first one brought. */
+  const missing = segmentJobsNotLoaded(((listedJobs ?? []) as { id: string }[]).map((j) => j.id), (segments ?? []) as unknown as { job_id: string }[]);
+  const { data: historyJobs } = missing.length
+    ? await supabase.from("jobs").select(JOB_COLS).in("id", missing.slice(0, 500))
+    : { data: [] };
+  const jobs: unknown[] = [...(listedJobs ?? []), ...(historyJobs ?? [])];
 
   const unscheduled = (unschedRows ?? []).map((j: any) => ({
     id: j.id,
     job_number: j.job_number,
     name: j.name,
     customer: j.customers?.name ?? null,
+    // Where and who on the tray's tile, as its block and its rail card say them. No money.
+    address: j.address ?? null,
+    assigned_to: Array.isArray(j.assigned_to) ? j.assigned_to : [],
   }));
 
   return (
@@ -124,6 +158,13 @@ export async function CalendarPanel() {
         workDayStart={workDayWindowHm((org as any)?.settings).start}
         workDayEnd={workDayWindowHm((org as any)?.settings).end}
         crewBoard={featureOn(getOrgSettings((org as any)?.settings).features, "crew_board")}
+        // The office taps a block for its day, time and crew (schedule/tile-sheet). Staff only: the
+        // page sends anyone else to My Day, and every writer behind the sheet asks requireStaff too.
+        canEdit={canEdit}
+        // A day can keep its own hours (0370 applied): the tile's time is This Day's.
+        perDayHours={perDayHours}
+        // Add To Schedule: an open spot (or a day's "+") opens the sheet with these jobs.
+        addableJobs={(addableRows ?? []) as unknown as AddableJob[]}
       />
     </div>
   );

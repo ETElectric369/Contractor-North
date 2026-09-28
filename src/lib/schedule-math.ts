@@ -3,11 +3,25 @@
  *  database — setJobScheduleRanges REPLACES all segments wholesale, so every
  *  caller must compute the FULL new set (read-modify-write) and these functions
  *  are that computation. All arithmetic runs at UTC midnight (a bare yyyy-mm-dd
- *  parses as UTC), so DST can never grow or shrink a day. */
+ *  parses as UTC), so DST can never grow or shrink a day.
+ *
+ *  EACH DAY KEEPS ITS OWN HOURS (0370). A range may carry `hours`: the wall-clock start and end its
+ *  days run on the company's clock (job_schedule_segments.start_time / end_time). Three states, like
+ *  the writers' start time always had:
+ *    hours: { start, end }  the days' OWN hours (Herringbone added today, noon to 5, beside its
+ *                           other days);
+ *    hours: null            the job's USUAL hours (its scheduled_start/end block), today's behavior;
+ *    hours absent           not said: a writer carries over whatever those days already had
+ *                           (carryHours), so a rewrite never drops a day's hours.
+ *  Every function here keeps a range's hours with it: a moved range lands with its own hours, a kept
+ *  worked day keeps the hours it ran, and two neighbouring ranges only merge when their hours match. */
 
 import { todayStrInTz } from "./tz";
 
-export type DaySegment = { start: string; end: string }; // yyyy-mm-dd each, inclusive
+/** A day's own hours on the company's clock ("HH:MM" each, end after start). */
+export type DayHours = { start: string; end: string };
+
+export type DaySegment = { start: string; end: string; hours?: DayHours | null }; // yyyy-mm-dd each, inclusive
 
 const DAY_MS = 86_400_000;
 
@@ -16,26 +30,123 @@ const toMs = (ymd: string) => Date.parse(`${ymd}T00:00:00Z`);
 const toYmd = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 const addDays = (ymd: string, days: number) => toYmd(toMs(ymd) + days * DAY_MS);
 
-/** Drop malformed rows, right inverted ones (end before start → one day), sort by start. */
-function normalize(segments: DaySegment[]): DaySegment[] {
-  return (segments ?? [])
-    .filter((s) => isYmd(s?.start) && isYmd(s?.end))
-    .map((s) => (s.end < s.start ? { start: s.start, end: s.start } : { start: s.start, end: s.end }))
-    .sort((a, b) => a.start.localeCompare(b.start));
+/** Which hours a range carries, as a key: two ranges merge only when their keys match. */
+const hoursKey = (h: DayHours | null | undefined) => (h === undefined ? "~" : h === null ? "-" : `${h.start}-${h.end}`);
+
+/** The same range's hours on other dates (absent stays absent, never an `hours: undefined` key). */
+function withHours(s: DaySegment, start: string, end: string): DaySegment {
+  return s.hours === undefined ? { start, end } : { start, end, hours: s.hours };
 }
 
-/** Coalesce overlapping or adjacent (end + 1 day = next start) segments into one. */
-export function mergeSegments(segments: DaySegment[]): DaySegment[] {
+/** Well-formed ranges only, an inverted one righted to its first day. INPUT ORDER is kept: a later
+ *  range's hours win the days it shares with an earlier one. */
+function clean(segments: DaySegment[]): DaySegment[] {
+  return (segments ?? [])
+    .filter((s) => isYmd(s?.start) && isYmd(s?.end))
+    .map((s) => (s.end < s.start ? withHours(s, s.start, s.start) : withHours(s, s.start, s.end)));
+}
+
+/** Drop malformed rows, right inverted ones (end before start → one day), sort by start. */
+function normalize(segments: DaySegment[]): DaySegment[] {
+  return clean(segments).sort((a, b) => a.start.localeCompare(b.start));
+}
+
+/** Lay `top` over `base`: the days `top` covers leave whatever range held them (split around it). */
+function overlay(base: DaySegment[], top: DaySegment): DaySegment[] {
   const out: DaySegment[] = [];
-  for (const seg of normalize(segments)) {
+  for (const b of base) {
+    if (b.end < top.start || b.start > top.end) {
+      out.push(b);
+      continue;
+    }
+    if (b.start < top.start) out.push(withHours(b, b.start, addDays(top.start, -1)));
+    if (b.end > top.end) out.push(withHours(b, addDays(top.end, 1), b.end));
+  }
+  out.push(top);
+  return out;
+}
+
+/** Sort, then join ranges that touch or overlap AND carry the same hours. */
+function coalesce(segments: DaySegment[]): DaySegment[] {
+  const out: DaySegment[] = [];
+  for (const seg of [...segments].sort((a, b) => a.start.localeCompare(b.start))) {
     const last = out[out.length - 1];
-    if (last && toMs(seg.start) <= toMs(last.end) + DAY_MS) {
+    if (last && hoursKey(last.hours) === hoursKey(seg.hours) && toMs(seg.start) <= toMs(last.end) + DAY_MS) {
       if (seg.end > last.end) last.end = seg.end;
     } else {
       out.push({ ...seg });
     }
   }
   return out;
+}
+
+/** Coalesce overlapping or adjacent (end + 1 day = next start) segments into one. The union of every
+ *  day stays; where two ranges share a day with DIFFERENT hours, the later one in the list wins that
+ *  day (the other is split around it), and ranges only join when their hours match. */
+export function mergeSegments(segments: DaySegment[]): DaySegment[] {
+  let laid: DaySegment[] = [];
+  for (const seg of clean(segments)) laid = overlay(laid, seg);
+  return coalesce(laid);
+}
+
+/** The hours on `day`: its own ({ start, end }), the job's usual (null), or undefined when no range
+ *  covers the day (or the range never said). The last range covering it wins, as in mergeSegments. */
+export function hoursOnDay(segments: DaySegment[], day: string): DayHours | null | undefined {
+  let found: DayHours | null | undefined = undefined;
+  for (const s of clean(segments)) if (s.start <= day && day <= s.end) found = s.hours;
+  return found;
+}
+
+/** Is `day` one of these days? */
+export function coversDay(segments: DaySegment[], day: string): boolean {
+  return clean(segments).some((s) => s.start <= day && day <= s.end);
+}
+
+/** ONE DAY's hours set (its own, or null for the job's usual), the rest of the days untouched. The day
+ *  joins the days when it wasn't one of them. */
+export function setDayHours(segments: DaySegment[], day: string, hours: DayHours | null): DaySegment[] {
+  if (!isYmd(day)) return mergeSegments(segments);
+  return mergeSegments([...(segments ?? []), { start: day, end: day, hours }]);
+}
+
+/** Every day the ranges cover, sorted, at most `cap` of them (a runaway range can't hang a writer). */
+export function segmentDays(segments: DaySegment[], cap = 400): string[] {
+  const days = new Set<string>();
+  for (const s of normalize(segments)) {
+    for (let d = s.start; d <= s.end && days.size < cap; d = addDays(d, 1)) days.add(d);
+    if (days.size >= cap) break;
+  }
+  return [...days].sort();
+}
+
+/** The days alone, merged as dates (hours set aside): the job page's range editor shows a job's days
+ *  as the ranges a person made, not split wherever one day has its own hours. */
+export function datesOnly(segments: DaySegment[]): DaySegment[] {
+  return mergeSegments(clean(segments).map((s) => ({ start: s.start, end: s.end })));
+}
+
+/**
+ * CARRY THE HOURS THROUGH A REWRITE. A writer that was handed ranges with no hours said (the job
+ * page's range editor, Nort's window) gets, for each of their days, the hours that day already had in
+ * `prior` (the segments as they stand), and the job's usual hours (null) for a day that had none.
+ * Ranges that said their hours keep them. Every range that comes back says its hours.
+ */
+export function carryHours(ranges: DaySegment[], prior: DaySegment[]): DaySegment[] {
+  const own = clean(prior).filter((p) => !!p.hours);
+  const out: DaySegment[] = [];
+  for (const r of clean(ranges)) {
+    if (r.hours !== undefined) {
+      out.push(r);
+      continue;
+    }
+    let parts: DaySegment[] = [{ start: r.start, end: r.end, hours: null }];
+    for (const p of own) {
+      if (p.end < r.start || p.start > r.end) continue;
+      parts = overlay(parts, { start: p.start > r.start ? p.start : r.start, end: p.end < r.end ? p.end : r.end, hours: p.hours });
+    }
+    out.push(...parts);
+  }
+  return mergeSegments(out);
 }
 
 /** MOVE: shift the segment covering fromDate (or the earliest/only one when
@@ -53,9 +164,11 @@ export function shiftSegmentCovering(
 }
 
 /** PLACE: union a single day into the existing segments — never drops anything
- *  (a needs-return job keeps its worked-history ranges on the calendar). */
-export function addDaySegment(segments: DaySegment[], dateISO: string): DaySegment[] {
-  return mergeSegments([...(segments ?? []), { start: dateISO, end: dateISO }]);
+ *  (a needs-return job keeps its worked-history ranges on the calendar). `hours` is the day's:
+ *  its own, null for the job's usual hours, or left out (not said). */
+export function addDaySegment(segments: DaySegment[], dateISO: string, hours?: DayHours | null): DaySegment[] {
+  const day: DaySegment = hours === undefined ? { start: dateISO, end: dateISO } : { start: dateISO, end: dateISO, hours };
+  return mergeSegments([...(segments ?? []), day]);
 }
 
 /** EDIT one bound of a range without ever inverting it: the edited bound wins
@@ -98,15 +211,23 @@ export function keepWorkedDays(
   today: string,
 ): { segments: DaySegment[]; kept: string[]; mirror: DaySegment | null } {
   const prior = normalize(before);
-  const next = normalize(after);
+  const next = clean(after);
   const covers = (segs: DaySegment[], d: string) => segs.some((s) => s.start <= d && d <= s.end);
   const kept = [...new Set((worked ?? []).filter(isYmd))]
     .filter((d) => d <= today && covers(prior, d) && !covers(next, d))
     .sort();
   const mirror = next.length
-    ? { start: next[0].start, end: next.reduce((m, s) => (s.end > m ? s.end : m), next[0].end) }
+    ? {
+        start: next.reduce((m, s) => (s.start < m ? s.start : m), next[0].start),
+        end: next.reduce((m, s) => (s.end > m ? s.end : m), next[0].end),
+      }
     : null;
-  return { segments: mergeSegments([...next, ...kept.map((d) => ({ start: d, end: d }))]), kept, mirror };
+  // A kept day keeps the hours it ran (its range's, as it stood).
+  const keptDays = kept.map((d) => {
+    const h = hoursOnDay(prior, d);
+    return h === undefined ? { start: d, end: d } : { start: d, end: d, hours: h };
+  });
+  return { segments: mergeSegments([...next, ...keptDays]), kept, mirror };
 }
 
 /** MOVE, KEEPING THE PAST. The move verbs' version of shiftSegmentCovering: the range covering
@@ -148,7 +269,8 @@ export function moveKeepingWorkedDays(
   const rangeDays = daysOf(seg);
   const workedInRange = workedIn(seg);
   const remaining = Math.max(1, rangeDays - workedInRange);
-  const moved = { start: toDate, end: addDays(toDate, remaining - 1) };
+  // A MOVE KEEPS THE BLOCK: the range lands with the hours it had (its own, or the usual).
+  const moved = withHours(seg, toDate, addDays(toDate, remaining - 1));
   const after = mergeSegments([...sorted.filter((_, i) => i !== idx), moved]);
   return { ...keepWorkedDays(sorted, after, [...workedSet], today), moved, rangeDays, workedInRange };
 }

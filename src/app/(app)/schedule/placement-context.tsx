@@ -9,6 +9,7 @@ import { groupByTown, spreadTimes, type Placeable } from "@/lib/schedule/place-b
 import { workKind } from "@/lib/schedule/work-shape";
 import { dayLabelFrom, placeMessage } from "@/lib/schedule/placement-plan";
 import { halves } from "@/lib/schedule/fit-day";
+import { DEFAULT_JOB_MINUTES } from "@/lib/schedule/job-block";
 
 /**
  * WHAT IS PICKED, SHARED BY THE RAIL AND THE CALENDAR.
@@ -170,10 +171,15 @@ export function PlacementProvider({
         const planned = await planDayTimes(
           dateISO,
           visits.map((v) => ({
-            minutes: v.planned_minutes ?? null,
+            // An unsized JOB is fitted at the length it will land with (two hours, the default in
+            // lib/schedule/job-block), so the next thing on the day starts where it really ends.
+            minutes: v.planned_minutes ?? (v.kind === "job" ? DEFAULT_JOB_MINUTES : null),
             pinned: workKind(v) === "call",
           })),
           firstAt,
+          // The jobs being placed are never in their own way: not their current block, not their own
+          // visit (which the calendar hides behind the job, so a push by it looked like a jump).
+          { jobIds: jobs.map((j) => j.id) },
         ).catch(() => ({ ok: false as const, times: [] as string[] }));
 
         // FALL BACK, NEVER FAIL. If the day couldn't be read, place at the old fixed spread rather
@@ -189,7 +195,7 @@ export function PlacementProvider({
         // an offline queue for exactly that — and a dropped request rejects rather than returning
         // ok:false, which would take the whole Promise.all down and skip every line below,
         // including the toast written to explain what happened.
-        const jobResults = await Promise.all(
+        const jobResults: { ok: boolean; defaulted?: boolean }[] = await Promise.all(
           // The half he chose, honoured. placeJobOnDay took no time at all, so a floater — which by
           // definition carries no prior time — fell through to the org's all-day window and landed
           // at 8am while both the rail and the armed strip said "afternoon".
@@ -200,6 +206,8 @@ export function PlacementProvider({
           ),
         );
         const jobsFailed = jobResults.filter((r) => !r.ok).length;
+        // Nobody gave these a length: they went down as two hours, and the toast says so.
+        const jobsDefaulted = jobResults.filter((r) => r.ok && r.defaulted).length;
 
         const apptResults = await Promise.all(
           appts.map((a, i) =>
@@ -243,6 +251,7 @@ export function PlacementProvider({
           // own table layout.
           jobsPlaced: jobs.length - jobsFailed + (appts.length - apptsFailed),
           jobsFailed: jobsFailed + apptsFailed,
+          jobsDefaulted,
           dayLabel: dayLabelFrom(dateISO, todayISO),
         });
         toast(msg.text, msg.tone);

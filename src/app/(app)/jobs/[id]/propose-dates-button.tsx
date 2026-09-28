@@ -20,15 +20,18 @@ const fmt = (s: Slot | string) => {
   return `${dl} · ${tl}`;
 };
 
-function defaultSlots(): Slot[] {
-  // Next three weekdays at 8 AM, starting tomorrow.
+/** The next three weekdays, starting tomorrow, at the company's work-day start (Settings): the time a
+ *  customer's pick lands at unless the office changes it (0370). Never a fixed 8 AM: a 9-to-5 company
+ *  offered 8:00 and got a job an hour before its day began. */
+export function defaultSlots(dayStart: string): Slot[] {
+  const time = /^\d{2}:\d{2}$/.test(dayStart) ? dayStart : "08:00";
   const out: Slot[] = [];
   const d = new Date();
   const p = (n: number) => String(n).padStart(2, "0");
   while (out.length < 3) {
     d.setDate(d.getDate() + 1);
     if (d.getDay() !== 0 && d.getDay() !== 6)
-      out.push({ date: `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`, time: "08:00" });
+      out.push({ date: `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`, time });
   }
   return out;
 }
@@ -42,16 +45,19 @@ export function ProposeDatesButton({
   jobId,
   customerPhone,
   pending: pendingProposal,
+  dayStart = "08:00",
 }: {
   jobId: string;
   customerPhone?: string | null;
   pending?: { id: string; token: string; dates: (string | Slot)[] } | null;
+  /** The company's work-day start ("HH:MM", Settings): each offered date's time until changed. */
+  dayStart?: string;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [busy, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  const [slots, setSlots] = useState<Slot[]>(defaultSlots());
+  const [slots, setSlots] = useState<Slot[]>(() => defaultSlots(dayStart));
   const [timeNote, setTimeNote] = useState("");
   const [token, setToken] = useState<string | null>(pendingProposal?.token ?? null);
   const [copied, setCopied] = useState(false);

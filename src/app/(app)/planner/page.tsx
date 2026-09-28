@@ -35,10 +35,19 @@ import { reportError } from "@/lib/observe";
 import { featureOn, offFeatureKey } from "@/lib/features";
 import { FeatureOffLine } from "@/components/feature-off-line";
 import { buyMaterials } from "@/lib/materials-checklist";
+import { workDayWindowHm } from "@/lib/org-settings";
+import { tzDateTimeUtc } from "@/lib/tz";
+import { hmWords, jobDayBlock, workDayMinutes } from "@/lib/schedule/job-block";
+import { minutesToHm } from "@/lib/schedule/fit-day";
+import { crewChips, placeLine, streetOf, townOf, visitPlace, type CrewChip } from "@/lib/schedule/block-info";
+import { ownHoursByJobDay, segmentCols, withDayHours, type SegmentRow } from "@/lib/schedule/segment-hours";
+import type { DayHours } from "@/lib/schedule-math";
+import { CrewInitials } from "@/components/crew-initials";
 
 export const dynamic = "force-dynamic";
 
-const fmtTime = (iso: string) => formatTime(iso);
+/** A job as an agenda row reads it: its block (start, end, size), its crew, where it is. */
+const AGENDA_JOB_COLS = "id, job_number, name, status, address, city, scheduled_start, scheduled_end, planned_minutes, assigned_to";
 
 export default async function PlannerPage({ searchParams }: { searchParams: Promise<{ view?: string; week?: string }> }) {
   const { view: viewRaw, week: weekRaw } = await searchParams;
@@ -74,10 +83,18 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
     { data: jobs }, { data: segJobs }, { data: appts }, { data: openRows },
     { data: customers }, { data: staff }, { data: jobOptRows }, { data: me },
   ] = await Promise.all([
-    supabase.from("jobs").select("id, job_number, name, status, address, scheduled_start, customers(name, phone)").gte("scheduled_start", dayStart.toISOString()).lt("scheduled_start", dayEnd.toISOString()).order("scheduled_start"),
-    // Multi-range jobs whose segment covers today.
-    supabase.from("job_schedule_segments").select("job_id, jobs(id, job_number, name, status, address, customers(name, phone))").lte("start_date", todayStr).gte("end_date", todayStr),
-    supabase.from("appointments").select("id, type, title, starts_at, ends_at, location, notes, status, job_id, customer_id, assigned_to, jobs(address), customers(phone), inquiries(phone)").gte("starts_at", dayStart.toISOString()).lt("starts_at", dayEnd.toISOString()).not("status", "in", "(cancelled,completed)").eq("absorbed", false).order("starts_at"),
+    // The block's end, its size and its crew and town ride along: every agenda row says where, when
+    // (start to end) and who (lib/schedule/block-info), for the crew as for the office. No money.
+    supabase.from("jobs").select(`${AGENDA_JOB_COLS}, customers(name, phone)`).gte("scheduled_start", dayStart.toISOString()).lt("scheduled_start", dayEnd.toISOString()).order("scheduled_start"),
+    // Multi-range jobs whose segment covers today, with today's own hours (0370; without them before).
+    withDayHours((h) =>
+      supabase
+        .from("job_schedule_segments")
+        .select(`${segmentCols("job_id, start_date, end_date", h)}, jobs(${AGENDA_JOB_COLS}, customers(name, phone))`)
+        .lte("start_date", todayStr)
+        .gte("end_date", todayStr),
+    ),
+    supabase.from("appointments").select("id, type, title, starts_at, ends_at, location, notes, status, job_id, customer_id, assigned_to, jobs(address), customers(name, phone), inquiries(phone), profiles!appointments_assigned_to_fkey(full_name)").gte("starts_at", dayStart.toISOString()).lt("starts_at", dayEnd.toISOString()).not("status", "in", "(cancelled,completed)").eq("absorbed", false).order("starts_at"),
     // The open entry, regardless of when it started (overnight shift, etc.). The job
     // on THIS entry is the Now card's job — scoped to the caller, not the org's latest
     // in_progress job (which could be a coworker's site across town).
@@ -120,7 +137,17 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
     const j = s.jobs;
     if (j && !jobMap.has(j.id)) jobMap.set(j.id, { ...j, time: null });
   }
-  const todayJobs = [...jobMap.values()];
+  /* TODAY'S BLOCK FOR EACH JOB, as the calendar draws it (lib/schedule/job-block jobDayBlock): its own
+     hours today when the day keeps them (0370), else the job's usual hours. A day with its own hours
+     is timed at them; otherwise the row keeps the time it always had (the job's start, or none for a
+     day in the middle of a run). */
+  const workDay = workDayWindowHm((orgRow as any)?.settings);
+  const wd = workDayMinutes(workDay);
+  const ownToday = ownHoursByJobDay(((segJobs ?? []) as unknown as SegmentRow[]));
+  const todayJobs = [...jobMap.values()].map((j: any) => {
+    const own = ownToday.get(j.id)?.get(todayStr) ?? null;
+    return { ...j, time: own ? tzDateTimeUtc(todayStr, own.start, tz) : j.time };
+  });
 
   const uid = user?.id ?? "";
   // MY REMINDERS (0358): a task with no job, that is for me, or that I made for nobody else. The
@@ -368,6 +395,40 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
   const staffOpts = toStaffOptions(staff);
   const people = (staff ?? []).map((s: any) => ({ id: s.id, full_name: s.full_name }));
 
+  /** A job's row on `day`: where (the street, or who when the name is the street; the town small),
+   *  that day's block start to end as the calendar draws it (its own hours when it keeps them), and the
+   *  crew as initials. The same words the job's block on the schedule says (lib/schedule/block-info). */
+  const jobRowInfo = (j: any, day: string, own: DayHours | null) => {
+    const b = jobDayBlock({
+      day,
+      scheduledStart: j.scheduled_start ?? null,
+      scheduledEnd: j.scheduled_end ?? null,
+      plannedMinutes: j.planned_minutes ?? null,
+      tz,
+      wd,
+      dayHours: own,
+    });
+    return {
+      place: placeLine({ name: j.name, street: j.address, customer: j.customers?.name })?.text ?? null,
+      town: (j.city as string | null) ?? null,
+      span: b.allDay ? "All day" : `${hmWords(minutesToHm(b.startMin))} – ${hmWords(minutesToHm(b.endMin))}`,
+      crew: crewChips(j.assigned_to, people),
+    };
+  };
+  /** A visit's row: its street (its job's, with no place of its own), who, start to end (an hour when
+   *  it has no end, the calendar's rule), and the one person going (a dashed Nobody). */
+  const visitRowInfo = (a: any) => {
+    const endsAt = a.ends_at && new Date(a.ends_at).getTime() > new Date(a.starts_at).getTime()
+      ? a.ends_at
+      : new Date(new Date(a.starts_at).getTime() + 3_600_000).toISOString();
+    return {
+      place: placeLine({ name: a.title, street: streetOf(visitPlace(a)), customer: a.customers?.name })?.text ?? null,
+      town: townOf(visitPlace(a)) || null,
+      span: `${formatTime(a.starts_at, tz)} – ${formatTime(endsAt, tz)}`,
+      crew: a.assigned_to ? crewChips([a.assigned_to], [...people, { id: a.assigned_to, full_name: a.profiles?.full_name ?? null }]) : [],
+    };
+  };
+
   const niceDay = prettyDay(todayStr);
   const empty = (label: string) => <p className="px-5 py-6 text-center text-sm text-slate-400">{label}</p>;
 
@@ -398,6 +459,12 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
     jobId?: string;
     /** The person waiting — powers the running-late one-tap text on the NEXT visit. */
     phone?: string | null;
+    /** WHERE AND WHO (lib/schedule/block-info), the same words the job's block on the calendar says:
+     *  the street (or who, when the name is the street), the town small, start to end, the crew. */
+    place?: string | null;
+    town?: string | null;
+    span?: string | null;
+    crew?: CrewChip[] | null;
   };
   const agenda: Agenda[] = [
     ...todayJobs
@@ -413,6 +480,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
         status: j.status,
         jobId: j.id as string,
         phone: j.customers?.phone ?? null,
+        ...jobRowInfo(j, todayStr, ownToday.get(j.id)?.get(todayStr) ?? null),
       })),
     ...(appts ?? []).map((a: any) => ({
       key: `a-${a.id}`,
@@ -420,6 +488,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
       time: a.starts_at,
       title: a.title,
       sub: a.location ?? null,
+      ...visitRowInfo(a),
       // Fall back to the linked job's address so the Navigate button appears on a
       // job appointment that has no explicit location (bug: NAV missing on appts).
       address: a.location ?? a.jobs?.address ?? null,
@@ -498,13 +567,13 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
     const [{ data: wJobs }, { data: wAppts }, { data: wSegs }] = await Promise.all([
       supabase
         .from("jobs")
-        .select("id, job_number, name, status, address, scheduled_start, customers(name)")
+        .select(`${AGENDA_JOB_COLS}, customers(name)`)
         .gte("scheduled_start", weekStartUtc.toISOString())
         .lt("scheduled_start", weekEndUtc.toISOString())
         .order("scheduled_start"),
       supabase
         .from("appointments")
-        .select("id, type, title, starts_at, location, job_id, status")
+        .select("id, type, title, starts_at, ends_at, location, job_id, status, assigned_to, jobs(address), customers(name), profiles!appointments_assigned_to_fkey(full_name)")
         .gte("starts_at", weekStartUtc.toISOString())
         .lt("starts_at", weekEndUtc.toISOString())
         // audit v921 (+ review): the day view hides a COMPLETED visit because "today" is always
@@ -518,12 +587,16 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
       // Multi-range jobs whose segment overlaps this week — so a Mon–Thu job shows on
       // every covered day (the day view does this too; without it the week view put
       // such jobs on their start day only).
-      supabase
-        .from("job_schedule_segments")
-        .select("start_date, end_date, jobs(id, job_number, name, status, address, customers(name))")
-        .lte("start_date", weekEndStr)
-        .gte("end_date", weekStartStr),
+      // Each day's own hours ride along (0370; without them before the migration).
+      withDayHours((h) =>
+        supabase
+          .from("job_schedule_segments")
+          .select(`${segmentCols("job_id, start_date, end_date", h)}, jobs(${AGENDA_JOB_COLS}, customers(name))`)
+          .lte("start_date", weekEndStr)
+          .gte("end_date", weekStartStr),
+      ),
     ]);
+    const ownWeek = ownHoursByJobDay((wSegs ?? []) as unknown as SegmentRow[]);
     const timedWeek: Agenda[] = [
       ...((wJobs ?? []) as any[]).map((j) => ({
         key: `wj-${j.id}`,
@@ -535,6 +608,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
         address: directionsTarget(j.address, j.name) || null,
         href: `/jobs/${j.id}`,
         status: j.status,
+        ...jobRowInfo(j, todayStrInTz(tz, new Date(j.scheduled_start)), null),
       })),
       ...((wAppts ?? []) as any[]).map((a) => ({
         key: `wa-${a.id}`,
@@ -543,6 +617,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
         title: a.title,
         sub: a.location ?? null,
         address: a.location ?? null,
+        ...visitRowInfo(a),
         // ALWAYS the appointment. This used to fall back to the schedule grid when there was no
       // job — but a pre-sale inspection has no job by design (verified in prod: ET 1 of 8,
       // Tahoe Deck 0 of 20), so the fallback fired almost every time and tapping today's
@@ -577,16 +652,19 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
         if (!j || s.start_date > dayStr || s.end_date < dayStr) continue;
         if (placedJobIds.has(j.id)) continue;
         placedJobIds.add(j.id);
+        // That day's block (its own hours when it keeps them), and timed at them when it does.
+        const own = ownWeek.get(j.id)?.get(dayStr) ?? null;
         items.push({
           key: `ws-${j.id}-${dayStr}`,
           kind: "job",
           jobId: j.id,
-          time: null,
+          time: own ? tzDateTimeUtc(dayStr, own.start, tz) : null,
           title: jobLabel(j),
           sub: [j.customers?.name, j.address].filter(Boolean).join(" · ") || null,
           address: directionsTarget(j.address, j.name) || null,
           href: `/jobs/${j.id}`,
           status: j.status,
+          ...jobRowInfo(j, dayStr, own),
         });
       }
       weekDayGroups.push({ dayStr, label: prettyDay(dayStr), items });
@@ -601,13 +679,15 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
   // `day` is the ROW's own day (org tz): today in the day view, that day in the week view. A job's
   // Move moves the range that day sits in (moveJobDay's fromDate), so Thursday's row of a Mon-Tue +
   // Thu-Fri job moves Thu-Fri, never Mon-Tue.
+  const fmtTime = (iso: string) => formatTime(iso, tz); // the company's clock, never the server's
   const agendaRows = (items: Agenda[], day: string) =>
     items.map((i) => (
       <li key={i.key} className="flex items-center gap-3 px-5 py-3">
         <div className="w-14 shrink-0 text-sm font-medium text-slate-700">{i.time ? fmtTime(i.time) : "—"}</div>
         {/* 44px to the thumb (py-1 over the row's own padding), the row's height unchanged. The
             title has its own line, so the verbs on the right can never squeeze it to nothing at
-            375px; the kind badge sits with the where. */}
+            375px; the kind badge sits with the where. Under it, the block's own words (the same the
+            schedule's block says): start to end, and who's on it as initials. No money. */}
         <Link href={i.href} className="-my-1 min-w-0 flex-1 py-1 hover:opacity-80">
           <div className="truncate text-sm font-medium text-slate-900">{i.title}</div>
           <div className="mt-0.5 flex min-w-0 items-center gap-1.5">
@@ -629,8 +709,21 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
                 {jobStatusLabel(i.status)}
               </Badge>
             ) : null}
-            {i.sub && <span className="min-w-0 truncate text-xs text-slate-400">{i.sub}</span>}
+            {/* WHERE: the street number and name (never the city or the zip), or who when the name
+                already is the street; the town small. */}
+            {i.place ? (
+              <span className="min-w-0 truncate text-xs text-slate-500">{i.place}</span>
+            ) : i.sub && !i.span ? (
+              <span className="min-w-0 truncate text-xs text-slate-400">{i.sub}</span>
+            ) : null}
+            {i.town && <span className="shrink-0 text-[11px] text-slate-400">· {i.town}</span>}
           </div>
+          {(i.span || i.crew) && (
+            <div className="mt-1 flex min-w-0 items-center gap-2">
+              {i.span && <span className="min-w-0 truncate text-xs tabular-nums text-slate-600">{i.span}</span>}
+              {i.crew && <CrewInitials crew={i.crew} />}
+            </div>
+          )}
         </Link>
         {/* WRAP, don't cover. Andrew (mobile): "the Navigate field/button covers up the other
             items on the Today view." A shrink-0 no-wrap cluster of up to four 44px buttons ate the

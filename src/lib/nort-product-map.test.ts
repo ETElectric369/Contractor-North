@@ -121,4 +121,20 @@ describe("Nort's product map after the shell wave", () => {
     // The old money words are gone from Nort's map.
     expect(NORT_PRODUCT_MAP).not.toMatch(/Business Costs|Left For You|Net Profit \(before income tax\)/);
   });
+
+  it("names the Schedule's doors by the words on them: Add To Schedule, This Day, Offer Dates", () => {
+    const line = NORT_PRODUCT_MAP.split("\n").find((l) => l.startsWith("- Schedule (/schedule)"))!;
+    for (const part of ["Add To Schedule", "This Day", "Offer Dates", "Nobody", "two hours"]) expect(line, part).toContain(part);
+    // True in code: the open spots and the day view's button say Add To Schedule, the sheet saves
+    // with it, the block's sheet says This Day, the chips say Nobody, and a pick with no length
+    // gets two hours (0370's job_takes_picked_day: 120 minutes).
+    const src = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+    expect(src("src/components/time-grid.tsx")).toContain('addLabel = "Add To Schedule"');
+    expect(src("src/app/(app)/calendar/calendar-view.tsx")).toMatch(/<Plus className="h-4 w-4" \/> Add To Schedule/);
+    expect(src("src/app/(app)/schedule/add-to-schedule-sheet.tsx")).toContain('saveLabel="Add To Schedule"');
+    expect(src("src/app/(app)/schedule/tile-sheet.tsx")).toContain("This Day, {dayWords(day)}");
+    expect(src("src/components/crew-initials.tsx")).toContain("Nobody");
+    expect(src("src/app/(app)/jobs/[id]/propose-dates-button.tsx")).toContain('"Offer Dates"');
+    expect(src("supabase/migrations/0370_each_day_keeps_its_own_hours.sql")).toMatch(/\+ 120\b/);
+  });
 });

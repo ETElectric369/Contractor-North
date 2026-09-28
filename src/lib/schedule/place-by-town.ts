@@ -77,6 +77,12 @@ export type Placeable = {
   /** A LEAD's own work_kind (0230), chosen on the lead where the caller already knew. Preferred
    *  over any inference: what he told the app beats what the app worked out. */
   workKind?: string | null;
+  /** WHO, for a job or a visit: the customer's name. The card's place line is the street, or this
+   *  when the name already is the street (lib/schedule/block-info placeLine). */
+  customer?: string | null;
+  /** Who's on it, as initials chips: a job's crew, a visit's one person ([] = a dashed Nobody).
+   *  Absent (a lead): no crew line. */
+  crew?: { id: string; initials: string; name: string }[] | null;
 };
 
 export type TownGroup = {

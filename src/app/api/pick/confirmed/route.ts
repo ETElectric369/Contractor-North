@@ -40,7 +40,7 @@ export async function POST(req: Request) {
   if (!prop || prop.status !== "confirmed" || prop.boss_notified_at) return NextResponse.json({ ok: true });
   // audit v921: this used to gate on `chosen_at` being minutes old, but the RPC writes chosen_at =
   // the chosen SLOT'S START instant (0222), never now() — so a same-day pick (a date-only job option
-  // defaults to 08:00, an appointment slot picked half an hour into its window) was already "stale"
+  // starts at the work day's start since 0370, an appointment slot picked half an hour into its window) was already "stale"
   // and the most time-critical pick was the silent one. The boss_notified_at CAS latch below is what
   // bounds replays; expiry is the only staleness that matters here — an expired proposal can't be
   // picked at all, so a long-dead row resurfacing still says nothing.
