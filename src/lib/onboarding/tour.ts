@@ -503,14 +503,14 @@ export const LESSONS: Lesson[] = [
     // Plus names no customer and no task (lane 3 takes those rows off it this release); the bell
     // is the record of every notice, not "what's waiting on you" (that is Needs You, on My Day).
     say:
-      "Plus is where new work starts — a job, an appointment, an invoice — from any screen. " +
+      "Plus is where new work starts — a job, an appointment, an invoice, or a paper to snap — from any screen. " +
       "Search Or Ask finds your jobs, customers, estimates, invoices and appointments by name or " +
       "number, and you can ask me anything there. " +
       "And the bell keeps your notices, whether or not you switch on phone notifications.",
     plain: {
       title: "Plus, Search, the bell",
       say:
-        "Plus is where new work starts — a job, an appointment, an invoice — from any screen. " +
+        "Plus is where new work starts — a job, an appointment, an invoice, or a paper to snap — from any screen. " +
         "Search finds your jobs, customers, estimates, invoices and appointments by name or number. " +
         "And the bell keeps your notices, whether or not you switch on phone notifications.",
     },
@@ -700,7 +700,8 @@ export const LESSONS: Lesson[] = [
           "already agreed to. If there isn't one, it's every person's hours at the right rate plus "
         : "every person's hours at the right rate plus ") +
       "every receipt with your markup on. It lands as a draft, and nothing reaches your customer " +
-      "unless you tick the box that sends it.",
+      "unless you tick the box that sends it. On the invoice itself a draft has one button, Send " +
+      "with its total on it, then Email It or Text It.",
     plain: {
       say: (c) =>
         "Job's done. Press Finish Job and the invoice is already written — " +
@@ -710,7 +711,8 @@ export const LESSONS: Lesson[] = [
             "already agreed to. If there isn't one, it's every person's hours at the right rate plus "
           : "every person's hours at the right rate plus ") +
         "every receipt with your markup on. It lands as a draft, and nothing reaches your customer " +
-        "unless you tick the box that sends it.",
+        "unless you tick the box that sends it. On the invoice itself a draft has one button, Send " +
+        "with its total on it, then Email It or Text It.",
     },
   },
   // HIS "everybody wins", stated as something he can CHECK rather than handed back as a slogan.
