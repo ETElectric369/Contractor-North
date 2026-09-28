@@ -101,8 +101,11 @@ describe("what the typed sheet hands addStockPurchase", () => {
     const saveStock = src.slice(src.indexOf("function saveStock("), src.indexOf("return (", src.indexOf("function saveStock(")));
     expect(saveStock).toContain('label: "Undo"');
     expect(saveStock).toContain('void deleteBill(id, "")');
-    // Nothing typed is thrown away unless he chooses it.
-    expect(src).toContain('if (dirty && !window.confirm("Open Snap Or Note? What you typed here won\'t be saved.")) return;');
+    // Nothing typed is thrown away unless he chooses it; with nothing typed, the door just opens.
+    const door = src.slice(src.indexOf("function openTheTicketDoor("), src.indexOf("function save("));
+    expect(door).toContain("const typed = amount > 0 || !!where.trim() || !!billNumber.trim() || !!stockItem || !!stockName.trim() || stockPieces > 0 || !!stockUnit.trim();");
+    expect(door).toContain('if (typed && !window.confirm("Open Snap Or Note? What you typed here won\'t be saved.")) return;');
+    expect(door.indexOf("window.confirm")).toBeLessThan(door.indexOf("openSnapOrNote()"));
   });
 });
 

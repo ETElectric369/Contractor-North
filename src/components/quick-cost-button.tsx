@@ -1038,9 +1038,11 @@ function TypeItInButton({
     if (next !== BUSINESS) setBucket(null);
   }
 
-  /** Open Snap Or Note for a ticket in hand. Anything typed here is left behind only when he says so. */
+  /** Open Snap Or Note for a ticket in hand. Anything typed here is left behind only when he says so
+   *  (picking Shop Stock itself is not something typed: with nothing else filled in, it just opens). */
   function openTheTicketDoor() {
-    if (dirty && !window.confirm("Open Snap Or Note? What you typed here won't be saved.")) return;
+    const typed = amount > 0 || !!where.trim() || !!billNumber.trim() || !!stockItem || !!stockName.trim() || stockPieces > 0 || !!stockUnit.trim();
+    if (typed && !window.confirm("Open Snap Or Note? What you typed here won't be saved.")) return;
     close();
     openSnapOrNote();
   }
