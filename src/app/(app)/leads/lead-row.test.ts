@@ -238,7 +238,7 @@ describe("E. residential or commercial is worked out, never asked", () => {
 
   it("updateInquiry never demotes an Industrial lead", () => {
     const upd = src.slice(src.indexOf("export async function updateInquiry("), src.indexOf("export async function markInquiryContacted("));
-    expect(upd).toMatch(/\.update\(\{ type: [^}]*\}\)\s*\.eq\("id", id\)\s*\.neq\("type", "industrial"\)\s*\.select\("id"\)/);
+    expect(upd).toMatch(/\.update\(\{ type: [^}]*\}\)\s*\.eq\("id", id\)\s*\.or\("type\.is\.null,type\.neq\.industrial"\)\s*\.select\("id"\)/);
   });
 });
 

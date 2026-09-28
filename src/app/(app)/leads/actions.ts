@@ -227,13 +227,14 @@ export async function updateInquiry(id: string, formData: FormData): Promise<Res
 
   // THE TYPE FOLLOWS THE COMPANY BOX (inferredLeadType), written apart and only where the stored type
   // isn't Industrial, so an edit never demotes an Industrial lead to Commercial. Zero rows here is
-  // that rule holding, not a failed save: the edit itself landed above.
+  // that rule holding, not a failed save: the edit itself landed above. (A type with no value yet is
+  // not Industrial: `neq` alone would skip it, since NULL <> 'industrial' is not true.)
   const sentType = String(formData.get("type") ?? "").trim();
   const { error: typeErr } = await supabase
     .from("inquiries")
     .update({ type: LEAD_TYPES.includes(sentType) ? sentType : inferredLeadType(fields.company_name) })
     .eq("id", id)
-    .neq("type", "industrial")
+    .or("type.is.null,type.neq.industrial")
     .select("id");
   if (typeErr) return { ok: false, error: `The lead saved, but its residential or commercial type didn't: ${dbError(typeErr)}` };
 
