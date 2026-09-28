@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { CAL_WINDOW_BACK_DAYS, CAL_WINDOW_FWD_DAYS, segmentJobsNotLoaded } from "@/lib/schedule/cal-window";
 import { segmentCols, withDayHours } from "@/lib/schedule/segment-hours";
+import type { AddableJob } from "./add-to-schedule-sheet";
 import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 import { getOrgSettings, workDayWindowHm } from "@/lib/org-settings";
 import { featureOn } from "@/lib/features";
@@ -30,7 +31,7 @@ export async function CalendarPanel({ canEdit = false }: { canEdit?: boolean } =
 
   // `address` (the street) rides along: every block says where (lib/schedule/block-info).
   const JOB_COLS = "id, job_number, name, status, scheduled_start, scheduled_end, planned_minutes, assigned_to, address, city, customers(name)";
-  const [{ data: listedJobs }, { data: segments, perDayHours }, { data: appointments }, { data: tasks }, { data: unschedRows }, { data: externalRows }, picker, { data: org }] =
+  const [{ data: listedJobs }, { data: segments, perDayHours }, { data: appointments }, { data: tasks }, { data: unschedRows }, { data: externalRows }, picker, { data: org }, { data: addableRows }] =
     await Promise.all([
       // Overlap test, not a point test on scheduled_start: a job shows if it
       // STARTS before the window end AND (ends after the window start, or is an
@@ -102,6 +103,18 @@ export async function CalendarPanel({ canEdit = false }: { canEdit?: boolean } =
       // Org settings: the configured work-day start is the "all-day job" time
       // sentinel the week agenda uses to decide whether to render a start time.
       supabase.from("organizations").select("settings").limit(1).maybeSingle(),
+      /* ADD TO SCHEDULE's job list (the office only): every job still in flight (to be scheduled,
+         scheduled, in progress, on hold), the most recently worked first, with its street, who, its
+         size (the length it starts with) and its crew. No money. */
+      canEdit
+        ? supabase
+            .from("jobs")
+            .select("id, job_number, name, status, address, city, planned_minutes, assigned_to, customers(name)")
+            .in("status", ACTIVE_JOB_STATUSES)
+            .order("updated_at", { ascending: false, nullsFirst: false })
+            .order("created_at", { ascending: false })
+            .limit(300)
+        : Promise.resolve({ data: [] as unknown[] }),
     ]);
 
   /* HISTORY DRAWS TOO. A job whose date was cleared keeps its worked days as segments with no listed
@@ -146,6 +159,8 @@ export async function CalendarPanel({ canEdit = false }: { canEdit?: boolean } =
         canEdit={canEdit}
         // A day can keep its own hours (0370 applied): the tile's time is This Day's.
         perDayHours={perDayHours}
+        // Add To Schedule: an open spot (or a day's "+") opens the sheet with these jobs.
+        addableJobs={(addableRows ?? []) as unknown as AddableJob[]}
       />
     </div>
   );

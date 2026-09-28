@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CalendarClock, CalendarSync, Briefcase, ClipboardList, ListTodo, MapPin, Users, Columns3 } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CalendarClock, CalendarSync, Briefcase, ClipboardList, ListTodo, MapPin, Plus, Users, Columns3 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SegmentedControl } from "@/components/ui/segmented";
 import { Card } from "@/components/ui/card";
@@ -15,6 +15,7 @@ import { jobDayBlock } from "@/lib/schedule/job-block";
 import { crewChips, placeLine, spanShort, streetOf, townOf } from "@/lib/schedule/block-info";
 import { ownHoursByJobDay } from "@/lib/schedule/segment-hours";
 import { ScheduleTileSheet, type TileTarget } from "../schedule/tile-sheet";
+import { AddToScheduleSheet, type AddAt, type AddableJob } from "../schedule/add-to-schedule-sheet";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/components/toast";
 import { MoveToDay } from "@/components/move-to-day";
@@ -253,6 +254,7 @@ export function CalendarView({
   crewBoard = true,
   canEdit = false,
   perDayHours = false,
+  addableJobs = [],
 }: {
   jobs: CalJob[];
   segments?: CalSegment[];
@@ -282,6 +284,8 @@ export function CalendarView({
   canEdit?: boolean;
   /** 0370 is applied: a day can keep its own hours, so the tile's time edit is This Day's. */
   perDayHours?: boolean;
+  /** The office's Add To Schedule list: every job still in flight (schedule/add-to-schedule-sheet). */
+  addableJobs?: AddableJob[];
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -389,6 +393,12 @@ export function CalendarView({
      up in the loaded jobs and visits at render, so the refresh after a save shows the sheet what was
      saved, and a job whose date was cleared simply leaves (and the sheet with it). */
   const [sheet, setSheet] = useState<{ kind: "job" | "visit"; id: string; day: string } | null>(null);
+
+  /* ADD TO SCHEDULE (Erik: "theres no way to add to the schedule from the schedule page unless its
+     already scripted"): an open spot tapped on a day, or the day's "+", opens the sheet at that day and
+     half hour (schedule/add-to-schedule-sheet). The office only. */
+  const [adding, setAdding] = useState<AddAt | null>(null);
+  const onSlotTap = useCallback((day: string, minute: number | null) => setAdding({ day, minute }), []);
 
   /* EACH DAY'S OWN HOURS (0370), by job and day: the grid draws a day by them, the day drill reads
      them, and the tile's time is that day's. Empty before 0370 (every day is the job's usual hours). */
@@ -1111,6 +1121,7 @@ export function CalendarView({
                   onDayClick={(ds) => nav("day", ds, { push: true })}
                   placement={target.prop}
                   onEventTap={canEdit ? onEventTap : undefined}
+                  onSlotTap={canEdit && !target.armed ? onSlotTap : undefined}
                 />
               </Card>
             );
@@ -1119,6 +1130,17 @@ export function CalendarView({
       )}
       {view === "day" && (
         <>
+          {/* ADD TO SCHEDULE ON THIS DAY: any job, at the work day's start (or tap an open time on the
+              grid below for that time). Here even on an empty day, where there is no grid to tap. */}
+          {canEdit && !target.armed && (
+            <button
+              type="button"
+              onClick={() => onSlotTap(anchorK, null)}
+              className="inline-flex min-h-11 w-full items-center justify-center gap-1.5 rounded-xl border-2 border-dashed border-brand/40 bg-white px-4 text-sm font-semibold text-brand hover:bg-brand-light/40"
+            >
+              <Plus className="h-4 w-4" /> Add To Schedule
+            </button>
+          )}
           {(dayGrid.events.length > 0 || dayGrid.allDay.length > 0) && (
             <Card className="overflow-hidden">
               <TimeGrid
@@ -1137,6 +1159,7 @@ export function CalendarView({
                 initialNow={gridNow}
                 placement={target.prop}
                 onEventTap={canEdit ? onEventTap : undefined}
+                onSlotTap={canEdit && !target.armed ? onSlotTap : undefined}
               />
             </Card>
           )}
@@ -1176,6 +1199,17 @@ export function CalendarView({
           team={members}
           canEdit={canEdit}
           perDayHours={perDayHours}
+        />
+      )}
+
+      {/* ADD TO SCHEDULE — any job onto the day (and half hour) tapped (the office only). */}
+      {canEdit && (
+        <AddToScheduleSheet
+          at={adding}
+          jobs={addableJobs}
+          team={members}
+          workDay={{ start: workDayStart, end: workDayEnd }}
+          onClose={() => setAdding(null)}
         />
       )}
 

@@ -48,6 +48,7 @@ export function BlockTimeControls({
   plannedMinutes,
   onPending,
   onRefusal,
+  draft = false,
 }: {
   startHm: string;
   endHm: string;
@@ -71,6 +72,9 @@ export function BlockTimeControls({
   /** Every refusal in words (null when a new try starts): a sheet closed before the words were read
    *  says them in a toast. */
   onRefusal?: (words: string | null) => void;
+  /** A form's draft (Add To Schedule): `save` only sets the form's hours and the form's own button
+   *  writes, so nothing here says Saving… or Saved. */
+  draft?: boolean;
 }) {
   const [pending, start] = useTransition();
   const [start_, setStart] = useState(startHm);
@@ -249,8 +253,8 @@ export function BlockTimeControls({
         {multiDay
           ? `Starts ${hmWords(start_)} · full days${lastDayWords ? ` through ${lastDayWords}` : ""}. Change the days above.`
           : `${hmWords(start_)} – ${hmWords(end)} · ${words}`}
-        {pending && <span className="ml-2 text-slate-400">Saving…</span>}
-        {saved && !pending && (
+        {pending && !draft && <span className="ml-2 text-slate-400">Saving…</span>}
+        {saved && !pending && !draft && (
           <span className="ml-2 inline-flex items-center gap-1 font-medium text-green-600">
             <Check className="h-3.5 w-3.5" /> Saved
           </span>
