@@ -999,9 +999,10 @@ export async function setJobDayTimes(
  * hours, said: `defaulted`), `crew` the people put on and taken off in the sheet, applied to the crew as
  * saved now (setJobCrew rings the bell for someone new).
  *
- * Refused in words: a day it's already on (its block there is where its time is changed), a finished
- * job, a pick-a-date link out (asked first, like a move: `needsProposalConfirm`). Before 0370 the day
- * can't keep its own hours: it's added at the job's usual hours and the note says so. Nothing silent.
+ * Refused in words: a day of its plan it's already on (its block there is where its time is changed; a
+ * day it sits on only as history takes the add), a finished job, a pick-a-date link out (asked first,
+ * like a move: `needsProposalConfirm`). Before 0370 the day can't keep its own hours: it's added at the
+ * job's usual hours and the note says so. Nothing silent.
  */
 export async function addJobDay(
   jobId: string,
@@ -1040,7 +1041,15 @@ export async function addJobDay(
 
   const { segments, perDayHours, error: segErr } = await loadJobDaySegments(supabase, jobId);
   if (segErr) return { ok: false, error: segErr };
-  if (coversDay(segments, day)) {
+  const { tz, dayStartHm, dayEndHm } = await orgSchedulePrefs(supabase);
+  const onHold = job.status === "on_hold";
+  // THE LIVE PLAN (a day, not on hold): its span, else none.
+  const plan = onHold ? null : planSpan(job, tz);
+  /* A DAY OF ITS PLAN IT'S ALREADY ON is refused: its block there is the door (This Day's time, the
+     crew). A day it sits on only as HISTORY (worked, outside the plan; or any day of a job with no live
+     plan) takes the add: that day becomes a planned day at these hours. Refusing it would send the
+     office to a block whose sheet says the time belongs to the plan: a dead end. */
+  if (plan && day >= plan.start && day <= plan.end && coversDay(segments, day)) {
     return { ok: false, error: `${called} is already on ${dayWords(day)}. Tap its block there to change its time or crew.` };
   }
 
@@ -1058,7 +1067,6 @@ export async function addJobDay(
 
   // THE DAY'S HOURS, as the sheet showed them: the start (the tapped time, else the work day's start)
   // and the length (chosen; else the job's size; else two hours, said).
-  const { tz, dayStartHm, dayEndHm } = await orgSchedulePrefs(supabase);
   const wd = workDayMinutes({ start: dayStartHm, end: dayEndHm });
   const s = readHm(start ?? dayStartHm) ?? wd.startMin;
   const size = Math.max(0, Number(job.planned_minutes ?? 0) || 0);
@@ -1074,8 +1082,7 @@ export async function addJobDay(
 
   const notes: string[] = [];
   let res: Result & { defaulted?: boolean };
-  const onHold = job.status === "on_hold";
-  if (!job.scheduled_start || onHold) {
+  if (!plan) {
     // NO LIVE PLAN: this day is the plan, at these hours (the job's own, its usual). Worked days stay.
     const w = segments.length ? await workedDaysForJob(supabase, jobId, tz) : { days: [] };
     if ("error" in w) return { ok: false, error: w.error };
@@ -1102,8 +1109,9 @@ export async function addJobDay(
       notes.push(woke?.length ? "It's off hold now." : "It's still marked on hold. Change that on the job page.");
     }
   } else {
-    // A LIVE PLAN: the day joins it with its own hours, the span grows to cover it, and no other day moves.
-    const was = planSpan(job, tz) as DateRange;
+    // A LIVE PLAN: the day joins it with its own hours, the span grows to cover it, and no other day moves
+    // (a history day taken back into the plan gets these hours in place of the ones it ran).
+    const was = plan;
     const mirror = { start: was.start < day ? was.start : day, end: was.end > day ? was.end : day };
     let days = addDaySegment(segments, day, perDayHours ? hours : null);
     if (perDayHours) {

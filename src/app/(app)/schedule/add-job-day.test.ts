@@ -267,6 +267,37 @@ describe("Add To Schedule: the day joins the job, at its own hours", () => {
     expect(state.writes.filter((w) => w.table === "job_schedule_segments")).toEqual([]);
   });
 
+  it("a worked day kept as history (outside the plan) takes the add: it is planned again at these hours", async () => {
+    herringbone();
+    // 9/22 was worked and sits outside the plan (9/24): its block's sheet says its time belongs to the
+    // plan, so "tap its block" would be a dead end. The add plans it.
+    const r = await actions.addJobDay("j011", { day: "2026-09-22", start: "12:00", length: 300 });
+    expect(r).toMatchObject({ ok: true });
+    expect(days("j011")).toEqual(["2026-09-18..2026-09-18 usual", "2026-09-22..2026-09-22 12:00-17:00", "2026-09-24..2026-09-24 usual"]);
+    expect(job("j011")).toMatchObject({ scheduled_start: at("2026-09-22", "09:00"), scheduled_end: at("2026-09-24", "17:00"), status: "in_progress" });
+  });
+
+  it("a job with no live plan, on the day it sits on as history: that day becomes its plan", async () => {
+    // Its date was cleared (Clear The Date) and the worked day stayed; the office puts it back on that day.
+    state.db.jobs.push({ id: "c1", name: "Tanager", status: "to_be_scheduled", scheduled_start: null, scheduled_end: null, planned_minutes: null, assigned_to: [] });
+    state.db.job_schedule_segments.push({ job_id: "c1", start_date: "2026-09-21", end_date: "2026-09-21", start_time: "10:00:00", end_time: "14:00:00" });
+    state.db.time_entries.push({ job_id: "c1", clock_in: at("2026-09-21", "10:05") });
+    const r = await actions.addJobDay("c1", { day: "2026-09-21", start: "13:00", length: 120 });
+    expect(r).toMatchObject({ ok: true });
+    expect(days("c1")).toEqual(["2026-09-21..2026-09-21 usual"]);
+    expect(job("c1")).toMatchObject({ status: "scheduled", scheduled_start: at("2026-09-21", "13:00"), scheduled_end: at("2026-09-21", "15:00") });
+  });
+
+  it("an on-hold job put back on its old day comes off hold there, instead of being told it's already on it", async () => {
+    state.db.jobs.push({ id: "h2", name: "Tanager", status: "on_hold", hold_reason: "Waiting on the permit", scheduled_start: at("2026-09-25", "09:00"), scheduled_end: at("2026-09-25", "17:00"), planned_minutes: null, assigned_to: [] });
+    state.db.job_schedule_segments.push({ job_id: "h2", start_date: "2026-09-25", end_date: "2026-09-25", start_time: null, end_time: null });
+    const r = await actions.addJobDay("h2", { day: "2026-09-25", start: "08:00", length: 120 });
+    expect(r.ok).toBe(true);
+    expect(r.note).toContain("It's off hold now.");
+    expect(job("h2")).toMatchObject({ status: "scheduled", hold_reason: null, scheduled_start: at("2026-09-25", "08:00"), scheduled_end: at("2026-09-25", "10:00") });
+    expect(days("h2")).toEqual(["2026-09-25..2026-09-25 usual"]);
+  });
+
   it("a pick-a-date link out is asked about first, and withdrawn only when the office says so", async () => {
     herringbone();
     state.db.schedule_proposals.push({ id: "sp1", job_id: "j011", status: "pending" });
