@@ -10,17 +10,19 @@ import { TEXTS_NOT_READY_LINE, TEXTING_CARD_PLACE } from "@/lib/sms-readiness";
 import { updateOrgSettings } from "./actions";
 import { setFeature } from "./features-actions";
 
+/**
+ * SCHEDULER & TIMESHEETS. Two settings left this form in Wave 2, because nothing anywhere ever read
+ * them: "Time tracking method" (start & end, or duration) and "Timecard supervisor" (who approves
+ * timecards). The Timecards header named an approver nobody's approval was ever asked of. Save no
+ * longer sends either key; updateOrgSettings merges, so a value already stored stays, unread.
+ */
 export function SchedulingSettings({
   settings,
-  employees = [],
-  ownerName,
   textReady = true,
   isOwner = false,
   payroll = true,
 }: {
   settings: OrgSettings;
-  employees?: { id: string; full_name: string | null }[];
-  ownerName?: string;
   /** Can this org text (lib/sms-readiness)? false: the text option shows as not active. */
   textReady?: boolean;
   /** Only the owner moves the Job Codes switch (0352); everyone else reads it. */
@@ -32,12 +34,10 @@ export function SchedulingSettings({
   const [start, setStart] = useState(settings.work_day_start);
   const [end, setEnd] = useState(settings.work_day_end);
   const [weekStart, setWeekStart] = useState(settings.week_start);
-  const [method, setMethod] = useState(settings.time_tracking_method);
   const [remindClock, setRemindClock] = useState(settings.remind_timeclock);
   const [askJobCodes, setAskJobCodes] = useState(settings.timeclock_job_codes);
   const [geofence, setGeofence] = useState(settings.geofence_logout);
   const [radius, setRadius] = useState(settings.geofence_radius_m);
-  const [supervisor, setSupervisor] = useState(settings.timecard_supervisor_id);
   const [paySchedule, setPaySchedule] = useState(settings.pay_schedule);
   const [payAnchor, setPayAnchor] = useState(settings.pay_anchor);
   const [pending, startT] = useTransition();
@@ -70,11 +70,9 @@ export function SchedulingSettings({
         work_day_start: start,
         work_day_end: end,
         week_start: weekStart,
-        time_tracking_method: method,
         remind_timeclock: remindClock,
         geofence_logout: geofence,
         geofence_radius_m: Math.max(50, Math.round(Number(radius) || 300)),
-        timecard_supervisor_id: supervisor,
         pay_schedule: paySchedule,
         pay_anchor: payAnchor,
       });
@@ -101,13 +99,6 @@ export function SchedulingSettings({
           <Select id="sc-week" value={weekStart} onChange={(e) => setWeekStart(e.target.value as any)}>
             <option value="monday">Monday</option>
             <option value="sunday">Sunday</option>
-          </Select>
-        </div>
-        <div>
-          <Label htmlFor="sc-method">Time tracking method</Label>
-          <Select id="sc-method" value={method} onChange={(e) => setMethod(e.target.value as any)}>
-            <option value="start_end">Track start &amp; end time</option>
-            <option value="duration">Track duration only</option>
           </Select>
         </div>
       </div>
@@ -199,17 +190,6 @@ export function SchedulingSettings({
           </div>
         )}
         <p className="text-xs text-slate-400">Runs while the app is open on the employee&apos;s phone. (True background tracking needs the native app.)</p>
-      </div>
-
-      <div className="space-y-1.5 border-t border-slate-100 pt-4">
-        <Label htmlFor="sup">Timecard supervisor</Label>
-        <Select id="sup" value={supervisor} onChange={(e) => setSupervisor(e.target.value)}>
-          <option value="">Owner{ownerName ? ` — ${ownerName}` : ""} (default)</option>
-          {employees.map((e) => (
-            <option key={e.id} value={e.id}>{e.full_name ?? "Unnamed"}</option>
-          ))}
-        </Select>
-        <p className="text-xs text-slate-400">Who reviews &amp; approves timecards. Defaults to the owner.</p>
       </div>
 
       {payroll && (

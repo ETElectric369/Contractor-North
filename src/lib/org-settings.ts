@@ -74,10 +74,10 @@ export interface OrgSettings {
   work_day_start: string; // "08:00"
   work_day_end: string; // "17:00"
   week_start: "sunday" | "monday";
-  time_tracking_method: "start_end" | "duration";
   // (auto_lunch_30 RETIRED cn-v537: the 30-min >5h lunch is now UNCONDITIONAL — see lib/lunch-rule.ts.
   //  Old orgs may still carry the key in stored JSON; it's ignored.)
-  timecard_supervisor_id: string; // who approves timecards ("" = org owner)
+  // (time_tracking_method and timecard_supervisor_id RETIRED in Wave 2: nothing ever read them, so
+  //  approval comes back as a feature switch if it is ever built. A stored value stays, unread.)
   /** Geofence auto clock-out: when a clocked-in employee leaves the spot they clocked
    *  in at by more than the radius (for a grace period), clock them out — AT the time
    *  they left, so a forgotten clock-out can't over-bill. Default on. */
@@ -382,8 +382,6 @@ export const DEFAULT_SETTINGS: OrgSettings = {
   work_day_start: "08:00",
   work_day_end: "17:00",
   week_start: "monday",
-  time_tracking_method: "start_end",
-  timecard_supervisor_id: "",
   geofence_logout: true,
   geofence_radius_m: 300,
   remind_timeclock: true, // matches the crons' historical "absent = on" behavior

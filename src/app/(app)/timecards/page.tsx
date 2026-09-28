@@ -468,11 +468,6 @@ export default async function TimecardsPage({
   const gridNow = { dayStr: todayStr, min: tzMinutesOfDay(new Date(), tz) };
   const onClock = crew.filter((c) => c.clockedIn);
 
-  const supId = getOrgSettings((org as any)?.settings).timecard_supervisor_id;
-  const approver = supId
-    ? (members?.find((m: any) => m.id === supId)?.full_name ?? "—")
-    : "Owner";
-
   /* ── WHAT HE OWES, IN ONE ROW ──────────────────────────────────────────────────────────────
    *
    *  WHAT WAS HERE: the "Pay period" card — every person with hours, their gross, and a paid
@@ -724,7 +719,9 @@ export default async function TimecardsPage({
 
   return (
     <div>
-      <PageHeader title="Timecards" description={`Review your crew's hours by week.  ·  Approver: ${approver}`}>
+      {/* No approver here any more (Wave 2): the header named one, and nothing ever asked anybody to
+          approve anything. The setting behind it left Settings too. */}
+      <PageHeader title="Timecards" description="Review your crew's hours by week.">
         <div className="flex flex-wrap items-center gap-2">
           <AddEntryButton
             isStaff
