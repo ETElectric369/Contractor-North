@@ -64,7 +64,13 @@ export function rowButtons(item: ActionItem, ctx: { leadsOn?: boolean; isStaff: 
   const leadsOn = ctx.leadsOn !== false;
   const what = item.title;
 
-  if (item.pile) return { primary: { label: item.pile.verb, act: { type: "unfold" } }, also: null, more: [] };
+  // A pile carries its rows' verb, and opens itself with it; when its rows have no button for this
+  // viewer (a tech's own visits only open), neither has the pile.
+  if (item.pile) {
+    const first = item.children?.[0];
+    const kid = first ? rowButtons(first, ctx) : null;
+    return kid?.primary ? { primary: { label: item.pile.verb, act: { type: "unfold" } }, also: null, more: [] } : none;
+  }
   // A "Couldn't Check" line only opens the page that can say what it couldn't.
   if (item.id.endsWith("-unread")) return none;
 

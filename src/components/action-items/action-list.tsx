@@ -308,6 +308,8 @@ function PileRow(p: RowProps & { kids: ActionItem[]; count: number; open: boolea
     </button>
   );
   const unfold = () => (here || !pile.listHref ? p.onToggle() : p.router.push(pile.listHref));
+  // The pile's verb, only when its rows have a button for this viewer (row-buttons.ts).
+  const verb = rowButtons({ ...item, children: kids }, { leadsOn: p.leadsOn, isStaff: p.isStaff }).primary;
   return (
     <div className="rounded-xl border border-slate-200 bg-white" data-pile={pile.name}>
       <div className="relative flex items-center gap-1 py-1.5 pl-3 pr-1">
@@ -331,9 +333,11 @@ function PileRow(p: RowProps & { kids: ActionItem[]; count: number; open: boolea
               </span>
               {item.subtitle && <span className="truncate">{item.subtitle}</span>}
             </div>
-            <button type="button" onClick={unfold} className={`${ROW_BUTTON} pointer-events-auto ml-auto`}>
-              {pile.verb}
-            </button>
+            {verb && (
+              <button type="button" onClick={unfold} className={`${ROW_BUTTON} pointer-events-auto ml-auto`}>
+                {verb.label}
+              </button>
+            )}
           </div>
         </div>
       </div>

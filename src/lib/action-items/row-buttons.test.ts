@@ -102,11 +102,23 @@ describe("the table", () => {
       id: "pile:estimates_not_sent",
       affordances: ["open"],
       pile: { name: "estimates_not_sent", label: "Estimates Not Sent", count: 6, capped: false, listHref: "/quotes?status=draft", listLabel: "See All On Estimates", verb: "Send It" },
+      children: [row("quote_draft"), row("quote_draft")],
     });
     const b = rowButtons(pile, staff);
     expect(b.primary).toEqual({ label: "Send It", act: { type: "unfold" } });
     expect(b.more).toEqual([]);
     expect(allDoors(b).map(doorVerb).filter(Boolean)).toEqual([]);
+  });
+
+  it("a tech's pile of his own visits has no verb: his visits only open", () => {
+    const visit = () => row("appointment", { affordances: ["open"] });
+    const pile = row("appointment", {
+      id: "pile:visits_to_close_out",
+      affordances: ["open"],
+      pile: { name: "visits_to_close_out", label: "Visits To Close Out", count: 2, capped: false, listHref: "/schedule", listLabel: "See All On Schedule", verb: "Close Out" },
+      children: [visit(), visit()],
+    });
+    expect(rowButtons(pile, { leadsOn: true, isStaff: false })).toEqual({ primary: null, also: null, more: [] });
   });
 });
 
