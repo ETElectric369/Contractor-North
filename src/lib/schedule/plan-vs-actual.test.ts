@@ -1,0 +1,331 @@
+import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { tzDateTimeUtc } from "@/lib/tz";
+import { pillColorForPerson } from "@/lib/employee-color";
+import {
+  ACTUALS_LIMIT,
+  actualsFrom,
+  actualSpans,
+  blockSentence,
+  clockShort,
+  durShort,
+  mergePeople,
+  packActuals,
+  peopleWords,
+  planVsActual,
+  rangeWords,
+  SENTENCE_MAX,
+  unpackActuals,
+  type ActualEntry,
+  type PlanBlock,
+} from "./plan-vs-actual";
+
+/**
+ * WHAT HAPPENED, INSIDE THE BLOCK (Wave 2, SV-actual). The shapes are the real ET weeks that made the
+ * case (as fixtures with made-up ids, never data): J-046's week (Monday nobody went; Tuesday Erik 10 to
+ * 6 and Jimmy noon to 6; Thursday 11 to 9 = 4h over), J-011 9/22 (an all-day block, two people), J-055
+ * (an 8-to-5 block started at noon), J-011 9/25 (worked, nothing booked), an overnight 10 PM to 6:30 AM,
+ * a duplicate pair that counts once, a day only a return visit booked, and a spring-forward day.
+ */
+const LA = "America/Los_Angeles";
+const TODAY = "2026-09-28";
+const at = (ymd: string, hm: string) => tzDateTimeUtc(ymd, hm, LA) as string;
+const ERIK = { profileId: "p-erik", name: "Erik Taylor" };
+const JIMMY = { profileId: "p-jimmy", name: "Jimmy Ruiz" };
+const BRIAN = { profileId: "p-brian", name: "Brian Cole" };
+const entry = (who: { profileId: string; name: string }, jobId: string | null, day: string, from: string, to: string | null, toDay = day): ActualEntry => ({
+  ...who,
+  jobId,
+  clockIn: at(day, from),
+  clockOut: to ? at(toDay, to) : null,
+});
+const block = (key: string, jobId: string | null, dayStr: string, startMin: number, endMin: number, kind: "job" | "visit" = "job"): PlanBlock => ({
+  key,
+  jobId,
+  dayStr,
+  startMin,
+  endMin,
+  kind,
+});
+const run = (blocks: PlanBlock[], entries: ActualEntry[]) => planVsActual({ blocks, spans: actualSpans(entries, LA, TODAY), todayStr: TODAY });
+
+describe("the entries, as past-day spans on the company's clock", () => {
+  it("an entry lands on its Pacific day and minutes; no job, today and later are dropped", () => {
+    const spans = actualSpans(
+      [
+        entry(ERIK, "j46", "2026-09-22", "10:00", "18:00"),
+        entry(ERIK, null, "2026-09-22", "07:00", "08:00"),
+        entry(ERIK, "j46", TODAY, "08:00", "09:00"),
+        // 8:30 PM Pacific on the 22nd is the 23rd in UTC: it lands on the Pacific day.
+        entry(JIMMY, "j46", "2026-09-22", "20:30", "21:30"),
+      ],
+      LA,
+      TODAY,
+    );
+    expect(spans.map((s) => [s.profileId, s.dayStr, s.startMin, s.endMin])).toEqual([
+      ["p-erik", "2026-09-22", 600, 1080],
+      ["p-jimmy", "2026-09-22", 1230, 1290],
+    ]);
+  });
+
+  it("an overnight 10 PM to 6:30 AM splits at midnight: its tail is drawn on the next day from 0", () => {
+    const spans = actualSpans([entry(ERIK, "j9", "2026-09-20", "22:00", "06:30", "2026-09-21")], LA, TODAY);
+    expect(spans.map((s) => [s.dayStr, s.startMin, s.endMin])).toEqual([
+      ["2026-09-20", 1320, 1440],
+      ["2026-09-21", 0, 390],
+    ]);
+  });
+
+  it("a runaway later closed covers its days, at most a week; a tail that reaches today is not drawn", () => {
+    const spans = actualSpans([entry(ERIK, "j9", "2026-09-25", "08:00", "10:00", TODAY)], LA, TODAY);
+    expect(spans.map((s) => [s.dayStr, s.startMin, s.endMin])).toEqual([
+      ["2026-09-25", 480, 1440],
+      ["2026-09-26", 0, 1440],
+      ["2026-09-27", 0, 1440],
+    ]);
+  });
+
+  it("a spring-forward day reads the wall clock: 1:30 AM to 4:00 AM is drawn 1:30 to 4", () => {
+    // 2027-03-14: the clocks jump from 2:00 to 3:00 AM. 1:30 PST to 4:00 PDT is 90 minutes elapsed.
+    const spans = actualSpans(
+      [{ ...ERIK, jobId: "j9", clockIn: "2027-03-14T09:30:00.000Z", clockOut: "2027-03-14T11:00:00.000Z" }],
+      LA,
+      "2027-03-20",
+    );
+    expect(spans.map((s) => [s.dayStr, s.startMin, s.endMin])).toEqual([["2027-03-14", 90, 240]]);
+  });
+
+  it("packs compact for the page (each person and job once) and unpacks the same spans", () => {
+    const spans = actualSpans(
+      [entry(ERIK, "j46", "2026-09-22", "10:00", "18:00"), entry(JIMMY, "j46", "2026-09-22", "12:00", "18:00"), entry(ERIK, "j11", "2026-09-23", "09:00", null)],
+      LA,
+      TODAY,
+    );
+    const packed = packActuals(spans, new Map([["j46", { name: "12 Elm St", job_number: "J-046", customer: "Rita Moss" }]]));
+    expect(packed.people).toHaveLength(2);
+    expect(packed.jobs).toEqual([
+      { id: "j46", name: "12 Elm St", job_number: "J-046", customer: "Rita Moss" },
+      { id: "j11", name: "A Job", job_number: null, customer: null },
+    ]);
+    expect(packed.spans[2]).toEqual([1, 0, "2026-09-23", 540, null]);
+    expect(unpackActuals(packed)).toEqual(spans);
+    expect(unpackActuals(null)).toEqual([]);
+    // Nothing about pay rides along: no rate, no amount, no pay column.
+    expect(JSON.stringify(packed)).not.toMatch(/rate|amount|paid|miles/);
+  });
+});
+
+describe("the read, as the calendar gets it", () => {
+  const row = (who: { profileId: string; name: string }, jobId: string | null, day: string, from: string, to: string | null) => ({
+    profile_id: who.profileId,
+    job_id: jobId,
+    clock_in: at(day, from),
+    clock_out: to ? at(day, to) : null,
+    profiles: { full_name: who.name },
+    job: jobId ? { id: jobId, job_number: "J-046", name: "12 Elm St", customers: { name: "Rita Moss" } } : null,
+  });
+
+  it("a failed read is null (no bars, and the calendar says so), never an empty week", () => {
+    expect(actualsFrom(null, LA, TODAY)).toEqual({ actuals: null, actualsCappedBefore: null });
+  });
+
+  it("names people from the entry's own person (a person who left still has one) and jobs from its job", () => {
+    const { actuals, actualsCappedBefore } = actualsFrom([row(ERIK, "j46", "2026-09-22", "10:00", "18:00")], LA, TODAY);
+    expect(actualsCappedBefore).toBeNull();
+    expect(actuals!.people).toEqual([{ id: "p-erik", name: "Erik Taylor" }]);
+    expect(actuals!.jobs).toEqual([{ id: "j46", name: "12 Elm St", job_number: "J-046", customer: "Rita Moss" }]);
+  });
+
+  it("a read that hit its cap loads back to the day AFTER its oldest clock-in (that day may be partial)", () => {
+    const rows = [row(ERIK, "j46", "2026-09-22", "10:00", "18:00"), row(ERIK, "j46", "2026-09-10", "09:00", "17:00")];
+    expect(actualsFrom(rows, LA, TODAY, 2).actualsCappedBefore).toBe("2026-09-11");
+    expect(actualsFrom(rows, LA, TODAY, 3).actualsCappedBefore).toBeNull();
+    expect(ACTUALS_LIMIT).toBe(4000);
+  });
+});
+
+describe("the calendar reads it and draws it (source)", () => {
+  const read = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
+
+  it("one past-only read of entries on a job, newest first, capped, and NO pay column", () => {
+    const panel = read("src/app/(app)/schedule/calendar-panel.tsx");
+    expect(panel).toContain(
+      '"id, profile_id, job_id, clock_in, clock_out, source, profiles:profile_id(full_name), job:job_id(id, job_number, name, customers(name))"',
+    );
+    const q = panel.slice(panel.indexOf('.from("time_entries")'), panel.indexOf(".limit(ACTUALS_LIMIT)"));
+    expect(q).toContain('.not("job_id", "is", null)');
+    expect(q).toContain('.gte("clock_in", jobFrom)');
+    expect(q).toContain('.lt("clock_in", tzDayStartUtc(todayStr, tz).toISOString())');
+    expect(q).toContain('.order("clock_in", { ascending: false })');
+    const cols = panel.slice(panel.indexOf("const ENTRY_COLS"), panel.indexOf("const [historyReads"));
+    expect(cols).not.toMatch(/rate_override|paid_at|miles|notes|lunch|pay/);
+    // Jobs with in-window days but no listed day are read by id, 200 at a time, in the same round.
+    expect(panel).toContain("for (let i = 0; i < missing.length; i += 200) missingChunks.push(missing.slice(i, i + 200));");
+  });
+
+  it("the July rule is retired in words, in the panel and the view", () => {
+    expect(read("src/app/(app)/schedule/calendar-panel.tsx")).toContain('the July rule "the calendar never shows clocked time" was retired');
+    const view = read("src/app/(app)/calendar/calendar-view.tsx");
+    expect(view).toContain('the July rule "the calendar never shows clocked time" is retired');
+    expect(view).not.toContain("WHEN-DID (clocked hours) lives on");
+  });
+
+  it("hollow is decided before the person filter; only days loaded whole are judged; blank is not zero", () => {
+    const view = read("src/app/(app)/calendar/calendar-view.tsx");
+    expect(view).toContain('return { people, hollow: a.state === "hollow", sentence: a.sentence };');
+    expect(view).toContain("(k: string) => clockInUse && k < todayK && (!actualsCappedBefore || k >= actualsCappedBefore)");
+    expect(view).toContain("Clocked time loads back to {dayWords(actualsCappedBefore)}.");
+    expect(view).toContain("Clocked time didn&apos;t load, so past days show only what was booked.");
+  });
+
+  it("the stack builds each week's grid once per (week, data), with stable props, so mounted weeks skip", () => {
+    const view = read("src/app/(app)/calendar/calendar-view.tsx");
+    expect(view).toContain("const gridNow = useMemo(");
+    expect(view).toMatch(/const key = \[\s*jobs, segments, appointments, tasks, external, actuals, actualsCappedBefore, dayRows, people, members, addableJobs,\s*personFilter, tz, todayK, canEdit, workDayStart, workDayEnd,\s*\];/);
+    expect(view).toContain("onDayClick={drillInto}");
+    expect(view).toContain("placement={armedProp}");
+    expect(view).not.toContain("placement={target.prop}");
+    expect(view).not.toMatch(/onDayClick=\{\(ds\) =>/);
+  });
+});
+
+describe("J-046's week: booked 9 to 5", () => {
+  const blocks = ["2026-09-21", "2026-09-22", "2026-09-24"].map((d) => block(`j-j46-${d}`, "j46", d, 540, 1020));
+  const res = run(blocks, [
+    entry(ERIK, "j46", "2026-09-22", "10:00", "18:00"),
+    entry(JIMMY, "j46", "2026-09-22", "12:00", "18:00"),
+    entry(ERIK, "j46", "2026-09-24", "11:00", "21:00"),
+  ]);
+
+  it("Monday: nobody went: hollow", () => {
+    expect(res.byKey.get("j-j46-2026-09-21")).toMatchObject({ state: "hollow", people: [], lateMin: null, sentence: "Booked 9–5 · Nobody clocked in" });
+  });
+
+  it("Tuesday: Erik 10 to 6 and Jimmy noon to 6: an hour late, an hour over, in their colors", () => {
+    const tue = res.byKey.get("j-j46-2026-09-22")!;
+    expect(tue.state).toBe("worked");
+    expect(tue.people.map((p) => [p.first, p.initials, p.startMin, p.endMin, p.dot])).toEqual([
+      ["Erik", "ET", 600, 1080, pillColorForPerson("p-erik").dot],
+      ["Jimmy", "JR", 720, 1080, pillColorForPerson("p-jimmy").dot],
+    ]);
+    expect([tue.lateMin, tue.overMin, tue.shortMin]).toEqual([60, 60, -60]);
+    expect(tue.sentence).toBe("Booked 9–5 · Erik 10–6 · Jimmy 12–6 · 1h late · 1h over");
+    expect(tue.extent).toEqual({ lo: 540, hi: 1080 });
+  });
+
+  it("Thursday: 11 to 9 is 2h late and 4h over, and the extent reaches 9 PM (the grid stretches to it)", () => {
+    const thu = res.byKey.get("j-j46-2026-09-24")!;
+    expect(thu.sentence).toBe("Booked 9–5 · Erik 11–9 · 2h late · 4h over");
+    expect(thu.overMin).toBe(240);
+    expect(thu.extent.hi).toBe(21 * 60);
+  });
+
+  it("no hour total is ever printed (it can never disagree with /timecards)", () => {
+    for (const a of res.byKey.values()) expect(a.sentence).not.toMatch(/\bhours?\b|\bhrs?\b|total/i);
+  });
+});
+
+describe("the other real shapes", () => {
+  it("J-011 9/22: an all-day block with two people", () => {
+    const res = run([block("j-j11-0922", "j11", "2026-09-22", 540, 1020)], [
+      entry(ERIK, "j11", "2026-09-22", "09:00", "17:00"),
+      entry(BRIAN, "j11", "2026-09-22", "09:30", "15:00"),
+    ]);
+    const a = res.byKey.get("j-j11-0922")!;
+    expect(a.people.map((p) => p.first)).toEqual(["Erik", "Brian"]);
+    expect(a.sentence).toBe("Booked 9–5 · Erik 9–5 · Brian 9:30–3");
+  });
+
+  it("J-055: an 8-to-5 block started at noon is 4h late; an early finish is short", () => {
+    const late = run([block("k", "j55", "2026-09-23", 480, 1020)], [entry(ERIK, "j55", "2026-09-23", "12:00", "17:00")]).byKey.get("k")!;
+    expect(late.sentence).toBe("Booked 8–5 · Erik 12–5 · 4h late");
+    const short = run([block("k", "j55", "2026-09-23", 480, 1020)], [entry(ERIK, "j55", "2026-09-23", "08:00", "15:30")]).byKey.get("k")!;
+    expect(short.sentence).toBe("Booked 8–5 · Erik 8–3:30 · 1.5h short");
+  });
+
+  it("J-011 9/25: worked with no block that day is unplanned (part D draws it)", () => {
+    const res = run([block("j-j11-0924", "j11", "2026-09-24", 540, 1020)], [entry(BRIAN, "j11", "2026-09-25", "11:04", "13:46")]);
+    expect(res.unplanned).toHaveLength(1);
+    expect(res.unplanned[0]).toMatchObject({ jobId: "j11", dayStr: "2026-09-25" });
+    expect(res.unplanned[0].people[0]).toMatchObject({ first: "Brian", startMin: 664, endMin: 826 });
+    expect(res.byKey.get("j-j11-0924")!.state).toBe("hollow");
+  });
+
+  it("a duplicate pair (and a switch-back) counts once: overlapping stretches union", () => {
+    const res = run([block("k", "j9", "2026-09-23", 540, 1020)], [
+      entry(ERIK, "j9", "2026-09-23", "09:00", "17:00"),
+      entry(ERIK, "j9", "2026-09-23", "09:00", "17:00"),
+      entry(JIMMY, "j9", "2026-09-23", "09:00", "12:00"),
+      entry(JIMMY, "j9", "2026-09-23", "12:00", "17:00"),
+    ]);
+    const a = res.byKey.get("k")!;
+    expect(a.people.map((p) => p.spans)).toEqual([
+      [{ startMin: 540, endMin: 1020, open: false }],
+      [{ startMin: 540, endMin: 1020, open: false }],
+    ]);
+    expect(a.sentence).toBe("Booked 9–5 · Erik 9–5 · Jimmy 9–5");
+  });
+
+  it("an appointment-only day: the return visit on the job takes the time; a job block that day would take it first", () => {
+    const visitOnly = run([block("a-v1-0923", "j9", "2026-09-23", 600, 660, "visit")], [entry(ERIK, "j9", "2026-09-23", "10:05", "11:20")]);
+    expect(visitOnly.byKey.get("a-v1-0923")!.sentence).toBe("Booked 10–11 · Erik 10:05–11:20 · 20m over");
+    expect(visitOnly.unplanned).toEqual([]);
+    const both = run(
+      [block("a-v1-0923", "j9", "2026-09-23", 600, 660, "visit"), block("j-j9-0923", "j9", "2026-09-23", 540, 1020)],
+      [entry(ERIK, "j9", "2026-09-23", "10:05", "11:20")],
+    );
+    expect(both.byKey.get("j-j9-0923")!.state).toBe("worked");
+    expect(both.byKey.get("a-v1-0923")!.state).toBe("hollow");
+  });
+
+  it("a visit with no job (a walk-through before the sale) is never judged: time is clocked to jobs", () => {
+    const res = run([block("a-walk", null, "2026-09-23", 600, 660, "visit")], []);
+    expect(res.byKey.has("a-walk")).toBe(false);
+  });
+
+  it("never clocked out: the stretch runs to the block's end, open, and the sentence says so", () => {
+    const res = run([block("k", "j9", "2026-09-23", 540, 1020)], [entry(ERIK, "j9", "2026-09-23", "10:00", null)]);
+    const a = res.byKey.get("k")!;
+    expect(a.people[0].spans).toEqual([{ startMin: 600, endMin: 1020, open: true }]);
+    expect(a.people[0].endMin).toBeNull();
+    expect([a.overMin, a.shortMin]).toEqual([null, null]);
+    expect(a.sentence).toBe("Booked 9–5 · Erik in at 10, never clocked out · 1h late");
+  });
+
+  it("only days before today are judged", () => {
+    const res = run([block("k", "j9", TODAY, 540, 1020)], []);
+    expect(res.byKey.has("k")).toBe(false);
+  });
+});
+
+describe("the words", () => {
+  it("clocks, ranges and lengths in as few letters as they read", () => {
+    expect([clockShort(540), clockShort(1170), clockShort(720), clockShort(0), clockShort(1440)]).toEqual(["9", "7:30", "12", "12", "12"]);
+    expect(rangeWords(664, 826)).toBe("11:04 AM–1:46 PM");
+    expect(rangeWords(750, 1050)).toBe("12:30–5:30 PM");
+    expect([durShort(45), durShort(60), durShort(90), durShort(150), durShort(70)]).toEqual(["45m", "1h", "1.5h", "2.5h", "1h 10m"]);
+  });
+
+  it("a crowded day still fits in 140 characters, the rest counted", () => {
+    const many = Array.from({ length: 9 }, (_, i) => ({ profileId: `p${i}`, name: `Person${i} Longname` }));
+    const people = mergePeople(
+      many.map((p, i) => ({ ...p, jobId: "j", dayStr: "2026-09-23", startMin: 480 + i, endMin: 1000 + i })),
+      (s) => s + 60,
+    );
+    const s = blockSentence({ startMin: 480, endMin: 1020 }, { people, lateMin: 0, overMin: 0, shortMin: 0 });
+    expect(s.length).toBeLessThanOrEqual(SENTENCE_MAX);
+    expect(s).toMatch(/\+\d+ more$/);
+  });
+
+  it("who worked, for a ghost's sheet: the half said once when both ends share it", () => {
+    const people = mergePeople(
+      [
+        { ...BRIAN, jobId: "j", dayStr: "d", startMin: 664, endMin: 826 },
+        { ...ERIK, jobId: "j", dayStr: "d", startMin: 750, endMin: 1050 },
+      ],
+      (s) => s + 60,
+    );
+    expect(peopleWords(people)).toBe("Brian 11:04 AM–1:46 PM · Erik 12:30–5:30 PM");
+  });
+});

@@ -8,6 +8,8 @@ import { dayBlockWords, readJobBlock } from "@/lib/schedule/job-block";
 import { crewChips, placeLine, type CrewChip } from "@/lib/schedule/block-info";
 import type { DayHours } from "@/lib/schedule-math";
 import { CrewInitials } from "@/components/crew-initials";
+import { WorkedTrack } from "@/components/worked-track";
+import type { WorkedPerson } from "@/lib/schedule/plan-vs-actual";
 
 interface Member {
   id: string;
@@ -45,6 +47,7 @@ export function JobScheduleCard({
   dayHours,
   onOpen,
   crew,
+  actual,
 }: {
   job: SchedJob;
   members: Member[];
@@ -61,6 +64,9 @@ export function JobScheduleCard({
   /** The crew as THAT DAY's rows leave it (Everyone's Day: off that day, on another job, put on for the
    *  day; lib/schedule/block-info crewChips). Absent: the job's crew as it stands. */
   crew?: CrewChip[] | null;
+  /** A PAST day's worked time (lib/schedule/plan-vs-actual): the booked span and who clocked in, drawn
+   *  as a small track under the block (text to visual), its sentence the label. Absent: nothing to say. */
+  actual?: { booked: { startMin: number; endMin: number }; people: WorkedPerson[]; sentence: string } | null;
 }) {
   const at = {
     scheduledStart: job.scheduled_start,
@@ -112,6 +118,12 @@ export function JobScheduleCard({
         </button>
       ) : (
         <div className="mt-2 flex min-h-11 w-full items-center gap-2 px-2">{inside}</div>
+      )}
+      {/* WHAT HAPPENED (a past day): the booked span, each person's bars in their color, the words. */}
+      {actual && (
+        <div className="mt-2 px-1">
+          <WorkedTrack booked={actual.booked} people={actual.people} sentence={actual.sentence} />
+        </div>
       )}
     </div>
   );

@@ -11,7 +11,7 @@ import { usePlacement } from "../schedule/placement-context";
 import { dayTargetLabel } from "@/lib/schedule/placement-plan";
 import { dayLabel, spanLabel } from "@/lib/schedule/span-label";
 import { useEndlessStack } from "@/components/use-endless-stack";
-import { jobDayBlock } from "@/lib/schedule/job-block";
+import { dayWords, jobDayBlock } from "@/lib/schedule/job-block";
 import { crewChips, placeLine, spanShort, streetOf, townOf, visitPlace, type CrewChip, type CrewDayRow } from "@/lib/schedule/block-info";
 import { jobWords } from "@/lib/action-items/words";
 import { CrewInitials } from "@/components/crew-initials";
@@ -37,13 +37,18 @@ import { jobLabel } from "@/lib/schedule-options";
 import { appointmentTypeLabel, isInspectionType } from "@/lib/statuses";
 import { allDayEventDays } from "@/lib/gcal-map";
 import { CAL_WINDOW_BACK_DAYS, CAL_WINDOW_FWD_DAYS } from "@/lib/schedule/cal-window";
+import { planVsActual, unpackActuals, type ActualsPayload, type BlockActual, type PlanBlock, type WorkedPerson } from "@/lib/schedule/plan-vs-actual";
+import type { TimeGridActual, TimeGridDay } from "@/components/time-grid";
 
-// THE one forward-looking time map. WHEN-DID (clocked hours) lives on
-// /timeclock + /timecards only — the old "Clocked time" layer, day-view
-// "Timecard entries" and month per-person hour chips were a second display of
-// that territory and are gone. Views are url-synced (?view=day|week|month +
-// ?date=) via SHALLOW history writes: the server preloads a wide ±window once
-// and every chevron/day tap slices it client-side — no RSC round-trip per tap.
+// THE ONE TIME MAP. Future days show what's booked; past days show what was
+// booked AND what happened, inside the same block: who clocked in as bars in
+// each person's color beside it (late, over, short), the block hollow when
+// nobody went, and a dashed ghost for work nobody booked (Wave 2, SV-actual and
+// SV-ghost: the July rule "the calendar never shows clocked time" is retired,
+// Erik 2026-09-26). No toggle, no extra layer. The timesheet (editing, pay)
+// stays on /timecards. Views are url-synced (?view=day|week|month + ?date=) via
+// SHALLOW history writes: the server preloads a wide ±window once and every
+// chevron/day tap slices it client-side — no RSC round-trip per tap.
 //
 // SAFETY (the deliberate-move law): a block's tap is never a move. The office's
 // tap opens the block's sheet (its day with Move, its time, its crew, Open The
@@ -202,6 +207,92 @@ function startOfWeek(d: Date) {
   return r;
 }
 
+/**
+ * THE DAYS A JOB IS ON, ONE RULE for every surface that reads them (the week, the month, the day drill,
+ * and the past blocks what happened is matched to): SEGMENTS FIRST, each range its own run of days (so a
+ * gap between two work weeks stays empty); a job with no segments runs its listed span, each end
+ * resolved to its ORG-TZ day first (a raw evening timestamp would land on the UTC next day).
+ */
+function jobDayRanges(j: Pick<CalJob, "scheduled_start" | "scheduled_end">, segs: readonly CalSegment[] | undefined, dayOf: (iso: string) => string): string[][] {
+  const run = (startYmd: string, endYmd: string): string[] => {
+    const d = new Date(`${startYmd}T00:00:00`);
+    const last = new Date(`${endYmd}T00:00:00`);
+    // Backstop against a runaway loop; sized above the widest fetch window so legitimate long jobs
+    // aren't silently clipped.
+    const keys: string[] = [];
+    let guard = 0;
+    while (d <= last && guard++ < 540) {
+      keys.push(dayKey(d));
+      d.setDate(d.getDate() + 1);
+    }
+    return keys;
+  };
+  if (segs?.length) return segs.map((s) => run(s.start_date, s.end_date));
+  if (!j.scheduled_start) return [];
+  const startYmd = dayOf(j.scheduled_start);
+  const endYmd = j.scheduled_end ? dayOf(j.scheduled_end) : startYmd;
+  return [run(startYmd, endYmd < startYmd ? startYmd : endYmd)];
+}
+
+/**
+ * THE DAYS A VISIT IS ON: every day it covers, not just the one it starts on (Erik: "i set it for a week
+ * … but it only showed up as 1 day"). The span was SIZED in working days (spanEnd/workingDaysFrom skip
+ * weekends), so the days after the first skip them too; the FIRST day is exempt: a visit explicitly
+ * booked on a Saturday is a Saturday visit.
+ */
+function apptSpanDays(a: Pick<CalAppt, "starts_at" | "ends_at">, dayOf: (iso: string) => string): string[] {
+  const first = dayOf(a.starts_at);
+  const last = a.ends_at ? dayOf(a.ends_at) : first;
+  const out = [first];
+  if (isYmd(first) && isYmd(last) && last > first) {
+    const d = new Date(`${first}T12:00:00`);
+    for (let i = 0; i < 60; i++) {
+      d.setDate(d.getDate() + 1);
+      if (d.getDay() === 0 || d.getDay() === 6) continue;
+      const k = dayKey(d);
+      if (k > last) break;
+      out.push(k);
+    }
+  }
+  return out;
+}
+
+/**
+ * A VISIT'S BLOCK ON ONE DAY, in the company's clock: only the first day starts at the booked time and
+ * only the last day ends at the booked time; the days between are whole working days; no end is an hour.
+ */
+function apptDayMinutes(
+  a: Pick<CalAppt, "starts_at" | "ends_at">,
+  k: string,
+  dayOf: (iso: string) => string,
+  minOf: (iso: string) => number,
+  wd: { startMin: number; endMin: number },
+): { startMin: number; endMin: number } {
+  const firstDay = dayOf(a.starts_at) === k;
+  const lastDay = !a.ends_at || dayOf(a.ends_at) === k;
+  const startMin = firstDay ? minOf(a.starts_at) : wd.startMin;
+  let endMin = startMin + 60;
+  if (a.ends_at && new Date(a.ends_at).getTime() > new Date(a.starts_at).getTime()) {
+    endMin = lastDay ? Math.max(startMin + 15, minOf(a.ends_at)) : Math.max(startMin + 15, wd.endMin);
+  } else if (!lastDay) {
+    endMin = Math.max(startMin + 15, wd.endMin);
+  }
+  return { startMin, endMin };
+}
+
+/** A past block's worked time as the grid draws it: HOLLOW is decided before the person filter (a
+ *  block somebody else worked is "not them", never hollow); with the filter on, only that person's bars. */
+function gridActualOf(a: BlockActual | undefined, personFilter: string | null): TimeGridActual | undefined {
+  if (!a) return undefined;
+  const people = (personFilter ? a.people.filter((p) => p.profileId === personFilter) : a.people).map((p) => ({
+    key: p.profileId,
+    initials: p.initials,
+    dot: p.dot,
+    spans: p.spans,
+  }));
+  return { people, hollow: a.state === "hollow", sentence: a.sentence };
+}
+
 const PROPOSED_CONFIRM =
   "A pick-a-time link is out to the customer for this — moving it withdraws that link. Move it anyway?";
 
@@ -264,6 +355,8 @@ export function CalendarView({
   addableJobs = [],
   dayRows = EMPTY_DAY_ROWS,
   people = EMPTY_PEOPLE,
+  actuals,
+  actualsCappedBefore = null,
 }: {
   jobs: CalJob[];
   segments?: CalSegment[];
@@ -299,6 +392,12 @@ export function CalendarView({
   dayRows?: Record<string, CrewDayRow[]>;
   /** Everyone the company ever had, so a chip names a person who left. */
   people?: CalPerson[];
+  /** What happened on past days: the clocked time as compact spans (lib/schedule/plan-vs-actual).
+   *  null: the read failed (no bars, and one quiet line says so). Absent: nothing was read. */
+  actuals?: ActualsPayload | null;
+  /** When the clocked-time read hit its cap: the first day it holds whole. Older days say "Clocked time
+   *  loads back to <date>." and are never drawn hollow (blank is not zero). */
+  actualsCappedBefore?: string | null;
 }) {
   const searchParams = useSearchParams();
   const toast = useToast();
@@ -448,6 +547,17 @@ export function CalendarView({
     return visit ? { kind: "visit", day: sheet.day, visit } : null;
   }, [sheet, jobs, appointments, ownHours, jobCrewOn]);
 
+  /** Each job's segments, by job: the days it is on (segments first), for the grid, the towns and the
+   *  past blocks what happened is matched to. */
+  const segByJob = useMemo(() => {
+    const m = new Map<string, CalSegment[]>();
+    for (const s of segments) {
+      if (!m.has(s.job_id)) m.set(s.job_id, []);
+      m.get(s.job_id)!.push(s);
+    }
+    return m;
+  }, [segments]);
+
   const byDay = useMemo(() => {
     const m = new Map<string, DayData>();
     const get = (k: string) => {
@@ -465,24 +575,9 @@ export function CalendarView({
       /* ON EVERY DAY IT COVERS, not just the one it starts on. Erik: "i set it for a week … but it
          only showed up as 1 day." A booking was filed under its start day alone, so a Monday-to-
          Friday job was drawn on Monday and Tuesday through Friday looked free — which is the
-         overbooking the sizes exist to prevent, on the days he is most likely to fill. */
-      const first = dayOf(a.starts_at);
-      const last = a.ends_at ? dayOf(a.ends_at) : first;
-      get(first).appts.push(a);
-      if (isYmd(first) && isYmd(last) && last > first) {
-        const d = new Date(`${first}T12:00:00`);
-        for (let i = 0; i < 60; i++) {
-          d.setDate(d.getDate() + 1);
-          // The span was SIZED in working days (spanEnd/workingDaysFrom skip weekends), so the
-          // draw skips them too — a 3-day visit booked Friday runs Fri+Mon+Tue, and Saturday
-          // stays blank instead of wearing a pill nobody scheduled. The FIRST day is exempt
-          // above: a visit explicitly booked on a Saturday is a Saturday visit.
-          if (d.getDay() === 0 || d.getDay() === 6) continue;
-          const k = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-          if (k > last) break;
-          get(k).appts.push(a);
-        }
-      }
+         overbooking the sizes exist to prevent, on the days he is most likely to fill. The days
+         after the first skip weekends (apptSpanDays: the span was sized in working days). */
+      for (const k of apptSpanDays(a, dayOf)) get(k).appts.push(a);
     }
     for (const t of tasks) {
       if (pf && t.assigned_to !== pf) continue;
@@ -504,41 +599,12 @@ export function CalendarView({
       }
     }
 
-    // Segments-first day expansion: a job with segments is placed only on the
-    // days its ranges cover, so gaps (e.g. between two work weeks) stay empty.
-    const segByJob = new Map<string, CalSegment[]>();
-    for (const s of segments) {
-      if (!segByJob.has(s.job_id)) segByJob.set(s.job_id, []);
-      segByJob.get(s.job_id)!.push(s);
-    }
-    const pushSpan = (j: CalJob, startD: Date, endD: Date) => {
-      const d = new Date(startD);
-      d.setHours(0, 0, 0, 0);
-      const last = new Date(endD);
-      last.setHours(0, 0, 0, 0);
-      // Backstop against a runaway loop; sized above the widest fetch window
-      // so legitimate long jobs aren't silently clipped.
-      const keys: string[] = [];
-      let guard = 0;
-      while (d <= last && guard++ < 540) {
-        keys.push(dayKey(d));
-        d.setDate(d.getDate() + 1);
-      }
-      keys.forEach((k, i) => get(k).jobs.push({ job: j, pos: keys.length > 1 ? `d${i + 1}/${keys.length}` : null }));
-    };
+    // Segments-first day expansion (jobDayRanges): a job with segments is placed only on the days its
+    // ranges cover, so gaps (e.g. between two work weeks) stay empty; "d2/3" counts within its range.
     for (const j of jobs) {
       if (pf && !(j.assigned_to ?? []).includes(pf)) continue;
-      const segs = segByJob.get(j.id);
-      if (segs?.length) {
-        for (const s of segs) pushSpan(j, new Date(`${s.start_date}T00:00:00`), new Date(`${s.end_date}T00:00:00`));
-      } else if (j.scheduled_start) {
-        // scheduled_start/_end are INSTANTS: resolve each to its ORG-TZ day
-        // first, then hand pushSpan pure local-midnight day anchors. Feeding
-        // the raw timestamps in put an evening-scheduled Pacific job on the
-        // UTC (next) day when server-rendered.
-        const startYmd = dayOf(j.scheduled_start);
-        const endYmd = j.scheduled_end ? dayOf(j.scheduled_end) : startYmd;
-        pushSpan(j, new Date(`${startYmd}T00:00:00`), new Date(`${endYmd < startYmd ? startYmd : endYmd}T00:00:00`));
+      for (const keys of jobDayRanges(j, segByJob.get(j.id), dayOf)) {
+        keys.forEach((k, i) => get(k).jobs.push({ job: j, pos: keys.length > 1 ? `d${i + 1}/${keys.length}` : null }));
       }
     }
 
@@ -548,7 +614,7 @@ export function CalendarView({
     }
     return m;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [jobs, segments, appointments, tasks, external, personFilter, tz]);
+  }, [jobs, segByJob, appointments, tasks, external, personFilter, tz]);
 
   /** A day tap drills into that day, unless the rail has armed it (then it places the picked work). */
   const target = useDayTarget();
@@ -576,6 +642,89 @@ export function CalendarView({
   const wdStartMin = hmToMin(workDayStart);
   const wdEndMin = Math.max(wdStartMin + 60, hmToMin(workDayEnd));
 
+  /** A job's block on day `k` as the grid draws it (lib/schedule/job-block jobDayBlock: its own hours
+   *  that day when it keeps them, else its usual hours), never zero-length. */
+  const jobBlockOn = useCallback(
+    (job: CalJob, k: string) => {
+      const b = jobDayBlock({
+        day: k,
+        scheduledStart: job.scheduled_start,
+        scheduledEnd: job.scheduled_end,
+        plannedMinutes: job.planned_minutes,
+        tz,
+        wd: { startMin: wdStartMin, endMin: wdEndMin },
+        dayHours: ownHours.get(job.id)?.get(k) ?? null,
+      });
+      return { startMin: b.startMin, endMin: b.endMin > b.startMin ? b.endMin : b.startMin + 60 };
+    },
+    [tz, wdStartMin, wdEndMin, ownHours],
+  );
+
+  /* ── WHAT HAPPENED (Wave 2, SV-actual) ───────────────────────────────────────────────────────────
+     The past days' clocked time, matched to EXACTLY the blocks the grid draws (every job's days, each
+     by its own hours; every visit on a job), for EVERYONE: hollow is decided before the person filter.
+     Only days that are loaded whole are judged; with no clocked time in the window at all (a company
+     that doesn't use the clock), nothing is: missing data is never "nobody went". */
+  const spans = useMemo(() => unpackActuals(actuals), [actuals]);
+  const clockInUse = spans.length > 0;
+  /** Is this past day's clocked time loaded whole (so a block with none of it is truly hollow)? */
+  const actualsWhole = useCallback(
+    (k: string) => clockInUse && k < todayK && (!actualsCappedBefore || k >= actualsCappedBefore),
+    [clockInUse, todayK, actualsCappedBefore],
+  );
+  const pastBlocks = useMemo(() => {
+    const out: PlanBlock[] = [];
+    const seen = new Set<string>();
+    const add = (b: PlanBlock) => {
+      if (seen.has(b.key) || !actualsWhole(b.dayStr)) return;
+      seen.add(b.key);
+      out.push(b);
+    };
+    for (const job of jobs) {
+      for (const keys of jobDayRanges(job, segByJob.get(job.id), dayOf)) {
+        for (const k of keys) {
+          if (k >= todayK || k < winFrom) continue;
+          add({ key: `j-${job.id}-${k}`, jobId: job.id, dayStr: k, ...jobBlockOn(job, k), kind: "job" });
+        }
+      }
+    }
+    for (const a of appointments) {
+      // Drawn visits only: not absorbed into their job, not a call (a call is pinned, not a block).
+      if ((a as { absorbed?: boolean }).absorbed || a.type === "call" || !a.job_id) continue;
+      for (const k of apptSpanDays(a, dayOf)) {
+        if (k >= todayK || k < winFrom) continue;
+        add({ key: `a-${a.id}-${k}`, jobId: a.job_id, dayStr: k, ...apptDayMinutes(a, k, dayOf, minOf, { startMin: wdStartMin, endMin: wdEndMin }), kind: "visit" });
+      }
+    }
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jobs, segByJob, appointments, jobBlockOn, actualsWhole, todayK, winFrom, tz, wdStartMin, wdEndMin]);
+  const pva = useMemo(
+    () => (clockInUse ? planVsActual({ blocks: pastBlocks, spans, todayStr: todayK }) : null),
+    [clockInUse, pastBlocks, spans, todayK],
+  );
+  /** A past day's worked time for the day drill's card (the track under the block): the booked span
+   *  and who clocked in (person-filtered, like the grid), with the sentence. Null when not judged. */
+  const dayActualFor = useCallback(
+    (job: CalJob, k: string) => {
+      if (!actualsWhole(k)) return null;
+      const a = pva?.byKey.get(`j-${job.id}-${k}`);
+      if (!a) return null;
+      return {
+        booked: jobBlockOn(job, k),
+        people: personFilter ? a.people.filter((p) => p.profileId === personFilter) : a.people,
+        sentence: a.sentence,
+      };
+    },
+    [actualsWhole, pva, personFilter, jobBlockOn],
+  );
+  /** The past job days nobody clocked in on (the month's hollow tone). */
+  const hollowKeys = useMemo(() => {
+    const out = new Set<string>();
+    for (const [key, a] of pva?.byKey ?? []) if (a.state === "hollow" && key.startsWith("j-")) out.add(key);
+    return out;
+  }, [pva]);
+
   /** One day's grid pills + all-day tray items. Jobs take their scheduled
    *  window — an explicit (non-sentinel) start time on their start day — or
    *  the org work-day window when all-day; appointments run starts_at →
@@ -589,37 +738,35 @@ export function CalendarView({
     const events: TimeGridEvent[] = [];
     const tray: TimeGridAllDay[] = [];
     if (!data) return { events, allDay: tray };
+    /* A PAST DAY LOADED WHOLE shows what happened (the bars, hollow) instead of the crew as planned;
+       today and later, and a past day whose clocked time isn't loaded, show who's on it. */
+    const judged = actualsWhole(k);
     for (const { job, pos } of data.jobs) {
       /* THE BLOCK IS WHAT WAS SAVED: its start, and the end its length gives it, in the org's clock
          (lib/schedule/job-block jobDayBlock, the one rule the writer, the fitter and the time
-         controls share). THE SENTINEL NEEDS BOTH ENDS (Nora's 9–11 at a 9 o'clock shop is timed); a
-         sized job never draws the closing-time stamp older writes put on every end; a job over
-         several days runs full days. A DAY WITH ITS OWN HOURS (0370) draws exactly those. */
-      const b = jobDayBlock({
-        day: k,
-        scheduledStart: job.scheduled_start,
-        scheduledEnd: job.scheduled_end,
-        plannedMinutes: job.planned_minutes,
-        tz,
-        wd: { startMin: wdStartMin, endMin: wdEndMin },
-        dayHours: ownHours.get(job.id)?.get(k) ?? null,
-      });
-      const endMin = b.endMin > b.startMin ? b.endMin : b.startMin + 60;
+         controls share; jobBlockOn). THE SENTINEL NEEDS BOTH ENDS (Nora's 9–11 at a 9 o'clock shop
+         is timed); a sized job never draws the closing-time stamp older writes put on every end; a
+         job over several days runs full days. A DAY WITH ITS OWN HOURS (0370) draws exactly those. */
+      const { startMin, endMin } = jobBlockOn(job, k);
+      const id = `j-${job.id}-${k}`;
+      const actual = judged ? gridActualOf(pva?.byKey.get(id), personFilter) : undefined;
       events.push({
-        id: `j-${job.id}-${k}`,
+        id,
         dayStr: k,
-        startMin: b.startMin,
+        startMin,
         endMin,
         label: job.name,
         /* WHERE AND WHO, IN THE BLOCK (Erik: "we definitly need the address showing up on the job
            block with info too"): the street (or who, when the name is the street), the crew as
-           initials (a dashed Nobody), the time, the town; as much as the block has room for. */
+           initials (a dashed Nobody), the time, the town; as much as the block has room for. A past
+           day's crew is what happened: its bars (below), never the plan's chips. */
         info: {
           place: placeLine({ name: job.name, street: job.address, customer: job.customers?.name })?.text ?? null,
           town: job.city ?? null,
-          time: pos ? `${spanShort(b.startMin, endMin)} · ${pos}` : spanShort(b.startMin, endMin),
-          crew: jobCrewOn(job, k),
+          time: pos ? `${spanShort(startMin, endMin)} · ${pos}` : spanShort(startMin, endMin),
+          crew: judged ? null : jobCrewOn(job, k),
         },
+        ...(actual ? { actual } : {}),
         color: JOB_GRID_TONE,
         href: `/jobs/${job.id}`,
         // Staff tap the block for its day, its time and its crew (the tile's sheet); Open The Job is inside.
@@ -657,17 +804,15 @@ export function CalendarView({
       // STAYED at UTC positions — the "UTC problem in the new calendars").
       /* A DAY IN THE MIDDLE OF A SPAN IS A WHOLE WORKING DAY. Only the first day starts at the
          booked time and only the last day ends at the booked time; the days between are full. */
-      const firstDay = dayOf(a.starts_at) === k;
-      const lastDay = !a.ends_at || dayOf(a.ends_at) === k;
-      const startMin = firstDay ? minOf(a.starts_at) : wdStartMin;
-      let endMin = startMin + 60;
-      if (a.ends_at && new Date(a.ends_at).getTime() > new Date(a.starts_at).getTime()) {
-        endMin = lastDay ? Math.max(startMin + 15, minOf(a.ends_at)) : Math.max(startMin + 15, wdEndMin);
-      } else if (!lastDay) {
-        endMin = Math.max(startMin + 15, wdEndMin);
-      }
+      const { startMin, endMin } = apptDayMinutes(a, k, dayOf, minOf, { startMin: wdStartMin, endMin: wdEndMin });
+      const id = `a-${a.id}-${k}`; // keyed per day — a span appears on several
+      /* A RETURN VISIT ON A JOB is judged like a job's day, unless that job has its own block that day
+         (hidden by the person filter here): its time went to the job's block, never "nobody". A visit
+         with no job is never judged (time is clocked to jobs). */
+      const actual =
+        judged && a.job_id && !pva?.byKey.has(`j-${a.job_id}-${k}`) ? gridActualOf(pva?.byKey.get(id), personFilter) : undefined;
       events.push({
-        id: `a-${a.id}-${k}`, // keyed per day — a span appears on several
+        id,
         dayStr: k,
         startMin,
         endMin,
@@ -677,8 +822,9 @@ export function CalendarView({
           place: placeLine({ name: a.title, street: streetOf(visitPlace(a)), customer: a.customers?.name ?? a.jobs?.name ?? null })?.text ?? null,
           town: townOf(visitPlace(a)) || null,
           time: spanShort(startMin, endMin),
-          crew: visitCrewOn(a, k),
+          crew: actual ? null : visitCrewOn(a, k),
         },
+        ...(actual ? { actual } : {}),
         color: apptGridColor(a),
         /* STRAIGHT TO THE THING, from every view. Erik, on a booking whose length was wrong:
            "i now have now way to adjust the time." There WAS a way — tap the pill, land in the day
@@ -783,8 +929,9 @@ export function CalendarView({
 
 
   // Server-computed now in the ORG tz, so SSR and hydration agree on the now
-  // line; TimeGrid's own minute ticker (also org-tz via the tz prop) takes over.
-  const gridNow = { dayStr: todayStrInTz(tz, new Date(now)), min: tzMinutesOfDay(new Date(now), tz) };
+  // line; TimeGrid's own minute ticker (also org-tz via the tz prop) takes over. Memoized: a fresh
+  // object each render would defeat TimeGrid's memo on every mounted week.
+  const gridNow = useMemo(() => ({ dayStr: todayStrInTz(tz, new Date(now)), min: tzMinutesOfDay(new Date(now), tz) }), [now, tz]);
 
   /** WHERE the day's committed work is. Jobs carry a town; a walk-through's `location` is a bare
    *  street with no city, and inventing one would be worse than saying nothing. Jobs are the right
@@ -793,14 +940,7 @@ export function CalendarView({
    *  the scheduled_start/_end mirror, so a segmented Fri+Mon+Tue job drew pills on Monday with no
    *  town under them, a two-range job advertised its town on the empty gap week, and another
    *  tech's job steered ride-along placement while the person filter hid its pill. */
-  const townSegs = useMemo(() => {
-    const m2 = new Map<string, CalSegment[]>();
-    for (const sg of segments) {
-      if (!m2.has(sg.job_id)) m2.set(sg.job_id, []);
-      m2.get(sg.job_id)!.push(sg);
-    }
-    return m2;
-  }, [segments]);
+  const townSegs = segByJob;
   const townFor = (dayStr: string): string | undefined => {
     const towns = new Set<string>();
     for (const j of jobs ?? []) {
@@ -826,6 +966,67 @@ export function CalendarView({
   };
 
   const dayGrid = view === "day" ? gridDataFor(anchorK, { openApptRecords: true }) : { events: [], allDay: [] };
+
+  /* ONE WEEK'S GRID DATA, BUILT ONCE PER (WEEK, DATA) (the timecard-stack pattern). The endless stack
+     re-renders on every growth, and TimeGrid's memo only bails when a mounted week's props keep their
+     identity: its days, its blocks, its tray. So each week's data lives in a cache keyed by its first
+     day, emptied only when the DATA changes (every array the blocks are drawn from, the day rows, the
+     clocked time, the person filter, the clock and the company's day), never on a growth. The key holds
+     every input's identity: a stale cache after router.refresh would draw yesterday's bars. */
+  type WeekData = { days: TimeGridDay[]; events: TimeGridEvent[]; allDay: TimeGridAllDay[]; label: string; hasToday: boolean; loadsBack: boolean };
+  const weekCacheRef = useRef<{ key: unknown[]; map: Map<string, WeekData> }>({ key: [], map: new Map() });
+  const weekData = useMemo(() => {
+    const key = [
+      jobs, segments, appointments, tasks, external, actuals, actualsCappedBefore, dayRows, people, members, addableJobs,
+      personFilter, tz, todayK, canEdit, workDayStart, workDayEnd,
+    ];
+    const cache = weekCacheRef.current;
+    if (key.length !== cache.key.length || key.some((v, i) => v !== cache.key[i])) weekCacheRef.current = { key, map: new Map() };
+    const map = weekCacheRef.current.map;
+    return stackWeeks.map((wk) => {
+      const first = dayKey(wk[0]);
+      const had = map.get(first);
+      if (had) return had;
+      const days = wk.map((d) => {
+        const k = dayKey(d);
+        return {
+          dayStr: k,
+          label: d.toLocaleDateString(undefined, { weekday: "short", day: "numeric" }),
+          isToday: k === todayK,
+          sublabel: townFor(k),
+        };
+      });
+      const events: TimeGridEvent[] = [];
+      const allDay: TimeGridAllDay[] = [];
+      for (const d of days) {
+        const g = gridDataFor(d.dayStr);
+        events.push(...g.events);
+        allDay.push(...g.allDay);
+      }
+      const built: WeekData = {
+        days,
+        events,
+        allDay,
+        label: spanLabel(wk[0], wk[6], { month: "long" }),
+        hasToday: days.some((d) => d.isToday),
+        // A week with a past day older than the loaded clocked time says so (never drawn hollow).
+        loadsBack: !!actualsCappedBefore && clockInUse && days[0].dayStr < actualsCappedBefore && days[0].dayStr < todayK,
+      };
+      map.set(first, built);
+      return built;
+    });
+    // gridDataFor and townFor read only what the key names (and what is derived from it).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stackWeeks, jobs, segments, appointments, tasks, external, actuals, actualsCappedBefore, dayRows, people, members, addableJobs, personFilter, tz, todayK, canEdit, workDayStart, workDayEnd]);
+  /** The day header's tap: drill into that day (stable, so a mounted week's grid never redraws for it). */
+  const drillInto = useCallback((ds: string) => {
+    window.history.pushState(null, "", `${window.location.pathname}?view=day&date=${ds}`);
+  }, []);
+  /** The armed day target, stable between renders (a fresh object would redraw every mounted week). */
+  const armedProp = useMemo(
+    () => (target.armed ? { label: dayTargetLabel(target.pl.armedCount), onPlace: target.pl.placeOn } : undefined),
+    [target.armed, target.pl.armedCount, target.pl.placeOn],
+  );
 
   /* THE YEAR, ALWAYS. Erik: "we have to put the year on there no way around it." Every one of
      these except the month view used to name a span with no year in it — fine when the calendar
@@ -936,6 +1137,12 @@ export function CalendarView({
         </div>
       )}
 
+      {/* NOTHING SILENT: the clocked time didn't load, so no past block shows what happened (and
+          none is drawn hollow: missing data is not nobody). One quiet line says so. */}
+      {actuals === null && (
+        <p className="text-xs text-slate-500">Clocked time didn&apos;t load, so past days show only what was booked.</p>
+      )}
+
       {/* ARMED, AND SAYING SO WHERE THE TAP HAPPENS.
           The rail's bar is pinned to the bottom of the RAIL, which on a phone sits above the
           calendar — so by the time you have scrolled down to the day you want, the only thing
@@ -987,6 +1194,7 @@ export function CalendarView({
                 <MonthGrid
                   anchor={m}
                   byDay={byDay}
+                  hollow={hollowKeys}
                   todayK={todayK}
                   tz={tz}
                   onPick={handleDayTap}
@@ -1008,23 +1216,7 @@ export function CalendarView({
           onScroll={weekStack.onScroll}
           className="max-h-[max(70dvh,calc(100dvh-14rem))] space-y-3 overflow-y-auto"
         >
-          {stackWeeks.map((wk) => {
-            const days = wk.map((d) => {
-              const k = dayKey(d);
-              return {
-                dayStr: k,
-                label: d.toLocaleDateString(undefined, { weekday: "short", day: "numeric" }),
-                isToday: k === todayK,
-                sublabel: townFor(k),
-              };
-            });
-            const ev: TimeGridEvent[] = [];
-            const tray: TimeGridAllDay[] = [];
-            for (const d of days) {
-              const g = gridDataFor(d.dayStr);
-              ev.push(...g.events);
-              tray.push(...g.allDay);
-            }
+          {weekData.map(({ days, events: ev, allDay: tray, label, hasToday, loadsBack }) => {
             /* WHICH MONTH AM I LOOKING AT. Erik, scrolling: "i dont know what month it is on the
                schedule." Day headers read "Mon 25" — fine in a fixed week, useless once the span
                scrolls through months. The header sticks to the top of the scroller so the answer
@@ -1032,9 +1224,7 @@ export function CalendarView({
             /* The year was CONDITIONAL here — shown only when it differed from today's. That is
                the overdue-badge mistake again: a fact you can only read if you remember the rule
                that governs its absence. Now it is simply always there, and a week that crosses a
-               year names both. */
-            const label = spanLabel(wk[0], wk[6], { month: "long" });
-            const hasToday = days.some((d) => d.isToday);
+               year names both. (Built once per week and data: weekData.) */
             return (
               /* overflow-CLIP, not hidden. `hidden` makes this Card a scroll container, and a
                  sticky child resolves against its NEAREST scrollport — so the month header stuck to
@@ -1052,6 +1242,13 @@ export function CalendarView({
                 >
                   {label}
                   {hasToday && <span className="ml-2 text-[10px] font-bold uppercase tracking-wide">this week</span>}
+                  {/* NOTHING SILENT: older than the clocked time loaded, a past block is never drawn
+                      hollow (missing data is not nobody), and the week says why it shows no bars. */}
+                  {loadsBack && actualsCappedBefore && (
+                    <span className="block text-[11px] font-normal text-slate-500">
+                      Clocked time loads back to {dayWords(actualsCappedBefore)}.
+                    </span>
+                  )}
                 </div>
                 <TimeGrid
                   days={days}
@@ -1061,8 +1258,8 @@ export function CalendarView({
                   workEndMin={wdEndMin}
                   tz={tz}
                   initialNow={gridNow}
-                  onDayClick={(ds) => nav("day", ds, { push: true })}
-                  placement={target.prop}
+                  onDayClick={drillInto}
+                  placement={armedProp}
                   onEventTap={canEdit ? onEventTap : undefined}
                   onSlotTap={canEdit && !target.armed ? onSlotTap : undefined}
                 />
@@ -1100,7 +1297,7 @@ export function CalendarView({
                 workEndMin={wdEndMin}
                 tz={tz}
                 initialNow={gridNow}
-                placement={target.prop}
+                placement={armedProp}
                 onEventTap={canEdit ? onEventTap : undefined}
                 onSlotTap={canEdit && !target.armed ? onSlotTap : undefined}
               />
@@ -1131,6 +1328,7 @@ export function CalendarView({
             onOpenVisit={canEdit ? (visitId) => setSheet({ kind: "visit", id: visitId, day: anchorK }) : undefined}
             jobCrewOn={jobCrewOn}
             visitCrewOn={visitCrewOn}
+            actualFor={dayActualFor}
           />
         </>
       )}
@@ -1181,8 +1379,12 @@ function pillTime(iso: string, tz: string): string {
   return m ? `${h}:${String(m).padStart(2, "0")}${ap}` : `${h}${ap}`;
 }
 
-const PILL_TONE: Record<"job" | "appt" | "apptProposed" | "task" | "external", string> = {
+const PILL_TONE: Record<"job" | "jobHollow" | "ghost" | "appt" | "apptProposed" | "task" | "external", string> = {
   job: "bg-blue-50 text-blue-700",
+  // A past job day nobody clocked in on (hollow): its hue kept in a faint outline, the fill gone.
+  jobHollow: "bg-white/40 text-blue-400 ring-1 ring-inset ring-blue-200",
+  // Work nobody booked (a ghost, part D): dashed, slate, white — never a booking's look.
+  ghost: "border border-dashed border-slate-400 bg-white/60 text-slate-700",
   appt: "bg-violet-50 text-violet-700",
   apptProposed: "bg-violet-50 text-violet-400",
   task: "bg-slate-100 text-slate-600",
@@ -1190,7 +1392,13 @@ const PILL_TONE: Record<"job" | "appt" | "apptProposed" | "task" | "external", s
 };
 
 /** Order a day's jobs/appts/tasks into labelled pills (timed first), for the month grid. */
-function monthPills(data: DayData | undefined, tz: string, dayK?: string): { label: string; tone: keyof typeof PILL_TONE; sort: number }[] {
+function monthPills(
+  data: DayData | undefined,
+  tz: string,
+  dayK?: string,
+  /** Past job days nobody clocked in on (block keys, "j-<job>-<day>"), drawn hollow. */
+  hollow?: ReadonlySet<string>,
+): { label: string; tone: keyof typeof PILL_TONE; sort: number }[] {
   if (!data) return [];
   const dayOf = (iso: string) => todayStrInTz(tz, new Date(iso)); // org-tz, same rule as the grid
   const out: { label: string; tone: keyof typeof PILL_TONE; sort: number }[] = [];
@@ -1200,7 +1408,7 @@ function monthPills(data: DayData | undefined, tz: string, dayK?: string): { lab
     // WHICH DAY OF IT THIS IS — the week view says "d2/3" and the month said nothing, so a
     // three-day job read as three unrelated jobs.
     const base = cust ? `${job.name} · ${cust}` : job.name;
-    out.push({ label: pos ? `${base} · ${pos}` : base, tone: "job", sort: t });
+    out.push({ label: pos ? `${base} · ${pos}` : base, tone: dayK && hollow?.has(`j-${job.id}-${dayK}`) ? "jobHollow" : "job", sort: t });
   }
   for (const a of data.appts) {
     // Absorbed rows are filtered at byDay (0237); an inspection hides only beside its own job.
@@ -1240,6 +1448,7 @@ const MONTH_MAX_PILLS = 3;
 function MonthGrid({
   anchor,
   byDay,
+  hollow,
   todayK,
   tz,
   onPick,
@@ -1247,6 +1456,8 @@ function MonthGrid({
 }: {
   anchor: Date;
   byDay: Map<string, DayData>;
+  /** Past job days nobody clocked in on (the hollow tone; no bars in a month cell). */
+  hollow?: ReadonlySet<string>;
   todayK: string;
   tz: string;
   onPick: (d: Date) => void;
@@ -1274,7 +1485,7 @@ function MonthGrid({
           const k = dayKey(d);
           const data = byDay.get(k);
           const inMonth = d.getMonth() === anchor.getMonth();
-          const pills = monthPills(data, tz, k);
+          const pills = monthPills(data, tz, k, hollow);
           return (
             <button
               key={i}
@@ -1335,6 +1546,7 @@ function DayDetail({
   onOpenVisit,
   jobCrewOn,
   visitCrewOn,
+  actualFor,
 }: {
   dayK: string;
   data?: DayData;
@@ -1351,6 +1563,8 @@ function DayDetail({
   /** The crew as that day's rows leave it (Everyone's Day), for the cards and the rows. */
   jobCrewOn?: (job: Pick<CalJob, "id" | "assigned_to">, day: string) => CrewChip[];
   visitCrewOn?: (a: Pick<CalAppt, "assigned_to">, day: string) => CrewChip[];
+  /** A past day: what happened on a job's block (the card draws it as a small track). */
+  actualFor?: (job: CalJob, day: string) => { booked: { startMin: number; endMin: number }; people: WorkedPerson[]; sentence: string } | null;
 }) {
   const appts = data?.appts ?? [];
   const jobsOn = data?.jobs ?? [];
@@ -1414,6 +1628,7 @@ function DayDetail({
               dayHours={ownHours?.get(job.id)?.get(dayK) ?? null}
               onOpen={onOpenJob ? () => onOpenJob(job.id) : undefined}
               crew={jobCrewOn ? jobCrewOn(job, dayK) : undefined}
+              actual={actualFor ? actualFor(job, dayK) : null}
             />
           ))}
           {!jobsOn.length && (
