@@ -241,6 +241,14 @@ describe("the Waiting fold", () => {
     expect(html).not.toContain("Waiting on the permit");
   });
 
+  it("a job held until Oct 3 waits in the fold as 'Back Oct 3', never up top", () => {
+    // query.ts: heldJobState(hold_until, today) === "later" → waitingRow(...), not a Now row.
+    const held = waitingRow({ id: "onhold-j47", kind: "job_on_hold", title: "Kitchen Hood Outlet · J-047", why: "Waiting on the customer", backOn: "2026-10-03", href: "/jobs/j47" })!;
+    expect(waitingLine(held)).toBe("Kitchen Hood Outlet · J-047 · Waiting on the customer · Back Oct 3");
+    const query = readFileSync(join(process.cwd(), "src/lib/action-items/query.ts"), "utf8");
+    expect(query).toMatch(/if \(withDay && state === "later"\) \{\s*const row = waitingRow\(\{ id: `onhold-\$\{j\.id\}`, kind: "job_on_hold"/);
+  });
+
   it("each row says what, why and the day it comes back", () => {
     expect(waitingLine(w({}))).toBe("Rhodesia Panel · J-034 · Waiting on the permit · Back Oct 3");
     const fold = readFileSync(join(process.cwd(), "src/components/action-items/waiting-fold.tsx"), "utf8");
