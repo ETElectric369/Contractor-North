@@ -107,6 +107,25 @@ function parts(iso: string | null) {
   };
 }
 
+/**
+ * Whether the Rate field holds a change a Save would still write: what save() sends for
+ * rate_override (a typed rate, 0 = none; never a new one for the owner, 0286) against what is
+ * stored. A VALUE, not an "it was edited" flag, so a saved Rate stops counting as unsaved as soon
+ * as the refreshed row comes back.
+ */
+export function rateUnsavedOf(f: { rateDirty: boolean; ownerShift: boolean; rate: number; stored: number | string | null | undefined }): boolean {
+  if (!f.rateDirty || f.ownerShift) return false;
+  const stored = f.stored == null ? null : Number(f.stored);
+  return (f.rate > 0 ? f.rate : null) !== stored;
+}
+
+/** The form's four time fields, as seeded from a stored clock_in / clock_out. */
+export function formTimesOf(clockIn: string, clockOut: string | null) {
+  const a = parts(clockIn);
+  const b = parts(clockOut);
+  return { date: a.date, startT: a.time, endT: b.time || a.time, endDate: b.date || a.date };
+}
+
 export function EditEntryButton({
   entry,
   jobCodes,
@@ -204,6 +223,26 @@ export function EditEntryButton({
   // office comes here to fix) would have been silently truncated to a same-day span on
   // save. Seeded from the stored clock_out, so opening and saving is always a no-op.
   const [endDate, setEndDate] = useState(outP.date || inP.date);
+  /* THE STORED TIMES MOVED UNDER THE FORM. Move The Split rewrites this shift's clock_in or
+     clock_out on the server, and the refreshed `entry` arrives while this component stays mounted
+     (the job page's Time tab keeps it; a billed-hours note keeps the modal open). A form still
+     holding the OLD stored times would read as unsaved (Copy To Someone Else… shut behind "Save
+     your changes first") and a Save would put the old times back, undoing the move. So when the
+     stored times change and the form's times were not touched, they follow the stored row;
+     times the person typed are never overwritten. */
+  const [seenSpan, setSeenSpan] = useState({ in: entry.clock_in, out: entry.clock_out });
+  if (seenSpan.in !== entry.clock_in || seenSpan.out !== entry.clock_out) {
+    const was = formTimesOf(seenSpan.in, seenSpan.out);
+    const untouched = date === was.date && startT === was.startT && endT === was.endT && endDate === was.endDate;
+    setSeenSpan({ in: entry.clock_in, out: entry.clock_out });
+    if (untouched) {
+      const now = formTimesOf(entry.clock_in, entry.clock_out);
+      setDate(now.date);
+      setStartT(now.startT);
+      setEndT(now.endT);
+      setEndDate(now.endDate);
+    }
+  }
   const [jobId, setJobId] = useState(entry.job_id ?? "");
   const [jobCode, setJobCode] = useState(entry.job_code ?? "");
   // Real lunch MINUTES (not a 30/0 boolean) so editing an unrelated field can't silently
@@ -247,7 +286,13 @@ export function EditEntryButton({
    * stored row, so anything changed in this form and not saved yet would NOT come along: fix
    * Brian's end time, copy to Jimmy before saving, and Jimmy gets the old end time. So while the
    * form holds unsaved changes the copy waits, and says why (Save is right there).
+   *
+   * Every part compares a VALUE with the stored row, so it clears the moment a save's refresh
+   * brings the row back. The Rate too: a sticky "was edited" flag never cleared, and after a
+   * saved Rate edit the copy stayed shut asking for a save that had already happened. It counts
+   * only while what a Save would send (see rate_override below) differs from what is stored.
    */
+  const rateUnsaved = rateUnsavedOf({ rateDirty, ownerShift, rate, stored: entry.rate_override });
   const unsaved =
     profileId !== (entry.profile_id ?? "") ||
     date !== inP.date ||
@@ -258,7 +303,7 @@ export function EditEntryButton({
     jobCode !== (entry.job_code ?? "") ||
     lunchMin !== (entry.lunch_minutes ?? 0) ||
     miles !== (entry.miles ?? 0) ||
-    rateDirty ||
+    rateUnsaved ||
     notes !== (entry.notes ?? "");
 
   function save() {

@@ -29,7 +29,7 @@ vi.mock("../timeclock/actions", () => ({
 import { SchedulingSettings } from "../settings/scheduling-settings";
 import { getOrgSettings } from "@/lib/org-settings";
 import { ShiftList, type StackEntry } from "./timecard-stack";
-import { EditEntryButton, sourceLine } from "./edit-entry-button";
+import { EditEntryButton, sourceLine, rateUnsavedOf, formTimesOf } from "./edit-entry-button";
 import { DuplicateEntryButton } from "./duplicate-entry-button";
 
 const src = (rel: string) => readFileSync(new URL(rel, import.meta.url), "utf8");
@@ -238,6 +238,45 @@ describe("Copy To Someone Else… lives in the editor, beside Split", () => {
     const edit = src("./edit-entry-button.tsx");
     expect(edit).toContain("disabled={pending || unsaved}");
     expect(edit).toContain("Save your changes first, then copy the shift to someone else.");
+  });
+
+  it("a saved Rate stops asking for Save: the copy opens again once the refreshed row holds it", () => {
+    // Brian's Rate typed to 45: unsaved while the row still holds nothing (or 40)...
+    expect(rateUnsavedOf({ rateDirty: true, ownerShift: false, rate: 45, stored: null })).toBe(true);
+    expect(rateUnsavedOf({ rateDirty: true, ownerShift: false, rate: 45, stored: 40 })).toBe(true);
+    // ...and saved once the refresh brings 45 back, even as a numeric string, with the field still "edited".
+    expect(rateUnsavedOf({ rateDirty: true, ownerShift: false, rate: 45, stored: 45 })).toBe(false);
+    expect(rateUnsavedOf({ rateDirty: true, ownerShift: false, rate: 45, stored: "45.00" })).toBe(false);
+    // Cleared to 0 = "use the base rate", saved as no override.
+    expect(rateUnsavedOf({ rateDirty: true, ownerShift: false, rate: 0, stored: null })).toBe(false);
+    expect(rateUnsavedOf({ rateDirty: true, ownerShift: false, rate: 0, stored: 40 })).toBe(true);
+    // Never edited, or the owner's shift (a Save never sends him a rate, 0286): nothing to save.
+    expect(rateUnsavedOf({ rateDirty: false, ownerShift: false, rate: 45, stored: null })).toBe(false);
+    expect(rateUnsavedOf({ rateDirty: true, ownerShift: true, rate: 45, stored: null })).toBe(false);
+    // Wired: `unsaved` reads the value, never the bare flag.
+    const edit = src("./edit-entry-button.tsx");
+    expect(edit).toContain("const rateUnsaved = rateUnsavedOf({ rateDirty, ownerShift, rate, stored: entry.rate_override });");
+    const unsavedExpr = edit.slice(edit.indexOf("const unsaved ="), edit.indexOf("function save()"));
+    expect(unsavedExpr).toContain("rateUnsaved ||");
+    expect(unsavedExpr).not.toMatch(/\brateDirty\b/);
+  });
+
+  it("a moved split's new times reach an editor that stays open, unless the person typed their own", () => {
+    // Brian's shift, 7:00 AM to 3:30 PM Pacific; Move The Split ends it at 2:00 PM.
+    const before = formTimesOf("2026-09-22T14:00:00Z", "2026-09-22T22:30:00Z");
+    const after = formTimesOf("2026-09-22T14:00:00Z", "2026-09-22T21:00:00Z");
+    expect(before.endT).not.toBe(after.endT);
+    expect(after.startT).toBe(before.startT);
+    expect(after.date).toBe(before.date);
+    // An open clock's form ends where it starts, on the same day.
+    const open = formTimesOf("2026-09-22T14:00:00Z", null);
+    expect(open.endT).toBe(open.startT);
+    expect(open.endDate).toBe(open.date);
+    // Wired: when the stored times change, untouched fields follow the row; typed ones stay.
+    const edit = src("./edit-entry-button.tsx");
+    expect(edit).toMatch(/if \(seenSpan\.in !== entry\.clock_in \|\| seenSpan\.out !== entry\.clock_out\) \{/);
+    expect(edit).toContain("const untouched = date === was.date && startT === was.startT && endT === was.endT && endDate === was.endDate;");
+    expect(edit).toMatch(/if \(untouched\) \{\s*const now = formTimesOf\(entry\.clock_in, entry\.clock_out\);/);
   });
 });
 
