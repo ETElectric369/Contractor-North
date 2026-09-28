@@ -119,5 +119,7 @@ describe("the registry and Nort", () => {
     // inquiry.delete stays (it lives on /leads behind its ⋯), and stays out of Nort's reach.
     expect(inquiryActions["inquiry.delete"]).toBeDefined();
     expect(AGENT_WRITE_ALLOWED.has("inquiry.delete")).toBe(false);
-  });
+    // The imports above load the whole action registry cold, inside the test: alone that takes about
+    // 2 s, and in the full parallel run it once took past the 5 s default (the test itself is instant).
+  }, 30_000);
 });
