@@ -7,13 +7,13 @@ import { OpenInspectorButton } from "./open-inspector-button";
 import Link from "next/link";
 import { isStaffRole } from "@/lib/actions/perms";
 import { notFound } from "next/navigation";
-import { Home, ChevronRight, MapPin, Plus, Printer, Phone, HardHat } from "lucide-react";
+import { Home, ChevronRight, Plus, Printer, Phone, HardHat } from "lucide-react";
 import { ClipboardCheck, ListChecks } from "./job-tab-icons";
 import { arrangeJobTabs } from "./job-tabs";
 import { FeatureOffLine } from "@/components/feature-off-line";
 import { featureOn, type FeatureKey } from "@/lib/features";
 import { createClient } from "@/lib/supabase/server";
-import { acceptedQuoteTotal } from "@/lib/payment-schedule-math";
+import { acceptedQuoteTotal, leftToBill, scheduleStatus, type Milestone } from "@/lib/payment-schedule-math";
 import { invoiceBalance, isDrawKind } from "@/lib/invoice-math";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge, statusTone } from "@/components/ui/badge";
@@ -30,10 +30,12 @@ import {
   initials,
   formatCityStateZip,
   formatFullAddress,
+  unitLine,
 } from "@/lib/utils";
 import { JobDocuments } from "./job-documents";
 import { JobCostCapture } from "./job-cost-capture";
 import { UnbilledCard, UnbilledDoorButton, type UnbilledView } from "./unbilled-card";
+import { LeftToBillCard, contractEstimates } from "./left-to-bill-card";
 import { fixedBillingsNotYetNetted, unbilledWorkForJob } from "@/lib/unbilled-work";
 import { groupJobCosts } from "@/lib/job-cost-groups";
 import { readJobPapers } from "./job-papers";
@@ -91,7 +93,6 @@ import { getOrgSettings, workDayWindowHm } from "@/lib/org-settings";
 import { computeJobLaborBilling, customerLaborRateForJob, fetchJobLaborRows, laborCostForJob } from "@/lib/labor-billing";
 import { ownerRegister } from "@/lib/owner-draw";
 import { formatDateTz, hmToMin, todayStrInTz, tzMinutesOfDay } from "@/lib/tz";
-import { NavLink } from "@/components/nav-link";
 import { InvoiceAmount, InvoiceAmountDetail } from "@/components/invoice-amount";
 import { IntakeFiles } from "../../leads/intake-files";
 import { intakePaths } from "@/lib/playbook/uploads";
@@ -824,6 +825,55 @@ export default async function JobDetailPage({
   const isDrawBilled = (invoices ?? []).some(
     (i: any) => isDrawKind(i.invoice_kind) && i.status !== "void",
   );
+  // THE OVERVIEW'S ONE FIGURE ON A JOB BILLED BY ITS CONTRACT (W1-19): Left To Bill, from the same
+  // figures above (the contract, what went out on sent bills) or the schedule's own status, the one
+  // PaymentScheduleCard shows. Staff only (the card is never mounted for a tech).
+  const scheduleView = (paymentMilestones ?? []).length ? scheduleStatus((paymentMilestones ?? []) as Milestone[], contractTotal) : null;
+  const leftView = leftToBill(progress, scheduleView);
+  const draftInvoice =
+    ((invoices ?? []) as any[]).find((i) => openDraft && i.id === openDraft.id) ?? ((invoices ?? []) as any[]).find((i) => i.status === "draft") ?? null;
+  // THE JOB'S NEW INVOICE, ONE SET OF FACTS (W1-24, W1-19): the Invoices tab's button and the Left To
+  // Bill card's are the same button with the same props, so the two can never answer differently.
+  // Every prop is a fact this page already read; what one tap does is lib/actuals-draw newInvoiceRoute.
+  const newInvoiceProps = {
+    jobId: j.id as string,
+    billingType: (j as any).billing_type ?? "fixed",
+    estimate: quoted,
+    // hasEstimate, drawBilled, scheduleActive, billsActuals, wholeEstimate and changeOrdersToBill, derived
+    // once from this page's own reads (lib/actuals-draw newInvoicePageFacts).
+    ...newInvoicePageFacts({
+      billingType: (j as any).billing_type ?? "fixed",
+      estimate: quoted,
+      quotes: (quotes ?? []) as any[],
+      invoices: (invoices ?? []) as any[],
+      milestoneCount: ((paymentMilestones as any) ?? []).length,
+      // Approved change orders: Bill The Change Orders once the estimate's bill is out.
+      changeOrders: (changeOrders ?? []) as { status?: string | null; amount?: number | null }[],
+    }),
+    worked: workedToDate,
+    billed: billedToDate,
+    paid: collected,
+    openDraft: openDraft ? { id: openDraft.id, number: openDraft.number, refreshable: openDraft.refreshable } : null,
+    // The Overview card's own figures (the same door, so the sheet and the card agree).
+    unbilled:
+      unbilled && unbilled.schemaReady
+        ? {
+            hours: unbilled.hours,
+            billsCount: unbilled.billsCount,
+            stockCount: unbilled.stockCount,
+            returnsCount: unbilled.returnsCount,
+            total: unbilled.total,
+            laborAmount: unbilled.laborAmount,
+            billsBilled: unbilled.billsBilled,
+            stockBilled: unbilled.stockBilled,
+          }
+        : null,
+    lumpToNet,
+    depositPercent: getOrgSettings((org as any)?.settings).deposit_percent,
+    // Pieces taken past the stock: said BEFORE a bill is built (the sheet says it above Save).
+    stockShortsWords,
+    salesTax: on("sales_tax"),
+  };
   const jobRefunds = (refundRows ?? []).reduce((s: number, r: any) => s + Number(r.amount ?? 0), 0);
   const revenue = Math.max(0, collected - jobRefunds);
   // Profit excludes mileage on PURPOSE so this hub and /analytics show the SAME number
@@ -1041,12 +1091,42 @@ export default async function JobDetailPage({
       label: "Overview",
       content: (
         <div className="space-y-4">
-          {/* THE RUNNING TOTAL leads (Erik: "a running total of open time and materials on the
-              overview") — what's been worked and bought since the last invoice, with the door
-              that bills it. T&M jobs only (billsActuals — the door's own rule); a tech's card is
-              hours only (unbilledView is projected above). */}
-          {billsActuals && (
-            <UnbilledCard jobId={j.id} customerId={j.customer_id ?? null} view={unbilledView} viewerIsStaff={viewerIsStaff} openDraft={openDraft} lumpToNet={lumpToNet} drawBilled={isDrawBilled} />
+          {/* ONE FIGURE AND ONE BUTTON LEAD (W1-19). A job billed by its WORK (every Time & Material
+              job, and for the office a fixed-price job with no live estimate: importsActuals, New
+              Invoice's own rule) leads with the running total (Erik: "a running total of open time
+              and materials on the overview"): "Open $X" and the door that bills it. A job billed by
+              its CONTRACT (a live fixed-price estimate, or any payment schedule) leads with Left To
+              Bill and the job's own New Invoice or Request Next Payment. Both are money, so the
+              office's only; a tech's card is hours only on a job that bills its actuals (unbilledView
+              is projected above) and nothing on one billed by its contract. */}
+          {viewerIsStaff ? (
+            importsActuals ? (
+              <UnbilledCard jobId={j.id} customerId={j.customer_id ?? null} view={unbilledView} viewerIsStaff={viewerIsStaff} openDraft={openDraft} lumpToNet={lumpToNet} drawBilled={isDrawBilled} />
+            ) : (
+              <LeftToBillCard
+                jobId={j.id}
+                view={leftView}
+                estimates={contractEstimates((quotes ?? []) as any[])}
+                sent={((invoices ?? []) as any[])
+                  .filter((i) => i.status !== "void" && i.status !== "draft")
+                  .map((i) => ({ id: String(i.id), number: i.invoice_number ?? null, total: Number(i.total) || 0 }))}
+                draft={draftInvoice ? { id: String(draftInvoice.id), number: draftInvoice.invoice_number ?? null, total: Number(draftInvoice.total) || 0 } : null}
+                rows={(scheduleView?.rows ?? []).map((r) => ({
+                  label: r.label,
+                  percent: r.percent ?? null,
+                  dollars: r.dollars,
+                  billed: r.billed,
+                  next: scheduleView?.next?.index === r.index,
+                }))}
+                isTm={(j as any).billing_type === "tm"}
+                openDraft={openDraft ? { id: openDraft.id, number: openDraft.number, refreshable: openDraft.refreshable } : null}
+                newInvoice={newInvoiceProps}
+              />
+            )
+          ) : (
+            billsActuals && (
+              <UnbilledCard jobId={j.id} customerId={j.customer_id ?? null} view={unbilledView} viewerIsStaff={viewerIsStaff} openDraft={openDraft} lumpToNet={lumpToNet} drawBilled={isDrawBilled} />
+            )
           )}
           {/* THE JOB'S TASKS, small (0358): "Tasks: 7 of 12 done", the next 3 and the Add line; All
               Tasks opens the Tasks chip's tab. The same card for the crew (no prices on a task). */}
@@ -1069,12 +1149,9 @@ export default async function JobDetailPage({
                       <span className="text-sm text-slate-400">—</span>
                     )}
                   </div>
-                  {/* Tap-to-call: one of the two things a job gets opened for from the truck. */}
-                  {j.customers?.phone && (
-                    <a href={`tel:${j.customers.phone}`} className="flex min-h-[44px] items-center gap-1.5 text-sm text-slate-600 hover:text-brand">
-                      <Phone className="h-3.5 w-3.5 text-slate-400" /> {j.customers.phone}
-                    </a>
-                  )}
+                  {/* A LIGHTER INFO CARD (W1-19): the number, read, not a second call button. The
+                      dock's Call is the one door that dials it. */}
+                  {j.customers?.phone && <div className="mt-0.5 text-xs text-slate-500">{j.customers.phone}</div>}
                 </div>
                 <div>
                   <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Status</div>
@@ -1096,16 +1173,12 @@ export default async function JobDetailPage({
                 </div>
                 <div>
                   <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Address</div>
+                  {/* One plain line (W1-19): "123 Main · Truckee, CA 96161". The dock's Navigate is
+                      the one door that drives there. */}
                   <div className="mt-1 text-sm text-slate-700">
-                    {j.address ? (
-                      // Tap-to-navigate: the address opens guided directions in the user's maps app.
-                      <NavLink address={jobAddress} className="flex min-h-[44px] items-center gap-1 text-left hover:text-brand">
-                        <MapPin className="h-3.5 w-3.5 shrink-0 text-slate-400" /> {j.address}
-                        {[j.city, j.state, j.zip].filter(Boolean).length > 0 && (
-                          <span>· {formatCityStateZip(j.city, j.state, j.zip)}</span>
-                        )}
-                      </NavLink>
-                    ) : "—"}
+                    {j.address
+                      ? [[j.address, unitLine(j.unit)].filter(Boolean).join(", "), formatCityStateZip(j.city, j.state, j.zip)].filter(Boolean).join(" · ")
+                      : "—"}
                   </div>
                 </div>
                 <div className="sm:col-span-2">
@@ -1784,46 +1857,9 @@ export default async function JobDetailPage({
               (a tech never sees this tab, and never a price). */}
           {viewerIsStaff && (
             <div className="flex justify-end">
-              <NewInvoiceButton
-                jobId={j.id}
-                billingType={(j as any).billing_type ?? "fixed"}
-                estimate={quoted}
-                // hasEstimate, drawBilled, scheduleActive, billsActuals, wholeEstimate and changeOrdersToBill, derived
-                // once from this page's own reads (lib/actuals-draw newInvoicePageFacts).
-                {...newInvoicePageFacts({
-                  billingType: (j as any).billing_type ?? "fixed",
-                  estimate: quoted,
-                  quotes: (quotes ?? []) as any[],
-                  invoices: (invoices ?? []) as any[],
-                  milestoneCount: ((paymentMilestones as any) ?? []).length,
-                  // Approved change orders: Bill The Change Orders once the estimate's bill is out.
-                  changeOrders: (changeOrders ?? []) as { status?: string | null; amount?: number | null }[],
-                })}
-                worked={workedToDate}
-                billed={billedToDate}
-                paid={collected}
-                openDraft={openDraft ? { id: openDraft.id, number: openDraft.number, refreshable: openDraft.refreshable } : null}
-                // The Overview card's own figures (the same door, so the sheet and the card agree).
-                unbilled={
-                  unbilled && unbilled.schemaReady
-                    ? {
-                        hours: unbilled.hours,
-                        billsCount: unbilled.billsCount,
-                        stockCount: unbilled.stockCount,
-                        returnsCount: unbilled.returnsCount,
-                        total: unbilled.total,
-                        laborAmount: unbilled.laborAmount,
-                        billsBilled: unbilled.billsBilled,
-                        stockBilled: unbilled.stockBilled,
-                      }
-                    : null
-                }
-                lumpToNet={lumpToNet}
-                depositPercent={getOrgSettings((org as any)?.settings).deposit_percent}
-                // Pieces taken past the stock: said BEFORE a bill is built (the sheet says it above Save).
-                stockShortsWords={stockShortsWords}
-                salesTax={on("sales_tax")}
-              />
+              {/* The page's facts, computed once (newInvoiceProps): the Overview's Left To Bill card
+                  mounts the same button with the same props, opened on Part Of The Estimate. */}
+              <NewInvoiceButton {...newInvoiceProps} />
             </div>
           )}
           <Card className="overflow-hidden">

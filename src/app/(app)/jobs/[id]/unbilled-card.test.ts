@@ -86,5 +86,53 @@ describe("UnbilledCard - Open: $X and the door that bills it", () => {
     const html = card({ viewerIsStaff: false, view: { kind: "tech", hours: 13, lastInvoiceNumber: "INV-00028", lastInvoiceAt: null } });
     expect(html).not.toContain("$");
     expect(html).not.toContain("Open:");
+    expect(html).not.toContain("<details");
+  });
+
+  it("a tech with no new time is sent to the job's one clock at the top (W1-20)", () => {
+    const html = card({ viewerIsStaff: false, view: { kind: "tech", hours: 0, lastInvoiceNumber: null, lastInvoiceAt: null } });
+    expect(html).toContain("No new time yet. Tap Clock In at the top of this job.");
+    expect(html).not.toContain("Time tab");
+  });
+});
+
+describe("UnbilledCard - one figure, the reasoning in a Why? fold (W1-19)", () => {
+  const foldOf = (html: string) => html.slice(html.indexOf("<details"), html.indexOf("</details>") + "</details>".length);
+
+  it("the Labor / Bills rows sit in the fold directly under the figure, the button beside it", () => {
+    const html = card();
+    expect(html).toContain("<details");
+    expect(html.indexOf("Open: $3,197.90")).toBeLessThan(html.indexOf("<details"));
+    const fold = foldOf(html);
+    expect(fold).toContain(">Why?<");
+    expect(fold).toContain("Labor");
+    expect(fold).toContain("Erik Taylor 13h");
+    expect(fold).toContain("+ 25% = $142.90");
+    // The one door is outside the fold.
+    expect(fold).not.toContain("<button");
+    expect(html).toContain("Create Invoice for $3,197.90");
+  });
+
+  it("the sentences that change what the button does stay outside the fold", () => {
+    const shorts = "2 pieces were taken past what stock holds; they wait for a roll.";
+    const html = card({
+      drawBilled: true,
+      lumpToNet: 1000,
+      view: { ...WORK, stockShortsWords: shorts } as UnbilledView,
+    });
+    const fold = foldOf(html);
+    expect(html).toContain(shorts);
+    expect(fold).not.toContain(shorts);
+    // The deposit note is said beside the figure, not folded.
+    expect(html).toContain("less the $1,000.00 deposit not yet taken off a bill");
+    expect(fold).not.toContain("deposit not yet taken off a bill");
+  });
+
+  it("nothing new: the sentence, no fold", () => {
+    const html = card({
+      view: { ...WORK, hours: 0, laborAmount: 0, laborByPerson: [], billsCount: 0, billsAmount: 0, billsBilled: 0, total: 0 } as UnbilledView,
+    });
+    expect(html).toContain("Nothing new since INV-00028");
+    expect(html).not.toContain("<details");
   });
 });

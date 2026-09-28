@@ -7,6 +7,7 @@ import { FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { useToast } from "@/components/toast";
+import { WhyFold } from "@/components/why-fold";
 import { formatCurrency, formatDate, formatDuration } from "@/lib/utils";
 import type { UnbilledWork } from "@/lib/unbilled-work";
 import { createInvoiceForJob } from "../actions";
@@ -44,9 +45,13 @@ export type UnbilledView =
  * deposit); otherwise "Create Invoice" (createInvoiceForJob, the Invoices tab's New Invoice).
  *
  * EVERY T&M JOB (jobBillsItsActuals), estimate or not: on Time & Material the estimate is a guide,
- * never a block (Erik, Tao J-002, where an accepted estimate hid the card). A payment schedule or a
- * fixed-price job bills something else - a figure here would be a number no door produces (MONEY
- * law) - so there the card doesn't exist.
+ * never a block (Erik, Tao J-002, where an accepted estimate hid the card). For the office, also a
+ * fixed-price job with no live estimate (W1-19): its next New Invoice pulls the same hours and
+ * receipts (nextInvoiceImportsActuals, J-010 Purple Sage), so this figure is what that door bills. A
+ * payment schedule or a fixed-price contract bills something else - a figure here would be a number
+ * no door produces (MONEY law) - so there the Overview leads with Left To Bill instead
+ * (left-to-bill-card.tsx). The Labor / Bills / Stock / Credit rows sit in a Why? fold under the one
+ * figure; the sentences that change what the button does stay outside it.
  *
  * `view` null = the total couldn't be computed; the card says so and names the tabs that hold
  * the rows, instead of vanishing (nothing silent).
@@ -164,7 +169,12 @@ export function UnbilledCard({
                 {" "}from Billing.
               </p>
             ) : (
-              <dl className="mt-2 space-y-1.5 text-sm">
+              // THE REASONING WAITS IN A FOLD (W1-19): the card leads with one figure and one button;
+              // what makes the figure (each person's hours, the bills and their markup, stock, a
+              // return's credit) sits under "Why?" directly beneath it. The amber and plain sentences
+              // below stay OUT of the fold: they change what the button does, so they are never folded.
+              <WhyFold>
+              <dl className="space-y-1.5 text-sm">
                 <div className="flex gap-2">
                   <dt className="w-12 shrink-0 text-slate-400">Labor</dt>
                   <dd className="min-w-0">
@@ -237,6 +247,7 @@ export function UnbilledCard({
                   </div>
                 )}
               </dl>
+              </WhyFold>
             )}
             {w.stockShortsWords && (
               // TAKEN PAST THE SHELF: said before the invoice is built, never discovered after it

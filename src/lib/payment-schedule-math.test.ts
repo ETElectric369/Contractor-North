@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { milestoneAmount, milestoneKind, scheduleStatus, defaultSchedule, contractTotalFromQuotes } from "@/lib/payment-schedule-math";
+import { milestoneAmount, milestoneKind, scheduleStatus, defaultSchedule, contractTotalFromQuotes, leftToBill } from "@/lib/payment-schedule-math";
 
 describe("contractTotalFromQuotes (shared contract-base rule)", () => {
   it("uses the accepted quote(s) when any are accepted (ignores a superseded draft/revision)", () => {
@@ -192,5 +192,86 @@ describe("contractTotalFromQuotes — a caller that omits created_at must not de
         { total: 7000, status: "sent" },
       ]),
     ).toBe(5000);
+  });
+});
+
+describe("leftToBill — the one figure on a job billed by its contract (W1-19)", () => {
+  it("a fixed-price contract: the contract less what went out on sent bills (a draft is not a bill)", () => {
+    // progress.invoiced already leaves out drafts and void bills (computeJobProgress).
+    const l = leftToBill({ estimate: 20000, invoiced: 5000 }, null);
+    expect(l.kind).toBe("contract");
+    expect(l.contract).toBe(20000);
+    expect(l.billed).toBe(5000);
+    expect(l.left).toBe(15000);
+    expect(l.billedInFull).toBe(false);
+    expect(l.over).toBe(0);
+  });
+
+  it("billed to the cent: $0.00 left and billed in full", () => {
+    const l = leftToBill({ estimate: 12345.67, invoiced: 12345.67 }, null);
+    expect(l.left).toBe(0);
+    expect(l.billedInFull).toBe(true);
+  });
+
+  it("billed past the contract: never a negative figure, and how far over is said", () => {
+    const l = leftToBill({ estimate: 10000, invoiced: 10750.5 }, null);
+    expect(l.left).toBe(0);
+    expect(l.billedInFull).toBe(true);
+    expect(l.over).toBe(750.5);
+  });
+
+  it("an estimate with no price is not 'billed in full'", () => {
+    const l = leftToBill({ estimate: 0, invoiced: 0 }, null);
+    expect(l.left).toBe(0);
+    expect(l.billedInFull).toBe(false);
+  });
+
+  it("a schedule: its own remaining and next payment, the same figures Request Next Payment draws", () => {
+    const s = scheduleStatus(
+      [
+        { sort_order: 0, label: "Deposit", percent: 30, invoice_id: "inv-1", billed_amount: 3000 },
+        { sort_order: 1, label: "Rough-In", percent: 35 },
+        { sort_order: 2, label: "Final", percent: 35 },
+      ],
+      10000,
+    );
+    const l = leftToBill({ estimate: 10000, invoiced: 3000 }, s);
+    expect(l.kind).toBe("schedule");
+    expect(l.left).toBe(s.remaining);
+    expect(l.left).toBe(7000);
+    expect(l.billed).toBe(3000);
+    expect(l.next).toEqual({ label: "Rough-In", dollars: 3500 });
+    expect(l.scheduleShort).toBe(0);
+    expect(l.scheduleOver).toBe(0);
+  });
+
+  it("a fully drawn schedule: $0.00 left, no next payment", () => {
+    const s = scheduleStatus([{ sort_order: 0, label: "Full", percent: 100, invoice_id: "inv-1", billed_amount: 5000 }], 5000);
+    const l = leftToBill({ estimate: 5000, invoiced: 5000 }, s);
+    expect(l.left).toBe(0);
+    expect(l.next).toBeNull();
+    expect(l.billedInFull).toBe(true);
+  });
+
+  it("a schedule that draws less, or more, than the contract says by how much", () => {
+    const short = leftToBill(
+      { estimate: 10000, invoiced: 0 },
+      scheduleStatus([{ sort_order: 0, label: "a", percent: 50 }, { sort_order: 1, label: "b", percent: 40 }], 10000),
+    );
+    expect(short.scheduleShort).toBe(1000);
+    expect(short.scheduleOver).toBe(0);
+    const over = leftToBill(
+      { estimate: 10000, invoiced: 0 },
+      scheduleStatus([{ sort_order: 0, label: "a", amount: 6000 }, { sort_order: 1, label: "b", amount: 5000 }], 10000),
+    );
+    expect(over.scheduleOver).toBe(1000);
+    expect(over.scheduleShort).toBe(0);
+  });
+
+  it("an empty schedule is no schedule; bad numbers never become NaN", () => {
+    expect(leftToBill({ estimate: 100, invoiced: 0 }, scheduleStatus([], 100)).kind).toBe("contract");
+    const l = leftToBill({ estimate: NaN as unknown as number, invoiced: Infinity as unknown as number }, undefined);
+    expect(l.left).toBe(0);
+    expect(Number.isFinite(l.billed)).toBe(true);
   });
 });
