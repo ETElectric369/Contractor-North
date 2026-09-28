@@ -658,10 +658,13 @@ export async function setAvatarUrl(url: string | null): Promise<Result> {
   return { ok: true };
 }
 
-/** Owner/admin edits a team member's profile (name, role, active, rate). */
+/** Owner/admin edits a team member's profile (name, phone, role, rate, home address, commute
+ *  baseline, crew lead). NEVER whether they're active (W2-04): deactivating goes only through
+ *  setMemberActive, which stamps deactivated_at/by and bans or unbans the login. A write of `active`
+ *  here locked nobody out and lifted no ban, and said nothing about either. */
 export async function updateMember(
   id: string,
-  patch: { full_name?: string; phone?: string; role?: string; active?: boolean; hourly_rate?: number | null; home_address?: string | null; commute_baseline_miles?: number; crew_lead?: boolean },
+  patch: { full_name?: string; phone?: string; role?: string; hourly_rate?: number | null; home_address?: string | null; commute_baseline_miles?: number; crew_lead?: boolean },
 ): Promise<Result> {
   const supabase = await createClient();
   const {
@@ -678,7 +681,6 @@ export async function updateMember(
   if (patch.full_name !== undefined) clean.full_name = patch.full_name.trim() || null;
   if (patch.phone !== undefined) clean.phone = patch.phone.trim() || null;
   if (patch.role !== undefined && ["admin", "office", "tech"].includes(patch.role)) clean.role = patch.role;
-  if (patch.active !== undefined) clean.active = patch.active;
   if (patch.hourly_rate !== undefined) clean.hourly_rate = patch.hourly_rate;
   if (patch.home_address !== undefined) clean.home_address = patch.home_address?.trim() || null;
   if (patch.commute_baseline_miles !== undefined) clean.commute_baseline_miles = Math.max(0, Number(patch.commute_baseline_miles) || 0);
@@ -699,7 +701,7 @@ export async function updateMember(
   if (!wroteM?.length) return { ok: false, error: "That didn't save - reload and try again." };
   revalidatePath("/team");
   revalidatePath("/settings");
-  revalidatePath("/planner"); // role/active/rate feed the planner's assignee pickers
+  revalidatePath("/planner"); // role/rate feed the planner's assignee pickers
   return { ok: true };
 }
 

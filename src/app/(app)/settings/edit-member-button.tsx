@@ -14,13 +14,18 @@ interface Member {
   email: string | null;
   phone?: string | null;
   role: string;
-  active: boolean;
+  /** Carried by the roster (TeamMemberMenu reads it for Deactivate / Reactivate); never edited here. */
+  active?: boolean;
   home_address?: string | null;
   commute_baseline_miles?: number | null;
   crew_lead?: boolean;
 }
 
-/** Owner/admin edit for a team member: name/role/active + login email/password.
+/** Owner/admin edit for a team member: name/role/crew lead/login (email and password).
+ *  NO STATUS HERE (W2-04). Deactivating is the roster ⋯'s Deactivate (Lock Out) / Reactivate
+ *  (setMemberActive), the one door that stamps deactivated_at/by and bans or unbans the login. A
+ *  Status select here only wrote profiles.active: a deactivation left the login working, and a
+ *  reactivation never lifted a ban the ⋯ menu had set, with nothing saying why they couldn't sign in.
  *  `menuItem` renders the trigger as a full-width menu row (for the /team ⋯ menu)
  *  instead of the pencil icon; the modal renders IN-PLACE, so the menu that owns
  *  this must stay mounted while it's open (see TeamMemberMenu's modal-rule handler).
@@ -54,7 +59,6 @@ export function EditMemberButton({
   const [homeAddress, setHomeAddress] = useState(member.home_address ?? "");
   const [commuteBaseline, setCommuteBaseline] = useState(Number(member.commute_baseline_miles ?? 0));
   const [role, setRole] = useState(member.role);
-  const [active, setActive] = useState(member.active);
   const [crewLead, setCrewLead] = useState(!!member.crew_lead);
   const [email, setEmail] = useState(member.email ?? "");
   const [password, setPassword] = useState("");
@@ -70,7 +74,6 @@ export function EditMemberButton({
         home_address: homeAddress,
         commute_baseline_miles: commuteBaseline,
         role: isSelf ? undefined : role,
-        active: isSelf ? undefined : active,
         crew_lead: crewLead,
       });
       if (!res.ok) return setError(res.error ?? "Could not save.");
@@ -152,22 +155,13 @@ export function EditMemberButton({
             <p className="mt-1 text-xs text-slate-400">Subtracted once per day driven — only miles ABOVE this count as reimbursable/business miles. 0 = treat all as business.</p>
           </div>
           {!isSelf && (
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label htmlFor="m-role">Role</Label>
-                <Select id="m-role" value={role} onChange={(e) => setRole(e.target.value)}>
-                  <option value="admin">Admin</option>
-                  <option value="office">Office</option>
-                  <option value="tech">Tech</option>
-                </Select>
-              </div>
-              <div>
-                <Label htmlFor="m-active">Status</Label>
-                <Select id="m-active" value={active ? "active" : "inactive"} onChange={(e) => setActive(e.target.value === "active")}>
-                  <option value="active">Active</option>
-                  <option value="inactive">Inactive</option>
-                </Select>
-              </div>
+            <div>
+              <Label htmlFor="m-role">Role</Label>
+              <Select id="m-role" value={role} onChange={(e) => setRole(e.target.value)}>
+                <option value="admin">Admin</option>
+                <option value="office">Office</option>
+                <option value="tech">Tech</option>
+              </Select>
             </div>
           )}
           {/* Crew lead (any role): with Daily Reports on, Nort asks them the end-of-day debrief —

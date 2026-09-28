@@ -11,6 +11,10 @@ import { join } from "node:path";
  * it away. Daily Reports off only takes the clock-out report out of the box's line.
  * Crew & Payroll takes nothing here: the pay and charge rates price labor, and the home address and
  * commute baseline feed the Tax Report's mileage deduction, so they stay whatever the switches say.
+ *
+ * AND ONE DOOR TO LOCK SOMEONE OUT (W2-04): the edit has no Status select. The roster ⋯'s
+ * Deactivate (Lock Out) / Reactivate (setMemberActive) stamps who and when and bans or lifts the
+ * login; the edit's old select wrote profiles.active alone and did neither.
  */
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
 vi.mock("../settings/actions", () => ({ updateMember: vi.fn(), updateMemberAuth: vi.fn() }));
@@ -53,6 +57,49 @@ describe("a member's edit on /team", () => {
     expect(html).not.toContain("daily report at clock-out");
     expect(html).toContain("Daily commute baseline");
     expect(html).toContain("Home address");
+  });
+
+  it("has no Status select (W2-04): Role stands alone, and the save never sends whether they're active", () => {
+    const html = r({});
+    expect(html).not.toContain("m-active");
+    expect(html).not.toContain(">Status<");
+    expect(html).not.toContain("Inactive");
+    // The Role select is still there, on its own now (no two-column grid around it).
+    expect(html).toContain('id="m-role"');
+    expect(html).toMatch(/<select[^>]*id="m-role"/);
+    const src = readFileSync(join(process.cwd(), "src/app/(app)/settings/edit-member-button.tsx"), "utf8");
+    expect(src).not.toContain("setActive");
+    expect(src).not.toMatch(/\bactive: isSelf \? undefined : active\b/);
+    // Your own row still has no Role: nothing to lock yourself out of.
+    expect(r({ isSelf: true })).not.toContain('id="m-role"');
+  });
+
+  it("updateMember never writes active: deactivating is setMemberActive's alone (it stamps who and when, and bans the login)", () => {
+    const actions = readFileSync(join(process.cwd(), "src/app/(app)/settings/actions.ts"), "utf8");
+    const body = actions.slice(actions.indexOf("export async function updateMember("), actions.indexOf("export async function updateMemberAuth("));
+    expect(body.length).toBeGreaterThan(0);
+    expect(body).not.toContain("clean.active");
+    expect(body).not.toMatch(/active\?: boolean/);
+    // The one door stays exactly as it was: the stamp and the ban.
+    const door = actions.slice(actions.indexOf("export async function setMemberActive("), actions.indexOf("export async function memberFootprint("));
+    expect(door).toContain("deactivated_at: active ? null : new Date().toISOString(), deactivated_by: active ? null : user.id");
+    expect(door).toContain('ban_duration: active ? "none" : "876000h"');
+  });
+
+  it("the roster ⋯ is the one door: Deactivate (Lock Out) / Reactivate through setMemberActive, 44px rows and trigger", () => {
+    const menu = readFileSync(join(process.cwd(), "src/app/(app)/team/team-member-menu.tsx"), "utf8");
+    expect(menu).toContain("await setMemberActive(member.id, !member.active)");
+    expect(menu).toContain('{member.active ? "Deactivate (Lock Out)" : "Reactivate"}');
+    expect(menu).not.toContain("Deactivate (lock out)");
+    // Every row 44px: the shared row (Edit & Role, Deactivate) and Remove; the ⋯ itself 44px square.
+    expect(menu).toMatch(/const ROW_CLS =\s*"[^"]*\bmin-h-11\b/);
+    const remove = menu.slice(menu.lastIndexOf("<button", menu.indexOf("onClick={runRemove}")), menu.indexOf("Remove\n", menu.indexOf("onClick={runRemove}")));
+    expect(remove).toContain("min-h-11");
+    expect(menu).toContain('className="inline-flex h-11 w-11 items-center justify-center rounded-lg border');
+    expect(menu).not.toContain("h-9 w-9");
+    // The own-row / owner-row hiding and the footprint-gated Remove stay.
+    expect(menu).toContain("const canLifecycle = !isSelf && !isOwnerRow;");
+    expect(menu).toContain("await memberFootprint(member.id)");
   });
 
   it("the roster draws the badge whatever the switches, and hands Daily Reports to the edit for its line only", () => {
