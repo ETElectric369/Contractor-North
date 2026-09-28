@@ -75,6 +75,33 @@ export function defaultDraft(start: string, sizeMinutes: number | null | undefin
   return { ...dayHoursOf(s, s + (size || 120)), sized: size > 0 };
 }
 
+/**
+ * THE SHEET'S HOURS AFTER A CHANGE, exactly as Add To Schedule will store them (addJobDay), so the sheet
+ * never shows an end the save won't keep. While nobody chose a length, the save sends none and the
+ * writer gives the new start the job's size (a day or more runs to closing, else the size, else two
+ * hours): so does this, from defaultDraft. Once a length is chosen (a chip, an End, Full Day) the save
+ * sends the length the sheet shows, and a new start keeps it on the clock (nextDayHours, own hours).
+ */
+export function nextDraft(p: {
+  now: { start: string; end: string };
+  chosen: boolean;
+  sizeMinutes: number | null | undefined;
+  workDay: { start: string; end: string };
+  patch: BlockPatch;
+}): { hours: { start: string; end: string }; chosen: boolean } | null {
+  if ("start" in p.patch && !p.chosen) {
+    if (readHm(p.patch.start) == null) return null;
+    const d = defaultDraft(p.patch.start, p.sizeMinutes, p.workDay);
+    return { hours: { start: d.start, end: d.end }, chosen: false };
+  }
+  const wd = workDayMinutes(p.workDay);
+  const s = readHm(p.now.start) ?? wd.startMin;
+  const e = readHm(p.now.end) ?? s + 120;
+  const next = nextDayHours({ before: { startMin: s, endMin: e, allDay: s === wd.startMin && e === wd.endMin }, own: true, plannedMinutes: null, patch: p.patch, wd });
+  if (!next) return null;
+  return { hours: next, chosen: p.chosen || !("start" in p.patch) };
+}
+
 const LIST_MAX = 40;
 
 export function AddToScheduleSheet(props: {
@@ -118,10 +145,10 @@ function AddSheet({ at, jobs, team, workDay, onClose }: Parameters<typeof AddToS
 
   /** The time controls save into the sheet, never the database: the same rule the writer keeps. */
   async function draftSave(patch: BlockPatch) {
-    const next = nextDayHours({ before: { startMin: s, endMin: e, allDay }, own: true, plannedMinutes: null, patch, wd });
+    const next = nextDraft({ now: hours, chosen, sizeMinutes: job?.planned_minutes, workDay, patch });
     if (!next) return { ok: false, error: "That time doesn't work. Pick a start and a length." };
-    setDraft(next);
-    if (!("start" in patch)) setChosen(true);
+    setDraft(next.hours);
+    setChosen(next.chosen);
     return { ok: true };
   }
 
@@ -251,7 +278,9 @@ function AddSheet({ at, jobs, team, workDay, onClose }: Parameters<typeof AddToS
             workDay={workDay}
             save={draftSave}
             idPrefix="add-to-schedule"
-            plannedMinutes={Math.max(1, e - s)}
+            // The End a new start predicts: the length shown once one is chosen, else the job's size
+            // (what the save will use: nextDraft).
+            plannedMinutes={chosen ? Math.max(1, e - s) : Math.max(0, Number(job?.planned_minutes ?? 0) || 0)}
             draft
           />
         </section>

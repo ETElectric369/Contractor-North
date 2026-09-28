@@ -340,7 +340,8 @@ function TimeGridInner({
               );
             }
             /* THE DAY'S "+": Add To Schedule on this day, beside the day's own tap (which drills in).
-               Two sibling buttons, never one inside the other. 44px tall. */
+               Two sibling buttons, never one inside the other. 44 by 44: a 92px week column still leaves
+               the day's label about 48px. */
             if (onSlotTap) {
               return (
                 <div key={d.dayStr} className={`flex min-w-0 flex-1 items-stretch ${colBorder(d)}`}>
@@ -360,7 +361,7 @@ function TimeGridInner({
                     onClick={() => onSlotTap(d.dayStr, null)}
                     aria-label={`${addLabel}, ${d.label}`}
                     title={`${addLabel}, ${d.label}`}
-                    className="flex min-h-11 w-8 shrink-0 items-center justify-center text-brand hover:bg-brand-light/60"
+                    className="flex min-h-11 w-11 shrink-0 items-center justify-center text-brand hover:bg-brand-light/60"
                   >
                     <Plus className="h-4 w-4" />
                   </button>

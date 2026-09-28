@@ -16,7 +16,7 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn(), push: 
 vi.mock("@/components/toast", () => ({ useToast: () => vi.fn() }));
 vi.mock("./actions", () => ({ addJobDay: vi.fn() }));
 
-import { AddToScheduleSheet, addableLine, defaultDraft, findAddable, type AddableJob } from "./add-to-schedule-sheet";
+import { AddToScheduleSheet, addableLine, defaultDraft, findAddable, nextDraft, type AddableJob } from "./add-to-schedule-sheet";
 import { TimeGrid, slotMinute } from "@/components/time-grid";
 
 const WORK_DAY = { start: "09:00", end: "17:00" };
@@ -103,6 +103,26 @@ describe("the sheet's words and search", () => {
     expect(defaultDraft("12:00", 960, WORK_DAY)).toEqual({ start: "12:00", end: "17:00", sized: true });
     expect(defaultDraft("18:00", 960, WORK_DAY)).toEqual({ start: "18:00", end: "19:00", sized: true });
   });
+
+  it("a new start with no length chosen shows the end the save will store (the job's size, not the drawn hours)", () => {
+    // Tapped at 10:00, a job sized a day: 10 to closing. Only the Start moves to 11:00: the save sends
+    // no length and the writer runs a day's size to closing, so the sheet says 11 to 5, never 11 to 6.
+    const base = defaultDraft("10:00", 480, WORK_DAY);
+    expect(nextDraft({ now: base, chosen: false, sizeMinutes: 480, workDay: WORK_DAY, patch: { start: "11:00" } })).toEqual({
+      hours: { start: "11:00", end: "17:00" },
+      chosen: false,
+    });
+    // Unsized: two hours from the new start; sized under a day: its size.
+    expect(nextDraft({ now: { start: "10:00", end: "12:00" }, chosen: false, sizeMinutes: null, workDay: WORK_DAY, patch: { start: "15:30" } })?.hours).toEqual({ start: "15:30", end: "17:30" });
+    expect(nextDraft({ now: { start: "10:00", end: "14:00" }, chosen: false, sizeMinutes: 240, workDay: WORK_DAY, patch: { start: "13:00" } })?.hours).toEqual({ start: "13:00", end: "17:00" });
+    // A length chosen is the length the save sends: a new start keeps it on the clock.
+    const picked = nextDraft({ now: base, chosen: false, sizeMinutes: 480, workDay: WORK_DAY, patch: { length: 120 } });
+    expect(picked).toEqual({ hours: { start: "10:00", end: "12:00" }, chosen: true });
+    expect(nextDraft({ now: picked!.hours, chosen: true, sizeMinutes: 480, workDay: WORK_DAY, patch: { start: "13:00" } })).toEqual({
+      hours: { start: "13:00", end: "15:00" },
+      chosen: true,
+    });
+  });
 });
 
 describe("the open spots and the day's +, on the grid", () => {
@@ -124,7 +144,10 @@ describe("the open spots and the day's +, on the grid", () => {
   it("with the office's add: every column's open time is a door, and each day header carries a 44px +", () => {
     const html = grid({ onSlotTap: () => {}, onDayClick: () => {} });
     expect(html.match(/<button[^>]*aria-label="Add To Schedule, Mon 28"/g)?.length).toBe(2);
-    expect(html).toMatch(/<button[^>]*aria-label="Add To Schedule, Tue 29"[^>]*class="[^"]*min-h-11/);
+    // 44 by 44: tall AND wide, so a thumb aimed at the + never lands on the day's label beside it.
+    const plus = html.match(/<button[^>]*aria-label="Add To Schedule, Tue 29"[^>]*>/)?.[0] ?? "";
+    expect(plus).toMatch(/class="[^"]*\bmin-h-11\b/);
+    expect(plus).toMatch(/class="[^"]*\b(min-)?w-11\b/);
   });
 
   it("without it (anyone else, /timecards) or while work is armed, no add door at all", () => {
