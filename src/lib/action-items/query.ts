@@ -1365,7 +1365,9 @@ async function buildActionItems(ctx: {
         subtitle: [by ? `Put on hold by ${by}` : null, back, toBuy > 0 ? `${toBuy} to buy` : null].filter(Boolean).join(" · ") || null,
         who: null,
         when: null,
-        since: until,
+        // The pip's age. A hold with no day (held before 0366, so among the oldest) ages from its last
+        // touch, the proxy for "held since": age 0 would draw every old hold grey. Words stay "No Day Set".
+        since: until ?? dayOf(j.updated_at),
         urgency: 1,
         done: false,
         href: `/jobs/${j.id}`,
