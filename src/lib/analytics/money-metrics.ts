@@ -20,8 +20,9 @@ const ymdOf = (v: string | null | undefined): string | null => {
   return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;
 };
 
-/** Whole days from `fromYmd` to `toYmd` (positive when `toYmd` is later). */
-const daysBetweenYmd = (fromYmd: string, toYmd: string): number =>
+/** Whole days from `fromYmd` to `toYmd` (positive when `toYmd` is later). THE lateness rule's
+ *  arithmetic: the aging here and the Invoices page's "N Days Late" (billing-pipeline) count alike. */
+export const daysBetweenYmd = (fromYmd: string, toYmd: string): number =>
   Math.round((new Date(`${toYmd}T00:00:00Z`).getTime() - new Date(`${fromYmd}T00:00:00Z`).getTime()) / 86_400_000);
 
 /** The org's timezone + org-local today — the fetch wrappers' shared clock. */

@@ -42,8 +42,8 @@ describe("the invoice row amount — the total inline with what is due (d103cb9f
     }
   });
 
-  it("is the one amount on the customer's and the job's Invoices tabs, and the AR page, too", () => {
-    for (const f of ["src/app/(app)/crm/[id]/page.tsx", "src/app/(app)/jobs/[id]/page.tsx", "src/app/(app)/billing/ar/page.tsx"]) {
+  it("is the one amount on the customer's and the job's Invoices tabs, and on /billing (its By Customer fold is the old AR page)", () => {
+    for (const f of ["src/app/(app)/crm/[id]/page.tsx", "src/app/(app)/jobs/[id]/page.tsx", "src/app/(app)/billing/page.tsx"]) {
       const src = readFileSync(join(process.cwd(), f), "utf8");
       expect(src, f).toContain('from "@/components/invoice-amount"');
       expect(src, f).toContain("<InvoiceAmount ");

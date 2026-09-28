@@ -102,10 +102,10 @@ describe("every door that writes payments.method writes a key", () => {
 });
 
 describe("every screen that shows a method shows its label", () => {
-  it("the invoice page, /payments, the story feed and the customer's copy", () => {
+  it("the invoice page, Payments In on /billing (the old /payments ledger), the story feed and the customer's copy", () => {
     for (const f of [
       "src/app/(app)/billing/[id]/invoice-detail.tsx",
-      "src/app/(app)/payments/page.tsx",
+      "src/app/(app)/billing/page.tsx",
       "src/lib/story.ts",
       "src/components/invoice-document.tsx",
     ]) {

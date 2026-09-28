@@ -3,6 +3,7 @@ import { invoiceBalance } from "@/lib/invoice-math";
 import { contractTotalFromQuotes, milestoneAmount, type Milestone } from "@/lib/payment-schedule-math";
 import { getOrgSettings } from "@/lib/org-settings";
 import { todayStrInTz } from "@/lib/tz";
+import { daysBetweenYmd } from "@/lib/analytics/money-metrics";
 
 /** Org-local "today" (YYYY-MM-DD) — THE date the overdue rule compares due_date against.
  *  A UTC "today" flags a due-today invoice overdue after ~5 PM Pacific, so every overdue
@@ -27,7 +28,46 @@ export type PipelineInvoice = {
   due_date: string | null; customer: string | null; job: string | null; overdue: boolean;
   /** amount_paid, so a row can say what its balance is due against (invoiceAmount). */
   paid: number;
+  /** Whole days past its due date, org-local (daysBetweenYmd, the aging's own arithmetic); 0 when
+   *  not late. What the Invoices page's red "N Days Late" chip and its By Customer fold say. */
+  daysLate: number;
+  /** Whose it is, so By Customer never folds two customers who share a name into one. */
+  customerId: string | null;
 };
+
+/** "1 Day Late", "12 Days Late": the chip on a late row. */
+export const daysLateWords = (n: number): string => `${n} ${n === 1 ? "Day" : "Days"} Late`;
+
+/** One customer with money open: what they owe, their worst lateness, and the invoices under them. */
+export type OwedByCustomer = { key: string; customer: string; balance: number; worstDaysLate: number; invoices: PipelineInvoice[] };
+
+/**
+ * WHO OWES, ROLLED UP (the Accounts Receivable page, folded into Invoices, W1-29): the pipeline's own
+ * open invoices grouped by customer, worst lateness first, then the most owed. One read, one total:
+ * the balances here add up to the page's Owed To You to the cent. Pure.
+ */
+export function owedByCustomer(unpaid: readonly PipelineInvoice[]): OwedByCustomer[] {
+  const by = new Map<string, OwedByCustomer>();
+  for (const i of unpaid) {
+    const key = i.customerId ?? `name:${i.customer ?? ""}`;
+    const g = by.get(key) ?? { key, customer: i.customer ?? "No customer", balance: 0, worstDaysLate: 0, invoices: [] };
+    g.balance = Math.round((g.balance + i.balance) * 100) / 100;
+    g.worstDaysLate = Math.max(g.worstDaysLate, i.daysLate);
+    g.invoices.push(i);
+    by.set(key, g);
+  }
+  return [...by.values()].sort((a, b) => b.worstDaysLate - a.worstDaysLate || b.balance - a.balance || a.customer.localeCompare(b.customer));
+}
+
+/** THE OWED BAR's pieces, by lateness (current, then 1-30, 31-60 and over 60 days late), in dollars. */
+export function owedByLateness(unpaid: readonly PipelineInvoice[]): { current: number; d30: number; d60: number; d90: number } {
+  const out = { current: 0, d30: 0, d60: 0, d90: 0 };
+  for (const i of unpaid) {
+    const k = i.daysLate <= 0 ? "current" : i.daysLate <= 30 ? "d30" : i.daysLate <= 60 ? "d60" : "d90";
+    out[k] = Math.round((out[k] + i.balance) * 100) / 100;
+  }
+  return out;
+}
 
 export type MoneyPipeline = {
   doneNotInvoiced: PipelineJob[]; // complete jobs, no invoice (or un-drawn schedule draws) → BILL them
@@ -47,7 +87,7 @@ export async function getMoneyPipeline(supabase: SupabaseClient): Promise<MoneyP
     // PostgREST's 1000-row max, and invoicedJobIds below is built from whatever survived —
     // past that cliff a job whose invoice fell outside the window reappears in "Done - Not
     // Invoiced" and the Outstanding/Overdue tiles undercount.
-    supabase.from("invoices").select("id, invoice_number, total, amount_paid, status, due_date, job_id, customers(name), jobs(name)").limit(50000),
+    supabase.from("invoices").select("id, invoice_number, total, amount_paid, status, due_date, job_id, customer_id, customers(name), jobs(name)").limit(50000),
     // 'invoiced' is a RETIRED job status (the lifecycle rework moved every row off it), but
     // a stray legacy row could still carry it — keep it in the filter as stage-1 safety so
     // such a job can't escape the board (jobs with a real invoice are removed by the
@@ -107,6 +147,10 @@ export async function getMoneyPipeline(supabase: SupabaseClient): Promise<MoneyP
     balance: invoiceBalance(i.total, i.amount_paid), status: i.status,
     due_date: i.due_date, customer: i.customers?.name ?? null, job: i.jobs?.name ?? null, overdue,
     paid: Number(i.amount_paid) || 0,
+    // ONE RULE: overdue is a due date before the org's today, and how late is the same two days
+    // counted the aging's way (a due-today invoice is neither).
+    daysLate: overdue && i.due_date ? Math.max(0, daysBetweenYmd(String(i.due_date).slice(0, 10), today)) : 0,
+    customerId: i.customer_id ?? null,
   });
 
   const drafts = invoices.filter((i) => i.status === "draft").map((i) => toInv(i, false));
