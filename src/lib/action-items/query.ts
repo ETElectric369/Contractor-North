@@ -874,7 +874,12 @@ async function buildActionItems(ctx: {
   const shortsR = await shortsP;
   const shortRows = shortsR.error ? [] : ((shortsR.data ?? []) as any[]);
 
-  const [settledR, futureApptR, listsR, wBillsR, wPosR, wInvR, wJobsR, tiesR, peopleR] = await Promise.all([
+  // The jobs whose materials lines a row names (Buy Materials' preview, No Costs Yet's costed rule),
+  // and the ones whose open lines are only counted ("· 6 to buy" on a job needing a day or a hold).
+  const previewIds = [...new Set([...matCandidates.keys(), ...workedIds])];
+  const countIds = [...new Set([...needDayIds, ...heldRows.map((j) => String(j.id))])].filter((id) => !previewIds.includes(id));
+
+  const [settledR, futureApptR, previewListsR, countListsR, wBillsR, wPosR, wInvR, wJobsR, tiesR, peopleR] = await Promise.all([
     // The settled signal for done visits: an invoice anchored to the visit (0233). amount_paid rides
     // along because ANCHORED IS NOT PAID ("collect later" anchors a bill with zero collected).
     doneVisitIds.length && isStaff
@@ -895,14 +900,26 @@ async function buildActionItems(ctx: {
             .limit(400),
         )
       : empty,
-    // THE JOBS' MATERIALS LISTS, one read for every job a row may name ("· 6 to buy", Buy Materials,
-    // a hold's "6 to buy", No Costs Yet's costed rule): newest first, so newestListPerJob keeps the
-    // job's own list (the one its Materials tab shows).
-    isStaff
-      ? inChunks([...matCandidates.keys(), ...workedIds, ...needDayIds, ...heldRows.map((j) => String(j.id))], (ids) =>
+    // THE JOBS' MATERIALS LISTS, newest first, so newestListPerJob keeps the job's own list (the one
+    // its Materials tab shows). The jobs a row previews carry their lines' words...
+    isStaff && previewIds.length
+      ? inChunks(previewIds, (ids) =>
           supabase
             .from("material_lists")
             .select("id, job_id, created_at, material_list_items(description, quantity, purchased, is_tool)")
+            .in("job_id", ids)
+            .order("created_at", { ascending: false })
+            .order("id", { ascending: false })
+            .limit(400),
+        )
+      : empty,
+    // ...and the ones only counted carry the two checklist columns, nothing more (this rides the app
+    // shell's badge on every page).
+    isStaff && countIds.length
+      ? inChunks(countIds, (ids) =>
+          supabase
+            .from("material_lists")
+            .select("id, job_id, created_at, material_list_items(purchased, is_tool)")
             .in("job_id", ids)
             .order("created_at", { ascending: false })
             .order("id", { ascending: false })
@@ -935,11 +952,12 @@ async function buildActionItems(ctx: {
 
   // Open lines to buy per job, on the job's ONE list (the newest): the Materials badge, the Buy
   // Materials row and every "to buy" here count exactly these lines. Tools are brought, not bought.
-  const lists = (listsR.data ?? []) as any[];
+  // A lost read counts nothing and says nothing it can't know (no "to buy", no Buy Materials row).
+  const lists = [...((previewListsR.data ?? []) as any[]), ...((countListsR.data ?? []) as any[])];
   const toBuyByJob = new Map<string, { description: string; quantity: number }[]>();
   for (const ml of newestListPerJob(lists).values()) {
     const open = ((ml.material_list_items ?? []) as any[]).filter(isOpenToBuy);
-    if (open.length) toBuyByJob.set(ml.job_id, open.map((it) => ({ description: it.description, quantity: Number(it.quantity ?? 1) })));
+    if (open.length) toBuyByJob.set(ml.job_id, open.map((it) => ({ description: String(it.description ?? ""), quantity: Number(it.quantity ?? 1) })));
   }
   const toBuyCount = new Map([...toBuyByJob].map(([id, lines]) => [id, lines.length]));
 
@@ -1167,12 +1185,15 @@ async function buildActionItems(ctx: {
   }
 
   // 2) NO COSTS YET — time on the job, zero costs/POs/materials. The Romex leak. A job with no
-  // costs to record (labor only) gets a Snooze that picks a day (0367), never a dismiss.
-  if (isStaff && workedJobs.length) {
+  // costs to record (labor only) gets a Snooze that picks a day (0367), never a dismiss. A lost read
+  // of any of the four could make a costed job look bare, so then it says nothing rather than
+  // something false.
+  const costsReadable = ![previewListsR, wBillsR, wPosR, wInvR].some((r) => (r as Read)?.error);
+  if (isStaff && workedJobs.length && costsReadable) {
     const costed = costedJobIds({
       bills: (wBillsR.data ?? []) as any[],
       purchaseOrders: (wPosR.data ?? []) as any[],
-      materialLists: lists.filter((l) => workedIds.includes(String(l.job_id))),
+      materialLists: ((previewListsR.data ?? []) as any[]).filter((l) => workedIds.includes(String(l.job_id))),
       invoices: (wInvR.data ?? []) as any[],
     });
     const invoicedJobIds = new Set<string>(
@@ -1196,8 +1217,22 @@ async function buildActionItems(ctx: {
   }
 
   // 3) JOBS NEEDING A DAY — nothing ahead of it (jobsNeedingADay), minus a job with a visit booked
-  // today or later; its open lines to buy ride its row.
-  {
+  // today or later; its open lines to buy ride its row. A lost read of the jobs or of their visits
+  // would call every job dateless: one "Couldn't Check" line instead.
+  if (isStaff && (jobsR.error || futureApptR.error)) {
+    items.push({
+      id: "needday-unread",
+      kind: "job_to_schedule",
+      title: "Jobs Needing A Day · Couldn't Check",
+      subtitle: "Couldn't read which jobs have nothing ahead of them just now. Open Schedule to see them.",
+      who: null,
+      when: null,
+      urgency: 1,
+      done: false,
+      href: "/schedule",
+      affordances: ["open"],
+    });
+  } else {
     const futureAppt = new Set(((futureApptR.data ?? []) as any[]).map((a) => String(a.job_id)));
     const findings = jobsNeedingADay({
       jobs: needDayPre.map((f) => f.job),

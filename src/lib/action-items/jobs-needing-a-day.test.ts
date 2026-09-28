@@ -118,5 +118,14 @@ describe("the build reads it", () => {
     expect(query).not.toContain("detectNeedsReturn(");
     expect(query).not.toContain('kind: "job_needs_return"');
     expect(query).not.toContain('.is("scheduled_start", null)');
+    // The entries' own foreign key is named (time_entries also points at itself).
+    expect(query).toContain("time_entries!time_entries_job_id_fkey(clock_in)");
+  });
+
+  it("a lost read never calls every job dateless: one Couldn't Check line instead", () => {
+    expect(query).toContain("if (isStaff && (jobsR.error || futureApptR.error)) {");
+    expect(query).toContain(`title: "Jobs Needing A Day · Couldn't Check"`);
+    // And a lost costs read never invents No Costs Yet.
+    expect(query).toContain("const costsReadable = ![previewListsR, wBillsR, wPosR, wInvR].some((r) => (r as Read)?.error);");
   });
 });
