@@ -871,11 +871,12 @@ export function CalendarView({
          booked time and only the last day ends at the booked time; the days between are full. */
       const { startMin, endMin } = apptDayMinutes(a, k, dayOf, minOf, { startMin: wdStartMin, endMin: wdEndMin });
       const id = `a-${a.id}-${k}`; // keyed per day — a span appears on several
-      /* A RETURN VISIT ON A JOB is judged like a job's day, unless that job has its own block that day
-         (hidden by the person filter here): its time went to the job's block, never "nobody". A visit
-         with no job is never judged (time is clocked to jobs). */
-      const actual =
-        judged && a.job_id && !pva?.byKey.has(`j-${a.job_id}-${k}`) ? gridActualOf(pva?.byKey.get(id), personFilter) : undefined;
+      /* A RETURN VISIT ON A JOB draws the time clocked to its job that day, unless that job has its own
+         block that day (hidden by the person filter here: the time went to the job's block). A visit is
+         NEVER drawn hollow: a city inspection or a meeting on a job is booked time nobody clocks, and
+         "Nobody clocked in" there would be a false zero. A visit with no job is never judged. */
+      const visitActual = judged && a.job_id && !pva?.byKey.has(`j-${a.job_id}-${k}`) ? pva?.byKey.get(id) : undefined;
+      const actual = visitActual?.state === "worked" ? gridActualOf(visitActual, personFilter) : undefined;
       events.push({
         id,
         dayStr: k,

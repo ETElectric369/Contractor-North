@@ -855,31 +855,21 @@ async function placeOnDays(
     };
   }
 
+  /* WHAT THIS PLACE CHANGES, READ BEFORE IT WRITES (the rail's Undo). The listed span in company days
+     and its exact instants; the days as they stood; the days as they will be. */
+  const listed = row?.scheduled_start ? planSpan(row, tz) : null;
+  const prior: PlacePrior = {
+    ranges: segments,
+    status: row?.status ?? null,
+    listed: listed ? { ...listed, startIso: row?.scheduled_start ?? null, endIso: row?.scheduled_end ?? null } : null,
+    days: segmentDays(write.segments),
+  };
+
   /* GIVING SOMETHING A DAY IS THE OPPOSITE OF PARKING IT. An on-hold job now appears on the rail
      even when it carries a stale date (Erik: "we need everything on hold to pop up on that list"),
      so placing one has to take it off hold — otherwise it lands on the calendar AND stays on the
      board forever, which is a loop rather than a decision. advanceToScheduled deliberately only
      promotes to_be_scheduled/estimate, so this is its own explicit write. */
-  /* WHAT THIS PLACE CHANGES, READ BEFORE IT WRITES (the rail's Undo). The listed span in company days
-     and its exact instants; the days as they stood; the days as they will be. */
-  const prior: PlacePrior = {
-    ranges: segments,
-    status: row?.status ?? null,
-    listed: row?.scheduled_start
-      ? {
-          start: todayStrInTz(tz, new Date(row.scheduled_start)),
-          end: (() => {
-            const first = todayStrInTz(tz, new Date(row.scheduled_start as string));
-            const last = row.scheduled_end ? todayStrInTz(tz, new Date(row.scheduled_end)) : first;
-            return last > first ? last : first;
-          })(),
-          startIso: row.scheduled_start,
-          endIso: row.scheduled_end ?? null,
-        }
-      : null,
-    days: segmentDays(write.segments),
-  };
-
   if (row?.status === "on_hold") {
     // The reason leaves WITH the hold — same wake rule as setJobHold, or "waiting on the permit"
     // keeps haunting a job that's back on the calendar. The day it was coming back and who held it

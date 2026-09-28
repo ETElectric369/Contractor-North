@@ -179,6 +179,10 @@ describe("the calendar reads it and draws it (source)", () => {
     expect(view).toContain("(k: string) => clockInUse && k < todayK && (!actualsCappedBefore || k >= actualsCappedBefore)");
     expect(view).toContain("Clocked time loads back to {dayWords(actualsCappedBefore)}.");
     expect(view).toContain("Clocked time didn&apos;t load, so past days show only what was booked.");
+    // A visit on a job draws the time it took, but is never drawn hollow (a city inspection or a
+    // meeting is booked time nobody clocks); only a job's day is.
+    expect(view).toContain('const actual = visitActual?.state === "worked" ? gridActualOf(visitActual, personFilter) : undefined;');
+    expect(view).toContain('if (a.state === "hollow" && key.startsWith("j-")) out.add(key);');
   });
 
   it("ghosts: booked from the raw rows, following the person filter, dashed on the grid and the month, a row in the day drill", () => {
@@ -191,6 +195,21 @@ describe("the calendar reads it and draws it (source)", () => {
     expect(view).toContain("<GhostRow key={`ghost-${g.jobId}`} day={dayK} ghost={g} canEdit={canEdit} />");
     // A proposed visit keeps its type's tone with a thin dashed border, faded: never a ghost's look.
     expect(view).toContain('${a.status === "proposed" ? " border-dashed opacity-75" : ""}');
+  });
+
+  it("no money anywhere near it: no price, amount, total, cost, rate or pay column in what draws or books worked time", () => {
+    const code = (f: string) =>
+      read(f)
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/(^|\s)\/\/[^\n]*/g, "$1");
+    for (const f of [
+      "src/lib/schedule/plan-vs-actual.ts",
+      "src/lib/schedule/booked-days.ts",
+      "src/components/worked-track.tsx",
+      "src/app/(app)/schedule/ghost-sheet.tsx",
+    ]) {
+      expect(code(f), f).not.toMatch(/\b(prices?|amounts?|totals?|costs?|rates?|rate_override|paid_at|bill_rate|pay_rate)\b|formatCurrency|\$\d/i);
+    }
   });
 
   it("the stack builds each week's grid once per (week, data), with stable props, so mounted weeks skip", () => {
