@@ -2,7 +2,7 @@
 // (You can later replace these with `supabase gen types typescript`.)
 
 export type UserRole = "owner" | "admin" | "office" | "tech";
-export type CustomerType = "residential" | "commercial" | "industrial" | "subcontractor";
+export type CustomerType = "residential" | "commercial" | "industrial" | "subcontractor" | "contractor";
 export type CustomerStatus = "lead" | "active" | "inactive";
 // Status types are derived from their canonical as-const arrays (one spine each) so the
 // DB enum, the type, the dropdowns, and the write-guards can't drift. Imported for local

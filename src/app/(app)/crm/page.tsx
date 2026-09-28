@@ -1,14 +1,14 @@
-import { Users, Mail, Phone, Search } from "lucide-react";
+import { Users, Search } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader, EmptyState } from "@/components/page-header";
 import { Card } from "@/components/ui/card";
-import { Badge, statusTone } from "@/components/ui/badge";
 import { DataTable } from "@/components/ui/data-table";
 import { Input } from "@/components/ui/input";
 import { NewCustomerButton } from "./new-customer-button";
 import { ImportCustomersButton } from "./import-customers-button";
 import { DuplicatesButton } from "./duplicates-button";
 import { SortControl } from "./sort-control";
+import { customerColumns, customerTypesDiffer } from "./columns";
 import { sanitizeSearch } from "@/lib/utils";
 import { crmOrderColumn, formatCrmSort, parseCrmSort } from "@/lib/crm-order";
 import type { Customer } from "@/lib/types";
@@ -50,8 +50,13 @@ export default async function CrmPage({
     );
   }
 
-  const { data } = await query;
+  // THE TYPE COLUMN ONLY WHEN THE TYPES DIFFER (W2-13): the first and last type in the enum's order,
+  // one row each, beside the list and ignoring its search and sort (RLS scopes them to the company).
+  // min ≠ max exactly when two or more types are in use.
+  const typeEnd = (ascending: boolean) => supabase.from("customers").select("type").order("type", { ascending }).limit(1);
+  const [{ data }, lo, hi] = await Promise.all([query, typeEnd(true), typeEnd(false)]);
   const customers = (data ?? []) as Customer[];
+  const mixed = customerTypesDiffer(lo, hi);
 
   return (
     <div>
@@ -112,45 +117,7 @@ export default async function CrmPage({
             rows={customers}
             rowKey={(c) => c.id}
             rowHref={(c) => `/crm/${c.id}`}
-            columns={[
-              {
-                header: "Name",
-                span: 4,
-                cell: (c) => (
-                  <>
-                    <div className="font-medium text-slate-900">{c.name}</div>
-                    {c.company_name && <div className="text-xs text-slate-400">{c.company_name}</div>}
-                  </>
-                ),
-              },
-              {
-                header: "Contact",
-                span: 3,
-                className: "space-y-0.5 text-sm text-slate-500",
-                cell: (c) => (
-                  <>
-                    {c.email && (
-                      <div className="flex items-center gap-1.5">
-                        <Mail className="h-3.5 w-3.5" /> {c.email}
-                      </div>
-                    )}
-                    {c.phone && (
-                      <div className="flex items-center gap-1.5">
-                        <Phone className="h-3.5 w-3.5" /> {c.phone}
-                      </div>
-                    )}
-                  </>
-                ),
-              },
-              { header: "Type", span: 2, className: "text-sm capitalize text-slate-600", cell: (c) => c.type },
-              {
-                header: "Location",
-                span: 2,
-                className: "text-sm text-slate-500",
-                cell: (c) => [c.city, c.state].filter(Boolean).join(", ") || "—",
-              },
-              { header: "Status", span: 1, align: "right", cell: (c) => <Badge tone={statusTone(c.status)}>{c.status}</Badge> },
-            ]}
+            columns={customerColumns(mixed)}
           />
         </Card>
       )}

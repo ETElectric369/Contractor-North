@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useRef, useState, useTransition, type ClipboardEvent } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Plus, Pencil, Trash2, Search, Phone, Mail, Globe, MapPin, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -13,7 +14,7 @@ import { cn, formatPhone } from "@/lib/utils";
 import { applySiteFill, emptyBoxes, fillSummary, looksLikeWebAddress, siteToForm, siteUrl, withoutSiteFill, type FillKey } from "@/lib/site-read/form-fill";
 import { createResource, updateResource, deleteResource } from "./actions";
 import { fillFromSite } from "./fill-from-site";
-import { RESOURCE_CATEGORIES } from "./categories";
+import { RESOURCE_CATEGORIES, SUPPLIERS_LIVE_IN_VENDORS, VENDORS_HREF, categoryChoices } from "./categories";
 
 export interface Resource {
   id: string;
@@ -286,7 +287,27 @@ export function ResourcesManager({ resources, canEdit }: { resources: Resource[]
           </div>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
             <div className="col-span-2 sm:col-span-1"><Label htmlFor="r-name">Name *{siteTag("name")}</Label><Input id="r-name" value={name} onChange={(e) => set("name", e.target.value)} placeholder="e.g. County Building Department" className={marked("name")} /></div>
-            <div><Label htmlFor="r-cat">Category{siteTag("category")}</Label><Select id="r-cat" value={category} onChange={(e) => set("category", e.target.value)} className={marked("category")}>{CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}</Select></div>
+            <div>
+              <Label htmlFor="r-cat">Category{siteTag("category")}</Label>
+              {/* A category from before the list changed (Supplier / Distributor, or Nort's own word)
+                  stays this contact's: shown as its current pick, never offered (categoryChoices), so a
+                  save can't quietly swap it for the first one on the list. */}
+              <Select id="r-cat" value={category} onChange={(e) => set("category", e.target.value)} className={marked("category")}>
+                {categoryChoices(category).map((c) => (
+                  <option key={c.value} value={c.value} disabled={c.disabled}>
+                    {c.value}
+                  </option>
+                ))}
+              </Select>
+              {/* Staff only: this whole form is behind canEdit, so a tech never gets a door to the
+                  Price List (and its prices). */}
+              <p className="mt-1 text-xs text-slate-500">
+                {SUPPLIERS_LIVE_IN_VENDORS}{" "}
+                <Link href={VENDORS_HREF} className="inline-flex min-h-11 items-center font-medium text-brand hover:underline">
+                  Open Vendors
+                </Link>
+              </p>
+            </div>
             <div><Label htmlFor="r-contact">Contact person</Label><Input id="r-contact" value={contact} onChange={(e) => set("contact", e.target.value)} /></div>
             <div><Label htmlFor="r-phone">Phone{siteTag("phone")}</Label><Input id="r-phone" type="tel" inputMode="tel" value={phone} onChange={(e) => set("phone", formatPhone(e.target.value))} className={marked("phone")} /></div>
             <div><Label htmlFor="r-email">Email{siteTag("email")}</Label><Input id="r-email" type="email" value={email} onChange={(e) => set("email", e.target.value)} className={marked("email")} /></div>
