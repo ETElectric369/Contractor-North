@@ -8,7 +8,8 @@ import { createClient } from "@/lib/supabase/server";
 import { visibleJobIdOrNull } from "@/lib/job-visibility";
 import { promoteJobToInProgress } from "@/lib/job-promote";
 import { requireStaff } from "@/lib/staff-guard";
-import { ACTIVE_JOB_STATUSES, pickJobScheduledToday } from "@/lib/job-status";
+import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
+import { NOTHING_SCHEDULED, scheduledJobFor } from "./scheduled-job";
 import { hoursBetween } from "@/lib/utils";
 import { splitPreview } from "@/lib/split-preview";
 import { resolveOfflinePunchTime } from "@/lib/offline/punch-time";
@@ -39,7 +40,7 @@ import {
 } from "./close-math";
 import { loadShiftChains, type ShiftInfo } from "@/lib/shift-chain";
 import { ADOPT_AFTER_CLOCK_IN_MS, ADOPT_AFTER_SWITCH_MS } from "./adopt-window";
-import { closedPickable } from "./which-job-choices";
+import { closedPickable, whichJobLabel, type ChoiceJob } from "./which-job-choices";
 import { billedPartMoved, claimedMoveRefusal, claimedPersonRefusal, type ClaimHolder, type ClaimIndex } from "./claim-words";
 import { LONG_SHIFT_PHRASE, MAX_SHIFT_HOURS, clockDoorWords, clockedOutWords, isLongOpenShift, stopProblem } from "@/lib/long-shift";
 import { clockInClashWords, findOverlap, overlapRefusal, shiftWhen, type OverlapClash } from "@/lib/overlap-refusal";
@@ -84,90 +85,33 @@ function clashIdFrom(err: unknown): string | null {
  *   3. else null — the entry lands job-less and the office attaches it later.
  * Never guesses between candidates beyond "earliest scheduled first"; RLS scopes every
  * read to the caller's org. Best-effort: any failure resolves to null, never blocks the punch.
+ *
+ * TIERS 0 AND 1 ARE scheduledJobFor (./scheduled-job, Wave 2), asked about the org's today: the
+ * same answer Add Time Entry starts its Job field on for any day. The one thing that moved is the
+ * job's own window, read in company days now instead of the UTC date (an evening start no longer
+ * covers the next morning). Tier 2 stays here: it is the clock's alone.
  */
 async function resolveTechJobToday(supabase: SupabaseClient, uid: string): Promise<string | null> {
   try {
     const { data: org } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
     const tz = getOrgSettings((org as { settings?: unknown } | null)?.settings).timezone;
-    const { dayStart, dayEnd, todayStr } = todayBoundsInTz(tz);
+    const { todayStr } = todayBoundsInTz(tz);
 
-    // TIER 0 — today's crew day-assignment wins. Fails soft (falls through) until
-    // migration 0139 lands: the select errors → data null → next tier.
-    const { data: dayRow } = await supabase
-      .from("crew_day_assignments")
-      .select("job_id, kind")
-      .eq("profile_id", uid)
-      .eq("work_date", todayStr)
-      .maybeSingle();
-    const day = dayRow as { job_id?: string | null; kind?: string } | null;
     /**
-     * OFF FAILS CLOSED (0170) — and this is the half that actually costs money.
-     *
-     * The office marks Brian off for the week. Without this line the resolver falls straight
-     * through to tier 1, which reads `jobs.assigned_to` — the ROSTER, which still (correctly)
-     * contains him — so his phone would punch onto the very job the office thought it had taken
-     * him off, and that job_id lands in time_entries, which is what the job gets COSTED from.
-     *
-     * A deliberate "not on a job today" must beat every guess below it. The day row wins; a
+     * TIERS 0 AND 1. The day row wins; OFF FAILS CLOSED (0170) — and this is the half that
+     * actually costs money. The office marks Brian off for the week; without it the roster
+     * (`jobs.assigned_to`, which still correctly contains him) would punch his phone onto the very
+     * job the office thought it had taken him off, and that job_id is what the job gets COSTED
+     * from. A deliberate "not on a job today" beats every guess below it, tier 2 included: a
      * job-less punch is the honest outcome and the office attaches it later if it was a mistake.
-     */
-    if (day?.kind === "off") return null;
-    const dayJobId = day?.job_id ?? null;
-    if (dayJobId) {
-      const { data: dayJob } = await supabase
-        .from("jobs")
-        .select("id")
-        .eq("id", dayJobId)
-        .in("status", ACTIVE_JOB_STATUSES)
-        .maybeSingle();
-      if (dayJob) return dayJobId;
-    }
-
-    /**
-     * THE PUNCH AND THE CARD READ THE SAME ROWS (0266, and the reason it exists).
      *
-     * `scheduled_end` rides along because the two dates ARE the job's window whenever the segment
-     * rows are missing, and the PROJECTION law is that a missing field reads as an absence rather
-     * than an error. Leaving it out is what made this mirror answer only on a job's START day: on
-     * day two of a three-day job the Clock's Next Up card said "22 Pine" off the full window while
-     * this resolver, mirroring the start day alone, went somewhere else. A card and a punch that
-     * disagree about where a man is, is the exact thing the precedence law exists to stop.
-     *
-     * Until 0266 a tech could not READ job_schedule_segments at all (0040's only policy was
-     * staff-only for every verb, reads included), so both surfaces were running on mirrors and
-     * drifting apart in different directions. Now both read the real rows, and the mirror below is
-     * what it should always have been: the fallback for a job whose segments were never written.
+     * THE PUNCH AND THE CARD READ THE SAME ROWS (0266): the segments, then the job's own window
+     * as the fallback for a job whose segments were never written, so day two of a three-day job
+     * resolves where the Clock's Next Up card says the man is.
      */
-    const { data: mine } = await supabase
-      .from("jobs")
-      .select("id, scheduled_start, scheduled_end")
-      .contains("assigned_to", [uid])
-      .in("status", ACTIVE_JOB_STATUSES);
-    const myJobs = (mine ?? []) as { id: string; scheduled_start: string | null; scheduled_end: string | null }[];
-    if (myJobs.length) {
-      // Scheduled today via the segments table (multi-range jobs) …
-      const { data: segs } = await supabase
-        .from("job_schedule_segments")
-        .select("job_id")
-        .in("job_id", myJobs.map((j) => j.id))
-        .lte("start_date", todayStr)
-        .gte("end_date", todayStr);
-      const segToday = new Set(((segs ?? []) as { job_id: string }[]).map((s) => s.job_id));
-      // … or, for a job with no segment rows at all, across its own scheduled window rather than
-      // on its first day only. `todayStr` is already the ORG's day, which is what the window is in.
-      for (const j of myJobs) {
-        if (segToday.has(j.id)) continue;
-        const start = j.scheduled_start ? String(j.scheduled_start).slice(0, 10) : null;
-        if (!start) continue;
-        const end = j.scheduled_end ? String(j.scheduled_end).slice(0, 10) : start;
-        if (start <= todayStr && todayStr <= end) segToday.add(j.id);
-      }
-      // … or via the scheduled_start mirror (single-day jobs) — the SHARED tier-1 pick
-      // (lib/job-status.pickJobScheduledToday), the same one the /timeclock crew board
-      // points members with, so the punch and the board can't drift.
-      const today = pickJobScheduledToday(myJobs, segToday, dayStart, dayEnd);
-      if (today) return today.id;
-    }
+    const scheduled = await scheduledJobFor(supabase, uid, todayStr, tz);
+    if (scheduled.off) return null;
+    if (scheduled.jobId) return scheduled.jobId;
 
     // No scheduled assignment — if the org has exactly ONE job in progress, that's the site.
     const { data: prog } = await supabase.from("jobs").select("id").eq("status", "in_progress").limit(2);
@@ -1439,7 +1383,10 @@ export async function createManualEntry(input: {
     revalidatePath(`/jobs/${jobId}`);
     revalidatePath("/jobs");
   }
-  return spanWarning ? { ok: true, warning: spanWarning } : { ok: true };
+  // THE NEW SHIFT'S ID RIDES BACK (Wave 2): Add Time Entry's "Added 7.5 h for Brian" toast carries
+  // Open That Shift, the door to its miles, rate and notes, which the add form no longer asks.
+  const id = String((made[0] as { id?: string }).id ?? "") || undefined;
+  return spanWarning ? { ok: true, id, warning: spanWarning } : { ok: true, id };
 }
 
 /**
@@ -2383,13 +2330,29 @@ export type DayShift = {
 };
 
 export type DayShifts =
-  | { ok: true; name: string; tz: string; shifts: DayShift[]; forJob: { id: string; label: string } | null }
+  | {
+      ok: true;
+      name: string;
+      tz: string;
+      shifts: DayShift[];
+      forJob: { id: string; label: string } | null;
+      /** Where the schedule put this person that day (scheduledJobFor: the day row, else a rostered
+       *  job whose days cover it), labelled the way the form's Job list labels it. Add Time Entry
+       *  starts its Job field here while nobody has touched it. Null: nothing scheduled, marked off,
+       *  or the schedule couldn't be read (best-effort: never a blocked save). */
+      scheduledJob: { id: string; label: string } | null;
+      /** The office marked this person OFF that day (0170): nothing is preselected, and the list
+       *  says so. */
+      offThatDay: boolean;
+    }
   | { ok: false; error: string };
 
 /**
- * What one person already has on one day (the org's day), for the add-hours forms: Add Entry on
- * Timecards, the job's Add Time Entry and Log Hours. Office only. `for_job_id` is the job the form
- * would put the hours on, named back so the door can say "Put This On 85 Whitney".
+ * What one person already has on one day (the org's day), for the add-hours forms: Add Time Entry
+ * (on Timecards and on the job's Time tab) and Log Hours. Office only. `for_job_id` is the job the
+ * form would put the hours on, named back so the door can say "Put This On 85 Whitney". The answer
+ * also says where the schedule put the person that day (scheduledJob, offThatDay), which Add Time
+ * Entry starts its Job field on.
  */
 export async function shiftsOnDay(input: { profile_id?: string | null; date: string; for_job_id?: string | null }): Promise<DayShifts> {
   const ctx = await requireStaff();
@@ -2397,12 +2360,14 @@ export async function shiftsOnDay(input: { profile_id?: string | null; date: str
   const supabase = ctx.supabase;
   const profileId = input.profile_id || ctx.userId;
   if (!/^\d{4}-\d{2}-\d{2}$/.test(input.date ?? "")) return { ok: false, error: "Pick a day." };
-  const tz = await orgTz(supabase);
+  const { data: orgRow } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
+  const orgSettings = getOrgSettings((orgRow as { settings?: unknown } | null)?.settings);
+  const tz = orgSettings.timezone;
   const dayStart = tzDayStartUtc(input.date, tz).getTime();
   const next = new Date(Date.parse(`${input.date}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
   const dayEnd = tzDayStartUtc(next, tz).getTime();
 
-  const [rowsR, whoR, jobR] = await Promise.all([
+  const [rowsR, whoR, jobR, scheduled] = await Promise.all([
     // A day back catches a shift that started the evening before and ran into this day (18 h cap).
     supabase
       .from("time_entries")
@@ -2414,6 +2379,8 @@ export async function shiftsOnDay(input: { profile_id?: string | null; date: str
       .limit(50),
     supabase.from("profiles").select("full_name").eq("id", profileId).maybeSingle(),
     input.for_job_id ? supabase.from("jobs").select("id, job_number, name").eq("id", input.for_job_id).maybeSingle() : Promise.resolve({ data: null }),
+    // BEST-EFFORT: a schedule that can't be read means no preselect, never a refusal.
+    scheduledJobFor(supabase, profileId, input.date, tz).catch(() => NOTHING_SCHEDULED),
   ]);
   if (rowsR.error) return { ok: false, error: dbError(rowsR.error) };
   type Row = { id: string; clock_in: string; clock_out: string | null; lunch_minutes: number | null; job_id: string | null; job_code: string | null; job?: unknown };
@@ -2441,12 +2408,29 @@ export async function shiftsOnDay(input: { profile_id?: string | null; date: str
     };
   });
   const job = jobR.data as { id: string; job_number?: string | null; name?: string | null } | null;
+  // The scheduled job, named the way the form's Job list names it (whichJobLabel: codes on, its
+  // name; codes off, customer · street). A label that can't be read is no preselect.
+  let scheduledJob: { id: string; label: string } | null = null;
+  if (scheduled.jobId) {
+    try {
+      const { data: sj } = await supabase
+        .from("jobs")
+        .select("id, job_number, name, address, customers(name)")
+        .eq("id", scheduled.jobId)
+        .maybeSingle();
+      if (sj) scheduledJob = { id: scheduled.jobId, label: whichJobLabel(sj as ChoiceJob, orgSettings.timeclock_job_codes) };
+    } catch {
+      scheduledJob = null;
+    }
+  }
   return {
     ok: true,
     name: ((whoR.data as { full_name?: string | null } | null)?.full_name ?? "").trim() || "This person",
     tz,
     shifts,
     forJob: job ? { id: job.id, label: jobLabel(job) } : null,
+    scheduledJob,
+    offThatDay: scheduled.off,
   };
 }
 

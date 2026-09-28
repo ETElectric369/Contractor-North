@@ -42,9 +42,12 @@ const billed: DayShift = {
   noJob: false,
   billedBy: "INV-081",
 };
-const render = (shifts: DayShift[], forJob: { id: string; label: string } | null) =>
+const render = (shifts: DayShift[], forJob: { id: string; label: string } | null, offThatDay = false) =>
   renderToStaticMarkup(
-    createElement(SameDayShiftsList, { data: { ok: true, name: "Brian Taylor", tz: TZ, shifts, forJob }, date: "2026-09-11" }),
+    createElement(SameDayShiftsList, {
+      data: { ok: true, name: "Brian Taylor", tz: TZ, shifts, forJob, scheduledJob: null, offThatDay },
+      date: "2026-09-11",
+    }),
   );
 
 describe("the day's shifts, above the form", () => {
