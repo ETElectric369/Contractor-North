@@ -47,6 +47,7 @@ import {
 import {
   appointmentTypeFor,
   daysNeeded,
+  isWorkKind,
   spanEnd,
   WORK_DAY_MINUTES,
   workingDaysFrom,
@@ -1622,6 +1623,13 @@ export async function sizeAppointment(
 ): Promise<Result> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
+  /* A KIND THAT ISN'T ONE IS REFUSED (W2-06), in words and with nothing written: the same rule sizeLead
+     keeps. Any known kind is taken (the pickers narrow what's offered; a guard never refuses a row's own
+     old kind, so an old Quote or Office can be picked again), and "other". Junk used to fall through
+     appointmentTypeFor's default and land as a walk-through nobody chose. */
+  if (patch?.workKind && !isWorkKind(patch.workKind) && patch.workKind !== "other") {
+    return { ok: false, error: "That isn't a kind of work." };
+  }
 
   const update: Record<string, unknown> = { updated_at: new Date().toISOString() };
   if ("plannedMinutes" in patch) {

@@ -1105,25 +1105,39 @@ export function CalendarView({
         ? spanLabel(stackWeeks[0][0], stackWeeks[stackWeeks.length - 1][6])
         : dayLabel(anchor);
 
-  const iconBtn = "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg";
+  /* EVERY HEADER DOOR IS A 44px TARGET (W2-01). At 375px the row holds the three paging buttons, the
+     title and three icons (four with the day drill's ← Week), so each keeps its 32px look and takes a
+     transparent bleed to 44 (the icon-sm grammar: a ::before past every edge) rather than widening the
+     row until it scrolls sideways. Everyone's Day's icon is first: once the Timeclock page's card is cut
+     (lane 2), it is that board's only door. */
+  const iconBtn =
+    "relative flex h-8 w-8 shrink-0 items-center justify-center rounded-lg before:absolute before:-inset-1.5 before:content-['']";
 
   return (
     <div className="space-y-3">
-      {/* ROW 1 — paging + title + the two door icons (map, person filter).
-          The SectionSubnav pill above stays the ONLY brand-lit chrome. */}
+      {/* ROW 1 — paging + title + the door icons (Everyone's Day, map, person filter), every one a
+          44px target. The SectionSubnav pill above stays the ONLY brand-lit chrome. */}
       <div className="flex items-center gap-1">
-        <Button size="sm" variant="outline" onClick={() => shiftAnchor(-1)} aria-label="Previous">
+        <Button size="icon-sm" variant="outline" onClick={() => shiftAnchor(-1)} aria-label="Previous" title="Previous">
           <ChevronLeft className="h-4 w-4" />
         </Button>
-        <Button size="sm" variant="outline" onClick={() => nav(view, todayK)}>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => nav(view, todayK)}
+          className="relative overflow-visible! before:absolute before:inset-x-0 before:-inset-y-1.5 before:content-['']"
+        >
           Today
         </Button>
-        <Button size="sm" variant="outline" onClick={() => shiftAnchor(1)} aria-label="Next">
+        <Button size="icon-sm" variant="outline" onClick={() => shiftAnchor(1)} aria-label="Next" title="Next">
           <ChevronRight className="h-4 w-4" />
         </Button>
         {/* The way back out of the day drill — the PWA has no back chrome. */}
         {view === "day" && (
-          <button onClick={() => nav("week", anchorK)} className="ml-1 shrink-0 text-xs font-medium text-brand hover:underline">
+          <button
+            onClick={() => nav("week", anchorK)}
+            className="relative ml-1 shrink-0 text-xs font-medium text-brand hover:underline before:absolute before:-inset-x-1 before:-inset-y-3.5 before:content-['']"
+          >
             ← Week
           </button>
         )}
@@ -1178,23 +1192,30 @@ export function CalendarView({
           calendar is color-coded by person anymore. */}
       {(filterOpen || personFilter) && (
         <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
-          <button
-            onClick={() => setPersonFilter(null)}
-            className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-medium ${
-              personFilter === null ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-            }`}
-          >
-            Everyone
+          {/* Each chip a 44px tap (the button), the pill its look (W2-01). */}
+          <button onClick={() => setPersonFilter(null)} aria-pressed={personFilter === null} className="flex h-11 shrink-0 items-center">
+            <span
+              className={`rounded-full px-2.5 py-1 text-xs font-medium ${
+                personFilter === null ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+              }`}
+            >
+              Everyone
+            </span>
           </button>
           {members.map((m) => (
             <button
               key={m.id}
               onClick={() => setPersonFilter((p) => (p === m.id ? null : m.id))}
-              className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-medium ${
-                personFilter === m.id ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-              }`}
+              aria-pressed={personFilter === m.id}
+              className="flex h-11 shrink-0 items-center"
             >
-              {firstNameOf(m.full_name)}
+              <span
+                className={`rounded-full px-2.5 py-1 text-xs font-medium ${
+                  personFilter === m.id ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                }`}
+              >
+                {firstNameOf(m.full_name)}
+              </span>
             </button>
           ))}
           {personFilter && unassignedHidden > 0 && (
@@ -1230,7 +1251,7 @@ export function CalendarView({
           <button
             type="button"
             onClick={target.pl.clear}
-            className="ml-auto text-xs font-semibold text-slate-600 underline-offset-2 hover:underline"
+            className="ml-auto inline-flex min-h-11 items-center px-1 text-xs font-semibold text-slate-600 underline-offset-2 hover:underline"
           >
             Cancel
           </button>
@@ -1836,8 +1857,9 @@ function ApptRow({
         {isInspectionType(a.type) && (
           <Link
             href={`/appointments/${a.id}`}
-            className="rounded-md p-1 text-slate-400 hover:bg-teal-50 hover:text-teal-700"
-            title="Inspection capture — notes, measurements, photos"
+            className="flex h-11 w-11 items-center justify-center rounded-md text-slate-400 hover:bg-teal-50 hover:text-teal-700"
+            title="Walk-through — notes, measurements, photos"
+            aria-label="Walk-through — notes, measurements, photos"
           >
             <ClipboardList className="h-4 w-4" />
           </Link>
@@ -1846,7 +1868,7 @@ function ApptRow({
         <AppointmentButton jobs={picker.jobs} customers={picker.customers} staff={picker.staff} appointment={appt} />
         <MoveToDay
           label={`Move ${a.title}`}
-          triggerClassName="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+          triggerClassName="flex h-11 w-11 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-700"
           onPick={async (iso) => {
             if (!iso) return { ok: false, error: "Pick a day." };
             if (a.status === "proposed" && !confirm(PROPOSED_CONFIRM)) return { ok: true, note: "Left it alone — the link is still live." };
@@ -1878,7 +1900,7 @@ function TaskRow({ t }: { t: CalTask }) {
       <MoveToDay
         label={`Move ${t.title}`}
         clearable
-        triggerClassName="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+        triggerClassName="flex h-11 w-11 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-700"
         onPick={async (iso) => {
           const res = await updateTask(t.id, { due_date: iso }, { jobId: t.job_id, category: t.category as TaskCategory });
           if (res.ok) router.refresh();

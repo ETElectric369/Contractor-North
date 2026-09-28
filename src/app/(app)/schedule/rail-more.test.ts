@@ -88,7 +88,7 @@ vi.mock("@/lib/observe", () => ({ reportError: vi.fn() }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn(), push: vi.fn(), replace: vi.fn() }) }));
 vi.mock("@/components/toast", () => ({ useToast: () => vi.fn() }));
 
-const { placeJobOnDay, undoPlaceJob } = await import("./actions");
+const { placeJobOnDay, undoPlaceJob, sizeAppointment } = await import("./actions");
 const { RailCardRows } = await import("./place-rail");
 const { todayStrInTz } = await import("@/lib/tz");
 const { addDays } = await import("@/lib/come-back-days");
@@ -320,5 +320,46 @@ describe("Undo on the rail's place", () => {
       ok: false,
       error: "There's nothing to put back.",
     });
+  });
+});
+
+describe("the small parts: every header door 44px (W2-01), one word (W2-10), no junk kind (W2-06)", () => {
+  const view = () => read("src/app/(app)/calendar/calendar-view.tsx");
+
+  it("the header's icons are 44px targets, Everyone's Day first, its link, gate and href exactly as they were", () => {
+    const v = view();
+    expect(v).toContain(`const iconBtn =\n    "relative flex h-8 w-8 shrink-0 items-center justify-center rounded-lg before:absolute before:-inset-1.5 before:content-['']";`);
+    const at = v.indexOf('href="/schedule?view=crew"');
+    expect(at).toBeGreaterThan(0);
+    expect(v.slice(Math.max(0, at - 300), at)).toMatch(/\{crewBoard && \(/);
+    expect(v.slice(at, at + 300)).toContain("className={`${iconBtn} text-slate-400");
+    // The paging buttons: 32px to the eye, 44 to the thumb (the icon-sm bleed; Today bleeds up and down).
+    expect(v).toContain('<Button size="icon-sm" variant="outline" onClick={() => shiftAnchor(-1)} aria-label="Previous" title="Previous">');
+    expect(v).toContain('<Button size="icon-sm" variant="outline" onClick={() => shiftAnchor(1)} aria-label="Next" title="Next">');
+    expect(v).toContain(`className="relative overflow-visible! before:absolute before:inset-x-0 before:-inset-y-1.5 before:content-['']"`);
+    expect(v).toMatch(/← Week/);
+    expect(v).toContain("before:-inset-y-3.5");
+    // The person filter's chips, the armed strip's Cancel, and the day drill's small icons: 44px.
+    expect(v.match(/className="flex h-11 shrink-0 items-center"/g)?.length).toBe(2);
+    expect(v).toContain('className="ml-auto inline-flex min-h-11 items-center px-1 text-xs font-semibold');
+    expect(v).not.toMatch(/rounded-md p-1 text-slate-400/);
+    expect(v).not.toMatch(/const iconBtn = "flex h-8 w-8/);
+  });
+
+  it("the calendar's walk-through tooltip says Walk-through", () => {
+    const v = view();
+    expect(v).toContain('title="Walk-through — notes, measurements, photos"');
+    expect(v).not.toContain("Inspection capture");
+  });
+
+  it("sizeAppointment refuses a kind that isn't one, and takes any known kind (an old Quote or Office too) and Other", async () => {
+    db.appts = [{ id: "a1", type: "inspection", starts_at: null, planned_minutes: null }];
+    expect(await sizeAppointment("a1", { workKind: "junk" })).toEqual({ ok: false, error: "That isn't a kind of work." });
+    expect(db.writes).toEqual([]);
+    for (const k of ["quote", "office", "service", "other"]) {
+      expect(await sizeAppointment("a1", { workKind: k }), k).toEqual({ ok: true });
+    }
+    // A size alone never asks about the kind.
+    expect(await sizeAppointment("a1", { plannedMinutes: 60 })).toEqual({ ok: true });
   });
 });
