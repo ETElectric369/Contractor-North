@@ -291,8 +291,8 @@ describe("createJobFromAppointment: a fresh lead gets its customer, and the job 
     const res = await createJobFromAppointment("appt-tom");
     expect(res.ok).toBe(true);
     expect(win.customerForInquiry).toHaveBeenCalledTimes(1);
-    expect(win.customerForInquiry.mock.calls[0][1]).toBe("inq-fresh");
-    expect(win.customerForInquiry.mock.calls[0][2]).toBe("erik");
+    // The staff client, the lead, and who did it: the rule's own signature.
+    expect(win.customerForInquiry).toHaveBeenCalledWith(expect.anything(), "inq-fresh", "erik");
     const job = db.jobs.get(res.id!);
     expect(job.customer_id).toBe("cust-minted");
     expect(job.description).toBe("Kitchen hood outlet, wants it before the range arrives.");

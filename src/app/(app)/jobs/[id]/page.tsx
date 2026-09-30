@@ -1734,6 +1734,9 @@ export default async function JobDetailPage({
               billOf={billOfPaper}
               looseIds={paperSort.loose ? paperSort.loose.map((d: any) => String(d.id)) : null}
               tieNote={paperTies ? null : "Couldn't check which papers made which bill just now. Reload to try again."}
+              // A loose receipt's Already On A Bill → Tie It (d1ff7c5a): the job's live bills, said
+              // the way the rows say them ("the CED bill #8802-…"). The office only.
+              bills={viewerIsStaff ? liveBillIds.map((id) => ({ id, label: billWords(id) })) : null}
             />
           </Card>
           {/* THE ORDERS, ONLY WHEN THERE ARE SOME (W1-23): a job with no purchase order draws no

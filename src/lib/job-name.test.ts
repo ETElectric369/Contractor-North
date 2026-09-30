@@ -251,7 +251,10 @@ describe("every door that inserts a job names it with jobNameFrom", () => {
     expect(src).toMatch(/aliases: previewWho\.aliases/);
     const door = read("src/app/(app)/appointments/actions.ts");
     expect(door).toMatch(/jobWho\(\[card, lead\]\)/);
-    expect(door).toMatch(/const customerId = appt\.customer_id \?\? lead\?\.customer_id \?\? null/);
+    // The card first, else the lead's; a fresh lead's card is minted after (209451e1), which only
+    // changes who the job is FOR, never the order the preview and the door say who.
+    expect(door).toMatch(/let customerId = appt\.customer_id \?\? lead\?\.customer_id \?\? null/);
+    expect(door).toMatch(/if \(!customerId && inquiryId\) customerId = await customerForInquiry\(supabase, inquiryId, ctx\.userId\);/);
     expect(door).toMatch(/jobNameFrom\(\{\s*sourceWords: appt\.title,\s*customer: who,\s*aliases,[\s\S]*?street: visitStreetOf\(appt\.location, appt\),\s*unit: apptUnit,/);
     expect(door).toMatch(/location, unit, city/);
     expect(door).toMatch(/unit: apptUnit, \/\/ the visit's unit is the job's/);

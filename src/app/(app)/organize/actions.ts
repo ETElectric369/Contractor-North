@@ -438,6 +438,11 @@ export async function billJobReceipt(
   already?: boolean;
   /** A bill already carries this paper's number: nothing was written, and this says which. */
   sameAs?: string;
+  /** THAT bill (d1ff7c5a): so a door can say "Same Purchase: It's That Bill" and tie the paper to it
+   *  (linkReceiptToBill) instead of a second paid read or a second bill. `sameOnThisJob` is whether
+   *  it is on the paper's own job, the only case the tie is allowed (job containment). */
+  sameBillId?: string;
+  sameOnThisJob?: boolean;
   amount?: number | null;
   vendor?: string | null;
   lineCount?: number;
@@ -594,7 +599,19 @@ ${MASKED_PRICE_PROMPT_RULE}`,
       // sentence here pointing at "Receipts & Documents" sent him to a button that only appears
       // after another Record as Cost press (another paid read).
       const said = `Already on the books: ${billLabel(same[0])}. Nothing was recorded twice.`;
-      return { ok: true, already: true, vendor, amount, sameAs: said, warning: said };
+      // WHICH BILL, AND WHETHER IT IS THIS JOB'S (d1ff7c5a): the doors beside this sentence used to
+      // be Record As Cost (another paid read, the same answer) or Different Purchase (a SECOND bill
+      // for the same money). A paper that IS that bill gets tied to it instead.
+      return {
+        ok: true,
+        already: true,
+        vendor,
+        amount,
+        sameAs: said,
+        warning: said,
+        sameBillId: same[0].id,
+        sameOnThisJob: (same[0].job_id ?? null) === doc.job_id,
+      };
     }
   }
 
