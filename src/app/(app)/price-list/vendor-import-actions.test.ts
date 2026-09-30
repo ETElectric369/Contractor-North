@@ -5,9 +5,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 /**
  * Add N Vendors and its Undo (vendor import, Phase 1), and the rule that replaced 0341's "a
  * subcontractor never carries prices on an item" (Erik 2026-09-30: every kind carries prices),
- * driven through the REAL server actions against a small in-memory database. The database keeps 0296's one-card-per-name rule (lower(btrim(name)) per org), stamps
- * created_at/updated_at the way Postgres does (an insert leaves them equal; 0296's touch trigger
- * moves updated_at on every update), and can be told it hasn't had 0341 yet.
+ * driven through the REAL server actions against a small in-memory database. The database keeps
+ * 0296's one-card-per-name rule (lower(btrim(name)) per org), stamps created_at/updated_at the way
+ * Postgres does (an insert leaves them equal; 0296's touch trigger moves updated_at on every
+ * update), and can be told it hasn't had 0341 yet.
  *
  * Every name is made up: a real customer's vendor list never goes in this repo (it is public).
  */
