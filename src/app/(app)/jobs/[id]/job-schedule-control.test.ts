@@ -120,4 +120,18 @@ describe("where each edit goes (source)", () => {
     expect(src).toContain("plannedMinutes={plannedMinutes}");
     expect(page).toMatch(/const block = readJobBlock\(\{\s*scheduledStart: j\.scheduled_start \?\? null,\s*scheduledEnd: j\.scheduled_end \?\? null,\s*plannedMinutes: j\.planned_minutes \?\? null,\s*tz,\s*workDay,/);
   });
+
+  it("the crew's Scheduled line reads start AND end on several days too ('10:00 AM – 12:00 PM each day'), never just a start", () => {
+    const page = readFileSync(join(process.cwd(), "src/app/(app)/jobs/[id]/page.tsx"), "utf8");
+    const from = page.indexOf("const scheduleText");
+    const line = page.slice(from, page.indexOf("})();", from));
+    expect(line).not.toContain("`starts ${hmWords(block.startHm)}`");
+    expect(line).toContain('`${hmWords(block.startHm)} – ${hmWords(block.endHm)}${block.multiDay ? " each day" : ""}`');
+  });
+
+  it("the job page's Add Time Entry hands the clock-out sheet the work day's end (End Of Work Day on a forgotten punch)", () => {
+    const page = readFileSync(join(process.cwd(), "src/app/(app)/jobs/[id]/page.tsx"), "utf8");
+    const from = page.indexOf("<AddTimeEntry");
+    expect(page.slice(from, page.indexOf("/>", from))).toContain("workDayEnd={workDay.end}");
+  });
 });

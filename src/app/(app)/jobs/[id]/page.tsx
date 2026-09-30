@@ -743,12 +743,12 @@ export default async function JobDetailPage({
     .map(([day, h]) => ({ day, hours: h, words: `${dayWords(day)} ${hmWords(h.start)} – ${hmWords(h.end)}` }));
   const scheduleText: string | null = (() => {
     const segs = scheduleDays;
-    // The crew reads the whole block, start AND end ("10:00 AM – 12:00 PM"), never just a start.
+    // The crew reads the whole block, start AND end ("10:00 AM – 12:00 PM"), never just a start. On
+    // several days those are its hours on each of them ("10:00 AM – 12:00 PM each day"): a 10–12 job
+    // and a full day must not read the same.
     const startTime = !j.scheduled_start || block.allDay
       ? null
-      : block.multiDay
-        ? `starts ${hmWords(block.startHm)}`
-        : `${hmWords(block.startHm)} – ${hmWords(block.endHm)}`;
+      : `${hmWords(block.startHm)} – ${hmWords(block.endHm)}${block.multiDay ? " each day" : ""}`;
     const days = segs.length
       ? segs
           .map((sg) => (sg.start_date === sg.end_date ? formatDate(sg.start_date) : `${formatDate(sg.start_date)} – ${formatDate(sg.end_date)}`))
@@ -1515,6 +1515,7 @@ export default async function JobDetailPage({
                   tz={tz}
                   viewerId={user?.id}
                   companyTimeCode={null}
+                  workDayEnd={workDay.end}
                 />
               )}
             </div>
