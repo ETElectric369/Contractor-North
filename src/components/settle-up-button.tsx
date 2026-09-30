@@ -14,7 +14,8 @@ import { invoiceBalance } from "@/lib/invoice-math";
 import { sendFirstDetail, sendFirstQuestion } from "@/lib/pay-door-words";
 import { TEXTS_NOT_READY_LINE } from "@/lib/sms-readiness";
 import { paymentMethodKey } from "@/lib/payment-method";
-import { cancelTapPaymentIntent, createTapPaymentIntent, tapToPayContext } from "@/app/(app)/billing/tap-actions";
+import { cancelTapPaymentIntent, createTapPaymentIntent, tapPaymentIntentStatus, tapToPayContext } from "@/app/(app)/billing/tap-actions";
+import { notChargedSentence } from "@/lib/tap-intent-status";
 import {
   cancelTapPayment,
   collectTapPayment,
@@ -120,13 +121,18 @@ type TapDoor = { invoiceId: string; clientSecret: string; paymentIntentId: strin
 type TapOutcome = "declined" | "timed-out" | "failed" | "not-enabled" | "setup";
 
 /** Where a tap is: nothing / the phone is at it (`phase` says who owns the screen — the reader,
- *  Apple's terms sheet, or Apple's how-to guide right after the terms) / Stripe said yes and the
- *  webhook is writing it / it stopped, with the sentence that says why. */
+ *  Apple's terms sheet, or Apple's how-to guide right after the terms) / the phone's confirm
+ *  resolved, with what STRIPE says about it (`stripe`, re-asked while it waits — INV-083: the
+ *  phone's yes alone was never the charge) / it stopped, with the sentence that says why. */
 type TapState =
   | { kind: "idle" }
   | { kind: "busy"; label: string; phase: "pay" | "enable" | "guide" }
-  | { kind: "confirmed" }
+  | { kind: "confirmed"; paymentIntentId: string; amount: number; stripe: "charged" | "processing" | "unread"; since: number }
   | { kind: "error"; error: string; outcome: TapOutcome };
+
+/** How often the confirmed screen asks Stripe again, and when it starts saying it has been a while. */
+const stripeRecheckMs = 6_000;
+const stripeSlowMs = 60_000;
 
 /** The receipt door (Apple 5.10): the public invoice link and what the text names. null = not
  *  fetched yet for this open of the screen. */
@@ -539,6 +545,8 @@ function useCardDoor(
   const [tapOk, setTapOk] = useState(false);
   const [tapNote, setTapNote] = useState<string | null>(null);
   const [tap, setTap] = useState<TapState>({ kind: "idle" });
+  /** The confirmed screen has been waiting on Stripe's notice for a while (stripeSlowMs). */
+  const [stripeSlow, setStripeSlow] = useState(false);
   const [tapStarted, setTapStarted] = useState(false);
   const [progress, setProgress] = useState<TapProgress | null>(null);
   const [receipt, setReceipt] = useState<Receipt | null>(null);
@@ -820,13 +828,24 @@ function useCardDoor(
         if (stale(true)) return;
       }
       if (c.ok) {
-        // Stripe confirmed the charge. The invoice flips when the webhook writes it; the watch
-        // sees it land exactly as it does for the QR.
+        // The phone's confirm resolved, and the bridge asked Stripe what that meant (INV-083). The
+        // invoice flips when the webhook writes it; the watch sees it land exactly as it does for
+        // the QR — and the Stripe watch below keeps asking until it does, or until Stripe says
+        // nothing was taken. A door Stripe has taken can't be cancelled, so letting go costs nothing.
         tapPi.current = null;
-        setTap({ kind: "confirmed" });
+        setTap({ kind: "confirmed", paymentIntentId: pi.paymentIntentId, amount: pi.amount, stripe: c.stripe, since: Date.now() });
         return;
       }
       if (c.cancelled) { setTap({ kind: "idle" }); return; }
+      if (c.notCharged) {
+        // Stripe says nothing was taken: that PaymentIntent is spent (or back at the start with a
+        // reason). Try Again mints a fresh door rather than re-arming a door Stripe has refused.
+        const spent = tapPi.current;
+        tapPi.current = null;
+        if (spent) void cancelTapPaymentIntent(spent.paymentIntentId).catch(() => {});
+        setTap({ kind: "error", error: c.error, outcome: "failed" });
+        return;
+      }
       setTap({ kind: "error", error: c.error, outcome: c.notEnabled ? "not-enabled" : outcomeOf(c.error) });
     } catch (e) {
       if (stale()) return;
@@ -860,6 +879,52 @@ function useCardDoor(
     const timer = setInterval(tick, 4000);
     return () => { live = false; clearInterval(timer); };
   }, [open, art, tapStarted, invoiceId, paid, router, toast]);
+
+  // THE STRIPE WATCH (Rich Seiler, INV-083, 2026-09-29). The screen above said "Stripe confirmed the
+  // charge" and waited for a webhook forever while Stripe had charged nothing: the phone's confirm
+  // resolving was the only evidence. So while the confirmed screen is up and the invoice hasn't
+  // flipped, Stripe itself is asked what the PaymentIntent's status is — every few seconds, on the
+  // server, own org only. Charged: the words say so and the invoice watch finishes the job.
+  // Processing or unreadable: keep asking, and say so. Nothing taken: the screen stops waiting and
+  // says it in words, with Try Again on a fresh door — never a spinner over an uncharged card.
+  useEffect(() => {
+    if (tap.kind !== "confirmed") {
+      setStripeSlow(false);
+      return;
+    }
+    if (!open || paid != null) return;
+    let live = true;
+    const { paymentIntentId, amount, since } = tap;
+    const slowTimer = setTimeout(() => {
+      if (live) setStripeSlow(true);
+    }, Math.max(0, stripeSlowMs - (Date.now() - since)));
+    const tick = async () => {
+      const s = await tapPaymentIntentStatus(paymentIntentId).catch(() => null);
+      if (!live) return;
+      if (!s?.ok) {
+        setTap((t) => (t.kind === "confirmed" && t.paymentIntentId === paymentIntentId && t.stripe !== "charged" ? { ...t, stripe: "unread" } : t));
+        return;
+      }
+      if (s.charged) {
+        setTap((t) => (t.kind === "confirmed" && t.paymentIntentId === paymentIntentId && t.stripe !== "charged" ? { ...t, stripe: "charged" } : t));
+        return;
+      }
+      if (s.waiting) {
+        setTap((t) => (t.kind === "confirmed" && t.paymentIntentId === paymentIntentId && t.stripe !== "processing" ? { ...t, stripe: "processing" } : t));
+        return;
+      }
+      // Stripe says nothing was taken. The door is spent; Try Again mints a fresh one.
+      tapPi.current = null;
+      void cancelTapPaymentIntent(paymentIntentId).catch(() => {});
+      setTap({ kind: "error", error: notChargedSentence(amount / 100, s.status, s.reason), outcome: "failed" });
+    };
+    const timer = setInterval(tick, stripeRecheckMs);
+    return () => {
+      live = false;
+      clearInterval(timer);
+      clearTimeout(slowTimer);
+    };
+  }, [open, tap, paid]);
 
   // THE PROGRESS FEED (Apple 5.7 / 3.9.1). The bridge publishes what the reader is doing — its
   // own stages and the SDK's configuration percent — for the life of the page; this screen
@@ -1172,11 +1237,29 @@ function useCardDoor(
         </div>
       );
     } else if (tap.kind === "confirmed") {
+      // WHAT IS KNOWN, AND ONLY THAT (INV-083). "Stripe confirmed the charge" is said only when
+      // Stripe's own status says so; until then the screen says it is still asking.
+      const figure = money(tap.amount / 100);
+      const line =
+        tap.stripe === "charged"
+          ? `Stripe took the ${figure} — recording it on the invoice…`
+          : tap.stripe === "processing"
+            ? `Card approved — Stripe is still finishing the ${figure}…`
+            : `Card approved — checking with Stripe that the ${figure} went through…`;
+      const under =
+        tap.stripe === "charged"
+          ? "This flips to Paid the moment Stripe's notice lands."
+          : "Nothing is recorded until Stripe says the money was taken.";
+      const slow =
+        tap.stripe === "charged"
+          ? "It's been a while. Stripe took the charge, so the invoice will show Paid once its notice arrives — you can close this and check back on the invoice."
+          : "It's been a while and Stripe hasn't said the money was taken. If the customer is still there, press Tap to Pay again or send them the link; nothing has been charged twice.";
       takeover = (
         <div className="flex flex-col items-center gap-2 py-4 text-center">
           <Loader2 className="h-5 w-5 animate-spin text-slate-500" />
-          <div className="text-sm font-medium text-slate-800">Card approved — recording it on the invoice…</div>
-          <p className="text-xs text-slate-500">Stripe confirmed the charge. This flips to Paid the moment it lands.</p>
+          <div className="text-sm font-medium text-slate-800">{line}</div>
+          <p className="text-xs text-slate-500">{under}</p>
+          {stripeSlow && <p className="max-w-72 text-xs text-amber-700">{slow}</p>}
         </div>
       );
     }

@@ -1,8 +1,9 @@
 "use client";
 
 import { isNativeShell } from "@/lib/native-shell";
-import { ensureTerminalLocation, tapToPayContext, type TapToPayContext } from "@/app/(app)/billing/tap-actions";
+import { ensureTerminalLocation, tapPaymentIntentStatus, tapToPayContext, type TapToPayContext } from "@/app/(app)/billing/tap-actions";
 import { reportClientError } from "@/app/report-client-error";
+import { notChargedSentence } from "@/lib/tap-intent-status";
 
 /**
  * TAP TO PAY ON IPHONE, from the web app running inside the native shell (2026-09-10).
@@ -1545,17 +1546,40 @@ export async function showHowToTap(): Promise<{ ok: true } | { ok: false; error:
   }
 }
 
-export type TapCollectResult = { ok: true } | { ok: false; error: string; cancelled?: boolean; notEnabled?: boolean };
+export type TapCollectResult =
+  /**
+   * The phone's confirm resolved, and what STRIPE says about it (Rich Seiler, INV-083, 2026-09-29):
+   *   "charged"    Stripe's status is `succeeded` — the money is taken; the webhook books it.
+   *   "processing" Stripe is still finishing it; the caller keeps asking (tapPaymentIntentStatus).
+   *   "unread"     the phone said yes but Stripe couldn't be asked (no signal, the server refused);
+   *                NOT known to be charged. `note` is the sentence the read gave. The caller keeps
+   *                asking, and says it is checking — never "Stripe confirmed the charge".
+   */
+  | { ok: true; stripe: "charged" | "processing" | "unread"; note?: string }
+  | {
+      ok: false;
+      error: string;
+      cancelled?: boolean;
+      notEnabled?: boolean;
+      /** The phone called it approved and Stripe says nothing was taken: the PaymentIntent is spent
+       *  or back at the start. The caller lets it go and mints a fresh door for Try Again. */
+      notCharged?: boolean;
+    };
 
 /** How long a busy reader gets to finish its last request before the one retry of a collect. */
 const BUSY_RETRY_PAUSE_MS = 2_000;
 
+/** How long Stripe's own word on the confirm is waited for before the caller is told "unread". */
+const STATUS_READ_MS = 20_000;
+
 /**
  * TAKE THE TAP. The PaymentIntent already exists (createTapPaymentIntent); this collects the card
- * against it and confirms. `{ ok: true }` means Stripe confirmed the charge — the invoice flips
- * when the webhook lands, so the caller keeps polling invoiceCollectStatus exactly as the QR door
- * does. The plugin never returns the PaymentIntent to JS (its confirmed event is empty), which is
- * why `paymentIntentId` travels with the input: the caller already holds the only copy.
+ * against it and confirms. `{ ok: true, stripe: "charged" }` means STRIPE says the charge went
+ * through — the invoice flips when the webhook lands, so the caller keeps polling
+ * invoiceCollectStatus exactly as the QR door does. The plugin never returns the PaymentIntent to
+ * JS (its confirmed event is empty; its confirmPaymentIntent resolves on ANY non-nil intent,
+ * whatever that intent's status — INV-083), which is why `paymentIntentId` travels with the input
+ * and why the confirm's own resolution is never the answer: the server is asked what Stripe says.
  *
  * `amount` is integer cents, kept on the input so the caller's confirmation copy and this call
  * can't disagree; the charge itself was fixed when the PaymentIntent was minted.
@@ -1602,7 +1626,10 @@ export async function collectTapPayment(input: {
 }
 
 /** One attempt at the tap, location to Stripe's confirm. collectTapPayment holds the claim on it. */
-async function collectAttempt(p: TerminalPlugin, input: { clientSecret: string }): Promise<TapCollectResult> {
+async function collectAttempt(
+  p: TerminalPlugin,
+  input: { clientSecret: string; paymentIntentId: string; amount: number },
+): Promise<TapCollectResult> {
   // WHERE it got stuck, so a hang names itself instead of spinning forever.
   let stage: string = STAGE.location;
   try {
@@ -1703,7 +1730,14 @@ async function collectAttempt(p: TerminalPlugin, input: { clientSecret: string }
     });
     if (outcome === "cancelled") return CANCELLED;
     publish(STAGE.ready);
-    return { ok: true };
+    // THE PHONE'S WORD IS NOT THE ANSWER (Rich Seiler, INV-083, 2026-09-29). The plugin resolved
+    // confirmPaymentIntent, this returned ok, the screen said "Stripe confirmed the charge" and
+    // waited for a webhook that never came: Stripe had charged nothing. The SDK hands the plugin
+    // an intent on every non-error path and the plugin resolves on any non-nil intent, so the
+    // resolution says only "the SDK answered", never "it succeeded". The answer is Stripe's own
+    // status, read through the server, off the SDK turn (the reader is free again). A read that
+    // can't be made is "unread", never "charged"; the caller keeps asking.
+    return await stripeWordOn(input);
   } catch (e) {
     // The reader is still there after a failed tap or confirm; it isn't after a failed connect.
     publish(stage === STAGE.tapping || stage === STAGE.confirming ? STAGE.ready : STAGE.notReady);
@@ -1734,6 +1768,35 @@ async function collectAttempt(p: TerminalPlugin, input: { clientSecret: string }
     }
     return { ok: false, error: describeFailure(stage, e) };
   }
+}
+
+/**
+ * WHAT STRIPE SAYS about a confirm the phone resolved. Reached only through the collect; every
+ * path ends in words, never a throw:
+ *   succeeded              → { ok: true, stripe: "charged" }
+ *   processing             → { ok: true, stripe: "processing" }
+ *   anything else          → { ok: false, notCharged: true, error } — and a row in error_events,
+ *                            because a confirm Stripe did not take is the INV-083 mechanism and
+ *                            must never again be found by a customer paying twice
+ *   couldn't ask / refused → { ok: true, stripe: "unread", note } — not known either way
+ */
+async function stripeWordOn(input: { paymentIntentId: string; amount: number }): Promise<TapCollectResult> {
+  let word: Awaited<ReturnType<typeof tapPaymentIntentStatus>> | null = null;
+  try {
+    word = await raced(STATUS_READ_MS, () => tapPaymentIntentStatus(input.paymentIntentId));
+  } catch (e) {
+    const note = e === TIMED_OUT ? "Stripe didn't answer in time." : said(e) || "Couldn't reach the server.";
+    return { ok: true, stripe: "unread", note };
+  }
+  if (!word.ok) return { ok: true, stripe: "unread", note: word.error };
+  if (word.charged) return { ok: true, stripe: "charged" };
+  if (word.waiting) return { ok: true, stripe: "processing" };
+  void reportClientError("tap-to-pay", `confirm resolved but Stripe says ${word.status}: nothing charged`, {
+    paymentIntentId: input.paymentIntentId,
+    status: word.status,
+    reason: word.reason ?? "",
+  });
+  return { ok: false, notCharged: true, error: notChargedSentence(input.amount / 100, word.status, word.reason) };
 }
 
 /**

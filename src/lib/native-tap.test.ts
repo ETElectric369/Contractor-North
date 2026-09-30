@@ -22,12 +22,15 @@ const h = vi.hoisted(() => ({
   } as Record<string, unknown>,
   loc: { ok: true, identity: "org-1:user-1", locationId: "tml_1", merchantDisplayName: "ET Electric", livemode: false } as Record<string, unknown>,
   report: vi.fn(async (..._args: unknown[]) => {}),
+  /** What Stripe says about the PaymentIntent after the phone's confirm (INV-083): charged by default. */
+  status: vi.fn(async (_id: string): Promise<unknown> => ({ ok: true, charged: true, amountReceived: 1.23 })),
 }));
 
 vi.mock("@/lib/native-shell", () => ({ isNativeShell: () => true }));
 vi.mock("@/app/(app)/billing/tap-actions", () => ({
   tapToPayContext: async () => h.ctx,
   ensureTerminalLocation: async () => h.loc,
+  tapPaymentIntentStatus: (id: string) => h.status(id),
 }));
 vi.mock("@/app/report-client-error", () => ({ reportClientError: h.report }));
 
@@ -129,6 +132,8 @@ beforeEach(() => {
   );
   h.report.mockReset();
   h.report.mockImplementation(async () => {});
+  h.status.mockReset();
+  h.status.mockImplementation(async () => ({ ok: true, charged: true, amountReceived: 1.23 }));
 });
 
 afterEach(() => {
@@ -283,7 +288,7 @@ describe("Cancel while the reader is still connecting", () => {
     expect(t.plugin.collectPaymentMethod).not.toHaveBeenCalled();
 
     // And the attempt has let go: the next press goes straight to the (connected) reader.
-    expect(await tap.collectTapPayment(PI)).toEqual({ ok: true });
+    expect(await tap.collectTapPayment(PI)).toEqual({ ok: true, stripe: "charged" });
     expect(t.plugin.collectPaymentMethod).toHaveBeenCalledTimes(1);
     expect(t.plugin.confirmPaymentIntent).toHaveBeenCalledTimes(1);
   });
@@ -309,8 +314,56 @@ describe("Cancel while the reader is still connecting", () => {
     expect(settled).toBe(false);
     // The card had already been read when the Cancel reached the reader: Stripe confirms it.
     collect.resolve();
-    expect(await press).toEqual({ ok: true });
+    expect(await press).toEqual({ ok: true, stripe: "charged" });
     expect(t.plugin.confirmPaymentIntent).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("the phone's confirm is not the charge — Stripe's word is (Rich Seiler, INV-083, 2026-09-29)", () => {
+  it("charged only when Stripe's status is succeeded; the server is asked with the PaymentIntent id", async () => {
+    const tap = await freshBridge();
+    t.markConnected();
+    expect(await tap.collectTapPayment(PI)).toEqual({ ok: true, stripe: "charged" });
+    expect(t.plugin.confirmPaymentIntent).toHaveBeenCalledTimes(1);
+    expect(h.status).toHaveBeenCalledWith("pi_1");
+    expect(h.report).not.toHaveBeenCalled();
+  });
+
+  it("INV-083's shape: the confirm resolved, Stripe says requires_payment_method — not ok, nothing charged, said in words, and a row for the sweep", async () => {
+    const tap = await freshBridge();
+    t.markConnected();
+    h.status.mockResolvedValue({ ok: true, charged: false, status: "requires_payment_method", waiting: false, reason: null });
+    const r = await tap.collectTapPayment({ ...PI, amount: 42000 });
+    expect(r).toEqual({
+      ok: false,
+      notCharged: true,
+      error: "The phone said the card was approved, but Stripe did not take the $420.00 — nothing was charged. Press Tap to Pay again, or send them the link.",
+    });
+    expect(h.report).toHaveBeenCalledWith("tap-to-pay", "confirm resolved but Stripe says requires_payment_method: nothing charged", {
+      paymentIntentId: "pi_1",
+      status: "requires_payment_method",
+      reason: "",
+    });
+    // The reader is still there: a not-charged confirm is not a lost reader.
+    expect(t.plugin.disconnectReader).not.toHaveBeenCalled();
+  });
+
+  it("Stripe still processing: ok, but said as processing, never as charged", async () => {
+    const tap = await freshBridge();
+    t.markConnected();
+    h.status.mockResolvedValue({ ok: true, charged: false, status: "processing", waiting: true, reason: null });
+    expect(await tap.collectTapPayment(PI)).toEqual({ ok: true, stripe: "processing" });
+    expect(h.report).not.toHaveBeenCalled();
+  });
+
+  it("Stripe couldn't be asked (the server refused, or nothing came back): unread with the sentence — never charged", async () => {
+    const tap = await freshBridge();
+    t.markConnected();
+    h.status.mockResolvedValue({ ok: false, error: "Couldn't ask Stripe about that payment — no signal." });
+    expect(await tap.collectTapPayment(PI)).toEqual({ ok: true, stripe: "unread", note: "Couldn't ask Stripe about that payment — no signal." });
+
+    h.status.mockRejectedValue(new Error("Failed to fetch"));
+    expect(await tap.collectTapPayment(PI)).toEqual({ ok: true, stripe: "unread", note: "Failed to fetch" });
   });
 });
 

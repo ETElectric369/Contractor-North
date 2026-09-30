@@ -11,6 +11,7 @@ import { reportError } from "@/lib/observe";
 import { orgStaffIds, pushConfigured } from "@/lib/push";
 import { notifyPeople } from "@/lib/notifications";
 import { STAFF_ROLES } from "@/lib/actions/perms";
+import { tapIntentStatusOf, type TapPaymentStatus } from "@/lib/tap-intent-status";
 
 /**
  * TAP TO PAY ON IPHONE — the server half (2026-09-10, migration 0252).
@@ -739,5 +740,49 @@ export async function cancelTapPaymentIntent(paymentIntentId: string): Promise<{
     reportError("stripe:terminal:cancel-intent", e, { orgId, paymentIntentId });
     const said = e instanceof Error ? e.message : "";
     return { ok: false, error: `Stripe wouldn't let go of that payment${said ? ` — ${said}` : ""}.` };
+  }
+}
+
+/**
+ * WHAT STRIPE SAYS HAPPENED TO A TAP — read from Stripe, never from the phone (Rich Seiler, INV-083,
+ * 2026-09-29). The Tap to Pay screen said "confirmed" at 12:41 PM and waited for a webhook that never
+ * came: the plugin's confirmPaymentIntent resolves the moment the SDK hands back a non-nil intent,
+ * whatever that intent's STATUS is, and the bridge read "it resolved" as "it charged". Stripe had
+ * charged nothing; Rich paid $420 by the link an hour later. So the phone's word is never the answer
+ * any more: after the confirm, the bridge asks THIS, and the screen keeps asking while it waits.
+ *
+ * Own org only, the same fence as cancelTapPaymentIntent: the intent must carry this org's id and the
+ * Tap marker, on this org's connected account, or it is not ours to read. A read that can't reach
+ * Stripe is a sentence, and the caller treats "couldn't read" as "not known" — never as charged.
+ */
+export async function tapPaymentIntentStatus(paymentIntentId: string): Promise<TapPaymentStatus> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error ?? "This action is staff-only." };
+  const orgId = ctx.orgId;
+  if (!orgId) return { ok: false, error: "Your account isn't attached to a company yet." };
+  if (!billingEnabled) return { ok: false, error: "Card payments aren't set up on this server yet." };
+  if (!/^pi_[A-Za-z0-9]+$/.test(paymentIntentId)) return { ok: false, error: "That isn't a payment id." };
+
+  const { data: org, error: orgErr } = await ctx.supabase
+    .from("organizations")
+    .select("stripe_account_id")
+    .eq("id", orgId)
+    .maybeSingle();
+  if (orgErr || !org) return { ok: false, error: orgErr ? dbError(orgErr) : "Couldn't read this company's payment setup." };
+  const accountId = (org as { stripe_account_id?: string | null }).stripe_account_id;
+  if (!accountId) return { ok: false, error: NOT_SET_UP };
+
+  try {
+    const pi = await getStripe().paymentIntents.retrieve(paymentIntentId, {}, { stripeAccount: accountId });
+    if (pi.metadata?.org_id !== orgId || pi.metadata?.source !== "tap_to_pay") {
+      return { ok: false, error: "That payment isn't this company's." };
+    }
+    // The status, read the one way (lib/tap-intent-status): `succeeded` is the only word that
+    // means charged.
+    return tapIntentStatusOf(pi);
+  } catch (e) {
+    reportError("stripe:terminal:intent-status", e, { orgId, paymentIntentId });
+    const said = e instanceof Error ? e.message : "";
+    return { ok: false, error: `Couldn't ask Stripe about that payment${said ? ` — ${said}` : ""}.` };
   }
 }
