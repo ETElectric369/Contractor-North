@@ -2305,8 +2305,8 @@ describe("billJobReceipt asks 'already on the books?' like every other door (aud
     };
   });
 
-  it("the same ticket snapped again on the job page writes NOTHING and says which bill it is", async () => {
-    state.client = fakeSupabase(snapped(), calls);
+  it("the same ticket snapped again on the job page writes NO second bill, ties the paper to the one it names, and says which bill it is", async () => {
+    state.client = fakeSupabase(snapped({ "organized_items.insert": [{ data: [{ id: "oi-tie" }], error: null }] }), calls);
     const res = await billJobReceipt("doc-2");
     expect(res).toMatchObject({ ok: true, already: true });
     expect(res.sameAs).toContain("Already on the books: Consolidated Electrical Dist. #8802-SO-257555, $323.71, 2026-09-24, on J-011 13897 Herringbone.");
@@ -2315,7 +2315,13 @@ describe("billJobReceipt asks 'already on the books?' like every other door (aud
     // The Add Cost sheet never falls back to a typed second bill on an ok.
     expect(res.warning).toBe(res.sameAs);
     expect(did("bills", "insert")).toBeUndefined();
-    expect(did("organized_items", "insert")).toBeUndefined();
+    // THE ONE WRITE: the paper is tied to the bill it names (J-013, 2026-09-29: left untied, the
+    // job's Costs badge counted the receipt as open beside its own bill and the receipt read "Not
+    // on a bill yet"). A tie, never bill_id — no teardown may delete a bill this row did not make.
+    const tie = did("organized_items", "insert");
+    expect(tie?.payload).toMatchObject({ document_id: "doc-2", tied_bill_id: TRAY_BILL.id, status: "filed", job_id: "j11" });
+    expect(tie?.payload.bill_id).toBeUndefined();
+    expect(tie?.selected).toBe(true);
   });
 
   it("Different Purchase: Record It Anyway records it, and the bill says a person checked", async () => {
