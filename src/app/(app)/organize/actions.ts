@@ -593,7 +593,31 @@ ${MASKED_PRICE_PROMPT_RULE}`,
       // renders: the Add Cost sheet and Snap the Bill offer Different Purchase in place, and a
       // sentence here pointing at "Receipts & Documents" sent him to a button that only appears
       // after another Record as Cost press (another paid read).
-      const said = `Already on the books: ${billLabel(same[0])}. Nothing was recorded twice.`;
+      //
+      // THE PHOTO IS FILED WITH THAT BILL (J-013 "TTP #56", 2026-09-30: one live bill, and the
+      // Costs badge said 3 with the receipts fold reading "Not On A Bill Yet"). This answer used to
+      // write NOTHING, so the second photo of the same ticket stayed a Receipt on no tie: the job
+      // page called it loose, counted it on the Costs chip, flagged it "Not on a bill yet." and
+      // offered Record As Cost, whose only answer was this sentence again, forever. The paper IS
+      // that bill's, by the same reading every door trusts, so it is filed against the bill the way
+      // Same Purchase: Tie Them files one (tied_bill_id, never bill_id: no teardown can take the
+      // bill down through it, and the idempotency read above still lets Different Purchase through).
+      // No money moves. Once, so a second read of the same photo doesn't stack ties.
+      const tie = await tieDocumentToBill(supabase, ctx, {
+        documentId,
+        doc,
+        billId: same[0].id,
+        vendor,
+        amount,
+        itemDate: stated?.billDate || itemDate || stated?.fallbackBillDate || null,
+        category: stated?.category || "Receipt",
+        confidence,
+        payment: stated?.paid ? "paid_at_purchase" : (parsed.payment ?? "unknown"),
+        lines,
+      });
+      const said = tie.ok
+        ? `Already on the books: ${billLabel(same[0])}. This photo is filed with that bill; nothing was recorded twice.`
+        : `Already on the books: ${billLabel(same[0])}. Nothing was recorded twice, but this photo couldn't be filed with that bill, so the job's Costs tab will keep saying it is not on a bill yet.`;
       return { ok: true, already: true, vendor, amount, sameAs: said, warning: said };
     }
   }
@@ -672,6 +696,29 @@ ${MASKED_PRICE_PROMPT_RULE}`,
     ? "The cost is recorded, but this receipt did not get marked as billed. Tapping Record As Cost on it again would write a second bill, so check the job's costs first."
     : null;
 
+  // A PERSON SAID DIFFERENT PURCHASE: the tie the same-number answer filed this photo under (above)
+  // is no longer what they meant. Its own bill now holds the photo; the old tie would still list
+  // it "On" the other bill. Only after the bill and its link are in, so a refusal costs nothing.
+  // Checked, never silent: an untied row left behind is said in the same warning line.
+  let untieWarning: string | null = null;
+  if (stated?.differentPurchase) {
+    const { data: gone, error: goneErr } = await supabase
+      .from("organized_items")
+      .delete()
+      .eq("org_id", ctx.orgId)
+      .eq("document_id", documentId)
+      .is("bill_id", null)
+      .not("tied_bill_id", "is", null)
+      .select("id");
+    // Zero rows is the ordinary case here (Different Purchase pressed straight from the sheet
+    // before any tie was filed), so only an error is a warning; `gone` is read so the write is asked
+    // for its answer the way every write is.
+    if (goneErr) {
+      reportError("organize:billJobReceipt.untie", goneErr, { documentId, billId, jobId: doc.job_id, untied: ((gone ?? []) as { id: string }[]).length });
+      untieWarning = "This photo is still filed with the other bill too, so the Costs tab may name both. Reload the page; if it still does, open the photo and check.";
+    }
+  }
+
   revalidatePath("/bills");
   revalidatePath("/analytics");
   revalidatePath(`/jobs/${doc.job_id}`);
@@ -682,8 +729,74 @@ ${MASKED_PRICE_PROMPT_RULE}`,
     lineCount: lines.length,
     // Both facts or neither: a receipt that did not add up AND did not get linked has two things
     // wrong with it, and hiding one behind the other is how the second one gets found in a month.
-    warning: [check.mismatch ? check.note : null, linkWarning].filter(Boolean).join(" ") || undefined,
+    warning: [check.mismatch ? check.note : null, linkWarning, untieWarning].filter(Boolean).join(" ") || undefined,
   };
+}
+
+/**
+ * FILE A JOB'S PHOTO WITH A BILL ALREADY ON THE BOOKS (the same-number answer in billJobReceipt).
+ * The row Same Purchase: Tie Them writes (0295), for a document the job already holds: filed,
+ * tied_bill_id and never bill_id, so no teardown of this row can take the bill down and the
+ * "already billed?" read (bill_id) still lets a Different Purchase through. Once per document:
+ * a tie already there is the answer. Every write asks for its row back (silent-write law).
+ */
+async function tieDocumentToBill(
+  supabase: any,
+  ctx: { userId: string },
+  o: {
+    documentId: string;
+    doc: { job_id: string | null; file_url: string | null };
+    billId: string;
+    vendor: string;
+    amount: number;
+    itemDate: string | null;
+    category: string;
+    confidence: string;
+    payment: string;
+    lines: unknown[];
+  },
+): Promise<{ ok: boolean }> {
+  const { data: prior, error: priorErr } = await supabase
+    .from("organized_items")
+    .select("id")
+    .eq("document_id", o.documentId)
+    .not("tied_bill_id", "is", null)
+    .limit(1)
+    .maybeSingle();
+  if (priorErr) {
+    reportError("organize:billJobReceipt.tie.read", priorErr, { documentId: o.documentId, billId: o.billId, jobId: o.doc.job_id });
+    return { ok: false };
+  }
+  if (prior?.id) return { ok: true };
+  const { data: tie, error: tieErr } = await supabase
+    .from("organized_items")
+    .insert({
+      kind: "receipt",
+      title: o.vendor,
+      summary: null,
+      vendor: o.vendor,
+      amount: o.amount,
+      item_date: o.itemDate,
+      category: o.category,
+      confidence: o.confidence,
+      payment: o.payment,
+      status: "filed",
+      job_id: o.doc.job_id,
+      document_id: o.documentId,
+      bill_id: null,
+      tied_bill_id: o.billId,
+      line_items: o.lines.length ? o.lines : null,
+      file_url: o.doc.file_url,
+      created_by: ctx.userId,
+      source: "job",
+      proposal: { filed: { how: "tie" } },
+    })
+    .select("id");
+  if (tieErr || !tie?.length) {
+    reportError("organize:billJobReceipt.tie", tieErr ?? new Error("tie insert returned no row"), { documentId: o.documentId, billId: o.billId, jobId: o.doc.job_id });
+    return { ok: false };
+  }
+  return { ok: true };
 }
 
 /**
