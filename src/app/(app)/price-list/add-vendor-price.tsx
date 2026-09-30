@@ -34,6 +34,7 @@ export function AddVendorPrice({
   vendor,
   knownVendors,
   subcontractorsLeftOut = [],
+  alreadyOnItem = 0,
   defaultMarkupPct,
   hasDefault,
   onDone,
@@ -42,9 +43,16 @@ export function AddVendorPrice({
   item: PriceItem;
   /** Fixed vendor name (adding from the vendor's sheet). Absent = picked or typed here. */
   vendor?: string;
+  /** The vendors that can be picked here: the org's, minus the ones already priced on this item. */
   knownVendors: string[];
   /** The live subcontractor cards knownVendors leaves out (0341), named under the picker. */
   subcontractorsLeftOut?: string[];
+  /**
+   * How many of the org's vendors are left out because they are ALREADY on this item. The list
+   * arrives filtered, so without this an org whose every vendor is priced here would read "No
+   * vendors yet" while its Vendors tab lists them.
+   */
+  alreadyOnItem?: number;
   defaultMarkupPct: number;
   /** Whether this item already has a default vendor (the tick's wording depends on it). */
   hasDefault: boolean;
@@ -64,7 +72,12 @@ export function AddVendorPrice({
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
-  const typing = !vendor && pick === SOMEONE_NEW;
+  // WITH NOTHING LEFT TO PICK, THE BOX IS OPEN, whatever `pick` remembers: the list shrinks under
+  // this mounted sheet when its last vendor is added (the parent re-renders after the refresh), and
+  // a sentence saying "type one here" must never point at a box that isn't there.
+  const nonePickable = knownVendors.length === 0;
+  const pickShown = nonePickable ? SOMEONE_NEW : pick;
+  const typing = !vendor && pickShown === SOMEONE_NEW;
   const who = (vendor ?? (typing ? name : pick)).trim();
   const subsLeftOut = subcontractorsLeftOut.length;
 
@@ -107,7 +120,10 @@ export function AddVendorPrice({
     if (!res.ok) return setError(res.error ?? "Couldn't add that.");
     if (!vendor) {
       setName("");
-      setPick(knownVendors.length ? "" : SOMEONE_NEW);
+      // Reset from what the list WILL be: a picked vendor leaves it (it's on the item now), a typed
+      // one doesn't (it was never in it). With none left, the box stays open for the next one.
+      const left = knownVendors.length - (typing ? 0 : 1);
+      setPick(left > 0 ? "" : SOMEONE_NEW);
     }
     setCost("");
     setSell("");
@@ -131,7 +147,7 @@ export function AddVendorPrice({
         {!vendor && (
           <div className="col-span-2">
             <Label htmlFor={`${uid}-pick`}>Vendor *</Label>
-            <Select id={`${uid}-pick`} className="h-11" value={pick} onChange={(e) => setPick(e.target.value)}>
+            <Select id={`${uid}-pick`} className="h-11" value={pickShown} onChange={(e) => setPick(e.target.value)}>
               <option value="">Pick One Of Your Vendors</option>
               {knownVendors.map((n) => (
                 <option key={n} value={n}>
@@ -170,7 +186,14 @@ export function AddVendorPrice({
                   : `${subsLeftOut} on your Vendors list are subcontractors and aren't offered here: subcontractors don't carry prices on items.`}{" "}
                 Change a vendor&apos;s Kind to Supplier or Brand on the Vendors tab to price it.
               </p>
-            ) : knownVendors.length === 0 ? (
+            ) : nonePickable && alreadyOnItem > 0 ? (
+              // EVERY VENDOR IS ALREADY HERE: the list is empty because they're all on the item,
+              // not because the Vendors tab is. Saying "No vendors yet" sent him there for nothing.
+              <p className="mt-1 text-xs text-slate-500">
+                {alreadyOnItem === 1 ? "Your one vendor is already on this item." : `Every vendor you have (${alreadyOnItem}) is already on this item.`}{" "}
+                Type a new one here.
+              </p>
+            ) : nonePickable ? (
               <p className="mt-1 text-xs text-slate-500">No vendors yet. Add them on the Vendors tab or type one here.</p>
             ) : null}
           </div>
