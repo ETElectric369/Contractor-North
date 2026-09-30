@@ -423,11 +423,12 @@ function SnapCostButton({
       if (!fb.ok) return setError(res.error ?? "Couldn't read the receipt.");
       setSameAsDoc(null);
       setSavedBillId(fb.id ?? null);
-      setWarn(
-        typedAmount > 0
-          ? `${nortOn ? "Nort couldn't" : "Couldn't"} read it (${res.error ?? "unreadable"}) — saved your typed ${formatCurrency(typedAmount)} instead, receipt attached.`
-          : `Couldn't read a total (${res.error ?? "unreadable"}) — saved as $0. Open the bill to enter the amount.`,
-      );
+      // The paper is filed on the job (docId is real) whether or not its link to the bill landed,
+      // so it is cleared from the form: the next tap is Done, never a second upload of the same file.
+      setReceipt(null);
+      // createBill says in words when the receipt link did NOT land (fb.warning): that sentence
+      // takes the place of the attached-receipt words, which would assert the tie that just failed.
+      setWarn(readerFallbackLine({ typedAmount, readerError: res.error, nortOn, linkWarning: fb.warning }));
       setCostSaved(true);
       return;
     }
@@ -774,6 +775,22 @@ export const RETRY_HERE_LINE =
 
 /** The typed sheet's jobs couldn't be read: a job's cost waits for a reload, never becomes a business cost. */
 export const JOBS_UNREAD_LINE = "Couldn't load your jobs just now. Reload the page to put this cost on a job.";
+
+/**
+ * THE READER FAILED, SO THE TYPED FIGURE (OR $0) WAS SAVED AS THE BILL WITH THE PAPER ON IT. The
+ * sentence says "receipt attached" only when createBill did not say otherwise: when the link to the
+ * bill failed to land, createBill's own warning (tie it on the Costs tab, never Record As Cost) is
+ * the sentence, because a "receipt attached" there would claim the tie that just failed.
+ */
+export function readerFallbackLine(f: { typedAmount: number; readerError?: string | null; nortOn?: boolean; linkWarning?: string | null }): string {
+  const why = f.readerError ?? "unreadable";
+  const saved =
+    f.typedAmount > 0
+      ? `${f.nortOn ? "Nort couldn't" : "Couldn't"} read it (${why}) — saved your typed ${formatCurrency(f.typedAmount)} instead`
+      : `Couldn't read a total (${why}) — saved as $0. Open the bill to enter the amount.`;
+  if (f.linkWarning) return `${saved}${f.typedAmount > 0 ? "." : ""} ${f.linkWarning}`;
+  return f.typedAmount > 0 ? `${saved}, receipt attached.` : saved;
+}
 
 export const SHOP_STOCK_BY_PAPER =
   "Stock goes in by the piece, from the ticket's lines, so it comes in on paper: snap or drop the ticket in Snap Or Note, then tap Shop Stock on its card.";
