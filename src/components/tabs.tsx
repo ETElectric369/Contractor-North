@@ -3,7 +3,7 @@
 import { isValidElement, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
-import { ChevronDown, ChevronLeft, MoreHorizontal, Plus, type LucideIcon } from "lucide-react";
+import { ChevronDown, MoreHorizontal, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useGlassMenuPlacement } from "@/components/ui/glass-menu";
 
@@ -41,15 +41,10 @@ export interface TabBarItem {
    *  else on the page, where a second chip would be the same door listed twice. Never use it to
    *  hide a tab that has no other way in. Today's uses: a switched-off feature's tab (the switch
    *  board, 0352), whose way in is a link and the Off line's Turn On; and on a job, a tab that is
-   *  EMPTY and that the viewer can't add to (a tech's empty Permits: W1-18), which has nothing to show
+   *  EMPTY and that the viewer can't add to (a tech's empty Permits), which has nothing to show
    *  him and nothing for him to do, and still opens from a link. (A job's Tasks rode it while its
    *  door was the action dock; since 0358 Tasks is a pinned chip.) */
   offStrip?: boolean;
-  /** Tiles look only: an unpinned tab that HOLDS NOTHING YET (W1-18). More lists the tabs that hold
-   *  something first; a tucked one waits behind More's "+ Add…" row instead, by name and icon, one
-   *  tap from opening it (where its own New… button is). A ?tab= link still opens it, and it moves
-   *  up by itself once it holds a row. Ignored by the underline look. */
-  tucked?: boolean;
 }
 
 /** Two skins, one contract. "underline" is the measured strip every tabbed page mounts;
@@ -76,8 +71,9 @@ export interface TabDef extends TabBarItem {
   /** Optional — omit in controlled "strip-only" mode where the page renders the
    *  panels itself (e.g. a large form-heavy view). */
   content?: React.ReactNode;
-  /** Whether the tab has anything in it, open or closed (a page's own reading, e.g. the job page's
-   *  arrangeJobTabs turns false into `tucked`). Undefined = holds (never tucked on a guess). */
+  /** Whether the tab has anything in it, open or closed (a page's own reading). The job page uses it
+   *  for the ONE thing left that turns on emptiness: a tab a tech can neither read nor add to leaves
+   *  his strip (offStrip). More itself lists every tab, full or empty. Undefined = holds. */
   holds?: boolean;
 }
 
@@ -309,9 +305,9 @@ function UnderlineBar({
  * underline strip's ghost-measure did (at 343px only ~3 of its four primaries ever fit, so
  * Costs and Invoices lived behind More on every phone). Everything unpinned sits behind ONE
  * sixth chip, "More ▾", which lights and wears the active overflow tab's icon + label instead
- * of appending a seventh chip the phone has no room for. Inside it the tabs that hold something
- * lead and the empty (tucked) ones wait behind "+ Add…" (W1-18, MoreMenuRows); with nothing
- * unpinned left to list, the strip draws no More chip at all.
+ * of appending a seventh chip the phone has no room for. Inside it is EVERY unpinned tab, full or
+ * empty, in its clusters (Erik, 2026-09-28: "the more dropdown should contain everything (remove +
+ * Add)"); with nothing unpinned left to list, the strip draws no More chip at all.
  */
 function TileBar({ items, activeId, onSelect }: { items: TabBarItem[]; activeId?: string; onSelect?: (id: string) => void }) {
   const pinned = items.filter((t) => t.pinned);
@@ -509,35 +505,23 @@ function RowGlyph({ icon: Glyph }: { icon: LucideIcon }) {
 }
 
 /**
- * THE MORE MENU'S ROWS, in its two views (W1-18), apart from the menu's open/close so a test can
- * read them.
- *
- *   "main"  The tabs that hold something, in the cluster order they always had (ungrouped first,
- *           then Money, Docs, Work...), each with its open count. Then, when any tab is tucked (the
- *           tiles look only), a divider and "+ Add…", which swaps the menu to:
- *   "add"   "‹ More" (back), then each tucked tab by its name and icon. Tapping one opens it, where
- *           its own New… button is: the way to add the first estimate, permit or visit.
- *
- * A tab with nothing in it is never listed as if it held something, and never missing: it is one
- * tap behind "+ Add…". The underline look has no tucked tabs, so its menu is the main view alone.
+ * THE MORE MENU'S ROWS — ONE LIST OF EVERY TAB, apart from the menu's open/close so a test can read
+ * them. Erik, report 002dbffc (2026-09-28, on a job's Time tab): "the more dropdown should contain
+ * everything (remove + Add)". So every unpinned tab is a plain row here, empty or not, in the cluster
+ * order it always had (ungrouped first, then Money, Docs, Work…), each with its open count. One tap
+ * opens any of them, where that tab's own New… button is: the way to add the first estimate, permit
+ * or visit. (Wave 1's W1-18 split this in two — the holding tabs, then a "+ Add…" row that swapped to
+ * a second list of the empty ones. Erik reversed it on 2026-09-30: one list, nothing behind a door.)
  */
 export function MoreMenuRows({
   items,
   activeId,
-  view = "main",
-  tile = false,
   onPick,
-  onView,
 }: {
   items: TabBarItem[];
   activeId?: string;
-  view?: "main" | "add";
-  tile?: boolean;
   onPick?: (t: TabBarItem) => void;
-  onView?: (v: "main" | "add") => void;
 }) {
-  const holding = tile ? items.filter((t) => !t.tucked) : items;
-  const tucked = tile ? items.filter((t) => t.tucked) : [];
   const row = (t: TabBarItem) => {
     const active = t.id === activeId;
     const MenuIcon = componentIcon(t.icon);
@@ -545,7 +529,7 @@ export function MoreMenuRows({
       <>
         {MenuIcon ? <RowGlyph icon={MenuIcon} /> : inlineIcon(t.icon)}
         <span className="flex-1">{t.label}</span>
-        {view === "main" && typeof t.count === "number" && t.count > 0 && (
+        {typeof t.count === "number" && t.count > 0 && (
           <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500">{t.count}</span>
         )}
       </>
@@ -561,20 +545,7 @@ export function MoreMenuRows({
     );
   };
 
-  if (view === "add" && tucked.length > 0) {
-    return (
-      <div role="group" aria-label="Add…">
-        <button type="button" onClick={() => onView?.("main")} className={cn(moreRowCls(false), "font-medium text-[rgb(var(--glass-ink))]")}>
-          <ChevronLeft className="h-4 w-4 shrink-0" />
-          <span className="flex-1">More</span>
-        </button>
-        <div className="relative z-10 my-1 border-t border-slate-200/70" />
-        {tucked.map(row)}
-      </div>
-    );
-  }
-
-  const sections = clusters(holding);
+  const sections = clusters(items);
   return (
     <div>
       {sections.map(
@@ -596,15 +567,6 @@ export function MoreMenuRows({
             </div>
           ),
       )}
-      {tucked.length > 0 && (
-        <>
-          {holding.length > 0 && <div className="relative z-10 my-1 border-t border-slate-200/70" />}
-          <button type="button" onClick={() => onView?.("add")} className={moreRowCls(false)} aria-haspopup="menu">
-            <RowGlyph icon={Plus} />
-            <span className="flex-1">Add…</span>
-          </button>
-        </>
-      )}
     </div>
   );
 }
@@ -612,17 +574,17 @@ export function MoreMenuRows({
 /** The trailing "More ▾" menu holding overflow tabs (always visible, never faded).
  *  Skinned with the glass-menu recipe (the + quick-add / ⋯ actions grammar); items
  *  with a `group` render under uppercase cluster headers — the dock rail's exact
- *  header style — ungrouped items first, groups in first-appearance order. In the tiles look
- *  a tucked tab (one that holds nothing yet) waits behind "+ Add…" (MoreMenuRows).
+ *  header style — ungrouped items first, groups in first-appearance order. Every tab is listed,
+ *  empty or not (MoreMenuRows).
  *
  *  THE PANEL NEVER HIDES UNDER THE DOCK (bug triage, 2026-09-27): on a phone, a short tab left the
  *  More chip low on the screen and the panel dropped under the bottom dock, its last rows out of
  *  reach. It is placed by the shared useGlassMenuPlacement, like the job's Manage and the team menus:
- *  it opens upward, or shrinks and scrolls, above the dock. The view is its second trigger: a new
- *  job's More opens on one row ("+ Add…"), which fits below the chip; the Add view it swaps to in
- *  place is ten rows, so it is measured again rather than hanging down under the dock. When it opens
- *  upward it sits OVER the job's sticky action dock (z-[90], the glass-menu layer, above the dock's
- *  z-40), so a tap on a row never lands on Call or Navigate underneath. */
+ *  it opens upward, or shrinks and scrolls, above the dock. The full list is the tall case — a new
+ *  job's office More is nine rows and their headers, over the panel's own 24rem cap — so it opens
+ *  upward and scrolls inside the room above the chip. Opened upward it sits OVER the job's sticky
+ *  action dock (z-[90], the glass-menu layer, above the dock's z-40), so a tap on a row never lands
+ *  on Call or Navigate underneath. */
 function MoreMenu({
   items,
   activeId,
@@ -639,16 +601,10 @@ function MoreMenu({
   activeOverflow?: TabBarItem | null;
 }) {
   const [open, setOpen] = useState(false);
-  const [view, setView] = useState<"main" | "add">("main");
   const ref = useRef<HTMLDivElement>(null);
-  const { panelRef, panelStyle } = useGlassMenuPlacement(open, view);
+  const { panelRef, panelStyle } = useGlassMenuPlacement(open);
   const activeHere = items.some((t) => t.id === activeId);
   const ActiveIcon = activeOverflow ? componentIcon(activeOverflow.icon) : null;
-
-  // Every open starts on the main view.
-  useEffect(() => {
-    if (!open) setView("main");
-  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -747,7 +703,7 @@ function MoreMenu({
               it, which is why this is a flex column with a min-h-0 child rather than one overflow
               rule. */}
           <div className="relative z-10 min-h-0 flex-1 overflow-y-auto overscroll-contain">
-            <MoreMenuRows items={items} activeId={activeId} view={view} tile={tile} onPick={pick} onView={setView} />
+            <MoreMenuRows items={items} activeId={activeId} onPick={pick} />
           </div>
         </div>
       )}
