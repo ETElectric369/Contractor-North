@@ -5,13 +5,11 @@ import { dbError } from "@/lib/db-error";
 import { requireStaff } from "@/lib/staff-guard";
 import {
   cleanVendorCard,
-  kindCarriesPrices,
   vendorCardRefusal,
   vendorKey,
   type VendorCardClean,
   type VendorCardField,
   type VendorCardInput,
-  type VendorKind,
 } from "./item-options-math";
 import { CARDS_NOT_READY, KINDS_NOT_READY, cardOfVendor, cardsMissing, cardsOf, kindsMissing, optionsOfVendor } from "./vendor-db";
 
@@ -21,9 +19,10 @@ import { CARDS_NOT_READY, KINDS_NOT_READY, cardOfVendor, cardsMissing, cardsOf, 
  * Erik for Justin (Vivian Builders), 2026-09-24: "vendor means what brand with its own cost and
  * sell price". The cost and sell live on price_list_item_options (0282), one row per item per
  * vendor. How to reach the vendor lives once per name on price_list_vendors (0296), with its kind
- * (0341): a brand or a supplier can carry prices on items; a subcontractor never does. Andrew's
- * list (2026-09-25) was mostly subcontractors, and 0296's "a vendor is the brand" would have
- * offered Coldwater Drywall as a maker of windows.
+ * (0341). EVERY KIND CAN CARRY PRICES ON ITEMS: Erik 2026-09-30 reversed 0341's "a subcontractor
+ * never does", because a builder prices a line like drywall by the sub who hangs it (Justin, Vivian
+ * Builders, 2026-09-29, who had to call Coldwater Drywall a Supplier to put it on an item). The
+ * kind sorts the directory; it never decides who can be priced.
  *
  * Every write here is staff-only (requireStaff, then 0296's policies), org-scoped by an explicit
  * org_id filter as well as RLS, reads its rows back (THE SILENT-WRITE LAW), and returns what it
@@ -48,10 +47,9 @@ export async function addVendor(input: VendorCardInput): Promise<VendorResult & 
 
   const existing = await cardOfVendor(supabase, orgId, name);
   if ("error" in existing) return { ok: false, error: cardsMissing(existing.error) ? CARDS_NOT_READY : dbError(existing.error) };
+  // How many items this name already prices, so the toast can say the card landed on top of them.
   const opts = await optionsOfVendor(supabase, orgId, name);
   const onItems = "rows" in opts ? opts.rows.filter((o) => !o.archived).length : 0;
-  const subRefusal = subOnItemsRefusal(name, cleaned.clean.kind, onItems);
-  if (subRefusal) return { ok: false, error: subRefusal };
 
   if (existing.card && !existing.card.archived) {
     return { ok: false, error: `${String(existing.card.name)} is already on your Vendors list. Open it there to change its details.` };
@@ -122,12 +120,6 @@ export async function saveVendorField(input: {
   if (input.field === "name") return renameVendor(supabase, orgId, input.name, String(value), card, cardsReady);
 
   if (!cardsReady) return { ok: false, error: CARDS_NOT_READY };
-  if (input.field === "kind" && value === "subcontractor") {
-    const opts = await optionsOfVendor(supabase, orgId, input.name);
-    if ("error" in opts) return { ok: false, error: dbError(opts.error) };
-    const refusal = subOnItemsRefusal(card ? String(card.name) : input.name, "subcontractor", opts.rows.filter((o) => !o.archived).length);
-    if (refusal) return { ok: false, error: refusal };
-  }
   const previous = card ? ((card[input.field] as string | null) ?? null) : null;
   // A saved map link belongs to the address it was found with. An address typed by hand drops it,
   // so View On Map searches the new address instead of opening the old place. (Only when the card
@@ -185,13 +177,6 @@ export async function saveVendorIsPerson(input: { name: string; isPerson: boolea
 }
 
 type Db = Extract<Awaited<ReturnType<typeof requireStaff>>, { supabase: unknown }>["supabase"];
-
-/** A subcontractor never carries prices on items. A vendor that already does can't become one
- *  until it's off those items: said by name, with the way out. */
-function subOnItemsRefusal(name: string, kind: VendorKind | null | undefined, liveOnItems: number): string | null {
-  if (kindCarriesPrices(kind) || liveOnItems === 0) return null;
-  return `${name.trim()} has prices on ${liveOnItems} item${liveOnItems === 1 ? "" : "s"}, so it can't be a subcontractor. Keep it a Supplier or Brand, or take it off those items first.`;
-}
 
 async function renameVendor(
   supabase: Db,
@@ -437,8 +422,9 @@ const BATCH_MAX = 200;
  * archived, whatever the preview said:
  *   · a name that is already a live card is refused by name (the exact one-per-name rule);
  *   · a name on an archived card brings that card back with what the row says (as addVendor does);
- *   · a name twice in this press is added once;
- *   · a subcontractor whose name already has prices on items is refused by name.
+ *   · a name twice in this press is added once.
+ * A row's Kind never refuses it: a subcontractor whose name already prices items comes in as one
+ * (Erik 2026-09-30), because that is how a builder's list is priced.
  * Every new card goes in ONE insert, stamped with this press's batch id, so it lands whole or not
  * at all, and is read back (THE SILENT-WRITE LAW): the count that landed is the count we say.
  */
@@ -456,19 +442,6 @@ export async function addVendorsBatch(rows: ImportVendorRow[], batchId: string):
   if ("error" in cards) return { ok: false, error: cardsMissing(cards.error) ? CARDS_NOT_READY : dbError(cards.error) };
   if (!cards.kinds) return { ok: false, error: KINDS_NOT_READY };
   const byKey = new Map(cards.rows.map((c) => [vendorKey(String(c.name ?? "")), c]));
-
-  const { data: optRows, error: optErr } = await supabase
-    .from("price_list_item_options")
-    .select("vendor, archived")
-    .eq("org_id", orgId)
-    .limit(5000);
-  if (optErr) return { ok: false, error: dbError(optErr) };
-  const liveOnItems = new Map<string, number>();
-  for (const o of (optRows ?? []) as { vendor: string; archived: boolean }[]) {
-    if (o.archived) continue;
-    const k = vendorKey(o.vendor);
-    liveOnItems.set(k, (liveOnItems.get(k) ?? 0) + 1);
-  }
 
   const refused: { name: string; why: string }[] = [];
   const inserts: (VendorCardClean & { name: string; looked_up_at?: string })[] = [];
@@ -488,11 +461,6 @@ export async function addVendorsBatch(rows: ImportVendorRow[], batchId: string):
       continue;
     }
     seen.add(key);
-    const sub = subOnItemsRefusal(name, cleaned.clean.kind, liveOnItems.get(key) ?? 0);
-    if (sub) {
-      refused.push({ name, why: sub });
-      continue;
-    }
     const card = byKey.get(key);
     if (card && !card.archived) {
       refused.push({ name, why: `${String(card.name)} is already on your Vendors list.` });

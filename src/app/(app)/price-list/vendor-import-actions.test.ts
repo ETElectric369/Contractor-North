@@ -3,9 +3,9 @@ import { fileURLToPath } from "node:url";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
- * Add N Vendors and its Undo (vendor import, Phase 1), and the 0341 rule that a subcontractor never
- * carries prices on an item, driven through the REAL server actions against a small in-memory
- * database. The database keeps 0296's one-card-per-name rule (lower(btrim(name)) per org), stamps
+ * Add N Vendors and its Undo (vendor import, Phase 1), and the rule that replaced 0341's "a
+ * subcontractor never carries prices on an item" (Erik 2026-09-30: every kind carries prices),
+ * driven through the REAL server actions against a small in-memory database. The database keeps 0296's one-card-per-name rule (lower(btrim(name)) per org), stamps
  * created_at/updated_at the way Postgres does (an insert leaves them equal; 0296's touch trigger
  * moves updated_at on every update), and can be told it hasn't had 0341 yet.
  *
@@ -205,11 +205,13 @@ describe("Add N Vendors: one press, checked on the server, whatever the preview 
     expect(res.note).toBe("1 was archived and came back: Lakeside Windows.");
   });
 
-  it("a subcontractor whose name already carries prices on items is refused by name", async () => {
+  it("a subcontractor whose name already prices items is added, not refused (Erik 2026-09-30)", async () => {
     const res = await addVendorsBatch([{ name: "Harbor Door Co", kind: "subcontractor" }], BATCH);
-    expect(res.ok).toBe(false);
-    expect(res.refused?.[0].why).toMatch(/^Harbor Door Co has prices on 1 item, so it can't be a subcontractor\./);
-    expect(liveNames()).toEqual(["Acme Supply"]);
+    expect(res).toMatchObject({ ok: true, added: 1, refused: [] });
+    expect(liveNames()).toEqual(["Acme Supply", "Harbor Door Co"]);
+    expect(vendors().find((r) => r.name === "Harbor Door Co")).toMatchObject({ kind: "subcontractor" });
+    // Its price on item-830 is untouched: the card lands on top of the row it already has.
+    expect(db.tables.price_list_item_options).toHaveLength(1);
   });
 
   it("a kind outside the whitelist is refused in words, never stored", async () => {
@@ -335,16 +337,14 @@ describe("Undo: archives exactly that press's cards, and only the ones nobody ha
   });
 });
 
-describe("a subcontractor never carries prices on an item (0341), at the write as well as the picker", () => {
-  it("adding a subcontractor's name to an item is refused by name, and nothing is written", async () => {
+describe("every vendor kind carries prices on an item (Erik 2026-09-30, reversing 0341)", () => {
+  it("a subcontractor's name goes on an item, written with the card's spelling", async () => {
     await addVendorsBatch([{ name: "Coldwater Drywall", kind: "subcontractor" }], BATCH);
     const before = db.tables.price_list_item_options.length;
     const res = await addItemOption({ itemId: "item-830", vendor: "coldwater drywall", buyPrice: "100" });
-    expect(res.ok).toBe(false);
-    expect(res.error).toBe(
-      "Coldwater Drywall is a subcontractor on your Vendors list, and subcontractors don't carry prices on items. Change its Kind to Supplier or Brand on the Vendors tab first.",
-    );
-    expect(db.tables.price_list_item_options.length).toBe(before);
+    expect(res.ok).toBe(true);
+    expect(db.tables.price_list_item_options.length).toBe(before + 1);
+    expect(db.tables.price_list_item_options.at(-1)).toMatchObject({ vendor: "Coldwater Drywall", buy_price: 100 });
   });
 
   it("a supplier can still go on an item", async () => {
@@ -353,10 +353,11 @@ describe("a subcontractor never carries prices on an item (0341), at the write a
     expect(res.ok).toBe(true);
   });
 
-  it("a vendor with prices on items can't be switched to Subcontractor; it says why and how", async () => {
+  it("a vendor with prices on items can be switched to Subcontractor, and keeps those prices", async () => {
     const res = await saveVendorField({ name: "Harbor Door Co", field: "kind", value: "subcontractor" });
-    expect(res.ok).toBe(false);
-    expect(res.error).toMatch(/^Harbor Door Co has prices on 1 item, so it can't be a subcontractor\. Keep it a Supplier or Brand/);
+    expect(res.ok).toBe(true);
+    expect(vendors().find((r) => r.name === "Harbor Door Co")).toMatchObject({ kind: "subcontractor" });
+    expect(db.tables.price_list_item_options[0]).toMatchObject({ vendor: "Harbor Door Co", archived: false });
   });
 
   it("kind and trade save one at a time like every other detail, with the old value for Undo", async () => {
@@ -384,7 +385,7 @@ describe("the screen: Title Case on every new clickable, and the words that repl
   });
 
   it("the Vendors tab: chips, kind words, View On Map, and the line that says who carries prices", () => {
-    expect(MANAGER).toContain("Your suppliers, subcontractors and brands. Brands and suppliers can carry prices on items.");
+    expect(MANAGER).toContain("Suppliers, subcontractors and brands can all carry prices on items.");
     expect(MANAGER).toContain("View On Map");
     expect(MANAGER).not.toContain("A vendor is the brand, e.g. Andersen.\n");
     expect(MANAGER).not.toContain('placeholder: "the brand, e.g. Andersen"');
