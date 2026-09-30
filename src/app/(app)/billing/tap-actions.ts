@@ -741,3 +741,95 @@ export async function cancelTapPaymentIntent(paymentIntentId: string): Promise<{
     return { ok: false, error: `Stripe wouldn't let go of that payment${said ? ` — ${said}` : ""}.` };
   }
 }
+
+export type TapPaymentVerdict =
+  | {
+      ok: true;
+      /**
+       * What Stripe itself says about the PaymentIntent, folded to what the screen can act on:
+       * `charged` (succeeded, or processing: the webhook books it), `not_charged` (still waiting
+       * for a card: the phone's "confirmed" was not a charge, and the same door can be tapped
+       * again), `cancelled` (Stripe let it go: a new door is needed). `status` is Stripe's own word.
+       */
+      verdict: "charged" | "not_charged" | "cancelled";
+      status: string;
+      /** The money is already written on the invoice (a payments row names this intent). */
+      booked: boolean;
+    }
+  | { ok: false; error: string };
+
+/**
+ * DID STRIPE ACTUALLY CHARGE THE CARD? (Rich Seiler, INV-083, 2026-09-29.)
+ *
+ * The phone's Tap to Pay screen reached "Card approved — recording it on the invoice…" at 12:41
+ * and sat there. Stripe never charged: no payment_intent.succeeded, nothing in Stripe's own
+ * dashboard, no error anywhere. Rich paid the $420 by the link an hour later. The mechanism: the
+ * bridge (src/lib/native-tap.ts) answers `ok` the moment the plugin's confirmPaymentIntent
+ * RESOLVES, and the plugin resolves on any non-nil result without reading the intent's status
+ * (node_modules/@capacitor-community/stripe-terminal/ios/.../StripeTerminal.swift). The plugin
+ * hands no status to JS at all, so the only place the truth can be read is Stripe, from here, on
+ * the tenant's account. The screen asks this the moment the phone says confirmed, and again while
+ * it waits for the webhook, and says what it finds in words.
+ *
+ * A READ, NEVER A WRITE. The webhook stays the one writer for card money (recordInvoicePayment);
+ * a second booking keyed on anything but the event id is the double-record class. `booked` is
+ * read off the payments row the webhook writes, so the screen can tell "Stripe has it, the
+ * invoice doesn't yet" from "nothing happened". Own org only: the intent must carry this org's id
+ * and the Tap marker, on this org's connected account, exactly as cancelTapPaymentIntent checks.
+ *
+ * A confirm that charged nothing is REPORTED (error_events) from here: the phone's own log lives
+ * in a truck, and this is the one place that knows both the intent and the org.
+ */
+export async function tapPaymentVerdict(paymentIntentId: string): Promise<TapPaymentVerdict> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error ?? "This action is staff-only." };
+  const orgId = ctx.orgId;
+  if (!orgId) return { ok: false, error: "Your account isn't attached to a company yet." };
+  if (!billingEnabled) return { ok: false, error: "Card payments aren't set up on this server yet." };
+  if (!/^pi_[A-Za-z0-9]+$/.test(paymentIntentId)) return { ok: false, error: "That isn't a payment id." };
+
+  const { data: org, error: orgErr } = await ctx.supabase
+    .from("organizations")
+    .select("stripe_account_id")
+    .eq("id", orgId)
+    .maybeSingle();
+  if (orgErr || !org) return { ok: false, error: orgErr ? dbError(orgErr) : "Couldn't read this company's payment setup." };
+  const accountId = (org as { stripe_account_id?: string | null }).stripe_account_id;
+  if (!accountId) return { ok: false, error: NOT_SET_UP };
+
+  try {
+    const pi = await getStripe().paymentIntents.retrieve(paymentIntentId, {}, { stripeAccount: accountId });
+    if (pi.metadata?.org_id !== orgId || pi.metadata?.source !== "tap_to_pay") {
+      return { ok: false, error: "That payment isn't this company's." };
+    }
+    const status = String(pi.status);
+    const verdict: Extract<TapPaymentVerdict, { ok: true }>["verdict"] =
+      status === "succeeded" || status === "processing" ? "charged" : status === "canceled" ? "cancelled" : "not_charged";
+    let booked = false;
+    if (verdict === "charged") {
+      const { data: row } = await ctx.supabase
+        .from("payments")
+        .select("id")
+        .eq("org_id", orgId)
+        .eq("stripe_payment_intent", pi.id)
+        .limit(1)
+        .maybeSingle();
+      booked = !!row;
+    } else {
+      // Said to ops, not only to the phone: the phone told a person the card was approved and
+      // Stripe has no charge. The message carries the status, so a repeat of the same case on
+      // the same intent folds into one row.
+      reportError("stripe:terminal:confirmed-not-charged", new Error(`Tap to Pay confirmed on the phone but the PaymentIntent is ${status}`), {
+        orgId,
+        paymentIntentId: pi.id,
+        invoiceId: pi.metadata?.invoice_id ?? null,
+        status,
+      });
+    }
+    return { ok: true, verdict, status, booked };
+  } catch (e) {
+    reportError("stripe:terminal:verdict", e, { orgId, paymentIntentId });
+    const said = e instanceof Error ? e.message : "";
+    return { ok: false, error: `Couldn't check this payment with Stripe${said ? ` — ${said}` : ""}.` };
+  }
+}

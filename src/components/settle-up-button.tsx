@@ -14,7 +14,7 @@ import { invoiceBalance } from "@/lib/invoice-math";
 import { sendFirstDetail, sendFirstQuestion } from "@/lib/pay-door-words";
 import { TEXTS_NOT_READY_LINE } from "@/lib/sms-readiness";
 import { paymentMethodKey } from "@/lib/payment-method";
-import { cancelTapPaymentIntent, createTapPaymentIntent, tapToPayContext } from "@/app/(app)/billing/tap-actions";
+import { cancelTapPaymentIntent, createTapPaymentIntent, tapPaymentVerdict, tapToPayContext, type TapPaymentVerdict } from "@/app/(app)/billing/tap-actions";
 import {
   cancelTapPayment,
   collectTapPayment,
@@ -120,13 +120,68 @@ type TapDoor = { invoiceId: string; clientSecret: string; paymentIntentId: strin
 type TapOutcome = "declined" | "timed-out" | "failed" | "not-enabled" | "setup";
 
 /** Where a tap is: nothing / the phone is at it (`phase` says who owns the screen — the reader,
- *  Apple's terms sheet, or Apple's how-to guide right after the terms) / Stripe said yes and the
- *  webhook is writing it / it stopped, with the sentence that says why. */
-type TapState =
+ *  Apple's terms sheet, or Apple's how-to guide right after the terms) / the phone said the card
+ *  went through and the webhook is writing it (`stripe` says whether Stripe itself agreed;
+ *  `slow` that the webhook is taking longer than it should) / it stopped, with the sentence
+ *  that says why. */
+export type TapState =
   | { kind: "idle" }
   | { kind: "busy"; label: string; phase: "pay" | "enable" | "guide" }
-  | { kind: "confirmed" }
+  | { kind: "confirmed"; paymentIntentId: string; stripe: "charged" | "unchecked"; since: number; slow: boolean }
   | { kind: "error"; error: string; outcome: TapOutcome };
+
+/** How long "Card approved" may wait on the webhook before the screen says it is slow. */
+const WEBHOOK_SLOW_MS = 60_000;
+
+/**
+ * THE PHONE'S "CONFIRMED" IS NOT A CHARGE (Rich Seiler, INV-083, 2026-09-29).
+ *
+ * The bridge answers ok when the plugin's confirm call resolves, and the plugin resolves without
+ * reading the intent's status — so this screen said "Card approved — recording it on the
+ * invoice…" for a $420 charge Stripe never made, and sat on that spinner until Rich paid by the
+ * link an hour later. Stripe is the only one who knows, so Stripe is asked (tapPaymentVerdict)
+ * the moment the phone says confirmed, and again every few seconds while the webhook is awaited.
+ * This turns Stripe's answer into the screen: what to show, and whether to keep the door.
+ *
+ *   charged      Stripe has the money: the webhook writes it, the watch flips the screen. The
+ *                door is let go of (nothing to cancel; Stripe refuses anyway). Past WEBHOOK_SLOW_MS
+ *                the screen says so, with the payment id, so the office can act instead of wait.
+ *   not_charged  The intent is still waiting for a card: nothing was taken. The SAME door stays
+ *                (Try Again re-uses it, exactly like a decline) and the sentence says the truth.
+ *   cancelled    Stripe let it go: nothing was taken, and a fresh door is needed.
+ *   unreadable   (null / a failed read) The phone's word stands, said as the phone's word, not as
+ *                Stripe's; the door is kept so a close still cancels an intent nobody charged.
+ */
+export function tapConfirmedNext(
+  paymentIntentId: string,
+  v: TapPaymentVerdict | null,
+  since: number,
+  now: number,
+): { tap: TapState; keepDoor: boolean } {
+  const slow = now - since >= WEBHOOK_SLOW_MS;
+  if (v?.ok && v.verdict === "not_charged") {
+    return {
+      keepDoor: true,
+      tap: {
+        kind: "error",
+        outcome: "failed",
+        error: `The phone said the card was read, but Stripe never charged it (Stripe: ${v.status.replace(/_/g, " ")}). Nothing was taken. Try Again takes the same card again, or send them the pay link.`,
+      },
+    };
+  }
+  if (v?.ok && v.verdict === "cancelled") {
+    return {
+      keepDoor: false,
+      tap: {
+        kind: "error",
+        outcome: "failed",
+        error: "Stripe let this payment go before the card was charged. Nothing was taken. Press Tap to Pay to start a new one.",
+      },
+    };
+  }
+  if (v?.ok) return { keepDoor: false, tap: { kind: "confirmed", paymentIntentId, stripe: "charged", since, slow } };
+  return { keepDoor: true, tap: { kind: "confirmed", paymentIntentId, stripe: "unchecked", since, slow } };
+}
 
 /** The receipt door (Apple 5.10): the public invoice link and what the text names. null = not
  *  fetched yet for this open of the screen. */
@@ -820,10 +875,15 @@ function useCardDoor(
         if (stale(true)) return;
       }
       if (c.ok) {
-        // Stripe confirmed the charge. The invoice flips when the webhook writes it; the watch
-        // sees it land exactly as it does for the QR.
-        tapPi.current = null;
-        setTap({ kind: "confirmed" });
+        // THE PHONE SAID CONFIRMED; STRIPE IS ASKED BEFORE A PERSON IS TOLD (tapConfirmedNext).
+        // The invoice flips when the webhook writes it; the watch sees it land exactly as it does
+        // for the QR. The door is let go of only when Stripe says the money is there.
+        const since = Date.now();
+        const verdict = await tapPaymentVerdict(pi.paymentIntentId).catch(() => null);
+        if (stale(true)) return;
+        const next = tapConfirmedNext(pi.paymentIntentId, verdict, since, Date.now());
+        if (!next.keepDoor) tapPi.current = null;
+        setTap(next.tap);
         return;
       }
       if (c.cancelled) { setTap({ kind: "idle" }); return; }
@@ -860,6 +920,30 @@ function useCardDoor(
     const timer = setInterval(tick, 4000);
     return () => { live = false; clearInterval(timer); };
   }, [open, art, tapStarted, invoiceId, paid, router, toast]);
+
+  // WHILE "CARD APPROVED" WAITS ON THE WEBHOOK, STRIPE IS ASKED AGAIN (Rich Seiler, INV-083). A
+  // read that failed on the press is retried here; a charge that never happened turns the
+  // spinner into words with the door still open; a charge the webhook is slow to write is said
+  // as slow, with the payment id, after WEBHOOK_SLOW_MS. Stops the moment the invoice reads Paid.
+  const confirmedKey = tap.kind === "confirmed" ? `${tap.paymentIntentId}:${tap.stripe}:${tap.slow}` : null;
+  useEffect(() => {
+    if (!open || tap.kind !== "confirmed" || paid != null) return;
+    const { paymentIntentId, since } = tap;
+    let live = true;
+    const timer = setInterval(async () => {
+      const v = await tapPaymentVerdict(paymentIntentId).catch(() => null);
+      if (!live) return;
+      const next = tapConfirmedNext(paymentIntentId, v, since, Date.now());
+      if (!next.keepDoor) tapPi.current = null;
+      // Same screen, same words: leave the state alone so this effect isn't restarted for nothing.
+      if (next.tap.kind === "confirmed" && next.tap.stripe === tap.stripe && next.tap.slow === tap.slow) return;
+      setTap(next.tap);
+    }, 6000);
+    return () => { live = false; clearInterval(timer); };
+    // confirmedKey stands for the parts of `tap` this effect reads; a new object with the same
+    // words must not restart the clock.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, confirmedKey, paid]);
 
   // THE PROGRESS FEED (Apple 5.7 / 3.9.1). The bridge publishes what the reader is doing — its
   // own stages and the SDK's configuration percent — for the life of the page; this screen
@@ -1172,11 +1256,25 @@ function useCardDoor(
         </div>
       );
     } else if (tap.kind === "confirmed") {
+      // The words follow who has said what: Stripe's own yes, or only the phone's (tapConfirmedNext).
       takeover = (
         <div className="flex flex-col items-center gap-2 py-4 text-center">
           <Loader2 className="h-5 w-5 animate-spin text-slate-500" />
-          <div className="text-sm font-medium text-slate-800">Card approved — recording it on the invoice…</div>
-          <p className="text-xs text-slate-500">Stripe confirmed the charge. This flips to Paid the moment it lands.</p>
+          <div className="text-sm font-medium text-slate-800">
+            {tap.stripe === "charged" ? "Card approved — recording it on the invoice…" : "The phone says the card went through — checking with Stripe…"}
+          </div>
+          <p className="max-w-64 text-xs text-slate-500">
+            {tap.stripe === "charged"
+              ? "Stripe has the money. This flips to Paid the moment it lands on the invoice."
+              : "Couldn't reach Stripe to double-check yet; it's asked again every few seconds. Don't take the card again until this says what happened."}
+          </p>
+          {tap.slow && (
+            <p className="max-w-64 text-xs text-amber-700">
+              {tap.stripe === "charged"
+                ? `This is taking longer than usual. The charge is in Stripe (payment ${tap.paymentIntentId}); if the invoice still isn't Paid in a few minutes, the office can record it by hand as a card payment.`
+                : `Still no answer from Stripe (payment ${tap.paymentIntentId}). Check the connection, or look the payment up in Stripe before charging this card again.`}
+            </p>
+          )}
         </div>
       );
     }

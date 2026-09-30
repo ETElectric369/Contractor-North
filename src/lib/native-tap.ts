@@ -1552,10 +1552,15 @@ const BUSY_RETRY_PAUSE_MS = 2_000;
 
 /**
  * TAKE THE TAP. The PaymentIntent already exists (createTapPaymentIntent); this collects the card
- * against it and confirms. `{ ok: true }` means Stripe confirmed the charge — the invoice flips
- * when the webhook lands, so the caller keeps polling invoiceCollectStatus exactly as the QR door
- * does. The plugin never returns the PaymentIntent to JS (its confirmed event is empty), which is
- * why `paymentIntentId` travels with the input: the caller already holds the only copy.
+ * against it and confirms. `{ ok: true }` means THE PLUGIN'S CONFIRM CALL RESOLVED — not that
+ * Stripe charged the card. The plugin resolves on any non-nil confirm result without reading the
+ * intent's status (StripeTerminal.swift), and it never returns the PaymentIntent to JS (its
+ * confirmed event is empty), so nothing on this side can tell a charge from a confirm that went
+ * nowhere: Rich Seiler's $420 (INV-083, 2026-09-29) reached "confirmed" here and Stripe had
+ * nothing. The caller therefore asks the server (tapPaymentVerdict, which reads the intent off
+ * Stripe) before it tells a person anything, and the invoice flips when the webhook lands, so it
+ * keeps polling invoiceCollectStatus exactly as the QR door does. `paymentIntentId` travels with
+ * the input because the caller already holds the only copy.
  *
  * `amount` is integer cents, kept on the input so the caller's confirmation copy and this call
  * can't disagree; the charge itself was fixed when the PaymentIntent was minted.

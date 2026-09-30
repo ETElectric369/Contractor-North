@@ -13,7 +13,7 @@ vi.mock("@/components/ui/modal", () => ({
   ModalActions: () => null,
 }));
 
-const { doorAmountStillMatches, holdCardLine, GetPaidButton, SettleUpButton } = await import("./settle-up-button");
+const { doorAmountStillMatches, holdCardLine, tapConfirmedNext, GetPaidButton, SettleUpButton } = await import("./settle-up-button");
 
 /**
  * THE FIGURE ON THE CARD IS THE FIGURE ON THE INVOICE, OR NOTHING IS CHARGED.
@@ -86,7 +86,84 @@ describe("holdCardLine — the last sentence before Apple owns the screen", () =
   });
 });
 
+/**
+ * THE PHONE'S "CONFIRMED" IS NOT A CHARGE (Rich Seiler, INV-083, 2026-09-29).
+ *
+ * The Tap to Pay screen reached "Card approved — recording it on the invoice…" at 12:41 for a
+ * $420 charge Stripe never made: no payment_intent.succeeded, nothing in Stripe's dashboard, no
+ * error anywhere. The bridge answers ok when the plugin's confirm call resolves, and the plugin
+ * resolves without reading the intent's status. So Stripe is asked, and its answer decides what
+ * the screen says and whether the door is kept for a Try Again.
+ */
+describe("tapConfirmedNext — Stripe's word decides what 'Card approved' means", () => {
+  const PI = "pi_3SCHtest";
+  const since = 1_000_000;
+
+  it("Stripe says succeeded: the webhook is awaited and the door is let go of", () => {
+    const r = tapConfirmedNext(PI, { ok: true, verdict: "charged", status: "succeeded", booked: false }, since, since + 2_000);
+    expect(r.keepDoor).toBe(false);
+    expect(r.tap).toEqual({ kind: "confirmed", paymentIntentId: PI, stripe: "charged", since, slow: false });
+  });
+
+  it("Stripe says the intent is still waiting for a card: NOT charged, said in words, same door kept for Try Again", () => {
+    // Rich's exact case: the intent sat at requires_payment_method while the screen said approved.
+    const r = tapConfirmedNext(PI, { ok: true, verdict: "not_charged", status: "requires_payment_method", booked: false }, since, since + 2_000);
+    expect(r.keepDoor).toBe(true);
+    expect(r.tap.kind).toBe("error");
+    if (r.tap.kind !== "error") throw new Error("expected an error state");
+    expect(r.tap.outcome).toBe("failed"); // Try Again renders for "failed"
+    expect(r.tap.error).toContain("Stripe never charged it");
+    expect(r.tap.error).toContain("Nothing was taken");
+    expect(r.tap.error).toContain("requires payment method");
+    expect(r.tap.error).toContain("pay link");
+  });
+
+  it("Stripe says cancelled: nothing was taken, and a fresh door is needed", () => {
+    const r = tapConfirmedNext(PI, { ok: true, verdict: "cancelled", status: "canceled", booked: false }, since, since + 2_000);
+    expect(r.keepDoor).toBe(false);
+    expect(r.tap.kind).toBe("error");
+    if (r.tap.kind !== "error") throw new Error("expected an error state");
+    expect(r.tap.error).toContain("Nothing was taken");
+    expect(r.tap.error).toContain("Tap to Pay");
+  });
+
+  it("Stripe couldn't be read: the phone's word stands AS the phone's word, and the door is kept so a close still cancels it", () => {
+    for (const v of [null, { ok: false as const, error: "Couldn't check this payment with Stripe." }]) {
+      const r = tapConfirmedNext(PI, v, since, since + 2_000);
+      expect(r.keepDoor).toBe(true);
+      expect(r.tap).toEqual({ kind: "confirmed", paymentIntentId: PI, stripe: "unchecked", since, slow: false });
+    }
+  });
+
+  it("a webhook that hasn't landed after a minute is said as slow, never waited on in silence", () => {
+    const r = tapConfirmedNext(PI, { ok: true, verdict: "charged", status: "succeeded", booked: false }, since, since + 60_000);
+    expect(r.tap).toMatchObject({ kind: "confirmed", stripe: "charged", slow: true });
+    const early = tapConfirmedNext(PI, { ok: true, verdict: "charged", status: "succeeded", booked: false }, since, since + 59_999);
+    expect(early.tap).toMatchObject({ kind: "confirmed", slow: false });
+  });
+});
+
 const SRC = readFileSync(join(process.cwd(), "src/components/settle-up-button.tsx"), "utf8");
+
+describe("the phone's confirmed is checked with Stripe before a person is told", () => {
+  it("the ok branch asks tapPaymentVerdict and goes through tapConfirmedNext, on the press and on the wait", () => {
+    const okBranch = SRC.slice(SRC.indexOf("if (c.ok) {"), SRC.indexOf("if (c.cancelled)"));
+    expect(okBranch).toContain("await tapPaymentVerdict(pi.paymentIntentId)");
+    expect(okBranch).toContain("tapConfirmedNext(pi.paymentIntentId, verdict");
+    // Never the old unconditional confirmed, and the door is dropped only on Stripe's word.
+    expect(okBranch).not.toMatch(/setTap\(\{ kind: "confirmed" \}\)/);
+    expect(okBranch).toContain("if (!next.keepDoor) tapPi.current = null;");
+    // The wait re-asks: the effect keyed on the confirmed state calls the verdict again.
+    expect([...SRC.matchAll(/await tapPaymentVerdict\(/g)]).toHaveLength(2);
+  });
+
+  it("the confirmed screen never claims Stripe's yes when only the phone said it", () => {
+    const screen = SRC.slice(SRC.indexOf('tap.kind === "confirmed") {'), SRC.indexOf("const panel: React.ReactNode"));
+    expect(screen).toContain('tap.stripe === "charged" ? "Card approved');
+    expect(screen).toContain("checking with Stripe");
+    expect(screen).not.toContain("Stripe confirmed the charge.");
+  });
+});
 
 /**
  * The rest of this is shape, not behaviour: the defect was control flow inside one async function
