@@ -27,7 +27,8 @@ vi.mock("@/components/ui/modal", () => ({
   ModalActions: ({ saveLabel }: { saveLabel?: string }) => createElement("button", { "data-save": "" }, saveLabel ?? "Save"),
 }));
 
-const { QuickCostButton, SHOP_STOCK_BY_PAPER, JOBS_UNREAD_LINE, jobPickLabel, typedCostBill, typedCostProblem } = await import("./quick-cost-button");
+const { QuickCostButton, SHOP_STOCK_BY_PAPER, JOBS_UNREAD_LINE, jobPickLabel, readerFallbackLine, typedCostBill, typedCostProblem } =
+  await import("./quick-cost-button");
 
 const base = { amount: 64.1, date: "2026-09-27", target: "", bucket: null, where: "", paid: "paid" as const, billNumber: "", poId: "" };
 const text = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/&#x27;|&apos;/g, "'").replace(/\s+/g, " ");
@@ -102,6 +103,41 @@ describe("what the typed sheet hands createBill", () => {
   it("names a job the way it is read: the place first, the number second", () => {
     expect(jobPickLabel({ job_number: "J-011", name: "13897 Herringbone" })).toBe("13897 Herringbone · J-011");
     expect(jobPickLabel({ job_number: "J-011", name: "" })).toBe("J-011");
+  });
+});
+
+describe("the reader failed and the typed figure was saved instead", () => {
+  const LINK_WARNING =
+    "The cost is recorded, but its receipt did not get marked as billed. On the job's Costs tab it will say Not On A Bill Yet: tie it to this bill there, rather than Record As Cost (that would write a second bill).";
+
+  it("with the paper linked to the bill, the sentence says so: receipt attached", () => {
+    expect(readerFallbackLine({ typedAmount: 84.1, readerError: "unreadable file" })).toBe(
+      "Couldn't read it (unreadable file) — saved your typed $84.10 instead, receipt attached.",
+    );
+    expect(readerFallbackLine({ typedAmount: 84.1, nortOn: true })).toBe("Nort couldn't read it (unreadable) — saved your typed $84.10 instead, receipt attached.");
+    expect(readerFallbackLine({ typedAmount: 0, readerError: "no total" })).toBe("Couldn't read a total (no total) — saved as $0. Open the bill to enter the amount.");
+  });
+
+  it("createBill's receipt-link warning is the sentence, never dropped, and 'receipt attached' is not claimed", () => {
+    const typed = readerFallbackLine({ typedAmount: 84.1, readerError: "unreadable file", linkWarning: LINK_WARNING });
+    expect(typed).toBe(`Couldn't read it (unreadable file) — saved your typed $84.10 instead. ${LINK_WARNING}`);
+    expect(typed).not.toContain("receipt attached");
+    const zero = readerFallbackLine({ typedAmount: 0, linkWarning: LINK_WARNING });
+    expect(zero).toBe(`Couldn't read a total (unreadable) — saved as $0. Open the bill to enter the amount. ${LINK_WARNING}`);
+    expect(zero).not.toContain("receipt attached");
+  });
+
+  it("the sheet's fallback hands createBill's warning to that sentence (the receipt is filed, so it is not offered for a second upload)", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const src = readFileSync(join(process.cwd(), "src/components/quick-cost-button.tsx"), "utf8");
+    const fallback = src.slice(src.indexOf("async function afterRead("), src.indexOf("if (res.already && res.sameAs)"));
+    expect(fallback).toContain("receipt_document_id: docId");
+    expect(fallback).toContain("linkWarning: fb.warning");
+    expect(fallback).toContain("setReceipt(null)");
+    // No sentence a person reads there (quoted, never a comment) claims the tie on its own.
+    const said = Array.from(fallback.matchAll(/(["`])((?:(?!\1)[^\\\n]|\\.)*)\1/g)).map((m) => m[2]);
+    expect(said.filter((w) => w.includes("receipt attached"))).toEqual([]);
   });
 });
 

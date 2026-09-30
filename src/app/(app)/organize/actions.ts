@@ -438,6 +438,11 @@ export async function billJobReceipt(
   already?: boolean;
   /** A bill already carries this paper's number: nothing was written, and this says which. */
   sameAs?: string;
+  /** THAT bill (d1ff7c5a): so a door can say "Same Purchase: It's That Bill" and tie the paper to it
+   *  (linkReceiptToBill) instead of a second paid read or a second bill. `sameOnThisJob` is whether
+   *  it is on the paper's own job, the only case the tie is allowed (job containment). */
+  sameBillId?: string;
+  sameOnThisJob?: boolean;
   amount?: number | null;
   vendor?: string | null;
   lineCount?: number;
@@ -618,7 +623,21 @@ ${MASKED_PRICE_PROMPT_RULE}`,
       const said = tie.ok
         ? `Already on the books: ${billLabel(same[0])}. This photo is filed with that bill; nothing was recorded twice.`
         : `Already on the books: ${billLabel(same[0])}. Nothing was recorded twice, but this photo couldn't be filed with that bill, so the job's Costs tab will keep saying it is not on a bill yet.`;
-      return { ok: true, already: true, vendor, amount, sameAs: said, warning: said };
+      // WHICH BILL, AND WHETHER IT IS THIS JOB'S (d1ff7c5a): when the tie above did NOT land, the
+      // doors beside this sentence used to be Record As Cost (another paid read, the same answer)
+      // or Different Purchase (a SECOND bill for the same money). Naming the bill lets the door
+      // offer Same Purchase: It's That Bill, which writes the one missing tie by hand
+      // (linkReceiptToBill, job containment checked there). A tie that landed needs no door.
+      const sameOnThisJob = (same[0].job_id ?? null) === doc.job_id;
+      return {
+        ok: true,
+        already: true,
+        vendor,
+        amount,
+        sameAs: said,
+        warning: said,
+        ...(!tie.ok && sameOnThisJob ? { sameBillId: same[0].id, sameOnThisJob } : {}),
+      };
     }
   }
 

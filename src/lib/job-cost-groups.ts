@@ -139,6 +139,24 @@ export function openOwnNote(own: number | undefined): string | undefined {
   return own && own > 0 ? `${formatCurrency(own)} of it is your own` : undefined;
 }
 
+/**
+ * THE COSTS CHIP COUNTS ROWS A PERSON CAN FIND (J-013, 0b742620, 2026-09-29: one live bill, no
+ * papers, and the chip said 3). The chip is the Not Billed Yet pile's length, and the tab draws a
+ * pile id only as a bill row, a purchase order row, or a take from stock (JobBills rowsOf draws
+ * nothing for any other id). So the chip counts exactly those — `drawn` — and names the rest as
+ * `phantom`, for the page to report rather than show as a number nobody can check against the tab.
+ */
+export function openRowsDrawn(groups: Pick<JobCostGroups, "open" | "stock">, rowIds: Iterable<string>): { drawn: string[]; phantom: string[] } {
+  const rows = new Set(Array.from(rowIds, String));
+  const drawn: string[] = [];
+  const phantom: string[] = [];
+  for (const id of groups.open.ids) {
+    if (rows.has(id) || groups.stock[id]) drawn.push(id);
+    else phantom.push(id);
+  }
+  return { drawn, phantom };
+}
+
 /** Why a row is on no invoice and never will be, in the office's words. */
 export function nothingToBillWhy(why: NothingToBill): string {
   if (why === "po_billed") return "Its PO is already billed";

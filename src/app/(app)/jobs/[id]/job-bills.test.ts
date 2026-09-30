@@ -10,7 +10,8 @@ import { join } from "node:path";
  * It had kept the old ones: a 16px pencil and a 16px trash icon (the trash a one-tap hard delete,
  * no question, no Undo) and a badge reading the raw "paid"/"unpaid", the word /bills retired
  * because a bill ticked paid that a cheque already covered takes the same dollar off twice. Both
- * screens now draw BillRowDoors: Settled / On Account · Switch, Edit, Delete, each 44px, and
+ * screens now draw BillRowDoors: Settled / On Account (Mark Settled / Mark On Account on its face),
+ * Edit, Delete, each 44px, and
  * Delete asks first.
  */
 
@@ -88,15 +89,29 @@ describe("the Costs tab's bills list adds nothing itself", () => {
 });
 
 describe("the Costs tab's bill row", () => {
-  it("says how the bill was bought, never 'paid', and the toggle is 44px", () => {
+  it("says how the bill was bought, never 'paid', the toggle's face is the deed (never a bare Switch), and it is 44px", () => {
     const html = render();
     const toggles = Array.from(html.matchAll(/<button[^>]*aria-label="How this bill was bought[^"]*"[^>]*>([\s\S]*?)<\/button>/g));
     expect(toggles).toHaveLength(2);
     for (const t of toggles) expect(t[0]).toContain("min-h-11");
     const faces = toggles.map((t) => t[1].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim());
-    expect(faces).toEqual(["On Account Switch", "Settled Switch"]);
+    // ea2b7172: on a job page "Switch" read as "switch the job"; the face says what the tap does.
+    expect(faces).toEqual(["On Account Mark Settled", "Settled Mark On Account"]);
+    expect(html).not.toMatch(/>Switch</);
     expect(html).not.toMatch(/>\s*(paid|unpaid)\s*</);
     expect(html).not.toContain("Toggle paid/unpaid");
+  });
+
+  it("the bill opens: the supplier line and a 44px Open The Bill both land on the bill's fold in /bills", () => {
+    const html = render();
+    for (const b of BILLS) {
+      const doors = Array.from(html.matchAll(new RegExp(`<a[^>]*href="/bills#bill-${b.id}"[^>]*>([\\s\\S]*?)</a>`, "g")));
+      expect(doors, b.id).toHaveLength(2);
+      for (const d of doors) expect(d[0]).toContain("min-h-11");
+      const words = doors.map((d) => d[1].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim());
+      expect(words[0]).toContain(b.supplier);
+      expect(words[1]).toBe("Open The Bill");
+    }
   });
 
   it("Edit and Delete are 44px buttons with their words, not bare 16px icons", () => {

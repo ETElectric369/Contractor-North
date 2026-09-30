@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { createElement } from "react";
@@ -10,11 +10,17 @@ import { renderToStaticMarkup } from "react-dom/server";
  * on the permit · back Oct 3" with Snooze beside it; the crew reads the same pill, not tappable. The
  * J-number is said once (the breadcrumb). Manage is three rows for the office and nothing for a tech.
  */
+const writers = vi.hoisted(() => ({
+  setJobStatus: vi.fn(async () => ({ ok: true })),
+  finishJob: vi.fn(async () => ({ ok: true, speak: "Job finished. Started INV-090 for $420.00 of work not yet billed. Review it, then Send." })),
+  setJobHold: vi.fn(async () => ({ ok: true })),
+  snoozeJobHold: vi.fn(async () => ({ ok: true })),
+}));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh() {}, push() {} }) }));
-vi.mock("../actions", () => ({ setJobStatus: vi.fn() }));
-vi.mock("../../schedule/actions", () => ({ setJobHold: vi.fn(), snoozeJobHold: vi.fn() }));
+vi.mock("../actions", () => ({ setJobStatus: writers.setJobStatus, finishJob: writers.finishJob }));
+vi.mock("../../schedule/actions", () => ({ setJobHold: writers.setJobHold, snoozeJobHold: writers.snoozeJobHold }));
 
-import { JobStatusControl, heldWords, statusTitle } from "./job-status-control";
+import { JobStatusControl, heldWords, statusTitle, writeStatusPick } from "./job-status-control";
 import { MANAGE_ROW_CLS } from "./job-manage-menu";
 
 const TODAY = "2026-09-27";
@@ -66,6 +72,49 @@ describe("the office's pill", () => {
     const html = render({ status: "scheduled", holdReason: "stale words", holdUntil: "2026-10-03" });
     expect(html).not.toContain("Snooze");
     expect(html).not.toContain("stale words");
+  });
+});
+
+/**
+ * ONE WRITE BEHIND A PICK (ce9ba4ef, 209451e1). A held job picked To Be Scheduled used to go through
+ * setJobHold(id, null) first, whose wake rule chose "scheduled" for itself and skipped the pick; the
+ * second tap worked because the job was no longer held. And the pill's Complete wrote the word alone,
+ * skipping Finish Job's billing motion. Now every pick is setJobStatus with the pick itself (it clears
+ * hold_reason; jobs_hold_day clears the day), and Complete is finishJob's.
+ */
+describe("the pick is one guarded write", () => {
+  beforeEach(() => {
+    writers.setJobStatus.mockClear();
+    writers.finishJob.mockClear();
+    writers.setJobHold.mockClear();
+  });
+
+  it("a held job picked To Be Scheduled: setJobStatus with to_be_scheduled, never setJobHold's wake", async () => {
+    const res = await writeStatusPick("j1", "to_be_scheduled");
+    expect(res.ok).toBe(true);
+    expect(writers.setJobStatus).toHaveBeenCalledTimes(1);
+    expect(writers.setJobStatus).toHaveBeenCalledWith("j1", "to_be_scheduled");
+    expect(writers.setJobHold).not.toHaveBeenCalled();
+    expect(writers.finishJob).not.toHaveBeenCalled();
+  });
+
+  it("Complete goes through finishJob (the whole motion), not setJobStatus's word alone", async () => {
+    const res = await writeStatusPick("j1", "complete");
+    expect(writers.finishJob).toHaveBeenCalledWith("j1", {});
+    expect(writers.setJobStatus).not.toHaveBeenCalled();
+    expect(res.speak).toContain("Job finished.");
+  });
+
+  it("the pill's pick() has no held fork and no setJobHold(id, null): the one helper, and Finish Job's sentence toasted", () => {
+    const control = code(src("job-status-control.tsx"));
+    const pick = control.slice(control.indexOf("function pick("), control.indexOf("const heldLine"));
+    expect(pick).toContain("await writeStatusPick(id, next)");
+    expect(pick).not.toContain("setJobHold(id, null)");
+    expect(pick).not.toMatch(/if \(held\)/);
+    expect(pick).toContain('toast(res.speak ?? "Job finished.", "info")');
+    expect(pick).toContain("if (res.warning) toast(res.warning");
+    // setJobHold is still the picker's writer (Hold It asks why first); it just never wakes a job.
+    expect(control).toContain("await setJobHold(id, why, when)");
   });
 });
 
