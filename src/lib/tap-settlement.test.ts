@@ -103,8 +103,11 @@ describe("the job header's Pay Now (settleUp) lands on the job's bill and sends 
   });
 });
 
-describe("the webhook settles and never claims a delivery (route.ts)", () => {
-  const src = readFileSync("src/app/api/stripe/webhook/route.ts", "utf8");
+describe("the webhook settles and never claims a delivery (route.ts + the one writer it shares with the Pay Now sheet)", () => {
+  // The settle itself moved out of the route on 2026-09-30 (lib/record-invoice-payment.ts, so the
+  // sheet's own check can book a succeeded tap through the same door); both files stand behind
+  // every one of these.
+  const src = readFileSync("src/app/api/stripe/webhook/route.ts", "utf8") + readFileSync("src/lib/record-invoice-payment.ts", "utf8");
 
   it("no door may move a draft here any more", () => {
     expect(src).not.toMatch(/promotesDraft/);
