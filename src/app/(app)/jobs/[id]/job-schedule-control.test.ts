@@ -66,12 +66,13 @@ describe("the job page's Scheduled box: the length beside the start", () => {
     expect(text(box({ start: at("2026-09-28", "10:00"), end: at("2026-09-28", "12:00") }))).not.toContain("Its own hours");
   });
 
-  it("several days: the start of the first, full days, and no lengths to pick", () => {
-    const html = box({ start: at("2026-09-28", "10:00"), end: at("2026-09-30", "17:00"), segments: [{ start_date: "2026-09-28", end_date: "2026-09-30" }] });
+  it("several days (a second date range): the End and the lengths stay, and the words say each day (Erik, 2026-09-29)", () => {
+    const html = box({ start: at("2026-09-28", "10:00"), end: at("2026-09-30", "12:00"), segments: [{ start_date: "2026-09-28", end_date: "2026-09-28" }, { start_date: "2026-09-30", end_date: "2026-09-30" }] });
     expect(html).toMatch(/aria-label="Start time"/);
-    expect(html).not.toMatch(/aria-label="End time"/);
-    expect(html).not.toMatch(/>2h</);
-    expect(text(html)).toContain("full days through Wed, Sep 30");
+    expect(html).toMatch(/aria-label="End time"/);
+    expect(html).toMatch(/<button[^>]*aria-pressed="true"[^>]*>2h<\/button>/);
+    expect(text(html)).toContain("10:00 AM – 12:00 PM each day through Wed, Sep 30 · 2 hours — change it");
+    expect(text(html)).not.toContain("full days");
   });
 
   it("no day yet: it says what a day will bring", () => {

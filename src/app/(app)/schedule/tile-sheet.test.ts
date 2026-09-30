@@ -110,10 +110,12 @@ describe("a job's sheet, for the office", () => {
     expect(text(render(seiler({ planned_minutes: 120 })))).not.toContain("change it");
   });
 
-  it("a job over several days asks only its start, and says full days", () => {
-    const many = render(seiler({ scheduled_end: at("2026-09-30", "17:00"), planned_minutes: 1440 }));
-    expect(many).not.toMatch(/>4h</);
-    expect(text(many)).toContain("full days through Wed, Sep 30");
+  it("a job over several days keeps its End and its lengths, and says its hours each day", () => {
+    const many = render(seiler({ scheduled_end: at("2026-09-30", "12:00"), planned_minutes: 120 }));
+    expect(many).toMatch(/>4h</);
+    expect(many).toMatch(/aria-label="End time"/);
+    expect(text(many)).toContain("10:00 AM – 12:00 PM each day through Wed, Sep 30 · 2 hours");
+    expect(text(many)).not.toContain("full days");
   });
 });
 

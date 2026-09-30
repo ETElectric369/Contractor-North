@@ -54,7 +54,8 @@ export function BlockTimeControls({
   endHm: string;
   allDay: boolean;
   sized: boolean;
-  /** A block over several days: its days are full days, so only the first day's start is asked. */
+  /** A block over several days: the same hours on each of them, so the Start, the End and the lengths
+   *  are asked the same as for one day, and the words say "each day through <lastDayWords>". */
   multiDay?: boolean;
   /** "Wed, Sep 30": the last day of a multi-day block, for the words. */
   lastDayWords?: string | null;
@@ -95,16 +96,16 @@ export function BlockTimeControls({
   const s = readHm(start_) ?? 0;
   const e = readHm(end) ?? 0;
   const minutes = Math.max(1, e - s);
-  const words = blockWords({ allDay, minutes, sized, multiDay });
+  const words = blockWords({ allDay, minutes, sized });
+  // Several days: "10:00 AM – 12:00 PM each day through Wed, Oct 1 · 2 hours".
+  const eachDay = multiDay && lastDayWords ? ` each day through ${lastDayWords}` : "";
 
   if (!canEdit) {
     return (
       <p className="text-sm text-slate-700">
-        {multiDay
-          ? `Starts ${hmWords(startHm)} · full days${lastDayWords ? ` through ${lastDayWords}` : ""}`
-          : allDay
-            ? `All day, ${hmWords(startHm)} – ${hmWords(endHm)}`
-            : `${hmWords(startHm)} – ${hmWords(endHm)} · ${blockWords({ allDay, minutes: Math.max(1, (readHm(endHm) ?? 0) - (readHm(startHm) ?? 0)), sized, multiDay })}`}
+        {allDay && !multiDay
+          ? `All day, ${hmWords(startHm)} – ${hmWords(endHm)}`
+          : `${hmWords(startHm)} – ${hmWords(endHm)}${eachDay} · ${blockWords({ allDay, minutes: Math.max(1, (readHm(endHm) ?? 0) - (readHm(startHm) ?? 0)), sized })}`}
       </p>
     );
   }
@@ -159,7 +160,7 @@ export function BlockTimeControls({
       plannedMinutes: plannedMinutes ?? (sized ? saidMinutes : 0),
       wd: workDayMinutes(workDay),
     }).endMin;
-    const nextEnd = multiDay ? end : minutesToHm(Math.max(newStart + 1, Math.min(23 * 60 + 59, kept)));
+    const nextEnd = minutesToHm(Math.max(newStart + 1, Math.min(23 * 60 + 59, kept)));
     run({ start: hm }, { start: hm, end: nextEnd });
   }
 
@@ -199,60 +200,55 @@ export function BlockTimeControls({
             aria-label="Start time"
           />
         </label>
-        {!multiDay && (
-          <label className="flex flex-col text-xs text-slate-500" htmlFor={`${idPrefix}-end`}>
-            End
-            <input
-              id={`${idPrefix}-end`}
-              type="time"
-              value={end}
-              disabled={pending}
-              onChange={(ev) => setEnd(ev.target.value)}
-              onBlur={(ev) => commitEnd(ev.target.value)}
-              onKeyDown={(ev) => {
-                if (ev.key === "Enter") (ev.target as HTMLInputElement).blur();
-              }}
-              className="mt-0.5 h-11 w-[8.5rem] rounded-md border border-slate-200 bg-white px-2 text-sm text-slate-900 disabled:opacity-60"
-              aria-label="End time"
-            />
-          </label>
-        )}
+        <label className="flex flex-col text-xs text-slate-500" htmlFor={`${idPrefix}-end`}>
+          End
+          <input
+            id={`${idPrefix}-end`}
+            type="time"
+            value={end}
+            disabled={pending}
+            onChange={(ev) => setEnd(ev.target.value)}
+            onBlur={(ev) => commitEnd(ev.target.value)}
+            onKeyDown={(ev) => {
+              if (ev.key === "Enter") (ev.target as HTMLInputElement).blur();
+            }}
+            className="mt-0.5 h-11 w-[8.5rem] rounded-md border border-slate-200 bg-white px-2 text-sm text-slate-900 disabled:opacity-60"
+            aria-label="End time"
+          />
+        </label>
       </div>
 
-      {!multiDay && (
-        <div role="group" aria-label="How long" className="flex flex-wrap gap-2">
-          {QUICK_LENGTHS.map((q) => {
-            const on = !allDay && minutes === q.minutes;
-            return (
-              <button
-                key={q.minutes}
-                type="button"
-                disabled={pending}
-                aria-pressed={on}
-                aria-label={q.words}
-                onClick={() => run({ length: q.minutes }, { end: endAfter(start_, q.minutes) })}
-                className={chip(on)}
-              >
-                {q.label}
-              </button>
-            );
-          })}
-          <button
-            type="button"
-            disabled={pending}
-            aria-pressed={allDay}
-            onClick={() => run({ length: "full" }, { start: workDay.start, end: workDay.end })}
-            className={chip(allDay)}
-          >
-            Full Day
-          </button>
-        </div>
-      )}
+      {/* The lengths, on one day or several: a job's hours are each day's hours. */}
+      <div role="group" aria-label="How long" className="flex flex-wrap gap-2">
+        {QUICK_LENGTHS.map((q) => {
+          const on = !allDay && minutes === q.minutes;
+          return (
+            <button
+              key={q.minutes}
+              type="button"
+              disabled={pending}
+              aria-pressed={on}
+              aria-label={q.words}
+              onClick={() => run({ length: q.minutes }, { end: endAfter(start_, q.minutes) })}
+              className={chip(on)}
+            >
+              {q.label}
+            </button>
+          );
+        })}
+        <button
+          type="button"
+          disabled={pending}
+          aria-pressed={allDay}
+          onClick={() => run({ length: "full" }, { start: workDay.start, end: workDay.end })}
+          className={chip(allDay)}
+        >
+          Full Day
+        </button>
+      </div>
 
       <p className="text-xs text-slate-500">
-        {multiDay
-          ? `Starts ${hmWords(start_)} · full days${lastDayWords ? ` through ${lastDayWords}` : ""}. Change the days above.`
-          : `${hmWords(start_)} – ${hmWords(end)} · ${words}`}
+        {`${hmWords(start_)} – ${hmWords(end)}${eachDay} · ${words}`}
         {pending && !draft && <span className="ml-2 text-slate-400">Saving…</span>}
         {saved && !pending && !draft && (
           <span className="ml-2 inline-flex items-center gap-1 font-medium text-green-600">
