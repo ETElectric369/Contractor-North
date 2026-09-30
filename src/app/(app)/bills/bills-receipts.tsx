@@ -77,6 +77,12 @@ export interface BillRow {
   /** Set aside as the duplicate of another bill (0271): still listed, never counted. */
   superseded?: boolean;
   /**
+   * Settled in the supplier's own books (8a982483): every document from its account that covers
+   * this bill is closed (an applied open list). bills.status still says On Account, because that
+   * is how it was bought; the row says "Settled · CED Says" and Unpaid leaves it out (isOpenBill).
+   */
+  settledBySupplier?: boolean;
+  /**
    * The receipt's per-line billing switches (0268/0272), when this bill is a live receipt on a job
    * with lines. They live in the bill's own detail now: one place per bill, no second list.
    */
@@ -269,7 +275,7 @@ export function BillsReceipts({
             </span>
             <span className="shrink-0 text-right">
               <span className={`block font-medium tabular-nums ${b.superseded ? "text-slate-400 line-through" : "text-slate-800"}`}>{formatCurrency(b.amount)}</span>
-              <span className="block text-xs text-slate-400">{b.status === "paid" ? "Settled" : "On Account"}</span>
+              <span className="block text-xs text-slate-400">{b.status === "paid" ? "Settled" : b.settledBySupplier ? `Settled · ${b.supplier} Says` : "On Account"}</span>
             </span>
           </summary>
 

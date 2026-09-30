@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { isOpenBill } from "@/lib/open-counts";
 
 /**
  * THE ONE WORD ON THIS SCREEN THAT INVITES A DOUBLE-COUNT.
@@ -38,8 +39,30 @@ describe("All Bills lists receipt files, and is never a second upload door (Wave
 
 describe("a bill's status says how it was bought, in words", () => {
   it("never prints the raw database word on the badge", () => {
-    expect(SRC).toContain('{b.status === "paid" ? "Settled" : "On Account"}');
+    expect(SRC).toContain('{b.status === "paid" ? "Settled" : b.settledBySupplier ? `Settled · ${b.supplier} Says` : "On Account"}');
     expect(SRC).not.toContain("<Badge tone={statusTone(b.status)}>{b.status}</Badge>");
+  });
+
+  /**
+   * "$10k UNPAID" OVER "$5k OWED" (8a982483). Applying a CED open list closes CED's documents and
+   * never a bill, so every ticket ever bought on account stayed Unpaid under All Bills. The page
+   * now works out which on-account bills the supplier's own closed papers cover, and the ledger's
+   * one open test (isOpenBill) leaves them out, so the fold's count and the card's balance stop
+   * disagreeing by the same tickets.
+   */
+  it("a bill the supplier's closed papers cover leaves the Unpaid count and says who says so", () => {
+    expect(SRC).toContain("const unpaid = bills.filter((b) => isOpenBill(b));");
+    expect(SRC).toContain("settledBySupplier?: boolean;");
+    const settled = { id: "b1", supplier: "CED", status: "unpaid", superseded: false, settledBySupplier: true };
+    const stillOpen = { id: "b2", supplier: "CED", status: "unpaid", superseded: false, settledBySupplier: false };
+    const asBefore = { id: "b3", supplier: "CED", status: "unpaid", superseded: false };
+    expect([settled, stillOpen, asBefore].filter((b) => isOpenBill(b)).map((b) => b.id)).toEqual(["b2", "b3"]);
+    // The label the row prints for each.
+    const label = (b: { status: string; supplier: string; settledBySupplier?: boolean }) =>
+      b.status === "paid" ? "Settled" : b.settledBySupplier ? `Settled · ${b.supplier} Says` : "On Account";
+    expect(label(settled)).toBe("Settled · CED Says");
+    expect(label(stillOpen)).toBe("On Account");
+    expect(label({ status: "paid", supplier: "CED", settledBySupplier: true })).toBe("Settled");
   });
 
   it("gives the Edit Bill Status picker two Title Case choices (the add form went: Add By Hand asks Paid?)", () => {

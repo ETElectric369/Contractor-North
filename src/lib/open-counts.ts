@@ -60,9 +60,16 @@ export function isOpenAppointment(status: string | null | undefined): boolean {
 }
 
 /** A supplier bill still owed (bills.status is unpaid | paid). A bill set aside as another's
- *  duplicate is never counted anywhere (superseded). */
-export function isOpenBill(b: { status?: string | null; superseded?: boolean | null }): boolean {
-  return b.status !== "paid" && !b.superseded;
+ *  duplicate is never counted anywhere (superseded).
+ *
+ *  `settledBySupplier` (optional, read-side only): bills.status says HOW a bill was bought, not
+ *  whether the supplier was paid, and applying a supplier's open list closes the supplier's own
+ *  documents, never the bill. A bill every covering document from its own account calls closed
+ *  is settled in the supplier's books, so it is not open here either - or "$10k Unpaid" under All
+ *  Bills sat over "$5k Owed" on the Suppliers card, the same tickets counted twice. A row without
+ *  the field behaves exactly as before. */
+export function isOpenBill(b: { status?: string | null; superseded?: boolean | null; settledBySupplier?: boolean | null }): boolean {
+  return b.status !== "paid" && !b.superseded && !b.settledBySupplier;
 }
 
 /** A purchase order not in yet: a draft, sent, or partly received. Received and cancelled are settled. */

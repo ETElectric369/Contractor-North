@@ -38,6 +38,7 @@ import { BillsSearchBox, BillsSearchProvider } from "./bills-search-box";
 import { SupplierPaperCards } from "@/components/supplier-paper-cards";
 import { formatCurrency, formatDateShort } from "@/lib/utils";
 import {
+  billsSettledBySupplier,
   booksBeginOn,
   cardJobIds,
   cardsWithAlreadyBilled,
@@ -692,6 +693,17 @@ export default async function BillsPage({
     for (const id of billsCarrying.get(String(r.id)) ?? []) coverBill(id, accountId);
   }
 
+  // ── THE BILLS THE SUPPLIER'S OWN BOOKS CALL SETTLED (8a982483) ──────────────────────────────
+  // Same walk as coverBill, and the document's `closed` (an applied open list) is what the ledger
+  // was never told: an on-account bill every covering document from its own account calls closed
+  // is settled in the supplier's books, so All Bills stops counting it as Unpaid and its row says
+  // "Settled · CED Says". bills.status is not written. A lost links read would make a bill covered
+  // only by a Record link look open again, so, like noSupplierDocument, nothing is settled until
+  // the links read.
+  const settledBySupplierIds = linksErr
+    ? new Set<string>()
+    : billsSettledBySupplier({ documents: (invoiceRows ?? []) as any[], bills: liveBills, coveringBills, billsCarrying });
+
   // ONLY WHERE THE QUESTION EXISTS - an account whose supplier documents we actually hold. Under
   // model A every unpaid bill is already inside the balance, so there is no uncovered slice to
   // name and this map stays empty for every account but CED.
@@ -1215,6 +1227,8 @@ export default async function BillsPage({
       ...b,
       shownNumber: b.bill_number || b.supplier_invoice_number || reading.invoiceNumber || null,
       superseded: !!b.superseded_by_bill_id,
+      // Settled in the supplier's own books (every covering document closed): not open (isOpenBill).
+      settledBySupplier: settledBySupplierIds.has(String(b.id)),
       receipt: receiptById.get(String(b.id)) ?? null,
       papers: paperOfBill[String(b.id)] ?? null,
     };
