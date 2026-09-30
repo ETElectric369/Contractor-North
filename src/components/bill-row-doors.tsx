@@ -79,7 +79,9 @@ export function BillRowDoors({
         className="flex min-h-11 items-center gap-2 rounded-lg px-2 text-xs font-medium text-slate-600 ring-1 ring-slate-200 hover:bg-white"
       >
         <Badge tone={statusTone(bill.status)}>{bill.status === "paid" ? "Settled" : "On Account"}</Badge>
-        <span>Switch</span>
+        {/* THE DEED, NOT "SWITCH" (ea2b7172): on a job page a bare "Switch" beside the badge read
+            as "switch the job". The face says what the tap does to THIS bill. */}
+        <span>{bill.status === "paid" ? "Mark On Account" : "Mark Settled"}</span>
       </button>
       <Button variant="outline" onClick={onEdit} disabled={busy}>
         <Pencil /> Edit
