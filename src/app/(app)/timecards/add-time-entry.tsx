@@ -8,7 +8,10 @@ import { Modal, ModalActions } from "@/components/ui/modal";
 import { useToast } from "@/components/toast";
 import { Input, Label, Select } from "@/components/ui/input";
 import { LunchCheckbox } from "@/components/lunch-checkbox";
+import { clockDoorWords } from "@/lib/long-shift";
 import { lunchMinutesFor } from "@/lib/lunch-rule";
+import type { OverlapClash } from "@/lib/overlap-refusal";
+import { clockInputValue } from "@/lib/split-preview";
 import { todayStrInTz } from "@/lib/tz";
 import type { JobCode } from "@/lib/types";
 import { createManualEntry, type DayShifts } from "../timeclock/actions";
@@ -16,6 +19,7 @@ import { NewJobInline, type CreatedJob } from "../timeclock/new-job-inline";
 import { SameDayShifts, notCarriedWords } from "../timeclock/same-day-shifts";
 import { buildShiftSpan } from "../timeclock/shift-span";
 import { whichJobLabel, type ChoiceJob } from "../timeclock/which-job-choices";
+import { StopClockSheet } from "./stop-clock-sheet";
 
 /**
  * ADD TIME ENTRY: THE ONE FORM THE OFFICE ADDS HOURS WITH (Wave 2, W2-03).
@@ -111,6 +115,41 @@ export function preselectFrom(answer: DayShifts | null, touched: boolean): strin
   if (touched) return null;
   if (!answer || !answer.ok || answer.offThatDay) return "";
   return answer.scheduledJob?.id ?? "";
+}
+
+/** "3:15 PM" in the company's clock, for the words after a clock-out. */
+function clockWords(iso: string, tz: string): string {
+  return new Date(iso).toLocaleTimeString("en-US", { timeZone: tz, hour: "numeric", minute: "2-digit" }).replace(/ /g, " ");
+}
+
+/**
+ * A REFUSAL HANDS BACK THE DOOR (Erik, 2026-09-29: Add Time Entry on 700 North Lake Boulevard for
+ * Brian while Brian's punch was still running elsewhere). The refusal said "Clock Brian out first: tap
+ * their shift on Timecards", and this form had no such door: the clock-out sheet was never mounted
+ * here, and the job's Time tab lists Clock Out <Name> only for punches on this job. So when the shift
+ * in the way is still RUNNING, the same words the office reaches for on Timecards sit right under the
+ * refusal, "Clock Out Brian" (clockDoorWords, "Clock Out" for the viewer's own clock), and open the
+ * clock-out sheet in place. A closed clash keeps its own door (Put This On <job>, in the day's list).
+ */
+export function ClockOutClashDoor({
+  clash,
+  name,
+  self = false,
+  onTap,
+}: {
+  clash: OverlapClash | null;
+  /** The person's full name, for the door's words. */
+  name: string | null;
+  /** The viewer's own running clock reads "Clock Out". */
+  self?: boolean;
+  onTap: () => void;
+}) {
+  if (!clash || clash.clockOut !== null) return null;
+  return (
+    <Button type="button" variant="outline" className="min-h-11" onClick={onTap}>
+      {clockDoorWords(name, { self }).clockOut}
+    </Button>
+  );
 }
 
 export function AddTimeEntry({
@@ -226,8 +265,10 @@ export function AddTimeEntry({
    * twice for one person, simultaneous saves included.
    */
   const inFlight = useRef(false);
-  /** The shift a refusal named, bolded in the day's list; and a nudge to re-read that list. */
-  const [clashId, setClashId] = useState<string | null>(null);
+  /** The shift a refusal named: bolded in the day's list, and, still running, given its clock-out
+   *  door under the refusal (ClockOutClashDoor); and a nudge to re-read that list. */
+  const [clash, setClash] = useState<OverlapClash | null>(null);
+  const [clockingOut, setClockingOut] = useState(false);
   const [dayKey, setDayKey] = useState(0);
 
   /**
@@ -248,6 +289,44 @@ export function AddTimeEntry({
 
   const whoName = (members.find((m) => m.id === who)?.full_name ?? "").trim();
   const whoWords = whoName ? whoName.split(/\s+/)[0] : "you";
+  const whoIsViewer = !!viewerId && (who || viewerId) === viewerId;
+
+  /**
+   * THE CLOCK-OUT SHEET'S JOB LIST, from what this form already holds: the job it is on (fixedJob),
+   * every job it lists (knownJobs, named the way the form names them), and the job the running punch is
+   * on. The sheet itself keeps the punch's own job selectable when nothing lists it.
+   */
+  const sheetJobs = useMemo(() => {
+    const out: { id: string; job_number: string; name: string }[] = [];
+    const seen = new Set<string>();
+    const add = (j: { id: string; job_number: string; name: string }) => {
+      if (seen.has(j.id)) return;
+      seen.add(j.id);
+      out.push(j);
+    };
+    if (fixedJob) add({ id: fixedJob.id, job_number: "", name: fixedJob.label });
+    for (const j of knownJobs) add({ id: j.id, job_number: j.job_number ?? "", name: whichJobLabel(j, jobCodesEnabled) });
+    if (clash?.jobId && clash.jobLabel) add({ id: clash.jobId, job_number: "", name: clash.jobLabel });
+    return out;
+  }, [fixedJob, knownJobs, jobCodesEnabled, clash]);
+
+  /** The clock was stopped from here: re-read the day, drop the refusal, and start these hours where
+   *  those stopped, so Save Entry is one more tap. Said, never silent. */
+  function stoppedAt(clockOutIso: string) {
+    const stopDay = todayStrInTz(tz, new Date(clockOutIso));
+    const hm = clockInputValue(clockOutIso, tz);
+    if (stopDay !== day || !hm) return;
+    setStartT(hm);
+    // An End at or before the new Start would ask "Ends The Next Day": move it an hour past instead.
+    let endMoved = false;
+    if (endsBeforeStart(hm, endT)) {
+      const [h, m] = hm.split(":").map(Number);
+      const endMin = Math.min(23 * 60 + 59, h * 60 + m + 60);
+      setEndT(`${String(Math.floor(endMin / 60)).padStart(2, "0")}:${String(endMin % 60).padStart(2, "0")}`);
+      endMoved = true;
+    }
+    toast(`Start set to ${clockWords(clockOutIso, tz)}, when ${whoWords} clocked out.${endMoved ? " Check End, then Save Entry." : " Save Entry when the End is right."}`, "info");
+  }
 
   function submit() {
     if (inFlight.current || pending) return;
@@ -288,12 +367,13 @@ export function AddTimeEntry({
     if (!res.ok) {
       setError(res.error ?? "Could not add the entry.");
       // The shift in the way is in the day's list: bold it, and re-read the day so a shift saved a
-      // moment ago (another tab, a second phone) is there too.
-      setClashId(res.clash?.id ?? null);
+      // moment ago (another tab, a second phone) is there too. Still running, it gets its clock-out
+      // door under the refusal.
+      setClash(res.clash ?? null);
       setDayKey((k) => k + 1);
       return;
     }
-    setClashId(null);
+    setClash(null);
     setOpen(false);
     // SAY WHAT WAS RECORDED, AND HAND OVER ITS DOOR: the shift's editor is where its miles, a pay
     // rate and notes go, which this form no longer asks.
@@ -328,7 +408,13 @@ export function AddTimeEntry({
         footer={<ModalActions onCancel={() => setOpen(false)} onSave={submit} saving={pending} saveLabel="Save Entry" />}
       >
         <div className="space-y-4">
-          {error && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
+          {error && (
+            <div className="space-y-2">
+              <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>
+              {/* The shift in the way is still running: the clock-out door, right here. */}
+              <ClockOutClashDoor clash={clash} name={whoName || null} self={whoIsViewer} onTap={() => setClockingOut(true)} />
+            </div>
+          )}
 
           <div>
             <Label htmlFor="ate-who">Who</Label>
@@ -399,7 +485,7 @@ export function AddTimeEntry({
             profileId={who || viewerId || ""}
             date={day}
             jobId={fixedJob ? fixedJob.id : jobIsReal ? jobValue : null}
-            highlightId={clashId}
+            highlightId={clash?.id ?? null}
             refreshKey={dayKey}
             onRead={(answer) => {
               if (fixedJob) return;
@@ -412,7 +498,7 @@ export function AddTimeEntry({
             onPlaced={(_sentence, shift) => {
               setOpen(false);
               setError(null);
-              setClashId(null);
+              setClash(null);
               // The door moved the punch only: say what was typed here that it did not get.
               const left = notCarriedWords({ lunch: tookLunch, code: jobCodesEnabled ? jobCode : null });
               if (left) toast(left, "info", { label: "Open That Shift", onClick: () => router.push(`/timecards?entry=${shift.id}`) });
@@ -483,6 +569,39 @@ export function AddTimeEntry({
           )}
         </div>
       </Modal>
+
+      {/* CLOCK OUT <NAME>, IN PLACE: the office's clock-out sheet (the one Timecards opens on a running
+          row), seeded with the running punch the refusal named: its start, its job, its lunch and notes
+          (never a blank written over them). Closing it re-reads the day and drops the refusal; a stop
+          sets Start to the time the clock stopped (stoppedAt). No Delete here: this door clocks out. */}
+      {clash && clash.clockOut === null && clockingOut && (
+        <StopClockSheet
+          entry={{
+            id: clash.id,
+            profile_id: who || viewerId || null,
+            clock_in: clash.clockIn,
+            lunch_minutes: clash.lunchMinutes,
+            job_id: clash.jobId,
+            job_code: clash.jobCode,
+            notes: clash.notes,
+            profiles: { full_name: whoName || null },
+            job: clash.jobId && clash.jobLabel ? { job_number: "", name: clash.jobLabel } : null,
+          }}
+          jobs={sheetJobs}
+          jobCodes={jobCodes}
+          jobCodesEnabled={jobCodesEnabled}
+          tz={tz}
+          open
+          onClose={() => {
+            setClockingOut(false);
+            setClash(null);
+            setError(null);
+            setDayKey((k) => k + 1);
+          }}
+          onStopped={stoppedAt}
+          viewerId={viewerId}
+        />
+      )}
     </>
   );
 }

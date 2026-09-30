@@ -2323,7 +2323,9 @@ export type DayShift = {
   jobId: string | null;
   jobLabel: string | null;
   jobCode: string | null;
-  /** Closed, on no job and no code: the one the door is for. */
+  /** On no job and no code, running or closed: the one the door is for (putShiftOnJob takes an open
+   *  row too, "running since … is on <job> now", so a punch still on the clock with no job gets Put
+   *  This On <job> as well). */
   noJob: boolean;
   /** The invoice already billing it, when one does: a billed shift keeps its job (0288). */
   billedBy: string | null;
@@ -2403,7 +2405,7 @@ export async function shiftsOnDay(input: { profile_id?: string | null; date: str
       jobId: r.job_id,
       jobLabel: r.job_id && j ? jobLabel(j) : null,
       jobCode: code,
-      noJob: !!r.clock_out && !r.job_id && !code,
+      noJob: !r.job_id && !code,
       billedBy: claims.get(r.id)?.invoice_number ?? (claims.has(r.id) ? "an invoice" : null),
     };
   });

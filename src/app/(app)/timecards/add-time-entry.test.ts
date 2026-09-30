@@ -23,6 +23,7 @@ vi.mock("../schedule/actions", () => ({ createJob: vi.fn(async () => ({ ok: true
 
 import {
   AddTimeEntry,
+  ClockOutClashDoor,
   COMPANY_TIME,
   NO_JOB,
   addedWords,
@@ -35,6 +36,7 @@ import {
   type AddJob,
 } from "./add-time-entry";
 import { LUNCH_LABEL } from "@/lib/lunch-rule";
+import type { OverlapClash } from "@/lib/overlap-refusal";
 import { todayStrInTz } from "@/lib/tz";
 import type { JobCode } from "@/lib/types";
 
@@ -280,5 +282,55 @@ describe("after Save, nothing silent", () => {
     expect(s).toContain('id ? { label: "Open That Shift", onClick: () => router.push(`/timecards?entry=${id}`) } : undefined');
     // A dropped connection is a sentence (the 60mph law).
     expect(s).toMatch(/\} catch \{\s*\/\/ THE 60MPH LAW[^\n]*\n\s*setError\("No connection/);
+  });
+});
+
+describe("a refusal over a RUNNING punch hands back the clock-out door (Erik, 2026-09-29, Brian on 700 North Lake Boulevard)", () => {
+  const running: OverlapClash = {
+    id: "punch-1",
+    clockIn: "2026-09-29T16:10:00Z",
+    clockOut: null,
+    jobId: "j11",
+    jobCode: null,
+    jobLabel: "13897 Herringbone",
+    noJob: false,
+    exact: false,
+    lunchMinutes: 30,
+    notes: "panel swap",
+  };
+  const door = (clash: OverlapClash | null, over: Partial<Parameters<typeof ClockOutClashDoor>[0]> = {}) =>
+    renderToStaticMarkup(createElement(ClockOutClashDoor, { clash, name: "Brian Taylor", onTap: () => undefined, ...over }));
+
+  it("an open clash renders Clock Out Brian, a 44px outline button; a closed clash renders nothing", () => {
+    const html = door(running);
+    expect(html).toMatch(/<button[^>]*class="[^"]*border-slate-300[^"]*min-h-11[^"]*"[^>]*>Clock Out Brian<\/button>/);
+    expect(door({ ...running, clockOut: "2026-09-29T20:00:00Z" })).toBe("");
+    expect(door(null)).toBe("");
+    // The viewer's own running clock reads "Clock Out", never his own name.
+    expect(door(running, { self: true })).toMatch(/>Clock Out<\/button>/);
+    // No name on file: still a door, never a blank label.
+    expect(door(running, { name: null })).toMatch(/>Clock Them Out<\/button>/);
+  });
+
+  it("wired: the door sits under the red refusal, and it mounts the clock-out sheet in place, seeded with the punch's own lunch and notes", () => {
+    const s = src("./add-time-entry.tsx");
+    expect(s).toMatch(/\{error && \(\s*<div className="space-y-2">\s*<div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">\{error\}<\/div>[\s\S]*?<ClockOutClashDoor clash=\{clash\}/);
+    expect(s).toContain("setClash(res.clash ?? null)");
+    expect(s).toMatch(/<StopClockSheet\s+entry=\{\{\s*id: clash\.id,/);
+    expect(s).toContain("lunch_minutes: clash.lunchMinutes,");
+    expect(s).toContain("notes: clash.notes,");
+    expect(s).toContain("onStopped={stoppedAt}");
+    // No Delete on this door: it is here to clock somebody out.
+    const sheet = s.slice(s.indexOf("<StopClockSheet"), s.indexOf("onStopped={stoppedAt}"));
+    expect(sheet).not.toContain("onDelete");
+    // Closing the sheet re-reads the day and drops the refusal; a stop starts these hours where those stopped.
+    expect(s).toMatch(/onClose=\{\(\) => \{\s*setClockingOut\(false\);\s*setClash\(null\);\s*setError\(null\);\s*setDayKey\(\(k\) => k \+ 1\);/);
+    expect(s).toMatch(/function stoppedAt\(clockOutIso: string\) \{[\s\S]*?setStartT\(hm\);/);
+    expect(s).toContain("Start set to ${clockWords(clockOutIso, tz)}, when ${whoWords} clocked out.");
+    // The sheet's Delete is optional now, and it says the stop time before it closes.
+    const stop = src("./stop-clock-sheet.tsx");
+    expect(stop).toContain("onDelete?: () => void;");
+    expect(stop).toMatch(/onStopped\?\.\(stopIso\);\s*onClose\(\);/);
+    expect(stop).toMatch(/\{onDelete && \(\s*<Button variant="ghost" onClick=\{onDelete\}/);
   });
 });
