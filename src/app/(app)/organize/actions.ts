@@ -1493,6 +1493,20 @@ export async function undoPaperwork(id: string): Promise<Result & { message?: st
     };
   }
 
+  // A JOB'S PHOTO FILED WITH A BILL ALREADY ON THE BOOKS (billJobReceipt's same-number answer, a
+  // tied row with source "job"): there is no tray paper to put back, only the job's own document,
+  // which stays. The row goes, so the photo reads Not On A Bill Yet on the job's Costs tab again,
+  // beside Record As Cost, exactly as an undone job-page cost does above. Never into the tray.
+  if (tied && item.source === "job" && !item.bill_id && item.document_id) {
+    const { data: gone, error: goneErr } = await supabase.from("organized_items").delete().eq("id", id).eq("org_id", ctx.orgId).select("id");
+    if (goneErr) return { ok: false, error: dbError(goneErr) };
+    if (!gone?.length) return { ok: false, error: "Nothing was undone. That paper isn't here any more, or this login can't change it." };
+    revalidatePath("/organize");
+    revalidatePath("/bills");
+    if (item.job_id) revalidatePath(`/jobs/${item.job_id}`);
+    return { ok: true, message: "Untied. The photo stays on the job and reads Not On A Bill Yet on its Costs tab again; nothing else changed." };
+  }
+
   const type = paperTypeOfItem(item);
   const patch: Record<string, unknown> = {
     job_id: null,
