@@ -396,4 +396,17 @@ describe("the screen: Title Case on every new clickable, and the words that repl
     expect(MANAGER).not.toContain("A vendor is the brand, e.g. Andersen.\n");
     expect(MANAGER).not.toContain('placeholder: "the brand, e.g. Andersen"');
   });
+
+  it("Add Vendor says 'Prices go on items' for every Kind, not only a brand or a supplier", () => {
+    expect(MANAGER).toContain("Prices go on items: after adding, put it on an item from its page here.");
+    // The gate that hid the line for a subcontractor (and for Not Sorted) is gone, with its comment.
+    expect(MANAGER).not.toContain('k === "brand" || k === "supplier"');
+    expect(MANAGER).not.toContain("Said only for a kind that carries prices");
+    expect(MANAGER).not.toContain("vendorKindOf");
+  });
+
+  it("the Kind box's revert comment names a failed save, not the refusal that is gone", () => {
+    expect(MANAGER).not.toContain("a vendor with prices can't become a subcontractor");
+    expect(MANAGER).toContain("A failed save (a lost connection, a kind the database refuses) puts the box");
+  });
 });

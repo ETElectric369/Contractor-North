@@ -21,7 +21,6 @@ import {
   optionName,
   vendorFilters,
   vendorKey,
-  vendorKindOf,
   websiteHref,
   type ItemOption,
   type VendorCard,
@@ -370,15 +369,8 @@ function AddVendorForm({ kindsAvailable, onClose, onAdded }: { kindsAvailable: b
         ))}
       </div>
       <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
-        {/* Said only for a kind that carries prices: a brand or a supplier. */}
-        {(() => {
-          const k = kindsAvailable ? vendorKindOf(vals.kind) : "brand";
-          return k === "brand" || k === "supplier";
-        })() ? (
-          <span className="mr-auto text-xs text-slate-500">Prices go on items: after adding, put it on an item from its page here.</span>
-        ) : (
-          <span className="mr-auto" />
-        )}
+        {/* Said for EVERY Kind (Erik 2026-09-30, reversing 0341): a subcontractor carries prices too. */}
+        <span className="mr-auto text-xs text-slate-500">Prices go on items: after adding, put it on an item from its page here.</span>
         <Button onClick={() => void save()} disabled={saving || !String(vals.name ?? "").trim()}>
           <Plus className="h-4 w-4" /> {saving ? "Adding…" : "Add Vendor"}
         </Button>
@@ -561,8 +553,8 @@ function VendorSheet({
                   defaultValue={card ? (card.kind ?? "") : "brand"}
                   disabled={savingFields.has("kind")}
                   onChange={(e) => {
-                    // A refused change (a vendor with prices can't become a subcontractor) puts the
-                    // box back to what is saved, so the screen never shows a kind that isn't.
+                    // A failed save (a lost connection, a kind the database refuses) puts the box
+                    // back to what is saved, so the screen never shows a kind that isn't.
                     const box = e.currentTarget;
                     const saved = card ? (card.kind ?? "") : "brand";
                     void saveField("kind", box.value, card ? (card.kind ?? null) : "brand").then((ok) => {
