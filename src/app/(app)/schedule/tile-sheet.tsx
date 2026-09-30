@@ -567,6 +567,12 @@ function VisitSheet({ day, visit, tz, workDay, team, canEdit, onClose, voice }: 
     // day keeps closing), a quick length runs from the start, Full Day is the company's day.
     let start = block.startHm;
     let end = block.endHm;
+    // ONE SPAN OVER SEVERAL DAYS (Mon 10:00 AM → Wed 6:00 PM) takes only a new start: a length from
+    // here would be its start to that many minutes on its LAST day (a 1h chip = a 25-hour visit). The
+    // controls hide the chips for it (oneSpan); this refusal is for anything that still asks.
+    if (block.multiDay && !("start" in patch)) {
+      return { ok: false, error: `This visit runs over several days, through ${dayWords(block.lastDay)}. Open Visit to change when it ends.` };
+    }
     if ("start" in patch) {
       start = patch.start;
       end = block.multiDay || block.allDay ? block.endHm : endAfter(patch.start, block.minutes);
@@ -621,6 +627,8 @@ function VisitSheet({ day, visit, tz, workDay, team, canEdit, onClose, voice }: 
           allDay={block.allDay}
           sized={block.sized}
           multiDay={block.multiDay}
+          // A visit over several days is one span (Mon 10 AM → Wed 6 PM), never the same hours each day.
+          oneSpan
           lastDayWords={dayWords(block.lastDay)}
           workDay={workDay}
           canEdit={canEdit}
