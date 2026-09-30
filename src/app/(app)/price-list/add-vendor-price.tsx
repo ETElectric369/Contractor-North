@@ -22,10 +22,9 @@ import { parseCellNumber, type PriceItem } from "./price-list-math";
  *
  * THE VENDOR IS A VISIBLE PICKER (b0a8f25e). It was a text box over a native datalist, which in
  * Chrome on a Mac pops only after matching letters or a double-click, so Justin's twenty-nine
- * imported vendors looked like none. Now a select lists every vendor that can carry a price, with
- * Someone New (Type It) at the end for a brand not on the Vendors tab yet - and the sheet SAYS how
- * many of his vendors are subcontractors and so aren't in the list (0341), rather than the list
- * silently being short.
+ * imported vendors looked like none. Now a select lists every vendor the org has - suppliers,
+ * subcontractors and brands alike (Erik 2026-09-30, reversing 0341's "a subcontractor never carries
+ * prices") - with Someone New (Type It) at the end for a brand not on the Vendors tab yet.
  */
 export const SOMEONE_NEW = "__someone_new__";
 
@@ -33,7 +32,6 @@ export function AddVendorPrice({
   item,
   vendor,
   knownVendors,
-  subcontractorsLeftOut = [],
   alreadyOnItem = 0,
   defaultMarkupPct,
   hasDefault,
@@ -45,8 +43,6 @@ export function AddVendorPrice({
   vendor?: string;
   /** The vendors that can be picked here: the org's, minus the ones already priced on this item. */
   knownVendors: string[];
-  /** The live subcontractor cards knownVendors leaves out (0341), named under the picker. */
-  subcontractorsLeftOut?: string[];
   /**
    * How many of the org's vendors are left out because they are ALREADY on this item. The list
    * arrives filtered, so without this an org whose every vendor is priced here would read "No
@@ -79,7 +75,6 @@ export function AddVendorPrice({
   const pickShown = nonePickable ? SOMEONE_NEW : pick;
   const typing = !vendor && pickShown === SOMEONE_NEW;
   const who = (vendor ?? (typing ? name : pick)).trim();
-  const subsLeftOut = subcontractorsLeftOut.length;
 
   const costN = parseCellNumber(cost);
   const sellN = parseCellNumber(sell);
@@ -177,16 +172,10 @@ export function AddVendorPrice({
                 </datalist>
               </>
             )}
-            {/* WHAT THE LIST LEAVES OUT, SAID OUT LOUD (0341): a subcontractor is on the Vendors
-                tab to be reached, never priced, and a list that is quietly short reads as broken. */}
-            {subsLeftOut > 0 ? (
-              <p className="mt-1 text-xs text-slate-500">
-                {subsLeftOut === 1
-                  ? "1 on your Vendors list is a subcontractor and isn't offered here: subcontractors don't carry prices on items."
-                  : `${subsLeftOut} on your Vendors list are subcontractors and aren't offered here: subcontractors don't carry prices on items.`}{" "}
-                Change a vendor&apos;s Kind to Supplier or Brand on the Vendors tab to price it.
-              </p>
-            ) : nonePickable && alreadyOnItem > 0 ? (
+            {/* WHAT THE LIST LEAVES OUT, SAID OUT LOUD: every vendor the org has is offered here
+                whatever its Kind, so the only short list is one whose vendors are already on this
+                item - and a list that is quietly short reads as broken. */}
+            {nonePickable && alreadyOnItem > 0 ? (
               // EVERY VENDOR IS ALREADY HERE: the list is empty because they're all on the item,
               // not because the Vendors tab is. Saying "No vendors yet" sent him there for nothing.
               <p className="mt-1 text-xs text-slate-500">

@@ -80,9 +80,9 @@ describe("clicking an item opens its vendors", () => {
   });
 
   /**
-   * THE VENDOR IS A VISIBLE PICKER (b0a8f25e): a select that lists every vendor that can carry a
-   * price, not a text box over a datalist that pops only after matching letters. And the sheet
-   * says how many of the org's vendors are subcontractors and so aren't in it.
+   * THE VENDOR IS A VISIBLE PICKER (b0a8f25e): a select that lists every vendor the org has,
+   * subcontractors included (Erik 2026-09-30), not a text box over a datalist that pops only after
+   * matching letters.
    */
   it("Add Vendor's Vendor box is a select that lists the vendors, with Someone New (Type It) at the end", () => {
     expect(html).toContain("Pick One Of Your Vendors");
@@ -93,28 +93,25 @@ describe("clicking an item opens its vendors", () => {
     expect(html).toContain("Someone New (Type It)");
     // The text box waits behind Someone New; nothing is typed until it is picked.
     expect(html).not.toContain('placeholder="the brand, e.g. Andersen"');
-    // No subs on this org: no sentence about them, and no "No vendors yet" either.
+    // Nothing is left out for its Kind any more, so nothing says so.
     expect(html).not.toContain("are subcontractors");
     expect(html).not.toContain("No vendors yet");
   });
 
-  it("says how many vendors are subcontractors and so aren't offered, and where their Kind lives", () => {
-    const withSubs = renderToStaticMarkup(
+  it("a subcontractor is offered in the picker like any other vendor, with nothing said about being left out", () => {
+    const withSub = renderToStaticMarkup(
       createElement(ItemSheet, {
         item: w830,
         options,
         defaultMarkupPct: 25,
-        knownVendors: ["Andersen", "Pella"],
-        subcontractorsLeftOut: ["Coldwater Drywall", "Ridge Roofing"],
+        knownVendors: ["Andersen", "Coldwater Drywall", "Pella"],
         onClose: () => {},
       }),
     );
-    expect(withSubs).toContain("2 on your Vendors list are subcontractors and aren&#x27;t offered here: subcontractors don&#x27;t carry prices on items.");
-    expect(withSubs).toContain("Change a vendor&#x27;s Kind to Supplier or Brand on the Vendors tab to price it.");
-    const oneSub = renderToStaticMarkup(
-      createElement(ItemSheet, { item: w830, options, defaultMarkupPct: 25, knownVendors: ["Andersen"], subcontractorsLeftOut: ["Coldwater Drywall"], onClose: () => {} }),
-    );
-    expect(oneSub).toContain("1 on your Vendors list is a subcontractor and isn&#x27;t offered here");
+    expect(withSub).toContain('<option value="Coldwater Drywall">Coldwater Drywall</option>');
+    expect(withSub).not.toContain("are subcontractors");
+    expect(withSub).not.toContain("isn&#x27;t offered here");
+    expect(withSub).not.toContain("Change a vendor&#x27;s Kind");
   });
 
   it("when every vendor he has is already on this item, it says so (never 'No vendors yet') and the box is open", () => {

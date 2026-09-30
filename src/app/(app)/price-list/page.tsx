@@ -11,7 +11,7 @@ import { PriceListManager } from "./price-list-manager";
 import { KitsManager } from "./kits-manager";
 import { PaidPrices } from "./paid-prices";
 import { VendorsManager } from "./vendors-manager";
-import { hiddenSubcontractors, knownVendorNames, linkOf, summarizeVendors, vendorKey, vendorKindOf, type ItemOption, type VendorCard } from "./item-options-math";
+import { knownVendorNames, linkOf, summarizeVendors, vendorKey, vendorKindOf, type ItemOption, type VendorCard } from "./item-options-math";
 import type { ExistingVendor } from "./vendor-import-math";
 import { FeatureOffLineFor } from "@/components/feature-off-line-for";
 import { featureOn } from "@/lib/features";
@@ -142,9 +142,10 @@ export default async function PriceListPage() {
   for (const o of options) (optionsByItem[o.item_id] ??= []).push(o);
   // Archived options still ride in optionsByItem so they stay findable (and restorable) on their
   // item's sheet.
-  // VENDORS: one per name across every item, with its card when it has one. A brand or supplier
-  // carries prices on items (Erik for Justin, 2026-09-24: "vendor means what brand with its own
-  // cost and sell price"); a subcontractor (0341) is on the list to be reached, never priced.
+  // VENDORS: one per name across every item, with its card when it has one. ANY KIND carries prices
+  // on items (Erik for Justin, 2026-09-24: "vendor means what brand with its own cost and sell
+  // price"; and 2026-09-30, reversing 0341's rule: a builder prices drywall by the sub who hangs
+  // it). The Kind sorts the list; it never decides who can be priced.
   const cardsAvailable = !cardsRes.error;
   const cards: VendorCard[] = ((cardsRes.data ?? []) as Record<string, unknown>[]).map((c) => ({
     id: String(c.id),
@@ -170,10 +171,8 @@ export default async function PriceListPage() {
       : {}),
   }));
   const vendors = summarizeVendors(options, allItems, cards, defaultMarkupPct);
+  // Every kind, subcontractors included (Erik 2026-09-30): a builder prices drywall by its sub.
   const knownVendors = knownVendorNames(options, cards);
-  // The live subcontractor cards that picker leaves out, named on the item sheet (a picker that
-  // silently shows 3 of 29 imported names reads as broken).
-  const subcontractorsLeftOut = hiddenSubcontractors(cards);
   // What an import compares a dropped list against: every card (live and archived) and every name
   // on an item, one entry per name.
   const existingVendors: ExistingVendor[] = (() => {
@@ -225,7 +224,6 @@ export default async function PriceListPage() {
                 sizingAvailable={itemsRes.sizingAvailable}
                 optionsByItem={optionsAvailable ? optionsByItem : null}
                 knownVendors={knownVendors}
-                subcontractorsLeftOut={subcontractorsLeftOut}
                 kitDoors={kitsOn}
               />
             ),
