@@ -1341,6 +1341,27 @@ describe("Tie and Undo", () => {
     expect(did("organized_items", "update")!.payload).toMatchObject({ status: "needs_review", tied_bill_id: null });
   });
 
+  it("Undo of a job's photo filed with a bill already on the books drops the row, never the bill, never into the tray", async () => {
+    // billJobReceipt's same-number answer (J-013 "TTP #56"): a job document tied to the bill its
+    // number names, source "job". There is no tray paper to put back: the photo stays the job's and
+    // reads Not On A Bill Yet on its Costs tab again.
+    state.client = fakeSupabase(
+      {
+        "organized_items.select": [
+          { data: { ...PAPER, status: "filed", bill_id: null, tied_bill_id: "bill-1", source: "job", document_id: "doc-11", job_id: "job-013", proposal: { filed: { how: "tie" } } }, error: null },
+        ],
+        "organized_items.delete": [{ data: [{ id: "oi-9" }], error: null }],
+      },
+      calls,
+    );
+    const res = await undoPaperwork("oi-9");
+    expect(res.ok).toBe(true);
+    expect(res.message).toContain("Not On A Bill Yet");
+    expect(did("bills", "delete")).toBeUndefined();
+    expect(did("organized_items", "update")).toBeUndefined();
+    expect(did("organized_items", "delete")?.selected).toBe(true);
+  });
+
   it("Undo under a live claim refuses in a sentence, and nothing is undone", async () => {
     state.client = fakeSupabase(
       {
@@ -2305,17 +2326,31 @@ describe("billJobReceipt asks 'already on the books?' like every other door (aud
     };
   });
 
-  it("the same ticket snapped again on the job page writes NOTHING and says which bill it is", async () => {
-    state.client = fakeSupabase(snapped(), calls);
+  it("the same ticket snapped again on the job page writes NO bill, files the photo with the bill it names, and says which", async () => {
+    state.client = fakeSupabase(
+      snapped({
+        // The "already billed?" read, loadBooks' papers read, then the "already tied?" read.
+        "organized_items.select": [{ data: null, error: null }, { data: [], error: null }, { data: null, error: null }],
+        // The tie: this photo filed against the bill (J-013 "TTP #56": a loose second photo used to
+        // sit on the Costs badge as "Not On A Bill Yet" forever).
+        "organized_items.insert": [{ data: [{ id: "oi-tie" }], error: null }],
+      }),
+      calls,
+    );
     const res = await billJobReceipt("doc-2");
     expect(res).toMatchObject({ ok: true, already: true });
     expect(res.sameAs).toContain("Already on the books: Consolidated Electrical Dist. #8802-SO-257555, $323.71, 2026-09-24, on J-011 13897 Herringbone.");
     // The fact only: each door names the button it renders (never "under Receipts & Documents").
-    expect(res.sameAs).toBe("Already on the books: Consolidated Electrical Dist. #8802-SO-257555, $323.71, 2026-09-24, on J-011 13897 Herringbone. Nothing was recorded twice.");
+    expect(res.sameAs).toBe(
+      "Already on the books: Consolidated Electrical Dist. #8802-SO-257555, $323.71, 2026-09-24, on J-011 13897 Herringbone. This photo is filed with that bill; nothing was recorded twice.",
+    );
     // The Add Cost sheet never falls back to a typed second bill on an ok.
     expect(res.warning).toBe(res.sameAs);
     expect(did("bills", "insert")).toBeUndefined();
-    expect(did("organized_items", "insert")).toBeUndefined();
+    // Tied, never billed: tied_bill_id (Same Purchase: Tie Them's own column), bill_id empty.
+    const tie = did("organized_items", "insert");
+    expect(tie?.selected).toBe(true);
+    expect(tie?.payload).toMatchObject({ document_id: "doc-2", tied_bill_id: "e2380fc9", bill_id: null, status: "filed", job_id: "j11", source: "job" });
   });
 
   it("Different Purchase: Record It Anyway records it, and the bill says a person checked", async () => {
@@ -2325,13 +2360,18 @@ describe("billJobReceipt asks 'already on the books?' like every other door (aud
         "bills.insert": [{ data: { id: "bill-new" }, error: null }],
         "bill_line_items.insert": [{ data: [{ id: "bli" }], error: null }],
         "organized_items.insert": [{ data: [{ id: "oi" }], error: null }],
+        // The same-purchase tie the first answer filed this photo under comes off: its own bill holds it now.
+        "organized_items.delete": [{ data: [{ id: "oi-tie" }], error: null }],
       }),
       calls,
     );
     const res = await billJobReceipt("doc-2", { differentPurchase: true });
     expect(res.ok).toBe(true);
     expect(res.already).toBeUndefined();
+    // The reconcile note rides (the fixture's lines don't add up); no untie warning beside it.
+    expect(res.warning ?? "").not.toContain("still filed with the other bill");
     expect(did("bills", "insert")!.payload.notes).toContain("A person checked: a different purchase");
+    expect(did("organized_items", "delete")?.selected).toBe(true);
   });
 });
 

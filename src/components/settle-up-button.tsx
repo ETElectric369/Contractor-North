@@ -2,7 +2,7 @@
 
 /* eslint-disable @next/next/no-img-element -- the QRs are data URLs and the Tap to Pay symbol is a 4KB static PNG; next/image adds nothing */
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { BadgeDollarSign, Check, Copy, Loader2, Mail, MessageSquare, QrCode, Share } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -14,7 +14,8 @@ import { invoiceBalance } from "@/lib/invoice-math";
 import { sendFirstDetail, sendFirstQuestion } from "@/lib/pay-door-words";
 import { TEXTS_NOT_READY_LINE } from "@/lib/sms-readiness";
 import { paymentMethodKey } from "@/lib/payment-method";
-import { cancelTapPaymentIntent, createTapPaymentIntent, tapToPayContext } from "@/app/(app)/billing/tap-actions";
+import { cancelTapPaymentIntent, createTapPaymentIntent, tapPaymentOutcome, tapToPayContext } from "@/app/(app)/billing/tap-actions";
+import { verdictAfterConfirm, watchConfirmedTap } from "@/lib/tap-verdict";
 import {
   cancelTapPayment,
   collectTapPayment,
@@ -120,12 +121,13 @@ type TapDoor = { invoiceId: string; clientSecret: string; paymentIntentId: strin
 type TapOutcome = "declined" | "timed-out" | "failed" | "not-enabled" | "setup";
 
 /** Where a tap is: nothing / the phone is at it (`phase` says who owns the screen — the reader,
- *  Apple's terms sheet, or Apple's how-to guide right after the terms) / Stripe said yes and the
- *  webhook is writing it / it stopped, with the sentence that says why. */
+ *  Apple's terms sheet, or Apple's how-to guide right after the terms) / the phone said yes and
+ *  Stripe is being asked, or said yes too and the row is landing (`note` says which — the
+ *  sheet never claims more than it knows, 0e2cb937) / it stopped, with the sentence that says why. */
 type TapState =
   | { kind: "idle" }
   | { kind: "busy"; label: string; phase: "pay" | "enable" | "guide" }
-  | { kind: "confirmed" }
+  | { kind: "confirmed"; note: string }
   | { kind: "error"; error: string; outcome: TapOutcome };
 
 /** The receipt door (Apple 5.10): the public invoice link and what the text names. null = not
@@ -820,10 +822,51 @@ function useCardDoor(
         if (stale(true)) return;
       }
       if (c.ok) {
-        // Stripe confirmed the charge. The invoice flips when the webhook writes it; the watch
-        // sees it land exactly as it does for the QR.
-        tapPi.current = null;
-        setTap({ kind: "confirmed" });
+        /**
+         * THE PHONE'S WORD IS A CLAIM (0e2cb937 — Rich Seiler, INV-083, $420, 2026-09-30).
+         *
+         * "ok" from the bridge means the plugin's confirm call resolved — and the stock plugin
+         * resolved without ever reading the intent's status. This screen used to turn that into
+         * "Card approved — Stripe confirmed the charge" and poll the invoice for a webhook that
+         * could never come, because Stripe had charged nothing. Now Stripe is asked FIRST
+         * (tapPaymentOutcome reads the PaymentIntent off the tenant's own account and books a
+         * succeeded one itself if the webhook hasn't), and what the sheet says is Stripe's word:
+         *   succeeded → Paid;  not → "Not charged — try again", with Stripe's reason in plain
+         *   words, on the SAME PaymentIntent (tapPi is kept: Stripe says re-use it on a retry);
+         *   no answer → the claim is shown as a claim, and a watch that ENDS: ~20 s, then one
+         *   more look at Stripe, then a verdict either way. Never a spinner forever.
+         */
+        setTap({ kind: "confirmed", note: "Card approved — checking with Stripe…" });
+        const first = await tapPaymentOutcome(id, pi.paymentIntentId).catch(() => null);
+        if (stale()) return;
+        const verdict = verdictAfterConfirm(first);
+        if (verdict.kind === "paid") {
+          tapPi.current = null;
+          landed(first && first.ok ? first.amountReceived / 100 : null);
+          return;
+        }
+        if (verdict.kind === "error") {
+          setTap({ kind: "error", error: verdict.error, outcome: verdict.outcome });
+          return;
+        }
+        setTap({ kind: "confirmed", note: verdict.note });
+        const watched = await watchConfirmedTap({
+          poll: async () => {
+            const s = await invoiceCollectStatus(id).catch(() => null);
+            if (!s?.ok) return "unknown";
+            const left = Math.max(0, (s.total ?? 0) - (s.amountPaid ?? 0));
+            return left <= 0.005 || s.status === "paid" ? "paid" : "open";
+          },
+          verify: () => tapPaymentOutcome(id, pi.paymentIntentId).catch(() => null),
+          alive: () => !stale(),
+        });
+        if (watched.kind === "stopped") return;
+        if (watched.kind === "paid") {
+          tapPi.current = null;
+          landed(null);
+          return;
+        }
+        setTap({ kind: "error", error: watched.error, outcome: watched.outcome });
         return;
       }
       if (c.cancelled) { setTap({ kind: "idle" }); return; }
@@ -838,9 +881,31 @@ function useCardDoor(
     }
   }
 
-  // THE WATCH. Stripe's webhook writes the payment; nothing on this screen does. Poll the invoice
-  // while the QR is up (or a tap has been started) so the person holding the phone sees it land,
-  // then stop — a screen that keeps polling after "Paid" is a battery drain in a truck.
+  /** THE MONEY LANDED — the Paid screen, once. Both watches come through here: the QR's 4 s poll
+   *  below and the tap's own (tapToPay's verdict and watchConfirmedTap), which can both see the
+   *  same row land within a beat of each other. One toast, one screen. `landedOnce` is reset
+   *  wherever `paid` is (close, onOpen).
+   *
+   *  NO router.refresh() here. The page behind mounts this button only while a balance is owed;
+   *  refreshing on "paid" re-rendered the header without it, and the Paid screen — the outcome
+   *  and the receipt row Apple 5.9/5.10 want in front of the person — vanished a second after it
+   *  appeared (Erik, 2026-09-11: "then cleared"). close() refreshes. */
+  const landedOnce = useRef(false);
+  const landed = useCallback(
+    (amountPaid: number | null) => {
+      if (landedOnce.current) return;
+      landedOnce.current = true;
+      const a = amountPaid ?? balanceRef.current;
+      setPaid(a);
+      toast(`Paid — ${money(a)} by card. Done.`, "success");
+    },
+    [toast],
+  );
+
+  // THE WATCH. Stripe's webhook writes the payment (or the tap's own check does, when Stripe
+  // says succeeded and the webhook hasn't landed); nothing else on this screen does. Poll the
+  // invoice while the QR is up (or a tap has been started) so the person holding the phone sees
+  // it land, then stop — a screen that keeps polling after "Paid" is a battery drain in a truck.
   useEffect(() => {
     if (!open || (!art && !tapStarted) || !invoiceId || paid != null) return;
     let live = true;
@@ -848,18 +913,11 @@ function useCardDoor(
       const s = await invoiceCollectStatus(invoiceId).catch(() => null);
       if (!live || !s?.ok) return;
       const left = Math.max(0, (s.total ?? 0) - (s.amountPaid ?? 0));
-      if (left <= 0.005 || s.status === "paid") {
-        setPaid(s.amountPaid ?? balanceRef.current);
-        toast(`Paid — ${money(s.amountPaid ?? balanceRef.current)} by card. Done.`, "success");
-        // NO router.refresh() here. The page behind mounts this button only while a balance is
-        // owed; refreshing on "paid" re-rendered the header without it, and the Paid screen —
-        // the outcome and the receipt row Apple 5.9/5.10 want in front of the person — vanished
-        // a second after it appeared (Erik, 2026-09-11: "then cleared"). close() refreshes.
-      }
+      if (left <= 0.005 || s.status === "paid") landed(s.amountPaid ?? null);
     };
     const timer = setInterval(tick, 4000);
     return () => { live = false; clearInterval(timer); };
-  }, [open, art, tapStarted, invoiceId, paid, router, toast]);
+  }, [open, art, tapStarted, invoiceId, paid, router, landed]);
 
   // THE PROGRESS FEED (Apple 5.7 / 3.9.1). The bridge publishes what the reader is doing — its
   // own stages and the SDK's configuration percent — for the life of the page; this screen
@@ -973,6 +1031,7 @@ function useCardDoor(
     if (unused) void cancelTapPaymentIntent(unused.paymentIntentId).catch(() => {});
     setArt(null);
     setPaid(null);
+    landedOnce.current = false;
     setCopied(false);
     setTap({ kind: "idle" });
     setTapStarted(false);
@@ -1029,6 +1088,7 @@ function useCardDoor(
     setProgress(null);
     setReceipt(null);
     setPaid(null);
+    landedOnce.current = false;
     setCopied(false);
     setAsk(null);
     sendOk.current = false;
@@ -1172,11 +1232,14 @@ function useCardDoor(
         </div>
       );
     } else if (tap.kind === "confirmed") {
+      // The note is exactly what is known (lib/tap-verdict): "checking with Stripe", "Stripe
+      // confirmed the charge", or "couldn't double-check with Stripe yet" — never a claim the
+      // sheet hasn't verified. The watch behind it ends on its own.
       takeover = (
         <div className="flex flex-col items-center gap-2 py-4 text-center">
           <Loader2 className="h-5 w-5 animate-spin text-slate-500" />
-          <div className="text-sm font-medium text-slate-800">Card approved — recording it on the invoice…</div>
-          <p className="text-xs text-slate-500">Stripe confirmed the charge. This flips to Paid the moment it lands.</p>
+          <div className="text-sm font-medium text-slate-800">{tap.note}</div>
+          <p className="text-xs text-slate-500">This flips to Paid the moment the payment lands on the invoice.</p>
         </div>
       );
     }
