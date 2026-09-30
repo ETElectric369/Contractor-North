@@ -754,6 +754,7 @@ export default async function TimecardsPage({
             jobs={addJobs}
             tz={tz}
             companyTimeCode={companyTimeCode((jobCodes ?? []) as JobCode[])}
+            workDayEnd={workWin.end}
           />
           <Link
             href={hrefFor(offset + 1)}

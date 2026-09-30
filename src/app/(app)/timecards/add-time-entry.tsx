@@ -163,6 +163,7 @@ export function AddTimeEntry({
   fixedJob = null,
   companyTimeCode,
   initialOpen = false,
+  workDayEnd,
 }: {
   /** Only the office adds hours: a tech gets nothing (they clock live). */
   isStaff: boolean;
@@ -183,6 +184,9 @@ export function AddTimeEntry({
   companyTimeCode: string | null;
   /** Mount with the form already open. */
   initialOpen?: boolean;
+  /** The company's work-day end ("HH:MM"), for the clock-out sheet's End Of Work Day chip on a
+   *  forgotten punch: the same chip Timecards and the job's Time tab offer. Absent: Now alone. */
+  workDayEnd?: string;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -310,9 +314,13 @@ export function AddTimeEntry({
     return out;
   }, [fixedJob, knownJobs, jobCodesEnabled, clash]);
 
-  /** The clock was stopped from here: re-read the day, drop the refusal, and start these hours where
-   *  those stopped, so Save Entry is one more tap. Said, never silent. */
+  /** The clock was stopped from here: drop the refusal and its door (the punch in the way is over),
+   *  and start these hours where those stopped, so Save Entry is one more tap. Said, never silent.
+   *  Only a STOP clears them: Cancel on the sheet (Erik wants to check with Brian first) leaves the red
+   *  refusal and Clock Out Brian where they were, because nothing changed. */
   function stoppedAt(clockOutIso: string) {
+    setClash(null);
+    setError(null);
     const stopDay = todayStrInTz(tz, new Date(clockOutIso));
     const hm = clockInputValue(clockOutIso, tz);
     if (stopDay !== day || !hm) return;
@@ -572,8 +580,9 @@ export function AddTimeEntry({
 
       {/* CLOCK OUT <NAME>, IN PLACE: the office's clock-out sheet (the one Timecards opens on a running
           row), seeded with the running punch the refusal named: its start, its job, its lunch and notes
-          (never a blank written over them). Closing it re-reads the day and drops the refusal; a stop
-          sets Start to the time the clock stopped (stoppedAt). No Delete here: this door clocks out. */}
+          (never a blank written over them). Closing it re-reads the day; a stop drops the refusal and
+          sets Start to the time the clock stopped (stoppedAt), while Cancel keeps the refusal and its
+          door (the punch is still running). No Delete here: this door clocks out. */}
       {clash && clash.clockOut === null && clockingOut && (
         <StopClockSheet
           entry={{
@@ -591,11 +600,10 @@ export function AddTimeEntry({
           jobCodes={jobCodes}
           jobCodesEnabled={jobCodesEnabled}
           tz={tz}
+          workDayEnd={workDayEnd}
           open
           onClose={() => {
             setClockingOut(false);
-            setClash(null);
-            setError(null);
             setDayKey((k) => k + 1);
           }}
           onStopped={stoppedAt}

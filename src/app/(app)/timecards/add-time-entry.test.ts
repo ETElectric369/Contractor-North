@@ -323,14 +323,44 @@ describe("a refusal over a RUNNING punch hands back the clock-out door (Erik, 20
     // No Delete on this door: it is here to clock somebody out.
     const sheet = s.slice(s.indexOf("<StopClockSheet"), s.indexOf("onStopped={stoppedAt}"));
     expect(sheet).not.toContain("onDelete");
-    // Closing the sheet re-reads the day and drops the refusal; a stop starts these hours where those stopped.
-    expect(s).toMatch(/onClose=\{\(\) => \{\s*setClockingOut\(false\);\s*setClash\(null\);\s*setError\(null\);\s*setDayKey\(\(k\) => k \+ 1\);/);
-    expect(s).toMatch(/function stoppedAt\(clockOutIso: string\) \{[\s\S]*?setStartT\(hm\);/);
+    // Closing the sheet re-reads the day; a stop drops the refusal and starts these hours where those stopped.
+    expect(s).toMatch(/onClose=\{\(\) => \{\s*setClockingOut\(false\);\s*setDayKey\(\(k\) => k \+ 1\);\s*\}\}/);
+    expect(s).toMatch(/function stoppedAt\(clockOutIso: string\) \{\s*setClash\(null\);\s*setError\(null\);[\s\S]*?setStartT\(hm\);/);
     expect(s).toContain("Start set to ${clockWords(clockOutIso, tz)}, when ${whoWords} clocked out.");
     // The sheet's Delete is optional now, and it says the stop time before it closes.
     const stop = src("./stop-clock-sheet.tsx");
     expect(stop).toContain("onDelete?: () => void;");
     expect(stop).toMatch(/onStopped\?\.\(stopIso\);\s*onClose\(\);/);
     expect(stop).toMatch(/\{onDelete && \(\s*<Button variant="ghost" onClick=\{onDelete\}/);
+  });
+
+  it("Cancel on the sheet keeps the refusal and Clock Out Brian (nothing changed; the punch is still running); only a stop clears them", () => {
+    const s = src("./add-time-entry.tsx");
+    const mount = s.slice(s.indexOf("<StopClockSheet"), s.indexOf("onStopped={stoppedAt}"));
+    const close = mount.slice(mount.indexOf("onClose="), mount.indexOf("}}", mount.indexOf("onClose=")));
+    expect(close).toContain("setClockingOut(false)");
+    expect(close).not.toContain("setClash(null)");
+    expect(close).not.toContain("setError(null)");
+    // The sheet routes Cancel, the backdrop and Save Without Stopping through that same onClose; the stop
+    // path calls onStopped first, and THAT is where the refusal goes.
+    const stop = src("./stop-clock-sheet.tsx");
+    expect(stop).toMatch(/onClick=\{onClose\}[^>]*>\s*Cancel/);
+    const stopped = s.slice(s.indexOf("function stoppedAt("), s.indexOf("setStartT(hm)"));
+    expect(stopped).toContain("setClash(null)");
+    expect(stopped).toContain("setError(null)");
+  });
+
+  it("the in-place sheet offers End Of Work Day on a forgotten punch, the same as Timecards: the work day's end reaches it", () => {
+    const s = src("./add-time-entry.tsx");
+    expect(s).toContain("workDayEnd?: string;");
+    const mount = s.slice(s.indexOf("<StopClockSheet"), s.indexOf("onStopped={stoppedAt}"));
+    expect(mount).toContain("workDayEnd={workDayEnd}");
+    // The chip is gated on that prop in the sheet; without it only Now is offered.
+    const stop = src("./stop-clock-sheet.tsx");
+    expect(stop).toContain("const workEndIso = workDayEnd ? tzDateTimeUtc(clockInDay, workDayEnd, tz) : null;");
+    // Timecards hands it the company's day end (the job page's mount is Lane 3's; the prop is optional there).
+    const page = src("./page.tsx");
+    const add = page.slice(page.indexOf("<AddTimeEntry"), page.indexOf("/>", page.indexOf("<AddTimeEntry")));
+    expect(add).toContain("workDayEnd={workWin.end}");
   });
 });
