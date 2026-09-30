@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { NEEDS_A_DAY_STATUSES, WHY_MAX, companyDay, jobsNeedingADay, needDayWhy, type NeedDayJob } from "./jobs-needing-a-day";
+import { isDrawKind } from "@/lib/invoice-math";
 
 /**
  * JOBS NEEDING A DAY: one question, "is anything ahead of this job?", in place of "to schedule" and
@@ -137,10 +138,39 @@ describe("the build reads it", () => {
     expect(query).toContain("const costsReadable = ![previewListsR, wBillsR, wPosR, wInvR].some((r) => (r as Read)?.error);");
   });
 
-  it("billed = done (0205) reaches both feeders: Won, Needs A Day and Jobs Needing A Day", () => {
-    // The win: an accepted estimate whose job already has a live invoice is over, not dateless.
-    expect(query).toContain("if (a.job_id && billedJobs.has(String(a.job_id))) continue; // billed = done (0205)");
+  it("billed for the work = done (0205) reaches both feeders: Won, Needs A Day and Jobs Needing A Day", () => {
+    // The win: an accepted estimate whose job already has a live invoice for the work is over, not dateless.
+    expect(query).toContain("if (a.job_id && finishedBilledJobs.has(String(a.job_id))) continue; // billed for the work = done (0205)");
     // The jobs read: the same set goes into the pure reading (the second call reuses needDayPre's jobs).
-    expect(query).toContain("billedJobIds: billedJobs,");
+    expect(query).toContain("billedJobIds: finishedBilledJobs,");
+  });
+
+  it("a deposit or progress draw is not billing for the work: the job keeps asking for a day", () => {
+    // The read carries the kind, and the needs-a-day set keeps only a standard invoice or the final draw.
+    expect(query).toContain('supabase.from("invoices").select("job_id, invoice_kind").not("job_id", "is", null).not("status", "in", "(draft,void)")');
+    const rule = 'billedRows.filter((r) => r.job_id && (!isDrawKind(r.invoice_kind) || r.invoice_kind === "final")).map((r) => r.job_id)';
+    expect(query).toContain(rule);
+    // The same rule, run: a deck builder's paid $10,000 deposit on a to_be_scheduled job with no day.
+    const rows = [
+      { job_id: "deposit-only", invoice_kind: "deposit" },
+      { job_id: "progress-only", invoice_kind: "progress" },
+      { job_id: "final-drawn", invoice_kind: "final" },
+      { job_id: "standard-billed", invoice_kind: "standard" },
+      { job_id: "kind-null", invoice_kind: null },
+      { job_id: "deposit-then-final", invoice_kind: "deposit" },
+      { job_id: "deposit-then-final", invoice_kind: "final" },
+    ];
+    const finished = new Set(rows.filter((r) => r.job_id && (!isDrawKind(r.invoice_kind) || r.invoice_kind === "final")).map((r) => r.job_id));
+    expect([...finished]).toEqual(["final-drawn", "standard-billed", "kind-null", "deposit-then-final"]);
+    const jobs = [...new Set(rows.map((r) => r.job_id))].map((id) => job({ id, status: "to_be_scheduled" }));
+    expect(ids(jobs, { billedJobIds: finished })).toEqual(["deposit-only", "progress-only"]);
+    // A mid-build job with a progress draw and nothing ahead still needs its next day.
+    const midBuild = job({ id: "progress-only", status: "in_progress", time_entries: [{ clock_in: "2026-09-11T15:00:00Z" }] });
+    expect(whyOf(midBuild, { billedJobIds: finished })).toBe("Quiet since Sep 11");
+    // The outcome feeders keep the wide set: any real invoice settles "did this work turn into money".
+    expect(query).toContain("const billedJobs = new Set(billedRows.map((r) => r.job_id).filter(Boolean));");
+    for (const site of ["billedJobs, // jobs with real", "billedJobs.has(a.job_id)) continue;", "billedJobs.has(j.id)) continue;", "billedJobs.has(q.job_id)) continue;"]) {
+      expect(query).toContain(site);
+    }
   });
 });
