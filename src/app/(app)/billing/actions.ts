@@ -3497,9 +3497,10 @@ export async function recordPayment(input: {
   if (error) return { ok: false, error: dbError(error) };
 
   await recalcInvoice(supabase, input.invoice_id);
-  // PAID COMPLETES THE JOB (209451e1): a standard invoice paid in full on an active job with no
-  // other open bill marks the job complete — here, in Settle Up (which records through this
-  // door), and in the Stripe webhook, the three places money lands. A paid draw never does.
+  // PAID COMPLETES THE JOB (209451e1): a standard invoice paid in full on a job that has STARTED
+  // (in progress / on hold) with no other open bill marks the job complete — here, in Settle Up
+  // (which records through this door), and in the Stripe webhook, the three places money lands.
+  // A paid draw never does, and neither does a bill paid ahead of a visit still on the schedule.
   await completeJobWhenPaid(supabase, input.invoice_id);
   // Cash-in ping to the OTHER office staff (the recorder already knows).
   //

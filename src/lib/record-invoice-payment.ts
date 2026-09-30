@@ -169,8 +169,9 @@ export async function recordStripeInvoicePayment(
    */
   const settle = async (id: string): Promise<boolean> => {
     if (!(await recalcInvoice(supabase, id))) return false;
-    // Paid in full on a standard invoice, on an active job with no other open bill: the job is
-    // done (lib/complete-job-when-paid; never throws, never fails the payment).
+    // Paid in full on a standard invoice, on a job that has started (in progress / on hold) with
+    // no other open bill: the job is done (lib/complete-job-when-paid; never throws, never fails
+    // the payment). A job still booked ahead is left on the schedule.
     await completeJobWhenPaid(supabase, id);
     try {
       revalidateMoney(id);

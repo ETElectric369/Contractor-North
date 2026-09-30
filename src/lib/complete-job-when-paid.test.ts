@@ -4,10 +4,11 @@ import { fakeDb } from "@/lib/bank-transfer-fake.test-util";
 /**
  * PAID COMPLETES THE JOB (209451e1, the money half) — the gate, without a database.
  *
- * A standard invoice paid in full on an active job with no other open bill marks the job
- * complete. A paid draw never does; a job already complete or cancelled is left alone; a second
- * open bill on the job keeps it open. The write is checked, and the touches a finish makes (the
- * calendar push, the revalidates) run only after a row moved.
+ * A standard invoice paid in full on a job that has STARTED (in progress / on hold) with no other
+ * open bill marks the job complete. A paid draw never does; a job that hasn't started (to be
+ * scheduled, scheduled) stays on the schedule however its bill was paid; a job already complete
+ * or cancelled is left alone; a second open bill on the job keeps it open. The write is checked,
+ * and the touches a finish makes (the calendar push, the revalidates) run only after a row moved.
  */
 const calls = vi.hoisted(() => ({ pushed: [] as string[], revalidated: [] as string[], reported: [] as string[] }));
 vi.mock("next/cache", () => ({ revalidatePath: (p: string) => calls.revalidated.push(p) }));
@@ -26,16 +27,33 @@ describe("completeJobWhenPaid — the gate", () => {
     calls.reported.length = 0;
   });
 
-  it("an active job, a standard invoice, fully paid: the job is complete, Google and the pages hear it", async () => {
+  it("a started job, a standard invoice, fully paid: the job is complete, Google and the pages hear it", async () => {
     const db = fakeDb({ invoices: [paidStandard()], jobs: [{ id: JOB, status: "in_progress" }] });
     const r = await completeJobWhenPaid(db, "inv-1");
     expect(r).toEqual({ completed: true, jobId: JOB });
     expect(db.tables.jobs[0].status).toBe("complete");
-    // The write was checked (.select("id") on the update, filtered to the live statuses).
+    // The write was checked (.select("id") on the update, filtered to the started statuses).
     const write = db.log.find((l) => l.table === "jobs" && l.verb === "update");
     expect(write?.filters).toEqual(["eq:id", "in:status"]);
     expect(calls.pushed).toEqual([JOB]);
     expect(calls.revalidated).toEqual([`/jobs/${JOB}`, "/jobs", "/planner", "/billing"]);
+    // Paused after starting counts as started too.
+    const held = fakeDb({ invoices: [paidStandard()], jobs: [{ id: JOB, status: "on_hold" }] });
+    expect((await completeJobWhenPaid(held, "inv-1")).completed).toBe(true);
+    expect(held.tables.jobs[0].status).toBe("complete");
+  });
+
+  it("a job that hasn't started — booked for next Tuesday, its one standard bill paid by the link Monday night — stays on the schedule", async () => {
+    for (const status of ["to_be_scheduled", "scheduled"]) {
+      const db = fakeDb({ invoices: [paidStandard()], jobs: [{ id: JOB, status }] });
+      const r = await completeJobWhenPaid(db, "inv-1");
+      expect(r).toEqual({ completed: false, why: `the job hasn't started (it is ${status.replace(/_/g, " ")}) — a bill paid ahead of the visit doesn't end it` });
+      expect(db.tables.jobs[0].status).toBe(status);
+      expect(db.log.some((l) => l.table === "jobs" && l.verb === "update")).toBe(false);
+    }
+    // Nothing left Google, nothing was revalidated: the job is still Tuesday's.
+    expect(calls.pushed).toEqual([]);
+    expect(calls.revalidated).toEqual([]);
   });
 
   it("a paid DRAW (deposit / progress / final) is a stage of the job, not its end: no status write", async () => {
@@ -79,7 +97,7 @@ describe("completeJobWhenPaid — the gate", () => {
         { id: "inv-2", job_id: JOB, invoice_kind: "standard", status: "void" },
         { id: "inv-3", job_id: JOB, invoice_kind: "deposit", status: "paid" },
       ],
-      jobs: [{ id: JOB, status: "to_be_scheduled" }],
+      jobs: [{ id: JOB, status: "in_progress" }],
     });
     expect((await completeJobWhenPaid(settled, "inv-1")).completed).toBe(true);
     expect(settled.tables.jobs[0].status).toBe("complete");

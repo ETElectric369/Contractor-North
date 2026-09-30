@@ -1,6 +1,6 @@
 import { revalidatePath } from "next/cache";
 import { pushCalendarItem } from "@/lib/calendar-sync";
-import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
+import { STARTED_JOB_STATUSES, jobStatusLabel } from "@/lib/job-status";
 import { reportError } from "@/lib/observe";
 
 /**
@@ -16,9 +16,14 @@ import { reportError } from "@/lib/observe";
  *   1. the invoice is paid, and it is a STANDARD invoice. A paid draw (deposit / progress /
  *      final on the payment schedule) is a stage of the job, never its end; a paid deposit on a
  *      job that hasn't started must not mark it complete.
- *   2. the invoice belongs to a job, and that job is still ACTIVE (to be scheduled, scheduled,
- *      in progress, on hold). A complete or cancelled job is left exactly as it is — nothing here
- *      un-cancels a job because a straggler bill was paid.
+ *   2. the invoice belongs to a job, and that job has STARTED (in progress, or on hold after
+ *      starting). A job still to be scheduled, or booked for a day ahead, is not ended by a
+ *      bill paid up front: a small job billed as one standard invoice on Monday and paid by the
+ *      link Monday night must still be on Tuesday's schedule, crew board, map and My Day, and in
+ *      Google — completing it here would silently pull it off all of them before anyone drove
+ *      there. The tech's punch (promoteJobToInProgress) is what starts it; then a paid bill can
+ *      end it. A complete or cancelled job is left exactly as it is — nothing here un-cancels a
+ *      job because a straggler bill was paid.
  *   3. the job has no OTHER live, unpaid bill. A second open invoice — a draft still being
  *      built, a sent bill still owed — means the job is still open. Void doesn't count.
  *
@@ -64,8 +69,10 @@ export async function completeJobWhenPaid(
       return { completed: false, why: "the job couldn't be read" };
     }
     const jobStatus = String((job as { status?: string | null } | null)?.status ?? "");
-    if (!job || !(ACTIVE_JOB_STATUSES as string[]).includes(jobStatus)) {
-      return { completed: false, why: job ? `the job is already ${jobStatus}` : "job not found" };
+    if (!job) return { completed: false, why: "job not found" };
+    if (jobStatus === "complete" || jobStatus === "cancelled") return { completed: false, why: `the job is already ${jobStatus}` };
+    if (!(STARTED_JOB_STATUSES as string[]).includes(jobStatus)) {
+      return { completed: false, why: `the job hasn't started (it is ${jobStatusLabel(jobStatus) || "not started"}) — a bill paid ahead of the visit doesn't end it` };
     }
 
     const { data: others, error: othersErr } = await supabase.from("invoices").select("id, status").eq("job_id", jobId).neq("id", invoiceId);
@@ -80,7 +87,7 @@ export async function completeJobWhenPaid(
       .from("jobs")
       .update({ status: "complete" })
       .eq("id", jobId)
-      .in("status", ACTIVE_JOB_STATUSES)
+      .in("status", STARTED_JOB_STATUSES)
       .select("id");
     if (updErr) {
       reportError("completeJobWhenPaid:write", updErr, { invoiceId, jobId });

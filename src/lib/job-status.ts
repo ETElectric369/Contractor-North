@@ -25,6 +25,11 @@ export type JobStatus = (typeof JOB_STATUSES)[number];
  *  schedule/My-Day reads, and the clock-in "this job is now started" promotion. */
 export const ACTIVE_JOB_STATUSES: JobStatus[] = ["to_be_scheduled", "scheduled", "in_progress", "on_hold"];
 
+/** A job somebody has BEEN on — in progress, or paused after starting. A job still to be
+ *  scheduled, or booked for a day ahead, has not started, whatever its bills say: a bill paid
+ *  ahead of the visit must never end it (lib/complete-job-when-paid). */
+export const STARTED_JOB_STATUSES: JobStatus[] = ["in_progress", "on_hold"];
+
 /** Sort weight for the jobs list: active up top, finished/cancelled sink. Retired enum
  *  values keep a weight so a stray legacy row still sorts sanely instead of NaN-ing. */
 export const JOB_STATUS_PRIORITY: Record<string, number> = {
