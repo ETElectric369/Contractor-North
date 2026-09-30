@@ -70,7 +70,14 @@ type TerminalPlugin = {
   disconnectReader(): Promise<void>;
   collectPaymentMethod(o: { paymentIntent: string }): Promise<void>;
   cancelCollectPaymentMethod(): Promise<void>;
-  confirmPaymentIntent(): Promise<void>;
+  /**
+   * The stock plugin resolves with NOTHING — and, until the 2026-09-30 patch, resolved on any
+   * non-nil confirm result without reading the intent's status (Rich Seiler's $420: "approved"
+   * on the phone, never charged). The patched Swift rejects unless the status is succeeded or
+   * requires_capture, and answers `{ status: "succeeded" }`. An older shell build still answers
+   * void: that is why the answer is optional, and why the sheet asks Stripe itself either way.
+   */
+  confirmPaymentIntent(): Promise<{ status?: string } | void>;
   /**
    * Plugin 8.2.0 / SDK 5.5.0, iOS 16.4+: Apple's own "terms accepted?" answer, read fresh on
    * every call, no reader needed — but initialize() must have run (the SDK singleton asserts a
@@ -661,6 +668,49 @@ function said(e: unknown): string {
     return (e as { message: string }).message;
   }
   return typeof e === "string" ? e : "";
+}
+
+/**
+ * The plugin's two verdict events for one payment attempt: `terminalFailed` (a collect or a
+ * confirm that the SDK called failed — with the decline code when there is one) and
+ * `terminalCanceled`. Heard from before the reader is armed until the attempt ends, so a Failed
+ * that arrives beside a resolved confirm still decides the answer. An older bridge without the
+ * events registers nothing and the attempt goes on the confirm's own word; a listener that
+ * can't be removed is left to Capacitor's page reset (bridge.reset()).
+ */
+async function hearPaymentVerdicts(p: TerminalPlugin): Promise<{
+  failure: () => Error | null;
+  cancelled: () => boolean;
+  stop: () => Promise<void>;
+}> {
+  let failed: { message: string; data: unknown } | null = null;
+  let cancelled = false;
+  const handles: { remove: () => Promise<void> }[] = [];
+  try {
+    handles.push(
+      await p.addListener("terminalFailed", (d) => {
+        const m = (d as { message?: unknown } | null)?.message;
+        failed = { message: typeof m === "string" && m ? m : "the reader reported a failure", data: d };
+      }),
+    );
+    handles.push(
+      await p.addListener("terminalCanceled", () => {
+        cancelled = true;
+      }),
+    );
+  } catch {
+    /* an older bridge: nothing to hear, the confirm's own answer stands */
+  }
+  return {
+    // Shaped like a Capacitor rejection (message + `.data` with the plugin's errorDetails) so the
+    // one failure path reads it exactly as it reads a rejected confirm: declineOf finds the
+    // decline code, describeFailure the sentence.
+    failure: () => (failed ? Object.assign(new Error(failed.message), { data: failed.data }) : null),
+    cancelled: () => cancelled,
+    stop: async () => {
+      for (const h of handles) await h.remove().catch(() => {});
+    },
+  };
 }
 
 /** Capacitor rejects with the plugin's errorDetails on `.data`; the plugin puts a decline code there. */
@@ -1682,24 +1732,45 @@ async function collectAttempt(p: TerminalPlugin, input: { clientSecret: string }
       }
       readerArmed = true;
       cancelBeforeReader = null;
-      const collect = () => raced(120_000, () => p.collectPaymentMethod({ paymentIntent: input.clientSecret }));
+      // A NATIVE "FAILED" IS NEVER SWALLOWED (Rich Seiler, INV-083, 2026-09-30). The plugin
+      // tells its listeners about a failed collect or confirm AND rejects the call — but a
+      // resolve is only "the bridge answered", and the stock Swift confirm resolved without ever
+      // reading the intent's status. So the two verdict events are heard for the life of this
+      // attempt, and a Failed that arrives beside a resolve wins: the answer is a failure
+      // sentence, never "confirmed".
+      const heard = await hearPaymentVerdicts(p);
       try {
-        await collect();
-      } catch (e) {
-        if (cancelRequested || !isBusy(e)) throw e;
-        // Apple's reader was still on its last request — a reconnect finishing under the tap, a
-        // read being torn down. Clear, give it a beat, once more; the second answer is the answer.
-        await raced(5_000, () => p.cancelCollectPaymentMethod()).catch(() => {});
-        await pause(BUSY_RETRY_PAUSE_MS);
-        if (cancelRequested) throw e;
-        await collect();
+        const collect = () => raced(120_000, () => p.collectPaymentMethod({ paymentIntent: input.clientSecret }));
+        try {
+          await collect();
+        } catch (e) {
+          if (cancelRequested || !isBusy(e)) throw e;
+          // Apple's reader was still on its last request — a reconnect finishing under the tap, a
+          // read being torn down. Clear, give it a beat, once more; the second answer is the answer.
+          await raced(5_000, () => p.cancelCollectPaymentMethod()).catch(() => {});
+          await pause(BUSY_RETRY_PAUSE_MS);
+          if (cancelRequested) throw e;
+          await collect();
+        }
+        // Stripe: authorize or cancel within 30 seconds of collection — confirm straight away.
+        // The caller's "processing" screen (Apple 5.8) is this stage.
+        stage = STAGE.confirming;
+        publish(stage);
+        const answer = await raced(45_000, () => p.confirmPaymentIntent());
+        if (heard.cancelled()) return "cancelled" as const;
+        const failed = heard.failure();
+        if (failed) throw failed;
+        // The patched plugin answers the intent's status; treat anything but Stripe's two "the
+        // money is yours" words as a failure. An unpatched build answers nothing — the sheet
+        // asks Stripe itself either way (tapPaymentOutcome).
+        const status = (answer as { status?: unknown } | void)?.status;
+        if (typeof status === "string" && status !== "succeeded" && status !== "requires_capture") {
+          throw new Error(`Stripe did not complete the payment (status: ${status.replace(/_/g, " ")}). Nothing was charged — try again.`);
+        }
+        return "confirmed" as const;
+      } finally {
+        await heard.stop();
       }
-      // Stripe: authorize or cancel within 30 seconds of collection — confirm straight away.
-      // The caller's "processing" screen (Apple 5.8) is this stage.
-      stage = STAGE.confirming;
-      publish(stage);
-      await raced(45_000, () => p.confirmPaymentIntent());
-      return "confirmed" as const;
     });
     if (outcome === "cancelled") return CANCELLED;
     publish(STAGE.ready);
