@@ -1389,6 +1389,12 @@ export async function createBill(input: {
 
   // Best-effort receipt link (never fails the bill): only when the document is visible
   // via RLS AND on this bill's job — same containment rule as the po_id link above.
+  // NEVER SILENT (fada712a, the silent-write law): this insert was awaited and thrown away, so a
+  // link that didn't land left the receipt "Not on a bill yet" beside the very bill it made, and
+  // the next Record As Cost tap would write a second bill for the same money. The bill IS in, so a
+  // lost link cannot refuse; it is logged for the daily sweep and said on `warning`, the way
+  // organize's billJobReceipt does it.
+  let warning: string | undefined;
   if (input.receipt_document_id && created?.id) {
     const { data: doc } = await supabase
       .from("documents")
@@ -1396,26 +1402,38 @@ export async function createBill(input: {
       .eq("id", input.receipt_document_id)
       .maybeSingle();
     if (doc && doc.job_id === jobId) {
-      await supabase.from("organized_items").insert({
-        kind: "receipt",
-        title: input.supplier.trim(),
-        vendor: input.supplier.trim(),
-        amount: input.amount || 0,
-        item_date: input.bill_date || null,
-        category,
-        status: "filed",
-        job_id: jobId,
-        document_id: doc.id,
-        bill_id: created.id,
-        file_url: doc.file_url,
-        created_by: ctx.userId,
-      });
+      const { data: link, error: linkErr } = await supabase
+        .from("organized_items")
+        .insert({
+          kind: "receipt",
+          title: input.supplier.trim(),
+          vendor: input.supplier.trim(),
+          amount: input.amount || 0,
+          item_date: input.bill_date || null,
+          category,
+          status: "filed",
+          job_id: jobId,
+          document_id: doc.id,
+          bill_id: created.id,
+          file_url: doc.file_url,
+          created_by: ctx.userId,
+        })
+        .select("id");
+      if (linkErr || !link?.length) {
+        reportError("jobs.createBill.receiptLink", linkErr ?? new Error("link insert returned no row"), {
+          billId: created.id,
+          documentId: doc.id,
+          jobId,
+        });
+        warning =
+          "The cost is recorded, but its receipt did not get marked as billed. On the job's Costs tab it will say Not On A Bill Yet: tie it to this bill there, rather than Record As Cost (that would write a second bill).";
+      }
     }
   }
 
   if (input.job_id) revalidatePath(`/jobs/${input.job_id}`);
   revalidatePath("/bills");
-  return { ok: true, id: created?.id };
+  return { ok: true, id: created?.id, ...(warning ? { warning } : {}) };
 }
 
 /** Link an already-uploaded receipt document to an already-saved bill — the retry path.

@@ -1008,17 +1008,16 @@ export default async function JobDetailPage({
   // Buy Materials row alone passed off as the job's open tasks.
   const openTaskCount = jobTasks.failed ? undefined : jobTaskTally(jobTasks.rows, buy).open;
   // The Costs chip: Not Billed Yet rows + unrecorded papers naming this job + the job's own receipts
-  // on no bill yet + the job's hours not billed yet, as ONE (see the tab below). The hours count
-  // exactly where the tab says "Also not billed yet: Xh of time" (costGroups exists only there): Time
-  // lost its badge (a shift total), so this is the one place unbilled time is a number on a chip. The
-  // loose receipts are the Receipts & Papers fold's own "N Not On A Bill Yet" (the same paperSort.loose
-  // it is handed below); they are the job's documents, never supplier_invoices, so they can't double
-  // a paperView.
+  // on no bill yet. Every one is a ROW the tab draws, so the number can be checked against the tab
+  // (fada712a: J-013 had 1 bill and said 3). The hours not billed yet are NOT a count here: they are
+  // said in words on the tab ("Also not billed yet: Xh of time") beside the door that bills them, and
+  // a "1" that is no row could never be found. The loose receipts are the Receipts & Papers fold's own
+  // "N Not On A Bill Yet" (the same paperSort.loose it is handed below); they are the job's documents,
+  // never supplier_invoices, so they can't double a paperView.
   const costsOpen =
     (costGroups?.open.ids.length ?? 0) +
     (paperViews ?? []).filter((p) => !p.waitingOnCredit).length +
-    (viewerIsStaff && paperSort.loose ? paperSort.loose.length : 0) +
-    (costGroups && unbilled && unbilled.hours > 0 ? 1 : 0);
+    (viewerIsStaff && paperSort.loose ? paperSort.loose.length : 0);
   const taskListProps = {
     materials: buy,
     jobId: j.id as string,
@@ -1650,9 +1649,10 @@ export default async function JobDetailPage({
       // only show whats open"): the Not Billed Yet pile (the Unbilled card's own verdict, so the chip
       // is the pile the tab leads with) plus the supplier papers naming this job that are in nobody's
       // books yet (Named On A Paper; one set aside waiting on a credit is decided, so not counted),
-      // plus the job's own receipts on no bill yet (Receipts & Papers' "Not On A Bill Yet"), plus
-      // one for the hours not billed yet when there are any. A fixed-price job has no Not Billed Yet
-      // pile, so only its unrecorded papers and loose receipts count.
+      // plus the job's own receipts on no bill yet (Receipts & Papers' "Not On A Bill Yet"). Every
+      // one is a row on the tab; the hours not billed yet are said in words beside their door, never
+      // a made-up 1. A fixed-price job has no Not Billed Yet pile, so only its unrecorded papers and
+      // loose receipts count.
       count: costsOpen,
       content: (
         <div className="space-y-4">

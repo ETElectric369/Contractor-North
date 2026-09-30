@@ -89,7 +89,7 @@ function walk(dir: string, out: string[] = []): string[] {
 const OPEN_TAB_COUNTS: Record<string, string> = {
   openTaskCount: "the job's open tasks + the live Buy Materials row while anything is left to buy",
   materialsOpen: "the job's materials lines still to buy",
-  costsOpen: "the job's Not Billed Yet costs + supplier papers naming it that are in nobody's books + one for its hours not billed yet",
+  costsOpen: "the job's Not Billed Yet costs + supplier papers naming it that are in nobody's books + its receipts on no bill yet (every one a row on the tab)",
   panelCount: "suggested circuits waiting on a Keep or a Not This",
   "tray.length": "Organize's Needs Attention tray",
 };
@@ -145,17 +145,23 @@ describe("every tab count in the app is an open count", () => {
     expect(page).not.toContain("count: canonicalItems?.length");
   });
 
-  it("the job's Costs chip counts its hours not billed yet (as one), where the tab says them", () => {
+  it("the job's Costs chip counts only rows the tab draws: no made-up 1 for the hours (fada712a)", () => {
     const page = read("app/(app)/jobs/[id]/page.tsx");
     const costsOpen = page.slice(page.indexOf("const costsOpen ="), page.indexOf(";", page.indexOf("const costsOpen =")));
+    // The three piles, each a list of rows: Not Billed Yet, the supplier's papers in nobody's books,
+    // and the receipts the Receipts & Papers fold calls "Not On A Bill Yet" (from the very list the
+    // fold is handed).
     expect(costsOpen).toContain("costGroups?.open.ids.length");
-    expect(costsOpen).toContain("costGroups && unbilled && unbilled.hours > 0 ? 1 : 0");
-    // The receipts the Receipts & Papers fold calls "Not On A Bill Yet" (and opens for) count too,
-    // from the very list the fold is handed.
+    expect(costsOpen).toContain("(paperViews ?? []).filter((p) => !p.waitingOnCredit).length");
     expect(costsOpen).toContain("viewerIsStaff && paperSort.loose ? paperSort.loose.length : 0");
     expect(page).toContain("looseIds={paperSort.loose ? paperSort.loose.map(");
-    // The tab's own sentence is behind the same costGroups && unbilled guard.
+    // J-013 (TTP #56): 1 live bill, 0 papers, and the chip said 3. A "1" that is no row could never
+    // be checked against the tab; the hours are said in words beside the door that bills them.
+    expect(costsOpen).not.toContain("unbilled.hours");
+    expect(costsOpen).not.toMatch(/\? 1 : 0/);
+    // The tab's sentence about the hours is still there, behind its costGroups && unbilled guard.
     expect(page).toMatch(/costGroups && unbilled \? \(\s*<div className="space-y-2">/);
+    expect(page).toContain("`Also not billed yet: ${formatDuration(unbilled.hours)} of time, ${formatCurrency(unbilled.laborAmount)}.`");
   });
 
   it("the job's Tasks chip draws no number when the tasks couldn't be read (never the Buy Materials row alone)", () => {

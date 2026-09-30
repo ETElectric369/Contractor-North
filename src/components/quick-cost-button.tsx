@@ -540,6 +540,9 @@ function SnapCostButton({
         setWarn(`Cost saved ✓ — but the receipt ${attachClause()}. ${RETRY_HERE_LINE}`);
         return;
       }
+      // The cost is in but its receipt link didn't land (createBill says so, never silently): a
+      // sentence that has to be read, so it stays until tapped.
+      if (res.warning) toast(res.warning, "error", undefined, { sticky: true });
       finishOk();
     });
   }
