@@ -12,9 +12,10 @@
  *   dayHoursOf       minutes → the "HH:MM" pair a segment stores (the end never past 23:59).
  *   nextDayHours     one day's new hours from a new start (the length stays, the writer's keep rule)
  *                    or a new length (1h 2h 4h, an End time, Full Day).
- *   freezeDrawnDays  adding a day grows the job's span (its first day now runs to closing, a middle
- *                    day is full): every OTHER day whose drawn block that would change keeps the
- *                    block it had, as its own hours. Adding a day never moves another.
+ *   freezeDrawnDays  adding a day grows the job's span: every OTHER day whose drawn block that would
+ *                    change keeps the block it had, as its own hours. Adding a day never moves
+ *                    another. Since a job's hours are its hours on EACH of its days (job-block, Erik
+ *                    2026-09-29), a grown span redraws nothing on its own and this is the safety net.
  */
 import type { DayHours, DaySegment } from "../schedule-math";
 import { hoursOnDay, segmentDays, setDayHours } from "../schedule-math";
@@ -81,11 +82,11 @@ type Mirror = { scheduledStart: string | null; scheduledEnd: string | null; plan
 
 /**
  * ADDING A DAY NEVER MOVES ANOTHER. The job's span (jobs.scheduled_start/end) grows to cover a day
- * added to it, and the usual hours of a span are drawn by where a day sits in it (the first from the
- * start to closing, a middle day full, the last from the opening to the end: job-block jobDayBlock).
- * So Seiler's one day 10 to 12 would draw 10 to 5 the moment a second day joins it. Every day of
- * `segments` that keeps no hours of its own, and whose drawn block changes from `before` to `after`,
- * gets the block it had as its own hours. `skip` (the day being added) is left as it is.
+ * added to it. A job's usual hours are its hours on each of its days (job-block jobDayBlock), so
+ * Seiler's one day 10 to 12 stays 10 to 12 when a second day joins it and nothing here fires; this
+ * remains the safety net: every day of `segments` that keeps no hours of its own, and whose drawn
+ * block changes from `before` to `after`, gets the block it had as its own hours. `skip` (the day
+ * being added) is left as it is.
  */
 export function freezeDrawnDays(p: {
   segments: DaySegment[];

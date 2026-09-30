@@ -9,6 +9,7 @@
  *
  * Pure: no clock, no network. The sheet, Nort's fill and the tests all call it.
  */
+import { clockedOutWords } from "./long-shift";
 import { todayStrInTz, tzDateTimeUtc, tzOffsetMs } from "./tz";
 import { hoursBetween } from "./utils";
 
@@ -23,6 +24,8 @@ export interface SplitEntry {
   miles?: number | null;
   paid_at?: string | null;
   mileage_paid_at?: string | null;
+  /** Whose shift, for the words a running one is refused with ("Clock Brian out at the time they left"). */
+  profiles?: { full_name?: string | null } | null;
 }
 
 export interface SplitPiece {
@@ -252,7 +255,9 @@ export function splitPreview(
 
   const problem = ((): string | null => {
     if (!entry.clock_out || (entry.status != null && entry.status !== "closed")) {
-      return "That shift is still running. Use Switch Job to start the next part now.";
+      // The office's sheet: Switch Job is the crew member's own door, never the office's for
+      // somebody else's clock. The office clocks them out at the time they left, then splits.
+      return `That shift is still running. ${clockedOutWords(entry.profiles?.full_name, false).clockOutVerb} at the time they left, then Split This Shift.`;
     }
     if (!(b > a)) return "That shift has no length, so there is nothing to split.";
     if (!Number.isFinite(t) || t <= a || t >= b) {

@@ -200,6 +200,80 @@ describe("the Costs tab: Receipts & Papers", () => {
 });
 
 /**
+ * A LOOSE RECEIPT CAN SAY "IT IS THAT BILL" (d1ff7c5a). A bill typed by hand with its receipt
+ * uploaded apart, or a paper the reader answered "already on the books" for, sat "Not on a bill
+ * yet" beside the very bill it made, with only another paid read or a second bill as doors. Now the
+ * row carries Already On A Bill: <the job's bills> + Tie It, and the reader's answer carries Same
+ * Purchase: It's That Bill when the bill is on this job. Both write linkReceiptToBill's one tie.
+ */
+describe("the Costs tab: a loose receipt ties itself to the bill it is", () => {
+  const bills = [
+    { id: "b-ced", label: "the CED bill #8802-1106969" },
+    { id: "b-typed", label: "the OSH bill" },
+  ];
+  const props = {
+    orgId: "org1",
+    jobId: "j1",
+    docs: DOCS,
+    photoTabIds: Array.from(sorted.photoTabIds),
+    billOf: { "ced-ticket": "the CED bill #8802-1106969" },
+    looseIds: (sorted.loose ?? []).map((d) => d.id),
+    bills,
+  };
+  const html = r(JobDocuments, props);
+  const rows = html.split(/<li[ >]/).slice(1);
+  const row = (id: string) => rows.find((x) => x.includes(`${id}.jpg`))!;
+
+  it("the Not on a bill yet row: Already On A Bill, a 44px picker of the job's bills, and a 44px Tie It", () => {
+    const loose = row("loose-receipt");
+    expect(text(loose)).toContain("Not on a bill yet.");
+    expect(text(loose)).toContain("Already On A Bill:");
+    const picker = loose.match(/<select([^>]*)>([\s\S]*?)<\/select>/);
+    expect(picker).not.toBeNull();
+    expect(picker![1]).toMatch(/\bh-11\b/);
+    // The first live bill is picked until a person picks another.
+    expect(picker![2]).toMatch(/<option value="b-ced" selected="">the CED bill #8802-1106969<\/option>/);
+    expect(picker![2]).toMatch(/<option value="b-typed">the OSH bill<\/option>/);
+    const tie = buttons(loose).find((b) => b.words === "Tie It");
+    expect(tie).toBeDefined();
+    expect(tie!.attrs).toContain("min-h-11");
+    // Record As Cost stays: a receipt that really is new is still read into its own bill.
+    expect(text(loose)).toContain("Record As Cost");
+  });
+
+  it("a receipt already on a bill, and a job with no bills, draw no tie door", () => {
+    expect(text(row("ced-ticket"))).not.toContain("Already On A Bill");
+    expect(buttons(row("ced-ticket")).some((b) => b.words === "Tie It")).toBe(false);
+    for (const none of [r(JobDocuments, { ...props, bills: [] }), r(JobDocuments, { ...props, bills: null })]) {
+      expect(text(none)).not.toContain("Already On A Bill");
+      expect(text(none)).not.toContain("Tie It");
+      expect(text(none)).toContain("Not on a bill yet.");
+    }
+  });
+
+  it("Tie It writes linkReceiptToBill(picked bill, this receipt); the reader's same-job answer offers Same Purchase: It's That Bill first (source)", () => {
+    const src = readFileSync(join(process.cwd(), "src/app/(app)/jobs/[id]/job-documents.tsx"), "utf8");
+    expect(src).toContain("const res = await linkReceiptToBill(billId, d.id);");
+    expect(src).toContain("onClick={() => tieToBill(d, tiePick[d.id] ?? billChoices[0].id)}");
+    // The reader's "already on the books" answer carries the bill; the door is drawn only for a
+    // bill on THIS job (the tie is job-contained), beside Different Purchase, and never reads again.
+    expect(src).toMatch(/\{n\.sameOnThisJob && n\.sameBillId && \(\s*<button[\s\S]*?onClick=\{\(\) => tieToBill\(d, n\.sameBillId!\)\}[\s\S]*?Same Purchase: It&apos;s That Bill/);
+    // In the row's JSX (the header comment names Different Purchase too), the tie door comes first.
+    expect(src.indexOf("Same Purchase: It&apos;s That Bill")).toBeLessThan(src.lastIndexOf("Different Purchase: Record It Anyway"));
+    // A refusal lands on the row in words, never a silent no-op.
+    expect(src).toContain('note(d.id, { text: res.error ?? "The tie didn\'t save. Try again.", done: false, tone: "fail" });');
+  });
+
+  it("Snap The Bill's line offers the same door for a paper the reader matched to a bill of this job (source)", () => {
+    const src = readFileSync(join(process.cwd(), "src/app/(app)/jobs/[id]/job-cost-capture.tsx"), "utf8");
+    expect(src).toContain('const sameBillId = out.kind === "already" && out.samePurchase && out.sameOnThisJob ? out.sameBillId : undefined;');
+    expect(src).toContain("say(p.id, p.name, sentence, out.tone, differentDoc, sameBillId);");
+    expect(src).toMatch(/\{l\.sameBillId && \(\s*<button[\s\S]*?onClick=\{\(\) => tieIt\(l\)\}[\s\S]*?Same Purchase: It&apos;s That Bill/);
+    expect(src).toContain("const res = await linkReceiptToBill(l.sameBillId, l.differentDoc);");
+  });
+});
+
+/**
  * ONE WAY TO ADD A COST (W1-23). The Costs tab's header is one primary Snap The Bill and a 44px ⋯,
  * More Ways To Add A Cost: Upload (many at once, its own input) and Type It In (the one typed
  * sheet). Receipts & Papers is the job's filed list, with no uploader of its own.

@@ -207,6 +207,51 @@ export function supplierDocumentRows(input: {
   return { rows, coveringBills, billsCarrying, aliasIndex };
 }
 
+/**
+ * THE BILLS THE SUPPLIER'S OWN BOOKS CALL SETTLED (8a982483). Pure.
+ *
+ * bills.status says HOW a bill was bought (on the account, or paid at the counter), never whether
+ * the supplier has since been paid: applying a CED open list closes CED's DOCUMENTS
+ * (supplier_invoices.closed) and touches no bill. So every ticket ever bought on account read
+ * "Unpaid" under All Bills forever - "$10k Unpaid" over a Suppliers card saying "$5k Owed", the
+ * same tickets twice, with the only explanation behind a Why? fold.
+ *
+ * A live, on-account bill is settled by the supplier when at least one document covering it on
+ * ITS OWN account is closed and none covering it is still open. Covering is the same two routes
+ * supplierDocumentRows counts (linked, or carrying the number), gated to the document's account
+ * exactly as coveredBillIds is on the page. bills.status is never written: this is a reading.
+ */
+export function billsSettledBySupplier(input: {
+  documents: { id: string; supplier_account_id?: string | null; closed?: boolean | null }[];
+  bills: { id: string; supplier_account_id?: string | null; status?: string | null; superseded_by_bill_id?: string | null }[];
+  coveringBills: ReadonlyMap<string, ReadonlySet<string>>;
+  billsCarrying: ReadonlyMap<string, readonly string[]>;
+}): Set<string> {
+  const billAccount = new Map<string, string>();
+  for (const b of input.bills ?? []) billAccount.set(String(b.id), String(b.supplier_account_id ?? ""));
+  const closedCover = new Set<string>();
+  const openCover = new Set<string>();
+  for (const d of input.documents ?? []) {
+    const docId = String(d.id);
+    const accountId = String(d.supplier_account_id ?? "");
+    if (!accountId) continue;
+    const covered = new Set<string>(input.coveringBills.get(docId) ?? []);
+    for (const id of input.billsCarrying.get(docId) ?? []) covered.add(id);
+    for (const billId of covered) {
+      if (!billId || billAccount.get(billId) !== accountId) continue;
+      (d.closed === true ? closedCover : openCover).add(billId);
+    }
+  }
+  const out = new Set<string>();
+  for (const b of input.bills ?? []) {
+    const id = String(b.id);
+    if (b.superseded_by_bill_id) continue;
+    if (String(b.status ?? "").toLowerCase() === "paid") continue;
+    if (closedCover.has(id) && !openCover.has(id)) out.add(id);
+  }
+  return out;
+}
+
 /** His jobs as the matcher and the card picker read them: enough to tell five Rhodesias apart. */
 export function reconcileJobsOf(rows: any[]): ReconcileJob[] {
   return ((rows ?? []) as any[]).map((j) => ({

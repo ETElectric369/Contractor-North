@@ -26,6 +26,7 @@ export function ItemSheet({
   options,
   defaultMarkupPct,
   knownVendors,
+  subcontractorsLeftOut = [],
   onClose,
 }: {
   item: PriceItem;
@@ -33,6 +34,8 @@ export function ItemSheet({
   options: ItemOption[];
   defaultMarkupPct: number;
   knownVendors: string[];
+  /** The live subcontractor cards knownVendors leaves out (0341), so the picker can say so. */
+  subcontractorsLeftOut?: string[];
   onClose: () => void;
 }) {
   const writes = useOptionWrites();
@@ -40,6 +43,9 @@ export function ItemSheet({
   const active = sortItemOptions(options.filter((o) => !o.archived));
   const archived = sortItemOptions(options.filter((o) => o.archived));
   const chosen = active.find((o) => o.is_default) ?? null;
+  // The vendors Add Vendor can offer: the org's, minus the ones already priced on this item (a
+  // vendor with a product line can carry a second line, so only a plain row takes it off the list).
+  const pickable = knownVendors.filter((n) => !active.some((o) => o.vendor.trim().toLowerCase() === n.trim().toLowerCase() && !o.label));
   const own = rowView(item, defaultMarkupPct);
   const looksLikeCode = costLooksLikeCode(item);
 
@@ -104,7 +110,9 @@ export function ItemSheet({
 
         <AddVendorPrice
           item={item}
-          knownVendors={knownVendors.filter((n) => !active.some((o) => o.vendor.trim().toLowerCase() === n.trim().toLowerCase() && !o.label))}
+          knownVendors={pickable}
+          subcontractorsLeftOut={subcontractorsLeftOut}
+          alreadyOnItem={knownVendors.length - pickable.length}
           defaultMarkupPct={defaultMarkupPct}
           hasDefault={!!chosen}
           run={writes.run}

@@ -44,6 +44,16 @@ export type SplitPrefill = { at?: string | null; jobId?: string | null; code?: s
 
 const hoursText = (h: number) => `${(Math.round(h * 100) / 100).toString()} h`;
 
+/** Said under the picker when a search leaves nothing: the list holds every job in flight and those
+ *  finished in the last 30 days (Timecards' pickJobs), so an older finished job is on its own page. */
+export const NO_JOB_MATCH = "No job matches that. Finished jobs older than 30 days are on the job's own Time tab.";
+
+/** The line under the job picker, or null: only a search that finds nothing is answered (an empty
+ *  list with no search is not "no match"). Pure, for the tests. */
+export function jobSearchNote(query: string, shownCount: number): string | null {
+  return query.trim() && shownCount === 0 ? NO_JOB_MATCH : null;
+}
+
 /**
  * SPLIT THIS SHIFT (0288). Erik, 2026-09-24: "i think it will be better if a shift is split to create
  * multiple timecard entries instead of trying to do this complicated thing whatever it is it doesnt
@@ -341,7 +351,9 @@ export function SplitShiftSheet({
                 {pick.startsWith("job:") && !shownJobs.some((j) => `job:${j.id}` === pick) && rightLabel && (
                   <option value={pick}>{rightLabel}</option>
                 )}
-                <optgroup label="Recent Jobs">
+                {/* Every job in flight and those finished in the last 30 days (Timecards' one list),
+                    never "the 50 newest". */}
+                <optgroup label="Jobs">
                   {shownJobs.map((j) => (
                     <option key={j.id} value={`job:${j.id}`}>
                       {jobLabel(j)}
@@ -360,6 +372,7 @@ export function SplitShiftSheet({
                   </optgroup>
                 )}
               </Select>
+              {jobSearchNote(search, shownJobs.length) && <p className="text-xs text-slate-500">{jobSearchNote(search, shownJobs.length)}</p>}
             </div>
           </PieceCard>
         </div>

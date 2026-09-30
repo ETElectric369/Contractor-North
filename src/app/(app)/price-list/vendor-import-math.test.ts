@@ -13,7 +13,7 @@ import {
   type ExistingVendor,
   type PreviewRow,
 } from "./vendor-import-math";
-import { cleanVendorCard, knownVendorNames, listedKind, matchesVendorFilter, vendorFilters, type VendorCard } from "./item-options-math";
+import { cleanVendorCard, hiddenSubcontractors, knownVendorNames, listedKind, matchesVendorFilter, vendorFilters, type VendorCard } from "./item-options-math";
 
 /**
  * Import A List, the sorting half (vendor import, Phase 1). Every name here is MADE UP: a real
@@ -296,6 +296,26 @@ describe("THE ITEM PRICE PICKER never offers a subcontractor (0341)", () => {
 
   it("before 0341 (no kind on the card) every card is offered, exactly as before", () => {
     expect(knownVendorNames([], [vc({ name: "Andersen" })])).toEqual(["Andersen"]);
+  });
+
+  /**
+   * AND THE SHEET SAYS WHO IT LEFT OUT (b0a8f25e). An import of twenty-nine names, mostly subs by
+   * guessKind, put three in the picker and nothing said where the other twenty-six went.
+   */
+  it("hiddenSubcontractors names the live subcontractor cards, sorted; archived subs and every other kind stay out", () => {
+    const cards = [
+      vc({ name: "Ridge Roofing", kind: "subcontractor" }),
+      vc({ name: "Coldwater Drywall", kind: "subcontractor" }),
+      vc({ name: "Old Sub", kind: "subcontractor", archived: true }),
+      vc({ name: "Andersen", kind: "brand" }),
+      vc({ name: "Lakeside Windows", kind: "supplier" }),
+      vc({ name: "Quartzline Holdings", kind: null }),
+      vc({ name: "Before 0341" }),
+    ];
+    expect(hiddenSubcontractors(cards)).toEqual(["Coldwater Drywall", "Ridge Roofing"]);
+    expect(hiddenSubcontractors([])).toEqual([]);
+    // One name, two spellings on two cards: named once.
+    expect(hiddenSubcontractors([vc({ name: "Coldwater Drywall", kind: "subcontractor" }), vc({ name: "  coldwater drywall ", kind: "subcontractor" })])).toEqual(["Coldwater Drywall"]);
   });
 });
 

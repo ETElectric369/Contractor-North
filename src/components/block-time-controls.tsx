@@ -40,6 +40,7 @@ export function BlockTimeControls({
   allDay,
   sized,
   multiDay = false,
+  oneSpan = false,
   lastDayWords,
   workDay,
   canEdit = true,
@@ -54,8 +55,14 @@ export function BlockTimeControls({
   endHm: string;
   allDay: boolean;
   sized: boolean;
-  /** A block over several days: its days are full days, so only the first day's start is asked. */
+  /** A block over several days: the same hours on each of them, so the Start, the End and the lengths
+   *  are asked the same as for one day, and the words say "each day through <lastDayWords>". */
   multiDay?: boolean;
+  /** A block over several days that is ONE span, not the same hours each day: a visit Mon 10:00 AM →
+   *  Wed 6:00 PM. Its start is asked here; its end sits on its last day, so no End box and no length
+   *  chips (a 1h on it would write a 25-hour visit), and the words say "Starts 10:00 AM · ends 6:00 PM
+   *  Wed, Sep 30". A job over several days is never this: its hours are each day's. */
+  oneSpan?: boolean;
   /** "Wed, Sep 30": the last day of a multi-day block, for the words. */
   lastDayWords?: string | null;
   /** The company's work day ("HH:MM"): what Full Day means. */
@@ -95,16 +102,21 @@ export function BlockTimeControls({
   const s = readHm(start_) ?? 0;
   const e = readHm(end) ?? 0;
   const minutes = Math.max(1, e - s);
-  const words = blockWords({ allDay, minutes, sized, multiDay });
+  const words = blockWords({ allDay, minutes, sized });
+  // One span over several days (a visit): "Starts 10:00 AM · ends 6:00 PM Wed, Sep 30".
+  const span = multiDay && oneSpan;
+  const spanWords = (s: string, e: string) => `Starts ${hmWords(s)} · ends ${hmWords(e)}${lastDayWords ? ` ${lastDayWords}` : ""}`;
+  // Several days: "10:00 AM – 12:00 PM each day through Wed, Oct 1 · 2 hours".
+  const eachDay = multiDay && !span && lastDayWords ? ` each day through ${lastDayWords}` : "";
 
   if (!canEdit) {
     return (
       <p className="text-sm text-slate-700">
-        {multiDay
-          ? `Starts ${hmWords(startHm)} · full days${lastDayWords ? ` through ${lastDayWords}` : ""}`
-          : allDay
+        {span
+          ? spanWords(startHm, endHm)
+          : allDay && !multiDay
             ? `All day, ${hmWords(startHm)} – ${hmWords(endHm)}`
-            : `${hmWords(startHm)} – ${hmWords(endHm)} · ${blockWords({ allDay, minutes: Math.max(1, (readHm(endHm) ?? 0) - (readHm(startHm) ?? 0)), sized, multiDay })}`}
+            : `${hmWords(startHm)} – ${hmWords(endHm)}${eachDay} · ${blockWords({ allDay, minutes: Math.max(1, (readHm(endHm) ?? 0) - (readHm(startHm) ?? 0)), sized })}`}
       </p>
     );
   }
@@ -159,7 +171,8 @@ export function BlockTimeControls({
       plannedMinutes: plannedMinutes ?? (sized ? saidMinutes : 0),
       wd: workDayMinutes(workDay),
     }).endMin;
-    const nextEnd = multiDay ? end : minutesToHm(Math.max(newStart + 1, Math.min(23 * 60 + 59, kept)));
+    // One span keeps its end on its last day: only the start moves.
+    const nextEnd = span ? end : minutesToHm(Math.max(newStart + 1, Math.min(23 * 60 + 59, kept)));
     run({ start: hm }, { start: hm, end: nextEnd });
   }
 
@@ -199,7 +212,7 @@ export function BlockTimeControls({
             aria-label="Start time"
           />
         </label>
-        {!multiDay && (
+        {!span && (
           <label className="flex flex-col text-xs text-slate-500" htmlFor={`${idPrefix}-end`}>
             End
             <input
@@ -219,7 +232,9 @@ export function BlockTimeControls({
         )}
       </div>
 
-      {!multiDay && (
+      {/* The lengths, on one day or several: a job's hours are each day's hours. Not on one span over
+          several days (a visit): its end is on its last day, and a length here would be a day and more. */}
+      {!span && (
         <div role="group" aria-label="How long" className="flex flex-wrap gap-2">
           {QUICK_LENGTHS.map((q) => {
             const on = !allDay && minutes === q.minutes;
@@ -250,9 +265,7 @@ export function BlockTimeControls({
       )}
 
       <p className="text-xs text-slate-500">
-        {multiDay
-          ? `Starts ${hmWords(start_)} · full days${lastDayWords ? ` through ${lastDayWords}` : ""}. Change the days above.`
-          : `${hmWords(start_)} – ${hmWords(end)} · ${words}`}
+        {span ? `${spanWords(start_, end)}. One visit over several days; Open Visit changes its end.` : `${hmWords(start_)} – ${hmWords(end)}${eachDay} · ${words}`}
         {pending && !draft && <span className="ml-2 text-slate-400">Saving…</span>}
         {saved && !pending && !draft && (
           <span className="ml-2 inline-flex items-center gap-1 font-medium text-green-600">

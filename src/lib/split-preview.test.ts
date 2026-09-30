@@ -66,7 +66,13 @@ describe("splitPreview", () => {
   });
 
   it("refuses a running shift and a zero-length ghost", () => {
-    expect(splitPreview({ ...shift, clock_out: null, status: "open" }, "2001-07-14T20:00:00.000Z").problem).toMatch(/Switch Job/);
+    // The office's sheet, not the crew member's clock: no "Use Switch Job" (every Switch Job door is the viewer's OWN clock).
+    expect(splitPreview({ ...shift, clock_out: null, status: "open", profiles: { full_name: "Brian Taylor" } }, "2001-07-14T20:00:00.000Z").problem).toBe(
+      "That shift is still running. Clock Brian out at the time they left, then Split This Shift.",
+    );
+    expect(splitPreview({ ...shift, clock_out: null, status: "open" }, "2001-07-14T20:00:00.000Z").problem).toBe(
+      "That shift is still running. Clock them out at the time they left, then Split This Shift.",
+    );
     const ghost = { clock_in: "2001-07-02T19:40:19.860Z", clock_out: "2001-07-02T19:40:19.860Z", status: "closed" };
     expect(splitPreview(ghost, "2001-07-02T19:40:19.860Z").problem).toBe("That shift has no length, so there is nothing to split.");
   });
