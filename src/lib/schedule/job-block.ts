@@ -31,7 +31,14 @@
  *    (DEFAULT_JOB_MINUTES). planned_minutes stays blank (nobody sized it) and every schedule surface
  *    says so in words: "2 hours — change it". All day is a choice (the Full Day chip), never a fallback.
  *  - A move keeps the block: the same start time and the same length on the new day.
- *  - A job over several days runs full days: the first day from its start, the last to closing.
+ *  - A JOB'S USUAL HOURS ARE ITS HOURS ON EACH OF ITS DAYS. Erik, 2026-09-29, on 700 North Lake
+ *    Boulevard: a second date range (Add Date Range) turned his 10–12 job into "full days", stamped the
+ *    end at closing over the end he set, and hid the End box and the length chips. The "several days
+ *    are full days" rule (cn-v1030) was written for one contiguous stretch and fired for two separate
+ *    days. Now a 10–12 job is 10–12 on every day it has; scheduled_end is that end on the LAST day, and
+ *    a day that keeps its own hours (0370) still draws its own. The one thing several days decide on
+ *    their own: a window with nothing else chosen (no start, no length, no block before) is full days,
+ *    because the days were the choice.
  */
 import { todayStrInTz, tzDateTimeUtc, tzMinutesOfDay } from "../tz";
 import type { DayHours } from "../schedule-math";
@@ -83,12 +90,13 @@ export function ownDayMinutes(h: DayHours | null | undefined): { startMin: numbe
  *   its own hours (0370): a day that keeps its own hours (Herringbone added today, noon to 5, beside
  *               its other days) draws exactly those, on any day, in the plan or kept as history. The
  *               rest of this is the job's USUAL hours, for every day without its own:
- *   one day:    its start to its stored end. A SIZED job whose stored end is just the closing-time stamp
- *               (every write before this fix) draws its size, never closing: the length somebody chose
- *               beats a time the writer made up. An older row with no end runs to closing, as it always
- *               drew. Start and end both on the work-day edges (and not sized shorter) is all day.
- *   many days:  the first day from its start to closing, the middle days full, the last day from the
- *               opening to its end. A day outside the plan's span (a worked day kept as history) is full.
+ *   any day of the plan: its start to its stored end, AS TIMES OF DAY, on the first day, a middle day or
+ *               the last (the end is stored on the last day; its clock time is the end on every day). A
+ *               SIZED job whose stored end is just the closing-time stamp (every write before this fix)
+ *               draws its size, never closing: the length somebody chose beats a time the writer made
+ *               up. An older row with no end runs to closing, as it always drew. Start and end both on
+ *               the work-day edges (and not sized shorter) is all day.
+ *   outside:    a day outside the plan's span (a worked day kept as history) is full.
  */
 export function jobDayBlock(p: {
   day: string;
@@ -112,19 +120,8 @@ export function jobDayBlock(p: {
 
   const sized = Math.max(0, Number(p.plannedMinutes ?? 0) || 0);
   const startMin = tzMinutesOfDay(p.scheduledStart, tz);
-  const endOnDay = p.scheduledEnd && endDay === day ? tzMinutesOfDay(p.scheduledEnd, tz) : null;
-
-  if (first !== last) {
-    if (day === first) {
-      return { startMin, endMin: wd.endMin > startMin ? wd.endMin : Math.min(24 * 60, startMin + 60), allDay: startMin === wd.startMin };
-    }
-    if (day === last) {
-      const endMin = endOnDay != null && endOnDay > wd.startMin ? endOnDay : wd.endMin;
-      return { startMin: wd.startMin, endMin, allDay: endMin === wd.endMin };
-    }
-    return full;
-  }
-
+  // The end's clock time is the end on EVERY day of the plan, whatever day it is stored on.
+  const endOnDay = p.scheduledEnd ? tzMinutesOfDay(p.scheduledEnd, tz) : null;
   const realEnd = endOnDay != null && endOnDay > startMin ? endOnDay : null;
   if (sized > 0 && sized < WORK_DAY_MINUTES && (realEnd == null || realEnd === wd.endMin)) {
     return { startMin, endMin: Math.min(24 * 60, startMin + sized), allDay: false };
@@ -149,9 +146,9 @@ export type JobBlock = {
   multiDay: boolean;
   allDay: boolean;
   startHm: string;
-  /** The end on the (last) day. */
+  /** The end, on each of its days. */
   endHm: string;
-  /** The day's length in minutes (one-day jobs); a multi-day job's first day. */
+  /** The day's length in minutes: the same on each of its days. */
   minutes: number;
   /** True when somebody chose the length (planned_minutes is set). */
   sized: boolean;
@@ -181,17 +178,15 @@ export function readJobBlock(p: {
   const first = todayStrInTz(p.tz, new Date(p.scheduledStart));
   const endDay = p.scheduledEnd ? todayStrInTz(p.tz, new Date(p.scheduledEnd)) : first;
   const last = endDay < first ? first : endDay;
-  const on = (day: string) =>
-    jobDayBlock({ day, scheduledStart: p.scheduledStart, scheduledEnd: p.scheduledEnd, plannedMinutes: p.plannedMinutes, tz: p.tz, wd });
-  const a = on(first);
-  const z = last === first ? a : on(last);
+  // The same hours on each of its days: the first day's block is every day's (multiDay is a label).
+  const a = jobDayBlock({ day: first, scheduledStart: p.scheduledStart, scheduledEnd: p.scheduledEnd, plannedMinutes: p.plannedMinutes, tz: p.tz, wd });
   return {
     day: first,
     lastDay: last,
     multiDay: last !== first,
-    allDay: last === first ? a.allDay : a.allDay && z.allDay,
+    allDay: a.allDay,
     startHm: minutesToHm(a.startMin),
-    endHm: minutesToHm(Math.min(LAST_MINUTE, z.endMin)),
+    endHm: minutesToHm(Math.min(LAST_MINUTE, a.endMin)),
     minutes: Math.max(1, a.endMin - a.startMin),
     sized,
   };
@@ -200,7 +195,8 @@ export function readJobBlock(p: {
 /**
  * A VISIT'S BLOCK, in the same shape, for the same controls. A visit is its starts_at → ends_at, drawn
  * as an hour when it has no end (the calendar's rule), and that hour is the app's, not a person's
- * ("1 hour — change it"). A visit over several days is full days, like a job's.
+ * ("1 hour — change it"). A visit over several days is one span, its own rule: the first day from its
+ * start, drawn as full days between.
  */
 export function readVisitBlock(p: {
   startsAt: string;
@@ -252,9 +248,9 @@ export function hmWords(hm: string): string {
 }
 
 /** The length in one line of plain words, with "— change it" when the app chose it: "2 hours — change
- *  it", "All day", "4 hours". A job over several days reads as full days. */
-export function blockWords(b: Pick<JobBlock, "allDay" | "minutes" | "sized" | "multiDay">): string {
-  const words = b.multiDay ? "Full days" : b.allDay ? "All day" : lengthWords(b.minutes);
+ *  it", "All day", "4 hours". A job over several days reads the same: its hours are each day's. */
+export function blockWords(b: Pick<JobBlock, "allDay" | "minutes" | "sized"> & { multiDay?: boolean }): string {
+  const words = b.allDay ? "All day" : lengthWords(b.minutes);
   return b.sized ? words : `${words} — change it`;
 }
 
@@ -285,10 +281,10 @@ export function dayBlockWords(p: {
   }
   if (!plan.day) return { words: "Worked day · no day planned yet", history: true };
   if (p.day < plan.day || p.day > (plan.lastDay ?? plan.day)) return { words: `Worked day · planned ${dayWords(plan.day)}`, history: true };
-  if (!plan.multiDay) return { words: `${hmWords(plan.startHm)} – ${hmWords(plan.endHm)} · ${blockWords(plan)}`, history: false };
+  // On any day of the plan: the job's hours, the same on each of its days.
   const b = jobDayBlock({ ...p, wd: workDayMinutes(p.workDay) });
   return {
-    words: `${hmWords(minutesToHm(b.startMin))} – ${hmWords(minutesToHm(Math.min(LAST_MINUTE, b.endMin)))} · ${blockWords(plan)}`,
+    words: `${hmWords(minutesToHm(b.startMin))} – ${hmWords(minutesToHm(Math.min(LAST_MINUTE, b.endMin)))} · ${blockWords({ allDay: b.allDay, minutes: Math.max(1, b.endMin - b.startMin), sized: plan.sized })}`,
     history: false,
   };
 }
@@ -299,15 +295,19 @@ export function dayBlockWords(p: {
  *   startTime  undefined keep the start the job has · "HH:MM" set it · null/"" all day (the old
  *              "clear the time")
  *   length     undefined keep the length the job has · minutes set it (and planned_minutes) · "full"
- *              the company's whole day (planned_minutes = one working day)
+ *              the company's whole day (planned_minutes = one working day, or on several days the load
+ *              already on file when that is more)
  *
  * Keeping the length means (keptEndMin): the clock length of the timed block the job already has on its
  * day (never the closing-time stamp older writes put on every end); else the size somebody chose; else
  * all day when it was all day and nothing new was asked of it; else, a job getting a day and a time for
  * the first time with no length, the two-hour DEFAULT (planned_minutes left blank). A length in minutes
  * on one day is its clock length, and it stores at most one working day as planned_minutes (the work
- * load). Several days are full days whatever the length (a length never collapses a multi-day
- * schedule). `plannedMinutes` undefined = leave the column alone.
+ * load). Several days take the same hours on each day (the end is stored on the last day, at the
+ * clock time each day ends); their size keeps what was asked (the work load of several days). The one
+ * exception: a window of several days with nothing chosen at all, no start, no length and no block
+ * before, is full days, since the days themselves were the choice. `plannedMinutes` undefined = leave
+ * the column alone.
  */
 export function planJobTimes(p: {
   firstDay: string | null;
@@ -337,7 +337,12 @@ export function planJobTimes(p: {
   const numeric = typeof p.length === "number" && Number.isFinite(p.length) && p.length > 0;
   if (p.length === "full" || (clearsTime && p.length === undefined)) {
     startMin = wd.startMin;
-    if (p.length === "full" && !multiDay) plannedMinutes = WORK_DAY_MINUTES;
+    // FULL DAY STORES A SIZE THAT CANNOT SHRINK IT. jobDayBlock draws a sub-day size over an end that
+    // sits at closing (the old stamp), so a job carrying the 2h chip (120) that is then made Full Day
+    // must not keep 120 beside its new 8-to-5 end: on one day the size is one working day; on several
+    // days it is at least one (a load of several days already on file stays what it was). Before this,
+    // Full Day on several days left the column alone and the block re-read as 8:00 to 10:00 each day.
+    if (p.length === "full") plannedMinutes = multiDay ? Math.max(sized, WORK_DAY_MINUTES) : WORK_DAY_MINUTES;
   } else if (numeric) {
     clockMinutes = Math.min(60 * 24 * 30, Math.round(p.length as number));
     // ONE DAY'S CLOCK IS NOT THE JOB'S LOAD. planned_minutes is a work-load figure (WORK_DAY_MINUTES is
@@ -348,19 +353,13 @@ export function planJobTimes(p: {
   }
   startMin = Math.min(startMin, LAST_MINUTE - 1);
 
-  // SEVERAL DAYS ARE FULL DAYS: the last one ends at closing, whatever the length.
-  if (multiDay) {
-    return {
-      startIso: tzDateTimeUtc(firstDay, minutesToHm(startMin), p.tz),
-      endIso: tzDateTimeUtc(lastDay, minutesToHm(wd.endMin), p.tz),
-      ...(plannedMinutes !== undefined ? { plannedMinutes } : {}),
-      defaulted: false,
-    };
-  }
+  // A WINDOW OF SEVERAL DAYS WITH NOTHING ELSE CHOSEN is full days: the days were the choice.
+  const bareWindow = multiDay && !hadDay && typedStart == null && !clearsTime && p.length === undefined;
 
   let endMin: number;
   let defaulted = false;
-  if (p.length === "full" || (clearsTime && p.length === undefined)) {
+  if (p.length === "full" || (clearsTime && p.length === undefined) || bareWindow) {
+    startMin = wd.startMin;
     endMin = wd.endMin;
   } else if (clockMinutes !== undefined) {
     endMin = startMin + clockMinutes;
@@ -370,9 +369,10 @@ export function planJobTimes(p: {
     defaulted = kept.defaulted;
   }
   endMin = Math.max(startMin + 1, Math.min(LAST_MINUTE, endMin));
+  // The end lands on the LAST day: its clock time is the end on each day (jobDayBlock).
   return {
     startIso: tzDateTimeUtc(firstDay, minutesToHm(startMin), p.tz),
-    endIso: tzDateTimeUtc(firstDay, minutesToHm(endMin), p.tz),
+    endIso: tzDateTimeUtc(lastDay, minutesToHm(endMin), p.tz),
     ...(plannedMinutes !== undefined ? { plannedMinutes } : {}),
     defaulted,
   };
@@ -392,8 +392,9 @@ export function planJobTimes(p: {
  *     sized a day or more  → it still runs to closing from the new start;
  *     unsized, a new start → the two-hour default, said ("2 hours — change it"), never the stamp's
  *                            7 hours carried past closing to 9 PM.
- *   A block that was ALL DAY (or several full days) stays a full day on a move; a new start on it
- *   takes the size, else the two-hour default. No block before: the size, else the two-hour default.
+ *   A block that was ALL DAY stays a full day on a move; a new start on it takes the size, else the
+ *   two-hour default. No block before: the size, else the two-hour default. A block over several days
+ *   is judged the same as one day's: its hours are each day's.
  */
 export function keptEndMin(p: {
   startMin: number;
@@ -408,14 +409,14 @@ export function keptEndMin(p: {
   const { startMin, before, wd } = p;
   const sized = Math.max(0, Number(p.plannedMinutes) || 0);
   const toClosing = (s: number) => (wd.endMin > s ? wd.endMin : s + 60);
-  if (before && !before.multiDay && !before.allDay) {
+  if (before && !before.allDay) {
     const endsAtClosing = readHm(before.endHm) === wd.endMin;
     if (endsAtClosing && sized >= WORK_DAY_MINUTES) return { endMin: toClosing(startMin), defaulted: false };
     if (endsAtClosing && sized === 0 && p.typedStart) return { endMin: startMin + DEFAULT_JOB_MINUTES, defaulted: true };
     return { endMin: startMin + before.minutes, defaulted: false };
   }
   if (sized > 0) return { endMin: sized >= WORK_DAY_MINUTES ? toClosing(startMin) : startMin + sized, defaulted: false };
-  // It was all day (or several full days) and nothing new was asked of it: its day stays a full day.
+  // It was all day and nothing new was asked of it: its day stays a full day.
   if (before && !p.typedStart) return { endMin: toClosing(startMin), defaulted: false };
   return { endMin: startMin + DEFAULT_JOB_MINUTES, defaulted: true };
 }

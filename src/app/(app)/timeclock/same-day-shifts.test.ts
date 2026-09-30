@@ -60,6 +60,20 @@ describe("the day's shifts, above the form", () => {
     expect(html).toContain("Put it on 85 Whitney instead of adding the hours again.");
   });
 
+  it("a punch STILL RUNNING on no job gets Put This On <job> too (putShiftOnJob takes an open row: 'running since … is on <job> now')", () => {
+    const running: DayShift = { ...punch, id: "running", clockOut: null, hours: 0 };
+    const html = render([running], { id: "j28", label: "85 Whitney" });
+    expect(html).toContain("since 10:31 AM, still on the clock");
+    expect(html).toContain("No job");
+    expect(html).toContain(">Put This On 85 Whitney</button>");
+    // The server marks it the door's kind whether it is closed or still running.
+    const actions = readFileSync(new URL("./actions.ts", import.meta.url), "utf8");
+    expect(actions).toContain("noJob: !r.job_id && !code,");
+    expect(actions).not.toContain("noJob: !!r.clock_out && !r.job_id && !code,");
+    const refusal = readFileSync(new URL("../../../lib/overlap-refusal.ts", import.meta.url), "utf8");
+    expect(refusal).toContain("noJob: !clash.job_id && !code,");
+  });
+
   it("with no job picked yet, the punch is shown and the form says to pick the job; there is no blind button", () => {
     const html = render([punch], null);
     expect(html).not.toContain("Put This On");
@@ -118,7 +132,7 @@ describe("one tap, one entry", () => {
     expect(s).toContain("saving={pending}");
     // The door.
     expect(s).toContain("<SameDayShifts");
-    expect(s).toContain("setClashId(res.clash?.id ?? null)");
+    expect(s).toContain("setClash(res.clash ?? null)");
   });
   it("the one form is the only add-hours form of its kind: both old copies are gone, and both pages mount Add Time Entry", () => {
     expect(() => src("../jobs/[id]/job-add-time.tsx")).toThrow();

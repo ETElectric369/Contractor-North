@@ -137,6 +137,41 @@ describe("Add Entry over a punch that has no job", () => {
     expect(calls.some((c) => c.table === "invoice_items")).toBe(false);
   });
 
+  it("a punch STILL RUNNING on another job names where it is and hands back the clock-out move: no 'tap their shift on Timecards' (Erik, 2026-09-29)", async () => {
+    // Brian clocked in at 10:31 AM on Herringbone and is still on the clock; the office adds his 11:00 on 700 North Lake Boulevard.
+    const running = { ...brianPunch, clock_out: null, job_id: "other", job: { job_number: "J-011", name: "13897 Herringbone" }, lunch_minutes: 30, notes: "panel swap" };
+    state.client = fakeSupabase((q) => {
+      if (isOverlapRead(q)) return { data: [running] };
+      if (q.table === "profiles") return { data: { full_name: "Brian Taylor" } };
+      if (q.table === "organizations") return ORG_TZ;
+    }, calls);
+    const r = await createManualEntry({ profile_id: "brian-1", clock_in: "2026-09-11T18:00:00Z", clock_out: "2026-09-12T02:30:00Z", job_id: JOB, job_code: null, notes: "" });
+    expect(r.ok).toBe(false);
+    expect(r.error).toBe(
+      "Brian Taylor has been clocked in since Friday Sep 11, 10:31 AM on 13897 Herringbone, so these hours would be counted twice. Clock Brian out at the time they left there, then save these hours.",
+    );
+    expect(r.error).not.toMatch(/Timecards/);
+    // The clash carries what the clock-out sheet seeds itself with, so a stop from the form never blanks the punch's lunch or notes.
+    expect(r.clash).toMatchObject({ id: PUNCH, clockOut: null, noJob: false, jobId: "other", jobLabel: "13897 Herringbone", lunchMinutes: 30, notes: "panel swap" });
+    expect(calls.some((c) => c.verb === "insert")).toBe(false);
+  });
+
+  it("a punch still running with NO job is named so, is the door's kind (noJob), and the way out is to clock them out when they stopped", async () => {
+    state.client = fakeSupabase((q) => {
+      if (isOverlapRead(q)) return { data: [{ ...brianPunch, clock_out: null }] };
+      if (q.table === "profiles") return { data: { full_name: "Brian Taylor" } };
+      if (q.table === "organizations") return ORG_TZ;
+    }, calls);
+    const r = await createManualEntry({ profile_id: "brian-1", clock_in: "2026-09-11T18:00:00Z", clock_out: "2026-09-12T02:30:00Z", job_id: JOB, job_code: null, notes: "" });
+    expect(r.error).toBe(
+      "Brian Taylor has been clocked in since Friday Sep 11, 10:31 AM with no job on the clock, so these hours would be counted twice. Clock Brian out at the time they stopped, then save these hours.",
+    );
+    // Running on no job: Put This On <job> is offered too (putShiftOnJob takes an open row).
+    expect(r.clash).toMatchObject({ id: PUNCH, clockOut: null, noJob: true, jobId: null, lunchMinutes: 0, notes: null });
+    // No claims read for a running punch: the door is the clock-out, not "put that shift on the job".
+    expect(calls.some((c) => c.table === "invoice_items")).toBe(false);
+  });
+
   it("a shift on another job is named with its job, and the answer is to edit it", async () => {
     state.client = fakeSupabase((q) => {
       if (isOverlapRead(q)) return { data: [{ ...brianPunch, job_id: "other", job: { job_number: "J-011", name: "Herringbone" } }] };

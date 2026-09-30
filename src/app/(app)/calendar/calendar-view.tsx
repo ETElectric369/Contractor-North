@@ -605,7 +605,7 @@ export function CalendarView({
          (lib/schedule/job-block jobDayBlock, the one rule the writer, the fitter and the time
          controls share). THE SENTINEL NEEDS BOTH ENDS (Nora's 9–11 at a 9 o'clock shop is timed); a
          sized job never draws the closing-time stamp older writes put on every end; a job over
-         several days runs full days. A DAY WITH ITS OWN HOURS (0370) draws exactly those. */
+         several days draws its hours on each of them. A DAY WITH ITS OWN HOURS (0370) draws exactly those. */
       const b = jobDayBlock({
         day: k,
         scheduledStart: job.scheduled_start,
