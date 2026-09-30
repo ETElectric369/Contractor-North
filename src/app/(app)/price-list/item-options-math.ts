@@ -545,6 +545,20 @@ export function knownVendorNames(options: Pick<ItemOption, "vendor">[], cards: P
   return [...seen.values()].sort((a, b) => a.localeCompare(b));
 }
 
+/** The names knownVendorNames leaves out ON PURPOSE, so the item sheet can say so: every live card
+ *  whose Kind doesn't carry prices (a subcontractor, 0341), sorted. Justin's import is mostly subs
+ *  (guessKind on a trade name), so a picker that silently listed three of his twenty-nine read as
+ *  "the list is missing" until the sheet named the other twenty-six and where their Kind lives. */
+export function hiddenSubcontractors(cards: Pick<VendorCard, "name" | "archived" | "kind">[]): string[] {
+  const seen = new Map<string, string>();
+  for (const c of cards) {
+    if (c.archived || kindCarriesPrices(c.kind)) continue;
+    const k = vendorKey(c.name);
+    if (k && !seen.has(k)) seen.set(k, c.name.trim());
+  }
+  return [...seen.values()].sort((a, b) => a.localeCompare(b));
+}
+
 /** Which Kind a vendor on the Vendors tab reads as: its card's kind, and a vendor that is only on
  *  items (no card yet) is a brand, because that is what an item's vendor has always been. */
 export function listedKind(v: Pick<VendorSummary, "card">): VendorKind | null {

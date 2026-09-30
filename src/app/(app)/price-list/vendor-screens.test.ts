@@ -77,6 +77,51 @@ describe("clicking an item opens its vendors", () => {
     expect(html).not.toContain("$700.00");
   });
 
+  /**
+   * THE VENDOR IS A VISIBLE PICKER (b0a8f25e): a select that lists every vendor that can carry a
+   * price, not a text box over a datalist that pops only after matching letters. And the sheet
+   * says how many of the org's vendors are subcontractors and so aren't in it.
+   */
+  it("Add Vendor's Vendor box is a select that lists the vendors, with Someone New (Type It) at the end", () => {
+    expect(html).toContain("Pick One Of Your Vendors");
+    expect(html).toContain('<option value="Andersen">Andersen</option>');
+    expect(html).toContain('<option value="Pella">Pella</option>');
+    // Milgard is already on the item (no label), so it is not offered twice.
+    expect(html).not.toContain('<option value="Milgard">Milgard</option>');
+    expect(html).toContain("Someone New (Type It)");
+    // The text box waits behind Someone New; nothing is typed until it is picked.
+    expect(html).not.toContain('placeholder="the brand, e.g. Andersen"');
+    // No subs on this org: no sentence about them, and no "No vendors yet" either.
+    expect(html).not.toContain("are subcontractors");
+    expect(html).not.toContain("No vendors yet");
+  });
+
+  it("says how many vendors are subcontractors and so aren't offered, and where their Kind lives", () => {
+    const withSubs = renderToStaticMarkup(
+      createElement(ItemSheet, {
+        item: w830,
+        options,
+        defaultMarkupPct: 25,
+        knownVendors: ["Andersen", "Pella"],
+        subcontractorsLeftOut: ["Coldwater Drywall", "Ridge Roofing"],
+        onClose: () => {},
+      }),
+    );
+    expect(withSubs).toContain("2 on your Vendors list are subcontractors and aren&#x27;t offered here: subcontractors don&#x27;t carry prices on items.");
+    expect(withSubs).toContain("Change a vendor&#x27;s Kind to Supplier or Brand on the Vendors tab to price it.");
+    const oneSub = renderToStaticMarkup(
+      createElement(ItemSheet, { item: w830, options, defaultMarkupPct: 25, knownVendors: ["Andersen"], subcontractorsLeftOut: ["Coldwater Drywall"], onClose: () => {} }),
+    );
+    expect(oneSub).toContain("1 on your Vendors list is a subcontractor and isn&#x27;t offered here");
+  });
+
+  it("with no vendors at all, the text box is open from the start and the sheet says where vendors come from", () => {
+    const none = renderToStaticMarkup(createElement(ItemSheet, { item: w830, options: [], defaultMarkupPct: 25, knownVendors: [], onClose: () => {} }));
+    expect(none).toContain("No vendors yet. Add them on the Vendors tab or type one here.");
+    expect(none).toContain('placeholder="the brand, e.g. Andersen"');
+    expect(none).toContain("Someone New (Type It)");
+  });
+
   it("says the cost is the item number when it is", () => {
     expect(html).toMatch(/same as the item number \(830\)/);
   });

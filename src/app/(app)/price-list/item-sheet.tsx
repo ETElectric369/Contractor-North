@@ -26,6 +26,7 @@ export function ItemSheet({
   options,
   defaultMarkupPct,
   knownVendors,
+  subcontractorsLeftOut = [],
   onClose,
 }: {
   item: PriceItem;
@@ -33,6 +34,8 @@ export function ItemSheet({
   options: ItemOption[];
   defaultMarkupPct: number;
   knownVendors: string[];
+  /** The live subcontractor cards knownVendors leaves out (0341), so the picker can say so. */
+  subcontractorsLeftOut?: string[];
   onClose: () => void;
 }) {
   const writes = useOptionWrites();
@@ -105,6 +108,7 @@ export function ItemSheet({
         <AddVendorPrice
           item={item}
           knownVendors={knownVendors.filter((n) => !active.some((o) => o.vendor.trim().toLowerCase() === n.trim().toLowerCase() && !o.label))}
+          subcontractorsLeftOut={subcontractorsLeftOut}
           defaultMarkupPct={defaultMarkupPct}
           hasDefault={!!chosen}
           run={writes.run}
