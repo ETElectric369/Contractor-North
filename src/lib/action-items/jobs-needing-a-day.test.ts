@@ -59,6 +59,14 @@ describe("who needs a day", () => {
     expect(ids([j], { wonJobIds: new Set([j.id]) })).toEqual([]);
   });
 
+  it("a job already billed is done (0205), whatever its status still says; one not billed still needs a day", () => {
+    const billed = job({ status: "to_be_scheduled" });
+    const notBilled = job({ status: "to_be_scheduled" });
+    expect(ids([billed, notBilled], { billedJobIds: new Set([billed.id]) })).toEqual([notBilled.id]);
+    // Without the set at all, nothing changes.
+    expect(ids([billed, notBilled])).toEqual([billed.id, notBilled.id]);
+  });
+
   it("no three-day window: worked a month ago with nothing ahead still needs a day", () => {
     const j = job({ status: "in_progress", time_entries: [{ clock_in: "2026-08-20T15:00:00Z" }] });
     expect(ids([j])).toEqual([j.id]);
@@ -127,5 +135,12 @@ describe("the build reads it", () => {
     expect(query).toContain(`title: "Jobs Needing A Day · Couldn't Check"`);
     // And a lost costs read never invents No Costs Yet.
     expect(query).toContain("const costsReadable = ![previewListsR, wBillsR, wPosR, wInvR].some((r) => (r as Read)?.error);");
+  });
+
+  it("billed = done (0205) reaches both feeders: Won, Needs A Day and Jobs Needing A Day", () => {
+    // The win: an accepted estimate whose job already has a live invoice is over, not dateless.
+    expect(query).toContain("if (a.job_id && billedJobs.has(String(a.job_id))) continue; // billed = done (0205)");
+    // The jobs read: the same set goes into the pure reading (the second call reuses needDayPre's jobs).
+    expect(query).toContain("billedJobIds: billedJobs,");
   });
 });

@@ -608,6 +608,9 @@ async function buildActionItems(ctx: {
       // A JOB THAT'S OVER DOESN'T NEED A DATE (work ending is an outcome, 0205), and a held one
       // waits with its own day and reason (NY-feeders: holds quiet the nudges).
       if (job?.status === "complete" || job?.status === "cancelled" || job?.status === "on_hold") continue;
+      // A JOB ALREADY BILLED IS OVER TOO (0205): sending or paying an invoice never moves
+      // jobs.status, so without this the Lim "new power to garage" win asked for a day forever.
+      if (a.job_id && billedJobs.has(String(a.job_id))) continue; // billed = done (0205)
       if (a.job_id) wonJobIds.add(String(a.job_id));
       const who = one(a.customers as any)?.name ?? null;
       items.push({
@@ -886,6 +889,8 @@ async function buildActionItems(ctx: {
     tz,
     clockedInJobIds,
     wonJobIds,
+    // Billed = done (0205): a job with a live invoice never needs a day, whatever jobs.status says.
+    billedJobIds: billedJobs,
   });
   const needDayIds = needDayPre.map((f) => f.job.id);
   // Materials-routing candidates: jobs the crew is about to stand on (today/tomorrow, segments), and
