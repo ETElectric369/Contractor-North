@@ -331,3 +331,138 @@ describe("the one Get Paid sheet", () => {
     expect(SRC).toContain('<Button variant="outline" onClick={() => setAsk(null)}>Not Now</Button>');
   });
 });
+
+/**
+ * TAP TO PAY TELLS THE TRUTH (0e2cb937 — Rich Seiler, INV-083, $420, 2026-09-30), the sheet's half.
+ *
+ * The bridge's ok is a claim; tapPaymentOutcome is the check; lib/tap-verdict is what the sheet
+ * says for each answer and the watch that ends. tapToPay() wires them: a "paid" verdict is the
+ * Paid screen, an "error" verdict is the "Not charged — try again" box with tapPi KEPT (the
+ * retry re-uses the same PaymentIntent), a "confirmed" verdict is an honest line and a watch
+ * that asks Stripe once more after ~20 s.
+ */
+const { verdictAfterConfirm, watchConfirmedTap, notChargedSentence, NOT_CHARGED_LEAD, UNCHECKED_LINE, UNCHECKED_TIMEOUT_SENTENCE, SUCCEEDED_LINE, CHARGED_NOT_RECORDED_SENTENCE } =
+  await import("@/lib/tap-verdict");
+
+const succeeded = (recorded = true) => ({ ok: true as const, status: "succeeded", amountReceived: 42000, lastError: null, booked: recorded, recorded });
+const notCharged = (lastError: string | null = "the card has insufficient funds") => ({
+  ok: true as const,
+  status: "requires_payment_method",
+  amountReceived: 0,
+  lastError,
+  booked: false,
+  recorded: false,
+});
+
+describe("verdictAfterConfirm — what the sheet says once Stripe has been asked", () => {
+  it("bridge ok + server says requires_payment_method → the 'Not charged — try again' box, Stripe's reason in plain words, on the same PaymentIntent", () => {
+    const v = verdictAfterConfirm(notCharged());
+    expect(v).toEqual({
+      kind: "error",
+      error: "Not charged — try again. The phone said approved, but Stripe shows no charge: the card has insufficient funds.",
+      // "failed" is the outcome tapToPay keeps tapPi for and offers Try Again on (retry = declined | failed).
+      outcome: "failed",
+    });
+  });
+
+  it("no reason from Stripe → the lead sentence alone, never a blank or a raw code", () => {
+    expect(notChargedSentence(null)).toBe(`${NOT_CHARGED_LEAD}.`);
+    expect(notChargedSentence("Your card was declined.")).toBe(`${NOT_CHARGED_LEAD}: Your card was declined.`);
+  });
+
+  it("bridge ok + server says succeeded (recorded) → Paid", () => {
+    expect(verdictAfterConfirm(succeeded())).toEqual({ kind: "paid" });
+    expect(verdictAfterConfirm({ ...succeeded(), status: "requires_capture" })).toEqual({ kind: "paid" });
+  });
+
+  it("server says succeeded but the row didn't land → honest confirmed line, watching", () => {
+    expect(verdictAfterConfirm(succeeded(false))).toEqual({ kind: "confirmed", note: SUCCEEDED_LINE, checked: true });
+  });
+
+  it("the server read itself failed → confirmed, but 'couldn't double-check with Stripe yet' — never 'Stripe confirmed the charge'", () => {
+    expect(verdictAfterConfirm(null)).toEqual({ kind: "confirmed", note: UNCHECKED_LINE, checked: false });
+    expect(verdictAfterConfirm({ ok: false, error: "Couldn't read this payment back from Stripe." })).toEqual({ kind: "confirmed", note: UNCHECKED_LINE, checked: false });
+    expect(UNCHECKED_LINE).toContain("couldn't double-check with Stripe yet");
+    expect(UNCHECKED_LINE).not.toContain("Stripe confirmed");
+  });
+});
+
+describe("watchConfirmedTap — the confirmed watch has an end", () => {
+  /** A clock that moves 4 s per poll, so twenty seconds is five polls. */
+  function clock() {
+    let t = 0;
+    return { now: () => t, sleep: async (ms: number) => void (t += ms) };
+  }
+
+  it("past 20 s with no Paid, Stripe is asked a second time; succeeded → Paid", async () => {
+    const c = clock();
+    const poll = vi.fn(async () => "open" as const);
+    const verify = vi.fn(async () => succeeded());
+    const r = await watchConfirmedTap({ poll, verify, ...c });
+    expect(r).toEqual({ kind: "paid" });
+    expect(verify).toHaveBeenCalledTimes(1);
+    expect(poll).toHaveBeenCalledTimes(5);
+  });
+
+  it("past 20 s and the second look says not charged → the 'Not charged — try again' box", async () => {
+    const c = clock();
+    const r = await watchConfirmedTap({ poll: async () => "open", verify: async () => notCharged("the bank said try again later"), ...c });
+    expect(r).toEqual({ kind: "error", error: notChargedSentence("the bank said try again later"), outcome: "failed" });
+  });
+
+  it("the invoice reads Paid before the timeout → Paid, and Stripe is not asked again", async () => {
+    const c = clock();
+    let polls = 0;
+    const verify = vi.fn(async () => succeeded());
+    const r = await watchConfirmedTap({ poll: async () => (++polls >= 2 ? "paid" : "open"), verify, ...c });
+    expect(r).toEqual({ kind: "paid" });
+    expect(verify).not.toHaveBeenCalled();
+  });
+
+  it("the second look can't be taken either → a sentence that says so and what to check, never a spinner forever", async () => {
+    const c = clock();
+    const r = await watchConfirmedTap({ poll: async () => "unknown", verify: async () => null, ...c });
+    expect(r).toEqual({ kind: "error", error: UNCHECKED_TIMEOUT_SENTENCE, outcome: "failed" });
+  });
+
+  it("Stripe says succeeded twice but the row never lands → 'don't tap again', with no Try Again", async () => {
+    const c = clock();
+    const r = await watchConfirmedTap({ poll: async () => "open", verify: async () => succeeded(false), ...c });
+    expect(r).toEqual({ kind: "error", error: CHARGED_NOT_RECORDED_SENTENCE, outcome: "setup" });
+  });
+
+  it("the sheet closing stops the watch: nothing is asked, nothing is painted", async () => {
+    const c = clock();
+    let alive = true;
+    const verify = vi.fn(async () => succeeded());
+    const r = await watchConfirmedTap({
+      poll: async () => {
+        alive = false;
+        return "open";
+      },
+      verify,
+      alive: () => alive,
+      ...c,
+    });
+    expect(r).toEqual({ kind: "stopped" });
+    expect(verify).not.toHaveBeenCalled();
+  });
+});
+
+describe("the sheet's own words (settle-up-button.tsx)", () => {
+  const src = readFileSync(join(__dirname, "settle-up-button.tsx"), "utf8");
+
+  it("never claims 'Stripe confirmed the charge' on the bridge's word alone", () => {
+    // The old confirmed paint said it outright; now the note comes from the verdict.
+    expect(src).not.toContain("Stripe confirmed the charge. This flips to Paid");
+    expect(src).toContain("tapPaymentOutcome(id, pi.paymentIntentId)");
+    expect(src).toContain("watchConfirmedTap(");
+  });
+
+  it("keeps the PaymentIntent on a 'Not charged' verdict (tapPi is only let go on Paid)", () => {
+    const branch = src.slice(src.indexOf("if (c.ok) {"), src.indexOf("if (c.cancelled)"));
+    // Two Paid exits let go of the door; the error exits do not touch it.
+    expect(branch.match(/tapPi\.current = null;/g)).toHaveLength(2);
+    expect(branch).toContain('if (verdict.kind === "error") {\n          setTap({ kind: "error", error: verdict.error, outcome: verdict.outcome });\n          return;\n        }');
+  });
+});
