@@ -86,6 +86,7 @@ export function PriceListManager({
   sizingAvailable = false,
   optionsByItem = null,
   knownVendors = [],
+  subcontractorsLeftOut = [],
   kitDoors = true,
 }: {
   items: PriceItem[];
@@ -104,6 +105,9 @@ export function PriceListManager({
   optionsByItem?: Record<string, ItemOption[]> | null;
   /** Every vendor name the org already spells one way, for the Add Vendor box. */
   knownVendors?: string[];
+  /** The live subcontractor cards that box leaves out (0341), named under it so the list never
+   *  reads as missing. */
+  subcontractorsLeftOut?: string[];
   /** The Kits & Sizing switch (0352). Off: no row checkboxes and no Add to Kit (they exist only to
    *  build a kit), and no sizing fields on an item; the Kits column still says which kits hold it. */
   kitDoors?: boolean;
@@ -733,6 +737,7 @@ export function PriceListManager({
           options={optionsByItem[sheetItem.id] ?? []}
           defaultMarkupPct={defaultMarkupPct}
           knownVendors={knownVendors}
+          subcontractorsLeftOut={subcontractorsLeftOut}
           onClose={() => setSheetId(null)}
         />
       )}

@@ -503,6 +503,17 @@ describe("billJobReceipt — a paper whose number is already on the books is FIL
     expect(res.warning).toContain("still filed with the other bill");
     expect(reported.calls.map((c) => c.where)).toContain("organize:billJobReceipt.untie");
   });
+
+  it("a receipt already tied to a bill is on the books: no second read, no second bill", async () => {
+    state.client = fakeSupabase(
+      { "documents.select": [{ data: DOC, error: null }], "organized_items.select": [{ data: { id: "oi-tie", bill_id: null, tied_bill_id: "bill-old" }, error: null }] },
+      calls,
+    );
+    const res = await billJobReceipt(DOC.id);
+    expect(res).toEqual({ ok: true, already: true });
+    expect(did("bills", "insert")).toBeUndefined();
+    expect(did("organized_items", "insert")).toBeUndefined();
+  });
 });
 
 describe("billJobReceipt — whose date the bill carries", () => {

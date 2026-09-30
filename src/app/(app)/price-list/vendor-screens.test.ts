@@ -1,4 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
@@ -75,6 +77,88 @@ describe("clicking an item opens its vendors", () => {
     expect(count(html, "Archive</button>")).toBe(2);
     expect(html).toContain("Show Archived Vendors (1)");
     expect(html).not.toContain("$700.00");
+  });
+
+  /**
+   * THE VENDOR IS A VISIBLE PICKER (b0a8f25e): a select that lists every vendor that can carry a
+   * price, not a text box over a datalist that pops only after matching letters. And the sheet
+   * says how many of the org's vendors are subcontractors and so aren't in it.
+   */
+  it("Add Vendor's Vendor box is a select that lists the vendors, with Someone New (Type It) at the end", () => {
+    expect(html).toContain("Pick One Of Your Vendors");
+    expect(html).toContain('<option value="Andersen">Andersen</option>');
+    expect(html).toContain('<option value="Pella">Pella</option>');
+    // Milgard is already on the item (no label), so it is not offered twice.
+    expect(html).not.toContain('<option value="Milgard">Milgard</option>');
+    expect(html).toContain("Someone New (Type It)");
+    // The text box waits behind Someone New; nothing is typed until it is picked.
+    expect(html).not.toContain('placeholder="the brand, e.g. Andersen"');
+    // No subs on this org: no sentence about them, and no "No vendors yet" either.
+    expect(html).not.toContain("are subcontractors");
+    expect(html).not.toContain("No vendors yet");
+  });
+
+  it("says how many vendors are subcontractors and so aren't offered, and where their Kind lives", () => {
+    const withSubs = renderToStaticMarkup(
+      createElement(ItemSheet, {
+        item: w830,
+        options,
+        defaultMarkupPct: 25,
+        knownVendors: ["Andersen", "Pella"],
+        subcontractorsLeftOut: ["Coldwater Drywall", "Ridge Roofing"],
+        onClose: () => {},
+      }),
+    );
+    expect(withSubs).toContain("2 on your Vendors list are subcontractors and aren&#x27;t offered here: subcontractors don&#x27;t carry prices on items.");
+    expect(withSubs).toContain("Change a vendor&#x27;s Kind to Supplier or Brand on the Vendors tab to price it.");
+    const oneSub = renderToStaticMarkup(
+      createElement(ItemSheet, { item: w830, options, defaultMarkupPct: 25, knownVendors: ["Andersen"], subcontractorsLeftOut: ["Coldwater Drywall"], onClose: () => {} }),
+    );
+    expect(oneSub).toContain("1 on your Vendors list is a subcontractor and isn&#x27;t offered here");
+  });
+
+  it("when every vendor he has is already on this item, it says so (never 'No vendors yet') and the box is open", () => {
+    // A one-supplier org (CED on every item) opening an item CED already prices: the filtered list
+    // is empty because the vendor is on the item, not because the Vendors tab is.
+    const milgardOnly = options.filter((o) => o.vendor === "Milgard");
+    const one = renderToStaticMarkup(
+      createElement(ItemSheet, { item: w830, options: milgardOnly, defaultMarkupPct: 25, knownVendors: ["Milgard"], onClose: () => {} }),
+    );
+    expect(one).toContain("Your one vendor is already on this item. Type a new one here.");
+    expect(one).not.toContain("No vendors yet");
+    expect(one).not.toContain('<option value="Milgard">Milgard</option>');
+    expect(one).toContain('placeholder="the brand, e.g. Andersen"');
+    // Two vendors, both priced on the item with no product line.
+    const both: ItemOption[] = [
+      { ...milgardOnly[0], id: "m2", vendor: "Andersen" },
+      { ...milgardOnly[0], id: "p2", vendor: "Pella" },
+    ];
+    const two = renderToStaticMarkup(
+      createElement(ItemSheet, { item: w830, options: both, defaultMarkupPct: 25, knownVendors: ["Andersen", "Pella"], onClose: () => {} }),
+    );
+    expect(two).toContain("Every vendor you have (2) is already on this item. Type a new one here.");
+    expect(two).not.toContain("No vendors yet");
+    expect(two).toContain('placeholder="the brand, e.g. Andersen"');
+  });
+
+  it("after the last pickable vendor is added, the box is open even though the sheet remembers a pick", () => {
+    // The add() reset is computed from what the list will be next: a picked vendor leaves it.
+    const SRC = readFileSync(join(process.cwd(), "src/app/(app)/price-list/add-vendor-price.tsx"), "utf8");
+    expect(SRC).toContain("const left = knownVendors.length - (typing ? 0 : 1);");
+    expect(SRC).toContain('setPick(left > 0 ? "" : SOMEONE_NEW);');
+    // And the box is derived from the list, not from the remembered pick, so a list that shrinks to
+    // nothing under a mounted sheet opens it.
+    expect(SRC).toContain("const pickShown = nonePickable ? SOMEONE_NEW : pick;");
+    expect(SRC).toContain("const typing = !vendor && pickShown === SOMEONE_NEW;");
+    const SHEET = readFileSync(join(process.cwd(), "src/app/(app)/price-list/item-sheet.tsx"), "utf8");
+    expect(SHEET).toContain("alreadyOnItem={knownVendors.length - pickable.length}");
+  });
+
+  it("with no vendors at all, the text box is open from the start and the sheet says where vendors come from", () => {
+    const none = renderToStaticMarkup(createElement(ItemSheet, { item: w830, options: [], defaultMarkupPct: 25, knownVendors: [], onClose: () => {} }));
+    expect(none).toContain("No vendors yet. Add them on the Vendors tab or type one here.");
+    expect(none).toContain('placeholder="the brand, e.g. Andersen"');
+    expect(none).toContain("Someone New (Type It)");
   });
 
   it("says the cost is the item number when it is", () => {

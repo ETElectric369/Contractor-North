@@ -11,7 +11,7 @@ import { PriceListManager } from "./price-list-manager";
 import { KitsManager } from "./kits-manager";
 import { PaidPrices } from "./paid-prices";
 import { VendorsManager } from "./vendors-manager";
-import { knownVendorNames, linkOf, summarizeVendors, vendorKey, vendorKindOf, type ItemOption, type VendorCard } from "./item-options-math";
+import { hiddenSubcontractors, knownVendorNames, linkOf, summarizeVendors, vendorKey, vendorKindOf, type ItemOption, type VendorCard } from "./item-options-math";
 import type { ExistingVendor } from "./vendor-import-math";
 import { FeatureOffLineFor } from "@/components/feature-off-line-for";
 import { featureOn } from "@/lib/features";
@@ -171,6 +171,9 @@ export default async function PriceListPage() {
   }));
   const vendors = summarizeVendors(options, allItems, cards, defaultMarkupPct);
   const knownVendors = knownVendorNames(options, cards);
+  // The live subcontractor cards that picker leaves out, named on the item sheet (a picker that
+  // silently shows 3 of 29 imported names reads as broken).
+  const subcontractorsLeftOut = hiddenSubcontractors(cards);
   // What an import compares a dropped list against: every card (live and archived) and every name
   // on an item, one entry per name.
   const existingVendors: ExistingVendor[] = (() => {
@@ -222,6 +225,7 @@ export default async function PriceListPage() {
                 sizingAvailable={itemsRes.sizingAvailable}
                 optionsByItem={optionsAvailable ? optionsByItem : null}
                 knownVendors={knownVendors}
+                subcontractorsLeftOut={subcontractorsLeftOut}
                 kitDoors={kitsOn}
               />
             ),

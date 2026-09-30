@@ -462,15 +462,21 @@ export async function billJobReceipt(
   if (!doc) return { ok: false, error: "Receipt not found." };
   if (!doc.job_id) return { ok: false, error: "This receipt isn't attached to a job." };
 
-  // Idempotency: have we already turned this document into a bill?
+  // Idempotency: have we already turned this document into a bill — or tied it to the bill that
+  // already carried its purchase (the "already on the books" answer below writes that tie)? Either
+  // way the paper is on the books and a second read would only pay for the same answer again.
   const { data: prior } = await supabase
     .from("organized_items")
-    .select("id, bill_id")
+    .select("id, bill_id, tied_bill_id")
     .eq("document_id", documentId)
-    .not("bill_id", "is", null)
+    .or("bill_id.not.is.null,tied_bill_id.not.is.null")
     .limit(1)
     .maybeSingle();
   if (prior?.bill_id) return { ok: true, already: true };
+  // A tie is "on the books" for every door but Different Purchase: a person pressing that on a
+  // photo the same-number answer filed with the other bill means it, so the read goes on, this
+  // paper gets its own bill, and the tie comes off below.
+  if (prior?.tied_bill_id && !stated?.differentPurchase) return { ok: true, already: true };
 
   const mime = mimeFromName(doc.name) ?? mimeFromName(doc.file_url);
   if (!mime) return { ok: false, error: "Use a photo (JPG/PNG) or PDF receipt." };
@@ -619,7 +625,9 @@ ${MASKED_PRICE_PROMPT_RULE}`,
         confidence,
         payment: stated?.paid ? "paid_at_purchase" : (parsed.payment ?? "unknown"),
         lines,
+        docNumber,
       });
+      if (tie.ok) revalidatePath(`/jobs/${doc.job_id}`);
       const said = tie.ok
         ? `Already on the books: ${billLabel(same[0])}. This photo is filed with that bill; nothing was recorded twice.`
         : `Already on the books: ${billLabel(same[0])}. Nothing was recorded twice, but this photo couldn't be filed with that bill, so the job's Costs tab will keep saying it is not on a bill yet.`;
@@ -773,6 +781,7 @@ async function tieDocumentToBill(
     confidence: string;
     payment: string;
     lines: unknown[];
+    docNumber: string | null;
   },
 ): Promise<{ ok: boolean }> {
   const { data: prior, error: priorErr } = await supabase
@@ -797,6 +806,7 @@ async function tieDocumentToBill(
       amount: o.amount,
       item_date: o.itemDate,
       category: o.category,
+      doc_number: o.docNumber,
       confidence: o.confidence,
       payment: o.payment,
       status: "filed",
