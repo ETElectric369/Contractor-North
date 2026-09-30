@@ -123,6 +123,7 @@ function fakeSupabase(
           return chain;
         },
         eq() { return chain; },
+        or() { return chain; },
         order() { return chain; },
         not() { return chain; },
         limit() { return chain; },
@@ -388,6 +389,92 @@ describe("billJobReceipt — the link row IS the idempotency", () => {
     expect(res.warning).toContain("did not get marked as billed");
     // The reconcile note is the other half; it names the gap the lines leave against the total.
     expect(res.warning).toContain("$432.13 less than");
+  });
+});
+
+/**
+ * A RECEIPT WHOSE PURCHASE IS ALREADY ON THE BOOKS IS TIED TO THAT BILL (J-013, 2026-09-29).
+ *
+ * The job had one live bill and no supplier papers, yet its Costs badge said 3 and the receipt
+ * read "Not on a bill yet" with Record As Cost beside it. The "already on the books" answer wrote
+ * nothing, so the snapped receipt stayed a document with no link to any bill: counted as open
+ * beside the very bill it belongs to, and offering a door that could only come back to the same
+ * answer (another paid read). Now it is tied (0295's tied_bill_id: filed against a bill this row
+ * did not make), so it sits under that bill and the badge counts what is really open.
+ */
+describe("billJobReceipt — already on the books ties the paper to that bill", () => {
+  const DOC = { id: "doc-12", name: "ced-8802.jpg", file_url: "org-1/job-046/ced-8802.jpg", size_bytes: 100_000, job_id: "job-046" };
+  const OLD_BILL = {
+    id: "bill-old",
+    supplier: "Contractors Electrical Distributors",
+    bill_number: "8802-1107820",
+    supplier_invoice_number: null,
+    supplier_account_id: null,
+    superseded_by_bill_id: null,
+    amount: 467.87,
+    bill_date: "2026-09-15",
+    job_id: "job-046",
+    jobs: { job_number: "J-046", name: "Waldow" },
+  };
+  const script = (tieResult: any) => ({
+    "documents.select": [{ data: DOC, error: null }],
+    // the "already billed or tied?" check — nothing yet; loadBooks' own organized_items read is
+    // unscripted, and its `safe` wrapper reads that as an empty list.
+    "organized_items.select": [{ data: null, error: null }],
+    // loadBooks: the numbered live bills (its two no-number reads are unscripted → empty).
+    "bills.select": [{ data: [OLD_BILL], error: null }],
+    "organized_items.insert": [tieResult],
+  });
+
+  beforeEach(() => {
+    ai.parsed = { ...ai.clean(), document_number: "8802-1107820" };
+  });
+
+  it("writes the tie, not a second bill, and says which bill already carries it", async () => {
+    state.client = fakeSupabase(script({ data: [{ id: "oi-tie" }], error: null }), calls);
+    const res = await billJobReceipt(DOC.id);
+    expect(res.ok).toBe(true);
+    expect(res.already).toBe(true);
+    expect(res.sameAs).toContain("Already on the books: Contractors Electrical Distributors #8802-1107820");
+    expect(res.warning).toBe(res.sameAs);
+    expect(did("bills", "insert")).toBeUndefined();
+    const tie = did("organized_items", "insert");
+    expect(tie?.payload).toMatchObject({
+      kind: "receipt",
+      status: "filed",
+      job_id: "job-046",
+      document_id: DOC.id,
+      tied_bill_id: "bill-old",
+      file_url: DOC.file_url,
+      source: "job",
+      proposal: { filed: { how: "tie" } },
+    });
+    // Never bill_id: a tie must not let any teardown delete a bill this row did not make (0295).
+    expect(tie?.payload.bill_id).toBeUndefined();
+    expect(tie?.selected).toBe(true);
+  });
+
+  it("a tie that did not land is SAID, and the person's answer still stands", async () => {
+    state.client = fakeSupabase(script({ data: null, error: { message: "rls says no" } }), calls);
+    const res = await billJobReceipt(DOC.id);
+    expect(res.ok).toBe(true);
+    expect(res.already).toBe(true);
+    // On sameAs, which is the sentence the doors print for this answer — not only on warning.
+    expect(res.sameAs).toContain("Already on the books");
+    expect(res.sameAs).toContain("couldn't be marked as that bill's paper");
+    expect(res.warning).toBe(res.sameAs);
+    expect(reported.calls.map((c) => c.where)).toContain("organize:billJobReceipt.tie");
+  });
+
+  it("a receipt already tied is on the books: no second read, no second bill", async () => {
+    state.client = fakeSupabase(
+      { "documents.select": [{ data: DOC, error: null }], "organized_items.select": [{ data: { id: "oi-tie", bill_id: null, tied_bill_id: "bill-old" }, error: null }] },
+      calls,
+    );
+    const res = await billJobReceipt(DOC.id);
+    expect(res).toEqual({ ok: true, already: true });
+    expect(did("bills", "insert")).toBeUndefined();
+    expect(did("organized_items", "insert")).toBeUndefined();
   });
 });
 

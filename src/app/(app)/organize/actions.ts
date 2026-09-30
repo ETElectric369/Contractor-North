@@ -457,15 +457,17 @@ export async function billJobReceipt(
   if (!doc) return { ok: false, error: "Receipt not found." };
   if (!doc.job_id) return { ok: false, error: "This receipt isn't attached to a job." };
 
-  // Idempotency: have we already turned this document into a bill?
+  // Idempotency: have we already turned this document into a bill — or tied it to the bill that
+  // already carried its purchase (the "already on the books" answer below writes that tie)? Either
+  // way the paper is on the books and a second read would only pay for the same answer again.
   const { data: prior } = await supabase
     .from("organized_items")
-    .select("id, bill_id")
+    .select("id, bill_id, tied_bill_id")
     .eq("document_id", documentId)
-    .not("bill_id", "is", null)
+    .or("bill_id.not.is.null,tied_bill_id.not.is.null")
     .limit(1)
     .maybeSingle();
-  if (prior?.bill_id) return { ok: true, already: true };
+  if (prior?.bill_id || prior?.tied_bill_id) return { ok: true, already: true };
 
   const mime = mimeFromName(doc.name) ?? mimeFromName(doc.file_url);
   if (!mime) return { ok: false, error: "Use a photo (JPG/PNG) or PDF receipt." };
@@ -594,7 +596,44 @@ ${MASKED_PRICE_PROMPT_RULE}`,
       // sentence here pointing at "Receipts & Documents" sent him to a button that only appears
       // after another Record as Cost press (another paid read).
       const said = `Already on the books: ${billLabel(same[0])}. Nothing was recorded twice.`;
-      return { ok: true, already: true, vendor, amount, sameAs: said, warning: said };
+      // THE PAPER IS TIED TO THE BILL IT NAMES (J-013, 2026-09-29: one live bill, and the job's
+      // Costs badge said 3 with the receipt reading "Not on a bill yet"). This answer used to write
+      // nothing, so the snapped receipt stayed one of the job's documents with no link to any
+      // bill: the Costs tab counted it as open beside the very bill it belongs to, said it was on
+      // no bill, and offered Record As Cost — a door that could only come back here. The tie is
+      // 0295's word for exactly this (Same Purchase: Tie Them): filed AGAINST a bill this row did
+      // not make, so no teardown ever deletes that bill through it. Best effort, said when lost:
+      // the person's answer stands either way.
+      const { data: tied, error: tieErr } = await supabase
+        .from("organized_items")
+        .insert({
+          kind: "receipt",
+          title: vendor,
+          vendor,
+          amount,
+          item_date: stated?.billDate || itemDate || stated?.fallbackBillDate || null,
+          category: stated?.category || "Receipt",
+          doc_number: docNumber,
+          confidence,
+          status: "filed",
+          job_id: doc.job_id,
+          document_id: documentId,
+          tied_bill_id: same[0].id,
+          file_url: doc.file_url,
+          created_by: ctx.userId,
+          source: "job",
+          proposal: { filed: { how: "tie" } },
+        })
+        .select("id");
+      const tieMissing = tieErr || !tied?.length;
+      if (tieMissing) reportError("organize:billJobReceipt.tie", tieErr ?? new Error("tie insert returned no row"), { documentId, billId: same[0].id, jobId: doc.job_id });
+      revalidatePath(`/jobs/${doc.job_id}`);
+      // The callers print sameAs on this answer (receipt-capture's "already" outcome), so a lost
+      // tie rides on it, not on a warning nobody shows.
+      const sameAs = tieMissing
+        ? `${said} This receipt couldn't be marked as that bill's paper, so it still reads as on no bill; nothing else changed.`
+        : said;
+      return { ok: true, already: true, vendor, amount, sameAs, warning: sameAs };
     }
   }
 
