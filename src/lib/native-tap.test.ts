@@ -420,6 +420,56 @@ describe("the confirm's word is checked — a resolve is not a charge", () => {
     expect(await tap.collectTapPayment(PI)).toEqual({ ok: false, cancelled: true, error: "Cancelled. Nothing was charged." });
   });
 
+  /**
+   * The busy retry (a reconnect finishing under the tap; SCPTapToPayReaderErrorDomain 20/43/12):
+   * the plugin says Failed for EVERY collect error and rejects, and the clear before the retry can
+   * say Canceled. Those are the first collect's verdicts. The second collect reads the card and
+   * Stripe charges it — that charge must never be answered "still busy" or "Nothing was charged".
+   */
+  function busyThenCharged(): void {
+    t.markConnected();
+    const BUSY = "The operation couldn't be completed. (SCPTapToPayReaderErrorDomain error 20.)";
+    let collects = 0;
+    t.collect = async () => {
+      if (++collects === 1) {
+        t.fire("terminalFailed", { message: BUSY });
+        throw new Error(BUSY);
+      }
+    };
+    t.plugin.cancelCollectPaymentMethod.mockImplementation(async () => {
+      t.fire("terminalCanceled", {});
+    });
+    t.plugin.confirmPaymentIntent.mockImplementation(async () => ({ status: "succeeded" }));
+  }
+
+  it("a busy first collect — its Failed, and the Canceled the clear raises — never outvotes the retry's charge", async () => {
+    const tap = await freshBridge();
+    busyThenCharged();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const press = tap.collectTapPayment(PI);
+    await vi.advanceTimersByTimeAsync(3_000); // past the busy-retry pause
+    expect(await press).toEqual({ ok: true });
+    expect(t.plugin.collectPaymentMethod).toHaveBeenCalledTimes(2);
+    expect(t.plugin.confirmPaymentIntent).toHaveBeenCalledTimes(1);
+  });
+
+  it("the retry forgets only the first collect's verdicts: a Failed beside the retry's own confirm still decides", async () => {
+    const tap = await freshBridge();
+    busyThenCharged();
+    t.plugin.confirmPaymentIntent.mockImplementation(async () => {
+      t.fire("terminalFailed", { message: "Your card was declined.", declineCode: "insufficient_funds", code: "card_declined" });
+      return { status: "succeeded" };
+    });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const press = tap.collectTapPayment(PI);
+    await vi.advanceTimersByTimeAsync(3_000);
+    expect(await press).toEqual({
+      ok: false,
+      error: "The card was declined (insufficient funds). Nothing was charged — try another card on the same payment.",
+    });
+    expect(t.plugin.collectPaymentMethod).toHaveBeenCalledTimes(2);
+  });
+
   it("the verdict listeners are armed for the attempt and gone after it", async () => {
     const tap = await freshBridge();
     t.markConnected();

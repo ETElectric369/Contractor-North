@@ -674,13 +674,18 @@ function said(e: unknown): string {
  * The plugin's two verdict events for one payment attempt: `terminalFailed` (a collect or a
  * confirm that the SDK called failed — with the decline code when there is one) and
  * `terminalCanceled`. Heard from before the reader is armed until the attempt ends, so a Failed
- * that arrives beside a resolved confirm still decides the answer. An older bridge without the
- * events registers nothing and the attempt goes on the confirm's own word; a listener that
- * can't be removed is left to Capacitor's page reset (bridge.reset()).
+ * that arrives beside a resolved confirm still decides the answer. The plugin says Failed for
+ * EVERY collect error, the reader-busy one included, and Canceled for a clear that caught a
+ * collect still open — so a collect that is retried calls `reset()` first: the verdicts of a
+ * collect that never reached the card belong to that collect, not to the one that did. An older
+ * bridge without the events registers nothing and the attempt goes on the confirm's own word; a
+ * listener that can't be removed is left to Capacitor's page reset (bridge.reset()).
  */
 async function hearPaymentVerdicts(p: TerminalPlugin): Promise<{
   failure: () => Error | null;
   cancelled: () => boolean;
+  /** Forget what was heard so far: the next collect is a new attempt, and only its verdicts count. */
+  reset: () => void;
   stop: () => Promise<void>;
 }> {
   let failed: { message: string; data: unknown } | null = null;
@@ -707,6 +712,10 @@ async function hearPaymentVerdicts(p: TerminalPlugin): Promise<{
     // decline code, describeFailure the sentence.
     failure: () => (failed ? Object.assign(new Error(failed.message), { data: failed.data }) : null),
     cancelled: () => cancelled,
+    reset: () => {
+      failed = null;
+      cancelled = false;
+    },
     stop: async () => {
       for (const h of handles) await h.remove().catch(() => {});
     },
@@ -1750,6 +1759,11 @@ async function collectAttempt(p: TerminalPlugin, input: { clientSecret: string }
           await raced(5_000, () => p.cancelCollectPaymentMethod()).catch(() => {});
           await pause(BUSY_RETRY_PAUSE_MS);
           if (cancelRequested) throw e;
+          // The busy collect's Failed (the plugin tells its listeners about every collect error,
+          // busy included) and the Canceled the clear above may raise were THAT collect's verdicts.
+          // Forget them here, or a card this collect reads and Stripe charges would be answered
+          // "still busy — try again" or "Cancelled. Nothing was charged." — a lie the other way.
+          heard.reset();
           await collect();
         }
         // Stripe: authorize or cancel within 30 seconds of collection — confirm straight away.
