@@ -75,6 +75,14 @@ describe("the job page's Scheduled box: the length beside the start", () => {
     expect(text(html)).not.toContain("full days");
   });
 
+  it("Full Day on several days reads as a full day each day, with Full Day pressed (the size the chip stores is a working day)", () => {
+    // What the Full Day chip stores on Erik's two-day job (planJobTimes: 9:00 first day, 5:00 PM last day, planned 480).
+    const html = box({ start: at("2026-09-28", "09:00"), end: at("2026-09-30", "17:00"), planned: 480, segments: [{ start_date: "2026-09-28", end_date: "2026-09-28" }, { start_date: "2026-09-30", end_date: "2026-09-30" }] });
+    expect(html).toMatch(/<button[^>]*aria-pressed="true"[^>]*>Full Day<\/button>/);
+    expect(html).not.toMatch(/<button[^>]*aria-pressed="true"[^>]*>2h<\/button>/);
+    expect(text(html)).toContain("9:00 AM – 5:00 PM each day through Wed, Sep 30 · All day");
+  });
+
   it("no day yet: it says what a day will bring", () => {
     expect(text(box({ start: null, end: null }))).toContain("lands as 2 hours");
   });

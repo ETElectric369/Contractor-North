@@ -295,7 +295,8 @@ export function dayBlockWords(p: {
  *   startTime  undefined keep the start the job has · "HH:MM" set it · null/"" all day (the old
  *              "clear the time")
  *   length     undefined keep the length the job has · minutes set it (and planned_minutes) · "full"
- *              the company's whole day (planned_minutes = one working day)
+ *              the company's whole day (planned_minutes = one working day, or on several days the load
+ *              already on file when that is more)
  *
  * Keeping the length means (keptEndMin): the clock length of the timed block the job already has on its
  * day (never the closing-time stamp older writes put on every end); else the size somebody chose; else
@@ -336,7 +337,12 @@ export function planJobTimes(p: {
   const numeric = typeof p.length === "number" && Number.isFinite(p.length) && p.length > 0;
   if (p.length === "full" || (clearsTime && p.length === undefined)) {
     startMin = wd.startMin;
-    if (p.length === "full" && !multiDay) plannedMinutes = WORK_DAY_MINUTES;
+    // FULL DAY STORES A SIZE THAT CANNOT SHRINK IT. jobDayBlock draws a sub-day size over an end that
+    // sits at closing (the old stamp), so a job carrying the 2h chip (120) that is then made Full Day
+    // must not keep 120 beside its new 8-to-5 end: on one day the size is one working day; on several
+    // days it is at least one (a load of several days already on file stays what it was). Before this,
+    // Full Day on several days left the column alone and the block re-read as 8:00 to 10:00 each day.
+    if (p.length === "full") plannedMinutes = multiDay ? Math.max(sized, WORK_DAY_MINUTES) : WORK_DAY_MINUTES;
   } else if (numeric) {
     clockMinutes = Math.min(60 * 24 * 30, Math.round(p.length as number));
     // ONE DAY'S CLOCK IS NOT THE JOB'S LOAD. planned_minutes is a work-load figure (WORK_DAY_MINUTES is
