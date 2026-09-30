@@ -5,10 +5,9 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 /**
- * THE MORE MENU'S TWO VIEWS (W1-18). In the tiles look, More lists the tabs that hold something (in
- * their clusters, with their open counts), a divider, and "+ Add…"; "+ Add…" swaps the menu to "‹
- * More" and the tabs that hold nothing yet, by name and icon. Every row is a 44px tap target. The
- * underline look has no tucked tabs: its menu lists everything, as it always did.
+ * THE MORE MENU IS ONE LIST OF EVERY TAB (Erik, report 002dbffc: "the more dropdown should contain
+ * everything (remove + Add)"). In their clusters, with their open counts, full or empty — no second
+ * "+ Add…" view, in either look. Every row is a 44px tap target.
  */
 vi.mock("next/navigation", () => ({ usePathname: () => "/x", useSearchParams: () => new URLSearchParams() }));
 
@@ -18,84 +17,63 @@ import { Camera, FileText, Receipt, Stamp } from "lucide-react";
 
 const ITEMS: TabBarItem[] = [
   { id: "invoices", label: "Invoices", group: "Money", icon: Receipt, count: 2 },
-  { id: "quotes", label: "Estimates", group: "Money", icon: FileText, tucked: true },
+  { id: "quotes", label: "Estimates", group: "Money", icon: FileText },
   { id: "photos", label: "Photos", group: "Docs", icon: Camera, count: 5 },
-  { id: "permits", label: "Permits", group: "Docs", icon: Stamp, tucked: true },
+  { id: "permits", label: "Permits", group: "Docs", icon: Stamp },
 ];
-const html = (p: Partial<Parameters<typeof MoreMenuRows>[0]> = {}) => renderToStaticMarkup(createElement(MoreMenuRows, { items: ITEMS, tile: true, ...p }));
+const html = (p: Partial<Parameters<typeof MoreMenuRows>[0]> = {}) => renderToStaticMarkup(createElement(MoreMenuRows, { items: ITEMS, ...p }));
 const rowTags = (s: string) => Array.from(s.matchAll(/<(?:button|a)\b[^>]*>/g)).map((m) => m[0]);
 const labels = (s: string) => Array.from(s.matchAll(/<span class="flex-1">([^<]+)<\/span>/g)).map((m) => m[1]);
 
-describe("the main view", () => {
-  it("the holding tabs in their clusters with their open counts, a divider, then + Add…", () => {
+describe("the More menu lists every tab", () => {
+  it("all of them in their clusters, the ones with something open wearing their count", () => {
     const s = html();
-    expect(labels(s)).toEqual(["Invoices", "Photos", "Add…"]);
+    expect(labels(s)).toEqual(["Invoices", "Estimates", "Photos", "Permits"]);
     expect(s.indexOf(">Money<")).toBeLessThan(s.indexOf(">Invoices<"));
     expect(s.indexOf(">Docs<")).toBeLessThan(s.indexOf(">Photos<"));
     expect(s).toMatch(/>Invoices<\/span><span[^>]*>2<\/span>/);
-    expect(s).toContain("border-t");
-    expect(s).toContain("lucide-plus");
-    expect(s).not.toContain("Estimates");
+    expect(s).toMatch(/>Photos<\/span><span[^>]*>5<\/span>/);
   });
 
-  it("with nothing holding, only + Add… (and no divider above it)", () => {
-    const s = html({ items: ITEMS.filter((t) => t.tucked) });
-    expect(labels(s)).toEqual(["Add…"]);
+  it("an empty tab is a plain row: no + Add…, no divider, no going back", () => {
+    const s = html();
+    expect(labels(s)).not.toContain("Add…");
+    expect(s).not.toContain("lucide-plus");
+    expect(s).not.toContain("lucide-chevron-left");
     expect(s).not.toContain("border-t");
-  });
-
-  it("with nothing tucked, no + Add… at all", () => {
-    expect(labels(html({ items: ITEMS.filter((t) => !t.tucked) }))).toEqual(["Invoices", "Photos"]);
-  });
-});
-
-describe("the + Add… view", () => {
-  it("‹ More first, then each tucked tab by name and icon, no counts", () => {
-    const s = html({ view: "add" });
-    expect(labels(s)).toEqual(["More", "Estimates", "Permits"]);
-    expect(s).toContain("lucide-chevron-left");
+    // Nothing behind a second door: the empty tabs are rows you can tap right now.
     expect(s).toContain("lucide-file-text");
     expect(s).toContain("lucide-stamp");
-    expect(s).not.toContain("Invoices");
+  });
+
+  it("the tabs with nothing in them, on their own, still list by name and icon", () => {
+    const s = html({ items: ITEMS.filter((t) => t.count == null) });
+    expect(labels(s)).toEqual(["Estimates", "Permits"]);
   });
 });
 
-describe("every row is 44px, in both views and both looks", () => {
+describe("every row is 44px (one list, so one row recipe for both looks)", () => {
   it("min-h-11 on every button and link", () => {
-    for (const s of [html(), html({ view: "add" }), html({ tile: false })]) {
-      const tags = rowTags(s);
-      expect(tags.length).toBeGreaterThan(0);
-      for (const t of tags) expect(t).toContain("min-h-11");
-    }
-  });
-
-  it("the underline look lists everything as before: nothing is tucked there", () => {
-    expect(labels(html({ tile: false }))).toEqual(["Invoices", "Estimates", "Photos", "Permits"]);
+    const tags = rowTags(html());
+    expect(tags.length).toBe(ITEMS.length);
+    for (const t of tags) expect(t).toContain("min-h-11");
   });
 });
 
 describe("the panel never hides under the bottom dock (bug triage 2026-09-27)", () => {
   const src = () => readFileSync(join(process.cwd(), "src/components/tabs.tsx"), "utf8");
 
-  it("More is placed by the shared glass-menu placement, like Manage and the team menus, and again when its view changes", () => {
-    expect(src()).toContain("const { panelRef, panelStyle } = useGlassMenuPlacement(open, view);");
+  it("More is placed by the shared glass-menu placement, like Manage and the team menus", () => {
+    expect(src()).toContain("const { panelRef, panelStyle } = useGlassMenuPlacement(open);");
     expect(src()).toMatch(/ref=\{panelRef\}\s+role="menu"\s+style=\{\{ \.\.\.panelStyle, right: 0 \}\}/);
-    // The hook measures on the view as well as the open, and without the cap an earlier measure set.
-    const hook = readFileSync(join(process.cwd(), "src/components/ui/glass-menu.ts"), "utf8");
-    expect(hook).toContain("}, [open, contentKey]);");
-    expect(hook).toContain('panel.style.maxHeight = "";');
   });
 
   // A new job's office More on a 667px phone: the strip's More chip spans y 330-382, the bottom dock's
-  // top edge is at 595. The main view is "+ Add…" alone (52px); the Add view is "‹ More", a divider
-  // and nine tucked tabs, which the panel's CSS cap stops at 384px.
+  // top edge is at 595. The list is every unpinned tab now — nine rows and their cluster headers, which
+  // the panel's own CSS cap (max-h-[min(70vh,24rem)]) stops at 384px.
   const chip = { anchorTop: 330, anchorBottom: 382, bottomLimit: 595 };
 
-  it("the one-row main view fits below the chip and drops down", () => {
-    expect(placeGlassMenu({ panelH: 52, ...chip })).toEqual({ dropUp: false, maxHeight: undefined });
-  });
-
-  it("the Add view, measured again, opens upward above the chip instead of hanging under the dock", () => {
+  it("the full list opens upward above the chip instead of hanging under the dock", () => {
     const p = placeGlassMenu({ panelH: 384, ...chip });
     expect(p.dropUp).toBe(true);
     // Room above the chip is 318px, so it also scrolls inside that room: every row can be reached.
@@ -111,6 +89,12 @@ describe("the panel never hides under the bottom dock (bug triage 2026-09-27)", 
       expect(bottom).toBeLessThanOrEqual(a.bottomLimit);
       expect(bottom - h).toBeGreaterThanOrEqual(0);
     }
+  });
+
+  it("the rows scroll inside the capped panel, so the bottom of a long list is reachable", () => {
+    const panel = src().match(/role="menu"[\s\S]*?className="([^"]+)"/)?.[1] ?? "";
+    expect(panel).toContain("max-h-[min(70vh,24rem)]");
+    expect(src()).toMatch(/min-h-0 flex-1 overflow-y-auto[\s\S]*?<MoreMenuRows/);
   });
 
   it("opened upward, it sits over the job's sticky action dock (z-40), so no tap lands on Call or Navigate", () => {

@@ -469,10 +469,10 @@ export default async function JobDetailPage({
         (r: { count: number | null; error: unknown }) => (r.error ? undefined : (r.count ?? 0)),
         () => undefined,
       ),
-    // DOES THE PANEL TAB HOLD ANYTHING (W1-18: More shows what the job has): any panel, or any live
-    // circuit, kept or suggested. Head-only counts riding this wave; the badge stays panelCount (the
-    // open ones). A failed read (a database without 0333 included) counts as holding, so an error
-    // never tucks the tab away.
+    // DOES THE PANEL TAB HOLD ANYTHING: any panel, or any live circuit, kept or suggested. Head-only
+    // counts; the badge stays panelCount (the open ones). `holds` is what tells the crew's strip the
+    // tab has nothing to read and nothing he could add; a failed read (a database without 0333
+    // included) counts as holding, so an error never takes the tab off his strip.
     Promise.all([
       supabase.from("job_panels").select("id", { count: "exact", head: true }).eq("job_id", id).is("removed_at", null),
       supabase.from("job_circuits").select("id", { count: "exact", head: true }).eq("job_id", id).is("removed_at", null),
@@ -1058,8 +1058,8 @@ export default async function JobDetailPage({
   let sharedPhotoIds: string[] | null = null;
   let portalPapers: Record<string, "shown" | "replaced"> | null = null;
   let staleSharedIds: string[] = [];
-  // Does the Customer Page tab hold anything (W1-18): a paper shown, a stretch or a pick, live. Only
-  // read where the tab is the office's and switched on; a failed read counts as holding.
+  // Does the Customer Page tab hold anything: a paper shown, a stretch or a pick, live. Only read
+  // where the tab is the office's and switched on; a failed read counts as holding.
   let customerPageHolds = true;
   // Customer Portal off (the switch board): no Show Customer / Show On Portal, so no read for them.
   if (viewerIsStaff && on("customer_portal")) {
@@ -1376,7 +1376,7 @@ export default async function JobDetailPage({
       // keeps how many job-site photos the job has (tests/badges-show-open names the exception):
       // the grid only, never the Plans & Other Papers fold under it, a receipt or a bill.
       id: "photos",
-      // Holds a job-site photo or a plan (office only: for the crew Photos is a pinned chip). W1-18.
+      // Holds a job-site photo or a plan (office only: for the crew Photos is a pinned chip).
       holds: !!docsErr || paperSort.photos.length > 0 || paperSort.pictures.length > 0,
       label: "Photos",
       count: paperSort.photos.length,

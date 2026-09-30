@@ -124,55 +124,56 @@ describe("a switched-off feature's tab", () => {
   });
 });
 
-describe("More shows what the job has, plus one + Add… (W1-18)", () => {
+describe("More lists every tab (Erik 002dbffc: \"the more dropdown should contain everything (remove + Add)\")", () => {
   /** The page's tabs with `holds` set: true for the ids given, false for every other. */
   const holding = (ids: string[]) => TABS.map((t) => ({ ...t, holds: ids.includes(t.id) }));
   /** What the strip hands More: this viewer's tabs, minus pinned chips and offStrip ones (TabBar's own filter). */
   const moreItems = (arranged: TabDef[], staff: boolean) => arranged.filter((t) => (!t.staffOnly || staff) && !t.offStrip && !t.pinned);
-  const rows = (items: TabDef[], view: "main" | "add" = "main") =>
-    renderToStaticMarkup(createElement(MoreMenuRows, { items, view, tile: true }));
+  const rows = (items: TabDef[]) => renderToStaticMarkup(createElement(MoreMenuRows, { items }));
   const labels = (html: string) => Array.from(html.matchAll(/<span class="flex-1">([^<]+)<\/span>/g)).map((m) => m[1]);
+  /** Every unpinned office tab — what a brand-new job's More has to list, empty or not. */
+  const OFFICE_MORE = JOB_TAB_ORDER.filter((id) => !JOB_PINNED_STAFF.has(id));
 
   it("no notes tab: the notes are the Overview's second box (W1-21)", () => {
     expect(JOB_TAB_ORDER).not.toContain("notes");
   });
 
-  it("tucked is false for pinned and offStrip tabs; with no holds said, nothing is tucked", () => {
-    for (const staff of [true, false]) {
-      for (const t of arrangeJobTabs(holding([]), staff, { features: off("permits", "customer_portal"), isOwner: true })) {
-        if (t.pinned || t.offStrip) expect(t.tucked, t.id).toBe(false);
-      }
-      expect(arrangeJobTabs(TABS, staff).filter((t) => t.tucked)).toEqual([]);
-    }
-  });
-
-  it("a new job's office More is only + Add…, and + Add… lists every empty tab by name", () => {
+  it("a brand-new job's office More lists all nine unpinned tabs by name — nothing waits behind a + Add…", () => {
     const items = moreItems(arrangeJobTabs(holding([]), true), true);
+    expect(OFFICE_MORE).toHaveLength(9);
+    expect(items.map((t) => t.id).sort()).toEqual([...OFFICE_MORE].sort());
     const main = rows(items);
-    expect(labels(main)).toEqual(["Add…"]);
-    const add = rows(items, "add");
-    expect(labels(add)[0]).toBe("More");
-    expect(labels(add).slice(1).sort()).toEqual(items.map((t) => t.label).sort());
-    expect(items.map((t) => t.id).sort()).toEqual(["appointments", "change-orders", "customer", "invoices", "permits", "panel", "photos", "quotes", "wos"].sort());
+    // Clustered (Money, then Docs, then Work), and every one of the nine is there by name.
+    expect(labels(main)).toEqual([
+      "invoices", "quotes", "change-orders", "customer",
+      "photos", "permits", "panel",
+      "appointments", "wos",
+    ]);
+    expect(labels(main)).not.toContain("Add…");
+    expect(main).not.toContain("lucide-plus");
+    expect(main).not.toContain("lucide-chevron-left");
   });
 
-  it("a job with invoices and photos lists exactly those two, then + Add…", () => {
+  it("a job with invoices and photos lists the same nine: what it holds and what it doesn't, together", () => {
     const items = moreItems(arrangeJobTabs(holding(["invoices", "photos"]), true), true);
-    expect(labels(rows(items))).toEqual(["invoices", "photos", "Add…"]);
-    expect(labels(rows(items, "add"))).not.toContain("invoices");
+    const shown = labels(rows(items));
+    expect(shown.slice().sort()).toEqual([...OFFICE_MORE].sort());
+    for (const id of ["invoices", "photos", "quotes", "permits"]) expect(shown).toContain(id);
   });
 
-  it("the crew is never offered a staff-write tab that is empty: only the Panel, which he works", () => {
+  it("the crew still gets no row to a staff-write tab that is empty: only the Panel, which he works", () => {
     expect([...JOB_TECH_ADDABLE]).toEqual(["panel"]);
     const t = byId(arrangeJobTabs(holding([]), false));
-    for (const id of ["permits", "appointments", "wos"]) {
-      expect(t[id].offStrip, id).toBe(true);
-      expect(t[id].tucked, id).toBe(false);
-    }
-    expect(t.panel.tucked).toBe(true);
-    expect(labels(rows(moreItems(arrangeJobTabs(holding([]), false), false), "add"))).toEqual(["More", "panel"]);
+    for (const id of ["permits", "appointments", "wos"]) expect(t[id].offStrip, id).toBe(true);
+    expect(t.panel.offStrip).toBe(false);
+    // Photos is a pinned chip for him, so the Panel is the whole of his More.
+    expect(labels(rows(moreItems(arrangeJobTabs(holding([]), false), false)))).toEqual(["panel"]);
     // A tab that holds something is his to read, empty or not for the office.
     expect(byId(arrangeJobTabs(holding(["permits"]), false)).permits.offStrip).toBe(false);
+  });
+
+  it("with no holds said, nothing leaves the strip on a guess", () => {
+    for (const staff of [true, false]) expect(arrangeJobTabs(TABS, staff).filter((t) => t.offStrip)).toEqual([]);
   });
 
   it("when the crew's More would hold nothing, there is no More chip", () => {
@@ -183,10 +184,10 @@ describe("More shows what the job has, plus one + Add… (W1-18)", () => {
     expect(html).toMatch(/>job</); // the pinned chips are all there
   });
 
-  it("a ?tab= link to a tucked tab still opens it, and More wears its name", () => {
+  it("a ?tab= link to an empty tab still opens it, and More wears its name", () => {
     nav.search = "tab=quotes";
     const arranged = arrangeJobTabs(holding([]), true);
-    expect(byId(arranged).quotes.tucked).toBe(true);
+    expect(byId(arranged).quotes.offStrip).toBe(false);
     const html = renderToStaticMarkup(createElement(Tabs, { tabs: arranged, viewerIsStaff: true, look: "tiles" }));
     expect(html).toContain("quotes-BODY");
     expect(html).toMatch(/aria-current="page"[^>]*>(?:(?!<\/button>)[\s\S])*>quotes</);
