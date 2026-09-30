@@ -386,6 +386,11 @@ describe("the screen: Title Case on every new clickable, and the words that repl
 
   it("the Vendors tab: chips, kind words, View On Map, and the line that says who carries prices", () => {
     expect(MANAGER).toContain("Suppliers, subcontractors and brands can all carry prices on items.");
+    // PUT IT ON AN ITEM IS ON EVERY VENDOR'S SHEET (Erik 2026-09-30): no Kind is turned away, so
+    // the sentence that used to send a subcontractor back to change its Kind is gone.
+    expect(MANAGER).toContain("Put It On An Item");
+    expect(MANAGER).not.toContain("subcontractors don");
+    expect(MANAGER).not.toContain("Change its Kind to Supplier or Brand");
     expect(MANAGER).toContain("View On Map");
     expect(MANAGER).not.toContain("A vendor is the brand, e.g. Andersen.\n");
     expect(MANAGER).not.toContain('placeholder: "the brand, e.g. Andersen"');
