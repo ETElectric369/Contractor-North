@@ -36,7 +36,7 @@ import { JobCostCapture } from "./job-cost-capture";
 import { UnbilledCard, UnbilledDoorButton, type UnbilledView } from "./unbilled-card";
 import { LeftToBillCard, contractEstimates } from "./left-to-bill-card";
 import { fixedBillingsNotYetNetted, unbilledWorkForJob } from "@/lib/unbilled-work";
-import { groupJobCosts } from "@/lib/job-cost-groups";
+import { groupJobCosts, openRowsDrawn } from "@/lib/job-cost-groups";
 import { readJobPapers } from "./job-papers";
 import { JobPaperList, type JobPaperView } from "./job-paper-list";
 import { tmWorkToDate } from "@/lib/job-financials";
@@ -1014,8 +1014,21 @@ export default async function JobDetailPage({
   // a "1" that is no row could never be found. The loose receipts are the Receipts & Papers fold's own
   // "N Not On A Bill Yet" (the same paperSort.loose it is handed below); they are the job's documents,
   // never supplier_invoices, so they can't double a paperView.
+  // J-013 (0b742620, 2026-09-29): one live bill, no papers, and the chip said 3. The chip counts only
+  // the pile ids the tab draws (a bill, an order, a take from stock — lib/job-cost-groups
+  // openRowsDrawn); an id nothing on the tab stands behind is reported, never counted.
+  const openDrawn = costGroups
+    ? openRowsDrawn(costGroups, [...((bills ?? []) as any[]).map((b) => String(b.id)), ...((pos ?? []) as any[]).map((p) => String(p.id))])
+    : { drawn: [], phantom: [] };
+  if (openDrawn.phantom.length > 0) {
+    reportError("jobs.[id].costsChip", new Error("Not Billed Yet holds ids no row on the Costs tab draws"), {
+      jobId: id,
+      phantom: openDrawn.phantom.join(","),
+      billed: String(((bills ?? []) as any[]).length),
+    });
+  }
   const costsOpen =
-    (costGroups?.open.ids.length ?? 0) +
+    openDrawn.drawn.length +
     (paperViews ?? []).filter((p) => !p.waitingOnCredit).length +
     (viewerIsStaff && paperSort.loose ? paperSort.loose.length : 0);
   const taskListProps = {

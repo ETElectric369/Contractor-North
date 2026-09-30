@@ -150,8 +150,13 @@ describe("every tab count in the app is an open count", () => {
     const costsOpen = page.slice(page.indexOf("const costsOpen ="), page.indexOf(";", page.indexOf("const costsOpen =")));
     // The three piles, each a list of rows: Not Billed Yet, the supplier's papers in nobody's books,
     // and the receipts the Receipts & Papers fold calls "Not On A Bill Yet" (from the very list the
-    // fold is handed).
-    expect(costsOpen).toContain("costGroups?.open.ids.length");
+    // fold is handed). Not Billed Yet is counted as the pile ids the tab DRAWS (a bill, an order, a
+    // take from stock — lib/job-cost-groups openRowsDrawn), and an id no row stands behind is
+    // reported, never counted (J-013 again, 2026-09-29: the chip still said 3 on one live bill).
+    expect(costsOpen).toContain("openDrawn.drawn.length");
+    expect(costsOpen).not.toContain("open.ids.length");
+    expect(page).toContain("openRowsDrawn(costGroups,");
+    expect(page).toContain('reportError("jobs.[id].costsChip"');
     expect(costsOpen).toContain("(paperViews ?? []).filter((p) => !p.waitingOnCredit).length");
     expect(costsOpen).toContain("viewerIsStaff && paperSort.loose ? paperSort.loose.length : 0");
     expect(page).toContain("looseIds={paperSort.loose ? paperSort.loose.map(");
