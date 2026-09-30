@@ -13,7 +13,7 @@ import {
   type ExistingVendor,
   type PreviewRow,
 } from "./vendor-import-math";
-import { cleanVendorCard, hiddenSubcontractors, knownVendorNames, listedKind, matchesVendorFilter, vendorFilters, type VendorCard } from "./item-options-math";
+import { cleanVendorCard, knownVendorNames, listedKind, matchesVendorFilter, vendorFilters, type VendorCard } from "./item-options-math";
 
 /**
  * Import A List, the sorting half (vendor import, Phase 1). Every name here is MADE UP: a real
@@ -21,8 +21,8 @@ import { cleanVendorCard, hiddenSubcontractors, knownVendorNames, listedKind, ma
  *
  * The laws under test: the app suggests and a person decides (every kind is a labelled guess, a
  * fuzzy match only ever asks, its tick starts off, nothing is merged); an exact name the org already
- * has as a live card can't be added twice; and a subcontractor is never offered as a vendor on an
- * item.
+ * has as a live card can't be added twice; and every kind, subcontractors included, is offered as a
+ * vendor on an item (Erik 2026-09-30, reversing 0341's rule).
  */
 
 describe("headings: recognised and left out, never a vendor", () => {
@@ -278,8 +278,8 @@ const vc = (over: Partial<VendorCard> & { name: string }): VendorCard => ({
   ...over,
 });
 
-describe("THE ITEM PRICE PICKER never offers a subcontractor (0341)", () => {
-  it("brand, supplier and Not Sorted cards are offered; a subcontractor card is not, even where an item still spells it", () => {
+describe("THE ITEM PRICE PICKER offers every kind, subcontractors included (Erik 2026-09-30)", () => {
+  it("a subcontractor card is offered beside the brands, suppliers and Not Sorted vendors", () => {
     const cards = [
       vc({ name: "Andersen", kind: "brand" }),
       vc({ name: "Lakeside Windows", kind: "supplier" }),
@@ -288,34 +288,23 @@ describe("THE ITEM PRICE PICKER never offers a subcontractor (0341)", () => {
     ];
     expect(knownVendorNames([{ vendor: "coldwater drywall" }, { vendor: "Milgard" }], cards)).toEqual([
       "Andersen",
+      "Coldwater Drywall",
       "Lakeside Windows",
       "Milgard",
       "Quartzline Holdings",
     ]);
   });
 
-  it("before 0341 (no kind on the card) every card is offered, exactly as before", () => {
-    expect(knownVendorNames([], [vc({ name: "Andersen" })])).toEqual(["Andersen"]);
+  it("a sub's spelling on the card wins over the item row's, the way every other kind's does", () => {
+    expect(knownVendorNames([{ vendor: "coldwater drywall" }], [vc({ name: "Coldwater Drywall", kind: "subcontractor" })])).toEqual(["Coldwater Drywall"]);
   });
 
-  /**
-   * AND THE SHEET SAYS WHO IT LEFT OUT (b0a8f25e). An import of twenty-nine names, mostly subs by
-   * guessKind, put three in the picker and nothing said where the other twenty-six went.
-   */
-  it("hiddenSubcontractors names the live subcontractor cards, sorted; archived subs and every other kind stay out", () => {
-    const cards = [
-      vc({ name: "Ridge Roofing", kind: "subcontractor" }),
-      vc({ name: "Coldwater Drywall", kind: "subcontractor" }),
-      vc({ name: "Old Sub", kind: "subcontractor", archived: true }),
-      vc({ name: "Andersen", kind: "brand" }),
-      vc({ name: "Lakeside Windows", kind: "supplier" }),
-      vc({ name: "Quartzline Holdings", kind: null }),
-      vc({ name: "Before 0341" }),
-    ];
-    expect(hiddenSubcontractors(cards)).toEqual(["Coldwater Drywall", "Ridge Roofing"]);
-    expect(hiddenSubcontractors([])).toEqual([]);
-    // One name, two spellings on two cards: named once.
-    expect(hiddenSubcontractors([vc({ name: "Coldwater Drywall", kind: "subcontractor" }), vc({ name: "  coldwater drywall ", kind: "subcontractor" })])).toEqual(["Coldwater Drywall"]);
+  it("an archived card stays out whatever its kind is", () => {
+    expect(knownVendorNames([], [vc({ name: "Old Sub", kind: "subcontractor", archived: true }), vc({ name: "Ridge Roofing", kind: "subcontractor" })])).toEqual(["Ridge Roofing"]);
+  });
+
+  it("before 0341 (no kind on the card) every card is offered, exactly as before", () => {
+    expect(knownVendorNames([], [vc({ name: "Andersen" })])).toEqual(["Andersen"]);
   });
 });
 
