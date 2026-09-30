@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { isOpenBill } from "@/lib/open-counts";
+import { shortSupplierName } from "@/lib/supplier-name";
 
 /**
  * THE ONE WORD ON THIS SCREEN THAT INVITES A DOUBLE-COUNT.
@@ -39,8 +40,34 @@ describe("All Bills lists receipt files, and is never a second upload door (Wave
 
 describe("a bill's status says how it was bought, in words", () => {
   it("never prints the raw database word on the badge", () => {
-    expect(SRC).toContain('{b.status === "paid" ? "Settled" : b.settledBySupplier ? `Settled · ${b.supplier} Says` : "On Account"}');
+    expect(SRC).toContain('{b.status === "paid" ? "Settled" : b.settledBySupplier ? `Settled · ${b.settledBySupplierName || shortSupplierName(b.supplier)} Says` : "On Account"}');
     expect(SRC).not.toContain("<Badge tone={statusTone(b.status)}>{b.status}</Badge>");
+  });
+
+  /**
+   * "SETTLED · CED SAYS", NEVER THE 63-CHARACTER SPELLING. bills.supplier keeps whatever the receipt
+   * reader found (19 of CED's 21 bills are "Consolidated Electrical Distributors, Inc. (CED)" or a
+   * cousin; the two spelled "CED" are paid and print plain "Settled"). The right-hand column is
+   * shrink-0, so a label that long took the whole 390px row on the phone and truncated the bill's
+   * name, number, date and job to nothing, while repeating the name the first line already prints.
+   */
+  it("says who settled it by the account's short name, in a label that can't widen the column", () => {
+    const PAGE = readFileSync(join(process.cwd(), "src/app/(app)/bills/page.tsx"), "utf8");
+    expect(SRC).toContain("settledBySupplierName?: string | null;");
+    expect(PAGE).toContain("shortSupplierName(accountNameOf.get(String(b.supplier_account_id ?? \"\")) || b.supplier)");
+    // The label itself is bounded, whatever name reaches it.
+    expect(SRC).toContain('<span className="block max-w-[9rem] truncate text-xs text-slate-400">');
+    // The one rule, run on the spellings CED's bills actually carry.
+    const label = (b: { status: string; supplier: string; settledBySupplier?: boolean; settledBySupplierName?: string | null }) =>
+      b.status === "paid" ? "Settled" : b.settledBySupplier ? `Settled · ${b.settledBySupplierName || shortSupplierName(b.supplier)} Says` : "On Account";
+    const account = shortSupplierName("Consolidated Electrical Distributors, Inc. (CED)");
+    expect(account).toBe("CED");
+    for (const spelling of ["Consolidated Electrical Distributors, Inc. (CED)", "Consolidated Electrical Dist.", "Consolidated Electrical Distributors, Inc.", "CED"]) {
+      expect(label({ status: "unpaid", supplier: spelling, settledBySupplier: true, settledBySupplierName: account })).toBe("Settled · CED Says");
+    }
+    // A bill on no account (the page stamps null) still never prints the long spelling.
+    expect(label({ status: "unpaid", supplier: "Consolidated Electrical Distributors, Inc.", settledBySupplier: true, settledBySupplierName: null })).toBe("Settled · CED Says");
+    expect(label({ status: "unpaid", supplier: "Swigard's Hardware", settledBySupplier: true, settledBySupplierName: null })).toBe("Settled · Swigard's Hardware Says");
   });
 
   /**
@@ -58,8 +85,8 @@ describe("a bill's status says how it was bought, in words", () => {
     const asBefore = { id: "b3", supplier: "CED", status: "unpaid", superseded: false };
     expect([settled, stillOpen, asBefore].filter((b) => isOpenBill(b)).map((b) => b.id)).toEqual(["b2", "b3"]);
     // The label the row prints for each.
-    const label = (b: { status: string; supplier: string; settledBySupplier?: boolean }) =>
-      b.status === "paid" ? "Settled" : b.settledBySupplier ? `Settled · ${b.supplier} Says` : "On Account";
+    const label = (b: { status: string; supplier: string; settledBySupplier?: boolean; settledBySupplierName?: string | null }) =>
+      b.status === "paid" ? "Settled" : b.settledBySupplier ? `Settled · ${b.settledBySupplierName || shortSupplierName(b.supplier)} Says` : "On Account";
     expect(label(settled)).toBe("Settled · CED Says");
     expect(label(stillOpen)).toBe("On Account");
     expect(label({ status: "paid", supplier: "CED", settledBySupplier: true })).toBe("Settled");

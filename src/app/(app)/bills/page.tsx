@@ -1229,6 +1229,11 @@ export default async function BillsPage({
       superseded: !!b.superseded_by_bill_id,
       // Settled in the supplier's own books (every covering document closed): not open (isOpenBill).
       settledBySupplier: settledBySupplierIds.has(String(b.id)),
+      // WHO says so: the account's short name ("CED"), not the spelling the receipt reader stored
+      // on bills.supplier (the row's first line already prints that one, in full).
+      settledBySupplierName: settledBySupplierIds.has(String(b.id))
+        ? shortSupplierName(accountNameOf.get(String(b.supplier_account_id ?? "")) || b.supplier)
+        : null,
       receipt: receiptById.get(String(b.id)) ?? null,
       papers: paperOfBill[String(b.id)] ?? null,
     };

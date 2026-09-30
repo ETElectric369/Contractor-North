@@ -31,6 +31,7 @@ import { ReceiptLines, type ReceiptForBilling } from "./receipt-billing-card";
 import { AlreadyBilledButton, NotBilledAfterAllButton } from "@/components/already-billed-sheet";
 import type { BillAlreadyBilled } from "@/lib/already-billed";
 import { isOpenBill } from "@/lib/open-counts";
+import { shortSupplierName } from "@/lib/supplier-name";
 import { useBillsSearch } from "./bills-search-box";
 
 interface JobOption {
@@ -82,6 +83,13 @@ export interface BillRow {
    * is how it was bought; the row says "Settled · CED Says" and Unpaid leaves it out (isOpenBill).
    */
   settledBySupplier?: boolean;
+  /**
+   * WHO says it is settled: the supplier ACCOUNT's short name ("CED"), never bills.supplier. That
+   * column keeps the spelling the receipt reader found ("Consolidated Electrical Distributors,
+   * Inc. (CED)", 19 of CED's 21 bills), which the row's first line already prints and which, in
+   * the right-hand column that can't shrink, would push the bill's own name and number off a phone.
+   */
+  settledBySupplierName?: string | null;
   /**
    * The receipt's per-line billing switches (0268/0272), when this bill is a live receipt on a job
    * with lines. They live in the bill's own detail now: one place per bill, no second list.
@@ -275,7 +283,11 @@ export function BillsReceipts({
             </span>
             <span className="shrink-0 text-right">
               <span className={`block font-medium tabular-nums ${b.superseded ? "text-slate-400 line-through" : "text-slate-800"}`}>{formatCurrency(b.amount)}</span>
-              <span className="block text-xs text-slate-400">{b.status === "paid" ? "Settled" : b.settledBySupplier ? `Settled · ${b.supplier} Says` : "On Account"}</span>
+              {/* The label is bounded (max-w + truncate) so a long typed supplier can never widen
+                  this shrink-0 column and collapse the bill's name, number and job on the left. */}
+              <span className="block max-w-[9rem] truncate text-xs text-slate-400">
+                {b.status === "paid" ? "Settled" : b.settledBySupplier ? `Settled · ${b.settledBySupplierName || shortSupplierName(b.supplier)} Says` : "On Account"}
+              </span>
             </span>
           </summary>
 
