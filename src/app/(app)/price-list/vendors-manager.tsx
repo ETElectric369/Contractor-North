@@ -543,7 +543,6 @@ function VendorSheet({
   const tel = card?.phone ? card.phone.replace(/[^\d+]/g, "") : "";
   const web = websiteHref(card?.website);
   const map = mapHref(card);
-  const kind = listedKind(vendor);
 
   return (
     <Modal open onClose={onClose} title={vendor.name} size="xl">
