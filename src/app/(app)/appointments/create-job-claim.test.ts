@@ -31,6 +31,10 @@ vi.mock("@/lib/calendar-sync", () => ({ pushCalendarItem: vi.fn(async () => {}),
 vi.mock("@/lib/push", () => ({ sendPushToProfiles: vi.fn(async () => {}) }));
 // appointments/actions pushes through notifyPeople (the Bell records every push, 0366 wave).
 vi.mock("@/lib/notifications", () => ({ notifyPeople: vi.fn(async () => ({ bell: true, pushed: [] })) }));
+// THE WIN MINTS THE CUSTOMER (209451e1): the one rule every win uses, stubbed so the test can see it
+// asked, and what the job was handed. null = the rule found no lead (the old tests' fresh leads).
+const win = vi.hoisted(() => ({ customerForInquiry: vi.fn(async (): Promise<string | null> => null) }));
+vi.mock("@/lib/actions/win-customer", () => ({ customerForInquiry: win.customerForInquiry }));
 
 import { createJobFromAppointment } from "./actions";
 
@@ -257,5 +261,62 @@ describe("createJobFromAppointment: the job's name is the street, never the visi
       db.appt.title = null;
       expect(await madeName()).toBe("Rita Moss");
     });
+  });
+});
+
+/**
+ * A FRESH LEAD'S VISIT STARTS A JOB WITH A CONTACT (209451e1). The inspection door books the visit
+ * with customer_id null on purpose, so a lead → visit → Start The Job wrote jobs.customer_id = null,
+ * stamped the lead won and minted nobody: no contact on the job, no card until money landed. Now
+ * the one rule every win uses (customerForInquiry: dedup by phone / email / name, the person's own
+ * address, the lead stamped won) mints the card here, and the job, the visit and the lead all carry
+ * it. The visit's notes (the lead's message) become the job's description.
+ */
+describe("createJobFromAppointment: a fresh lead gets its customer, and the job its description", () => {
+  beforeEach(() => {
+    win.customerForInquiry.mockClear();
+    win.customerForInquiry.mockResolvedValue(null);
+    db.release?.();
+    db.arrivals = 1;
+  });
+
+  it("a lead with no customer: the card is minted through customerForInquiry and the job, the visit and the description carry it", async () => {
+    db.appt.customer_id = null;
+    db.appt.inquiry_id = "inq-fresh";
+    db.appt.notes = "Kitchen hood outlet, wants it before the range arrives.";
+    db.inquiry = { id: "inq-fresh", customer_id: null, name: "Jackie Burks", company_name: null, type: "residential" };
+    win.customerForInquiry.mockResolvedValue("cust-minted");
+    db.customers["cust-minted"] = { name: "Jackie Burks", company_name: null, type: "residential" };
+
+    const res = await createJobFromAppointment("appt-tom");
+    expect(res.ok).toBe(true);
+    expect(win.customerForInquiry).toHaveBeenCalledTimes(1);
+    expect(win.customerForInquiry.mock.calls[0][1]).toBe("inq-fresh");
+    expect(win.customerForInquiry.mock.calls[0][2]).toBe("erik");
+    const job = db.jobs.get(res.id!);
+    expect(job.customer_id).toBe("cust-minted");
+    expect(job.description).toBe("Kitchen hood outlet, wants it before the range arrives.");
+    // The visit keeps the same answer the job got: one contact, both records.
+    expect(db.appt.customer_id).toBe("cust-minted");
+  });
+
+  it("a visit that already has a customer never asks the rule, and a visit with no notes makes no description", async () => {
+    db.appt.customer_id = "cust-tom";
+    db.appt.inquiry_id = "inq-1";
+    db.inquiry = { id: "inq-1", customer_id: null, name: "Rita Moss", company_name: null, type: "residential" };
+    const res = await createJobFromAppointment("appt-tom");
+    expect(res.ok).toBe(true);
+    expect(win.customerForInquiry).not.toHaveBeenCalled();
+    expect(db.jobs.get(res.id!).customer_id).toBe("cust-tom");
+    expect(db.jobs.get(res.id!).description).toBeNull();
+  });
+
+  it("the rule finds nobody (a lead it couldn't read): the job is still made, customer-less, as before", async () => {
+    db.appt.customer_id = null;
+    db.appt.inquiry_id = "inq-gone";
+    db.inquiry = { id: "inq-gone", customer_id: null, name: "Rich Test", company_name: null, type: "residential" };
+    const res = await createJobFromAppointment("appt-tom");
+    expect(res.ok).toBe(true);
+    expect(db.jobs.get(res.id!).customer_id).toBeNull();
   });
 });
