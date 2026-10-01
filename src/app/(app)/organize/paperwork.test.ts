@@ -769,14 +769,57 @@ describe("a supplier return through Organize: its lines come with it, or it does
     ]);
   });
 
-  it("the write itself refuses a return with no lines on a job, whichever door calls it", async () => {
+  // Item C2 moved the rule to lib/job-cost-guard and made the write SAY why, so the caller can show
+  // the sentence instead of "Could not create the bill."
+  it("the write itself refuses a return with no lines on a job, whichever door calls it, and says why", async () => {
     state.client = fakeSupabase({}, calls);
-    const bill = { job_id: "job-046", supplier: "CED", amount: -51.58, bill_date: null, category: "Bill", notes: "", created_by: "user-1" };
-    expect(await insertItemizedBill(state.client, bill, [])).toBeNull();
+    const bill = {
+      job_id: "job-046",
+      supplier: "CED",
+      amount: -51.58,
+      bill_date: null,
+      category: "Bill",
+      scope: { kind: "notAsked" } as const,
+      notes: "",
+      created_by: "user-1",
+    };
+    const no = await insertItemizedBill(state.client, bill, []);
+    expect(no.id).toBeNull();
+    expect(no.refusal).toContain("credit the customer the whole amount");
     expect(did("bills", "insert")).toBeUndefined();
     // The company's own book (no job) is not held to it.
     state.client = fakeSupabase({ "bills.insert": [{ data: { id: "bill-oh" }, error: null }] }, calls);
-    expect(await insertItemizedBill(state.client, { ...bill, job_id: null }, [])).toBe("bill-oh");
+    expect(await insertItemizedBill(state.client, { ...bill, job_id: null, scope: { kind: "noJob" } }, [])).toEqual({
+      id: "bill-oh",
+      refusal: null,
+    });
+  });
+
+  // Item C1: the write is the one place a scope becomes a stored value, and it is held to the parts
+  // the job's estimate really has.
+  it("the write stores a part the job's estimate has, and refuses one it hasn't", async () => {
+    state.client = fakeSupabase({ "bills.insert": [{ data: { id: "bill-s" }, error: null }] }, calls);
+    const bill = {
+      job_id: "job-046",
+      supplier: "A Lumber Yard",
+      amount: 900,
+      bill_date: null,
+      category: "Receipt",
+      notes: "",
+      created_by: "user-1",
+    };
+    expect(await insertItemizedBill(state.client, { ...bill, scope: { kind: "scope", scope: "Decking" } }, [], "paid", ["Framing", "Decking"])).toEqual({
+      id: "bill-s",
+      refusal: null,
+    });
+    expect(did("bills", "insert")!.payload.scope_category).toBe("Decking");
+
+    const wroteBefore = calls.filter((c) => c.table === "bills" && c.verb === "insert").length;
+    state.client = fakeSupabase({}, calls);
+    const no = await insertItemizedBill(state.client, { ...bill, scope: { kind: "scope", scope: "Plumbing" } }, [], "paid", ["Framing", "Decking"]);
+    expect(no.id).toBeNull();
+    expect(no.refusal).toContain("Framing");
+    expect(calls.filter((c) => c.table === "bills" && c.verb === "insert")).toHaveLength(wroteBefore);
   });
 
   it("Snap the Bill refuses a return read with no legible lines, and writes nothing", async () => {

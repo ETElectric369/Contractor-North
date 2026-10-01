@@ -4,6 +4,8 @@ import { reportError } from "@/lib/observe";
 import { dbError } from "@/lib/db-error";
 import { AUTO_FILE_BUCKETS, BUSINESS_COST_BUCKETS, LEGACY_GAS_AND_TRUCK, bucketOf, looksLikeSupplierFee } from "@/lib/business-cost-buckets";
 import { getOrgSettings } from "@/lib/org-settings";
+import { jobCostRefusal } from "@/lib/job-cost-guard";
+import { scopeForWrite, type BillScopeAnswer } from "@/lib/bill-scope";
 import { tradeWordsOr, withArticle } from "@/lib/org-trade";
 import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 import { indexSupplierAliases, type SupplierAliasIndex } from "@/lib/supplier-identity";
@@ -11,7 +13,6 @@ import { indexSupplierIdentity, supplierAccountForPaper } from "@/lib/supplier-o
 import { openListFromReader } from "@/lib/supplier-open-list";
 import {
   findSameNumber,
-  isLinelessReturn,
   linesPointWithTotal,
   onPaperWords,
   paperTypeOf,
@@ -76,7 +77,21 @@ export async function insertItemizedBill(
     amount: number | null;
     bill_date: string | null;
     category: string;
-    scope_category?: string | null; // the JOB SCOPE (Framing, Decking…) for budget-vs-actual
+    /**
+     * WHICH PART OF THE JOB THIS COST IS (item C1). REQUIRED, and a typed answer rather than a
+     * column: a new door cannot forget it, because it will not compile without one. The reader
+     * answers { kind: "scope" }; a one-tap door that has nowhere to ask answers { kind: "notAsked" }
+     * and the screen says so; a bill with no job answers { kind: "noJob" }. lib/bill-scope decides
+     * what is stored, and refuses a part this job's estimate does not have.
+     */
+    scope: BillScopeAnswer;
+    /**
+     * THE DOOR'S OWN NEXT STEP, appended to the one refusal reason (lib/job-cost-guard). The REASON
+     * a lineless credit cannot go on a job is the same everywhere; what to do about it is not. A
+     * paper in the tray can be read again; a photo just snapped on the job page cannot, so Snap The
+     * Bill says "try a clearer photo" instead. Left out, the tray's words.
+     */
+    nextStepIfRefused?: string;
     notes: string;
     created_by: string;
     /** 0271: the prices on this paper are a counter preview, not this account's own. */
@@ -90,26 +105,40 @@ export async function insertItemizedBill(
   },
   given: BillLine[],
   status: "paid" | "unpaid" = "unpaid",
-): Promise<string | null> {
+  /** The job's estimate parts (listJobScopes), so a scope can be held to one it really has. Empty
+   *  for a bill with no job, and for a job whose estimate isn't broken into parts. */
+  jobScopes: readonly string[] = [],
+): Promise<{ id: string | null; refusal: string | null }> {
   // THE LINES POINT WITH THE TOTAL, HERE WHERE THE BILL IS WRITTEN (audit v994 review). The
   // readers line them up when they read, but the total can change after that (Fix Details, It Is A
   // Charge) and the lines sit in the row as they were read. Every door that writes a bill from a
   // paper comes through here, so this is the one place the two cannot disagree.
   const lines = linesPointWithTotal(bill.amount, given);
-  // A RETURN WITH NO LINES NEVER GOES ON A JOB (DB4): the importer would credit the customer the
-  // whole of it at markup, with nothing to hold it to what they were billed. The doors ask first
-  // and say so in their own words (fileRefusal, billJobReceipt); this is the boundary behind them.
-  if (bill.job_id && isLinelessReturn(bill.amount, lines)) {
+  // A RETURN WITH NO LINES NEVER GOES ON A JOB (DB4, finished in item C2): the importer would credit
+  // the customer the whole of it at markup, with nothing to hold it to what they were billed. The
+  // rule is lib/job-cost-guard's now, asked by every door that writes a cost, and the REASON comes
+  // back in words so a caller can say it instead of "Could not create the bill."
+  const no = jobCostRefusal(
+    { jobId: bill.job_id, amount: bill.amount, lines },
+    bill.nextStepIfRefused ?? "Press Read Again so its lines come with it, or file it as a business cost.",
+  );
+  if (no) {
     reportError("organize:insertItemizedBill.linelessReturn", new Error("a return with no lines was refused on a job"), {
       supplier: bill.supplier,
       jobId: bill.job_id,
       amount: bill.amount,
     });
-    return null;
+    return { id: null, refusal: no };
   }
+  // WHICH PART OF THE JOB (item C1). The door answered; lib/bill-scope decides what is stored, and
+  // a part this job's estimate does not have is refused in words rather than filed under a heading
+  // nobody budgeted.
+  const { scope, nextStepIfRefused: _next, ...cols } = bill;
+  const decided = scopeForWrite({ jobId: bill.job_id, answer: scope, jobScopes });
+  if (decided.refusal) return { id: null, refusal: decided.refusal };
   // Undefined keys are dropped so a bill that has no number or account writes exactly what it
   // wrote before these existed.
-  const row: Record<string, unknown> = { ...bill, status };
+  const row: Record<string, unknown> = { ...cols, status, scope_category: decided.value };
   for (const k of Object.keys(row)) if (row[k] === undefined) delete row[k];
   const { data, error } = await supabase.from("bills").insert(row).select("id").single();
   if (error || !data) {
@@ -121,7 +150,7 @@ export async function insertItemizedBill(
       jobId: bill.job_id,
       amount: bill.amount,
     });
-    return null;
+    return { id: null, refusal: null };
   }
   if (lines.length) {
     const { error: lineErr } = await supabase
@@ -157,7 +186,7 @@ export async function insertItemizedBill(
     // not exist until this insert, so no roll can be on this bill to restamp. A door that ever
     // adds lines to an EXISTING bill must restamp after it writes.
   }
-  return data.id;
+  return { id: String(data.id), refusal: null };
 }
 
 /**

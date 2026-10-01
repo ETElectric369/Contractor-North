@@ -17,7 +17,6 @@ import {
   fileRefusal,
   paperTypeLabel,
   paperTypeOfItem,
-  isLinelessReturn,
   isPicture,
   linesPointWithTotal,
   paperPickOf,
@@ -26,7 +25,6 @@ import {
   proposalOf,
   readinessOf,
   rematchPaper,
-  RETURN_ON_JOB_NEEDS_LINES,
   amountOf,
   shelfRowsOf,
   storedMarks,
@@ -562,13 +560,10 @@ ${MASKED_PRICE_PROMPT_RULE}`,
       error: "Couldn't read a total on this receipt. Open it and enter the cost manually as a bill.",
     };
   }
-  // A RETURN WITH NO LINES NEVER GOES ON A JOB (audit v994 review; DB4's class). This door writes
-  // straight onto the job, so a return read here with nothing legible under its total would be
-  // credited to the customer in full at markup, even for parts they were never charged for.
-  // insertItemizedBill refuses it too; this says why, in the words this door's person needs.
-  if (isLinelessReturn(amount, lines)) {
-    return { ok: false, error: RETURN_ON_JOB_NEEDS_LINES };
-  }
+  // A RETURN WITH NO LINES NEVER GOES ON A JOB (audit v994 review; DB4's class, closed in item C2).
+  // THIS DOOR USED TO ASK FOR ITSELF and three other doors that write a cost did not — so the rule
+  // moved down to the write (lib/job-cost-guard, asked by insertItemizedBill below) and the sentence
+  // it refuses with comes back from there. Nothing here re-states the test.
 
   // DOES IT ADD UP? The reader asks the model for a grand total AND every line, then used the
   // total and never compared the two. A misread total — a subtotal, a prior balance, a
@@ -649,7 +644,7 @@ ${MASKED_PRICE_PROMPT_RULE}`,
     }
   }
 
-  const billId = await insertItemizedBill(
+  const written = await insertItemizedBill(
     supabase,
     {
       job_id: doc.job_id,
@@ -657,7 +652,12 @@ ${MASKED_PRICE_PROMPT_RULE}`,
       amount,
       bill_date: stated?.billDate || itemDate || stated?.fallbackBillDate || null,
       category: stated?.category || "Receipt",
-      scope_category: scopeCategory, // job scope for budget-vs-actual (null → Uncategorized)
+      // The reader's answer to the one scope question (item C1). lib/bill-scope holds it to a part
+      // this job's estimate really has; a miss reads as none of them, never as a guess.
+      scope: scopeCategory ? { kind: "scope", scope: scopeCategory } : { kind: "none" },
+      // This door reads straight off a photo the person just took, so "Read Again" is not a door it
+      // has: its own next step is a clearer photo, or the tray (RETURN_ON_JOB_NEEDS_LINES's words).
+      nextStepIfRefused: "Nothing was recorded. Try a clearer photo, or drop it in Organize and file it as a business cost.",
       notes: `Receipt recorded as cost: ${doc.name}${
         stated?.differentPurchase ? "\nA person checked: a different purchase from the one already on the books with this number." : ""
       }${check.mismatch ? `\n\n${check.note}` : ""}`,
@@ -673,8 +673,12 @@ ${MASKED_PRICE_PROMPT_RULE}`,
     // wrongly-unpaid bill nags and gets corrected, a wrongly-paid one loses money.
     // The user's own "Already paid" checkbox wins when they ticked it — they were there.
     stated?.paid ? "paid" : parsed.payment === "paid_at_purchase" ? "paid" : "unpaid",
+    jobScopes,
   );
-  if (!billId) return { ok: false, error: "Could not create the bill." };
+  // THE REFUSAL IS SAID, NOT SWALLOWED: a return with nothing legible under it, or a part this job's
+  // estimate has not got, comes back in the words the write refused with (nothing silent).
+  if (!written.id) return { ok: false, error: written.refusal ?? "Could not create the bill." };
+  const billId = written.id;
 
   // Link record so the receipt is known to be billed (drives idempotency above).
   const { data: link, error: linkErr } = await supabase.from("organized_items").insert({
@@ -861,7 +865,10 @@ function billClaimRefusal(err: unknown, tail: string): string | null {
 // filed to petty cash before this still has its petty_cash_id, and re-filing it tears that row
 // down below exactly as before.
 export type FileDestination =
-  | { type: "job"; jobId: string }
+  /** `scope`: which part of the job's estimate this cost is (item C1). File It is one tap, so a
+   *  destination that names no part lands the cost under none of them and the Costs tab says so,
+   *  with the door that sets it. A part this job's estimate hasn't got is refused in words. */
+  | { type: "job"; jobId: string; scope?: string | null }
   /**
    * THE SHOP SHELF (Shop Stock, Phase 2): the ticket becomes a bill with no job, on_shelf, and
    * each line a person counted becomes a roll on the shelf. `lines` is a person's answer for every
@@ -1249,7 +1256,11 @@ export async function fileItem(id: string, dest: FileDestination, opts: FileOpti
     if (!isCost && !documentId) return backToTray("It didn't save on the job, so it is back in the tray. Try again.");
     // A receipt or bill filed to a job becomes an itemized billable cost on that job.
     if (dest.type === "job" && isCost && item.amount != null) {
-      billId = await insertItemizedBill(
+      // WHICH PART OF THE JOB (item C1). File It is one tap, so this door names a part only when the
+      // person said one; otherwise the cost lands under none of them and the Costs tab SAYS so, with
+      // a door to set it. The job's own parts are read only when there is a named part to hold to one.
+      const named = String(dest.scope ?? "").trim();
+      const written = await insertItemizedBill(
         supabase,
         {
           job_id: dest.jobId,
@@ -1257,32 +1268,45 @@ export async function fileItem(id: string, dest: FileDestination, opts: FileOpti
           amount: item.amount,
           bill_date: item.item_date,
           category: paperCategory,
+          scope: named ? { kind: "scope", scope: named } : { kind: "notAsked" },
           notes: `${paperCategory} filed by a person from the tray: ${item.title}${decided}`,
           created_by: ctx.userId,
           ...billFacts,
         },
         lines,
         billStatusFromItem(item),
+        named ? await listJobScopes(supabase, dest.jobId) : [],
       );
-      if (!billId) return backToTray("The cost didn't save, so this paper is back in the tray. Try File It again.");
+      billId = written.id;
+      // The write's own sentence when it has one (a return with no lines, a part this job hasn't got).
+      if (!billId)
+        return backToTray(
+          written.refusal
+            ? `${written.refusal} This paper is back in the tray.`
+            : "The cost didn't save, so this paper is back in the tray. Try File It again.",
+        );
     }
   } else if (dest.type === "overhead") {
     category = dest.category;
-    billId = await insertItemizedBill(
-      supabase,
-      {
-        job_id: null,
-        supplier: vendor,
-        amount: item.amount ?? 0,
-        bill_date: item.item_date,
-        category: dest.category,
-        notes: `Business cost filed by a person from the tray: ${item.title}${decided}`,
-        created_by: ctx.userId,
-        ...billFacts,
-      },
-      lines,
-      billStatusFromItem(item),
-    );
+    billId = (
+      await insertItemizedBill(
+        supabase,
+        {
+          job_id: null,
+          supplier: vendor,
+          amount: item.amount ?? 0,
+          bill_date: item.item_date,
+          category: dest.category,
+          // No job, so no part of a job to be under (item C1).
+          scope: { kind: "noJob" },
+          notes: `Business cost filed by a person from the tray: ${item.title}${decided}`,
+          created_by: ctx.userId,
+          ...billFacts,
+        },
+        lines,
+        billStatusFromItem(item),
+      )
+    ).id;
     // A business cost IS its bill; there is no copy on a job to show for it.
     if (!billId) return backToTray("The business cost didn't save, so this receipt is back in Needs Review. Try again.");
   } else if (dest.type === "stock") {
@@ -1292,7 +1316,8 @@ export async function fileItem(id: string, dest: FileDestination, opts: FileOpti
     // a roll, in one transaction (shelveLines -> 0328). Anything short of that puts the paper back
     // in the tray holding nothing: a shelf ticket with no rolls on it is money in no place.
     category = "Shop Stock";
-    billId = await insertItemizedBill(
+    billId = (
+      await insertItemizedBill(
       supabase,
       {
         job_id: null,
@@ -1300,6 +1325,8 @@ export async function fileItem(id: string, dest: FileDestination, opts: FileOpti
         amount: item.amount ?? 0,
         bill_date: item.item_date,
         category: "Shop Stock",
+        // A shelf ticket has no job, so no part of a job to be under (item C1).
+        scope: { kind: "noJob" },
         notes: `Shop stock filed by a person from the tray: ${item.title}${decided}`,
         created_by: ctx.userId,
         on_shelf: true,
@@ -1307,7 +1334,8 @@ export async function fileItem(id: string, dest: FileDestination, opts: FileOpti
       },
       lines,
       billStatusFromItem(item),
-    );
+      )
+    ).id;
     if (!billId) return backToTray("The ticket didn't save, so it is back in the tray. Try File It again.");
     const rows = shelfRowsOf(item);
     const { data: written, error: writtenErr } = await supabase

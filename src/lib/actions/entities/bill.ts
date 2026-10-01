@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { resolveJobId } from "../resolve-id";
 import type { ActionDef } from "../types";
 import { BUSINESS_COST_BUCKETS, bucketOf } from "@/lib/business-cost-buckets";
+import type { BillScopeAnswer } from "@/lib/bill-scope";
 
 // Each entry just WRAPS the existing server action — no new business logic.
 export const billActions: Record<string, ActionDef> = {
@@ -24,6 +25,10 @@ export const billActions: Record<string, ActionDef> = {
       // The PO this bill pays. Set it and the bill supersedes that PO everywhere material
       // cost is summed — the one way to stop a delivery being charged twice (0142).
       po_id: z.string().nullable().optional(),
+      // WHICH PART OF THE JOB this cost is (item C1) — one of the job estimate's own scope words
+      // ("Framing", "Decking"). Left out, the cost lands under no part of the job and the Costs tab
+      // says so; a word this job's estimate hasn't got is refused and names the ones it has.
+      scope_category: z.string().nullable().optional(),
     }),
     auth: "staff",
     effect: "write",
@@ -50,6 +55,9 @@ export const billActions: Record<string, ActionDef> = {
         notes: i.notes ?? "",
         category: i.category ?? null,
         po_id: i.po_id ?? null,
+        // The same scope question every other door answers. No job means no part of a job; nothing
+        // said means nobody was asked, never a guess.
+        scope: !job.id ? { kind: "noJob" } : i.scope_category ? { kind: "scope", scope: String(i.scope_category) } : { kind: "notAsked" },
       });
     },
   },
@@ -71,11 +79,20 @@ export const billActions: Record<string, ActionDef> = {
       // Linking/unlinking the PO this bill pays MOVES the job's material cost (a linked
       // PO stops counting — the bill supersedes it), hence the financial confirm tier.
       po_id: z.string().nullable().optional(),
+      // WHICH PART OF THE JOB (item C1): this is how Nort sets or changes it on a cost that already
+      // exists. "" or null takes it back off; left out, the stored part is untouched.
+      scope_category: z.string().nullable().optional(),
     }),
     auth: "staff",
     effect: "write",
     confirm: "financial", // edits the amount/status of a money record → tier 2
-    handler: ({ id, ...patch }) => updateBill(id, patch),
+    handler: ({ id, scope_category, ...patch }) =>
+      updateBill(id, {
+        ...patch,
+        ...(scope_category !== undefined
+          ? { scope: (scope_category ? { kind: "scope", scope: String(scope_category) } : { kind: "none" }) as BillScopeAnswer }
+          : {}),
+      }),
   },
   "bill.setStatus": {
     name: "bill.setStatus",

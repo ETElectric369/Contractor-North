@@ -28,6 +28,9 @@ import { changeOrderLines, type ChangeOrderRow } from "@/lib/change-order-billin
 import { depositCoversWords, finalFinishWords, finishedWithWorkOffBill, finishWouldLeaveOffBill, LAST_BILL_DOOR } from "@/lib/finish-job-words";
 import { guardedFieldsMoved, planBillEdit, type BillClaimHolder } from "./bill-claims";
 import { bucketOf } from "@/lib/business-cost-buckets";
+import { jobCostRefusal } from "@/lib/job-cost-guard";
+import { scopeAfterJobMove, scopeForWrite, type BillScopeAnswer } from "@/lib/bill-scope";
+import { listJobScopes } from "@/lib/analytics/job-profitability";
 import { restampLotsForBill } from "@/lib/stock-ledger";
 import { exactAccountFor, papersAfterBillDeleted, papersBehindBill, readBillStanding, standingRefusal } from "@/app/(app)/organize/paperwork-core";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -1350,6 +1353,13 @@ export async function createBill(input: {
    *  a later "Record as cost" tap on that same file answers "already recorded" instead of
    *  creating a duplicate bill — the exact double-entry Erik hit on J-033. */
   receipt_document_id?: string | null;
+  /**
+   * WHICH PART OF THE JOB THIS COST IS (item C1). REQUIRED, so a new door cannot forget to answer —
+   * it will not compile without one. `{ kind: "notAsked" }` is a real answer: the cost lands under
+   * no part of the job and the Costs tab says so, with the door that sets it. lib/bill-scope decides
+   * what is stored and refuses a part this job's estimate has not got.
+   */
+  scope: BillScopeAnswer;
 }): Promise<Result & { id?: string }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
@@ -1376,6 +1386,24 @@ export async function createBill(input: {
   // and read-time resolution still places the paper, this just saves it from having to.
   const supplierAccountId = await exactAccountFor(supabase, ctx.orgId, input.supplier);
 
+  // A RETURN WITH NO LINES NEVER GOES ON A JOB (item C2). This door writes a lump with NO lines
+  // at all, so a negative typed onto a job is always the INV-078 housings: the importer credits the
+  // customer the whole of it at markup, for parts they were never charged for. The rule lives at the
+  // write (lib/job-cost-guard) and every door that writes a cost asks the same function.
+  const noReturn = jobCostRefusal(
+    { jobId, amount: input.amount, lines: [] },
+    "Snap the credit memo so its lines come with it, or record it as a business cost.",
+  );
+  if (noReturn) return { ok: false, error: noReturn };
+
+  // WHICH PART OF THE JOB (item C1): the one decider, held to the parts this job's estimate has.
+  const scope = scopeForWrite({
+    jobId,
+    answer: input.scope,
+    jobScopes: jobId && input.scope.kind === "scope" ? await listJobScopes(supabase, jobId) : [],
+  });
+  if (scope.refusal) return { ok: false, error: scope.refusal };
+
   const { data: created, error } = await supabase
     .from("bills")
     .insert({
@@ -1389,6 +1417,7 @@ export async function createBill(input: {
       bill_date: input.bill_date || null,
       notes: input.notes.trim() || null,
       category,
+      scope_category: scope.value,
       created_by: ctx.userId,
     })
     .select("id")
@@ -1425,6 +1454,13 @@ export async function createBill(input: {
           bill_id: created.id,
           file_url: doc.file_url,
           created_by: ctx.userId,
+          // THE JOB OWNS THIS PHOTO (item C3; the same word billJobReceipt and linkReceiptToBill
+          // write). The row points at an upload the job already had — Add Cost put the photo up
+          // before it saved the cost — so Undo and Delete must take the bill down and never the
+          // receipt. This was the one door of the three that did not say so, and filingDocument
+          // only spared the photo because it happened to be older than the row: the day a door
+          // writes the row first, or the two land in the same instant, the photo goes with the bill.
+          source: "job",
         })
         .select("id");
       if (linkErr || !link?.length) {
@@ -1575,6 +1611,10 @@ export async function updateBill(
     category?: string | null;
     job_id?: string | null;
     po_id?: string | null;
+    /** WHICH PART OF THE JOB (item C1) — the way to set or change it on a cost that already exists.
+     *  The Edit Bill box on the job's Costs tab and on /bills both send it; so can Nort. Left out,
+     *  the stored part is untouched (PATCH semantics). */
+    scope?: BillScopeAnswer;
   },
 ): Promise<Result> {
   const ctx = await requireStaff();
@@ -1600,22 +1640,66 @@ export async function updateBill(
   // every save would look like a re-price.
   let oldJobId: string | null = null;
   let oldAmount = 0;
+  let oldScope: string | null = null;
   if (
     patch.job_id !== undefined ||
     patch.amount !== undefined ||
     patch.category !== undefined ||
+    patch.scope !== undefined ||
     (patch.po_id !== undefined && !!patch.po_id)
   ) {
-    const { data: prev } = await supabase.from("bills").select("job_id, amount").eq("id", id).maybeSingle();
+    const { data: prev } = await supabase.from("bills").select("job_id, amount, scope_category").eq("id", id).maybeSingle();
     oldJobId = (prev as { job_id: string | null } | null)?.job_id ?? null;
     oldAmount = Number((prev as { amount?: number | string | null } | null)?.amount ?? 0);
+    oldScope = (prev as { scope_category?: string | null } | null)?.scope_category ?? null;
+  }
+  /** The job this bill will be on once this patch lands. */
+  const nextJobId = patch.job_id !== undefined ? patch.job_id || null : oldJobId;
+
+  // A RETURN WITH NO LINES NEVER GOES ON A JOB — AND THIS IS THE SHORTEST ROAD TO IT (item C2).
+  // A bank credit lands as a business cost with no lines at all, and one dropdown here re-points it
+  // onto a job, where the importer credits the customer the whole of it at markup. Turning a job's
+  // own lineless bill negative does the same thing. The rule is lib/job-cost-guard's, asked by every
+  // door that writes a cost; the lines are read only when the result would actually be a credit.
+  const nextAmount = patch.amount !== undefined ? (patch.amount || 0) : oldAmount;
+  if (nextJobId && Math.round(Number(nextAmount) * 100) < 0) {
+    const { data: lineRows, error: lineReadErr } = await supabase.from("bill_line_items").select("description").eq("bill_id", id).limit(200);
+    // NOTHING SILENT: a lines read that failed cannot be treated as "it has lines" — that is how the
+    // housings got credited — nor as "it has none", which would refuse an honest credit memo blind.
+    if (lineReadErr) {
+      reportError("updateBill.returnLines", lineReadErr, { billId: id });
+      return { ok: false, error: "Couldn't check what lines this credit has, so nothing was changed. Try again in a moment." };
+    }
+    const noReturn = jobCostRefusal(
+      { jobId: nextJobId, amount: nextAmount, lines: lineRows ?? [] },
+      "Snap the credit memo so its lines come with it, or leave it as a business cost.",
+    );
+    if (noReturn) return { ok: false, error: noReturn };
+  }
+
+  // WHICH PART OF THE JOB (item C1). Two things can change it: a person answering the question, and
+  // the cost moving to another job — a part called "Framing" on the job it leaves means nothing on
+  // the job it joins unless that estimate has a part by the same name. Both go through lib/bill-scope,
+  // and a part that is dropped is SAID, never dropped quietly.
+  let scopeSaidNote: string | undefined;
+  if (patch.scope !== undefined) {
+    const decided = scopeForWrite({
+      jobId: nextJobId,
+      answer: patch.scope,
+      jobScopes: nextJobId && patch.scope.kind === "scope" ? await listJobScopes(supabase, nextJobId) : [],
+    });
+    if (decided.refusal) return { ok: false, error: decided.refusal };
+    clean.scope_category = decided.value;
+  } else if (patch.job_id !== undefined && nextJobId !== oldJobId && oldScope) {
+    const moved = scopeAfterJobMove(oldScope, nextJobId ? await listJobScopes(supabase, nextJobId) : []);
+    clean.scope_category = moved.value;
+    scopeSaidNote = moved.said ?? undefined;
   }
   // The same rule as createBill: a bill with no job puts its category in one of the buckets. The job
   // it will have is the one this patch sends, or the stored one when the patch leaves job_id out (Nort
   // can send a category alone): without that, a "gas" typed on a no-job bill was stored as typed, the
   // Owner's Draw card counted it as Fuel through bucketOf, and the Fuel card, which read "Fuel", did not.
   if (patch.category !== undefined) {
-    const nextJobId = patch.job_id !== undefined ? patch.job_id || null : oldJobId;
     clean.category = !nextJobId ? bucketOf(patch.category) : (patch.category ?? null);
   }
 
@@ -1644,8 +1728,7 @@ export async function updateBill(
   // job's order — so scope the check to the bill's TARGET job (the just-changed job when
   // this update moves it, else its stored job). A mismatch is ignored (clears the link).
   if (patch.po_id !== undefined) {
-    const targetJob = patch.job_id !== undefined ? patch.job_id || null : oldJobId;
-    clean.po_id = await visiblePoIdOnJobOrNull(supabase, patch.po_id || null, targetJob);
+    clean.po_id = await visiblePoIdOnJobOrNull(supabase, patch.po_id || null, nextJobId);
   }
 
   const { data, error } = await supabase.from("bills").update(clean).eq("id", id).select("job_id").maybeSingle();
@@ -1674,7 +1757,7 @@ export async function updateBill(
   for (const jid of new Set([oldJobId, (data as any)?.job_id].filter(Boolean) as string[])) revalidatePath(`/jobs/${jid}`);
   revalidatePath("/bills");
   revalidatePath("/analytics"); // bill cost moves job profitability
-  const said = [warning, shelfNote].filter(Boolean).join(" ");
+  const said = [warning, scopeSaidNote, shelfNote].filter(Boolean).join(" ");
   return said ? { ok: true, warning: said } : { ok: true };
 }
 
