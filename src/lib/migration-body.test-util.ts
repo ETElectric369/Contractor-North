@@ -14,9 +14,11 @@ import { join } from "node:path";
  * database. Case is ignored: some migrations were pasted back from pg_get_functiondef, which prints
  * `CREATE OR REPLACE FUNCTION … AS $function$`.
  *
- * Used by src/lib/shift-ceiling.test.ts (W4), src/lib/customer-visible-docs.test.ts (W3) and
- * src/lib/office-roles.test.ts (W2). Never shipped: this file is a test utility, and the unit
- * project's include pattern (`*.test.ts`) does not pick it up as a suite of its own.
+ * Used by src/lib/shift-ceiling.test.ts (W4), src/lib/customer-visible-docs.test.ts (W3),
+ * src/lib/office-roles.test.ts (W2) and src/lib/vendor-words.test.ts (W1). Its own behaviour — what
+ * a tripwire can and cannot see — is pinned in src/lib/migration-body.test.ts. Never shipped: this
+ * file is a test utility, and the unit project's include pattern (`*.test.ts`) does not pick it up
+ * as a suite of its own.
  */
 
 const DIR = join(process.cwd(), "supabase/migrations");
@@ -70,6 +72,29 @@ export function statusListsOf(body: string, column: string): string[][] {
 }
 
 /**
+ * WHAT A FILE SAYS, WITH WHAT IT EXPLAINS TAKEN OUT. ONE RULE, ONE PLACE: every bypass tripwire
+ * reads its files through here, so what counts as a comment is decided once.
+ *
+ * A COMMENT OPENER IS ONLY AN OPENER WHERE A COMMENT CAN START — at the top of a file, after
+ * whitespace, or after the `{` or `(` an inline JSX or argument comment sits inside. This used to
+ * treat every opener-looking pair of characters as one, including the pair inside a string like
+ * `accept="image/` + a star + `,application/pdf"`, which opened a comment that ran on to the next
+ * real comment close in the file and blanked everything between. Eighteen app files had code hidden
+ * from all three tripwires that way — src/middleware.ts for 118 lines, one span covering 79 to 286
+ * — so an office-role list or a Supplier label written out by hand inside one of those spans passed
+ * every tripwire by name. The repo has no real block comment that opens after a word character, and
+ * erring this way is the safe direction: a comment this keeps can only make a tripwire FIRE and say
+ * which file it read, never hide a file from it. Pinned in migration-body.test.ts.
+ */
+export function codeOnly(text: string): string {
+  return text
+    .replace(/(^|[\s{(])\/\*[\s\S]*?\*\//g, "$1")
+    .split("\n")
+    .filter((l) => !/^\s*(\/\/|\*|--)/.test(l))
+    .join("\n");
+}
+
+/**
  * Walk every app source file (never a test, a fixture or a db-suite) and hand each one's text with
  * comments stripped, so a bypass tripwire reads what the app SAYS rather than what it explains.
  */
@@ -85,12 +110,7 @@ export function eachAppSource(visit: (path: string, codeOnly: string) => void, s
       if (!/\.tsx?$/.test(e.name)) continue;
       if (/\.(test|db-suite|test-util|test-fixture|db-fixture|cases)\.tsx?$/.test(e.name)) continue;
       if (skip.some((s) => p.endsWith(s))) continue;
-      const codeOnly = readFileSync(p, "utf8")
-        .replace(/\/\*[\s\S]*?\*\//g, "")
-        .split("\n")
-        .filter((l) => !/^\s*(\/\/|\*|--)/.test(l))
-        .join("\n");
-      visit(p, codeOnly);
+      visit(p, codeOnly(readFileSync(p, "utf8")));
     }
   };
   walk(root);

@@ -605,7 +605,10 @@ function VendorSheet({
               const current = f.key === "name" ? vendor.name : ((card?.[f.key] as string | null | undefined) ?? null);
               return (
                 <div key={`${vendor.key}:${f.key}:${current ?? ""}`}>
-                  <Label htmlFor={`vs-${f.key}`}>{f.key === "name" ? "Vendor" : f.label}</Label>
+                  {/* The name field drops Add Vendor's asterisk (nothing is being created here), but
+                      the WORD is still lib/vendor-words': typed out by hand, this card showed the old
+                      word on Edit Vendor while Add Vendor showed the new one, on the same tab. */}
+                  <Label htmlFor={`vs-${f.key}`}>{f.key === "name" ? companyLabel("vendor_card") : f.label}</Label>
                   <Input
                     id={`vs-${f.key}`}
                     type={f.type ?? "text"}

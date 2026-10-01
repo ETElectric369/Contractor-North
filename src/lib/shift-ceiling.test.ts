@@ -18,10 +18,22 @@ import { CEILING_REFUSAL, CEILING_REFUSAL_ASK_OFFICE, MAX_SHIFT_HOURS, MAX_SHIFT
  *
  *   the app's number      src/lib/long-shift.ts MAX_SHIFT_HOURS, and every sentence derived from it
  *                         (MAX_SHIFT_PHRASE) rather than typed again;
- *   the database's        three live functions, each the LAST migration that replaces it:
+ *   the database's        four live functions, each the LAST migration that replaces it:
  *                         guard_time_entry_sanity (a saved span over the ceiling),
  *                         guard_paid_time_entry   (the puncher closing their own long shift),
- *                         close_stale_open_entry  (the next punch zero-closing a forgotten clock).
+ *                         close_stale_open_entry  (the next punch zero-closing a forgotten clock),
+ *                         split_time_entry        (a cut keeping the auto-closed reason on a piece
+ *                                                  that is still over the ceiling).
+ *
+ * THE FOURTH WAS MISSING AND THAT BROKE SPLIT (batch item 5). split_time_entry (live in 0313) writes
+ * the ceiling too, and its own comment says why: the sanity guard refuses a long piece without a
+ * reason, so a cut keeps the reason on any piece still over it. Lower MAX_SHIFT_HOURS to 16, move
+ * the three guards this test used to name, and tsc was clean and the suite green — then Erik splits
+ * a 17-hour forgotten punch on the Timecards split sheet (timeclock/actions.ts splitTimeEntry),
+ * split_time_entry reads 17 > 18 as false and NULLS the left piece's reason, and the guard at 16
+ * then refuses the write: the Split button dies on a shift the app itself auto-closed, with nothing
+ * in the suite having warned. Raising the ceiling is harmless (a reason is kept a little longer);
+ * lowering it below the unpinned copy is what bites, which is exactly a drift this test exists for.
  *
  * This reads the migration FILES, not a live database, so it runs in the unit project on every
  * push with no credentials. The DB-catalog twin (timeclock/pay-column-guard.integration.test.ts)
@@ -49,20 +61,29 @@ const DB_CEILINGS: { fn: string; what: string; anchor: RegExp }[] = [
     what: "the next punch zero-closes a clock left running past the ceiling",
     anchor: /v_ceiling\s+constant\s+interval\s*:=\s*interval\s*'(\d+)\s*hours?'/,
   },
+  {
+    fn: "split_time_entry",
+    what: "a cut keeps the auto-closed reason on a left piece still over the ceiling",
+    anchor: /p_at\s*-\s*p\.clock_in\s*>\s*interval\s*'(\d+)\s*hours?'/,
+  },
 ];
 
 describe("the shift ceiling: the app's number and the database's never drift apart (W4)", () => {
   for (const c of DB_CEILINGS) {
-    it(`${c.fn} refuses at ${MAX_SHIFT_HOURS} hours — ${c.what}`, () => {
+    it(`${c.fn} uses ${MAX_SHIFT_HOURS} hours — ${c.what}`, () => {
       const live = liveFunctionBody(c.fn);
       expect(live, `no migration creates public.${c.fn}`).not.toBeNull();
-      const m = c.anchor.exec(live!.body);
+      const all = [...live!.body.matchAll(new RegExp(c.anchor.source, "gi"))];
       expect(
-        m,
+        all.length,
         `public.${c.fn} (live in ${live!.file}) no longer writes its ceiling where this test looks. ` +
           `If the guard was rewritten, re-point DB_CEILINGS' anchor at the new comparison — do not delete it.`,
-      ).not.toBeNull();
-      expect(Number(m![1]), `${c.fn} in ${live!.file} vs MAX_SHIFT_HOURS in src/lib/long-shift.ts`).toBe(MAX_SHIFT_HOURS);
+      ).toBeGreaterThan(0);
+      // EVERY copy inside the one function, not just the first: a guard that compares twice and was
+      // half-moved is the same drift, one level down.
+      for (const m of all) {
+        expect(Number(m[1]), `${c.fn} in ${live!.file} vs MAX_SHIFT_HOURS in src/lib/long-shift.ts`).toBe(MAX_SHIFT_HOURS);
+      }
     });
   }
 

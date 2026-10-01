@@ -94,6 +94,12 @@ export type CompanyField =
   | "vendor_card"
   /** A supplier's bill or receipt, on the Bills door and the job's own bills. bills.supplier. */
   | "bill"
+  /** The + cost sheet (Snap A Cost, Type It In) filing against a JOB or into shop stock: materials,
+   *  bought somewhere. Same column as `bill`, same word. */
+  | "job_cost"
+  /** The same sheet with no job — a cost of running the business — where the company is as likely a
+   *  landlord or an insurer as a supply house. */
+  | "business_cost"
   /** A cost that comes round every month, which is often nobody's supplier: rent, insurance. */
   | "recurring_cost";
 
@@ -106,11 +112,35 @@ export const COMPANY_FIELD: Record<CompanyField, { label: string; placeholder?: 
   price_item_option: { label: "Vendor", help: VENDOR_MEANS },
   vendor_card: { label: "Vendor", placeholder: "A supplier, a sub or a brand", help: VENDOR_MEANS },
   bill: { label: "Supplier" },
+  job_cost: { label: "Supplier", placeholder: "Who you bought it from" },
+  /** NOT "Supplier": the same reason recurring_cost isn't. See costCompanyField below. */
+  business_cost: { label: "Who You Pay", placeholder: "e.g. the landlord" },
   /** NOT "Vendor": a landlord is nobody's vendor, and "Supplier" would be a lie about rent. */
   recurring_cost: { label: "Who You Pay", placeholder: "e.g. the landlord" },
 };
 
-/** The label for a door, with the asterisk a required field carries. */
-export function companyLabel(field: CompanyField, required = false): string {
-  return required ? `${COMPANY_FIELD[field].label} *` : COMPANY_FIELD[field].label;
+/**
+ * THE + COST SHEET'S WORD, DECIDED BY WHERE THE COST LANDS — never at the door.
+ *
+ * The one "add a cost" (components/quick-cost-button) files three things through the same box: a
+ * cost on a JOB (materials, bought at a supply house), a SHOP STOCK purchase (bought somewhere too),
+ * and a BUSINESS COST with no job — rent, insurance, a licence — where the company is as likely a
+ * landlord as a supply house. So this is NOT a blanket relabel to Supplier: "Supplier" would be a
+ * lie about rent, which is the same reason recurring_cost says "Who You Pay". The sheet asks the
+ * question under the word that fits what is being filed, and the choosing happens here so both of
+ * its sheets cannot drift apart from each other or from the Bills door they write the same column as.
+ */
+export function costCompanyField(forABusinessCost: boolean): CompanyField {
+  return forABusinessCost ? "business_cost" : "job_cost";
+}
+
+/**
+ * The label for a door: the word, plus the mark that says whether the box has to be filled. `true`
+ * is the asterisk every required field in the app carries; "optional" says so in the one wording,
+ * for a box (a business cost's) that may be left blank and is not refused for it.
+ */
+export function companyLabel(field: CompanyField, required: boolean | "optional" = false): string {
+  const { label } = COMPANY_FIELD[field];
+  if (required === "optional") return `${label} (Optional)`;
+  return required ? `${label} *` : label;
 }

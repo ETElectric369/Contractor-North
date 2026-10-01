@@ -1400,8 +1400,10 @@ export async function createManualEntry(input: {
  * updateTimeEntry on an open row (the editor, Nort's time.fixEntry, a crafted call), all
  * land here and get the same bounds, the same card crumb and the same message to the crew member.
  *
- *   * bounds (stopProblem): after the start, not in the future, at most 18 hours, lunch shorter than
- *     the shift. 0291 refuses a future close under this for every session caller.
+ *   * bounds (stopProblem): after the start, not in the future, at most the shift ceiling
+ *     (MAX_SHIFT_HOURS / MAX_SHIFT_PHRASE in lib/long-shift — never the number typed again here,
+ *     because W4's tripwire strips comments and would never catch this one going stale), lunch
+ *     shorter than the shift. 0291 refuses a future close under this for every session caller.
  *   * the row must still be OPEN when the write lands (.eq status open): a clock stopped a moment
  *     ago on his phone is not stopped twice, and the answer says so rather than claiming success.
  *   * the card says who stopped it and when (stopCrumb), and the person whose clock it was is told,
