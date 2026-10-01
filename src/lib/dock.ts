@@ -178,11 +178,16 @@ export const DOCK: DockSection[] = [
     icon: Briefcase,
     href: "/jobs",
     children: [
+      // ALL, FIRST (Erik, report b94497dd, 2026-09-30: "Add a button for the default setting at the
+      // top above To Be Scheduled 'All'"). It is the page with no ?status= — the view /jobs opens
+      // on: the active jobs in one list, the Completed shelf under them, the cancelled count below
+      // that. So the row a person lands on is a row they can see they are on, and the way back to it
+      // is a tap instead of a cleared filter chip. (It had been cut in 2026-07 as "brain clutter";
+      // four months of using it says the default view needs its own name. This reversal is his.)
+      { id: "j-all", label: "All", icon: Briefcase, href: "/jobs" },
       // The job lifecycle, GENERATED from the canonical JOB_STATUSES spine (its order IS the
       // lifecycle) so this list can't drift from the enum again — it had: missing invoiced +
       // cancelled, and a hand-written "Completed" vs canonical "complete". Guarded by dock.test.ts.
-      // "All Jobs" is gone by Erik's call (2026-07 notes): the status pills ARE the list — the
-      // unfiltered firehose was brain clutter (the section tile itself still lands on /jobs).
       ...JOB_STATUSES.map((s) => ({
         id: `j-${s}`,
         label: capFirst(jobStatusLabel(s)),

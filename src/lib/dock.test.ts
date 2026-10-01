@@ -15,10 +15,13 @@ describe("DOCK jobs section ← JOB_STATUSES", () => {
   const children = jobs?.children ?? [];
   const statusChildren = children.filter((c) => c.href?.startsWith("/jobs?status="));
 
-  it("exists, statuses first — the 'All Jobs' firehose is gone (Erik 2026-07: brain clutter)", () => {
+  it("exists, All first and then the statuses (Erik, b94497dd: 'a button for the default setting at the top above To Be Scheduled')", () => {
     expect(jobs).toBeDefined();
-    expect(children[0]?.href).toBe(`/jobs?status=${JOB_STATUSES[0]}`);
-    expect(children.some((c) => c.href === "/jobs")).toBe(false);
+    expect(children[0]).toMatchObject({ id: "j-all", label: "All", href: "/jobs" });
+    expect(children[1]?.href).toBe(`/jobs?status=${JOB_STATUSES[0]}`);
+    // All carries no switch and no role gate: it is the view the page opens on, for everyone.
+    expect(children[0]?.staffOnly).toBeUndefined();
+    expect(children[0]?.feature).toBeUndefined();
   });
 
   it("hrefs cover every job status, in lifecycle order (cancelled last)", () => {
@@ -31,8 +34,8 @@ describe("DOCK jobs section ← JOB_STATUSES", () => {
     );
   });
 
-  it("statuses lead; only Permits + Plans follow (WO/Materials/CO are hub-only — Erik: 'Across all jobs GO AWAY')", () => {
-    expect(children.slice(0, JOB_STATUSES.length).map((c) => c.id)).toEqual(
+  it("All then the statuses, and nothing after (WO/Materials/CO are hub-only — Erik: 'Across all jobs GO AWAY')", () => {
+    expect(children.slice(1, 1 + JOB_STATUSES.length).map((c) => c.id)).toEqual(
       JOB_STATUSES.map((s) => `j-${s}`),
     );
     // Statuses are for everyone (techs filter their own job list) — never staff-gated.
@@ -40,7 +43,7 @@ describe("DOCK jobs section ← JOB_STATUSES", () => {
     // After the statuses: NOTHING. Every cross-job list link is gone — those records are
     // reached through the job's own tabs. Permits left last (Erik 2026-07-20: "permits live
     // with the job like materials"); Plans & LiDAR left 2026-07-14.
-    const rest = children.slice(JOB_STATUSES.length);
+    const rest = children.slice(1 + JOB_STATUSES.length);
     expect(rest).toEqual([]);
     for (const gone of ["/work-orders", "/materials", "/change-orders", "/permits"]) {
       expect(children.some((c) => c.href && basePath(c.href) === gone)).toBe(false);
@@ -273,8 +276,10 @@ describe("activeRowHref — one lit row, or none", () => {
     expect(activeRowHref(rows("you", false), "/handbook", "/handbook")).toBe("/handbook");
   });
 
-  it("two rows on one page light nothing rather than guess (bare /jobs)", () => {
-    expect(activeRowHref(rows("jobs", true), "/jobs", "/jobs")).toBeUndefined();
+  // Bare /jobs used to light nothing: seven rows sat on that one pathname and none of them WAS it.
+  // The All row is it (b94497dd), so the page a person opens on now says which row it is.
+  it("bare /jobs lights All — the row that IS the unfiltered page", () => {
+    expect(activeRowHref(rows("jobs", true), "/jobs", "/jobs")).toBe("/jobs");
   });
 });
 
