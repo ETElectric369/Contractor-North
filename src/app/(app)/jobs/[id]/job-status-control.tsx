@@ -14,7 +14,7 @@ import { isYmd, shortDay } from "@/lib/come-back-days";
 import { finishJob, setJobStatus } from "../actions";
 import { setJobHold, snoozeJobHold } from "../../schedule/actions";
 import { useToast } from "@/components/toast";
-import { JOB_STATUSES, jobStatusLabel } from "@/lib/job-status";
+import { JOB_STATUSES, finishesTheJob, jobStatusLabel } from "@/lib/job-status";
 
 /** "in_progress" → "In Progress": the pill and the menu rows are Title Case (the clickables law). */
 export const statusTitle = (s: string | null | undefined): string => jobStatusLabel(s).replace(/\b\w/g, (c) => c.toUpperCase());
@@ -44,12 +44,15 @@ const PILL =
  * THE ONE WRITE BEHIND A PICK. Whatever the job is now (held or not), the pick is written as itself
  * through the guarded setJobStatus: it clears hold_reason on any status that isn't on_hold, and the
  * jobs_hold_day trigger (0366) clears hold_until and hold_by, so the wake side effects happen without
- * a second writer choosing the status. Complete is finishJob's (Nort's no-toggle path): the job is
- * done AND its billing is put in front of the office, the way Manage → Finish Job does it. On Hold
- * never comes here (the picker asks why first).
+ * a second writer choosing the status. A pick that FINISHES the job is finishJob's (Nort's no-toggle
+ * path): the job is done AND its billing is put in front of the office, the way Manage → Finish Job
+ * does it. Which statuses those are is not written out here — it is the one typed table every door
+ * reads (lib/job-status JOB_STATUS_DOOR, M2), and setJobStatus sends a finish the same way, so this
+ * is the short road to the same function, never a second rule. On Hold never comes here (the picker
+ * asks why first).
  */
 export async function writeStatusPick(id: string, next: string): Promise<{ ok: boolean; error?: string; speak?: string; warning?: string }> {
-  if (next === "complete") return finishJob(id, {});
+  if (finishesTheJob(next)) return finishJob(id, {});
   return setJobStatus(id, next);
 }
 

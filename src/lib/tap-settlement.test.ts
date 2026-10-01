@@ -123,6 +123,9 @@ describe("the webhook settles and never claims a delivery (route.ts + the one wr
   });
 
   it("every settle refreshes the money surfaces, so no screen can disagree with the row", () => {
-    expect(src).toMatch(/revalidateMoney\(/);
+    // M1: the refresh (and the recalc, the job completion and the bell) moved into the one helper
+    // every pay door settles through, so this pins the road to it and the refresh at the end of it.
+    expect(src).toMatch(/afterPaymentLanded\(/);
+    expect(readFileSync("src/lib/after-payment-landed.ts", "utf8")).toMatch(/revalidateMoney\(/);
   });
 });

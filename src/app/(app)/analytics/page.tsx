@@ -255,8 +255,13 @@ export default async function AnalyticsPage({
                 <span className="w-20 text-right font-medium text-slate-800">{formatCurrency(v as number)}</span>
               </div>
             ))}
+            {/* THE COUNT IS THE ROWS (M3): computeArAging counts exactly the invoices it lists, so
+                this is never a figure with nothing behind it — and nothing open says so instead of
+                reading "0 open invoices · chase the red first". */}
             <p className="pt-2 text-xs text-slate-400">
-              {ar.openCount} open invoice{ar.openCount === 1 ? "" : "s"} · chase the red first
+              {ar.openCount === 0
+                ? "Nobody owes you anything right now."
+                : `${ar.openCount} open invoice${ar.openCount === 1 ? "" : "s"} · chase the red first`}
             </p>
           </CardContent>
         </Card>

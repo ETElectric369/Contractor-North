@@ -28,6 +28,7 @@ import { canAcceptPayments, connectStateFromOrg } from "@/lib/stripe-connect";
 import { smsReadiness } from "@/lib/sms";
 import { pendingTransfers, transferOnItsWaySentence } from "@/lib/bank-transfer";
 import { GetPaidPickButton } from "./record-payment-button";
+import { PullToRefresh } from "@/components/pull-to-refresh";
 
 export const dynamic = "force-dynamic";
 
@@ -200,6 +201,9 @@ export default async function BillingPage({ searchParams }: { searchParams?: Pro
 
   return (
     <div>
+      {/* PULL DOWN TO REFRESH (44aeec9c, Erik on this page: "can we pull down to refresh?"). One
+          shared component, mounted here; every other screen gets it the same way. */}
+      <PullToRefresh />
       <PageHeader title="Invoices" description="Who owes you, what's late, and what came in.">
         <NewInvoiceButton customers={customers ?? []} jobs={jobs} salesTax={salesTax} />
       </PageHeader>

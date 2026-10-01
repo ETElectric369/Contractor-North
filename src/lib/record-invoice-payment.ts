@@ -1,11 +1,7 @@
-import { invoiceOverpayment } from "@/lib/invoice-math";
-import { orgStaffIds } from "@/lib/push";
-import { notifyPeople } from "@/lib/notifications";
-import { formatCurrency } from "@/lib/utils";
-import { recalcInvoice } from "@/lib/invoice-recalc";
-import { completeJobWhenPaid } from "@/lib/complete-job-when-paid";
+// WHAT FOLLOWS A PAYMENT, for every door that writes one (M1): recalc, finish the job, the bell,
+// the refresh. This file used to carry its own copy of all four.
+import { afterPaymentLanded, type PaymentBell } from "@/lib/after-payment-landed";
 import { paymentReachedDraft } from "@/lib/tap-settlement";
-import { revalidateMoney } from "@/lib/revalidate-money";
 import { reportError } from "@/lib/observe";
 import { captureProcessorFee } from "@/lib/processor-fee-capture";
 import { paymentMethodKey } from "@/lib/payment-method";
@@ -157,32 +153,17 @@ export async function recordStripeInvoicePayment(
   const onDraft = paymentReachedDraft(target.status);
 
   /**
-   * SETTLE = RECALC, COMPLETE THE JOB IF THAT PAID IT OFF, THEN REFRESH.
-   *
-   * revalidateMoney is the one nerve every money mutation in the app uses; a webhook is a Route
-   * Handler and the action is a Server Action, so it is legal from both, and the invoice page,
-   * the billing board, AR and the My Day money line all re-read instead of disagreeing with the
-   * row (the other half of INV-069: a pay door's write that told no screen anything).
+   * SETTLE = THE WORK THAT FOLLOWS EVERY PAYMENT, through the one helper (M1,
+   * lib/after-payment-landed): recalc, finish the job if that paid it off, refresh every money
+   * screen. `bell` carries the office's line only where a payment was NEWLY recorded - a repeat
+   * (the row was already there) settles again, which is free, but ringing twice for one payment
+   * is a lie.
    *
    * Returns false when the money did NOT come to rest, so the caller can throw and let Stripe
    * retry the same event id — the insert then hits 23505 and the heal branch settles it.
    */
-  const settle = async (id: string): Promise<boolean> => {
-    if (!(await recalcInvoice(supabase, id))) return false;
-    // Paid in full on a standard invoice, on a job that has started (in progress / on hold) with
-    // no other open bill: the job is done (lib/complete-job-when-paid; never throws, never fails
-    // the payment). A job still booked ahead is left on the schedule.
-    await completeJobWhenPaid(supabase, id);
-    try {
-      revalidateMoney(id);
-    } catch (e) {
-      // The money is recorded and the totals are right; only the caches are stale, and the next
-      // navigation clears them. Worth a line in the ops log, never worth making Stripe retry a
-      // payment that already landed.
-      reportError("stripe:webhook:revalidate", e, { invoiceId: id });
-    }
-    return true;
-  };
+  const settle = async (id: string, bell?: PaymentBell): Promise<boolean> =>
+    (await afterPaymentLanded(supabase, { invoiceId: id, orgId, bell })).settled;
 
   // LOCK 2: the same PaymentIntent already booked, under whatever key (a row from before this
   // module, or the other writer). Settle again — free, and it heals a crashed first attempt.
@@ -245,7 +226,12 @@ export async function recordStripeInvoicePayment(
   // re-runs recalc. So throw: the handler answers 500, Stripe retries the same event id,
   // the insert hits 23505 and the heal branch above settles it. Recalc is idempotent, so
   // the retry is free; a swallowed failure is not.
-  if (!(await settle(invoiceId))) {
+  //
+  // THE BELL RIDES WITH IT, once, on the path that recorded the payment: `said` is this door's own
+  // words ("paid online", "paid by card in person"), there is no recorder to leave out, and an
+  // overpayment is said in its own words by the one helper (lib/after-payment-landed). A replay of
+  // the same key (23505 above) settles without a bell, so one payment rings exactly once.
+  if (!(await settle(invoiceId, { amount, said: via.said }))) {
     throw new Error(`settling invoice ${invoiceId} failed after recording the payment`);
   }
   if (onDraft) {
@@ -256,49 +242,6 @@ export async function recordStripeInvoicePayment(
       paymentIntent,
     });
   }
-  const { data: inv } = await supabase
-    .from("invoices")
-    // total + amount_paid so the overpayment is knowable HERE — the projection law: you cannot
-    // notice what you did not select.
-    .select("invoice_number, total, amount_paid, customers(name)")
-    .eq("id", invoiceId)
-    .single();
-
-  // A customer paid online — ping office staff (no recorder to exclude).
-  // Awaited (not fire-and-forget): a serverless function can freeze right after
-  // responding to Stripe, killing an un-awaited push. sendPush never throws.
-  const cust = (inv as any)?.customers?.name as string | undefined;
-
-  // ── PAID TWICE (audit 6) ────────────────────────────────────────────────────────────────
-  //
-  // This is the only payment writer with no ceiling. recordPayment refuses to exceed the
-  // balance and credits are capped, but a customer who taps Pay twice on a slow connection
-  // mints two Checkout sessions that EACH read a full balance, because neither has settled yet.
-  // Both go through, both post, and the invoice then reads $0 owed — the one number anybody
-  // checks — with nothing anywhere saying it took double.
-  //
-  // THE ROW IS STILL WRITTEN. The money already moved at Stripe; refusing the insert would lose
-  // the record of a real payment, which is strictly worse than recording an awkward one. And
-  // the disposition is NOT chosen here: credit-versus-refund is the judgement CreditButton asks
-  // a human to make, and an overpayment is sometimes a deliberate prepayment toward the next
-  // job. A webhook picking "refund" would pre-empt that and double-post against a later manual
-  // credit. So it does the one thing a machine should: say so, loudly, to the people who can
-  // decide.
-  const over = invoiceOverpayment((inv as any)?.total, (inv as any)?.amount_paid);
-  // THE BELL RECORDS IT (notifyPeople): once, here, on the path that recorded the payment. A replay
-  // of the same key (23505 above) settles and returns before this line, so it never writes twice.
-  await notifyPeople(orgId, await orgStaffIds(orgId), "invoice_paid", over > 0.005
-    ? {
-        title: "Overpaid — action needed",
-        body: `${formatCurrency(amount)} ${via.said} on ${inv?.invoice_number || "an invoice"}${cust ? ` — ${cust}` : ""}. That's ${formatCurrency(over)} MORE than the total. Credit it or refund it.`,
-        url: `/billing/${invoiceId}`,
-      }
-    : {
-        title: "Payment received",
-        body: `${formatCurrency(amount)} ${via.said} on ${inv?.invoice_number || "an invoice"}${cust ? ` — ${cust}` : ""}`,
-        url: `/billing/${invoiceId}`,
-      });
-
   // WHAT STRIPE TOOK, LAST (migration 0284). Card fees are a business cost that comes off the
   // owner's draw, so the real fee is read off the charge on the contractor's own account and
   // kept on the row. It runs only after the money is recorded, settled and announced, and it

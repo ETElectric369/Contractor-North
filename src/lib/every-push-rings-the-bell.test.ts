@@ -13,9 +13,9 @@ import { join, relative } from "node:path";
  * and notifyPeople) is counted, per file, comments stripped, and a file or a count that isn't on the
  * list fails: a new push must either go through notifyPeople or join the list with its own line.
  *
- * It counts calls only. billing/actions.ts's payment-recorded push gets its bell line from lane 4's
- * createNotifications, pinned in lane 4's own test (a check for it here would be red until that lane
- * merges first).
+ * It counts calls only. The payment-recorded push used to be billing/actions.ts's own pair
+ * (createNotifications, then a bare push); M1 moved it into lib/after-payment-landed, the one place
+ * every pay door rings from, so it is a notifyPeople site now.
  */
 const ROOT = process.cwd();
 
@@ -26,7 +26,6 @@ const OWN_LINE: Record<string, number> = {
   "src/app/(app)/quotes/actions.ts": 1, // an estimate accepted: createNotifications, then the push
   "src/app/(app)/timeclock/crew-actions.ts": 1, // a crew change: its own line
   "src/app/(app)/timeclock/actions.ts": 2, // the clock-out reminder and the daily report: their own lines
-  "src/app/(app)/billing/actions.ts": 1, // a payment recorded: lane 4's createNotifications
   "src/app/api/timeclock/long-shift/route.ts": 2, // the long-shift job: the line first, then each push
   "src/app/api/pick/confirmed/route.ts": 1, // a customer picked a time: its own line
   "src/app/q/[token]/actions.ts": 1, // an estimate accepted from the public page: its own line
@@ -37,6 +36,9 @@ const OWN_LINE: Record<string, number> = {
 
 /** The sites that were bare pushes and now go through notifyPeople (the line, then the push). */
 const THROUGH_NOTIFY: string[] = [
+  // M1: every door that lands a payment rings ONE bell, from the one helper. recordPayment used to
+  // keep its own createNotifications + bare push in billing/actions.ts; that pair is this now.
+  "src/lib/after-payment-landed.ts",
   "src/app/inquire/[org]/actions.ts",
   "src/app/(app)/appointments/actions.ts",
   "src/app/(app)/timeclock/actions.ts", // notifyGeofenceExit, the "Clock out?" reminder

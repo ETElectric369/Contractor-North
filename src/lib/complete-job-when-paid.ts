@@ -8,9 +8,11 @@ import { reportError } from "@/lib/observe";
  *
  * A job that has been billed in full and paid in full is done: nobody is coming back to it, and
  * a tile that still says "in progress" over a paid bill is a lie the office has to clean up by
- * hand. So the three doors money lands through — the Stripe webhook (card, bank, Tap to Pay),
- * Record Payment, and Settle Up (which records through Record Payment) — ask this once after the
- * recalc that came out "paid".
+ * hand. So every door money lands through asks this once, after the recalc that came out "paid" —
+ * and since M1 there is exactly ONE caller, lib/after-payment-landed, which every payment writer
+ * goes through (Record Payment and Settle Up, the Stripe writer the webhook and the Pay Now sheet
+ * share, and a deposit put on an invoice out of the bank download, which used to skip this step
+ * and leave a paid-off job reading "in progress" for ever).
  *
  * THE GATE, in the order it is read:
  *   1. the invoice is paid, and it is a STANDARD invoice. A paid draw (deposit / progress /
