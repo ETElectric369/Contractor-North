@@ -14,6 +14,7 @@ import { getOrgSettings } from "@/lib/org-settings";
 import { requestHref } from "@/lib/feature-doors";
 import { todayStrInTz, tzLocalHourUtc } from "@/lib/tz";
 import { createNotifications } from "@/lib/notifications";
+import { STAFF_ROLES } from "@/lib/actions/perms";
 import { sendPushToProfiles } from "@/lib/push";
 import { sendEmail } from "@/lib/email";
 import { rateLimited } from "@/lib/rate-limit";
@@ -356,7 +357,8 @@ async function notifyNewLead(
       // reason push.ts:34 does it). Without it a new lead's email could go to an offboarded
       // ex-employee — and if the org has no email on file, ONLY to them. `role` comes along so the
       // recipient below is chosen rather than picked at random from an unordered set.
-      supabase.from("profiles").select("id, email, role").eq("org_id", orgId).eq("active", true).in("role", ["owner", "admin", "office"]),
+      // Who is office is lib/actions/perms, the one answer every door reads (W2).
+      supabase.from("profiles").select("id, email, role").eq("org_id", orgId).eq("active", true).in("role", STAFF_ROLES),
       // settings: where the alert lands (Leads switched off → My Day, the switch board 0352).
       supabase.from("organizations").select("email, name, settings").eq("id", orgId).maybeSingle(),
     ]);
