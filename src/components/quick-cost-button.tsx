@@ -722,7 +722,17 @@ function SnapCostButton({
           {!jobId && pickerJobs && pickerJobs.length > 0 && (
             <div>
               <Label htmlFor="qc-job">Job</Label>
-              <Select id="qc-job" value={job} onChange={(e) => setJob(e.target.value)} disabled={costSaved || !!sameAsDoc}>
+              <Select
+                id="qc-job"
+                value={job}
+                // A part of the OLD job means nothing on the new one (item C1), so the answer starts
+                // again rather than being carried over and refused at the save.
+                onChange={(e) => {
+                  setJob(e.target.value);
+                  setScope("");
+                }}
+                disabled={costSaved || !!sameAsDoc}
+              >
                 <option value="">Business Cost (No Job)</option>
                 {pickerJobs.map((j) => (
                   <option key={j.id} value={j.id}>{j.label}</option>
