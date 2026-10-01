@@ -6,7 +6,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { adminConfigured, createAdminClient } from "@/lib/supabase/admin";
 import { pushCalendarItem, deleteCalendarItem } from "@/lib/calendar-sync";
-import { JOB_STATUSES } from "@/lib/job-status";
+import { JOB_STATUSES, finishesTheJob } from "@/lib/job-status";
 import { DRAW_KINDS, isDrawKind } from "@/lib/invoice-math";
 import { BRING_IN_NEW_WORK, openDraftOnJob, unbilledCardDoor, type CardDoor, type OpenDraft } from "@/lib/actuals-draw";
 import { emptyToNull } from "@/lib/forms";
@@ -675,8 +675,24 @@ export async function setJobStatus(
   status: string,
   /** Why it's parked — only read for on_hold. A hold without a reason is a shrug (0234). */
   reason?: string | null,
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<{ ok: boolean; error?: string; id?: string; speak?: string; warning?: string }> {
   if (!(JOB_STATUSES as readonly string[]).includes(status)) return { ok: false, error: `Status must be one of: ${JOB_STATUSES.join(", ")}.` };
+  /**
+   * FINISHING A JOB BILLS ITS WORK FIRST — THROUGH THIS DOOR TOO (M2, Tao J-002).
+   *
+   * This writer took "complete" from anybody and wrote the word alone. The job page's Complete had
+   * already been pointed at finishJob (209451e1), but every OTHER caller of this function — Nort's
+   * "mark it complete", and whatever door is written next — still ended a job with its hours and
+   * receipts on no bill: exactly Tao's 19.5 hours, which dropped off every screen with nobody told.
+   *
+   * So the rule lives at the WRITER, not at each door, and it reads the one typed table that says
+   * which statuses end a job (lib/job-status JOB_STATUS_DOOR — a new status will not compile until
+   * it is classified). finishJob does the whole of finishing: the T&M Final built as a draft, the
+   * nothing-new check, the warning naming work no bill claims — and the status write, which clears
+   * the hold with it. Its `speak` and `warning` ride back out of here so no caller loses them.
+   */
+  if (finishesTheJob(status)) return finishJob(id, {});
+
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
@@ -888,8 +904,15 @@ export async function finishJob(
 
   // One place marks the job complete — checked (the silent-write law: a zero-row update on a
   // cross-org or deleted id is a 204, and "finished" would have been a lie).
+  //
+  // THE HOLD REASON LIVES AND DIES WITH THE HOLD (0234), so finishing clears it, the same as every
+  // other status write does (setJobStatus). It used to leave it, which was invisible while
+  // setJobStatus was the only door a held job could be finished through — M2 makes this the only
+  // door, so the clear comes with it rather than resting on the database's trigger (0366) being
+  // applied. A stale "waiting on the permit" on a finished job is a false alarm every reader
+  // would believe.
   const complete = async (): Promise<{ ok: true } | { ok: false; error: string }> => {
-    const { data, error } = await supabase.from("jobs").update({ status: "complete" }).eq("id", jobId).select("id");
+    const { data, error } = await supabase.from("jobs").update({ status: "complete", hold_reason: null }).eq("id", jobId).select("id");
     if (error) return { ok: false, error: dbError(error) };
     if (!data?.length) return { ok: false, error: "Job not found." };
     await pushCalendarItem("job", jobId); // finished job leaves Google (fire-safe)

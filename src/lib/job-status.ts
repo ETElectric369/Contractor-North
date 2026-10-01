@@ -25,6 +25,35 @@ export type JobStatus = (typeof JOB_STATUSES)[number];
  *  schedule/My-Day reads, and the clock-in "this job is now started" promotion. */
 export const ACTIVE_JOB_STATUSES: JobStatus[] = ["to_be_scheduled", "scheduled", "in_progress", "on_hold"];
 
+/**
+ * WHICH DOOR A STATUS IS WRITTEN THROUGH (M2, Tao J-002).
+ *
+ *   "set"    the plain status write: the word, and nothing else follows from it (setJobStatus).
+ *   "finish" FINISHING, which BILLS THE UNBILLED WORK FIRST (jobs/actions finishJob) — the T&M
+ *            Final built as a draft, the nothing-new check, and the hours-and-receipts-off-a-bill
+ *            warning. Writing the word alone is the Tao J-002 failure: his job went complete, 19.5
+ *            hours were billed nowhere, and they dropped off every screen with nobody told.
+ *
+ * ONE RULE, ONE PLACE: every door that moves a job's status reads this table instead of carrying its
+ * own "if it's complete…", and a NEW job status will not compile until someone says which door it
+ * goes through. Erik's laws: one rule, one place; nothing silent.
+ */
+export const JOB_STATUS_DOOR: Record<JobStatus, "set" | "finish"> = {
+  to_be_scheduled: "set",
+  scheduled: "set",
+  in_progress: "set",
+  on_hold: "set",
+  complete: "finish",
+  cancelled: "set", // a job called off is not a job billed: nothing is drafted, and it never was
+};
+
+/** A status that ENDS the job, so it may only be written by finishing it (which bills first). */
+export const finishesTheJob = (status: string | null | undefined): boolean =>
+  JOB_STATUS_DOOR[String(status ?? "") as JobStatus] === "finish";
+
+/** The statuses a plain status write may set — every one that isn't a finish (the typed table above). */
+export const SETTABLE_JOB_STATUSES: JobStatus[] = JOB_STATUSES.filter((s) => JOB_STATUS_DOOR[s] === "set");
+
 /** A job somebody has BEEN on — in progress, or paused after starting. A job still to be
  *  scheduled, or booked for a day ahead, has not started, whatever its bills say: a bill paid
  *  ahead of the visit must never end it (lib/complete-job-when-paid). */

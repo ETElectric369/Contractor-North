@@ -99,6 +99,38 @@ describe("job.setStatus puts a job on hold through the hold", () => {
   });
 });
 
+/**
+ * NORT HAS ONE FINISH TOOL, NOT TWO (M2).
+ *
+ * "Mark the Tao job complete" could reach either job.finish — which bills the unbilled work into a
+ * draft and asks Erik to confirm first — or job.setStatus {status: complete}, which wrote the word
+ * alone and asked nobody. Same words, two consequences, and the cheap one is how Tao's 19.5 hours
+ * went unbilled. job.setStatus now points at the one door instead, in words Nort can act on.
+ */
+describe("job.setStatus is not a second way to finish a job", () => {
+  const run = (i: Record<string, unknown>) => jobActions["job.setStatus"].handler(jobActions["job.setStatus"].input.parse(i), ctx);
+
+  it("complete is refused in words that name the one finish tool, and NOTHING is written", async () => {
+    const r = await run({ id: JOB, status: "complete" });
+    expect(r.ok).toBe(false);
+    expect(r.error).toContain("job.finish");
+    expect(r.error).toMatch(/bills its work first/);
+    expect(m.setJobStatus).not.toHaveBeenCalled();
+    expect(m.setJobHold).not.toHaveBeenCalled();
+  });
+
+  it("the tool stops offering complete, and says where finishing lives", () => {
+    const d = jobActions["job.setStatus"].description;
+    expect(d).not.toMatch(/to_be_scheduled, scheduled, in_progress, on_hold, complete, cancelled/);
+    expect(d).toContain("job.finish");
+  });
+
+  it("finishing is still a confirmed, financial move — the thing a bare status write skipped", () => {
+    expect(jobActions["job.finish"].confirm).toBe("financial");
+    expect(jobActions["job.setStatus"].confirm).toBeUndefined();
+  });
+});
+
 describe("a hold's two answers", () => {
   it("job.snoozeHold moves the day (the reason only when none is saved)", async () => {
     await jobActions["job.snoozeHold"].handler({ id: JOB, date: "2026-10-03", reason: "Waiting on the permit" }, ctx);

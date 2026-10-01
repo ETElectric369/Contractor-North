@@ -1,5 +1,65 @@
 import { describe, it, expect } from "vitest";
-import { pickJobScheduledToday, pickMemberCurrentJob } from "@/lib/job-status";
+import { readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
+import {
+  JOB_STATUSES,
+  JOB_STATUS_DOOR,
+  SETTABLE_JOB_STATUSES,
+  finishesTheJob,
+  pickJobScheduledToday,
+  pickMemberCurrentJob,
+} from "@/lib/job-status";
+
+/**
+ * WHICH DOOR A STATUS IS WRITTEN THROUGH (M2). Finishing a job BILLS THE UNBILLED WORK FIRST, so the
+ * word "complete" may only be written by finishing — one typed table, read by the status writer, by
+ * the job page's pill and by Nort's tool, instead of an `if` at each door. The type is the teeth: a
+ * new job status will not compile until somebody says which door it goes through.
+ */
+describe("the door each job status is written through", () => {
+  it("every status on the spine is classified, and nothing else is", () => {
+    expect(Object.keys(JOB_STATUS_DOOR).sort()).toEqual([...JOB_STATUSES].sort());
+  });
+
+  it("finishing is 'complete', and only 'complete' — a cancelled job is called off, never billed", () => {
+    expect(JOB_STATUSES.filter(finishesTheJob)).toEqual(["complete"]);
+    expect(finishesTheJob("cancelled")).toBe(false);
+    // Nothing off the spine ends a job either: a stray word is not a finish.
+    for (const s of ["", "invoiced", "estimate", "done", null, undefined]) expect(finishesTheJob(s), String(s)).toBe(false);
+  });
+
+  it("the plain status write may set everything that is not a finish", () => {
+    expect(SETTABLE_JOB_STATUSES).toEqual(["to_be_scheduled", "scheduled", "in_progress", "on_hold", "cancelled"]);
+    expect(SETTABLE_JOB_STATUSES.some(finishesTheJob)).toBe(false);
+  });
+});
+
+/**
+ * THE TEETH: ONLY FINISHING WRITES "complete" ON A JOB.
+ *
+ * A deliberate bypass tripwire (the behaviour itself is pinned in jobs/finish-job.test.ts): it walks
+ * the source for anything that writes the word onto the jobs table and allows exactly the two places
+ * that are allowed to — finishJob, which bills first, and the paid-in-full gate, which runs after a
+ * payment has already settled. A third is RED until its author reads this.
+ */
+describe("nothing writes a job complete except finishing it", () => {
+  const code = (path: string) =>
+    readFileSync(join(process.cwd(), path), "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/(^|\s)\/\/[^\n]*/g, "$1");
+
+  it("the only two writers are Finish Job and the paid-in-full gate", () => {
+    const files = (readdirSync(join(process.cwd(), "src"), { recursive: true }) as string[])
+      .filter((f) => /\.(ts|tsx)$/.test(f) && !/\.test\.tsx?$/.test(f))
+      .map((f) => join("src", f));
+    // A write of the word onto `jobs`: `.update({ status: "complete"` with whatever rides along.
+    const found = files.filter((f) => /from\("jobs"\)[\s\S]{0,80}?\.update\(\{\s*status: "complete"/.test(code(f)));
+    expect(found.sort()).toEqual([
+      "src/app/(app)/jobs/actions.ts", // finishJob — bills the unbilled work, THEN writes the word
+      "src/lib/complete-job-when-paid.ts", // paid in full on a started job, after the money settled
+    ]);
+  });
+});
 
 // The "which job is this person on today" spine — shared by the /timeclock crew
 // board and the job-less clock-in resolution. Day bounds here are an arbitrary

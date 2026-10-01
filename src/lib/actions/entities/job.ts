@@ -14,6 +14,9 @@ import { createClient } from "@/lib/supabase/server";
 import { orgTimezone } from "@/lib/org-local-time";
 import { todayStrInTz } from "@/lib/tz";
 import { WAITABLE_KINDS, saveNeedsYouWait, waitKey } from "@/lib/action-items/needs-you-waits";
+// Which statuses END a job, so they only go through finishing (which bills first) — the one typed
+// table every door reads (M2).
+import { finishesTheJob } from "@/lib/job-status";
 import { resolveCustomerId, resolveContactId, resolveJobId, resolveProfileId } from "../resolve-id";
 import type { ActionDef } from "../types";
 
@@ -114,7 +117,7 @@ export const jobActions: Record<string, ActionDef> = {
     group: "job",
     label: "Set job status",
     description:
-      "Change a job's status — 'mark the Miller job on hold / in progress / scheduled'. Resolve the job with list_jobs first. Status: to_be_scheduled, scheduled, in_progress, on_hold, complete, cancelled. Putting a job ON HOLD needs its reason (what it's waiting on: it is the reminder when the job comes back) and takes an optional until (YYYY-MM-DD, company-local, today or later: the day it comes back to Needs You; left out, a week from today). With no reason it refuses unless the job already has one saved; ask what it's waiting on.",
+      "Change a job's status — 'mark the Miller job on hold / in progress / scheduled'. Resolve the job with list_jobs first. Status: to_be_scheduled, scheduled, in_progress, on_hold, cancelled. FINISHING A JOB IS NOT HERE: 'mark it complete / done / finished' is job.finish, which bills the work first and asks the user to confirm — this tool refuses 'complete' and says so. Putting a job ON HOLD needs its reason (what it's waiting on: it is the reminder when the job comes back) and takes an optional until (YYYY-MM-DD, company-local, today or later: the day it comes back to Needs You; left out, a week from today). With no reason it refuses unless the job already has one saved; ask what it's waiting on.",
     input: z.object({
       id: z.string(),
       status: z.string(),
@@ -124,6 +127,21 @@ export const jobActions: Record<string, ActionDef> = {
     auth: "staff",
     effect: "write",
     handler: async (i) => {
+      /**
+       * ONE FINISH TOOL, NOT TWO (M2). Nort could end a job two ways: job.finish, which bills the
+       * unbilled work into a draft and asks the user to confirm first (confirm: "financial"), and
+       * this tool with status "complete", which wrote the word alone and asked nobody. Same words
+       * from Erik, two different consequences — and the cheap one was the one that lost Tao's 19.5
+       * hours. So finishing has exactly one door now, and this one points at it in words rather
+       * than quietly doing something else (the typed table in lib/job-status says which statuses
+       * end a job, so a new one is covered here the day it is added).
+       */
+      if (finishesTheJob(i.status)) {
+        return {
+          ok: false,
+          error: "Finishing a job bills its work first, so it goes through Finish Job, not a status change. Use job.finish on this job — it drafts the bill, never sends it, and asks them to confirm.",
+        };
+      }
       // ON HOLD GOES THROUGH THE HOLD (NY-hold, 0366): its reason and its day, the same write the
       // schedule's Hold It makes. Every other status is the plain status write.
       if (i.status !== "on_hold") return setJobStatus(i.id, i.status);
