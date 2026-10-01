@@ -3,13 +3,15 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 /**
  * RESIDENTIAL OR COMMERCIAL IS WORKED OUT, NOT ASKED (W2-07): the New Lead form no longer asks it.
  * A lead with a company is commercial, one without is residential; a type a caller sends (Nort's
- * inquiry.create) wins; an edit follows the Company box but never demotes an Industrial lead.
+ * inquiry.create) wins; an edit follows the Company box but only ever upwards — it may add
+ * Commercial or fill a blank in, and never demotes a type the lead already has.
  */
 type Row = Record<string, unknown>;
 const s = vi.hoisted(() => ({
   inserts: [] as Row[],
   updates: [] as { patch: Row; filters: unknown[][] }[],
   customers: [] as Row[],
+  storedType: null as string | null,
 }));
 
 function builder(table: string) {
@@ -27,6 +29,8 @@ function builder(table: string) {
       return { data: [{ id: "lead-1" }], error: null };
     }
     if (table === "customers") return { data: s.customers, error: null };
+    // updateInquiry reads the lead's stored type before deciding whether it may add to it.
+    if (table === "inquiries") return { data: { type: s.storedType }, error: null };
     return { data: null, error: null };
   };
   const b: any = {
@@ -60,6 +64,7 @@ beforeEach(() => {
   s.inserts = [];
   s.updates = [];
   s.customers = [];
+  s.storedType = null;
 });
 
 describe("a new lead's type", () => {
@@ -92,5 +97,46 @@ describe("an edited lead's type", () => {
     s.updates = [];
     await updateInquiry("lead-1", form({ name: "Rita Moss" }));
     expect(s.updates[1].patch).toEqual({ type: "residential" });
+    // An Industrial lead is left alone entirely — not even a write is attempted.
+    s.updates = [];
+    s.storedType = "industrial";
+    expect(await updateInquiry("lead-1", form({ name: "Plant Test" }))).toEqual({ ok: true });
+    expect(s.updates).toHaveLength(1);
+    expect("type" in s.updates[0].patch).toBe(false);
+  });
+
+  it("a lead already Commercial with a blank Company box stays Commercial", async () => {
+    // The silent demotion: editing only the phone number used to reset the type the lead was
+    // created with (Nort's inquiry.create can send one), and the customer card it mints with it.
+    s.storedType = "commercial";
+    expect(await updateInquiry("lead-1", form({ name: "Pat Test", phone: "5305551212" }))).toEqual({ ok: true });
+    expect(s.updates).toHaveLength(1); // the edit itself, and no type write at all
+    expect("type" in s.updates[0].patch).toBe(false);
+  });
+
+  it("clearing the Company box on a Commercial lead leaves it Commercial", async () => {
+    s.storedType = "commercial";
+    await updateInquiry("lead-1", form({ name: "Pat Test", company_name: "" }));
+    expect(s.updates).toHaveLength(1);
+  });
+
+  it("typing a Company on a Residential lead upgrades it, and says so", async () => {
+    s.storedType = "residential";
+    const res = await updateInquiry("lead-1", form({ name: "Pat Test", company_name: "Pine Test Co" }));
+    expect(s.updates[1].patch).toEqual({ type: "commercial" });
+    // NOTHING SILENT: changing an answer the lead already had is said out loud.
+    expect(res).toMatchObject({ ok: true, note: expect.stringContaining("Commercial") });
+  });
+
+  it("filling in a lead with no type yet needs no announcement", async () => {
+    s.storedType = null;
+    expect(await updateInquiry("lead-1", form({ name: "Rita Moss" }))).toEqual({ ok: true });
+    expect(s.updates[1].patch).toEqual({ type: "residential" });
+  });
+
+  it("a Residential lead with a blank Company box is not re-written", async () => {
+    s.storedType = "residential";
+    await updateInquiry("lead-1", form({ name: "Rita Moss" }));
+    expect(s.updates).toHaveLength(1);
   });
 });
