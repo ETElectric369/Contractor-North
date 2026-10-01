@@ -11,6 +11,8 @@ import { hasActiveAccess, isCompedOrg, graceDaysLeft } from "@/lib/subscription"
 import { getOrgSettings } from "@/lib/org-settings";
 import { orgTrade } from "@/lib/org-trade";
 import { getActionItemsCount } from "@/lib/action-items/query";
+import { readReconcileWork } from "@/app/(app)/reconcile/reconcile-read";
+import { reconcileBadge } from "@/lib/reconcile-kinds";
 import { reportError } from "@/lib/observe";
 import { todayStrInTz } from "@/lib/tz";
 import { GeofenceMonitor } from "@/components/geofence-monitor";
@@ -291,6 +293,31 @@ export default async function AppLayout({
   // immediately; the count arrives in a later chunk and the dot appears a beat afterwards, which
   // is exactly what a badge is worth. Rejection is swallowed here (a count is never a crash) and
   // still reported to the ops sink, so nothing awaits a promise that can throw.
+  // ── RECONCILE'S DOT: HOW MANY KINDS, NEVER HOW MANY ROWS ────────────────────────────────────
+  //
+  // A reconcile pile is undated and unbounded by construction — twenty-six papers under five
+  // spellings wait as long as nobody sorts them — and the badge invariant (action-items/types.ts)
+  // forbids counting a set like that on chrome. So this is a ROLLUP, like the no-job hours line:
+  // the number of KINDS of disagreement with anything open, bounded at the size of the ReconcileKind
+  // union, zero drawing nothing. Each kind's own count is plain text inside its heading on the page,
+  // where the deciding happens.
+  //
+  // IT READS THE SAME FUNCTION THE PAGE READS (readReconcileWork), so the dot and the page can never
+  // say different things — the never-disagree doctrine. Staff only, so a tech's shell never spends a
+  // query on it, and it rides inside the badges promise the shell hands over UNRESOLVED: nothing on
+  // any page waits for it. It is deliberately NOT routed through getActionItemsCount — that is the
+  // Needs You engine, and Erik stopped opening My Day because it stockpiled what he could not act on.
+  const reconcileP: Promise<number> = (async () => {
+    if (!isStaff || !profile.org_id) return 0;
+    try {
+      const work = await readReconcileWork(supabase, profile.org_id, null);
+      return reconcileBadge(work.counts);
+    } catch (e) {
+      reportError("app-layout:reconcile-badge", e);
+      return 0;
+    }
+  })();
+
   const badges: Promise<Record<string, number>> = (async () => {
     try {
       const needsAction = await getActionItemsCount({
@@ -308,10 +335,10 @@ export default async function AppLayout({
       // The lead count ran beside this one (it started with the org read, and never rejects).
       const freshLeads = await freshLeadsP;
       // "/leads" dots only a Leads row that's drawn: with Leads off the dock has none to sum.
-      return { "/planner": needsAction, "/leads": freshLeads };
+      return { "/planner": needsAction, "/leads": freshLeads, "/reconcile": await reconcileP };
     } catch (e) {
       reportError("app-layout:action-items", e);
-      return { "/planner": 0, "/leads": await freshLeadsP };
+      return { "/planner": 0, "/leads": await freshLeadsP, "/reconcile": await reconcileP };
     }
   })();
 

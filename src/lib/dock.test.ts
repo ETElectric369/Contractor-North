@@ -84,7 +84,12 @@ describe("DOCK time doors — Schedule after Today, Clock is the crew's, Timecar
   /**
    * ONE INVOICES PAGE (W1-29): Accounts Receivable and Payments folded into /billing (By Customer and
    * Payments In), and their old routes redirect there, so they have no row. PETTY CASH LEFT THE MENU
-   * (W1-34): a company with rows finds it in Search Or Ask. No new badge: the Money tile carries none.
+   * (W1-34): a company with rows finds it in Search Or Ask.
+   *
+   * MONEY CARRIES ONE DOT NOW, and only one (cn-v1037): Reconcile's, which is how many KINDS of
+   * disagreement have anything open — a rollup bounded by the ReconcileKind union, zero drawing
+   * nothing. It is the only badge under this tile, and the only one it may grow: a number on chrome
+   * has to be a human decision today (lib/action-items/types.ts), which a ledger total is not.
    */
   it("Money has one row for the money coming in (Invoices), and no Accounts Receivable, Payments or Petty Cash row", () => {
     const money = DOCK.find((s) => s.key === "invoices")!.children;
@@ -102,6 +107,34 @@ describe("DOCK time doors — Schedule after Today, Clock is the crew's, Timecar
       DOCK.flatMap((s) => s.children).filter((c) => c.href && basePath(c.href) === path).map((c) => c.id);
     expect(homes("/schedule")).toEqual(["s-week"]);
     expect(homes("/timecards")).toEqual(["ck-cards"]);
+  });
+
+  /**
+   * RECONCILE IS A SIBLING OF BILLS, NEVER A TILE (cn-v1037).
+   *
+   * The two-records-that-should-agree work was a collapsed fold at the bottom of /bills. It is
+   * occasional office work — nobody taps it in a truck — so it belongs one row below the page it
+   * came off, inside Money, and nowhere near the main dock. Staff only, because techs never see
+   * prices, and with no feature switch: this is not a paid tier and KISS says no new switch.
+   */
+  it("Reconcile is one row under Money, straight after Bills, staff-only, with no switch", () => {
+    const money = DOCK.find((s) => s.key === "invoices")!.children;
+    const at = money.findIndex((c) => c.id === "m-recon");
+    expect(money[at]).toMatchObject({ label: "Reconcile", href: "/reconcile", staffOnly: true });
+    expect(money[at]?.feature).toBeUndefined();
+    expect(money[at - 1]?.id).toBe("m-bills");
+    // No top-level tile of its own, and exactly one dock home.
+    expect(DOCK.map((s) => s.key)).not.toContain("reconcile");
+    const homes = DOCK.flatMap((s) => s.children).filter((c) => c.href && basePath(c.href) === "/reconcile");
+    expect(homes.map((c) => c.id)).toEqual(["m-recon"]);
+  });
+
+  it("a tech never sees the Reconcile row, whatever the switches say", () => {
+    for (const section of visibleDock({ isStaff: false, features: null })) {
+      expect(section.children.map((c) => c.id)).not.toContain("m-recon");
+    }
+    const staffMoney = visibleDock({ isStaff: true, features: null }).find((s) => s.key === "invoices");
+    expect(staffMoney?.children.map((c) => c.id)).toContain("m-recon");
   });
 });
 
