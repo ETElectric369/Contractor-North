@@ -60,8 +60,17 @@ export function scopeForWrite(input: {
   jobId: string | null;
   answer: BillScopeAnswer;
   jobScopes: readonly string[];
+  /**
+   * THE PART THIS COST IS ALREADY UNDER, on an edit. It is KEPT even when the estimate no longer has
+   * a line by that name — somebody deleted the Framing lines after the receipt was filed — because
+   * refusing it would mean the Edit Bill box could never save that cost again, for any reason: a
+   * typo in the supplier, a corrected date, nothing. A dead end of the app's own making. Only a
+   * change is held to the estimate's current parts.
+   */
+  stored?: string | null;
 }): ScopeDecision {
   const { jobId, answer, jobScopes } = input;
+  const stored = String(input.stored ?? "").trim();
   switch (answer.kind) {
     case "noJob":
       // A door that says "no job" over a job id is a door that has not been taught the question.
@@ -80,7 +89,7 @@ export function scopeForWrite(input: {
           value: null,
           refusal: `A business cost isn't part of a job, so it can't be put under "${want}". Put it on a job first, or leave it as a business cost. Nothing was saved.`,
         };
-      if (!jobScopes.includes(want)) return { value: null, refusal: scopeNotOnJob(want, jobScopes) };
+      if (want !== stored && !jobScopes.includes(want)) return { value: null, refusal: scopeNotOnJob(want, jobScopes) };
       return { value: want, refusal: null };
     }
     default: {

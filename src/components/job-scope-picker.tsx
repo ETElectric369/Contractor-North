@@ -21,6 +21,34 @@ import { jobScopeOptions } from "@/app/(app)/bills/scope-actions";
  * 44px target, phone first. Staff only: the server action behind it is requireStaff, so a tech is
  * never shown a control that would refuse (TECHS NEVER SEE PRICES, and these words are the estimate's).
  */
+/**
+ * THE JOB'S PARTS, read once per screen that needs them — the picker, and the Costs tab (which only
+ * says "No Part Of The Job Set" on a job that HAS parts: on a job whose estimate isn't broken into
+ * parts there is no gap to name and no door to fix it, so saying it would be a dead end).
+ *
+ * `scopes` is null while it is still reading. `unread` is the sentence to say when it could not be
+ * read; a screen that only needs to know whether parts exist can ignore it.
+ */
+export function useJobScopes(jobId: string | null | undefined): { scopes: string[] | null; unread: string | null } {
+  const [scopes, setScopes] = useState<string[] | null>(null);
+  const [unread, setUnread] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    setScopes(null);
+    setUnread(null);
+    if (!jobId) return;
+    void jobScopeOptions(jobId).then((res) => {
+      if (!alive) return;
+      setScopes(res.scopes);
+      setUnread(res.unread ? (res.error ?? "Couldn't read this job's estimate, so the parts of the job aren't listed.") : null);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [jobId]);
+  return { scopes, unread };
+}
+
 export function JobScopePicker({
   jobId,
   value,
@@ -36,27 +64,7 @@ export function JobScopePicker({
   id?: string;
   className?: string;
 }) {
-  const [scopes, setScopes] = useState<string[] | null>(null);
-  const [unread, setUnread] = useState<string | null>(null);
-
-  useEffect(() => {
-    let alive = true;
-    if (!jobId) {
-      setScopes(null);
-      setUnread(null);
-      return;
-    }
-    setScopes(null);
-    setUnread(null);
-    void jobScopeOptions(jobId).then((res) => {
-      if (!alive) return;
-      setScopes(res.scopes);
-      setUnread(res.unread ? (res.error ?? "Couldn't read this job's estimate, so the parts of the job aren't listed.") : null);
-    });
-    return () => {
-      alive = false;
-    };
-  }, [jobId]);
+  const { scopes, unread } = useJobScopes(jobId);
 
   // A PART THE JOB NO LONGER HAS IS STILL SHOWN, so the dropdown can never silently re-file a cost
   // under nothing just by being opened: the stored word rides in the list, and saving it again

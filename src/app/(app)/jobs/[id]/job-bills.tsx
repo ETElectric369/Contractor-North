@@ -12,7 +12,7 @@ import { Badge, statusTone } from "@/components/ui/badge";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { formatCurrency, formatDate, formatDuration } from "@/lib/utils";
 import { BillRowDoors } from "@/components/bill-row-doors";
-import { JobScopePicker } from "@/components/job-scope-picker";
+import { JobScopePicker, useJobScopes } from "@/components/job-scope-picker";
 import { scopeSaid } from "@/lib/bill-scope";
 import { BillPaperDoors } from "@/components/bill-paper-doors";
 import type { BillPaper } from "@/lib/job-photos";
@@ -125,6 +125,12 @@ export function JobBills({
   settledSaysUnread?: boolean;
 }) {
   const [editBill, setEditBill] = useState<Bill | null>(null);
+  // DOES THIS JOB HAVE PARTS AT ALL (item C1)? On a job whose estimate is broken into Framing and
+  // Decking, a cost under no part is a real gap and the row says so. On a job with no scoped estimate
+  // there is no gap and no door to fix one, so the row says nothing rather than nagging about a
+  // question nobody can answer.
+  const { scopes: jobScopes } = useJobScopes(jobId);
+  const jobHasParts = (jobScopes?.length ?? 0) > 0;
 
   const total = bills.reduce((s, b) => s + Number(b.amount), 0);
   const poNumberById = new Map(pos.map((p) => [p.id, p.po_number]));
@@ -166,10 +172,10 @@ export function JobBills({
             {b.po_id && poNumberById.has(b.po_id)
               ? ` · pays ${poNumberById.get(b.po_id)}`
               : ""}
-            {/* NOTHING SILENT (item C1): the part of the job this cost counts under, and when it
-                counts under none of them it says that in words rather than only on the budget sheet.
-                Edit sets it. */}
-            {` · ${scopeSaid(b.scope_category)}`}
+            {/* NOTHING SILENT (item C1): the part of the job this cost counts under, and on a job
+                that HAS parts, that none is set — rather than that showing up only as Uncategorized
+                on the budget sheet. Edit sets it. */}
+            {(b.scope_category || jobHasParts) && ` · ${scopeSaid(b.scope_category)}`}
           </div>
           {why && <div className="text-xs text-slate-500">{why}</div>}
         </div>

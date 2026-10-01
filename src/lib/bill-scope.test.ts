@@ -57,6 +57,20 @@ describe("scopeForWrite", () => {
     expect(r.refusal).toMatch(/which part of the job/i);
   });
 
+  /** NO DEAD ENDS. Delete the Framing lines off the estimate after a receipt was filed under Framing
+   *  and, without this, the Edit Bill box could never save that cost again — not a corrected supplier,
+   *  not a date, nothing — because the unchanged part would be refused. */
+  it("the part a cost already carries is kept even when the estimate has lost it", () => {
+    expect(scopeForWrite({ jobId: "j1", answer: { kind: "scope", scope: "Framing" }, jobScopes: ["Decking"], stored: "Framing" })).toEqual({
+      value: "Framing",
+      refusal: null,
+    });
+    // CHANGING it is still held to what the estimate has now.
+    const r = scopeForWrite({ jobId: "j1", answer: { kind: "scope", scope: "Siding" }, jobScopes: ["Decking"], stored: "Framing" });
+    expect(r.value).toBeNull();
+    expect(r.refusal).toContain("Siding");
+  });
+
   it("whitespace is not an answer", () => {
     expect(scopeForWrite({ jobId: "j1", answer: { kind: "scope", scope: "  " }, jobScopes: PARTS })).toEqual({ value: null, refusal: null });
   });

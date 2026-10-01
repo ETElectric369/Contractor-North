@@ -1687,6 +1687,10 @@ export async function updateBill(
       jobId: nextJobId,
       answer: patch.scope,
       jobScopes: nextJobId && patch.scope.kind === "scope" ? await listJobScopes(supabase, nextJobId) : [],
+      // Saving the cost with the part it already carries is never refused, even if the estimate has
+      // since lost that line — otherwise this cost could never be edited again at all. Only on the
+      // job it is still on: moving it is the one case where the part has to be re-earned.
+      stored: nextJobId === oldJobId ? oldScope : null,
     });
     if (decided.refusal) return { ok: false, error: decided.refusal };
     clean.scope_category = decided.value;

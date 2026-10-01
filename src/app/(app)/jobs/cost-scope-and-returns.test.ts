@@ -171,6 +171,16 @@ describe("C1: a typed cost says which part of the job it is", () => {
     expect(wroteTo("bills", "update")!.payload.scope_category).toBeNull();
   });
 
+  // NO DEAD ENDS: the estimate lost its Framing lines after this receipt was filed under Framing. The
+  // Edit Bill box has to stay able to save the cost, or a typo in the supplier can never be fixed.
+  it("saving a cost with the part it already carries works even when the estimate has lost it", async () => {
+    state.scopes = ["Decking"];
+    state.stored = { job_id: "job-1", amount: 900, scope_category: "Framing" };
+    const res = await updateBill("bill-1", { supplier: "A Lumber Yard", scope: { kind: "scope", scope: "Framing" } });
+    expect(res.ok).toBe(true);
+    expect(wroteTo("bills", "update")!.payload.scope_category).toBe("Framing");
+  });
+
   it("moving a cost to a job whose estimate has no such part clears it, and says so", async () => {
     state.scopes = ["Siding"]; // the job it is moving TO
     state.stored = { job_id: "job-1", amount: 900, scope_category: "Framing" };
