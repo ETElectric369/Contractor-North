@@ -1,5 +1,6 @@
 "use client";
 
+import { COMPANY_FIELD } from "@/lib/vendor-words";
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, Trash2, Check, PackageCheck, Pencil, X } from "lucide-react";
@@ -433,7 +434,7 @@ export function EditPoButton({
           )}
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <Label htmlFor="edit-po-vendor">Vendor</Label>
+              <Label htmlFor="edit-po-vendor">{COMPANY_FIELD.purchase_order.label}</Label>
               <Input id="edit-po-vendor" value={vendor} onChange={(e) => setVendor(e.target.value)} />
             </div>
             <div>

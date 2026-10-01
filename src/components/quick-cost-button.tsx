@@ -27,6 +27,7 @@ import { useToast } from "@/components/toast";
 import { openSnapOrNote } from "@/components/snap-or-note";
 import { useShelfItems } from "@/components/shelf-count";
 import { BUSINESS_COST_BUCKETS, type BusinessCostBucket } from "@/lib/business-cost-buckets";
+import { COMPANY_FIELD, companyLabel, costCompanyField } from "@/lib/vendor-words";
 import { stockPurchaseProblem, type StockPurchaseInput } from "@/lib/stock-purchase";
 import type { ShelfPickerItem } from "@/lib/shelf-plan";
 
@@ -528,7 +529,9 @@ function SnapCostButton({
     // Fragment-first: snapping a receipt must NEVER be blocked by a missing supplier —
     // the photo IS the capture, and the supplier can be read off it / filled in later.
     // Require the supplier only when there's no receipt to carry the detail.
-    if (!supplier.trim() && !receipt) return setError("Who was it paid to? (supplier)");
+    // The refusal names the box in the box's own words, which off a job is "Who You Pay": it used to
+    // say "(supplier)" about a landlord (lib/vendor-words, costCompanyField).
+    if (!supplier.trim() && !receipt) return setError(`Who was it paid to? Fill in ${companyLabel(costCompanyField(!targetJob))}.`);
     // TYPE IT IN TYPES A NUMBER. With a receipt attached the supplier may stay blank — the paper
     // carries it — but the amount may not: Type It In with nothing typed used to save a $0 bill,
     // receipt attached, and say "Cost saved ✓". That is not a cost, it is a figure invented for
@@ -717,12 +720,17 @@ function SnapCostButton({
         <div className="space-y-4">
           {snapTop && !sameAsDoc && receiptBlock}
           <div>
-            {/* The asterisk is the truth of the save path: a supplier is REQUIRED only when
+            {/* The WORD is lib/vendor-words', not this sheet's: it writes the same bills.supplier
+                column the Bills door and the job's bills write, and this sheet used to ask for it as
+                "Paid to / supplier" — a fourth wording for one column, and the one Erik hits most
+                from the phone. With no job it is a business cost, so the word is "Who You Pay"
+                (a landlord is nobody's supplier), which costCompanyField decides.
+                The asterisk is the truth of the save path: the company is REQUIRED only when
                 there is no receipt to carry it (fragment-first) — with a photo attached, Nort
                 reads it (Read the Receipt) or the bill says "From receipt — add supplier"
                 (Type It In), so a greyed, starred field was a demand the form never made. */}
-            <Label htmlFor="qc-supplier">Paid to / supplier{receipt ? "" : " *"}</Label>
-            <Input id="qc-supplier" value={supplier} onChange={(e) => setSupplier(e.target.value)} placeholder={useReader ? (nortOn ? "Nort reads it off the receipt" : "Read off the receipt") : "e.g. Main Street Supply"} autoFocus={!snapTop} disabled={costSaved || useReader} />
+            <Label htmlFor="qc-supplier">{companyLabel(costCompanyField(!targetJob), !receipt)}</Label>
+            <Input id="qc-supplier" value={supplier} onChange={(e) => setSupplier(e.target.value)} placeholder={useReader ? (nortOn ? "Nort reads it off the receipt" : "Read off the receipt") : COMPANY_FIELD[costCompanyField(!targetJob)].placeholder} autoFocus={!snapTop} disabled={costSaved || useReader} />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -1306,8 +1314,13 @@ function TypeItInButton({
           )}
 
           <div>
-            <Label htmlFor="ti-where">{target === BUSINESS ? "Where (Optional)" : "Where"}</Label>
-            <Input id="ti-where" value={where} onChange={(e) => setWhere(e.target.value)} placeholder="The store or company" />
+            {/* The same column, so the same word as the snap sheet and the Bills door (lib/vendor-words).
+                It asked "Where" / "Where (Optional)" with "The store or company" under it, which was a
+                fifth wording for bills.supplier. Required wherever the save refuses a blank one
+                (typedCostProblem: a job's cost and a stock purchase both do); a business cost's may be
+                left blank and says so. */}
+            <Label htmlFor="ti-where">{companyLabel(costCompanyField(target === BUSINESS), target === BUSINESS ? "optional" : !!target)}</Label>
+            <Input id="ti-where" value={where} onChange={(e) => setWhere(e.target.value)} placeholder={COMPANY_FIELD[costCompanyField(target === BUSINESS)].placeholder} />
           </div>
 
           <div>

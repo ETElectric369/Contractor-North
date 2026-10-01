@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import pg from "pg";
 import { assertTestDatabase } from "@/lib/db-guard";
+import { MAX_SHIFT_HOURS } from "@/lib/long-shift";
 
 /**
  * Migration 0143 — the wage-integrity invariant, checked where it actually lives.
@@ -93,8 +94,11 @@ d("time_entries pay-column tamper guard (0143)", () => {
     expect(body).not.toMatch(/coalesce\(new\.lunch_minutes, ?0\) < 30/);
   });
 
-  it("a shift longer than a day cannot be closed by its owner (0169)", () => {
-    expect(body).toMatch(/interval '18 hours'/);
+  // The DEPLOYED guard refuses at the same number the app's screens quote (W4). Its file-side twin
+  // is src/lib/shift-ceiling.test.ts, which needs no credentials; this one proves what is actually
+  // in the database agrees, so a hand-edited production function cannot drift either.
+  it("a shift longer than a day cannot be closed by its owner, at the app's ceiling (0169, W4)", () => {
+    expect(body).toMatch(new RegExp(`new\\.clock_out - new\\.clock_in > interval '${MAX_SHIFT_HOURS} hours'`));
   });
 
   it("a backdated punch cannot be laid on top of a shift already recorded (0169)", () => {

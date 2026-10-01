@@ -14,6 +14,7 @@
  * fall-through and every refusal can be tested without a browser. The four sell functions live in
  * lib/pricing/markup.ts (the one place cost turns into sell); nothing here re-implements them.
  */
+import { vendorKindOf, type VendorKind } from "@/lib/vendor-words";
 import { dbError } from "@/lib/db-error";
 import { optionMarkupPct } from "@/lib/pricing/item-options";
 import { marginFromMarkup, sellPrice } from "@/lib/pricing/markup";
@@ -352,21 +353,6 @@ export function showPct(pct: number): string {
 /** The key two spellings of one vendor share. Mirrors lower(btrim(name)) in both indexes. */
 export function vendorKey(name: string | null | undefined): string {
   return String(name ?? "").trim().toLowerCase();
-}
-
-/** What a vendor is (0341). NULL is Not Sorted. EVERY KIND CAN CARRY PRICES ON AN ITEM: Erik
- *  2026-09-30 reversed 0341's "a subcontractor never carries prices", because a builder prices a
- *  line like drywall by the sub who hangs it (Justin, Vivian Builders, 2026-09-29). The kind sorts
- *  the directory and says who a vendor is; it never decides who can be priced. */
-export type VendorKind = "brand" | "supplier" | "subcontractor";
-export const VENDOR_KINDS: VendorKind[] = ["supplier", "subcontractor", "brand"];
-
-/** A kind as typed or chosen -> the column's value, or undefined when it isn't one ("" is null,
- *  Not Sorted). The whitelist 0341's check constraint also holds. */
-export function vendorKindOf(raw: unknown): VendorKind | null | undefined {
-  const s = String(raw ?? "").trim().toLowerCase();
-  if (!s) return null;
-  return (VENDOR_KINDS as string[]).includes(s) ? (s as VendorKind) : undefined;
 }
 
 /** One vendor card (0296), as the page reads it. kind/trade/is_person arrive with 0341; before

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
+import { COMPANY_FIELD, companyLabel } from "@/lib/vendor-words";
 import { createElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
@@ -347,5 +348,55 @@ describe("the sheet as it is drawn", () => {
     expect(buttons(now)[0].words).toBe("Add Cost");
     expect(now).toContain('data-sheet="Add a cost"');
     expect(now).not.toContain('data-sheet="Type It In"');
+  });
+
+  /**
+   * ONE WORD FOR ONE COLUMN, ON THE APP'S MAIN COST DOOR (batch item 2).
+   *
+   * Both sheets write the SAME bills.supplier column as /bills and a job's Bills tab, and both asked
+   * for it in their own words: the snap sheet "Paid to / supplier" (lower case, a slash, not Title
+   * Case), Type It In "Where" / "Where (Optional)" over the placeholder "The store or company". Four
+   * wordings for one column, and these two are the ones Erik hits from the phone. W1's source-text
+   * tripwire could not see either (its patterns matched a label STARTING with the bare word), and no
+   * scan of this file's text can know that a box called `ti-where` is a company box at all — so the
+   * door is held HERE, on the drawn sheet, against lib/vendor-words.
+   *
+   * NOT A BLANKET RELABEL. The same sheets file a Business Cost with no job — rent, insurance, a
+   * licence — and "Supplier" would be a lie about a landlord, the same reason recurring_cost says
+   * "Who You Pay". costCompanyField picks by where the cost lands, and both cases are drawn below.
+   */
+  it("both sheets ask for the company in lib/vendor-words' words: a job's Supplier, a landlord's Who You Pay", () => {
+    const labelFor = (html: string, id: string) =>
+      text(html.match(new RegExp(`<label[^>]*for="${id}"[^>]*>([\\s\\S]*?)</label>`))![1]).trim();
+    const placeholderOf = (html: string, id: string) =>
+      html.match(new RegExp(`<input[^>]*id="${id}"[^>]*>`))![0].match(/placeholder="([^"]*)"/)![1];
+
+    // ── the snap sheet, on a job: materials, bought somewhere. The Bills door's own word.
+    const snapJob = renderToStaticMarkup(createElement(QuickCostButton, { jobId: "job-011", snapFirst: true }));
+    expect(labelFor(snapJob, "qc-supplier")).toBe(companyLabel("job_cost", true));
+    expect(labelFor(snapJob, "qc-supplier")).toBe(companyLabel("bill", true));
+    expect(placeholderOf(snapJob, "qc-supplier")).toBe(COMPANY_FIELD.job_cost.placeholder);
+    // The wording it used to carry is gone from the sheet entirely.
+    expect(text(snapJob)).not.toContain("Paid to / supplier");
+
+    // ── the snap sheet off a job: a business cost, so never called a supplier.
+    const snapBusiness = renderToStaticMarkup(createElement(QuickCostButton, { jobs: JOBS, snapFirst: true }));
+    expect(labelFor(snapBusiness, "qc-supplier")).toBe(companyLabel("business_cost", true));
+    expect(labelFor(snapBusiness, "qc-supplier")).not.toContain("Supplier");
+    expect(placeholderOf(snapBusiness, "qc-supplier")).toBe(COMPANY_FIELD.business_cost.placeholder);
+
+    // ── Type It In, job preselected: required there (typedCostProblem refuses a blank one), so starred.
+    const typedJob = renderToStaticMarkup(createElement(QuickCostButton, { typeOnly: true, jobId: "job-011" }));
+    expect(labelFor(typedJob, "ti-where")).toBe(companyLabel("job_cost", true));
+    expect(placeholderOf(typedJob, "ti-where")).toBe(COMPANY_FIELD.job_cost.placeholder);
+    expect(typedCostProblem({ ...base, target: "job-011", where: "" })).toBe("Say where it was bought (the supplier).");
+
+    // ── Type It In with nothing picked yet: the same word, no star — the sheet asks for the job first.
+    expect(labelFor(bills, "ti-where")).toBe(companyLabel("job_cost"));
+
+    // The words it used to ask under are gone from both sheets.
+    for (const html of [typedJob, bills]) {
+      for (const old of ["Where (Optional)", "The store or company"]) expect(text(html)).not.toContain(old);
+    }
   });
 });

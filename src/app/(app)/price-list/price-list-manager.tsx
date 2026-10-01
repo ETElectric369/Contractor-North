@@ -1,5 +1,6 @@
 "use client";
 
+import { COMPANY_FIELD } from "@/lib/vendor-words";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, Trash2, Upload, Search, AlertTriangle, Archive, ArchiveRestore, Package, X } from "lucide-react";
@@ -58,7 +59,7 @@ const SORT_OPTIONS: SortOption[] = [
   { key: "cost", label: "Cost", kind: "number" },
   { key: "pct", label: "Markup", kind: "number" },
   { key: "sell", label: "Sell", kind: "number" },
-  { key: "supplier", label: "Supplier" },
+  { key: "supplier", label: COMPANY_FIELD.price_item.label },
   { key: "updated_at", label: "Updated", kind: "date" },
 ];
 const GROUP_OPTIONS = [
@@ -557,7 +558,7 @@ export function PriceListManager({
                   <th className={`${thR} w-[8%]`}>MU%</th>
                   <th className={`${thR} w-[7%]`}>Margin</th>
                   <th className={`${thR} w-[8%]`}>Sell</th>
-                  <th className={`${th} w-[9%]`}>Supplier</th>
+                  <th className={`${th} w-[9%]`}>{COMPANY_FIELD.price_item.label}</th>
                   <th className={`${th} w-[7%]`}>Kits</th>
                   <th className={`${thR} w-[4%]`}></th>
                 </tr>

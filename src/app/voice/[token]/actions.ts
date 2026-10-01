@@ -2,6 +2,7 @@
 
 import { createServiceClient } from "@/lib/supabase/server";
 import { createNotifications } from "@/lib/notifications";
+import { STAFF_ROLES } from "@/lib/actions/perms";
 import { CONSENT_VERSION, VOICE_PROMPTS, extForMime } from "@/lib/voice-script";
 
 // Public, UNAUTHENTICATED actions for the /voice/[token] portal. The invitee has no account,
@@ -86,12 +87,13 @@ export async function completeRecording(token: string, clipCount: number): Promi
     .update({ completed_at: new Date().toISOString(), clip_count: Math.max(0, Math.min(99, Math.floor(clipCount || 0))) })
     .eq("id", invite.id);
 
-  // Tell the office (all staff of the inviting org) it's ready to submit to ElevenLabs.
+  // Tell the office (all staff of the inviting org) it's ready to submit to ElevenLabs. Who is
+  // office is lib/actions/perms, the one answer every door reads (W2).
   const { data: staff } = await sb
     .from("profiles")
     .select("id")
     .eq("org_id", invite.org_id)
-    .in("role", ["owner", "admin", "office"]);
+    .in("role", STAFF_ROLES);
   await createNotifications(
     invite.org_id,
     (staff ?? []).map((s: { id: string }) => s.id),

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { COMPANY_FIELD } from "@/lib/vendor-words";
 import { useRouter } from "next/navigation";
 import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -86,8 +87,10 @@ export function NewPoButton({
           )}
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <Label htmlFor="vendor">Vendor</Label>
-              <Input id="vendor" value={vendor} onChange={(e) => setVendor(e.target.value)} placeholder="e.g. Main Street Supply" />
+              {/* THE WORD IS THE ONE WORD (W1): a purchase order goes to a SUPPLIER, the same
+                  word the bills door, the material list and the price book use. */}
+              <Label htmlFor="vendor">{COMPANY_FIELD.purchase_order.label}</Label>
+              <Input id="vendor" value={vendor} onChange={(e) => setVendor(e.target.value)} placeholder={COMPANY_FIELD.purchase_order.placeholder} />
             </div>
             <div>
               <Label htmlFor="po-job">Job (optional)</Label>

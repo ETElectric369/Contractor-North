@@ -11,7 +11,8 @@ import { PriceListManager } from "./price-list-manager";
 import { KitsManager } from "./kits-manager";
 import { PaidPrices } from "./paid-prices";
 import { VendorsManager } from "./vendors-manager";
-import { knownVendorNames, linkOf, summarizeVendors, vendorKey, vendorKindOf, type ItemOption, type VendorCard } from "./item-options-math";
+import { knownVendorNames, linkOf, summarizeVendors, vendorKey, type ItemOption, type VendorCard } from "./item-options-math";
+import { VENDOR_MEANS, vendorKindOf } from "@/lib/vendor-words";
 import type { ExistingVendor } from "./vendor-import-math";
 import { FeatureOffLineFor } from "@/components/feature-off-line-for";
 import { featureOn } from "@/lib/features";
@@ -198,7 +199,7 @@ export default async function PriceListPage() {
         description={
           "Your priced catalog and reusable kits — cost, markup and sell, ready for estimates. Import a supplier's list via CSV." +
           // Only said when the tab is actually there — copy never names a control that doesn't exist.
-          (optionsAvailable ? " Click any item to give it vendors (the brand or supplier, e.g. Andersen), each with its own cost and sell." : "")
+          (optionsAvailable ? ` Click any item to give it vendors, each with its own cost and sell. ${VENDOR_MEANS}` : "")
         }
       />
       {/* ONE unit vocabulary, one list: every unit input on the page points at this datalist. */}

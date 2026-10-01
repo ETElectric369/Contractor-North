@@ -1,5 +1,6 @@
 "use server";
 import { dbError } from "@/lib/db-error";
+import { isStaffRole } from "@/lib/actions/perms";
 
 import { revalidatePath } from "next/cache";
 import { stampNeeds } from "@/lib/playbook/stamp";
@@ -22,9 +23,10 @@ async function staff(): Promise<Staff> {
   if (!user) return { ok: false, error: "Sign in first." };
   const { data: me } = await supabase.from("profiles").select("role, org_id, active").eq("id", user.id).maybeSingle();
   const role = (me as { active?: boolean | null } | null)?.active === false ? null : (me as { role?: string } | null)?.role;
-  // A playbook is what every estimate for this company is built from. Editing it is an owner /
-  // admin / office act, not a field one — and RLS scopes the write to the org regardless.
-  if (!role || !["owner", "admin", "office"].includes(role))
+  // A playbook is what every estimate for this company is built from. Editing it is an OFFICE act,
+  // not a field one — and RLS scopes the write to the org regardless. Who is office is
+  // lib/actions/perms, the one answer every door reads (W2).
+  if (!isStaffRole(role))
     return { ok: false, error: "You don't have access to that." };
   return { ok: true, supabase };
 }

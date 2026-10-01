@@ -42,6 +42,35 @@ export const OFFICE_BELL_HOURS = 10;
 export const MAX_SHIFT_HOURS = 18;
 
 /**
+ * "18 hours": the ceiling as every sentence says it, read from the constant above.
+ *
+ * W4. The number was typed again in each sentence (the stop picker's two refusals, the clock-out
+ * action's, the geofence sheet's two), so moving the ceiling moved what the app REFUSED without
+ * moving what the app TOLD anybody: at 20 the picker let a 19-hour stop through while still saying
+ * "more than 18 hours". Every sentence now reads the one number, and shift-ceiling.test.ts holds it
+ * to the number the database refuses at.
+ */
+export const MAX_SHIFT_PHRASE = `${MAX_SHIFT_HOURS} hours`;
+
+/**
+ * THE ONE REFUSAL FOR A STOP PAST THE CEILING, in the two voices the app speaks in: the crew
+ * member reads "you", the office reads "the shift". A typed Record, so a third voice cannot be
+ * added without a sentence for it.
+ */
+export const CEILING_REFUSAL: Record<"you" | "he", string> = {
+  you: `That's more than ${MAX_SHIFT_PHRASE} after you clocked in. Pick when you really stopped.`,
+  he: `That's more than ${MAX_SHIFT_PHRASE} after the clock-in. Pick when the shift really stopped.`,
+};
+
+/** The clock-out door's refusal: the same sentence, plus who CAN enter a shift that really ran
+ *  that long. Nothing is left silent — the person is told where the hours can still go. */
+export const CEILING_REFUSAL_ASK_OFFICE =
+  `${CEILING_REFUSAL.you} If the shift truly ran that long, the office has to enter it.`;
+
+/** What the clock-out sheet's picker says a good time looks like. */
+export const PICK_WITHIN_CEILING = `Pick a time between clock-in and now, within ${MAX_SHIFT_PHRASE}.`;
+
+/**
  * True when the clock has been running at least LONG_SHIFT_HOURS.
  *
  * There is deliberately no "started on an earlier day" clause: a 7 PM callback that runs past
@@ -175,11 +204,7 @@ export function stopProblem(input: {
   if (!Number.isFinite(startMs) || !Number.isFinite(stopMs)) return "Pick a stop time.";
   if (stopMs < startMs + 60_000) return `Pick a stop time after ${clock(startMs, input.tz)}.`;
   if (stopMs > nowMs + 60_000) return "That time hasn't happened yet.";
-  if (stopMs - startMs > MAX_SHIFT_HOURS * H) {
-    return input.who === "you"
-      ? "That's more than 18 hours after you clocked in. Pick when you really stopped."
-      : "That's more than 18 hours after the clock-in. Pick when the shift really stopped.";
-  }
+  if (stopMs - startMs > MAX_SHIFT_HOURS * H) return CEILING_REFUSAL[input.who];
   const lunch = Math.max(0, Number(input.lunchMin) || 0);
   if (lunch * 60_000 >= stopMs - startMs) return "The lunch is longer than the shift.";
   return null;

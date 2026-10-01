@@ -142,7 +142,8 @@ export async function textQuote(
  * textQuote above: one message, whichever way it leaves.
  *
  * A DRAFT'S LINK IS A 404. public_quote serves only sent/accepted/declined/expired
- * (CUSTOMER_VISIBLE_STATUSES in lib/pdf-cache), so a draft's link would land the customer on
+ * (customerMayOpen / CUSTOMER_VISIBLE_STATUSES.quote in lib/customer-visible-docs — the gate to
+ * CALL, not a list to copy), so a draft's link would land the customer on
  * "Not found". Every other egress flips draft→sent on the way past (textQuote, emailQuote); the
  * share sheet has no send step to hang that on, so it ASKS — needsSend → the button's plain-words
  * confirm — and flips only on that explicit yes. STAMP FOLLOWS DEED, and NOTHING SILENT.

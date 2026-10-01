@@ -1,5 +1,6 @@
 "use client";
 
+import { COMPANY_FIELD } from "@/lib/vendor-words";
 import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, Trash2, Pencil, Check, ChevronDown, Wrench } from "lucide-react";
@@ -265,7 +266,7 @@ export function ItemEditor({
           <Input value={eUnit} onChange={(e) => setEUnit(e.target.value)} className="h-11 w-16 shrink-0" aria-label="Unit" />
           {viewerIsStaff && (
             <>
-              <Input value={eVendor} onChange={(e) => setEVendor(e.target.value)} className="h-11 min-w-[7rem] flex-1" placeholder="Vendor" aria-label="Vendor" />
+              <Input value={eVendor} onChange={(e) => setEVendor(e.target.value)} className="h-11 min-w-[7rem] flex-1" placeholder={COMPANY_FIELD.material_line.placeholder} aria-label={COMPANY_FIELD.material_line.label} />
               <NumberInput value={eCost} onValueChange={setECost} className="h-11 min-w-[6rem] flex-1 text-right" placeholder="Est. cost" aria-label="Est. cost" />
             </>
           )}
@@ -387,7 +388,7 @@ export function ItemEditor({
           <Input value={unit} onChange={(e) => setUnit(e.target.value)} className="h-11 w-16 shrink-0" placeholder="ea" />
           {viewerIsStaff && (
             <>
-              <Input value={vendor} onChange={(e) => setVendor(e.target.value)} className="h-11 min-w-[7rem] flex-1" placeholder="Vendor" />
+              <Input value={vendor} onChange={(e) => setVendor(e.target.value)} className="h-11 min-w-[7rem] flex-1" placeholder={COMPANY_FIELD.material_line.placeholder} aria-label={COMPANY_FIELD.material_line.label} />
               <NumberInput value={cost} onValueChange={setCost} className="h-11 min-w-[6rem] flex-1 text-right" placeholder="Est. cost" />
             </>
           )}
