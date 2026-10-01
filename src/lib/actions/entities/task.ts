@@ -119,7 +119,7 @@ export const taskActions: Record<string, ActionDef> = {
     group: "task",
     label: "Add task",
     description:
-      "Create a REMINDER or a JOB TASK. 'Remind me to…' is a Reminder: NO job_id — it is private to the person who made it (and assigned_to, if it's for someone else), and lands in their Today's 6 when dated or pinned. A job task goes on a job's one list for whoever works the job: pass job_id ONLY when the user names a job or asks for it on the job (resolve with list_jobs) — never default to the job someone is clocked into. A job task has NO assignee (the crew lead hands them out out loud) and no due date or priority: never send assigned_to with job_id. category is FREE-FORM org vocabulary (pass the user's word verbatim; OMIT when none was given). For a Reminder, optionally: due_date (YYYY-MM-DD), assigned_to (a profile id), notes, priority (0 normal | 1 high | 2 urgent). Steps of ONE deliverable become subtasks: pass parent_id (an existing task's id) per step — the due date lives on the parent. focus_date (YYYY-MM-DD) pins a Reminder into that day's six — ONLY when the user explicitly says today/tomorrow. A same-title open task from the last 48h is returned instead of duplicated. Read back where it went (the result's speak line says).",
+      "Create a REMINDER or a JOB TASK. 'Remind me to…' is a Reminder: NO job_id — it is private to the person who made it (and assigned_to, if it's for someone else), and lands on their My Day Tasks & Reminders card. A job task goes on a job's one list for whoever works the job: pass job_id ONLY when the user names a job or asks for it on the job (resolve with list_jobs) — never default to the job someone is clocked into. A job task has NO assignee (the crew lead hands them out out loud) and no due date or priority: never send assigned_to with job_id. category is FREE-FORM org vocabulary (pass the user's word verbatim; OMIT when none was given). For a Reminder, optionally: due_date (YYYY-MM-DD), assigned_to (a profile id), notes, priority (0 normal | 1 high | 2 urgent). Steps of ONE deliverable become subtasks: pass parent_id (an existing task's id) per step — the due date lives on the parent. focus_date (YYYY-MM-DD) pins a Reminder to the TOP of that day's Tasks & Reminders, and it stays pinned until someone unpins it — ONLY when the user explicitly says today/tomorrow. A same-title open task from the last 48h is returned instead of duplicated. Read back where it went (the result's speak line says).",
     // Fragment-first: createTask already takes all of these — the old 2-field schema
     // silently DROPPED a spoken due date / job / assignee / note.
     input: z.object({
@@ -218,13 +218,13 @@ export const taskActions: Record<string, ActionDef> = {
     group: "task",
     label: "Pin task to a day",
     description:
-      "Pin or unpin a REMINDER into a day's six on My Day: focus_date YYYY-MM-DD — today for 'do this today', tomorrow for the debrief's tomorrow picks, null to unpin. Does NOT touch the due date (that's task.setDue). A job's task is never in the six (it's on the job's list, and on My Day's Now card while someone is clocked in on that job): this refuses on one.",
+      "Pin or unpin a REMINDER to the top of My Day's Tasks & Reminders: focus_date YYYY-MM-DD — today for 'do this today', tomorrow for the debrief's tomorrow picks, null to unpin. A pin CARRIES: it stays on top, saying which day it came from, until it is unpinned or checked off — it does not expire overnight. Does NOT touch the due date (that's task.setDue). A job's task is never pinned (it's on the job's list, and on My Day's Now card while someone is clocked in on that job): this refuses on one.",
     input: z.object({ id: z.string(), focus_date: z.string().nullable() }),
     auth: "any",
     effect: "write",
     handler: async (i) => {
       if (i.focus_date) {
-        const refusal = await refuseOnJobTask(i.id, "day pins (it's never in Today's 6)");
+        const refusal = await refuseOnJobTask(i.id, "pins (a job's task is never on a person's Tasks & Reminders)");
         if (refusal) return refusal;
       }
       return updateTask(i.id, { focus_date: i.focus_date });

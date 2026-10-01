@@ -101,8 +101,8 @@ const ID_CHUNK = 80;
  * org; a tech's view is scoped to his own visits.
  *
  * TASKS ARE DELIBERATELY NOT FED HERE. To-dos live in exactly three places —
- * Today's 6 on My Day, /tasks (grouped by due), and the schedule's per-day due
- * lines. The old task feeder counted every undated task as "due now" forever,
+ * Tasks & Reminders on My Day, /tasks (grouped by due), and the schedule's per-day
+ * due lines. The old task feeder counted every undated task as "due now" forever,
  * which is exactly what the badge invariant (types.ts) forbids: no count may be
  * the length of an unbounded or undated set. Do not re-add a task feeder.
  */

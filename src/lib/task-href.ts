@@ -1,5 +1,5 @@
 /**
- * Where a task row links. One rule for every surface (calendar, My Day's Today's 6, …):
+ * Where a task row links. One rule for every surface (calendar, My Day's Tasks & Reminders, …):
  *
  *   - a job task → the job's Tasks tab (the pinned chip right after Overview, 0358);
  *   - a task with no job is a Reminder → the Reminders page, /tasks. The /tasks/<category> pages

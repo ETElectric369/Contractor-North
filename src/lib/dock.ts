@@ -123,7 +123,7 @@ export const DOCK: DockSection[] = [
     icon: Sun,
     href: "/planner",
     // MY DAY ALONE (W1-03). Reminders and Organize were pills beside it, a strip on every visit to
-    // My Day for two pages its own cards already open (Today's 6 is the Reminders list; the paper
+    // My Day for two pages its own cards already open (Tasks & Reminders is the Reminders list; the paper
     // inbox rides in Needs You). One row draws no strip and no desktop column. Both pages keep a
     // home: they light Today (owns), and the command bar finds them by name (command-bar.tsx).
     children: [{ id: "t-day", label: "My Day", icon: Sun, href: "/planner", owns: ["/tasks", "/organize"] }],
@@ -221,7 +221,9 @@ export const DOCK: DockSection[] = [
       { id: "m-inv", label: "Invoices", icon: Receipt, href: "/billing" },
       // Hours are money to the office (W1-08): Timecards moved here from the Clock tile, which is
       // the crew's now. It owns /timeclock too, so staff on the Timeclock (reached from the Now
-      // card) light Money; a tech never sees this row, so his /timeclock lights Clock.
+      // card) light Money AND this row (activeRowHref rule 4) — "time clock point to money with
+      // timecards on the subnav", Erik 2026-09-30. A tech never sees this row, so his /timeclock
+      // lights Clock.
       { id: "ck-cards", label: "Timecards", icon: CalendarClock, href: "/timecards", staffOnly: true, owns: ["/timeclock"] },
       // Purchase Orders off: the row reads "Bills" and still owns /purchasing, so a PO opened by
       // a link lights Money (with the Off line on top).
@@ -390,6 +392,12 @@ export const menuSections = (sections: DockSection[]): DockSection[] => sections
  *   3. else the ONE row whose page this is, whatever its query: a tech's bare /settings lights
  *      Your Settings (/settings?tab=you). Two or more such rows (the Jobs statuses on bare /jobs)
  *      light nothing rather than guess.
+ *   4. else the ONE row that OWNS this route. THE CLOCK POINTS AT MONEY (Erik, 2026-09-30: "lets also
+ *      have time clock point to money with timecards on the subnav"). activeSection already put the
+ *      office on Money while they are on the Timeclock — Timecards owns /timeclock — but no row lit,
+ *      so the strip said "Money" over nothing. The office's clock now lights Timecards, which is where
+ *      their hours turn into money. No new nav entry: the nav doctrine forbids a second door to one
+ *      page, and a tech's own /timeclock still lights his Clock tile by rule 2.
  */
 export function activeRowHref(rows: DockNode[], pathname: string, current: string): string | undefined {
   const links = rows.filter((c): c is DockNode & { href: string } => !!c.href);
@@ -398,7 +406,10 @@ export function activeRowHref(rows: DockNode[], pathname: string, current: strin
   const plain = links.find((c) => basePath(c.href) === pathname && !c.href.includes("?"));
   if (plain) return plain.href;
   const onPage = links.filter((c) => basePath(c.href) === pathname);
-  return onPage.length === 1 ? onPage[0].href : undefined;
+  if (onPage.length === 1) return onPage[0].href;
+  const under = (base: string) => pathname === base || pathname.startsWith(base + "/");
+  const owner = links.filter((c) => c.owns?.some(under));
+  return owner.length === 1 ? owner[0].href : undefined;
 }
 
 /**

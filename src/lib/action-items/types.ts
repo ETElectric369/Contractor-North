@@ -11,7 +11,7 @@
 // item carries an expiry: a date, a bounded window, or a rollup.
 //
 // Chores never badge; decisions badge. TASKS AND REMINDERS ARE NEVER HERE: a job's
-// tasks live on the job's Tasks chip and a person's Reminders in Today's 6 (0358).
+// tasks live on the job's Tasks chip and a person's Reminders on My Day's Tasks & Reminders (0358).
 // The old task/work_order kinds and their Convert sheet are gone (Wave 1, W1-16);
 // the registry keeps task.* and inquiry.convert for Nort. North's own bug reports
 // are not a company's decision either: they live on Bug Watch with its own count.
