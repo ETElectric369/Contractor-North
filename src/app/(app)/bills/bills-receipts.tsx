@@ -1,5 +1,6 @@
 "use client";
 
+import { companyLabel } from "@/lib/vendor-words";
 import { useEffect, useState, useTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
@@ -34,6 +35,7 @@ import { isOpenBill } from "@/lib/open-counts";
 import { billSettledLabel } from "@/lib/supplier-owed";
 import { shortSupplierName } from "@/lib/supplier-name";
 import { useBillsSearch } from "./bills-search-box";
+import { JobScopePicker } from "@/components/job-scope-picker";
 
 interface JobOption {
   id: string;
@@ -68,6 +70,8 @@ export interface BillRow {
   bill_date: string | null;
   job_id: string | null;
   category: string | null;
+  /** WHICH PART OF THE JOB this cost is (item C1; column 0105) — set from the Edit Bill box. */
+  scope_category?: string | null;
   jobs?: { job_number: string; name: string } | null;
   line_items?: BillLineRow[];
   /**
@@ -518,6 +522,9 @@ function BillEditModal({
   // bill's category is a paper kind ("Receipt"), not a bucket, so moving one off its job starts
   // with no bucket and asks for one.
   const [billCategory, setBillCategory] = useState<string>(bill.job_id ? "" : bucketOf(bill.category));
+  // WHICH PART OF THE JOB (item C1). Cleared the moment the job changes: a part called "Framing" on
+  // the job it came off means nothing on the job it moves to (updateBill says so if it has to drop one).
+  const [scope, setScope] = useState<string>(bill.scope_category ?? "");
   const [error, setError] = useState<string | null>(null);
   /** What updateBill said about an invoice that bills this receipt. Holds the modal open. */
   const [billedNote, setBilledNote] = useState<string | null>(null);
@@ -538,6 +545,9 @@ function BillEditModal({
         bill_date: billDate || null,
         job_id: isOverhead ? null : billJob,
         category: isOverhead ? billCategory : null,
+        // Item C1: a business cost has no part of a job, so moving one off a job takes its part off
+        // with it. On a job, what the picker says — "" takes it back off.
+        scope_category: isOverhead ? null : scope || null,
       });
       if (!res.ok) return setError(res.error ?? "Could not save.");
       // THE SAME SENTENCE THE JOB PAGE HOLDS OPEN (review of the fix wave, 2026-09-20). A re-price
@@ -575,18 +585,29 @@ function BillEditModal({
         {error && <p className="text-sm text-red-600">{error}</p>}
         <div className="grid grid-cols-2 gap-3">
           <div className="col-span-2">
-            <Label htmlFor="be-supplier">Supplier *</Label>
+            <Label htmlFor="be-supplier">{companyLabel("bill", true)}</Label>
             <Input id="be-supplier" value={supplier} onChange={(e) => setSupplier(e.target.value)} autoFocus />
           </div>
           <div className="col-span-2">
             <Label htmlFor="be-job">Job</Label>
-            <Select id="be-job" value={billJob} onChange={(e) => setBillJob(e.target.value)}>
+            <Select
+              id="be-job"
+              value={billJob}
+              onChange={(e) => {
+                setBillJob(e.target.value);
+                // A part of the OLD job means nothing on the new one, so the answer starts again
+                // rather than carrying a word the new job's estimate may not have (item C1).
+                setScope(e.target.value === (bill.job_id ?? "__overhead") ? (bill.scope_category ?? "") : "");
+              }}
+            >
               <option value="__overhead">Business Cost (No Job)</option>
               {jobs.map((j) => (
                 <option key={j.id} value={j.id}>{jobLabel(j)}</option>
               ))}
             </Select>
           </div>
+          {/* The same control every other cost door draws; nothing when this job's estimate has no parts. */}
+          {!isOverhead && <JobScopePicker jobId={billJob} value={scope} onChange={setScope} id="be-scope" className="col-span-2" />}
           {isOverhead && (
             <div className="col-span-2">
               <Label htmlFor="be-cat">Bucket</Label>

@@ -7,7 +7,7 @@ import { Loader2, MapPin } from "lucide-react";
 import { adoptGeofenceAnchor, geoClockOut, notifyGeofenceExit } from "@/app/(app)/timeclock/actions";
 import { adoptWindowMs } from "@/app/(app)/timeclock/adopt-window";
 import { ClockStartPicker } from "@/app/(app)/timeclock/clock-start-picker";
-import { isLongOpenShift, stopWindow } from "@/lib/long-shift";
+import { PICK_WITHIN_CEILING, isLongOpenShift, stopWindow } from "@/lib/long-shift";
 import { splitClock } from "@/lib/split-preview";
 import { fallbackArmed, type GeofencePhase } from "./geofence-fallback";
 import { Button } from "@/components/ui/button";
@@ -367,14 +367,14 @@ export function GeofenceMonitor({
     // this sheet exists to avoid. Long = twelve hours of the SHIFT (SW1).
     const long = longPromptRef.current || isLongOpenShift(shiftStartRef.current, Date.now());
     if (long && !pickedIso) {
-      setError("Pick a time between clock-in and now, within 18 hours.");
+      setError(PICK_WITHIN_CEILING);
       return;
     }
     const iso = pickedIso ?? new Date().toISOString(); // picker's "Use now" ⇒ now
     const ms = Date.parse(iso);
     const win = Number.isFinite(ci) ? stopWindow(ci, Date.now()) : null;
     if (isNaN(ms) || (win && (ms < win.minMs || ms > win.maxMs)) || ms > Date.now() + 60_000) {
-      setError("Pick a time between clock-in and now, within 18 hours.");
+      setError(PICK_WITHIN_CEILING);
       return;
     }
     submit(lastFixRef.current, iso, false, true);
@@ -719,7 +719,7 @@ export function GeofenceMonitor({
 
             {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
             {phase === "picking" && !pickedValid && (
-              <p className="mt-2 text-xs text-amber-600">Pick a time between clock-in and now, within 18 hours.</p>
+              <p className="mt-2 text-xs text-amber-600">{PICK_WITHIN_CEILING}</p>
             )}
 
             <div className="mt-3 space-y-2">

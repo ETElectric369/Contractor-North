@@ -1,6 +1,6 @@
 import { revalidatePath } from "next/cache";
 import { pushCalendarItem } from "@/lib/calendar-sync";
-import { STARTED_JOB_STATUSES, jobStatusLabel } from "@/lib/job-status";
+import { STARTED_JOB_STATUSES, finishedJobFields, jobStatusLabel } from "@/lib/job-status";
 import { reportError } from "@/lib/observe";
 
 /**
@@ -8,9 +8,11 @@ import { reportError } from "@/lib/observe";
  *
  * A job that has been billed in full and paid in full is done: nobody is coming back to it, and
  * a tile that still says "in progress" over a paid bill is a lie the office has to clean up by
- * hand. So the three doors money lands through — the Stripe webhook (card, bank, Tap to Pay),
- * Record Payment, and Settle Up (which records through Record Payment) — ask this once after the
- * recalc that came out "paid".
+ * hand. So every door money lands through asks this once, after the recalc that came out "paid" —
+ * and since M1 there is exactly ONE caller, lib/after-payment-landed, which every payment writer
+ * goes through (Record Payment and Settle Up, the Stripe writer the webhook and the Pay Now sheet
+ * share, and a deposit put on an invoice out of the bank download, which used to skip this step
+ * and leave a paid-off job reading "in progress" for ever).
  *
  * THE GATE, in the order it is read:
  *   1. the invoice is paid, and it is a STANDARD invoice. A paid draw (deposit / progress /
@@ -26,6 +28,12 @@ import { reportError } from "@/lib/observe";
  *      job because a straggler bill was paid.
  *   3. the job has no OTHER live, unpaid bill. A second open invoice — a draft still being
  *      built, a sent bill still owed — means the job is still open. Void doesn't count.
+ *
+ * THIS IS THE SECOND DOOR THAT ENDS A JOB, so it writes what the first one writes: every field in
+ * lib/job-status's finishedJobFields, which is the whole of a finish — the word, and the hold reason
+ * cleared with it (0234). It used to write the word alone, so a job ON HOLD whose last bill was then
+ * paid came out complete still saying "waiting on the permit", and the tidying was left to migration
+ * 0366's trigger. One rule, one place: job-status.test.ts fails if either door writes it by hand.
  *
  * The write is CHECKED (the silent-write law: .select("id"), and the status filter rides on the
  * update so a job that moved under this read is not overwritten). Then the same touches a
@@ -85,7 +93,7 @@ export async function completeJobWhenPaid(
 
     const { data: done, error: updErr } = await supabase
       .from("jobs")
-      .update({ status: "complete" })
+      .update(finishedJobFields())
       .eq("id", jobId)
       .in("status", STARTED_JOB_STATUSES)
       .select("id");

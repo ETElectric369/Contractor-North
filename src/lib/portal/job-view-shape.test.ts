@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { isJobPhotoPath, pickHasContent, portalPathsToSign, shapePortalJob, type PortalJobRaw } from "./job-view-shape";
 import { INV_078, LINES, PAYMENTS, STRETCHES } from "./j011-fixture";
+import { CUSTOMER_VISIBLE_STATUSES } from "@/lib/customer-visible-docs";
 
 const ORG = "11111111-1111-4111-8111-111111111111";
 const JOB = "22222222-2222-4222-8222-222222222222";
@@ -117,6 +118,22 @@ describe("the customer's job page carries an allowlist, nothing else", () => {
     const s = shapePortalJob(sent, { signed: signedFor(sent), unbilled: null, now: NOW });
     expect(s.running).toBe(false);
     expect(s.invoices[0].payToken).toBe("a".repeat(32));
+  });
+
+  /**
+   * W3. A Pay door appears on exactly the bills the /i link will open, because both now read the
+   * one list (lib/customer-visible-docs). Before this, the page kept a set of its own: adding
+   * "void" to it gave a voided bill a Pay button that /i then refused — a tap landing on
+   * "Not found." — and nothing in the suite noticed.
+   */
+  it("every status the customer may open gets the pay door, and no other status does", () => {
+    const every = ["draft", "sent", "partial", "paid", "overdue", "void", "held"];
+    for (const status of every) {
+      const one = raw({ invoices: [{ ...r.invoices![0], status, sent_at: status === "draft" ? null : "2026-09-24T20:00:00Z" }] });
+      const s = shapePortalJob(one, { signed: signedFor(one), unbilled: null, now: NOW });
+      const mayOpen = CUSTOMER_VISIBLE_STATUSES.invoice.includes(status);
+      expect(s.invoices[0].payToken, `a ${status} bill`).toBe(mayOpen ? "a".repeat(32) : null);
+    }
   });
 
   it("files leave only as signed URLs, and only from where that kind of file lives", () => {

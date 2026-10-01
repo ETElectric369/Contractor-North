@@ -1,5 +1,6 @@
 import { matchSupplierNames } from "@/lib/supplier-identity";
-import { vendorKey, type VendorKind } from "./item-options-math";
+import { vendorKey } from "./item-options-math";
+import { VENDOR_KIND_CHOICES, VENDOR_KIND_LABEL, type VendorKind } from "@/lib/vendor-words";
 import { applyPick, type FoundField, type LookupChoice } from "./vendor-lookup-math";
 
 /**
@@ -338,21 +339,10 @@ export interface PreviewRow {
   pick?: { choice: LookupChoice; take: FoundField[] } | null;
 }
 
-/** One Kind's words, for chips and selects. Title Case: they are clickable. */
-export const KIND_LABEL: Record<VendorKind | "none", string> = {
-  brand: "Brand",
-  supplier: "Supplier",
-  subcontractor: "Subcontractor",
-  none: "Not Sorted",
-};
-
-/** The Kind choices, in the order the selects list them. "" is Not Sorted. */
-export const KIND_CHOICES: { value: VendorKind | ""; label: string }[] = [
-  { value: "supplier", label: KIND_LABEL.supplier },
-  { value: "subcontractor", label: KIND_LABEL.subcontractor },
-  { value: "brand", label: KIND_LABEL.brand },
-  { value: "", label: KIND_LABEL.none },
-];
+// A KIND'S WORDS live in lib/vendor-words with the rest of the vocabulary (W1):
+// VENDOR_KIND_LABEL and VENDOR_KIND_CHOICES, re-exported here under the names the screens
+// below already use. One definition, one place.
+export { VENDOR_KIND_CHOICES as KIND_CHOICES, VENDOR_KIND_LABEL as KIND_LABEL };
 
 /**
  * The notes a row carries, from what it says NOW (so they follow an edit to the name). Plain words,

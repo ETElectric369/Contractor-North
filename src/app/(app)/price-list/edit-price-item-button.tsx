@@ -1,5 +1,6 @@
 "use client";
 
+import { COMPANY_FIELD } from "@/lib/vendor-words";
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Pencil } from "lucide-react";
@@ -147,7 +148,7 @@ export function EditPriceItemButton({ item, sizingAvailable = false, measurement
               <Input id="epi-desc" value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="e.g. how you'd say it at the supply house" />
             </div>
             <div className="col-span-2">
-              <Label htmlFor="epi-supplier">Supplier</Label>
+              <Label htmlFor="epi-supplier">{COMPANY_FIELD.price_item.label}</Label>
               <Input id="epi-supplier" value={supplier} onChange={(e) => setSupplier(e.target.value)} />
             </div>
             <div>

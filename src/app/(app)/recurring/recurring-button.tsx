@@ -1,5 +1,6 @@
 "use client";
 
+import { COMPANY_FIELD } from "@/lib/vendor-words";
 import { useState, useTransition } from "react";
 import { NewCustomerInline } from "@/components/new-customer-inline";
 import { useRouter } from "next/navigation";
@@ -214,8 +215,10 @@ export function RecurringButton({
           ) : (
             <div className="grid grid-cols-3 gap-3">
               <div className="col-span-2">
-                <Label htmlFor="r-vendor">Vendor</Label>
-                <Input id="r-vendor" name="vendor" defaultValue={template?.vendor ?? ""} placeholder="e.g. landlord" />
+                {/* NOT "Vendor" (W1): a landlord is nobody's vendor, and "Supplier" would be
+                    a lie about rent. The box says what it wants: who you pay. */}
+                <Label htmlFor="r-vendor">{COMPANY_FIELD.recurring_cost.label}</Label>
+                <Input id="r-vendor" name="vendor" defaultValue={template?.vendor ?? ""} placeholder={COMPANY_FIELD.recurring_cost.placeholder} />
               </div>
               <div>
                 <Label htmlFor="r-amt">Amount</Label>

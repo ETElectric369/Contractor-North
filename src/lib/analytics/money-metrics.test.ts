@@ -37,11 +37,42 @@ describe("computeArAging — A/R buckets (reconciles /analytics)", () => {
     expect(ar.invoices[0]).toMatchObject({ balance: 1558.62, total: 8318.62, amountPaid: 6760 });
   });
 
-  it("skips zero-balance invoices from buckets but still counts them open", () => {
+  /**
+   * REWRITTEN FOR M3 (the badge law: a count shows only what's OPEN, never a total).
+   *
+   * This test used to pin the defect in its own title: a sent bill paid in full whose status lagged
+   * was dropped from the buckets and the rows, and STILL counted open. So "5 open invoices" sat over
+   * four rows, and Nort's ar_aging said open_invoices 5 beside four most_overdue. The count is the
+   * rows now, both read isOwedInvoice, and a bill with nothing open on it is simply not open.
+   */
+  it("a sent bill whose balance is covered (its status lagging) is not open: no bucket, no row, and NOT counted", () => {
     const ar = computeArAging([mk("sent", 45, 500, 500)], TODAY);
     expect(ar.outstanding).toBe(0);
-    expect(ar.openCount).toBe(1);
     expect(ar.invoices.length).toBe(0);
+    expect(ar.openCount).toBe(0);
+  });
+
+  it("the count is always the number of rows under it, whatever the pile looks like", () => {
+    const ar = computeArAging(
+      [
+        mk("sent", 10), // owed
+        mk("partial", 20, 1000, 400), // owed, part paid
+        mk("sent", 45, 500, 500), // covered, status lagging — not open
+        mk("paid", 90), // settled
+        mk("void", 90), // settled
+        mk("draft", 90), // not billed yet: nobody has been asked for it
+      ],
+      TODAY,
+    );
+    expect(ar.openCount).toBe(ar.invoices.length);
+    expect(ar.openCount).toBe(2);
+    expect(ar.invoices.every((r) => r.balance > 0)).toBe(true);
+  });
+
+  it("a draft is never in A/R: it hasn't gone out, so nobody owes it", () => {
+    const ar = computeArAging([mk("draft", 45)], TODAY);
+    expect(ar.openCount).toBe(0);
+    expect(ar.outstanding).toBe(0);
   });
 
   it("an invoice with NO due date is outstanding but never 'late' (matches /billing's overdue rule)", () => {

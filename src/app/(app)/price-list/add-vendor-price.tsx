@@ -1,5 +1,6 @@
 "use client";
 
+import { companyLabel } from "@/lib/vendor-words";
 import { useId, useState } from "react";
 import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -141,7 +142,7 @@ export function AddVendorPrice({
       <div className={`grid grid-cols-2 gap-2 ${vendor ? "" : "sm:grid-cols-4"}`}>
         {!vendor && (
           <div className="col-span-2">
-            <Label htmlFor={`${uid}-pick`}>Vendor *</Label>
+            <Label htmlFor={`${uid}-pick`}>{companyLabel("price_item_option", true)}</Label>
             <Select id={`${uid}-pick`} className="h-11" value={pickShown} onChange={(e) => setPick(e.target.value)}>
               <option value="">Pick One Of Your Vendors</option>
               {knownVendors.map((n) => (

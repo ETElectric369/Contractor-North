@@ -38,6 +38,19 @@ export function isOpenInvoice(inv: { status?: string | null; total?: number | st
   return invoiceBalance(Number(inv.total) || 0, Number(inv.amount_paid) || 0) > 0.005;
 }
 
+/**
+ * AN INVOICE THE CUSTOMER STILL OWES — the Accounts Receivable half of the same rule (M3).
+ *
+ * An OPEN invoice that has gone out: a draft is not owed yet (nobody has been asked for it, and it
+ * is money not yet billed, which is a different pile), paid and void are settled, and so is a sent
+ * bill whose balance is covered even if its status lags. The A/R aging's rows AND its count read
+ * this one function, so "5 open invoices" is always the number of rows underneath it — the badge
+ * law: a count shows only what's open, never a total.
+ */
+export function isOwedInvoice(inv: { status?: string | null; total?: number | string | null; amount_paid?: number | string | null }): boolean {
+  return String(inv.status ?? "") !== "draft" && isOpenInvoice(inv);
+}
+
 /** A change order waiting on its answer. Approved and rejected are settled. */
 export function isOpenChangeOrder(status: string | null | undefined): boolean {
   return status === "pending";

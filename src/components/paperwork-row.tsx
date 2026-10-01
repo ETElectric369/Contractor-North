@@ -1,5 +1,6 @@
 "use client";
 
+import { COMPANY_FIELD } from "@/lib/vendor-words";
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Archive, BookOpen, Camera, Check, FileText, Link2, ListTodo, Loader2, Pencil, Receipt, RotateCcw, Sparkles, StickyNote, Trash2, Undo2 } from "lucide-react";
@@ -264,7 +265,9 @@ function FixDetails({ item, onClose, onSaved }: { item: PaperRowItem; onClose: (
         </div>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
-            <Label htmlFor={`fd-vendor-${item.id}`}>Supplier Or Store</Label>
+            {/* One word for one box (W1): this said "Supplier Or Store" while the drop box
+                above it said "Vendor" and the bill door said "Supplier". */}
+            <Label htmlFor={`fd-vendor-${item.id}`}>{COMPANY_FIELD.paperwork_line.label}</Label>
             <Input id={`fd-vendor-${item.id}`} value={vendor} onChange={(e) => setVendor(e.target.value)} className="h-11" />
           </div>
           <div>

@@ -42,7 +42,7 @@ import { loadShiftChains, type ShiftInfo } from "@/lib/shift-chain";
 import { ADOPT_AFTER_CLOCK_IN_MS, ADOPT_AFTER_SWITCH_MS } from "./adopt-window";
 import { closedPickable, whichJobLabel, type ChoiceJob } from "./which-job-choices";
 import { billedPartMoved, claimedMoveRefusal, claimedPersonRefusal, type ClaimHolder, type ClaimIndex } from "./claim-words";
-import { LONG_SHIFT_PHRASE, MAX_SHIFT_HOURS, clockDoorWords, clockedOutWords, isLongOpenShift, stopProblem } from "@/lib/long-shift";
+import { CEILING_REFUSAL_ASK_OFFICE, LONG_SHIFT_PHRASE, MAX_SHIFT_HOURS, clockDoorWords, clockedOutWords, isLongOpenShift, stopProblem } from "@/lib/long-shift";
 import { clockInClashWords, findOverlap, overlapRefusal, shiftWhen, type OverlapClash } from "@/lib/overlap-refusal";
 
 export type ClockResult = {
@@ -676,11 +676,7 @@ export async function clockOut(input: {
       };
     }
     if (!unattended && closeMs - ciMsForStop > MAX_SHIFT_HOURS * 3_600_000) {
-      return {
-        ok: false,
-        error:
-          "That's more than 18 hours after you clocked in. Pick when you really stopped. If the shift truly ran that long, the office has to enter it.",
-      };
+      return { ok: false, error: CEILING_REFUSAL_ASK_OFFICE };
     }
     // A stop time stated after a long run says so on the card, and the office hears about it. Not
     // only a `picked` one: needsStatedStop lets an `at` well before now through as a real time, and
@@ -1404,8 +1400,10 @@ export async function createManualEntry(input: {
  * updateTimeEntry on an open row (the editor, Nort's time.fixEntry, a crafted call), all
  * land here and get the same bounds, the same card crumb and the same message to the crew member.
  *
- *   * bounds (stopProblem): after the start, not in the future, at most 18 hours, lunch shorter than
- *     the shift. 0291 refuses a future close under this for every session caller.
+ *   * bounds (stopProblem): after the start, not in the future, at most the shift ceiling
+ *     (MAX_SHIFT_HOURS / MAX_SHIFT_PHRASE in lib/long-shift — never the number typed again here,
+ *     because W4's tripwire strips comments and would never catch this one going stale), lunch
+ *     shorter than the shift. 0291 refuses a future close under this for every session caller.
  *   * the row must still be OPEN when the write lands (.eq status open): a clock stopped a moment
  *     ago on his phone is not stopped twice, and the answer says so rather than claiming success.
  *   * the card says who stopped it and when (stopCrumb), and the person whose clock it was is told,

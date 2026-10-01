@@ -22,13 +22,9 @@ import { createClient, createServiceClient } from "@/lib/supabase/server";
  * Everything is best-effort: a cache failure must never cost the action that triggered it.
  */
 
-/** The same visibility sets as public_invoice / public_quote (0187). If 0187's WHERE clauses
- *  ever change, change these WITH them — the RPCs return no ids, so the share door has to
- *  mirror the law rather than reuse it. */
-export const CUSTOMER_VISIBLE_STATUSES: Record<"invoice" | "quote", readonly string[]> = {
-  invoice: ["sent", "partial", "paid", "overdue"],
-  quote: ["sent", "accepted", "declined", "expired"],
-};
+// WHICH PAPERS A CUSTOMER MAY OPEN is lib/customer-visible-docs, the one list the /i door and the
+// portal's job page read too (W3). This file used to keep a second copy of it, with a comment
+// telling the next reader to remember to change both.
 
 /**
  * The signed-in caller's org, or null when there is no caller at all (Stripe webhooks, crons,

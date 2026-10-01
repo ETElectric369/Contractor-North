@@ -1,4 +1,5 @@
 import { PROFILE_SAFE_COLS } from "@/lib/profile-columns";
+import { isStaffRole } from "@/lib/actions/perms";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
@@ -129,8 +130,9 @@ export default async function SettingsPage({
   const profile = me as Profile | null;
   const isAdmin = profile?.role === "owner" || profile?.role === "admin";
   // Office (Alexa's control plane: Numbering, Scheduling & timesheets, Automation)
-  // keeps the org-settings cluster; only techs are gated out of it.
-  const isStaff = isAdmin || profile?.role === "office";
+  // keeps the org-settings cluster; only techs are gated out of it. Who is office is
+  // lib/actions/perms, the one answer every door reads (W2) — this page spelled it a third way.
+  const isStaff = isStaffRole(profile?.role);
   const t = translator(profile?.language);
 
   const [{ data: org }, { data: taxRates }, { data: pricingLevels }, { data: codeTemplates }, { data: jobCodes }] = await Promise.all([

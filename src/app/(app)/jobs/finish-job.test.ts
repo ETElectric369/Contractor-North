@@ -60,7 +60,7 @@ vi.mock("../billing/actions", () => ({
   emailInvoice: state.emailInvoice,
 }));
 
-import { finishJob, finishJobPreview } from "./actions";
+import { finishJob, finishJobPreview, setJobStatus } from "./actions";
 
 const JOB = "tao-j-002";
 
@@ -131,7 +131,7 @@ describe("finishJob on a FIXED-PRICE job billed with progress payments (unchange
     expect(res.speak).toMatch(/^Job finished\. 19\.5 h/);
     // The only write is the job's status: no invoice is written, sent or promoted.
     expect(state.writes.map((w) => w.table)).toEqual(["jobs"]);
-    expect(state.writes[0].payload).toEqual({ status: "complete" });
+    expect(state.writes[0].payload).toEqual({ status: "complete", hold_reason: null });
     expect(state.drawDoor).not.toHaveBeenCalled();
   });
 
@@ -173,7 +173,7 @@ describe("finishJob on a TIME & MATERIAL job: the Final is built as a draft, not
     // Nothing is sent, even when asked: a draft goes out only when a person sends it.
     expect(state.emailInvoice).not.toHaveBeenCalled();
     // This action's own writes: the job's status, after the draft existed.
-    expect(state.writes).toEqual([{ table: "jobs", payload: { status: "complete" } }]);
+    expect(state.writes).toEqual([{ table: "jobs", payload: { status: "complete", hold_reason: null } }]);
   });
 
   it("the draft can't be built → the job is NOT marked complete, and the reason is said", async () => {
@@ -242,7 +242,7 @@ describe("finishJob on a TIME & MATERIAL job: the Final is built as a draft, not
     expect(res.final).toBeUndefined();
     expect(res.warning).toBe("$2,437.50 of work is not on a bill. INV-090 is still a draft for set amounts: send it (or delete it), then bill the work.");
     expect(state.drawDoor).not.toHaveBeenCalled();
-    expect(state.writes).toEqual([{ table: "jobs", payload: { status: "complete" } }]);
+    expect(state.writes).toEqual([{ table: "jobs", payload: { status: "complete", hold_reason: null } }]);
   });
 
   it("Finish Without Billing when the draft is no longer in the way: nothing is done, never a bill that wasn't asked for", async () => {
@@ -275,7 +275,7 @@ describe("finishJob on a TIME & MATERIAL job: the Final is built as a draft, not
     );
     expect(res.warning).toMatch(/\$7,562\.50 more than the work/);
     expect(state.drawDoor).not.toHaveBeenCalled();
-    expect(state.writes).toEqual([{ table: "jobs", payload: { status: "complete" } }]);
+    expect(state.writes).toEqual([{ table: "jobs", payload: { status: "complete", hold_reason: null } }]);
   });
 
   it("a plain T&M job (no draws) keeps the standard invoice - the card's Create Invoice - never a draw", async () => {
@@ -338,5 +338,63 @@ describe("finishJobPreview — the truth at the button", () => {
     const p = await finishJobPreview(JOB);
     expect(p.final).toBeUndefined();
     expect(p.drawBilled).toBe(true);
+  });
+});
+
+/**
+ * EVERY DOOR THAT FINISHES A JOB BILLS FIRST (M2, Tao J-002 again).
+ *
+ * setJobStatus took the word "complete" from anybody and wrote it alone: Nort's "mark it complete",
+ * and whatever door is written next. The job page's own Complete had already been pointed at
+ * finishJob (209451e1) — which is exactly how a rule written at one door drifts. The rule lives at
+ * the WRITER now, off the one typed table that says which statuses end a job (lib/job-status
+ * JOB_STATUS_DOOR), so finishing a job is the whole motion whichever door asks for it.
+ *
+ * (The status write clears the hold reason with it now — the payload assertions above say so: a
+ * hold's reason lives and dies with the hold, 0234, and finishing is the only door to complete.)
+ */
+describe("setJobStatus — 'complete' is finishing, not a status write (M2)", () => {
+  it("a fixed-price job with 19.5 h on no bill: finishing through the status writer NAMES the work, as the Finish button does", async () => {
+    state.billingType = "fixed";
+    const res = await setJobStatus(JOB, "complete");
+    expect(res.ok).toBe(true);
+    // The sentence and the warning finishJob gives, handed back out of the status writer so no
+    // caller (Nort included) loses them.
+    expect(res.warning).toBe(
+      "19.5 h ($2,437.50) of work on this job is not on a bill yet. Finishing didn't bill it - bill it with the job's New Invoice → This Is The Last Bill.",
+    );
+    expect(res.speak).toMatch(/^Job finished\. 19\.5 h/);
+    expect(res.id).toBe("inv-00028");
+  });
+
+  it("a Time & Material job: the status writer BUILDS the Final draft first, the way the Finish button does", async () => {
+    state.billingType = "tm";
+    state.drawDoor.mockResolvedValue({ ok: true, id: "inv-080", note: "Started INV-080 for the work not yet billed - its total is that work." });
+    state.made = { invoice_number: "INV-080", total: 2437.5 };
+    const res = await setJobStatus(JOB, "complete");
+    expect(state.drawDoor).toHaveBeenCalledWith(JOB, "final");
+    expect(res).toEqual({
+      ok: true,
+      id: "inv-080",
+      final: true,
+      sent: false, // nothing is emailed: a draft goes out only when a person sends it
+      speak: "Job finished. Started INV-080 for $2,437.50 of work not yet billed. Review it, then Send.",
+    });
+  });
+
+  it("a draft that can't be built → the job is NOT finished through this door either, and nothing is written", async () => {
+    state.billingType = "tm";
+    state.drawDoor.mockResolvedValue({ ok: false, error: "Couldn't start the Final." });
+    const res = await setJobStatus(JOB, "complete");
+    expect(res.ok).toBe(false);
+    expect(state.writes).toEqual([]);
+  });
+
+  it("every OTHER status is still the plain write, and nothing is billed", async () => {
+    state.billingType = "tm";
+    const res = await setJobStatus(JOB, "in_progress");
+    expect(res).toEqual({ ok: true });
+    expect(state.writes).toEqual([{ table: "jobs", payload: { status: "in_progress", hold_reason: null } }]);
+    expect(state.drawDoor).not.toHaveBeenCalled();
   });
 });

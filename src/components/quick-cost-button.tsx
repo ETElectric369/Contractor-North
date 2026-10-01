@@ -21,10 +21,13 @@ import { billJobReceipt } from "@/app/(app)/organize/actions";
 import { addStockPurchase } from "@/app/(app)/inventory/actions";
 import { jobLabel } from "@/lib/schedule-options";
 import { jobPickLabel } from "@/lib/job-pick-label";
+import { JobScopePicker } from "@/components/job-scope-picker";
+import { scopeAnswered } from "@/lib/bill-scope";
 import { useToast } from "@/components/toast";
 import { openSnapOrNote } from "@/components/snap-or-note";
 import { useShelfItems } from "@/components/shelf-count";
 import { BUSINESS_COST_BUCKETS, type BusinessCostBucket } from "@/lib/business-cost-buckets";
+import { COMPANY_FIELD, companyLabel, costCompanyField } from "@/lib/vendor-words";
 import { stockPurchaseProblem, type StockPurchaseInput } from "@/lib/stock-purchase";
 import type { ShelfPickerItem } from "@/lib/shelf-plan";
 
@@ -169,6 +172,9 @@ function SnapCostButton({
   // filed as Sep 24, because the seed was being sent as if it were a fact).
   const [dateTouched, setDateTouched] = useState(false);
   const [category, setCategory] = useState("Materials");
+  // WHICH PART OF THE JOB this cost is (item C1): the one question, the one control. "" = none of
+  // them. Nothing is preselected: a guessed part is a wrong budget row.
+  const [scope, setScope] = useState("");
   // The bucket, when the cost has no job. Nothing is picked for the person (see onSave).
   const [bucket, setBucket] = useState("");
   const [paid, setPaid] = useState(false);
@@ -215,6 +221,7 @@ function SnapCostButton({
     setBillDate(todayStrInTz(orgTz.current ?? getOrgSettings(null).timezone));
     setDateTouched(false);
     setCategory("Materials");
+    setScope("");
     setBucket("");
     setPaid(false);
     setJob(jobId ?? "");
@@ -398,11 +405,23 @@ function SnapCostButton({
    *  there is one. */
   const attachClause = () => attachFailure.current ?? "didn't upload";
 
-  /** What the PERSON stated on the form, handed to the reader: attestation beats inference. */
+  /**
+   * WHAT THE PERSON STATED ON THE FORM, handed to the reader: attestation beats inference.
+   *
+   * EVERY ANSWER THIS SHEET COLLECTS IS IN HERE (items C1-1, C1-4). Part Of The Job was drawn, and
+   * was not in this object — so on the default Read the Receipt save (and on Different Purchase's
+   * re-read, which is this same object) the model's guess won, Erik's picked "Decking" never left the
+   * browser, and nothing on screen said so, while the Category dropdown right above it was carried
+   * through. Supplier and Amount are the paper's in this mode and the form greys them to say it;
+   * every control that is NOT greyed is an answer, and an answer belongs here.
+   */
   function stated(differentPurchase = false) {
     return {
       paid,
       category: category || null,
+      // Blank is not an answer: the control sits on "No Part Of The Job" until somebody picks, so an
+      // untouched one leaves the paper's own read standing (lib/bill-scope's scopeAnswered decides).
+      scope: scope || null,
       // Only a date a person set is a fact; the seeded "today" would outrank the paper's own
       // date (organize/actions.ts: `stated?.billDate || itemDate`). The seeded day still
       // lands when the paper has no legible date, so the bill is never dateless.
@@ -423,6 +442,9 @@ function SnapCostButton({
         job_id: targetJob, supplier: supplier.trim() || "From receipt — add supplier", bill_number: "",
         amount: typedAmount, status: paid ? "paid" : "unpaid", bill_date: billDate || null,
         notes: "", category, receipt_document_id: docId,
+        // The reader couldn't read it, so there is no model word to weigh against: what the PERSON
+        // answered about the part of the job stands (lib/bill-scope decides, here as everywhere).
+        scope: scopeAnswered(scope, null),
       });
       if (!fb.ok) return setError(res.error ?? "Couldn't read the receipt.");
       setSameAsDoc(null);
@@ -507,7 +529,9 @@ function SnapCostButton({
     // Fragment-first: snapping a receipt must NEVER be blocked by a missing supplier —
     // the photo IS the capture, and the supplier can be read off it / filled in later.
     // Require the supplier only when there's no receipt to carry the detail.
-    if (!supplier.trim() && !receipt) return setError("Who was it paid to? (supplier)");
+    // The refusal names the box in the box's own words, which off a job is "Who You Pay": it used to
+    // say "(supplier)" about a landlord (lib/vendor-words, costCompanyField).
+    if (!supplier.trim() && !receipt) return setError(`Who was it paid to? Fill in ${companyLabel(costCompanyField(!targetJob))}.`);
     // TYPE IT IN TYPES A NUMBER. With a receipt attached the supplier may stay blank — the paper
     // carries it — but the amount may not: Type It In with nothing typed used to save a $0 bill,
     // receipt attached, and say "Cost saved ✓". That is not a cost, it is a figure invented for
@@ -537,6 +561,9 @@ function SnapCostButton({
         notes: "",
         category: targetJob ? category : bucket,
         receipt_document_id: docId,
+        // Item C1: a business cost has no part of a job; on a job, what the person answered — and
+        // nothing was read off a paper on this path, so there is nothing for it to beat.
+        scope: !targetJob ? { kind: "noJob" } : scopeAnswered(scope, null),
       });
       if (!res.ok) return setError(res.error ?? "Couldn't save the cost.");
       setCostSaved(true);
@@ -693,12 +720,17 @@ function SnapCostButton({
         <div className="space-y-4">
           {snapTop && !sameAsDoc && receiptBlock}
           <div>
-            {/* The asterisk is the truth of the save path: a supplier is REQUIRED only when
+            {/* The WORD is lib/vendor-words', not this sheet's: it writes the same bills.supplier
+                column the Bills door and the job's bills write, and this sheet used to ask for it as
+                "Paid to / supplier" — a fourth wording for one column, and the one Erik hits most
+                from the phone. With no job it is a business cost, so the word is "Who You Pay"
+                (a landlord is nobody's supplier), which costCompanyField decides.
+                The asterisk is the truth of the save path: the company is REQUIRED only when
                 there is no receipt to carry it (fragment-first) — with a photo attached, Nort
                 reads it (Read the Receipt) or the bill says "From receipt — add supplier"
                 (Type It In), so a greyed, starred field was a demand the form never made. */}
-            <Label htmlFor="qc-supplier">Paid to / supplier{receipt ? "" : " *"}</Label>
-            <Input id="qc-supplier" value={supplier} onChange={(e) => setSupplier(e.target.value)} placeholder={useReader ? (nortOn ? "Nort reads it off the receipt" : "Read off the receipt") : "e.g. Main Street Supply"} autoFocus={!snapTop} disabled={costSaved || useReader} />
+            <Label htmlFor="qc-supplier">{companyLabel(costCompanyField(!targetJob), !receipt)}</Label>
+            <Input id="qc-supplier" value={supplier} onChange={(e) => setSupplier(e.target.value)} placeholder={useReader ? (nortOn ? "Nort reads it off the receipt" : "Read off the receipt") : COMPANY_FIELD[costCompanyField(!targetJob)].placeholder} autoFocus={!snapTop} disabled={costSaved || useReader} />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -713,7 +745,17 @@ function SnapCostButton({
           {!jobId && pickerJobs && pickerJobs.length > 0 && (
             <div>
               <Label htmlFor="qc-job">Job</Label>
-              <Select id="qc-job" value={job} onChange={(e) => setJob(e.target.value)} disabled={costSaved || !!sameAsDoc}>
+              <Select
+                id="qc-job"
+                value={job}
+                // A part of the OLD job means nothing on the new one (item C1), so the answer starts
+                // again rather than being carried over and refused at the save.
+                onChange={(e) => {
+                  setJob(e.target.value);
+                  setScope("");
+                }}
+                disabled={costSaved || !!sameAsDoc}
+              >
                 <option value="">Business Cost (No Job)</option>
                 {pickerJobs.map((j) => (
                   <option key={j.id} value={j.id}>{j.label}</option>
@@ -729,6 +771,9 @@ function SnapCostButton({
                   <option key={c} value={c}>{c}</option>
                 ))}
               </Select>
+              {/* The same scope question the receipt reader answers (item C1). Drawn only when this
+                  job's estimate is broken into parts — otherwise there is nothing to ask. */}
+              <JobScopePicker jobId={targetJob} value={scope} onChange={setScope} id="qc-scope" className="mt-3" />
             </div>
           ) : (
             <div>
@@ -816,6 +861,9 @@ export type TypedCostFields = {
   paid: "paid" | "unpaid";
   billNumber: string;
   poId: string;
+  /** WHICH PART OF THE JOB this cost is (item C1): one of the job estimate's own words, or "" for
+   *  none of them. Only ever set when the target is a job whose estimate is broken into parts. */
+  scope?: string;
   /** Shop Stock only: What Is It? (an item's id, NEW_ITEM, or "" for nothing picked), the new item's
    *  name, How Many, and the Unit (the item's own for an item in stock). */
   stockItem?: string;
@@ -886,6 +934,10 @@ export function typedCostBill(f: TypedCostFields): Parameters<typeof createBill>
     notes: "",
     category: business ? f.bucket : "Materials",
     po_id: business ? null : f.poId || null,
+    // THE SAME SCOPE QUESTION AS EVERY OTHER DOOR (item C1). A business cost has no part of a job;
+    // on a job, what the person answered, and nothing said is "none of them", never a guess. Nothing
+    // is read off a paper on the typed path, so there is no model word for the answer to beat.
+    scope: business ? { kind: "noJob" } : scopeAnswered(f.scope, null),
   };
 }
 
@@ -931,6 +983,8 @@ function TypeItInButton({
   const [paid, setPaid] = useState<"paid" | "unpaid">("paid");
   const [billNumber, setBillNumber] = useState("");
   const [poId, setPoId] = useState("");
+  // WHICH PART OF THE JOB (item C1). Nothing is preselected: a guessed part is a wrong budget row.
+  const [scope, setScope] = useState("");
   // SHOP STOCK: What Is It? (an item in stock, NEW_ITEM, or nothing yet), the new item's name, How
   // Many, and the Unit a new item is counted in (an item in stock keeps its own).
   const [stockItem, setStockItem] = useState("");
@@ -974,6 +1028,7 @@ function TypeItInButton({
     setPaid("paid");
     setBillNumber("");
     setPoId("");
+    setScope("");
     setStockItem("");
     setStockName("");
     setStockPieces(0);
@@ -1054,6 +1109,8 @@ function TypeItInButton({
   function pickTarget(next: string) {
     setTarget(next);
     setPoId("");
+    // A part of the OLD job means nothing on the new one (item C1).
+    setScope("");
     setError(null);
     if (next !== BUSINESS) setBucket(null);
   }
@@ -1069,7 +1126,7 @@ function TypeItInButton({
 
   function save() {
     setError(null);
-    const fields: TypedCostFields = { amount, date, target, bucket, where, paid, billNumber, poId, stockItem, stockName, stockPieces, stockUnit: unitNow };
+    const fields: TypedCostFields = { amount, date, target, bucket, where, paid, billNumber, poId, scope, stockItem, stockName, stockPieces, stockUnit: unitNow };
     const problem = typedCostProblem(fields);
     if (problem) return setError(problem);
     if (target === STOCK) return saveStock(fields);
@@ -1257,8 +1314,13 @@ function TypeItInButton({
           )}
 
           <div>
-            <Label htmlFor="ti-where">{target === BUSINESS ? "Where (Optional)" : "Where"}</Label>
-            <Input id="ti-where" value={where} onChange={(e) => setWhere(e.target.value)} placeholder="The store or company" />
+            {/* The same column, so the same word as the snap sheet and the Bills door (lib/vendor-words).
+                It asked "Where" / "Where (Optional)" with "The store or company" under it, which was a
+                fifth wording for bills.supplier. Required wherever the save refuses a blank one
+                (typedCostProblem: a job's cost and a stock purchase both do); a business cost's may be
+                left blank and says so. */}
+            <Label htmlFor="ti-where">{companyLabel(costCompanyField(target === BUSINESS), target === BUSINESS ? "optional" : !!target)}</Label>
+            <Input id="ti-where" value={where} onChange={(e) => setWhere(e.target.value)} placeholder={COMPANY_FIELD[costCompanyField(target === BUSINESS)].placeholder} />
           </div>
 
           <div>
@@ -1273,6 +1335,10 @@ function TypeItInButton({
             </div>
             {paid === "unpaid" && <p className="mt-1 text-xs text-slate-500">It counts in what you owe that supplier until you pay it.</p>}
           </div>
+
+          {/* WHICH PART OF THE JOB (item C1): the same control the snap sheet and both Edit Bill boxes
+              draw. Nothing is drawn when the job's estimate isn't broken into parts. */}
+          <JobScopePicker jobId={jobTarget} value={scope} onChange={setScope} id="ti-scope" />
 
           {jobPos && jobPos.list.length > 0 && (
             <div>

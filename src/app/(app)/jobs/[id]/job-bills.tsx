@@ -1,5 +1,6 @@
 "use client";
 
+import { companyLabel } from "@/lib/vendor-words";
 import { useState, useTransition, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -12,6 +13,8 @@ import { Badge, statusTone } from "@/components/ui/badge";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { formatCurrency, formatDate, formatDuration } from "@/lib/utils";
 import { BillRowDoors } from "@/components/bill-row-doors";
+import { JobScopePicker, useJobScopes } from "@/components/job-scope-picker";
+import { scopeSaid } from "@/lib/bill-scope";
 import { BillPaperDoors } from "@/components/bill-paper-doors";
 import type { BillPaper } from "@/lib/job-photos";
 import { AlreadyBilledButton, NotBilledAfterAllButton } from "@/components/already-billed-sheet";
@@ -52,6 +55,10 @@ interface Bill {
    */
   settledBySupplier?: boolean | null;
   settledBySupplierName?: string | null;
+  /** WHICH PART OF THE JOB this cost is (item C1; column 0105). Shown on the row and set in the Edit
+   *  Bill box, so a cost that is under no part of the job says so instead of quietly reading
+   *  "Uncategorized" on the budget sheet and nowhere else. */
+  scope_category?: string | null;
 }
 
 export interface JobPo {
@@ -119,6 +126,12 @@ export function JobBills({
   settledSaysUnread?: boolean;
 }) {
   const [editBill, setEditBill] = useState<Bill | null>(null);
+  // DOES THIS JOB HAVE PARTS AT ALL (item C1)? On a job whose estimate is broken into Framing and
+  // Decking, a cost under no part is a real gap and the row says so. On a job with no scoped estimate
+  // there is no gap and no door to fix one, so the row says nothing rather than nagging about a
+  // question nobody can answer.
+  const { scopes: jobScopes } = useJobScopes(jobId);
+  const jobHasParts = (jobScopes?.length ?? 0) > 0;
 
   const total = bills.reduce((s, b) => s + Number(b.amount), 0);
   const poNumberById = new Map(pos.map((p) => [p.id, p.po_number]));
@@ -160,6 +173,10 @@ export function JobBills({
             {b.po_id && poNumberById.has(b.po_id)
               ? ` · pays ${poNumberById.get(b.po_id)}`
               : ""}
+            {/* NOTHING SILENT (item C1): the part of the job this cost counts under, and on a job
+                that HAS parts, that none is set — rather than that showing up only as Uncategorized
+                on the budget sheet. Edit sets it. */}
+            {(b.scope_category || jobHasParts) && ` · ${scopeSaid(b.scope_category)}`}
           </div>
           {why && <div className="text-xs text-slate-500">{why}</div>}
         </div>
@@ -341,6 +358,7 @@ export function JobBills({
         <JobBillEditModal
           key={editBill.id}
           bill={editBill}
+          jobId={jobId}
           pos={pos}
           onClose={() => setEditBill(null)}
         />
@@ -353,10 +371,13 @@ export function JobBills({
  *  (executeAction → "bill.update") — the same capability the AI agent calls. */
 function JobBillEditModal({
   bill,
+  jobId,
   pos = [],
   onClose,
 }: {
   bill: Bill;
+  /** The job this tab is on — what the Part Of The Job control reads its options from (item C1). */
+  jobId: string;
   pos?: JobPo[];
   onClose: () => void;
 }) {
@@ -368,6 +389,8 @@ function JobBillEditModal({
   const [status, setStatus] = useState(bill.status);
   const [billDate, setBillDate] = useState(bill.bill_date ?? "");
   const [poId, setPoId] = useState(bill.po_id ?? "");
+  // WHICH PART OF THE JOB (item C1): the door that sets or changes it on a cost that already exists.
+  const [scope, setScope] = useState(bill.scope_category ?? "");
   const [error, setError] = useState<string | null>(null);
   // A save that WENT THROUGH and still has something to say: the receipt an invoice bills was
   // re-priced, so the invoice and the receipt now describe the same purchase at two figures.
@@ -394,6 +417,9 @@ function JobBillEditModal({
         status,
         bill_date: billDate || null,
         po_id: poId || null,
+        // "" takes it back off; a part this job's estimate hasn't got is refused and names the ones
+        // it has (lib/bill-scope). Sending it is how it changes.
+        scope_category: scope || null,
       });
       if (!res.ok) return setError(res.error ?? "Could not save.");
       if (res.warning) {
@@ -426,7 +452,7 @@ function JobBillEditModal({
         )}
         <div className="grid grid-cols-2 gap-3">
           <div className="col-span-2">
-            <Label htmlFor="be-supplier">Supplier *</Label>
+            <Label htmlFor="be-supplier">{companyLabel("bill", true)}</Label>
             <Input id="be-supplier" value={supplier} onChange={(e) => setSupplier(e.target.value)} autoFocus />
           </div>
           <div>
@@ -448,6 +474,8 @@ function JobBillEditModal({
               <option value="paid">Settled At The Counter</option>
             </Select>
           </div>
+          {/* The same control the Add Cost sheets draw; nothing when this job's estimate has no parts. */}
+          <JobScopePicker jobId={jobId} value={scope} onChange={setScope} id="be-scope" className="col-span-2" />
           {poOptions.length > 0 && (
             <div className="col-span-2">
               <Label htmlFor="be-po">Pays purchase order</Label>

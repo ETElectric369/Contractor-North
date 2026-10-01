@@ -22,6 +22,9 @@ import { sayMoney } from "@/lib/payroll-math";
 // checkable without a database. It routes category/billable through decideReceiptLine, the one
 // door every other receipt path already passes through.
 import { supplierBillLines } from "./supplier-bill-lines";
+import { jobCostRefusal } from "@/lib/job-cost-guard";
+import { scopeForWrite } from "@/lib/bill-scope";
+import { listJobScopes } from "@/lib/analytics/job-profitability";
 import { SHELF_NEEDS_LINES, ticketShelfProblem, type ShelfPick, type TicketLineChoice } from "@/lib/shelf-plan";
 import { shelveLines } from "@/lib/stock-ledger";
 // What a set of invoice lines CLAIMS - both shapes, the `bill:<id>` import key older invoices carry
@@ -1643,6 +1646,12 @@ export async function recordSupplierInvoiceAsBill(input: {
    * tap moved the paper in between, this refuses rather than record on a job he never pressed.
    */
   expectJobId?: string | null;
+  /**
+   * WHICH PART OF THE JOB this cost is (item C1) — one of the job estimate's own words. Record It As
+   * A Bill is a one-tap door on the supplier's own card, so nothing said means nobody was asked: the
+   * bill lands under no part of the job, the Costs tab SAYS so, and the Edit Bill box sets it.
+   */
+  scope?: string | null;
 }): Promise<SupplierActionResult> {
   const toShelf = Array.isArray(input?.toShelf) ? input.toShelf : null;
   const cardDoor = Array.isArray(input?.notSameAs);
@@ -1886,13 +1895,33 @@ export async function recordSupplierInvoiceAsBill(input: {
     if (shelfProblem) return { ok: false, error: `${shelfProblem} Nothing was written.` };
   }
 
+  // A RETURN WITH NO LINES NEVER GOES ON A JOB (item C2). A supplier's credit memo recorded here on a
+  // job with nothing legible under its total is the INV-078 housings: the importer credits the
+  // customer the whole of it at markup. The same rule every other cost door asks (lib/job-cost-guard).
+  const billJobId = toShelf || bucket ? null : jobId;
+  const noReturn = jobCostRefusal(
+    { jobId: billJobId, amount: total, lines },
+    `Nothing was written. Record ${number} as a business cost, or get its lines onto the document first.`,
+  );
+  if (noReturn) return { ok: false, error: noReturn };
+
+  // WHICH PART OF THE JOB (item C1): the one decider, held to the parts this job's estimate has.
+  const askedScope = String(input?.scope ?? "").trim();
+  const scope = scopeForWrite({
+    jobId: billJobId,
+    answer: billJobId ? (askedScope ? { kind: "scope", scope: askedScope } : { kind: "notAsked" }) : { kind: "noJob" },
+    jobScopes: billJobId && askedScope ? await listJobScopes(ctx.supabase, billJobId) : [],
+  });
+  if (scope.refusal) return { ok: false, error: scope.refusal };
+
   const { data: billRows, error: billErr } = await ctx.supabase
     .from("bills")
     .insert({
       org_id: org.orgId,
       // A document recorded to the shelf is the shelf's, never a job's (0303's check says so too).
       // A business cost is the company's own: no job, whatever job the paper itself names.
-      job_id: toShelf || bucket ? null : jobId,
+      job_id: billJobId,
+      scope_category: scope.value,
       ...(toShelf ? { on_shelf: true } : {}),
       supplier: accountName,
       supplier_account_id: accountId,

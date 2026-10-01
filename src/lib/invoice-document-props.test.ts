@@ -10,11 +10,11 @@ vi.mock("@/lib/observe", () => ({ reportError: (where: string) => void reported.
 
 import {
   INVOICE_DOC_COLS,
-  PUBLIC_INVOICE_STATUSES,
   readInvoiceDocumentProps,
   resolvePublicInvoice,
   type InvoiceDocRead,
 } from "@/lib/invoice-document-props";
+import { CUSTOMER_VISIBLE_STATUSES } from "@/lib/customer-visible-docs";
 import { InvoiceDocument } from "@/components/invoice-document";
 import { ProgressReportCard } from "@/components/progress-report-card";
 import { accentHex } from "@/lib/org-settings";
@@ -416,7 +416,9 @@ describe("the /i link resolves its invoice the way public_invoice gates it", () 
     } finally {
       ROWS.invoices[0].status = "sent";
     }
-    expect([...PUBLIC_INVOICE_STATUSES]).toEqual(["sent", "partial", "paid", "overdue"]);
+    // W3: the list itself is lib/customer-visible-docs now, shared with the stored-PDF door and the
+    // portal's job page, and customer-visible-docs.test.ts holds it to what the database opens.
+    expect([...CUSTOMER_VISIBLE_STATUSES.invoice]).toEqual(["sent", "partial", "paid", "overdue"]);
     expect((await resolvePublicInvoice(client(), "")).kind).toBe("missing");
   });
 

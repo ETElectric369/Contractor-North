@@ -1,6 +1,7 @@
 "use server";
 import { recordAiUsage, aiSpendExceeded, currentOrgId } from "@/lib/ai-cost";
 import { dbError } from "@/lib/db-error";
+import { isStaffRole } from "@/lib/actions/perms";
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
@@ -212,8 +213,9 @@ export async function saveSetup(answers: Answers): Promise<Result> {
   if (!user) return { ok: false, error: "Sign in first." };
   const { data: me } = await supabase.from("profiles").select("role, org_id, active").eq("id", user.id).maybeSingle();
   const role = (me as { role?: string } | null)?.role;
-  // A deactivated seat is refused here too (audit v921 critical — see staff-guard.ts).
-  if (!role || !["owner", "admin", "office"].includes(role) || (me as { active?: boolean | null } | null)?.active === false)
+  // WHO IS OFFICE is lib/actions/perms (W2) — one answer, the same one the dock and every other
+  // door reads. A deactivated seat is refused here too (audit v921 critical — see staff-guard.ts).
+  if (!isStaffRole(role) || (me as { active?: boolean | null } | null)?.active === false)
     return { ok: false, error: "You don't have access to that." };
 
   // Same coercion the fill path uses — a hand-typed rate and a heard one land identically.

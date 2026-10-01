@@ -656,7 +656,8 @@ export async function addStockPurchase(input: StockPurchaseInput): Promise<Resul
   }
 
   // The bill: no job, bought for stock, its one line. The supplier account only by an exact alias.
-  const billId = await insertItemizedBill(
+  const billId = (
+    await insertItemizedBill(
     supabase,
     {
       job_id: null,
@@ -664,6 +665,8 @@ export async function addStockPurchase(input: StockPurchaseInput): Promise<Resul
       amount,
       bill_date: date,
       category: "Shop Stock",
+      // A shelf ticket has no job, so no part of a job to be under (item C1).
+      scope: { kind: "noJob" },
       notes: `Shop stock typed in by hand (no paper): ${pieces} ${unit} of ${itemName}.`,
       created_by: userId,
       bill_number: cleanDocNumber(input.billNumber),
@@ -672,7 +675,8 @@ export async function addStockPurchase(input: StockPurchaseInput): Promise<Resul
     },
     [stockPurchaseLine({ item: itemName, pieces, amount })],
     stockPurchaseStatus(input.paid),
-  );
+    )
+  ).id;
   if (!billId) return { ok: false, error: "The purchase didn't save. Nothing was recorded and nothing went into stock - try again." };
 
   // Its one line, read back (insertItemizedBill keeps a bill whose lines didn't save: not here).

@@ -21,6 +21,7 @@ vi.mock("../actions", () => ({
 }));
 
 import { ItemEditor, settleFlips } from "./item-editor";
+import { COMPANY_FIELD } from "@/lib/vendor-words";
 
 const item = (id: string, description: string, over: Record<string, unknown> = {}) => ({
   id,
@@ -73,6 +74,59 @@ describe("the checklist", () => {
     expect(tech()).not.toContain("List Total");
   });
 
+  /**
+   * ITEM C4 (Erik's report a7831363 on /materials/<id>). The total summed `(est_cost ?? 0) × quantity`,
+   * so a line nobody had priced counted as ZERO and nothing on the screen said so — the figure he
+   * reads, and might hand a supplier, was short by whatever those lines cost. And the line itself
+   * printed a bare dash, which reads as nothing to pay rather than nothing known.
+   */
+  it("a line nobody priced is left out of the total, and the footer says so", () => {
+    const html = office([ITEMS[0], { ...ITEMS[3], est_cost: null }]);
+    // 2 × $12.50 is the only priced line, so that IS the total...
+    expect(html).toMatch(/List Total <span[^>]*>\$\s?25\.00</);
+    // ...and the line it does not cover is named under it.
+    expect(html).toMatch(/1<!-- --> line has no price on it yet|1 line has no price on it yet/);
+    expect(html).toContain("not in that total");
+  });
+
+  /**
+   * ITEM C4-6. With NO line priced — the ordinary order sheet off an estimate with no priced
+   * catalogue — the footer printed "List Total $0.00" and then, right under it, "there is nothing to
+   * total": two statements that contradict each other. ONE-NUMBER ANSWERS means the figure is what
+   * Erik reads, and $0.00 reads as "this list costs nothing" rather than "nothing is known". There is
+   * no figure to print, so none is printed.
+   */
+  it("prints NO List Total when nothing on the list is priced — just the sentence saying why", () => {
+    const html = office([
+      { ...ITEMS[0], est_cost: null },
+      { ...ITEMS[3], est_cost: null },
+    ]);
+    expect(html).not.toContain("List Total");
+    expect(html).not.toMatch(/\$\s?0\.00/);
+    expect(html).toContain("there is nothing to total");
+    // The rest of the footer is untouched: what's left to buy is still said.
+    expect(html).toMatch(/2<!-- --> to buy|2 to buy/);
+  });
+
+  it("a list priced at a real zero still prints its figure (free is a number; nothing is not)", () => {
+    const html = office([{ ...ITEMS[0], est_cost: 0 }]);
+    expect(html).toMatch(/List Total <span[^>]*>\$\s?0\.00</);
+    expect(html).not.toContain("there is nothing to total");
+  });
+
+  it("the unpriced line says No Price Yet, never a bare dash, and never to a tech", () => {
+    const html = office([{ ...ITEMS[0], est_cost: null }]);
+    expect(html).toContain("No Price Yet");
+    const t = tech([{ ...TECH_ITEMS[0] }]);
+    expect(t).not.toContain("No Price Yet");
+    expect(t).not.toContain("List Total");
+  });
+
+  it("a total that covers the whole list says nothing extra", () => {
+    expect(office()).not.toContain("not in that total");
+    expect(office()).not.toContain("No Price Yet");
+  });
+
   it("everything bought: said once, in the footer, and every line waits in the fold", () => {
     const all = ITEMS.map((i) => ({ ...i, purchased: true }));
     const html = office(all);
@@ -105,9 +159,23 @@ describe("the office and the crew see the same list; the crew never sees a price
     expect(office()).toMatch(/\$\s?25\.00/);
   });
 
-  it("the crew's list has no dollar sign, no vendor, no tool toggle", () => {
+  /**
+   * W1. The box that asks where a material comes from says SUPPLIER, the one word the purchase
+   * order, the bills door and the price book all use now; it used to say "Vendor" here while the
+   * same company was a "Supplier *" two screens away. The word is read from lib/vendor-words, so
+   * this pins the WIRING, not a string.
+   */
+  it("the office's line asks for the supplier by the one name", () => {
+    const html = office();
+    expect(COMPANY_FIELD.material_line.label).toBe("Supplier");
+    expect(html).toContain(`aria-label="${COMPANY_FIELD.material_line.label}"`);
+    expect(html).not.toContain('placeholder="Vendor"');
+  });
+
+  it("the crew's list has no dollar sign, no supplier box, no tool toggle", () => {
     const html = tech();
     expect(html).not.toMatch(/\$\s?\d/);
+    expect(html).not.toContain(`aria-label="${COMPANY_FIELD.material_line.label}"`);
     expect(html).not.toContain('placeholder="Vendor"');
     expect(html).not.toContain("Mark As A Tool");
     for (const s of ["12-2 Romex", "3 gang faceplate", "Hole saw"]) expect(html).toContain(s);

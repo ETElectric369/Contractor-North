@@ -4,6 +4,7 @@ import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { activeRowHref, activeSection, dockTiles, visibleDock } from "@/lib/dock";
+import { isStaffRole } from "@/lib/actions/perms";
 import type { FeatureMap } from "@/lib/features";
 
 type Badges = Record<string, number>;
@@ -89,7 +90,9 @@ function DockInner({ branding, role, badges: badgesProp, features }: DockProps) 
   const pathname = usePathname();
   const search = useSearchParams();
   const current = pathname + (search.toString() ? `?${search.toString()}` : "");
-  const isStaff = role === "owner" || role === "admin" || role === "office";
+  // Who is office is lib/actions/perms, the one answer every door reads (W2). The dock hiding a
+  // seat the server lets in is how a person finds a page by URL that the nav swore did not exist.
+  const isStaff = isStaffRole(role);
   const logo = branding?.logo;
   // THE ONE DOCK FILTER (lib/dock visibleDock): role (staffOnly/techOnly) and the switches, on
   // tiles and rows alike, so every renderer below — rail tiles, the page column, the phone

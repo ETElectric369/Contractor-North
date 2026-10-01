@@ -32,6 +32,7 @@ import { ItemSheet } from "./item-sheet";
 import { VendorsManager } from "./vendors-manager";
 import { PriceListManager } from "./price-list-manager";
 import { summarizeVendors, type ItemOption } from "./item-options-math";
+import { COMPANY_FIELD, VENDOR_MEANS } from "@/lib/vendor-words";
 import type { PriceItem } from "./price-list-math";
 
 const w830: PriceItem = {
@@ -65,6 +66,16 @@ describe("clicking an item opens its vendors", () => {
     expect(html).toContain("$1,500.00"); // Andersen sell at the org's 25%
     expect(html).toContain("$950.00"); // Milgard cost
     expect(html).toContain("$1,045.00"); // Milgard sell at its own 10%
+  });
+
+  // W1: what a vendor IS, said once (VENDOR_MEANS). The sheet used to say "the brand or supplier",
+  // which left the sub who hangs the drywall out of a list he is allowed to be on.
+  it("the sheet says what a vendor is, including the sub", () => {
+    expect(VENDOR_MEANS).toContain("supplier");
+    expect(VENDOR_MEANS).toContain("sub");
+    expect(VENDOR_MEANS).toContain("brand");
+    expect(html).toContain("anyone you buy from or hire");
+    expect(html).not.toContain("the brand or supplier");
   });
 
   it("marks one Default and offers Make Default on the other, plus the item's own price back", () => {
@@ -193,6 +204,24 @@ describe("the Items list", () => {
     expect(html).toContain("2 Vendors · default Andersen 400 Series");
     expect(html).toContain("1 item costs exactly its item number");
     expect(html).toContain("= item #");
+  });
+
+  /**
+   * W1: ONE WORD PER THING. The book's own buy-from column is the SUPPLIER (the same word the
+   * purchase order, the material list, a dropped receipt and the bills door use), and the
+   * per-company prices under an item are VENDORS, which the sheet says means a supplier, a sub or
+   * a brand. Both words come from lib/vendor-words, so this pins the wiring, not a string.
+   */
+  it("the book's buy-from column is the Supplier, and an item's own prices are Vendors", () => {
+    const html = renderToStaticMarkup(
+      createElement(PriceListManager, { items: [w830], defaultMarkupPct: 25, optionsByItem: { i830: options }, knownVendors: [] }),
+    );
+    expect(COMPANY_FIELD.price_item.label).toBe("Supplier");
+    expect(COMPANY_FIELD.price_item_option.label).toBe("Vendor");
+    expect(html).toContain(`>${COMPANY_FIELD.price_item.label}<`);
+    // The sort control offers the same word as the column, never a second one.
+    expect(html.match(new RegExp(`>${COMPANY_FIELD.price_item.label}<`, "g"))?.length).toBeGreaterThanOrEqual(2);
+    expect(html).not.toContain(">Vendor<"); // the column is never the umbrella word
   });
 
   it("without the vendors table, the description is plain text (no door onto a database error)", () => {

@@ -1,5 +1,6 @@
 "use client";
 
+import { COMPANY_FIELD } from "@/lib/vendor-words";
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Archive, ArchiveRestore, Pencil, Trash2 } from "lucide-react";
@@ -130,7 +131,7 @@ export function ItemActions({ item, hasHistory = false }: { item: InventoryItem;
               <Input id="ii-reorder" name="reorder_point" type="number" step="any" defaultValue={item.reorder_point} />
             </div>
             <div>
-              <Label htmlFor="ii-vendor">Vendor</Label>
+              <Label htmlFor="ii-vendor">{COMPANY_FIELD.stock_item.label}</Label>
               <Input id="ii-vendor" name="vendor" defaultValue={item.vendor ?? ""} />
             </div>
             <div className="col-span-2">

@@ -1,5 +1,6 @@
 "use client";
 
+import { COMPANY_FIELD } from "@/lib/vendor-words";
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Trash2, Receipt, StickyNote, FileText, Briefcase, Check, AlertCircle, Archive, RotateCcw, Pencil, ListTodo } from "lucide-react";
@@ -397,8 +398,8 @@ export function OrganizeManager({
           </div>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
-              <Label htmlFor="oi-vendor">Vendor</Label>
-              <Input id="oi-vendor" value={vendor} onChange={(e) => setVendor(e.target.value)} placeholder="Store" />
+              <Label htmlFor="oi-vendor">{COMPANY_FIELD.paperwork_line.label}</Label>
+              <Input id="oi-vendor" value={vendor} onChange={(e) => setVendor(e.target.value)} placeholder={COMPANY_FIELD.paperwork_line.placeholder} />
             </div>
             <div>
               <Label htmlFor="oi-amount">Amount</Label>

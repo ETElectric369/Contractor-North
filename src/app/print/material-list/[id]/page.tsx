@@ -1,3 +1,4 @@
+import { COMPANY_FIELD } from "@/lib/vendor-words";
 import { notFound } from "next/navigation";
 import { pickSite, siteLines, SITE_COLS } from "@/lib/site-address";
 import { BackLink } from "@/components/back-link";
@@ -108,7 +109,7 @@ export default async function MaterialListPrintPage({
               <th className="py-2">Part #</th>
               <th className="w-16 py-2 pr-3 text-right">Qty</th>
               <th className="w-16 py-2">Unit</th>
-              {viewerIsStaff && <th className="py-2">Vendor</th>}
+              {viewerIsStaff && <th className="py-2">{COMPANY_FIELD.material_line.label}</th>}
             </tr>
           </thead>
           <tbody>

@@ -464,10 +464,24 @@ export function InvoiceDetail({
   const [qty, setQty] = useState(1);
   const [unit, setUnit] = useState("ea");
   const [price, setPrice] = useState(0);
-  /** Enter was pressed on a line with no description. Add is greyed out for that reason, and a
-   *  greyed-out button cannot say why on its own (INV-073, Erik 2026-09-22). */
+  /**
+   * ADD WAS PRESSED ON A LINE WITH NO WORDS (bug report 44aeec9c, Erik on /billing 2026-09-22: "I
+   * could not add an amount to a new blank invoice", and INV-073 the same day).
+   *
+   * A new blank invoice is nothing but this row, so he typed the amount into Price and tapped Add.
+   * Add was DISABLED until the description had something in it, so the tap did nothing: the only
+   * control that could have told him what was missing was the one he could not press. The first fix
+   * (2026-09-23) put an amber line under the row — which only appears once he has touched Qty or
+   * Price, and still leaves a button that refuses to be pressed.
+   *
+   * So the dead end is gone rather than explained: Add is always pressable, and pressing it with no
+   * words says what is missing and puts the cursor in the box. A line still needs words — a charge
+   * with no description is a line the customer rings up about — but a refusal is said, not greyed.
+   */
   const [descAsked, setDescAsked] = useState(false);
-  const needsDesc = !desc.trim() && (price !== 0 || qty !== 1 || descAsked);
+  const descBox = useRef<HTMLInputElement>(null);
+  /** Whether to say it yet: he has typed a figure, changed the count, or pressed Add. */
+  const needsDesc = !!addLineAsk(desc) && (price !== 0 || qty !== 1 || descAsked);
 
   // payment state
 
@@ -729,8 +743,10 @@ export function InvoiceDetail({
 
 
   function addItem() {
-    if (!desc.trim()) {
+    if (addLineAsk(desc)) {
+      // The ask, with the cursor put where the answer goes (44aeec9c — the press used to do nothing).
       setDescAsked(true);
+      descBox.current?.focus();
       return;
     }
     setDescAsked(false);
@@ -1338,6 +1354,8 @@ export function InvoiceDetail({
           ) : (
           <div className="space-y-2 border-t border-slate-100 bg-slate-50/60 p-3">
             <Input
+              ref={descBox}
+              aria-label="What this charge is for"
               placeholder="Add a line item…"
               value={desc}
               onChange={(e) => setDesc(e.target.value)}
@@ -1359,13 +1377,13 @@ export function InvoiceDetail({
               />
               <span className="text-slate-400">×</span>
               <NumberInput value={price} onValueChange={setPrice} className="flex-1 text-right" placeholder="Price" />
-              <Button onClick={addItem} disabled={pending || !desc.trim()}>
+              {/* ALWAYS PRESSABLE (44aeec9c): a tap with no words says what's missing and puts the
+                  cursor in the box. It used to be greyed out, so the tap did nothing at all. */}
+              <Button onClick={addItem} disabled={pending}>
                 <Plus className="h-4 w-4" /> Add
               </Button>
             </div>
-            {needsDesc && (
-              <p className="text-xs text-amber-700">Type what this charge is for in the box above, then tap Add.</p>
-            )}
+            {needsDesc && <p className="text-xs text-amber-700">{addLineAsk(desc)}</p>}
           </div>
           )}
         </div>
@@ -1627,6 +1645,19 @@ function shortDay(value: string | null | undefined): string {
   const at = new Date(`${d}T12:00:00Z`);
   const sameYear = at.getUTCFullYear() === new Date().getUTCFullYear();
   return at.toLocaleDateString("en-US", { month: "short", day: "numeric", ...(sameYear ? {} : { year: "numeric" }), timeZone: "UTC" });
+}
+
+/**
+ * WHAT A NEW LINE IS STILL MISSING, in the row's own words — null when it can go on (44aeec9c).
+ *
+ * A charge needs words: "$500" alone on a customer's invoice is a line they ring up about. But that
+ * is a thing to SAY, not a reason to grey out the only button on a blank invoice — which is how
+ * Erik's "I could not add an amount to a new blank invoice" happened. One rule, read by the press
+ * (which asks and puts the cursor in the box) and by the line under the row (which says the same
+ * thing), so the two can never tell different stories.
+ */
+export function addLineAsk(desc: string): string | null {
+  return desc.trim() ? null : "Type what this charge is for in the box above, then tap Add.";
 }
 
 /**
