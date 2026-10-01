@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { clockIn, clockOutCurrent, createManualEntry, switchJob, updateTimeEntry } from "@/app/(app)/timeclock/actions";
+import { tellAppChose } from "@/app/(app)/timeclock/clock-told";
 import { clockInputValue, splitClock, splitPreview } from "@/lib/split-preview";
 import { hoursBetween } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/server";
@@ -30,7 +31,7 @@ export const timeActions: Record<string, ActionDef> = {
     name: "time.clockIn",
     group: "time",
     label: "Clock in",
-    description: "Start the clock for the current user, optionally on a job — ONLY for work happening NOW (or a still-running shift that started earlier TODAY, via clock_in_at backdate). NEVER use clockIn+clockOut to record FINISHED past work ('3 hours yesterday') — that is time.addEntry (work_date + hours); a clockIn/clockOut pair fired together records a seconds-long entry on today, not the stated hours. clock_in_at is a NAIVE local timestamp, YYYY-MM-DDTHH:MM in the company's own timezone, NO Z, NO offset; the app converts.",
+    description: "Start the clock for the current user, optionally on a job — ONLY for work happening NOW (or a still-running shift that started earlier TODAY, via clock_in_at backdate). NEVER use clockIn+clockOut to record FINISHED past work ('3 hours yesterday') — that is time.addEntry (work_date + hours); a clockIn/clockOut pair fired together records a seconds-long entry on today, not the stated hours. clock_in_at is a NAIVE local timestamp, YYYY-MM-DDTHH:MM in the company's own timezone, NO Z, NO offset; the app converts. WHEN NO job_id IS GIVEN THE APP PICKS THE JOB from today's schedule: if the result carries `said`, REPEAT IT WORD FOR WORD — it names the job the app chose and nobody picked, and the person has to hear it before those hours bill the wrong customer.",
     input: z.object({
       job_id: z.string().nullable().optional(),
       job_code: z.string().nullable().optional(),
@@ -41,7 +42,13 @@ export const timeActions: Record<string, ActionDef> = {
     handler: async (i) => {
       // The backdate is a model-supplied wall-clock time — third sibling, same conversion.
       const toUtc = i.clock_in_at ? await orgLocalConverter(await createClient()) : null;
-      return clockIn({ job_id: i.job_id ?? null, job_code: i.job_code ?? null, gps: null, clock_in_at: (toUtc ? toUtc(i.clock_in_at ?? undefined) : null) ?? null });
+      const res = await clockIn({ job_id: i.job_id ?? null, job_code: i.job_code ?? null, gps: null, clock_in_at: (toUtc ? toUtc(i.clock_in_at ?? undefined) : null) ?? null });
+      // NOTHING SILENT AT THIS DOOR EITHER. Nort can clock someone in with no job, and then the app
+      // picks one from the schedule exactly as the Clock In button's punch does. The sentence comes
+      // from the ONE function every other door calls (clock-told: tellAppChose), so Nort cannot word
+      // it differently or decide for itself that the punch was unremarkable.
+      const told = tellAppChose(res);
+      return told ? { ...res, said: told.sentence } : res;
     },
   },
   "time.clockOut": {

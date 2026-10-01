@@ -14,6 +14,8 @@ import { isLongOpenShift } from "@/lib/long-shift";
 import { useToast } from "@/components/toast";
 import { WhichJobSheet } from "./which-job";
 import { askAfterPunch, type WhichJobAsk } from "../timeclock/which-job-choices";
+import { tellAppChose, type AppChoseNotice } from "../timeclock/clock-told";
+import { AppChoseJobNotice } from "../timeclock/app-chose-notice";
 
 /** Best-effort on-gesture GPS with a short cap (the timeclock panel's race pattern):
  *  the punch never waits out the full 8s highAccuracy fix — if the fix lands inside
@@ -97,6 +99,10 @@ export function NowCard({
   // the card's Pick The Job. Lives here, above the open/closed branches, so the card flipping to
   // "on the clock" (or back) underneath doesn't take the question with it.
   const [ask, setAsk] = useState<WhichJobAsk | null>(null);
+  // THE APP CHOSE THE JOB AND SAYS SO (Erik, 2026-10-01: Brian's punch on TTP 56). One sentence
+  // naming the job, with the Change door — never a toast that is gone before the truck. Lives up
+  // here with `ask` for the same reason: the card flips branches underneath it.
+  const [chose, setChose] = useState<AppChoseNotice | null>(null);
 
   // Replay a held punch the moment the connection returns (or the app is reopened).
   // THE DRAIN MOVED TO THE SHELL (audit 9, OfflineDrain): mounted here it only ran while this
@@ -175,6 +181,10 @@ export function NowCard({
           // until it is read, as the Timeclock panel does.
           if (res.warning) toast(res.warning, "info", undefined, { sticky: true });
           setAsk(askAfterPunch(res, "in"));
+          // THE OTHER HALF OF THE SAME LAW: the clock couldn't tell the job → it asks; it could, but
+          // nobody picked it → it SAYS WHICH ONE. Both rules live in one place, and this door only
+          // calls them (askAfterPunch, tellAppChose).
+          setChose(tellAppChose(res));
         }
       } catch {
         // Network only. The punch is on the phone with its real time — say that instead of
@@ -312,6 +322,13 @@ export function NowCard({
               </Button>
             )}
           </div>
+          {/* The sentence sits between the job and the clock-out footer: on the card, beside the job
+              it is about, with no timer on it. */}
+          {chose && (
+            <div className="border-t border-brand/20 px-5 py-3">
+              <AppChoseJobNotice notice={chose} onDone={() => setChose(null)} />
+            </div>
+          )}
           {(err || held) && <div className="px-5 pb-3">{lines}</div>}
         </>
       ) : (
@@ -328,7 +345,9 @@ export function NowCard({
           </Button>
         </div>
       )}
-      {ask && <WhichJobSheet key={ask.entryId + ask.moment} entryId={ask.entryId} moment={ask.moment} onClose={() => setAsk(null)} />}
+      {ask && (
+        <WhichJobSheet key={ask.entryId + ask.moment} entryId={ask.entryId} moment={ask.moment} from={ask.from ?? null} onClose={() => setAsk(null)} />
+      )}
     </Card>
   );
 }
