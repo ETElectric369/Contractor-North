@@ -49,7 +49,7 @@ export async function hearIntoPlaybook(
     .select("id, org_id, inspection_template_id")
     .eq("id", appointmentId)
     .maybeSingle();
-  if (!appt) return { ok: false, error: "That inspection no longer exists." };
+  if (!appt) return { ok: false, error: "That walk-through no longer exists." };
 
   // What he's looking at wins; the stored column is the fallback for anything that calls without one.
   const useId = templateId || (appt as { inspection_template_id?: string | null }).inspection_template_id;

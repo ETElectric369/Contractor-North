@@ -8,7 +8,7 @@ import { getOrgSettings } from "@/lib/org-settings";
 import { todayStrInTz } from "@/lib/tz";
 import { listCustomerOptions } from "@/lib/schedule-options";
 import { RecurringButton, type RecurringValue } from "./recurring-button";
-import { RecurringRowActions, GenerateDueButton } from "./recurring-actions-ui";
+import { RecurringRowActions } from "./recurring-actions-ui";
 import { featureOn } from "@/lib/features";
 import { viewerSwitches } from "@/lib/viewer-switches";
 import { FeatureOffLine } from "@/components/feature-off-line";
@@ -29,29 +29,30 @@ export default async function RecurringPage() {
     viewerSwitches(),
   ]);
   const orgS = getOrgSettings((orgRow as { settings?: unknown } | null)?.settings);
+  // EACH ONE IS MADE ON ITS DAY, AUTOMATICALLY (W2-12). The daily cron (vercel.json, 15:00 UTC =
+  // 8 AM Pacific: /api/automations/daily → generateDueTemplates for every company) makes every
+  // template that is due, so the header's old "Generate N Due" did by hand what already happens by
+  // itself, and it is gone. A row that is due wears its amber "due" chip until the cron makes it, with
+  // its own Generate One Now beside the chip for the one you want made right now.
   // RECURRING BILLING OFF (the switch board, 0352): no repeat invoice is made, so the doors that make
   // one (an invoice row's Generate One Now, New's "Recurring invoice" type) go, and generateOne and
-  // saveRecurring refuse a new one as well. Repeat jobs and expenses aren't the switch's: this page
-  // is their only door, so it stays in the dock, New stays for them, Generate Due counts only them,
-  // and their rows keep Generate One Now. The list stays readable, and Pause/Resume and edit stay.
-  // The page isn't a switch route (the jobs and expenses are core), so it draws its own Off line.
+  // saveRecurring refuse a new one as well (the cron's engine skips them too). Repeat jobs and
+  // expenses aren't the switch's: this page is their only door, so it stays in the dock, New stays
+  // for them, and their rows keep Generate One Now. The list stays readable, and Pause/Resume and edit
+  // stay. The page isn't a switch route (the jobs and expenses are core), so it draws its own Off line.
   const recurringOn = featureOn(orgS.features, "recurring_billing");
   const salesTax = featureOn(orgS.features, "sales_tax");
   // "Due" is an ORG-LOCAL calendar decision (audit v921). A UTC today rolls over at ~5 PM Pacific,
-  // so this page said "Generate 1 Due" while generateDueTemplates — which gates on the org's own
-  // today — created nothing and the toast read "Generated 0 invoices". Same clock, both sides.
+  // so the chip would say "due" while the cron's generateDueTemplates, which gates on the org's own
+  // today, would make nothing yet. Same clock, both sides.
   const today = todayStrInTz(orgS.timezone);
 
   const custOpts = (customers ?? []).map((c: any) => ({ id: c.id, name: c.name }));
-  const dueCount = (templates ?? []).filter((t: any) => t.active && t.next_date <= today && (recurringOn || t.kind !== "invoice")).length;
 
   return (
     <div className="mx-auto max-w-3xl">
-      <PageHeader title="Recurring" description="Jobs, invoices, and expenses that repeat — generate them on a schedule.">
-        <div className="flex items-center gap-2">
-          {dueCount > 0 && <GenerateDueButton count={dueCount} />}
-          <RecurringButton customers={custOpts} salesTax={salesTax} invoiceKind={recurringOn} />
-        </div>
+      <PageHeader title="Recurring" description="Jobs, invoices, and expenses that repeat. Each one is made on its day, automatically.">
+        <RecurringButton customers={custOpts} salesTax={salesTax} invoiceKind={recurringOn} />
       </PageHeader>
 
       <FeatureOffLine feature="recurring_billing" features={sw.features} isOwner={sw.isOwner} />

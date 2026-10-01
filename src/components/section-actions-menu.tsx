@@ -1,6 +1,6 @@
 "use client";
 
-import { Children, useEffect, useMemo, useRef, useState } from "react";
+import { Children, createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { MoreHorizontal, Loader2, Trash2 } from "lucide-react";
 import { GLASS_MENU_CLASS, useGlassMenuPlacement } from "@/components/ui/glass-menu";
@@ -22,7 +22,19 @@ export const ACTIONS_NOTE_CLS = "relative z-10 px-4 py-2.5 text-left text-xs lea
 const DANGER_ROW_CLS =
   "relative z-10 flex min-h-11 w-full items-center gap-3 px-4 py-2.5 text-left text-sm font-medium text-red-600 hover:bg-red-50/60 disabled:opacity-50";
 
-const DIVIDER = <div className="relative z-10 my-1 border-t border-white/50" />;
+/** The red row, for a composed child that is the panel's destructive verb (the visit's Won't Happen,
+ *  W2-11): the same look a danger node gets, so it reads as the one to be careful with. */
+export const ACTIONS_DANGER_ROW_CLS = DANGER_ROW_CLS;
+
+/** The line between the panel's groups (a composed danger row sits under one). */
+export const ACTIONS_DIVIDER_CLS = "relative z-10 my-1 border-t border-white/50";
+
+const DIVIDER = <div className={ACTIONS_DIVIDER_CLS} />;
+
+/** A composed child's way to close the panel once its deed is done (a toast then says what
+ *  happened). Outside a SectionActionsMenu it does nothing. */
+const CloseMenu = createContext<() => void>(() => {});
+export const useCloseActionsMenu = () => useContext(CloseMenu);
 
 /**
  * The "⋯" actions menu — THE seek door on every detail page: rare deliberate
@@ -215,7 +227,7 @@ export function SectionActionsMenu({
           style={{ ...panelStyle, ...(alignLeft ? { left: 0 } : { right: 0 }) }}
           className={`${GLASS_MENU_CLASS} w-56`}
         >
-          {children}
+          <CloseMenu.Provider value={() => setOpen(false)}>{children}</CloseMenu.Provider>
           {hasChildren && main.length > 0 && DIVIDER}
           {main.map((n) => row(n, false))}
           {danger.length > 0 && (

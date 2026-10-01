@@ -171,6 +171,24 @@ export function addDaySegment(segments: DaySegment[], dateISO: string, hours?: D
   return mergeSegments([...(segments ?? []), day]);
 }
 
+/** TAKE ONE DAY OFF: the range holding it is split around it (a day in the middle of a range leaves
+ *  the days before and the days after), every other range and every day's hours untouched. The undo of
+ *  a worked day booked after the fact (unbookWorkedDay): it removes that day and only that day, never
+ *  replacing the whole set from a client's snapshot. A day no range covers changes nothing. */
+export function removeDaySegment(segments: DaySegment[], dateISO: string): DaySegment[] {
+  if (!isYmd(dateISO)) return mergeSegments(segments);
+  const out: DaySegment[] = [];
+  for (const s of clean(segments)) {
+    if (s.end < dateISO || s.start > dateISO) {
+      out.push(s);
+      continue;
+    }
+    if (s.start < dateISO) out.push(withHours(s, s.start, addDays(dateISO, -1)));
+    if (s.end > dateISO) out.push(withHours(s, addDays(dateISO, 1), s.end));
+  }
+  return mergeSegments(out);
+}
+
 /** EDIT one bound of a range without ever inverting it: the edited bound wins
  *  and the other bound follows when crossed (start moved past end drags end up;
  *  end moved before start drags start back). Same-day (start === end) is a

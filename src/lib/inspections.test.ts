@@ -1,9 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { bucketInspections, captureQuoteId, hasCaptureData, type InspectionBucketRow } from "@/lib/inspections";
 
-/** The Inspections tab's promise is TRUTHFUL buckets — pin the classification rules
- *  (Erik's design 2026-07-14) so a refactor can't quietly re-hide open write-ups or
- *  bury a not-yet-visited inspection behind the Completed toggle. */
+/** The Walk-Throughs tab's promise (/inspections; W2-10's one word) is TRUTHFUL buckets — pin the
+ *  classification rules (Erik's design 2026-07-14) so a refactor can't quietly re-hide open
+ *  write-ups or bury a not-yet-visited walk-through behind the Completed toggle. */
 
 const NOW = new Date("2026-07-14T18:00:00Z");
 const past = "2026-07-13T16:00:00Z";
@@ -77,7 +77,7 @@ describe("bucketInspections", () => {
     expect(bucketInspections([r], none, none, NOW).filed).toEqual([r]);
   });
 
-  // The lead-less "Inspect now" path: no inquiry_id/job_id ever exists, so the ONLY
+  // The lead-less "Start A Walk-Through" path: no inquiry_id/job_id ever exists, so the ONLY
   // write-up signal is the quote id saveQuote stamps onto the capture jsonb. Without it
   // the row sat in "To write up" forever (the only escape was cancelling — a lie).
   it("capture.quote_id files a lead-less write-up away (completed AND done-by-capture)", () => {

@@ -52,6 +52,24 @@ export const WORK_KINDS: readonly WorkKind[] = [
 export const isWorkKind = (v: unknown): v is WorkKind =>
   (WORK_KINDS as readonly string[]).includes(String(v ?? ""));
 
+/**
+ * THE KINDS A PICKER OFFERS (W2-06): Walk-Through, Job, Service Call, Phone Call, Other — the same
+ * five the appointment's Type select offers (lib/statuses PICKABLE_APPOINTMENT_TYPES), in the same
+ * order. Other is offered at last (it was accepted but never offered).
+ *
+ * WORK_KINDS and isWorkKind stay BROAD: an old lead tagged Quote or Office still reads back through
+ * workKind(), and a WRITE GUARD accepts any known kind (sizeLead, the rail's sizeAppointment), so a
+ * row's own old kind always saves. Only the pickers narrow (kindOptions).
+ */
+export const PICKABLE_WORK_KINDS: readonly WorkKind[] = ["walkthrough", "job", "service", "call", "other"] as const;
+
+/** A kind picker's options for one row: the five, plus the row's own old kind (Quote, Office) when
+ *  it has one, so an old row never reads "Kind?" and re-picking what it already is still saves. */
+export function kindOptions(current: string | null | undefined): WorkKind[] {
+  const own = String(current ?? "");
+  return isWorkKind(own) && !PICKABLE_WORK_KINDS.includes(own) ? [...PICKABLE_WORK_KINDS, own] : [...PICKABLE_WORK_KINDS];
+}
+
 const APPT_KIND: Record<string, WorkKind> = {
   // 0231. A day marked as the WORK is not a walk-through, and calling it one was the app
   // overruling the only person who knew — twice, silently.
@@ -98,7 +116,8 @@ export function workKind(i: { kind?: "lead" | "job" | "appointment"; type?: stri
 /** Short enough to sit on a chip in a calendar cell. */
 export const KIND_LABEL: Record<WorkKind, string> = {
   job: "Job",
-  walkthrough: "Walk-through",
+  // The site visit's one word, the same as the appointment type's label (W2-10, lib/statuses).
+  walkthrough: "Walk-Through",
   service: "Service Call",
   office: "Office",
   quote: "Quote",
@@ -197,6 +216,9 @@ export function appointmentTypeFor(kind: string | null | undefined): string {
     case "quote": return "quote";
     case "job": return "job";
     case "call": return "call";
+    // OTHER BOOKS AS OTHER (W2-06). It used to fall through to 'inspection': an Other lead booked a
+    // walk-through, and the write-up nag that follows every walk-through came after it.
+    case "other": return "other";
     default: return "inspection";
   }
 }
@@ -206,7 +228,10 @@ export function appointmentTypeFor(kind: string | null | undefined): string {
  *
  * "Site inspection: Matt Warren" on a day he booked as a full day of work is the app telling him
  * what he did, incorrectly, in the one place he goes to check. The label follows the kind, and a
- * walk-through keeps the wording it always had.
+ * walk-through is called one: "Walk-Through: Matt Warren" (W2-10; stored titles keep their words).
+ *
+ * OTHER IS NO KIND (W2-06): a visit booked as Other is just who it's with. It used to fall through to
+ * the walk-through's title, so an Other booking read "Site inspection: …" on the calendar.
  */
 export function bookingTitle(kind: WorkKind, name: string): string {
   const who = String(name ?? "").trim() || "Visit";
@@ -216,8 +241,28 @@ export function bookingTitle(kind: WorkKind, name: string): string {
     case "office": return `Meeting: ${who}`;
     case "quote": return `Quote: ${who}`;
     case "call": return `Call ${who}`;
-    default: return `Site inspection: ${who}`;
+    case "other": return who;
+    default: return `Walk-Through: ${who}`;
   }
+}
+
+/**
+ * THE TITLE THE NEW-VISIT FORM SUGGESTS, following its Type (W2-06): a walk-through is
+ * "Walk-Through: <customer or place>" (W2-10); a job is the job's own name (lib/job-name's street,
+ * never "Inspection — J-012"); every other kind is bookingTitle's. Nothing to name it by, nothing
+ * suggested: an empty title asks, a made-up one pretends somebody answered.
+ */
+export function suggestedVisitTitle(
+  type: string | null | undefined,
+  ctx: { jobName?: string | null; customerName?: string | null; place?: string | null },
+): string {
+  const kind = workKind({ kind: "appointment", type: type || "other" });
+  const jobName = String(ctx.jobName ?? "").trim();
+  const customer = String(ctx.customerName ?? "").trim();
+  // The place is its first line (the street), never the town and zip tail.
+  const place = String(ctx.place ?? "").split(",")[0].trim();
+  const who = kind === "job" ? jobName || customer || place : customer || place || jobName;
+  return who ? bookingTitle(kind, who) : "";
 }
 
 /**

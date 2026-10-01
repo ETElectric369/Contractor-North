@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useRef, useState, useTransition, type ClipboardEvent } from "react";
+import { useMemo, useRef, useState, useTransition, type ClipboardEvent, type MouseEvent } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Plus, Pencil, Trash2, Search, Phone, Mail, Globe, MapPin, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -13,7 +14,7 @@ import { cn, formatPhone } from "@/lib/utils";
 import { applySiteFill, emptyBoxes, fillSummary, looksLikeWebAddress, siteToForm, siteUrl, withoutSiteFill, type FillKey } from "@/lib/site-read/form-fill";
 import { createResource, updateResource, deleteResource } from "./actions";
 import { fillFromSite } from "./fill-from-site";
-import { RESOURCE_CATEGORIES } from "./categories";
+import { RESOURCE_CATEGORIES, SUPPLIERS_LIVE_IN_VENDORS, VENDORS_HREF, categoryChoices } from "./categories";
 
 export interface Resource {
   id: string;
@@ -29,9 +30,33 @@ export interface Resource {
 
 export const CATEGORIES = RESOURCE_CATEGORIES;
 
-type Form = { name: string; category: string; contact: string; phone: string; email: string; website: string; address: string; notes: string };
+export type Form = { name: string; category: string; contact: string; phone: string; email: string; website: string; address: string; notes: string };
 const EMPTY_FORM: Form = { name: "", category: "Building Department", contact: "", phone: "", email: "", website: "", address: "", notes: "" };
 type FillNote = { tone: "ok" | "warn" | "error"; text: string };
+
+/** Said before Open Vendors leaves a form that holds something typed or filled. */
+export const LEAVE_FOR_VENDORS = "Open Vendors? What you typed here won't be saved.";
+
+/** A saved contact as the form shows it. */
+export function resourceForm(r: Resource): Form {
+  return {
+    name: r.name,
+    category: r.category || "Building Department",
+    contact: r.contact_name ?? "",
+    phone: r.phone ?? "",
+    email: r.email ?? "",
+    website: r.website ?? "",
+    address: r.address ?? "",
+    notes: r.notes ?? "",
+  };
+}
+
+/** Does the form hold work that leaving would throw away? Any box that differs from how it opened
+ *  (empty for a new contact, the saved row for an edit), whether typed or filled from their site.
+ *  Spaces alone are not work. */
+export function formHasWork(form: Form, start: Form): boolean {
+  return (Object.keys(start) as (keyof Form)[]).some((k) => form[k].trim() !== start[k].trim());
+}
 
 function withProtocol(url: string) {
   return /^https?:\/\//i.test(url) ? url : `https://${url}`;
@@ -127,16 +152,15 @@ export function ResourcesManager({ resources, canEdit }: { resources: Resource[]
     setAdding(false);
     setEditingId(r.id);
     resetForm();
-    setForm({
-      name: r.name,
-      category: r.category || "Building Department",
-      contact: r.contact_name ?? "",
-      phone: r.phone ?? "",
-      email: r.email ?? "",
-      website: r.website ?? "",
-      address: r.address ?? "",
-      notes: r.notes ?? "",
-    });
+    setForm(resourceForm(r));
+  }
+
+  /** OPEN VENDORS leaves this page, and the form with it: anything typed or filled from their site
+   *  (a new contact's boxes, or an edit to one) is thrown away only when the person says so. */
+  function openVendors(e: MouseEvent<HTMLAnchorElement>) {
+    const row = editingId ? resources.find((r) => r.id === editingId) : null;
+    const start = row ? resourceForm(row) : EMPTY_FORM;
+    if (formHasWork(form, start) && !window.confirm(LEAVE_FOR_VENDORS)) e.preventDefault();
   }
 
   /** FILL FROM THEIR SITE: read the page, fill the EMPTY boxes, mark them. Nothing saves until Save.
@@ -286,7 +310,27 @@ export function ResourcesManager({ resources, canEdit }: { resources: Resource[]
           </div>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
             <div className="col-span-2 sm:col-span-1"><Label htmlFor="r-name">Name *{siteTag("name")}</Label><Input id="r-name" value={name} onChange={(e) => set("name", e.target.value)} placeholder="e.g. County Building Department" className={marked("name")} /></div>
-            <div><Label htmlFor="r-cat">Category{siteTag("category")}</Label><Select id="r-cat" value={category} onChange={(e) => set("category", e.target.value)} className={marked("category")}>{CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}</Select></div>
+            <div>
+              <Label htmlFor="r-cat">Category{siteTag("category")}</Label>
+              {/* A category from before the list changed (Supplier / Distributor, or Nort's own word)
+                  stays this contact's: shown as its current pick, never offered (categoryChoices), so a
+                  save can't quietly swap it for the first one on the list. */}
+              <Select id="r-cat" value={category} onChange={(e) => set("category", e.target.value)} className={marked("category")}>
+                {categoryChoices(category).map((c) => (
+                  <option key={c.value} value={c.value} disabled={c.disabled}>
+                    {c.value}
+                  </option>
+                ))}
+              </Select>
+              {/* Staff only: this whole form is behind canEdit, so a tech never gets a door to the
+                  Price List (and its prices). */}
+              <p className="mt-1 text-xs text-slate-500">
+                {SUPPLIERS_LIVE_IN_VENDORS}{" "}
+                <Link href={VENDORS_HREF} className="inline-flex min-h-11 items-center font-medium text-brand hover:underline" onClick={openVendors}>
+                  Open Vendors
+                </Link>
+              </p>
+            </div>
             <div><Label htmlFor="r-contact">Contact person</Label><Input id="r-contact" value={contact} onChange={(e) => set("contact", e.target.value)} /></div>
             <div><Label htmlFor="r-phone">Phone{siteTag("phone")}</Label><Input id="r-phone" type="tel" inputMode="tel" value={phone} onChange={(e) => set("phone", formatPhone(e.target.value))} className={marked("phone")} /></div>
             <div><Label htmlFor="r-email">Email{siteTag("email")}</Label><Input id="r-email" type="email" value={email} onChange={(e) => set("email", e.target.value)} className={marked("email")} /></div>

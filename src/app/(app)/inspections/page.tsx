@@ -19,8 +19,9 @@ import { featureOn } from "@/lib/features";
 export const dynamic = "force-dynamic";
 
 /**
- * Sales → Inspections: appointments of the inspection types, bucketed as OPEN WORK FIRST
- * (Erik's design 2026-07-14 — an inspection IS an appointment type, one platform):
+ * Sales → Walk-Throughs (the route stays /inspections; W2-10 gave the site visit one word):
+ * appointments of the walk-through types, bucketed as OPEN WORK FIRST
+ * (Erik's design 2026-07-14 — a walk-through IS an appointment type, one platform):
  *   • "To write up" — the visit happened but its inquiry/job has no estimate yet; each row's
  *     next step is one button: Create estimate (capture prefills the estimator scope).
  *   • "Upcoming & proposed" — the calendar-shaped rest, by date/status.
@@ -96,8 +97,9 @@ export default async function InspectionsPage({
     new Set(((billedJobs ?? []) as { job_id: string }[]).map((r) => r.job_id).filter(Boolean)),
   );
 
+  // 44px targets, like every tap in the app (the pill still reads as a pill).
   const pill = (active: boolean) =>
-    `rounded-full border px-3 py-1 text-sm font-medium ${
+    `inline-flex min-h-11 items-center rounded-full border px-4 text-sm font-medium ${
       active
         ? "border-brand bg-brand-light/40 text-brand-dark"
         : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
@@ -113,18 +115,18 @@ export default async function InspectionsPage({
       customers={pickers.custOpts}
       staff={pickers.staffOpts}
       defaultType="inspection"
-      buttonLabel="Schedule inspection"
+      buttonLabel="Book A Walk-Through"
     />
   );
 
   return (
     <div>
       <PageHeader
-        title="Inspections"
-        description="Site visits and final inspections — capture the walk-through, then write it up into an estimate."
+        title="Walk-Throughs"
+        description="Site visits before you price the work — fill in the walk-through, then write it up into an estimate."
       >
-        {/* The shared two-mode affordance: Inspect now (one tap → capture) or the EXISTING
-            appointment flow (Set a Time | Propose Times), preset to the inspection type. */}
+        {/* The shared two-mode affordance: Start A Walk-Through (one tap → capture) or the EXISTING
+            appointment flow (Set a Time | Propose Times), preset to the walk-through type. */}
         {leadsOn && <NewInspectionButton schedule={scheduleInspection} />}
       </PageHeader>
 
@@ -143,7 +145,7 @@ export default async function InspectionsPage({
           <EmptyState
             icon={ClipboardCheck}
             title="Nothing filed away yet"
-            description="Inspections land here once they're written up into an estimate (or cancelled)."
+            description="Walk-throughs land here once they're written up into an estimate (or called off)."
           />
         ) : (
           // A CANCELLED VISIT IS NOT COMPLETED WORK. Both land in `filed` (correctly — they are
@@ -162,8 +164,8 @@ export default async function InspectionsPage({
       ) : toWriteUp.length === 0 && upcoming.length === 0 ? (
         <EmptyState
           icon={ClipboardCheck}
-          title="No open inspections"
-          description={leadsOn ? "Start one from a lead, schedule one, or tap Inspect now when you're already onsite." : "Nothing open right now."}
+          title="No open walk-throughs"
+          description={leadsOn ? "Start one from a lead, book one, or tap Start A Walk-Through when you're already there." : "Nothing open right now."}
         >
           {leadsOn && <NewInspectionButton schedule={scheduleInspection} />}
         </EmptyState>
@@ -236,7 +238,7 @@ function InspectionRow({ a, tz, writeUp, estimateDoor }: { a: any; tz: string; w
       </div>
       {writeUp && estimateDoor && (
         <Link href={estimateHref} className="shrink-0">
-          <Button size="sm">
+          <Button>
             <FileText className="h-4 w-4" /> Create Estimate
           </Button>
         </Link>

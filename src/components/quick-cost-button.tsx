@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useTransition } from "react";
 import { DropTarget } from "@/components/drop-target";
 import { useRouter } from "next/navigation";
-import { Wallet, DollarSign, Camera, Check, Paperclip, Keyboard, FileUp } from "lucide-react";
+import { Wallet, DollarSign, Camera, Check, Paperclip, Keyboard } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { Input, Label, Select } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
@@ -18,11 +18,15 @@ import { callOrLost } from "@/lib/lost-signal";
 import { DIFFERENT_PURCHASE_DOOR, fileReceiptDocument } from "@/lib/receipt-capture";
 import { createBill, deleteBill, linkReceiptToBill } from "@/app/(app)/jobs/actions";
 import { billJobReceipt } from "@/app/(app)/organize/actions";
+import { addStockPurchase } from "@/app/(app)/inventory/actions";
 import { jobLabel } from "@/lib/schedule-options";
 import { jobPickLabel } from "@/lib/job-pick-label";
 import { useToast } from "@/components/toast";
 import { openSnapOrNote } from "@/components/snap-or-note";
+import { useShelfItems } from "@/components/shelf-count";
 import { BUSINESS_COST_BUCKETS, type BusinessCostBucket } from "@/lib/business-cost-buckets";
+import { stockPurchaseProblem, type StockPurchaseInput } from "@/lib/stock-purchase";
+import type { ShelfPickerItem } from "@/lib/shelf-plan";
 
 // What a cost ON A JOB is. A cost with no job is a business cost and picks from the business-cost buckets
 // instead (lib/business-cost-buckets), the same list every other no-job door uses.
@@ -755,11 +759,16 @@ function SnapCostButton({
 /** What's It For?, besides a job's id: a cost of running the business, or stock for the shop. */
 const BUSINESS = "__business";
 const STOCK = "__stock";
+/** What Is It?'s choice for an item not in stock yet (a name box opens under it). */
+const NEW_ITEM = "__new";
 
-/**
- * STOCK GOES IN BY THE PIECE, FROM THE TICKET'S LINES (Shop Stock, 0303): each line a person counts
- * becomes a roll with its own cost, which a typed amount has none of. So Shop Stock here is a door,
- * never a guessed save: the paper goes in through Snap Or Note, whose card has Shop Stock.
+/*
+ * SHOP STOCK SAVES FROM TYPE IT IN (W1-FU-misc B). A stock purchase with no paper is typed like any
+ * other cost, plus what it is (an item in stock, or a new one by name) and how many in what unit. It
+ * saves through addStockPurchase (inventory/actions), the same shape Snap Or Note's Shop Stock writes:
+ * a bill on no job, bought for stock, whose one line goes into stock as one roll, so Stock Bought
+ * counts it in the month on the purchase. With the ticket in hand, Snap Or Note reads every line
+ * instead (the sheet says so, one tap away). Undo takes it back out.
  */
 /**
  * WHERE A RECEIPT GOES WHEN THIS SHEET CAN'T TAKE IT (review of W1-23: Receipts & Papers has no
@@ -775,6 +784,9 @@ export const RETRY_HERE_LINE =
 
 /** The typed sheet's jobs couldn't be read: a job's cost waits for a reload, never becomes a business cost. */
 export const JOBS_UNREAD_LINE = "Couldn't load your jobs just now. Reload the page to put this cost on a job.";
+
+/** The quiet line under a typed stock purchase: the paper's own door, for a ticket in hand. */
+export const STOCK_HAVE_THE_TICKET = "Have the ticket? Snap Or Note reads every line.";
 
 /**
  * THE READER FAILED, SO THE TYPED FIGURE (OR $0) WAS SAVED AS THE BILL WITH THE PAPER ON IT. The
@@ -792,9 +804,6 @@ export function readerFallbackLine(f: { typedAmount: number; readerError?: strin
   return f.typedAmount > 0 ? `${saved}, receipt attached.` : saved;
 }
 
-export const SHOP_STOCK_BY_PAPER =
-  "Stock goes in by the piece, from the ticket's lines, so it comes in on paper: snap or drop the ticket in Snap Or Note, then tap Shop Stock on its card.";
-
 export { jobPickLabel };
 
 export type TypedCostFields = {
@@ -807,22 +816,56 @@ export type TypedCostFields = {
   paid: "paid" | "unpaid";
   billNumber: string;
   poId: string;
+  /** Shop Stock only: What Is It? (an item's id, NEW_ITEM, or "" for nothing picked), the new item's
+   *  name, How Many, and the Unit (the item's own for an item in stock). */
+  stockItem?: string;
+  stockName?: string;
+  stockPieces?: number;
+  stockUnit?: string;
 };
 
 /**
  * WHY A TYPED COST CAN'T BE SAVED YET, in plain words; null when it can. Pure, so the rules are
  * pinned: A BLANK JOB IS NOT A BUSINESS COST (no job has to be said out loud, with its bucket), NO
  * BUCKET IS PICKED FOR HIM (a preselected one files every cost nobody looked at under the same
- * word), and a job's cost says where it was bought (createBill needs a supplier).
+ * word), a job's cost says where it was bought (createBill needs a supplier), and a stock purchase
+ * says what it is, how many, in what unit, and where it was bought (lib/stock-purchase).
  */
-export function typedCostProblem(f: Pick<TypedCostFields, "amount" | "date" | "target" | "bucket" | "where">): string | null {
+export function typedCostProblem(
+  f: Pick<TypedCostFields, "amount" | "date" | "target" | "bucket" | "where" | "stockItem" | "stockName" | "stockPieces" | "stockUnit">,
+): string | null {
   if (!(f.amount > 0)) return "Type the amount.";
   if (!/^\d{4}-\d{2}-\d{2}$/.test(f.date)) return "Pick the day it was bought.";
   if (!f.target) return "Pick the job it's for, or Business Cost and its bucket.";
-  if (f.target === STOCK) return SHOP_STOCK_BY_PAPER;
+  if (f.target === STOCK) {
+    const s = typedStockPurchase({ paid: "paid", billNumber: "", ...f });
+    return stockPurchaseProblem(s);
+  }
   if (f.target === BUSINESS) return f.bucket ? null : "Tap the bucket this business cost goes in.";
   if (!f.where.trim()) return "Say where it was bought (the supplier).";
   return null;
+}
+
+/**
+ * WHAT addStockPurchase IS HANDED for a typed stock purchase. Pure: an item in stock goes by its id,
+ * a new one by its name (never both); ON ACCOUNT IS NEVER SAVED AS PAID; the Bill # as typed.
+ */
+export function typedStockPurchase(
+  f: Pick<TypedCostFields, "amount" | "date" | "where" | "paid" | "billNumber" | "stockItem" | "stockName" | "stockPieces" | "stockUnit">,
+): StockPurchaseInput {
+  const item = String(f.stockItem ?? "");
+  const inStock = !!item && item !== NEW_ITEM;
+  return {
+    itemId: inStock ? item : null,
+    newItemName: item === NEW_ITEM ? String(f.stockName ?? "").trim() : null,
+    pieces: Number(f.stockPieces) || 0,
+    unit: String(f.stockUnit ?? "").trim(),
+    amount: f.amount,
+    date: f.date,
+    where: f.where.trim(),
+    paid: f.paid === "unpaid" ? "unpaid" : "paid",
+    billNumber: f.billNumber.trim() || null,
+  };
 }
 
 /**
@@ -859,8 +902,10 @@ const choiceCls = (on: boolean) =>
 /**
  * THE ONE TYPED COST SHEET (W1-23, W1-32). Amount, the day, What's It For? (a job, Business Cost and
  * its bucket, or Shop Stock while that switch is on), Where, Paid? (Already Paid, or On Account and
- * still owed), a Bill # under More, and the job's own purchase order when it has one. It saves
- * through createBill as it is, then says what landed where, with an Undo (deleteBill).
+ * still owed), a Bill # under More, and the job's own purchase order when it has one. A job's or a
+ * business cost saves through createBill as it is; Shop Stock adds What Is It?, How Many and Unit
+ * and saves through addStockPurchase (into stock). Either way it says what landed where, with an
+ * Undo (deleteBill).
  */
 function TypeItInButton({
   jobId,
@@ -886,6 +931,12 @@ function TypeItInButton({
   const [paid, setPaid] = useState<"paid" | "unpaid">("paid");
   const [billNumber, setBillNumber] = useState("");
   const [poId, setPoId] = useState("");
+  // SHOP STOCK: What Is It? (an item in stock, NEW_ITEM, or nothing yet), the new item's name, How
+  // Many, and the Unit a new item is counted in (an item in stock keeps its own).
+  const [stockItem, setStockItem] = useState("");
+  const [stockName, setStockName] = useState("");
+  const [stockPieces, setStockPieces] = useState(0);
+  const [stockUnit, setStockUnit] = useState("");
   // The chosen job's live orders, read by the sheet itself so no page has to hand them over.
   const [pos, setPos] = useState<{ jobId: string; list: LivePo[]; failed: boolean } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -894,10 +945,24 @@ function TypeItInButton({
   // The sheet's own jobs read failed (no signal): said as that, never as "no jobs yet".
   const [autoJobsFailed, setAutoJobsFailed] = useState(false);
   const orgTz = useRef<string | null>(null);
+  // The items in stock, read once Shop Stock is picked: names and units only, never a cost.
+  const stockItems = useShelfItems(open && target === STOCK);
 
   const pickerJobs = jobs ?? autoJobs ?? [];
   const jobTarget = target && target !== BUSINESS && target !== STOCK ? target : null;
-  const dirty = amount > 0 || !!where.trim() || !!bucket || !!billNumber.trim() || (!jobId && !!target);
+  const pickedItem = target === STOCK && stockItem && stockItem !== NEW_ITEM ? (stockItems.items.find((i) => i.id === stockItem) ?? null) : null;
+  // An item in stock is counted in its own unit, locked; a new one's unit is typed.
+  const unitNow = pickedItem ? pickedItem.unit : stockUnit;
+  const dirty =
+    amount > 0 ||
+    !!where.trim() ||
+    !!bucket ||
+    !!billNumber.trim() ||
+    (!jobId && !!target) ||
+    !!stockItem ||
+    !!stockName.trim() ||
+    stockPieces > 0 ||
+    !!stockUnit.trim();
 
   function reset() {
     setAmount(0);
@@ -909,6 +974,10 @@ function TypeItInButton({
     setPaid("paid");
     setBillNumber("");
     setPoId("");
+    setStockItem("");
+    setStockName("");
+    setStockPieces(0);
+    setStockUnit("");
     setError(null);
   }
 
@@ -989,11 +1058,21 @@ function TypeItInButton({
     if (next !== BUSINESS) setBucket(null);
   }
 
+  /** Open Snap Or Note for a ticket in hand. Anything typed here is left behind only when he says so
+   *  (picking Shop Stock itself is not something typed: with nothing else filled in, it just opens). */
+  function openTheTicketDoor() {
+    const typed = amount > 0 || !!where.trim() || !!billNumber.trim() || !!stockItem || !!stockName.trim() || stockPieces > 0 || !!stockUnit.trim();
+    if (typed && !window.confirm("Open Snap Or Note? What you typed here won't be saved.")) return;
+    close();
+    openSnapOrNote();
+  }
+
   function save() {
     setError(null);
-    const fields: TypedCostFields = { amount, date, target, bucket, where, paid, billNumber, poId };
+    const fields: TypedCostFields = { amount, date, target, bucket, where, paid, billNumber, poId, stockItem, stockName, stockPieces, stockUnit: unitNow };
     const problem = typedCostProblem(fields);
     if (problem) return setError(problem);
+    if (target === STOCK) return saveStock(fields);
     const bill = typedCostBill(fields);
     const jobName = jobTarget ? (pickerJobs.find((j) => j.id === jobTarget)?.label ?? null) : null;
     const owed = paid === "unpaid" ? ", On Account (still owed)" : "";
@@ -1019,6 +1098,42 @@ function TypeItInButton({
               onClick: () => {
                 void deleteBill(id, bill.job_id ?? "").then((undone) => {
                   toast(undone.ok ? (undone.warning ?? "Cost removed.") : (undone.error ?? "Couldn't remove it. Delete it from the list."), undone.ok ? "success" : "error");
+                  router.refresh();
+                });
+              },
+            }
+          : undefined,
+      );
+      close();
+      router.refresh();
+    });
+  }
+
+  /** Shop Stock: into stock through addStockPurchase, then the words and an Undo (deleteBill). */
+  function saveStock(fields: TypedCostFields) {
+    const purchase = typedStockPurchase(fields);
+    start(async () => {
+      // A dropped signal rejects (audit v994 SI2): what was typed stays put, and the sentence says it
+      // MAY have saved, because a lost answer can hide a purchase that landed.
+      const res = await callOrLost(() => addStockPurchase(purchase), "Couldn't reach the server, so this may not have saved. Check Shop Stock before saving it again.");
+      if (!res.ok) {
+        if ("lost" in res) router.refresh();
+        return setError(res.error ?? "The purchase didn't save. Nothing was recorded.");
+      }
+      const id = res.id;
+      toast(
+        res.message ?? "Saved in stock.",
+        "success",
+        id
+          ? {
+              label: "Undo",
+              onClick: () => {
+                // After a piece of it went on a job, the refusal names the take to undo first.
+                void deleteBill(id, "").then((undone) => {
+                  toast(
+                    undone.ok ? (undone.warning ?? "Taken back out of stock. Nothing is recorded.") : (undone.error ?? "Couldn't take it back. Delete it on Bills."),
+                    undone.ok ? "success" : "error",
+                  );
                   router.refresh();
                 });
               },
@@ -1119,70 +1234,174 @@ function TypeItInButton({
             </div>
           )}
 
-          {target === STOCK ? (
-            <div className="space-y-2 rounded-lg bg-slate-50 px-3 py-3 text-sm text-slate-700">
-              <p>{SHOP_STOCK_BY_PAPER}</p>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => {
-                  close();
-                  openSnapOrNote();
-                }}
-              >
-                <FileUp /> Open Snap Or Note
-              </Button>
-            </div>
-          ) : (
-            <>
-              <div>
-                <Label htmlFor="ti-where">{target === BUSINESS ? "Where (Optional)" : "Where"}</Label>
-                <Input id="ti-where" value={where} onChange={(e) => setWhere(e.target.value)} placeholder="The store or company" />
-              </div>
-
-              <div>
-                <Label>Paid?</Label>
-                <div role="radiogroup" aria-label="Paid?" className="grid grid-cols-2 gap-2">
-                  <button type="button" role="radio" aria-checked={paid === "paid"} onClick={() => setPaid("paid")} className={choiceCls(paid === "paid")}>
-                    Already Paid
-                  </button>
-                  <button type="button" role="radio" aria-checked={paid === "unpaid"} onClick={() => setPaid("unpaid")} className={choiceCls(paid === "unpaid")}>
-                    On Account (Still Owed)
-                  </button>
-                </div>
-                {paid === "unpaid" && <p className="mt-1 text-xs text-slate-500">It counts in what you owe that supplier until you pay it.</p>}
-              </div>
-
-              {jobPos && jobPos.list.length > 0 && (
-                <div>
-                  <Label htmlFor="ti-po">Purchase Order</Label>
-                  <Select id="ti-po" className="h-11" value={poId} onChange={(e) => setPoId(e.target.value)}>
-                    <option value="">Not A PO, A Cost Of Its Own</option>
-                    {jobPos.list.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {[p.po_number || "PO", p.vendor || "No Vendor", formatCurrency(p.total)].join(" · ")}
-                      </option>
-                    ))}
-                  </Select>
-                  <p className="mt-1 text-xs text-slate-500">Pick the order this bill pays and it takes that order&apos;s place in the job&apos;s cost, so the delivery counts once.</p>
-                </div>
-              )}
-              {jobPos?.failed && (
-                <p className="text-xs text-amber-700">Couldn&apos;t check this job&apos;s purchase orders just now, so this can&apos;t say it pays one. Edit the bill later to link it.</p>
-              )}
-
-              <Fold summary={<span className="text-sm font-medium text-slate-700">More</span>}>
-                <div className="pb-1">
-                  <Label htmlFor="ti-number">Bill #</Label>
-                  <Input id="ti-number" value={billNumber} onChange={(e) => setBillNumber(e.target.value)} />
-                </div>
-              </Fold>
-            </>
+          {/* SHOP STOCK, TYPED IN: what it is and how many, then the same Where, Paid? and Bill #.
+              No purchase order: a stock purchase pays no job's order. */}
+          {target === STOCK && (
+            <StockFields
+              items={stockItems.items}
+              loaded={stockItems.loaded}
+              itemsError={stockItems.error}
+              stockItem={stockItem}
+              stockName={stockName}
+              stockPieces={stockPieces}
+              unit={unitNow}
+              lockedTo={pickedItem}
+              onItem={(v) => {
+                setStockItem(v);
+                setError(null);
+              }}
+              onName={setStockName}
+              onPieces={setStockPieces}
+              onUnit={setStockUnit}
+            />
           )}
+
+          <div>
+            <Label htmlFor="ti-where">{target === BUSINESS ? "Where (Optional)" : "Where"}</Label>
+            <Input id="ti-where" value={where} onChange={(e) => setWhere(e.target.value)} placeholder="The store or company" />
+          </div>
+
+          <div>
+            <Label>Paid?</Label>
+            <div role="radiogroup" aria-label="Paid?" className="grid grid-cols-2 gap-2">
+              <button type="button" role="radio" aria-checked={paid === "paid"} onClick={() => setPaid("paid")} className={choiceCls(paid === "paid")}>
+                Already Paid
+              </button>
+              <button type="button" role="radio" aria-checked={paid === "unpaid"} onClick={() => setPaid("unpaid")} className={choiceCls(paid === "unpaid")}>
+                On Account (Still Owed)
+              </button>
+            </div>
+            {paid === "unpaid" && <p className="mt-1 text-xs text-slate-500">It counts in what you owe that supplier until you pay it.</p>}
+          </div>
+
+          {jobPos && jobPos.list.length > 0 && (
+            <div>
+              <Label htmlFor="ti-po">Purchase Order</Label>
+              <Select id="ti-po" className="h-11" value={poId} onChange={(e) => setPoId(e.target.value)}>
+                <option value="">Not A PO, A Cost Of Its Own</option>
+                {jobPos.list.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {[p.po_number || "PO", p.vendor || "No Vendor", formatCurrency(p.total)].join(" · ")}
+                  </option>
+                ))}
+              </Select>
+              <p className="mt-1 text-xs text-slate-500">Pick the order this bill pays and it takes that order&apos;s place in the job&apos;s cost, so the delivery counts once.</p>
+            </div>
+          )}
+          {jobPos?.failed && (
+            <p className="text-xs text-amber-700">Couldn&apos;t check this job&apos;s purchase orders just now, so this can&apos;t say it pays one. Edit the bill later to link it.</p>
+          )}
+
+          <Fold summary={<span className="text-sm font-medium text-slate-700">More</span>}>
+            <div className="pb-1">
+              <Label htmlFor="ti-number">Bill #</Label>
+              <Input id="ti-number" value={billNumber} onChange={(e) => setBillNumber(e.target.value)} />
+            </div>
+          </Fold>
+
+          {/* The ticket's own door, for a ticket in hand: one quiet line. What was typed here is left
+              behind only when he says so. */}
+          {target === STOCK && <StockTicketLine onOpen={openTheTicketDoor} />}
 
           {error && <p className="text-sm text-red-600">{error}</p>}
         </div>
       </Modal>
     </>
+  );
+}
+
+/**
+ * WHAT IS IT, AND HOW MANY (Shop Stock on the typed sheet). The item picker is the stock's own items
+ * (names and units, never a cost) plus New Item with a name box. How Many is a number; the Unit is the
+ * item's own, locked, for an item in stock, and typed (ft, each) for a new one.
+ */
+export function StockFields({
+  items,
+  loaded,
+  itemsError,
+  stockItem,
+  stockName,
+  stockPieces,
+  unit,
+  lockedTo,
+  onItem,
+  onName,
+  onPieces,
+  onUnit,
+}: {
+  items: ShelfPickerItem[];
+  loaded: boolean;
+  itemsError: string | null;
+  /** An item's id, NEW_ITEM, or "" for nothing picked yet. */
+  stockItem: string;
+  stockName: string;
+  stockPieces: number;
+  /** The unit shown: the picked item's own, or the one typed for a new item. */
+  unit: string;
+  /** The picked item in stock, whose unit is locked; null for a new item or none. */
+  lockedTo: ShelfPickerItem | null;
+  onItem: (v: string) => void;
+  onName: (v: string) => void;
+  onPieces: (n: number) => void;
+  onUnit: (v: string) => void;
+}) {
+  return (
+    <div className="space-y-3">
+      <div>
+        <Label htmlFor="ti-item">What Is It?</Label>
+        <Select id="ti-item" className="h-11" value={stockItem} onChange={(e) => onItem(e.target.value)}>
+          <option value="">Pick An Item</option>
+          <option value={NEW_ITEM}>New Item</option>
+          {items.map((i) => (
+            <option key={i.id} value={i.id}>
+              {i.name} ({i.unit})
+            </option>
+          ))}
+        </Select>
+        {stockItem === NEW_ITEM && (
+          <Input
+            id="ti-item-name"
+            aria-label="New item name"
+            value={stockName}
+            onChange={(e) => onName(e.target.value)}
+            placeholder="The item's name"
+            className="mt-2 h-11"
+          />
+        )}
+        {!loaded && <p className="mt-1 text-xs text-slate-500">Reading stock…</p>}
+        {itemsError && (
+          <p className="mt-1 text-xs text-amber-800" role="alert">
+            {itemsError}
+          </p>
+        )}
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <Label htmlFor="ti-pieces">How Many</Label>
+          <NumberInput id="ti-pieces" value={stockPieces} onValueChange={onPieces} placeholder="250" />
+        </div>
+        <div>
+          <Label htmlFor="ti-unit">Unit</Label>
+          <Input id="ti-unit" className="h-11" value={unit} onChange={(e) => onUnit(e.target.value)} disabled={!!lockedTo} placeholder="ft or each" />
+        </div>
+      </div>
+      {lockedTo && (
+        <p className="text-xs text-slate-500">
+          {lockedTo.name} is counted in {lockedTo.unit}, so this is too.
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** The one quiet line under a typed stock purchase, with the ticket's door (44px). */
+export function StockTicketLine({ onOpen }: { onOpen: () => void }) {
+  return (
+    <p className="text-sm text-slate-500">
+      {STOCK_HAVE_THE_TICKET}{" "}
+      <button type="button" onClick={onOpen} className="inline-flex min-h-11 items-center font-medium text-brand hover:underline">
+        Open Snap Or Note
+      </button>
+    </p>
   );
 }

@@ -11,6 +11,7 @@ import { InquiryModal } from "./inquiry-modal";
 import { InquiryRow } from "./inquiry-row";
 import { ReferralTally } from "./referral-tally";
 import type { Inquiry } from "@/lib/types";
+import type { LeadVisits } from "@/lib/leads/next-step";
 import { viewerSwitches } from "@/lib/viewer-switches";
 import { featureOn } from "@/lib/features";
 
@@ -49,44 +50,14 @@ export default async function InquiriesPage({
   ]);
   const leadsOn = featureOn(sw.features, "leads");
 
-  /**
-   * WHICH LEADS HAVE ALREADY BEEN WALKED.
-   *
-   * Erik: "the sarah cain lead was already converted to an inspection but still shows up as a
-   * new lead." Staying OPEN is correct and deliberate — leads/actions.ts documents inspection as
-   * exempt from converting, so an inspected lead can still go on to become an estimate. What was
-   * wrong is that her row looked IDENTICAL to a lead nobody had touched: three inspections, one
-   * of them completed with a full capture, and not a mark on the list to say so.
-   *
-   * So this is a display fix, not a status change. Counts only — the row says what happened, the
-   * status keeps meaning what it has always meant.
-   */
-  const leadIds = (inqData ?? []).map((i: { id: string }) => i.id);
-  const { data: inspRows } = leadIds.length
-    ? await supabase
-        .from("appointments")
-        .select("inquiry_id, status")
-        .in("inquiry_id", leadIds)
-        // EVERY kind of visit counts, not just inspections — a service-call lead with Friday
-        // booked looked untouched here while its twin with a walk-through said "1 booked".
-        .neq("status", "cancelled")
-        .limit(500)
-    : { data: [] as { inquiry_id: string; status: string }[] };
-  const inspectionState = new Map<string, { done: number; upcoming: number }>();
-  for (const r of (inspRows ?? []) as { inquiry_id: string; status: string }[]) {
-    const cur = inspectionState.get(r.inquiry_id) ?? { done: 0, upcoming: 0 };
-    if (r.status === "completed") cur.done += 1;
-    else cur.upcoming += 1;
-    inspectionState.set(r.inquiry_id, cur);
-  }
-
   const inquiries = (inqData ?? []) as Inquiry[];
   const customers = (custData ?? []) as { id: string; name: string }[];
 
   // A deep-link can point at a lead that already left the open list — a just-converted lead,
   // or the "From lead" backlink on an estimate/job (which points at a now-converted lead). Fetch
   // that one by id and surface it at the top so the link always lands on a real, flashing row
-  // instead of an empty list. Its status badge (quoted/won) makes clear it's already been acted on.
+  // instead of an empty list. Its chip (Became An Estimate / Became A Job / Lost) makes clear it's
+  // already been acted on.
   let focusExtra: Inquiry | null = null;
   if (focus && !inquiries.some((i) => i.id === focus)) {
     const { data } = await supabase
@@ -95,6 +66,41 @@ export default async function InquiriesPage({
       .eq("id", focus)
       .maybeSingle();
     focusExtra = (data as Inquiry) ?? null;
+  }
+
+  /**
+   * WHAT EACH LEAD'S VISITS SAY, for its one next-step chip (W2-07, lib/leads/next-step).
+   *
+   * Erik: "the sarah cain lead was already converted to an inspection but still shows up as a
+   * new lead." Staying OPEN is correct and deliberate — leads/actions.ts documents inspection as
+   * exempt from converting, so an inspected lead can still go on to become an estimate. What was
+   * wrong is that her row looked IDENTICAL to a lead nobody had touched. So: how many visits are
+   * done, how many are still booked, and the earliest booked start (with its type), so the chip
+   * can say "Walk-Through · Tue Oct 1" or "Walked · Estimate Next". EVERY kind of visit counts,
+   * not just walk-throughs; cancelled ones never do.
+   */
+  const leadIds = [...(inqData ?? []).map((i: { id: string }) => i.id), ...(focusExtra ? [focusExtra.id] : [])];
+  const { data: visitRows } = leadIds.length
+    ? await supabase
+        .from("appointments")
+        .select("inquiry_id, status, starts_at, type")
+        .in("inquiry_id", leadIds)
+        .neq("status", "cancelled")
+        .limit(500)
+    : { data: [] as { inquiry_id: string; status: string; starts_at: string | null; type: string | null }[] };
+  const visitState = new Map<string, LeadVisits>();
+  for (const r of (visitRows ?? []) as { inquiry_id: string; status: string; starts_at: string | null; type: string | null }[]) {
+    const cur = visitState.get(r.inquiry_id) ?? { done: 0, upcoming: 0, nextAt: null, nextType: null };
+    if (r.status === "completed") cur.done += 1;
+    else {
+      cur.upcoming += 1;
+      // The EARLIEST booked start wins; a visit waiting for a day (no start, 0368) never displaces one.
+      if (r.starts_at && (!cur.nextAt || r.starts_at < cur.nextAt)) {
+        cur.nextAt = r.starts_at;
+        cur.nextType = r.type;
+      } else if (!cur.nextAt && !cur.nextType) cur.nextType = r.type;
+    }
+    visitState.set(r.inquiry_id, cur);
   }
   // ?due=1 — THE FOLLOW-UP LIST, as a lens on this board rather than a new page (the shape the
   // layout mock recommended and everyone agreed to). next_follow_up_at already IS the follow-up
@@ -107,7 +113,9 @@ export default async function InquiriesPage({
   // `phone` rides along with the settings read (PROJECTION LAW): the business line is what the
   // "Text it" handoff has to be able to NAME — see convert-menu for why naming it is the whole fix.
   const { data: tzRow } = await supabase.from("organizations").select("settings, phone").limit(1).maybeSingle();
-  const todayYmd = todayStrInTz(getOrgSettings((tzRow as { settings?: unknown } | null)?.settings).timezone);
+  // The company's clock: today's date, and the day each chip's booked visit falls on.
+  const tz = getOrgSettings((tzRow as { settings?: unknown } | null)?.settings).timezone;
+  const todayYmd = todayStrInTz(tz);
   const businessPhone = ((tzRow as { phone?: string | null } | null)?.phone ?? "").trim() || null;
   const isDue = (i: { next_follow_up_at: string | null }) =>
     Boolean(i.next_follow_up_at && i.next_follow_up_at.slice(0, 10) <= todayYmd);
@@ -130,14 +138,14 @@ export default async function InquiriesPage({
 
       {inquiries.length > 0 && (
         <FactsGrid cols={2} className="mb-4 sm:max-w-sm">
-          {/* The tiles are the FILTER now — tap "Follow-ups due" and the board shows only what's
-              due; tap "Open inquiries" (or it again) and everything is back. State lives in the
-              URL, so the lens survives a refresh and can be sent to somebody. */}
+          {/* The tiles are the FILTER now — tap "Follow-Ups Due" and the board shows only what's
+              due; tap "Open Leads" (or it again) and everything is back. State lives in the URL, so
+              the lens survives a refresh and can be sent to somebody. Both count open leads only. */}
           <Link href="/leads" aria-current={!dueOnly ? "true" : undefined} className={!dueOnly ? "rounded-xl ring-2 ring-brand" : ""}>
-            <StatTile label="Open inquiries" value={inquiries.length} />
+            <StatTile label="Open Leads" value={inquiries.length} />
           </Link>
           <Link href="/leads?due=1" aria-current={dueOnly ? "true" : undefined} className={dueOnly ? "rounded-xl ring-2 ring-brand" : ""}>
-            <StatTile label="Follow-ups due" value={dueToday} tone={dueToday > 0 ? "warning" : "default"} />
+            <StatTile label="Follow-Ups Due" value={dueToday} tone={dueToday > 0 ? "warning" : "default"} />
           </Link>
         </FactsGrid>
       )}
@@ -164,9 +172,12 @@ export default async function InquiriesPage({
                 inquiry={i}
                 customers={customers}
                 focused={i.id === focus}
-                inspections={inspectionState.get(i.id) ?? null}
+                visits={visitState.get(i.id) ?? null}
+                todayYmd={todayYmd}
+                tz={tz}
                 businessPhone={businessPhone}
                 estimateDoor={featureOn(sw.features, "estimates")}
+                referralsOn={featureOn(sw.features, "referrals")}
               />
             ))}
           </ul>

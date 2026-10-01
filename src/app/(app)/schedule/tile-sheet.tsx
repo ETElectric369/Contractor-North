@@ -21,10 +21,11 @@ import {
   type JobBlock,
 } from "@/lib/schedule/job-block";
 import { minutesToHm } from "@/lib/schedule/fit-day";
-import { placeLine } from "@/lib/schedule/block-info";
+import { chipDot, crewDayLines, placeLine, type CrewChip } from "@/lib/schedule/block-info";
 import type { DayHours } from "@/lib/schedule-math";
 import { shiftApptToDay } from "@/lib/appt-time";
 import { initials } from "@/lib/utils";
+import { GhostSheetBody, ghostTitle, type GhostTarget } from "./ghost-sheet";
 
 /**
  * TAP A BLOCK ON THE SCHEDULE: ONE SMALL SHEET with its day, its start and its length, and who's on it.
@@ -34,10 +35,10 @@ import { initials } from "@/lib/utils";
  * there should be a time adjustment inside the job itself with the crew picker". This replaces the
  * clear-and-reset: the day (a deliberate Move), the time (the same controls as the job page:
  * components/block-time-controls), the crew as initials chips (the job page's own crew logic,
- * useJobCrew, through setJobCrew), and the two ways out: Open Job and Clear The Date.
+ * useJobCrew, through setJobCrew), and the two ways out: Open The Job and Clear The Date.
  *
  * A VISIT gets the same sheet: its day, its time and the one person going (a visit carries one,
- * appointments.assigned_to), with Open Visit and Clear The Date.
+ * appointments.assigned_to), with Open The Visit and Clear The Date.
  *
  * STAFF ONLY. The schedule is the office's (a tech never reaches /schedule); `canEdit` false still
  * reads everything out with nothing to tap, and every writer behind it asks requireStaff. No price
@@ -74,8 +75,13 @@ export type TileTarget =
       job: TileJob;
       /** The tapped day's own hours (0370), when it keeps them. */
       dayHours?: DayHours | null;
+      /** The crew as THAT DAY's rows leave it (Everyone's Day, lib/schedule/block-info crewChips): who is
+       *  off that day or on another job, said under the crew. Absent: no day rows were read. */
+      dayCrew?: CrewChip[] | null;
     }
-  | { kind: "visit"; day: string; visit: TileVisit };
+  | { kind: "visit"; day: string; visit: TileVisit }
+  /** Work nobody booked (Wave 2, SV-ghost): who worked a job's past day, and Book This Day. */
+  | { kind: "ghost"; day: string; ghost: GhostTarget };
 
 type Shared = {
   tz: string;
@@ -83,6 +89,8 @@ type Shared = {
   /** The active team (the crew picker's list). */
   team: CrewMember[];
   canEdit: boolean;
+  /** Crew Board's switch (0352): on, the crew line points at Everyone's Day for one day's change. */
+  crewBoard?: boolean;
   /** 0370 is applied: a day can keep its own hours, so the time here is THIS DAY's. Absent or false:
    *  the time is the job's (every day's), as before. */
   perDayHours?: boolean;
@@ -144,7 +152,7 @@ export function ScheduleTileSheet({ target, ...rest }: Shared & { target: TileTa
   sayRef.current = toast;
   const [busy, setBusy] = useState(0);
   const [guard] = useState(() => createSheetGuard((w) => sayRef.current(w, "error"), setBusy));
-  const key = !target ? "" : `${target.kind}:${target.kind === "job" ? target.job.id : target.visit.id}:${target.day}`;
+  const key = !target ? "" : `${target.kind}:${tileId(target)}:${target.day}`;
   useEffect(() => {
     if (key) guard.opened();
   }, [key, guard]);
@@ -152,7 +160,8 @@ export function ScheduleTileSheet({ target, ...rest }: Shared & { target: TileTa
     guard.closing();
     rest.onClose();
   };
-  const title = !target ? "" : target.kind === "job" ? target.job.name : target.visit.title;
+  // A ghost is titled with its job and who it's for ("12 Elm St · Rita Moss"), its number inside.
+  const title = !target ? "" : target.kind === "job" ? target.job.name : target.kind === "visit" ? target.visit.title : ghostTitle(target.ghost);
   return (
     <Modal open={!!target} onClose={close} holdOpen={busy > 0} title={title || "Schedule"} size="md">
       {target && (
@@ -169,10 +178,18 @@ export function ScheduleTileSheet({ target, ...rest }: Shared & { target: TileTa
   );
 }
 
+/** The record a target is about, for the sheet's key. */
+function tileId(t: TileTarget): string {
+  return t.kind === "job" ? t.job.id : t.kind === "visit" ? t.visit.id : t.ghost.jobId;
+}
+
 /** The sheet's inside (exported for its render test). */
 export function TileSheetBody({ target, ...rest }: Shared & { target: TileTarget }) {
+  if (target.kind === "ghost") {
+    return <GhostSheetBody day={target.day} ghost={target.ghost} canEdit={rest.canEdit} onClose={rest.onClose} voice={rest.voice} />;
+  }
   return target.kind === "job" ? (
-    <JobSheet day={target.day} job={target.job} dayHours={target.dayHours ?? null} {...rest} />
+    <JobSheet day={target.day} job={target.job} dayHours={target.dayHours ?? null} dayCrew={target.dayCrew ?? null} {...rest} />
   ) : (
     <VisitSheet day={target.day} visit={target.visit} {...rest} />
   );
@@ -310,14 +327,16 @@ function JobSheet({
   day,
   job,
   dayHours,
+  dayCrew,
   tz,
   workDay,
   team,
   canEdit,
+  crewBoard = false,
   perDayHours = false,
   onClose,
   voice,
-}: Shared & { day: string; job: TileJob; dayHours: DayHours | null }) {
+}: Shared & { day: string; job: TileJob; dayHours: DayHours | null; dayCrew: CrewChip[] | null }) {
   const router = useRouter();
   const toast = useToast();
   const block: JobBlock = readJobBlock({
@@ -467,10 +486,20 @@ function JobSheet({
       <section>
         <Heading>Crew</Heading>
         <JobCrewChips jobId={job.id} crew={crew} team={team} canEdit={canEdit} />
+        {/* WHOSE CREW THIS IS, in plain words: the job's crew is the whole job, every day; one day's
+            change is Everyone's Day's (when it's on); and what that day's rows already did. */}
+        <div className="mt-2 space-y-0.5 text-xs text-slate-500">
+          <p>The whole job, every day.{crewBoard ? " To change one day, use Everyone's Day." : ""}</p>
+          {crewDayLines(dayCrew).map((line) => (
+            <p key={line} className="text-slate-600">
+              {line}
+            </p>
+          ))}
+        </div>
       </section>
       <div className="flex flex-wrap gap-2 border-t border-slate-100 pt-4">
         <Link href={`/jobs/${job.id}`} className={`${BTN} btn-gloss bg-[rgb(var(--glass-ink))] text-white hover:bg-[rgb(var(--glass-ink))]/90`}>
-          Open Job
+          Open The Job
         </Link>
         {canEdit && block.day && <ClearTheDate what="this job" clear={clear} voice={voice} />}
       </div>
@@ -494,9 +523,11 @@ function VisitPerson({ visitId, assigned, team, canEdit }: { visitId: string; as
     setWho(assigned);
   }
   const nameOf = (id: string | null) => (id ? (team.find((m) => m.id === id)?.full_name ?? "Unnamed") : "Nobody");
-  const dot = (on: boolean) =>
-    `flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-xs font-semibold disabled:opacity-60 ${
-      on ? "bg-brand text-white ring-2 ring-brand ring-offset-2" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+  // ONE PERSON IS ONE COLOR: every circle wears its person's color (lib/schedule/block-info chipDot);
+  // the one going is lit (full color, a ring), the rest are faded until tapped.
+  const dot = (id: string, on: boolean) =>
+    `flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-xs font-semibold text-white disabled:opacity-60 ${chipDot({ id })} ${
+      on ? "ring-2 ring-slate-900 ring-offset-2" : "opacity-40 hover:opacity-70"
     }`;
   const nobody = (on: boolean) =>
     `inline-flex h-11 items-center rounded-full border border-dashed px-3 text-sm disabled:opacity-60 ${
@@ -505,7 +536,7 @@ function VisitPerson({ visitId, assigned, team, canEdit }: { visitId: string; as
 
   if (!canEdit) {
     return who ? (
-      <span className={dot(true)} title={nameOf(who)} aria-label={nameOf(who)}>
+      <span className={dot(who, true)} title={nameOf(who)} aria-label={nameOf(who)}>
         {initials(nameOf(who))}
       </span>
     ) : (
@@ -547,7 +578,7 @@ function VisitPerson({ visitId, assigned, team, canEdit }: { visitId: string; as
           aria-label={m.full_name ?? "Unnamed"}
           title={m.full_name ?? "Unnamed"}
           onClick={() => pick(m.id)}
-          className={dot(who === m.id)}
+          className={dot(m.id, who === m.id)}
         >
           {initials(m.full_name ?? "")}
         </button>
@@ -571,7 +602,7 @@ function VisitSheet({ day, visit, tz, workDay, team, canEdit, onClose, voice }: 
     // here would be its start to that many minutes on its LAST day (a 1h chip = a 25-hour visit). The
     // controls hide the chips for it (oneSpan); this refusal is for anything that still asks.
     if (block.multiDay && !("start" in patch)) {
-      return { ok: false, error: `This visit runs over several days, through ${dayWords(block.lastDay)}. Open Visit to change when it ends.` };
+      return { ok: false, error: `This visit runs over several days, through ${dayWords(block.lastDay)}. Open The Visit to change when it ends.` };
     }
     if ("start" in patch) {
       start = patch.start;
@@ -646,7 +677,7 @@ function VisitSheet({ day, visit, tz, workDay, team, canEdit, onClose, voice }: 
       </section>
       <div className="flex flex-wrap gap-2 border-t border-slate-100 pt-4">
         <Link href={`/appointments/${visit.id}`} className={`${BTN} btn-gloss bg-[rgb(var(--glass-ink))] text-white hover:bg-[rgb(var(--glass-ink))]/90`}>
-          Open Visit
+          Open The Visit
         </Link>
         {canEdit && open && <ClearTheDate what="this visit" clear={clear} voice={voice} />}
       </div>

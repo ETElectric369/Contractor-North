@@ -28,6 +28,7 @@ vi.mock("../appointments/actions", () => ({
 }));
 
 import { AgendaRowActions, AgendaRowMenu, markVisitDone, moveJobFromDay, moveVisitToDay } from "./agenda-move";
+import { crewChips } from "@/lib/schedule/block-info";
 
 const code = readFileSync(join(process.cwd(), "src/app/(app)/planner/page.tsx"), "utf8")
   .replace(/\/\*[\s\S]*?\*\//g, "")
@@ -162,5 +163,30 @@ describe("the verbs", () => {
       close: vi.fn(),
     });
     expect(t2).toHaveBeenCalledWith("The customer's pick-a-time link was withdrawn and can't be un-withdrawn.", "info", undefined, { sticky: true });
+  });
+});
+
+/** THE SAME JOB SAYS THE SAME THING ON BOTH SCREENS: a person who has left is NAMED, never "Unnamed". */
+describe("My Day's crew chips name someone who left", () => {
+  it("reads the whole company (names only) and hands it to every chip, jobs and visits alike", () => {
+    // Deactivating a member only flips profiles.active; the id stays in jobs.assigned_to, so a chip has
+    // to be able to look past the active team — as the schedule's own chips already do.
+    expect(code).toContain('supabase.from("profiles").select("id, full_name").limit(1000)');
+    expect(code).toContain("const everPeople = ");
+    const calls = code.match(/crewChips\(/g) ?? [];
+    expect(calls).toHaveLength(2);
+    for (const slice of code.split("crewChips(").slice(1)) {
+      expect(slice.slice(0, slice.indexOf("})"))).toContain("people: everPeople");
+    }
+  });
+
+  it("a chip for an id the active team no longer holds is that person's name and 'No Longer On The Team'", () => {
+    const [chip] = crewChips(["gone-1"], [{ id: "p1", full_name: "Erik Taylor" }], {
+      jobId: "j1",
+      people: [{ id: "gone-1", full_name: "Dana Whitfield" }],
+    });
+    expect(chip).toMatchObject({ initials: "DW", name: "Dana Whitfield", departed: true, title: "Dana Whitfield · No Longer On The Team" });
+    // Without the whole-company list it drew a "U" titled "Unnamed" — on My Day only, for the same job.
+    expect(crewChips(["gone-1"], [{ id: "p1", full_name: "Erik Taylor" }], { jobId: "j1" })[0]).toMatchObject({ name: "Unnamed" });
   });
 });

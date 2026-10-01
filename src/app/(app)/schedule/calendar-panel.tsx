@@ -6,6 +6,9 @@ import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 import { getOrgSettings, workDayWindowHm } from "@/lib/org-settings";
 import { featureOn } from "@/lib/features";
 import { getSchedulePickerOptions } from "@/lib/schedule-options";
+import { dayRowsByDay, type CrewDayRow } from "@/lib/schedule/block-info";
+import { ACTUALS_PAGES, CREW_ROW_PAGES, actualsFrom, readPagesCapped, type ActualEntryRow } from "@/lib/schedule/plan-vs-actual";
+import { todayStrInTz, tzDayStartUtc } from "@/lib/tz";
 import {
   CalendarView,
   type CalJob,
@@ -15,10 +18,11 @@ import {
   type CalExternal,
 } from "../calendar/calendar-view";
 
-/** Data layer for the /schedule calendar. Forward-looking records only —
- *  clocked time (WHEN-DID) lives on /timeclock + /timecards, so the old
- *  time_entries fetch and former-employee roster union are gone. The client
- *  slices this preloaded ±window into day/week/month; paging never refetches. */
+/** Data layer for the /schedule calendar: the ONE time map. Future days show what's booked; past days
+ *  show what was booked and what happened, inside the same block.
+ *  In Wave 2 (SV-actual) the July rule "the calendar never shows clocked time" was retired: one
+ *  past-only clocked-time read below, never a pay column. The timesheet (editing, pay) stays on
+ *  /timecards. The client slices this preloaded ±window into day/week/month; paging never refetches. */
 export async function CalendarPanel({ canEdit = false }: { canEdit?: boolean } = {}) {
   const supabase = await createClient();
 
@@ -31,7 +35,10 @@ export async function CalendarPanel({ canEdit = false }: { canEdit?: boolean } =
 
   // `address` (the street) rides along: every block says where (lib/schedule/block-info).
   const JOB_COLS = "id, job_number, name, status, scheduled_start, scheduled_end, planned_minutes, assigned_to, address, city, customers(name)";
-  const [{ data: listedJobs }, { data: segments, perDayHours }, { data: appointments }, { data: tasks }, { data: unschedRows }, { data: externalRows }, picker, { data: org }, { data: addableRows }] =
+  // EVERYONE'S DAY'S ROWS from today on (a day early, so the company's today is in it in any timezone):
+  // the day row wins for that day on every upcoming chip (lib/schedule/block-info crewChips).
+  const dayRowsFrom = new Date(now - 86400_000).toISOString().slice(0, 10);
+  const [{ data: listedJobs }, { data: segments, perDayHours }, { data: appointments }, { data: tasks }, { data: externalRows }, picker, { data: org }, { data: addableRows }, crewRead, { data: everyone }] =
     await Promise.all([
       // Overlap test, not a point test on scheduled_start: a job shows if it
       // STARTS before the window end AND (ends after the window start, or is an
@@ -76,18 +83,6 @@ export async function CalendarPanel({ canEdit = false }: { canEdit?: boolean } =
         .lte("due_date", jobTo.slice(0, 10))
         .order("due_date")
         .limit(500),
-      // "To schedule" tray: every still-in-flight job with no scheduled_start, via the
-      // ACTIVE_JOB_STATUSES spine (held jobs included: the tray places them). Needs You asks a
-      // wider question of the same jobs (action-items/jobs-needing-a-day: is ANYTHING ahead of it?
-      // no day, segment, visit or clock today or later), so a job whose date has passed with
-      // nothing next is there too, and a held job waits there with its own day instead.
-      supabase
-        .from("jobs")
-        .select("id, job_number, name, address, assigned_to, customers(name)")
-        .is("scheduled_start", null)
-        .in("status", ACTIVE_JOB_STATUSES)
-        .order("created_at", { ascending: false })
-        .limit(50),
       // Mirrored Google events (0132 two-way sync) — read-only zinc pills.
       // Fail-soft by construction: a missing table / RLS miss / fetch error
       // returns data:null and the calendar simply renders zero Google pills.
@@ -116,28 +111,88 @@ export async function CalendarPanel({ canEdit = false }: { canEdit?: boolean } =
             .order("created_at", { ascending: false })
             .limit(300)
         : Promise.resolve({ data: [] as unknown[] }),
+      /* WHO'S ON IT, THAT DAY (Everyone's Day, crew_day_assignments, both kinds: 'off', and 'job' for
+         this job or another). RLS scopes it to the company. PAGED, because a bare .limit(2000) is cut
+         at PostgREST's own ceiling (1000 by default) with no error, and the rows that fell off are the
+         FURTHEST days — their chips would quietly fall back to the job's crew while a day row said
+         otherwise. Ordered by (work_date, profile_id), the pair this row is unique on (crew-actions
+         upserts on it), so paging never repeats or drops one. Fail-soft: no rows read, the chips are
+         the job's crew as it stands. */
+      readPagesCapped<CrewDayRow>(
+        (from, to) =>
+          supabase
+            .from("crew_day_assignments")
+            .select("profile_id, work_date, kind, job_id")
+            .gte("work_date", dayRowsFrom)
+            .lte("work_date", jobTo.slice(0, 10))
+            .order("work_date")
+            .order("profile_id")
+            .range(from, to),
+        CREW_ROW_PAGES,
+      ),
+      /* EVERYONE THE COMPANY EVER HAD (id, name, active), so a chip names someone who has left ("No
+         Longer On The Team") instead of "Unnamed". The pickers still list the active team only. */
+      supabase.from("profiles").select("id, full_name, active").limit(1000),
     ]);
+
+  const tz = getOrgSettings((org as any)?.settings).timezone;
+  const todayStr = todayStrInTz(tz);
 
   /* HISTORY DRAWS TOO. A job whose date was cleared keeps its worked days as segments with no listed
      span, so the read above (on scheduled_start) never brings it; its worked day would vanish while
-     Clear The Date's note says it was kept on the calendar. Read those jobs by id: the segments place
-     them on their worked days (drawn all day, the day drill reads "Worked day"). Fail-soft: a failed
-     read draws what the first one brought. */
+     Clear The Date's note says it was kept on the calendar. Read those jobs by id (in reads of 200 ids:
+     a long list is a long URL; every one is read, none dropped): the segments place them on their
+     worked days (drawn all day, the day drill reads "Worked day"). Fail-soft: a failed read draws what
+     the first one brought. It runs beside the clocked-time read below, one round. */
   const missing = segmentJobsNotLoaded(((listedJobs ?? []) as { id: string }[]).map((j) => j.id), (segments ?? []) as unknown as { job_id: string }[]);
-  const { data: historyJobs } = missing.length
-    ? await supabase.from("jobs").select(JOB_COLS).in("id", missing.slice(0, 500))
-    : { data: [] };
-  const jobs: unknown[] = [...(listedJobs ?? []), ...(historyJobs ?? [])];
+  const missingChunks: string[][] = [];
+  for (let i = 0; i < missing.length; i += 200) missingChunks.push(missing.slice(i, i + 200));
 
-  const unscheduled = (unschedRows ?? []).map((j: any) => ({
-    id: j.id,
-    job_number: j.job_number,
-    name: j.name,
-    customer: j.customers?.name ?? null,
-    // Where and who on the tray's tile, as its block and its rail card say them. No money.
-    address: j.address ?? null,
-    assigned_to: Array.isArray(j.assigned_to) ? j.assigned_to : [],
-  }));
+  /* WHAT HAPPENED ON PAST DAYS (Wave 2, SV-actual: the July rule "the calendar never shows clocked
+     time" is retired). The schedule is the one time map: future days show what's booked; past days
+     show what was booked AND what happened, inside the same block (lib/schedule/plan-vs-actual). The
+     timesheet (editing, pay) stays on /timecards. ONE read, from the start of the window's oldest
+     company day up to the start of today on the company's clock, only entries on a job (a no-job punch
+     is never guessed onto a block), newest first, A PAGE AT A TIME to a stated bound. NO PAY
+     COLUMN: no rate, no paid, no miles, no notes. Names come from the entry's own person, so someone
+     who has left still has initials on the days they worked. The job rides along so a ghost (part D)
+     can name a job the window's jobs read didn't bring. RLS scopes it to the company (0249's
+     (org_id, clock_in desc) index serves it). Fail-soft: a failed read draws no bars, and says so. */
+  const ENTRY_COLS =
+    "id, profile_id, job_id, clock_in, clock_out, source, profiles:profile_id(full_name), job:job_id(id, job_number, name, customers(name))";
+  /* THE WHOLE OLDEST DAY, NOT FROM THIS HOUR BACKWARDS. jobFrom is an INSTANT (now minus the window),
+     so at a 3pm load it begins mid-afternoon on the oldest day and an 8am shift on that day was never
+     read, while the view counts that day as loaded whole and draws its block hollow. The clocked-time
+     read starts at the START of the company day the window opens on — the same day the view clamps to
+     (CAL_WINDOW_BACK_DAYS, in YMD arithmetic at noon, never on raw instants). */
+  const winFromStr = new Date(Date.parse(`${todayStr}T12:00:00Z`) - CAL_WINDOW_BACK_DAYS * 86400_000).toISOString().slice(0, 10);
+  /* One day EARLIER than that: an overnight shift clocked in the evening before has its tail drawn on
+     the oldest day (actualSpans splits at midnight), and a day off by one between here and the view's
+     clamp must never make a day look like a day nobody worked. The extra rows draw nothing of their own
+     (the view ignores days before the window). */
+  const actualsFromIso = tzDayStartUtc(new Date(Date.parse(`${winFromStr}T12:00:00Z`) - 86400_000).toISOString().slice(0, 10), tz).toISOString();
+  const [historyReads, entriesRead] = await Promise.all([
+    Promise.all(missingChunks.map((missingChunk) => supabase.from("jobs").select(JOB_COLS).in("id", missingChunk))),
+    /* PAGED, NEWEST FIRST (readPagesCapped). A `.limit(4000)` is silently cut at PostgREST's own
+       db-max-rows (1000 by default), so the row count can never see the cut and every older day would
+       be judged as a day nobody worked. Ordered (clock_in desc, id desc): the id tiebreak keeps rows
+       from repeating or vanishing between pages. */
+    readPagesCapped<ActualEntryRow>(async (from, to) => {
+      const r = await supabase
+        .from("time_entries")
+        .select(ENTRY_COLS)
+        .not("job_id", "is", null)
+        .gte("clock_in", actualsFromIso)
+        .lt("clock_in", tzDayStartUtc(todayStr, tz).toISOString())
+        .order("clock_in", { ascending: false })
+        .order("id", { ascending: false })
+        .range(from, to);
+      return { data: (r.data ?? null) as unknown as ActualEntryRow[] | null, error: r.error };
+    }, ACTUALS_PAGES),
+  ]);
+  const historyJobs = historyReads.flatMap((r) => (r.data ?? []) as unknown[]);
+  const jobs: unknown[] = [...(listedJobs ?? []), ...(historyJobs ?? [])];
+  const { actuals, actualsCappedBefore } = actualsFrom(entriesRead.error ? null : entriesRead.rows, tz, todayStr, entriesRead.capped);
 
   return (
     <div className="mx-auto max-w-5xl">
@@ -147,14 +202,13 @@ export async function CalendarPanel({ canEdit = false }: { canEdit?: boolean } =
         appointments={(appointments ?? []) as unknown as CalAppt[]}
         tasks={(tasks ?? []) as unknown as CalTask[]}
         external={(externalRows ?? []) as unknown as CalExternal[]}
-        unscheduled={unscheduled}
         members={picker.staff}
         picker={{ jobs: picker.jobOpts, customers: picker.custOpts, staff: picker.staffOpts }}
         now={new Date().toISOString()}
         // The org tz drives EVERY instant→day/minutes mapping in the view —
         // without it the client fell back to Date methods (server UTC on SSR,
         // browser zone after), the "UTC problem in the new calendars".
-        tz={getOrgSettings((org as any)?.settings).timezone}
+        tz={tz}
         workDayStart={workDayWindowHm((org as any)?.settings).start}
         workDayEnd={workDayWindowHm((org as any)?.settings).end}
         crewBoard={featureOn(getOrgSettings((org as any)?.settings).features, "crew_board")}
@@ -165,7 +219,15 @@ export async function CalendarPanel({ canEdit = false }: { canEdit?: boolean } =
         perDayHours={perDayHours}
         // Add To Schedule: an open spot (or a day's "+") opens the sheet with these jobs.
         addableJobs={(addableRows ?? []) as unknown as AddableJob[]}
+        // Each day's crew rows (Everyone's Day), by day, and everyone the company ever had.
+        dayRows={dayRowsByDay(crewRead.error ? [] : crewRead.rows)}
+        people={((everyone ?? []) as { id: string; full_name: string | null; active?: boolean | null }[]).map((p) => ({ id: p.id, full_name: p.full_name, active: p.active ?? null }))}
+        // What happened on past days (compact spans; null: the read failed) and, when the read hit its
+        // cap, the first day it covers whole (older days are never drawn hollow: blank is not zero).
+        actuals={actuals}
+        actualsCappedBefore={actualsCappedBefore}
       />
     </div>
   );
 }
+

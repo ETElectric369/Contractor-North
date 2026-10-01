@@ -1,5 +1,40 @@
 import { describe, expect, it } from "vitest";
-import { APPOINTMENT_STATUSES, APPT_PUSH_STATUSES } from "./statuses";
+import {
+  APPOINTMENT_STATUSES,
+  APPOINTMENT_TYPES,
+  APPT_PUSH_STATUSES,
+  PICKABLE_APPOINTMENT_TYPES,
+  appointmentTypeLabel,
+  appointmentTypeOptions,
+  isPickableAppointmentType,
+} from "./statuses";
+
+describe("the five kinds a person picks (W2-06)", () => {
+  it("are Walk-Through, Job, Service Call, Phone Call and Other, each a type the table allows, each with a real label", () => {
+    expect(PICKABLE_APPOINTMENT_TYPES.map(appointmentTypeLabel)).toEqual(["Walk-Through", "Job", "Service Call", "Phone Call", "Other"]);
+    for (const t of PICKABLE_APPOINTMENT_TYPES) {
+      expect(APPOINTMENT_TYPES as readonly string[]).toContain(t);
+      expect(appointmentTypeLabel(t)).not.toBe(t); // a raw enum value is not a label
+    }
+  });
+
+  it("an old row's kind still reads truly under its old label", () => {
+    expect(appointmentTypeLabel("quote")).toBe("Quote / Estimate");
+    expect(appointmentTypeLabel("meeting")).toBe("Client Meeting");
+    expect(appointmentTypeLabel("appointment")).toBe("Appointment");
+    expect(appointmentTypeLabel("final_inspection")).toBe("Final Inspection");
+    for (const t of ["quote", "meeting", "appointment", "final_inspection"]) expect(isPickableAppointmentType(t)).toBe(false);
+  });
+
+  it("the Type select offers the five, plus a row's own old kind (so a Save never rewrites it)", () => {
+    expect(appointmentTypeOptions(null)).toEqual([...PICKABLE_APPOINTMENT_TYPES]);
+    expect(appointmentTypeOptions("inspection")).toEqual([...PICKABLE_APPOINTMENT_TYPES]);
+    expect(appointmentTypeOptions("meeting")).toEqual([...PICKABLE_APPOINTMENT_TYPES, "meeting"]);
+    expect(appointmentTypeOptions("final_inspection")).toEqual([...PICKABLE_APPOINTMENT_TYPES, "final_inspection"]);
+    // Junk is never offered.
+    expect(appointmentTypeOptions("nonsense")).toEqual([...PICKABLE_APPOINTMENT_TYPES]);
+  });
+});
 
 describe("APPT_PUSH_STATUSES — the Google-push set is derived from the spine", () => {
   it("today's derived set is exactly the historical hand-written one", () => {

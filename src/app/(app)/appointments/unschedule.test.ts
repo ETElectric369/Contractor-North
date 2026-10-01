@@ -85,5 +85,9 @@ describe("Clear The Date", () => {
     expect(s).toContain('"Clear The Date"');
     expect(s).not.toContain('size="sm"');
     expect(s).toContain("Waiting For A Day");
+    // On the visit page it is a ⋯ Actions row (W2-11): the same words and toast, the menu's 44px row.
+    expect(s).toContain("className={ACTIONS_ROW_CLS}");
+    const page = readFileSync(join(process.cwd(), "src/app/(app)/appointments/[id]/page.tsx"), "utf8");
+    expect(page).toContain("{booked && a.starts_at && <UnscheduleButton id={a.id} menuItem />}");
   });
 });

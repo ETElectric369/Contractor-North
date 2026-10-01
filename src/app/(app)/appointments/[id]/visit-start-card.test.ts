@@ -21,7 +21,8 @@ import { VisitStartCard, visitStartState, visitTimeOffered } from "./visit-start
 
 const TZ = "America/Los_Angeles";
 const preview = {
-  name: "Inspection — Tom Goodman",
+  // The name Start The Job gives (lib/job-name): the street, never the visit's "Walk-Through:" tag.
+  name: "3245 W. Lake Blvd",
   customer: "Tom Goodman",
   address: "3245 W. Lake Blvd, Homewood, CA 96141",
   scheduledStart: "2026-09-25T17:00:00.000Z",

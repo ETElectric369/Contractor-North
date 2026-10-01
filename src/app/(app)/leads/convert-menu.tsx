@@ -12,7 +12,7 @@ import { NewInspectionButton } from "../appointments/new-inspection-button";
 import { convertInquiry, suggestVisitSlots } from "./actions";
 import { workKind } from "@/lib/schedule/work-shape";
 
-/** A sensible default inspection date: 2 days out. */
+/** A sensible default walk-through day: 2 days out. */
 function defaultInspectDate(): string {
   const d = new Date();
   d.setDate(d.getDate() + 2);
@@ -22,7 +22,7 @@ function defaultInspectDate(): string {
 const p2 = (n: number) => String(n).padStart(2, "0");
 
 /** Next three weekdays at 9 AM — default options for "Let them pick" (9 AM is
- *  the inspection convention; the office fine-tunes per slot). */
+ *  the walk-through convention; the office fine-tunes per slot). */
 function defaultSlots(): { date: string; time: string }[] {
   const out: { date: string; time: string }[] = [];
   const d = new Date();
@@ -35,10 +35,11 @@ function defaultSlots(): { date: string; time: string }[] {
 }
 
 /**
- * The lead's TWO front-and-center next steps — no more "Convert ▾" grab-bag. A lead either needs a
- * site visit to gather scope, or it's ready to price:
- *   • Schedule inspection — books a site visit onto the Schedule; the lead STAYS a lead. Two ways:
- *     "Book it" (a firm date) or "Let them pick" (offer up to 3 times → a /pick link to text them,
+ * The lead's front-and-center next steps — no more "Convert ▾" grab-bag. A lead either needs a
+ * walk-through to gather scope, or it's ready to price:
+ *   • Walk-Through — starts one now, when you're already there.
+ *   • Schedule — books a walk-through onto the Schedule; the lead STAYS a lead. Two ways:
+ *     "Book It" (a firm date) or "Let Them Pick" (offer up to 3 times → a /pick link to text them,
  *     same pattern as the appointment modal's Propose Times).
  *   • Create estimate — opens the estimate builder from this lead.
  * The rest of the pipeline (customer + scheduled job) happens automatically when the estimate is
@@ -180,26 +181,35 @@ export function ConvertMenu({
           positioning the contact takes it out of the flow, so the three verbs centre on the row
           itself and land at the same x all the way down the list however long the name is. */}
       <div className="relative flex w-full flex-wrap items-center justify-center gap-2 sm:flex-nowrap">
-        {/* Already onsite? One tap creates the inspection (linked to this lead) and lands
+        {/* Already there? One tap creates the walk-through (linked to this lead) and lands
             straight on its capture page — no booking ceremony (nowOnly: the schedule
-            options live right here in the modal alongside). */}
-        <NewInspectionButton nowOnly label="Inspect" inquiryId={inquiryId} size="sm" variant="outline" />
+            options live right here in the modal alongside).
+            ERIK'S ONE-WORD VERBS (July), with the site visit's one word (W2-10): Walk-Through ·
+            Schedule · Estimate. 44px each; on a phone the icons step aside so the three still fit
+            one line at 375px (the words carry the meaning). */}
+        <NewInspectionButton
+          nowOnly
+          label="Walk-Through"
+          title="Start a walk-through now — you're already there"
+          iconClassName="hidden h-4 w-4 sm:block"
+          inquiryId={inquiryId}
+          variant="outline"
+        />
         {/* "Schedule", not "Schedule inspection" — Erik: "takes up way too much space on the
-            screen and is distracting". The word "inspection" was doing no work on a LEAD row,
-            where a site visit is the only thing there is to schedule; the modal it opens says
-            "Book a site inspection" in its title, which is where that word belongs. */}
+            screen and is distracting". A walk-through is the only thing there is to schedule on
+            a LEAD row; the modal it opens says "Book A Walk-Through" in its title, which is where
+            that word belongs. */}
         <Button
-          size="sm"
           variant="outline"
           onClick={openInspect}
           disabled={busy !== null}
-          title={isWork ? `Put the ${workNoun} on the Schedule` : "Book a site visit — the lead stays open"}
+          title={isWork ? `Put the ${workNoun} on the Schedule` : "Book a walk-through — the lead stays open"}
         >
-          <CalendarPlus className="h-4 w-4" /> Schedule
+          <CalendarPlus className="hidden h-4 w-4 sm:block" /> Schedule
         </Button>
         {estimateDoor && (
-          <Button size="sm" onClick={() => run("estimate")} disabled={busy !== null}>
-            <FileText className="h-4 w-4" /> {busy === "estimate" ? "Opening…" : "Estimate"}
+          <Button onClick={() => run("estimate")} disabled={busy !== null}>
+            <FileText className="hidden h-4 w-4 sm:block" /> {busy === "estimate" ? "Opening…" : "Estimate"}
           </Button>
         )}
         {/* THE CONTACT BUTTON IS GONE — the NAME is that control now (see inquiry-row).
@@ -214,12 +224,12 @@ export function ConvertMenu({
         open={inspectOpen}
         onClose={closeInspect}
         title={
-          link ? "Text them these times"
+          link ? "Text Them These Times"
           // Pick mode books a PROPOSAL for every kind — a job can't be placed on an unchosen
           // day, so the work-flavored title would promise a conversion pick mode never does.
-          : isWork && mode === "book" ? (kind === "job" ? "Schedule the job" : "Book the service call")
-          : isWork ? "Offer times for the visit"
-          : "Book a site inspection"
+          : isWork && mode === "book" ? (kind === "job" ? "Schedule The Job" : "Book The Service Call")
+          : isWork ? "Offer Times For The Visit"
+          : "Book A Walk-Through"
         }
         size="sm"
         footer={
@@ -230,7 +240,7 @@ export function ConvertMenu({
               onCancel={closeInspect}
               onSave={() => run("inspection")}
               saving={busy === "inspection"}
-              saveLabel={mode === "pick" ? "Create Link" : isWork ? (kind === "job" ? "Schedule job" : "Book service call") : "Book inspection"}
+              saveLabel={mode === "pick" ? "Create Link" : isWork ? (kind === "job" ? "Schedule Job" : "Book Service Call") : "Book It"}
             />
           )
         }
@@ -243,7 +253,7 @@ export function ConvertMenu({
             </div>
             <code className="block break-all rounded-lg bg-slate-100 px-3 py-2 text-xs text-slate-700">{pickLink}</code>
             <div className="flex flex-wrap gap-2">
-              <Button type="button" size="sm" onClick={copyLink}>
+              <Button type="button" onClick={copyLink}>
                 {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
                 {copied ? "Copied" : "Copy Link"}
               </Button>
@@ -251,7 +261,7 @@ export function ConvertMenu({
                 // iOS convention (matches propose-dates-button): with a number the body
                 // separator is `&` — `sms:<number>?body=` opens Messages without the text.
                 href={`sms:${link.phone ?? ""}${link.phone ? "&" : "?"}body=${encodeURIComponent(smsBody)}`}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-brand px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-dark"
+                className="inline-flex min-h-11 items-center gap-1.5 rounded-lg bg-brand px-4 text-sm font-medium text-white hover:bg-brand-dark"
               >
                 <MessageSquare className="h-4 w-4 shrink-0" /> Text It
               </a>
@@ -281,7 +291,7 @@ export function ConvertMenu({
               </p>
             ) : (
               <p className="text-sm text-slate-600">
-                Books a site visit for <strong>{inquiryName}</strong> onto your Schedule (a booking you can move or
+                Books a walk-through for <strong>{inquiryName}</strong> onto your Schedule (a booking you can move or
                 reassign). The lead stays open, so you can create the estimate after the visit.
               </p>
             )}
@@ -298,7 +308,7 @@ export function ConvertMenu({
 
             {mode === "book" ? (
               <div>
-                <Label htmlFor="inspect-date">{isWork ? "Start date" : "Inspection date"}</Label>
+                <Label htmlFor="inspect-date">{isWork ? "Start date" : "Day"}</Label>
                 <Input id="inspect-date" type="date" value={inspectDate} onChange={(e) => { touchedRef.current = true; setSlotNote(null); setInspectDate(e.target.value); }} />
                 {slotNote && <p className="mt-1 text-xs text-brand">{slotNote}</p>}
                 <p className="mt-1 text-xs text-slate-400">Defaults to 9:00 AM — fine-tune the time on the Schedule.</p>

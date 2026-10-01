@@ -44,10 +44,10 @@ export function PlanBriefPanel({ inquiryId, intake }: { inquiryId: string; intak
       type="button"
       disabled={pending}
       onClick={run}
-      className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+      className="inline-flex min-h-11 items-center gap-1.5 rounded-lg border border-slate-200 px-3 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
     >
       {pending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FileSearch className="h-3.5 w-3.5" />}
-      {pending ? "Reading the plans…" : label}
+      {pending ? "Reading The Plans…" : label}
     </button>
   );
 
@@ -55,7 +55,7 @@ export function PlanBriefPanel({ inquiryId, intake }: { inquiryId: string; intak
   const stalePending =
     brief?.status === "pending" && (!brief.at || Date.now() - new Date(brief.at).getTime() > 5 * 60 * 1000);
 
-  if (!brief) return <div>{runButton("Read the plans")}</div>;
+  if (!brief) return <div>{runButton("Read The Plans")}</div>;
 
   if (brief.status === "pending" && !stalePending) {
     return (
@@ -72,7 +72,7 @@ export function PlanBriefPanel({ inquiryId, intake }: { inquiryId: string; intak
         <p className="text-xs text-amber-700">
           {stalePending ? "The plan reading didn't finish." : (brief.error ?? "The plans couldn't be read.")}
         </p>
-        {runButton("Try again")}
+        {runButton("Try Again")}
       </div>
     );
   }
@@ -104,7 +104,8 @@ export function PlanBriefPanel({ inquiryId, intake }: { inquiryId: string; intak
         </p>
       )}
       {/* THE DOOR (Erik: "open the inspector right there with the data all filled in"). Opens the
-          lead's existing walk-through, or starts one now — either way the answers are seeded. */}
+          lead's existing walk-through, or starts one now — either way the answers are seeded.
+          Named with the site visit's one word (W2-10), Title Case, 44px. */}
       <div className="flex flex-wrap items-center gap-2 pt-0.5">
         <button
           type="button"
@@ -113,19 +114,19 @@ export function PlanBriefPanel({ inquiryId, intake }: { inquiryId: string; intak
             start(async () => {
               const r = await openLeadInspection(inquiryId);
               if (!r.ok || !r.id) {
-                toast(r.error ?? "Couldn't open the inspection.", "error");
+                toast(r.error ?? "Couldn't open the walk-through.", "error");
                 return;
               }
               router.push(`/appointments/${r.id}`);
             })
           }
-          className="inline-flex items-center gap-1.5 rounded-lg bg-sky-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-sky-700 disabled:opacity-50"
+          className="inline-flex min-h-11 items-center gap-1.5 rounded-lg bg-sky-600 px-3 text-xs font-semibold text-white hover:bg-sky-700 disabled:opacity-50"
         >
           {pending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ClipboardCheck className="h-3.5 w-3.5" />}
-          Preliminary inspection
+          Open The Walk-Through
           {!!Object.keys(brief.answers ?? {}).length && ` (${Object.keys(brief.answers ?? {}).length} answers ready)`}
         </button>
-        {runButton("Read again")}
+        {runButton("Read Again")}
       </div>
     </div>
   );

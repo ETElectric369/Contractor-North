@@ -74,7 +74,7 @@ describe("a grid block, by its height", () => {
     expect(text(hour)).not.toContain("10a–12p");
     const half = grid(block(30));
     expect(text(half)).not.toContain("123 Main St");
-    expect(half).toContain('title="Seiler · 3-way switches · 123 Main St · Truckee · 10a–12p · Erik Taylor"');
+    expect(half).toContain('title="Seiler · 3-way switches · 123 Main St · Truckee · 10a–12p · Crew: Erik Taylor"');
   });
 
   it("nobody on it is a dashed Nobody; the block never grows past its time (overflow is clipped, lines are whole)", () => {
@@ -87,7 +87,7 @@ describe("a grid block, by its height", () => {
 
   it("with the office's tap, the block opens its sheet and says what it holds", () => {
     const html = grid({ ...block(120), tapId: "job:j058" }, { onEventTap: () => {} });
-    expect(html).toMatch(/<button[^>]*aria-label="Seiler · 3-way switches · 123 Main St · Truckee · 10a–12p · Erik Taylor: day, time and crew"/);
+    expect(html).toMatch(/<button[^>]*aria-label="Seiler · 3-way switches · 123 Main St · Truckee · 10a–12p · Crew: Erik Taylor: day, time and crew"/);
   });
 });
 
@@ -227,7 +227,10 @@ describe("My Day's rows and the schedule read the same words, with no money", ()
   it("the calendar's blocks carry the place, the time and the crew; the rail's cards carry who and the crew", () => {
     const view = read("src/app/(app)/calendar/calendar-view.tsx");
     expect(view).toMatch(/info: \{\s*place: placeLine\(\{ name: job\.name, street: job\.address/);
-    expect(view).toContain("crew: crewChips(job.assigned_to, team)");
+    // The crew as that day's Everyone's Day rows leave it (the day row wins; lib/schedule/block-info);
+    // a past day judged shows what happened instead (Wave 2, SV-actual).
+    expect(view).toContain("crew: judged ? null : jobCrewOn(job, k)");
+    expect(view).toContain("crewChips(job.assigned_to, team, { rows: dayRows[day], jobId: job.id, jobNames, people })");
     expect(view).toContain("dayHours: ownHours.get(job.id)?.get(k) ?? null");
     const page = read("src/app/(app)/schedule/page.tsx");
     expect(page).toContain("crew: crewChips((r as unknown as { assigned_to?: string[] | null }).assigned_to ?? [], team)");
@@ -244,13 +247,16 @@ describe("My Day's rows and the schedule read the same words, with no money", ()
     expect(code("src/app/(app)/planner/page.tsx")).toContain("street: streetOf(visitPlace(a))");
   });
 
-  it("the To Schedule tray's tiles say where and who like every other tile, never the job number", () => {
-    const panel = read("src/app/(app)/schedule/calendar-panel.tsx");
-    expect(panel).toContain('.select("id, job_number, name, address, assigned_to, customers(name)")');
+  it("a dateless job's card says where and who like every other tile, never the job number (its home since the tray was cut, W2-05)", () => {
+    // The To Schedule tray is gone: every job it held waits on the rail, whose card reads the same words.
     const view = code("src/app/(app)/calendar/calendar-view.tsx");
-    expect(view).toContain("const place = placeLine({ name: j.name, street: j.address, customer: j.customer })?.text ?? null;");
-    expect(view).toContain('<CrewInitials crew={crewChips(j.assigned_to, team)} size="xs" />');
-    expect(view).not.toContain("j.customer ?? j.job_number");
+    expect(view).not.toContain("To Schedule ·");
+    const page = read("src/app/(app)/schedule/page.tsx");
+    expect(page).toMatch(/const RAIL_JOB_COLS = "id, job_number, name, address, city, planned_minutes, status, hold_reason, assigned_to, scheduled_start, customers\(name, phone, email\)"/);
+    const rail = code("src/app/(app)/schedule/place-rail.tsx");
+    expect(rail).toContain("const place = placeLine({ name: i.name, street: i.address, customer: i.customer });");
+    expect(rail).toContain("<CrewInitials crew={i.crew} />");
+    expect(rail).not.toContain("job_number");
   });
 
   it("no price, amount, total, cost or rate on any of them", () => {

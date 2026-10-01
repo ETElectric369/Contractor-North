@@ -176,7 +176,8 @@ describe("a length is saved before the placement reads it", () => {
     state.db.jobs.push({ id: "j3", status: "to_be_scheduled", scheduled_start: null, scheduled_end: null, planned_minutes: null });
     expect(await actions.sizeJob("j3", 120)).toEqual({ ok: true });
     const res = await actions.placeJobOnDay("j3", "2026-09-28", "10:00");
-    expect(res).toEqual({ ok: true });
+    // `prior`: what the place changed, read before the write, for the rail's Undo (W2-05).
+    expect(res).toEqual({ ok: true, prior: expect.any(Object) });
     expect(job("j3")).toMatchObject({ scheduled_start: at("2026-09-28", "10:00"), scheduled_end: at("2026-09-28", "12:00"), planned_minutes: 120, status: "scheduled" });
     expect(segs("j3")).toEqual(["2026-09-28..2026-09-28"]);
   });
@@ -184,7 +185,7 @@ describe("a length is saved before the placement reads it", () => {
   it("no length anywhere: two hours from the start, the size left blank, and the answer says so", async () => {
     state.db.jobs.push({ id: "j4", status: "to_be_scheduled", scheduled_start: null, scheduled_end: null, planned_minutes: null });
     const res = await actions.placeJobOnDay("j4", "2026-09-28", "09:00");
-    expect(res).toEqual({ ok: true, defaulted: true });
+    expect(res).toEqual({ ok: true, defaulted: true, prior: expect.any(Object) });
     expect(job("j4")).toMatchObject({ scheduled_start: at("2026-09-28", "09:00"), scheduled_end: at("2026-09-28", "11:00"), planned_minutes: null });
   });
 
@@ -293,7 +294,7 @@ describe("Clear The Date, then put back: lands exactly where and as long as chos
 
   it("placed again from the rail on Oct 5 at 9:00: a 9:00–11:00 block on Oct 5 (the default, said), Sep 22 kept as history", async () => {
     await cleared("c1");
-    expect(await actions.placeJobOnDay("c1", "2026-10-05", "09:00")).toEqual({ ok: true, defaulted: true });
+    expect(await actions.placeJobOnDay("c1", "2026-10-05", "09:00")).toEqual({ ok: true, defaulted: true, prior: expect.any(Object) });
     expect(job("c1")).toMatchObject({ scheduled_start: at("2026-10-05", "09:00"), scheduled_end: at("2026-10-05", "11:00") });
     expect(segs("c1")).toEqual(["2026-09-22..2026-09-22", "2026-10-05..2026-10-05"]);
   });
@@ -337,7 +338,7 @@ describe("Clear The Date, then put back: lands exactly where and as long as chos
   it("the same on-hold job with a stale 10-to-5 stamp placed on that day at 1:00 PM: 1 to 3 (the fitter's two hours), never 1 to 8", async () => {
     state.db.jobs.push({ id: "h2", status: "on_hold", scheduled_start: at("2026-10-05", "10:00"), scheduled_end: at("2026-10-05", "17:00"), planned_minutes: null });
     state.db.job_schedule_segments.push({ job_id: "h2", start_date: "2026-10-05", end_date: "2026-10-05" });
-    expect(await actions.placeJobOnDay("h2", "2026-10-05", "13:00")).toEqual({ ok: true, defaulted: true });
+    expect(await actions.placeJobOnDay("h2", "2026-10-05", "13:00")).toEqual({ ok: true, defaulted: true, prior: expect.any(Object) });
     expect(job("h2")).toMatchObject({ scheduled_start: at("2026-10-05", "13:00"), scheduled_end: at("2026-10-05", "15:00") });
   });
 

@@ -22,7 +22,10 @@ describe("pdfPreviewBackHref", () => {
     expect(pdfPreviewBackHref("quote", ID, "")).toBe(`/quotes/${ID}`);
     expect(pdfPreviewBackHref("work-order", ID, "")).toBe(`/work-orders/${ID}`);
     expect(pdfPreviewBackHref("material-list", ID, "")).toBe(`/materials/${ID}`);
-    expect(pdfPreviewBackHref("change-order", ID, "")).toBe("/change-orders");
+    // No list of change orders any more (W2-12): the id is the change order's, so Jobs, never a
+    // path built from it. The job's own door passes back=, which wins.
+    expect(pdfPreviewBackHref("change-order", ID, "")).toBe("/jobs");
+    expect(pdfPreviewBackHref("change-order", ID, `/jobs/${ID}?tab=change-orders`)).toBe(`/jobs/${ID}?tab=change-orders`);
     expect(pdfPreviewBackHref("prelim-notice", ID, "")).toBe(`/jobs/${ID}`);
     expect(pdfPreviewBackHref("panel", ID, "")).toBe(`/jobs/${ID}?tab=panel`);
   });

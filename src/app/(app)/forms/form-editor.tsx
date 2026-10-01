@@ -204,9 +204,9 @@ export function FormEditor({
             onChange={(e) => setIsInspection(e.target.checked)}
           />
           <span>
-            <span className="font-medium">Use as an inspection sheet</span>
+            <span className="font-medium">Use as a walk-through sheet</span>
             <span className="mt-0.5 block text-xs text-slate-400">
-              Adds these questions to the inspection page so measurements are captured as numbers and carry
+              Adds these questions to the walk-through so measurements are captured as numbers and carry
               straight into an estimate.
             </span>
           </span>

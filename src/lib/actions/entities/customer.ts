@@ -106,7 +106,7 @@ export const customerActions: Record<string, ActionDef> = {
       state: z.string().nullable().optional(),
       zip: z.string().nullable().optional(),
       notes: z.string().nullable().optional(),
-      type: z.enum(["residential", "commercial", "industrial", "subcontractor"]).optional(),
+      type: z.enum(["residential", "commercial", "industrial", "subcontractor", "contractor"]).optional(),
     }),
     auth: "staff",
     effect: "write",
@@ -151,7 +151,7 @@ export const customerActions: Record<string, ActionDef> = {
       state: z.string().nullable().optional(),
       zip: z.string().nullable().optional(),
       notes: z.string().nullable().optional(),
-      type: z.enum(["residential", "commercial", "industrial", "subcontractor"]).optional(),
+      type: z.enum(["residential", "commercial", "industrial", "subcontractor", "contractor"]).optional(),
       // Not a column: the user already said no to linking this person to a visit, so the update
       // carries no link offer (a no writes nothing, so only Nort can tell the server).
       declined_link: z.boolean().optional(),

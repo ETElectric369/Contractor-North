@@ -42,6 +42,15 @@ import {
 import { foldWaitingRows, readNeedsYouWaits, waitKey, type NeedsYouWaits } from "./needs-you-waits";
 import { codeCount, isTrayPaper, rollUpPiles, sqlCount, type PileCount } from "./piles";
 import { firstNameOf, jobWords } from "./words";
+import {
+  DONE_NOT_BILLED_RPC,
+  DONE_UNREAD_ITEM,
+  doneRowItems,
+  doneRowsCount,
+  isMissingDoneRpc,
+  legacyDoneItems,
+  type DoneRow,
+} from "./done-not-billed";
 import type { PaperTie } from "@/lib/job-photos";
 
 /**
@@ -126,6 +135,16 @@ export function getActionItems(ctx: {
 }
 
 type Read = { data: any[] | null; error?: unknown; count?: number | null };
+
+/** Done, Not Billed's one read (0371), or the two it replaced before 0371 is applied. */
+type DoneRead =
+  | { mode: "rpc"; rows: DoneRow[] }
+  | { mode: "legacy"; doneWork: Read; doneJobs: Read }
+  | { mode: "failed" }
+  | { mode: "none" };
+
+/** Said to the ops sink ONCE per server, not on every page's badge, while 0371 isn't applied. */
+let doneRpcMissingSaid = false;
 
 /** An embed PostgREST may hand back as one row or a one-row array. */
 const one = <T,>(v: T | T[] | null | undefined): T | null => (Array.isArray(v) ? (v[0] ?? null) : (v ?? null));
@@ -278,33 +297,55 @@ async function buildActionItems(ctx: {
           .limit(100),
       )
     : empty;
-  // ── Service calls / job-days that HAPPENED and have no bill — THE NORA HOLE ──
-  const doneWorkP: Promise<Read> = isStaff
-    ? floor(60).then((from) =>
-        supabase
-          .from("appointments")
-          .select("id, type, title, status, starts_at, job_id, customers(name), inquiries(name)", { count: "exact" })
-          .eq("absorbed", false)
-          .in("type", ["service_call", "job"])
-          .eq("status", "completed")
-          .gte("starts_at", dayStartIso(from))
-          .order("starts_at", { ascending: false })
-          .limit(100),
-      )
-    : empty;
-  // THE JOB-SHAPED NORA HOLE: a job flipped to complete through the status dropdown earned money
-  // the appointment feeder can never see (below).
-  const doneJobsP: Promise<Read> = isStaff
-    ? floor(30).then((from) =>
-        supabase
-          .from("jobs")
-          .select("id, job_number, name, status, updated_at, customers(name)", { count: "exact" })
-          .eq("status", "complete")
-          .gte("updated_at", dayStartIso(from))
-          .order("updated_at", { ascending: false })
-          .limit(50),
-      )
-    : empty;
+  // ── Service calls / job-days that HAPPENED and have no bill — THE NORA HOLE — and THE JOB-SHAPED
+  // NORA HOLE (a job flipped to complete through the status dropdown earned money the visits never
+  // show). READ WHOLE (0371, done-not-billed.ts): public.needs_you_done_not_billed tests billed-or-not
+  // in SQL over every row since the floors and hands back the unbilled ones OLDEST first with their
+  // true count, so a cut never drops the oldest earned work. Same floors as the two reads it replaced
+  // (the org's midnight of each). Before 0371 (the code deploys first): those two reads, unchanged,
+  // said once to the ops sink. Any other failure: a Couldn't Check line, never a quiet zero.
+  const doneP: Promise<DoneRead> = isStaff
+    ? Promise.all([floor(60), floor(30)]).then(async ([visitFrom, jobFrom]): Promise<DoneRead> => {
+        try {
+          const r = await supabase.rpc(DONE_NOT_BILLED_RPC, { p_visit_from: dayStartIso(visitFrom), p_job_from: dayStartIso(jobFrom) });
+          if (!r.error) return { mode: "rpc", rows: Array.isArray(r.data) ? (r.data as DoneRow[]) : [] };
+          if (!isMissingDoneRpc(r.error)) {
+            reportError("action-items.doneNotBilled", r.error);
+            return { mode: "failed" };
+          }
+          if (!doneRpcMissingSaid) {
+            doneRpcMissingSaid = true;
+            reportError("action-items.doneNotBilled.needs0371", r.error);
+          }
+          const [doneWork, doneJobs] = (await Promise.all([
+            supabase
+              .from("appointments")
+              .select("id, type, title, status, starts_at, job_id, customers(name), inquiries(name)", { count: "exact" })
+              .eq("absorbed", false)
+              .in("type", ["service_call", "job"])
+              .eq("status", "completed")
+              .gte("starts_at", dayStartIso(visitFrom))
+              .order("starts_at", { ascending: false })
+              .limit(100),
+            supabase
+              .from("jobs")
+              .select("id, job_number, name, status, updated_at, customers(name)", { count: "exact" })
+              .eq("status", "complete")
+              .gte("updated_at", dayStartIso(jobFrom))
+              .order("updated_at", { ascending: false })
+              .limit(50),
+          ])) as [Read, Read];
+          if (doneWork.error || doneJobs.error) {
+            reportError("action-items.doneNotBilled.legacy", doneWork.error ?? doneJobs.error);
+            return { mode: "failed" };
+          }
+          return { mode: "legacy", doneWork, doneJobs };
+        } catch (e) {
+          reportError("action-items.doneNotBilled", e);
+          return { mode: "failed" };
+        }
+      })
+    : Promise.resolve({ mode: "none" });
 
   // THE HELD JOBS (NY-hold, 0366): every job on hold, with its reason, its day and who held it (the
   // profile through jobs_hold_by_fkey). A day today or earlier, or no day at all, is a Reminder on
@@ -376,9 +417,8 @@ async function buildActionItems(ctx: {
     inspR,
     inspQuoteR,
     billedJobR,
-    doneWorkR,
+    doneR,
     draftQuoteR,
-    doneJobsR,
     heldR,
     receiptsR,
     waitsR,
@@ -562,12 +602,14 @@ async function buildActionItems(ctx: {
     isStaff && feederOn("inspection_writeup", features) ? supabase.from("quotes").select("id, inquiry_id, job_id").limit(2000) : empty,
     // MONEY IS AN OUTCOME (0205): a job carrying real billing is finished. Draft invoices don't
     // count — a draft is work in progress, not a decision. (Also: an estimate draft whose job has
-    // real billing is no longer an estimate to send.) The kind rides along: a deposit or progress
-    // draw is money for work NOT done yet, so the two needs-a-day feeders read a narrower set.
+    // real billing is no longer an estimate to send.) Done, Not Billed asks this in SQL now (0371);
+    // the walk-throughs, the estimate drafts and the deploy window's old done reads still read it.
+    // The kind rides along: a deposit or progress draw is money for work NOT done yet, so the two
+    // needs-a-day feeders read a narrower set.
     isStaff
       ? supabase.from("invoices").select("job_id, invoice_kind").not("job_id", "is", null).not("status", "in", "(draft,void)").limit(5000)
       : empty,
-    doneWorkP,
+    doneP,
     // ── Estimates started and never sent ───────────────────────────────────────
     // The first autosave stamps the lead converted, so an abandoned draft takes the LEAD off every
     // list with it. Older than 2 days: a draft he's actively building today isn't nagging material.
@@ -581,12 +623,11 @@ async function buildActionItems(ctx: {
           .order("created_at", { ascending: true })
           .limit(50)
       : empty,
-    doneJobsP,
     heldP,
     receiptsP,
     waitsP,
   ])) as [
-    Read, Read, Read, Read, Read, Read, Read & { noFollowUp?: boolean; later?: Read }, Read, Read, Read, Read, Read, Read, Read, Read, Read, Read, Read, Read, Read, Read, Read,
+    Read, Read, Read, Read, Read, Read, Read & { noFollowUp?: boolean; later?: Read }, Read, Read, Read, Read, Read, Read, Read, Read, Read, Read, Read, Read, DoneRead, Read,
     Read & { withDay: boolean }, Read | null, NeedsYouWaits,
   ];
 
@@ -684,7 +725,7 @@ async function buildActionItems(ctx: {
       items.push({
         id: a.id,
         kind: "inspection_writeup",
-        title: a.title || "Site inspection",
+        title: a.title || "Walk-Through",
         subtitle: who,
         who: null,
         // The DAY IT HAPPENED, not a due date — how long this has been sitting is the pressure.
@@ -887,8 +928,9 @@ async function buildActionItems(ctx: {
 
   // ── WORK DONE, NO BILL (the Nora hole). A completed service call or job-day with no invoice
   //    anchored to it and no billing on its job is money already earned and not yet asked for.
-  //    A hold never quiets it (money is never hidden).
-  const doneVisitIds = ((doneWorkR.data ?? []) as { id: string }[]).map((a) => String(a.id));
+  //    A hold never quiets it (money is never hidden). With 0371 the database answers which are
+  //    unbilled; only the deploy window's old reads need the anchored invoices read below.
+  const doneVisitIds = doneR.mode === "legacy" ? ((doneR.doneWork.data ?? []) as { id: string }[]).map((a) => String(a.id)) : [];
 
   // ── THE SECOND WAVE: every read that needs a first-wave answer, side by side. ──
   const worked = rollupWorkedJobs((recentTimeR.data ?? []) as any[], todayStr);
@@ -929,8 +971,9 @@ async function buildActionItems(ctx: {
   const countIds = [...new Set([...needDayIds, ...heldRows.map((j) => String(j.id))])].filter((id) => !previewIds.includes(id));
 
   const [settledR, futureApptR, previewListsR, countListsR, wBillsR, wPosR, wInvR, wJobsR, tiesR, peopleR] = await Promise.all([
-    // The settled signal for done visits: an invoice anchored to the visit (0233). amount_paid rides
-    // along because ANCHORED IS NOT PAID ("collect later" anchors a bill with zero collected).
+    // The settled signal for done visits, BEFORE 0371 ONLY (the function asks it in SQL): an invoice
+    // anchored to the visit (0233). amount_paid rides along because ANCHORED IS NOT PAID ("collect
+    // later" anchors a bill with zero collected).
     doneVisitIds.length && isStaff
       ? inChunks(doneVisitIds, (ids) =>
           supabase.from("invoices").select("id, appointment_id, amount_paid").in("appointment_id", ids).neq("status", "void").limit(400),
@@ -1011,61 +1054,34 @@ async function buildActionItems(ctx: {
   const toBuyCount = new Map([...toBuyByJob].map(([id, lines]) => [id, lines.length]));
 
   // ── Done visits and done jobs, no bill (visit_unbilled). ──
+  // Only what depends on OTHER rows of this build is decided here (done-not-billed.ts): a visit whose
+  // open invoice is already a Late Invoices row (one balance, one row), and a finished job whose bill
+  // is a draft on Now ("Draft invoice INV-081", or "… Finished · Send INV-081": that row, with its
+  // Send It, is the job's one row). THE JOB-SHAPED NORA HOLE rides the same kind: a job flipped to
+  // complete through the status dropdown (finishJob bills atomically; the dropdown doesn't).
   {
-    const settled = new Set<string>();
-    const billedUnpaid = new Map<string, string>(); // appointment id → invoice id
-    for (const r of (settledR.data ?? []) as { id: string; appointment_id: string | null; amount_paid: number | null }[]) {
-      if (!r.appointment_id) continue;
-      if (Number(r.amount_paid ?? 0) > 0) settled.add(String(r.appointment_id));
-      else billedUnpaid.set(String(r.appointment_id), r.id);
+    const seen = { overdueEmitted, draftOnNowJobs };
+    if (doneR.mode === "rpc") {
+      items.push(...doneRowItems(doneR.rows, seen));
+      // "N+" only when the function counted more unbilled rows than it handed back.
+      counts.done_not_billed = doneRowsCount(doneR.rows);
+    } else if (doneR.mode === "legacy") {
+      // Before 0371: today's rules on today's reads, which drop rows in code (settled, billed), so
+      // "N+" when either read didn't bring every candidate.
+      items.push(
+        ...legacyDoneItems({
+          doneWork: (doneR.doneWork.data ?? []) as any[],
+          doneJobs: (doneR.doneJobs.data ?? []) as any[],
+          settled: (settledR.data ?? []) as { id: string; appointment_id: string | null; amount_paid: number | null }[],
+          billedJobs,
+          seen,
+        }),
+      );
+      counts.done_not_billed = codeCount(doneR.doneWork).capped || codeCount(doneR.doneJobs).capped ? { capped: true } : {};
+    } else if (doneR.mode === "failed") {
+      // A lost read claims nothing: one Couldn't Check line, never a quiet zero.
+      items.push(DONE_UNREAD_ITEM);
     }
-    for (const a of (doneWorkR.data ?? []) as any[]) {
-      if (settled.has(String(a.id))) continue;
-      if (a.job_id && billedJobs.has(a.job_id)) continue;
-      const who = one(a.customers as any)?.name ?? one(a.inquiries as any)?.name ?? null;
-      const openInvoice = billedUnpaid.get(String(a.id));
-      // ONE balance, ONE row: once the anchored invoice ages into invoice_overdue, it isn't twice.
-      if (openInvoice && overdueEmitted.has(openInvoice)) continue;
-      items.push({
-        id: `unbilled-${a.id}`,
-        kind: "visit_unbilled",
-        // Its chip says the state it is in: billed and waiting on the money, or not billed at all.
-        ...(openInvoice ? { chip: "Billed, Not Paid" } : {}),
-        title: a.title || "Work done",
-        subtitle: who,
-        who: null,
-        when: a.starts_at ?? null,
-        urgency: 1, // earned and unasked-for ages worse than a draft
-        done: false,
-        // Billed → the open invoice (Get Paid); not billed → the job's Invoices tab, or the visit
-        // (which carries Pay now) when it has no job (Bill It).
-        href: openInvoice ? `/billing/${openInvoice}` : a.job_id ? `/jobs/${a.job_id}?tab=invoices` : `/appointments/${a.id}`,
-        affordances: AFFORDANCES.visit_unbilled,
-      });
-    }
-    /* THE JOB-SHAPED NORA HOLE. A job flipped to complete through the status dropdown (finishJob
-       bills atomically; the dropdown doesn't) earned money the appointment feeder above can never
-       see. Same kind, same question, same Bill It on the other end — the job page's. */
-    for (const j of (doneJobsR.data ?? []) as any[]) {
-      if (billedJobs.has(j.id)) continue; // any real (non-draft, non-void) invoice settles it
-      // Its bill is already a draft on Now ("Draft invoice INV-081", or "… Finished · Send INV-081"):
-      // that row, with its Send It, is this job's one row. (A draft past the 50-row read keeps this.)
-      if (draftOnNowJobs.has(String(j.id))) continue;
-      items.push({
-        id: `jdone-${j.id}`,
-        kind: "visit_unbilled",
-        title: jobWords(j),
-        subtitle: one(j.customers as any)?.name ?? null,
-        who: null,
-        when: j.updated_at ?? null,
-        urgency: 1,
-        done: false,
-        href: `/jobs/${j.id}?tab=invoices`,
-        affordances: AFFORDANCES.visit_unbilled,
-      });
-    }
-    // Both reads drop rows in code (settled, billed): "N+" when either didn't bring every candidate.
-    counts.done_not_billed = codeCount(doneWorkR).capped || codeCount(doneJobsR).capped ? { capped: true } : {};
   }
 
   // ── ESTIMATES STARTED, NEVER SENT. An abandoned draft is a lead that will never resurface anywhere:

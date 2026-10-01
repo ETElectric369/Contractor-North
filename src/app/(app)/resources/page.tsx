@@ -23,9 +23,11 @@ export default async function ResourcesPage() {
 
   return (
     <div>
+      {/* THE ONE HOME FOR THE PEOPLE A JOB ANSWERS TO (W2-13): suppliers and subcontractors are the
+          company's vendors and live in Price List › Vendors (the form says so, office only). */}
       <PageHeader
         title="Resources"
-        description="Contacts for local building departments, inspectors, utilities, suppliers, and permit/records portals."
+        description="Building departments, inspectors, utilities, engineers and permit portals: the numbers and links the crew needs."
       />
       <ResourcesManager resources={(resources ?? []) as any} canEdit={canEdit} />
     </div>

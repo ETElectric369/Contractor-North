@@ -1,9 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CalendarClock, CalendarSync, Briefcase, ClipboardList, ListTodo, MapPin, Plus, Users, Columns3 } from "lucide-react";
+import { ChevronLeft, ChevronRight, CalendarClock, Briefcase, ClipboardList, ListTodo, MapPin, Plus, Users, Columns3 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SegmentedControl } from "@/components/ui/segmented";
 import { Card } from "@/components/ui/card";
@@ -11,8 +11,9 @@ import { usePlacement } from "../schedule/placement-context";
 import { dayTargetLabel } from "@/lib/schedule/placement-plan";
 import { dayLabel, spanLabel } from "@/lib/schedule/span-label";
 import { useEndlessStack } from "@/components/use-endless-stack";
-import { jobDayBlock } from "@/lib/schedule/job-block";
-import { crewChips, initialsOf, placeLine, spanShort, streetOf, townOf, visitPlace } from "@/lib/schedule/block-info";
+import { dayWords, jobDayBlock } from "@/lib/schedule/job-block";
+import { crewChips, placeLine, spanShort, streetOf, townOf, visitPlace, type CrewChip, type CrewDayRow } from "@/lib/schedule/block-info";
+import { jobWords } from "@/lib/action-items/words";
 import { CrewInitials } from "@/components/crew-initials";
 import { ownHoursByJobDay } from "@/lib/schedule/segment-hours";
 import { ScheduleTileSheet, type TileTarget } from "../schedule/tile-sheet";
@@ -26,7 +27,6 @@ import { hmToMin, todayStrInTz, tzMinutesOfDay } from "@/lib/tz";
 import { formatTime } from "@/lib/utils";
 import { firstNameOf } from "@/lib/employee-color";
 import { shiftApptToDay } from "@/lib/appt-time";
-import { placeJobOnDay, unplaceJob } from "../schedule/actions";
 import { rescheduleAppointment } from "../appointments/actions";
 import { updateTask, type TaskCategory } from "../tasks/actions";
 import { taskHref } from "@/lib/task-href";
@@ -37,20 +37,40 @@ import { jobLabel } from "@/lib/schedule-options";
 import { appointmentTypeLabel, isInspectionType } from "@/lib/statuses";
 import { allDayEventDays } from "@/lib/gcal-map";
 import { CAL_WINDOW_BACK_DAYS, CAL_WINDOW_FWD_DAYS } from "@/lib/schedule/cal-window";
+import {
+  ghostsFor,
+  peopleWords,
+  planVsActual,
+  unpackActuals,
+  type ActualsPayload,
+  type BlockActual,
+  type PlanBlock,
+  type WorkedPerson,
+} from "@/lib/schedule/plan-vs-actual";
+import { GhostRow, ghostTitle, type GhostTarget } from "../schedule/ghost-sheet";
+import type { TimeGridActual, TimeGridDay } from "@/components/time-grid";
+import { bookedKeys, dayRange, visitDays } from "@/lib/schedule/booked-days";
 
-// THE one forward-looking time map. WHEN-DID (clocked hours) lives on
-// /timeclock + /timecards only — the old "Clocked time" layer, day-view
-// "Timecard entries" and month per-person hour chips were a second display of
-// that territory and are gone. Views are url-synced (?view=day|week|month +
-// ?date=) via SHALLOW history writes: the server preloads a wide ±window once
-// and every chevron/day tap slices it client-side — no RSC round-trip per tap.
+// THE ONE TIME MAP. Future days show what's booked; past days show what was
+// booked AND what happened, inside the same block: who clocked in as bars in
+// each person's color beside it (late, over, short), the block hollow when
+// nobody went, and a dashed ghost for work nobody booked (Wave 2, SV-actual and
+// SV-ghost: the July rule "the calendar never shows clocked time" is retired,
+// Erik 2026-09-26). No toggle, no extra layer. The timesheet (editing, pay)
+// stays on /timecards. Views are url-synced (?view=day|week|month + ?date=) via
+// SHALLOW history writes: the server preloads a wide ±window once and every
+// chevron/day tap slices it client-side — no RSC round-trip per tap.
 //
-// SAFETY (the deliberate-move law): a chip's MAIN tap OPENS its record — it is
-// never a move. There is NO armed "tap a chip, then tap a day" mode: one stray
-// tap while driving can't silently reschedule a real appointment. Every
-// reschedule goes through the MoveToDay sheet (a day-strip + Cancel) hung off a
-// small per-chip move handle, so it takes a deliberate two-step gesture inside
-// a modal. A day tap only ever drills into that day.
+// SAFETY (the deliberate-move law): a block's tap is never a move. The office's
+// tap opens the block's sheet (its day with Move, its time, its crew, Open The
+// Job inside: schedule/tile-sheet); anyone else's opens its record. There is NO
+// armed "tap a block, then tap a day" mode: one stray tap while driving can't
+// silently reschedule a real appointment. Every reschedule is two deliberate
+// steps (a day and Move in the sheet, or the MoveToDay sheet's day-strip). A day
+// tap drills into that day, UNLESS the rail has armed it: ticking waiting work
+// on the rail (Waiting For A Day) turns every day into a target that places it.
+// The old "To Schedule" tray above the grid was cut in W2-05: the rail is the one
+// door for waiting work, and its place's toast carries the Undo the tray had.
 
 export interface CalJob {
   id: string;
@@ -73,6 +93,13 @@ export interface CalJob {
 interface CalMember {
   id: string;
   full_name: string | null;
+}
+
+/** Everyone the company ever had (a chip names someone who left: "No Longer On The Team"). */
+export interface CalPerson {
+  id: string;
+  full_name: string | null;
+  active?: boolean | null;
 }
 
 export interface CalSegment {
@@ -126,17 +153,6 @@ export interface CalExternal {
   starts_at: string;
   ends_at: string | null;
   all_day: boolean;
-}
-
-/** A job with no date yet — shown in the "To schedule" tray. */
-export interface CalUnscheduled {
-  id: string;
-  job_number: string;
-  name: string;
-  customer: string | null;
-  /** Where and who, as its block and its rail card say them (absent: nothing to say). */
-  address?: string | null;
-  assigned_to?: string[] | null;
 }
 
 /** One job's presence on one day (pos = "d2/3" on multi-day spans).
@@ -194,8 +210,6 @@ const dayKey = (d: Date) => {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 };
 const isYmd = (s: string | null | undefined): s is string => /^\d{4}-\d{2}-\d{2}$/.test(s ?? "");
-const prettyYmd = (ymd: string) =>
-  new Date(`${ymd}T12:00:00`).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
 
 function startOfWeek(d: Date) {
   const r = new Date(d);
@@ -204,8 +218,77 @@ function startOfWeek(d: Date) {
   return r;
 }
 
+/**
+ * THE DAYS A JOB IS ON, ONE RULE for every surface that reads them (the week, the month, the day drill,
+ * and the past blocks what happened is matched to): SEGMENTS FIRST, each range its own run of days (so a
+ * gap between two work weeks stays empty); a job with no segments runs its listed span, each end
+ * resolved to its ORG-TZ day first (a raw evening timestamp would land on the UTC next day).
+ */
+function jobDayRanges(j: Pick<CalJob, "scheduled_start" | "scheduled_end">, segs: readonly CalSegment[] | undefined, dayOf: (iso: string) => string): string[][] {
+  // dayRange (lib/schedule/booked-days, the rule "booked" reads too) carries a backstop against a
+  // runaway loop, sized above the widest fetch window so legitimate long jobs aren't silently clipped.
+  if (segs?.length) return segs.map((s) => dayRange(s.start_date, s.end_date));
+  if (!j.scheduled_start) return [];
+  const startYmd = dayOf(j.scheduled_start);
+  const endYmd = j.scheduled_end ? dayOf(j.scheduled_end) : startYmd;
+  return [dayRange(startYmd, endYmd)];
+}
+
+/**
+ * THE DAYS A VISIT IS ON: every day it covers, not just the one it starts on (Erik: "i set it for a week
+ * … but it only showed up as 1 day"). The span was SIZED in working days (spanEnd/workingDaysFrom skip
+ * weekends), so the days after the first skip them too; the FIRST day is exempt: a visit explicitly
+ * booked on a Saturday is a Saturday visit.
+ */
+function apptSpanDays(a: Pick<CalAppt, "starts_at" | "ends_at">, dayOf: (iso: string) => string): string[] {
+  const first = dayOf(a.starts_at);
+  const last = a.ends_at ? dayOf(a.ends_at) : first;
+  return visitDays(first, last);
+}
+
+/**
+ * A VISIT'S BLOCK ON ONE DAY, in the company's clock: only the first day starts at the booked time and
+ * only the last day ends at the booked time; the days between are whole working days; no end is an hour.
+ */
+function apptDayMinutes(
+  a: Pick<CalAppt, "starts_at" | "ends_at">,
+  k: string,
+  dayOf: (iso: string) => string,
+  minOf: (iso: string) => number,
+  wd: { startMin: number; endMin: number },
+): { startMin: number; endMin: number } {
+  const firstDay = dayOf(a.starts_at) === k;
+  const lastDay = !a.ends_at || dayOf(a.ends_at) === k;
+  const startMin = firstDay ? minOf(a.starts_at) : wd.startMin;
+  let endMin = startMin + 60;
+  if (a.ends_at && new Date(a.ends_at).getTime() > new Date(a.starts_at).getTime()) {
+    endMin = lastDay ? Math.max(startMin + 15, minOf(a.ends_at)) : Math.max(startMin + 15, wd.endMin);
+  } else if (!lastDay) {
+    endMin = Math.max(startMin + 15, wd.endMin);
+  }
+  return { startMin, endMin };
+}
+
+/** A past block's worked time as the grid draws it: HOLLOW is decided before the person filter (a
+ *  block somebody else worked is "not them", never hollow); with the filter on, only that person's bars. */
+function gridActualOf(a: BlockActual | undefined, personFilter: string | null): TimeGridActual | undefined {
+  if (!a) return undefined;
+  const people = (personFilter ? a.people.filter((p) => p.profileId === personFilter) : a.people).map((p) => ({
+    key: p.profileId,
+    initials: p.initials,
+    dot: p.dot,
+    spans: p.spans,
+  }));
+  return { people, hollow: a.state === "hollow", sentence: a.sentence };
+}
+
 const PROPOSED_CONFIRM =
   "A pick-a-time link is out to the customer for this — moving it withdraws that link. Move it anyway?";
+
+// Stable empties for the optional data props: a fresh `{}` / `[]` default each render would change
+// every memo and cache keyed on them.
+const EMPTY_DAY_ROWS: Record<string, CrewDayRow[]> = {};
+const EMPTY_PEOPLE: CalPerson[] = [];
 
 // ── Time-grid pill colors (Erik wants blocks IN their time allotment) ──
 // Appointments color by TYPE; jobs stay slate so the crew's work blocks read
@@ -218,6 +301,9 @@ const APPT_GRID_TONE: Record<string, string> = {
 };
 const APPT_GRID_DEFAULT = "border-cyan-300 bg-cyan-100 text-cyan-900";
 const JOB_GRID_TONE = "border-slate-300 bg-slate-200/80 text-slate-800";
+// WORK NOBODY BOOKED (a ghost): slate, 2px dashed, white. Kept apart from a proposed visit on purpose,
+// which keeps its type's tone with a thin dashed border, faded: a ghost is never a booking's look.
+const GHOST_GRID_TONE = "border-2 border-dashed border-slate-400 bg-white/60 text-slate-700";
 const TASK_TRAY_TONE = "border-slate-300 bg-slate-100 text-slate-700";
 // Mirrored Google events: deliberately the flattest tone on the grid — real CN
 // work stays visually louder than "Erik's dentist".
@@ -249,7 +335,6 @@ export function CalendarView({
   appointments = [],
   tasks = [],
   external = [],
-  unscheduled = [],
   members = [],
   picker,
   now,
@@ -260,6 +345,10 @@ export function CalendarView({
   canEdit = false,
   perDayHours = false,
   addableJobs = [],
+  dayRows = EMPTY_DAY_ROWS,
+  people = EMPTY_PEOPLE,
+  actuals,
+  actualsCappedBefore = null,
 }: {
   jobs: CalJob[];
   segments?: CalSegment[];
@@ -267,7 +356,6 @@ export function CalendarView({
   tasks?: CalTask[];
   /** Mirrored Google events — read-only zinc pills (0132 two-way sync). */
   external?: CalExternal[];
-  unscheduled?: CalUnscheduled[];
   members?: CalMember[];
   picker: SchedulePicker;
   /** Server's "now" (ISO) — keeps SSR and first client render in sync. */
@@ -291,11 +379,20 @@ export function CalendarView({
   perDayHours?: boolean;
   /** The office's Add To Schedule list: every job still in flight (schedule/add-to-schedule-sheet). */
   addableJobs?: AddableJob[];
+  /** Everyone's Day's rows by day (crew_day_assignments, both kinds): THE DAY ROW WINS for that day on
+   *  the chips (off that day, on another job, put on for the day). Absent: the job's crew as it stands. */
+  dayRows?: Record<string, CrewDayRow[]>;
+  /** Everyone the company ever had, so a chip names a person who left. */
+  people?: CalPerson[];
+  /** What happened on past days: the clocked time as compact spans (lib/schedule/plan-vs-actual).
+   *  null: the read failed (no bars, and one quiet line says so). Absent: nothing was read. */
+  actuals?: ActualsPayload | null;
+  /** When the clocked-time read hit its cap: the first day it holds whole. Older days say "Clocked time
+   *  loads back to <date>." and are never drawn hollow (blank is not zero). */
+  actualsCappedBefore?: string | null;
 }) {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const toast = useToast();
-  const [pending, start] = useTransition();
 
   // Seed "today" from the SERVER clock so SSR and hydration agree, then correct
   // to the actual now on mount (the existing calendar pattern). The DAY is
@@ -362,10 +459,6 @@ export function CalendarView({
     nav(view, ymd);
   }
 
-  // "To schedule" tray: a collapsed one-line chip by default — the calendar
-  // grid is the point of the page, not the backlog rail.
-  const [trayOpen, setTrayOpen] = useState(false);
-
   // Person filter (the Users icon) — "who works where tomorrow" by filtering,
   // not by decoding a color legend. Client-only state; color = record TYPE.
   const [filterOpen, setFilterOpen] = useState(false);
@@ -384,20 +477,10 @@ export function CalendarView({
     );
   }, [personFilter, jobs, segments, appointments, tasks, external]);
 
-  // Undo for a tray placement — snapshot taken client-side BEFORE the write, so
-  // "Schedule" a backlog job is one deliberate pick with a safety net. (Chip
-  // moves run through the MoveToDay sheet's own confirm/error affordances.)
-  const [undo, setUndo] = useState<{ label: string; run: () => Promise<{ ok: boolean; error?: string } | void> } | null>(null);
-  useEffect(() => {
-    if (!undo) return;
-    const t = setTimeout(() => setUndo(null), 8000);
-    return () => clearTimeout(t);
-  }, [undo]);
-
   /* THE TILE'S SHEET (schedule/tile-sheet): which block was tapped, on which day. The record is looked
      up in the loaded jobs and visits at render, so the refresh after a save shows the sheet what was
      saved, and a job whose date was cleared simply leaves (and the sheet with it). */
-  const [sheet, setSheet] = useState<{ kind: "job" | "visit"; id: string; day: string } | null>(null);
+  const [sheet, setSheet] = useState<{ kind: "job" | "visit" | "ghost"; id: string; day: string } | null>(null);
 
   /* ADD TO SCHEDULE (Erik: "theres no way to add to the schedule from the schedule page unless its
      already scripted"): an open spot tapped on a day, or the day's "+", opens the sheet at that day and
@@ -418,20 +501,43 @@ export function CalendarView({
     }
     return [...byId.values()];
   }, [members, appointments]);
+  /** Job words by id ("12 Elm St · J-048"), for a chip whose person is on ANOTHER job that day. */
+  const jobNames = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const j of addableJobs) m.set(j.id, jobWords(j));
+    for (const j of jobs) m.set(j.id, jobWords(j));
+    return m;
+  }, [jobs, addableJobs]);
+  /** WHO'S ON IT THAT DAY, as chips (lib/schedule/block-info crewChips): the job's crew with that day's
+   *  Everyone's Day rows applied (the day row wins), a person who left still named. A visit carries
+   *  one person, and only an 'off' row applies to it. */
+  const jobCrewOn = useCallback(
+    (job: Pick<CalJob, "id" | "assigned_to">, day: string): CrewChip[] =>
+      crewChips(job.assigned_to, team, { rows: dayRows[day], jobId: job.id, jobNames, people }),
+    [team, dayRows, jobNames, people],
+  );
+  const visitCrewOn = useCallback(
+    (a: Pick<CalAppt, "assigned_to">, day: string): CrewChip[] =>
+      crewChips(a.assigned_to ? [a.assigned_to] : [], team, { rows: dayRows[day], jobId: null, people }),
+    [team, dayRows, people],
+  );
+  /* A block's tap: its kind and record ("job:<id>", "visit:<id>", "ghost:<job id>") and the day. One
+     sheet per block: a ghost opens inside the same sheet (schedule/ghost-sheet). */
   const onEventTap = useCallback((tapId: string, day: string) => {
     const [kind, id] = tapId.split(":");
-    if ((kind === "job" || kind === "visit") && id) setSheet({ kind, id, day });
+    if ((kind === "job" || kind === "visit" || kind === "ghost") && id) setSheet({ kind, id, day });
   }, []);
-  const sheetTarget = useMemo<TileTarget | null>(() => {
-    if (!sheet) return null;
-    if (sheet.kind === "job") {
-      const job = jobs.find((j) => j.id === sheet.id);
-      // The tapped day's own hours ride along: the sheet's time is This Day's (0370).
-      return job ? { kind: "job", day: sheet.day, job, dayHours: ownHours.get(job.id)?.get(sheet.day) ?? null } : null;
+
+  /** Each job's segments, by job: the days it is on (segments first), for the grid, the towns and the
+   *  past blocks what happened is matched to. */
+  const segByJob = useMemo(() => {
+    const m = new Map<string, CalSegment[]>();
+    for (const s of segments) {
+      if (!m.has(s.job_id)) m.set(s.job_id, []);
+      m.get(s.job_id)!.push(s);
     }
-    const visit = appointments.find((a) => a.id === sheet.id);
-    return visit ? { kind: "visit", day: sheet.day, visit } : null;
-  }, [sheet, jobs, appointments, ownHours]);
+    return m;
+  }, [segments]);
 
   const byDay = useMemo(() => {
     const m = new Map<string, DayData>();
@@ -450,24 +556,9 @@ export function CalendarView({
       /* ON EVERY DAY IT COVERS, not just the one it starts on. Erik: "i set it for a week … but it
          only showed up as 1 day." A booking was filed under its start day alone, so a Monday-to-
          Friday job was drawn on Monday and Tuesday through Friday looked free — which is the
-         overbooking the sizes exist to prevent, on the days he is most likely to fill. */
-      const first = dayOf(a.starts_at);
-      const last = a.ends_at ? dayOf(a.ends_at) : first;
-      get(first).appts.push(a);
-      if (isYmd(first) && isYmd(last) && last > first) {
-        const d = new Date(`${first}T12:00:00`);
-        for (let i = 0; i < 60; i++) {
-          d.setDate(d.getDate() + 1);
-          // The span was SIZED in working days (spanEnd/workingDaysFrom skip weekends), so the
-          // draw skips them too — a 3-day visit booked Friday runs Fri+Mon+Tue, and Saturday
-          // stays blank instead of wearing a pill nobody scheduled. The FIRST day is exempt
-          // above: a visit explicitly booked on a Saturday is a Saturday visit.
-          if (d.getDay() === 0 || d.getDay() === 6) continue;
-          const k = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-          if (k > last) break;
-          get(k).appts.push(a);
-        }
-      }
+         overbooking the sizes exist to prevent, on the days he is most likely to fill. The days
+         after the first skip weekends (apptSpanDays: the span was sized in working days). */
+      for (const k of apptSpanDays(a, dayOf)) get(k).appts.push(a);
     }
     for (const t of tasks) {
       if (pf && t.assigned_to !== pf) continue;
@@ -489,41 +580,12 @@ export function CalendarView({
       }
     }
 
-    // Segments-first day expansion: a job with segments is placed only on the
-    // days its ranges cover, so gaps (e.g. between two work weeks) stay empty.
-    const segByJob = new Map<string, CalSegment[]>();
-    for (const s of segments) {
-      if (!segByJob.has(s.job_id)) segByJob.set(s.job_id, []);
-      segByJob.get(s.job_id)!.push(s);
-    }
-    const pushSpan = (j: CalJob, startD: Date, endD: Date) => {
-      const d = new Date(startD);
-      d.setHours(0, 0, 0, 0);
-      const last = new Date(endD);
-      last.setHours(0, 0, 0, 0);
-      // Backstop against a runaway loop; sized above the widest fetch window
-      // so legitimate long jobs aren't silently clipped.
-      const keys: string[] = [];
-      let guard = 0;
-      while (d <= last && guard++ < 540) {
-        keys.push(dayKey(d));
-        d.setDate(d.getDate() + 1);
-      }
-      keys.forEach((k, i) => get(k).jobs.push({ job: j, pos: keys.length > 1 ? `d${i + 1}/${keys.length}` : null }));
-    };
+    // Segments-first day expansion (jobDayRanges): a job with segments is placed only on the days its
+    // ranges cover, so gaps (e.g. between two work weeks) stay empty; "d2/3" counts within its range.
     for (const j of jobs) {
       if (pf && !(j.assigned_to ?? []).includes(pf)) continue;
-      const segs = segByJob.get(j.id);
-      if (segs?.length) {
-        for (const s of segs) pushSpan(j, new Date(`${s.start_date}T00:00:00`), new Date(`${s.end_date}T00:00:00`));
-      } else if (j.scheduled_start) {
-        // scheduled_start/_end are INSTANTS: resolve each to its ORG-TZ day
-        // first, then hand pushSpan pure local-midnight day anchors. Feeding
-        // the raw timestamps in put an evening-scheduled Pacific job on the
-        // UTC (next) day when server-rendered.
-        const startYmd = dayOf(j.scheduled_start);
-        const endYmd = j.scheduled_end ? dayOf(j.scheduled_end) : startYmd;
-        pushSpan(j, new Date(`${startYmd}T00:00:00`), new Date(`${endYmd < startYmd ? startYmd : endYmd}T00:00:00`));
+      for (const keys of jobDayRanges(j, segByJob.get(j.id), dayOf)) {
+        keys.forEach((k, i) => get(k).jobs.push({ job: j, pos: keys.length > 1 ? `d${i + 1}/${keys.length}` : null }));
       }
     }
 
@@ -533,35 +595,9 @@ export function CalendarView({
     }
     return m;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [jobs, segments, appointments, tasks, external, personFilter, tz]);
+  }, [jobs, segByJob, appointments, tasks, external, personFilter, tz]);
 
-  /** Place a backlog (dateless) job on a day — the tray's "Schedule" gesture,
-   *  routed to placeJobOnDay (a needs-return job keeps its worked-history
-   *  segments as history; the new day is its plan). Runs inside the MoveToDay sheet, so it's already
-   *  a deliberate two-step pick. Undo takes the plan off again (unplaceJob) and leaves the history:
-   *  a tray job had no day, and writing its history back as ranges made a worked day its plan.
-   *  Returns the MoveToDay result shape so the sheet reports errors inline. */
-  async function placeOnDay(job: CalUnscheduled, targetYmd: string) {
-    const res = await placeJobOnDay(job.id, targetYmd);
-    if (!res.ok) return res;
-    setUndo({ label: `${job.name} → ${prettyYmd(targetYmd)}`, run: () => unplaceJob(job.id) });
-    router.refresh();
-    return res;
-  }
-
-  function runUndo() {
-    if (!undo || pending) return;
-    const u = undo;
-    setUndo(null);
-    start(async () => {
-      const res = await u.run();
-      if (res && !res.ok) return toast(res.error ?? "Couldn't undo — check the schedule.", "error");
-      toast("Put back where it was.", "success");
-      router.refresh();
-    });
-  }
-
-  /** A day tap only ever drills into that day — never a move. */
+  /** A day tap drills into that day, unless the rail has armed it (then it places the picked work). */
   const target = useDayTarget();
 
   /* THE SAME TAP, TWO MEANINGS — and the armed one wins. Armed, a day places the picked work;
@@ -587,6 +623,169 @@ export function CalendarView({
   const wdStartMin = hmToMin(workDayStart);
   const wdEndMin = Math.max(wdStartMin + 60, hmToMin(workDayEnd));
 
+  /** A job's block on day `k` as the grid draws it (lib/schedule/job-block jobDayBlock: its own hours
+   *  that day when it keeps them, else its usual hours), never zero-length. */
+  const jobBlockOn = useCallback(
+    (job: CalJob, k: string) => {
+      const b = jobDayBlock({
+        day: k,
+        scheduledStart: job.scheduled_start,
+        scheduledEnd: job.scheduled_end,
+        plannedMinutes: job.planned_minutes,
+        tz,
+        wd: { startMin: wdStartMin, endMin: wdEndMin },
+        dayHours: ownHours.get(job.id)?.get(k) ?? null,
+      });
+      return { startMin: b.startMin, endMin: b.endMin > b.startMin ? b.endMin : b.startMin + 60 };
+    },
+    [tz, wdStartMin, wdEndMin, ownHours],
+  );
+
+  /* ── WHAT HAPPENED (Wave 2, SV-actual) ───────────────────────────────────────────────────────────
+     The past days' clocked time, matched to EXACTLY the blocks the grid draws (every job's days, each
+     by its own hours; every visit on a job), for EVERYONE: hollow is decided before the person filter.
+     Only days that are loaded whole are judged; with no clocked time in the window at all (a company
+     that doesn't use the clock), nothing is: missing data is never "nobody went". */
+  const spans = useMemo(() => unpackActuals(actuals), [actuals]);
+  const clockInUse = spans.length > 0;
+  /** Is this past day's clocked time loaded whole (so a block with none of it is truly hollow)? */
+  const actualsWhole = useCallback(
+    (k: string) => clockInUse && k < todayK && (!actualsCappedBefore || k >= actualsCappedBefore),
+    [clockInUse, todayK, actualsCappedBefore],
+  );
+  const pastBlocks = useMemo(() => {
+    const out: PlanBlock[] = [];
+    const seen = new Set<string>();
+    const add = (b: PlanBlock) => {
+      if (seen.has(b.key) || !actualsWhole(b.dayStr)) return;
+      seen.add(b.key);
+      out.push(b);
+    };
+    for (const job of jobs) {
+      for (const keys of jobDayRanges(job, segByJob.get(job.id), dayOf)) {
+        for (const k of keys) {
+          if (k >= todayK || k < winFrom) continue;
+          add({ key: `j-${job.id}-${k}`, jobId: job.id, dayStr: k, ...jobBlockOn(job, k), kind: "job" });
+        }
+      }
+    }
+    for (const a of appointments) {
+      // Drawn visits only: not absorbed into their job, not a call (a call is pinned, not a block).
+      if ((a as { absorbed?: boolean }).absorbed || a.type === "call" || !a.job_id) continue;
+      for (const k of apptSpanDays(a, dayOf)) {
+        if (k >= todayK || k < winFrom) continue;
+        add({ key: `a-${a.id}-${k}`, jobId: a.job_id, dayStr: k, ...apptDayMinutes(a, k, dayOf, minOf, { startMin: wdStartMin, endMin: wdEndMin }), kind: "visit" });
+      }
+    }
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jobs, segByJob, appointments, jobBlockOn, actualsWhole, todayK, winFrom, tz, wdStartMin, wdEndMin]);
+  const pva = useMemo(
+    () => (clockInUse ? planVsActual({ blocks: pastBlocks, spans, todayStr: todayK }) : null),
+    [clockInUse, pastBlocks, spans, todayK],
+  );
+  /** A past day's worked time for the day drill's card (the track under the block): the booked span
+   *  and who clocked in (person-filtered, like the grid), with the sentence. Null when not judged. */
+  const dayActualFor = useCallback(
+    (job: CalJob, k: string) => {
+      if (!actualsWhole(k)) return null;
+      const a = pva?.byKey.get(`j-${job.id}-${k}`);
+      if (!a) return null;
+      return {
+        booked: jobBlockOn(job, k),
+        people: personFilter ? a.people.filter((p) => p.profileId === personFilter) : a.people,
+        sentence: a.sentence,
+      };
+    },
+    [actualsWhole, pva, personFilter, jobBlockOn],
+  );
+  /* ── WORK NOBODY BOOKED (Wave 2, SV-ghost) ────────────────────────────────────────────────────────
+     A job's past day with clocked time and NO booking that day draws as a dashed ghost. "Booked" is
+     read from the raw rows (lib/schedule/booked-days), never from what the grid draws after the person
+     filter. Only days loaded whole; today and later never get one. */
+  const booked = useMemo(() => bookedKeys({ segments, jobs, appointments, tz }), [segments, jobs, appointments, tz]);
+  /** The jobs the clocked time names (its job embed): a ghost can name a job the window's reads didn't bring. */
+  const actualJobs = useMemo(() => new Map((actuals?.jobs ?? []).map((j) => [j.id, j])), [actuals]);
+  const ghostsByDay = useMemo(() => {
+    const m = new Map<string, GhostTarget[]>();
+    if (!clockInUse) return m;
+    for (const g of ghostsFor(spans, booked, todayK)) {
+      if (!actualsWhole(g.dayStr) || g.dayStr < winFrom) continue;
+      const known = actualJobs.get(g.jobId);
+      const job = jobs.find((j) => j.id === g.jobId);
+      const t: GhostTarget = {
+        jobId: g.jobId,
+        name: known?.name ?? job?.name ?? "A Job",
+        jobNumber: known?.job_number ?? job?.job_number ?? null,
+        customer: known?.customer ?? job?.customers?.name ?? null,
+        people: g.people,
+      };
+      m.set(g.dayStr, [...(m.get(g.dayStr) ?? []), t]);
+    }
+    return m;
+  }, [clockInUse, spans, booked, todayK, actualsWhole, winFrom, actualJobs, jobs]);
+  /* The tapped block's sheet target, looked up in what's loaded now (so the refresh after a save shows
+     the sheet what was saved; a job whose date was cleared, or a ghost booked into a real block, simply
+     leaves, and the sheet with it). */
+  const sheetTarget = useMemo<TileTarget | null>(() => {
+    if (!sheet) return null;
+    if (sheet.kind === "job") {
+      const job = jobs.find((j) => j.id === sheet.id);
+      // The tapped day's own hours ride along: the sheet's time is This Day's (0370). So does the crew
+      // as that day's rows leave it: the sheet says who is off or on another job that day.
+      return job
+        ? { kind: "job", day: sheet.day, job, dayHours: ownHours.get(job.id)?.get(sheet.day) ?? null, dayCrew: jobCrewOn(job, sheet.day) }
+        : null;
+    }
+    if (sheet.kind === "ghost") {
+      const ghost = (ghostsByDay.get(sheet.day) ?? []).find((g) => g.jobId === sheet.id);
+      return ghost ? { kind: "ghost", day: sheet.day, ghost } : null;
+    }
+    const visit = appointments.find((a) => a.id === sheet.id);
+    return visit ? { kind: "visit", day: sheet.day, visit } : null;
+  }, [sheet, jobs, appointments, ownHours, jobCrewOn, ghostsByDay]);
+  /** A day's ghosts as the person filter leaves them: one shows only when that person has time in it,
+   *  and only their bars. */
+  const ghostsOn = useCallback(
+    (k: string): GhostTarget[] =>
+      (ghostsByDay.get(k) ?? []).flatMap((g) => {
+        if (!personFilter) return [g];
+        const mine = g.people.filter((p) => p.profileId === personFilter);
+        return mine.length ? [{ ...g, people: mine }] : [];
+      }),
+    [ghostsByDay, personFilter],
+  );
+  /** The past job days with no time clocked TO THEM (the month's hollow tone). */
+  const hollowKeys = useMemo(() => {
+    const out = new Set<string>();
+    for (const [key, a] of pva?.byKey ?? []) if (a.state === "hollow" && key.startsWith("j-")) out.add(key);
+    return out;
+  }, [pva]);
+
+  /** THE DAY'S GHOSTS, dashed, as the person filter leaves them: the job's name on top, who it's for
+   *  under it, the bars of who worked it; a tap opens it in the one sheet (the office), or the job. */
+  function pushGhosts(k: string, events: TimeGridEvent[]) {
+    for (const g of ghostsOn(k)) {
+      const ends = g.people.flatMap((p) => p.spans.map((s) => s.endMin));
+      const startMin = Math.min(...g.people.map((p) => p.startMin));
+      const endMin = Math.max(startMin + 15, ...ends);
+      const who = String(g.customer ?? "").trim();
+      events.push({
+        id: `g-${g.jobId}-${k}`,
+        dayStr: k,
+        startMin,
+        endMin,
+        label: g.name,
+        sub: who && ghostTitle(g) !== g.name ? who : null,
+        color: GHOST_GRID_TONE,
+        ghost: true,
+        actual: { people: g.people.map((p) => ({ key: p.profileId, initials: p.initials, dot: p.dot, spans: p.spans })), sentence: peopleWords(g.people) },
+        href: `/jobs/${g.jobId}`,
+        ...(canEdit ? { tapId: `ghost:${g.jobId}` } : {}),
+      });
+    }
+  }
+
   /** One day's grid pills + all-day tray items. Jobs take their scheduled
    *  window — an explicit (non-sentinel) start time on their start day — or
    *  the org work-day window when all-day; appointments run starts_at →
@@ -599,41 +798,44 @@ export function CalendarView({
     const data = byDay.get(k);
     const events: TimeGridEvent[] = [];
     const tray: TimeGridAllDay[] = [];
-    if (!data) return { events, allDay: tray };
+    if (!data) {
+      // A day nothing was booked on can still have been worked.
+      pushGhosts(k, events);
+      return { events, allDay: tray };
+    }
+    /* A PAST DAY LOADED WHOLE shows what happened (the bars, hollow) instead of the crew as planned;
+       today and later, and a past day whose clocked time isn't loaded, show who's on it. */
+    const judged = actualsWhole(k);
     for (const { job, pos } of data.jobs) {
       /* THE BLOCK IS WHAT WAS SAVED: its start, and the end its length gives it, in the org's clock
          (lib/schedule/job-block jobDayBlock, the one rule the writer, the fitter and the time
-         controls share). THE SENTINEL NEEDS BOTH ENDS (Nora's 9–11 at a 9 o'clock shop is timed); a
-         sized job never draws the closing-time stamp older writes put on every end; a job over
-         several days draws its hours on each of them. A DAY WITH ITS OWN HOURS (0370) draws exactly those. */
-      const b = jobDayBlock({
-        day: k,
-        scheduledStart: job.scheduled_start,
-        scheduledEnd: job.scheduled_end,
-        plannedMinutes: job.planned_minutes,
-        tz,
-        wd: { startMin: wdStartMin, endMin: wdEndMin },
-        dayHours: ownHours.get(job.id)?.get(k) ?? null,
-      });
-      const endMin = b.endMin > b.startMin ? b.endMin : b.startMin + 60;
+         controls share; jobBlockOn). THE SENTINEL NEEDS BOTH ENDS (Nora's 9–11 at a 9 o'clock shop
+         is timed); a sized job never draws the closing-time stamp older writes put on every end; a
+         job over several days draws its hours on each of them. A DAY WITH ITS OWN HOURS (0370) draws
+         exactly those. */
+      const { startMin, endMin } = jobBlockOn(job, k);
+      const id = `j-${job.id}-${k}`;
+      const actual = judged ? gridActualOf(pva?.byKey.get(id), personFilter) : undefined;
       events.push({
-        id: `j-${job.id}-${k}`,
+        id,
         dayStr: k,
-        startMin: b.startMin,
+        startMin,
         endMin,
         label: job.name,
         /* WHERE AND WHO, IN THE BLOCK (Erik: "we definitly need the address showing up on the job
            block with info too"): the street (or who, when the name is the street), the crew as
-           initials (a dashed Nobody), the time, the town; as much as the block has room for. */
+           initials (a dashed Nobody), the time, the town; as much as the block has room for. A past
+           day's crew is what happened: its bars (below), never the plan's chips. */
         info: {
           place: placeLine({ name: job.name, street: job.address, customer: job.customers?.name })?.text ?? null,
           town: job.city ?? null,
-          time: pos ? `${spanShort(b.startMin, endMin)} · ${pos}` : spanShort(b.startMin, endMin),
-          crew: crewChips(job.assigned_to, team),
+          time: pos ? `${spanShort(startMin, endMin)} · ${pos}` : spanShort(startMin, endMin),
+          crew: judged ? null : jobCrewOn(job, k),
         },
+        ...(actual ? { actual } : {}),
         color: JOB_GRID_TONE,
         href: `/jobs/${job.id}`,
-        // Staff tap the block for its day, its time and its crew (the tile's sheet); Open Job is inside.
+        // Staff tap the block for its day, its time and its crew (the tile's sheet); Open The Job is inside.
         ...(canEdit ? { tapId: `job:${job.id}` } : {}),
       });
     }
@@ -668,17 +870,16 @@ export function CalendarView({
       // STAYED at UTC positions — the "UTC problem in the new calendars").
       /* A DAY IN THE MIDDLE OF A SPAN IS A WHOLE WORKING DAY. Only the first day starts at the
          booked time and only the last day ends at the booked time; the days between are full. */
-      const firstDay = dayOf(a.starts_at) === k;
-      const lastDay = !a.ends_at || dayOf(a.ends_at) === k;
-      const startMin = firstDay ? minOf(a.starts_at) : wdStartMin;
-      let endMin = startMin + 60;
-      if (a.ends_at && new Date(a.ends_at).getTime() > new Date(a.starts_at).getTime()) {
-        endMin = lastDay ? Math.max(startMin + 15, minOf(a.ends_at)) : Math.max(startMin + 15, wdEndMin);
-      } else if (!lastDay) {
-        endMin = Math.max(startMin + 15, wdEndMin);
-      }
+      const { startMin, endMin } = apptDayMinutes(a, k, dayOf, minOf, { startMin: wdStartMin, endMin: wdEndMin });
+      const id = `a-${a.id}-${k}`; // keyed per day — a span appears on several
+      /* A RETURN VISIT ON A JOB draws the time clocked to its job that day, unless that job has its own
+         block that day (hidden by the person filter here: the time went to the job's block). A visit is
+         NEVER drawn hollow: a city inspection or a meeting on a job is booked time nobody clocks, and
+         a hollow sentence there would be a false zero. A visit with no job is never judged. */
+      const visitActual = judged && a.job_id && !pva?.byKey.has(`j-${a.job_id}-${k}`) ? pva?.byKey.get(id) : undefined;
+      const actual = visitActual?.state === "worked" ? gridActualOf(visitActual, personFilter) : undefined;
       events.push({
-        id: `a-${a.id}-${k}`, // keyed per day — a span appears on several
+        id,
         dayStr: k,
         startMin,
         endMin,
@@ -688,14 +889,15 @@ export function CalendarView({
           place: placeLine({ name: a.title, street: streetOf(visitPlace(a)), customer: a.customers?.name ?? a.jobs?.name ?? null })?.text ?? null,
           town: townOf(visitPlace(a)) || null,
           time: spanShort(startMin, endMin),
-          crew: crewChips(a.assigned_to ? [a.assigned_to] : [], team),
+          crew: actual ? null : visitCrewOn(a, k),
         },
+        ...(actual ? { actual } : {}),
         color: apptGridColor(a),
         /* STRAIGHT TO THE THING, from every view. Erik, on a booking whose length was wrong:
            "i now have now way to adjust the time." There WAS a way — tap the pill, land in the day
            drill, find the edit pencil — but a control you have to already know about is not a way,
            it is a rumour. Staff get the tile's sheet (the day, the start, the length and who's
-           going, with Open Visit inside), so the fix is on the tap that saw the problem; the record
+           going, with Open The Visit inside), so the fix is on the tap that saw the problem; the record
            page is the href underneath. */
         href: `/appointments/${a.id}`,
         ...(canEdit ? { tapId: `visit:${a.id}` } : {}),
@@ -710,6 +912,7 @@ export function CalendarView({
         href: taskHref(t),
       });
     }
+    pushGhosts(k, events);
     // Mirrored Google events: zinc, NO href — read-only display, Google owns
     // them. All-day ones ride the tray; timed ones sit in their slot.
     for (const x of data.externals) {
@@ -793,13 +996,10 @@ export function CalendarView({
   }, [anchor, monthStack.back, monthStack.fwd]);
 
 
-  const weekGridDays = weekDays.map((d) => {
-    const k = dayKey(d);
-    return { dayStr: k, label: d.toLocaleDateString(undefined, { weekday: "short", day: "numeric" }), isToday: k === todayK };
-  });
   // Server-computed now in the ORG tz, so SSR and hydration agree on the now
-  // line; TimeGrid's own minute ticker (also org-tz via the tz prop) takes over.
-  const gridNow = { dayStr: todayStrInTz(tz, new Date(now)), min: tzMinutesOfDay(new Date(now), tz) };
+  // line; TimeGrid's own minute ticker (also org-tz via the tz prop) takes over. Memoized: a fresh
+  // object each render would defeat TimeGrid's memo on every mounted week.
+  const gridNow = useMemo(() => ({ dayStr: todayStrInTz(tz, new Date(now)), min: tzMinutesOfDay(new Date(now), tz) }), [now, tz]);
 
   /** WHERE the day's committed work is. Jobs carry a town; a walk-through's `location` is a bare
    *  street with no city, and inventing one would be worse than saying nothing. Jobs are the right
@@ -808,14 +1008,7 @@ export function CalendarView({
    *  the scheduled_start/_end mirror, so a segmented Fri+Mon+Tue job drew pills on Monday with no
    *  town under them, a two-range job advertised its town on the empty gap week, and another
    *  tech's job steered ride-along placement while the person filter hid its pill. */
-  const townSegs = useMemo(() => {
-    const m2 = new Map<string, CalSegment[]>();
-    for (const sg of segments) {
-      if (!m2.has(sg.job_id)) m2.set(sg.job_id, []);
-      m2.get(sg.job_id)!.push(sg);
-    }
-    return m2;
-  }, [segments]);
+  const townSegs = segByJob;
   const townFor = (dayStr: string): string | undefined => {
     const towns = new Set<string>();
     for (const j of jobs ?? []) {
@@ -842,6 +1035,67 @@ export function CalendarView({
 
   const dayGrid = view === "day" ? gridDataFor(anchorK, { openApptRecords: true }) : { events: [], allDay: [] };
 
+  /* ONE WEEK'S GRID DATA, BUILT ONCE PER (WEEK, DATA) (the timecard-stack pattern). The endless stack
+     re-renders on every growth, and TimeGrid's memo only bails when a mounted week's props keep their
+     identity: its days, its blocks, its tray. So each week's data lives in a cache keyed by its first
+     day, emptied only when the DATA changes (every array the blocks are drawn from, the day rows, the
+     clocked time, the person filter, the clock and the company's day), never on a growth. The key holds
+     every input's identity: a stale cache after router.refresh would draw yesterday's bars. */
+  type WeekData = { days: TimeGridDay[]; events: TimeGridEvent[]; allDay: TimeGridAllDay[]; label: string; hasToday: boolean; loadsBack: boolean };
+  const weekCacheRef = useRef<{ key: unknown[]; map: Map<string, WeekData> }>({ key: [], map: new Map() });
+  const weekData = useMemo(() => {
+    const key = [
+      jobs, segments, appointments, tasks, external, actuals, actualsCappedBefore, dayRows, people, members, addableJobs,
+      personFilter, tz, todayK, canEdit, workDayStart, workDayEnd,
+    ];
+    const cache = weekCacheRef.current;
+    if (key.length !== cache.key.length || key.some((v, i) => v !== cache.key[i])) weekCacheRef.current = { key, map: new Map() };
+    const map = weekCacheRef.current.map;
+    return stackWeeks.map((wk) => {
+      const first = dayKey(wk[0]);
+      const had = map.get(first);
+      if (had) return had;
+      const days = wk.map((d) => {
+        const k = dayKey(d);
+        return {
+          dayStr: k,
+          label: d.toLocaleDateString(undefined, { weekday: "short", day: "numeric" }),
+          isToday: k === todayK,
+          sublabel: townFor(k),
+        };
+      });
+      const events: TimeGridEvent[] = [];
+      const allDay: TimeGridAllDay[] = [];
+      for (const d of days) {
+        const g = gridDataFor(d.dayStr);
+        events.push(...g.events);
+        allDay.push(...g.allDay);
+      }
+      const built: WeekData = {
+        days,
+        events,
+        allDay,
+        label: spanLabel(wk[0], wk[6], { month: "long" }),
+        hasToday: days.some((d) => d.isToday),
+        // A week with a past day older than the loaded clocked time says so (never drawn hollow).
+        loadsBack: !!actualsCappedBefore && clockInUse && days[0].dayStr < actualsCappedBefore && days[0].dayStr < todayK,
+      };
+      map.set(first, built);
+      return built;
+    });
+    // gridDataFor and townFor read only what the key names (and what is derived from it).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stackWeeks, jobs, segments, appointments, tasks, external, actuals, actualsCappedBefore, dayRows, people, members, addableJobs, personFilter, tz, todayK, canEdit, workDayStart, workDayEnd]);
+  /** The day header's tap: drill into that day (stable, so a mounted week's grid never redraws for it). */
+  const drillInto = useCallback((ds: string) => {
+    window.history.pushState(null, "", `${window.location.pathname}?view=day&date=${ds}`);
+  }, []);
+  /** The armed day target, stable between renders (a fresh object would redraw every mounted week). */
+  const armedProp = useMemo(
+    () => (target.armed ? { label: dayTargetLabel(target.pl.armedCount), onPlace: target.pl.placeOn } : undefined),
+    [target.armed, target.pl.armedCount, target.pl.placeOn],
+  );
+
   /* THE YEAR, ALWAYS. Erik: "we have to put the year on there no way around it." Every one of
      these except the month view used to name a span with no year in it — fine when the calendar
      could only show the fortnight you had just arrived at, wrong the moment it scrolls a year in
@@ -853,25 +1107,39 @@ export function CalendarView({
         ? spanLabel(stackWeeks[0][0], stackWeeks[stackWeeks.length - 1][6])
         : dayLabel(anchor);
 
-  const iconBtn = "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg";
+  /* EVERY HEADER DOOR IS A 44px TARGET (W2-01). At 375px the row holds the three paging buttons, the
+     title and three icons (four with the day drill's ← Week), so each keeps its 32px look and takes a
+     transparent bleed to 44 (the icon-sm grammar: a ::before past every edge) rather than widening the
+     row until it scrolls sideways. Everyone's Day's icon is first: once the Timeclock page's card is cut
+     (lane 2), it is that board's only door. */
+  const iconBtn =
+    "relative flex h-8 w-8 shrink-0 items-center justify-center rounded-lg before:absolute before:-inset-1.5 before:content-['']";
 
   return (
     <div className="space-y-3">
-      {/* ROW 1 — paging + title + the two door icons (map, person filter).
-          The SectionSubnav pill above stays the ONLY brand-lit chrome. */}
+      {/* ROW 1 — paging + title + the door icons (Everyone's Day, map, person filter), every one a
+          44px target. The SectionSubnav pill above stays the ONLY brand-lit chrome. */}
       <div className="flex items-center gap-1">
-        <Button size="sm" variant="outline" onClick={() => shiftAnchor(-1)} aria-label="Previous">
+        <Button size="icon-sm" variant="outline" onClick={() => shiftAnchor(-1)} aria-label="Previous" title="Previous">
           <ChevronLeft className="h-4 w-4" />
         </Button>
-        <Button size="sm" variant="outline" onClick={() => nav(view, todayK)}>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => nav(view, todayK)}
+          className="relative overflow-visible! before:absolute before:inset-x-0 before:-inset-y-1.5 before:content-['']"
+        >
           Today
         </Button>
-        <Button size="sm" variant="outline" onClick={() => shiftAnchor(1)} aria-label="Next">
+        <Button size="icon-sm" variant="outline" onClick={() => shiftAnchor(1)} aria-label="Next" title="Next">
           <ChevronRight className="h-4 w-4" />
         </Button>
         {/* The way back out of the day drill — the PWA has no back chrome. */}
         {view === "day" && (
-          <button onClick={() => nav("week", anchorK)} className="ml-1 shrink-0 text-xs font-medium text-brand hover:underline">
+          <button
+            onClick={() => nav("week", anchorK)}
+            className="relative ml-1 shrink-0 text-xs font-medium text-brand hover:underline before:absolute before:-inset-x-1 before:-inset-y-3.5 before:content-['']"
+          >
             ← Week
           </button>
         )}
@@ -926,23 +1194,30 @@ export function CalendarView({
           calendar is color-coded by person anymore. */}
       {(filterOpen || personFilter) && (
         <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
-          <button
-            onClick={() => setPersonFilter(null)}
-            className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-medium ${
-              personFilter === null ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-            }`}
-          >
-            Everyone
+          {/* Each chip a 44px tap (the button), the pill its look (W2-01). */}
+          <button onClick={() => setPersonFilter(null)} aria-pressed={personFilter === null} className="flex h-11 shrink-0 items-center">
+            <span
+              className={`rounded-full px-2.5 py-1 text-xs font-medium ${
+                personFilter === null ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+              }`}
+            >
+              Everyone
+            </span>
           </button>
           {members.map((m) => (
             <button
               key={m.id}
               onClick={() => setPersonFilter((p) => (p === m.id ? null : m.id))}
-              className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-medium ${
-                personFilter === m.id ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-              }`}
+              aria-pressed={personFilter === m.id}
+              className="flex h-11 shrink-0 items-center"
             >
-              {firstNameOf(m.full_name)}
+              <span
+                className={`rounded-full px-2.5 py-1 text-xs font-medium ${
+                  personFilter === m.id ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                }`}
+              >
+                {firstNameOf(m.full_name)}
+              </span>
             </button>
           ))}
           {personFilter && unassignedHidden > 0 && (
@@ -951,61 +1226,11 @@ export function CalendarView({
         </div>
       )}
 
-      {/* ROW 3 — the "To schedule" tray: a collapsed amber chip (hidden at 0),
-          expanding to the backlog. Each job carries its OWN Schedule handle →
-          the MoveToDay sheet → placeJobOnDay (a UNION write, so a needs-return
-          job keeps its history segments). No arming: pick the day right there. */}
-      {unscheduled.length > 0 &&
-        (trayOpen ? (
-          <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-2">
-            <div className="mb-1.5 flex items-center justify-between px-1 text-xs">
-              <span className="font-semibold text-amber-700">To schedule · {unscheduled.length}</span>
-              <button onClick={() => setTrayOpen(false)} className="rounded p-0.5 text-amber-700 hover:bg-amber-100" aria-label="Collapse">
-                <ChevronUp className="h-3.5 w-3.5" />
-              </button>
-            </div>
-            <div className="flex gap-1.5 overflow-x-auto pb-1">
-              {unscheduled.map((j) => {
-                /* WHERE AND WHO, as its block and its rail card say them: the street (or who, when the
-                   name is the street; nothing when the name says both, never the job number), and the
-                   crew's initials, a dashed Nobody when no one is on it. */
-                const place = placeLine({ name: j.name, street: j.address, customer: j.customer })?.text ?? null;
-                return (
-                <div
-                  key={j.id}
-                  className="flex shrink-0 items-center gap-1 rounded-lg border border-slate-200 bg-white pl-2.5 text-xs"
-                >
-                  <Link href={`/jobs/${j.id}`} className="min-w-0 py-1.5 text-left">
-                    <div className="max-w-[160px] truncate font-medium text-slate-800">{j.name}</div>
-                    {place && <div className="max-w-[160px] truncate text-[11px] text-slate-500">{place}</div>}
-                    <div className="mt-0.5">
-                      <CrewInitials crew={crewChips(j.assigned_to, team)} size="xs" />
-                    </div>
-                  </Link>
-                  {/* The Schedule handle — a deliberate day pick, undo-safe. */}
-                  <MoveToDay
-                    label={`Schedule ${j.name}`}
-                    triggerClassName="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-amber-600 hover:bg-amber-100"
-                    onPick={async (iso) => {
-                      if (!iso) return { ok: false, error: "Pick a day." };
-                      return placeOnDay(j, iso);
-                    }}
-                  >
-                    <CalendarSync className="h-4 w-4" />
-                  </MoveToDay>
-                </div>
-                );
-              })}
-            </div>
-          </div>
-        ) : (
-          <button
-            onClick={() => setTrayOpen(true)}
-            className="inline-flex items-center gap-1.5 rounded-full border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-700 hover:bg-amber-100"
-          >
-            To Schedule · {unscheduled.length} <ChevronDown className="h-3.5 w-3.5" />
-          </button>
-        ))}
+      {/* NOTHING SILENT: the clocked time didn't load, so no past block shows what happened (and
+          none is drawn hollow: missing data is not nobody). One quiet line says so. */}
+      {actuals === null && (
+        <p className="text-xs text-slate-500">Clocked time didn&apos;t load, so past days show only what was booked.</p>
+      )}
 
       {/* ARMED, AND SAYING SO WHERE THE TAP HAPPENS.
           The rail's bar is pinned to the bottom of the RAIL, which on a phone sits above the
@@ -1028,7 +1253,7 @@ export function CalendarView({
           <button
             type="button"
             onClick={target.pl.clear}
-            className="ml-auto text-xs font-semibold text-slate-600 underline-offset-2 hover:underline"
+            className="ml-auto inline-flex min-h-11 items-center px-1 text-xs font-semibold text-slate-600 underline-offset-2 hover:underline"
           >
             Cancel
           </button>
@@ -1058,6 +1283,8 @@ export function CalendarView({
                 <MonthGrid
                   anchor={m}
                   byDay={byDay}
+                  hollow={hollowKeys}
+                  ghostsOn={ghostsOn}
                   todayK={todayK}
                   tz={tz}
                   onPick={handleDayTap}
@@ -1079,23 +1306,7 @@ export function CalendarView({
           onScroll={weekStack.onScroll}
           className="max-h-[max(70dvh,calc(100dvh-14rem))] space-y-3 overflow-y-auto"
         >
-          {stackWeeks.map((wk) => {
-            const days = wk.map((d) => {
-              const k = dayKey(d);
-              return {
-                dayStr: k,
-                label: d.toLocaleDateString(undefined, { weekday: "short", day: "numeric" }),
-                isToday: k === todayK,
-                sublabel: townFor(k),
-              };
-            });
-            const ev: TimeGridEvent[] = [];
-            const tray: TimeGridAllDay[] = [];
-            for (const d of days) {
-              const g = gridDataFor(d.dayStr);
-              ev.push(...g.events);
-              tray.push(...g.allDay);
-            }
+          {weekData.map(({ days, events: ev, allDay: tray, label, hasToday, loadsBack }) => {
             /* WHICH MONTH AM I LOOKING AT. Erik, scrolling: "i dont know what month it is on the
                schedule." Day headers read "Mon 25" — fine in a fixed week, useless once the span
                scrolls through months. The header sticks to the top of the scroller so the answer
@@ -1103,9 +1314,7 @@ export function CalendarView({
             /* The year was CONDITIONAL here — shown only when it differed from today's. That is
                the overdue-badge mistake again: a fact you can only read if you remember the rule
                that governs its absence. Now it is simply always there, and a week that crosses a
-               year names both. */
-            const label = spanLabel(wk[0], wk[6], { month: "long" });
-            const hasToday = days.some((d) => d.isToday);
+               year names both. (Built once per week and data: weekData.) */
             return (
               /* overflow-CLIP, not hidden. `hidden` makes this Card a scroll container, and a
                  sticky child resolves against its NEAREST scrollport — so the month header stuck to
@@ -1123,6 +1332,13 @@ export function CalendarView({
                 >
                   {label}
                   {hasToday && <span className="ml-2 text-[10px] font-bold uppercase tracking-wide">this week</span>}
+                  {/* NOTHING SILENT: older than the clocked time loaded, a past block is never drawn
+                      hollow (missing data is not nobody), and the week says why it shows no bars. */}
+                  {loadsBack && actualsCappedBefore && (
+                    <span className="block text-[11px] font-normal text-slate-500">
+                      Clocked time loads back to {dayWords(actualsCappedBefore)}.
+                    </span>
+                  )}
                 </div>
                 <TimeGrid
                   days={days}
@@ -1132,8 +1348,8 @@ export function CalendarView({
                   workEndMin={wdEndMin}
                   tz={tz}
                   initialNow={gridNow}
-                  onDayClick={(ds) => nav("day", ds, { push: true })}
-                  placement={target.prop}
+                  onDayClick={drillInto}
+                  placement={armedProp}
                   onEventTap={canEdit ? onEventTap : undefined}
                   onSlotTap={canEdit && !target.armed ? onSlotTap : undefined}
                 />
@@ -1171,7 +1387,7 @@ export function CalendarView({
                 workEndMin={wdEndMin}
                 tz={tz}
                 initialNow={gridNow}
-                placement={target.prop}
+                placement={armedProp}
                 onEventTap={canEdit ? onEventTap : undefined}
                 onSlotTap={canEdit && !target.armed ? onSlotTap : undefined}
               />
@@ -1199,6 +1415,12 @@ export function CalendarView({
             workDay={{ start: workDayStart, end: workDayEnd }}
             ownHours={ownHours}
             onOpenJob={canEdit ? (jobId) => setSheet({ kind: "job", id: jobId, day: anchorK }) : undefined}
+            onOpenVisit={canEdit ? (visitId) => setSheet({ kind: "visit", id: visitId, day: anchorK }) : undefined}
+            jobCrewOn={jobCrewOn}
+            visitCrewOn={visitCrewOn}
+            actualFor={dayActualFor}
+            ghosts={ghostsOn(anchorK)}
+            canEdit={canEdit}
           />
         </>
       )}
@@ -1212,6 +1434,7 @@ export function CalendarView({
           workDay={{ start: workDayStart, end: workDayEnd }}
           team={members}
           canEdit={canEdit}
+          crewBoard={crewBoard}
           perDayHours={perDayHours}
         />
       )}
@@ -1227,17 +1450,6 @@ export function CalendarView({
         />
       )}
 
-      {/* Undo — the safety net under a tray placement. */}
-      {undo && (
-        <div className="fixed inset-x-0 bottom-[calc(9rem+env(safe-area-inset-bottom))] z-[120] flex justify-center px-4">
-          <div className="flex max-w-sm items-center gap-3 rounded-full bg-slate-900 px-4 py-2 text-sm text-white shadow-lg">
-            <span className="min-w-0 truncate">Moved {undo.label}</span>
-            <button onClick={runUndo} className="shrink-0 font-semibold text-amber-300 hover:text-amber-200">
-              Undo
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
@@ -1259,8 +1471,12 @@ function pillTime(iso: string, tz: string): string {
   return m ? `${h}:${String(m).padStart(2, "0")}${ap}` : `${h}${ap}`;
 }
 
-const PILL_TONE: Record<"job" | "appt" | "apptProposed" | "task" | "external", string> = {
+const PILL_TONE: Record<"job" | "jobHollow" | "ghost" | "appt" | "apptProposed" | "task" | "external", string> = {
   job: "bg-blue-50 text-blue-700",
+  // A past job day with no time clocked to it (hollow): its hue in a faint outline, the fill gone.
+  jobHollow: "bg-white/40 text-blue-400 ring-1 ring-inset ring-blue-200",
+  // Work nobody booked (a ghost, part D): dashed, slate, white — never a booking's look.
+  ghost: "border border-dashed border-slate-400 bg-white/60 text-slate-700",
   appt: "bg-violet-50 text-violet-700",
   apptProposed: "bg-violet-50 text-violet-400",
   task: "bg-slate-100 text-slate-600",
@@ -1268,17 +1484,26 @@ const PILL_TONE: Record<"job" | "appt" | "apptProposed" | "task" | "external", s
 };
 
 /** Order a day's jobs/appts/tasks into labelled pills (timed first), for the month grid. */
-function monthPills(data: DayData | undefined, tz: string, dayK?: string): { label: string; tone: keyof typeof PILL_TONE; sort: number }[] {
-  if (!data) return [];
-  const dayOf = (iso: string) => todayStrInTz(tz, new Date(iso)); // org-tz, same rule as the grid
+function monthPills(
+  data: DayData | undefined,
+  tz: string,
+  dayK?: string,
+  /** Past job days with no time clocked to them (block keys, "j-<job>-<day>"), drawn hollow. */
+  hollow?: ReadonlySet<string>,
+  /** The day's work nobody booked: a dashed pill, "<job name> · <customer>". */
+  ghosts?: readonly GhostTarget[],
+): { label: string; tone: keyof typeof PILL_TONE; sort: number }[] {
   const out: { label: string; tone: keyof typeof PILL_TONE; sort: number }[] = [];
+  for (const g of ghosts ?? []) out.push({ label: ghostTitle(g), tone: "ghost", sort: Number.MAX_SAFE_INTEGER - 2 });
+  if (!data) return out;
+  const dayOf = (iso: string) => todayStrInTz(tz, new Date(iso)); // org-tz, same rule as the grid
   for (const { job, pos } of data.jobs) {
     const t = job.scheduled_start ? new Date(job.scheduled_start).getTime() : Number.MAX_SAFE_INTEGER;
     const cust = job.customers?.name;
     // WHICH DAY OF IT THIS IS — the week view says "d2/3" and the month said nothing, so a
     // three-day job read as three unrelated jobs.
     const base = cust ? `${job.name} · ${cust}` : job.name;
-    out.push({ label: pos ? `${base} · ${pos}` : base, tone: "job", sort: t });
+    out.push({ label: pos ? `${base} · ${pos}` : base, tone: dayK && hollow?.has(`j-${job.id}-${dayK}`) ? "jobHollow" : "job", sort: t });
   }
   for (const a of data.appts) {
     // Absorbed rows are filtered at byDay (0237); an inspection hides only beside its own job.
@@ -1318,6 +1543,8 @@ const MONTH_MAX_PILLS = 3;
 function MonthGrid({
   anchor,
   byDay,
+  hollow,
+  ghostsOn,
   todayK,
   tz,
   onPick,
@@ -1325,6 +1552,10 @@ function MonthGrid({
 }: {
   anchor: Date;
   byDay: Map<string, DayData>;
+  /** Past job days with no time clocked to them (the hollow tone; no bars in a month cell). */
+  hollow?: ReadonlySet<string>;
+  /** A day's work nobody booked, person-filtered (a dashed pill). */
+  ghostsOn?: (k: string) => GhostTarget[];
   todayK: string;
   tz: string;
   onPick: (d: Date) => void;
@@ -1352,7 +1583,7 @@ function MonthGrid({
           const k = dayKey(d);
           const data = byDay.get(k);
           const inMonth = d.getMonth() === anchor.getMonth();
-          const pills = monthPills(data, tz, k);
+          const pills = monthPills(data, tz, k, hollow, ghostsOn?.(k));
           return (
             <button
               key={i}
@@ -1410,6 +1641,12 @@ function DayDetail({
   workDay,
   ownHours,
   onOpenJob,
+  onOpenVisit,
+  jobCrewOn,
+  visitCrewOn,
+  actualFor,
+  ghosts = [],
+  canEdit = false,
 }: {
   dayK: string;
   data?: DayData;
@@ -1421,6 +1658,17 @@ function DayDetail({
   ownHours?: Map<string, Map<string, { start: string; end: string }>>;
   /** The office: a job card opens the tile's sheet (day, time, crew) for this day. */
   onOpenJob?: (jobId: string) => void;
+  /** The office: a visit row's person opens the same sheet for that visit (its day, time, who's going). */
+  onOpenVisit?: (visitId: string) => void;
+  /** The crew as that day's rows leave it (Everyone's Day), for the cards and the rows. */
+  jobCrewOn?: (job: Pick<CalJob, "id" | "assigned_to">, day: string) => CrewChip[];
+  visitCrewOn?: (a: Pick<CalAppt, "assigned_to">, day: string) => CrewChip[];
+  /** A past day: what happened on a job's block (the card draws it as a small track). */
+  actualFor?: (job: CalJob, day: string) => { booked: { startMin: number; endMin: number }; people: WorkedPerson[]; sentence: string } | null;
+  /** The day's work nobody booked (SV-ghost): a dashed "Worked, Not Booked" row under the booked cards. */
+  ghosts?: GhostTarget[];
+  /** The office: Book This Day on a ghost's row. */
+  canEdit?: boolean;
 }) {
   const appts = data?.appts ?? [];
   const jobsOn = data?.jobs ?? [];
@@ -1440,7 +1688,14 @@ function DayDetail({
         </div>
         <ul className="divide-y divide-slate-100">
           {appts.map((a) => (
-            <ApptRow key={a.id} a={a} picker={picker} tz={tz} />
+            <ApptRow
+              key={a.id}
+              a={a}
+              picker={picker}
+              tz={tz}
+              crew={visitCrewOn ? visitCrewOn(a, dayK) : undefined}
+              onOpenPerson={onOpenVisit ? () => onOpenVisit(a.id) : undefined}
+            />
           ))}
           {!appts.length && (
             <li className="px-5 py-5 text-center text-sm text-slate-400">Nothing booked this day.</li>
@@ -1476,11 +1731,19 @@ function DayDetail({
               day={dayK}
               dayHours={ownHours?.get(job.id)?.get(dayK) ?? null}
               onOpen={onOpenJob ? () => onOpenJob(job.id) : undefined}
+              crew={jobCrewOn ? jobCrewOn(job, dayK) : undefined}
+              actual={actualFor ? actualFor(job, dayK) : null}
             />
           ))}
           {!jobsOn.length && (
             <div className="col-span-full py-5 text-center text-sm text-slate-400">Nothing scheduled.</div>
           )}
+          {/* WORKED, NOT BOOKED (SV-ghost): under the booked cards, each dashed, with its track, its
+              words and the same two doors as its sheet (44px each: the guaranteed door when a ghost is
+              squeezed in a week). */}
+          {ghosts.map((g) => (
+            <GhostRow key={`ghost-${g.jobId}`} day={dayK} ghost={g} canEdit={canEdit} />
+          ))}
         </div>
       </Card>
 
@@ -1503,9 +1766,25 @@ function DayDetail({
 
 /** One appointment on the day drill — the old appointments-tab row, relocated:
  *  quick done/cancel + edit pencil + the Move-to-day glyph. */
-function ApptRow({ a, picker, tz }: { a: CalAppt; picker: SchedulePicker; tz: string }) {
+function ApptRow({
+  a,
+  picker,
+  tz,
+  crew,
+  onOpenPerson,
+}: {
+  a: CalAppt;
+  picker: SchedulePicker;
+  tz: string;
+  /** Who's going, as that day's rows leave them (an 'off' row dims them). Absent: the one person as saved. */
+  crew?: CrewChip[];
+  /** The office: the person opens the tile's sheet for this visit (its day, time and who's going). */
+  onOpenPerson?: () => void;
+}) {
   const router = useRouter();
   const place = visitPlace(a);
+  const going: CrewChip[] =
+    crew ?? (a.assigned_to ? crewChips([a.assigned_to], [{ id: a.assigned_to, full_name: a.profiles?.full_name ?? null }]) : []);
   const appt: ApptValue = {
     id: a.id,
     type: a.type,
@@ -1556,9 +1835,20 @@ function ApptRow({ a, picker, tz }: { a: CalAppt; picker: SchedulePicker; tz: st
               {townOf(place) && <span className="text-[11px] text-slate-400"> · {townOf(place)}</span>}
             </NavLink>
           )}
-          <CrewInitials
-            crew={a.assigned_to ? [{ id: a.assigned_to, initials: initialsOf(a.profiles?.full_name), name: a.profiles?.full_name ?? "Unnamed" }] : []}
-          />
+          {/* WHO'S GOING: marks, in the person's own color. For the office they sit in one 44px tap
+              that opens the visit's sheet (its day, its time and who's going), the job card's twin. */}
+          {onOpenPerson ? (
+            <button
+              type="button"
+              onClick={onOpenPerson}
+              aria-label={`${a.title}: day, time and who's going`}
+              className="inline-flex min-h-11 items-center rounded-md px-1 hover:bg-slate-50"
+            >
+              <CrewInitials crew={going} />
+            </button>
+          ) : (
+            <CrewInitials crew={going} />
+          )}
         </div>
         {a.notes && <p className="mt-1 line-clamp-2 whitespace-pre-wrap text-xs text-slate-500">{a.notes}</p>}
       </div>
@@ -1569,8 +1859,9 @@ function ApptRow({ a, picker, tz }: { a: CalAppt; picker: SchedulePicker; tz: st
         {isInspectionType(a.type) && (
           <Link
             href={`/appointments/${a.id}`}
-            className="rounded-md p-1 text-slate-400 hover:bg-teal-50 hover:text-teal-700"
-            title="Inspection capture — notes, measurements, photos"
+            className="flex h-11 w-11 items-center justify-center rounded-md text-slate-400 hover:bg-teal-50 hover:text-teal-700"
+            title="Walk-through — notes, measurements, photos"
+            aria-label="Walk-through — notes, measurements, photos"
           >
             <ClipboardList className="h-4 w-4" />
           </Link>
@@ -1579,7 +1870,7 @@ function ApptRow({ a, picker, tz }: { a: CalAppt; picker: SchedulePicker; tz: st
         <AppointmentButton jobs={picker.jobs} customers={picker.customers} staff={picker.staff} appointment={appt} />
         <MoveToDay
           label={`Move ${a.title}`}
-          triggerClassName="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+          triggerClassName="flex h-11 w-11 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-700"
           onPick={async (iso) => {
             if (!iso) return { ok: false, error: "Pick a day." };
             if (a.status === "proposed" && !confirm(PROPOSED_CONFIRM)) return { ok: true, note: "Left it alone — the link is still live." };
@@ -1611,7 +1902,7 @@ function TaskRow({ t }: { t: CalTask }) {
       <MoveToDay
         label={`Move ${t.title}`}
         clearable
-        triggerClassName="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+        triggerClassName="flex h-11 w-11 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-700"
         onPick={async (iso) => {
           const res = await updateTask(t.id, { due_date: iso }, { jobId: t.job_id, category: t.category as TaskCategory });
           if (res.ok) router.refresh();

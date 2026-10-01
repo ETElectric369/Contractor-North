@@ -2,20 +2,19 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
 import { MapPin, Phone, Mail, Check } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { PhoneInput } from "@/components/ui/phone-input";
 import { formatPhone } from "@/lib/utils";
 import { useToast } from "@/components/toast";
 import { setLeadContact, sizeLead } from "../leads/actions";
-import { setJobStatus } from "../jobs/actions";
-import { JOB_STATUSES, jobStatusLabel } from "@/lib/job-status";
-import { setJobContact, setJobHold, sizeAppointment, sizeJob } from "./actions";
+import { setJobContact, setJobHold, sizeAppointment, sizeJob, snoozeJobHold } from "./actions";
 import { usePlacement } from "./placement-context";
 import { WorkShapeControls } from "@/components/work-shape-controls";
 import { ComeBackPicker } from "@/components/come-back-picker";
-import { backWords, comeBackDue, type ComeBackWhen } from "@/lib/come-back-days";
+import { RowMoreSheet, SheetLink, SHEET_ROW } from "@/components/row-more-sheet";
+import { backWords, comeBackDue } from "@/lib/come-back-days";
 import { armedInstruction } from "@/lib/schedule/placement-plan";
 import { placeLine } from "@/lib/schedule/block-info";
 import { CrewInitials } from "@/components/crew-initials";
@@ -40,7 +39,13 @@ import {
  * He had 32 open leads, 27 with addresses, and ZERO future appointments — because nothing anywhere
  * put "the leads" and "the calendar" in the same view. The calendar's old "To schedule" tray held
  * only dateless JOBS; a lead had never been in it. He scanned one list, then the other, and
- * bridged it in his head.
+ * bridged it in his head. This rail is the ONE door for waiting work: the tray was cut in W2-05
+ * (every job it held was already here), and the place's toast carries the Undo it had.
+ *
+ * ONE ⋯ PER CARD (W2-05). A card's verbs (open the record; put a job on hold, snooze it, change why,
+ * take it off hold) sit behind one 44px ⋯ (the app's one row sheet), so ticking five jobs no longer
+ * unfolds five status dropdowns beside the job page's one status control. Status changes (Done,
+ * Cancelled…) happen on the job page's pill.
  *
  * TAP THE WORK, THEN TAP THE DAY. He picked this himself — "tap the job then tap the day sounds
  * like a great path" — and it beats drag-and-drop where it matters: one-handed, in a truck, on a
@@ -69,6 +74,150 @@ function PlaceAndCrew({ i }: { i: Placeable }) {
         <span className="mt-1 flex">
           <CrewInitials crew={i.crew} />
         </span>
+      )}
+    </>
+  );
+}
+
+/** Where a card's record lives, and the row that opens it. */
+function openRow(i: Placeable): { href: string; label: string } {
+  if (i.kind === "job") return { href: `/jobs/${i.id}`, label: "Open The Job" };
+  if (i.kind === "appointment") return { href: `/appointments/${i.id}`, label: "Open The Visit" };
+  return { href: `/leads?focus=${i.id}`, label: "Open The Lead" };
+}
+
+/**
+ * A CARD'S ⋯ SHEET (W2-05): titled with the card's name, the address under it. Every kind opens its
+ * record. A job not on hold can be put on hold (why, and the day it comes back: ComeBackPicker, "Hold
+ * It"); a held job can be snoozed to another day, have its why changed (its day kept), or be taken off
+ * hold. Each closes the sheet when it lands; a refusal is said in its words, right where it was asked.
+ * No glass menu nests inside it (the modal-in-glass-menu lesson): the pickers are inline.
+ */
+export function RailCardMore({ i, todayStr }: { i: Placeable; todayStr?: string }) {
+  return (
+    <RowMoreSheet title={i.name} subline={i.address ?? null}>
+      {/* The rows mount with the sheet, so a half-picked hold never survives a close. */}
+      {({ close }) => <RailCardRows i={i} todayStr={todayStr} close={close} />}
+    </RowMoreSheet>
+  );
+}
+
+/** The rows of a card's ⋯ sheet (exported for its render test). */
+export function RailCardRows({ i, todayStr, close }: { i: Placeable; todayStr?: string; close: () => void }) {
+  const router = useRouter();
+  const toast = useToast();
+  const [pending, start] = useTransition();
+  const [mode, setMode] = useState<"hold" | "snooze" | "why" | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [why, setWhy] = useState(i.holdReason ?? "");
+  const open = openRow(i);
+
+  const run = (fn: () => Promise<{ ok: boolean; error?: string }>, said?: string) =>
+    start(async () => {
+      setErr(null);
+      try {
+        const res = await fn();
+        if (!res.ok) {
+          setErr(res.error ?? "That didn't change. Try again.");
+          return;
+        }
+        close();
+        setMode(null);
+        if (said) toast(said, "success");
+        router.refresh();
+      } catch {
+        setErr("That didn't reach the server. Check your connection and try again.");
+      }
+    });
+
+  return (
+    <>
+      <SheetLink href={open.href}>{open.label}</SheetLink>
+      {i.kind === "job" && !i.onHold && (
+        mode === "hold" ? (
+          <ComeBackPicker
+            label="Hold It"
+            requireWhy
+            autoFocus
+            todayStr={todayStr}
+            pending={pending}
+            error={err}
+            onCancel={() => {
+              setMode(null);
+              setErr(null);
+            }}
+            onSubmit={({ why: w, when }) => run(() => setJobHold(i.id, w, when), `${i.name} is on hold.`)}
+          />
+        ) : (
+          <button type="button" className={SHEET_ROW} onClick={() => { setErr(null); setMode("hold"); }}>
+            Put On Hold…
+          </button>
+        )
+      )}
+      {i.kind === "job" && i.onHold && (
+        <>
+          {mode === "snooze" ? (
+            <ComeBackPicker
+              label="Snooze"
+              askWhy={!i.holdReason}
+              autoFocus={!i.holdReason}
+              todayStr={todayStr}
+              pending={pending}
+              error={err}
+              onCancel={() => {
+                setMode(null);
+                setErr(null);
+              }}
+              onSubmit={({ why: w, when }) => run(() => snoozeJobHold(i.id, when, w || null))}
+            />
+          ) : (
+            <button type="button" className={SHEET_ROW} onClick={() => { setErr(null); setMode("snooze"); }}>
+              Snooze…
+            </button>
+          )}
+          {mode === "why" ? (
+            <div className="space-y-2">
+              {/* THE WHY ALONE: its day is kept, so no day chips are offered that would do nothing. */}
+              <input
+                autoFocus
+                value={why}
+                onChange={(e) => setWhy(e.target.value)}
+                placeholder="Waiting on the permit"
+                aria-label="Why?"
+                className="h-11 w-full rounded-lg border border-slate-300 px-3 text-sm"
+              />
+              <div className="flex flex-wrap items-center gap-2">
+                <Button type="button" disabled={pending || !why.trim()} onClick={() => run(() => setJobHold(i.id, why.trim()))}>
+                  {pending ? "Saving…" : "Change Why"}
+                </Button>
+                <Button type="button" variant="ghost" disabled={pending} onClick={() => { setMode(null); setErr(null); }}>
+                  Cancel
+                </Button>
+              </div>
+              {err && <p className="text-xs font-medium text-red-600">{err}</p>}
+            </div>
+          ) : (
+            <button type="button" className={SHEET_ROW} onClick={() => { setErr(null); setWhy(i.holdReason ?? ""); setMode("why"); }}>
+              Change Why…
+            </button>
+          )}
+          <button
+            type="button"
+            className={SHEET_ROW}
+            disabled={pending}
+            onClick={() =>
+              run(
+                () => setJobHold(i.id, null),
+                // A held job that still carries a day goes back on the calendar on it; one with none
+                // stays here, waiting for a day. Said, either way.
+                i.hasDay ? `${i.name} is off hold and back on the calendar.` : `${i.name} is off hold. It stays here until it has a day.`,
+              )
+            }
+          >
+            Take Off Hold
+          </button>
+          {mode === null && err && <p className="text-xs font-medium text-red-600">{err}</p>}
+        </>
       )}
     </>
   );
@@ -118,10 +267,6 @@ export function PlaceRail({
    *  calendar; only the box picks. Editing and placing are different intents, one card. */
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
-  /** Which job is picking its hold (why, and the day it comes back). */
-  const [holdFor, setHoldFor] = useState<string | null>(null);
-  const [holdErr, setHoldErr] = useState<string | null>(null);
-
   /** The driveway entry — a phone heard out loud goes straight in. Blank never erases. A lead's
    *  contact is its own; a job's rides its customer (setJobContact's fill-only rule). */
   function contact(i: Placeable, patch: { phone?: string; email?: string }) {
@@ -129,22 +274,6 @@ export function PlaceRail({
     start(async () => {
       const res = i.kind === "job" ? await setJobContact(i.id, patch) : await setLeadContact(i.id, patch);
       if (!res.ok) { toast(res.error ?? "Couldn't save that.", "error"); return; }
-      router.refresh();
-    });
-  }
-
-  /** Park with a reason and the day it comes back, change a held job's reason (its day stays), or
-   *  wake. A refused park keeps the picker open with the words under it. */
-  function hold(id: string, reason: string | null, when?: ComeBackWhen) {
-    start(async () => {
-      setHoldErr(null);
-      const res = await setJobHold(id, reason, when);
-      if (!res.ok) {
-        if (holdFor === id) setHoldErr(res.error ?? "Couldn't change that.");
-        else toast(res.error ?? "Couldn't change that.", "error");
-        return;
-      }
-      setHoldFor(null);
       router.refresh();
     });
   }
@@ -205,19 +334,23 @@ export function PlaceRail({
                       on ? "border-brand bg-brand-light/40" : "border-slate-200 hover:bg-slate-50"
                     }`}
                   >
-                    <div className="flex w-full items-start gap-2">
+                    <div className="flex w-full items-start">
                       {/* THE BOX PICKS. Its own control, a sibling of the body tap — never nested
-                          (the Karen lesson), and sized for a thumb. */}
+                          (the Karen lesson), and sized for a thumb: a 44px target around the box. */}
                       <button
                         type="button"
                         onClick={() => toggle(i.id)}
                         aria-pressed={on}
                         aria-label={on ? `Unpick ${i.name}` : `Pick ${i.name} to place on a day`}
-                        className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded border ${
-                          on ? "border-brand bg-brand text-white" : "border-slate-300 hover:border-brand/60"
-                        }`}
+                        className="-my-2 -ml-3 -mr-1 flex h-11 w-11 shrink-0 items-center justify-center"
                       >
-                        {on && <Check className="h-3.5 w-3.5" />}
+                        <span
+                          className={`flex h-5 w-5 items-center justify-center rounded border ${
+                            on ? "border-brand bg-brand text-white" : "border-slate-300 hover:border-brand/60"
+                          }`}
+                        >
+                          {on && <Check className="h-3.5 w-3.5" />}
+                        </span>
                       </button>
                       {/* THE BODY OPENS. Editing and placing are different intents: a tap here
                           unfolds the in-place controls without arming the calendar. */}
@@ -225,7 +358,7 @@ export function PlaceRail({
                         type="button"
                         onClick={() => setExpandedId(expandedId === i.id ? null : i.id)}
                         aria-expanded={on || expandedId === i.id}
-                        className="min-w-0 flex-1 text-left"
+                        className="min-h-11 min-w-0 flex-1 text-left"
                       >
                       <span className="min-w-0 flex-1">
                         <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
@@ -284,6 +417,11 @@ export function PlaceRail({
                         )}
                       </span>
                       </button>
+                      {/* THE CARD'S ⋯: its record, and a job's hold verbs (RailCardMore). A sibling
+                          of the box and the body, never inside either. */}
+                      <span className="-my-2 -mr-2 ml-1 shrink-0">
+                        <RailCardMore i={i} todayStr={todayStr} />
+                      </span>
                     </div>
 
                     {/* THE CONTACT LINE — a SIBLING of the body button, because the phone is a
@@ -334,15 +472,8 @@ export function PlaceRail({
                             disabled={pending}
                             onPatch={(patch) => size(i, patch)}
                           />
-                          {/* THE RECORD, ONE TAP AWAY — Erik: "it would be great to access the job
-                              or appt". The board edits the common things in place; the record page
-                              holds everything else. */}
-                          <Link
-                            href={i.kind === "job" ? `/jobs/${i.id}` : i.kind === "appointment" ? `/appointments/${i.id}` : `/leads?focus=${i.id}`}
-                            className="text-xs font-medium text-brand hover:underline"
-                          >
-                            Open →
-                          </Link>
+                          {/* The record is one tap away in the card's ⋯ (Open The Job, Open The Visit,
+                              Open The Lead), never a second link here. */}
                         </div>
 
                         {/* Enter the phone/email ON THE SPOT — the driveway moment. Saves on Enter
@@ -362,7 +493,7 @@ export function PlaceRail({
                                 aria-label="Phone — enter it on the spot"
                                 onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
                                 onBlur={(e) => contact(i, { phone: e.target.value })}
-                                className="h-8 w-36 rounded-md px-1.5 text-xs"
+                                className="h-11 w-36 rounded-md px-1.5 text-sm"
                               />
                             )}
                             {!i.email && (
@@ -375,82 +506,14 @@ export function PlaceRail({
                                 aria-label="Email — enter it on the spot"
                                 onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
                                 onBlur={(e) => contact(i, { email: e.target.value })}
-                                className="h-8 w-40 rounded-md border border-slate-200 px-1.5 text-xs"
+                                className="h-11 w-40 rounded-md border border-slate-200 px-1.5 text-sm"
                               />
                             )}
                           </div>
                         )}
-
-                        {/* STATUS, IN THE SAME GRAMMAR AS EVERYTHING ELSE. Erik: "this put on
-                            hold button is weird it should be the same kind picker flow as
-                            everything else: continuity is our friend." One more small select —
-                            the job-status spine, same as the job page's dropdown. Picking On hold
-                            opens the come-back picker (a hold has a reason, 0234, and a day it comes
-                            back, 0366: In A Week unless another is picked); any other pick moves the
-                            status and the reason and the day die with the hold (the database clears
-                            them, jobs_hold_day). */}
-                        {i.kind === "job" && (
-                          <span className="flex flex-wrap items-center gap-1.5">
-                            <select
-                              value={holdFor === i.id ? "on_hold" : (i.status ?? "to_be_scheduled")}
-                              disabled={pending}
-                              onChange={(e) => {
-                                const v = e.target.value;
-                                if (v === "on_hold" && !i.onHold) {
-                                  setHoldErr(null);
-                                  setHoldFor(i.id);
-                                  return;
-                                }
-                                setHoldFor(null);
-                                start(async () => {
-                                  const res = await setJobStatus(i.id, v);
-                                  if (!res.ok) { toast(res.error ?? "Couldn't change that.", "error"); return; }
-                                  router.refresh();
-                                });
-                              }}
-                              className="h-11 rounded-md border border-slate-200 bg-white px-2 text-sm disabled:opacity-50"
-                              aria-label="Job status"
-                            >
-                              {JOB_STATUSES.map((st) => (
-                                <option key={st} value={st}>
-                                  {jobStatusLabel(st).replace(/^\w/, (c: string) => c.toUpperCase())}
-                                </option>
-                              ))}
-                            </select>
-                            {holdFor === i.id && (
-                              <span className="block w-full">
-                                <ComeBackPicker
-                                  label="Hold It"
-                                  requireWhy
-                                  autoFocus
-                                  initialWhy={i.holdReason ?? ""}
-                                  todayStr={todayStr}
-                                  pending={pending}
-                                  error={holdErr}
-                                  onCancel={() => {
-                                    setHoldFor(null);
-                                    setHoldErr(null);
-                                  }}
-                                  onSubmit={({ why, when }) => hold(i.id, why, when)}
-                                />
-                              </span>
-                            )}
-                            {/* An already-held job edits its reason right here; its day stays. */}
-                            {i.onHold && holdFor !== i.id && (
-                              <input
-                                defaultValue={i.holdReason ?? ""}
-                                onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
-                                onBlur={(e) => {
-                                  const v = e.target.value.trim();
-                                  if (v && v !== (i.holdReason ?? "")) hold(i.id, v);
-                                }}
-                                placeholder="Why? — waiting on the permit"
-                                aria-label="Why is this on hold"
-                                className="h-11 w-56 max-w-full rounded-md border border-slate-200 px-2 text-sm"
-                              />
-                            )}
-                          </span>
-                        )}
+                        {/* No status control here (W2-05): the job page's status pill is the one;
+                            putting a job on hold, snoozing it, changing why and taking it off hold
+                            live in the card's ⋯. */}
                       </div>
                     )}
                   </div>
@@ -498,9 +561,9 @@ export function PlaceRail({
           <button
             type="button"
             onClick={() => document.getElementById("schedule-calendar")?.scrollIntoView({ behavior: "smooth", block: "start" })}
-            className="w-full rounded-lg border-2 border-dashed border-brand/50 bg-brand-light/30 px-3 py-2 text-sm font-semibold text-brand lg:hidden"
+            className="min-h-11 w-full rounded-lg border-2 border-dashed border-brand/50 bg-brand-light/30 px-3 py-2 text-sm font-semibold text-brand lg:hidden"
           >
-            Jump to the calendar ↓
+            Jump To The Calendar ↓
           </button>
 
           <div className="flex flex-wrap items-center gap-2">
@@ -515,7 +578,7 @@ export function PlaceRail({
                   key={h}
                   type="button"
                   onClick={() => { setHalf(h); setStartAt(""); }}
-                  className={`inline-flex h-8 items-center px-3 text-xs font-semibold uppercase ${
+                  className={`inline-flex h-11 items-center px-3 text-xs font-semibold uppercase ${
                     half === h && !startAt
                       ? "bg-brand text-white"
                       : "bg-white text-slate-500 hover:bg-slate-50"
@@ -532,7 +595,7 @@ export function PlaceRail({
               value={startAt}
               onChange={(e) => setStartAt(e.target.value)}
               aria-label="Start at an exact time instead"
-              className={`h-8 rounded-lg border px-1.5 text-xs ${
+              className={`h-11 rounded-lg border px-1.5 text-sm ${
                 startAt ? "border-brand text-brand" : "border-slate-200 text-slate-400"
               }`}
             />
@@ -540,9 +603,9 @@ export function PlaceRail({
               <button
                 type="button"
                 onClick={() => setStartAt("")}
-                className="text-xs font-medium text-slate-400 hover:text-slate-700"
+                className="inline-flex min-h-11 items-center px-1 text-xs font-medium text-slate-400 hover:text-slate-700"
               >
-                clear time
+                Clear Time
               </button>
             )}
             <span className="w-full text-xs text-slate-400">
@@ -556,7 +619,7 @@ export function PlaceRail({
             <button
               type="button"
               onClick={clear}
-              className="ml-auto text-xs font-medium text-slate-500 hover:text-slate-800"
+              className="ml-auto inline-flex min-h-11 items-center px-2 text-xs font-medium text-slate-500 hover:text-slate-800"
             >
               Clear
             </button>

@@ -4,7 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, u
 import { useRouter } from "next/navigation";
 import { useToast } from "@/components/toast";
 import { scheduleLeadsOnDay } from "../leads/actions";
-import { placeAppointmentOnDay, placeJobOnDay, planDayTimes } from "./actions";
+import { placeAppointmentOnDay, placeJobOnDay, planDayTimes, undoPlaceJob, undoPlaceVisit, type PlacePrior } from "./actions";
 import { groupByTown, spreadTimes, type Placeable } from "@/lib/schedule/place-by-town";
 import { workKind } from "@/lib/schedule/work-shape";
 import { dayLabelFrom, placeMessage } from "@/lib/schedule/placement-plan";
@@ -149,6 +149,39 @@ export function PlacementProvider({
     [items, picked],
   );
 
+  /**
+   * PUT BACK WHERE IT WAS: each job through undoPlaceJob (its days, its listed day, its status) and
+   * each visit through undoPlaceVisit (back to Waiting For A Day, through unscheduleAppointment). BOTH
+   * are refused in words when the work changed since the place — the ten seconds the Undo toast lives
+   * are long enough for someone else to move that same visit, and taking their newer time away while
+   * the toast said "Put back where it was." is the lost update the job path has always refused. Every
+   * answer is said: a refusal in its own words, and a pick-a-time link the place withdrew stays
+   * withdrawn, said so.
+   */
+  const undoPlace = useCallback(
+    (priors: { id: string; prior: PlacePrior }[], visits: { id: string; placedAt: string }[], withdrew: boolean) => {
+      start(async () => {
+        const offline = { ok: false as const, error: "That Undo didn't reach the server. Check your connection; nothing may have changed." };
+        const results: { ok: boolean; error?: string; note?: string }[] = await Promise.all([
+          ...priors.map((p) => undoPlaceJob(p.id, p.prior).catch(() => offline)),
+          ...visits.map((v) => undoPlaceVisit(v.id, v.placedAt).catch(() => offline)),
+        ]);
+        router.refresh();
+        const refused = results.filter((r) => !r.ok);
+        if (refused.length) {
+          toast(refused[0].error ?? "That didn't go back. Check the schedule.", "error");
+          return;
+        }
+        const notes = results.map((r) => r.note).filter(Boolean);
+        toast(
+          ["Put back where it was.", ...notes, withdrew ? "The customer's pick-a-time link stays withdrawn." : null].filter(Boolean).join(" "),
+          "success",
+        );
+      });
+    },
+    [router, toast],
+  );
+
   const placeOn = useCallback(
     (dateISO: string) => {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(dateISO) || !chosen.length || pending) return;
@@ -195,7 +228,7 @@ export function PlacementProvider({
         // an offline queue for exactly that — and a dropped request rejects rather than returning
         // ok:false, which would take the whole Promise.all down and skip every line below,
         // including the toast written to explain what happened.
-        const jobResults: { ok: boolean; defaulted?: boolean }[] = await Promise.all(
+        const jobResults: { ok: boolean; defaulted?: boolean; prior?: PlacePrior }[] = await Promise.all(
           // The half he chose, honoured. placeJobOnDay took no time at all, so a floater — which by
           // definition carries no prior time — fell through to the org's all-day window and landed
           // at 8am while both the rail and the armed strip said "afternoon".
@@ -209,7 +242,7 @@ export function PlacementProvider({
         // Nobody gave these a length: they went down as two hours, and the toast says so.
         const jobsDefaulted = jobResults.filter((r) => r.ok && r.defaulted).length;
 
-        const apptResults = await Promise.all(
+        const apptResults: { ok: boolean; note?: string; placedAt?: string }[] = await Promise.all(
           appts.map((a, i) =>
             placeAppointmentOnDay(a.id, dateISO, times[i] ?? startHHMM, a.planned_minutes).catch(
               () => ({ ok: false as const }),
@@ -254,7 +287,26 @@ export function PlacementProvider({
           jobsDefaulted,
           dayLabel: dayLabelFrom(dateISO, todayISO),
         });
-        toast(msg.text, msg.tone);
+        /* UNDO ON THE PLACE (W2-05). The tray that was cut had the only Undo on putting a floater on a
+           day; the rail's place carries it now, on the toast that names the day. Only when every job and
+           visit placed landed, and only for work an Undo can truly put back: a job the place took off
+           hold (its reason and its day went with the hold) and a lead booked as a walk-through (a visit
+           was made) get none; their blocks' sheets carry Move and Clear The Date. */
+        const undoable =
+          !leads.length &&
+          jobs.length + appts.length > 0 &&
+          jobs.every((j, i) => !j.onHold && jobResults[i]?.ok && !!jobResults[i]?.prior) &&
+          // A visit without the start the place wrote can't be undone safely (it couldn't be told from
+          // one somebody moved since), so the toast simply carries no Undo.
+          apptResults.every((r) => r.ok && !!r.placedAt);
+        if (undoable) {
+          const priors = jobs.map((j, i) => ({ id: j.id, prior: jobResults[i].prior as PlacePrior }));
+          const visits = appts.map((a, i) => ({ id: a.id, placedAt: apptResults[i].placedAt as string }));
+          const withdrew = apptResults.some((r) => !!r.note);
+          toast(msg.text, msg.tone, { label: "Undo", onClick: () => undoPlace(priors, visits, withdrew) });
+        } else {
+          toast(msg.text, msg.tone);
+        }
 
         /* KEEP EXACTLY WHAT DIDN'T LAND — which is what the old comment claimed and the old code
            did not do. It kept the whole set on any partial failure, successes included, so the
@@ -270,7 +322,7 @@ export function PlacementProvider({
         router.refresh();
       });
     },
-    [chosen, half, startAt, halfTimes, pending, router, toast, todayISO],
+    [chosen, half, startAt, halfTimes, pending, router, toast, todayISO, undoPlace],
   );
 
   const value = useMemo<PlacementValue>(

@@ -7,7 +7,8 @@
  * He has 32 open leads, 27 with addresses, and zero future appointments. The path from a lead to
  * the calendar exists (2 taps), but nothing anywhere puts "the leads" and "the calendar" in the
  * same view — so he scans one, then the other, and bridges it in his head. And the calendar's
- * "To schedule" tray holds only dateless JOBS; a lead has never been in it.
+ * "To schedule" tray held only dateless JOBS; a lead had never been in it. (The tray was cut in W2-05:
+ * every job it held was already on this rail, which is the one door for waiting work.)
  *
  * ── THE RULE THIS ENCODES ──────────────────────────────────────────────────────────────────
  *
@@ -70,6 +71,9 @@ export type Placeable = {
   /** The day a parked job comes back (0366, jobs.hold_until), YYYY-MM-DD. Null: held before the day
    *  existed ("No Day Set"). Absent: the database doesn't have the column yet, so no chip at all. */
   holdUntil?: string | null;
+  /** A held job that still carries a listed day: taken off hold, it goes back on the calendar on that
+   *  day rather than waiting here (the card's ⋯ says which). */
+  hasDay?: boolean;
   /** A job's status (the spine), so the card's status control shows where it stands. */
   status?: string | null;
   /** appointments.type, when this item IS one — drives the Walk-through / Service call / Office tag. */

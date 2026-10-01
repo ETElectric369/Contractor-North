@@ -265,7 +265,7 @@ export function BlockTimeControls({
       )}
 
       <p className="text-xs text-slate-500">
-        {span ? `${spanWords(start_, end)}. One visit over several days; Open Visit changes its end.` : `${hmWords(start_)} – ${hmWords(end)}${eachDay} · ${words}`}
+        {span ? `${spanWords(start_, end)}. One visit over several days; Open The Visit changes its end.` : `${hmWords(start_)} – ${hmWords(end)}${eachDay} · ${words}`}
         {pending && !draft && <span className="ml-2 text-slate-400">Saving…</span>}
         {saved && !pending && !draft && (
           <span className="ml-2 inline-flex items-center gap-1 font-medium text-green-600">

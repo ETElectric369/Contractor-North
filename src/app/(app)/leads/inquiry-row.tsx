@@ -3,70 +3,125 @@
 import { useEffect, useRef, useState, useTransition } from "react";
 import { WorkShapeControls } from "@/components/work-shape-controls";
 import { useRouter } from "next/navigation";
-import { Phone, Mail, Globe, MapPin } from "lucide-react";
-import { Input, Select } from "@/components/ui/input";
+import { Phone, Mail, Globe, MapPin, UserPlus } from "lucide-react";
+import { Input } from "@/components/ui/input";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { InquiryModal } from "./inquiry-modal";
 import { ConvertMenu } from "./convert-menu";
-import { convertInquiry, deleteInquiry, markInquiryContacted, setInquiryStatus, sizeLead } from "./actions";
-import { useToast } from "@/components/toast";
+import { convertInquiry, deleteInquiry, markInquiryContacted, setInquiryStatus, sizeLead, snoozeInquiry } from "./actions";
+import { useToast, type ToastAction } from "@/components/toast";
 import { formatDateTime, formatDate } from "@/lib/utils";
-import type { Inquiry, LeadBucket } from "@/lib/types";
-import { INQUIRY_STATUSES } from "@/lib/statuses";
+import type { Inquiry } from "@/lib/types";
 import { LEAD_BUCKETS } from "@/lib/lead-triage";
+import { leadNextStep, monthDay, type LeadBucketLetter, type LeadVisits } from "@/lib/leads/next-step";
 import { IntakeFiles } from "./intake-files";
 import { PlanBriefPanel } from "./plan-brief-panel";
 import { intakePaths } from "@/lib/playbook/uploads";
 
-// Named INQUIRY_STATUS_TONE (not `statusTone`) so it can't shadow the shared badge
-// statusTone helper. Values cover every INQUIRY_STATUSES entry.
-const INQUIRY_STATUS_TONE: Record<string, "blue" | "amber" | "indigo" | "green" | "slate"> = {
-  new: "blue",
-  contacted: "amber",
-  quoted: "indigo",
-  won: "green",
-  lost: "slate",
-};
+// The bucket's colored dot (Chris's dot language: green ready · amber measure · blue consult).
+const BUCKET_DOT: Record<LeadBucketLetter, string> = { A: "bg-emerald-500", B: "bg-amber-500", C: "bg-sky-500" };
 
-// The A/B/C readiness chip — colour + Chris's dot language (🟢 ready · 🟡 measure · 🔵 consult).
-const BUCKET_TONE: Record<LeadBucket, "green" | "amber" | "blue"> = { A: "green", B: "amber", C: "blue" };
-const BUCKET_DOT: Record<LeadBucket, string> = { A: "🟢", B: "🟡", C: "🔵" };
+/** The ⋯ panel's buttons: 44px, Title Case, one look. */
+const PANEL_BTN =
+  "inline-flex min-h-11 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50";
 
+type Toast = (message: string, kind?: "success" | "error" | "info", action?: ToastAction) => void;
 
+/**
+ * MARK LOST, WITH UNDO (W2-07). No confirm: the Undo is the safety, and it puts back the status the
+ * lead HAD, carried in the toast (never a guessed "new"). The list drops lost leads, so the row goes
+ * and the toast is what says where it went.
+ */
+export async function markLeadLost(
+  lead: { id: string; name: string; status: string },
+  deps: { setStatus: (id: string, status: string) => Promise<{ ok: boolean; error?: string }>; toast: Toast; refresh: () => void },
+): Promise<void> {
+  const was = lead.status;
+  const res = await deps.setStatus(lead.id, "lost");
+  if (!res?.ok) {
+    deps.toast(res?.error ?? "Couldn't mark it lost — try again.", "error");
+    return;
+  }
+  deps.toast(`Marked ${lead.name} Lost`, "success", {
+    label: "Undo",
+    onClick: () => {
+      void (async () => {
+        const back = await deps.setStatus(lead.id, was);
+        deps.toast(back.ok ? "Put back." : (back.error ?? "Couldn't put it back."), back.ok ? "success" : "error");
+        deps.refresh();
+      })();
+    },
+  });
+  deps.refresh();
+}
+
+/**
+ * SAVE AS CONTACT, named and on purpose (W2-07). The lead's name used to be a button that made a
+ * contact card on a tap whose only warning was a hover title a phone never shows: a silent write.
+ * Erik (cn-v724): "a lead can convert to a contact anytime if the person wants to create one", so the
+ * door stays, where a person asks for it. convertInquiry(id, 'customer') checks the book first and
+ * never closes the lead; the toast says which happened ("Saved Rita Moss As A Contact", or "Linked To
+ * Rita Moss" when the book already had her) and offers Open. Nothing navigates on its own.
+ */
+export async function saveLeadAsContact(
+  lead: { id: string; name: string },
+  deps: {
+    convert: (id: string) => Promise<{ ok: boolean; id?: string; error?: string; contact?: { id: string; name: string; existing: boolean } }>;
+    toast: Toast;
+    open: (href: string) => void;
+    refresh: () => void;
+  },
+): Promise<void> {
+  const res = await deps.convert(lead.id);
+  if (!res.ok || !res.id) {
+    deps.toast(res.error ?? "Couldn't make a contact from this lead.", "error");
+    return;
+  }
+  const id = res.id;
+  const card = res.contact;
+  deps.toast(card?.existing ? `Linked To ${card.name}` : `Saved ${card?.name || lead.name} As A Contact`, "success", {
+    label: "Open",
+    onClick: () => deps.open(`/crm/${id}`),
+  });
+  deps.refresh();
+}
 
 export function InquiryRow({
   inquiry,
   customers,
   focused = false,
-  inspections = null,
+  visits = null,
+  todayYmd,
+  tz,
   businessPhone = null,
   estimateDoor = true,
+  referralsOn = false,
 }: {
   inquiry: Inquiry;
   customers: { id: string; name: string }[];
   /** True when My Day (or an estimate backlink) deep-linked to this exact lead —
       scroll it into view and flash a highlight so the eye lands on the right row. */
   focused?: boolean;
-  /** Walk-throughs on this lead. A lead with a completed inspection is CORRECTLY still open —
-   *  inspection is exempt from converting, so it can still become an estimate — but the row used
-   *  to look identical to one nobody had touched. This is what it takes to tell them apart. */
-  inspections?: { done: number; upcoming: number } | null;
+  /** This lead's visits (lib/leads/next-step LeadVisits): what the next-step chip reads. A lead with
+   *  a completed walk-through is CORRECTLY still open (a walk-through never converts it), and the chip
+   *  is what tells it apart from a lead nobody has touched. */
+  visits?: LeadVisits | null;
+  /** The company's today (YYYY-MM-DD) and clock: a follow-up day and a visit's day are theirs. */
+  todayYmd: string;
+  tz: string;
   /** The org's own line (organizations.phone) — the "Text it" handoff has to be able to name it. */
   businessPhone?: string | null;
   /** The Estimates switch (0352): off, the row has no Estimate button. */
   estimateDoor?: boolean;
+  /** The Track Referrals switch: on, the ⋯ panel says who referred them. */
+  referralsOn?: boolean;
 }) {
-  const router = useRouter();
-  const [pending, start] = useTransition();
-  const [followUp, setFollowUp] = useState(inquiry.next_follow_up_at ?? "");
-  const toast = useToast();
   const rowRef = useRef<HTMLLIElement>(null);
   const [flash, setFlash] = useState(false);
   // Option B (approved by Erik AND Andrew off the layout mock): two lines per lead, the one-tap
-  // verbs ON the row, and everything heavier — the message, the files, follow-up date, status,
-  // edit — behind this one toggle. The old row stacked all of it full-width below lg, so three
-  // leads filled a phone screen.
+  // verbs ON the row, and everything heavier — the message, the files, follow-up date, contact,
+  // edit — behind this one toggle.
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
@@ -79,62 +134,24 @@ export function InquiryRow({
     return () => clearTimeout(t);
   }, [focused]);
 
-  /**
-   * OVERDUE WAS COMPARING TWO DIFFERENT MIDNIGHTS.
-   *
-   * Erik: "all the red letters everywhere take all the clarity out of the whole page … the follow
-   * up overdue button needs a different existence." It was not merely noisy — it was WRONG, and
-   * that is why it appeared on every row.
-   *
-   *   new Date("2026-08-25")             → UTC midnight
-   *   new Date(new Date().toDateString()) → LOCAL midnight
-   *
-   * West of UTC the first is always earlier, so `<` is true for a lead due TODAY. In Pacific,
-   * 00:00Z < 07:00Z — every lead due today read as overdue, every day, for everyone.
-   *
-   * Comparing the two as YMD STRINGS has no parsing mode to get wrong. This project already has a
-   * tz layer for exactly this class; the leads row predated it.
-   */
-  const todayYmd = (() => {
-    const d = new Date();
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-  })();
-  const overdue =
-    !!inquiry.next_follow_up_at && String(inquiry.next_follow_up_at).slice(0, 10) < todayYmd;
-
-  // The Status dropdown is the ONE lead-state control (the old standalone "Contacted"
-  // button was redundant with it and crowded the row). Picking "Contacted" still does the
-  // full stamp — last_contacted_at + the follow-up date — via markInquiryContacted; every
-  // other status is a plain set.
-  function changeStatus(status: string) {
-    start(async () => {
-      const res =
-        status === "contacted"
-          ? await markInquiryContacted(inquiry.id, followUp || null)
-          : await setInquiryStatus(inquiry.id, status);
-      if (!res?.ok) { toast(res?.error ?? "Couldn't update status — try again.", "error"); return; }
-      if (status === "contacted") toast("Marked contacted", "success");
-      // The list filters lost leads out, so the row vanishes — say it worked.
-      if (status === "lost") toast("Marked lost", "success");
-      router.refresh();
-    });
-  }
-
-  /** The NAME is the contact control now. Linked → a link (above); not linked → this makes one,
-   *  then routes straight to it, because "create a contact" and "open it" are one intention. */
-  const [savingContact, setSavingContact] = useState(false);
-  function saveAsContact() {
-    setSavingContact(true);
-    start(async () => {
-      const res = await convertInquiry(inquiry.id, "customer", {});
-      if (res.ok && res.redirect) {
-        router.push(res.redirect);
-        return;
-      }
-      setSavingContact(false);
-      toast(res.error ?? "Couldn't make a contact from this lead.", "error");
-    });
-  }
+  /* ONE NEXT-STEP CHIP (W2-07) in place of up to nine badges (status, walk-through counts, bucket,
+     site visit, web, deck site, referred by, follow up): lib/leads/next-step reads the same facts and
+     says what to do next. The bucket's letter and dot lead it only on a lead that carries one. */
+  const step = leadNextStep(
+    {
+      status: inquiry.status,
+      converted_at: inquiry.converted_at,
+      converted_to: inquiry.converted_to,
+      next_follow_up_at: inquiry.next_follow_up_at,
+      lead_bucket: inquiry.lead_bucket,
+      site_inspection_required: inquiry.site_inspection_required,
+      source: (inquiry as { source?: string | null }).source ?? null,
+      referred_by: (inquiry as { referred_by?: string | null }).referred_by ?? null,
+    },
+    visits,
+    todayYmd,
+    { estimatesOn: estimateDoor, tz },
+  );
 
   // Street first, then the town — the two parts he actually reads. Comma-joined and trimmed so a
   // lead carrying only a town still shows the town rather than nothing.
@@ -148,90 +165,45 @@ export function InquiryRow({
         flash ? "bg-brand/5 ring-2 ring-inset ring-brand" : ""
       }`}
     >
-      {/* ── LINE 1: WHO, and how to reach them. Erik: "lets do the phone number and email to the
-          right of the name, have the name be the contact button or create contact option to clear
-          up all that much more space … lets unify and simplfy in all we do."
-          The name IS the contact control now — a separate button for it was a second thing saying
-          what the name already says. Linked → opens the contact; not linked → makes one. ── */}
+      {/* ── LINE 1: WHO, how to reach them, and the ONE next step. Erik: "lets do the phone number
+          and email to the right of the name". A linked lead's name opens its contact; an unlinked
+          one is only its name: making a contact is the ⋯ panel's Save As Contact, never a tap on a
+          name. ── */}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         {inquiry.customer_id ? (
           <Link
             href={`/crm/${inquiry.customer_id}`}
             onClick={(e) => e.stopPropagation()}
-            className="font-semibold text-slate-900 hover:text-brand hover:underline"
+            className="inline-flex min-h-11 items-center font-semibold text-slate-900 hover:text-brand hover:underline"
             title="Open this contact"
           >
             {inquiry.name}
           </Link>
         ) : (
-          <button
-            type="button"
-            onClick={() => saveAsContact()}
-            disabled={savingContact}
-            className="font-semibold text-slate-900 decoration-dotted underline-offset-4 hover:text-brand hover:underline"
-            title="Not a contact yet — tap to make one"
-          >
-            {savingContact ? "Saving…" : inquiry.name}
-          </button>
+          <span className="font-semibold text-slate-900">{inquiry.name}</span>
         )}
         {inquiry.company_name && <span className="text-xs text-slate-400">{inquiry.company_name}</span>}
         {inquiry.phone && (
-          <a href={`tel:${inquiry.phone}`} onClick={(e) => e.stopPropagation()} className="flex items-center gap-1 text-xs font-medium text-brand hover:underline">
+          <a href={`tel:${inquiry.phone}`} onClick={(e) => e.stopPropagation()} className="flex min-h-11 items-center gap-1 text-xs font-medium text-brand hover:underline">
             <Phone className="h-3 w-3 shrink-0" /> {inquiry.phone}
           </a>
         )}
         {inquiry.email && (
-          <a href={`mailto:${inquiry.email}`} onClick={(e) => e.stopPropagation()} className="hidden items-center gap-1 text-xs text-slate-500 hover:text-brand hover:underline sm:flex">
+          <a href={`mailto:${inquiry.email}`} onClick={(e) => e.stopPropagation()} className="hidden min-h-11 items-center gap-1 text-xs text-slate-500 hover:text-brand hover:underline sm:flex">
             <Mail className="h-3 w-3 shrink-0" /> {inquiry.email}
           </a>
         )}
-        {/* THE ADDRESS IS THE HEADLINE. Erik, entering his real lead list: "addresses addresses and
-            more addresses that is what this business is, lets see it up on the lead top line."
-            It was rendered only inside the expanded detail, so scanning the board told him who
-            called but never WHERE — and where is how he decides what to group into a day's route.
-            A tel: link is one tap; so is this: it opens the map, which is the thing he actually
-            does next with an address. */}
-        <Badge tone={INQUIRY_STATUS_TONE[inquiry.status] ?? "slate"}>{inquiry.status}</Badge>
-        {/* Staying open after an inspection is deliberate (an inspected lead can still become an
-            estimate); the badge is what stops the row reading as untouched. A count, not a
-            status: what it says is true and stays true. */}
-        {!!inspections?.done && (
-          <Badge tone="green">{inspections.done === 1 ? "inspected" : `inspected ×${inspections.done}`}</Badge>
-        )}
-        {!inspections?.done && !!inspections?.upcoming && <Badge tone="blue">inspection booked</Badge>}
-        {inquiry.lead_bucket && (
-          <Badge tone={BUCKET_TONE[inquiry.lead_bucket]} title={LEAD_BUCKETS[inquiry.lead_bucket].blurb}>
-            {BUCKET_DOT[inquiry.lead_bucket]} {inquiry.lead_bucket}
+        <span className="inline-flex items-center gap-1.5">
+          {step.web && (
+            <span role="img" aria-label="From Your Website" title="From Your Website" className="inline-flex text-slate-400">
+              <Globe className="h-3.5 w-3.5" />
+            </span>
+          )}
+          <Badge tone={step.tone} title={step.bucket ? LEAD_BUCKETS[step.bucket].blurb : undefined} className="gap-1.5">
+            {step.bucket && <span aria-hidden className={`inline-block h-2 w-2 rounded-full ${BUCKET_DOT[step.bucket]}`} />}
+            {step.label}
           </Badge>
-        )}
-        {inquiry.site_inspection_required && (
-          <Badge tone="red" title="Needs a human site visit — triaged over the threshold, or the customer requested one (send them times via Convert → Let them pick).">
-            🚩 Site visit
-          </Badge>
-        )}
-        {["public_form", "intake"].includes(String(inquiry.source)) && (
-          <Badge tone="slate"><Globe className="mr-1 inline h-3 w-3" />web</Badge>
-        )}
-        {(inquiry.source === "tahoe_deck" || inquiry.source === "deck_configurator") && (
-          <Badge tone="slate"><Globe className="mr-1 inline h-3 w-3" />deck site</Badge>
-        )}
-        {(inquiry as any).referrer?.full_name && (
-          <Badge tone="green">referred by {(inquiry as any).referrer.full_name}</Badge>
-        )}
-        {/* Now that the date maths is right this is genuinely rare, so it can stay red — a badge
-            earns its colour by being uncommon. Before the fix it fired on every row and read as
-            decoration. Amber, not red: a follow-up slipping a day is a nudge, not an alarm. */}
-        {/* "Follow up" is a STATE, not a missed appointment. Erik: "have it just say follow up
-            and leave it on a list of follow ups." A lead with no visit booked and no date promised
-            is simply on the follow-up list — that is neutral, not late. A real DATE that has
-            actually passed is the only thing that earns amber. */}
-        {overdue ? (
-          <Badge tone="amber">follow up · {formatDate(inquiry.next_follow_up_at!)}</Badge>
-        ) : (
-          !inquiry.next_follow_up_at && !inspections?.done && !inspections?.upcoming && (
-            <Badge tone="slate">follow up</Badge>
-          )
-        )}
+        </span>
         <span className="ml-auto whitespace-nowrap font-mono text-xs tabular-nums text-slate-400" title={`Added ${formatDateTime(inquiry.created_at)}`}>
           {formatDateTime(inquiry.created_at)}
         </span>
@@ -239,9 +211,8 @@ export function InquiryRow({
 
       {/* ── LINE 2: THE ADDRESS, left-justified under the name, on its own line.
           "addresses addresses and more addresses that is what this business is" — on its own line
-          it starts at the same x on every row, so the column reads down the page. Sharing line 1
-          with the name meant it started wherever the name ended. One tap opens Maps, which is
-          what he actually does next with an address. ── */}
+          it starts at the same x on every row, so the column reads down the page. One tap opens
+          Maps, which is what he actually does next with an address. ── */}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs text-slate-500">
         {addressLine && (
           <a
@@ -249,7 +220,7 @@ export function InquiryRow({
             target="_blank"
             rel="noreferrer"
             onClick={(e) => e.stopPropagation()}
-            className="flex items-center gap-1 text-sm font-medium text-slate-600 hover:text-brand hover:underline"
+            className="flex min-h-11 items-center gap-1 text-sm font-medium text-slate-600 hover:text-brand hover:underline"
             title="Open in Maps"
           >
             <MapPin className="h-3.5 w-3.5 shrink-0 text-slate-400" />
@@ -263,24 +234,18 @@ export function InquiryRow({
             type="button"
             onClick={() => setOpen((v) => !v)}
             aria-expanded={open}
-            aria-label={open ? "Hide details" : "Show details — message, files, follow-up, status"}
-            className="rounded-lg border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-500 hover:bg-slate-50"
+            aria-label={open ? "Hide details" : "Show details — message, files, follow-up, contact"}
+            className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg border border-slate-200 px-2 text-xs font-semibold text-slate-500 hover:bg-slate-50"
           >
             {open ? "Less" : "⋯"}
           </button>
         </span>
       </div>
 
-      {/* ── LINE 3: THE THREE VERBS, on their own row and centred. Erik: "they should line up on
-          the page centered instead of all over the place now its confusing."
-          They used to sit at the END of the contact line, so their left edge moved with whatever
-          phone / email / note happened to precede them — every row put them somewhere different
-          and the eye had to re-find them on each one. On their own row they land in the same place
-          all the way down the list, which is what makes a list of 32 scannable. ── */}
-      {/* A CONVERTED LEAD IS PROVENANCE, NOT A LEAD. The ?focus= deep link (an estimate's or
-          job's backlink) surfaces converted rows here — and the verbs used to render live on
-          them, offering to Estimate a lead whose deed is already done (the tap only earned the
-          guard's red refusal). The record's real doors are its status badge's destination. */}
+      {/* ── LINE 3: THE THREE VERBS, on their own row and centred (Erik: "they should line up on the
+          page centered instead of all over the place"). A CONVERTED LEAD IS PROVENANCE, NOT A LEAD:
+          a ?focus= row that already became an estimate or a job offers no verbs (its chip says what
+          it became). ── */}
       {inquiry.converted_at ? (
         <p className="text-center text-xs text-slate-400">
           Already converted — its estimate or job carries the work now.
@@ -296,80 +261,177 @@ export function InquiryRow({
         <p className="line-clamp-1 text-xs text-slate-500">{inquiry.message}</p>
       )}
 
-      {open && (
-        <div className="mt-1 space-y-3 rounded-lg bg-slate-50/70 p-3">
-          {inquiry.message && <p className="whitespace-pre-wrap text-sm text-slate-600">{inquiry.message}</p>}
-          <IntakeFiles inquiryId={inquiry.id} paths={intakePaths(inquiry.intake)} />
-          <PlanBriefPanel inquiryId={inquiry.id} intake={inquiry.intake} />
-          <div className="flex flex-wrap items-end gap-3">
-            {/* THE CRITICAL PATH STARTS HERE. Erik: "this is what needs to be on the lead itself
-                next to the contacted drop down menu, thats the critical path." Kind + size, set at
-                the phone call, carried untouched to the schedule (the rail renders this SAME
-                component), through placement, onto the calendar, into the job. Stated once. */}
+      {open && <LeadDetails inquiry={inquiry} todayYmd={todayYmd} referralsOn={referralsOn} />}
+    </li>
+  );
+}
+
+/**
+ * THE ⋯ PANEL (W2-07): the message and files, the plan report, the work's kind and size, then the
+ * Follow Up day with Mark Contacted and Mark Lost (the status moves itself: Quoted and Won are stamped
+ * by the deed that earns them), Save As Contact for a lead with no card, Edit, and Delete Lead.
+ */
+export function LeadDetails({
+  inquiry,
+  todayYmd,
+  referralsOn = false,
+}: {
+  inquiry: Inquiry;
+  todayYmd: string;
+  referralsOn?: boolean;
+}) {
+  const router = useRouter();
+  const toast = useToast();
+  const [pending, start] = useTransition();
+  const [followUp, setFollowUp] = useState(inquiry.next_follow_up_at?.slice(0, 10) ?? "");
+  const referrer = (inquiry as { referrer?: { full_name?: string | null } | null }).referrer?.full_name ?? null;
+  const converted = !!inquiry.converted_at;
+
+  /** The Follow Up day saves itself once it is a real day, today or later (snoozeInquiry: the day
+   *  only, no status). A day already gone is said under the box, never saved as a guess. */
+  function pickFollowUp(v: string) {
+    setFollowUp(v);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(v) || v < todayYmd || v === (inquiry.next_follow_up_at ?? "").slice(0, 10)) return;
+    start(async () => {
+      const res = await snoozeInquiry(inquiry.id, v);
+      if (!res.ok) { toast(res.error ?? "Couldn't save that day — try again.", "error"); return; }
+      toast(`Follow up on ${monthDay(v)}.`, "success");
+      router.refresh();
+    });
+  }
+
+  function markContacted() {
+    start(async () => {
+      const res = await markInquiryContacted(inquiry.id, followUp || null);
+      if (!res?.ok) { toast(res?.error ?? "Couldn't mark it contacted — try again.", "error"); return; }
+      toast("Marked Contacted", "success");
+      router.refresh();
+    });
+  }
+
+  return (
+    <div className="mt-1 space-y-3 rounded-lg bg-slate-50/70 p-3">
+      {inquiry.message && <p className="whitespace-pre-wrap text-sm text-slate-600">{inquiry.message}</p>}
+      {/* Who sent them, with Track Referrals on: a line in here, never a badge on the row. */}
+      {referralsOn && referrer && <p className="text-xs text-slate-500">Referred By {referrer}</p>}
+      <IntakeFiles inquiryId={inquiry.id} paths={intakePaths(inquiry.intake)} />
+      <PlanBriefPanel inquiryId={inquiry.id} intake={inquiry.intake} />
+      <div className="flex flex-wrap items-end gap-3">
+        {/* THE CRITICAL PATH STARTS HERE. Erik: "this is what needs to be on the lead itself next to
+            the contacted drop down menu, thats the critical path." Kind + size, set at the phone
+            call, carried untouched to the schedule (the rail renders this SAME component), through
+            placement, onto the calendar, into the job. Stated once. */}
+        <div>
+          <label className="mb-0.5 block text-[10px] uppercase tracking-wide text-slate-400">The work</label>
+          <WorkShapeControls
+            workKind={(inquiry as { work_kind?: string | null }).work_kind ?? null}
+            plannedMinutes={(inquiry as { planned_minutes?: number | null }).planned_minutes ?? null}
+            disabled={pending}
+            onPatch={(patch) =>
+              start(async () => {
+                const r = await sizeLead(inquiry.id, patch);
+                if (!r.ok) toast(r.error ?? "Couldn't save that.", "error");
+                else router.refresh();
+              })
+            }
+          />
+        </div>
+        {!converted && (
+          <>
             <div>
-              <label className="mb-0.5 block text-[10px] uppercase tracking-wide text-slate-400">The work</label>
-              <WorkShapeControls
-                workKind={(inquiry as { work_kind?: string | null }).work_kind ?? null}
-                plannedMinutes={(inquiry as { planned_minutes?: number | null }).planned_minutes ?? null}
-                disabled={pending}
-                onPatch={(patch) =>
-                  start(async () => {
-                    const r = await sizeLead(inquiry.id, patch);
-                    if (!r.ok) toast(r.error ?? "Couldn't save that.", "error");
-                    else router.refresh();
-                  })
-                }
+              <label htmlFor={`follow-${inquiry.id}`} className="mb-0.5 block text-[10px] uppercase tracking-wide text-slate-400">
+                Follow Up
+              </label>
+              <Input
+                id={`follow-${inquiry.id}`}
+                type="date"
+                value={followUp}
+                min={todayYmd}
+                onChange={(e) => pickFollowUp(e.target.value)}
+                className="h-11 w-40 text-xs"
               />
             </div>
-            <div>
-              <label className="mb-0.5 block text-[10px] uppercase tracking-wide text-slate-400">Follow up</label>
-              <Input type="date" value={followUp} onChange={(e) => setFollowUp(e.target.value)} className="h-8 w-40 text-xs" />
-            </div>
-            <div>
-              <label className="mb-0.5 block text-[10px] uppercase tracking-wide text-slate-400">Status</label>
-              {/* "Lost" lives ONLY here (a deliberate two-tap pick) — the old one-tap "Mark lost"
-                  button vanished the row from a mis-tap beside Edit/Convert. */}
-              <Select
-                value={inquiry.status}
-                disabled={pending}
-                className="h-8 w-36 text-xs"
-                onChange={(e) => changeStatus(e.target.value)}
-              >
-                {INQUIRY_STATUSES.map((st) => (
-                  <option key={st} value={st}>
-                    {st.replace(/^\w/, (c) => c.toUpperCase())}
-                  </option>
-                ))}
-              </Select>
-            </div>
-            <InquiryModal inquiry={inquiry} mode="edit" />
-            {/* DELETE, inside the ⋯ panel — Erik: "add a way to delete a lead entry… or a Delete
-                option inside the row's ⋯ menu." Behind the door and behind a confirm, per the nav
-                doctrine: destructive never sits beside the verbs you tap at 60mph. Note the split
-                of meanings — LOST is a two-tap status for a lead that said no (it keeps the
-                record); delete is for tests and junk, and it keeps nothing. */}
-            <button
-              type="button"
-              disabled={pending}
-              onClick={() => {
-                // A CONVERTED lead is an estimate's provenance (audit 7): deleting it severs
-                // the estimate's only link back to the person. Say so before the click.
-                if (!confirm(inquiry.converted_at
-                  ? `Delete "${inquiry.name}" completely? An estimate came from this lead — deleting cuts that estimate's link to the person, cancels any un-confirmed booking links, and removes the lead's uploaded files and any walk-through that has no field notes or photos. Mark it Lost instead unless it was junk.`
-                  : `Delete "${inquiry.name}" completely? A lead that said no should be marked Lost instead — delete keeps nothing: its uploaded files and any walk-through without field notes or photos go with it.`)) return;
-                start(async () => {
-                  const r = await deleteInquiry(inquiry.id);
-                  if (!r.ok) toast(r.error ?? "Couldn't delete that.", "error");
-                  else router.refresh();
-                });
-              }}
-              className="ml-auto self-end rounded-lg px-2 py-1.5 text-xs font-medium text-rose-600 hover:bg-rose-50"
-            >
-              Delete lead
+            <button type="button" disabled={pending} onClick={markContacted} className={PANEL_BTN}>
+              Mark Contacted
             </button>
-          </div>
-        </div>
+            {inquiry.status !== "lost" && (
+              <button
+                type="button"
+                disabled={pending}
+                onClick={() =>
+                  start(() =>
+                    markLeadLost(
+                      { id: inquiry.id, name: inquiry.name, status: inquiry.status },
+                      { setStatus: setInquiryStatus, toast, refresh: () => router.refresh() },
+                    ),
+                  )
+                }
+                className={PANEL_BTN}
+              >
+                Mark Lost
+              </button>
+            )}
+          </>
+        )}
+      </div>
+      {!converted && /^\d{4}-\d{2}-\d{2}$/.test(followUp) && followUp < todayYmd && (
+        <p className="text-xs text-amber-700">That day has passed. Pick today or later to save it.</p>
       )}
-    </li>
+      <div className="flex flex-wrap items-center gap-3">
+        {/* A contact is made HERE, by name, never by tapping the lead's name. Only a lead with no card
+            that hasn't become anything yet. */}
+        {!inquiry.customer_id && !converted && (
+          <button
+            type="button"
+            disabled={pending}
+            onClick={() =>
+              start(() =>
+                saveLeadAsContact(
+                  { id: inquiry.id, name: inquiry.name },
+                  {
+                    convert: (id) => convertInquiry(id, "customer", {}),
+                    toast,
+                    open: (href) => router.push(href),
+                    refresh: () => router.refresh(),
+                  },
+                ),
+              )
+            }
+            className={PANEL_BTN}
+          >
+            <UserPlus className="h-4 w-4 shrink-0" /> Save As Contact
+          </button>
+        )}
+        <InquiryModal inquiry={inquiry} mode="edit" />
+        {/* DELETE, inside the ⋯ panel — Erik: "add a way to delete a lead entry… or a Delete option
+            inside the row's ⋯ menu." Behind the door and behind a confirm, per the nav doctrine:
+            destructive never sits beside the verbs you tap at 60mph. Note the split of meanings —
+            LOST is a lead that said no (it keeps the record); delete is for tests and junk, and it
+            keeps nothing. */}
+        <button
+          type="button"
+          disabled={pending}
+          onClick={() => {
+            // A CONVERTED lead is an estimate's provenance (audit 7): deleting it severs the
+            // estimate's only link back to the person. Say so before the click.
+            if (!confirm(inquiry.converted_at
+              ? `Delete "${inquiry.name}" completely? An estimate came from this lead — deleting cuts that estimate's link to the person, cancels any un-confirmed booking links, and removes the lead's uploaded files and any walk-through that has no field notes or photos. Mark it Lost instead unless it was junk.`
+              : `Delete "${inquiry.name}" completely? A lead that said no should be marked Lost instead — delete keeps nothing: its uploaded files and any walk-through without field notes or photos go with it.`)) return;
+            start(async () => {
+              const r = await deleteInquiry(inquiry.id);
+              if (!r.ok) {
+                toast(r.error ?? "Couldn't delete that.", "error");
+                return;
+              }
+              toast("Lead deleted.", "success");
+              router.refresh();
+            });
+          }}
+          className="ml-auto inline-flex min-h-11 items-center rounded-lg px-3 text-sm font-medium text-rose-600 hover:bg-rose-50"
+        >
+          Delete Lead
+        </button>
+      </div>
+    </div>
   );
 }

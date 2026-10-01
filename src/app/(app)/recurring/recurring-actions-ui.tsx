@@ -3,40 +3,16 @@
 import { useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Play, Pause, Zap } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/toast";
-import { generateDue, generateOne, setRecurringActive } from "./actions";
+import { generateOne, setRecurringActive } from "./actions";
 
 /** What Generate One Now made, in the words the rest of the app uses for it. */
 export function madeWords(kind: string): string {
   return kind === "job" ? "Job created" : kind === "expense" ? "Expense added" : "Invoice generated";
 }
 
-export function GenerateDueButton({ count }: { count: number }) {
-  const router = useRouter();
-  const [pending, start] = useTransition();
-  const toast = useToast();
-  return (
-    <div className="relative">
-      <Button
-        variant="outline"
-        onClick={() =>
-          start(async () => {
-            const res = await generateDue();
-            if (!res?.ok) { toast(res?.error ?? "Couldn't generate — try again.", "error"); return; }
-            const n = res.count ?? 0;
-            // The engine makes jobs, invoices and expenses alike, so the count is of recurring items.
-            toast(n === 0 ? "Nothing was due to generate." : n === 1 ? "Generated 1 recurring item" : `Generated ${n} recurring items`, "success");
-            router.refresh();
-          })
-        }
-        disabled={pending}
-      >
-        <Zap className="h-4 w-4" /> {pending ? "Generating…" : `Generate ${count} Due`}
-      </Button>
-    </div>
-  );
-}
+/* No Generate Due here any more (W2-12): the daily cron makes every template that is due. A row that
+ * is due keeps its Generate One Now below, for the one wanted right now. */
 
 /** `canGenerate` false = a repeat invoice while Recurring Billing is off (0352): Generate One Now
  *  isn't drawn, because generateOne would refuse it. Pause and Resume stay. Absent = on.
