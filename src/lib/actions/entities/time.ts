@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { clockIn, clockOutCurrent, createManualEntry, switchJob, updateTimeEntry } from "@/app/(app)/timeclock/actions";
+import { tellAppChose } from "@/app/(app)/timeclock/clock-told";
 import { clockInputValue, splitClock, splitPreview } from "@/lib/split-preview";
 import { hoursBetween } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/server";
@@ -30,7 +31,7 @@ export const timeActions: Record<string, ActionDef> = {
     name: "time.clockIn",
     group: "time",
     label: "Clock in",
-    description: "Start the clock for the current user, optionally on a job — ONLY for work happening NOW (or a still-running shift that started earlier TODAY, via clock_in_at backdate). NEVER use clockIn+clockOut to record FINISHED past work ('3 hours yesterday') — that is time.addEntry (work_date + hours); a clockIn/clockOut pair fired together records a seconds-long entry on today, not the stated hours. clock_in_at is a NAIVE local timestamp, YYYY-MM-DDTHH:MM in the company's own timezone, NO Z, NO offset; the app converts.",
+    description: "Start the clock for the current user, optionally on a job — ONLY for work happening NOW (or a still-running shift that started earlier TODAY, via clock_in_at backdate). NEVER use clockIn+clockOut to record FINISHED past work ('3 hours yesterday') — that is time.addEntry (work_date + hours); a clockIn/clockOut pair fired together records a seconds-long entry on today, not the stated hours. clock_in_at is a NAIVE local timestamp, YYYY-MM-DDTHH:MM in the company's own timezone, NO Z, NO offset; the app converts. WHEN NO job_id IS GIVEN THE APP PICKS THE JOB ITSELF: if the result carries `warning`, REPEAT IT WORD FOR WORD — it names the job the app chose and nobody picked, and the person has to hear it before those hours bill the wrong customer.",
     input: z.object({
       job_id: z.string().nullable().optional(),
       job_code: z.string().nullable().optional(),
@@ -41,7 +42,21 @@ export const timeActions: Record<string, ActionDef> = {
     handler: async (i) => {
       // The backdate is a model-supplied wall-clock time — third sibling, same conversion.
       const toUtc = i.clock_in_at ? await orgLocalConverter(await createClient()) : null;
-      return clockIn({ job_id: i.job_id ?? null, job_code: i.job_code ?? null, gps: null, clock_in_at: (toUtc ? toUtc(i.clock_in_at ?? undefined) : null) ?? null });
+      const res = await clockIn({ job_id: i.job_id ?? null, job_code: i.job_code ?? null, gps: null, clock_in_at: (toUtc ? toUtc(i.clock_in_at ?? undefined) : null) ?? null });
+      // NOTHING SILENT AT THIS DOOR EITHER — AND THIS IS THE ONE DOOR THAT CANNOT SHOW A BUTTON, so
+      // the sentence has to reach the model or nothing reaches the person at all. It comes from the
+      // ONE function every other door calls (clock-told: tellAppChose), so Nort cannot word it
+      // differently or decide for itself that the punch was unremarkable.
+      //
+      // IT RIDES `warning`, WHICH IS THE CHANNEL THAT ACTUALLY ARRIVES. `warning` with ok:true means
+      // exactly this ("the write landed, and something about WHERE it landed has to be said"), it is
+      // on ActionResult, the agent's tool-result allowlist carries it (lib/actions/agent-tool-result)
+      // and the verb description above orders the model to relay it. A field invented here instead was
+      // dropped by that allowlist, so Nort read {"ok":true} and said "You're clocked in" while the
+      // hours billed the wrong customer. Joined with anything the punch already had to say (a job it
+      // took off hold), because both are the same kind of fact and there is one channel for them.
+      const told = tellAppChose(res);
+      return told ? { ...res, warning: [res.warning, told.sentence].filter(Boolean).join(" ") } : res;
     },
   },
   "time.clockOut": {

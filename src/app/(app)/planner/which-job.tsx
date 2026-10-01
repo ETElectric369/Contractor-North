@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -8,6 +8,7 @@ import { Modal } from "@/components/ui/modal";
 import { useToast } from "@/components/toast";
 import { putPunchOnJob, whichJobChoices } from "../timeclock/which-job-actions";
 import {
+  jobsDidntLoadSentence,
   noJobsToOffer,
   pickOutcome,
   routePick,
@@ -67,6 +68,7 @@ export type { SheetPhase, WhichJobOption, WhichJobResult } from "../timeclock/wh
  */
 export function WhichJobSheetView({
   moment,
+  from = null,
   state,
   busyId = null,
   err = null,
@@ -76,6 +78,9 @@ export function WhichJobSheetView({
   onSkip,
 }: {
   moment: WhichJobMoment;
+  /** On a "move": the job the APP chose, which the punch is coming off — named, so the sheet says
+   *  what it is moving away from and never asks a question about an unnamed job. */
+  from?: { id: string; label: string } | null;
   state: SheetPhase;
   busyId?: string | null;
   err?: string | null;
@@ -92,8 +97,11 @@ export function WhichJobSheetView({
       Done
     </Button>
   ) : (
+    /* A MOVE IS NEVER A DEAD END AND NEVER A DEMAND: the way out says the punch stays where the app
+       put it, which is exactly what ignoring the sentence does. "Skip, The Office Will Pick" would be
+       a lie here — the punch already has a job. */
     <Button type="button" variant="outline" className="min-h-[44px] w-full" onClick={onSkip} disabled={!!busyId}>
-      Skip, The Office Will Pick
+      {moment === "move" ? "Leave It Where It Is" : "Skip, The Office Will Pick"}
     </Button>
   );
   return (
@@ -105,9 +113,11 @@ export function WhichJobSheetView({
       ) : (
         <div data-testid="which-job-sheet">
           <p className="text-sm text-slate-600">
-            {moment === "in"
-              ? "You're clocked in. Tap the job you're on and the whole punch goes on it."
-              : "You're clocked out, and this punch has no job. Tap the job it was on."}
+            {moment === "move"
+              ? `The app put this punch on ${from?.label ?? "the job it picked"}. Tap the job you're really on and the whole punch moves.`
+              : moment === "in"
+                ? "You're clocked in. Tap the job you're on and the whole punch goes on it."
+                : "You're clocked out, and this punch has no job. Tap the job it was on."}
           </p>
           {state.phase === "loading" ? (
             <p className="mt-3 flex min-h-[44px] items-center gap-2 text-sm text-slate-500">
@@ -116,7 +126,11 @@ export function WhichJobSheetView({
           ) : state.phase === "failed" ? (
             <p className="mt-3 text-sm text-slate-600">{state.error}</p>
           ) : state.jobs.length === 0 ? (
-            <p className="mt-3 text-sm text-slate-600">{noJobsToOffer(state.isStaff)}</p>
+            /* THE MOMENT DECIDES THIS SENTENCE. The only door that renders an empty list is the
+               offline queue's (confirmInline, so sheetAfterLoad does not close first) — and on a
+               MOVE the punch is on the job the app chose, so borrowing the ask's "saved on no job"
+               would tell Brian his 2h19m is on nothing while it bills the wrong customer. */
+            <p className="mt-3 text-sm text-slate-600">{noJobsToOffer(state.isStaff, moment)}</p>
           ) : (
             <ul className="mt-3 divide-y divide-slate-100 overflow-hidden rounded-lg border border-slate-200">
               {state.jobs.map((j) => (
@@ -156,16 +170,30 @@ export function WhichJobSheetView({
 export function WhichJobSheet({
   entryId,
   moment,
+  from = null,
   onClose,
   confirmInline = false,
 }: {
   entryId: string;
   moment: WhichJobMoment;
+  /** On a "move" (the Change door on the clock's sentence): the job the app chose. The list leaves it
+   *  out, and the write names it, so the punch can only come off the job the screen said it was on. */
+  from?: { id: string; label: string } | null;
   onClose: () => void;
   confirmInline?: boolean;
 }) {
   const router = useRouter();
   const toast = useToast();
+  // The job the punch is coming off, as a plain id: the load effect depends on it, and an object
+  // literal rebuilt on every render would re-run the read and re-load the list under the thumb.
+  const fromId = from?.id ?? null;
+  // The label as a PRIMITIVE, for the same reason as fromId: the load effect reads it, and an object
+  // literal rebuilt each render would re-load the list under the thumb.
+  const fromLabel = from?.label ?? null;
+  // Which question this sheet is answering, for every sentence that says where the punch still is.
+  // Memoised on its two primitives: the load effect reads it, and a fresh object each render would
+  // re-run that read and re-load the list under the thumb.
+  const where = useMemo(() => ({ moment, from: fromLabel ? { label: fromLabel } : null }), [moment, fromLabel]);
   const [state, setState] = useState<SheetPhase>({ phase: "loading" });
   const [busyId, setBusyId] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -191,10 +219,10 @@ export function WhichJobSheet({
   useEffect(() => {
     let alive = true;
     setState({ phase: "loading" });
-    whichJobChoices(entryId).then(
+    whichJobChoices(entryId, fromId).then(
       (r) => {
         if (!alive) return;
-        const next = sheetAfterLoad(r, { confirmInline });
+        const next = sheetAfterLoad(r, { confirmInline, moment });
         if (next.close) {
           // No job to offer: close, and say where the punch went instead of a Skip-only sheet.
           toastRef.current(next.sentence, "info");
@@ -204,20 +232,24 @@ export function WhichJobSheet({
         setState(next.state);
       },
       () => {
-        if (alive) setState({ phase: "failed", error: "No connection, so the jobs didn't load. Your punch is saved; skip, and the office will put it on its job." });
+        // ON A MOVE THE PUNCH ALREADY HAS A JOB: "the office will put it on its job" would promise a
+        // prompt the office never sees, because a punch with a job is not in Hours On No Job.
+        if (alive) setState({ phase: "failed", error: jobsDidntLoadSentence(where) });
       },
     );
     return () => {
       alive = false;
     };
-  }, [entryId, confirmInline]);
+  }, [entryId, confirmInline, fromId, moment, where]);
 
   async function pick(job: WhichJobOption) {
     if (busyId) return;
     setBusyId(job.id);
     setErr(null);
     try {
-      const out = await pickOutcome(putPunchOnJob, entryId, job);
+      // ONE WRITE for both: putPunchOnJob places a job-less punch, and moves one off the job the app
+      // chose when the screen names that job. Nothing here decides which — `fromId` is the fact.
+      const out = await pickOutcome((eid, jid) => putPunchOnJob(eid, jid, fromId), entryId, job, where);
       const gone = !mounted.current;
       const route = routePick(out, { confirmInline, gone });
       if (route.refresh) router.refresh();
@@ -234,6 +266,7 @@ export function WhichJobSheet({
   return (
     <WhichJobSheetView
       moment={moment}
+      from={from}
       state={state}
       busyId={busyId}
       err={err}

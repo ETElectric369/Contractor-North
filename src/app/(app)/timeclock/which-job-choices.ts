@@ -119,9 +119,12 @@ export function orderWhichJobChoices(input: {
   todayStr: string;
   tz: string;
   codesOn: boolean;
+  /** The job the punch is already on (a "move" off the app's pick): never offered to itself, or the
+   *  sheet would list the very job the sentence is asking about and the write would refuse the tap. */
+  excludeJobId?: string | null;
 }): WhichJobOption[] {
   const byId = new Map<string, ChoiceJob>();
-  for (const j of input.jobs ?? []) if (j?.id && !byId.has(j.id)) byId.set(j.id, j);
+  for (const j of input.jobs ?? []) if (j?.id && !byId.has(j.id) && j.id !== input.excludeJobId) byId.set(j.id, j);
   const out: WhichJobOption[] = [];
   const taken = new Set<string>();
   const add = (j: ChoiceJob, why?: string) => {
@@ -157,9 +160,19 @@ export function orderWhichJobChoices(input: {
 /** The why on a held job's row: what the tap will do besides place the punch. */
 export const ON_HOLD_WHY = "On hold: picking it takes it off hold";
 
-/** Which moment the sheet is asked at: right after the punch in, or right after the clock-out. */
-export type WhichJobMoment = "in" | "out";
-export type WhichJobAsk = { entryId: string; moment: WhichJobMoment };
+/**
+ * Which moment the sheet is open at: right after the punch in, right after the clock-out, or to MOVE
+ * a punch off the job the APP chose for it (clock-told: the Change door on the clock's sentence). The
+ * move is the same list and the same write — nothing is a second sheet.
+ */
+export type WhichJobMoment = "in" | "out" | "move";
+export type WhichJobAsk = {
+  entryId: string;
+  moment: WhichJobMoment;
+  /** Only on a "move": the job the app chose, which the punch is coming OFF. The write names it, so
+   *  a punch that moved underneath is a zero-row UPDATE and says so instead of landing twice. */
+  from?: { id: string; label: string };
+};
 
 /**
  * THE ONE RULE EVERY CLOCK DOOR USES to decide whether to ask: only a punch that is saved (ok, with
@@ -179,11 +192,57 @@ export type SheetPhase =
   | { phase: "ready"; jobs: WhichJobOption[]; isStaff: boolean }
   | { phase: "failed"; error: string };
 
-/** What the sheet says when it has no job to offer: where the punch is, and who puts it on its job. */
-export function noJobsToOffer(isStaff: boolean): string {
+/** What the sheet says when it has no job to offer: where the punch is, and who puts it on its job.
+ *  On a MOVE the punch is NOT on no job — it is on the job the app chose — so it never borrows this
+ *  sentence; that would be the clock telling a lie about where the hours are. */
+export function noJobsToOffer(isStaff: boolean, moment: WhichJobMoment = "in"): string {
+  if (moment === "move") {
+    return isStaff
+      ? "There's no other job going right now. Leave it here, or move it from Timecards when you know the job."
+      : "There's no other job going right now. Leave it here and tell the office which job it was.";
+  }
   return isStaff
     ? "No job is going right now, so your punch is saved on no job. Put it on its job from Timecards when you know it."
     : "No job is going right now, so your punch is saved on no job. The office puts it on the right job.";
+}
+
+/** The job a MOVE is coming off, as the sheet knows it. Named, so no sentence about it is vague. */
+export type MoveFrom = { label: string } | null | undefined;
+
+/** Which question the sheet is answering, and (on a move) the job the punch is on. Every sentence
+ *  about where the punch STILL is takes this, so none of them can be written for one moment and
+ *  quietly reused at the other. */
+export type SheetWhere = { moment: WhichJobMoment; from?: MoveFrom };
+
+/**
+ * WHERE THE PUNCH STILL IS when a pick doesn't land — THE WHOLE POINT (Erik, 2026-10-01).
+ *
+ * At the ask the punch really is on no job, and saying so is the truth. On a MOVE it is on the job
+ * the app chose, so "still on no job" is the clock telling a lie about where the hours are: the man
+ * reads it, stops worrying, and 2h19m keeps billing the wrong customer. Worse, a punch that already
+ * carries a job is not in Hours On No Job, so "the office will put it on its job" promises a prompt
+ * the office will never see.
+ */
+export function punchStillOn(where: SheetWhere): string {
+  return where.moment === "move" ? `still on ${where.from?.label ?? "the job the app picked"}` : "still on no job";
+}
+
+/** The sheet's line when its OWN job list didn't load. Same law: at the ask the office picks it up
+ *  from Hours On No Job; on a move the punch has a job, so the line says where it still is and names
+ *  the door that can still move it. */
+export function jobsDidntLoadSentence(where: SheetWhere): string {
+  return where.moment === "move"
+    ? `No connection, so the jobs didn't load. Your punch is ${punchStillOn(where)} — try again when you have signal, or move it from Timecards.`
+    : "No connection, so the jobs didn't load. Your punch is saved; skip, and the office will put it on its job.";
+}
+
+/** The same thing said by the READ behind the sheet (which-job-actions). It knows it is a move but
+ *  not the job's label — the job read is the one that failed — so it says where the punch is without
+ *  naming it, and never that the office will pick. */
+export function choicesUnavailable(moving: boolean): string {
+  return moving
+    ? "Couldn't load the jobs just now. Your punch stays on the job the app picked — try again, or move it from Timecards."
+    : "Couldn't load the jobs just now. Skip, and the office will put this punch on its job.";
 }
 
 /**
@@ -196,10 +255,10 @@ export function noJobsToOffer(isStaff: boolean): string {
  */
 export function sheetAfterLoad(
   r: WhichJobChoices,
-  door: { confirmInline: boolean },
+  door: { confirmInline: boolean; moment?: WhichJobMoment },
 ): { close: true; sentence: string } | { close: false; state: SheetPhase } {
   if (!r.ok) return { close: false, state: { phase: "failed", error: r.error } };
-  if (!r.jobs.length && !door.confirmInline) return { close: true, sentence: noJobsToOffer(r.isStaff) };
+  if (!r.jobs.length && !door.confirmInline) return { close: true, sentence: noJobsToOffer(r.isStaff, door.moment ?? "in") };
   return { close: false, state: { phase: "ready", jobs: r.jobs, isStaff: r.isStaff } };
 }
 
@@ -218,12 +277,17 @@ export async function pickOutcome(
   put: (entryId: string, jobId: string) => Promise<WhichJobResult>,
   entryId: string,
   job: WhichJobOption,
+  /** Which question this tap answered, and on a move the job the punch is on: every sentence below
+   *  that says where the punch STILL is reads it, so a move never borrows the ask's words. */
+  where: SheetWhere = { moment: "in" },
 ): Promise<PickOutcome> {
+  // A move's way out is "Leave It Where It Is", never Skip — the punch already has a job.
+  const orSkip = where.moment === "move" ? "" : ", or skip";
   let res: WhichJobResult;
   try {
     res = await put(entryId, job.id);
   } catch {
-    return { kind: "refused", sentence: "No connection, so the punch is still on no job. Try again when you have a bar or two, or skip." };
+    return { kind: "refused", sentence: `No connection, so the punch is ${punchStillOn(where)}. Try again when you have a bar or two${orSkip}.` };
   }
   // What else the pick did rides after the placed sentence, in the same words, so routePick carries
   // both to the toast (or to the sheet at the offline queue's door) with nothing of its own to add.
@@ -232,7 +296,7 @@ export async function pickOutcome(
     const also = (res.warning ?? "").trim();
     return { kind: "placed", sentence: also ? `${placed} ${also}` : placed };
   }
-  const sentence = res?.error || "That didn't go through. Your punch is saved, still on no job.";
+  const sentence = res?.error || `That didn't go through. Your punch is saved, ${punchStillOn(where)}.`;
   return res?.stale ? { kind: "stale", sentence } : { kind: "refused", sentence };
 }
 

@@ -10,6 +10,7 @@ import { promoteJobToInProgress } from "@/lib/job-promote";
 import {
   LAST_JOB_LOOKBACK_MS,
   WHICH_JOB_COLUMNS,
+  choicesUnavailable,
   closedPickable,
   orderWhichJobChoices,
   whichJobLabel,
@@ -27,7 +28,7 @@ import {
  * Every read runs on the caller's RLS client, and the job read selects labels and schedule only:
  * a tech sees the same rows as the office, with no price anywhere on them.
  */
-export async function whichJobChoices(entryId: string): Promise<WhichJobChoices> {
+export async function whichJobChoices(entryId: string, fromJobId?: string | null): Promise<WhichJobChoices> {
   const supabase = await createClient();
   const {
     data: { user },
@@ -42,7 +43,13 @@ export async function whichJobChoices(entryId: string): Promise<WhichJobChoices>
   const isStaff = isStaffRole((meR.data as { role?: string } | null)?.role ?? "");
   const entry = entryR.data as { id: string; job_id: string | null } | null;
   if (!entry) return { ok: false, isStaff, error: "That punch isn't there any more. The office can see it on Timecards." };
-  if (entry.job_id) return { ok: false, isStaff, error: "This punch is already on a job." };
+  // A MOVE OFF THE APP'S PICK IS THE SAME QUESTION (Erik, 2026-10-01). The clock's sentence names the
+  // job the app chose and its Change door opens this sheet with that job as `fromJobId`, so a punch
+  // that carries exactly that job is offered the list. Any OTHER job on it means the screen is behind
+  // (the office moved it, a Switch Job landed): the old refusal stands, because the list the sheet
+  // would show would be answering about a punch that no longer exists as shown.
+  const moving = !!fromJobId && entry.job_id === fromJobId;
+  if (entry.job_id && !moving) return { ok: false, isStaff, error: "This punch is already on a job." };
 
   const settings = getOrgSettings((orgR.data as { settings?: unknown } | null)?.settings);
   const tz = settings.timezone || "America/Los_Angeles";
@@ -80,7 +87,9 @@ export async function whichJobChoices(entryId: string): Promise<WhichJobChoices>
       .lt("scheduled_start", dayEnd.toISOString())
       .or(`scheduled_start.gte.${dayStartIso},scheduled_end.gte.${dayStartIso}`),
   ]);
-  if (goingR.error) return { ok: false, isStaff, error: "Couldn't load the jobs just now. Skip, and the office will put this punch on its job." };
+  // A MOVE'S PUNCH ALREADY HAS A JOB, so it is not in Hours On No Job and the office is never
+  // prompted about it: the line must not promise that they will pick it (which-job-choices).
+  if (goingR.error) return { ok: false, isStaff, error: choicesUnavailable(moving) };
 
   const lastJobId = ((lastR.data as { job_id?: string | null } | null)?.job_id ?? null) || null;
   const segToday = new Set(((segR.data ?? []) as { job_id: string }[]).map((s) => s.job_id));
@@ -111,6 +120,8 @@ export async function whichJobChoices(entryId: string): Promise<WhichJobChoices>
     todayStr,
     tz,
     codesOn,
+    // On a move, the job the punch is on is never offered back to itself.
+    excludeJobId: moving ? entry.job_id : null,
   });
   return { ok: true, isStaff, jobs };
 }
@@ -141,9 +152,25 @@ export async function whichJobChoices(entryId: string): Promise<WhichJobChoices>
  * (`warning`, NY-hold 0366): the sheet lists a held job last, marked On Hold, so it is never a
  * surprise either.
  *
+ * AND IT MOVES A PUNCH OFF THE JOB THE APP CHOSE (`fromJobId`; Erik, 2026-10-01: "we didn't do the
+ * job at TTP 56 this morning"). The clock now says which job it picked when nobody picked it, and
+ * that sentence's Change door opens this same sheet and lands on this same write — a punch whose job
+ * nobody chose is not an after-the-fact edit, it is the person finally being asked. The whole punch
+ * moves, every hour since the tap, which is why Switch Job is not the door: switch_job (0288) only
+ * re-points whole for the first two minutes and CUTS after that, leaving the hours before the tap on
+ * the job nobody picked — the exact 2h19m this defect is about.
+ *
+ * NO NEW AUTHORITY. A TECH has no job picker anywhere, so every job on a tech's punch is the app's
+ * pick, and a tech could already move a job-less punch whole (above) and re-point inside two minutes
+ * (switchJob). The OFFICE can already move any entry from Timecards. What is new is only that the
+ * person is told, and that the move is not limited to the first two minutes. Bounded the same way as
+ * every other pick: the caller's OWN punch, still open or closed within the day (closedPickable), a
+ * job visible to the caller's RLS client and still going, and `fromJobId` named ON the write, so a
+ * punch that moved underneath is a zero-row UPDATE that says so.
+ *
  * Checked write (the silent-write law): a zero-row UPDATE is a refusal with a sentence.
  */
-export async function putPunchOnJob(entryId: string, jobId: string): Promise<WhichJobResult> {
+export async function putPunchOnJob(entryId: string, jobId: string, fromJobId?: string | null): Promise<WhichJobResult> {
   const supabase = await createClient();
   const {
     data: { user },
@@ -160,9 +187,13 @@ export async function putPunchOnJob(entryId: string, jobId: string): Promise<Whi
   // `stale` refusals: the punch is not what the screen shows. The shell has no pull-to-refresh,
   // so the sentence never asks for one — the door re-renders from the server itself.
   if (!entry) return { ok: false, stale: true, error: "That punch isn't there any more. The screen is catching up." };
-  if (entry.job_id) {
+  // Moving off the app's pick: only off the very job the screen named. A punch on some OTHER job got
+  // there another way (the office, a Switch Job) and that is Timecards' business, as it always was.
+  const moving = !!fromJobId && entry.job_id === fromJobId;
+  if (entry.job_id && !moving) {
     return { ok: false, stale: true, error: "This punch already carries a job. The screen is catching up; the office moves it from Timecards." };
   }
+  if (moving && jobId === entry.job_id) return { ok: false, error: "That's the job it's already on." };
   const open = entry.status === "open";
   if (!open) {
     const code = (entry.job_code ?? "").trim();
@@ -185,17 +216,19 @@ export async function putPunchOnJob(entryId: string, jobId: string): Promise<Whi
 
   // The predicates repeat the checks above ON the write itself, so a punch that closed, reopened or
   // got a job between the read and the update is a zero-row UPDATE — reported, never assumed landed.
-  const { data: hit, error } = await supabase
+  const write = supabase
     .from("time_entries")
     .update({ job_id: job.id })
     .eq("id", entry.id)
     .eq("profile_id", user.id)
-    .eq("status", entry.status)
-    .is("job_id", null)
-    .select("id")
-    .maybeSingle();
+    .eq("status", entry.status);
+  const { data: hit, error } = await (moving ? write.eq("job_id", fromJobId!) : write.is("job_id", null)).select("id").maybeSingle();
   if (error) return { ok: false, error: dbError(error) };
-  if (!hit) return { ok: false, stale: true, error: "Nothing changed: the punch closed or got a job in the meantime. The screen is catching up." };
+  if (!hit) {
+    return moving
+      ? { ok: false, stale: true, error: "Nothing changed: the punch closed or moved to another job in the meantime. The screen is catching up." }
+      : { ok: false, stale: true, error: "Nothing changed: the punch closed or got a job in the meantime. The screen is catching up." };
+  }
 
   // A held job comes off hold with the pick, and the sheet says so in its own words (NY-hold, 0366):
   // the same sentence the clock's other doors show, riding back as `warning`.
@@ -206,6 +239,15 @@ export async function putPunchOnJob(entryId: string, jobId: string): Promise<Whi
   revalidatePath("/timecards"); // the crew strip + week grid
   revalidatePath(`/jobs/${job.id}`); // the job's Time tab + labor totals
   revalidatePath("/jobs");
+  // THE SCHEDULE FREES ITSELF (and this is why no migration is needed). A job's worked days are
+  // DERIVED from its time_entries by job_id on every read (workedDaysFrom, schedule/actions), never
+  // stored — so the day the app's pick pinned stops being a worked day the moment the punch leaves,
+  // and the day moves again. Its page and the calendar just have to be told to re-read.
+  if (moving) {
+    revalidatePath(`/jobs/${fromJobId!}`);
+    revalidatePath("/schedule");
+    revalidatePath("/calendar");
+  }
   if (offHold) revalidatePath("/schedule"); // the rail's held card goes
   const codesOn = getOrgSettings((orgRow as { settings?: unknown } | null)?.settings).timeclock_job_codes;
   return { ok: true, label: whichJobLabel(job, codesOn), ...(offHold ? { warning: offHold } : {}) };

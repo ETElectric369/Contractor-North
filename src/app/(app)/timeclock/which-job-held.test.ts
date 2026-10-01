@@ -171,16 +171,26 @@ describe("the answer to a pick that took a job off hold", () => {
 describe("every clock-in door says when a hold came off", () => {
   // clockIn returns the off-hold sentence as res.warning (lib/job-promote). A door that drops it
   // takes a job off hold, and clears its reason and day, without a word: the Timeclock page's own
-  // Clock In did exactly that. Every .tsx that calls clockIn must read res.warning.
-  it("each .tsx calling clockIn reads res.warning", async () => {
+  // Clock In did exactly that. So every .tsx that calls clockIn must say it — by reading res.warning
+  // itself, OR by routing the whole answer through the one function that reads it for every door
+  // (clock-told's replayTold, the offline queue's path since the clock started saying WHICH job it
+  // picked) and then rendering the lines it hands back. Those are the only two routes; anything else
+  // is a door that drops the sentence.
+  it("each .tsx calling clockIn says the off-hold sentence", async () => {
     const { readdirSync, readFileSync } = await import("node:fs");
     const { join } = await import("node:path");
     const walk = (dir: string): string[] =>
       readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(join(dir, e.name)) : e.name.endsWith(".tsx") ? [join(dir, e.name)] : []));
     const callers = walk(join(process.cwd(), "src")).filter((f) => /\bclockIn\(/.test(readFileSync(f, "utf8")));
     expect(callers.map((f) => f.slice(f.indexOf("src/")))).toContain("src/app/(app)/timeclock/timeclock-panel.tsx");
-    const silent = callers.filter((f) => !/res\.warning/.test(readFileSync(f, "utf8"))).map((f) => f.slice(f.indexOf("src/")));
+    const saysIt = (src: string) => /res\.warning/.test(src) || (/\breplayTold\(/.test(src) && /\btold\.said\b/.test(src));
+    const silent = callers.filter((f) => !saysIt(readFileSync(f, "utf8"))).map((f) => f.slice(f.indexOf("src/")));
     expect(silent).toEqual([]);
+    // And the shared route really does carry it, so the second branch above is not a loophole.
+    const { replayTold } = await import("./clock-told");
+    const offHold = "J-048 was on hold (waiting on the permit). It's off hold now.";
+    expect(replayTold({ ok: true, id: "p1", warning: offHold }).said).toEqual([offHold]);
+    expect(replayTold({ ok: false, error: "nope", warning: offHold }).said).toEqual([]);
   });
 
   it("the Timeclock page's Clock In toasts it, sticky, like Switch Job and Clock Out", async () => {

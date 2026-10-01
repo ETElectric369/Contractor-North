@@ -3,7 +3,9 @@
 import { useEffect, useState } from "react";
 import { clockIn } from "@/app/(app)/timeclock/actions";
 import { WhichJobSheet } from "@/app/(app)/planner/which-job";
-import { askAfterPunch, type WhichJobAsk } from "@/app/(app)/timeclock/which-job-choices";
+import { type WhichJobAsk } from "@/app/(app)/timeclock/which-job-choices";
+import { replayTold, type AppChoseNotice } from "@/app/(app)/timeclock/clock-told";
+import { AppChoseJobNotice } from "@/app/(app)/timeclock/app-chose-notice";
 import { listPending, registerReplayer, remove, startAutoDrain, type QueuedOp } from "@/lib/offline/queue";
 
 /**
@@ -32,19 +34,25 @@ export function OfflineDrain({ userId }: { userId: string | null }) {
   // hold took it off hold, and the clock says so at every door. Outside the toast provider there is
   // no toast to carry it, so it waits here until Got It.
   const [said, setSaid] = useState<string[]>([]);
+  // THE JOB A HELD PUNCH LANDED ON, WHEN NOBODY PICKED IT (Erik, 2026-10-01). This is the door that
+  // matters most: Brian taps Clock In in a dead zone on his way to the supply house, the punch files
+  // hours later, and the app still chose its job from the schedule. Same sentence, same Change door
+  // as the live clock — and here it waits on screen until it is answered, because there is no card
+  // and no toast out here to carry it.
+  const [chose, setChose] = useState<AppChoseNotice | null>(null);
 
   useEffect(() => {
     registerReplayer("time.clockIn", async (args, clientOpId) => {
       const a = args as Parameters<typeof clockIn>[0];
       const res = await clockIn({ ...a, clock_in_at: null, clientOpId });
-      const again = askAfterPunch(res, "in");
-      if (again) setAsk(again);
-      const warning = res.ok ? (res.warning ?? "").trim() : "";
-      if (warning) setSaid((s) => (s.includes(warning) ? s : [...s, warning]));
-      // A refusal that TIME fixes (a session that hadn't refreshed after hours offline) must not
-      // be quarantined as a permanent rejection — the drain waits and tries again instead.
-      const transient = !res.ok && /sign(ed)? in|session|expired|temporar|timeout|network|fetch/i.test(res.error ?? "");
-      return { ...res, retryable: transient };
+      // EVERYTHING A FILED PUNCH HAS TO SAY, decided in ONE place (clock-told: replayTold — which
+      // asks askAfterPunch and tellAppChose, the same two rules the live doors call). This replayer
+      // only puts the answers on screen; a rule written here is a rule that drifts from the clock's.
+      const told = replayTold(res);
+      if (told.ask) setAsk(told.ask);
+      if (told.told) setChose(told.told);
+      for (const line of told.said) setSaid((s) => (s.includes(line) ? s : [...s, line]));
+      return { ...res, retryable: told.retryable };
     });
 
     let alive = true;
@@ -88,7 +96,15 @@ export function OfflineDrain({ userId }: { userId: string | null }) {
   };
 
   const sheet = ask ? (
-    <WhichJobSheet key={ask.entryId} entryId={ask.entryId} moment={ask.moment} confirmInline onClose={() => setAsk(null)} />
+    <WhichJobSheet key={ask.entryId} entryId={ask.entryId} moment={ask.moment} from={ask.from ?? null} confirmInline onClose={() => setAsk(null)} />
+  ) : null;
+
+  // Out here there is no card to put the line on, so it gets the same panel the off-hold sentence
+  // uses: it stays until it is answered or waved off, which is what "survives the walk" means.
+  const choseLine = chose ? (
+    <div className="pointer-events-auto w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-3 shadow-lg">
+      <AppChoseJobNotice notice={chose} onDone={() => setChose(null)} confirmInline />
+    </div>
   ) : null;
 
   const saidLines = said.length ? (
@@ -112,8 +128,11 @@ export function OfflineDrain({ userId }: { userId: string | null }) {
     return (
       <>
         {sheet}
-        {saidLines && (
-          <div className="pointer-events-none fixed inset-x-0 bottom-20 z-40 flex flex-col items-center gap-2 px-3 shell:bottom-4">{saidLines}</div>
+        {(saidLines || choseLine) && (
+          <div className="pointer-events-none fixed inset-x-0 bottom-20 z-40 flex flex-col items-center gap-2 px-3 shell:bottom-4">
+            {choseLine}
+            {saidLines}
+          </div>
         )}
       </>
     );
@@ -123,6 +142,7 @@ export function OfflineDrain({ userId }: { userId: string | null }) {
     <>
     {sheet}
     <div className="pointer-events-none fixed inset-x-0 bottom-20 z-40 flex flex-col items-center gap-2 px-3 shell:bottom-4">
+      {choseLine}
       {saidLines}
       {blocked > 0 && showBlocked ? (
         <div className="pointer-events-auto w-full max-w-sm rounded-2xl border border-rose-200 bg-white p-3 text-xs shadow-lg">
