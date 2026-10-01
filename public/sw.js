@@ -4,7 +4,7 @@
 // so a SW bug can't trap users on old code. We only cache hashed/immutable
 // static assets and an offline fallback page. API and auth requests are never
 // touched. Bump VERSION to invalidate the static cache.
-const VERSION = "cn-v1037";
+const VERSION = "cn-v1038";
 const STATIC_CACHE = `static-${VERSION}`;
 // Pages visited while online, kept so a dead zone shows the real page instead of /offline.
 // SEPARATE from the static cache because it holds ORG DATA and has to be purgeable on sign-out.
@@ -13,6 +13,15 @@ const STATIC_CACHE = `static-${VERSION}`;
 // tech needed it. A page one deploy old still beats /offline, and the sign-out purge below (the
 // reason this cache is separate at all) is unaffected.
 const PAGE_CACHE = "pages";
+// EVERY cached page is stamped with the VERSION that built it, because a page's html names the
+// hashed /_next/static chunks of ITS OWN build, and `activate` above deletes every static cache
+// but the current one. So a page cached by an older build is html whose javascript no longer
+// exists anywhere: the shell paints, nothing hydrates, and the person gets a BLANK SCREEN with no
+// error — the worst dead end in the app (Erik, 2026-10-01, a blank Money tab in the truck after a
+// deploy, one flaky navigation on 5G being all it took). The offline page is honest; a page that
+// cannot run is not. So the fallback below serves a cached page ONLY when it was cached by the
+// build now running, and otherwise falls through to /offline.
+const PAGE_VERSION_HEADER = "x-cn-page-version";
 const PRECACHE = ["/offline", "/icon-192.png", "/icon-512.png", "/apple-touch-icon.png"];
 
 self.addEventListener("install", (event) => {
@@ -90,12 +99,31 @@ self.addEventListener("fetch", (event) => {
           // would be served back as if it were the page.
           if (res && res.ok && res.type === "basic" && !res.redirected) {
             const copy = res.clone();
-            caches.open(PAGE_CACHE).then((c) => c.put(req, copy)).catch(() => {});
+            caches
+              .open(PAGE_CACHE)
+              .then(async (c) => {
+                // Stamp the build. We re-wrap rather than put the response straight in, because a
+                // Response's headers are immutable once it exists.
+                const body = await copy.blob();
+                const headers = new Headers(copy.headers);
+                headers.set(PAGE_VERSION_HEADER, VERSION);
+                await c.put(req, new Response(body, { status: copy.status, statusText: copy.statusText, headers }));
+              })
+              .catch(() => {});
           }
           return res;
         })
         .catch(() =>
-          caches.match(req).then((cached) => cached || caches.match("/offline")),
+          caches
+            .open(PAGE_CACHE)
+            .then((c) => c.match(req))
+            .then((cached) => {
+              // A page from an older build cannot run: its chunks were swept by `activate`. Serving
+              // it is a blank screen, so prefer the offline page, which at least says what happened.
+              if (cached && cached.headers.get(PAGE_VERSION_HEADER) === VERSION) return cached;
+              return caches.match("/offline");
+            })
+            .catch(() => caches.match("/offline")),
         ),
     );
     return;
