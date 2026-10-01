@@ -817,8 +817,10 @@ function costsTab(input: AccountantWorkbookInput, cur: OwnerMoney, months: Set<s
           String(l.category ?? "").trim() || null,
           money(c),
           String(l.description ?? "").trim() || null,
-          round3(l.quantity),
-          money(cents(l.unit_price)),
+          // A line entered without a count or an each-price leaves those cells BLANK: a 0 there would
+          // read as "none at $0.00" instead of "nobody typed it".
+          l.quantity == null || l.quantity === "" ? null : round3(l.quantity),
+          l.unit_price == null || l.unit_price === "" ? null : money(cents(l.unit_price)),
           // billable false is 0268's "the company eats this line": it never reaches an invoice.
           yesNo(l.billable !== false, "No (the company's)"),
           l.billed_amount == null ? null : money(cents(l.billed_amount)),
