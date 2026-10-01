@@ -153,7 +153,9 @@ describe("the card says the things a balance cannot say for itself", () => {
   /** Model B: their figure cannot cover a purchase they never billed him for. */
   it("does not explain away the bills the supplier has no document for", () => {
     expect(CARD).toContain("const modelledExplained =");
-    expect(CARD).toContain("${formatCurrency(modelledExplained)} unpaid there, which is your paperwork rather than theirs.");
+    // "bought on account", the same words All Bills now leads with (8a982483), so the sentence
+    // pointing at that fold and the fold's own line are about the same question in the same words.
+    expect(CARD).toContain("${formatCurrency(modelledExplained)} bought on account there, which is your paperwork rather than theirs.");
     expect(CARD).not.toContain("${formatCurrency(modelledBillsUnpaid)} unpaid there");
     expect(CARD).toContain("{account.name} never sent");
     // And the list of his own bills stops calling itself the balance under model B.

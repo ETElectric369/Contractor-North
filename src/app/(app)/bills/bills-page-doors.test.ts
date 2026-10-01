@@ -353,7 +353,11 @@ const HOMES: { door: string | RegExp; was: string; home: string; times?: number 
   // pinned below), and Names It's Filed Under to its sheet.
   { door: "Check These (1)", was: "the amber boxes under each account", home: "suppliers", times: 2 },
   { door: "Open In All Bills", was: "the never-sent-paper list's All Bills link", home: "suppliers", times: 1 },
-  { door: /^\$615\.79 On 2 Bills With No Supplier Account File It$/, was: "amber 'not on a supplier account' line", home: "suppliers" },
+  // $467.87, not $615.79: a paper finds its supplier by IDENTITY now (8a982483), so
+  // "Consolidated Electrical Dist." lands on the account whose own name it spells instead of
+  // sitting in a pile headed "Owed" that no balance could reach. The Sunnyvale ticket
+  // ("Contractors Electrical Distributors") is a different company and correctly stays here.
+  { door: /^\$467\.87 On 1 Bill With No Supplier Account File It$/, was: "amber 'not on a supplier account' line", home: "suppliers" },
   // 3. What CED Says You Owe -> short folded lists inside CED's detail
   { door: /^Their Papers \(\d+\)$/, was: "(new fold: Where This Comes From, Invoices With No Job, Not In Your Books)", home: "suppliers" },
   { door: /^Invoices With No Job \(\d+\)/, was: "CED 3a", home: "suppliers" },
@@ -368,7 +372,10 @@ const HOMES: { door: string | RegExp; was: string; home: string; times?: number 
   // line leads with what's open (Erik, 2026-09-27: "all badges only show whats open"): the 9 of 15
   // bills still unpaid and what they come to, never how many rows it holds. The tabs and the filter
   // chips went: the search box at the top narrows the list in place.
-  { door: /^All Bills · 9 Unpaid \$4,801\.98$/, was: "the tabs under the page (All Bills (15) · $X)", home: "all-bills" },
+  // "Bought On Account", not "Unpaid" (8a982483): this figure is HIS paperwork, and the word
+  // "Unpaid" over a Suppliers card saying "Owed" is the screen naming two different amounts for
+  // one pile of money.
+  { door: /^All Bills · 9 Bought On Account \$4,801\.98$/, was: "the tabs under the page (All Bills (15) · $X)", home: "all-bills" },
   { door: /^(On Account Mark Settled|Settled Mark On Account)$/, was: "Settled/On Account badge toggle (its face said Switch)", home: "all-bills", times: 15 },
   { door: "Edit", was: "pencil icon (bare 16px)", home: "all-bills", times: 15 },
   { door: "Delete", was: "trash icon (bare 16px)", home: "all-bills", times: 15 },
@@ -667,10 +674,14 @@ describe("All Bills is one list", () => {
     expect(count(doors(hand), "Not Billed After All")).toBe(1);
   });
 
-  it("its line leads with what's open, never a count of rows", () => {
+  it("its line leads with what's open, and says which question it is answering", () => {
     const summary = doors(section("all-bills")).find((d) => d.startsWith("All Bills"))!;
-    expect(summary).toBe("All Bills · 9 Unpaid $4,801.98");
+    expect(summary).toBe("All Bills · 9 Bought On Account $4,801.98");
     expect(summary).not.toMatch(/All Bills \(\d+\)/);
+    // AND IT NEVER CALLS ITSELF A DEBT (8a982483). "9 Unpaid $4,801.98" sat under a Suppliers card
+    // reading "$X Owed" and he read them as one pile: "at the bottom it says 10k in open bills it
+    // at the top it says 5k". This figure is what he BOUGHT; the card above is what he OWES.
+    expect(summary).not.toMatch(/Unpaid|Owed/);
   });
 
   it("each kind in one list: bills, the order with its PO chip, the file with its File chip and its ⋯", () => {

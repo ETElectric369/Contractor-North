@@ -28,6 +28,14 @@ import {
 } from "@/lib/same-purchase";
 import { indexSupplierAliases, type SupplierAliasIndex } from "@/lib/supplier-identity";
 import {
+  indexSupplierIdentity,
+  resolveSupplierPapers,
+  supplierCoverage,
+  type SupplierCoverage,
+  type SupplierIdentityIndex,
+  type SupplierPaperIdentity,
+} from "@/lib/supplier-owed";
+import {
   invoicesNeedingBill,
   isBeforeLine,
   shortSupplierName,
@@ -97,6 +105,13 @@ export interface SupplierDocumentCoverage {
   /** Bills CARRYING each document's number, by document id. */
   billsCarrying: Map<string, string[]>;
   aliasIndex: SupplierAliasIndex;
+  /** WHO EACH PAPER BELONGS TO: bill id -> the account it resolves to and how (lib/supplier-owed).
+   *  Handed out so a reader never has to resolve a second time and never has to read the raw
+   *  column, which is how two figures on one screen came to be built from two sets of paper. */
+  identity: Map<string, SupplierPaperIdentity>;
+  identityIndex: SupplierIdentityIndex;
+  /** THE ONE COVERING WALK's answer: what the supplier's papers cover, and what they call settled. */
+  coverage: SupplierCoverage;
 }
 
 /**
@@ -111,6 +126,10 @@ export function supplierDocumentRows(input: {
   bills: any[];
   links: { bill_id?: string | null; supplier_invoice_id?: string | null }[];
   aliasRows: any[];
+  /** The supplier accounts, so a paper can be placed by the account's OWN name as well as by an
+   *  alias. Optional: without them identity falls back to filed-or-alias, which is what every
+   *  reader did before 8a982483 and is still correct, just narrower. */
+  accountRows?: any[];
 }): SupplierDocumentCoverage {
   const documents = (input.documents ?? []) as any[];
   const coveringBills = new Map<string, Set<string>>();
@@ -128,12 +147,39 @@ export function supplierDocumentRows(input: {
    * only on the document's own account.
    */
   const aliasIndex = indexSupplierAliases((input.aliasRows ?? []) as any[]);
+
+  /**
+   * WHO EACH PAPER BELONGS TO, WORKED OUT ONCE (8a982483).
+   *
+   * Everything below this line reads a RESOLVED account id, never the raw column. That is the one
+   * change that makes the covering walk reach: `bills.supplier_account_id` is null on more than
+   * half his book, so every earlier walk gated on it was structurally unable to find those papers
+   * covered, settled, or anything else. A paper's account is now the one it is filed on, the one an
+   * alias names, or the one whose own name it spells - decided in lib/supplier-owed.ts and nowhere
+   * else.
+   */
+  const identityIndex = indexSupplierIdentity({
+    accounts: ((input.accountRows ?? []) as any[]).map((a: any) => ({ id: a?.id, name: a?.name })),
+    aliases: (input.aliasRows ?? []) as any[],
+  });
+  const identity = resolveSupplierPapers(
+    ((input.bills ?? []) as any[]).map((b: any) => ({
+      id: String(b.id),
+      supplierAccountId: b.supplier_account_id ?? null,
+      supplier: b.supplier ?? null,
+    })),
+    identityIndex,
+  );
+
   const ledgerBills: LedgerBill[] = ((input.bills ?? []) as any[]).map((b: any) => {
     const named = namedNumbersOf({ notes: b.notes ?? null, line_items: b.line_items ?? b.bill_line_items ?? [] });
     return {
       id: String(b.id),
       supplier: b.supplier ?? null,
-      supplier_account_id: b.supplier_account_id ?? null,
+      // RESOLVED, not raw. `sameSupplier` decides by account whenever both sides have one, so
+      // handing it the resolved id is what lets a paper nobody has filed yet be matched to the
+      // supplier's own document by the number printed on it.
+      supplier_account_id: identity.get(String(b.id))?.accountId ?? b.supplier_account_id ?? null,
       bill_number: b.bill_number ?? null,
       supplier_invoice_number: b.supplier_invoice_number ?? null,
       amount: b.amount ?? null,
@@ -204,7 +250,25 @@ export function supplierDocumentRows(input: {
     return row;
   });
 
-  return { rows, coveringBills, billsCarrying, aliasIndex };
+  const coverage = supplierCoverage({
+    documents: documents.map((d: any) => ({
+      id: String(d.id),
+      supplierAccountId: d.supplier_account_id ?? null,
+      closed: d.closed === true,
+    })),
+    identity,
+    linked: coveringBills,
+    carrying: billsCarrying,
+    papers: ((input.bills ?? []) as any[]).map((b: any) => ({
+      id: String(b.id),
+      supplierAccountId: b.supplier_account_id ?? null,
+      supplier: b.supplier ?? null,
+      status: b.status ?? null,
+      supersededByBillId: b.superseded_by_bill_id ?? null,
+    })),
+  });
+
+  return { rows, coveringBills, billsCarrying, aliasIndex, identity, identityIndex, coverage };
 }
 
 /**
@@ -223,33 +287,38 @@ export function supplierDocumentRows(input: {
  */
 export function billsSettledBySupplier(input: {
   documents: { id: string; supplier_account_id?: string | null; closed?: boolean | null }[];
-  bills: { id: string; supplier_account_id?: string | null; status?: string | null; superseded_by_bill_id?: string | null }[];
+  bills: { id: string; supplier_account_id?: string | null; supplier?: string | null; status?: string | null; superseded_by_bill_id?: string | null }[];
   coveringBills: ReadonlyMap<string, ReadonlySet<string>>;
   billsCarrying: ReadonlyMap<string, readonly string[]>;
+  /** The accounts and aliases, so a paper nobody filed can still be placed. Omitted means
+   *  filed-only, which is the pre-8a982483 reach and the reason this reached one reader of four. */
+  accountRows?: { id?: unknown; name?: unknown }[];
+  aliasRows?: { alias?: unknown; supplier_account_id?: unknown }[];
 }): Set<string> {
-  const billAccount = new Map<string, string>();
-  for (const b of input.bills ?? []) billAccount.set(String(b.id), String(b.supplier_account_id ?? ""));
-  const closedCover = new Set<string>();
-  const openCover = new Set<string>();
-  for (const d of input.documents ?? []) {
-    const docId = String(d.id);
-    const accountId = String(d.supplier_account_id ?? "");
-    if (!accountId) continue;
-    const covered = new Set<string>(input.coveringBills.get(docId) ?? []);
-    for (const id of input.billsCarrying.get(docId) ?? []) covered.add(id);
-    for (const billId of covered) {
-      if (!billId || billAccount.get(billId) !== accountId) continue;
-      (d.closed === true ? closedCover : openCover).add(billId);
-    }
-  }
-  const out = new Set<string>();
-  for (const b of input.bills ?? []) {
-    const id = String(b.id);
-    if (b.superseded_by_bill_id) continue;
-    if (String(b.status ?? "").toLowerCase() === "paid") continue;
-    if (closedCover.has(id) && !openCover.has(id)) out.add(id);
-  }
-  return out;
+  const papers = (input.bills ?? []).map((b) => ({
+    id: String(b.id),
+    supplierAccountId: b.supplier_account_id ?? null,
+    supplier: b.supplier ?? null,
+    status: b.status ?? null,
+    supersededByBillId: b.superseded_by_bill_id ?? null,
+  }));
+  const identity = resolveSupplierPapers(
+    papers,
+    indexSupplierIdentity({ accounts: input.accountRows ?? [], aliases: input.aliasRows ?? [] }),
+  );
+  return new Set(
+    supplierCoverage({
+      documents: (input.documents ?? []).map((d) => ({
+        id: String(d.id),
+        supplierAccountId: d.supplier_account_id ?? null,
+        closed: d.closed === true,
+      })),
+      identity,
+      linked: input.coveringBills,
+      carrying: input.billsCarrying,
+      papers,
+    }).settledBySupplier,
+  );
 }
 
 /** His jobs as the matcher and the card picker read them: enough to tell five Rhodesias apart. */

@@ -37,11 +37,15 @@ describe("the bills page asks for every column it reads", () => {
    * paper for. It is named, never added to a balance.
    */
   it("works out which bills no supplier document covers, gated to that document's own account", () => {
-    expect(PAGE).toContain("const coveredBillIds = new Set<string>();");
-    expect(PAGE).toContain("if (billAccount.get(billId) !== documentAccountId) return;");
+    // ONE COVERING WALK, IN lib/supplier-owed.ts (8a982483). The page used to build its own, and
+    // gate it on the stored column; it reads the walk's answer now and gates on the account each
+    // paper RESOLVES to, which is the only way a ticket nobody filed can be reached at all.
+    expect(PAGE).toContain("const coveredBillIds = coverage.covered;");
+    expect(PAGE).toContain("const accountOfBill = (id: string) => supplierOf.get(String(id))?.accountId ?? null;");
     expect(PAGE).toContain("const noSupplierDocument = new Map<string, { total: number; bills: number; ids: string[] }>();");
     // Model B only: under model A an unpaid bill is already inside the balance.
     expect(PAGE).toContain("if (!accountId || !documentsOf.has(accountId)) continue;");
+    expect(PAGE).toContain('const accountId = accountOfBill(String(b.id)) ?? "";');
     // And it reaches the card that has to say it.
     expect(PAGE).toContain("noSupplierDocument={Object.fromEntries(noSupplierDocument)}");
   });
@@ -95,9 +99,38 @@ describe("the bills the supplier's own closed papers cover are settled in the le
     expect(settled.size).toBe(0);
   });
 
-  it("the page builds it from the same rows, only once the links read, and hands it to every ledger row", () => {
-    expect(PAGE).toContain("const settledBySupplierIds = linksErr");
-    expect(PAGE).toContain("billsSettledBySupplier({ documents: (invoiceRows ?? []) as any[], bills: liveBills, coveringBills, billsCarrying })");
+  /**
+   * A TICKET ON NO ACCOUNT CAN BE FOUND SETTLED NOW (8a982483).
+   *
+   * This is the gate that capped the first attempt at one reader of four: every covering walk
+   * compared `bills.supplier_account_id` to the document's account, and `supplier_account_id` is
+   * null on more than half his book - so those tickets were structurally unreachable, whatever the
+   * predicate said. Identity decides now, so a ticket spelling the account's own name is on that
+   * account and its closed paper can settle it.
+   */
+  it("reaches a ticket nobody filed, through the account's own name", () => {
+    const loose = [{ id: "b-loose", supplier_account_id: null, supplier: "Northgate Electrical Distributors, Inc.", status: "unpaid" }];
+    const docs = [{ id: "d-closed", supplier_account_id: CED, closed: true }];
+    const covering = new Map<string, Set<string>>([["d-closed", new Set(["b-loose"])]]);
+    const blind = billsSettledBySupplier({ documents: docs, bills: loose, coveringBills: covering, billsCarrying: new Map() });
+    expect(blind.size).toBe(0);
+    const seeing = billsSettledBySupplier({
+      documents: docs,
+      bills: loose,
+      coveringBills: covering,
+      billsCarrying: new Map(),
+      accountRows: [{ id: CED, name: "Northgate Electrical Distributors" }],
+    });
+    expect([...seeing]).toEqual(["b-loose"]);
+  });
+
+  it("the page reads the one covering walk, only once the links read, and hands it to every ledger row", () => {
+    expect(PAGE).toContain("const settledBySupplierIds: ReadonlySet<string> = linksErr ? new Set<string>() : coverage.settledBySupplier;");
+    // ONE WALK, NOT FOUR: the page no longer builds its own `coverBill` loop, and it hands
+    // supplierDocumentRows the accounts so a paper can be placed by the account's own name.
+    expect(PAGE).toContain("const coveredBillIds = coverage.covered;");
+    expect(PAGE).toContain("accountRows: (accountRows ?? []) as any[],");
+    expect(PAGE).not.toContain("const coverBill = (billId: string, documentAccountId: string)");
     expect(PAGE).toContain("settledBySupplier: settledBySupplierIds.has(String(b.id)),");
     // Read-side only: no write to bills.status rides along.
     expect(PAGE).not.toMatch(/from\("bills"\)\s*\.update\(/);

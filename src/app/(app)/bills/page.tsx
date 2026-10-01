@@ -38,7 +38,6 @@ import { BillsSearchBox, BillsSearchProvider } from "./bills-search-box";
 import { SupplierPaperCards } from "@/components/supplier-paper-cards";
 import { formatCurrency, formatDateShort } from "@/lib/utils";
 import {
-  billsSettledBySupplier,
   booksBeginOn,
   cardJobIds,
   cardsWithAlreadyBilled,
@@ -75,6 +74,7 @@ import {
   type SupplierMergeProposal,
   type SupplierSpelling,
 } from "./supplier-balance";
+import { whatIBoughtNotSettled, whatISupplierOwed } from "@/lib/supplier-owed";
 import { SuppliersCard } from "./suppliers-card";
 import {
   acceptSupplierMerge,
@@ -608,12 +608,8 @@ export default async function BillsPage({
     ]);
   }
 
-  const billsOf = new Map<string, SupplierBillRow[]>();
-  for (const b of liveBills) {
-    const key = String(b.supplier_account_id ?? "");
-    if (!key) continue;
-    billsOf.set(key, [...(billsOf.get(key) ?? []), toBillRow(b)]);
-  }
+  // `billsOf` is built further down, AFTER identity is worked out: which account a paper belongs
+  // to is not a column on it, and keying this off the raw column is the fault behind 8a982483.
 
   // ── WHAT THE SUPPLIER ITSELF SAYS (migration 0273) ──────────────────────────────────────────
   //
@@ -648,11 +644,22 @@ export default async function BillsPage({
    * papers to him as cards, and a second copy of "is this paper already in his books?" on the
    * second screen is how the two would come to disagree about which bill is waiting.
    */
-  const { rows: supplierDocuments, coveringBills, billsCarrying } = supplierDocumentRows({
+  const {
+    rows: supplierDocuments,
+    coveringBills,
+    billsCarrying,
+    identity: supplierOf,
+    coverage,
+  } = supplierDocumentRows({
     documents: (invoiceRows ?? []) as any[],
     bills: liveBills,
     links: (billLinkRows ?? []) as any[],
     aliasRows: (aliasRows ?? []) as any[],
+    // THE ACCOUNTS THEMSELVES, so a paper can be placed by the account's OWN name. Without this a
+    // ticket scanned under the name on the account it belongs to resolved to nothing, landed in
+    // the unfiled pile, and was counted under a heading that said "Owed" - which is the mechanical
+    // half of 8a982483.
+    accountRows: (accountRows ?? []) as any[],
   });
   const documentsOf = new Map<string, SupplierDocumentRow[]>();
   for (const row of supplierDocuments) {
@@ -678,20 +685,12 @@ export default async function BillsPage({
   // own lines - the same two routes `billCount` above counts - and only when the bill is filed
   // on THAT document's account, so a number belonging to another supplier can never mark a bill
   // covered.
-  const billAccount = new Map<string, string>();
-  for (const b of liveBills) billAccount.set(String(b.id), String(b.supplier_account_id ?? ""));
-
-  const coveredBillIds = new Set<string>();
-  const coverBill = (billId: string, documentAccountId: string) => {
-    if (!billId || !documentAccountId) return;
-    if (billAccount.get(billId) !== documentAccountId) return;
-    coveredBillIds.add(billId);
-  };
-  for (const r of (invoiceRows ?? []) as any[]) {
-    const accountId = String(r.supplier_account_id ?? "");
-    for (const id of coveringBills.get(String(r.id)) ?? []) coverBill(id, accountId);
-    for (const id of billsCarrying.get(String(r.id)) ?? []) coverBill(id, accountId);
-  }
+  // ONE WALK, NOT FOUR (8a982483). This page built its own, supplier-papers.ts built a second for
+  // the settled set, and the P&L card built a third with no alias index - so the P&L and this page
+  // could name different bills as covering the same paper on identical rows. `supplierCoverage` in
+  // lib/supplier-owed.ts is the walk now, it runs once in supplierDocumentRows above, and it gates
+  // on the account a paper RESOLVES to rather than the column it happens to carry.
+  const coveredBillIds = coverage.covered;
 
   // ── THE BILLS THE SUPPLIER'S OWN BOOKS CALL SETTLED (8a982483) ──────────────────────────────
   // Same walk as coverBill, and the document's `closed` (an applied open list) is what the ledger
@@ -700,9 +699,24 @@ export default async function BillsPage({
   // "Settled · CED Says". bills.status is not written. A lost links read would make a bill covered
   // only by a Record link look open again, so, like noSupplierDocument, nothing is settled until
   // the links read.
-  const settledBySupplierIds = linksErr
-    ? new Set<string>()
-    : billsSettledBySupplier({ documents: (invoiceRows ?? []) as any[], bills: liveBills, coveringBills, billsCarrying });
+  const settledBySupplierIds: ReadonlySet<string> = linksErr ? new Set<string>() : coverage.settledBySupplier;
+
+  // ── WHO EACH PAPER BELONGS TO, AND THE ROWS THAT HANG OFF IT ────────────────────────────────
+  // Built here, after identity, so every pile on this page is cut from the SAME set of paper. The
+  // two figures Erik was reading were not disagreeing about a rule, they were looking at different
+  // bills: one reached its papers through the stored column and the other grouped the typed-in
+  // spelling. There is one road to a supplier now and this is it.
+  const accountOfBill = (id: string) => supplierOf.get(String(id))?.accountId ?? null;
+  const billsOf = new Map<string, SupplierBillRow[]>();
+  for (const b of liveBills) {
+    const key = accountOfBill(String(b.id));
+    if (!key) continue;
+    // THE BALANCE IS TOLD WHAT THE LEDGER ALREADY KNEW. A ticket the supplier's own closed paper
+    // covers used to leave the All Bills count and stay inside the figure at the top of the card,
+    // because the balance had no way to hear about it. It rides on the row now.
+    const row: SupplierBillRow = { ...toBillRow(b), settledBySupplier: settledBySupplierIds.has(String(b.id)) };
+    billsOf.set(key, [...(billsOf.get(key) ?? []), row]);
+  }
 
   // ONLY WHERE THE QUESTION EXISTS - an account whose supplier documents we actually hold. Under
   // model A every unpaid bill is already inside the balance, so there is no uncovered slice to
@@ -714,9 +728,9 @@ export default async function BillsPage({
   // A lost links read makes every bill covered only by a Record link look uncovered: "+ $N they
   // never sent paper for" would be false. So the slice is not named at all until the links read.
   if (!linksErr) for (const b of liveBills) {
-    const accountId = String(b.supplier_account_id ?? "");
+    const accountId = accountOfBill(String(b.id)) ?? "";
     if (!accountId || !documentsOf.has(accountId)) continue;
-    if (!isOnAccountBill({ status: String(b.status ?? "") })) continue;
+    if (!isOnAccountBill({ status: String(b.status ?? ""), settledBySupplier: settledBySupplierIds.has(String(b.id)) })) continue;
     if (coveredBillIds.has(String(b.id))) continue;
     const amount = Number(b.amount) || 0;
     if (amount <= 0.005) continue;
@@ -786,6 +800,50 @@ export default async function BillsPage({
   // supplier's papers (CED) would silently fall back to bills-less-payments.
   const balancesUnread = !!(invoicesErr || billsErr || paymentsErr);
 
+  // ── THE TWO QUESTIONS, ASKED ONCE EACH (8a982483) ───────────────────────────────────────────
+  //
+  //   "at the bottom it says 10k in open bills it at the top it says 5k but online it's saying a
+  //    different number that's lower"
+  //
+  // Three figures, and nothing on the screen said they were answers to different questions. They
+  // are computed here, once, by the two functions in lib/supplier-owed.ts, and handed down. Every
+  // screen below reads the ANSWER - nothing recomputes it, which is the whole reason this page
+  // could show two totals built from two different sets of paper in the first place.
+  const owedPapers = liveBills.map((b: any) => ({
+    id: String(b.id),
+    supplierAccountId: b.supplier_account_id ?? null,
+    supplier: b.supplier ?? null,
+    amount: b.amount,
+    status: b.status ?? null,
+    settledBySupplier: settledBySupplierIds.has(String(b.id)),
+  }));
+
+  // (a) WHAT HE OWES HIS SUPPLIERS. The one-number answer, and the one the card leads with.
+  const owedToSuppliers = whatISupplierOwed({
+    accounts: supplierAccounts.map((a) => {
+      const b = supplierBalance(a, today);
+      return {
+        accountId: a.id,
+        name: a.name,
+        onAccount: a.onAccount,
+        owed: b.owed,
+        model: b.model,
+        openPapers: b.chargedBills,
+        // A model-A figure with one of its reads missing is not zero and not a guess: it is named
+        // as one we could not total, exactly as the card has always done it.
+        unread: balancesUnread && a.onAccount && b.model !== "supplier-invoices",
+      };
+    }),
+    papers: owedPapers,
+    identity: supplierOf,
+    settledBySupplier: settledBySupplierIds,
+  });
+
+  // (b) WHAT HE BOUGHT AND HAS NOT SQUARED UP. A purchasing figure. NOT a debt, and the label it
+  // is given below says so - "$10k Unpaid" over "$5k Owed" is the screen telling a man he owes two
+  // different amounts.
+  const boughtNotSettled = whatIBoughtNotSettled({ papers: owedPapers, settledBySupplier: settledBySupplierIds });
+
   // "HEY YOU, HERE'S A BILL, WHAT'S IT FOR?" The same cards My Day shows, from the same call
   // (supplierPaperFeed), so the two screens can never disagree about which paper is waiting.
   //
@@ -837,10 +895,14 @@ export default async function BillsPage({
   type UnfiledSpelling = { alias: string; bills: number; total: number; unpaid: number; unpaidBills: number };
   const unfiled = new Map<string, UnfiledSpelling>();
   for (const b of liveBills) {
-    if (b.supplier_account_id) continue;
+    // ON NO ACCOUNT AS THE RESOLVER READS IT, not as the column reads it: a paper spelled with the
+    // account's own name is ON that account now, and offering to file it a second time would be a
+    // door to nothing.
+    if (accountOfBill(String(b.id))) continue;
     const alias = String(b.supplier ?? "").trim();
-    // A bill with no supplier name at all is not a spelling to file. It stays in the ledger below
-    // exactly as it reads today, rather than becoming a nameless row in a card about names.
+    // A bill with no supplier name at all is not a SPELLING to file - there is nothing to type on
+    // a button. It is still money, and it is counted and named by `whatISupplierOwed` under "No
+    // Supplier Name On The Paper"; this list is the one about names.
     if (!alias) continue;
     // Nor is a business cost saved with no Where: Add By Hand puts the bucket's own name in
     // the supplier field ("Fuel"), and offering to give "Fuel" its own supplier account would be a
@@ -852,7 +914,7 @@ export default async function BillsPage({
     const amount = Number(b.amount) || 0;
     g.bills += 1;
     g.total = Math.round((g.total + amount) * 100) / 100;
-    if (isOnAccountBill({ status: String(b.status ?? "") })) {
+    if (isOnAccountBill({ status: String(b.status ?? ""), settledBySupplier: settledBySupplierIds.has(String(b.id)) })) {
       g.unpaid = Math.round((g.unpaid + amount) * 100) / 100;
       g.unpaidBills += 1;
     }
@@ -1394,6 +1456,12 @@ export default async function BillsPage({
             accounts={supplierAccounts}
             today={today}
             unassigned={unassigned}
+            // THE ANSWER, NOT THE INGREDIENTS. The card used to add an account join to a spelling
+            // grouping and call the sum "Owed"; it now reads the figure the one function produced.
+            owedToSuppliers={owedToSuppliers}
+            // The OTHER figure, named on the same card, so the one he finds further down the page
+            // is not a surprise he has to reconcile himself.
+            boughtNotSettled={boughtNotSettled}
             reconcile={reconcile}
             needsYouIds={needsYouIds}
             waitingOnCredit={paperFeed?.waiting ?? []}
@@ -1440,6 +1508,9 @@ export default async function BillsPage({
             bills={ledgerBills as any}
             docs={looseDocs as any}
             readFailed={!!billsErr}
+            // QUESTION (b), ALREADY ANSWERED. The fold used to total the rows it happened to be
+            // holding; it reads the one function's figure now, so it cannot drift from the card.
+            boughtNotSettled={boughtNotSettled}
             papersNote={billTiesErr ? "Couldn't load which receipt made each bill just now, so every receipt file is listed. Reload to try again." : null}
             switches={switches}
             alreadyBilled={billDoors}
