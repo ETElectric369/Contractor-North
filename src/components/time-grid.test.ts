@@ -159,10 +159,10 @@ describe("what happened, on a past block", () => {
   it("hollow keeps the border and type color, a faint fill and muted words; never dashed", () => {
     expect(hollowTone("border-slate-300 bg-slate-200/80 text-slate-800")).toBe("border-slate-300 bg-white/40 text-slate-500");
     expect(hollowTone("border-amber-300 bg-amber-100 text-amber-900 border-dashed opacity-75")).toBe("border-amber-300 border-dashed opacity-75 bg-white/40 text-slate-500");
-    const html = grid({ events: [block({ actual: { people: [], hollow: true, sentence: "Booked 9–5 · Nobody clocked in" } })] });
+    const html = grid({ events: [block({ actual: { people: [], hollow: true, sentence: "Booked 9–5 · No time clocked to this job" } })] });
     expect(html).toContain("border-slate-300 bg-white/40 text-slate-500");
     expect(html).not.toContain("bg-slate-200/80");
-    expect(html).toContain("Booked 9–5 · Nobody clocked in");
+    expect(html).toContain("Booked 9–5 · No time clocked to this job");
     expect(html).not.toContain("data-worked-bars");
   });
 

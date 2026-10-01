@@ -144,8 +144,9 @@ describe("the week", () => {
     expect(html).toContain('title="12 Elm St · Rita Moss · Truckee · 9a–5p · Booked 9–5 · Erik 10–6 · 1h late · 1h over"');
   });
 
-  it("a booked day nobody worked is hollow", () => {
-    expect(html).toContain("Booked 9–11 · Nobody clocked in");
+  it("a booked day with no time clocked to it is hollow, and says only that", () => {
+    // Not "Nobody clocked in": a punch with no job never reaches a block, so the block can't know.
+    expect(html).toContain("Booked 9–11 · No time clocked to this job");
     expect(html).toContain("border-slate-300 bg-white/40 text-slate-500");
   });
 
@@ -185,13 +186,13 @@ describe("the day drill", () => {
   it("a failed clocked-time read says so in one quiet line, and no block is hollow", () => {
     const html = render("week", PAST3, { actuals: null });
     expect(html).toContain("Clocked time didn&#x27;t load, so past days show only what was booked.");
-    expect(html).not.toContain("Nobody clocked in");
+    expect(html).not.toContain("No time clocked to this job");
     expect(html).not.toContain("data-worked-bars");
   });
 
   it("a capped read: older weeks say how far back the clocked time loads, and are never hollow", () => {
     const html = render("week", PAST3, { actualsCappedBefore: TODAY });
     expect(html).toContain("Clocked time loads back to");
-    expect(html).not.toContain("Nobody clocked in");
+    expect(html).not.toContain("No time clocked to this job");
   });
 });

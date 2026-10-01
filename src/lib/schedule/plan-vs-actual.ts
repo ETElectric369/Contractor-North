@@ -26,7 +26,8 @@
  *                   /timecards.
  *
  * The sentence is at most 140 characters of plain words: "Booked 9–5 · Erik 10–7:30 · Jimmy 10–7:30 ·
- * 1h late · 2.5h over"; a block nobody worked is "Booked 9–5 · Nobody clocked in" (HOLLOW).
+ * 1h late · 2.5h over"; a block with none of it is "Booked 9–5 · No time clocked to this job" (HOLLOW) —
+ * what the read can see, since a punch with no job never reaches a block.
  * No money here: no rate, no pay column, ever.
  */
 import { todayStrInTz, tzMinutesOfDay } from "@/lib/tz";
@@ -272,7 +273,7 @@ export type WorkedPerson = {
 
 export type BlockActual = {
   people: WorkedPerson[];
-  /** Hollow: booked, and nobody clocked in. */
+  /** Hollow: booked, and no time was clocked TO THIS JOB that day (a no-job punch is never on a block). */
   state: "hollow" | "worked";
   /** First in minus the block's start (negative: early). Null when hollow. */
   lateMin: number | null;
@@ -395,7 +396,12 @@ function fitSentence(head: string, people: string[], tail: string[]): string {
 /** The block's sentence: "Booked 9–5 · Erik 10–7:30 · Jimmy 10–7:30 · 1h late · 2.5h over". */
 export function blockSentence(b: { startMin: number; endMin: number }, a: Pick<BlockActual, "people" | "lateMin" | "overMin" | "shortMin">): string {
   const head = `Booked ${clockShort(b.startMin)}–${clockShort(b.endMin)}`;
-  if (!a.people.length) return `${head} · Nobody clocked in`;
+  /* SAY ONLY WHAT THE READ KNOWS. The clocked-time read keeps entries ON A JOB (a no-job punch is
+     never guessed onto a block), so a helper who clocked in with no job — the Skip on "Which Job Are
+     You On?", anyone not rostered on the job — is invisible here. "Nobody clocked in" would name a
+     real person as absent while /timecards shows their hours that day and Needs You counts them under
+     Hours On No Job. The block's own truth is narrower, and it is the one said. */
+  if (!a.people.length) return `${head} · No time clocked to this job`;
   const tail: string[] = [];
   if (a.lateMin != null && a.lateMin >= NOTE_MIN) tail.push(`${durShort(a.lateMin)} late`);
   if (a.overMin != null && a.overMin >= NOTE_MIN) tail.push(`${durShort(a.overMin)} over`);
@@ -413,7 +419,7 @@ export function planVsActual(p: { blocks: readonly PlanBlock[]; spans: readonly 
   unplanned: UnplannedGroup[];
 } {
   // Only a block ON A JOB is judged: time is clocked to jobs, so a visit with no job (a pre-sale
-  // walk-through) has nothing to be compared with, and "Nobody clocked in" would be a false zero.
+  // walk-through) has nothing to be compared with, and "No time clocked to this job" would be a false zero.
   const past = p.blocks.filter((b) => b.dayStr < p.todayStr && !!b.jobId);
   const jobBlock = new Map<string, PlanBlock>();
   const visitBlock = new Map<string, PlanBlock>();

@@ -74,7 +74,7 @@ export interface TimeGridActual {
   /** Each person who clocked in, in their own color, with their stretches (minutes past midnight;
    *  `open` = never clocked out, drawn fading out). */
   people: { key: string; initials: string; dot: string; spans: { startMin: number; endMin: number; open: boolean }[] }[];
-  /** Booked, and nobody clocked in: the block keeps its border and type color, filled faint. */
+  /** Booked, and no time clocked to it: the block keeps its border and type color, filled faint. */
   hollow?: boolean;
   /** The block's sentence ("Booked 9–5 · Erik 10–6 · 1h late"): its title and label. */
   sentence?: string;

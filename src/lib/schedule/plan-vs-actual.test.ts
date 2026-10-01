@@ -28,7 +28,7 @@ import { bookedKeys } from "./booked-days";
 
 /**
  * WHAT HAPPENED, INSIDE THE BLOCK (Wave 2, SV-actual). The shapes are the real ET weeks that made the
- * case (as fixtures with made-up ids, never data): J-046's week (Monday nobody went; Tuesday Erik 10 to
+ * case (as fixtures with made-up ids, never data): J-046's week (Monday no time on the job; Tuesday Erik 10 to
  * 6 and Jimmy noon to 6; Thursday 11 to 9 = 4h over), J-011 9/22 (an all-day block, two people), J-055
  * (an 8-to-5 block started at noon), J-011 9/25 (worked, nothing booked), an overnight 10 PM to 6:30 AM,
  * a duplicate pair that counts once, a day only a return visit booked, and a spring-forward day.
@@ -296,8 +296,19 @@ describe("J-046's week: booked 9 to 5", () => {
     entry(ERIK, "j46", "2026-09-24", "11:00", "21:00"),
   ]);
 
-  it("Monday: nobody went: hollow", () => {
-    expect(res.byKey.get("j-j46-2026-09-21")).toMatchObject({ state: "hollow", people: [], lateMin: null, sentence: "Booked 9–5 · Nobody clocked in" });
+  it("Monday: no time clocked to the job: hollow, and the sentence claims only that", () => {
+    expect(res.byKey.get("j-j46-2026-09-21")).toMatchObject({ state: "hollow", people: [], lateMin: null, sentence: "Booked 9–5 · No time clocked to this job" });
+  });
+
+  it("someone who clocked in with NO job is not called absent: the hollow day never says nobody clocked in", () => {
+    // The read keeps entries on a job, so a helper who skipped "Which Job Are You On?" is invisible to
+    // the block — and /timecards shows their hours that same day. The block says what it can know.
+    const withNoJobPunch = run(blocks, [entry(JIMMY, null, "2026-09-21", "09:00", "17:00")]);
+    const mon = withNoJobPunch.byKey.get("j-j46-2026-09-21")!;
+    expect(mon.state).toBe("hollow");
+    expect(mon.sentence).toBe("Booked 9–5 · No time clocked to this job");
+    expect(mon.sentence).not.toContain("Nobody clocked in");
+    expect(mon.people).toEqual([]);
   });
 
   it("Tuesday: Erik 10 to 6 and Jimmy noon to 6: an hour late, an hour over, in their colors", () => {

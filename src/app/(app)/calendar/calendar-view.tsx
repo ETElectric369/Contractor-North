@@ -755,7 +755,7 @@ export function CalendarView({
       }),
     [ghostsByDay, personFilter],
   );
-  /** The past job days nobody clocked in on (the month's hollow tone). */
+  /** The past job days with no time clocked TO THEM (the month's hollow tone). */
   const hollowKeys = useMemo(() => {
     const out = new Set<string>();
     for (const [key, a] of pva?.byKey ?? []) if (a.state === "hollow" && key.startsWith("j-")) out.add(key);
@@ -875,7 +875,7 @@ export function CalendarView({
       /* A RETURN VISIT ON A JOB draws the time clocked to its job that day, unless that job has its own
          block that day (hidden by the person filter here: the time went to the job's block). A visit is
          NEVER drawn hollow: a city inspection or a meeting on a job is booked time nobody clocks, and
-         "Nobody clocked in" there would be a false zero. A visit with no job is never judged. */
+         a hollow sentence there would be a false zero. A visit with no job is never judged. */
       const visitActual = judged && a.job_id && !pva?.byKey.has(`j-${a.job_id}-${k}`) ? pva?.byKey.get(id) : undefined;
       const actual = visitActual?.state === "worked" ? gridActualOf(visitActual, personFilter) : undefined;
       events.push({
@@ -1473,7 +1473,7 @@ function pillTime(iso: string, tz: string): string {
 
 const PILL_TONE: Record<"job" | "jobHollow" | "ghost" | "appt" | "apptProposed" | "task" | "external", string> = {
   job: "bg-blue-50 text-blue-700",
-  // A past job day nobody clocked in on (hollow): its hue kept in a faint outline, the fill gone.
+  // A past job day with no time clocked to it (hollow): its hue in a faint outline, the fill gone.
   jobHollow: "bg-white/40 text-blue-400 ring-1 ring-inset ring-blue-200",
   // Work nobody booked (a ghost, part D): dashed, slate, white — never a booking's look.
   ghost: "border border-dashed border-slate-400 bg-white/60 text-slate-700",
@@ -1488,7 +1488,7 @@ function monthPills(
   data: DayData | undefined,
   tz: string,
   dayK?: string,
-  /** Past job days nobody clocked in on (block keys, "j-<job>-<day>"), drawn hollow. */
+  /** Past job days with no time clocked to them (block keys, "j-<job>-<day>"), drawn hollow. */
   hollow?: ReadonlySet<string>,
   /** The day's work nobody booked: a dashed pill, "<job name> · <customer>". */
   ghosts?: readonly GhostTarget[],
@@ -1552,7 +1552,7 @@ function MonthGrid({
 }: {
   anchor: Date;
   byDay: Map<string, DayData>;
-  /** Past job days nobody clocked in on (the hollow tone; no bars in a month cell). */
+  /** Past job days with no time clocked to them (the hollow tone; no bars in a month cell). */
   hollow?: ReadonlySet<string>;
   /** A day's work nobody booked, person-filtered (a dashed pill). */
   ghostsOn?: (k: string) => GhostTarget[];
