@@ -10,6 +10,7 @@ import { modelFor, recordAiUsage } from "@/lib/ai-cost";
 import { parseAiJson } from "@/lib/ai-json";
 import { listJobScopes } from "@/lib/analytics/job-profitability";
 import { reconcileReceipt } from "@/lib/receipt-reconcile";
+import { scopeAnswered } from "@/lib/bill-scope";
 import { AUTO_FILE_BUCKETS, bucketOf, isBusinessCostBucket, looksLikeSupplierFee } from "@/lib/business-cost-buckets";
 import { isSha256 } from "@/lib/content-hash";
 import {
@@ -427,6 +428,16 @@ export async function billJobReceipt(
     category?: string | null;
     billDate?: string | null;
     fallbackBillDate?: string | null;
+    /**
+     * WHICH PART OF THE JOB a person answered at the door, when the door asked (items C1-1, C1-4).
+     * The Add Cost sheet draws that control and used to hand this function paid, category and the
+     * date and NOT this — so on the default Read the Receipt save the model's own guess won, a
+     * picked "Decking" never left the browser, and no sentence anywhere said it had been dropped.
+     * A word beats the model's read (lib/bill-scope's scopeAnswered); blank leaves the paper's own
+     * read standing, the same as a blank category does. Either way scopeForWrite still holds it to
+     * a part this job's estimate really has.
+     */
+    scope?: string | null;
     /** A person looked at "already on the books" and said this is a different purchase. */
     differentPurchase?: boolean;
   },
@@ -652,9 +663,12 @@ ${MASKED_PRICE_PROMPT_RULE}`,
       amount,
       bill_date: stated?.billDate || itemDate || stated?.fallbackBillDate || null,
       category: stated?.category || "Receipt",
-      // The reader's answer to the one scope question (item C1). lib/bill-scope holds it to a part
-      // this job's estimate really has; a miss reads as none of them, never as a guess.
-      scope: scopeCategory ? { kind: "scope", scope: scopeCategory } : { kind: "none" },
+      // THE ONE SCOPE QUESTION, and whose word wins when both answered it (items C1, C1-1, C1-4).
+      // The person's beats the model's, decided in lib/bill-scope and nowhere else — the same
+      // attestation-beats-inference rule this call already applies to the date, the category and
+      // paid. lib/bill-scope then holds whatever won to a part this job's estimate really has; a
+      // miss reads as none of them, never as a guess.
+      scope: scopeAnswered(stated?.scope, scopeCategory),
       // This door reads straight off a photo the person just took, so "Read Again" is not a door it
       // has: its own next step is a clearer photo, or the tray (RETURN_ON_JOB_NEEDS_LINES's words).
       nextStepIfRefused: "Nothing was recorded. Try a clearer photo, or drop it in Organize and file it as a business cost.",

@@ -35,7 +35,10 @@ vi.mock("@/lib/anthropic", () => ({
 }));
 vi.mock("@/lib/ai-json", () => ({ parseAiJson: async () => ai.parsed }));
 vi.mock("@/lib/ai-cost", () => ({ recordAiUsage: async () => {}, modelFor: () => "test-model" }));
-vi.mock("@/lib/analytics/job-profitability", () => ({ listJobScopes: async () => [] }));
+// What the job's estimate is broken into: nothing, unless a test says otherwise (item C1-4 needs a
+// job with real parts before the reader can put a cost under one).
+const estimate = vi.hoisted(() => ({ scopes: [] as string[] }));
+vi.mock("@/lib/analytics/job-profitability", () => ({ listJobScopes: async () => estimate.scopes }));
 vi.mock("@/lib/observe", () => ({ reportError: () => {} }));
 // The real importer, wrapped so one test can say what a re-import landed.
 vi.mock("@/app/(app)/bills/supplier-import-actions", async (orig) => {
@@ -120,6 +123,7 @@ const storageLog = { copied: [] as [string, string][], removed: [] as string[], 
 let calls: Call[];
 beforeEach(() => {
   calls = [];
+  estimate.scopes = [];
   ai.systems = [];
   storageLog.copied = [];
   storageLog.removed = [];
@@ -1964,6 +1968,87 @@ describe("billJobReceipt (Snap the Bill, Record as Cost) no longer drops what th
     expect(did("bills", "insert")!.payload).toMatchObject({ pricing_provisional: true, bill_number: "T-123" });
     expect(ai.systems[0]).toContain("for a contractor");
     expect(ai.systems[0]).not.toContain("electrical contractor");
+  });
+});
+
+/**
+ * ITEMS C1-1 AND C1-4 (ONE DEFECT): THE PERSON'S PART OF THE JOB IS NOT THROWN AWAY BY A GOOD READ.
+ *
+ * Erik is on Chris's deck job, whose estimate is Framing and Decking. He taps Add Cost, picks
+ * "Decking" in Part Of The Job, snaps the lumber receipt and taps Read the Receipt — the DEFAULT save,
+ * because supplier and amount are blank. The sheet handed this function paid, category and the date
+ * and NOT his answer, so the model's "Framing" won (or nothing did), the Costs tab printed
+ * "No Part Of The Job Set" on the very cost he had just answered, and nothing said so — while the
+ * Category dropdown directly above it was carried through under this file's own attestation rule.
+ */
+describe("billJobReceipt: the person's Part Of The Job beats the model's (items C1-1, C1-4)", () => {
+  const paper = {
+    vendor: "A Lumber Yard",
+    amount: 900,
+    date: "2026-10-01",
+    document_number: null,
+    line_items: [{ description: "2x6 PT", quantity: 30, unit_price: 30, amount: 900 }],
+    payment: "on_account",
+    confidence: "high",
+  };
+  const script = () => ({
+    "documents.select": [{ data: { id: "doc-7", name: "t.jpg", file_url: "org-1/x/t.jpg", size_bytes: 10, job_id: "job-1" }, error: null }],
+    "organized_items.select": [{ data: null, error: null }],
+    "organizations.select": [{ data: { settings: { trade_label: "" } }, error: null }],
+    "supplier_aliases.select": [{ data: [], error: null }],
+    "bills.insert": [{ data: { id: "bill-9" }, error: null }],
+    "bill_line_items.insert": [{ data: [{ id: "bli" }], error: null }],
+    "organized_items.insert": [{ data: [{ id: "oi" }], error: null }],
+  });
+
+  it("stores HIS answer, not the model's guess", async () => {
+    estimate.scopes = ["Framing", "Decking"];
+    ai.parsed = { ...paper, scope_category: "Framing" };
+    state.client = fakeSupabase(script(), calls);
+    const res = await billJobReceipt("doc-7", { paid: false, category: "Materials", scope: "Decking" });
+    expect(res.ok).toBe(true);
+    expect(did("bills", "insert")!.payload.scope_category).toBe("Decking");
+  });
+
+  it("stores his answer even when the model shrugged — the case that read 'No Part Of The Job Set'", async () => {
+    estimate.scopes = ["Framing", "Decking"];
+    ai.parsed = { ...paper, scope_category: "Uncategorized" };
+    state.client = fakeSupabase(script(), calls);
+    const res = await billJobReceipt("doc-7", { scope: "Decking" });
+    expect(res.ok).toBe(true);
+    expect(did("bills", "insert")!.payload.scope_category).toBe("Decking");
+  });
+
+  it("an untouched control is not an answer, so the paper's own read still stands", async () => {
+    estimate.scopes = ["Framing", "Decking"];
+    ai.parsed = { ...paper, scope_category: "Framing" };
+    state.client = fakeSupabase(script(), calls);
+    const res = await billJobReceipt("doc-7", { scope: "" });
+    expect(res.ok).toBe(true);
+    expect(did("bills", "insert")!.payload.scope_category).toBe("Framing");
+  });
+
+  it("his answer is still held to the estimate: a part the job hasn't got is refused, and NOTHING is written", async () => {
+    estimate.scopes = ["Framing", "Decking"];
+    ai.parsed = { ...paper, scope_category: "Framing" };
+    state.client = fakeSupabase(script(), calls);
+    const res = await billJobReceipt("doc-7", { scope: "Plumbing" });
+    expect(res.ok).toBe(false);
+    expect(res.error).toMatch(/Plumbing/);
+    expect(res.error).toMatch(/Framing/);
+    expect(did("bills", "insert")).toBeUndefined();
+  });
+
+  // Different Purchase re-reads the same paper through the same stated() object, so his answer has to
+  // survive that road too (the skeptic's precision on item C1-1).
+  it("survives the Different Purchase re-read as well", async () => {
+    estimate.scopes = ["Framing", "Decking"];
+    ai.parsed = { ...paper, scope_category: "Framing" };
+    // Re-reading clears the "already on the books" suggestion row first.
+    state.client = fakeSupabase({ ...script(), "organized_items.delete": [{ data: null, error: null }] }, calls);
+    const res = await billJobReceipt("doc-7", { scope: "Decking", differentPurchase: true });
+    expect(res.ok).toBe(true);
+    expect(did("bills", "insert")!.payload.scope_category).toBe("Decking");
   });
 });
 

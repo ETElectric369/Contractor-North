@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { jobSiteLabel } from "@/lib/schedule-options";
 import { Briefcase, ChevronDown, ListChecks } from "lucide-react";
 import { checklistGroups } from "@/lib/materials-checklist";
-import { lineExtension, listMoney, listTotalCaveat } from "@/lib/materials-money";
+import { lineExtension, listMoney, listTotalLine } from "@/lib/materials-money";
 import { BackLink } from "@/components/back-link";
 import { createClient } from "@/lib/supabase/server";
 import { formatCurrency, formatDate } from "@/lib/utils";
@@ -109,8 +109,10 @@ export default async function MaterialListPage({
   // The same honest money the editor prints (item C4): what the priced lines come to, and what the
   // figure leaves out. The read-only view used to show no total at all, and the office lands here to
   // decide what to carry across to the live list.
-  const readOnlyMoney = listMoney(readOnlyItems);
-  const readOnlyCaveat = listTotalCaveat(readOnlyMoney);
+  // With nothing priced there is no figure, only the sentence (item C4-6): this view got the total at
+  // the same time as the caveat, so it was the one screen printing "List Total $0.00" beside "there is
+  // nothing to total" for the first time. lib/materials-money decides which of the two there is.
+  const { figure: readOnlyFigure, caveat: readOnlyCaveat } = listTotalLine(listMoney(readOnlyItems));
   const readOnlyRow = (it: any) => (
     <li key={it.id} className="flex items-center gap-2 px-4 py-3 text-sm">
       <span className={it.purchased ? "text-slate-400 line-through" : "text-slate-800"}>{it.description}</span>
@@ -234,11 +236,13 @@ export default async function MaterialListPage({
             {/* The list's own money, said the same way as the editor's footer (item C4). Staff only. */}
             {viewerIsStaff && readOnlyItems.length > 0 && (
               <div className="border-t border-slate-100 px-4 py-2 text-sm">
-                <div className="flex items-center justify-end">
-                  <span className="text-slate-500">
-                    List Total <span className="font-semibold text-slate-900">{formatCurrency(readOnlyMoney.total)}</span>
-                  </span>
-                </div>
+                {readOnlyFigure !== null && (
+                  <div className="flex items-center justify-end">
+                    <span className="text-slate-500">
+                      List Total <span className="font-semibold text-slate-900">{formatCurrency(readOnlyFigure)}</span>
+                    </span>
+                  </div>
+                )}
                 {readOnlyCaveat && <p className="mt-1 text-xs text-amber-700">{readOnlyCaveat}</p>}
               </div>
             )}

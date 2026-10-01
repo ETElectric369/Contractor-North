@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { scopeAfterJobMove, scopeForWrite, scopeOptions, scopeSaid, SCOPE_UNCATEGORIZED } from "./bill-scope";
+import { scopeAfterJobMove, scopeAnswered, scopeForWrite, scopeOptions, scopeSaid, scopeSelected, SCOPE_UNCATEGORIZED } from "./bill-scope";
 
 /**
  * THE ONE DECIDER FOR WHICH PART OF THE JOB A COST IS (item C1).
@@ -76,20 +76,36 @@ describe("scopeForWrite", () => {
   });
 });
 
+// REWRITTEN for item C1-2: the destination is now stated (`{ jobId, jobScopes }`), because a move to
+// Business Cost and a move to a job without the part are two different sentences and an empty scopes
+// list could not tell them apart.
 describe("scopeAfterJobMove", () => {
   it("keeps the part when the job it moves to has one by the same name", () => {
-    expect(scopeAfterJobMove("Framing", ["Framing", "Siding"])).toEqual({ value: "Framing", said: null });
+    expect(scopeAfterJobMove("Framing", { jobId: "job-2", jobScopes: ["Framing", "Siding"] })).toEqual({ value: "Framing", said: null });
   });
 
   it("drops it when the new job's estimate has no such part — and SAYS so", () => {
-    const r = scopeAfterJobMove("Framing", ["Siding"]);
+    const r = scopeAfterJobMove("Framing", { jobId: "job-2", jobScopes: ["Siding"] });
     expect(r.value).toBeNull();
     expect(r.said).toContain("Framing");
     expect(r.said).toMatch(/no part by that name/i);
   });
 
   it("a cost that was under no part has nothing to say", () => {
-    expect(scopeAfterJobMove(null, ["Siding"])).toEqual({ value: null, said: null });
+    expect(scopeAfterJobMove(null, { jobId: "job-2", jobScopes: ["Siding"] })).toEqual({ value: null, said: null });
+  });
+
+  // ITEM C1-2: taken OFF every job, the one sentence spoke of "the job it moved to" (there isn't one)
+  // and sent him to the Edit Bill box's Part Of The Job control, which is not drawn without a job.
+  it("taken off every job it says what happened, invents no job, and names no door that isn't drawn", () => {
+    const r = scopeAfterJobMove("Framing", { jobId: null, jobScopes: [] });
+    expect(r.value).toBeNull();
+    expect(r.said).toContain("Framing");
+    expect(r.said).toBe(
+      'This cost was under "Framing" on the job it came off. A business cost isn\'t part of a job, so the part it was under came off with it.',
+    );
+    expect(r.said).not.toMatch(/the job it moved to/i);
+    expect(r.said).not.toMatch(/Edit Bill/i);
   });
 });
 
@@ -105,5 +121,76 @@ describe("what the screen says", () => {
     expect(scopeOptions([])).toEqual([]);
     expect(scopeOptions([SCOPE_UNCATEGORIZED])).toEqual([]);
     expect(scopeOptions(["Framing", SCOPE_UNCATEGORIZED, "Decking"])).toEqual(["Framing", "Decking"]);
+  });
+});
+
+/**
+ * ITEM C1-3: THE ONE CONTROL NEVER OFFERS TWO SPELLINGS OF NOTHING.
+ *
+ * main's receipt reader could store the literal "Uncategorized". The control kept a stored word the
+ * estimate no longer has (right, so a dropdown can never silently re-file a cost under nothing just
+ * by being opened) and so it kept that one too: "No Part Of The Job / Uncategorized / Framing /
+ * Decking" — in the one control whose whole purpose is to stop a budget row splitting in two. The
+ * Costs tab row beside it already said "No Part Of The Job Set" about the same cost, so the row and
+ * the box disagreed until he saved. Both decisions moved in here.
+ */
+describe("what the one control shows (item C1-3)", () => {
+  it("a stored part is what is chosen; the reserved word is chosen as none of them", () => {
+    expect(scopeSelected("Decking")).toBe("Decking");
+    expect(scopeSelected(null)).toBe("");
+    expect(scopeSelected("  ")).toBe("");
+    expect(scopeSelected(SCOPE_UNCATEGORIZED)).toBe("");
+  });
+
+  it("a stored 'Uncategorized' is shown as No Part Of The Job, with NO option of its own", () => {
+    const options = scopeOptions(["Framing", "Decking"], SCOPE_UNCATEGORIZED);
+    expect(options).toEqual(["Framing", "Decking"]);
+    expect(options).not.toContain(SCOPE_UNCATEGORIZED);
+    // And the box now agrees with the row the Costs tab prints beside it.
+    expect(scopeSelected(SCOPE_UNCATEGORIZED)).toBe("");
+    expect(scopeSaid(SCOPE_UNCATEGORIZED)).toBe("No Part Of The Job Set");
+  });
+
+  it("a part the estimate has LOST still rides in the list, so saving the box saves what is there", () => {
+    expect(scopeOptions(["Decking"], "Framing")).toEqual(["Framing", "Decking"]);
+    // Even on a job whose estimate has no parts left at all: otherwise the control would vanish and
+    // the cost would quietly lose the part it carries on the next save.
+    expect(scopeOptions([], "Framing")).toEqual(["Framing"]);
+  });
+
+  it("a part the estimate still has is offered once, not twice", () => {
+    expect(scopeOptions(["Framing", "Decking"], "Decking")).toEqual(["Framing", "Decking"]);
+  });
+});
+
+/**
+ * ITEMS C1-1 AND C1-4 (ONE DEFECT): WHOSE WORD WINS, decided here and nowhere else.
+ *
+ * The Add Cost sheet drew Part Of The Job and then handed the receipt reader paid, category and the
+ * date and NOT the answer — so on the default Read the Receipt save the model's guess won, Erik's
+ * picked "Decking" never left the browser, and no sentence anywhere said it had been dropped.
+ */
+describe("scopeAnswered (items C1-1, C1-4)", () => {
+  it("the person's answer beats the model's read of the paper", () => {
+    expect(scopeAnswered("Decking", "Framing")).toEqual({ kind: "scope", scope: "Decking" });
+  });
+
+  it("a blank control is not an answer, so the paper's own read still stands", () => {
+    expect(scopeAnswered("", "Framing")).toEqual({ kind: "scope", scope: "Framing" });
+    expect(scopeAnswered(null, "Framing")).toEqual({ kind: "scope", scope: "Framing" });
+    expect(scopeAnswered("   ", "Framing")).toEqual({ kind: "scope", scope: "Framing" });
+  });
+
+  it("nobody answered and nothing was read: none of them, never a guess", () => {
+    expect(scopeAnswered(null, null)).toEqual({ kind: "none" });
+    expect(scopeAnswered("", "")).toEqual({ kind: "none" });
+  });
+
+  it("a person's answer is still held to the estimate — whoever said it", () => {
+    const parts = ["Framing", "Decking"];
+    expect(scopeForWrite({ jobId: "job-1", answer: scopeAnswered("Plumbing", "Framing"), jobScopes: parts }).refusal).toMatch(/Plumbing/);
+    expect(scopeForWrite({ jobId: "job-1", answer: scopeAnswered("Decking", "Framing"), jobScopes: parts }).value).toBe("Decking");
+    // The model shouting the reserved word is still stored as nothing, not as a second spelling.
+    expect(scopeForWrite({ jobId: "job-1", answer: scopeAnswered(null, SCOPE_UNCATEGORIZED), jobScopes: parts }).value).toBeNull();
   });
 });

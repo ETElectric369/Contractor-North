@@ -229,6 +229,82 @@ describe("C2: a return with no lines cannot be put on a job by any door", () => 
     expect(res.error).toMatch(/credit the customer the whole amount/i);
     expect(wroteTo("bills", "update")).toBeUndefined();
   });
+
+  // ITEM C1-5: THE CHANGE IS HELD TO THE RULE, NOT THE RESTING STATE. Asked of the resting state, the
+  // guard refused EVERY save on a lineless credit already sitting on a job — the rows the code before
+  // item C2 was free to create. The job's Costs tab Edit Bill box always sends `amount` and now
+  // `scope_category` too, so marking one Settled At The Counter, or fixing its date, or setting its
+  // Part Of The Job came back refused, with a next step ("leave it as a business cost") that needs a
+  // Job field that box has not got.
+  describe("a lineless credit ALREADY on a job (item C1-5)", () => {
+    const LEGACY = { job_id: "job-1", amount: -51.58 };
+    /** What JobBillEditModal sends on Save Changes: amount and scope every time, never a job. */
+    const boxSave = {
+      supplier: "A Supply House",
+      bill_number: "",
+      amount: -51.58,
+      status: "paid",
+      bill_date: "2026-10-01",
+      po_id: null,
+      scope: { kind: "none" } as const,
+    };
+
+    it("saves when the patch moves neither the job nor the figure — it cannot put the credit anywhere new", async () => {
+      state.stored = { ...LEGACY };
+      state.storedLines = [];
+      const res = await updateBill("bill-1", boxSave);
+      expect(res.ok).toBe(true);
+      expect(wroteTo("bills", "update")!.payload.status).toBe("paid");
+    });
+
+    it("and its Part Of The Job can still be set, which is the row the budget needs", async () => {
+      state.scopes = ["Framing", "Decking"];
+      state.stored = { ...LEGACY };
+      state.storedLines = [];
+      const res = await updateBill("bill-1", { ...boxSave, scope: { kind: "scope", scope: "Decking" } });
+      expect(res.ok).toBe(true);
+      expect(wroteTo("bills", "update")!.payload.scope_category).toBe("Decking");
+    });
+
+    it("a cent of re-price IS the change, so that save is still refused and nothing is written", async () => {
+      state.stored = { ...LEGACY };
+      state.storedLines = [];
+      const res = await updateBill("bill-1", { ...boxSave, amount: -51.59 });
+      expect(res.ok).toBe(false);
+      expect(res.error).toMatch(/credit the customer the whole amount/i);
+      expect(wroteTo("bills", "update")).toBeUndefined();
+    });
+
+    it("moving it to ANOTHER job is still refused", async () => {
+      state.stored = { ...LEGACY };
+      state.storedLines = [];
+      const res = await updateBill("bill-1", { job_id: "job-2" });
+      expect(res.ok).toBe(false);
+      expect(res.error).toMatch(/credit the customer the whole amount/i);
+      expect(wroteTo("bills", "update")).toBeUndefined();
+    });
+
+    it("the refusal names a door that is actually drawn, not one this box hasn't got", async () => {
+      state.stored = { job_id: null, amount: -51.58 };
+      state.storedLines = [];
+      const res = await updateBill("bill-1", { job_id: "job-2" });
+      expect(res.ok).toBe(false);
+      // "Leave it as a business cost" is a Job field, and the Costs tab's Edit Bill box has none.
+      expect(res.error).not.toMatch(/leave it as a business cost/i);
+      expect(res.error).toMatch(/Open The Bill/);
+      expect(res.error).toMatch(/Business Cost \(No Job\)/);
+    });
+
+    it("taking it OFF the job always works, and says the part came off with it", async () => {
+      state.stored = { ...LEGACY, scope_category: "Framing" };
+      state.storedLines = [];
+      const res = await updateBill("bill-1", { job_id: null });
+      expect(res.ok).toBe(true);
+      expect(wroteTo("bills", "update")!.payload.job_id).toBeNull();
+      expect(res.warning ?? "").toMatch(/business cost isn't part of a job/i);
+      expect(res.warning ?? "").not.toMatch(/the job it moved to/i);
+    });
+  });
 });
 
 describe("C3: a receipt filed from Add Cost is stamped the job's own", () => {

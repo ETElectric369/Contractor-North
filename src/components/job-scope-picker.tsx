@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Label, Select } from "@/components/ui/input";
 import { jobScopeOptions } from "@/app/(app)/bills/scope-actions";
+import { scopeOptions, scopeSelected } from "@/lib/bill-scope";
 
 /**
  * THE ONE SCOPE QUESTION, drawn the same way at every door that writes or edits a cost (item C1).
@@ -66,11 +67,12 @@ export function JobScopePicker({
 }) {
   const { scopes, unread } = useJobScopes(jobId);
 
-  // A PART THE JOB NO LONGER HAS IS STILL SHOWN, so the dropdown can never silently re-file a cost
-  // under nothing just by being opened: the stored word rides in the list, and saving it again
-  // saves what is already there.
-  const stored = String(value ?? "").trim();
-  const options = scopes && stored && !scopes.includes(stored) ? [stored, ...scopes] : scopes;
+  // WHAT IS CHOSEN AND WHAT IS OFFERED ARE BOTH lib/bill-scope's (item C1-3). This control used to
+  // work the list out for itself — which kept a part the job no longer has (right: saving the box
+  // must save what is already there) and also kept the reserved word "Uncategorized", a second
+  // spelling of "No Part Of The Job" sitting right under it. One place decides both now.
+  const stored = scopeSelected(value);
+  const options = scopes ? scopeOptions(scopes, stored) : null;
 
   if (!jobId) return null;
   if (unread)

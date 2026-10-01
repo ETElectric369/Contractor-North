@@ -9,7 +9,7 @@ import { NumberInput } from "@/components/ui/number-input";
 import { formatCurrency } from "@/lib/utils";
 import { useToast } from "@/components/toast";
 import { checklistGroups, openToBuyCount, tickWord, toBuyWords } from "@/lib/materials-checklist";
-import { lineExtension, listMoney, listTotalCaveat } from "@/lib/materials-money";
+import { lineExtension, listMoney, listTotalLine } from "@/lib/materials-money";
 import {
   addMaterialItem,
   deleteMaterialItem,
@@ -127,8 +127,9 @@ export function ItemEditor({
   // THE MONEY, AND WHAT IT LEAVES OUT (item C4). The total used to sum (est_cost ?? 0) × quantity, so
   // a line with no price yet counted as zero with nothing said — a twenty-line list where six have no
   // price read as a finished figure. lib/materials-money owns both the sum and the sentence.
-  const money = listMoney(view);
-  const caveat = listTotalCaveat(money);
+  // `figure` is null when NOTHING on the list is priced: then there is no total to print, only the
+  // sentence saying why (item C4-6). lib/materials-money decides that, not this footer.
+  const { figure, caveat } = listTotalLine(listMoney(view));
   const openCount = openToBuyCount(view);
   // Tools float to the top (grab from the shop first), materials to buy below, both in their own
   // sort_order; every checked line (tools too) folds into Bought. The tools-first grouping is for
@@ -433,13 +434,14 @@ export function ItemEditor({
         <div className="border-t border-slate-100 px-4 py-2 text-sm">
           <div className="flex items-center justify-between gap-3">
             <span className="text-slate-500">{toBuyWords(openCount)}</span>
-            {viewerIsStaff && (
+            {viewerIsStaff && figure !== null && (
               <span className="text-slate-500">
-                List Total <span className="font-semibold text-slate-900">{formatCurrency(money.total)}</span>
+                List Total <span className="font-semibold text-slate-900">{formatCurrency(figure)}</span>
               </span>
             )}
           </div>
-          {/* NOTHING SILENT: the lines this total does not cover are named, under the figure (item C4). */}
+          {/* NOTHING SILENT: the lines this total does not cover are named, under the figure (item C4) —
+              or in place of it, when no line is priced and there is no figure to stand behind. */}
           {viewerIsStaff && caveat && <p className="mt-1 text-xs text-amber-700">{caveat}</p>}
         </div>
       )}

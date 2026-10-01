@@ -22,6 +22,7 @@ import { addStockPurchase } from "@/app/(app)/inventory/actions";
 import { jobLabel } from "@/lib/schedule-options";
 import { jobPickLabel } from "@/lib/job-pick-label";
 import { JobScopePicker } from "@/components/job-scope-picker";
+import { scopeAnswered } from "@/lib/bill-scope";
 import { useToast } from "@/components/toast";
 import { openSnapOrNote } from "@/components/snap-or-note";
 import { useShelfItems } from "@/components/shelf-count";
@@ -403,11 +404,23 @@ function SnapCostButton({
    *  there is one. */
   const attachClause = () => attachFailure.current ?? "didn't upload";
 
-  /** What the PERSON stated on the form, handed to the reader: attestation beats inference. */
+  /**
+   * WHAT THE PERSON STATED ON THE FORM, handed to the reader: attestation beats inference.
+   *
+   * EVERY ANSWER THIS SHEET COLLECTS IS IN HERE (items C1-1, C1-4). Part Of The Job was drawn, and
+   * was not in this object — so on the default Read the Receipt save (and on Different Purchase's
+   * re-read, which is this same object) the model's guess won, Erik's picked "Decking" never left the
+   * browser, and nothing on screen said so, while the Category dropdown right above it was carried
+   * through. Supplier and Amount are the paper's in this mode and the form greys them to say it;
+   * every control that is NOT greyed is an answer, and an answer belongs here.
+   */
   function stated(differentPurchase = false) {
     return {
       paid,
       category: category || null,
+      // Blank is not an answer: the control sits on "No Part Of The Job" until somebody picks, so an
+      // untouched one leaves the paper's own read standing (lib/bill-scope's scopeAnswered decides).
+      scope: scope || null,
       // Only a date a person set is a fact; the seeded "today" would outrank the paper's own
       // date (organize/actions.ts: `stated?.billDate || itemDate`). The seeded day still
       // lands when the paper has no legible date, so the bill is never dateless.
@@ -428,8 +441,9 @@ function SnapCostButton({
         job_id: targetJob, supplier: supplier.trim() || "From receipt — add supplier", bill_number: "",
         amount: typedAmount, status: paid ? "paid" : "unpaid", bill_date: billDate || null,
         notes: "", category, receipt_document_id: docId,
-        // The reader couldn't read it, so what the PERSON answered about the part of the job stands.
-        scope: scope ? { kind: "scope", scope } : { kind: "none" },
+        // The reader couldn't read it, so there is no model word to weigh against: what the PERSON
+        // answered about the part of the job stands (lib/bill-scope decides, here as everywhere).
+        scope: scopeAnswered(scope, null),
       });
       if (!fb.ok) return setError(res.error ?? "Couldn't read the receipt.");
       setSameAsDoc(null);
@@ -544,8 +558,9 @@ function SnapCostButton({
         notes: "",
         category: targetJob ? category : bucket,
         receipt_document_id: docId,
-        // Item C1: a business cost has no part of a job; on a job, what the person answered.
-        scope: !targetJob ? { kind: "noJob" } : scope ? { kind: "scope", scope } : { kind: "none" },
+        // Item C1: a business cost has no part of a job; on a job, what the person answered — and
+        // nothing was read off a paper on this path, so there is nothing for it to beat.
+        scope: !targetJob ? { kind: "noJob" } : scopeAnswered(scope, null),
       });
       if (!res.ok) return setError(res.error ?? "Couldn't save the cost.");
       setCostSaved(true);
@@ -912,8 +927,9 @@ export function typedCostBill(f: TypedCostFields): Parameters<typeof createBill>
     category: business ? f.bucket : "Materials",
     po_id: business ? null : f.poId || null,
     // THE SAME SCOPE QUESTION AS EVERY OTHER DOOR (item C1). A business cost has no part of a job;
-    // on a job, what the person answered, and nothing said is "none of them", never a guess.
-    scope: business ? { kind: "noJob" } : f.scope ? { kind: "scope", scope: f.scope } : { kind: "none" },
+    // on a job, what the person answered, and nothing said is "none of them", never a guess. Nothing
+    // is read off a paper on the typed path, so there is no model word for the answer to beat.
+    scope: business ? { kind: "noJob" } : scopeAnswered(f.scope, null),
   };
 }
 

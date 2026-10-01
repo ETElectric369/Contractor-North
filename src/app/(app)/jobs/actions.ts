@@ -1656,13 +1656,28 @@ export async function updateBill(
   /** The job this bill will be on once this patch lands. */
   const nextJobId = patch.job_id !== undefined ? patch.job_id || null : oldJobId;
 
+  /** WHAT THIS PATCH ACTUALLY MOVES, asked once and answered in one place (bill-claims'
+   *  guardedFieldsMoved, which compares whole cents so 456.03 against 456.02 is not a coin flip).
+   *  Both guards below ask it: the lineless-return rule, and the invoice-claim rule further down.
+   *  The bills list sends `amount` on every save and job-bills never sends `job_id`, so "did it move"
+   *  cannot be answered from the patch alone. */
+  const edit = { storedJobId: oldJobId, storedAmount: oldAmount, nextJobId: patch.job_id, nextAmount: patch.amount };
+  const moved = guardedFieldsMoved(edit);
+
   // A RETURN WITH NO LINES NEVER GOES ON A JOB — AND THIS IS THE SHORTEST ROAD TO IT (item C2).
   // A bank credit lands as a business cost with no lines at all, and one dropdown here re-points it
   // onto a job, where the importer credits the customer the whole of it at markup. Turning a job's
   // own lineless bill negative does the same thing. The rule is lib/job-cost-guard's, asked by every
   // door that writes a cost; the lines are read only when the result would actually be a credit.
+  //
+  // THE CHANGE IS WHAT IS HELD TO THE RULE, NOT THE RESTING STATE (item C1-5). Asked of the resting
+  // state, this refused EVERY save on a lineless credit already sitting on a job — rows the code
+  // before item C2 was free to create — so marking one Settled At The Counter, or fixing its date,
+  // or setting its Part Of The Job came back refused, and the Costs tab's Edit Bill box has no Job
+  // field with which to take the only way out it was offered. A save that moves neither the job nor
+  // the figure cannot put a credit anywhere it is not already, so it goes through.
   const nextAmount = patch.amount !== undefined ? (patch.amount || 0) : oldAmount;
-  if (nextJobId && Math.round(Number(nextAmount) * 100) < 0) {
+  if (nextJobId && (moved.movingJob || moved.repricing) && Math.round(Number(nextAmount) * 100) < 0) {
     const { data: lineRows, error: lineReadErr } = await supabase.from("bill_line_items").select("description").eq("bill_id", id).limit(200);
     // NOTHING SILENT: a lines read that failed cannot be treated as "it has lines" — that is how the
     // housings got credited — nor as "it has none", which would refuse an honest credit memo blind.
@@ -1672,7 +1687,10 @@ export async function updateBill(
     }
     const noReturn = jobCostRefusal(
       { jobId: nextJobId, amount: nextAmount, lines: lineRows ?? [] },
-      "Snap the credit memo so its lines come with it, or leave it as a business cost.",
+      // THE NEXT STEP NAMES A DOOR THAT IS DRAWN AT EVERY DOOR THAT CAN REACH THIS (item C1-5).
+      // "Leave it as a business cost" is a Job field, and the Costs tab's Edit Bill box has not got
+      // one — the row's Open The Bill door is how a cost gets to the box that has.
+      "Snap the credit memo so its lines come with it, or Open The Bill and set its Job to Business Cost (No Job).",
     );
     if (noReturn) return { ok: false, error: noReturn };
   }
@@ -1695,7 +1713,12 @@ export async function updateBill(
     if (decided.refusal) return { ok: false, error: decided.refusal };
     clean.scope_category = decided.value;
   } else if (patch.job_id !== undefined && nextJobId !== oldJobId && oldScope) {
-    const moved = scopeAfterJobMove(oldScope, nextJobId ? await listJobScopes(supabase, nextJobId) : []);
+    const moved = scopeAfterJobMove(oldScope, {
+      // WHICH MOVE THIS IS, said rather than implied by an empty list (item C1-2): onto another job,
+      // or off every job into the company's own book. The two get different sentences.
+      jobId: nextJobId,
+      jobScopes: nextJobId ? await listJobScopes(supabase, nextJobId) : [],
+    });
     clean.scope_category = moved.value;
     scopeSaidNote = moved.said ?? undefined;
   }
@@ -1713,10 +1736,9 @@ export async function updateBill(
   // that same id on the new job forever: one purchase billed to the wrong person and unbillable to
   // the right one, out of a save that looked clean. The rule and both sentences live in
   // bill-claims.ts (pure, unit-tested); this door does the two reads.
-  // The claim read only ever runs when one of the two guarded fields actually moved, so a receipt
-  // nobody has billed, or an edit to the supplier / date / status / notes / PO link, costs nothing.
-  const edit = { storedJobId: oldJobId, storedAmount: oldAmount, nextJobId: patch.job_id, nextAmount: patch.amount };
-  const moved = guardedFieldsMoved(edit);
+  // The claim read only ever runs when one of the two guarded fields actually moved (`moved`, worked
+  // out once above), so a receipt nobody has billed, or an edit to the supplier / date / status /
+  // notes / PO link, costs nothing.
   let warning: string | undefined;
   if (moved.movingJob || moved.repricing) {
     const claim = await invoiceBillingBill(supabase, id);

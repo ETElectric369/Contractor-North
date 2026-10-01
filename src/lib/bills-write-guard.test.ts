@@ -34,10 +34,11 @@ const rel = (p: string) => p.slice(SRC.length + 1).split("\\").join("/");
  * reason in words, and the reason is the thing a reviewer checks.
  */
 const MAY_WRITE_BILLS: Record<string, string> = {
-  // The two real cost writers: both ask jobCostRefusal and both decide scope through scopeForWrite.
+  // THE THREE REAL COST WRITERS, and the three named in lib/bill-scope's TEETH note: each asks
+  // jobCostRefusal and each decides the part of the job through scopeForWrite. The last one is
+  // Record It As A Bill on a supplier's card, which can put a credit memo on a job like the others.
   "app/(app)/organize/paperwork-core.ts": "guarded",
   "app/(app)/jobs/actions.ts": "guarded",
-  // Record a supplier's own invoice as a bill: guarded (it can put a credit memo on a job).
   "app/(app)/bills/supplier-actions.ts": "guarded",
   // A bank download's costs are ALWAYS job_id: null — the company's own book, which never reaches a
   // customer. Re-pointing one onto a job happens in updateBill, which is guarded.
@@ -109,6 +110,50 @@ describe("one place decides which part of the job a cost is (item C1)", () => {
       "A door is choosing a cost's part of the job for itself. Hand lib/bill-scope's scopeForWrite a " +
         "BillScopeAnswer and write what it decides.",
     ).toEqual([]);
+  });
+
+  /**
+   * ITEMS C1-1 AND C1-4 (ONE DEFECT), and the one a shared helper could not have caught: the Add Cost
+   * sheet DREW the Part Of The Job control and its default save path simply did not hand the answer to
+   * the writer. `stated()` is the one object that sheet gives the receipt reader — "attestation beats
+   * inference", the file's own rule — so every answer the sheet collects has to be in it, and the
+   * reader may never be handed anything else. Add a save path or a question and this fails until the
+   * answer rides along.
+   */
+  it("the Add Cost sheet hands the reader every answer it collects, through one object", () => {
+    const src = readFileSync(join(SRC, "components/quick-cost-button.tsx"), "utf8");
+    const at = src.indexOf("function stated(");
+    expect(at, "quick-cost-button.tsx no longer has the one stated() object").toBeGreaterThan(-1);
+    const body = src.slice(at, src.indexOf("\n  }", at));
+    for (const answered of ["paid", "category", "billDate", "scope"]) {
+      expect(
+        body,
+        `The sheet draws ${answered} and stated() does not carry it, so the reader decides it instead ` +
+          "and nothing on screen says the person's answer was dropped (items C1-1, C1-4).",
+      ).toContain(answered);
+    }
+    // And nothing reaches the reader except that object.
+    const handed = [...src.matchAll(/billJobReceipt\(([^)]*\)?[^)]*)\)/g)].map((m) => m[1].trim());
+    expect(handed.length, "no door in the sheet reads a receipt any more?").toBeGreaterThan(0);
+    for (const args of handed) {
+      expect(args, "The reader is being handed something other than stated().").toMatch(/^docId,\s*stated\((true)?\)$/);
+    }
+  });
+
+  /**
+   * ITEM C1-3: THE ONE CONTROL HAS NO SAY IN WHAT IT OFFERS. It worked its own list out — which kept a
+   * part the estimate has lost (right) and so kept the reserved word "Uncategorized" too, a second
+   * spelling of "No Part Of The Job" sitting directly under it, in the one control whose stated purpose
+   * is to stop a budget row splitting in two. Both decisions are lib/bill-scope's now, and the control
+   * prints them.
+   */
+  it("the Part Of The Job control takes both its chosen value and its options from lib/bill-scope", () => {
+    const src = readFileSync(join(SRC, "components/job-scope-picker.tsx"), "utf8");
+    expect(src, "the control is choosing its own value again").toContain("scopeSelected(value)");
+    expect(src, "the control is building its own option list again").toMatch(/scopeOptions\(scopes,\s*stored\)/);
+    // The two shapes it used to do by hand. Either one back means the reserved word can return with it.
+    expect(src).not.toMatch(/scopes\.includes\(/);
+    expect(src).not.toMatch(/String\(value\s*\?\?/);
   });
 
   it("no door writes the lineless-return test itself", () => {
