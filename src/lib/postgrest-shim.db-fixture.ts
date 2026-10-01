@@ -9,9 +9,9 @@
  * suite's one transaction, which the suite always rolls back.
  *
  * Only what the doors under test call: from().select / insert / update / delete, the filters eq, neq,
- * is, in, gt, gte, lt, lte, order, limit, range, maybeSingle, single, one level of embedding for the
- * relations named in EMBEDS, and rpc(). Numbers, dates and timestamps come back as PostgREST sends
- * them (a number, 'YYYY-MM-DD', an ISO string) when the suite's client uses PG_TYPES below.
+ * is, in, gt, gte, lt, lte, or, order (nullsFirst either way), limit, range, maybeSingle, single, one
+ * level of embedding for the relations named in EMBEDS, and rpc(). Numbers, dates and timestamps come
+ * back as PostgREST sends them (a number, 'YYYY-MM-DD', an ISO string) when the client uses PG_TYPES.
  *
  * It never connects: the calling *.integration.test.ts does, and calls assertTestDatabase first.
  */
@@ -23,6 +23,27 @@ export interface ShimSql {
 export type ShimError = { message: string; code?: string; details?: string | null; hint?: string | null };
 
 const IDENT = /^[a-z_][a-z0-9_]*$/;
+
+/** The comparison words PostgREST spells inside an `or(...)`, and the SQL they mean. */
+const OR_OPS: Record<string, string> = { eq: "=", neq: "<>", gt: ">", gte: ">=", lt: "<", lte: "<=" };
+
+/** Split an or()/and() body on its TOP-LEVEL commas, so a nested `and(a,b)` stays one term. */
+function splitArms(body: string): string[] {
+  const out: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < body.length; i++) {
+    const c = body[i];
+    if (c === "(") depth++;
+    else if (c === ")") depth--;
+    else if (c === "," && depth === 0) {
+      out.push(body.slice(start, i));
+      start = i + 1;
+    }
+  }
+  out.push(body.slice(start));
+  return out.map((a) => a.trim()).filter(Boolean);
+}
 
 /** pg's type parsers for the suite's Client, so a row reads as PostgREST's JSON would: numeric and
  *  bigint as numbers, date / timestamp / timestamptz as their text. */
@@ -204,6 +225,34 @@ export function postgrestShim(c: ShimSql, uid: string | null) {
         where.push(`${col(k)} is ${v === null ? "null" : v ? "true" : "false"}`);
         return q;
       },
+      /**
+       * PostgREST's `or=(...)`: the arms the client passes as one string, translated whole. The
+       * ranked-pool cut (lib/six-rank rankPoolCut) is exactly this shape, so a suite can run the REAL
+       * query the app sends instead of a hand-written copy of it.
+       */
+      or(filters: string) {
+        const arm = (a: string): string => {
+          const nested = /^(and|or)\((.*)\)$/s.exec(a);
+          if (nested) {
+            const join = nested[1] === "and" ? " and " : " or ";
+            return `(${splitArms(nested[2]).map(arm).join(join)})`;
+          }
+          const m = /^([a-z_][a-z0-9_]*)\.([a-z]+)\.(.*)$/s.exec(a);
+          if (!m) throw new Error(`shim: or arm ${a}`);
+          const [, k, op, raw] = m;
+          if (op === "is") {
+            if (raw === "null") return `${col(k)} is null`;
+            if (raw === "true" || raw === "false") return `${col(k)} is ${raw}`;
+            throw new Error(`shim: or is.${raw}`);
+          }
+          const sql = OR_OPS[op];
+          if (!sql) throw new Error(`shim: or op ${op}`);
+          params.push(raw);
+          return `${col(k)} ${sql} $${params.length}`;
+        };
+        where.push(`(${splitArms(filters).map(arm).join(" or ")})`);
+        return q;
+      },
       in(k: string, v: unknown[]) {
         params.push(v);
         where.push(`${col(k)} = any ($${params.length})`);
@@ -225,7 +274,10 @@ export function postgrestShim(c: ShimSql, uid: string | null) {
       },
       order(k: string, opts: { ascending?: boolean; nullsFirst?: boolean; referencedTable?: string } = {}) {
         if (opts.referencedTable) return q;
-        order.push(`${col(k)} ${opts.ascending === false ? "desc" : "asc"}${opts.nullsFirst ? " nulls first" : ""}`);
+        // nullsFirst is three-valued the way PostgREST is: unset leaves Postgres's own default
+        // (nulls last for asc, first for desc), true and false say so.
+        const nulls = opts.nullsFirst === true ? " nulls first" : opts.nullsFirst === false ? " nulls last" : "";
+        order.push(`${col(k)} ${opts.ascending === false ? "desc" : "asc"}${nulls}`);
         return q;
       },
       limit(n: number, opts: { referencedTable?: string } = {}) {

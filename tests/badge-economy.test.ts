@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
-import { rankSix, SIX_SLOTS, OVERDUE_AUTO_CAP, type SixRankTask } from "@/lib/six-rank";
+import { isPinned, pinArm, PUSH_SIX, rankPoolCut, rankSix, type SixRankTask } from "@/lib/six-rank";
 import { KIND_STREAM, AFFORDANCES, type ActionItem, type PileName } from "@/lib/action-items/types";
 import { supplierPaperActionItem } from "@/lib/action-items/supplier-paper-item";
 import { supplierPayActionItems } from "@/lib/action-items/supplier-pay-item";
@@ -155,21 +155,36 @@ describe("badge economy: the inbox is decisions-only (the task feeder stays dead
     expect(dockSrc).toContain('badge > 9 ? "9+" : badge');
   });
 
-  it("the morning digest dropped the UNBOUNDED undated arm and ranks with THE shared six", () => {
+  it("the morning digest never writes the pool cut itself: it calls THE shared one, so the push can't drift from the card", () => {
     const digestSrc = src("lib/action-items/digest.ts");
-    // The old unbounded arm made EVERY undated task a candidate — gone.
+    // ONE RULE, ONE PLACE. The digest and the planner each used to spell the arms out, which is how
+    // `focus_date.eq.<today>` came to live in two files and expire a pin in both (Erik, 2026-09-30:
+    // "the tasks keep disappearing even the pinned ones").
+    expect(digestSrc).toContain("rankPoolQuery(");
+    expect(digestSrc).not.toContain("focus_date.eq.");
     expect(digestSrc).not.toContain("due_date.is.null,due_date.lte");
-    // Undated may only ride in FLAGGED (priority-gated), exactly matching the
-    // planner's poolCut — so the phone and the app pick the same six.
-    expect(digestSrc).toContain("and(due_date.is.null,priority.gte.1)");
-    // The phone's morning number/read-back must come from the same rank as the
-    // planner's six — a parallel cut would drift (phone says 18, app says 4). Since
-    // 0358 it ranks each PERSON's own Reminders (digest-six), through the same rank.
+    // The push's scope is the ONE named difference, and it is the narrow one: an undated Reminder
+    // rides a push only when it is flagged or pinned (the badge invariant — no pushed number is the
+    // length of an undated set).
+    expect(digestSrc).toContain('scope: "push"');
+    expect(rankPoolCut("2026-07-02", "push")).toContain("and(due_date.is.null,priority.gte.1)");
+    expect(rankPoolCut("2026-07-02", "my_day")).toContain("due_date.is.null");
+    expect(rankPoolCut("2026-07-02", "my_day")).not.toContain("priority.gte.1");
+    // Both scopes carry the SAME pin arm, and it is lte — a carried pin is fetched by both.
+    for (const scope of ["my_day", "push"] as const) {
+      expect(rankPoolCut("2026-07-02", scope)).toContain(pinArm("2026-07-02"));
+    }
+    expect(pinArm("2026-07-02")).toBe("focus_date.lte.2026-07-02");
+    // The phone's morning read-back comes from the same rank as the card — a parallel cut would
+    // drift (phone says 18, app says 4). Since 0358 it ranks each PERSON's own Reminders.
     expect(digestSrc).toContain('from "./digest-six"');
     expect(digestSrc).toContain("sixForPerson(pool, personId, today)");
     const sixSrc = src("lib/action-items/digest-six.ts");
     expect(sixSrc).toContain('from "@/lib/six-rank"');
     expect(sixSrc).toContain("rankSix(");
+    // A PUSH is still bounded even though the card is not: a notification is one sentence.
+    expect(sixSrc).toContain("slots: PUSH_SIX");
+    expect(PUSH_SIX).toBe(6);
   });
 
   it("the digest's pool is Reminders only and pushes one person at a time (0358), each on their own bell too", () => {
@@ -193,9 +208,15 @@ describe("badge economy: the inbox is decisions-only (the task feeder stays dead
   });
 });
 
-// ── rankSix: pinned > fresh-overdue (cap 3) > due-today > flagged (Reminders only, 0358) ──
+// ── rankSix: carried pins > today's pins > overdue > due today > flagged undated > plain undated ──
+// REWRITTEN for Erik's report of 2026-09-30 (/planner): "the tasks keep disappearing even the pinned
+// ones, I think those reminders should be visible". The cases that used to pin the OLD behaviour —
+// "a stale pin does not squat a slot", "caps overdue auto-fill at 3", "never returns more than
+// SIX_SLOTS", "plain undated tasks never fill a slot" — were pinning the three defects he was
+// reporting. Each is rewritten below to pin what he asked for instead; none was deleted to get green.
 
 const TODAY = "2026-07-02";
+const YESTERDAY = "2026-07-01";
 let seq = 0;
 const task = (over: Partial<SixRankTask> = {}): SixRankTask => ({
   id: `t${++seq}`,
@@ -206,79 +227,137 @@ const task = (over: Partial<SixRankTask> = {}): SixRankTask => ({
   category: "operations",
   job_id: null,
   parent_id: null,
+  // The total order's middle term: distinct and ascending with seq, so "the oldest keeps its place"
+  // is actually exercised instead of falling through to the id.
+  created_at: `2026-06-01T00:00:${String(seq % 60).padStart(2, "0")}Z`,
   ...over,
 });
 
-describe("rankSix: slot order", () => {
-  it("pinned (focus_date=today) beats everything, even an urgent overdue", () => {
-    const overdue = task({ priority: 2, due_date: "2026-07-01" });
-    const pinned = task({ priority: 0, focus_date: TODAY });
-    const six = rankSix([overdue, pinned], { todayStr: TODAY });
-    expect(six.map((t) => t.id)).toEqual([pinned.id, overdue.id]);
+describe("rankSix: a pin is a promise and it CARRIES (Erik, 2026-09-30)", () => {
+  it("THE BUG, as he lived it: pin it today, come back tomorrow, it is still the first thing on the card", () => {
+    // Day one: he pins it. It leads.
+    const pin = task({ focus_date: TODAY });
+    const dueToday = task({ due_date: TODAY });
+    expect(rankSix([dueToday, pin], { todayStr: TODAY }).map((t) => t.id)).toEqual([pin.id, dueToday.id]);
+    // The day turns over. NOTHING about the row changes — nobody wrote to it, nobody swept it.
+    const tomorrow = "2026-07-03";
+    const stillThere = rankSix([dueToday, pin], { todayStr: tomorrow });
+    // It used to be gone: focus_date === todayStr was false, and no other rank claimed an undated
+    // priority-0 row, so the pin he set yesterday simply was not on the card.
+    expect(stillThere.map((t) => t.id)).toContain(pin.id);
+    expect(stillThere[0].id).toBe(pin.id); // and it still LEADS, as a carried pin
   });
 
-  it("orders pins by priority desc", () => {
+  it("carried pins lead, oldest first, ahead of today's pins", () => {
+    const old = task({ focus_date: "2026-06-20" });
+    const newer = task({ focus_date: YESTERDAY });
+    const todays = task({ focus_date: TODAY });
+    const six = rankSix([todays, newer, old], { todayStr: TODAY });
+    expect(six.map((t) => t.id)).toEqual([old.id, newer.id, todays.id]);
+  });
+
+  it("a carried pin beats even an urgent overdue, and priority can't jump the carry order", () => {
+    const urgentOverdue = task({ priority: 2, due_date: "2026-06-01" });
+    const carried = task({ priority: 0, focus_date: YESTERDAY });
+    expect(rankSix([urgentOverdue, carried], { todayStr: TODAY })[0].id).toBe(carried.id);
+  });
+
+  it("a pin set for a LATER day does not LEAD today — a pin is a promise from its own day onward", () => {
+    // Nort's "propose tomorrow's six" writes focus_date = tomorrow. It must not jump the queue today;
+    // it is just one of his open Reminders until its day comes (and it wears no pin glyph: isPinned).
+    const tomorrowPin = task({ focus_date: "2026-07-03" });
+    const dueToday = task({ due_date: TODAY });
+    expect(rankSix([tomorrowPin, dueToday], { todayStr: TODAY }).map((t) => t.id)).toEqual([dueToday.id, tomorrowPin.id]);
+    expect(isPinned(tomorrowPin.focus_date, TODAY)).toBe(false);
+    // Its own day: it leads.
+    expect(rankSix([tomorrowPin, dueToday], { todayStr: "2026-07-03" })[0].id).toBe(tomorrowPin.id);
+    expect(isPinned(tomorrowPin.focus_date, "2026-07-03")).toBe(true);
+  });
+
+  it("pinned (focus_date=today) still beats everything dated", () => {
+    const overdue = task({ priority: 2, due_date: YESTERDAY });
+    const pinned = task({ priority: 0, focus_date: TODAY });
+    expect(rankSix([overdue, pinned], { todayStr: TODAY }).map((t) => t.id)).toEqual([pinned.id, overdue.id]);
+  });
+
+  it("orders today's pins by priority desc", () => {
     const p0 = task({ focus_date: TODAY, priority: 0 });
     const p2 = task({ focus_date: TODAY, priority: 2 });
     const p1 = task({ focus_date: TODAY, priority: 1 });
-    const six = rankSix([p0, p2, p1], { todayStr: TODAY });
-    expect(six.map((t) => t.id)).toEqual([p2.id, p1.id, p0.id]);
+    expect(rankSix([p0, p2, p1], { todayStr: TODAY }).map((t) => t.id)).toEqual([p2.id, p1.id, p0.id]);
   });
+});
 
-  it("a stale pin (focus_date=yesterday) does not squat a slot", () => {
-    const stalePin = task({ focus_date: "2026-07-01" }); // plain undated otherwise
-    const dueToday = task({ due_date: TODAY });
-    const six = rankSix([stalePin, dueToday], { todayStr: TODAY });
-    expect(six.map((t) => t.id)).toEqual([dueToday.id]);
-  });
-
-  it("caps overdue auto-fill at 3 so a stale backlog can't own the whole day", () => {
+describe("rankSix: no display cap (Erik: \"lets not limit it\")", () => {
+  it("every overdue Reminder is shown — the 3-row auto-fill cap is gone", () => {
     const overdue = Array.from({ length: 8 }, (_, i) =>
       task({ due_date: `2026-06-${String(10 + i).padStart(2, "0")}` }),
     );
-    const six = rankSix(overdue, { todayStr: TODAY });
-    expect(six).toHaveLength(OVERDUE_AUTO_CAP);
+    // It used to return exactly 3 of these and silently keep five missed deadlines off the card.
+    expect(rankSix(overdue, { todayStr: TODAY })).toHaveLength(8);
+  });
+
+  it("twelve things due today are twelve rows, not six", () => {
+    const many = Array.from({ length: 12 }, () => task({ due_date: TODAY }));
+    expect(rankSix(many, { todayStr: TODAY })).toHaveLength(12);
+  });
+
+  it("a PUSH is still bounded, because a notification is a sentence: slots caps it", () => {
+    const many = Array.from({ length: 12 }, () => task({ due_date: TODAY }));
+    expect(rankSix(many, { todayStr: TODAY, slots: PUSH_SIX })).toHaveLength(PUSH_SIX);
   });
 
   it("within overdue: priority desc, then due DESC (a yesterday-miss beats a June-8 zombie)", () => {
     const zombie = task({ priority: 0, due_date: "2026-06-08" });
-    const fresh = task({ priority: 0, due_date: "2026-07-01" });
+    const fresh = task({ priority: 0, due_date: YESTERDAY });
     const flagged = task({ priority: 1, due_date: "2026-06-15" });
     const six = rankSix([zombie, fresh, flagged], { todayStr: TODAY });
     expect(six.map((t) => t.id)).toEqual([flagged.id, fresh.id, zombie.id]);
   });
 
-  it("fills the full slot order: pinned → overdue → due-today → flagged undated", () => {
-    const flagged = task({ priority: 1 }); // undated + flagged → rank 4
-    const dueToday = task({ due_date: TODAY }); // rank 3
-    const overdue = task({ due_date: "2026-07-01" }); // rank 2
-    const pinned = task({ focus_date: TODAY }); // rank 1
-    const six = rankSix([flagged, dueToday, overdue, pinned], { todayStr: TODAY });
-    expect(six.map((t) => t.id)).toEqual([pinned.id, overdue.id, dueToday.id, flagged.id]);
-  });
-
-  it("an over-cap overdue Reminder stays out: the on-site rank is gone with job tasks (0358)", () => {
-    const a = task({ priority: 2, due_date: "2026-07-01" });
-    const b = task({ priority: 1, due_date: "2026-07-01" });
-    const c = task({ priority: 0, due_date: "2026-07-01" });
-    const d = task({ priority: 0, due_date: "2026-06-20" }); // past the cap
+  it("fills the whole rank order: carried pin → today's pin → overdue → due today → flagged → plain", () => {
+    const plain = task(); // undated, priority 0 → the last rank, and it DOES rank now
+    const flagged = task({ priority: 1 });
     const dueToday = task({ due_date: TODAY });
-    const six = rankSix([a, b, c, d, dueToday], { todayStr: TODAY });
-    expect(six.map((t) => t.id)).toEqual([a.id, b.id, c.id, dueToday.id]);
+    const overdue = task({ due_date: YESTERDAY });
+    const pinned = task({ focus_date: TODAY });
+    const carried = task({ focus_date: "2026-06-30" });
+    const six = rankSix([plain, flagged, dueToday, overdue, pinned, carried], { todayStr: TODAY });
+    expect(six.map((t) => t.id)).toEqual([carried.id, pinned.id, overdue.id, dueToday.id, flagged.id, plain.id]);
   });
 });
 
-describe("rankSix: a job's task is never a slot (0358: Today's 6 are Reminders)", () => {
-  it("pinned, overdue, due today or flagged, a row with a job never ranks", () => {
+describe("rankSix: a plain undated Reminder is VISIBLE (his word)", () => {
+  it("priority 0, no due date, no pin: it ranks last, but it ranks", () => {
+    const undated = task();
+    const dueToday = task({ due_date: TODAY });
+    // It used to be absent entirely, which is why the Add line had to stamp a pin on everything it
+    // typed — and that pin is what expired at midnight.
+    expect(rankSix([undated, dueToday], { todayStr: TODAY }).map((t) => t.id)).toEqual([dueToday.id, undated.id]);
+  });
+
+  it("the My Day pool ASKS for them: the cut carries a bare undated arm", () => {
+    expect(rankPoolCut(TODAY, "my_day").split(",")).toContain("due_date.is.null");
+  });
+
+  it("a FUTURE due date still never ranks — the sheet promises it waits till then", () => {
+    const later = task({ due_date: "2026-08-01" });
+    expect(rankSix([later], { todayStr: TODAY })).toHaveLength(0);
+  });
+});
+
+describe("rankSix: a job's task is never a slot (0358: these are Reminders)", () => {
+  it("pinned, carried, overdue, due today or flagged, a row with a job never ranks", () => {
     const onJob = [
       task({ job_id: "job-1", focus_date: TODAY, priority: 2 }),
-      task({ job_id: "job-1", due_date: "2026-07-01" }),
+      task({ job_id: "job-1", focus_date: YESTERDAY }),
+      task({ job_id: "job-1", due_date: YESTERDAY }),
       task({ job_id: "job-1", due_date: TODAY }),
       task({ job_id: "job-1", priority: 1 }),
+      task({ job_id: "job-1" }),
     ];
     const reminder = task({ due_date: TODAY });
-    const six = rankSix([...onJob, reminder], { todayStr: TODAY });
-    expect(six.map((t) => t.id)).toEqual([reminder.id]);
+    expect(rankSix([...onJob, reminder], { todayStr: TODAY }).map((t) => t.id)).toEqual([reminder.id]);
   });
 
   it("the My Day pool never asks for them either: the cut names job_id null and no on-site arm", () => {
@@ -289,53 +368,64 @@ describe("rankSix: a job's task is never a slot (0358: Today's 6 are Reminders)"
   });
 });
 
-describe("rankSix: exclusions (what never auto-promotes)", () => {
-  it("plain undated tasks never fill a slot, even with all six free", () => {
-    const undated = task(); // p0, no due, no pin, no job
-    const dueToday = task({ due_date: TODAY });
-    const six = rankSix([undated, dueToday], { todayStr: TODAY });
-    expect(six.map((t) => t.id)).toEqual([dueToday.id]);
-  });
-
-  it("excludes office from the flagged-undated rank ONLY (a stated date beats the category)", () => {
+describe("rankSix: exclusions (what never ranks)", () => {
+  it("excludes office from the UNDATED ranks only (a stated date beats the category)", () => {
     const officeFlagged = task({ category: "office", priority: 2 }); // undated → excluded
-    const officeOverdue = task({ category: "office", due_date: "2026-07-01" }); // dated → ranks
+    const officePlain = task({ category: "office" }); // undated → excluded
+    const officeOverdue = task({ category: "office", due_date: YESTERDAY }); // dated → ranks
     const officeDueToday = task({ category: "office", due_date: TODAY }); // dated → ranks
-    const officePinned = task({ category: "office", focus_date: TODAY }); // pin overrides
-    const six = rankSix([officeFlagged, officeOverdue, officeDueToday, officePinned], { todayStr: TODAY });
+    const officePinned = task({ category: "office", focus_date: TODAY }); // a pin overrides
+    const six = rankSix([officeFlagged, officePlain, officeOverdue, officeDueToday, officePinned], { todayStr: TODAY });
     expect(six.map((t) => t.id)).toEqual([officePinned.id, officeOverdue.id, officeDueToday.id]);
   });
 
   it("subtasks (parent_id set) are never slots — they nest under their parent", () => {
     const child = task({ parent_id: "parent-1", due_date: TODAY, priority: 2 });
     const parent = task({ due_date: TODAY });
-    const six = rankSix([child, parent], { todayStr: TODAY });
-    expect(six.map((t) => t.id)).toEqual([parent.id]);
+    expect(rankSix([child, parent], { todayStr: TODAY }).map((t) => t.id)).toEqual([parent.id]);
   });
 
   it("drops non-open rows defensively", () => {
-    const done = task({ status: "done", due_date: "2026-07-01" });
-    const six = rankSix([done], { todayStr: TODAY });
-    expect(six).toHaveLength(0);
+    const done = task({ status: "done", due_date: YESTERDAY });
+    expect(rankSix([done], { todayStr: TODAY })).toHaveLength(0);
   });
 });
 
-describe("rankSix: bounds + stability", () => {
-  it("never returns more than SIX_SLOTS", () => {
-    const many = Array.from({ length: 12 }, () => task({ due_date: TODAY }));
-    expect(rankSix(many, { todayStr: TODAY })).toHaveLength(SIX_SLOTS);
-    expect(SIX_SLOTS).toBe(6);
+describe("rankSix: a TOTAL order, so the list can't shuffle between polls (defect 2)", () => {
+  it("the SAME pool handed over in a different sequence comes back identical", () => {
+    // Seven pinned, undated, priority-0 rows: under the old comparator these tied all the way down
+    // and fell through to whatever order Postgres happened to return, so which six he saw changed
+    // while he watched (an UPDATE relocates a row in the heap).
+    const pins = Array.from({ length: 7 }, () => task({ focus_date: TODAY }));
+    const first = rankSix(pins, { todayStr: TODAY }).map((t) => t.id);
+    const shuffled = [...pins].reverse();
+    expect(rankSix(shuffled, { todayStr: TODAY }).map((t) => t.id)).toEqual(first);
+    const rotated = [...pins.slice(3), ...pins.slice(0, 3)];
+    expect(rankSix(rotated, { todayStr: TODAY }).map((t) => t.id)).toEqual(first);
   });
 
-  it("keeps input order on full ties (stable — callers pre-sort by due date)", () => {
-    const first = task({ due_date: TODAY });
-    const second = task({ due_date: TODAY });
-    const six = rankSix([first, second], { todayStr: TODAY });
-    expect(six.map((t) => t.id)).toEqual([first.id, second.id]);
+  it("the oldest keeps its place: created_at asc breaks a priority tie", () => {
+    const younger = { ...task({ due_date: TODAY }), created_at: "2026-06-30T09:00:00Z" };
+    const older = { ...task({ due_date: TODAY }), created_at: "2026-06-02T09:00:00Z" };
+    expect(rankSix([younger, older], { todayStr: TODAY }).map((t) => t.id)).toEqual([older.id, younger.id]);
+  });
+
+  it("rows created in the same instant still have ONE order: the id decides", () => {
+    const stamp = "2026-06-10T09:00:00Z";
+    const a = { ...task({ due_date: TODAY }), id: "aaa", created_at: stamp };
+    const b = { ...task({ due_date: TODAY }), id: "bbb", created_at: stamp };
+    expect(rankSix([b, a], { todayStr: TODAY }).map((t) => t.id)).toEqual(["aaa", "bbb"]);
+    expect(rankSix([a, b], { todayStr: TODAY }).map((t) => t.id)).toEqual(["aaa", "bbb"]);
+  });
+
+  it("priority still wins over age", () => {
+    const old0 = { ...task({ due_date: TODAY, priority: 0 }), created_at: "2026-01-01T00:00:00Z" };
+    const new2 = { ...task({ due_date: TODAY, priority: 2 }), created_at: "2026-06-30T00:00:00Z" };
+    expect(rankSix([old0, new2], { todayStr: TODAY }).map((t) => t.id)).toEqual([new2.id, old0.id]);
   });
 
   it("never mutates the caller's array", () => {
-    const a = task({ due_date: "2026-07-01" });
+    const a = task({ due_date: YESTERDAY });
     const b = task({ focus_date: TODAY });
     const input = [a, b];
     rankSix(input, { todayStr: TODAY });

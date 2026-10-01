@@ -4,6 +4,7 @@ import { dbError } from "@/lib/db-error";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { isStaffRole } from "@/lib/actions/perms";
+import { isPinned, ranksToday } from "@/lib/six-rank";
 import { isMissingColumn } from "@/lib/job-tasks";
 
 export type Result = { ok: boolean; error?: string };
@@ -79,6 +80,9 @@ export async function createTask(input: {
   notes?: string | null;
   parent_id?: string | null;
   focus_date?: string | null;
+  /** The COMPANY'S day (yyyy-mm-dd), from a caller that knows it. Not stored: it is how the duplicate
+   *  answer decides whether the Reminder already on the list is one the person can actually SEE. */
+  today?: string | null;
   tags?: string[] | null;
   /** A job task made from a photo: the photo's storage path (documents bucket, this company's). */
   photo_path?: string | null;
@@ -122,7 +126,11 @@ export async function createTask(input: {
   const since = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
   let dupQ = supabase
     .from("tasks")
-    .select("id, title, created_at")
+    // PROJECTION: enough to DECIDE, not just to name (the projection law). Erik re-typing a Reminder
+    // got a grey "Already on the list" and a list that did not change, because the row it collapsed
+    // onto was one no surface was showing him. Deciding that needs the row's day, its pin and its
+    // category, so they come back with it.
+    .select("id, title, created_at, due_date, focus_date, priority, category, parent_id, job_id, status")
     .eq("status", "open")
     .gte("created_at", since)
     .ilike("title", title.replace(/[\\%_]/g, "\\$&"));
@@ -141,11 +149,40 @@ export async function createTask(input: {
       month: "short",
       day: "numeric",
     });
+    const was = `Already on the list: "${dup.title}" — open since ${openedOn}.`;
+    // AN ANSWER WITH A DOOR IN IT. A twin is not minted — but "already on the list" is only true if
+    // he can SEE the list it is on. A Reminder waiting on a later day, or an undated office one, is
+    // not on My Day's Tasks & Reminders, so a re-type used to change nothing at all and say nothing
+    // about why. Now it PINS the existing row — the one write that makes a Reminder visible without
+    // moving a day he set — and says so. A job task is never pinned (it is the job's list) and a
+    // caller that doesn't know the company's day can't decide, so both keep the plain sentence.
+    const today = input.today?.trim() || null;
+    if (!jobId && today && !ranksToday(dup as any, today)) {
+      // THE SILENT-WRITE LAW: a zero-row UPDATE is a clean 204, so the write reads its row back and
+      // the refusal says which of the two it was, in words.
+      const { data: pinned, error: pinErr } = await supabase
+        .from("tasks")
+        .update({ focus_date: today })
+        .eq("id", dup.id as string)
+        .select("id");
+      if (pinErr) return { ok: false, error: dbError(pinErr) };
+      if (!pinned?.length) {
+        return { ok: true, id: dup.id as string, duplicate: true, speak: `${was} ${await zeroRowsReason(supabase, dup.id as string, "change")}` };
+      }
+      revalidateTaskViews((dup.category as string | null) ?? null, null);
+      return {
+        ok: true,
+        id: dup.id as string,
+        duplicate: true,
+        speak: `${was} It was waiting out of sight, so it's pinned to the top of Tasks & Reminders now.`,
+      };
+    }
+    const where = !jobId && today && isPinned(dup.focus_date as string | null, today) ? " It's pinned at the top of Tasks & Reminders." : "";
     return {
       ok: true,
       id: dup.id as string,
       duplicate: true,
-      speak: `Already on the list: "${dup.title}" — open since ${openedOn}.`,
+      speak: `${was}${where}`,
     };
   }
 
@@ -164,6 +201,9 @@ export async function createTask(input: {
     assigned_to: input.assigned_to || null,
     notes: input.notes?.trim() || null,
     parent_id: input.parent_id || null,
+    // NOT A PIN BY DEFAULT. The My Day Add line used to send focus_date = today for every typed
+    // reminder, because an unpinned undated one was not even fetched for the card; it is now, so a pin
+    // is only ever something a person chose (planner/your-list, /tasks, Nort's task.setFocus).
     focus_date: input.focus_date || null,
     tags: tags.length ? tags : null,
     created_by: user.id,

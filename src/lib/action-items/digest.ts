@@ -5,6 +5,7 @@ import { featureOn } from "@/lib/features";
 import { orgStaffIds, pushConfigured } from "@/lib/push";
 import { notifyPeople } from "@/lib/notifications";
 import { sixForPerson, type DigestTask } from "./digest-six";
+import { PUSH_POOL_LIMIT, RANK_POOL_SELECT, rankPoolQuery } from "@/lib/six-rank";
 import { inquiryDueFilter } from "./due-filters";
 
 /**
@@ -86,22 +87,26 @@ export async function sendDayAheadDigests(supabase: any): Promise<{ orgs: number
         .limit(2),
     ]);
 
-    // The six candidates — the same pool the planner ranks: open TOP-LEVEL Reminders (no job) that
-    // are pinned today, dated due/overdue, or flagged. Plain undated ones are deliberately absent
-    // (they live on the Reminders page, not in anyone's morning), and job tasks never ride it. Who
-    // made each one and who it is for ride along, so each person is handed only their own. Bounded
-    // fetch (the company's whole pool, then split per person): nulls-first so the cap keeps pins
-    // over dated zombies (audit cn-v328).
-    const { data: taskRows } = await supabase
-      .from("tasks")
-      .select("id, title, status, priority, due_date, focus_date, category, job_id, parent_id, created_by, assigned_to")
-      .eq("org_id", org.id)
-      .eq("status", "open")
-      .is("parent_id", null)
-      .is("job_id", null)
-      .or(`focus_date.eq.${today},due_date.lte.${today},and(due_date.is.null,priority.gte.1)`)
-      .order("due_date", { ascending: false, nullsFirst: true })
-      .limit(500);
+    // THE PUSH CANDIDATES — the same cut, order and bound as My Day's card, through the ONE shared
+    // shaper (lib/six-rank rankPoolQuery, scope "push"). The pin arm used to be written out here by
+    // hand, matching focus_date to today EXACTLY, the same copy the planner carried — so a pin dropped
+    // out of the push at midnight exactly as it dropped out of the card. It is "on or before today" in
+    // both places now because it is the same line of code in both places.
+    //
+    // scope "push" is the ONE documented difference: a plain undated Reminder rides the card (Erik:
+    // "those reminders should be visible") but never a push, because a pushed number may not be the
+    // length of an undated set (the badge invariant above). Who made each one and who it is for ride
+    // along, so each person is handed only their own.
+    const { data: taskRows } = await rankPoolQuery(
+      supabase
+        .from("tasks")
+        .select(`${RANK_POOL_SELECT}, status, parent_id, created_by, assigned_to`)
+        .eq("org_id", org.id)
+        .eq("status", "open")
+        .is("parent_id", null)
+        .is("job_id", null),
+      { todayStr: today, scope: "push", limit: PUSH_POOL_LIMIT },
+    );
     const pool = (taskRows ?? []) as DigestTask[];
 
     const holdsBack = holdsBackCount(holdsR);

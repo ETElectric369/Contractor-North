@@ -1,4 +1,4 @@
-import { rankSix, type SixRankTask } from "@/lib/six-rank";
+import { inRankPool, PUSH_SIX, rankSix, type SixRankTask } from "@/lib/six-rank";
 
 /**
  * EACH PERSON'S OWN SIX, for the morning push (0358). The digest runs on the service client, which
@@ -24,10 +24,21 @@ export function sixOwner(t: Pick<DigestTask, "job_id" | "created_by" | "assigned
   return t.assigned_to ?? t.created_by ?? null;
 }
 
-/** One person's six from the company's pool: only rows that are theirs, ranked the way My Day ranks. */
+/**
+ * One person's day from the company's pool: only rows that are theirs, ranked the way My Day ranks.
+ *
+ * BOUNDED AT PUSH_SIX, and that bound is the push's, not the card's. My Day has no cap any more
+ * (Erik: "lets not limit it") but a notification is one sentence — it names two titles and "+N" — so
+ * it reads the top of the same order rather than all of it. The ORDER is shared, which is what keeps
+ * the phone and the app from disagreeing; the length is a property of a push.
+ */
 export function sixForPerson<T extends DigestTask>(pool: T[], personId: string, todayStr: string): T[] {
   return rankSix(
-    pool.filter((t) => sixOwner(t) === personId),
-    { todayStr },
+    // THE PUSH'S OWN POOL, asserted here as well as in its fetch (lib/six-rank inRankPool, scope
+    // "push"): My Day shows a plain undated Reminder now, and a push must not — a pushed number may
+    // not be the length of an undated set (the badge invariant). The fetch is the first guard; this is
+    // the braces, so a caller handing over a wider pool can't put one on somebody's lock screen.
+    pool.filter((t) => sixOwner(t) === personId && inRankPool(t, todayStr, "push")),
+    { todayStr, slots: PUSH_SIX },
   );
 }

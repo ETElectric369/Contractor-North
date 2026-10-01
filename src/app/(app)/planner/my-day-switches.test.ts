@@ -8,9 +8,14 @@ import { renderToStaticMarkup } from "react-dom/server";
  * MY DAY AND THE SWITCH BOARD (0352), and MY DAY'S ONE ADD LINE (0358). There is no Open Leads card
  * for anyone (a lead is a Needs You row, and the Sales tile's badge counts the new ones); the Daily
  * Reports card goes with Daily Reports once nothing is left to review (until then it stays, Off line
- * on top). The 6-field task box is gone: Today's 6 leads with one line ("Add A Reminder Or Task") and
- * an optional job chip, and asks no priority whatever To-Do Extras says (the switch is the Reminders
- * page's now). Everything on = My Day as it was otherwise.
+ * on top). The 6-field task box is gone: Tasks & Reminders leads with one line ("Add A Reminder Or
+ * Task") and an optional job chip, and asks no priority whatever To-Do Extras says (the switch is the
+ * Reminders page's now). Everything on = My Day as it was otherwise.
+ *
+ * RENAMED AND UNCAPPED for Erik's report of 2026-09-30 (/planner): the card is "Tasks & Reminders"
+ * ("instead of todayy's 6 lets not limit it and call it something more clear like Tasks & Reminders"),
+ * the Add line no longer stamps a pin, and a pin carries past midnight instead of disappearing ("the
+ * tasks keep disappearing even the pinned ones").
  */
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), refresh: vi.fn() }),
@@ -23,16 +28,28 @@ vi.mock("../tasks/actions", () => ({ createTask: vi.fn(), toggleTask: vi.fn(), d
 vi.mock("../timeclock/actions", () => ({ clockIn: vi.fn(), clockOut: vi.fn() }));
 vi.mock("../timeclock/which-job-actions", () => ({ whichJobChoices: vi.fn(), putPunchOnJob: vi.fn() }));
 
-import { YourList, AddReminderLine, LATER_CHOICE, addDaysStr, laterRow, movedWords } from "./your-list";
+import { YourList, AddReminderLine, LATER_CHOICE, PROGRESS_MARKS, addDaysStr, laterRow, movedWords, type SixSlot } from "./your-list";
 import { NewReminderBox } from "../tasks/tasks-view";
 import { NowCard } from "./now-card";
 import { LUNCH_LABEL } from "@/lib/lunch-rule";
-import { rankSix } from "@/lib/six-rank";
+import { carriedDay, rankSix } from "@/lib/six-rank";
 
 const JOBS = [{ id: "j1", label: "J-055 Smith Panel", number: "J-055" }];
-const line = (jobs = JOBS) => renderToStaticMarkup(createElement(AddReminderLine, { jobs, todayStr: "2026-09-26", pinsFull: false, bumps: null }));
+const line = (jobs = JOBS) => renderToStaticMarkup(createElement(AddReminderLine, { jobs, todayStr: "2026-09-26" }));
+const TODAY = "2026-09-26";
+/** A row as the server hands it over: focus_date as-is, no pre-chewed "pinned" flag. */
+const row = (over: Partial<SixSlot> = {}): SixSlot => ({
+  id: "r1",
+  title: "Call PUD",
+  category: "office",
+  priority: 0,
+  due_date: null,
+  job_id: null,
+  focus_date: null,
+  ...over,
+});
 
-describe("Today's 6: the one Add line up top (Erik, 2026-09-26)", () => {
+describe("Tasks & Reminders: the one Add line up top (Erik, 2026-09-26)", () => {
   it("one line, Title Case, 44px: type the words, an optional job chip, Add", () => {
     const html = line();
     expect(html).toContain('placeholder="Add A Reminder Or Task…"');
@@ -56,20 +73,39 @@ describe("Today's 6: the one Add line up top (Erik, 2026-09-26)", () => {
     expect(line([])).not.toContain("Job (optional)");
   });
 
-  it("the card is always there, even with nothing in the six, so a first Reminder has a place to go", () => {
+  it("the card is always there, even with nothing on it, so a first Reminder has a place to go", () => {
     const html = renderToStaticMarkup(
-      createElement(YourList, { six: [], subtasks: [], todayStr: "2026-09-26", doneToday: 0, restCount: 0, jobs: JOBS }),
+      createElement(YourList, { rows: [], subtasks: [], todayStr: TODAY, doneToday: 0, restCount: 0, jobs: JOBS }),
     );
-    expect(html).toContain("Today’s 6");
+    expect(html).toContain("Tasks &amp; Reminders");
     expect(html).toContain("Add A Reminder Or Task");
     expect(html).toContain("Nothing urgent today.");
     expect(html).not.toContain("Grab One");
   });
 
-  it("more Reminders than the six: All Reminders says how many and goes to /tasks", () => {
-    const six = [{ id: "r1", title: "Call PUD", category: "office", priority: 0, due_date: "2026-09-26", job_id: null, pinned: false }];
+  it("HIS NAME FOR IT: no \"Today's 6\" and no number left in the heading (Erik, 2026-09-30)", () => {
     const html = renderToStaticMarkup(
-      createElement(YourList, { six, subtasks: [], todayStr: "2026-09-26", doneToday: 0, restCount: 4, jobs: JOBS }),
+      createElement(YourList, { rows: [row({ due_date: TODAY })], subtasks: [], todayStr: TODAY, doneToday: 0, restCount: 0, jobs: JOBS }),
+    );
+    expect(html).toContain("Tasks &amp; Reminders");
+    expect(html).not.toContain("Today’s 6");
+    expect(html).not.toContain("Today's 6");
+    expect(html).not.toMatch(/of 6 done today/);
+  });
+
+  it("the Add line never claims a pin it didn't write, and doesn't write one", () => {
+    const src = readFileSync(join(process.cwd(), "src/app/(app)/planner/your-list.tsx"), "utf8");
+    // Part B: a typed reminder is created WITHOUT focus_date — it is visible because the card now
+    // shows plain undated Reminders, not because something stamped a pin on it that then expired.
+    expect(src).toContain("createTask(job ? { title, job_id: job.id } : { title, today: todayStr })");
+    expect(src).not.toContain("{ title, focus_date: todayStr }");
+    expect(src).toContain('toast("Added To Tasks & Reminders", "success")');
+    expect(src).not.toMatch(/Reminder added and pinned/);
+  });
+
+  it("Reminders the card isn't showing: All Reminders says how many and goes to /tasks", () => {
+    const html = renderToStaticMarkup(
+      createElement(YourList, { rows: [row({ due_date: TODAY })], subtasks: [], todayStr: TODAY, doneToday: 0, restCount: 4, jobs: JOBS }),
     );
     // "For You": the count is the Reminders for this person; /tasks also lists the ones they made for others.
     expect(html).toContain("All Reminders · 4 More For You");
@@ -77,32 +113,103 @@ describe("Today's 6: the one Add line up top (Erik, 2026-09-26)", () => {
   });
 });
 
-describe("Today's 6: the polish (six marks, 44px steps, one ⋯ per row)", () => {
-  const six = [
-    { id: "r1", title: "Call PUD", category: "office", priority: 0, due_date: "2026-09-26", job_id: null, pinned: false },
-    { id: "r2", title: "Order the meter base", category: "field", priority: 1, due_date: null, job_id: null, pinned: true },
+describe("Tasks & Reminders: a carried pin says so on the row (Erik, 2026-09-30)", () => {
+  const draw = (focus_date: string | null) =>
+    renderToStaticMarkup(
+      createElement(YourList, {
+        rows: [row({ title: "Order the meter base", category: "field", focus_date })],
+        subtasks: [],
+        todayStr: TODAY,
+        doneToday: 0,
+        restCount: 0,
+        jobs: JOBS,
+      }),
+    );
+
+  it("a pin from an earlier day wears Carried From <Day>, in Title Case, and keeps the pin glyph", () => {
+    const html = draw("2026-09-25");
+    expect(html).toContain("Carried From Yesterday");
+    expect(html).toMatch(/lucide-pin/);
+  });
+
+  it("today's pin wears the glyph and NO carried chip", () => {
+    const html = draw(TODAY);
+    expect(html).not.toContain("Carried From");
+    expect(html).toMatch(/lucide-pin/);
+  });
+
+  it("no pin at all: neither", () => {
+    const html = draw(null);
+    expect(html).not.toContain("Carried From");
+    expect(html).not.toMatch(/lucide-pin/);
+  });
+
+  it("the words stay true as the carry gets older: Yesterday, then the weekday, then the date", () => {
+    expect(carriedDay("2026-09-25", TODAY)).toBe("Yesterday");
+    expect(carriedDay("2026-09-21", TODAY)).toBe("Monday");
+    // Past six days back a bare weekday would be a lie (three Mondays ago also reads "Monday").
+    expect(carriedDay("2026-09-12", TODAY)).toBe("Sep 12, 2026");
+  });
+});
+
+describe("Tasks & Reminders: the polish (progress marks, 44px steps, one ⋯ per row)", () => {
+  const rows = [
+    row({ id: "r1", due_date: TODAY }),
+    row({ id: "r2", title: "Order the meter base", category: "field", priority: 1, focus_date: TODAY }),
   ];
   const subtasks = [{ id: "s1", title: "Find the account number", status: "open", parent_id: "r1" }];
   const render = (doneToday: number) =>
-    renderToStaticMarkup(createElement(YourList, { six, subtasks, todayStr: "2026-09-26", doneToday, restCount: 0, jobs: JOBS }));
+    renderToStaticMarkup(createElement(YourList, { rows, subtasks, todayStr: TODAY, doneToday, restCount: 0, jobs: JOBS }));
 
-  it("six small marks beside the title, one filled for each done today: a progress mark, not a count", () => {
+  it("one mark per thing on the day, filled for each done: the total is the DAY's, never a hard 6", () => {
     const html = render(2);
     const header = html.slice(0, html.indexOf("Add A Reminder Or Task"));
-    expect(header).toContain("Today’s 6");
-    expect(header).toContain('aria-label="2 of 6 done today"');
+    expect(header).toContain("Tasks &amp; Reminders");
+    // 2 done + 2 open on the card = 4 marks, 2 filled. It used to be six marks whatever the day held.
+    expect(header).toContain('aria-label="2 of 4 done today"');
     expect(header.match(/data-mark="done"/g)).toHaveLength(2);
-    expect(header.match(/data-mark="open"/g)).toHaveLength(4);
-    expect(html).not.toMatch(/\d\/6/);
-    // Never more than six, never a badge pill.
-    expect(render(9).match(/data-mark="done"/g)).toHaveLength(6);
+    expect(header.match(/data-mark="open"/g)).toHaveLength(2);
+    expect(html).not.toMatch(/\d\/\d/);
     expect(header).not.toContain("rounded-full");
+  });
+
+  it("a long day abbreviates the marks but the label still carries the TRUE total", () => {
+    const html = renderToStaticMarkup(
+      createElement(YourList, {
+        rows: Array.from({ length: 20 }, (_, i) => row({ id: `x${i}`, title: `Thing ${i}`, due_date: TODAY })),
+        subtasks: [],
+        todayStr: TODAY,
+        doneToday: 5,
+        restCount: 0,
+        jobs: JOBS,
+      }),
+    );
+    const header = html.slice(0, html.indexOf("Add A Reminder Or Task"));
+    expect(header).toContain('aria-label="5 of 25 done today"');
+    expect((header.match(/data-mark=/g) ?? []).length).toBe(PROGRESS_MARKS);
+    // All twenty rows are DRAWN — only the marks abbreviate (Erik: "lets not limit it").
+    expect(html).toContain("Thing 19");
+  });
+
+  it("nothing done and nothing open: no marks at all (zero means no badge)", () => {
+    const html = renderToStaticMarkup(
+      createElement(YourList, { rows: [], subtasks: [], todayStr: TODAY, doneToday: 0, restCount: 0, jobs: JOBS }),
+    );
+    expect(html).not.toContain("data-mark=");
   });
 
   it("a step's check row is 44px, like every other target", () => {
     const html = render(0);
     expect(html).toMatch(/<button type="button" class="flex min-h-\[44px\] w-full[^"]*"[^>]*aria-label="Mark Find the account number done"/);
     expect(html).not.toContain("min-h-[36px]");
+  });
+
+  it("the pin row says what the pin does: it carries until you unpin it", () => {
+    const src = readFileSync(join(process.cwd(), "src/app/(app)/planner/your-list.tsx"), "utf8");
+    expect(src).toContain('{pinned ? "Unpin" : "Pin To Top (Carries Until You Unpin It)"}');
+    // No comment or label left claiming the old midnight expiry.
+    expect(src).not.toMatch(/self-expires at midnight/);
+    expect(src).not.toContain("Unpin From Today");
   });
 
   it("each Reminder's ⋯ is the app's one row sheet: 44px, named for its row", () => {
@@ -130,35 +237,35 @@ describe("nothing goes quiet without a day: In A Week, not Someday (Erik's open 
     expect(src).toContain("updateTask(t.id, { due_date: later.due }, opts)");
   });
 
-  it("a Reminder that leaves the six says where it went; a pin, or a day of today or earlier, needs no word", () => {
+  it("a Reminder that leaves the card says where it went; a pin, or a day of today or earlier, needs no word", () => {
     const today = "2026-09-26";
-    const plain = { pinned: false, priority: 0, category: "general" };
+    const plain = { focus_date: null, priority: 0, category: "general" };
     expect(movedWords(plain, "2026-09-27", today)).toBe("Due tomorrow. It waits on your Reminders list till then.");
     expect(movedWords(plain, "2026-10-03", today)).toBe("Due Oct 3, 2026. It waits on your Reminders list till then.");
-    expect(movedWords({ ...plain, pinned: true }, "2026-10-03", today)).toBeNull();
+    // A PIN keeps it on the card whatever the date — including a pin from an earlier day, which is
+    // the whole point of the carry (it used to be dropped silently at midnight).
+    expect(movedWords({ ...plain, focus_date: today }, "2026-10-03", today)).toBeNull();
+    expect(movedWords({ ...plain, focus_date: "2026-09-20" }, "2026-10-03", today)).toBeNull();
     expect(movedWords(plain, today, today)).toBeNull();
-    expect(movedWords(plain, null, today)).toBe("No due date now. It waits on your Reminders list under Someday.");
-    // A flagged Reminder with a future day never ranks, so it does leave the six and says so.
+    // Clearing the date no longer SILENCES an ordinary Reminder: the last rank shows it, so claiming
+    // "it waits under Someday" would be a lie, and this says nothing instead.
+    expect(movedWords(plain, null, today)).toBeNull();
+    // A flagged Reminder with a future day never ranks, so it does leave the card and says so.
     expect(movedWords({ ...plain, priority: 1 }, "2026-10-03", today)).toBe("Due Oct 3, 2026. It waits on your Reminders list till then.");
   });
 
-  it("if Someday is flipped back on, a flagged non-office Reminder whose date is cleared stays in the six (rank 4), so no toast says it left", () => {
+  it("the only Reminder a cleared date still sends quiet is an OFFICE one, and it says so", () => {
     const today = "2026-09-26";
     const due = laterRow("someday", today).due;
     expect(due).toBeNull();
-    const flagged = { pinned: false, priority: 1, category: "general" };
-    expect(movedWords(flagged, due, today)).toBeNull();
-    expect(movedWords({ ...flagged, priority: 2 }, due, today)).toBeNull();
-    // The six agrees: cleared of its date, a flagged Reminder still ranks; an office one does not.
-    const row = { id: "r1", status: "open", due_date: null, focus_date: null, priority: 1, category: "general", job_id: null, parent_id: null };
-    expect(rankSix([row], { todayStr: today }).map((r) => r.id)).toEqual(["r1"]);
-    expect(rankSix([{ ...row, category: "office" }], { todayStr: today })).toEqual([]);
-    expect(rankSix([{ ...row, priority: 0 }], { todayStr: today })).toEqual([]);
-    // Office work and unflagged Reminders do leave the six, so they say where they went.
     const someday = "No due date now. It waits on your Reminders list under Someday.";
-    expect(movedWords({ ...flagged, category: "office" }, due, today)).toBe(someday);
-    expect(movedWords({ ...flagged, priority: 0 }, due, today)).toBe(someday);
-    expect(movedWords({ ...flagged, priority: null }, due, today)).toBe(someday);
+    expect(movedWords({ focus_date: null, priority: 1, category: "office" }, due, today)).toBe(someday);
+    expect(movedWords({ focus_date: null, priority: 0, category: "office" }, due, today)).toBe(someday);
+    // The rank agrees — these words ASK it (ranksToday), so they can't drift from it.
+    const base = { id: "r1", status: "open", due_date: null, focus_date: null, priority: 1, category: "general", job_id: null, parent_id: null };
+    expect(rankSix([base], { todayStr: today }).map((r) => r.id)).toEqual(["r1"]);
+    expect(rankSix([{ ...base, priority: 0 }], { todayStr: today }).map((r) => r.id)).toEqual(["r1"]);
+    expect(rankSix([{ ...base, category: "office" }], { todayStr: today })).toEqual([]);
   });
 });
 
@@ -275,14 +382,18 @@ describe("My Day's cards (structural: the page is a server component over the da
     expect(pageCode).toMatch(/<Link href="\/planner\?view=week" className="inline-flex min-h-11 [^"]*">\s*This Week/);
   });
 
-  it("the quote sits below the Now card, then the office's Daily Reports, then the Today card", () => {
-    const nowAt = pageCode.indexOf("</NowCard>");
+  it("the quote sits ABOVE the clock (Erik, 2026-09-30), then the Now card, the office's Daily Reports, the Today card", () => {
+    // "move the quote of the day up over time clock". It used to sit UNDER the Now card, so the first
+    // thing he read on opening the app was a running timer.
     const quoteAt = pageCode.indexOf("{dailyQuote}");
+    const nowOpensAt = pageCode.indexOf("<NowCard");
+    const nowAt = pageCode.indexOf("</NowCard>");
     const reportsAt = pageCode.indexOf("Daily reports");
     const todayAt = pageCode.indexOf('<CalendarCheck className="h-4 w-4 text-brand" /> Today');
-    expect(nowAt).toBeGreaterThan(0);
-    expect(quoteAt).toBeGreaterThan(nowAt);
-    expect(reportsAt).toBeGreaterThan(quoteAt);
+    expect(quoteAt).toBeGreaterThan(0);
+    expect(nowOpensAt).toBeGreaterThan(quoteAt);
+    expect(nowAt).toBeGreaterThan(nowOpensAt);
+    expect(reportsAt).toBeGreaterThan(nowAt);
     expect(todayAt).toBeGreaterThan(reportsAt);
     // The Today card keeps its honest empty line when the only job today is the one you're on.
     expect(page).toContain('empty(currentJob ? "Nothing else on the schedule today." : "Nothing left on the schedule today.")');

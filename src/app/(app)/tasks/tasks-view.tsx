@@ -11,6 +11,7 @@ import { Card } from "@/components/ui/card";
 import { MoveToDay } from "@/components/move-to-day";
 import { useToast } from "@/components/toast";
 import { formatDate } from "@/lib/utils";
+import { carriedDay, isPinned, pinCarriedFrom } from "@/lib/six-rank";
 import { createTask, toggleTask, deleteTask, updateTask, type ToggleTaskResult } from "./actions";
 
 /**
@@ -112,7 +113,7 @@ const priorityLabel = (p: number) => PRIORITIES.find((x) => x.value === p)?.labe
 /**
  * THE ONE-LINE ADD (0358: the 6-field box — category, job, person, due, priority — became this).
  * Type the words, Add: a Reminder for yourself, undated (it waits under Someday here; pin it or date
- * it to put it in Today's 6). Everything else is one tap on the row afterwards. A job's task is added
+ * it to put it on top of My Day's Tasks & Reminders). Everything else is one tap on the row afterwards. A job's task is added
  * on the job, or from My Day's Add line with a job picked.
  */
 export function NewReminderBox() {
@@ -348,7 +349,11 @@ export function TaskRow({
   const [editing, setEditing] = useState(false);
   const [adding, setAdding] = useState(false);
   const [subTitle, setSubTitle] = useState("");
-  const pinnedToday = !!todayStr && t.focus_date === todayStr;
+  // THE PIN RULE HAS ONE HOME (lib/six-rank isPinned): any focus_date on or before today is a pin
+  // that still stands. This used to read `=== todayStr`, the third hand-written copy of the rule, and
+  // it is why yesterday's pin still drew a filled glyph here while My Day had already lost the row.
+  const pinned = isPinned(t.focus_date, todayStr ?? "");
+  const carried = todayStr ? pinCarriedFrom(t.focus_date, todayStr) : null;
 
   function addSub() {
     if (!subTitle.trim()) return;
@@ -380,10 +385,10 @@ export function TaskRow({
   function togglePin() {
     if (!todayStr) return;
     start(async () => {
-      // focus_date = the "do today" pin — a date, so it self-expires at midnight.
-      const res = await updateTask(t.id, { focus_date: pinnedToday ? null : todayStr }, { category, jobId: t.job_id });
+      // focus_date = the pin. It no longer expires at midnight: a pin carries until it is unpinned.
+      const res = await updateTask(t.id, { focus_date: pinned ? null : todayStr }, { category, jobId: t.job_id });
       if (!res?.ok) { toast(res?.error ?? "Couldn't update task — try again.", "error"); return; }
-      toast(pinnedToday ? "Unpinned from today" : "Pinned to today's six", "success");
+      toast(pinned ? "Unpinned" : "Pinned to the top of Tasks & Reminders. It carries until you unpin it.", "success");
       router.refresh();
     });
   }
@@ -425,6 +430,13 @@ export function TaskRow({
                 {categoryLabel(t.category)}
               </span>
             )}
+            {/* A pin he set on an earlier day says so here as well as on My Day — the same two words
+                in both places, so the row never looks like it arrived today. */}
+            {carried && (
+              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-600">
+                Carried From {carriedDay(carried, todayStr as string)}
+              </span>
+            )}
             {/* Tags follow To-Do Extras (0358): off, the chips aren't drawn; the tags stay stored. */}
             {extras &&
               (t.tags ?? []).map((tag) => (
@@ -432,16 +444,16 @@ export function TaskRow({
               ))}
           </div>
         </div>
-        {/* "Do today" — pin into My Day's six (a date, so it self-expires at
-            midnight). Top-level open tasks only; subtasks are never slots. */}
+        {/* The pin — it puts this Reminder at the top of My Day's Tasks & Reminders and KEEPS it
+            there until it is unpinned or checked off. Top-level open tasks only; subtasks never rank. */}
         {todayStr && t.status !== "done" && !t.parent_id && (
           <button
             onClick={togglePin}
             disabled={pending}
-            className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-md hover:bg-slate-100 ${pinnedToday ? "text-brand" : "text-slate-300 hover:text-brand"}`}
-            title={pinnedToday ? "Unpin from today" : "Do today"}
+            className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-md hover:bg-slate-100 ${pinned ? "text-brand" : "text-slate-300 hover:text-brand"}`}
+            title={pinned ? "Unpin" : "Pin To Top (Carries Until You Unpin It)"}
           >
-            <Pin className="h-4 w-4" fill={pinnedToday ? "currentColor" : "none"} />
+            <Pin className="h-4 w-4" fill={pinned ? "currentColor" : "none"} />
           </button>
         )}
         {extras && (

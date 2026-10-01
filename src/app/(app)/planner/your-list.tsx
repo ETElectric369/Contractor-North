@@ -1,17 +1,23 @@
 "use client";
 
-// TODAY'S 6 — the six-slot day card on My Day, and since 0358 the ONE place My Day adds anything
+// TASKS & REMINDERS — the day card on My Day, and since 0358 the ONE place My Day adds anything
 // (Erik, 2026-09-26: "fold that into Today's 6 with an add reminder/task up top as that will be the
 // most useful"). The Add line leads the card: type the words; pick a job on the chip and it goes on
-// that job's Tasks ("Added To J-055's Tasks"), leave the chip and it is a Reminder for today.
+// that job's Tasks ("Added To J-055's Tasks"), leave the chip and it is a Reminder for you.
 //
-// The six are the person's own REMINDERS (tasks with no job): job tasks are the job's list, worked
-// on the job and in the Now card, never stockpiled here. The server picks the six with THE shared
-// rank (lib/six-rank: pins, then overdue / due today / flagged — the same function behind the morning
-// digest, so the phone and the card can never disagree) and this card renders them as 44px one-tap
-// check rows with subtasks indented under their parent. Subtasks are NEVER counted anywhere —
-// checking a parent with open children confirm-cascades (the toggleTask needsCascade contract).
-// #7+ never vanishes: it lives at /tasks, the Reminders page (Grab One / All Reminders).
+// ERIK NAMED IT (2026-09-30): "instead of todayy's 6 lets not limit it and call it something more
+// clear like Tasks & Reminders". So there is no cap on this card and no "6" in its words. The rows
+// are the person's own REMINDERS (tasks with no job): job tasks are the job's list, worked on the job
+// and in the Now card, never stockpiled here. The server picks them with THE shared rank
+// (lib/six-rank: carried pins, today's pins, overdue, due today, flagged undated, then the plain
+// ones — the same function behind the morning digest, so the phone and the card can never disagree)
+// and this card renders them as 44px one-tap check rows with subtasks indented under their parent.
+// Subtasks are NEVER counted anywhere — checking a parent with open children confirm-cascades (the
+// toggleTask needsCascade contract).
+//
+// A PIN IS A PROMISE. It carries past midnight and wears "Carried From <Day>" when it does; it goes
+// when he unpins it or checks it off. Whatever the fetch's bound could not carry is counted on the
+// All Reminders line — nothing leaves this card without a number.
 
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
@@ -24,10 +30,12 @@ import { MoveToDay } from "@/components/move-to-day";
 import { RowMoreSheet, SheetLink, SHEET_ROW } from "@/components/row-more-sheet";
 import { useToast } from "@/components/toast";
 import { formatDate } from "@/lib/utils";
+import { carriedDay, isPinned, pinCarriedFrom, ranksToday } from "@/lib/six-rank";
 import { createTask, toggleTask, updateTask, type ToggleTaskResult } from "../tasks/actions";
 import { taskHref } from "@/lib/task-href";
 
-/** A ranked slot (lib/six-rank picks it; planner/page.tsx decorates it). A Reminder: no job. */
+/** A ranked row (lib/six-rank picks it). A Reminder: no job. focus_date crosses as-is and the card
+ *  asks lib/six-rank what it means — the pin's definition has ONE home, and it used to have three. */
 export interface SixSlot {
   id: string;
   title: string;
@@ -35,8 +43,8 @@ export interface SixSlot {
   priority: number;
   due_date: string | null;
   job_id: string | null;
-  /** focus_date = today — an explicit "do today" pin (renders the pin glyph). */
-  pinned: boolean;
+  /** yyyy-mm-dd. On or before today = a pin that still stands; before today = a CARRIED pin. */
+  focus_date: string | null;
 }
 
 /** A job the Add line's chip can put a task on (the jobs still being worked, the clocked-in one first). */
@@ -56,11 +64,11 @@ export interface SixSubtask {
 
 /**
  * THE REMINDER'S "LATER" ROW (Erik's open question, built as the plan recommends). His rule is
- * "nothing goes quiet without a day", and an undated, unflagged Reminder never ranks into Today's 6
- * (lib/six-rank), so "Someday (Clear Date)" was the one row in the ⋯ sheet that sent a Reminder quiet
- * for good. The sheet offers "In A Week" instead: due a week from today, in the company's timezone
- * (todayStr is the org's day). Reminders already undated keep working: they wait on /tasks under
- * Someday until someone dates, flags or pins them.
+ * "nothing goes quiet without a day". It stays In A Week — due a week from today, in the company's
+ * timezone (todayStr is the org's day) — because a stated day is still better than no day: the row
+ * comes back on the morning it matters instead of sitting on the card every day until then.
+ * (Clearing the date no longer SILENCES a Reminder — lib/six-rank's last rank shows the plain undated
+ * ones now, which is what Erik asked for. It just loses its place in the order.)
  * One line to flip back: "someday" draws the old row again.
  */
 export const LATER_CHOICE: "in_a_week" | "someday" = "in_a_week";
@@ -78,37 +86,47 @@ export function laterRow(choice: typeof LATER_CHOICE, todayStr: string): { label
 }
 
 /**
- * NOTHING SILENT: a Reminder whose new due day takes it out of the six says where it went. A pin
- * stays in today's six whatever its date, and a date of today or earlier still ranks, so neither
- * needs a sentence. Nor does a flagged, non-office Reminder whose date is cleared (Someday, if the
- * later row is flipped back): lib/six-rank's rank 4 (flagged undated) takes it straight back into
- * the six, so "it waits under Someday" would be untrue.
+ * NOTHING SILENT: a Reminder whose new due day takes it OFF this card says where it went, and one
+ * that stays says nothing (a toast about a row still sitting in front of him is noise).
+ *
+ * It asks THE RANK (lib/six-rank ranksToday) with the row as it will be after the write, instead of
+ * re-deriving the rule here. That is the only way these words can't go stale: when the undated ranks
+ * changed, this sentence would have started lying about four different rows.
  */
 export function movedWords(
-  t: { pinned: boolean; priority: number | null; category: string | null },
+  t: { focus_date: string | null; priority: number | null; category: string | null },
   due: string | null,
   todayStr: string,
 ): string | null {
-  if (t.pinned || (due !== null && due <= todayStr)) return null;
-  if (due === null) {
-    if ((Number(t.priority) || 0) >= 1 && t.category !== "office") return null;
-    return "No due date now. It waits on your Reminders list under Someday.";
-  }
+  const after = { id: "x", focus_date: t.focus_date, priority: t.priority, category: t.category, due_date: due };
+  if (ranksToday(after, todayStr)) return null;
+  if (due === null) return "No due date now. It waits on your Reminders list under Someday.";
   const when = due === addDaysStr(todayStr, 1) ? "tomorrow" : formatDate(due);
   return `Due ${when}. It waits on your Reminders list till then.`;
 }
 
-/** Six small marks beside the title, one filled for each of the six done today: a progress mark,
- *  never a badge (nothing counts down to zero here, and nothing is owed). */
-export function SixMarks({ done }: { done: number }) {
-  const n = Math.max(0, Math.min(6, done));
+/** How many marks a phone can carry beside a heading before they stop reading as progress. The
+ *  aria-label always carries the TRUE total, so a long day is never misreported, only abbreviated. */
+export const PROGRESS_MARKS = 10;
+
+/** Small marks beside the heading, one filled for each Reminder done today: a progress mark, never a
+ *  badge (nothing counts down to zero here, and nothing is owed). There is no "6" left in it — the
+ *  total is the day's own: what is done plus what is still open on the card. A day with neither
+ *  draws nothing. */
+export function DoneMarks({ done, total }: { done: number; total: number }) {
+  const all = Math.max(0, total);
+  if (all === 0) return null;
+  const n = Math.max(0, Math.min(all, done));
+  const marks = Math.min(all, PROGRESS_MARKS);
+  // Abbreviated days scale the fill so the proportion stays honest (3 of 20 → 2 of 10 filled).
+  const filled = all === marks ? n : Math.round((n / all) * marks);
   return (
-    <span role="img" aria-label={`${n} of 6 done today`} className="flex items-center gap-1">
-      {Array.from({ length: 6 }, (_, i) => (
+    <span role="img" aria-label={`${n} of ${all} done today`} className="flex items-center gap-1">
+      {Array.from({ length: marks }, (_, i) => (
         <span
           key={i}
-          data-mark={i < n ? "done" : "open"}
-          className={`h-2.5 w-2.5 rounded-[3px] border ${i < n ? "border-brand bg-brand" : "border-slate-300 bg-white"}`}
+          data-mark={i < filled ? "done" : "open"}
+          className={`h-2.5 w-2.5 rounded-[3px] border ${i < filled ? "border-brand bg-brand" : "border-slate-300 bg-white"}`}
         />
       ))}
     </span>
@@ -127,25 +145,26 @@ function dueChip(due: string | null, todayStr: string): { label: string; overdue
 }
 
 /**
- * THE ADD LINE at the top of Today's 6. One line, one optional chip, one button:
- *   · no job  → a Reminder, pinned to today (focus_date) so it shows in the six it was added to;
+ * THE ADD LINE at the top of Tasks & Reminders. One line, one optional chip, one button:
+ *   · no job  → a Reminder of yours, right here on the card;
  *   · a job   → that job's task, on its list for whoever is on the job ("Added To J-055's Tasks").
- * The toast always says where it went (nothing silent). A pin ranks first (lib/six-rank), so a new
- * Reminder takes a slot unless six pins already hold them all; on a full card the last slot, never a
- * pin, is the one it moves to Reminders, and the toast names it.
+ *
+ * IT NO LONGER STAMPS A PIN. It had to: an undated, unflagged Reminder was not even fetched for this
+ * card, so the only way a typed reminder showed up at all was focus_date = today — which then expired
+ * at midnight and took the reminder out of the query with it (Erik, 2026-09-30: "the tasks keep
+ * disappearing even the pinned ones"). Now the card shows plain undated Reminders (lib/six-rank's
+ * last rank), so a typed one is visible WITHOUT a pin, and a pin goes back to meaning what it says:
+ * something he chose, that carries until he unpins it. He pins from the row's ⋯ sheet below.
+ *
+ * The toast always says where it went, and never claims a pin it didn't write (nothing silent).
  */
 export function AddReminderLine({
   jobs,
   todayStr,
-  pinsFull,
-  bumps,
 }: {
   jobs: AddJob[];
+  /** The company's day — the dup answer needs it to tell an already-open Reminder it can't see. */
   todayStr: string;
-  /** Six pins already: a seventh pin can't be sure of a slot. */
-  pinsFull: boolean;
-  /** The six are full (not all pins): the title of the last slot, which a new pin moves out. */
-  bumps: string | null;
 }) {
   const router = useRouter();
   const toast = useToast();
@@ -157,16 +176,16 @@ export function AddReminderLine({
     if (!title.trim()) return;
     const job = jobs.find((j) => j.id === jobId) ?? null;
     start(async () => {
-      const res = await createTask(job ? { title, job_id: job.id } : { title, focus_date: todayStr });
+      // No focus_date: a typed reminder is not a pin. `today` is only so the duplicate answer can
+      // tell whether the Reminder he just re-typed is one he can actually see (tasks/actions).
+      const res = await createTask(job ? { title, job_id: job.id } : { title, today: todayStr });
       if (!res.ok) {
         toast(res.error ?? "Couldn't add it. Try again.", "error");
         return;
       }
       if (res.duplicate) toast(res.speak ?? "Already on the list.", "info");
       else if (job) toast(`Added To ${job.number || job.label}'s Tasks`, "success");
-      else if (pinsFull) toast("Reminder added and pinned. Today's 6 already holds six pins, so one of them waits on your Reminders list.", "success");
-      else if (bumps) toast(`Added To Today's 6. "${bumps}" moved to your Reminders list.`, "success");
-      else toast("Added To Today's 6", "success");
+      else toast("Added To Tasks & Reminders", "success");
       setTitle("");
       setJobId("");
       router.refresh();
@@ -211,19 +230,22 @@ export function AddReminderLine({
 }
 
 export function YourList({
-  six,
+  rows,
   subtasks,
   todayStr,
   doneToday,
   restCount,
   jobs = [],
 }: {
-  six: SixSlot[];
+  /** The day's Reminders, already in rank order. No cap — Erik: "lets not limit it". */
+  rows: SixSlot[];
   subtasks: SixSubtask[];
   todayStr: string;
-  /** My Reminders completed today (server head-count) — the durable half of the six marks. */
+  /** My Reminders completed today (server head-count) — the durable half of the progress marks. */
   doneToday: number;
-  /** My open Reminders the six don't show (Grab One when the six are empty, All Reminders otherwise). */
+  /** My open Reminders this card doesn't show — the ones a rank doesn't claim (a future due date, an
+   *  undated office task) plus anything past the fetch's bound. Never dropped in silence: it is the
+   *  All Reminders line's number, and the Grab One gate on an empty day. */
   restCount: number;
   /** The Add line's job chip. Empty: the line adds Reminders only. */
   jobs?: AddJob[];
@@ -232,7 +254,7 @@ export function YourList({
   const toast = useToast();
   const [pending, start] = useTransition();
   // Optimistic done-state overrides (parents AND subtasks): applied instantly,
-  // reverted on server error. The refresh re-picks the six server-side.
+  // reverted on server error. The refresh re-ranks the rows server-side.
   const [override, setOverride] = useState<Map<string, boolean>>(new Map());
 
   const kidsByParent = useMemo(() => {
@@ -253,7 +275,7 @@ export function YourList({
   const slotDone = (t: SixSlot) => override.get(t.id) ?? false;
   const kidDone = (k: SixSubtask) => override.get(k.id) ?? k.status === "done";
 
-  const doneCount = doneToday + six.filter((t) => slotDone(t)).length;
+  const doneCount = doneToday + rows.filter((t) => slotDone(t)).length;
 
   function toggleSlot(t: SixSlot) {
     const nowDone = !slotDone(t);
@@ -298,7 +320,7 @@ export function YourList({
   }
 
   /** Run a sheet verb: on success close the row's sheet, say where the Reminder went if it left the
-   *  six, and refresh; on failure a toast, and the sheet stays. */
+   *  card, and refresh; on failure a toast, and the sheet stays. */
   function sheetAct(close: () => void, fn: () => Promise<{ ok: boolean; error?: string }>, said: string | null = null) {
     start(async () => {
       const res = await fn();
@@ -318,8 +340,11 @@ export function YourList({
     const c = dueChip(t.due_date, todayStr);
     const due = t.due_date ? `Due ${formatDate(t.due_date)}${c?.overdue ? ` · ${c.label}` : ""}` : "No due date";
     const opts = { category: t.category, jobId: t.job_id };
+    const pinned = isPinned(t.focus_date, todayStr);
+    const carried = pinCarriedFrom(t.focus_date, todayStr);
+    const pinWords = carried ? ` · Pinned, carried from ${carriedDay(carried, todayStr)}` : pinned ? " · Pinned" : "";
     return (
-      <RowMoreSheet title={t.title} subline={`${due}${t.pinned ? " · Pinned to today" : ""}`}>
+      <RowMoreSheet title={t.title} subline={`${due}${pinWords}`}>
         {({ close }) => (
           <>
             <button
@@ -360,12 +385,13 @@ export function YourList({
               type="button"
               disabled={pending}
               onClick={() =>
-                // focus_date is the pin — a DATE so it self-expires at midnight.
-                sheetAct(close, () => updateTask(t.id, { focus_date: t.pinned ? null : todayStr }, opts))
+                // focus_date is the pin. It no longer expires at midnight: lib/six-rank honours any
+                // focus_date on or before today, so this row says what the pin actually does.
+                sheetAct(close, () => updateTask(t.id, { focus_date: pinned ? null : todayStr }, opts))
               }
               className={SHEET_ROW}
             >
-              {t.pinned ? "Unpin From Today" : "Pin to Today"}
+              {pinned ? "Unpin" : "Pin To Top (Carries Until You Unpin It)"}
             </button>
             {/* Goes to the Reminders page; the page change takes the sheet with it (SheetLink). */}
             <SheetLink href={taskHref(t)}>Open</SheetLink>
@@ -376,26 +402,23 @@ export function YourList({
   };
 
   // Always drawn: the Add line is My Day's one door for a Reminder or a job's task, even on a day
-  // with nothing in the six (no dead end, and never a first Reminder with nowhere to type it).
+  // with nothing on it (no dead end, and never a first Reminder with nowhere to type it).
   return (
     <Card className="mb-4 overflow-hidden">
       <div className="flex items-center border-b border-slate-100 px-5 py-3">
         <div className="flex items-center gap-2.5">
-          <h2 className="text-sm font-semibold text-slate-900">Today&rsquo;s 6</h2>
-          {/* Six marks, one filled for each done today: checkboxes are their own affordance, and
-              this is progress, not a count to clear. */}
-          <SixMarks done={doneCount} />
+          {/* ERIK NAMED IT: "lets not limit it and call it something more clear like Tasks &
+              Reminders". No number in the heading, because there is no cap behind it. */}
+          <h2 className="text-sm font-semibold text-slate-900">Tasks &amp; Reminders</h2>
+          {/* One mark per thing on the day, filled as they get checked off: checkboxes are their own
+              affordance, and this is progress, not a count to clear. */}
+          <DoneMarks done={doneCount} total={doneToday + rows.length} />
         </div>
       </div>
 
-      <AddReminderLine
-        jobs={jobs}
-        todayStr={todayStr}
-        pinsFull={six.filter((t) => t.pinned).length >= 6}
-        bumps={six.length >= 6 ? six[six.length - 1].title : null}
-      />
+      <AddReminderLine jobs={jobs} todayStr={todayStr} />
 
-      {six.length === 0 ? (
+      {rows.length === 0 ? (
         <p className="px-5 py-5 text-center text-sm text-slate-400">
           Nothing urgent today.{" "}
           {restCount > 0 && (
@@ -406,11 +429,14 @@ export function YourList({
         </p>
       ) : (
         <ul className="divide-y divide-slate-100">
-          {six.map((t) => {
+          {rows.map((t) => {
             const done = slotDone(t);
             const chip = dueChip(t.due_date, todayStr);
             const screaming = !!chip && (chip.overdue || chip.label === "Today");
             const kids = kidsByParent.get(t.id) ?? [];
+            const pinned = isPinned(t.focus_date, todayStr);
+            // A pin he set on an earlier day. The chip is why the row is still here, in two words.
+            const carried = pinCarriedFrom(t.focus_date, todayStr);
             return (
               <li key={t.id}>
                 <div className="flex items-center pr-2">
@@ -434,9 +460,16 @@ export function YourList({
                         )}
                         {t.title}
                       </span>
-                      {t.category === "office" && (
-                        <span className="mt-0.5 flex items-center gap-1.5 text-xs text-slate-400">
-                          <span className="rounded-full bg-amber-50 px-1.5 py-px text-[10px] font-medium text-amber-700">Office</span>
+                      {(carried || t.category === "office") && (
+                        <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-slate-400">
+                          {carried && (
+                            <span className="rounded-full bg-slate-100 px-1.5 py-px text-[10px] font-medium text-slate-600">
+                              Carried From {carriedDay(carried, todayStr)}
+                            </span>
+                          )}
+                          {t.category === "office" && (
+                            <span className="rounded-full bg-amber-50 px-1.5 py-px text-[10px] font-medium text-amber-700">Office</span>
+                          )}
                         </span>
                       )}
                     </span>
@@ -447,7 +480,7 @@ export function YourList({
                       ) : chip ? (
                         <span className="shrink-0 text-xs text-slate-400">{chip.label}</span>
                       ) : null)}
-                    {t.pinned && <Pin className="h-3.5 w-3.5 shrink-0 text-brand" fill="currentColor" />}
+                    {pinned && <Pin className="h-3.5 w-3.5 shrink-0 text-brand" fill="currentColor" />}
                   </button>
                   {/* The row's ⋯: the app's one row sheet (components/row-more-sheet). */}
                   {sheetFor(t)}
@@ -491,12 +524,15 @@ export function YourList({
           })}
         </ul>
       )}
-      {six.length > 0 && restCount > 0 && (
+      {rows.length > 0 && restCount > 0 && (
         <Link
           href="/tasks"
           className="flex min-h-[44px] items-center justify-center border-t border-slate-100 text-sm font-medium text-brand hover:bg-slate-50"
         >
-          {/* For you: /tasks also lists the ones you made for someone else, which this doesn't count. */}
+          {/* NOTHING SILENT: this is every open Reminder of mine the card is NOT showing — the ones
+              waiting on a later day, the undated office ones, and anything past the fetch's bound.
+              "For you": /tasks also lists the ones you made for someone else, which this doesn't
+              count. */}
           All Reminders · {restCount} More For You
         </Link>
       )}

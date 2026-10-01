@@ -50,9 +50,9 @@ describe("Nort's product map after the shell wave", () => {
     expect(visibleDock({ isStaff: false }).some((s) => s.key === "clock")).toBe(true);
   });
 
-  it("names My Day's parts: the Now card, Today's 6, Needs You and the agenda", () => {
+  it("names My Day's parts: the Now card, Tasks & Reminders, Needs You and the agenda", () => {
     const myDay = NORT_PRODUCT_MAP.split("\n").find((l) => l.startsWith("- My Day (/planner)"))!;
-    for (const part of ["Now card", "Today's 6", "Needs You", "agenda"]) expect(myDay, part).toContain(part);
+    for (const part of ["Now card", "Tasks & Reminders", "Needs You", "agenda"]) expect(myDay, part).toContain(part);
     expect(NORT_PRODUCT_MAP).not.toMatch(/needs-action|Needs action/i);
   });
 

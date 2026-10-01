@@ -18,7 +18,7 @@ import { NavLink } from "@/components/nav-link";
 import { toJobOptions, toCustomerOptions, toStaffOptions, listActiveTechs, listCustomerOptions, jobLabel } from "@/lib/schedule-options";
 import { todayBoundsInTz, prettyDay, tzDayStartUtc, todayStrInTz } from "@/lib/tz";
 import { YourList } from "./your-list";
-import { rankSix } from "@/lib/six-rank";
+import { RANK_POOL_SELECT, rankPoolQuery, rankSix } from "@/lib/six-rank";
 import { getActionItems } from "@/lib/action-items/query";
 import { ActionList } from "@/components/action-items/action-list";
 import { WaitingFold } from "@/components/action-items/waiting-fold";
@@ -105,7 +105,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
     // Options for the inline add/edit controls + the owner snapshot.
     listCustomerOptions(supabase),
     listActiveTechs(supabase),
-    // status rides along for Today's 6 Add line: its job chip offers only jobs still being worked.
+    // status rides along for the Tasks & Reminders Add line: its job chip offers only jobs still being worked.
     supabase.from("jobs").select("id, job_number, name, address, status").order("created_at", { ascending: false }).limit(200),
     // full_name rides along for the setup card — it's the first thing it asks and the first thing
     // that would otherwise be asked again after it was already answered at signup.
@@ -169,19 +169,15 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
   // same on a database without it.
   const mineCut = <T,>(q: T): T =>
     (q as any).is("job_id", null).or(`assigned_to.eq.${uid},and(created_by.eq.${uid},assigned_to.is.null)`) as T;
-  // TODAY'S 6 pool cut — only rows a rank can claim (pinned / overdue / due today / flagged
-  // undated), so a deep dated backlog can't starve the pool out of the 60-row cap. Plain undated
-  // Reminders never fetch, never promote.
-  const poolCut = [
-    `focus_date.eq.${todayStr}`,
-    `due_date.lte.${todayStr}`,
-    "and(due_date.is.null,priority.gte.1)",
-  ].join(",");
+  // THE POOL CUT LIVES IN ONE PLACE NOW (lib/six-rank rankPoolQuery): the arms, the order the bound
+  // has to cut in, and the bound itself. It used to be written here as `focus_date.eq.<today>`, which
+  // is why a pin vanished overnight — the row stopped matching and was never fetched again (Erik,
+  // 2026-09-30: "the tasks keep disappearing even the pinned ones").
   const headCount = () => supabase.from("tasks").select("id", { count: "exact", head: true });
 
   // The reads that depend on a result above — the caller's current job (the job on
   // their OWN open time entry, so the Now card is their site, not a coworker's),
-  // the six-slot pool, and the head-counts that feed Today's 6 — run together in
+  // the ranked Reminders pool, and the head-counts that feed Tasks & Reminders — run together in
   // one final round. (The money-pipeline fetch left with the Money line — the AR
   // page owns that view now; the office/else DOOR links left too, so the only
   // count consumers below are the Today's-6 card's Grab-One gate + its six marks.)
@@ -197,22 +193,19 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
     openEntry?.job_id
       ? supabase.from("jobs").select("id, job_number, name, status, address, customers(name, address, city, state, zip)").eq("id", openEntry.job_id).maybeSingle()
       : Promise.resolve({ data: null }),
-    // TODAY'S 6 pool — my open TOP-LEVEL Reminders a rank can claim (subtasks nest
-    // under their parent and never count; children fetch below).
-    mineCut(
-      supabase
-        .from("tasks")
-        .select("id, title, category, priority, due_date, focus_date, job_id")
-        .eq("status", "open")
-        .is("parent_id", null),
-    )
-      .or(poolCut)
-      // Nulls (pins + flagged-undated) FIRST, then freshest dates — so the 60-cap
-      // trims June zombies, not today's pins. rankSix re-sorts internally, so this
-      // only governs what survives the cap, not display order (audit cn-v328).
-      .order("due_date", { ascending: false, nullsFirst: true })
-      .order("priority", { ascending: false })
-      .limit(60),
+    // TASKS & REMINDERS pool — my open TOP-LEVEL Reminders a rank can claim (subtasks nest
+    // under their parent and never count; children fetch below). The cut, the order and the bound
+    // are THE shared rule (lib/six-rank), so the card and the morning push read the same rows.
+    rankPoolQuery(
+      mineCut(
+        supabase
+          .from("tasks")
+          .select(RANK_POOL_SELECT)
+          .eq("status", "open")
+          .is("parent_id", null),
+      ),
+      { todayStr, scope: "my_day" },
+    ),
     // MY OPEN REMINDERS, all of them (top-level): what's behind the six feeds the card's Grab One
     // and All Reminders links. The ones FOR ME: /tasks also lists the Reminders I made for someone
     // else (theirs to do, never in my six), so the link says "More For You", not a /tasks count.
@@ -266,16 +259,17 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
       )
     : "";
   const sixPool = ((poolR as any)?.data ?? []) as any[];
-  // THE shared rank (lib/six-rank — the same function behind the morning digest,
-  // pinned by tests/badge-economy.test.ts, so the phone and the card can never
-  // disagree). The card's pin glyph is derived HERE, keeping the pure rank
-  // presentation-free.
-  const six = rankSix(sixPool, { todayStr }).map((t: any) => ({
-    ...t,
-    pinned: t.focus_date === todayStr,
-  }));
-  // (Pins beyond six used to badge the door line; the doors are gone — overflow
-  // pins still surface at /tasks like everything else past the six.)
+  // THE shared rank (lib/six-rank — the same function behind the morning digest, so the phone and
+  // the card can never disagree). NO DISPLAY CAP: every open Reminder a rank claims is drawn (Erik's
+  // own call, 2026-09-30: "lets not limit it and call it something more clear like Tasks &
+  // Reminders"). focus_date crosses into the card as-is; the card asks lib/six-rank whether it is a
+  // pin and whether it carried, so that rule has exactly one home.
+  const six = rankSix(sixPool, { todayStr });
+  // NOTHING SILENT ABOUT THE BOUND. The fetch is still capped (MY_DAY_POOL_LIMIT) so a company with
+  // thousands of open Reminders doesn't pull them all, and the order puts every pin out of the cut's
+  // reach. What the cut DID leave behind is never hidden: restCount below is an independent head count
+  // of ALL my open Reminders minus the ones drawn, so the card's "All Reminders · N More For You" line
+  // tells the truth whether N is a backlog, a day next month, or the bound.
 
   // The current job's materials and its open tasks (need its id), the Needs You inbox (needs
   // the role), and the six's subtasks (need the chosen six) — one final round.
@@ -464,7 +458,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
 
   // ── Agenda (Earlier / Next / Later) ─────────────────────────────────────────
   // One chronological stream of WHERE YOU'LL BE — timed jobs + appointments,
-  // nothing else. Tasks live in Today's 6 above (doctrine law 2: a due-today task
+  // nothing else. Tasks live in Tasks & Reminders above (doctrine law 2: a due-today task
   // rendering as slot AND agenda row would be a double map). The job you're ON is
   // the Now card at the top; the rest groups into Earlier, Next (soonest) and Later.
   type Agenda = {
@@ -820,6 +814,11 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
         />
       </div>
 
+      {/* THE QUOTE OF THE DAY, ABOVE THE CLOCK (Erik, 2026-09-30: "move the quote of the day up over
+          time clock"). It used to sit under the Now card, where the first thing he read on opening the
+          app was a timer. */}
+      <p className="mb-4 text-sm italic text-slate-400">&ldquo;{dailyQuote}&rdquo;</p>
+
       {/* THE NOW CARD, full width, for every role: the clock, the job on the punch and its doors, in
           one card (it replaced the clock card, the Today card's Now block and the Which Job block).
           The Open Leads card that once sat beside the clock for staff is gone too: a lead is a Needs
@@ -899,7 +898,6 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
           </>
         )}
       </NowCard>
-      <p className="mb-4 text-sm italic text-slate-400">&ldquo;{dailyQuote}&rdquo;</p>
 
       {/* The CrewBoard that sat here is GONE (Erik changed his mind, cn-v503):
           crew presence + hours live together on /timecards now — the "on the
@@ -1117,13 +1115,14 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
         </Card>
       )}
 
-      {/* TODAY'S 6 — what must get done (the agenda above is where you'll be). ONE card (Erik,
-          2026-09-26: "fold that into Today's 6 with an add reminder/task up top as that will be
-          the most useful"): the Add line leads it — type the words; pick a job and it goes on that
-          job's Tasks, leave it and it's my Reminder for today. The six below are my own Reminders
-          (pins + the ranked pool); job tasks live on their job and in the Now card above. */}
+      {/* TASKS & REMINDERS — what must get done (the agenda above is where you'll be). ONE card
+          (Erik, 2026-09-26: "fold that into Today's 6 with an add reminder/task up top as that will
+          be the most useful"): the Add line leads it — type the words; pick a job and it goes on that
+          job's Tasks, leave it and it's my own Reminder. The rows below are my Reminders, uncapped and
+          in rank order (Erik, 2026-09-30: "lets not limit it"); job tasks live on their job and in the
+          Now card above. */}
       <YourList
-        six={six as any}
+        rows={six as any}
         subtasks={sixKids as any}
         todayStr={todayStr}
         doneToday={doneToday}
@@ -1138,7 +1137,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
 
       {/* NEEDS YOU — the pure DECISION inbox (money, leads, waiting, leak
           detectors), right under the day so pull-work follows the plan. Tasks
-          live in Today's 6 + the doors above, never here. */}
+          live in Tasks & Reminders + the doors above, never here. */}
       {/* A supplier paper filed from the LAST card leaves no "Supplier Bills" line to hold its
           sentence and Undo; they land here instead, until he leaves the page. */}
       <SupplierPaperDoneTrail scope={SUPPLIER_PAPERS_SCOPE} />
@@ -1169,7 +1168,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
         </Card>
       )}
 
-      {/* (The 6-field task box that sat here went in 0358: its one line is the top of Today's 6.) */}
+      {/* (The 6-field task box that sat here went in 0358: its one line leads Tasks & Reminders.) */}
 
       {/* The MONEY LINE (getMoneyPipeline totals) left this page — the AR page owns
           that view now, and overdue/draft invoices already surface as actionable
