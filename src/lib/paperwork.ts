@@ -23,6 +23,7 @@ import type { StoredBank } from "@/lib/bank-download";
 import { billsCarryingLongNumberElsewhere, billsCarryingNumber, normalizeDocNumber, sameSupplier, type LedgerBill } from "@/lib/same-purchase";
 import { cleanLines, type BillLine as PaperLine } from "@/lib/paper-lines";
 import { SHELF_NEEDS_LINES, SHELF_NO_RETURNS } from "@/lib/shelf-plan";
+import { isLinelessReturn, RETURN_ON_JOB_WHY } from "@/lib/job-cost-guard";
 
 export { normalizeDocNumber };
 
@@ -319,15 +320,11 @@ export function isReturnWithoutLines(item: PaperItem): boolean {
 }
 
 /**
- * A negative total with no described line under it. The one test behind isReturnWithoutLines (the
- * File It gate) and insertItemizedBill (the write itself), so the rule is held where the bill is
- * written and not only at the door that happened to ask first.
+ * A negative total with no described line under it — RE-EXPORTED from lib/job-cost-guard, where the
+ * rule lives now (item C2). This module is the SCREEN's half of it (fileRefusal paints the door grey
+ * before anyone taps); the refusal that actually stops money is at the write.
  */
-export function isLinelessReturn(total: number | null | undefined, lines: unknown): boolean {
-  if (total === null || total === undefined || !(Math.round(Number(total) * 100) < 0)) return false;
-  const list = Array.isArray(lines) ? lines : [];
-  return !list.some((l) => l && typeof l === "object" && String((l as { description?: unknown }).description ?? "").trim());
-}
+export { isLinelessReturn };
 
 /**
  * A BILL'S LINES POINT THE SAME WAY AS ITS TOTAL (audit v994, DB4 and its review).
@@ -366,15 +363,13 @@ export const SHELF_TRAY_NEEDS_LINES = `It was read with no lines. ${SHELF_NEEDS_
 export const SHELF_TRAY_NO_LINES_NO_FILE =
   "It has no lines and no picture to read them from, so it can't go into stock. File it on a job or as a business cost.";
 
-export const RETURN_NEEDS_LINES =
-  "This is a return with no lines on it, so on a job it would credit the customer the whole amount, even for parts they were never charged for. Press Read Again so its lines come with it, or file it as a business cost.";
+export const RETURN_NEEDS_LINES = `${RETURN_ON_JOB_WHY} Press Read Again so its lines come with it, or file it as a business cost.`;
 
 /** A paper over the reader's size limit: a person types the total, then answers where it goes. */
 export const TOO_BIG_TO_FILE = "Too big to read. Put the total in with Fix Details, then answer where it goes.";
 
 /** The same refusal where a receipt is read straight onto a job (Snap the Bill, Record as Cost). */
-export const RETURN_ON_JOB_NEEDS_LINES =
-  "This reads as a return, and none of its lines could be read, so on this job it would credit the customer the whole amount, even for parts they were never charged for. Nothing was recorded. Try a clearer photo, or drop it in Organize and file it as a business cost.";
+export const RETURN_ON_JOB_NEEDS_LINES = `${RETURN_ON_JOB_WHY} Nothing was recorded. Try a clearer photo, or drop it in Organize and file it as a business cost.`;
 
 /** Has anything read this paper yet? A placeholder row is a file name and nothing else. */
 export function isRead(item: PaperItem): boolean {

@@ -21,6 +21,8 @@ import { billJobReceipt } from "@/app/(app)/organize/actions";
 import { addStockPurchase } from "@/app/(app)/inventory/actions";
 import { jobLabel } from "@/lib/schedule-options";
 import { jobPickLabel } from "@/lib/job-pick-label";
+import { JobScopePicker } from "@/components/job-scope-picker";
+import { scopeAnswered } from "@/lib/bill-scope";
 import { useToast } from "@/components/toast";
 import { openSnapOrNote } from "@/components/snap-or-note";
 import { useShelfItems } from "@/components/shelf-count";
@@ -169,6 +171,9 @@ function SnapCostButton({
   // filed as Sep 24, because the seed was being sent as if it were a fact).
   const [dateTouched, setDateTouched] = useState(false);
   const [category, setCategory] = useState("Materials");
+  // WHICH PART OF THE JOB this cost is (item C1): the one question, the one control. "" = none of
+  // them. Nothing is preselected: a guessed part is a wrong budget row.
+  const [scope, setScope] = useState("");
   // The bucket, when the cost has no job. Nothing is picked for the person (see onSave).
   const [bucket, setBucket] = useState("");
   const [paid, setPaid] = useState(false);
@@ -215,6 +220,7 @@ function SnapCostButton({
     setBillDate(todayStrInTz(orgTz.current ?? getOrgSettings(null).timezone));
     setDateTouched(false);
     setCategory("Materials");
+    setScope("");
     setBucket("");
     setPaid(false);
     setJob(jobId ?? "");
@@ -398,11 +404,23 @@ function SnapCostButton({
    *  there is one. */
   const attachClause = () => attachFailure.current ?? "didn't upload";
 
-  /** What the PERSON stated on the form, handed to the reader: attestation beats inference. */
+  /**
+   * WHAT THE PERSON STATED ON THE FORM, handed to the reader: attestation beats inference.
+   *
+   * EVERY ANSWER THIS SHEET COLLECTS IS IN HERE (items C1-1, C1-4). Part Of The Job was drawn, and
+   * was not in this object — so on the default Read the Receipt save (and on Different Purchase's
+   * re-read, which is this same object) the model's guess won, Erik's picked "Decking" never left the
+   * browser, and nothing on screen said so, while the Category dropdown right above it was carried
+   * through. Supplier and Amount are the paper's in this mode and the form greys them to say it;
+   * every control that is NOT greyed is an answer, and an answer belongs here.
+   */
   function stated(differentPurchase = false) {
     return {
       paid,
       category: category || null,
+      // Blank is not an answer: the control sits on "No Part Of The Job" until somebody picks, so an
+      // untouched one leaves the paper's own read standing (lib/bill-scope's scopeAnswered decides).
+      scope: scope || null,
       // Only a date a person set is a fact; the seeded "today" would outrank the paper's own
       // date (organize/actions.ts: `stated?.billDate || itemDate`). The seeded day still
       // lands when the paper has no legible date, so the bill is never dateless.
@@ -423,6 +441,9 @@ function SnapCostButton({
         job_id: targetJob, supplier: supplier.trim() || "From receipt — add supplier", bill_number: "",
         amount: typedAmount, status: paid ? "paid" : "unpaid", bill_date: billDate || null,
         notes: "", category, receipt_document_id: docId,
+        // The reader couldn't read it, so there is no model word to weigh against: what the PERSON
+        // answered about the part of the job stands (lib/bill-scope decides, here as everywhere).
+        scope: scopeAnswered(scope, null),
       });
       if (!fb.ok) return setError(res.error ?? "Couldn't read the receipt.");
       setSameAsDoc(null);
@@ -537,6 +558,9 @@ function SnapCostButton({
         notes: "",
         category: targetJob ? category : bucket,
         receipt_document_id: docId,
+        // Item C1: a business cost has no part of a job; on a job, what the person answered — and
+        // nothing was read off a paper on this path, so there is nothing for it to beat.
+        scope: !targetJob ? { kind: "noJob" } : scopeAnswered(scope, null),
       });
       if (!res.ok) return setError(res.error ?? "Couldn't save the cost.");
       setCostSaved(true);
@@ -713,7 +737,17 @@ function SnapCostButton({
           {!jobId && pickerJobs && pickerJobs.length > 0 && (
             <div>
               <Label htmlFor="qc-job">Job</Label>
-              <Select id="qc-job" value={job} onChange={(e) => setJob(e.target.value)} disabled={costSaved || !!sameAsDoc}>
+              <Select
+                id="qc-job"
+                value={job}
+                // A part of the OLD job means nothing on the new one (item C1), so the answer starts
+                // again rather than being carried over and refused at the save.
+                onChange={(e) => {
+                  setJob(e.target.value);
+                  setScope("");
+                }}
+                disabled={costSaved || !!sameAsDoc}
+              >
                 <option value="">Business Cost (No Job)</option>
                 {pickerJobs.map((j) => (
                   <option key={j.id} value={j.id}>{j.label}</option>
@@ -729,6 +763,9 @@ function SnapCostButton({
                   <option key={c} value={c}>{c}</option>
                 ))}
               </Select>
+              {/* The same scope question the receipt reader answers (item C1). Drawn only when this
+                  job's estimate is broken into parts — otherwise there is nothing to ask. */}
+              <JobScopePicker jobId={targetJob} value={scope} onChange={setScope} id="qc-scope" className="mt-3" />
             </div>
           ) : (
             <div>
@@ -816,6 +853,9 @@ export type TypedCostFields = {
   paid: "paid" | "unpaid";
   billNumber: string;
   poId: string;
+  /** WHICH PART OF THE JOB this cost is (item C1): one of the job estimate's own words, or "" for
+   *  none of them. Only ever set when the target is a job whose estimate is broken into parts. */
+  scope?: string;
   /** Shop Stock only: What Is It? (an item's id, NEW_ITEM, or "" for nothing picked), the new item's
    *  name, How Many, and the Unit (the item's own for an item in stock). */
   stockItem?: string;
@@ -886,6 +926,10 @@ export function typedCostBill(f: TypedCostFields): Parameters<typeof createBill>
     notes: "",
     category: business ? f.bucket : "Materials",
     po_id: business ? null : f.poId || null,
+    // THE SAME SCOPE QUESTION AS EVERY OTHER DOOR (item C1). A business cost has no part of a job;
+    // on a job, what the person answered, and nothing said is "none of them", never a guess. Nothing
+    // is read off a paper on the typed path, so there is no model word for the answer to beat.
+    scope: business ? { kind: "noJob" } : scopeAnswered(f.scope, null),
   };
 }
 
@@ -931,6 +975,8 @@ function TypeItInButton({
   const [paid, setPaid] = useState<"paid" | "unpaid">("paid");
   const [billNumber, setBillNumber] = useState("");
   const [poId, setPoId] = useState("");
+  // WHICH PART OF THE JOB (item C1). Nothing is preselected: a guessed part is a wrong budget row.
+  const [scope, setScope] = useState("");
   // SHOP STOCK: What Is It? (an item in stock, NEW_ITEM, or nothing yet), the new item's name, How
   // Many, and the Unit a new item is counted in (an item in stock keeps its own).
   const [stockItem, setStockItem] = useState("");
@@ -974,6 +1020,7 @@ function TypeItInButton({
     setPaid("paid");
     setBillNumber("");
     setPoId("");
+    setScope("");
     setStockItem("");
     setStockName("");
     setStockPieces(0);
@@ -1054,6 +1101,8 @@ function TypeItInButton({
   function pickTarget(next: string) {
     setTarget(next);
     setPoId("");
+    // A part of the OLD job means nothing on the new one (item C1).
+    setScope("");
     setError(null);
     if (next !== BUSINESS) setBucket(null);
   }
@@ -1069,7 +1118,7 @@ function TypeItInButton({
 
   function save() {
     setError(null);
-    const fields: TypedCostFields = { amount, date, target, bucket, where, paid, billNumber, poId, stockItem, stockName, stockPieces, stockUnit: unitNow };
+    const fields: TypedCostFields = { amount, date, target, bucket, where, paid, billNumber, poId, scope, stockItem, stockName, stockPieces, stockUnit: unitNow };
     const problem = typedCostProblem(fields);
     if (problem) return setError(problem);
     if (target === STOCK) return saveStock(fields);
@@ -1273,6 +1322,10 @@ function TypeItInButton({
             </div>
             {paid === "unpaid" && <p className="mt-1 text-xs text-slate-500">It counts in what you owe that supplier until you pay it.</p>}
           </div>
+
+          {/* WHICH PART OF THE JOB (item C1): the same control the snap sheet and both Edit Bill boxes
+              draw. Nothing is drawn when the job's estimate isn't broken into parts. */}
+          <JobScopePicker jobId={jobTarget} value={scope} onChange={setScope} id="ti-scope" />
 
           {jobPos && jobPos.list.length > 0 && (
             <div>
