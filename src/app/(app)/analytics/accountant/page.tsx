@@ -180,9 +180,13 @@ export default async function AccountantPage({ searchParams }: { searchParams: P
             xlsxName={accountantFileName(org?.name, period, "xlsx")}
             csvName={accountantFileName(org?.name, period, "csv")}
           />
+          {/* What is in the file, said before the tap (Erik, report 80cbd6fa: it "needs to have ALL
+              the data available to be itemized"). Every claim in this line is a section of the
+              workbook — see accountant-workbook.ts. */}
           <p className="mt-3 text-xs text-slate-500">
-            {TAB_NAMES.length} tabs: {TAB_NAMES.join(", ")}. Open is as of the day you download it ({day(todayYmd)}). Stock is what was in stock on {day(through)}. Depreciation is
-            your accountant&apos;s call.
+            {TAB_NAMES.length} tabs: {TAB_NAMES.join(", ")}. Summary is the profit and loss; the rest are the rows behind it, itemized — each payment in, each cost and the lines of
+            each ticket, each shift and each payment handed to a person, each ticket still unpaid. Open is as of the day you download it ({day(todayYmd)}). Stock is what was in
+            stock on {day(through)}. Depreciation is your accountant&apos;s call.
           </p>
         </Card>
       </div>

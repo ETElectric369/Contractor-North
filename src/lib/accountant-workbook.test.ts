@@ -422,19 +422,21 @@ describe("Income, Costs and People hold the rows behind the Summary", () => {
     expect(cents(costs.rows[totalAt].cells[1])).toBe(listed);
     // It leaves crew pay out, and says so, so it never reads as the Summary's Total COGS.
     expect(costs.rows[totalAt + 1].cells[0]).toBe("Crew Pay (1099) and Crew Mileage Paid are in Cost of Goods Sold (COGS) too, but they are on the People tab, so they are not in this total.");
-    // The ticket with a roll in it: its rest is Materials & Bills, its roll is Stock Bought.
-    const b1 = costs.rows.filter((r) => r.cells[2] === "NS-100");
+    // The ticket with a roll in it: its rest is Materials & Bills, its roll is Stock Bought. Scoped to
+    // the cost list (above the totals) — the ticket's own lines are listed again further down the tab.
+    const costList = costs.rows.slice(0, at);
+    const b1 = costList.filter((r) => r.cells[2] === "NS-100");
     expect(b1.map((r) => [r.cells[5], cents(r.cells[6])])).toEqual([
       ["Materials & Bills", 45000],
       [STOCK_BOUGHT_LABEL, 15000],
     ]);
     // The write-off: out of Stock Bought, into Stock Lost, named by its item.
-    expect(costs.rows.filter((r) => r.cells[1] === "Stock").map((r) => [r.cells[5], cents(r.cells[6]), r.cells[7]])).toEqual([
+    expect(costList.filter((r) => r.cells[1] === "Stock").map((r) => [r.cells[5], cents(r.cells[6]), r.cells[7]])).toEqual([
       [STOCK_BOUGHT_LABEL, -2000, "Written off: 12/2 NM-B"],
       [STOCK_LOST_LABEL, 2000, "Written off: 12/2 NM-B"],
     ]);
     // A stored "Gas & Truck" goes to Auto, and never says Gas & Truck beside it.
-    expect(costs.rows.find((r) => r.cells[1] === "Quick Lube")!.cells.slice(5)).toEqual(["Auto", { money: 60 }, null]);
+    expect(costList.find((r) => r.cells[1] === "Quick Lube")!.cells.slice(5)).toEqual(["Auto", { money: 60 }, null]);
   });
 
   it("Costs: what was paid to each supplier (voided left out), and the tools, kept and billed to the customer", () => {
@@ -467,6 +469,105 @@ describe("Income, Costs and People hold the rows behind the Summary", () => {
     expect(rowOf(tab(wb, "Summary"), "Owner Hours (not pay)")!.cells[4]).toBe(16);
     // The owner's 16 hours cost nothing: Crew Pay is Sam's and Lee's alone.
     expect(cur.totals.crewPay).toBe(880 + 150);
+  });
+
+  it("Costs: every line on every ticket, and the gap between the lines and the tickets' totals is said", () => {
+    const costs = tab(wb, "Costs");
+    const at = costs.rows.findIndex((r) => r.cells[0] === "Every Line On Every Ticket");
+    const lines = costs.rows.slice(at + 3, costs.rows.findIndex((r, i) => i > at && r.cells[0] === "Total Of The Lines"));
+    expect(costs.rows[at + 2].cells).toEqual([
+      "Date", "Supplier", "Bill Number", "Job Number", "Job", "Filed As", "Amount", "What", "Quantity", "Unit Price", "Billable", "Part Billed", "Into Stock",
+    ]);
+    // The roll on the Maple Court ticket: the company's own line (0268's billable false) that went on
+    // the shelf, on the ticket's own day, under the ticket's number and the ticket's job.
+    expect(lines.find((r) => r.cells[7] === "12/2 NM-B 250'")!.cells).toEqual([
+      { date: "2026-04-12" }, "Northline Supply", "NS-100", "J-201", "Maple Court Remodel", "Wire", { money: 150 }, "12/2 NM-B 250'", 1, { money: 150 }, "No (the company's)", null, "Yes",
+    ]);
+    // A tool line on a ticket with two lines: billable, not stock, both lines listed.
+    expect(lines.filter((r) => r.cells[2] === "NS-120").map((r) => [r.cells[7], cents(r.cells[6]), r.cells[10], r.cells[12]])).toEqual([
+      ["Hammer drill", 19900, "Yes", null],
+      ["Wire and boxes", 100100, "Yes", null],
+    ]);
+    // Only the period's tickets: the March receipt and the superseded duplicate are nowhere.
+    expect(lines.every((r) => String((r.cells[0] as any)?.date ?? "").startsWith("2026-0") && (r.cells[0] as any).date >= "2026-04-01")).toBe(true);
+    // The lines add up to their own Total, and the tab says, in dollars, what the lines don't name.
+    const lineTotal = costs.rows.find((r) => r.cells[0] === "Total Of The Lines")!;
+    expect(cents(lineTotal.cells[6])).toBe(lines.reduce((s, r) => s + cents(r.cells[6])!, 0));
+    expect(cents(lineTotal.cells[6])).toBe(147999); // 150 + 129.99 + 199 + 1,001
+    const said = costs.rows.map((r) => String(r.cells[0]));
+    // 7 tickets in Q2 come to $2,615.50 (600 + 85.50 + 240 + 129.99 + 1,200 + 60 + 300); four of them
+    // (Fuel, Auto, Gas & Truck, Insurance: $685.50) were entered as a total only.
+    expect(said).toContain(
+      "The tickets of this period come to $2,615.49 in the list at the top of this tab, and their lines name $1,479.99 of it. 4 tickets ($685.50) were entered as a total only, with no lines to list. A ticket is always counted by its own total, never by adding its lines.",
+    );
+  });
+
+  it("Costs: each payment to a supplier, on its day, voided ones marked and not counted", () => {
+    const costs = tab(wb, "Costs");
+    const at = costs.rows.findIndex((r) => r.cells[0] === "Each Payment To A Supplier");
+    const rows = costs.rows.slice(at + 3, costs.rows.findIndex((r, i) => i > at && r.cells[0] === "Total"));
+    expect(costs.rows[at + 2].cells).toEqual(["Date", "Supplier", "Method", "Amount", "Note"]);
+    expect(rows.map((r) => r.cells)).toEqual([
+      [{ date: "2026-05-30" }, "Northline Supply", "Check", { money: 500 }, null],
+      [{ date: "2026-06-01" }, "Northline Supply", "Check", { money: 100 }, "Voided: not counted"],
+    ]);
+    // Its Total is the live payments only — the same $500 the rollup above counts.
+    const sent = costs.rows.slice(at).find((r) => r.cells[0] === "Total")!;
+    expect(cents(sent.cells[3])).toBe(50000);
+  });
+
+  it("People: each payment handed over, every shift, and the pay periods that locked", () => {
+    const ppl = tab(wb, "People");
+    const handedAt = ppl.rows.findIndex((r) => r.cells[0] === "Each Payment Handed Over");
+    expect(ppl.rows[handedAt + 2].cells).toEqual(["Date", "Person", "Kind", "Method", "Check Or Reference", "Amount", "Note"]);
+    const handed = ppl.rows.slice(handedAt + 3, ppl.rows.findIndex((r, i) => i > handedAt && r.cells[0] === "Total Pay"));
+    expect(handed.map((r) => [r.cells[0], r.cells[2], cents(r.cells[5]), r.cells[6]])).toEqual([
+      [{ date: "2026-04-20" }, "Pay", 32000, null],
+      [{ date: "2026-06-25" }, "Pay", 20000, null],
+      [{ date: "2026-06-26" }, "Pay", 99900, "Voided: not counted"],
+      [{ date: "2026-06-30" }, "Mileage Settled", 3800, "What was typed for the miles of 2026-06-01 to 2026-06-30"],
+    ]);
+    // The two totals are Sam's own Paid In Period and Mileage Settled, and they are never added together.
+    const sam = rowOf(ppl, "Sam Rivera")!.cells;
+    expect(cents(rowOf(ppl, "Total Pay")!.cells[5])).toBe(cents(sam[4]));
+    expect(cents(rowOf(ppl, "Total Mileage Settled")!.cells[5])).toBe(cents(sam[9]));
+
+    const shiftAt = ppl.rows.findIndex((r) => r.cells[0] === "Every Shift");
+    expect(ppl.rows[shiftAt + 2].cells).toEqual(["Person", "Date", "Clock In", "Clock Out", "Lunch (Minutes)", "Hours", "Miles Logged", "Note"]);
+    const shifts = ppl.rows.slice(shiftAt + 3, ppl.rows.findIndex((r, i) => i > shiftAt && r.cells[0] === "Total Hours"));
+    // Q2's shifts only, in day order, in the company's clock (10 AM Chicago), the owner's among them.
+    expect(shifts.map((r) => [r.cells[0], (r.cells[1] as any).date, r.cells[2], r.cells[3], r.cells[5], r.cells[6]])).toEqual([
+      ["Sam Rivera", "2026-04-06", "10:00 AM", "6:00 PM", 8, 0],
+      ["Dana Pinecrest", "2026-04-07", "10:00 AM", "7:00 PM", 9, 40],
+      ["Lee Okafor", "2026-05-12", "10:00 AM", "3:00 PM", 5, 0],
+      ["Dana Pinecrest", "2026-05-20", "10:00 AM", "5:00 PM", 7, 0],
+      ["Sam Rivera", "2026-06-08", "10:00 AM", "6:00 PM", 8, 30],
+      ["Sam Rivera", "2026-06-09", "10:00 AM", "4:00 PM", 6, 25],
+    ]);
+    // Hours only: no shift row carries money, so nothing here can argue with Earned.
+    for (const r of shifts) expect(r.cells.map(cents).filter((c) => c != null)).toEqual([]);
+    expect(rowOf(ppl, "Total Hours")!.cells[5]).toBe(43); // 8 + 9 + 5 + 7 + 8 + 6, the owner's included
+
+    const lockAt = ppl.rows.findIndex((r) => r.cells[0] === "Pay Periods Locked");
+    expect(ppl.rows[lockAt + 2].cells).toEqual(["Person", "From", "To", "Gross Frozen"]);
+    expect(ppl.rows[lockAt + 3].cells).toEqual(["Sam Rivera", { date: "2026-04-01" }, { date: "2026-04-15" }, { money: 320 }]);
+  });
+
+  it("Open: the bills and the supplier's own invoices behind what suppliers say is owed", () => {
+    const open = tab(wb, "Open");
+    const at = open.rows.findIndex((r) => r.cells[0] === "Bills North Has Marked Unpaid");
+    expect(open.rows[at + 2].cells).toEqual(["Date", "Supplier", "Bill Number", "Amount", "Supplier Account", "Job"]);
+    const bills = open.rows.slice(at + 3, open.rows.findIndex((r, i) => i > at && r.cells[0] === "Total"));
+    // The two unpaid Northline tickets — all time, as of the download day, not just this period.
+    expect(bills.map((r) => [r.cells[2], cents(r.cells[3]), r.cells[4], r.cells[5]])).toEqual([
+      ["NS-100", 60000, "Northline Supply", "Maple Court Remodel"],
+      ["NS-120", 120000, "Northline Supply", "Birch Street Service"],
+    ]);
+    // $1,800 of tickets less the $500 sent is the $1,300 the supplier figure above says.
+    expect(cents(open.rows.slice(at).find((r) => r.cells[0] === "Total")!.cells[3])).toBe(180000);
+    const docsAt = open.rows.findIndex((r) => r.cells[0] === "What Each Supplier's Own Invoices Say Is Still Open");
+    expect(docsAt).toBeGreaterThan(at);
+    expect(open.rows[docsAt + 3].cells[0]).toBe("No supplier has an open document of its own on the books.");
   });
 
   it("Stock: what was in stock on the period's last day, at cost", () => {

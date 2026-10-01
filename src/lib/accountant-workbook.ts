@@ -24,6 +24,7 @@ import { summarizeSalesTax } from "@/lib/sales-tax";
 import { balanceForPerson, sumPayments, toPayPaymentRow, type PayPaymentRow } from "@/lib/payroll-math";
 import { summarizeMileage } from "@/lib/mileage-math";
 import { formatCurrency, hoursBetween } from "@/lib/utils";
+import { tzMinutesOfDay } from "@/lib/tz";
 import { isOnAccountBill, supplierBalance } from "@/app/(app)/bills/supplier-balance";
 import { buildXlsx, type XlsxRow, type XlsxSheet, type XlsxValue } from "@/lib/xlsx-write";
 import { buildZip, type DeflateRaw } from "@/lib/zip-write";
@@ -299,7 +300,23 @@ const shortMonth = (m: string) => `${MONTH_NAMES[Number(m.slice(5, 7)) - 1].slic
 /** "Sep 27" from "2025-09-27". */
 const shortDay = (ymd: string) => `${MONTH_NAMES[Number(ymd.slice(5, 7)) - 1].slice(0, 3)} ${Number(ymd.slice(8, 10))}`;
 const round2 = (n: number) => Math.round(n * 100) / 100;
+const round3 = (n: unknown) => {
+  const v = Number(n);
+  return Number.isFinite(v) ? Math.round(v * 1000) / 1000 : null;
+};
 const round1 = (n: number) => Math.round(n * 10) / 10 + 0; // + 0: never -0
+/** A timestamp as a clock time in the company's zone ("10:00 AM"), never the reader's phone. */
+const clockTime = (at: unknown, tz: string): string | null => {
+  if (at == null || at === "") return null;
+  const d = new Date(String(at));
+  if (!Number.isFinite(d.getTime())) return null;
+  const mins = tzMinutesOfDay(d, tz);
+  const h = Math.floor(mins / 60);
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return `${h12}:${String(mins % 60).padStart(2, "0")} ${h < 12 ? "AM" : "PM"}`;
+};
+/** "Yes" / "No" — a flag an accountant reads, never a bare true/false in a cell. */
+const yesNo = (v: unknown, no: string | null = "No"): string | null => (v === true ? "Yes" : no);
 
 /** A CsvTable (the stock and tools lists) as sheet rows: its header bold, its Total rows bold, the
  *  money columns as money and the date columns as dates. */
@@ -497,7 +514,10 @@ function summaryTab(
   const notPaid = countedNotPaidLine(cur);
   if (notPaid) rows.push(note(notPaid));
   rows.push(note(`Open is as of the day this was downloaded (${input.todayYmd}), not the end of the period. Stock is at cost.`));
-  rows.push(note("Tabs: Income, Costs, People, Open and Stock hold the rows behind these figures."));
+  // What the other tabs hold, named by what is itemized on them (80cbd6fa) — every claim here is a
+  // section on one of them: each payment in, each cost and the lines of each ticket, each shift and
+  // each payment handed to a person, each unpaid ticket.
+  rows.push(note("Tabs: Income, Costs, People, Open and Stock hold the rows behind these figures — each payment in, each cost and the lines of each ticket, each shift and each payment handed over, each ticket still unpaid."));
   return { name: "Summary", rows, widths: [46, ...(byMonth ? cur.months.map(() => 13) : []), 16, 22, 15] };
 }
 
@@ -631,9 +651,24 @@ function costsTab(input: AccountantWorkbookInput, cur: OwnerMoney, months: Set<s
     head("Date", "Where", "Bill Number", "Job Number", "Job", "Goes To", "Amount", "What It Was"),
   ];
   const sums = new Map<PnlKey, number>();
+  /** The period's tickets, by the SAME day and the same set the cost list above counts, so the lines
+   *  section can't list a ticket on a day the cost line calls something else. */
+  const ticket = new Map<string, { day: string | null; supplier: string | null; billNo: string | null; jobId: string | null; cents: number }>();
   for (const l of lines) {
     const r = l.row ?? {};
     const j = r.job_id ? jobs.get(String(r.job_id)) : undefined;
+    if (l.source === "bill" && r.id != null) {
+      const id = String(r.id);
+      const seen = ticket.get(id);
+      ticket.set(id, {
+        day: l.day ?? seen?.day ?? null,
+        supplier: String(r.supplier ?? "").trim() || null,
+        billNo: r.bill_number ?? r.supplier_invoice_number ?? null,
+        jobId: r.job_id ? String(r.job_id) : null,
+        // Every part of the ticket the Summary counted (its materials half and its shelf half).
+        cents: (seen?.cents ?? 0) + l.cents,
+      });
+    }
     let where: string | null = null;
     let billNo: string | null = null;
     let what: string | null = null;
@@ -697,6 +732,35 @@ function costsTab(input: AccountantWorkbookInput, cur: OwnerMoney, months: Set<s
   if (!any) rows.push(note("No payments to supplier accounts in this period."));
   rows.push(total("Total", null, money(paid)));
 
+  // EACH PAYMENT, NOT JUST HOW MANY (Erik, report 80cbd6fa, 2026-09-30: the download "needs to have
+  // ALL the data available to be itemized"). The rollup above says "Northline Supply · 1 · $500"; this
+  // is the $500, on its day, by its method. A voided payment is listed and marked, as a payment on a
+  // voided invoice is on Income, so the figure above can be checked and nothing is quietly dropped.
+  const acctName = new Map((inp.supplierAccounts ?? []).map((a: any) => [String(a?.id), String(a?.name ?? "").trim()]));
+  rows.push(blank(), title("Each Payment To A Supplier"), note("Every payment that made up the figures above, voided ones marked. They add up to the same Total."));
+  rows.push(head("Date", "Supplier", "Method", "Amount", "Note"));
+  let paidEach = 0;
+  const payRows = [...periodPayments].sort(
+    (a, b) => String(a?.paid_on).localeCompare(String(b?.paid_on)) || String(a?.id ?? "").localeCompare(String(b?.id ?? "")),
+  );
+  for (const p of payRows) {
+    const voided = !!p?.voided_at;
+    if (!voided) paidEach += cents(p?.amount);
+    rows.push(
+      line(
+        date(String(p?.paid_on ?? "").slice(0, 10)),
+        acctName.get(String(p?.supplier_account_id)) || "A supplier account North can't name",
+        methodLabel(p?.method),
+        money(cents(p?.amount)),
+        voided ? "Voided: not counted" : null,
+      ),
+    );
+  }
+  if (!payRows.length) rows.push(note("No payments to supplier accounts in this period."));
+  rows.push(total("Total", null, null, money(paidEach)));
+  // Never expected (both are the same rows), and never silent if it happens.
+  if (paidEach !== paid) rows.push(note("These payments don't add up to Paid To Suppliers above; the figure above is the one /bills shows."));
+
   // TOOLS: already inside the costs above; listed so the accountant can tell them apart.
   const days = { from: input.period.start, to: through };
   rows.push(blank(), title("Tools The Company Kept"), note("Already counted above. Listed so tools can be told apart: depreciation is your accountant's call."));
@@ -708,7 +772,76 @@ function costsTab(input: AccountantWorkbookInput, cur: OwnerMoney, months: Set<s
   const billed: CsvTable = { header: billedAll.header, rows: billedAll.rows.filter((r) => typeof r[0] === "string" && r[0] >= days.from && r[0] <= days.to) };
   if (billed.rows.length) rows.push(...tableRows(billed, [5], [0]));
   else rows.push(note("None in this period."));
-  return { name: "Costs", rows, widths: [12, 30, 14, 12, 28, 26, 13, 44] };
+
+  // EVERY LINE ON EVERY TICKET (80cbd6fa). The list at the top of this tab is one row per ticket: a
+  // $1,200 receipt from Northline. This is what was ON it, line by line, as the person entering it
+  // itemized the paper — what it was, how many, at what price, what it was filed as, whether the
+  // customer was billed for it and whether the container went on the shelf. Nothing new is read: these
+  // are the receipt's own lines, the same ones the Materials tab and the Tools lists work from.
+  rows.push(blank(), title("Every Line On Every Ticket"));
+  rows.push(note("The lines of each ticket counted above, in the order they were entered. Already counted: a ticket's own total is its row at the top of this tab, not these lines added again."));
+  rows.push(head("Date", "Supplier", "Bill Number", "Job Number", "Job", "Filed As", "Amount", "What", "Quantity", "Unit Price", "Billable", "Part Billed", "Into Stock"));
+  /** A line whose container went onto the shelf: a stock lot points at it (0303's bill_line_id). */
+  const shelved = new Set((lists.lots ?? []).map((l) => String(l.bill_line_id ?? "")).filter(Boolean));
+  const linesOf = new Map<string, typeof lists.lines>();
+  for (const l of lists.lines ?? []) {
+    const id = String(l.bill_id);
+    linesOf.set(id, [...(linesOf.get(id) ?? []), l]);
+  }
+  const tickets = [...ticket.entries()].sort(
+    (a, b) => String(a[1].day).localeCompare(String(b[1].day)) || a[0].localeCompare(b[0]),
+  );
+  let lineCents = 0;
+  let listed = 0;
+  let bare = 0;
+  let bareCents = 0;
+  for (const [id, t] of tickets) {
+    const own = linesOf.get(id) ?? [];
+    if (!own.length) {
+      bare += 1;
+      bareCents += t.cents;
+      continue;
+    }
+    listed += 1;
+    const j = t.jobId ? jobs.get(t.jobId) : undefined;
+    for (const l of own) {
+      const c = cents(l.amount);
+      lineCents += c;
+      rows.push(
+        line(
+          date(t.day),
+          t.supplier ?? "A bill with no supplier named",
+          t.billNo ?? null,
+          j?.job_number ?? null,
+          j?.name ?? null,
+          String(l.category ?? "").trim() || null,
+          money(c),
+          String(l.description ?? "").trim() || null,
+          round3(l.quantity),
+          money(cents(l.unit_price)),
+          // billable false is 0268's "the company eats this line": it never reaches an invoice.
+          yesNo(l.billable !== false, "No (the company's)"),
+          l.billed_amount == null ? null : money(cents(l.billed_amount)),
+          yesNo(shelved.has(String(l.id)), null),
+        ),
+      );
+    }
+  }
+  if (!listed) rows.push(note("No ticket in this period was entered line by line."));
+  rows.push(total("Total Of The Lines", null, null, null, null, null, money(lineCents)));
+  rows.push(note("Part Billed is the dollars of a line this job took when only part of it was the customer's; blank means the whole line."));
+  // THE GAP, SAID. A ticket is counted by its own total, so the lines are never added up instead of it
+  // — and a ticket entered as a total only, or one whose lines don't cover it, leaves a difference
+  // somebody would otherwise hunt for. Both halves of it are named here rather than left to arithmetic.
+  const ticketCents = [...ticket.values()].reduce((s, x) => s + x.cents, 0);
+  rows.push(
+    note(
+      `The tickets of this period come to ${formatCurrency(ticketCents / 100)} in the list at the top of this tab, and their lines name ${formatCurrency(lineCents / 100)} of it.` +
+        (bare ? ` ${bare === 1 ? "1 ticket" : `${bare} tickets`} (${formatCurrency(bareCents / 100)}) ${bare === 1 ? "was" : "were"} entered as a total only, with no lines to list.` : "") +
+        " A ticket is always counted by its own total, never by adding its lines.",
+    ),
+  );
+  return { name: "Costs", rows, widths: [12, 30, 14, 12, 28, 26, 13, 44, 11, 12, 18, 13, 11] };
 }
 
 // ── People ───────────────────────────────────────────────────────────────────
@@ -744,7 +877,16 @@ function peopleTab(input: AccountantWorkbookInput, cur: OwnerMoney, months: Set<
   ];
   const crewRows: Row[] = [];
   const ownerRows: Row[] = [];
+  // THE ROWS BEHIND THE ROWS (Erik, report 80cbd6fa: the download "needs to have ALL the data
+  // available to be itemized"). Each person's line above is a period's worth of figures; these three
+  // lists are what those figures are made of — every shift, every payment handed over, every pay
+  // period that locked. Each row carries the day it belongs to so the lists read in date order.
+  type Dated = { at: string; row: Row };
+  const shiftRows: Dated[] = [];
+  const personPayRows: Dated[] = [];
+  const lockedRows: Row[] = [];
   const t = { hours: 0, earned: 0, paid: 0, owed: 0, year: 0, miles: 0, business: 0, settled: 0 };
+  const tHandedOver = { pay: 0, mileage: 0 };
   for (const [pid, s] of byPerson) {
     const person = inp.people.get(pid);
     const isOwner = person?.paidByDraw === true;
@@ -755,6 +897,30 @@ function peopleTab(input: AccountantWorkbookInput, cur: OwnerMoney, months: Set<
     const hours = worked.reduce((h, e) => h + Math.round(hoursBetween(e.clock_in, e.clock_out, e.lunch_minutes) * 100), 0) / 100;
     const miles = summarizeMileage(s.entries.filter(inMonth), Number(person?.commuteBaselineMiles ?? 0) || 0, tz);
     const openShift = s.entries.some((e) => !e?.clock_out && inMonth(e));
+    // EVERY SHIFT, HOURS ONLY. What a shift is WORTH is the Pay board's rule (a locked pay period is
+    // worth the gross frozen on it), so an hourly multiply here would not add up to Earned — the note
+    // under the list says so rather than print a figure that argues with the one above.
+    for (const e of s.entries) {
+      if (!inMonth(e)) continue;
+      const day = recordDay(null, e?.clock_in, tz);
+      shiftRows.push({
+        at: `${day ?? "9999-99-99"} ${String(e?.clock_in ?? "")}`,
+        row: line(
+          name,
+          date(day),
+          clockTime(e?.clock_in, tz),
+          e?.clock_out ? clockTime(e.clock_out, tz) : null,
+          Number(e?.lunch_minutes) || 0,
+          e?.clock_out ? round2(hoursBetween(e.clock_in, e.clock_out, e.lunch_minutes)) : null,
+          round3(e?.miles ?? 0) ?? 0,
+          e?.clock_out
+            ? e?.split_from
+              ? "Split off another shift of the same day."
+              : null
+            : "Still on the clock: these hours aren't in Earned yet.",
+        ),
+      });
+    }
     if (isOwner) {
       if (!hours && !miles.recorded) continue;
       ownerRows.push(line(name, "Owner (Owner's Draw)", hours, null, null, null, null, miles.recorded, miles.business, null, "Hours only: the owner's time is not pay or a cost."));
@@ -769,7 +935,52 @@ function peopleTab(input: AccountantWorkbookInput, cur: OwnerMoney, months: Set<
     const owed = cents(
       balanceForPerson({ profileId: pid, name, entries: balanceEntries(s.entries, inp.balanceFrom, tz), lockedRuns: s.runs, payments: s.payments, tz, fallbackRate: Number(person?.hourlyRate ?? 0) || 0 }).owed,
     );
-    const settled = s.mileageRuns.filter((r) => months.has(String(recordDay(null, r.created_at, tz) ?? "").slice(0, 7))).reduce((c, r) => c + cents(r.mileage_amount), 0);
+    const periodMileage = s.mileageRuns.filter((r) => months.has(String(recordDay(null, r.created_at, tz) ?? "").slice(0, 7)));
+    const settled = periodMileage.reduce((c, r) => c + cents(r.mileage_amount), 0);
+
+    // EVERY PAYMENT HANDED TO THIS PERSON in the period — the pay and the mileage settlements, each on
+    // its own day, with its method and its check or transfer number. This is the list a 1099-NEC is
+    // filed from; the per-person "Paid In Period" above is its total. Voided payments are listed and
+    // marked (the figures above leave them out), so the total can be checked.
+    for (const p of s.payments) {
+      if (!months.has(p.paidOn.slice(0, 7))) continue;
+      if (!p.voided) tHandedOver.pay += cents(p.amount);
+      personPayRows.push({
+        at: `${p.paidOn} ${p.id}`,
+        row: line(
+          date(p.paidOn),
+          name,
+          "Pay",
+          methodLabel(p.method),
+          p.reference ?? null,
+          money(cents(p.amount)),
+          p.voided ? "Voided: not counted" : p.needsCheck ? `Marked to check${p.note ? `: ${p.note}` : ""}` : p.note ?? null,
+        ),
+      });
+    }
+    for (const r of periodMileage) {
+      const day = recordDay(null, r.created_at, tz);
+      tHandedOver.mileage += cents(r.mileage_amount);
+      personPayRows.push({
+        at: `${day ?? "9999-99-99"} ${String(r?.id ?? "")}`,
+        row: line(
+          date(day),
+          name,
+          "Mileage Settled",
+          null,
+          null,
+          money(cents(r.mileage_amount)),
+          `What was typed for the miles of ${r.period_start} to ${r.period_end}`,
+        ),
+      });
+    }
+    // EVERY PAY PERIOD THAT LOCKED and touches this one: the gross FROZEN on it when it locked, which
+    // is what Earned uses for those shifts (a raise applies forward only). A period can straddle the
+    // edge of this one, which is why its own two dates are printed beside it.
+    for (const r of s.runs) {
+      if (!(r.period_start < period.end && r.period_end >= period.start)) continue;
+      lockedRows.push(line(name, date(r.period_start), date(r.period_end), money(cents(r.gross))));
+    }
     if (!hours && !earned && !paidPeriod && !paidYear && !owed && !miles.recorded && !settled) continue;
     t.hours += Math.round(hours * 100);
     t.earned += earned;
@@ -792,7 +1003,39 @@ function peopleTab(input: AccountantWorkbookInput, cur: OwnerMoney, months: Set<
   rows.push(blank(), note(`Paid In ${year} is what was handed over this calendar year, the figure a 1099-NEC is filed from. Who needs one is your accountant's call.`));
   // Never expected (both are the frozen-gross rule over the same rows), and never silent if it happens.
   if (Math.round(cur.totals.crewPay * 100) !== t.earned) rows.push(note("Earned here doesn't add up to the Summary's Crew Pay (1099); the Summary's figure is the one Money by Month shows."));
-  return { name: "People", rows, widths: [26, 20, 9, 13, 14, 16, 24, 12, 14, 14, 44] };
+
+  rows.push(blank(), title("Each Payment Handed Over"));
+  rows.push(note("Every payment in the period, on its own day: pay, and mileage a person was settled for. Voided ones are listed and marked, and are in neither Total."));
+  rows.push(head("Date", "Person", "Kind", "Method", "Check Or Reference", "Amount", "Note"));
+  personPayRows.sort((a, b) => a.at.localeCompare(b.at));
+  if (!personPayRows.length) rows.push(note("Nothing was handed over in this period."));
+  rows.push(...personPayRows.map((d) => d.row));
+  rows.push(total("Total Pay", null, null, null, null, money(tHandedOver.pay)));
+  rows.push(total("Total Mileage Settled", null, null, null, null, money(tHandedOver.mileage)));
+  rows.push(note("Pay and mileage settle separately and are never added into one figure: a payable number North invented is how a wrong amount lands on a check."));
+
+  rows.push(blank(), title("Every Shift"));
+  rows.push(note("Each shift in the period, in the company's time zone, with its lunch and its miles. Hours only: what a shift is worth follows the Pay board's rule (a locked pay period is worth the gross frozen on it), so Earned above is the figure, not hours times a rate."));
+  rows.push(head("Person", "Date", "Clock In", "Clock Out", "Lunch (Minutes)", "Hours", "Miles Logged", "Note"));
+  shiftRows.sort((a, b) => a.at.localeCompare(b.at));
+  if (!shiftRows.length) rows.push(note("No shifts in this period."));
+  rows.push(...shiftRows.map((d) => d.row));
+  rows.push(total("Total Hours", null, null, null, null, round2(shiftRows.length ? sumHours(shiftRows) : 0)));
+  rows.push(note("Total Hours counts every shift listed, the owner's among them when they are shown, so it is not Crew Total's Hours."));
+
+  rows.push(blank(), title("Pay Periods Locked"));
+  rows.push(note("A locked period's gross is frozen the day it locks: a later raise applies forward only. Earned spreads a frozen period over the months of the shifts it locked, which is why a period that straddles this one's edge still shows here with both its own dates."));
+  rows.push(head("Person", "From", "To", "Gross Frozen"));
+  if (!lockedRows.length) rows.push(note("No pay period that locked touches this period."));
+  rows.push(...lockedRows.sort((a, b) => String(a.cells[0]).localeCompare(String(b.cells[0]))));
+  // No total on purpose, said out loud: adding frozen grosses across the edge is not this period's pay.
+  if (lockedRows.length) rows.push(note("No total here: a period that straddles this one's edge is only partly in it, so adding the frozen grosses would not be Earned."));
+  return { name: "People", rows, widths: [26, 20, 11, 14, 16, 16, 24, 14, 14, 14, 44] };
+}
+
+/** The Hours column of the shift rows, added up (a null hour — a shift still on the clock — is 0). */
+function sumHours(rows: { row: Row }[]): number {
+  return rows.reduce((h, d) => h + (typeof d.row.cells[5] === "number" ? d.row.cells[5] : 0), 0);
 }
 
 // ── Open ─────────────────────────────────────────────────────────────────────
@@ -860,12 +1103,83 @@ function openTab(input: AccountantWorkbookInput, open: OpenFigures): XlsxSheet {
   if (!open.suppliers.length) rows.push(note(`No supplier was owed anything on ${day}.`));
   rows.push(total("Total", money(open.suppliersCents)));
   rows.push(note("A supplier that sends its own invoices is owed what those say is still open. Crew still owed is on People."));
+
+  // THE PAPERS BEHIND THAT FIGURE (Erik, report 80cbd6fa: the download "needs to have ALL the data
+  // available to be itemized"). One row per supplier above is a balance; these are the documents it is
+  // read from — North's own unpaid tickets, and what each supplier's own invoices say is left on them.
+  // Both lists, always, because which one DECIDES an account is the account's own model (/bills): a
+  // supplier that sends invoices is owed what those say, and North's tickets are only its copy.
+  const inp = input.money;
+  const acctName = new Map((inp.supplierAccounts ?? []).map((a: any) => [String(a?.id), String(a?.name ?? "").trim()]));
+  rows.push(blank(), title("Bills North Has Marked Unpaid"));
+  rows.push(note(`Every ticket on the books not marked paid, as of ${day}. For an account North tracks by its own bills, what is owed above is these less what was sent (each payment is on Costs).`));
+  rows.push(head("Date", "Supplier", "Bill Number", "Amount", "Supplier Account", "Job"));
+  const unpaid: { at: string; row: Row }[] = [];
+  let unpaidCents = 0;
+  for (const b of inp.bills ?? []) {
+    if (!b || b.superseded_by_bill_id) continue;
+    if (!isOnAccountBill({ status: String(b.status ?? "") })) continue;
+    const c = cents(b.amount);
+    if (!c) continue;
+    unpaidCents += c;
+    const at = recordDay(b.bill_date, b.created_at, input.tz);
+    const j = b.job_id ? input.lists.jobs.find((x) => String(x.id) === String(b.job_id)) : undefined;
+    unpaid.push({
+      at: `${at ?? "9999-99-99"} ${String(b.id ?? "")}`,
+      row: line(
+        date(at),
+        String(b.supplier ?? "").trim() || "A bill with no supplier named",
+        b.bill_number ?? b.supplier_invoice_number ?? null,
+        money(c),
+        b.supplier_account_id ? acctName.get(String(b.supplier_account_id)) || "An account North can't name" : "No supplier account",
+        j?.name ?? null,
+      ),
+    });
+  }
+  unpaid.sort((a, b) => a.at.localeCompare(b.at));
+  if (!unpaid.length) rows.push(note("No ticket on the books is marked unpaid."));
+  rows.push(...unpaid.map((u) => u.row));
+  rows.push(total("Total", null, null, money(unpaidCents)));
+
+  rows.push(blank(), title("What Each Supplier's Own Invoices Say Is Still Open"));
+  rows.push(note("The supplier's own paper, not North's: a statement invoice, a credit memo or a service charge that isn't closed. Still Open is what that document says is left on it."));
+  rows.push(head("Date", "Supplier", "Invoice Number", "Kind", "Total", "Still Open"));
+  const docs: { at: string; row: Row }[] = [];
+  let docCents = 0;
+  let unfigured = 0;
+  for (const d of inp.supplierDocuments ?? []) {
+    if (!d || d.closed) continue;
+    const left = cents(d.open_balance);
+    if (d.open_balance != null && left <= 0) continue;
+    if (d.open_balance == null) unfigured += 1;
+    docCents += left;
+    const at = recordDay(d.invoice_date, d.created_at, input.tz);
+    docs.push({
+      at: `${at ?? "9999-99-99"} ${String(d.id ?? "")}`,
+      row: line(
+        date(at),
+        d.supplier_account_id ? acctName.get(String(d.supplier_account_id)) || "An account North can't name" : "No supplier account",
+        d.invoice_number ?? null,
+        methodLabel(d.kind),
+        money(cents(d.total)),
+        d.open_balance == null ? null : money(left),
+      ),
+    });
+  }
+  docs.sort((a, b) => a.at.localeCompare(b.at));
+  if (!docs.length) rows.push(note("No supplier has an open document of its own on the books."));
+  rows.push(...docs.map((d) => d.row));
+  rows.push(total("Total", null, null, null, null, money(docCents)));
+  if (unfigured) {
+    rows.push(note("A document with no Still Open figure came from before North recorded one: its Total is what the paper says, and the supplier's balance above doesn't count it."));
+  }
+
   if (open.ahead.length) {
     rows.push(blank(), title("Paid Ahead (Credit With The Supplier)"), head("Supplier", "Credit"));
     for (const a of open.ahead) rows.push(line(a.name, money(a.cents)));
     rows.push(note("Paid ahead of the bills North has: the extra sits on that supplier's account and isn't taken off what the others are owed."));
   }
-  return { name: "Open", rows, widths: [30, 26, 13, 13, 13, 10] };
+  return { name: "Open", rows, widths: [30, 26, 16, 16, 20, 14] };
 }
 
 // ── Stock ────────────────────────────────────────────────────────────────────
