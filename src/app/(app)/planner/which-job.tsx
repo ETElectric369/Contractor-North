@@ -67,6 +67,7 @@ export type { SheetPhase, WhichJobOption, WhichJobResult } from "../timeclock/wh
  */
 export function WhichJobSheetView({
   moment,
+  from = null,
   state,
   busyId = null,
   err = null,
@@ -76,6 +77,9 @@ export function WhichJobSheetView({
   onSkip,
 }: {
   moment: WhichJobMoment;
+  /** On a "move": the job the APP chose, which the punch is coming off — named, so the sheet says
+   *  what it is moving away from and never asks a question about an unnamed job. */
+  from?: { id: string; label: string } | null;
   state: SheetPhase;
   busyId?: string | null;
   err?: string | null;
@@ -92,8 +96,11 @@ export function WhichJobSheetView({
       Done
     </Button>
   ) : (
+    /* A MOVE IS NEVER A DEAD END AND NEVER A DEMAND: the way out says the punch stays where the app
+       put it, which is exactly what ignoring the sentence does. "Skip, The Office Will Pick" would be
+       a lie here — the punch already has a job. */
     <Button type="button" variant="outline" className="min-h-[44px] w-full" onClick={onSkip} disabled={!!busyId}>
-      Skip, The Office Will Pick
+      {moment === "move" ? "Leave It Where It Is" : "Skip, The Office Will Pick"}
     </Button>
   );
   return (
@@ -105,9 +112,11 @@ export function WhichJobSheetView({
       ) : (
         <div data-testid="which-job-sheet">
           <p className="text-sm text-slate-600">
-            {moment === "in"
-              ? "You're clocked in. Tap the job you're on and the whole punch goes on it."
-              : "You're clocked out, and this punch has no job. Tap the job it was on."}
+            {moment === "move"
+              ? `The app put this punch on ${from?.label ?? "a job from today's schedule"}. Tap the job you're really on and the whole punch moves.`
+              : moment === "in"
+                ? "You're clocked in. Tap the job you're on and the whole punch goes on it."
+                : "You're clocked out, and this punch has no job. Tap the job it was on."}
           </p>
           {state.phase === "loading" ? (
             <p className="mt-3 flex min-h-[44px] items-center gap-2 text-sm text-slate-500">
@@ -156,16 +165,23 @@ export function WhichJobSheetView({
 export function WhichJobSheet({
   entryId,
   moment,
+  from = null,
   onClose,
   confirmInline = false,
 }: {
   entryId: string;
   moment: WhichJobMoment;
+  /** On a "move" (the Change door on the clock's sentence): the job the app chose. The list leaves it
+   *  out, and the write names it, so the punch can only come off the job the screen said it was on. */
+  from?: { id: string; label: string } | null;
   onClose: () => void;
   confirmInline?: boolean;
 }) {
   const router = useRouter();
   const toast = useToast();
+  // The job the punch is coming off, as a plain id: the load effect depends on it, and an object
+  // literal rebuilt on every render would re-run the read and re-load the list under the thumb.
+  const fromId = from?.id ?? null;
   const [state, setState] = useState<SheetPhase>({ phase: "loading" });
   const [busyId, setBusyId] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -191,10 +207,10 @@ export function WhichJobSheet({
   useEffect(() => {
     let alive = true;
     setState({ phase: "loading" });
-    whichJobChoices(entryId).then(
+    whichJobChoices(entryId, fromId).then(
       (r) => {
         if (!alive) return;
-        const next = sheetAfterLoad(r, { confirmInline });
+        const next = sheetAfterLoad(r, { confirmInline, moment });
         if (next.close) {
           // No job to offer: close, and say where the punch went instead of a Skip-only sheet.
           toastRef.current(next.sentence, "info");
@@ -210,14 +226,16 @@ export function WhichJobSheet({
     return () => {
       alive = false;
     };
-  }, [entryId, confirmInline]);
+  }, [entryId, confirmInline, fromId, moment]);
 
   async function pick(job: WhichJobOption) {
     if (busyId) return;
     setBusyId(job.id);
     setErr(null);
     try {
-      const out = await pickOutcome(putPunchOnJob, entryId, job);
+      // ONE WRITE for both: putPunchOnJob places a job-less punch, and moves one off the job the app
+      // chose when the screen names that job. Nothing here decides which — `fromId` is the fact.
+      const out = await pickOutcome((eid, jid) => putPunchOnJob(eid, jid, fromId), entryId, job);
       const gone = !mounted.current;
       const route = routePick(out, { confirmInline, gone });
       if (route.refresh) router.refresh();
@@ -234,6 +252,7 @@ export function WhichJobSheet({
   return (
     <WhichJobSheetView
       moment={moment}
+      from={from}
       state={state}
       busyId={busyId}
       err={err}

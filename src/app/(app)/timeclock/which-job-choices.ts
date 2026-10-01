@@ -119,9 +119,12 @@ export function orderWhichJobChoices(input: {
   todayStr: string;
   tz: string;
   codesOn: boolean;
+  /** The job the punch is already on (a "move" off the app's pick): never offered to itself, or the
+   *  sheet would list the very job the sentence is asking about and the write would refuse the tap. */
+  excludeJobId?: string | null;
 }): WhichJobOption[] {
   const byId = new Map<string, ChoiceJob>();
-  for (const j of input.jobs ?? []) if (j?.id && !byId.has(j.id)) byId.set(j.id, j);
+  for (const j of input.jobs ?? []) if (j?.id && !byId.has(j.id) && j.id !== input.excludeJobId) byId.set(j.id, j);
   const out: WhichJobOption[] = [];
   const taken = new Set<string>();
   const add = (j: ChoiceJob, why?: string) => {
@@ -157,9 +160,19 @@ export function orderWhichJobChoices(input: {
 /** The why on a held job's row: what the tap will do besides place the punch. */
 export const ON_HOLD_WHY = "On hold: picking it takes it off hold";
 
-/** Which moment the sheet is asked at: right after the punch in, or right after the clock-out. */
-export type WhichJobMoment = "in" | "out";
-export type WhichJobAsk = { entryId: string; moment: WhichJobMoment };
+/**
+ * Which moment the sheet is open at: right after the punch in, right after the clock-out, or to MOVE
+ * a punch off the job the APP chose for it (clock-told: the Change door on the clock's sentence). The
+ * move is the same list and the same write — nothing is a second sheet.
+ */
+export type WhichJobMoment = "in" | "out" | "move";
+export type WhichJobAsk = {
+  entryId: string;
+  moment: WhichJobMoment;
+  /** Only on a "move": the job the app chose, which the punch is coming OFF. The write names it, so
+   *  a punch that moved underneath is a zero-row UPDATE and says so instead of landing twice. */
+  from?: { id: string; label: string };
+};
 
 /**
  * THE ONE RULE EVERY CLOCK DOOR USES to decide whether to ask: only a punch that is saved (ok, with
@@ -179,8 +192,15 @@ export type SheetPhase =
   | { phase: "ready"; jobs: WhichJobOption[]; isStaff: boolean }
   | { phase: "failed"; error: string };
 
-/** What the sheet says when it has no job to offer: where the punch is, and who puts it on its job. */
-export function noJobsToOffer(isStaff: boolean): string {
+/** What the sheet says when it has no job to offer: where the punch is, and who puts it on its job.
+ *  On a MOVE the punch is NOT on no job — it is on the job the app chose — so it never borrows this
+ *  sentence; that would be the clock telling a lie about where the hours are. */
+export function noJobsToOffer(isStaff: boolean, moment: WhichJobMoment = "in"): string {
+  if (moment === "move") {
+    return isStaff
+      ? "There's no other job going right now. Leave it here, or move it from Timecards when you know the job."
+      : "There's no other job going right now. Leave it here and tell the office which job it was.";
+  }
   return isStaff
     ? "No job is going right now, so your punch is saved on no job. Put it on its job from Timecards when you know it."
     : "No job is going right now, so your punch is saved on no job. The office puts it on the right job.";
@@ -196,10 +216,10 @@ export function noJobsToOffer(isStaff: boolean): string {
  */
 export function sheetAfterLoad(
   r: WhichJobChoices,
-  door: { confirmInline: boolean },
+  door: { confirmInline: boolean; moment?: WhichJobMoment },
 ): { close: true; sentence: string } | { close: false; state: SheetPhase } {
   if (!r.ok) return { close: false, state: { phase: "failed", error: r.error } };
-  if (!r.jobs.length && !door.confirmInline) return { close: true, sentence: noJobsToOffer(r.isStaff) };
+  if (!r.jobs.length && !door.confirmInline) return { close: true, sentence: noJobsToOffer(r.isStaff, door.moment ?? "in") };
   return { close: false, state: { phase: "ready", jobs: r.jobs, isStaff: r.isStaff } };
 }
 
