@@ -169,7 +169,7 @@ describe("GET /analytics/accountant/export", () => {
     expect(summary.split("\r\n").filter((l) => /^(Revenue|Received|Total|Gross|Other Income)/.test(l))).toEqual([]);
     // The cost rows stay, under their two headings.
     expect(summary).toContain("\r\nCost of Goods Sold (COGS)\r\nMaterials & Bills,");
-    expect(summary).toContain("\r\nOverhead\r\nAuto,");
+    expect(summary).toContain("\r\nOverhead\r\nFuel,"); // Fuel leads Overhead (2026-09-30)
     expect(summary).toContain("The totals are the owner's.");
     // The owner may: the same file with the switch off, downloaded by the owner, has it.
     state.role = "owner";

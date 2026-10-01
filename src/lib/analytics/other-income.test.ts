@@ -48,10 +48,11 @@ describe("Other Income in Received", () => {
     const at = (k: Parameters<typeof pnlRow>[1]) => pnlRow(rows, k)!;
     expect(at("revenue").amount).toBe(1250.5);
     expect(at("other_income")).toMatchObject({ label: "Other Income (Inside Revenue)", amount: 250.5, kind: "part" });
-    // Fuel is Cost of Goods Sold (COGS): 1,250.50 less 100.
-    expect(at("total_cogs").amount).toBe(100);
-    expect(at("gross_profit").amount).toBe(1150.5);
-    expect(at("total_overhead").amount).toBe(0);
+    // Fuel is Overhead (2026-09-30), so no cost sits in COGS: all of Revenue is Gross Profit, and
+    // the 100 comes off below it.
+    expect(at("total_cogs").amount).toBe(0);
+    expect(at("gross_profit").amount).toBe(1250.5);
+    expect(at("total_overhead").amount).toBe(100);
     expect(at("net_profit").amount).toBe(m.totals.left);
     expect(at("net_profit").amount).toBe(1150.5);
   });

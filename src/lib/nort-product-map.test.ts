@@ -96,10 +96,10 @@ describe("Nort's product map after the shell wave", () => {
     let from = 0;
     for (const w of [
       "Revenue",
-      "Cost of Goods Sold (COGS): Materials & Bills, Stock Lost, Crew Pay (1099), Crew Mileage Paid and Fuel",
+      "Cost of Goods Sold (COGS): Materials & Bills, Stock Lost, Crew Pay (1099) and Crew Mileage Paid",
       "Total COGS",
       "Gross Profit and Gross Margin %",
-      "Overhead: Auto, Tools & Supplies, Phone & Office, Insurance & Licenses, Fees and Other",
+      "Overhead: Fuel, Auto, Tools & Supplies, Phone & Office, Insurance & Licenses, Fees and Other",
       "Total Overhead",
       "Net Profit (Owner's Draw), before income tax",
     ]) {

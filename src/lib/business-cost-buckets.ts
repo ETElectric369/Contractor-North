@@ -9,9 +9,10 @@
  * as "Fuel" in one door and "Vehicle" in another is the same gas counted in two rows of a report,
  * so every door that files a cost with no job reads THIS list and nothing else.
  *
- * FUEL IS ITS OWN BUCKET, for every company: it is the cost a contractor watches week to week, and
- * Analytics draws it on its own line, in Cost of Goods Sold (COGS), never inside Overhead
- * (BUCKET_SECTION below, 2026-09-28). Auto is everything else the truck
+ * FUEL IS ITS OWN BUCKET, for every company: it is the cost a contractor watches week to week, so
+ * Analytics gives it a line of its own and a bar of its own, and it is never folded in with the
+ * truck's other costs. Which HALF of the profit and loss it sits in is BUCKET_SECTION's answer
+ * below, and since 2026-09-30 that is Overhead, first of them. Auto is everything else the truck
  * costs (parts, repairs, tires, registration, a truck payment). Migration 0362 moved every stored
  * "Gas & Truck" to Auto, and bucketOf reads one still stored (before 0362, or typed by hand) as Auto.
  *

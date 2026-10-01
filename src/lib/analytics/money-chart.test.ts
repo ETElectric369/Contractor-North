@@ -263,7 +263,8 @@ describe("buildMoneyChartData: what this viewer's chart holds", () => {
     for (const [i, mo] of d.months.entries()) {
       const v = mo.values as Record<MoneySeriesKey, number>;
       const c = (n: number) => Math.round(n * 100);
-      expect(c(v.gross), mo.month).toBe(c(v.collected) - c(v.materials) - c(v.lost) - c(v.crewPay) - c(v.mileage) - c(v.fuel));
+      // The COGS bars only: Fuel is Overhead now (2026-09-30), inside the Overhead bar's total.
+      expect(c(v.gross), mo.month).toBe(c(v.collected) - c(v.materials) - c(v.lost) - c(v.crewPay) - c(v.mileage));
       expect(c(v.left), mo.month).toBe(c(v.gross) - c(v.business));
       expect(c(v.left), mo.month).toBe(c(m.months[i].left)); // the engine's own net
     }
@@ -290,7 +291,7 @@ describe("buildMoneyChartData: what this viewer's chart holds", () => {
     expect(parseStoredSeries('["collected","shelf"]', d.series)).toEqual(["collected"]);
   });
 
-  it("FUEL STANDS OUT: its own COGS series in its own colour, beside Overhead and never inside it", () => {
+  it("FUEL STANDS OUT: its own series in its own colour, beside an Overhead bar whose total includes it", () => {
     const m = money([
       row("2026-08", { received: 5000, materialsAndBills: 900, fuel: 312.4, businessCostsTotal: 120, putOnShelf: 80 }),
       row("2026-09", { received: 4000, fuel: 0, businessCostsTotal: 60 }),
@@ -304,12 +305,16 @@ describe("buildMoneyChartData: what this viewer's chart holds", () => {
     expect(fuel.fill).not.toBe(business.fill);
     expect(fuel.swatch).toBe("bg-pink-800"); // the Fuel card's and the bank card's colour
     expect(fuel.defaultOn).toBe(false); // Revenue and Net Profit stay the two default bars
-    expect(d.months[0].values).toMatchObject({ fuel: 312.4, business: 120 });
-    // EVERY CENT ACCOUNTED FOR: Revenue = Net Profit + every cost series, Fuel counted once and
-    // stock bought inside Materials & Bills (it has no bar of its own).
+    // The Fuel bar is the Fuel bucket; the Overhead bar is the WHOLE overhead total, fuel included
+    // (Erik, 2026-09-30: "it could show fuel on its own then a total overhead on the overhead
+    // button"), so reading both at once counts fuel twice, on purpose.
+    expect(d.months[0].values).toMatchObject({ fuel: 312.4, business: 432.4 });
+    expect(d.months[1].values).toMatchObject({ fuel: 0, business: 60 });
+    // EVERY CENT ACCOUNTED FOR: Revenue = Net Profit + the COGS bars + Overhead, with fuel counted
+    // once (inside Overhead) and stock bought inside Materials & Bills (it has no bar of its own).
     for (const mo of d.months) {
       const v = mo.values;
-      const costs = (v.materials ?? 0) + (v.crewPay ?? 0) + (v.mileage ?? 0) + (v.fuel ?? 0) + (v.business ?? 0) + (v.lost ?? 0);
+      const costs = (v.materials ?? 0) + (v.crewPay ?? 0) + (v.mileage ?? 0) + (v.business ?? 0) + (v.lost ?? 0);
       expect(Math.round(((v.left ?? 0) + costs) * 100)).toBe(Math.round((v.collected ?? 0) * 100));
     }
   });

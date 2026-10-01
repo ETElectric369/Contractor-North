@@ -175,8 +175,8 @@ export default async function AnalyticsPage({
 
   // The old "Overhead (all time)" tile and "Overhead by category" block are gone (0286). They
   // counted only no-job bills, all time, in the old category words, and disagreed with Business
-  // Costs. The Owner's Draw card carries them now, for the window, as a profit and loss: Fuel in
-  // Cost of Goods Sold (COGS), every other bucket under Overhead (profit-and-loss.ts).
+  // Costs. The Owner's Draw card carries them now, for the window, as a profit and loss: every
+  // bucket under Overhead, Fuel first (BUCKET_SECTION, profit-and-loss.ts).
 
   const stat = (label: string, value: string, Icon: any, tone: string) => (
     <Card key={label}>
