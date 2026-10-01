@@ -82,6 +82,23 @@ import { isMissingWaitColumn } from "./supplier-papers";
  * a refusal said out loud, never a 204 that a screen reads as success.
  */
 
+/**
+ * THE TWO SCREENS A SUPPLIER-NAME WRITE CHANGES, REFRESHED TOGETHER (cn-v1037).
+ *
+ * The five doors below — Accept And File Them There, Not The Same, Give It Its Own Account, Keep It
+ * On <job>, Undo — moved to /reconcile, and every one of them revalidated "/bills" and nothing else.
+ * Moving the components without this line would have made every button on the new page APPEAR TO DO
+ * NOTHING: the write lands, the page is served from the last render, and nothing on screen moves. A
+ * silent 204 by a different route, which is the one failure this repository has a law against.
+ *
+ * BOTH, NOT ONE. /bills still totals the unfiled pile for the Suppliers card's "$X on N bills with
+ * no supplier account · File It" line, so a spelling filed on Reconcile changes that line too.
+ */
+const revalidateSupplierNames = () => {
+  revalidatePath("/bills");
+  revalidatePath("/reconcile");
+};
+
 /** Cents, so a fraction of a penny can never ride along into a balance. */
 const money = (n: unknown): number => Math.round((Number(n) || 0) * 100) / 100;
 
@@ -600,7 +617,7 @@ export async function fileSpellingAsItsOwnAccount(input: {
     };
   }
 
-  revalidatePath("/bills");
+  revalidateSupplierNames();
   return {
     ok: true,
     accountId: made.accountId,
@@ -863,7 +880,7 @@ export async function acceptSupplierMerge(input: {
     ? ` ${sayList(forgotten.map((f) => `"${f}"`))} didn't save as ${forgotten.length === 1 ? "a name" : "names"}, so ${forgotten.length === 1 ? "a receipt" : "receipts"} that ${forgotten.length === 1 ? "says" : "say"} that will land unfiled again.`
     : "";
 
-  revalidatePath("/bills");
+  revalidateSupplierNames();
   return {
     ok: true,
     message: `${accountName} is one account now, holding ${plural(linked, "bill", "bills")}.${tail}`,
@@ -979,7 +996,7 @@ export async function dismissSupplierMerge(proposalId: string): Promise<Supplier
 
   const detached = takenOff.length ? ` Took ${sayList(takenOff)}.` : "";
 
-  revalidatePath("/bills");
+  revalidateSupplierNames();
   return {
     ok: true,
     message:
@@ -1147,7 +1164,7 @@ export async function resolveDuplicateBill(input: {
   const droppedOn = sayList([...new Set((moved as any[]).map((m) => m.jobs?.name ?? "no job"))]);
   const amount = sayMoney(money((keeper as any).amount));
 
-  revalidatePath("/bills");
+  revalidateSupplierNames();
   if ((keeper as any).job_id) revalidatePath(`/jobs/${(keeper as any).job_id}`);
   for (const m of moved as any[]) if (m.job_id) revalidatePath(`/jobs/${m.job_id}`);
 
@@ -1183,7 +1200,7 @@ export async function unresolveDuplicateBill(groupId: string): Promise<SupplierA
   if (error) return { ok: false, error: `That didn't go back. ${dbError(error)}` };
   if (!data?.length) return { ok: false, error: "That pair is already back the way it was. Reload the page." };
 
-  revalidatePath("/bills");
+  revalidateSupplierNames();
   for (const row of data as any[]) if (row.job_id) revalidatePath(`/jobs/${row.job_id}`);
   return { ok: true, message: "Put back. Both copies count again, the way they did before." };
 }

@@ -4,24 +4,23 @@ import { claimedIdsOfLines } from "@/lib/unbilled-work";
 import { getOrgSettings } from "@/lib/org-settings";
 import { featureOn } from "@/lib/features";
 import { todayStrInTz } from "@/lib/tz";
-import {
-  aliasKey,
-  findDuplicateBills,
-  readBillInvoice,
-  resolveSupplierAccount,
-  suggestSupplierGroups,
-  type BillFingerprint,
-} from "@/lib/supplier-identity";
+import { readBillInvoice } from "@/lib/supplier-identity";
 import { Card } from "@/components/ui/card";
 import { BillsReceipts } from "./bills-receipts";
 import { AddByHandButton } from "./add-business-cost";
-import { bucketOf, namesABucket } from "@/lib/business-cost-buckets";
+import { bucketOf } from "@/lib/business-cost-buckets";
 import { isShelfTicket } from "@/lib/shelf-plan";
 import { jobPickLabel } from "@/lib/job-pick-label";
 import type { ReceiptForBilling } from "./receipt-billing-card";
-import { SupplierCandidateReview, SupplierMergeReview, SupplierUnfiledSpellings } from "./supplier-merge-review";
-import { SupplierDuplicates } from "./supplier-duplicates";
-import { Fold, WhyFold } from "@/components/why-fold";
+// THE PILES, FROM THE ONE MODULE BOTH PAGES READ. The doors that answer them are on /reconcile;
+// this page keeps the two readings it still has a sentence for (the Suppliers card's File It line,
+// and the Needs You pointer at a ticket filed twice).
+import {
+  duplicateTicketGroups,
+  isOpenDuplicateGroup,
+  unassignedTotals,
+  unfiledSpellings,
+} from "./supplier-name-work";
 import { FoldOpener } from "@/components/fold-opener";
 import {
   creditWait,
@@ -51,7 +50,6 @@ import {
 import { readAlreadyBilledReach, type AlreadyBilledReach } from "@/lib/already-billed-read";
 import { billAlreadyBilledDoors } from "@/lib/already-billed";
 import { reportError } from "@/lib/observe";
-import { CedPdfPicker } from "./ced-pdf-picker";
 import { BooksBeginLine } from "./books-begin-line";
 import { NeedsYou, PaperworkDropZone } from "./bills-drop";
 import { SnapOrNoteButton } from "@/components/snap-or-note";
@@ -65,15 +63,10 @@ import { loadBooks, loadMarkContext, matchesOnBooks, PAPER_JOB_STATUSES, rematch
 import { signDocumentUrls } from "@/lib/signed-docs";
 import { billOfTie, billPapers, type PaperTie } from "@/lib/job-photos";
 import {
-  candidateMoving,
   isOnAccountBill,
   supplierBalance,
-  supplierCandidateQuestions,
-  type DuplicateBillGroup,
   type SupplierAccountRow,
   type SupplierBillRow,
-  type SupplierMergeProposal,
-  type SupplierSpelling,
 } from "./supplier-balance";
 import {
   billSettledLabel,
@@ -84,13 +77,8 @@ import {
 } from "@/lib/supplier-owed";
 import { SuppliersCard } from "./suppliers-card";
 import {
-  acceptSupplierMerge,
-  dismissSupplierMerge,
-  fileSpellingAsItsOwnAccount,
   recordSupplierPayment,
-  resolveDuplicateBill,
   setSupplierOnAccount,
-  unresolveDuplicateBill,
   voidSupplierPayment,
   setSupplierInvoiceJob,
   recordSupplierInvoiceAsBill,
@@ -554,10 +542,9 @@ export default async function BillsPage({
   // THE ARITHMETIC IS NOT DONE HERE. supplierBalance() is a pure function with a test around it and
   // the card calls it on the rows this page hands over. A second copy of a money rule on a page is
   // how two screens end up disagreeing about the same dollar (the 24%-vs-82% budget bug, audit
-  // v800), so this file's whole job is to hand over rows, spelled and totalled once.
-  // THE IMPORT, not a fourth copy (8a982483). `aliasKey` is what `supplier_aliases` is unique on,
+  // v800), so this file's whole job is to hand over rows, spelled and totalled once. The spelling
+  // key itself is `aliasKey`, inside supplier-name-work.ts — what `supplier_aliases` is unique on,
   // what a press actually moves bills by, and what the resolver groups a paper on no account under.
-  const spellingKey = (raw: unknown) => aliasKey(String(raw ?? ""));
 
   const supplierPayments = ((paymentRows ?? []) as any[]).map((r) => ({
     id: String(r.id),
@@ -903,266 +890,37 @@ export default async function BillsPage({
           recordsSince,
         };
 
-  // ── THE SPELLINGS NOBODY HAS FILED YET ──────────────────────────────────────────────────────
+  // ── THE SPELLINGS NOBODY HAS FILED YET, AND THE TICKETS FILED TWICE ─────────────────────────
   //
-  // Sixteen distinct supplier strings for about nine real vendors, because the receipt reader
-  // writes `bills.supplier` afresh on every scan. CED alone is five of them, holding $12,572.20
-  // between them. They are grouped by the EXACT spelling, lowercased - the same key
-  // supplier_aliases is unique on and the same key resolveSupplierAccount matches - so what he
-  // reads in a row is exactly what that row's button will move. No more, no less.
-  type UnfiledSpelling = { alias: string; bills: number; total: number; unpaid: number; unpaidBills: number };
-  const unfiled = new Map<string, UnfiledSpelling>();
-  for (const b of liveBills) {
+  // THE DOORS THAT ANSWER THESE LIVE ON /reconcile NOW (cn-v1037). This page kept the two readings
+  // it still needs its own sentence for: the Suppliers card's "$X on N bills with no supplier
+  // account · File It" line, which is the unfiled pile totalled, and the Needs You pointer at a
+  // ticket filed to two jobs. Both come out of the ONE module both pages read
+  // (supplier-name-work.ts) — extracted, never copied, because two pages grouping the same
+  // spellings their own way is the fault 8a982483 was.
+  const unfiled = unfiledSpellings({
+    bills: liveBills,
     // ON NO ACCOUNT AS THE RESOLVER READS IT, not as the column reads it: a paper spelled with the
-    // account's own name is ON that account now, and offering to file it a second time would be a
-    // door to nothing.
-    if (accountOfBill(String(b.id))) continue;
-    const alias = String(b.supplier ?? "").trim();
-    // A bill with no supplier name at all is not a SPELLING to file - there is nothing to type on
-    // a button. It is still money, and it is counted and named by `whatISupplierOwed` under "No
-    // Supplier Name On The Paper"; this list is the one about names.
-    if (!alias) continue;
-    // Nor is a business cost saved with no Where: Add By Hand puts the bucket's own name in
-    // the supplier field ("Fuel"), and offering to give "Fuel" its own supplier account would be a
-    // door to nothing (nor "Gas & Truck", the name Auto had before 0362). Only a settled one,
-    // though: anything still owed stays in the count, so no unpaid dollar drops out of the amber line.
-    if (!b.job_id && namesABucket(alias) && !isOnAccountBill({ status: String(b.status ?? "") })) continue;
-    const key = spellingKey(alias);
-    const g = unfiled.get(key) ?? { alias, bills: 0, total: 0, unpaid: 0, unpaidBills: 0 };
-    const amount = Number(b.amount) || 0;
-    g.bills += 1;
-    g.total = Math.round((g.total + amount) * 100) / 100;
-    if (isOnAccountBill({ status: String(b.status ?? ""), settledBySupplier: settledBySupplierIds.has(String(b.id)) })) {
-      g.unpaid = Math.round((g.unpaid + amount) * 100) / 100;
-      g.unpaidBills += 1;
-    }
-    unfiled.set(key, g);
-  }
+    // account's own name is ON that account now.
+    accountOf: accountOfBill,
+    settledBySupplier: settledBySupplierIds,
+  });
 
   // Every dollar on this page is accounted for somewhere. Until a spelling is on an account its
-  // money belongs to no balance on the card, and the Unpaid tab further down is still counting it
-  // - saying that out loud is the only thing that keeps the two halves of one screen from arguing.
-  //
-  // BOTH FIGURES ARE ABOUT THE SAME BILLS. The card reads this as "$X across N bills is not on a
-  // supplier account yet, so it is not in the total above", and the total above is what he OWES -
-  // so a count that quietly included receipts he already paid at the register would make one
-  // sentence out of two different piles.
-  const unassigned = {
-    bills: [...unfiled.values()].reduce((n, g) => n + g.unpaidBills, 0),
-    total: Math.round([...unfiled.values()].reduce((s, g) => s + g.unpaid, 0) * 100) / 100,
-  };
-
-  // ── WHICH SPELLINGS LOOK LIKE ONE ACCOUNT ───────────────────────────────────────────────────
-  //
-  // Suggestions, and only suggestions: nothing is merged, renamed or re-filed until he presses
-  // something. The names of the accounts he already has go into the same read, so a CED receipt
-  // scanned next Tuesday is offered to the CED account instead of proposing a second one.
-  //
-  // A LONE SPELLING WITH NO RELATIVE IS NOT PROPOSED, and that part was always right: on a proposal
-  // card, Accept would make it an account of its own and so would "Not The Same", which sets it
-  // aside as a supplier of its own. Two buttons doing one thing is worse than no button.
-  //
-  // WHAT WAS WRONG WAS THE CONCLUSION (review of cn-v963). Those spellings were then dropped
-  // entirely - five of his sixteen, their money counted in the amber line at the top of the card
-  // and named nowhere, with nothing to press. A suggestion that cannot be made is not a reason to
-  // say nothing; it is a reason to stop suggesting and just offer the door. So they fall through
-  // to `loose` further down, which gives each one a row of its own and one button that makes it a
-  // supplier in its own right.
-  const accountKeyToId = new Map<string, string>();
-  for (const a of supplierAccounts) {
-    accountKeyToId.set(spellingKey(a.name), a.id);
-    for (const al of a.aliases) accountKeyToId.set(spellingKey(al.alias), a.id);
-  }
-  const identity = suggestSupplierGroups([
-    ...[...unfiled.values()].map((g) => g.alias),
-    ...supplierAccounts.flatMap((a) => [a.name, ...a.aliases.map((x) => x.alias)]),
-  ]);
-
-  const proposals: SupplierMergeProposal[] = [];
-  for (const group of identity.groups) {
-    const members = group.members.map((m) => ({ m, key: spellingKey(m) }));
-    const mine = members.filter((x) => unfiled.has(x.key));
-    if (!mine.length) continue; // nothing left to file: this group is already an account
-    // A group can touch more than one account he already has (two accounts whose names look
-    // alike). Joining two existing accounts is a question this wave has no door for, so the row
-    // offers the one it can answer - and it picks by NAME, not by whatever order the matcher
-    // happened to return, so the same pile proposes the same thing every time he loads the page.
-    const existing =
-      members
-        .map((x) => accountKeyToId.get(x.key))
-        .filter((id): id is string => !!id)
-        .map((id) => supplierAccounts.find((a) => a.id === id))
-        .filter((a): a is SupplierAccountRow => !!a)
-        .sort((a, b) => a.name.localeCompare(b.name))[0] ?? null;
-    if (mine.length < 2 && !existing) continue; // see above: both buttons would do the same thing
-    const spellings: SupplierSpelling[] = mine.map((x) => {
-      const g = unfiled.get(x.key) as UnfiledSpelling;
-      return { alias: g.alias, bills: g.bills, total: g.total, unpaid: g.unpaid };
-    });
-    proposals.push({
-      // THE ID IS THE SPELLINGS, as JSON. "Not The Same" hands the server nothing but this one
-      // string, so the string has to carry what it is about - and JSON rather than a separator
-      // because a supplier name is free text a scanner wrote and will eventually contain whatever
-      // character we picked. The action re-checks every spelling against his own unfiled bills
-      // before it writes anything, so a made-up id buys nobody anything.
-      id: `merge:${JSON.stringify(spellings.map((s) => s.alias))}`,
-      suggestedName: existing?.name ?? group.suggestedName,
-      accountNumber: existing?.accountNumber ?? null,
-      branchCode: existing?.branchCode ?? null,
-      spellings,
-      existingAccountId: existing?.id ?? null,
-      existingAccountName: existing?.name ?? null,
-      because: group.reasons[0] ?? null,
-    });
-  }
-
-  // A spelling that already IS a saved name for an account, whose bills were never filed onto it.
-  // That happens every time a receipt is scanned after the account was made, which makes it the
-  // most ordinary case there is - so it gets its own one-press row instead of waiting for the
-  // fuzzy matcher to have an opinion about it.
-  const proposedKeys = new Set(proposals.flatMap((p) => p.spellings.map((s) => spellingKey(s.alias))));
-  for (const [key, g] of unfiled) {
-    if (proposedKeys.has(key)) continue;
-    const accountId = resolveSupplierAccount(g.alias, (aliasRows ?? []) as any[]);
-    const account = accountId ? supplierAccounts.find((a) => a.id === accountId) ?? null : null;
-    if (!account) continue;
-    proposals.push({
-      id: `merge:${JSON.stringify([g.alias])}`,
-      suggestedName: account.name,
-      accountNumber: account.accountNumber,
-      branchCode: account.branchCode,
-      spellings: [{ alias: g.alias, bills: g.bills, total: g.total, unpaid: g.unpaid }],
-      existingAccountId: account.id,
-      existingAccountName: account.name,
-      because: `"${g.alias}" is already saved as a name for ${account.name}. These bills were scanned after that and never landed on it.`,
-    });
-  }
-
-  // ── THE ONE QUESTION ONLY HE CAN ANSWER ─────────────────────────────────────────────────────
-  //
-  // `suggestSupplierGroups` returns `{ groups, candidates }`. This page bound the whole thing to
-  // `identity` and then iterated `identity.groups` and nothing else, so every candidate it worked
-  // out was computed and thrown away (review of cn-v963). On his book that discarded exactly one
-  // question, and it is the single judgement call in this entire feature: "Contractors Electrical
-  // Distributors" ($467.87) against his four "Consolidated Electrical ..." spellings. Both come out
-  // as the initials CED, they share two of their three words, and the first word differs. The
-  // matcher already words it correctly. It just had nowhere to say it.
-  //
-  // IT IS NOT RENDERED AS A PROPOSAL. A proposal says "these are the same, press Accept"; this says
-  // "I cannot tell", and carries both doors.
-  //
-  // BOTH DOORS ONLY EVER TOUCH THE LOOSE SIDES - the spellings still sitting on no account at all.
-  // "Keep them separate" is dismissSupplierMerge, which gives every spelling it is handed an
-  // account of its own; hand it a spelling that is currently an alias of CED Truckee and it would
-  // tear that spelling straight off the account he built tonight. A side that IS an account gets
-  // named and has its balance shown, and is not moved by anything on that row.
-  //
-  // AND THAT IS ALSO WHY THE DISMISSAL STICKS. Nothing anywhere stores "he said no": what makes a
-  // dismissal stick is that it becomes TRUE - the bills land on an account of their own, so the
-  // spelling leaves the unfiled pile. The matcher still sees both names next time, because it is
-  // fed account names too, and the question would come straight back were it not for the rule
-  // above: no loose side, no question. The same rule the proposals use, for the same reason.
-  //
-  // THE RULE ITSELF IS PURE AND LIVES IN supplier-balance.ts WITH A TEST AROUND IT, because the
-  // part that matters is not the loop, it is which side a press is allowed to touch - and a money
-  // rule with a second copy on a page is how two screens end up disagreeing about one dollar.
-  const questions = supplierCandidateQuestions(identity.candidates, {
-    unfiled,
-    accounts: new Map(
-      [...accountKeyToId].flatMap(([key, id]) => {
-        const account = supplierAccounts.find((a) => a.id === id);
-        if (!account) return [];
-        return [[key, { id: account.id, name: account.name, owed: supplierBalance(account, today).owed }] as const];
-      }),
-    ),
-  });
-
-  // ── EVERY OTHER SPELLING, WITH THE DOOR IT NEVER HAD ────────────────────────────────────────
-  //
-  // Whatever is left: a name off a receipt that is in no proposal and no question, which on his
-  // book is Home Depot, Goodwin's, Tahoe City Lumber and the rest of the counters he pays at the
-  // till. Until tonight those were counted in the amber line at the top of the card and offered
-  // nothing at all.
-  //
-  // A SPELLING THAT ALREADY HAS A DOOR DOES NOT GET A SECOND ONE. If it sits in a proposal or is
-  // the loose side of a question, it gets no row here: "Keep Them Separate" up there and "Give It
-  // Its Own Account" down here are the same write wearing two sentences, and two buttons doing one
-  // thing is the very trap the proposals avoid by not offering "Not The Same" on a group of one.
-  // (A spelling can be in a proposal AND in a question - "are these four one account?" and "is
-  // that fifth one theirs too?" are two different questions - and that is fine, because those two
-  // rows offer genuinely different outcomes.)
-  const spokenFor = new Set([
-    ...proposals.flatMap((p) => p.spellings.map((s) => spellingKey(s.alias))),
-    ...questions.flatMap((q) => candidateMoving(q).map((s) => spellingKey(s.spelling))),
-  ]);
-  const loose: SupplierSpelling[] = [...unfiled.values()]
-    .filter((g) => !spokenFor.has(spellingKey(g.alias)))
-    .map((g) => ({ alias: g.alias, bills: g.bills, total: g.total, unpaid: g.unpaid }))
-    // Biggest money first: what he still owes, then what it cost him, then by name so the list
-    // does not shuffle itself between loads.
-    .sort((x, y) => y.unpaid - x.unpaid || y.total - x.total || x.alias.localeCompare(y.alias));
+  // money belongs to no balance on the card, and the All Bills list further down is still counting
+  // it - saying that out loud is the only thing that keeps the two halves of one screen from
+  // arguing.
+  const unassigned = unassignedTotals(unfiled);
 
   // ── THE SAME TICKET, FILED TO TWO JOBS ──────────────────────────────────────────────────────
+  // Two receipts that match line for line to the penny mean one of those jobs is carrying a cost
+  // that is not its own. WHICH COPY IS THE REAL ONE IS ERIK'S KNOWLEDGE - he was on those jobs - so
+  // the pick is made on /reconcile. This page only POINTS at it, from Needs You, which is where he
+  // already looks for a decision.
   //
-  // An identical CED ticket - $95.27, eight lines, line for line to the penny - is filed to BOTH
-  // "13631 Northwoods" (07-29, from the portal PDF) and "85 Whitney Place" (08-28, from a file he
-  // saved as "85 Whit.pdf"). One of those jobs is carrying a cost that is not its own, and its
-  // profit is wrong by exactly that much. WHICH COPY IS THE REAL ONE IS ERIK'S KNOWLEDGE: he was
-  // on those jobs. The page only asks.
-  //
-  // Built from whatever matched, never hard-coded to that one bill - and offered only when the
-  // database actually has 0271's `superseded_by_bill_id`, which is where the answer gets written.
-  // Without that column the picker could only refuse, and a control that can only refuse must not
-  // render at all.
-  const supersedeReady = (billsWithLines as any[]).every((b) => "superseded_by_bill_id" in b);
-  const billById = new Map((billsWithLines as any[]).map((b) => [String(b.id), b]));
-  const fingerprints: BillFingerprint[] = (billsWithLines as any[]).map((b) => {
-    const reading = readBillInvoice({
-      notes: b.notes ?? null,
-      lineDescriptions: (b.line_items ?? []).map((l: any) => l.description),
-    });
-    return {
-      id: String(b.id),
-      supplier: String(b.supplier ?? ""),
-      amount: Number(b.amount) || 0,
-      billDate: b.bill_date ?? null,
-      jobLabel: b.jobs?.name ?? null,
-      lineCount: (b.line_items ?? []).length,
-      invoiceNumber: b.supplier_invoice_number ?? reading.invoiceNumber,
-    };
-  });
-  const duplicates: DuplicateBillGroup[] = supersedeReady
-    ? findDuplicateBills(fingerprints).map((d) => {
-        const ids = d.bills.map((b) => String(b.id));
-        const copies = ids.map((id) => {
-          const row = billById.get(id);
-          return {
-            billId: id,
-            jobId: row?.job_id ?? null,
-            jobName: row?.jobs?.name ?? null,
-            billDate: row?.bill_date ?? null,
-            supplier: String(row?.supplier ?? ""),
-            // Where it came from, in the importer's own words: the CED portal filename, or
-            // "85 Whit.pdf". On two tickets identical to the penny it is the one thing that tells
-            // them apart on sight.
-            source: String(row?.notes ?? "").split(/\r?\n/)[0] || null,
-          };
-        });
-        // Already sorted out? The copy he set aside points at the copy he kept.
-        const supersededCopy = copies.find((c) => billById.get(c.billId)?.superseded_by_bill_id);
-        const keptBillId = supersededCopy
-          ? String(billById.get(supersededCopy.billId)?.superseded_by_bill_id ?? "")
-          : "";
-        return {
-          // BOTH BILL IDS RIDE IN THE ID, because Undo is handed nothing else.
-          id: `dup:${JSON.stringify([...ids].sort())}`,
-          amount: d.amount,
-          lineCount: Number(d.bills[0]?.lineCount ?? 0),
-          copies,
-          resolution: keptBillId && ids.includes(keptBillId) ? { keptBillId } : null,
-        };
-      })
-    : [];
+  // The superseded rows ride along on purpose: a group reads as answered because the copy he set
+  // aside points at the copy he kept.
+  const { groups: duplicates } = duplicateTicketGroups({ bills: billsWithLines as any[] });
 
   // ── FIND ANY PAPER (Bills plan, Wave A) ─────────────────────────────────────────────────────
   // Over what this page has ALREADY read: the supplier's documents, the bills, and the receipt
@@ -1349,8 +1107,7 @@ export default async function BillsPage({
       : {};
 
   // What is waiting under More, counted so its one line says so (nothing silent behind a fold).
-  const openDuplicates = duplicates.filter((g) => !g.resolution);
-  const moreWaiting = proposals.length + questions.length + openDuplicates.length;
+  const openDuplicates = duplicates.filter(isOpenDuplicateGroup);
   const needsYouIds = (paperFeed?.cards ?? []).map((c) => c.invoiceId);
   // WAITING ON A CREDIT (0346): off Needs You, folded under its supplier, and pointed at from
   // Needs You so a card he set aside never just vanishes. One line per supplier account.
@@ -1373,7 +1130,6 @@ export default async function BillsPage({
   // just turned the switch on, with nothing yet, found no New PO and no word about orders).
   const poOn = featureOn(switches.features, "purchase_orders");
   const showAllBills = !!billsErr || poOn || (billsWithLines as any[]).length > 0 || (pos ?? []).length > 0 || looseDocs.length > 0;
-  const showMore = moreWaiting > 0 || proposals.length + questions.length + loose.length > 0 || duplicates.length > 0 || supplierDocuments.length > 0 || liveBills.length > 0;
   // Needs You's empty line: every paper since the books began is in them, unless some wait on a credit.
   // ONLY WHEN IT WAS ALL READ (audit v1018, class 2): with the supplier half unread (its alert is in the
   // card) or the waiting papers unread, "every paper is in your books" would be a false all-clear right
@@ -1453,10 +1209,11 @@ export default async function BillsPage({
           }
         />
         {/* The same ticket on two jobs is money on the wrong job: it is a decision, so it is pointed at
-            from here, and answered on its card under More. */}
+            from here, and answered on Reconcile, where the picking happens. A LINK, not a second copy
+            of the control — that is the difference nav doctrine draws. */}
         {openDuplicates.length > 0 && (
           <a
-            href="#same-ticket-two-jobs"
+            href="/reconcile#same-ticket-two-jobs"
             className="mb-6 flex min-h-11 items-center justify-between gap-3 rounded-lg bg-amber-50 px-4 py-2.5 text-sm text-amber-900 hover:bg-amber-100"
           >
             <span className="min-w-0">
@@ -1545,68 +1302,23 @@ export default async function BillsPage({
         )}
       </BillsSearchProvider>
 
-      {/* MORE: the once-a-month import, and supplier-name housekeeping. Folded, and its one line
-          says how many things in it are waiting, so nothing waits silently behind the fold. */}
-      {showMore && (
-        <Card className="mb-6 px-4 py-1">
-          <Fold
-            id="more"
-            summary={
-              <span className="text-base font-semibold text-slate-900">
-                More
-                {moreWaiting > 0 ? (
-                  <span className="font-normal text-amber-800"> · {moreWaiting} To Look At</span>
-                ) : (
-                  <span className="font-normal text-slate-500"> · Imports And Supplier Names</span>
-                )}
-              </span>
-            }
-          >
-            {/* ── THE SUPPLIER'S OWN INVOICES: ONE LINE (W1-30) ───────────────────────────────────
-                They come in through Snap Or Note like every other paper: a portal PDF is read from
-                its own text in the browser and waits as one card (Add To Supplier Documents keeps
-                the PDF for Open Bill); pasted invoice text in the note box is imported. Choose
-                Supplier PDFs stays one more release: three sentences outside this lane still name it. */}
-            <div className="mb-4 scroll-mt-20 space-y-2" id="ced-import">
-              <h3 className="text-sm font-semibold text-slate-900">Import Supplier Invoices</h3>
-              <p className="text-sm text-slate-600">Supplier PDFs, statements and open lists go in through Snap Or Note.</p>
-              <WhyFold>
-                <p>
-                  Choose the PDFs from your supplier&apos;s payment portal in Snap Or Note, as many as you like, or paste an
-                  invoice&apos;s text into its note box. Each is checked against its own arithmetic before it is saved; anything
-                  that does not add up is named and left out. Loading the same download twice changes nothing, and the job
-                  you filed a document on is never touched.
-                </p>
-                <p>
-                  A statement, or the portal&apos;s open list (PDF, Excel, CSV or pasted), waits under Needs You as one card
-                  saying which papers it marks paid and which are new; nothing changes until you press Apply, and Undo puts
-                  it all back.
-                </p>
-              </WhyFold>
-              <CedPdfPicker orgId={orgId} />
-            </div>
+      {/* ── WHERE THE "MORE" FOLD WENT ────────────────────────────────────────────────────────────
+          The fold that used to sit here held the import door and all the supplier-name housekeeping,
+          collapsed, at the bottom of the page that answers "what came in and what do I owe". It was
+          a confession: that work is not this page's. It is /reconcile now, and this is ONE LINK to it
+          — a link is not duplication; a second copy of a control is.
 
-            {/* SUPPLIER-NAME HOUSEKEEPING, in the order of how sure the app is: what it thinks, what
-                it cannot tell, what it has no opinion about. */}
-            <div id="supplier-names" className="scroll-mt-20">
-              <SupplierMergeReview proposals={proposals} actions={{ acceptMerge: acceptSupplierMerge, dismissMerge: dismissSupplierMerge }} />
-              <SupplierCandidateReview questions={questions} actions={{ acceptMerge: acceptSupplierMerge, dismissMerge: dismissSupplierMerge }} />
-              <SupplierUnfiledSpellings
-                spellings={loose}
-                canSetOnAccount={!accountsErr}
-                actions={{ fileAsItsOwnAccount: fileSpellingAsItsOwnAccount }}
-              />
-              {proposals.length + questions.length + loose.length === 0 && (
-                <p className="mb-4 text-sm text-slate-400">Every supplier name off your receipts is on an account.</p>
-              )}
-            </div>
-
-            <SupplierDuplicates
-              groups={duplicates}
-              actions={{ resolveDuplicate: resolveDuplicateBill, unresolveDuplicate: unresolveDuplicateBill }}
-            />
-          </Fold>
-        </Card>
+          It is drawn only once the book has something in it, so a new company's Bills page is still
+          the header and nothing else. */}
+      {liveBills.length > 0 && (
+        <a
+          id="reconcile-link"
+          href="/reconcile"
+          className="mb-6 flex min-h-11 items-center justify-between gap-3 rounded-lg bg-white px-4 py-2.5 text-sm text-slate-700 shadow-sm hover:bg-slate-50"
+        >
+          <span className="min-w-0">Supplier names, and tickets filed twice, are sorted out on Reconcile.</span>
+          <span className="shrink-0 font-medium text-brand">Open Reconcile</span>
+        </a>
       )}
     </PaperworkDropZone>
   );

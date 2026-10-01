@@ -203,6 +203,49 @@ describe("the still-owed rule is written in exactly one place", () => {
   });
 
   /**
+   * ── /reconcile MAY NOT WORK OUT A SUPPLIER FIGURE ITSELF (cn-v1037) ──────────────────────────
+   *
+   * Reconcile's whole job is to draw two records against each other, which makes it the FOURTH door
+   * to the one supplier figure (supplier-owed-parity.test.ts: "one book, three doors, one figure").
+   * The only safe fourth door is one that calls the same read: `readSupplierOwed`. A page that built
+   * its own model-B arm to show "what they say" beside "what we bought" would be 8a982483 with a new
+   * file name — and it would be the MOST convincing wrong screen in the app, because two numbers
+   * drawn against each other read as having been checked against each other.
+   *
+   * This lives here, beside its siblings, rather than in a second scanner that could disagree with
+   * this one about what a line of code is.
+   */
+  it("/reconcile calls the one read and never a figure function of its own", () => {
+    const dir = join(ROOT, "src/app/(app)/reconcile");
+    const banned = ["whatISupplierOwed(", "whatIBoughtNotSettled(", "supplierBalance(", "supplierCoverage(", "supplierSaysBalance("];
+    const hits: string[] = [];
+    for (const f of files(dir)) {
+      const rel = relative(ROOT, f);
+      // Its own tests may name a figure function to prove the read hands one back.
+      if (/\.test\.tsx?$/.test(rel)) continue;
+      const lines = code(readFileSync(f, "utf8")).split("\n");
+      for (let i = 0; i < lines.length; i += 1) {
+        for (const b of banned) if (lines[i].includes(b)) hits.push(`${rel}:${i + 1}: ${lines[i].trim().slice(0, 140)}`);
+      }
+    }
+    expect(hits).toEqual([]);
+    // And it really does go through the one read, per account as well as in total.
+    const page = readFileSync(join(dir, "page.tsx"), "utf8");
+    expect(page).toContain("readSupplierOwed(supabase, orgId)");
+    expect(page).toContain("owed?.boughtByAccount[l.accountId]");
+    expect(page).toContain('l.how === "their-own-papers"');
+    // THE GAP SECTION IS HANDED NUMBERS, NEVER ROWS. It subtracts two figures and adds up the
+    // DIFFERENCES — "how far apart" is this page's own reading and no function in supplier-owed.ts
+    // produces it — but it must never touch a bill, a payment or a paper, because that is the step
+    // where a screen starts totalling a supplier's money a second way.
+    const gap = readFileSync(join(dir, "supplier-gap.tsx"), "utf8");
+    for (const row of ["bill_line_items", "supplier_account_id", ".status", "isStillOwed", "isOnAccountBill", "settledBySupplier"]) {
+      expect(gap, row).not.toContain(row);
+    }
+    expect(gap).not.toMatch(/\bfrom "@\/lib\/supplier-owed"/);
+  });
+
+  /**
    * AND THE COSTS TAB MAY NOT DRAW A BILL ROW WITHOUT THE SUPPLIER'S VERDICT. The component was
    * taught `billSettledLabel` and the job page never passed the fact, so the badge could not fire
    * there however right the expression was. A grep cannot see an unpassed prop; this checks the one
