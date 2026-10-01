@@ -1,4 +1,7 @@
 import { invoiceBalance } from "@/lib/invoice-math";
+// THE open rules, one per kind of record (lib/open-counts). The A/R aging's rows and its count both
+// read isOwedInvoice, so the number over the card is the number of rows in it (M3).
+import { isOwedInvoice } from "@/lib/open-counts";
 import { getOrgSettings } from "@/lib/org-settings";
 import { todayStrInTz, tzDayStartUtc } from "@/lib/tz";
 
@@ -39,6 +42,11 @@ export type ArBuckets = { current: number; d30: number; d60: number; d90: number
 export type ArInvoice = { id?: string | null; customer_id?: string | null; invoice_number: string | null; customer: string | null; balance: number; total: number; amountPaid: number; daysLate: number; bucket: keyof ArBuckets };
 export type ArAging = { buckets: ArBuckets; outstanding: number; openCount: number; invoices: ArInvoice[] };
 
+/**
+ * The statuses the fetch wrapper leaves out of its QUERY (getArAging below), so a long history can't
+ * push the open invoices past PostgREST's row cap. It must stay a SUBSET of what isOwedInvoice drops:
+ * the rule decides what is owed, this only saves rows no rule could ever keep.
+ */
 const OPEN_EXCLUDED = ["paid", "void", "draft"];
 /** THE lateness buckets (not late, 1-30, 31-60, over 60 days late): this aging and the Invoices
  *  page's Owed To You bar (billing-pipeline's owedByLateness) cut the same days the same way. */
@@ -53,12 +61,20 @@ export const arBucketOf = (days: number): keyof ArBuckets => (days <= 0 ? "curre
  * /analytics called a dateless sent invoice "1–30 days late" while /billing's Overdue tile said $0.
  */
 export function computeArAging(invoices: any[], todayYmd: string): ArAging {
-  const open = (invoices ?? []).filter((i) => !OPEN_EXCLUDED.includes(i.status));
+  /**
+   * THE COUNT AND THE LIST READ THE SAME FUNCTION (M3, the badge law).
+   *
+   * This used to filter on the status words, then drop the zero-balance ones INSIDE the loop and
+   * still report `openCount` from the bigger set. So a sent bill paid in full whose status lagged
+   * was counted and not listed: "5 open invoices" over four rows, and Nort's ar_aging answered
+   * open_invoices 5 beside four most_overdue. Erik's law is that a count shows only what's OPEN —
+   * one rule (isOwedInvoice), used for the rows, and the count is how many rows there are.
+   */
+  const open = (invoices ?? []).filter(isOwedInvoice);
   const buckets: ArBuckets = { current: 0, d30: 0, d60: 0, d90: 0 };
   const rows: ArInvoice[] = [];
   for (const i of open) {
     const balance = invoiceBalance(i.total, i.amount_paid);
-    if (balance <= 0) continue;
     const dueYmd = ymdOf(i.due_date);
     const daysLate = dueYmd ? Math.max(0, daysBetweenYmd(dueYmd, todayYmd)) : 0;
     const bucket = arBucketOf(daysLate);
@@ -70,7 +86,7 @@ export function computeArAging(invoices: any[], todayYmd: string): ArAging {
   return {
     buckets: { current: round2(buckets.current), d30: round2(buckets.d30), d60: round2(buckets.d60), d90: round2(buckets.d90) },
     outstanding: round2(outstanding),
-    openCount: open.length,
+    openCount: rows.length,
     invoices: rows,
   };
 }
