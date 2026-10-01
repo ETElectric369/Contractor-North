@@ -427,11 +427,12 @@ function SnapCostButton({
       if (!fb.ok) return setError(res.error ?? "Couldn't read the receipt.");
       setSameAsDoc(null);
       setSavedBillId(fb.id ?? null);
-      setWarn(
-        typedAmount > 0
-          ? `${nortOn ? "Nort couldn't" : "Couldn't"} read it (${res.error ?? "unreadable"}) — saved your typed ${formatCurrency(typedAmount)} instead, receipt attached.`
-          : `Couldn't read a total (${res.error ?? "unreadable"}) — saved as $0. Open the bill to enter the amount.`,
-      );
+      // The paper is filed on the job (docId is real) whether or not its link to the bill landed,
+      // so it is cleared from the form: the next tap is Done, never a second upload of the same file.
+      setReceipt(null);
+      // createBill says in words when the receipt link did NOT land (fb.warning): that sentence
+      // takes the place of the attached-receipt words, which would assert the tie that just failed.
+      setWarn(readerFallbackLine({ typedAmount, readerError: res.error, nortOn, linkWarning: fb.warning }));
       setCostSaved(true);
       return;
     }
@@ -544,6 +545,9 @@ function SnapCostButton({
         setWarn(`Cost saved ✓ — but the receipt ${attachClause()}. ${RETRY_HERE_LINE}`);
         return;
       }
+      // The cost is in but its receipt link didn't land (createBill says so, never silently): a
+      // sentence that has to be read, so it stays until tapped.
+      if (res.warning) toast(res.warning, "error", undefined, { sticky: true });
       finishOk();
     });
   }
@@ -783,6 +787,22 @@ export const JOBS_UNREAD_LINE = "Couldn't load your jobs just now. Reload the pa
 
 /** The quiet line under a typed stock purchase: the paper's own door, for a ticket in hand. */
 export const STOCK_HAVE_THE_TICKET = "Have the ticket? Snap Or Note reads every line.";
+
+/**
+ * THE READER FAILED, SO THE TYPED FIGURE (OR $0) WAS SAVED AS THE BILL WITH THE PAPER ON IT. The
+ * sentence says "receipt attached" only when createBill did not say otherwise: when the link to the
+ * bill failed to land, createBill's own warning (tie it on the Costs tab, never Record As Cost) is
+ * the sentence, because a "receipt attached" there would claim the tie that just failed.
+ */
+export function readerFallbackLine(f: { typedAmount: number; readerError?: string | null; nortOn?: boolean; linkWarning?: string | null }): string {
+  const why = f.readerError ?? "unreadable";
+  const saved =
+    f.typedAmount > 0
+      ? `${f.nortOn ? "Nort couldn't" : "Couldn't"} read it (${why}) — saved your typed ${formatCurrency(f.typedAmount)} instead`
+      : `Couldn't read a total (${why}) — saved as $0. Open the bill to enter the amount.`;
+  if (f.linkWarning) return `${saved}${f.typedAmount > 0 ? "." : ""} ${f.linkWarning}`;
+  return f.typedAmount > 0 ? `${saved}, receipt attached.` : saved;
+}
 
 export { jobPickLabel };
 

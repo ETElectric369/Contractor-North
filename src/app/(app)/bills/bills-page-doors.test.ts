@@ -369,7 +369,7 @@ const HOMES: { door: string | RegExp; was: string; home: string; times?: number 
   // bills still unpaid and what they come to, never how many rows it holds. The tabs and the filter
   // chips went: the search box at the top narrows the list in place.
   { door: /^All Bills · 9 Unpaid \$4,801\.98$/, was: "the tabs under the page (All Bills (15) · $X)", home: "all-bills" },
-  { door: /^(Settled|On Account) Switch$/, was: "Settled/On Account badge toggle", home: "all-bills", times: 15 },
+  { door: /^(On Account Mark Settled|Settled Mark On Account)$/, was: "Settled/On Account badge toggle (its face said Switch)", home: "all-bills", times: 15 },
   { door: "Edit", was: "pencil icon (bare 16px)", home: "all-bills", times: 15 },
   { door: "Delete", was: "trash icon (bare 16px)", home: "all-bills", times: 15 },
   { door: /^Bill Only What This Job Used$/, was: "receipt card, per line", home: "all-bills" },

@@ -139,18 +139,12 @@ export default async function TimecardsPage({
   /** Add Time Entry's Job list reaches back this far for a FINISHED job (the one read Needs You uses
    *  for "done lately": complete, touched in the last 30 days). Older: the job's own Time tab. */
   const doneSince = new Date(Date.now() - 30 * 86_400_000).toISOString();
-  const [{ data: members }, { data: jobCodes }, { data: jobs }, { data: org }, crew, teammates, { data: activeJobs }, { data: doneJobs }] = await Promise.all([
+  const [{ data: members }, { data: jobCodes }, { data: org }, crew, teammates, { data: activeJobs }, { data: doneJobs }] = await Promise.all([
     // hourly_rate + bill_rate feed the edit/add modals' pay-rate anchor + the
     // bill-rate tripwire. Safe to select flat here — the page redirects non-staff
     // above, so the rates never serialize into a tech's props.
     supabase.from("profile_pay").select("id, full_name, hourly_rate, bill_rate, paid_by_draw").eq("active", true).order("full_name"),
     supabase.from("job_codes").select("*").eq("active", true).order("code"),
-    // The EDITOR's and the Split sheet's job list, as it was (the 50 newest, any status).
-    supabase
-      .from("jobs")
-      .select("id, job_number, name")
-      .order("created_at", { ascending: false })
-      .limit(50),
     supabase.from("organizations").select("settings").limit(1).maybeSingle(),
     // The live crew pulse (who's on the clock now) — moved here from My Day's
     // CrewBoard so presence lives next to the hours it becomes.
@@ -174,6 +168,13 @@ export default async function TimecardsPage({
       .order("updated_at", { ascending: false }),
   ]);
   const addJobs = [...((activeJobs ?? []) as AddJob[]), ...((doneJobs ?? []) as AddJob[])];
+  /* THE EDITOR'S AND THE SPLIT SHEET'S JOB LIST IS THE SAME LIST (cc484d6e). It was a separate read
+     capped at fifty rows, newest first, any status, so an older job still running was never offered
+     for a shift's Second Part and the sheet's search found nothing: the same "Not all are listed"
+     lesson the Timeclock learned. Now every job in flight plus those finished in the last 30 days,
+     no cap. The editor keeps a shift's own job selectable when it is older than that
+     (edit-entry-button.tsx). */
+  const pickJobs = addJobs.map((j) => ({ id: j.id, job_number: j.job_number ?? "", name: j.name ?? "" }));
   // Render times in the BUSINESS timezone, not the UTC server's, so the list
   // matches the (browser-local) edit modal instead of being hours off.
   const orgSettings = getOrgSettings((org as any)?.settings);
@@ -379,7 +380,7 @@ export default async function TimecardsPage({
         <EditEntryButton
           entry={e}
           jobCodes={(jobCodes ?? []) as JobCode[]}
-          jobs={jobs ?? []}
+          jobs={pickJobs}
           members={members ?? []}
           isStaff
           jobCodesEnabled={orgSettings.timeclock_job_codes}
@@ -726,9 +727,9 @@ export default async function TimecardsPage({
     focusFamilyRows = [...byId.values()];
   }
   // NORT'S FILL NAMES ITS JOB. time.splitEntry resolves any job the office can see, and the list
-  // above is only the 50 newest: without this the sheet's second part read "That job", and a person
-  // was asked to tap Split Shift without seeing whose job the hours were going to.
-  let focusJobs = (jobs ?? []) as { id: string; job_number: string; name: string }[];
+  // above stops 30 days after a job finishes: without this the sheet's second part read "That job",
+  // and a person was asked to tap Split Shift without seeing whose job the hours were going to.
+  let focusJobs = pickJobs;
   if (focusEntry && splitParam === "1" && splitJobParam && !focusJobs.some((j) => j.id === splitJobParam)) {
     const { data: fj } = await supabase.from("jobs").select("id, job_number, name").eq("id", splitJobParam).maybeSingle();
     if (fj) focusJobs = [fj as { id: string; job_number: string; name: string }, ...focusJobs];
@@ -753,6 +754,7 @@ export default async function TimecardsPage({
             jobs={addJobs}
             tz={tz}
             companyTimeCode={companyTimeCode((jobCodes ?? []) as JobCode[])}
+            workDayEnd={workWin.end}
           />
           <Link
             href={hrefFor(offset + 1)}

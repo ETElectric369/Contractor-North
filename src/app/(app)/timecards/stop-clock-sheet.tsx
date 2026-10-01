@@ -78,9 +78,10 @@ export function StopClockSheet({
   open,
   onClose,
   onDelete,
-  deleting,
+  deleting = false,
   externalError,
   viewerId,
+  onStopped,
 }: {
   entry: StopClockEntry;
   jobs: { id: string; job_number: string; name: string }[];
@@ -91,8 +92,13 @@ export function StopClockSheet({
   workDayEnd?: string;
   open: boolean;
   onClose: () => void;
-  onDelete: () => void;
-  deleting: boolean;
+  /** Delete, when the caller has it (the editor). Absent: no Delete button (Add Time Entry's door,
+   *  which is there to clock somebody out, not to delete a punch). */
+  onDelete?: () => void;
+  deleting?: boolean;
+  /** The clock was stopped, at this time (ISO): said before onClose, so a form underneath can start
+   *  its own hours where these stopped (Add Time Entry). */
+  onStopped?: (clockOutIso: string) => void;
   /** A failure from the parent's own action (Delete), shown in this sheet's error line: the parent's
    *  edit form, which used to show it, is never mounted for a running clock. */
   externalError?: string | null;
@@ -225,6 +231,7 @@ export function StopClockSheet({
         setStillOpenId(res.still_open_entry_id ?? null);
         return setError(res.error ?? `That didn't go through, so the clock is still running. Try again.`);
       }
+      onStopped?.(stopIso);
       onClose();
       router.refresh();
       toast(res.sentence ?? `${said.headline}.`, "success");
@@ -295,9 +302,11 @@ export function StopClockSheet({
               Cancel
             </Button>
           </div>
-          <Button variant="ghost" onClick={onDelete} disabled={busy} className="h-11 w-full text-red-600 hover:bg-red-50">
-            <Trash2 className="h-4 w-4" /> Delete
-          </Button>
+          {onDelete && (
+            <Button variant="ghost" onClick={onDelete} disabled={busy} className="h-11 w-full text-red-600 hover:bg-red-50">
+              <Trash2 className="h-4 w-4" /> Delete
+            </Button>
+          )}
         </div>
       }
     >

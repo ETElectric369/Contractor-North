@@ -5,7 +5,7 @@ import type { ActionItem, NeedsYou, PileName, WaitingItem } from "./types";
 import { AFFORDANCES, KIND_STREAM, appointmentAffordances, sortActionItems, waitingForViewer, waitingRow } from "./types";
 import { bucketInspections } from "@/lib/inspections";
 import { ESTIMATE_VISIT_TYPES } from "@/lib/statuses";
-import { invoiceBalance } from "@/lib/invoice-math";
+import { invoiceBalance, isDrawKind } from "@/lib/invoice-math";
 import { invoiceAmount } from "@/lib/invoice-amount";
 import { lienStatus } from "@/lib/lien-math";
 import { formatCurrency, formatDateShort, formatTime } from "@/lib/utils";
@@ -604,8 +604,10 @@ async function buildActionItems(ctx: {
     // count — a draft is work in progress, not a decision. (Also: an estimate draft whose job has
     // real billing is no longer an estimate to send.) Done, Not Billed asks this in SQL now (0371);
     // the walk-throughs, the estimate drafts and the deploy window's old done reads still read it.
+    // The kind rides along: a deposit or progress draw is money for work NOT done yet, so the two
+    // needs-a-day feeders read a narrower set.
     isStaff
-      ? supabase.from("invoices").select("job_id").not("job_id", "is", null).not("status", "in", "(draft,void)").limit(5000)
+      ? supabase.from("invoices").select("job_id, invoice_kind").not("job_id", "is", null).not("status", "in", "(draft,void)").limit(5000)
       : empty,
     doneP,
     // ── Estimates started and never sent ───────────────────────────────────────
@@ -635,7 +637,16 @@ async function buildActionItems(ctx: {
   const waiting: WaitingItem[] = [];
   const counts: Partial<Record<PileName, PileCount>> = {};
   const todayMs = Date.parse(todayStr);
-  const billedJobs = new Set(((billedJobR.data ?? []) as { job_id: string }[]).map((r) => r.job_id).filter(Boolean));
+  const billedRows = (billedJobR.data ?? []) as { job_id: string; invoice_kind?: string | null }[];
+  const billedJobs = new Set(billedRows.map((r) => r.job_id).filter(Boolean));
+  // A JOB WHOSE BILLING SAYS THE WORK IS OVER: a standard invoice or the final draw. A deposit or a
+  // progress draw (invoice_kind deposit/progress, 0063) is the opposite: money collected for work
+  // still ahead, so a deck builder's $10,000 deposit on a to_be_scheduled job must keep asking for
+  // a day. Only the two needs-a-day feeders read this set; the outcome feeders (visit unbilled,
+  // done job unbilled, estimate to send) keep billedJobs, where any real invoice settles them.
+  const finishedBilledJobs = new Set(
+    billedRows.filter((r) => r.job_id && (!isDrawKind(r.invoice_kind) || r.invoice_kind === "final")).map((r) => r.job_id),
+  );
   const clockedInJobIds = new Set(((openTimeR.data ?? []) as any[]).map((e) => e.job_id).filter(Boolean) as string[]);
 
   // ── THE WIN: an accepted estimate whose job still has no date. Urgency 2, money stream → the top,
@@ -648,6 +659,10 @@ async function buildActionItems(ctx: {
       // A JOB THAT'S OVER DOESN'T NEED A DATE (work ending is an outcome, 0205), and a held one
       // waits with its own day and reason (NY-feeders: holds quiet the nudges).
       if (job?.status === "complete" || job?.status === "cancelled" || job?.status === "on_hold") continue;
+      // A JOB ALREADY BILLED FOR THE WORK IS OVER TOO (0205): sending or paying an invoice never
+      // moves jobs.status, so without this the Lim "new power to garage" win asked for a day
+      // forever. A deposit or progress draw is not that: the work is still ahead, so it still nags.
+      if (a.job_id && finishedBilledJobs.has(String(a.job_id))) continue; // billed for the work = done (0205)
       if (a.job_id) wonJobIds.add(String(a.job_id));
       const who = one(a.customers as any)?.name ?? null;
       items.push({
@@ -927,6 +942,9 @@ async function buildActionItems(ctx: {
     tz,
     clockedInJobIds,
     wonJobIds,
+    // Billed for the work = done (0205): a job with a live standard or final invoice never needs a
+    // day, whatever jobs.status says. A deposit or progress draw leaves it asking.
+    billedJobIds: finishedBilledJobs,
   });
   const needDayIds = needDayPre.map((f) => f.job.id);
   // Materials-routing candidates: jobs the crew is about to stand on (today/tomorrow, segments), and

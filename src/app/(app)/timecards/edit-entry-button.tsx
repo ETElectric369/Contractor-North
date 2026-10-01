@@ -211,6 +211,15 @@ export function EditEntryButton({
     setSplitFromForm(false);
     setOpen(true);
   };
+  /** A CLOSED shift can be split (a running one is clocked out first: the sheet says so). The door is
+   *  in the body's tools box and in the footer (one tap, no scroll); both open the same sheet, and its
+   *  Cancel comes back to this form with what was typed still in it. */
+  const canSplit = !!entry.clock_out && (entry.status ?? "closed") === "closed";
+  const openSplit = () => {
+    setOpen(false);
+    setSplitFromForm(true);
+    setSplitting(true);
+  };
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
   const [profileId, setProfileId] = useState(entry.profile_id ?? "");
@@ -600,22 +609,36 @@ export function EditEntryButton({
         title="Edit time entry"
         portal
         footer={
-          <ModalActions
-            onCancel={close}
-            onSave={save}
-            saving={pending}
-            saveLabel="Save Changes"
-            extra={
-              <Button
-                variant="ghost"
-                onClick={remove}
-                disabled={pending}
-                className="text-red-600 hover:bg-red-50"
-              >
-                <Trash2 className="h-4 w-4" /> Delete
+          /* SPLIT THIS SHIFT IS IN THE FOOTER TOO (cc484d6e): the tools box that holds it sits past
+             the Job field, so on a phone the office scrolled the whole form to reach the one thing it
+             opened the editor for. A secondary door here, on its own row (four nowrap buttons in one
+             row clip their labels at 375px: the clock-out sheet learned that), for a closed shift only,
+             like the one in the body. Delete stays the one red action. */
+          <div className="w-full space-y-2">
+            {canSplit && (
+              <Button type="button" variant="outline" className="h-11 w-full" onClick={openSplit} disabled={pending}>
+                <Scissors className="h-4 w-4" /> Split This Shift
               </Button>
-            }
-          />
+            )}
+            <div className="flex items-center justify-end gap-2">
+              <ModalActions
+                onCancel={close}
+                onSave={save}
+                saving={pending}
+                saveLabel="Save Changes"
+                extra={
+                  <Button
+                    variant="ghost"
+                    onClick={remove}
+                    disabled={pending}
+                    className="text-red-600 hover:bg-red-50"
+                  >
+                    <Trash2 className="h-4 w-4" /> Delete
+                  </Button>
+                }
+              />
+            </div>
+          </div>
         }
       >
         <div className="space-y-4">
@@ -712,10 +735,10 @@ export function EditEntryButton({
               alongside (Erik 2026-09-18, "copy this time card for jimmy who worked with me"), the
               picker that used to hang off a copy icon on every row. Closed shifts only, like Split;
               a secondary button, so Delete stays the one red action. */}
-          {entry.clock_out && (entry.status ?? "closed") === "closed" && (
+          {canSplit && (
             <div className="space-y-2 rounded-lg border border-slate-200 p-3">
               <div className="grid gap-2 sm:grid-cols-2">
-                <Button type="button" variant="outline" className="h-11 w-full" onClick={() => { setOpen(false); setSplitFromForm(true); setSplitting(true); }} disabled={pending}>
+                <Button type="button" variant="outline" className="h-11 w-full" onClick={openSplit} disabled={pending}>
                   <Scissors className="h-4 w-4" /> Split This Shift
                 </Button>
                 <DuplicateEntryButton

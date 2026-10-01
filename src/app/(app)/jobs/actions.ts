@@ -1389,6 +1389,12 @@ export async function createBill(input: {
 
   // Best-effort receipt link (never fails the bill): only when the document is visible
   // via RLS AND on this bill's job — same containment rule as the po_id link above.
+  // NEVER SILENT (fada712a, the silent-write law): this insert was awaited and thrown away, so a
+  // link that didn't land left the receipt "Not on a bill yet" beside the very bill it made, and
+  // the next Record As Cost tap would write a second bill for the same money. The bill IS in, so a
+  // lost link cannot refuse; it is logged for the daily sweep and said on `warning`, the way
+  // organize's billJobReceipt does it.
+  let warning: string | undefined;
   if (input.receipt_document_id && created?.id) {
     const { data: doc } = await supabase
       .from("documents")
@@ -1396,34 +1402,53 @@ export async function createBill(input: {
       .eq("id", input.receipt_document_id)
       .maybeSingle();
     if (doc && doc.job_id === jobId) {
-      await supabase.from("organized_items").insert({
-        kind: "receipt",
-        title: input.supplier.trim(),
-        vendor: input.supplier.trim(),
-        amount: input.amount || 0,
-        item_date: input.bill_date || null,
-        category,
-        status: "filed",
-        job_id: jobId,
-        document_id: doc.id,
-        bill_id: created.id,
-        file_url: doc.file_url,
-        created_by: ctx.userId,
-      });
+      const { data: link, error: linkErr } = await supabase
+        .from("organized_items")
+        .insert({
+          kind: "receipt",
+          title: input.supplier.trim(),
+          vendor: input.supplier.trim(),
+          amount: input.amount || 0,
+          item_date: input.bill_date || null,
+          category,
+          status: "filed",
+          job_id: jobId,
+          document_id: doc.id,
+          bill_id: created.id,
+          file_url: doc.file_url,
+          created_by: ctx.userId,
+        })
+        .select("id");
+      if (linkErr || !link?.length) {
+        reportError("jobs.createBill.receiptLink", linkErr ?? new Error("link insert returned no row"), {
+          billId: created.id,
+          documentId: doc.id,
+          jobId,
+        });
+        warning =
+          "The cost is recorded, but its receipt did not get marked as billed. On the job's Costs tab it will say Not On A Bill Yet: tie it to this bill there, rather than Record As Cost (that would write a second bill).";
+      }
     }
   }
 
   if (input.job_id) revalidatePath(`/jobs/${input.job_id}`);
   revalidatePath("/bills");
-  return { ok: true, id: created?.id };
+  return { ok: true, id: created?.id, ...(warning ? { warning } : {}) };
 }
 
-/** Link an already-uploaded receipt document to an already-saved bill — the retry path.
+/** Link an already-uploaded receipt document to an already-saved bill: "it IS that bill".
  *  When the photo upload fails on the first save, the bill exists with NO link, so a later
  *  upload of that same receipt (retry button, or the job's Receipts tab) reads it as a fresh
  *  cost and files a SECOND bill for the same money — the Tao Zhu double-charge class. This
  *  writes the same organized_items link createBill would have, making the file answer
- *  "already recorded". Same containment rule: the document must be visible and on the bill's job. */
+ *  "already recorded". Same containment rule: the document must be visible and on the bill's job.
+ *
+ *  THE DOOR FOR A LOOSE RECEIPT (d1ff7c5a). Two paths leave a receipt "Not on a bill yet" while its
+ *  bill exists: the reader answering "already on the books" (billJobReceipt writes nothing then),
+ *  and a bill typed by hand with the receipt uploaded separately. This is the tie both were
+ *  missing: Same Purchase: It's That Bill beside the reader's answer, and Already On A Bill → Tie It
+ *  on the receipt's own row. After it the row reads "On the CED bill #…", the Costs chip drops by
+ *  one and Needs You's Receipts Not On A Bill row goes (all read the same sortJobPapers.loose). */
 export async function linkReceiptToBill(billId: string, documentId: string): Promise<Result> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
@@ -1436,31 +1461,50 @@ export async function linkReceiptToBill(billId: string, documentId: string): Pro
   if (!bill || !doc) return { ok: false, error: "Couldn't find that cost or receipt." };
   if (!bill.job_id || doc.job_id !== bill.job_id) return { ok: false, error: "That receipt isn't on this cost's job." };
 
-  // Idempotent: a re-tap must not stack duplicate links.
-  const { data: existing } = await supabase
+  // Idempotent: a re-tap must not stack duplicate links. ONLY A ROW THAT CARRIES A BILL counts
+  // (bill_id, or tied_bill_id): a tech's Snap Or Note row names the same document with no bill on
+  // it (needs_review), and "any row with this document_id" let that row block the tie, leaving the
+  // receipt loose forever. A row on ANOTHER bill is said, never silently kept.
+  const { data: existing, error: readErr } = await supabase
     .from("organized_items")
-    .select("id")
+    .select("id, bill_id, tied_bill_id")
     .eq("document_id", doc.id)
+    .or("bill_id.not.is.null,tied_bill_id.not.is.null")
     .limit(1)
     .maybeSingle();
-  if (existing) return { ok: true };
+  if (readErr) return { ok: false, error: dbError(readErr) };
+  if (existing) {
+    const on = (existing as { bill_id?: string | null; tied_bill_id?: string | null }).bill_id ?? (existing as { tied_bill_id?: string | null }).tied_bill_id;
+    if (on === bill.id) return { ok: true };
+    return { ok: false, error: "That receipt is already on another bill. Open it under Receipts & Papers to see which." };
+  }
 
-  const { error } = await supabase.from("organized_items").insert({
-    kind: "receipt",
-    title: bill.supplier ?? "Receipt",
-    vendor: bill.supplier ?? null,
-    amount: bill.amount ?? 0,
-    item_date: bill.bill_date ?? null,
-    category: bill.category ?? null,
-    status: "filed",
-    job_id: bill.job_id,
-    document_id: doc.id,
-    bill_id: bill.id,
-    file_url: doc.file_url,
-    created_by: ctx.userId,
-  });
+  const { data: link, error } = await supabase
+    .from("organized_items")
+    .insert({
+      kind: "receipt",
+      title: bill.supplier ?? "Receipt",
+      vendor: bill.supplier ?? null,
+      amount: bill.amount ?? 0,
+      item_date: bill.bill_date ?? null,
+      category: bill.category ?? null,
+      status: "filed",
+      job_id: bill.job_id,
+      document_id: doc.id,
+      bill_id: bill.id,
+      file_url: doc.file_url,
+      created_by: ctx.userId,
+      // THE JOB'S OWN UPLOAD (audit v994, TD1; the same rule billJobReceipt writes): this row points
+      // at a document the job already had, so Undo and Delete take the bill down and never the
+      // receipt (filingDocument).
+      source: "job",
+    })
+    .select("id");
   if (error) return { ok: false, error: dbError(error) };
+  if (!link?.length) return { ok: false, error: "The tie didn't save. Try again." };
   revalidatePath(`/jobs/${bill.job_id}`);
+  revalidatePath("/bills");
+  revalidatePath("/planner"); // Needs You's Receipts Not On A Bill row reads the same ties
   return { ok: true };
 }
 

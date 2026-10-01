@@ -1,68 +1,17 @@
-import { invoiceOverpayment } from "@/lib/invoice-math";
 import { getStripe } from "@/lib/stripe";
 import { createServiceClient } from "@/lib/supabase/server";
 import { orgStaffIds } from "@/lib/push";
 import { notifyPeople } from "@/lib/notifications";
 import { formatCurrency } from "@/lib/utils";
-import { recalcInvoice } from "@/lib/invoice-recalc";
-import { paymentReachedDraft } from "@/lib/tap-settlement";
-import { revalidateMoney } from "@/lib/revalidate-money";
+import { claimedInvoice, recordStripeInvoicePayment, tapPaymentKey, TAP_VIA, type RecordVia } from "@/lib/record-invoice-payment";
+import { declineReason } from "@/lib/stripe-decline-words";
 import { accountUpdateFields } from "@/lib/stripe-connect";
 import { tierForPriceId } from "@/lib/plans";
 import { reportError } from "@/lib/observe";
-import { captureProcessorFee } from "@/lib/processor-fee-capture";
-import { paymentMethodKey } from "@/lib/payment-method";
 import { checkoutPaymentMethod, isBankCheckout, noteTransferStarted, resolveTransfer } from "@/lib/bank-transfer";
 import type Stripe from "stripe";
 
 export const runtime = "nodejs";
-
-/**
- * WHY THE CARD SAID NO, IN WORDS A TECH CAN REPEAT TO A CUSTOMER (Apple 5.12 push body).
- *
- * decline_code is the issuer's reason and the most useful thing Stripe hands back; `message` is
- * Stripe's cardholder-facing sentence ("Your card was declined.") — written to the CUSTOMER, so it
- * reads wrong in a notification to the tech and is the fallback, not the lead. The map covers the
- * codes a driveway actually sees; anything else falls through to the code with its underscores
- * turned into spaces, which is still a plain phrase and never a blank.
- */
-function declineReason(err: Stripe.PaymentIntent.LastPaymentError | null | undefined): string {
-  const code = err?.decline_code ?? "";
-  const WORDS: Record<string, string> = {
-    insufficient_funds: "the card has insufficient funds",
-    generic_decline: "the bank declined it without a reason",
-    do_not_honor: "the bank declined it (do not honor)",
-    expired_card: "the card is expired",
-    lost_card: "the card was reported lost",
-    stolen_card: "the card was reported stolen",
-    incorrect_pin: "the PIN was wrong",
-    pin_try_exceeded: "too many wrong PIN tries",
-    offline_pin_required: "the card wants a PIN entered",
-    online_or_offline_pin_required: "the card wants a PIN entered",
-    call_issuer: "the bank wants the cardholder to call them",
-    card_velocity_exceeded: "the card hit its spending limit",
-    withdrawal_count_limit_exceeded: "the card hit its daily limit",
-    transaction_not_allowed: "the card doesn't allow this kind of charge",
-    card_not_supported: "the card doesn't support this kind of charge",
-    currency_not_supported: "the card doesn't take US dollars",
-    fraudulent: "the bank flagged it as suspected fraud",
-    merchant_blacklist: "the bank blocks this business",
-    restricted_card: "the card is restricted",
-    revocation_of_all_authorizations: "the cardholder revoked charges from this business",
-    security_violation: "the bank flagged a security problem",
-    service_not_allowed: "the bank doesn't allow this charge",
-    stop_payment_order: "the cardholder placed a stop on it",
-    try_again_later: "the bank said try again later",
-    processing_error: "a processing error at the bank",
-    reenter_transaction: "the bank asked for the card to be tapped again",
-    testmode_decline: "test-mode decline",
-  };
-  if (code && WORDS[code]) return WORDS[code];
-  if (code) return code.replace(/_/g, " ");
-  if (err?.message) return err.message.replace(/\.$/, "");
-  if (err?.code) return String(err.code).replace(/_/g, " ");
-  return "the card was declined";
-}
 
 /**
  * Stripe webhook: keeps organizations.subscription_status / plan in sync.
@@ -139,236 +88,31 @@ export async function POST(req: Request) {
   }
 
   /**
-   * THE EVENT'S ACCOUNT IS THE ORG BOUNDARY — THE METADATA IS A CLAIM (audit v921).
+   * THE ONE WRITER FOR STRIPE MONEY, shared with the Pay Now sheet's own check (lib/record-invoice-
+   * payment.ts, 2026-09-30: Rich Seiler's $420 said "approved" on the phone and was never charged;
+   * the sheet now asks Stripe and books a succeeded tap itself when this webhook hasn't landed
+   * yet). Everything that used to live here — the org<->account and invoice<->org claim, the draft
+   * note, the event-id idempotency, the shared recalc, the office push, the fee — lives there now,
+   * plus a second lock on the PaymentIntent id so the two writers can never book one tap twice.
    *
-   * Everything a payment event writes is scoped by its metadata, which the sender chose. The
-   * connected endpoint delivers checkout.session.completed from EVERY connected account, so an
-   * account able to mint its own session could name another tenant's invoice and mark it paid with
-   * a $1 charge. It can't today (Express accounts hold no API keys and only /api/pay mints these
-   * sessions), which is exactly why the check belongs here: [[tenant-isolation-root-cause]] — a
-   * rule applied at one write path is a convention, not a boundary.
-   *
-   * ONE CHECK FOR EVERY WRITER: the payment row, and since 0338 the bank-transfer marker (audit
-   * v994 BK3), stand behind the same two questions. Returns the invoice (with the status a draft
-   * is said by - the projection law) or null after saying why in the ops log. A retry can't
-   * fix a claim that doesn't hold, so the caller acks rather than looping Stripe on it.
+   * TRUE ONLY WHEN THE CLAIM HELD AND THE MONEY IS AT REST (this event's row, or a retry that
+   * found it and healed it). A caller that writes anything else for this payment (the bank
+   * transfer marker, BK3) stands behind this answer, never behind the session's metadata: false
+   * means the account does not own the org or the invoice is not the org's, and nothing more may
+   * be written in either's name. Every failure that a retry can fix THROWS instead — the handler
+   * answers 500, Stripe resends the same event id, and the heal branch settles it.
    */
-  async function claimedInvoice(
-    invoiceId: string,
-    orgId: string,
-    connectedAccount: string | null,
-  ): Promise<{ id: string; status: string | null; invoice_number: string | null } | null> {
-    if (connectedAccount) {
-      const { data: owner } = await supabase
-        .from("organizations")
-        .select("id")
-        .eq("id", orgId)
-        .eq("stripe_account_id", connectedAccount)
-        .maybeSingle();
-      if (!owner) {
-        reportError("stripe:webhook:account-org-mismatch", new Error("checkout session names an org that doesn't own the connected account"), {
-          orgId,
-          invoiceId,
-          connectedAccount,
-        });
-        return null;
-      }
-    }
-    const { data: target } = await supabase
-      .from("invoices")
-      .select("id, status, invoice_number")
-      .eq("id", invoiceId)
-      .eq("org_id", orgId)
-      .maybeSingle();
-    if (!target) {
-      reportError("stripe:webhook:invoice-org-mismatch", new Error("checkout session names an invoice that isn't the org's"), {
-        orgId,
-        invoiceId,
-      });
-      return null;
-    }
-    return target as { id: string; status: string | null; invoice_number: string | null };
-  }
-
   async function recordInvoicePayment(
     invoiceId: string | undefined,
     orgId: string | undefined,
     amount: number,
-    eventId: string,
+    idempotencyKey: string,
     paymentIntent: string | null,
     connectedAccount: string | null,
-    // WHICH DOOR THE MONEY CAME THROUGH — the ledger note, the words of the office push, and the
-    // method key the row is booked under. Defaulted so the Checkout branch reads exactly as it
-    // always has; Tap to Pay passes its own. One writer, one extra parameter — NOT a second insert
-    // path (the double-record class this helper closed). No door moves a status here any more
-    // (lib/tap-settlement): a draft becomes a bill when a person sends it, and every pay door asks
-    // first.
-    via: {
-      note: string;
-      said: string;
-      /**
-       * THE METHOD KEY THE ROW IS BOOKED UNDER (0287; audit v994 BK2). Every Stripe payment used to
-       * be booked 'card', so a bank debit read "Card" and "Card fee" on the invoice, the PDF, the
-       * statement and the owner's fees, and the "Bank fee" label could never show. The Checkout
-       * branch passes what the session was actually paid with (checkoutPaymentMethod); Tap to Pay
-       * is always a card. Absent means 'card', as it always was.
-       */
-      method?: "card" | "ach";
-    } = { note: "Online payment", said: "paid online" },
+    via?: RecordVia,
   ): Promise<boolean> {
-    // TRUE ONLY WHEN THE CLAIM HELD AND THE MONEY IS AT REST (this event's row, or a retry that
-    // found it and healed it). A caller that writes anything else for this payment (the bank
-    // transfer marker, BK3) stands behind this answer, never behind the session's metadata: false
-    // means the account does not own the org or the invoice is not the org's, and nothing more may
-    // be written in either's name. Every failure that a retry can fix THROWS instead.
-    if (!invoiceId || !orgId || amount <= 0) return false;
-    // The org<->account and invoice<->org checks (claimedInvoice above). status rides along because
-    // a draft reaching this door has to be SAID (see below), and the projection law says you cannot
-    // notice what you did not select.
-    const target = await claimedInvoice(invoiceId, orgId, connectedAccount);
-    if (!target) return false;
-    /**
-     * A DRAFT IS SETTLED, NEVER SENT, AND ALWAYS SAID (Connected North Phase 1).
-     *
-     * Every pay door asks "Send INV-078 as the bill first?" and sends it on the yes before a card
-     * can be charged, so money arriving on a draft means something slipped past that question (a
-     * PaymentIntent minted before it shipped, a bill put back to Draft under an open sheet). It is
-     * recorded and recalced like a cash deposit on a draft - the money lands, the draft stays a
-     * draft (paidStatus never advances one) - and an error_events row makes a person look. This
-     * webhook never writes a status and never stamps sent_at (lib/tap-settlement).
-     */
-    const onDraft = paymentReachedDraft(target.status);
-
-    /**
-     * SETTLE = RECALC, THEN REFRESH.
-     *
-     * revalidateMoney is the one nerve every money mutation in the app uses; a webhook is a Route
-     * Handler, so it is legal here, and the invoice page, the billing board, AR and the My Day money
-     * line all re-read instead of disagreeing with the row (the other half of INV-069: a pay door's
-     * write that told no screen anything).
-     *
-     * Returns false when the money did NOT come to rest, so the caller can throw and let Stripe
-     * retry the same event id — the insert then hits 23505 and the heal branch settles it.
-     */
-    const settle = async (id: string): Promise<boolean> => {
-      if (!(await recalcInvoice(supabase, id))) return false;
-      try {
-        revalidateMoney(id);
-      } catch (e) {
-        // The money is recorded and the totals are right; only the caches are stale, and the next
-        // navigation clears them. Worth a line in the ops log, never worth making Stripe retry a
-        // payment that already landed.
-        reportError("stripe:webhook:revalidate", e, { invoiceId: id });
-      }
-      return true;
-    };
-    // org_id is set explicitly (the set_org_id trigger has no auth context here).
-    // Idempotency: stripe_event_id is UNIQUE, so a retried webhook (Stripe resends
-    // the SAME event.id on timeout) fails the insert and we stop — no double pay.
-    const { error: insErr } = await supabase.from("payments").insert({
-      invoice_id: invoiceId,
-      org_id: orgId,
-      amount,
-      method: paymentMethodKey(via.method ?? "card"),
-      note: via.note,
-      stripe_event_id: eventId,
-      // The ONE id a later charge.refunded / charge.dispute.created can be matched on. The
-      // event id can't be: Stripe sends a different event for the refund. See migration 0220.
-      stripe_payment_intent: paymentIntent,
-    });
-    if (insErr) {
-      if ((insErr as { code?: string }).code === "23505") {
-        // Already recorded this event — but the FIRST attempt may have died between the insert
-        // and the recalc (cold-start timeout, deploy, OOM), leaving the payment row with an
-        // invoice header still reading $0 owed-in-full (audit 8). recalc is idempotent, so
-        // running it on every benign retry is free and it heals the crashed case. Deliberately
-        // NOT the push: that one isn't idempotent and the duplicate is usually benign.
-        if (!(await settle(invoiceId))) {
-          // Still not settled — let Stripe retry rather than acking a lie (see below).
-          throw new Error(`settling invoice ${invoiceId} failed on retry`);
-        }
-        return true;
-      }
-      throw new Error(insErr.message);
-    }
-    // Settle through THE shared recalc (items + payments + open customer credits) instead
-    // of a local payments-only sum. The old code blind-wrote `amount_paid = sum(payments)`,
-    // which ERASED any posted credit: a $200 account credit + an $800 card payment on a
-    // $1,000 invoice came back as $800 paid / status "partial", so the invoice kept a
-    // phantom $200 balance forever — aged in A/R, dunned by the reminder cron, and payable
-    // a SECOND time on the public page. One definition, both paths agree by construction.
-    //
-    // AND IT HAS TO LAND (audit v921 high). The money row is already in; if the settle fails,
-    // the invoice keeps its old balance, AR ages it, the dunning cron chases a customer who
-    // paid, and GET /api/pay/<token> still sees balance > 0 and opens a SECOND full-amount
-    // Checkout. Acking 200 here ends the story — Stripe never retries a 2xx and no cron
-    // re-runs recalc. So throw: the handler answers 500, Stripe retries the same event id,
-    // the insert hits 23505 and the heal branch above settles it. Recalc is idempotent, so
-    // the retry is free; a swallowed failure is not.
-    if (!(await settle(invoiceId))) {
-      throw new Error(`settling invoice ${invoiceId} failed after recording the payment`);
-    }
-    if (onDraft) {
-      reportError("stripe:webhook:payment-on-draft", new Error("card money landed on a draft invoice; settled, not sent"), {
-        invoiceId,
-        orgId,
-        door: via.note,
-        paymentIntent,
-      });
-    }
-    const { data: inv } = await supabase
-      .from("invoices")
-      // total + amount_paid so the overpayment is knowable HERE — the projection law: you cannot
-      // notice what you did not select.
-      .select("invoice_number, total, amount_paid, customers(name)")
-      .eq("id", invoiceId)
-      .single();
-
-    // A customer paid online — ping office staff (no recorder to exclude).
-    // Awaited (not fire-and-forget): a serverless function can freeze right after
-    // responding to Stripe, killing an un-awaited push. sendPush never throws.
-    const cust = (inv as any)?.customers?.name as string | undefined;
-
-    // ── PAID TWICE (audit 6) ────────────────────────────────────────────────────────────────
-    //
-    // This is the only payment writer with no ceiling. recordPayment refuses to exceed the
-    // balance and credits are capped, but a customer who taps Pay twice on a slow connection
-    // mints two Checkout sessions that EACH read a full balance, because neither has settled yet.
-    // Both go through, both post, and the invoice then reads $0 owed — the one number anybody
-    // checks — with nothing anywhere saying it took double.
-    //
-    // THE ROW IS STILL WRITTEN. The money already moved at Stripe; refusing the insert would lose
-    // the record of a real payment, which is strictly worse than recording an awkward one. And
-    // the disposition is NOT chosen here: credit-versus-refund is the judgement CreditButton asks
-    // a human to make, and an overpayment is sometimes a deliberate prepayment toward the next
-    // job. A webhook picking "refund" would pre-empt that and double-post against a later manual
-    // credit. So it does the one thing a machine should: say so, loudly, to the people who can
-    // decide.
-    const over = invoiceOverpayment((inv as any)?.total, (inv as any)?.amount_paid);
-    // THE BELL RECORDS IT (notifyPeople): once, here, on the path that recorded the payment. A replay
-    // of the same event (23505 above) settles and returns before this line, so it never writes twice.
-    await notifyPeople(orgId, await orgStaffIds(orgId), "invoice_paid", over > 0.005
-      ? {
-          title: "Overpaid — action needed",
-          body: `${formatCurrency(amount)} ${via.said} on ${inv?.invoice_number || "an invoice"}${cust ? ` — ${cust}` : ""}. That's ${formatCurrency(over)} MORE than the total. Credit it or refund it.`,
-          url: `/billing/${invoiceId}`,
-        }
-      : {
-          title: "Payment received",
-          body: `${formatCurrency(amount)} ${via.said} on ${inv?.invoice_number || "an invoice"}${cust ? ` — ${cust}` : ""}`,
-          url: `/billing/${invoiceId}`,
-        });
-
-    // WHAT STRIPE TOOK, LAST (migration 0284). Card fees are a business cost that comes off the
-    // owner's draw, so the real fee is read off the charge on the contractor's own account and
-    // kept on the row. It runs only after the money is recorded, settled and announced, and it
-    // never throws: a fee Stripe cannot hand over yet stays NULL, the ops log hears about a
-    // failure, and the daily cron reads it tomorrow. One writer for every door that lands here
-    // (Checkout card, Checkout bank debit, Tap to Pay).
-    if (paymentIntent) {
-      await captureProcessorFee(supabase, { orgId, paymentIntent, account: connectedAccount });
-    }
-    return true;
+    const outcome = await recordStripeInvoicePayment(supabase, { invoiceId, orgId, amount, idempotencyKey, paymentIntent, connectedAccount, via });
+    return outcome !== "refused";
   }
 
   async function syncSubscription(sub: Stripe.Subscription) {
@@ -555,7 +299,7 @@ export async function POST(req: Request) {
            */
           const orgId = session.metadata.org_id;
           const invoiceId = session.metadata.invoice_id;
-          const target = orgId && invoiceId ? await claimedInvoice(invoiceId, orgId, eventAccount) : null;
+          const target = orgId && invoiceId ? await claimedInvoice(supabase, invoiceId, orgId, eventAccount) : null;
           if (target && orgId && invoiceId) {
             const started = await noteTransferStarted(supabase, {
               orgId,
@@ -616,7 +360,7 @@ export async function POST(req: Request) {
       const invoiceId = session.metadata.invoice_id;
       const pi = typeof session.payment_intent === "string" ? session.payment_intent : (session.payment_intent?.id ?? null);
       if (!orgId || !invoiceId || !pi) break;
-      const target = await claimedInvoice(invoiceId, orgId, eventAccount);
+      const target = await claimedInvoice(supabase, invoiceId, orgId, eventAccount);
       if (!target) break;
       const amount = invoiceCredit((session.amount_total ?? 0) / 100, session.metadata);
       const ended = await resolveTransfer(supabase, {
@@ -773,12 +517,16 @@ export async function POST(req: Request) {
           md.org_id,
           // amount_received is the settled figure; with capture_method automatic it equals amount.
           invoiceCredit((pi.amount_received ?? 0) / 100, pi.metadata as Record<string, string> | null),
-          event.id,
+          // NOT event.id: the key is derived from the PaymentIntent, the same one the Pay Now
+          // sheet's own check books under (tapPaymentOutcome), so whichever writer is second hits
+          // the unique index. A resend of this event carries the same pi.id, so it is still a
+          // retry, not a second payment.
+          tapPaymentKey(pi.id),
           pi.id,
           eventAccount,
           // Settles, never sends: createTapPaymentIntent mints on a draft only after the person said
           // yes to "Send INV-078 as the bill first?" and it was sent (lib/pay-door-send).
-          { note: "Tap to Pay on iPhone", said: "paid by card in person" },
+          TAP_VIA,
         );
       }
       break;

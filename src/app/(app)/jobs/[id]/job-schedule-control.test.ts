@@ -66,12 +66,21 @@ describe("the job page's Scheduled box: the length beside the start", () => {
     expect(text(box({ start: at("2026-09-28", "10:00"), end: at("2026-09-28", "12:00") }))).not.toContain("Its own hours");
   });
 
-  it("several days: the start of the first, full days, and no lengths to pick", () => {
-    const html = box({ start: at("2026-09-28", "10:00"), end: at("2026-09-30", "17:00"), segments: [{ start_date: "2026-09-28", end_date: "2026-09-30" }] });
+  it("several days (a second date range): the End and the lengths stay, and the words say each day (Erik, 2026-09-29)", () => {
+    const html = box({ start: at("2026-09-28", "10:00"), end: at("2026-09-30", "12:00"), segments: [{ start_date: "2026-09-28", end_date: "2026-09-28" }, { start_date: "2026-09-30", end_date: "2026-09-30" }] });
     expect(html).toMatch(/aria-label="Start time"/);
-    expect(html).not.toMatch(/aria-label="End time"/);
-    expect(html).not.toMatch(/>2h</);
-    expect(text(html)).toContain("full days through Wed, Sep 30");
+    expect(html).toMatch(/aria-label="End time"/);
+    expect(html).toMatch(/<button[^>]*aria-pressed="true"[^>]*>2h<\/button>/);
+    expect(text(html)).toContain("10:00 AM – 12:00 PM each day through Wed, Sep 30 · 2 hours — change it");
+    expect(text(html)).not.toContain("full days");
+  });
+
+  it("Full Day on several days reads as a full day each day, with Full Day pressed (the size the chip stores is a working day)", () => {
+    // What the Full Day chip stores on Erik's two-day job (planJobTimes: 9:00 first day, 5:00 PM last day, planned 480).
+    const html = box({ start: at("2026-09-28", "09:00"), end: at("2026-09-30", "17:00"), planned: 480, segments: [{ start_date: "2026-09-28", end_date: "2026-09-28" }, { start_date: "2026-09-30", end_date: "2026-09-30" }] });
+    expect(html).toMatch(/<button[^>]*aria-pressed="true"[^>]*>Full Day<\/button>/);
+    expect(html).not.toMatch(/<button[^>]*aria-pressed="true"[^>]*>2h<\/button>/);
+    expect(text(html)).toContain("9:00 AM – 5:00 PM each day through Wed, Sep 30 · All day");
   });
 
   it("no day yet: it says what a day will bring", () => {
@@ -110,5 +119,19 @@ describe("where each edit goes (source)", () => {
     // The size reaches the Start box, so the end it predicts is the end the writer keeps.
     expect(src).toContain("plannedMinutes={plannedMinutes}");
     expect(page).toMatch(/const block = readJobBlock\(\{\s*scheduledStart: j\.scheduled_start \?\? null,\s*scheduledEnd: j\.scheduled_end \?\? null,\s*plannedMinutes: j\.planned_minutes \?\? null,\s*tz,\s*workDay,/);
+  });
+
+  it("the crew's Scheduled line reads start AND end on several days too ('10:00 AM – 12:00 PM each day'), never just a start", () => {
+    const page = readFileSync(join(process.cwd(), "src/app/(app)/jobs/[id]/page.tsx"), "utf8");
+    const from = page.indexOf("const scheduleText");
+    const line = page.slice(from, page.indexOf("})();", from));
+    expect(line).not.toContain("`starts ${hmWords(block.startHm)}`");
+    expect(line).toContain('`${hmWords(block.startHm)} – ${hmWords(block.endHm)}${block.multiDay ? " each day" : ""}`');
+  });
+
+  it("the job page's Add Time Entry hands the clock-out sheet the work day's end (End Of Work Day on a forgotten punch)", () => {
+    const page = readFileSync(join(process.cwd(), "src/app/(app)/jobs/[id]/page.tsx"), "utf8");
+    const from = page.indexOf("<AddTimeEntry");
+    expect(page.slice(from, page.indexOf("/>", from))).toContain("workDayEnd={workDay.end}");
   });
 });

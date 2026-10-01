@@ -36,6 +36,9 @@ const { TEST_DBPW, TEST_DB_HOST, TEST_DB_USER } = process.env;
 const d = TEST_DBPW && TEST_DB_HOST && TEST_DB_USER ? describe : describe.skip;
 const migrations = join(process.cwd(), "supabase/migrations");
 const M0370 = readFileSync(join(migrations, readdirSync(migrations).find((n) => n.startsWith("0370_"))!), "utf8");
+// 0372 re-creates job_day_block_min on the rule the app draws since cn-v1031 (a job's hours are its
+// hours on each of its days); applied after 0370, exactly as the database will carry it.
+const M0372 = readFileSync(join(migrations, readdirSync(migrations).find((n) => n.startsWith("0372_"))!), "utf8");
 const LA = "America/Los_Angeles";
 const WORK_DAY = { start: "09:00", end: "17:00" };
 
@@ -158,9 +161,11 @@ d("each day keeps its own hours (0370)", () => {
     await c.query("begin");
     await c.query("set local lock_timeout = '5s'");
     await c.query("set local statement_timeout = '30s'");
-    // The file on this branch, twice: it must run twice without complaint.
+    // The files on this branch, twice: they must run twice without complaint.
     await c.query(M0370);
     await c.query(M0370);
+    await c.query(M0372);
+    await c.query(M0372);
 
     const org = await mintThrowawayOrg(c, { label: "0370 each day's hours", techs: 1 });
     orgId = org.orgId;

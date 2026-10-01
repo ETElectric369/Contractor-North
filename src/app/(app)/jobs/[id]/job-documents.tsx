@@ -13,7 +13,7 @@ import { formatDate } from "@/lib/utils";
 import { MediaLightbox } from "@/components/media-lightbox";
 import { prettyBytes, readReceiptDocument, type ReceiptTone } from "@/lib/receipt-capture";
 import { isCostableCategory } from "@/lib/job-photos";
-import { deleteDocument, updateDocument } from "../actions";
+import { deleteDocument, linkReceiptToBill, updateDocument } from "../actions";
 
 /** A Receipt or a Bill: what Record As Cost reads into a job cost (lib/job-photos, the same rule
  *  that decides which papers can be "Not On A Bill Yet"). */
@@ -45,7 +45,14 @@ type BillNote = {
   /** A bill already carries this paper's number, so nothing was written (audit v994): the row
    *  offers Different Purchase: Record It Anyway, because only a person can say it isn't the same. */
   different?: boolean;
+  /** …and, when that bill is on this job (d1ff7c5a), Same Purchase: It's That Bill, which ties the
+   *  paper to it (linkReceiptToBill) instead of reading it again or billing it twice. */
+  sameBillId?: string;
+  sameOnThisJob?: boolean;
 };
+
+/** One of the job's live bills, said the way the page says them ("the CED bill #8802-1106969"). */
+export type BillChoice = { id: string; label: string };
 
 const NOTE_COLOR: Record<ReceiptTone, string> = {
   ok: "text-emerald-600",
@@ -72,6 +79,13 @@ const NOTE_COLOR: Record<ReceiptTone, string> = {
  * made a bill on this job says which (`billOf`); a receipt or bill on no bill at all (`looseIds`)
  * says so beside its Record As Cost, and the fold's line counts those and starts open while there
  * are any, so an unrecorded receipt is never folded out of sight.
+ *
+ * A LOOSE RECEIPT CAN SAY "IT IS THAT BILL" (d1ff7c5a). A bill typed by hand with the receipt
+ * uploaded separately, or a paper the reader answered "already on the books" for, left the receipt
+ * "Not on a bill yet" beside the very bill it made, and the only doors were another paid read or a
+ * second bill. Every such row now carries Already On A Bill: <the job's live bills> + Tie It, and
+ * the reader's "already on the books" answer carries Same Purchase: It's That Bill when that bill is
+ * on this job. Both write the one missing tie (linkReceiptToBill), and a refusal is said on the row.
  */
 export function JobDocuments({
   // Unused since the uploader went to the top of the tab (W1-23); kept so the page's mount holds.
@@ -85,6 +99,7 @@ export function JobDocuments({
   billOf = null,
   looseIds = null,
   tieNote = null,
+  bills = null,
 }: {
   orgId: string;
   jobId: string;
@@ -109,6 +124,9 @@ export function JobDocuments({
   /** Said when the ties couldn't be read (the bills then draw no Receipt door): the fold starts open
    *  so it is seen. */
   tieNote?: string | null;
+  /** The job's live bills, for a loose receipt's Already On A Bill → Tie It (the office only; a
+   *  tech is handed none, and no loose rows either). Empty or null: no tie door is drawn. */
+  bills?: BillChoice[] | null;
 }) {
   const router = useRouter();
   const onPhotoTab = new Set(photoTabIds ?? []);
@@ -131,6 +149,10 @@ export function JobDocuments({
   // Per-document "recorded as a job cost" status, keyed by document id.
   const [billing, setBilling] = useState<string | null>(null);
   const [billMsg, setBillMsg] = useState<Record<string, BillNote>>({});
+  // Which bill a loose receipt's Already On A Bill picker points at, per document (the first
+  // live bill until a person picks another).
+  const [tiePick, setTiePick] = useState<Record<string, string>>({});
+  const billChoices = bills ?? [];
 
   const note = (docId: string, n: BillNote | null) =>
     setBillMsg((m) => {
@@ -152,8 +174,28 @@ export function JobDocuments({
         done: out.kind !== "filed",
         tone: out.tone,
         different: out.kind === "already" && out.samePurchase === true,
+        ...(out.kind === "already" && out.samePurchase && out.sameBillId ? { sameBillId: out.sameBillId, sameOnThisJob: out.sameOnThisJob === true } : {}),
       });
       if (out.kind === "billed") router.refresh();
+    } finally {
+      setBilling(null);
+    }
+  }
+
+  // "It IS that bill": write the one missing tie (linkReceiptToBill, job containment checked
+  // there), say the outcome on the row, and refresh so the row, the Costs chip and Needs You all
+  // read the tie. A refusal stays on the row in words.
+  async function tieToBill(d: Doc, billId: string) {
+    setBilling(d.id);
+    try {
+      const res = await linkReceiptToBill(billId, d.id);
+      if (!res.ok) {
+        note(d.id, { text: res.error ?? "The tie didn't save. Try again.", done: false, tone: "fail" });
+        return;
+      }
+      const label = billChoices.find((b) => b.id === billId)?.label;
+      note(d.id, { text: `On ${label ?? "that bill"}.`, done: true, tone: "ok" });
+      router.refresh();
     } finally {
       setBilling(null);
     }
@@ -277,14 +319,59 @@ export function JobDocuments({
             </Link>
           </div>
         )}
+        {/* A receipt on no bill, with the job's bills to choose from: it may already BE one of them
+            (typed by hand, the photo uploaded apart). Tie It writes the one missing link. */}
+        {loose?.has(d.id) && !n?.done && billChoices.length > 0 && (
+          <div className="pl-15 flex flex-wrap items-center gap-2">
+            <label htmlFor={`tie-${d.id}`} className="text-xs font-medium text-slate-600">
+              Already On A Bill:
+            </label>
+            <Select
+              id={`tie-${d.id}`}
+              className="h-11 w-auto max-w-full"
+              value={tiePick[d.id] ?? billChoices[0].id}
+              onChange={(e) => setTiePick((m) => ({ ...m, [d.id]: e.target.value }))}
+              disabled={billing === d.id}
+            >
+              {billChoices.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.label}
+                </option>
+              ))}
+            </Select>
+            <button
+              type="button"
+              onClick={() => tieToBill(d, tiePick[d.id] ?? billChoices[0].id)}
+              disabled={billing === d.id}
+              className="inline-flex min-h-11 items-center gap-1.5 rounded-md border border-slate-300 px-3 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            >
+              {billing === d.id ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              Tie It
+            </button>
+          </div>
+        )}
         {n && (
           <div className={`pl-15 text-xs ${NOTE_COLOR[n.tone]}`}>
             {n.text}
           </div>
         )}
         {n?.different && (
-          <div className="pl-15">
+          <div className="pl-15 flex flex-wrap items-center gap-2">
+            {/* The reader found this paper's number on a bill of THIS job: most often it is that
+                bill's own receipt, so the first door ties it, never reads or bills it again. */}
+            {n.sameOnThisJob && n.sameBillId && (
+              <button
+                type="button"
+                onClick={() => tieToBill(d, n.sameBillId!)}
+                disabled={billing === d.id}
+                className="inline-flex min-h-11 items-center gap-1.5 rounded-md border border-brand/30 bg-brand/5 px-3 text-xs font-medium text-brand hover:bg-brand/10 disabled:opacity-50"
+              >
+                {billing === d.id ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                Same Purchase: It&apos;s That Bill
+              </button>
+            )}
             <button
+              type="button"
               onClick={() => recordCost(d, true)}
               disabled={billing === d.id}
               className="inline-flex min-h-11 items-center gap-1.5 rounded-md border border-slate-300 px-3 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
