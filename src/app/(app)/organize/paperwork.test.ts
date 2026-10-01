@@ -2038,7 +2038,7 @@ describe("importCedInvoices knows a PDF by its content, never its name", () => {
     const res = await importCedInvoices({ files: [{ name: "statement.txt", text: "%PDF-1.7\n1 0 obj << >>" }] });
     expect(res.ok).toBe(false);
     expect(res.error).toContain("statement.txt reached here as raw PDF bytes");
-    expect(res.error).toContain("Choose Supplier PDFs");
+    expect(res.error).toContain("Put it in through Snap Or Note");
   });
 });
 

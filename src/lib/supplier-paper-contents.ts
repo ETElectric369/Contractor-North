@@ -125,7 +125,7 @@ export function paperContents(input: {
       : input.pdfCheckFailed
         ? "It couldn't check for its PDF just now."
         : fileName
-          ? `Its PDF wasn't saved here, only what was read from ${fileName}. Choose that PDF again with Choose Supplier PDFs on Bills to keep it.`
+          ? `Its PDF wasn't saved here, only what was read from ${fileName}. Put that PDF in again through Snap Or Note on Bills to keep it.`
           : "It came in as pasted text, so there's no PDF here.";
   return { invoiceNumber: String(input.invoice?.invoice_number ?? ""), lines, tax, shipping, total, offLines, pdfUrl, pdfNote };
 }

@@ -231,7 +231,7 @@ describe("a CED PDF is kept once, and every invoice in it can open it", () => {
     const rows = did("supplier_invoices", "insert")[0].payload as any[];
     expect(rows.map((r) => r.source_file)).toEqual(["invoice_8802-1101363.pdf", "invoice_8802-1101363.pdf"]);
     expect(res.message).toContain("This PDF didn't save, so Open Bill can't show it: invoice_8802-1101363.pdf (the upload failed (Bucket unreachable))");
-    expect(res.message).toContain("Choose it again with Choose Supplier PDFs to keep the PDF.");
+    expect(res.message).toContain("Put it in again through Snap Or Note to keep the PDF.");
   });
 
   it("storage saying the object is already there is the answer we wanted: the path is recorded", async () => {

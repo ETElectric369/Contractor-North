@@ -637,14 +637,14 @@ export function SuppliersCard({
         </WhyFold>
 
         {/* NOTHING HIDES: money on bills with no supplier account is in no balance until it is filed,
-            and the doors that file it live under More. */}
+            and the door that files it lives on Reconcile. A LINK, not a second copy of that door. */}
         {/* EVERY PAPER THAT IS NOT ON AN ACCOUNT YET, INCLUDING THE ONES WITH NO NAME ON THEM. The
             count used to come from a list of SPELLINGS, so a bill carrying no supplier name at all
             was dropped from it while All Bills went on counting the money - the two halves of one
             screen disagreeing by exactly the rows nothing on the page mentioned. */}
         {notOnAccount && notOnAccount.papers > 0 ? (
           <a
-            href="#supplier-names"
+            href="/reconcile#not-on-an-account"
             className="mb-2 flex min-h-11 items-center justify-between gap-3 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900 hover:bg-amber-100"
           >
             <span className="min-w-0">
@@ -665,7 +665,7 @@ export function SuppliersCard({
           unassigned &&
           unassigned.total > 0.005 && (
             <a
-              href="#supplier-names"
+              href="/reconcile#not-on-an-account"
               className="mb-2 flex min-h-11 items-center justify-between gap-3 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900 hover:bg-amber-100"
             >
               <span className="min-w-0">

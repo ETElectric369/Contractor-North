@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
 import { computeOwnerMoney, countedNotPaidLine, ownerMoneyWindow, type OwnerMoneyInputs } from "@/lib/analytics/owner-money";
 import { buildAccountantWorkbook, periodFromKey, type AccountantWorkbookInput } from "@/lib/accountant-workbook";
 import { readSupplierOwed } from "@/lib/supplier-owed-read";
@@ -277,6 +278,32 @@ describe("one book of paper, three doors, one figure", () => {
     expect(workbookOwed(blind)).toBe(3500);
     expect(workbookOwed(blind)).not.toBe(read!.owed.total);
     expect(workbookRows(blind).map((r) => r.name)).toContain("NWS Counter");
+  });
+
+  /**
+   * ── THE FOURTH DOOR: /reconcile (cn-v1037) ───────────────────────────────────────────────────
+   *
+   * Reconcile draws the two figures AGAINST EACH OTHER, per supplier, which makes it the most
+   * dangerous reader of all: two numbers side by side read as having been checked against each
+   * other, so a wrong one there is the most convincing wrong screen in the app. The only safe
+   * fourth door is one that calls this very read, so it is asserted in one line here — and the
+   * per-account slice it draws comes out of the same read rather than a filter of its own.
+   *
+   * (The ban on it computing a figure itself is the tripwire in supplier-owed-one-place.test.ts.)
+   */
+  it("Reconcile is the FOURTH door and reads this same figure, per account as well as in total", async () => {
+    const read = await readSupplierOwed(fakeSupabase(), ORG);
+    const page = readFileSync(new URL("../app/(app)/reconcile/page.tsx", import.meta.url), "utf8");
+    expect(page).toContain("readSupplierOwed(supabase, orgId)");
+    // Their side is the line out of `whatISupplierOwed`; our side is that account's own slice of
+    // `whatIBoughtNotSettled`. Both arrive from this read; neither is worked out on the page.
+    const line = read!.owed.lines.find((l) => l.accountId === ACCOUNT)!;
+    expect(line.owed).toBe(3000);
+    expect(read!.boughtByAccount[ACCOUNT].total).toBe(3500);
+    // The per-account slices add back up to the whole-book figure: no ticket is in two accounts and
+    // none is dropped, which is what would make a per-supplier row quietly wrong.
+    const slices = Object.values(read!.boughtByAccount).reduce((s, b) => s + b.total, 0);
+    expect(slices).toBe(read!.bought.total);
   });
 });
 

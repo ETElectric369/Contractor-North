@@ -1,5 +1,6 @@
 import {
   Sun,
+  ArrowLeftRight,
   Ban,
   Briefcase,
   Play,
@@ -228,6 +229,13 @@ export const DOCK: DockSection[] = [
       // Purchase Orders off: the row reads "Bills" and still owns /purchasing, so a PO opened by
       // a link lights Money (with the Off line on top).
       { id: "m-bills", label: "Bills & POs", icon: Wallet, href: "/bills", owns: ["/purchasing"], whenOff: { feature: "purchase_orders", label: "Bills" } },
+      // RECONCILE (cn-v1037): the two-records-that-should-agree work that used to be a collapsed
+      // fold at the bottom of Bills. A SIBLING of Bills, never a tile of its own — it is occasional
+      // office work, not a door anybody taps in a truck. Right AFTER m-bills, because dock.test.ts
+      // pins Timecards' neighbour as m-bills and a row squeezed in above it breaks that.
+      // staffOnly is the dock half of techs-never-see-prices; the page's redirect is the boundary.
+      // No `feature` key: this is not a paid tier and KISS says no new switch.
+      { id: "m-recon", label: "Reconcile", icon: ArrowLeftRight, href: "/reconcile", staffOnly: true },
       { id: "m-price", label: "Price List", icon: Tags, href: "/price-list" },
       // Money admin — promoted out of Office (Alexa's open "under billing?" call, now answered).
       { id: "m-ma-h", label: "Money admin", icon: Calculator, header: true },

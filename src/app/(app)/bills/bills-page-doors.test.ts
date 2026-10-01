@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeAll, afterAll } from "vitest";
+import { countDoors, doorsIn, sectionOf, textOf } from "@/test/rendered-page";
 import { renderToStaticMarkup } from "react-dom/server";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -279,44 +280,43 @@ beforeAll(async () => {
 }, 30_000);
 afterAll(() => vi.useRealTimers());
 
-/** The element carrying `id`, whole: from its opening tag to the tag that closes it. */
-function section(id: string): string {
-  const at = html.indexOf(` id="${id}"`);
-  if (at < 0) throw new Error(`no element with id ${id}`);
-  const open = html.lastIndexOf("<", at);
-  const tag = /^<([a-zA-Z0-9]+)/.exec(html.slice(open))![1];
-  const re = new RegExp(`<(/?)${tag}(?=[\\s>])[^>]*>`, "g");
-  re.lastIndex = open;
-  let depth = 0;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(html))) {
-    depth += m[1] ? -1 : 1;
-    if (depth === 0) return html.slice(open, re.lastIndex);
-  }
-  return html.slice(open);
-}
-/** What a person reads on a control: its text, tags and whitespace dropped. */
-const text = (s: string) =>
-  s
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&#x27;|&#39;/g, "'")
-    .replace(/&quot;/g, '"')
-    .replace(/\s+/g, " ");
-/** The words on every <button>, <a> and <summary> in a piece of the page. */
-function doors(s: string): string[] {
-  return Array.from(s.matchAll(/<(button|a|summary)\b[^>]*>([\s\S]*?)<\/\1>/g)).map((m) => text(m[2]).trim());
-}
-const count = (list: string[], label: string | RegExp) =>
-  list.filter((d) => (typeof label === "string" ? d === label : label.test(d))).length;
+/** The four readers live in src/test/rendered-page.ts now: /reconcile's door test needs the same
+ *  ones, and a fourth hand-copy of "what is inside the element carrying this id" is how two door
+ *  tests come to disagree about whether a button is in a section. */
+const section = (id: string) => sectionOf(html, id);
+const doors = doorsIn;
+const text = textOf;
+const count = countDoors;
 
 describe("the page, in Wave B's order", () => {
-  it("reads Bills, search, Needs You, Suppliers, All Bills, More, top to bottom", () => {
+  it("reads Bills, search, Needs You, Suppliers, All Bills, and the Reconcile link, top to bottom", () => {
     expect(text(html)).toContain("Bills");
     expect(html).not.toContain("Bills &amp; purchasing");
-    const order = ['id="bills-search"', 'id="needs-you"', 'id="sort-these"', 'id="suppliers"', 'id="all-bills"', 'id="more"'].map((k) => html.indexOf(k));
+    const order = ['id="bills-search"', 'id="needs-you"', 'id="sort-these"', 'id="suppliers"', 'id="all-bills"', 'id="reconcile-link"'].map((k) => html.indexOf(k));
     for (const i of order) expect(i).toBeGreaterThan(-1);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
+  });
+
+  /**
+   * THE "MORE" FOLD IS GONE, NOT HIDDEN (cn-v1037).
+   *
+   * It held the import door and all the supplier-name housekeeping, collapsed, at the bottom of the
+   * page that answers "what came in and what do I owe" — a confession that the work was not this
+   * page's. /reconcile answers it now, and exactly ONE LINK sits where the fold was. A link is not
+   * duplication; a second copy of a control is, which is what the HOMES table below proves.
+   */
+  it("the More fold is gone from the markup entirely, and one link to Reconcile stands where it was", () => {
+    expect(html).not.toContain('id="more"');
+    expect(html).not.toContain('id="ced-import"');
+    expect(html).not.toContain('id="supplier-names"');
+    expect(html).not.toContain('id="same-ticket-two-jobs"');
+    expect(count(doors(html), /^More · /)).toBe(0);
+    expect(text(html)).not.toContain("Imports And Supplier Names");
+    // One link, and it is the LAST thing on the page: the once-a-month errand, under the daily work.
+    const link = section("reconcile-link");
+    expect(count(doors(html), /Open Reconcile$/)).toBe(1);
+    expect(link).toContain('href="/reconcile"');
+    expect(text(link)).toContain("Supplier names, and tickets filed twice, are sorted out on Reconcile.");
   });
 });
 
@@ -385,18 +385,14 @@ const HOMES: { door: string | RegExp; was: string; home: string; times?: number 
   { door: "New PO", was: "Purchase Orders tab (the list's ⋯ now)", home: "all-bills", times: 1 },
   { door: /^PO PO-001 · CED/, was: "Purchase Orders row (a PO chip in the one list now)", home: "all-bills" },
   { door: "IMG_0412.jpg", was: "Receipts tab file link (a File chip in the one list now)", home: "all-bills" },
-  // 4-8. Housekeeping and the import -> More
-  { door: /^More · /, was: "(new fold)", home: "more" },
-  // Import Supplier Invoices is one line now (W1-30); Paste Text Instead and its Import Documents
-  // went into Snap Or Note's note box. Choose Supplier PDFs stays one more release (three sentences
-  // outside this lane still name it).
-  { door: "Choose Supplier PDFs", was: "Import fold", home: "more" },
-  { door: /^Accept And (File Them There|Make The Account)$/, was: "Supplier Names That Look Like One Account", home: "more" },
-  { door: "Not The Same", was: "Supplier Names That Look Like One Account", home: "more" },
-  { door: "Give It Its Own Account", was: "Supplier Names Not On An Account Yet", home: "more" },
-  { door: "Join Them Onto One Account", was: "Same Supplier, Or Two?", home: "more" },
-  { door: "Keep Them Separate", was: "Same Supplier, Or Two?", home: "more" },
-  { door: /^Keep It On /, was: "The Same Ticket On Two Jobs", home: "more", times: 2 },
+  // 4-8. Housekeeping and the import LEFT THIS PAGE (cn-v1037). Every door that was in the More
+  // fold now lives on /reconcile and is pinned there, in reconcile-page-doors.test.ts' own HOMES
+  // table: Accept And File Them There, Accept And Make The Account, Not The Same, Give It Its Own
+  // Account, Join Them Onto One Account, Keep Them Separate, Keep It On <job>. The import door
+  // (Choose Supplier PDFs) was DELETED rather than moved — it was a second copy of Snap Or Note by
+  // this page's own admission, and carrying it would have made Reconcile a paper-intake door. What
+  // stands here is one link, and the test above proves the fold itself is gone.
+  { door: /Open Reconcile$/, was: "the More fold (deleted; its doors are on /reconcile)", home: "reconcile-link", times: 1 },
 ];
 
 describe("every door keeps exactly one home", () => {
@@ -480,11 +476,14 @@ describe("every door keeps exactly one home", () => {
     expect(text(ced)).toContain("Where This Comes From");
   });
 
-  it("the same ticket on two jobs is pointed at from Needs You and answered under More", () => {
+  it("the same ticket on two jobs is pointed at from Needs You and answered on Reconcile", () => {
+    // The POINTER stays here, because Needs You is where he looks for a decision. The picking is
+    // Reconcile's, so the href crosses pages and this page holds no copy of the control.
     const pointer = doors(html).filter((d) => d.includes("Sort It Out"));
     expect(pointer).toHaveLength(1);
-    expect(html).toMatch(/href="#same-ticket-two-jobs"/);
-    expect(section("more")).toContain('id="same-ticket-two-jobs"');
+    expect(html).toMatch(/href="\/reconcile#same-ticket-two-jobs"/);
+    expect(html).not.toMatch(/href="#same-ticket-two-jobs"/);
+    expect(count(doors(html), /^Keep It On /)).toBe(0);
   });
 
   it("a paper on a Needs You card is never listed a second time in the supplier's own lists", () => {
@@ -512,16 +511,20 @@ describe("one door for papers (Wave 0; W1-30)", () => {
     expect(count(doors(section("all-bills")), "IMG_0412.jpg")).toBe(1);
   });
 
-  it("one paper door: Snap Or Note in the header, no Drop Paperwork, no Paste Text Instead, and the import is one line with a Why?", () => {
+  it("ONE paper door, and now there is only one: Snap Or Note in the header, and no import door left at all", () => {
     expect(count(doors(html.slice(0, html.indexOf('id="bills-search"'))), "Snap Or Note")).toBe(1);
     expect(text(html)).not.toContain("Drop Paperwork");
     expect(count(doors(html), "Paste Text Instead")).toBe(0);
     expect(count(doors(html), "Import Documents")).toBe(0);
     expect(html).not.toContain('name="text"');
-    const imp = section("ced-import");
-    expect(text(imp)).toContain("Import Supplier Invoices");
-    expect(text(imp)).toContain("Supplier PDFs, statements and open lists go in through Snap Or Note.");
-    expect(count(doors(imp), "Why?")).toBe(1);
+    // THE SECOND COPY IS DELETED (cn-v1037). "Import Supplier Invoices" was a whole block saying
+    // papers go in through Snap Or Note, with a button under it that did the same thing. Snap Or
+    // Note is the one door; nothing was moved to Reconcile, because an intake door there would have
+    // made Reconcile a paper-intake screen instead of a reading of two records.
+    expect(html).not.toContain('id="ced-import"');
+    expect(count(doors(html), "Choose Supplier PDFs")).toBe(0);
+    expect(text(html)).not.toContain("Import Supplier Invoices");
+    expect(text(html)).not.toContain("Supplier PDFs, statements and open lists go in through Snap Or Note.");
   });
 });
 
@@ -702,16 +705,16 @@ describe("All Bills is one list", () => {
   });
 });
 
-describe("a one-tap write with no undo says so on screen, not only in a fold", () => {
-  it("Not The Same and Keep Them Separate each carry their warning outside the Why? fold", () => {
-    const more = section("more");
-    expect(text(more)).toContain("Not The Same Can't Be Undone Here");
-    expect(text(more)).toContain("Keeping Them Separate Can't Be Undone Here");
-    // Not inside a Why? fold's body: the warning sits just above the buttons.
-    for (const fold of more.match(/<div class="mb-2 space-y-1 leading-relaxed">[\s\S]*?<\/div>/g) ?? []) {
-      expect(fold).not.toContain("Undone Here");
-    }
-    expect(text(more)).toContain("What Does Each Answer Do?");
+/**
+ * THE NO-UNDO WARNINGS TRAVELLED WITH THEIR BUTTONS. "Not The Same Can't Be Undone Here" and
+ * "Keeping Them Separate Can't Be Undone Here" are a SAFETY test, and they are now pinned in
+ * reconcile-page-doors.test.ts beside the buttons they warn about. Here we only insist this page no
+ * longer carries either sentence, so a reader cannot be warned about a button that is not there.
+ */
+describe("the one-tap writes with no undo left with their warnings", () => {
+  it("/bills carries neither warning any more, because it carries neither button", () => {
+    expect(text(html)).not.toContain("Can't Be Undone Here");
+    expect(text(html)).not.toContain("What Does Each Answer Do?");
   });
 });
 
@@ -740,7 +743,7 @@ describe("the header, for a new company and one with data", () => {
       const fresh = renderToStaticMarkup((await BillsPage({ searchParams: Promise.resolve({}) })) as React.ReactElement);
       expect(text(fresh)).toContain("Drop a receipt or bill anywhere on this page.");
       expect(doors(fresh)).toEqual(["Snap Or Note", "Add By Hand"]);
-      for (const id of ["bills-search", "needs-you", "suppliers", "all-bills", "more"]) expect(fresh, id).not.toContain(`id="${id}"`);
+      for (const id of ["bills-search", "needs-you", "suppliers", "all-bills", "reconcile-link"]) expect(fresh, id).not.toContain(`id="${id}"`);
     } finally {
       CURRENT = TABLES;
     }
@@ -757,7 +760,7 @@ describe("the header, for a new company and one with data", () => {
       expect(fresh).toMatch(/aria-label="More For All Bills"/);
       expect(doors(fresh)).toContain("New PO");
       expect(text(fresh)).toContain("No bills or purchase orders yet. Add a bill with Snap Or Note at the top of this page, or tap ⋯ here for New PO.");
-      for (const id of ["bills-search", "needs-you", "suppliers", "more"]) expect(fresh, id).not.toContain(`id="${id}"`);
+      for (const id of ["bills-search", "needs-you", "suppliers", "reconcile-link"]) expect(fresh, id).not.toContain(`id="${id}"`);
     } finally {
       CURRENT = TABLES;
     }

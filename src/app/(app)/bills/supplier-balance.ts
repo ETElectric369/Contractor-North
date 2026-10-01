@@ -955,7 +955,8 @@ export function supplierCandidateQuestions(
   candidates: { a: string; b: string; reasons?: string[] }[] | null | undefined,
   book: {
     /** Money on a spelling that is on no account yet, keyed by the spelling lowercased. */
-    unfiled: Map<string, SupplierSpelling>;
+    /** READ ONLY here: a ReadonlyMap so a caller's own pile cannot be reached into and changed. */
+    unfiled: ReadonlyMap<string, SupplierSpelling>;
     /** The account a spelling is already filed under, keyed the same way. */
     accounts: Map<string, SupplierBookEntry>;
   },

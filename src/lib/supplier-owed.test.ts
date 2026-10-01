@@ -10,6 +10,7 @@ import {
   indexSupplierIdentity,
   isStillOwed,
   notOnAnAccountSentence,
+  papersOnNoAccountAside,
   resolveSupplierPapers,
   supplierAccountForPaper,
   supplierBalancesUnread,
@@ -299,6 +300,46 @@ describe("(a) what do I owe this supplier", () => {
       "$290.00 of this is on 2 papers that are not on a supplier account yet, counted under the name on the paper. 1 of them has no supplier name on it at all.",
     );
     expect(notOnAnAccountSentence({ papers: 0, total: 0, spellings: 0, unnamed: 0, credits: 0, creditPapers: 0 }, (v) => `$${v}`)).toBeNull();
+  });
+
+  /** ONE PAPER IS "that is". Three screens and Nort all say this sentence out loud; "1 paper that
+   *  are" reads as a machine talking, and he stops reading what a machine wrote. */
+  it("gets the verb right for a single paper", () => {
+    expect(
+      notOnAnAccountSentence({ papers: 1, total: 475.5, spellings: 1, unnamed: 0, credits: 0, creditPapers: 0 }, (v) => `$${v.toFixed(2)}`),
+    ).toBe("$475.50 of this is on 1 paper that is not on a supplier account yet, counted under the name on the paper.");
+  });
+
+  /**
+   * ── "OF THIS" IS TRUE ON THE SUPPLIERS CARD AND FALSE ON /reconcile ────────────────────────────
+   *
+   * The sentence above opens "$X OF THIS is on...", and on the Suppliers card that is exactly right:
+   * the figure over it is what he owes and these papers are inside it. Reconcile's lead is a different
+   * figure — how far his own tickets and his suppliers' own papers are APART — and a paper on no
+   * supplier account is in NEITHER side of it, so it contributes nothing at all to the gap. Reusing
+   * the card's sentence there told him that $475.50 of the $1,087.00 he was about to ring the counter
+   * about was sitting on an unfiled paper, which was false, and it broke the rule that nothing leaves
+   * a figure without the screen saying so — by saying the opposite.
+   *
+   * Both sentences are over ONE `NotOnAnAccount` and neither adds anything up. This test is what keeps
+   * the wrong one from being reached for again.
+   */
+  it("has a second sentence for a screen where that money is in NO figure, and it never says of this", () => {
+    const pile = { papers: 1, total: 475.5, spellings: 1, unnamed: 0, credits: 0, creditPapers: 0 };
+    const aside = papersOnNoAccountAside(pile, (v) => `$${v.toFixed(2)}`)!;
+    expect(aside).toBe(
+      "$475.50 is on 1 paper that is not on a supplier account yet, counted under the name on the paper. A paper on no account has no supplier balance to disagree with, so none of it is in a gap figure on this page.",
+    );
+    expect(aside).not.toContain("of this");
+    // Same grammar, same credit clause, same zero rule: nothing to say means no sentence.
+    expect(papersOnNoAccountAside({ ...pile, papers: 2, unnamed: 1, credits: 51.58, creditPapers: 1 }, (v) => `$${v.toFixed(2)}`)).toContain(
+      "2 papers that are not on a supplier account yet, counted under the name on the paper.",
+    );
+    expect(papersOnNoAccountAside({ ...pile, credits: 51.58, creditPapers: 1 }, (v) => `$${v.toFixed(2)}`)).toContain(
+      "A credit of $51.58 on 1 of them is money back, so it is not in that figure either.",
+    );
+    expect(papersOnNoAccountAside({ papers: 0, total: 0, spellings: 0, unnamed: 0, credits: 0, creditPapers: 0 }, (v) => `$${v}`)).toBeNull();
+    expect(papersOnNoAccountAside(null, (v) => `$${v}`)).toBeNull();
   });
 
   /**

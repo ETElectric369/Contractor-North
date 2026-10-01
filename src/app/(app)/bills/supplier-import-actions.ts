@@ -239,7 +239,7 @@ export async function importCedInvoices(input: SupplierImportInput): Promise<Sup
       // NOT A DEAD END: it names the file and it names the way forward.
       refused.push({
         invoiceNumber: null,
-        error: `${name} reached here as raw PDF bytes, not its text. Put it in through Snap Or Note, or pick it with Choose Supplier PDFs; both read the text out of it.`,
+        error: `${name} reached here as raw PDF bytes, not its text. Put it in through Snap Or Note, which reads the text out of it.`,
       });
       continue;
     }
@@ -699,7 +699,7 @@ export async function importCedInvoices(input: SupplierImportInput): Promise<Sup
     // NOTHING SILENT, AND NOT A DEAD END: the documents are in; this names the PDF that isn't, why,
     // and the way to keep it.
     detail.push(
-      `${pdfUnsaved.length === 1 ? "This PDF" : "These PDFs"} didn't save, so Open Bill can't show ${pdfUnsaved.length === 1 ? "it" : "them"}: ${sayList(pdfUnsaved)}. The documents are in. Choose ${pdfUnsaved.length === 1 ? "it" : "them"} again with Choose Supplier PDFs to keep the PDF.`,
+      `${pdfUnsaved.length === 1 ? "This PDF" : "These PDFs"} didn't save, so Open Bill can't show ${pdfUnsaved.length === 1 ? "it" : "them"}: ${sayList(pdfUnsaved)}. The documents are in. Put ${pdfUnsaved.length === 1 ? "it" : "them"} in again through Snap Or Note to keep the PDF.`,
     );
   }
   if (refused.length) {

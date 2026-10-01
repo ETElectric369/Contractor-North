@@ -176,10 +176,31 @@ describe("every tab count in the app is an open count", () => {
 });
 
 describe("the chrome's other numbers", () => {
-  it("the dock badges only Needs You (/planner, decisions only) and new unanswered leads (/leads)", () => {
+  it("the dock badges Needs You (/planner), new unanswered leads (/leads) and Reconcile — and nothing else", () => {
     const layout = read("app/(app)/layout.tsx");
-    expect(layout).toContain('return { "/planner": needsAction, "/leads": freshLeads };');
+    expect(layout).toContain('return { "/planner": needsAction, "/leads": freshLeads, "/reconcile": await reconcileP };');
     expect(layout).toMatch(/\.eq\("status", "new"\)\s*\.is\("converted_at", null\)/);
+    // Three keys in the whole map, and the amber dot on a tile is their sum over the rows it draws.
+    expect([...layout.matchAll(/"\/(planner|leads|reconcile)":/g)].length).toBe(6);
+  });
+
+  /**
+   * RECONCILE'S DOT IS A ROLLUP OVER KINDS, NOT A PILE OF ROWS (cn-v1037).
+   *
+   * A reconcile pile is undated and unbounded — papers under five spellings wait as long as nobody
+   * sorts them — and the badge invariant forbids counting a set like that on chrome. So the dot is
+   * how many KINDS have anything open, bounded by the union, and it reads THE SAME function the page
+   * reads so the two can never say different things.
+   */
+  it("Reconcile's dot counts kinds (a rollup), from the page's own read, and never through Needs You", () => {
+    const layout = read("app/(app)/layout.tsx");
+    expect(layout).toContain('import { readReconcileWork } from "@/app/(app)/reconcile/reconcile-read"');
+    expect(layout).toContain("return reconcileBadge(work.counts);");
+    // Not a row count, and not the Needs You engine (My Day stockpiled what he could not act on).
+    expect(layout).not.toMatch(/reconcile[^\n]*\.length/);
+    expect(layout).not.toContain("getActionItemsCount({ ...");
+    // Staff only: a tech's shell never spends a query on a page he cannot open.
+    expect(layout).toContain("if (!isStaff || !profile.org_id) return 0;");
   });
 
   it("the Sales dot counts only the leads due now: a lead snoozed from Needs You waits for its day, like its row", () => {
