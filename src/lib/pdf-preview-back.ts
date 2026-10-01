@@ -18,8 +18,10 @@ const DOC_PAGE: Record<string, (id: string) => string> = {
   quote: (id) => `/quotes/${id}`,
   "work-order": (id) => `/work-orders/${id}`,
   "material-list": (id) => `/materials/${id}`,
-  // Change orders have no page of their own; the list is where each one is opened from.
-  "change-order": () => "/change-orders",
+  // Change orders have no page of their own, and no list (W2-12): each lives on its job's Change
+  // Orders tab, whose door passes back=/jobs/<id>?tab=change-orders (that wins above). The id here is
+  // the change order's, never the job's, so with no back= the honest page is Jobs.
+  "change-order": () => "/jobs",
   // The prelim notice is printed from the job, and its id IS the job id.
   "prelim-notice": (jobId) => `/jobs/${jobId}`,
   // The panel directory is printed from the job's Panel tab, and its id is the job id too.

@@ -8,9 +8,9 @@ import { EditMemberButton } from "../settings/edit-member-button";
 import { setMemberActive, memberFootprint, removeMember } from "../settings/actions";
 
 /** The one menu-row style — shared with EditMemberButton (composed in as the first row)
- *  so every row in the panel looks identical (same recipe as JobManageMenu). */
+ *  so every row in the panel looks identical (same recipe as JobManageMenu). 44px tall. */
 const ROW_CLS =
-  "relative z-10 flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm font-medium text-slate-700 hover:bg-[rgb(var(--glass-tint))]/15 disabled:opacity-50";
+  "relative z-10 flex min-h-11 w-full items-center gap-3 px-4 py-2.5 text-left text-sm font-medium text-slate-700 hover:bg-[rgb(var(--glass-tint))]/15 disabled:opacity-50";
 
 interface Member {
   id: string;
@@ -27,8 +27,10 @@ interface Member {
 /**
  * The /team roster's per-member "⋯" SEEK menu — the real lifecycle verbs a member
  * carries: Edit & role + Reset login (the composed EditMemberButton modal), Deactivate
- * / Reactivate (setMemberActive — a deactivated member is actually locked OUT now, the
- * app layout redirects them), and Remove (danger, LAST). Remove is the zero-footprint
+ * (Lock Out) / Reactivate (setMemberActive — a deactivated member is actually locked OUT now,
+ * the app layout redirects them, and their login is banned), and Remove (danger, LAST).
+ * Deactivate here is the ONE door (W2-04): the edit has no Status select, because only
+ * setMemberActive stamps who and when and bans or lifts the login. Remove is the zero-footprint
  * path only: a member who ever logged time is DEACTIVATED to keep their history (how the
  * operator removed Ryan/Danny); only a never-used account is offered a hard remove.
  *
@@ -153,7 +155,7 @@ export function TeamMemberMenu({
         aria-haspopup="menu"
         aria-expanded={open}
         title="Manage member"
-        className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-600 hover:bg-slate-50"
+        className="inline-flex h-11 w-11 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-600 hover:bg-slate-50"
       >
         <MoreHorizontal className="h-5 w-5" />
       </button>
@@ -193,12 +195,12 @@ export function TeamMemberMenu({
                 ) : (
                   <Play className="h-4 w-4 shrink-0 text-[rgb(var(--glass-ink))]" />
                 )}
-                {member.active ? "Deactivate (lock out)" : "Reactivate"}
+                {member.active ? "Deactivate (Lock Out)" : "Reactivate"}
               </button>
               <button
                 onClick={runRemove}
                 disabled={busy !== null}
-                className="relative z-10 flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm font-medium text-red-600 hover:bg-red-50/60 disabled:opacity-50"
+                className="relative z-10 flex min-h-11 w-full items-center gap-3 px-4 py-2.5 text-left text-sm font-medium text-red-600 hover:bg-red-50/60 disabled:opacity-50"
               >
                 {busy === "remove" ? (
                   <Loader2 className="h-4 w-4 shrink-0 animate-spin" />

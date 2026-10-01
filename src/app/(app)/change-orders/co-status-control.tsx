@@ -32,13 +32,18 @@ export function CoStatusControl({
 
   if (status !== "pending") {
     return (
-      <button
-        onClick={() => set("pending")}
-        disabled={pending}
-        title={err ?? "Reset to pending"}
-      >
-        <Badge tone={statusTone(status)}>{status}</Badge>
-      </button>
+      <div className="flex items-center gap-1.5">
+        {/* Said beside the badge, not only in a tooltip a phone never shows. */}
+        {err && <span className="text-xs text-rose-600">{err}</span>}
+        <button
+          onClick={() => set("pending")}
+          disabled={pending}
+          title={err ?? "Reset to pending"}
+          className="inline-flex min-h-11 items-center"
+        >
+          <Badge tone={statusTone(status)}>{status}</Badge>
+        </button>
+      </div>
     );
   }
 
@@ -48,14 +53,14 @@ export function CoStatusControl({
       <button
         onClick={() => set("approved")}
         disabled={pending}
-        className="inline-flex items-center gap-1.5 rounded-lg bg-green-50 px-2 py-1 text-xs font-medium text-green-700 hover:bg-green-100"
+        className="inline-flex min-h-11 items-center gap-1.5 rounded-lg bg-green-50 px-2 py-1 text-xs font-medium text-green-700 hover:bg-green-100"
       >
         <Check className="h-4 w-4 shrink-0" /> Approve
       </button>
       <button
         onClick={() => set("rejected")}
         disabled={pending}
-        className="inline-flex items-center gap-1.5 rounded-lg bg-red-50 px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-100"
+        className="inline-flex min-h-11 items-center gap-1.5 rounded-lg bg-red-50 px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-100"
       >
         <X className="h-4 w-4 shrink-0" /> Reject
       </button>

@@ -10,7 +10,12 @@ import { renderToStaticMarkup } from "react-dom/server";
  *   · a blank job is not a business cost, and no bucket is picked for him;
  *   · On Account (still owed) is never saved as paid;
  *   · a business cost with no Where is saved under its bucket's own name;
- *   · Shop Stock (switch on only) is a door to Snap Or Note, never a guessed save.
+ *   · Shop Stock (switch on only) saves from the sheet (W1-FU-misc B): what it is, how many, in what
+ *     unit and where, into stock through addStockPurchase, with the ticket's door (Snap Or Note) one
+ *     quiet line away. It used to be only that door, and it threw away what was typed.
+ *
+ * NORT'S PRODUCT MAP still says Add By Hand never adds stock: lane 6 (the wave's words) rewrites that
+ * Money → Bills line and pins it in nort-product-map.test.ts. This file no longer pins the old words.
  */
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }) }));
@@ -18,6 +23,7 @@ vi.mock("@/components/toast", () => ({ useToast: () => vi.fn() }));
 vi.mock("@/lib/supabase/client", () => ({ createClient: () => ({}) }));
 vi.mock("@/app/(app)/jobs/actions", () => ({ createBill: vi.fn(), deleteBill: vi.fn(), linkReceiptToBill: vi.fn() }));
 vi.mock("@/app/(app)/organize/actions", () => ({ billJobReceipt: vi.fn() }));
+vi.mock("@/app/(app)/inventory/actions", () => ({ addStockPurchase: vi.fn(), shelfPickerItems: vi.fn() }));
 vi.mock("@/lib/receipt-capture", () => ({ DIFFERENT_PURCHASE_DOOR: "", fileReceiptDocument: vi.fn() }));
 vi.mock("@/components/snap-or-note", () => ({ openSnapOrNote: vi.fn() }));
 // The sheet's body, drawn as if open: a static render never taps the trigger.
@@ -27,8 +33,18 @@ vi.mock("@/components/ui/modal", () => ({
   ModalActions: ({ saveLabel }: { saveLabel?: string }) => createElement("button", { "data-save": "" }, saveLabel ?? "Save"),
 }));
 
-const { QuickCostButton, SHOP_STOCK_BY_PAPER, JOBS_UNREAD_LINE, jobPickLabel, readerFallbackLine, typedCostBill, typedCostProblem } =
-  await import("./quick-cost-button");
+const {
+  QuickCostButton,
+  JOBS_UNREAD_LINE,
+  STOCK_HAVE_THE_TICKET,
+  StockFields,
+  StockTicketLine,
+  jobPickLabel,
+  readerFallbackLine,
+  typedCostBill,
+  typedCostProblem,
+  typedStockPurchase,
+} = await import("./quick-cost-button");
 
 const base = { amount: 64.1, date: "2026-09-27", target: "", bucket: null, where: "", paid: "paid" as const, billNumber: "", poId: "" };
 const text = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/&#x27;|&apos;/g, "'").replace(/\s+/g, " ");
@@ -55,19 +71,51 @@ describe("what the typed sheet refuses, in words", () => {
     expect(typedCostProblem({ ...base, date: "", target: "__business", bucket: "Fuel" })).toBe("Pick the day it was bought.");
   });
 
-  it("Shop Stock is never a typed save: it says the paper goes in through Snap Or Note", () => {
-    expect(typedCostProblem({ ...base, target: "__stock" })).toBe(SHOP_STOCK_BY_PAPER);
-    expect(SHOP_STOCK_BY_PAPER).toContain("Snap Or Note");
+  it("Shop Stock saves when it says what it is, how many, in what unit and where, asked in that order", () => {
+    const stock = { ...base, target: "__stock" };
+    expect(typedCostProblem(stock)).toBe("Pick or name the item.");
+    expect(typedCostProblem({ ...stock, stockItem: "__new", stockName: "  " })).toBe("Pick or name the item.");
+    expect(typedCostProblem({ ...stock, stockItem: "__new", stockName: "12/2 NM-B" })).toBe("Type how many.");
+    expect(typedCostProblem({ ...stock, stockItem: "__new", stockName: "12/2 NM-B", stockPieces: 250 })).toBe("Say the unit.");
+    expect(typedCostProblem({ ...stock, stockItem: "__new", stockName: "12/2 NM-B", stockPieces: 250, stockUnit: "ft" })).toBe("Say where it was bought.");
+    expect(typedCostProblem({ ...stock, stockItem: "__new", stockName: "12/2 NM-B", stockPieces: 250, stockUnit: "ft", where: "CED" })).toBeNull();
+    // An item already in stock carries its own unit (the sheet locks it and hands it in).
+    expect(typedCostProblem({ ...stock, stockItem: "item-7", stockPieces: 2, stockUnit: "box", where: "CED" })).toBeNull();
+    // The typed sheet's own rules still come first.
+    expect(typedCostProblem({ ...stock, amount: 0, stockItem: "item-7", stockPieces: 2, stockUnit: "box", where: "CED" })).toBe("Type the amount.");
+    expect(typedCostProblem({ ...stock, date: "", stockItem: "item-7", stockPieces: 2, stockUnit: "box", where: "CED" })).toBe("Pick the day it was bought.");
+  });
+});
+
+describe("what the typed sheet hands addStockPurchase", () => {
+  const stock = { ...base, amount: 180, target: "__stock", where: " CED ", stockPieces: 250, stockUnit: " ft " };
+
+  it("an item in stock goes by its id, a new one by its name, never both", () => {
+    expect(typedStockPurchase({ ...stock, stockItem: "item-7", stockName: "ignored" })).toMatchObject({ itemId: "item-7", newItemName: null, pieces: 250, unit: "ft", where: "CED", amount: 180, date: "2026-09-27" });
+    expect(typedStockPurchase({ ...stock, stockItem: "__new", stockName: " 12/2 NM-B " })).toMatchObject({ itemId: null, newItemName: "12/2 NM-B" });
   });
 
-  it("Nort's product map says the same: Add By Hand never adds stock, and stock comes in through Snap Or Note", async () => {
-    const { NORT_PRODUCT_MAP } = await import("@/lib/nort-product-map");
-    const bills = NORT_PRODUCT_MAP.split("\n").find((l) => l.includes("Money → Bills"))!;
-    const hand = bills.slice(bills.indexOf("Add By Hand ("), bills.indexOf("), and All Bills"));
-    expect(hand).toContain("a job or a business cost in its bucket");
-    expect(hand).not.toMatch(/business cost in its bucket, or stock/);
-    expect(hand).toContain("It never adds stock");
-    expect(hand).toContain("through Snap Or Note");
+  it("On Account (still owed) is never saved as paid; the Bill # rides along", () => {
+    expect(typedStockPurchase({ ...stock, stockItem: "item-7", paid: "unpaid" }).paid).toBe("unpaid");
+    expect(typedStockPurchase({ ...stock, stockItem: "item-7", paid: "paid" }).paid).toBe("paid");
+    expect(typedStockPurchase({ ...stock, stockItem: "item-7", billNumber: " 8802-1 " }).billNumber).toBe("8802-1");
+    expect(typedStockPurchase({ ...stock, stockItem: "item-7" }).billNumber).toBeNull();
+  });
+
+  it("the sheet saves Shop Stock through addStockPurchase, and its Undo is deleteBill", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const src = readFileSync(join(process.cwd(), "src/components/quick-cost-button.tsx"), "utf8");
+    expect(src).toContain("if (target === STOCK) return saveStock(fields);");
+    expect(src).toContain("callOrLost(() => addStockPurchase(purchase),");
+    const saveStock = src.slice(src.indexOf("function saveStock("), src.indexOf("return (", src.indexOf("function saveStock(")));
+    expect(saveStock).toContain('label: "Undo"');
+    expect(saveStock).toContain('void deleteBill(id, "")');
+    // Nothing typed is thrown away unless he chooses it; with nothing typed, the door just opens.
+    const door = src.slice(src.indexOf("function openTheTicketDoor("), src.indexOf("function save("));
+    expect(door).toContain("const typed = amount > 0 || !!where.trim() || !!billNumber.trim() || !!stockItem || !!stockName.trim() || stockPieces > 0 || !!stockUnit.trim();");
+    expect(door).toContain('if (typed && !window.confirm("Open Snap Or Note? What you typed here won\'t be saved.")) return;');
+    expect(door.indexOf("window.confirm")).toBeLessThan(door.indexOf("openSnapOrNote()"));
   });
 });
 
@@ -173,6 +221,82 @@ describe("the sheet as it is drawn", () => {
     expect(buttons(bills).some((b) => b.words === "Shop Stock")).toBe(false);
     const on = renderToStaticMarkup(createElement(QuickCostButton, { typeOnly: true, jobs: JOBS, shopStock: true }));
     expect(buttons(on).find((b) => b.words === "Shop Stock")?.attrs).toContain("min-h-11");
+  });
+
+  it("switched off, or on a job's own Costs tab: no Shop Stock, so none of its fields", () => {
+    const off = renderToStaticMarkup(createElement(QuickCostButton, { typeOnly: true, jobs: JOBS, shopStock: false }));
+    const costs = renderToStaticMarkup(createElement(QuickCostButton, { typeOnly: true, jobId: "job-011", shopStock: true }));
+    for (const html of [off, costs]) {
+      expect(buttons(html).some((b) => b.words === "Shop Stock")).toBe(false);
+      for (const id of ["ti-item", "ti-pieces", "ti-unit"]) expect(html).not.toContain(`id="${id}"`);
+      expect(text(html)).not.toContain(STOCK_HAVE_THE_TICKET);
+    }
+  });
+
+  const ITEMS = [
+    { id: "item-7", name: "12/2 NM-B", unit: "ft" },
+    { id: "item-9", name: "Wire Nuts, Red", unit: "box" },
+  ];
+  const fields = (p: Record<string, unknown> = {}) =>
+    renderToStaticMarkup(
+      createElement(StockFields, {
+        items: ITEMS,
+        loaded: true,
+        itemsError: null,
+        stockItem: "",
+        stockName: "",
+        stockPieces: 0,
+        unit: "",
+        lockedTo: null,
+        onItem: () => {},
+        onName: () => {},
+        onPieces: () => {},
+        onUnit: () => {},
+        ...p,
+      }),
+    );
+
+  it("What Is It?: the items in stock (names and units, never a cost) and New Item, then How Many and Unit", () => {
+    const html = fields();
+    const t = text(html);
+    for (const w of ["What Is It?", "How Many", "Unit"]) expect(t).toContain(w);
+    const select = html.match(/<select[^>]*id="ti-item"[^>]*>([\s\S]*?)<\/select>/)!;
+    const options = Array.from(select[1].matchAll(/<option[^>]*>([\s\S]*?)<\/option>/g)).map((m) => text(m[1]).trim());
+    expect(options).toEqual(["Pick An Item", "New Item", "12/2 NM-B (ft)", "Wire Nuts, Red (box)"]);
+    expect(html).not.toContain("$");
+    // No name box until New Item is picked.
+    expect(html).not.toContain('id="ti-item-name"');
+  });
+
+  it("New Item opens a name box, and its Unit is typed (ft, each)", () => {
+    const html = fields({ stockItem: "__new", stockName: "Twister 500/BX", unit: "" });
+    expect(html).toContain('id="ti-item-name"');
+    expect(html).toContain('value="Twister 500/BX"');
+    const unit = html.match(/<input[^>]*id="ti-unit"[^>]*>/)![0];
+    expect(unit).not.toMatch(/\sdisabled=""/);
+    expect(unit).toContain('placeholder="ft or each"');
+  });
+
+  it("an item in stock locks the Unit to its own", () => {
+    const html = fields({ stockItem: "item-7", unit: "ft", lockedTo: ITEMS[0] });
+    const unit = html.match(/<input[^>]*id="ti-unit"[^>]*>/)![0];
+    expect(unit).toMatch(/\sdisabled=""/);
+    expect(unit).toContain('value="ft"');
+    expect(text(html)).toContain("12/2 NM-B is counted in ft, so this is too.");
+  });
+
+  it("a stock list that couldn't be read says so, and still lets a new item be named", () => {
+    const html = fields({ items: [], itemsError: "The stock items couldn't be read. You can still name a new item." });
+    expect(html).toMatch(/role="alert"[^>]*>The stock items couldn(?:&#x27;|')t be read/);
+    expect(text(html)).toContain("New Item");
+  });
+
+  it("one quiet line under them: the ticket's own door, 44px and Title Case", () => {
+    const html = renderToStaticMarkup(createElement(StockTicketLine, { onOpen: () => {} }));
+    expect(text(html)).toContain("Have the ticket? Snap Or Note reads every line.");
+    const door = buttons(html).find((b) => b.words === "Open Snap Or Note")!;
+    expect(door.attrs).toContain("min-h-11");
+    expect(STOCK_HAVE_THE_TICKET).toBe("Have the ticket? Snap Or Note reads every line.");
   });
 
   it("Paid? starts on Already Paid, with On Account (Still Owed) beside it, both 44px", () => {

@@ -4,7 +4,7 @@ import { dbError } from "@/lib/db-error";
 import { revalidatePath } from "next/cache";
 import { emptyToNull } from "@/lib/forms";
 import { requireStaff } from "@/lib/staff-guard";
-import { SHELF_NEEDS_0328, isMissingShelfRpc, undoTake, unshelveLot } from "@/lib/stock-ledger";
+import { SHELF_NEEDS_0328, isMissingShelfRpc, shelveLines, undoTake, unshelveLot } from "@/lib/stock-ledger";
 import type { ShelfPickerItem } from "@/lib/shelf-plan";
 import { isMissingCreditColumn, isMissingShelf } from "@/lib/job-cost";
 import { canTieToShelfReturn, shelfReturnMoney } from "@/lib/supplier-returns";
@@ -12,6 +12,17 @@ import { formatCurrency } from "@/lib/utils";
 import { isMissingExportRecord } from "@/lib/accountant-lists";
 import { getOrgSettings } from "@/lib/org-settings";
 import { todayStrInTz } from "@/lib/tz";
+import { reportError } from "@/lib/observe";
+import { cleanDocNumber, exactAccountFor, insertItemizedBill } from "@/app/(app)/organize/paperwork-core";
+import {
+  roundMoney,
+  roundPieces,
+  stockPurchaseLine,
+  stockPurchaseProblem,
+  stockPurchaseStatus,
+  stockPurchaseWords,
+  type StockPurchaseInput,
+} from "@/lib/stock-purchase";
 
 export type Result = { ok: boolean; error?: string; id?: string };
 
@@ -596,5 +607,104 @@ export async function addOpeningRoll(input: { itemId: string; pieces: number; co
   if (!data?.length) return { ok: false, error: "That roll didn't go into stock. Nothing changed - try again." };
   revalidatePath("/inventory");
   return { ok: true, id: String(data[0].id) };
+}
+
+/**
+ * SHOP STOCK, TYPED IN (Add By Hand's Type It In, W1-FU-misc B): a stock purchase with no paper.
+ *
+ * It lands exactly like Snap Or Note's Shop Stock (organize/actions fileItem's "stock" branch): a bill
+ * with no job, on_shelf, category Shop Stock, paid or on account as the person said (On Account is
+ * never saved as paid), with ONE line (the item, how many, the amount), and that line goes into stock
+ * as one roll through shelveLines (0328). So Stock Bought counts it in the month on the purchase, and
+ * no new money reader reads it. THERE IS NEVER A STOCK BILL WITH NOTHING IN STOCK: when the roll
+ * doesn't go in, the bill this wrote comes back off, and the words say why. Undo is deleteBill, whose
+ * delete takes the roll back out (stock_line_deleted, 0303) until a piece of it is on a job (0304
+ * refuses then, and says which take to undo first).
+ *
+ * Staff only (a tech never sees a price), every read and write filtered to the company.
+ */
+export async function addStockPurchase(input: StockPurchaseInput): Promise<Result & { message?: string }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const { supabase, orgId, userId } = ctx;
+  if (!orgId) return { ok: false, error: NO_ORG };
+
+  // The sheet's own rules first, the same words (typedCostProblem, lib/stock-purchase).
+  const amount = roundMoney(input.amount);
+  const pieces = roundPieces(input.pieces);
+  const unit = String(input.unit ?? "").trim();
+  const where = String(input.where ?? "").trim();
+  const date = String(input.date ?? "").trim();
+  const itemId = String(input.itemId ?? "").trim() || null;
+  const newName = itemId ? null : String(input.newItemName ?? "").trim().slice(0, 200) || null;
+  if (!(amount > 0)) return { ok: false, error: "Type the amount." };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return { ok: false, error: "Pick the day it was bought." };
+  const problem = stockPurchaseProblem({ itemId, newItemName: newName, pieces, unit, where });
+  if (problem) return { ok: false, error: problem };
+
+  // An item already in stock: this company's, and counted in this unit (said before anything is
+  // written; shelveLines checks it again, and matches a new name to an item exactly).
+  let itemName = newName ?? "";
+  if (itemId) {
+    const { data: item, error: itemErr } = await supabase.from("inventory_items").select("id, name, unit").eq("id", itemId).eq("org_id", orgId).maybeSingle();
+    if (itemErr) return { ok: false, error: dbError(itemErr) };
+    if (!item) return { ok: false, error: "That item isn't in this company's stock any more. Reload and pick again." };
+    const it = item as { name: string; unit: string };
+    if (String(it.unit).trim().toLowerCase() !== unit.toLowerCase())
+      return { ok: false, error: `${it.name} is counted in ${it.unit}. Count this in ${it.unit}, or make a new item for ${unit}.` };
+    itemName = String(it.name);
+  }
+
+  // The bill: no job, bought for stock, its one line. The supplier account only by an exact alias.
+  const billId = await insertItemizedBill(
+    supabase,
+    {
+      job_id: null,
+      supplier: where,
+      amount,
+      bill_date: date,
+      category: "Shop Stock",
+      notes: `Shop stock typed in by hand (no paper): ${pieces} ${unit} of ${itemName}.`,
+      created_by: userId,
+      bill_number: cleanDocNumber(input.billNumber),
+      supplier_account_id: (await exactAccountFor(supabase, orgId, where)) ?? undefined,
+      on_shelf: true,
+    },
+    [stockPurchaseLine({ item: itemName, pieces, amount })],
+    stockPurchaseStatus(input.paid),
+  );
+  if (!billId) return { ok: false, error: "The purchase didn't save. Nothing was recorded and nothing went into stock - try again." };
+
+  // Its one line, read back (insertItemizedBill keeps a bill whose lines didn't save: not here).
+  const { data: lines, error: linesErr } = await supabase.from("bill_line_items").select("id").eq("bill_id", billId).eq("org_id", orgId);
+  const lineId = !linesErr && (lines ?? []).length === 1 ? String((lines as { id: string }[])[0].id) : null;
+  if (!lineId) return takeBack(supabase, orgId, billId, "The purchase's line didn't save, so nothing went into stock.");
+
+  // Into stock, one roll: all of it (nothing of it went on a job).
+  const shelved = await shelveLines(supabase, orgId, billId, [
+    { lineId, pieces, used: 0, unit, bought: pieces, itemId, newItemName: itemId ? null : itemName },
+  ]);
+  if (!shelved.ok) return takeBack(supabase, orgId, billId, shelved.error);
+
+  revalidatePath("/inventory");
+  revalidatePath("/bills");
+  revalidatePath("/analytics");
+  const lot = shelved.lots[0];
+  return {
+    ok: true,
+    id: billId,
+    message: stockPurchaseWords({ pieces: lot?.pieces ?? pieces, unit: lot?.unit ?? unit, item: itemName, amount, where }),
+  };
+}
+
+/** A stock purchase whose roll didn't go in comes back off the books, and the words say so. */
+async function takeBack(supabase: any, orgId: string, billId: string, why: string): Promise<Result> {
+  const { data, error } = await supabase.from("bills").delete().eq("id", billId).eq("org_id", orgId).select("id");
+  if (error || !data?.length) {
+    reportError("inventory:addStockPurchase.takeBack", error ?? new Error("the stock purchase's bill delete wrote no rows"), { billId });
+    return { ok: false, error: `${why} The purchase is still on Bills with nothing in stock: delete it there.` };
+  }
+  revalidatePath("/bills");
+  return { ok: false, error: `${why} Nothing was recorded.` };
 }
 

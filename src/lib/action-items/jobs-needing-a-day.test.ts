@@ -169,8 +169,21 @@ describe("the build reads it", () => {
     expect(whyOf(midBuild, { billedJobIds: finished })).toBe("Quiet since Sep 11");
     // The outcome feeders keep the wide set: any real invoice settles "did this work turn into money".
     expect(query).toContain("const billedJobs = new Set(billedRows.map((r) => r.job_id).filter(Boolean));");
-    for (const site of ["billedJobs, // jobs with real", "billedJobs.has(a.job_id)) continue;", "billedJobs.has(j.id)) continue;", "billedJobs.has(q.job_id)) continue;"]) {
+    for (const site of ["billedJobs, // jobs with real", "billedJobs.has(q.job_id)) continue;"]) {
       expect(query).toContain(site);
     }
+    // Done, Not Billed asks the same wide question in SQL now (0371), so its two sites moved out of
+    // this file. The function tests "a live invoice that isn't a draft", never the kind.
+    const sql = readFileSync(join(process.cwd(), "supabase/migrations/0371_done_work_is_read_whole.sql"), "utf8");
+    expect(sql.match(/status not in \('draft', 'void'\)/g)).toHaveLength(2);
+    expect(sql).not.toContain("invoice_kind");
+    // And the deploy window's fallback, which still drops rows in code, reads billedJobs — the wide
+    // set query.ts hands it, never finishedBilledJobs.
+    expect(query).toContain("billedJobs,\n          seen,");
+    const legacy = readFileSync(join(process.cwd(), "src/lib/action-items/done-not-billed.ts"), "utf8");
+    for (const site of ["input.billedJobs.has(String(a.job_id))) continue;", "input.billedJobs.has(String(j.id))) continue;"]) {
+      expect(legacy).toContain(site);
+    }
+    expect(legacy).not.toContain("isDrawKind");
   });
 });

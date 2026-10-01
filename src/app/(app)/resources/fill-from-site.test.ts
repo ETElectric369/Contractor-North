@@ -113,7 +113,7 @@ beforeEach(() => {
     zip: "96122",
     hours: "Mon–Fri 7 AM–4 PM",
     about: "Electrical supply house",
-    category: "Supplier / Distributor",
+    category: "Other", // on the list (W2-13: suppliers left it for Price List › Vendors)
   });
   state.calls = [];
   state.metered = [];
@@ -203,9 +203,20 @@ describe("fillFromSite: the model only when needed, allowed and affordable", () 
         zip: "96122",
         hours: "Mon–Fri 7 AM–4 PM",
         about: "Electrical supply house",
-        category: "Supplier / Distributor",
+        category: "Other", // on the list (W2-13: suppliers left it for Price List › Vendors)
       },
     });
+  });
+
+  it("a model pick outside the list (the old Supplier / Distributor) comes back as the fallback it already uses: no category", async () => {
+    state.reply = JSON.stringify({ ...JSON.parse(state.reply), category: "Supplier / Distributor" });
+    const r = await fillFromSite({ url: "acme-supply.example" });
+    expect(state.calls).toHaveLength(1);
+    // The model is offered only the list, and nothing off it is ever filled in.
+    expect(String(state.calls[0].system)).not.toContain("Supplier / Distributor");
+    expect(r.ok).toBe(true);
+    expect(r.ok && "category" in r.fields).toBe(false);
+    expect(r).toMatchObject({ ok: true, fields: { name: "Acme Electric Supply", about: "Electrical supply house" } });
   });
 
   it("keeps a model's phone only when the page's words show it", async () => {
