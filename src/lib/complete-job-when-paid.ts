@@ -1,6 +1,6 @@
 import { revalidatePath } from "next/cache";
 import { pushCalendarItem } from "@/lib/calendar-sync";
-import { STARTED_JOB_STATUSES, jobStatusLabel } from "@/lib/job-status";
+import { STARTED_JOB_STATUSES, finishedJobFields, jobStatusLabel } from "@/lib/job-status";
 import { reportError } from "@/lib/observe";
 
 /**
@@ -28,6 +28,12 @@ import { reportError } from "@/lib/observe";
  *      job because a straggler bill was paid.
  *   3. the job has no OTHER live, unpaid bill. A second open invoice — a draft still being
  *      built, a sent bill still owed — means the job is still open. Void doesn't count.
+ *
+ * THIS IS THE SECOND DOOR THAT ENDS A JOB, so it writes what the first one writes: every field in
+ * lib/job-status's finishedJobFields, which is the whole of a finish — the word, and the hold reason
+ * cleared with it (0234). It used to write the word alone, so a job ON HOLD whose last bill was then
+ * paid came out complete still saying "waiting on the permit", and the tidying was left to migration
+ * 0366's trigger. One rule, one place: job-status.test.ts fails if either door writes it by hand.
  *
  * The write is CHECKED (the silent-write law: .select("id"), and the status filter rides on the
  * update so a job that moved under this read is not overwritten). Then the same touches a
@@ -87,7 +93,7 @@ export async function completeJobWhenPaid(
 
     const { data: done, error: updErr } = await supabase
       .from("jobs")
-      .update({ status: "complete" })
+      .update(finishedJobFields())
       .eq("id", jobId)
       .in("status", STARTED_JOB_STATUSES)
       .select("id");

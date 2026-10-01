@@ -6,7 +6,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { adminConfigured, createAdminClient } from "@/lib/supabase/admin";
 import { pushCalendarItem, deleteCalendarItem } from "@/lib/calendar-sync";
-import { JOB_STATUSES, finishesTheJob } from "@/lib/job-status";
+import { JOB_STATUSES, finishedJobFields, finishesTheJob } from "@/lib/job-status";
 import { DRAW_KINDS, isDrawKind } from "@/lib/invoice-math";
 import { BRING_IN_NEW_WORK, openDraftOnJob, unbilledCardDoor, type CardDoor, type OpenDraft } from "@/lib/actuals-draw";
 import { emptyToNull } from "@/lib/forms";
@@ -910,12 +910,14 @@ export async function finishJob(
   //
   // THE HOLD REASON LIVES AND DIES WITH THE HOLD (0234), so finishing clears it, the same as every
   // other status write does (setJobStatus). It used to leave it, which was invisible while
-  // setJobStatus was the only door a held job could be finished through — M2 makes this the only
-  // door, so the clear comes with it rather than resting on the database's trigger (0366) being
-  // applied. A stale "waiting on the permit" on a finished job is a false alarm every reader
+  // setJobStatus was the only door a held job could be finished through — and it is STILL not the
+  // only door that ends a job: a bill paid in full ends one too (lib/complete-job-when-paid, which
+  // M1 wired to every pay door). So the whole patch a finish writes is lib/job-status's
+  // finishedJobFields, written by both of them, rather than resting on the database's trigger (0366)
+  // being applied. A stale "waiting on the permit" on a finished job is a false alarm every reader
   // would believe.
   const complete = async (): Promise<{ ok: true } | { ok: false; error: string }> => {
-    const { data, error } = await supabase.from("jobs").update({ status: "complete", hold_reason: null }).eq("id", jobId).select("id");
+    const { data, error } = await supabase.from("jobs").update(finishedJobFields()).eq("id", jobId).select("id");
     if (error) return { ok: false, error: dbError(error) };
     if (!data?.length) return { ok: false, error: "Job not found." };
     await pushCalendarItem("job", jobId); // finished job leaves Google (fire-safe)

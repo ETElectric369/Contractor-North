@@ -43,6 +43,28 @@ describe("completeJobWhenPaid — the gate", () => {
     expect(held.tables.jobs[0].status).toBe("complete");
   });
 
+  /**
+   * THE HOLD DIES WITH THE JOB, THROUGH THIS DOOR TOO (the M1/M2 seam, fixed at the merge).
+   *
+   * M2 made Finish Job clear the hold reason (0234) and its comment said finishJob was now the only
+   * door a held job could be finished through. It was not: this gate finishes a job on hold as well,
+   * and M1 had just wired it to EVERY door that lands a payment — Record Payment, Settle Up, the
+   * Stripe writer, and a deposit matched out of the bank file, which before M1 could not end a job at
+   * all. So a job held on "waiting on the permit", paid off, went complete still carrying it: a
+   * sentence Needs You reads out when the job comes back, about a job that is done. The whole patch
+   * is lib/job-status's finishedJobFields now, written here and at finishJob, instead of resting on
+   * migration 0366's trigger being applied.
+   */
+  it("a HELD job paid off comes out complete with its hold reason gone, not left for the database to tidy", async () => {
+    const db = fakeDb({
+      invoices: [paidStandard()],
+      jobs: [{ id: JOB, status: "on_hold", hold_reason: "waiting on the permit" }],
+    });
+    expect((await completeJobWhenPaid(db, "inv-1")).completed).toBe(true);
+    expect(db.tables.jobs[0].status).toBe("complete");
+    expect(db.tables.jobs[0].hold_reason).toBeNull();
+  });
+
   it("a job that hasn't started — booked for next Tuesday, its one standard bill paid by the link Monday night — stays on the schedule", async () => {
     for (const status of ["to_be_scheduled", "scheduled"]) {
       const db = fakeDb({ invoices: [paidStandard()], jobs: [{ id: JOB, status }] });

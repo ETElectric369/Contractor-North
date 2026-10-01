@@ -54,6 +54,30 @@ export const finishesTheJob = (status: string | null | undefined): boolean =>
 /** The statuses a plain status write may set — every one that isn't a finish (the typed table above). */
 export const SETTABLE_JOB_STATUSES: JobStatus[] = JOB_STATUSES.filter((s) => JOB_STATUS_DOOR[s] === "set");
 
+/**
+ * EVERYTHING A FINISH WRITES ON THE JOB ROW — THE WHOLE PATCH, IN ONE PLACE (the M1/M2 seam).
+ *
+ * TWO doors end a job, not one, and this batch built them in the same lane a commit apart:
+ *   · Finish Job (jobs/actions finishJob), which bills the unbilled work first — M2;
+ *   · a bill PAID IN FULL (lib/complete-job-when-paid), which since M1 is reached from EVERY door
+ *     that lands a payment, through lib/after-payment-landed — including a deposit matched out of
+ *     the bank file, which before M1 could not end a job at all.
+ *
+ * M2 wrote "the hold reason dies with the hold" (0234) at the FIRST door and said, in that door's own
+ * comment, that it was now the only one. It is not. So a job ON HOLD — "waiting on the permit" —
+ * whose last bill was then paid went complete still carrying that reason, and a hold reason is
+ * believed by every reader: it is the sentence Needs You says when the job comes back. The app was
+ * left resting on migration 0366's trigger to tidy up after it, which is the thing M2 set out not to
+ * do.
+ *
+ * So the patch is this, both doors write it, and the tripwire in job-status.test.ts fails if a door
+ * writes the word by hand again. A fresh object per call: a shared literal handed to a query builder
+ * is one mutation away from a shared bug.
+ */
+export function finishedJobFields(): { status: JobStatus; hold_reason: null } {
+  return { status: "complete", hold_reason: null };
+}
+
 /** A job somebody has BEEN on — in progress, or paused after starting. A job still to be
  *  scheduled, or booked for a day ahead, has not started, whatever its bills say: a bill paid
  *  ahead of the visit must never end it (lib/complete-job-when-paid). */

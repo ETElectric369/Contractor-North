@@ -5,6 +5,7 @@ import {
   JOB_STATUSES,
   JOB_STATUS_DOOR,
   SETTABLE_JOB_STATUSES,
+  finishedJobFields,
   finishesTheJob,
   pickJobScheduledToday,
   pickMemberCurrentJob,
@@ -32,15 +33,41 @@ describe("the door each job status is written through", () => {
     expect(SETTABLE_JOB_STATUSES).toEqual(["to_be_scheduled", "scheduled", "in_progress", "on_hold", "cancelled"]);
     expect(SETTABLE_JOB_STATUSES.some(finishesTheJob)).toBe(false);
   });
+
+  /**
+   * WHAT A FINISH WRITES, not just which word it is (the M1/M2 seam). Two doors end a job and they
+   * wrote different patches: finishJob cleared the hold reason, the paid-in-full gate did not. A hold
+   * reason is a sentence Needs You says out loud when the job comes back, so one left on a finished
+   * job is a false alarm — and the clear must not rest on migration 0366's trigger having been run.
+   */
+  it("a finish is the word AND the hold cleared with it, in one object, fresh each time", () => {
+    expect(finishedJobFields()).toEqual({ status: "complete", hold_reason: null });
+    // The word it writes is the one the typed table calls a finish, so the two cannot drift.
+    expect(finishesTheJob(finishedJobFields().status)).toBe(true);
+    // A fresh object per call: a shared literal handed to a query builder is one mutation from a bug.
+    const a = finishedJobFields();
+    a.hold_reason = "waiting on the permit" as unknown as null;
+    expect(finishedJobFields().hold_reason).toBeNull();
+  });
 });
 
 /**
- * THE TEETH: ONLY FINISHING WRITES "complete" ON A JOB.
+ * THE TEETH: ONLY FINISHING WRITES "complete" ON A JOB, AND IT WRITES THE WHOLE FINISH.
  *
- * A deliberate bypass tripwire (the behaviour itself is pinned in jobs/finish-job.test.ts): it walks
- * the source for anything that writes the word onto the jobs table and allows exactly the two places
- * that are allowed to — finishJob, which bills first, and the paid-in-full gate, which runs after a
- * payment has already settled. A third is RED until its author reads this.
+ * A deliberate bypass tripwire (the behaviour itself is pinned in jobs/finish-job.test.ts and
+ * lib/complete-job-when-paid.test.ts): it walks the source for anything that ends a job on the jobs
+ * table and allows exactly the two places that are allowed to — finishJob, which bills first, and
+ * the paid-in-full gate, which runs after a payment has already settled. A third is RED until its
+ * author reads this.
+ *
+ * REWRITTEN AT THE MERGE (the M1/M2 seam). The first version matched the hand-typed shape
+ * `.update({ status: "complete"` and listed the two files — so it counted the doors and said nothing
+ * about what they wrote. The two did not write the same thing: M2 added `hold_reason: null` to
+ * finishJob and its comment claimed finishJob was the only door, while M1 was in the same lane wiring
+ * the OTHER door to every pay door there is, still writing the word alone. A job on hold, paid off,
+ * went complete carrying "waiting on the permit". The patch is lib/job-status's finishedJobFields
+ * now, so this pins THAT: nobody types the word into a jobs update again, and the two doors that end
+ * a job are still exactly two.
  */
 describe("nothing writes a job complete except finishing it", () => {
   const code = (path: string) =>
@@ -48,16 +75,41 @@ describe("nothing writes a job complete except finishing it", () => {
       .replace(/\/\*[\s\S]*?\*\//g, "")
       .replace(/(^|\s)\/\/[^\n]*/g, "$1");
 
+  /** Every write onto the `jobs` table that ends the job, and whether it typed the word itself. */
+  const endsAJob = (src: string): { byHand: boolean }[] => {
+    const hits: { byHand: boolean }[] = [];
+    for (let at = src.indexOf('from("jobs")'); at >= 0; at = src.indexOf('from("jobs")', at + 1)) {
+      const window = src.slice(at, at + 220);
+      const upd = window.indexOf(".update(");
+      if (upd < 0) continue;
+      const payload = window.slice(upd, upd + 140);
+      if (/status:\s*"complete"/.test(payload)) hits.push({ byHand: true });
+      else if (/finishedJobFields\(\)/.test(payload)) hits.push({ byHand: false });
+    }
+    return hits;
+  };
+
+  const files = (readdirSync(join(process.cwd(), "src"), { recursive: true }) as string[])
+    .filter((f) => /\.(ts|tsx)$/.test(f) && !/\.test\.tsx?$/.test(f))
+    .map((f) => join("src", f));
+  const ending = files.map((f) => ({ f, hits: endsAJob(code(f)) })).filter((x) => x.hits.length);
+
   it("the only two writers are Finish Job and the paid-in-full gate", () => {
-    const files = (readdirSync(join(process.cwd(), "src"), { recursive: true }) as string[])
-      .filter((f) => /\.(ts|tsx)$/.test(f) && !/\.test\.tsx?$/.test(f))
-      .map((f) => join("src", f));
-    // A write of the word onto `jobs`: `.update({ status: "complete"` with whatever rides along.
-    const found = files.filter((f) => /from\("jobs"\)[\s\S]{0,80}?\.update\(\{\s*status: "complete"/.test(code(f)));
-    expect(found.sort()).toEqual([
-      "src/app/(app)/jobs/actions.ts", // finishJob — bills the unbilled work, THEN writes the word
+    expect(ending.map((x) => x.f).sort()).toEqual([
+      "src/app/(app)/jobs/actions.ts", // finishJob — bills the unbilled work, THEN writes the finish
       "src/lib/complete-job-when-paid.ts", // paid in full on a started job, after the money settled
     ]);
+  });
+
+  it("both of them write the WHOLE finish, and neither types the word itself", () => {
+    const byHand = ending.filter((x) => x.hits.some((h) => h.byHand)).map((x) => x.f);
+    expect(
+      byHand,
+      "This door ends a job by typing the status into the patch, so whatever else a finish writes — " +
+        "today the hold reason (0234) — is missing from it. Write lib/job-status's finishedJobFields() instead.",
+    ).toEqual([]);
+    // And the scan is really finding them: an empty scan must never pass this describe.
+    expect(ending.flatMap((x) => x.hits).length).toBeGreaterThan(1);
   });
 });
 
