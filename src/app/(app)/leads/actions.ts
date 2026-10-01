@@ -31,7 +31,6 @@ import { saveQuote } from "../quotes/actions";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { INTAKE_BUCKET, intakePaths, isOwnIntakePath } from "@/lib/playbook/uploads";
 import { hasCaptureData } from "@/lib/inspections";
-import { playbookForForm } from "@/lib/playbook/parse";
 import { briefNote, carriedNote, carryForInquiry } from "@/lib/inquiries/carry-intake-answers";
 import { runPlanBrief } from "@/lib/plan-brief-run";
 import { rateLimited } from "@/lib/rate-limit";
@@ -134,8 +133,8 @@ export async function createInquiry(formData: FormData): Promise<Result & { note
   //
   // `inquiries.next_follow_up_at` already IS the follow-up list: /leads orders by it and the
   // Needs-action inbox feeds off it. So the lead carries its own date, and the calendar keeps
-  // meaning "things I agreed to be somewhere for".
-  const tz = await orgTimezone(supabase);
+  // meaning "things I agreed to be somewhere for". Nothing here needs the company's clock any more,
+  // so creating a lead stopped reading Settings for a timezone it never used.
 
   /**
    * THE APP ALREADY KNOWS THIS PERSON (Erik, entering his real lead list: "lack of fluidity and
