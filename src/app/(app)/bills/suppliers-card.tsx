@@ -23,7 +23,7 @@ import {
   type SupplierActionResult,
   type SupplierPayMethod,
 } from "./supplier-balance";
-import { notOnAnAccountSentence, type SupplierOwedLine, type WhatISupplierOwed } from "@/lib/supplier-owed";
+import { notOnAnAccountSentence, supplierFigureUnread, type SupplierOwedLine, type WhatISupplierOwed } from "@/lib/supplier-owed";
 import { SupplierPaperLists, type SupplierInvoiceActions } from "./supplier-invoices-card";
 import { type ReconcileJob, type SupplierInvoiceRow, type SupplierPaperCard, type SupplierReconcileFeed } from "./supplier-reconcile";
 
@@ -347,14 +347,25 @@ export function SuppliersCard({
   }, [canReconcile, reconcile]);
 
   /** No figure for this account: it is counted from bills less payments and one of those reads
-   *  (or the supplier's own papers, which would have counted it instead) failed. */
+   *  (or the supplier's own papers, which would have counted it instead) failed. BY THE ONE
+   *  FUNCTION, not a third copy of it (8a982483): the copy in Nort's read left out the supplier's
+   *  own papers and he quoted a number this card refuses to show. */
   const cantTotal = (account: SupplierAccountRow, balance: ReturnType<typeof supplierBalance>) =>
-    balancesUnread && account.onAccount && balance.model !== "supplier-invoices";
+    supplierFigureUnread({ onAccount: account.onAccount, model: balance.model, balancesUnread });
 
   // WHAT HE OWES, not a net position: an account paid ahead does not reduce the next one's bill.
   const owing = balances.filter((b) => (b.balance.owed ?? 0) > 0.005);
   const onAccountOwed = r2(owing.reduce((s, b) => s + (b.balance.owed ?? 0), 0));
-  const ahead = balances.filter((b) => (b.balance.owed ?? 0) < -0.005);
+  // WHERE HE IS AHEAD, READ rather than rebuilt (8a982483). This filtered the accounts itself, so a
+  // credit on a SPELLING not on an account yet - how a return is filed in this app, a negative
+  // on-account bill - was in no clause on the card at all. `whatISupplierOwed` holds every credit it
+  // leaves out of the total, account or spelling, so saying it here says all of them. The fallback
+  // is the old filter and exists only for a caller that has not been handed the answer.
+  const aheadAt: { name: string; credit: number }[] = owedToSuppliers
+    ? owedToSuppliers.ahead
+    : balances
+        .filter((b) => (b.balance.owed ?? 0) < -0.005)
+        .map((b) => ({ name: b.account.name, credit: r2(-(b.balance.owed ?? 0)) }));
   // Money marked On Account on a supplier he settles at the register: no balance to sit in, still
   // money. UNDER MODEL B it is not a second pile: that account's `owed` is already the supplier's.
   const registerUnpaid = r2(
@@ -597,7 +608,7 @@ export function SuppliersCard({
               ]
                 .filter(Boolean)
                 .join(" ")}
-              {ahead.length > 0 ? ` You are ahead at ${ahead.map((b) => b.account.name).join(", ")}, which does not come off the total.` : ""}
+              {aheadAt.length > 0 ? ` You are ahead at ${aheadAt.map((a) => a.name).join(", ")}, which does not come off the total.` : ""}
             </p>
           )}
           {/* THE TWO FIGURES, NAMED, ON THE SAME SCREEN. The arithmetic that reconciles them used
@@ -641,6 +652,11 @@ export function SuppliersCard({
               Supplier Account
               {notOnAccount.unnamed > 0
                 ? ` · ${notOnAccount.unnamed} With No Supplier Name`
+                : ""}
+              {/* A CREDIT AMONG THEM IS NOT IN THAT FIGURE, and the door says so - otherwise the
+                  money reads as spread across every bill it names, including one that is money back. */}
+              {notOnAccount.credits > 0.005
+                ? ` · Plus A ${formatCurrency(notOnAccount.credits)} Credit Not In That Figure`
                 : ""}
             </span>
             <span className="shrink-0 font-medium">File It</span>

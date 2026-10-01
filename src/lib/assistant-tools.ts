@@ -1602,7 +1602,16 @@ export async function runDataTool(
           ...(read.owed.couldNotTotal.length
             ? { could_not_total: read.owed.couldNotTotal.map((a) => a.name), could_not_total_note: "Say these could not be totalled rather than treating them as zero." }
             : {}),
-          ...(read.failed.length ? { reads_that_failed: read.failed } : {}),
+          // A READ THAT FAILED IS NOT A FOOTNOTE (8a982483). This listed the names and said nothing
+          // about what they mean, so the figure above still read as the answer. It is not: with a
+          // read missing the figure is short, and what is missing has to be said in the same breath.
+          ...(read.failed.length
+            ? {
+                reads_that_failed: read.failed,
+                reads_that_failed_note:
+                  "Say that some of this could not be read, so the figure may be short. Never present it as the final answer.",
+              }
+            : {}),
         });
       }
 

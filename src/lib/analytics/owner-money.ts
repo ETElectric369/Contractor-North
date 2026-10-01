@@ -356,10 +356,21 @@ export type OwnerMoneyInputs = {
   supplierAccounts?: any[];
   /** supplier_payments (0270), voided ones included: supplier_account_id, amount, paid_on, voided_at. */
   supplierPayments?: any[];
-  /** supplier_aliases (0270): alias, supplier_account_id. The spellings somebody has already filed
-   *  onto an account. Absent is fine and normal - identity then resolves by the stored column and
-   *  the account's own name, which is what reaches CED's five spellings (8a982483). */
-  supplierAliases?: any[];
+  /**
+   * supplier_aliases (0270): alias, supplier_account_id. The spellings somebody has already filed
+   * onto an account.
+   *
+   * REQUIRED, ALONE AMONG ITS NEIGHBOURS, BECAUSE IT WAS DECLARED AND NEVER POPULATED (8a982483).
+   * This field existed, `supplierIdentityOf` read it, and `readOwnerMoneyInputs` never fetched the
+   * table - so /bills and Nort resolved filed -> alias -> name while the P&L card and the
+   * accountant's download resolved filed -> name. A recurring expense writes exactly the ticket that
+   * splits them (recurring-engine.ts: free-text vendor, unpaid, no account id), and the Suppliers
+   * card then said $1,200.00 while the accountant's workbook said $1,700.00 for one book.
+   *
+   * An empty array is a legitimate answer - plenty of companies have filed no spellings - but it has
+   * to be WRITTEN. Nothing may reach identity having silently skipped this step again.
+   */
+  supplierAliases: any[];
   /** supplier_invoices (0273), EVERY kind: id, supplier_account_id, invoice_number, kind, total,
    *  open_balance, closed, bill_supplier_invoices(bill_id). The supplier's own verdict on what is
    *  still open (model B), and which bills cover each (supplierDocCoverage), so only a document a
@@ -668,7 +679,7 @@ export function ownerMoneyCostLines(inp: OwnerMoneyInputs, tz: string): OwnerMon
  * his book. A paper spelling an account's own name now belongs to that account here exactly as it
  * does on /bills, so the two screens can no longer be built from different sets of paper.
  */
-export function supplierIdentityOf(inp: OwnerMoneyInputs): {
+export function supplierIdentityOf(inp: Pick<OwnerMoneyInputs, "bills" | "supplierAccounts" | "supplierAliases">): {
   index: SupplierIdentityIndex;
   of: Map<string, SupplierPaperIdentity>;
 } {
@@ -1146,9 +1157,17 @@ export function computeOwnerMoney(
         const covered = new Set<string>();
         let c = 0;
         for (const d of docsOf.get(row.id) ?? []) {
+          // BY THE RESOLVED ACCOUNT, the same test the no-document loop below makes (8a982483).
+          //
+          // This read the RAW column while the walk above it and the loop below it both read
+          // `identity`, so a ticket identity had placed by the account's own name was dropped here,
+          // never landed in `covered`, and was then named by that loop as a bill the supplier "has
+          // sent no invoice for yet" - beside the very invoice its own line printed. The card named
+          // $5,000 for $3,000 of materials and said something untrue about the supplier to do it.
+          // `billById` holds raw rows, so the resolver is the only thing that can answer this.
           const covering = [...(coverage.get(String(d.id)) ?? [])]
             .map((id) => billById.get(id))
-            .filter((b) => b && String(b.supplier_account_id ?? "") === row.id);
+            .filter((b) => b && (identity.get(String(b.id))?.accountId ?? "") === row.id);
           if (!covering.length) continue;
           for (const b of covering) covered.add(String(b.id));
           if (d.closed === true) continue;
@@ -1384,6 +1403,10 @@ export function supplierDocCoverage(docs: any[], bills: any[], identity?: Readon
     superseded_by_bill_id: null,
     named_numbers: namedNumbersOf({ notes: b.notes ?? null, bill_line_items: b.bill_line_items ?? null }).numbers,
   }));
+  /** The account on a row THIS function built above, which is already resolved (see `accountOf`).
+   *  Named, so it is plain that nothing here gates a paper on the raw `bills` column - the gate that
+   *  made every earlier copy of this walk unable to reach the papers nobody had filed. */
+  const ledgerAccount = (b: LedgerBill) => String(b.supplier_account_id ?? "");
   const out = new Map<string, Set<string>>();
   for (const d of docs ?? []) {
     if (!d?.id) continue;
@@ -1394,7 +1417,7 @@ export function supplierDocCoverage(docs: any[], bills: any[], identity?: Readon
     const account = d.supplier_account_id ? String(d.supplier_account_id) : "";
     if (account) {
       for (const b of billsCarryingNumber(d.invoice_number, { accountId: account }, ledger)) {
-        if (String(b.supplier_account_id ?? "") === account) set.add(b.id);
+        if (ledgerAccount(b) === account) set.add(b.id);
       }
     }
     if (set.size) out.set(String(d.id), set);
@@ -1409,8 +1432,15 @@ export function supplierDocCoverage(docs: any[], bills: any[], identity?: Readon
  * is supplierDocCoverage's (links and carried numbers, the reading the "Counted" figure uses);
  * without them, a document with any link is covered.
  */
-export function supplierDocsNoBillCovers(rows: any[], bills?: any[]): { creditMemos: any[]; unbilledServiceCharges: any[] } {
-  const coverage = bills ? supplierDocCoverage(rows ?? [], bills) : null;
+export function supplierDocsNoBillCovers(
+  rows: any[],
+  bills?: any[],
+  /** WHO EACH PAPER BELONGS TO (supplierIdentityOf). Without it this walk gates on the raw column
+   *  while the card's "Counted" side gates on the resolved account, and the two sides of the card
+   *  then disagree about which documents a bill covers - the same fault in the other direction. */
+  identity?: ReadonlyMap<string, SupplierPaperIdentity> | null,
+): { creditMemos: any[]; unbilledServiceCharges: any[] } {
+  const coverage = bills ? supplierDocCoverage(rows ?? [], bills, identity) : null;
   const uncovered = (rows ?? []).filter((s: any) =>
     s && (coverage ? !coverage.has(String(s.id)) : !(Array.isArray(s.bill_supplier_invoices) && s.bill_supplier_invoices.length)),
   );
@@ -1513,7 +1543,7 @@ export async function readOwnerMoneyInputs(
   const hoursFrom = ownerMoneyHoursFrom(span.start, todayYmd);
   const entriesFrom = tzDayStartUtc(hoursFrom.from, tz).toISOString();
 
-  const [payments, refunds, bills, pos, petty, entries, runs, payPayments, memos, ratesRead, names, firsts, shelfLots, supplierAccounts, supplierPayments, otherIncome] = await Promise.all([
+  const [payments, refunds, bills, pos, petty, entries, runs, payPayments, memos, ratesRead, names, firsts, shelfLots, supplierAccounts, supplierAliases, supplierPayments, otherIncome] = await Promise.all([
     readEvery<any>("payments", (f, t) =>
       supabase
         .from("payments")
@@ -1601,6 +1631,15 @@ export async function readOwnerMoneyInputs(
     readEvery<any>("supplier accounts", (f, t) =>
       supabase.from("supplier_accounts").select("id, name, on_account").order("id").range(f, t),
     ),
+    // THE SPELLINGS SOMEBODY HAS ALREADY FILED ONTO AN ACCOUNT (8a982483). Without them this read
+    // resolved a paper by the stored column and the account's own name only, while /bills and Nort
+    // also read the aliases - so a ticket spelled by a filed alias landed on the account on one
+    // screen and in the loose pile on the other, and the Suppliers card and the accountant's
+    // download printed two different figures for one book. A recurring expense writes exactly that
+    // shape: free-text vendor, unpaid, no account id (recurring-engine.ts).
+    readEvery<any>("supplier names", (f, t) =>
+      supabase.from("supplier_aliases").select("alias, supplier_account_id").order("alias").range(f, t),
+    ),
     readEvery<any>("supplier payments", (f, t) =>
       supabase.from("supplier_payments").select("id, supplier_account_id, amount, paid_on, method, voided_at").order("id").range(f, t),
     ),
@@ -1609,7 +1648,7 @@ export async function readOwnerMoneyInputs(
   ]);
 
   const problem =
-    [payments, refunds, bills, pos, petty, entries, runs, payPayments, memos, shelfLots, supplierAccounts, supplierPayments, otherIncome]
+    [payments, refunds, bills, pos, petty, entries, runs, payPayments, memos, shelfLots, supplierAccounts, supplierAliases, supplierPayments, otherIncome]
       .map((r) => r.problem)
       .find(Boolean) ??
     ratesRead.problem ??
@@ -1634,6 +1673,15 @@ export async function readOwnerMoneyInputs(
   const recordsStart = starts.length ? starts.sort()[0] : null;
   const firstPaymentDay = recordDay(null, firstPay?.data?.[0]?.paid_at, tz);
 
+  // ONE IDENTITY FOR THIS WHOLE READ (8a982483), built from the same three things every other
+  // reader builds it from, so "which documents does a bill cover" has one answer on both sides of
+  // the card: the Counted side resolves the account, and so must the Not Counted side.
+  const { of: identity } = supplierIdentityOf({
+    bills: bills.rows,
+    supplierAccounts: supplierAccounts.rows,
+    supplierAliases: supplierAliases.rows,
+  });
+
   return {
     inputs: {
       payments: payments.rows,
@@ -1644,13 +1692,14 @@ export async function readOwnerMoneyInputs(
       entries: entries.rows,
       runs: runs.rows,
       payPayments: payPayments.rows,
-      ...supplierDocsNoBillCovers(memos.rows, bills.rows),
+      ...supplierDocsNoBillCovers(memos.rows, bills.rows, identity),
       people,
       recordsStart,
       firstPaymentDay,
       shelfLots: shelfLots.rows,
       shelfMoves: shelfLots.moves,
       supplierAccounts: supplierAccounts.rows,
+      supplierAliases: supplierAliases.rows,
       supplierPayments: supplierPayments.rows,
       supplierDocuments: memos.rows,
       otherIncome: otherIncome.rows,

@@ -106,6 +106,8 @@ import { jobTakes } from "@/lib/stock-ledger";
 import { TookFromStock } from "../../materials/took-from-stock";
 import type { Customer } from "@/lib/types";
 import { staleSharedPhotoIds } from "@/lib/portal/shared-photo-state";
+import { readSettledBySupplier } from "@/lib/supplier-owed-read";
+import { shortSupplierName } from "@/lib/supplier-name";
 
 export const dynamic = "force-dynamic";
 
@@ -185,8 +187,12 @@ export default async function JobDetailPage({
       // readJobBillsWithLines; this read did not, so the hub's Work To Date and the draw modal
       // that opens from it disagreed by $12.22 on the Waldow job while both claimed to be the
       // same number. The projection law, on the one figure the two screens share.
+      // supplier_account_id, supplier_invoice_number, notes and is_statement ride along for the one
+      // covering walk (readSettledBySupplier, 8a982483): without them this tab could not be told
+      // that the supplier's own closed paper already covers a ticket, so the SAME ticket read
+      // "Settled · CED Says" on /bills and "On Account" here.
       .select(
-        "id, supplier, bill_number, amount, status, bill_date, po_id, bill_line_items(id, description, quantity, unit_price, amount, category, billable, billed_amount)",
+        "id, supplier, supplier_account_id, supplier_invoice_number, is_statement, notes, bill_number, amount, status, bill_date, po_id, bill_line_items(id, description, quantity, unit_price, amount, category, billable, billed_amount)",
       )
       .eq("job_id", id)
       // THE BUTTON THAT SET IT ASIDE HAS TO MEAN SOMETHING HERE TOO (review, 2026-09-19). Without
@@ -350,6 +356,7 @@ export default async function JobDetailPage({
     jobStock,
     handClaims,
     abReach,
+    settledSays,
   ] = await Promise.all([
     // THE job's items, role-shaped (projection law): staff read every column, a tech reads
     // TECH_ITEM_COLUMNS — no est_cost, no vendor — the same list /materials/[id] uses, so the one
@@ -548,7 +555,33 @@ export default async function JobDetailPage({
           },
         )
       : Promise.resolve(null as { charge: boolean; ret: boolean } | null),
+    // WHAT THE SUPPLIER'S OWN BOOKS SAY ABOUT THESE TICKETS (8a982483). The badge on a bill row is
+    // one expression both screens draw, but only /bills had ever been handed the fact, so a ticket
+    // whose covering supplier paper is closed said "Settled · CED Says" there and "On Account" here -
+    // one ticket described two ways, with nothing on this tab saying the money had already left the
+    // supplier's balance. THE SAME covering walk, never a second copy. Staff only (the Costs tab is).
+    // A lost read says so in words below; it never quietly draws "On Account".
+    viewerIsStaff
+      ? readSettledBySupplier(supabase, j.org_id, (bills ?? []) as any[]).catch((e: unknown) => {
+          reportError("jobs.[id].settledBySupplier", e, { jobId: id });
+          return { settled: new Map<string, string>(), unread: true, failed: ["the suppliers' own papers"] };
+        })
+      : Promise.resolve({ settled: new Map<string, string>(), unread: false, failed: [] as string[] }),
   ]);
+
+  // THE COSTS TAB'S BILL ROWS, CARRYING THE SUPPLIER'S OWN VERDICT (8a982483). The badge is one
+  // expression (billSettledLabel) and this screen drew it already; what it had never been handed was
+  // the FACT, so every ticket here read "On Account" however many closed supplier papers covered it.
+  // The name is the ACCOUNT's, the way /bills names it, so the two rows read the same words.
+  const costBills = ((bills ?? []) as any[]).map((b) => {
+    const says = settledSays.settled.get(String(b.id));
+    return {
+      ...b,
+      settledBySupplier: says !== undefined,
+      settledBySupplierName: says ? shortSupplierName(says) : null,
+    };
+  });
+
   // PROJECTION at the boundary: staff get the money; a tech's view is HOURS ONLY — no rate, no
   // amount, no bills, no crew (a tech reads only his own rows, so the hours ARE his) — built here
   // so the figures never reach his props (tech-job-access). Before migration 0255 lands the labor
@@ -1691,7 +1724,8 @@ export default async function JobDetailPage({
             <CardContent className="py-5">
               <JobBills
                 jobId={j.id}
-                bills={(bills ?? []) as any}
+                bills={costBills as any}
+                settledSaysUnread={settledSays.unread}
                 pos={(pos ?? []) as any}
                 groups={costGroups}
                 groupsNote={costGroupsNote}

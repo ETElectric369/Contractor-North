@@ -4,11 +4,11 @@ import { useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Pencil, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Badge, statusTone } from "@/components/ui/badge";
+import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/components/toast";
 import { setBillStatus, deleteBill } from "@/app/(app)/jobs/actions";
 import { shortSupplierName } from "@/lib/supplier-name";
-import { billSettledLabel, boughtAtRegister, flipBoughtHow } from "@/lib/supplier-owed";
+import { billSettledLabel, billSettledTone, boughtHowFace, flipBoughtHow } from "@/lib/supplier-owed";
 
 /**
  * A BILL ROW'S THREE DOORS, ONE COPY FOR EVERY SCREEN (audit v1018, class 13): how it was bought,
@@ -102,10 +102,15 @@ export function BillRowDoors({
         aria-label="How this bill was bought: tap to switch between Settled and On Account"
         className="flex min-h-11 items-center gap-2 rounded-lg px-2 text-xs font-medium text-slate-600 ring-1 ring-slate-200 hover:bg-white"
       >
-        <Badge tone={statusTone(bill.status)}>{billSettledLabel(bill, shortSupplierName)}</Badge>
+        {/* THE WORDS AND THE COLOUR FROM THE SAME THREE FACTS (8a982483): the tone used to come
+            from bills.status alone, so a ticket the supplier had settled read in the amber of
+            money still owed. */}
+        <Badge tone={billSettledTone(bill)}>{billSettledLabel(bill, shortSupplierName)}</Badge>
         {/* THE DEED, NOT "SWITCH" (ea2b7172): on a job page a bare "Switch" beside the badge read
-            as "switch the job". The face says what the tap does to THIS bill. */}
-        <span>{boughtAtRegister(bill) ? "Mark On Account" : "Mark Settled"}</span>
+            as "switch the job". The face says what the tap does to THIS bill - and where the
+            supplier has already settled it, it names the register rather than offering to do the
+            thing the badge beside it says is done. */}
+        <span>{boughtHowFace(bill)}</span>
       </button>
       <Button variant="outline" onClick={onEdit} disabled={busy}>
         <Pencil /> Edit

@@ -366,6 +366,7 @@ describe("on the engine's own figures, month by month: Net Profit (Owner's Draw)
     runs: [{ profile_id: "crew", kind: "mileage", period_start: "2026-08-01", period_end: "2026-08-15", gross: 0, mileage_amount: 41.25, created_at: "2026-08-16T18:00:00Z" }],
     payPayments: [],
     creditMemos: [],
+    supplierAliases: [],
     people: new Map([
       ["crew", { name: "Casey Crew", paidByDraw: false, hourlyRate: 36 }],
       ["boss", { name: "Robin Boss", paidByDraw: true, hourlyRate: 0 }],

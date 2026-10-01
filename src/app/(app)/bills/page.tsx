@@ -75,7 +75,13 @@ import {
   type SupplierMergeProposal,
   type SupplierSpelling,
 } from "./supplier-balance";
-import { billSettledLabel, whatIBoughtNotSettled, whatISupplierOwed } from "@/lib/supplier-owed";
+import {
+  billSettledLabel,
+  supplierBalancesUnread,
+  supplierFigureUnread,
+  whatIBoughtNotSettled,
+  whatISupplierOwed,
+} from "@/lib/supplier-owed";
 import { SuppliersCard } from "./suppliers-card";
 import {
   acceptSupplierMerge,
@@ -801,7 +807,16 @@ export default async function BillsPage({
   // would be wrong without a word, so the account says it couldn't total instead (SuppliersCard).
   // The supplier's own papers are one of them: without them an account that is counted from its
   // supplier's papers (CED) would silently fall back to bills-less-payments.
-  const balancesUnread = !!(invoicesErr || billsErr || paymentsErr);
+  //
+  // NAMED ONE AT A TIME, by the one function every reader of this rule asks (8a982483). This was a
+  // bare `||` here, a second copy on the card and a third in Nort's read - and the third left the
+  // supplier's own papers out, so /bills said "Couldn't Total Just Now" while Nort answered the
+  // same question with the bills-less-payments number.
+  const balancesUnread = supplierBalancesUnread({
+    bills: !!billsErr,
+    payments: !!paymentsErr,
+    theirOwnPapers: !!invoicesErr,
+  });
 
   // ── THE TWO QUESTIONS, ASKED ONCE EACH (8a982483) ───────────────────────────────────────────
   //
@@ -834,7 +849,7 @@ export default async function BillsPage({
         openPapers: b.chargedBills,
         // A model-A figure with one of its reads missing is not zero and not a guess: it is named
         // as one we could not total, exactly as the card has always done it.
-        unread: balancesUnread && a.onAccount && b.model !== "supplier-invoices",
+        unread: supplierFigureUnread({ onAccount: a.onAccount, model: b.model, balancesUnread }),
       };
     }),
     papers: owedPapers,
@@ -1302,8 +1317,11 @@ export default async function BillsPage({
       settledBySupplier: settledBySupplierIds.has(String(b.id)),
       // WHO says so: the account's short name ("CED"), not the spelling the receipt reader stored
       // on bills.supplier (the row's first line already prints that one, in full).
+      // BY IDENTITY (8a982483). This read the raw column, which is null on more than half his book,
+      // so the very tickets only the resolver could reach - the ones this fix exists for - fell back
+      // to the typed spelling and named the supplier differently from every other row.
       settledBySupplierName: settledBySupplierIds.has(String(b.id))
-        ? shortSupplierName(accountNameOf.get(String(b.supplier_account_id ?? "")) || b.supplier)
+        ? shortSupplierName(accountNameOf.get(String(accountOfBill(String(b.id)) ?? "")) || b.supplier)
         : null,
       receipt: receiptById.get(String(b.id)) ?? null,
       papers: paperOfBill[String(b.id)] ?? null,

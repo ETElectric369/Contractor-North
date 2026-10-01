@@ -70,6 +70,19 @@ const NOT_THIS_RULE: { file: string; why: string }[] = [
   },
 ];
 
+/**
+ * WRITES THAT ASK WHETHER A PAPER IS ALREADY FILED, which is a question about the stored column and
+ * is answerable only by reading it. Filing a paper onto an account, and refusing to move one that is
+ * already somewhere else, are the two places `bills.supplier_account_id` is the subject rather than a
+ * shortcut to the supplier's identity. Each still has to be argued for in writing.
+ */
+const FILES_THE_PAPER: { file: string; why: string }[] = [
+  {
+    file: "src/app/(app)/bills/supplier-actions.ts",
+    why: "filing and alias actions ask whether a bill is ALREADY on an account, and whether it is a DIFFERENT one, before moving it; the stored column is the subject of that question",
+  },
+];
+
 function files(dir: string): string[] {
   return readdirSync(dir).flatMap((n) => {
     const p = join(dir, n);
@@ -151,9 +164,72 @@ describe("the still-owed rule is written in exactly one place", () => {
     expect(hits).toEqual([]);
   });
 
+  /**
+   * A FIGURE READER THAT GATES A TICKET ON THE RAW `bills.supplier_account_id` COLUMN.
+   *
+   * This is the half of the bug no predicate fix could reach, and it came back AFTER the fix: the
+   * P&L card's model-B arm built its covering walk with the resolver and then re-filtered the
+   * covering tickets by the stored column, which is null on more than half his book. The ticket
+   * dropped out of "covered" and the card named it as money the supplier had never billed - beside
+   * the very invoice printed on that ticket's own line.
+   *
+   * `supplierAccountForPaper` is the only thing that decides which supplier a paper belongs to, so
+   * comparing the stored column to an account id is always either this fault or a write deciding
+   * whether a paper is ALREADY filed - and the ones that are get named below.
+   */
+  it("no figure gates a ticket on the stored supplier_account_id column", () => {
+    // A BILL's column, named as one. A PAYMENT carries `supplier_account_id` too and that one IS the
+    // stored fact about it (a cheque was sent to an account, not to a spelling), as does the record of
+    // what applying an open list wrote; neither is a paper looking for its supplier.
+    const billColumn = String.raw`\b(b|bill|bills|ticket|paper)\s*(\?\.)?\.supplier_account_id\b`;
+    const anAccount = String.raw`\b(row\.id|account|accountId|acctId|opts\.accountId)\b`;
+    const hits = scan(
+      (l) =>
+        new RegExp(`${billColumn}[^\\n]*(===|!==)[^\\n]*${anAccount}`).test(l) ||
+        new RegExp(`${anAccount}[^\\n]*(===|!==)[^\\n]*${billColumn}`).test(l),
+    ).filter((h) => !FILES_THE_PAPER.some((e) => h.startsWith(`${e.file}:`)));
+    expect(hits).toEqual([]);
+  });
+
+  /**
+   * COULD THIS FIGURE BE TOTALLED AT ALL, WRITTEN OUT AGAIN. It was spelled out at four doors and
+   * one of them - Nort's - left THE SUPPLIER'S OWN PAPERS off the list, so /bills refused to total
+   * while he quoted the bills-less-payments number for the same account. `supplierFigureUnread` is
+   * the expression; a door calls it.
+   */
+  it("no reader writes the could-not-total test itself", () => {
+    const hits = scan((l) => /model\s*(!==|===)\s*["'`]supplier-invoices["'`]/.test(l) && /onAccount/.test(l));
+    expect(hits).toEqual([]);
+  });
+
+  /**
+   * AND THE COSTS TAB MAY NOT DRAW A BILL ROW WITHOUT THE SUPPLIER'S VERDICT. The component was
+   * taught `billSettledLabel` and the job page never passed the fact, so the badge could not fire
+   * there however right the expression was. A grep cannot see an unpassed prop; this checks the one
+   * thing a grep can see, that the page goes through the shared read and hands the row down.
+   */
+  it("the job's Costs tab gets the fact from the one read", () => {
+    const page = readFileSync(join(ROOT, "src/app/(app)/jobs/[id]/page.tsx"), "utf8");
+    expect(page).toContain("readSettledBySupplier(supabase, j.org_id,");
+    expect(page).toContain("settledBySupplier: says !== undefined");
+    expect(page).toContain("bills={costBills as any}");
+    expect(page).toContain("settledSaysUnread={settledSays.unread}");
+  });
+
+  /**
+   * AND THE P&L CARD AND THE WORKBOOK GET THE FILED SPELLINGS. `supplierAliases` is required on
+   * OwnerMoneyInputs now, so nothing can omit it - but a required field can still be handed an empty
+   * array, and the only reader that should is a test. The production read must fetch the table.
+   */
+  it("the owner-money read fetches the filed spellings", () => {
+    const src = readFileSync(join(ROOT, "src/lib/analytics/owner-money.ts"), "utf8");
+    expect(src).toContain('supabase.from("supplier_aliases").select("alias, supplier_account_id")');
+    expect(src).toContain("supplierAliases: supplierAliases.rows");
+  });
+
   /** Every named exception still exists and still says why. A stale allowlist entry is an invitation. */
   it("every exception names a file that exists and gives its reason", () => {
-    for (const e of NOT_THIS_RULE) {
+    for (const e of [...NOT_THIS_RULE, ...FILES_THE_PAPER]) {
       expect(() => statSync(join(ROOT, e.file)), `${e.file} is listed as an exception but is not there`).not.toThrow();
       expect(e.why.length, `${e.file} needs a reason`).toBeGreaterThan(20);
     }

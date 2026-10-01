@@ -3,14 +3,18 @@ import {
   NO_SUPPLIER_NAME_GROUP,
   NO_SUPPLIER_NAME_LABEL,
   billSettledLabel,
+  billSettledTone,
   boughtAtRegister,
+  boughtHowFace,
   flipBoughtHow,
   indexSupplierIdentity,
   isStillOwed,
   notOnAnAccountSentence,
   resolveSupplierPapers,
   supplierAccountForPaper,
+  supplierBalancesUnread,
   supplierCoverage,
+  supplierFigureUnread,
   whatIBoughtNotSettled,
   whatISupplierOwed,
   type SupplierAccountFigure,
@@ -183,6 +187,67 @@ describe("what bills.status says, and what it does not", () => {
       billSettledLabel({ status: "unpaid", supplier: "Northgate Electrical Distributors, Inc.", settledBySupplier: true, settledBySupplierName: "Northgate" }, short),
     ).toBe("Settled · Northgate Says");
   });
+
+  /**
+   * THE WORDS AND THE COLOUR ARE ONE STATEMENT. The badge took its words from the three facts and
+   * its tone from `statusTone(bill.status)`, which knows two, so a ticket the supplier had closed
+   * read "Settled · CED Says" in the amber of money still owed.
+   */
+  it("colours the badge by the same three facts that choose its words", () => {
+    expect(billSettledTone({ status: "paid" })).toBe("green");
+    expect(billSettledTone({ status: "unpaid" })).toBe("amber");
+    expect(billSettledTone({ status: "unpaid", settledBySupplier: true })).toBe("green");
+    // Settled at the register, whatever the supplier's papers say: it never was in their balance.
+    expect(billSettledTone({ status: "paid", settledBySupplier: true })).toBe("green");
+  });
+
+  /**
+   * AND THE BUTTON MAY NOT OFFER WHAT THE BADGE BESIDE IT SAYS IS DONE. A ticket whose covering
+   * supplier paper is closed showed "Settled · CED Says" next to a face reading "Mark Settled" - a
+   * control offering to do the thing the words beside it had just said was already done. The tap
+   * writes `status='paid'` and moves no money, so the face has to name the deed it really does.
+   */
+  it("never offers to settle a ticket the badge beside it already calls settled", () => {
+    const short = (n: string | null | undefined) => String(n ?? "").split(" ")[0] ?? "";
+    expect(boughtHowFace({ status: "unpaid" })).toBe("Mark Settled");
+    expect(boughtHowFace({ status: "paid" })).toBe("Mark On Account");
+    const closed = { status: "unpaid", supplier: "Ridgeline Lumber", settledBySupplier: true };
+    expect(billSettledLabel(closed, short)).toBe("Settled · Ridgeline Says");
+    expect(boughtHowFace(closed)).toBe("Mark Settled At The Register");
+    // The pair never reads as one offering the other: that is the whole rule.
+    expect(boughtHowFace(closed)).not.toBe(`Mark ${billSettledLabel(closed, short).split(" ")[0]}`);
+  });
+});
+
+/**
+ * COULD THIS FIGURE BE TOTALLED AT ALL - ONE PLACE (8a982483, finding 4).
+ *
+ * It was spelled out at four doors: /bills' page, that page's per-account `unread`, the Suppliers
+ * card's `cantTotal`, and Nort's read. Nort's copy left out THE SUPPLIER'S OWN PAPERS, and losing
+ * that read does not read as a gap: an account with no documents drops from model B to model A,
+ * which subtracts payments already inside what the supplier closed. So /bills showed "Couldn't
+ * Total Just Now" while Nort answered the same question with that number, and Erik acts on Nort's
+ * answers.
+ */
+describe("a figure built on a read that failed is named, not guessed", () => {
+  it("counts the supplier's own papers as one of the reads a balance stands on", () => {
+    expect(supplierBalancesUnread({ bills: false, payments: false, theirOwnPapers: false })).toBe(false);
+    expect(supplierBalancesUnread({ bills: true, payments: false, theirOwnPapers: false })).toBe(true);
+    expect(supplierBalancesUnread({ bills: false, payments: true, theirOwnPapers: false })).toBe(true);
+    // THE ONE THAT WAS MISSING.
+    expect(supplierBalancesUnread({ bills: false, payments: false, theirOwnPapers: true })).toBe(true);
+  });
+
+  it("names an on-account model-A figure it cannot total, and leaves the supplier's own figure alone", () => {
+    const unread = (over: { onAccount?: boolean; model?: "supplier-invoices" | "bills-minus-payments"; balancesUnread?: boolean }) =>
+      supplierFigureUnread({ onAccount: true, model: "bills-minus-payments", balancesUnread: true, ...over });
+    expect(unread({})).toBe(true);
+    // A figure that IS the supplier's own papers did not come from the reads that failed.
+    expect(unread({ model: "supplier-invoices" })).toBe(false);
+    // A register supplier keeps no running balance to fail to total.
+    expect(unread({ onAccount: false })).toBe(false);
+    expect(unread({ balancesUnread: false })).toBe(false);
+  });
 });
 
 describe("(b) what did I buy and not settle yet", () => {
@@ -226,14 +291,83 @@ describe("(a) what do I owe this supplier", () => {
 
   it("counts the paper with no supplier name under a name of its own, never silently", () => {
     expect(owed.lines.find((l) => l.name === NO_SUPPLIER_NAME_LABEL)).toMatchObject({ owed: 40, papers: 1 });
-    expect(owed.notOnAnAccount).toEqual({ papers: 2, total: 290, spellings: 1, unnamed: 1 });
+    expect(owed.notOnAnAccount).toEqual({ papers: 2, total: 290, spellings: 1, unnamed: 1, credits: 0, creditPapers: 0 });
   });
 
   it("says how many papers are not on an account yet, and says nothing when none are", () => {
     expect(notOnAnAccountSentence(owed.notOnAnAccount, (v) => `$${v.toFixed(2)}`)).toBe(
       "$290.00 of this is on 2 papers that are not on a supplier account yet, counted under the name on the paper. 1 of them has no supplier name on it at all.",
     );
-    expect(notOnAnAccountSentence({ papers: 0, total: 0, spellings: 0, unnamed: 0 }, (v) => `$${v}`)).toBeNull();
+    expect(notOnAnAccountSentence({ papers: 0, total: 0, spellings: 0, unnamed: 0, credits: 0, creditPapers: 0 }, (v) => `$${v}`)).toBeNull();
+  });
+
+  /**
+   * A RETURN ON A SPELLING NOBODY HAS FILED YET MADE THE ONE NUMBER TOO SMALL.
+   *
+   * This app files a return as a NEGATIVE on-account bill, and 69 of his 119 papers are on no
+   * account under 43 spellings, so a credit-only spelling is an ordinary Tuesday: a register-paid
+   * purchase and then an on-account return, or one real supplier spelled two ways. The account arm
+   * sent a negative figure to `ahead` and the loose arm meant to - its guard read
+   * `g.total <= 0.005 && g.papers === 0`, and a group only exists once a paper lands in it, so
+   * `papers === 0` was unreachable and the guard was dead. The credit went into the headline, the
+   * workbook printed a negative "owed" row, and Nort read a negative debt out loud.
+   */
+  it("reports a credit on an unfiled spelling beside the total, never inside it", () => {
+    const withReturn = [
+      ...papers,
+      // A return, filed the way this app files returns, on a spelling that is on no account.
+      { id: "t9", supplierAccountId: null, supplier: "Summit Supply", amount: -51.58, status: "unpaid" },
+    ];
+    const id2 = resolveSupplierPapers(withReturn, index);
+    const owedBack = whatISupplierOwed({
+      accounts: figures,
+      papers: withReturn,
+      identity: id2,
+      settledBySupplier: coverage.settledBySupplier,
+    });
+
+    // THE ONE NUMBER DOES NOT MOVE. It was $1,558.42 before this - $51.58 less than he owes.
+    expect(owedBack.total).toBe(1610);
+    // No negative row reaches the workbook's Owed To Suppliers or Nort's by_supplier.
+    expect(owedBack.lines.every((l) => l.owed > 0)).toBe(true);
+    expect(owedBack.lines.find((l) => l.name === "Summit Supply")).toBeUndefined();
+    // It is NAMED beside the total, under the spelling on the paper, with no account id to call it.
+    expect(owedBack.ahead).toContainEqual({ accountId: "", name: "Summit Supply", credit: 51.58 });
+    // And the papers-not-on-an-account door still counts it: it is a paper he has to go and file.
+    expect(owedBack.notOnAnAccount).toEqual({ papers: 3, total: 290, spellings: 2, unnamed: 1, credits: 51.58, creditPapers: 1 });
+  });
+
+  /** And the sentence says the credit out loud, or he could divide $290 by 3 papers and be wrong. */
+  it("says the credit it left out, in the same sentence as the papers", () => {
+    const withReturn = [...papers, { id: "t9", supplierAccountId: null, supplier: "Summit Supply", amount: -51.58, status: "unpaid" }];
+    const owedBack = whatISupplierOwed({
+      accounts: figures,
+      papers: withReturn,
+      identity: resolveSupplierPapers(withReturn, index),
+      settledBySupplier: coverage.settledBySupplier,
+    });
+    expect(notOnAnAccountSentence(owedBack.notOnAnAccount, (v) => `$${v.toFixed(2)}`)).toBe(
+      "$290.00 of this is on 3 papers that are not on a supplier account yet, counted under the name on the paper. 1 of them has no supplier name on it at all. A credit of $51.58 on 1 of them is money back, so it is not in the figure.",
+    );
+  });
+
+  /** A spelling whose papers cancel out: counted as papers to file, no row, no credit, no money. */
+  it("puts a spelling that nets to nothing on no list of money", () => {
+    const evens = [
+      ...papers,
+      { id: "t9", supplierAccountId: null, supplier: "Summit Supply", amount: 100, status: "unpaid" },
+      { id: "t10", supplierAccountId: null, supplier: "Summit Supply", amount: -100, status: "unpaid" },
+    ];
+    const owedEven = whatISupplierOwed({
+      accounts: figures,
+      papers: evens,
+      identity: resolveSupplierPapers(evens, index),
+      settledBySupplier: coverage.settledBySupplier,
+    });
+    expect(owedEven.total).toBe(1610);
+    expect(owedEven.lines.find((l) => l.name === "Summit Supply")).toBeUndefined();
+    expect(owedEven.ahead.find((a) => a.name === "Summit Supply")).toBeUndefined();
+    expect(owedEven.notOnAnAccount).toMatchObject({ papers: 4, total: 290, credits: 0, creditPapers: 0 });
   });
 
   it("keeps a credit at one supplier out of the total: being ahead there does not pay here", () => {

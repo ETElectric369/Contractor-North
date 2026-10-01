@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { readSupplierOwed } from "@/lib/supplier-owed-read";
+import { readSettledBySupplier, readSupplierOwed } from "@/lib/supplier-owed-read";
 
 /**
  * NORT'S WORDS MATCH THE CARD TO THE CENT (8a982483, Part 4).
@@ -113,6 +113,10 @@ function fakeSupabase(missing: Set<string> = new Set()) {
         filters.push((r) => (v === null ? r?.[col] == null : r?.[col] === v));
         return q;
       },
+      in: (col: string, vs: unknown[]) => {
+        filters.push((r) => (vs ?? []).map(String).includes(String(r?.[col] ?? "")));
+        return q;
+      },
       limit: () => settle(),
       maybeSingle: () => settle(true),
       then: (res: any, rej: any) => settle().then(res, rej),
@@ -160,7 +164,7 @@ describe("Nort reads the same figure the card shows", () => {
 
   it("says how many papers are not on a supplier account yet", async () => {
     const read = await readSupplierOwed(fakeSupabase(), ORG);
-    expect(read!.owed.notOnAnAccount).toEqual({ papers: 2, total: 290, spellings: 1, unnamed: 1 });
+    expect(read!.owed.notOnAnAccount).toEqual({ papers: 2, total: 290, spellings: 1, unnamed: 1, credits: 0, creditPapers: 0 });
   });
 
   /**
@@ -174,8 +178,75 @@ describe("Nort reads the same figure the card shows", () => {
     expect(read!.bought.ids).toContain("t2");
   });
 
+  /**
+   * THE READ THAT FAILS SILENTLY (finding 4). Lose the SUPPLIERS' OWN PAPERS and nothing looks
+   * missing: the account simply holds no documents, so its figure drops from model B to model A -
+   * our tickets less what we sent them - which subtracts $6,000 of payments that are already inside
+   * what the supplier closed. That is the arithmetic supplier-balance.ts has a test named after.
+   *
+   * /bills refuses to total in that state ("Couldn't Total Just Now"). Nort quoted the number,
+   * because his copy of the rule checked only bills and payments. Erik acts on Nort's answers.
+   */
+  it("will not total an account whose own papers could not be read, and names it", async () => {
+    const read = await readSupplierOwed(fakeSupabase(new Set(["supplier_invoices"])), ORG);
+    expect(read!.failed).toContain("the suppliers' own papers");
+    // The account is NAMED as one that could not be totalled, which is what /bills shows.
+    expect(read!.owed.couldNotTotal.map((a) => a.name)).toEqual(["Northgate Electrical Distributors"]);
+    // And its money is in no figure and no line: not quoted, not zeroed, not turned into a credit.
+    expect(read!.owed.lines.some((l) => l.accountId === ACCOUNT)).toBe(false);
+    expect(read!.owed.ahead.some((a) => a.accountId === ACCOUNT)).toBe(false);
+    // Before this it answered $1,665.46 AHEAD at that account - 500 + 800 + 3034.54 - 6000.
+    expect(read!.owed.total).not.toBe(1610);
+  });
+
   it("refuses to answer for no company at all", async () => {
     expect(await readSupplierOwed(fakeSupabase(), "")).toBeNull();
+  });
+});
+
+/**
+ * THE FACT A JOB'S COSTS TAB HAD NEVER BEEN HANDED (findings 3/8).
+ *
+ * `billSettledLabel` is one expression both screens draw, but only /bills had been told whether the
+ * supplier's own papers covered a ticket - so the SAME ticket read "Settled · CED Says" there and
+ * "On Account" on the job, and nothing on the job said the money had already left the balance.
+ *
+ * It is the SAME covering walk, through `supplierDocumentRows`, scoped to the tickets asked about:
+ * a document reaches a paper through a link on that paper or a number printed on that paper's own
+ * lines, so leaving other jobs' tickets out cannot change the answer for these.
+ */
+describe("what the supplier's own books say about a handful of tickets", () => {
+  const ticketsOn = (ids: string[]) => TABLES.bills.filter((b) => ids.includes(b.id));
+
+  it("names the ticket their closed paper covers, by the account's own name", async () => {
+    const read = await readSettledBySupplier(fakeSupabase(), ORG, ticketsOn(["t1", "t2", "t8"]));
+    expect(read.unread).toBe(false);
+    // t2: on NO account, placed by the account's own name, covered by a CLOSED paper of theirs.
+    expect(read.settled.get("t2")).toBe("Northgate Electrical Distributors");
+    // t8: placed by an alias, and the paper covering it is still OPEN - so still owed, not settled.
+    expect(read.settled.has("t8")).toBe(false);
+    // t1: nothing of theirs reaches it at all.
+    expect(read.settled.has("t1")).toBe(false);
+  });
+
+  it("claims nothing either way when a read behind it failed, and says which", async () => {
+    const read = await readSettledBySupplier(fakeSupabase(new Set(["supplier_invoices"])), ORG, ticketsOn(["t2"]));
+    expect(read.unread).toBe(true);
+    expect(read.failed).toContain("the suppliers' own papers");
+    expect(read.settled.size).toBe(0);
+  });
+
+  it("answers for no company and no tickets without reading anything", async () => {
+    expect((await readSettledBySupplier(fakeSupabase(), "", ticketsOn(["t2"]))).settled.size).toBe(0);
+    expect((await readSettledBySupplier(fakeSupabase(), ORG, [])).unread).toBe(false);
+  });
+
+  /** A duplicate somebody set aside is in nobody's books, so it is never called settled either. */
+  it("leaves a superseded copy out", async () => {
+    const read = await readSettledBySupplier(fakeSupabase(), ORG, [
+      { id: "t2", supplier: "Northgate Electrical Distributors, Inc.", superseded_by_bill_id: "t1", bill_line_items: [{ description: "Statement (Invoice 1002)" }] },
+    ]);
+    expect(read.settled.size).toBe(0);
   });
 });
 

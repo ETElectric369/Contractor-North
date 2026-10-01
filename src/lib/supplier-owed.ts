@@ -310,6 +310,42 @@ export function billSettledLabel(
   return "On Account";
 }
 
+/**
+ * THAT BADGE'S COLOUR, DECIDED BY THE SAME THREE FACTS AS ITS WORDS (8a982483).
+ *
+ * The badge took its words from the three facts above and its tone from `statusTone(bill.status)`,
+ * which knows two. So a ticket whose supplier has closed the paper covering it read "Settled · X
+ * Says" in the amber of money still owed. The word and the colour are one statement and they are
+ * decided here together, or a screen can make them disagree again.
+ */
+export function billSettledTone(
+  paper: { status?: string | null; settledBySupplier?: boolean | null },
+): "green" | "amber" {
+  if (boughtAtRegister(paper)) return "green";
+  return paper?.settledBySupplier ? "green" : "amber";
+}
+
+/**
+ * THE FACE OF THE CONTROL THAT WRITES `bills.status`, AND IT MAY NOT OFFER WHAT THE BADGE BESIDE IT
+ * SAYS IS DONE.
+ *
+ * A ticket the supplier's own closed paper covers showed a badge reading "Settled · X Says" next to
+ * a button whose face said "Mark Settled" - a button offering to do the thing the words beside it
+ * had just said was already done. Tapping it writes `status='paid'` and moves no money, so the lie
+ * was in the face, not the deed: the deed is "this one was settled AT THE REGISTER", which is a
+ * different fact from the supplier's verdict and the only fact this column holds.
+ *
+ * So where the supplier has already settled it, the face names the register out loud. Where it has
+ * not, "Mark Settled" is unambiguous beside "On Account" and stays - the shorter face on a 375px
+ * row, for the state that is almost every row.
+ */
+export function boughtHowFace(
+  paper: { status?: string | null; settledBySupplier?: boolean | null },
+): string {
+  if (boughtAtRegister(paper)) return "Mark On Account";
+  return paper?.settledBySupplier ? "Mark Settled At The Register" : "Mark Settled";
+}
+
 // ────────────────────────────────────────────────────────────────────────────────────────────────
 // THE ONE COVERING WALK
 // ────────────────────────────────────────────────────────────────────────────────────────────────
@@ -493,14 +529,26 @@ export interface SupplierOwedLine {
 }
 
 export interface NotOnAnAccount {
-  /** How many papers are not on a supplier account yet. Zero means no badge. */
+  /**
+   * How many papers are not on a supplier account yet. Zero means no badge. EVERY one of them,
+   * credits included: this is the count the File It door acts on, and a paper nobody has filed is
+   * something he needs to look at whichever way its money points.
+   */
   papers: number;
-  /** Their money. It IS inside `total` - see the doc comment. */
+  /** The money OWED on them. It IS inside `total` - see the doc comment. Credits are not. */
   total: number;
   /** How many distinct typed-in spellings that is, for the door's sentence. */
   spellings: number;
   /** How many of them carry no supplier name at all, which is a different errand. */
   unnamed: number;
+  /**
+   * CREDIT ON A SPELLING THAT IS NOT ON AN ACCOUNT, as a positive figure. Money back, not money to
+   * send, so it is NOT in `total` - the same rule the account arm has always followed. Named here
+   * so the sentence can say it out loud instead of it quietly shrinking the one number.
+   */
+  credits: number;
+  /** How many of `papers` those credits are on, so the sentence can name them. */
+  creditPapers: number;
 }
 
 export interface WhatISupplierOwed {
@@ -517,10 +565,58 @@ export interface WhatISupplierOwed {
    * Suppliers he is ahead at. A credit at one supplier does not pay another, so this is NOT
    * subtracted from `total` - it is a fact beside it, which is the same rule model B uses for
    * payments and for the same reason.
+   *
+   * `accountId` is "" for a credit on a SPELLING that is not on an account yet. Those reach this
+   * list too, under the name on the paper, because a credit that is not in the total and not named
+   * anywhere is money that vanished off the screen.
    */
   ahead: { accountId: string; name: string; credit: number }[];
   /** Accounts whose figure could not be worked out because a read failed. Named, never guessed. */
   couldNotTotal: { accountId: string; name: string }[];
+}
+
+/**
+ * THE THREE READS A SUPPLIER BALANCE STANDS ON, each named, as a record rather than a boolean.
+ *
+ * It is a record on purpose. Written as a loose "did anything fail" boolean it was spelled out at
+ * four doors - /bills' page, the Suppliers card, Nort's read - and one of them left out the
+ * supplier's own papers. Losing THAT read does not leave a visible gap: an account with no
+ * documents silently drops from model B to model A, which is bills-less-payments, which is the
+ * $1,360.93 double subtraction supplier-balance.ts has a test named after. So /bills said
+ * "Couldn't Total Just Now" while Nort answered the same question with a number.
+ *
+ * Adding a fourth read means adding a field here, and every caller that builds this object by hand
+ * stops compiling until it says what that read did. That is the teeth.
+ */
+export interface SupplierBalanceReads {
+  /** Our own tickets. */
+  bills: boolean;
+  /** What we have sent them. */
+  payments: boolean;
+  /** THE SUPPLIER'S OWN PAPERS. Lose these and an account quietly changes which model answers. */
+  theirOwnPapers: boolean;
+}
+
+/** True when any read a supplier balance stands on failed. The page's headline reads this. */
+export function supplierBalancesUnread(reads: SupplierBalanceReads): boolean {
+  return reads.bills || reads.payments || reads.theirOwnPapers;
+}
+
+/**
+ * CAN THIS ONE ACCOUNT'S FIGURE BE TOTALLED AT ALL. One place, every door.
+ *
+ * An account whose figure is the SUPPLIER'S OWN PAPERS is safe: that figure is theirs, and it did
+ * not come from the reads that failed. Any other on-account figure is bills less payments, so with
+ * one of those reads missing it is not zero and not a guess - it is named as one we could not
+ * total, which is what the card has always done and what Nort now does too.
+ */
+export function supplierFigureUnread(input: {
+  onAccount: boolean;
+  model: "supplier-invoices" | "bills-minus-payments";
+  /** `supplierBalancesUnread` of the three reads. */
+  balancesUnread: boolean;
+}): boolean {
+  return input.balancesUnread && input.onAccount && input.model !== "supplier-invoices";
 }
 
 /** One account's figure as `supplierBalance` already produced it. Passed IN rather than recomputed:
@@ -561,7 +657,9 @@ export interface SupplierAccountFigure {
  *   · A SUPERSEDED DUPLICATE, always and everywhere.
  *   · A VOIDED PAYMENT, which never came off anything (`supplierBalance` holds that rule).
  *   · A CREDIT AT ANOTHER SUPPLIER. Being ahead at one does not pay the next, so `ahead` is
- *     reported beside the total and never inside it.
+ *     reported beside the total and never inside it. That holds for a credit on a spelling nobody
+ *     has filed yet as well - a return goes in this app as a negative on-account bill, and one of
+ *     those under an unfiled spelling used to make the one number smaller than what he owes.
  *
  * WHAT IT DOES NOT HIDE: a paper on no account is in `total`, under its own typed-in name, and
  * `notOnAnAccount` carries the count, the money and the spellings so the screen can say it in one
@@ -680,11 +778,31 @@ export function whatISupplierOwed(input: {
   let notOnTotal = 0;
   let notOnPapers = 0;
   let unnamed = 0;
+  let notOnCredits = 0;
+  let notOnCreditPapers = 0;
   for (const [, g] of loose) {
-    if (g.total <= 0.005 && g.papers === 0) continue;
-    notOnTotal = r2(notOnTotal + g.total);
+    // The paper is counted whatever its money does: the count is the File It door's.
     notOnPapers += g.papers;
     if (g.unnamed) unnamed += g.papers;
+    // A CREDIT ON A SPELLING NOBODY HAS FILED YET goes BESIDE the total, never inside it.
+    //
+    // The account arm has always done this (`owed < 0` -> `ahead`), and the type above says so:
+    // "Never negative here - a credit goes to `ahead`". The loose arm meant to and could not: its
+    // guard was `g.total <= 0.005 && g.papers === 0`, and a group only exists once a paper lands
+    // in it, so `papers === 0` is unreachable and the guard was dead code. A return filed the way
+    // this app files returns - a negative on-account bill - under a spelling not on an account
+    // then made THE ONE NUMBER SMALLER than what he owes, printed a negative "owed" row in the
+    // accountant's workbook, and had Nort say a negative debt out loud.
+    if (g.total < -0.005) {
+      notOnCredits = r2(notOnCredits + -g.total);
+      notOnCreditPapers += g.papers;
+      ahead.push({ accountId: "", name: g.name, credit: r2(-g.total) });
+      continue;
+    }
+    // Nothing owed on it, and nothing back either. The paper is counted above; there is no row to
+    // put on a list of what is owed, and a $0.00 line would read as a supplier he owes nothing.
+    if (g.total <= 0.005) continue;
+    notOnTotal = r2(notOnTotal + g.total);
     lines.push({
       accountId: "",
       name: g.name,
@@ -706,6 +824,8 @@ export function whatISupplierOwed(input: {
       total: notOnTotal,
       spellings: [...loose.keys()].filter((k) => k !== NO_SUPPLIER_NAME_GROUP).length,
       unnamed,
+      credits: notOnCredits,
+      creditPapers: notOnCreditPapers,
     },
     ahead,
     couldNotTotal,
@@ -721,5 +841,11 @@ export function notOnAnAccountSentence(n: NotOnAnAccount | null | undefined, for
   if (!n || n.papers <= 0) return null;
   const papers = `${n.papers} ${n.papers === 1 ? "paper" : "papers"}`;
   const unnamed = n.unnamed > 0 ? ` ${n.unnamed} of them ${n.unnamed === 1 ? "has" : "have"} no supplier name on it at all.` : "";
-  return `${formatMoney(n.total)} of this is on ${papers} that are not on a supplier account yet, counted under the name on the paper.${unnamed}`;
+  // THE CREDIT THAT IS NOT IN THE FIGURE, SAID OUT LOUD. Nothing may leave a figure without the
+  // screen saying so, and without this clause he could divide the money by the papers and be wrong.
+  const credits =
+    n.credits > 0.005
+      ? ` A credit of ${formatMoney(n.credits)} on ${n.creditPapers} of them is money back, so it is not in the figure.`
+      : "";
+  return `${formatMoney(n.total)} of this is on ${papers} that are not on a supplier account yet, counted under the name on the paper.${unnamed}${credits}`;
 }

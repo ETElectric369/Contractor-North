@@ -78,6 +78,7 @@ const base = (): OwnerMoneyInputs => ({
   runs: [],
   payPayments: [],
   creditMemos: [],
+  supplierAliases: [],
   people,
   recordsStart: null,
 });

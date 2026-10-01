@@ -344,7 +344,7 @@ describe("buildMoneyChartData: what this viewer's chart holds", () => {
 
   it("a company with no money yet has no months (the card says so in a sentence)", () => {
     const empty = computeOwnerMoney(
-      { payments: [], refunds: [], bills: [], pos: [], pettyCash: [], entries: [], runs: [], payPayments: [], creditMemos: [], people: new Map(), recordsStart: null },
+      { payments: [], refunds: [], bills: [], pos: [], pettyCash: [], entries: [], runs: [], payPayments: [], creditMemos: [], supplierAliases: [], people: new Map(), recordsStart: null },
       ownerMoneyChartWindow(TODAY),
       "America/Los_Angeles",
       TODAY,

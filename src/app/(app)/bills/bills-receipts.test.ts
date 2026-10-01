@@ -61,7 +61,10 @@ describe("a bill's status says how it was bought, in words", () => {
   it("says who settled it by the account's short name, in a label that can't widen the column", () => {
     const PAGE = readFileSync(join(process.cwd(), "src/app/(app)/bills/page.tsx"), "utf8");
     expect(SRC).toContain("settledBySupplierName?: string | null;");
-    expect(PAGE).toContain("shortSupplierName(accountNameOf.get(String(b.supplier_account_id ?? \"\")) || b.supplier)");
+    // BY IDENTITY, NOT THE STORED COLUMN (8a982483). This named the supplier off
+    // `b.supplier_account_id`, which is null on more than half his book, so exactly the tickets only
+    // the resolver reaches - the ones this whole fix is about - fell back to the typed spelling.
+    expect(PAGE).toContain('shortSupplierName(accountNameOf.get(String(accountOfBill(String(b.id)) ?? "")) || b.supplier)');
     // The label itself is bounded, whatever name reaches it.
     expect(SRC).toContain('<span className="block max-w-[9rem] truncate text-xs text-slate-400">');
     // The one rule, run on the spellings CED's bills actually carry.

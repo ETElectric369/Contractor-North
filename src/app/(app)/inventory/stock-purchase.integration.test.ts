@@ -183,6 +183,7 @@ d("Shop Stock typed in: one bill on no job, one line, one roll, its month, its U
       runs: [],
       payPayments: [],
       creditMemos: [],
+      supplierAliases: [],
       people: new Map(),
       recordsStart: null,
       shelfLots: lots,
