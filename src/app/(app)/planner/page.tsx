@@ -83,6 +83,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
   const [
     { data: jobs }, { data: segJobs }, { data: appts }, { data: openRows },
     { data: customers }, { data: staff }, { data: jobOptRows }, { data: me }, { data: todayCrewRows },
+    { data: everyone },
   ] = await Promise.all([
     // The block's end, its size and its crew and town ride along: every agenda row says where, when
     // (start to end) and who (lib/schedule/block-info), for the crew as for the office. No money.
@@ -114,6 +115,12 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
     // Everyone's Day's rows for today (both kinds): the day row wins on the rows' crew chips (someone
     // off today, or on another job today, is dimmed). Names only, for the crew as for the office.
     supabase.from("crew_day_assignments").select("profile_id, work_date, kind, job_id").eq("work_date", todayStr).limit(500),
+    /* EVERYONE THE COMPANY EVER HAD (id, name only), so a job still assigned to someone who LEFT shows
+       their name and "No Longer On The Team" instead of a "U" chip titled "Unnamed" — the schedule names
+       them, and My Day has to say the same thing about the same job. Deactivating a member only flips
+       profiles.active (settings/actions setMemberActive); nothing strips jobs.assigned_to, so the id
+       stays on the job. Names only: no role, no rate, nothing a tech may not see. */
+    supabase.from("profiles").select("id, full_name").limit(1000),
   ]);
 
   const openEntry = (openRows ?? [])[0] as any | undefined;
@@ -398,6 +405,8 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
   const custOpts = toCustomerOptions(customers);
   const staffOpts = toStaffOptions(staff);
   const people = (staff ?? []).map((s: any) => ({ id: s.id, full_name: s.full_name }));
+  /** Everyone the company ever had, for a chip whose person has left ("No Longer On The Team"). */
+  const everPeople = ((everyone ?? []) as any[]).map((p) => ({ id: p.id, full_name: p.full_name }));
   /* EACH DAY'S CREW ROWS (Everyone's Day), by day: today's now, the week's in the week view below. The
      day row wins on that day's chips (lib/schedule/block-info crewChips). */
   const crewRowsByDay: Record<string, CrewDayRow[]> = dayRowsByDay((todayCrewRows ?? []) as unknown as CrewDayRow[]);
@@ -421,7 +430,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
       place: placeLine({ name: j.name, street: j.address, customer: j.customers?.name })?.text ?? null,
       town: (j.city as string | null) ?? null,
       span: b.allDay ? "All day" : `${hmWords(minutesToHm(b.startMin))} – ${hmWords(minutesToHm(b.endMin))}`,
-      crew: crewChips(j.assigned_to, people, { rows: crewRowsByDay[day], jobId: j.id, jobNames }),
+      crew: crewChips(j.assigned_to, people, { rows: crewRowsByDay[day], jobId: j.id, jobNames, people: everPeople }),
     };
   };
   /** A visit's row: its street (its job's, with no place of its own), who, start to end (an hour when
@@ -439,6 +448,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
         ? crewChips([a.assigned_to], [...people, { id: a.assigned_to, full_name: a.profiles?.full_name ?? null }], {
             rows: crewRowsByDay[todayStrInTz(tz, new Date(a.starts_at))],
             jobId: null,
+            people: everPeople,
           })
         : [],
     };
