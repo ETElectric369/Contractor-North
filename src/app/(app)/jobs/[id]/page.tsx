@@ -191,8 +191,11 @@ export default async function JobDetailPage({
       // covering walk (readSettledBySupplier, 8a982483): without them this tab could not be told
       // that the supplier's own closed paper already covers a ticket, so the SAME ticket read
       // "Settled · CED Says" on /bills and "On Account" here.
+      // scope_category (0105) rides along for item C1: which part of the job each cost counts under.
+      // Without it on the wire the Costs tab row would say no part is set on every cost, and the Edit
+      // Bill box would open empty and clear a part somebody had already set — THE PROJECTION LAW.
       .select(
-        "id, supplier, supplier_account_id, supplier_invoice_number, is_statement, notes, bill_number, amount, status, bill_date, po_id, bill_line_items(id, description, quantity, unit_price, amount, category, billable, billed_amount)",
+        "id, supplier, supplier_account_id, supplier_invoice_number, is_statement, notes, bill_number, amount, status, bill_date, po_id, scope_category, bill_line_items(id, description, quantity, unit_price, amount, category, billable, billed_amount)",
       )
       .eq("job_id", id)
       // THE BUTTON THAT SET IT ASIDE HAS TO MEAN SOMETHING HERE TOO (review, 2026-09-19). Without

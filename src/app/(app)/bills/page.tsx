@@ -128,9 +128,13 @@ function isMissingColumn(err: unknown): boolean {
   );
 }
 
+/** scope_category sits on the BASE rung on purpose (item C1): it is migration 0105, older than every
+ *  column the ladder drops, so a database that has any of those has it too. THE PROJECTION LAW — the
+ *  Edit Bill box opens on this value and saves it back, so a row that arrives without it would clear
+ *  the part of the job somebody had set. */
 async function readBills(supabase: Awaited<ReturnType<typeof createClient>>) {
   const columns = (o: BillColumns) =>
-    `id, supplier, bill_number, amount, status, bill_date, job_id, po_id, category, notes${o.supplierAccount ? ", supplier_account_id, supplier_invoice_number, is_statement" : ""}${o.supersede ? ", superseded_by_bill_id, pricing_provisional" : ""}, jobs(job_number, name), bill_line_items(id, description, quantity, unit_price, amount, category${o.billable ? ", billable, billed_amount, is_stock" : ""}, sort_order)`;
+    `id, supplier, bill_number, amount, status, bill_date, job_id, po_id, category, notes, scope_category${o.supplierAccount ? ", supplier_account_id, supplier_invoice_number, is_statement" : ""}${o.supersede ? ", superseded_by_bill_id, pricing_provisional" : ""}, jobs(job_number, name), bill_line_items(id, description, quantity, unit_price, amount, category${o.billable ? ", billable, billed_amount, is_stock" : ""}, sort_order)`;
   const read = (o: BillColumns) =>
     supabase.from("bills").select(columns(o)).order("created_at", { ascending: false });
 
