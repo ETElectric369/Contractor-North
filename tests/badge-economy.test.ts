@@ -41,7 +41,7 @@ describe("badge economy: the inbox is decisions-only (the task feeder stays dead
   });
 
   it("tasks are gone from Needs You's grammar entirely, and so is the Convert verb (Wave 1, W1-16)", () => {
-    // A job's tasks live on its Tasks chip and a person's Reminders in Today's 6 (0358): no task or
+    // A job's tasks live on its Tasks chip and a person's Reminders on Tasks & Reminders (0358): no task or
     // work_order kind, no stream for one, and no Convert sheet on any row. (The registry keeps
     // task.* and inquiry.convert for Nort; Needs You reaches neither.)
     expect(Object.keys(KIND_STREAM)).not.toContain("task");
