@@ -40,7 +40,7 @@ vi.mock("@/lib/calendar-sync", () => ({ pushCalendarItem: async () => undefined 
 vi.mock("@/lib/crew-notify", () => ({ notifyJobCrewAdded: async () => undefined }));
 vi.mock("@/lib/observe", () => ({ reportError: () => {} }));
 
-import { bookWorkedDay, placeJobOnDay, unbookWorkedDay, undoPlaceJob } from "./actions";
+import { bookWorkedDay, placeAppointmentOnDay, placeJobOnDay, unbookWorkedDay, undoPlaceJob, undoPlaceVisit } from "./actions";
 import { segmentJobsNotLoaded } from "@/lib/schedule/cal-window";
 import { todayStrInTz, tzDateTimeUtc } from "@/lib/tz";
 
@@ -400,5 +400,32 @@ d("worked days booked after the fact, and the rail's Undo (Wave 2 lane 1)", () =
     expect(await undoPlaceJob(id, placed.prior!)).toEqual({ ok: false, error: "It changed since, so nothing was undone." });
     expect(await days(id)).toEqual(before);
     expect((await stored(id)).status).toBe("scheduled");
+  });
+
+  /* A VISIT'S UNDO IS GUARDED LIKE A JOB'S. The ten seconds the toast lives are long enough for someone
+     else to move the visit; the Undo matches on the start the place wrote, in the UPDATE's own WHERE. */
+  it("undoPlaceVisit puts a placed visit back to waiting, and refuses once somebody moved it", async () => {
+    const day = dayFromToday(16);
+    const v = (
+      await one("insert into public.appointments (org_id, type, title, status) values ($1, 'inspection', 'TEST rail undo visit', 'scheduled') returning id::text as id", [orgId])
+    ).id as string;
+    const visit = () => one("select starts_at::text as starts_at, ends_at::text as ends_at, status::text as status from public.appointments where id = $1", [v]);
+    speakAs("office");
+
+    const placed = await placeAppointmentOnDay(v, day, "09:00", 120);
+    expect(placed.ok).toBe(true);
+    expect(placed.placedAt).toBeTruthy();
+    expect((await visit()).starts_at).not.toBeNull();
+
+    // Someone moved it an hour later while the Undo toast was still up: nothing is undone, and said.
+    await c.query("update public.appointments set starts_at = starts_at + interval '1 hour' where id = $1", [v]);
+    const moved = await visit();
+    expect(await undoPlaceVisit(v, placed.placedAt!)).toEqual({ ok: false, error: "It changed since, so nothing was undone." });
+    expect(await visit()).toMatchObject({ starts_at: moved.starts_at, ends_at: moved.ends_at });
+
+    // Still where the place left it: back to Waiting For A Day (0368 allows a visit with no day).
+    await c.query("update public.appointments set starts_at = $2::timestamptz where id = $1", [v, placed.placedAt]);
+    expect(await undoPlaceVisit(v, placed.placedAt!)).toEqual({ ok: true });
+    expect(await visit()).toMatchObject({ starts_at: null, ends_at: null, status: "scheduled" });
   });
 });

@@ -131,7 +131,9 @@ describe("where the day's rows come from, and where the chips draw", () => {
     const page = read("src/app/(app)/planner/page.tsx");
     expect(page).toContain('supabase.from("crew_day_assignments").select("profile_id, work_date, kind, job_id").eq("work_date", todayStr)');
     expect(page).toMatch(/\.from\("crew_day_assignments"\)\s*\.select\("profile_id, work_date, kind, job_id"\)\s*\.gte\("work_date", weekStartStr\)/);
-    expect(page).toContain("crewChips(j.assigned_to, people, { rows: crewRowsByDay[day], jobId: j.id, jobNames })");
+    // `people: everPeople` is the whole company, so a job still assigned to someone who left is NAMED
+    // here as it is on the schedule, never a "U" chip titled "Unnamed".
+    expect(page).toContain("crewChips(j.assigned_to, people, { rows: crewRowsByDay[day], jobId: j.id, jobNames, people: everPeople })");
   });
 });
 
