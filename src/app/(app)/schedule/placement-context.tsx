@@ -4,8 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, u
 import { useRouter } from "next/navigation";
 import { useToast } from "@/components/toast";
 import { scheduleLeadsOnDay } from "../leads/actions";
-import { unscheduleAppointment } from "../appointments/actions";
-import { placeAppointmentOnDay, placeJobOnDay, planDayTimes, undoPlaceJob, type PlacePrior } from "./actions";
+import { placeAppointmentOnDay, placeJobOnDay, planDayTimes, undoPlaceJob, undoPlaceVisit, type PlacePrior } from "./actions";
 import { groupByTown, spreadTimes, type Placeable } from "@/lib/schedule/place-by-town";
 import { workKind } from "@/lib/schedule/work-shape";
 import { dayLabelFrom, placeMessage } from "@/lib/schedule/placement-plan";
@@ -151,18 +150,21 @@ export function PlacementProvider({
   );
 
   /**
-   * PUT BACK WHERE IT WAS: each job through undoPlaceJob (its days, its listed day, its status; refused
-   * in words when it changed since), each visit through unscheduleAppointment (back to Waiting For A
-   * Day). Every answer is said: a refusal in its own words, and a pick-a-time link the place withdrew
-   * stays withdrawn, said so.
+   * PUT BACK WHERE IT WAS: each job through undoPlaceJob (its days, its listed day, its status) and
+   * each visit through undoPlaceVisit (back to Waiting For A Day, through unscheduleAppointment). BOTH
+   * are refused in words when the work changed since the place — the ten seconds the Undo toast lives
+   * are long enough for someone else to move that same visit, and taking their newer time away while
+   * the toast said "Put back where it was." is the lost update the job path has always refused. Every
+   * answer is said: a refusal in its own words, and a pick-a-time link the place withdrew stays
+   * withdrawn, said so.
    */
   const undoPlace = useCallback(
-    (priors: { id: string; prior: PlacePrior }[], visitIds: string[], withdrew: boolean) => {
+    (priors: { id: string; prior: PlacePrior }[], visits: { id: string; placedAt: string }[], withdrew: boolean) => {
       start(async () => {
         const offline = { ok: false as const, error: "That Undo didn't reach the server. Check your connection; nothing may have changed." };
         const results: { ok: boolean; error?: string; note?: string }[] = await Promise.all([
           ...priors.map((p) => undoPlaceJob(p.id, p.prior).catch(() => offline)),
-          ...visitIds.map((id) => unscheduleAppointment(id).catch(() => offline)),
+          ...visits.map((v) => undoPlaceVisit(v.id, v.placedAt).catch(() => offline)),
         ]);
         router.refresh();
         const refused = results.filter((r) => !r.ok);
@@ -240,7 +242,7 @@ export function PlacementProvider({
         // Nobody gave these a length: they went down as two hours, and the toast says so.
         const jobsDefaulted = jobResults.filter((r) => r.ok && r.defaulted).length;
 
-        const apptResults: { ok: boolean; note?: string }[] = await Promise.all(
+        const apptResults: { ok: boolean; note?: string; placedAt?: string }[] = await Promise.all(
           appts.map((a, i) =>
             placeAppointmentOnDay(a.id, dateISO, times[i] ?? startHHMM, a.planned_minutes).catch(
               () => ({ ok: false as const }),
@@ -294,12 +296,14 @@ export function PlacementProvider({
           !leads.length &&
           jobs.length + appts.length > 0 &&
           jobs.every((j, i) => !j.onHold && jobResults[i]?.ok && !!jobResults[i]?.prior) &&
-          apptResults.every((r) => r.ok);
+          // A visit without the start the place wrote can't be undone safely (it couldn't be told from
+          // one somebody moved since), so the toast simply carries no Undo.
+          apptResults.every((r) => r.ok && !!r.placedAt);
         if (undoable) {
           const priors = jobs.map((j, i) => ({ id: j.id, prior: jobResults[i].prior as PlacePrior }));
-          const visitIds = appts.map((a) => a.id);
+          const visits = appts.map((a, i) => ({ id: a.id, placedAt: apptResults[i].placedAt as string }));
           const withdrew = apptResults.some((r) => !!r.note);
-          toast(msg.text, msg.tone, { label: "Undo", onClick: () => undoPlace(priors, visitIds, withdrew) });
+          toast(msg.text, msg.tone, { label: "Undo", onClick: () => undoPlace(priors, visits, withdrew) });
         } else {
           toast(msg.text, msg.tone);
         }

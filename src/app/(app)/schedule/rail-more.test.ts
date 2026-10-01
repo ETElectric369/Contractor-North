@@ -88,7 +88,7 @@ vi.mock("@/lib/observe", () => ({ reportError: vi.fn() }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn(), push: vi.fn(), replace: vi.fn() }) }));
 vi.mock("@/components/toast", () => ({ useToast: () => vi.fn() }));
 
-const { placeJobOnDay, undoPlaceJob, sizeAppointment } = await import("./actions");
+const { placeAppointmentOnDay, placeJobOnDay, undoPlaceJob, undoPlaceVisit, sizeAppointment } = await import("./actions");
 const { RailCardRows } = await import("./place-rail");
 const { todayStrInTz } = await import("@/lib/tz");
 const { addDays } = await import("@/lib/come-back-days");
@@ -231,11 +231,16 @@ describe("Undo on the rail's place", () => {
 
   it("the place's toast carries Undo only when every job and visit landed, and never for a held job or a booked lead", () => {
     const ctx = read("src/app/(app)/schedule/placement-context.tsx");
-    expect(ctx).toContain('toast(msg.text, msg.tone, { label: "Undo", onClick: () => undoPlace(priors, visitIds, withdrew) });');
+    expect(ctx).toContain('toast(msg.text, msg.tone, { label: "Undo", onClick: () => undoPlace(priors, visits, withdrew) });');
     expect(ctx).toMatch(/!leads\.length &&/);
     expect(ctx).toContain("jobs.every((j, i) => !j.onHold && jobResults[i]?.ok && !!jobResults[i]?.prior)");
     expect(ctx).toContain("undoPlaceJob(p.id, p.prior)");
-    expect(ctx).toContain("unscheduleAppointment(id)");
+    // A visit goes back through the guarded undo (which calls unscheduleAppointment itself), and only
+    // when the place handed back the start it wrote.
+    expect(ctx).toContain("undoPlaceVisit(v.id, v.placedAt)");
+    expect(ctx).toContain("apptResults.every((r) => r.ok && !!r.placedAt)");
+    expect(ctx).not.toContain('from "../appointments/actions"');
+    expect(read("src/app/(app)/schedule/actions.ts")).toContain("return unscheduleAppointment(id);");
     expect(ctx).toContain('"Put back where it was."');
     expect(ctx).toContain("The customer's pick-a-time link stays withdrawn.");
     // placeMessage (lane 4's test) is untouched: the Undo rides the toast's action.
@@ -319,6 +324,45 @@ describe("Undo on the rail's place", () => {
     expect(await undoPlaceJob("j1", { ranges: [{ start: "nope", end: "x" }], status: null, listed: null, days: [] } as any)).toEqual({
       ok: false,
       error: "There's nothing to put back.",
+    });
+  });
+
+  /* A VISIT'S UNDO KEEPS THE SAME PROMISE AS A JOB'S. The toast lives ten seconds; if someone moves the
+     same visit in that time, Undo must not take their newer time away and call it "Put back where it
+     was." — it says what happened instead. */
+  describe("a placed visit", () => {
+    const waiting = () => [{ id: "a1", title: "Smith walk-through", type: "inspection", status: "scheduled", starts_at: null, ends_at: null, planned_minutes: null }];
+
+    it("the place hands back the start it wrote, and the Undo puts the visit back to waiting", async () => {
+      db.appts = waiting();
+      const placed = await placeAppointmentOnDay("a1", "2026-10-07", "09:00", 120);
+      expect(placed.ok).toBe(true);
+      expect(placed.placedAt).toBe(db.appts[0].starts_at);
+      db.writes = [];
+      expect(await undoPlaceVisit("a1", placed.placedAt!)).toEqual({ ok: true });
+      expect(db.appts[0]).toMatchObject({ starts_at: null, ends_at: null, status: "scheduled" });
+    });
+
+    it("refuses in words, and leaves the newer time alone, when the visit moved since the place", async () => {
+      db.appts = waiting();
+      const placed = await placeAppointmentOnDay("a1", "2026-10-07", "09:00", 120);
+      // Another tab moved it an hour later while the Undo toast was still up.
+      const moved = "2026-10-07T17:00:00.000Z";
+      db.appts[0].starts_at = moved;
+      db.writes = [];
+      expect(await undoPlaceVisit("a1", placed.placedAt!)).toEqual({ ok: false, error: "It changed since, so nothing was undone." });
+      expect(db.appts[0].starts_at).toBe(moved);
+      expect(db.appts[0].ends_at).not.toBeNull();
+      // The guard's own UPDATE matched no row (so it wrote nothing); the day was never cleared.
+      expect(db.writes.some((w) => w.patch && ("starts_at" in w.patch || "status" in w.patch))).toBe(false);
+    });
+
+    it("a start that isn't one is refused, with nothing written", async () => {
+      db.appts = waiting();
+      db.writes = [];
+      expect(await undoPlaceVisit("a1", "not a time")).toEqual({ ok: false, error: "There's nothing to put back." });
+      expect(db.writes).toEqual([]);
+      expect(db.appts[0].starts_at).toBeNull();
     });
   });
 });

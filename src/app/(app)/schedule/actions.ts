@@ -36,7 +36,7 @@ import { jobWords } from "@/lib/action-items/words";
 import { dayHoursOf, freezeDrawnDays, nextDayHours, readDayHours } from "@/lib/schedule/day-hours";
 import { ownHoursByJobDay, segmentCols, withDayHours, type SegmentRow } from "@/lib/schedule/segment-hours";
 import { ACTIVE_JOB_STATUSES, jobStatusLabel } from "@/lib/job-status";
-import { rescheduleAppointment } from "../appointments/actions";
+import { rescheduleAppointment, unscheduleAppointment } from "../appointments/actions";
 import {
   fitIntoDay,
   hmToMinutes,
@@ -970,6 +970,39 @@ export async function undoPlaceJob(jobId: string, prior: PlacePrior): Promise<Re
 }
 
 /**
+ * UNDO ON THE RAIL'S PLACE, FOR A VISIT (W2-05): the visit goes back to Waiting For A Day — but only
+ * if it is still where the place put it.
+ *
+ * unscheduleAppointment alone only asks whether the status is scheduled or proposed, so for the ten
+ * seconds the Undo toast lives, anyone moving or resizing that visit (another tab, another device, the
+ * second office person) lost their newer time to a tap of Undo that reported "Put back where it was."
+ * A job's Undo has refused a changed job since it was written; this is the same promise for a visit.
+ *
+ * The guard is the WRITE's own WHERE, not a read beside it: one UPDATE that touches nothing a person
+ * reads (updated_at), matched on the start the place wrote, and a zero-row answer is the refusal (the
+ * silent-write law). The deed itself stays with the one writer that owns it — unscheduleAppointment,
+ * which also cancels a pending pick-a-time link, puts "pending pick" back to scheduled, deletes the
+ * Google event and revalidates. Idempotent: it finds the start already cleared on the second pass.
+ */
+export async function undoPlaceVisit(id: string, placedAt: string): Promise<Result & { note?: string }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  if (!id || typeof placedAt !== "string" || isNaN(Date.parse(placedAt))) return { ok: false, error: "There's nothing to put back." };
+
+  const { data: still, error } = await ctx.supabase
+    .from("appointments")
+    .update({ updated_at: new Date().toISOString() })
+    .eq("id", id)
+    .eq("starts_at", new Date(placedAt).toISOString())
+    .in("status", ["scheduled", "proposed"])
+    .select("id");
+  if (error) return { ok: false, error: dbError(error) };
+  if (!still?.length) return { ok: false, error: "It changed since, so nothing was undone." };
+
+  return unscheduleAppointment(id);
+}
+
+/**
  * UNDO A PLACEMENT of a job that had no day: the plan leaves again and its worked days stay as
  * history, exactly the state it was placed from. The calendar tray's Undo. It used to write the
  * snapshot back through setJobScheduleRanges, which turned a kept worked day into the job's plan.
@@ -1536,7 +1569,7 @@ export async function placeAppointmentOnDay(
   dateISO: string,
   startHHMM: string,
   plannedMinutes?: number | null,
-): Promise<Result & { note?: string }> {
+): Promise<Result & { note?: string; /** The start it wrote: the rail's Undo sends it back, so a visit someone moved since is refused. */ placedAt?: string }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dateISO)) return { ok: false, error: "Pick a day." };
@@ -1563,8 +1596,10 @@ export async function placeAppointmentOnDay(
   const endsAt = span ? tzDateTimeUtc(span.lastYmd, span.endHHMM, tz) : null;
 
   const res = await rescheduleAppointment(id, startsAt, endsAt);
-  // The writer's note (a pick-a-time link it withdrew) rides back: the rail's Undo says it stays withdrawn.
-  return res.ok ? { ok: true, ...(res.note ? { note: res.note } : {}) } : res;
+  // The writer's note (a pick-a-time link it withdrew) rides back: the rail's Undo says it stays
+  // withdrawn. So does the start that was written, which the Undo matches on before it puts anything
+  // back — the exact instant the writer stored (`new Date(...).toISOString()`).
+  return res.ok ? { ok: true, placedAt: new Date(startsAt).toISOString(), ...(res.note ? { note: res.note } : {}) } : res;
 }
 
 /**
