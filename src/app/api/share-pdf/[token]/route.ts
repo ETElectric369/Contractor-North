@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { contentDisposition } from "@/lib/content-disposition";
 import { createServiceClient } from "@/lib/supabase/server";
-import { CUSTOMER_VISIBLE_STATUSES } from "@/lib/pdf-cache";
+import { customerMayOpen } from "@/lib/customer-visible-docs";
 import { docFileName, rowPlace } from "@/lib/doc-place";
 
 export const dynamic = "force-dynamic";
@@ -37,7 +37,7 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ token: str
     .select("id, status, invoice_number, jobs(address), customers(address)")
     .eq("public_token", token)
     .maybeSingle();
-  if (inv && CUSTOMER_VISIBLE_STATUSES.invoice.includes(String((inv as ShareRow).status))) {
+  if (inv && customerMayOpen("invoice", (inv as ShareRow).status)) {
     doc = "invoice";
     row = inv as ShareRow;
   } else {
@@ -46,7 +46,7 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ token: str
       .select("id, status, quote_number, address, jobs(address), inquiries(address), customers(address)")
       .eq("public_token", token)
       .maybeSingle();
-    if (q && CUSTOMER_VISIBLE_STATUSES.quote.includes(String((q as ShareRow).status))) {
+    if (q && customerMayOpen("quote", (q as ShareRow).status)) {
       doc = "quote";
       row = q as ShareRow;
     }

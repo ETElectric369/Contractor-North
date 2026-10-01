@@ -7,6 +7,7 @@ import { customerLines, invoiceTypeLabel, isDrawKind } from "@/lib/invoice-math"
 import { jobProgressFinancials, receivedBeforeThisInvoice, type JobProgressFinancials } from "@/lib/job-financials";
 import { readSupplierNames } from "@/lib/supplier-names";
 import { pickSite, SITE_COLS } from "@/lib/site-address";
+import { CUSTOMER_VISIBLE_STATUSES } from "@/lib/customer-visible-docs";
 import { reportError } from "@/lib/observe";
 import type { Organization } from "@/lib/types";
 
@@ -68,9 +69,8 @@ export type InvoiceDocAccess = { kind: "staff" } | { kind: "service"; orgId: str
 /** Minimal client shape: a supabase-js client (session or service role). */
 type Db = { from: (table: string) => any };
 
-/** What public_invoice has always shown a customer: a bill that was sent (0012/0247). A draft, a
- *  void bill or a held one never opens through a /i link. */
-export const PUBLIC_INVOICE_STATUSES = ["sent", "partial", "paid", "overdue"] as const;
+// WHICH BILLS A CUSTOMER MAY OPEN is lib/customer-visible-docs, shared with the stored-PDF door and
+// the portal's job page (W3). It used to be a list of its own here, named PUBLIC_INVOICE_STATUSES.
 
 export const INVOICE_DOC_COLS = {
   invoice:
@@ -329,7 +329,7 @@ export async function readInvoiceDocumentProps(
 
 /**
  * THE CUSTOMER'S /i LINK: which invoice the token names, if it is one a customer may open
- * (PUBLIC_INVOICE_STATUSES, the same gate public_invoice holds), and its org, read as the service
+ * (customerMayOpen, the same gate public_invoice holds), and its org, read as the service
  * role. The token is the credential; the caller then reads the document with
  * readInvoiceDocumentProps(svc, invoiceId, { kind: "service", orgId }).
  */
@@ -342,7 +342,7 @@ export async function resolvePublicInvoice(
     .from("invoices")
     .select("id, org_id")
     .eq("public_token", token)
-    .in("status", [...PUBLIC_INVOICE_STATUSES])
+    .in("status", [...CUSTOMER_VISIBLE_STATUSES.invoice])
     .maybeSingle();
   if (error) {
     reportError("invoiceDoc.token", error);

@@ -19,6 +19,7 @@
 import { buildJobLedger, type JobLedger, type LedgerInvoiceIn, type LedgerLineIn, type LedgerPaymentIn, type LedgerStretchIn } from "./stretch-ledger";
 import { accentHex, getOrgSettings } from "@/lib/org-settings";
 import { customerLineWords, invoiceBalance } from "@/lib/invoice-math";
+import { customerMayOpen } from "@/lib/customer-visible-docs";
 import { todayStrInTz } from "@/lib/tz";
 import type { CustomerUnbilled } from "@/lib/unbilled-work";
 import { docFormat, isPortalDocKind, kindLabel, kindRank, type DocFormat, type PortalDocKind } from "./doc-kinds";
@@ -189,7 +190,9 @@ const DEFAULT_TINT = "#1b9488";
 /** The job statuses a customer is shown (customer_portal and portal_job_view, 0301): the same
  *  fail-closed allowlist, so the office can say when a job is not on the customer's page. */
 export const CUSTOMER_SHOWN_JOB_STATUSES: readonly string[] = ["to_be_scheduled", "scheduled", "in_progress", "on_hold", "complete", "invoiced"];
-const SENT = new Set(["sent", "partial", "paid", "overdue"]);
+// Which bills carry a Pay door is lib/customer-visible-docs, the one list the /i door and the
+// stored-PDF door read too (W3). A set of its own here gave a voided bill a Pay button that /i then
+// refused.
 const HEX = /^#[0-9a-f]{6}$/i;
 const HTTPS = /^https:\/\/[^\s]+$/i;
 const str = (v: unknown): string | null => (typeof v === "string" && v.trim() ? v : null);
@@ -269,7 +272,7 @@ export function shapePortalJob(
   });
 
   const invoices: PortalInvoice[] = invoicesRaw.map((i) => {
-    const sent = SENT.has(i.status);
+    const sent = customerMayOpen("invoice", i.status);
     const read = i.doc ? extra.docs?.get(String(i.id)) : undefined;
     return {
       number: i.invoice_number ?? null,

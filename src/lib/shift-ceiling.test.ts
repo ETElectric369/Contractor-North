@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import { eachAppSource, liveFunctionBody } from "@/lib/migration-body.test-util";
 import { CEILING_REFUSAL, CEILING_REFUSAL_ASK_OFFICE, MAX_SHIFT_HOURS, MAX_SHIFT_PHRASE, PICK_WITHIN_CEILING, stopProblem } from "@/lib/long-shift";
 
 /**
@@ -28,29 +28,6 @@ import { CEILING_REFUSAL, CEILING_REFUSAL_ASK_OFFICE, MAX_SHIFT_HOURS, MAX_SHIFT
  * holds the DEPLOYED function to the same number.
  */
 
-const DIR = join(process.cwd(), "supabase/migrations");
-const FILES = readdirSync(DIR)
-  .filter((n) => /^\d{4}_.*\.sql$/.test(n))
-  .sort();
-
-/** The LIVE body of a database function: the last migration that creates-or-replaces it wins. */
-function liveBody(fn: string): { file: string; body: string } | null {
-  const head = new RegExp(`create\\s+(?:or\\s+replace\\s+)?function\\s+public\\.${fn}\\s*\\(`, "i");
-  for (let i = FILES.length - 1; i >= 0; i--) {
-    const sql = readFileSync(join(DIR, FILES[i]), "utf8");
-    const m = head.exec(sql);
-    if (!m) continue;
-    const from = sql.slice(m.index);
-    // The dollar-quoted body: `as $$ … $$` or `as $function$ … $function$`.
-    const tag = /\bas\s+(\$[A-Za-z_]*\$)/i.exec(from);
-    if (!tag) return { file: FILES[i], body: "" };
-    const start = from.indexOf(tag[1], tag.index) + tag[1].length;
-    const end = from.indexOf(tag[1], start);
-    return { file: FILES[i], body: end > start ? from.slice(start, end) : "" };
-  }
-  return null;
-}
-
 /**
  * Where the database writes the ceiling, one per function, each anchored to the comparison it is
  * actually used in. An anchor that stops matching FAILS rather than passing quietly: a rewritten
@@ -77,7 +54,7 @@ const DB_CEILINGS: { fn: string; what: string; anchor: RegExp }[] = [
 describe("the shift ceiling: the app's number and the database's never drift apart (W4)", () => {
   for (const c of DB_CEILINGS) {
     it(`${c.fn} refuses at ${MAX_SHIFT_HOURS} hours — ${c.what}`, () => {
-      const live = liveBody(c.fn);
+      const live = liveFunctionBody(c.fn);
       expect(live, `no migration creates public.${c.fn}`).not.toBeNull();
       const m = c.anchor.exec(live!.body);
       expect(
@@ -119,26 +96,10 @@ describe("the shift ceiling: the app's number and the database's never drift apa
    */
   it("no screen types the ceiling into a sentence of its own", () => {
     const quoted = new RegExp(`["'\`][^"'\`\\n]*\\b${MAX_SHIFT_HOURS} hours?\\b`);
-    const owner = join("src", "lib", "long-shift.ts");
     const offenders: string[] = [];
-    const walk = (dir: string) => {
-      for (const e of readdirSync(dir, { withFileTypes: true })) {
-        const p = join(dir, e.name);
-        if (e.isDirectory()) {
-          walk(p);
-          continue;
-        }
-        if (!/\.tsx?$/.test(e.name) || /\.(test|db-suite|test-util|cases)\.tsx?$/.test(e.name)) continue;
-        if (p.endsWith(owner)) continue;
-        const src = readFileSync(p, "utf8")
-          .replace(/\/\*[\s\S]*?\*\//g, "")
-          .split("\n")
-          .filter((l) => !/^\s*(\/\/|\*|--)/.test(l))
-          .join("\n");
-        if (quoted.test(src)) offenders.push(p);
-      }
-    };
-    walk(join(process.cwd(), "src"));
+    eachAppSource((p, code) => {
+      if (quoted.test(code)) offenders.push(p);
+    }, [join("src", "lib", "long-shift.ts")]);
     expect(offenders, `these say the ceiling in their own words — use MAX_SHIFT_PHRASE: ${offenders.join(", ")}`).toEqual([]);
   });
 });
