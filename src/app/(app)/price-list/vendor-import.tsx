@@ -12,7 +12,8 @@ import { parseCSV } from "@/lib/csv";
 import { prepareImageForUpload } from "@/lib/image-prep";
 import { readPdfText } from "@/lib/pdf-text";
 import { canInflateRawHere, inflateRawInBrowser, readXlsx } from "@/lib/xlsx-read";
-import { vendorKey, vendorKindOf } from "./item-options-math";
+import { vendorKey } from "./item-options-math";
+import { COMPANY_FIELD, vendorKindOf } from "@/lib/vendor-words";
 import { addVendorsBatch, undoVendorImport } from "./vendor-actions";
 import { FoundChanges, LookupChoices } from "./vendor-choices";
 import { lookUpVendors, readVendorList } from "./vendor-lookup-actions";
@@ -528,7 +529,7 @@ function ImportPreview({
                     />
                   </label>
                   <div className="min-w-0 flex-1 space-y-2">
-                    <Input value={r.name} onChange={(e) => rename(r, e.target.value)} aria-label="Vendor Name" autoComplete="off" />
+                    <Input value={r.name} onChange={(e) => rename(r, e.target.value)} aria-label={`${COMPANY_FIELD.vendor_card.label} Name`} autoComplete="off" />
                     <div className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
                       <div>
                         <Select

@@ -1,5 +1,6 @@
 "use client";
 
+import { companyLabel } from "@/lib/vendor-words";
 import { useEffect, useState, useTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
@@ -575,7 +576,7 @@ function BillEditModal({
         {error && <p className="text-sm text-red-600">{error}</p>}
         <div className="grid grid-cols-2 gap-3">
           <div className="col-span-2">
-            <Label htmlFor="be-supplier">Supplier *</Label>
+            <Label htmlFor="be-supplier">{companyLabel("bill", true)}</Label>
             <Input id="be-supplier" value={supplier} onChange={(e) => setSupplier(e.target.value)} autoFocus />
           </div>
           <div className="col-span-2">

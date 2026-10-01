@@ -1,5 +1,6 @@
 "use client";
 
+import { companyLabel } from "@/lib/vendor-words";
 import { useState, useTransition, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -426,7 +427,7 @@ function JobBillEditModal({
         )}
         <div className="grid grid-cols-2 gap-3">
           <div className="col-span-2">
-            <Label htmlFor="be-supplier">Supplier *</Label>
+            <Label htmlFor="be-supplier">{companyLabel("bill", true)}</Label>
             <Input id="be-supplier" value={supplier} onChange={(e) => setSupplier(e.target.value)} autoFocus />
           </div>
           <div>

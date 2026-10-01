@@ -26,13 +26,13 @@ import {
   type VendorCard,
   type VendorCardField,
   type VendorFilter,
-  type VendorKind,
   type VendorSummary,
 } from "./item-options-math";
 import type { PriceItem } from "./price-list-math";
 import { addVendor, archiveVendor, restoreVendor, saveLookedUp, saveVendorField, saveVendorIsPerson, undoLookedUp } from "./vendor-actions";
 import { VendorImport } from "./vendor-import";
-import { KIND_CHOICES, KIND_LABEL, type ExistingVendor } from "./vendor-import-math";
+import { type ExistingVendor } from "./vendor-import-math";
+import { COMPANY_FIELD, companyLabel, VENDOR_KIND_CHOICES as KIND_CHOICES, VENDOR_KIND_LABEL as KIND_LABEL, type VendorKind } from "@/lib/vendor-words";
 import { ArchivedVendorRow, VendorPriceRow, useOptionWrites } from "./vendor-price-row";
 
 /**
@@ -269,7 +269,7 @@ function ContactLine({ card }: { card: VendorCard | null }) {
 /* ── ADD VENDOR ─────────────────────────────────────────────────────────────────────────────── */
 
 const FIELDS: { key: VendorCardField; label: string; placeholder?: string; type?: string; inputMode?: "tel" | "email" | "url" }[] = [
-  { key: "name", label: "Vendor *", placeholder: "e.g. Andersen or Granite Peak Plumbing" },
+  { key: "name", label: companyLabel("vendor_card", true), placeholder: COMPANY_FIELD.vendor_card.placeholder },
   { key: "contact_name", label: "Contact Person", placeholder: "your rep" },
   { key: "phone", label: "Phone", type: "tel", inputMode: "tel" },
   { key: "email", label: "Email", type: "email", inputMode: "email" },

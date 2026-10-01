@@ -8,13 +8,16 @@
  *   2. Fields are tried in the order that disambiguates: code before cost, so "Cost Code" is a code.
  * Plus the field the importer never had: unit.
  */
+import { COMPANY_FIELD } from "@/lib/vendor-words";
+
 export type PriceCsvField = "code" | "description" | "category" | "supplier" | "unit" | "buy_price" | "markup_pct";
 
 export const PRICE_CSV_FIELDS: { key: PriceCsvField; label: string; match: RegExp }[] = [
   { key: "code", label: "Item code", match: /code|item|part|sku|catalog|number|#/i },
   { key: "description", label: "Description", match: /desc|name|product|detail/i },
   { key: "category", label: "Category", match: /categ|group|class|type|division/i },
-  { key: "supplier", label: "Supplier", match: /supplier|vendor|manufactur|brand|mfg/i },
+  // ONE WORD FOR ONE THING (W1): the column the book shows is the same word the importer offers.
+  { key: "supplier", label: COMPANY_FIELD.price_item.label, match: /supplier|vendor|manufactur|brand|mfg/i },
   // A header that also says price/cost/rate/amount is a PRICE column ("Unit Price", "Cost per unit"),
   // never the unit — the negative lookahead keeps it for buy_price below.
   { key: "unit", label: "Unit", match: /^(?!.*\b(price|cost|rate|amount)\b).*(\bunit\b|\buom\b|\bum\b|\bper\b|measure)/i },

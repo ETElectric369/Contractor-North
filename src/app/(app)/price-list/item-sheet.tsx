@@ -1,5 +1,6 @@
 "use client";
 
+import { VENDOR_MEANS } from "@/lib/vendor-words";
 import { useState } from "react";
 import { AlertTriangle, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -52,7 +53,7 @@ export function ItemSheet({
         <div>
           <h3 className="text-sm font-semibold text-slate-900">Vendors</h3>
           <p className="text-xs text-slate-500">
-            A vendor here is the brand or supplier, e.g. Andersen. Each one has its own cost and sell. The default is what an estimate uses
+            {VENDOR_MEANS} Each one has its own cost and sell. The default is what an estimate uses
             when nobody picks; the others are there to pick from.
           </p>
         </div>

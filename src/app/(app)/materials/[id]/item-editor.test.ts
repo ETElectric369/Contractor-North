@@ -21,6 +21,7 @@ vi.mock("../actions", () => ({
 }));
 
 import { ItemEditor, settleFlips } from "./item-editor";
+import { COMPANY_FIELD } from "@/lib/vendor-words";
 
 const item = (id: string, description: string, over: Record<string, unknown> = {}) => ({
   id,
@@ -105,9 +106,23 @@ describe("the office and the crew see the same list; the crew never sees a price
     expect(office()).toMatch(/\$\s?25\.00/);
   });
 
-  it("the crew's list has no dollar sign, no vendor, no tool toggle", () => {
+  /**
+   * W1. The box that asks where a material comes from says SUPPLIER, the one word the purchase
+   * order, the bills door and the price book all use now; it used to say "Vendor" here while the
+   * same company was a "Supplier *" two screens away. The word is read from lib/vendor-words, so
+   * this pins the WIRING, not a string.
+   */
+  it("the office's line asks for the supplier by the one name", () => {
+    const html = office();
+    expect(COMPANY_FIELD.material_line.label).toBe("Supplier");
+    expect(html).toContain(`aria-label="${COMPANY_FIELD.material_line.label}"`);
+    expect(html).not.toContain('placeholder="Vendor"');
+  });
+
+  it("the crew's list has no dollar sign, no supplier box, no tool toggle", () => {
     const html = tech();
     expect(html).not.toMatch(/\$\s?\d/);
+    expect(html).not.toContain(`aria-label="${COMPANY_FIELD.material_line.label}"`);
     expect(html).not.toContain('placeholder="Vendor"');
     expect(html).not.toContain("Mark As A Tool");
     for (const s of ["12-2 Romex", "3 gang faceplate", "Hole saw"]) expect(html).toContain(s);
