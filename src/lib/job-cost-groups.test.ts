@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { billedOnLabel, groupJobCosts, nothingToBillWhy, openOwnNote, pileCount } from "@/lib/job-cost-groups";
+import { billedOnLabel, groupJobCosts, nothingToBillWhy, openOwnNote, openRowsDrawn, pileCount } from "@/lib/job-cost-groups";
 import type { CostRowVerdict } from "@/lib/unbilled-work";
 
 /**
@@ -119,5 +119,19 @@ describe("groupJobCosts — takes from stock (Shop Stock, Phase 3)", () => {
     expect(nothingToBillWhy("stock_no_cost")).toContain("no cost on it");
     expect(nothingToBillWhy("stock_cost_used")).toBe("Its roll's cost was all counted on earlier takes, so there's nothing left to bill");
     expect(g.openOwn).toEqual({});
+  });
+});
+
+describe("the Costs chip counts rows a person can find on the tab (J-013, 2026-09-29: 1 live bill, no papers, chip said 3)", () => {
+  const stock = { "stock:g1": { label: "2 × 12/2 NM-B", cost: 14.2, takenAt: "2026-09-20T00:00:00Z" } };
+
+  it("a bill, an order and a take from stock are rows; the chip is their count", () => {
+    const r = openRowsDrawn({ open: { ids: ["bill-1", "po-1", "stock:g1"], bills: 1, pos: 1, takes: 1, total: 100 }, stock }, ["bill-1", "po-1"]);
+    expect(r).toEqual({ drawn: ["bill-1", "po-1", "stock:g1"], phantom: [] });
+  });
+
+  it("an id nothing on the tab stands behind is named phantom, never counted", () => {
+    const r = openRowsDrawn({ open: { ids: ["bill-1", "ghost-a", "ghost-b"], bills: 3, pos: 0, takes: 0, total: 100 }, stock: {} }, ["bill-1"]);
+    expect(r).toEqual({ drawn: ["bill-1"], phantom: ["ghost-a", "ghost-b"] });
   });
 });

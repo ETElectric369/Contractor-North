@@ -354,8 +354,10 @@ export function vendorKey(name: string | null | undefined): string {
   return String(name ?? "").trim().toLowerCase();
 }
 
-/** What a vendor is (0341). NULL is Not Sorted. Only a brand, a supplier or a Not Sorted vendor
- *  is offered as a vendor on an item: a subcontractor does the work, it doesn't make the windows. */
+/** What a vendor is (0341). NULL is Not Sorted. EVERY KIND CAN CARRY PRICES ON AN ITEM: Erik
+ *  2026-09-30 reversed 0341's "a subcontractor never carries prices", because a builder prices a
+ *  line like drywall by the sub who hangs it (Justin, Vivian Builders, 2026-09-29). The kind sorts
+ *  the directory and says who a vendor is; it never decides who can be priced. */
 export type VendorKind = "brand" | "supplier" | "subcontractor";
 export const VENDOR_KINDS: VendorKind[] = ["supplier", "subcontractor", "brand"];
 
@@ -365,12 +367,6 @@ export function vendorKindOf(raw: unknown): VendorKind | null | undefined {
   const s = String(raw ?? "").trim().toLowerCase();
   if (!s) return null;
   return (VENDOR_KINDS as string[]).includes(s) ? (s as VendorKind) : undefined;
-}
-
-/** Can this kind carry prices on items? Brand and supplier yes, Not Sorted yes (today's vendors
- *  from items have no card and are brands), subcontractor never. */
-export function kindCarriesPrices(kind: VendorKind | null | undefined): boolean {
-  return kind !== "subcontractor";
 }
 
 /** One vendor card (0296), as the page reads it. kind/trade/is_person arrive with 0341; before
@@ -528,19 +524,18 @@ export function summarizeVendors(
 
 /** Every vendor name the org already spells one way, for the vendor box's suggestions on an item
  *  (THE ITEM PRICE PICKER), so the next item gets "Andersen" and not "Anderson". Cards first (a
- *  person chose that spelling). A SUBCONTRACTOR is never offered (0341): Coldwater Drywall is not a
- *  maker of windows, and a name a card calls a subcontractor stays out even where an item row
- *  still spells it. */
+ *  person chose that spelling). EVERY KIND IS OFFERED, subcontractors included (Erik 2026-09-30,
+ *  reversing 0341): Justin prices drywall by Coldwater Drywall, the sub who hangs it, so a picker
+ *  that left the subs out was missing most of a builder's list. */
 export function knownVendorNames(options: Pick<ItemOption, "vendor">[], cards: Pick<VendorCard, "name" | "archived" | "kind">[]): string[] {
   const seen = new Map<string, string>();
-  const subs = new Set(cards.filter((c) => !c.archived && !kindCarriesPrices(c.kind)).map((c) => vendorKey(c.name)));
   for (const c of cards) {
     const k = vendorKey(c.name);
-    if (!c.archived && k && !subs.has(k) && !seen.has(k)) seen.set(k, c.name.trim());
+    if (!c.archived && k && !seen.has(k)) seen.set(k, c.name.trim());
   }
   for (const o of options) {
     const k = vendorKey(o.vendor);
-    if (k && !subs.has(k) && !seen.has(k)) seen.set(k, o.vendor.trim());
+    if (k && !seen.has(k)) seen.set(k, o.vendor.trim());
   }
   return [...seen.values()].sort((a, b) => a.localeCompare(b));
 }

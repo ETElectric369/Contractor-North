@@ -19,10 +19,10 @@ index 0000000..15d582e
 +</dict>
 +</plist>
 diff --git a/node_modules/@capacitor-community/stripe-terminal/ios/Sources/StripeTerminalPlugin/StripeTerminal.swift b/node_modules/@capacitor-community/stripe-terminal/ios/Sources/StripeTerminalPlugin/StripeTerminal.swift
-index 9d9bd32..19df14e 100644
+index 9d9bd32..28797ae 100644
 --- a/node_modules/@capacitor-community/stripe-terminal/ios/Sources/StripeTerminalPlugin/StripeTerminal.swift
 +++ b/node_modules/@capacitor-community/stripe-terminal/ios/Sources/StripeTerminalPlugin/StripeTerminal.swift
-@@ -9,6 +9,11 @@ public class StripeTerminal: NSObject, DiscoveryDelegate, TerminalDelegate, Read
+@@ -9,6 +9,11 @@
      weak var plugin: StripeTerminalPlugin?
      private let apiClient = APIClient()
  
@@ -34,7 +34,7 @@ index 9d9bd32..19df14e 100644
      var discoverCancelable: Cancelable?
      private var discoveryToken: DiscoveryToken?
      var collectCancelable: Cancelable?
-@@ -30,6 +35,15 @@ public class StripeTerminal: NSObject, DiscoveryDelegate, TerminalDelegate, Read
+@@ -30,6 +35,15 @@
              apiClient.initialize(plugin: self.plugin, tokenProviderEndpoint: call.getString("tokenProviderEndpoint", ""))
              Terminal.initWithTokenProvider(apiClient)
          }
@@ -50,7 +50,71 @@ index 9d9bd32..19df14e 100644
          self.isInitialize = true
          self.plugin?.notifyListeners(TerminalEvents.Loaded.rawValue, data: [:])
          call.resolve()
-@@ -633,16 +647,57 @@ public class StripeTerminal: NSObject, DiscoveryDelegate, TerminalDelegate, Read
+@@ -251,6 +265,22 @@
+         }
+     }
+ 
++    /// CONTRACTOR NORTH PATCH (2026-09-30): Stripe's own status word for a PaymentIntentStatus, as
++    /// the API spells it, so the JS side reads the same word it reads off the server.
++    private static func statusWord(_ status: PaymentIntentStatus) -> String {
++        switch status {
++        case .requiresPaymentMethod: return "requires_payment_method"
++        case .requiresConfirmation: return "requires_confirmation"
++        case .requiresAction: return "requires_action"
++        case .requiresCapture: return "requires_capture"
++        case .processing: return "processing"
++        case .canceled: return "canceled"
++        case .succeeded: return "succeeded"
++        case .requiresReauthorization: return "requires_reauthorization"
++        @unknown default: return "unknown"
++        }
++    }
++
+     public func confirmPaymentIntent(_ call: CAPPluginCall) {
+         if let paymentIntent = self.paymentIntent {
+             Terminal.shared.confirmPaymentIntent(paymentIntent) { confirmResult, confirmError in
+@@ -271,9 +301,38 @@
+                     self.plugin?.notifyListeners(TerminalEvents.Failed.rawValue, data: errorDetails)
+                     call.reject(error.localizedDescription, nil, nil, errorDetails)
+                 } else if let confirmedIntent = confirmResult {
++                    // CONTRACTOR NORTH PATCH (2026-09-30, INV-083). This resolved on ANY non-nil
++                    // result without reading the intent's status, and handed JS nothing — so a
++                    // confirm whose intent came back requires_payment_method was "approved" on the
++                    // phone while Stripe had charged nothing. Only Stripe's two "the money is
++                    // yours" statuses resolve, and the status rides on the answer; anything else
++                    // is a Failed event and a rejection that carries the status and the decline.
++                    let status = StripeTerminal.statusWord(confirmedIntent.status)
++                    guard confirmedIntent.status == .succeeded || confirmedIntent.status == .requiresCapture else {
++                        print("confirmPaymentIntent resolved without a charge: status \(status)")
++                        let message = "Stripe did not complete the payment (status: \(status))."
++                        var errorDetails: [String: Any] = ["message": message, "status": status]
++                        if let lastPaymentError = confirmedIntent.lastPaymentError {
++                            if let declineCode = lastPaymentError.declineCode {
++                                errorDetails["declineCode"] = declineCode
++                            }
++                            if let code = lastPaymentError.code {
++                                errorDetails["code"] = code
++                            }
++                        }
++                        self.plugin?.notifyListeners(TerminalEvents.Failed.rawValue, data: errorDetails)
++                        call.reject(message, nil, nil, errorDetails)
++                        return
++                    }
+                     print("PaymentIntent confirmed: \(confirmedIntent)")
+-                    self.plugin?.notifyListeners(TerminalEvents.ConfirmedPaymentIntent.rawValue, data: [:])
+-                    call.resolve()
++                    self.plugin?.notifyListeners(TerminalEvents.ConfirmedPaymentIntent.rawValue, data: ["status": status])
++                    call.resolve(["status": status])
++                } else {
++                    // CONTRACTOR NORTH PATCH: neither a result nor an error used to leave the call
++                    // unanswered until the JS timeout ("stuck at: confirming"). Say so instead.
++                    let message = "Stripe answered the confirm with neither a payment nor an error."
++                    self.plugin?.notifyListeners(TerminalEvents.Failed.rawValue, data: ["message": message])
++                    call.reject(message, nil, nil, ["message": message])
+                 }
+             }
+         } else {
+@@ -633,16 +692,57 @@
  class APIClient: ConnectionTokenProvider {
      weak var plugin: StripeTerminalPlugin?
      var tokenProviderEndpoint: String = ""
@@ -71,7 +135,7 @@ index 9d9bd32..19df14e 100644
 +    /// The SDK abandons an unanswered fetchConnectionToken at about 60s and reports its own error,
 +    /// so anything older than this is already spoken for and must not be answered late.
 +    private let pendingTokenTTL: TimeInterval = 60
-+
+ 
 +    private func prunePendingTokens() {
 +        let cutoff = Date().addingTimeInterval(-pendingTokenTTL)
 +        let before = pendingCompletion.count
@@ -80,7 +144,7 @@ index 9d9bd32..19df14e 100644
 +            NSLog("[StripeTerminal] dropped \(before - pendingCompletion.count) expired connection-token request(s)")
 +        }
 +    }
- 
++
      func initialize(plugin: StripeTerminalPlugin?, tokenProviderEndpoint: String) {
          self.plugin = plugin
          self.tokenProviderEndpoint = tokenProviderEndpoint
@@ -110,7 +174,7 @@ index 9d9bd32..19df14e 100644
              if token == "" {
                  let error = NSError(domain: "com.getcapacitor.community.stripe.terminal",
                                      code: 3000,
-@@ -661,7 +716,23 @@ class APIClient: ConnectionTokenProvider {
+@@ -661,7 +761,23 @@
      // Fetches a ConnectionToken from your backend
      func fetchConnectionToken(_ completion: @escaping ConnectionTokenCompletionBlock) {
          if tokenProviderEndpoint == "" {

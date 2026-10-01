@@ -349,7 +349,8 @@ describe("Clear The Date, then put back: lands exactly where and as long as chos
     );
     await actions.placeJobOnDay("p1", "2026-10-06");
     expect(job("p1").scheduled_start).toBe(at("2026-10-05", "10:00"));
-    expect(job("p1").scheduled_end).toBe(at("2026-10-06", "17:00"));
+    // The job's 10 to 12 is its hours on the added day too: the end lands on the last day at 12, never closing.
+    expect(job("p1").scheduled_end).toBe(at("2026-10-06", "12:00"));
   });
 });
 

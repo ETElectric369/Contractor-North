@@ -21,6 +21,7 @@ vi.mock("../timeclock/actions", () => ({
   joinTimeEntries: vi.fn(async () => ({ ok: true })),
   moveTimeEntryCut: vi.fn(async () => ({ ok: true })),
   splitTimeEntry: vi.fn(async () => ({ ok: true })),
+  shiftClaim: vi.fn(async () => ({ ok: true, holder: null })),
   duplicateTimeEntry: vi.fn(async () => ({ ok: true })),
   stopShift: vi.fn(async () => ({ ok: true })),
   updateOpenEntry: vi.fn(async () => ({ ok: true })),
@@ -31,6 +32,7 @@ import { getOrgSettings } from "@/lib/org-settings";
 import { ShiftList, type StackEntry } from "./timecard-stack";
 import { EditEntryButton, sourceLine, rateUnsavedOf, formTimesOf } from "./edit-entry-button";
 import { DuplicateEntryButton } from "./duplicate-entry-button";
+import { NO_JOB_MATCH, SplitShiftSheet, jobSearchNote } from "./split-shift-sheet";
 
 const src = (rel: string) => readFileSync(new URL(rel, import.meta.url), "utf8");
 const TZ = "America/Los_Angeles";
@@ -287,5 +289,62 @@ describe("no sentence sends anyone to a door that left", () => {
     expect(debrief).not.toMatch(/on Crew Hours\./);
     // My Day is where the reports are (with Mark Reviewed).
     expect(src("../planner/page.tsx")).toContain('.from("daily_reports")');
+  });
+});
+
+describe("Split This Shift offers every job in flight, not the 50 newest (cc484d6e)", () => {
+  /** 60 jobs, newest first as the old read ordered them; the 60th is an older job still running. */
+  const sixty = Array.from({ length: 60 }, (_, i) => ({ id: `j${i + 1}`, job_number: `J-${String(i + 1).padStart(3, "0")}`, name: i === 59 ? "700 North Lake Boulevard" : `Job ${i + 1}` }));
+  const sheet = (jobs: typeof sixty) =>
+    renderToStaticMarkup(
+      createElement(SplitShiftSheet, { entry: entry() as any, jobs, jobCodes: [], tz: TZ, open: true, onClose: () => undefined, onSplit: () => undefined, knownClaim: null }),
+    );
+
+  it("the Second Part's picker lists an active job older than the 50 newest, under 'Jobs', never 'Recent Jobs'", () => {
+    const html = sheet(sixty);
+    expect(html).toContain('<option value="job:j60">700 North Lake Boulevard</option>');
+    expect(html).toContain('<optgroup label="Jobs">');
+    expect(html).not.toContain("Recent Jobs");
+    expect((html.match(/<option value="job:/g) ?? []).length).toBe(60);
+  });
+
+  it("a search that finds nothing says so, and where an older finished job went; an empty list with no search says nothing", () => {
+    expect(jobSearchNote("lake", 0)).toBe(NO_JOB_MATCH);
+    expect(NO_JOB_MATCH).toBe("No job matches that. Finished jobs older than 30 days are on the job's own Time tab.");
+    expect(jobSearchNote("lake", 3)).toBeNull();
+    expect(jobSearchNote("", 0)).toBeNull();
+    expect(jobSearchNote("   ", 0)).toBeNull();
+    expect(sheet([])).not.toContain("No job matches that");
+    // Wired under the picker, from the live search and the jobs it leaves.
+    expect(src("./split-shift-sheet.tsx")).toContain("{jobSearchNote(search, shownJobs.length) && <p className=\"text-xs text-slate-500\">{jobSearchNote(search, shownJobs.length)}</p>}");
+  });
+
+  it("Timecards hands the editor and the split sheet the SAME list Add Time Entry uses: every active job plus 30 days of finished ones, no cap", () => {
+    const page = src("./page.tsx");
+    expect(page).not.toContain(".limit(50)");
+    expect(page).not.toContain("the 50 newest");
+    expect(page).toContain('const pickJobs = addJobs.map((j) => ({ id: j.id, job_number: j.job_number ?? "", name: j.name ?? "" }));');
+    expect(page).toContain("jobs={pickJobs}");
+    expect(page).toContain("let focusJobs = pickJobs;");
+    // Nort's fill still prepends a job the list does not hold.
+    expect(page).toMatch(/if \(fj\) focusJobs = \[fj as \{ id: string; job_number: string; name: string \}, \.\.\.focusJobs\];/);
+    // The job page's list has no cap either (verified: no limit(50) on its allJobs read).
+    expect(src("../jobs/[id]/page.tsx")).not.toContain(".limit(50)");
+  });
+
+  it("a closed shift's editor carries Split This Shift in its footer too, a 44px secondary door reachable without scrolling the form; a running clock has none", () => {
+    const html = renderEditor(entry());
+    const doors = html.match(/<button[^>]*>(?:(?!<\/button>).)*Split This Shift<\/button>/g) ?? [];
+    expect(doors.length).toBe(2);
+    for (const d of doors) expect(d).toMatch(/class="[^"]*border-slate-300[^"]*h-11[^"]*"/);
+    // The footer's: after the body's tools box, before Save Changes.
+    const last = html.lastIndexOf("Split This Shift");
+    expect(last).toBeGreaterThan(html.indexOf("Worked two jobs, or drove part of it?"));
+    expect(last).toBeLessThan(html.indexOf("Save Changes"));
+    // Delete stays the one red action, and both doors open the one sheet.
+    expect(html.match(/text-red-600/g)?.length).toBe(1);
+    const edit = src("./edit-entry-button.tsx");
+    expect((edit.match(/onClick=\{openSplit\}/g) ?? []).length).toBe(2);
+    expect(renderEditor(entry({ clock_out: null, status: "open" }))).not.toContain("Split This Shift");
   });
 });

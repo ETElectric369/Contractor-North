@@ -48,8 +48,10 @@ export type ReceiptOutcome =
     }
   /** This file already produced a bill — nothing added twice (organized_items.document_id). Or
    *  `samePurchase`: a bill already carries this paper's printed number (audit v994), so nothing
-   *  was written, and the door offers Different Purchase: Record It Anyway. */
-  | { kind: "already"; docId: string; tone: "ok" | "warn"; sentence: string; samePurchase?: boolean }
+   *  was written, and the door offers Different Purchase: Record It Anyway — and, when that bill is
+   *  on this paper's own job (`sameOnThisJob`, d1ff7c5a), Same Purchase: It's That Bill, which ties
+   *  the paper to `sameBillId` (linkReceiptToBill) instead of reading it again or billing it twice. */
+  | { kind: "already"; docId: string; tone: "ok" | "warn"; sentence: string; samePurchase?: boolean; sameBillId?: string; sameOnThisJob?: boolean }
   /** Filed on the job as a document. The reader wasn't asked (a Plan, a Permit), or the file is
    *  over its cap, or it refused (a name it can't read, no total) — the sentence names which. */
   | { kind: "filed"; docId: string; tone: "ok" | "warn"; why: "not_asked" | "over_cap" | "refused"; sentence: string };
@@ -122,7 +124,14 @@ export async function readReceiptDocument(
   }
   if (res.already && res.sameAs) {
     // Every door that shows this outcome renders the button beside it (samePurchase: true).
-    return { kind: "already", docId, tone: "warn", sentence: `${res.sameAs} ${DIFFERENT_PURCHASE_DOOR}`, samePurchase: true };
+    return {
+      kind: "already",
+      docId,
+      tone: "warn",
+      sentence: `${res.sameAs} ${DIFFERENT_PURCHASE_DOOR}`,
+      samePurchase: true,
+      ...(res.sameBillId ? { sameBillId: res.sameBillId, sameOnThisJob: res.sameOnThisJob === true } : {}),
+    };
   }
   if (res.already) {
     return { kind: "already", docId, tone: "ok", sentence: "Already recorded as a cost — nothing added twice." };

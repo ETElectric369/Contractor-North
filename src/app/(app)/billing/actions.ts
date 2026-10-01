@@ -39,6 +39,7 @@ import { HELD_HERE_READ_FAILED, costsKeyNames, idKeyNames, laborKeyNames, readHe
 import { removedLines, removedSentence, staleTombstones, textArrayLiteral } from "@/lib/import-reconcile";
 import { linesByBillId, readBillLines, readInvoiceMarkup } from "@/lib/invoice-markup-read";
 import { recalcInvoice } from "@/lib/invoice-recalc";
+import { completeJobWhenPaid } from "@/lib/complete-job-when-paid";
 import { defaultDueDateIsoForOrg } from "@/lib/invoice-due";
 import { standardBillingBlockerOnJob, standardBillingConflictError } from "@/lib/billing-guards";
 import { scheduleStatus, contractTotalFromQuotes, type Milestone } from "@/lib/payment-schedule-math";
@@ -3496,6 +3497,11 @@ export async function recordPayment(input: {
   if (error) return { ok: false, error: dbError(error) };
 
   await recalcInvoice(supabase, input.invoice_id);
+  // PAID COMPLETES THE JOB (209451e1): a standard invoice paid in full on a job that has STARTED
+  // (in progress / on hold) with no other open bill marks the job complete — here, in Settle Up
+  // (which records through this door), and in the Stripe webhook, the three places money lands.
+  // A paid draw never does, and neither does a bill paid ahead of a visit still on the schedule.
+  await completeJobWhenPaid(supabase, input.invoice_id);
   // Cash-in ping to the OTHER office staff (the recorder already knows).
   //
   // THE BELL RECORDS THE PUSH (W1-10, Erik: "where would push notifications be recorded?"). A push
@@ -4182,6 +4188,21 @@ export async function settleUp(input: {
   // lead stamped won). Best-effort: a contact-less invoice still records the money.
   if (!customerId && inquiryId) {
     customerId = await customerForInquiry(supabase, inquiryId, ctx.userId);
+    // THE JOB LEARNS ITS CUSTOMER TOO (209451e1, the settleUp half). The lead's contact was
+    // minted for the bill and the job went on with none — its tile, its papers and its job page
+    // all read "no customer" over a paid invoice that named one. Only a job that had none
+    // (.is null), checked (.select("id")): a job that already has its customer is never
+    // re-pointed by a payment. Best-effort like the mint above; the money still records.
+    if (customerId && jobId) {
+      const { data: pointed, error: pointErr } = await supabase
+        .from("jobs")
+        .update({ customer_id: customerId })
+        .eq("id", jobId)
+        .is("customer_id", null)
+        .select("id");
+      if (pointErr) reportError("settleUp.jobCustomer", pointErr, { jobId, customerId });
+      else if (pointed?.length) revalidatePath(`/jobs/${jobId}`);
+    }
   }
 
   // ── The invoice, its one line, its real totals ─────────────────────────────────────────────

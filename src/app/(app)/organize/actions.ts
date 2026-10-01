@@ -438,6 +438,11 @@ export async function billJobReceipt(
   already?: boolean;
   /** A bill already carries this paper's number: nothing was written, and this says which. */
   sameAs?: string;
+  /** THAT bill (d1ff7c5a): so a door can say "Same Purchase: It's That Bill" and tie the paper to it
+   *  (linkReceiptToBill) instead of a second paid read or a second bill. `sameOnThisJob` is whether
+   *  it is on the paper's own job, the only case the tie is allowed (job containment). */
+  sameBillId?: string;
+  sameOnThisJob?: boolean;
   amount?: number | null;
   vendor?: string | null;
   lineCount?: number;
@@ -457,15 +462,21 @@ export async function billJobReceipt(
   if (!doc) return { ok: false, error: "Receipt not found." };
   if (!doc.job_id) return { ok: false, error: "This receipt isn't attached to a job." };
 
-  // Idempotency: have we already turned this document into a bill?
+  // Idempotency: have we already turned this document into a bill — or tied it to the bill that
+  // already carried its purchase (the "already on the books" answer below writes that tie)? Either
+  // way the paper is on the books and a second read would only pay for the same answer again.
   const { data: prior } = await supabase
     .from("organized_items")
-    .select("id, bill_id")
+    .select("id, bill_id, tied_bill_id")
     .eq("document_id", documentId)
-    .not("bill_id", "is", null)
+    .or("bill_id.not.is.null,tied_bill_id.not.is.null")
     .limit(1)
     .maybeSingle();
   if (prior?.bill_id) return { ok: true, already: true };
+  // A tie is "on the books" for every door but Different Purchase: a person pressing that on a
+  // photo the same-number answer filed with the other bill means it, so the read goes on, this
+  // paper gets its own bill, and the tie comes off below.
+  if (prior?.tied_bill_id && !stated?.differentPurchase) return { ok: true, already: true };
 
   const mime = mimeFromName(doc.name) ?? mimeFromName(doc.file_url);
   if (!mime) return { ok: false, error: "Use a photo (JPG/PNG) or PDF receipt." };
@@ -593,8 +604,48 @@ ${MASKED_PRICE_PROMPT_RULE}`,
       // renders: the Add Cost sheet and Snap the Bill offer Different Purchase in place, and a
       // sentence here pointing at "Receipts & Documents" sent him to a button that only appears
       // after another Record as Cost press (another paid read).
-      const said = `Already on the books: ${billLabel(same[0])}. Nothing was recorded twice.`;
-      return { ok: true, already: true, vendor, amount, sameAs: said, warning: said };
+      //
+      // THE PHOTO IS FILED WITH THAT BILL (J-013 "TTP #56", 2026-09-30: one live bill, and the
+      // Costs badge said 3 with the receipts fold reading "Not On A Bill Yet"). This answer used to
+      // write NOTHING, so the second photo of the same ticket stayed a Receipt on no tie: the job
+      // page called it loose, counted it on the Costs chip, flagged it "Not on a bill yet." and
+      // offered Record As Cost, whose only answer was this sentence again, forever. The paper IS
+      // that bill's, by the same reading every door trusts, so it is filed against the bill the way
+      // Same Purchase: Tie Them files one (tied_bill_id, never bill_id: no teardown can take the
+      // bill down through it, and the idempotency read above still lets Different Purchase through).
+      // No money moves. Once, so a second read of the same photo doesn't stack ties.
+      const tie = await tieDocumentToBill(supabase, ctx, {
+        documentId,
+        doc,
+        billId: same[0].id,
+        vendor,
+        amount,
+        itemDate: stated?.billDate || itemDate || stated?.fallbackBillDate || null,
+        category: stated?.category || "Receipt",
+        confidence,
+        payment: stated?.paid ? "paid_at_purchase" : (parsed.payment ?? "unknown"),
+        lines,
+        docNumber,
+      });
+      if (tie.ok) revalidatePath(`/jobs/${doc.job_id}`);
+      const said = tie.ok
+        ? `Already on the books: ${billLabel(same[0])}. This photo is filed with that bill; nothing was recorded twice.`
+        : `Already on the books: ${billLabel(same[0])}. Nothing was recorded twice, but this photo couldn't be filed with that bill, so the job's Costs tab will keep saying it is not on a bill yet.`;
+      // WHICH BILL, AND WHETHER IT IS THIS JOB'S (d1ff7c5a): when the tie above did NOT land, the
+      // doors beside this sentence used to be Record As Cost (another paid read, the same answer)
+      // or Different Purchase (a SECOND bill for the same money). Naming the bill lets the door
+      // offer Same Purchase: It's That Bill, which writes the one missing tie by hand
+      // (linkReceiptToBill, job containment checked there). A tie that landed needs no door.
+      const sameOnThisJob = (same[0].job_id ?? null) === doc.job_id;
+      return {
+        ok: true,
+        already: true,
+        vendor,
+        amount,
+        sameAs: said,
+        warning: said,
+        ...(!tie.ok && sameOnThisJob ? { sameBillId: same[0].id, sameOnThisJob } : {}),
+      };
     }
   }
 
@@ -672,6 +723,29 @@ ${MASKED_PRICE_PROMPT_RULE}`,
     ? "The cost is recorded, but this receipt did not get marked as billed. Tapping Record As Cost on it again would write a second bill, so check the job's costs first."
     : null;
 
+  // A PERSON SAID DIFFERENT PURCHASE: the tie the same-number answer filed this photo under (above)
+  // is no longer what they meant. Its own bill now holds the photo; the old tie would still list
+  // it "On" the other bill. Only after the bill and its link are in, so a refusal costs nothing.
+  // Checked, never silent: an untied row left behind is said in the same warning line.
+  let untieWarning: string | null = null;
+  if (stated?.differentPurchase) {
+    const { data: gone, error: goneErr } = await supabase
+      .from("organized_items")
+      .delete()
+      .eq("org_id", ctx.orgId)
+      .eq("document_id", documentId)
+      .is("bill_id", null)
+      .not("tied_bill_id", "is", null)
+      .select("id");
+    // Zero rows is the ordinary case here (Different Purchase pressed straight from the sheet
+    // before any tie was filed), so only an error is a warning; `gone` is read so the write is asked
+    // for its answer the way every write is.
+    if (goneErr) {
+      reportError("organize:billJobReceipt.untie", goneErr, { documentId, billId, jobId: doc.job_id, untied: ((gone ?? []) as { id: string }[]).length });
+      untieWarning = "This photo is still filed with the other bill too, so the Costs tab may name both. Reload the page; if it still does, open the photo and check.";
+    }
+  }
+
   revalidatePath("/bills");
   revalidatePath("/analytics");
   revalidatePath(`/jobs/${doc.job_id}`);
@@ -682,8 +756,76 @@ ${MASKED_PRICE_PROMPT_RULE}`,
     lineCount: lines.length,
     // Both facts or neither: a receipt that did not add up AND did not get linked has two things
     // wrong with it, and hiding one behind the other is how the second one gets found in a month.
-    warning: [check.mismatch ? check.note : null, linkWarning].filter(Boolean).join(" ") || undefined,
+    warning: [check.mismatch ? check.note : null, linkWarning, untieWarning].filter(Boolean).join(" ") || undefined,
   };
+}
+
+/**
+ * FILE A JOB'S PHOTO WITH A BILL ALREADY ON THE BOOKS (the same-number answer in billJobReceipt).
+ * The row Same Purchase: Tie Them writes (0295), for a document the job already holds: filed,
+ * tied_bill_id and never bill_id, so no teardown of this row can take the bill down and the
+ * "already billed?" read (bill_id) still lets a Different Purchase through. Once per document:
+ * a tie already there is the answer. Every write asks for its row back (silent-write law).
+ */
+async function tieDocumentToBill(
+  supabase: any,
+  ctx: { userId: string },
+  o: {
+    documentId: string;
+    doc: { job_id: string | null; file_url: string | null };
+    billId: string;
+    vendor: string;
+    amount: number;
+    itemDate: string | null;
+    category: string;
+    confidence: string;
+    payment: string;
+    lines: unknown[];
+    docNumber: string | null;
+  },
+): Promise<{ ok: boolean }> {
+  const { data: prior, error: priorErr } = await supabase
+    .from("organized_items")
+    .select("id")
+    .eq("document_id", o.documentId)
+    .not("tied_bill_id", "is", null)
+    .limit(1)
+    .maybeSingle();
+  if (priorErr) {
+    reportError("organize:billJobReceipt.tie.read", priorErr, { documentId: o.documentId, billId: o.billId, jobId: o.doc.job_id });
+    return { ok: false };
+  }
+  if (prior?.id) return { ok: true };
+  const { data: tie, error: tieErr } = await supabase
+    .from("organized_items")
+    .insert({
+      kind: "receipt",
+      title: o.vendor,
+      summary: null,
+      vendor: o.vendor,
+      amount: o.amount,
+      item_date: o.itemDate,
+      category: o.category,
+      doc_number: o.docNumber,
+      confidence: o.confidence,
+      payment: o.payment,
+      status: "filed",
+      job_id: o.doc.job_id,
+      document_id: o.documentId,
+      bill_id: null,
+      tied_bill_id: o.billId,
+      line_items: o.lines.length ? o.lines : null,
+      file_url: o.doc.file_url,
+      created_by: ctx.userId,
+      source: "job",
+      proposal: { filed: { how: "tie" } },
+    })
+    .select("id");
+  if (tieErr || !tie?.length) {
+    reportError("organize:billJobReceipt.tie", tieErr ?? new Error("tie insert returned no row"), { documentId: o.documentId, billId: o.billId, jobId: o.doc.job_id });
+    return { ok: false };
+  }
+  return { ok: true };
 }
 
 /**
@@ -1378,6 +1520,20 @@ export async function undoPaperwork(id: string): Promise<Result & { message?: st
       ok: true,
       message: `Undone: its cost is off the job. The receipt stays on the job; press Record As Cost there to make it a cost again.${papersBackSaid(torn.papersBack)}`,
     };
+  }
+
+  // A JOB'S PHOTO FILED WITH A BILL ALREADY ON THE BOOKS (billJobReceipt's same-number answer, a
+  // tied row with source "job"): there is no tray paper to put back, only the job's own document,
+  // which stays. The row goes, so the photo reads Not On A Bill Yet on the job's Costs tab again,
+  // beside Record As Cost, exactly as an undone job-page cost does above. Never into the tray.
+  if (tied && item.source === "job" && !item.bill_id && item.document_id) {
+    const { data: gone, error: goneErr } = await supabase.from("organized_items").delete().eq("id", id).eq("org_id", ctx.orgId).select("id");
+    if (goneErr) return { ok: false, error: dbError(goneErr) };
+    if (!gone?.length) return { ok: false, error: "Nothing was undone. That paper isn't here any more, or this login can't change it." };
+    revalidatePath("/organize");
+    revalidatePath("/bills");
+    if (item.job_id) revalidatePath(`/jobs/${item.job_id}`);
+    return { ok: true, message: "Untied. The photo stays on the job and reads Not On A Bill Yet on its Costs tab again; nothing else changed." };
   }
 
   const type = paperTypeOfItem(item);

@@ -79,8 +79,11 @@ describe("every door that writes payments.method writes a key", () => {
     expect(body).not.toMatch(/method: patch\.method \|\|/);
   });
 
-  it("the Stripe webhook writes a key: card, or ach for a bank debit (audit v994 BK2)", () => {
-    const hook = code("src/app/api/stripe/webhook/route.ts");
+  it("the Stripe writer (the webhook's and the Pay Now sheet's, one module) writes a key: card, or ach for a bank debit (audit v994 BK2)", () => {
+    // The insert moved out of the route on 2026-09-30 into lib/record-invoice-payment.ts, the one
+    // writer the webhook and tapPaymentOutcome share; the route itself writes no payment row.
+    const hook = code("src/lib/record-invoice-payment.ts");
+    expect(code("src/app/api/stripe/webhook/route.ts")).not.toMatch(/from\("payments"\)\s*\.(insert|upsert)\(/);
     const inserts = [...hook.matchAll(/from\("payments"\)\.insert\(\{[\s\S]*?\}\)/g)].map((m) => m[0]);
     expect(inserts.length).toBeGreaterThan(0);
     for (const ins of inserts) expect(ins).toContain('method: paymentMethodKey(via.method ?? "card")');
@@ -91,7 +94,7 @@ describe("every door that writes payments.method writes a key", () => {
     // If a third writer appears it has to be added here on purpose, with its key. (The database
     // trigger from 0287 backs all of them regardless.)
     // The bank download (2026-09-27) puts a deposit a person placed on an invoice, keyed.
-    const writers = new Set(["src/app/(app)/billing/actions.ts", "src/app/api/stripe/webhook/route.ts", "src/app/(app)/bills/bank-core.ts"]);
+    const writers = new Set(["src/app/(app)/billing/actions.ts", "src/lib/record-invoice-payment.ts", "src/app/(app)/bills/bank-core.ts"]);
     expect(code("src/app/(app)/bills/bank-core.ts")).toContain("method: paymentMethodKey(depositMethod(w.line.description))");
     const files = (readdirSync(join(process.cwd(), "src"), { recursive: true }) as string[])
       .filter((f) => /\.(ts|tsx)$/.test(f) && !/\.test\.tsx?$/.test(f))

@@ -24,6 +24,7 @@ import { coerceByPlaybook, orphanedAnswers, retiredAnswers, retiredOptions } fro
 import { playbookForForm } from "@/lib/playbook/parse";
 import { clearInapplicable } from "@/lib/playbook/resolve";
 import { runOnce } from "@/lib/offline/run-once";
+import { customerForInquiry } from "@/lib/actions/win-customer";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { DEFAULT_JOB_MINUTES } from "@/lib/schedule/job-block";
 import { putBackPlan, wontHappenVerdict } from "@/lib/appointments/wont-happen";
@@ -1216,7 +1217,8 @@ export async function createJobFromAppointment(
     .from("appointments")
     // PROJECTION LAW: everything the job inherits has to be in the select list. planned_minutes,
     // ends_at and inquiry_id were all missing, which is why none of them survived the conversion.
-    .select("id, title, customer_id, location, unit, city, state, zip, job_id, starts_at, ends_at, planned_minutes, inquiry_id")
+    // `notes` too (209451e1): the lead's message rode the visit and never reached the job.
+    .select("id, title, customer_id, location, unit, city, state, zip, job_id, starts_at, ends_at, planned_minutes, inquiry_id, notes")
     .eq("id", appointmentId)
     .maybeSingle();
   if (!appt) return { ok: false, error: "Appointment not found." };
@@ -1239,7 +1241,13 @@ export async function createJobFromAppointment(
      with customer_id null, so this insert wrote jobs.customer_id = null — and nothing in the tree
      ever backfills it: settleUp mints/links the customer onto the INVOICE only. The result was a
      paid job missing from its own customer's card and a job page with no contact. If the lead
-     already carries a card, the job inherits it here, at the one step that connects the two. */
+     already carries a card, the job inherits it here, at the one step that connects the two.
+
+     AND A FRESH LEAD GETS ITS CARD HERE (209451e1). A lead → inspection visit → Start The Job is a
+     win like any other, and every other win (an accepted estimate, settleUp, setJobContact) mints
+     the customer through the one rule, customerForInquiry: dedup by phone / email / name, the
+     person's own address, the lead stamped won. This door stamped the lead won and minted nothing,
+     so the job was born with no contact and the customer never existed until money landed. */
   const inquiryId = (appt as { inquiry_id?: string | null }).inquiry_id ?? null;
   type Who = { name?: string | null; company_name?: string | null; type?: string | null } | null;
   type Lead = { customer_id?: string | null; name?: string | null; company_name?: string | null; type?: string | null };
@@ -1248,7 +1256,8 @@ export async function createJobFromAppointment(
     const { data: iq } = await supabase.from("inquiries").select("customer_id, name, company_name, type").eq("id", inquiryId).maybeSingle();
     lead = (iq as Lead | null) ?? null;
   }
-  const customerId = appt.customer_id ?? lead?.customer_id ?? null;
+  let customerId = appt.customer_id ?? lead?.customer_id ?? null;
+  if (!customerId && inquiryId) customerId = await customerForInquiry(supabase, inquiryId, ctx.userId);
 
   /* THE NAME IS THE STREET, NEVER THE VISIT IT CAME FROM (Erik 2026-09-27: "site inspections are
      labeled with the tag they shouldnt carry site inspection in the job title"; 09-28: "street
@@ -1290,6 +1299,8 @@ export async function createJobFromAppointment(
       name: jobName,
       customer_id: customerId,
       inquiry_id: inquiryId,
+      // The visit's notes (the lead's message, what the inspector was told) are the job's scope.
+      description: (appt as { notes?: string | null }).notes ?? null,
       // A visit waiting for a day (no start, 0368) makes a job that is waiting for one too.
       status: appt.starts_at ? "scheduled" : "to_be_scheduled",
       planned_minutes: sized > 0 ? sized : null, // blank stays blank — never a made-up number

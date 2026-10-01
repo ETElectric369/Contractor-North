@@ -134,10 +134,13 @@ export function JobBills({
   };
 
   /** A bill in a pile: what it is, then the /bills row's own doors (BillRowDoors: Settled / On
-   *  Account, Edit, Delete that asks first), each 44px, wrapping under it on a phone. */
+   *  Account with the deed on its face, Edit, Delete that asks first), each 44px, wrapping under it
+   *  on a phone. THE BILL OPENS (ea2b7172): a bill's detail (its lines, the receipt-billing card) lives
+   *  only inside /bills's own fold (#bill-<id>), and this row had no way there, so the supplier line
+   *  and an Open The Bill door both land on it, the way a PO row lands on its page. */
   const billRow = (b: Bill, why: string | undefined, pile: Pile) => (
     <li key={b.id} className="px-4 py-2.5 text-sm">
-      <div className="flex items-center gap-3">
+      <Link href={`/bills#bill-${b.id}`} className="flex min-h-11 items-center gap-3 rounded-md hover:bg-slate-50">
         <div className="min-w-0 flex-1">
           <div className="font-medium text-slate-900">{b.supplier}</div>
           <div className="text-xs text-slate-400">
@@ -149,10 +152,13 @@ export function JobBills({
           {why && <div className="text-xs text-slate-500">{why}</div>}
         </div>
         <span className="font-medium text-slate-800">{formatCurrency(b.amount)}</span>
-      </div>
+      </Link>
       <div className="mt-2 flex flex-wrap items-center gap-2">
         <BillPaperDoors papers={papers?.[b.id]} />
         <BillRowDoors bill={b} jobId={jobId} onEdit={() => setEditBill(b)} />
+        <Link href={`/bills#bill-${b.id}`} className="flex min-h-11 items-center px-2 text-sm font-medium text-brand hover:underline">
+          Open The Bill
+        </Link>
         {abDoors(b.id, pile)}
       </div>
     </li>

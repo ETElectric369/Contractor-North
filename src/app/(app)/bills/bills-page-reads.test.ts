@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { billsSettledBySupplier } from "./supplier-papers";
 
 /**
  * THE FAILURE IS ALWAYS A SELECT LIST.
@@ -43,5 +44,62 @@ describe("the bills page asks for every column it reads", () => {
     expect(PAGE).toContain("if (!accountId || !documentsOf.has(accountId)) continue;");
     // And it reaches the card that has to say it.
     expect(PAGE).toContain("noSupplierDocument={Object.fromEntries(noSupplierDocument)}");
+  });
+});
+
+/**
+ * "$10k UNPAID" UNDER ALL BILLS OVER "$5k OWED" ON THE SUPPLIERS CARD (8a982483). Applying a CED
+ * open list closes CED's documents (supplier_invoices.closed) and never a bill, so every ticket
+ * ever bought on account read Unpaid forever. The page now reads, from the same covering walk
+ * coveredBillIds uses, which on-account bills the supplier's own books call settled, and hands
+ * that to the ledger's rows. bills.status is never written.
+ */
+describe("the bills the supplier's own closed papers cover are settled in the ledger", () => {
+  const CED = "acct-ced";
+  const bills = [
+    { id: "b-closed", supplier_account_id: CED, status: "unpaid" },
+    { id: "b-open", supplier_account_id: CED, status: "unpaid" },
+    { id: "b-both", supplier_account_id: CED, status: "unpaid" },
+    { id: "b-other-account", supplier_account_id: "acct-other", status: "unpaid" },
+    { id: "b-counter", supplier_account_id: CED, status: "paid" },
+    { id: "b-dup", supplier_account_id: CED, status: "unpaid", superseded_by_bill_id: "b-closed" },
+    { id: "b-uncovered", supplier_account_id: CED, status: "unpaid" },
+  ];
+  const documents = [
+    { id: "d-closed", supplier_account_id: CED, closed: true },
+    { id: "d-open", supplier_account_id: CED, closed: false },
+    { id: "d-closed-2", supplier_account_id: CED, closed: true },
+  ];
+  const coveringBills = new Map<string, Set<string>>([
+    ["d-closed", new Set(["b-closed", "b-both", "b-other-account", "b-counter", "b-dup"])],
+    ["d-open", new Set(["b-open"])],
+  ]);
+  // b-both is on the closed document by link and on the open one by its number: still open.
+  const billsCarrying = new Map<string, string[]>([["d-open", ["b-both"]]]);
+
+  it("one covered by a closed paper is settled; one covered by an open paper, or by both, still counts", () => {
+    const settled = billsSettledBySupplier({ documents, bills, coveringBills, billsCarrying });
+    expect([...settled].sort()).toEqual(["b-closed"]);
+    expect(settled.has("b-open")).toBe(false);
+    expect(settled.has("b-both")).toBe(false);
+    // Another account's document can never settle it; a counter ticket and a set-aside duplicate
+    // are not this question; an uncovered bill is not settled by anything.
+    expect(settled.has("b-other-account")).toBe(false);
+    expect(settled.has("b-counter")).toBe(false);
+    expect(settled.has("b-dup")).toBe(false);
+    expect(settled.has("b-uncovered")).toBe(false);
+  });
+
+  it("with no closed papers at all, nothing is settled (a document with no closed flag is open)", () => {
+    const settled = billsSettledBySupplier({ documents: [{ id: "d-closed", supplier_account_id: CED }], bills, coveringBills, billsCarrying });
+    expect(settled.size).toBe(0);
+  });
+
+  it("the page builds it from the same rows, only once the links read, and hands it to every ledger row", () => {
+    expect(PAGE).toContain("const settledBySupplierIds = linksErr");
+    expect(PAGE).toContain("billsSettledBySupplier({ documents: (invoiceRows ?? []) as any[], bills: liveBills, coveringBills, billsCarrying })");
+    expect(PAGE).toContain("settledBySupplier: settledBySupplierIds.has(String(b.id)),");
+    // Read-side only: no write to bills.status rides along.
+    expect(PAGE).not.toMatch(/from\("bills"\)\s*\.update\(/);
   });
 });

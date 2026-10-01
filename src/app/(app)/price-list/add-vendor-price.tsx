@@ -3,7 +3,7 @@
 import { useId, useState } from "react";
 import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input, Label } from "@/components/ui/input";
+import { Input, Label, Select } from "@/components/ui/input";
 import { formatCurrency } from "@/lib/utils";
 import { addItemOption, type OptionResult } from "./actions";
 import { markupForSell, markupSourceNote, optionView, showPct } from "./item-options-math";
@@ -19,20 +19,36 @@ import { parseCellNumber, type PriceItem } from "./price-list-math";
  * estimate's ladder). Typed = this vendor's own markup, the one that lands on those cents.
  *
  * `vendor` fixed (the vendor's own sheet) hides the vendor box; `item` is always fixed.
+ *
+ * THE VENDOR IS A VISIBLE PICKER (b0a8f25e). It was a text box over a native datalist, which in
+ * Chrome on a Mac pops only after matching letters or a double-click, so Justin's twenty-nine
+ * imported vendors looked like none. Now a select lists every vendor the org has - suppliers,
+ * subcontractors and brands alike (Erik 2026-09-30, reversing 0341's "a subcontractor never carries
+ * prices") - with Someone New (Type It) at the end for a brand not on the Vendors tab yet.
  */
+export const SOMEONE_NEW = "__someone_new__";
+
 export function AddVendorPrice({
   item,
   vendor,
   knownVendors,
+  alreadyOnItem = 0,
   defaultMarkupPct,
   hasDefault,
   onDone,
   run,
 }: {
   item: PriceItem;
-  /** Fixed vendor name (adding from the vendor's sheet). Absent = typed here. */
+  /** Fixed vendor name (adding from the vendor's sheet). Absent = picked or typed here. */
   vendor?: string;
+  /** The vendors that can be picked here: the org's, minus the ones already priced on this item. */
   knownVendors: string[];
+  /**
+   * How many of the org's vendors are left out because they are ALREADY on this item. The list
+   * arrives filtered, so without this an org whose every vendor is priced here would read "No
+   * vendors yet" while its Vendors tab lists them.
+   */
+  alreadyOnItem?: number;
   defaultMarkupPct: number;
   /** Whether this item already has a default vendor (the tick's wording depends on it). */
   hasDefault: boolean;
@@ -41,6 +57,10 @@ export function AddVendorPrice({
   run: (key: string, fn: () => Promise<OptionResult>, okMsg: string) => Promise<OptionResult>;
 }) {
   const uid = useId();
+  // The picker's choice: "" (nothing yet), a vendor's name, or SOMEONE_NEW (the text box shows).
+  // With no vendors to pick from, the box is open from the start rather than behind a two-option
+  // select.
+  const [pick, setPick] = useState(knownVendors.length ? "" : SOMEONE_NEW);
   const [name, setName] = useState(vendor ?? "");
   const [cost, setCost] = useState("");
   const [sell, setSell] = useState("");
@@ -48,19 +68,26 @@ export function AddVendorPrice({
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
+  // WITH NOTHING LEFT TO PICK, THE BOX IS OPEN, whatever `pick` remembers: the list shrinks under
+  // this mounted sheet when its last vendor is added (the parent re-renders after the refresh), and
+  // a sentence saying "type one here" must never point at a box that isn't there.
+  const nonePickable = knownVendors.length === 0;
+  const pickShown = nonePickable ? SOMEONE_NEW : pick;
+  const typing = !vendor && pickShown === SOMEONE_NEW;
+  const who = (vendor ?? (typing ? name : pick)).trim();
+
   const costN = parseCellNumber(cost);
   const sellN = parseCellNumber(sell);
   const typedMarkup = costN !== null && costN > 0 && sellN !== null ? markupForSell(costN, sellN) : null;
   const preview =
     costN !== null
-      ? optionView({ vendor: name, label: null, unit: null, buy_price: costN, markup_pct: typedMarkup }, item, defaultMarkupPct)
+      ? optionView({ vendor: who, label: null, unit: null, buy_price: costN, markup_pct: typedMarkup }, item, defaultMarkupPct)
       : null;
-  const who = (vendor ?? name).trim();
 
   async function add() {
     if (saving) return;
     setError(null);
-    if (!who) return setError("Name the vendor: the brand, e.g. Andersen.");
+    if (!who) return setError(typing ? "Name the vendor: the brand, e.g. Andersen." : "Pick one of your vendors, or Someone New (Type It).");
     if (costN === null) return setError("Type what this vendor's one costs you.");
     if (sell.trim() && sellN === null) return setError("That sell price isn't a number.");
     if (sell.trim() && typedMarkup === null) return setError("Sell is cost plus markup, so it needs a cost above zero.");
@@ -86,7 +113,13 @@ export function AddVendorPrice({
     );
     setSaving(false);
     if (!res.ok) return setError(res.error ?? "Couldn't add that.");
-    if (!vendor) setName("");
+    if (!vendor) {
+      setName("");
+      // Reset from what the list WILL be: a picked vendor leaves it (it's on the item now), a typed
+      // one doesn't (it was never in it). With none left, the box stays open for the next one.
+      const left = knownVendors.length - (typing ? 0 : 1);
+      setPick(left > 0 ? "" : SOMEONE_NEW);
+    }
     setCost("");
     setSell("");
     setIsDefault(false);
@@ -108,20 +141,50 @@ export function AddVendorPrice({
       <div className={`grid grid-cols-2 gap-2 ${vendor ? "" : "sm:grid-cols-4"}`}>
         {!vendor && (
           <div className="col-span-2">
-            <Label htmlFor={`${uid}-name`}>Vendor *</Label>
-            <Input
-              id={`${uid}-name`}
-              list={listId}
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="the brand, e.g. Andersen"
-              autoComplete="off"
-            />
-            <datalist id={listId}>
+            <Label htmlFor={`${uid}-pick`}>Vendor *</Label>
+            <Select id={`${uid}-pick`} className="h-11" value={pickShown} onChange={(e) => setPick(e.target.value)}>
+              <option value="">Pick One Of Your Vendors</option>
               {knownVendors.map((n) => (
-                <option key={n} value={n} />
+                <option key={n} value={n}>
+                  {n}
+                </option>
               ))}
-            </datalist>
+              <option value={SOMEONE_NEW}>Someone New (Type It)</option>
+            </Select>
+            {typing && (
+              <>
+                <Label htmlFor={`${uid}-name`} className="mt-2">
+                  Their Name *
+                </Label>
+                <Input
+                  id={`${uid}-name`}
+                  list={listId}
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="the brand, e.g. Andersen"
+                  autoComplete="off"
+                  autoFocus={knownVendors.length > 0}
+                />
+                <datalist id={listId}>
+                  {knownVendors.map((n) => (
+                    <option key={n} value={n} />
+                  ))}
+                </datalist>
+              </>
+            )}
+            {/* WHAT THE LIST LEAVES OUT, SAID OUT LOUD: every vendor the org has is offered here
+                whatever its Kind, so the only short list is one whose vendors are already on this
+                item - and a list that is quietly short reads as broken. */}
+            {nonePickable && alreadyOnItem > 0 ? (
+              // EVERY VENDOR IS ALREADY HERE: the list is empty because they're all on the item,
+              // not because the Vendors tab is. Saying "No vendors yet" sent him there for nothing.
+              <p className="mt-1 text-xs text-slate-500">
+                {alreadyOnItem === 1 ? "Your one vendor is already on this item." : `Every vendor you have (${alreadyOnItem}) is already on this item.`}{" "}
+                Type a new one here.
+              </p>
+            ) : nonePickable ? (
+              <p className="mt-1 text-xs text-slate-500">No vendors yet. Add them on the Vendors tab or type one here.</p>
+            ) : null}
           </div>
         )}
         <div>

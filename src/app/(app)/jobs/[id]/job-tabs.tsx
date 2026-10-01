@@ -73,9 +73,10 @@ const JOB_TAB_META: Record<string, { group?: string; icon?: LucideIcon }> = {
   customer: { group: "Money", icon: Eye },
 };
 
-/** THE TABS A TECH CAN ADD THE FIRST ROW TO (W1-18): the crew works the Panel at the panel (Erik's
- *  decision 1, 2026-09-25). Permits, visits and work orders are the office's writes, so an empty one
- *  is never offered to him under "+ Add…" (a door he couldn't use); it still opens by link. */
+/** THE TABS A TECH CAN ADD THE FIRST ROW TO: the crew works the Panel at the panel (Erik's decision
+ *  1, 2026-09-25). Permits, visits and work orders are the office's writes, so an EMPTY one is never
+ *  a row on his More (a door he couldn't use, with nothing to read behind it); it still opens by
+ *  link. Once it holds a row it is his to read, and More lists it. */
 export const JOB_TECH_ADDABLE: ReadonlySet<string> = new Set(["panel"]);
 
 /** Order the job tabs and tag each with its pin + cluster + staff-gating, so
@@ -84,12 +85,16 @@ export const JOB_TECH_ADDABLE: ReadonlySet<string> = new Set(["panel"]);
  *  page drops those tabs before passing them (so their content never serializes
  *  to a tech), and <Tabs> filters again on the client. `switches` omitted = everything on.
  *
- *  MORE SHOWS WHAT THE JOB HAS (W1-18). The page sets `holds` on each tab (any row of its kind, open
- *  or closed; a failed read counts as holding, so an error never hides a door). An unpinned tab that
- *  holds nothing is `tucked`: More lists the holding tabs first and the tucked ones behind "+ Add…".
- *  A pinned chip is never tucked, and a switched-off tab is never listed at all (offStrip). For the
- *  crew, an empty tab he can't add to (JOB_TECH_ADDABLE) is not offered either: it leaves his More
- *  (offStrip) and still opens from a link; when nothing is left his strip draws no More chip. */
+ *  MORE LISTS EVERY TAB (Erik, report 002dbffc, 2026-09-28: "the more dropdown should contain
+ *  everything (remove + Add)"; reversal OK'd 2026-09-30). Full or empty, each unpinned tab is one row
+ *  in its cluster — tapping an empty one lands on the tab, where its own New… button is. Wave 1's
+ *  W1-18 hid the empty ones behind a "+ Add…" second view; that door is gone.
+ *
+ *  The page still sets `holds` on each tab (any row of its kind, open or closed; a failed read counts
+ *  as holding, so an error never hides a door), for the open counts and for the ONE rule emptiness
+ *  still decides: for the crew, an empty tab he can't add to (JOB_TECH_ADDABLE) is no row at all — it
+ *  leaves his strip (offStrip) and still opens from a link; when nothing is left his strip draws no
+ *  More chip. A switched-off tab is never listed either (offStrip). */
 export function arrangeJobTabs(
   tabs: TabDef[],
   viewerIsStaff: boolean,
@@ -114,7 +119,6 @@ export function arrangeJobTabs(
         // to ride this rail too, its door a slot in the action dock; since 0358 it is a pinned chip
         // and the dock slot is gone — one door, not two.)
         offStrip: off || notForCrew,
-        tucked: empty && !off && !notForCrew,
         content:
           off && feature ? (
             <>

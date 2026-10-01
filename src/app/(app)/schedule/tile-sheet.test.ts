@@ -110,10 +110,12 @@ describe("a job's sheet, for the office", () => {
     expect(text(render(seiler({ planned_minutes: 120 })))).not.toContain("change it");
   });
 
-  it("a job over several days asks only its start, and says full days", () => {
-    const many = render(seiler({ scheduled_end: at("2026-09-30", "17:00"), planned_minutes: 1440 }));
-    expect(many).not.toMatch(/>4h</);
-    expect(text(many)).toContain("full days through Wed, Sep 30");
+  it("a job over several days keeps its End and its lengths, and says its hours each day", () => {
+    const many = render(seiler({ scheduled_end: at("2026-09-30", "12:00"), planned_minutes: 120 }));
+    expect(many).toMatch(/>4h</);
+    expect(many).toMatch(/aria-label="End time"/);
+    expect(text(many)).toContain("10:00 AM – 12:00 PM each day through Wed, Sep 30 · 2 hours");
+    expect(text(many)).not.toContain("full days");
   });
 });
 
@@ -133,6 +135,32 @@ describe("a visit's sheet", () => {
 
   it("every door is 44px", () => {
     for (const d of doors(html)) expect(d, d).toMatch(/\b(min-)?h-11\b/);
+  });
+
+  it("a visit over several days is one span: Starts and ends, no End box, no length chips, never 'each day' (the rail's 3 days bucket)", () => {
+    const span: TileTarget = {
+      kind: "visit",
+      day: "2026-09-28",
+      visit: { id: "v3", title: "Walk-through: Rich Seiler", status: "scheduled", starts_at: at("2026-09-28", "10:00")!, ends_at: at("2026-09-30", "18:00"), assigned_to: null },
+    };
+    const office = render(span);
+    expect(text(office)).toContain("Starts 10:00 AM · ends 6:00 PM Wed, Sep 30. One visit over several days; Open Visit changes its end.");
+    expect(text(office)).not.toContain("each day");
+    expect(office).toMatch(/aria-label="Start time"/);
+    expect(office).not.toMatch(/aria-label="End time"/);
+    for (const chip of ["1h", "2h", "4h", "Full Day"]) expect(office).not.toMatch(new RegExp(`<button[^>]*>${chip}</button>`));
+    for (const d of doors(office)) expect(d, d).toMatch(/\b(min-)?h-11\b/);
+    // The crew reads the same truth.
+    const crew = render(span, false);
+    expect(text(crew)).toContain("Starts 10:00 AM · ends 6:00 PM Wed, Sep 30");
+    expect(text(crew)).not.toContain("each day");
+    // A length that still reaches the visit's writer is refused in words, never a 25-hour visit.
+    const src = readFileSync(join(process.cwd(), "src/app/(app)/schedule/tile-sheet.tsx"), "utf8");
+    expect(src).toMatch(/if \(block\.multiDay && !\("start" in patch\)\) \{\s*return \{ ok: false, error: `This visit runs over several days/);
+    expect(src).toMatch(/multiDay=\{block\.multiDay\}\s*(\/\/[^\n]*\n\s*)?oneSpan\s/);
+    // A job over several days is never one span: its End and its lengths stay.
+    const many = render(seiler({ scheduled_end: at("2026-09-30", "12:00"), planned_minutes: 120 }));
+    expect(many).toMatch(/aria-label="End time"/);
   });
 });
 

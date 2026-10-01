@@ -85,6 +85,11 @@ export function fakeDb(tables: Tables, opts: { missing?: string[]; failing?: str
           filters.push((r) => vs.includes(r[c]));
           return chain;
         },
+        neq(c: string, v: unknown) {
+          said.push(`neq:${c}`);
+          filters.push((r) => r[c] !== v);
+          return chain;
+        },
         is(c: string, v: unknown) {
           said.push(`is:${c}`);
           filters.push((r) => (r[c] ?? null) === v);
