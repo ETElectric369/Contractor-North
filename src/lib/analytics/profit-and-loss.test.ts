@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   PNL_WORDS,
   bucketAmount,
+  bucketHalvesWords,
   cogsWords,
   grossMarginPct,
   materialsWithStock,
@@ -62,11 +63,11 @@ describe("the layout: the accounting industry's words, in its order", () => {
       "Stock Lost (Written Off, Counted Short, Returned)",
       "Crew Pay (1099)",
       "Crew Mileage Paid",
-      "Fuel",
       "Total COGS",
       "Gross Profit",
       "Gross Margin %",
       "Overhead",
+      "Fuel",
       "Auto",
       "Tools & Supplies",
       "Phone & Office",
@@ -80,22 +81,22 @@ describe("the layout: the accounting industry's words, in its order", () => {
       "revenue",
       "part",
       "heading",
-      "cost",
-      "cost",
-      "cost",
-      "cost",
-      "cost",
-      "cost",
+      "cost", // Materials & Bills
+      "cost", // Stock Bought
+      "cost", // Stock Lost
+      "cost", // Crew Pay (1099)
+      "cost", // Crew Mileage Paid
       "total",
       "profit",
       "margin",
       "heading",
-      "cost",
-      "cost",
-      "cost",
-      "cost",
-      "cost",
-      "cost",
+      "cost", // Fuel
+      "cost", // Auto
+      "cost", // Tools & Supplies
+      "cost", // Phone & Office
+      "cost", // Insurance & Licenses
+      "cost", // Fees
+      "cost", // Other
       "total",
       "profit",
     ]);
@@ -136,11 +137,11 @@ describe("the same dollars, in new places", () => {
   it("Total COGS is its lines; Gross Profit is Revenue less it; Total Overhead is its lines; Net Profit is the engine's own figure", () => {
     expect(at(rows, "revenue").cents).toBe(1_000_000);
     expect(at(rows, "other_income").cents).toBe(25_000); // inside Revenue, never added to it
-    // 2,000 + 150 + 20 + 1,500 + 40 + 300 (Fuel)
-    expect(at(rows, "total_cogs").cents).toBe(401_000);
-    expect(at(rows, "gross_profit").cents).toBe(1_000_000 - 401_000);
-    // 120 + 80 + 60 + 200 + 45.50 + 10: every bucket but Fuel
-    expect(at(rows, "total_overhead").cents).toBe(51_550);
+    // 2,000 + 150 + 20 + 1,500 + 40: the job-side lines, and no bucket (Fuel moved out, 2026-09-30)
+    expect(at(rows, "total_cogs").cents).toBe(371_000);
+    expect(at(rows, "gross_profit").cents).toBe(1_000_000 - 371_000);
+    // 300 (Fuel) + 120 + 80 + 60 + 200 + 45.50 + 10: every bucket
+    expect(at(rows, "total_overhead").cents).toBe(81_550);
     expect(at(rows, "net_profit").cents).toBe(Math.round(f.left * 100));
     // THE PARITY: Gross Profit less Total Overhead lands on the engine's net, to the cent.
     expect(at(rows, "gross_profit").cents! - at(rows, "total_overhead").cents!).toBe(at(rows, "net_profit").cents);
@@ -188,7 +189,7 @@ describe("the same dollars, in new places", () => {
 describe("Gross Margin %, where a percent fits", () => {
   it("Gross Profit as a percent of Revenue, one decimal", () => {
     const rows = profitAndLoss(figures(), { margin: true });
-    expect(at(rows, "gross_margin").pct).toBe(59.9); // 5,990 of 10,000
+    expect(at(rows, "gross_margin").pct).toBe(62.9); // 6,290 of 10,000
     expect(grossMarginPct(417_000, 176_250)).toBe(42.3);
     expect(grossMarginPct(300_000, 100_000)).toBe(33.3);
   });
@@ -219,8 +220,8 @@ describe("the owner's switch: an office viewer the owner hasn't shared Owner's D
       "Stock Lost (Written Off, Counted Short, Returned)",
       "Crew Pay (1099)",
       "Crew Mileage Paid",
-      "Fuel",
       "Overhead",
+      "Fuel",
       "Auto",
       "Tools & Supplies",
       "Phone & Office",
@@ -245,10 +246,10 @@ describe("the owner's switch: an office viewer the owner hasn't shared Owner's D
 });
 
 describe("the COGS/Overhead split is data (BUCKET_SECTION), not an if", () => {
-  it("Fuel is COGS and every other bucket Overhead; each bucket is on the profit and loss exactly once", () => {
-    expect(BUCKET_SECTION.Fuel).toBe("cogs");
-    expect(bucketsIn("cogs")).toEqual(["Fuel"]);
-    expect(bucketsIn("overhead")).toEqual(["Auto", "Tools & Supplies", "Phone & Office", "Insurance & Licenses", "Fees", "Other"]);
+  it("every bucket is Overhead (Erik moved Fuel there on 2026-09-30); each bucket is on the profit and loss exactly once", () => {
+    expect(BUCKET_SECTION.Fuel).toBe("overhead");
+    expect(bucketsIn("cogs")).toEqual([]);
+    expect(bucketsIn("overhead")).toEqual(["Fuel", "Auto", "Tools & Supplies", "Phone & Office", "Insurance & Licenses", "Fees", "Other"]);
     const lines = pnlLines();
     for (const b of BUSINESS_COST_BUCKETS) {
       const mine = lines.filter((l) => l.key === `bucket:${b}`);
@@ -278,9 +279,33 @@ describe("the COGS/Overhead split is data (BUCKET_SECTION), not an if", () => {
   });
 
   it("the sentences name the lines from the data", () => {
-    expect(cogsWords()).toBe("Materials & Bills, Stock Bought, Stock Lost, Crew Pay (1099), Crew Mileage Paid and Fuel");
-    expect(cogsWords({ stockInMaterials: true })).toBe("Materials & Bills, Stock Lost, Crew Pay (1099), Crew Mileage Paid and Fuel");
-    expect(overheadWords()).toBe("Auto, Tools & Supplies, Phone & Office, Insurance & Licenses, Fees and Other");
+    expect(cogsWords()).toBe("Materials & Bills, Stock Bought, Stock Lost, Crew Pay (1099) and Crew Mileage Paid");
+    expect(cogsWords({ stockInMaterials: true })).toBe("Materials & Bills, Stock Lost, Crew Pay (1099) and Crew Mileage Paid");
+    expect(overheadWords()).toBe("Fuel, Auto, Tools & Supplies, Phone & Office, Insurance & Licenses, Fees and Other");
+  });
+
+  /**
+   * A HALF WITH NO BUCKET IN IT IS A SENTENCE, NEVER A GAP. COGS holds no bucket at all now, and
+   * Nort's get_bill description built its sentence by joining bucketsIn("cogs") itself: the day Fuel
+   * moved, a model was being told "on the company's profit and loss  are in Cost of Goods Sold
+   * (COGS) and the rest in Overhead". bucketHalvesWords is the one way to say the split.
+   */
+  it("the split as a sentence: every bucket in one half reads as that, with no empty list joined into it", () => {
+    expect(bucketHalvesWords()).toBe("every bucket is in Overhead");
+    const section = BUCKET_SECTION as Record<string, "cogs" | "overhead">;
+    try {
+      section.Fuel = "cogs";
+      expect(bucketHalvesWords()).toBe("Fuel is in Cost of Goods Sold (COGS) and the rest in Overhead");
+      section.Auto = "cogs";
+      expect(bucketHalvesWords()).toBe("Fuel and Auto are in Cost of Goods Sold (COGS) and the rest in Overhead");
+      for (const b of BUSINESS_COST_BUCKETS) section[b] = "cogs";
+      expect(bucketHalvesWords()).toBe("every bucket is in Cost of Goods Sold (COGS)");
+    } finally {
+      for (const b of BUSINESS_COST_BUCKETS) section[b] = "overhead";
+    }
+    expect(bucketHalvesWords()).toBe("every bucket is in Overhead");
+    // However it reads, it is one sentence: no double space where a list was, no dangling verb.
+    expect(bucketHalvesWords()).not.toMatch(/\s{2,}|^\s|\s$/);
   });
 
   it("every cost line the engine writes lands on a line of the profit and loss", () => {
@@ -364,8 +389,9 @@ describe("on the engine's own figures, month by month: Net Profit (Owner's Draw)
         expect(at(rows, "total_overhead").cents).toBe(sum("overhead"));
         expect(at(rows, "gross_profit").cents).toBe(at(rows, "revenue").cents! - at(rows, "total_cogs").cents!);
         expect(at(rows, "gross_profit").cents! - at(rows, "total_overhead").cents!).toBe(at(rows, "net_profit").cents);
-        // Overhead is exactly what the card called Business Costs; COGS plus it is every cost the engine counted.
-        expect(at(rows, "total_overhead").cents).toBe(Math.round(f.businessCostsTotal * 100));
+        // Overhead is what the card called Business Costs PLUS Fuel, which the engine keeps on its own
+        // line; COGS plus it is every cost the engine counted.
+        expect(at(rows, "total_overhead").cents).toBe(Math.round(f.businessCostsTotal * 100) + Math.round(f.fuel * 100));
       }
     }
   });

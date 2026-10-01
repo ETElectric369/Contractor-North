@@ -9,9 +9,10 @@
  * as "Fuel" in one door and "Vehicle" in another is the same gas counted in two rows of a report,
  * so every door that files a cost with no job reads THIS list and nothing else.
  *
- * FUEL IS ITS OWN BUCKET, for every company: it is the cost a contractor watches week to week, and
- * Analytics draws it on its own line, in Cost of Goods Sold (COGS), never inside Overhead
- * (BUCKET_SECTION below, 2026-09-28). Auto is everything else the truck
+ * FUEL IS ITS OWN BUCKET, for every company: it is the cost a contractor watches week to week, so
+ * Analytics gives it a line of its own and a bar of its own, and it is never folded in with the
+ * truck's other costs. Which HALF of the profit and loss it sits in is BUCKET_SECTION's answer
+ * below, and since 2026-09-30 that is Overhead, first of them. Auto is everything else the truck
  * costs (parts, repairs, tires, registration, a truck payment). Migration 0362 moved every stored
  * "Gas & Truck" to Auto, and bucketOf reads one still stored (before 0362, or typed by hand) as Auto.
  *
@@ -34,11 +35,18 @@ export type BusinessCostBucket = (typeof BUSINESS_COST_BUCKETS)[number];
 export type PnlSection = "cogs" | "overhead";
 
 /**
- * WHERE EACH BUCKET SITS ON THE PROFIT AND LOSS (Erik, 2026-09-28: "COGS (including fuel as it IS a
- * direct cost in this case…) Gross Profit is before Overhead"). The accounting industry's own test:
- * if the cost disappears when you stop doing jobs, it is COGS; if it keeps running whether you have
- * work or not, it is Overhead. Fuel is COGS here: nearly every fill-up is within a few days of job
- * work, the driving to and from the jobs. Every other bucket is Overhead.
+ * WHERE EACH BUCKET SITS ON THE PROFIT AND LOSS. The accounting industry's own test: if the cost
+ * disappears when you stop doing jobs, it is COGS; if it keeps running whether you have work or
+ * not, it is Overhead.
+ *
+ * FUEL IS OVERHEAD (Erik, 2026-09-30: "lets move fuel to overhead above Auto and take out of COGS").
+ * It sat in COGS for two days (his 2026-09-28 call, on the reasoning that nearly every fill-up is
+ * within a few days of job work) and he moved it: the truck burns fuel whether or not there is work
+ * in the book. It is FIRST in the list, so it reads above Auto wherever the Overhead lines are
+ * drawn in the list's own order, and it keeps its own bar on Money by Month (money-chart.ts) while
+ * the Overhead bar carries the whole total, fuel included — his words: "it could show fuel on its
+ * own then a total overhead on the overhead button". So COGS is now the job-side lines only
+ * (materials and bills, stock, crew pay and crew mileage) and every bucket is Overhead.
  *
  * THIS IS THE ONE PLACE THE SPLIT IS WRITTEN: every profit and loss the app draws (the Owner's Draw
  * card, Money by Month, the accountant's Summary, Nort's words) reads it through
@@ -46,7 +54,7 @@ export type PnlSection = "cogs" | "overhead";
  * added to the list above does not compile until someone says which half it is in.
  */
 export const BUCKET_SECTION: Record<BusinessCostBucket, PnlSection> = {
-  Fuel: "cogs",
+  Fuel: "overhead",
   Auto: "overhead",
   "Tools & Supplies": "overhead",
   "Phone & Office": "overhead",

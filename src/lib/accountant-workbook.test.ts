@@ -236,11 +236,11 @@ describe("the Summary is Money by Month, to the cent, laid out as a profit and l
       "Stock Lost (Written Off, Counted Short, Returned)",
       "Crew Pay (1099)",
       "Crew Mileage Paid",
-      "Fuel",
       "Total COGS",
       "Gross Profit",
       "Gross Margin %",
       "Overhead",
+      "Fuel",
       "Auto",
       "Tools & Supplies",
       "Phone & Office",
@@ -287,18 +287,20 @@ describe("the Summary is Money by Month, to the cent, laid out as a profit and l
       expect(col("Revenue", i) - col("Total COGS", i), `column ${i}`).toBe(col("Gross Profit", i));
       expect(col("Gross Profit", i) - col("Total Overhead", i), `column ${i}`).toBe(col(NET_LABEL, i));
     }
-    // By hand, the quarter: 4,170 in; COGS 1,775 + 130 + 20 + 1,030 + 38 + 85.50 = 3,078.50;
-    // Overhead 300 + 129.99 + 45 + 300 + 72.80 = 847.79; so 1,091.50 gross and 243.71 net.
-    expect([col("Total COGS", 4), col("Gross Profit", 4), col("Total Overhead", 4), col(NET_LABEL, 4)]).toEqual([307850, 109150, 84779, 24371]);
+    // By hand, the quarter: 4,170 in; COGS 1,775 + 130 + 20 + 1,030 + 38 = 2,993 (Fuel left COGS on
+    // 2026-09-30); Overhead 85.50 Fuel + 300 + 129.99 + 45 + 300 + 72.80 = 933.29; so 1,177 gross
+    // and the same 243.71 net.
+    expect([col("Total COGS", 4), col("Gross Profit", 4), col("Total Overhead", 4), col(NET_LABEL, 4)]).toEqual([299300, 117700, 93329, 24371]);
     expect(toCents(cur.totals.left)).toBe(24371);
     // The page's figures are the same numbers.
-    expect(wb.figures).toEqual({ revenue: cur.totals.received, grossProfit: 1091.5, net: cur.totals.left });
+    expect(wb.figures).toEqual({ revenue: cur.totals.received, grossProfit: 1177, net: cur.totals.left });
   });
 
   it("Gross Margin %: a plain percent in each column, its change in points", () => {
     const r = rowOf(summary, "Gross Margin %")!;
-    // Q2: 1,091.50 of 4,170 is 26.2%. Q1: 800 in, 40 of Fuel and 160 of crew pay, so 75.0%.
-    expect(r.cells.slice(4)).toEqual([26.2, 75, -48.8]);
+    // Q2: 1,177 of 4,170 is 28.2%. Q1: 800 in and 160 of crew pay, so 80.0% (its 40 of Fuel is
+    // Overhead now, below Gross Profit).
+    expect(r.cells.slice(4)).toEqual([28.2, 80, -51.8]);
     expect(r.cells.slice(1, 4).every((c) => typeof c === "number")).toBe(true);
   });
 
@@ -310,11 +312,11 @@ describe("the Summary is Money by Month, to the cent, laid out as a profit and l
     // What the two halves are, in the accounting industry's own test, with the lines from the data.
     expect(summary.rows.map((r) => r.cells[0])).toContain(cogsOverheadNote());
     expect(cogsOverheadNote()).toBe(
-      "Cost of Goods Sold (COGS) is what doing the jobs costs: Materials & Bills, Stock Bought, Stock Lost, Crew Pay (1099), Crew Mileage Paid and Fuel. Overhead is what keeps running whether there is work or not: Auto, Tools & Supplies, Phone & Office, Insurance & Licenses, Fees and Other.",
+      "Cost of Goods Sold (COGS) is what doing the jobs costs: Materials & Bills, Stock Bought, Stock Lost, Crew Pay (1099) and Crew Mileage Paid. Overhead is what keeps running whether there is work or not: Fuel, Auto, Tools & Supplies, Phone & Office, Insurance & Licenses, Fees and Other.",
     );
   });
 
-  it("every business-cost bucket is its own row, in the half BUCKET_SECTION puts it: Fuel in COGS, Auto in Overhead, never Gas & Truck", () => {
+  it("every business-cost bucket is its own row, in the half BUCKET_SECTION puts it: every one Overhead, Fuel above Auto, never Gas & Truck", () => {
     const labels = summary.rows.map((r) => r.cells[0]);
     const at = BUSINESS_COST_BUCKETS.map((b) => labels.indexOf(b));
     expect(at.every((i) => i > 0)).toBe(true);
@@ -327,8 +329,10 @@ describe("the Summary is Money by Month, to the cent, laid out as a profit and l
       if (BUCKET_SECTION[b] === "cogs") expect(i > cogs && i < totalCogs, b).toBe(true);
       else expect(i > overhead && i < totalOverhead, b).toBe(true);
     }
-    expect(labels.indexOf("Fuel")).toBeLessThan(totalCogs);
-    expect(labels.indexOf("Auto")).toBeGreaterThan(overhead);
+    // Fuel is an Overhead row now (2026-09-30), the first of them, so it reads above Auto.
+    expect(labels.indexOf("Fuel")).toBeGreaterThan(overhead);
+    expect(labels.indexOf("Fuel")).toBeLessThan(labels.indexOf("Auto"));
+    expect(labels.slice(cogs, totalCogs)).not.toContain("Fuel");
     expect(labels).not.toContain("Gas & Truck");
     expect(labels).toContain(STOCK_BOUGHT_LABEL);
     expect(labels).toContain(STOCK_LOST_LABEL);
@@ -406,8 +410,8 @@ describe("Income, Costs and People hold the rows behind the Summary", () => {
       "Materials & Bills",
       STOCK_BOUGHT_LABEL,
       STOCK_LOST_LABEL,
-      "Fuel",
       "Overhead",
+      "Fuel",
       "Auto",
       "Tools & Supplies",
       "Phone & Office",
@@ -625,8 +629,8 @@ describe("the owner's switch: an office download without Owner's Draw", () => {
       STOCK_LOST_LABEL,
       "Crew Pay (1099)",
       "Crew Mileage Paid",
-      "Fuel",
       "Overhead",
+      "Fuel",
       "Auto",
       "Tools & Supplies",
       "Phone & Office",

@@ -64,10 +64,10 @@ describe("the business-cost bucket list", () => {
   });
 });
 
-describe("which half of the profit and loss each bucket is in (Erik, 2026-09-28)", () => {
-  it("Fuel is Cost of Goods Sold (COGS), as a direct cost of the jobs; every other bucket is Overhead", () => {
+describe("which half of the profit and loss each bucket is in (Erik, 2026-09-30: fuel moved to Overhead)", () => {
+  it("every bucket is Overhead, Fuel first so it reads above Auto; COGS carries no bucket", () => {
     expect(BUCKET_SECTION).toEqual({
-      Fuel: "cogs",
+      Fuel: "overhead",
       Auto: "overhead",
       "Tools & Supplies": "overhead",
       "Phone & Office": "overhead",
@@ -75,8 +75,10 @@ describe("which half of the profit and loss each bucket is in (Erik, 2026-09-28)
       Fees: "overhead",
       Other: "overhead",
     });
-    expect(bucketsIn("cogs")).toEqual(["Fuel"]);
-    expect(bucketsIn("overhead")).toEqual(BUSINESS_COST_BUCKETS.filter((b) => b !== "Fuel"));
+    expect(bucketsIn("cogs")).toEqual([]);
+    expect(bucketsIn("overhead")).toEqual([...BUSINESS_COST_BUCKETS]);
+    // Erik: "above Auto" — the list's own order puts it there wherever Overhead is drawn.
+    expect(bucketsIn("overhead").indexOf("Fuel")).toBeLessThan(bucketsIn("overhead").indexOf("Auto"));
   });
 
   it("every bucket is in exactly one half, in the list's own order", () => {

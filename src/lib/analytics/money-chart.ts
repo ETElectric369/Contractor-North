@@ -10,7 +10,7 @@ import { pnlLines, profitAndLoss, type PnlKey } from "@/lib/analytics/profit-and
  * below it totals, laid out by the same profit and loss (profit-and-loss.ts, Erik 2026-09-28): each
  * series IS one of its lines, by its own words, so the chart and the card can never disagree or say
  * the same money two ways. Revenue and Net Profit (Owner's Draw) are the two bars a month opens
- * with; Gross Profit, each Cost of Goods Sold (COGS) line and Overhead are chips.
+ * with; Gross Profit, each Cost of Goods Sold (COGS) line, Fuel and Overhead are chips.
  *
  * This file is the pure half: which series exist for this viewer, which months to draw, the y
  * scale, and where every bar and label goes. The SVG component only draws what this returns, which
@@ -25,8 +25,10 @@ export type MoneySeriesKey = "collected" | "gross" | "left" | "materials" | "los
 
 /**
  * THE PROFIT-AND-LOSS LINE EACH SERIES DRAWS. The cost series are every Cost of Goods Sold (COGS)
- * line (stock bought inside Materials & Bills, as the card says it) and Overhead as one bar, so the
- * cost bars and Net Profit account for every cent of Revenue; a test holds every COGS line to a
+ * line (stock bought inside Materials & Bills, as the card says it), Fuel on its own, and Overhead
+ * as one bar. Overhead carries the WHOLE overhead total, fuel included (2026-09-30), so the COGS
+ * bars plus Overhead plus Net Profit account for every cent of Revenue and the Fuel bar is a second
+ * look at money already in Overhead — never a cost left out. A test holds every COGS line to a
  * series here, so a bucket moved into COGS can never quietly fall off the chart.
  */
 export const SERIES_LINE: Record<MoneySeriesKey, PnlKey> = {
@@ -85,8 +87,11 @@ const SERIES: Record<MoneySeriesKey, Omit<MoneySeries, "key" | "label">> = {
   lost: { fill: "fill-slate-500", swatch: "bg-slate-500", defaultOn: false },
   crewPay: { fill: "fill-amber-600", swatch: "bg-amber-600", defaultOn: false },
   mileage: { fill: "fill-sky-600", swatch: "bg-sky-600", defaultOn: false },
-  // FUEL STANDS OUT (0362; Erik, 2026-09-27): the Fuel bucket is its own series, never inside
-  // Overhead, in the pink-800 the Fuel card and the bank card draw it in.
+  // FUEL STANDS OUT (0362; Erik, 2026-09-27), in the pink-800 the Fuel card and the bank card draw
+  // it in. It keeps its own bar now that the bucket is Overhead (2026-09-30), and the Overhead bar
+  // beside it carries the whole total, fuel included — Erik: "it could show fuel on its own then a
+  // total overhead on the overhead button". So reading both bars at once counts fuel twice on
+  // purpose; each one is true on its own, and the chip names say which is which.
   fuel: { fill: "fill-pink-800", swatch: "bg-pink-800", defaultOn: false },
   business: { fill: "fill-pink-500", swatch: "bg-pink-500", defaultOn: false },
 };
@@ -110,8 +115,9 @@ const tiny = (v: number | undefined) => !v || Math.abs(v) < 0.005;
  * A COST series (Materials & Bills, Stock Lost, Crew Pay (1099), Crew Mileage Paid, Fuel, Overhead)
  * is offered only when some month on the chart holds some, the way the card only prints a line when
  * there is one: a solo owner with no crew never gets a Crew Pay chip that would draw nothing. Crew
- * Mileage is its own series (the two-bucket law: never folded into crew pay), and so is Fuel (never
- * folded into Overhead). Revenue, Gross Profit and Net Profit are always offered to the owner.
+ * Mileage is its own series (the two-bucket law: never folded into crew pay), and Fuel keeps its own
+ * bar as well as its share of Overhead's. Revenue, Gross Profit and Net Profit are always offered to
+ * the owner.
  *
  * Every value is the month's profit-and-loss line (profitAndLoss), so a bar and the card's row for
  * the same month are the same cents.

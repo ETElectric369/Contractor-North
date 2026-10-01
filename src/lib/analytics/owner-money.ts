@@ -56,7 +56,8 @@ import { PNL_WORDS, materialsWithStock } from "@/lib/analytics/profit-and-loss";
  *   · fuel              = bills and petty cash with no job in the Fuel bucket (0362). A business
  *                         cost like the rest, said on its OWN line and never inside Business Costs
  *                         (Erik, 2026-09-27: "lets make fuel stand out from business costs"); on the
- *                         profit and loss it is COGS (2026-09-28), the rest Overhead.
+ *                         profit and loss it is Overhead, first of them, like every other bucket
+ *                         (2026-09-30), and it keeps its own bar on Money by Month.
  *   · business costs    = bills and petty cash with no job, in every other bucket
  *                         (business-cost-buckets.ts). The Fees bucket also carries Stripe's real
  *                         card fee on each payment (payments.processor_fee, 0284). A NULL fee is
@@ -67,10 +68,11 @@ import { PNL_WORDS, materialsWithStock } from "@/lib/analytics/profit-and-loss";
  * income tax, and the page says so directly under the number.
  *
  * HOW EVERY SCREEN SAYS IT (Erik, 2026-09-28): profit-and-loss.ts lays these figures out the
- * accounting industry's way. Received is Revenue; materials and bills, stock bought and lost, crew
- * pay and mileage, and Fuel are Cost of Goods Sold (COGS); Revenue less them is Gross Profit; every
- * other bucket is Overhead; and `left` is the bottom line, Net Profit (Owner's Draw). Which bucket is
- * which is data (BUCKET_SECTION). This file's figures and arithmetic do not change with the words.
+ * accounting industry's way. Received is Revenue; materials and bills, stock bought and lost, and
+ * crew pay and mileage are Cost of Goods Sold (COGS); Revenue less them is Gross Profit; every
+ * bucket, Fuel first, is Overhead (2026-09-30); and `left` is the bottom line, Net Profit (Owner's
+ * Draw). Which bucket is which is data (BUCKET_SECTION). This file's figures and arithmetic do not
+ * change with the words: moving Fuel moved the halves, not a dollar.
  *
  * Pure half (computeOwnerMoney) + a fetch half (getOwnerMoney) that reads the SAME row sources the
  * existing readers use, so the chart the next build puts on top of this cannot disagree with the

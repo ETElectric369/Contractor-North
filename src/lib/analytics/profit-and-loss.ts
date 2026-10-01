@@ -5,9 +5,10 @@ import type { OwnerMoneyCostTarget, OwnerMoneyFigures } from "@/lib/analytics/ow
  * THE PROFIT AND LOSS, IN THE ACCOUNTING INDUSTRY'S OWN WORDS AND ORDER (Erik, 2026-09-28).
  *
  * "Lets stick with the tried and true old school simple wording and formatting of the accounting
- * industry on this one: COGS (including fuel as it IS a direct cost in this case…) Gross Profit is
- * before Overhead and Net Profit = Owner's Draw." And minutes later: "COGS includes materials bills
- * pay and fuel". So every money summary the app draws reads, top to bottom:
+ * industry on this one: ... Gross Profit is before Overhead and Net Profit = Owner's Draw." Fuel sat
+ * in COGS with the job costs for two days, and on 2026-09-30 he moved it: "lets move fuel to
+ * overhead above Auto and take out of COGS". So every money summary the app draws reads, top to
+ * bottom:
  *
  *   Revenue                                  the money received (Other Income inside it, said)
  *   Cost of Goods Sold (COGS)
@@ -15,15 +16,19 @@ import type { OwnerMoneyCostTarget, OwnerMoneyFigures } from "@/lib/analytics/ow
  *     Stock Bought                           shop stock, the month it was bought
  *     Stock Lost (Written Off, Counted Short, Returned)
  *     Crew Pay (1099)
- *     Crew Mileage Paid
- *     Fuel                                   and any other bucket BUCKET_SECTION calls COGS
+ *     Crew Mileage Paid                      and any bucket BUCKET_SECTION calls COGS (none today)
  *     Total COGS
  *   Gross Profit                             Revenue less Total COGS
  *   Gross Margin %                           where a percent fits
  *   Overhead
- *     Auto, Tools & Supplies, Phone & Office, Insurance & Licenses, Fees, Other
+ *     Fuel, Auto, Tools & Supplies, Phone & Office, Insurance & Licenses, Fees, Other
  *     Total Overhead
  *   Net Profit (Owner's Draw)                Gross Profit less Total Overhead
+ *
+ * COGS CAN HOLD NO BUCKET AT ALL, and does today: its lines are the job-side ones by what they are.
+ * Nothing here needs a bucket in it (no sentence joins a list that could be empty, and the one
+ * division is by Revenue, never by a cost), and bucketHalvesWords below is how a sentence says the
+ * split without reading wrong when one half is empty.
  *
  * THE SAME DOLLARS IN NEW PLACES. Every figure is one computeOwnerMoney already makes; this only says
  * where each one sits. Net Profit (Owner's Draw) IS the engine's `left`, to the cent: it is read
@@ -32,7 +37,8 @@ import type { OwnerMoneyCostTarget, OwnerMoneyFigures } from "@/lib/analytics/ow
  *
  * THE SPLIT IS DATA. A business-cost bucket is COGS or Overhead by BUCKET_SECTION
  * (business-cost-buckets.ts), and nowhere else; the job-cost lines (materials, stock, crew pay and
- * mileage) are COGS by what they are. Flip a bucket there and every surface moves it.
+ * mileage) are COGS by what they are. Flip a bucket there and every surface moves it: that is all
+ * moving Fuel to Overhead was.
  *
  * EVERY SURFACE READS THIS: the Owner's Draw card and Money by Month on /analytics, the accountant's
  * Summary and Costs tabs, the accountant page's two figures, and Nort's words. One layout, one set
@@ -302,8 +308,8 @@ export function sayPct(pct: number): string {
   return pct < 0 ? `−${s}` : s;
 }
 
-/** The COGS lines' names, as a sentence reads them ("Materials & Bills, …, Crew Mileage Paid and
- *  Fuel"): from the data, so a line moved between the halves moves in every sentence too. */
+/** The COGS lines' names, as a sentence reads them ("Materials & Bills, … and Crew Mileage Paid"):
+ *  from the data, so a line moved between the halves moves in every sentence too. */
 export function cogsWords(opts: Pick<PnlOptions, "stockInMaterials"> = {}): string {
   const names = pnlLines({ ...opts, showOwner: false })
     .filter((l) => l.kind === "cost" && l.section === "cogs")
@@ -311,8 +317,27 @@ export function cogsWords(opts: Pick<PnlOptions, "stockInMaterials"> = {}): stri
   return names.length <= 1 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
 }
 
-/** The Overhead lines' names, the same way ("Auto, …, Fees and Other"). */
+/** The Overhead lines' names, the same way ("Fuel, Auto, …, Fees and Other"). */
 export function overheadWords(): string {
   const names = bucketsIn("overhead") as string[];
   return names.length <= 1 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+}
+
+/**
+ * WHICH HALF THE BUSINESS-COST BUCKETS ARE IN, as a sentence says it, from BUCKET_SECTION: today
+ * "every bucket is in Overhead", because Fuel moved there on 2026-09-30 and COGS holds no bucket at
+ * all. Move one back and it reads "Fuel is in Cost of Goods Sold (COGS) and the rest in Overhead".
+ *
+ * IT EXISTS BECAUSE A JOINED LIST CAN BE EMPTY. Nort's get_bill description built that sentence by
+ * joining bucketsIn("cogs") itself, and the day COGS emptied it read "on the company's profit and
+ * loss  are in Cost of Goods Sold (COGS) and the rest in Overhead" — a half-sentence about nothing,
+ * in a tool description a model reads as fact. Whoever says the split says it through this.
+ */
+export function bucketHalvesWords(): string {
+  const cogs = bucketsIn("cogs") as string[];
+  const overhead = bucketsIn("overhead") as string[];
+  const list = (names: string[]) => (names.length <= 1 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`);
+  if (!cogs.length) return `every bucket is in ${PNL_WORDS.overhead}`;
+  if (!overhead.length) return `every bucket is in ${PNL_WORDS.cogs}`;
+  return `${list(cogs)} ${cogs.length === 1 ? "is" : "are"} in ${PNL_WORDS.cogs} and the rest in ${PNL_WORDS.overhead}`;
 }

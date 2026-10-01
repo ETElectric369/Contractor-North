@@ -1466,14 +1466,20 @@ export type FlowSegment = { key: string; label: string; cents: number };
  * and the legend is the place for names), Materials & Bills, Crew Pay, Owner's Draw (here: money the
  * owner took out of the account). The rest are the bank's own: Suppliers, Cash Taken Out,
  * Transfers, Personal, Already In North, Needs You.
+ *
+ * THIS BAR IS A BREAKDOWN, so every dollar lands in exactly one segment: Fuel out on its own means
+ * the Overhead segment here is the OTHER buckets, even though Fuel is an Overhead bucket itself
+ * (2026-09-30) and Money by Month's Overhead BAR carries the whole total, fuel included. Each is
+ * true of what it draws; neither counts a dollar twice inside itself.
  */
 export function flowLabelOf(choice: string, bucket: string | null): { key: string; label: string } {
   switch (choice) {
     case "cost": {
       const b = bucketOf(bucket);
       if (b === "Fuel") return { key: "fuel", label: "Fuel" };
-      // Overhead is the buckets BUCKET_SECTION says it is, never a guess: a bucket it puts in Cost of
-      // Goods Sold (COGS) is its own segment, by its own name.
+      // Overhead is the buckets BUCKET_SECTION says it is, never a guess. Every bucket is Overhead
+      // today; one ever moved to Cost of Goods Sold (COGS) gets its own segment, by its own name,
+      // rather than being drawn as Overhead it is not.
       return BUCKET_SECTION[b] === "overhead" ? { key: "business", label: PNL_WORDS.overhead } : { key: `bucket:${b}`, label: b };
     }
     case "draw":

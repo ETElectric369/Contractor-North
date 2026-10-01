@@ -1372,8 +1372,9 @@ describe("the profit and loss on these fixtures: Net Profit (Owner's Draw) is th
             // The cost rows are every cost the engine counted, each once.
             const costs = rows.filter((r) => r.kind === "cost").reduce((s, r) => s + r.cents!, 0);
             expect(costs, label).toBe(cents(f.received) - cents(f.left));
-            // Overhead is what the card called Business Costs: every bucket but Fuel.
-            expect(at("total_overhead"), label).toBe(cents(f.businessCostsTotal));
+            // Overhead is what the card called Business Costs plus Fuel, which the engine keeps on
+            // its own line: every bucket (2026-09-30).
+            expect(at("total_overhead"), label).toBe(cents(f.businessCostsTotal) + cents(f.fuel));
             checked += 1;
           }
         }
@@ -1382,13 +1383,15 @@ describe("the profit and loss on these fixtures: Net Profit (Owner's Draw) is th
     expect(checked).toBeGreaterThan(300);
   });
 
-  it("by hand, the year: 5,797.18 in; 843.28 + 940 + 62.50 + 138.62 of COGS; 167.43 of Overhead; 3,645.35 left", () => {
+  it("by hand, the year: 5,797.18 in; 843.28 + 940 + 62.50 of COGS; 138.62 + 167.43 of Overhead; 3,645.35 left", () => {
     const rows = profitAndLoss(computeOwnerMoney(yearInputs(), YEAR, TZ, TODAY).totals);
     const at = (k: Parameters<typeof pnlRow>[1]) => pnlRow(rows, k)!.amount;
     expect(at("revenue")).toBe(5797.18);
-    expect(at("total_cogs")).toBe(1984.4);
-    expect(at("gross_profit")).toBe(3812.78);
-    expect(at("total_overhead")).toBe(167.43); // 47.44 Other + 20 Tools & Supplies + 99.99 Fees
-    expect(at("net_profit")).toBe(3645.35);
+    // The job-side lines alone now: 843.28 materials and bills + 940 crew pay + 62.50 crew mileage.
+    expect(at("total_cogs")).toBe(1845.78);
+    expect(at("gross_profit")).toBe(3951.4);
+    // 138.62 Fuel + 47.44 Other + 20 Tools & Supplies + 99.99 Fees: Fuel moved here 2026-09-30.
+    expect(at("total_overhead")).toBe(306.05);
+    expect(at("net_profit")).toBe(3645.35); // the same bottom line: only the halves moved
   });
 });
