@@ -3,9 +3,14 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 /**
- * THE JOB'S ONE TASK LIST, AS IT RENDERS (0358). The office and the crew get the same card; every
- * target is 44px; every clickable is Title Case; a task carries no price; a job with no tasks shows
- * just the Add line; the Done fold says who and when in the company's time zone.
+ * THE JOB'S ONE TASK LIST, AS IT RENDERS (0358, and b7f23be0's one face). The office and the crew get
+ * the same card; every target is 44px; every clickable is Title Case; a task carries no price; a job
+ * with no tasks shows just the Add line; the Done fold says who and when in the company's time zone.
+ *
+ * ONE FACE (Erik, 2026-09-30: "show the tasks here, additional steps are unnecessary"). The card had
+ * been a three-row summary with a "+2 more on the Tasks tab" line and an All Tasks link; it is the
+ * whole list now, the same wherever it is drawn, so these tests render it once and ask nothing about
+ * where it sits.
  */
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: vi.fn(), push: vi.fn(), replace: vi.fn() }),
@@ -61,9 +66,9 @@ const BASE = {
   stamps: true,
 };
 const office = (over: Record<string, unknown> = {}) =>
-  renderToStaticMarkup(createElement(JobTaskList, { ...BASE, viewerId: "u-office", viewerIsStaff: true, mode: "card", ...over } as any));
+  renderToStaticMarkup(createElement(JobTaskList, { ...BASE, viewerId: "u-office", viewerIsStaff: true, ...over } as any));
 const tech = (over: Record<string, unknown> = {}) =>
-  renderToStaticMarkup(createElement(JobTaskList, { ...BASE, viewerId: "u-brian", viewerIsStaff: false, mode: "card", ...over } as any));
+  renderToStaticMarkup(createElement(JobTaskList, { ...BASE, viewerId: "u-brian", viewerIsStaff: false, ...over } as any));
 
 /** Every <button> / <a> / <label> element's visible text. */
 const clickables = (html: string) =>
@@ -71,34 +76,36 @@ const clickables = (html: string) =>
     .map((m) => m[2].replace(/<[^>]+>/g, "").replace(/&amp;/g, "&").trim())
     .filter(Boolean);
 
-describe("the Overview card (mode card)", () => {
-  it("the one-line answer, the next three, All Tasks, and the Add line", () => {
+describe("the one list: the one-line answer, every open task, the Add line, the Done fold", () => {
+  it("every open task is on it — no three-row cap, no '+N more', no All Tasks link to tap", () => {
     const html = office();
     expect(html).toContain("Tasks: 2 of 7 done");
-    for (const t of ["Pull the permit", "Set the meter base", "Run the feeder"]) expect(html).toContain(t);
-    for (const t of ["Hang the panel", "Label the circuits"]) expect(html).not.toContain(t);
-    expect(html).toContain("+2 more on the Tasks tab");
-    expect(html).toMatch(/<a[^>]*href="\?tab=tasks"[^>]*>All Tasks<\/a>/);
+    for (const t of ["Pull the permit", "Set the meter base", "Run the feeder", "Hang the panel", "Label the circuits"]) {
+      expect(html).toContain(t);
+    }
+    expect(html).not.toContain("more on the Tasks tab");
+    expect(html).not.toContain("All Tasks");
     expect(html).toContain('placeholder="Add A Task…"');
     expect(html).toMatch(/>Photo<\/button>|> Photo<\/button>/);
-    // The Done fold lives on the Tasks tab, not on the small card.
+    // The Done fold is here too, closed: the count, not the rows.
+    expect(html).toMatch(/>2 Done<svg|>2 Done</);
     expect(html).not.toContain("Walk the site");
   });
 
-  it("the crew gets the same card: same rows, same Add line, same All Tasks", () => {
+  it("the crew gets the same list: same rows, same Add line, same fold", () => {
     const o = office();
     const t = tech();
-    for (const s of ["Tasks: 2 of 7 done", "Pull the permit", "All Tasks", "Add A Task", "Photo"]) {
+    for (const s of ["Tasks: 2 of 7 done", "Pull the permit", "Label the circuits", "Add A Task", "Photo", "2 Done"]) {
       expect(o).toContain(s);
       expect(t).toContain(s);
     }
   });
 
-  it("a job with no tasks shows just the Add line: no header, no rows, no All Tasks", () => {
+  it("a job with no tasks shows just the Add line: no header, no rows, no fold", () => {
     const html = office({ tasks: [], photos: {} });
     expect(html).toContain('placeholder="Add A Task…"');
     expect(html).not.toContain("Tasks:");
-    expect(html).not.toContain("All Tasks");
+    expect(html).not.toMatch(/>\d+ Done</);
     expect(html).not.toContain("<ul");
   });
 
@@ -109,38 +116,25 @@ describe("the Overview card (mode card)", () => {
   });
 
   it("a list that couldn't be read gives no count: no 'X of Y done' built from the Buy Materials row alone", () => {
-    for (const mode of ["card", "tab"] as const) {
-      const html = office({ mode, tasks: [], photos: {}, failed: true, materials: { open: 3 } });
-      expect(html).toContain("Couldn’t read this job’s tasks just now. Reload to try again.");
-      expect(html).not.toContain("Tasks:");
-      // The row is read from the materials list, so it still shows.
-      expect(html).toContain("Buy Materials · 3 Open");
-      const bought = office({ mode, tasks: [], photos: {}, failed: true, materials: { open: 0 }, doneOpen: true });
-      expect(bought).not.toContain("Tasks:");
-      expect(bought).not.toMatch(/>\d+ Done</);
-    }
-  });
-});
-
-describe("the Tasks tab (mode tab)", () => {
-  it("every open task, the Add line, and the Done fold with its count", () => {
-    const html = office({ mode: "tab" });
-    for (const t of ["Pull the permit", "Set the meter base", "Run the feeder", "Hang the panel", "Label the circuits"]) {
-      expect(html).toContain(t);
-    }
-    expect(html).toMatch(/>2 Done<svg|>2 Done</);
-    expect(html).not.toContain("All Tasks");
+    const html = office({ tasks: [], photos: {}, failed: true, materials: { open: 3 } });
+    expect(html).toContain("Couldn’t read this job’s tasks just now. Reload to try again.");
+    expect(html).not.toContain("Tasks:");
+    // The row is read from the materials list, so it still shows.
+    expect(html).toContain("Buy Materials · 3 Open");
+    const bought = office({ tasks: [], photos: {}, failed: true, materials: { open: 0 }, doneOpen: true });
+    expect(bought).not.toContain("Tasks:");
+    expect(bought).not.toMatch(/>\d+ Done</);
   });
 
   it("before 0358 it says, plainly, what waits for the database update, and draws no photo door", () => {
-    const html = office({ mode: "tab", stamps: false });
+    const html = office({ stamps: false });
     expect(html).toContain("Photos on tasks, and who checked each one off, start after the next database update.");
     expect(clickables(html)).not.toContain("Photo");
   });
 });
 
 describe("the laws, on every face", () => {
-  const faces = [office(), tech(), office({ mode: "tab" }), tech({ mode: "tab" })];
+  const faces = [office(), tech(), office({ doneOpen: true }), tech({ doneOpen: true })];
 
   it("no prices: nothing with a dollar sign reaches a task list", () => {
     for (const html of faces) expect(html).not.toMatch(/\$\s?\d/);
@@ -157,7 +151,7 @@ describe("the laws, on every face", () => {
     }
   });
 
-  it("Title Case clickables: All Tasks, Add, Photo — never a lowercase verb", () => {
+  it("Title Case clickables: Add, Photo, Buy Materials — never a lowercase verb", () => {
     for (const html of faces) {
       for (const words of clickables(html)) {
         // Task titles are the rows' own words (the crew's typing), not labels.
@@ -175,13 +169,12 @@ describe("the laws, on every face", () => {
 });
 
 describe("the Done fold", () => {
-  it("starts closed on the tab: the count, not the rows", () => {
-    const html = office({ mode: "tab" });
-    expect(html).not.toContain("Walk the site");
+  it("starts closed: the count, not the rows", () => {
+    expect(office()).not.toContain("Walk the site");
   });
 
   it("open: who and when in the company's time zone; a pre-0358 row says Done 6/17 and no name", () => {
-    for (const html of [office({ mode: "tab", doneOpen: true }), tech({ mode: "tab", doneOpen: true })]) {
+    for (const html of [office({ doneOpen: true }), tech({ doneOpen: true })]) {
       expect(html).toContain("Walk the site");
       expect(html).toContain("Brian · Tue 2:14 PM");
       expect(html).toContain("Order the gear");
@@ -190,24 +183,23 @@ describe("the Done fold", () => {
       expect(html).toContain("Add Photo");
     }
     // Before 0358 a done row offers no photo door.
-    expect(office({ mode: "tab", doneOpen: true, stamps: false })).not.toContain("Add Photo");
+    expect(office({ doneOpen: true, stamps: false })).not.toContain("Add Photo");
   });
 });
 
 describe("the live Buy Materials row (Erik, 2026-09-27: open materials create a task)", () => {
   const buyLink = /<a[^>]*href="\?tab=materials"[^>]*>[\s\S]*?Buy Materials · (\d+) Open[\s\S]*?<\/a>/;
 
-  it("leads the card while anything is left to buy, opens the Materials tab, and counts as one task", () => {
+  it("leads the list while anything is left to buy, opens the Materials tab, and counts as one task", () => {
     const html = office({ materials: { open: 3 } });
     expect(html).toMatch(buyLink);
     expect(html.match(buyLink)?.[1]).toBe("3");
     // One more task in the count: 7 tasks + the row = 8, and the row is open.
     expect(html).toContain("Tasks: 2 of 8 done");
-    // Still three rows on the small card: the row first, then the next two tasks.
+    // It leads, and it pushes nothing off: every open task is still under it.
     expect(html.indexOf("Buy Materials")).toBeLessThan(html.indexOf("Pull the permit"));
-    expect(html).toContain("Set the meter base");
-    expect(html).not.toContain("Run the feeder");
-    expect(html).toContain("+3 more on the Tasks tab");
+    for (const t of ["Set the meter base", "Run the feeder", "Hang the panel", "Label the circuits"]) expect(html).toContain(t);
+    expect(html).not.toContain("more on the Tasks tab");
   });
 
   it("is a door, not a checkbox: no one checks it off by hand, the list does", () => {
@@ -223,13 +215,14 @@ describe("the live Buy Materials row (Erik, 2026-09-27: open materials create a 
     expect(html).not.toMatch(/\$\s?\d/);
   });
 
-  it("gone from the open list once everything is bought; reads All Bought in the tab's Done fold", () => {
-    const card = office({ materials: { open: 0 } });
-    expect(card).not.toContain("Buy Materials");
-    expect(card).toContain("Tasks: 3 of 8 done");
-    const tab = office({ mode: "tab", materials: { open: 0 }, doneOpen: true });
-    expect(tab).toMatch(/>3 Done<svg|>3 Done</);
-    expect(tab).toContain("Buy Materials · All Bought");
+  it("gone from the open list once everything is bought; reads All Bought in the Done fold", () => {
+    const closed = office({ materials: { open: 0 } });
+    expect(closed).toContain("Tasks: 3 of 8 done");
+    expect(closed).toMatch(/>3 Done<svg|>3 Done</);
+    // Closed fold: the row is inside it, not on the open list.
+    expect(closed).not.toContain("Buy Materials");
+    const open = office({ materials: { open: 0 }, doneOpen: true });
+    expect(open).toContain("Buy Materials · All Bought");
   });
 
   it("no row, and no change to the count, when nothing on the list is to buy", () => {
@@ -239,7 +232,7 @@ describe("the live Buy Materials row (Erik, 2026-09-27: open materials create a 
   });
 
   it("keeps the laws: 44px door, Title Case words", () => {
-    const html = office({ mode: "tab", materials: { open: 4 } });
+    const html = office({ materials: { open: 4 } });
     expect(html).toMatch(/<a[^>]*min-h-\[44px\][^>]*href="\?tab=materials"/);
     expect(clickables(html)).toContain("Buy Materials · 4 Open");
   });
