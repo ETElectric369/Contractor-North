@@ -301,6 +301,14 @@ describe("(a) what do I owe this supplier", () => {
     expect(notOnAnAccountSentence({ papers: 0, total: 0, spellings: 0, unnamed: 0, credits: 0, creditPapers: 0 }, (v) => `$${v}`)).toBeNull();
   });
 
+  /** ONE PAPER IS "that is". Three screens and Nort all say this sentence out loud; "1 paper that
+   *  are" reads as a machine talking, and he stops reading what a machine wrote. */
+  it("gets the verb right for a single paper", () => {
+    expect(
+      notOnAnAccountSentence({ papers: 1, total: 475.5, spellings: 1, unnamed: 0, credits: 0, creditPapers: 0 }, (v) => `$${v.toFixed(2)}`),
+    ).toBe("$475.50 of this is on 1 paper that is not on a supplier account yet, counted under the name on the paper.");
+  });
+
   /**
    * A RETURN ON A SPELLING NOBODY HAS FILED YET MADE THE ONE NUMBER TOO SMALL.
    *

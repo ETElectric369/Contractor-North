@@ -31,6 +31,8 @@ import {
   whatIBoughtNotSettled,
   whatISupplierOwed,
   type BoughtNotSettled,
+  type SupplierAccountFigure,
+  type SupplierPaperIdentity,
   type WhatISupplierOwed,
 } from "@/lib/supplier-owed";
 
@@ -43,6 +45,29 @@ export interface SupplierOwedRead {
   today: string;
   /** Which reads failed, by name. A figure is never quoted off a failed read: the caller says so. */
   failed: string[];
+  /**
+   * ── WHAT RECONCILE NEEDS, AND WHY IT COMES OUT OF THIS READ RATHER THAN A SECOND ONE ────────
+   *
+   * /reconcile draws the two figures AGAINST EACH OTHER, per supplier: their own open papers beside
+   * our own open tickets. Doing that needed four things this read already works out and used to
+   * keep to itself — each account's figure, each account's own slice of question (b), who each
+   * paper belongs to, and which papers the suppliers' own closed papers cover.
+   *
+   * Handing them back is the whole defence against a fourth disagreeing door (supplier-owed-
+   * parity.test.ts). The alternative was Reconcile resolving identity a second time and totalling
+   * an account's papers itself, which is 8a982483 with a new file name.
+   */
+  /** Each account's figure, exactly as `supplierBalance` produced it. Never re-totalled. */
+  accounts: SupplierAccountFigure[];
+  /**
+   * Question (b) for ONE account: its own open tickets, by `whatIBoughtNotSettled`, over the papers
+   * the resolver placed on it. Keyed by account id; an account with no open tickets is absent.
+   */
+  boughtByAccount: Record<string, BoughtNotSettled>;
+  /** From `resolveSupplierPapers`: which supplier each paper belongs to, keyed by paper id. */
+  identity: ReadonlyMap<string, SupplierPaperIdentity>;
+  /** From `supplierCoverage`: the papers their own closed papers call settled. Empty if unchecked. */
+  settledBySupplier: ReadonlySet<string>;
 }
 
 /**
@@ -306,10 +331,30 @@ export async function readSupplierOwed(supabase: any, orgId: string): Promise<Su
     settledBySupplier: settledBySupplier.has(String(b.id)),
   }));
 
+  // ── QUESTION (b), ONE ACCOUNT AT A TIME ─────────────────────────────────────────────────────
+  // The SAME function, handed only that account's papers — never a sum written here. Which papers
+  // are "that account's" is the resolver's answer (`identity`), never the stored column: gating a
+  // figure on `bills.supplier_account_id` is specifically what the tripwire in
+  // supplier-owed-one-place.test.ts bans, and it is null on more than half a real book.
+  const papersOfAccount = new Map<string, typeof papers>();
+  for (const p of papers) {
+    const accountId = identity.get(p.id)?.accountId ?? "";
+    if (!accountId) continue;
+    papersOfAccount.set(accountId, [...(papersOfAccount.get(accountId) ?? []), p]);
+  }
+  const boughtByAccount: Record<string, BoughtNotSettled> = {};
+  for (const [accountId, own] of papersOfAccount) {
+    boughtByAccount[accountId] = whatIBoughtNotSettled({ papers: own, settledBySupplier });
+  }
+
   return {
     owed: whatISupplierOwed({ accounts: figures, papers, identity, settledBySupplier }),
     bought: whatIBoughtNotSettled({ papers, settledBySupplier }),
     today,
     failed,
+    accounts: figures,
+    boughtByAccount,
+    identity,
+    settledBySupplier,
   };
 }

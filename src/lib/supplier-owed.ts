@@ -839,7 +839,9 @@ export function whatISupplierOwed(input: {
  */
 export function notOnAnAccountSentence(n: NotOnAnAccount | null | undefined, formatMoney: (v: number) => string): string | null {
   if (!n || n.papers <= 0) return null;
-  const papers = `${n.papers} ${n.papers === 1 ? "paper" : "papers"}`;
+  // ONE PAPER IS "that is", not "that are". A sentence three screens and Nort all say out loud gets
+  // the verb right: broken grammar in his words reads as a machine talking, and he stops reading it.
+  const papers = `${n.papers} ${n.papers === 1 ? "paper that is" : "papers that are"}`;
   const unnamed = n.unnamed > 0 ? ` ${n.unnamed} of them ${n.unnamed === 1 ? "has" : "have"} no supplier name on it at all.` : "";
   // THE CREDIT THAT IS NOT IN THE FIGURE, SAID OUT LOUD. Nothing may leave a figure without the
   // screen saying so, and without this clause he could divide the money by the papers and be wrong.
@@ -847,5 +849,5 @@ export function notOnAnAccountSentence(n: NotOnAnAccount | null | undefined, for
     n.credits > 0.005
       ? ` A credit of ${formatMoney(n.credits)} on ${n.creditPapers} of them is money back, so it is not in the figure.`
       : "";
-  return `${formatMoney(n.total)} of this is on ${papers} that are not on a supplier account yet, counted under the name on the paper.${unnamed}${credits}`;
+  return `${formatMoney(n.total)} of this is on ${papers} not on a supplier account yet, counted under the name on the paper.${unnamed}${credits}`;
 }
