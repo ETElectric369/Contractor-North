@@ -117,16 +117,21 @@ export default async function SchedulePage({
    *
    * Erik: "how do I put these on the schedule is the big denny". Nothing put the leads and the
    * calendar in one view; the old "To schedule" tray held only dateless JOBS and a lead had never
-   * been in it. This absorbs that tray — he doesn't think of leads and jobs as two piles.
+   * been in it. This absorbed that tray — he doesn't think of leads and jobs as two piles — and the
+   * tray itself was cut in W2-05: the rail is the one door for waiting work, and its place's toast
+   * carries the Undo the tray had.
    *
    * RLS scopes both reads to his org. A lead counts as "waiting" when it is open and has no
    * inspection booked yet; a job when it is in flight with no date.
    */
+  /** Each rail read's cap: a read that comes back full may have left some out, and the heading says so. */
+  const RAIL_LIMITS = { leads: 500, jobs: 200, visits: 200 } as const;
   // A parked job's day (0366, hold_until) rides the rail's job read. A push deploys before its
   // migration and a select naming a column the database doesn't have yet fails the whole read, so
   // it asks with the column and, only when the column is missing, again without it (no chip then).
   // `assigned_to` rides along: the card says who's on it, as its block on the calendar does.
-  const RAIL_JOB_COLS = "id, job_number, name, address, city, planned_minutes, status, hold_reason, assigned_to, customers(name, phone, email)";
+  // `scheduled_start`: a held job that still carries a day goes back on the calendar when taken off hold (the card's ⋯ says so).
+  const RAIL_JOB_COLS = "id, job_number, name, address, city, planned_minutes, status, hold_reason, assigned_to, scheduled_start, customers(name, phone, email)";
   const railJobs = (cols: string) =>
     supabase
       .from("jobs")
@@ -141,7 +146,7 @@ export default async function SchedulePage({
          leftover, so it belongs on the board with the rest of the work waiting for a real day. */
       .or("scheduled_start.is.null,status.eq.on_hold")
       .order("created_at", { ascending: false })
-      .limit(200);
+      .limit(RAIL_LIMITS.jobs);
   const railJobsWithDay = async () => {
     const withDay = await railJobs(`${RAIL_JOB_COLS}, hold_until`);
     return withDay.error && isMissingColumn(withDay.error) ? railJobs(RAIL_JOB_COLS) : withDay;
@@ -154,7 +159,7 @@ export default async function SchedulePage({
       .is("converted_at", null)
       .neq("status", "lost")
       .order("created_at", { ascending: false })
-      .limit(500),
+      .limit(RAIL_LIMITS.leads),
     railJobsWithDay(),
     // A booking with no time on it yet — proposed, or created without a date.
     supabase
@@ -164,7 +169,7 @@ export default async function SchedulePage({
       .is("starts_at", null)
       .not("status", "in", "(cancelled,completed)")
       .order("created_at", { ascending: false })
-      .limit(200),
+      .limit(RAIL_LIMITS.visits),
     // WAS A SERIAL ROUND TRIP, buried inside a template literal below — one extra sequential hop
     // on every single schedule load, for one settings row. Erik: "the app froze for me a few
     // times". This page is the heaviest read in the app; it does not get to wait on a fourth
@@ -256,6 +261,7 @@ export default async function SchedulePage({
       // as a thing he has to work out.
       onHold: r.status === "on_hold",
       holdReason: r.hold_reason ?? null,
+      hasDay: !!r.scheduled_start,
       // The day it comes back (0366): absent when the database has no such column yet, so the
       // card draws no chip rather than a false "No Day Set".
       ...("hold_until" in r ? { holdUntil: r.hold_until ?? null } : {}),
@@ -292,6 +298,12 @@ export default async function SchedulePage({
     })),
   ];
 
+  // Any rail read that hit its cap: the list may be missing some (the heading says "n+").
+  const railCapped =
+    (leadRows ?? []).length >= RAIL_LIMITS.leads ||
+    ((dateless ?? []) as unknown[]).length >= RAIL_LIMITS.jobs ||
+    ((undated ?? []) as unknown[]).length >= RAIL_LIMITS.visits;
+
   return (
     /* ONE PROVIDER OVER BOTH HALVES. Ticking work in the rail arms the calendar; tapping a day in
        the calendar places what the rail has ticked. They can only be one gesture if they share
@@ -299,9 +311,13 @@ export default async function SchedulePage({
     <PlacementProvider items={waiting} todayISO={today} workDay={workDay}>
       <div className="space-y-4 lg:grid lg:grid-cols-[minmax(0,20rem)_minmax(0,1fr)] lg:items-start lg:gap-6 lg:space-y-0">
         <aside className="lg:sticky lg:top-4">
+          {/* WAITING FOR A DAY (n): the open work on the rail, counted. A read that came back full may
+              have left some out, so the count says "n+" and one line says where the rest are
+              (nothing silent: a capped list never passes for the whole of it). */}
           <h2 className="mb-2 text-sm font-semibold text-slate-900">
-            Waiting for a day <span className="font-normal text-slate-400">({waiting.length})</span>
+            Waiting For A Day <span className="font-normal text-slate-400">({waiting.length}{railCapped ? "+" : ""})</span>
           </h2>
+          {railCapped && <p className="-mt-1 mb-2 text-xs text-slate-500">More is waiting than this list shows. Find the rest on Jobs and Leads.</p>}
           <PlaceRail items={waiting} todayStr={today} />
         </aside>
         {/* The id is the landing pad for the rail's "tap the day" jump on phones — see place-rail. */}

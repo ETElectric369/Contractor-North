@@ -8,6 +8,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { useToast } from "@/components/toast";
 import { initials } from "@/lib/utils";
 import { applyCrewChange, type CrewChange } from "@/lib/crew-change";
+import { chipDot } from "@/lib/schedule/block-info";
 import { changeJobCrew } from "../../schedule/actions";
 
 export type CrewMember = { id: string; full_name: string | null };
@@ -227,7 +228,9 @@ export function JobCrewChips({
 }) {
   const c = useJobCrew(jobId, initialCrew, team);
   const { crew, pending, asking, setAsking, nameOf } = c;
-  const dot = "flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-brand text-xs font-semibold text-white";
+  // ONE PERSON IS ONE COLOR: each circle wears the person's own color, the same as their chip on the
+  // tile and their bar on a worked day (lib/schedule/block-info chipDot). The job page's card keeps its look.
+  const dot = (id: string) => `flex h-11 w-11 shrink-0 items-center justify-center rounded-full ${chipDot({ id })} text-xs font-semibold text-white`;
   const nobody = (
     <span className="inline-flex h-11 items-center rounded-full border border-dashed border-slate-300 px-3 text-sm text-slate-400">
       Nobody
@@ -239,7 +242,7 @@ export function JobCrewChips({
       <div className="flex flex-wrap items-center gap-2">
         {initialCrew.length === 0 && nobody}
         {initialCrew.map((s) => (
-          <span key={s.id} className={dot} title={s.full_name ?? "Unnamed"} aria-label={s.full_name ?? "Unnamed"}>
+          <span key={s.id} className={dot(s.id)} title={s.full_name ?? "Unnamed"} aria-label={s.full_name ?? "Unnamed"}>
             {initials(s.full_name ?? "")}
           </span>
         ))}
@@ -260,7 +263,7 @@ export function JobCrewChips({
             aria-label={nameOf(id)}
             title={nameOf(id)}
             onClick={() => setAsking((cur) => (cur === id ? null : id))}
-            className={`${dot} disabled:opacity-60 ${asking === id ? "ring-2 ring-brand ring-offset-2" : ""}`}
+            className={`${dot(id)} disabled:opacity-60 ${asking === id ? "ring-2 ring-brand ring-offset-2" : ""}`}
           >
             {initials(nameOf(id))}
           </button>

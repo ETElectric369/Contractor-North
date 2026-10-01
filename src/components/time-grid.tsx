@@ -3,7 +3,7 @@
 import React from "react";
 import { Plus } from "lucide-react";
 import { todayStrInTz, tzMinutesOfDay } from "@/lib/tz";
-import { blockRows, type CrewChip } from "@/lib/schedule/block-info";
+import { blockRows, crewWords, type CrewChip } from "@/lib/schedule/block-info";
 import { CrewInitials } from "./crew-initials";
 
 import { useEffect, useRef, useState } from "react";
@@ -60,7 +60,36 @@ export interface TimeGridEvent {
    *  Drawn as tall as the block has room for: the name, then the place, the crew, the time, the town.
    *  With it, `sub` is not drawn. */
   info?: TimeGridInfo;
+  /** WHAT HAPPENED, on a past day (the schedule; lib/schedule/plan-vs-actual): who clocked in, as bars
+   *  in each person's color beside the block, and the block hollow when nobody did. Optional and
+   *  additive: /timecards passes none and renders exactly as before. */
+  actual?: TimeGridActual;
+  /** WORK NOBODY BOOKED (the schedule's ghost, SV-ghost): the caller draws it dashed, and it says so in
+   *  its title and label: "<job name> · worked, not booked". */
+  ghost?: boolean;
 }
+
+/** A past block's worked time (see TimeGridEvent.actual). */
+export interface TimeGridActual {
+  /** Each person who clocked in, in their own color, with their stretches (minutes past midnight;
+   *  `open` = never clocked out, drawn fading out). */
+  people: { key: string; initials: string; dot: string; spans: { startMin: number; endMin: number; open: boolean }[] }[];
+  /** Booked, and no time clocked to it: the block keeps its border and type color, filled faint. */
+  hollow?: boolean;
+  /** The block's sentence ("Booked 9–5 · Erik 10–6 · 1h late"): its title and label. */
+  sentence?: string;
+}
+
+/** A hollow block: its own border, a faint white fill and muted words (never dashed: dashed is a ghost's). */
+export function hollowTone(color: string): string {
+  const kept = color.split(/\s+/).filter((c) => c && !/^(?:bg|text)-/.test(c));
+  return [...kept, "bg-white/40", "text-slate-500"].join(" ");
+}
+
+/** Each person's bar lane: 4px wide at the block's right edge, the next one 1px to its left. */
+const LANE_PX = 4;
+const LANE_GAP_PX = 1;
+const laneRight = (i: number) => 2 + i * (LANE_PX + LANE_GAP_PX);
 
 /** A block's own lines under its name (see TimeGridEvent.info). */
 export interface TimeGridInfo {
@@ -227,6 +256,13 @@ function TimeGridInner({
   for (const e of events) {
     lo = Math.min(lo, e.startMin);
     hi = Math.max(hi, e.endMin ?? (initialNow && e.dayStr === initialNow.dayStr ? initialNow.min : e.startMin + 60));
+    // What happened reaches the range too: a 9 PM finish stretches the day to 9 PM, never clipped at 7.
+    for (const p of e.actual?.people ?? []) {
+      for (const s of p.spans) {
+        lo = Math.min(lo, s.startMin);
+        hi = Math.max(hi, s.endMin);
+      }
+    }
   }
   const startHour = Math.max(0, Math.floor(lo / 60));
   const endHour = Math.min(24, Math.ceil(hi / 60));
@@ -262,8 +298,10 @@ function TimeGridInner({
     d.heavyStart ? "border-l-2 border-l-slate-400" : "border-l border-l-slate-100";
 
   /** A block's lines, as many as its height has room for (lib/schedule/block-info blockRows): the
-   *  name, then the place, the crew, the time, the town. Every line is whole or absent. */
-  const pillBody = (e: TimeGridEvent, heightPx: number) => {
+   *  name, then the place, the crew, the time, the town. Every line is whole or absent. The crew line
+   *  is marks, never a door (pointer-events-none): the block's tap is the block's. A pill squeezed
+   *  beside another in a week (under ~48px) shows two chips and "+N". */
+  const pillBody = (e: TimeGridEvent, heightPx: number, narrow = false) => {
     const info = e.info;
     if (!info) {
       return (
@@ -284,8 +322,8 @@ function TimeGridInner({
         <div className="truncate font-semibold">{e.label}</div>
         {rows.place && <div className="truncate opacity-80">{info.place}</div>}
         {rows.crew && (
-          <div className="mt-0.5 flex h-3.5 items-center overflow-hidden">
-            <CrewInitials crew={info.crew ?? []} size="xs" />
+          <div className="pointer-events-none mt-0.5 flex h-3.5 items-center overflow-hidden">
+            <CrewInitials crew={info.crew ?? []} size="xs" max={narrow ? 2 : 3} />
           </div>
         )}
         {rows.time && <div className="truncate tabular-nums opacity-70">{info.time}</div>}
@@ -296,10 +334,74 @@ function TimeGridInner({
   /** Everything the block says, for its title and its label (a small block still says it all to a
    *  screen reader and on hover). */
   const pillTitle = (e: TimeGridEvent) => {
-    if (!e.info) return e.sub ? `${e.label} · ${e.sub}` : e.label;
+    // A past block's sentence closes its title and label: what was booked, and what happened.
+    const said = e.actual?.sentence ?? null;
+    if (e.ghost) return [`${e.label} · worked, not booked`, said].filter(Boolean).join(" · ");
+    if (!e.info) return [e.label, e.sub, said].filter(Boolean).join(" · ");
     const crew = e.info.crew;
-    const who = Array.isArray(crew) ? (crew.length ? crew.map((c) => c.name).join(", ") : "Nobody") : null;
-    return [e.label, e.info.place, e.info.town, e.info.time, who].filter(Boolean).join(" · ");
+    // "Crew: Brian Cole, Erik Taylor" or "Nobody on it": a block too short for its chips still says it.
+    const who = Array.isArray(crew) ? crewWords(crew) : null;
+    return [e.label, e.info.place, e.info.town, e.info.time, who, said].filter(Boolean).join(" · ");
+  };
+
+  /**
+   * THE WORKED BARS, a SIBLING layer over the block (the block clips its own contents, so the bars
+   * can't live inside it): pointer-events-none, so the block's tap and an armed day's place are the
+   * block's, never the bars'. Each person gets a 4px lane at the block's right edge (the next one step
+   * left), a rounded bar in their color from their in to their out: a late start reads as a gap under
+   * the block's top, an overrun as a bar past its bottom, an early finish as a bar stopping short, and
+   * one never clocked out fades away. A wide block (the day view, a lone week block) puts a 16px initials
+   * chip at the top of each person's bar (blue and indigo look alike; the letters say who).
+   */
+  const barLayer = (e: TimeGridEvent & { col: number; cols: number }, wide: boolean) => {
+    const people = e.actual?.people ?? [];
+    if (!people.length) return null;
+    const y = (m: number) => (Math.max(rangeStart, Math.min(rangeEnd, m)) - rangeStart) * PX_PER_MIN;
+    const chipTops: number[] = [];
+    return (
+      <div
+        key={`bars-${e.id}`}
+        aria-hidden="true"
+        data-worked-bars={e.id}
+        className="pointer-events-none absolute z-[5]"
+        style={{ top: 0, height: gridH, left: `calc(${(e.col / e.cols) * 100}% + 2px)`, width: `calc(${100 / e.cols}% - 4px)` }}
+      >
+        {people.map((p, i) =>
+          p.spans.map((s, si) => {
+            const top = y(s.startMin);
+            const height = Math.max(3, y(s.endMin) - top);
+            return (
+              <div
+                key={`${p.key}-${si}`}
+                className={`absolute rounded-full ${p.dot}`}
+                style={{
+                  top,
+                  height,
+                  right: laneRight(i),
+                  width: LANE_PX,
+                  ...(s.open ? { maskImage: "linear-gradient(to bottom, black 55%, transparent)", WebkitMaskImage: "linear-gradient(to bottom, black 55%, transparent)" } : {}),
+                }}
+              />
+            );
+          }),
+        )}
+        {wide &&
+          people.map((p) => {
+            let top = y(p.spans[0]?.startMin ?? rangeStart);
+            while (chipTops.some((t) => Math.abs(t - top) < 17)) top += 17;
+            chipTops.push(top);
+            return (
+              <span
+                key={`chip-${p.key}`}
+                className={`absolute flex h-4 w-4 items-center justify-center rounded-full text-[8px] font-semibold leading-none text-white ring-1 ring-white ${p.dot}`}
+                style={{ top, right: 0 }}
+              >
+                {p.initials}
+              </span>
+            );
+          })}
+      </div>
+    );
   };
 
   return (
@@ -499,14 +601,20 @@ function TimeGridInner({
                 {laid.map((e) => {
                   const top = (Math.max(e.startMin, rangeStart) - rangeStart) * PX_PER_MIN;
                   const height = Math.max(16, (e.endMin - Math.max(e.startMin, rangeStart)) * PX_PER_MIN);
+                  const lanes = e.actual?.people.length ?? 0;
                   const style: React.CSSProperties = {
                     top,
                     height,
                     left: `calc(${(e.col / e.cols) * 100}% + 2px)`,
                     width: `calc(${100 / e.cols}% - 4px)`,
+                    // Room for the worked bars at the right edge, so they never sit on the words.
+                    ...(lanes ? { paddingRight: laneRight(lanes) + 1 } : {}),
                   };
-                  const cls = `absolute overflow-hidden rounded-md border px-1 py-0.5 text-[10px] leading-tight shadow-sm ${e.color}`;
+                  const tone = e.actual?.hollow ? hollowTone(e.color) : e.color;
+                  const cls = `absolute overflow-hidden rounded-md border px-1 py-0.5 text-[10px] leading-tight shadow-sm ${tone}`;
                   const title = pillTitle(e);
+                  // Two pills side by side in a week column are ~42px each at 375px: two chips and "+N".
+                  const narrow = days.length > 1 && e.cols > 1;
                   /* ARMED, A PILL PLACES TOO. On a busy day the pills cover most of the column,
                      so the natural tap landed on a Link, navigated to that job, unmounted the
                      provider and silently threw away every pick and the AM/PM choice — the worst
@@ -521,7 +629,7 @@ function TimeGridInner({
                       title={`${placement.label} — ${d.label}`}
                       className={`${cls} text-left opacity-60`}
                     >
-                      {pillBody(e, height)}
+                      {pillBody(e, height, narrow)}
                     </button>
                   ) : onEventTap && e.tapId ? (
                     /* THE TILE OPENS ITS SHEET: the day, the time and who's on it, where the block
@@ -533,21 +641,24 @@ function TimeGridInner({
                       onClick={() => onEventTap(e.tapId!, d.dayStr)}
                       style={style}
                       title={title}
-                      aria-label={`${title}: day, time and crew`}
+                      aria-label={e.ghost ? title : `${title}: day, time and crew`}
                       className={`${cls} text-left hover:opacity-80`}
                     >
-                      {pillBody(e, height)}
+                      {pillBody(e, height, narrow)}
                     </button>
                   ) : e.href ? (
                     <Link key={e.id} href={e.href} style={style} title={title} className={`${cls} hover:opacity-80`}>
-                      {pillBody(e, height)}
+                      {pillBody(e, height, narrow)}
                     </Link>
                   ) : (
                     <div key={e.id} style={style} title={title} className={cls}>
-                      {pillBody(e, height)}
+                      {pillBody(e, height, narrow)}
                     </div>
                   );
                 })}
+
+                {/* what happened: the worked bars, over the blocks, never catching a tap */}
+                {laid.map((e) => barLayer(e, days.length === 1 || e.cols === 1))}
 
                 {/* the now line */}
                 {showNow && (

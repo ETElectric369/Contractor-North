@@ -13,7 +13,8 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh() {} }) }));
 vi.mock("@/components/toast", () => ({ useToast: () => () => {} }));
 vi.mock("../../schedule/actions", () => ({ changeJobCrew: vi.fn(async () => ({ ok: true })) }));
 
-import { JobCrewCard } from "./job-crew-card";
+import { JobCrewCard, JobCrewChips } from "./job-crew-card";
+import { pillColorForPerson } from "@/lib/employee-color";
 
 const crew = [
   { id: "p1", full_name: "Brian Cole" },
@@ -79,5 +80,38 @@ describe("the crew", () => {
     expect(html).toContain("Brian Cole");
     expect(html).toContain("Erik Taylor");
     expect(html).not.toContain("<button");
+  });
+});
+
+/**
+ * ONE PERSON IS ONE COLOR (Wave 2, SV-chips): the schedule tile's crew chips (JobCrewChips) draw each
+ * person's circle in their own color, the /timecards person color their chip on the tile and their bar
+ * on a worked day wear too. The job page's crew card keeps its look; the crew logic is untouched.
+ */
+describe("the tile's crew chips, each in their person's color", () => {
+  const chips = (canEdit: boolean, people = crew) =>
+    renderToStaticMarkup(createElement(JobCrewChips, { jobId: "j1", crew: people, team: crew, canEdit }));
+
+  it("each circle wears its person's color, 44px, for the office", () => {
+    const html = chips(true);
+    for (const p of crew) {
+      const tag = (html.match(new RegExp(`<button[^>]*aria-label="${p.full_name}"[^>]*>`)) ?? [""])[0];
+      expect(tag, p.full_name).toContain(pillColorForPerson(p.id).dot);
+      expect(tag).toMatch(/\bh-11 w-11\b/);
+      expect(tag).not.toContain("bg-brand");
+    }
+  });
+
+  it("the crew reads the same colors with nothing to tap; an empty crew is a dashed Nobody", () => {
+    const html = chips(false);
+    expect(html).not.toContain("<button");
+    expect(html).toContain(pillColorForPerson("p1").dot);
+    expect(chips(true, [])).toMatch(/<span[^>]*border-dashed[^>]*>Nobody<\/span>/);
+  });
+
+  it("the job page's card keeps its look: brand avatars, no person colors", () => {
+    const html = r({});
+    expect(html).toContain("bg-brand text-[10px]");
+    for (const p of crew) expect(html).not.toContain(pillColorForPerson(p.id).dot);
   });
 });
