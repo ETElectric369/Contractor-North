@@ -282,6 +282,24 @@ describe("activeRowHref — one lit row, or none", () => {
   it("bare /jobs lights All — the row that IS the unfiltered page", () => {
     expect(activeRowHref(rows("jobs", true), "/jobs", "/jobs")).toBe("/jobs");
   });
+
+  // Erik, 2026-09-30: "lets also have time clock point to money with timecards on the subnav".
+  it("the office standing on the TIME CLOCK lights Money's Timecards — the row that owns the page", () => {
+    expect(activeRowHref(rows("invoices", true), "/timeclock", "/timeclock")).toBe("/timecards");
+    // A detail route under it too (a split's own page), and the query-carrying case.
+    expect(activeRowHref(rows("invoices", true), "/timeclock/abc", "/timeclock/abc")).toBe("/timecards");
+    expect(activeRowHref(rows("invoices", true), "/timeclock", "/timeclock?day=2026-09-30")).toBe("/timecards");
+    // Timecards itself still wins by its own href, not by owning anything.
+    expect(activeRowHref(rows("invoices", true), "/timecards", "/timecards")).toBe("/timecards");
+  });
+
+  it("a tech's /timeclock still lights his own Clock row, not an owning one", () => {
+    expect(activeRowHref(rows("clock", false), "/timeclock", "/timeclock")).toBe("/timeclock");
+  });
+
+  it("a route nothing owns still lights nothing rather than guess", () => {
+    expect(activeRowHref(rows("invoices", true), "/work-orders/abc", "/work-orders/abc")).toBeUndefined();
+  });
 });
 
 describe("the section nav must be REACHABLE at every width (cn-v660 regression)", () => {
