@@ -7,7 +7,7 @@ import { getOrgSettings, workDayWindowHm } from "@/lib/org-settings";
 import { featureOn } from "@/lib/features";
 import { getSchedulePickerOptions } from "@/lib/schedule-options";
 import { dayRowsByDay, type CrewDayRow } from "@/lib/schedule/block-info";
-import { ACTUALS_LIMIT, actualsFrom, type ActualEntryRow } from "@/lib/schedule/plan-vs-actual";
+import { ACTUALS_PAGES, CREW_ROW_PAGES, actualsFrom, readPagesCapped, type ActualEntryRow } from "@/lib/schedule/plan-vs-actual";
 import { todayStrInTz, tzDayStartUtc } from "@/lib/tz";
 import {
   CalendarView,
@@ -38,7 +38,7 @@ export async function CalendarPanel({ canEdit = false }: { canEdit?: boolean } =
   // EVERYONE'S DAY'S ROWS from today on (a day early, so the company's today is in it in any timezone):
   // the day row wins for that day on every upcoming chip (lib/schedule/block-info crewChips).
   const dayRowsFrom = new Date(now - 86400_000).toISOString().slice(0, 10);
-  const [{ data: listedJobs }, { data: segments, perDayHours }, { data: appointments }, { data: tasks }, { data: externalRows }, picker, { data: org }, { data: addableRows }, { data: dayRowRows }, { data: everyone }] =
+  const [{ data: listedJobs }, { data: segments, perDayHours }, { data: appointments }, { data: tasks }, { data: externalRows }, picker, { data: org }, { data: addableRows }, crewRead, { data: everyone }] =
     await Promise.all([
       // Overlap test, not a point test on scheduled_start: a job shows if it
       // STARTS before the window end AND (ends after the window start, or is an
@@ -112,15 +112,24 @@ export async function CalendarPanel({ canEdit = false }: { canEdit?: boolean } =
             .limit(300)
         : Promise.resolve({ data: [] as unknown[] }),
       /* WHO'S ON IT, THAT DAY (Everyone's Day, crew_day_assignments, both kinds: 'off', and 'job' for
-         this job or another). RLS scopes it to the company. Fail-soft: no rows read, the chips are the
-         job's crew as it stands. */
-      supabase
-        .from("crew_day_assignments")
-        .select("profile_id, work_date, kind, job_id")
-        .gte("work_date", dayRowsFrom)
-        .lte("work_date", jobTo.slice(0, 10))
-        .order("work_date")
-        .limit(2000),
+         this job or another). RLS scopes it to the company. PAGED, because a bare .limit(2000) is cut
+         at PostgREST's own ceiling (1000 by default) with no error, and the rows that fell off are the
+         FURTHEST days — their chips would quietly fall back to the job's crew while a day row said
+         otherwise. Ordered by (work_date, profile_id), the pair this row is unique on (crew-actions
+         upserts on it), so paging never repeats or drops one. Fail-soft: no rows read, the chips are
+         the job's crew as it stands. */
+      readPagesCapped<CrewDayRow>(
+        (from, to) =>
+          supabase
+            .from("crew_day_assignments")
+            .select("profile_id, work_date, kind, job_id")
+            .gte("work_date", dayRowsFrom)
+            .lte("work_date", jobTo.slice(0, 10))
+            .order("work_date")
+            .order("profile_id")
+            .range(from, to),
+        CREW_ROW_PAGES,
+      ),
       /* EVERYONE THE COMPANY EVER HAD (id, name, active), so a chip names someone who has left ("No
          Longer On The Team") instead of "Unnamed". The pickers still list the active team only. */
       supabase.from("profiles").select("id, full_name, active").limit(1000),
@@ -142,28 +151,48 @@ export async function CalendarPanel({ canEdit = false }: { canEdit?: boolean } =
   /* WHAT HAPPENED ON PAST DAYS (Wave 2, SV-actual: the July rule "the calendar never shows clocked
      time" is retired). The schedule is the one time map: future days show what's booked; past days
      show what was booked AND what happened, inside the same block (lib/schedule/plan-vs-actual). The
-     timesheet (editing, pay) stays on /timecards. ONE read, before today on the company's clock, only
-     entries on a job (a no-job punch is never guessed onto a block), newest first, capped. NO PAY
+     timesheet (editing, pay) stays on /timecards. ONE read, from the start of the window's oldest
+     company day up to the start of today on the company's clock, only entries on a job (a no-job punch
+     is never guessed onto a block), newest first, A PAGE AT A TIME to a stated bound. NO PAY
      COLUMN: no rate, no paid, no miles, no notes. Names come from the entry's own person, so someone
      who has left still has initials on the days they worked. The job rides along so a ghost (part D)
      can name a job the window's jobs read didn't bring. RLS scopes it to the company (0249's
      (org_id, clock_in desc) index serves it). Fail-soft: a failed read draws no bars, and says so. */
   const ENTRY_COLS =
     "id, profile_id, job_id, clock_in, clock_out, source, profiles:profile_id(full_name), job:job_id(id, job_number, name, customers(name))";
+  /* THE WHOLE OLDEST DAY, NOT FROM THIS HOUR BACKWARDS. jobFrom is an INSTANT (now minus the window),
+     so at a 3pm load it begins mid-afternoon on the oldest day and an 8am shift on that day was never
+     read, while the view counts that day as loaded whole and draws its block hollow. The clocked-time
+     read starts at the START of the company day the window opens on — the same day the view clamps to
+     (CAL_WINDOW_BACK_DAYS, in YMD arithmetic at noon, never on raw instants). */
+  const winFromStr = new Date(Date.parse(`${todayStr}T12:00:00Z`) - CAL_WINDOW_BACK_DAYS * 86400_000).toISOString().slice(0, 10);
+  /* One day EARLIER than that: an overnight shift clocked in the evening before has its tail drawn on
+     the oldest day (actualSpans splits at midnight), and a day off by one between here and the view's
+     clamp must never make a day look like a day nobody worked. The extra rows draw nothing of their own
+     (the view ignores days before the window). */
+  const actualsFromIso = tzDayStartUtc(new Date(Date.parse(`${winFromStr}T12:00:00Z`) - 86400_000).toISOString().slice(0, 10), tz).toISOString();
   const [historyReads, entriesRead] = await Promise.all([
     Promise.all(missingChunks.map((missingChunk) => supabase.from("jobs").select(JOB_COLS).in("id", missingChunk))),
-    supabase
-      .from("time_entries")
-      .select(ENTRY_COLS)
-      .not("job_id", "is", null)
-      .gte("clock_in", jobFrom)
-      .lt("clock_in", tzDayStartUtc(todayStr, tz).toISOString())
-      .order("clock_in", { ascending: false })
-      .limit(ACTUALS_LIMIT),
+    /* PAGED, NEWEST FIRST (readPagesCapped). A `.limit(4000)` is silently cut at PostgREST's own
+       db-max-rows (1000 by default), so the row count can never see the cut and every older day would
+       be judged as a day nobody worked. Ordered (clock_in desc, id desc): the id tiebreak keeps rows
+       from repeating or vanishing between pages. */
+    readPagesCapped<ActualEntryRow>(async (from, to) => {
+      const r = await supabase
+        .from("time_entries")
+        .select(ENTRY_COLS)
+        .not("job_id", "is", null)
+        .gte("clock_in", actualsFromIso)
+        .lt("clock_in", tzDayStartUtc(todayStr, tz).toISOString())
+        .order("clock_in", { ascending: false })
+        .order("id", { ascending: false })
+        .range(from, to);
+      return { data: (r.data ?? null) as unknown as ActualEntryRow[] | null, error: r.error };
+    }, ACTUALS_PAGES),
   ]);
   const historyJobs = historyReads.flatMap((r) => (r.data ?? []) as unknown[]);
   const jobs: unknown[] = [...(listedJobs ?? []), ...(historyJobs ?? [])];
-  const { actuals, actualsCappedBefore } = actualsFrom(entriesRead.error ? null : ((entriesRead.data ?? []) as unknown as ActualEntryRow[]), tz, todayStr);
+  const { actuals, actualsCappedBefore } = actualsFrom(entriesRead.error ? null : entriesRead.rows, tz, todayStr, entriesRead.capped);
 
   return (
     <div className="mx-auto max-w-5xl">
@@ -191,7 +220,7 @@ export async function CalendarPanel({ canEdit = false }: { canEdit?: boolean } =
         // Add To Schedule: an open spot (or a day's "+") opens the sheet with these jobs.
         addableJobs={(addableRows ?? []) as unknown as AddableJob[]}
         // Each day's crew rows (Everyone's Day), by day, and everyone the company ever had.
-        dayRows={dayRowsByDay((dayRowRows ?? []) as unknown as CrewDayRow[])}
+        dayRows={dayRowsByDay(crewRead.error ? [] : crewRead.rows)}
         people={((everyone ?? []) as { id: string; full_name: string | null; active?: boolean | null }[]).map((p) => ({ id: p.id, full_name: p.full_name, active: p.active ?? null }))}
         // What happened on past days (compact spans; null: the read failed) and, when the read hit its
         // cap, the first day it covers whole (older days are never drawn hollow: blank is not zero).

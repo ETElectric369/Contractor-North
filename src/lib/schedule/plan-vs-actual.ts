@@ -30,6 +30,7 @@
  * No money here: no rate, no pay column, ever.
  */
 import { todayStrInTz, tzMinutesOfDay } from "@/lib/tz";
+import { PAGE_ROWS } from "@/lib/read-all-pages";
 import { pillColorForPerson } from "@/lib/employee-color";
 import { initialsOf } from "./block-info";
 
@@ -145,8 +146,49 @@ export function packActuals(spans: readonly ActualSpan[], jobs: ReadonlyMap<stri
   return { people, jobs: jobList, spans: tuples };
 }
 
-/** The clocked-time read's cap (calendar-panel): past it, the oldest days in the window aren't all loaded. */
-export const ACTUALS_LIMIT = 4000;
+/**
+ * THE CLOCKED-TIME READ IS PAGED, BECAUSE A CEILING CANNOT SEE A CUT BELOW IT.
+ *
+ * PostgREST caps one select at the project's db-max-rows (1000 by default, a setting that lives
+ * nowhere in this repo) and says nothing: status 200, no error, the rest simply missing. So a
+ * `.limit(4000)` on a company whose punches reach a thousand inside the window (a crew of ten in about
+ * fifty days) comes back with 1000 rows, a row-count test against 4000 never fires, and every day
+ * older than the cut is judged as a day NOBODY WORKED — a false zero on the one screen whose job is to
+ * say what happened.
+ *
+ * The read goes a PAGE at a time instead (readPagesCapped: the readAllPages contract — advance by the
+ * rows actually returned, stop on an empty page), up to this many pages. Past that bound it says it
+ * was CAPPED, and no day older than the oldest row it reached is drawn hollow (BLANK IS NOT ZERO).
+ */
+export const ACTUALS_PAGES = 4;
+export const ACTUALS_LIMIT = ACTUALS_PAGES * PAGE_ROWS;
+
+/** Everyone's Day's rows are read the same way, inside the same bound that list always carried. */
+export const CREW_ROW_PAGES = 2;
+
+/**
+ * A WHOLE LIST, OR WHAT FIT AND THE WORD FOR IT. readAllPages' paging with one difference: more rows
+ * than `maxPages` holds is not an error here but `capped: true` beside the rows that were read, so the
+ * schedule can draw the days it really has and SAY which older ones didn't load, instead of either
+ * lying about them or showing nothing at all. `page(from, to)` must order by something unique (a
+ * tiebreak after the sort column), or rows can repeat or go missing between pages.
+ */
+export async function readPagesCapped<T>(
+  page: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: unknown }>,
+  maxPages: number,
+): Promise<{ rows: T[]; capped: boolean; error: unknown }> {
+  const out: T[] = [];
+  for (let i = 0; i < maxPages; i++) {
+    const { data, error } = await page(out.length, out.length + PAGE_ROWS - 1);
+    if (error) return { rows: [], capped: false, error };
+    if (!Array.isArray(data)) return { rows: [], capped: false, error: new Error("read returned no rows array") };
+    // An EMPTY page is the end of the list. A SHORT one is only this project's own ceiling, which can
+    // sit anywhere below PAGE_ROWS, so it is never read as the end.
+    if (!data.length) return { rows: out, capped: false, error: null };
+    out.push(...data);
+  }
+  return { rows: out, capped: true, error: null };
+}
 
 /** A time entry as the calendar's read returns it: no pay column, ever (no rate, paid, miles or notes). */
 export type ActualEntryRow = {
@@ -160,16 +202,20 @@ export type ActualEntryRow = {
 
 /**
  * THE READ, AS THE CALENDAR GETS IT: past-day spans on the company's clock, packed (each person and job
- * once), and, when the read came back full (newest first, so the OLDEST days are the ones cut), the
- * first day it holds WHOLE: the day after the oldest clock-in it reached. Every day before that may be
- * missing time, so none of them is ever drawn hollow. A failed read (null) stays null: no bars, and the
- * calendar says so.
+ * once), and, when the read stopped at its page bound (newest first, so the OLDEST days are the ones
+ * cut), the first day it holds WHOLE: the day after the oldest clock-in it reached. Every day before
+ * that may be missing time, so none of them is ever drawn hollow. A failed read (null) stays null: no
+ * bars, and the calendar says so.
+ *
+ * `capped` comes from the PAGED read itself (readPagesCapped), never from counting the rows against a
+ * `.limit()`: PostgREST's own ceiling sits below any larger limit and hands back a short list with no
+ * error, so a count can't see the cut (see ACTUALS_PAGES).
  */
 export function actualsFrom(
   rows: readonly ActualEntryRow[] | null,
   tz: string,
   todayStr: string,
-  limit = ACTUALS_LIMIT,
+  capped = false,
 ): { actuals: ActualsPayload | null; actualsCappedBefore: string | null } {
   if (!rows) return { actuals: null, actualsCappedBefore: null };
   const entries: ActualEntry[] = rows.map((r) => ({
@@ -184,7 +230,9 @@ export function actualsFrom(
     if (r.job?.id) jobsById.set(String(r.job.id), { name: r.job.name ?? "A Job", job_number: r.job.job_number ?? null, customer: r.job.customers?.name ?? null });
   }
   let actualsCappedBefore: string | null = null;
-  const oldest = rows.length >= limit ? rows[rows.length - 1]?.clock_in : null;
+  // The oldest row READ, found in the rows themselves rather than trusted from their order.
+  let oldest: string | null = null;
+  if (capped) for (const r of rows) if (r.clock_in && (!oldest || r.clock_in < oldest)) oldest = r.clock_in;
   if (oldest) actualsCappedBefore = nextDay(todayStrInTz(tz, new Date(oldest)));
   return { actuals: packActuals(actualSpans(entries, tz, todayStr), jobsById), actualsCappedBefore };
 }

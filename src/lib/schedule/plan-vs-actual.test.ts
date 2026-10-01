@@ -5,6 +5,8 @@ import { tzDateTimeUtc } from "@/lib/tz";
 import { pillColorForPerson } from "@/lib/employee-color";
 import {
   ACTUALS_LIMIT,
+  ACTUALS_PAGES,
+  CREW_ROW_PAGES,
   actualsFrom,
   actualSpans,
   blockSentence,
@@ -15,6 +17,7 @@ import {
   packActuals,
   peopleWords,
   planVsActual,
+  readPagesCapped,
   rangeWords,
   SENTENCE_MAX,
   unpackActuals,
@@ -139,27 +142,89 @@ describe("the read, as the calendar gets it", () => {
     expect(actuals!.jobs).toEqual([{ id: "j46", name: "12 Elm St", job_number: "J-046", customer: "Rita Moss" }]);
   });
 
-  it("a read that hit its cap loads back to the day AFTER its oldest clock-in (that day may be partial)", () => {
+  it("a read that stopped at its page bound loads back to the day AFTER its oldest clock-in (that day may be partial)", () => {
     const rows = [row(ERIK, "j46", "2026-09-22", "10:00", "18:00"), row(ERIK, "j46", "2026-09-10", "09:00", "17:00")];
-    expect(actualsFrom(rows, LA, TODAY, 2).actualsCappedBefore).toBe("2026-09-11");
-    expect(actualsFrom(rows, LA, TODAY, 3).actualsCappedBefore).toBeNull();
-    expect(ACTUALS_LIMIT).toBe(4000);
+    expect(actualsFrom(rows, LA, TODAY, true).actualsCappedBefore).toBe("2026-09-11");
+    expect(actualsFrom(rows, LA, TODAY, false).actualsCappedBefore).toBeNull();
+    // Said by the PAGED read, never counted off a .limit(): PostgREST's own ceiling sits below it.
+    expect(actualsFrom(rows, LA, TODAY).actualsCappedBefore).toBeNull();
+    expect([ACTUALS_PAGES, ACTUALS_LIMIT, CREW_ROW_PAGES]).toEqual([4, 4000, 2]);
+  });
+
+  it("the oldest row read is found in the rows, whatever order they came back in", () => {
+    const rows = [row(ERIK, "j46", "2026-09-10", "09:00", "17:00"), row(ERIK, "j46", "2026-09-22", "10:00", "18:00")];
+    expect(actualsFrom(rows, LA, TODAY, true).actualsCappedBefore).toBe("2026-09-11");
+  });
+});
+
+/** A CEILING CANNOT SEE A CUT BELOW IT: the paging the clocked-time read and the crew rows both use. */
+describe("readPagesCapped", () => {
+  const pages = (sizes: number[]) => {
+    const seen: [number, number][] = [];
+    let i = 0;
+    return {
+      seen,
+      page: async (from: number, to: number) => {
+        seen.push([from, to]);
+        const n = sizes[i++] ?? 0;
+        return { data: Array.from({ length: n }, (_, k) => ({ id: `${from + k}` })), error: null };
+      },
+    };
+  };
+
+  it("advances by the rows ACTUALLY returned and ends on an EMPTY page, not a short one", async () => {
+    // 600 back from a 1000-row ask is this project's ceiling, not the end of the list.
+    const p = pages([600, 600, 0]);
+    const res = await readPagesCapped(p.page, 4);
+    expect(res.rows.length).toBe(1200);
+    expect(res.capped).toBe(false);
+    expect(p.seen).toEqual([[0, 999], [600, 1599], [1200, 2199]]);
+  });
+
+  it("more rows than the bound holds is CAPPED, with the rows it read — never an error and never nothing", async () => {
+    const res = await readPagesCapped(pages([1000, 1000]).page, 2);
+    expect(res.rows.length).toBe(2000);
+    expect(res.capped).toBe(true);
+    expect(res.error).toBeNull();
+  });
+
+  it("an error, or a read that isn't a list, is a failure: no rows, and never 'capped'", async () => {
+    const bad = await readPagesCapped(async () => ({ data: null, error: { message: "x" } }), 3);
+    expect([bad.rows.length, bad.capped, !!bad.error]).toEqual([0, false, true]);
+    const notList = await readPagesCapped(async () => ({ data: null, error: null }), 3);
+    expect([notList.rows.length, notList.capped, !!notList.error]).toEqual([0, false, true]);
   });
 });
 
 describe("the calendar reads it and draws it (source)", () => {
   const read = (f: string) => readFileSync(join(process.cwd(), f), "utf8");
 
-  it("one past-only read of entries on a job, newest first, capped, and NO pay column", () => {
+  it("one past-only read of entries on a job, newest first, PAGED to a bound, and NO pay column", () => {
     const panel = read("src/app/(app)/schedule/calendar-panel.tsx");
     expect(panel).toContain(
       '"id, profile_id, job_id, clock_in, clock_out, source, profiles:profile_id(full_name), job:job_id(id, job_number, name, customers(name))"',
     );
-    const q = panel.slice(panel.indexOf('.from("time_entries")'), panel.indexOf(".limit(ACTUALS_LIMIT)"));
+    const q = panel.slice(panel.indexOf('.from("time_entries")'), panel.indexOf("}, ACTUALS_PAGES)"));
     expect(q).toContain('.not("job_id", "is", null)');
-    expect(q).toContain('.gte("clock_in", jobFrom)');
+    // The WHOLE oldest day (the window's own first company day, a day earlier for an overnight tail),
+    // never the instant `jobFrom`, which begins mid-afternoon on it.
+    expect(q).toContain('.gte("clock_in", actualsFromIso)');
+    expect(panel).toContain("const actualsFromIso = tzDayStartUtc(");
+    expect(q).not.toContain('.gte("clock_in", jobFrom)');
     expect(q).toContain('.lt("clock_in", tzDayStartUtc(todayStr, tz).toISOString())');
     expect(q).toContain('.order("clock_in", { ascending: false })');
+    // Paged, with a unique tiebreak, because a .limit() above PostgREST's ceiling can't see the cut.
+    expect(q).toContain('.order("id", { ascending: false })');
+    expect(q).toContain(".range(from, to)");
+    expect(panel).toContain("readPagesCapped<ActualEntryRow>(");
+    expect(panel).not.toContain(".limit(ACTUALS_LIMIT)");
+    // Everyone's Day's rows are paged the same way, and never cut at 1000 in silence.
+    expect(panel).toContain("readPagesCapped<CrewDayRow>(");
+    const crew = panel.slice(panel.indexOf('.from("crew_day_assignments")'), panel.indexOf("CREW_ROW_PAGES,\n"));
+    expect(crew).toContain(".range(from, to)");
+    expect(crew).toContain('.order("profile_id")');
+    expect(crew).not.toContain(".limit(");
+    expect(panel).toContain("actuals, actualsCappedBefore } = actualsFrom(entriesRead.error ? null : entriesRead.rows, tz, todayStr, entriesRead.capped)");
     const cols = panel.slice(panel.indexOf("const ENTRY_COLS"), panel.indexOf("const [historyReads"));
     expect(cols).not.toMatch(/rate_override|paid_at|miles|notes|lunch|pay/);
     // Jobs with in-window days but no listed day are read by id, 200 at a time, in the same round.
