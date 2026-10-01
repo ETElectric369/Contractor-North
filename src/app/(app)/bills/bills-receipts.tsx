@@ -31,6 +31,7 @@ import { ReceiptLines, type ReceiptForBilling } from "./receipt-billing-card";
 import { AlreadyBilledButton, NotBilledAfterAllButton } from "@/components/already-billed-sheet";
 import type { BillAlreadyBilled } from "@/lib/already-billed";
 import { isOpenBill } from "@/lib/open-counts";
+import { billSettledLabel } from "@/lib/supplier-owed";
 import { shortSupplierName } from "@/lib/supplier-name";
 import { useBillsSearch } from "./bills-search-box";
 
@@ -302,7 +303,7 @@ export function BillsReceipts({
               {/* The label is bounded (max-w + truncate) so a long typed supplier can never widen
                   this shrink-0 column and collapse the bill's name, number and job on the left. */}
               <span className="block max-w-[9rem] truncate text-xs text-slate-400">
-                {b.status === "paid" ? "Settled" : b.settledBySupplier ? `Settled · ${b.settledBySupplierName || shortSupplierName(b.supplier)} Says` : "On Account"}
+                {billSettledLabel(b, shortSupplierName)}
               </span>
             </span>
           </summary>

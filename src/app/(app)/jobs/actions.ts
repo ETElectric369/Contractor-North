@@ -29,7 +29,7 @@ import { depositCoversWords, finalFinishWords, finishedWithWorkOffBill, finishWo
 import { guardedFieldsMoved, planBillEdit, type BillClaimHolder } from "./bill-claims";
 import { bucketOf } from "@/lib/business-cost-buckets";
 import { restampLotsForBill } from "@/lib/stock-ledger";
-import { papersAfterBillDeleted, papersBehindBill, readBillStanding, standingRefusal } from "@/app/(app)/organize/paperwork-core";
+import { exactAccountFor, papersAfterBillDeleted, papersBehindBill, readBillStanding, standingRefusal } from "@/app/(app)/organize/paperwork-core";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   createInvoiceFromQuote,
@@ -1369,12 +1369,20 @@ export async function createBill(input: {
   // A job bill's category is the kind of paper it is (Receipt, Materials) and passes untouched.
   const category = jobId ? (input.category ?? null) : bucketOf(input.category);
 
+  // THE SUPPLIER IT IS ALREADY ON AN ACCOUNT FOR (8a982483). A scanned paper has had its account
+  // worked out since 0270 (exactAccountFor), and a bill TYPED here never did - so every cost added
+  // by hand, and every cost Nort recorded, minted a fresh unaccounted spelling that the Suppliers
+  // card then had to explain away. Best-effort and never a refusal: a miss leaves the column null
+  // and read-time resolution still places the paper, this just saves it from having to.
+  const supplierAccountId = await exactAccountFor(supabase, ctx.orgId, input.supplier);
+
   const { data: created, error } = await supabase
     .from("bills")
     .insert({
       job_id: jobId,
       po_id: poId,
       supplier: input.supplier.trim(),
+      ...(supplierAccountId ? { supplier_account_id: supplierAccountId } : {}),
       bill_number: input.bill_number.trim() || null,
       amount: input.amount || 0,
       status: input.status || "unpaid",

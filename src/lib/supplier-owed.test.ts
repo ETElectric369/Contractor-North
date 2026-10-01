@@ -2,6 +2,9 @@ import { describe, it, expect } from "vitest";
 import {
   NO_SUPPLIER_NAME_GROUP,
   NO_SUPPLIER_NAME_LABEL,
+  billSettledLabel,
+  boughtAtRegister,
+  flipBoughtHow,
   indexSupplierIdentity,
   isStillOwed,
   notOnAnAccountSentence,
@@ -156,6 +159,29 @@ describe("the one still-owed test", () => {
     expect(isStillOwed({ status: "unpaid", superseded: true })).toBe(false);
     expect(isStillOwed({ status: "unpaid", supersededByBillId: "x" })).toBe(false);
     expect(isStillOwed({ status: "unpaid", settledBySupplier: true })).toBe(false);
+  });
+});
+
+describe("what bills.status says, and what it does not", () => {
+  it("says only how the thing was bought", () => {
+    expect(boughtAtRegister({ status: "paid" })).toBe(true);
+    expect(boughtAtRegister({ status: "unpaid" })).toBe(false);
+    expect(boughtAtRegister({ status: null })).toBe(false);
+    expect(flipBoughtHow({ status: "paid" })).toBe("unpaid");
+    expect(flipBoughtHow({ status: "unpaid" })).toBe("paid");
+  });
+
+  it("gives a row the same words wherever it is drawn", () => {
+    const short = (n: string | null | undefined) => String(n ?? "").split(" ")[0] ?? "";
+    expect(billSettledLabel({ status: "paid", supplier: "Ridgeline Lumber" }, short)).toBe("Settled");
+    expect(billSettledLabel({ status: "unpaid", supplier: "Ridgeline Lumber" }, short)).toBe("On Account");
+    expect(billSettledLabel({ status: "unpaid", supplier: "Ridgeline Lumber", settledBySupplier: true }, short)).toBe("Settled · Ridgeline Says");
+    // A ticket settled at the register is just Settled: there is no supplier verdict to quote.
+    expect(billSettledLabel({ status: "paid", supplier: "Ridgeline Lumber", settledBySupplier: true }, short)).toBe("Settled");
+    // The account's own short name wins over the spelling the scanner wrote.
+    expect(
+      billSettledLabel({ status: "unpaid", supplier: "Northgate Electrical Distributors, Inc.", settledBySupplier: true, settledBySupplierName: "Northgate" }, short),
+    ).toBe("Settled · Northgate Says");
   });
 });
 

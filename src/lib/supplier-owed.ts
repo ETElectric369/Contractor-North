@@ -265,8 +265,49 @@ export interface StillOwedShape {
 export function isStillOwed(paper: StillOwedShape | null | undefined): boolean {
   if (!paper) return false;
   if (paper.superseded || paper.supersededByBillId) return false;
-  if (String(paper.status ?? "").toLowerCase() === "paid") return false;
+  if (boughtAtRegister(paper)) return false;
   return !paper.settledBySupplier;
+}
+
+/**
+ * HOW IT WAS BOUGHT, WHICH IS THE ONLY THING bills.status SAYS - and naming that is most of what
+ * this whole fix is (8a982483).
+ *
+ * 'paid' means settled at the register on the spot. It does NOT mean the supplier has been paid:
+ * applying a supplier's open list closes the SUPPLIER'S documents and writes no bill, so an
+ * on-account ticket keeps this status forever and reading it as a debt is the bug. Every screen that
+ * wants "is this still owed" wants `isStillOwed` above. This one is for the CONTROL that writes the
+ * column, and for a row's face, which must say what the tap will do.
+ */
+export function boughtAtRegister(paper: { status?: string | null } | null | undefined): boolean {
+  return String(paper?.status ?? "").toLowerCase() === "paid";
+}
+
+/** What that control writes when somebody taps it. One place, so the face and the write agree. */
+export function flipBoughtHow(paper: { status?: string | null } | null | undefined): "paid" | "unpaid" {
+  return boughtAtRegister(paper) ? "unpaid" : "paid";
+}
+
+/**
+ * WHAT ONE PAPER'S ROW SAYS ABOUT ITSELF - one expression, every screen (8a982483).
+ *
+ * The SAME bill read "On Account" on a job's Costs tab and "Settled · <supplier> Says" on /bills,
+ * because the badge was written out by hand in both places and only one of them had been told about
+ * the supplier's closed paper. Two screens disagreeing about one ticket is the small, visible
+ * version of two figures disagreeing about one pile of money.
+ *
+ * THREE DIFFERENT FACTS, and the order matters:
+ *   · settled at the register on the spot   -> "Settled"       (bills.status, how it was bought)
+ *   · their own closed paper covers it      -> "Settled · X Says"
+ *   · neither                               -> "On Account"
+ */
+export function billSettledLabel(
+  paper: { status?: string | null; supplier?: string | null; settledBySupplier?: boolean | null; settledBySupplierName?: string | null },
+  shortName: (raw: string | null | undefined) => string,
+): string {
+  if (String(paper?.status ?? "").toLowerCase() === "paid") return "Settled";
+  if (paper?.settledBySupplier) return `Settled · ${paper.settledBySupplierName || shortName(paper.supplier)} Says`;
+  return "On Account";
 }
 
 // ────────────────────────────────────────────────────────────────────────────────────────────────

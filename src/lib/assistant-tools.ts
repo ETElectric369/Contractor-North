@@ -9,6 +9,7 @@ import { loadShiftChains } from "@/lib/shift-chain";
 import { ESTIMATE_VISIT_TYPES } from "@/lib/statuses";
 import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
 import { getMoneyPipeline, orgTodayStr } from "@/lib/billing-pipeline";
+import { readSupplierOwed } from "@/lib/supplier-owed-read";
 import { invoiceBalance } from "@/lib/invoice-math";
 import { aggregatePayrollEntries, payRateForEntry } from "@/lib/payroll-math";
 import { summarizeMileage } from "@/lib/mileage-math";
@@ -347,9 +348,15 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
     input_schema: { type: "object", properties: { limit: { type: "integer", description: "Max rows (default 20, max 40)." } } },
   },
   {
+    name: "supplier_balances",
+    description:
+      "WHAT THE COMPANY OWES ITS SUPPLIERS — the one figure for that question, worked out exactly as the Bills page works it out. Use for 'how much do I owe suppliers', 'what do I owe <supplier>', 'am I square with anybody'. It returns TWO figures and they are answers to different questions: `owed` is the DEBT (where a supplier sends its own papers, that is their figure, not ours), and `bought_not_settled` is what was bought on account and has not been squared up yet, which is OUR paperwork and NOT a debt. Say which one you are quoting and never add them together. It also says how many papers are not on a supplier account yet — mention that whenever it is not zero, because those are counted under the name typed on the paper.",
+    input_schema: { type: "object", properties: {} },
+  },
+  {
     name: "list_bills",
     description:
-      "List supplier BILLS (money owed to suppliers) with supplier, amount, status, and the linked job. A bill a later one REPLACED is left out (a replaced copy is not a second debt), and each row says whether its pricing is still provisional — counter-ticket prices the supplier's own invoice will overwrite. Use for 'what bills are unpaid', 'how much do I owe suppliers'.",
+      "List supplier BILLS with supplier, amount, status, and the linked job. A bill a later one REPLACED is left out (a replaced copy is not a second debt), and each row says whether its pricing is still provisional — counter-ticket prices the supplier's own invoice will overwrite. Use for 'what bills are unpaid', 'show me the bills for this job'. NEVER ADD THESE UP TO ANSWER 'what do I owe' — this is a truncated LIST of the newest tickets under whatever name the scanner typed, several spellings can be one supplier, and a ticket the supplier's own closed paper already covers is still listed here. `supplier_balances` is the tool for that question.",
     input_schema: {
       type: "object",
       properties: {
@@ -610,6 +617,7 @@ export const STAFF_ONLY_DATA_TOOLS = new Set<string>([
   // be a straight bypass of that gate — a tech could read the company's paid costs by asking for a
   // quote line instead of asking for a cost.
   "price_material",
+  "supplier_balances", // what the company owes its suppliers - buy-side money, office only
   "get_bill", // supplier bill + its cost breakdown
   "get_purchase_order", // vendor PO + costs (unit_cost is buy-side pricing)
   "list_kits", // saved quote-bundle pricing
@@ -1540,6 +1548,61 @@ export async function runDataTool(
             invoice: p.invoices?.invoice_number ?? null,
             customer: embedName(p.invoices?.customers),
           })),
+        });
+      }
+
+      /**
+       * NORT READS THE SAME FUNCTION AS THE CARD (8a982483).
+       *
+       * He was asked "what do I owe CED", and answered off `list_bills`: twenty rows of a hundred
+       * and nineteen, newest first, grouped by nothing, added up by him. Erik asks him and then
+       * ACTS on the answer, so a figure that is merely plausible is worse here than on a screen -
+       * there is no card beside it to argue with. This returns `whatISupplierOwed` and
+       * `whatIBoughtNotSettled`, the same two functions /bills, the P&L card and the accountant's
+       * download all read, so his words match the card to the cent.
+       */
+      case "supplier_balances": {
+        const { data: auth } = await supabase.auth.getUser();
+        const userId: string | null = auth?.user?.id ?? null;
+        const { data: me } = userId ? await supabase.from("profiles").select("org_id").eq("id", userId).maybeSingle() : { data: null };
+        // EVERY READ BEHIND THIS FIGURE IS ORG-FILTERED. Three companies share this database.
+        const orgId = String((me as { org_id?: string | null } | null)?.org_id ?? "");
+        const read = orgId ? await readSupplierOwed(supabase, orgId) : null;
+        if (!read) {
+          return JSON.stringify({
+            error: "Couldn't work out the supplier balances just now. Say that rather than adding up a list of bills.",
+          });
+        }
+        return JSON.stringify({
+          as_of: read.today,
+          // (a) THE ONE NUMBER. Lead with it.
+          owed: money(read.owed.total),
+          owed_means: "What the company owes its suppliers. Where a supplier sends its own papers this is THEIR figure.",
+          by_supplier: read.owed.lines.map((l) => ({
+            supplier: l.name || "a supplier with no name on the paper",
+            owed: money(l.owed),
+            how:
+              l.how === "their-own-papers"
+                ? "their own open papers"
+                : l.how === "my-tickets-less-payments"
+                  ? "our tickets less what we have sent them"
+                  : "our own tickets - they have sent no balance",
+            on_a_supplier_account: l.accountId !== "",
+          })),
+          // (b) A DIFFERENT QUESTION. Never added to the figure above.
+          bought_not_settled: money(read.bought.total),
+          bought_not_settled_means:
+            "Bought on account and not squared up yet, from our own tickets. NOT a debt and NOT the same question as `owed`.",
+          bought_not_settled_bills: read.bought.papers,
+          papers_not_on_a_supplier_account: read.owed.notOnAnAccount.papers,
+          papers_not_on_a_supplier_account_total: money(read.owed.notOnAnAccount.total),
+          ...(read.owed.ahead.length
+            ? { ahead_at: read.owed.ahead.map((a) => ({ supplier: a.name, credit: money(a.credit) })), ahead_note: "A credit at one supplier does not pay another, so it is not taken off the figure above." }
+            : {}),
+          ...(read.owed.couldNotTotal.length
+            ? { could_not_total: read.owed.couldNotTotal.map((a) => a.name), could_not_total_note: "Say these could not be totalled rather than treating them as zero." }
+            : {}),
+          ...(read.failed.length ? { reads_that_failed: read.failed } : {}),
         });
       }
 

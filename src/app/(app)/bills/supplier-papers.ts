@@ -625,6 +625,10 @@ export async function loadSupplierDesk(supabase: any, userId: string, today: str
     bills: papersReadable ? (billsRes.data ?? []) : [],
     links: papersReadable ? (linksRes.data ?? []) : [],
     aliasRows: papersReadable ? (aliasRes?.data ?? []) : [],
+    // My Day places a paper the same way /bills does (8a982483). Without the accounts a ticket
+    // spelling an account's own name resolved to nothing here, so a paper his books already cover
+    // could still have been brought to him as one that needs sorting.
+    accountRows: accounts,
   });
   const feed = papersReadable
     ? supplierPaperFeed({

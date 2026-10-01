@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Badge, statusTone } from "@/components/ui/badge";
 import { useToast } from "@/components/toast";
 import { setBillStatus, deleteBill } from "@/app/(app)/jobs/actions";
+import { shortSupplierName } from "@/lib/supplier-name";
+import { billSettledLabel, boughtAtRegister, flipBoughtHow } from "@/lib/supplier-owed";
 
 /**
  * A BILL ROW'S THREE DOORS, ONE COPY FOR EVERY SCREEN (audit v1018, class 13): how it was bought,
@@ -26,7 +28,20 @@ export function BillRowDoors({
   onEdit,
   disabled = false,
 }: {
-  bill: { id: string; supplier: string; status: string; job_id?: string | null };
+  bill: {
+    id: string;
+    supplier: string;
+    status: string;
+    job_id?: string | null;
+    /**
+     * THE SUPPLIER'S OWN BOOKS CALL IT SETTLED (8a982483). The SAME bill read "On Account" on a
+     * job's Costs tab and "Settled · <supplier> Says" on /bills, because only /bills was told. The
+     * badge says it wherever the row is drawn now, and the control still says how it was BOUGHT -
+     * those are two different facts and both belong on the row.
+     */
+    settledBySupplier?: boolean | null;
+    settledBySupplierName?: string | null;
+  };
   /** The job the row is drawn on, for the server's revalidation; the bill's own job otherwise. */
   jobId?: string | null;
   onEdit: () => void;
@@ -39,17 +54,26 @@ export function BillRowDoors({
   const job = jobId ?? bill.job_id ?? "";
 
   function toggleStatus() {
-    const next = bill.status === "paid" ? "unpaid" : "paid";
+    const next = flipBoughtHow(bill);
     start(async () => {
       const res = await setBillStatus(bill.id, next, job);
       if (!res?.ok) {
         toast(res?.error ?? "Couldn't update the bill — try again.", "error");
         return;
       }
+      // WHAT THE TAP ACTUALLY DID, AND NOTHING MORE (8a982483).
+      //
+      // It used to promise the tap moved the supplier balance, and where a supplier sends its own
+      // papers that is FALSE: the balance is their open documents, and flipping bills.status moves
+      // it not one cent. A sentence the app says out loud after a write, that the next screen
+      // contradicts, is the onboarding-truth law broken at the worst possible moment - just after
+      // he pressed something.
+      //
+      // bills.status says HOW it was bought. That is what the toast says now.
       toast(
         next === "paid"
-          ? "Marked settled - it comes out of the supplier balance"
-          : "Marked on account - it goes back into the supplier balance",
+          ? "Marked settled at the register - it is no longer on account"
+          : "Marked on account - it is money you still owe them",
         "success",
       );
       router.refresh();
@@ -78,10 +102,10 @@ export function BillRowDoors({
         aria-label="How this bill was bought: tap to switch between Settled and On Account"
         className="flex min-h-11 items-center gap-2 rounded-lg px-2 text-xs font-medium text-slate-600 ring-1 ring-slate-200 hover:bg-white"
       >
-        <Badge tone={statusTone(bill.status)}>{bill.status === "paid" ? "Settled" : "On Account"}</Badge>
+        <Badge tone={statusTone(bill.status)}>{billSettledLabel(bill, shortSupplierName)}</Badge>
         {/* THE DEED, NOT "SWITCH" (ea2b7172): on a job page a bare "Switch" beside the badge read
             as "switch the job". The face says what the tap does to THIS bill. */}
-        <span>{bill.status === "paid" ? "Mark On Account" : "Mark Settled"}</span>
+        <span>{boughtAtRegister(bill) ? "Mark On Account" : "Mark Settled"}</span>
       </button>
       <Button variant="outline" onClick={onEdit} disabled={busy}>
         <Pencil /> Edit

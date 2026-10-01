@@ -41,7 +41,7 @@ import {
   type SamePurchaseCandidate,
   type SupplierDoc,
 } from "@/lib/same-purchase";
-import { indexSupplierAliases } from "@/lib/supplier-identity";
+import { aliasKey, indexSupplierAliases } from "@/lib/supplier-identity";
 import { BUSINESS_COST_BUCKETS, isBusinessCostBucket, type BusinessCostBucket } from "@/lib/business-cost-buckets";
 import { readBillStanding, standingRefusal } from "@/app/(app)/organize/paperwork-core";
 import { creditWait } from "./supplier-reconcile";
@@ -98,7 +98,7 @@ const text = (v: unknown): string | null => {
  * "Link every bill with this spelling" has to mean that spelling, no more and no less, or the row
  * he read and the rows that moved are two different sets.
  */
-const spellingKey = (raw: unknown): string => String(raw ?? "").trim().toLowerCase();
+const spellingKey = (raw: unknown): string => aliasKey(String(raw ?? ""));
 
 const isPayMethod = (v: unknown): v is SupplierPayMethod =>
   typeof v === "string" && (SUPPLIER_PAY_METHODS as readonly string[]).includes(v);

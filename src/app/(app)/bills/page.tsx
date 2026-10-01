@@ -5,6 +5,7 @@ import { getOrgSettings } from "@/lib/org-settings";
 import { featureOn } from "@/lib/features";
 import { todayStrInTz } from "@/lib/tz";
 import {
+  aliasKey,
   findDuplicateBills,
   readBillInvoice,
   resolveSupplierAccount,
@@ -74,7 +75,7 @@ import {
   type SupplierMergeProposal,
   type SupplierSpelling,
 } from "./supplier-balance";
-import { whatIBoughtNotSettled, whatISupplierOwed } from "@/lib/supplier-owed";
+import { billSettledLabel, whatIBoughtNotSettled, whatISupplierOwed } from "@/lib/supplier-owed";
 import { SuppliersCard } from "./suppliers-card";
 import {
   acceptSupplierMerge,
@@ -548,7 +549,9 @@ export default async function BillsPage({
   // the card calls it on the rows this page hands over. A second copy of a money rule on a page is
   // how two screens end up disagreeing about the same dollar (the 24%-vs-82% budget bug, audit
   // v800), so this file's whole job is to hand over rows, spelled and totalled once.
-  const spellingKey = (raw: unknown) => String(raw ?? "").trim().toLowerCase();
+  // THE IMPORT, not a fourth copy (8a982483). `aliasKey` is what `supplier_aliases` is unique on,
+  // what a press actually moves bills by, and what the resolver groups a paper on no account under.
+  const spellingKey = (raw: unknown) => aliasKey(String(raw ?? ""));
 
   const supplierPayments = ((paymentRows ?? []) as any[]).map((r) => ({
     id: String(r.id),
@@ -1231,7 +1234,9 @@ export default async function BillsPage({
         formatDateShort(b.bill_date),
         formatCurrency(b.amount),
         b.job_id ? `on ${jobSaid(b.job_id) ?? b.jobs?.name ?? "a job"}` : isShelfTicket(b) ? "shop stock" : `business cost, ${bucketOf(b.category)}`,
-        b.status === "paid" ? "settled" : "on account",
+        // THE ROW'S OWN WORDS, from the one function that makes them (8a982483): a ticket the
+        // supplier's closed paper covers reads the same in Search Or Ask as it does on its row.
+        billSettledLabel({ ...b, settledBySupplier: settledBySupplierIds.has(String(b.id)) }, shortSupplierName).toLowerCase(),
       ]
         .filter(Boolean)
         .join(" · "),
@@ -1243,7 +1248,11 @@ export default async function BillsPage({
         b.bill_date,
         b.category,
         ...kindWords,
-        b.status === "paid" ? "settled paid" : "on account unpaid",
+        // The words he might TYPE to find it, which is a wider net than the words the row shows:
+        // "unpaid" still finds a ticket still owed even though no screen calls it that any more.
+        isOnAccountBill({ status: String(b.status ?? ""), settledBySupplier: settledBySupplierIds.has(String(b.id)) })
+          ? "on account unpaid bought"
+          : "settled paid",
         b.jobs?.job_number,
         b.jobs?.name,
         ...jobWords(b.job_id),
