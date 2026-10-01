@@ -738,7 +738,12 @@ export function SupplierUnfiledSpellings({
       <div className="mb-3">
         <h2 className="text-base font-semibold text-slate-900">
           Supplier Names Not On An Account Yet ({spellings.length})
-          {owedHere > 0.005 ? <span className="font-normal text-slate-500"> · {formatCurrency(owedHere)} Owed</span> : null}
+          {/* NOT A THIRD "OWED" ON ONE PAGE (8a982483). This is the same pile of his own tickets
+              All Bills counts, shown again under the names that still need an account - so it says
+              what it is, in the words that fold uses. */}
+          {owedHere > 0.005 ? (
+            <span className="font-normal text-slate-500"> · {formatCurrency(owedHere)} Bought On Account</span>
+          ) : null}
         </h2>
         <WhyFold>
           <p>

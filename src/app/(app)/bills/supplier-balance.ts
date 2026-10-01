@@ -63,6 +63,9 @@
  * claimable, names what waiting costs, and names what is already gone.
  */
 
+import { aliasKey } from "@/lib/supplier-identity";
+import { isStillOwed } from "@/lib/supplier-owed";
+
 /** The methods migration 0270 lets `supplier_payments.method` be. */
 export const SUPPLIER_PAY_METHODS = ["cash", "check", "transfer", "card", "other"] as const;
 export type SupplierPayMethod = (typeof SUPPLIER_PAY_METHODS)[number];
@@ -96,6 +99,20 @@ export interface SupplierBillRow {
   invoiceNumber: string | null;
   /** True when one document covers several of the supplier's invoices (the email import). */
   isStatement: boolean;
+  /**
+   * SET ASIDE AS ANOTHER TICKET'S DUPLICATE (0271). It keeps its rows and its history and it still
+   * shows in the ledger; it never lands in a balance, because the ticket that replaced it already
+   * has. The page always knew this and the balance did not, so a duplicate he had already dealt
+   * with went on sitting inside the figure at the top of the card.
+   */
+  superseded?: boolean;
+  /**
+   * THE SUPPLIER'S OWN BOOKS CALL THIS ONE SETTLED - every document of theirs covering it is
+   * closed, and none is still open. Read-side only, worked out by `supplierCoverage`, never a
+   * column and never written to bills.status. Under model B it changes nothing (their open papers
+   * were always the figure); under model A it is the whole of 8a982483.
+   */
+  settledBySupplier?: boolean;
 }
 
 /**
@@ -289,12 +306,21 @@ export interface SupplierBalance {
   openDocumentsOnRegisterAccount: boolean;
 }
 
-/** On account, i.e. still carrying a balance. Anything not explicitly 'paid' counts as owed.
+/**
+ * ON ACCOUNT, i.e. still carrying a balance - and the rule lives in ONE place now (8a982483).
  *
- *  The lean is deliberate: a null status, a typo, a status some later migration adds should all
- *  show up as money he may still owe and be argued with on screen, rather than quietly leave the
- *  balance and make the number he is trusting too small. */
-export const isOnAccountBill = (bill: { status: string }) => String(bill?.status ?? "").toLowerCase() !== "paid";
+ * The lean this was written for is kept, and it is now `isStillOwed`'s: a null status, a typo, a
+ * status some later migration adds all show up as money he may still owe and get argued with on
+ * screen, rather than quietly leaving the balance and making the number he is trusting too small.
+ *
+ * WHAT CHANGED IS WHAT IT CAN SEE. This knew only `status`, so the three readers that call it - the
+ * suppliers card, the P&L card and the accountant's workbook - went on counting a ticket somebody
+ * had already set aside as a duplicate, and a ticket the supplier's own closed paper covers. That
+ * second one is the double count Erik was looking at. Both are facts about the bill, so they ride
+ * on the bill row and this test reads them.
+ */
+export const isOnAccountBill = (bill: { status: string; superseded?: boolean | null; settledBySupplier?: boolean | null }) =>
+  isStillOwed(bill);
 
 /**
  * Whole days between two wall-calendar days. Date-only strings anchor at NOON UTC before they are
@@ -687,6 +713,11 @@ export function supplierBalance(account: SupplierAccountRow, today: string): Sup
 
   for (const bill of account.bills ?? []) {
     const amount = r2(Number(bill.amount) || 0);
+    // NEITHER PILE. A duplicate somebody set aside, and a ticket the supplier's own closed paper
+    // covers, are not money on account and they are not money settled at the register either -
+    // they are already counted somewhere else, which is the whole complaint. Letting them fall to
+    // the `else` below would move the double count rather than end it.
+    if (bill.superseded || bill.settledBySupplier) continue;
     if (isOnAccountBill(bill)) {
       charged = r2(charged + amount);
       chargedBills += 1;
@@ -892,12 +923,15 @@ export interface SupplierBookEntry {
 
 /**
  * The exact string, trimmed and lowercased - `aliasKey` in supplier-identity, which is what
- * `supplier_aliases` is unique on and what actually moves bills. A local copy rather than an
- * import so the fuzzy matcher does not get dragged into the client bundle for three lines; the
- * rule itself must never diverge, because the row he reads and the rows a press moves would then
- * be two different sets.
+ * `supplier_aliases` is unique on, what actually moves bills, and what
+ * `supplierAccountForPaper` groups a paper on no account under.
+ *
+ * IT IS THE IMPORT NOW, not a copy. It was copied here so the fuzzy matcher would not be dragged
+ * into the client bundle for three lines, with a comment saying the rule must never diverge - and
+ * a rule written twice is this whole bug in miniature, which is a steeper price than a few bytes.
+ * `aliasKey` is three lines of string work with no dependency of its own.
  */
-const sameSpelling = (raw: unknown): string => String(raw ?? "").trim().toLowerCase();
+const sameSpelling = (raw: unknown): string => aliasKey(String(raw ?? ""));
 
 /**
  * THE PAIRS THE MATCHER WILL NOT DECIDE, TURNED INTO SOMETHING WITH DOORS ON IT.

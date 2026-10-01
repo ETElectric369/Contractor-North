@@ -296,7 +296,9 @@ describe("which receipt made which bill, unread", () => {
     expect(text).toContain("Couldn't load which receipt made each bill just now, so every receipt file is listed. Reload to try again.");
     // The bills themselves were read: the ledger still lists them, led by what's open.
     expect(text).not.toContain("Couldn't read your bills just now");
-    expect(text).toContain("All Bills · 3 Unpaid $529.45");
+    // "Bought On Account", not "Unpaid" (8a982483): see bills-receipts.tsx. The figure is his own
+    // paperwork and the Suppliers card above answers the debt.
+    expect(text).toContain("All Bills · 3 Bought On Account $529.45");
   });
 });
 

@@ -149,6 +149,7 @@ const money = (): OwnerMoneyInputs => ({
     { id: "pp3", profile_id: SAM, amount: 999, paid_on: "2026-06-26", method: "cash", voided_at: "2026-06-27T00:00:00Z" },
   ],
   creditMemos: [],
+  supplierAliases: [],
   people,
   recordsStart: "2026-02-03",
   shelfLots: [{ lot_id: "L1", bill_id: "b1", cost: 150, cost_left: 100, live: true }],

@@ -30,6 +30,7 @@ const inputs: OwnerMoneyInputs = {
   runs: [],
   payPayments: [],
   creditMemos: [],
+  supplierAliases: [],
   people: new Map(),
   recordsStart: "2026-06-01",
 };

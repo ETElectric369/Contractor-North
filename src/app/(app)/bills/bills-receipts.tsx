@@ -31,6 +31,7 @@ import { ReceiptLines, type ReceiptForBilling } from "./receipt-billing-card";
 import { AlreadyBilledButton, NotBilledAfterAllButton } from "@/components/already-billed-sheet";
 import type { BillAlreadyBilled } from "@/lib/already-billed";
 import { isOpenBill } from "@/lib/open-counts";
+import { billSettledLabel } from "@/lib/supplier-owed";
 import { shortSupplierName } from "@/lib/supplier-name";
 import { useBillsSearch } from "./bills-search-box";
 
@@ -155,6 +156,7 @@ export function BillsReceipts({
   bills,
   docs,
   readFailed = false,
+  boughtNotSettled = null,
   papersNote = null,
   switches = { features: ALL_ON, isOwner: false },
   alreadyBilled = {},
@@ -168,6 +170,13 @@ export function BillsReceipts({
   docs: DocRow[];
   /** The bills read failed (audit v1018, class 2): said, never "No bills here yet" and $0.00. */
   readFailed?: boolean;
+  /**
+   * QUESTION (b), ANSWERED ONCE BY `whatIBoughtNotSettled` (8a982483): what he bought on account
+   * and has not squared up. Passed in rather than summed here, because this fold holds only the
+   * rows the search left visible and the figure must be about his whole book - and because a
+   * second copy of the rule is how this line and the Suppliers card came to disagree.
+   */
+  boughtNotSettled?: { total: number; papers: number } | null;
   /** Said above the bills when the page couldn't read which receipt made which bill: every row then
    *  draws no Receipt door, and a bill that has one must not look like one that never had any. */
   papersNote?: string | null;
@@ -246,8 +255,16 @@ export function BillsReceipts({
   const allCount = bills.length + pos.length + docs.length;
   // WHAT IS OPEN LEADS THE LINE: the bills still owed (a copy set aside as a duplicate is listed,
   // struck through, and never counted), never how many rows the list holds.
+  //
+  // AND IT IS QUESTION (b), NOT A DEBT (8a982483). This figure is built from HIS paperwork - what
+  // he bought on account and has not squared up - while the Suppliers card above answers what he
+  // OWES, which is their figure where they send him one. Both are true, they are different numbers,
+  // and this line calling itself "Unpaid" over a card saying "Owed" is what made him stop believing
+  // the screen. The page hands the answer down (`boughtNotSettled`) so the two cannot drift; the
+  // local sum is the fallback for a caller that has not been given it.
   const unpaid = bills.filter((b) => isOpenBill(b));
-  const unpaidTotal = unpaid.reduce((s, b) => s + (Number(b.amount) || 0), 0);
+  const unpaidTotal = boughtNotSettled ? boughtNotSettled.total : unpaid.reduce((s, b) => s + (Number(b.amount) || 0), 0);
+  const unpaidCount = boughtNotSettled ? boughtNotSettled.papers : unpaid.length;
 
   const billRows = shownBills.map((b) => {
     const lineCount = b.line_items?.length ?? 0;
@@ -286,7 +303,7 @@ export function BillsReceipts({
               {/* The label is bounded (max-w + truncate) so a long typed supplier can never widen
                   this shrink-0 column and collapse the bill's name, number and job on the left. */}
               <span className="block max-w-[9rem] truncate text-xs text-slate-400">
-                {b.status === "paid" ? "Settled" : b.settledBySupplier ? `Settled · ${b.settledBySupplierName || shortSupplierName(b.supplier)} Says` : "On Account"}
+                {billSettledLabel(b, shortSupplierName)}
               </span>
             </span>
           </summary>
@@ -402,8 +419,12 @@ export function BillsReceipts({
         summary={
           <span className="text-base font-semibold text-slate-900">
             All Bills
-            <span className={`font-normal ${!readFailed && unpaid.length ? "text-amber-800" : "text-slate-500"}`}>
-              {readFailed ? " · Couldn't Read" : unpaid.length ? ` · ${unpaid.length} Unpaid ${formatCurrency(unpaidTotal)}` : " · Nothing Unpaid"}
+            <span className={`font-normal ${!readFailed && unpaidCount ? "text-amber-800" : "text-slate-500"}`}>
+              {readFailed
+                ? " · Couldn't Read"
+                : unpaidCount
+                  ? ` · ${unpaidCount} Bought On Account ${formatCurrency(unpaidTotal)}`
+                  : " · All Squared Up"}
             </span>
           </span>
         }

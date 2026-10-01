@@ -102,6 +102,41 @@ describe("the Costs tab's bill row", () => {
     expect(html).not.toContain("Toggle paid/unpaid");
   });
 
+  /**
+   * THE SAME TICKET, THE SAME WORDS, ON BOTH SCREENS (8a982483, findings 3/8).
+   *
+   * `billSettledLabel` is one expression and this tab already drew it; what it had never been handed
+   * was the FACT. `interface Bill` had no `settledBySupplier`, nothing on the job page computed it,
+   * and `<BillRowDoors bill={b}>` passed the row through unchanged - so a CED ticket whose covering
+   * CED paper is closed read "Settled · CED Says" on /bills and "On Account" here, with nothing on
+   * this tab saying the money had already left the supplier's balance. A string-scan tripwire cannot
+   * catch a prop nobody passes; this renders the component and reads the row.
+   */
+  it("says the supplier settled it, in the same words /bills uses, when the page says so", () => {
+    const settled = [
+      { ...BILLS[0], settledBySupplier: true, settledBySupplierName: "CED" },
+      BILLS[1],
+    ];
+    const html = renderToStaticMarkup(createElement(JobBills, { jobId: "j11", bills: settled as any, pos: [] }));
+    const toggles = Array.from(html.matchAll(/<button[^>]*aria-label="How this bill was bought[^"]*"[^>]*>([\s\S]*?)<\/button>/g));
+    const faces = toggles.map((t) => t[1].replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim());
+    // The badge is the supplier's verdict, and the control beside it no longer offers to do the
+    // thing the badge says is already done - it names the register, which is what the tap writes.
+    expect(faces[0]).toBe("Settled · CED Says Mark Settled At The Register");
+    // The ticket settled at the register is untouched by any of this.
+    expect(faces[1]).toBe("Settled Mark On Account");
+  });
+
+  /** AND A LOST READ SAYS SO. With the covering read gone, a row reading "On Account" would claim the
+   *  money is still out when the supplier may already have settled it. Nothing silent. */
+  it("says it could not check rather than drawing every row as On Account", () => {
+    const html = renderToStaticMarkup(
+      createElement(JobBills, { jobId: "j11", bills: BILLS as any, pos: [], settledSaysUnread: true }),
+    );
+    expect(html).toContain("Couldn&#x27;t check these against the papers your suppliers sent just now");
+    expect(html).toContain('role="alert"');
+  });
+
   it("the bill opens: the supplier line and a 44px Open The Bill both land on the bill's fold in /bills", () => {
     const html = render();
     for (const b of BILLS) {

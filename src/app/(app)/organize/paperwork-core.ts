@@ -6,7 +6,8 @@ import { AUTO_FILE_BUCKETS, BUSINESS_COST_BUCKETS, LEGACY_GAS_AND_TRUCK, bucketO
 import { getOrgSettings } from "@/lib/org-settings";
 import { tradeWordsOr, withArticle } from "@/lib/org-trade";
 import { ACTIVE_JOB_STATUSES } from "@/lib/job-status";
-import { indexSupplierAliases, resolveSupplierAccount, type SupplierAliasIndex } from "@/lib/supplier-identity";
+import { indexSupplierAliases, type SupplierAliasIndex } from "@/lib/supplier-identity";
+import { indexSupplierIdentity, supplierAccountForPaper } from "@/lib/supplier-owed";
 import { openListFromReader } from "@/lib/supplier-open-list";
 import {
   findSameNumber,
@@ -176,23 +177,41 @@ export async function tradeOf(supabase: any, orgId: string | null | undefined): 
 }
 
 /**
- * The supplier ACCOUNT for a spelling, by exact alias only (0270: the alias exists because a person
- * pressed something to make it). A miss, or a read that fails, is "not on an account", which is
- * exactly what every bill was before this: never a guess and never a refusal.
+ * THE SUPPLIER ACCOUNT FOR A SPELLING, by the one resolver (lib/supplier-owed, 8a982483).
+ *
+ * This is the ONLY thing that fills `bills.supplier_account_id` when a paper is scanned, and it
+ * read `supplier_aliases` and nothing else - so a ticket scanned under the name on the very account
+ * it belongs to resolved to NOTHING, because `createSupplierAccount` writes no alias row for an
+ * account's own name. That ticket then landed in the unfiled pile and was counted under a heading
+ * that said "Owed", which is half of the mechanism behind Erik's two figures.
+ *
+ * It resolves by the account's own normalised name as well now - exact equality on the normalised
+ * string, never a fuzzy score, so punctuation, "Inc." and "Dist." stop hiding a match while a
+ * judgement about two companies stays on a button he presses.
+ *
+ * A miss, or a read that fails, is still "not on an account": never a guess and never a refusal.
  */
 export async function exactAccountFor(supabase: any, orgId: string | null | undefined, supplier: string | null | undefined): Promise<string | null> {
   if (!orgId || !String(supplier ?? "").trim()) return null;
-  try {
-    const { data, error } = await supabase
-      .from("supplier_aliases")
-      .select("alias, supplier_account_id")
-      .eq("org_id", orgId)
-      .limit(5000);
-    if (error) return null;
-    return resolveSupplierAccount(supplier, data as { alias: string; supplier_account_id: string }[]);
-  } catch {
-    return null;
-  }
+  // EACH READ STANDS ALONE. One try around both would mean a failed accounts read also lost the
+  // aliases, so a spelling somebody had already filed by hand would stop resolving - a fix that
+  // widened the reach and then narrowed it on the unhappy path.
+  const read = async <T>(q: () => any): Promise<T[]> => {
+    try {
+      const res = await q();
+      return res?.error ? [] : ((res?.data ?? []) as T[]);
+    } catch {
+      return [];
+    }
+  };
+  const [aliases, accounts] = await Promise.all([
+    read<{ alias: string; supplier_account_id: string }>(() =>
+      supabase.from("supplier_aliases").select("alias, supplier_account_id").eq("org_id", orgId).limit(5000),
+    ),
+    read<{ id: string; name: string }>(() => supabase.from("supplier_accounts").select("id, name").eq("org_id", orgId).limit(500)),
+  ]);
+  if (!aliases.length && !accounts.length) return null;
+  return supplierAccountForPaper({ supplier }, indexSupplierIdentity({ accounts, aliases })).accountId;
 }
 
 /** The printed number, cleaned for storage: no longer than a bill label can carry. */

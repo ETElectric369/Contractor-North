@@ -15,6 +15,7 @@ import { ACTIONS_ROW_CLS, SectionActionsMenu } from "@/components/section-action
 import { formatCurrency, formatDate } from "@/lib/utils";
 import {
   SUPPLIER_PAY_METHODS,
+  isOnAccountBill,
   r2,
   sayAge,
   supplierBalance,
@@ -22,6 +23,7 @@ import {
   type SupplierActionResult,
   type SupplierPayMethod,
 } from "./supplier-balance";
+import { notOnAnAccountSentence, supplierFigureUnread, type SupplierOwedLine, type WhatISupplierOwed } from "@/lib/supplier-owed";
 import { SupplierPaperLists, type SupplierInvoiceActions } from "./supplier-invoices-card";
 import { type ReconcileJob, type SupplierInvoiceRow, type SupplierPaperCard, type SupplierReconcileFeed } from "./supplier-reconcile";
 
@@ -215,6 +217,8 @@ export function SuppliersCard({
   accounts,
   today,
   unassigned = null,
+  owedToSuppliers = null,
+  boughtNotSettled = null,
   reconcile = null,
   noSupplierDocument = {},
   needsYouIds = [],
@@ -230,6 +234,21 @@ export function SuppliersCard({
   today: string;
   /** Bills on no account yet. Shown so every dollar on this page is accounted for somewhere. */
   unassigned?: { bills: number; total: number } | null;
+  /**
+   * QUESTION (a), ALREADY ANSWERED: WHAT HE OWES HIS SUPPLIERS (8a982483, lib/supplier-owed.ts).
+   *
+   * THE CARD NO LONGER WORKS OUT THE TOTAL. It used to add `onAccountOwed + registerUnpaid +
+   * unfiled`, and the first two of those reached their bills by joining through
+   * `bills.supplier_account_id` while the third grouped `bills.supplier` free text - one total
+   * built from two different sets of paper, which is why it could never be reconciled with the
+   * figure under All Bills however the predicate was sharpened. One function answers it now and
+   * this card reads the answer.
+   */
+  owedToSuppliers?: WhatISupplierOwed | null;
+  /** QUESTION (b): what he bought on account and has not squared up. Named here so the two figures
+   *  stand beside each other with their questions on them, instead of one of them being discovered
+   *  further down the page under a word that reads like a debt. */
+  boughtNotSettled?: { total: number; papers: number } | null;
   /**
    * THE SUPPLIER'S OWN DOCUMENTS (migration 0273), for the accounts we hold them for. `byAccount`
    * holds the SAME row objects handed to `accounts[].supplierInvoices`: one array, two readers.
@@ -328,14 +347,25 @@ export function SuppliersCard({
   }, [canReconcile, reconcile]);
 
   /** No figure for this account: it is counted from bills less payments and one of those reads
-   *  (or the supplier's own papers, which would have counted it instead) failed. */
+   *  (or the supplier's own papers, which would have counted it instead) failed. BY THE ONE
+   *  FUNCTION, not a third copy of it (8a982483): the copy in Nort's read left out the supplier's
+   *  own papers and he quoted a number this card refuses to show. */
   const cantTotal = (account: SupplierAccountRow, balance: ReturnType<typeof supplierBalance>) =>
-    balancesUnread && account.onAccount && balance.model !== "supplier-invoices";
+    supplierFigureUnread({ onAccount: account.onAccount, model: balance.model, balancesUnread });
 
   // WHAT HE OWES, not a net position: an account paid ahead does not reduce the next one's bill.
   const owing = balances.filter((b) => (b.balance.owed ?? 0) > 0.005);
   const onAccountOwed = r2(owing.reduce((s, b) => s + (b.balance.owed ?? 0), 0));
-  const ahead = balances.filter((b) => (b.balance.owed ?? 0) < -0.005);
+  // WHERE HE IS AHEAD, READ rather than rebuilt (8a982483). This filtered the accounts itself, so a
+  // credit on a SPELLING not on an account yet - how a return is filed in this app, a negative
+  // on-account bill - was in no clause on the card at all. `whatISupplierOwed` holds every credit it
+  // leaves out of the total, account or spelling, so saying it here says all of them. The fallback
+  // is the old filter and exists only for a caller that has not been handed the answer.
+  const aheadAt: { name: string; credit: number }[] = owedToSuppliers
+    ? owedToSuppliers.ahead
+    : balances
+        .filter((b) => (b.balance.owed ?? 0) < -0.005)
+        .map((b) => ({ name: b.account.name, credit: r2(-(b.balance.owed ?? 0)) }));
   // Money marked On Account on a supplier he settles at the register: no balance to sit in, still
   // money. UNDER MODEL B it is not a second pile: that account's `owed` is already the supplier's.
   const registerUnpaid = r2(
@@ -343,8 +373,23 @@ export function SuppliersCard({
       .filter((b) => b.balance.unpaidOnRegisterAccount && b.balance.model !== "supplier-invoices")
       .reduce((s, b) => s + b.balance.charged, 0),
   );
-  const unfiled = r2(unassigned?.total ?? 0);
-  const totalOwed = r2(onAccountOwed + registerUnpaid + unfiled);
+  const unfiled = r2(owedToSuppliers?.notOnAnAccount.total ?? unassigned?.total ?? 0);
+  // THE ONE NUMBER, read rather than rebuilt. The fallback is the old sum and it exists only for a
+  // caller that has not been given the answer yet; the page always gives it.
+  const totalOwed = owedToSuppliers ? r2(owedToSuppliers.total) : r2(onAccountOwed + registerUnpaid + unfiled);
+  const notOnAccount = owedToSuppliers?.notOnAnAccount ?? null;
+  // WHAT THE TOTAL IS MADE OF, split by WHOSE WORD each slice is - which is the only split that
+  // tells him how much to trust a figure. A supplier's own paper can be checked line by line
+  // against their portal; our own tickets cannot. Every dollar of the total is in exactly one of
+  // these four, which is what makes the sentence below checkable instead of decorative.
+  const sumOf = (pick: (l: SupplierOwedLine) => boolean) =>
+    r2((owedToSuppliers?.lines ?? []).filter(pick).reduce((s, l) => s + l.owed, 0));
+  const theirOwnPapers = sumOf((l) => l.how === "their-own-papers");
+  const myTickets = sumOf((l) => l.how === "my-tickets-less-payments");
+  // An account he settles at the register that is somehow carrying tickets marked On Account. No
+  // balance to sit in, still money, and the contradiction belongs on screen rather than inside a
+  // figure - which is what the card's own checks have always said about it.
+  const registerOwed = sumOf((l) => l.how === "my-tickets-no-account" && l.accountId !== "");
   // Accounts whose figure now comes from the supplier, and what his own paperwork still says.
   const supplierModelled = balances.filter((b) => b.balance.model === "supplier-invoices");
   const modelledBillsUnpaid = r2(supplierModelled.reduce((s, b) => s + b.balance.charged, 0));
@@ -523,6 +568,14 @@ export function SuppliersCard({
             )
           )}
         </div>
+        {/* WHICH QUESTION THIS FIGURE ANSWERS, in one line, where he reads the figure (8a982483).
+            There are two true numbers about supplier money on this page and he was reading them as
+            one: this is the debt, and All Bills below is what he has bought and not squared up. */}
+        {!balancesUnread && totalOwed > 0.005 && (
+          <p className="mt-0.5 text-sm text-slate-500">
+            What you still owe your suppliers. Where they send you their own papers, this is their figure.
+          </p>
+        )}
         {balancesUnread && (
           <p className="mt-1 text-sm text-amber-800" role="alert">
             Couldn&apos;t read everything your balances are made of just now, so the ones that depend on it aren&apos;t totalled. Reload the page to try again.
@@ -542,13 +595,30 @@ export function SuppliersCard({
           {totalOwed > 0.005 && !balancesUnread && (
             <p>
               {[
-                onAccountOwed > 0.005 ? `${formatCurrency(onAccountOwed)} on ${owing.length} ${owing.length === 1 ? "account" : "accounts"}.` : "",
-                registerUnpaid > 0.005 ? `${formatCurrency(registerUnpaid)} is on suppliers you pay at the register and still marked On Account.` : "",
-                unfiled > 0.005 ? `${formatCurrency(unfiled)} is on bills with no supplier account yet.` : "",
+                theirOwnPapers > 0.005
+                  ? `${formatCurrency(theirOwnPapers)} is what your suppliers' own papers say is still open.`
+                  : "",
+                myTickets > 0.005
+                  ? `${formatCurrency(myTickets)} is from your own tickets, on suppliers who have not sent you a balance.`
+                  : "",
+                registerOwed > 0.005
+                  ? `${formatCurrency(registerOwed)} is on suppliers you pay at the register and still marked On Account.`
+                  : "",
+                notOnAccount ? notOnAnAccountSentence(notOnAccount, formatCurrency) : "",
               ]
                 .filter(Boolean)
                 .join(" ")}
-              {ahead.length > 0 ? ` You are ahead at ${ahead.map((b) => b.account.name).join(", ")}, which does not come off the total.` : ""}
+              {aheadAt.length > 0 ? ` You are ahead at ${aheadAt.map((a) => a.name).join(", ")}, which does not come off the total.` : ""}
+            </p>
+          )}
+          {/* THE TWO FIGURES, NAMED, ON THE SAME SCREEN. The arithmetic that reconciles them used
+              to be the only honest thing on this card and it was folded away under a heading that
+              led with one number over a list that led with another. */}
+          {boughtNotSettled && boughtNotSettled.total > 0.005 && (
+            <p>
+              All Bills below says {formatCurrency(boughtNotSettled.total)} across {boughtNotSettled.papers}{" "}
+              {boughtNotSettled.papers === 1 ? "bill" : "bills"} bought on account and not squared up yet. That is your own
+              paperwork, not a bill from them, so it is a different number from the one above and neither is wrong.
             </p>
           )}
           {supplierModelled.length > 0 && (
@@ -560,7 +630,7 @@ export function SuppliersCard({
                   ? " Which of your unpaid bills there they never billed you for couldn't be checked just now, so none is called your paperwork."
                   : ""
                 : modelledExplained > 0.005
-                  ? ` All Bills still shows ${formatCurrency(modelledExplained)} unpaid there, which is your paperwork rather than theirs.`
+                  ? ` All Bills still shows ${formatCurrency(modelledExplained)} bought on account there, which is your paperwork rather than theirs.`
                   : ""}
             </p>
           )}
@@ -568,16 +638,42 @@ export function SuppliersCard({
 
         {/* NOTHING HIDES: money on bills with no supplier account is in no balance until it is filed,
             and the doors that file it live under More. */}
-        {unassigned && unassigned.total > 0.005 && (
+        {/* EVERY PAPER THAT IS NOT ON AN ACCOUNT YET, INCLUDING THE ONES WITH NO NAME ON THEM. The
+            count used to come from a list of SPELLINGS, so a bill carrying no supplier name at all
+            was dropped from it while All Bills went on counting the money - the two halves of one
+            screen disagreeing by exactly the rows nothing on the page mentioned. */}
+        {notOnAccount && notOnAccount.papers > 0 ? (
           <a
             href="#supplier-names"
             className="mb-2 flex min-h-11 items-center justify-between gap-3 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900 hover:bg-amber-100"
           >
             <span className="min-w-0">
-              {formatCurrency(unassigned.total)} On {unassigned.bills} {unassigned.bills === 1 ? "Bill" : "Bills"} With No Supplier Account
+              {formatCurrency(notOnAccount.total)} On {notOnAccount.papers} {notOnAccount.papers === 1 ? "Bill" : "Bills"} With No
+              Supplier Account
+              {notOnAccount.unnamed > 0
+                ? ` · ${notOnAccount.unnamed} With No Supplier Name`
+                : ""}
+              {/* A CREDIT AMONG THEM IS NOT IN THAT FIGURE, and the door says so - otherwise the
+                  money reads as spread across every bill it names, including one that is money back. */}
+              {notOnAccount.credits > 0.005
+                ? ` · Plus A ${formatCurrency(notOnAccount.credits)} Credit Not In That Figure`
+                : ""}
             </span>
             <span className="shrink-0 font-medium">File It</span>
           </a>
+        ) : (
+          unassigned &&
+          unassigned.total > 0.005 && (
+            <a
+              href="#supplier-names"
+              className="mb-2 flex min-h-11 items-center justify-between gap-3 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900 hover:bg-amber-100"
+            >
+              <span className="min-w-0">
+                {formatCurrency(unassigned.total)} On {unassigned.bills} {unassigned.bills === 1 ? "Bill" : "Bills"} With No Supplier Account
+              </span>
+              <span className="shrink-0 font-medium">File It</span>
+            </a>
+          )
         )}
 
         {error && (
@@ -630,7 +726,10 @@ export function SuppliersCard({
               const noDocIds = new Set(noSupplierDocument[account.id]?.ids ?? []);
               const checks = supplierChecks({ account, balance, noDocIds, unread });
               const sayPaid = paymentLine({ account, balance, paymentsUnread });
-              const unpaidBills = account.bills.filter((b) => String(b.status ?? "").toLowerCase() !== "paid");
+              // THE FUNCTION, not a third copy of it written inline in the card that imports it
+              // (8a982483). This knew only `status`, so it listed a ticket the supplier's own closed
+              // paper covers as still owed, under a balance that had already stopped counting it.
+              const unpaidBills = account.bills.filter((b) => isOnAccountBill(b));
               const oldestFirst = [...unpaidBills].sort((a, b) => String(a.billDate ?? "").localeCompare(String(b.billDate ?? "")));
               const shownBills = oldestFirst.slice(0, LIST_LIMIT);
               const hiddenBills = oldestFirst.length - shownBills.length;
