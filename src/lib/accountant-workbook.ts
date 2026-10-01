@@ -9,6 +9,8 @@ import {
   ownerMoneyReadSpan,
   recordDay,
   supplierAccountRowsOf,
+  supplierIdentityOf,
+  supplierSettledOf,
   windowMonths,
   type OwnerMoney,
   type OwnerMoneyCostLine,
@@ -26,6 +28,7 @@ import { summarizeMileage } from "@/lib/mileage-math";
 import { formatCurrency, hoursBetween } from "@/lib/utils";
 import { tzMinutesOfDay } from "@/lib/tz";
 import { isOnAccountBill, supplierBalance } from "@/app/(app)/bills/supplier-balance";
+import { whatISupplierOwed, type SupplierOwedHow } from "@/lib/supplier-owed";
 import { buildXlsx, type XlsxRow, type XlsxSheet, type XlsxValue } from "@/lib/xlsx-write";
 import { buildZip, type DeflateRaw } from "@/lib/zip-write";
 
@@ -1058,33 +1061,64 @@ function openFigures(input: AccountantWorkbookInput): OpenFigures {
   const suppliers: OpenFigures["suppliers"] = [];
   const ahead: OpenFigures["ahead"] = [];
   const accounts = supplierAccountRowsOf(inp, tz);
-  for (const acct of accounts.values()) {
-    const bal = supplierBalance(acct, todayYmd);
-    if (bal.owed === null) {
-      if (bal.unpaidOnRegisterAccount) suppliers.push({ name: acct.name, cents: cents(bal.charged), how: "Bills marked unpaid on a pay-at-the-register account" });
-      continue;
-    }
-    const c = cents(bal.owed);
-    // WHAT IS OWED, not a net position (/bills' rule): a credit with one supplier pays no other.
-    if (c < 0) ahead.push({ name: acct.name, cents: -c });
-    if (c <= 0) continue;
-    suppliers.push({ name: acct.name, cents: c, how: bal.model === "supplier-invoices" ? "Their own open invoices" : "Bills minus payments" });
+
+  // ── QUESTION (a), THE SAME FUNCTION /bills READS (8a982483) ────────────────────────────────
+  //
+  // This tab used to build its own total: a per-account figure from supplierBalance PLUS one lump
+  // row called "Bills On No Supplier Account", the first reached through `bills.supplier_account_id`
+  // and the second by whatever was left over. That is the same mixture the Suppliers card was
+  // making, in the accountant's deliverable, under a heading saying the suppliers had said it.
+  //
+  // It reads `whatISupplierOwed` now, so this tab's total and the figure on his card are the same
+  // number by construction rather than by two pieces of arithmetic happening to agree. A paper on
+  // no account still gets a row - one per spelling, named, never a lump - and the "How North Knows"
+  // column says whose word each row is, which was always this tab's best idea.
+  const { of: identity } = supplierIdentityOf(inp);
+  const settled = supplierSettledOf(inp, identity);
+  const owed = whatISupplierOwed({
+    accounts: [...accounts.values()].map((acct) => {
+      const bal = supplierBalance(acct, todayYmd);
+      return {
+        accountId: acct.id,
+        name: acct.name,
+        onAccount: acct.onAccount,
+        owed: bal.owed,
+        model: bal.model,
+        openPapers: bal.chargedBills,
+      };
+    }),
+    papers: (inp.bills ?? [])
+      .filter((b: any) => b?.id && !b.superseded_by_bill_id)
+      .map((b: any) => ({
+        id: String(b.id),
+        supplierAccountId: b.supplier_account_id ?? null,
+        supplier: b.supplier ?? null,
+        amount: b.amount,
+        status: b.status ?? null,
+        settledBySupplier: settled.has(String(b.id)),
+      })),
+    identity,
+    settledBySupplier: settled,
+  });
+
+  const HOW: Record<SupplierOwedHow, string> = {
+    "their-own-papers": "Their own open invoices",
+    "my-tickets-less-payments": "Bills minus payments",
+    "my-tickets-no-account": "North's own tickets - the supplier has sent no balance",
+  };
+  for (const l of owed.lines) {
+    suppliers.push({
+      name: l.name || "A supplier North can't name",
+      cents: cents(l.owed),
+      how: l.accountId ? HOW[l.how] : `${HOW[l.how]}, and not on a supplier account yet`,
+    });
   }
-  let n = 0;
-  let loose = 0;
-  for (const b of inp.bills ?? []) {
-    if (!b || b.superseded_by_bill_id) continue;
-    if (b.supplier_account_id && accounts.has(String(b.supplier_account_id))) continue;
-    if (!isOnAccountBill({ status: String(b.status ?? "") })) continue;
-    const c = cents(b.amount);
-    if (!c) continue;
-    n += 1;
-    loose += c;
-  }
+  // WHAT IS OWED, not a net position (/bills' rule): a credit with one supplier pays no other.
+  for (const a of owed.ahead) ahead.push({ name: a.name, cents: cents(a.credit) });
+
   suppliers.sort((a, b) => b.cents - a.cents || a.name.localeCompare(b.name));
-  if (loose) suppliers.push({ name: "Bills On No Supplier Account", cents: loose, how: `${n} ${n === 1 ? "bill" : "bills"} marked unpaid` });
   ahead.sort((a, b) => b.cents - a.cents || a.name.localeCompare(b.name));
-  return { customers, customersCents: cents(customers.outstanding), suppliers, suppliersCents: suppliers.reduce((s, x) => s + x.cents, 0), ahead };
+  return { customers, customersCents: cents(customers.outstanding), suppliers, suppliersCents: cents(owed.total), ahead };
 }
 
 function openTab(input: AccountantWorkbookInput, open: OpenFigures): XlsxSheet {
@@ -1113,14 +1147,23 @@ function openTab(input: AccountantWorkbookInput, open: OpenFigures): XlsxSheet {
   // supplier that sends invoices is owed what those say, and North's tickets are only its copy.
   const inp = input.money;
   const acctName = new Map((inp.supplierAccounts ?? []).map((a: any) => [String(a?.id), String(a?.name ?? "").trim()]));
+  // THE BEST LABEL IN THE TREE, KEPT: it says WHOSE claim the figure is and does not call it a
+  // debt - which is exactly what every screen reader got wrong (8a982483). It gains the one
+  // exclusion it was missing: a ticket the supplier's own closed paper covers is counted inside
+  // that paper already, so counting it here overstated what North had bought and not squared.
+  const settledHere = supplierSettledOf(inp, supplierIdentityOf(inp).of);
   rows.push(blank(), title("Bills North Has Marked Unpaid"));
-  rows.push(note(`Every ticket on the books not marked paid, as of ${day}. For an account North tracks by its own bills, what is owed above is these less what was sent (each payment is on Costs).`));
+  rows.push(
+    note(
+      `Every ticket on the books not marked paid, as of ${day}, except any the supplier's own closed paper already covers. For an account North tracks by its own bills, what is owed above is these less what was sent (each payment is on Costs). This is what North BOUGHT on account; what is owed above is what the suppliers say, and they are different figures.`,
+    ),
+  );
   rows.push(head("Date", "Supplier", "Bill Number", "Amount", "Supplier Account", "Job"));
   const unpaid: { at: string; row: Row }[] = [];
   let unpaidCents = 0;
   for (const b of inp.bills ?? []) {
     if (!b || b.superseded_by_bill_id) continue;
-    if (!isOnAccountBill({ status: String(b.status ?? "") })) continue;
+    if (!isOnAccountBill({ status: String(b.status ?? ""), settledBySupplier: settledHere.has(String(b.id)) })) continue;
     const c = cents(b.amount);
     if (!c) continue;
     unpaidCents += c;

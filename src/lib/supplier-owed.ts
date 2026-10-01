@@ -284,6 +284,10 @@ export interface CoveringDocumentRef {
 export interface SupplierCoverage {
   /** Every live paper at least one of its own supplier's documents covers, however. */
   covered: ReadonlySet<string>;
+  /** The same answer per document: document id -> the papers of its own supplier that cover it. A
+   *  document nothing covers has no entry. The P&L card needs it this way round, and it must be the
+   *  SAME walk, or the card and /bills can name different tickets as covering one paper. */
+  byDocument: ReadonlyMap<string, ReadonlySet<string>>;
   /**
    * Papers every covering document of their own supplier calls CLOSED, and none calls open. These
    * are settled in the supplier's books whatever `bills.status` says, and they are the double
@@ -322,6 +326,7 @@ export function supplierCoverage(input: {
   papers?: readonly (SupplierPaperRef & StillOwedShape)[] | null;
 }): SupplierCoverage {
   const covered = new Set<string>();
+  const byDocument = new Map<string, ReadonlySet<string>>();
   const closedCover = new Set<string>();
   const openCover = new Set<string>();
 
@@ -334,11 +339,14 @@ export function supplierCoverage(input: {
     const reach = new Set<string>();
     for (const id of input?.linked?.get(docId) ?? []) reach.add(String(id));
     for (const id of input?.carrying?.get(docId) ?? []) reach.add(String(id));
+    const mine = new Set<string>();
     for (const paperId of reach) {
       if (!paperId || accountOf(paperId) !== account) continue;
       covered.add(paperId);
+      mine.add(paperId);
       (d?.closed === true ? closedCover : openCover).add(paperId);
     }
+    if (mine.size) byDocument.set(docId, mine);
   }
 
   const settledBySupplier = new Set<string>();
@@ -353,7 +361,7 @@ export function supplierCoverage(input: {
     if (closedCover.has(id) && !openCover.has(id)) settledBySupplier.add(id);
   }
 
-  return { covered, settledBySupplier };
+  return { covered, byDocument, settledBySupplier };
 }
 
 // ────────────────────────────────────────────────────────────────────────────────────────────────

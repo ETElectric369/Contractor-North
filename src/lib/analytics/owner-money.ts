@@ -8,6 +8,13 @@ import { computeCollected, monthKeyInTz, trailing12Months } from "@/lib/analytic
 import { isMissingCreditColumn, isMissingShelf } from "@/lib/job-cost";
 import { isOnAccountBill, openBalanceOf, supplierBalance, type SupplierAccountRow } from "@/app/(app)/bills/supplier-balance";
 import { billsCarryingNumber, namedNumbersOf, type LedgerBill } from "@/lib/same-purchase";
+import {
+  indexSupplierIdentity,
+  resolveSupplierPapers,
+  supplierCoverage,
+  type SupplierIdentityIndex,
+  type SupplierPaperIdentity,
+} from "@/lib/supplier-owed";
 import { PNL_WORDS, materialsWithStock } from "@/lib/analytics/profit-and-loss";
 
 /**
@@ -349,6 +356,10 @@ export type OwnerMoneyInputs = {
   supplierAccounts?: any[];
   /** supplier_payments (0270), voided ones included: supplier_account_id, amount, paid_on, voided_at. */
   supplierPayments?: any[];
+  /** supplier_aliases (0270): alias, supplier_account_id. The spellings somebody has already filed
+   *  onto an account. Absent is fine and normal - identity then resolves by the stored column and
+   *  the account's own name, which is what reaches CED's five spellings (8a982483). */
+  supplierAliases?: any[];
   /** supplier_invoices (0273), EVERY kind: id, supplier_account_id, invoice_number, kind, total,
    *  open_balance, closed, bill_supplier_invoices(bill_id). The supplier's own verdict on what is
    *  still open (model B), and which bills cover each (supplierDocCoverage), so only a document a
@@ -650,12 +661,66 @@ export function ownerMoneyCostLines(inp: OwnerMoneyInputs, tz: string): OwnerMon
 }
 
 /**
+ * WHO EACH PAPER BELONGS TO, BY THE ONE RULE (lib/supplier-owed.ts, 8a982483).
+ *
+ * The P&L card and the accountant's workbook both read their suppliers through this file, and both
+ * used to reach a paper only through `bills.supplier_account_id`, which is null on more than half
+ * his book. A paper spelling an account's own name now belongs to that account here exactly as it
+ * does on /bills, so the two screens can no longer be built from different sets of paper.
+ */
+export function supplierIdentityOf(inp: OwnerMoneyInputs): {
+  index: SupplierIdentityIndex;
+  of: Map<string, SupplierPaperIdentity>;
+} {
+  const index = indexSupplierIdentity({
+    accounts: (inp.supplierAccounts ?? []).map((a: any) => ({ id: a?.id, name: a?.name })),
+    aliases: inp.supplierAliases ?? [],
+  });
+  const of = resolveSupplierPapers(
+    (inp.bills ?? [])
+      .filter((b: any) => b?.id && !b.superseded_by_bill_id)
+      .map((b: any) => ({ id: String(b.id), supplierAccountId: b.supplier_account_id ?? null, supplier: b.supplier ?? null })),
+    index,
+  );
+  return { index, of };
+}
+
+/** THE PAPERS THE SUPPLIER'S OWN BOOKS CALL SETTLED, from the one covering walk. Same answer as
+ *  /bills, because it is the same function over the same two routes. */
+export function supplierSettledOf(
+  inp: OwnerMoneyInputs,
+  identity: ReadonlyMap<string, SupplierPaperIdentity>,
+): ReadonlySet<string> {
+  const live = (inp.bills ?? []).filter((b: any) => b?.id && !b.superseded_by_bill_id);
+  const byDoc = supplierDocCoverage(inp.supplierDocuments ?? [], live, identity);
+  return supplierCoverage({
+    documents: (inp.supplierDocuments ?? []).map((d: any) => ({
+      id: String(d?.id ?? ""),
+      supplierAccountId: d?.supplier_account_id ?? null,
+      closed: d?.closed === true,
+    })),
+    identity,
+    // supplierDocCoverage already folded the link and the number into one set per document.
+    linked: byDoc,
+    carrying: null,
+    papers: live.map((b: any) => ({
+      id: String(b.id),
+      supplierAccountId: b.supplier_account_id ?? null,
+      supplier: b.supplier ?? null,
+      status: b.status ?? null,
+    })),
+  }).settledBySupplier;
+}
+
+/**
  * EACH SUPPLIER ACCOUNT AS /bills READS IT (supplierBalance's input): its live bills, the payments
  * sent it (voided ones included; the balance skips them) and its own documents. Pass `payments` to
  * build the rows over some other set of payments (one period's).
  */
 export function supplierAccountRowsOf(inp: OwnerMoneyInputs, tz: string, payments: any[] = inp.supplierPayments ?? []): Map<string, SupplierAccountRow> {
   const liveBills = (inp.bills ?? []).filter((b) => b && !b.superseded_by_bill_id);
+  const { of: identity } = supplierIdentityOf(inp);
+  const settled = supplierSettledOf(inp, identity);
   const accountRows = new Map<string, SupplierAccountRow>();
   for (const a of inp.supplierAccounts ?? []) {
     if (!a?.id) continue;
@@ -672,11 +737,16 @@ export function supplierAccountRowsOf(inp: OwnerMoneyInputs, tz: string, payment
     });
   }
   for (const b of liveBills) {
-    const row = b.supplier_account_id ? accountRows.get(String(b.supplier_account_id)) : undefined;
+    // BY IDENTITY, AND THE SPELLING IS KEPT (8a982483). This read the raw column and then threw the
+    // spelling away (`supplier: ""`), so nothing downstream of it could ever resolve a paper by
+    // name even if it wanted to - and this function feeds BOTH the P&L card and the accountant's
+    // workbook, so both inherited the blind spot.
+    const accountId = identity.get(String(b.id))?.accountId ?? null;
+    const row = accountId ? accountRows.get(accountId) : undefined;
     if (!row) continue;
     row.bills.push({
       id: String(b.id),
-      supplier: "",
+      supplier: String(b.supplier ?? ""),
       billDate: recordDay(b.bill_date, b.created_at, tz),
       amount: Number(b.amount) || 0,
       status: String(b.status ?? ""),
@@ -684,6 +754,10 @@ export function supplierAccountRowsOf(inp: OwnerMoneyInputs, tz: string, payment
       jobName: null,
       invoiceNumber: null,
       isStatement: false,
+      // The supplier's own closed paper covers it, so it is not money on account here. Without
+      // this the P&L card and the workbook kept counting the tickets /bills had already stopped
+      // counting - the same materials inside a closed supplier paper and beside it.
+      settledBySupplier: settled.has(String(b.id)),
     });
   }
   for (const p of payments ?? []) {
@@ -1014,6 +1088,12 @@ export function computeOwnerMoney(
       return month < winStartMonth ? "before" : "after";
     };
     const accountRows = supplierAccountRowsOf(inp, tz);
+    // ONE IDENTITY AND ONE COVERING WALK for this whole block (8a982483): which account a paper
+    // belongs to, and which papers the supplier's own closed documents already cover.
+    const { of: identity } = supplierIdentityOf(inp);
+    const settled = supplierSettledOf(inp, identity);
+    const stillOwed = (b: any) =>
+      isOnAccountBill({ status: String(b.status ?? ""), settledBySupplier: settled.has(String(b.id)) });
 
     const accounts: { name: string; owed: number; bySupplier: boolean }[] = [];
     let owedCents = 0;
@@ -1029,12 +1109,13 @@ export function computeOwnerMoney(
       looseCents += c;
     };
     for (const b of liveBills) {
-      if (b.supplier_account_id && accountRows.has(String(b.supplier_account_id))) continue;
-      if (isOnAccountBill({ status: String(b.status ?? "") })) loose(b);
+      const accountId = identity.get(String(b.id))?.accountId ?? null;
+      if (accountId && accountRows.has(accountId)) continue;
+      if (stillOwed(b)) loose(b);
     }
     // WHICH BILLS COVER WHICH DOCUMENT: the one reading supplierDocsNoBillCovers makes too, so a
     // document is on exactly one side of the card (counted through a bill, or named not counted).
-    const coverage = supplierDocCoverage(inp.supplierDocuments ?? [], liveBills);
+    const coverage = supplierDocCoverage(inp.supplierDocuments ?? [], liveBills, identity);
     const billById = new Map<string, any>();
     for (const b of liveBills) if (b?.id) billById.set(String(b.id), b);
     const docsOf = new Map<string, any[]>();
@@ -1091,8 +1172,8 @@ export function computeOwnerMoney(
         let n = 0;
         let cents = 0;
         for (const b of liveBills) {
-          if (String(b.supplier_account_id ?? "") !== row.id) continue;
-          if (!isOnAccountBill({ status: String(b.status ?? "") })) continue;
+          if ((identity.get(String(b.id))?.accountId ?? "") !== row.id) continue;
+          if (!stillOwed(b)) continue;
           if (covered.has(String(b.id))) continue;
           if (place(monthOfBill(b)) !== "window") continue;
           const amt = toCents(b.amount);
@@ -1283,13 +1364,18 @@ async function readEvery<T>(
  * Keyed by document id; a document no bill covers has no entry. One reading for both sides of the
  * card, so a document is either counted through a bill or named "not counted", never both.
  */
-export function supplierDocCoverage(docs: any[], bills: any[]): Map<string, Set<string>> {
+export function supplierDocCoverage(docs: any[], bills: any[], identity?: ReadonlyMap<string, SupplierPaperIdentity> | null): Map<string, Set<string>> {
   const live = (bills ?? []).filter((b: any) => b?.id && !b.superseded_by_bill_id);
   const liveIds = new Set(live.map((b: any) => String(b.id)));
+  const accountOf = (id: string) => identity?.get(String(id))?.accountId ?? null;
   const ledger: LedgerBill[] = live.map((b: any) => ({
     id: String(b.id),
     supplier: b.supplier ?? null,
-    supplier_account_id: b.supplier_account_id ?? null,
+    // RESOLVED, when the caller has the identity to resolve it with (8a982483). This walk used to
+    // read the raw column AND pass `billsCarryingNumber` no alias index at all, while /bills passed
+    // one - so the P&L card and /bills could name different tickets as covering the same paper on
+    // identical rows. One rule decides now, and it is the same one both screens use.
+    supplier_account_id: accountOf(b.id) ?? b.supplier_account_id ?? null,
     bill_number: b.bill_number ?? null,
     supplier_invoice_number: b.supplier_invoice_number ?? null,
     amount: b.amount ?? null,
