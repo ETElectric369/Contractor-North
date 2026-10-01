@@ -84,6 +84,34 @@ describe("the bills table has one write boundary (items C1, C2)", () => {
     }
   });
 
+  /**
+   * ITEM C1-7(a): THE DOOR LIST IN THE HEADER IS CHECKED, NOT JUST WRITTEN. lib/job-cost-guard's header
+   * says "every door asks this one function" and then names them — and it named three while four asked,
+   * so a maintainer grepping that header to find every door that writes a job cost would have missed
+   * recordSupplierInvoiceAsBill. A list a person keeps by hand goes stale; this one cannot.
+   */
+  it("every function that asks the cost guard is named in the guard's own door list", () => {
+    const header = readFileSync(join(SRC, "lib/job-cost-guard.ts"), "utf8");
+    const asking: string[] = [];
+    for (const file of walk(SRC)) {
+      const src = readFileSync(file, "utf8");
+      let at = src.indexOf("jobCostRefusal(");
+      while (at >= 0) {
+        // The door is the exported function the call sits inside: the nearest one above it.
+        const before = src.slice(0, at);
+        const names = [...before.matchAll(/export async function (\w+)/g)];
+        if (names.length && rel(file) !== "lib/job-cost-guard.ts") asking.push(names[names.length - 1][1]);
+        at = src.indexOf("jobCostRefusal(", at + 1);
+      }
+    }
+    const missing = [...new Set(asking)].filter((fn) => !header.includes(fn)).sort();
+    expect(
+      missing,
+      "These doors ask jobCostRefusal and are not in lib/job-cost-guard's door list. Add them to that " +
+        "header, so the one place that says where this rule is asked still tells the truth.",
+    ).toEqual([]);
+  });
+
   it("the list has no stale entries (a file that no longer writes bills)", () => {
     const stale = Object.keys(MAY_WRITE_BILLS).filter((f) => !writers.has(f)).sort();
     expect(stale, "These files are on MAY_WRITE_BILLS but write no bill any more — drop them.").toEqual([]);
