@@ -42,7 +42,7 @@ import { loadShiftChains, type ShiftInfo } from "@/lib/shift-chain";
 import { ADOPT_AFTER_CLOCK_IN_MS, ADOPT_AFTER_SWITCH_MS } from "./adopt-window";
 import { closedPickable, whichJobLabel, type ChoiceJob } from "./which-job-choices";
 import { billedPartMoved, claimedMoveRefusal, claimedPersonRefusal, type ClaimHolder, type ClaimIndex } from "./claim-words";
-import { LONG_SHIFT_PHRASE, MAX_SHIFT_HOURS, clockDoorWords, clockedOutWords, isLongOpenShift, stopProblem } from "@/lib/long-shift";
+import { CEILING_REFUSAL_ASK_OFFICE, LONG_SHIFT_PHRASE, MAX_SHIFT_HOURS, clockDoorWords, clockedOutWords, isLongOpenShift, stopProblem } from "@/lib/long-shift";
 import { clockInClashWords, findOverlap, overlapRefusal, shiftWhen, type OverlapClash } from "@/lib/overlap-refusal";
 
 export type ClockResult = {
@@ -676,11 +676,7 @@ export async function clockOut(input: {
       };
     }
     if (!unattended && closeMs - ciMsForStop > MAX_SHIFT_HOURS * 3_600_000) {
-      return {
-        ok: false,
-        error:
-          "That's more than 18 hours after you clocked in. Pick when you really stopped. If the shift truly ran that long, the office has to enter it.",
-      };
+      return { ok: false, error: CEILING_REFUSAL_ASK_OFFICE };
     }
     // A stop time stated after a long run says so on the card, and the office hears about it. Not
     // only a `picked` one: needsStatedStop lets an `at` well before now through as a real time, and
