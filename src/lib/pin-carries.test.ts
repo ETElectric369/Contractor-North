@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
+  byPoolOrder,
+  carriedPin,
   inRankPool,
   MY_DAY_POOL_LIMIT,
   pinCarriedFrom,
@@ -23,29 +25,20 @@ import {
  * same arms it hands the database (rankPoolCut), so this is the real cut and not a copy of it.
  */
 
-/** The pool a reader actually gets back: the cut, then the order the bound cuts in, then the bound. */
+/**
+ * The pool a reader actually gets back: the cut, then the order the bound cuts in, then the bound.
+ *
+ * THE ORDER IS SIX-RANK'S OWN (byPoolOrder), never a copy of it. This helper used to hand-write the
+ * comparison, and that is how the bound shipped ordered due_date ASCENDING while the suite sorted its
+ * own fixtures the way it wished the query did: sixty June zombies filled the pool, the thing due
+ * TODAY was never fetched, and the suite was green over the top of it. Now the only order this file
+ * can test with is the one the database is sent.
+ */
 function fetchPool(all: SixRankTask[], todayStr: string, scope: PoolScope, limit = MY_DAY_POOL_LIMIT): SixRankTask[] {
-  const cmp = (a: SixRankTask, b: SixRankTask) => {
-    // focus_date asc, NULLS LAST — every standing pin ahead of everything else, carried first.
-    const fa = a.focus_date ?? "￿";
-    const fb = b.focus_date ?? "￿";
-    if (fa !== fb) return fa < fb ? -1 : 1;
-    const pa = Number(a.priority) || 0;
-    const pb = Number(b.priority) || 0;
-    if (pa !== pb) return pb - pa;
-    // due_date asc, NULLS LAST
-    const da = a.due_date ?? "￿";
-    const db = b.due_date ?? "￿";
-    if (da !== db) return da < db ? -1 : 1;
-    const ca = String(a.created_at ?? "");
-    const cb = String(b.created_at ?? "");
-    if (ca !== cb) return ca < cb ? -1 : 1;
-    return String(a.id).localeCompare(String(b.id));
-  };
   return all
     .filter((t) => t.status === "open" && t.parent_id == null && t.job_id == null)
     .filter((t) => inRankPool(t, todayStr, scope))
-    .sort(cmp)
+    .sort(byPoolOrder)
     .slice(0, limit);
 }
 
@@ -126,6 +119,21 @@ describe("defect 1: a pinned reminder survives the night", () => {
     expect(fetchPool([done], WED, "my_day")).toHaveLength(0);
     expect(myDay([done], WED)).toHaveLength(0);
   });
+
+  it("and a CHECKED-OFF reminder says nothing about a pin: no 'Carried From' on finished work", () => {
+    // Checking it off leaves focus_date alone (so un-checking restores the pin), which is why the
+    // chip needs the status gate and not just the date: /tasks' Done fold wore "Carried From
+    // Saturday" under a struck-through title, and so did a just-checked row on My Day.
+    const open = reminder({ focus_date: MON });
+    const done = { ...open, status: "done" };
+    expect(carriedPin(open, WED)).toBe(MON);
+    expect(carriedPin(done, WED)).toBeNull();
+    // The pure date rule still answers for what it is: the row IS carried, it just has nothing to say.
+    expect(pinCarriedFrom(done.focus_date, WED)).toBe(MON);
+    // A surface that knows better than `status` (My Day checks optimistically) passes it in.
+    expect(carriedPin(open, WED, true)).toBeNull();
+    expect(carriedPin(open, null)).toBeNull();
+  });
 });
 
 describe("defect 1, the other half: the bound can never be the thing that drops a pin", () => {
@@ -138,6 +146,43 @@ describe("defect 1, the other half: the bound can never be the thing that drops 
     expect(pool).toHaveLength(MY_DAY_POOL_LIMIT); // the bound still holds — build for millions
     expect(pool[0].id).toBe(pin.id); // but it cut the noise, never the promise
     expect(myDay([...noise, pin], WED)[0].id).toBe(pin.id);
+  });
+
+  it("AND THE BOUND CANNOT DROP THE DEADLINE EITHER: seventy June zombies, and today still shows", () => {
+    // The disappearance Erik reported, one layer down. The bound used to cut dated rows OLDEST-FIRST,
+    // so a June backlog bigger than the bound filled the pool and the thing due today — and
+    // yesterday's miss — were never fetched at all. Only the "N More For You" line hinted at it.
+    const zombies = Array.from({ length: 70 }, (_, i) =>
+      reminder({ due_date: `2026-06-${String((i % 28) + 1).padStart(2, "0")}` }),
+    );
+    const dueToday = reminder({ due_date: WED });
+    const missedYesterday = reminder({ due_date: TUE });
+    const plain = reminder();
+    const all = [...zombies, dueToday, missedYesterday, plain];
+
+    const pool = fetchPool(all, WED, "my_day");
+    expect(pool).toHaveLength(MY_DAY_POOL_LIMIT); // build for millions: the bound still holds
+    const ids = pool.map((t) => t.id);
+    expect(ids, "the thing due TODAY").toContain(dueToday.id);
+    expect(ids, "yesterday's miss — fresher than any zombie").toContain(missedYesterday.id);
+
+    // And on the card, in rank order: the freshest miss leads the overdue, then today's deadline.
+    const card = myDay(all, WED).map((t) => t.id);
+    expect(card[0]).toBe(missedYesterday.id);
+    expect(card).toContain(dueToday.id);
+    // The oldest end of the backlog is what got cut — and it is the only thing that got cut.
+    expect(card).not.toContain(zombies[0].id);
+  });
+
+  it("a pin, a deadline and a backlog at once: the pin leads, the deadline survives, June is cut", () => {
+    const pin = reminder({ focus_date: MON });
+    const dueToday = reminder({ due_date: WED });
+    const zombies = Array.from({ length: 80 }, (_, i) =>
+      reminder({ due_date: `2026-0${(i % 5) + 1}-${String((i % 28) + 1).padStart(2, "0")}` }),
+    );
+    const card = myDay([...zombies, dueToday, pin], WED).map((t) => t.id);
+    expect(card[0]).toBe(pin.id);
+    expect(card).toContain(dueToday.id);
   });
 
   it("twenty pins and a thousand plain reminders: every pin survives the bound", () => {

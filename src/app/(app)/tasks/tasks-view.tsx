@@ -11,7 +11,7 @@ import { Card } from "@/components/ui/card";
 import { MoveToDay } from "@/components/move-to-day";
 import { useToast } from "@/components/toast";
 import { formatDate } from "@/lib/utils";
-import { carriedDay, isPinned, pinCarriedFrom } from "@/lib/six-rank";
+import { carriedDay, carriedPin, isPinned } from "@/lib/six-rank";
 import { createTask, toggleTask, deleteTask, updateTask, type ToggleTaskResult } from "./actions";
 
 /**
@@ -29,7 +29,9 @@ export interface ViewTask {
   status: string;
   priority: number;
   due_date: string | null;
-  /** = today means pinned into My Day's six (self-expires at midnight). */
+  /** The pin (lib/six-rank): on or before today is a pin that STILL STANDS, and one set before
+   *  today is a carried pin. It does not expire at midnight — it goes when it is unpinned or the
+   *  Reminder is checked off. */
   focus_date?: string | null;
   job_id: string | null;
   assigned_to: string | null;
@@ -112,9 +114,10 @@ const priorityLabel = (p: number) => PRIORITIES.find((x) => x.value === p)?.labe
 
 /**
  * THE ONE-LINE ADD (0358: the 6-field box — category, job, person, due, priority — became this).
- * Type the words, Add: a Reminder for yourself, undated (it waits under Someday here; pin it or date
- * it to put it on top of My Day's Tasks & Reminders). Everything else is one tap on the row afterwards. A job's task is added
- * on the job, or from My Day's Add line with a job picked.
+ * Type the words, Add: a Reminder for yourself, undated — it files under Someday on this page and it
+ * is on My Day's Tasks & Reminders the same day (an undated Reminder is VISIBLE there now; pin it to
+ * put it on TOP). Everything else is one tap on the row afterwards. A job's task is added on the job,
+ * or from My Day's Add line with a job picked.
  */
 export function NewReminderBox() {
   const router = useRouter();
@@ -353,7 +356,10 @@ export function TaskRow({
   // that still stands. This used to read `=== todayStr`, the third hand-written copy of the rule, and
   // it is why yesterday's pin still drew a filled glyph here while My Day had already lost the row.
   const pinned = isPinned(t.focus_date, todayStr ?? "");
-  const carried = todayStr ? pinCarriedFrom(t.focus_date, todayStr) : null;
+  // A DONE ROW SAYS NOTHING ABOUT A PIN (lib/six-rank carriedPin owns that gate): checking a
+  // Reminder off leaves its focus_date alone, so the Done fold used to wear "Carried From <Day>"
+  // under a struck-through title — a false sentence about finished work.
+  const carried = carriedPin(t, todayStr);
 
   function addSub() {
     if (!subTitle.trim()) return;

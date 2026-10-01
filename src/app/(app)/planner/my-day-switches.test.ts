@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { join, relative } from "node:path";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
@@ -33,6 +33,15 @@ import { NewReminderBox } from "../tasks/tasks-view";
 import { NowCard } from "./now-card";
 import { LUNCH_LABEL } from "@/lib/lunch-rule";
 import { carriedDay, rankSix } from "@/lib/six-rank";
+
+/** Every shipped source file in a tree — the app's own code, never a test or a fixture. */
+function sourceFiles(dir: string): string[] {
+  return readdirSync(dir).flatMap((name) => {
+    const p = join(dir, name);
+    if (statSync(p).isDirectory()) return sourceFiles(p);
+    return /\.tsx?$/.test(p) && !/\.(test|db-suite|db-fixture)\.tsx?$/.test(p) && !/\.d\.ts$/.test(p) ? [p] : [];
+  });
+}
 
 const JOBS = [{ id: "j1", label: "J-055 Smith Panel", number: "J-055" }];
 const line = (jobs = JOBS) => renderToStaticMarkup(createElement(AddReminderLine, { jobs, todayStr: "2026-09-26" }));
@@ -144,6 +153,17 @@ describe("Tasks & Reminders: a carried pin says so on the row (Erik, 2026-09-30)
     expect(html).not.toMatch(/lucide-pin/);
   });
 
+  it("the chip and the glyph are gated the SAME way the flag and the due chip are (one gate, one function)", () => {
+    // The gate itself is lib/six-rank's carriedPin, proven behaviourally in pin-carries.test.ts and
+    // through a real render in tasks/tasks-view.test.ts. On THIS card the done-ness is the optimistic
+    // local state of a checked row, which a static render can't reach (no DOM in the unit project), so
+    // what is pinned here is that the card asks the one function and gates the glyph with it.
+    const src = readFileSync(join(process.cwd(), "src/app/(app)/planner/your-list.tsx"), "utf8");
+    expect(src).toContain("const carried = carriedPin(t, todayStr, done);");
+    expect(src).toContain("const pinned = isPinned(t.focus_date, todayStr) && !done;");
+    expect(src).not.toContain("const carried = pinCarriedFrom(t.focus_date, todayStr);");
+  });
+
   it("the words stay true as the carry gets older: Yesterday, then the weekday, then the date", () => {
     expect(carriedDay("2026-09-25", TODAY)).toBe("Yesterday");
     expect(carriedDay("2026-09-21", TODAY)).toBe("Monday");
@@ -207,9 +227,34 @@ describe("Tasks & Reminders: the polish (progress marks, 44px steps, one ⋯ per
   it("the pin row says what the pin does: it carries until you unpin it", () => {
     const src = readFileSync(join(process.cwd(), "src/app/(app)/planner/your-list.tsx"), "utf8");
     expect(src).toContain('{pinned ? "Unpin" : "Pin To Top (Carries Until You Unpin It)"}');
-    // No comment or label left claiming the old midnight expiry.
-    expect(src).not.toMatch(/self-expires at midnight/);
     expect(src).not.toContain("Unpin From Today");
+  });
+
+  /**
+   * AND NOWHERE ELSE IN src EITHER. This used to grep your-list.tsx alone, and the retired words
+   * survived in five other files — a type's doc comment still promising the midnight expiry, three
+   * comments still calling the card Today's 6, and the page comment that still put the quote under
+   * the Now card after it was moved above the clock. A comment that lies is how the next person
+   * rebuilds the bug.
+   */
+  it("NO FILE IN src STILL DESCRIBES THE OLD BEHAVIOUR: no midnight expiry, no Today's 6", () => {
+    const files = sourceFiles(join(process.cwd(), "src"));
+    expect(files.length).toBeGreaterThan(500); // it really is the whole app
+    const expiry: string[] = [];
+    const oldName: string[] = [];
+    for (const f of files) {
+      const src = readFileSync(f, "utf8");
+      if (!/self-expir|Today'?s[- ]?6\b|today'?s six/i.test(src)) continue;
+      src.split("\n").forEach((ln, i) => {
+        const at = `${relative(process.cwd(), f)}:${i + 1}`;
+        if (/self-expir/i.test(ln)) expiry.push(at);
+        // The retired NAME survives in exactly one place: inside Erik's own quoted words, which are
+        // the history of why the card is called what it is called now.
+        if (/Today'?s[- ]?6\b|today'?s six/i.test(ln) && !/Erik/.test(ln)) oldName.push(at);
+      });
+    }
+    expect(expiry, "a pin does not expire at midnight any more").toEqual([]);
+    expect(oldName, 'the card is "Tasks & Reminders" — the old name only inside his own quote').toEqual([]);
   });
 
   it("each Reminder's ⋯ is the app's one row sheet: 44px, named for its row", () => {

@@ -15,7 +15,7 @@ vi.mock("next/navigation", () => ({
 vi.mock("@/components/toast", () => ({ useToast: () => vi.fn() }));
 vi.mock("./actions", () => ({ createTask: vi.fn(), toggleTask: vi.fn(), deleteTask: vi.fn(), updateTask: vi.fn() }));
 
-import { TaskEditModal, type ViewTask } from "./tasks-view";
+import { TaskEditModal, TaskRow, type ViewTask } from "./tasks-view";
 
 const REMINDER: ViewTask = {
   id: "t1",
@@ -50,5 +50,39 @@ describe("Edit Reminder: Who It's For", () => {
     expect(html).not.toContain('id="te-person"');
     expect(html).toContain("You");
     expect(html).toContain("Only the person who made it can hand it to someone else.");
+  });
+});
+
+/**
+ * A FINISHED REMINDER SAYS NOTHING ABOUT A PIN. Checking one off does not clear its focus_date (so
+ * un-checking restores the pin it had), so the Completed fold drew "Carried From <Day>" under a
+ * struck-through title — a sentence claiming finished work was still carried onto today. The pin GLYPH
+ * was already gated on status; the chip was not. Both now ask lib/six-rank's carriedPin.
+ */
+describe("Carried From on the Reminders page: open rows only", () => {
+  const TODAY = "2026-10-01";
+  const PINNED_MONDAY = "2026-09-28";
+  const row = (status: string) =>
+    renderToStaticMarkup(
+      createElement(TaskRow, {
+        t: { ...REMINDER, id: "p1", title: "Call the PUD", status, focus_date: PINNED_MONDAY, assigned_to: null },
+        people: PEOPLE,
+        category: null,
+        todayStr: TODAY,
+        viewerId: "user-erik",
+      }),
+    );
+
+  it("an open carried pin wears the chip and the pin glyph", () => {
+    const html = row("open");
+    expect(html).toContain("Carried From Monday");
+    expect(html).toMatch(/lucide-pin/);
+  });
+
+  it("a DONE one wears neither — no chip to go with the glyph that was already hidden", () => {
+    const html = row("done");
+    expect(html).not.toContain("Carried From");
+    expect(html).not.toMatch(/lucide-pin/);
+    expect(html).toContain("line-through"); // it is drawn as finished, as before
   });
 });

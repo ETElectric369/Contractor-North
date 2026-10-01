@@ -159,14 +159,25 @@ d("a pin carries: the real My Day pool, on the day after (and the week after)", 
     expect(brians).not.toContain("TEST carried pin");
   });
 
-  it("the bound cuts the backlog, never the pin: 80 dated rows and the pin still comes back first", async () => {
+  it("the bound cuts the backlog, never the pin OR the deadline: 80 stale rows, and today still shows", async () => {
+    // Every one of these is overdue on WED, and there are more of them than the bound can carry.
     for (let i = 0; i < 80; i++) {
       await reminder(orgId, staffId, `noise ${i}`, { due: `2026-0${(i % 8) + 1}-${String((i % 27) + 1).padStart(2, "0")}` });
     }
     const rows = await pool(staffId, WED);
     expect(rows).toHaveLength(MY_DAY_POOL_LIMIT); // build for millions: the bound holds
     expect(titles(rows)[0]).toBe("TEST carried pin");
-    expect(titles(await card(staffId, WED))[0]).toBe("TEST carried pin");
+    // THE SECOND HALF OF THE SAME BUG. The bound used to cut dated rows oldest-first, so a backlog
+    // this size kept the January zombies and the row due TODAY was never fetched from the database at
+    // all. Same disappearance Erik reported, one layer down: it has to come back, and it has to be on
+    // the card. (The real query, the real order, the real 60-row cut.)
+    expect(titles(rows), "the row due today").toContain("TEST due wed");
+    expect(titles(rows), "yesterday's miss, fresher than any zombie").toContain("TEST overdue");
+    const shown = titles(await card(staffId, WED));
+    expect(shown[0]).toBe("TEST carried pin");
+    expect(shown).toContain("TEST due wed");
+    // What the cut DID take is the oldest end of the pile — and the card's All Reminders line counts it.
+    expect(shown).not.toContain("TEST noise 0"); // due 2026-01-01
   });
 
   it("the order is TOTAL: the same read, with an UPDATE in between, comes back identical", async () => {

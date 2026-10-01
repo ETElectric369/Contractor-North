@@ -140,8 +140,8 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
   // who can't see /schedule (office-only). A role-gated single map ≠ duplication.
   if (view === "week" && isStaff) redirect("/schedule?view=week");
 
-  // Merge scheduled-today jobs + segment-today jobs (dedup) for the agenda below. (The six no longer
-  // read today's jobs: job tasks left Today's 6 in 0358, so rank 4 "on site" is gone.)
+  // Merge scheduled-today jobs + segment-today jobs (dedup) for the agenda below. (The rank no longer
+  // reads today's jobs: job tasks left this card in 0358, so the old "on site" rank is gone.)
   const jobMap = new Map<string, any>();
   for (const j of jobs ?? []) jobMap.set(j.id, { ...j, time: j.scheduled_start });
   for (const s of (segJobs ?? []) as any[]) {
@@ -180,7 +180,8 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
   // the ranked Reminders pool, and the head-counts that feed Tasks & Reminders — run together in
   // one final round. (The money-pipeline fetch left with the Money line — the AR
   // page owns that view now; the office/else DOOR links left too, so the only
-  // count consumers below are the Today's-6 card's Grab-One gate + its six marks.)
+  // count consumers below are the Tasks & Reminders card's Grab-One gate + its progress marks,
+  // which count the DAY's own total, not a six.)
   //
   // The daily-report window: 14 ORG-local days back from today (lib/tz, never the
   // UTC server's day — a Pacific evening debrief must not fall out of the window a
@@ -266,10 +267,12 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
   // pin and whether it carried, so that rule has exactly one home.
   const six = rankSix(sixPool, { todayStr });
   // NOTHING SILENT ABOUT THE BOUND. The fetch is still capped (MY_DAY_POOL_LIMIT) so a company with
-  // thousands of open Reminders doesn't pull them all, and the order puts every pin out of the cut's
-  // reach. What the cut DID leave behind is never hidden: restCount below is an independent head count
-  // of ALL my open Reminders minus the ones drawn, so the card's "All Reminders · N More For You" line
-  // tells the truth whether N is a backlog, a day next month, or the bound.
+  // thousands of open Reminders doesn't pull them all, and the order (lib/six-rank RANK_POOL_ORDER)
+  // puts both every pin AND the freshest deadline out of the cut's reach: it takes from the oldest end
+  // of a backlog, never from today. What the cut DID leave behind is never hidden: restCount below is
+  // an independent head count of ALL my open Reminders minus the ones drawn, so the card's
+  // "All Reminders · N More For You" line tells the truth whether N is a backlog, a day next month,
+  // or the bound.
 
   // The current job's materials and its open tasks (need its id), the Needs You inbox (needs
   // the role), and the six's subtasks (need the chosen six) — one final round.
@@ -800,7 +803,8 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
       <RefreshOnVisible />
       {/* Header + weather (Erik-spec): the bigger weather widget fills the space to the RIGHT
           of the date at EVERY width (a plain flex row, not PageHeader's stack-on-mobile). The
-          daily quote gets its OWN line under the Now card so it never truncates or crowds it. */}
+          daily quote gets its OWN line, now ABOVE the clock (next comment), so it never
+          truncates or crowds anything. */}
       <div className="mb-4 flex items-center justify-between gap-3">
         <div className="min-w-0">
           <h1 className="text-2xl font-bold tracking-tight text-slate-900">My Day</h1>
@@ -1132,8 +1136,8 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
 
       {/* The office/else DOOR LINES that sat here were removed (Erik's declutter):
           office tasks live at /tasks, and flagged items already surface via
-          Needs You below. The backlog stays reachable through the Today's-6
-          Grab-One link + the dock. */}
+          Needs You below. The backlog stays reachable through Tasks & Reminders'
+          Grab-One / All Reminders links + the dock. */}
 
       {/* NEEDS YOU — the pure DECISION inbox (money, leads, waiting, leak
           detectors), right under the day so pull-work follows the plan. Tasks

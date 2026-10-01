@@ -30,7 +30,7 @@ import { MoveToDay } from "@/components/move-to-day";
 import { RowMoreSheet, SheetLink, SHEET_ROW } from "@/components/row-more-sheet";
 import { useToast } from "@/components/toast";
 import { formatDate } from "@/lib/utils";
-import { carriedDay, isPinned, pinCarriedFrom, ranksToday } from "@/lib/six-rank";
+import { carriedDay, carriedPin, isPinned, ranksToday } from "@/lib/six-rank";
 import { createTask, toggleTask, updateTask, type ToggleTaskResult } from "../tasks/actions";
 import { taskHref } from "@/lib/task-href";
 
@@ -341,7 +341,9 @@ export function YourList({
     const due = t.due_date ? `Due ${formatDate(t.due_date)}${c?.overdue ? ` · ${c.label}` : ""}` : "No due date";
     const opts = { category: t.category, jobId: t.job_id };
     const pinned = isPinned(t.focus_date, todayStr);
-    const carried = pinCarriedFrom(t.focus_date, todayStr);
+    // The same one function the row's chip asks (lib/six-rank carriedPin), so the sheet's subline and
+    // the chip above it can never say different things about the same pin.
+    const carried = carriedPin(t, todayStr);
     const pinWords = carried ? ` · Pinned, carried from ${carriedDay(carried, todayStr)}` : pinned ? " · Pinned" : "";
     return (
       <RowMoreSheet title={t.title} subline={`${due}${pinWords}`}>
@@ -434,9 +436,12 @@ export function YourList({
             const chip = dueChip(t.due_date, todayStr);
             const screaming = !!chip && (chip.overdue || chip.label === "Today");
             const kids = kidsByParent.get(t.id) ?? [];
-            const pinned = isPinned(t.focus_date, todayStr);
-            // A pin he set on an earlier day. The chip is why the row is still here, in two words.
-            const carried = pinCarriedFrom(t.focus_date, todayStr);
+            // A pin he set on an earlier day: the chip is why the row is still here, in two words.
+            // BOTH PIN MARKS GO WHEN THE ROW IS CHECKED, like the flag and the due chip beside them —
+            // a struck-through line saying "Carried From Yesterday" is a sentence about finished work
+            // (lib/six-rank carriedPin owns that gate for this card and for /tasks both).
+            const carried = carriedPin(t, todayStr, done);
+            const pinned = isPinned(t.focus_date, todayStr) && !done;
             return (
               <li key={t.id}>
                 <div className="flex items-center pr-2">

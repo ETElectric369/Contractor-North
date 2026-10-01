@@ -15,8 +15,9 @@
 //     BEFORE today is a CARRIED pin: it leads the card, oldest first, wearing "Carried From <Day>".
 //     It leaves when he unpins it or checks it off — never because a day turned over.
 //   · THERE IS NO DISPLAY CAP. The card shows every open Reminder a rank claims. The only bound left
-//     is on the FETCH (MY_DAY_POOL_LIMIT), ordered so a pin can never be the row that gets cut, and
-//     the card says how many more there are rather than dropping them in silence.
+//     is on the FETCH (MY_DAY_POOL_LIMIT), ordered so that neither a pin nor the freshest deadline can
+//     be the row that gets cut (RANK_POOL_ORDER says why, term by term), and the card says how many
+//     more there are rather than dropping them in silence.
 //   · A PLAIN UNDATED REMINDER IS VISIBLE. It ranks last, but it ranks. That is what lets the Add
 //     line stop stamping a pin on everything it types (planner/your-list.tsx) — a pin means a pin
 //     again.
@@ -50,6 +51,29 @@ export function isPinned(focusDate: string | null | undefined, todayStr: string)
  *  "Carried From <Day>" off this, so a pin that survived the night says so instead of looking new. */
 export function pinCarriedFrom(focusDate: string | null | undefined, todayStr: string): string | null {
   return focusDate && focusDate < todayStr ? focusDate : null;
+}
+
+/**
+ * THE CARRIED-PIN CHIP FOR ONE ROW — the day a standing pin was set, or null when there is nothing
+ * TRUE to say about this row: no pin, today's pin, no company day to measure against, or a Reminder
+ * that is DONE.
+ *
+ * The status gate is the whole reason this exists. Checking a Reminder off does not clear its
+ * focus_date (nothing does, on purpose: un-checking it restores the pin it had), so a chip gated on
+ * the DATE alone stood under a struck-through title — "Carried From Yesterday" about work already
+ * finished, in /tasks' Done fold and under a just-checked row on My Day. The pin GLYPH was already
+ * gated on status at both doors; the chip was not. Now both surfaces ask this one function, so there
+ * is one gate to get right instead of two to keep in step.
+ */
+export function carriedPin(
+  t: { focus_date?: string | null; status?: string | null },
+  todayStr: string | null | undefined,
+  /** The row's done-ness when the surface knows better than `status` — My Day's optimistic check. */
+  done?: boolean,
+): string | null {
+  if (!todayStr) return null;
+  if (done ?? t.status === "done") return null;
+  return pinCarriedFrom(t.focus_date, todayStr);
 }
 
 /**
@@ -129,28 +153,70 @@ export const PUSH_POOL_LIMIT = 500;
 export const PUSH_SIX = 6;
 
 /**
+ * THE ORDER THE BOUND CUTS IN, WRITTEN ONCE — as the terms the database gets (rankPoolQuery) and as
+ * the comparison those terms MEAN (byPoolOrder). Two languages, one list, on purpose: the first
+ * attempt at this build sorted its fixtures one way in the suite and sent the database another, so a
+ * green suite proved nothing about the rows a phone would actually get back.
+ *
+ * WHY THESE TERMS, IN THIS ORDER:
+ *  1. focus_date ASC, NULLS LAST — every standing pin ahead of everything unpinned, the carried ones
+ *     first (the card leads with them too). A pin can never be the row the bound cuts: that was the
+ *     other half of Erik's "the tasks keep disappearing even the pinned ones".
+ *     KNOWN AND BOUNDED COST: a pin on a FUTURE day (the debrief pins tomorrow's picks) rides the
+ *     head of the fetch as well, though it does not rank until its day comes. It costs as many rows
+ *     as one debrief pinned, and buying it back would mean a second read of the same table — so it is
+ *     named here rather than forked around.
+ *  2. priority DESC, NULLS LAST — urgent, then high, then the rest: the first term every rank sorts
+ *     by, so the fetch and the card agree about what matters. (tasks.priority is NOT NULL since 0018;
+ *     the nulls term is stated anyway so the SQL and the comparison stay literally identical.)
+ *  3. due_date DESC, NULLS LAST — THE FRESHEST DATE SURVIVES THE CUT. Ascending read oldest-first:
+ *     with 60-odd overdue reminders from June in the pool, the bound kept the June zombies and the
+ *     thing due TODAY was never fetched at all — Erik's own complaint, one layer down, and a straight
+ *     contradiction of rank 2's "a yesterday-miss beats a June-8 zombie". Descending keeps today,
+ *     then yesterday's miss, and cuts the oldest end of the backlog. Undated reminders sort last, so
+ *     a Someday pile is cut before a deadline is.
+ *  4. created_at ASC, then 5. id ASC — the total order: no two rows can tie, so the same pool comes
+ *     back in the same sequence however the heap happened to hand it over, and the card stops
+ *     shuffling between polls.
+ *
+ * Whatever the bound DID leave behind is never dropped in silence: it is counted on the card's
+ * "All Reminders · N More For You" line.
+ */
+export const RANK_POOL_ORDER: { column: keyof SixRankTask; ascending: boolean; nullsFirst: boolean }[] = [
+  { column: "focus_date", ascending: true, nullsFirst: false },
+  { column: "priority", ascending: false, nullsFirst: false },
+  { column: "due_date", ascending: false, nullsFirst: false },
+  { column: "created_at", ascending: true, nullsFirst: false },
+  { column: "id", ascending: true, nullsFirst: false },
+];
+
+/** The pool order as a COMPARISON — the same terms, so a test drives the real order or none at all. */
+export function byPoolOrder(a: SixRankTask, b: SixRankTask): number {
+  for (const { column, ascending, nullsFirst } of RANK_POOL_ORDER) {
+    const av = a[column] ?? null;
+    const bv = b[column] ?? null;
+    if (av === null && bv === null) continue;
+    if (av === null) return nullsFirst ? -1 : 1;
+    if (bv === null) return nullsFirst ? 1 : -1;
+    const c =
+      typeof av === "number" && typeof bv === "number" ? av - bv : String(av).localeCompare(String(bv));
+    if (c !== 0) return ascending ? c : -c;
+  }
+  return 0;
+}
+
+/**
  * Shape a tasks read into THE ranked pool: the cut, the order the bound must cut in, and the bound.
  * Hand it a query already narrowed to the caller's own rows (My Day's mineCut, the digest's org +
  * job_id null) — this adds only the parts that are the RULE.
- *
- * THE ORDER IS LOAD-BEARING. focus_date ascending with nulls last puts every standing pin ahead of
- * everything else, carried ones first, so the bound can never be the thing that drops a pin (that
- * was the other half of defect 1). Then priority, then the nearest date, then the Part-D tiebreak
- * (created_at, id) so the database and the ranker agree and the list cannot shuffle between polls.
  */
 export function rankPoolQuery<Q>(
   q: Q,
   { todayStr, scope, limit }: { todayStr: string; scope: PoolScope; limit?: number },
 ): Q {
-  const a = q as any;
-  return a
-    .or(rankPoolCut(todayStr, scope))
-    .order("focus_date", { ascending: true, nullsFirst: false })
-    .order("priority", { ascending: false })
-    .order("due_date", { ascending: true, nullsFirst: false })
-    .order("created_at", { ascending: true })
-    .order("id", { ascending: true })
-    .limit(limit ?? (scope === "my_day" ? MY_DAY_POOL_LIMIT : PUSH_POOL_LIMIT)) as Q;
+  let a = (q as any).or(rankPoolCut(todayStr, scope));
+  for (const { column, ascending, nullsFirst } of RANK_POOL_ORDER) a = a.order(column, { ascending, nullsFirst });
+  return a.limit(limit ?? (scope === "my_day" ? MY_DAY_POOL_LIMIT : PUSH_POOL_LIMIT)) as Q;
 }
 
 export interface SixRankTask {
