@@ -4,7 +4,7 @@ import { useEffect } from "react";
 
 /**
  * A LINK INTO A FOLD OPENS THE FOLD (Bills plan, Wave B). /bills keeps everything below Needs You
- * folded, and a link to something folded away ("#bill-...", "#ced-import", "/bills#supplier-
+ * folded, and a link to something folded away ("#bill-...", "#supplier-checks-...", "/bills#supplier-
  * invoices-...") would otherwise land on a closed box: a dead door. This opens every <details>
  * around the target, then brings it into view. Runs on arrival, on a hash change, and on a tap of
  * any in-page "#..." link (Next's own navigation does not fire hashchange).
