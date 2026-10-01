@@ -109,13 +109,13 @@ describe("scheduledJobFor: the day row wins", () => {
   it("a day row naming a job still in flight is the answer, and no tier below is read", async () => {
     const sb = fakeSupabase(
       planRoutes({
-        day: { job_id: "whitney", kind: "job" },
-        active: ["whitney", "pine"],
+        day: { job_id: "larkspur", kind: "job" },
+        active: ["larkspur", "pine"],
         roster: [{ id: "pine", scheduled_start: "2026-09-22T15:00:00Z", scheduled_end: null }],
       }),
       calls,
     );
-    expect(await scheduledJobFor(sb as any, "brian-1", "2026-09-22", TZ)).toEqual({ off: false, jobId: "whitney" });
+    expect(await scheduledJobFor(sb as any, "brian-1", "2026-09-22", TZ)).toEqual({ off: false, jobId: "larkspur" });
     expect(calls.some(isRoster)).toBe(false);
     const day = calls.find(isDayRow)!;
     expect(day.filters).toEqual(expect.arrayContaining([["eq", "profile_id", "brian-1"], ["eq", "work_date", "2026-09-22"]]));
@@ -301,11 +301,11 @@ describe("the clock resolves exactly as before (resolveTechJobToday, through a j
   }
 
   it("today's day row wins", async () => {
-    const { jobId, result } = await punch({ day: { job_id: "whitney", kind: "job" }, active: ["whitney"], inProgress: ["pine"] });
-    expect(jobId).toBe("whitney");
+    const { jobId, result } = await punch({ day: { job_id: "larkspur", kind: "job" }, active: ["larkspur"], inProgress: ["pine"] });
+    expect(jobId).toBe("larkspur");
     // NOBODY PICKED THIS JOB — the schedule did, and the answer says so now, so every clock door can
-    // name it out loud instead of leaving the hours on it in silence (clock-told, Erik's TTP 56).
-    expect(result).toEqual({ ok: true, id: "new-punch", jobPick: { chosenBy: "app", id: "whitney", from: "schedule", label: "whitney site" } });
+    // name it out loud instead of leaving the hours on it in silence (clock-told, Erik's ARR 56).
+    expect(result).toEqual({ ok: true, id: "new-punch", jobPick: { chosenBy: "app", id: "larkspur", from: "schedule", label: "larkspur site" } });
     // Asked about the company's today.
     expect(calls.find(isDayRow)!.filters).toContainEqual(["eq", "work_date", "2026-09-23"]);
   });
@@ -350,7 +350,7 @@ describe("the clock resolves exactly as before (resolveTechJobToday, through a j
   });
 
   it("nothing scheduled and two jobs in progress: no guess", async () => {
-    const { jobId, result } = await punch({ inProgress: ["pine", "whitney"] });
+    const { jobId, result } = await punch({ inProgress: ["pine", "larkspur"] });
     expect(jobId).toBeNull();
     expect(result.noJob).toBe(true);
   });

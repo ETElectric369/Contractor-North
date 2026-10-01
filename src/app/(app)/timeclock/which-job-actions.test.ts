@@ -325,11 +325,11 @@ describe("picking puts the punch on the job, checked", () => {
     if (q.table === "organizations") return ORG;
   };
   const openPunch = { id: PUNCH, job_id: null, job_code: null, status: "open", clock_out: null };
-  const whitney = { id: JOB, status: "scheduled", job_number: "J-028", name: "85 Whitney", address: null, customers: { name: "Nora" } };
+  const larkspur = { id: JOB, status: "scheduled", job_number: "J-028", name: "41 Larkspur", address: null, customers: { name: "Nora" } };
 
   it("an open punch goes on the job whole: only if still his and still job-less, asked back, and a job not started yet is started", async () => {
-    state.client = fakeSupabase(pickRoute(openPunch, whitney), calls);
-    expect(await putPunchOnJob(PUNCH, JOB)).toEqual({ ok: true, label: "85 Whitney" });
+    state.client = fakeSupabase(pickRoute(openPunch, larkspur), calls);
+    expect(await putPunchOnJob(PUNCH, JOB)).toEqual({ ok: true, label: "41 Larkspur" });
     const upd = calls.find((c) => c.table === "time_entries" && c.verb === "update")!;
     expect(upd.payload).toEqual({ job_id: JOB });
     expect(has(upd, "eq", "profile_id", "user-1")).toBe(true);
@@ -343,25 +343,25 @@ describe("picking puts the punch on the job, checked", () => {
 
   it("a shift that just closed (the clock-out's question) goes on the job too", async () => {
     const closed = { ...openPunch, status: "closed", clock_out: new Date(Date.now() - 2 * H).toISOString() };
-    state.client = fakeSupabase(pickRoute(closed, whitney), calls);
-    expect(await putPunchOnJob(PUNCH, JOB)).toEqual({ ok: true, label: "85 Whitney" });
+    state.client = fakeSupabase(pickRoute(closed, larkspur), calls);
+    expect(await putPunchOnJob(PUNCH, JOB)).toEqual({ ok: true, label: "41 Larkspur" });
     expect(has(calls.find((c) => c.table === "time_entries" && c.verb === "update")!, "eq", "status", "closed")).toBe(true);
   });
 
   it("an old closed shift, or one filed under a code, is the office's: refused in words, nothing written", async () => {
     const old = { ...openPunch, status: "closed", clock_out: new Date(Date.now() - 30 * H).toISOString() };
-    state.client = fakeSupabase(pickRoute(old, whitney), calls);
+    state.client = fakeSupabase(pickRoute(old, larkspur), calls);
     const r = await putPunchOnJob(PUNCH, JOB);
     expect(r).toMatchObject({ ok: false, stale: true });
     expect(r.error).toMatch(/office puts it on its job from Timecards/);
     const shop = { ...openPunch, status: "closed", job_code: "SHOP", clock_out: new Date(Date.now() - H).toISOString() };
-    state.client = fakeSupabase(pickRoute(shop, whitney), calls);
+    state.client = fakeSupabase(pickRoute(shop, larkspur), calls);
     expect((await putPunchOnJob(PUNCH, JOB)).error).toBe("That shift is filed under SHOP. The office moves it from Timecards.");
     expect(calls.some((c) => c.verb === "update")).toBe(false);
   });
 
   it("a finished job, or one he can't see, is refused and nothing is written", async () => {
-    state.client = fakeSupabase(pickRoute(openPunch, { ...whitney, status: "complete" }), calls);
+    state.client = fakeSupabase(pickRoute(openPunch, { ...larkspur, status: "complete" }), calls);
     expect((await putPunchOnJob(PUNCH, JOB)).error).toMatch(/^That job is finished/);
     state.client = fakeSupabase(pickRoute(openPunch, null), calls);
     expect(await putPunchOnJob(PUNCH, JOB)).toEqual({ ok: false, error: "That job isn't available." });
@@ -369,7 +369,7 @@ describe("picking puts the punch on the job, checked", () => {
   });
 
   it("a zero-row update (the punch closed or got a job a moment ago) is never reported as done", async () => {
-    state.client = fakeSupabase(pickRoute(openPunch, whitney, { data: null }), calls);
+    state.client = fakeSupabase(pickRoute(openPunch, larkspur, { data: null }), calls);
     const r = await putPunchOnJob(PUNCH, JOB);
     expect(r.ok).toBe(false);
     expect(r.stale).toBe(true);

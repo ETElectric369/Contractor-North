@@ -7,8 +7,8 @@ import { join } from "node:path";
 /**
  * THE CLOCK SAYS WHICH JOB IT PUT YOUR PUNCH ON (Erik, 2026-10-01).
  *
- * "we didn't do the job at TTP 56 this morning. Brian clocked in on his way to the Supply house to
- * get materials for Whitney before I could switch the schedule." Two punches landed on the job the
+ * "we didn't do the job at ARR 56 this morning. Brian clocked in on his way to the Supply house to
+ * get materials for Larkspur before I could switch the schedule." Two punches landed on the job the
  * schedule happened to be showing — 2h19m of Brian's billable time on the wrong customer — and the
  * clock said nothing, because it only ever spoke up when it COULDN'T tell the job. Then those hours
  * made that job a worked day, and a worked day does not move, so the schedule kept agreeing with the
@@ -108,31 +108,31 @@ function fakeSupabase(route: (q: Q) => Reply, calls: Q[]) {
 
 const has = (q: Q, ...f: any[]) => q.filters.some((x) => JSON.stringify(x) === JSON.stringify(f));
 const PUNCH = "a0000000-0000-4000-8000-00000000000a";
-const TTP = "d0000000-0000-4000-8000-00000000000d";
+const ARR = "d0000000-0000-4000-8000-00000000000d";
 const SUPPLY = "e0000000-0000-4000-8000-00000000000e";
 const SETTINGS = { data: { settings: { timezone: "America/Los_Angeles", timeclock_job_codes: true } } };
 
 /** The job row the label read brings back: Erik's own morning, named the way he names jobs. */
-const TTP_ROW = { id: TTP, job_number: "J-013", name: "TTP 56 rough-in", address: "56 Timber Trail Pl", customers: { name: "Jackie Burks" } };
+const ARR_ROW = { id: ARR, job_number: "J-013", name: "ARR 56 rough-in", address: "56 Alder Ridge Rd", customers: { name: "Marla Finch" } };
 
 /**
- * BRIAN'S MORNING. The schedule puts him on TTP 56 today (the office's day row, tier 0), he taps the
+ * BRIAN'S MORNING. The schedule puts him on ARR 56 today (the office's day row, tier 0), he taps the
  * one Clock In button, and the punch carries no job of its own.
  */
-const schedulePutsHimOnTtp =
+const schedulePutsHimOnArr =
   (over: { jobRow?: Reply; insert?: Reply } = {}) =>
   (q: Q): Reply => {
     if (q.table === "profiles" && q.cols === "org_id") return { data: { org_id: "org-1" } };
     if (q.table === "profiles") return { data: { role: "tech" } };
     if (q.table === "organizations") return SETTINGS;
-    if (q.table === "crew_day_assignments") return { data: { job_id: TTP, kind: "job" } };
+    if (q.table === "crew_day_assignments") return { data: { job_id: ARR, kind: "job" } };
     // The day row's job is still in flight (resolveTechJobToday tier 0's own check).
-    if (q.table === "jobs" && q.cols === "id") return { data: { id: TTP } };
+    if (q.table === "jobs" && q.cols === "id") return { data: { id: ARR } };
     // The promotion's read (lib/job-promote), then its write.
     if (q.table === "jobs" && q.cols.startsWith("org_id")) return { data: { org_id: "org-1", status: "scheduled" } };
     if (q.table === "jobs" && q.verb === "update") return { data: [] };
     // The LABEL read: what the sentence names.
-    if (q.table === "jobs" && q.cols.startsWith("id, job_number")) return over.jobRow ?? { data: TTP_ROW };
+    if (q.table === "jobs" && q.cols.startsWith("id, job_number")) return over.jobRow ?? { data: ARR_ROW };
     if (q.table === "time_entries" && q.verb === "insert") return over.insert ?? { data: { id: PUNCH } };
   };
 
@@ -154,7 +154,7 @@ beforeEach(() => {
 
 describe("PART 1 — the clock says what it decided", () => {
   it("a job-less punch the server resolved comes back saying the APP chose the job, and names it", async () => {
-    state.client = fakeSupabase(schedulePutsHimOnTtp(), calls);
+    state.client = fakeSupabase(schedulePutsHimOnArr(), calls);
     const res = await clockIn({ job_id: null, job_code: null, gps: null });
 
     expect(res.ok).toBe(true);
@@ -162,19 +162,19 @@ describe("PART 1 — the clock says what it decided", () => {
     // THE HONEST SHAPE: who chose it is its own fact, not something inferred from job_id being set.
     // THE HONEST SHAPE also carries WHICH rule picked: tier 0/1 really is today's schedule, so the
     // sentence may say so (clock-told: a source it didn't use is the same class of lie as silence).
-    expect(res.jobPick).toEqual({ chosenBy: "app", id: TTP, from: "schedule", label: "TTP 56 rough-in · 56 Timber Trail Pl" });
+    expect(res.jobPick).toEqual({ chosenBy: "app", id: ARR, from: "schedule", label: "ARR 56 rough-in · 56 Alder Ridge Rd" });
 
     const told = tellAppChose(res);
     expect(told).not.toBeNull();
     expect(told!.entryId).toBe(PUNCH);
-    expect(told!.job).toEqual({ id: TTP, label: "TTP 56 rough-in · 56 Timber Trail Pl" });
+    expect(told!.job).toEqual({ id: ARR, label: "ARR 56 rough-in · 56 Alder Ridge Rd" });
     // The sentence a person sees: plain words, the job named, and it says who picked it.
     expect(told!.sentence).toBe(
-      "Your punch is on TTP 56 rough-in · 56 Timber Trail Pl. The app picked that from today's schedule — change it if you're somewhere else.",
+      "Your punch is on ARR 56 rough-in · 56 Alder Ridge Rd. The app picked that from today's schedule — change it if you're somewhere else.",
     );
     // The punch still landed before any of this: the clock never waits on the sentence.
     const insert = calls.find((c) => c.verb === "insert")!;
-    expect(insert.payload).toMatchObject({ job_id: TTP, status: "open" });
+    expect(insert.payload).toMatchObject({ job_id: ARR, status: "open" });
     expect(insert.returning).toBe("id");
     expect(calls.indexOf(insert)).toBeLessThan(calls.findIndex((c) => c.cols.startsWith("id, job_number")));
   });
@@ -183,14 +183,14 @@ describe("PART 1 — the clock says what it decided", () => {
     state.client = fakeSupabase((q) => {
       if (q.table === "profiles" && q.cols === "org_id") return { data: { org_id: "org-1" } };
       if (q.table === "profiles") return { data: { role: "owner" } };
-      if (q.table === "jobs" && q.cols === "id") return { data: { id: TTP } };
+      if (q.table === "jobs" && q.cols === "id") return { data: { id: ARR } };
       if (q.table === "jobs" && q.cols.startsWith("org_id")) return { data: { org_id: "org-1", status: "scheduled" } };
       if (q.table === "jobs" && q.verb === "update") return { data: [] };
       if (q.table === "time_entries" && q.verb === "insert") return { data: { id: PUNCH } };
     }, calls);
-    const res = await clockIn({ job_id: TTP, job_code: null, gps: null });
+    const res = await clockIn({ job_id: ARR, job_code: null, gps: null });
 
-    expect(res.jobPick).toEqual({ chosenBy: "person", id: TTP });
+    expect(res.jobPick).toEqual({ chosenBy: "person", id: ARR });
     expect(tellAppChose(res)).toBeNull();
     // AND IT COSTS NO EXTRA READ: a person-picked punch never asks the database for a label.
     expect(calls.some((c) => c.cols.startsWith("id, job_number"))).toBe(false);
@@ -208,7 +208,7 @@ describe("PART 1 — the clock says what it decided", () => {
 
   it("a refused punch tells nothing — there is no punch to tell about", async () => {
     state.client = fakeSupabase(
-      schedulePutsHimOnTtp({ insert: { error: { code: "23505", message: 'duplicate key value violates unique constraint "one_open_entry"' } } }),
+      schedulePutsHimOnArr({ insert: { error: { code: "23505", message: 'duplicate key value violates unique constraint "one_open_entry"' } } }),
       calls,
     );
     const res = await clockIn({ job_id: null, job_code: null, gps: null });
@@ -217,14 +217,14 @@ describe("PART 1 — the clock says what it decided", () => {
   });
 
   it("a job whose own row couldn't be read is still said out loud — silence is the one wrong answer", async () => {
-    state.client = fakeSupabase(schedulePutsHimOnTtp({ jobRow: { data: null } }), calls);
+    state.client = fakeSupabase(schedulePutsHimOnArr({ jobRow: { data: null } }), calls);
     const res = await clockIn({ job_id: null, job_code: null, gps: null });
-    expect(res.jobPick).toEqual({ chosenBy: "app", id: TTP, from: "schedule", label: UNREAD_JOB_LABEL });
+    expect(res.jobPick).toEqual({ chosenBy: "app", id: ARR, from: "schedule", label: UNREAD_JOB_LABEL });
     expect(tellAppChose(res)!.sentence).toContain(UNREAD_JOB_LABEL);
   });
 
   it("the rule reads the ANSWER, not the shape of it: no id, not ok, or no pick tells nothing", () => {
-    const pick = { chosenBy: "app" as const, id: TTP, from: "schedule" as const, label: "TTP 56" };
+    const pick = { chosenBy: "app" as const, id: ARR, from: "schedule" as const, label: "ARR 56" };
     expect(tellAppChose({ ok: true, jobPick: pick })).toBeNull();
     expect(tellAppChose({ ok: false, id: PUNCH, jobPick: pick })).toBeNull();
     expect(tellAppChose({ ok: true, id: PUNCH })).toBeNull();
@@ -237,7 +237,7 @@ describe("the job named the way a person knows it — never a bare number", () =
   const job = (over: Partial<ChoiceJob>): ChoiceJob => ({ id: "j1", job_number: "J-013", name: null, address: null, customers: null, ...over });
 
   it("codes on: the job's name AND where it is", () => {
-    expect(punchJobLabel(job({ name: "TTP 56 rough-in", address: "56 Timber Trail Pl" }), true)).toBe("TTP 56 rough-in · 56 Timber Trail Pl");
+    expect(punchJobLabel(job({ name: "ARR 56 rough-in", address: "56 Alder Ridge Rd" }), true)).toBe("ARR 56 rough-in · 56 Alder Ridge Rd");
   });
 
   it("a name that already carries the street doesn't say it twice", () => {
@@ -247,29 +247,29 @@ describe("the job named the way a person knows it — never a bare number", () =
   });
 
   it("codes off: the Timeclock's own label — customer · street", () => {
-    expect(punchJobLabel(job({ name: "TTP 56 rough-in", address: "56 Timber Trail Pl", customers: { name: "Jackie Burks" } }), false)).toBe(
-      "Jackie Burks · 56 Timber Trail Pl",
+    expect(punchJobLabel(job({ name: "ARR 56 rough-in", address: "56 Alder Ridge Rd", customers: { name: "Marla Finch" } }), false)).toBe(
+      "Marla Finch · 56 Alder Ridge Rd",
     );
   });
 
   it("a job nobody named still says where it is, so the number is never alone (Erik: \"i cant tell by job numbers alone\")", () => {
-    const label = punchJobLabel(job({ address: "5659 Rhodesia" }), true);
-    expect(label).toBe("J-013 · 5659 Rhodesia");
-    expect(appChoseSentence(label, "schedule")).toContain("5659 Rhodesia");
+    const label = punchJobLabel(job({ address: "5659 Fernhill" }), true);
+    expect(label).toBe("J-013 · 5659 Fernhill");
+    expect(appChoseSentence(label, "schedule")).toContain("5659 Fernhill");
     expect(label).not.toBe("J-013");
   });
 });
 
 describe("PART 2 — one tap to change it, and it is not a dead end", () => {
   it("the Change door opens the clock's own sheet, in move mode, off the job the app chose", () => {
-    const told = tellAppChose({ ok: true, id: PUNCH, jobPick: { chosenBy: "app", id: TTP, from: "schedule", label: "TTP 56" } })!;
-    expect(changeJobAsk(told)).toEqual({ entryId: PUNCH, moment: "move", from: { id: TTP, label: "TTP 56" } });
+    const told = tellAppChose({ ok: true, id: PUNCH, jobPick: { chosenBy: "app", id: ARR, from: "schedule", label: "ARR 56" } })!;
+    expect(changeJobAsk(told)).toEqual({ entryId: PUNCH, moment: "move", from: { id: ARR, label: "ARR 56" } });
   });
 
   it("the sentence carries the Change door, and both are rendered by every clock door's one component", () => {
-    const told = tellAppChose({ ok: true, id: PUNCH, jobPick: { chosenBy: "app", id: TTP, from: "schedule", label: "TTP 56 rough-in · 56 Timber Trail Pl" } })!;
+    const told = tellAppChose({ ok: true, id: PUNCH, jobPick: { chosenBy: "app", id: ARR, from: "schedule", label: "ARR 56 rough-in · 56 Alder Ridge Rd" } })!;
     const html = renderToStaticMarkup(createElement(AppChoseJobNotice, { notice: told, onDone: () => {} }));
-    expect(html).toContain("TTP 56 rough-in · 56 Timber Trail Pl");
+    expect(html).toContain("ARR 56 rough-in · 56 Alder Ridge Rd");
     expect(html).toContain("The app picked that from today&#x27;s schedule");
     expect(html).toContain(CHANGE_JOB_LABEL);
     // Title Case, 44px, and NOT a modal: the clock stays two buttons.
@@ -286,13 +286,13 @@ describe("PART 2 — one tap to change it, and it is not a dead end", () => {
     const html = renderToStaticMarkup(
       createElement(WhichJobSheetView, {
         moment: "move" as const,
-        from: { id: TTP, label: "TTP 56 rough-in" },
-        state: { phase: "ready" as const, jobs: [{ id: SUPPLY, label: "85 Whitney" }], isStaff: false },
+        from: { id: ARR, label: "ARR 56 rough-in" },
+        state: { phase: "ready" as const, jobs: [{ id: SUPPLY, label: "41 Larkspur" }], isStaff: false },
         onPick: () => {},
         onSkip: () => {},
       }),
     );
-    expect(html).toContain("The app put this punch on TTP 56 rough-in");
+    expect(html).toContain("The app put this punch on ARR 56 rough-in");
     expect(html).toContain("the whole punch moves");
     expect(html).toContain("Leave It Where It Is");
     // "Skip, The Office Will Pick" would be a lie: the punch already has a job.
@@ -301,12 +301,12 @@ describe("PART 2 — one tap to change it, and it is not a dead end", () => {
 
   it("the sheet never offers the job the punch is already on", () => {
     const jobs: ChoiceJob[] = [
-      { id: TTP, name: "TTP 56 rough-in", status: "in_progress", created_at: "2026-09-01T00:00:00Z" },
-      { id: SUPPLY, name: "85 Whitney", status: "in_progress", created_at: "2026-09-02T00:00:00Z" },
+      { id: ARR, name: "ARR 56 rough-in", status: "in_progress", created_at: "2026-09-01T00:00:00Z" },
+      { id: SUPPLY, name: "41 Larkspur", status: "in_progress", created_at: "2026-09-02T00:00:00Z" },
     ];
-    const common = { jobs, lastJobId: TTP, segToday: new Set([TTP]), hasSegments: new Set<string>(), todayStr: "2026-10-01", tz: "America/Los_Angeles", codesOn: true };
-    expect(orderWhichJobChoices(common).map((o) => o.id)).toEqual([TTP, SUPPLY]);
-    expect(orderWhichJobChoices({ ...common, excludeJobId: TTP }).map((o) => o.id)).toEqual([SUPPLY]);
+    const common = { jobs, lastJobId: ARR, segToday: new Set([ARR]), hasSegments: new Set<string>(), todayStr: "2026-10-01", tz: "America/Los_Angeles", codesOn: true };
+    expect(orderWhichJobChoices(common).map((o) => o.id)).toEqual([ARR, SUPPLY]);
+    expect(orderWhichJobChoices({ ...common, excludeJobId: ARR }).map((o) => o.id)).toEqual([SUPPLY]);
   });
 
   it("with nothing else going, a move never claims the punch is on no job", () => {
@@ -324,18 +324,18 @@ describe("PART 2 — the move is a checked write that moves the WHOLE punch", ()
   /** The punch as the clock left it: open, on the app's pick, no code. */
   const onAppsPick = (over: { entry?: any; hit?: Reply } = {}) => (q: Q): Reply => {
     if (q.table === "time_entries" && q.verb === "select")
-      return { data: over.entry ?? { id: PUNCH, job_id: TTP, job_code: null, status: "open", clock_out: null } };
+      return { data: over.entry ?? { id: PUNCH, job_id: ARR, job_code: null, status: "open", clock_out: null } };
     if (q.table === "time_entries" && q.verb === "update") return over.hit ?? { data: { id: PUNCH } };
     if (q.table === "organizations") return SETTINGS;
-    if (q.table === "jobs" && q.cols.startsWith("id, status")) return { data: { id: SUPPLY, status: "in_progress", job_number: "J-020", name: "85 Whitney", address: "85 Whitney Dr", customers: { name: "Nora Smith" } } };
+    if (q.table === "jobs" && q.cols.startsWith("id, status")) return { data: { id: SUPPLY, status: "in_progress", job_number: "J-020", name: "41 Larkspur", address: "41 Larkspur Dr", customers: { name: "Nora Smith" } } };
     if (q.table === "jobs" && q.cols.startsWith("org_id")) return { data: { org_id: "org-1", status: "in_progress" } };
     if (q.table === "jobs" && q.verb === "update") return { data: [] };
   };
 
   it("one tap moves every hour of the punch, and the write names the job it is coming off", async () => {
     state.client = fakeSupabase(onAppsPick(), calls);
-    const res = await putPunchOnJob(PUNCH, SUPPLY, TTP);
-    expect(res).toMatchObject({ ok: true, label: "85 Whitney" });
+    const res = await putPunchOnJob(PUNCH, SUPPLY, ARR);
+    expect(res).toMatchObject({ ok: true, label: "41 Larkspur" });
 
     const write = calls.find((c) => c.table === "time_entries" && c.verb === "update")!;
     expect(write.payload).toEqual({ job_id: SUPPLY });
@@ -343,7 +343,7 @@ describe("PART 2 — the move is a checked write that moves the WHOLE punch", ()
     expect(has(write, "eq", "id", PUNCH)).toBe(true);
     expect(has(write, "eq", "profile_id", "user-1")).toBe(true);
     // NAMED ON THE WRITE: a punch that moved underneath is a zero-row UPDATE, not a second landing.
-    expect(has(write, "eq", "job_id", TTP)).toBe(true);
+    expect(has(write, "eq", "job_id", ARR)).toBe(true);
     expect(has(write, "is", "job_id", null)).toBe(false);
     // The silent-write law.
     expect(write.returning).toBe("id");
@@ -351,7 +351,7 @@ describe("PART 2 — the move is a checked write that moves the WHOLE punch", ()
 
   it("a punch that moved underneath is reported, never assumed landed", async () => {
     state.client = fakeSupabase(onAppsPick({ hit: { data: null } }), calls);
-    const res = await putPunchOnJob(PUNCH, SUPPLY, TTP);
+    const res = await putPunchOnJob(PUNCH, SUPPLY, ARR);
     expect(res.ok).toBe(false);
     expect(res.stale).toBe(true);
     expect(res.error).toContain("Nothing changed");
@@ -359,7 +359,7 @@ describe("PART 2 — the move is a checked write that moves the WHOLE punch", ()
 
   it("a punch on some OTHER job is still the office's to move", async () => {
     state.client = fakeSupabase(onAppsPick({ entry: { id: PUNCH, job_id: "someone-else", job_code: null, status: "open", clock_out: null } }), calls);
-    const res = await putPunchOnJob(PUNCH, SUPPLY, TTP);
+    const res = await putPunchOnJob(PUNCH, SUPPLY, ARR);
     expect(res.ok).toBe(false);
     expect(res.error).toContain("Timecards");
     expect(calls.some((c) => c.table === "time_entries" && c.verb === "update")).toBe(false);
@@ -379,16 +379,16 @@ describe("PART 2 — the move is a checked write that moves the WHOLE punch", ()
       if (q.table === "time_entries" && q.cols === "id, job_id, status") return { data: { id: PUNCH, job_id: jobId, status: "open" } };
       if (q.table === "time_entries") return { data: null };
       if (q.table === "job_schedule_segments") return { data: [] };
-      if (q.table === "jobs") return { data: [{ ...TTP_ROW, status: "in_progress", scheduled_start: null, scheduled_end: null, created_at: "2026-09-01T00:00:00Z" }] };
+      if (q.table === "jobs") return { data: [{ ...ARR_ROW, status: "in_progress", scheduled_start: null, scheduled_end: null, created_at: "2026-09-01T00:00:00Z" }] };
     };
-    state.client = fakeSupabase(listRoute(TTP), calls);
-    const moving = await whichJobChoices(PUNCH, TTP);
+    state.client = fakeSupabase(listRoute(ARR), calls);
+    const moving = await whichJobChoices(PUNCH, ARR);
     expect(moving.ok).toBe(true);
     // The job it is on is not offered back to itself.
     expect(moving.ok && moving.jobs.map((j) => j.id)).toEqual([]);
 
     state.client = fakeSupabase(listRoute("another-job"), calls);
-    const wrong = await whichJobChoices(PUNCH, TTP);
+    const wrong = await whichJobChoices(PUNCH, ARR);
     expect(wrong.ok).toBe(false);
     expect(wrong.ok === false && wrong.error).toContain("already on a job");
   });
@@ -396,7 +396,7 @@ describe("PART 2 — the move is a checked write that moves the WHOLE punch", ()
 
 describe("and then the schedule frees itself — why no migration is needed", () => {
   /**
-   * THE LOOP THAT CLOSED ON ERIK. Brian's hours made TTP 56 a WORKED day, and moveJobDay keeps worked
+   * THE LOOP THAT CLOSED ON ERIK. Brian's hours made ARR 56 a WORKED day, and moveJobDay keeps worked
    * days where they happened, so the job would not leave today when Erik went to move it. A punch the
    * app assigned pinned the schedule, and the pinned schedule made the punch look right.
    *
@@ -409,9 +409,9 @@ describe("and then the schedule frees itself — why no migration is needed", ()
   const TZ = "America/Los_Angeles";
 
   it("the day stops being the wrong job's worked day the moment the punch leaves it", () => {
-    // Before: TTP 56 holds the punch, so Oct 1 is a worked day on it and will not move.
+    // Before: ARR 56 holds the punch, so Oct 1 is a worked day on it and will not move.
     expect(workedDaysFrom([{ clock_in: CLOCKED }], [], TZ)).toEqual(["2026-10-01"]);
-    // After the Change door moves the punch: TTP 56's own entries no longer include it.
+    // After the Change door moves the punch: ARR 56's own entries no longer include it.
     expect(workedDaysFrom([], [], TZ)).toEqual([]);
     // And the day is now a worked day on the job it really was.
     expect(workedDaysFrom([{ clock_in: CLOCKED }], [], TZ)).toEqual(["2026-10-01"]);
@@ -428,9 +428,9 @@ describe("and then the schedule frees itself — why no migration is needed", ()
 
 describe("PART 3 — the offline queue's replay says it too (Brian in the truck)", () => {
   it("a held punch that files onto a job the app chose says so when it lands", () => {
-    const told = replayTold({ ok: true, id: PUNCH, jobPick: { chosenBy: "app", id: TTP, from: "schedule", label: "TTP 56 rough-in · 56 Timber Trail Pl" } });
+    const told = replayTold({ ok: true, id: PUNCH, jobPick: { chosenBy: "app", id: ARR, from: "schedule", label: "ARR 56 rough-in · 56 Alder Ridge Rd" } });
     expect(told.ask).toBeNull();
-    expect(told.told!.sentence).toContain("TTP 56 rough-in · 56 Timber Trail Pl");
+    expect(told.told!.sentence).toContain("ARR 56 rough-in · 56 Alder Ridge Rd");
     expect(told.told!.sentence).toContain("The app picked that");
     expect(told.said).toEqual([]);
     expect(told.retryable).toBe(false);
@@ -443,7 +443,7 @@ describe("PART 3 — the offline queue's replay says it too (Brian in the truck)
   });
 
   it("a held punch that files onto a job the PERSON had picked says nothing new", () => {
-    const told = replayTold({ ok: true, id: PUNCH, jobPick: { chosenBy: "person", id: TTP } });
+    const told = replayTold({ ok: true, id: PUNCH, jobPick: { chosenBy: "person", id: ARR } });
     expect(told.told).toBeNull();
     expect(told.ask).toBeNull();
   });
@@ -469,10 +469,10 @@ const onlyOneJobGoing = (q: Q): Reply => {
   if (q.table === "organizations") return SETTINGS;
   if (q.table === "crew_day_assignments") return { data: null };
   if (q.table === "jobs" && q.filters.some((f) => f[0] === "contains")) return { data: [] };
-  if (q.table === "jobs" && has(q, "eq", "status", "in_progress")) return { data: [{ id: TTP }] };
+  if (q.table === "jobs" && has(q, "eq", "status", "in_progress")) return { data: [{ id: ARR }] };
   if (q.table === "jobs" && q.cols.startsWith("org_id")) return { data: { org_id: "org-1", status: "in_progress" } };
   if (q.table === "jobs" && q.verb === "update") return { data: [] };
-  if (q.table === "jobs" && q.cols.startsWith("id, job_number")) return { data: TTP_ROW };
+  if (q.table === "jobs" && q.cols.startsWith("id, job_number")) return { data: ARR_ROW };
   if (q.table === "time_entries" && q.verb === "insert") return { data: { id: PUNCH } };
 };
 
@@ -481,7 +481,7 @@ describe("the sentence names the source the resolver ACTUALLY used", () => {
     state.client = fakeSupabase(onlyOneJobGoing, calls);
     const res = await clockIn({ job_id: null, job_code: null, gps: null });
 
-    expect(res.jobPick).toEqual({ chosenBy: "app", id: TTP, from: "only-job", label: "TTP 56 rough-in · 56 Timber Trail Pl" });
+    expect(res.jobPick).toEqual({ chosenBy: "app", id: ARR, from: "only-job", label: "ARR 56 rough-in · 56 Alder Ridge Rd" });
     const told = tellAppChose(res)!;
     expect(told.sentence).toContain("because it's the only job going");
     // Opening the schedule to check would have found NOTHING there, which makes the one sentence
@@ -492,13 +492,13 @@ describe("the sentence names the source the resolver ACTUALLY used", () => {
   });
 
   it("a day row still says the schedule, because the schedule is where it came from", async () => {
-    state.client = fakeSupabase(schedulePutsHimOnTtp(), calls);
+    state.client = fakeSupabase(schedulePutsHimOnArr(), calls);
     expect(tellAppChose(await clockIn({ job_id: null, job_code: null, gps: null }))!.sentence).toContain("from today's schedule");
   });
 
   it("a source that can't be known names none at all", () => {
-    expect(appChoseSentence("85 Whitney · 85 Whitney Dr", "unknown")).toBe(
-      "Your punch is on 85 Whitney · 85 Whitney Dr. The app picked that — change it if you're somewhere else.",
+    expect(appChoseSentence("41 Larkspur · 41 Larkspur Dr", "unknown")).toBe(
+      "Your punch is on 41 Larkspur · 41 Larkspur Dr. The app picked that — change it if you're somewhere else.",
     );
   });
 });
@@ -510,14 +510,14 @@ describe("Nort's door: the sentence reaches the MODEL, or nobody hears it at all
   const projected = (res: ActionResult) => JSON.parse(agentToolResultBody(res, null)) as Record<string, unknown>;
 
   it('"Nort, clock me in" on a job the app chose comes back SAYING so, in the projected body', async () => {
-    state.client = fakeSupabase(schedulePutsHimOnTtp(), calls);
+    state.client = fakeSupabase(schedulePutsHimOnArr(), calls);
     const res = await timeActions["time.clockIn"].handler({ job_id: null, job_code: null, clock_in_at: null }, CTX);
 
     // THE ONLY THING THAT MATTERS: what the model is actually handed. A field the allowlist does not
     // carry is dropped in silence, and Nort then answers "You're clocked in" for a punch on the
     // wrong customer — the one door in the app that cannot show a Change button.
     const body = projected(res);
-    expect(String(body.warning)).toContain("TTP 56 rough-in · 56 Timber Trail Pl");
+    expect(String(body.warning)).toContain("ARR 56 rough-in · 56 Alder Ridge Rd");
     expect(String(body.warning)).toContain("The app picked that");
     expect(body.ok).toBe(true);
   });
@@ -526,9 +526,9 @@ describe("Nort's door: the sentence reaches the MODEL, or nobody hears it at all
     // The job the schedule put him on was ON HOLD, and the punch took it off (NY-hold, 0366).
     state.client = fakeSupabase((q) => {
       if (q.table === "jobs" && q.cols.startsWith("org_id"))
-        return { data: { org_id: "org-1", status: "on_hold", job_number: "J-013", name: "TTP 56 rough-in", hold_reason: "waiting on the permit" } };
-      if (q.table === "jobs" && q.verb === "update") return { data: [{ id: TTP }] };
-      return schedulePutsHimOnTtp()(q);
+        return { data: { org_id: "org-1", status: "on_hold", job_number: "J-013", name: "ARR 56 rough-in", hold_reason: "waiting on the permit" } };
+      if (q.table === "jobs" && q.verb === "update") return { data: [{ id: ARR }] };
+      return schedulePutsHimOnArr()(q);
     }, calls);
     const res = await timeActions["time.clockIn"].handler({ job_id: null, job_code: null, clock_in_at: null }, CTX);
     const warning = String(projected(res).warning);
@@ -540,12 +540,12 @@ describe("Nort's door: the sentence reaches the MODEL, or nobody hears it at all
     state.client = fakeSupabase((q) => {
       if (q.table === "profiles" && q.cols === "org_id") return { data: { org_id: "org-1" } };
       if (q.table === "profiles") return { data: { role: "owner" } };
-      if (q.table === "jobs" && q.cols === "id") return { data: { id: TTP } };
+      if (q.table === "jobs" && q.cols === "id") return { data: { id: ARR } };
       if (q.table === "jobs" && q.cols.startsWith("org_id")) return { data: { org_id: "org-1", status: "in_progress" } };
       if (q.table === "jobs" && q.verb === "update") return { data: [] };
       if (q.table === "time_entries" && q.verb === "insert") return { data: { id: PUNCH } };
     }, calls);
-    const res = await timeActions["time.clockIn"].handler({ job_id: TTP, job_code: null, clock_in_at: null }, CTX);
+    const res = await timeActions["time.clockIn"].handler({ job_id: ARR, job_code: null, clock_in_at: null }, CTX);
     expect(projected(res).warning).toBeUndefined();
   });
 
@@ -568,9 +568,9 @@ describe("the truck's held punch: a punch that already filed still says where it
     if (q.table === "client_operations" && q.verb === "insert")
       return { error: { code: "23505", message: 'duplicate key value violates unique constraint "client_operations_org_op"' } };
     if (q.table === "client_operations") return { data: { result_id: PUNCH } };
-    if (q.table === "time_entries" && q.cols === "job_id, job_code") return over.entry ?? { data: { job_id: TTP, job_code: null } };
+    if (q.table === "time_entries" && q.cols === "job_id, job_code") return over.entry ?? { data: { job_id: ARR, job_code: null } };
     if (q.table === "organizations") return SETTINGS;
-    if (q.table === "jobs" && q.cols.startsWith("id, job_number")) return { data: TTP_ROW };
+    if (q.table === "jobs" && q.cols.startsWith("id, job_number")) return { data: ARR_ROW };
   };
 
   it("the duplicate claim still names the job, and the replay says it with the Change door", async () => {
@@ -580,11 +580,11 @@ describe("the truck's held punch: a punch that already filed still says where it
     expect(res.ok).toBe(true);
     expect(res.id).toBe(PUNCH);
     // Nobody picked this job: the call named none, so whatever the entry carries is the app's.
-    expect(res.jobPick).toEqual({ chosenBy: "app", id: TTP, from: "unknown", label: "TTP 56 rough-in · 56 Timber Trail Pl" });
+    expect(res.jobPick).toEqual({ chosenBy: "app", id: ARR, from: "unknown", label: "ARR 56 rough-in · 56 Alder Ridge Rd" });
     // And the drain's own door — the one that matters most — now has something to put on screen.
     const told = replayTold(res);
-    expect(told.told!.sentence).toContain("TTP 56 rough-in · 56 Timber Trail Pl");
-    expect(changeJobAsk(told.told!)).toEqual({ entryId: PUNCH, moment: "move", from: { id: TTP, label: "TTP 56 rough-in · 56 Timber Trail Pl" } });
+    expect(told.told!.sentence).toContain("ARR 56 rough-in · 56 Alder Ridge Rd");
+    expect(changeJobAsk(told.told!)).toEqual({ entryId: PUNCH, moment: "move", from: { id: ARR, label: "ARR 56 rough-in · 56 Alder Ridge Rd" } });
     // WHICH tier picked is genuinely gone with the lost answer, so the sentence names no source.
     expect(told.told!.sentence).not.toContain("schedule");
     // The punch is NOT written a second time: this is the exactly-once path, still exactly once.
@@ -601,7 +601,7 @@ describe("the truck's held punch: a punch that already filed still says where it
 
   it("a punch the person named, or filed under a time code, is not second-guessed and costs no read", async () => {
     state.client = fakeSupabase(alreadyFiled(), calls);
-    const named = await clockIn({ job_id: TTP, job_code: null, gps: null, clientOpId: "op-2" });
+    const named = await clockIn({ job_id: ARR, job_code: null, gps: null, clientOpId: "op-2" });
     expect(named).toEqual({ ok: true, id: PUNCH });
     expect(replayTold(named).told).toBeNull();
     expect(calls.some((c) => c.cols === "job_id, job_code")).toBe(false);
@@ -621,9 +621,9 @@ describe("the truck's held punch: a punch that already filed still says where it
 });
 
 describe("the move path never tells a man his hours are on no job", () => {
-  const FROM = { label: "TTP 56 rough-in · 56 Timber Trail Pl" };
+  const FROM = { label: "ARR 56 rough-in · 56 Alder Ridge Rd" };
   const MOVE = { moment: "move" as const, from: FROM };
-  const row = { id: SUPPLY, label: "85 Whitney" };
+  const row = { id: SUPPLY, label: "41 Larkspur" };
 
   it("the sheet with nothing else going, RENDERED: the one door that shows an empty list", () => {
     // Reachable only where there is no toast to close onto — the offline queue (confirmInline), the
@@ -633,15 +633,15 @@ describe("the move path never tells a man his hours are on no job", () => {
     const html = renderToStaticMarkup(
       createElement(WhichJobSheetView, {
         moment: "move" as const,
-        from: { id: TTP, label: FROM.label },
+        from: { id: ARR, label: FROM.label },
         state: (loaded as { state: SheetPhase }).state,
         onPick: () => {},
         onSkip: () => {},
       }),
     );
-    // His 2h19m IS on TTP 56, and the sheet had just said so one line above.
+    // His 2h19m IS on ARR 56, and the sheet had just said so one line above.
     expect(html).not.toContain("on no job");
-    expect(html).toContain("TTP 56 rough-in");
+    expect(html).toContain("ARR 56 rough-in");
     expect(html).toContain("no other job going right now");
     expect(html).toContain("Leave It Where It Is");
   });
@@ -704,8 +704,8 @@ describe("the move path never tells a man his hours are on no job", () => {
       if (q.table === "jobs" && has(q, "eq", "status", "in_progress")) return { error: { message: "boom" } };
       if (q.table === "jobs") return { data: [] };
     };
-    state.client = fakeSupabase(readFails(TTP), calls);
-    const moving = await whichJobChoices(PUNCH, TTP);
+    state.client = fakeSupabase(readFails(ARR), calls);
+    const moving = await whichJobChoices(PUNCH, ARR);
     expect(moving.ok).toBe(false);
     // A punch that already carries a job is not in Hours On No Job, so the office is never prompted:
     // telling him they will is the same lie as "still on no job", one door along.
@@ -721,7 +721,7 @@ describe("the move path never tells a man his hours are on no job", () => {
 describe("the sentence retires itself the moment the person answers it another way", () => {
   /**
    * A SWITCH JOB *IS* THE ANSWER, and the Timeclock panel kept the line on screen anyway: the banner
-   * read the new job while the box below still said "Your punch is on TTP 56 — the app picked that",
+   * read the new job while the box below still said "Your punch is on ARR 56 — the app picked that",
    * offering Change The Job for a piece the person had already left. Over 0288's two minutes a switch
    * CUTS, so that door pointed at the closed pre-switch stub; inside them it re-points whole, so the
    * same door dead-ended on "This punch is already on a job."
@@ -729,10 +729,10 @@ describe("the sentence retires itself the moment the person answers it another w
    * Fixed by DERIVING it instead of remembering to clear it: the line shows only while the punch on
    * screen is the one it is about and still carries the job it names.
    */
-  const notice = tellAppChose({ ok: true, id: PUNCH, jobPick: { chosenBy: "app", id: TTP, from: "schedule", label: "TTP 56 rough-in" } })!;
+  const notice = tellAppChose({ ok: true, id: PUNCH, jobPick: { chosenBy: "app", id: ARR, from: "schedule", label: "ARR 56 rough-in" } })!;
 
   it("while the punch is still the one it is about, on the job it names, it stays", () => {
-    expect(noticeForEntry(notice, { id: PUNCH, job_id: TTP })).toBe(notice);
+    expect(noticeForEntry(notice, { id: PUNCH, job_id: ARR })).toBe(notice);
   });
 
   it("a Switch Job that CUT: the clock is on a new entry, so the line about the old one goes", () => {
@@ -750,7 +750,7 @@ describe("the sentence retires itself the moment the person answers it another w
 
   it("the shift ended: no punch on screen, no line about one", () => {
     expect(noticeForEntry(notice, null)).toBeNull();
-    expect(noticeForEntry(null, { id: PUNCH, job_id: TTP })).toBeNull();
+    expect(noticeForEntry(null, { id: PUNCH, job_id: ARR })).toBeNull();
   });
 });
 

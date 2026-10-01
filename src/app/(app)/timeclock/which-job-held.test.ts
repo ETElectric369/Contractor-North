@@ -129,13 +129,13 @@ describe("the answer to a pick that took a job off hold", () => {
   });
 
   it("with no warning (or a blank one) the placed sentence is unchanged", async () => {
-    expect(await pickOutcome(vi.fn(async () => ({ ok: true, label: "85 Whitney" })), "p1", held)).toEqual({
+    expect(await pickOutcome(vi.fn(async () => ({ ok: true, label: "41 Larkspur" })), "p1", held)).toEqual({
       kind: "placed",
-      sentence: "Your punch is on 85 Whitney.",
+      sentence: "Your punch is on 41 Larkspur.",
     });
-    expect(await pickOutcome(vi.fn(async () => ({ ok: true, label: "85 Whitney", warning: "  " })), "p1", held)).toEqual({
+    expect(await pickOutcome(vi.fn(async () => ({ ok: true, label: "41 Larkspur", warning: "  " })), "p1", held)).toEqual({
       kind: "placed",
-      sentence: "Your punch is on 85 Whitney.",
+      sentence: "Your punch is on 41 Larkspur.",
     });
   });
 
