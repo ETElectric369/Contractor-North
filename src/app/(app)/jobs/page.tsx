@@ -4,7 +4,7 @@ import { Briefcase, X } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader, EmptyState } from "@/components/page-header";
 import { Card } from "@/components/ui/card";
-import { ACTIVE_JOB_STATUSES, JOB_STATUS_PRIORITY, jobStatusLabel } from "@/lib/job-status";
+import { ACTIVE_JOB_STATUSES, JOB_STATUSES, JOB_STATUS_PRIORITY, jobStatusLabel } from "@/lib/job-status";
 import { listNewJobCustomerOptions, readUsualBillingKind, toNewJobCustomerOptions, unitStreetKeys } from "@/lib/schedule-options";
 import { getOrgSettings, workDayWindowHm } from "@/lib/org-settings";
 import { todayStrInTz } from "@/lib/tz";
@@ -28,7 +28,13 @@ export default async function JobsPage({
 }: {
   searchParams: Promise<{ status?: string }>;
 }) {
-  const { status } = await searchParams;
+  // ONE REAL STATUS, OR ALL. The nav's first row is All (b94497dd) and its href is this page with no
+  // ?status= at all, so anything that isn't a status on the job-status spine is the All view too —
+  // a typed or stale "?status=all" / "?status=invoiced" (a retired enum value) used to render an
+  // empty list under "Filtered: invoiced", which is a dead end with no way to see it was never a
+  // filter. Now it just opens on All, the same as the row says.
+  const { status: statusParam } = await searchParams;
+  const status = (JOB_STATUSES as readonly string[]).includes(String(statusParam ?? "")) ? statusParam : undefined;
   const supabase = await createClient();
 
   let query = supabase
@@ -142,8 +148,9 @@ export default async function JobsPage({
       </PageHeader>
 
       {/* Status nav lives in ONE place per breakpoint now — the desktop rail / the mobile
-          SectionSubnav strip, both generated from JOB_STATUSES via the dock. The page keeps
-          reading ?status= and shows just a dismissible chip so the filter is visible + clearable. */}
+          SectionSubnav strip, both All + JOB_STATUSES, generated via the dock. The page keeps
+          reading ?status= and shows just a dismissible chip so the filter is visible + clearable;
+          clearing it is the All row, which is where this link goes. */}
       {status && (
         <div className="mb-4">
           <Link

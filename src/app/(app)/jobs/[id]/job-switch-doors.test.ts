@@ -42,9 +42,9 @@ describe("To-Do Extras never reaches a job's Tasks (0358: the switch is the Remi
     { id: "t1", title: "Pull the permit", status: "open", created_by: "u1", created_at: "2026-09-20T17:00:00Z", completed_at: null, done_by: null, done_by_name: null, photo_path: null, done_photo_path: null, sort_order: 0 },
   ];
   const base = { jobId: "j1", orgId: "o1", tasks, viewerId: "u1", viewerIsStaff: true, tz: "America/Los_Angeles", nowIso: "2026-09-26T19:00:00Z", stamps: true };
-  it("the job's list asks no priority and draws no flag, card or tab, whatever the switch says", () => {
-    for (const mode of ["card", "tab"] as const) {
-      const html = r(JobTaskList, { ...base, mode });
+  it("the job's list asks no priority and draws no flag, Done fold open or closed, whatever the switch says", () => {
+    for (const doneOpen of [false, true]) {
+      const html = r(JobTaskList, { ...base, doneOpen });
       expect(html).toContain("Pull the permit");
       expect(html).not.toMatch(/priority/i);
       expect(html).not.toMatch(/due date/i);
@@ -53,7 +53,7 @@ describe("To-Do Extras never reaches a job's Tasks (0358: the switch is the Remi
   it("the job page hands the Tasks tab no switch at all", () => {
     const page = readFileSync(join(process.cwd(), "src/app/(app)/jobs/[id]/page.tsx"), "utf8");
     expect(page).not.toContain('extras={on("todo_extras")}');
-    expect(page).toContain('<JobTaskList mode="tab" {...taskListProps} />');
+    expect(page).toContain("content: <JobTaskList {...taskListProps} />");
   });
 });
 

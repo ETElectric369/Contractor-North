@@ -1209,9 +1209,11 @@ export default async function JobDetailPage({
               <UnbilledCard jobId={j.id} customerId={j.customer_id ?? null} view={unbilledView} viewerIsStaff={viewerIsStaff} openDraft={openDraft} lumpToNet={lumpToNet} drawBilled={isDrawBilled} />
             )
           )}
-          {/* THE JOB'S TASKS, small (0358): "Tasks: 7 of 12 done", the next 3 and the Add line; All
-              Tasks opens the Tasks chip's tab. The same card for the crew (no prices on a task). */}
-          <JobTaskList mode="card" {...taskListProps} />
+          {/* THE JOB'S TASKS, WHOLE, RIGHT HERE (Erik, report b7f23be0: "show the tasks here,
+              additional steps are unnecessary"). "Tasks: 7 of 12 done", every open task, the Add
+              line and the Done fold — the same list the Tasks chip opens, not a three-row summary
+              of it with a "+2 more" line. The same card for the crew (no prices on a task). */}
+          <JobTaskList {...taskListProps} />
           <Card>
             <CardContent className="space-y-4 py-5">
               <div className="grid gap-4 sm:grid-cols-2">
@@ -1413,14 +1415,16 @@ export default async function JobDetailPage({
         ]
       : []),
     // THE TASKS CHIP (Erik, 2026-09-26: "put it on the bottom bar next to overview"): pinned right
-    // after Overview for the office and the crew, its count the open tasks. The tab is the job's
-    // whole list: add, check off, the Done fold, photos. To-Do Extras doesn't reach it (a job's
-    // list has no priority or subtasks); that switch is the Reminders' now.
+    // after Overview for the office and the crew, its count the open tasks. The Overview draws the
+    // same whole list (b7f23be0), so this tab is the one-tap door from the job's OTHER tabs and the
+    // place a task's own link lands (/tasks rows, My Day, a bell: lib/task-href) — never a view that
+    // holds a row the Overview hides. To-Do Extras doesn't reach it (a job's list has no priority or
+    // subtasks); that switch is the Reminders' now.
     {
       id: "tasks",
       label: "Tasks",
       count: openTaskCount,
-      content: <JobTaskList mode="tab" {...taskListProps} />,
+      content: <JobTaskList {...taskListProps} />,
     },
     {
       id: "permits",

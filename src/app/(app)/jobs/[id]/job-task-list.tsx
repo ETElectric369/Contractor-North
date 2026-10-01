@@ -35,12 +35,15 @@ export type TaskPhotos = Record<string, { task: TaskPhoto; done: TaskPhoto }>;
  * maybe a photo. Everyone on the job sees the same list and checks things off; the server records who
  * and when. Techs get exactly this card (tech-job-access: all pertinent job info; a task has no price).
  *
- * Two faces, one component:
- *   card — the Overview's summary: "Tasks: 7 of 12 done", the next 3, All Tasks (the Tasks tab), and
- *          the Add line. A job with no tasks shows just the Add line.
- *   tab  — the Tasks tab (the pinned chip right after Overview): every open task, the Add line, and
- *          the Done fold, where each row says who and when ("Brian · Tue 2:14 PM", company time zone)
- *          and can take a quiet, optional photo of the finished work.
+ * THE WHOLE LIST, WHEREVER IT IS DRAWN (Erik, report b7f23be0, 2026-09-30: "show the tasks here,
+ * additional steps are unnecessary"). It had two faces: a three-row summary on the Overview with a
+ * "+2 more on the Tasks tab" line and an All Tasks link, and the full list on the Tasks tab. The
+ * summary was the extra step — the tasks were on the job, one tap away from where he was standing.
+ * So there is one face now: "Tasks: 7 of 12 done", every open task, the Add line, and the Done fold,
+ * where each row says who and when ("Brian · Tue 2:14 PM", company time zone) and can take a quiet,
+ * optional photo of the finished work. The Overview draws it and so does the Tasks tab (the pinned
+ * chip, still the one-tap door from the job's other tabs and the target of a task's own link);
+ * neither hides a row the other has. A job with no tasks shows just the Add line.
  *
  * Deleting follows 0358's rule, said before the tap: the office or whoever added the task. A tech
  * opens an office task to read it and checks it off; there is no Delete for him to press.
@@ -57,7 +60,6 @@ export function JobTaskList({
   orgId,
   tasks,
   photos = {},
-  mode,
   viewerId,
   viewerIsStaff,
   tz,
@@ -71,7 +73,6 @@ export function JobTaskList({
   orgId: string;
   tasks: JobTaskRow[];
   photos?: TaskPhotos;
-  mode: "card" | "tab";
   viewerId: string | null;
   viewerIsStaff: boolean;
   /** The company's time zone: the done line reads in it, never the phone's. */
@@ -82,7 +83,7 @@ export function JobTaskList({
   stamps: boolean;
   /** The list couldn't be read: say so, never "no tasks". */
   failed?: boolean;
-  /** The tab's Done fold starts open (it starts closed: the open work leads). */
+  /** The Done fold starts open (it starts closed: the open work leads). */
   doneOpen?: boolean;
   /** The job's materials list, as the live Buy Materials row (null: nothing on it to buy). */
   materials?: BuyMaterials;
@@ -124,10 +125,11 @@ export function JobTaskList({
       // Reopening takes a task's done photo off it (0358 clears it); the file stays on the job. Said.
       const doneShot = photos[t.id]?.done;
       if (!next && doneShot && typeof doneShot === "object") toast("Reopened. Its done photo is still on the Photos tab.", "info");
-      // The card shows open tasks only, so a checked one leaves it: an Undo, never a mis-tap that
-      // takes the Tasks tab and the Done fold to take back. A check-off that closed open steps with
-      // it says so, and its Undo reopens exactly those steps (closedSteps), never one already done.
-      if (next && mode === "card") {
+      // A checked task leaves the open list for the Done fold, so the check-off carries an Undo:
+      // never a mis-tap that takes opening the fold and checking the row again to take back. A
+      // check-off that closed open steps with it says so, and its Undo reopens exactly those steps
+      // (closedSteps), never one already done.
+      if (next) {
         const closed = res.closedSteps ?? [];
         toast(checkedOffWords(t.title, closed.length), "success", {
           label: "Undo",
@@ -170,7 +172,7 @@ export function JobTaskList({
           {t.status === "done" && <span className="text-xs text-slate-500">{doneWords(t, tz, now)}</span>}
         </button>
         <Thumb photo={p?.task ?? null} label={`Photo for ${t.title}`} onOpen={setViewing} />
-        {mode === "tab" && t.status === "done" && stamps && (
+        {t.status === "done" && stamps && (
           p?.done ? (
             <Thumb photo={p.done} label={`Photo of ${t.title} done`} onOpen={setViewing} />
           ) : (
@@ -202,22 +204,10 @@ export function JobTaskList({
   // ("Tasks: 0 of 1 done" over "Couldn't read this job's tasks"). The row itself still shows, because
   // it is read from the materials list, not the tasks.
   const header = !failed && total > 0 && (
-    <div className="flex items-center justify-between gap-2 border-b border-slate-100 px-4">
+    <div className="border-b border-slate-100 px-4">
       <h2 className="py-3 text-sm font-semibold text-slate-900">{tasksHeader(total, tally.done)}</h2>
-      {mode === "card" && (
-        <Link
-          href="?tab=tasks"
-          scroll={false}
-          className="inline-flex min-h-[44px] items-center text-sm font-medium text-brand hover:underline"
-        >
-          All Tasks
-        </Link>
-      )}
     </div>
   );
-
-  // The card shows three open rows, the live Buy Materials row first when it is open.
-  const shownOpen = mode === "card" ? open.slice(0, buyOpen ? 2 : 3) : open;
 
   return (
     <Card className="overflow-hidden">
@@ -225,22 +215,19 @@ export function JobTaskList({
       {failed && (
         <p className="px-4 py-3 text-sm text-red-600">Couldn&rsquo;t read this job&rsquo;s tasks just now. Reload to try again.</p>
       )}
-      {(shownOpen.length > 0 || buyOpen) && (
+      {/* Every open task, the live Buy Materials row first when it is open. No cap and no "+N more":
+          the list is the list, wherever it is drawn (b7f23be0). */}
+      {(open.length > 0 || buyOpen) && (
         <ul className="divide-y divide-slate-100">
           {buyOpen && buyRow}
-          {shownOpen.map(row)}
+          {open.map(row)}
         </ul>
       )}
       {!failed && total > 0 && tally.open === 0 && (
         <p className="px-4 py-3 text-sm text-slate-500">Everything on this list is done.</p>
       )}
-      {mode === "card" && open.length > shownOpen.length && (
-        <p className="px-4 pb-1 text-xs text-slate-400">
-          +{open.length - shownOpen.length} more on the Tasks tab
-        </p>
-      )}
       {!failed && <AddTaskLine jobId={jobId} orgId={orgId} photoDoor={stamps} bordered={total > 0} />}
-      {mode === "tab" && !failed && tally.done > 0 && (
+      {!failed && tally.done > 0 && (
         <div className="border-t border-slate-100">
           <button
             type="button"
@@ -259,7 +246,7 @@ export function JobTaskList({
           )}
         </div>
       )}
-      {mode === "tab" && !stamps && !failed && (
+      {!stamps && !failed && (
         <p className="border-t border-slate-100 px-4 py-2 text-xs text-slate-400">
           Photos on tasks, and who checked each one off, start after the next database update.
         </p>

@@ -89,9 +89,11 @@ describe("the job's side doors", () => {
 
   it("the job's Tasks card is the crew's too: the Overview and the Tasks tab render it for every role (0358)", () => {
     const s = src("jobs/[id]/page.tsx");
-    // Not behind a role gate: the same card, the same list, for the office and the crew.
-    expect(s).toMatch(/\n\s*<JobTaskList mode="card" \{\.\.\.taskListProps\} \/>/);
-    expect(s).toContain('content: <JobTaskList mode="tab" {...taskListProps} />');
+    // Not behind a role gate: the same card, the same list, for the office and the crew — and the
+    // SAME props on both, since b7f23be0 made it one face (no "mode" that shows fewer rows).
+    expect(s).toMatch(/\n\s*<JobTaskList \{\.\.\.taskListProps\} \/>/);
+    expect(s).toContain("content: <JobTaskList {...taskListProps} />");
+    expect(s).not.toContain('<JobTaskList mode=');
     expect(s).not.toMatch(/viewerIsStaff\s*&&\s*<JobTaskList/);
     // The role decides only the Delete (canDeleteTask), passed down, never the list.
     expect(s).toMatch(/taskListProps = \{[\s\S]*viewerIsStaff,[\s\S]*\};/);

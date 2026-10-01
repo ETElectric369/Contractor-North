@@ -49,7 +49,9 @@ const NAV_ALIASES: Record<string, string[]> = {
   "/timeclock": ["clock in", "punch", "clock"],
   "/timecards": ["hours", "timesheet"],
   "/schedule": ["calendar", "dispatch", "appointments"],
-  "/jobs?status=in_progress": ["projects", "work"],
+  // "All", the Jobs sub-nav's first row (b94497dd): the unfiltered page, which is what a person
+  // means by "jobs" or "work". The ?status= rows stay out of the palette (see the collision note).
+  "/jobs": ["jobs", "projects", "work", "all jobs"],
   "/inventory": ["stock", "shop stock", "shelf", "inventory", "warehouse", "parts"],
   "/compliance": ["osha", "liability", "regulations"],
   "/insurance": ["workers comp", "coverage", "liability"],
@@ -91,10 +93,9 @@ function navLeaves(nodes: DockLeaf[], sub: string, features: FeatureMap | null |
         : [],
   );
 }
-// "All Jobs" left the dock (the status pills ARE the list), so no dock leaf carries a plain
-// /jobs href anymore — which orphaned the "projects"/"work" aliases. One hand-written entry
-// points typing "jobs"/"work" at the default working view; the GENERATED ?status= children
-// stay out of the palette (see the collision note above).
+// The Jobs section's "All" row carries the plain /jobs href again (b94497dd), so the generated list
+// answers "jobs"/"work"/"projects" by itself and the hand-written entry that stood in for it is gone
+// — one leaf, not two. The GENERATED ?status= children still stay out (see the collision note above).
 /**
  * PETTY CASH, FOUND BY NAME (W1-34): it left the Money menu, so a company that already has petty-cash
  * rows (the layout's staff-only existence check) finds the page here, by its own words. A company
@@ -113,7 +114,6 @@ const PETTY_CASH_ROW: Item = {
 export function commandNavItems(isStaff: boolean, features?: FeatureMap | null, hasPettyCash = false): Item[] {
   const items: Item[] = [
     ...visibleDock({ isStaff, features }).flatMap((s) => navLeaves(s.children, s.label, features, s.staffOnly)),
-    { kind: "Go to", label: "Jobs", sub: "Jobs", href: "/jobs?status=in_progress", aliases: NAV_ALIASES["/jobs?status=in_progress"] },
     // Today is My Day alone on the dock (W1-03), so its two old pills are found here by name:
     // Reminders for everyone, Organize for the office (every save on it is requireStaff).
     { kind: "Go to", label: "Reminders", sub: "Today", href: "/tasks", aliases: NAV_ALIASES["/tasks"] },
