@@ -288,6 +288,11 @@ describe("the clock resolves exactly as before (resolveTechJobToday, through a j
       if (q.table === "time_entries" && q.verb === "insert") return { data: { id: "new-punch" } };
       // promoteJobToInProgress reads the job it would move; nothing to move here.
       if (q.table === "jobs" && q.cols.startsWith("org_id")) return { data: null };
+      // The label read behind the clock's "the app picked that job" sentence (clock-told).
+      if (q.table === "jobs" && q.cols.startsWith("id, job_number")) {
+        const id = q.filters.find((f: any[]) => f[0] === "eq" && f[1] === "id")?.[2] as string;
+        return { data: { id, job_number: "J-1", name: `${id} site`, address: null, customers: null } };
+      }
       return route(q);
     }, calls);
     const result = await clockIn({ job_id: null, job_code: null, gps: null });
@@ -298,7 +303,9 @@ describe("the clock resolves exactly as before (resolveTechJobToday, through a j
   it("today's day row wins", async () => {
     const { jobId, result } = await punch({ day: { job_id: "whitney", kind: "job" }, active: ["whitney"], inProgress: ["pine"] });
     expect(jobId).toBe("whitney");
-    expect(result).toEqual({ ok: true, id: "new-punch" });
+    // NOBODY PICKED THIS JOB — the schedule did, and the answer says so now, so every clock door can
+    // name it out loud instead of leaving the hours on it in silence (clock-told, Erik's TTP 56).
+    expect(result).toEqual({ ok: true, id: "new-punch", jobPick: { chosenBy: "app", id: "whitney", label: "whitney site" } });
     // Asked about the company's today.
     expect(calls.find(isDayRow)!.filters).toContainEqual(["eq", "work_date", "2026-09-23"]);
   });

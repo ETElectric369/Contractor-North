@@ -41,6 +41,7 @@ import {
 import { loadShiftChains, type ShiftInfo } from "@/lib/shift-chain";
 import { ADOPT_AFTER_CLOCK_IN_MS, ADOPT_AFTER_SWITCH_MS } from "./adopt-window";
 import { closedPickable, whichJobLabel, type ChoiceJob } from "./which-job-choices";
+import { UNREAD_JOB_LABEL, punchJobLabel, type PunchJob } from "./clock-told";
 import { billedPartMoved, claimedMoveRefusal, claimedPersonRefusal, type ClaimHolder, type ClaimIndex } from "./claim-words";
 import { LONG_SHIFT_PHRASE, MAX_SHIFT_HOURS, clockDoorWords, clockedOutWords, isLongOpenShift, stopProblem } from "@/lib/long-shift";
 import { clockInClashWords, findOverlap, overlapRefusal, shiftWhen, type OverlapClash } from "@/lib/overlap-refusal";
@@ -61,6 +62,11 @@ export type ClockResult = {
    *  no job and no code, so the door asks "Which Job Are You On?" once, with a Skip. Only ever set
    *  on a punch that is ALREADY saved: the question never holds the clock up. */
   noJob?: boolean;
+  /** THE CLOCK DID TELL THE JOB, AND WHO CHOSE IT (Erik, 2026-10-01: TTP 56). `chosenBy: "app"`
+   *  means nobody picked it — the resolver did, from the schedule — so every door says one plain
+   *  sentence naming the job and offers one tap to move it (clock-told: tellAppChose). Never infer
+   *  this from job_id being present: a person-picked punch carries one too. */
+  jobPick?: PunchJob;
 };
 
 /** The shift 0360's overlap refusal names in its DETAIL ("time_entry:<uuid>"), or null. */
@@ -187,8 +193,15 @@ async function clockInInner(
   // role now (techs never see a picker; staff only pick via "More options" — and Erik's
   // own one-tap punch must resolve the same way): today's assignment → the only
   // in_progress job → none (the office attaches it later).
+  //
+  // WHO CHOSE THE JOB IS A FACT ONLY THIS LINE KNOWS, so it is carried out in the answer rather
+  // than guessed at later from job_id (Erik's TTP 56 morning, 2026-10-01). `appChose` is true for
+  // the resolver's pick and ONLY for it — including when a job_id came in and the caller couldn't
+  // see it, because then the job on the punch is still not the one anybody asked for.
+  let appChose = false;
   if (!jobId) {
     jobId = await resolveTechJobToday(supabase, user.id);
+    appChose = !!jobId;
   }
 
   /**
@@ -326,7 +339,34 @@ async function clockInInner(
   // reads a job list and the clock answers as fast as it always did.
   const id = (made as { id?: string } | null)?.id;
   if (!id) return { ok: true, ...said };
-  return !jobId && !(input.job_code ?? "").trim() ? { ok: true, id, noJob: true } : { ok: true, id, ...said };
+  if (!jobId) return !(input.job_code ?? "").trim() ? { ok: true, id, noJob: true } : { ok: true, id, ...said };
+  // AND WHEN THE CLOCK *CAN* TELL THE JOB, IT SAYS WHICH ONE IT CHOSE (Erik, 2026-10-01: Brian's
+  // punch on TTP 56). The pick rides back with WHO made it, so the door can say one sentence naming
+  // the job and offer the move — and say nothing at all when the person picked it themselves. The
+  // label is read only on the app's pick: a person-picked punch needs no sentence, so it pays for no
+  // extra read and the clock answers as fast as it always did.
+  return { ok: true, id, ...said, jobPick: await punchPickOf(supabase, jobId, appChose) };
+}
+
+/**
+ * The job a punch landed on, named the way a person knows it (clock-told: punchJobLabel), for the
+ * sentence the door says. Best-effort on the label alone: a read that fails must never turn a saved
+ * punch into a refusal, so the pick still reports WHO chose it and the sentence falls back to the
+ * job's number or name — never silence, and never a bare id.
+ */
+async function punchPickOf(supabase: SupabaseClient, jobId: string, appChose: boolean): Promise<PunchJob> {
+  if (!appChose) return { chosenBy: "person", id: jobId };
+  try {
+    const [{ data: jobRow }, { data: orgRow }] = await Promise.all([
+      supabase.from("jobs").select("id, job_number, name, address, customers(name)").eq("id", jobId).maybeSingle(),
+      supabase.from("organizations").select("settings").limit(1).maybeSingle(),
+    ]);
+    const codesOn = getOrgSettings((orgRow as { settings?: unknown } | null)?.settings).timeclock_job_codes;
+    const job = jobRow as ChoiceJob | null;
+    return { chosenBy: "app", id: jobId, label: job ? punchJobLabel(job, codesOn) : UNREAD_JOB_LABEL };
+  } catch {
+    return { chosenBy: "app", id: jobId, label: UNREAD_JOB_LABEL };
+  }
 }
 
 // promoteJobToInProgress lives in lib/job-promote (one copy for clock-in, switch-job and

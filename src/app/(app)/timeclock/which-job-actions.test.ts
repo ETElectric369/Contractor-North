@@ -124,7 +124,11 @@ describe("the clock asks only when it can't tell the job, and never before the p
       if (q.table === "jobs" && q.verb === "update") return { data: [] };
       if (q.table === "time_entries" && q.verb === "insert") return { data: { id: PUNCH } };
     }, calls);
-    expect(await clockIn({ job_id: JOB, job_code: null, gps: null })).toEqual({ ok: true, id: PUNCH });
+    // It does report WHICH job and WHO chose it (clock-told): a punch the person picked says nothing
+    // new on screen, and a punch the app picked says one sentence. Neither is ever asked about.
+    const known = await clockIn({ job_id: JOB, job_code: null, gps: null });
+    expect(known).toEqual({ ok: true, id: PUNCH, jobPick: { chosenBy: "person", id: JOB } });
+    expect(known.noJob).toBeUndefined();
   });
 
   it("a punch given a time code (Shop) with no job was named on purpose, and is not asked about", async () => {
