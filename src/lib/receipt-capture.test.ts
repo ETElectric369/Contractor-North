@@ -52,3 +52,28 @@ describe("a reader that fails without a reason", () => {
     expect(off.sentence).not.toContain("Nort");
   });
 });
+
+/**
+ * "ALREADY ON THE BOOKS" CARRIES THE BILL (d1ff7c5a): which bill, and whether it is on this paper's
+ * job, ride the outcome so a door can offer Same Purchase: It's That Bill (the tie) beside Different
+ * Purchase, instead of another read or a second bill.
+ */
+describe("a paper whose number is already on a bill", () => {
+  it("the outcome names the bill and whether it is this job's, beside the Different Purchase door", async () => {
+    bill.mockResolvedValueOnce({ ok: true, already: true, sameAs: "Already on the books: CED #8802, $301.81, on J-013 TTP #56. Nothing was recorded twice.", sameBillId: "b-ced", sameOnThisJob: true });
+    const out = await readReceiptDocument("doc-1");
+    expect(out).toMatchObject({ kind: "already", tone: "warn", samePurchase: true, sameBillId: "b-ced", sameOnThisJob: true });
+    expect(out.sentence).toContain("Different Purchase: Record It Anyway");
+  });
+
+  it("a bill on another job: named, but not this job's (no tie is offered there)", async () => {
+    bill.mockResolvedValueOnce({ ok: true, already: true, sameAs: "Already on the books: CED #8802, on J-002.", sameBillId: "b-ced", sameOnThisJob: false });
+    expect(await readReceiptDocument("doc-1")).toMatchObject({ kind: "already", samePurchase: true, sameBillId: "b-ced", sameOnThisJob: false });
+  });
+
+  it("this very file already made a bill (no number match): plain already, no bill to tie", async () => {
+    bill.mockResolvedValueOnce({ ok: true, already: true });
+    const out = await readReceiptDocument("doc-1");
+    expect(out).toEqual({ kind: "already", docId: "doc-1", tone: "ok", sentence: "Already recorded as a cost — nothing added twice." });
+  });
+});

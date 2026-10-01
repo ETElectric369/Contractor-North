@@ -117,6 +117,11 @@ export function jobsNeedingADay(input: {
   clockedInJobIds?: ReadonlySet<string>;
   /** Jobs already on Needs You as Won (an accepted estimate with no day yet). */
   wonJobIds?: ReadonlySet<string>;
+  /** Jobs with a live (sent or paid, not draft, not void) invoice FOR THE WORK, a standard one or
+   *  the final draw: billed is done (0205), and sending or paying an invoice never moves
+   *  jobs.status, so the status alone can't say so. The caller leaves out deposit and progress
+   *  draws: a deposit is money for work still ahead, and that job still needs its day. */
+  billedJobIds?: ReadonlySet<string>;
   /** Lines still to buy, per job (the newest list's open lines). */
   toBuy?: ReadonlyMap<string, number>;
 }): NeedDayFinding[] {
@@ -127,6 +132,7 @@ export function jobsNeedingADay(input: {
     if (!j?.id) continue;
     if (!NEEDS_A_DAY_STATUSES.includes(String(j.status ?? ""))) continue;
     if (input.wonJobIds?.has(j.id)) continue;
+    if (input.billedJobIds?.has(j.id)) continue; // billed = done (0205)
     if (input.clockedInJobIds?.has(j.id)) continue;
     if (input.futureApptJobIds?.has(j.id)) continue;
 

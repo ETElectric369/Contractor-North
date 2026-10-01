@@ -5,7 +5,7 @@
  */
 import { dbError } from "@/lib/db-error";
 import { getOrgSettings } from "@/lib/org-settings";
-import { clockDoorWords, clockedOutWords } from "@/lib/long-shift";
+import { clockedOutWords } from "@/lib/long-shift";
 import { jobLabel } from "@/lib/schedule-options";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
@@ -76,10 +76,15 @@ export type OverlapClash = {
   jobCode: string | null;
   /** The job's name (jobLabel, the SSOT), when it is on one. */
   jobLabel: string | null;
-  /** Closed, on no job and no code: the door is "put it on the job". */
+  /** On no job and no code, running or closed: the door is "put it on the job" (putShiftOnJob takes
+   *  an open row too: "running since … is on <job> now"). */
   noJob: boolean;
   /** The very same times: a double submit. */
   exact: boolean;
+  /** The row's own lunch and notes, so a door that clocks it out from here (Add Time Entry's Clock Out
+   *  <Name>, which seeds the clock-out sheet with them) never writes a blank over what it had. */
+  lunchMinutes: number;
+  notes: string | null;
 };
 
 type NearRow = {
@@ -88,6 +93,8 @@ type NearRow = {
   clock_out: string | null;
   job_id?: string | null;
   job_code?: string | null;
+  lunch_minutes?: number | null;
+  notes?: string | null;
   job?: { job_number?: string | null; name?: string | null } | { job_number?: string | null; name?: string | null }[] | null;
 };
 
@@ -106,7 +113,7 @@ export async function findOverlap(
   // into this one.
   const { data: near, error: nearErr } = await supabase
     .from("time_entries")
-    .select("id, clock_in, clock_out, job_id, job_code, job:job_id(job_number, name)")
+    .select("id, clock_in, clock_out, job_id, job_code, lunch_minutes, notes, job:job_id(job_number, name)")
     .eq("profile_id", profileId)
     .gte("clock_in", new Date(startMs - 24 * 3_600_000).toISOString())
     .lte("clock_in", new Date(endMs).toISOString())
@@ -157,8 +164,10 @@ export async function findOverlap(
     jobId: clash.job_id ?? null,
     jobCode: code,
     jobLabel: clash.job_id && job ? jobLabel(job) : null,
-    noJob: !!clash.clock_out && !clash.job_id && !code,
+    noJob: !clash.job_id && !code,
     exact: !!exact,
+    lunchMinutes: Math.max(0, Number(clash.lunch_minutes ?? 0) || 0),
+    notes: clash.notes ?? null,
   };
 
   if (exact) {
@@ -170,12 +179,19 @@ export async function findOverlap(
         : `${name} already has ${when} on another entry. Open that one to change it.`,
     };
   }
-  // An open shift has no finish to name, so it gets its start instead of a made-up one.
+  // An open shift has no finish to name, so it gets its start instead of a made-up one, and WHERE it
+  // is running (the job's street name, its code, or no job): what the office sees on the form. The
+  // way out is said as the one move it is (Erik, 2026-09-29, Brian's running punch while adding his
+  // hours on 700 North Lake Boulevard): clock him out at the time he left, then save. The form that
+  // got refused carries the door itself (Add Time Entry's Clock Out <Name>), so the sentence never
+  // sends anyone to another page.
   const startedAt = shiftWhen(clash.clock_in, clash.clock_in, tz).split(" to ")[0];
   if (!clash.clock_out) {
+    const runningOn = found.jobLabel ? ` on ${found.jobLabel}` : code ? ` under ${code}` : " with no job on the clock";
+    const leftAt = found.jobLabel ? "at the time they left there" : "at the time they stopped";
     return {
       clash: found,
-      sentence: `${name} has been clocked in since ${startedAt}, so these hours would be counted twice. ${clockedOutWords(fullName, false).clockOutFirst}: tap their shift on Timecards and use ${clockDoorWords(fullName).clockOut}.`,
+      sentence: `${name} has been clocked in since ${startedAt}${runningOn}, so these hours would be counted twice. ${clockedOutWords(fullName, false).clockOutVerb} ${leftAt}, then save these hours.`,
     };
   }
   const when = shiftWhen(clash.clock_in, clash.clock_out, tz);

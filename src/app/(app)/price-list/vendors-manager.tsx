@@ -15,14 +15,12 @@ import { AddressAutocomplete } from "@/components/address-autocomplete";
 import { formatCurrency, formatPhone } from "@/lib/utils";
 import { AddVendorPrice } from "./add-vendor-price";
 import {
-  kindCarriesPrices,
   linkOf,
   listedKind,
   matchesVendorFilter,
   optionName,
   vendorFilters,
   vendorKey,
-  vendorKindOf,
   websiteHref,
   type ItemOption,
   type VendorCard,
@@ -39,11 +37,12 @@ import { ArchivedVendorRow, VendorPriceRow, useOptionWrites } from "./vendor-pri
 
 /**
  * THE VENDORS TAB: your suppliers, subcontractors and brands, in one directory with a Kind (0341).
- * A brand or supplier can carry prices on items (Erik for Justin, 2026-09-24: "vendor means what
- * brand with its own cost and sell price"): Andersen, Milgard, Marvin. A subcontractor (Andrew's
- * list, 2026-09-25: Granite Peak Plumbing, Coldwater Drywall) is here to be reached, and is never offered
- * as a vendor on an item. This lists every vendor the org has, whether it came from a card here or
- * from an item, how to reach it, and every item it is on with its cost and sell.
+ * ANY OF THEM CAN CARRY PRICES ON ITEMS (Erik for Justin, 2026-09-24: "vendor means what brand with
+ * its own cost and sell price" - Andersen, Milgard, Marvin; and 2026-09-30, reversing 0341's rule:
+ * a builder prices a line like drywall by the sub who hangs it, so Coldwater Drywall carries prices
+ * too). The Kind sorts this directory; it never decides who can be priced. This lists every vendor
+ * the org has, whether it came from a card here or from an item, how to reach it, and every item it
+ * is on with its cost and sell.
  */
 export function VendorsManager({
   vendors,
@@ -113,7 +112,7 @@ export function VendorsManager({
       </div>
       <p className="text-xs text-slate-500">
         {kindsAvailable
-          ? "Your suppliers, subcontractors and brands. Brands and suppliers can carry prices on items."
+          ? "Suppliers, subcontractors and brands can all carry prices on items."
           : `${vendors.length} vendor${vendors.length === 1 ? "" : "s"}. A vendor on an item is the brand, e.g. Andersen.`}
       </p>
       {kindsAvailable && vendors.length > 0 && (
@@ -151,7 +150,7 @@ export function VendorsManager({
               <p className="text-sm text-slate-600">No vendors yet.</p>
               <p className="mx-auto mt-1 max-w-md text-sm text-slate-500">
                 {kindsAvailable
-                  ? "Add your suppliers, subcontractors and brands here with their phone and email, or import the list you already keep in Excel or CSV. Brands and suppliers can carry prices: a window allowance can carry Andersen, Milgard and Marvin, each at its own price."
+                  ? "Add your suppliers, subcontractors and brands here with their phone and email, or import the list you already keep in Excel or CSV. Any of them can carry prices: a window allowance can carry Andersen, Milgard and Marvin, each at its own price, and a drywall line can carry the sub who hangs it."
                   : "Add one here with its phone and email, or open any item on the Price List tab and add a vendor with its cost and sell. A window allowance can carry Andersen, Milgard and Marvin, each at its own price."}
               </p>
             </>
@@ -370,15 +369,8 @@ function AddVendorForm({ kindsAvailable, onClose, onAdded }: { kindsAvailable: b
         ))}
       </div>
       <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
-        {/* Said only for a kind that carries prices: a brand or a supplier. */}
-        {(() => {
-          const k = kindsAvailable ? vendorKindOf(vals.kind) : "brand";
-          return k === "brand" || k === "supplier";
-        })() ? (
-          <span className="mr-auto text-xs text-slate-500">Prices go on items: after adding, put it on an item from its page here.</span>
-        ) : (
-          <span className="mr-auto" />
-        )}
+        {/* Said for EVERY Kind (Erik 2026-09-30, reversing 0341): a subcontractor carries prices too. */}
+        <span className="mr-auto text-xs text-slate-500">Prices go on items: after adding, put it on an item from its page here.</span>
         <Button onClick={() => void save()} disabled={saving || !String(vals.name ?? "").trim()}>
           <Plus className="h-4 w-4" /> {saving ? "Adding…" : "Add Vendor"}
         </Button>
@@ -543,11 +535,6 @@ function VendorSheet({
   const tel = card?.phone ? card.phone.replace(/[^\d+]/g, "") : "";
   const web = websiteHref(card?.website);
   const map = mapHref(card);
-  const kind = listedKind(vendor);
-  // A SUBCONTRACTOR NEVER CARRIES PRICES (0341): no "Put It On An Item" for one. It can only
-  // become one while it's on no item (saveVendorField refuses otherwise), so this never hides
-  // prices that exist.
-  const pricesHere = kindCarriesPrices(kind);
 
   return (
     <Modal open onClose={onClose} title={vendor.name} size="xl">
@@ -566,8 +553,8 @@ function VendorSheet({
                   defaultValue={card ? (card.kind ?? "") : "brand"}
                   disabled={savingFields.has("kind")}
                   onChange={(e) => {
-                    // A refused change (a vendor with prices can't become a subcontractor) puts the
-                    // box back to what is saved, so the screen never shows a kind that isn't.
+                    // A failed save (a lost connection, a kind the database refuses) puts the box
+                    // back to what is saved, so the screen never shows a kind that isn't.
                     const box = e.currentTarget;
                     const saved = card ? (card.kind ?? "") : "brand";
                     void saveField("kind", box.value, card ? (card.kind ?? null) : "brand").then((ok) => {
@@ -719,11 +706,7 @@ function VendorSheet({
         {/* PUT IT ON ANOTHER ITEM: find the item, type the cost (and the sell, if you know it). */}
         <section>
           <h3 className="text-sm font-semibold text-slate-900">Put It On An Item</h3>
-          {!pricesHere ? (
-            <p className="mt-1 text-sm text-slate-500">
-              {vendor.name} is a subcontractor, and subcontractors don&apos;t carry prices on items. Change its Kind to Supplier or Brand to price items with it.
-            </p>
-          ) : picked ? (
+          {picked ? (
             <div className="mt-2 space-y-2">
               <div className="flex items-center justify-between gap-2 text-sm">
                 <span>

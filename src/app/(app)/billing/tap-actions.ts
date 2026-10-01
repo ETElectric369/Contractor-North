@@ -8,6 +8,9 @@ import { canAcceptPayments, connectStateFromOrg } from "@/lib/stripe-connect";
 import { invoiceBalance } from "@/lib/invoice-math";
 import { needsSendRefusal, sendDraftForPayment, type NeedsSend } from "@/lib/pay-door-send";
 import { reportError } from "@/lib/observe";
+import { recordStripeInvoicePayment, tapPaymentKey, TAP_VIA } from "@/lib/record-invoice-payment";
+import { lastErrorWords } from "@/lib/stripe-decline-words";
+import type { TapOutcomeAnswer } from "@/lib/tap-verdict";
 import { orgStaffIds, pushConfigured } from "@/lib/push";
 import { notifyPeople } from "@/lib/notifications";
 import { STAFF_ROLES } from "@/lib/actions/perms";
@@ -739,5 +742,105 @@ export async function cancelTapPaymentIntent(paymentIntentId: string): Promise<{
     reportError("stripe:terminal:cancel-intent", e, { orgId, paymentIntentId });
     const said = e instanceof Error ? e.message : "";
     return { ok: false, error: `Stripe wouldn't let go of that payment${said ? ` — ${said}` : ""}.` };
+  }
+}
+
+/**
+ * DID IT ACTUALLY GO THROUGH? (0e2cb937 — Rich Seiler, INV-083, 2026-09-30.)
+ *
+ * The phone's confirm resolved, the sheet said "Card approved — Stripe confirmed the charge",
+ * and Stripe had charged nothing: the plugin's Swift confirm resolved on any non-nil result
+ * without reading the intent's status, the bridge turned "resolved" into ok:true, and the sheet
+ * waited for a webhook that could never come. Rich paid $420 by the link an hour later.
+ *
+ * So the phone's word is a CLAIM, and this is the check: the PaymentIntent is read straight off
+ * the tenant's own connected account, and its status — not the bridge's — decides what the
+ * sheet says. The sheet calls it the moment the bridge says ok, and once more if the watch runs
+ * ~20 s with nothing landed.
+ *
+ * OWN ORG ONLY, THREE WAYS: requireStaff; the intent is read on THIS org's connected account
+ * (another tenant's pi_ id does not exist there); and the intent's own metadata — org_id, the
+ * Tap marker, the invoice — must say what the caller says, or it is refused in words. The
+ * metadata keys are the ones createTapPaymentIntent stamps above; read them there, not here.
+ *
+ * AND IT BOOKS WHAT STRIPE SAYS SUCCEEDED. Usually the webhook has already written the row and
+ * `booked` is false because it was there. When it hasn't landed yet, the money is booked HERE,
+ * through the SAME writer the webhook uses (lib/record-invoice-payment.ts), under the SAME key
+ * derived from the PaymentIntent — so the webhook, arriving a beat later, hits the unique index
+ * and heals instead of booking a second row (the Tao Zhu double-charge class; invoice-claims-
+ * model: never the same money twice).
+ *
+ * A status that is not succeeded lands in error_events (stripe:terminal:confirm-not-succeeded),
+ * with Stripe's own last error, so the night this happens again there is a row to read.
+ */
+export async function tapPaymentOutcome(invoiceId: string, paymentIntentId: string): Promise<TapOutcomeAnswer> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error ?? "This action is staff-only." };
+  const orgId = ctx.orgId;
+  if (!orgId) return { ok: false, error: "Your account isn't attached to a company yet." };
+  if (!billingEnabled) return { ok: false, error: "Card payments aren't set up on this server yet." };
+  if (!/^pi_[A-Za-z0-9]+$/.test(paymentIntentId)) return { ok: false, error: "That isn't a payment id." };
+  if (!invoiceId) return { ok: false, error: "No invoice to check the payment against." };
+
+  const { data: org, error: orgErr } = await ctx.supabase
+    .from("organizations")
+    .select("stripe_account_id")
+    .eq("id", orgId)
+    .maybeSingle();
+  if (orgErr || !org) return { ok: false, error: orgErr ? dbError(orgErr) : "Couldn't read this company's payment setup." };
+  const accountId = (org as { stripe_account_id?: string | null }).stripe_account_id;
+  if (!accountId) return { ok: false, error: NOT_SET_UP };
+
+  let pi: Awaited<ReturnType<ReturnType<typeof getStripe>["paymentIntents"]["retrieve"]>>;
+  try {
+    pi = await getStripe().paymentIntents.retrieve(paymentIntentId, {}, { stripeAccount: accountId });
+  } catch (e) {
+    reportError("stripe:terminal:outcome-read", e, { orgId, invoiceId, paymentIntentId });
+    const said = e instanceof Error ? e.message : "";
+    return { ok: false, error: `Couldn't read this payment back from Stripe${said ? ` — ${said}` : ""}.` };
+  }
+  const md = pi.metadata ?? {};
+  if (md.org_id !== orgId || md.source !== "tap_to_pay") {
+    return { ok: false, error: "That payment isn't this company's." };
+  }
+  if (md.invoice_id !== invoiceId) {
+    return { ok: false, error: "That payment is for a different invoice." };
+  }
+
+  const status = String(pi.status ?? "");
+  const amountReceived = Number(pi.amount_received ?? 0);
+  const lastError = lastErrorWords(pi.last_payment_error);
+
+  if (status !== "succeeded") {
+    reportError("stripe:terminal:confirm-not-succeeded", new Error(`the phone said approved; Stripe says ${status}`), {
+      orgId,
+      invoiceId,
+      paymentIntentId,
+      status,
+      lastError,
+      declineCode: pi.last_payment_error?.decline_code ?? null,
+    });
+    return { ok: true, status, amountReceived, lastError, booked: false, recorded: false };
+  }
+
+  // Succeeded. Book it if the webhook hasn't — same writer, same key, same claim checks.
+  try {
+    const outcome = await recordStripeInvoicePayment(ctx.supabase, {
+      invoiceId,
+      orgId,
+      amount: Math.round(amountReceived) / 100,
+      idempotencyKey: tapPaymentKey(pi.id),
+      paymentIntent: pi.id,
+      connectedAccount: accountId,
+      via: TAP_VIA,
+    });
+    if (outcome === "refused") return { ok: false, error: "That payment isn't this company's." };
+    return { ok: true, status, amountReceived, lastError, booked: outcome === "booked", recorded: true };
+  } catch (e) {
+    // The charge is real; the row didn't land here. The webhook will book it (its retries are
+    // Stripe's), and the sheet keeps watching — this is the one case "confirmed, watching" is
+    // exactly true. Said as such: succeeded, not recorded.
+    reportError("stripe:terminal:outcome-book", e, { orgId, invoiceId, paymentIntentId });
+    return { ok: true, status, amountReceived, lastError, booked: false, recorded: false };
   }
 }

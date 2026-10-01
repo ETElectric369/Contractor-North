@@ -36,7 +36,7 @@ import { JobCostCapture } from "./job-cost-capture";
 import { UnbilledCard, UnbilledDoorButton, type UnbilledView } from "./unbilled-card";
 import { LeftToBillCard, contractEstimates } from "./left-to-bill-card";
 import { fixedBillingsNotYetNetted, unbilledWorkForJob } from "@/lib/unbilled-work";
-import { groupJobCosts } from "@/lib/job-cost-groups";
+import { groupJobCosts, openRowsDrawn } from "@/lib/job-cost-groups";
 import { readJobPapers } from "./job-papers";
 import { JobPaperList, type JobPaperView } from "./job-paper-list";
 import { tmWorkToDate } from "@/lib/job-financials";
@@ -469,10 +469,10 @@ export default async function JobDetailPage({
         (r: { count: number | null; error: unknown }) => (r.error ? undefined : (r.count ?? 0)),
         () => undefined,
       ),
-    // DOES THE PANEL TAB HOLD ANYTHING (W1-18: More shows what the job has): any panel, or any live
-    // circuit, kept or suggested. Head-only counts riding this wave; the badge stays panelCount (the
-    // open ones). A failed read (a database without 0333 included) counts as holding, so an error
-    // never tucks the tab away.
+    // DOES THE PANEL TAB HOLD ANYTHING: any panel, or any live circuit, kept or suggested. Head-only
+    // counts; the badge stays panelCount (the open ones). `holds` is what tells the crew's strip the
+    // tab has nothing to read and nothing he could add; a failed read (a database without 0333
+    // included) counts as holding, so an error never takes the tab off his strip.
     Promise.all([
       supabase.from("job_panels").select("id", { count: "exact", head: true }).eq("job_id", id).is("removed_at", null),
       supabase.from("job_circuits").select("id", { count: "exact", head: true }).eq("job_id", id).is("removed_at", null),
@@ -743,12 +743,12 @@ export default async function JobDetailPage({
     .map(([day, h]) => ({ day, hours: h, words: `${dayWords(day)} ${hmWords(h.start)} – ${hmWords(h.end)}` }));
   const scheduleText: string | null = (() => {
     const segs = scheduleDays;
-    // The crew reads the whole block, start AND end ("10:00 AM – 12:00 PM"), never just a start.
+    // The crew reads the whole block, start AND end ("10:00 AM – 12:00 PM"), never just a start. On
+    // several days those are its hours on each of them ("10:00 AM – 12:00 PM each day"): a 10–12 job
+    // and a full day must not read the same.
     const startTime = !j.scheduled_start || block.allDay
       ? null
-      : block.multiDay
-        ? `starts ${hmWords(block.startHm)}`
-        : `${hmWords(block.startHm)} – ${hmWords(block.endHm)}`;
+      : `${hmWords(block.startHm)} – ${hmWords(block.endHm)}${block.multiDay ? " each day" : ""}`;
     const days = segs.length
       ? segs
           .map((sg) => (sg.start_date === sg.end_date ? formatDate(sg.start_date) : `${formatDate(sg.start_date)} – ${formatDate(sg.end_date)}`))
@@ -1008,17 +1008,29 @@ export default async function JobDetailPage({
   // Buy Materials row alone passed off as the job's open tasks.
   const openTaskCount = jobTasks.failed ? undefined : jobTaskTally(jobTasks.rows, buy).open;
   // The Costs chip: Not Billed Yet rows + unrecorded papers naming this job + the job's own receipts
-  // on no bill yet + the job's hours not billed yet, as ONE (see the tab below). The hours count
-  // exactly where the tab says "Also not billed yet: Xh of time" (costGroups exists only there): Time
-  // lost its badge (a shift total), so this is the one place unbilled time is a number on a chip. The
-  // loose receipts are the Receipts & Papers fold's own "N Not On A Bill Yet" (the same paperSort.loose
-  // it is handed below); they are the job's documents, never supplier_invoices, so they can't double
-  // a paperView.
+  // on no bill yet. Every one is a ROW the tab draws, so the number can be checked against the tab
+  // (fada712a: J-013 had 1 bill and said 3). The hours not billed yet are NOT a count here: they are
+  // said in words on the tab ("Also not billed yet: Xh of time") beside the door that bills them, and
+  // a "1" that is no row could never be found. The loose receipts are the Receipts & Papers fold's own
+  // "N Not On A Bill Yet" (the same paperSort.loose it is handed below); they are the job's documents,
+  // never supplier_invoices, so they can't double a paperView.
+  // J-013 (0b742620, 2026-09-29): one live bill, no papers, and the chip said 3. The chip counts only
+  // the pile ids the tab draws (a bill, an order, a take from stock — lib/job-cost-groups
+  // openRowsDrawn); an id nothing on the tab stands behind is reported, never counted.
+  const openDrawn = costGroups
+    ? openRowsDrawn(costGroups, [...((bills ?? []) as any[]).map((b) => String(b.id)), ...((pos ?? []) as any[]).map((p) => String(p.id))])
+    : { drawn: [], phantom: [] };
+  if (openDrawn.phantom.length > 0) {
+    reportError("jobs.[id].costsChip", new Error("Not Billed Yet holds ids no row on the Costs tab draws"), {
+      jobId: id,
+      phantom: openDrawn.phantom.join(","),
+      billed: String(((bills ?? []) as any[]).length),
+    });
+  }
   const costsOpen =
-    (costGroups?.open.ids.length ?? 0) +
+    openDrawn.drawn.length +
     (paperViews ?? []).filter((p) => !p.waitingOnCredit).length +
-    (viewerIsStaff && paperSort.loose ? paperSort.loose.length : 0) +
-    (costGroups && unbilled && unbilled.hours > 0 ? 1 : 0);
+    (viewerIsStaff && paperSort.loose ? paperSort.loose.length : 0);
   const taskListProps = {
     materials: buy,
     jobId: j.id as string,
@@ -1046,8 +1058,8 @@ export default async function JobDetailPage({
   let sharedPhotoIds: string[] | null = null;
   let portalPapers: Record<string, "shown" | "replaced"> | null = null;
   let staleSharedIds: string[] = [];
-  // Does the Customer Page tab hold anything (W1-18): a paper shown, a stretch or a pick, live. Only
-  // read where the tab is the office's and switched on; a failed read counts as holding.
+  // Does the Customer Page tab hold anything: a paper shown, a stretch or a pick, live. Only read
+  // where the tab is the office's and switched on; a failed read counts as holding.
   let customerPageHolds = true;
   // Customer Portal off (the switch board): no Show Customer / Show On Portal, so no read for them.
   if (viewerIsStaff && on("customer_portal")) {
@@ -1364,7 +1376,7 @@ export default async function JobDetailPage({
       // keeps how many job-site photos the job has (tests/badges-show-open names the exception):
       // the grid only, never the Plans & Other Papers fold under it, a receipt or a bill.
       id: "photos",
-      // Holds a job-site photo or a plan (office only: for the crew Photos is a pinned chip). W1-18.
+      // Holds a job-site photo or a plan (office only: for the crew Photos is a pinned chip).
       holds: !!docsErr || paperSort.photos.length > 0 || paperSort.pictures.length > 0,
       label: "Photos",
       count: paperSort.photos.length,
@@ -1515,6 +1527,7 @@ export default async function JobDetailPage({
                   tz={tz}
                   viewerId={user?.id}
                   companyTimeCode={null}
+                  workDayEnd={workDay.end}
                 />
               )}
             </div>
@@ -1650,9 +1663,10 @@ export default async function JobDetailPage({
       // only show whats open"): the Not Billed Yet pile (the Unbilled card's own verdict, so the chip
       // is the pile the tab leads with) plus the supplier papers naming this job that are in nobody's
       // books yet (Named On A Paper; one set aside waiting on a credit is decided, so not counted),
-      // plus the job's own receipts on no bill yet (Receipts & Papers' "Not On A Bill Yet"), plus
-      // one for the hours not billed yet when there are any. A fixed-price job has no Not Billed Yet
-      // pile, so only its unrecorded papers and loose receipts count.
+      // plus the job's own receipts on no bill yet (Receipts & Papers' "Not On A Bill Yet"). Every
+      // one is a row on the tab; the hours not billed yet are said in words beside their door, never
+      // a made-up 1. A fixed-price job has no Not Billed Yet pile, so only its unrecorded papers and
+      // loose receipts count.
       count: costsOpen,
       content: (
         <div className="space-y-4">
@@ -1734,6 +1748,9 @@ export default async function JobDetailPage({
               billOf={billOfPaper}
               looseIds={paperSort.loose ? paperSort.loose.map((d: any) => String(d.id)) : null}
               tieNote={paperTies ? null : "Couldn't check which papers made which bill just now. Reload to try again."}
+              // A loose receipt's Already On A Bill → Tie It (d1ff7c5a): the job's live bills, said
+              // the way the rows say them ("the CED bill #8802-…"). The office only.
+              bills={viewerIsStaff ? liveBillIds.map((id) => ({ id, label: billWords(id) })) : null}
             />
           </Card>
           {/* THE ORDERS, ONLY WHEN THERE ARE SOME (W1-23): a job with no purchase order draws no

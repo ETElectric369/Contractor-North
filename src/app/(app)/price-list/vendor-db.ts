@@ -51,17 +51,6 @@ export async function cardsOf(
   return { rows: (base.data ?? []) as unknown as Record<string, unknown>[], kinds: false };
 }
 
-/** The names this org's live cards call SUBCONTRACTORS (0341), by vendorKey. A subcontractor never
- *  carries prices on an item, so the item writes refuse these by name. Empty before 0341. */
-export async function subcontractorKeysFor(supabase: StaffDb, orgId: string): Promise<Set<string> | { error: unknown }> {
-  const res = await supabase.from("price_list_vendors").select("name, kind, archived").eq("org_id", orgId).eq("kind", "subcontractor").limit(2000);
-  // Before 0341 (or before 0296) there is no kind, so there are no subcontractors to keep out.
-  if (res.error) return kindsMissing(res.error) || cardsMissing(res.error) ? new Set() : { error: res.error };
-  return new Set(
-    ((res.data ?? []) as { name: string; archived: boolean }[]).filter((c) => !c.archived).map((c) => vendorKey(c.name)),
-  );
-}
-
 export const CARDS_NOT_READY =
   "Vendor contact details aren't switched on for your account yet. The vendor's items and prices still work; the phone and email arrive with the next update.";
 

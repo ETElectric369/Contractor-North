@@ -11,8 +11,9 @@ import { isYmd, shortDay } from "@/lib/come-back-days";
 // Use the GUARDED setJobStatus (jobs/actions: requireStaff + status whitelist + not-found check).
 // There used to be an identically-named UNGUARDED copy in schedule/actions that this imported — a
 // name-collision footgun that silently bypassed the staff guard. That copy is now deleted.
-import { setJobStatus } from "../actions";
+import { finishJob, setJobStatus } from "../actions";
 import { setJobHold, snoozeJobHold } from "../../schedule/actions";
+import { useToast } from "@/components/toast";
 import { JOB_STATUSES, jobStatusLabel } from "@/lib/job-status";
 
 /** "in_progress" → "In Progress": the pill and the menu rows are Title Case (the clickables law). */
@@ -40,6 +41,19 @@ const PILL =
   "inline-flex min-h-11 items-center gap-1 rounded-full px-3 text-sm font-medium transition-colors";
 
 /**
+ * THE ONE WRITE BEHIND A PICK. Whatever the job is now (held or not), the pick is written as itself
+ * through the guarded setJobStatus: it clears hold_reason on any status that isn't on_hold, and the
+ * jobs_hold_day trigger (0366) clears hold_until and hold_by, so the wake side effects happen without
+ * a second writer choosing the status. Complete is finishJob's (Nort's no-toggle path): the job is
+ * done AND its billing is put in front of the office, the way Manage → Finish Job does it. On Hold
+ * never comes here (the picker asks why first).
+ */
+export async function writeStatusPick(id: string, next: string): Promise<{ ok: boolean; error?: string; speak?: string; warning?: string }> {
+  if (next === "complete") return finishJob(id, {});
+  return setJobStatus(id, next);
+}
+
+/**
  * THE STATUS BADGE IS THE STATUS CONTROL (W1-17). One writer for a job's status, in the header where
  * the status is read, not a second dropdown down the Overview.
  *
@@ -48,10 +62,15 @@ const PILL =
  * writers: setJobStatus, and setJobHold for a hold. Picking On Hold opens the come-back picker
  * instead of writing blind: Why? (required, it is the reminder the job comes back with) and the day
  * (In A Week unless another is picked; there is no "no date": "too quiet gets things lost", 0366),
- * with Hold It. Leaving on_hold clears the reason and the day (setJobHold's wake rule, and the
- * database's own jobs_hold_day, keep a stale reason from ever reading as a live one). While held the
- * pill reads "On Hold · waiting on the permit · back Oct 3" with a Snooze that moves the day
- * (snoozeJobHold). A refused write says why, right here (nothing silent).
+ * with Hold It. Leaving on_hold is ONE write, the pick itself (writeStatusPick): setJobStatus clears
+ * hold_reason on any status that isn't on_hold, and the database's own jobs_hold_day (0366) clears
+ * the day and who held it, so a stale reason never reads as a live one. (It used to go through
+ * setJobHold(id, null) first, whose wake rule picked "scheduled" or "to_be_scheduled" for itself and
+ * ignored the pick: To Be Scheduled on a held job landed on Scheduled, ce9ba4ef.) Complete goes
+ * through finishJob, the same door as Manage → Finish Job: the T&M Final draft, the nothing-new
+ * check and the unbilled-work warning ride with the word, never the word alone (209451e1). While
+ * held the pill reads "On Hold · waiting on the permit · back Oct 3" with a Snooze that moves the
+ * day (snoozeJobHold). A refused write says why, right here (nothing silent).
  *
  * The crew: the same pill and the same words, not tappable (setJobStatus is the office's).
  *
@@ -80,6 +99,7 @@ export function JobStatusControl({
   viewerIsStaff?: boolean;
 }) {
   const router = useRouter();
+  const toast = useToast();
   const [pending, start] = useTransition();
   const [open, setOpen] = useState(false);
   /** Which picker is open under the pill: putting it on hold, or moving a hold's day. */
@@ -122,16 +142,14 @@ export function JobStatusControl({
     setAsking(null);
     start(async () => {
       setErr(null);
-      // Off hold via THE hold writer so the reason (and the day) clear with the status — setJobStatus
-      // alone would leave "waiting on the permit" haunting a job that isn't waiting on anything.
-      let res: { ok: boolean; error?: string };
-      if (held) {
-        res = await setJobHold(id, null);
-        if (res.ok && next !== "scheduled" && next !== "to_be_scheduled") res = await setJobStatus(id, next);
-      } else {
-        res = await setJobStatus(id, next);
-      }
+      const res = await writeStatusPick(id, next);
       if (!res.ok) setErr(res.error ?? "That didn't save.");
+      else if (next === "complete") {
+        // Finish Job's own sentence (which draft was built, or that nothing new was left to bill),
+        // and its warning (hours or bills still off a bill) has to be READ, so it stays until tapped.
+        toast(res.speak ?? "Job finished.", "info");
+        if (res.warning) toast(res.warning, "error", undefined, { sticky: true });
+      }
       router.refresh();
     });
   }

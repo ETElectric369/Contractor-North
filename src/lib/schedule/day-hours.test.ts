@@ -58,9 +58,10 @@ describe("the calendar draws a day by its own hours", () => {
     ]) {
       const job = { scheduledStart: at(first, "10:00"), scheduledEnd: at(last, "17:00"), plannedMinutes: 1440, tz: LA, wd };
       expect(jobDayBlock({ day: mid, ...job, dayHours: noon5 }), mid).toEqual({ startMin: 720, endMin: 1020, allDay: false });
+      // The usual days: the job's hours on each of them (a legacy closing stamp on the last day draws to closing).
       expect(jobDayBlock({ day: first, ...job }), first).toEqual({ startMin: 600, endMin: 1020, allDay: false });
-      expect(jobDayBlock({ day: last, ...job }), last).toEqual({ startMin: 540, endMin: 1020, allDay: true });
-      expect(jobDayBlock({ day: mid, ...job }), mid).toEqual({ startMin: 540, endMin: 1020, allDay: true });
+      expect(jobDayBlock({ day: last, ...job }), last).toEqual({ startMin: 600, endMin: 1020, allDay: false });
+      expect(jobDayBlock({ day: mid, ...job }), mid).toEqual({ startMin: 600, endMin: 1020, allDay: false });
     }
   });
 
@@ -68,7 +69,7 @@ describe("the calendar draws a day by its own hours", () => {
     const plan = { scheduledStart: at("2026-09-24", "09:00"), scheduledEnd: at("2026-09-28", "17:00"), plannedMinutes: null, tz: LA, workDay: WORK_DAY };
     expect(dayBlockWords({ day: "2026-09-28", ...plan, dayHours: noon5 })).toEqual({ words: "12:00 PM – 5:00 PM · 5 hours", history: false });
     expect(dayBlockWords({ day: "2026-09-20", ...plan, dayHours: noon5 })).toEqual({ words: "Worked day · 12:00 PM – 5:00 PM · 5 hours", history: true });
-    expect(dayBlockWords({ day: "2026-09-28", ...plan }).words).toBe("9:00 AM – 5:00 PM · Full days — change it");
+    expect(dayBlockWords({ day: "2026-09-28", ...plan }).words).toBe("9:00 AM – 5:00 PM · All day — change it");
   });
 });
 
@@ -109,14 +110,15 @@ describe("adding a day never moves another (freezeDrawnDays)", () => {
     return { scheduledStart: t.startIso, scheduledEnd: t.endIso, plannedMinutes: t.plannedMinutes ?? prior.plannedMinutes };
   };
 
-  it("Seiler's one day, 10 to 12, gets a second day: it keeps 10 to 12 as its own, never 10 to 5", () => {
+  it("Seiler's one day, 10 to 12, gets a second day: it stays 10 to 12 by the rule itself, so nothing needs freezing", () => {
     const days = addDaySegment([{ start: "2026-09-28", end: "2026-09-28", hours: null }], "2026-09-30", noon5);
     const after = grown("2026-09-28", "2026-09-30", seiler);
-    // What the growth alone would have drawn on the 28th:
-    expect(jobDayBlock({ day: "2026-09-28", ...after, tz: LA, wd })).toEqual({ startMin: 600, endMin: 1020, allDay: false });
+    // The grown span keeps the job's hours on the 28th (a job's hours are each day's), never 10 to 5.
+    expect(after).toMatchObject({ scheduledStart: at("2026-09-28", "10:00"), scheduledEnd: at("2026-09-30", "12:00") });
+    expect(jobDayBlock({ day: "2026-09-28", ...after, tz: LA, wd })).toEqual({ startMin: 600, endMin: 720, allDay: false });
     const f = freezeDrawnDays({ segments: days, before: seiler, after, tz: LA, wd, skip: ["2026-09-30"] });
-    expect(f.frozen).toEqual(["2026-09-28"]);
-    expect(hoursOnDay(f.segments, "2026-09-28")).toEqual({ start: "10:00", end: "12:00" });
+    expect(f.frozen).toEqual([]);
+    expect(hoursOnDay(f.segments, "2026-09-28")).toBeNull();
     expect(hoursOnDay(f.segments, "2026-09-30")).toEqual(noon5);
   });
 
@@ -127,12 +129,14 @@ describe("adding a day never moves another (freezeDrawnDays)", () => {
     expect(f.frozen).toEqual([]);
   });
 
-  it("a day added BEFORE a job that starts at 10: its first day keeps 10 to closing, the days between stay full", () => {
+  it("a day added BEFORE a job that runs 10 to closing: every day still draws 10 to closing, so nothing is frozen", () => {
     const job = { scheduledStart: at("2026-09-24", "10:00"), scheduledEnd: at("2026-09-25", "17:00"), plannedMinutes: 960 };
     const days = addDaySegment([{ start: "2026-09-24", end: "2026-09-25", hours: null }], "2026-09-22", noon5);
-    const f = freezeDrawnDays({ segments: days, before: job, after: grown("2026-09-22", "2026-09-25", job), tz: LA, wd, skip: ["2026-09-22"] });
-    expect(f.frozen).toEqual(["2026-09-24"]);
-    expect(hoursOnDay(f.segments, "2026-09-24")).toEqual({ start: "10:00", end: "17:00" });
+    const after = grown("2026-09-22", "2026-09-25", job);
+    expect(jobDayBlock({ day: "2026-09-24", ...after, tz: LA, wd })).toEqual(jobDayBlock({ day: "2026-09-24", ...job, tz: LA, wd }));
+    const f = freezeDrawnDays({ segments: days, before: job, after, tz: LA, wd, skip: ["2026-09-22"] });
+    expect(f.frozen).toEqual([]);
+    expect(hoursOnDay(f.segments, "2026-09-24")).toBeNull();
     expect(hoursOnDay(f.segments, "2026-09-25")).toBeNull();
   });
 

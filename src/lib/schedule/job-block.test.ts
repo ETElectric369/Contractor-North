@@ -199,21 +199,103 @@ describe("a move keeps the block: the same start, the same length, on the new da
   });
 });
 
-describe("several days are full days, and a length never collapses them", () => {
-  it("Mon to Wed from 10: the first day from 10, the last to closing", () => {
-    const t = planJobTimes({ firstDay: "2026-09-28", lastDay: "2026-09-30", tz: LA, workDay: ET_DAY, startTime: "10:00", prior: none });
-    expect(t).toEqual({ startIso: at("2026-09-28", "10:00"), endIso: at("2026-09-30", "17:00"), defaulted: false });
+describe("several days: the job's hours on each of them (Erik, 2026-09-29, 700 North Lake Boulevard)", () => {
+  it("Erik's case: a 10–12 job given a second range keeps 10 to 12 on both days, and its End stays its own", () => {
+    const prior = { scheduledStart: at("2026-09-28", "10:00"), scheduledEnd: at("2026-09-28", "12:00"), plannedMinutes: null };
+    const t = planJobTimes({ firstDay: "2026-09-28", lastDay: "2026-10-01", tz: LA, workDay: ET_DAY, prior });
+    // The end is stored on the LAST day, at the end each day has: never closing.
+    expect(t).toEqual({ startIso: at("2026-09-28", "10:00"), endIso: at("2026-10-01", "12:00"), defaulted: false });
     const s = t.startIso!;
     const e = t.endIso!;
-    expect(jobDayBlock({ day: "2026-09-28", scheduledStart: s, scheduledEnd: e, tz: LA, wd })).toEqual({ startMin: 600, endMin: 1020, allDay: false });
-    expect(jobDayBlock({ day: "2026-09-29", scheduledStart: s, scheduledEnd: e, tz: LA, wd })).toEqual({ startMin: 540, endMin: 1020, allDay: true });
-    expect(jobDayBlock({ day: "2026-09-30", scheduledStart: s, scheduledEnd: e, tz: LA, wd })).toEqual({ startMin: 540, endMin: 1020, allDay: true });
+    for (const day of ["2026-09-28", "2026-09-29", "2026-10-01"]) {
+      expect(jobDayBlock({ day, scheduledStart: s, scheduledEnd: e, tz: LA, wd }), day).toEqual({ startMin: 600, endMin: 720, allDay: false });
+    }
+    const b = readJobBlock({ scheduledStart: s, scheduledEnd: e, plannedMinutes: null, tz: LA, workDay: ET_DAY });
+    expect(b).toMatchObject({ multiDay: true, day: "2026-09-28", lastDay: "2026-10-01", startHm: "10:00", endHm: "12:00", minutes: 120, allDay: false });
+    expect(blockWords(b)).toBe("2 hours — change it");
   });
 
-  it("a number sent to a multi-day schedule is its size; the days stay", () => {
+  it("Mon to Wed from 10 with no length: 10 to 12 each day, the default, said", () => {
+    const t = planJobTimes({ firstDay: "2026-09-28", lastDay: "2026-09-30", tz: LA, workDay: ET_DAY, startTime: "10:00", prior: none });
+    expect(t).toEqual({ startIso: at("2026-09-28", "10:00"), endIso: at("2026-09-30", "12:00"), defaulted: true });
+  });
+
+  it("a number sent to a multi-day schedule is each day's length; its size keeps what was asked", () => {
     const t = planJobTimes({ firstDay: "2026-09-28", lastDay: "2026-09-30", tz: LA, workDay: ET_DAY, length: 120, prior: none });
-    expect(t.endIso).toBe(at("2026-09-30", "17:00"));
+    expect(t.endIso).toBe(at("2026-09-30", "11:00"));
     expect(t.plannedMinutes).toBe(120);
+    for (const day of ["2026-09-28", "2026-09-29", "2026-09-30"]) {
+      expect(jobDayBlock({ day, scheduledStart: t.startIso, scheduledEnd: t.endIso, plannedMinutes: 120, tz: LA, wd }), day).toEqual({ startMin: 540, endMin: 660, allDay: false });
+    }
+  });
+
+  it("a window of several days with nothing else chosen is full days: the days were the choice", () => {
+    const t = planJobTimes({ firstDay: "2026-09-28", lastDay: "2026-09-30", tz: LA, workDay: ET_DAY, prior: none });
+    expect(t).toEqual({ startIso: at("2026-09-28", "09:00"), endIso: at("2026-09-30", "17:00"), defaulted: false });
+    for (const day of ["2026-09-28", "2026-09-29", "2026-09-30"]) {
+      expect(jobDayBlock({ day, scheduledStart: t.startIso, scheduledEnd: t.endIso, tz: LA, wd }), day).toEqual({ startMin: 540, endMin: 1020, allDay: true });
+    }
+  });
+
+  it("a new start on a multi-day timed block keeps its clock length, on the screen and in the writer", () => {
+    const before = { multiDay: true, allDay: false, endHm: "12:00", minutes: 120 };
+    expect(keptEndMin({ startMin: 13 * 60, typedStart: true, before, plannedMinutes: 0, wd })).toEqual({ endMin: 15 * 60, defaulted: false });
+    const prior = { scheduledStart: at("2026-09-28", "10:00"), scheduledEnd: at("2026-10-01", "12:00"), plannedMinutes: null };
+    const t = planJobTimes({ firstDay: "2026-09-28", lastDay: "2026-10-01", tz: LA, workDay: ET_DAY, startTime: "13:00", prior });
+    expect(t).toEqual({ startIso: at("2026-09-28", "13:00"), endIso: at("2026-10-01", "15:00"), defaulted: false });
+  });
+
+  it("a legacy multi-day row (the old closing stamp on its last day) draws its start to closing on each day", () => {
+    const s = at("2026-09-28", "10:00");
+    const e = at("2026-09-30", "17:00");
+    for (const day of ["2026-09-28", "2026-09-29", "2026-09-30"]) {
+      expect(jobDayBlock({ day, scheduledStart: s, scheduledEnd: e, plannedMinutes: 1440, tz: LA, wd }), day).toEqual({ startMin: 600, endMin: 1020, allDay: false });
+    }
+  });
+
+  it("Full Day on Erik's two-day 10–12 job (the 2h chip stored 120) is a full day on each of its days, and the chip reads pressed", () => {
+    // 10:00 + the 2h chip on Tue, then Add Date Range through Thu: 10 to 12 each day, size 120.
+    const two = planJobTimes({ firstDay: "2026-09-29", lastDay: "2026-10-01", tz: LA, workDay: ET_DAY, prior: { scheduledStart: at("2026-09-29", "10:00"), scheduledEnd: at("2026-09-29", "12:00"), plannedMinutes: 120 } });
+    expect(two).toEqual({ startIso: at("2026-09-29", "10:00"), endIso: at("2026-10-01", "12:00"), defaulted: false });
+    // Then the Full Day chip. Before the fix the size stayed 120 beside the new 9-to-5 end, and
+    // jobDayBlock's "a size beats the closing stamp" rule re-drew 9:00 to 11:00 on every day.
+    const t = planJobTimes({ firstDay: "2026-09-29", lastDay: "2026-10-01", tz: LA, workDay: ET_DAY, length: "full", prior: { scheduledStart: two.startIso, scheduledEnd: two.endIso, plannedMinutes: 120 } });
+    expect(t).toEqual({ startIso: at("2026-09-29", "09:00"), endIso: at("2026-10-01", "17:00"), plannedMinutes: 480, defaulted: false });
+    for (const day of ["2026-09-29", "2026-09-30", "2026-10-01"]) {
+      expect(jobDayBlock({ day, scheduledStart: t.startIso, scheduledEnd: t.endIso, plannedMinutes: t.plannedMinutes, tz: LA, wd }), day).toEqual({ startMin: wd.startMin, endMin: wd.endMin, allDay: true });
+    }
+    const b = readJobBlock({ scheduledStart: t.startIso, scheduledEnd: t.endIso, plannedMinutes: t.plannedMinutes, tz: LA, workDay: ET_DAY });
+    expect(b).toMatchObject({ multiDay: true, allDay: true, startHm: "09:00", endHm: "17:00", sized: true });
+    expect(blockWords(b)).toBe("All day");
+    expect(dayBlockWords({ day: "2026-09-30", scheduledStart: t.startIso, scheduledEnd: t.endIso, plannedMinutes: t.plannedMinutes, tz: LA, workDay: ET_DAY })).toEqual({ words: "9:00 AM – 5:00 PM · All day", history: false });
+  });
+
+  it("Full Day after an End typed on several days (a 4-hour clock stored) is a full day too", () => {
+    const prior = { scheduledStart: at("2026-09-28", "09:00"), scheduledEnd: at("2026-09-30", "13:00"), plannedMinutes: 240 };
+    const t = planJobTimes({ firstDay: "2026-09-28", lastDay: "2026-09-30", tz: LA, workDay: ET_DAY, length: "full", prior });
+    expect(t.plannedMinutes).toBe(480);
+    expect(readJobBlock({ scheduledStart: t.startIso, scheduledEnd: t.endIso, plannedMinutes: t.plannedMinutes, tz: LA, workDay: ET_DAY })).toMatchObject({ allDay: true, endHm: "17:00" });
+  });
+
+  it("Full Day on several days keeps a load of several days already on file (1440 stays 1440), and still draws full days", () => {
+    const prior = { scheduledStart: at("2026-09-28", "10:00"), scheduledEnd: at("2026-09-30", "12:00"), plannedMinutes: 1440 };
+    const t = planJobTimes({ firstDay: "2026-09-28", lastDay: "2026-09-30", tz: LA, workDay: ET_DAY, length: "full", prior });
+    expect(t.plannedMinutes).toBe(1440);
+    expect(jobDayBlock({ day: "2026-09-29", scheduledStart: t.startIso, scheduledEnd: t.endIso, plannedMinutes: 1440, tz: LA, wd })).toEqual({ startMin: wd.startMin, endMin: wd.endMin, allDay: true });
+    // One day never stores more than a day (the Full Day chip's 480), as before.
+    const one = planJobTimes({ firstDay: "2026-09-28", lastDay: "2026-09-28", tz: LA, workDay: ET_DAY, length: "full", prior: { ...prior, scheduledEnd: at("2026-09-28", "12:00"), plannedMinutes: 120 } });
+    expect(one.plannedMinutes).toBe(480);
+  });
+
+  it("a legacy multi-day row with a sub-day size and the old closing stamp draws its size each day (its hours are each day's), never full days", () => {
+    // A 4h-sized job later given a week, written before this fix: start 9:00 Mon, the stamp at closing
+    // Thu, planned_minutes 240. cn-v1030 drew full days over the size somebody chose; now the size is
+    // each day's block, the same rule as one day.
+    const s = at("2026-10-05", "09:00");
+    const e = at("2026-10-08", "17:00");
+    for (const day of ["2026-10-05", "2026-10-06", "2026-10-08"]) {
+      expect(jobDayBlock({ day, scheduledStart: s, scheduledEnd: e, plannedMinutes: 240, tz: LA, wd }), day).toEqual({ startMin: 540, endMin: 780, allDay: false });
+    }
   });
 
   it("a worked day kept outside the plan draws as a full day of the job", () => {
@@ -222,10 +304,11 @@ describe("several days are full days, and a length never collapses them", () => 
     expect(jobDayBlock({ day: "2026-09-22", scheduledStart: s, scheduledEnd: e, tz: LA, wd })).toEqual({ startMin: 540, endMin: 1020, allDay: true });
   });
 
-  it("the words say full days", () => {
+  it("the words say the length, never 'full days'", () => {
     const b = readJobBlock({ scheduledStart: at("2026-09-28", "10:00"), scheduledEnd: at("2026-09-30", "17:00"), plannedMinutes: 1440, tz: LA, workDay: ET_DAY });
     expect(b.multiDay).toBe(true);
-    expect(blockWords(b)).toBe("Full days");
+    expect(blockWords(b)).toBe("7 hours");
+    expect(blockWords({ ...b, sized: false })).toBe("7 hours — change it");
   });
 });
 
@@ -386,9 +469,10 @@ describe("the day drill's line says what the grid draws on THAT day", () => {
     });
   });
 
-  it("a middle day of several reads full, the first from its start", () => {
-    const many = { ...plan, scheduledStart: at("2026-09-28", "10:00"), scheduledEnd: at("2026-09-30", "17:00"), plannedMinutes: 1440 };
-    expect(dayBlockWords({ day: "2026-09-28", ...many }).words).toBe("10:00 AM – 5:00 PM · Full days");
-    expect(dayBlockWords({ day: "2026-09-29", ...many }).words).toBe("9:00 AM – 5:00 PM · Full days");
+  it("every day of several reads the job's hours, the first, a middle one and the last alike", () => {
+    const many = { ...plan, scheduledStart: at("2026-09-28", "10:00"), scheduledEnd: at("2026-09-30", "12:00"), plannedMinutes: 120 };
+    for (const day of ["2026-09-28", "2026-09-29", "2026-09-30"]) {
+      expect(dayBlockWords({ day, ...many }).words, day).toBe("10:00 AM – 12:00 PM · 2 hours");
+    }
   });
 });
