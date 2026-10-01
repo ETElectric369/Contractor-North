@@ -9,6 +9,7 @@ import { cogsWords, overheadWords } from "./analytics/profit-and-loss";
 import { DOCK, visibleDock } from "./dock";
 import { helpRows } from "./onboarding/help-rows";
 import { ALL_ON } from "./features";
+import { appointmentTypeLabel } from "./statuses";
 
 /**
  * WHERE NORT SAYS THINGS LIVE, HELD TO WHERE THEY DO (W1-09 / W1-07 / W1-08). A map that lags the
@@ -136,5 +137,62 @@ describe("Nort's product map after the shell wave", () => {
     expect(src("src/components/crew-initials.tsx")).toContain("Nobody");
     expect(src("src/app/(app)/jobs/[id]/propose-dates-button.tsx")).toContain('"Offer Dates"');
     expect(src("supabase/migrations/0370_each_day_keeps_its_own_hours.sql")).toMatch(/\+ 120\b/);
+  });
+
+  /* THE WAVE 2 RELEASE MADE THREE OF NORT'S SENTENCES FALSE, so the release rewrote them and pins
+     them here. Each is checked the way this file checks every other line: the words Nort reads, and
+     then the code that makes them true. Lane 6 (one lead link, Nort's words) is NOT in this release;
+     when it lands and rewrites these lines, it keeps these facts or changes the code first. */
+  it("Add By Hand says it CAN put stock in, because now it does (W1-FU-misc B)", () => {
+    const line = NORT_PRODUCT_MAP.split("\n").find((l) => l.startsWith("- Money → Bills (/bills)"))!;
+    // The old claim was the opposite, and the typed sheet now disproves it.
+    expect(line).not.toMatch(/never adds stock/);
+    for (const part of ["Shop Stock, which asks What Is It, How Many and the unit", "while the Shop Stock switch is on"]) {
+      expect(line, part).toContain(part);
+    }
+    // True in code: the typed sheet offers Shop Stock and saves it through the stock writer.
+    const sheet = readFileSync(join(process.cwd(), "src/components/quick-cost-button.tsx"), "utf8");
+    expect(sheet).toContain('import { addStockPurchase } from "@/app/(app)/inventory/actions"');
+    expect(sheet).toMatch(/addStockPurchase\(purchase\)/);
+  });
+
+  it("says Walk-Through where the app says Walk-Through (W2-10), keeping 'inspection' for the city's", () => {
+    // No line offers the user the old word for the site visit. Two uses are allowed and no others:
+    // the route /inspections (the path never moved — a word changed, not data) and the one sentence
+    // that names the word itself to say the city keeps it. Any new prose use fails here.
+    for (const line of NORT_PRODUCT_MAP.split("\n")) {
+      const prose = line.replace(/\/inspections/g, "").replace(/"inspection" is kept for the city's/, "");
+      expect(prose, line.slice(0, 48)).not.toMatch(/\binspections?\b/i);
+    }
+    expect(NORT_PRODUCT_MAP).toContain("- Sales → Walk-Throughs (/inspections):");
+    // True in code: the one label the app reads it by, and the dock row that opens it.
+    expect(appointmentTypeLabel("inspection")).toBe("Walk-Through");
+    expect(DOCK.find((s) => s.key === "sales")!.children.find((c) => c.href === "/inspections")?.label).toBe("Walk-Throughs");
+  });
+
+  it("names what a past day and a dateless job now do on the Schedule (SV-actual, SV-ghost, W2-05)", () => {
+    const line = NORT_PRODUCT_MAP.split("\n").find((l) => l.startsWith("- Schedule (/schedule)"))!;
+    for (const part of ["hollow", "Book This Day", "Waiting For A Day", "Undo"]) expect(line, part).toContain(part);
+    // Booking a worked day touches that day ONLY — the sentence promises it, the writer must keep it.
+    expect(line).toContain("not the job's status, its listed day or any hold");
+    // True in code: the ghost's own door, the rail's heading, and the past-only read behind it.
+    const src = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
+    expect(src("src/app/(app)/schedule/ghost-sheet.tsx")).toContain("Book This Day");
+    expect(src("src/app/(app)/schedule/page.tsx")).toContain("Waiting For A Day");
+    expect(src("src/app/(app)/schedule/actions.ts")).toMatch(/export async function bookWorkedDay/);
+    // bookWorkedDay never promotes: that is the whole difference from addJobDay.
+    expect(src("src/app/(app)/schedule/actions.ts")).toMatch(/promote: false/);
+  });
+
+  it("Nort can set every customer type the app offers, Contractor included (W2-13 Part A)", () => {
+    // The forms offer it, so the agent's writers must accept it: a type you can pick in the app and
+    // not say to Nort is a door that dead-ends.
+    const entity = readFileSync(join(process.cwd(), "src/lib/actions/entities/customer.ts"), "utf8");
+    const enums = entity.match(/z\.enum\(\["residential"[^)]*\)/g) ?? [];
+    expect(enums.length).toBe(2); // customer.create and customer.update
+    for (const e of enums) expect(e).toContain('"contractor"');
+    for (const p of ["src/app/(app)/crm/new-customer-button.tsx", "src/app/(app)/crm/[id]/edit-customer-button.tsx"]) {
+      expect(readFileSync(join(process.cwd(), p), "utf8"), p).toContain('<option value="contractor">Contractor</option>');
+    }
   });
 });

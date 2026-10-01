@@ -258,7 +258,7 @@ export async function patchCustomer(
   if ("error" in guard) return { ok: false, error: guard.error };
   const supabase = await createClient();
   const upd: Record<string, unknown> = {};
-  if (patch.type !== undefined) upd.type = patch.type; // residential | commercial | industrial | subcontractor
+  if (patch.type !== undefined) upd.type = patch.type; // lib/types CustomerType: residential | commercial | industrial | subcontractor | contractor
   if (patch.name !== undefined) { const n = String(patch.name ?? "").trim(); if (!n) return { ok: false, error: "Name can't be empty." }; upd.name = n; }
   if (patch.phone !== undefined) upd.phone = patch.phone == null ? null : orNull(formatPhone(String(patch.phone)));
   if (patch.email !== undefined) upd.email = emptyToNull(patch.email);
