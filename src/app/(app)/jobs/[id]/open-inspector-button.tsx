@@ -7,9 +7,10 @@ import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/toast";
 import { openJobInspector } from "../../appointments/actions";
 
-/** An access point, not a wall (Erik) — the Inspector with every note, photo and intake answer
+/** An access point, not a wall (Erik) — the walk-through with every note, photo and intake answer
  *  this work has collected from ANY entrance, one tap from the job. Finds the record that already
- *  holds the data; only starts a fresh one when nothing anywhere exists. */
+ *  holds the data; only starts a fresh one when nothing anywhere exists. Named for what it opens
+ *  (W2-10's one word): the Walk-Through, not the Inspector, which is the city's word. */
 export function OpenInspectorButton({ jobId }: { jobId: string }) {
   const router = useRouter();
   const toast = useToast();
@@ -18,19 +19,21 @@ export function OpenInspectorButton({ jobId }: { jobId: string }) {
     <Button
       size="sm"
       variant="outline"
+      // Compact beside the header's compact Get Paid, but a 44px target all the same.
+      className="min-h-11"
       disabled={pending}
       onClick={() =>
         start(async () => {
           const res = await openJobInspector(jobId);
           if (!res.ok || !res.redirect) {
-            toast(res.error ?? "Couldn't open the Inspector.", "error");
+            toast(res.error ?? "Couldn't open the walk-through.", "error");
             return;
           }
           router.push(res.redirect);
         })
       }
     >
-      <ClipboardList className="h-4 w-4" /> {pending ? "Opening…" : "Inspector"}
+      <ClipboardList className="h-4 w-4" /> {pending ? "Opening…" : "Walk-Through"}
     </Button>
   );
 }

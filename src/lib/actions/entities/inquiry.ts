@@ -12,7 +12,7 @@ export const inquiryActions: Record<string, ActionDef> = {
       // next-day follow-up", which is the phantom-booking createInquiry deliberately removed —
       // the lead lands with next_follow_up_at NULL and no appointment. Nort reads this text as
       // fact, so it was telling people about a follow-up nobody had booked.
-      "Capture a new LEAD / inquiry (the top of the funnel) — e.g. 'add a lead, <name>, <phone>, wants <the work>'. Only name is required; phone/email/company/message/type are optional. The lead lands on the follow-up list with no date; set one with inquiry.contact. Afterward you can contact (inquiry.contact) or convert it (inquiry.convert).",
+      "Capture a new LEAD / inquiry (the top of the funnel) — e.g. 'add a lead, <name>, <phone>, wants <the work>'. Only name is required; phone/email/company/message/type are optional. When type isn't given it is inferred from Company: a company is commercial, none is residential. The lead lands on the follow-up list with no date; set one with inquiry.contact. Afterward you can contact (inquiry.contact) or convert it (inquiry.convert).",
     input: z.object({
       name: z.string().min(1),
       phone: z.string().nullable().optional(),
@@ -71,7 +71,7 @@ export const inquiryActions: Record<string, ActionDef> = {
     group: "inquiry",
     label: "Convert inquiry",
     description:
-      "Convert a lead/inquiry. Targets: 'inspection' books a site inspection on the schedule and keeps the lead open (use for big jobs that need a site visit before a firm price); 'quote'/'estimate' both start a priced draft (no contact card until it's accepted); 'job' books the work; 'customer' just files them in the CRM. For 'inspection': when they name a time — 'today', 'right now', 'Tuesday at 10' — pass date (YYYY-MM-DD, company-local) and time (HH:MM, 24h); left out, it lands two days out at 09:00. The result's data.starts_at / date / time are WHEN it actually landed — read that back to them; never assume it's now.",
+      "Convert a lead/inquiry. Targets: 'inspection' books a walk-through (the site visit before a firm price) on the schedule and keeps the lead open (use for big jobs that need one); 'quote'/'estimate' both start a priced draft (no contact card until it's accepted); 'job' books the work; 'customer' just files them in the CRM. For 'inspection': when they name a time — 'today', 'right now', 'Tuesday at 10' — pass date (YYYY-MM-DD, company-local) and time (HH:MM, 24h); left out, it lands two days out at 09:00. The result's data.starts_at / date / time are WHEN it actually landed — read that back to them; never assume it's now. The target key stays 'inspection'; say walk-through to the person (a city inspection goes on the job's permit, not here).",
     input: z.object({
       id: z.string(),
       // DEFAULT "quote", NOT "estimate" (audit v921). The UI's Estimate button already means

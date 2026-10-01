@@ -203,7 +203,7 @@ export async function publicScheduleInspection(
   // words name where it opens.
   const url = requestHref(settings.features);
   const payload = {
-    title: `${inquiry.name || name} wants a site inspection — send them times`,
+    title: `${inquiry.name || name} wants a walk-through — send them times`,
     body:
       [phone ?? email, inquiry.address ?? address].filter(Boolean).join(" · ") ||
       (url === "/leads" ? "Open the lead to send time options." : "Open My Day to send time options."),

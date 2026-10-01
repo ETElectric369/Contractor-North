@@ -116,7 +116,7 @@ d("the shell's new reads: Bug Watch's open count and the link offer's candidates
           )
         ).id,
       );
-    const booked = await visit("Inspection — Tom Goodman");
+    const booked = await visit("Walk-Through: Tom Goodman");
     const offered = await visit("Walk — Tom Goodman", { status: "proposed" });
     await visit("Linked already — Tom Goodman", { customer: cust });
     await visit("Done — Tom Goodman", { status: "completed" });

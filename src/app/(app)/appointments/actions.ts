@@ -18,7 +18,7 @@ import { WORK_DAY_MINUTES } from "@/lib/schedule/work-shape";
 import { jobNameFrom, jobWho, visitStreetOf } from "@/lib/job-name";
 import { createProposalCore, cleanSlots } from "@/lib/appointments/proposal";
 import { endAfterStart, keptEnd } from "@/lib/appointments/times";
-import { APPOINTMENT_STATUSES, APPOINTMENT_TYPES, INSPECTION_TYPES } from "@/lib/statuses";
+import { APPOINTMENT_STATUSES, APPOINTMENT_TYPES, INSPECTION_TYPES, isPickableAppointmentType } from "@/lib/statuses";
 import { briefNote, carriedNote, carryForInquiry } from "@/lib/inquiries/carry-intake-answers";
 import { coerceByPlaybook, orphanedAnswers, retiredAnswers, retiredOptions } from "@/lib/playbook/answers";
 import { playbookForForm } from "@/lib/playbook/parse";
@@ -27,6 +27,7 @@ import { runOnce } from "@/lib/offline/run-once";
 import { customerForInquiry } from "@/lib/actions/win-customer";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { DEFAULT_JOB_MINUTES } from "@/lib/schedule/job-block";
+import { putBackPlan, wontHappenVerdict } from "@/lib/appointments/wont-happen";
 
 /** The browser-computed ISO if present; otherwise build the instant in the ORG
  *  timezone — NEVER the server's UTC (the bare-string parse stored the wrong
@@ -48,13 +49,27 @@ async function resolveIso(
  *  walk-through's autosave stops retrying and says so instead). */
 export type Result = { ok: boolean; error?: string; id?: string; refused?: boolean };
 
-/** Spine guard for appointments.type (mirrors the 0051/0131 check constraint) — a bad
- *  value reads as a clean message instead of a raw Postgres constraint error. */
-function resolveType(formData: FormData, fallback: string): { type?: string; error?: string } {
-  const type = String(formData.get("type") ?? fallback);
-  if (!(APPOINTMENT_TYPES as readonly string[]).includes(type))
-    return { error: `Type must be one of: ${APPOINTMENT_TYPES.join(", ")}.` };
-  return { type };
+/** The one refusal for a kind nobody can pick (W2-06), in the picker's own words. (Not exported: a
+ *  "use server" file exports only async functions.) */
+const PICK_A_KIND = "Pick a kind: Walk-Through, Job, Service Call, Phone Call or Other.";
+
+/**
+ * THE KIND A NEW OR EDITED VISIT MAY CARRY (W2-06). Create and Propose Times take one of the five a
+ * person can pick (PICKABLE_APPOINTMENT_TYPES); an edit takes one of those, or the row's OWN stored
+ * kind unchanged (a Client Meeting whose time is moved stays a Client Meeting, never refused and
+ * never silently rewritten). Anything else is refused in the picker's words, never Postgres'. A form
+ * that sends no kind gets the fallback: Other for a new visit, the row's own kind for an edit.
+ */
+function resolveType(
+  formData: FormData,
+  fallback: string,
+  own?: string | null,
+): { type?: string; error?: string } {
+  const sent = String(formData.get("type") ?? "").trim();
+  const type = sent || own || fallback;
+  if (isPickableAppointmentType(type)) return { type };
+  if (own && type === own && (APPOINTMENT_TYPES as readonly string[]).includes(type)) return { type };
+  return { error: PICK_A_KIND };
 }
 
 
@@ -107,7 +122,8 @@ export async function createAppointment(formData: FormData): Promise<Result> {
   if (cust.error) return { ok: false, error: cust.error };
   const customerId = cust.customerId;
 
-  const typed = resolveType(formData, "appointment");
+  // No kind sent is Other (W2-06): today's plain "appointment", with no write-up nag after it.
+  const typed = resolveType(formData, "other");
   if (typed.error) return { ok: false, error: typed.error };
 
   const { data, error } = await supabase
@@ -153,8 +169,8 @@ export async function createAppointment(formData: FormData): Promise<Result> {
   return { ok: true, id: data.id };
 }
 
-/** "Inspect now" — the already-onsite path (Erik: "sometimes we're onsite already — too
- *  many steps today"). Creates a type='inspection' appointment starting NOW (status
+/** "Start A Walk-Through" (it was "Inspect now") — the already-onsite path (Erik: "sometimes we're
+ *  onsite already — too many steps today"). Creates a type='inspection' appointment starting NOW (status
  *  'scheduled'; filling in the capture is what makes it *done*), linked to the lead when
  *  launched from one, so the caller can route STRAIGHT to /appointments/<id> and start
  *  collecting field data. One tap from lead → capturing. */
@@ -211,11 +227,13 @@ export async function createInspectionNow(
          tapped the row's one-tap door, and got "Site inspection" — the third booking door off one
          lead, and the only one still discarding the declared kind. All three obey it now. */
       type: appointmentTypeFor((inq as { work_kind?: string | null } | null)?.work_kind),
+      // The stock title of a walk-through with no lead is the site visit's one word (W2-10); the
+      // STOCK lists below rename it once an address or a customer arrives.
       title: inq
         ? bookingTitle(workKind({ kind: "lead", workKind: (inq as { work_kind?: string | null }).work_kind }), inq.name)
-        : "Site inspection",
+        : "Walk-Through",
       starts_at: new Date().toISOString(), // now — an instant is an instant in any tz
-      status: "scheduled", // NOT completed: the capture (or "Mark inspection complete") finishes it
+      status: "scheduled", // NOT completed: the capture (or "Mark Walk-Through Done") finishes it
       // The WHOLE address, not just the street line — and the parts alongside it, so nothing
       // downstream has to re-parse a string to learn which city the work is in.
       location: formatFullAddress(inq?.address ?? null, inq?.city ?? null, inq?.state ?? null, inq?.zip ?? null) || inq?.address || null,
@@ -311,7 +329,9 @@ export async function createAppointmentProposal(
   const cust = await resolveCustomer(supabase, formData, ctx.userId);
   if (cust.error) return { ok: false, error: cust.error };
 
-  const typed = resolveType(formData, "quote");
+  // Offering a customer times is how a walk-through gets booked, so that is the kind when none is
+  // sent (it was 'quote', a kind nobody picks any more: W2-06).
+  const typed = resolveType(formData, "inspection");
   if (typed.error) return { ok: false, error: typed.error };
 
   // First slot is the tentative time (browser-computed ISO honors the user's tz).
@@ -447,7 +467,8 @@ export async function linkAppointmentTo(
 
   const { data: appt } = await supabase
     .from("appointments")
-    .select("id, title, location")
+    // type rides along (PROJECTION LAW): the new title follows the visit's kind, never a guess.
+    .select("id, title, location, type")
     .eq("id", id)
     .maybeSingle();
   if (!appt) return { ok: false, error: "Appointment not found." };
@@ -505,9 +526,12 @@ export async function linkAppointmentTo(
     patch.location = address;
     if (parts) Object.assign(patch, parts);
   }
-  const STOCK = ["site inspection", "inspection", "final inspection", "appointment", ""];
+  // The stock titles the create paths hand out, old spellings and new (W2-10's "Walk-Through"), so an
+  // old stock title still gets renamed. The new title follows the visit's kind (bookingTitle): a
+  // walk-through reads "Walk-Through: <name>"; a job, an Other visit, just the name.
+  const STOCK = ["site inspection", "inspection", "final inspection", "appointment", "walk-through", ""];
   if (name && STOCK.includes(String(appt.title ?? "").trim().toLowerCase())) {
-    patch.title = `Site inspection: ${name}`;
+    patch.title = bookingTitle(workKind({ kind: "appointment", type: (appt as { type?: string | null }).type ?? null }), name);
   }
 
   const { data: linked, error } = await supabase
@@ -558,8 +582,9 @@ export async function setAppointmentPlace(
     .eq("id", id)
     .maybeSingle();
 
-  // The stock titles the create paths hand out. A title a human chose is never touched.
-  const STOCK = ["site inspection", "inspection", "final inspection", "appointment", ""];
+  // The stock titles the create paths hand out, old spellings and new (W2-10). A title a human
+  // chose is never touched.
+  const STOCK = ["site inspection", "inspection", "final inspection", "appointment", "walk-through", ""];
   const isStock = STOCK.includes(String(existing?.title ?? "").trim().toLowerCase());
 
   const { data, error } = await supabase
@@ -788,9 +813,9 @@ async function cleanInspectionAnswers(
       (from) => from.select("schema, is_inspection, playbook").eq("id", templateId).maybeSingle(),
     );
     if (formErr) return { ok: false, error: dbError(formErr) };
-    if (!form) return { ok: false, error: "That inspection sheet no longer exists." };
+    if (!form) return { ok: false, error: "That walk-through sheet no longer exists." };
     if (!(form as { is_inspection?: boolean }).is_inspection)
-      return { ok: false, error: "That form isn't an inspection sheet." };
+      return { ok: false, error: "That form isn't a walk-through sheet." };
     // Coerce, THEN drop anything the rules make inapplicable. Both halves matter and for different
     // reasons: coerce is the type contract, clearing is the truth contract. The client already
     // clears on change, but this row is writable through RLS directly — a payload could set
@@ -975,7 +1000,11 @@ export async function updateAppointment(id: string, formData: FormData): Promise
   const endErr = endAfterStart(startIso, endIso);
   if (endErr) return { ok: false, error: endErr };
 
-  const typed = resolveType(formData, "appointment");
+  // THE ROW'S OWN KIND (W2-06): an edit may keep a kind nobody can pick any more (a Client Meeting
+  // stays one), so the guard needs to know what is stored. RLS scopes the read; a missing row is
+  // the zero-row write below, said in words.
+  const { data: cur } = await supabase.from("appointments").select("type").eq("id", id).maybeSingle();
+  const typed = resolveType(formData, "other", (cur as { type?: string | null } | null)?.type ?? null);
   if (typed.error) return { ok: false, error: typed.error };
 
   const { data: wroteAppt, error } = await supabase
@@ -1389,6 +1418,129 @@ export async function deleteAppointment(id: string): Promise<Result> {
   revalidatePath("/planner"); // My Day shows today's appointments — keep it in sync
   revalidatePath("/inspections"); // the Sales → Inspections tab reads appointments too
   return { ok: true };
+}
+
+/** The paths every Won't Happen / Put It Back write revalidates: everywhere a visit shows. */
+function revalidateVisit(id: string) {
+  revalidatePath("/schedule");
+  revalidatePath("/planner");
+  revalidatePath("/inspections");
+  revalidatePath(`/appointments/${id}`);
+}
+
+/**
+ * WON'T HAPPEN (W2-11) — the visit page's one door for a visit that isn't going ahead, in place of
+ * the ✗ Cancel and the top-row Delete. The rule is lib/appointments/wont-happen: DELETED only when
+ * nothing was captured on it, no estimate was written from it, no invoice points at it and no
+ * pick-a-time link is waiting; otherwise CANCELLED through setAppointmentStatus (the pending link is
+ * withdrawn and said so, the Google event goes), with the previous status for Undo.
+ *
+ * Every fact is read again here, at the write: the page's confirm is a hint, and a capture saved in
+ * between wins. The answers come through the appointment_answers view (readViaView), never the table.
+ * A fact that can't be read counts as "something is there". The delete lands only on the row as it
+ * was read (its updated_at): a save that slipped in after the read turns it into a cancel instead.
+ */
+export async function wontHappenAppointment(
+  id: string,
+): Promise<Result & { did?: "deleted" | "cancelled"; previousStatus?: string; note?: string }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+
+  const { data: row, error: rowErr } = await supabase
+    .from("appointments")
+    // PROJECTION LAW: the status it's in, what's on it, and the stamp the delete is checked against.
+    .select("id, status, capture, updated_at")
+    .eq("id", id)
+    .maybeSingle();
+  if (rowErr) return { ok: false, error: dbError(rowErr) };
+  if (!row) return { ok: false, error: "That visit isn't there any more. Reload to see the schedule as it is." };
+  const r = row as { status: string; capture: unknown; updated_at: string | null };
+  if (r.status === "completed")
+    return { ok: false, error: "This visit is marked Done, so it did happen. Edit Details can change or remove it." };
+  if (r.status === "cancelled") return { ok: false, error: "This visit is already marked Cancelled." };
+
+  const [answersRead, invoices, links] = await Promise.all([
+    readViaView<{ inspection_answers: unknown }>(supabase, "answers", (from) =>
+      from.select("inspection_answers").eq("id", id).maybeSingle(),
+    ),
+    supabase.from("invoices").select("id", { count: "exact", head: true }).eq("appointment_id", id),
+    supabase.from("schedule_proposals").select("id", { count: "exact", head: true }).eq("appointment_id", id).eq("status", "pending"),
+  ]);
+  const verdict = wontHappenVerdict({
+    capture: r.capture,
+    answers: (answersRead.data as { inspection_answers?: unknown } | null)?.inspection_answers ?? null,
+    answersUnread: !!answersRead.error,
+    invoiceCount: invoices.error ? null : (invoices.count ?? 0),
+    pendingLinks: links.error ? null : (links.count ?? 0),
+  });
+
+  if (verdict === "delete") {
+    // BEFORE the row goes (it reads google_event_id off the row). Fire-safe.
+    await deleteCalendarItem("appointment", id);
+    const del = supabase.from("appointments").delete().eq("id", id).eq("status", r.status);
+    const { data: gone, error } = await (r.updated_at ? del.eq("updated_at", r.updated_at) : del.is("updated_at", null)).select("id");
+    if (error) return { ok: false, error: dbError(error) };
+    if (gone?.length) {
+      revalidateVisit(id);
+      return { ok: true, did: "deleted" };
+    }
+    // Zero rows: the visit changed after it was read (a capture, a status) or it is gone. One that is
+    // gone is said; one somebody marked Done or Cancelled in the meantime keeps what they did; one
+    // still booked is cancelled, never deleted on a stale read.
+    const { data: still } = await supabase.from("appointments").select("id, status").eq("id", id).maybeSingle();
+    if (!still) return { ok: false, error: "That visit isn't there any more. Reload to see the schedule as it is." };
+    const now = (still as { status?: string }).status;
+    if (now !== "scheduled" && now !== "proposed")
+      return { ok: false, error: `That visit changed a moment ago: it's marked ${now === "completed" ? "Done" : "Cancelled"} now. Reload to see it.` };
+  }
+
+  const res = await setAppointmentStatus(id, "cancelled");
+  if (!res.ok) return res;
+  revalidateVisit(id);
+  return { ok: true, did: "cancelled", previousStatus: res.previousStatus, ...(res.note ? { note: res.note } : {}) };
+}
+
+/**
+ * PUT IT BACK ON THE SCHEDULE (W2-11): a cancelled visit had no way back on its page. It comes back
+ * Scheduled on its own day when that day is still ahead (today counts); a day that has passed, or
+ * none, comes back WAITING FOR A DAY (starts_at and ends_at cleared, 0368), on the rail rather than
+ * sitting on a past day. Only a cancelled visit: anything else is said, never quietly re-stamped.
+ */
+export async function putVisitBackOnSchedule(id: string): Promise<Result & { message?: string }> {
+  const ctx = await requireStaff();
+  if ("error" in ctx) return { ok: false, error: ctx.error };
+  const supabase = ctx.supabase;
+  const { data: row, error: rowErr } = await supabase.from("appointments").select("id, status, starts_at").eq("id", id).maybeSingle();
+  if (rowErr) return { ok: false, error: dbError(rowErr) };
+  if (!row || (row as { status?: string }).status !== "cancelled")
+    return { ok: false, error: "Only a cancelled visit can go back on the schedule." };
+
+  const { data: orgRow } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
+  const tz = getOrgSettings((orgRow as { settings?: unknown } | null)?.settings).timezone;
+  const startsAt = (row as { starts_at?: string | null }).starts_at ?? null;
+  const plan = putBackPlan(startsAt ? todayStrInTz(tz, new Date(startsAt)) : null, todayStrInTz(tz));
+
+  const { data: wrote, error } = await supabase
+    .from("appointments")
+    .update({
+      status: "scheduled",
+      ...(plan.keepDay ? {} : { starts_at: null, ends_at: null }),
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", id)
+    .eq("status", "cancelled")
+    .select("id");
+  if (error) {
+    // A database without 0368 still holds starts_at NOT NULL: said plainly, nothing changed.
+    if ((error as { code?: string }).code === "23502")
+      return { ok: false, error: "Its day has passed, and a visit can't wait without a day until a quick database update is done. It stays Cancelled." };
+    return { ok: false, error: dbError(error) };
+  }
+  if (!wrote?.length) return { ok: false, error: "Only a cancelled visit can go back on the schedule." };
+  await pushCalendarItem("appointment", id); // back on the phone's calendar when it has a day (fire-safe)
+  revalidateVisit(id);
+  return { ok: true, message: plan.message };
 }
 
 /**

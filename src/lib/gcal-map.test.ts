@@ -143,7 +143,8 @@ describe("apptEventBody", () => {
 
   it("prefixes non-generic types, defaults end to +1h, tags cn", () => {
     const b = apptEventBody(appt, { linkUrl: "https://app/appointments/a1" });
-    expect(b.summary).toBe("[Inspection] Rough-in walk");
+    // The site visit's one word (W2-10), the same label the app draws.
+    expect(b.summary).toBe("[Walk-Through] Rough-in walk");
     expect(b.end.dateTime).toBe("2026-07-21T17:00:00.000Z");
     expect(b.description).toContain("bring ladder");
     expect(b.description).toContain("https://app/appointments/a1");
@@ -152,6 +153,10 @@ describe("apptEventBody", () => {
 
   it("plain 'appointment' type gets no prefix; the type label comes from the statuses.ts spine", () => {
     expect(apptEventBody({ ...appt, type: "appointment" }).summary).toBe("Rough-in walk");
+    // 'other' is the new default booking (W2-06) and means no kind, the same as 'appointment': every
+    // new visit would otherwise reach Google as "[Other] …".
+    expect(apptEventBody({ ...appt, type: "other" }).summary).toBe("Rough-in walk");
+    expect(apptEventBody({ ...appt, type: null }).summary).toBe("Rough-in walk");
     // Same label the app renders (appointmentTypeLabel) — pushed events must not drift
     // into "[final inspection]" while the app says "Final inspection".
     expect(apptEventBody({ ...appt, type: "final_inspection" }).summary).toBe("[Final Inspection] Rough-in walk");

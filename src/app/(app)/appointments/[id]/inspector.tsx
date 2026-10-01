@@ -995,7 +995,7 @@ export function Inspector({
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2 text-sm font-medium">
             <ClipboardList className="h-4 w-4 text-slate-400" />
-            Walk-through
+            Walk-Through
           </div>
           {/* A crew lead picks the sheet only while none is saved: switching a saved one clears
               every answer, and that is the office's call. */}

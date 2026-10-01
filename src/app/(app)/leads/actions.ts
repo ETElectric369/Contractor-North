@@ -31,7 +31,6 @@ import { saveQuote } from "../quotes/actions";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { INTAKE_BUCKET, intakePaths, isOwnIntakePath } from "@/lib/playbook/uploads";
 import { hasCaptureData } from "@/lib/inspections";
-import { playbookForForm } from "@/lib/playbook/parse";
 import { briefNote, carriedNote, carryForInquiry } from "@/lib/inquiries/carry-intake-answers";
 import { runPlanBrief } from "@/lib/plan-brief-run";
 import { rateLimited } from "@/lib/rate-limit";
@@ -48,6 +47,9 @@ export type Result = {
   /** Firm inspection booking: WHEN it landed (org-local date + time and the UTC instant), so a
    *  caller — the assistant above all — reads back the real time instead of assuming one. */
   data?: { starts_at: string; date: string; time: string };
+  /** Save As Contact (target 'customer'): the card the lead now carries, and whether the book
+   *  already had them (linked to it) or a new card was made, so the toast says which (W2-07). */
+  contact?: { id: string; name: string; existing: boolean };
 };
 
 function orNull(s: string): string | null {
@@ -70,11 +72,44 @@ async function orgTimezone(supabase: SupabaseClient): Promise<string> {
   return getOrgSettings((data as { settings?: unknown } | null)?.settings).timezone;
 }
 
-/** Fields shared by create + update, read from a FormData. */
+/**
+ * RESIDENTIAL OR COMMERCIAL IS WORKED OUT, NOT ASKED (W2-07). inquiries.type is read in one place,
+ * when a lead becomes a customer, and 43 of 43 production leads were residential with one company
+ * among them: the New Lead form's "Residential or commercial" asked every time for a fact the
+ * Company box already says. A lead with a company is commercial; one without is residential. A type
+ * a caller sends (Nort's inquiry.create can) wins. On an EDIT the inference may only add to the
+ * stored type, never take it away — see nextLeadTypeOnEdit.
+ */
+function inferredLeadType(companyName: string | null): "commercial" | "residential" {
+  return companyName ? "commercial" : "residential";
+}
+const LEAD_TYPES: readonly string[] = ["residential", "commercial", "industrial"];
+
+/**
+ * AN EDIT ONLY EVER ADDS TO THE TYPE, NEVER TAKES IT AWAY.
+ *
+ * Working the type out from the Company box is right for a NEW lead, where there is nothing to
+ * lose. Running that same inference on every EDIT lost something: a lead stored as Commercial with
+ * its Company box blank — one Nort created with the type spelled out, or one made on the old form
+ * where "Residential or commercial" was a question — was quietly reset to Residential by any edit
+ * at all, even one that only fixed the phone number. The type is read when the lead becomes a
+ * customer, so the customer card was then minted Residential, and nothing anywhere said so.
+ *
+ * So an edit may only move the type UP, or fill it IN:
+ *   a Company is there -> Commercial, unless it already is (or is Industrial)
+ *   no Company         -> Residential only when the lead has no type at all
+ *   anything else       -> leave the stored type alone (null here = write nothing)
+ */
+function nextLeadTypeOnEdit(storedType: string | null, companyName: string | null): "commercial" | "residential" | null {
+  if (storedType === "industrial") return null;
+  if (companyName) return storedType === "commercial" ? null : "commercial";
+  return storedType === null ? "residential" : null;
+}
+
+/** Fields shared by create + update, read from a FormData. (No `type`: see inferredLeadType.) */
 function inquiryFields(formData: FormData) {
   return {
     company_name: emptyToNull(formData.get("company_name")),
-    type: String(formData.get("type") ?? "residential"),
     email: emptyToNull(formData.get("email")),
     phone: orNull(formatPhone(String(formData.get("phone") ?? ""))),
     address: emptyToNull(formData.get("address")),
@@ -95,6 +130,9 @@ export async function createInquiry(formData: FormData): Promise<Result & { note
   const supabase = ctx.supabase;
 
   const fields = inquiryFields(formData);
+  // A sent type wins (Nort's inquiry.create); otherwise the Company box decides (inferredLeadType),
+  // after a known customer's company has been carried across (below).
+  const sentType = String(formData.get("type") ?? "").trim();
   // Fragment-first: a bare phone number is a valid lead (the missed-call case) —
   // default the name instead of blocking the capture.
   let name = String(formData.get("name") ?? "").trim();
@@ -117,8 +155,8 @@ export async function createInquiry(formData: FormData): Promise<Result & { note
   //
   // `inquiries.next_follow_up_at` already IS the follow-up list: /leads orders by it and the
   // Needs-action inbox feeds off it. So the lead carries its own date, and the calendar keeps
-  // meaning "things I agreed to be somewhere for".
-  const tz = await orgTimezone(supabase);
+  // meaning "things I agreed to be somewhere for". Nothing here needs the company's clock any more,
+  // so creating a lead stopped reading Settings for a timezone it never used.
 
   /**
    * THE APP ALREADY KNOWS THIS PERSON (Erik, entering his real lead list: "lack of fluidity and
@@ -164,6 +202,7 @@ export async function createInquiry(formData: FormData): Promise<Result & { note
       name,
       ...fields,
       ...carried,
+      type: LEAD_TYPES.includes(sentType) ? sentType : inferredLeadType(fields.company_name ?? carried.company_name ?? null),
       customer_id: linkedCustomerId,
       source: "manual",
       status: "new",
@@ -187,7 +226,7 @@ export async function createInquiry(formData: FormData): Promise<Result & { note
   return { ok: true, id: data.id, note: link_note };
 }
 
-export async function updateInquiry(id: string, formData: FormData): Promise<Result> {
+export async function updateInquiry(id: string, formData: FormData): Promise<Result & { note?: string }> {
   const ctx = await requireStaff();
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
@@ -206,6 +245,33 @@ export async function updateInquiry(id: string, formData: FormData): Promise<Res
     .select("id");
   if (error) return { ok: false, error: dbError(error) };
   if (!data?.length) return { ok: false, error: "That lead isn't available." };
+
+  // THE TYPE FOLLOWS THE COMPANY BOX, written apart, and only UPWARDS (nextLeadTypeOnEdit): the
+  // stored type is read first, so an edit can add Commercial or fill in a blank without ever
+  // demoting the answer somebody already gave. Nothing to add means nothing is written at all.
+  const sentType = String(formData.get("type") ?? "").trim();
+  const { data: storedRow } = await supabase.from("inquiries").select("type").eq("id", id).maybeSingle();
+  const storedType = (storedRow as { type?: string | null } | null)?.type ?? null;
+  const nextType = LEAD_TYPES.includes(sentType) ? sentType : nextLeadTypeOnEdit(storedType, fields.company_name);
+  if (nextType && nextType !== storedType) {
+    // The Industrial guard lives at the write too, not only in the read above — a rule at one read
+    // path is a convention, not a boundary. Zero rows here is that guard holding, not a failed
+    // save: the edit itself landed above. (A type with no value yet is not Industrial: `neq` alone
+    // would skip it, since NULL <> 'industrial' is not true.)
+    const { error: typeErr } = await supabase
+      .from("inquiries")
+      .update({ type: nextType })
+      .eq("id", id)
+      .or("type.is.null,type.neq.industrial")
+      .select("id");
+    if (typeErr) return { ok: false, error: `The lead saved, but its residential or commercial type didn't: ${dbError(typeErr)}` };
+    // NOTHING SILENT. Filling in a blank needs no announcement; changing an answer that was
+    // already there does, because that answer is what the customer card gets minted from.
+    if (storedType) {
+      revalidatePath("/leads");
+      return { ok: true, note: `Saved. This lead is now ${nextType === "commercial" ? "Commercial" : "Residential"}, because of its Company.` };
+    }
+  }
 
   revalidatePath("/leads");
   return { ok: true };
@@ -441,7 +507,13 @@ export async function convertInquiry(
   // "Save as contact" on an already-converted lead just OPENS the card it already has — the
   // guard below exists to stop double-minting, and opening isn't minting.
   if (target === "customer" && inq.customer_id) {
-    return { ok: true, id: inq.customer_id, redirect: `/crm/${inq.customer_id}` };
+    const { data: card } = await supabase.from("customers").select("name").eq("id", inq.customer_id).maybeSingle();
+    return {
+      ok: true,
+      id: inq.customer_id,
+      redirect: `/crm/${inq.customer_id}`,
+      contact: { id: inq.customer_id, name: String((card as { name?: string | null } | null)?.name ?? inq.name ?? ""), existing: true },
+    };
   }
   if (inq.converted_at && target !== "inspection" && target !== "customer") {
     return { ok: false, error: "This lead was already converted — open its customer or estimate instead." };
@@ -533,7 +605,7 @@ export async function convertInquiry(
     // landing the inspection at 2 AM Pacific).
     const startDate = opts.startDate || ymdAddDays(todayStrInTz(tz), 2);
     const startsAtIso = tzDateTimeUtc(startDate, /^\d{2}:\d{2}$/.test(opts.startTime ?? "") ? opts.startTime! : "09:00", tz);
-    if (!startsAtIso) return { ok: false, error: "Pick a valid inspection date." };
+    if (!startsAtIso) return { ok: false, error: "Pick a valid day for the walk-through." };
     const carry = await carryForInquiry(supabase, inq);
     const kindChosen = workKind({ kind: "lead", workKind: (inq as { work_kind?: string | null }).work_kind });
 
@@ -683,6 +755,9 @@ export async function convertInquiry(
   }
   let customerId = opts.customerId || null;
   let mintedFromLead = false; // the card was made from this lead's own name/company/type just now
+  // The name on the card the lead lands on, when the book already had them (Save As Contact says
+  // "Linked To <name>", never a silent link to somebody else's card).
+  let matchedName: string | null = null;
   if (!customerId) {
     // CROSSCHECK THE BOOK before minting (audit 7): "Save as contact" on a lead from an
     // EXISTING customer silently minted a second card — future jobs then split across the two.
@@ -692,6 +767,7 @@ export async function convertInquiry(
       { name: inq.name, email: inq.email, phone: inq.phone },
       (book ?? []) as DupCustomer[],
     );
+    if (customerId) matchedName = ((book ?? []) as DupCustomer[]).find((c) => c.id === customerId)?.name ?? null;
   }
   if (!customerId) {
     const { data: cust, error: cErr } = await supabase
@@ -828,7 +904,15 @@ export async function convertInquiry(
 
   revalidatePath("/leads");
   revalidatePath("/crm");
-  return { ok: true, id: customerId ?? undefined, redirect };
+  return {
+    ok: true,
+    id: customerId ?? undefined,
+    redirect,
+    // Save As Contact says which happened: a new card from this lead, or the card the book had.
+    ...(isContactOnly && customerId
+      ? { contact: { id: customerId, name: String((mintedFromLead ? inq.name : matchedName) ?? inq.name ?? ""), existing: !mintedFromLead } }
+      : {}),
+  };
 }
 
 /**

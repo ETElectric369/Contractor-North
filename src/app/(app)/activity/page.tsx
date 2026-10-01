@@ -63,7 +63,8 @@ export default async function ActivityPage() {
   for (const q of quotes.data ?? []) items.push({ when: q.created_at as string, icon: "quote", text: `Quote ${q.quote_number} (${q.status})`, href: `/quotes/${q.id}` });
   for (const iv of invoices.data ?? []) items.push({ when: iv.created_at as string, icon: "invoice", text: `Invoice ${iv.invoice_number} (${iv.status})`, href: `/billing/${iv.id}` });
   // Deep-link to the day the visit HAPPENS (schedule day drill), not a generic list.
-  for (const a of appts.data ?? []) items.push({ when: a.created_at as string, icon: "appt", text: `${a.type === "inspection" ? "Inspection" : "Appointment"} booked — ${a.title}`, href: a.starts_at ? `/schedule?view=day&date=${todayStrInTz(DEFAULT_TIMEZONE, new Date(a.starts_at as string))}` : "/schedule" });
+  // The site visit's one word (W2-10): "Walk-through booked — <title>".
+  for (const a of appts.data ?? []) items.push({ when: a.created_at as string, icon: "appt", text: `${a.type === "inspection" ? "Walk-through" : "Appointment"} booked — ${a.title}`, href: a.starts_at ? `/schedule?view=day&date=${todayStrInTz(DEFAULT_TIMEZONE, new Date(a.starts_at as string))}` : "/schedule" });
   for (const t of (tasks.data ?? []) as any[]) if (t.completed_at) items.push({ when: t.completed_at, icon: "task", text: `Task done — ${t.title}` });
   for (const e of (times.data ?? []) as any[]) {
     if (!e.clock_out) continue;

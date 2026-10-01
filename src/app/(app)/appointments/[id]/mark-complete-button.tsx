@@ -6,19 +6,21 @@ import { CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/toast";
 import { setAppointmentStatus } from "../actions";
+import { useStatusUndo } from "./visit-header-actions";
 
-/** The capture page's status affordance — flips the appointment to `completed` so the
- *  Inspections tab's buckets stay truthful (a walked-through inspection stops reading
- *  as "upcoming" and lands in "To write up" until its estimate exists). */
-export function MarkCompleteButton({ id, label = "Mark complete" }: { id: string; label?: string }) {
+/** The visit page's main button on a walk-through that is booked (W2-11): flips it to `completed`
+ *  so the Walk-Throughs tab's buckets stay truthful (a walked-through visit stops reading as
+ *  "upcoming" and lands in "To write up" until its estimate exists). 44px, primary: at most one main
+ *  button sits in the header, and on a booked walk-through this is it. Said in a toast, with Undo:
+ *  the page has no other way back from Done. */
+export function MarkCompleteButton({ id, label = "Mark Walk-Through Done" }: { id: string; label?: string }) {
   const router = useRouter();
   const toast = useToast();
+  const undo = useStatusUndo(id);
   const [pending, start] = useTransition();
 
   return (
     <Button
-      size="sm"
-      variant="outline"
       disabled={pending}
       onClick={() =>
         start(async () => {
@@ -27,7 +29,7 @@ export function MarkCompleteButton({ id, label = "Mark complete" }: { id: string
             toast(res.error ?? "Couldn't update the status — try again.", "error");
             return;
           }
-          toast("Marked complete", "success");
+          toast(res.note ? `Marked Done. ${res.note}` : "Marked Done", "success", undo(res.previousStatus));
           router.refresh();
         })
       }

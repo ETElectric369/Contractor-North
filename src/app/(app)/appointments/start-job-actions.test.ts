@@ -84,7 +84,7 @@ function fake() {
     if (q.table === "time_entries" && q.filters.some(([op]) => op === "gte")) return { data: state.closed, error: null };
     if (q.table === "time_entries") return { data: state.open.length ? state.open.shift() : null, error: null };
     if (q.table === "jobs" && f("id")) {
-      return { data: { id: f("id"), job_number: "J-056", name: "Inspection — Tom Goodman" }, error: null };
+      return { data: { id: f("id"), job_number: "J-056", name: "3245 West Lake Boulevard" }, error: null };
     }
     if (q.table === "jobs" && f("customer_id")) {
       // The read the page and the link share: this customer, not cancelled, made inside [gte, lt).
@@ -167,7 +167,7 @@ const NOON = "2026-09-25T19:00:00.000Z";
 
 const tomVisit = {
   id: "appt-tom",
-  title: "Inspection — Tom Goodman",
+  title: "Walk-Through: Tom Goodman",
   status: "completed",
   job_id: null,
   starts_at: "2026-09-25T17:00:00.000Z",
@@ -423,7 +423,7 @@ describe("only the office starts a job", () => {
     const res = await askOfficeToStartJob("appt-tom");
     expect(res).toMatchObject({ ok: true, message: "The office has been asked to start a job for this visit." });
     const body = spies.ring.mock.calls[0][2].body as string;
-    expect(body).toBe("Brian asks for a job on Inspection — Tom Goodman, a visit that is done, so the work can go on. Start it from the visit.");
+    expect(body).toBe("Brian asks for a job on Walk-Through: Tom Goodman, a visit that is done, so the work can go on. Start it from the visit.");
     expect(body).not.toContain(" is at ");
     expect(body).not.toContain("clock in");
   });
@@ -432,7 +432,7 @@ describe("only the office starts a job", () => {
     state.visit = { ...tomVisit, status: "scheduled", starts_at: new Date().toISOString(), ends_at: null };
     const res = await askOfficeToStartJob("appt-tom");
     expect(res).toMatchObject({ ok: true, message: "The office has been asked. Once they start the job, you can clock in right here." });
-    expect(spies.ring.mock.calls[0][2].body).toBe("Brian is at Inspection — Tom Goodman and can't clock in until it has a job. Start it from the visit.");
+    expect(spies.ring.mock.calls[0][2].body).toBe("Brian is at Walk-Through: Tom Goodman and can't clock in until it has a job. Start it from the visit.");
   });
 
   it("with nobody in the office to ring, it says call them instead", async () => {

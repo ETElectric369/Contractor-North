@@ -87,11 +87,13 @@ describe("the Off line on every record page", () => {
   });
 
   it("the walk-throughs list with Leads off names no button it doesn't draw", () => {
-    // NewInspectionButton (Inspect now) renders only with Leads on, so the empty state's words follow it.
+    // NewInspectionButton (Start A Walk-Through) renders only with Leads on, so the empty state's
+    // words follow it (W2-10: the site visit's one word).
     const src = readFileSync(join(ROOT, "inspections/page.tsx"), "utf8");
-    const at = src.indexOf('title="No open inspections"');
+    const at = src.indexOf('title="No open walk-throughs"');
+    expect(at).toBeGreaterThan(-1);
     const block = src.slice(at, src.indexOf("</EmptyState>", at));
-    expect(block).toMatch(/description=\{leadsOn \? "[^"]*Inspect now[^"]*" : "Nothing open right now\."\}/);
+    expect(block).toMatch(/description=\{leadsOn \? "[^"]*Start A Walk-Through[^"]*" : "Nothing open right now\."\}/);
     expect(block).toContain("{leadsOn && <NewInspectionButton");
   });
 
