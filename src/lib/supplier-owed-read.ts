@@ -1,37 +1,31 @@
 /**
  * THE ONE READ BEHIND THE ONE ANSWER (8a982483).
  *
- * Every screen that says what the company owes its suppliers now calls `whatISupplierOwed`, and
- * this is how a reader that is NOT a page gets the same figure: Nort, and anything else that has a
- * Supabase client and a question rather than a rendered page.
+ * Every screen that says what the company owes its suppliers calls `whatISupplierOwed`, and this is
+ * how a reader that is NOT a page gets the same figure: Nort, and anything else that has a Supabase
+ * client and a question rather than a rendered page.
  *
  * WHY THIS FILE HAD TO EXIST. Nort was the worst reader in the tree. `list_bills` advertised itself
  * for "how much do I owe suppliers" and answered it with at most twenty rows of a hundred and
  * nineteen, newest first, free-text supplier, no account join, no supplier documents, no
  * aggregation - so he added up a truncated list of spellings and said the total out loud. A wrong
- * card is bad; a wrong sentence from the assistant Erik asks and then acts on is worse, because
+ * card is bad; a wrong sentence from the assistant Erik asks and then ACTS on is worse, because
  * there is nothing on screen beside it to argue with.
  *
- * `src/lib/assistant-tools.ts` reads no supplier_accounts, supplier_aliases, supplier_invoices or
- * supplier_payments table anywhere, so Nort had no route to the question at all. He has one now,
- * and it is the same one.
+ * IT MAKES THE SAME CALL /bills MAKES, deliberately. `supplierDocumentRows` is the reconcile read
+ * the page and My Day both go through: it resolves identity, parses the invoice numbers off the
+ * bills' own notes and lines, and runs the one covering walk. Reaching the figure a second way -
+ * even a careful second way - is exactly how this bug was built, so Nort does not get his own
+ * arithmetic, he gets the page's.
  *
- * EVERY READ IS ORG-FILTERED. My SQL bypasses RLS, so `org_id` is on every query here: three
- * companies share this database and a balance that reached across them would be the worst bug in
- * the app.
+ * EVERY READ IS ORG-FILTERED. Three companies share this database and a balance that reached across
+ * them would be the worst bug in the app.
  */
 
+import { readSupplierDocuments, supplierDocumentRows } from "@/app/(app)/bills/supplier-papers";
 import { supplierBalance, type SupplierAccountRow } from "@/app/(app)/bills/supplier-balance";
 import { todayStrInTz } from "@/lib/tz";
-import {
-  indexSupplierIdentity,
-  resolveSupplierPapers,
-  supplierCoverage,
-  whatIBoughtNotSettled,
-  whatISupplierOwed,
-  type BoughtNotSettled,
-  type WhatISupplierOwed,
-} from "@/lib/supplier-owed";
+import { whatIBoughtNotSettled, whatISupplierOwed, type BoughtNotSettled, type WhatISupplierOwed } from "@/lib/supplier-owed";
 
 export interface SupplierOwedRead {
   /** (a) What the company owes its suppliers. THE one-number answer. */
@@ -45,7 +39,8 @@ export interface SupplierOwedRead {
 }
 
 /**
- * BOTH FIGURES FOR ONE COMPANY, from the same functions every screen reads.
+ * BOTH FIGURES FOR ONE COMPANY, from the same functions and the same reconcile read every screen
+ * uses.
  *
  * It returns the whole answer rather than a number, so a caller can say which question it is
  * quoting and name the papers that are not on an account yet - the two things the screens were
@@ -58,17 +53,21 @@ export async function readSupplierOwed(supabase: any, orgId: string): Promise<Su
     supabase.from("organizations").select("settings").eq("id", orgId).maybeSingle(),
     supabase.from("supplier_accounts").select("id, name, account_number, branch_code, on_account").eq("org_id", orgId).limit(500),
     supabase.from("supplier_aliases").select("alias, supplier_account_id").eq("org_id", orgId).limit(2000),
+    // notes AND the line descriptions: the invoice number a ticket carries is parsed out of them
+    // (readBillInvoice), because `bills.supplier_invoice_number` is null on every scanned ticket.
+    // Without them a statement's number could not mark the tickets inside it covered.
     supabase
       .from("bills")
-      .select("id, supplier, supplier_account_id, amount, status, bill_date, is_statement, superseded_by_bill_id")
+      .select(
+        "id, supplier, supplier_account_id, bill_number, supplier_invoice_number, amount, status, bill_date, job_id, is_statement, superseded_by_bill_id, notes, bill_line_items(description)",
+      )
       .eq("org_id", orgId)
       .is("superseded_by_bill_id", null)
       .limit(5000),
-    supabase
-      .from("supplier_invoices")
-      .select("id, supplier_account_id, invoice_number, kind, invoice_date, total, open_balance, closed, discount_amount, discount_by")
-      .eq("org_id", orgId)
-      .limit(5000),
+    readSupplierDocuments(supabase, orgId).then(
+      (r) => r,
+      (error: unknown) => ({ data: null, error, waitReady: false }),
+    ),
     supabase.from("bill_supplier_invoices").select("bill_id, supplier_invoice_id").eq("org_id", orgId).limit(5000),
     supabase.from("supplier_payments").select("id, supplier_account_id, amount, paid_on, method, voided_at").eq("org_id", orgId).limit(2000),
   ]);
@@ -92,48 +91,29 @@ export async function readSupplierOwed(supabase: any, orgId: string): Promise<Su
   const tz = (orgRes?.data as { settings?: { timezone?: string } } | null)?.settings?.timezone ?? "America/Los_Angeles";
   const today = todayStrInTz(tz);
 
-  // ── IDENTITY, THEN THE ONE COVERING WALK ───────────────────────────────────────────────────
-  const index = indexSupplierIdentity({
-    accounts: accounts.map((a) => ({ id: a?.id, name: a?.name })),
-    aliases,
-  });
-  const papers = bills.map((b) => ({
-    id: String(b.id),
-    supplierAccountId: b.supplier_account_id ?? null,
-    supplier: b.supplier ?? null,
-    amount: b.amount,
-    status: b.status ?? null,
-  }));
-  const identity = resolveSupplierPapers(papers, index);
-
-  const linked = new Map<string, Set<string>>();
-  for (const l of links) {
-    const doc = String(l?.supplier_invoice_id ?? "");
-    const bill = String(l?.bill_id ?? "");
-    if (!doc || !bill) continue;
-    linked.set(doc, (linked.get(doc) ?? new Set<string>()).add(bill));
-  }
-  const coverage = supplierCoverage({
-    documents: documents.map((d) => ({
-      id: String(d.id),
-      supplierAccountId: d.supplier_account_id ?? null,
-      closed: d.closed === true,
-    })),
+  // ── THE PAGE'S OWN RECONCILE READ: identity, the number parse, the one covering walk ────────
+  //
+  // A LOST LINKS READ MARKS NOTHING SETTLED, the same gate /bills uses: a bill covered only by a
+  // Record link would look open again, and the figure would quietly go UP with nothing saying why.
+  // Leaning toward money he may still owe is the lean every figure in this app takes.
+  const linksUnread = failed.includes("which paper covers which bill");
+  const {
+    rows: documentRows,
     identity,
-    linked,
-    // THE NUMBER-CARRYING ROUTE IS NOT READ HERE, and this is said out loud rather than left to be
-    // discovered: it needs the bills' notes and line descriptions, which is a far heavier read, and
-    // leaving it out can only make a ticket look STILL OWED that a supplier's closed paper covers.
-    // Nort's figure leans the way every figure in this app leans - toward money he may still owe -
-    // and /bills, which does read it, is the screen he checks against.
-    carrying: null,
-    papers,
+    coverage,
+  } = supplierDocumentRows({
+    documents,
+    bills,
+    links: linksUnread ? [] : links,
+    aliasRows: aliases,
+    accountRows: accounts,
   });
+  const settledBySupplier = linksUnread ? new Set<string>() : coverage.settledBySupplier;
 
-  // ── EACH ACCOUNT'S OWN FIGURE, by the one function /bills reads ────────────────────────────
-  const docsOf = new Map<string, any[]>();
-  for (const d of documents) {
-    const id = String(d?.supplier_account_id ?? "");
+  // ── EACH ACCOUNT'S OWN FIGURE, by the one function /bills reads ─────────────────────────────
+  const docsOf = new Map<string, typeof documentRows>();
+  for (const d of documentRows) {
+    const id = String(d.supplierAccountId ?? "");
     if (!id) continue;
     docsOf.set(id, [...(docsOf.get(id) ?? []), d]);
   }
@@ -157,11 +137,11 @@ export async function readSupplierOwed(supabase: any, orgId: string): Promise<Su
           billDate: b.bill_date ?? null,
           amount: Number(b.amount) || 0,
           status: String(b.status ?? ""),
-          jobId: null,
+          jobId: b.job_id ?? null,
           jobName: null,
-          invoiceNumber: null,
+          invoiceNumber: b.supplier_invoice_number ?? null,
           isStatement: !!b.is_statement,
-          settledBySupplier: coverage.settledBySupplier.has(String(b.id)),
+          settledBySupplier: settledBySupplier.has(String(b.id)),
         })),
       payments: payments
         .filter((p) => String(p?.supplier_account_id ?? "") === id)
@@ -175,24 +155,7 @@ export async function readSupplierOwed(supabase: any, orgId: string): Promise<Su
           voided: !!p.voided_at,
         })),
       // ABSENT, NOT EMPTY, when we hold none: one row is what switches an account to model B.
-      ...(own.length
-        ? {
-            supplierInvoices: own.map((d) => ({
-              id: String(d.id),
-              invoiceNumber: String(d.invoice_number ?? ""),
-              kind: String(d.kind ?? "invoice"),
-              invoiceDate: d.invoice_date ?? null,
-              dueDate: null,
-              jobNameRaw: null,
-              jobId: null,
-              total: Number(d.total) || 0,
-              openBalance: d.open_balance == null ? null : Number(d.open_balance),
-              closed: d.closed === true,
-              discountAmount: d.discount_amount == null ? null : Number(d.discount_amount),
-              discountBy: d.discount_by ?? null,
-            })),
-          }
-        : {}),
+      ...(own.length ? { supplierInvoices: own } : {}),
     };
     const balance = supplierBalance(row, today);
     return {
@@ -203,15 +166,25 @@ export async function readSupplierOwed(supabase: any, orgId: string): Promise<Su
       model: balance.model,
       openPapers: balance.chargedBills,
       // A model-A figure with its bills or payments unread is named, never guessed at.
-      unread: row.onAccount && balance.model !== "supplier-invoices" && (failed.includes("bills") || failed.includes("payments you have sent")),
+      unread:
+        row.onAccount &&
+        balance.model !== "supplier-invoices" &&
+        (failed.includes("bills") || failed.includes("payments you have sent")),
     };
   });
 
-  const withSettled = papers.map((p) => ({ ...p, settledBySupplier: coverage.settledBySupplier.has(p.id) }));
+  const papers = bills.map((b) => ({
+    id: String(b.id),
+    supplierAccountId: b.supplier_account_id ?? null,
+    supplier: b.supplier ?? null,
+    amount: b.amount,
+    status: b.status ?? null,
+    settledBySupplier: settledBySupplier.has(String(b.id)),
+  }));
 
   return {
-    owed: whatISupplierOwed({ accounts: figures, papers: withSettled, identity, settledBySupplier: coverage.settledBySupplier }),
-    bought: whatIBoughtNotSettled({ papers: withSettled, settledBySupplier: coverage.settledBySupplier }),
+    owed: whatISupplierOwed({ accounts: figures, papers, identity, settledBySupplier }),
+    bought: whatIBoughtNotSettled({ papers, settledBySupplier }),
     today,
     failed,
   };
