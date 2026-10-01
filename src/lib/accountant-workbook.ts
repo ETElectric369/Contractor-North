@@ -1144,17 +1144,26 @@ function openTab(input: AccountantWorkbookInput, open: OpenFigures): XlsxSheet {
   rows.push(total("Total", null, null, money(unpaidCents)));
 
   rows.push(blank(), title("What Each Supplier's Own Invoices Say Is Still Open"));
-  rows.push(note("The supplier's own paper, not North's: a statement invoice, a credit memo or a service charge that isn't closed. Still Open is what that document says is left on it."));
+  rows.push(note("The supplier's own paper, not North's: a statement invoice, a credit memo or a service charge that isn't closed. Still Open is what that document says is left on it, read exactly as the balance above reads it (openBalanceOf, /bills), so this list adds up to the supplier-invoices figure."));
   rows.push(head("Date", "Supplier", "Invoice Number", "Kind", "Total", "Still Open"));
   const docs: { at: string; row: Row }[] = [];
   let docCents = 0;
   let unfigured = 0;
   for (const d of inp.supplierDocuments ?? []) {
     if (!d || d.closed) continue;
-    const left = cents(d.open_balance);
-    if (d.open_balance != null && left <= 0) continue;
+    // STILL OPEN IS WHAT THE FIGURE ABOVE READ, both halves of it (openBalanceOf, supplier-balance.ts):
+    //  - A CREDIT MEMO'S NEGATIVE STAYS NEGATIVE. It is money the supplier takes OFF the account, and
+    //    the balance subtracts it, so dropping it made this list come out LARGER than the figure it
+    //    exists to explain ($3,304.73 listed against a $3,273.94 balance) - the accountant could not
+    //    reconcile the one to the other, which is the reverse of why the section was added.
+    //  - A DOCUMENT WITH NO BALANCE RECORDED falls back to its Total, exactly as openBalanceOf does:
+    //    the supplier figure counts it in full, deliberately, so a missing figure never makes what is
+    //    owed look smaller than it is. Counting it as 0 here understated the list by the whole paper.
+    const stated = d.open_balance == null ? cents(d.total) : cents(d.open_balance);
+    // Open paper the supplier itself says has nothing left on it: it adds nothing here and nothing above.
+    if (d.open_balance != null && stated === 0) continue;
     if (d.open_balance == null) unfigured += 1;
-    docCents += left;
+    docCents += stated;
     const at = recordDay(d.invoice_date, d.created_at, input.tz);
     docs.push({
       at: `${at ?? "9999-99-99"} ${String(d.id ?? "")}`,
@@ -1162,9 +1171,11 @@ function openTab(input: AccountantWorkbookInput, open: OpenFigures): XlsxSheet {
         date(at),
         d.supplier_account_id ? acctName.get(String(d.supplier_account_id)) || "An account North can't name" : "No supplier account",
         d.invoice_number ?? null,
-        methodLabel(d.kind),
+        // The mark rides on the row it is about, not in a sentence underneath: a reader checking one
+        // line sees on that line where its Still Open came from.
+        d.open_balance == null ? `${methodLabel(d.kind)} (No Balance Recorded)` : methodLabel(d.kind),
         money(cents(d.total)),
-        d.open_balance == null ? null : money(left),
+        money(stated),
       ),
     });
   }
@@ -1173,7 +1184,7 @@ function openTab(input: AccountantWorkbookInput, open: OpenFigures): XlsxSheet {
   rows.push(...docs.map((d) => d.row));
   rows.push(total("Total", null, null, null, null, money(docCents)));
   if (unfigured) {
-    rows.push(note("A document with no Still Open figure came from before North recorded one: its Total is what the paper says, and the supplier's balance above doesn't count it."));
+    rows.push(note("A row marked No Balance Recorded came from before North recorded one, so its Still Open is the paper's own Total. The supplier's balance above counts it the same way, in full — nothing here is left out of that figure."));
   }
 
   if (open.ahead.length) {
@@ -1181,7 +1192,9 @@ function openTab(input: AccountantWorkbookInput, open: OpenFigures): XlsxSheet {
     for (const a of open.ahead) rows.push(line(a.name, money(a.cents)));
     rows.push(note("Paid ahead of the bills North has: the extra sits on that supplier's account and isn't taken off what the others are owed."));
   }
-  return { name: "Open", rows, widths: [30, 26, 16, 16, 20, 14] };
+  // Column 4 holds the longest thing on this tab now - a Kind carrying its No Balance Recorded mark -
+  // and Still Open holds a credit memo's negative, so neither is cut off in the sheet.
+  return { name: "Open", rows, widths: [30, 26, 18, 28, 20, 16] };
 }
 
 // ── Stock ────────────────────────────────────────────────────────────────────

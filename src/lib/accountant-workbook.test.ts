@@ -32,7 +32,8 @@ import {
   type AccountantWorkbook,
   type AccountantWorkbookInput,
 } from "./accountant-workbook";
-import { computeOwnerMoney, type OwnerMoneyFigures, type OwnerMoneyInputs, type OwnerMoneyPerson } from "@/lib/analytics/owner-money";
+import { computeOwnerMoney, supplierAccountRowsOf, type OwnerMoneyFigures, type OwnerMoneyInputs, type OwnerMoneyPerson } from "@/lib/analytics/owner-money";
+import { supplierBalance } from "@/app/(app)/bills/supplier-balance";
 import { pnlLines, pnlRow, profitAndLoss } from "@/lib/analytics/profit-and-loss";
 import { BUCKET_SECTION, BUSINESS_COST_BUCKETS } from "@/lib/business-cost-buckets";
 import type { AccountantInputs } from "@/lib/accountant-lists";
@@ -694,6 +695,68 @@ describe("what suppliers are owed is /bills' rule: an account paid ahead doesn't
     expect(aheadAt).toBeGreaterThan(owedAt);
     expect(open.rows[aheadAt + 2].cells).toEqual(["Paid Ahead Co", { money: 700 }]);
     expect(tab(wb, "Summary").rows.some((r) => String(r.cells[0]).startsWith("Paid ahead with 1 supplier by $700.00"))).toBe(true);
+  });
+});
+
+describe("the supplier's own invoices list reconciles to the figure above it, to the cent", () => {
+  /** A supplier document as PostgREST hands it over: snake_case, `open_balance` null when none was recorded. */
+  const doc = (id: string, number: string, kind: string, on: string, total: number, openBalance: number | null, closed = false) => ({
+    id,
+    supplier_account_id: "a1",
+    invoice_number: number,
+    kind,
+    invoice_date: on,
+    created_at: `${on}T15:00:00Z`,
+    total,
+    open_balance: openBalance,
+    closed,
+  });
+  const withDocs = (): OwnerMoneyInputs => {
+    const m = money();
+    m.supplierDocuments = [
+      doc("sd1", "8802-1107230", "invoice", "2026-09-10", 2000, 2000),
+      // The one the list used to drop: a credit memo the supplier has not closed, carrying a NEGATIVE
+      // open balance. The balance above subtracts it, so leaving it out made the list the larger number.
+      doc("sd2", "8802-1108648", "credit_memo", "2026-09-12", -225.47, -225.47),
+      doc("sd3", "8802-1109001", "invoice", "2026-09-15", 800, 300), // part-paid
+      doc("sd4", "8802-1105000", "invoice", "2026-08-01", 450, null), // from before North recorded a balance
+      doc("sd5", "8802-1104000", "invoice", "2026-07-01", 610, 0), // open paper with nothing left on it
+      doc("sd6", "8802-1103000", "invoice", "2026-06-01", 990, 990, true), // closed
+    ];
+    return m;
+  };
+  const m = withDocs();
+  const wb = buildAccountantWorkbook(input({ money: m }));
+  const open = tab(wb, "Open");
+  const docsAt = open.rows.findIndex((r) => r.cells[0] === "What Each Supplier's Own Invoices Say Is Still Open");
+  const docTotal = open.rows.slice(docsAt).find((r) => r.cells[0] === "Total")!;
+  const docRows = open.rows.slice(docsAt + 3, open.rows.indexOf(docTotal));
+
+  it("lists every open document, a credit memo as a negative, and totals exactly what supplierBalance says", () => {
+    const acct = supplierAccountRowsOf(m, TZ).get("a1")!;
+    const bal = supplierBalance(acct, TODAY);
+    // Northline now sends its own paper, so the account is read the supplier's way.
+    expect(bal.model).toBe("supplier-invoices");
+    // 2,000 less the 225.47 memo plus 300 left on the part-paid ticket plus the 450 paper with no
+    // balance recorded = 2,524.53, and that is the itemized Total AND the figure above it.
+    expect(cents(docTotal.cells[5])).toBe(252453);
+    expect(cents(docTotal.cells[5])).toBe(toCents(bal.owed!));
+    const owedAt = open.rows.findIndex((r) => r.cells[0] === "Suppliers Say You Owe");
+    const owedTotal = open.rows.slice(owedAt).find((r) => r.cells[0] === "Total")!;
+    expect(cents(owedTotal.cells[1])).toBe(cents(docTotal.cells[5]));
+
+    expect(docRows.map((r) => [r.cells[2], r.cells[3], cents(r.cells[4]), cents(r.cells[5])])).toEqual([
+      ["8802-1105000", "Invoice (No Balance Recorded)", 45000, 45000],
+      ["8802-1107230", "Invoice", 200000, 200000],
+      ["8802-1108648", "Credit Memo", -22547, -22547],
+      ["8802-1109001", "Invoice", 80000, 30000],
+    ]);
+  });
+
+  it("says a paper with no balance recorded IS counted above, and never the opposite", () => {
+    const texts = everyText(wb);
+    expect(texts.some((s) => s.includes("doesn't count it"))).toBe(false);
+    expect(texts.some((s) => s.includes("No Balance Recorded") && s.includes("counts it the same way, in full"))).toBe(true);
   });
 });
 
