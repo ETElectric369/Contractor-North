@@ -9,6 +9,9 @@ import { proposalOf, type PaperProposal } from "@/lib/paperwork";
 import { readAllPages } from "@/lib/read-all-pages";
 import { invoiceBalance } from "@/lib/invoice-math";
 import { recalcInvoice } from "@/lib/invoice-recalc";
+// WHAT FOLLOWS A PAYMENT, for every door that writes one (M1): recalc, finish the job, the bell,
+// the refresh. A deposit put on an invoice here used to do the first of the four.
+import { afterPaymentLanded } from "@/lib/after-payment-landed";
 import { paymentMethodKey } from "@/lib/payment-method";
 import {
   bankViewOf,
@@ -724,9 +727,24 @@ export async function applyBankCore(
     putOn.set(c.invoiceId, (putOn.get(c.invoiceId) ?? 0) + w.line.cents);
     touchedInvoices.add(c.invoiceId);
   }
+  /**
+   * A DEPOSIT OFF THE BANK FILE IS A PAYMENT, AND EVERYTHING THAT FOLLOWS A PAYMENT FOLLOWS IT (M1).
+   *
+   * This used to recompute the invoice and stop there: a deposit that paid a job's last bill off
+   * left the job reading "in progress" on the tile, the map and My Day until somebody noticed, told
+   * nobody, and refreshed no screen. The one helper (lib/after-payment-landed) does the four steps
+   * every other pay door does. Once per INVOICE, not once per line, with what this Apply put on it:
+   * the balance cap above is built on amount_paid holding still through the loop (putOn), and one
+   * bell line saying what landed beats three.
+   */
   for (const id of touchedInvoices) {
-    const ok = await recalcInvoice(supabase, id);
-    if (!ok) problems.push("An invoice's balance didn't recompute; open it once to refresh it.");
+    const { settled } = await afterPaymentLanded(supabase, {
+      invoiceId: id,
+      orgId: who.orgId,
+      // A person tapped Apply, so they are the recorder and the bell leaves them out.
+      bell: { amount: (putOn.get(id) ?? 0) / 100, said: "from the bank file", recordedBy: who.userId },
+    });
+    if (!settled) problems.push("An invoice's balance didn't recompute; open it once to refresh it.");
   }
 
   // 4. THE COMPANY'S OWN RULES, from what a person tapped: one per merchant AND answer, for the

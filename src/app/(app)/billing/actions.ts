@@ -39,12 +39,12 @@ import { HELD_HERE_READ_FAILED, costsKeyNames, idKeyNames, laborKeyNames, readHe
 import { removedLines, removedSentence, staleTombstones, textArrayLiteral } from "@/lib/import-reconcile";
 import { linesByBillId, readBillLines, readInvoiceMarkup } from "@/lib/invoice-markup-read";
 import { recalcInvoice } from "@/lib/invoice-recalc";
-import { completeJobWhenPaid } from "@/lib/complete-job-when-paid";
+// WHAT FOLLOWS A PAYMENT, for every door that writes one (M1): recalc, finish the job, the bell,
+// the refresh. This file used to carry its own copy of all four.
+import { afterPaymentLanded } from "@/lib/after-payment-landed";
 import { defaultDueDateIsoForOrg } from "@/lib/invoice-due";
 import { standardBillingBlockerOnJob, standardBillingConflictError } from "@/lib/billing-guards";
 import { scheduleStatus, contractTotalFromQuotes, type Milestone } from "@/lib/payment-schedule-math";
-import { sendPushToProfiles, orgStaffIds } from "@/lib/push";
-import { createNotifications } from "@/lib/notifications";
 import { formatCurrency } from "@/lib/utils";
 import { paymentMethodKey } from "@/lib/payment-method";
 import { reportError } from "@/lib/observe";
@@ -3495,30 +3495,17 @@ export async function recordPayment(input: {
   });
   if (error) return { ok: false, error: dbError(error) };
 
-  await recalcInvoice(supabase, input.invoice_id);
-  // PAID COMPLETES THE JOB (209451e1): a standard invoice paid in full on a job that has STARTED
-  // (in progress / on hold) with no other open bill marks the job complete — here, in Settle Up
-  // (which records through this door), and in the Stripe webhook, the three places money lands.
-  // A paid draw never does, and neither does a bill paid ahead of a visit still on the schedule.
-  await completeJobWhenPaid(supabase, input.invoice_id);
-  // Cash-in ping to the OTHER office staff (the recorder already knows).
-  //
-  // THE BELL RECORDS THE PUSH (W1-10, Erik: "where would push notifications be recorded?"). A push
-  // is gone once it is swiped away, and a phone with pushes off never gets one at all; the bell line
-  // is the record. Same people, same words, written first (createNotifications never throws, and a
-  // lost line is reported there), then the push - one pair, so the two can never disagree about who
-  // was told.
-  const cust = (inv as any).customers?.name as string | undefined;
-  const paidTo = (await orgStaffIds(inv.org_id)).filter((id) => id !== ctx.userId);
-  const paidLine = {
-    title: "Payment recorded",
-    body: `${formatCurrency(input.amount)} on ${inv.invoice_number || "an invoice"}${cust ? ` — ${cust}` : ""}`,
-    url: `/billing/${input.invoice_id}`,
-  };
-  await createNotifications(inv.org_id, paidTo, { type: "invoice_paid", ...paidLine });
-  void sendPushToProfiles(paidTo, "invoice_paid", paidLine);
-  revalidateMoney(input.invoice_id);
-  revalidateMoney();
+  // WHAT FOLLOWS A PAYMENT IS ONE RULE, IN ONE PLACE (M1, lib/after-payment-landed): recompute the
+  // invoice, finish the job if that paid it off (209451e1 — a standard bill paid in full on a job
+  // somebody has been on, no other open bill; never a draw, never a bill paid ahead of the visit),
+  // ring the bell for the OTHER office staff (the recorder already knows), and refresh every screen
+  // that shows money. It used to be written out here, again in the Stripe writer, and two-thirds
+  // missing from the bank download's deposit.
+  await afterPaymentLanded(supabase, {
+    invoiceId: input.invoice_id,
+    orgId: inv.org_id,
+    bell: { amount: input.amount, recordedBy: ctx.userId },
+  });
   return { ok: true };
 }
 
