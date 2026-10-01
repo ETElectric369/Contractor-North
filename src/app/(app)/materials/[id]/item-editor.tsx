@@ -9,6 +9,7 @@ import { NumberInput } from "@/components/ui/number-input";
 import { formatCurrency } from "@/lib/utils";
 import { useToast } from "@/components/toast";
 import { checklistGroups, openToBuyCount, tickWord, toBuyWords } from "@/lib/materials-checklist";
+import { lineExtension, listMoney, listTotalCaveat } from "@/lib/materials-money";
 import {
   addMaterialItem,
   deleteMaterialItem,
@@ -123,7 +124,11 @@ export function ItemEditor({
     return f && f.from === server ? f.to : server;
   };
   const view = items.map((it) => ({ ...it, purchased: bought(it) }));
-  const total = view.reduce((s, i) => s + (i.est_cost ?? 0) * i.quantity, 0);
+  // THE MONEY, AND WHAT IT LEAVES OUT (item C4). The total used to sum (est_cost ?? 0) × quantity, so
+  // a line with no price yet counted as zero with nothing said — a twenty-line list where six have no
+  // price read as a finished figure. lib/materials-money owns both the sum and the sentence.
+  const money = listMoney(view);
+  const caveat = listTotalCaveat(money);
   const openCount = openToBuyCount(view);
   // Tools float to the top (grab from the shop first), materials to buy below, both in their own
   // sort_order; every checked line (tools too) folds into Bought. The tools-first grouping is for
@@ -305,8 +310,14 @@ export function ItemEditor({
             </span>
           </span>
           {viewerIsStaff && (
-            <span className="shrink-0 font-medium text-slate-900">
-              {it.est_cost != null ? formatCurrency(it.est_cost * it.quantity) : "—"}
+            // The line's own extension, or NO PRICE YET in words (item C4): a dash reads as nothing
+            // to pay, and this is a line nobody has priced.
+            <span
+              className={`shrink-0 text-right font-medium ${
+                lineExtension(it) === null ? "text-xs font-normal text-amber-700" : "text-slate-900"
+              }`}
+            >
+              {lineExtension(it) === null ? "No Price Yet" : formatCurrency(lineExtension(it)!)}
             </span>
           )}
           <Pencil className="h-3.5 w-3.5 shrink-0 text-slate-300" aria-hidden />
@@ -419,13 +430,17 @@ export function ItemEditor({
           is all bought: said once, here), and (office only) the WHOLE list's est. total, bought lines
           too. Labelled, so it never reads as the cost of the 3 beside it. Money, so it's the office's. */}
       {items.length > 0 && (
-        <div className="flex items-center justify-between gap-3 border-t border-slate-100 px-4 py-2 text-sm">
-          <span className="text-slate-500">{toBuyWords(openCount)}</span>
-          {viewerIsStaff && (
-            <span className="text-slate-500">
-              List Total <span className="font-semibold text-slate-900">{formatCurrency(total)}</span>
-            </span>
-          )}
+        <div className="border-t border-slate-100 px-4 py-2 text-sm">
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-slate-500">{toBuyWords(openCount)}</span>
+            {viewerIsStaff && (
+              <span className="text-slate-500">
+                List Total <span className="font-semibold text-slate-900">{formatCurrency(money.total)}</span>
+              </span>
+            )}
+          </div>
+          {/* NOTHING SILENT: the lines this total does not cover are named, under the figure (item C4). */}
+          {viewerIsStaff && caveat && <p className="mt-1 text-xs text-amber-700">{caveat}</p>}
         </div>
       )}
     </div>

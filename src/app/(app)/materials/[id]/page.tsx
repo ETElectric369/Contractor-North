@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { jobSiteLabel } from "@/lib/schedule-options";
 import { Briefcase, ChevronDown, ListChecks } from "lucide-react";
 import { checklistGroups } from "@/lib/materials-checklist";
+import { lineExtension, listMoney, listTotalCaveat } from "@/lib/materials-money";
 import { BackLink } from "@/components/back-link";
 import { createClient } from "@/lib/supabase/server";
 import { formatCurrency, formatDate } from "@/lib/utils";
@@ -105,6 +106,11 @@ export default async function MaterialListPage({
   const readOnlyItems = (items ?? []) as any[];
   const { tools: roTools, toBuy: roToBuy, bought: roBought } = checklistGroups(readOnlyItems);
   const readOnlyGroups = { open: [...roTools, ...roToBuy], bought: roBought };
+  // The same honest money the editor prints (item C4): what the priced lines come to, and what the
+  // figure leaves out. The read-only view used to show no total at all, and the office lands here to
+  // decide what to carry across to the live list.
+  const readOnlyMoney = listMoney(readOnlyItems);
+  const readOnlyCaveat = listTotalCaveat(readOnlyMoney);
   const readOnlyRow = (it: any) => (
     <li key={it.id} className="flex items-center gap-2 px-4 py-3 text-sm">
       <span className={it.purchased ? "text-slate-400 line-through" : "text-slate-800"}>{it.description}</span>
@@ -113,8 +119,14 @@ export default async function MaterialListPage({
         {it.quantity ?? ""} {it.unit ?? ""}
         {/* The office reads this view too now (a superseded list is read-only for
             everyone), and it may be reading it to decide what to carry across, so the
-            cost stays visible to staff. A tech's projection never selects the column. */}
-        {viewerIsStaff && it.est_cost != null && ` · ${formatCurrency(Number(it.est_cost))}`}
+            cost stays visible to staff. A tech's projection never selects the column.
+            PER ITEM AND THE LINE'S OWN MONEY (item C4): the price each, then what the line
+            comes to, so the office can read a line without doing the multiplication —
+            and "No Price Yet" where nobody has priced it, never a blank. */}
+        {viewerIsStaff &&
+          (lineExtension(it) === null
+            ? " · No Price Yet"
+            : ` · ${formatCurrency(Number(it.est_cost))} each · ${formatCurrency(lineExtension(it)!)}`)}
       </span>
     </li>
   );
@@ -219,6 +231,17 @@ export default async function MaterialListPage({
               {readOnlyGroups.open.map(readOnlyRow)}
               {(items ?? []).length === 0 && <li className="px-4 py-6 text-center text-slate-400">No items on this list.</li>}
             </ul>
+            {/* The list's own money, said the same way as the editor's footer (item C4). Staff only. */}
+            {viewerIsStaff && readOnlyItems.length > 0 && (
+              <div className="border-t border-slate-100 px-4 py-2 text-sm">
+                <div className="flex items-center justify-end">
+                  <span className="text-slate-500">
+                    List Total <span className="font-semibold text-slate-900">{formatCurrency(readOnlyMoney.total)}</span>
+                  </span>
+                </div>
+                {readOnlyCaveat && <p className="mt-1 text-xs text-amber-700">{readOnlyCaveat}</p>}
+              </div>
+            )}
             {readOnlyGroups.bought.length > 0 && (
               <details className="group border-t border-slate-100">
                 <summary className="flex min-h-[44px] cursor-pointer list-none items-center justify-between px-4 text-sm font-medium text-slate-600 hover:bg-slate-50 [&::-webkit-details-marker]:hidden">
