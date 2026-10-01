@@ -10,6 +10,7 @@ import { promoteJobToInProgress } from "@/lib/job-promote";
 import {
   LAST_JOB_LOOKBACK_MS,
   WHICH_JOB_COLUMNS,
+  choicesUnavailable,
   closedPickable,
   orderWhichJobChoices,
   whichJobLabel,
@@ -86,7 +87,9 @@ export async function whichJobChoices(entryId: string, fromJobId?: string | null
       .lt("scheduled_start", dayEnd.toISOString())
       .or(`scheduled_start.gte.${dayStartIso},scheduled_end.gte.${dayStartIso}`),
   ]);
-  if (goingR.error) return { ok: false, isStaff, error: "Couldn't load the jobs just now. Skip, and the office will put this punch on its job." };
+  // A MOVE'S PUNCH ALREADY HAS A JOB, so it is not in Hours On No Job and the office is never
+  // prompted about it: the line must not promise that they will pick it (which-job-choices).
+  if (goingR.error) return { ok: false, isStaff, error: choicesUnavailable(moving) };
 
   const lastJobId = ((lastR.data as { job_id?: string | null } | null)?.job_id ?? null) || null;
   const segToday = new Set(((segR.data ?? []) as { job_id: string }[]).map((s) => s.job_id));

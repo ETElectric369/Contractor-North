@@ -22,6 +22,7 @@ import { todayStrInTz } from "@/lib/tz";
 import { DATA_TOOLS, runDataTool, STAFF_ONLY_DATA_TOOLS } from "@/lib/assistant-tools";
 import { CALC_TOOLS, runCalc, CALC_TOOL_NAMES } from "@/lib/electrical-calc";
 import { agentInputForSwitches, agentWriteToolsForRole } from "@/lib/actions/agent-tools";
+import { agentToolResultBody } from "@/lib/actions/agent-tool-result";
 import { executeAction } from "@/lib/actions/execute";
 import { REGISTRY } from "@/lib/actions/registry";
 import { needsConsent } from "@/lib/actions/risk";
@@ -968,23 +969,11 @@ REGISTER: mirror the user's. When they swear or the moment calls for job-site ba
                   };
                   out = JSON.stringify({ ok: false, awaitingUserConfirmation: true });
                 } else {
-                  // missingFields rides through so Nort can ask for exactly what's absent
-                  // ("I've got the job — still need the hours") instead of parroting "Required".
-                  const warning = [res.warning, res.ok ? switched.dropped : null].filter(Boolean).join(" ");
-                  const body = JSON.stringify({
-                    ok: res.ok,
-                    error: res.error ?? null,
-                    ...(res.missingFields?.length ? { missingFields: res.missingFields } : {}),
-                    // THE PROJECTION LAW, in the agent's own write path (audit v800): this object
-                    // IS everything the model learns about what it just did. `warning` and
-                    // `recorded` are the announce-the-deed read-backs — dropping them made the
-                    // safety mechanism inert, so Nort announced "3 hours logged" for a 3-second
-                    // entry with the correction sitting unread in a stripped field.
-                    ...(warning ? { warning } : {}),
-                    ...(res.recorded ? { recorded: res.recorded } : {}),
-                    ...(res.speak ? { speak: res.speak } : {}),
-                    ...(res.data ? { data: res.data } : {}),
-                  });
+                  // THE PROJECTION LAW, in the agent's own write path (audit v800): the body below
+                  // IS everything the model learns about what it just did, and a field a handler
+                  // invents that this list doesn't carry is dropped in silence. The allowlist lives
+                  // in lib/actions/agent-tool-result so a test can read what Nort is handed.
+                  const body = agentToolResultBody(res, switched.dropped);
                   // A registry READ is a database read like runDataTool's (time.listEntries hands
                   // back job and person names), so it gets the same fence (audit v994 TL4). A
                   // write's result is the app's own words about what it did, and stays bare.

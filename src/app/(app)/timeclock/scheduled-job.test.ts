@@ -305,7 +305,7 @@ describe("the clock resolves exactly as before (resolveTechJobToday, through a j
     expect(jobId).toBe("whitney");
     // NOBODY PICKED THIS JOB — the schedule did, and the answer says so now, so every clock door can
     // name it out loud instead of leaving the hours on it in silence (clock-told, Erik's TTP 56).
-    expect(result).toEqual({ ok: true, id: "new-punch", jobPick: { chosenBy: "app", id: "whitney", label: "whitney site" } });
+    expect(result).toEqual({ ok: true, id: "new-punch", jobPick: { chosenBy: "app", id: "whitney", from: "schedule", label: "whitney site" } });
     // Asked about the company's today.
     expect(calls.find(isDayRow)!.filters).toContainEqual(["eq", "work_date", "2026-09-23"]);
   });

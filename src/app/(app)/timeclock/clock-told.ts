@@ -27,16 +27,32 @@
  */
 import { askAfterPunch, whichJobLabel, type ChoiceJob, type WhichJobAsk } from "./which-job-choices";
 
-/** Who put the job on a punch. "app": nobody picked it — the clock resolved it from the schedule. */
+/** Who put the job on a punch. "app": nobody picked it — the clock resolved it itself. */
 export type JobChosenBy = "person" | "app";
 
 /**
- * The job a punch landed on, and who chose it. A UNION, not a boolean beside a label, because the
- * two carry different facts: only the app's pick needs a label, since only the app's pick gets said
- * out loud. Never infer "the app chose this" from job_id being present — a person-picked punch has
- * one too; that inference is the whole defect.
+ * WHICH RULE PUT THE JOB THERE — carried out with the pick, because the sentence NAMES the source
+ * and the sources are not the same fact (Erik's own law: don't say a thing you didn't check).
+ *   · "schedule"  the office's day row, or a job of his scheduled today (resolveTechJobToday 0/1);
+ *   · "only-job"  nothing scheduled at all — the org has exactly ONE job in progress (tier 2). On a
+ *                 day with nothing on the schedule, "from today's schedule" sent a person to look at
+ *                 a schedule with nothing on it, which makes the one sentence that has to be trusted
+ *                 about money look wrong;
+ *   · "unknown"   the punch committed on a first attempt whose answer never came back, so the job on
+ *                 it is the app's but WHICH tier chose it is not recoverable (answerForAlreadyFiled).
+ *                 Then the sentence names no source rather than guessing one.
  */
-export type PunchJob = { chosenBy: "person"; id: string } | { chosenBy: "app"; id: string; label: string };
+export type AppPickSource = "schedule" | "only-job" | "unknown";
+
+/**
+ * The job a punch landed on, and who chose it. A UNION, not a boolean beside a label, because the
+ * two carry different facts: only the app's pick needs a label and a source, since only the app's
+ * pick gets said out loud. Never infer "the app chose this" from job_id being present — a
+ * person-picked punch has one too; that inference is the whole defect.
+ */
+export type PunchJob =
+  | { chosenBy: "person"; id: string }
+  | { chosenBy: "app"; id: string; label: string; from: AppPickSource };
 
 /**
  * THE JOB AS A PERSON KNOWS IT (Erik: "i cant tell by job numbers alone"). The Timeclock's own
@@ -56,10 +72,18 @@ export function punchJobLabel(j: ChoiceJob, codesOn: boolean): string {
  *  which reads the job list itself. */
 export const UNREAD_JOB_LABEL = "a job it couldn't name just now";
 
-/** THE ONE SENTENCE a door says when the app chose the job. Plain words, the job named, and it ends
- *  in the door out, so it is never a dead end. */
-export function appChoseSentence(label: string): string {
-  return `Your punch is on ${label}. The app picked that from today's schedule — change it if you're somewhere else.`;
+/** WHY the app picked it, in the sentence's own words — and nothing at all when the source isn't
+ *  known, because naming one the resolver didn't use is the same class of lie as saying nothing. */
+function pickedBecause(from: AppPickSource): string {
+  if (from === "schedule") return " from today's schedule";
+  if (from === "only-job") return " because it's the only job going";
+  return "";
+}
+
+/** THE ONE SENTENCE a door says when the app chose the job. Plain words, the job named, the source
+ *  it actually came from, and it ends in the door out, so it is never a dead end. */
+export function appChoseSentence(label: string, from: AppPickSource): string {
+  return `Your punch is on ${label}. The app picked that${pickedBecause(from)} — change it if you're somewhere else.`;
 }
 
 /** The Change door's words, Title Case, one copy (buttons on three surfaces read the same). */
@@ -86,7 +110,29 @@ export function tellAppChose(res: ToldResult | null | undefined): AppChoseNotice
   if (!res?.ok || !res.id) return null;
   const pick = res.jobPick;
   if (!pick || pick.chosenBy !== "app") return null;
-  return { entryId: res.id, job: { id: pick.id, label: pick.label }, sentence: appChoseSentence(pick.label) };
+  return { entryId: res.id, job: { id: pick.id, label: pick.label }, sentence: appChoseSentence(pick.label, pick.from) };
+}
+
+/**
+ * IS THE SENTENCE STILL TRUE OF THE PUNCH ON SCREEN? (Erik, 2026-10-01 — the other half of the same
+ * law.) The notice is remembered in client state, and the punch underneath it moves: a Switch Job
+ * CUTS after two minutes (0288) so the running entry is a NEW row, re-points whole inside them so the
+ * same row carries a different job, a clock-out closes the shift, and the office can move the punch
+ * from Timecards while the page sits open. In every one of those the person HAS chosen the job — and
+ * a line still reading "Your punch is on <the old job>. The app picked that" is then the page lying
+ * about where the money is, with a Change door pointed at the wrong piece.
+ *
+ * So a door that KNOWS the punch it is looking at asks this instead of remembering to clear the line
+ * on every path: the notice only shows while the entry on screen is the very punch it is about AND
+ * still carries the very job the sentence names. Nothing to clear, nothing to forget to clear.
+ */
+export function noticeForEntry(
+  notice: AppChoseNotice | null | undefined,
+  entry: { id: string; job_id?: string | null } | null | undefined,
+): AppChoseNotice | null {
+  if (!notice) return null;
+  if (!entry || entry.id !== notice.entryId) return null;
+  return (entry.job_id ?? null) === notice.job.id ? notice : null;
 }
 
 /** What the Change door opens: the clock's own sheet, in move mode, off the job the app chose. */

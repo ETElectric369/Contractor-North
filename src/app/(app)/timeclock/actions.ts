@@ -41,7 +41,7 @@ import {
 import { loadShiftChains, type ShiftInfo } from "@/lib/shift-chain";
 import { ADOPT_AFTER_CLOCK_IN_MS, ADOPT_AFTER_SWITCH_MS } from "./adopt-window";
 import { closedPickable, whichJobLabel, type ChoiceJob } from "./which-job-choices";
-import { UNREAD_JOB_LABEL, punchJobLabel, type PunchJob } from "./clock-told";
+import { UNREAD_JOB_LABEL, punchJobLabel, type AppPickSource, type PunchJob } from "./clock-told";
 import { billedPartMoved, claimedMoveRefusal, claimedPersonRefusal, type ClaimHolder, type ClaimIndex } from "./claim-words";
 import { LONG_SHIFT_PHRASE, MAX_SHIFT_HOURS, clockDoorWords, clockedOutWords, isLongOpenShift, stopProblem } from "@/lib/long-shift";
 import { clockInClashWords, findOverlap, overlapRefusal, shiftWhen, type OverlapClash } from "@/lib/overlap-refusal";
@@ -97,7 +97,10 @@ function clashIdFrom(err: unknown): string | null {
  * job's own window, read in company days now instead of the UTC date (an evening start no longer
  * covers the next morning). Tier 2 stays here: it is the clock's alone.
  */
-async function resolveTechJobToday(supabase: SupabaseClient, uid: string): Promise<string | null> {
+async function resolveTechJobToday(
+  supabase: SupabaseClient,
+  uid: string,
+): Promise<{ jobId: string; from: AppPickSource } | null> {
   try {
     const { data: org } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
     const tz = getOrgSettings((org as { settings?: unknown } | null)?.settings).timezone;
@@ -117,12 +120,14 @@ async function resolveTechJobToday(supabase: SupabaseClient, uid: string): Promi
      */
     const scheduled = await scheduledJobFor(supabase, uid, todayStr, tz);
     if (scheduled.off) return null;
-    if (scheduled.jobId) return scheduled.jobId;
+    if (scheduled.jobId) return { jobId: scheduled.jobId, from: "schedule" };
 
-    // No scheduled assignment — if the org has exactly ONE job in progress, that's the site.
+    // No scheduled assignment — if the org has exactly ONE job in progress, that's the site. WHICH
+    // TIER PICKED IT RIDES OUT WITH IT: this one has nothing to do with today's schedule, and a
+    // sentence that said it did sent a man to look at a schedule with nothing on it (clock-told).
     const { data: prog } = await supabase.from("jobs").select("id").eq("status", "in_progress").limit(2);
     const inProg = (prog ?? []) as { id: string }[];
-    if (inProg.length === 1) return inProg[0].id;
+    if (inProg.length === 1) return { jobId: inProg[0].id, from: "only-job" };
     return null;
   } catch {
     return null; // the punch must never wait on / fail over job resolution
@@ -153,7 +158,7 @@ export async function clockIn(input: {
    * genuine no-op that returns the original result.
    */
   const { data: profRow } = await supabase.from("profiles").select("org_id").eq("id", user.id).maybeSingle();
-  return runOnce(
+  const res = await runOnce(
     {
       clientOpId: input.clientOpId,
       action: "time.clockIn",
@@ -162,6 +167,9 @@ export async function clockIn(input: {
     },
     () => clockInInner(supabase, user.id, input),
   );
+  // A PUNCH THAT ALREADY FILED ONCE still owes the person the sentence: runOnce's duplicate answer
+  // carries only ok and the id, so the job it landed on is rebuilt here rather than lost.
+  return answerForAlreadyFiled(supabase, user.id, input, res);
 }
 
 async function clockInInner(
@@ -195,13 +203,15 @@ async function clockInInner(
   // in_progress job → none (the office attaches it later).
   //
   // WHO CHOSE THE JOB IS A FACT ONLY THIS LINE KNOWS, so it is carried out in the answer rather
-  // than guessed at later from job_id (Erik's TTP 56 morning, 2026-10-01). `appChose` is true for
-  // the resolver's pick and ONLY for it — including when a job_id came in and the caller couldn't
-  // see it, because then the job on the punch is still not the one anybody asked for.
-  let appChose = false;
+  // than guessed at later from job_id (Erik's TTP 56 morning, 2026-10-01). `appPick` is set for the
+  // resolver's pick and ONLY for it — including when a job_id came in and the caller couldn't see
+  // it, because then the job on the punch is still not the one anybody asked for — and it carries
+  // WHICH tier picked, so the sentence names the source it actually used.
+  let appPick: AppPickSource | null = null;
   if (!jobId) {
-    jobId = await resolveTechJobToday(supabase, user.id);
-    appChose = !!jobId;
+    const picked = await resolveTechJobToday(supabase, user.id);
+    jobId = picked?.jobId ?? null;
+    appPick = picked?.from ?? null;
   }
 
   /**
@@ -345,7 +355,7 @@ async function clockInInner(
   // the job and offer the move — and say nothing at all when the person picked it themselves. The
   // label is read only on the app's pick: a person-picked punch needs no sentence, so it pays for no
   // extra read and the clock answers as fast as it always did.
-  return { ok: true, id, ...said, jobPick: await punchPickOf(supabase, jobId, appChose) };
+  return { ok: true, id, ...said, jobPick: await punchPickOf(supabase, jobId, appPick) };
 }
 
 /**
@@ -354,8 +364,8 @@ async function clockInInner(
  * punch into a refusal, so the pick still reports WHO chose it and the sentence falls back to the
  * job's number or name — never silence, and never a bare id.
  */
-async function punchPickOf(supabase: SupabaseClient, jobId: string, appChose: boolean): Promise<PunchJob> {
-  if (!appChose) return { chosenBy: "person", id: jobId };
+async function punchPickOf(supabase: SupabaseClient, jobId: string, appPick: AppPickSource | null): Promise<PunchJob> {
+  if (!appPick) return { chosenBy: "person", id: jobId };
   try {
     const [{ data: jobRow }, { data: orgRow }] = await Promise.all([
       supabase.from("jobs").select("id, job_number, name, address, customers(name)").eq("id", jobId).maybeSingle(),
@@ -363,9 +373,55 @@ async function punchPickOf(supabase: SupabaseClient, jobId: string, appChose: bo
     ]);
     const codesOn = getOrgSettings((orgRow as { settings?: unknown } | null)?.settings).timeclock_job_codes;
     const job = jobRow as ChoiceJob | null;
-    return { chosenBy: "app", id: jobId, label: job ? punchJobLabel(job, codesOn) : UNREAD_JOB_LABEL };
+    return { chosenBy: "app", id: jobId, from: appPick, label: job ? punchJobLabel(job, codesOn) : UNREAD_JOB_LABEL };
   } catch {
-    return { chosenBy: "app", id: jobId, label: UNREAD_JOB_LABEL };
+    return { chosenBy: "app", id: jobId, from: appPick, label: UNREAD_JOB_LABEL };
+  }
+}
+
+/**
+ * THE PUNCH THAT ALREADY FILED STILL HAS TO SAY WHERE IT WENT — Brian in the truck with ONE bar
+ * rather than none (Erik, 2026-10-01).
+ *
+ * He taps Clock In; the card queues the punch and fires the live attempt with its clientOpId; the
+ * request REACHES the server and commits, and the response is lost on the way back. The card catches,
+ * shows "holding this punch", and the drain replays the same clientOpId later. runOnce then trips the
+ * unique index and answers `{ ok: true, id }` — all it can honestly say, because an exactly-once
+ * wrapper cannot know what a clock answer carries. So jobPick and noJob were both gone, the drain
+ * removed the op as filed, and the punch landed on the app's job with NOT ONE WORD on screen: no
+ * sentence, no Change door, not even the no-job question. The exact silence this door exists to end.
+ *
+ * THE CALL'S OWN ARGUMENTS ARE THE PROOF OF WHO CHOSE. A call that named no job and no code asked the
+ * app to pick, so whatever job the entry now carries, nobody picked it. Read the entry — the caller's
+ * own, on the caller's RLS client — and rebuild the same answer through the same one function, with
+ * the source left "unknown" because WHICH tier picked is genuinely not recoverable. What cannot be
+ * recovered at all is the off-hold warning: it was said once, to a screen that never got it.
+ */
+async function answerForAlreadyFiled(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  userId: string,
+  input: { job_id: string | null; job_code: string | null; clientOpId?: string },
+  res: ClockResult,
+): Promise<ClockResult> {
+  // Online (no idempotency key) the inner answer IS the answer: never pay for a read it doesn't need.
+  if (!input.clientOpId) return res;
+  if (!res.ok || !res.id) return res; // nothing landed, so there is nothing to tell about
+  if (res.jobPick || res.noJob) return res; // the punch answered for itself
+  if (input.job_id || (input.job_code ?? "").trim()) return res; // the person named the job or the code
+  try {
+    const { data } = await supabase
+      .from("time_entries")
+      .select("job_id, job_code")
+      .eq("id", res.id)
+      .eq("profile_id", userId)
+      .maybeSingle();
+    const entry = data as { job_id: string | null; job_code: string | null } | null;
+    if (!entry) return res;
+    if ((entry.job_code ?? "").trim()) return res; // filed under a time code: named on purpose
+    if (!entry.job_id) return { ...res, noJob: true };
+    return { ...res, jobPick: await punchPickOf(supabase, entry.job_id, "unknown") };
+  } catch {
+    return res; // a failed read must never turn a saved punch into a refusal
   }
 }
 

@@ -32,7 +32,7 @@ import { NewJobInline, type CreatedJob } from "./new-job-inline";
 import { DailyReportDebrief } from "./daily-report-debrief";
 import { WhichJobSheet } from "../planner/which-job";
 import { askAfterPunch, type WhichJobAsk } from "./which-job-choices";
-import { tellAppChose, type AppChoseNotice } from "./clock-told";
+import { noticeForEntry, tellAppChose, type AppChoseNotice } from "./clock-told";
 import { AppChoseJobNotice } from "./app-chose-notice";
 
 interface JobOption {
@@ -352,6 +352,10 @@ export function TimeclockPanel({
         setSwitching(false);
         setSwitchJobId("");
         setSwitchJobCode("");
+        // A SWITCH JOB *IS* THE ANSWER. He has named the job himself, so the "the app picked that"
+        // line goes now rather than on the refresh that catches the entry up (noticeForEntry would
+        // retire it then anyway; this is so it never flickers a job he has just left).
+        setChose(null);
         const j = jobOptions.find((x) => x.id === switchJobId);
         const name = j ? optionLabel(j) : "the new job";
         toast(
@@ -412,6 +416,8 @@ export function TimeclockPanel({
           setClockingOut(false);
           setShowTools(false);
           setSwitching(false);
+          // The shift is over: the sentence was about a punch that is no longer running.
+          setChose(null);
           if (res.warning) toast(res.warning, "info", undefined, { sticky: true });
           // Still on no job at the end of it: "Which Job Are You On?" once more, first.
           const again = askAfterPunch(res, "out");
@@ -481,6 +487,13 @@ export function TimeclockPanel({
     // 0:00 after a Switch Job was reading his day reset.
     const earlier = Math.max(0, Number(earlierShiftHours) || 0);
     const shiftTotal = earlier > 0 ? elapsed + earlier : elapsed;
+    // IS THE SENTENCE STILL TRUE OF THIS PUNCH? (clock-told: noticeForEntry.) A Switch Job CUTS after
+    // two minutes, so the running entry is a NEW row; inside them it re-points whole, so the same row
+    // carries a different job; the office can move the punch from Timecards while this page sits open.
+    // In every one of those the person HAS chosen the job, and a line still naming the app's pick
+    // would be this page contradicting its own banner — with a Change door aimed at the wrong piece.
+    // Derived, never remembered: there is no path left that has to remember to clear it.
+    const choseNow = noticeForEntry(chose, openEntry);
     // Codes on: name only (not the shared number·name jobLabel helper) — the running
     // banner reads better without the job number; renamed so the helper isn't shadowed.
     // Codes off: the customer · address identity IS the name the crew knows.
@@ -628,9 +641,9 @@ export function TimeclockPanel({
 
           {/* THE JOB NOBODY PICKED, SAID OUT LOUD — the same sentence and the same Change door as My
               Day's Now card, from the one function both call. */}
-          {chose && (
+          {choseNow && (
             <div className="rounded-xl border border-brand/30 bg-brand/5 p-3">
-              <AppChoseJobNotice notice={chose} onDone={() => setChose(null)} />
+              <AppChoseJobNotice notice={choseNow} onDone={() => setChose(null)} />
             </div>
           )}
 
