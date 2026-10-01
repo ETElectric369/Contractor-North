@@ -232,8 +232,29 @@ describe("the still-owed rule is written in exactly one place", () => {
     // And it really does go through the one read, per account as well as in total.
     const page = readFileSync(join(dir, "page.tsx"), "utf8");
     expect(page).toContain("readSupplierOwed(supabase, orgId)");
-    expect(page).toContain("owed?.boughtByAccount[l.accountId]");
-    expect(page).toContain('l.how === "their-own-papers"');
+    // The rows themselves are built in the read, out of what that one read handed back: the page asks
+    // for them by name and adds up nothing of its own.
+    expect(page).toContain("supplierGapRows(owed)");
+    const read = readFileSync(join(dir, "reconcile-read.ts"), "utf8");
+    expect(read).toContain("owed?.boughtByAccount[a.accountId]");
+
+    /**
+     * AND THE ROWS COME OFF `accounts`, NEVER OFF `owed.lines`. This is not style: a LINE on "what
+     * you owe your suppliers" exists only where an account is owed MONEY, so an account whose own
+     * papers are all CLOSED — their book says nothing is open, ours says four tickets are — had no
+     * line, got no row, and the page led with "No money gap" over the loudest disagreement in the
+     * book. Filtering the lines is the obvious way to write this and it is the wrong one, so the
+     * tripwire names it rather than trusting a comment to be read.
+     */
+    expect(read).toContain("owed?.accounts ?? []");
+    expect(read, "the gap rows must not be filtered off whatISupplierOwed's lines").not.toMatch(/owed[?!.]*\.owed\.lines/);
+    expect(page, "the gap rows must not be filtered off whatISupplierOwed's lines").not.toMatch(/owed[?!.]*\.owed\.lines/);
+    // And "do we hold their own papers" is asked through the owning module's one expression, because
+    // that is the question that decides whether two records exist to disagree at all.
+    expect(read).toContain("holdsTheirOwnPapers(a)");
+    for (const f of ["page.tsx", "supplier-gap.tsx"]) {
+      expect(readFileSync(join(dir, f), "utf8"), f).not.toContain('"supplier-invoices"');
+    }
     // THE GAP SECTION IS HANDED NUMBERS, NEVER ROWS. It subtracts two figures and adds up the
     // DIFFERENCES — "how far apart" is this page's own reading and no function in supplier-owed.ts
     // produces it — but it must never touch a bill, a payment or a paper, because that is the step

@@ -21,7 +21,7 @@
  * `unfiledSpellings`, which uses `isOnAccountBill` (the open-counts name for `isStillOwed`).
  */
 
-import { indexSupplierIdentity, resolveSupplierPapers } from "@/lib/supplier-owed";
+import { holdsTheirOwnPapers, indexSupplierIdentity, resolveSupplierPapers } from "@/lib/supplier-owed";
 import {
   duplicateTicketGroups,
   isOpenDuplicateGroup,
@@ -34,6 +34,7 @@ import {
 import { countOpen } from "@/lib/open-counts";
 import { NO_DISAGREEMENTS, type ReconcileOpenCounts } from "@/lib/reconcile-kinds";
 import type { SupplierOwedRead } from "@/lib/supplier-owed-read";
+import type { SupplierGapRow } from "./supplier-gap";
 import type { SupplierCandidateQuestion, SupplierMergeProposal, SupplierSpelling, DuplicateBillGroup } from "@/app/(app)/bills/supplier-balance";
 
 /** The figures the page passes and the badge does not. Named so a caller has to say which it is. */
@@ -210,6 +211,9 @@ export async function readReconcileWork(
   };
 }
 
+/** The three reads an identity stands on, by the names `readSupplierOwed` reports them under. */
+const IDENTITY_READS: readonly string[] = ["bills", "supplier accounts", "supplier names"];
+
 /**
  * THE FIGURES, OUT OF THE ONE READ. `readSupplierOwed` is the single read behind both supplier
  * questions — the one Nort makes and the one the Suppliers card draws — so taking Reconcile's
@@ -218,9 +222,58 @@ export async function readReconcileWork(
  */
 export function figuresFrom(owed: SupplierOwedRead | null): ReconcileFigures | null {
   if (!owed) return null;
+  // ── A HANDED-IN IDENTITY IS ONLY WORTH HAVING IF IT SAW THE WHOLE BOOK ──────────────────────
+  //
+  // `readSupplierOwed` does not bail when a read under it fails: it names the failure and answers
+  // with what it got. So after a lost bills read it still returns an identity map - one built over
+  // ZERO bills - and because the read below PREFERS what it is handed, every correctly filed bill in
+  // the book then reads as unfiled. The page drew "these spellings belong on that account" over
+  // bills already on it, carrying a button that says it cannot be undone, and the dock's badge
+  // disagreed with the page because the badge is handed nothing and resolves identity properly.
+  //
+  // Its own bills read has a column-fallback ladder this one has not, so the two really can differ.
+  // Handing back nothing is not a degradation: the read then asks `resolveSupplierPapers` itself,
+  // which is the same function that produced this map, and the page says what it could not read.
+  if (owed.failed.some((f) => IDENTITY_READS.includes(f))) return null;
   return {
     owedOf: new Map(owed.accounts.map((a) => [a.accountId, a.unread ? null : a.owed])),
     settledBySupplier: owed.settledBySupplier,
     identity: owed.identity,
   };
+}
+
+
+/**
+ * ── THE TWO RECORDS, PER SUPPLIER, STRAIGHT OUT OF THE ONE READ ───────────────────────────────
+ *
+ * One row per supplier WHOSE OWN PAPERS WE HOLD, because that is what makes two records exist to
+ * disagree. An account we hold no papers for has one record, not two, and its figure already IS our
+ * own tickets less what we have sent them - putting it here would invent a quarrel with ourselves.
+ *
+ * IT IS BUILT FROM `accounts`, NOT FROM `owed.lines`, AND THAT IS THE WHOLE POINT. A line on "what
+ * you owe your suppliers" exists only where an account is owed MONEY: `whatISupplierOwed` sends a net
+ * credit to `ahead` and drops anything at or under half a cent. So an account whose own papers are all
+ * CLOSED - their book says nothing is open - had no line, got no row, and the page led with "No money
+ * gap" over four of our own open tickets. That is not the quiet case; it is the loudest disagreement
+ * there is, and $3,034.54 of a live book was sitting in it.
+ *
+ * NOTHING IS ADDED UP HERE. `theirs` is that account's own figure exactly as `supplierBalance`
+ * produced it, `ours` is its own slice of `whatIBoughtNotSettled`, and an account whose figure could
+ * not be worked out is left out and NAMED by `couldNotTotal` rather than compared against a guess.
+ */
+export function supplierGapRows(owed: SupplierOwedRead | null): SupplierGapRow[] {
+  return (owed?.accounts ?? [])
+    .filter((a) => a.accountId && !a.unread && holdsTheirOwnPapers(a))
+    .map((a) => {
+      const ours = owed?.boughtByAccount[a.accountId];
+      return {
+        accountId: a.accountId,
+        name: a.name,
+        // Their own open balance. A credit of theirs arrives here negative, which is a real reading:
+        // their book says money back where ours says money out.
+        theirs: a.owed ?? 0,
+        ours: ours?.total ?? 0,
+        oursPapers: ours?.papers ?? 0,
+      };
+    });
 }

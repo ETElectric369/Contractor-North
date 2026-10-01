@@ -5,7 +5,8 @@ import { isStaffRole } from "@/lib/actions/perms";
 import { PageHeader } from "@/components/page-header";
 import { Card } from "@/components/ui/card";
 import { formatCurrency } from "@/lib/utils";
-import { notOnAnAccountSentence } from "@/lib/supplier-owed";
+import { reportError } from "@/lib/observe";
+import { papersOnNoAccountAside } from "@/lib/supplier-owed";
 import { readSupplierOwed } from "@/lib/supplier-owed-read";
 import {
   RECONCILE_KINDS,
@@ -13,7 +14,7 @@ import {
   reconcileRowsWaiting,
   type ReconcileAnsweredHere,
 } from "@/lib/reconcile-kinds";
-import { figuresFrom, readReconcileWork } from "./reconcile-read";
+import { figuresFrom, readReconcileWork, supplierGapRows } from "./reconcile-read";
 import { SupplierGap, disagreeing, moneyInDispute, type SupplierGapRow } from "./supplier-gap";
 import { SupplierCandidateReview, SupplierMergeReview, SupplierUnfiledSpellings } from "@/app/(app)/bills/supplier-merge-review";
 import { SupplierDuplicates } from "@/app/(app)/bills/supplier-duplicates";
@@ -26,6 +27,13 @@ import {
 } from "@/app/(app)/bills/supplier-actions";
 
 export const dynamic = "force-dynamic";
+
+/**
+ * WHAT TO CALL THE SUPPLIER FIGURES READ WHEN IT DOES NOT COME BACK AT ALL. Its own failures arrive
+ * named by table ("bills", "payments you have sent"); a thrown read names nothing, so it gets words
+ * that mean something to him rather than a module name.
+ */
+const OWED_READ = "what your suppliers say you owe";
 
 /**
  * ── RECONCILE ─────────────────────────────────────────────────────────────────────────────────
@@ -82,25 +90,27 @@ export default async function ReconcilePage() {
   // for the rows this page draws. The second needs the first's answers so a spelling's unpaid slice
   // matches the Suppliers card to the cent, so they are not parallel — and that is the trade: one
   // extra round trip against two screens that can never disagree about a dollar.
-  const owed = await readSupplierOwed(supabase, orgId).catch(() => null);
+  //
+  // AND A THROWN READ IS A FAILED READ WITH A NAME, NEVER A SILENT NULL. `.catch(() => null)` here
+  // turned the whole supplier half into nothing, and nothing then read as "nothing disagrees" — the
+  // false all-clear audit v1018 names as its own class of fault. Caught, named, and said out loud.
+  const owedRead = await readSupplierOwed(supabase, orgId).then(
+    (r) => ({ owed: r, threw: false }),
+    (e: unknown) => {
+      // Named in the ops sink as well as on the screen, the way the shell's own caught reads are:
+      // the screen tells him it could not check, and the sink tells us why it could not.
+      reportError("reconcile:supplier-owed", e, { orgId });
+      return { owed: null, threw: true };
+    },
+  );
+  const owed = owedRead.owed;
   const work = await readReconcileWork(supabase, orgId, figuresFrom(owed));
 
   // ── THE SUPPLIER GAP: TWO RECORDS, BOTH HANDED IN ────────────────────────────────────────────
-  // Only where two records EXIST to disagree — an account whose own papers we hold (model
-  // `their-own-papers`). An account we hold no papers for has one record, not two, and its figure is
-  // already our own tickets less what we have sent them: putting it here would invent a quarrel.
-  const gapRows: SupplierGapRow[] = (owed?.owed.lines ?? [])
-    .filter((l) => l.how === "their-own-papers" && l.accountId)
-    .map((l) => {
-      const ours = owed?.boughtByAccount[l.accountId];
-      return {
-        accountId: l.accountId,
-        name: l.name,
-        theirs: l.owed,
-        ours: ours?.total ?? 0,
-        oursPapers: ours?.papers ?? 0,
-      };
-    });
+  // One row per supplier whose own papers we hold, built by the read rather than here. Why it is not
+  // filtered off "what you owe your suppliers" is written at `supplierGapRows`: a supplier whose own
+  // papers are all CLOSED is owed nothing, has no line there, and is the loudest disagreement there is.
+  const gapRows: SupplierGapRow[] = supplierGapRows(owed);
   const gaps = disagreeing(gapRows);
   const disputed = moneyInDispute(gaps);
 
@@ -109,11 +119,23 @@ export default async function ReconcilePage() {
   const waiting = reconcileRowsWaiting(work.counts);
   const has = (k: ReconcileAnsweredHere) => open.includes(k);
 
-  // Nothing to read and nothing to press. Plain words, never an error, and never an empty heading.
-  const nothingAtAll = !gaps.length && !open.length && !work.failed.length && !(owed?.failed.length ?? 0);
+  // ── WHAT COULD NOT BE READ, IN ONE LIST, BECAUSE THE LEAD IS WHERE HE STOPS READING ──────────
+  // Two reads stand behind this page and either can lose a table. Whichever did, the sentence under
+  // the one number may not claim an all-clear: with the supplier half unread "your papers line up" is
+  // a sentence the app cannot stand behind, and he acts on the lead without scrolling.
+  const couldNotRead = [...new Set([...(owed?.failed ?? []), ...work.failed, ...(owedRead.threw ? [OWED_READ] : [])])];
+  const allRead = couldNotRead.length === 0;
 
-  // The papers on no supplier account, in the words the Suppliers card and Nort already use.
-  const notOnAnAccount = owed ? notOnAnAccountSentence(owed.owed.notOnAnAccount, formatCurrency) : null;
+  // The papers on no supplier account. They are in NEITHER side of any gap, so this page says so in
+  // its own words — `notOnAnAccountSentence` is the Suppliers card's, where "of this" is true.
+  const papersOnNoAccount = owed?.owed.notOnAnAccount.papers ?? 0;
+  const notOnAnAccount = owed ? papersOnNoAccountAside(owed.owed.notOnAnAccount, formatCurrency) : null;
+
+  // ── NOTHING TO READ AND NOTHING TO PRESS ────────────────────────────────────────────────────
+  // Plain words, never an error, and never an empty heading. It must answer for EVERY pile the page
+  // draws, including the papers on no account — /bills' own "File It" door lands here because of
+  // them, and "Nothing for you to do here" printed directly above that pile is a dead end.
+  const nothingAtAll = allRead && !gaps.length && !open.length && !papersOnNoAccount;
 
   return (
     <div>
@@ -121,10 +143,15 @@ export default async function ReconcilePage() {
 
       {/* ── THE ONE NUMBER ───────────────────────────────────────────────────────────────────────
           Erik leads with a figure, not a tally: "$5,600 of what you bought is not on your suppliers'
-          papers" is something an electrician between jobs can act on; "14 things" is not. Where
-          there is no money gap the lead is what is waiting, said as plain words — and where there is
-          nothing at all it says so, which is not an error. */}
-      <Card className="mb-6 p-4">
+          papers" is something an electrician between jobs can act on; "14 things" is not. Where there
+          is no money gap the lead is what is waiting, said as plain words — and where there is nothing
+          at all it says so, which is not an error.
+
+          AND IT NEVER CLAIMS WHAT IT DID NOT CHECK. Every all-clear below is gated on `allRead`, and
+          each clause of the all-clear sentence names one pile this page really counted: a sentence
+          that says the books line up over a pile it could not read is the worst thing on the page,
+          because it is the one he acts on without scrolling. */}
+      <Card id="reconcile-lead" className="mb-6 p-4">
         {disputed > 0.005 ? (
           <>
             <p className="text-3xl font-bold tabular-nums tracking-tight text-slate-900">{formatCurrency(disputed)}</p>
@@ -136,9 +163,13 @@ export default async function ReconcilePage() {
         ) : nothingAtAll ? (
           <>
             <p className="text-base font-semibold text-slate-900">Nothing Disagrees Right Now</p>
+            {/* EVERY CLAUSE IS A PILE THIS PAGE COUNTED, AND IT SPEAKS OF WHAT IS OPEN. It used to say
+                "no ticket is filed twice" — which is a claim about the whole book, printed directly
+                above the card naming a ticket he had already answered on two jobs. A pick he has made
+                keeps its row on purpose; what is true is that none is WAITING on him. */}
             <p className="mt-1 text-sm text-slate-600">
               Your bills and your suppliers&apos; own papers line up, every supplier name is on an account, and no ticket
-              is filed twice. Nothing for you to do here.
+              is waiting on you to pick a job. Nothing for you to do here.
             </p>
           </>
         ) : (
@@ -146,18 +177,26 @@ export default async function ReconcilePage() {
             <p className="text-base font-semibold text-slate-900">
               {waiting > 0
                 ? `${waiting} ${waiting === 1 ? "Thing" : "Things"} To Sort Out`
-                : "Nothing To Sort Out Right Now"}
+                : !allRead
+                  ? "Couldn't Check Everything Just Now"
+                  : papersOnNoAccount > 0
+                    ? `${papersOnNoAccount} ${papersOnNoAccount === 1 ? "Paper" : "Papers"} Not On A Supplier Account Yet`
+                    : "Nothing To Sort Out Right Now"}
             </p>
+            {/* "No money gap" is itself an all-clear, so it waits on every read landing. */}
             <p className="mt-1 text-sm text-slate-600">
-              No money gap between your bills and your suppliers&apos; own papers.
+              {allRead
+                ? "No money gap between your bills and your suppliers' own papers."
+                : "Some of what this page compares could not be read just now, so there is no figure to lead with."}
               {waiting > 0 ? " What is below is supplier names and tickets filed twice." : ""}
             </p>
           </>
         )}
-        {work.failed.length > 0 && (
+        {couldNotRead.length > 0 && (
           <p className="mt-2 text-sm text-amber-800" role="alert">
-            Couldn&apos;t read {work.failed.join(", ")} just now, so nothing below is counted. Reload the page to try
-            again.
+            Couldn&apos;t read {couldNotRead.join(", ")} just now, so{" "}
+            {work.failed.length > 0 ? "nothing below is counted" : "some of what is below may be short"}. Reload the
+            page to try again.
           </p>
         )}
         {notOnAnAccount && <p className="mt-2 text-sm text-slate-600">{notOnAnAccount}</p>}

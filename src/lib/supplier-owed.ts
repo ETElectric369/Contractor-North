@@ -638,6 +638,22 @@ export interface SupplierAccountFigure {
 }
 
 /**
+ * DO WE HOLD THIS ACCOUNT'S OWN PAPERS? Written once, here, because it is the question that decides
+ * whether TWO RECORDS EXIST TO DISAGREE at all.
+ *
+ * It is the model-B test, and it answers two different questions for two readers that must never
+ * drift apart: this module stamps a line `their-own-papers` with it, and /reconcile decides with it
+ * which suppliers can be drawn ours-against-theirs. Reconcile may not ask it a second way, because
+ * the interesting case is precisely the one a second way gets wrong - an account whose papers are all
+ * CLOSED is owed nothing, so it has no line on "what you owe your suppliers" while still holding two
+ * records that disagree. $3,034.54 of a live book sat in exactly that shape.
+ *
+ * NOT `supplierFigureUnread`'s question. That one asks whether a figure could be worked out at all.
+ */
+export const holdsTheirOwnPapers = (a: Pick<SupplierAccountFigure, "model">): boolean =>
+  a?.model === "supplier-invoices";
+
+/**
  * QUESTION (a): WHAT DO I OWE MY SUPPLIERS. THE ONE-NUMBER ANSWER.
  *
  * THE SUPPLIER IS THE TRUTH ABOUT ITS OWN OPEN BALANCE. Where we hold an account's own papers the
@@ -752,7 +768,7 @@ export function whatISupplierOwed(input: {
       accountId,
       name,
       owed,
-      how: a.model === "supplier-invoices" ? "their-own-papers" : "my-tickets-less-payments",
+      how: holdsTheirOwnPapers(a) ? "their-own-papers" : "my-tickets-less-payments",
       papers: a?.openPapers ?? open.papers,
       onAccount: !!a?.onAccount,
     });
@@ -850,4 +866,32 @@ export function notOnAnAccountSentence(n: NotOnAnAccount | null | undefined, for
       ? ` A credit of ${formatMoney(n.credits)} on ${n.creditPapers} of them is money back, so it is not in the figure.`
       : "";
   return `${formatMoney(n.total)} of this is on ${papers} not on a supplier account yet, counted under the name on the paper.${unnamed}${credits}`;
+}
+
+/**
+ * THE SAME PILE, SAID WHERE THERE IS NO "THIS" TO BE PART OF.
+ *
+ * `notOnAnAccountSentence` begins "$X OF THIS is on N papers...", and on the Suppliers card that is
+ * exactly right: the figure above it is what he owes, and these papers are inside it. Reconcile's
+ * lead is a different figure - how far his tickets and his suppliers' own papers are APART - and a
+ * paper on no supplier account is in neither side of that: it has no supplier balance to disagree
+ * with, so it contributes nothing to the gap. Reusing the card's sentence there told him most of the
+ * money he was about to ring the counter about was sitting on an unfiled paper, which was false.
+ *
+ * SO THE TWO SENTENCES LIVE SIDE BY SIDE, in one file, over one `NotOnAnAccount` and no second
+ * arithmetic. A reader who changes one is looking at the other, which is the only reliable way to
+ * keep two sentences about one pile of money from drifting.
+ */
+export function papersOnNoAccountAside(n: NotOnAnAccount | null | undefined, formatMoney: (v: number) => string): string | null {
+  if (!n || n.papers <= 0) return null;
+  const papers = `${n.papers} ${n.papers === 1 ? "paper that is" : "papers that are"}`;
+  const unnamed = n.unnamed > 0 ? ` ${n.unnamed} of them ${n.unnamed === 1 ? "has" : "have"} no supplier name on it at all.` : "";
+  const credits =
+    n.credits > 0.005
+      ? ` A credit of ${formatMoney(n.credits)} on ${n.creditPapers} of them is money back, so it is not in that figure either.`
+      : "";
+  // THE MONEY FIRST, THEN WHY IT IS BESIDE THE GAP RATHER THAN INSIDE IT. It names no figure "above",
+  // because this sentence prints both under a dispute figure and on its own when there is none, and a
+  // sentence that points at something that may not be there reads as the machine losing track.
+  return `${formatMoney(n.total)} is on ${papers} not on a supplier account yet, counted under the name on the paper. A paper on no account has no supplier balance to disagree with, so none of it is in a gap figure on this page.${unnamed}${credits}`;
 }

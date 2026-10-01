@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { readReconcileWork, figuresFrom } from "./reconcile-read";
+import { readReconcileWork, figuresFrom, supplierGapRows } from "./reconcile-read";
+import { disagreeing, gapOf } from "./supplier-gap";
 import { reconcileBadge } from "@/lib/reconcile-kinds";
 import { readSupplierOwed } from "@/lib/supplier-owed-read";
 
@@ -198,6 +199,63 @@ describe("nothing is claimed off a read that failed", () => {
  * both numbers are `readSupplierOwed`'s — never added up on the page.
  */
 describe("the two records, both from readSupplierOwed", () => {
+  /**
+   * ── AN ACCOUNT WHOSE OWN PAPERS ARE ALL CLOSED IS THE LOUDEST DISAGREEMENT THERE IS ───────────
+   *
+   * Their book says nothing is open. Ours says two tickets are, and no paper of theirs covers them.
+   * That is the measured production case — $3,034.54 on one ticket whose covering paper was already
+   * closed — and the gap rows used to be filtered off `whatISupplierOwed().lines`, which only carries
+   * an account that is owed MONEY. So this account had no line, got no row, and the page led with
+   * "No money gap". The rows come off `accounts` now, and this is the case that says why.
+   */
+  it("a supplier whose own papers are all closed still gets a row, with their side at zero", async () => {
+    const closed = {
+      ...BOOK,
+      bills: BOOK.bills.filter((b) => b.id === "b-on" || b.id === "b-d1"),
+      supplier_invoices: [{ ...BOOK.supplier_invoices[0], total: 300, open_balance: 0, closed: true }],
+    };
+    const { owed } = await read(closed as any);
+    // Nothing on that line: their own paper is closed, so they are owed nothing and there is no line.
+    expect(owed!.owed.lines.find((l) => l.accountId === ACCOUNT)).toBeUndefined();
+    // And the row is there all the same, because we hold their papers: two records, far apart.
+    const rows = supplierGapRows(owed);
+    expect(rows).toEqual([{ accountId: ACCOUNT, name: "Crestline Electrical Wholesale", theirs: 0, ours: 421.75, oursPapers: 2 }]);
+    expect(disagreeing(rows).map((r) => gapOf(r))).toEqual([421.75]);
+  });
+
+  /** An account we hold NO paper of has one record, not two. Comparing it would invent a quarrel. */
+  it("an account whose papers we do not hold is not compared at all", async () => {
+    const { owed } = await read({ ...BOOK, supplier_invoices: [] } as any);
+    expect(owed!.owed.lines.find((l) => l.accountId === ACCOUNT)?.how).toBe("my-tickets-less-payments");
+    expect(supplierGapRows(owed)).toEqual([]);
+  });
+
+  /** An account whose figure could not be worked out is NAMED by `couldNotTotal`, never compared. */
+  it("an account whose figure could not be read is left out of the comparison", async () => {
+    const { owed } = await read(BOOK as any, { supplier_invoices: { message: "boom" } });
+    expect(owed!.owed.couldNotTotal.map((a) => a.accountId)).toEqual([ACCOUNT]);
+    expect(supplierGapRows(owed)).toEqual([]);
+  });
+
+  /**
+   * ── AND A HANDED-IN IDENTITY THAT SAW NO BILLS IS WORSE THAN NONE ─────────────────────────────
+   *
+   * `readSupplierOwed` names a failed read and answers anyway, so after a lost bills read it hands
+   * back an identity map built over ZERO bills. The read below PREFERS what it is handed, so every
+   * filed bill in the book then read as unfiled and the page proposed re-filing bills already on
+   * their account — behind a button that says it cannot be undone. The badge, handed nothing, resolved
+   * identity properly and disagreed with the page, which is the one thing this module exists to stop.
+   */
+  it("a figures read that lost its bills hands back no figures, so identity is resolved properly", async () => {
+    const { owed, page, badge } = await read(BOOK as any, { bills: { message: "boom" } });
+    expect(owed!.failed).toContain("bills");
+    expect(figuresFrom(owed), "an identity built over zero bills must not be handed on").toBeNull();
+    // Both readers now agree, which is what they could not do before.
+    expect(page.counts).toEqual(badge.counts);
+    // And the bill that IS on its account is not offered for re-filing.
+    expect(page.proposals.flatMap((p) => p.spellings.map((s) => s.alias))).not.toContain("Crestline Electrical Wholesale");
+  });
+
   it("their own papers and our own tickets come back per account, from the owning functions", async () => {
     const { owed } = await read(BOOK as any);
     const line = owed!.owed.lines.find((l) => l.accountId === ACCOUNT)!;
