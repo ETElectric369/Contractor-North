@@ -34,11 +34,18 @@ export type BusinessCostBucket = (typeof BUSINESS_COST_BUCKETS)[number];
 export type PnlSection = "cogs" | "overhead";
 
 /**
- * WHERE EACH BUCKET SITS ON THE PROFIT AND LOSS (Erik, 2026-09-28: "COGS (including fuel as it IS a
- * direct cost in this case…) Gross Profit is before Overhead"). The accounting industry's own test:
- * if the cost disappears when you stop doing jobs, it is COGS; if it keeps running whether you have
- * work or not, it is Overhead. Fuel is COGS here: nearly every fill-up is within a few days of job
- * work, the driving to and from the jobs. Every other bucket is Overhead.
+ * WHERE EACH BUCKET SITS ON THE PROFIT AND LOSS. The accounting industry's own test: if the cost
+ * disappears when you stop doing jobs, it is COGS; if it keeps running whether you have work or
+ * not, it is Overhead.
+ *
+ * FUEL IS OVERHEAD (Erik, 2026-09-30: "lets move fuel to overhead above Auto and take out of COGS").
+ * It sat in COGS for two days (his 2026-09-28 call, on the reasoning that nearly every fill-up is
+ * within a few days of job work) and he moved it: the truck burns fuel whether or not there is work
+ * in the book. It is FIRST in the list, so it reads above Auto wherever the Overhead lines are
+ * drawn in the list's own order, and it keeps its own bar on Money by Month (money-chart.ts) while
+ * the Overhead bar carries the whole total, fuel included — his words: "it could show fuel on its
+ * own then a total overhead on the overhead button". So COGS is now the job-side lines only
+ * (materials and bills, stock, crew pay and crew mileage) and every bucket is Overhead.
  *
  * THIS IS THE ONE PLACE THE SPLIT IS WRITTEN: every profit and loss the app draws (the Owner's Draw
  * card, Money by Month, the accountant's Summary, Nort's words) reads it through
@@ -46,7 +53,7 @@ export type PnlSection = "cogs" | "overhead";
  * added to the list above does not compile until someone says which half it is in.
  */
 export const BUCKET_SECTION: Record<BusinessCostBucket, PnlSection> = {
-  Fuel: "cogs",
+  Fuel: "overhead",
   Auto: "overhead",
   "Tools & Supplies": "overhead",
   "Phone & Office": "overhead",

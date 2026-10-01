@@ -85,8 +85,11 @@ const SERIES: Record<MoneySeriesKey, Omit<MoneySeries, "key" | "label">> = {
   lost: { fill: "fill-slate-500", swatch: "bg-slate-500", defaultOn: false },
   crewPay: { fill: "fill-amber-600", swatch: "bg-amber-600", defaultOn: false },
   mileage: { fill: "fill-sky-600", swatch: "bg-sky-600", defaultOn: false },
-  // FUEL STANDS OUT (0362; Erik, 2026-09-27): the Fuel bucket is its own series, never inside
-  // Overhead, in the pink-800 the Fuel card and the bank card draw it in.
+  // FUEL STANDS OUT (0362; Erik, 2026-09-27), in the pink-800 the Fuel card and the bank card draw
+  // it in. It keeps its own bar now that the bucket is Overhead (2026-09-30), and the Overhead bar
+  // beside it carries the whole total, fuel included — Erik: "it could show fuel on its own then a
+  // total overhead on the overhead button". So reading both bars at once counts fuel twice on
+  // purpose; each one is true on its own, and the chip names say which is which.
   fuel: { fill: "fill-pink-800", swatch: "bg-pink-800", defaultOn: false },
   business: { fill: "fill-pink-500", swatch: "bg-pink-500", defaultOn: false },
 };

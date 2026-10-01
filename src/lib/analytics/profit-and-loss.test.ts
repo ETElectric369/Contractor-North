@@ -245,10 +245,10 @@ describe("the owner's switch: an office viewer the owner hasn't shared Owner's D
 });
 
 describe("the COGS/Overhead split is data (BUCKET_SECTION), not an if", () => {
-  it("Fuel is COGS and every other bucket Overhead; each bucket is on the profit and loss exactly once", () => {
-    expect(BUCKET_SECTION.Fuel).toBe("cogs");
-    expect(bucketsIn("cogs")).toEqual(["Fuel"]);
-    expect(bucketsIn("overhead")).toEqual(["Auto", "Tools & Supplies", "Phone & Office", "Insurance & Licenses", "Fees", "Other"]);
+  it("every bucket is Overhead (Erik moved Fuel there on 2026-09-30); each bucket is on the profit and loss exactly once", () => {
+    expect(BUCKET_SECTION.Fuel).toBe("overhead");
+    expect(bucketsIn("cogs")).toEqual([]);
+    expect(bucketsIn("overhead")).toEqual(["Fuel", "Auto", "Tools & Supplies", "Phone & Office", "Insurance & Licenses", "Fees", "Other"]);
     const lines = pnlLines();
     for (const b of BUSINESS_COST_BUCKETS) {
       const mine = lines.filter((l) => l.key === `bucket:${b}`);
@@ -278,9 +278,9 @@ describe("the COGS/Overhead split is data (BUCKET_SECTION), not an if", () => {
   });
 
   it("the sentences name the lines from the data", () => {
-    expect(cogsWords()).toBe("Materials & Bills, Stock Bought, Stock Lost, Crew Pay (1099), Crew Mileage Paid and Fuel");
-    expect(cogsWords({ stockInMaterials: true })).toBe("Materials & Bills, Stock Lost, Crew Pay (1099), Crew Mileage Paid and Fuel");
-    expect(overheadWords()).toBe("Auto, Tools & Supplies, Phone & Office, Insurance & Licenses, Fees and Other");
+    expect(cogsWords()).toBe("Materials & Bills, Stock Bought, Stock Lost, Crew Pay (1099) and Crew Mileage Paid");
+    expect(cogsWords({ stockInMaterials: true })).toBe("Materials & Bills, Stock Lost, Crew Pay (1099) and Crew Mileage Paid");
+    expect(overheadWords()).toBe("Fuel, Auto, Tools & Supplies, Phone & Office, Insurance & Licenses, Fees and Other");
   });
 
   it("every cost line the engine writes lands on a line of the profit and loss", () => {
