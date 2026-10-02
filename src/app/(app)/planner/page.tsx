@@ -370,7 +370,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
     "Fall seven times, stand up eight.",
     "A journey of a thousand miles begins with a single step. —Lao Tzu",
     "Silence is a source of great strength. —Lao Tzu",
-    "Do your work, then step back. — TESSTECHING ",
+    "Do your work, then step back. —Tao Te Ching",
     "Water is soft, yet it wears away stone.",
     "Let go, or be dragged.",
     "Empty your cup, and it can be filled.",

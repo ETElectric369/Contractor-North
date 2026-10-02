@@ -35,7 +35,7 @@ import { StopClockSheet } from "./stop-clock-sheet";
  * Miles, a pay-rate override and notes live on the shift's editor, which the toast after a save
  * opens in one tap ("Open That Shift"); an end on another day is the "Ends The Next Day" box.
  *
- * THE JOB IS ALWAYS SOMETHING SOMEBODY CHOSE. On the job's own page it is that job ("Job · 85
+ * THE JOB IS ALWAYS SOMETHING SOMEBODY CHOSE. On the job's own page it is that job ("Job · 41
  * Larkspur"). On Timecards it starts where the schedule put the person that day (shiftsOnDay's
  * scheduledJob: the crew board's day row, else a rostered job whose days cover it), and on "Pick
  * The Job" when the schedule says nothing, so Save refuses until someone picks: a job, Company Time

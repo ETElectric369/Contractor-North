@@ -120,6 +120,37 @@ const SENTINELS = new Map<string, string>([
 const WITH_SENTINELS = new Map([...SCRUBBED, ...SENTINELS]);
 
 /**
+ * PHRASES WHERE A SCRUBBED WORD IS NOT A PERSON.
+ *
+ * Some of the scrubbed words are also ordinary English, or the name of something public: a street
+ * can be called the same thing as an open-source licence, an operating-system version, the region
+ * this business works in, or a book that has been out of copyright for two thousand years. Banning
+ * the bare word is still right — the real streets appear in fixtures with no street type after them
+ * ("10429 BAYBERRY", in the invented spelling), as job ids, and as surnames, so a rule that only
+ * fired on pairs would let every one of them back in, which is why the bare entries stay and this
+ * list exists instead. It must not fire on the public thing of the same name. Each entry below
+ * is a whole PHRASE that is known not to be about a person. A hit whose surrounding 2 or 3 words
+ * match one of these is not a hit.
+ *
+ * The phrases are stamped for the same reason the names are: writing "<word> 2.0" here would say
+ * out loud which street was scrubbed. TO ADD ONE, print the stamp of the normalised phrase — the
+ * words lowercased with every run of non-letters as one space:
+ *
+ *   node -e 'const c=require("crypto");const s="contractor-north/no-real-names/v1";
+ *            console.log(c.createHash("sha256").update(s+"\0"+process.argv[1]).digest("hex").slice(0,16))' "the phrase"
+ */
+const INNOCENT = new Map<string, string>([
+  ["5392a795f3a90bce", "a public-domain book whose title opens with a scrubbed surname (the planner's quote of the day)"],
+  ["00e0a9d9ff325a00", "an open-source licence whose name is also a scrubbed street"],
+  ["17bdc597f6f2538e", "the same licence, written with its version number"],
+  ["2432e563da250445", "the same licence, spelled out"],
+  ["8cc766123fdad34e", "the same licence's foundation"],
+  ["80994dffc208d083", "an operating-system version named after a scrubbed street"],
+  ["e6e59a08c2c74705", "the same version, with its vendor prefix"],
+  ["18f1c1cd338bb84a", "the region this business works in, which opens with a scrubbed street"],
+]);
+
+/**
  * The first word of every two-word stamp. Only after one of these is it worth pairing the next
  * word, which is what keeps a three-million-word scan down to a couple of seconds.
  */
@@ -177,23 +208,38 @@ const stampOf = (w: string): string => {
   return h;
 };
 
+/**
+ * Why the word at `i` is not about a person, if one of the 2- and 3-word phrases it sits inside is
+ * an allowlisted public thing. Two and three words is the whole reach: every phrase in INNOCENT is
+ * that long, and a longer one would start matching sentences rather than names.
+ */
+function innocentAround(words: string[], i: number, innocent: Map<string, string> = INNOCENT): string | undefined {
+  for (let n = 2; n <= 3; n++) {
+    for (let s = Math.max(0, i - n + 1); s <= i && s + n <= words.length; s++) {
+      const why = innocent.get(stampOf(words.slice(s, s + n).join(" ")));
+      if (why) return why;
+    }
+  }
+  return undefined;
+}
+
 /** The invented name for every scrubbed name these words still contain. */
-function scrubbedNamesInWords(words: string[], table: Map<string, string>): string[] {
+function scrubbedNamesInWords(words: string[], table: Map<string, string>, innocent: Map<string, string> = INNOCENT): string[] {
   const found: string[] = [];
   for (let i = 0; i < words.length; i++) {
     const h = stampOf(words[i]);
     const one = table.get(h);
+    const two = PAIR_STARTS.has(h) && i + 1 < words.length ? table.get(stampOf(`${words[i]} ${words[i + 1]}`)) : undefined;
+    if ((one || two) && innocentAround(words, i, innocent)) continue;
     if (one) found.push(one);
-    if (PAIR_STARTS.has(h) && i + 1 < words.length) {
-      const two = table.get(stampOf(`${words[i]} ${words[i + 1]}`));
-      if (two) found.push(two);
-    }
+    if (two) found.push(two);
   }
   return found;
 }
 
 /** The same, from text, for the self-check. */
-const scrubbedNamesIn = (text: string, table: Map<string, string> = SCRUBBED) => scrubbedNamesInWords(wordsOf(text), table);
+const scrubbedNamesIn = (text: string, table: Map<string, string> = SCRUBBED, innocent: Map<string, string> = INNOCENT) =>
+  scrubbedNamesInWords(wordsOf(text), table, innocent);
 
 /**
  * A two-word name wrapped over a line break is still the name, and four of them were: a quote in a
@@ -201,16 +247,45 @@ const scrubbedNamesIn = (text: string, table: Map<string, string> = SCRUBBED) =>
  * the rest at the start of the next, so a scan that stops at the newline walked straight past them.
  * Each line is therefore also paired with the last word of the line before it.
  */
-function acrossTheBreak(lastWordBefore: string | undefined, firstWordHere: string | undefined, table: Map<string, string>): string | undefined {
+function acrossTheBreak(
+  lastWordBefore: string | undefined,
+  wordsHere: string[],
+  table: Map<string, string>,
+  innocent: Map<string, string> = INNOCENT,
+): string | undefined {
+  const firstWordHere = wordsHere[0];
   if (!lastWordBefore || !firstWordHere) return undefined;
   if (!PAIR_STARTS.has(stampOf(lastWordBefore))) return undefined;
-  return table.get(stampOf(`${lastWordBefore} ${firstWordHere}`));
+  const name = table.get(stampOf(`${lastWordBefore} ${firstWordHere}`));
+  if (!name) return undefined;
+  // A public phrase is still public when a line break falls inside it.
+  if (innocentAround([lastWordBefore, ...wordsHere], 0, innocent)) return undefined;
+  return name;
 }
+
+/**
+ * WHAT TO DO ABOUT IT, both ways, because the advice used to only go one way. A word can match here
+ * and still be innocent — some of the scrubbed streets are ordinary English — so a message that
+ * only said "write X instead" sent a developer off to make the code wrong, and could not say why it
+ * fired because the real word is a stamp. Both doors are named, and neither is a dead end.
+ */
+const advice = (instead: string) =>
+  `if it is a person, a customer or their street, write "${instead}" instead; if it is an ordinary ` +
+  `word (a licence, an OS version, a place, a book), add the phrase to INNOCENT in ` +
+  `tests/no-real-names.test.ts — the recipe is in the comment above it`;
 
 /** 555-01xx is the reserved example range. Anything else shaped like a phone number is somebody's. */
 const PHONE_SHAPED = /(?<![0-9])\(?[2-9][0-9]{2}\)?[ .)-]{1,2}[0-9]{3}[ .-][0-9]{4}(?![0-9])/g;
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
+
+/**
+ * EVERY DIRECTORY THE PUBLIC CAN READ, not just the one the app is built from. The first pass of
+ * this gate walked src/ and tests/ only, and a .test.ts parked under docs/archive/ — exactly the
+ * kind of file this gate was built for — kept a beta tester's full name for that reason, green
+ * forever because nothing walked it. A missing directory fails the walk rather than being skipped.
+ */
+const WALKED = ["src", "tests", "docs", "scripts", ".github", "public"];
 
 function shippedFiles(dir: string, out: string[] = []): string[] {
   for (const name of readdirSync(dir)) {
@@ -235,10 +310,68 @@ describe("the scanner can see", () => {
   });
 
   it("sees a two-word name wrapped over a line break", () => {
-    expect(acrossTheBreak("zzsentinel", "hollow", WITH_SENTINELS)).toBe("a made-up name (sentinel)");
-    expect(acrossTheBreak("zzsentinel", "hollow", SCRUBBED)).toBeUndefined();
-    expect(acrossTheBreak("alder", "ridge", WITH_SENTINELS)).toBeUndefined();
-    expect(acrossTheBreak(undefined, "hollow", WITH_SENTINELS)).toBeUndefined();
+    expect(acrossTheBreak("zzsentinel", ["hollow"], WITH_SENTINELS)).toBe("a made-up name (sentinel)");
+    expect(acrossTheBreak("zzsentinel", ["hollow"], SCRUBBED)).toBeUndefined();
+    expect(acrossTheBreak("alder", ["ridge"], WITH_SENTINELS)).toBeUndefined();
+    expect(acrossTheBreak(undefined, ["hollow"], WITH_SENTINELS)).toBeUndefined();
+    expect(acrossTheBreak("zzsentinel", [], WITH_SENTINELS)).toBeUndefined();
+  });
+
+  /**
+   * The allowlist, proved on a made-up public thing for the same reason the names are stamps: a test
+   * that spelled the real licence or the real book title would say out loud which street was
+   * scrubbed, and that is the one thing this file must not do.
+   */
+  describe("a scrubbed word inside an allowlisted phrase", () => {
+    const INNOCENT_SENTINEL = new Map([[stamp("zzsentinelname press"), "a made-up public thing (sentinel)"]]);
+    const find = (s: string) => scrubbedNamesIn(s, WITH_SENTINELS, INNOCENT_SENTINEL);
+
+    it("is not a hit, because the phrase is not about a person", () => {
+      expect(find("the Zzsentinelname Press edition, 1934")).toEqual([]);
+      expect(find("published by Zzsentinelname Press")).toEqual([]);
+    });
+
+    it("is still a hit everywhere else, so the allowlist cannot be a hole", () => {
+      expect(find("He wired 12 Zzsentinelname Rd")).toEqual(["a made-up name (sentinel)"]);
+      // The word right next to a near-miss of the phrase is not covered either.
+      expect(find("Zzsentinelname pressed the breaker in")).toEqual(["a made-up name (sentinel)"]);
+    });
+
+    it("reaches three words and no further", () => {
+      // Far enough away that no 2- or 3-word window holds both: the name is reported again.
+      expect(find("Zzsentinelname lives four words from the Press")).toEqual(["a made-up name (sentinel)"]);
+    });
+
+    it("still covers the phrase when a line break falls inside it", () => {
+      expect(acrossTheBreak("zzsentinel", ["hollow"], WITH_SENTINELS, new Map([[stamp("zzsentinel hollow press"), "x"]]))).toBe(
+        "a made-up name (sentinel)",
+      );
+      expect(acrossTheBreak("zzsentinel", ["hollow", "press"], WITH_SENTINELS, new Map([[stamp("zzsentinel hollow press"), "x"]]))).toBeUndefined();
+    });
+
+    it("is spelled as a stamp, never as the phrase itself", () => {
+      expect(INNOCENT.size).toBeGreaterThan(0);
+      for (const [key, why] of INNOCENT) {
+        expect(key, `${key} is not a stamp`).toMatch(/^[0-9a-f]{16}$/);
+        expect(why.length, `${key} does not say what it is`).toBeGreaterThan(10);
+      }
+    });
+  });
+
+  /**
+   * THE GATE MUST NOT REJECT THE CORRECT TEXT. One scrubbed surname is also the first word of a
+   * public-domain book, and the quote of the day on /planner credits it. The first pass of the
+   * scrub mangled that attribution into a fake customer's name wrapped in two NUL bytes, and then
+   * the gate refused the correct spelling — so the defect could not be fixed without this
+   * allowlist. If the allowlist entry goes, this fails rather than the quote going wrong again.
+   */
+  it("passes the quote of the day on the planner, as it is actually written", () => {
+    const planner = readFileSync(path.join(ROOT, "src/app/(app)/planner/page.tsx"), "utf8");
+    const quotes = planner.split("\n").filter((l) => /^\s*"[^"]+",\s*$/.test(l));
+    expect(quotes.length, "the QUOTES array did not read").toBeGreaterThan(20);
+    for (const line of quotes) {
+      expect(scrubbedNamesIn(line), `a quote of the day trips the gate: ${line.trim()}`).toEqual([]);
+    }
   });
 
   it("leaves the invented names alone, which is the whole point of swapping them in", () => {
@@ -253,9 +386,13 @@ describe("no shipped file names a real customer, street, phone or account", () =
   // One pass over the whole of src/ and tests/, both checks on the same read. Three million words,
   // so it is given room: the point is that it reads everything, not that it reads fast.
   it(
-    "every .ts, .tsx, .css and .svg under src/ and tests/ is clean",
+    "every .ts, .tsx, .css and .svg the public can read is clean",
     () => {
-      const files = [...shippedFiles(path.join(ROOT, "src")), ...shippedFiles(path.join(ROOT, "tests"))];
+      const files = WALKED.flatMap((d) => {
+        const dir = path.join(ROOT, d);
+        expect(statSync(dir).isDirectory(), `${d}/ is not there to walk`).toBe(true);
+        return shippedFiles(dir);
+      });
       let wordsRead = 0;
       const names: string[] = [];
       const phones: string[] = [];
@@ -270,11 +407,11 @@ describe("no shipped file names a real customer, street, phone or account", () =
           const line = lines[i];
           const words = normalisedLines[i].split(" ").filter(Boolean);
           wordsRead += words.length;
-          const wrapped = acrossTheBreak(lastWordBefore, words[0], SCRUBBED);
-          if (wrapped) names.push(`${rel}:${i} still names someone real over the line break — write "${wrapped}" instead`);
+          const wrapped = acrossTheBreak(lastWordBefore, words, SCRUBBED);
+          if (wrapped) names.push(`${rel}:${i} names someone real over the line break — ${advice(wrapped)}`);
           if (words.length) lastWordBefore = words[words.length - 1];
           for (const instead of new Set(scrubbedNamesInWords(words, SCRUBBED))) {
-            names.push(`${rel}:${i + 1} still names someone real — write "${instead}" instead`);
+            names.push(`${rel}:${i + 1} names someone real — ${advice(instead)}`);
           }
           for (const m of line.match(PHONE_SHAPED) ?? []) {
             if (!m.includes("555")) phones.push(`${rel}:${i + 1} ${m} — use a 555-01xx number`);
@@ -292,4 +429,70 @@ describe("no shipped file names a real customer, street, phone or account", () =
     },
     60_000,
   );
+
+  /**
+   * AND NO HOUSE NUMBER WAS LEFT BEHIND BY ITS STREET.
+   *
+   * Swapping the street word is only half an address. Three doc comments wrapped an address over a
+   * line break with the number at the end of one line and the street at the start of the next, the
+   * sweep replaced the street and walked past the number, and the real house number stayed in the
+   * repo in front of an invented street. The word scan above cannot see it: a number is not a name.
+   *
+   * The fixtures are the authority. Every house number a TEST writes in front of an invented street
+   * is by definition invented, near misses included — a test turns on "a different house number is
+   * never the street", so one street legitimately has several. A number in front of that street
+   * ANYWHERE ELSE that no fixture uses is a real one the sweep stranded.
+   */
+  it("every house number written in front of an invented street is one the fixtures use", () => {
+    // The invented names, longest first so "Clearview Inspections" wins over "Clearview". The
+    // parenthetical entries explain themselves after the name, so only the name itself is taken.
+    const invented = [...SCRUBBED.values()]
+      .map((v) => v.split(" (")[0])
+      .filter((v) => /^[A-Za-z][A-Za-z ]*$/.test(v))
+      .sort((a, b) => b.length - a.length);
+    // A number is a HOUSE number only when nothing runs into it: "J-010 Pinyon Sage" is a job
+    // number followed by a job's name, which is how Erik asks to be shown a job, not an address.
+    const re = new RegExp(`(?<![A-Za-z0-9-])(\\d{1,6})\\s+(${invented.map((v) => v.replace(/ /g, "\\s+")).join("|")})\\b`, "gi");
+
+    const fixtureNumbers = new Map<string, Set<string>>();
+    const elsewhere: { street: string; num: string; where: string }[] = [];
+    const files = WALKED.flatMap((d) => shippedFiles(path.join(ROOT, d))).filter((f) => /\.tsx?$/.test(f));
+
+    for (const f of files) {
+      const rel = path.relative(ROOT, f);
+      const isFixture = /\.test\.tsx?$/.test(rel);
+      // One flat string per file, with each line's comment leader dropped, so an address split over
+      // a line break reads as the one address it is. `starts` maps an offset back to its line.
+      const lines = readFileSync(f, "utf8").split("\n");
+      const starts: number[] = [];
+      let flat = "";
+      for (const line of lines) {
+        starts.push(flat.length);
+        flat += `${line.replace(/^\s*(\*\/|\*|\/\/|\/\*\*?)\s?/, " ")} `;
+      }
+      for (const m of flat.matchAll(re)) {
+        const street = m[2].replace(/\s+/g, " ").toLowerCase();
+        if (isFixture) {
+          if (!fixtureNumbers.has(street)) fixtureNumbers.set(street, new Set());
+          fixtureNumbers.get(street)!.add(m[1]);
+        } else {
+          let lo = 0;
+          while (lo + 1 < starts.length && starts[lo + 1] <= m.index) lo++;
+          elsewhere.push({ street, num: m[1], where: `${rel}:${lo + 1}` });
+        }
+      }
+    }
+
+    // It read the fixtures, not an empty list: a regex that stops matching fails here.
+    expect(fixtureNumbers.size, "no invented street was found in any fixture").toBeGreaterThan(10);
+
+    const stranded = elsewhere
+      .filter((h) => !fixtureNumbers.get(h.street)?.has(h.num))
+      .map(
+        (h) =>
+          `${h.where} says "${h.num} ${h.street}" — no fixture uses that number with that street, so it is a real ` +
+          `one the scrub left behind; write ${[...(fixtureNumbers.get(h.street) ?? [])].sort().join(" or ") || "the fixtures' number"} instead`,
+      );
+    expect(stranded, `${stranded.length} real house number(s) are still here:\n${stranded.join("\n")}`).toEqual([]);
+  });
 });

@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { setupSteps, nextStep, setupProgress, type SetupFacts } from "./setup-steps";
 
 /**
- * THE COLD START, from the day it actually bit. Andrew Cohen signed up as the first outside
+ * THE COLD START, from the day it actually bit. Andrew Crake signed up as the first outside
  * tenant and landed on an empty My Day. Inside a minute the weather widget threw (no address on a
  * new org) and his inspection page had no questions on it (the seed makes job codes but no
  * inspection sheet). Neither failure announces itself — you just see a broken widget and an empty
@@ -10,7 +10,7 @@ import { setupSteps, nextStep, setupProgress, type SetupFacts } from "./setup-st
  */
 
 const BRAND_NEW: SetupFacts = {
-  fullName: "Andrew Cohen", // signup captured this
+  fullName: "Andrew Crake", // signup captured this
   tradeLabel: null,
   city: null,
   serviceArea: null,

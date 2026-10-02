@@ -406,7 +406,7 @@ export interface BillingSplitLine {
    * and it is the projection law wearing the same hat as the tax gap below.
    *
    * `billLineCost` is `amount ?? unit_price * (qty || 1)`: a line whose stored extension is $0.00
-   * with a real price beside it - CED's standard back-order print, and there is one on his 85
+   * with a real price beside it - CED's standard back-order print, and there is one on his 41
    * Larkspur receipt right now - costs $38.98 to the importer and $0.00 to this card. Because the
    * tax share here is PROPORTIONAL, a short denominator then skews every other exclusion on the
    * same receipt too. A type too narrow to ask the right question is how two screens end up
