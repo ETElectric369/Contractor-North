@@ -72,19 +72,26 @@
 	</array>
 	<key>UIStatusBarStyle</key>
 	<string>UIStatusBarStyleDarkContent</string>
-	<!-- THE iPHONE MAY NOW BE TURNED SIDEWAYS — but only where a screen says so.
-	     This list is the OUTER BOUND, not the policy: it is what iOS will even consider, and it
-	     cannot be read per screen because it is compiled into the app. The policy lives one layer
-	     in, at NorthBridgeViewController.supportedInterfaceOrientations, which answers portrait on
-	     every screen until the page asks for sideways through the ScreenTurn plugin. WHICH screens
-	     ask is one declared list in the web app, src/lib/screens-that-turn.ts, where every entry
-	     carries the reason it warrants the width. Upside down is deliberately absent.
+	<!-- THE iPHONE'S INTERFACE NEVER ROTATES. PORTRAIT, FULL STOP — and that is the whole mechanism,
+	     not a limitation of it.
+
+	     Erik, on cn-v1041, which let iOS rotate: "nice it rotates now on schedule but the dock and top
+	     bar rotate with it still." Of course they did: iOS rotating the interface is what carries them
+	     around. What he asked for, twice, is the opposite — "lock the top bar and the dock positions
+	     and just rotate the buttons while the internal screen rotates". The only way the top bar can
+	     stay against the phone's top edge and the dock against its bottom edge is for nothing to move
+	     at all, which is what this list now guarantees.
+
+	     iOS still TELLS us which way the phone is physically held while the interface is locked
+	     (UIDevice.orientation and the device-orientation notification), and ScreenTurnPlugin.swift
+	     passes that one word to the page, which draws the region between the chrome a quarter turn.
+	     WHICH screens may do that is still one declared list in the web app,
+	     src/lib/screens-that-turn.ts, with the reason for every entry.
+
 	     Changing this file is why the shell has to be rebuilt and reinstalled for any of it. -->
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
-		<string>UIInterfaceOrientationLandscapeLeft</string>
-		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
 	<key>UISupportedInterfaceOrientations~ipad</key>
 	<array>
