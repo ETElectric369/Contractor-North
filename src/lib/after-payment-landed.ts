@@ -1,6 +1,7 @@
 import "server-only";
 import { recalcInvoice } from "@/lib/invoice-recalc";
 import { completeJobWhenPaid, type CompleteWhenPaid } from "@/lib/complete-job-when-paid";
+import type { BillingAccess } from "@/lib/finish-bills-first";
 import { revalidateMoney } from "@/lib/revalidate-money";
 import { invoiceOverpayment } from "@/lib/invoice-math";
 import { notifyPeople } from "@/lib/notifications";
@@ -81,6 +82,13 @@ export async function afterPaymentLanded(
     invoiceId: string;
     /** The invoice's company. Without it there is nobody to ring: the bell is skipped, said in the log. */
     orgId?: string | null;
+    /**
+     * WHICH CLIENT THIS DOOR HOLDS — required, and passed straight to the paid-in-full gate, because the
+     * billing step behind it prices the job's hours and the pricing reads answer differently to a staff
+     * client and to the service role (lib/finish-bills-first's module note). Not inferred from `orgId`:
+     * every door knows its own company, only one of them is the webhook.
+     */
+    access: BillingAccess;
     /** The words and the audience for the one bell line. Absent on a repeat: see step 3 above. */
     bell?: PaymentBell | null;
   },
@@ -90,7 +98,7 @@ export async function afterPaymentLanded(
   // 2. Paid in full on a standard invoice, on a job that has started, with no other open bill: the
   //    job is done. Never off a balance that didn't recompute.
   const job: CompleteWhenPaid = settled
-    ? await completeJobWhenPaid(supabase, invoiceId)
+    ? await completeJobWhenPaid(supabase, invoiceId, input.access)
     : { completed: false, why: "the invoice's figures didn't recompute, so nothing was finished" };
 
   let rang: string[] = [];
@@ -201,8 +209,12 @@ async function ringJobStillToBill(orgId: string | null | undefined, job: Complet
     reportError("afterPaymentLanded:job-bell", new Error("a job's billing step had something to say with no company on it, so nobody could be told"), {});
     return;
   }
+  // THE TITLE COMES WITH THE SENTENCE (paidDoorVerdict), and is never guessed from `completed` here: a
+  // read that FAILED used to go out titled "Still to bill" — a claim about the job's money that nothing
+  // had checked, and on a fixed-price job the one alarm it must never raise. The gate always sets it
+  // beside `say` (completeJobWhenPaid's `heard`), so there is nothing left to guess.
   await notifyPeople(orgId, await orgStaffIds(orgId), "invoice_paid", {
-    title: job.completed ? "Job finished" : "Still to bill",
+    title: job.sayTitle,
     body: job.say,
     ...(job.jobId ? { url: `/jobs/${job.jobId}` } : {}),
   });

@@ -879,8 +879,10 @@ export async function finishJob(
   // invoice on a plain T&M job. Only a draft that was really built completes the job; a door that
   // refuses (or a read that fails) leaves the job as it was and says why. Nothing is emailed: a draft
   // is not sent until a person sends it. No unbilled work: the job finishes as it always has, below.
-  // THE SAME STEP THE PAID-IN-FULL GATE RUNS — one place decides what a finish has to bill (M3).
-  const plan = await finishBillingStep(supabase, jobId);
+  // THE SAME STEP THE PAID-IN-FULL GATE RUNS — one place decides what a finish has to bill (M3). A
+  // PERSON pressed it on their own session, so the step keeps RLS and the profile_pay view: an org scope
+  // here would reach profiles.bill_rate, which 0216 revokes from the authenticated role.
+  const plan = await finishBillingStep(supabase, jobId, { kind: "staff" });
   if (plan.kind === "error") return { ok: false, error: plan.error };
   if (plan.kind === "plan") return finishTmWithFinal(supabase, jobId, plan, complete, !!opts.withoutBilling);
 
@@ -1035,7 +1037,7 @@ export async function finishJobPreview(jobId: string): Promise<FinishJobPreview>
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
   // A T&M job with work not on a bill: the Final finishing builds, said from the plan the press runs.
-  const plan = await finishBillingStep(supabase, jobId);
+  const plan = await finishBillingStep(supabase, jobId, { kind: "staff" });
   if (plan.kind === "error") return { ok: false, error: plan.error };
   if (plan.kind === "plan") {
     const words = finalFinishWords(plan.door, plan.draft, plan.work, plan.lump);

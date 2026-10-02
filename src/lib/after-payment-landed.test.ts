@@ -58,6 +58,10 @@ const ORG = "org-et";
 const INV = "inv-80";
 const JOB = "job-5659";
 
+/** Every door in this file is a staff one; the Stripe webhook's service client is pinned in
+ *  lib/paid-door-prices-the-work.test.ts, where what the client narrows is the whole question. */
+const STAFF = { kind: "staff" } as const;
+
 /** A $1,000 bill on a started job, with `paid` dollars of payments already on it. */
 const books = (paid: number, over: Record<string, unknown> = {}) => ({
   invoices: [{ id: INV, org_id: ORG, job_id: JOB, invoice_kind: "standard", status: "sent", invoice_number: "INV-080", tax_rate: 0, total: 1000, amount_paid: 0, customers: { name: "Rita Moss" }, ...over }],
@@ -98,7 +102,7 @@ describe("afterPaymentLanded — the four steps every pay door takes", () => {
       ...books(1000),
       jobs: [{ id: JOB, status: "in_progress", billing_type: "tm", job_number: "J-002", name: "41 Larkspur", customers: { name: "Marla Finch" } }],
     });
-    const r = await afterPaymentLanded(db, { invoiceId: INV, orgId: ORG, bell: { amount: 1000, said: "paid online" } });
+    const r = await afterPaymentLanded(db, { invoiceId: INV, orgId: ORG, access: STAFF, bell: { amount: 1000, said: "paid online" } });
 
     // The money landed. The job did NOT end, and nothing left Google.
     expect(r.settled).toBe(true);
@@ -122,11 +126,44 @@ describe("afterPaymentLanded — the four steps every pay door takes", () => {
     expect(calls.reported).toEqual([]);
   });
 
+  /**
+   * A LINE IS TITLED BY WHAT IT IS (review of this lane, medium). The gate's refusal used to be rung under
+   * "Still to bill" whatever caused it — so a READ THAT FAILED went to the whole office as a claim about
+   * the job's money that nothing had checked, in a sentence with no subject that told people who had
+   * tapped nothing to "try again in a moment". The title now comes from the verdict, with the sentence.
+   */
+  it("a read that failed is rung as what it is, not as 'Still to bill', and never asks anybody to try again", async () => {
+    work.rows = { hours: 19.5, laborAmount: 2437.5, laborByPerson: [], billsAmount: 400, excluded: 0, billsCount: 2, markupPct: 0.11,
+      billsBilled: 473.62, returnsAmount: 0, returnsCount: 0, returnsCredit: 0, stockCount: 0, stockAmount: 0,
+      stockBilled: 0, stockShorts: 0, stockShortsWords: null, stockNoCostWords: null, total: 2911.12,
+      lastInvoiceNumber: "INV-080", lastInvoiceAt: null, lastInvoiceStatus: "paid", poCoveredBills: 0,
+      claimedCount: 0, claimedOn: [], schemaReady: true, rows: [] };
+    const db = fakeDb(
+      {
+        ...books(1000),
+        jobs: [{ id: JOB, status: "in_progress", billing_type: "tm", job_number: "J-002", name: "41 Larkspur", customers: { name: "Marla Finch" } }],
+      },
+      { failing: ["payment_milestones"] },
+    );
+    const r = await afterPaymentLanded(db, { invoiceId: INV, orgId: ORG, access: STAFF, bell: { amount: 1000, said: "paid online" } });
+    expect(r.job.completed).toBe(false);
+    expect(db.tables.jobs[0].status).toBe("in_progress");
+    expect(calls.rang).toHaveLength(2);
+    expect(calls.rang[1].line.title).toBe("Couldn't check this job's bills");
+    expect(calls.rang[1].line.body).toContain("41 Larkspur · J-002 — Marla Finch");
+    expect(calls.rang[1].line.body).toContain("the app couldn't");
+    expect(calls.rang[1].line.body).not.toMatch(/try again/i);
+    // The door is still the job, and the ops sink heard the read that failed.
+    expect(calls.rang[1].line.url).toBe(`/jobs/${JOB}`);
+    expect(calls.reported).toContain("finishBillingStep.gate");
+  });
+
   it("a deposit off the bank file pays the last bill: the figures land, the JOB IS FINISHED, the office hears it once, every money screen refreshes", async () => {
     const db = fakeDb(books(1000));
     const r = await afterPaymentLanded(db, {
       invoiceId: INV,
       orgId: ORG,
+      access: STAFF,
       bell: { amount: 1000, said: "from the bank file", recordedBy: "erik" },
     });
 
@@ -157,7 +194,7 @@ describe("afterPaymentLanded — the four steps every pay door takes", () => {
 
   it("a part payment: the figures land, the job stays open in its own words, and the office still hears what came in", async () => {
     const db = fakeDb(books(400));
-    const r = await afterPaymentLanded(db, { invoiceId: INV, orgId: ORG, bell: { amount: 400, said: "paid online" } });
+    const r = await afterPaymentLanded(db, { invoiceId: INV, orgId: ORG, access: STAFF, bell: { amount: 400, said: "paid online" } });
     expect(r.settled).toBe(true);
     expect(db.tables.invoices[0]).toMatchObject({ amount_paid: 400, status: "partial" });
     expect(r.job.completed).toBe(false);
@@ -169,7 +206,7 @@ describe("afterPaymentLanded — the four steps every pay door takes", () => {
 
   it("a REPEAT (the row was already there) settles again and rings NOTHING: one payment, one bell", async () => {
     const db = fakeDb(books(1000));
-    const r = await afterPaymentLanded(db, { invoiceId: INV, orgId: ORG });
+    const r = await afterPaymentLanded(db, { invoiceId: INV, orgId: ORG, access: STAFF });
     expect(r.settled).toBe(true);
     expect(db.tables.invoices[0].status).toBe("paid");
     expect(r.job).toEqual({ completed: true, jobId: JOB });
@@ -179,7 +216,7 @@ describe("afterPaymentLanded — the four steps every pay door takes", () => {
 
   it("the recalc could not read: NOTHING is finished off a stale balance, and the refusal says why", async () => {
     const db = fakeDb(books(1000), { failing: ["payments"] });
-    const r = await afterPaymentLanded(db, { invoiceId: INV, orgId: ORG, bell: { amount: 1000, recordedBy: "erik" } });
+    const r = await afterPaymentLanded(db, { invoiceId: INV, orgId: ORG, access: STAFF, bell: { amount: 1000, recordedBy: "erik" } });
     expect(r.settled).toBe(false);
     expect(r.job).toEqual({ completed: false, why: "the invoice's figures didn't recompute, so nothing was finished" });
     expect(db.tables.jobs[0].status).toBe("in_progress");
@@ -191,14 +228,14 @@ describe("afterPaymentLanded — the four steps every pay door takes", () => {
 
   it("paid twice: the bell says OVERPAID and names the amount over, because only a person can choose credit or refund", async () => {
     const db = fakeDb(books(2000));
-    await afterPaymentLanded(db, { invoiceId: INV, orgId: ORG, bell: { amount: 1000, said: "paid online" } });
+    await afterPaymentLanded(db, { invoiceId: INV, orgId: ORG, access: STAFF, bell: { amount: 1000, said: "paid online" } });
     expect(calls.rang[0].line.title).toBe("Overpaid — action needed");
     expect(calls.rang[0].line.body).toBe("$1,000.00 paid online on INV-080 — Rita Moss. That's $1,000.00 MORE than the total. Credit it or refund it.");
   });
 
   it("a payment with no company on it: nobody is rung and the ops log says so, and the figures still land", async () => {
     const db = fakeDb(books(1000));
-    const r = await afterPaymentLanded(db, { invoiceId: INV, orgId: null, bell: { amount: 1000 } });
+    const r = await afterPaymentLanded(db, { invoiceId: INV, orgId: null, access: STAFF, bell: { amount: 1000 } });
     expect(r.settled).toBe(true);
     expect(calls.rang).toEqual([]);
     expect(calls.reported).toContain("afterPaymentLanded:bell");
@@ -206,7 +243,7 @@ describe("afterPaymentLanded — the four steps every pay door takes", () => {
 
   it("a paid DRAW is a stage of the job, not its end — the gate's rule, reached through this door", async () => {
     const db = fakeDb(books(1000, { invoice_kind: "deposit" }));
-    const r = await afterPaymentLanded(db, { invoiceId: INV, orgId: ORG, bell: { amount: 1000 } });
+    const r = await afterPaymentLanded(db, { invoiceId: INV, orgId: ORG, access: STAFF, bell: { amount: 1000 } });
     expect(r.settled).toBe(true);
     expect(r.job).toEqual({ completed: false, why: "a paid deposit draw is a stage of the job, not its end" });
     expect(db.tables.jobs[0].status).toBe("in_progress");
@@ -215,7 +252,7 @@ describe("afterPaymentLanded — the four steps every pay door takes", () => {
   it("a bell that blows up never unsaves the payment: the figures and the job still land, and the ops log hears it", async () => {
     const db = fakeDb(books(1000));
     calls.staff = null as unknown as string[]; // orgStaffIds answers with something unusable
-    const r = await afterPaymentLanded(db, { invoiceId: INV, orgId: ORG, bell: { amount: 1000 } });
+    const r = await afterPaymentLanded(db, { invoiceId: INV, orgId: ORG, access: STAFF, bell: { amount: 1000 } });
     expect(r.settled).toBe(true);
     expect(r.job).toEqual({ completed: true, jobId: JOB });
     expect(calls.reported).toContain("afterPaymentLanded:bell");

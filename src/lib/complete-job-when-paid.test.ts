@@ -59,7 +59,7 @@ describe("completeJobWhenPaid — the gate", () => {
 
   it("a started job, a standard invoice, fully paid: the job is complete, Google and the pages hear it", async () => {
     const db = fakeDb({ invoices: [paidStandard()], jobs: [{ id: JOB, status: "in_progress" }] });
-    const r = await completeJobWhenPaid(db, "inv-1");
+    const r = await completeJobWhenPaid(db, "inv-1", { kind: "staff" });
     expect(r).toEqual({ completed: true, jobId: JOB });
     expect(db.tables.jobs[0].status).toBe("complete");
     // The write was checked (.select("id") on the update, filtered to the started statuses).
@@ -69,7 +69,7 @@ describe("completeJobWhenPaid — the gate", () => {
     expect(calls.revalidated).toEqual([`/jobs/${JOB}`, "/jobs", "/planner", "/billing"]);
     // Paused after starting counts as started too.
     const held = fakeDb({ invoices: [paidStandard()], jobs: [{ id: JOB, status: "on_hold" }] });
-    expect((await completeJobWhenPaid(held, "inv-1")).completed).toBe(true);
+    expect((await completeJobWhenPaid(held, "inv-1", { kind: "staff" })).completed).toBe(true);
     expect(held.tables.jobs[0].status).toBe("complete");
   });
 
@@ -90,7 +90,7 @@ describe("completeJobWhenPaid — the gate", () => {
       invoices: [paidStandard()],
       jobs: [{ id: JOB, status: "on_hold", hold_reason: "waiting on the permit" }],
     });
-    expect((await completeJobWhenPaid(db, "inv-1")).completed).toBe(true);
+    expect((await completeJobWhenPaid(db, "inv-1", { kind: "staff" })).completed).toBe(true);
     expect(db.tables.jobs[0].status).toBe("complete");
     expect(db.tables.jobs[0].hold_reason).toBeNull();
   });
@@ -98,7 +98,7 @@ describe("completeJobWhenPaid — the gate", () => {
   it("a job that hasn't started — booked for next Tuesday, its one standard bill paid by the link Monday night — stays on the schedule", async () => {
     for (const status of ["to_be_scheduled", "scheduled"]) {
       const db = fakeDb({ invoices: [paidStandard()], jobs: [{ id: JOB, status }] });
-      const r = await completeJobWhenPaid(db, "inv-1");
+      const r = await completeJobWhenPaid(db, "inv-1", { kind: "staff" });
       expect(r).toEqual({ completed: false, why: `the job hasn't started (it is ${status.replace(/_/g, " ")}) — a bill paid ahead of the visit doesn't end it` });
       expect(db.tables.jobs[0].status).toBe(status);
       expect(db.log.some((l) => l.table === "jobs" && l.verb === "update")).toBe(false);
@@ -111,7 +111,7 @@ describe("completeJobWhenPaid — the gate", () => {
   it("a paid DRAW (deposit / progress / final) is a stage of the job, not its end: no status write", async () => {
     for (const kind of ["deposit", "progress", "final"]) {
       const db = fakeDb({ invoices: [paidStandard({ invoice_kind: kind })], jobs: [{ id: JOB, status: "scheduled" }] });
-      const r = await completeJobWhenPaid(db, "inv-1");
+      const r = await completeJobWhenPaid(db, "inv-1", { kind: "staff" });
       expect(r.completed).toBe(false);
       expect((r as { why: string }).why).toContain(`${kind} draw`);
       expect(db.tables.jobs[0].status).toBe("scheduled");
@@ -122,14 +122,14 @@ describe("completeJobWhenPaid — the gate", () => {
 
   it("an invoice that is not paid (partial after a recalc) writes nothing", async () => {
     const db = fakeDb({ invoices: [paidStandard({ status: "partial" })], jobs: [{ id: JOB, status: "in_progress" }] });
-    expect((await completeJobWhenPaid(db, "inv-1")).completed).toBe(false);
+    expect((await completeJobWhenPaid(db, "inv-1", { kind: "staff" })).completed).toBe(false);
     expect(db.tables.jobs[0].status).toBe("in_progress");
   });
 
   it("a job that is already complete or cancelled is left exactly as it is", async () => {
     for (const status of ["complete", "cancelled"]) {
       const db = fakeDb({ invoices: [paidStandard()], jobs: [{ id: JOB, status }] });
-      const r = await completeJobWhenPaid(db, "inv-1");
+      const r = await completeJobWhenPaid(db, "inv-1", { kind: "staff" });
       expect(r).toEqual({ completed: false, why: `the job is already ${status}` });
       expect(db.tables.jobs[0].status).toBe(status);
     }
@@ -140,7 +140,7 @@ describe("completeJobWhenPaid — the gate", () => {
       invoices: [paidStandard(), { id: "inv-2", job_id: JOB, invoice_kind: "standard", status: "sent" }],
       jobs: [{ id: JOB, status: "in_progress" }],
     });
-    expect(await completeJobWhenPaid(open, "inv-1")).toEqual({ completed: false, why: "the job has 1 other open bill" });
+    expect(await completeJobWhenPaid(open, "inv-1", { kind: "staff" })).toEqual({ completed: false, why: "the job has 1 other open bill" });
     expect(open.tables.jobs[0].status).toBe("in_progress");
 
     const settled = fakeDb({
@@ -151,21 +151,21 @@ describe("completeJobWhenPaid — the gate", () => {
       ],
       jobs: [{ id: JOB, status: "in_progress" }],
     });
-    expect((await completeJobWhenPaid(settled, "inv-1")).completed).toBe(true);
+    expect((await completeJobWhenPaid(settled, "inv-1", { kind: "staff" })).completed).toBe(true);
     expect(settled.tables.jobs[0].status).toBe("complete");
   });
 
   it("an invoice with no job, or a job that isn't there, writes nothing and says why", async () => {
     const noJob = fakeDb({ invoices: [paidStandard({ job_id: null })], jobs: [] });
-    expect(await completeJobWhenPaid(noJob, "inv-1")).toEqual({ completed: false, why: "the invoice isn't on a job" });
+    expect(await completeJobWhenPaid(noJob, "inv-1", { kind: "staff" })).toEqual({ completed: false, why: "the invoice isn't on a job" });
     const gone = fakeDb({ invoices: [paidStandard()], jobs: [] });
-    expect(await completeJobWhenPaid(gone, "inv-1")).toEqual({ completed: false, why: "job not found" });
+    expect(await completeJobWhenPaid(gone, "inv-1", { kind: "staff" })).toEqual({ completed: false, why: "job not found" });
     expect(calls.pushed).toEqual([]);
   });
 
   it("a database that fails mid-read is reported, never thrown at the money", async () => {
     const db = fakeDb({ invoices: [paidStandard()], jobs: [{ id: JOB, status: "in_progress" }] }, { failing: ["jobs"] });
-    const r = await completeJobWhenPaid(db, "inv-1");
+    const r = await completeJobWhenPaid(db, "inv-1", { kind: "staff" });
     expect(r.completed).toBe(false);
     expect(calls.reported).toEqual(["completeJobWhenPaid:read-job"]);
   });
@@ -220,7 +220,7 @@ describe("a paid bill never ends a job with its work off every bill", () => {
   it("THE DEFECT: a T&M job whose last bill the customer paid is NOT finished while 19.5 h and 2 receipts are on no bill", async () => {
     work.rows = taoShape();
     const db = fakeDb({ invoices: [paidStandard()], jobs: [tmJob()] });
-    const r = await completeJobWhenPaid(db, "inv-1");
+    const r = await completeJobWhenPaid(db, "inv-1", { kind: "staff" });
 
     expect(r.completed).toBe(false);
     // The job is exactly as the tech left it — nothing was written, nothing left Google, no page moved.
@@ -243,7 +243,7 @@ describe("a paid bill never ends a job with its work off every bill", () => {
   it("every hour and receipt already on a bill: the paid bill finishes the T&M job, and says nothing extra", async () => {
     work.rows = nothingUnbilled({ claimedCount: 7, claimedOn: ["INV-00028"] });
     const db = fakeDb({ invoices: [paidStandard()], jobs: [tmJob()] });
-    const r = await completeJobWhenPaid(db, "inv-1");
+    const r = await completeJobWhenPaid(db, "inv-1", { kind: "staff" });
     expect(r).toEqual({ completed: true, jobId: JOB });
     expect(db.tables.jobs[0].status).toBe("complete");
     expect(calls.pushed).toEqual([JOB]);
@@ -258,11 +258,57 @@ describe("a paid bill never ends a job with its work off every bill", () => {
     for (const billing_type of ["fixed", null, undefined]) {
       work.rows = taoShape();
       const db = fakeDb({ invoices: [paidStandard()], jobs: [tmJob({ billing_type })] });
-      const r = await completeJobWhenPaid(db, "inv-1");
+      const r = await completeJobWhenPaid(db, "inv-1", { kind: "staff" });
       expect(r, String(billing_type)).toEqual({ completed: true, jobId: JOB });
       expect(db.tables.jobs[0].status).toBe("complete");
       expect((r as { say?: string }).say).toBeUndefined();
     }
+  });
+
+  /**
+   * A FIXED JOB IS NEVER BLOCKED — OR ANNOUNCED — BY A READ IT DOES NOT USE (M3 review, medium).
+   *
+   * The step used to fire all three of its first reads at once and return `error` if ANY of them blipped,
+   * before it knew the billing type. So a fixed-price job whose payment_milestones read timed out came
+   * back "couldn't read this job's bills", did NOT finish (a regression against the gate as it shipped,
+   * with nothing to retry it: the invoice is already paid and 0371's pile needs status = 'complete'), and
+   * rang the whole office under the title "Still to bill" — the one alarm a fixed job must never raise,
+   * because the extension IS the price. jobBillsItsActuals is `tm && no milestones`, so neither of those
+   * two reads can change the answer for a fixed job: the type is read FIRST and alone, and the other two
+   * are never issued.
+   */
+  it("a FIXED-price job finishes even when the payment-schedule read blips — it never asked that question", async () => {
+    work.rows = taoShape();
+    const db = fakeDb(
+      { invoices: [paidStandard()], jobs: [tmJob({ billing_type: "fixed", job_number: "J-054", name: "Alder Ridge" })] },
+      { failing: ["payment_milestones"] },
+    );
+    const r = await completeJobWhenPaid(db, "inv-1", { kind: "staff" });
+    expect(r).toEqual({ completed: true, jobId: JOB });
+    expect(db.tables.jobs[0].status).toBe("complete");
+    expect((r as { say?: string }).say).toBeUndefined();
+    // The reads it does not need are not even issued, so there is nothing to blip.
+    expect(db.log.some((l) => l.table === "payment_milestones")).toBe(false);
+    expect(calls.reported).toEqual([]);
+  });
+
+  /**
+   * ON A T&M JOB THE SAME BLIP IS STILL A REFUSAL — there the schedule decides whether the job bills its
+   * actuals at all, so an unread answer is unknown, not "nothing to bill". It is said with a subject and
+   * no "try again" (nobody pressed anything), under its own title, and the ops sink hears it.
+   */
+  it("a T&M job whose payment-schedule read blips is NOT finished, is said in words, and lands in the ops log", async () => {
+    work.rows = taoShape();
+    const db = fakeDb({ invoices: [paidStandard()], jobs: [tmJob()] }, { failing: ["payment_milestones"] });
+    const r = await completeJobWhenPaid(db, "inv-1", { kind: "staff" });
+    expect(r.completed).toBe(false);
+    expect(db.tables.jobs[0].status).toBe("in_progress");
+    const say = (r as { say?: string }).say ?? "";
+    expect(say).toContain("41 Larkspur · J-002 — Marla Finch");
+    expect(say).toContain("the app couldn't");
+    expect(say).not.toContain("Try again");
+    expect((r as { sayTitle?: string }).sayTitle).toBe("Couldn't check this job's bills");
+    expect(calls.reported).toContain("finishBillingStep.gate");
   });
 
   it("a T&M job on a payment schedule is billed by its milestones, so the step skips and it finishes", async () => {
@@ -272,7 +318,7 @@ describe("a paid bill never ends a job with its work off every bill", () => {
       jobs: [tmJob()],
       payment_milestones: [{ id: "m1", job_id: JOB }],
     });
-    expect((await completeJobWhenPaid(db, "inv-1")).completed).toBe(true);
+    expect((await completeJobWhenPaid(db, "inv-1", { kind: "staff" })).completed).toBe(true);
     expect(db.tables.jobs[0].status).toBe("complete");
   });
 
@@ -288,7 +334,7 @@ describe("a paid bill never ends a job with its work off every bill", () => {
       invoices: [paidStandard(), { id: "inv-dep", job_id: JOB, invoice_kind: "deposit", status: "paid" }],
       jobs: [tmJob()],
     });
-    const r = await completeJobWhenPaid(db, "inv-1");
+    const r = await completeJobWhenPaid(db, "inv-1", { kind: "staff" });
     expect(r.completed).toBe(true);
     expect(db.tables.jobs[0].status).toBe("complete");
     const say = (r as { say?: string }).say ?? "";
@@ -306,7 +352,7 @@ describe("a paid bill never ends a job with its work off every bill", () => {
   it("the hours couldn't be read: the job is NOT finished, and that is said rather than assumed away", async () => {
     work.throws = true;
     const db = fakeDb({ invoices: [paidStandard()], jobs: [tmJob()] });
-    const r = await completeJobWhenPaid(db, "inv-1");
+    const r = await completeJobWhenPaid(db, "inv-1", { kind: "staff" });
     expect(r.completed).toBe(false);
     expect(db.tables.jobs[0].status).toBe("in_progress");
     expect((r as { say?: string }).say).toContain("41 Larkspur");
@@ -318,7 +364,7 @@ describe("a paid bill never ends a job with its work off every bill", () => {
     work.rows = taoShape();
     // A job that hasn't started: refused on rule 2, so the billing step is never even asked.
     const early = fakeDb({ invoices: [paidStandard()], jobs: [tmJob({ status: "scheduled" })] });
-    expect((await completeJobWhenPaid(early, "inv-1")).completed).toBe(false);
+    expect((await completeJobWhenPaid(early, "inv-1", { kind: "staff" })).completed).toBe(false);
     expect(early.log.some((l) => l.table === "payment_milestones")).toBe(false);
   });
 });
