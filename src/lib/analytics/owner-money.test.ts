@@ -1595,7 +1595,7 @@ describe("the owner's build time: on-site hours are a cost, office hours are ove
    * "What the owner's hours cost" had TWO implementations that rounded differently. The engine rounded
    * every shift to whole cents and added; tallyBuildTime (the job hub, /analytics' job rows,
    * budget-vs-actual, Nort's owner_cost) summed dollars and rounded once at the end. So the profit and
-   * loss's "Owner Build Time On Jobs" did not equal the sum of what the jobs were actually charged -
+   * loss's "Owner Hours Charged To Jobs" did not equal the sum of what the jobs were actually charged -
    * which is exactly what the accountant workbook tells an accountant that line IS.
    *
    * Measured before the fix: $15.09 against $15.08 at a $10.05 rate over three half-hour shifts, and it

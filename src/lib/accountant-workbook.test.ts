@@ -257,11 +257,11 @@ describe("the Summary is Money by Month, to the cent, laid out as a profit and l
     ]);
     expect(aboveAndNet.map((l) => l.label)).toEqual(labels);
     // AND THE OWNER'S THREE HOURS ROWS, after the equity block (0373), so an accountant can tie the COGS
-    // line to hours: the total, the on-site half that is charged to the jobs, the office half that is not.
+    // line to hours: the total, the on-site half whose cost is charged to the jobs, the office half that is not.
     const hours = summary.rows.map((r) => r.cells[0]).filter((c) => typeof c === "string" && c.startsWith("Owner Hours"));
     expect(hours).toEqual([
       "Owner Hours (Not Pay)",
-      "Owner Hours On Jobs (Build Time)",
+      "Owner Hours On Jobs",
       "Owner Hours In The Office (Overhead)",
     ]);
   });

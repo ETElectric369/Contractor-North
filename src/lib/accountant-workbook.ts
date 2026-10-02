@@ -567,7 +567,7 @@ function summaryTab(
     rows.push(line("Owner Hours (Not Pay)", ...(byMonth ? cur.months.map(hours) : []), hours(cur.totals), hours(prev.totals), round2(cur.totals.ownerHours - prev.totals.ownerHours)));
     rows.push(
       line(
-        "Owner Hours On Jobs (Build Time)",
+        "Owner Hours On Jobs",
         ...(byMonth ? cur.months.map(onSite) : []),
         onSite(cur.totals),
         onSite(prev.totals),

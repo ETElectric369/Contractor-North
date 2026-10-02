@@ -21,8 +21,8 @@ export type { PnlKind, PnlKindShape, PnlNetting, PnlSection, PnlSectionShape } f
  *     Stock Lost (Written Off, Counted Short, Returned)
  *     Crew Pay (1099)
  *     Crew Mileage Paid                      and any bucket BUCKET_SECTION calls COGS (none today)
- *     Owner Build Time On Jobs               the owner's ON-SITE hours at his cost rate
- *     Owner Build Time Allocation (Contra)   the same amount back, so the pair nets to zero
+ *     Owner Hours Charged To Jobs            the owner's ON-SITE hours at his cost rate
+ *     Owner Hours Added Back                 the same amount back, so the pair nets to zero
  *     Total COGS
  *   Gross Profit                             Revenue less Total COGS
  *   Gross Margin %                           where a percent fits
@@ -68,8 +68,8 @@ export type { PnlKind, PnlKindShape, PnlNetting, PnlSection, PnlSectionShape } f
  * expense, full stop - which is what migration 0286 was protecting, and on this report it was right.
  *
  * Both halves hold at once through an ALLOCATION WITH A CONTRA (pnl-shape.ts's PnlNetting): Owner
- * Build Time On Jobs charges his on-site hours inside COGS at his cost rate, and Owner Build Time
- * Allocation (Contra) books the identical amount straight back on the next line. The pair sums to
+ * Hours Charged To Jobs puts his on-site hours inside COGS at his cost rate, and Owner Hours Added
+ * Back books the identical amount straight back on the next line. The pair sums to
  * zero, so Total COGS, Gross Profit, Gross Margin % and NET PROFIT are every one of them unchanged to
  * the cent, and his Schedule C figure is untouched. His OFFICE time is not in it at all: office time
  * is Overhead, never a job cost, so the allocation counts only hours against a job.
@@ -95,12 +95,18 @@ export const PNL_WORDS = {
   stockLostShort: "Stock Lost",
   crewPay: "Crew Pay (1099)",
   crewMileage: "Crew Mileage Paid",
-  /** The owner's ON-SITE hours at his cost rate: a direct cost of the job, inside COGS. */
-  ownerBuildTime: "Owner Build Time On Jobs",
-  /** The same amount straight back, so the allocation nets to zero and Net Profit does not move. */
-  ownerBuildTimeContra: "Owner Build Time Allocation (Contra)",
-  /** Standing alone, where a chip or a sentence names the contra. */
-  ownerBuildTimeContraShort: "Owner Build Time (Contra)",
+  /** The owner's ON-SITE hours at his cost rate: a direct cost of the job, inside COGS. "Charged
+   *  to jobs" because that is literally what happened to the money, and never "billed" — billed is
+   *  the $125 the CUSTOMER pays for that hour, and one word for the cost and the price is the fault
+   *  that had the owner's row reading 125 in and 125 out (Erik, 2026-10-01). */
+  ownerBuildTime: "Owner Hours Charged To Jobs",
+  /** The same amount straight back, so the allocation nets to zero and Net Profit does not move.
+   *  NOT "contra", which is an accountant's word for an entry that exists only to cancel another, and
+   *  NOT "reconciled", which already means matching two records and has a page of its own. Erik,
+   *  2026-10-01: the words have to be precise AND readable by a working electrician. */
+  ownerBuildTimeContra: "Owner Hours Added Back",
+  /** Standing alone, where a chip or a sentence names the add-back. */
+  ownerBuildTimeContraShort: "Owner Hours Added Back",
   totalCogs: "Total COGS",
   grossProfit: "Gross Profit",
   /** A percent, not money: the row's name carries the unit, so a spreadsheet's plain 42.3 reads right. */

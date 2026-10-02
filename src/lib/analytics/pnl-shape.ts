@@ -41,7 +41,7 @@ export type PnlSectionShape = {
  * WHAT EACH SECTION DOES. The two cost halves are subtracted, in order, and each gets its heading
  * and its total. Equity is below the bottom line: Owner's Draw is what the owner took out, which is
  * not an expense of the business and is never subtracted to reach Net Profit. His own BUILD TIME is
- * a different thing and is a real direct cost — it is a COGS line (Owner Build Time), beside Crew
+ * a different thing and is a real direct cost — it is a COGS line (Owner Hours Charged To Jobs), beside Crew
  * Pay (Erik, 2026-10-01: "build time, including my build time is considered COGS").
  */
 export const PNL_SECTION_SHAPE: Record<PnlSection, PnlSectionShape> = {

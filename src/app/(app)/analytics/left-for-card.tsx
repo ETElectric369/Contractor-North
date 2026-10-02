@@ -37,7 +37,7 @@ import { OfficeCanSeeSwitch } from "./office-switch";
  * Summary, so no two screens say the same money two ways. Stock bought rides inside Materials &
  * Bills here (Erik, 2026-09-27), and the line under the card says how much.
  *
- * HIS BUILD TIME IS A COST HERE AND STILL NOT A DEDUCTION. Owner Build Time On Jobs charges his
+ * HIS BUILD TIME IS A COST HERE AND STILL NOT A DEDUCTION. Owner Hours Charged To Jobs charges his
  * on-site hours inside COGS, and the contra line under it books the same amount back, so Net Profit
  * is the same figure it was before the allocation existed - which it has to be, because a sole
  * proprietor cannot deduct his own labour. Until he sets a cost rate the pair is not drawn at all and
@@ -55,8 +55,8 @@ const ALWAYS_SAID = new Set<PnlKey>(["materials", "crew_pay"]);
 /** The Fuel bucket keeps its own colour here, the one Money by Month and the Fuel card draw it in. */
 const FUEL: PnlKey = "bucket:Fuel";
 
-/** A row name whose parenthesis never breaks inside: on a phone "Owner Build Time Allocation
- *  (Contra)" wraps as "… Allocation" over "(Contra)", never "… Allocation (Con" over "tra)". It was
+/** A row name that never breaks mid-word on a phone. It used to read "Owner Build Time Allocation
+ *  (Contra)" and wrapped as "… Allocation" over "(Contra)", never "… Allocation (Con" over "tra)". It was
  *  written for "Net Profit (Owner's Draw)", which has no parenthesis any more (Erik, 2026-10-01), and
  *  it is kept because the contra line has one and is the longest row name on the card. */
 function RowName({ label }: { label: string }) {
