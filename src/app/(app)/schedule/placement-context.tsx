@@ -49,7 +49,18 @@ type PlacementValue = {
   /** The second tap. Books every picked lead and dates every picked floater onto this day. */
   placeOn: (dateISO: string) => void;
   pending: boolean;
+  /** Days a place already landed on whose work the screen has not been handed yet. The write is done;
+   *  the server's fresh data is still in flight. A week view holds those days' columns open on it
+   *  (lib/schedule/week-columns), because un-arming is instant and the refresh is not. */
+  justPlaced: ReadonlySet<string>;
+  /** The screen has caught up — let the held days go back to standing on their own data. Called by
+   *  whichever view owns that data, because only it can tell when it changed. */
+  releasePlaced: () => void;
 };
+
+/** One empty set, so "nothing is held" keeps its identity across renders — a fresh `new Set()` would
+ *  change the week cache's key every render and rebuild every mounted week forever. */
+const NO_DAYS: ReadonlySet<string> = new Set<string>();
 
 const INERT: PlacementValue = {
   picked: new Set(),
@@ -63,6 +74,8 @@ const INERT: PlacementValue = {
   halfTimes: { am: "08:00", pm: "13:00" },
   placeOn: () => {},
   pending: false,
+  justPlaced: NO_DAYS,
+  releasePlaced: () => {},
 };
 
 const Ctx = createContext<PlacementValue>(INERT);
@@ -92,6 +105,17 @@ export function PlacementProvider({
      supply house opens, or a 10:30 the customer asked for, is a real thing he already knows and
      had nowhere to put. Empty means the half still decides. */
   const [startAt, setStartAt] = useState("");
+  /* THE DAY STAYS ON THE SCREEN BETWEEN THE WRITE AND THE REFRESH. A place clears the picks the
+     instant the writes come back, so the rail un-arms a whole round trip before the calendar is
+     handed data that knows about the booking. For that beat the week redraws from the OLD data —
+     and an empty Saturday drawn only because the rail was armed folded away under its own
+     "Placed on Sat" toast, then came back. The day the write landed on is held here until the view
+     that owns the data says it caught up. */
+  const [justPlaced, setJustPlaced] = useState<ReadonlySet<string>>(NO_DAYS);
+  const releasePlaced = useCallback(() => {
+    // Guarded, or an effect watching fresh data would set state on every render it fires in.
+    setJustPlaced((held) => (held.size ? NO_DAYS : held));
+  }, []);
   /* PICKS SURVIVE THE 60MPH JAUNT. Armed picks were plain state, and everything that leaves this
      page mid-placement wiped them silently: the crew/map view icons (their branches render without
      this provider), an "Open →" drill into a record, and — the field case — tapping a customer's
@@ -318,6 +342,14 @@ export function PlacementProvider({
           ...jobs.filter((_, i) => !jobResults[i]?.ok).map((j) => j.id),
           ...appts.filter((_, i) => !apptResults[i]?.ok).map((a) => a.id),
         ]);
+        /* HOLD THE DAY OPEN. setPicked un-arms the rail in this same render, a round trip before
+           router.refresh() hands the calendar data that knows about the booking — so the day the
+           work actually landed on is named here, and a week view keeps its column until the fresh
+           data arrives. Only when something LANDED: a place that failed outright has nothing to
+           wait for, and holding a column open for it would be the app promising a booking it
+           didn't make. */
+        const landed = jobs.length - jobsFailed + (appts.length - apptsFailed) + (res.ok ? res.booked : 0) > 0;
+        if (landed) setJustPlaced((held) => new Set([...held, dateISO]));
         setPicked(failedIds);
         router.refresh();
       });
@@ -326,8 +358,8 @@ export function PlacementProvider({
   );
 
   const value = useMemo<PlacementValue>(
-    () => ({ picked, toggle, clear, armedCount: chosen.length, half, setHalf, startAt, setStartAt, halfTimes, placeOn, pending }),
-    [picked, toggle, clear, chosen.length, half, startAt, halfTimes, placeOn, pending],
+    () => ({ picked, toggle, clear, armedCount: chosen.length, half, setHalf, startAt, setStartAt, halfTimes, placeOn, pending, justPlaced, releasePlaced }),
+    [picked, toggle, clear, chosen.length, half, startAt, halfTimes, placeOn, pending, justPlaced, releasePlaced],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

@@ -302,6 +302,12 @@ const PROPOSED_CONFIRM =
 // every memo and cache keyed on them.
 const EMPTY_DAY_ROWS: Record<string, CrewDayRow[]> = {};
 const EMPTY_PEOPLE: CalPerson[] = [];
+/* AND FOR THE LIST PROPS, for the same reason and one more. The week cache's key holds these arrays'
+   IDENTITY, and so does the release of a just-placed day's held column — a caller that leaves one of
+   them off used to get a brand new `[]` every render, which emptied the cache on every keystroke and
+   would let go of a held weekend column before its booking ever reached the screen. One shared empty:
+   nothing here ever writes to a list prop (the day buckets it fills are its own). */
+const NO_ROWS: never[] = [];
 
 // ── Time-grid pill colors (Erik wants blocks IN their time allotment) ──
 // Appointments color by TYPE; jobs stay slate so the crew's work blocks read
@@ -344,11 +350,11 @@ function useDayTarget() {
 
 export function CalendarView({
   jobs,
-  segments = [],
-  appointments = [],
-  tasks = [],
-  external = [],
-  members = [],
+  segments = NO_ROWS,
+  appointments = NO_ROWS,
+  tasks = NO_ROWS,
+  external = NO_ROWS,
+  members = NO_ROWS,
   picker,
   now,
   tz,
@@ -358,7 +364,7 @@ export function CalendarView({
   crewBoard = true,
   canEdit = false,
   perDayHours = false,
-  addableJobs = [],
+  addableJobs = NO_ROWS,
   dayRows = EMPTY_DAY_ROWS,
   people = EMPTY_PEOPLE,
   actuals,
@@ -620,6 +626,17 @@ export function CalendarView({
   /** Work is picked in the rail. Read out as a plain boolean because the week's columns depend on it:
    *  a weekend day is always drawn while armed, or there would be nothing there to drop a job onto. */
   const armed = target.armed;
+  /** Days the rail just placed work on, whose bookings are not in `jobs`/`appointments` yet. Armed
+   *  goes false the instant the writes return, a whole round trip before the refreshed data arrives,
+   *  so without this an empty Saturday's column folded away under its own "Placed on Sat" toast. */
+  const justPlaced = target.pl.justPlaced;
+  const releasePlaced = target.pl.releasePlaced;
+  /* LET GO WHEN THE SCREEN CATCHES UP. The provider cannot see this data, so the view that owns it
+     says when it changed: a new RSC payload is new arrays, and from then on the held day stands on
+     its own work like every other day — which is what lets an Undo fold the column back. */
+  useEffect(() => {
+    releasePlaced();
+  }, [jobs, segments, appointments, tasks, external, releasePlaced]);
 
   /* THE SAME TAP, TWO MEANINGS — and the armed one wins. Armed, a day places the picked work;
      otherwise it drills in as it always has. Navigating away mid-pick would also throw the picks
@@ -1064,10 +1081,12 @@ export function CalendarView({
   const weekCacheRef = useRef<{ key: unknown[]; map: Map<string, WeekData> }>({ key: [], map: new Map() });
   const weekData = useMemo(() => {
     /* `armed` is part of the key because it changes WHICH COLUMNS EXIST (below): a weekend day is
-       always drawn while work is picked in the rail, so arming rebuilds every mounted week once. */
+       always drawn while work is picked in the rail, so arming rebuilds every mounted week once.
+       `justPlaced` is in it for the same reason and at the other end of the same gesture — the day a
+       place just landed on keeps its column while un-arming and the refresh pass each other. */
     const key = [
       jobs, segments, appointments, tasks, external, actuals, actualsCappedBefore, dayRows, people, members, addableJobs,
-      personFilter, tz, todayK, canEdit, workDayStart, workDayEnd, armed,
+      personFilter, tz, todayK, canEdit, workDayStart, workDayEnd, armed, justPlaced,
     ];
     const cache = weekCacheRef.current;
     if (key.length !== cache.key.length || key.some((v, i) => v !== cache.key[i])) weekCacheRef.current = { key, map: new Map() };
@@ -1100,6 +1119,7 @@ export function CalendarView({
         },
         todayStr: todayK,
         armed,
+        justPlaced,
       });
       const keep = new Set(shown);
       const days = all.filter((d) => keep.has(d.dayStr));
@@ -1130,7 +1150,7 @@ export function CalendarView({
     });
     // gridDataFor and townFor read only what the key names (and what is derived from it).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stackWeeks, jobs, segments, appointments, tasks, external, actuals, actualsCappedBefore, dayRows, people, members, addableJobs, personFilter, tz, todayK, canEdit, workDayStart, workDayEnd, armed]);
+  }, [stackWeeks, jobs, segments, appointments, tasks, external, actuals, actualsCappedBefore, dayRows, people, members, addableJobs, personFilter, tz, todayK, canEdit, workDayStart, workDayEnd, armed, justPlaced]);
   /** The day header's tap: drill into that day (stable, so a mounted week's grid never redraws for it). */
   const drillInto = useCallback((ds: string) => {
     window.history.pushState(null, "", `${window.location.pathname}?view=day&date=${ds}`);

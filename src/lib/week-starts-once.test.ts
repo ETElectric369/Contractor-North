@@ -257,6 +257,36 @@ describe("a weekend day earns its space", () => {
     expect(hidden).toEqual([]);
   });
 
+  it("keeps the column of a weekend day the place just landed on, before the data says so", () => {
+    /* THE FLICKER. Tapping an empty Saturday's header places the picked work and clears the picks in
+       the same breath, so `armed` is false a round trip before the refreshed jobs arrive. Asked with
+       the OLD data — nothing on that Saturday, not today, not armed — the column folded away under
+       its own "Placed on Sat" toast and came back when the refresh landed. */
+    const stale = weekViewDays(WEEK, { hasWork: none, todayStr: "2026-07-15", armed: false });
+    expect(stale.shown).not.toContain("2026-07-18");
+    const held = weekViewDays(WEEK, {
+      hasWork: none,
+      todayStr: "2026-07-15",
+      armed: false,
+      justPlaced: new Set(["2026-07-18"]),
+    });
+    expect(held.shown).toContain("2026-07-18");
+    // The day BESIDE it is not held open — a place on Saturday is not a reason to draw Sunday.
+    expect(held.hidden).toEqual(["2026-07-19"]);
+  });
+
+  it("lets a held day go once nothing is held — so an Undo folds the column back", () => {
+    // Held, then released with the work put back: the Saturday stands on its own data again.
+    const released = weekViewDays(WEEK, {
+      hasWork: none,
+      todayStr: "2026-07-15",
+      armed: false,
+      justPlaced: new Set<string>(),
+    });
+    expect(released.shown).toEqual(WEEK.slice(0, 5));
+    expect(released.hidden).toEqual(["2026-07-18", "2026-07-19"]);
+  });
+
   it("re-draws the weekend by itself once work appears there — no switch to remember", () => {
     const before = weekViewDays(WEEK, { hasWork: none, todayStr: "2026-07-15" });
     expect(before.shown).not.toContain("2026-07-18");
@@ -323,7 +353,30 @@ describe("the weekend rule changes which columns are drawn, and nothing else", (
   it("rebuilds the mounted weeks when arming changes which columns exist", () => {
     // The week cache survives a scroll growth on purpose. Arming changes the COLUMNS, so it has to be
     // part of the cache key or a picked job has no weekend to land on until something else invalidates.
-    expect(CAL).toMatch(/personFilter, tz, todayK, canEdit, workDayStart, workDayEnd, armed,/);
+    expect(CAL).toMatch(/personFilter, tz, todayK, canEdit, workDayStart, workDayEnd, armed, justPlaced,/);
+  });
+
+  it("hands the week the day a place just landed on, and lets it go when the data lands", () => {
+    /* THE TEETH ON THE FLICKER. `armed` and `justPlaced` are the two halves of one gesture: the rail
+       un-arms the instant the writes return, and the refreshed jobs are a round trip behind it. Both
+       have to reach weekViewDays from this door, or an empty weekend day's column disappears under
+       the toast that says the work was placed on it. */
+    expect(CAL).toMatch(/weekViewDays\([\s\S]{0,400}armed,\s*justPlaced,/);
+    expect(CAL).toContain("const justPlaced = target.pl.justPlaced;");
+    // And it is HANDED BACK. Only this view can tell when its own data changed, so only this view can
+    // end the hold — without that, an Undo could never fold the column away again.
+    expect(CAL).toMatch(/useEffect\(\(\) => \{\s*releasePlaced\(\);\s*\}, \[jobs, segments, appointments, tasks, external, releasePlaced\]\)/);
+  });
+
+  it("holds a day open only for a place that actually LANDED", () => {
+    const PLACE = code("src/app/(app)/schedule/placement-context.tsx");
+    // The hold is set in the same render that clears the picks — that is the whole point of it.
+    expect(PLACE).toMatch(/if \(landed\) setJustPlaced\(\(held\) => new Set\(\[\.\.\.held, dateISO\]\)\);\s*setPicked\(failedIds\);/);
+    // A place where nothing landed has nothing to wait for; holding a column open for it would be the
+    // app drawing a day for a booking it never made.
+    expect(PLACE).toContain("const landed = jobs.length - jobsFailed + (appts.length - apptsFailed) + (res.ok ? res.booked : 0) > 0;");
+    // "Nothing held" keeps ONE identity, or the week cache's key changes every render.
+    expect(PLACE).toContain("setJustPlaced((held) => (held.size ? NO_DAYS : held));");
   });
 
   it("keeps My Day's 'Week of' label on the week's real first day", () => {

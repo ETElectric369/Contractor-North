@@ -280,10 +280,12 @@ describe("the calendar reads it and draws it (source)", () => {
   it("the stack builds each week's grid once per (week, data), with stable props, so mounted weeks skip", () => {
     const view = read("src/app/(app)/calendar/calendar-view.tsx");
     expect(view).toContain("const gridNow = useMemo(");
-    /* `armed` joined the key with the weekend rule (lib/schedule/week-columns): arming a placement
-       changes WHICH COLUMNS EXIST, so a mounted week has to rebuild once or a picked job would have no
-       weekend to land on. Everything else still only invalidates on data, never on a scroll growth. */
-    expect(view).toMatch(/const key = \[\s*jobs, segments, appointments, tasks, external, actuals, actualsCappedBefore, dayRows, people, members, addableJobs,\s*personFilter, tz, todayK, canEdit, workDayStart, workDayEnd, armed,\s*\];/);
+    /* `armed` and `justPlaced` joined the key with the weekend rule (lib/schedule/week-columns): both
+       ends of one gesture change WHICH COLUMNS EXIST, so a mounted week has to rebuild once — on arming,
+       or a picked job has no weekend to land on, and on the place, or the column it just landed on folds
+       away while the refresh is still in flight. Everything else still only invalidates on data, never
+       on a scroll growth; both of these are client state that changes nothing else about a week. */
+    expect(view).toMatch(/const key = \[\s*jobs, segments, appointments, tasks, external, actuals, actualsCappedBefore, dayRows, people, members, addableJobs,\s*personFilter, tz, todayK, canEdit, workDayStart, workDayEnd, armed, justPlaced,\s*\];/);
     expect(view).toContain("onDayClick={drillInto}");
     expect(view).toContain("placement={armedProp}");
     expect(view).not.toContain("placement={target.prop}");

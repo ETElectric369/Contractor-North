@@ -14,12 +14,18 @@ import { isWeekendDay } from "@/lib/tz";
  * the data: put work on a Saturday — from the month, from the day, from the rail — and that Saturday
  * is there the next time the week is drawn. Nothing is ever hidden with something on it.
  *
- * THREE THINGS OVERRIDE "EMPTY", and each one is a dead end without it:
+ * FOUR THINGS OVERRIDE "EMPTY", and each one is a dead end without it:
  *   - TODAY. The day you are standing in is always on the screen, even a Sunday you are not working.
  *   - ARMED. While work is picked in the placement rail (schedule/place-rail), every day is a drop
  *     target — and you cannot drop a job onto a column that isn't there.
  *   - WORK ON IT. Whatever the view would have drawn on that day; the caller answers that, because
  *     only the view knows what it draws (`hasWork`).
+ *   - JUST PLACED ON IT. The one day the write already landed on, held open until the screen catches
+ *     up. Placing onto an empty Saturday un-arms the rail in the same breath, and the server's fresh
+ *     data is a round trip behind: for that beat the week was rebuilt from the OLD data, where that
+ *     Saturday still had nothing on it, so the column folded away UNDER the "Placed on Sat" toast and
+ *     came back when the refresh landed. A column that leaves and returns on its own is the jumpy
+ *     week this rule exists to stop; a weekday never did it, because a weekday is unconditional.
  *
  * WEEKEND, WHEREVER THE WEEK START PUTS IT. This asks the calendar, never the position: a
  * Monday-start week leaves Sat+Sun at the end, a Sunday-start week opens on one of them.
@@ -36,13 +42,20 @@ export function weekViewDays(
     todayStr: string;
     /** Work is picked in the placement rail: every day must be tappable. */
     armed?: boolean;
+    /** Days a place already landed on, whose work the caller's data cannot see YET. Held open so the
+     *  column cannot vanish between the write and the refresh. Empty once the data catches up. */
+    justPlaced?: ReadonlySet<string>;
   },
 ): { shown: string[]; hidden: string[] } {
   const shown: string[] = [];
   const hidden: string[] = [];
   for (const ymd of days) {
     const drawn =
-      !isWeekendDay(ymd) || opts.armed === true || ymd === opts.todayStr || opts.hasWork(ymd);
+      !isWeekendDay(ymd) ||
+      opts.armed === true ||
+      ymd === opts.todayStr ||
+      opts.justPlaced?.has(ymd) === true ||
+      opts.hasWork(ymd);
     (drawn ? shown : hidden).push(ymd);
   }
   /* A WEEK IS NEVER NOTHING. If the data ever makes every day fold away (it cannot today — the five
