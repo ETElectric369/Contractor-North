@@ -40,9 +40,22 @@
    sideways) and `pointer: coarse` keeps short desktop windows out, which get
    the desktop shell anyway. `shell:` never fires here — 930px with a finger is
    below its 1024 floor — so the dock stays the bottom bar and the top bar
-   stays the phone's top bar, which is the whole reason this works at all. */
+   stays the phone's top bar, which is the whole reason this works at all.
+
+   AND THE MIN-WIDTH, WHICH IS THE ONLY CLAUSE THAT SAYS "SIDEWAYS". The other
+   three only say "wider than it is tall, short, and touched" — and a phone
+   standing straight up with its keyboard open is all three. layout.tsx sets
+   interactiveWidget: "resizes-content", so on Android Chrome the keyboard
+   shrinks the LAYOUT viewport: a 360x640 phone with a ~300px keyboard is
+   360x340, which reports `orientation: landscape` and clears max-height. The
+   whole sideways layout then landed mid-typing on a phone that never moved —
+   on /schedule the rail, which holds the autofocused "Why?" box, dropped below
+   the calendar as he tapped into it. An upright phone is ~440px wide at the
+   most and the narrowest sideways phone is 568, so 480 separates them cleanly.
+   iOS does not resize for the keyboard, so Erik's own phone never saw this —
+   it is a build-for-millions clause, not one he reported. */
 @custom-variant turned {
-  @media (orientation: landscape) and (max-height: 540px) and (pointer: coarse) {
+  @media (orientation: landscape) and (min-width: 480px) and (max-height: 540px) and (pointer: coarse) {
     @slot;
   }
 }
@@ -135,7 +148,7 @@ main {
    button and the first and last dock tiles sit under the cutout — a door you
    can see the edge of and not read. The bar and the dock stay exactly where
    they are; what is under the camera moves out from under it. */
-@media (orientation: landscape) and (max-height: 540px) and (pointer: coarse) {
+@media (orientation: landscape) and (min-width: 480px) and (max-height: 540px) and (pointer: coarse) {
   /* The top bar: still the top bar, same controls, same order, same 44px —
      just clear of the cutout on both ends. */
   .app-topbar {
@@ -144,8 +157,19 @@ main {
   }
   /* The dock: still pinned to the bottom, same tiles in the same order. They
      are flex-1, so clearing the cutout narrows them evenly instead of moving
-     the bar. */
-  .app-bottom-nav {
+     the bar.
+
+     `.app-dock`, NOT `.app-bottom-nav`. That second class has two users: the
+     dock, and the section-sheet edge handle, which borrows it only so
+     body.modal-open hides it with the dock. The handle is a 36px slab pinned
+     to the left edge — rounded on the RIGHT only, no left border, because it is
+     meant to look like part of that edge. This rule is unlayered, so it beat the
+     handle's own Tailwind `left-0`, and sideways it pushed the handle
+     env(safe-area-inset-left) — ~59pt on a 16 Pro — into mid-page, where it read
+     as a floating slab with a raw square side. It hit every section with more
+     than four pages, /price-list included, where that handle is the ONLY sibling
+     nav, and in any rotated mobile browser tab as well. */
+  .app-dock {
     left: max(0.5rem, env(safe-area-inset-left, 0px));
     right: max(0.5rem, env(safe-area-inset-right, 0px));
   }

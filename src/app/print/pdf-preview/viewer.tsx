@@ -6,6 +6,7 @@ import { Download, Loader2, Printer, RefreshCw } from "lucide-react";
 import { BackLink } from "@/components/back-link";
 import { pdfPreviewBackHref } from "@/lib/pdf-preview-back";
 import { pageWidthInside, worthRedrawing } from "@/lib/pdf-page-width";
+import { renderTurns } from "@/lib/pdf-render-turns";
 
 const MARGINS = [
   { v: 0.5, label: "Narrow · ½ in" },
@@ -30,15 +31,17 @@ export function PdfPreview({ doc, id, back }: { doc: string; id: string; back: s
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
   const [filename, setFilename] = useState("document.pdf");
   const pagesRef = useRef<HTMLDivElement>(null);
-  const renderSeq = useRef(0);
+  // WHOSE TURN IT IS TO OWN THIS SCREEN. Fetching a new document and redrawing the one in hand are
+  // two different jobs with two different rules, and one shared counter let them cancel each other:
+  // a rotation mid-fetch dropped the margin he chose, silently, and an interrupted rotation left the
+  // sheets drawn for the other orientation. lib/pdf-render-turns.ts carries both rules and their trace.
+  const turns = useRef(renderTurns());
   // THE DOCUMENT IS KEPT so the pages can be DRAWN AGAIN at a new width without fetching it twice.
   // Turning the phone sideways more than doubles the room a page has (Erik, 2026-10-01: rotation
   // should work "like documents especially"), and these canvases are bitmaps — a page rasterized for
   // a 374pt-wide phone, stretched to 812, is the same small page blown up. The buffer can't be kept
   // instead: pdf.js may hand its ArrayBuffer to the worker and detach it.
   const pdfRef = useRef<PDFDocumentProxy | null>(null);
-  /** The width the pages on screen were drawn for, so a resize that changes nothing repaints nothing. */
-  const paintedAtW = useRef(0);
   /** Always rendered, zero height, never display:none — the one thing that can always be measured. */
   const measureRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -58,15 +61,23 @@ export function PdfPreview({ doc, id, back }: { doc: string; id: string; back: s
    * DRAW THE PAGES at a given width. Split out of load() so turning the phone redraws from the
    * document already in hand instead of asking the server for the same bytes again — on cellular a
    * 6 MB plan set fetched on every rotation is the kind of thing that makes a man stop turning his
-   * phone. The sequence number is the only guard: whoever bumped it last owns the screen.
+   * phone.
+   *
+   * A PAINT TURN cancels other paints and NOTHING ELSE. It must never cancel a load: the load is
+   * fetching the margin he just tapped, and a turn of the phone that outranked it dropped that margin
+   * on the floor with no spinner and no error (pdf-render-turns.ts).
    */
   const paint = useCallback(async (pdf: PDFDocumentProxy, containerW: number) => {
-    const seq = ++renderSeq.current;
+    const host = pagesRef.current;
+    if (!host) return;
+    // CLAIM THE WIDTH NOW, not when the last page lands — the list is emptied below, so from this
+    // instant this is the width the screen shows whether or not this paint ever finishes. Recording it
+    // at the end hid an interrupted rotation from the repaint guard, which then declined to redraw and
+    // left a 796px sheet in a portrait window that only sideways panning could read.
+    const seq = turns.current.startPaint(containerW);
     // Print goes back to disabled for the whole repaint (audit 7: enabling it at page 1 let a fast
     // tap print a money document with blank tail pages, and a repaint has exactly that gap again).
     setAllPainted(false);
-    const host = pagesRef.current;
-    if (!host) return;
     // KEEP HIS PLACE. Redrawing empties the list, so page 5 of an invoice would become page 1 every
     // time the phone turned. The sheets keep their aspect ratio, so the fraction scrolled is the
     // same place at any width.
@@ -86,7 +97,7 @@ export function PdfPreview({ doc, id, back }: { doc: string; id: string; back: s
       const dpr = pdf.numPages <= 4 ? HIGH : pdf.numPages <= 10 ? 2 : 1.5;
       for (let n = 1; n <= pdf.numPages; n++) {
         const page = await pdf.getPage(n);
-        if (seq !== renderSeq.current) return;
+        if (!turns.current.paintOwns(seq)) return;
         const base = page.getViewport({ scale: 1 });
         const scale = containerW / base.width;
         const vp = page.getViewport({ scale });
@@ -107,24 +118,30 @@ export function PdfPreview({ doc, id, back }: { doc: string; id: string; back: s
         await page.render({ canvasContext: ctx, viewport: vp }).promise;
         // SHOW PAGE 1 THE MOMENT IT EXISTS. Waiting for every canvas made a 6-page doc feel
         // as slow as its last page; the rest keep painting into the already-visible list.
-        if (n === 1) setState("ready");
+        // Only if this paint still owns the list: page one is rasterized BEFORE the next trip
+        // round the loop checks, so a margin change landing in that window had the old document's
+        // first sheet declare itself "ready" over the new one's "Opening…".
+        if (n === 1 && turns.current.paintOwns(seq)) setState("ready");
       }
-      if (seq !== renderSeq.current) return; // a margin change mid-paint owns the screen now
-      paintedAtW.current = containerW;
+      // A margin change or a newer rotation mid-paint owns the screen now, and a superseded paint
+      // finishing late must not claim the width back either.
+      if (!turns.current.finishedPaint(seq, containerW)) return;
       setState("ready");
       setAllPainted(true);
       if (scroller && was > 0) scroller.scrollTop = was * scroller.scrollHeight;
     } catch (e: any) {
       // A page that won't rasterize is its own failure, not the fetch's — this used to be caught by
       // load()'s handler, which can no longer see it.
-      if (seq !== renderSeq.current) return;
+      if (!turns.current.paintOwns(seq)) return;
       setError(e?.message ?? "Couldn't draw the pages.");
       setState("error");
     }
   }, []);
 
   const load = useCallback(async () => {
-    const seq = ++renderSeq.current;
+    // A LOAD TURN outranks everything: the document on screen is about to be replaced, so a repaint of
+    // it is cancelled too — and until this one has the bytes in hand, nothing else may repaint at all.
+    const seq = turns.current.startLoad();
     setState("loading");
     setAllPainted(false);
     setError("");
@@ -144,7 +161,7 @@ export function PdfPreview({ doc, id, back }: { doc: string; id: string; back: s
         /* a malformed escape keeps the ASCII name */
       }
       const buf = await res.arrayBuffer();
-      if (seq !== renderSeq.current) return; // a newer request superseded this one
+      if (!turns.current.loadOwns(seq)) return; // a newer request superseded this one
 
       // Keep the raw bytes for Download/Print — the preview and the file can't diverge.
       const url = URL.createObjectURL(new Blob([buf], { type: "application/pdf" }));
@@ -160,7 +177,7 @@ export function PdfPreview({ doc, id, back }: { doc: string; id: string; back: s
         import.meta.url,
       ).toString();
       const pdf = await pdfjs.getDocument({ data: buf }).promise;
-      if (seq !== renderSeq.current) {
+      if (!turns.current.loadOwns(seq)) {
         void pdf.destroy();
         return;
       }
@@ -169,9 +186,13 @@ export function PdfPreview({ doc, id, back }: { doc: string; id: string; back: s
       const previous = pdfRef.current;
       pdfRef.current = pdf;
       if (previous) void previous.destroy();
+      // THE FETCH IS DONE, so rotations may repaint again — and the width below is measured right now,
+      // which is why a turn of the phone during the fetch needed no repaint of its own.
+      turns.current.settled(seq);
       await paint(pdf, roomForAPage());
     } catch (e: any) {
-      if (seq !== renderSeq.current) return;
+      if (!turns.current.loadOwns(seq)) return;
+      turns.current.settled(seq);
       setError(e?.message ?? "Couldn't build the PDF.");
       setState("error");
     }
@@ -194,8 +215,13 @@ export function PdfPreview({ doc, id, back }: { doc: string; id: string; back: s
       // Late enough that iOS has settled on the new size — asked mid-rotation it reports the old one.
       t = setTimeout(() => {
         const pdf = pdfRef.current;
+        // DEFER, DON'T FIGHT. While a fetch is in flight, pdfRef still holds the document being
+        // replaced — repainting it here outranked the fetch and the margin he tapped never landed.
+        // Nothing is lost by waiting: load() ends in paint(pdf, roomForAPage()), which measures the
+        // room at that moment, so the new orientation is drawn anyway.
+        if (!pdf || turns.current.isLoading()) return;
         const want = roomForAPage();
-        if (!pdf || !worthRedrawing(want, paintedAtW.current)) return;
+        if (!worthRedrawing(want, turns.current.drawnAtW())) return;
         void paint(pdf, want);
       }, 180);
     };
@@ -211,12 +237,13 @@ export function PdfPreview({ doc, id, back }: { doc: string; id: string; back: s
   // Release the blob (and the retained page bitmaps) when the viewer goes away — a
   // multi-megabyte PDF held by an object URL survives navigation otherwise.
   const pagesHost = pagesRef;
+  const turnsOnLeaving = turns.current;
   useEffect(() => {
     const host = pagesHost.current;
     return () => {
       // Abort any in-flight fetch/paint loop (audit 7): tapping Back mid-load still rasterized
       // every page into detached canvases and leaked the multi-MB blob on the page you fled to.
-      renderSeq.current++;
+      turnsOnLeaving.abandonAll();
       setBlobUrl((old) => {
         if (old) URL.revokeObjectURL(old);
         return null;

@@ -68,7 +68,13 @@ export function SectionSheet({
     <>
       {/* The handle. `app-bottom-nav` so body.modal-open hides it like the bottom
           nav — its backdrop-filter + fixed is the exact recipe that beat modal
-          z-order on iOS once already. */}
+          z-order on iOS once already.
+          THAT CLASS IS A MARKER, NOT A PLACE. It says "hide me with the dock" and
+          nothing else. Any rule that MOVES the dock belongs on `.app-dock`, which
+          only the dock wears: the sideways camera inset was written on the shared
+          class and pushed this handle ~59pt off the edge it is drawn to sit on
+          (rounded right only, no left border), into mid-page on every section with
+          more than four pages. */}
       <button
         type="button"
         onClick={() => setOpen(true)}

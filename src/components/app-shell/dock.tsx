@@ -218,7 +218,13 @@ function DockInner({ branding, role, badges: badgesProp, features }: DockProps) 
         // gap-1 SEPARATES the tiles so the lit pill no longer touches its neighbor; the
         // balanced pt-1 / safe-area-floored pb keeps the content vertically centered above
         // the home indicator instead of riding high with dead space below it.
-        className="app-bottom-nav glass fixed inset-x-2 bottom-2 z-[70] flex items-center gap-1 rounded-2xl border-white/40 px-1 pt-1 pb-[max(0.25rem,min(env(safe-area-inset-bottom),0.5rem))] shell:hidden"
+        // TWO CLASSES, TWO JOBS. `app-bottom-nav` is the MARKER a handful of things look for —
+        // body.modal-open hides them, glass-menu dodges them, the OS text callout is turned off on
+        // them — and the section-sheet edge handle wears it too, for the hiding alone. `app-dock` is
+        // THIS BAR, and it is the only hook any rule that MOVES the dock may use. Sideways, the shared
+        // class put the dock's camera inset on that handle as well, which shoved a slab built to sit
+        // flush against the left edge ~59pt into the middle of /price-list.
+        className="app-dock app-bottom-nav glass fixed inset-x-2 bottom-2 z-[70] flex items-center gap-1 rounded-2xl border-white/40 px-1 pt-1 pb-[max(0.25rem,min(env(safe-area-inset-bottom),0.5rem))] shell:hidden"
       >
         {tiles.map((s) => {
           const Icon = s.icon;

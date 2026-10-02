@@ -28,9 +28,31 @@ const PDF_VIEWER = read("src/app/print/pdf-preview/viewer.tsx");
 const LIGHTBOX = read("src/components/media-lightbox.tsx");
 const MANIFEST = read("src/app/manifest.ts");
 const PLIST = read("ios/App/App/Info.plist");
+const SECTION_SHEET = read("src/components/section-sheet.tsx");
+const ROOT_LAYOUT = read("src/app/layout.tsx");
 
 /** The one media query, as both the `turned:` variant and the plain rules must spell it. */
-const QUERY = "@media (orientation: landscape) and (max-height: 540px) and (pointer: coarse)";
+const QUERY =
+  "@media (orientation: landscape) and (min-width: 480px) and (max-height: 540px) and (pointer: coarse)";
+
+/**
+ * The RULES of the plain @media block: brace-matched, so a rule that merely sits AFTER the block can
+ * never be mistaken for one inside it (`.app-bottom-nav` has rules on both sides of that boundary),
+ * and stripped of comments, so the prose explaining which class a rule must NOT use is not read as
+ * that rule using it.
+ */
+function turnedBlock(): string {
+  const at = CSS.lastIndexOf(QUERY);
+  if (at < 0) throw new Error("the plain sideways @media block is missing");
+  let depth = 0;
+  for (let i = CSS.indexOf("{", at); i < CSS.length; i++) {
+    if (CSS[i] === "{") depth++;
+    else if (CSS[i] === "}" && --depth === 0) {
+      return CSS.slice(at, i + 1).replace(/\/\*[\s\S]*?\*\//g, "");
+    }
+  }
+  throw new Error("the sideways @media block is never closed");
+}
 
 describe("the `turned:` variant", () => {
   it("is defined, and spelled the same way in both places it appears", () => {
@@ -40,22 +62,42 @@ describe("the `turned:` variant", () => {
     expect(CSS).toMatch(/@custom-variant turned \{/);
   });
 
-  it("keeps all three clauses — each one is holding something out", () => {
+  it("keeps all four clauses — each one is holding something out", () => {
     // orientation: a tall phone must not get any of this.
+    // min-width: a phone standing UPRIGHT with its keyboard open (see below).
     // max-height: an iPad is 744pt tall sideways and already rotates everywhere; it keeps its own
     //   layout, which is the desktop shell.
     // pointer: a short DESKTOP window is wide and mouse-driven — it gets `shell:` (the side dock),
     //   and these rules would fight it.
     expect(QUERY).toContain("orientation: landscape");
+    expect(QUERY).toContain("min-width: 480px");
     expect(QUERY).toContain("max-height: 540px");
     expect(QUERY).toContain("pointer: coarse");
+  });
+
+  it("a phone held UPRIGHT with its keyboard open is NOT turned sideways", () => {
+    // The other three clauses only say "wider than it is tall, short, and touched". layout.tsx asks
+    // the browser to resize the layout for the keyboard, so on Android Chrome a 360x640 phone with a
+    // ~300px keyboard up is a 360x340 viewport: landscape by every one of them, on a phone that never
+    // moved. The whole sideways layout then arrived mid-keystroke — on /schedule the rail that holds
+    // the autofocused "Why?" box reorders BELOW the calendar as he taps into it.
+    //
+    // 480 is the separator: an upright phone is ~440px wide at the most (the widest is 440), and the
+    // narrowest phone held sideways is 568. Both of those numbers are what the clause is made of, so
+    // the arithmetic is asserted rather than described.
+    expect(ROOT_LAYOUT).toContain('interactiveWidget: "resizes-content"');
+    const floor = Number(/min-width: (\d+)px/.exec(QUERY)![1]);
+    for (const uprightWidth of [320, 360, 390, 402, 428, 440]) expect(uprightWidth).toBeLessThan(floor);
+    for (const sidewaysWidth of [568, 667, 740, 844, 874, 932]) {
+      expect(sidewaysWidth).toBeGreaterThanOrEqual(floor);
+    }
   });
 });
 
 describe("every selector the sideways rules target is really in the markup", () => {
   const hooks: [string, string, string][] = [
     ["app-topbar", "the top bar", TOPBAR],
-    ["app-bottom-nav", "the dock", DOCK],
+    ["app-dock", "the dock — its OWN hook, not the shared marker class", DOCK],
     ["app-subnav", "the section strip", SUBNAV],
     ["app-backdrop", "the shell root (main's padding hangs off it)", SHELL],
     ["schedule-split", "the schedule's rail-and-calendar split", SCHEDULE],
@@ -96,6 +138,29 @@ describe("the chrome does not move when the phone turns", () => {
       expect(TOPBAR).toMatch(undo);
     });
   }
+
+  it("the section handle keeps its edge — `app-bottom-nav` has TWO users, not one", () => {
+    // The handle (section-sheet.tsx) is a 36px slab pinned to the left edge, rounded on the RIGHT
+    // only and with no left border, because it is drawn to look like part of that edge. It wears
+    // `app-bottom-nav` for ONE reason: body.modal-open hides it with the dock. So no rule that MOVES
+    // the dock may use that class — unlayered CSS beats the handle's Tailwind `left-0`, and the
+    // sideways camera inset shoved it ~59pt into mid-page on every section with more than four pages
+    // (Jobs, Office and Money, which is where /price-list lives — one of the four screens that turn,
+    // and the one where this handle is the only sibling nav).
+    // The handle's own class list, not the prose around it.
+    const handle = /className="(app-bottom-nav[^"]*)"/.exec(SECTION_SHEET)?.[1];
+    expect(handle).toBeTruthy();
+    expect(handle).toContain("left-0");
+    expect(handle).not.toContain("app-dock");
+    const turned = turnedBlock();
+    // Nothing inside the sideways block may select the class the handle wears.
+    expect(turned).not.toMatch(/\.app-bottom-nav\b/);
+    // The dock still gets its insets, under a hook only the dock has.
+    expect(turned).toMatch(/\.app-dock\s*\{[^}]*env\(safe-area-inset-left/);
+    expect(/className="[^"]*\bapp-dock\b[^"]*"/.test(DOCK)).toBe(true);
+    // …and the marker still does the one job it was borrowed for.
+    expect(CSS).toContain("body.modal-open .app-bottom-nav");
+  });
 
   it("the dock is still the bottom bar sideways — `shell:` cannot reach a phone width", () => {
     // The bottom bar is drawn below `shell:`, which needs 1024px OR a fine pointer. A landscape
@@ -139,7 +204,34 @@ describe("the documents keep their doors when the camera is on the side", () => 
     expect(PDF_VIEWER).toMatch(/void paint\(pdf, want\)/);
     // Width only: a keyboard or a browser's own chrome changes the height, and a repaint then would
     // interrupt reading for nothing. The arithmetic itself is tested in lib/pdf-page-width.test.ts.
-    expect(PDF_VIEWER).toContain("worthRedrawing(want, paintedAtW.current)");
+    expect(PDF_VIEWER).toContain("worthRedrawing(want, turns.current.drawnAtW())");
+  });
+
+  it("a rotation never outranks the margin he just tapped", () => {
+    // Fetching a new document and redrawing the one in hand are two jobs with two rules, and one
+    // shared counter let a rotation cancel the fetch: the Wide bytes landed, the load saw a newer
+    // number, returned, and nothing re-ran it. The selector read "Wide · 1 in" over Narrow sheets with
+    // no spinner and no error — silent, on a money document. The rules and their trace live in
+    // lib/pdf-render-turns.ts, which is where they are tested; this pins the viewer to them.
+    expect(PDF_VIEWER).toContain("renderTurns()");
+    expect(PDF_VIEWER).toContain("turns.current.startLoad()");
+    expect(PDF_VIEWER).toContain("turns.current.startPaint(containerW)");
+    // The repaint timer DEFERS while a fetch is in flight instead of fighting it.
+    expect(PDF_VIEWER).toContain("turns.current.isLoading()");
+    // No counter is shared any more.
+    expect(PDF_VIEWER).not.toContain("renderSeq");
+  });
+
+  it("…and an interrupted rotation cannot leave the sheets the wrong width", () => {
+    // The width is claimed when the page list is emptied, because that is what the screen shows from
+    // then on. Recorded at the END instead, a rotation interrupted by a rotation back was invisible to
+    // the repaint guard, which declined to redraw and left a 796px sheet in a portrait window.
+    expect(PDF_VIEWER).not.toContain("paintedAtW");
+    const paintBody = PDF_VIEWER.slice(
+      PDF_VIEWER.indexOf("const paint = useCallback"),
+      PDF_VIEWER.indexOf("const load = useCallback"),
+    );
+    expect(paintBody.indexOf("startPaint(containerW)")).toBeLessThan(paintBody.indexOf('host.innerHTML = ""'));
   });
 
   it("…and the page keeps his place instead of jumping back to page 1", () => {
