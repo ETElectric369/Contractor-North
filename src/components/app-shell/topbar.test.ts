@@ -138,13 +138,22 @@ describe("Search Or Ask", () => {
     const tag = html.match(/<button[^>]*data-tour="ask"[^>]*>/)![0];
     expect(tag).toContain("h-11 w-11");
     expect(tag).toContain("md:w-auto");
-    expect(html).toContain('<span class="hidden text-sm md:inline">Search Or Ask</span>');
+    expect(html).toContain('<span class="hidden text-sm md:inline turned:hidden">Search Or Ask</span>');
+  });
+
+  it("A PHONE TURNED SIDEWAYS IS STILL A PHONE: the square, and no label", () => {
+    // Erik, 2026-10-01: the top bar's buttons stay "exactly where they are" when the phone turns.
+    // Sideways a phone is ~700–930px wide, so md: fires and this button would have grown a text
+    // label and widened — in the one place he said nothing may change. `turned:` puts it back.
+    const tag = render(owner, ALL_ON).match(/<button[^>]*data-tour="ask"[^>]*>/)![0];
+    expect(tag).toContain("turned:w-11");
+    expect(tag).toContain("turned:px-0");
   });
 
   it("with Nort off it reads Search, and his host isn't mounted", () => {
     const html = render(owner, { ...ALL_ON, nort: false });
     expect(html).toMatch(/<button[^>]*data-tour="ask"[^>]*aria-label="Search"/);
-    expect(html).toContain('<span class="hidden text-sm md:inline">Search</span>');
+    expect(html).toContain('<span class="hidden text-sm md:inline turned:hidden">Search</span>');
     expect(html).not.toContain("Search Or Ask");
     expect(html).not.toContain('data-x="nort-host"');
   });
