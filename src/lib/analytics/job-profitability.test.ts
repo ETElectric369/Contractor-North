@@ -60,7 +60,10 @@ describe("computeJobProfitRows — job profit SSOT (reconciles /analytics + Nort
       bills: [{ job_id: "A", amount: 200 }],
       entries: [laborEntry("A", 8, 50)], // 8h × $50 = 400
     });
-    expect(rows).toEqual([{ id: "A", job_number: "J-A", name: "Job A", status: "in_progress", rev: 1000, cost: 600, profit: 400, ownerHours: 0, perOwnerHour: null }]);
+    expect(rows).toEqual([
+      // ownerCost 0 and uncostedOwnerHours 0: no owner worked this job, so the build-time half is empty.
+      { id: "A", job_number: "J-A", name: "Job A", status: "in_progress", rev: 1000, cost: 600, profit: 400, ownerHours: 0, ownerCost: 0, uncostedOwnerHours: 0, perOwnerHour: null },
+    ]);
   });
 
   it("revenue is the PAYMENTS ledger, not invoices.amount_paid — a credit writeoff is no cash", () => {
@@ -198,7 +201,7 @@ describe("computeJobProfitRows — job profit SSOT (reconciles /analytics + Nort
 });
 
 describe("computeProfitByType — margin by work type", () => {
-  const row = (id: string, rev: number, cost: number, ownerHours = 0): JobProfitRow => ({ id, job_number: `J-${id}`, name: `Job ${id}`, status: "complete", rev, cost, profit: rev - cost, ownerHours, perOwnerHour: null });
+  const row = (id: string, rev: number, cost: number, ownerHours = 0): JobProfitRow => ({ id, job_number: `J-`, name: `Job `, status: "complete", rev, cost, profit: rev - cost, ownerHours, ownerCost: 0, uncostedOwnerHours: 0, perOwnerHour: null });
 
   it("groups jobs by type, sums money, computes margin %, sorts by profit", () => {
     const rows = [row("a", 1000, 600), row("b", 500, 450), row("c", 2000, 1000)];

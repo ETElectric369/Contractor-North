@@ -2,6 +2,7 @@ import { BUSINESS_COST_BUCKETS, bucketOf, type BusinessCostBucket } from "@/lib/
 import { livePurchaseOrders } from "@/lib/job-progress-math";
 import { balanceForPerson, payRateForEntry, toPayPaymentRow, type PayPaymentRow } from "@/lib/payroll-math";
 import { attachRates, payRateMapRead, type PayRates } from "@/lib/profile-columns";
+import { buildTimeRate } from "@/lib/build-time-cost";
 import { todayStrInTz, tzDayStartUtc } from "@/lib/tz";
 import { formatCurrency, hoursBetween } from "@/lib/utils";
 import { computeCollected, monthKeyInTz, trailing12Months } from "@/lib/analytics/money-metrics";
@@ -18,7 +19,7 @@ import {
 import { PNL_WORDS, materialsWithStock } from "@/lib/analytics/profit-and-loss";
 
 /**
- * LEFT FOR YOU: what the business kept for its owner (migration 0286's other half).
+ * NET PROFIT: what the business kept for its owner (migration 0286's other half).
  *
  * Erik, 2026-09-23: "get rid of the owners wages and make everything not a cost part of the owners
  * draw", and "i need to see ... total received, total draw after expenses and payroll". ET Electric
@@ -27,6 +28,18 @@ import { PNL_WORDS, materialsWithStock } from "@/lib/analytics/profit-and-loss";
  *
  *   left = received - materials_and_bills - crew_pay - crew_mileage_paid - fuel - business_costs
  *               - put_on_the_shelf - shop_stock_lost
+ *
+ * THE OWNER'S OWN BUILD TIME IS NOT IN THAT SUBTRACTION, AND MUST NEVER BE (0373). Erik, 2026-10-01:
+ * "build time, including my build time is considered COGS, so it would be considered a direct cost".
+ * He is right about the JOB, and his on-site hours are costed there (lib/build-time-cost.ts) and come
+ * back here as `ownerBuildTimeOnJobs`. But a sole proprietor cannot deduct his own labour: the business
+ * is not separate from him and all of this is already his personal income, so there is no owner wage
+ * expense on the report his Schedule C is read off. The profit and loss therefore charges the amount on
+ * a COGS line and books the identical amount straight back on a contra line (profit-and-loss.ts), and
+ * `left` is the same figure whether he has set a cost rate or not. If this subtraction ever grows an
+ * `- ownerBuildTime`, his tax figure is wrong - three existing tests fail first, by design.
+ *
+ * AND WHAT HE ACTUALLY TOOK OUT IS `ownerDraw`: equity, below the bottom line, never subtracted either.
  *
  * EVERY LINE COMES FROM A RULE THAT ALREADY EXISTS, never a new definition:
  *   · received          = computeCollected (money-metrics), the /analytics "Collected" rule:
@@ -264,6 +277,30 @@ export type OwnerMoneyFigures = {
   ownerHours: number;
   /** left / ownerHours, or null when the owner logged no hours. */
   perOwnerHour: number | null;
+  /**
+   * 0373: THE OWNER'S BUILD TIME ON JOBS, in dollars - his ON-SITE hours at his cost rate. A COGS
+   * line, with an equal contra line beside it (profit-and-loss.ts's ownerBuildTimePair), so it is
+   * charged where the cost belongs and nets to nothing on the way to `left`. $0 until he sets a cost
+   * rate, and when it is $0 for want of one the hours come back in ownerUncostedBuildTimeHours and a
+   * caveat says so rather than any screen printing a guess.
+   */
+  ownerBuildTimeOnJobs: number;
+  /** His ON-SITE hours: the hours behind ownerBuildTimeOnJobs. Always a subset of ownerHours. */
+  ownerOnSiteHours: number;
+  /** His OFFICE hours - shifts on no job. Overhead, never a job cost, never in the allocation. */
+  ownerOfficeHours: number;
+  /** On-site hours with no cost rate behind them: reported, never swallowed, never costed at $0 in
+   *  silence. ownerBuildTimeOnJobs is short by exactly these. */
+  ownerUncostedBuildTimeHours: number;
+  /**
+   * 0373: WHAT THE OWNER TOOK OUT - equity, below the bottom line, never subtracted from anything
+   * (Erik, 2026-10-01: "an actual draw from the owner is considered equity and should be a line item
+   * below net profit"). Sourced from bank_lines placed as Owner's Draw while sorting the bank, so it
+   * sees every draw that passed through a downloaded account and NOT one taken in cash: `ownerDrawSeen`
+   * on OwnerMoney says so in words, because a partial figure under a total-sounding name is worse than
+   * no figure at all.
+   */
+  ownerDraw: number;
 };
 
 export type OwnerMoneyMonth = OwnerMoneyFigures & { month: string };
@@ -276,6 +313,14 @@ export type OwnerMoneyCaveat =
   /** Closed, unpaid crew hours in the window priced at $0 because the person has no pay rate
    *  (audit v994 MR3). Unrated hours are REPORTED, never swallowed: Crew Pay is short by their wage. */
   | { kind: "unrated_hours"; hours: number; people: string[] }
+  /**
+   * 0373: the OWNER'S on-site hours in the window with no cost rate behind them. ITS OWN CAVEAT, AND
+   * NOT `unrated_hours`, for a reason the words have to carry: unrated_hours means a wage went
+   * missing, and says "Set Pay Rates". The owner has no wage to be missing - he is paid by owner's
+   * draw - and this is a cost rate he has never set, a different sentence pointing at a different box.
+   * Routing him through the crew caveat would print a false alarm about a rate that never existed.
+   */
+  | { kind: "owner_build_time_uncosted"; hours: number; people: string[] }
   | { kind: "crew_owed"; total: number }
   /** What the business still owes its SUPPLIERS for bills counted in this window, account by
    *  account, by the SAME supplierBalance /bills reads (audit v994 MR1): the supplier's own open
@@ -299,13 +344,30 @@ export type OwnerMoney = {
   caveats: OwnerMoneyCaveat[];
   /** The owners whose hours are counted (paid by owner's draw). */
   owners: { id: string; name: string }[];
+  /**
+   * 0373: WHICH DRAWS THE OWNER'S DRAW FIGURE CAN SEE. It is built from bank lines he sorted as
+   * Owner's Draw, so it holds every draw that went through a downloaded account and NONE taken in
+   * cash, or by a cheque from an account he never downloads. Whoever prints the figure prints this
+   * beside it: a partial total under a total-sounding name is the quiet wrong number, and the only
+   * honest version of a figure that cannot see everything is one that says what it cannot see.
+   */
+  ownerDrawSeen: string;
   /** What is on the shelf right now, at cost (every live lot's dollars left). Not a window
    *  figure: it is the shelf as of the read, shown beside Put On The Shelf. */
   onShelfNow: number;
 };
 
 /** `commuteBaselineMiles`: the daily commute the tax report nets out of logged miles (profile_pay). */
-export type OwnerMoneyPerson = { name: string; paidByDraw: boolean; hourlyRate: number | null; commuteBaselineMiles?: number | null };
+export type OwnerMoneyPerson = {
+  name: string;
+  paidByDraw: boolean;
+  hourlyRate: number | null;
+  /** 0373: what an hour of this person's BUILD TIME costs the business, where that is a different
+   *  figure from what it pays them. Set for an owner (who is paid no wage at all); null means nobody
+   *  has said yet, which is never read as $0 in silence - see lib/build-time-cost.ts. */
+  costRate?: number | null;
+  commuteBaselineMiles?: number | null;
+};
 
 export type OwnerMoneyInputs = {
   /** payments: amount, paid_at, processor_fee, stripe_payment_intent, invoices { status }. */
@@ -320,8 +382,9 @@ export type OwnerMoneyInputs = {
   /** petty_cash: job_id, amount, kind, category, tx_date, created_at. */
   pettyCash: any[];
   /** time_entries (closed AND open) with profiles merged from the rates read (attachRates):
-   *  id, profile_id, status, clock_in, clock_out, lunch_minutes, rate_override, paid_at. The rows
-   *  the Pay board reads, so crew pay and its "owed" agree with it. */
+   *  id, profile_id, job_id, status, clock_in, clock_out, lunch_minutes, rate_override, paid_at. The
+   *  rows the Pay board reads, so crew pay and its "owed" agree with it. job_id is what tells the
+   *  owner's BUILD TIME (on a job: a direct cost) from his OFFICE time (on none: Overhead). */
   entries: any[];
   /** payroll_runs, every kind: profile_id, kind, period_start, period_end, gross, mileage_amount, created_at. */
   runs: any[];
@@ -378,6 +441,10 @@ export type OwnerMoneyInputs = {
   supplierDocuments?: any[];
   /** bank_lines a person placed as Other Income (0363): amount, posted_on. Absent = none. */
   otherIncome?: any[];
+  /** bank_lines a person placed as Owner's Draw (0363's choice='draw'): amount (signed, negative for
+   *  money out), posted_on. EQUITY, below the bottom line, never a cost. Absent = none counted, which
+   *  is also every database before 0363. */
+  ownerDraws?: any[];
   /** The Pay board's own first day of hours (today less BALANCE_MONTHS, org-local). What a person is
    *  still owed is balanceForPerson over the shifts from this day on ONLY, whatever span was read, so
    *  it is the Pay board's You Owe to the cent (balanceEntries). Absent = every shift read counts. */
@@ -445,8 +512,28 @@ type Acc = {
   lost: number;
   movedOut: number;
   ownerHours: number; // hundredths of an hour, summed from hoursBetween's 2-decimal hours
+  ownerOnSite: number; // hundredths: the owner's hours ON A JOB, the allocation's base
+  ownerUncosted: number; // hundredths: on-site hours with no cost rate behind them
+  ownerBuildTime: number; // cents: ownerOnSite at the cost rate. NEVER inside `left`: it has a contra.
+  draw: number; // cents the owner took out (bank_lines placed as Owner's Draw). EQUITY, never a cost.
 };
-const newAcc = (): Acc => ({ received: 0, other: 0, materials: 0, crewPay: 0, mileage: 0, buckets: emptyBuckets(), fees: 0, shelf: 0, lost: 0, movedOut: 0, ownerHours: 0 });
+const newAcc = (): Acc => ({
+  received: 0,
+  other: 0,
+  materials: 0,
+  crewPay: 0,
+  mileage: 0,
+  buckets: emptyBuckets(),
+  fees: 0,
+  shelf: 0,
+  lost: 0,
+  movedOut: 0,
+  ownerHours: 0,
+  ownerOnSite: 0,
+  ownerUncosted: 0,
+  ownerBuildTime: 0,
+  draw: 0,
+});
 
 // ── THE FROZEN-GROSS RULE ────────────────────────────────────────────────────
 /**
@@ -916,7 +1003,18 @@ export function computeOwnerMoney(
     if (a) a.mileage += toCents(r.mileage_amount);
   }
 
-  // OWNER HOURS: every owner's closed shifts, by the month worked.
+  // OWNER HOURS: every owner's closed shifts, by the month worked - AND WHAT HIS BUILD TIME COST.
+  //
+  // THE SPLIT THAT MATTERS (0373). An hour he spends ON A JOB is build time: a direct cost of that
+  // job, charged at his cost rate (Erik, 2026-10-01: "build time, including my build time is
+  // considered COGS"). An hour on NO job is office time: Overhead, never a job cost. So a shift's
+  // job_id decides which half it is in, and only the first half enters the allocation.
+  //
+  // THE RATE IS THE ONE RULE'S, never a figure worked out here: buildTimeRate (lib/build-time-cost.ts)
+  // is the single expression, and readOwnerMoneyInputs has already merged each person's rates onto the
+  // shift (attachRates), so `cost_rate` rides the row the same way `hourly_rate` does. An hour with no
+  // cost rate behind it is COUNTED and NOT COSTED - it lands in ownerUncosted and the caveat below
+  // says so, rather than any screen printing $0 as though it were the answer.
   const owners = new Map<string, { id: string; name: string }>();
   for (const [id, p] of inp.people) if (p.paidByDraw) owners.set(id, { id, name: p.name });
   let openShifts = 0;
@@ -927,9 +1025,26 @@ export function computeOwnerMoney(
       continue;
     }
     const pid = e.profile_id ? String(e.profile_id) : "";
-    if (!pid || !inp.people.get(pid)?.paidByDraw) continue;
+    const person = pid ? inp.people.get(pid) : undefined;
+    if (!pid || !person?.paidByDraw) continue;
     const a = at(monthOfDay(day));
-    if (a) a.ownerHours += Math.round(hoursBetween(e.clock_in, e.clock_out, e.lunch_minutes) * 100);
+    if (!a) continue;
+    const hundredths = Math.round(hoursBetween(e.clock_in, e.clock_out, e.lunch_minutes) * 100);
+    a.ownerHours += hundredths;
+    if (!e.job_id) continue; // OFFICE TIME: Overhead. Counted as hours, charged to no job.
+    a.ownerOnSite += hundredths;
+    const rate = buildTimeRate(e, { costRate: person.costRate }).rate;
+    if (rate == null) a.ownerUncosted += hundredths;
+    else a.ownerBuildTime += Math.round((hundredths / 100) * rate * 100);
+  }
+
+  // WHAT THE OWNER TOOK OUT: bank lines he sorted as Owner's Draw (0363's choice='draw'), on the day
+  // they posted. EQUITY - it is added up here and said below the bottom line, and nothing subtracts
+  // it. `amount` is signed and negative for money out, so the magnitude is what was drawn.
+  for (const l of inp.ownerDraws ?? []) {
+    // posted_on is a DATE on the row (0363), so it is the day itself: the same read Other Income does.
+    const a = at(monthOfDay(l?.posted_on ?? null));
+    if (a) a.draw += Math.abs(toCents(l.amount));
   }
 
   // ── Figures ──
@@ -938,6 +1053,11 @@ export function computeOwnerMoney(
     buckets.Fees += a.fees;
     const fuelCents = buckets.Fuel;
     const bizCents = BUCKETS_BESIDE_FUEL.reduce((s, b) => s + buckets[b], 0);
+    // THE BOTTOM LINE IS UNTOUCHED BY THE ALLOCATION, ON PURPOSE. a.ownerBuildTime is NOT subtracted
+    // here and a.draw never will be: his build time is charged on a COGS line with an equal contra
+    // beside it (profit-and-loss.ts), and his draw is equity below the line. A sole proprietor cannot
+    // deduct his own labour, so this figure - the one his Schedule C is read off - must come out
+    // identical whether or not he has set a cost rate. Pinned by test, before and after.
     const leftCents = a.received - a.materials - a.crewPay - a.mileage - fuelCents - bizCents - a.shelf - a.lost;
     const hours = a.ownerHours / 100;
     return {
@@ -956,6 +1076,11 @@ export function computeOwnerMoney(
       left: fromCents(leftCents),
       ownerHours: hours,
       perOwnerHour: hours > 0 ? Math.round((leftCents / 100 / hours) * 100) / 100 : null,
+      ownerBuildTimeOnJobs: fromCents(a.ownerBuildTime),
+      ownerOnSiteHours: a.ownerOnSite / 100,
+      ownerOfficeHours: Math.round(a.ownerHours - a.ownerOnSite) / 100,
+      ownerUncostedBuildTimeHours: a.ownerUncosted / 100,
+      ownerDraw: fromCents(a.draw),
     };
   };
   const total = newAcc();
@@ -970,6 +1095,10 @@ export function computeOwnerMoney(
     total.lost += a.lost;
     total.movedOut += a.movedOut;
     total.ownerHours += a.ownerHours;
+    total.ownerOnSite += a.ownerOnSite;
+    total.ownerUncosted += a.ownerUncosted;
+    total.ownerBuildTime += a.ownerBuildTime;
+    total.draw += a.draw;
     for (const b of BUSINESS_COST_BUCKETS) total.buckets[b] += a.buckets[b];
   }
 
@@ -999,12 +1128,38 @@ export function computeOwnerMoney(
 
   if (openShifts > 0) caveats.push({ kind: "open_shifts", count: openShifts });
 
+  // THE OWNER'S OWN BUILD TIME, NOT COSTED YET (0373). His on-site hours in the window with no cost
+  // rate set: the allocation is short by exactly these, so the job-side figures read low while the
+  // bottom line is unaffected (the pair nets to zero either way). Said in its own words, because the
+  // crew caveat below means a WAGE went missing and this is a rate nobody has ever typed.
+  // Its own pass over the window's months, the same shape the crew caveat below uses, rather than the
+  // accumulator's running total: a "through a day" read sends later days to a key past every month,
+  // and a caveat must name only what the figures on screen are short by.
+  {
+    let hundredths = 0;
+    const who = new Set<string>();
+    for (const e of inp.entries ?? []) {
+      if (!e?.clock_out || !e.job_id) continue;
+      const pid = e.profile_id ? String(e.profile_id) : "";
+      const person = pid ? inp.people.get(pid) : undefined;
+      if (!pid || !person?.paidByDraw) continue;
+      if (!inWindow.has(monthOfDay(recordDay(null, e.clock_in, tz)) ?? "")) continue;
+      if (buildTimeRate(e, { costRate: person.costRate }).rate != null) continue;
+      const h = Math.round(hoursBetween(e.clock_in, e.clock_out, e.lunch_minutes) * 100);
+      if (!(h > 0)) continue;
+      hundredths += h;
+      who.add(person.name?.trim() || String(e.profiles?.full_name ?? "").trim() || "The owner");
+    }
+    if (hundredths > 0) caveats.push({ kind: "owner_build_time_uncosted", hours: hundredths / 100, people: [...who].sort() });
+  }
+
   // UNRATED HOURS ARE REPORTED, NEVER SWALLOWED (audit v994 MR3; laborCostForJob's v800 rule). A
   // crew member saved with no pay rate prices every hour at $0 above, so Crew Pay is short by his
   // wage and the draw reads that much too high. Only the hours that are still LIVE-priced count:
   // closed, not yet locked into a pay period (a locked period's gross is frozen on its run), in a
-  // month this window covers, for someone paid wages. An owner's hours are never a cost and never
-  // appear here.
+  // month this window covers, for someone paid wages. AN OWNER NEVER APPEARS HERE: he has no wage to
+  // be missing, so his uncosted build time is the caveat directly above, with its own sentence and its
+  // own door.
   {
     let hundredths = 0;
     const people = new Set<string>();
@@ -1241,6 +1396,7 @@ export function computeOwnerMoney(
     months: months.map((m) => ({ month: m, ...figures(acc.get(m)!) })),
     caveats,
     owners: [...owners.values()],
+    ownerDrawSeen: OWNER_DRAW_SEEN,
     onShelfNow: fromCents(onShelfNow),
   };
 }
@@ -1315,6 +1471,22 @@ export function notCountedLine(m: OwnerMoney): string | null {
  *  door that fixes it (the Team page's Pay box). */
 export function hasUnratedHours(m: OwnerMoney): boolean {
   return m.caveats.some((c) => c.kind === "unrated_hours");
+}
+
+/**
+ * WHAT THE OWNER'S DRAW FIGURE CAN AND CANNOT SEE (0373). Printed wherever the figure is, never
+ * optional: it is built from bank lines sorted as Owner's Draw, so a draw taken in cash is not in it
+ * and nothing in the app knows about one yet. Saying so is the difference between a figure a reader
+ * can trust the shape of and a total that is quietly short.
+ */
+export const OWNER_DRAW_SEEN =
+  "Counts money out of a bank account you downloaded and sorted as Owner's Draw. Cash you took without a bank line is not in it.";
+
+/** The window's uncosted owner build time, or null when every on-site hour has a cost rate behind it.
+ *  The one place a surface asks whether to say the sentence (nothing silent, and no second predicate). */
+export function uncostedBuildTime(m: OwnerMoney): { hours: number; people: string[] } | null {
+  for (const c of m.caveats) if (c.kind === "owner_build_time_uncosted") return { hours: c.hours, people: c.people };
+  return null;
 }
 
 const hoursWords = (h: number) => `${Number.isInteger(h) ? h : h.toFixed(2).replace(/0$/, "")} ${h === 1 ? "hour" : "hours"}`;
@@ -1543,7 +1715,7 @@ export async function readOwnerMoneyInputs(
   const hoursFrom = ownerMoneyHoursFrom(span.start, todayYmd);
   const entriesFrom = tzDayStartUtc(hoursFrom.from, tz).toISOString();
 
-  const [payments, refunds, bills, pos, petty, entries, runs, payPayments, memos, ratesRead, names, firsts, shelfLots, supplierAccounts, supplierAliases, supplierPayments, otherIncome] = await Promise.all([
+  const [payments, refunds, bills, pos, petty, entries, runs, payPayments, memos, ratesRead, names, firsts, shelfLots, supplierAccounts, supplierAliases, supplierPayments, otherIncome, ownerDraws] = await Promise.all([
     readEvery<any>("payments", (f, t) =>
       supabase
         .from("payments")
@@ -1577,7 +1749,11 @@ export async function readOwnerMoneyInputs(
     readEvery<any>("hours", (f, t) =>
       supabase
         .from("time_entries")
-        .select("id, profile_id, status, clock_in, clock_out, lunch_minutes, rate_override, paid_at, mileage_paid_at, miles, split_from, profiles(full_name)")
+        // job_id (0373): THE ALLOCATION BASE IS ON-SITE HOURS ONLY. The owner's build time is a job
+        // cost; his OFFICE time is Overhead and is charged to no job. Which half a shift is in is
+        // whether it carries a job, so without this column the figure cannot be computed at all -
+        // projection law: the select list is the first edit, before any arithmetic.
+        .select("id, profile_id, job_id, status, clock_in, clock_out, lunch_minutes, rate_override, paid_at, mileage_paid_at, miles, split_from, profiles(full_name)")
         .gte("clock_in", entriesFrom)
         .order("id")
         .range(f, t),
@@ -1644,11 +1820,14 @@ export async function readOwnerMoneyInputs(
       supabase.from("supplier_payments").select("id, supplier_account_id, amount, paid_on, method, voided_at").order("id").range(f, t),
     ),
     // OTHER INCOME from bank downloads (0363). A database before 0363 has none: never a lost read.
-    readOtherIncome(supabase, span),
+    readBankChoice(supabase, span, "other_income"),
+    // WHAT THE OWNER TOOK OUT (0373): the same bank lines, sorted as Owner's Draw. Equity, below the
+    // bottom line. Nothing read it until now - 0363 has written the answer since it shipped.
+    readBankChoice(supabase, span, "draw"),
   ]);
 
   const problem =
-    [payments, refunds, bills, pos, petty, entries, runs, payPayments, memos, shelfLots, supplierAccounts, supplierAliases, supplierPayments, otherIncome]
+    [payments, refunds, bills, pos, petty, entries, runs, payPayments, memos, shelfLots, supplierAccounts, supplierAliases, supplierPayments, otherIncome, ownerDraws]
       .map((r) => r.problem)
       .find(Boolean) ??
     ratesRead.problem ??
@@ -1661,7 +1840,13 @@ export async function readOwnerMoneyInputs(
     if (n?.id) nameOf.set(String(n.id), n.full_name ?? "");
   }
   for (const [id, r] of ratesRead.rates as Map<string, PayRates>) {
-    people.set(id, { name: nameOf.get(id) ?? "", paidByDraw: r.paid_by_draw, hourlyRate: r.hourly_rate, commuteBaselineMiles: r.commute_baseline_miles });
+    people.set(id, {
+      name: nameOf.get(id) ?? "",
+      paidByDraw: r.paid_by_draw,
+      hourlyRate: r.hourly_rate,
+      costRate: r.cost_rate,
+      commuteBaselineMiles: r.commute_baseline_miles,
+    });
   }
   // Rates onto each shift the way the Pay board merges them (0215/0216: never an embed).
   attachRates(entries.rows, ratesRead.rates, (e: any) => ({ id: e.profile_id, holder: e }));
@@ -1703,20 +1888,27 @@ export async function readOwnerMoneyInputs(
       supplierPayments: supplierPayments.rows,
       supplierDocuments: memos.rows,
       otherIncome: otherIncome.rows,
+      ownerDraws: ownerDraws.rows,
       balanceFrom: hoursFrom.balanceFrom,
     },
     problem: null,
   };
 }
 
-/** bank_lines placed as Other Income in the span. No table yet (before 0363) = none. */
-async function readOtherIncome(supabase: any, span: { start: string; end: string }): Promise<{ rows: any[]; problem: string | null }> {
+/**
+ * bank_lines a person placed as one ANSWER in the span. No table yet (before 0363) = none.
+ *
+ * Two choices are read: 'other_income' (money in that no invoice holds) and 'draw' (what the owner
+ * took out - equity, below the bottom line). ONE function for both, so the page-and-tolerate shape
+ * that handles a database without the table is written once rather than twice.
+ */
+async function readBankChoice(supabase: any, span: { start: string; end: string }, choice: string): Promise<{ rows: any[]; problem: string | null }> {
   const out: any[] = [];
   for (let i = 0, from = 0; i < MAX_PAGES; i++) {
     const { data, error } = await supabase
       .from("bank_lines")
       .select("id, amount, posted_on")
-      .eq("choice", "other_income")
+      .eq("choice", choice)
       .gte("posted_on", span.start)
       .lt("posted_on", span.end)
       .order("id")

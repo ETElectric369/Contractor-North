@@ -15,7 +15,8 @@ export const PROFILE_SAFE_COLS =
   "id, full_name, email, phone, role, avatar_url, active, created_at, updated_at, org_id, language, home_lat, home_lng, push_prefs, must_reset_password, crew_lead, deactivated_at, deactivated_by, onboarded_at, nort_humor, nort_register, nort_notes, lessons_seen";
 
 /** The pay/address columns — readable only through `profile_pay`, never off `profiles`. */
-export const PROFILE_PAY_COLS = "id, org_id, full_name, hourly_rate, bill_rate, home_address, commute_baseline_miles, active, paid_by_draw";
+export const PROFILE_PAY_COLS =
+  "id, org_id, full_name, hourly_rate, bill_rate, home_address, commute_baseline_miles, active, paid_by_draw, cost_rate";
 
 export type ProfilePayRow = {
   id: string;
@@ -26,8 +27,11 @@ export type ProfilePayRow = {
   home_address: string | null;
   commute_baseline_miles: number | null;
   active?: boolean;
-  /** 0286: an owner is paid by owner's draw. The view already reads his hourly_rate as 0. */
+  /** 0286: an owner is paid by owner's draw — not on payroll. The view reads his hourly_rate as 0. */
   paid_by_draw?: boolean | null;
+  /** 0373: what an hour of the OWNER'S OWN BUILD TIME costs the business. Null = nobody has said
+   *  yet, which is not $0: see lib/build-time-cost.ts. Never his bill rate, never a wage. */
+  cost_rate?: number | null;
 };
 
 /** The rate facts every reader of `payRateMap` gets per person. */
@@ -35,19 +39,25 @@ export type PayRates = {
   hourly_rate: number | null;
   bill_rate: number | null;
   commute_baseline_miles: number | null;
-  /** 0286: true for an owner. His hours are billed and counted, never a cost. */
+  /** 0286: true for an owner. He is not on payroll; his hours are billed and counted. */
   paid_by_draw: boolean;
+  /** 0373: the owner's build-time COST rate. Null = not set yet, never read as $0 in silence. */
+  cost_rate: number | null;
 };
 
 /**
- * IS THIS PERSON PAID BY OWNER'S DRAW? (migration 0286, Erik 2026-09-23: "get rid of the owners
- * wages and make everything not a cost part of the owners draw").
+ * IS THIS PERSON PAID BY OWNER'S DRAW — that is, NOT ON PAYROLL? (migration 0286.)
  *
  * Every owner is. The flag rides out of profile_pay beside the rates, so a reader that already has
  * the rates in hand has the answer too. A MISSING flag reads false, and that is safe rather than a
- * gap: the same view already returns hourly_rate 0 for an owner, so a reader that never asks this
- * question still costs his hours at $0. Asking it is how a reader tells his hours apart (counted,
- * billed, never "unrated").
+ * gap: the same view already returns hourly_rate 0 for an owner, so no reader can turn his row into
+ * a wage.
+ *
+ * IT NO LONGER MEANS "HIS HOURS ARE NEVER A COST" (Erik, 2026-10-01: "build time, including my build
+ * time is considered COGS"). The flag carries ONE fact now — he is not on payroll, so he has no
+ * Earned, no Owed and no pay period. What his build time COSTS is a different question with its own
+ * rate and its own expression: lib/build-time-cost.ts. A reader that wants a cost asks that; a
+ * reader that wants to know who is on the Pay board asks this.
  */
 export function isPaidByDraw(profile: { paid_by_draw?: unknown } | null | undefined): boolean {
   return profile?.paid_by_draw === true;
@@ -77,7 +87,7 @@ const PAY_RATE_COLS = "id, hourly_rate, bill_rate, commute_baseline_miles";
 function isUndefinedColumn(error: unknown): boolean {
   const code = String((error as { code?: string })?.code ?? "");
   const message = String((error as { message?: string })?.message ?? "");
-  return code === "42703" || /column .*paid_by_draw.* does not exist/i.test(message);
+  return code === "42703" || /column .*(paid_by_draw|cost_rate).* does not exist/i.test(message);
 }
 
 /**
@@ -96,14 +106,21 @@ export async function payRateMapRead(
   rates: Map<string, PayRates>;
   problem: string | null;
 }> {
-  // paid_by_draw rides the same read (0286), so every surface that prices hours also knows whose
-  // hours are the owner's, with no second query that could fail on its own.
-  let { data, error } = await supabase.from("profile_pay").select(`${PAY_RATE_COLS}, paid_by_draw`);
-  // MIGRATION WINDOW (inspection/schema.ts tolerateMissingColumns): a push to main deploys before
-  // 0286 is applied, and a select naming paid_by_draw fails WHOLE on the old view. payRateMap drops
-  // `problem`, so without this every caller (job hub, analytics, Nort, tax report) would price all
-  // crew labor at $0 with no error. On the old view the owner is still costed at his hourly_rate,
-  // the pre-0286 behaviour; nothing drops silently to zero. Only undefined_column is tolerated.
+  // paid_by_draw rides the same read (0286) and cost_rate rides it too (0373), so every surface that
+  // prices hours knows whose hours are the owner's AND what his build time costs, with no second
+  // query that could fail on its own.
+  let { data, error } = await supabase.from("profile_pay").select(`${PAY_RATE_COLS}, paid_by_draw, cost_rate`);
+  // MIGRATION WINDOW (inspection/schema.ts tolerateMissingColumns): a push to main deploys before the
+  // migration is applied, and a select naming a column the view has not got yet fails WHOLE.
+  // payRateMap drops `problem`, so without this every caller (job hub, analytics, Nort, tax report)
+  // would price all crew labor at $0 with no error. ONE COLUMN BACK AT A TIME: a database with 0286
+  // but not 0373 keeps 0286's own answer, instead of losing the draw flag along with the cost rate —
+  // without the flag the owner reads as crew with no pay rate, which would raise a false "hours with
+  // no rate" alarm about him. On the view before 0286 he is costed at his hourly_rate, which was the
+  // behaviour then. Only undefined_column is tolerated.
+  if (error && isUndefinedColumn(error)) {
+    ({ data, error } = await supabase.from("profile_pay").select(`${PAY_RATE_COLS}, paid_by_draw`));
+  }
   if (error && isUndefinedColumn(error)) {
     ({ data, error } = await supabase.from("profile_pay").select(PAY_RATE_COLS));
   }
@@ -115,6 +132,7 @@ export async function payRateMapRead(
       bill_rate: r.bill_rate ?? null,
       commute_baseline_miles: r.commute_baseline_miles ?? null,
       paid_by_draw: isPaidByDraw(r),
+      cost_rate: r.cost_rate ?? null,
     });
   }
   return { rates: m, problem: null };

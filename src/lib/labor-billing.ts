@@ -1,6 +1,5 @@
-import { formatCurrency, hoursBetween } from "@/lib/utils";
-import { payRateForEntry } from "@/lib/payroll-math";
-import { isPaidByDraw } from "@/lib/profile-columns";
+import { formatCurrency } from "@/lib/utils";
+import { tallyBuildTime } from "@/lib/build-time-cost";
 
 /** One billable-labor line for a worker on a job. `sourceIds` are the time_entry ids whose hours
  *  this line bills: the line's CLAIM on them (0255). A claim is what lets a second invoice bill only
@@ -59,51 +58,44 @@ export function withoutClaimedLabor(
 }
 
 /**
- * Per-job LABOR COST (what we PAY): the one implementation shared by the job hub and /analytics so a
- * job can't show two different profits. Counts the closed entries on `jobId`, each costed at its OWN
- * pay rate (rate_override ?? base) via payRateForEntry. Accepts the job's own entries (job hub,
+ * Per-job LABOR COST (what the work COST us): the one implementation shared by the job hub and
+ * /analytics so a job can't show two different profits. Counts the closed entries on `jobId`, each
+ * costed by the ONE build-time rule (lib/build-time-cost.ts). Accepts the job's own entries (job hub,
  * pre-filtered) OR all entries (analytics): same result either way.
  *
  * A split shift is ordinary entries (0288), so each piece is simply an entry on its own job. A
  * job-less piece carrying a time code (Drive, Shop) belongs to no job and is costed to none.
  *
- * THE OWNER'S HOURS ARE HOURS, NOT A COST (0286). The owner is paid by owner's draw: his hours count
- * in `hours` (the job took them) and again in `ownerHours` (so a screen can say "Your Hours" and
- * "$X per hour you worked"), they add $0 to `cost`, and they are NEVER `unratedHours`: his rate is
- * not missing, he simply has none, and "3 hours have no rate" about the owner would be a false
- * alarm. Billing is untouched: computeJobLaborBilling still bills him at his bill_rate.
+ * BUILD TIME IS A DIRECT COST, WHOEVER WORKED IT (Erik, 2026-10-01: "build time, including my build
+ * time is considered COGS, so it would be considered a direct cost and should be counted that way").
+ * So the OWNER'S hours are in `cost` too, at his own cost rate — a figure he sets, separate from his
+ * bill rate (0286's defect was that the two were the same $125, so every hour he worked netted $0).
+ * They are also still handed back as `ownerHours` and `ownerCost` so a screen can say whose time it
+ * was and what it cost, and until he sets that rate they come back as `uncostedOwnerHours` and are
+ * SAID, never quietly costed at $0. Billing is untouched: computeJobLaborBilling still bills him at
+ * his bill_rate, and this is about cost, not price.
+ *
+ * This function decides nothing itself any more: the rate and the owner test are one expression each,
+ * so no reader can disagree with another about whether an owner's hour is a cost.
  */
 export function laborCostForJob(
   entries: any[],
   jobId: string,
   fallbackRate = 0,
-): { hours: number; cost: number; unratedHours: number; ownerHours: number } {
+): { hours: number; cost: number; unratedHours: number; ownerHours: number; ownerCost: number; uncostedOwnerHours: number } {
   // UNRATED HOURS ARE REPORTED, NEVER SWALLOWED (v800 audit). A worker with no hourly_rate and
   // no fallback costs $0/hr, so their labor vanished from job profit entirely: a labor-only job
   // with an unrated crew member read as PURE PROFIT. The cost still cannot be invented (that is
-  // the office's number), but the hours it could not price come back with it.
-  let hours = 0;
-  let cost = 0;
-  let unratedHours = 0;
-  let ownerHours = 0;
-  for (const e of entries ?? []) {
-    if (e?.job_id !== jobId || e.status !== "closed" || !e.clock_out) continue;
-    const owner = isPaidByDraw(e?.profiles) || e?.paid_by_draw === true;
-    const rate = owner ? 0 : payRateForEntry(e, fallbackRate);
-    const h = hoursBetween(e.clock_in, e.clock_out, e.lunch_minutes);
-    hours += h;
-    if (owner) {
-      ownerHours += h;
-      continue;
-    }
-    if (!(rate > 0)) unratedHours += h;
-    cost += h * rate;
-  }
+  // the office's number), but the hours it could not price come back with it. An owner with no cost
+  // rate set is the same fault wearing a different hat, and comes back the same way.
+  const t = tallyBuildTime(entries, { jobId, payRate: fallbackRate });
   return {
-    hours: Math.round(hours * 100) / 100,
-    cost: Math.round(cost * 100) / 100,
-    unratedHours: Math.round(unratedHours * 100) / 100,
-    ownerHours: Math.round(ownerHours * 100) / 100,
+    hours: t.hours,
+    cost: t.cost,
+    unratedHours: t.unratedHours,
+    ownerHours: t.ownerHours,
+    ownerCost: t.ownerCost,
+    uncostedOwnerHours: t.uncostedOwnerHours,
   };
 }
 
@@ -226,6 +218,13 @@ export function noBillRateWarnings(lines: readonly LaborLine[]): string[] {
  * service role, so it reads profiles in the one org the portal link names and applies the view's
  * own CASE: an owner is paid by draw (hourly 0) and bills at bill_rate, else his hourly figure.
  * Keep in step with the view.
+ *
+ * THE OWNER'S COST RATE IS DELIBERATELY NOT HERE (0373). His build time is a direct cost now, and
+ * `cost_rate` is the figure it costs — but this path's reader is a CUSTOMER (the portal prices a
+ * draft's lines live), and what a customer pays is his BILL rate. A cost figure folded into
+ * `bill_rate` by this function is 0286's original defect rebuilt, on a customer's page: his cost
+ * equal to his price, every hour netting $0. This selects and returns no cost rate at all, which is
+ * why customerRateRow has nothing new to strip.
  */
 export function payViewRow(p: { id: string; role?: string | null; hourly_rate?: number | string | null; bill_rate?: number | string | null }) {
   const owner = p.role === "owner";

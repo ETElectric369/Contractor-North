@@ -34,7 +34,7 @@ import { computeRevenueTrend } from "@/lib/analytics/money-metrics";
 import { pnlRow, profitAndLoss } from "@/lib/analytics/profit-and-loss";
 import { balanceForPerson } from "@/lib/payroll-math";
 import { BUSINESS_COST_BUCKETS } from "@/lib/business-cost-buckets";
-import { BUCKETS_BESIDE_FUEL } from "@/lib/analytics/owner-money";
+import { BUCKETS_BESIDE_FUEL, OWNER_DRAW_SEEN, uncostedBuildTime } from "@/lib/analytics/owner-money";
 
 const TZ = "America/Los_Angeles";
 const TODAY = "2026-09-24";
@@ -1317,11 +1317,11 @@ describe("through a day: the same window, only the records on or before that day
 
 /**
  * THE PROFIT AND LOSS IS THE SAME DOLLARS (Erik, 2026-09-28). Every surface now says these figures as
- * Revenue, Cost of Goods Sold (COGS), Gross Profit, Overhead and Net Profit (Owner's Draw)
+ * Revenue, Cost of Goods Sold (COGS), Gross Profit, Overhead and Net Profit
  * (profit-and-loss.ts). On this file's own fixtures, in every window and every month, the bottom line
  * is `left` to the cent, and Gross Profit less Total Overhead lands on it.
  */
-describe("the profit and loss on these fixtures: Net Profit (Owner's Draw) is the engine's net, to the cent", () => {
+describe("the profit and loss on these fixtures: Net Profit is the engine's net, to the cent", () => {
   const jobTicket = { id: "h1", job_id: "J-011", amount: 199.48, bill_date: "2026-08-19", created_at: "2026-08-19T18:00:00Z", category: "Receipt", status: "unpaid" };
   const credit = { id: "cr1", job_id: null, on_shelf: true, amount: -30, bill_date: "2026-09-12", created_at: "2026-09-12T18:00:00Z", category: "Credit", status: "paid" };
   const fixtures: [string, OwnerMoneyInputs][] = [
@@ -1394,5 +1394,134 @@ describe("the profit and loss on these fixtures: Net Profit (Owner's Draw) is th
     // 138.62 Fuel + 47.44 Other + 20 Tools & Supplies + 99.99 Fees: Fuel moved here 2026-09-30.
     expect(at("total_overhead")).toBe(306.05);
     expect(at("net_profit")).toBe(3645.35); // the same bottom line: only the halves moved
+  });
+});
+
+/**
+ * ═══════════════════════════════════════════════════════════════════════════════════════════════════
+ * THE OWNER'S BUILD TIME, ON THE ENGINE'S OWN ROWS (0373).
+ *
+ * Two halves of his day, and only one of them is a job cost: an hour ON A JOB is build time, a direct
+ * cost at his cost rate; an hour on NO job is office time, which is Overhead and belongs to no job. A
+ * shift's job_id is the whole of that split, which is why readOwnerMoneyInputs has to select it.
+ *
+ * AND `left` MUST NOT MOVE. The allocation is charged on a COGS line with an equal contra, so the bottom
+ * line - the figure Erik's Schedule C is read off - is the same whether he has set a cost rate or not. If
+ * it moves, he is deducting his own labour, which a sole proprietor may not do.
+ * ═══════════════════════════════════════════════════════════════════════════════════════════════════
+ */
+describe("the owner's build time: on-site hours are a cost, office hours are overhead, the bottom line stands", () => {
+  const COST_RATE = 65;
+  // Erik with a cost rate he has set. $65, NOT his $125 bill rate: a cost equal to the price is 0286's bug.
+  const erikCosted = new Map(people);
+  erikCosted.set(ERIK, { name: "Erik Taylor", paidByDraw: true, hourlyRate: 0, costRate: COST_RATE });
+  const withRate = (pid: string, m: Map<string, OwnerMoneyPerson>) => {
+    const p = m.get(pid)!;
+    return { full_name: p.name, hourly_rate: p.hourlyRate, paid_by_draw: p.paidByDraw, cost_rate: p.costRate ?? null };
+  };
+  /** A closed shift with a job (build time) or without one (office time). */
+  const day = (id: string, pid: string, d: string, hours: number, jobId: string | null, m: Map<string, OwnerMoneyPerson>) => ({
+    ...shift(id, pid, d, hours),
+    job_id: jobId,
+    profiles: withRate(pid, m),
+  });
+
+  const run = (m: Map<string, OwnerMoneyPerson>, entries: any[], ownerDraws: any[] = []) =>
+    computeOwnerMoney(
+      { ...base(), people: m, payments: [{ amount: 10_000, paid_at: "2026-08-10T18:00:00.000Z", invoices: { status: "paid" } }], entries, ownerDraws },
+      YEAR,
+      TZ,
+      TODAY,
+    );
+
+  // 8 hours on a job, 3 hours in the office.
+  const bothHalves = (m: Map<string, OwnerMoneyPerson>) => [
+    day("s1", ERIK, "2026-08-11", 8, "J-1", m),
+    day("s2", ERIK, "2026-08-12", 3, null, m),
+  ];
+
+  it("ON-SITE hours are costed at his cost rate; OFFICE hours are not costed to any job", () => {
+    const f = run(erikCosted, bothHalves(erikCosted)).totals;
+    expect(f.ownerHours).toBe(11);
+    expect(f.ownerOnSiteHours).toBe(8);
+    expect(f.ownerOfficeHours).toBe(3);
+    // 8 x 65 = 520. The 3 office hours add nothing: office time is Overhead, never a job cost.
+    expect(f.ownerBuildTimeOnJobs).toBe(8 * COST_RATE);
+    expect(f.ownerUncostedBuildTimeHours).toBe(0);
+  });
+
+  it("NET PROFIT IS THE SAME FIGURE with a cost rate set and without: the allocation never reaches it", () => {
+    const costed = run(erikCosted, bothHalves(erikCosted)).totals;
+    const uncosted = run(people, bothHalves(people)).totals;
+    expect(costed.ownerBuildTimeOnJobs).toBe(520);
+    expect(uncosted.ownerBuildTimeOnJobs).toBe(0);
+    // THE WHOLE POINT, to the cent.
+    expect(costed.left).toBe(uncosted.left);
+    // And every line of the profit and loss above it, too.
+    const opts = { ownerBuildTime: true, margin: true } as const;
+    for (const key of ["revenue", "total_cogs", "gross_profit", "total_overhead", "net_profit"] as const) {
+      expect(pnlRow(profitAndLoss(costed, opts), key)!.cents, key).toBe(pnlRow(profitAndLoss(uncosted, opts), key)!.cents);
+    }
+    // Crew Pay NEVER carries his labour: that fold would deduct an owner's own wage on the P&L.
+    expect(costed.crewPay).toBe(0);
+    expect(costed.crewPay).toBe(uncosted.crewPay);
+  });
+
+  it("no cost rate set: the on-site hours are REPORTED, not costed at $0 in silence", () => {
+    const m = run(people, bothHalves(people));
+    expect(m.totals.ownerBuildTimeOnJobs).toBe(0);
+    expect(m.totals.ownerUncostedBuildTimeHours).toBe(8); // the on-site half only
+    expect(uncostedBuildTime(m)).toEqual({ hours: 8, people: ["Erik Taylor"] });
+    // NEVER the crew alarm: "hours with no pay rate" is about a WAGE, and he has none.
+    expect(m.caveats.some((c) => c.kind === "unrated_hours")).toBe(false);
+    // With a rate set there is nothing to say.
+    expect(uncostedBuildTime(run(erikCosted, bothHalves(erikCosted)))).toBeNull();
+  });
+
+  it("the per-hour figure on the card does NOT move either, because `left` does not", () => {
+    const costed = run(erikCosted, bothHalves(erikCosted)).totals;
+    const uncosted = run(people, bothHalves(people)).totals;
+    expect(costed.perOwnerHour).toBe(uncosted.perOwnerHour);
+    expect(costed.ownerHours).toBe(uncosted.ownerHours);
+  });
+
+  it("OWNER'S DRAW comes off the bank lines he sorted, is equity, and takes nothing off the bottom line", () => {
+    const draws = [
+      { id: "d1", amount: -2000, posted_on: "2026-08-15" },
+      { id: "d2", amount: -500.5, posted_on: "2026-09-02" },
+    ];
+    const withDraw = run(erikCosted, bothHalves(erikCosted), draws).totals;
+    const without = run(erikCosted, bothHalves(erikCosted)).totals;
+    // Signed negative for money out; the figure is the magnitude drawn.
+    expect(withDraw.ownerDraw).toBe(2500.5);
+    expect(without.ownerDraw).toBe(0);
+    // NOT A COST: the bottom line and every total are untouched by it.
+    expect(withDraw.left).toBe(without.left);
+    expect(withDraw.materialsAndBills).toBe(without.materialsAndBills);
+    expect(withDraw.businessCostsTotal).toBe(without.businessCostsTotal);
+  });
+
+  it("it says which draws it can see, because it cannot see cash", () => {
+    const m = run(erikCosted, bothHalves(erikCosted), [{ id: "d1", amount: -2000, posted_on: "2026-08-15" }]);
+    expect(m.ownerDrawSeen).toBe(OWNER_DRAW_SEEN);
+    expect(m.ownerDrawSeen).toMatch(/Cash you took without a bank line is not in it/);
+  });
+
+  it("a draw lands in the month the bank posted it", () => {
+    const m = run(erikCosted, bothHalves(erikCosted), [
+      { id: "d1", amount: -1000, posted_on: "2026-08-15" },
+      { id: "d2", amount: -400, posted_on: "2026-09-02" },
+    ]);
+    const month = (k: string) => m.months.find((x) => x.month === k)!;
+    expect(month("2026-08").ownerDraw).toBe(1000);
+    expect(month("2026-09").ownerDraw).toBe(400);
+    expect(m.months.reduce((s, x) => s + x.ownerDraw, 0)).toBe(m.totals.ownerDraw);
+  });
+
+  it("a crew member's hours are costed exactly as before: only the owner's half is new", () => {
+    const f = run(people, [day("c1", BRIAN, "2026-08-11", 8, "J-1", people)]).totals;
+    expect(f.ownerHours).toBe(0);
+    expect(f.ownerBuildTimeOnJobs).toBe(0);
+    expect(f.crewPay).toBe(8 * 40); // Brian's wage, through crewPayByMonth, untouched
   });
 });

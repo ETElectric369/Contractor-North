@@ -33,9 +33,16 @@ export type JobProfitRow = {
   rev: number;
   cost: number;
   profit: number;
-  /** Hours the owner worked on this job (0286). He is paid by owner's draw, so they are never in
-   *  `cost`; they are how much of his own time the profit bought. */
+  /** Hours the owner worked on this job. BUILD TIME IS A DIRECT COST (Erik, 2026-10-01), so these
+   *  hours ARE in `cost`, at the cost rate he set - and in `ownerCost` on their own, so a screen can
+   *  still say whose time it was. They are never a wage: nothing pays him, and the company's profit and
+   *  loss books the same amount straight back, so his tax figure is untouched. */
   ownerHours: number;
+  /** His share of `cost`: those hours in dollars. $0 while he has set no cost rate. */
+  ownerCost: number;
+  /** His hours here with no cost rate behind them. `cost` is short by exactly these, so this row's
+   *  profit reads HIGH until a rate is set - said in words wherever the row is drawn, never guessed. */
+  uncostedOwnerHours: number;
   /** profit / ownerHours: what the job left the owner per hour he put in. Null when he put in no
    *  hours, and null when nothing has been collected yet (a rate on no money is not a rate). */
   perOwnerHour: number | null;
@@ -117,7 +124,9 @@ export function computeJobProfitRows(inp: ProfitInputs): JobProfitRow[] {
   return ((inp.jobs ?? []) as any[])
     .map((j) => {
       const rev = Math.max(0, (revenueByJob.get(j.id) ?? 0) - (refundByJob.get(j.id) ?? 0));
-      // Crew labor only: the owner's hours come back as ownerHours and cost $0 (0286).
+      // ALL the labour this job took, the owner's build time included (Erik, 2026-10-01: "build time,
+      // including my build time is considered COGS"). His share comes back on its own too, so a screen
+      // can name it without re-deciding the rule.
       const labor = laborCostForJob((inp.entries ?? []) as any[], j.id);
       const cost = labor.cost + (matCost.get(j.id) ?? 0);
       const profit = rev - cost;
@@ -130,6 +139,8 @@ export function computeJobProfitRows(inp: ProfitInputs): JobProfitRow[] {
         cost,
         profit,
         ownerHours: labor.ownerHours,
+        ownerCost: labor.ownerCost,
+        uncostedOwnerHours: labor.uncostedOwnerHours,
         perOwnerHour: perOwnerHourOf(rev, profit, labor.ownerHours),
       };
     })
@@ -214,11 +225,14 @@ async function fetchProfitInputs(supabase: any, jobId?: string): Promise<ProfitI
 }
 
 /**
- * BUDGET BURN KEEPS ITS COST MEANING (0286, deliberately NOT redefined). remaining/burnPct/overBudget
- * are still cost against the estimate, and cost no longer includes the owner's hours. So on a job
- * the owner works himself, burn can read low while the job is well along: the hours were spent, they
- * just are not a cost. `ownerHours` (on the row) sits beside burn for exactly that reason, and Nort's
- * get_job_financials says so, so a $0 labor actual is never read as "barely started".
+ * BUDGET BURN IS COST AGAINST THE ESTIMATE, and the owner's build time is now part of that cost (Erik,
+ * 2026-10-01). remaining/burnPct/overBudget therefore finally mean what an estimator reads them to
+ * mean on a job the owner works himself: under 0286 his hours cost $0, so burn read LOW while the job
+ * was well along, and the caveat on Nort's get_job_financials existed only to warn about it.
+ *
+ * THE ONE CASE LEFT WHERE BURN STILL READS LOW: he has set no cost rate. Then his hours are counted and
+ * not costed, by design - `uncostedOwnerHours` on the row is how a screen or Nort knows to say so, and
+ * nothing guesses a figure to fill the gap.
  */
 export type JobFinancials = JobProfitRow & {
   estimate: number;
@@ -235,7 +249,9 @@ export async function getJobFinancials(supabase: any, jobId: string): Promise<Jo
   const inp = await fetchProfitInputs(supabase, jobId);
   const row = computeJobProfitRows(inp).find((r) => r.id === jobId)
     // computeJobProfitRows drops jobs with zero rev AND zero cost; synthesize a zero row so a brand-new job still answers.
-    ?? (inp.jobs[0] ? { id: jobId, job_number: inp.jobs[0].job_number, name: inp.jobs[0].name, status: inp.jobs[0].status, rev: 0, cost: 0, profit: 0, ownerHours: 0, perOwnerHour: null } : null);
+    ?? (inp.jobs[0]
+      ? { id: jobId, job_number: inp.jobs[0].job_number, name: inp.jobs[0].name, status: inp.jobs[0].status, rev: 0, cost: 0, profit: 0, ownerHours: 0, ownerCost: 0, uncostedOwnerHours: 0, perOwnerHour: null }
+      : null);
   if (!row) return null;
 
   const fin = await jobProgressFinancials(supabase, jobId);
