@@ -121,7 +121,11 @@ const r2 = (n: number) => Math.round((Number.isFinite(n) ? n : 0) * 100) / 100;
 const linesOf = (b: NameWorkBill) => b.line_items ?? b.bill_line_items ?? [];
 
 /**
- * ── THE SPELLINGS NOBODY HAS FILED YET ──────────────────────────────────────────────────────
+ * ── THE PAPERS ON NO SUPPLIER ACCOUNT THAT ARE STILL OPEN ───────────────────────────────────
+ *
+ * ONE PASS, ONE MEMBERSHIP TEST (`paperDisagrees`): on no account AND still owed. A purchase paid at
+ * the register has one record, so it is not a disagreement and does not belong in this pile —
+ * leaving that half out is what put thirty-three settled card swipes on /reconcile.
  *
  * The receipt reader writes `bills.supplier` afresh on every scan, so one real vendor arrives
  * spelled several ways, each carrying its own money. They are grouped by the EXACT spelling,
@@ -131,6 +135,11 @@ const linesOf = (b: NameWorkBill) => b.line_items ?? b.bill_line_items ?? [];
  *
  * `accountOf` is the resolver's answer, never the stored column: a paper spelled with an account's
  * own name is ON that account, and offering to file it a second time would be a door to nothing.
+ *
+ * AND WHAT IS LEFT OUT IS COUNTED, not dropped. `settledAtTheRegister` really is the register and
+ * not the supplier's own verdict: a paper only reads as settled-by-the-supplier when a document of
+ * ITS account covers it, and nothing here is on an account at all — so for this pile `isStillOwed`
+ * turns on `bills.status` and nothing else, and the sentence drawn off it is true.
  */
 export function papersOnNoAccount(input: {
   /** Live bills — the caller has already dropped the superseded ones. */
