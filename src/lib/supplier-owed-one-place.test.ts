@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
+import { codeOnly, eachAppSource } from "./migration-body.test-util";
 
 /**
  * ONE RULE, ONE PLACE - WITH A TRIPWIRE ON IT (8a982483).
@@ -91,13 +92,15 @@ function files(dir: string): string[] {
   });
 }
 
-/** Comments out, so a comment may describe the rule it bans. Copied from no-supplier-name.test.ts. */
-const code = (src: string) =>
-  src
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .split("\n")
-    .map((l) => l.replace(/(^|[^:])\/\/.*$/, "$1"))
-    .join("\n");
+/**
+ * Comments out, so a comment may describe the rule it bans — THROUGH THE ONE SHARED STRIPPER
+ * (`codeOnly`, pinned in migration-body.test.ts). This file used to carry its own copy, and that copy
+ * treated every `/*` as a comment opener including the one inside `accept="image/<star>"`, which
+ * opened a comment running on to the next real close and blanked everything between: eighteen app
+ * files with code hidden from all of these tripwires, src/middleware.ts for 118 lines in one span.
+ * A tripwire that cannot see a file is worse than no tripwire, because it reports PASS.
+ */
+const code = codeOnly;
 
 const scan = (test: (line: string) => boolean) => {
   const hits: string[] = [];
@@ -200,6 +203,81 @@ describe("the still-owed rule is written in exactly one place", () => {
   it("no reader writes the could-not-total test itself", () => {
     const hits = scan((l) => /model\s*(!==|===)\s*["'`]supplier-invoices["'`]/.test(l) && /onAccount/.test(l));
     expect(hits).toEqual([]);
+  });
+
+  /**
+   * ── "IS THIS PAPER A DISAGREEMENT" IS WRITTEN ONCE (cn-v1041) ─────────────────────────────────
+   *
+   * Erik, after using the page: "I don't understand this give it account thing because it's already
+   * categorized and identified and most things are not going to be on an account honestly". He was
+   * looking at thirty-three rows, THIRTY-TWO of them register purchases already settled, because the
+   * pile's membership test had only half of the rule in it. A paper is a disagreement when it is on
+   * no supplier account AND STILL OPEN: a purchase paid at the till has one record, so there is no
+   * second record for it to disagree with.
+   *
+   * THE RULE IS NOW ONE FUNCTION, `paperDisagrees`, and this is why it needs a tripwire rather than
+   * just an export: both halves are one-liners anybody can retype, and the LAST time half of a rule
+   * was retyped at a reader it took a year and a live book to notice. A reader that spells out the
+   * account test beside the open test has written the pile a second time, and the two piles will
+   * eventually be different sizes on two screens about the same papers.
+   *
+   * It lives here, beside its siblings, so no second scanner can disagree with this one about what a
+   * line of code is — and it reads through the SHARED stripper, so it cannot be blinded to a file.
+   */
+  it("no reader writes the is-this-a-disagreement test itself", () => {
+    // The open half, by any of its names, on a line that also asks whether a paper is on an account.
+    const openHalf = /\b(isStillOwed|isOnAccountBill|boughtAtRegister)\s*\(/;
+    const accountHalf = /\baccountOf\s*\(|\baccountId\b|\bsupplier_account_id\b/;
+    const hits: string[] = [];
+    let scanned = 0;
+    eachAppSource(
+      (path, source) => {
+        scanned += 1;
+        const rel = relative(ROOT, path);
+        const lines = source.split("\n");
+        for (let i = 0; i < lines.length; i += 1) {
+          const l = lines[i];
+          // The one function IS both halves, so a line that calls it is the rule, not a copy of it.
+          if (l.includes("paperDisagrees(")) continue;
+          if (openHalf.test(l) && accountHalf.test(l)) hits.push(`${rel}:${i + 1}: ${l.trim().slice(0, 140)}`);
+        }
+      },
+      // The owner. `paperDisagrees` is defined there, out of `isStillOwed` three lines above it.
+      [join("src", "lib", "supplier-owed.ts")],
+    );
+    expect(hits, `these decide the papers-on-no-account pile themselves — call paperDisagrees: ${hits.join(" | ")}`).toEqual([]);
+    /**
+     * AND THE SCAN REALLY LOOKED AT THE APP. A stripper that eats real code reports PASS, which is
+     * how eighteen files sat outside every tripwire in this file until 2026-10-01. A floor on the
+     * file count catches a walker that stopped early; the two files below are the ones this rule is
+     * actually about, so a rename that left this scanning ghosts fails here.
+     */
+    expect(scanned, "the app-source walk came back with far too few files").toBeGreaterThan(600);
+    for (const owner of ["src/lib/supplier-owed.ts", "src/app/(app)/bills/supplier-name-work.ts"]) {
+      const src = codeOnly(readFileSync(join(ROOT, owner), "utf8"));
+      expect(src, `${owner} must reach the pile through the one function`).toContain("paperDisagrees(");
+      // And the stripper left the file's code behind: a blinded read would be nearly empty.
+      expect(src.split("\n").filter((l) => l.trim().length > 0).length, owner).toBeGreaterThan(60);
+    }
+  });
+
+  /**
+   * ── ONE NUMBER FOR ONE PILE: THE DOOR AND THE SECTION IT LANDS ON ────────────────────────────
+   *
+   * /bills' Suppliers card draws "$X On N Bills With No Supplier Account · File It" out of
+   * `notOnAnAccount`, and links to the section on /reconcile that answers it. That section used to
+   * count its own rows: "1 Bill" at the door, thirty-one rows underneath. So the section is HANDED
+   * that same object and may not total the pile itself.
+   */
+  it("the papers-on-no-account section is handed the read's figure, never its own sum", () => {
+    const page = readFileSync(join(ROOT, "src/app/(app)/reconcile/page.tsx"), "utf8");
+    expect(page).toContain("figure={work.notOnAccount.figure}");
+    const read = codeOnly(readFileSync(join(ROOT, "src/app/(app)/reconcile/reconcile-read.ts"), "utf8"));
+    // Handed down from the one read, untouched — never rebuilt from the bills this module holds.
+    expect(read).toContain("owed.owed.notOnAnAccount");
+    expect(read).toContain("figures?.notOnAnAccount");
+    const card = codeOnly(readFileSync(join(ROOT, "src/app/(app)/bills/suppliers-card.tsx"), "utf8"));
+    expect(card).toContain("notOnAccount.papers");
   });
 
   /**
