@@ -6,7 +6,7 @@ import { PageHeader } from "@/components/page-header";
 import { Card } from "@/components/ui/card";
 import { formatCurrency } from "@/lib/utils";
 import { reportError } from "@/lib/observe";
-import { papersOnNoAccountAside } from "@/lib/supplier-owed";
+import { papersOnNoAccountAside, settledAtTheRegisterSentence } from "@/lib/supplier-owed";
 import { readSupplierOwed } from "@/lib/supplier-owed-read";
 import {
   RECONCILE_KINDS,
@@ -130,6 +130,23 @@ export default async function ReconcilePage() {
   // its own words — `notOnAnAccountSentence` is the Suppliers card's, where "of this" is true.
   const papersOnNoAccount = owed?.owed.notOnAnAccount.papers ?? 0;
   const notOnAnAccount = owed ? papersOnNoAccountAside(owed.owed.notOnAnAccount, formatCurrency) : null;
+  // ── AND WHAT THE OPEN TEST TOOK OUT OF THAT PILE, IN ONE SENTENCE, WHEREVER THE PILE LANDS ──────
+  // A purchase paid at the register has one record and is no disagreement, so it is not a row — and
+  // nothing may leave a figure in silence. The sentence used to be typed inside the rows card, which
+  // draws nothing when it has no rows, and the shape the measured book is in is exactly that: every
+  // open paper held by a suggestion further up, or the whole pile settled and no section at all. So
+  // the page holds the sentence and hands it to whichever of the three places is the one drawn.
+  const settledSaid = settledAtTheRegisterSentence(work.notOnAccount.settledAtTheRegister);
+
+  // ── WHICH SUGGESTION ABOVE ALREADY HOLDS THIS PILE'S ONLY ROW ─────────────────────────────────
+  // Every paper on no account is in exactly one of the three name sections, and the pile's own
+  // section draws what no suggestion speaks for. So a pile of ONE, under a spelling the matcher does
+  // have an opinion about, left this section unrendered — and /bills' File It door, which links to
+  // its anchor, landed on nothing. The anchor is drawn either way now, and when the row really is
+  // upstairs it says which question holds it. Null when no question does, so the sentence is never
+  // written over an empty page.
+  const askedAbove: ReconcileAnsweredHere | null =
+    (["supplier-names", "same-supplier-or-two"] as const).find((k) => has(k)) ?? null;
 
   // ── NOTHING TO READ AND NOTHING TO PRESS ────────────────────────────────────────────────────
   // Plain words, never an error, and never an empty heading. It must answer for EVERY pile the page
@@ -167,10 +184,18 @@ export default async function ReconcilePage() {
                 "no ticket is filed twice" — which is a claim about the whole book, printed directly
                 above the card naming a ticket he had already answered on two jobs. A pick he has made
                 keeps its row on purpose; what is true is that none is WAITING on him. */}
+            {/* AND IT CLAIMS ONLY WHAT IT COUNTED. It used to say "every supplier name is on an
+                account", which the open test turned into a steady-state lie: settling the last open
+                unmatched paper — which is precisely what he does with these ("anything not on an
+                account will most likely be squared up as paid like everything else in my bills") —
+                empties this pile while thirty-two names sit on no account, every one of them settled.
+                What the page counted is that none of them is WAITING on an account, so that is what
+                it says, and the settled count is said in the next breath rather than left out. */}
             <p className="mt-1 text-sm text-slate-600">
-              Your bills and your suppliers&apos; own papers line up, every supplier name is on an account, and no ticket
-              is waiting on you to pick a job. Nothing for you to do here.
+              Your bills and your suppliers&apos; own papers line up, no supplier name is waiting to be put on an account,
+              and no ticket is waiting on you to pick a job. Nothing for you to do here.
             </p>
+            {settledSaid && <p className="mt-1 text-sm text-slate-600">{settledSaid}</p>}
           </>
         ) : (
           <>
@@ -188,7 +213,10 @@ export default async function ReconcilePage() {
               {allRead
                 ? "No money gap between your bills and your suppliers' own papers."
                 : "Some of what this page compares could not be read just now, so there is no figure to lead with."}
-              {waiting > 0 ? " What is below is supplier names and tickets filed twice." : ""}
+              {/* WHAT IS BELOW, NAMED OFF THE RECORD RATHER THAN TYPED HERE. It used to say "supplier
+                  names and tickets filed twice" whatever was actually drawn, which went stale the
+                  moment the pile stopped being about names at all. */}
+              {waiting > 0 ? ` What is below is ${open.map((k) => RECONCILE_KINDS[k].heading).join(", ")}.` : ""}
             </p>
           </>
         )}
@@ -230,7 +258,14 @@ export default async function ReconcilePage() {
         </section>
       )}
 
-      {has("not-on-an-account") && (
+      {/* ── THE PILE /bills' "File It" DOOR LANDS ON ─────────────────────────────────────────────
+          IT IS DRAWN WHENEVER THE PILE HAS A PAPER IN IT, not only while this kind has a row
+          waiting. The door on the Suppliers card links to this anchor, and an anchor that is not
+          drawn is a dead end: the one measured open paper arrived under a spelling the fuzzy matcher
+          DID have an opinion about, so it was a row in the suggestions above and this section was
+          never rendered — the door landed on a page with nothing about the paper it had just named.
+          The COUNT stays open-only (badges show open); only the drawing is widened. */}
+      {(has("not-on-an-account") || (papersOnNoAccount > 0 && askedAbove)) && (
         <section id={RECONCILE_KINDS["not-on-an-account"].anchor} className="scroll-mt-20">
           <SupplierUnfiledSpellings
             spellings={work.loose}
@@ -238,8 +273,44 @@ export default async function ReconcilePage() {
             // promise a button that is not there: the accounts read is what that door needs, and it
             // is the read this page just made.
             canSetOnAccount={!work.failed.includes("supplier accounts")}
+            // ONE NUMBER FOR ONE PILE: the figure here is the same `notOnAnAccount` object the File
+            // It door on /bills quotes, handed down the read rather than totalled again.
+            figure={work.notOnAccount.figure}
+            unnamed={work.notOnAccount.unnamed}
+            settledAtTheRegister={work.notOnAccount.settledAtTheRegister}
             actions={{ fileAsItsOwnAccount: fileSpellingAsItsOwnAccount }}
           />
+          {/* NO ROW OF ITS OWN, BUT THE PAPER IS UPSTAIRS. Every spelling in the pile is already
+              offered a door in a suggestion above, so this section would be empty — and empty is the
+              dead end. One line, pointing at the row that exists. */}
+          {!has("not-on-an-account") && askedAbove && (
+            <Card className="mb-6 p-4">
+              {/* THE SAME HEADING AND THE SAME MONEY THE ROWS CARD WOULD HAVE SHOWN, out of the same
+                  `notOnAnAccount` object /bills' File It door quotes. This card drew the count and no
+                  figure at all, so the door said "$215.00 On 2 Bills" and landed on a card with no
+                  money on it — one pile, two readings, nothing on either page joining them. */}
+              <h2 className="text-base font-semibold text-slate-900">
+                {RECONCILE_KINDS["not-on-an-account"].heading} ({papersOnNoAccount})
+                {(work.notOnAccount.figure?.total ?? 0) > 0.005 ? (
+                  <span className="font-normal text-slate-500"> · {formatCurrency(work.notOnAccount.figure!.total)} Still Open</span>
+                ) : null}
+              </h2>
+              <p className="mt-1 text-sm text-slate-600">
+                Every one of these is already in a question above, under the name on the paper, so it is answered there
+                rather than twice.
+              </p>
+              {/* AND THE SETTLED PAPERS ARE ACCOUNTED FOR HERE TOO. This card is what gets drawn in the
+                  shape the measured book is in, and the sentence lived in the card that is NOT drawn:
+                  sixty-nine papers left a figure in silence on the one page whose law forbids it. */}
+              {settledSaid && <p className="mt-1 text-sm text-slate-600">{settledSaid}</p>}
+              <Link
+                href={`#${RECONCILE_KINDS[askedAbove].anchor}`}
+                className="mt-1 flex min-h-11 items-center text-sm font-medium text-brand hover:underline"
+              >
+                Go To The Question
+              </Link>
+            </Card>
+          )}
         </section>
       )}
 

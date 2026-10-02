@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { dockCoverage, typingInto, whatTheTurnBelongsTo, whichWayToDraw } from "@/components/turns-sideways";
 import {
@@ -55,11 +55,15 @@ const EVERY_REGION: readonly TurnedRegion[] = [...SCREEN_NAMES, "the route", "th
 describe("every way of arriving at a turned screen, and every way of leaving one", () => {
   const sideways = { layers: [], overlays: 0, held: "clockwise" as const, typing: false };
 
-  it("the four declared screens turn; everything else stays upright", () => {
-    for (const path of ["/schedule", "/schedule/2026-10-01", "/price-list", "/print/pdf-preview/invoice/80"]) {
+  it("the declared screens turn; everything else stays upright", () => {
+    for (const path of ["/schedule", "/schedule/2026-10-01", "/print/pdf-preview/invoice/80"]) {
       expect(whichWayToDraw({ ...sideways, pathname: path })).toBe("clockwise");
     }
-    for (const path of ["/planner", "/timecards", "/jobs/41", "/reconcile", "/price-lists", "/"]) {
+    // /price-list is in this list now, not the one above — Erik, 2026-10-01: "schedule and documents
+    // yes and no on everything else." Why, in lib/screens-that-turn.ts: drawn in the glass between
+    // chrome that no longer moves, the 1080px table gets ~658px, against ~858px when iOS rotated
+    // everything. This way of turning showed LESS of it than the old way did.
+    for (const path of ["/planner", "/timecards", "/jobs/41", "/reconcile", "/price-list", "/price-lists", "/"]) {
       expect(whichWayToDraw({ ...sideways, pathname: path })).toBe("upright");
     }
   });
@@ -73,9 +77,9 @@ describe("every way of arriving at a turned screen, and every way of leaving one
   });
 
   it("TURNING WHILE THERE turns, and turning back comes back", () => {
-    expect(whichWayToDraw({ ...sideways, pathname: "/price-list" })).toBe("clockwise");
+    expect(whichWayToDraw({ ...sideways, pathname: "/schedule" })).toBe("clockwise");
     expect(
-      whichWayToDraw({ pathname: "/price-list", layers: [], overlays: 0, held: "upright", typing: false }),
+      whichWayToDraw({ pathname: "/schedule", layers: [], overlays: 0, held: "upright", typing: false }),
     ).toBe("upright");
   });
 
@@ -109,13 +113,17 @@ describe("every way of arriving at a turned screen, and every way of leaving one
   });
 
   it("DO NOT ROTATE A SCREEN A PERSON IS TYPING ON — the keyboard comes up the other way round", () => {
-    // Two of the four do have boxes: /schedule's autofocused "Why?" line and /price-list's search and
-    // its inline price cells. With the interface locked the keyboard rises from the phone's bottom
-    // edge — the person's left or right hand side — so typing into a box drawn a quarter turn from it
-    // is miserable. The screen comes upright while the box has focus and turns back when it is left.
+    // One of the three does have boxes today: /schedule's autofocused "Why?" line. With the interface
+    // locked the keyboard rises from the phone's bottom edge — the person's left or right hand side —
+    // so typing into a box drawn a quarter turn from it is miserable. The screen comes upright while
+    // the box has focus and turns back when it is left.
+    //
+    // THE RULE IS FOR ALL THREE, not for the one screen that needs it today: a document gains a box the
+    // day somebody adds a note to one, and this holds before that happens rather than after.
     const box = { layers: [], overlays: 0, held: "clockwise" as const };
     expect(whichWayToDraw({ ...box, pathname: "/schedule", typing: true })).toBe("upright");
-    expect(whichWayToDraw({ ...box, pathname: "/price-list", typing: true })).toBe("upright");
+    expect(whichWayToDraw({ ...box, pathname: "/print/pdf-preview/invoice/80", typing: true })).toBe("upright");
+    expect(whichWayToDraw({ ...box, layers: VIEWER, pathname: "/jobs/41", typing: true })).toBe("upright");
     expect(whichWayToDraw({ ...box, pathname: "/schedule", typing: false })).toBe("clockwise");
   });
 });
@@ -221,17 +229,19 @@ describe("a sheet opened over a turned screen brings it upright instead of landi
    */
   const onATurnedSchedule = { pathname: "/schedule", layers: [], held: "clockwise" as const, typing: false };
 
-  it("a sheet open over /schedule or /price-list: upright, with its keyboard the same way up", () => {
+  it("a sheet open over /schedule or a document: upright, with its keyboard the same way up", () => {
     expect(whichWayToDraw({ ...onATurnedSchedule, overlays: 1 })).toBe("upright");
     expect(whatTheTurnBelongsTo({ ...onATurnedSchedule, overlays: 1 })).toBeNull();
-    expect(whichWayToDraw({ ...onATurnedSchedule, pathname: "/price-list", overlays: 1 })).toBe("upright");
+    expect(
+      whichWayToDraw({ ...onATurnedSchedule, pathname: "/print/pdf-preview/invoice/80", overlays: 1 }),
+    ).toBe("upright");
     // Closing it turns the screen back — nothing is stuck, and nothing had to remember anything.
     expect(whichWayToDraw({ ...onATurnedSchedule, overlays: 0 })).toBe("clockwise");
   });
 
   it("…and it does NOT depend on a field being focused, which is what left the sheet in the corner", () => {
-    // The sheets on these two screens (the tile sheet, Add To Schedule, Time Off, Edit Price Item, the
-    // item sheet) carry no autoFocus, so `typing` was false and the screen stayed turned the whole time
+    // The sheets on the schedule (the tile sheet, Add To Schedule, Time Off) carry no autoFocus, so
+    // `typing` was false and the screen stayed turned the whole time
     // the sheet was open. And where a field WAS focused, tapping Done on the keyboard turned the screen
     // back under an open sheet, mid-use.
     expect(whichWayToDraw({ ...onATurnedSchedule, overlays: 1, typing: false })).toBe("upright");
@@ -296,7 +306,7 @@ describe("what counts as typing", () => {
 
   it("a checkbox, a radio, a file picker, a slider, a button — NOT typing", () => {
     // iOS draws these in its own sheet or needs no keyboard at all. Un-turning the screen for a tapped
-    // checkbox would make the price table's Select All throw the whole page a quarter turn.
+    // checkbox would make a tick on the schedule throw the whole page a quarter turn.
     for (const type of ["checkbox", "radio", "button", "submit", "reset", "file", "range", "color"]) {
       expect(typingInto(el("input", { type }))).toBe(false);
     }
@@ -642,6 +652,102 @@ describe("THE BUTTONS READ UPRIGHT — one number, written in one place", () => 
     // face leaves the flow — otherwise the thing that must not move would move by 3px every turn.
     const tileHost = CSS.slice(CSS.indexOf("html[data-phone-held] .dock-tile {"));
     expect(tileHost.slice(0, tileHost.indexOf("}"))).toContain("min-height: 2.9375rem;");
+  });
+});
+
+// ── THE FLOATING PANELS: SIDEWAYS IS A COST HE TOOK; A CORNER IS NOT ──────────────────────────────
+
+/**
+ * WHAT WAS AUDITED, AND WHAT THE TWO HONEST OUTCOMES ARE.
+ *
+ * Every panel a person can reach from a turned screen is drawn in the phone's own portrait glass,
+ * because the chrome never moves — so it reads a quarter turn wrong to someone holding the phone
+ * sideways. Erik saw that called out and went ahead on the schedule and the documents anyway. An ugly
+ * panel is a cost he accepted.
+ *
+ * A panel laid out against the ROTATED BOX is a different thing entirely, and is not a cost anybody
+ * accepted: `position: fixed` inside a transformed ancestor resolves against that ancestor, so a
+ * full-screen sheet rendered inside the turned face becomes a sliver hugging one physical edge with its
+ * Cancel and Save off the glass. That is a dead end, and the two rules below are what stop it:
+ *   · a sheet takes the shared body lock (or says useCoversTheScreen), and the page comes upright
+ *     while it is open — so the sheet is laid out against the window, where it belongs;
+ *   · the chrome's own menus are siblings of their trigger, outside the face, pinned to the viewport.
+ *
+ * SO THE TRIPWIRE IS ON THE THIRD CASE: a page on a turning screen growing its own `position: fixed`
+ * overlay that declares neither. There is none today. The day somebody adds one, this is what tells
+ * them which of the two doors to use, instead of a person finding a sliver in a corner.
+ */
+describe("nothing on a turning screen may float without declaring itself", () => {
+  /** The screens whose own content is drawn INSIDE the rotated box, and the viewer that draws its own. */
+  const TURNING_TREES = [
+    "src/app/(app)/schedule",
+    "src/app/print/pdf-preview",
+    "src/components/media-lightbox.tsx",
+    "src/components/time-grid.tsx",
+    "src/app/(app)/calendar/calendar-view.tsx",
+  ];
+
+  const everyFile = (p: string): string[] => {
+    const full = join(process.cwd(), p);
+    if (!statSync(full).isDirectory()) return [p];
+    return readdirSync(full, { withFileTypes: true }).flatMap((e) =>
+      e.isDirectory() ? everyFile(join(p, e.name)) : /\.tsx$/.test(e.name) ? [join(p, e.name)] : [],
+    );
+  };
+
+  it("every fixed overlay on one of them either locks the page upright or covers the screen", () => {
+    const floating: string[] = [];
+    for (const tree of TURNING_TREES) {
+      for (const file of everyFile(tree)) {
+        const src = withoutComments(read(file));
+        const fixed = /className="[^"]*\bfixed\b|position: "fixed"/.test(src);
+        if (!fixed) continue;
+        // Either it holds the lock itself, or it IS the shared Modal (which holds it for every caller).
+        const declares = /useModalLock|useCoversTheScreen|lockBodyForModal/.test(src);
+        if (!declares) floating.push(file);
+      }
+    }
+    // The full-screen viewer is the one file here with a fixed overlay, and it holds the lock.
+    expect(floating).toEqual([]);
+  });
+
+  it("…and the one that does float declares it, which is why it is not in a corner", () => {
+    // Belt on the test above: if the detector ever stops finding anything at all it would pass empty.
+    expect(LIGHTBOX).toMatch(/className="media-lightbox fixed inset-0/);
+    expect(LIGHTBOX).toContain("useModalLock(true)");
+  });
+
+  it("a TOAST is inside the turned region, so it is the one panel that reads upright", () => {
+    // Not an accident worth losing: ToastProvider wraps the page INSIDE <Turned>, so a toast's `fixed`
+    // resolves against the face and it is painted through the same quarter turn as the page — upright
+    // for the person, centred across their view. Every other panel in the app is in the glass.
+    const face = SHELL.slice(SHELL.indexOf("<Turned"), SHELL.indexOf("</Turned>"));
+    expect(face).toContain("<ToastProvider>");
+  });
+
+  it("NORT'S PANEL KEEPS ITS OWN TURN, so the two buttons on it have to be real 44px targets", () => {
+    // Nort's panel is one of the few things that does NOT bring the page upright — it holds no body lock
+    // and it is pinned to the viewport, outside the face — so a person on a sideways schedule gets the
+    // panel a quarter turn round, and aims at its Collapse and Close. They were 24px squares (`p-1`
+    // around a 16px glyph), which is under the rule in EVERY orientation; a quarter turn leaves a square
+    // a square, so this was never "the turn shrank it", it was always short. Now they set the handle's
+    // height instead of being padded inside it.
+    const panel = read("src/components/global-assistant.tsx");
+    for (const label of ["Collapse", "Close assistant"]) {
+      const at = panel.indexOf(`aria-label=${label === "Collapse" ? "{collapsed" : `"${label}"`}`);
+      expect(at, label).toBeGreaterThan(-1);
+      // The className that goes with that button, read from the tag it is in.
+      const tag = panel.slice(panel.lastIndexOf("<button", at), panel.indexOf(">", panel.indexOf("className", at)));
+      expect(tag, label).toContain("h-11 w-11");
+      expect(tag, label).not.toMatch(/\bp-1\b/);
+    }
+  });
+
+  it("the section sheet covers the screen, so the strip's own sheet is never laid out in the box", () => {
+    // It renders inside the turned region (the layout mounts SectionSubnav there) and its scrim and
+    // sheet are both `fixed` — the exact shape that lands in a corner. It cannot take the body lock
+    // (`modal-open` is what its Escape handler stands down for), so it says the other thing.
+    expect(read("src/components/section-sheet.tsx")).toContain("useCoversTheScreen(open)");
   });
 });
 

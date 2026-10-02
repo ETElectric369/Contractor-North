@@ -134,8 +134,9 @@ function measureTheDock(): number {
  * IS THE PERSON TYPING? The iOS keyboard comes up in the DEVICE's orientation, which with the
  * interface locked to portrait means it rises from the phone's bottom edge — the person's left or
  * right hand side — and sits over the dock. Typing into a box drawn a quarter turn away from the
- * keyboard is miserable, and two of the four screens that turn do have boxes: /schedule's "Why?" line
- * (autofocused, place-rail.tsx) and /price-list's search and its inline price cells.
+ * keyboard is miserable, and one of the three screens that turn does have boxes: /schedule's "Why?"
+ * line (autofocused, place-rail.tsx). It stays a rule for all three rather than one screen's special
+ * case — a document gains a box the day somebody adds a note to one, and the rule has to already hold.
  *
  * So the turn SUSPENDS while a text box has focus: the screen comes upright, the keyboard matches it,
  * and the moment the box is left the screen turns back if the phone is still sideways. NOT a select

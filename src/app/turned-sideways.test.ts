@@ -153,8 +153,8 @@ describe("in a BROWSER, where the page itself rotates, the chrome still does not
     // `app-bottom-nav` for ONE reason: body.modal-open hides it with the dock. So no rule that MOVES
     // the dock may use that class — unlayered CSS beats the handle's Tailwind `left-0`, and the
     // sideways camera inset shoved it ~59pt into mid-page on every section with more than four pages
-    // (Jobs, Office and Money, which is where /price-list lives — one of the four screens that turn,
-    // and the one where this handle is the only sibling nav).
+    // (Jobs, Office and Money). In a rotated BROWSER tab — which is the world this file is about —
+    // every screen rotates, listed or not, so this is not limited to the declared three.
     // The handle's own class list, not the prose around it.
     const handle = /className="(app-bottom-nav[^"]*)"/.exec(SECTION_SHEET)?.[1];
     expect(handle).toBeTruthy();

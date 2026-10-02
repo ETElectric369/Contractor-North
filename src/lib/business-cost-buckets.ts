@@ -19,6 +19,8 @@
  * Job-material categories (Materials, Receipt, the bill-line categories) are a different thing
  * and are not touched by this module.
  */
+import type { BucketSection } from "@/lib/analytics/pnl-shape";
+
 export const BUSINESS_COST_BUCKETS = [
   "Fuel",
   "Auto",
@@ -31,8 +33,11 @@ export const BUSINESS_COST_BUCKETS = [
 
 export type BusinessCostBucket = (typeof BUSINESS_COST_BUCKETS)[number];
 
-/** The two halves of the costs on a profit and loss: Cost of Goods Sold (COGS) and Overhead. */
-export type PnlSection = "cogs" | "overhead";
+/** The two halves of the COSTS on a profit and loss: Cost of Goods Sold (COGS) and Overhead. The
+ *  whole SHAPE of a profit and loss — these two, plus the equity section below the bottom line that
+ *  is never subtracted — is analytics/pnl-shape.ts's. A bucket is a cost, so a bucket can only ever
+ *  be one of these two, which is what Exclude says there. */
+export type { BucketSection } from "@/lib/analytics/pnl-shape";
 
 /**
  * WHERE EACH BUCKET SITS ON THE PROFIT AND LOSS. The accounting industry's own test: if the cost
@@ -48,12 +53,12 @@ export type PnlSection = "cogs" | "overhead";
  * own then a total overhead on the overhead button". So COGS is now the job-side lines only
  * (materials and bills, stock, crew pay and crew mileage) and every bucket is Overhead.
  *
- * THIS IS THE ONE PLACE THE SPLIT IS WRITTEN: every profit and loss the app draws (the Owner's Draw
+ * THIS IS THE ONE PLACE THE SPLIT IS WRITTEN: every profit and loss the app draws (the Net Profit
  * card, Money by Month, the accountant's Summary, Nort's words) reads it through
  * analytics/profit-and-loss.ts, never an `if (bucket === "Fuel")` of its own. A Record, so a bucket
  * added to the list above does not compile until someone says which half it is in.
  */
-export const BUCKET_SECTION: Record<BusinessCostBucket, PnlSection> = {
+export const BUCKET_SECTION: Record<BusinessCostBucket, BucketSection> = {
   Fuel: "overhead",
   Auto: "overhead",
   "Tools & Supplies": "overhead",
@@ -64,7 +69,7 @@ export const BUCKET_SECTION: Record<BusinessCostBucket, PnlSection> = {
 };
 
 /** The buckets in one half of the profit and loss, in the list's own order. */
-export function bucketsIn(section: PnlSection): BusinessCostBucket[] {
+export function bucketsIn(section: BucketSection): BusinessCostBucket[] {
   return BUSINESS_COST_BUCKETS.filter((b) => BUCKET_SECTION[b] === section);
 }
 

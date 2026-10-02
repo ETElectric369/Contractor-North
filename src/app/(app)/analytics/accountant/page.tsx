@@ -37,12 +37,12 @@ const isKind = (v: unknown): v is AccountantPeriodKind => v === "month" || v ===
  *
  * Pick a Month, a Quarter or a Year (whole months only: the money engine counts whole months, and a
  * mid-month day would quietly pull in the whole month). The page shows the two figures that matter,
- * the top and the bottom line of the Summary's profit and loss, Revenue and Net Profit (Owner's
- * Draw), by the profit and loss's own rows and words (profit-and-loss.ts), then one button, Download
+ * the top and the bottom line of the Summary's profit and loss, Revenue and Net Profit, by the
+ * profit and loss's own rows and words (profit-and-loss.ts), then one button, Download
  * For Your Accountant, and one small link, Same Thing As CSV Files. The Shop Stock page links here.
  *
  * OFFICE ONLY (requireStaff; a tech is sent to My Day). The totals follow the owner's switch: an
- * office viewer the owner hasn't shared Owner's Draw with sees no totals, and the file leaves them
+ * office viewer the owner hasn't shared the owner's money with sees no totals, and the file leaves them
  * and the owner's rows out too (the route checks again). The figures are read over the SAME span the
  * route reads (accountantReadSpan), so they are the file's to the cent.
  */

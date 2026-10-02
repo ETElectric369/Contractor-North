@@ -7,7 +7,7 @@ export const ROLE_UNREAD_WORDS = "Your sign-in couldn't be checked just now, so 
 
 /**
  * WHO SEES THE TOTALS ON THE ACCOUNTANT PAGE: the owner, or an office viewer the owner has shared
- * Owner's Draw with (analytics/page.tsx's switch). FAIL CLOSED: a failed read of the company or of
+ * the owner's money with (analytics/page.tsx's switch). FAIL CLOSED: a failed read of the company or of
  * the viewer's role shows no totals and says which read failed. Only a role that READ as not the
  * owner, with the switch off, gets the owner's-switch note: the owner is never told "the owner
  * hasn't shared" about themself.

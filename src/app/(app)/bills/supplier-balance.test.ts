@@ -226,7 +226,15 @@ describe("what a merge proposal is holding", () => {
   });
 
   it("holds nothing when it holds nothing", () => {
-    expect(proposalTotals({ id: "x", suggestedName: "x", spellings: [] })).toEqual({ bills: 0, total: 0, unpaid: 0 });
+    // `settled`/`moves` are the papers a press would move that are NOT rows: a spelling's settled
+    // siblings, which `fileSpelling` takes onto the account along with the open ones.
+    expect(proposalTotals({ id: "x", suggestedName: "x", spellings: [] })).toEqual({
+      bills: 0,
+      total: 0,
+      unpaid: 0,
+      settled: 0,
+      moves: 0,
+    });
   });
 });
 

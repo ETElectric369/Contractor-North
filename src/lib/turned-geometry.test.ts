@@ -7,6 +7,7 @@ import {
   placeTheFace,
   roomBetweenTheChrome,
   tapTargetOnGlass,
+  thumbThroughTheTurn,
   uprightDegrees,
   uprightTurn,
   whereTheFingerLands,
@@ -222,5 +223,79 @@ describe("44px IN BOTH ORIENTATIONS — measured on the glass, after the turn", 
     expect(tapTargetOnGlass({ width: 44, height: 120 }, "clockwise")).toEqual({ width: 120, height: 44 });
     const t = tapTargetOnGlass({ width: 44, height: 120 }, "counterclockwise");
     expect(Math.min(t.width, t.height)).toBe(44);
+  });
+});
+
+// ── WHICH WAY THE THUMB IS GOING ───────────────────────────────────────────────────────────────────
+
+/**
+ * A DOWNWARD THUMB READS AS DOWNWARD, ALL THREE WAYS UP.
+ *
+ * A browser hit-tests through a transform, so taps and native scrolling are free. A TouchEvent's
+ * clientX/clientY are not: they are the GLASS's coordinates, so a gesture the app reads itself
+ * (pull-to-refresh) sees the thumb travelling along the glass while the content under it has been
+ * painted a quarter turn. Held clockwise, a pull straight DOWN the person's view is reported as a drag
+ * to the RIGHT — and "mostly sideways" is exactly what the pull rule throws away as a swipe. So the
+ * gesture was dead on a turned screen until the thumb was mapped the same way the face is.
+ */
+describe("a downward thumb reads as downward, whichever way the phone is held", () => {
+  /** A straight pull DOWN the person's own view, as the glass reports it, for each way of holding. */
+  const pullDownOnGlass: Record<Held, { dx: number; dy: number }> = {
+    // Upright, the glass and the person agree.
+    upright: { dx: 0, dy: 80 },
+    // Turned clockwise, the phone's top edge points to the person's RIGHT, so "down their view" runs
+    // along the glass toward the glass's right-hand side.
+    clockwise: { dx: 80, dy: 0 },
+    // Counterclockwise is its mirror: "down their view" runs toward the glass's left.
+    counterclockwise: { dx: -80, dy: 0 },
+  };
+
+  for (const held of EVERY_WAY_HELD) {
+    it(`${held}: a pull down the person's view is a pull down the content`, () => {
+      const thumb = thumbThroughTheTurn(pullDownOnGlass[held], held);
+      expect(thumb.dy).toBe(80);
+      // And it is STRAIGHT down — readPullMove drops anything more sideways than it is vertical, so a
+      // mapping that leaked any sideways travel in would make every pull a coin toss.
+      expect(thumb.dx).toBe(0);
+      expect(Math.abs(thumb.dx)).toBeLessThan(Math.abs(thumb.dy));
+    });
+
+    it(`${held}: a pull UP the person's view stays upward, so scrolling back up is never stolen`, () => {
+      const up = { dx: -pullDownOnGlass[held].dx, dy: -pullDownOnGlass[held].dy };
+      expect(thumbThroughTheTurn(up, held).dy).toBe(-80);
+    });
+
+    it(`${held}: a SIDEWAYS swipe across the person's view stays sideways`, () => {
+      // The other half of the same property: a back-swipe must not become a pull. "Rightward across
+      // their view" is the content's +x, which is the glass's own -y clockwise and +y the other way.
+      const thePull = thumbThroughTheTurn(pullDownOnGlass[held], held);
+      const across =
+        held === "upright" ? { dx: 80, dy: 0 } : held === "clockwise" ? { dx: 0, dy: -80 } : { dx: 0, dy: 80 };
+      const mapped = thumbThroughTheTurn(across, held);
+      expect(mapped.dx).toBe(80);
+      expect(mapped.dy).toBe(0);
+      // …and it is not the same answer as the pull, which is what would make the two indistinguishable.
+      expect(mapped).not.toEqual(thePull);
+    });
+  }
+
+  it("it is the SAME arithmetic as whereTheFingerLands, not a second copy of it", () => {
+    // The teeth. A delta is the difference of two positions, so this must equal the difference of two
+    // whereTheFingerLands answers — for every direction and whatever the box and the dock are. If the
+    // tap mapping is ever corrected and this is not, this test fails instead of a thumb going sideways.
+    const from = { x: 140, y: 220 };
+    for (const held of EVERY_WAY_HELD) {
+      for (const d of [{ dx: 60, dy: 0 }, { dx: 0, dy: 60 }, { dx: -37, dy: 91 }, { dx: 0, dy: 0 }]) {
+        const a = whereTheFingerLands(from, MIDDLE, held, DOCK);
+        const b = whereTheFingerLands({ x: from.x + d.dx, y: from.y + d.dy }, MIDDLE, held, DOCK);
+        expect(thumbThroughTheTurn(d, held)).toEqual({ dx: b.x - a.x, dy: b.y - a.y });
+      }
+    }
+  });
+
+  it("upright it changes nothing at all — the same object's numbers, untouched", () => {
+    for (const d of [{ dx: 0, dy: 0 }, { dx: 12, dy: -400 }, { dx: -5, dy: 5 }]) {
+      expect(thumbThroughTheTurn(d, "upright")).toEqual(d);
+    }
   });
 });

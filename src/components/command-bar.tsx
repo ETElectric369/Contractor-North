@@ -37,12 +37,21 @@ const NAV_ALIASES: Record<string, string[]> = {
     "payments", "paid", "received", "deposit", "collections",
   ],
   "/bills": ["ap", "accounts payable", "vendor", "expense"],
+  // RECONCILE (cn-v1037) shipped findable only by its own exact name. Its rows are what a person
+  // actually types: a supplier's statement against our tickets, one supplier spelled five ways, the
+  // same ticket on two jobs (lib/reconcile-kinds carries the headings these words come from).
+  "/reconcile": ["reconcile", "statement", "statements", "supplier statement", "spelling", "spellings", "duplicate", "duplicates", "same ticket"],
   "/payroll": ["wages", "pay", "salary", "paycheck", "hours pay"],
   "/tax-report": ["taxes", "1099", "irs", "tax"],
   "/analytics": ["reports", "reporting", "kpi", "dashboard", "numbers", "profit"],
   "/price-list": ["pricing", "rates", "catalog", "price book", "materials list", "line items"],
   "/leads": ["prospects", "inquiries", "pipeline"],
-  "/quotes": ["estimate", "proposal", "bid"],
+  // THE WORD THE PAGE USED FOR YEARS STILL FINDS IT (cn-v1034 renamed the dock row to Walk-Throughs
+  // and nothing was typed here, so "inspection" — still the route, still the stored appointment type,
+  // still the word in Nort's own description — found NOTHING). "walkthrough" and "walk through" are
+  // separate words because a one-word spelling matches neither the label nor a hyphenated alias.
+  "/inspections": ["inspection", "inspections", "walkthrough", "walk through", "site visit", "visit"],
+  "/quotes": ["estimate", "proposal", "bid", "quote", "quotes"],
   "/crm": ["customers", "clients", "people", "contact", "contacts"],
   // The Reminders page was "Tasks" until 0358, and people still type the old word.
   "/tasks": ["tasks", "to-do", "todo"],

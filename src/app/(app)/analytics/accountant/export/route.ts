@@ -38,8 +38,9 @@ const deflate = (b: Uint8Array) => new Uint8Array(deflateRawSync(b));
  *
  * STAFF ONLY, HERE: requireStaff is the refusal (a tech, a stranger, a deactivated seat get a 403 in
  * words and not one row read). THE TOTALS AND THE OWNER'S ROWS follow the owner's switch: an office
- * viewer the owner hasn't shared Owner's Draw with gets a file with no Revenue, no Total COGS, Gross
- * Profit or Total Overhead, no Net Profit (Owner's Draw) and no owner rows (analytics/page.tsx's rule).
+ * viewer the owner hasn't shared the owner's money with gets a file with no Revenue, no Total COGS, Gross
+ * Profit or Total Overhead, no Net Profit, no Owner's Draw and none of the owner's own rows - including
+ * his build time and its contra (analytics/page.tsx's rule).
  *
  * THE SIGNED-IN READER ONLY: readOwnerMoneyInputs names no company and relies on the database's
  * row rules, so it must never run through a service client. The other reads name the org_id too.

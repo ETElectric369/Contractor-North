@@ -5,6 +5,8 @@ import {
   crewPayByMonth,
   notCountedLine,
   balanceEntries,
+  hasOwnerBuildTime,
+  hasOwnerDraw,
   ownerMoneyCostLines,
   ownerMoneyReadSpan,
   recordDay,
@@ -18,7 +20,20 @@ import {
   type OwnerMoneyInputs,
   type OwnerMoneyWindow,
 } from "@/lib/analytics/owner-money";
-import { PNL_WORDS, cogsWords, overheadWords, pnlKeyOfCostTarget, pnlLines, pnlRow, profitAndLoss, type PnlKey, type PnlLine } from "@/lib/analytics/profit-and-loss";
+import {
+  PNL_KIND_SHAPE,
+  PNL_WORDS,
+  cogsWords,
+  isBelowNetProfit,
+  overheadWords,
+  pnlKeyOfCostTarget,
+  pnlLines,
+  pnlRow,
+  profitAndLoss,
+  type PnlKey,
+  type PnlLine,
+} from "@/lib/analytics/profit-and-loss";
+import { buildTimeNotCostedSentence } from "@/lib/build-time-cost";
 import { computeArAging, computeCollected, computeCustomerValue, monthKeyInTz } from "@/lib/analytics/money-metrics";
 import { collectedByJob } from "@/lib/analytics/job-profitability";
 import { HEADERS, onHandList, toCsv, toolsBilledList, toolsList, type AccountantInputs, type Cell, type CsvTable } from "@/lib/accountant-lists";
@@ -44,7 +59,7 @@ import { buildZip, type DeflateRaw } from "@/lib/zip-write";
  *            the period before and the change, laid out as the accounting industry lays out a profit
  *            and loss (profit-and-loss.ts, Erik 2026-09-28): Revenue; Cost of Goods Sold (COGS) and
  *            Total COGS; Gross Profit and Gross Margin %; Overhead and Total Overhead; and the bottom
- *            line, named exactly "Net Profit (Owner's Draw)". Every business-cost bucket is its own
+ *            line, named exactly "Net Profit", with Owner's Draw below it as equity. Every business-cost bucket is its own
  *            row, in the half BUCKET_SECTION puts it in, so a new bucket shows up by itself.
  *   Income   every payment (computeCollected's rows: the same read), by customer
  *            (computeCustomerValue), by job (collectedByJob, job profit's cash rule) and by method;
@@ -58,7 +73,7 @@ import { buildZip, type DeflateRaw } from "@/lib/zip-write";
  *            AS OF THE DOWNLOAD DAY, with that date printed (Erik's answer 1).
  *   Stock    what was in stock on the period's last day, roll by roll (onHandList).
  *
- * THE OWNER'S SWITCH: when the owner has not shared Owner's Draw with the office
+ * THE OWNER'S SWITCH: when the owner has not shared the owner's money with the office
  * (office_sees_owner_money), the bottom line is the owner's. An office download then carries NO
  * bottom-line figure on ANY tab: no Revenue (the Summary's or the Income tab's), no Total COGS, no
  * Gross Profit or Gross Margin %, no Total Overhead, no Net Profit, no change on them, and no owner
@@ -145,7 +160,7 @@ export function parseAccountantPeriod(v: unknown, todayYmd: string): AccountantP
   return p;
 }
 
-/** The page opens on this year: the same window the Owner's Draw card opens on. */
+/** The page opens on this year: the same window the Net Profit card opens on. */
 export function defaultAccountantPeriod(todayYmd: string): AccountantPeriod {
   return periodContaining("year", todayYmd);
 }
@@ -208,20 +223,33 @@ export function lastDayShown(p: AccountantPeriod, todayYmd: string): string {
 
 // ── Names ────────────────────────────────────────────────────────────────────
 
-/** The bottom line's name, exactly (Erik, 2026-09-28: "Net Profit = Owner's Draw"). It is before
- *  income tax, and the Summary and the page say so under it. */
+/** The bottom line's name, exactly: plain Net Profit (Erik, 2026-10-01: "lets get rid of the
+ *  terminology owners draw and use only net profit"). It is before income tax, and the Summary and the
+ *  page say so under it. What the owner TOOK OUT is DRAW_LABEL below: equity, under the bottom line. */
 export const NET_LABEL = PNL_WORDS.netProfit;
+/** The equity line's name: what the owner actually drew. Never an expense, never subtracted. */
+export const DRAW_LABEL = PNL_WORDS.ownerDraw;
 export const STOCK_BOUGHT_LABEL = PNL_WORDS.stockBought;
 export const STOCK_LOST_LABEL = PNL_WORDS.stockLost;
 export const TAB_NAMES = ["Summary", "Income", "Costs", "People", "Open", "Stock"] as const;
-/** What an office download's Summary says when the owner hasn't shared Owner's Draw (never a total). */
+/** What an office download's Summary says when the owner hasn't shared the owner's money (never a total). */
 export const OWNER_HIDDEN_NOTE = "The totals are the owner's.";
 /** The page's line for that office viewer: why, what the file leaves out, and what it keeps (the
  *  lists the office already sees in the app, each with its own total). Never shown to the owner. */
 export const OWNER_HIDDEN_WHY =
-  "The owner hasn't shared Owner's Draw with the office, so Revenue, Total COGS, Gross Profit and Gross Margin %, Total Overhead, Net Profit (Owner's Draw) and the owner's own rows are left out, here and in the file. The file still lists each payment, cost and crew member, with each list's own total, as the app shows them.";
+  "The owner hasn't shared the owner's money with the office, so Revenue, Total COGS, Gross Profit and Gross Margin %, Total Overhead, Net Profit, the owner's own build time and his Owner's Draw are left out, here and in the file. The file still lists each payment, cost and crew member, with each list's own total, as the app shows them.";
 /** Under the bottom line, for whoever sees it. */
 export const BEFORE_TAX_NOTE = `${PNL_WORDS.netProfit} is before income tax.`;
+/**
+ * WHY THE OWNER'S BUILD TIME IS IN COGS AND STILL CHANGES NOTHING - the sentence an accountant needs,
+ * because this is the one place the two reports are told to disagree on purpose. Erik's on-site hours
+ * are charged to the jobs so each job's margin is honest; a sole proprietor cannot deduct his own
+ * labour, so the identical amount comes straight back on the contra line and the bottom line does not
+ * move. Said whenever the pair is on the sheet.
+ */
+export const OWNER_BUILD_TIME_NOTE = `${PNL_WORDS.ownerBuildTime} charges the owner's on-site hours to the jobs at his cost rate, so each job's margin is honest. ${PNL_WORDS.ownerBuildTimeContra} books the same amount straight back, because a sole proprietor cannot deduct his own labour: the two net to zero, so ${PNL_WORDS.totalCogs}, ${PNL_WORDS.grossProfit} and ${PNL_WORDS.netProfit} are the same figures without them. His office hours are in ${PNL_WORDS.overhead}, never on a job.`;
+/** Under the equity line: what it is, and which draws the figure can see. */
+export const DRAW_NOTE = `${PNL_WORDS.ownerDraw} is equity, not an expense: it is what the owner took out and it is never subtracted to reach ${PNL_WORDS.netProfit}.`;
 /** What the two halves of the costs are, in the accounting industry's own test (Erik, 2026-09-28),
  *  with the lines from the data (profit-and-loss.ts), so the sentence moves when a line does. */
 export function cogsOverheadNote(): string {
@@ -262,7 +290,7 @@ export type AccountantWorkbookInput = {
   tz: string;
   /** The org-local day of the download: what Open is as of, and printed on it. */
   todayYmd: string;
-  /** The owner, or an office viewer the owner has shared Owner's Draw with. */
+  /** The owner, or an office viewer the owner has shared the owner's money with. */
   showOwner: boolean;
   /** readOwnerMoneyInputs over a span covering this period and the one before. */
   money: OwnerMoneyInputs;
@@ -279,7 +307,7 @@ export type AccountantWorkbookInput = {
 
 export type AccountantWorkbook = {
   tabs: XlsxSheet[];
-  /** The period's Revenue, Gross Profit and Net Profit (Owner's Draw), from the profit and loss. All
+  /** The period's Revenue, Gross Profit and Net Profit, from the profit and loss. All
    *  null when the viewer may not see the totals (the owner's switch). */
   figures: { revenue: number | null; grossProfit: number | null; net: number | null };
 };
@@ -342,7 +370,16 @@ function tableRows(t: CsvTable, moneyCols: number[], dateCols: number[]): Row[] 
 /** Every profit-and-loss line's name, by its key: what a cost line's Goes To says. */
 const PNL_LABEL = new Map<PnlKey, string>(pnlLines().map((l) => [l.key, l.label]));
 /** The profit-and-loss lines whose rows are on the People tab, not the Costs list. */
-const ON_PEOPLE = new Set<PnlKey>(["crew_pay", "crew_mileage"]);
+/**
+ * COGS LINES WHOSE ITEMISED ROWS ARE ON THE PEOPLE TAB, not the Costs tab, so the Costs tab's "Totals
+ * By Where It Goes" does not list a line it has no rows for and total it as $0.
+ *
+ * The owner's build-time pair joins crew pay and mileage here for the same reason and one more: it is
+ * not an ownerMoneyCostLine at all (no bill, no ticket, no receipt - it is hours at a rate), so the
+ * Costs tab has nothing to sum for it and its Total would have gone quietly SHORT of Total COGS with
+ * nothing saying why. The hours behind it are on People, where the owner's row already is.
+ */
+const ON_PEOPLE = new Set<PnlKey>(["crew_pay", "crew_mileage", "owner_build_time", "owner_build_time_contra"]);
 
 const methodLabel = (m: unknown): string => {
   const s = String(m ?? "").trim();
@@ -426,10 +463,16 @@ export function beforeRecordsLine(
 /**
  * THE SUMMARY'S LINES: the profit and loss (profit-and-loss.ts) for this viewer, Other Income inside
  * Revenue when either column has some, and Gross Margin % (a spreadsheet has room for a percent).
- * An office viewer the owner hasn't shared Owner's Draw with gets the headings and the cost rows.
+ * An office viewer the owner hasn't shared the owner's money with gets the headings and the cost rows.
  */
-export function summaryLines(opts: { hasOtherIncome: boolean; showOwner: boolean }): PnlLine[] {
-  return pnlLines({ otherIncome: opts.hasOtherIncome, margin: true, showOwner: opts.showOwner });
+export function summaryLines(opts: { hasOtherIncome: boolean; showOwner: boolean; ownerBuildTime?: boolean; ownerDraw?: boolean }): PnlLine[] {
+  return pnlLines({
+    otherIncome: opts.hasOtherIncome,
+    margin: true,
+    showOwner: opts.showOwner,
+    ownerBuildTime: opts.ownerBuildTime,
+    ownerDraw: opts.ownerDraw,
+  });
 }
 
 function summaryTab(
@@ -446,10 +489,19 @@ function summaryTab(
   const { period, showOwner } = input;
   const byMonth = period.kind !== "month";
   const hasOther = [cur.totals, prev.totals].some((f) => Math.abs(f.otherIncome ?? 0) >= 0.005);
-  // THE OWNER'S SWITCH: an office viewer the owner hasn't shared Owner's Draw with gets the cost rows
+  // THE OWNER'S SWITCH: an office viewer the owner hasn't shared the owner's money with gets the cost rows
   // one by one under their two headings and no total at all (no Revenue, no Total COGS, no Gross
   // Profit or margin, no Total Overhead, no Net Profit): the totals are the owner's.
-  const lines = summaryLines({ hasOtherIncome: hasOther, showOwner });
+  // THROUGH THE ONE PREDICATE (owner-money.ts), not written out here. Both this file and the Net Profit
+  // card used to hand-write `Math.abs(f.ownerBuildTimeOnJobs ?? 0) >= 0.005`, so the file and the screen
+  // could quietly start disagreeing about whether the lines were on the sheet at all.
+  const hasBuildTime = hasOwnerBuildTime(cur.totals, prev.totals);
+  // AND OWNER'S DRAW IS ALWAYS A ROW FOR WHOEVER SEES THE OWNER'S MONEY, $0.00 included. It was switched
+  // on only when the figure was non-zero, and the figure comes from bank lines sorted as Owner's Draw
+  // and nothing else - so a company that has not sorted a bank download got a Summary with no equity
+  // line, no zero and no disclosure, and an accountant could not tell a draw of nothing from a draw the
+  // app cannot see. The note below the line says which it is.
+  const lines = summaryLines({ hasOtherIncome: hasOther, showOwner, ownerBuildTime: hasBuildTime, ownerDraw: showOwner });
   const moneyCols = (l: PnlLine): XlsxValue[] => {
     const now = l.cents(cur.totals) ?? 0;
     const before = l.cents(prev.totals) ?? 0;
@@ -473,16 +525,67 @@ function summaryTab(
   // THE PROFIT AND LOSS, as an accountant lays one out: the headings and the figures that are totals
   // (Revenue, Total COGS, Gross Profit, Total Overhead, Net Profit) bold, each line under its heading
   // indented.
-  for (const l of lines) {
-    if (l.kind === "heading") rows.push(head(l.label));
-    else if (l.kind === "margin") rows.push(under(l.label, ...pctCols(l)));
-    else if (l.kind === "cost" || l.kind === "part") rows.push(under(l.label, ...moneyCols(l)));
-    else rows.push(total(l.label, ...moneyCols(l)));
+  //
+  // HOW A ROW IS WEIGHTED IS THE LAYOUT'S ANSWER, NOT THIS FILE'S (PNL_KIND_SHAPE, pnl-shape.ts). This
+  // used to end `else rows.push(total(...))`, so any kind it had never heard of printed BOLD, like a
+  // total - and the kind it had never heard of turned out to be `equity`, which would have put a bold
+  // Owner's Draw directly under Net Profit, reading exactly like a total of it. A Record that does not
+  // compile until a new kind declares its weight is the fix; `never` here is the compiler's proof that
+  // this switch has heard of all of them.
+  const pushLine = (l: PnlLine) => {
+    const { weight } = PNL_KIND_SHAPE[l.kind];
+    const cols = l.kind === "margin" ? pctCols(l) : moneyCols(l);
+    if (weight === "heading") rows.push(head(l.label));
+    else if (weight === "line") rows.push(under(l.label, ...cols));
+    else if (weight === "strong") rows.push(total(l.label, ...cols));
+    else {
+      const unreachable: never = weight;
+      throw new Error(`accountant Summary: no weight for ${unreachable}`);
+    }
+  };
+  // ABOVE THE BOTTOM LINE, then a blank row, then what is BELOW it. The blank is not decoration: an
+  // indented Owner's Draw sitting flush under a bold Net Profit reads as part of it, which is the one
+  // thing this line must never read as. Which side a row is on is isBelowNetProfit's answer.
+  for (const l of lines) if (!isBelowNetProfit(l.kind)) pushLine(l);
+  const below = lines.filter((l) => isBelowNetProfit(l.kind));
+  if (below.length) {
+    rows.push(blank());
+    for (const l of below) pushLine(l);
+    // WHAT THE EQUITY LINE IS, AND WHAT ITS FIGURE CAN SEE - and, when the figure is empty, that an empty
+    // one is not a claim that nothing was drawn. Same words as the Net Profit card, same predicate.
+    const drawn = hasOwnerDraw(cur.totals) ? "" : " Nothing this period that the app can see.";
+    rows.push(note(`${DRAW_NOTE} ${cur.ownerDrawSeen}${drawn}`));
   }
   if (showOwner) {
-    // The owner's time is hours, never pay or a cost: below the line.
+    // THE OWNER'S HOURS, AND WHICH OF THEM ARE BUILD TIME. His hours are never PAY - he is not on
+    // payroll and there is no wage to deduct. The ON-SITE half is charged to the jobs (the pair above,
+    // which nets to zero here), and the OFFICE half is Overhead and on no job: the two rows are what
+    // the allocation is made of, so an accountant can tie the COGS line back to hours.
     const hours = (x: OwnerMoneyFigures) => round2(x.ownerHours);
-    rows.push(line("Owner Hours (not pay)", ...(byMonth ? cur.months.map(hours) : []), hours(cur.totals), hours(prev.totals), round2(cur.totals.ownerHours - prev.totals.ownerHours)));
+    const onSite = (x: OwnerMoneyFigures) => round2(x.ownerOnSiteHours ?? 0);
+    const office = (x: OwnerMoneyFigures) => round2(x.ownerOfficeHours ?? 0);
+    rows.push(line("Owner Hours (Not Pay)", ...(byMonth ? cur.months.map(hours) : []), hours(cur.totals), hours(prev.totals), round2(cur.totals.ownerHours - prev.totals.ownerHours)));
+    rows.push(
+      line(
+        "Owner Hours On Jobs (Build Time)",
+        ...(byMonth ? cur.months.map(onSite) : []),
+        onSite(cur.totals),
+        onSite(prev.totals),
+        round2((cur.totals.ownerOnSiteHours ?? 0) - (prev.totals.ownerOnSiteHours ?? 0)),
+      ),
+    );
+    rows.push(
+      line(
+        "Owner Hours In The Office (Overhead)",
+        ...(byMonth ? cur.months.map(office) : []),
+        office(cur.totals),
+        office(prev.totals),
+        round2((cur.totals.ownerOfficeHours ?? 0) - (prev.totals.ownerOfficeHours ?? 0)),
+      ),
+    );
+    if ((cur.totals.ownerUncostedBuildTimeHours ?? 0) > 0) {
+      rows.push(note(buildTimeNotCostedSentence(round2(cur.totals.ownerUncostedBuildTimeHours), "The owner")));
+    }
   } else {
     rows.push(note(OWNER_HIDDEN_NOTE));
   }
@@ -494,6 +597,9 @@ function summaryTab(
 
   rows.push(blank());
   if (showOwner) rows.push(note(BEFORE_TAX_NOTE));
+  // THE ONE PLACE AN ACCOUNTANT IS TOLD THE TWO REPORTS DISAGREE ON PURPOSE. Only when the pair is on
+  // the sheet: a note about lines that are not there would be its own small lie.
+  if (showOwner && hasBuildTime) rows.push(note(OWNER_BUILD_TIME_NOTE));
   rows.push(note(cogsOverheadNote()));
   if (prevThrough) {
     rows.push(note(`${changeHead} compares ${period.label} through ${input.todayYmd} with the same days of ${prevPeriod.label} (through ${prevThrough}), not the whole of it.`));
@@ -716,7 +822,11 @@ function costsTab(input: AccountantWorkbookInput, cur: OwnerMoney, months: Set<s
   rows.push(total("Total", money(all)));
   // No figure here: an office file the owner hasn't shared carries no bottom line, so the note says
   // where the rest is rather than adding it up.
-  rows.push(note(`${PNL_WORDS.crewPay} and ${PNL_WORDS.crewMileage} are in ${PNL_WORDS.cogs} too, but they are on the People tab, so they are not in this total.`));
+  rows.push(
+    note(
+      `${PNL_WORDS.crewPay}, ${PNL_WORDS.crewMileage} and the owner's build time are in ${PNL_WORDS.cogs} too, but they are hours rather than paper, so their rows are on the People tab and they are not in this total.`,
+    ),
+  );
   if (cur.totals.processorFees) rows.push(note(`Fees includes ${formatCurrency(cur.totals.processorFees)} of card fees.`));
 
   // WHAT WAS SENT TO EACH SUPPLIER (supplierBalance over the period's payments).
@@ -876,7 +986,17 @@ function peopleTab(input: AccountantWorkbookInput, cur: OwnerMoney, months: Set<
     title(`People, ${period.label}`),
     note("Crew Pay (1099) counts when the hours were worked: the Pay board's Earned. Paid is what was handed over. Still Owed is as of the download day."),
     note("Miles are miles: North never turns them into dollars. Mileage Settled is only what a person typed when paying mileage."),
-    ...(showOwner ? [note("The owner is paid by owner's draw: the owner's hours are shown, never as pay or a cost.")] : []),
+    // THE OWNER'S HOURS, SAID EXACTLY. Never a WAGE: he is not on payroll, there is no Earned and no
+    // Still Owed on his row, and nothing on the profit and loss deducts his labour. AND a real cost of
+    // the job he worked: his on-site hours are charged there at his cost rate, which is what the
+    // Summary's build-time pair is. Both halves, because either one alone has been wrong before.
+    ...(showOwner
+      ? [
+          note(
+            "The owner is paid by owner's draw, never wages: there is no Earned and no Still Owed on the owner's row. The owner's hours on jobs ARE charged to those jobs at the owner's cost rate, so each job's margin is honest; the Summary books the same amount straight back, so it is not deducted on the profit and loss.",
+          ),
+        ]
+      : []),
     blank(),
     head("Person", "Paid By", "Hours", "Earned", "Paid In Period", `Still Owed (${todayYmd})`, `Paid In ${year} Through ${through}`, "Miles Logged", "Miles Past Daily Commute", "Mileage Settled", "Note"),
   ];
@@ -928,7 +1048,21 @@ function peopleTab(input: AccountantWorkbookInput, cur: OwnerMoney, months: Set<
     }
     if (isOwner) {
       if (!hours && !miles.recorded) continue;
-      ownerRows.push(line(name, "Owner (Owner's Draw)", hours, null, null, null, null, miles.recorded, miles.business, null, "Hours only: the owner's time is not pay or a cost."));
+      ownerRows.push(
+        line(
+          name,
+          "Owner (Owner's Draw)",
+          hours,
+          null,
+          null,
+          null,
+          null,
+          miles.recorded,
+          miles.business,
+          null,
+          "Hours only: never a wage. Hours on a job are charged to the job at the owner's cost rate, and booked straight back on the profit and loss.",
+        ),
+      );
       continue;
     }
     let earned = 0;

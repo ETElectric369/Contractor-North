@@ -68,7 +68,7 @@ describe("the page and its download agree", () => {
     expect(src("export/route.ts")).toContain("const span = accountantReadSpan(period);");
   });
 
-  it("its two figures are the profit and loss's top and bottom lines, by their own rows and words (Revenue, Net Profit (Owner's Draw))", () => {
+  it("its two figures are the profit and loss's top and bottom lines, by their own rows and words (Revenue, Net Profit)", () => {
     const page = src("page.tsx");
     expect(page).toContain("const pnl = figures ? profitAndLoss(figures) : [];");
     expect(page).toContain('const revenue = pnlRow(pnl, "revenue");');

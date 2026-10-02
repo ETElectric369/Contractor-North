@@ -251,7 +251,10 @@ export function PdfPreview({ doc, id, back }: { doc: string; id: string; back: s
 
   useEffect(() => {
     load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // No disable directive here any more: the dependency list is honest ([load], and `load` is a
+    // useCallback over everything it reads), so the suppression it used to carry was reporting nothing
+    // and lint called it out as dead. A silenced rule nobody needs is the one that hides the next
+    // real warning in this file.
   }, [load]);
 
   // ── DRAW THEM AGAIN WHEN THE ROOM CHANGES ──────────────────────────────────────────────────────

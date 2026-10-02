@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { Input, Label, Select } from "@/components/ui/input";
 import { updateMember, updateMemberAuth } from "./actions";
+import { memberEditToSave } from "./save-what-changed";
 
 interface Member {
   id: string;
@@ -67,15 +68,22 @@ export function EditMemberButton({
   function save() {
     setError(null);
     setDone(null);
+    // WHAT THIS SAVE ACTUALLY CHANGED, through the one rule (save-what-changed.ts). home_address and
+    // commute_baseline_miles used to ride along on EVERY save, so a Save about a phone number or the
+    // Crew Leader box cleared the home address and zeroed the baseline whenever the read that filled
+    // them had come back empty - and that address is the mileage origin the Tax Report deducts the
+    // commute from, lost with nothing on screen about either field.
+    const patch = memberEditToSave(member, {
+      full_name: name,
+      phone,
+      home_address: homeAddress,
+      commute_baseline_miles: commuteBaseline,
+      role,
+      crew_lead: crewLead,
+    }, { isSelf });
     start(async () => {
-      const res = await updateMember(member.id, {
-        full_name: name,
-        phone,
-        home_address: homeAddress,
-        commute_baseline_miles: commuteBaseline,
-        role: isSelf ? undefined : role,
-        crew_lead: crewLead,
-      });
+      // A login change is its own door below, so a save with nothing else changed still has work to do.
+      const res = patch ? await updateMember(member.id, patch) : { ok: true as const };
       if (!res.ok) return setError(res.error ?? "Could not save.");
 
       // Login changes go through the admin path only when something changed.

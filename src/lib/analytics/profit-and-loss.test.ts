@@ -1,6 +1,11 @@
 import { describe, it, expect } from "vitest";
 import {
+  PNL_KINDS,
+  PNL_KIND_SHAPE,
+  PNL_SECTIONS,
+  PNL_SECTION_SHAPE,
   PNL_WORDS,
+  isBelowNetProfit,
   bucketAmount,
   bucketHalvesWords,
   cogsWords,
@@ -40,6 +45,13 @@ const figures = (over: Partial<OwnerMoneyFigures> = {}): OwnerMoneyFigures => {
     left: 0,
     ownerHours: 100,
     perOwnerHour: null,
+    // THE OWNER'S BUILD TIME IS NOT IN THE SUBTRACTION BELOW, and that is the whole point: the charged
+    // line and its contra net to zero inside COGS, so `left` is the same figure whatever this is.
+    ownerBuildTimeOnJobs: 0,
+    ownerOnSiteHours: 0,
+    ownerOfficeHours: 0,
+    ownerUncostedBuildTimeHours: 0,
+    ownerDraw: 0,
     ...over,
   };
   // The engine's own subtraction, so `left` is always what computeOwnerMoney would say for these lines.
@@ -52,7 +64,7 @@ const figures = (over: Partial<OwnerMoneyFigures> = {}): OwnerMoneyFigures => {
 const at = (rows: PnlRow[], key: PnlKey) => pnlRow(rows, key)!;
 
 describe("the layout: the accounting industry's words, in its order", () => {
-  it("Revenue, COGS line by line and Total COGS, Gross Profit and its margin, Overhead line by line and Total Overhead, Net Profit (Owner's Draw)", () => {
+  it("Revenue, COGS line by line and Total COGS, Gross Profit and its margin, Overhead line by line and Total Overhead, Net Profit", () => {
     const lines = pnlLines({ otherIncome: true, margin: true });
     expect(lines.map((l) => l.label)).toEqual([
       "Revenue",
@@ -75,7 +87,7 @@ describe("the layout: the accounting industry's words, in its order", () => {
       "Fees",
       "Other",
       "Total Overhead",
-      "Net Profit (Owner's Draw)",
+      "Net Profit",
     ]);
     expect(lines.map((l) => l.kind)).toEqual([
       "revenue",
@@ -114,7 +126,7 @@ describe("the layout: the accounting industry's words, in its order", () => {
 
   it("the row words are Title Case, and the names are the ones Erik asked for, exactly", () => {
     expect(PNL_WORDS.cogs).toBe("Cost of Goods Sold (COGS)");
-    expect(PNL_WORDS.netProfit).toBe("Net Profit (Owner's Draw)");
+    expect(PNL_WORDS.netProfit).toBe("Net Profit");
     expect(PNL_WORDS.stockLost).toBe("Stock Lost (Written Off, Counted Short, Returned)");
     for (const l of pnlLines({ otherIncome: true, margin: true })) {
       // Every word starts with a capital, but "of" and the words inside a parenthesis read as written.
@@ -319,11 +331,11 @@ describe("the COGS/Overhead split is data (BUCKET_SECTION), not an if", () => {
     const short = new Map(pnlLines().map((l) => [l.key, l.short]));
     expect(short.get("stock_lost")).toBe("Stock Lost");
     expect(short.get("total_overhead")).toBe("Overhead");
-    expect(short.get("net_profit")).toBe("Net Profit (Owner's Draw)");
+    expect(short.get("net_profit")).toBe("Net Profit");
   });
 });
 
-describe("on the engine's own figures, month by month: Net Profit (Owner's Draw) is computeOwnerMoney's net to the cent", () => {
+describe("on the engine's own figures, month by month: Net Profit is computeOwnerMoney's net to the cent", () => {
   // A made-up company's year: payments (one voided, one with a card fee), a refund, a bank deposit
   // filed as Other Income, job tickets (one with a roll put into stock), a purchase order, job and
   // business petty cash, every business bucket, a write-off, a crew member's hours and a mileage
@@ -380,7 +392,15 @@ describe("on the engine's own figures, month by month: Net Profit (Owner's Draw)
   it("holds for every month and the year, every layout", () => {
     const sets = [year.totals, ...year.months];
     for (const f of sets) {
-      for (const opts of [{}, { stockInMaterials: true }, { otherIncome: true, margin: true }]) {
+      for (const opts of [
+        {},
+        { stockInMaterials: true },
+        { otherIncome: true, margin: true },
+        // AND WITH THE OWNER'S TWO SECTIONS ON (0373). Every identity above has to hold identically:
+        // the build-time pair nets to zero inside COGS, and the draw is below the line in a section the
+        // shape says is not subtracted, so no sum can reach it.
+        { otherIncome: true, margin: true, ownerBuildTime: true, ownerDraw: true },
+      ]) {
         const rows = profitAndLoss(f, opts);
         const costs = rows.filter((r) => r.kind === "cost");
         const sum = (section: "cogs" | "overhead") => costs.filter((r) => r.section === section).reduce((s, r) => s + r.cents!, 0);
@@ -402,5 +422,134 @@ describe("on the engine's own figures, month by month: Net Profit (Owner's Draw)
     for (const r of rows.filter((x) => x.kind === "cost" || x.kind === "part")) expect(Math.abs(r.cents!), r.label).toBeGreaterThan(0);
     expect(year.totals.ownerHours).toBe(10); // the owner's hours: counted as hours, in no line
     expect(at(rows, "gross_margin").pct).not.toBeNull();
+  });
+});
+
+/**
+ * ═══════════════════════════════════════════════════════════════════════════════════════════════════
+ * THE ALLOCATION NETS TO ZERO: NET PROFIT MUST NOT MOVE BY ONE CENT (0373).
+ *
+ * This is the test the whole change stands on. Erik is right that his build time is a direct cost, and
+ * standard practice is right that a sole proprietor cannot DEDUCT his own labour - the business is not
+ * separate from him, so every dollar of profit is already his personal income on Schedule C and there is
+ * no owner wage expense. Both hold at once only because the amount is charged inside COGS and booked
+ * straight back on a contra line immediately under it.
+ *
+ * If Net Profit moves when the allocation is switched on, THE ALLOCATION IS WRONG and his tax figure is
+ * wrong with it. So: the same figures, with the allocation off and then on at a real amount, and every
+ * line from Total COGS down asserted identical to the cent.
+ * ═══════════════════════════════════════════════════════════════════════════════════════════════════
+ */
+describe("the owner's build time: charged inside COGS, booked straight back, Net Profit unchanged", () => {
+  const off = figures({ ownerBuildTimeOnJobs: 0, ownerOnSiteHours: 0 });
+  // 41 hours at a $65 cost rate. NOT his $125 bill rate: at the bill rate his labour earns zero margin,
+  // which is the exact defect 0286 was written to fix.
+  const on = figures({ ownerBuildTimeOnJobs: 2665, ownerOnSiteHours: 41 });
+  const OPTS = { otherIncome: true, margin: true, ownerBuildTime: true, ownerDraw: true } as const;
+
+  it("NET PROFIT IS IDENTICAL, before he sets a rate and after", () => {
+    const before = profitAndLoss(off, OPTS);
+    const after = profitAndLoss(on, OPTS);
+    expect(at(after, "net_profit").cents).toBe(at(before, "net_profit").cents);
+    // And it is still the engine's own `left`, read straight off it: never re-added here.
+    expect(at(after, "net_profit").cents).toBe(Math.round(on.left * 100));
+    expect(on.left).toBe(off.left);
+  });
+
+  it("so are Total COGS, Gross Profit and Gross Margin % - the pair nets inside the section", () => {
+    const before = profitAndLoss(off, OPTS);
+    const after = profitAndLoss(on, OPTS);
+    for (const key of ["total_cogs", "gross_profit", "total_overhead", "revenue"] as PnlKey[]) {
+      expect(at(after, key).cents, key).toBe(at(before, key).cents);
+    }
+    expect(at(after, "gross_margin").pct).toBe(at(before, "gross_margin").pct);
+  });
+
+  it("the money IS on the sheet: charged on its own line, and the contra is exactly its negative", () => {
+    const rows = profitAndLoss(on, OPTS);
+    expect(at(rows, "owner_build_time").cents).toBe(266_500);
+    expect(at(rows, "owner_build_time_contra").cents).toBe(-266_500);
+    expect(at(rows, "owner_build_time").cents! + at(rows, "owner_build_time_contra").cents!).toBe(0);
+    // Both INSIDE COGS, and the contra immediately after the charge, so a reader sees it net out.
+    expect(at(rows, "owner_build_time").section).toBe("cogs");
+    expect(at(rows, "owner_build_time_contra").section).toBe("cogs");
+    const keys = rows.map((r) => r.key);
+    expect(keys.indexOf("owner_build_time_contra")).toBe(keys.indexOf("owner_build_time") + 1);
+    expect(keys.indexOf("owner_build_time_contra")).toBeLessThan(keys.indexOf("total_cogs"));
+  });
+
+  it("BOTH LINES OR NEITHER: one switch builds the pair, and the pair is marked as netting", () => {
+    expect(pnlLines({ ownerBuildTime: true }).filter((l) => l.netting).map((l) => [l.key, l.netting])).toEqual([
+      ["owner_build_time", "charged"],
+      ["owner_build_time_contra", "contra"],
+    ]);
+    // Off, neither is there - never one of them.
+    expect(pnlLines({}).filter((l) => l.netting)).toEqual([]);
+    // Every `charged` line has exactly one `contra` in the same section, whatever the layout.
+    for (const opts of [{ ownerBuildTime: true }, { ownerBuildTime: true, stockInMaterials: true }, { ownerBuildTime: true, margin: true }]) {
+      const lines = pnlLines(opts);
+      const charged = lines.filter((l) => l.netting === "charged");
+      const contra = lines.filter((l) => l.netting === "contra");
+      expect(charged).toHaveLength(contra.length);
+      for (const c of charged) expect(contra.some((x) => x.section === c.section)).toBe(true);
+    }
+  });
+
+  it("ANY netting pair sums to zero on ANY figures, so the netting is a property and not a fixture", () => {
+    for (const cents of [0, 1, 99, 266_500, 123_456_789, -5000]) {
+      const f = figures({ ownerBuildTimeOnJobs: cents / 100 });
+      const lines = pnlLines({ ownerBuildTime: true, margin: true });
+      const netted = lines.filter((l) => l.netting).reduce((s, l) => s + (l.cents(f) ?? 0), 0);
+      expect(netted, `${cents}`).toBe(0);
+      // And the section's total is what it would be with no pair at all.
+      const withPair = profitAndLoss(f, { ownerBuildTime: true, margin: true });
+      const without = profitAndLoss(f, { margin: true });
+      expect(at(withPair, "total_cogs").cents).toBe(at(without, "total_cogs").cents);
+      expect(at(withPair, "net_profit").cents).toBe(at(without, "net_profit").cents);
+    }
+  });
+
+  it("OWNER'S DRAW is below the line, in no total, and never subtracted", () => {
+    const f = figures({ ownerDraw: 4000 });
+    const rows = profitAndLoss(f, OPTS);
+    const draw = at(rows, "owner_draw");
+    expect(draw.label).toBe("Owner's Draw");
+    expect(draw.cents).toBe(400_000);
+    expect(draw.kind).toBe("equity");
+    expect(isBelowNetProfit(draw.kind)).toBe(true);
+    expect(PNL_SECTION_SHAPE[draw.section!].subtracted).toBe(false);
+    // AFTER the bottom line, and the bottom line does not know it exists.
+    const keys = rows.map((r) => r.key);
+    expect(keys.indexOf("owner_draw")).toBeGreaterThan(keys.indexOf("net_profit"));
+    expect(at(rows, "net_profit").cents).toBe(at(profitAndLoss(figures({ ownerDraw: 0 }), OPTS), "net_profit").cents);
+    // A draw bigger than the whole profit still subtracts nothing: it is equity, not an expense.
+    const huge = profitAndLoss(figures({ ownerDraw: 999_999 }), OPTS);
+    expect(at(huge, "net_profit").cents).toBe(at(rows, "net_profit").cents);
+    expect(at(huge, "total_overhead").cents).toBe(at(rows, "total_overhead").cents);
+  });
+
+  it("the office never sees the owner's build time, its contra, or his draw", () => {
+    // profit-and-loss promises an office viewer nothing that is a subtraction away from a bottom line
+    // they cannot see. A contra with no total to net it against would break that promise exactly.
+    const office = pnlLines({ ...OPTS, showOwner: false }).map((l) => l.key);
+    for (const key of ["owner_build_time", "owner_build_time_contra", "owner_draw"]) expect(office, key).not.toContain(key);
+  });
+
+  it("the shape is typed: a section says where it sits and whether it is subtracted", () => {
+    expect(PNL_SECTIONS).toEqual(["cogs", "overhead", "equity"]);
+    expect(PNL_SECTION_SHAPE.equity).toEqual({ where: "below_net_profit", subtracted: false, heading: false, total: false });
+    for (const s of ["cogs", "overhead"] as const) expect(PNL_SECTION_SHAPE[s].subtracted, s).toBe(true);
+    // And every KIND says how it is weighted, so neither surface can fail open on one it has not heard
+    // of: the card used to render an unknown kind as NOTHING and the accountant's Summary as a BOLD
+    // TOTAL, and a bold Owner's Draw under Net Profit is the worst outcome available here.
+    for (const k of PNL_KINDS) {
+      expect(PNL_KIND_SHAPE[k], k).toBeTruthy();
+      expect(["heading", "line", "strong"], k).toContain(PNL_KIND_SHAPE[k].weight);
+    }
+    expect(PNL_KIND_SHAPE.equity.weight).toBe("line"); // NEVER "strong": it must not look like a total
+    expect(PNL_KIND_SHAPE.total.weight).toBe("strong");
+    // Every kind the layout can emit is one the Record knows.
+    const emitted = new Set(pnlLines({ ...OPTS }).map((l) => l.kind));
+    for (const k of emitted) expect(PNL_KINDS, k).toContain(k);
   });
 });

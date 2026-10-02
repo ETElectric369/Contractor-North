@@ -76,7 +76,7 @@ describe("the Owner's Draw card is a profit and loss", () => {
       "Auto −$80.00",
       "Other −$20.00",
       "Total Overhead −$250.25",
-      "Net Profit (Owner's Draw) $749.75",
+      "Net Profit $749.75",
       "Before income tax. Ask your accountant how much to set aside.",
     ]);
     // The old words are gone.
@@ -103,7 +103,7 @@ describe("the Owner's Draw card is a profit and loss", () => {
     expect(overhead).not.toContain("Phone & Office");
   });
 
-  it("the same money: Revenue less COGS is Gross Profit, less Overhead is Net Profit (Owner's Draw), the engine's own figure", () => {
+  it("the same money: Revenue less COGS is Gross Profit, less Overhead is Net Profit, the engine's own figure", () => {
     expect(money.totals.left).toBe(749.75);
     const rows = profitAndLoss(money.totals);
     // No cost in COGS in this window, so Gross Profit is all of Revenue and every cost is Overhead.
@@ -128,7 +128,7 @@ describe("what else the card says, and how", () => {
     inOrder(t, ["Materials & Bills −$169.31", "Stock Lost (Written Off, Counted Short, Returned) −$30.17", "Crew Pay (1099)", "Total COGS −$199.48", "Overhead", "Fuel −$150.25"]);
     expect(t).not.toContain("Stock Bought");
     expect(t).toContain("Materials & Bills includes $150.00 of shop stock, counted the month it was bought, less what moved to Stock Lost.");
-    expect(t).toContain("Net Profit (Owner's Draw) $550.27");
+    expect(t).toContain("Net Profit $550.27");
     expect(money.totals.left).toBe(550.27);
   });
 
@@ -136,7 +136,7 @@ describe("what else the card says, and how", () => {
     const money = computeOwnerMoney({ ...inputs, otherIncome: [{ amount: 250, posted_on: "2026-08-02" }] }, ownerMoneyWindow("2026-08", TODAY), TZ, TODAY);
     const t = text(render(money));
     inOrder(t, ["Revenue $1,250.00", "Other Income (Inside Revenue) $250.00", "Cost of Goods Sold (COGS)"]);
-    expect(t).toContain("Net Profit (Owner's Draw) $999.75");
+    expect(t).toContain("Net Profit $999.75");
   });
 
   it("crew pay and mileage in the crew's words; Stripe's fee said inside Fees", () => {
@@ -172,7 +172,7 @@ describe("what else the card says, and how", () => {
     expect(t).toContain("Gross Profit -$60.00");
     expect(t).not.toContain("Gross Margin %");
     expect(t).toContain("Total Overhead −$250.25");
-    expect(t).toContain("Net Profit (Owner's Draw) -$310.25");
+    expect(t).toContain("Net Profit -$310.25");
     expect(money.totals.left).toBe(-310.25);
     expect(html).toContain("text-red-700");
     expect(html).toContain("text-red-600");
@@ -191,7 +191,7 @@ describe("what else the card says, and how", () => {
     );
     const t = text(render(money));
     // The same Net Profit as with no hours at all: the owner's time costs nothing.
-    inOrder(t, ["Net Profit (Owner's Draw) $749.75", "about $93.72 for each hour you worked"]);
+    inOrder(t, ["Net Profit $749.75", "about $93.72 for each hour you worked"]);
     expect(t).toContain("Crew Pay (1099) $0.00");
   });
 });

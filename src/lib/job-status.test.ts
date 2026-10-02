@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { readFileSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { sep } from "node:path";
+import { eachAppSource } from "@/lib/migration-body.test-util";
 import {
   JOB_STATUSES,
   JOB_STATUS_DOOR,
@@ -52,29 +52,32 @@ describe("the door each job status is written through", () => {
 });
 
 /**
- * THE TEETH: ONLY FINISHING WRITES "complete" ON A JOB, AND IT WRITES THE WHOLE FINISH.
+ * THE TEETH: ONLY FINISHING WRITES "complete" ON A JOB — AND FINISHING MEANS BILLING FIRST.
  *
- * A deliberate bypass tripwire (the behaviour itself is pinned in jobs/finish-job.test.ts and
- * lib/complete-job-when-paid.test.ts): it walks the source for anything that ends a job on the jobs
- * table and allows exactly the two places that are allowed to — finishJob, which bills first, and
- * the paid-in-full gate, which runs after a payment has already settled. A third is RED until its
- * author reads this.
+ * A deliberate bypass tripwire (the behaviour itself is pinned in jobs/finish-job.test.ts,
+ * lib/complete-job-when-paid.test.ts and lib/finish-bills-first.test.ts): it walks the source for
+ * anything that ends a job on the jobs table and allows exactly the two places that are allowed to —
+ * finishJob, and the paid-in-full gate. A third is RED until its author reads this.
  *
- * REWRITTEN AT THE MERGE (the M1/M2 seam). The first version matched the hand-typed shape
- * `.update({ status: "complete"` and listed the two files — so it counted the doors and said nothing
- * about what they wrote. The two did not write the same thing: M2 added `hold_reason: null` to
- * finishJob and its comment claimed finishJob was the only door, while M1 was in the same lane wiring
- * the OTHER door to every pay door there is, still writing the word alone. A job on hold, paid off,
- * went complete carrying "waiting on the permit". The patch is lib/job-status's finishedJobFields
- * now, so this pins THAT: nobody types the word into a jobs update again, and the two doors that end
- * a job are still exactly two.
+ * IT NOW ASSERTS THE BILLING STEP, NOT JUST THE PATCH (M3, the money seam). The previous version
+ * checked that both doors write finishedJobFields(), which is why it stayed green through the exact
+ * defect it exists to catch: cn-v1039 shipped lib/job-status saying in one line that a finishing
+ * status "may only be written by finishing it (which bills first)", and shipped a second door —
+ * lib/complete-job-when-paid, wired by M1 to EVERY payment door — that wrote the patch perfectly and
+ * never asked what the job had worked. Erik bills part of a time-and-materials job, the customer taps
+ * Pay, the job goes complete, and the hours and receipts no bill claims are drafted nowhere and named
+ * nowhere. So the pin is now the whole sentence: the word, the patch, AND lib/finish-bills-first's
+ * finishBillingStep, which is the one place that decides what a finish has to bill.
+ *
+ * AND IT READS THE FILES THROUGH THE FIXED STRIPPER (migration-body.test-util codeOnly). The copy this
+ * file carried treated every opener-looking pair of characters as a comment start, including the one
+ * inside a string like `accept="image/*,application/pdf"` — which opened a comment that ran to the next
+ * real close and blanked everything between. Measured on this tree: 18 app files with 756 lines of code
+ * hidden that way, src/app/(app)/jobs/[id]/job-portal-papers.tsx for 160 of them and src/middleware.ts
+ * for 118. A door written inside one of those spans was invisible to this tripwire by name, which is the
+ * one thing a bypass tripwire must never be — so the reach is asserted below, out loud, in files.
  */
-describe("nothing writes a job complete except finishing it", () => {
-  const code = (path: string) =>
-    readFileSync(join(process.cwd(), path), "utf8")
-      .replace(/\/\*[\s\S]*?\*\//g, "")
-      .replace(/(^|\s)\/\/[^\n]*/g, "$1");
-
+describe("nothing writes a job complete except finishing it, and finishing bills first", () => {
   /** Every write onto the `jobs` table that ends the job, and whether it typed the word itself. */
   const endsAJob = (src: string): { byHand: boolean }[] => {
     const hits: { byHand: boolean }[] = [];
@@ -89,10 +92,28 @@ describe("nothing writes a job complete except finishing it", () => {
     return hits;
   };
 
-  const files = (readdirSync(join(process.cwd(), "src"), { recursive: true }) as string[])
-    .filter((f) => /\.(ts|tsx)$/.test(f) && !/\.test\.tsx?$/.test(f))
-    .map((f) => join("src", f));
-  const ending = files.map((f) => ({ f, hits: endsAJob(code(f)) })).filter((x) => x.hits.length);
+  const scanned: string[] = [];
+  const ending: { f: string; hits: { byHand: boolean }[]; billsFirst: boolean }[] = [];
+  eachAppSource((path, code) => {
+    // The repo-relative path, so the names below read the way a person types them.
+    const f = path.slice(path.indexOf(`${sep}src${sep}`) + 1).split(sep).join("/");
+    scanned.push(f);
+    const hits = endsAJob(code);
+    if (hits.length) ending.push({ f, hits, billsFirst: /finishBillingStep\(/.test(code) });
+  });
+
+  it("the scan really read the app — not an empty walk, and not one blinded by a broken stripper", () => {
+    // 1122 app source files on the tree this was written against. A floor, not an equality: files come
+    // and go. An empty or crippled walk silently passes every other assertion in this describe.
+    expect(scanned.length).toBeGreaterThan(900);
+    expect(scanned).toContain("src/lib/complete-job-when-paid.ts");
+    expect(scanned).toContain("src/app/(app)/jobs/actions.ts");
+    // The two files the old stripper hid the most of are read whole now: a door written in either of
+    // them would be seen. `codeOnly` keeps a comment it is unsure about, so the only risk is a louder
+    // tripwire, never a blind one.
+    expect(scanned).toContain("src/middleware.ts");
+    expect(scanned).toContain("src/app/(app)/jobs/[id]/job-portal-papers.tsx");
+  });
 
   it("the only two writers are Finish Job and the paid-in-full gate", () => {
     expect(ending.map((x) => x.f).sort()).toEqual([
@@ -110,6 +131,18 @@ describe("nothing writes a job complete except finishing it", () => {
     ).toEqual([]);
     // And the scan is really finding them: an empty scan must never pass this describe.
     expect(ending.flatMap((x) => x.hits).length).toBeGreaterThan(1);
+  });
+
+  it("and BOTH of them reach the billing step — a job never ends with its work off every bill", () => {
+    const skipped = ending.filter((x) => !x.billsFirst).map((x) => x.f);
+    expect(
+      skipped,
+      "This door ends a job without running the billing step. lib/job-status says a finishing status " +
+        "may only be written by finishing, and finishing BILLS FIRST: hours and receipts no bill claims " +
+        "have to be drafted (Finish Job) or said out loud and the finish refused (a paid bill). Call " +
+        "lib/finish-bills-first's finishBillingStep and act on its answer — do not re-derive it here.",
+    ).toEqual([]);
+    expect(ending.length).toBe(2);
   });
 });
 

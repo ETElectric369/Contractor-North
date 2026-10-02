@@ -17,6 +17,7 @@ import { reportError } from "@/lib/observe";
 import { todayStrInTz } from "@/lib/tz";
 import { GeofenceMonitor } from "@/components/geofence-monitor";
 import { OfflineDrain } from "@/components/offline-drain";
+import { PullToRefresh } from "@/components/pull-to-refresh";
 import { ShellNavigationWatch } from "@/components/shell-navigation-watch";
 import { PageOpenCounter } from "@/components/page-open-counter";
 import { BugReporter } from "@/components/bug-reporter";
@@ -384,6 +385,29 @@ export default async function AppLayout({
               `position: fixed` has no transformed ancestor to resolve against) and what stops the two
               quarter turns composing into a half turn and drawing the photo upside down. */}
           <Turned region="the route" avoidDock>
+            {/* PULL DOWN TO REFRESH, ONCE, FOR EVERY SCREEN (44aeec9c; cn-v1039 built it and mounted it
+                on /billing alone, where the report came from, while its own headline said "for every
+                screen"). It needs no page data — it finds its own scroller — and in the shell there is
+                no browser gesture to fall back on: the root is h-dvh + overflow-hidden and the document's
+                rubber-band is off on purpose. Touch only, nothing drawn at rest, and never while a sheet
+                is open. One mount: two would refresh twice.
+
+                INSIDE THE TURNED REGION, NOT BESIDE IT — and that placement is half of one fix, never a
+                tidy-up. WHICH ELEMENT SCROLLS CHANGES WHEN THE PHONE TURNS: upright it is this <main>,
+                and while the phone is held turned globals.css gives <main> `overflow: hidden` and moves
+                `overflow-y: auto` onto the turned face. Both obvious resolutions are wrong, and both were
+                traced before this one was written:
+                  · left OUTSIDE <Turned>, the walk up to a scroller steps over a <main> that no longer
+                    scrolls and arms the gesture on the document — a pull that does nothing, on the two
+                    screens a thumb is most likely to try it on.
+                  · moved inside and left at that, the gesture arms on the right element but still
+                    measures the thumb in GLASS coordinates, while the face's scroll axis has been turned
+                    a quarter turn — so a downward pull reads as sideways and is thrown away as a swipe.
+                So it sits inside the face AND reads the turn: scrollerForTheTurn() resolves the face as
+                its scroller, and thumbThroughTheTurn() maps the thumb through the same quarter turn the
+                face is drawn with. One answer decides which element scrolls and which way a thumb is
+                going, and upright nothing about any of it changes. */}
+            <PullToRefresh />
             <Suspense fallback={null}>
               <SectionSubnav isStaff={isStaff} features={doors} />
             </Suspense>

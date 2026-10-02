@@ -60,7 +60,10 @@ describe("computeJobProfitRows — job profit SSOT (reconciles /analytics + Nort
       bills: [{ job_id: "A", amount: 200 }],
       entries: [laborEntry("A", 8, 50)], // 8h × $50 = 400
     });
-    expect(rows).toEqual([{ id: "A", job_number: "J-A", name: "Job A", status: "in_progress", rev: 1000, cost: 600, profit: 400, ownerHours: 0, perOwnerHour: null }]);
+    expect(rows).toEqual([
+      // ownerCost 0 and uncostedOwnerHours 0: no owner worked this job, so the build-time half is empty.
+      { id: "A", job_number: "J-A", name: "Job A", status: "in_progress", rev: 1000, cost: 600, profit: 400, ownerHours: 0, ownerCost: 0, uncostedOwnerHours: 0, perOwnerHour: null },
+    ]);
   });
 
   it("revenue is the PAYMENTS ledger, not invoices.amount_paid — a credit writeoff is no cash", () => {
@@ -198,15 +201,15 @@ describe("computeJobProfitRows — job profit SSOT (reconciles /analytics + Nort
 });
 
 describe("computeProfitByType — margin by work type", () => {
-  const row = (id: string, rev: number, cost: number, ownerHours = 0): JobProfitRow => ({ id, job_number: `J-${id}`, name: `Job ${id}`, status: "complete", rev, cost, profit: rev - cost, ownerHours, perOwnerHour: null });
+  const row = (id: string, rev: number, cost: number, ownerHours = 0): JobProfitRow => ({ id, job_number: `J-`, name: `Job `, status: "complete", rev, cost, profit: rev - cost, ownerHours, ownerCost: 0, uncostedOwnerHours: 0, perOwnerHour: null });
 
   it("groups jobs by type, sums money, computes margin %, sorts by profit", () => {
     const rows = [row("a", 1000, 600), row("b", 500, 450), row("c", 2000, 1000)];
     const typeOf = new Map([["a", "Panel swap"], ["b", "Panel swap"], ["c", "Service call"]]);
     const out = computeProfitByType(rows, typeOf);
     expect(out).toEqual([
-      { type: "Service call", jobs: 1, revenue: 2000, cost: 1000, profit: 1000, marginPct: 50, ownerHours: 0, profitPerOwnerHour: null },
-      { type: "Panel swap", jobs: 2, revenue: 1500, cost: 1050, profit: 450, marginPct: 30, ownerHours: 0, profitPerOwnerHour: null },
+      { type: "Service call", jobs: 1, revenue: 2000, cost: 1000, profit: 1000, marginPct: 50, ownerHours: 0, ownerCost: 0, uncostedOwnerHours: 0, profitPerOwnerHour: null },
+      { type: "Panel swap", jobs: 2, revenue: 1500, cost: 1050, profit: 450, marginPct: 30, ownerHours: 0, ownerCost: 0, uncostedOwnerHours: 0, profitPerOwnerHour: null },
     ]);
   });
 
@@ -215,9 +218,42 @@ describe("computeProfitByType — margin by work type", () => {
     expect(out[0]).toMatchObject({ ownerHours: 12, profit: 1400, profitPerOwnerHour: 116.67 });
   });
 
+  /**
+   * ── A TYPE'S ROW CARRIES THE OWNER'S COST AND HIS UNCOSTED HOURS (0373) ───────────────────────────
+   *
+   * `profit_by_type` tells Nort, through BUILD_TIME_IS_A_COST_NOT_A_WAGE, to check uncosted_owner_hours
+   * before quoting a cost - and this row had neither that field nor ownerCost, so the tool could not
+   * return them and the model had nothing to say it with. get_job_financials and list_job_profitability
+   * were given both in the same commit; this one was missed.
+   *
+   * It matters because the type's COST moves with his hours: with no rate set, a Panel Swap job he worked
+   * 40 hours on reports margin 85% against a Service Call's 63%, and with a $65 rate the same rows read
+   * 53% against 63% - so "what's my most profitable type of work" names the wrong type, overstates its
+   * margin by 32 points, and has no field with which to admit it.
+   */
+  it("carries the owner's cost and his uncosted hours, so a type's cost can say what it is missing", () => {
+    const withOwner = (id: string, rev: number, cost: number, ownerHours: number, ownerCost: number, uncosted: number): JobProfitRow => ({
+      ...row(id, rev, cost, ownerHours),
+      ownerCost,
+      uncostedOwnerHours: uncosted,
+    });
+    const out = computeProfitByType(
+      [withOwner("a", 8000, 3800, 40, 2600, 0), withOwner("b", 1000, 400, 6, 0, 6)],
+      new Map([["a", "Panel swap"], ["b", "Panel swap"]]),
+    );
+    expect(out[0]).toMatchObject({
+      type: "Panel swap",
+      ownerHours: 46,
+      // The owner's share of the type's cost, summed the same way ownerHours is.
+      ownerCost: 2600,
+      // And the hours no rate stands behind: this type's cost is SHORT by them, and now it can say so.
+      uncostedOwnerHours: 6,
+    });
+  });
+
   it("jobs with no type fall under 'Uncategorized'; null margin when zero revenue", () => {
     const out = computeProfitByType([row("x", 0, 200)], new Map());
-    expect(out).toEqual([{ type: "Uncategorized", jobs: 1, revenue: 0, cost: 200, profit: -200, marginPct: null, ownerHours: 0, profitPerOwnerHour: null }]);
+    expect(out).toEqual([{ type: "Uncategorized", jobs: 1, revenue: 0, cost: 200, profit: -200, marginPct: null, ownerHours: 0, ownerCost: 0, uncostedOwnerHours: 0, profitPerOwnerHour: null }]);
   });
 });
 

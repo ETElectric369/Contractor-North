@@ -158,3 +158,43 @@ export function whereTheFingerLands(onGlass: Point, host: Box, held: Held, reser
 export function tapTargetOnGlass(control: Box, held: Held): Box {
   return laidOutAt(control, held);
 }
+
+/** A thumb's travel — a pair of deltas, not a position. The same shape in either frame. */
+export type Drag = { dx: number; dy: number };
+
+/**
+ * WHICH WAY THE THUMB IS ACTUALLY GOING — whereTheFingerLands(), read as a MOVEMENT instead of a
+ * point, and the other half of making a turned screen feel like a screen.
+ *
+ * WHY THIS HAS TO EXIST AT ALL. A browser hit-tests THROUGH a transform, so a tap lands where the
+ * person aimed, and a NATIVE scroll inside the turned box goes the way they pushed — both of those are
+ * free. But a TouchEvent's `clientX/clientY` are the GLASS's coordinates, untransformed, because the
+ * window is what measures them. So a gesture we read OURSELVES — pull-to-refresh is the one today —
+ * sees a thumb travelling along the glass while the content it is pulling has been turned a quarter
+ * turn beneath it. Held clockwise the person pulls DOWN their own view and the glass reports a drag to
+ * the RIGHT: read raw, every pull looks like a sideways swipe and is thrown away as one.
+ *
+ * SO THE SAME INVERSE, ONCE. A delta is the difference of two positions, and the translation in
+ * whereTheFingerLands() cancels in a difference — which is why no box and no dock reservation are
+ * needed here, and why this is the SAME arithmetic rather than a second copy of it. The test asserts
+ * exactly that: for every direction, this agrees with the difference of two whereTheFingerLands()
+ * answers, so the two can never drift.
+ *
+ *   upright           a thumb is itself
+ *   clockwise         the person's DOWN is the glass's RIGHT   (dy =  dx on glass)
+ *   counterclockwise  the person's DOWN is the glass's LEFT    (dy = -dx on glass)
+ */
+export function thumbThroughTheTurn(onGlass: Drag, held: Held): Drag {
+  if (!isTurned(held)) return { dx: onGlass.dx, dy: onGlass.dy };
+  if (held === "clockwise") return { dx: theOtherWay(onGlass.dy), dy: onGlass.dx };
+  return { dx: onGlass.dy, dy: theOtherWay(onGlass.dx) };
+}
+
+/**
+ * The same travel, the other way along the axis. A plain `-n` would answer -0 for a thumb that did not
+ * move on that axis at all, and -0 is not 0 to Object.is — so "it did not move sideways" would read as
+ * a different answer from "it did not move sideways" depending on which way the phone was held.
+ */
+function theOtherWay(n: number): number {
+  return n === 0 ? 0 : -n;
+}

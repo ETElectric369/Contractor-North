@@ -87,12 +87,16 @@ const BILLS = [
   bill("b-north-1", { amount: 1200, bill_date: "2026-09-02", job_id: J1, jobs: jobRef(J1), supplier_account_id: NORTH }),
   bill("b-north-2", { amount: 300, bill_date: "2026-09-08", job_id: J1, jobs: jobRef(J1), supplier_account_id: NORTH }),
   // ── TWO SPELLINGS ON NO ACCOUNT THAT LOOK LIKE ONE: the merge proposal ──
-  bill("b-ridge-1", { supplier: "Ridgeway's Fastener Depot", amount: 61.4, status: "paid", bill_date: "2026-08-11", job_id: J2, jobs: jobRef(J2) }),
-  bill("b-ridge-2", { supplier: "Ridgeways Fastener Depot", amount: 44.15, status: "paid", bill_date: "2026-08-19", job_id: J2, jobs: jobRef(J2) }),
+  // STILL OPEN, and that is load-bearing now (cn-v1041): a purchase paid at the register has ONE
+  // record, so it is not a disagreement and no section here speaks for it. These used to be `paid`,
+  // which is how the fixture drew a page Erik would never have been shown.
+  bill("b-ridge-1", { supplier: "Ridgeway's Fastener Depot", amount: 61.4, category: "Receipt", bill_date: "2026-08-11", job_id: J2, jobs: jobRef(J2) }),
+  bill("b-ridge-2", { supplier: "Ridgeways Fastener Depot", amount: 44.15, category: "Receipt", bill_date: "2026-08-19", job_id: J2, jobs: jobRef(J2) }),
   // ── A SPELLING THE MATCHER WILL NOT RULE ON: same initials as the account, first word differs ──
-  bill("b-maybe", { supplier: "Northern Wholesale Supply", amount: 475.5, bill_date: "2026-07-21", job_id: J2, jobs: jobRef(J2) }),
-  // ── A SPELLING WITH NO RELATIVE AT ALL: Give It Its Own Account ──
-  bill("b-loose", { supplier: "Harbour Point Tool Rental", amount: 88.9, status: "paid", bill_date: "2026-06-30", job_id: J3, jobs: jobRef(J3) }),
+  bill("b-maybe", { supplier: "Northern Wholesale Supply", amount: 475.5, category: "Receipt", bill_date: "2026-07-21", job_id: J2, jobs: jobRef(J2) }),
+  // ── A SPELLING WITH NO RELATIVE AT ALL: Give It Its Own Account, and nothing filed it under an
+  //    expense category, so it is the one row that gets asked ("if it's unclear ask") ──
+  bill("b-loose", { supplier: "Harbour Point Tool Rental", amount: 88.9, bill_date: "2026-06-30", job_id: J3, jobs: jobRef(J3) }),
   // ── THE SAME TICKET ON TWO JOBS ──
   bill("b-dup-a", { amount: 43.5, bill_date: "2026-07-29", job_id: J3, jobs: jobRef(J3), supplier_account_id: NORTH, notes: "portal-20260729-1.pdf", bill_line_items: ticketLines() }),
   bill("b-dup-b", { amount: 43.5, bill_date: "2026-08-28", job_id: J2, jobs: jobRef(J2), supplier_account_id: NORTH, notes: "bramble ticket.pdf", bill_line_items: ticketLines() }),

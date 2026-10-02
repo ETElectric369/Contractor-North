@@ -163,10 +163,15 @@ export default async function BillsPage({
    * Record A Payment sheet opens on arrival. The sheet is the one that already exists. (The paste
    * box's `?import=` banner went with the paste box: pasted invoice text is imported from Snap Or
    * Note's note box now, and its line there says what came in.)
+   *
+   * `q` IS WHAT A DOOR SOMEWHERE ELSE WANTS LOOKED UP. /reconcile's papers-on-no-account rows send
+   * him here to answer a paper, and they linked to `#bills-search` — the id of a box whose query is
+   * React state and reads no URL, so he landed on a blank box and the first thing he had to do was
+   * retype the spelling the row had just shown him. The box seeds from this instead.
    */
-  searchParams?: Promise<{ pay?: string }>;
+  searchParams?: Promise<{ pay?: string; q?: string }>;
 }) {
-  const { pay: payOn } = (await searchParams) ?? {};
+  const { pay: payOn, q: searchFor } = (await searchParams) ?? {};
   const supabase = await createClient();
   const {
     data: { user },
@@ -1169,7 +1174,7 @@ export default async function BillsPage({
         </div>
       </PageHeader>
 
-      <BillsSearchProvider rows={searchRows}>
+      <BillsSearchProvider rows={searchRows} initialQuery={String(searchFor ?? "")}>
         {/* FIND ANY PAPER: number, street, job, supplier, bucket, or $ (Bills plan, Wave A). It filters
             All Bills in place; a supplier's own paper is a hit that lands on its card. */}
         {searchRows.length > 0 && <BillsSearchBox />}

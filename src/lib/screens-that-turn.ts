@@ -29,6 +29,15 @@
  *  - A job's materials list — capped at max-w-4xl and built of full-width rows: wider shows the
  *    same rows, fewer of them.
  *  - Reconcile — a stack of cards, one per kind of disagreement. Same loss as any tall list.
+ *  - THE PRICE LIST — on the list for one build, and taken off by the person it was built for. Erik,
+ *    2026-10-01, having held both builds on his own phone:
+ *      "schedule and documents yes and no on everything else"
+ *    It reads like the obvious entry and the arithmetic says otherwise, which is why
+ *    it is written down here rather than quietly dropped: the table declares min-w-[1080px], and the
+ *    rectangle between the chrome gives it about 858px when iOS rotates the whole interface but only
+ *    658px when the chrome stays put and the turn is drawn in the glass between it. Turning the phone
+ *    THIS way shows LESS of the table than turning it the old way did. One turn, three screens, and no
+ *    second mode to keep alive for the one screen that would want it.
  *  - The job panel / circuit tables — these would genuinely show more (they declare min-w-[640px]),
  *    but they are cards inside pages that are mostly forms, and the Panel tab is on a plan-first
  *    footing. They are the best candidates for the next entry, not this one.
@@ -41,11 +50,7 @@
  * A screen that may turn. Adding one means adding a name HERE and an entry below with a reason —
  * the record is exhaustive, so it will not compile until both exist.
  */
-export type ScreenThatTurns =
-  | "document-preview"
-  | "document-full-screen"
-  | "schedule"
-  | "price-list";
+export type ScreenThatTurns = "document-preview" | "document-full-screen" | "schedule";
 
 export type Warrant = {
   /**
@@ -76,12 +81,6 @@ export const SCREENS_THAT_TURN: Record<ScreenThatTurns, Warrant> = {
     because:
       "The week is seven day columns. Portrait shows three and scrolls sideways for the rest; sideways the whole week is on screen at once.",
   },
-  // ── And the one other table that is already wider than the phone ───────────────────────────
-  "price-list": {
-    route: "/price-list",
-    because:
-      "The table declares min-w-[1080px] and scrolls sideways on a phone today: Cost, Markup, Margin and Sell cannot be seen together, which is the one thing a price table is for.",
-  },
 };
 
 /** Trailing slashes and query strings never reach usePathname, but a hand-written path can. */
@@ -93,8 +92,8 @@ function justThePath(pathname: string): string {
 /**
  * Which declared screen this path IS, or null for "portrait, like everywhere else".
  *
- * Matched on a segment boundary, never with a bare startsWith: "/price-list" must not hand its
- * warrant to a future "/price-lists".
+ * Matched on a segment boundary, never with a bare startsWith: "/schedule" must not hand its warrant
+ * to a future "/schedules".
  */
 export function screenTurningAt(pathname: string): ScreenThatTurns | null {
   const path = justThePath(pathname);

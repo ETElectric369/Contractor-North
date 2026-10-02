@@ -325,6 +325,23 @@ main.turn-host > .turn-face[data-held] {
   -webkit-overflow-scrolling: touch;
   padding: 0.75rem;
 }
+
+/* ── PULL DOWN TO REFRESH KEEPS WORKING, AND ITS PILL LANDS AT THE PERSON'S TOP ──
+   The rule above is the whole reason the gesture needed teaching: THE ELEMENT THAT
+   SCROLLS CHANGES when the phone is turned. `main` is `overflow: hidden` (just
+   above) and the scroll is HERE, so the gesture resolves this face as its scroller
+   and maps the thumb through the same quarter turn the face is drawn with
+   (components/pull-to-refresh.tsx — scrollerForTheTurn, thumbThroughTheTurn).
+
+   Its indicator is `position: fixed`, and inside a transformed box that resolves
+   against THIS element rather than the window — which is what we want: it is then
+   centred across the person's view and painted upright with the content. Only the
+   offset is wrong, because the one it carries clears the top bar and the notch, and
+   inside this face there is neither: the bar is a strip down one side now, and so is
+   the notch. So: a plain gap from the face's own top edge. */
+main.turn-host > .turn-face[data-held] .pull-pill {
+  top: 0.75rem;
+}
 .pdf-pages-scroll.turn-host > .turn-face[data-held] {
   overflow-y: auto;
   overscroll-behavior: contain;

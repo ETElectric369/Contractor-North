@@ -1,5 +1,9 @@
-import { BUCKET_SECTION, bucketsIn, type BusinessCostBucket, type PnlSection } from "@/lib/business-cost-buckets";
+import { BUCKET_SECTION, bucketsIn, type BusinessCostBucket } from "@/lib/business-cost-buckets";
+import { isSubtracted, type PnlKind, type PnlNetting, type PnlSection } from "@/lib/analytics/pnl-shape";
 import type { OwnerMoneyCostTarget, OwnerMoneyFigures } from "@/lib/analytics/owner-money";
+
+export { PNL_KINDS, PNL_KIND_SHAPE, PNL_SECTIONS, PNL_SECTION_SHAPE, isBelowNetProfit, isSubtracted } from "@/lib/analytics/pnl-shape";
+export type { PnlKind, PnlKindShape, PnlNetting, PnlSection, PnlSectionShape } from "@/lib/analytics/pnl-shape";
 
 /**
  * THE PROFIT AND LOSS, IN THE ACCOUNTING INDUSTRY'S OWN WORDS AND ORDER (Erik, 2026-09-28).
@@ -17,13 +21,17 @@ import type { OwnerMoneyCostTarget, OwnerMoneyFigures } from "@/lib/analytics/ow
  *     Stock Lost (Written Off, Counted Short, Returned)
  *     Crew Pay (1099)
  *     Crew Mileage Paid                      and any bucket BUCKET_SECTION calls COGS (none today)
+ *     Owner Build Time On Jobs               the owner's ON-SITE hours at his cost rate
+ *     Owner Build Time Allocation (Contra)   the same amount back, so the pair nets to zero
  *     Total COGS
  *   Gross Profit                             Revenue less Total COGS
  *   Gross Margin %                           where a percent fits
  *   Overhead
  *     Fuel, Auto, Tools & Supplies, Phone & Office, Insurance & Licenses, Fees, Other
  *     Total Overhead
- *   Net Profit (Owner's Draw)                Gross Profit less Total Overhead
+ *   Net Profit                               Gross Profit less Total Overhead
+ *   ─────────────
+ *   Owner's Draw                             EQUITY, below the line, never subtracted
  *
  * COGS CAN HOLD NO BUCKET AT ALL, and does today: its lines are the job-side ones by what they are.
  * Nothing here needs a bucket in it (no sentence joins a list that could be empty, and the one
@@ -31,26 +39,48 @@ import type { OwnerMoneyCostTarget, OwnerMoneyFigures } from "@/lib/analytics/ow
  * split without reading wrong when one half is empty.
  *
  * THE SAME DOLLARS IN NEW PLACES. Every figure is one computeOwnerMoney already makes; this only says
- * where each one sits. Net Profit (Owner's Draw) IS the engine's `left`, to the cent: it is read
- * straight off it, never re-added, and the tests prove on the engine's own fixtures (every window,
- * every month) that Gross Profit less Total Overhead lands on it. Revenue is the engine's Received.
+ * where each one sits. Net Profit IS the engine's `left`, to the cent: it is read straight off it,
+ * never re-added, and the tests prove on the engine's own fixtures (every window, every month) that
+ * Gross Profit less Total Overhead lands on it. Revenue is the engine's Received.
  *
  * THE SPLIT IS DATA. A business-cost bucket is COGS or Overhead by BUCKET_SECTION
  * (business-cost-buckets.ts), and nowhere else; the job-cost lines (materials, stock, crew pay and
  * mileage) are COGS by what they are. Flip a bucket there and every surface moves it: that is all
  * moving Fuel to Overhead was.
  *
- * EVERY SURFACE READS THIS: the Owner's Draw card and Money by Month on /analytics, the accountant's
+ * EVERY SURFACE READS THIS: the Net Profit card and Money by Month on /analytics, the accountant's
  * Summary and Costs tabs, the accountant page's two figures, and Nort's words. One layout, one set
  * of words, so no two screens can say the same money two ways.
  *
- * THE OWNER'S SWITCH: for an office viewer the owner hasn't shared Owner's Draw with, the lines that
- * are the owner's (`ownerOnly`: Revenue, every total, Gross Profit and its margin, Net Profit) are
- * left out. What is left is the cost rows one by one under their two headings: nothing on it is a
- * subtraction away from the bottom line.
+ * THE OWNER'S SWITCH: for an office viewer the owner hasn't shared the owner's money with, the lines
+ * that are the owner's (`ownerOnly`: Revenue, every total, Gross Profit and its margin, Net Profit,
+ * the owner's build-time pair and his draw) are left out. What is left is the cost rows one by one
+ * under their two headings: nothing on it is a subtraction away from the bottom line.
  *
- * THE OWNER'S TIME IS NEVER A COST: the owner's hours are not a line here. Whoever shows them says
- * them as hours, below the line.
+ * ── THE OWNER'S OWN BUILD TIME, AND WHY IT IS BOTH A COST AND NOT A DEDUCTION ─────────────────────
+ *
+ * Erik, 2026-10-01: "build time, including my build time is considered COGS, so it would be
+ * considered a direct cost and should be counted that way". He is right about the JOB: an hour he
+ * spends on site costs the business something, and a job's margin that pretends otherwise is a
+ * fiction. Standard practice is equally blunt the other way about the TAX report: a sole proprietor
+ * cannot deduct his own labour, as wages or inside COGS, because the business is not separate from
+ * him and every dollar of profit is already his personal income on Schedule C. There is no owner wage
+ * expense, full stop - which is what migration 0286 was protecting, and on this report it was right.
+ *
+ * Both halves hold at once through an ALLOCATION WITH A CONTRA (pnl-shape.ts's PnlNetting): Owner
+ * Build Time On Jobs charges his on-site hours inside COGS at his cost rate, and Owner Build Time
+ * Allocation (Contra) books the identical amount straight back on the next line. The pair sums to
+ * zero, so Total COGS, Gross Profit, Gross Margin % and NET PROFIT are every one of them unchanged to
+ * the cent, and his Schedule C figure is untouched. His OFFICE time is not in it at all: office time
+ * is Overhead, never a job cost, so the allocation counts only hours against a job.
+ *
+ * BOTH LINES OR NEITHER. They are emitted by one function, ownerLabourPair, and the contra's figure is
+ * the charged line's own closure negated. A charged line without its contra would understate his net
+ * profit by all of his labour - the exact deduction he is not allowed - so it is not something a
+ * reader can do by hand.
+ *
+ * THE OWNER'S DRAW IS THE LINE BELOW. What he actually takes out is EQUITY, not an expense: it sits
+ * under Net Profit, is never subtracted from anything, and the words "Owner's Draw" now name only it.
  */
 
 /** The words, exactly. Title Case: they are row names. */
@@ -65,19 +95,33 @@ export const PNL_WORDS = {
   stockLostShort: "Stock Lost",
   crewPay: "Crew Pay (1099)",
   crewMileage: "Crew Mileage Paid",
+  /** The owner's ON-SITE hours at his cost rate: a direct cost of the job, inside COGS. */
+  ownerBuildTime: "Owner Build Time On Jobs",
+  /** The same amount straight back, so the allocation nets to zero and Net Profit does not move. */
+  ownerBuildTimeContra: "Owner Build Time Allocation (Contra)",
+  /** Standing alone, where a chip or a sentence names the contra. */
+  ownerBuildTimeContraShort: "Owner Build Time (Contra)",
   totalCogs: "Total COGS",
   grossProfit: "Gross Profit",
   /** A percent, not money: the row's name carries the unit, so a spreadsheet's plain 42.3 reads right. */
   grossMargin: "Gross Margin %",
   overhead: "Overhead",
   totalOverhead: "Total Overhead",
-  netProfit: "Net Profit (Owner's Draw)",
+  /** THE BOTTOM LINE, plain (Erik, 2026-10-01: "lets get rid of the terminology owners draw and use
+   *  only net profit"). It said "Net Profit (Owner's Draw)" until then, which conflated the bottom
+   *  line with the equity line below it; `ownerDraw` is the only line those words name now. */
+  netProfit: "Net Profit",
+  /** EQUITY, BELOW THE LINE: what the owner actually took out this period. Never an expense, never
+   *  subtracted (Erik: "an actual draw from the owner is considered equity and should be a line item
+   *  below net profit stating what Ive taken out this month"). */
+  ownerDraw: "Owner's Draw",
 } as const;
 
 /** What a line's name is when it stands alone (a chart's chip), where the row name is longer. */
 const SHORT: Partial<Record<PnlKey, string>> = {
   stock_lost: PNL_WORDS.stockLostShort,
   total_overhead: PNL_WORDS.overhead,
+  owner_build_time_contra: PNL_WORDS.ownerBuildTimeContraShort,
 };
 
 export type PnlKey =
@@ -89,29 +133,36 @@ export type PnlKey =
   | "stock_lost"
   | "crew_pay"
   | "crew_mileage"
+  | "owner_build_time"
+  | "owner_build_time_contra"
   | `bucket:${BusinessCostBucket}`
   | "total_cogs"
   | "gross_profit"
   | "gross_margin"
   | "overhead"
   | "total_overhead"
-  | "net_profit";
+  | "net_profit"
+  | "owner_draw";
 
 /**
- *   revenue   Revenue
- *   part      a part of the line above it, already inside it (Other Income inside Revenue)
- *   heading   a section's name, no figure (Cost of Goods Sold (COGS), Overhead)
- *   cost      one cost, in its section
- *   total     a section's total (Total COGS, Total Overhead)
- *   profit    Gross Profit, Net Profit (Owner's Draw)
- *   margin    Gross Margin %: a percent, not money
+ * The figures a profit and loss is made from: computeOwnerMoney's own. THE PICK IS THE ENFORCEMENT -
+ * add a figure here and the compiler walks every surface that builds a set of figures until each one
+ * supplies it, which is how a new line cannot quietly read 0 on a screen nobody remembered.
  */
-export type PnlKind = "revenue" | "part" | "heading" | "cost" | "total" | "profit" | "margin";
-
-/** The figures a profit and loss is made from: computeOwnerMoney's own. */
 export type PnlFigures = Pick<
   OwnerMoneyFigures,
-  "received" | "otherIncome" | "materialsAndBills" | "putOnShelf" | "shopStockLost" | "crewPay" | "crewMileagePaid" | "fuel" | "businessCosts" | "left"
+  | "received"
+  | "otherIncome"
+  | "materialsAndBills"
+  | "putOnShelf"
+  | "shopStockLost"
+  | "crewPay"
+  | "crewMileagePaid"
+  | "ownerBuildTimeOnJobs"
+  | "ownerDraw"
+  | "fuel"
+  | "businessCosts"
+  | "left"
 >;
 
 export type PnlLine = {
@@ -121,10 +172,15 @@ export type PnlLine = {
   /** Its name standing alone (a chart's chip); the label unless that is longer than a chip holds. */
   short: string;
   kind: PnlKind;
-  /** COGS or Overhead for a heading, a cost and a total; null for Revenue and the profits. */
+  /** COGS, Overhead or Equity for a heading, a cost and a total; null for Revenue and the profits. */
   section: PnlSection | null;
-  /** The owner's: never shown to an office viewer the owner hasn't shared Owner's Draw with. */
+  /** The owner's: never shown to an office viewer the owner hasn't shared the owner's money with. */
   ownerOnly: boolean;
+  /** One half of an amount booked twice (pnl-shape.ts's PnlNetting), null on an ordinary line. A
+   *  `charged` line and its `contra` are the same cents with opposite signs, so the pair adds nothing
+   *  to its section's total: a reader totalling a section needs no special case, and a reader DRAWING
+   *  one (a chart bar, a costs-tab row) can skip the pair knowing it accounts for no money. */
+  netting: PnlNetting | null;
   /** The line's money in whole cents, for one set of figures. Null for a heading and the margin. */
   cents: (f: PnlFigures) => number | null;
   /** The margin line's percent (one decimal); null when there is no Revenue to be a percent of.
@@ -141,7 +197,14 @@ export type PnlOptions = {
   stockInMaterials?: boolean;
   /** Gross Margin %, where a percent fits. */
   margin?: boolean;
-  /** False for an office viewer the owner hasn't shared Owner's Draw with: no `ownerOnly` line.
+  /** Say the owner's build time inside COGS with its contra under it. A surface passes true when any
+   *  figure it shows has some - i.e. when he has set a cost rate AND worked on a job. BOTH LINES OR
+   *  NEITHER: this one switch turns on the pair, never half of it. */
+  ownerBuildTime?: boolean;
+  /** Say Owner's Draw below the bottom line: what the owner actually took out. A surface passes true
+   *  when any figure it shows has some. */
+  ownerDraw?: boolean;
+  /** False for an office viewer the owner hasn't shared the owner's money with: no `ownerOnly` line.
    *  True (the default) for the owner, or an office the owner has shared it with. */
   showOwner?: boolean;
 };
@@ -186,7 +249,58 @@ export function grossMarginPct(revenueCents: number, grossCents: number): number
   return Math.round((grossCents * 1000) / revenueCents) / 10 + 0; // + 0: never -0
 }
 
-type Def = { key: PnlKey; label: string; kind: PnlKind; section: PnlSection | null; ownerOnly: boolean; cents?: (f: PnlFigures) => number | null; pct?: (f: PnlFigures) => number | null };
+type Def = {
+  key: PnlKey;
+  label: string;
+  kind: PnlKind;
+  section: PnlSection | null;
+  ownerOnly: boolean;
+  netting?: PnlNetting | null;
+  cents?: (f: PnlFigures) => number | null;
+  pct?: (f: PnlFigures) => number | null;
+};
+
+/**
+ * THE OWNER'S BUILD TIME AND ITS CONTRA, AS ONE THING YOU CANNOT HALF-DO.
+ *
+ * Both lines come back from this function or neither does, and the contra's arithmetic is the charged
+ * line's OWN closure with a minus in front - not a second read of `ownerBuildTimeOnJobs`. So there is
+ * one amount and one negation: no edit can leave the two reading different figures, and no caller can
+ * take one line and leave the other.
+ *
+ * WHY BOTH SIT INSIDE COGS rather than the contra going after Total COGS. Inside, the section's own
+ * sum nets them to nothing, so Total COGS, Gross Profit, Gross Margin %, the chart's stated identity
+ * (money-chart.ts: the COGS bars plus Overhead plus Net Profit account for every cent of Revenue),
+ * the accountant's Costs-tab total and Net Profit are all unchanged to the cent with no arithmetic
+ * edited anywhere. A contra placed after the total would have needed `gross` rewritten and would have
+ * left the COGS bars over-summing by the allocation. His build time is still visibly a direct cost, on
+ * its own line, where Erik said it belongs - one fewer thing to break for the same two rows.
+ */
+function ownerBuildTimePair(): Def[] {
+  const charged = (f: PnlFigures) => pnlCents(f.ownerBuildTimeOnJobs ?? 0);
+  return [
+    {
+      key: "owner_build_time",
+      label: PNL_WORDS.ownerBuildTime,
+      kind: "cost",
+      section: "cogs",
+      ownerOnly: true,
+      netting: "charged",
+      cents: charged,
+    },
+    {
+      key: "owner_build_time_contra",
+      label: PNL_WORDS.ownerBuildTimeContra,
+      kind: "cost",
+      section: "cogs",
+      ownerOnly: true,
+      netting: "contra",
+      // THE SAME CLOSURE, NEGATED. Never `-pnlCents(f.ownerBuildTimeOnJobs)`: that is a second
+      // reading, and two readings can be edited apart. This one cannot.
+      cents: (f) => -charged(f),
+    },
+  ];
+}
 
 /**
  * THE LAYOUT: every line, in order, for these options. The lines carry their own arithmetic, so a
@@ -223,11 +337,18 @@ export function pnlLines(opts: PnlOptions = {}): PnlLine[] {
     { key: "stock_lost", label: PNL_WORDS.stockLost, kind: "cost", section: "cogs", ownerOnly: false, cents: (f) => pnlCents(f.shopStockLost) },
     { key: "crew_pay", label: PNL_WORDS.crewPay, kind: "cost", section: "cogs", ownerOnly: false, cents: (f) => pnlCents(f.crewPay) },
     { key: "crew_mileage", label: PNL_WORDS.crewMileage, kind: "cost", section: "cogs", ownerOnly: false, cents: (f) => pnlCents(f.crewMileagePaid) },
+    // BUILD TIME IS A DIRECT COST, WHOEVER WORKED IT - beside Crew Pay, where Erik put it, with its
+    // contra immediately under so the pair nets to nothing. Both or neither: ownerBuildTimePair().
+    ...(opts.ownerBuildTime ? ownerBuildTimePair() : []),
     ...bucketsIn("cogs").map(bucketLine),
   ];
   const overhead: Def[] = bucketsIn("overhead").map(bucketLine);
 
-  const sum = (list: Def[]) => (f: PnlFigures) => list.reduce((s, d) => s + (d.cents?.(f) ?? 0), 0);
+  // A SECTION'S TOTAL ADDS ONLY WHAT ITS SECTION IS SUBTRACTED. PNL_SECTION_SHAPE decides, not this
+  // file: a line in a section the shape calls `subtracted: false` (equity) contributes nothing to any
+  // total even if somebody puts it in one of these arrays. That is the difference between a comment
+  // saying "never sum the draw" and a bottom line that cannot be off by it.
+  const sum = (list: Def[]) => (f: PnlFigures) => list.reduce((s, d) => s + (isSubtracted(d.section) ? (d.cents?.(f) ?? 0) : 0), 0);
   const totalCogs = sum(cogs);
   const totalOverhead = sum(overhead);
   const revenue = (f: PnlFigures) => pnlCents(f.received);
@@ -238,6 +359,9 @@ export function pnlLines(opts: PnlOptions = {}): PnlLine[] {
     : [];
   const margin: Def[] = opts.margin
     ? [{ key: "gross_margin", label: PNL_WORDS.grossMargin, kind: "margin", section: null, ownerOnly: true, pct: (f) => grossMarginPct(revenue(f), gross(f)) }]
+    : [];
+  const ownerDraw: Def[] = opts.ownerDraw
+    ? [{ key: "owner_draw", label: PNL_WORDS.ownerDraw, kind: "equity", section: "equity", ownerOnly: true, cents: (f) => pnlCents(f.ownerDraw ?? 0) }]
     : [];
 
   const defs: Def[] = [
@@ -252,7 +376,14 @@ export function pnlLines(opts: PnlOptions = {}): PnlLine[] {
     ...overhead,
     { key: "total_overhead", label: PNL_WORDS.totalOverhead, kind: "total", section: "overhead", ownerOnly: true, cents: totalOverhead },
     // THE BOTTOM LINE IS THE ENGINE'S OWN `left`, never re-added here: the same dollars, to the cent.
+    // The owner's build-time pair above nets to zero inside COGS, so this figure does not move when
+    // the allocation is switched on - which is the whole point of the contra, and is pinned by test.
     { key: "net_profit", label: PNL_WORDS.netProfit, kind: "profit", section: null, ownerOnly: true, cents: (f) => pnlCents(f.left) },
+    // ── BELOW THE BOTTOM LINE: EQUITY, NEVER SUBTRACTED ──────────────────────────────────────────
+    // What the owner actually took out. It is in no section the shape calls `subtracted`, so no sum()
+    // above can reach it (PNL_SECTION_SHAPE.equity.subtracted === false), and `kind: "equity"` tells
+    // every surface to draw it as a line below the rule, never as a total.
+    ...ownerDraw,
   ];
 
   return defs
@@ -264,6 +395,7 @@ export function pnlLines(opts: PnlOptions = {}): PnlLine[] {
       kind: d.kind,
       section: d.section,
       ownerOnly: d.ownerOnly,
+      netting: d.netting ?? null,
       cents: d.cents ?? nothing,
       pct: d.pct ?? nothing,
     }));
@@ -290,6 +422,7 @@ export function profitAndLoss(f: PnlFigures, opts: PnlOptions = {}): PnlRow[] {
       kind: l.kind,
       section: l.section,
       ownerOnly: l.ownerOnly,
+      netting: l.netting,
       cents,
       amount: cents == null ? null : cents / 100,
       pct: l.pct(f),

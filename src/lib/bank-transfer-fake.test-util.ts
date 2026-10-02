@@ -1,11 +1,12 @@
 /**
  * A small in-memory PostgREST fake for the bank-transfer tests (audit v994 BK1-BK3): tables are
- * arrays of rows; select / insert / upsert / update apply eq, in, is, lt filters, and limit. The
- * two unique keys these doors lean on are enforced: payments.stripe_event_id (a retried event is a
- * 23505) and pending_bank_transfers.payment_intent (upsert ignoreDuplicates is ON CONFLICT DO
- * NOTHING). A table named in `missing` answers PGRST205, the way a database before 0338 does. A
- * table named in `failing` (a Set the test may change between deliveries) answers a plain database
- * error on every verb, the way a dropped connection or a timeout does.
+ * arrays of rows; select / insert / upsert / update apply eq, in, is, lt, neq and overlaps filters,
+ * and limit. The two unique keys these doors lean on are enforced: payments.stripe_event_id (a
+ * retried event is a 23505) and pending_bank_transfers.payment_intent (upsert ignoreDuplicates is
+ * ON CONFLICT DO NOTHING). A table named in `missing` answers PGRST205, the way a database before
+ * 0338 does. A table named in `failing` (a Set the test may change between deliveries) answers a
+ * plain database error on every verb, the way a dropped connection, a timeout — or a column
+ * privilege the reader does not hold (0216) — does.
  */
 export type Tables = Record<string, any[]>;
 
@@ -98,6 +99,14 @@ export function fakeDb(tables: Tables, opts: { missing?: string[]; failing?: str
         lt(c: string, v: string) {
           said.push(`lt:${c}`);
           filters.push((r) => String(r[c]) < v);
+          return chain;
+        },
+        // Array overlap (`&&`): claimedSourcesOnJob's by-id read asks which invoice_items hold any of
+        // a job's row ids. A row whose column is absent or not an array overlaps nothing.
+        overlaps(c: string, vs: unknown[]) {
+          said.push(`overlaps:${c}`);
+          const want = new Set(vs.map((v) => String(v)));
+          filters.push((r) => Array.isArray(r[c]) && r[c].some((v: unknown) => want.has(String(v))));
           return chain;
         },
         order() {

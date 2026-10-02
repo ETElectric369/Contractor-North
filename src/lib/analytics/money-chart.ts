@@ -6,11 +6,18 @@ import { pnlLines, profitAndLoss, type PnlKey } from "@/lib/analytics/profit-and
  * with months and numbers with side by side bar graphs ... i need visual and so do most all
  * contractors").
  *
- * Every figure comes from computeOwnerMoney's per-month rows, the same rows the Owner's Draw card
+ * Every figure comes from computeOwnerMoney's per-month rows, the same rows the Net Profit card
  * below it totals, laid out by the same profit and loss (profit-and-loss.ts, Erik 2026-09-28): each
  * series IS one of its lines, by its own words, so the chart and the card can never disagree or say
- * the same money two ways. Revenue and Net Profit (Owner's Draw) are the two bars a month opens
- * with; Gross Profit, each Cost of Goods Sold (COGS) line, Fuel and Overhead are chips.
+ * the same money two ways. Revenue and Net Profit are the two bars a month opens with; Gross Profit,
+ * each Cost of Goods Sold (COGS) line, Fuel and Overhead are chips.
+ *
+ * THE OWNER'S BUILD TIME IS NOT A BAR, AND THAT IS THE RIGHT ANSWER (0373). His on-site hours are a
+ * COGS line with an equal contra line beside it, so the PAIR accounts for exactly $0 of Revenue. Two
+ * bars that cancel would be noise on a chart whose whole claim is that its bars account for every
+ * cent; the figure belongs on the card and in the accountant's Summary, where it can be read with its
+ * contra on the next row. So the chart does not pass `ownerBuildTime` at all, and the test below holds
+ * every COGS line that accounts for money to a series, skipping any line the layout marks as netting.
  *
  * This file is the pure half: which series exist for this viewer, which months to draw, the y
  * scale, and where every bar and label goes. The SVG component only draws what this returns, which
@@ -20,7 +27,7 @@ import { pnlLines, profitAndLoss, type PnlKey } from "@/lib/analytics/profit-and
 // ── Series ───────────────────────────────────────────────────────────────────
 
 /** Stored in the browser (the remembered chips), so a key never changes: "collected" is Revenue,
- *  "left" is Net Profit (Owner's Draw), "business" is Overhead. */
+ *  "left" is Net Profit, "business" is Overhead. */
 export type MoneySeriesKey = "collected" | "gross" | "left" | "materials" | "lost" | "crewPay" | "mileage" | "fuel" | "business";
 
 /**

@@ -86,6 +86,29 @@ export function appChoseSentence(label: string, from: AppPickSource): string {
   return `Your punch is on ${label}. The app picked that${pickedBecause(from)} — change it if you're somewhere else.`;
 }
 
+/**
+ * THE SAME FACTS FOR THE ONE DOOR THAT HAS NO BUTTON TO OFFER (Nort, 2026-10-01).
+ *
+ * Every screen ends the sentence with "change it if you're somewhere else" because Change The Job is
+ * right there. Nort relayed those words verbatim — and could not do it. His only move on a running
+ * shift is switch_job, which CUTS after two minutes: it closes the part so far and opens a new one, so
+ * the minutes already billed to the wrong customer stay exactly where they are. An instruction is a
+ * dead end when the door it names does not exist at the place it is read.
+ *
+ * So the spoken sentence says WHERE instead. No new write verb was registered for him: a punch is a
+ * money decision about which customer gets billed, the three doors that already move it are one tap
+ * away, and agent-write expansion stays frozen until multi-tenant is dialled (agent-security
+ * framework). Nort's job with a surface is to REDIRECT — his own product map says so.
+ *
+ * Both sentences are built HERE, from the same label and the same source, so they cannot drift.
+ */
+export function appChoseSentenceToSay(label: string, from: AppPickSource): string {
+  return (
+    `Your punch is on ${label}. The app picked that${pickedBecause(from)}. If you were somewhere else, ` +
+    `move it yourself on My Day's Now card or on Timeclock — tap ${CHANGE_JOB_LABEL} — or the office moves it on Timecards. I can't move it for you.`
+  );
+}
+
 /** The Change door's words, Title Case, one copy (buttons on three surfaces read the same). */
 export const CHANGE_JOB_LABEL = "Change The Job";
 
@@ -96,6 +119,8 @@ export type AppChoseNotice = {
   /** The job the app chose: its id (the sheet moves off it) and its label (said, and shown). */
   job: { id: string; label: string };
   sentence: string;
+  /** The same facts for a door with no Change button to offer — Nort (appChoseSentenceToSay). */
+  say: string;
 };
 
 /** The shape of a clock answer this module reads. Every clock door's result is one of these. */
@@ -110,7 +135,12 @@ export function tellAppChose(res: ToldResult | null | undefined): AppChoseNotice
   if (!res?.ok || !res.id) return null;
   const pick = res.jobPick;
   if (!pick || pick.chosenBy !== "app") return null;
-  return { entryId: res.id, job: { id: pick.id, label: pick.label }, sentence: appChoseSentence(pick.label, pick.from) };
+  return {
+    entryId: res.id,
+    job: { id: pick.id, label: pick.label },
+    sentence: appChoseSentence(pick.label, pick.from),
+    say: appChoseSentenceToSay(pick.label, pick.from),
+  };
 }
 
 /**
@@ -133,6 +163,26 @@ export function noticeForEntry(
   if (!notice) return null;
   if (!entry || entry.id !== notice.entryId) return null;
   return (entry.job_id ?? null) === notice.job.id ? notice : null;
+}
+
+/**
+ * THE ONE DOOR WITH NO PUNCH IN ITS HANDS. The shell's offline queue reports a punch that finally
+ * landed hours after the tap, from a screen that holds no live entry to check the sentence against —
+ * so it says that by name instead of passing null, which would read as "the shift ended" and silence
+ * the very sentence Brian is owed. Every other door knows its punch and must hand it over.
+ */
+export const NO_PUNCH_ON_SCREEN = "no-punch-on-screen" as const;
+
+/** What a door hands the notice: the punch on screen, none (the shift ended), or NO_PUNCH_ON_SCREEN. */
+export type PunchOnScreen = { id: string; job_id?: string | null } | null | typeof NO_PUNCH_ON_SCREEN;
+
+/**
+ * WHAT A DOOR ACTUALLY DRAWS — noticeForEntry for a door that knows its punch, and the remembered
+ * line for the one that cannot know. The notice component asks this itself, so skipping it is not a
+ * thing a door can do: the Now card's whole defect was that `notice={chose}` compiled.
+ */
+export function noticeOnScreen(notice: AppChoseNotice | null | undefined, punch: PunchOnScreen): AppChoseNotice | null {
+  return punch === NO_PUNCH_ON_SCREEN ? (notice ?? null) : noticeForEntry(notice, punch);
 }
 
 /** What the Change door opens: the clock's own sheet, in move mode, off the job the app chose. */

@@ -1,4 +1,4 @@
-import { isPaidByDraw, payById, PROFILE_PAY_COLS, PROFILE_SAFE_COLS, type ProfilePayRow } from "@/lib/profile-columns";
+import { isPaidByDraw, payById, profilePayRead, PROFILE_SAFE_COLS } from "@/lib/profile-columns";
 import { redirect } from "next/navigation";
 import { isStaffRole } from "@/lib/actions/perms";
 import { createClient } from "@/lib/supabase/server";
@@ -54,9 +54,16 @@ export default async function TeamPage() {
   // staff-scoped `profile_pay` view, which returns the whole org only to office staff. This
   // page is already office-only (the redirect above), so the merge is a shape detail — but a
   // tech who reached the REST API directly now gets nothing instead of everyone's pay.
-  const [{ data: team }, { data: pay }, { data: invites }, sw] = await Promise.all([
+  // THROUGH THE ONE DOOR, WITH THE MIGRATION WINDOW IN IT (profilePayRead). This read used to name the
+  // columns itself and never check the error, so between a push and Erik applying a migration that adds
+  // one, the whole select failed on 42703 and this page drew every rate as $0.00, every row's "No bill
+  // rate set", blank home addresses and - the worst of it - a crew Pay box on the OWNER's row instead of
+  // the Cost box, which is the only place the build-time rate can be typed. A save then wrote those
+  // zeros back as nulls over real data. Now the ladder answers with whatever the view has, and a read
+  // that fails for any other reason says so below instead of rendering a roster of zeros.
+  const [{ data: team }, payRead, { data: invites }, sw] = await Promise.all([
     supabase.from("profiles").select(PROFILE_SAFE_COLS).order("full_name"),
-    supabase.from("profile_pay").select(PROFILE_PAY_COLS),
+    profilePayRead(supabase),
     isAdmin
       ? supabase.from("invitations").select("*").order("created_at", { ascending: false })
       : Promise.resolve({ data: [] }),
@@ -70,7 +77,7 @@ export default async function TeamPage() {
   // address and commute baseline feed the Tax Report's mileage deduction.
   const dailyReports = featureOn(sw.features, "daily_reports");
 
-  const payRows = payById(pay as ProfilePayRow[] | null);
+  const payRows = payById(payRead.rows);
   const members = ((team ?? []) as Profile[]).map((m) => ({ ...m, ...(payRows.get(String(m.id)) ?? {}) })) as Profile[];
   const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "";
 
@@ -106,6 +113,16 @@ export default async function TeamPage() {
             <div className="border-b border-slate-100 px-5 py-3">
               <h3 className="text-sm font-semibold text-slate-900">Team ({members.length})</h3>
             </div>
+            {/* NOTHING SILENT. The rates read failed, so there are no rates and no addresses to show.
+                A roster of $0.00 is indistinguishable from a roster of real zeros, and a save on top of
+                it writes those zeros back - so the boxes are not drawn at all and this says why. */}
+            {payRead.problem && (
+              <div className="border-b border-amber-100 bg-amber-50 px-5 py-3 text-sm text-amber-800">
+                Pay, charge and cost rates aren&apos;t showing: {payRead.problem}. Nobody&apos;s rates have changed, and
+                the boxes are hidden until they load so a save can&apos;t overwrite them with blanks. Reload this
+                page; if it keeps happening, say so and it&apos;ll be looked at.
+              </div>
+            )}
             <ul className="divide-y divide-slate-100">
               {members.map((m) => (
                 <li key={m.id} className="flex items-center gap-3 px-5 py-3">
@@ -116,11 +133,14 @@ export default async function TeamPage() {
                     <div className="truncate text-sm font-medium text-slate-900">{m.full_name ?? "—"}</div>
                     <div className="truncate text-xs text-slate-400">{m.email}</div>
                   </div>
-                  {isAdmin && (
+                  {isAdmin && !payRead.problem && (
                     <MemberRate
                       id={m.id}
                       rate={m.hourly_rate ?? null}
                       billRate={m.bill_rate ?? null}
+                      // THE OWNER'S BUILD-TIME COST RATE (0373), off the same profile_pay read as the
+                      // other two. His row's box; null until he types one, never defaulted.
+                      costRate={payRows.get(String(m.id))?.cost_rate ?? null}
                       paidByDraw={isPaidByDraw(payRows.get(String(m.id)))}
                     />
                   )}

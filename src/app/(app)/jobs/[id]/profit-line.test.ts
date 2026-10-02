@@ -16,6 +16,11 @@ const BASE = {
   crewHours: 20,
   ownerHours: 0,
   ownerHoursLabel: "Your Hours",
+  // A cost rate IS set in the base case, so his build time carries a figure (the default fixture is
+  // the costed world now). The "not costed yet" case sets uncostedOwnerHours to his whole hours.
+  ownerCost: 0,
+  uncostedOwnerHours: 0,
+  ownerWho: "you",
   materialsAndBills: 1000,
   shelfTouched: false,
   tickets: 0,

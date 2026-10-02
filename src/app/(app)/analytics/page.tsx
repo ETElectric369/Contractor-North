@@ -18,6 +18,7 @@ import { getOwnerMoneyViews, ownerMoneyChartWindow, ownerMoneyWindow, resolveOwn
 import { buildMoneyChartData, drawnMonth, emptyChartSentence } from "@/lib/analytics/money-chart";
 import { PNL_WORDS } from "@/lib/analytics/profit-and-loss";
 import { ownerRegister } from "@/lib/owner-draw";
+import { buildTimeNotCostedSentence } from "@/lib/build-time-cost";
 import { LeftForCard } from "./left-for-card";
 import { MoneyChartCard } from "./money-chart-card";
 import { getFuelTrend } from "@/lib/analytics/fuel-trend";
@@ -69,7 +70,7 @@ export default async function AnalyticsPage({
     ? [ownerMoneyWindow(selection.segment, todayYmd), ...(selection.month ? [ownerMoneyWindow(selection.month, todayYmd)] : [])]
     : [];
   const ownerMoneyP = getOwnerMoneyViews(supabase, [ownerMoneyChartWindow(todayYmd), ...cardWindows], tz, todayYmd);
-  // FUEL BY THE WEEK (0362): shown to whoever sees the Owner's Draw card (it is a cost), and only
+  // FUEL BY THE WEEK (0362): shown to whoever sees the Net Profit card (it is a cost), and only
   // when there is fuel to show. Rides with the other reads.
   const fuelP = showOwnerMoney ? getFuelTrend(supabase, tz, todayYmd) : Promise.resolve(null);
 
@@ -172,10 +173,13 @@ export default async function AnalyticsPage({
     entries: entries ?? [],
     shelfNet: shelf.rows,
   }).slice(0, 8);
+  // The owner's on-site hours NOT costed on the eight jobs this board shows: the caveat under the list is
+  // about these jobs, so it is summed over these rows and not over a window.
+  const uncostedOnThisBoard = Math.round(jobRows.reduce((s, j) => s + (Number(j.uncostedOwnerHours) || 0), 0) * 100) / 100;
 
   // The old "Overhead (all time)" tile and "Overhead by category" block are gone (0286). They
   // counted only no-job bills, all time, in the old category words, and disagreed with Business
-  // Costs. The Owner's Draw card carries them now, for the window, as a profit and loss: every
+  // Costs. The Net Profit card carries them now, for the window, as a profit and loss: every
   // bucket under Overhead, Fuel first (BUCKET_SECTION, profit-and-loss.ts).
 
   const stat = (label: string, value: string, Icon: any, tone: string) => (
@@ -224,7 +228,7 @@ export default async function AnalyticsPage({
       )}
 
       {/* A bank download shows the owner's draw and personal spending: the same switch as the
-          Owner's Draw card says who may drop and sort one (bank-viewer.ts). */}
+          Net Profit card says who may drop and sort one (bank-viewer.ts). */}
       {showOwnerMoney && <BankDropLine />}
 
       {fuel?.hasFuel && <FuelTrendCard trend={fuel} />}
@@ -280,8 +284,15 @@ export default async function AnalyticsPage({
       </div>
 
       <Card>
+        {/* THE HEADING NAMES EVERY TERM THE FIGURE ACTUALLY SUBTRACTS. It said "collected − crew pay −
+            materials − bills − petty cash" while `j.cost` below already included the owner's build time
+            (laborCostForJob → tallyBuildTime), so it named four cost terms for a figure built from five.
+            The day Erik sets $65/hr, a job he worked 40 hours on reads $2,600 away from the heading's own
+            formula, on his main money screen - the same twelve-false-sentences class fixed in
+            profit-line.tsx and Nort and missed here. The words come from PNL_WORDS, so the sentence moves
+            when a line does. */}
         <div className="border-b border-slate-100 px-5 py-3 text-sm font-semibold text-slate-900">
-          Job profitability (collected − crew pay − materials − bills − petty cash)
+          Job profitability (collected − crew pay − build time − materials − bills − petty cash)
         </div>
         <ul className="divide-y divide-slate-100">
           {jobRows.map((j) => (
@@ -305,6 +316,23 @@ export default async function AnalyticsPage({
             </li>
           )}
         </ul>
+        {/* NOTHING SILENT, HERE TOO. The rows carry `uncostedOwnerHours` and four other surfaces say it in
+            words; this was the fifth reader and said nothing, so with no cost rate set the job hub read
+            "This job's profit reads high until then" while this list, showing the same jobs, read as
+            fact. The Net Profit card above is not a substitute: it is scoped to the selected window
+            (default this year) while this list is ALL-TIME, so a job worked in a prior year had an
+            inflated profit with no caveat anywhere on the page. Summed over the rows actually SHOWN, so
+            the sentence describes these jobs and not a window. */}
+        {uncostedOnThisBoard > 0 && (
+          <div className="border-t border-slate-100 px-5 py-3">
+            <p className="text-xs text-slate-500">
+              {buildTimeNotCostedSentence(uncostedOnThisBoard, voice.viewerIsOwner ? "you" : voice.who)}
+            </p>
+            <Link href="/team" className="inline-flex min-h-[44px] items-center text-sm font-medium text-brand-600">
+              Set Build Time Cost Rate
+            </Link>
+          </div>
+        )}
       </Card>
     </div>
   );

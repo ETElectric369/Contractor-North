@@ -60,7 +60,7 @@ export type ReconcileKind =
   | "supplier-names"
   /** A spelling the matcher will not rule on: a typo, or a second company. A person decides. */
   | "same-supplier-or-two"
-  /** A spelling carrying money with no supplier account at all. */
+  /** A paper STILL OPEN with no supplier account at all. A settled one is not a disagreement. */
   | "not-on-an-account"
   /** The same supplier ticket filed to two jobs. */
   | "same-ticket-two-jobs";
@@ -120,10 +120,14 @@ export const RECONCILE_KINDS: Record<ReconcileKind, ReconcileKindDef> = {
     order: 3,
   },
   "not-on-an-account": {
-    heading: "Supplier Names Not On An Account Yet",
+    // THE PILE IS PAPERS, NOT NAMES, and that word is the whole fix. Named by its spellings, the
+    // section listed thirty-three register purchases already settled and already categorised and
+    // offered to open a supplier account with each one, while /bills' door above it said "1 Bill".
+    // A paper paid at the till has ONE record and belongs in neither.
+    heading: "Papers Not On A Supplier Account Yet",
     anchor: "not-on-an-account",
-    ours: "A name typed on a paper, carrying money",
-    theirs: "No supplier account at all",
+    ours: "A paper still open, under the name typed on it",
+    theirs: "No supplier account holding the other half of it",
     answeredOn: "here",
     order: 4,
   },

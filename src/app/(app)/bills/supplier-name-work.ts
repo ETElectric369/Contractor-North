@@ -22,7 +22,6 @@
  * `supplierBalance`. Nothing here adds up a supplier's money.
  */
 
-import { namesABucket } from "@/lib/business-cost-buckets";
 import {
   aliasKey,
   findDuplicateBills,
@@ -31,9 +30,9 @@ import {
   suggestSupplierGroups,
   type BillFingerprint,
 } from "@/lib/supplier-identity";
+import { paperDisagrees } from "@/lib/supplier-owed";
 import {
   candidateMoving,
-  isOnAccountBill,
   supplierCandidateQuestions,
   type DuplicateBillGroup,
   type SupplierCandidateQuestion,
@@ -41,13 +40,59 @@ import {
   type SupplierSpelling,
 } from "./supplier-balance";
 
-/** What one typed-in spelling is carrying. `unpaid` is the slice still owed. */
+/**
+ * What one typed-in spelling is carrying. Since the open test moved into this pile every paper in
+ * here is still owed, so `unpaid` equals `total` and `unpaidBills` equals `bills` — both are kept
+ * because `unassignedTotals` is the Suppliers card's sentence and must not change shape.
+ */
 export interface UnfiledSpelling {
   alias: string;
   bills: number;
   total: number;
   unpaid: number;
   unpaidBills: number;
+  /**
+   * WHAT THE EXPENSE IS CATEGORISED AS, in the words stored on the papers, distinct and sorted.
+   * Erik's own rule for this pile: "What is the expense categorized as if it's unclear ask." So the
+   * row LEADS with this instead of pushing a supplier account at a petrol station.
+   */
+  categories: string[];
+  /**
+   * How many of its papers carry no category word at all AND are not costed to a job. The only
+   * thing that is "unclear" — see `papersOnNoAccount` for why a job bill is not one of them.
+   */
+  uncategorised: number;
+  /** How many of its papers are costed to a job, which is what those are filed as. */
+  onAJob: number;
+  /**
+   * How many SETTLED papers share this spelling. Not rows, and not money on this card — but the
+   * row's button files by spelling, so they move with it and the row says so.
+   */
+  settledSiblings: number;
+}
+
+/**
+ * ── THE WHOLE PILE OF PAPERS ON NO SUPPLIER ACCOUNT, IN ONE WALK ──────────────────────────────
+ *
+ * Erik's law: one number for one pile. These three readings are counted off the SAME pass over the
+ * same papers through the SAME membership test, so the section's rows, the papers with no name on
+ * them, and the sentence about what is NOT shown can never describe three different piles.
+ */
+export interface PapersOnNoAccount {
+  /** One entry per typed-in spelling, keyed by `aliasKey`. */
+  unfiled: Map<string, UnfiledSpelling>;
+  /**
+   * Papers carrying NO supplier name at all. Not a spelling — there is nothing to type on a button —
+   * but still a paper on no account, and dropping it is how the door's figure and the section's rows
+   * came to disagree by exactly the rows nothing on either page mentioned.
+   */
+  unnamed: { papers: number; total: number };
+  /**
+   * How many unmatched papers were already SETTLED, so left out. Nothing leaves a figure in silence
+   * (Erik's law): the section accounts for these in one sentence when it is not zero, with no names,
+   * no list and no door — the cure for a stockpile is not a smaller stockpile.
+   */
+  settledAtTheRegister: number;
 }
 
 /** The columns these piles read off a bill. PostgREST's own shape: the caller holds those rows. */
@@ -64,6 +109,8 @@ export interface NameWorkBill {
   superseded_by_bill_id?: string | null;
   notes?: string | null;
   jobs?: { name?: string | null } | null;
+  /** `bills.category`: what the expense is filed as. Blank is the only "unclear" a bill can carry. */
+  category?: string | null;
   /** Sorted or not, it is only ever counted and read for descriptions here. */
   line_items?: { description?: string | null }[] | null;
   bill_line_items?: { description?: string | null }[] | null;
@@ -84,7 +131,11 @@ const r2 = (n: number) => Math.round((Number.isFinite(n) ? n : 0) * 100) / 100;
 const linesOf = (b: NameWorkBill) => b.line_items ?? b.bill_line_items ?? [];
 
 /**
- * ── THE SPELLINGS NOBODY HAS FILED YET ──────────────────────────────────────────────────────
+ * ── THE PAPERS ON NO SUPPLIER ACCOUNT THAT ARE STILL OPEN ───────────────────────────────────
+ *
+ * ONE PASS, ONE MEMBERSHIP TEST (`paperDisagrees`): on no account AND still owed. A purchase paid at
+ * the register has one record, so it is not a disagreement and does not belong in this pile —
+ * leaving that half out is what put thirty-three settled card swipes on /reconcile.
  *
  * The receipt reader writes `bills.supplier` afresh on every scan, so one real vendor arrives
  * spelled several ways, each carrying its own money. They are grouped by the EXACT spelling,
@@ -94,42 +145,110 @@ const linesOf = (b: NameWorkBill) => b.line_items ?? b.bill_line_items ?? [];
  *
  * `accountOf` is the resolver's answer, never the stored column: a paper spelled with an account's
  * own name is ON that account, and offering to file it a second time would be a door to nothing.
+ *
+ * AND WHAT IS LEFT OUT IS COUNTED, not dropped. `settledAtTheRegister` really is the register and
+ * not the supplier's own verdict: a paper only reads as settled-by-the-supplier when a document of
+ * ITS account covers it, and nothing here is on an account at all — so for this pile `isStillOwed`
+ * turns on `bills.status` and nothing else, and the sentence drawn off it is true.
  */
-export function unfiledSpellings(input: {
+export function papersOnNoAccount(input: {
   /** Live bills — the caller has already dropped the superseded ones. */
   bills: readonly NameWorkBill[];
   /** From `resolveSupplierPapers`: which account a paper belongs to, or null. */
   accountOf: (billId: string) => string | null;
   /** From `supplierCoverage`. Absent means not checked, and nothing is treated as settled. */
   settledBySupplier?: ReadonlySet<string> | null;
-}): Map<string, UnfiledSpelling> {
+}): PapersOnNoAccount {
   const unfiled = new Map<string, UnfiledSpelling>();
+  const unnamed = { papers: 0, total: 0 };
+  let settledAtTheRegister = 0;
+  // ── THE SETTLED PAPERS, KEPT BY SPELLING AS WELL AS COUNTED ────────────────────────────────────
+  // They are not rows. But `fileSpelling` matches the SPELLING and no status, so a row's button
+  // moves them too, and a row's face must say what the tap will do. Gathered in the same pass, so
+  // the scope on the row and the count in the sentence can never be two different piles.
+  const settledBySpelling = new Map<string, number>();
   for (const b of input.bills ?? []) {
     const id = String(b?.id ?? "");
     if (!id) continue;
-    if (input.accountOf(id)) continue;
+    const accountId = input.accountOf(id);
+    if (accountId) continue;
+    // ── AND STILL OPEN, THROUGH THE ONE TEST THAT DECIDES THIS PILE ────────────────────────────
+    // A purchase paid at the register has ONE record, so there is nothing to reconcile. This pile
+    // used to count them, and 68 of the 69 papers on a live book were settled: thirty-three
+    // spellings of card swipes, each wearing a button offering to open a supplier account with a
+    // petrol station. The count of what dropped out is carried, because nothing leaves a figure in
+    // silence.
+    if (!paperDisagrees({ accountId, paper: { status: b.status, settledBySupplier: input.settledBySupplier?.has(id) } })) {
+      settledAtTheRegister += 1;
+      const settledAlias = String(b.supplier ?? "").trim();
+      if (settledAlias) {
+        const k = aliasKey(settledAlias);
+        settledBySpelling.set(k, (settledBySpelling.get(k) ?? 0) + 1);
+      }
+      continue;
+    }
     const alias = String(b.supplier ?? "").trim();
-    // A bill with no supplier name at all is not a SPELLING to file — there is nothing to type on
-    // a button. It is still money, and `whatISupplierOwed` counts and names it under "No Supplier
-    // Name On The Paper"; this list is the one about names.
-    if (!alias) continue;
-    // Nor is a business cost saved with no Where: Add By Hand puts the bucket's own name in the
-    // supplier field ("Fuel"), and offering to give "Fuel" its own supplier account would be a door
-    // to nothing. Only a settled one, though: anything still owed stays in the count, so no unpaid
-    // dollar drops out of the amber line.
-    if (!b.job_id && namesABucket(alias) && !isOnAccountBill({ status: String(b.status ?? "") })) continue;
-    const key = aliasKey(alias);
-    const g = unfiled.get(key) ?? { alias, bills: 0, total: 0, unpaid: 0, unpaidBills: 0 };
     const amount = Number(b.amount) || 0;
+    // A bill with no supplier name at all is not a SPELLING to file — there is nothing to type on
+    // a button — but it is a paper on no account, and `whatISupplierOwed` counts it under "No
+    // Supplier Name On The Paper". It gets its own row rather than vanishing from both the door's
+    // figure and the section the door lands on.
+    if (!alias) {
+      unnamed.papers += 1;
+      unnamed.total = r2(unnamed.total + amount);
+      continue;
+    }
+    // A BUSINESS COST SAVED WITH NO WHERE used to be dropped here when it was settled: Add By Hand
+    // puts the bucket's own name in the supplier field ("Fuel"), and offering to give "Fuel" its own
+    // supplier account is a door to nothing. That clause is gone because the open test above already
+    // drops every settled paper, which is every paper it ever reached — one rule in one place rather
+    // than two tests leaning the same way.
+    const key = aliasKey(alias);
+    const g =
+      unfiled.get(key) ??
+      { alias, bills: 0, total: 0, unpaid: 0, unpaidBills: 0, categories: [], uncategorised: 0, onAJob: 0, settledSiblings: 0 };
     g.bills += 1;
     g.total = r2(g.total + amount);
-    if (isOnAccountBill({ status: String(b.status ?? ""), settledBySupplier: input.settledBySupplier?.has(id) })) {
-      g.unpaid = r2(g.unpaid + amount);
-      g.unpaidBills += 1;
+    g.unpaid = r2(g.unpaid + amount);
+    g.unpaidBills += 1;
+    const category = String(b.category ?? "").trim();
+    if (category) {
+      if (!g.categories.includes(category)) g.categories = [...g.categories, category].sort((x, y) => x.localeCompare(y));
+    } else if (b.job_id) {
+      // ── A JOB BILL IS CATEGORISED BY ITS JOB, AND THE OWNING SCREEN SAYS SO ──────────────────
+      // `bills.category` is the BUSINESS-COST bucket. The bill editor writes `category: isOverhead ?
+      // billCategory : null` and renders the Bucket control only `{isOverhead && ...}`, so a paper on
+      // a job cannot carry one by design. Counting its blank as "unclear" asked the one question the
+      // page now asks and then sent him to a bill with no control that could answer it — a dead end
+      // wearing the question, on the page whose law is no dead ends. Its expense IS the job, so it is
+      // answered, and it says so on the row instead of being asked about.
+      //
+      // Reconcile reads; it does not re-rule. If a job bill should ever carry a bucket, that is
+      // bills-receipts' decision to make, and this count follows it without being touched.
+      g.onAJob += 1;
+    } else {
+      g.uncategorised += 1;
     }
     unfiled.set(key, g);
   }
-  return unfiled;
+  // THE SETTLED SIBLINGS LAND ON THE ROWS THAT EXIST. A spelling whose every paper is settled has no
+  // row at all (and must not get one); a spelling with one open paper and two settled ones has a row
+  // whose button moves all three, so that row carries the three.
+  for (const [key, g] of unfiled) g.settledSiblings = settledBySpelling.get(key) ?? 0;
+  return { unfiled, unnamed, settledAtTheRegister };
+}
+
+/**
+ * THE SPELLINGS, FOR A CALLER THAT WANTS ONLY THOSE. One walk, through `papersOnNoAccount` above —
+ * never a second pass that could count a different pile. /bills' Suppliers card reads this one for
+ * its "$X on N bills with no supplier account" sentence.
+ */
+export function unfiledSpellings(input: {
+  bills: readonly NameWorkBill[];
+  accountOf: (billId: string) => string | null;
+  settledBySupplier?: ReadonlySet<string> | null;
+}): Map<string, UnfiledSpelling> {
+  return papersOnNoAccount(input).unfiled;
 }
 
 /**
@@ -210,7 +329,10 @@ export function supplierNameWork(input: {
     if (mine.length < 2 && !existing) continue; // see above: both buttons would do the same thing
     const spellings: SupplierSpelling[] = mine.map((x) => {
       const g = unfiled.get(x.key) as UnfiledSpelling;
-      return { alias: g.alias, bills: g.bills, total: g.total, unpaid: g.unpaid };
+      // THE SETTLED SIBLINGS RIDE WITH THE PROPOSAL TOO. Accept files by spelling, so it moves them
+      // as well, and "Accepting files these 1 bill" over a press that moves three is the row's face
+      // not saying what the tap will do.
+      return { alias: g.alias, bills: g.bills, total: g.total, unpaid: g.unpaid, settledSiblings: g.settledSiblings };
     });
     proposals.push({
       // THE ID IS THE SPELLINGS, as JSON. "Not The Same" hands the server nothing but this one
@@ -244,7 +366,7 @@ export function supplierNameWork(input: {
       suggestedName: account.name,
       accountNumber: account.accountNumber,
       branchCode: account.branchCode,
-      spellings: [{ alias: g.alias, bills: g.bills, total: g.total, unpaid: g.unpaid }],
+      spellings: [{ alias: g.alias, bills: g.bills, total: g.total, unpaid: g.unpaid, settledSiblings: g.settledSiblings }],
       existingAccountId: account.id,
       existingAccountName: account.name,
       because: `"${g.alias}" is already saved as a name for ${account.name}. These bills were scanned after that and never landed on it.`,
@@ -284,7 +406,19 @@ export function supplierNameWork(input: {
   ]);
   const loose: SupplierSpelling[] = [...unfiled.values()]
     .filter((g) => !spokenFor.has(aliasKey(g.alias)))
-    .map((g) => ({ alias: g.alias, bills: g.bills, total: g.total, unpaid: g.unpaid }))
+    // THE CATEGORY RIDES ALONG, because it is what the row leads with now: "What is the expense
+    // categorized as if it's unclear ask." So does what the press would move, because the row's face
+    // must say what the tap will do. Nothing else on the page needs either.
+    .map((g) => ({
+      alias: g.alias,
+      bills: g.bills,
+      total: g.total,
+      unpaid: g.unpaid,
+      categories: g.categories,
+      uncategorised: g.uncategorised,
+      onAJob: g.onAJob,
+      settledSiblings: g.settledSiblings,
+    }))
     // Biggest money first: what he still owes, then what it cost him, then by name so the list does
     // not shuffle itself between loads.
     .sort((x, y) => y.unpaid - x.unpaid || y.total - x.total || x.alias.localeCompare(y.alias));
