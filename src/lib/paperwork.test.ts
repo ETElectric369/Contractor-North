@@ -536,7 +536,7 @@ describe("the job in the PO box: 13897 HONEYSUCKLE (Erik, 2026-09-24)", () => {
     // ...or its number.
     expect(jobFromPaperMarks({ po: "J011" }, JOBS)).toMatchObject({ kind: "one", jobId: "j11", from: "po" });
     // A PO that names no job exactly picks nothing.
-    expect(jobFromPaperMarks({ po: "13897 HERRING" }, JOBS)).toEqual({ kind: "none" });
+    expect(jobFromPaperMarks({ po: "13897 HONEY" }, JOBS)).toEqual({ kind: "none" });
     expect(jobFromPaperMarks({ po: "4471" }, JOBS)).toEqual({ kind: "none" });
   });
 

@@ -474,7 +474,7 @@ function tokenize(raw: string): string[] {
 }
 
 interface NameKey {
-  /** Letters only, run together: "HERRING BONE" and "HONEYSUCKLE" both become HONEYSUCKLE, which
+  /** Letters only, run together: "HONEY SUCKLE" and "HONEYSUCKLE" both become HONEYSUCKLE, which
    *  is the entire reason CED's two spellings of one street land on one job. */
   letters: string;
   /** Every number in the string. A zip code is in here too; the leading one is the house. */
@@ -563,8 +563,8 @@ const WORTH_GUESSING = 3;
  * RANK HIS JOBS AGAINST ONE OF CED'S JOB NAMES. Never picks; never filters.
  *
  * Checked against the real strings off his portal, in supplier-reconcile.test.ts: "13631
- * NIGHTSHADE" against a book that also holds 13466 Nightshade, "13897 HARRINGBONE" and "13897
- * HERRING BONE" against 13897 Honeysuckle, "ARR 106" and "ARR106" against five ARR jobs, "5659
+ * NIGHTSHADE" against a book that also holds 13466 Nightshade, "13897 HANEYSUCKLE" and "13897
+ * HONEY SUCKLE" against 13897 Honeysuckle, "ARR 106" and "ARR106" against five ARR jobs, "5659
  * FERNHILE" against five Fernhills (asks), "235 THISTLE WOOD" against both Tess Zane jobs (asks),
  * and "STOCK", which is offered nothing at all.
  */

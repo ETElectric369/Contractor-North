@@ -100,6 +100,11 @@ const SCRUBBED = new Map<string, string>([
   ["f029f5ad4d4be877", "555-0145"],
   ["0af857ad4ad85858", "555-0170"],
   ["1dd32319ebbbf771", "redfinch"],
+  // The supplier writes one street three more ways: truncated, split in two, and with one letter
+  // wrong. Each invented stand-in keeps that exact relationship to the invented street, because
+  // that relationship IS what the reconcile tests check.
+  ["457ac003745bdd95", "Honey (the truncation of Honeysuckle)"],
+  ["bdccb445f746cbe6", "Haneysuckle (the one-letter typo)"],
 ]);
 
 /**

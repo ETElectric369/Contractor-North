@@ -104,8 +104,8 @@ function hisBook(): SupplierInvoiceRow[] {
     invoice({ invoiceNumber: "8802-1107139", invoiceDate: "2026-09-01", jobNameRaw: "13683 HAZELNUT", total: 59.17, openBalance: 59.17, discountAmount: 0.9, discountBy: "2026-10-10" }),
     invoice({ invoiceNumber: "8802-1107088", invoiceDate: "2026-09-01", jobNameRaw: "13683 HAZELNUT", total: 456.02, openBalance: 456.02, discountAmount: 4.7, discountBy: "2026-10-10", billCount: 1 }),
     invoice({ invoiceNumber: "9019994306", invoiceDate: "2026-08-25", kind: "service_charge", total: 15.16, openBalance: 15.16 }),
-    invoice({ invoiceNumber: "8802-1106249", invoiceDate: "2026-08-21", jobNameRaw: "13897 HERRING BONE", total: 150.27, openBalance: 150.27, discountAmount: 1.15, discountBy: "2026-09-10", billCount: 1 }),
-    invoice({ invoiceNumber: "8802-1106188", invoiceDate: "2026-08-21", jobNameRaw: "13897 HARRINGBONE", total: 199.48, openBalance: 199.48, discountAmount: 3.67, discountBy: "2026-09-10", billCount: 1 }),
+    invoice({ invoiceNumber: "8802-1106249", invoiceDate: "2026-08-21", jobNameRaw: "13897 HONEY SUCKLE", total: 150.27, openBalance: 150.27, discountAmount: 1.15, discountBy: "2026-09-10", billCount: 1 }),
+    invoice({ invoiceNumber: "8802-1106188", invoiceDate: "2026-08-21", jobNameRaw: "13897 HANEYSUCKLE", total: 199.48, openBalance: 199.48, discountAmount: 3.67, discountBy: "2026-09-10", billCount: 1 }),
     invoice({ invoiceNumber: "8802-1105997", invoiceDate: "2026-08-19", jobNameRaw: "10429 BAYBERRY", total: 2.3, openBalance: 2.3, discountAmount: 0.04, discountBy: "2026-09-10" }),
     invoice({ invoiceNumber: "8802-1105963", invoiceDate: "2026-08-19", jobNameRaw: "41 LARKSPUR PL", total: 84.37, openBalance: 84.37, discountAmount: 0.26, discountBy: "2026-09-10", billCount: 1 }),
     invoice({ invoiceNumber: "8802-1104645", invoiceDate: "2026-08-06", kind: "credit_memo", jobNameRaw: "13631 NIGHTSHADE", total: -31.86, openBalance: -31.86 }),
@@ -160,7 +160,7 @@ describe("matching a CED job name to one of his jobs", () => {
   });
 
   it("reads through CED's two Honeysuckle spellings, one of them a typo", () => {
-    for (const raw of ["13897 HONEYSUCKLE", "13897 HERRING BONE", "13897 HARRINGBONE"]) {
+    for (const raw of ["13897 HONEYSUCKLE", "13897 HONEY SUCKLE", "13897 HANEYSUCKLE"]) {
       const m = matchJobName(raw, JOBS);
       expect(m.verdict, raw).toBe("one");
       expect(m.ranked[0].job.id, raw).toBe("j-011");
