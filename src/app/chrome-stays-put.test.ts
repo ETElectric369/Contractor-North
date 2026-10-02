@@ -262,6 +262,23 @@ describe("a sheet opened over a turned screen brings it upright instead of landi
     // Modal — the sheet this is about — is on that lock already, and still renders in place.
     expect(read("src/components/ui/modal.tsx")).toContain("lockBodyForModal()");
   });
+
+  it("and an overlay that cannot take the body lock is still counted as a sheet", () => {
+    // The section sheet renders INSIDE the app shell's turned region (the layout mounts SectionSubnav
+    // there) and its scrim and panel are both `position: fixed`, so sideways they would be laid out
+    // against the rotated box and land in a corner. It cannot use useModalLock: `modal-open` is exactly
+    // what its own Escape handler stands down for, and it hides its own edge handle. So it says it
+    // covers the screen, and the one count reports both.
+    const LOCK = read("src/components/ui/modal-lock.ts");
+    expect(LOCK).toContain("export function useCoversTheScreen");
+    expect(LOCK).toContain("return openCount + coveringCount;");
+    const SHEET = read("src/components/section-sheet.tsx");
+    expect(SHEET).toContain("useCoversTheScreen(open)");
+    // The prose explaining why it does not take the lock must not be read as taking it.
+    expect(withoutComments(SHEET)).not.toContain("useModalLock");
+    // Its scrim really is the shape this is about.
+    expect(SHEET).toMatch(/fixed inset-0 z-\[100\]/);
+  });
 });
 
 describe("what counts as typing", () => {
