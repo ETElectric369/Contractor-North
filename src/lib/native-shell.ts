@@ -23,6 +23,22 @@ export function safeAreaTop(): number {
   return Number.isFinite(v) ? v : 0;
 }
 
+/** The LEFT and RIGHT safe areas in px (--sal / --sar). Zero in portrait and in a browser; on a
+ *  turned phone one of them is the Dynamic Island's width. A floating panel placed in PIXELS must
+ *  add these or it sits under the cutout, which is exactly how Nort's panel went off the left edge.
+ *  CSS should read the vars directly. */
+export function safeAreaLeft(): number {
+  return cssInset("--sal");
+}
+export function safeAreaRight(): number {
+  return cssInset("--sar");
+}
+function cssInset(name: string): number {
+  if (typeof document === "undefined") return 0;
+  const v = parseFloat(getComputedStyle(document.documentElement).getPropertyValue(name));
+  return Number.isFinite(v) ? v : 0;
+}
+
 /** Browser-side: true inside the shell. Safe to call during SSR (false). */
 export function isNativeShell(): boolean {
   if (typeof navigator === "undefined") return false;

@@ -83,6 +83,13 @@
      Dynamic Island height inside the native shell, whose WebView paints edge to edge (contentInset never).
      Every fixed overlay that hangs from the top reads THIS, never a hard-coded 4rem. */
   --sat: env(safe-area-inset-top, 0px);
+  /* THE SIDE INSETS. Both are 0 in portrait and in a browser; turn a 16 Pro sideways and the
+     Dynamic Island takes about 59pt off ONE side. The shell paints edge to edge
+     (contentInset never), so anything placed at a bare 8px lands underneath it — Erik,
+     2026-10-01, on Nort's panel: "off the page to the left a bit". Anything positioned in
+     PIXELS must add these; CSS should use the vars directly. */
+  --sal: env(safe-area-inset-left, 0px);
+  --sar: env(safe-area-inset-right, 0px);
   --background: #f8fafc;
   --foreground: #0f172a;
 }
