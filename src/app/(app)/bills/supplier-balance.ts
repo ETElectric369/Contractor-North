@@ -806,6 +806,21 @@ export interface SupplierSpelling {
   categories?: string[];
   /** How many of its papers carry no category word at all - the only "unclear" a bill can hold. */
   uncategorised?: number;
+  /**
+   * HOW MANY OF ITS PAPERS ARE COSTED TO A JOB, which is what they are filed as. The owning screen
+   * FORBIDS a job bill from carrying a bucket (bills-receipts.tsx writes `category: null` off a job
+   * and draws no Bucket control there), so a blank category on one is not an unanswered question -
+   * it is the job. Counted separately so the row can say what it is instead of asking a question
+   * whose only answer is to take the bill off its job.
+   */
+  onAJob?: number;
+  /**
+   * HOW MANY SETTLED PAPERS SHARE THIS SPELLING. They are not rows - a purchase paid at the register
+   * has one record - but `fileSpelling` matches on the SPELLING with no status filter, so pressing
+   * the row's button moves them too. A row's face must say what the tap will do (8a982483), so the
+   * scope of the press rides on the row rather than only in the toast that comes back after it.
+   */
+  settledSiblings?: number;
 }
 
 export interface SupplierMergeProposal {
@@ -822,16 +837,53 @@ export interface SupplierMergeProposal {
   because?: string | null;
 }
 
-export function proposalTotals(proposal: SupplierMergeProposal): { bills: number; total: number; unpaid: number } {
+/**
+ * WHAT A PROPOSAL IS ABOUT, AND WHAT PRESSING IT WOULD MOVE - which stopped being the same thing the
+ * moment the pile became open-only. `bills`/`total`/`unpaid` are the OPEN papers, because that is
+ * what the rows are; `settled` is the settled papers sharing those same spellings, which Accept
+ * files onto the account along with them (`fileSpelling` matches the spelling and no status). Both
+ * are reported so the card can say the scope of the press instead of a count he never saw.
+ */
+export function proposalTotals(proposal: SupplierMergeProposal): {
+  bills: number;
+  total: number;
+  unpaid: number;
+  settled: number;
+  /** Every paper the press would move: the open rows plus their settled siblings. */
+  moves: number;
+} {
   let bills = 0;
   let total = 0;
   let unpaid = 0;
+  let settled = 0;
   for (const s of proposal.spellings ?? []) {
     bills += Number(s.bills) || 0;
     total = r2(total + (Number(s.total) || 0));
     unpaid = r2(unpaid + (Number(s.unpaid) || 0));
+    settled += Number(s.settledSiblings) || 0;
   }
-  return { bills, total, unpaid };
+  return { bills, total, unpaid, settled, moves: bills + settled };
+}
+
+/**
+ * ── WHAT A PILE'S MONEY SAYS ABOUT ITSELF, WITH THE SIGN READ ─────────────────────────────────
+ *
+ * A return goes in this app as a NEGATIVE on-account bill, so a group on no supplier account can
+ * carry a negative net - and the row printed it straight through "still open", which reads as a
+ * negative debt. On the same screen the lead already said it correctly ("a credit of $51.58 ... is
+ * money back, so it is not in that figure either"), so one paper had two sentences about it and one
+ * of them called money back still open. `whatISupplierOwed` routes a credit to `ahead` for exactly
+ * this reason; this is the same split in the words a row uses.
+ *
+ * AND A HALF-CENT IS NOT MONEY. A zero paper printed "$0.00 still open", which is a debt of nothing.
+ */
+export function spellingMoneySaid(net: unknown, formatMoney: (v: number) => string): string {
+  const n = r2(Number(net) || 0);
+  if (n < -0.005) return `a credit of ${formatMoney(-n)}, money back`;
+  // No pronoun, because the callers put it in different sentences: a row's own clause, and a merge
+  // proposal's "with ... across them". A phrase that carries "on it" cannot do both.
+  if (n <= 0.005) return "nothing owed";
+  return `${formatMoney(n)} still open`;
 }
 
 // ── THE QUESTION THE MATCHER WILL NOT ANSWER ────────────────────────────────────────────────────
@@ -871,6 +923,10 @@ export interface SupplierCandidateSide {
   /** What the account already owes, for a side that is one. Null for a loose spelling, and null
    *  for a register supplier, which has no running balance and must not be given one. */
   owed: number | null;
+  /** How many settled papers share this spelling. Not money on this row, but `fileSpelling` matches
+   *  the spelling and no status, so a press moves them as well - and a row's face says what the tap
+   *  will do. Zero on an account side, whose papers are already where they belong. */
+  settledSiblings?: number;
 }
 
 export interface SupplierCandidateQuestion {
@@ -997,6 +1053,7 @@ export function supplierCandidateQuestions(
       total: r2(Number(g.total) || 0),
       unpaid: r2(Number(g.unpaid) || 0),
       owed: null,
+      settledSiblings: Number(g.settledSiblings) || 0,
     };
   };
 

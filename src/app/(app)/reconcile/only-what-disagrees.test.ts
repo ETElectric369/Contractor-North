@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterAll } from "vitest";
+import { describe, it, expect, vi, beforeAll, beforeEach, afterAll } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { countDoors, doorsIn, sectionOf, textOf } from "@/test/rendered-page";
 import { RECONCILE_KINDS } from "@/lib/reconcile-kinds";
@@ -183,6 +183,17 @@ const pile = (html: string) => textOf(sectionOf(html, ANCHOR));
 /** How many rows that section drew. One <li> per row. */
 const rowCount = (html: string) => (sectionOf(html, ANCHOR).match(/<li\b/g) ?? []).length;
 
+/**
+ * THE MODULE GRAPH IS WARMED ONCE, OUTSIDE ANY TEST'S CLOCK. /reconcile pulls the whole bills tree in
+ * behind it, and the first `import("./page")` of a cold run cost more than a test's five seconds under
+ * full-suite load — so the first test in this file failed on a timer rather than on anything it
+ * asserts. A test that can fail on load order has no teeth, and a flake is how a tripwire gets
+ * switched off. The cost is paid once, here, where it belongs.
+ */
+beforeAll(async () => {
+  await import("./page");
+}, 60_000);
+
 beforeEach(() => {
   CURRENT = BASE;
   ERRORS = [];
@@ -273,7 +284,8 @@ describe("the door's figure and the section's figure are the same figure", () =>
     expect(words).toContain("Papers Not On A Supplier Account Yet (1)");
     expect(words).toContain("No Supplier Name On The Paper");
     expect(words).toContain("$312.75");
-    expect(countDoors(doorsIn(sectionOf(html, ANCHOR)), "Find It In Your Papers")).toBe(1);
+    // Its door is All Bills, not a search box: there is no name to type into one (see the door test).
+    expect(countDoors(doorsIn(sectionOf(html, ANCHOR)), "Find It In All Bills")).toBe(1);
   });
 
   /**
@@ -374,5 +386,231 @@ describe("it asks what the expense is, and only when that is unclear", () => {
     const row = textOf(sectionOf(html, ANCHOR).match(/<li\b[\s\S]*?<\/li>/)![0]);
     expect(row.indexOf("Filed as Receipt")).toBeGreaterThan(-1);
     expect(row.indexOf("Filed as Receipt")).toBeLessThan(row.indexOf("Give It Its Own Account"));
+  });
+
+  /**
+   * ── AND THE ONE QUESTION IT ASKS CAN BE ANSWERED WHERE IT SENDS HIM ───────────────────────────
+   *
+   * `bills.category` is the BUSINESS-COST bucket, and the owning screen forbids a job bill from
+   * holding one: the bill editor writes `category: isOverhead ? billCategory : null` and renders the
+   * Bucket control only `{isOverhead && ...}`. So every open unmatched paper attached to a job read
+   * "no expense category on it yet", wore the one question the page now asks, and sent him to a bill
+   * with no control that could answer it — a dead end wearing the question, on the page whose law is
+   * no dead ends. Its expense IS the job, so it is answered and the row says so.
+   */
+  it("does not ask what a job-costed paper's expense is: the job is the answer", async () => {
+    CURRENT = {
+      ...BASE,
+      bills: [
+        bill("b-job", {
+          supplier: "Larkspur Trade Counter",
+          amount: 61.4,
+          category: null,
+          job_id: J1,
+          jobs: { job_number: "J-201", name: "9 Alder Court" },
+        }),
+      ],
+    };
+    const html = await render();
+    const words = pile(html);
+    expect(countDoors(doorsIn(sectionOf(html, ANCHOR)), "Say What The Expense Is")).toBe(0);
+    expect(words, "its bucket cannot be set off a job, so this is not a question").not.toContain("no expense category");
+    expect(words).toContain("On a job");
+    // And the footer does not count it as the one thing worth answering, because it is not one.
+    expect(words).not.toContain("That is the one thing worth answering here");
+  });
+
+  /**
+   * AND WHERE IT DOES ASK, THE DOOR CARRIES WHAT TO LOOK FOR. Both doors on this pile pointed at
+   * `/bills#bills-search`, which scrolls to a box whose query is React state and reads no URL: he
+   * landed on a blank box and the first thing he had to do was retype the spelling the row had just
+   * shown him. And for the paper with NO name there is nothing to type at all, so a name search was
+   * that row's only door — the one paper with no name sent somewhere it cannot be found by name.
+   */
+  it("the expense door carries the spelling, and the nameless paper is not sent to a name search", async () => {
+    CURRENT = {
+      ...BASE,
+      bills: [
+        bill("b-blank", { supplier: "Larkspur Trade Counter", amount: 61.4, category: null }),
+        bill("b-nameless", { supplier: "", amount: 312.75 }),
+      ],
+    };
+    const section = sectionOf(await render(), ANCHOR);
+    const hrefs = Array.from(section.matchAll(/href="([^"]*)"/g)).map((m) => m[1]);
+    expect(hrefs, "the box seeds from ?q=, so the spelling travels with the door").toContain(
+      "/bills?q=Larkspur%20Trade%20Counter#bills-search",
+    );
+    expect(hrefs, "an empty search box is not a destination").not.toContain("/bills#bills-search");
+    // There is no name to type, so it lands on the list the paper is actually in.
+    expect(hrefs).toContain("/bills#all-bills");
+    expect(countDoors(doorsIn(section), "Find It In All Bills")).toBe(1);
+  });
+
+  /** AND THE BOX REALLY ARRIVES WITH THE WORDS IN IT. A door is only a door if the far side opens. */
+  it("the /bills search box opens with what the door asked it to look for", async () => {
+    const { createElement } = await import("react");
+    const { BillsSearchProvider, BillsSearchBox } = await import("@/app/(app)/bills/bills-search-box");
+    const rows = [
+      { key: "bill:b-blank", kind: "bill" as const, title: "Larkspur Trade Counter", sub: "$61.40", href: "#bill-b-blank", words: "larkspur trade counter 61.40" },
+    ];
+    const html = renderToStaticMarkup(
+      createElement(BillsSearchProvider, {
+        rows,
+        initialQuery: "Larkspur Trade Counter",
+        children: createElement(BillsSearchBox),
+      }),
+    );
+    expect(html).toContain('value="Larkspur Trade Counter"');
+    expect(textOf(html)).toContain("1 in All Bills matches");
+  });
+});
+
+/**
+ * ── THE ROW'S FACE SAYS WHAT THE TAP WILL DO (8a982483's rule, on this pile) ─────────────────────
+ *
+ * The pile became open-only, and the row's figures came with it — but the BUTTON acts on the
+ * SPELLING: `fileSpelling` matches `spellingKey(b.supplier)` over every bill in the org with no
+ * status filter. So a row reading "1 paper · $147.92 still open" moved three bills and $709.32, and
+ * the only place that number ever appeared was the toast afterwards. Before the open test the row
+ * said "3 bills · $709.32 · $147.92 still marked unpaid", which was honest about the scope.
+ *
+ * WHAT THE PRESS FILES IS NOT CHANGED. The saved alias puts those papers on the account whatever we
+ * do here, and they belong there. It is the sentence that was wrong.
+ */
+describe("a row says the settled papers on its name go with the press", () => {
+  const WITH_SETTLED: Record<string, unknown[]> = {
+    ...BASE,
+    bills: [
+      bill("b-open", { supplier: OPEN_SPELLING, amount: OPEN_AMOUNT, category: "Receipt" }),
+      swipe("b-s1", OPEN_SPELLING, 280.4, "Receipt"),
+      swipe("b-s2", OPEN_SPELLING, 281.0, "Receipt"),
+    ],
+  };
+
+  it("names the scope of Give It Its Own Account on the row itself", async () => {
+    CURRENT = WITH_SETTLED;
+    const words = pile(await render());
+    // The pile is still the open paper, because that is the only disagreement.
+    expect(words).toContain("1 paper");
+    expect(words).toContain("$147.92 still open");
+    // And the press is three papers, said before the press rather than in the toast after it.
+    expect(words).toContain("filing it takes 2 settled papers on this name with it");
+  });
+
+  /**
+   * THE SAME ON A MERGE PROPOSAL, whose Accept is the same write wearing a different sentence. It
+   * said "Accepting files these 1 bill" over a press that moves three.
+   */
+  it("the merge proposal counts what Accept moves, and says which of it is settled", async () => {
+    CURRENT = {
+      ...BASE,
+      bills: [
+        bill("p-1", { supplier: "Fernhill Pipe & Fitting", amount: 120, category: "Receipt" }),
+        bill("p-2", { supplier: "Fernhill Pipe and Fitting", amount: 95, category: "Receipt" }),
+        swipe("p-3", "Fernhill Pipe & Fitting", 60, "Receipt"),
+      ],
+    };
+    const words = textOf(sectionOf(await render(), RECONCILE_KINDS["supplier-names"].anchor));
+    expect(words).toContain("3 bills");
+    expect(words).toContain("1 of those was paid at the register already");
+    // The row still shows the open money, and says the settled paper rides along with it.
+    expect(words).toContain("+1 settled, filed too");
+  });
+});
+
+/**
+ * ── NOTHING LEAVES A FIGURE IN SILENCE, IN EVERY SHAPE THE PILE CAN LAND IN ─────────────────────
+ *
+ * The sentence accounting for the settled papers was typed inside the rows card, and that card draws
+ * nothing the moment it has no rows. The measured book is in exactly that shape: the one open paper
+ * arrives under a spelling the fuzzy matcher DOES have an opinion about, so it is a row in a
+ * suggestion further up the page and the pile's own list is empty. Sixty-nine papers then left a
+ * figure in silence while /bills' File It door went on quoting money for the pile.
+ */
+describe("the settled papers are accounted for wherever the pile lands", () => {
+  /** The 69-shape: settled swipes, plus two open spellings of ONE company, so nothing is loose. */
+  const ALL_ROWS_UPSTAIRS: Record<string, unknown[]> = {
+    ...BASE,
+    bills: [
+      ...SWIPES.map(([supplier, amount, category], i) => swipe(`sw-${i}`, supplier, amount, category)),
+      bill("p-1", { supplier: "Fernhill Pipe & Fitting", amount: 120, category: "Receipt" }),
+      bill("p-2", { supplier: "Fernhill Pipe and Fitting", amount: 95, category: "Receipt" }),
+    ],
+  };
+
+  it("says it on the one-line card the File It door lands on, with the door's own figure", async () => {
+    CURRENT = ALL_ROWS_UPSTAIRS;
+    const html = await render();
+    expect(rowCount(html), "every open row is in the merge proposal above").toBe(0);
+    const words = pile(html);
+    expect(words, "the sentence was only ever inside the card that is not drawn here").toContain(
+      "32 more purchases on no supplier account were paid at the register",
+    );
+    expect(words).toContain("one record and nothing to square up");
+    // ONE NUMBER FOR ONE PILE: /bills' door says "$215.00 On 2 Bills", and so does the card it lands on.
+    expect(words).toContain(`${RECONCILE_KINDS["not-on-an-account"].heading} (2)`);
+    expect(words).toContain("$215.00 Still Open");
+  });
+
+  /**
+   * AND IN THE ALL-CLEAR, WHICH IS HIS STEADY STATE. "anything not on an account will most likely be
+   * squared up as paid like everything else in my bills" — so settling the last open unmatched paper
+   * empties this pile, and the lead claimed "every supplier name is on an account" over a book where
+   * thirty-two are not. A false all-clear is the worst thing on this page: it is the one he acts on
+   * without scrolling.
+   */
+  it("does not claim every name is on an account over a book of settled swipes", async () => {
+    CURRENT = { ...BASE, bills: SWIPES.map(([supplier, amount, category], i) => swipe(`sw-${i}`, supplier, amount, category)) };
+    const words = textOf(sectionOf(await render(), "reconcile-lead"));
+    expect(words).toContain("Nothing Disagrees Right Now");
+    expect(words, "thirty-two of his names are not on an account").not.toContain("every supplier name is on an account");
+    expect(words).toContain("no supplier name is waiting to be put on an account");
+    // And what it stopped showing is still accounted for, in the one sentence.
+    expect(words).toContain("32 more purchases on no supplier account were paid at the register");
+  });
+
+  it("says nothing of the sort when nothing was left out", async () => {
+    CURRENT = { ...BASE, bills: [] };
+    const words = textOf(sectionOf(await render(), "reconcile-lead"));
+    expect(words).toContain("Nothing Disagrees Right Now");
+    expect(words).not.toContain("paid at the register");
+  });
+});
+
+/**
+ * ── A CREDIT IS MONEY BACK, NOT A NEGATIVE DEBT ─────────────────────────────────────────────────
+ *
+ * A return goes in this app as a negative on-account bill, and the row printed its money straight
+ * through "still open": "-$51.58 still open", while the lead on the SAME page said it correctly —
+ * "A credit of $51.58 on 1 of them is money back, so it is not in that figure either." Two sentences
+ * about one paper on one screen, one of them calling money back a debt. `whatISupplierOwed` routes a
+ * credit to `ahead` to prevent exactly this; the row's words now make the same split.
+ */
+describe("a credit and a zero are not debts", () => {
+  it("reads a return as money back, never as a negative still open", async () => {
+    CURRENT = {
+      ...BASE,
+      bills: [bill("b-credit", { supplier: "Larkspur Trade Counter", amount: -51.58, category: "Materials" })],
+    };
+    const html = await render();
+    const words = pile(html);
+    expect(words).toContain("a credit of $51.58, money back");
+    expect(words, "a negative debt is not a thing").not.toMatch(/-\s*\$51\.58/);
+    // And the lead's sentence about the same paper still agrees with it.
+    expect(textOf(sectionOf(html, "reconcile-lead"))).toContain("money back");
+  });
+
+  it("does not print a debt of nothing on a zero paper", async () => {
+    CURRENT = { ...BASE, bills: [bill("b-zero", { supplier: "Larkspur Trade Counter", amount: 0, category: "Materials" })] };
+    const words = pile(await render());
+    expect(words).toContain("nothing owed");
+    expect(words).not.toContain("$0.00 still open");
+  });
+
+  it("a nameless paper's money reads the same way", async () => {
+    CURRENT = { ...BASE, bills: [bill("b-nameless-credit", { supplier: "", amount: -51.58 })] };
+    const words = pile(await render());
+    expect(words).toContain("a credit of $51.58, money back");
+    expect(words).not.toMatch(/-\s*\$51\.58/);
   });
 });

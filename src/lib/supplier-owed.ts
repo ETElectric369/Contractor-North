@@ -937,3 +937,31 @@ export function papersOnNoAccountAside(n: NotOnAnAccount | null | undefined, for
   // sentence that points at something that may not be there reads as the machine losing track.
   return `${formatMoney(n.total)} is on ${papers} not on a supplier account yet, counted under the name on the paper. A paper on no account has no supplier balance to disagree with, so none of it is in a gap figure on this page.${unnamed}${credits}`;
 }
+
+/**
+ * ── WHAT IS NOT SHOWN, IN ONE SENTENCE, FROM ONE PLACE ────────────────────────────────────────
+ *
+ * `paperDisagrees` keeps every settled register purchase out of /reconcile's pile, and nothing may
+ * leave a figure in silence: this is the sentence that accounts for them. A count, no names, no
+ * list and no door — the cure for a stockpile is not a smaller stockpile with an explanation.
+ *
+ * IT IS A FUNCTION RATHER THAN JSX BECAUSE THREE PLACES SAY IT AND ONE OF THEM USED NOT TO. It was
+ * written inline inside the rows card, which returns null the moment it has no rows — and it has no
+ * rows in exactly the shape the measured book is in: every open paper held by a suggestion further
+ * up the page. On that book the settled papers were accounted for NOWHERE, while /bills' File It
+ * door went on quoting a figure for the pile. Three readers now, one sentence:
+ *
+ *   · the rows card on /reconcile, under its heading;
+ *   · the one-line card the File It door lands on when every row is upstairs;
+ *   · the all-clear lead, where the whole pile is settled and no section is drawn at all.
+ */
+export function settledAtTheRegisterSentence(settled: number | null | undefined): string | null {
+  const n = Math.trunc(Number(settled) || 0);
+  if (n <= 0) return null;
+  const one = n === 1;
+  return (
+    `${n} more ${one ? "purchase" : "purchases"} on no supplier account ${one ? "was" : "were"} paid at the register, ` +
+    `so ${one ? "it has" : "each has"} one record and nothing to square up. ` +
+    `${one ? "It is" : "They are"} in All Bills on the Bills page.`
+  );
+}

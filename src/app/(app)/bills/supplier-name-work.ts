@@ -57,8 +57,18 @@ export interface UnfiledSpelling {
    * row LEADS with this instead of pushing a supplier account at a petrol station.
    */
   categories: string[];
-  /** How many of its papers carry no category word at all. The only thing that is "unclear". */
+  /**
+   * How many of its papers carry no category word at all AND are not costed to a job. The only
+   * thing that is "unclear" — see `papersOnNoAccount` for why a job bill is not one of them.
+   */
   uncategorised: number;
+  /** How many of its papers are costed to a job, which is what those are filed as. */
+  onAJob: number;
+  /**
+   * How many SETTLED papers share this spelling. Not rows, and not money on this card — but the
+   * row's button files by spelling, so they move with it and the row says so.
+   */
+  settledSiblings: number;
 }
 
 /**
@@ -152,6 +162,11 @@ export function papersOnNoAccount(input: {
   const unfiled = new Map<string, UnfiledSpelling>();
   const unnamed = { papers: 0, total: 0 };
   let settledAtTheRegister = 0;
+  // ── THE SETTLED PAPERS, KEPT BY SPELLING AS WELL AS COUNTED ────────────────────────────────────
+  // They are not rows. But `fileSpelling` matches the SPELLING and no status, so a row's button
+  // moves them too, and a row's face must say what the tap will do. Gathered in the same pass, so
+  // the scope on the row and the count in the sentence can never be two different piles.
+  const settledBySpelling = new Map<string, number>();
   for (const b of input.bills ?? []) {
     const id = String(b?.id ?? "");
     if (!id) continue;
@@ -165,6 +180,11 @@ export function papersOnNoAccount(input: {
     // silence.
     if (!paperDisagrees({ accountId, paper: { status: b.status, settledBySupplier: input.settledBySupplier?.has(id) } })) {
       settledAtTheRegister += 1;
+      const settledAlias = String(b.supplier ?? "").trim();
+      if (settledAlias) {
+        const k = aliasKey(settledAlias);
+        settledBySpelling.set(k, (settledBySpelling.get(k) ?? 0) + 1);
+      }
       continue;
     }
     const alias = String(b.supplier ?? "").trim();
@@ -184,16 +204,37 @@ export function papersOnNoAccount(input: {
     // drops every settled paper, which is every paper it ever reached — one rule in one place rather
     // than two tests leaning the same way.
     const key = aliasKey(alias);
-    const g = unfiled.get(key) ?? { alias, bills: 0, total: 0, unpaid: 0, unpaidBills: 0, categories: [], uncategorised: 0 };
+    const g =
+      unfiled.get(key) ??
+      { alias, bills: 0, total: 0, unpaid: 0, unpaidBills: 0, categories: [], uncategorised: 0, onAJob: 0, settledSiblings: 0 };
     g.bills += 1;
     g.total = r2(g.total + amount);
     g.unpaid = r2(g.unpaid + amount);
     g.unpaidBills += 1;
     const category = String(b.category ?? "").trim();
-    if (!category) g.uncategorised += 1;
-    else if (!g.categories.includes(category)) g.categories = [...g.categories, category].sort((x, y) => x.localeCompare(y));
+    if (category) {
+      if (!g.categories.includes(category)) g.categories = [...g.categories, category].sort((x, y) => x.localeCompare(y));
+    } else if (b.job_id) {
+      // ── A JOB BILL IS CATEGORISED BY ITS JOB, AND THE OWNING SCREEN SAYS SO ──────────────────
+      // `bills.category` is the BUSINESS-COST bucket. The bill editor writes `category: isOverhead ?
+      // billCategory : null` and renders the Bucket control only `{isOverhead && ...}`, so a paper on
+      // a job cannot carry one by design. Counting its blank as "unclear" asked the one question the
+      // page now asks and then sent him to a bill with no control that could answer it — a dead end
+      // wearing the question, on the page whose law is no dead ends. Its expense IS the job, so it is
+      // answered, and it says so on the row instead of being asked about.
+      //
+      // Reconcile reads; it does not re-rule. If a job bill should ever carry a bucket, that is
+      // bills-receipts' decision to make, and this count follows it without being touched.
+      g.onAJob += 1;
+    } else {
+      g.uncategorised += 1;
+    }
     unfiled.set(key, g);
   }
+  // THE SETTLED SIBLINGS LAND ON THE ROWS THAT EXIST. A spelling whose every paper is settled has no
+  // row at all (and must not get one); a spelling with one open paper and two settled ones has a row
+  // whose button moves all three, so that row carries the three.
+  for (const [key, g] of unfiled) g.settledSiblings = settledBySpelling.get(key) ?? 0;
   return { unfiled, unnamed, settledAtTheRegister };
 }
 
@@ -288,7 +329,10 @@ export function supplierNameWork(input: {
     if (mine.length < 2 && !existing) continue; // see above: both buttons would do the same thing
     const spellings: SupplierSpelling[] = mine.map((x) => {
       const g = unfiled.get(x.key) as UnfiledSpelling;
-      return { alias: g.alias, bills: g.bills, total: g.total, unpaid: g.unpaid };
+      // THE SETTLED SIBLINGS RIDE WITH THE PROPOSAL TOO. Accept files by spelling, so it moves them
+      // as well, and "Accepting files these 1 bill" over a press that moves three is the row's face
+      // not saying what the tap will do.
+      return { alias: g.alias, bills: g.bills, total: g.total, unpaid: g.unpaid, settledSiblings: g.settledSiblings };
     });
     proposals.push({
       // THE ID IS THE SPELLINGS, as JSON. "Not The Same" hands the server nothing but this one
@@ -322,7 +366,7 @@ export function supplierNameWork(input: {
       suggestedName: account.name,
       accountNumber: account.accountNumber,
       branchCode: account.branchCode,
-      spellings: [{ alias: g.alias, bills: g.bills, total: g.total, unpaid: g.unpaid }],
+      spellings: [{ alias: g.alias, bills: g.bills, total: g.total, unpaid: g.unpaid, settledSiblings: g.settledSiblings }],
       existingAccountId: account.id,
       existingAccountName: account.name,
       because: `"${g.alias}" is already saved as a name for ${account.name}. These bills were scanned after that and never landed on it.`,
@@ -363,8 +407,18 @@ export function supplierNameWork(input: {
   const loose: SupplierSpelling[] = [...unfiled.values()]
     .filter((g) => !spokenFor.has(aliasKey(g.alias)))
     // THE CATEGORY RIDES ALONG, because it is what the row leads with now: "What is the expense
-    // categorized as if it's unclear ask." Nothing else on the page needs it.
-    .map((g) => ({ alias: g.alias, bills: g.bills, total: g.total, unpaid: g.unpaid, categories: g.categories, uncategorised: g.uncategorised }))
+    // categorized as if it's unclear ask." So does what the press would move, because the row's face
+    // must say what the tap will do. Nothing else on the page needs either.
+    .map((g) => ({
+      alias: g.alias,
+      bills: g.bills,
+      total: g.total,
+      unpaid: g.unpaid,
+      categories: g.categories,
+      uncategorised: g.uncategorised,
+      onAJob: g.onAJob,
+      settledSiblings: g.settledSiblings,
+    }))
     // Biggest money first: what he still owes, then what it cost him, then by name so the list does
     // not shuffle itself between loads.
     .sort((x, y) => y.unpaid - x.unpaid || y.total - x.total || x.alias.localeCompare(y.alias));

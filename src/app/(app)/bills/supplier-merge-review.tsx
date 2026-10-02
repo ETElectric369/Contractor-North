@@ -8,11 +8,13 @@ import { WhyFold } from "@/components/why-fold";
 import { Input, Label } from "@/components/ui/input";
 import { Modal, ModalActions } from "@/components/ui/modal";
 import { formatCurrency } from "@/lib/utils";
+import { settledAtTheRegisterSentence } from "@/lib/supplier-owed";
 import {
   candidateJoinedOwed,
   candidateMoving,
   proposalTotals,
   r2,
+  spellingMoneySaid,
   type SupplierActionResult,
   type SupplierCandidateQuestion,
   type SupplierMergeProposal,
@@ -138,8 +140,11 @@ export function SupplierMergeReview({
         return;
       }
       setAccepting(null);
+      // THE FALLBACK COUNTS WHAT THE PRESS MOVED, not what the rows showed. Accept files by spelling,
+      // so the settled papers on those names go on too (`totals.moves`). The server's own sentence
+      // wins when there is one; this is what gets said when there is not.
       setDone(
-        res.message ?? `${trimmed} is now one account, holding ${totals.bills} ${totals.bills === 1 ? "bill" : "bills"}.`,
+        res.message ?? `${trimmed} is now one account, holding ${totals.moves} ${totals.moves === 1 ? "bill" : "bills"}.`,
       );
       router.refresh();
     });
@@ -169,14 +174,20 @@ export function SupplierMergeReview({
         {proposals.map((p) => {
           const totals = proposalTotals(p);
           const count = p.spellings.length;
+          // THE COUNT IS WHAT THE PRESS WOULD MOVE; THE MONEY IS SAID AS WHAT IT IS, through the one
+          // function that reads the sign. Paired as "3 bills holding $147.92" the two read as one
+          // claim and they are two — a register purchase among them belongs on the account and owes
+          // nothing — and summing spellings that include a return made `unpaid` NEGATIVE, so the old
+          // "holding $X" could print a debt of minus money. The all-settled branch that used to sit
+          // here is gone with it: every spelling in this pile has an open paper now, so the only nets
+          // at or under half a cent are a credit and a zero, and both are said properly below.
+          const money = spellingMoneySaid(totals.unpaid > 0.005 ? totals.unpaid : totals.total, formatCurrency);
           const headline =
             count === 1
               ? p.existingAccountName
-                ? `${totals.bills} ${totals.bills === 1 ? "bill" : "bills"} scanned as "${p.spellings[0].alias}" belong on ${p.existingAccountName}, holding ${formatCurrency(totals.unpaid)}.`
-                : `This spelling is not on an account yet, and it is holding ${formatCurrency(totals.unpaid)}.`
-              : totals.unpaid > 0.005
-                ? `These ${count} spellings look like one account, holding ${formatCurrency(totals.unpaid)} between them.`
-                : `These ${count} spellings look like one account. ${formatCurrency(totals.total)} has been billed between them and none of it is still owed.`;
+                ? `${totals.moves} ${totals.moves === 1 ? "bill" : "bills"} scanned as "${p.spellings[0].alias}" belong on ${p.existingAccountName}, with ${money}.`
+                : `This spelling is not on an account yet, with ${money}.`
+              : `These ${count} spellings look like one account, with ${money} across them.`;
           return (
             <div key={p.id} className="rounded-lg border border-slate-200 p-3">
               <p className="text-sm font-medium text-slate-900">{headline}</p>
@@ -198,6 +209,9 @@ export function SupplierMergeReview({
                       <span className="block text-xs text-slate-400">
                         {s.bills} {s.bills === 1 ? "bill" : "bills"}
                         {s.unpaid > 0.005 ? ` · ${formatCurrency(s.unpaid)} owed` : ""}
+                        {/* THE SETTLED PAPERS ON THIS NAME GO TOO. The figures above are the open
+                            papers, which is what the pile is; the press is by spelling. */}
+                        {(s.settledSiblings ?? 0) > 0 ? ` · +${s.settledSiblings} settled, filed too` : ""}
                       </span>
                     </span>
                   </li>
@@ -210,9 +224,17 @@ export function SupplierMergeReview({
                   exist is named out loud rather than left for him to go looking for. */}
               <WhyFold label={count > 1 ? "What Does Each Answer Do?" : "What Does Accepting Do?"} className="mt-1">
               <p>
+                {/* THE COUNT IS WHAT THE PRESS MOVES (`moves`), not what the rows list. The rows are the
+                    OPEN papers, because a purchase paid at the register has one record and nothing to
+                    reconcile — but Accept files by spelling, so it takes the settled ones on those names
+                    along, and a sentence quoting the smaller number is the face not saying what the tap
+                    will do. The settled share is named, so the two numbers reconcile on screen. */}
                 {p.existingAccountId
-                  ? `Accepting files these ${totals.bills} ${totals.bills === 1 ? "bill" : "bills"} onto ${p.existingAccountName ?? "the account you already have"}, so they add up into one balance.`
-                  : `Accepting makes one account and files these ${totals.bills} ${totals.bills === 1 ? "bill" : "bills"} onto it, so they add up into one balance you can pay in chunks.`}{" "}
+                  ? `Accepting files these ${totals.moves} ${totals.moves === 1 ? "bill" : "bills"} onto ${p.existingAccountName ?? "the account you already have"}, so they add up into one balance.`
+                  : `Accepting makes one account and files these ${totals.moves} ${totals.moves === 1 ? "bill" : "bills"} onto it, so they add up into one balance you can pay in chunks.`}{" "}
+                {totals.settled > 0
+                  ? `${totals.settled} of ${totals.moves === 1 ? "that" : "those"} ${totals.settled === 1 ? "was" : "were"} paid at the register already, so ${totals.settled === 1 ? "it is" : "they are"} not in the figures above and ${totals.settled === 1 ? "it changes" : "they change"} no balance. `
+                  : ""}
                 Each bill keeps the spelling and the branch it was scanned with, so your prices still know one
                 counter from another. Nothing is renamed, taken off a job, or deleted.
                 {count > 1 ? (
@@ -325,6 +347,7 @@ export function SupplierMergeReview({
                     {s.alias}
                     {s.branchLabel ? ` (${s.branchLabel})` : ""} · {s.bills} {s.bills === 1 ? "bill" : "bills"} ·{" "}
                     {formatCurrency(s.total)}
+                    {(s.settledSiblings ?? 0) > 0 ? ` · +${s.settledSiblings} already settled` : ""}
                   </li>
                 ))}
               </ul>
@@ -472,7 +495,10 @@ export function SupplierCandidateReview({
           const moving = candidateMoving(q);
           const joined = candidateJoinedOwed(q);
           const movingNames = moving.map((s) => `"${s.spelling}"`).join(" and ");
-          const movingBills = moving.reduce((n, s) => n + s.bills, 0);
+          // WHAT A PRESS MOVES, not what the rows show. Both doors here file by SPELLING, so the
+          // settled papers on those names go with them: the rows are the open papers and this is the
+          // scope of the tap, which is what the sentence under the doors has to quote.
+          const movingBills = moving.reduce((n, s) => n + s.bills + (s.settledSiblings ?? 0), 0);
           return (
             <div key={q.id} className="rounded-lg border border-slate-200 p-3">
               <p className="text-sm font-medium text-slate-900">
@@ -491,7 +517,11 @@ export function SupplierCandidateReview({
                           ? s.spelling.trim().toLowerCase() === s.label.trim().toLowerCase()
                             ? "A supplier account you already have"
                             : `A supplier account you already have, scanned as ${s.spelling}`
-                          : `${s.bills} ${s.bills === 1 ? "bill" : "bills"}, on no account yet`}
+                          : `${s.bills} ${s.bills === 1 ? "bill" : "bills"}, on no account yet${
+                              (s.settledSiblings ?? 0) > 0
+                                ? ` · +${s.settledSiblings} settled on this name, filed too`
+                                : ""
+                            }`}
                       </span>
                     </span>
                     <span className="shrink-0 text-right">
@@ -594,6 +624,7 @@ export function SupplierCandidateReview({
                   <li key={s.spelling} className="text-xs text-slate-600">
                     {s.spelling} · {s.bills} {s.bills === 1 ? "bill" : "bills"} · {formatCurrency(s.total)}
                     {s.unpaid > 0.005 ? ` · ${formatCurrency(s.unpaid)} still owed` : ""}
+                    {(s.settledSiblings ?? 0) > 0 ? ` · +${s.settledSiblings} already settled` : ""}
                   </li>
                 ))}
               </ul>
@@ -750,6 +781,10 @@ export function SupplierUnfiledSpellings({
 
   const namelessPapers = unnamed?.papers ?? 0;
   const rows = spellings.length + (namelessPapers > 0 ? 1 : 0);
+  const settledSaid = settledAtTheRegisterSentence(settledAtTheRegister);
+  // NO ROWS, NO CARD — and the caller draws the one-line card that carries this card's sentence
+  // instead, because the pile's anchor must exist either way and nothing may leave a figure in
+  // silence. Two cards for one pile would be the worse answer.
   if (rows === 0) return null;
 
   // THE HEADING'S FIGURE IS THE READ'S, NEVER THESE ROWS ADDED UP. The fall-back is what the rows
@@ -798,13 +833,11 @@ export function SupplierUnfiledSpellings({
             Nothing leaves a figure in silence. One sentence, a count, no names and no door: these
             papers were paid at the till, so each has ONE record and there is no second record for it
             to disagree with. Listing them is what made this page a stockpile. */}
-        {settledAtTheRegister > 0 && (
-          <p className="mt-1 text-sm text-slate-500">
-            {settledAtTheRegister} more {settledAtTheRegister === 1 ? "purchase" : "purchases"} on no supplier account{" "}
-            {settledAtTheRegister === 1 ? "was" : "were"} paid at the register, so {settledAtTheRegister === 1 ? "it has" : "each has"}{" "}
-            one record and nothing to square up. {settledAtTheRegister === 1 ? "It is" : "They are"} in All Bills on the Bills page.
-          </p>
-        )}
+        {/* ONE SENTENCE, FROM ONE PLACE. It was typed here as JSX, and this card returns null the
+            moment it has no rows — which is the shape the measured book is in, so on that book the
+            settled papers were accounted for nowhere at all. `settledAtTheRegisterSentence` is now
+            said by this card, by the one-line card that stands in for it, and by the all-clear. */}
+        {settledSaid && <p className="mt-1 text-sm text-slate-500">{settledSaid}</p>}
         {/* THE COUNT ABOVE IS THE WHOLE PILE'S; THESE ROWS ARE WHAT NOTHING ELSE SPEAKS FOR. Said out
             loud, so the figure in the heading and the rows under it never read as a contradiction. */}
         {askedAbove > 0 && (
@@ -848,9 +881,12 @@ export function SupplierUnfiledSpellings({
             </span>
             {/* AND ONLY WHERE IT IS UNCLEAR, A QUESTION — answered on the paper itself, which owns
                 its category. Reconcile reads; the paper is answered where the paper is. */}
+            {/* AND THE DOOR CARRIES THE SPELLING. It used to drop him at /bills#bills-search, whose
+                query is React state that reads no URL — a blank box, and the first thing he had to do
+                was retype the name the row had just shown him. /bills seeds its box from `?q=`. */}
             {(g.uncategorised ?? 0) > 0 ? (
               <a
-                href="/bills#bills-search"
+                href={`/bills?q=${encodeURIComponent(g.alias)}#bills-search`}
                 className="flex min-h-11 shrink-0 items-center text-sm font-medium text-brand hover:underline"
               >
                 Say What The Expense Is
@@ -871,15 +907,18 @@ export function SupplierUnfiledSpellings({
             <span className="min-w-0 flex-1">
               <span className="block truncate text-sm text-slate-800">No Supplier Name On The Paper</span>
               <span className="block text-xs text-slate-500">
-                {namelessPapers} {namelessPapers === 1 ? "paper" : "papers"} · {formatCurrency(unnamed?.total ?? 0)} still open ·
-                nothing typed in Where, so there is no name to file
+                {namelessPapers} {namelessPapers === 1 ? "paper" : "papers"} · {spellingMoneySaid(unnamed?.total ?? 0, formatCurrency)} ·
+                nothing typed in Where, so there is no name to search for
               </span>
             </span>
+            {/* ITS DOOR IS NOT A SEARCH BOX. There is by definition nothing to type, and this was the
+                row's only door: a paper with no name sent to a box that can only be searched by name.
+                All Bills is the list the paper is actually in, and it is where its Where gets typed. */}
             <a
-              href="/bills#bills-search"
+              href="/bills#all-bills"
               className="flex min-h-11 shrink-0 items-center text-sm font-medium text-brand hover:underline"
             >
-              Find It In Your Papers
+              Find It In All Bills
             </a>
           </li>
         )}
@@ -895,17 +934,38 @@ export function SupplierUnfiledSpellings({
 }
 
 /**
- * WHAT ONE ROW SAYS ABOUT ITSELF: the expense category first, then the money still open. His rule,
- * verbatim — "What is the expense categorized as if it's unclear ask" — so the words lead with the
- * answer where there is one and name the gap where there is not.
+ * WHAT ONE ROW SAYS ABOUT ITSELF: the expense category first, then the money, then what the tap
+ * would move. His rule, verbatim — "What is the expense categorized as if it's unclear ask" — so the
+ * words lead with the answer where there is one and name the gap where there is not.
+ *
+ * THREE THINGS IT GOT WRONG AND NOW DOES NOT:
+ *
+ *  · A CREDIT IS NOT A DEBT. A return goes in as a negative on-account bill, and this printed it
+ *    through "still open": "-$51.58 still open" on a row, under a lead on the same page that said
+ *    correctly "a credit of $51.58 ... is money back". `spellingMoneySaid` reads the sign.
+ *  · A JOB BILL IS NOT UNCATEGORISED. Its expense is the job, and the bill editor cannot give it a
+ *    bucket at all, so saying "no expense category on it yet" asked a question nothing could answer.
+ *  · THE FACE SAYS WHAT THE TAP WILL DO. `fileSpelling` matches the SPELLING with no status filter,
+ *    so Give It Its Own Account moves the settled papers on that name as well. The row counted only
+ *    the open ones, so a press on "1 paper · $147.92" moved three bills and $709.32 and said so only
+ *    in the toast afterwards — a count that had never been on screen.
  */
 function spellingSaid(g: SupplierSpelling): string {
   const bills = `${g.bills} ${g.bills === 1 ? "paper" : "papers"}`;
-  const open = `${formatCurrency(g.unpaid > 0.005 ? g.unpaid : g.total)} still open`;
+  const money = spellingMoneySaid(g.unpaid > 0.005 ? g.unpaid : g.total, formatCurrency);
   const categories = g.categories ?? [];
+  const onAJob = g.onAJob ?? 0;
   const missing = g.uncategorised ?? 0;
-  if (!categories.length) return `${bills} · ${open} · no expense category on it yet`;
-  const said = `Filed as ${categories.join(", ")}`;
-  const gap = missing > 0 ? ` · ${missing} with no category on ${missing === 1 ? "it" : "them"}` : "";
-  return `${said} · ${bills} · ${open}${gap}`;
+  const settled = g.settledSiblings ?? 0;
+  // WHAT IT IS FILED AS: the buckets by name, and a job-costed paper as what it is.
+  const filed: string[] = [];
+  if (categories.length) filed.push(`Filed as ${categories.join(", ")}`);
+  if (onAJob > 0) filed.push(categories.length ? `${onAJob} on a job` : `On ${onAJob === 1 ? "a job" : "jobs"}`);
+  const gap = missing > 0 ? ` · ${missing} with no expense category on ${missing === 1 ? "it" : "them"}` : "";
+  const alsoMoves =
+    settled > 0
+      ? ` · filing it takes ${settled} settled ${settled === 1 ? "paper" : "papers"} on this name with it`
+      : "";
+  if (!filed.length) return `${bills} · ${money} · no expense category on it yet${alsoMoves}`;
+  return `${filed.join(" · ")} · ${bills} · ${money}${gap}${alsoMoves}`;
 }
