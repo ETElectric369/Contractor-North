@@ -5,6 +5,8 @@ import {
   columnsFromRemembered,
   discountLine,
   kindFromTypeWords,
+  isLineItemHeader,
+  looksLikePaperNumber,
   openListFromReader,
   closeCutoff,
   looksLikeStatementText,
@@ -523,6 +525,68 @@ Total $229.98
     expect(looksLikeStatementText(LINES)).toBe(true);
     expect(looksLikeStatementText(LUMBER_CSV)).toBe(true);
     expect(looksLikeStatementText("Invoice 7731\nTerms: Net 10th following statement\n")).toBe(false);
+  });
+
+  /**
+   * HOURS AND RATE ARE A QUANTITY AND A PRICE (2026-10-02). A trade's time-and-materials invoice prints
+   * DATE | DESCRIPTION | HOURS | RATE | AMOUNT over its own lines, and the guard that knows an invoice's
+   * item table from a list of open papers only knew QTY and PRICE — so a plumber's three dated labour
+   * lines read as three DEPOSITS on a bank card, because a date, a description and an amount is also the
+   * shape of a card statement. A quantity is a quantity whether it is counted in pieces or in hours.
+   */
+  it("an invoice's item table is known by HOURS and RATE as well as by QTY and PRICE", () => {
+    for (const heading of [
+      "Item Description Qty Price Amount",
+      "Date Description Hours Rate Amount",
+      "Description Hrs Rate Amount",
+      "Line Units Unit Cost Extension",
+    ]) {
+      expect(isLineItemHeader(heading), heading).toBe(true);
+    }
+    // And no heading a STATEMENT prints is mistaken for one: there is no quantity on an open list.
+    for (const heading of [
+      "Age Date Code Reference Customer PO# Discount Open Amount Orig Amount",
+      "Date Description Withdrawals Deposits Balance",
+      "Invoice Number Invoice Date Due Date Amount Open Balance",
+    ]) {
+      expect(isLineItemHeader(heading), heading).toBe(false);
+    }
+  });
+
+  /**
+   * A PAPER NUMBER IS NOT A LINE'S NAME, AND NEVER A FIGURE (2026-10-02). What decides whether a PDF
+   * nobody vouched for IS a list: a proposal numbering its lines "Interior 1" read as three open bills,
+   * and an aging footer's left-aligned "742.61" became a paper for $502.70.
+   */
+  it("knows a paper number from a line's name and from money", () => {
+    for (const yes of ["7741-2203118", "INV-1042", "90412", "8802-1000001", "SC 9001", "#4471203"]) expect(looksLikePaperNumber(yes), yes).toBe(true);
+    for (const no of ["Interior 1", "Trim 3", "Rough-in labor", "742.61", "$1,480.06", "(501.05)", "0.00", "09/25/26", "", "CURRENT / 1 - 30"]) {
+      expect(looksLikePaperNumber(no), no).toBe(false);
+    }
+  });
+
+  /**
+   * AND THE READER ITSELF NEVER TAKES A FIGURE AS A PAPER NUMBER. An aging footer printed with its
+   * amounts under their labels' own left x puts the CURRENT bucket in the REFERENCE column; read as a
+   * paper, it invented a bill and the read report's total overshot the paper's own TOTAL DUE by it —
+   * while the sentence under it blamed the parse for MISSING something.
+   */
+  it("a figure in the paper-number column is said out loud, never read as a paper", () => {
+    const read = readOpenListTable({
+      table: [
+        ["Reference", "Open Balance"],
+        ["8802-1000001", "10.00"],
+        ["742.61", "502.70"],
+      ],
+      from: "file",
+      name: "statement.csv",
+      listDate: "2026-09-25",
+      listDateFrom: "file",
+    });
+    expect(read.ok).toBe(true);
+    if (!read.ok) return;
+    expect(read.list.rows.map((r) => r.reference)).toEqual(["8802-1000001"]);
+    expect(read.list.skipped.some((s) => s.why.includes("742.61"))).toBe(true);
   });
 
   /** A statement two pages long, each page with its own labels and the statement's total. */

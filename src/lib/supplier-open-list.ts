@@ -142,6 +142,14 @@ export type OpenListNeedsColumns = {
   unsure: OpenListField[];
   accountId?: string | null;
   accountFrom?: OpenList["accountFrom"];
+  /**
+   * THE PDF THESE ROWS CAME OFF, KEPT UNTIL THE COLUMNS ARE PICKED. A PDF whose headings two columns
+   * both claim ("Balance" and "Open Amount") lands here with no reader's figures to say yet — and the
+   * Reconcile page promises a line saying how many pages and rows came off every PDF. Without this the
+   * promise is broken on the one path where the parse is LEAST verified: the read report was built
+   * inside addOpenList, and by the time a person has pointed at the columns the pages were forgotten.
+   */
+  pdf?: PdfPaper | null;
 };
 
 // ── READING VALUES ─────────────────────────────────────────────────────────────────────────────
@@ -401,7 +409,39 @@ export function capTable(table: readonly (readonly unknown[])[]): string[][] {
 }
 
 const cell = (row: readonly string[], at: number | undefined) => (at === undefined ? "" : String(row[at] ?? "").trim());
-const looksLikeReference = (s: string) => /\d/.test(s) && s.length <= 40 && !/^total\b/i.test(s) && readDate(s) === null;
+
+/**
+ * A WHOLE CELL THAT IS A FIGURE: "742.61", "$1,480.06", "(501.05)", "60.75-", "0.00". Nothing else in
+ * it, so a paper number that happens to carry a decimal point is untouched.
+ *
+ * WHY IT EXISTS: a statement's aging footer is a row of amounts under a row of labels, and on a paper
+ * whose footer amounts are LEFT-aligned under their labels, the CURRENT bucket lands in the REFERENCE
+ * column. Read as a paper number that invents a bill numbered 742.61, and the read report's total
+ * then overshoots the paper's own TOTAL DUE by that bucket — while the sentence under it tells him
+ * the parse MISSED something, which is the wrong diagnosis when the parse invented something.
+ */
+export const MONEY_CELL = /^\(?\s*-?\$?\s*[\d,]*\d\.\d{2}\s*\)?-?$/;
+
+const looksLikeReference = (s: string) =>
+  /\d/.test(s) && s.length <= 40 && !/^total\b/i.test(s) && readDate(s) === null && !MONEY_CELL.test(s);
+
+/**
+ * A PAPER NUMBER AS A SUPPLIER PRINTS ONE: a digit in it, no figure, no day, and no WORD beside the
+ * number. "7741-2203118", "INV-1042" and "90412" are paper numbers; "Interior 1", "Trim 3" and
+ * "Rough-in labor" are the NAMES of the lines of a proposal or an invoice, and "742.61" is money.
+ *
+ * WHY IT IS STRICTER THAN looksLikeReference. looksLikeReference decides whether a row of a list a
+ * person already called a list reads as a paper; this decides whether a PDF nobody has vouched for
+ * IS a list at all (pdf-table.ts). A painter's proposal with ITEM | DESCRIPTION | AMOUNT over
+ * "Interior 1 / Exterior 2 / Trim 3" otherwise read as three open papers for $12,200 of work nobody
+ * ever billed, and his proposal was never filed as the paper it is.
+ */
+export function looksLikePaperNumber(raw: unknown): boolean {
+  const v = String(raw ?? "").trim();
+  if (!v || v.length > 30 || !/\d/.test(v)) return false;
+  if (MONEY_CELL.test(v) || readDate(v) !== null) return false;
+  return v.split(/\s+/).every((t) => !/^[A-Za-z]{3,}$/.test(t));
+}
 
 /** "Total Balance: $3,273.94", "11 documents": the supplier's own figures, wherever they sit. */
 export function printedFigures(lines: readonly string[]): { total: number | null; count: number | null } {
@@ -746,10 +786,18 @@ function statementDate(lines: readonly string[]): string | null {
 const STATEMENT_TITLE =
   /^(?:(?:customer|account|monthly|vendor|supplier|open item|open items)\s+)?statement(?:\s+of\s+account)?(?:\s+(?:open items|open invoices|date\b.*|of\b.*))?$|^statement\s+date\b|^(?:open items|open invoices|open item list|open items list|aged? (?:receivables|payables|balance)|aging(?: report| summary)?|account aging)$/;
 
-/** An invoice's own item table: a quantity and a price (or description) over the same columns. */
-const QTY_WORDS = /\b(qty|quantity|ordered|shipped|ship qty|order qty|b\s*o)\b/;
-const PRICE_WORDS = /\b(price|unit|each|ext|extension|extended|description|sku|catalog)\b/;
-function isLineItemHeader(line: string): boolean {
+/**
+ * An invoice's own item table: a quantity and a price (or description) over the same columns.
+ *
+ * HOURS AND RATE ARE A QUANTITY AND A PRICE. A subcontractor's time-and-materials invoice prints
+ * DATE | DESCRIPTION | HOURS | RATE | AMOUNT, and a plumber's three dated labour lines read as a BANK
+ * download of three deposits — his own money, invented — because a date, a description and an amount
+ * is also the shape of a card statement. The words a trade prints over the SAME two columns belong in
+ * the same guard: a quantity is a quantity whether it is counted in pieces or in hours.
+ */
+const QTY_WORDS = /\b(qty|quantity|ordered|shipped|ship qty|order qty|b\s*o|hours|hour|hrs|units|pcs)\b/;
+const PRICE_WORDS = /\b(price|unit|each|ext|extension|extended|description|sku|catalog|rate|hourly|unit cost)\b/;
+export function isLineItemHeader(line: string): boolean {
   const words = headerKey(line);
   return QTY_WORDS.test(words) && PRICE_WORDS.test(words);
 }
@@ -1199,6 +1247,78 @@ export function planHeadline(plan: OpenListPlan, list: Pick<OpenList, "from">, s
   if (plan.add.length) parts.push(`${plan.add.length} new`);
   if (plan.update.length) parts.push(`${plan.update.length} changed`);
   return `${lead}: ${parts.join(", ")}${partial}, balance now ${balance}.`;
+}
+
+// ── WHAT A PDF'S PAGES ACTUALLY GAVE UP ────────────────────────────────────────────────────────
+
+/** The paper a table was lifted off: its pages, and the rows the table had before any were read. */
+export type PdfPaper = { pages: number; rows: number };
+
+/**
+ * What a reader made of those rows. Each reader fills this in from its OWN rows — a supplier's open
+ * list from `listReadFacts` here, a bank's download from `downloadReadFacts` in bank-download.ts —
+ * so the figures in the sentence can only ever be the figures that landed.
+ */
+export type ReadFacts = {
+  /** The plain word for one row of it: a supplier's "paper", a bank's "line". */
+  one: string;
+  many: string;
+  read: number;
+  from: string | null;
+  to: string | null;
+  /** What the rows add to, already in dollars: "$10,808.76", or "$4,210.00 out and $9,900.00 in". */
+  adds: string;
+  /** The figure on his own paper to hold it against: "the TOTAL DUE your statement prints". */
+  against: string;
+  skipped: readonly { line: number; why: string }[];
+};
+
+export function listReadFacts(list: Pick<OpenList, "rows" | "skipped">): ReadFacts {
+  const days = list.rows.map((r) => r.invoiceDate).filter((d): d is string => !!d).sort();
+  return {
+    one: "paper",
+    many: "papers",
+    read: list.rows.length,
+    from: days[0] ?? null,
+    to: days[days.length - 1] ?? null,
+    adds: sayDollars(sum(list.rows.map((r) => Number(r.openBalance) || 0))),
+    against: "the TOTAL DUE your statement prints",
+    skipped: list.skipped,
+  };
+}
+
+/**
+ * THE READ REPORT, AND IT IS THE SAFETY, NOT A NICETY. A parsed PDF can be confidently wrong in a way
+ * a CSV cannot: a column read one place over turns a withdrawal into a deposit, and four rows that
+ * never read leave a total he can see on the paper and the app cannot. So before he answers anything,
+ * the door that took the PDF says what came off it — how many pages, how many rows were on them, how
+ * many of those read, over what dates, adding to what — and names the figure his own paper prints to
+ * hold it against. Two numbers agreeing is a five-second proof the parse is right, and on a PDF it is
+ * the only proof there is.
+ *
+ * IT NEVER CLAIMS WHAT IT DID NOT READ. Every row that failed is counted and its reason said. A total
+ * that quietly leaves out four rows he can see on the paper is the worst outcome this whole path has.
+ */
+export function pdfReadSaid(pdf: PdfPaper | null | undefined, f: ReadFacts, today?: string | null): string {
+  if (!pdf) return "";
+  const range = f.from ? ` ${sayDay(f.from, today)} to ${sayDay(f.to, today)},` : "";
+  const shown = f.skipped.slice(0, 3);
+  const more = f.skipped.length - shown.length;
+  const skipped = f.skipped.length
+    ? ` ${plural(f.skipped.length, "row", "rows")} didn't read: ${shown.map((s) => `line ${s.line}, ${s.why.replace(/\.$/, "")}`).join("; ")}.${more > 0 ? ` And ${more} more.` : ""}`
+    : "";
+  return `Read off the PDF: ${plural(pdf.pages, "page", "pages")}, ${plural(pdf.rows, "row", "rows")} on them, ${plural(f.read, f.one, f.many)}${range} adding to ${f.adds}. Check that against ${f.against}; if the two don't match, this missed something on the paper.${skipped}`;
+}
+
+/**
+ * WHAT CAME OFF THE PAGES WHEN NOTHING HAS READ THEM YET: the read report's half that is true before a
+ * column is known. A PDF whose headings two columns both claim waits for a person to point at them,
+ * and said nothing at all about the pages until that was done — on the one path where the parse is
+ * least verified. The pages and the rows are facts either way, so they are said either way.
+ */
+export function pdfPagesSaid(pdf: PdfPaper | null | undefined): string {
+  if (!pdf) return "";
+  return `Read off the PDF: ${plural(pdf.pages, "page", "pages")}, ${plural(pdf.rows, "row", "rows")} on them. Which column is which isn't certain yet, so point at them below and the rest of the report follows.`;
 }
 
 /** "Tahoe Lumber's", "Consolidated Electrical Distributors'". */

@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { renderToStaticMarkup } from "react-dom/server";
 import { countDoors, doorsIn, sectionOf, textOf } from "@/test/rendered-page";
 import { RECONCILE_ANSWERED_HERE, RECONCILE_KINDS } from "@/lib/reconcile-kinds";
-import { LIST_ACCEPT } from "@/lib/open-list-file";
+import { LIST_ACCEPT, STATEMENT_ACCEPT } from "@/lib/open-list-file";
 
 /**
  * EVERY DOOR THAT MOVED OFF /bills HAS A HOME HERE, AND NOWHERE ELSE (cn-v1037).
@@ -280,18 +280,13 @@ describe("the page reads; it does not re-rule", () => {
    * its own card under Needs You, or this page becomes the only door to a queued paper.
    */
   it("takes a statement in, says where it is answered, and carries no Apply", () => {
-    expect(count(doors(html), "Drop A Bank Or Supplier Download")).toBe(1);
+    expect(count(doors(html), "Drop A Bank Or Supplier Statement")).toBe(1);
     expect(text(html)).toContain("Bring In A Statement");
     expect(text(html)).toContain("answered on its own card under Needs You on Bills");
     expect(count(doors(html), "Open Bills")).toBe(1);
     for (const gone of ["Apply", "Undo It", "Swap"]) expect(count(doors(html), gone), gone).toBe(0);
   });
 
-  /**
-   * AND IT NAMES WHAT IT ACTUALLY READS. LIST_ACCEPT (lib/open-list-file.ts) takes .csv .tsv .txt
-   * .xlsx .xls .ofx .qfx .qbo and NOT a PDF, so copy that said "your statement" would send him to
-   * the bank's Statements page for the PDF and hand him a refusal he had no reason to expect.
-   */
   /**
    * AND THE DOOR THAT WAS NAMED "BELOW THIS CARD" ON MONEY NOW LANDS HERE. The Net Profit card's
    * Owner's Draw line said "Drop Your Bank Download below to change that" because the door was three
@@ -305,12 +300,23 @@ describe("the page reads; it does not re-rule", () => {
     expect(html).toContain('id="bring-in-a-statement"');
   });
 
-  it("the file types on the card are the file types the reader takes, PDF named as the one that is not", () => {
+  /**
+   * AND IT NAMES WHAT IT ACTUALLY READS. The door takes the PDF statement a supplier emails now (the
+   * pages are read as a table: lib/pdf-table.ts), so the copy names the PDF — and names the one PDF
+   * it still cannot do anything with, a SCAN, with the door that can. Copy that promised or refused
+   * the wrong thing is how he finds out by being turned away.
+   *
+   * LIST_ACCEPT STILL HAS NO ".pdf" IN IT, and that is not an oversight: `isListFile` feeds `oneList`,
+   * which calls `readListFile`, and that reader cannot read a PDF. The statement door has its own
+   * constant (STATEMENT_ACCEPT) and its own route through the table reader.
+   */
+  it("the file types on the card are the file types the reader takes, the scan named as the one that is not", () => {
     const card = text(html.slice(html.indexOf("Bring In A Statement")));
-    for (const said of ["CSV", "Excel", "OFX", "QFX", "QBO"]) expect(card, said).toContain(said);
-    expect(card).toContain("A PDF can't be read as a list of lines");
+    for (const said of ["CSV", "Excel", "OFX", "QFX", "QBO", "PDF"]) expect(card, said).toContain(said);
+    expect(card).toContain("A PDF that was SCANNED has no text on its pages at all");
     for (const ext of [".csv", ".tsv", ".txt", ".xlsx", ".xls", ".ofx", ".qfx", ".qbo"]) expect(LIST_ACCEPT, ext).toContain(ext);
     expect(LIST_ACCEPT).not.toContain(".pdf");
+    for (const ext of [".pdf", ".csv", ".xlsx", ".ofx", ".qbo"]) expect(STATEMENT_ACCEPT, ext).toContain(ext);
   });
 });
 
@@ -377,7 +383,7 @@ describe("who may bring a bank download in", () => {
     CURRENT = asOffice(false);
     try {
       const out = await render();
-      expect(count(doors(out), "Drop A Bank Or Supplier Download")).toBe(0);
+      expect(count(doors(out), "Drop A Bank Or Supplier Statement")).toBe(0);
       expect(out).not.toContain('type="file"');
       // NOT A DEAD END: no control that could only refuse, and the door that IS theirs is named.
       expect(text(out)).toContain("The owner brings in bank downloads");
@@ -392,7 +398,7 @@ describe("who may bring a bank download in", () => {
     CURRENT = asOffice(true);
     try {
       const out = await render();
-      expect(count(doors(out), "Drop A Bank Or Supplier Download")).toBe(1);
+      expect(count(doors(out), "Drop A Bank Or Supplier Statement")).toBe(1);
       expect(text(out)).not.toContain("The owner brings in bank downloads");
     } finally {
       CURRENT = TABLES;
@@ -403,7 +409,7 @@ describe("who may bring a bank download in", () => {
     CURRENT = { ...TABLES, profiles: [{ id: "user-owner", org_id: ORG, role: "office", full_name: "An Office Hand" }], organizations: [] };
     try {
       const out = await render();
-      expect(count(doors(out), "Drop A Bank Or Supplier Download")).toBe(0);
+      expect(count(doors(out), "Drop A Bank Or Supplier Statement")).toBe(0);
     } finally {
       CURRENT = TABLES;
     }
@@ -421,7 +427,7 @@ describe("who may bring a bank download in", () => {
     CURRENT = { ...TABLES, profiles: [{ id: "user-owner", org_id: ORG, role: "owner", full_name: "A N Owner" }], organizations: [] };
     try {
       const out = await render();
-      expect(count(doors(out), "Drop A Bank Or Supplier Download")).toBe(1);
+      expect(count(doors(out), "Drop A Bank Or Supplier Statement")).toBe(1);
       expect(text(out)).not.toContain("The owner brings in bank downloads");
     } finally {
       CURRENT = TABLES;
@@ -448,7 +454,7 @@ describe("a new company sees words, not an error", () => {
       // card used to be hidden on this page, which left an all-clear with no way to put anything on
       // it — a dead end. So the lead may not then print a flat "Nothing for you to do here" above a
       // door, and it does not: it names the door instead.
-      expect(doors(fresh)).toEqual(["Drop A Bank Or Supplier Download", "Open Bills"]);
+      expect(doors(fresh)).toEqual(["Drop A Bank Or Supplier Statement", "Open Bills"]);
       expect(text(fresh)).toContain("drop it in below");
       expect(text(fresh)).not.toContain("Nothing for you to do here");
     } finally {

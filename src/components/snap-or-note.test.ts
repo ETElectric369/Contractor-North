@@ -27,6 +27,7 @@ const m = vi.hoisted(() => ({
   remove: vi.fn(),
   prep: vi.fn(async (f: File) => f),
   readListFile: vi.fn(),
+  readPdf: vi.fn(),
 }));
 vi.mock("@/app/(app)/organize/actions", () => ({
   saveVoiceNote: m.saveVoiceNote,
@@ -55,6 +56,8 @@ vi.mock("@/lib/image-prep", () => ({ prepareImageForUpload: m.prep }));
 vi.mock("@/lib/pdf-text", () => ({
   isPdfBytes: (b: ArrayBuffer) => new TextDecoder().decode(new Uint8Array(b).slice(0, 8)).startsWith("%PDF-"),
   readPdfText: async () => ({ ok: false, error: "no text" }),
+  // The browser's pdfjs read, standing in: each test says what came off the pages (m.readPdf).
+  readPdf: (...args: unknown[]) => m.readPdf(...args),
 }));
 vi.mock("@/lib/open-list-file", async (orig) => {
   const real = await orig<typeof import("@/lib/open-list-file")>();
@@ -89,6 +92,8 @@ beforeEach(() => {
   m.remove.mockResolvedValue({});
   m.fingerprintSeen.mockResolvedValue({ ok: true, seen: null });
   m.snapPaperRows.mockResolvedValue({ ok: true, items: [], jobs: [], matches: {}, shopStock: true });
+  // A PDF with no table on its pages, which is every PDF here unless a test says otherwise.
+  m.readPdf.mockResolvedValue({ ok: false, error: "no text" });
   fetched = [];
   vi.stubGlobal(
     "fetch",
@@ -157,6 +162,94 @@ describe("the office's files: one queue, one set of rules", () => {
     expect(m.addOpenList.mock.calls[0][0]).toMatchObject({ name: "open.csv", source: "organize", listDate: "2026-09-20" });
     expect(m.addPaperwork).not.toHaveBeenCalled();
     expect(lines()[0]).toMatchObject({ tone: "ok", text: "A supplier's open list, 1 paper. Waiting below: press Apply on its card." });
+  });
+
+  /**
+   * THE PDF STATEMENT READS (2026-10-02). Erik: "i want to upload my bank statement and supplier
+   * statement, every item will either match or need a category." A PDF whose PAGES read as a
+   * supplier's open list or a bank's download goes in as a LIST — the same card its CSV would make —
+   * and carries the pages and the row count the read report says out loud. Nothing else about a PDF
+   * changes: the pair below is the whole rule.
+   */
+  it("a PDF statement goes in as a LIST, with the pages and rows the read report says", async () => {
+    const table = [
+      ["DATE", "CODE", "REFERENCE", "OPEN AMOUNT"],
+      ["08/12/26", "IN", "7741-2203118", "412.90"],
+    ];
+    m.readPdf.mockResolvedValue({ ok: true, text: "STATEMENT", table, pages: 3 });
+    m.addOpenList.mockResolvedValue({ ok: true, id: "3f2b1c4d-5e6f-4a7b-8c9d-0e1f2a3b4c70", line: "Read as a supplier's list of 1 open paper." });
+    await snapTake([pdf("statement.pdf")]);
+    expect(m.addOpenList.mock.calls[0][0]).toMatchObject({ name: "statement.pdf", table, source: "organize", pdf: { pages: 3, rows: 2 } });
+    expect(m.addPaperwork).not.toHaveBeenCalled();
+    expect(m.upload).not.toHaveBeenCalled();
+    expect(lines()[0]).toMatchObject({ tone: "ok", text: "Read as a supplier's list of 1 open paper." });
+  });
+
+  it("a PDF that is ONE paper still goes down the single-paper path, untouched", async () => {
+    // An invoice's own item table: a quantity and a price, and no column of open balances.
+    const table = [
+      ["LINE", "QTY", "DESCRIPTION", "PRICE", "EXTENSION"],
+      ["1", "25", "12-2 ROMEX 250FT", "188.40", "188.40"],
+    ];
+    m.readPdf.mockResolvedValue({ ok: true, text: "INVOICE 7741-2203118", table, pages: 1 });
+    m.addPaperwork.mockResolvedValue({ ok: true, id: "3f2b1c4d-5e6f-4a7b-8c9d-0e1f2a3b4c71", needsRead: true });
+    await snapTake([pdf("invoice.pdf")]);
+    expect(m.addOpenList).not.toHaveBeenCalled();
+    expect(m.upload).toHaveBeenCalledTimes(1);
+    // The text layer still reaches addPaperwork, which is how a supplier's portal PDF becomes its
+    // documents with no model call.
+    expect(m.addPaperwork.mock.calls[0][0]).toMatchObject({ name: "invoice.pdf", mime: "application/pdf", pdfText: "INVOICE 7741-2203118" });
+  });
+
+  /**
+   * A PDF THE LIST DOOR TURNS AWAY IS STILL FILED (2026-10-02, the skeptic's pass).
+   *
+   * The routing question is a guess off a parsed page, and when it guessed wrong the PDF was
+   * UNFILEABLE: `return oneList(...)` was final, so an office hand whose owner sorts the bank was told
+   * about the owner's switch and his vendor's invoice went nowhere — and re-adding it took the same
+   * route to the same refusal. Nothing is stored before a refusal, so the paper path takes it instead,
+   * which is how it filed before this lane existed.
+   */
+  it("a PDF the list door refuses still goes in as a paper, never a dead end", async () => {
+    const table = [
+      ["DATE", "DESCRIPTION", "AMOUNT"],
+      ["09/02/26", "CARD PURCHASE HARROWGATE FUEL", "-142.08"],
+      ["09/05/26", "CARD PURCHASE RIVERBEND FUEL", "-42.17"],
+    ];
+    m.readPdf.mockResolvedValue({ ok: true, text: "RIVERBEND COMMUNITY BANK", table, pages: 2 });
+    m.addOpenList.mockResolvedValue({
+      ok: false,
+      error: "statement.pdf: The owner sorts bank downloads: they show the owner's own money. Nothing here was changed.",
+    });
+    m.addPaperwork.mockResolvedValue({ ok: true, id: "3f2b1c4d-5e6f-4a7b-8c9d-0e1f2a3b4c73", needsRead: true });
+    await snapTake([pdf("statement.pdf")]);
+    expect(m.addOpenList).toHaveBeenCalledTimes(1);
+    // It is the paper path that finishes the job, with the PDF's own text layer.
+    expect(m.upload).toHaveBeenCalledTimes(1);
+    expect(m.addPaperwork.mock.calls[0][0]).toMatchObject({ name: "statement.pdf", mime: "application/pdf", pdfText: "RIVERBEND COMMUNITY BANK" });
+    expect(lines()[0].tone).toBe("ok");
+  });
+
+  it("an Already In from the list door is the end of the road: the paper path does not add it twice", async () => {
+    const table = [
+      ["DATE", "CODE", "REFERENCE", "OPEN AMOUNT"],
+      ["08/12/26", "IN", "7741-2203118", "412.90"],
+      ["08/26/26", "IN", "7741-2206611", "88.15"],
+    ];
+    m.readPdf.mockResolvedValue({ ok: true, text: "STATEMENT", table, pages: 1 });
+    m.addOpenList.mockResolvedValue({ ok: false, already: "Already In: added Sep 27, 2026, waiting in the tray to be filed.", error: "x" });
+    await snapTake([pdf("statement.pdf")]);
+    expect(m.addPaperwork).not.toHaveBeenCalled();
+    expect(m.upload).not.toHaveBeenCalled();
+    expect(lines()[0]).toMatchObject({ tone: "warn", text: "Already In: added Sep 27, 2026, waiting in the tray to be filed. Nothing was added twice." });
+  });
+
+  it("a SCANNED PDF (no text on its pages at all) is looked at as a picture, exactly as before", async () => {
+    m.readPdf.mockResolvedValue({ ok: false, error: "statement.pdf had no text in it. It is probably a scan;" });
+    m.addPaperwork.mockResolvedValue({ ok: true, id: "3f2b1c4d-5e6f-4a7b-8c9d-0e1f2a3b4c72", needsRead: true });
+    await snapTake([pdf("scan.pdf")]);
+    expect(m.addOpenList).not.toHaveBeenCalled();
+    expect(m.addPaperwork.mock.calls[0][0]).toMatchObject({ name: "scan.pdf", pdfText: null });
   });
 
   it("saved is saved: a read that never answers leaves the paper waiting with Read Now", async () => {

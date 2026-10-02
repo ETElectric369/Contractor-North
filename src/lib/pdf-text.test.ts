@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { isPdfBytes, isPdfText, joinPdfTextItems } from "./pdf-text";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { isPdfBytes, isPdfText, joinPdfTextItems, noTextSaid } from "./pdf-text";
 import { sha256Hex, isSha256 } from "./content-hash";
 import { parseCedInvoice } from "./ced-invoice-parse";
 import { THISTLE_WOOD } from "@/test/ced-thistle-wood";
@@ -65,5 +67,30 @@ describe("the file's fingerprint", () => {
   it("the shape check the database also makes", () => {
     expect(isSha256("ABC")).toBe(false);
     expect(isSha256("g".repeat(64))).toBe(false);
+  });
+});
+
+/**
+ * A SCANNED PDF SAYS SO, IN ONE SENTENCE, IN ONE PLACE. His own bank statement is three scanned pages
+ * with ZERO text runs on them. Both readers in this file end on `noTextSaid`, so there is one sentence
+ * for it — and the thing it must never be is "no rows", or an empty statement with nothing on it.
+ */
+describe("a PDF with no text on its pages", () => {
+  it("is named as probably a scan, with the door that looks at it as a picture", () => {
+    const said = noTextSaid("Statement.pdf");
+    expect(said).toContain("Statement.pdf");
+    expect(said).toContain("had no text in it");
+    expect(said).toContain("probably a scan");
+    expect(said).toContain("read as a picture");
+    expect(said).not.toMatch(/no rows|empty/i);
+  });
+
+  it("one sentence, not two: the text reader and the table reader both end on this one", () => {
+    const src = readFileSync(join(process.cwd(), "src/lib/pdf-text.ts"), "utf8");
+    const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+    expect(code.match(/had no text in it/g) ?? []).toHaveLength(1);
+    expect(src).toContain("return { ok: false, error: noTextSaid(name) }");
+    // readPdfText is the same read, narrowed: a second pdfjs open would parse a statement twice.
+    expect(src).toContain("const got = await readPdf(data, name, { table: false });");
   });
 });

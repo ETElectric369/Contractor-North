@@ -13,13 +13,17 @@ import {
   capTable,
   findHeaderRow,
   openListFromText,
+  listReadFacts,
+  pdfPagesSaid,
+  pdfReadSaid,
   readHeaderRow,
   readOpenListTable,
   rememberColumns,
+  type ReadFacts,
   type OpenListColumns,
   type StoredOpenList,
 } from "@/lib/supplier-open-list";
-import { looksLikeBankTable, mayBeBankTable, noLinesSaid, notABankDownloadSaid, redactDigits, redactWordCells, unreadBankTable } from "@/lib/bank-download";
+import { downloadReadFacts, looksLikeBankTable, mayBeBankTable, noLinesSaid, notABankDownloadSaid, redactDigits, redactWordCells, unreadBankTable } from "@/lib/bank-download";
 import { OWNER_SORTS_BANK, viewerSortsBank } from "@/lib/bank-viewer";
 import { bankLine, bankTableTooLong, capBankTable, createBankPaper, readBankDownload } from "./bank-core";
 import { applyOpenListCore, createOpenListPaper, loadAccounts, loadPapers, openListLine, orgToday, resolveAccount } from "./open-list-core";
@@ -49,6 +53,12 @@ export async function addOpenList(input: {
   /** The day the file was saved (the browser's lastModified), or null for today. */
   listDate?: string | null;
   source?: "bills_drop" | "organize";
+  /**
+   * THE PDF THESE ROWS WERE LIFTED OFF: its pages, and how many rows the table had before any of them
+   * were read. A statement that came in as a PDF was PARSED, not downloaded, so the card's line says
+   * what came off the paper and he holds it against the total his own statement prints (pdfReadSaid).
+   */
+  pdf?: { pages: number; rows: number } | null;
   /** "bank": the caller promised a bank download, so anything else — a supplier's list included — is
    *  refused in plain words. NO DOOR PASSES IT TODAY: Reconcile's drop line takes either statement on
    *  purpose (Erik: "i want to upload my bank statement and supplier statement"), and this file tells
@@ -65,6 +75,13 @@ export async function addOpenList(input: {
   const given = YMD.test(String(input?.listDate ?? "")) && String(input.listDate) <= today ? String(input.listDate) : null;
   const listDate = given ?? today;
   const listDateFrom = given ? ("file" as const) : ("today" as const);
+  const pages = Math.trunc(Number(input?.pdf?.pages));
+  const rawRows = Math.trunc(Number(input?.pdf?.rows));
+  const pdf = pages > 0 && rawRows >= 0 ? { pages, rows: rawRows } : null;
+  /** THE READ REPORT, where every door reaches it, for whichever card this becomes. */
+  const withReport = (line: string, facts: ReadFacts) => (pdf ? `${line} ${pdfReadSaid(pdf, facts, today)}` : line);
+  /** A PDF whose columns go to the picker has no reader's figures yet, and the pages are still facts. */
+  const withPages = (line: string) => (pdf ? `${line} ${pdfPagesSaid(pdf)}` : line);
 
   let stored: StoredOpenList | null = null;
   let sha: string | null = isSha256(input?.sha256) ? String(input.sha256) : null;
@@ -106,7 +123,7 @@ export async function addOpenList(input: {
       revalidatePath("/bills");
       revalidatePath("/organize");
       revalidatePath("/planner");
-      return { ok: true, id: placed.id, line: bankLine(download) };
+      return { ok: true, id: placed.id, line: withReport(bankLine(download), downloadReadFacts(download)) };
     }
     // A BANK'S TABLE THAT DIDN'T READ AS ONE IS REFUSED HERE, AT EVERY DOOR, rather than kept as a
     // supplier's list waiting for its columns. That class of paper is the whole office's to read
@@ -128,7 +145,9 @@ export async function addOpenList(input: {
     if (read.ok) stored = { list: read.list, needs: null };
     else if ("needs" in read) {
       // A BANK'S FILE THAT DIDN'T READ AS ONE waits for its columns with no long number in it.
-      const needs = read.needs;
+      // THE PDF'S PAGES RIDE ALONG: once the columns are picked there is no other way back to them, and
+      // the read report is owed on this path most of all — it is where the parse is least verified.
+      const needs = { ...read.needs, pdf };
       const hasRef = needs.headerRow >= 0 && readHeaderRow(needs.raw[needs.headerRow] ?? []).columns.reference !== undefined;
       stored = mayBeBankTable(needs.raw, needs.headerRow, hasRef)
         ? { list: null, needs: { ...needs, raw: redactWordCells(needs.raw), header: needs.header.map((h) => redactDigits(h)) } }
@@ -163,7 +182,7 @@ export async function addOpenList(input: {
   if ("error" in placed) return { ok: false, error: `${name} wasn't added. ${placed.error}` };
   revalidatePath("/bills");
   revalidatePath("/organize");
-  return { ok: true, id: placed.id, line: openListLine(stored) };
+  return { ok: true, id: placed.id, line: stored.list ? withReport(openListLine(stored), listReadFacts(stored.list)) : withPages(openListLine(stored)) };
 }
 
 async function waitingList(supabase: any, orgId: string, id: string) {
@@ -217,11 +236,16 @@ export async function pickOpenListColumns(id: string, picked: OpenListColumns): 
   const saved = await saveStored(ctx.supabase, ctx.orgId, id, got.p, { list, needs: null });
   if (!saved.ok) return saved;
 
+  // THE READ REPORT THIS PATH OWED HIM. A PDF whose columns came here said only how many pages came off
+  // it; now that a reader has read them, it says the rest — how many papers, over what dates, adding to
+  // what, and the figure on his own paper to hold that against. The Reconcile page promises this line
+  // for every PDF, and this was the one path that never said it.
+  const report = needs.pdf ? ` ${pdfReadSaid(needs.pdf, listReadFacts(list), await orgToday(ctx.supabase, ctx.orgId))}` : "";
   // REMEMBER IT on the account the list belongs to, when that is known without guessing.
   const [accounts, loaded] = await Promise.all([loadAccounts(ctx.supabase, ctx.orgId), loadPapers(ctx.supabase, ctx.orgId)]);
   const who = resolveAccount(list, null, accounts, loaded.papers);
-  if (!who) return { ok: true, message: `Read ${list.rows.length} papers. Pick whose list it is, and these columns will be remembered for them.` };
-  return { ok: true, message: `Read ${list.rows.length} papers. ${await remember(ctx.supabase, ctx.orgId, who.id, rememberColumns(columns, needs.header, width))}` };
+  if (!who) return { ok: true, message: `Read ${list.rows.length} papers.${report} Pick whose list it is, and these columns will be remembered for them.` };
+  return { ok: true, message: `Read ${list.rows.length} papers.${report} ${await remember(ctx.supabase, ctx.orgId, who.id, rememberColumns(columns, needs.header, width))}` };
 }
 
 async function remember(supabase: any, orgId: string, accountId: string, rem: ReturnType<typeof rememberColumns>): Promise<string> {
