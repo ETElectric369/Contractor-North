@@ -423,6 +423,42 @@ describe("the doors", () => {
     expect(views["item-2"].accountFrom).toBe("number");
   });
 
+  /**
+   * THE READ REPORT A PDF IS OWED ON THE ONE PATH THAT NEVER SAID IT (2026-10-02, the skeptic's pass).
+   *
+   * The report was built inside addOpenList from the reader's own figures, so a PDF whose columns went
+   * to the picker — a statement printing both "Balance" and "Open Amount", say — said nothing at all
+   * about its pages, and by the time a person had pointed at the columns the pages were forgotten. The
+   * Reconcile page promises, for every PDF, "the line under it says how many pages and how many rows
+   * came off it and what they add to". That promise was broken exactly where the parse is least verified.
+   */
+  it("a PDF whose columns go to the picker says its pages now, and the rest once they are picked", async () => {
+    db.organized_items = [];
+    const odd = parseCSV(`Doc Ref Code,Acct,When,Still Owing\nQ-1001,AC-10427,09/01/26,10.00\nQ-1002,AC-10427,09/05/26,20.00\n`);
+    const added = await addOpenList({ name: "statement.pdf", table: odd, listDate: "2026-09-26", pdf: { pages: 2, rows: 37 } });
+    expect(added.ok).toBe(true);
+    expect(added.line).toContain("columns need a look");
+    expect(added.line).toContain("2 pages, 37 rows on them");
+    const needs = db.organized_items[0].proposal.openList.needs;
+    expect(needs.pdf).toEqual({ pages: 2, rows: 37 });
+
+    const picked = await pickOpenListColumns(db.organized_items[0].id, { reference: 0, account: 1, invoiceDate: 2, openBalance: 3 });
+    expect(picked.ok).toBe(true);
+    expect(picked.message).toContain("Read 2 papers.");
+    expect(picked.message).toContain("2 pages, 37 rows on them, 2 papers");
+    expect(picked.message).toContain("$30.00");
+    expect(picked.message).toContain("the TOTAL DUE your statement prints");
+  });
+
+  it("a list that did not come off a PDF says nothing about pages, at either step", async () => {
+    db.organized_items = [];
+    const odd = parseCSV(`Doc Ref Code,Acct,When,Still Owing\nQ-1001,AC-10427,09/01/26,10.00\nQ-1002,AC-10427,09/05/26,20.00\n`);
+    const added = await addOpenList({ name: "odd.csv", table: odd, listDate: "2026-09-26" });
+    expect(added.line).not.toContain("Read off the PDF");
+    const picked = await pickOpenListColumns(db.organized_items[0].id, { reference: 0, account: 1, invoiceDate: 2, openBalance: 3 });
+    expect(picked.message).not.toContain("Read off the PDF");
+  });
+
   it("a remembered column layout reads a list, but never decides whose list it is", async () => {
     db.organized_items = [];
     // CED's columns were remembered for a headerless 3-column list.

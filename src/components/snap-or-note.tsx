@@ -246,10 +246,16 @@ async function readPaper(id: string): Promise<{ ok: true; item?: OrganizedResult
  * A supplier's list or a bank download: rows, read here, then one card.
  *
  * `already`: a PDF statement whose table was lifted off its pages before it got here (oneStaff), with
- * the pages and the row count the read report says out loud. One path from here on, so a statement
- * that arrived as a PDF and one that arrived as a CSV become the same card.
+ * the pages and the row count the read report says out loud, and the fingerprint oneStaff already took.
+ * One path from here on, so a statement that arrived as a PDF and one that arrived as a CSV become the
+ * same card.
+ *
+ * `filed` SAYS WHETHER THIS FILE'S STORY ENDED HERE, so a PDF the list door turns away is not a dead
+ * end: oneStaff files it as a paper instead (see there). "Already In" counts as filed — the file really
+ * is in — and so does a refusal of a file a person chose as a list himself, because there is no second
+ * path for a CSV.
  */
-async function oneList(id: number, file: File, already?: { table: string[][]; pages: number }) {
+async function oneList(id: number, file: File, already?: { table: string[][]; pages: number; rows: number; sha: string | null }): Promise<{ filed: boolean }> {
   const name = file.name || "A file with no name";
   say(id, name, "Reading the list…", "busy");
   let table: string[][];
@@ -259,15 +265,20 @@ async function oneList(id: number, file: File, already?: { table: string[][]; pa
     listDate = savedOn(file.lastModified);
   } else {
     const read = await readListFile(file);
-    if (!read.ok) return say(id, name, `Not added: ${read.error}`, "error");
+    if (!read.ok) {
+      say(id, name, `Not added: ${read.error}`, "error");
+      return { filed: true };
+    }
     table = read.table;
     listDate = read.listDate;
   }
-  let sha: string | null = null;
-  try {
-    sha = await sha256Hex(await file.arrayBuffer());
-  } catch {
-    sha = null; // an old browser: the list still goes in, it just can't be matched as the same file
+  let sha: string | null = already ? already.sha : null;
+  if (!already) {
+    try {
+      sha = await sha256Hex(await file.arrayBuffer());
+    } catch {
+      sha = null; // an old browser: the list still goes in, it just can't be matched as the same file
+    }
   }
   const added = await addOpenList({
     name,
@@ -275,11 +286,17 @@ async function oneList(id: number, file: File, already?: { table: string[][]; pa
     table,
     listDate,
     source: "organize",
-    pdf: already ? { pages: already.pages, rows: table.length } : null,
+    pdf: already ? { pages: already.pages, rows: already.rows } : null,
   });
-  if (!added.ok) return say(id, name, added.already ? `${added.already} Nothing was added twice.` : (added.error ?? "Not added."), added.already ? "warn" : "error");
+  if (!added.ok) {
+    say(id, name, added.already ? `${added.already} Nothing was added twice.` : (added.error ?? "Not added."), added.already ? "warn" : "error");
+    // A PDF that was only ROUTED here has the paper path left to try, and a refusal that isn't "Already
+    // In" means nothing was stored. An "Already In" is the end of the road: the file is in.
+    return { filed: !already || !!added.already };
+  }
   remember(id, added.id);
   say(id, name, added.line ?? "Waiting for your answer on its card.", "ok");
+  return { filed: true };
 }
 
 /** One file, the office's way: checked, fingerprinted, stored, a row, and read. */
@@ -289,7 +306,10 @@ async function oneStaff(id: number, file: File, orgId: string) {
   const pdfByName = /\.pdf$/i.test(name);
   const heic = /image\/hei[cf]/.test(type) || /\.(heic|heif)$/i.test(name);
   const isImage = type.startsWith("image/") || heic;
-  if (!(type === "application/pdf" || pdfByName || isImage) && isListFile(file)) return oneList(id, file);
+  if (!(type === "application/pdf" || pdfByName || isImage) && isListFile(file)) {
+    await oneList(id, file);
+    return;
+  }
   if (!(type === "application/pdf" || pdfByName || isImage))
     return say(id, name, "Not added: Snap Or Note takes PDFs, photos, and a supplier's list or a bank download (Excel, CSV or OFX).", "error");
   if (file.size > MAX_FILE) return say(id, name, "Not added: it is over 15 MB. Save a smaller copy and add it again.", "error");
@@ -317,9 +337,19 @@ async function oneStaff(id: number, file: File, orgId: string) {
     // A PDF nothing recognises falls straight through to the paper path below, untouched: a CED
     // invoice, a job plan and a deed behave exactly as they did. A scan has no text at all, so
     // `readPdf` refuses it in words and it falls through to be looked at as a picture.
+    //
+    // AND IF THE LIST DOOR TURNS IT AWAY, THE PAPER PATH STILL TAKES IT. The routing question can be
+    // wrong — it is a guess off a parsed page — and when it was wrong the PDF was UNFILEABLE: an office
+    // hand whose owner sorts the bank was told about the owner's switch and his vendor's invoice went
+    // nowhere, and re-adding it took the same route to the same refusal. Nothing is stored before a
+    // refusal, so falling through here files the paper the way it filed before this lane existed.
     const got = await readPdf(raw, name);
     if (got.ok) {
-      if (tableReadsAsList(got.table)) return oneList(id, file, { table: got.table, pages: got.pages });
+      const list = tableReadsAsList(got.table);
+      if (list) {
+        const asList = await oneList(id, file, { table: list.rows, pages: got.pages, rows: got.table.length, sha });
+        if (asList.filed) return;
+      }
       pdfText = got.text;
     }
   } else {

@@ -155,11 +155,16 @@ export async function readStatementFile(file: File): Promise<StatementFileRead> 
   const bytes = await file.arrayBuffer();
   const got = await readPdf(bytes, name);
   if (!got.ok) return { ok: false, error: got.error };
-  if (!tableReadsAsList(got.table)) {
+  const list = tableReadsAsList(got.table);
+  if (!list) {
     return {
       ok: false,
       error: `${name} has pages this can read, but nothing on them reads as a statement: a supplier's list needs a column of paper numbers and a column of amounts, and a bank's needs a date, a description and an amount on every line. If it is ONE paper — an invoice, a bill, a receipt — add it with the + button at the top and it will be read as a paper.`,
     };
   }
-  return { ok: true, table: got.table, listDate: savedOn(file.lastModified), pdf: { pages: got.pages, rows: got.table.length } };
+  // THE ROWS THE QUESTION WAS ANSWERED ABOUT, never `got.table`: a statement whose letterhead pushed
+  // the heading row past the readers' 15-row reach comes back cropped to that heading, and handing the
+  // uncropped table on would ask the readers the question this door just answered and get "no heading".
+  // The PDF's own row count is still every row that came off the pages, which is what the report says.
+  return { ok: true, table: list.rows, listDate: savedOn(file.lastModified), pdf: { pages: got.pages, rows: got.table.length } };
 }

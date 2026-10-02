@@ -395,7 +395,9 @@ export default async function ReconcilePage() {
               Drop the month off your bank&apos;s website or a supplier&apos;s portal here: CSV, Excel, your bank&apos;s OFX,
               QFX or QBO file, or the PDF statement your supplier emails you. A PDF is read off the page, so the line
               under it says how many pages and how many rows came off it and what they add to — check that against the
-              total your statement prints. A PDF that was SCANNED has no text on its pages at all; that one has to go in
+              total your statement prints. If two of its columns could both be the amount, the line says the pages and
+              asks you which column is which, and adds them up once you have. A PDF that was SCANNED has no text on its
+              pages at all; that one has to go in
               with the + button at the top, which looks at it as a picture.
             </p>
             <BankDropLine />

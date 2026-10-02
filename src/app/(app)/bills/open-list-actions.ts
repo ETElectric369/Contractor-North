@@ -14,6 +14,7 @@ import {
   findHeaderRow,
   openListFromText,
   listReadFacts,
+  pdfPagesSaid,
   pdfReadSaid,
   readHeaderRow,
   readOpenListTable,
@@ -79,6 +80,8 @@ export async function addOpenList(input: {
   const pdf = pages > 0 && rawRows >= 0 ? { pages, rows: rawRows } : null;
   /** THE READ REPORT, where every door reaches it, for whichever card this becomes. */
   const withReport = (line: string, facts: ReadFacts) => (pdf ? `${line} ${pdfReadSaid(pdf, facts, today)}` : line);
+  /** A PDF whose columns go to the picker has no reader's figures yet, and the pages are still facts. */
+  const withPages = (line: string) => (pdf ? `${line} ${pdfPagesSaid(pdf)}` : line);
 
   let stored: StoredOpenList | null = null;
   let sha: string | null = isSha256(input?.sha256) ? String(input.sha256) : null;
@@ -142,7 +145,9 @@ export async function addOpenList(input: {
     if (read.ok) stored = { list: read.list, needs: null };
     else if ("needs" in read) {
       // A BANK'S FILE THAT DIDN'T READ AS ONE waits for its columns with no long number in it.
-      const needs = read.needs;
+      // THE PDF'S PAGES RIDE ALONG: once the columns are picked there is no other way back to them, and
+      // the read report is owed on this path most of all — it is where the parse is least verified.
+      const needs = { ...read.needs, pdf };
       const hasRef = needs.headerRow >= 0 && readHeaderRow(needs.raw[needs.headerRow] ?? []).columns.reference !== undefined;
       stored = mayBeBankTable(needs.raw, needs.headerRow, hasRef)
         ? { list: null, needs: { ...needs, raw: redactWordCells(needs.raw), header: needs.header.map((h) => redactDigits(h)) } }
@@ -177,7 +182,7 @@ export async function addOpenList(input: {
   if ("error" in placed) return { ok: false, error: `${name} wasn't added. ${placed.error}` };
   revalidatePath("/bills");
   revalidatePath("/organize");
-  return { ok: true, id: placed.id, line: stored.list ? withReport(openListLine(stored), listReadFacts(stored.list)) : openListLine(stored) };
+  return { ok: true, id: placed.id, line: stored.list ? withReport(openListLine(stored), listReadFacts(stored.list)) : withPages(openListLine(stored)) };
 }
 
 async function waitingList(supabase: any, orgId: string, id: string) {
@@ -231,11 +236,16 @@ export async function pickOpenListColumns(id: string, picked: OpenListColumns): 
   const saved = await saveStored(ctx.supabase, ctx.orgId, id, got.p, { list, needs: null });
   if (!saved.ok) return saved;
 
+  // THE READ REPORT THIS PATH OWED HIM. A PDF whose columns came here said only how many pages came off
+  // it; now that a reader has read them, it says the rest — how many papers, over what dates, adding to
+  // what, and the figure on his own paper to hold that against. The Reconcile page promises this line
+  // for every PDF, and this was the one path that never said it.
+  const report = needs.pdf ? ` ${pdfReadSaid(needs.pdf, listReadFacts(list), await orgToday(ctx.supabase, ctx.orgId))}` : "";
   // REMEMBER IT on the account the list belongs to, when that is known without guessing.
   const [accounts, loaded] = await Promise.all([loadAccounts(ctx.supabase, ctx.orgId), loadPapers(ctx.supabase, ctx.orgId)]);
   const who = resolveAccount(list, null, accounts, loaded.papers);
-  if (!who) return { ok: true, message: `Read ${list.rows.length} papers. Pick whose list it is, and these columns will be remembered for them.` };
-  return { ok: true, message: `Read ${list.rows.length} papers. ${await remember(ctx.supabase, ctx.orgId, who.id, rememberColumns(columns, needs.header, width))}` };
+  if (!who) return { ok: true, message: `Read ${list.rows.length} papers.${report} Pick whose list it is, and these columns will be remembered for them.` };
+  return { ok: true, message: `Read ${list.rows.length} papers.${report} ${await remember(ctx.supabase, ctx.orgId, who.id, rememberColumns(columns, needs.header, width))}` };
 }
 
 async function remember(supabase: any, orgId: string, accountId: string, rem: ReturnType<typeof rememberColumns>): Promise<string> {

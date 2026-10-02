@@ -1,6 +1,6 @@
 import { BUCKET_SECTION, BUSINESS_COST_BUCKETS, bucketOf, isBusinessCostBucket, type BusinessCostBucket } from "@/lib/business-cost-buckets";
 import { PNL_WORDS } from "@/lib/analytics/profit-and-loss";
-import { findHeaderRow, fingerprintOf, headerKey, readDate, readHeaderRow, readHeaderWith, readMoney, sayDollars, type ReadFacts } from "@/lib/supplier-open-list";
+import { findHeaderRow, fingerprintOf, headerKey, looksLikePaperNumber, readDate, readHeaderRow, readHeaderWith, readMoney, sayDollars, type ReadFacts } from "@/lib/supplier-open-list";
 // THE RULE EVERY DOOR THAT PUTS A COST ON A JOB IS HELD TO (audit v994's DB4). A bank line writes a
 // bills row with NO LINES under it, so which way the money goes decides whether a job is an answer at
 // all. jobRefusalFor below asks this guard; nothing in this module decides that for itself.
@@ -249,8 +249,37 @@ export function looksLikeBankTable(table: readonly (readonly string[])[], suppli
     .map((r) => String(r[ref] ?? "").trim())
     .filter(Boolean)
     .slice(0, 30);
-  const paperNumbers = values.filter((v) => /\d/.test(v) && !/\s/.test(v) && v.length <= 30).length;
+  const paperNumbers = values.filter((v) => looksLikePaperNumber(v)).length;
   return !(values.length > 0 && paperNumbers / values.length >= 0.6);
+}
+
+/**
+ * THE PROOF A TABLE IS A BANK'S STATEMENT AND NOT AN INVOICE'S OWN LINES.
+ *
+ * A day, a description and an amount is the shape of a card statement AND the shape of a plumber's
+ * time-and-materials invoice. In a file a person downloaded from his bank's website that costs
+ * nothing — he knows what he downloaded. In a table lifted off a PDF's pages nobody vouched for the
+ * paper, and `looksLikeBankTable` answers yes to any such heading with no paper-number column, so a
+ * subcontractor's invoice became a bank card of three DEPOSITS of the owner's own money.
+ *
+ * WHAT ONLY A STATEMENT HAS: a heading only a bank prints (Withdrawals, Deposits, Debit, Credit,
+ * Posted, Check, Memo, Payee), a running balance down the side, or money that went OUT. An invoice's
+ * lines all go one way; a month of an account does not.
+ *
+ * IT IS ASKED ONLY OF A PDF (pdf-table.ts's `tableReadsAsList`), never of a download. A bank's own CSV
+ * of Date, Description, Amount with every line positive is still the bank's, and turning that away
+ * would be a new dead end for the file the person chose on purpose.
+ */
+export function bankTableProof(table: readonly (readonly string[])[]): boolean {
+  const h = findBankHeader(table);
+  if (!h) return false;
+  const words = (h.row >= 0 ? (table[h.row] ?? []) : []).map((c) => headerKey(c));
+  if (words.some((k) => BANK_ONLY.has(k))) return true;
+  if (h.columns.balance !== undefined) return true;
+  if (h.columns.debit !== undefined && h.columns.credit !== undefined) return true;
+  const at = h.columns.amount;
+  if (at === undefined) return false;
+  return table.slice(Math.max(h.row + 1, 0)).some((r) => (readBankMoney(String(r[at] ?? "")) ?? 0) < 0);
 }
 
 // ── ONE LINE ───────────────────────────────────────────────────────────────────────────────────

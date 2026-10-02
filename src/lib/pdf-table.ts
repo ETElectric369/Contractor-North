@@ -1,5 +1,5 @@
-import { findHeaderRow, isLineItemHeader, readDate, readHeaderRow, readMoney } from "@/lib/supplier-open-list";
-import { looksLikeBankTable } from "@/lib/bank-download";
+import { HEADER_WORDS, MONEY_CELL, findHeaderRow, isLineItemHeader, looksLikePaperNumber, readDate, readHeaderRow, readHeaderWith, readMoney, type OpenListColumns } from "@/lib/supplier-open-list";
+import { BANK_WORDS, bankTableProof, findBankHeader, looksLikeBankTable } from "@/lib/bank-download";
 
 /**
  * A PDF'S TABLE, FROM WHERE ITS MARKS SIT ON THE PAGE (the PDF statement reads, 2026-10-02).
@@ -190,6 +190,45 @@ function alignmentEdges(rows: readonly Mark[][]): number[] {
 }
 
 /**
+ * A ROW'S MARKS AS THE WORDS A READER SEES: runs closer together than about two spaces are one word,
+ * so "OPEN" and "AMOUNT" printed as two runs are the one heading OPEN AMOUNT and not two columns.
+ */
+function wordGroups(row: readonly Mark[], height: number): { str: string; x: number; right: number }[] {
+  const near = (height > 0 ? height : 8) * 1.5;
+  const out: { str: string; x: number; right: number }[] = [];
+  for (const m of row) {
+    const last = out[out.length - 1];
+    if (last && m.x - last.right <= near) {
+      last.str = `${last.str} ${m.str}`.replace(/\s+/g, " ");
+      last.right = Math.max(last.right, m.right);
+    } else out.push({ str: m.str, x: m.x, right: m.right });
+  }
+  return out;
+}
+
+/** Is this one word a column heading one of the readers KNOWS? ("Open Amount" yes, "AGE" no.) */
+function knownHeading(word: string): boolean {
+  const supplier = readHeaderWith([word], HEADER_WORDS).columns;
+  const bank = readHeaderWith([word], BANK_WORDS).columns;
+  return Object.keys(supplier).length > 0 || Object.keys(bank).length > 0;
+}
+
+/**
+ * The row whose words one of the readers recognises as COLUMN HEADINGS, each word with whether that
+ * reader knows it. The known ones are what the grid is checked against: a paper's own "AGE" or "ORIG
+ * AMOUNT" is nobody's word, and whether it shares a cell with its neighbour decides nothing.
+ */
+function headingRow(rows: readonly Mark[][], height: number): { x: number; right: number; known: boolean }[] | null {
+  for (const row of rows) {
+    const groups = wordGroups(row, height);
+    if (groups.length < 3) continue;
+    if (!readsAsHeading(groups.map((g) => g.str))) continue;
+    return groups.map((g) => ({ x: g.x, right: g.right, known: knownHeading(g.str) }));
+  }
+  return null;
+}
+
+/**
  * THE GRID IS DRAWN BY THE MARKS THAT DO NOT SWALLOW ANOTHER COLUMN'S EDGE, AND BY NOTHING ELSE.
  *
  * A column cannot be found by clustering every mark that overlaps another: a statement's address
@@ -210,13 +249,10 @@ function alignmentEdges(rows: readonly Mark[][]): number[] {
  * overlap the footer's band further than its own amounts', and the heading and its figures would end
  * up in two columns.
  *
- * WHEN NOTHING REPEATS THREE TIMES (a heading row and two lines) there are no alignment edges at all,
- * every mark draws, and this falls back to plain overlap clustering — which is the right answer for a
- * table that has no grid to find.
+ * WHEN NOTHING REPEATS THREE TIMES there is no grid to find in the rows, and the HEADING ROW's own
+ * edges are used instead — see bandsOf below, which checks its work against that row.
  */
-function bandsOf(rows: readonly Mark[][], all: readonly Mark[], height: number): Band[] {
-  if (!all.length) return [];
-  const edges = alignmentEdges(rows);
+function gridOf(edges: readonly number[], all: readonly Mark[], height: number): Band[] {
   const swallows = (m: Mark) => edges.some((at) => at > m.x + EDGE_TOL && at < m.right - EDGE_TOL);
   const standsOn = (m: Mark) => edges.some((at) => Math.abs(at - m.x) <= EDGE_TOL || Math.abs(at - m.right) <= EDGE_TOL);
   const spanOf = (m: Mark) => ({ lo: m.x, hi: m.right });
@@ -237,6 +273,53 @@ function bandsOf(rows: readonly Mark[][], all: readonly Mark[], height: number):
   for (const b of bands) b.grid = true;
   const extra = joinTight(mergeBands(orphans.map(spanOf)), gutter);
   return [...bands, ...extra].sort((a, b) => a.lo - b.lo);
+}
+
+/**
+ * THE GRID IS CHECKED AGAINST THE HEADING ROW, AND THE HEADING ROW WINS (the short statement, 2026-10-02).
+ *
+ * A statement with ONE or TWO open papers on it has no column that three rows of a page agree on, so
+ * the only edges left are coincidences — an address line's left x, a footer label's right edge — and
+ * the money columns, whose right edges only two rows share, draw nothing at all. Every money mark then
+ * falls through as an orphan, the orphans merge, and DISCOUNT, OPEN AMOUNT and ORIG AMOUNT arrive as
+ * ONE cell. The statement read as no list, the PDF went down the single-paper path with nothing said
+ * about its table, and Reconcile refused it with "nothing on them reads as a statement" — which was
+ * false: it had a column of paper numbers and a column of amounts. A small contractor's month with two
+ * open invoices is an ordinary month, not an edge case.
+ *
+ * THE TEST IS THE PAPER'S OWN HEADINGS: every heading the readers KNOW must land in a column of its
+ * own. Two of them in one cell means the grid is wrong, whatever drew it — and then the heading row,
+ * which IS a column grid the paper printed itself, draws the grid instead. Only words a reader knows
+ * count, so one heading pdfjs happened to split into two wide-apart runs decides nothing.
+ *
+ * IT IS A SECOND PASS AND NOT THE FIRST, because on a statement with rows enough to measure, the rows'
+ * own edges are the better measure: money is right-aligned and lands 20 points past the right edge of
+ * the heading over it, so a grid built from heading edges alone has to find each amount by overlap. A
+ * page whose headings already separate is left exactly as it was.
+ */
+function bandsOf(rows: readonly Mark[][], all: readonly Mark[], height: number): Band[] {
+  if (!all.length) return [];
+  const bands = gridOf(alignmentEdges(rows), all, height);
+  const heading = headingRow(rows, height);
+  if (!heading || headingsSplit(bands, heading)) return bands;
+  const seeded = gridOf(
+    heading.flatMap((g) => [g.x, g.right]),
+    all,
+    height,
+  );
+  return seeded.length ? seeded : bands;
+}
+
+/** Does every heading a reader knows land in a column of its own? Two in one cell is a wrong grid. */
+function headingsSplit(bands: readonly Band[], heading: readonly { x: number; right: number; known: boolean }[]): boolean {
+  const seen = new Set<number>();
+  for (const g of heading) {
+    if (!g.known) continue;
+    const at = bandFor(bands, { str: "", x: g.x, right: g.right, y: 0, page: 0 });
+    if (seen.has(at)) return false;
+    seen.add(at);
+  }
+  return true;
 }
 
 function joinTight(bands: readonly Band[], gutter: number): Band[] {
@@ -312,6 +395,12 @@ const MONEY_IN = /\(?-?\$?\s?[\d,]*\d\.\d{2}\)?-?/;
  * in one column, under a row that had several. Left alone it becomes a row with no paper number on
  * it, and the words are lost. This is a rule and not a special case: ANY lone cell of words with no
  * day and no money in it, under a row that has more than one cell, joins that row's same cell.
+ *
+ * AND IT IS THE ROW ABOVE IT, NOT THE LAST ROW ANYWHERE ON THE PAGE — see linePitch and the join
+ * itself in tableFromPositionedItems. A rule with no vertical reach joined "Page 1 of 3" at the foot
+ * of the page, and "PAYMENTS AND CREDITS" 80 points under the last paper, onto that paper's REFERENCE
+ * cell: "7741-2209002 PAYMENTS AND CREDITS", accepted with nothing reported, matching no bill the app
+ * holds, so the card proposed adding a duplicate paper and called the real one missing.
  */
 function isContinuation(cells: readonly string[]): number | null {
   let at = -1;
@@ -331,6 +420,43 @@ function isContinuation(cells: readonly string[]): number | null {
 const filled = (cells: readonly string[]) => cells.filter((c) => c !== "").length;
 
 /**
+ * THE PAGE'S OWN LINE PITCH: the median gap from one row to the next, within a page. A wrapped
+ * description sits ONE line under the row it belongs to; a page-number footer sits six hundred points
+ * under it, and an aging footer forty. Measured off the paper rather than hardcoded, because a number
+ * that fits one supplier's leading silently joins the next supplier's footer onto his last paper.
+ */
+function linePitch(rows: readonly Mark[][], height: number): number {
+  const gaps: number[] = [];
+  for (let i = 1; i < rows.length; i++) {
+    const above = rows[i - 1][0];
+    const here = rows[i][0];
+    if (!above || !here || above.page !== here.page) continue;
+    const gap = above.y - here.y;
+    if (gap > 0) gaps.push(gap);
+  }
+  const m = median(gaps);
+  return m > 0 ? m : (height > 0 ? height : 8) * 1.5;
+}
+
+/**
+ * COULD THIS ROW BE A LINE OF THE STATEMENT? A day in one cell, or a figure in one. Page furniture — a
+ * heading row, an address block, a page title, a remit-to block — carries neither.
+ *
+ * It is what the repeated-page-furniture rule is allowed to drop. The rule used to drop ANY row a
+ * later page repeated cell for cell, and a card statement that charged the same fuel station the same
+ * amount twice in one week — page 1's last line and page 2's first — lost the second purchase. It was
+ * not counted and not listed as skipped: the report's row count is measured AFTER the drop, so only
+ * the total disagreeing with his own paper could reveal it, which is the worst outcome this path has.
+ */
+function carriesALine(cells: readonly string[]): boolean {
+  return cells.some((c) => {
+    const v = c.trim();
+    if (!v) return false;
+    return MONEY_CELL.test(v) || DATE_IN.test(v) || readDate(v) !== null;
+  });
+}
+
+/**
  * A PDF'S PAGES AS ONE TABLE: rows by where they sit, columns by the bands that repeat, every cell
  * in its own column with the empty ones kept. An empty cell IS information — a row that drops it
  * shifts every value after it one column left, which on a statement means an amount landing under
@@ -339,15 +465,17 @@ const filled = (cells: readonly string[]) => cells.filter((c) => c !== "").lengt
  * REPEATED PAGE FURNITURE: page two of a statement reprints the heading row and the address block,
  * and three header rows and three address blocks must not arrive as if they were papers. THE RULE:
  * a row on a later page that is an EXACT repeat (cell for cell) of a row already seen on an EARLIER
- * page is dropped. The readers downstream find their own header row, so one copy of it is all they
- * need, and a within-page repeat is kept untouched.
+ * page is dropped, AND ONLY WHEN IT COULD NOT BE A LINE — no day in it and no figure (carriesALine).
+ * The readers downstream find their own header row, so one copy of it is all they need, and a
+ * within-page repeat is kept untouched.
  *
- * WHAT THAT COSTS: a statement that legitimately prints the same line twice on two different pages —
- * the same day, the same paper number and the same amount — loses the second copy. On a supplier's
- * open list that costs nothing, because readOpenListTable already refuses the same paper number
- * twice; on a bank download two identical lines on one day would become one, so a bank's PDF that
- * prints a repeated line would read one line short. It is said in the read report (the row count and
- * the total are the rows that actually landed), never hidden.
+ * WHY THE SECOND HALF OF THAT RULE. Without it, a row that really was a line went silently missing: a
+ * card statement that charged the same fuel station the same amount twice in one week, page 1's last
+ * line and page 2's first, read one purchase short with nothing counted and nothing listed as skipped.
+ * The row count in the read report is `table.length`, measured after this function has already
+ * dropped the row, and nothing in ReadFacts can carry "a row was removed" — so the loss could only
+ * ever surface as a total that disagreed with his own paper. A heading row, an address line and a page
+ * title carry neither a day nor a figure, so nothing this rule exists for is lost by narrowing it.
  */
 export function tableFromPositionedItems(items: readonly PositionedItem[] | null | undefined, opts?: TableOptions): string[][] {
   const { marks, height } = marksOf(items);
@@ -362,8 +490,12 @@ export function tableFromPositionedItems(items: readonly PositionedItem[] | null
   if (!bands.length || bands.length > MAX_COLUMNS) return [];
   const cap = Math.max(1, Math.min(opts?.maxRows ?? MAX_ROWS, MAX_ROWS));
 
+  // A wrapped line sits one pitch under its row; anything further down the page is not its tail.
+  const reach = linePitch(rows, height) * 1.5;
+
   const out: string[][] = [];
   const pages: number[] = [];
+  const ys: number[] = [];
   const seen = new Map<string, number>();
   for (const row of rows) {
     const buckets: Mark[][] = bands.map(() => []);
@@ -371,51 +503,144 @@ export function tableFromPositionedItems(items: readonly PositionedItem[] | null
     const cells = buckets.map((b) => cellText(b, height));
     if (!filled(cells)) continue;
     const page = row[0].page;
+    const y = row[0].y;
     const key = cells.join("\u0001");
     const first = seen.get(key);
-    if (first !== undefined && first < page) continue;
+    if (first !== undefined && first < page && !carriesALine(cells)) continue;
     if (first === undefined) seen.set(key, page);
 
     const at = isContinuation(cells);
     const prev = out[out.length - 1];
-    if (at !== null && prev && filled(prev) > 1 && pages[pages.length - 1] === page) {
+    // THE ROW DIRECTLY ABOVE IT, ON THE SAME PAGE, WITHIN ONE LINE PITCH, AND NEVER INTO A CELL THAT
+    // ALREADY HOLDS A DAY OR A FIGURE. Each of those three is a failure that shipped: a footer 650
+    // points below glued "Page 1 of 3" onto a paper number; a section title 40 points below glued
+    // "DAILY BALANCE SUMMARY" onto a deposit's date, and that $1,875.50 deposit was skipped; and a
+    // line that lands in the amount column turns "275.40" into "275.40 Page 1 of 3", which drops the
+    // paper out of the total altogether.
+    const near = prev && pages[pages.length - 1] === page && ys[ys.length - 1] - y <= reach;
+    if (at !== null && prev && near && filled(prev) > 1 && !carriesALine([prev[at]])) {
       prev[at] = prev[at] ? `${prev[at]} ${cells[at]}` : cells[at];
       continue;
     }
     out.push(cells);
     pages.push(page);
+    ys.push(y);
     if (out.length >= cap) break;
   }
   return out;
 }
 
+/** How far down a PDF's pages the heading row is looked for. */
+const HEADING_SCAN = 200;
+/** As far as findHeaderRow and findBankHeader look for a heading row themselves. */
+const READER_REACH = 15;
+
+/** A row that reads as a row of COLUMN HEADINGS, by the words the readers already know: a supplier's
+ *  (two fields, one of them the paper number or the money) or a bank's (a day, a description, money). */
+function readsAsHeading(cells: readonly string[]): boolean {
+  const { columns } = readHeaderRow(cells);
+  const found = Object.keys(columns).length;
+  if (found >= 2 && (columns.reference !== undefined || columns.openBalance !== undefined || columns.amount !== undefined)) return true;
+  return findBankHeader([cells]) !== null;
+}
+
 /**
- * IS THIS PDF A STATEMENT, OR IS IT ONE PAPER? Asked of the readers that already exist and of no new
- * test of this file's own: bank-download.ts's `looksLikeBankTable` for a bank's download, and
- * supplier-open-list.ts's `findHeaderRow`/`readHeaderRow` for a supplier's open list, which needs a
- * column of paper numbers and a column of money. A table nothing recognises is not a list, and the
- * PDF goes down the single-paper path it goes down today — a CED invoice, a job plan and a deed must
- * all behave exactly as they did.
+ * THE TABLE FROM ITS HEADING ROW DOWN, WHEN THE HEADING IS OUT OF THE READERS' OWN REACH.
  *
- * ONE FUNCTION, BOTH DOORS. Snap Or Note and Reconcile's statement line ask this, so a PDF that
- * reads as a list at one door reads as a list at the other; a second copy of the question is how one
- * door starts taking a paper the other turns away.
+ * findHeaderRow and findBankHeader each look at the first 15 rows only — written for a download, where
+ * the heading is row 0. On a PDF every y-line of the letterhead, the remit-to block, the customer's
+ * address, the account box and the supplier's message is a row, and sixteen of them is an ordinary
+ * letterhead: the heading landed at row 16, both readers answered "no heading", the whole statement
+ * read as no list, and the PDF went down the single-paper path with nothing said about its table.
+ *
+ * AND ONLY WHEN IT IS OUT OF REACH. Inside 15 rows the readers find it themselves and every row above
+ * it stays where it is, because readOpenListTable reads the supplier's own printed total off the rows
+ * ABOVE the heading (printedFigures) — and that total is the one cross-check the completeness question
+ * has. Cropping a paper that did not need cropping would buy a heading and sell the proof.
  */
-export function tableReadsAsList(table: readonly (readonly string[])[]): "bank" | "supplier" | null {
+function fromHeading(table: readonly (readonly string[])[]): string[][] {
+  const rows = (table ?? []).map((r) => (r ?? []).map((c) => String(c ?? "")));
+  let at = -1;
+  for (let i = 0; i < Math.min(rows.length, HEADING_SCAN); i++) {
+    if (readsAsHeading(rows[i])) {
+      at = i;
+      break;
+    }
+  }
+  return at < READER_REACH ? rows : rows.slice(at);
+}
+
+/**
+ * DOES THE REFERENCE COLUMN HOLD PAPER NUMBERS, WITH MONEY BESIDE THEM? Asked of the VALUES, because
+ * the heading words alone cannot tell a supplier's open list from an invoice or a proposal.
+ *
+ * A painter's proposal printing ITEM | DESCRIPTION | AMOUNT over "Interior 1", "Exterior 2" and
+ * "Trim 3" read as three open papers for $12,200 of work nobody had billed. An invoice printing
+ * INVOICE NO. | INVOICE DATE | TERMS | AMOUNT DUE over its own labour lines read as a one-paper list
+ * with four rows reported as "isn't a paper number" — and either way the paper itself was never filed.
+ *
+ * THE LINE: at least half of what sits under the paper-number column, with money beside it, IS a paper
+ * number. A statement's own aging footer puts one label row under that column, so "every row" would
+ * turn away an ordinary statement; an invoice's item lines put four or five words there, so half is a
+ * line neither a proposal nor an invoice gets near.
+ */
+function mostlyPapers(table: readonly (readonly string[])[], at: number, columns: OpenListColumns): boolean {
+  const ref = columns.reference;
+  if (ref === undefined) return false;
+  const moneyAt = [columns.openBalance, columns.amount].filter((i): i is number => typeof i === "number");
+  let papers = 0;
+  let candidates = 0;
+  for (let i = Math.max(at, 0) + 1; i < table.length; i++) {
+    const row = table[i] ?? [];
+    const v = String(row[ref] ?? "").trim();
+    if (!v) continue;
+    candidates++;
+    if (looksLikePaperNumber(v) && moneyAt.some((j) => readMoney(String(row[j] ?? "")) !== null)) papers++;
+  }
+  return papers > 0 && papers * 2 >= candidates;
+}
+
+/**
+ * IS THIS PDF A STATEMENT, OR IS IT ONE PAPER? Asked of the readers that already exist:
+ * bank-download.ts's `looksLikeBankTable` and `bankTableProof` for a bank's download, and
+ * supplier-open-list.ts's `findHeaderRow`/`readHeaderRow` plus its own paper-number test for a
+ * supplier's open list. A table nothing recognises is not a list, and the PDF goes down the
+ * single-paper path it goes down today — an invoice, a job plan and a deed must all behave exactly as
+ * they did.
+ *
+ * ONE FUNCTION, BOTH DOORS, AND IT HANDS BACK THE ROWS IT ANSWERED ABOUT. Snap Or Note and Reconcile's
+ * statement line ask this one question, so a PDF that reads as a list at one door reads as a list at
+ * the other; and because the answer carries the rows (cropped to the heading row when the letterhead
+ * put it out of the readers' reach), a door cannot ask the question of one table and then read a
+ * different one.
+ *
+ * THE INVOICE GUARD IS ASKED BEFORE EITHER ANSWER. It used to sit under the bank answer, where it
+ * could never run: a date, a description and an amount is the shape of a card statement AND of a
+ * subcontractor's time-and-materials invoice, so `looksLikeBankTable` said "bank" and returned before
+ * the guard whose whole job was to say "that is an invoice's own item table".
+ */
+export function tableReadsAsList(table: readonly (readonly string[])[]): { as: "bank" | "supplier"; rows: string[][] } | null {
   if (!table?.length) return null;
-  const at = findHeaderRow(table);
-  const header = at >= 0 ? readHeaderRow(table[at] ?? []).columns : {};
-  if (looksLikeBankTable(table, header.reference !== undefined)) return "bank";
-  if (at < 0) return null;
+  const rows = fromHeading(table);
+  if (!rows.length) return null;
   // AN INVOICE'S OWN ITEM TABLE IS NEVER A LIST OF OPEN PAPERS, whatever its columns say: "ITEM" is
-  // one of the words a paper number goes by and "AMOUNT" is money, so a CED invoice's lines would
-  // otherwise read as a supplier's open list and his invoice would stop being a paper. The same
-  // guard the paste door already uses (a quantity and a price over the same columns), asked here.
-  if (table.some((r) => isLineItemHeader(r.join(" ")))) return null;
+  // one of the words a paper number goes by, "AMOUNT" is money, and HOURS and RATE over three dated
+  // lines are a date, a description and an amount. The same guard the paste door already uses (a
+  // quantity and a price over the same columns), asked once, above both answers.
+  if (rows.some((r) => isLineItemHeader(r.join(" ")))) return null;
+  const at = findHeaderRow(rows);
+  const header = at >= 0 ? readHeaderRow(rows[at] ?? []).columns : {};
+  // A BANK'S STATEMENT NEEDS THE PROOF ONLY A STATEMENT CARRIES (bankTableProof): a heading only a
+  // bank prints, a running balance, or money that went out. Without it an invoice's three labour lines
+  // became three DEPOSITS on a bank card — the owner's own money, invented — and an office hand who
+  // does not sort the bank was refused in the owner's name and could not file a vendor's invoice at all.
+  if (looksLikeBankTable(rows, header.reference !== undefined) && bankTableProof(rows)) return { as: "bank", rows };
+  if (at < 0) return null;
   // The same two columns readOpenListTable requires before it will read a list at all. Anything
   // short of them would land on the column picker, and a person pointing at the columns of an
   // invoice he meant to file as an invoice is a dead end dressed as a question.
   if (header.reference === undefined) return null;
   if (header.openBalance === undefined && header.amount === undefined) return null;
-  return "supplier";
+  if (!mostlyPapers(rows, at, header)) return null;
+  return { as: "supplier", rows };
 }

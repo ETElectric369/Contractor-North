@@ -171,7 +171,9 @@ describe("a supplier's statement, laid out the way the paper lays it out", () =>
   });
 
   it("it reads as a supplier's list, so it goes in as a list and not as one receipt", () => {
-    expect(tableReadsAsList(table)).toBe("supplier");
+    expect(tableReadsAsList(table)?.as).toBe("supplier");
+    // THE ROWS COME BACK WITH THE ANSWER, so a door cannot ask about one table and read another.
+    expect(tableReadsAsList(table)?.rows).toEqual(table);
   });
 });
 
@@ -193,6 +195,181 @@ describe("a wrapped description belongs to the row above it", () => {
     const table = tableFromPositionedItems(page(PAPERS.slice(0, 3)));
     expect(table.some((r) => r.join(" ").includes("4120 HARROW ROAD"))).toBe(true);
     expect(table.some((r) => r.join(" ").includes("NORTHGATE ELECTRIC SUPPLY 4120 HARROW ROAD"))).toBe(false);
+  });
+
+  /**
+   * AND IT IS THE ROW ABOVE IT, NOT THE LAST ROW ANYWHERE ON THE PAGE (2026-10-02, the skeptic's pass).
+   *
+   * The rule had no vertical reach at all: any lone line of words, however far down the page, joined
+   * whichever row was pushed last. A section title 80 points below the last paper became part of that
+   * paper's NUMBER — "7741-2209002 PAYMENTS AND CREDITS" — and nothing was reported, because the amount
+   * was untouched and the rows still added to the TOTAL DUE. The paper then matched no bill the app
+   * holds, so the card proposed adding a duplicate and called the real one missing from the list.
+   */
+  it("a lone line 80 points below the last paper is its own row, and that paper's number is untouched", () => {
+    const items = page(PAPERS.slice(0, 5), 0, { foot: false });
+    items.push(run(127, 680 - 4 * 12 - 80, "PAYMENTS AND CREDITS", 0));
+    const table = tableFromPositionedItems(items);
+    const reference = table[findHeaderRow(table)].indexOf("REFERENCE");
+    expect(cellsAt(table, reference)).toContain("7741-2209002");
+    expect(table.some((r) => r[reference].includes("PAYMENTS AND CREDITS") && r[reference].includes("7741-"))).toBe(false);
+    const read = readOpenListTable({ table, from: "file", name: "Statement.pdf", listDate: "2026-09-25", listDateFrom: "file" });
+    expect(read.ok).toBe(true);
+    if (!read.ok) return;
+    expect(read.list.rows.map((r) => r.reference)).toEqual(PAPERS.slice(0, 5).map((p) => p.reference));
+    // Said out loud, as the line that did not read: never joined to a paper and never dropped quietly.
+    expect(read.list.skipped.some((s) => s.why.includes("PAYMENTS AND CREDITS"))).toBe(true);
+  });
+
+  /**
+   * A PAGE NUMBER AT THE FOOT OF EVERY PAGE, which is almost every statement there is, and no test had
+   * one. At x130 it became part of the last paper's number on pages 1 and 2 with nothing reported; at
+   * x420 it became part of the OPEN AMOUNT cell and both papers dropped out of the total; at x25 it
+   * landed in the DATE cell, where a date silently becomes null.
+   */
+  it("a Page N of M footer never joins the last row of its page, wherever on the line it is printed", () => {
+    for (const footX of [25, 130, 270, 420]) {
+      const items = [...page(PAPERS.slice(0, 4), 0, { foot: false }), ...page(PAPERS.slice(4, 7), 1, { foot: false }), ...page(PAPERS.slice(7), 2)];
+      items.push(run(footX, 30, "Page 1 of 3", 0), run(footX, 30, "Page 2 of 3", 1), run(footX, 30, "Page 3 of 3", 2));
+      const table = tableFromPositionedItems(items);
+      const read = readOpenListTable({ table, from: "file", name: "Statement.pdf", listDate: "2026-09-25", listDateFrom: "file" });
+      expect(read.ok, `x=${footX}`).toBe(true);
+      if (!read.ok) continue;
+      expect(read.list.rows.map((r) => r.reference), `x=${footX}`).toEqual(PAPERS.map((p) => p.reference));
+      const total = read.list.rows.reduce((n, r) => n + r.openBalance, 0);
+      expect(total.toFixed(2), `x=${footX}`).toBe(TOTAL_DUE.replace("$", "").replace(",", ""));
+    }
+  });
+});
+
+/**
+ * THE AGING FOOTER'S FIGURES ARE NOT A PAPER, WHICHEVER WAY THE PAPER PRINTS THEM (2026-10-02).
+ *
+ * Only the right-aligned layout was pinned. With the amounts printed at their labels' own left x — a
+ * layout the same paper allows — the CURRENT bucket lands in the REFERENCE band and became a paper
+ * numbered "742.61", so the read report's total overshot the paper's own TOTAL DUE by that bucket, and
+ * the sentence under it told him the parse had MISSED something. Applying the card would have added a
+ * bill numbered 742.61 to that supplier.
+ */
+describe("an aging footer invents no paper", () => {
+  /** The same page, with the footer's five figures left-aligned under their labels instead. */
+  function leftFooter(papers: readonly Paper[]): string[][] {
+    const items = page(papers, 0, { foot: false });
+    const y = 680 - papers.length * 12 - 40;
+    for (const [x, word] of FOOTER) items.push(run(x, y, word, 0));
+    FOOTER.forEach(([x], i) => items.push(run(x, y - 12, FOOTER_AMOUNTS[i], 0)));
+    return tableFromPositionedItems(items);
+  }
+
+  it("a left-aligned footer figure in the REFERENCE band is not a paper number", () => {
+    const table = leftFooter(PAPERS.slice(0, 4));
+    const read = readOpenListTable({ table, from: "file", name: "Statement.pdf", listDate: "2026-09-25", listDateFrom: "file" });
+    expect(read.ok).toBe(true);
+    if (!read.ok) return;
+    expect(read.list.rows.map((r) => r.reference)).toEqual(PAPERS.slice(0, 4).map((p) => p.reference));
+    for (const amount of FOOTER_AMOUNTS) expect(read.list.rows.map((r) => r.reference)).not.toContain(amount);
+    // Said out loud, so the total it is held against is the total of the papers and nothing else.
+    expect(read.list.skipped.some((s) => s.why.includes("742.61"))).toBe(true);
+    expect(read.list.rows.reduce((n, r) => n + r.openBalance, 0)).toBeCloseTo(412.9 + 88.15 + 1204.66 + 275.4, 2);
+  });
+
+  it("the whole nine-paper page still reads, right-aligned footer and all", () => {
+    const table = tableFromPositionedItems(page(PAPERS));
+    const read = readOpenListTable({ table, from: "file", name: "Statement.pdf", listDate: "2026-09-25", listDateFrom: "file" });
+    expect(read.ok).toBe(true);
+    if (!read.ok) return;
+    expect(read.list.rows).toHaveLength(PAPERS.length);
+  });
+});
+
+/**
+ * A STATEMENT WITH ONE OR TWO PAPERS ON IT IS AN ORDINARY MONTH (2026-10-02, the skeptic's pass).
+ *
+ * Three rows of a page have to agree on an edge before it counts as a column, and a two-paper page has
+ * nothing that does: the money columns drew nothing, every money mark fell through as an orphan, the
+ * orphans merged, and DISCOUNT, OPEN AMOUNT and ORIG AMOUNT arrived as one cell. tableReadsAsList then
+ * said "not a list", so the PDF went down the single-paper path with nothing said, and Reconcile refused
+ * it with "nothing on them reads as a statement" — which was false. Worse, the older text reader took
+ * the LAST figure on the line as the open balance, so a paper with $100.00 still open on a $412.90
+ * invoice showed as $412.90 open.
+ */
+describe("a short statement keeps its columns apart", () => {
+  const SHORT: Paper[] = [
+    { age: "47", date: "08/12/26", code: "IN", reference: "7741-2203118", po: "3302 PINEBROOK", open: "412.90", orig: "412.90" },
+    // Part-paid: what is OPEN is $100.00 and what the invoice was is $412.90. Two different columns.
+    { age: "47", date: "08/12/26", code: "IN", reference: "7741-2203204", po: "3302 PINEBROOK", open: "100.00", orig: "412.90" },
+  ];
+
+  for (const n of [1, 2]) {
+    it(`${n} paper${n === 1 ? "" : "s"} and an aging footer: every heading in its own column, and it reads as a list`, () => {
+      const table = tableFromPositionedItems(page(SHORT.slice(0, n)));
+      const header = table[findHeaderRow(table)];
+      const where = HEADINGS.map(([, word]) => header.indexOf(word));
+      expect(where, "every heading in its own cell").not.toContain(-1);
+      expect(new Set(where).size).toBe(HEADINGS.length);
+      expect(tableReadsAsList(table)?.as).toBe("supplier");
+      const read = readOpenListTable({ table, from: "file", name: "Statement.pdf", listDate: "2026-09-25", listDateFrom: "file" });
+      expect(read.ok).toBe(true);
+      if (!read.ok) return;
+      // THE AMOUNT UNDER THE RIGHT HEADING: $100.00 is open, not the $412.90 the invoice was for.
+      expect(read.list.rows.map((r) => [r.reference, r.openBalance])).toEqual(SHORT.slice(0, n).map((p) => [p.reference, Number(p.open.replace(/,/g, ""))]));
+    });
+  }
+});
+
+/**
+ * A LETTERHEAD TALLER THAN THE READERS' REACH (2026-10-02, the skeptic's pass). findHeaderRow and
+ * findBankHeader each look at the first 15 rows — a download's shape, where the heading is row 0. On a
+ * PDF every y-line of the remit-to block, the customer's address, the account box and the supplier's
+ * message is a row of its own, and sixteen of them is an ordinary letterhead: the heading landed at row
+ * 16, both readers said "no heading", and the statement went down the single-paper path with nothing
+ * said about its table.
+ */
+describe("a statement under a tall letterhead", () => {
+  function underLetterhead(lines: number): string[][] {
+    const items: PositionedItem[] = [];
+    for (let i = 0; i < lines; i++) items.push(run(25, 780 - i * 12, `REMIT TO BOX ${1000 + i} RIVERBEND CA`, 0));
+    const top = 780 - lines * 12;
+    for (const [x, word] of HEADINGS) items.push(run(x, top, word, 0));
+    PAPERS.slice(0, 4).forEach((p, i) => {
+      const y = top - 12 - i * 12;
+      items.push(run(29, y, p.age, 0), run(51, y, p.date, 0), run(105, y, p.code, 0), run(127, y, p.reference, 0), run(212, y, p.po, 0));
+      items.push(money(496, y, p.open, 0), money(577, y, p.orig, 0));
+    });
+    return tableFromPositionedItems(items);
+  }
+
+  for (const lines of [4, 15, 16, 24]) {
+    it(`${lines} lines of letterhead above the heading row still reads as a supplier's list`, () => {
+      const table = underLetterhead(lines);
+      const got = tableReadsAsList(table);
+      expect(got?.as).toBe("supplier");
+      // The rows handed back start at the heading, so the readers downstream find it inside their reach.
+      const read = readOpenListTable({ table: got!.rows, from: "file", name: "Statement.pdf", listDate: "2026-09-25", listDateFrom: "file" });
+      expect(read.ok).toBe(true);
+      if (!read.ok) return;
+      expect(read.list.rows.map((r) => r.reference)).toEqual(PAPERS.slice(0, 4).map((p) => p.reference));
+    });
+  }
+
+  it("a letterhead inside the readers' reach is left where it is, so a printed total above the table is still read", () => {
+    const items: PositionedItem[] = [];
+    items.push(run(25, 780, "NORTHGATE ELECTRIC SUPPLY", 0));
+    items.push(run(380, 768, "AMOUNT DUE: $1,981.11", 0));
+    for (const [x, word] of HEADINGS) items.push(run(x, 700, word, 0));
+    PAPERS.slice(0, 4).forEach((p, i) => {
+      const y = 680 - i * 12;
+      items.push(run(29, y, p.age, 0), run(51, y, p.date, 0), run(105, y, p.code, 0), run(127, y, p.reference, 0), run(212, y, p.po, 0));
+      items.push(money(496, y, p.open, 0), money(577, y, p.orig, 0));
+    });
+    const table = tableFromPositionedItems(items);
+    const got = tableReadsAsList(table);
+    expect(got?.as).toBe("supplier");
+    expect(got!.rows.some((r) => r.join(" ").includes("AMOUNT DUE: $1,981.11"))).toBe(true);
+    const read = readOpenListTable({ table: got!.rows, from: "file", name: "Statement.pdf", listDate: "2026-09-25", listDateFrom: "file" });
+    expect(read.ok).toBe(true);
+    if (!read.ok) return;
+    expect(read.list.printedTotal).toBe(1981.11);
   });
 });
 
@@ -248,7 +425,7 @@ describe("a bank statement's pages: the heading says which way the money went", 
   const table = tableFromPositionedItems(items);
 
   it("reads as a bank download through the reader that already exists", () => {
-    expect(tableReadsAsList(table)).toBe("bank");
+    expect(tableReadsAsList(table)?.as).toBe("bank");
   });
 
   it("a withdrawal is money out and a deposit is money in, from the heading and not from a sign", () => {
@@ -265,6 +442,55 @@ describe("a bank statement's pages: the heading says which way the money went", 
   it("the account number on the page never reaches the stored line whole", () => {
     const dl = readBankTable(table, "Statement.pdf", (t) => `h${t.length}`);
     for (const l of dl!.lines) expect(l.description).not.toContain("000199884412");
+  });
+});
+
+/**
+ * THE SAME PURCHASE TWICE IN ONE WEEK IS TWO PURCHASES (2026-10-02, the skeptic's pass).
+ *
+ * Page two of a statement reprints the heading row and the address block, so a row a later page repeats
+ * cell for cell is dropped. That rule had no exception for a row that carried MONEY: a card statement
+ * that charged the same fuel station the same amount on the same day — page 1's last line and page 2's
+ * first — read one purchase short. The read report's row count is measured after the drop and nothing in
+ * it could carry "a row was removed", so only a total disagreeing with his own paper could reveal it,
+ * which the doc comment claimed was impossible.
+ */
+describe("a repeated line across pages is kept; repeated furniture is not", () => {
+  const CARD: [string, string, string][][] = [
+    [
+      ["09/02/26", "CARD PURCHASE HARROWGATE FUEL", "-142.08"],
+      ["09/03/26", "DEPOSIT REMOTE", "300.00"],
+      ["09/05/26", "FUEL STOP 57444 RIVERBEND", "-42.17"],
+    ],
+    [
+      ["09/05/26", "FUEL STOP 57444 RIVERBEND", "-42.17"],
+      ["09/06/26", "WESTMERE HARDWARE", "-37.42"],
+    ],
+  ];
+  const items: PositionedItem[] = [];
+  CARD.forEach((lines, n) => {
+    items.push(run(25, 760, "RIVERBEND COMMUNITY BANK", n));
+    items.push(run(25, 748, "CARD 000199884412", n));
+    for (const [x, word] of [[30, "DATE"], [95, "DESCRIPTION"], [480, "AMOUNT"]] as [number, string][]) items.push(run(x, 700, word, n));
+    lines.forEach(([d, t, a], i) => {
+      const y = 680 - i * 12;
+      items.push(run(30, y, d, n), run(95, y, t, n), money(530, y, a, n));
+    });
+  });
+  const table = tableFromPositionedItems(items);
+
+  it("the heading row and the address block arrive once, not twice", () => {
+    expect(table.filter((r) => r.includes("DATE") && r.includes("AMOUNT"))).toHaveLength(1);
+    expect(table.filter((r) => r.join(" ").includes("RIVERBEND COMMUNITY BANK"))).toHaveLength(1);
+  });
+
+  it("both copies of the repeated purchase are read, and the total is what he spent", () => {
+    const dl = readBankTable(table, "Card.pdf", (t) => `h${t.length}`);
+    expect(dl).not.toBeNull();
+    expect(dl!.lines).toHaveLength(5);
+    expect(dl!.lines.filter((l) => l.description.includes("FUEL STOP"))).toHaveLength(2);
+    expect(dl!.skipped).toEqual([]);
+    expect(dl!.lines.reduce((n, l) => n + l.cents, 0)).toBe(300_00 - 142_08 - 42_17 - 42_17 - 37_42);
   });
 });
 
@@ -354,6 +580,127 @@ describe("a scan, and a paper that is one paper", () => {
       run(60, 700, "Two 20 amp circuits to the rear bedroom, one to the porch.", 0),
     ];
     expect(tableReadsAsList(tableFromPositionedItems(items))).toBeNull();
+  });
+});
+
+/**
+ * ONE PAPER WITH A DATE ON EVERY LINE IS STILL ONE PAPER (2026-10-02, the skeptic's pass).
+ *
+ * A date, a description and an amount is the shape of a card statement AND the shape of every
+ * subcontractor's invoice. The bank question was asked FIRST, and `looksLikeBankTable` says yes to any
+ * such heading with no paper-number column — so a plumber's three dated labour lines came back as three
+ * DEPOSITS of the owner's own money, and the invoice guard that was written to stop exactly that sat
+ * below the return and could never run. For an office hand the same PDF was refused in the owner's name
+ * and his vendor's invoice could not be filed at all.
+ *
+ * EVERY TABLE BELOW IS LAID OUT WITH A REAL LETTERHEAD ABOVE IT, because the heading row's distance
+ * from the top is part of the failure (findHeaderRow looks at the first 15 rows).
+ */
+describe("a single paper with dated lines is not a statement", () => {
+  /** One invoice page: a letterhead, a heading row, and its own lines. */
+  function invoice(headings: [number, string][], lines: string[][]): string[][] {
+    const items: PositionedItem[] = [];
+    items.push(run(25, 770, "WESTMERE MECHANICAL CO", 0));
+    items.push(run(25, 758, "118 CALDERWOOD LANE", 0));
+    items.push(run(25, 746, "RIVERBEND CA 95605", 0));
+    items.push(run(25, 734, "INVOICE 1042", 0));
+    for (const [x, word] of headings) items.push(run(x, 700, word, 0));
+    lines.forEach((cells, i) => {
+      const y = 680 - i * 12;
+      cells.forEach((v, c) => {
+        if (!v) return;
+        // The first two columns are words (left), the rest are figures (right-aligned).
+        if (c < 2) items.push(run(headings[c][0] + 5, y, v, 0));
+        else items.push(money(headings[c][0] + headings[c][1].length * CH + 20, y, v, 0));
+      });
+    });
+    return tableFromPositionedItems(items);
+  }
+
+  const HOURLY: [number, string][] = [[30, "DATE"], [100, "DESCRIPTION"], [330, "HOURS"], [400, "RATE"], [480, "AMOUNT"]];
+  const MATERIALS: [number, string][] = [[30, "DATE"], [100, "DESCRIPTION"], [330, "QTY"], [400, "PRICE"], [480, "AMOUNT"]];
+  const PROPOSAL: [number, string][] = [[30, "ITEM"], [120, "DESCRIPTION"], [460, "AMOUNT"]];
+
+  it("a dated hourly invoice is not a bank statement, so its hours never become deposits", () => {
+    const table = invoice(HOURLY, [
+      ["09/01/26", "Rough-in labor", "6.0", "95.00", "570.00"],
+      ["09/02/26", "Trim labor", "4.5", "95.00", "427.50"],
+      ["09/03/26", "Service call", "2.0", "95.00", "190.00"],
+    ]);
+    expect(table.some((r) => r.includes("HOURS") && r.includes("RATE"))).toBe(true);
+    expect(tableReadsAsList(table)).toBeNull();
+    // What it would have been: readBankTable turns those three lines into money IN.
+    const dl = readBankTable(table, "Invoice.pdf", (t) => `h${t.length}`);
+    expect(dl?.lines.map((l) => l.cents) ?? []).toEqual([57000, 42750, 19000]);
+  });
+
+  it("a dated materials invoice is not a bank statement either, though it has a QTY column", () => {
+    const table = invoice(MATERIALS, [
+      ["09/01/26", "12-2 ROMEX 250FT", "2", "94.20", "188.40"],
+      ["09/02/26", "20A SINGLE POLE BREAKER", "4", "5.52", "22.08"],
+      ["09/03/26", "4 SQUARE BOX", "12", "3.05", "36.60"],
+    ]);
+    expect(tableReadsAsList(table)).toBeNull();
+  });
+
+  it("a proposal's NAMED lines are not open papers: Interior 1 is not a paper number", () => {
+    const table = invoice(PROPOSAL, [
+      ["Interior 1", "Walls and ceilings, two coats", "4,800.00"],
+      ["Exterior 2", "Siding and trim", "6,250.00"],
+      ["Trim 3", "Doors and casings", "1,150.00"],
+    ]);
+    const header = table[findHeaderRow(table)];
+    expect(header).toContain("ITEM");
+    expect(header).toContain("AMOUNT");
+    expect(tableReadsAsList(table)).toBeNull();
+  });
+
+  it("a proposal whose lines carry no number at all is not a list, and is not a dead end either", () => {
+    const table = invoice(PROPOSAL, [
+      ["Interior", "Walls and ceilings, two coats", "4,800.00"],
+      ["Exterior", "Siding and trim", "6,250.00"],
+      ["Trim", "Doors and casings", "1,150.00"],
+    ]);
+    expect(tableReadsAsList(table)).toBeNull();
+    // It used to reach readOpenListTable, which refuses it outright — and the PDF was never filed.
+    const read = readOpenListTable({ table, from: "file", name: "Proposal.pdf", listDate: "2026-09-25", listDateFrom: "file" });
+    expect(read.ok).toBe(false);
+  });
+
+  /**
+   * AN INVOICE'S LABEL BLOCK IS NOT A ONE-PAPER LIST. INVOICE NO. | INVOICE DATE | TERMS | AMOUNT DUE
+   * over its own labour lines read as a supplier's list of one paper (1042, $1,602.00) with four rows
+   * reported as "isn't a paper number" — and the invoice itself was never filed as a paper.
+   */
+  it("an invoice's label block over its own labour lines is not a one-paper list", () => {
+    const items: PositionedItem[] = [];
+    for (const [x, word] of [[30, "INVOICE NO."], [160, "INVOICE DATE"], [300, "TERMS"], [460, "AMOUNT DUE"]] as [number, string][]) items.push(run(x, 740, word, 0));
+    items.push(run(30, 728, "1042", 0), run(160, 728, "09/05/26", 0), run(300, 728, "Net 30", 0), money(530, 728, "1,602.00", 0));
+    for (const [x, word] of [[30, "DESCRIPTION"], [330, "HOURS"], [400, "RATE"], [490, "AMOUNT"]] as [number, string][]) items.push(run(x, 700, word, 0));
+    [["Rough-in labor", "6.0", "95.00", "570.00"], ["Trim labor", "4.5", "95.00", "427.50"], ["Service call", "2.0", "95.00", "190.00"]].forEach(([t, h, r, a], i) => {
+      const y = 680 - i * 12;
+      items.push(run(30, y, t, 0), money(350, y, h, 0), money(430, y, r, 0), money(530, y, a, 0));
+    });
+    const table = tableFromPositionedItems(items);
+    expect(tableReadsAsList(table)).toBeNull();
+  });
+
+  /**
+   * AND A REAL CARD STATEMENT WITH NO BALANCE COLUMN STILL READS. The proof a statement carries and an
+   * invoice does not is money that went OUT: an invoice's lines all go one way. Without this the fix
+   * above would have turned away the one statement shape Erik actually has to bring in.
+   */
+  it("a card statement with DATE, DESCRIPTION and AMOUNT reads as a bank statement, by its minus signs", () => {
+    const items: PositionedItem[] = [];
+    items.push(run(25, 760, "RIVERBEND COMMUNITY BANK", 0));
+    items.push(run(25, 748, "CARD 000199884412", 0));
+    for (const [x, word] of [[30, "DATE"], [95, "DESCRIPTION"], [480, "AMOUNT"]] as [number, string][]) items.push(run(x, 700, word, 0));
+    [["09/02/26", "CARD PURCHASE HARROWGATE FUEL", "-142.08"], ["09/03/26", "REFUND WESTMERE HARDWARE", "37.42"], ["09/05/26", "CARD PURCHASE RIVERBEND FUEL", "-42.17"]].forEach(([d, t, a], i) => {
+      const y = 680 - i * 12;
+      items.push(run(30, y, d, 0), run(95, y, t, 0), money(530, y, a, 0));
+    });
+    const table = tableFromPositionedItems(items);
+    expect(tableReadsAsList(table)?.as).toBe("bank");
   });
 });
 
