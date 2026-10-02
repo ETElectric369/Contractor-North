@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Check } from "lucide-react";
 import { NumberInput } from "@/components/ui/number-input";
 import { updateMemberRate } from "./actions";
+import { rateBoxesToSave } from "./save-what-changed";
 
 /** Inline pay + charge rate editor on the Team list. Pay = what you pay this
  *  person (job cost); Bill = what the customer is charged for their labor.
@@ -56,19 +57,21 @@ export function MemberRate({
   const [err, setErr] = useState<string | null>(null);
 
   function save() {
-    const payChanged = !paidByDraw && (rate ?? 0) !== pay;
-    const costChanged = paidByDraw && (costRate ?? 0) !== cost;
-    if (!payChanged && !costChanged && (billRate ?? 0) === bill) return;
+    // WHAT THIS SAVE ACTUALLY CHANGED, through the one rule (save-what-changed.ts). It used to send
+    // `bill || null` on every save whatever the Bill box held, so when the page's rates read failed and
+    // every box rendered $0, typing a crew member's real pay rate DELETED his stored bill rate. A box
+    // nobody typed in is now simply absent from the patch, and the server reads absent as "leave it".
+    const patch = rateBoxesToSave({ rate, billRate, costRate }, { pay, bill, cost }, paidByDraw);
+    if (!patch) return;
     start(async () => {
       // CHECK THE RESULT (audit v921 high): the action returns {ok:false,error} for a non-staff
       // caller or a rejected write, and the old code flashed the green check regardless — the
       // office thought a pay change saved when it hadn't. Only claim success on ok.
       //
       // AN OWNER'S SAVE SENDS NO PAY FIGURE AND A COST FIGURE; a crew member's sends a pay figure and
-      // no cost figure. Two different questions, never the same box, never defaulted into each other.
-      const res = paidByDraw
-        ? await updateMemberRate(id, undefined, bill || null, cost || null)
-        : await updateMemberRate(id, pay || null, bill || null);
+      // no cost figure. Two different questions, never the same box, never defaulted into each other -
+      // and rateBoxesToSave is where that is decided, for both of them, once.
+      const res = await updateMemberRate(id, patch.hourlyRate, patch.billRate, patch.costRate);
       if (!res?.ok) {
         setErr(res?.error ?? "That didn't save — try again.");
         setPay(rate ?? 0);

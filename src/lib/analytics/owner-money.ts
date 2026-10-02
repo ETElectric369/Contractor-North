@@ -2,7 +2,7 @@ import { BUSINESS_COST_BUCKETS, bucketOf, type BusinessCostBucket } from "@/lib/
 import { livePurchaseOrders } from "@/lib/job-progress-math";
 import { balanceForPerson, payRateForEntry, toPayPaymentRow, type PayPaymentRow } from "@/lib/payroll-math";
 import { attachRates, payRateMapRead, type PayRates } from "@/lib/profile-columns";
-import { buildTimeRate } from "@/lib/build-time-cost";
+import { buildTimeCents, buildTimeRate } from "@/lib/build-time-cost";
 import { todayStrInTz, tzDayStartUtc } from "@/lib/tz";
 import { formatCurrency, hoursBetween } from "@/lib/utils";
 import { computeCollected, monthKeyInTz, trailing12Months } from "@/lib/analytics/money-metrics";
@@ -90,8 +90,10 @@ import { PNL_WORDS, materialsWithStock } from "@/lib/analytics/profit-and-loss";
  * HOW EVERY SCREEN SAYS IT (Erik, 2026-09-28): profit-and-loss.ts lays these figures out the
  * accounting industry's way. Received is Revenue; materials and bills, stock bought and lost, and
  * crew pay and mileage are Cost of Goods Sold (COGS); Revenue less them is Gross Profit; every
- * bucket, Fuel first, is Overhead (2026-09-30); and `left` is the bottom line, Net Profit (Owner's
- * Draw). Which bucket is which is data (BUCKET_SECTION). This file's figures and arithmetic do not
+ * bucket, Fuel first, is Overhead (2026-09-30); and `left` is the bottom line, Net Profit. What he
+ * actually took OUT is `ownerDraw`: equity, below that line, and never subtracted from it (Erik,
+ * 2026-10-01: "lets get rid of the terminology owners draw and use only net profit"). Which bucket is
+ * which is data (BUCKET_SECTION). This file's figures and arithmetic do not
  * change with the words: moving Fuel moved the halves, not a dollar.
  *
  * Pure half (computeOwnerMoney) + a fetch half (getOwnerMoney) that reads the SAME row sources the
@@ -1034,8 +1036,12 @@ export function computeOwnerMoney(
     if (!e.job_id) continue; // OFFICE TIME: Overhead. Counted as hours, charged to no job.
     a.ownerOnSite += hundredths;
     const rate = buildTimeRate(e, { costRate: person.costRate }).rate;
+    // THROUGH THE ONE EXPRESSION (buildTimeCents), not a multiplication of its own. This line used to do
+    // its own cents arithmetic while tallyBuildTime - the job hub, /analytics' job rows, Nort - did
+    // different arithmetic, so at any rate with cents the P&L's stated charge to the jobs did not equal
+    // the sum of what the jobs were charged, and the gap grew with the shift count.
     if (rate == null) a.ownerUncosted += hundredths;
-    else a.ownerBuildTime += Math.round((hundredths / 100) * rate * 100);
+    else a.ownerBuildTime += buildTimeCents(hundredths / 100, rate);
   }
 
   // WHAT THE OWNER TOOK OUT: bank lines he sorted as Owner's Draw (0363's choice='draw'), on the day
@@ -1487,6 +1493,52 @@ export const OWNER_DRAW_SEEN =
 export function uncostedBuildTime(m: OwnerMoney): { hours: number; people: string[] } | null {
   for (const c of m.caveats) if (c.kind === "owner_build_time_uncosted") return { hours: c.hours, people: c.people };
   return null;
+}
+
+/** A figure set holding one of the owner's optional lines. Any OwnerMoneyFigures is one. */
+type OwnerLineFigures = { ownerDraw?: number | null; ownerBuildTimeOnJobs?: number | null };
+
+const hasMoney = (n: number | null | undefined) => Math.abs(Number(n) || 0) >= 0.005;
+
+/**
+ * IS THE OWNER'S BUILD-TIME PAIR WORTH DRAWING — the ONE predicate, asked by every surface.
+ *
+ * BOTH LINES OR NEITHER: the charge and its contra are one amount booked twice, so a surface that drew
+ * half of it would show a deduction of the owner's own labour, which is the one thing this whole wave
+ * exists to prevent. The Net Profit card and the accountant's Summary each wrote
+ * `Math.abs(f.ownerBuildTimeOnJobs ?? 0) >= 0.005` by hand, which is the "a reader writes the predicate
+ * itself" shape that has already cost this codebase a week once.
+ */
+export function hasOwnerBuildTime(...figures: (OwnerLineFigures | null | undefined)[]): boolean {
+  return figures.some((f) => hasMoney(f?.ownerBuildTimeOnJobs));
+}
+
+/**
+ * WHETHER THE OWNER'S DRAW LINE HAS A FIGURE IN IT — and note what this is NOT used for.
+ *
+ * The equity line is NOT switched on by this. Erik asked for "a line item below net profit stating what
+ * Ive taken out this month", and a line that disappears when the figure is zero cannot state anything:
+ * he opens the card, sees nothing new below the bottom line, and cannot tell "I drew nothing" from "the
+ * app cannot see my draws" from "the line was never built". So whoever is entitled to the owner's money
+ * always gets the row, at $0.00 if that is the answer, with `ownerDrawSeen` beside it.
+ *
+ * This is for the SENTENCE that goes with a zero: see ownerDrawUnseen.
+ */
+export function hasOwnerDraw(...figures: (OwnerLineFigures | null | undefined)[]): boolean {
+  return figures.some((f) => hasMoney(f?.ownerDraw));
+}
+
+/**
+ * THE DRAW FIGURE IS ZERO, AND ZERO IS A CLAIM THE APP CANNOT MAKE (nothing silent).
+ *
+ * `ownerDraw` is built from ONE source: bank lines sorted as Owner's Draw (0363's choice='draw'). So an
+ * owner who draws by cheque from an account he does not download, any company that has not sorted a
+ * bank download yet, and Erik on the 1st of a month under "This Month" all get $0.00 - and $0.00 read
+ * as "you took nothing out" would be a lie about money. True when a surface should print the row with
+ * the sentence and the door that fixes it, rather than a bare figure that sounds like an answer.
+ */
+export function ownerDrawUnseen(m: OwnerMoney | null | undefined): boolean {
+  return !!m && !hasOwnerDraw(m.totals);
 }
 
 const hoursWords = (h: number) => `${Number.isInteger(h) ? h : h.toFixed(2).replace(/0$/, "")} ${h === 1 ? "hour" : "hours"}`;

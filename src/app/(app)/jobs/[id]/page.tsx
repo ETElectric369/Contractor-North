@@ -92,6 +92,7 @@ import { NewPoButton } from "../../purchasing/new-po-button";
 import { EditCustomerButton } from "../../crm/[id]/edit-customer-button";
 import { getOrgSettings, workDayWindowHm } from "@/lib/org-settings";
 import { computeJobLaborBilling, customerLaborRateForJob, fetchJobLaborRows, laborCostForJob } from "@/lib/labor-billing";
+import { isOwnerShift } from "@/lib/build-time-cost";
 import { ownerRegister } from "@/lib/owner-draw";
 import { formatDateTz, todayStrInTz } from "@/lib/tz";
 import { dayWords, hmWords, readJobBlock } from "@/lib/schedule/job-block";
@@ -822,8 +823,13 @@ export default async function JobDetailPage({
   } = laborCostForJob(entries ?? [], id);
   const crewHours = Math.max(0, Math.round((laborHours - ownerHours) * 100) / 100);
   const crewLabor = Math.round((laborCost - ownerCost) * 100) / 100;
+  // WHOSE HOURS THOSE ARE, BY THE SAME TEST THAT COSTED THEM (isOwnerShift). This asked
+  // `e?.profiles?.paid_by_draw === true` by hand, which is only HALF of isOwnerShift - it misses the
+  // `|| e?.paid_by_draw === true` branch - so on a row carrying the flag at top level the cost above
+  // was non-zero while this list came back empty, and the tile printed a cost it could not attribute to
+  // anybody. One expression, in the owner module, so the two can never disagree again.
   const ownersOnJob = ((entries ?? []) as any[])
-    .filter((e: any) => e?.profiles?.paid_by_draw === true && e.profile_id)
+    .filter((e: any) => isOwnerShift(e) && e.profile_id)
     .map((e: any) => ({ id: String(e.profile_id), name: e.profiles?.full_name ?? null }));
   const ownerVoice = ownerRegister(ownersOnJob, user?.id ?? null);
   // Materials, via the ONE shared rule (livePurchaseOrders): a draft/cancelled PO isn't a
@@ -984,7 +990,9 @@ export default async function JobDetailPage({
   //
   // PETTY CASH TOO: /analytics and Nort (computeJobProfitRows) have subtracted the job's petty cash
   // since audit v800, and this hub did not, so the three disagreed on the same job. Now all three
-  // are collected − crew labor − materials − bills − petty cash.
+  // are collected − all labour − materials − bills − petty cash. ALL labour, not crew labour:
+  // laborCostForJob costs the owner's own on-site hours too (0373), and the subtraction below takes the
+  // whole of it, so a formula naming only the crew is short by his build time.
   const pettyCost = ((pettyRows ?? []) as any[])
     .filter((pc: any) => pc?.kind !== "replenish")
     .reduce((s: number, pc: any) => s + (Number(pc?.amount) || 0), 0);
@@ -1830,8 +1838,9 @@ export default async function JobDetailPage({
             </Card>
           )}
           {/* PROFIT IN ONE LINE (W1-23), last, so what's open leads the tab. The figures are the
-              ones this page always worked out (collected − crew labor − live orders − bills − petty
-              cash, the same as /analytics); the rows wait in its Why? fold. */}
+              ones this page always worked out (collected − all labour − live orders − bills − petty
+              cash, the same as /analytics); the rows wait in its Why? fold. ALL labour: the owner's own
+              build time is in it too (0373), which is why this no longer says crew labour. */}
           <ProfitLine
             collected={revenue}
             crewLabor={crewLabor}

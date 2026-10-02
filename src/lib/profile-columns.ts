@@ -14,9 +14,24 @@
 export const PROFILE_SAFE_COLS =
   "id, full_name, email, phone, role, avatar_url, active, created_at, updated_at, org_id, language, home_lat, home_lng, push_prefs, must_reset_password, crew_lead, deactivated_at, deactivated_by, onboarded_at, nort_humor, nort_register, nort_notes, lessons_seen";
 
-/** The pay/address columns — readable only through `profile_pay`, never off `profiles`. */
-export const PROFILE_PAY_COLS =
-  "id, org_id, full_name, hourly_rate, bill_rate, home_address, commute_baseline_miles, active, paid_by_draw, cost_rate";
+/**
+ * The pay/address columns — readable only through `profile_pay`, never off `profiles`.
+ *
+ * NOT EXPORTED, AND THAT IS THE POINT (the /team defect, 2026-10-01). This list used to be exported
+ * and /team selected it by hand with no error check. The moment it grew `cost_rate` for 0373, the
+ * page's read began failing WHOLE in the window between a push and Erik applying the migration -
+ * PostgREST answers `42703 column "cost_rate" does not exist` and drops every row - so the roster
+ * rendered every rate at $0.00, a false "No bill rate set" on every line, blank home addresses, a 0
+ * commute baseline and NO Cost box on the owner's row, which is the only door this feature has. Then
+ * a save wrote those zeros back as nulls over real stored data.
+ *
+ * The ladder that survives that window lived in payRateMapRead and nowhere else. Now there is ONE
+ * reader for these columns, `profilePayRead`, the ladder is behind it, and there is no column list to
+ * select by hand - a would-be second reader has nothing to import. A tripwire
+ * (build-time-is-a-cost.test.ts) fails if a file names one of the young columns in a select anyway.
+ */
+const PROFILE_PAY_BASE =
+  "id, org_id, full_name, hourly_rate, bill_rate, home_address, commute_baseline_miles, active";
 
 export type ProfilePayRow = {
   id: string;
@@ -90,6 +105,63 @@ function isUndefinedColumn(error: unknown): boolean {
   return code === "42703" || /column .*(paid_by_draw|cost_rate).* does not exist/i.test(message);
 }
 
+/** What a reader is told when the view could not be read at all: said in words, never drawn as $0. */
+const PAY_READ_PROBLEM = "the pay rates could not be read";
+
+/**
+ * THE YOUNG COLUMNS, NEWEST LAST — the ones a deployed app may name before the view has them.
+ *
+ * Add a column to profile_pay and it goes on the END of this list, which is the whole of what a future
+ * migration window costs: the ladder below drops them one at a time, youngest first, so a database at
+ * any point in the sequence answers with everything it actually has.
+ */
+const PAY_VIEW_YOUNG = ["paid_by_draw", "cost_rate"] as const;
+
+/**
+ * THE ONE READ OF `profile_pay`, WITH THE MIGRATION WINDOW IN IT (inspection/schema.ts
+ * tolerateMissingColumns).
+ *
+ * A push to main deploys before the migration is applied, and a select naming a column the view has
+ * not got yet fails WHOLE - every row dropped, not just the column. Without this, a caller that
+ * swallows the error prices all crew labor at $0 with no word said, and a caller that renders the rows
+ * draws a roster of zeros that a save then writes back as nulls. Both have happened.
+ *
+ * ONE COLUMN BACK AT A TIME, AND THE ORDER MATTERS. A database with 0286 but not 0373 has
+ * paid_by_draw and not cost_rate; dropping straight to the base columns would lose the DRAW FLAG along
+ * with the cost rate, and without the flag the owner reads as crew with no pay rate - a false "hours
+ * with no rate" alarm about a wage he has never had, and on /team a Pay box where his Cost box belongs.
+ *
+ * Only undefined_column is tolerated. Any other failure comes back as `problem`, for the caller to say.
+ */
+async function payViewRead(
+  supabase: any,
+  base: string,
+): Promise<{ rows: ProfilePayRow[]; problem: string | null }> {
+  // `: number` on purpose: PAY_VIEW_YOUNG is `as const`, so its `.length` is the literal 2 and the
+  // compiler would narrow `keep` to 2 forever and call `keep === 0` unreachable.
+  for (let keep: number = PAY_VIEW_YOUNG.length; keep >= 0; keep -= 1) {
+    const cols = [base, ...PAY_VIEW_YOUNG.slice(0, keep)].join(", ");
+    const { data, error } = await supabase.from("profile_pay").select(cols);
+    if (!error && Array.isArray(data)) return { rows: data as ProfilePayRow[], problem: null };
+    // A missing column is the only failure worth another try, and only while a rung is left to drop.
+    if (!error || !isUndefinedColumn(error) || keep === 0) return { rows: [], problem: PAY_READ_PROBLEM };
+  }
+  return { rows: [], problem: PAY_READ_PROBLEM };
+}
+
+/**
+ * EVERY PAY/ADDRESS COLUMN FOR THE WHOLE ROSTER, OR THE REASON THERE ARE NONE (/team).
+ *
+ * The one door for a full `profile_pay` read: the same ladder, the same tolerance, the same reported
+ * problem as the rates read. A page that draws these rows asks for the problem too and says it, because
+ * an empty roster and a roster of $0.00 look identical on screen and only one of them is true.
+ */
+export async function profilePayRead(
+  supabase: any,
+): Promise<{ rows: ProfilePayRow[]; problem: string | null }> {
+  return payViewRead(supabase, PROFILE_PAY_BASE);
+}
+
 /**
  * THE SAME READ, WITH ITS FAILURE STILL ATTACHED (2026-09-17).
  *
@@ -108,25 +180,12 @@ export async function payRateMapRead(
 }> {
   // paid_by_draw rides the same read (0286) and cost_rate rides it too (0373), so every surface that
   // prices hours knows whose hours are the owner's AND what his build time costs, with no second
-  // query that could fail on its own.
-  let { data, error } = await supabase.from("profile_pay").select(`${PAY_RATE_COLS}, paid_by_draw, cost_rate`);
-  // MIGRATION WINDOW (inspection/schema.ts tolerateMissingColumns): a push to main deploys before the
-  // migration is applied, and a select naming a column the view has not got yet fails WHOLE.
-  // payRateMap drops `problem`, so without this every caller (job hub, analytics, Nort, tax report)
-  // would price all crew labor at $0 with no error. ONE COLUMN BACK AT A TIME: a database with 0286
-  // but not 0373 keeps 0286's own answer, instead of losing the draw flag along with the cost rate —
-  // without the flag the owner reads as crew with no pay rate, which would raise a false "hours with
-  // no rate" alarm about him. On the view before 0286 he is costed at his hourly_rate, which was the
-  // behaviour then. Only undefined_column is tolerated.
-  if (error && isUndefinedColumn(error)) {
-    ({ data, error } = await supabase.from("profile_pay").select(`${PAY_RATE_COLS}, paid_by_draw`));
-  }
-  if (error && isUndefinedColumn(error)) {
-    ({ data, error } = await supabase.from("profile_pay").select(PAY_RATE_COLS));
-  }
+  // query that could fail on its own. The migration-window ladder is payViewRead's, shared with the
+  // roster read: one function, so a window that breaks one reader cannot be open on the other.
+  const { rows, problem } = await payViewRead(supabase, PAY_RATE_COLS);
   const m = new Map<string, PayRates>();
-  if (error || !Array.isArray(data)) return { rates: m, problem: "the pay rates could not be read" };
-  for (const r of data as ProfilePayRow[]) {
+  if (problem) return { rates: m, problem };
+  for (const r of rows) {
     if (r?.id) m.set(String(r.id), {
       hourly_rate: r.hourly_rate ?? null,
       bill_rate: r.bill_rate ?? null,

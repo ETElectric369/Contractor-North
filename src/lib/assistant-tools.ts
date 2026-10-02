@@ -1,5 +1,5 @@
 import { attachRates, payRateMap } from "@/lib/profile-columns";
-import { BUILD_TIME_IS_A_COST_NOT_A_WAGE } from "@/lib/build-time-cost";
+import { BUILD_TIME_IS_A_COST_NOT_A_WAGE, isOwnerShift } from "@/lib/build-time-cost";
 import "server-only";
 import type Anthropic from "@anthropic-ai/sdk";
 import { tzDayStartUtc, todayStrInTz, payPeriodForOffset } from "@/lib/tz";
@@ -2246,6 +2246,12 @@ export async function runDataTool(
             profit: r.profit,
             marginPct: r.marginPct,
             owner_hours: r.ownerHours,
+            // THE TWO FIELDS THE NOTE ABOVE TELLS THE MODEL TO CHECK. They were missing here while
+            // get_job_financials and list_job_profitability both had them, so this tool instructed a
+            // model to read uncosted_owner_hours and then did not return it: it either quoted a cost
+            // short by all of Erik's labour with no caveat, or invented the field.
+            owner_cost: r.ownerCost,
+            uncosted_owner_hours: r.uncostedOwnerHours,
             profit_per_owner_hour: r.profitPerOwnerHour,
           })),
         });
@@ -2484,7 +2490,10 @@ export async function runDataTool(
         // rode in on the rates merge above (profile_pay.paid_by_draw).
         const allRows = aggregatePayrollEntries((entries ?? []) as any[], settings.timezone);
         const drawIds = new Set<string>();
-        for (const e of (entries ?? []) as any[]) if (e?.profiles?.paid_by_draw === true && e.profile_id) drawIds.add(String(e.profile_id));
+        // BY THE SAME TEST THAT COSTS A SHIFT (isOwnerShift). This asked for the flag on the embedded
+        // profile by hand, which is only HALF of it - the `|| e?.paid_by_draw === true` branch was
+        // missing - so a row carrying the flag at top level put the owner back on the Pay board.
+        for (const e of (entries ?? []) as any[]) if (isOwnerShift(e) && e.profile_id) drawIds.add(String(e.profile_id));
         const rows = allRows.filter((r) => !drawIds.has(String(r.profileId)));
         const ownerRows = allRows.filter((r) => drawIds.has(String(r.profileId)));
         const round = (n: number) => Math.round(n * 100) / 100;

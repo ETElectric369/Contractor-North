@@ -5,9 +5,11 @@ import {
   OWNER_MONEY_WINDOWS,
   costFigure,
   countedNotPaidLine,
+  hasOwnerBuildTime,
   hasUnratedHours,
   isOwnerMoneySegmentKey,
   notCountedLine,
+  ownerDrawUnseen,
   stockLine,
   uncostedBuildTime,
   windowLabel,
@@ -92,15 +94,26 @@ export function LeftForCard({
   // THE PROFIT AND LOSS: only the owner (or an office the owner shared it with) ever gets this card.
   // Both of the owner's optional sections are switched on only when there is money in them: the
   // build-time PAIR (never half of it) and the draw below the line.
+  // THE EQUITY LINE IS ALWAYS DRAWN, $0.00 INCLUDED (Erik, 2026-10-01: "an actual draw from the owner is
+  // considered equity and should be a line item below net profit stating what Ive taken out this
+  // month"). It used to be switched on only when the figure was non-zero, and the figure has ONE source
+  // - bank lines sorted as Owner's Draw - so an owner who draws by cheque from an account he does not
+  // download, or anyone who has not sorted a bank download, got no row, no $0.00 and no sentence: a card
+  // identical to yesterday's, with no way to tell "I drew nothing" from "the app cannot see my draws"
+  // from "the line was never built". Whoever sees this card is entitled to the owner's money, so the row
+  // is here, and ownerDrawUnseen decides whether the sentence and the door come with it.
   const pnl = t
     ? profitAndLoss(t, {
         otherIncome: Math.abs(t.otherIncome ?? 0) >= 0.005,
         stockInMaterials: true,
         margin: true,
-        ownerBuildTime: Math.abs(t.ownerBuildTimeOnJobs ?? 0) >= 0.005,
-        ownerDraw: Math.abs(t.ownerDraw ?? 0) >= 0.005,
+        // The build-time PAIR, through the one predicate both this card and the accountant's Summary ask.
+        ownerBuildTime: hasOwnerBuildTime(t),
+        ownerDraw: true,
       })
     : [];
+  // Zero draws THAT THE APP CAN SEE. Not the same claim as "he drew nothing", and said as such.
+  const drawUnseen = money ? ownerDrawUnseen(money) : false;
   // The rows ABOVE the bottom line. Equity is drawn by hand under it, so it never joins this list -
   // a row below the rule must not be able to slide up into the subtractions by being in the same map.
   const said = pnl.filter((r) => {
@@ -253,7 +266,15 @@ export function LeftForCard({
                   <span className="text-sm text-slate-700">{draw.label}</span>
                   <span className="text-sm tabular-nums text-slate-800">{formatCurrency(draw.amount ?? 0)}</span>
                 </div>
-                <p className="mt-0.5 text-xs text-slate-500">Equity, not a cost: it is not taken off Net Profit. {money.ownerDrawSeen}</p>
+                {/* $0.00 IS NOT "YOU TOOK NOTHING OUT". The figure has ONE source - bank lines sorted as
+                    Owner's Draw - so an empty one means "nothing this period that the app can see", and
+                    the door that changes the answer is Drop Your Bank Download, the line directly below
+                    this card on this same page. Named rather than linked, because it is a file picker
+                    three inches away and a link to somewhere else would be the longer way round. */}
+                <p className="mt-0.5 text-xs text-slate-500">
+                  Equity, not a cost: it is not taken off Net Profit. {money.ownerDrawSeen}
+                  {drawUnseen ? " Nothing this period that the app can see — Drop Your Bank Download below to change that." : ""}
+                </p>
               </div>
             )}
 

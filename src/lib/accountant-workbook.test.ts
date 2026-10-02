@@ -34,7 +34,7 @@ import {
 } from "./accountant-workbook";
 import { computeOwnerMoney, supplierAccountRowsOf, type OwnerMoneyFigures, type OwnerMoneyInputs, type OwnerMoneyPerson } from "@/lib/analytics/owner-money";
 import { supplierBalance } from "@/app/(app)/bills/supplier-balance";
-import { pnlLines, pnlRow, profitAndLoss } from "@/lib/analytics/profit-and-loss";
+import { PNL_WORDS, pnlLines, pnlRow, profitAndLoss } from "@/lib/analytics/profit-and-loss";
 import { BUCKET_SECTION, BUSINESS_COST_BUCKETS } from "@/lib/business-cost-buckets";
 import type { AccountantInputs } from "@/lib/accountant-lists";
 import { contentDisposition, fileNameFromDisposition } from "@/lib/download-name";
@@ -227,8 +227,11 @@ describe("the Summary is Money by Month, to the cent, laid out as a profit and l
   });
 
   it("its rows are the profit and loss's, in the accounting industry's order and words, then the owner's hours", () => {
-    // + 3: the profit and loss's lines, then the owner's THREE hours rows (total, on jobs, in the office).
-    const labels = summary.rows.slice(headerAt + 1, headerAt + 1 + lines.length + 3).map((r) => r.cells[0]);
+    // EVERYTHING ABOVE THE BOTTOM LINE, then Net Profit. What is BELOW it - a blank, the Owner's Draw
+    // equity row and its note - is asserted on its own below, because a row under the rule must never be
+    // mistaken for one in this list.
+    const aboveAndNet = lines.filter((l) => l.key !== "owner_draw");
+    const labels = summary.rows.slice(headerAt + 1, headerAt + 1 + aboveAndNet.length).map((r) => r.cells[0]);
     expect(labels).toEqual([
       "Revenue",
       "Other Income (Inside Revenue)",
@@ -251,13 +254,47 @@ describe("the Summary is Money by Month, to the cent, laid out as a profit and l
       "Other",
       "Total Overhead",
       "Net Profit",
+    ]);
+    expect(aboveAndNet.map((l) => l.label)).toEqual(labels);
+    // AND THE OWNER'S THREE HOURS ROWS, after the equity block (0373), so an accountant can tie the COGS
+    // line to hours: the total, the on-site half that is charged to the jobs, the office half that is not.
+    const hours = summary.rows.map((r) => r.cells[0]).filter((c) => typeof c === "string" && c.startsWith("Owner Hours"));
+    expect(hours).toEqual([
       "Owner Hours (Not Pay)",
-      // The two halves the allocation is made of (0373), so an accountant can tie the COGS line to hours.
       "Owner Hours On Jobs (Build Time)",
       "Owner Hours In The Office (Overhead)",
     ]);
-    // The profit and loss's own lines are everything above the THREE owner-hours rows.
-    expect(lines.map((l) => l.label)).toEqual(labels.slice(0, -3));
+  });
+
+  /**
+   * THE EQUITY LINE IS ON THE SHEET WHETHER OR NOT HE DREW ANYTHING (Erik, 2026-10-01: "an actual draw
+   * from the owner is considered equity and should be a line item below net profit stating what Ive taken
+   * out this month").
+   *
+   * It used to be switched on only when the figure was non-zero, and the figure has ONE source: bank lines
+   * sorted as Owner's Draw. This fixture draws nothing, so before the fix the Summary had NO equity row,
+   * no $0.00 and no disclosure - and an accountant could not tell a draw of nothing from a draw the app
+   * cannot see. Now the row is there with the note that says which.
+   */
+  it("Owner's Draw is a row below the bottom line even at $0.00, and says what it cannot see", () => {
+    const netAt = summary.rows.findIndex((r) => r.cells[0] === NET_LABEL);
+    const drawAt = summary.rows.findIndex((r) => r.cells[0] === PNL_WORDS.ownerDraw);
+    expect(drawAt).toBeGreaterThan(netAt);
+    // A BLANK ROW BETWEEN THEM: flush under a bold Net Profit, this row reads as a total of it.
+    expect(summary.rows[drawAt - 1].cells.filter(Boolean)).toEqual([]);
+    // NEVER BOLD. How the row is weighted is PNL_KIND_SHAPE's answer and `equity` is weighted "line", so
+    // it is indented like one - what it must never be is BOLD, because bold under a bold Net Profit is
+    // exactly how a reader takes it for a total of the figure above it.
+    expect(!!summary.rows[drawAt].bold).toBe(false);
+    // The fixture really did draw nothing, so this is the zero case and not an accident.
+    expect(cur.totals.ownerDraw).toBe(0);
+    expect(cents(summary.rows[drawAt].cells[4])).toBe(0);
+    // AND IT SAYS SO IN WORDS: equity not an expense, what the figure can see, and that zero is not a
+    // claim that nothing was drawn.
+    const note = String(summary.rows[drawAt + 1].cells[0]);
+    expect(note).toContain("is equity, not an expense");
+    expect(note).toContain("Cash you took without a bank line is not in it");
+    expect(note).toContain("Nothing this period that the app can see");
   });
 
   it("formatted the way an accountant lays one out: headings and totals bold, every line under its heading indented", () => {

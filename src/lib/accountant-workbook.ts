@@ -5,6 +5,8 @@ import {
   crewPayByMonth,
   notCountedLine,
   balanceEntries,
+  hasOwnerBuildTime,
+  hasOwnerDraw,
   ownerMoneyCostLines,
   ownerMoneyReadSpan,
   recordDay,
@@ -490,9 +492,16 @@ function summaryTab(
   // THE OWNER'S SWITCH: an office viewer the owner hasn't shared the owner's money with gets the cost rows
   // one by one under their two headings and no total at all (no Revenue, no Total COGS, no Gross
   // Profit or margin, no Total Overhead, no Net Profit): the totals are the owner's.
-  const hasBuildTime = [cur.totals, prev.totals].some((f) => Math.abs(f.ownerBuildTimeOnJobs ?? 0) >= 0.005);
-  const hasDraw = [cur.totals, prev.totals].some((f) => Math.abs(f.ownerDraw ?? 0) >= 0.005);
-  const lines = summaryLines({ hasOtherIncome: hasOther, showOwner, ownerBuildTime: hasBuildTime, ownerDraw: hasDraw });
+  // THROUGH THE ONE PREDICATE (owner-money.ts), not written out here. Both this file and the Net Profit
+  // card used to hand-write `Math.abs(f.ownerBuildTimeOnJobs ?? 0) >= 0.005`, so the file and the screen
+  // could quietly start disagreeing about whether the lines were on the sheet at all.
+  const hasBuildTime = hasOwnerBuildTime(cur.totals, prev.totals);
+  // AND OWNER'S DRAW IS ALWAYS A ROW FOR WHOEVER SEES THE OWNER'S MONEY, $0.00 included. It was switched
+  // on only when the figure was non-zero, and the figure comes from bank lines sorted as Owner's Draw
+  // and nothing else - so a company that has not sorted a bank download got a Summary with no equity
+  // line, no zero and no disclosure, and an accountant could not tell a draw of nothing from a draw the
+  // app cannot see. The note below the line says which it is.
+  const lines = summaryLines({ hasOtherIncome: hasOther, showOwner, ownerBuildTime: hasBuildTime, ownerDraw: showOwner });
   const moneyCols = (l: PnlLine): XlsxValue[] => {
     const now = l.cents(cur.totals) ?? 0;
     const before = l.cents(prev.totals) ?? 0;
@@ -542,7 +551,10 @@ function summaryTab(
   if (below.length) {
     rows.push(blank());
     for (const l of below) pushLine(l);
-    rows.push(note(`${DRAW_NOTE} ${cur.ownerDrawSeen}`));
+    // WHAT THE EQUITY LINE IS, AND WHAT ITS FIGURE CAN SEE - and, when the figure is empty, that an empty
+    // one is not a claim that nothing was drawn. Same words as the Net Profit card, same predicate.
+    const drawn = hasOwnerDraw(cur.totals) ? "" : " Nothing this period that the app can see.";
+    rows.push(note(`${DRAW_NOTE} ${cur.ownerDrawSeen}${drawn}`));
   }
   if (showOwner) {
     // THE OWNER'S HOURS, AND WHICH OF THEM ARE BUILD TIME. His hours are never PAY - he is not on

@@ -137,6 +137,28 @@ export type BuildTimeTally = {
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
 /**
+ * WHAT ONE SHIFT'S HOURS COST, IN WHOLE CENTS — the one expression, so the figures cannot diverge.
+ *
+ * There were two. The profit-and-loss engine rounded every shift to cents and added; tallyBuildTime
+ * summed dollars and rounded once at the end. At any whole-dollar rate they agree exactly, which is why
+ * every test pinned $65 and nothing caught it; at a rate with cents they drift, and the drift GROWS with
+ * the number of shifts - $15.09 against $15.08 over three half-hour shifts at $10.05, $99,454.59 against
+ * $99,454.36 over two hundred. The profit and loss's stated charge to the jobs then did not equal the sum
+ * of what the jobs were charged, which is precisely what the accountant's workbook says that line is.
+ *
+ * A SHIFT AT A TIME, because a shift is what the business is charged for: money exists in cents, and a
+ * figure that is the sum of real amounts is the one an accountant can tie back to rows. The rate itself
+ * may carry cents (the Cost box takes decimals and the column is numeric(10,2)).
+ */
+export function buildTimeCents(hours: number, rate: number | null | undefined): number {
+  const r = Number(rate);
+  if (!Number.isFinite(r) || !(r > 0)) return 0;
+  const h = Number(hours);
+  if (!Number.isFinite(h)) return 0;
+  return Math.round(h * r * 100);
+}
+
+/**
  * Add up build time over a set of closed shifts, at the one rule's rates.
  *
  * `jobId` narrows to one job's shifts (the job hub and /analytics both hand this whole lists).
@@ -148,9 +170,12 @@ export function tallyBuildTime(
   opts: { jobId?: string; payRate?: number | null; costRate?: number | null } = {},
 ): BuildTimeTally {
   let hours = 0;
-  let cost = 0;
+  // Cents, a shift at a time, through buildTimeCents - the same expression the profit-and-loss engine
+  // uses, so the charge on the P&L and the charges on the jobs are the same figure. Summing dollars and
+  // rounding once at the end is what made them drift at a rate with cents.
+  let costCents = 0;
   let ownerHours = 0;
-  let ownerCost = 0;
+  let ownerCostCents = 0;
   let unratedHours = 0;
   let uncostedOwnerHours = 0;
   const owners = new Map<string, { id: string; name: string | null }>();
@@ -160,11 +185,11 @@ export function tallyBuildTime(
     const h = hoursBetween(e.clock_in, e.clock_out, e.lunch_minutes);
     const r = buildTimeRate(e, { payRate: opts.payRate, costRate: opts.costRate });
     hours += h;
-    const money = r.rate == null ? 0 : h * r.rate;
-    cost += money;
+    const money = r.rate == null ? 0 : buildTimeCents(h, r.rate);
+    costCents += money;
     if (r.owner) {
       ownerHours += h;
-      ownerCost += money;
+      ownerCostCents += money;
       if (r.rate == null) uncostedOwnerHours += h;
       if (e.profile_id) {
         const id = String(e.profile_id);
@@ -176,9 +201,9 @@ export function tallyBuildTime(
   }
   return {
     hours: round2(hours),
-    cost: round2(cost),
+    cost: costCents / 100,
     ownerHours: round2(ownerHours),
-    ownerCost: round2(ownerCost),
+    ownerCost: ownerCostCents / 100,
     unratedHours: round2(unratedHours),
     uncostedOwnerHours: round2(uncostedOwnerHours),
     owners: [...owners.values()],

@@ -34,7 +34,17 @@ import { computeRevenueTrend } from "@/lib/analytics/money-metrics";
 import { pnlRow, profitAndLoss } from "@/lib/analytics/profit-and-loss";
 import { balanceForPerson } from "@/lib/payroll-math";
 import { BUSINESS_COST_BUCKETS } from "@/lib/business-cost-buckets";
-import { BUCKETS_BESIDE_FUEL, OWNER_DRAW_SEEN, uncostedBuildTime } from "@/lib/analytics/owner-money";
+import {
+  BUCKETS_BESIDE_FUEL,
+  OWNER_DRAW_SEEN,
+  hasOwnerBuildTime,
+  hasOwnerDraw,
+  ownerDrawUnseen,
+  uncostedBuildTime,
+} from "@/lib/analytics/owner-money";
+import { tallyBuildTime } from "@/lib/build-time-cost";
+import { readFileSync } from "node:fs";
+import { codeOnly } from "@/lib/migration-body.test-util";
 
 const TZ = "America/Los_Angeles";
 const TODAY = "2026-09-24";
@@ -1507,6 +1517,60 @@ describe("the owner's build time: on-site hours are a cost, office hours are ove
     expect(m.ownerDrawSeen).toMatch(/Cash you took without a bank line is not in it/);
   });
 
+  /**
+   * ── A DRAW OF NOTHING IS NOT THE SAME CLAIM AS A DRAW THE APP CANNOT SEE ──────────────────────────
+   *
+   * `ownerDraw` has ONE source: bank lines sorted as Owner's Draw. So an owner who draws by cheque from
+   * an account he does not download, a company that has not sorted a bank download, and Erik on the 1st
+   * of a month all read $0.00 - and the equity line used to be switched OFF in exactly that case, by a
+   * `Math.abs(…) >= 0.005` written out by hand in two different readers. He opened the card and saw a
+   * card identical to yesterday's: no row, no zero, no sentence, and no way to tell "I drew nothing" from
+   * "the app cannot see my draws" from "the line was never built". These are the one predicate both
+   * readers ask instead.
+   */
+  describe("the one predicate for the owner's own lines", () => {
+    it("hasOwnerDraw and hasOwnerBuildTime read a figure, over any number of figure sets", () => {
+      expect(hasOwnerDraw({ ownerDraw: 0 })).toBe(false);
+      expect(hasOwnerDraw({ ownerDraw: 0.004 })).toBe(false); // under half a cent is no money
+      expect(hasOwnerDraw({ ownerDraw: 0.005 })).toBe(true);
+      expect(hasOwnerDraw(null, undefined, { ownerDraw: null })).toBe(false);
+      // Two periods, the way the accountant's Summary asks: a figure in EITHER puts the line on the sheet.
+      expect(hasOwnerDraw({ ownerDraw: 0 }, { ownerDraw: 4000 })).toBe(true);
+      expect(hasOwnerBuildTime({ ownerBuildTimeOnJobs: 0 }, { ownerBuildTimeOnJobs: 520 })).toBe(true);
+      expect(hasOwnerBuildTime({ ownerBuildTimeOnJobs: 0 })).toBe(false);
+    });
+
+    it("ownerDrawUnseen is true exactly when the figure is empty, which is when a surface must say so", () => {
+      const nothing = run(erikCosted, bothHalves(erikCosted));
+      expect(nothing.totals.ownerDraw).toBe(0);
+      expect(ownerDrawUnseen(nothing)).toBe(true);
+      const drew = run(erikCosted, bothHalves(erikCosted), [{ id: "d1", amount: -4000, posted_on: "2026-08-15" }]);
+      expect(ownerDrawUnseen(drew)).toBe(false);
+    });
+
+    /** AND NET PROFIT IS THE SAME EITHER WAY: the draw is equity and is never subtracted. */
+    it("drawing nothing and drawing $4,000 give the identical bottom line", () => {
+      const nothing = run(erikCosted, bothHalves(erikCosted)).totals;
+      const drew = run(erikCosted, bothHalves(erikCosted), [{ id: "d1", amount: -4000, posted_on: "2026-08-15" }]).totals;
+      expect(drew.ownerDraw).toBe(4000);
+      expect(drew.left).toBe(nothing.left);
+    });
+
+    /**
+     * ONE PLACE, WITH A TOOTH ON IT. Both readers wrote this predicate out by hand, which is the exact
+     * "a reader writes the rule itself" shape that made 0286 a no-op for a week. Neither may again.
+     */
+    it("no reader writes the owner-line predicate by hand", () => {
+      const byHand = /Math\.abs\(\s*[\w.?]*\.?(ownerDraw|ownerBuildTimeOnJobs)[^)]*\)\s*>=?/;
+      for (const f of ["src/app/(app)/analytics/left-for-card.tsx", "src/lib/accountant-workbook.ts"]) {
+        expect(byHand.test(codeOnly(readFileSync(`${process.cwd()}/${f}`, "utf8"))), f).toBe(false);
+      }
+      // NOT VACUOUS: the predicate matches the line as both readers really had it.
+      expect(byHand.test("ownerDraw: Math.abs(t.ownerDraw ?? 0) >= 0.005,")).toBe(true);
+      expect(byHand.test("const hasBuildTime = [cur.totals].some((f) => Math.abs(f.ownerBuildTimeOnJobs ?? 0) >= 0.005);")).toBe(true);
+    });
+  });
+
   it("a draw lands in the month the bank posted it", () => {
     const m = run(erikCosted, bothHalves(erikCosted), [
       { id: "d1", amount: -1000, posted_on: "2026-08-15" },
@@ -1523,5 +1587,63 @@ describe("the owner's build time: on-site hours are a cost, office hours are ove
     expect(f.ownerHours).toBe(0);
     expect(f.ownerBuildTimeOnJobs).toBe(0);
     expect(f.crewPay).toBe(8 * 40); // Brian's wage, through crewPayByMonth, untouched
+  });
+
+  /**
+   * ── ONE IMPLEMENTATION, SO THE P&L AND THE JOBS CANNOT DISAGREE ───────────────────────────────────
+   *
+   * "What the owner's hours cost" had TWO implementations that rounded differently. The engine rounded
+   * every shift to whole cents and added; tallyBuildTime (the job hub, /analytics' job rows,
+   * budget-vs-actual, Nort's owner_cost) summed dollars and rounded once at the end. So the profit and
+   * loss's "Owner Build Time On Jobs" did not equal the sum of what the jobs were actually charged -
+   * which is exactly what the accountant workbook tells an accountant that line IS.
+   *
+   * Measured before the fix: $15.09 against $15.08 at a $10.05 rate over three half-hour shifts, and it
+   * GROWS with the number of shifts - $99,454.59 against $99,454.36 over two hundred of them. Exactly
+   * $0.00 at any whole-dollar rate, which is why every existing case here pins $65 and no test could see
+   * it. It fires the first time Erik types a rate with cents, which the free-decimal Cost box and the
+   * numeric(10,2) column both allow.
+   *
+   * Total COGS, Gross Profit and Net Profit were never wrong either way: the contra is the charged
+   * line's own figure negated. What was wrong is the charge not matching the charges.
+   */
+  describe("the charge on the profit and loss equals the sum of what the jobs were charged", () => {
+    const CENTS_RATE = 10.05;
+    const erikCents = new Map(people);
+    erikCents.set(ERIK, { name: "Erik Taylor", paidByDraw: true, hourlyRate: 0, costRate: CENTS_RATE });
+
+    /** `n` on-site shifts of `hours` each, all in one month, all on one job. */
+    const shifts = (n: number, hours: number) =>
+      Array.from({ length: n }, (_, i) => day(`c${i}`, ERIK, "2026-08-11", hours, "J-1", erikCents));
+
+    /** What the JOB was charged, through the shared implementation every job surface uses. */
+    const chargedToTheJob = (entries: any[]) => tallyBuildTime(entries, { jobId: "J-1" }).ownerCost;
+
+    it("a rate with cents: three half-hour shifts agree to the cent", () => {
+      const entries = shifts(3, 0.5);
+      // $15.09 on the profit and loss against $15.08 on the job, before the fix.
+      expect(run(erikCents, entries).totals.ownerBuildTimeOnJobs).toBe(chargedToTheJob(entries));
+    });
+
+    it("and the gap does not grow with the number of shifts", () => {
+      for (const [n, hours] of [[4, 7.25], [200, 0.5], [200, 1]] as const) {
+        const entries = shifts(n, hours);
+        expect(run(erikCents, entries).totals.ownerBuildTimeOnJobs, `${n} x ${hours}h`).toBe(chargedToTheJob(entries));
+      }
+    });
+
+    it("a whole-dollar rate still agrees, as it always did", () => {
+      const entries = [day("s1", ERIK, "2026-08-11", 8, "J-1", erikCosted)];
+      expect(run(erikCosted, entries).totals.ownerBuildTimeOnJobs).toBe(chargedToTheJob(entries));
+    });
+
+    /** AND THE BOTTOM LINE IS STILL UNTOUCHED at a rate with cents: the contra still nets to zero. */
+    it("net profit does not move, at a rate with cents either", () => {
+      const entries = shifts(3, 0.5);
+      const costed = run(erikCents, entries).totals;
+      const uncosted = run(people, shifts(3, 0.5).map((e) => ({ ...e, profiles: withRate(ERIK, people) }))).totals;
+      expect(costed.ownerBuildTimeOnJobs).toBeGreaterThan(0);
+      expect(costed.left).toBe(uncosted.left);
+    });
   });
 });
