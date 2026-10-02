@@ -40,6 +40,9 @@ export const VISIT_IDS_PER_REQUEST = 50;
  *  truncated into a wrong chip. */
 export const VISIT_ROW_CAP = 500;
 
+/** How many of those requests are in flight at once. */
+export const VISIT_REQUESTS_AT_ONCE = 4;
+
 export type LeadVisitsRead = {
   /** This lead's visits, null when it has none, or VISITS_UNREAD when nobody could tell. */
   forLead: (id: string) => LeadVisitsAnswer;
@@ -71,16 +74,23 @@ function tally(byLead: Map<string, LeadVisits>, r: VisitRow): void {
 export async function readLeadVisits(ids: string[], query: VisitQuery): Promise<LeadVisitsRead> {
   const byLead = new Map<string, LeadVisits>();
   const unread = new Set<string>();
-  for (let i = 0; i < ids.length; i += VISIT_IDS_PER_REQUEST) {
-    const batch = ids.slice(i, i + VISIT_IDS_PER_REQUEST);
-    if (!batch.length) continue;
-    const { data, error } = await query(batch, VISIT_ROW_CAP);
-    const rows = data ?? [];
-    if (error || !data || rows.length >= VISIT_ROW_CAP) {
-      for (const id of batch) unread.add(id);
-      continue;
-    }
-    for (const r of rows) tally(byLead, r);
+  const batches: string[][] = [];
+  for (let i = 0; i < ids.length; i += VISIT_IDS_PER_REQUEST) batches.push(ids.slice(i, i + VISIT_IDS_PER_REQUEST));
+  // A few at a time, not one at a time and not all at once: the board used to make ONE request, so
+  // four hundred leads must not become eight round trips the page waits through one after another —
+  // nor ten thousand requests fired at the database at once.
+  for (let w = 0; w < batches.length; w += VISIT_REQUESTS_AT_ONCE) {
+    const wave = batches.slice(w, w + VISIT_REQUESTS_AT_ONCE);
+    const answers = await Promise.all(wave.map((batch) => query(batch, VISIT_ROW_CAP)));
+    wave.forEach((batch, n) => {
+      const { data, error } = answers[n];
+      const rows = data ?? [];
+      if (error || !data || rows.length >= VISIT_ROW_CAP) {
+        for (const id of batch) unread.add(id);
+        return;
+      }
+      for (const r of rows) tally(byLead, r);
+    });
   }
   return {
     forLead: (id: string) => (unread.has(id) ? VISITS_UNREAD : (byLead.get(id) ?? null)),

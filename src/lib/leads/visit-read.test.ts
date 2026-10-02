@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { readLeadVisits, VISIT_IDS_PER_REQUEST, type VisitRow } from "./visit-read";
+import { readLeadVisits, VISIT_IDS_PER_REQUEST, VISIT_REQUESTS_AT_ONCE, type VisitRow } from "./visit-read";
 import { leadNextStep, VISITS_UNREAD, type LeadStepInput } from "./next-step";
 
 /**
@@ -59,6 +59,24 @@ describe("the visits behind the chip: read, or honestly unknown", () => {
     expect(asked.length).toBeGreaterThan(1);
     for (const n of asked) expect(n).toBeLessThanOrEqual(VISIT_IDS_PER_REQUEST);
     expect(asked.reduce((a, b) => a + b, 0)).toBe(260);
+    // Every lead asked about is answered, and none is left unknown by the batching itself.
+    const read = await readLeadVisits(ids(260), async () => ({ data: [], error: null }));
+    expect(read.unreadCount).toBe(0);
+    for (const id of ids(260)) expect(read.forLead(id)).toBeNull();
+  });
+
+  it("the batches go a few at a time: the board was ONE request, so it may not become eight waits", async () => {
+    let inFlight = 0;
+    let most = 0;
+    await readLeadVisits(ids(500), async () => {
+      inFlight += 1;
+      most = Math.max(most, inFlight);
+      await Promise.resolve();
+      inFlight -= 1;
+      return { data: [], error: null };
+    });
+    expect(most).toBeGreaterThan(1);
+    expect(most).toBeLessThanOrEqual(VISIT_REQUESTS_AT_ONCE);
   });
 
   it("one batch failing never makes the others unknown: only the leads nobody could read say so", async () => {
