@@ -7,12 +7,16 @@ import UIKit
 /// calendar in full, but it would be nice to also keep the buttons for the top bar and the dock
 /// exactly where they are while spinning everything in between only."
 ///
-/// Portrait is the floor AND the default. The app opens portrait and every screen except the
-/// schedule's calendar stays portrait on purpose: a phone held sideways has about 375pt of HEIGHT,
-/// and the rest of the app is built for a tall screen (the note in timecards/timecard-stack.tsx
-/// says so). Unlocking the whole app would hand every one of those screens a shape it was never
-/// drawn for. The calendar is the one screen that gets WIDER-IS-BETTER out of it — its week is
-/// seven columns that scroll sideways on a portrait phone — so it is the one screen that asks.
+/// Portrait is the floor AND the default. The app opens portrait and a screen stays portrait unless
+/// it asks: a phone held sideways has about 400pt of HEIGHT, and the rest of the app is built for a
+/// tall screen (the note in timecards/timecard-stack.tsx says so). Unlocking the whole app would hand
+/// every one of those screens a shape it was never drawn for.
+///
+/// WHICH SCREENS ASK IS NOT DECIDED HERE, and deliberately so — this file can only be changed by
+/// rebuilding the app, and the policy has to be changeable without one. The list lives in the web
+/// app, src/lib/screens-that-turn.ts, one entry per screen with the reason it warrants the width
+/// (documents, the schedule's week, the price table), and components/turns-sideways.tsx is the one
+/// thing that calls in here.
 ///
 /// THE iPAD IS NEVER GATED. Info.plist's `UISupportedInterfaceOrientations~ipad` already allows
 /// all four and should keep doing so; the view controller below only consults this value on an
@@ -27,6 +31,7 @@ enum ScreenTurn {
 
 /// The page's one door to it: `window.Capacitor.Plugins.ScreenTurn.allow({ turn: "sideways" })`
 /// while a screen can use the width, and `{ turn: "portrait" }` the moment it can't.
+///
 /// src/lib/native-orientation.ts is the web side.
 ///
 /// A LOCAL plugin, like TapToPayEducation, NOT an npm one. All it needs is three lines of UIKit;
@@ -54,9 +59,9 @@ public class ScreenTurnPlugin: CAPPlugin, CAPBridgedPlugin {
                 // Ask iOS to re-read supportedInterfaceOrientations NOW, rather than whenever it
                 // next happens to consider rotating.
                 vc.setNeedsUpdateOfSupportedInterfaceOrientations()
-                // And when the room for sideways is gone, turn the phone back by itself. Leaving
-                // the calendar while holding the phone sideways must not strand anyone on a
-                // portrait-only screen rendered into 375pt of height — NO DEAD ENDS.
+                // And when the room for sideways is gone, turn the phone back by itself. Walking off
+                // a document or the calendar while holding the phone sideways must not strand anyone
+                // on a portrait-only screen rendered into 400pt of height — NO DEAD ENDS.
                 if !sideways, let scene = vc.view.window?.windowScene {
                     scene.requestGeometryUpdate(.iOS(interfaceOrientations: .portrait))
                 }

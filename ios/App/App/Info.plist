@@ -76,8 +76,9 @@
 	     This list is the OUTER BOUND, not the policy: it is what iOS will even consider, and it
 	     cannot be read per screen because it is compiled into the app. The policy lives one layer
 	     in, at NorthBridgeViewController.supportedInterfaceOrientations, which answers portrait on
-	     every screen until the page asks for sideways through the ScreenTurn plugin (today: the
-	     schedule's calendar, and nothing else). Upside down is deliberately absent.
+	     every screen until the page asks for sideways through the ScreenTurn plugin. WHICH screens
+	     ask is one declared list in the web app, src/lib/screens-that-turn.ts, where every entry
+	     carries the reason it warrants the width. Upside down is deliberately absent.
 	     Changing this file is why the shell has to be rebuilt and reinstalled for any of it. -->
 	<key>UISupportedInterfaceOrientations</key>
 	<array>

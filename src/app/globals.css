@@ -188,6 +188,39 @@ main {
   .cal-stack {
     max-height: calc(100dvh - 11.5rem);
   }
+
+  /* ── DOCUMENTS, which have no app shell around them ──────────────────────
+     Erik, 2026-10-01: "The rotate should be available for any screen that
+     warrants it like documents especially". Two of them paint EDGE TO EDGE with
+     no top bar and no dock to borrow insets from — /print/pdf-preview (outside
+     the app shell entirely) and the full-screen photo/PDF viewer (fixed
+     inset-0). Sideways, the camera cutout is on the SIDE, so without these the
+     only way off the preview (Back) and the only way to close the viewer (✕)
+     sit under the Dynamic Island: doors you can see the edge of and not press.
+     The rows do not move and nothing is dropped — they clear the camera. Each
+     keeps the padding it already had as its floor, so a browser (where every
+     inset is 0) is pixel-for-pixel what it is today. */
+  .pdf-preview-bar,
+  .media-lightbox-bar {
+    padding-left: max(1rem, env(safe-area-inset-left, 0px));
+    padding-right: max(1rem, env(safe-area-inset-right, 0px));
+  }
+  .pdf-pages-scroll,
+  .media-lightbox-body {
+    padding-left: max(0.5rem, env(safe-area-inset-left, 0px));
+    padding-right: max(0.5rem, env(safe-area-inset-right, 0px));
+  }
+  /* The sheet gets the height back that a tall screen could afford to frame it
+     with. 1.5rem top and bottom is a tenth of the screen sideways. */
+  .pdf-pages-scroll {
+    padding-top: 0.5rem;
+    padding-bottom: 0.5rem;
+  }
+  /* The viewer's hint line STAYS (nothing is dropped to make room) — it just
+     sits tight against the bottom instead of floating above it. */
+  .media-lightbox-hint {
+    padding-bottom: 0.25rem;
+  }
 }
 
 /* ── The iOS shell (Capacitor WKWebView, full-bleed) ─────────────────────────

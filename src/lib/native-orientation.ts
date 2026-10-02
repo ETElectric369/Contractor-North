@@ -10,21 +10,23 @@ import { isNativeShell } from "@/lib/native-shell";
  * exactly where they are while spinning everything in between only."
  *
  * PORTRAIT EVERYWHERE, SIDEWAYS WHERE IT HELPS. Unlocking the app would hand every screen about
- * 375pt of height to work in, which is a surface nobody has drawn for (see the note in
- * timecards/timecard-stack.tsx). So the shell allows sideways at all, and each screen says whether
- * it is one of the screens that can use it. Today exactly one does: the schedule's calendar, whose
- * week is seven columns that have to be scrolled sideways on a portrait phone.
+ * 400pt of height to work in, which is a surface nobody has drawn for (see the note in
+ * timecards/timecard-stack.tsx). So the shell allows sideways at all, and the WEB APP says, screen
+ * by screen, which ones can use the width. WHICH ONES IS NOT DECIDED HERE: this file only carries
+ * the answer to the phone. The list — and the reason each screen is on it — lives in
+ * lib/screens-that-turn.ts, and components/turns-sideways.tsx is the one thing that calls this.
  *
  * THREE PLACES CAN SAY NO, and this file tells them apart so the report can be honest:
  *  - "shell"   — the App Store app. The native side decides (ScreenTurnPlugin.swift), and it can
  *                also turn the phone BACK when a screen stops allowing sideways. Needs the rebuilt
  *                shell: the orientation list is in Info.plist, which is compiled into the app.
- *  - "browser" — a phone browser with the Screen Orientation API (Android Chrome, and the installed
- *                web app there). lock()/unlock() do the same job, one screen at a time.
- *  - "no"      — nobody could be asked: iOS Safari has no Screen Orientation API, and the installed
- *                web app on iOS follows the manifest (which stays portrait — a manifest is one
- *                value for the whole app, so it cannot be the per-screen answer). Nothing breaks
- *                there; rotation simply does nothing, exactly as it does today.
+ *  - "browser" — a browser with the Screen Orientation API (Android Chrome). lock()/unlock() do the
+ *                same job, one screen at a time — but only where the page is allowed to lock at
+ *                all, which in practice means installed or full screen.
+ *  - "no"      — nobody could be asked. The common case, and a quiet one: iOS Safari has no Screen
+ *                Orientation API at all, and an ordinary mobile browser TAB cannot lock. There the
+ *                phone turns on every screen, as it already does today, and the `turned:` rules in
+ *                globals.css are what keep the top bar and the dock where they are when it does.
  *
  * THE PLUGIN COMES FROM THE BRIDGE, NEVER FROM AN IMPORT (the native-push.ts / native-tap.ts
  * lesson): on the phone an `await import()` of a Capacitor package HUNG. There is no package here
@@ -61,6 +63,22 @@ type WebOrientation = {
 
 function webOrientation(): WebOrientation | null {
   if (typeof screen === "undefined") return null;
+  // ONLY WHERE A LOCK IS ALLOWED AT ALL. The Screen Orientation API refuses to lock a plain browser
+  // TAB — it wants the page installed or full screen — so asking from one is a rejected promise on
+  // every single page load, including every visit to a company's public site. That is noise, not a
+  // fallback: a tab turns on every screen already, and the `turned:` rules in globals.css are what
+  // keep the chrome put when it does. A build with no matchMedia at all (a test, a server) is asked
+  // nothing and answers "no".
+  const installed =
+    typeof matchMedia === "function" &&
+    ["standalone", "fullscreen", "minimal-ui"].some((mode) => {
+      try {
+        return matchMedia(`(display-mode: ${mode})`).matches;
+      } catch {
+        return false;
+      }
+    });
+  if (!installed) return null;
   const o = (screen as unknown as { orientation?: WebOrientation }).orientation;
   return o && (typeof o.lock === "function" || typeof o.unlock === "function") ? o : null;
 }

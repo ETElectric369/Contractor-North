@@ -31,8 +31,16 @@ function fakeShell(opts: { fail?: boolean } = {}) {
   return calls;
 }
 
+/** An INSTALLED web app: the only place the Screen Orientation API will accept a lock. */
+function installed(yes = true) {
+  (globalThis as { matchMedia?: unknown }).matchMedia = (q: string) => ({
+    matches: yes && /display-mode: (standalone|fullscreen|minimal-ui)/.test(q),
+  });
+}
+
 function fakeBrowser(opts: { lockRejects?: boolean } = {}) {
   const seen: string[] = [];
+  installed();
   (globalThis as { screen?: unknown }).screen = {
     orientation: {
       lock: (o: string) => {
@@ -51,6 +59,7 @@ beforeEach(() => {
 afterEach(() => {
   delete (globalThis as { window?: unknown }).window;
   delete (globalThis as { screen?: unknown }).screen;
+  delete (globalThis as { matchMedia?: unknown }).matchMedia;
 });
 
 describe("letTheScreenTurn", () => {
@@ -96,9 +105,21 @@ describe("letTheScreenTurn", () => {
 
   it("iOS Safari — no Screen Orientation API at all — says nobody could be asked", async () => {
     h.native = false;
+    installed();
     (globalThis as { screen?: unknown }).screen = {};
     const { letTheScreenTurn } = await import("./native-orientation");
     expect(await letTheScreenTurn("sideways")).toBe("no");
+  });
+
+  it("an ordinary browser TAB is never even asked — a tab cannot be locked", async () => {
+    // Not a detail: without this, every visit to a company's public site fires a rejected lock() on
+    // page load. A tab turns on every screen already; globals.css is what keeps the chrome put.
+    h.native = false;
+    const seen = fakeBrowser();
+    installed(false);
+    const { letTheScreenTurn } = await import("./native-orientation");
+    expect(await letTheScreenTurn("portrait")).toBe("no");
+    expect(seen).toEqual([]);
   });
 
   it("on the server (no window, no screen) it is a quiet no", async () => {

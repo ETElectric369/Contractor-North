@@ -24,6 +24,9 @@ const SUBNAV = read("src/components/section-subnav.tsx");
 const SHELL = read("src/app/(app)/layout.tsx");
 const SCHEDULE = read("src/app/(app)/schedule/page.tsx");
 const CALENDAR = read("src/app/(app)/calendar/calendar-view.tsx");
+const PDF_VIEWER = read("src/app/print/pdf-preview/viewer.tsx");
+const LIGHTBOX = read("src/components/media-lightbox.tsx");
+const MANIFEST = read("src/app/manifest.ts");
 const PLIST = read("ios/App/App/Info.plist");
 
 /** The one media query, as both the `turned:` variant and the plain rules must spell it. */
@@ -57,6 +60,11 @@ describe("every selector the sideways rules target is really in the markup", () 
     ["app-backdrop", "the shell root (main's padding hangs off it)", SHELL],
     ["schedule-split", "the schedule's rail-and-calendar split", SCHEDULE],
     ["cal-stack", "the week/month scroller", CALENDAR],
+    ["pdf-preview-bar", "the document preview's toolbar", PDF_VIEWER],
+    ["pdf-pages-scroll", "the sheets, scrolling", PDF_VIEWER],
+    ["media-lightbox-bar", "the full-screen viewer's button row", LIGHTBOX],
+    ["media-lightbox-body", "the photo or PDF itself", LIGHTBOX],
+    ["media-lightbox-hint", "the line that says how to close it", LIGHTBOX],
   ];
   for (const [cls, what, src] of hooks) {
     it(`${cls} — ${what}`, () => {
@@ -98,19 +106,62 @@ describe("the chrome does not move when the phone turns", () => {
   });
 });
 
-describe("where the phone may turn", () => {
-  it("the schedule's calendar says so, and the map and Everyone's Day do not", () => {
-    expect(SCHEDULE).toContain("<TurnsSideways />");
-    // Exactly once: the map and crew branches return above it, so walking to either turns the
-    // phone back upright on the way.
-    expect(SCHEDULE.split("<TurnsSideways />").length - 1).toBe(1);
+describe("the documents keep their doors when the camera is on the side", () => {
+  // /print/pdf-preview and the full-screen viewer are the two rotating screens with NO app shell
+  // around them — no top bar, no dock, nothing holding an inset. Sideways the notch is on the side,
+  // and the ONLY way off each of them (Back; the ✕) sits at an edge.
+  it("the rules pad both of them past the cutout on BOTH ends", () => {
+    for (const cls of ["pdf-preview-bar", "media-lightbox-bar"]) {
+      const at = CSS.indexOf(`.${cls}`);
+      expect(at).toBeGreaterThan(-1);
+      const rule = CSS.slice(at, CSS.indexOf("}", at));
+      expect(rule).toContain("env(safe-area-inset-left");
+      expect(rule).toContain("env(safe-area-inset-right");
+    }
   });
 
-  it("no other screen mounts it", () => {
-    // A grep across the app would be the real guard; this at least pins the two files that know
-    // the component exists, so adding a third is a deliberate act with a test to update.
-    const comp = read("src/components/turns-sideways.tsx");
-    expect(comp).toContain("letTheScreenTurn");
+  it("…and each keeps its own padding as the floor, so a browser is unchanged", () => {
+    // px-4 on both rows. max(1rem, inset) means every inset-less browser renders exactly what it
+    // renders today; only the phone with a cutout moves.
+    const at = CSS.indexOf(".pdf-preview-bar");
+    const rule = CSS.slice(at, CSS.indexOf("}", at));
+    expect(rule).toContain("max(1rem, env(safe-area-inset-left");
+    expect(PDF_VIEWER).toContain("px-4");
+  });
+
+  it("the sheets are DRAWN AGAIN at the new width — a bitmap does not re-flow", () => {
+    // Without this the whole claim is false: turning the phone would leave the same 374pt-wide page
+    // in a 812pt-wide window, which is strictly worse than portrait.
+    expect(PDF_VIEWER).toContain('window.addEventListener("resize"');
+    expect(PDF_VIEWER).toContain('window.addEventListener("orientationchange"');
+    // From the document already in hand, not a second trip to the server.
+    expect(PDF_VIEWER).toMatch(/pdfRef\.current/);
+    expect(PDF_VIEWER).toMatch(/void paint\(pdf, want\)/);
+    // Width only: a keyboard or a browser's own chrome changes the height, and a repaint then would
+    // interrupt reading for nothing. The arithmetic itself is tested in lib/pdf-page-width.test.ts.
+    expect(PDF_VIEWER).toContain("worthRedrawing(want, paintedAtW.current)");
+  });
+
+  it("…and the page keeps his place instead of jumping back to page 1", () => {
+    expect(PDF_VIEWER).toContain("scroller.scrollTop = was * scroller.scrollHeight");
+  });
+
+  it("a page is measured from INSIDE the scroller, which is where the insets are", () => {
+    // window.innerWidth doesn't know about the camera inset, so a page sized from it would be drawn
+    // partly under the cutout.
+    expect(PDF_VIEWER).toContain("measureRef.current?.clientWidth");
+    expect(PDF_VIEWER).toContain("pageWidthInside(");
+    expect(PDF_VIEWER).not.toContain("Math.max(window.innerWidth - 32, 280)");
+  });
+});
+
+describe("the installed web app's manifest", () => {
+  it("still says portrait, and says WHY it cannot be the per-screen answer", () => {
+    // One value for the whole app: "any" would let an installed iOS web app rotate on every screen
+    // with no API to lock it back. Portrait is the one that is wrong in a safe direction.
+    expect(MANIFEST).toContain('orientation: "portrait"');
+    expect(MANIFEST).toContain("ONE");
+    expect(MANIFEST).toContain("screens-that-turn");
   });
 });
 
