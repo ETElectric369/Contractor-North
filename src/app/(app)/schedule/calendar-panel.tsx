@@ -209,6 +209,9 @@ export async function CalendarPanel({ canEdit = false }: { canEdit?: boolean } =
         // without it the client fell back to Date methods (server UTC on SSR,
         // browser zone after), the "UTC problem in the new calendars".
         tz={tz}
+        // Settings → Scheduling, "Week starts on": the week's columns and the month's rows begin on
+        // the company's own day. This screen hardcoded Sunday while the setting said Monday.
+        weekStart={getOrgSettings((org as any)?.settings).week_start}
         workDayStart={workDayWindowHm((org as any)?.settings).start}
         workDayEnd={workDayWindowHm((org as any)?.settings).end}
         crewBoard={featureOn(getOrgSettings((org as any)?.settings).features, "crew_board")}

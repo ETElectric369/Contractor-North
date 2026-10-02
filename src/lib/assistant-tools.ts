@@ -2,7 +2,7 @@ import { attachRates, payRateMap } from "@/lib/profile-columns";
 import { BUILD_TIME_IS_A_COST_NOT_A_WAGE, isOwnerShift } from "@/lib/build-time-cost";
 import "server-only";
 import type Anthropic from "@anthropic-ai/sdk";
-import { tzDayStartUtc, todayStrInTz, payPeriodForOffset } from "@/lib/tz";
+import { tzDayStartUtc, todayStrInTz, payPeriodForOffset, weekDayStrs, type WeekStart } from "@/lib/tz";
 import { escapeLike, hoursBetween, formatFullAddress } from "@/lib/utils";
 import { getOrgSettings } from "@/lib/org-settings";
 import { LONG_SHIFT_HOURS, forgottenReason } from "@/lib/long-shift";
@@ -661,8 +661,14 @@ function embedName(rel: any): string | null {
 
 const money = (n: any) => Math.round(Number(n ?? 0) * 100) / 100;
 
-/** Compute [startISO, endISO) for a named window, in UTC (matches the calendar). */
-function windowFor(range: string, tz = "America/Los_Angeles"): { start: string; end: string; label: string } {
+/** Compute [startISO, endISO) for a named window, in UTC (matches the calendar).
+ *  `weekStart` is the company's own (Settings → Scheduling): "this week" has to mean the same seven
+ *  days to Nort as it does on the screen beside him, or he answers a question nobody asked. */
+function windowFor(
+  range: string,
+  tz = "America/Los_Angeles",
+  weekStart: WeekStart = "monday",
+): { start: string; end: string; label: string } {
   // ORG-LOCAL boundaries, not UTC (audit v921 high). Building "today"/"this week" with
   // setUTCHours made Nort's schedule_overview read Sep 9 5pm -> Sep 10 5pm Pacific for "Sep 10",
   // dropping a 5:30pm call and pulling in the prior evening. Anchor every window on the org tz.
@@ -680,12 +686,13 @@ function windowFor(range: string, tz = "America/Los_Angeles"): { start: string; 
     const nextFirst = `${m === 12 ? y + 1 : y}-${String(m === 12 ? 1 : m + 1).padStart(2, "0")}-01`;
     return { start: at(first), end: at(nextFirst), label: "this month" };
   }
-  // week-based (Monday start), this_week or next_week — Monday of the ORG-local week.
-  const dow = (new Date(Date.parse(todayStr + "T00:00:00Z")).getUTCDay() + 6) % 7; // Monday = 0
-  const weekStart = addDays(todayStr, -dow + (range === "next_week" ? 7 : 0));
+  /* this_week or next_week — the COMPANY's week in ITS timezone. This hardcoded Monday, so a
+     Sunday-start company asking Nort "what's on this week" got a window one day out from the week on
+     its own schedule. One rule now (lib/tz weekDayStrs), the same one the schedule and My Day draw. */
+  const firstDay = weekDayStrs(todayStr, weekStart, range === "next_week" ? 1 : 0)[0];
   return {
-    start: at(weekStart),
-    end: at(addDays(weekStart, 7)),
+    start: at(firstDay),
+    end: at(addDays(firstDay, 7)),
     label: range === "next_week" ? "next week" : "this week",
   };
 }
@@ -1887,7 +1894,8 @@ export async function runDataTool(
         // needs to look backward). Day boundaries are the ORG's local midnight, not UTC
         // (audit v921 high) — else a Pacific org's evening visits fall a day out.
         const { data: schedOrg } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
-        const schedTz = getOrgSettings((schedOrg as any)?.settings).timezone || "America/Los_Angeles";
+        const schedSettings = getOrgSettings((schedOrg as any)?.settings);
+        const schedTz = schedSettings.timezone || "America/Los_Angeles";
         const day = sanitize(input.date);
         const pivot = sanitize(input.around);
         const addSchedDays = (ymd: string, n: number) =>
@@ -1902,7 +1910,7 @@ export async function runDataTool(
           end = tzDayStartUtc(addSchedDays(pivot, 15), schedTz).toISOString(); // ±2 weeks, pivot day inclusive
           label = `two weeks around ${pivot}`;
         } else {
-          ({ start, end, label } = windowFor(String(input.range ?? "this_week"), schedTz));
+          ({ start, end, label } = windowFor(String(input.range ?? "this_week"), schedTz, schedSettings.week_start));
         }
         const [jobsRes, apptRes, taskRes] = await Promise.all([
           supabase
