@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   EVERY_WAY_HELD,
+  faceStyle,
   isTurned,
   laidOutAt,
   placeTheFace,
@@ -100,6 +101,18 @@ describe("THE GEOMETRY: the content gets the swapped dimensions", () => {
     expect(hisWay.height).toBe(402);
     expect(hisWay.height - whatShipped.height).toBe(131);
     expect(whatShipped.width - hisWay.width).toBe(190);
+  });
+
+  it("the box carries its OWN size, because a media query inside it still sees the phone", () => {
+    // The one real cost of drawing the turn instead of letting iOS do it: the layout in here is
+    // 684 x 402, but `100dvh` and `min-width: 1024px` are answered by the WINDOW, which is 402 x 874
+    // however the phone is held. Most of a page does not care — flex, grid, percentages and the PDF's
+    // measured page width are all container-sized — but the two rules that ask the window read these.
+    const style = faceStyle(placeTheFace(MIDDLE, "clockwise", DOCK));
+    expect(style["--turn-w"]).toBe("684px");
+    expect(style["--turn-h"]).toBe("402px");
+    expect(style.width).toBe(style["--turn-w"]);
+    expect(style.height).toBe(style["--turn-h"]);
   });
 
   it("the face is pinned to the centre of the ROOM, not of the box — the dock is not the middle", () => {

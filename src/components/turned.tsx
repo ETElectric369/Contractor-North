@@ -73,7 +73,7 @@ export function Turned({ children, avoidDock = false }: { children: React.ReactN
       data-held={held}
       style={
         place
-          ? faceStyle(place)
+          ? (faceStyle(place) as React.CSSProperties)
           : // One frame, before the host has been measured: fill it, unrotated, rather than collapse to
             // nothing. The measurement happens before paint, so in practice this is never seen.
             { inset: "0", width: "auto", height: "auto" }

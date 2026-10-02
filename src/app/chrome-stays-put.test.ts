@@ -172,7 +172,25 @@ describe("the content gets the swapped dimensions, and the element really wears 
       left: "201px",
       top: "342px",
       transform: "translate(-50%, -50%) rotate(-90deg)",
+      "--turn-w": "684px",
+      "--turn-h": "402px",
     });
+  });
+
+  it("the two rules that ask the WINDOW instead of their container are told the box's own size", () => {
+    // A media query inside the turned box is still answered by the window — 402 x 874, however the
+    // phone is held. Below `lg` the schedule's rail stacks ABOVE the calendar, so without this,
+    // turning the phone to see the week lands on "Waiting For A Day"; and the week stack's 70dvh is
+    // 612px inside a 402px room, which makes the box scroll as well — two scrollers for one list.
+    expect(CSS).toContain(".turn-face[data-held] .schedule-split > aside");
+    const order = CSS.slice(CSS.indexOf(".turn-face[data-held] .schedule-split > aside"));
+    expect(order.slice(0, order.indexOf("}"))).toContain("order: 1");
+    expect(CSS).toMatch(/\.turn-face\[data-held\] \.cal-stack \{\s*max-height: calc\(var\(--turn-h/);
+    // The var the rule reads is the one the face is given.
+    expect(faceStyle(placeTheFace({ width: 402, height: 751 }, "clockwise", 67))["--turn-h"]).toBe("402px");
+    // Both hooks really exist in the markup they steer.
+    expect(read("src/app/(app)/schedule/page.tsx")).toContain("schedule-split");
+    expect(read("src/app/(app)/calendar/calendar-view.tsx")).toContain("cal-stack");
   });
 
   it("<Turned> places the face from that one function and nothing else", () => {

@@ -109,20 +109,22 @@ export function placeTheFace(host: Box, held: Held, reserveBottom = 0): FacePlac
  * style a turned region gets is a thing a test can read, instead of something only a phone can show.
  * `translate(-50%, -50%)` first and the turn second: the element is pinned by its own centre to the
  * centre of the room, and then turned about that same point.
+ *
+ * AND THE BOX'S OWN SIZE, AS TWO CUSTOM PROPERTIES. This is the one real cost of drawing the turn
+ * ourselves instead of letting iOS do it: inside this box the LAYOUT is 684 x 402, but `100dvh` and
+ * `min-width: 1024px` are still answered by the WINDOW, which is 402 x 874 and stays that way.
+ * Anything sized by its container — flex, grid, percentages, the PDF's measured page width — is right
+ * on its own; the few rules that ask the window instead read --turn-w / --turn-h.
  */
-export function faceStyle(place: FacePlacement): {
-  width: string;
-  height: string;
-  left: string;
-  top: string;
-  transform: string;
-} {
+export function faceStyle(place: FacePlacement): Record<string, string> {
   return {
     width: `${place.width}px`,
     height: `${place.height}px`,
     left: `${place.left}px`,
     top: `${place.top}px`,
     transform: `translate(-50%, -50%) rotate(${place.degrees}deg)`,
+    "--turn-w": `${place.width}px`,
+    "--turn-h": `${place.height}px`,
   };
 }
 

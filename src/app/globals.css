@@ -338,6 +338,41 @@ main.turn-host > .turn-face[data-held] {
   padding: 0.5rem;
 }
 
+/* ── INSIDE A TURNED BOX, A MEDIA QUERY STILL SEES THE PHONE ─────────────────
+   The one real cost of drawing the turn ourselves instead of letting iOS do it.
+   The LAYOUT inside the box is 684 x 402 — flex, grid, percentages and the PDF's
+   measured page width are all right on their own, which is most of it — but
+   `100dvh` and `min-width: 1024px` are answered by the WINDOW, and the window is
+   402 x 874 and stays that way. So the two rules that ask the window have to be
+   told, and the face carries its own size as --turn-w / --turn-h for exactly that.
+
+   THE CALENDAR FIRST. Below `lg` the rail is stacked ABOVE the calendar, and `lg`
+   is answered by a 402px window however the phone is held — so turning the phone
+   to see the week would land on "Waiting For A Day". Order, not display: the rail
+   is all still there, one scroll further down. */
+.turn-face[data-held] .schedule-split {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+/* `space-y-4` in Tailwind v4 is margin-block-END on every child but the last, so with the order
+   swapped the gap would hang off the wrong element. `gap` above replaces it; this takes it off. */
+.turn-face[data-held] .schedule-split > * {
+  margin-block: 0;
+}
+.turn-face[data-held] .schedule-split > aside {
+  order: 1;
+}
+/* The week/month stack is its own scroller — its onScroll is what extends the
+   endless stack, so it has to keep scrolling itself rather than handing the job to
+   the box around it. Its max-height asks for 70dvh, which inside this box is 612px
+   of a 402px room: the box would scroll as well, two scrollers for one list. This
+   is the room that is actually there — the box, less the section strip and the
+   calendar's own header row. */
+.turn-face[data-held] .cal-stack {
+  max-height: calc(var(--turn-h, 70dvh) - 8rem);
+}
+
 /* ── THE BUTTONS READ UPRIGHT ────────────────────────────────────────────────
    Every control in the top bar is a 44px SQUARE, and a square turned a quarter
    turn is the same square — so the bar does not move a pixel and the tap target is
