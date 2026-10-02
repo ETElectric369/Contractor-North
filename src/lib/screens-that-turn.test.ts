@@ -152,13 +152,23 @@ describe("a document opened OVER a tall screen may still be turned", () => {
 });
 
 describe("there is ONE place that tells the phone, and ONE place that is mounted", () => {
-  it("only turns-sideways.tsx calls letTheScreenTurn", () => {
-    // Two writers is the race this design exists to avoid: a layer asking for portrait on its way
-    // out while the route underneath is still allowed to be sideways.
+  it("only turns-sideways.tsx watches how the phone is held", () => {
+    // Two writers is the race this design exists to avoid: a layer un-turning the screen on its way
+    // out while the route underneath is still allowed to be turned.
+    //
+    // The CALL changed shape with cn-v1042 and the rule did not. It used to ask the shell to unlock
+    // the interface so iOS would rotate the whole view — which is exactly what carried the top bar and
+    // the dock around with it (Erik: "nice it rotates now on schedule but the dock and top bar rotate
+    // with it still"). The shell is portrait-locked again and REPORTS which way the phone is held;
+    // this watcher is still the one and only thing that listens, and the one and only thing that
+    // decides what gets drawn.
     const callers = read("src/components/turns-sideways.tsx");
-    expect(callers).toContain("letTheScreenTurn");
+    expect(callers).toContain("watchHowThePhoneIsHeld");
     const lib = read("src/lib/native-orientation.ts");
-    expect(lib).toContain("export async function letTheScreenTurn");
+    expect(lib).toContain("export function watchHowThePhoneIsHeld");
+    // Nothing else in the app may listen for the shell's report directly.
+    const others = ["src/components/turned.tsx", "src/components/media-lightbox.tsx", "src/app/print/pdf-preview/viewer.tsx"];
+    for (const f of others) expect(read(f)).not.toContain("watchHowThePhoneIsHeld");
   });
 
   it("the watcher is mounted in the ROOT layout, so no screen has to remember anything", () => {

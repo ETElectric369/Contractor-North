@@ -7,12 +7,25 @@ import { BackLink } from "@/components/back-link";
 import { pdfPreviewBackHref } from "@/lib/pdf-preview-back";
 import { pageWidthInside, worthRedrawing } from "@/lib/pdf-page-width";
 import { renderTurns } from "@/lib/pdf-render-turns";
+import { Turned } from "@/components/turned";
 
 const MARGINS = [
   { v: 0.5, label: "Narrow · ½ in" },
   { v: 0.75, label: "Normal · ¾ in" },
   { v: 1, label: "Wide · 1 in" },
 ];
+
+/**
+ * WHICHEVER ELEMENT IS ACTUALLY SCROLLING THE SHEETS. Upright that is the box itself, as it always
+ * was. Turned sideways the box becomes the frame and the quarter-turned face inside it is the
+ * scroller (globals.css), so "keep his place across a repaint" has to read and write the scrollTop of
+ * THAT one — written to the wrong element it is silently a no-op, and page 5 of an invoice becomes
+ * page 1 every time the phone turns, which is the exact bug the place-keeping is there to prevent.
+ */
+function theScroller(box: HTMLElement | null): HTMLElement | null {
+  if (!box) return null;
+  return box.querySelector<HTMLElement>(":scope > .turn-face[data-held]") ?? box;
+}
 
 /**
  * The document PDF viewer. Renders the server-generated PDF page-by-page onto canvases
@@ -81,7 +94,7 @@ export function PdfPreview({ doc, id, back }: { doc: string; id: string; back: s
     // KEEP HIS PLACE. Redrawing empties the list, so page 5 of an invoice would become page 1 every
     // time the phone turned. The sheets keep their aspect ratio, so the fraction scrolled is the
     // same place at any width.
-    const scroller = scrollRef.current;
+    const scroller = theScroller(scrollRef.current);
     const was =
       scroller && scroller.scrollHeight > scroller.clientHeight
         ? scroller.scrollTop / scroller.scrollHeight
@@ -227,10 +240,17 @@ export function PdfPreview({ doc, id, back }: { doc: string; id: string; back: s
     };
     window.addEventListener("resize", maybeRepaint);
     window.addEventListener("orientationchange", maybeRepaint);
+    // AND THE ONE THAT ACTUALLY FIRES IN THE APP NOW. The shell is portrait-locked, so when the phone
+    // is turned the WINDOW never changes shape — neither `resize` nor `orientationchange` happens, and
+    // without this a document would stay drawn at the portrait width inside a box twice as wide, which
+    // is strictly worse than not turning at all. components/turns-sideways.tsx fires it the moment the
+    // turn is decided; the two above stay for a browser, where the window really does change.
+    window.addEventListener("cn:screen-turned", maybeRepaint);
     return () => {
       clearTimeout(t);
       window.removeEventListener("resize", maybeRepaint);
       window.removeEventListener("orientationchange", maybeRepaint);
+      window.removeEventListener("cn:screen-turned", maybeRepaint);
     };
   }, [paint, roomForAPage]);
 
@@ -327,11 +347,16 @@ export function PdfPreview({ doc, id, back }: { doc: string; id: string; back: s
         </div>
       </div>
 
-      <div ref={scrollRef} className="pdf-pages-scroll min-h-0 flex-1 overflow-y-auto px-2 py-6">
+      {/* `turn-host`: the bar above stays exactly where it is — the phone's top edge — and THIS is the
+          rectangle the page turns inside when the phone is held sideways (Erik, 2026-10-01). Upright,
+          <Turned> has no box at all and this is the same scroller it has always been. */}
+      <div ref={scrollRef} className="pdf-pages-scroll turn-host min-h-0 flex-1 overflow-y-auto px-2 py-6">
+       <Turned>
         {/* THE ONE THING THAT CAN ALWAYS BE MEASURED. The pages host below is display:none while
             loading (clientWidth 0 → a page drawn into a negative-width canvas: Erik's blank sheets),
             and window.innerWidth doesn't know about the camera inset this scroller is padded for. This
-            sits inside the padding, draws nothing, and is exactly the room a page has. */}
+            sits inside the padding, draws nothing, and is exactly the room a page has — including when
+            that room is the turned box, which is twice as wide. */}
         <div ref={measureRef} aria-hidden="true" className="h-0" />
         {state === "loading" && (
           <div className="flex flex-col items-center gap-3 py-24 text-slate-500">
@@ -353,6 +378,7 @@ export function PdfPreview({ doc, id, back }: { doc: string; id: string; back: s
           </div>
         )}
         <div ref={pagesRef} className={state === "ready" ? "" : "hidden"} />
+       </Turned>
       </div>
     </div>
   );

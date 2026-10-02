@@ -28,6 +28,7 @@ import { TapToPayAwareness } from "@/components/tap-to-pay/awareness";
 import { SectionSubnav } from "@/components/section-subnav";
 import { RouteOffLine } from "@/components/route-off-line";
 import { ToastProvider } from "@/components/toast";
+import { Turned } from "@/components/turned";
 import { offFeatureKey } from "@/lib/features";
 import { countTeammates, shellDoors } from "@/lib/feature-doors";
 import { Suspense } from "react";
@@ -368,17 +369,26 @@ export default async function AppLayout({
             {graceLeft} more day{graceLeft === 1 ? "" : "s"}.
           </div>
         )}
-        <main className="flex-1 overflow-y-auto bg-slate-50/70 p-4 pb-[calc(7.5rem+env(safe-area-inset-bottom))] shell:p-6 shell:pb-6">
-          <Suspense fallback={null}>
-            <SectionSubnav isStaff={isStaff} features={doors} />
-          </Suspense>
-          {/* A page whose feature is switched off still opens from a link, with the Off line on top. */}
-          <RouteOffLine features={features} isOwner={isOwner} />
-          {/* One count per page open, ids stripped, no user id (0353). Suspense: it reads ?tab=. */}
-          <Suspense fallback={null}>
-            <PageOpenCounter />
-          </Suspense>
-          <ToastProvider>{children}</ToastProvider>
+        {/* `turn-host`: on a screen declared in lib/screens-that-turn.ts, this is the rectangle of
+            glass BETWEEN the chrome — and when the phone is turned sideways it is the frame the page
+            is drawn into a quarter turn. The top bar above and the dock below are not transformed at
+            all, which is why they stay exactly where they are on the phone (Erik, 2026-10-01). */}
+        <main className="turn-host flex-1 overflow-y-auto bg-slate-50/70 p-4 pb-[calc(7.5rem+env(safe-area-inset-bottom))] shell:p-6 shell:pb-6">
+          {/* Upright this wrapper has no box at all (`display: contents`), so nothing about any screen
+              changes. `avoidDock` takes the floating dock's MEASURED height off the bottom of the
+              turned box, so the last line of a document is never drawn under the glass. */}
+          <Turned avoidDock>
+            <Suspense fallback={null}>
+              <SectionSubnav isStaff={isStaff} features={doors} />
+            </Suspense>
+            {/* A page whose feature is switched off still opens from a link, with the Off line on top. */}
+            <RouteOffLine features={features} isOwner={isOwner} />
+            {/* One count per page open, ids stripped, no user id (0353). Suspense: it reads ?tab=. */}
+            <Suspense fallback={null}>
+              <PageOpenCounter />
+            </Suspense>
+            <ToastProvider>{children}</ToastProvider>
+          </Turned>
         </main>
       </div>
       {/* Search Or Ask's sheet: with nothing typed, Talk To Nort and (staff) the setup rows. */}

@@ -23,9 +23,17 @@
   }
 }
 
-/* ── The phone, turned sideways ───────────────────────────────────────────
-   `turned:` = "a PHONE held sideways": wide, and with almost no HEIGHT to
-   spend — an iPhone 16 Pro is 402pt tall that way, an SE 320.
+/* ── A BROWSER's phone, turned sideways ───────────────────────────────────
+   `turned:` = "a PHONE held sideways, in a browser": wide, and with almost no
+   HEIGHT to spend — an iPhone 16 Pro is 402pt tall that way, an SE 320.
+
+   A BROWSER'S, NOW. In the App Store app the interface is locked to portrait
+   (Info.plist) and the WINDOW NEVER CHANGES SHAPE when the phone is turned, so
+   none of this matches there any more — the chrome stays where it is because
+   nothing moves at all, and the quarter turn is drawn by us (see "THE PHONE IS
+   TURNED, THE CHROME IS NOT" further down). This block is what a plain mobile
+   browser tab and an installed web app get, where the page rotates natively and
+   always did: one world each, and they never both fire.
 
    Erik, 2026-10-01, from /schedule: "I'd like to be able to turn the phone
    sideways to see the calendar in full, but it would be nice to also keep the
@@ -245,6 +253,129 @@ main {
   .media-lightbox-hint {
     padding-bottom: 0.25rem;
   }
+}
+
+/* ── THE PHONE IS TURNED, THE CHROME IS NOT ──────────────────────────────────
+   Erik, on cn-v1041: "nice it rotates now on schedule but the dock and top bar
+   rotate with it still." And what he asked for, twice: "lock the top bar and the
+   dock positions and just rotate the buttons while the internal screen rotates."
+
+   SO THE SHELL IS PORTRAIT-LOCKED AGAIN on the iPhone (Info.plist), because iOS
+   rotating the interface is the thing that carried the chrome around. Nothing
+   moves: the top bar is still against the phone's top edge and the dock still
+   against its bottom edge, which is why — once the phone is turned — they read as
+   a strip down one side and a strip down the other. They did not move; the person
+   did. Only the region between them is drawn turned, and every square control's
+   face is drawn through the SAME quarter turn so the buttons read upright.
+
+   THE QUARTER TURN IS ONE NUMBER, uprightDegrees() in lib/turned-geometry.ts.
+   components/turns-sideways.tsx writes it onto <html> as --turn-deg, with
+   data-phone-held saying which way, and that is the only place either is set.
+
+   NONE OF THIS FIRES IN A BROWSER. A tab (and an installed web app) rotates
+   natively and always did; there is no plugin there to report a turn, so
+   data-phone-held is never set and the `turned:` block ABOVE is what keeps the
+   chrome where it belongs in the rotated viewport. One world each, no overlap. */
+
+/* Held upright this element has NO BOX AT ALL, so every screen lays out byte for
+   byte as it does today and there is nothing to regress. */
+.turn-face {
+  display: contents;
+}
+
+/* Turned: the box the quarter turn is painted into. Its size, its centre and its
+   degrees are all measured and set inline by components/turned.tsx — the host's
+   real glass, never a phone model's numbers. */
+.turn-face[data-held] {
+  display: block;
+  position: absolute;
+  z-index: 10;
+  transform-origin: 50% 50%;
+}
+
+/* ── THE THREE HOSTS: each one becomes the FRAME the turn is painted into ─────
+   Named one by one on purpose rather than as a bare `.turn-host`. `position` is
+   not an addition, it is a REPLACEMENT — a blanket `.turn-host { position:
+   relative }` would quietly undo the positioning of a host that had its own, and
+   a host whose height came from `top`/`bottom` would collapse to nothing the
+   moment the phone was turned. All three of these are static boxes sized by their
+   flex parent, which is checked here by naming them.
+
+   The padding comes OFF the host and onto the turned box: while turned the host's
+   job is to be the exact rectangle of glass between the chrome, which is what gets
+   measured. The 7.5rem of bottom padding that clears the floating dock goes with
+   it — the dock is taken off the bottom of the box by `avoidDock` instead, from
+   the dock's own measured height, so the room is real rather than slack.
+
+   The two document ones paint edge to edge with their own small bar instead of the
+   app's. The bar stays exactly where it is — the physical top edge — and the page
+   below it turns. A drawn PDF page is a bitmap, so the viewer also REDRAWS it at
+   the new width; `cn:screen-turned` is what tells it (viewer.tsx), because with the
+   interface locked the window never resizes when the phone turns. */
+main.turn-host:has(> .turn-face[data-held]),
+.pdf-pages-scroll.turn-host:has(> .turn-face[data-held]),
+.media-lightbox-body.turn-host:has(> .turn-face[data-held]) {
+  position: relative;
+  padding: 0;
+  overflow: hidden;
+}
+main.turn-host > .turn-face[data-held] {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding: 0.75rem;
+}
+.pdf-pages-scroll.turn-host > .turn-face[data-held] {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0.5rem;
+}
+.media-lightbox-body.turn-host > .turn-face[data-held] {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: auto;
+  padding: 0.5rem;
+}
+
+/* ── THE BUTTONS READ UPRIGHT ────────────────────────────────────────────────
+   Every control in the top bar is a 44px SQUARE, and a square turned a quarter
+   turn is the same square — so the bar does not move a pixel and the tap target is
+   still 44 x 44 AFTER the transform, which is the number that counts.
+
+   THE MARKER IS ON THE BUTTON, NEVER ON ANYTHING ABOVE IT. A transform makes an
+   element the containing block for its position:fixed descendants — the cn-v344
+   regression that trapped Nort's floating panel inside the header. Nort's panel,
+   the notification list, the account menu and the + menu are all SIBLINGS of their
+   trigger button, so marking the button leaves every one of them anchored to the
+   viewport, exactly as it is today. Do not move a marker up a level. */
+html[data-phone-held] [data-upright] {
+  transform: rotate(var(--turn-deg, 0deg));
+}
+
+/* ── The dock's tiles ────────────────────────────────────────────────────────
+   A tile is NOT square — it is about 77 x 47 — and it holds a stack, icon over
+   label. So a tile gets the same treatment as a page: its face is laid out at the
+   swapped size (47 x 77, which is where an icon over an 11px label fits
+   comfortably) and painted through the quarter turn. The result is what a person
+   holding the phone sideways expects: five upright tiles down the strip, icon above
+   label, nothing dropped and nothing renamed.
+
+   And the tile keeps the height it has upright, so the dock itself does not change
+   size when the face leaves the flow — 47px is what the icon (20) + gap (4) +
+   label (11) + py-1.5 (12) measures to. */
+html[data-phone-held] .dock-tile {
+  /* A tile already carries Tailwind `relative`; said again here so this rule stands
+     on its own the way the three hosts above do. */
+  position: relative;
+  min-height: 2.9375rem;
+}
+html[data-phone-held] .dock-tile > .turn-face[data-held] {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
 }
 
 /* ── The iOS shell (Capacitor WKWebView, full-bleed) ─────────────────────────
