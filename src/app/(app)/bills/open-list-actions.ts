@@ -19,7 +19,7 @@ import {
   type OpenListColumns,
   type StoredOpenList,
 } from "@/lib/supplier-open-list";
-import { looksLikeBankTable, mayBeBankTable, noLinesSaid, redactDigits, redactWordCells } from "@/lib/bank-download";
+import { looksLikeBankTable, mayBeBankTable, noLinesSaid, notABankDownloadSaid, redactDigits, redactWordCells, unreadBankTable } from "@/lib/bank-download";
 import { OWNER_SORTS_BANK, viewerSortsBank } from "@/lib/bank-viewer";
 import { bankLine, bankTableTooLong, capBankTable, createBankPaper, readBankDownload } from "./bank-core";
 import { applyOpenListCore, createOpenListPaper, loadAccounts, loadPapers, openListLine, orgToday, resolveAccount } from "./open-list-core";
@@ -49,8 +49,11 @@ export async function addOpenList(input: {
   /** The day the file was saved (the browser's lastModified), or null for today. */
   listDate?: string | null;
   source?: "bills_drop" | "organize";
-  /** "bank": the door is Money's Drop Your Bank Download. A file that isn't one is refused in
-   *  plain words, never turned into a supplier's list. */
+  /** "bank": the caller promised a bank download, so anything else — a supplier's list included — is
+   *  refused in plain words. NO DOOR PASSES IT TODAY: Reconcile's drop line takes either statement on
+   *  purpose (Erik: "i want to upload my bank statement and supplier statement"), and this file tells
+   *  them apart by what is in them. It is NOT what keeps a bank's file out of the supplier class:
+   *  `unreadBankTable` does that below, for every door, whether or not anyone promised anything. */
   expect?: "bank" | null;
 }): Promise<Result & { id?: string; already?: string; line?: string }> {
   const ctx = await requireStaff();
@@ -105,11 +108,18 @@ export async function addOpenList(input: {
       revalidatePath("/planner");
       return { ok: true, id: placed.id, line: bankLine(download) };
     }
-    if (input?.expect === "bank")
-      return {
-        ok: false,
-        error: `${name} doesn't read as a bank download: it needs a date, a description and an amount on every line. Download it again as CSV (with column headings, if the bank offers them) and drop that. Nothing was added.`,
-      };
+    // A BANK'S TABLE THAT DIDN'T READ AS ONE IS REFUSED HERE, AT EVERY DOOR, rather than kept as a
+    // supplier's list waiting for its columns. That class of paper is the whole office's to read
+    // (0365 holds proposal.openList to is_org_staff(); a bank download it holds to
+    // viewer_sorts_bank(), the owner's own switch), and the card prints four of its lines as a
+    // sample — so storing the owner's draw and his dentist there hands them to an office hand the
+    // owner switched off, and hides it behind a gate that only hides the button. The rule lives in
+    // ONE function (unreadBankTable) rather than on the door, because the door cannot tell the two
+    // files apart and every door reaches this one.
+    //
+    // `expect: "bank"` lands on the same sentence: a door that promised a bank download and got
+    // something else is asking the same question and gets the same answer.
+    if (unreadBankTable(bankTable, at, supplierRef) || input?.expect === "bank") return { ok: false, error: notABankDownloadSaid(name) };
   }
   if (input?.expect === "bank") return { ok: false, error: `${name} doesn't read as a bank download. Download it as CSV, Excel or OFX/QFX and drop that. Nothing was added.` };
   if (Array.isArray(input?.table)) {

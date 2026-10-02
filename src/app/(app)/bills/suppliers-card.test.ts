@@ -150,6 +150,33 @@ describe("the card says the things a balance cannot say for itself", () => {
     expect(CARD).toContain("Still owed; mark {c.bills.length === 1 ? \"it\" : \"them\"} Settled when you pay.");
   });
 
+  /**
+   * TWO TRUE FIGURES, AND THE SENTENCE NAMES WHAT EACH ONE ANSWERS. It used to end "and neither is
+   * wrong", which is a hedge: it asked an electrician between jobs to accept two numbers on faith
+   * instead of telling him which question each one answers. Two figures are only confusing while
+   * nobody says that.
+   */
+  it("names the question behind each of the two supplier figures instead of asking him to accept both", () => {
+    // The sentence, not the comment above it: the comment quotes the hedge to say what it prevents.
+    expect(CARD).not.toContain("neither is wrong.");
+    expect(CARD).toContain("so it answers a");
+    expect(CARD).toContain("different question: that one counts every ticket you have not squared up, and the figure above is what is");
+    expect(CARD).toContain("still owed once the payments you have sent come off");
+  });
+
+  /**
+   * AND IT DOES NOT CALL THE HEADLINE A SUPPLIER'S ASK WHEN NO SUPPLIER ASKED. `totalOwed` is a blend:
+   * their own papers where they send them, our own tickets where they do not, register accounts and
+   * papers on no account — the fold above names all four. A company nobody sends a portal balance to
+   * has a headline made entirely of its own tickets, so "what your suppliers are asking you for" was a
+   * sentence about a document that does not exist. The supplier's-own-figure half is said only where
+   * there is one, gated on the same `theirOwnPapers` slice the fold is built from.
+   */
+  it("claims a supplier's own figure only where this company has supplier papers", () => {
+    expect(CARD).not.toContain("what your suppliers are asking you for");
+    expect(CARD).toContain('{theirOwnPapers > 0.005 ? ", which is your suppliers\' own figure where they send you papers" : ""}');
+  });
+
   /** Model B: their figure cannot cover a purchase they never billed him for. */
   it("does not explain away the bills the supplier has no document for", () => {
     expect(CARD).toContain("const modelledExplained =");

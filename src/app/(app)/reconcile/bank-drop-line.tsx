@@ -9,11 +9,22 @@ import { LIST_ACCEPT, readListFile } from "@/lib/open-list-file";
 import { addOpenList } from "@/app/(app)/bills/open-list-actions";
 
 /**
- * DROP YOUR BANK DOWNLOAD (Erik, 2026-09-27): one plain line on Money, for the monthly export from
- * the bank's website (CSV, Excel old or new, OFX/QFX). It is the same door as Snap Or Note (addOpenList
- * recognises a bank's columns); the file is read on this device and only its rows go to the server,
- * which keeps the last 4 of the account and never a long number. The download then waits under Needs
- * You on Bills as one card. Nothing is written until a person presses Apply there.
+ * DROP A BANK OR SUPPLIER DOWNLOAD (Erik, 2026-09-27; moved to Reconcile 2026-10-02): one plain line
+ * for the export off the bank's website or a supplier's portal — CSV, TSV, a text table, Excel old
+ * or new, or a bank's OFX/QFX/QBO (LIST_ACCEPT). NOT A PDF, which this reader refuses, so no copy
+ * beside it may say "statement" and leave him to find that out by being turned away.
+ *
+ * It is the same door as Snap Or Note (addOpenList reads a bank's columns as a bank download and
+ * anything else as a supplier's open list); the file is read on this device and only its rows go to
+ * the server, which keeps the last 4 of an account and never a long number. It then waits under
+ * Needs You on Bills as one card, and nothing is written until a person presses Apply there.
+ *
+ * WHY IT LIVES ON RECONCILE AND NOT ON MONEY. Erik asked twice: "i want to upload my bank statement
+ * and supplier statement, every item will either match or need a category", and then, seeing this
+ * line on /analytics, "this should be in reconcile too i imagine". Reconcile's law is that it FILLS
+ * IN DOTS, it never CONTROLS SYSTEMS — a peace maker. Bringing a paper IN is an intake, not a
+ * control, so the door belongs on the page named for the job; ANSWERING it still happens on the
+ * paper's own card under Needs You, which is the one place every paper is answered.
  */
 export function BankDropLine() {
   const router = useRouter();
@@ -36,7 +47,18 @@ export function BankDropLine() {
       } catch {
         sha = null;
       }
-      const added = await addOpenList({ name: file.name || "Bank download", sha256: sha, table: read.table, listDate: read.listDate, source: "bills_drop", expect: "bank" });
+      // NO `expect` HERE, AND THAT IS THE POINT. `expect: "bank"` turned a supplier's own open list
+      // away at this door, and the two statements Erik names in one breath are what this page is
+      // for. addOpenList tells them apart by what is in the file — a bank's columns become a bank
+      // download (and only whoever sorts the bank may bring one in, checked on the server), and
+      // anything else is read as a supplier's open list.
+      //
+      // WIDENING THE DOOR DID ADD A PATH, AND THE SERVER CLOSED IT. A bank table the reader could not
+      // make a download of used to be kept as a supplier's list — a class of paper the whole office
+      // may read, with four of its lines sampled onto the card — so `expect: "bank"` had been the
+      // only thing refusing it here. The refusal is now `unreadBankTable` inside addOpenList, where
+      // every door gets it, because this door cannot tell the two files apart and nor could the next.
+      const added = await addOpenList({ name: file.name || "Statement", sha256: sha, table: read.table, listDate: read.listDate, source: "bills_drop" });
       if (!added.ok) return setSaid({ text: added.already ? `${added.already} Nothing was added twice.` : (added.error ?? "Not added."), ok: !!added.already });
       setSaid({ text: (added.line ?? "Waiting under Needs You on Bills.").replace("Waiting below", "Waiting under Needs You on Bills"), ok: true, waiting: true });
       router.refresh();
@@ -49,7 +71,9 @@ export function BankDropLine() {
 
   return (
     <div
-      className="mb-6"
+      // INSIDE A CARD NOW, NOT A LINE OF ITS OWN ON A PAGE: the old mb-6 left a card's worth of
+      // white space between the button and the sentence under it.
+      className="mb-3"
       onDragOver={(e) => e.preventDefault()}
       onDrop={(e) => {
         e.preventDefault();
@@ -73,7 +97,7 @@ export function BankDropLine() {
         className="flex min-h-11 w-full items-center gap-3 rounded-lg border border-dashed border-slate-300 bg-white px-4 text-left text-sm font-medium text-slate-800 hover:bg-slate-50 disabled:opacity-60"
       >
         {busy ? <Loader2 className="h-4 w-4 shrink-0 animate-spin text-brand" /> : <Landmark className="h-4 w-4 shrink-0 text-brand" />}
-        Drop Your Bank Download
+        Drop A Bank Or Supplier Download
       </button>
       {said && (
         <p className={`mt-2 flex items-start gap-2 text-sm ${said.ok ? "text-slate-700" : "text-red-700"}`} role={said.ok ? "status" : "alert"}>

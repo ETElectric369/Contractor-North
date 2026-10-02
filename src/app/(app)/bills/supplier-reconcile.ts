@@ -650,6 +650,32 @@ export function matchJobName(raw: string | null | undefined, jobs: ReconcileJob[
 export interface NeedsJobRow {
   invoice: SupplierInvoiceRow;
   match: JobNameMatch;
+  /**
+   * COULD THIS PAPER ACTUALLY GO ON THE SHELF? Only a purchase nothing took back can: the Record To
+   * Stock door takes `kind === "invoice"` and the server refuses the rest in those words
+   * ("Only an invoice can go into stock."), and a purchase a credit memo already reversed is NOT a
+   * missing record — the other fold says "Nothing kept, nothing owed, so nothing to record."
+   *
+   * It is on the row because the row is where the sentence is read. Without it the pile told him to
+   * record a credit memo to stock, with no such control anywhere on the screen, while the fold three
+   * inches down told him there was nothing to record. Two doors, one rule, opposite instructions.
+   */
+  canRecordToStock: boolean;
+}
+
+/**
+ * EVERY PURCHASE A CREDIT TOOK STRAIGHT BACK, IN ONE SET (2026-10-02). The pair found on the total
+ * (reversedPurchaseIds, which does not expire when CED closes both documents), plus a purchase a
+ * person said was waiting on a credit whose credit has since come in (creditArrivedFor).
+ *
+ * ONE FUNCTION, because "did he keep what was on this paper?" is now asked by two piles — the one
+ * that offers a bill and the one that offers a job — and a second copy is how one of them keeps
+ * offering to put returned merchandise somewhere.
+ */
+export function takenBackPurchaseIds(invoices: SupplierInvoiceRow[]): Set<string> {
+  const taken = reversedPurchaseIds(invoices ?? []);
+  for (const id of creditArrivedFor(invoices ?? [])) taken.add(id);
+  return taken;
 }
 
 /**
@@ -676,6 +702,7 @@ export function invoicesNeedingJob(
   jobs: ReconcileJob[],
   opts: { since?: string | null } = {},
 ): NeedsJobRow[] {
+  const takenBack = takenBackPurchaseIds(invoices ?? []);
   return (invoices ?? [])
     .filter(
       (inv) =>
@@ -684,7 +711,11 @@ export function invoicesNeedingJob(
         !((Number(inv.billCount) || 0) > 0) &&
         !isBeforeLine(inv.invoiceDate, opts.since),
     )
-    .map((invoice) => ({ invoice, match: matchJobName(invoice.jobNameRaw, jobs) }))
+    .map((invoice) => ({
+      invoice,
+      match: matchJobName(invoice.jobNameRaw, jobs),
+      canRecordToStock: IS_A_PURCHASE.includes(invoice.kind) && !takenBack.has(String(invoice.id)),
+    }))
     .sort(
       (a, b) =>
         Math.abs(Number(b.invoice.total) || 0) - Math.abs(Number(a.invoice.total) || 0) ||
@@ -698,24 +729,95 @@ export function needsJobTotals(rows: NeedsJobRow[]): {
   total: number;
   /** Rows where several jobs are equally close, or none is. These are the ones that cost him time. */
   undecided: number;
-  /** Rows CED booked to shop stock, which are never offered a job. */
+  /**
+   * Rows the supplier booked to shop stock, which are never offered a job AND CAN STILL BE RECORDED.
+   * A stock credit memo, and a stock purchase a credit memo took back, are counted as `wentBack`
+   * instead: counting them here put a figure under "record them to stock" that no control can record.
+   */
   stock: number;
   stockTotal: number;
+  /** Stock papers nothing was kept off: the return itself, or the purchase it reversed. */
+  wentBack: number;
+  wentBackTotal: number;
 } {
   let total = 0;
   let undecided = 0;
   let stock = 0;
   let stockTotal = 0;
+  let wentBack = 0;
+  let wentBackTotal = 0;
   for (const row of rows ?? []) {
     total = r2(total + (Number(row.invoice.total) || 0));
     if (row.match.verdict === "stock") {
-      stock += 1;
-      stockTotal = r2(stockTotal + (Number(row.invoice.total) || 0));
+      if (row.canRecordToStock) {
+        stock += 1;
+        stockTotal = r2(stockTotal + (Number(row.invoice.total) || 0));
+      } else {
+        wentBack += 1;
+        wentBackTotal = r2(wentBackTotal + (Number(row.invoice.total) || 0));
+      }
       continue;
     }
     if (row.match.verdict !== "one") undecided += 1;
   }
-  return { rows: (rows ?? []).length, total, undecided, stock, stockTotal };
+  return { rows: (rows ?? []).length, total, undecided, stock, stockTotal, wentBack, wentBackTotal };
+}
+
+/**
+ * WHAT ACTUALLY HAPPENS TO A SHOP-STOCK TICKET'S MONEY, SAID IN ONE PLACE (Shop Stock, 0303-0350).
+ *
+ * Both of this pile's sentences used to end "it stays as overhead", and that has been untrue since
+ * the shelf shipped. The shelf is a ledger: a lot's cost comes OFF the job that bought it, and the
+ * database stamps every draw from its lot, so `job_shelf_net.from_shelf` puts what a piece cost onto
+ * the job that took it, and job material cost is `bills - off_shelf + from_shelf`
+ * (src/lib/job-cost.ts jobMaterialCostFrom, migration 0303's job_shelf_net). "It stays as overhead"
+ * taught a dead end that does not exist: he would stop looking for the cost on the job that used it.
+ *
+ * ONE FUNCTION FOR BOTH SENTENCES. The pile's heading said it and so did every row, in two different
+ * strings — which is how one of them went stale and the other went stale with it. A third door gets
+ * these words from here, or the tripwire in supplier-shop-stock-words.test.ts fails.
+ */
+export const SHOP_STOCK_NO_JOB_LINE =
+  "Shop stock, so there is no job to put it on. Record it to stock, and the job that takes a piece out carries exactly what that piece cost; what is still in stock is the company's.";
+
+/** The same truth where the pile is counted: "2 are shop stock ($114.40): …". `money` is formatted. */
+export function shopStockPileClause(rows: number, money: string): string {
+  const n = Math.max(0, Math.trunc(Number(rows) || 0));
+  if (!n) return "";
+  return `${n} ${n === 1 ? "is" : "are"} shop stock (${money}): record them to stock, and each job that takes a piece out carries what that piece cost.`;
+}
+
+/**
+ * A STOCK PAPER NOTHING WAS KEPT OFF (2026-10-02). The return itself, or the purchase a credit memo
+ * took straight back: the pieces went back to the counter, so there is nothing to put on the shelf and
+ * no control that would put it there. These are the SAME WORDS the "Not Recorded Yet" fold uses for the
+ * reversed pair, on purpose — the two folds are looking at one event and used to give him opposite
+ * instructions about it.
+ */
+export const NOTHING_KEPT_NO_JOB_LINE =
+  "The pieces went back on a credit memo, so there is no job and nothing to put into stock. Nothing kept, nothing owed, so nothing to record.";
+
+/** The same, where the pile is counted: "1 went back on a credit memo ($225.47): …". */
+export function wentBackPileClause(rows: number, money: string): string {
+  const n = Math.max(0, Math.trunc(Number(rows) || 0));
+  if (!n) return "";
+  return `${n} ${n === 1 ? "paper went back on a credit memo" : "papers went back on credit memos"} (${money}): nothing kept, so there is nothing to record.`;
+}
+
+/** No job on his list to offer at all (a book with no jobs in it yet). Never the stock sentence: he
+ *  would read "record it to stock" on a paper that was bought for a job nobody has entered. */
+export const NO_JOB_ON_YOUR_LIST_LINE =
+  "There is no job on your list to put this on yet. Add the job, then come back and file it.";
+
+/**
+ * WHAT A ROW WITH NO JOB PICKER IS TOLD, IN ONE PLACE. Three rows reach this branch and they are not
+ * the same thing: shop stock he can record, a paper the pieces went back off, and a paper with no job
+ * on the list to offer. Every one of them used to get the shop-stock sentence, which told him to press
+ * a button that is only ever drawn for the first.
+ */
+export function noJobRowLine(row: NeedsJobRow): string {
+  if (row.match.verdict !== "stock") return NO_JOB_ON_YOUR_LIST_LINE;
+  return row.canRecordToStock ? SHOP_STOCK_NO_JOB_LINE : NOTHING_KEPT_NO_JOB_LINE;
 }
 
 export interface NeedsBillSlice {
@@ -786,10 +888,11 @@ export function invoicesNeedingBill(
    * September statement CED closes both of these, that rule stops matching, and the return would
    * walk back onto this list with a live button on it.
    */
-  const reversed = reversedPurchaseIds(invoices ?? []);
-  // And a purchase a person said waits on a credit, whose credit has come in whichever state CED
-  // left the two (creditArrivedFor): taken back, never Record It As A Bill.
-  for (const id of creditArrivedFor(invoices ?? [])) reversed.add(id);
+  // The pair on the total, plus a purchase a person said waits on a credit whose credit has come in
+  // whichever state CED left the two: taken back, never Record It As A Bill. One set, built by
+  // `takenBackPurchaseIds`, because the "needs a job" pile asks the same question about the same
+  // papers and must not answer it differently.
+  const reversed = takenBackPurchaseIds(invoices ?? []);
 
   for (const inv of invoices ?? []) {
     if (!IS_A_PURCHASE.includes(inv.kind)) continue;

@@ -107,13 +107,16 @@ export function findBankHeader(table: readonly (readonly string[])[]): { row: nu
 }
 
 /**
- * A DOWNLOAD WITH NO HEADINGS AT ALL (a big bank's CSV is just "09/25/2026","-42.00","*","","ACME…").
- * Read by what its columns hold, on a strong sign only: one column of days, one of money with at
- * least one line going out, one of words long enough to be a bank's description, and no column of
- * paper numbers (a supplier's list without headings has one, and stays the supplier's). The header
- * row is -1: every row is a line.
+ * THE SHAPE OF A BANK'S LINES WITH NO HEADINGS OVER THEM: one column of days, one of money, one of
+ * words long enough to be a bank's description, and no column of paper numbers (a supplier's list
+ * without headings has one, and stays the supplier's). Null when the table is not laid out that way.
+ *
+ * It is its own function because two questions ask it. `headerlessBank` below adds the proof that
+ * tells money out from money in, and reads the download. `unreadBankTable` asks the shape alone, to
+ * refuse a bank's table that could not be read rather than keep the owner's spending as a supplier's
+ * list — a file with no minus sign in it is still the bank's.
  */
-function headerlessBank(table: readonly (readonly string[])[]): { row: number; columns: BankColumns } | null {
+function headerlessShape(table: readonly (readonly string[])[]): BankColumns | null {
   const rows = table.filter((r) => r.some((c) => String(c ?? "").trim() !== "")).slice(0, 25);
   if (rows.length < 2) return null;
   const width = Math.max(...rows.map((r) => r.length));
@@ -134,9 +137,34 @@ function headerlessBank(table: readonly (readonly string[])[]): { row: number; c
     if (avg > longest) [description, longest] = [i, avg];
   }
   if (description === undefined || longest < 10) return null;
-  if (!table.some((r) => (readBankMoney(String(r[amount] ?? "")) ?? 0) < 0)) return null;
   const paperNumbers = cols.some((i) => i !== date && i !== amount && i !== description && share(i, (v) => /^[a-z]{0,4}[-#]?\d[\d-]{3,}$/i.test(v) && !isDay(v)) >= 0.8);
-  return paperNumbers ? null : { row: -1, columns: { date, amount, description } };
+  return paperNumbers ? null : { date, amount, description };
+}
+
+/**
+ * A DOWNLOAD WITH NO HEADINGS AT ALL (a big bank's CSV is just "09/25/2026","-42.00","*","","ACME…").
+ * Read by what its columns hold, on a strong sign only: the shape above, and at least one line going
+ * out — with no heading to say so, a minus sign is the only thing that tells money out from money in,
+ * and a download read the wrong way round would file his deposits as costs. The header row is -1:
+ * every row is a line.
+ */
+function headerlessBank(table: readonly (readonly string[])[]): { row: number; columns: BankColumns } | null {
+  const columns = headerlessShape(table);
+  if (!columns || columns.amount === undefined) return null;
+  const amount = columns.amount;
+  if (!table.some((r) => (readBankMoney(String(r[amount] ?? "")) ?? 0) < 0)) return null;
+  return { row: -1, columns };
+}
+
+/**
+ * A HEADING ONLY A BANK PRINTS (Withdrawal, Deposit) OVER NO COLUMN OF PAPER NUMBERS. Both questions
+ * below end here, so the heading rule is written once: a second copy is how one of them gains a word
+ * the other never hears about.
+ */
+function bankHeadingNoPapers(table: readonly (readonly string[])[], headerRow: number, supplierHasReference: boolean): boolean {
+  if (supplierHasReference) return false;
+  const words = new Set([...BANK_WORDS.debit, ...BANK_WORDS.credit]);
+  return (table[headerRow] ?? []).some((c) => words.has(headerKey(c)));
 }
 
 /**
@@ -145,13 +173,45 @@ function headerlessBank(table: readonly (readonly string[])[]): { row: number; c
  * its columns, every cell with words in it is kept with its long digit runs cut to their last 4
  * ("ONLINE TRANSFER FROM SAVINGS 000123456789" keeps ••6789), the same as a bank line. A cell of
  * only a number (a paper number, an amount, a day) is left alone: a supplier's list needs them.
+ *
+ * THIS IS THE PRIVACY QUESTION, asked wide on purpose: any headerless table is cut, because a cell
+ * that holds an account number costs nothing to cut. `unreadBankTable` below is the narrower one.
  */
 export function mayBeBankTable(table: readonly (readonly string[])[], headerRow: number, supplierHasReference: boolean): boolean {
   if (findBankHeader(table)) return false;
   if (headerRow < 0) return true;
-  if (supplierHasReference) return false;
-  const words = new Set([...BANK_WORDS.debit, ...BANK_WORDS.credit]);
-  return (table[headerRow] ?? []).some((c) => words.has(headerKey(c)));
+  return bankHeadingNoPapers(table, headerRow, supplierHasReference);
+}
+
+/**
+ * THESE ROWS ARE A BANK'S, THOUGH THEY DID NOT READ AS A DOWNLOAD (2026-10-02). Every door refuses
+ * such a table, whoever drops it, and `notABankDownloadSaid` is what it says.
+ *
+ * WHY A REFUSAL AND NOT A CARD. A table that does not read as a download is otherwise kept as a
+ * supplier's list waiting for a person to point at its columns — and the database holds THAT class of
+ * paper to is_org_staff(), every office hand, while it holds a bank download to viewer_sorts_bank(),
+ * the owner's own switch (0365). A bank's lines stored as a supplier's list are therefore the owner's
+ * draw and his dentist on the screen of an office hand the owner switched off, four of them sampled
+ * onto the card itself. The owner's own door loses nothing: a list with no paper numbers in it could
+ * never have been applied anyway, and the refusal says which download to take instead.
+ *
+ * NARROWER THAN mayBeBankTable, which cuts long numbers out of any headerless table. This asks
+ * whether the rows ARE a bank's: laid out like a bank's lines, or under a heading only a bank prints.
+ * A headerless list of paper numbers and amounts is a supplier's, and still gets its column picker.
+ */
+export function unreadBankTable(table: readonly (readonly string[])[], headerRow: number, supplierHasReference: boolean): boolean {
+  if (findBankHeader(table)) return false;
+  if (headerRow < 0) return headerlessShape(table) !== null;
+  return bankHeadingNoPapers(table, headerRow, supplierHasReference);
+}
+
+/**
+ * WHAT A DOOR SAYS TO A FILE THAT IS A BANK'S AND DIDN'T READ AS ONE. One sentence in one place: the
+ * door that promised a bank download and the door that takes either statement are asking the same
+ * question, and two spellings of the answer is how one of them stops naming what to do next.
+ */
+export function notABankDownloadSaid(name: string): string {
+  return `${name} doesn't read as a bank download: it needs a date, a description and an amount on every line. Download it again as CSV (with column headings, if the bank offers them) and drop that. Nothing was added.`;
 }
 
 export function redactWordCells(table: readonly (readonly string[])[]): string[][] {

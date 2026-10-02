@@ -10,8 +10,12 @@ import {
   matchJobName,
   missedDiscounts,
   needsJobTotals,
+  noJobRowLine,
+  NOTHING_KEPT_NO_JOB_LINE,
+  NO_JOB_ON_YOUR_LIST_LINE,
   openDocuments,
   reconcileSummary,
+  SHOP_STOCK_NO_JOB_LINE,
   supplierSaysOpen,
   type ReconcileJob,
   type SupplierInvoiceRow,
@@ -385,6 +389,65 @@ describe("invoices with no job", () => {
     expect(stockRow!.match.verdict).toBe("stock");
     expect(stockRow!.match.ranked).toEqual([]);
     expect(needsJobTotals(invoicesNeedingJob(book, JOBS)).stockTotal).toBe(114.4);
+  });
+
+  /**
+   * A STOCK PAPER NOTHING WAS KEPT OFF IS NEVER TOLD TO RECORD ITSELF (2026-10-02).
+   *
+   * The verdict "stock" is read off the JOB NAME alone, and CED copies that name onto the credit memo
+   * too — so a return booked to STOCK, and the purchase it took straight back, both landed in this
+   * pile and both were told "Record it to stock". There is no such control for either: the only Record
+   * To Stock button on the card is drawn from invoicesNeedingBill, which takes an invoice and routes a
+   * reversed purchase to its own line ("Nothing kept, nothing owed, so nothing to record."), and the
+   * server refuses a credit memo outright. One pile told him to put returned merchandise on the shelf
+   * while the other, three inches down, told him there was nothing to record.
+   */
+  it("a STOCK return and the STOCK purchase it took back are not shop stock, and are told nothing to record", () => {
+    const book = [
+      ...hisBook(),
+      // Bought for stock and kept: the one row that may be recorded.
+      invoice({ invoiceNumber: "8802-1103061", jobNameRaw: "STOCK", total: 114.4, closed: true }),
+      // Bought for stock, sent straight back, with CED's own job name copied onto the memo.
+      invoice({ invoiceNumber: "8802-1108440", jobNameRaw: "STOCK", total: 76.2, openBalance: 76.2 }),
+      invoice({ invoiceNumber: "8802-1108441", kind: "credit_memo", jobNameRaw: "STOCK", total: -76.2, openBalance: -76.2 }),
+    ];
+    const rows = invoicesNeedingJob(book, JOBS);
+    const row = (n: string) => rows.find((r) => r.invoice.invoiceNumber === n)!;
+    // All three stay in the pile: leaving one out would be the app deciding quietly.
+    for (const n of ["8802-1103061", "8802-1108440", "8802-1108441"]) expect(row(n), n).toBeTruthy();
+    expect(row("8802-1103061").canRecordToStock).toBe(true);
+    expect(row("8802-1108440").canRecordToStock).toBe(false);
+    expect(row("8802-1108441").canRecordToStock).toBe(false);
+
+    // THE COUNT UNDER "record them to stock" HOLDS ONLY WHAT CAN BE RECORDED.
+    const totals = needsJobTotals(rows);
+    expect(totals.stock).toBe(1);
+    expect(totals.stockTotal).toBe(114.4);
+    expect(totals.wentBack).toBe(2);
+    expect(totals.wentBackTotal).toBe(0); // +$76.20 and -$76.20: nothing kept and nothing owed
+    expect(totals.rows).toBe(rows.length);
+
+    // AND THE WORDS ON EACH ROW.
+    expect(noJobRowLine(row("8802-1103061"))).toBe(SHOP_STOCK_NO_JOB_LINE);
+    expect(noJobRowLine(row("8802-1108440"))).toBe(NOTHING_KEPT_NO_JOB_LINE);
+    expect(noJobRowLine(row("8802-1108441"))).toBe(NOTHING_KEPT_NO_JOB_LINE);
+    for (const n of ["8802-1108440", "8802-1108441"]) expect(noJobRowLine(row(n)), n).not.toContain("Record it to stock");
+
+    // AND THE TWO FOLDS AGREE ABOUT THAT PURCHASE: the other one calls it reversed and offers nothing.
+    const bill = invoicesNeedingBill(book, {});
+    expect(bill.rows.map((r) => r.invoiceNumber)).not.toContain("8802-1108440");
+    expect(bill.reversedRows).toBeGreaterThanOrEqual(1);
+    // The one that was kept is still offered a bill, so no row lost its door.
+    expect(bill.rows.map((r) => r.invoiceNumber)).toContain("8802-1103061");
+  });
+
+  /** A book with no jobs in it yet: the row has no picker, and the stock sentence would be a lie. */
+  it("a paper with no job on the list to offer is not called shop stock", () => {
+    const row = invoicesNeedingJob([invoice({ invoiceNumber: "8802-1109001", jobNameRaw: "41 LARKSPUR", total: 52.1 })], [])[0];
+    expect(row.match.verdict).not.toBe("stock");
+    expect(row.match.ranked).toEqual([]);
+    expect(noJobRowLine(row)).toBe(NO_JOB_ON_YOUR_LIST_LINE);
+    expect(noJobRowLine(row)).not.toContain("Record it to stock");
   });
 });
 

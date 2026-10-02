@@ -298,6 +298,44 @@ describe("the door", () => {
     expect(stored).toContain("••6789");
   });
 
+  /**
+   * A BANK'S TABLE THE READER COULD NOT MAKE A DOWNLOAD OF IS REFUSED AT EVERY DOOR (2026-10-02).
+   *
+   * Reconcile's statement line dropped `expect: "bank"` so it could take a supplier's list too, and
+   * that took away the only refusal this file had: a headerless download with no minus sign in it is
+   * not read as a bank's, so it fell through and was kept as a SUPPLIER'S list waiting for its
+   * columns. The database holds that class to is_org_staff() — every office hand, including one the
+   * owner switched off — while it holds a bank download to viewer_sorts_bank(), and the card samples
+   * four of its lines. His dentist and his transfer to savings are not the office's business.
+   *
+   * So the refusal is in addOpenList now, where EVERY door gets it, and this is drawn from both: the
+   * statement line on Reconcile ("bills_drop") and Snap Or Note ("organize"). All amounts positive
+   * and no heading row: that is the file that walked through.
+   */
+  it("a bank's own lines with no headings over them are refused at every door, never kept as a supplier's card", async () => {
+    const headerless = [
+      "09/24/2026,DENTAL CARE LLC OFFICE VISIT,150.00",
+      "09/18/2026,HARBOUR POINT HARDWARE #221,86.40",
+      "09/12/2026,STREAMING SERVICE MONTHLY,15.99",
+      "09/05/2026,ONLINE TRANSFER TO SAVINGS 000123456789,2000.00",
+    ].join("\n");
+    for (const source of ["bills_drop", "organize"] as const) {
+      const res = await addOpenList({ name: "Stmt2.csv", sha256: null, table: parseCSV(headerless), listDate: "2026-09-26", source });
+      expect(res.ok, source).toBe(false);
+      expect(res.error, source).toMatch(/^Stmt2\.csv doesn't read as a bank download/);
+      // AND NOTHING WAS STORED: no card, so no sample of his own spending under Needs You, and
+      // nothing in the database for an office hand to read past the gate.
+      expect(db.organized_items, source).toHaveLength(0);
+    }
+    // A supplier's own headerless list — paper numbers and amounts, no bank's description — is NOT
+    // caught by this: it still waits for a person to point at its columns. The refusal is narrow.
+    const supplierList = ["INV-4410,09/01/2026,250.00", "INV-4411,09/08/2026,118.75", "INV-4412,09/15/2026,64.20"].join("\n");
+    const waits = await addOpenList({ name: "Portal.csv", sha256: null, table: parseCSV(supplierList), listDate: "2026-09-26", source: "bills_drop" });
+    expect(waits.ok).toBe(true);
+    expect(db.organized_items).toHaveLength(1);
+    expect(db.organized_items[0].proposal.openList.needs).toBeTruthy();
+  });
+
   it("a counter payment printed with only the branch is the supplier's, by the branch its papers carry", async () => {
     db.supplier_invoices.push(
       { id: "si-1", org_id: "org-1", supplier_account_id: "acct-cs", invoice_number: "4410-1100001", invoice_date: "2026-09-01" },
