@@ -8,7 +8,7 @@ import { adminConfigured, createAdminClient } from "@/lib/supabase/admin";
 import { pushCalendarItem, deleteCalendarItem } from "@/lib/calendar-sync";
 import { JOB_STATUSES, finishedJobFields, finishesTheJob } from "@/lib/job-status";
 import { DRAW_KINDS, isDrawKind } from "@/lib/invoice-math";
-import { BRING_IN_NEW_WORK, openDraftOnJob, unbilledCardDoor, type CardDoor, type OpenDraft } from "@/lib/actuals-draw";
+import { BRING_IN_NEW_WORK, openDraftOnJob, type OpenDraft } from "@/lib/actuals-draw";
 import { emptyToNull } from "@/lib/forms";
 import { notifyJobCrewAdded } from "@/lib/crew-notify";
 import { matchOrCreateCustomer, typedNewCustomer } from "@/lib/crm/new-customer";
@@ -21,11 +21,15 @@ import { jobNameFrom } from "@/lib/job-name";
 import { customerMaterialMarkupForJob } from "@/lib/labor-billing";
 import { reportError } from "@/lib/observe";
 import { escapeLike, formatCurrency, formatPhone } from "@/lib/utils";
-import { estimateIsTheContract, jobBillsItsActuals, shouldImportActuals } from "@/lib/invoice-import-rule";
+import { estimateIsTheContract, shouldImportActuals } from "@/lib/invoice-import-rule";
 import { revalidateMoney } from "@/lib/revalidate-money";
-import { claimedSourcesOnJob, fixedBillingsNotYetNetted, unbilledWorkForJob } from "@/lib/unbilled-work";
+import { claimedSourcesOnJob, unbilledWorkForJob } from "@/lib/unbilled-work";
 import { changeOrderLines, type ChangeOrderRow } from "@/lib/change-order-billing";
 import { depositCoversWords, finalFinishWords, finishedWithWorkOffBill, finishWouldLeaveOffBill, LAST_BILL_DOOR } from "@/lib/finish-job-words";
+// THE BILLING STEP A FINISH RUNS, IN ONE PLACE FOR BOTH DOORS THAT END A JOB (M3). It used to live
+// here as tmFinishPlan, which left the paid-in-full gate (lib/complete-job-when-paid) with no way to
+// reach it: that door wrote the finish without ever asking what the job had worked.
+import { finishBillingStep, type FinishBillingStep } from "@/lib/finish-bills-first";
 import { guardedFieldsMoved, planBillEdit, type BillClaimHolder } from "./bill-claims";
 import { bucketOf } from "@/lib/business-cost-buckets";
 import { jobCostRefusal } from "@/lib/job-cost-guard";
@@ -751,71 +755,11 @@ export type FinishJobResult = {
   final?: true;
 };
 
-/**
- * WHAT FINISHING A TIME & MATERIAL JOB BILLS, decided once for the press and for the modal before
- * it (finishJob, finishJobPreview). The door is the Overview card's own (unbilledCardDoor), so
- * Finish bills exactly the "Open: $X" the card shows, through the door the card's button uses:
- * an open draft that takes new work, the draw door on a job with draws, a standard invoice on a
- * plain T&M job. `skip` = not this rule's business (not T&M, a payment schedule, or nothing
- * unbilled): the job finishes as it always has. A read that fails is an `error`, never "nothing
- * to bill" - that would finish the job with its work off every bill.
- */
-type TmFinishPlan =
-  | { kind: "skip" }
-  | { kind: "error"; error: string }
-  | { kind: "plan"; door: NonNullable<CardDoor>; draft: OpenDraft | null; drawBilled: boolean; work: number; lump: number };
-
-async function tmFinishPlan(supabase: SupabaseClient, jobId: string): Promise<TmFinishPlan> {
-  const [jobRead, schedRead, drawsRead] = await Promise.all([
-    supabase.from("jobs").select("billing_type").eq("id", jobId).maybeSingle(),
-    supabase.from("payment_milestones").select("id").eq("job_id", jobId).limit(1),
-    supabase.from("invoices").select("id").eq("job_id", jobId).neq("status", "void").in("invoice_kind", [...DRAW_KINDS]).limit(1),
-  ]);
-  if (jobRead.error || schedRead.error || drawsRead.error) {
-    return { kind: "error", error: "Couldn't read this job's bills just now, so it wasn't finished. Try again in a moment." };
-  }
-  const billingType = (jobRead.data as { billing_type?: string | null } | null)?.billing_type ?? null;
-  if (!jobBillsItsActuals(billingType, (schedRead.data ?? []).length)) return { kind: "skip" };
-  const drawBilled = (drawsRead.data ?? []).length > 0;
-  let unbilled: Awaited<ReturnType<typeof unbilledWorkForJob>>;
-  let draft: OpenDraft | null;
-  let lump: number;
-  try {
-    [unbilled, draft, lump] = await Promise.all([
-      unbilledWorkForJob(supabase, jobId),
-      openDraftOnJob(supabase, jobId),
-      drawBilled ? fixedBillingsNotYetNetted(supabase, jobId) : Promise.resolve(0),
-    ]);
-  } catch (e) {
-    reportError("finishJob.tmPlan", e, { jobId });
-    return { kind: "error", error: "Couldn't read this job's hours and bills just now, so it wasn't finished and nothing was billed. Try again in a moment." };
-  }
-  if (!unbilled.schemaReady) {
-    return { kind: "error", error: "Billing is mid-upgrade for a few minutes, so the hours not yet billed can't be told apart. The job wasn't finished; try again shortly." };
-  }
-  const stock = unbilled.stockCount ?? 0;
-  const workPending = unbilled.hours > 0 || unbilled.billsCount > 0 || stock > 0;
-  const newWork = Math.round((unbilled.laborAmount + unbilled.billsBilled + (unbilled.stockBilled ?? 0)) * 100) / 100;
-  const door = unbilledCardDoor({
-    openDraft: draft,
-    workPending,
-    // A pending return alone is not work to bill: Finish never builds a bill for a credit.
-    returns: 0,
-    total: unbilled.total,
-    newWork,
-    lumpToNet: lump,
-    drawBilled,
-    money: formatCurrency,
-  });
-  if (!workPending || !door) return { kind: "skip" };
-  return { kind: "plan", door, draft, drawBilled, work: unbilled.total > 0.005 ? unbilled.total : newWork, lump };
-}
-
 /** Build the Final through the plan's door, then (and only then) mark the job complete. */
 async function finishTmWithFinal(
   supabase: SupabaseClient,
   jobId: string,
-  plan: Extract<TmFinishPlan, { kind: "plan" }>,
+  plan: Extract<FinishBillingStep, { kind: "plan" }>,
   complete: () => Promise<{ ok: true } | { ok: false; error: string }>,
   withoutBilling = false,
 ): Promise<FinishJobResult> {
@@ -930,12 +874,15 @@ export async function finishJob(
 
   // A TIME & MATERIAL JOB IS FINISHED WITH ITS FINAL BUILT, NEVER SENT (Erik, 2026-09-26, Tao J-002).
   // Finishing used to mark Tao's job complete and bill nothing, leaving 19.5 h to a note. Now the
-  // work not yet billed is built into a DRAFT through the card's own door (tmFinishPlan): the draw
-  // door as the Final on a job with draws, the open draft when one takes it, a standard invoice on
-  // a plain T&M job. Only a draft that was really built completes the job; a door that refuses (or
-  // a read that fails) leaves the job as it was and says why. Nothing is emailed: a draft is not
-  // sent until a person sends it. No unbilled work: the job finishes as it always has, below.
-  const plan = await tmFinishPlan(supabase, jobId);
+  // work not yet billed is built into a DRAFT through the card's own door (lib/finish-bills-first):
+  // the draw door as the Final on a job with draws, the open draft when one takes it, a standard
+  // invoice on a plain T&M job. Only a draft that was really built completes the job; a door that
+  // refuses (or a read that fails) leaves the job as it was and says why. Nothing is emailed: a draft
+  // is not sent until a person sends it. No unbilled work: the job finishes as it always has, below.
+  // THE SAME STEP THE PAID-IN-FULL GATE RUNS — one place decides what a finish has to bill (M3). A
+  // PERSON pressed it on their own session, so the step keeps RLS and the profile_pay view: an org scope
+  // here would reach profiles.bill_rate, which 0216 revokes from the authenticated role.
+  const plan = await finishBillingStep(supabase, jobId, { kind: "staff" });
   if (plan.kind === "error") return { ok: false, error: plan.error };
   if (plan.kind === "plan") return finishTmWithFinal(supabase, jobId, plan, complete, !!opts.withoutBilling);
 
@@ -1090,7 +1037,7 @@ export async function finishJobPreview(jobId: string): Promise<FinishJobPreview>
   if ("error" in ctx) return { ok: false, error: ctx.error };
   const supabase = ctx.supabase;
   // A T&M job with work not on a bill: the Final finishing builds, said from the plan the press runs.
-  const plan = await tmFinishPlan(supabase, jobId);
+  const plan = await finishBillingStep(supabase, jobId, { kind: "staff" });
   if (plan.kind === "error") return { ok: false, error: plan.error };
   if (plan.kind === "plan") {
     const words = finalFinishWords(plan.door, plan.draft, plan.work, plan.lump);

@@ -741,6 +741,8 @@ export async function applyBankCore(
     const { settled } = await afterPaymentLanded(supabase, {
       invoiceId: id,
       orgId: who.orgId,
+      // requireStaff's own client: RLS narrows it, so the step keeps reading the pay view.
+      access: { kind: "staff" },
       // A person tapped Apply, so they are the recorder and the bell leaves them out.
       bell: { amount: (putOn.get(id) ?? 0) / 100, said: "from the bank file", recordedBy: who.userId },
     });

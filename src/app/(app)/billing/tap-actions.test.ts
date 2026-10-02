@@ -148,6 +148,8 @@ describe("tapPaymentOutcome — Stripe's word, not the phone's", () => {
       paymentIntent: "pi_420",
       connectedAccount: ACCT,
       via: TAP_VIA,
+      // This arm IS the webhook, so it names the client it holds: the service role, in this org.
+      access: { kind: "service", orgId: ORG },
     });
     expect(outcome).toBe("already");
     expect(state.db.tables.payments).toHaveLength(1);

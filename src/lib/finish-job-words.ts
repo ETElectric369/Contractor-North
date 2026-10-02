@@ -54,6 +54,23 @@ export function finishedWithWorkOffBill(u: NotBilled | null | undefined): string
   return w ? `${w} of work on this job is not on a bill yet. Finishing didn't bill it - bill it with ${LAST_BILL_DOOR}.` : null;
 }
 
+/**
+ * NOBODY PRESSED ANYTHING — THE CUSTOMER PAID (M3, the money seam). A bill paid in full ends a job all
+ * by itself (lib/complete-job-when-paid, reached from Stripe, Tap to Pay, Record Payment and a deposit
+ * matched out of the bank file). On a time-and-materials job with hours or receipts no bill claims it
+ * now does NOT end it, because nothing billed them and nothing could: the invoice builders need a staff
+ * session and this runs in a webhook. So this is the sentence the bell carries, and it is the only
+ * place that fact is ever said — the job by NAME, never a bare number (Erik: "i cant tell by job
+ * numbers alone"), then the hours and receipts from the same arithmetic the Unbilled card uses, then
+ * the one door that bills them.
+ */
+export function paidLeftWorkOffBill(jobSaid: string, u: NotBilled | null | undefined): string | null {
+  const w = notBilledWords(u);
+  return w
+    ? `${jobSaid} has ${w} of work that no bill claims, so it is NOT finished yet - paying the last bill didn't bill it. Bill it with ${LAST_BILL_DOOR}.`
+    : null;
+}
+
 /** Before the press, same job: the amber line in the Finish modal. */
 export function finishWouldLeaveOffBill(u: NotBilled | null | undefined): string | null {
   const w = notBilledWords(u);

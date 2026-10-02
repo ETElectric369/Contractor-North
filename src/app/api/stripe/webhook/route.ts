@@ -111,7 +111,21 @@ export async function POST(req: Request) {
     connectedAccount: string | null,
     via?: RecordVia,
   ): Promise<boolean> {
-    const outcome = await recordStripeInvoicePayment(supabase, { invoiceId, orgId, amount, idempotencyKey, paymentIntent, connectedAccount, via });
+    // `access`: THIS HANDLER IS THE SERVICE CLIENT (createServiceClient above, RLS off). The job's hours
+    // are priced in the org this event names — checked against the invoice by claimedInvoice, and against
+    // the job by the paid-in-full gate. Without it the billing step read another company's rates.
+    const outcome = await recordStripeInvoicePayment(supabase, {
+      invoiceId,
+      orgId,
+      amount,
+      idempotencyKey,
+      paymentIntent,
+      connectedAccount,
+      via,
+      // Never "staff": this client IS the service role whatever the event carried. An event with no org
+      // on it is refused by the writer before any of this, and the step refuses an empty company too.
+      access: { kind: "service", orgId: orgId ?? "" },
+    });
     return outcome !== "refused";
   }
 
