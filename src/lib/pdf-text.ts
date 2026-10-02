@@ -11,9 +11,19 @@
  *
  * A scanned PDF has no text layer; that is said in words ("had no text in it"), never treated as an
  * empty invoice.
+ *
+ * A STATEMENT IS A TABLE, NOT LINES (2026-10-02). Joining runs into lines throws away which COLUMN a
+ * figure sat in, and on a bank statement that is the difference between a withdrawal and a deposit.
+ * So `readPdf` below also hands every run's x, y and width to pdf-table.ts, which builds the
+ * string[][] a statement is read from. This file stays the only place that loads pdfjs.
  */
 
+import { tableFromPositionedItems, type PositionedItem } from "@/lib/pdf-table";
+
 export type PdfTextItem = { str?: unknown; hasEOL?: unknown };
+
+/** The same run, with its place on the page: transform[4] is x, transform[5] is y. */
+type PdfPositionedItem = PdfTextItem & { transform?: unknown; width?: unknown; height?: unknown };
 
 /**
  * pdfjs hands back text as runs. A run that ends a line says hasEOL; runs on one line are joined
@@ -60,9 +70,33 @@ export function isPdfText(text: string | null | undefined): boolean {
 
 export type PdfTextResult = { ok: true; text: string; pages: number } | { ok: false; error: string };
 
-/** Browser only. Reads every page's text; a PDF with none says so. Never throws. */
-export async function readPdfText(data: ArrayBuffer, name = "That PDF"): Promise<PdfTextResult> {
+/**
+ * A PDF WITH NO TEXT LAYER IN IT, IN WORDS, IN ONE PLACE. His bank's statement is three scanned
+ * pages with ZERO text runs on them: a text reader can do nothing with it, and the one thing that
+ * must never happen is reporting it as "no rows" or an empty statement. Both readers below end here,
+ * so there is one sentence for it and not two that drift apart.
+ */
+export function noTextSaid(name: string): string {
+  return `${name} had no text in it. It is probably a scan; put it in through Snap Or Note and it will be read as a picture.`;
+}
+
+/**
+ * EVERY PAGE, BOTH WAYS AT ONCE: the text runs joined into lines (what the CED importer reads) and
+ * the same runs as a table, from where each one sits on the page (what a statement needs). One open,
+ * one page loop: a statement PDF used to be parsed twice to get both.
+ */
+export type PdfReadResult = { ok: true; text: string; table: string[][]; pages: number } | { ok: false; error: string };
+
+/**
+ * Browser only. Never throws: every failure is a sentence a person can act on.
+ *
+ * `table: false` reads the text and nothing else. The vendor price-list importer asks for the text of
+ * a two-hundred-page catalogue and has no use for a grid, so it does not pay for one; the statement
+ * doors ask for both and get both out of ONE open of the file.
+ */
+export async function readPdf(data: ArrayBuffer, name = "That PDF", opts: { table?: boolean } = {}): Promise<PdfReadResult> {
   if (!isPdfBytes(data)) return { ok: false, error: `${name} isn't a PDF inside, whatever its name says.` };
+  const wantTable = opts.table !== false;
   try {
     const pdfjs = await import("pdfjs-dist");
     pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString();
@@ -70,15 +104,29 @@ export async function readPdfText(data: ArrayBuffer, name = "That PDF"): Promise
     // need the bytes to upload.
     const pdf = await pdfjs.getDocument({ data: new Uint8Array(data.slice(0)) }).promise;
     const pages: string[] = [];
+    const marks: PositionedItem[] = [];
     for (let n = 1; n <= pdf.numPages; n++) {
       const page = await pdf.getPage(n);
       const content = await page.getTextContent();
       pages.push(joinPdfTextItems(content.items as PdfTextItem[]));
+      if (!wantTable) continue;
+      for (const it of content.items as PdfPositionedItem[]) {
+        // A marked-content item has no str and no transform; only text runs have a place.
+        const t = it?.transform;
+        if (typeof it?.str !== "string" || !Array.isArray(t)) continue;
+        marks.push({ str: it.str, x: Number(t[4]), y: Number(t[5]), width: Number(it.width), height: Number(it.height), page: n - 1 });
+      }
     }
     const text = pages.join("\n\n").trim();
-    if (!text) return { ok: false, error: `${name} had no text in it. It is probably a scan; put it in through Snap Or Note and it will be read as a picture.` };
-    return { ok: true, text, pages: pdf.numPages };
+    if (!text) return { ok: false, error: noTextSaid(name) };
+    return { ok: true, text, table: wantTable ? tableFromPositionedItems(marks) : [], pages: pdf.numPages };
   } catch (e) {
     return { ok: false, error: `${name} wouldn't open as a PDF (${(e as Error)?.message ?? "unknown error"}).` };
   }
+}
+
+/** Browser only. Reads every page's text; a PDF with none says so. Never throws. */
+export async function readPdfText(data: ArrayBuffer, name = "That PDF"): Promise<PdfTextResult> {
+  const got = await readPdf(data, name, { table: false });
+  return got.ok ? { ok: true, text: got.text, pages: got.pages } : got;
 }

@@ -1,6 +1,6 @@
 import { BUCKET_SECTION, BUSINESS_COST_BUCKETS, bucketOf, isBusinessCostBucket, type BusinessCostBucket } from "@/lib/business-cost-buckets";
 import { PNL_WORDS } from "@/lib/analytics/profit-and-loss";
-import { findHeaderRow, fingerprintOf, headerKey, readDate, readHeaderRow, readHeaderWith, readMoney, sayDollars } from "@/lib/supplier-open-list";
+import { findHeaderRow, fingerprintOf, headerKey, readDate, readHeaderRow, readHeaderWith, readMoney, sayDollars, type ReadFacts } from "@/lib/supplier-open-list";
 // THE RULE EVERY DOOR THAT PUTS A COST ON A JOB IS HELD TO (audit v994's DB4). A bank line writes a
 // bills row with NO LINES under it, so which way the money goes decides whether a job is an answer at
 // all. jobRefusalFor below asks this guard; nothing in this module decides that for itself.
@@ -482,6 +482,27 @@ export function noLinesSaid(dl: Pick<BankDownload, "skipped">, name: string): st
     return `${name}: none of its dates read (${days[0].why.replace(/\.$/, "")}). Download it again with dates like 09/03/2026, and drop that.`;
   const why = dl.skipped[0]?.why;
   return `${name} has no transactions in it that read${why ? ` (${why.replace(/\.$/, "")})` : ""}.`;
+}
+
+/**
+ * WHAT CAME OFF A BANK'S PAGES, for the read report every PDF door prints (supplier-open-list.ts
+ * pdfReadSaid). Money out and money in are said separately, because on a bank statement that is the
+ * whole question: a column read one place over turns a withdrawal into a deposit, and these two
+ * totals against the two his own statement prints catch that in five seconds.
+ */
+export function downloadReadFacts(dl: Pick<BankDownload, "lines" | "skipped" | "from" | "to">): ReadFacts {
+  const out = dl.lines.reduce((n, l) => (l.cents < 0 ? n + l.cents : n), 0);
+  const money = dl.lines.reduce((n, l) => (l.cents > 0 ? n + l.cents : n), 0);
+  return {
+    one: "line",
+    many: "lines",
+    read: dl.lines.length,
+    from: dl.from,
+    to: dl.to,
+    adds: `${sayDollars(Math.abs(out) / 100)} out and ${sayDollars(money / 100)} in`,
+    against: "the totals your statement prints",
+    skipped: dl.skipped,
+  };
 }
 
 /** The type words (a bank's Type column, OFX's TRNTYPE) that say which way unsigned money went.

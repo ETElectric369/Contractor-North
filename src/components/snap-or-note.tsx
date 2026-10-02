@@ -14,8 +14,9 @@ import { useDictation } from "@/lib/use-dictation";
 import { createClient } from "@/lib/supabase/client";
 import { prepareImageForUpload } from "@/lib/image-prep";
 import { sha256Hex } from "@/lib/content-hash";
-import { isPdfBytes, readPdfText } from "@/lib/pdf-text";
-import { isListFile, LIST_ACCEPT, readListFile } from "@/lib/open-list-file";
+import { isPdfBytes, readPdf } from "@/lib/pdf-text";
+import { tableReadsAsList } from "@/lib/pdf-table";
+import { isListFile, LIST_ACCEPT, readListFile, savedOn } from "@/lib/open-list-file";
 import { captureReceipt } from "@/lib/receipt-capture";
 import { formatCurrency } from "@/lib/utils";
 import { addPaperwork, fingerprintSeen } from "@/app/(app)/organize/paperwork-actions";
@@ -40,8 +41,10 @@ import { routePastedText, snapContext, snapPaperRows, type PastedTextRoute, type
  *      anything else is named and refused;
  *   2. the 15 MB cap;
  *   3. the fingerprint of its ORIGINAL bytes, and "Already In" before anything is uploaded;
- *   4. a PDF's own text, read here in the browser: a supplier's portal PDF becomes its documents
- *      with no model call (addPaperwork reads the text);
+ *   4. a PDF's own pages, read here in the browser: its TABLE first, so the statement a supplier
+ *      emails goes in as a list (the same card its CSV would make) instead of being read as one
+ *      receipt, and otherwise its TEXT, so a supplier's portal PDF becomes its documents with no
+ *      model call (addPaperwork reads the text);
  *   5. upload to the office's own folder, the row (addPaperwork, source organize), and only then
  *      the reader, through /api/paperwork/read so a read started from any page gets its 60 seconds.
  *      A read that never answers leaves "Saved, not read yet": the card waits with Read Now.
@@ -239,19 +242,41 @@ async function readPaper(id: string): Promise<{ ok: true; item?: OrganizedResult
   }
 }
 
-/** A supplier's list or a bank download: rows, read here, then one card. */
-async function oneList(id: number, file: File) {
+/**
+ * A supplier's list or a bank download: rows, read here, then one card.
+ *
+ * `already`: a PDF statement whose table was lifted off its pages before it got here (oneStaff), with
+ * the pages and the row count the read report says out loud. One path from here on, so a statement
+ * that arrived as a PDF and one that arrived as a CSV become the same card.
+ */
+async function oneList(id: number, file: File, already?: { table: string[][]; pages: number }) {
   const name = file.name || "A file with no name";
   say(id, name, "Reading the list…", "busy");
-  const read = await readListFile(file);
-  if (!read.ok) return say(id, name, `Not added: ${read.error}`, "error");
+  let table: string[][];
+  let listDate: string | null;
+  if (already) {
+    table = already.table;
+    listDate = savedOn(file.lastModified);
+  } else {
+    const read = await readListFile(file);
+    if (!read.ok) return say(id, name, `Not added: ${read.error}`, "error");
+    table = read.table;
+    listDate = read.listDate;
+  }
   let sha: string | null = null;
   try {
     sha = await sha256Hex(await file.arrayBuffer());
   } catch {
     sha = null; // an old browser: the list still goes in, it just can't be matched as the same file
   }
-  const added = await addOpenList({ name, sha256: sha, table: read.table, listDate: read.listDate, source: "organize" });
+  const added = await addOpenList({
+    name,
+    sha256: sha,
+    table,
+    listDate,
+    source: "organize",
+    pdf: already ? { pages: already.pages, rows: table.length } : null,
+  });
   if (!added.ok) return say(id, name, added.already ? `${added.already} Nothing was added twice.` : (added.error ?? "Not added."), added.already ? "warn" : "error");
   remember(id, added.id);
   say(id, name, added.line ?? "Waiting for your answer on its card.", "ok");
@@ -286,8 +311,17 @@ async function oneStaff(id: number, file: File, orgId: string) {
   if (isPdf) {
     // A PDF by what is IN it. A file named .pdf that isn't one is refused by name, not read.
     if (!isPdfBytes(raw)) return say(id, name, "Not added: it is named like a PDF but isn't one inside.", "error");
-    const t = await readPdfText(raw, name);
-    if (t.ok) pdfText = t.text; // a scan has no text; the reader looks at it as a picture instead
+    // THE STATEMENT HIS SUPPLIER EMAILS HIM IS A TABLE, NOT ONE RECEIPT (2026-10-02). Its pages are
+    // read as a table FIRST, and if one of the existing readers recognises that table — a supplier's
+    // open list, or a bank's download — it goes in as a LIST, the same card a CSV of it would make.
+    // A PDF nothing recognises falls straight through to the paper path below, untouched: a CED
+    // invoice, a job plan and a deed behave exactly as they did. A scan has no text at all, so
+    // `readPdf` refuses it in words and it falls through to be looked at as a picture.
+    const got = await readPdf(raw, name);
+    if (got.ok) {
+      if (tableReadsAsList(got.table)) return oneList(id, file, { table: got.table, pages: got.pages });
+      pdfText = got.text;
+    }
   } else {
     upload = await prepareImageForUpload(file);
     if (/hei[cf]/i.test(upload.type) || (heic && upload === file)) {

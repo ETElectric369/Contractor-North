@@ -385,7 +385,7 @@ describe("the all-clear is scoped to what this page counted", () => {
     expect(words).toContain("drop it in below");
     expect(words).not.toContain("Nothing for you to do here");
     expect(words).not.toMatch(/Nothing is waiting on you/);
-    expect(textOf(html)).toContain("Drop A Bank Or Supplier Download");
+    expect(textOf(html)).toContain("Drop A Bank Or Supplier Statement");
   });
 
   it("and the scope is required, because nothing on this page reads the paper queue", async () => {

@@ -749,7 +749,7 @@ const STATEMENT_TITLE =
 /** An invoice's own item table: a quantity and a price (or description) over the same columns. */
 const QTY_WORDS = /\b(qty|quantity|ordered|shipped|ship qty|order qty|b\s*o)\b/;
 const PRICE_WORDS = /\b(price|unit|each|ext|extension|extended|description|sku|catalog)\b/;
-function isLineItemHeader(line: string): boolean {
+export function isLineItemHeader(line: string): boolean {
   const words = headerKey(line);
   return QTY_WORDS.test(words) && PRICE_WORDS.test(words);
 }
@@ -1199,6 +1199,67 @@ export function planHeadline(plan: OpenListPlan, list: Pick<OpenList, "from">, s
   if (plan.add.length) parts.push(`${plan.add.length} new`);
   if (plan.update.length) parts.push(`${plan.update.length} changed`);
   return `${lead}: ${parts.join(", ")}${partial}, balance now ${balance}.`;
+}
+
+// ── WHAT A PDF'S PAGES ACTUALLY GAVE UP ────────────────────────────────────────────────────────
+
+/** The paper a table was lifted off: its pages, and the rows the table had before any were read. */
+export type PdfPaper = { pages: number; rows: number };
+
+/**
+ * What a reader made of those rows. Each reader fills this in from its OWN rows — a supplier's open
+ * list from `listReadFacts` here, a bank's download from `downloadReadFacts` in bank-download.ts —
+ * so the figures in the sentence can only ever be the figures that landed.
+ */
+export type ReadFacts = {
+  /** The plain word for one row of it: a supplier's "paper", a bank's "line". */
+  one: string;
+  many: string;
+  read: number;
+  from: string | null;
+  to: string | null;
+  /** What the rows add to, already in dollars: "$10,808.76", or "$4,210.00 out and $9,900.00 in". */
+  adds: string;
+  /** The figure on his own paper to hold it against: "the TOTAL DUE your statement prints". */
+  against: string;
+  skipped: readonly { line: number; why: string }[];
+};
+
+export function listReadFacts(list: Pick<OpenList, "rows" | "skipped">): ReadFacts {
+  const days = list.rows.map((r) => r.invoiceDate).filter((d): d is string => !!d).sort();
+  return {
+    one: "paper",
+    many: "papers",
+    read: list.rows.length,
+    from: days[0] ?? null,
+    to: days[days.length - 1] ?? null,
+    adds: sayDollars(sum(list.rows.map((r) => Number(r.openBalance) || 0))),
+    against: "the TOTAL DUE your statement prints",
+    skipped: list.skipped,
+  };
+}
+
+/**
+ * THE READ REPORT, AND IT IS THE SAFETY, NOT A NICETY. A parsed PDF can be confidently wrong in a way
+ * a CSV cannot: a column read one place over turns a withdrawal into a deposit, and four rows that
+ * never read leave a total he can see on the paper and the app cannot. So before he answers anything,
+ * the door that took the PDF says what came off it — how many pages, how many rows were on them, how
+ * many of those read, over what dates, adding to what — and names the figure his own paper prints to
+ * hold it against. Two numbers agreeing is a five-second proof the parse is right, and on a PDF it is
+ * the only proof there is.
+ *
+ * IT NEVER CLAIMS WHAT IT DID NOT READ. Every row that failed is counted and its reason said. A total
+ * that quietly leaves out four rows he can see on the paper is the worst outcome this whole path has.
+ */
+export function pdfReadSaid(pdf: PdfPaper | null | undefined, f: ReadFacts, today?: string | null): string {
+  if (!pdf) return "";
+  const range = f.from ? ` ${sayDay(f.from, today)} to ${sayDay(f.to, today)},` : "";
+  const shown = f.skipped.slice(0, 3);
+  const more = f.skipped.length - shown.length;
+  const skipped = f.skipped.length
+    ? ` ${plural(f.skipped.length, "row", "rows")} didn't read: ${shown.map((s) => `line ${s.line}, ${s.why.replace(/\.$/, "")}`).join("; ")}.${more > 0 ? ` And ${more} more.` : ""}`
+    : "";
+  return `Read off the PDF: ${plural(pdf.pages, "page", "pages")}, ${plural(pdf.rows, "row", "rows")} on them, ${plural(f.read, f.one, f.many)}${range} adding to ${f.adds}. Check that against ${f.against}; if the two don't match, this missed something on the paper.${skipped}`;
 }
 
 /** "Tahoe Lumber's", "Consolidated Electrical Distributors'". */

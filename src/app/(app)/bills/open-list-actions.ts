@@ -13,13 +13,16 @@ import {
   capTable,
   findHeaderRow,
   openListFromText,
+  listReadFacts,
+  pdfReadSaid,
   readHeaderRow,
   readOpenListTable,
   rememberColumns,
+  type ReadFacts,
   type OpenListColumns,
   type StoredOpenList,
 } from "@/lib/supplier-open-list";
-import { looksLikeBankTable, mayBeBankTable, noLinesSaid, notABankDownloadSaid, redactDigits, redactWordCells, unreadBankTable } from "@/lib/bank-download";
+import { downloadReadFacts, looksLikeBankTable, mayBeBankTable, noLinesSaid, notABankDownloadSaid, redactDigits, redactWordCells, unreadBankTable } from "@/lib/bank-download";
 import { OWNER_SORTS_BANK, viewerSortsBank } from "@/lib/bank-viewer";
 import { bankLine, bankTableTooLong, capBankTable, createBankPaper, readBankDownload } from "./bank-core";
 import { applyOpenListCore, createOpenListPaper, loadAccounts, loadPapers, openListLine, orgToday, resolveAccount } from "./open-list-core";
@@ -49,6 +52,12 @@ export async function addOpenList(input: {
   /** The day the file was saved (the browser's lastModified), or null for today. */
   listDate?: string | null;
   source?: "bills_drop" | "organize";
+  /**
+   * THE PDF THESE ROWS WERE LIFTED OFF: its pages, and how many rows the table had before any of them
+   * were read. A statement that came in as a PDF was PARSED, not downloaded, so the card's line says
+   * what came off the paper and he holds it against the total his own statement prints (pdfReadSaid).
+   */
+  pdf?: { pages: number; rows: number } | null;
   /** "bank": the caller promised a bank download, so anything else — a supplier's list included — is
    *  refused in plain words. NO DOOR PASSES IT TODAY: Reconcile's drop line takes either statement on
    *  purpose (Erik: "i want to upload my bank statement and supplier statement"), and this file tells
@@ -65,6 +74,11 @@ export async function addOpenList(input: {
   const given = YMD.test(String(input?.listDate ?? "")) && String(input.listDate) <= today ? String(input.listDate) : null;
   const listDate = given ?? today;
   const listDateFrom = given ? ("file" as const) : ("today" as const);
+  const pages = Math.trunc(Number(input?.pdf?.pages));
+  const rawRows = Math.trunc(Number(input?.pdf?.rows));
+  const pdf = pages > 0 && rawRows >= 0 ? { pages, rows: rawRows } : null;
+  /** THE READ REPORT, where every door reaches it, for whichever card this becomes. */
+  const withReport = (line: string, facts: ReadFacts) => (pdf ? `${line} ${pdfReadSaid(pdf, facts, today)}` : line);
 
   let stored: StoredOpenList | null = null;
   let sha: string | null = isSha256(input?.sha256) ? String(input.sha256) : null;
@@ -106,7 +120,7 @@ export async function addOpenList(input: {
       revalidatePath("/bills");
       revalidatePath("/organize");
       revalidatePath("/planner");
-      return { ok: true, id: placed.id, line: bankLine(download) };
+      return { ok: true, id: placed.id, line: withReport(bankLine(download), downloadReadFacts(download)) };
     }
     // A BANK'S TABLE THAT DIDN'T READ AS ONE IS REFUSED HERE, AT EVERY DOOR, rather than kept as a
     // supplier's list waiting for its columns. That class of paper is the whole office's to read
@@ -163,7 +177,7 @@ export async function addOpenList(input: {
   if ("error" in placed) return { ok: false, error: `${name} wasn't added. ${placed.error}` };
   revalidatePath("/bills");
   revalidatePath("/organize");
-  return { ok: true, id: placed.id, line: openListLine(stored) };
+  return { ok: true, id: placed.id, line: stored.list ? withReport(openListLine(stored), listReadFacts(stored.list)) : openListLine(stored) };
 }
 
 async function waitingList(supabase: any, orgId: string, id: string) {
