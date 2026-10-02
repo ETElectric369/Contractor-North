@@ -16,7 +16,8 @@ import { directionsTarget } from "@/lib/maps";
 import { getOrgSettings } from "@/lib/org-settings";
 import { NavLink } from "@/components/nav-link";
 import { toJobOptions, toCustomerOptions, toStaffOptions, listActiveTechs, listCustomerOptions, jobLabel } from "@/lib/schedule-options";
-import { todayBoundsInTz, prettyDay, tzDayStartUtc, todayStrInTz } from "@/lib/tz";
+import { todayBoundsInTz, prettyDay, todayStrInTz, weekWindowInTz } from "@/lib/tz";
+import { shortDayWords, weekViewDays } from "@/lib/schedule/week-columns";
 import { YourList } from "./your-list";
 import { RANK_POOL_SELECT, rankPoolQuery, rankSix } from "@/lib/six-rank";
 import { getActionItems } from "@/lib/action-items/query";
@@ -76,6 +77,8 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
   // badge counts the new, uncontacted ones. leadsOn stays because Needs You's rows hear it.
   const features = getOrgSettings((orgRow as any)?.settings).features;
   const leadsOn = featureOn(features, "leads");
+  // Settings → Scheduling, "Week starts on". The week list below used to hardcode Sunday.
+  const weekStart = getOrgSettings((orgRow as any)?.settings).week_start;
 
   // ONE parallel batch for everything that only needs the tz + the user id — was three sequential
   // rounds (day data → current job + week total → form/snapshot options). Latency audit 2026-06-27.
@@ -565,27 +568,32 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
     return mins < 20 ? nx.key : null;
   })();
 
-  // Week view (techs only — staff were redirected above): the agenda widened to a
-  // week (Sun–Sat), grouped by day, paged via ?week=. Sunday-start is the DISPLAY
-  // week; the pay-week hours above are Monday-start on purpose.
+  // Week view (techs only — staff were redirected above): the agenda widened to a week, grouped by
+  // day, paged via ?week=.
+  //
+  // THE COMPANY'S WEEK, NOT A HARDCODED SUNDAY. This computed its own `getUTCDay()` and the comment
+  // that stood here said the display week is Sunday-start while the pay week is Monday-start "on
+  // purpose" — two rules. There is only ever ONE: org settings week_start (Settings → Scheduling,
+  // default Monday), which /timecards already read and this screen did not, so the setting said
+  // Monday and My Day still opened on a Sunday. One function answers it now (lib/tz weekWindowInTz),
+  // for the columns AND for the instants the reads below ask the database with.
   const weekDayGroups: { dayStr: string; label: string; items: Agenda[] }[] = [];
+  /** The weekend days this week folded away (empty, not today) — named in the header, never silent. */
+  let weekHiddenDays: string[] = [];
+  /** The week's REAL first day, kept whether or not it is drawn: "Week of" names the week, not the
+   *  first row that survived the weekend rule (a Sunday-start week with a free Sunday would otherwise
+   *  have re-labelled itself "Week of Mon 6"). */
+  let weekFirstDay = "";
   if (view === "week") {
-    const dow = new Date(`${todayStr}T00:00:00Z`).getUTCDay(); // 0 = Sunday (display week start)
-    const viewWeekStart = new Date(`${todayStr}T00:00:00Z`);
-    viewWeekStart.setUTCDate(viewWeekStart.getUTCDate() - dow + weekOffset * 7);
-    // The 7 day strings (Sun–Sat) of the viewed week, in the org tz.
-    const weekDayStrs: string[] = [];
-    for (let i = 0; i < 7; i++) {
-      const d = new Date(viewWeekStart);
-      d.setUTCDate(d.getUTCDate() + i);
-      weekDayStrs.push(d.toISOString().slice(0, 10));
-    }
+    const { days: weekDayStrs, start: weekStartUtc, end: weekEndUtc } = weekWindowInTz(
+      todayStr,
+      weekStart,
+      tz,
+      weekOffset,
+    );
     const weekStartStr = weekDayStrs[0];
     const weekEndStr = weekDayStrs[6];
-    const weekEndExcl = new Date(viewWeekStart);
-    weekEndExcl.setUTCDate(weekEndExcl.getUTCDate() + 7);
-    const weekStartUtc = tzDayStartUtc(weekStartStr, tz);
-    const weekEndUtc = tzDayStartUtc(weekEndExcl.toISOString().slice(0, 10), tz);
+    weekFirstDay = weekStartStr;
     const [{ data: wJobs }, { data: wAppts }, { data: wSegs }, { data: wCrewRows }] = await Promise.all([
       supabase
         .from("jobs")
@@ -700,9 +708,22 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
       }
       weekDayGroups.push({ dayStr, label: prettyDay(dayStr), items });
     }
+    /* THE WEEKEND EARNS ITS ROW, OR IT ISN'T DRAWN — the SAME rule as the schedule's week columns
+       (lib/schedule/week-columns), from the same function. Hiding empty weekends on one week view and
+       drawing them on the other is the two-doors-one-thing bug this repo keeps shipping; here it also
+       buys back two "Open" rows of a phone screen. No rail arms a row on My Day, so nothing is armed. */
+    const { shown, hidden } = weekViewDays(weekDayStrs, {
+      hasWork: (d) => (weekDayGroups.find((g) => g.dayStr === d)?.items.length ?? 0) > 0,
+      todayStr,
+    });
+    weekHiddenDays = hidden;
+    const keep = new Set(shown);
+    for (let i = weekDayGroups.length - 1; i >= 0; i--) {
+      if (!keep.has(weekDayGroups[i].dayStr)) weekDayGroups.splice(i, 1);
+    }
   }
-  const weekOfLabel = weekDayGroups.length
-    ? new Date(`${weekDayGroups[0].dayStr}T12:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" })
+  const weekOfLabel = weekFirstDay
+    ? new Date(`${weekFirstDay}T12:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" })
     : "";
 
   const navBtnCls =
@@ -1019,12 +1040,21 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
           3-second glance (where I am + what's happening when) fits in one viewport. It holds only
           Earlier / Next / Later: the job you're on is the Now card. */}
       {view === "week" ? (
-        /* Tech week — the agenda grouped by day (Sun–Sat), paged via ?week=. */
+        /* Tech week — the agenda grouped by day, the company's week start first, paged via ?week=. */
         <Card className="mb-4 overflow-hidden">
           <div className="flex items-center justify-between gap-2 border-b border-slate-100 px-5 py-3">
-            <div className="flex min-w-0 items-center gap-2 text-sm font-semibold text-slate-900">
-              <CalendarCheck className="h-4 w-4 shrink-0 text-brand" />
-              <span className="truncate">{weekOffset === 0 ? "This week" : `Week of ${weekOfLabel}`}</span>
+            <div className="min-w-0 text-sm font-semibold text-slate-900">
+              <div className="flex min-w-0 items-center gap-2">
+                <CalendarCheck className="h-4 w-4 shrink-0 text-brand" />
+                <span className="truncate">{weekOffset === 0 ? "This week" : `Week of ${weekOfLabel}`}</span>
+              </div>
+              {/* NOTHING SILENT: the week is short two rows and says which, so a week that grows a
+                  Saturday next time it is drawn was announced before it did. */}
+              {weekHiddenDays.length > 0 && (
+                <span className="mt-0.5 block text-[11px] font-normal text-slate-400">
+                  {weekHiddenDays.map(shortDayWords).join(" and ")} clear
+                </span>
+              )}
             </div>
             {/* 44px, all three (the paging arrows were 36px): -my-3 keeps the header its height. */}
             <div className="-my-3 flex shrink-0 items-center gap-0.5">

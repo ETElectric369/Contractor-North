@@ -12,6 +12,7 @@ import { MoveToDay } from "@/components/move-to-day";
 import { useToast } from "@/components/toast";
 import { formatDate } from "@/lib/utils";
 import { carriedDay, carriedPin, isPinned } from "@/lib/six-rank";
+import { weekDayStrs, type WeekStart } from "@/lib/tz";
 import { createTask, toggleTask, deleteTask, updateTask, type ToggleTaskResult } from "./actions";
 
 /**
@@ -533,11 +534,13 @@ export function TaskRow({
   );
 }
 
-/** Saturday closing the Sunday-start week that contains `todayStr` (matches the planner/payroll week). */
-function weekEndStr(todayStr: string): string {
-  const d = new Date(`${todayStr}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + (6 - d.getUTCDay()));
-  return d.toISOString().slice(0, 10);
+/** The last day of the week `todayStr` is in — the far edge of the This Week bucket.
+ *  It used to compute its own Saturday and claim in a comment that it "matches the planner/payroll
+ *  week". Neither half was true: the pay week has read the company's own week_start all along, and
+ *  the default is Monday — so a Reminder due on Sunday fell out of This Week into Later. ONE rule
+ *  (lib/tz weekDayStrs), the same one every other week on the app is drawn from. */
+function weekEndStr(todayStr: string, weekStart: WeekStart): string {
+  return weekDayStrs(todayStr, weekStart)[6];
 }
 
 function TimeSection({
@@ -602,6 +605,7 @@ export function TasksView({
   people = [],
   categories = [],
   todayStr,
+  weekStart = "monday",
   doneTotal = 0,
   showingAllDone = false,
   extras = true,
@@ -612,6 +616,8 @@ export function TasksView({
   /** The org's existing category values (autocomplete + by-category view). */
   categories?: string[];
   todayStr: string;
+  /** Settings → Scheduling, "Week starts on" — where This Week ends. Absent: the org default, Monday. */
+  weekStart?: WeekStart;
   doneTotal?: number;
   showingAllDone?: boolean;
   /** The To-Do Extras switch (0352): priority, step and tag doors. Omitted = on (as before). */
@@ -647,7 +653,7 @@ export function TasksView({
     }
   }
 
-  const weekEnd = weekEndStr(todayStr);
+  const weekEnd = weekEndStr(todayStr, weekStart);
   const openTop = top.filter((t) => t.status !== "done");
   const doneTop = top.filter((t) => t.status === "done");
   const doneFetched = tasks.filter((t) => t.status === "done").length;

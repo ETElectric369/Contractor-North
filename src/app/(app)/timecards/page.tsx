@@ -19,7 +19,7 @@ import {
 import { getOrgSettings, workDayWindowHm } from "@/lib/org-settings";
 import { featureOn } from "@/lib/features";
 import { countTeammates, shellDoors } from "@/lib/feature-doors";
-import { formatDateTimeTz, timeEntryGridSpan, tzDayStartUtc, tzMinutesOfDay, todayStrInTz } from "@/lib/tz";
+import { formatDateTimeTz, timeEntryGridSpan, tzDayStartUtc, tzMinutesOfDay, todayStrInTz, weekWindowInTz } from "@/lib/tz";
 import { balanceForPerson, drawIdsFrom, toPayPaymentRow, wagesOnly, type PayPaymentRow, type PersonBalance } from "@/lib/payroll-math";
 import { getCrewStatus } from "@/lib/crew-status";
 import { firstNameOf, pillColorForPerson } from "@/lib/employee-color";
@@ -46,23 +46,21 @@ export const dynamic = "force-dynamic";
 // week. Starts Monday unless Settings → Scheduling says the week starts Sunday
 // (org settings week_start). `start`/`end` are the UTC instants of local
 // midnight, end exclusive.
+//
+// ONE RULE, ONE SETTING. This used to hand-roll the week start here, which made it the only screen
+// that read `week_start` at all and left three others opening on a Sunday; the arithmetic now lives
+// once, in lib/tz weekWindowInTz. The pay week and the display week are the SAME company setting —
+// there was never a second rule in code, only a stale comment on /planner claiming one — and what IS
+// separate is the pay PERIOD (pay_schedule + anchor, lib/tz payPeriodBounds), which the Payroll page
+// owns and this window never touches.
+//
+// POSITIVE PAGES BACK HERE. A timecard offset counts weeks into the PAST (last week is ?week=1),
+// while weekDayStrs is signed future-positive for the crew-planning surfaces — hence the `-offset`.
+// ALL SEVEN DAYS, ALWAYS: the weekend rule folds empty weekend columns away on the SCHEDULE's week
+// (lib/schedule/week-columns); a pay week is a fixed seven-day window that hours are summed over, and
+// a column missing from it would be an hour missing from the page.
 function weekRange(offset: number, tz: string, weekStart: "sunday" | "monday") {
-  const todayStr = todayStrInTz(tz);
-  const utcDow = new Date(`${todayStr}T00:00:00Z`).getUTCDay(); // Sunday = 0
-  const dow = weekStart === "sunday" ? utcDow : (utcDow + 6) % 7; // days since the week started
-  const startDate = new Date(`${todayStr}T00:00:00Z`);
-  startDate.setUTCDate(startDate.getUTCDate() - dow - offset * 7);
-  const start = tzDayStartUtc(startDate.toISOString().slice(0, 10), tz);
-  const endDate = new Date(startDate);
-  endDate.setUTCDate(endDate.getUTCDate() + 7);
-  const end = tzDayStartUtc(endDate.toISOString().slice(0, 10), tz);
-  // The 7 local day-strings of the week — the time grid's columns.
-  const days: string[] = [];
-  for (let i = 0; i < 7; i++) {
-    const d = new Date(startDate);
-    d.setUTCDate(d.getUTCDate() + i);
-    days.push(d.toISOString().slice(0, 10));
-  }
+  const { days, start, end } = weekWindowInTz(todayStrInTz(tz), weekStart, tz, -offset);
   return { start, end, days };
 }
 

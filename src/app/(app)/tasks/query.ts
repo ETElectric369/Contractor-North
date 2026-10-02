@@ -93,8 +93,12 @@ export async function getTasksPageData(showAllDone: boolean) {
     (s) => !shown.has(s.id as string) && !!s.parent_id && shown.has(s.parent_id as string),
   );
 
+  const weekStart = getOrgSettings((orgRow as any)?.settings).week_start;
+
   return {
     todayStr: todayStrInTz(tz),
+    /** Settings → Scheduling: where the This Week bucket ends (lib/tz weekDayStrs, the one rule). */
+    weekStart,
     /** Who is looking: only a Reminder's maker hands it to someone else (0358's tasks_update). */
     viewerId: uid || null,
     tasks: [...mineRows, ...steps],

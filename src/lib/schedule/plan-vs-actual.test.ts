@@ -280,7 +280,10 @@ describe("the calendar reads it and draws it (source)", () => {
   it("the stack builds each week's grid once per (week, data), with stable props, so mounted weeks skip", () => {
     const view = read("src/app/(app)/calendar/calendar-view.tsx");
     expect(view).toContain("const gridNow = useMemo(");
-    expect(view).toMatch(/const key = \[\s*jobs, segments, appointments, tasks, external, actuals, actualsCappedBefore, dayRows, people, members, addableJobs,\s*personFilter, tz, todayK, canEdit, workDayStart, workDayEnd,\s*\];/);
+    /* `armed` joined the key with the weekend rule (lib/schedule/week-columns): arming a placement
+       changes WHICH COLUMNS EXIST, so a mounted week has to rebuild once or a picked job would have no
+       weekend to land on. Everything else still only invalidates on data, never on a scroll growth. */
+    expect(view).toMatch(/const key = \[\s*jobs, segments, appointments, tasks, external, actuals, actualsCappedBefore, dayRows, people, members, addableJobs,\s*personFilter, tz, todayK, canEdit, workDayStart, workDayEnd, armed,\s*\];/);
     expect(view).toContain("onDayClick={drillInto}");
     expect(view).toContain("placement={armedProp}");
     expect(view).not.toContain("placement={target.prop}");

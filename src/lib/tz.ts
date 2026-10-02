@@ -211,17 +211,29 @@ export function payPeriodForOffset(
   return p;
 }
 
-/** The 7 org-local day-strings of the week containing `todayStr`, shifted by
- *  `offset` weeks — SIGNED, and **positive = FUTURE** (crew planning looks
- *  ahead; note /timecards' local weekRange pages BACK with positive offsets —
- *  different surface, different direction, hence the loud name difference).
- *  Pure UTC-noon arithmetic on the day STRING (the caller already resolved
- *  "today" in the org tz via todayStrInTz), so it's deterministic and DST-safe.
- *  `weekStart` mirrors org settings week_start. Invalid input falls back to a
- *  fixed date instead of throwing (the payPeriodBounds guard precedent). */
+/** Which day a company's week begins on — org settings `week_start`. */
+export type WeekStart = "sunday" | "monday";
+
+/**
+ * WHEN THE WEEK STARTS, FOR THIS COMPANY — THE ONE ANSWER.
+ *
+ * The 7 org-local day-strings of the week containing `todayStr`, shifted by `offset` weeks —
+ * SIGNED, and **positive = FUTURE** (crew planning looks ahead; /timecards pages BACK with a
+ * positive offset, so it passes `-offset`, said out loud at its own call site).
+ *
+ * EVERY SURFACE THAT DRAWS A WEEK COMES THROUGH HERE. It used to be four hand-written copies of
+ * `getUTCDay()` — the schedule's week and month, My Day's week, and Nort's "this week" — and only
+ * /timecards read the setting at all. So Settings → Scheduling said "Week starts on Monday", the
+ * timecard obeyed, and the three screens Erik actually plans on still opened on a Sunday. One
+ * function, one rule, and week-starts-once.test.ts fails if a fifth copy appears.
+ *
+ * Pure UTC-noon arithmetic on the day STRING (the caller already resolved "today" in the org tz via
+ * todayStrInTz), so it's deterministic and DST-safe. Invalid input falls back to a fixed date
+ * instead of throwing (the payPeriodBounds guard precedent).
+ */
 export function weekDayStrs(
   todayStr: string,
-  weekStart: "sunday" | "monday",
+  weekStart: WeekStart,
   offset = 0,
 ): string[] {
   const safe =
@@ -240,6 +252,45 @@ export function weekDayStrs(
     days.push(d.toISOString().slice(0, 10));
   }
   return days;
+}
+
+/**
+ * THE SAME WEEK, PLUS ITS TWO EDGES AS INSTANTS — for every reader that has to ASK the database for
+ * the week (`.gte(start).lt(end)`) as well as draw it. `days` is weekDayStrs above, so a window and
+ * the columns it fills can never disagree about where the week began; `start`/`end` are the UTC
+ * instants of the week's first and the NEXT week's first LOCAL midnight, end exclusive, resolved on
+ * the calendar (tzDayStartUtc) so a DST week is 167 or 169 hours, never a flat 7 x 86_400_000.
+ */
+export function weekWindowInTz(
+  todayStr: string,
+  weekStart: WeekStart,
+  tz: string,
+  offset = 0,
+): { days: string[]; start: Date; end: Date } {
+  const days = weekDayStrs(todayStr, weekStart, offset);
+  const after = new Date(`${days[6]}T00:00:00Z`);
+  after.setUTCDate(after.getUTCDate() + 1);
+  return {
+    days,
+    start: tzDayStartUtc(days[0], tz),
+    end: tzDayStartUtc(after.toISOString().slice(0, 10), tz),
+  };
+}
+
+/** Saturday or Sunday, for a "YYYY-MM-DD" — the two days the week view only draws when they earn it
+ *  (lib/schedule/week-columns). Noon UTC so no zone can shift the day it asks about. A CALENDAR
+ *  fact, not a working-hours one: a company that works Saturdays still has a Saturday. */
+export function isWeekendDay(ymd: string): boolean {
+  const dow = new Date(`${ymd}T12:00:00Z`).getUTCDay(); // 0 Sunday … 6 Saturday
+  return dow === 0 || dow === 6;
+}
+
+/** The weekday headings of a company's week, in ITS order: Monday-start reads Mon…Sun, Sunday-start
+ *  Sun…Sat. The month grid's header row drew a hardcoded Sun…Sat beside a Monday-start week — the
+ *  column labels and the columns disagreeing by one on the same screen. */
+export function weekdayHeadings(weekStart: WeekStart): string[] {
+  const names = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  return weekStart === "sunday" ? names : [...names.slice(1), names[0]];
 }
 
 /** Pretty "Weekday, Month D" label for a "YYYY-MM-DD", tz-stable. */

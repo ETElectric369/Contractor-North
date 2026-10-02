@@ -22,7 +22,7 @@ export default async function TasksPage({
 }) {
   const sp = await searchParams;
   const showAllDone = sp?.done === "all";
-  const [{ todayStr, viewerId, tasks, doneTotal, people, categories }, sw] = await Promise.all([
+  const [{ todayStr, weekStart, viewerId, tasks, doneTotal, people, categories }, sw] = await Promise.all([
     getTasksPageData(showAllDone),
     viewerSwitches(),
   ]);
@@ -47,6 +47,7 @@ export default async function TasksPage({
         people={people}
         categories={categories}
         todayStr={todayStr}
+        weekStart={weekStart}
         viewerId={viewerId}
         doneTotal={doneTotal}
         showingAllDone={showAllDone}

@@ -23,7 +23,8 @@ import { useToast } from "@/components/toast";
 import { MoveToDay } from "@/components/move-to-day";
 import { NavLink } from "@/components/nav-link";
 import { TimeGrid, type TimeGridAllDay, type TimeGridEvent } from "@/components/time-grid";
-import { hmToMin, todayStrInTz, tzMinutesOfDay } from "@/lib/tz";
+import { hmToMin, todayStrInTz, tzMinutesOfDay, weekDayStrs, weekdayHeadings, type WeekStart } from "@/lib/tz";
+import { shortDayWords, weekViewDays } from "@/lib/schedule/week-columns";
 import { formatTime } from "@/lib/utils";
 import { firstNameOf } from "@/lib/employee-color";
 import { shiftApptToDay } from "@/lib/appt-time";
@@ -211,11 +212,23 @@ const dayKey = (d: Date) => {
 };
 const isYmd = (s: string | null | undefined): s is string => /^\d{4}-\d{2}-\d{2}$/.test(s ?? "");
 
-function startOfWeek(d: Date) {
-  const r = new Date(d);
-  r.setDate(r.getDate() - r.getDay()); // Sunday start
-  r.setHours(0, 0, 0, 0);
-  return r;
+/** A "YYYY-MM-DD" back to the pure calendar-day Date dayKey round-trips (local midnight, no instant). */
+const dayDate = (ymd: string) => {
+  const [y, m, d] = ymd.split("-").map(Number);
+  return new Date(y, (m || 1) - 1, d || 1);
+};
+
+/**
+ * THE COMPANY'S WEEK CONTAINING `d` — seven calendar-day Dates, first day first.
+ *
+ * This was `startOfWeek`, a hardcoded `r.getDay()` with the comment "Sunday start", and it fed BOTH
+ * the week columns and the month grid's first cell. Settings → Scheduling has said "Week starts on
+ * Monday" since the setting shipped and only /timecards read it, so the one screen Erik plans the
+ * crew's week on opened on a Sunday and the setting was a lie. The arithmetic lives once now, in
+ * lib/tz weekDayStrs, and this just carries it back into the Dates the grid draws with.
+ */
+function weekDaysOf(d: Date, weekStart: WeekStart): Date[] {
+  return weekDayStrs(dayKey(d), weekStart).map(dayDate);
 }
 
 /**
@@ -339,6 +352,7 @@ export function CalendarView({
   picker,
   now,
   tz,
+  weekStart = "monday",
   workDayStart = "08:00",
   workDayEnd = "16:00",
   crewBoard = true,
@@ -364,6 +378,10 @@ export function CalendarView({
    *  it (the /timecards discipline), so the SSR (UTC server) and the browser
    *  place a 9 AM Pacific appointment at 9 AM on the Pacific day, always. */
   tz: string;
+  /** Settings → Scheduling, "Week starts on" (org settings week_start). The week's columns AND the
+   *  month grid's first cell come from it, through the one rule in lib/tz — this view used to start
+   *  both on a hardcoded Sunday while the setting said Monday. Absent: the org default, Monday. */
+  weekStart?: WeekStart;
   /** The org's work_day_start ("HH:MM") — the all-day job time sentinel the
    *  week agenda hides. Defaults to the scheduler's original 8 AM. */
   workDayStart?: string;
@@ -599,6 +617,9 @@ export function CalendarView({
 
   /** A day tap drills into that day, unless the rail has armed it (then it places the picked work). */
   const target = useDayTarget();
+  /** Work is picked in the rail. Read out as a plain boolean because the week's columns depend on it:
+   *  a weekend day is always drawn while armed, or there would be nothing there to drop a job onto. */
+  const armed = target.armed;
 
   /* THE SAME TAP, TWO MEANINGS — and the armed one wins. Armed, a day places the picked work;
      otherwise it drills in as it always has. Navigating away mid-pick would also throw the picks
@@ -608,14 +629,12 @@ export function CalendarView({
     nav("day", dayKey(d), { push: true });
   }
 
-  const weekDays = useMemo(() => {
-    const ws = startOfWeek(anchor);
-    return Array.from({ length: 7 }, (_, i) => {
-      const d = new Date(ws);
-      d.setDate(d.getDate() + i);
-      return d;
-    });
-  }, [anchor]);
+  /** THE WHOLE WEEK, ALWAYS SEVEN — the week the anchor is in, in the company's own order. What the
+   *  grid DRAWS is a subset of this (weekViewDays folds an empty weekend away), but every figure the
+   *  week names about itself — its span label, whether today is in it, how far the stack may grow —
+   *  is answered from here. A label computed from the drawn days would rename the week when a
+   *  Saturday emptied out. */
+  const weekDays = useMemo(() => weekDaysOf(anchor, weekStart), [anchor, weekStart]);
 
   // ── Time-grid data: week + day render through the shared TimeGrid, so a
   // morning inspection SITS at 9 AM instead of reading like any other chip
@@ -1041,21 +1060,26 @@ export function CalendarView({
      day, emptied only when the DATA changes (every array the blocks are drawn from, the day rows, the
      clocked time, the person filter, the clock and the company's day), never on a growth. The key holds
      every input's identity: a stale cache after router.refresh would draw yesterday's bars. */
-  type WeekData = { days: TimeGridDay[]; events: TimeGridEvent[]; allDay: TimeGridAllDay[]; label: string; hasToday: boolean; loadsBack: boolean };
+  type WeekData = { days: TimeGridDay[]; events: TimeGridEvent[]; allDay: TimeGridAllDay[]; label: string; key: string; hasToday: boolean; loadsBack: boolean; hiddenWeekend: string[] };
   const weekCacheRef = useRef<{ key: unknown[]; map: Map<string, WeekData> }>({ key: [], map: new Map() });
   const weekData = useMemo(() => {
+    /* `armed` is part of the key because it changes WHICH COLUMNS EXIST (below): a weekend day is
+       always drawn while work is picked in the rail, so arming rebuilds every mounted week once. */
     const key = [
       jobs, segments, appointments, tasks, external, actuals, actualsCappedBefore, dayRows, people, members, addableJobs,
-      personFilter, tz, todayK, canEdit, workDayStart, workDayEnd,
+      personFilter, tz, todayK, canEdit, workDayStart, workDayEnd, armed,
     ];
     const cache = weekCacheRef.current;
     if (key.length !== cache.key.length || key.some((v, i) => v !== cache.key[i])) weekCacheRef.current = { key, map: new Map() };
     const map = weekCacheRef.current.map;
     return stackWeeks.map((wk) => {
+      /* THE WEEK'S IDENTITY IS ITS REAL FIRST DAY, drawn or not. Keying the cache (and the Card) on
+         the first SHOWN column would renumber a Sunday-start week the moment its Sunday emptied out —
+         the same week would arrive under two keys and the stack would remount it. */
       const first = dayKey(wk[0]);
       const had = map.get(first);
       if (had) return had;
-      const days = wk.map((d) => {
+      const all = wk.map((d) => {
         const k = dayKey(d);
         return {
           dayStr: k,
@@ -1064,10 +1088,26 @@ export function CalendarView({
           sublabel: townFor(k),
         };
       });
+      /* WHAT EACH DAY HAS ON IT, before deciding which days get a column: exactly what this view
+         would draw there (gridDataFor — jobs, visits, a call or a task in the tray, a ghost of work
+         nobody booked, a mirrored Google event). Asked of all seven, because a day only folds away
+         once its own bucket is known to be empty. */
+      const drawn = new Map(all.map((d) => [d.dayStr, gridDataFor(d.dayStr)]));
+      const { shown, hidden } = weekViewDays(all.map((d) => d.dayStr), {
+        hasWork: (k) => {
+          const g = drawn.get(k);
+          return !!g && (g.events.length > 0 || g.allDay.length > 0);
+        },
+        todayStr: todayK,
+        armed,
+      });
+      const keep = new Set(shown);
+      const days = all.filter((d) => keep.has(d.dayStr));
       const events: TimeGridEvent[] = [];
       const allDay: TimeGridAllDay[] = [];
       for (const d of days) {
-        const g = gridDataFor(d.dayStr);
+        const g = drawn.get(d.dayStr);
+        if (!g) continue;
         events.push(...g.events);
         allDay.push(...g.allDay);
       }
@@ -1075,17 +1115,22 @@ export function CalendarView({
         days,
         events,
         allDay,
+        /* FROM THE WHOLE WEEK, NOT THE DRAWN DAYS. The span the header names, whether this is "this
+           week", and how far back the clocked time reaches are facts about the WEEK; reading them off
+           `days` would make a week rename itself when its Saturday went quiet. */
         label: spanLabel(wk[0], wk[6], { month: "long" }),
-        hasToday: days.some((d) => d.isToday),
+        key: first,
+        hasToday: all.some((d) => d.isToday),
         // A week with a past day older than the loaded clocked time says so (never drawn hollow).
-        loadsBack: !!actualsCappedBefore && clockInUse && days[0].dayStr < actualsCappedBefore && days[0].dayStr < todayK,
+        loadsBack: !!actualsCappedBefore && clockInUse && first < actualsCappedBefore && first < todayK,
+        hiddenWeekend: hidden,
       };
       map.set(first, built);
       return built;
     });
     // gridDataFor and townFor read only what the key names (and what is derived from it).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stackWeeks, jobs, segments, appointments, tasks, external, actuals, actualsCappedBefore, dayRows, people, members, addableJobs, personFilter, tz, todayK, canEdit, workDayStart, workDayEnd]);
+  }, [stackWeeks, jobs, segments, appointments, tasks, external, actuals, actualsCappedBefore, dayRows, people, members, addableJobs, personFilter, tz, todayK, canEdit, workDayStart, workDayEnd, armed]);
   /** The day header's tap: drill into that day (stable, so a mounted week's grid never redraws for it). */
   const drillInto = useCallback((ds: string) => {
     window.history.pushState(null, "", `${window.location.pathname}?view=day&date=${ds}`);
@@ -1293,6 +1338,7 @@ export function CalendarView({
                   ghostsOn={ghostsOn}
                   todayK={todayK}
                   tz={tz}
+                  weekStart={weekStart}
                   onPick={handleDayTap}
                   armedLabel={target.prop?.label}
                 />
@@ -1312,7 +1358,7 @@ export function CalendarView({
           onScroll={weekStack.onScroll}
           className="cal-stack max-h-[max(70dvh,calc(100dvh-14rem))] space-y-3 overflow-y-auto turned:space-y-2"
         >
-          {weekData.map(({ days, events: ev, allDay: tray, label, hasToday, loadsBack }) => {
+          {weekData.map(({ days, events: ev, allDay: tray, label, key: weekKey, hasToday, loadsBack, hiddenWeekend }) => {
             /* WHICH MONTH AM I LOOKING AT. Erik, scrolling: "i dont know what month it is on the
                schedule." Day headers read "Mon 25" — fine in a fixed week, useless once the span
                scrolls through months. The header sticks to the top of the scroller so the answer
@@ -1328,7 +1374,7 @@ export function CalendarView({
                  week. `clip` still trims the grid to the rounded corners without creating a
                  scrollport, so the header pins to the real scroller and answers "what month is
                  this" the whole way down, which was the entire point of adding it. */
-              <Card key={days[0].dayStr} className="overflow-clip">
+              <Card key={weekKey} className="overflow-clip">
                 <div
                   className={`sticky top-0 z-20 border-b px-3 py-1.5 text-xs font-semibold backdrop-blur ${
                     hasToday
@@ -1338,6 +1384,30 @@ export function CalendarView({
                 >
                   {label}
                   {hasToday && <span className="ml-2 text-[10px] font-bold uppercase tracking-wide">this week</span>}
+                  {/* THE WEEKEND IT FOLDED AWAY, NAMED AND STILL A DOOR. Nothing is drawn with work on
+                      it, so a hidden day is a day that is clear — but the week says which days those
+                      are (so growing a Saturday column next time is something it already warned you
+                      about), and each one opens as a day, where Add To Schedule lives. 20px of look and
+                      44px of thumb through the bleed idiom (`before` past every edge, the header's own
+                      grammar), so the law is kept without the header growing a line. */}
+                  {hiddenWeekend.length > 0 && (
+                    <span className="ml-2 text-[11px] font-normal text-slate-400">
+                      Nothing on{" "}
+                      {hiddenWeekend.map((k, i) => (
+                        <span key={k}>
+                          {i > 0 && ", "}
+                          <button
+                            type="button"
+                            onClick={() => drillInto(k)}
+                            title={`Open ${shortDayWords(k)}`}
+                            className="relative inline-flex h-5 items-center align-middle underline-offset-2 hover:text-slate-600 hover:underline before:absolute before:-inset-x-1.5 before:-inset-y-3 before:content-['']"
+                          >
+                            {shortDayWords(k)}
+                          </button>
+                        </span>
+                      ))}
+                    </span>
+                  )}
                   {/* NOTHING SILENT: older than the clocked time loaded, a past block is never drawn
                       hollow (missing data is not nobody), and the week says why it shows no bars. */}
                   {loadsBack && actualsCappedBefore && (
@@ -1553,6 +1623,7 @@ function MonthGrid({
   ghostsOn,
   todayK,
   tz,
+  weekStart,
   onPick,
   armedLabel,
 }: {
@@ -1564,12 +1635,21 @@ function MonthGrid({
   ghostsOn?: (k: string) => GhostTarget[];
   todayK: string;
   tz: string;
+  /** The company's week start — the month's rows begin on it, and so do the headings below. */
+  weekStart: WeekStart;
   onPick: (d: Date) => void;
   /** Set while work is picked in the rail — every cell becomes a target and says so. */
   armedLabel?: string;
 }) {
   const first = new Date(anchor.getFullYear(), anchor.getMonth(), 1);
-  const start = startOfWeek(first);
+  /* THE SAME WEEK START AS THE WEEK VIEW. The month's first cell and its column headings both come
+     from the one rule now; they used to be a hardcoded Sunday and a hardcoded ["Sun", …] beside a
+     week view this lane moved to Monday — two answers to "when does the week start" on one screen,
+     and the headings would have been off by one the moment either moved alone.
+     THE WHOLE MONTH IS ALWAYS DRAWN. The weekend rule folds away a weekend COLUMN on the week view,
+     where a column is 92 pixels of a phone; a month cell is a seventh of one row, and a month missing
+     its Saturdays would be a calendar you cannot count on. */
+  const start = weekDaysOf(first, weekStart)[0];
   const cells: Date[] = [];
   for (let i = 0; i < 42; i++) {
     const d = new Date(start);
@@ -1580,7 +1660,7 @@ function MonthGrid({
   return (
     <Card className="overflow-hidden">
       <div className="grid grid-cols-7 border-b border-slate-100 bg-slate-50 text-center text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-        {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => (
+        {weekdayHeadings(weekStart).map((d) => (
           <div key={d} className="py-1.5">{d}</div>
         ))}
       </div>
