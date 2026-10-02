@@ -32,6 +32,9 @@ type Row = Record<string, any>;
 let db: Record<string, Row[]>;
 let seq = 0;
 let missingBank = false;
+/** 0375 not applied yet: bank_lines has no job_id, so asking for it or writing it fails the way
+ *  PostgREST fails (an unknown column, an unknown key in the schema cache). */
+let noJobColumn = false;
 
 // bank_rules: one per merchant AND answer (0363's generated `answer` column, spelled out here).
 const UNIQUE: Record<string, string[]> = {
@@ -58,10 +61,21 @@ function fakeDb() {
           const inv = (db.invoices ?? []).find((i) => i.id === r.invoice_id);
           out.invoices = inv ? { invoice_number: inv.invoice_number, status: inv.status } : null;
         }
+        if (cols.includes("customers(")) {
+          const c = (db.customers ?? []).find((x) => x.id === r.customer_id);
+          out.customers = c ? { name: c.name ?? null, company_name: c.company_name ?? null } : null;
+        }
         return out;
       };
       const run = () => {
         if (missingBank && touchesBank) return { data: null, error: { code: "42P01", message: 'relation "bank_lines" does not exist' } };
+        // BEFORE 0375: the column isn't there. A read of it is an unknown column, and a write carrying
+        // it is a key the schema cache has never heard of — which would fail the WHOLE insert.
+        if (noJobColumn && table === "bank_lines") {
+          if (verb === "select" && /job_id/.test(cols)) return { data: null, error: { code: "42703", message: 'column bank_lines.job_id does not exist' } };
+          if ((verb === "insert" || verb === "upsert") && (Array.isArray(payload) ? payload : [payload]).some((r: Row) => r && "job_id" in r))
+            return { data: null, error: { code: "PGRST204", message: "Could not find the 'job_id' column of 'bank_lines' in the schema cache" } };
+        }
         if (verb === "insert" || verb === "upsert") {
           const list = (Array.isArray(payload) ? payload : [payload]).map((r: Row): Row => ({
             id: `${table}-${++seq}`,
@@ -169,8 +183,21 @@ XXXXX1234,09/16/2026,,1111-SHELL 123 ANYTOWN ST,100.00,,Posted,9421.70
 function seed() {
   seq = 0;
   missingBank = false;
+  noJobColumn = false;
   db = {
     organizations: [{ id: "org-1", settings: { timezone: "America/Los_Angeles" } }],
+    customers: [
+      { id: "cust-1", org_id: "org-1", name: "Marla Finch", company_name: null },
+      { id: "cust-2", org_id: "org-1", name: "Tess Zane", company_name: null },
+    ],
+    // The jobs a line may be put on: open, and finished (a line from June can belong to a job that is
+    // complete now). Never a cancelled one, and never another company's.
+    jobs: [
+      { id: "job-kitchen", org_id: "org-1", job_number: "J-054", name: "41 Larkspur", status: "in_progress", customer_id: "cust-1", created_at: "2026-09-01T00:00:00Z" },
+      { id: "job-done", org_id: "org-1", job_number: "J-040", name: "12 Thistle Wood", status: "complete", customer_id: "cust-2", created_at: "2026-06-01T00:00:00Z" },
+      { id: "job-off", org_id: "org-1", job_number: "J-051", name: "9 Clover", status: "cancelled", customer_id: "cust-1", created_at: "2026-08-01T00:00:00Z" },
+      { id: "job-theirs", org_id: "org-2", job_number: "J-900", name: "Another Company's Job", status: "in_progress", customer_id: null, created_at: "2026-09-01T00:00:00Z" },
+    ],
     supplier_accounts: [
       { id: "acct-cs", org_id: "org-1", name: "Contractor Supply", account_number: "CS-12345", branch_code: null, on_account: true },
       { id: "acct-x", org_id: "org-2", name: "Someone Else's Supplier", account_number: "CS-12345", on_account: true },
@@ -500,6 +527,113 @@ describe("Apply", () => {
     expect(res.error).toMatch(/^Nothing was written\./);
     expect(db.bank_lines).toHaveLength(0);
     expect(db.organized_items[0].status).toBe("needs_review");
+  });
+});
+
+/**
+ * A BANK LINE CAN GO ON THE JOB IT WAS FOR (0375, Erik 2026-10-02). The $340 of wire bought at the
+ * counter for one kitchen used to have no answer but a business bucket, so it became OVERHEAD, the job
+ * never saw the cost, and Gross Profit read high by exactly that much. A job line writes the same
+ * bills row a receipt filed on that job writes — job_id set, no bucket beside it — which owner-money
+ * splits with `if (b.job_id)` into Materials & Bills inside Cost Of Goods Sold.
+ */
+describe("a line put on the job it was for", () => {
+  const SUPPLY = `Date,Description,Amount\n09/12/2026,ANYTOWN WIRE HOUSE #4,-340.55\n`;
+  const CREDIT = `Date,Description,Amount\n09/19/2026,ANYTOWN WIRE HOUSE #4 CREDIT,22.80\n`;
+
+  it("offers only this company's jobs, each said in full, and writes the money onto the job with no bucket", async () => {
+    const id = await drop(SUPPLY, "Card1234.csv");
+    const v = await view(id);
+    // THE LIST: open and finished jobs, said as the place, the number AND who. Never a cancelled job,
+    // never another company's, and never a quick button (there is no way to guess WHICH job).
+    expect(v.otherOutSingle.find((b) => b.id === "job:job-kitchen")!.label).toBe("On 41 Larkspur · J-054 — Marla Finch");
+    expect(v.otherOutSingle.map((b) => b.id)).toContain("job:job-done");
+    expect(JSON.stringify(v)).not.toContain("job-off");
+    expect(JSON.stringify(v)).not.toContain("job-theirs");
+    expect(v.rows[0].buttons.some((b) => b.id.startsWith("job:"))).toBe(false);
+
+    const res = await applyBankDownload(id, { fingerprint: v.fingerprint, picks: { [v.rows[0].id]: "job:job-kitchen" } });
+    expect(res.ok).toBe(true);
+    const line = db.bank_lines[0];
+    expect(line).toMatchObject({ choice: "job", job_id: "job-kitchen", bucket: null, sorted_by: "person", amount: -340.55 });
+    // THE MONEY ROW: on the job, category NULL (the job already decides), the bank's day, marked.
+    expect(db.bills).toEqual([
+      expect.objectContaining({ org_id: "org-1", job_id: "job-kitchen", category: null, amount: 340.55, status: "paid", bill_date: "2026-09-12", bank_line_id: line.id }),
+    ]);
+    // NEVER A RULE: "the wire house is always this job" is never true (0375 leaves bank_rules alone).
+    expect(db.bank_rules).toHaveLength(0);
+    // AND WHERE THE MONEY WENT draws it as the job cost it is, in the profit and loss's own words:
+    // the next download of the same week counts this line as already in North, and says so.
+    const again = await drop(SUPPLY, "Card1234-again.csv");
+    expect((await view(again)).flow).toEqual([{ key: "materials", label: "Materials & Bills", cents: 34055 }]);
+
+    // UNDO takes a job bill off exactly as it takes a business cost off.
+    expect((await undoBankDownload(id)).ok).toBe(true);
+    expect(db.bills).toHaveLength(0);
+    expect(db.bank_lines).toHaveLength(0);
+  });
+
+  it("a credit back from the supply house is a refund ON that job, never income and never a bucket", async () => {
+    const id = await drop(CREDIT, "Card1234.csv");
+    const v = await view(id);
+    const row = v.rows[0];
+    expect(row.direction).toBe("in");
+    expect(row.others!.find((b) => b.id === "job:job-kitchen")!.label).toBe("Refund: On 41 Larkspur · J-054 — Marla Finch");
+    expect((await applyBankDownload(id, { fingerprint: v.fingerprint, picks: { [row.id]: "job:job-kitchen" } })).ok).toBe(true);
+    expect(db.bills).toEqual([expect.objectContaining({ job_id: "job-kitchen", category: null, amount: -22.8 })]);
+    expect(db.bank_rules).toHaveLength(0);
+    expect((await undoBankDownload(id)).ok).toBe(true);
+    expect(db.bills).toHaveLength(0);
+  });
+
+  it("a job bill somebody moved to another job since stays, and says so", async () => {
+    const id = await drop(SUPPLY, "Card1234.csv");
+    const v = await view(id);
+    await applyBankDownload(id, { fingerprint: v.fingerprint, picks: { [v.rows[0].id]: "job:job-kitchen" } });
+    db.bills[0].job_id = "job-done";
+    const res = await undoBankDownload(id);
+    expect(res.message).toMatch(/its bill was changed since, so it stays/);
+    expect(db.bills).toHaveLength(1);
+    expect(db.bank_lines).toHaveLength(1);
+  });
+
+  it("refuses another company's job, and writes nothing", async () => {
+    const id = await drop(SUPPLY, "Card1234.csv");
+    const v = await view(id);
+    const res = await applyBankDownload(id, { fingerprint: v.fingerprint, picks: { [v.rows[0].id]: "job:job-theirs" } });
+    expect(res.ok).toBe(false);
+    expect(res.error).toMatch(/that job isn't one of yours/);
+    expect(db.bills).toHaveLength(0);
+    expect(db.bank_lines).toHaveLength(0);
+    expect(db.organized_items[0].status).toBe("needs_review");
+  });
+
+  /**
+   * BEFORE 0375 LANDS (the migration is additive and may land after this code): bank_lines has no
+   * job_id, so no job is offered anywhere, no write mentions the column — a key the schema cache has
+   * never heard of fails the WHOLE insert, every line of it — and the card says not one word about a
+   * feature that isn't there yet.
+   */
+  it("before the database can hold a job, no job is offered, nothing throws, and every other answer still works", async () => {
+    noJobColumn = true;
+    const id = await drop(SUPPLY, "Card1234.csv");
+    const v = await view(id);
+    expect(v.problem).toBeNull();
+    expect(JSON.stringify(v)).not.toContain("job:");
+    expect(JSON.stringify(v)).not.toContain("J-054");
+    // A hand-made job pick is refused, not attempted.
+    expect(await applyBankDownload(id, { fingerprint: v.fingerprint, picks: { [v.rows[0].id]: "job:job-kitchen" } })).toMatchObject({ ok: false });
+    expect(db.bank_lines).toHaveLength(0);
+    // And the everyday answer writes as always: the line's row never carries the column.
+    const ok = await applyBankDownload(id, { fingerprint: v.fingerprint, picks: { [v.rows[0].id]: "cost:Tools & Supplies" } });
+    expect(ok.ok).toBe(true);
+    expect(ok.message).not.toMatch(/database update/);
+    expect(db.bills).toEqual([expect.objectContaining({ job_id: null, category: "Tools & Supplies", amount: 340.55 })]);
+    expect("job_id" in db.bank_lines[0]).toBe(false);
+    // Undo runs too: it never asks for a column that isn't there.
+    expect((await undoBankDownload(id)).ok).toBe(true);
+    expect(db.bills).toHaveLength(0);
+    expect(db.bank_lines).toHaveLength(0);
   });
 });
 

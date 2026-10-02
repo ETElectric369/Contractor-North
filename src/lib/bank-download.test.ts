@@ -4,7 +4,9 @@ import { parseCSV } from "@/lib/csv";
 import {
   bankHeadline,
   bankViewOf,
+  billPlacement,
   branchFromNumbers,
+  choiceFits,
   choiceId,
   choiceLabel,
   cleanDescription,
@@ -13,10 +15,12 @@ import {
   flowLabelOf,
   guessFor,
   isBareCheck,
+  learnableAnswer,
   lookalikePayment,
   lineNamesAccount,
   looksLikeBankTable,
   merchantKeyOf,
+  namesOf,
   parseChoiceId,
   planBankDownload,
   ruleHintFor,
@@ -29,6 +33,7 @@ import {
   ruleFor,
   ruleChoice,
   depositKindOf,
+  storedAnswer,
   storedChoice,
   storedChoiceName,
   swapDownloadSigns,
@@ -82,6 +87,11 @@ const ORG_BOOKS = (over: Partial<BankBooks> = {}): BankBooks => ({
   accounts: [{ id: "acct-cs", name: "Contractor Supply", number: "CS-12345", branch: null, onAccount: true, aliases: ["CONTRACTOR SUPPLY CO"] }],
   invoices: [],
   crew: [{ id: "crew-pat", name: "Pat Crew" }],
+  // Two of the company's jobs, each said the way a picker says one (jobSaidLabel): place, number, who.
+  jobs: [
+    { id: "job-kitchen", label: "41 Larkspur · J-054 — Marla Finch" },
+    { id: "job-shop", label: "12 Thistle Wood · J-055 — Tess Zane" },
+  ],
   rules: [],
   crewPaid: [],
   ...over,
@@ -688,7 +698,7 @@ describe("matching what is already on the books (exact cents, each row once)", (
  * matches, so it counts once.
  */
 describe("Cash Taken Out (Not A Cost)", () => {
-  const names = { accounts: new Map(), crew: new Map(), invoices: new Map() };
+  const names = { accounts: new Map(), crew: new Map(), invoices: new Map(), jobs: new Map() };
 
   it("is the ATM's guess and its button, in Title Case, and Petty Cash (ATM) is no answer any more", () => {
     const dl = download();
@@ -993,8 +1003,8 @@ describe("the card and the person's answers", () => {
       expect(choiceId(parseChoiceId(id)!)).toBe(id);
     }
     expect(parseChoiceId("cost:Fuel")).toEqual({ choice: "cost", bucket: "Fuel" });
-    expect(choiceLabel(parseChoiceId("cost:Fuel")!, { accounts: new Map(), crew: new Map(), invoices: new Map() })).toBe("Fuel");
-    expect(choiceLabel(parseChoiceId("cost:Auto")!, { accounts: new Map(), crew: new Map(), invoices: new Map() })).toBe("Auto");
+    expect(choiceLabel(parseChoiceId("cost:Fuel")!, { accounts: new Map(), crew: new Map(), invoices: new Map(), jobs: new Map() })).toBe("Fuel");
+    expect(choiceLabel(parseChoiceId("cost:Auto")!, { accounts: new Map(), crew: new Map(), invoices: new Map(), jobs: new Map() })).toBe("Auto");
     // The retired kind-inside-a-bucket answers are no answer: the row asks again.
     expect(parseChoiceId("cost:Gas & Truck:fuel")).toBeNull();
     expect(parseChoiceId("cost:Gas & Truck")).toBeNull();
@@ -1008,5 +1018,136 @@ describe("the card and the person's answers", () => {
     expect(outs).toEqual(["cost:Fuel", "cost:Auto", "cost:Tools & Supplies", "cost:Phone & Office", "cost:Insurance & Licenses", "cost:Fees", "cost:Other"]);
     const ins = everyChoice("in", ORG_BOOKS(), true).filter((c) => c.choice === "cost").map(choiceId);
     expect(ins).toEqual(outs);
+  });
+});
+
+/**
+ * A BANK LINE CAN NAME THE JOB IT WAS FOR (0375, Erik 2026-10-02).
+ *
+ * The defect it fixes: eleven answers and not one of them was a job, so the wire bought at the counter
+ * for one kitchen became OVERHEAD, the job never saw the cost, and Gross Profit read high by exactly
+ * that much. The twelfth answer, and its edges:
+ *   · ONE LINE ONLY. A question row is one row per MERCHANT, and a job is per LINE — three trips to
+ *     the supply house in a week can be three different jobs.
+ *   · NEVER A RULE. A rule is per merchant, so "the supply house is always this job" is never true.
+ *   · ONLY THIS COMPANY'S JOBS, each said as the place, the number AND who.
+ *   · BOTH DIRECTIONS: money out is a cost on the job, money in is a refund on it (a supplier's
+ *     credit for material returned off that job).
+ */
+describe("a bank line on a job", () => {
+  const names = () => namesOf(ORG_BOOKS());
+  /** One trip to a supply house, or one credit back from it: a download of one line is a row of one. */
+  const BOUGHT = `Date,Description,Amount\n09/12/2026,ANYTOWN ELECTRIC SUPPLY #4,-340.55\n`;
+  const CREDITED = `Date,Description,Amount\n09/19/2026,ANYTOWN ELECTRIC SUPPLY #4 CREDIT,22.80\n`;
+  const THREE_TRIPS = `Date,Description,Amount\n09/02/2026,ANYTOWN ELECTRIC SUPPLY #4,-100.00\n09/09/2026,ANYTOWN ELECTRIC SUPPLY #4,-120.00\n09/16/2026,ANYTOWN ELECTRIC SUPPLY #4,-110.00\n`;
+  const sortOf = (csv: string, books = ORG_BOOKS()) => {
+    const dl = readBankTable(parseCSV(csv), "Card1234.csv", hash)!;
+    const plan = planBankDownload(dl, books);
+    return { dl, plan, books, group: plan.groups[0], view: bankViewOf(dl, plan, books) };
+  };
+
+  it("reads back exactly, and says the job as the place, the number AND who", () => {
+    expect(choiceId({ choice: "job", jobId: "job-kitchen" })).toBe("job:job-kitchen");
+    expect(parseChoiceId("job:job-kitchen")).toEqual({ choice: "job", jobId: "job-kitchen" });
+    expect(choiceId(parseChoiceId("job:abcdef12")!)).toBe("job:abcdef12");
+    // Anything that isn't an id is no answer at all: the row asks again.
+    expect(parseChoiceId("job")).toBeNull();
+    expect(parseChoiceId("job:")).toBeNull();
+    expect(parseChoiceId("job:not a uuid")).toBeNull();
+    // THE LABEL IS A LAW (Erik: "i cant tell by job numbers alone").
+    const said = choiceLabel({ choice: "job", jobId: "job-kitchen" }, names());
+    expect(said).toBe("On 41 Larkspur · J-054 — Marla Finch");
+    expect(said).not.toBe("On J-054");
+    // A job the books no longer carry still reads as something, never "undefined".
+    expect(choiceLabel({ choice: "job", jobId: "gone" }, names())).toBe("On Job");
+  });
+
+  it("fits money out as a cost on the job, and money in as a refund on it", () => {
+    const job = { choice: "job", jobId: "job-kitchen" } as const;
+    expect(choiceFits(job, "out")).toBe(true);
+    // The same both ways as the bucket answer it follows: a refund comes off what it was charged to.
+    expect(choiceFits(job, "in")).toBe(choiceFits({ choice: "cost", bucket: "Fuel" }, "in"));
+    // And the money-in button says so in plain words, in the list the card shows a deposit.
+    const { view } = sortOf(CREDITED);
+    expect(view.rows[0].direction).toBe("in");
+    expect(view.otherInSingle.find((b) => b.id === "job:job-kitchen")!.label).toBe("Refund: On 41 Larkspur · J-054 — Marla Finch");
+    expect(view.rows[0].others!.find((b) => b.id === "job:job-kitchen")!.label).toBe("Refund: On 41 Larkspur · J-054 — Marla Finch");
+  });
+
+  it("is offered ONLY on a row that is one line, in both directions, and never as a quick button", () => {
+    for (const direction of ["out", "in"] as const) {
+      const single = everyChoice(direction, ORG_BOOKS(), true).map(choiceId);
+      const several = everyChoice(direction, ORG_BOOKS(), false).map(choiceId);
+      expect(single).toContain("job:job-kitchen");
+      expect(single).toContain("job:job-shop");
+      expect(several.some((id) => id.startsWith("job:"))).toBe(false);
+      // The everyday answers keep their places: the jobs are added, never put in front.
+      expect(single.slice(0, several.length)).toEqual(several);
+    }
+    // THREE TRIPS TO ONE SUPPLY HOUSE are ONE row of three lines, and it offers no job: one tap must
+    // never put three jobs' material on one job.
+    const { view } = sortOf(THREE_TRIPS);
+    expect(view.rows).toHaveLength(1);
+    expect(view.rows[0].single).toBe(false);
+    expect(view.otherOut.some((b) => b.id.startsWith("job:"))).toBe(false);
+    expect(view.otherOutSingle.some((b) => b.id.startsWith("job:"))).toBe(true);
+    // No row's guess or button is ever a job: there is no way to guess WHICH job.
+    const guessed = [...view.rows.flatMap((r) => r.buttons.map((b) => b.id)), ...sortOf(BOUGHT).view.rows.flatMap((r) => [...r.buttons.map((b) => b.id), r.guess ?? ""])];
+    expect(guessed.some((id) => id.startsWith("job:"))).toBe(false);
+  });
+
+  /**
+   * NEVER A RULE. `learnable` is worked out BEFORE a merchant's lines are grouped, so a row that turns
+   * out to hold one line can still be learnable — which means nothing but learnableAnswer stands
+   * between a job pick and "this merchant is always this job", spending one job's money on another's
+   * for ever. Both halves are pinned here: the row IS learnable, and the answer is not.
+   */
+  it("is never learned as a rule, even on a row a rule could be learned from", async () => {
+    const { group } = sortOf(BOUGHT);
+    expect(group.single).toBe(true);
+    expect(group.learnable).toBe(true);
+    expect(learnableAnswer({ choice: "job", jobId: "job-kitchen" })).toBe(false);
+    expect(learnableAnswer({ choice: "invoice", invoiceId: "inv-1" })).toBe(false);
+    expect(learnableAnswer({ choice: "other_income" })).toBe(false);
+    expect(learnableAnswer({ choice: "cost", bucket: "Fuel" })).toBe(true);
+    expect(learnableAnswer({ choice: "draw" })).toBe(true);
+    // A rule row that somehow carried the word places nothing: its lines ask, every time.
+    expect(ruleChoice({ id: "r", direction: "out", key: "supply", choice: "job", bucket: null, supplierAccountId: null, profileId: null }, ORG_BOOKS())).toBeNull();
+    // And the one door that learns reads it, so it cannot be forgotten there.
+    const { readFileSync } = await import("node:fs");
+    expect(readFileSync("src/app/(app)/bills/bank-core.ts", "utf8")).toContain("!learnableAnswer(w.choice)");
+  });
+
+  it("refuses a job that isn't this company's, and a job on a row that is several lines", () => {
+    const { plan, group, books } = sortOf(BOUGHT);
+    expect(validPicks({ [group.id]: "job:job-kitchen" }, plan, books).ok.get(group.id)).toEqual({ choice: "job", jobId: "job-kitchen" });
+    const stranger = validPicks({ [group.id]: "job:another-companys-job" }, plan, books);
+    expect(stranger.ok.size).toBe(0);
+    expect(stranger.refused[0]).toMatch(/that job isn't one of yours$/);
+    const three = sortOf(THREE_TRIPS);
+    const refused = validPicks({ [three.group.id]: "job:job-kitchen" }, three.plan, three.books);
+    expect(refused.ok.size).toBe(0);
+    expect(refused.refused[0]).toMatch(/a job goes on one line at a time$/);
+    // WITH NO JOB OFFERED AT ALL (no 0375 on the database yet): nothing is on the list, and a
+    // hand-made pick is refused rather than written.
+    const noJobs = sortOf(BOUGHT, ORG_BOOKS({ jobs: [] }));
+    expect(noJobs.view.otherOutSingle.some((b) => b.id.startsWith("job:"))).toBe(false);
+    expect(JSON.stringify(noJobs.view)).not.toContain("job:");
+    expect(validPicks({ [noJobs.group.id]: "job:job-kitchen" }, noJobs.plan, noJobs.books).ok.size).toBe(0);
+  });
+
+  it("puts the money on the job with no bucket beside it, and draws it where job money is drawn", () => {
+    // THE TWO FIELDS ON THE BILLS ROW, from the answer the line holds: the one rule Apply writes with
+    // and Undo checks against.
+    expect(billPlacement(storedAnswer({ choice: "job", jobId: "job-kitchen" }))).toEqual({ job_id: "job-kitchen", category: null });
+    expect(billPlacement(storedAnswer({ choice: "cost", bucket: "Fuel" }))).toEqual({ job_id: null, category: "Fuel" });
+    expect(billPlacement(storedAnswer(null))).toEqual({ job_id: null, category: null });
+    // THE LINE'S OWN ROW: the word and the job, inseparable (0375's bank_lines_job_named). The key is
+    // on the row only when a job was named, so a database without the column is never sent it.
+    expect(storedAnswer({ choice: "job", jobId: "job-kitchen" })).toMatchObject({ choice: "job", job_id: "job-kitchen", bucket: null, invoice_id: null });
+    expect("job_id" in storedAnswer({ choice: "cost", bucket: "Fuel" })).toBe(false);
+    expect("job_id" in storedAnswer(null)).toBe(false);
+    // WHERE THE MONEY WENT: the same segment a bill already on a job draws, by the P&L's own words.
+    expect(flowLabelOf("job", null)).toEqual({ key: "materials", label: "Materials & Bills" });
   });
 });

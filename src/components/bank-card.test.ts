@@ -14,7 +14,7 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh() {} }) }));
 vi.mock("@/app/(app)/bills/bank-actions", () => ({ applyBankDownload: vi.fn(), undoBankDownload: vi.fn(), swapBankDownload: vi.fn(), setBankAccount: vi.fn(), forgetBankRule: vi.fn() }));
 vi.mock("@/app/(app)/organize/paperwork-actions", () => ({ keepPaperwork: vi.fn() }));
 
-import { BankCard, livePicks, toneOf } from "./bank-card";
+import { BankCard, livePicks, othersFor, toneOf } from "./bank-card";
 import { FuelTrendCard } from "@/app/(app)/analytics/fuel-trend-card";
 
 const textOf = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/&#x27;/g, "'").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
@@ -57,6 +57,10 @@ const VIEW: BankView = {
     { id: "line:def", title: "Check 1043", money: "$640.00", dates: "Sep 5", direction: "out", single: true, guess: "crew:pat", buttons: [{ id: "crew:pat", label: "Pay Pat Crew" }] },
   ],
   otherOut: [{ id: "draw", label: "Owner's Draw" }],
+  otherOutSingle: [
+    { id: "draw", label: "Owner's Draw" },
+    { id: "job:job-1", label: "On 41 Larkspur · J-054 — Marla Finch" },
+  ],
   otherIn: [{ id: "other_income", label: "Other Income" }],
   otherInSingle: [{ id: "invoice:inv-1", label: "On INV-1001" }],
   flow: [
@@ -118,6 +122,25 @@ describe("the bank card", () => {
     const html = render({ ...VIEW, rows: [{ ...VIEW.rows[0], guess: null, buttons: [{ id: "personal", label: "Personal" }, { id: "draw", label: "Owner's Draw" }] }] });
     expect(textOf(html)).toContain("No guess");
     expect(html).not.toMatch(/>Guess</);
+  });
+
+  /**
+   * A BANK LINE CAN GO ON A JOB (0375), and only where there is one line to put on it: the job answer
+   * is in the Other… list of a row that is ONE line, and in no quick button (there is no way to guess
+   * WHICH job). A row holding three of a merchant's fills gets the shared list, with no job in it.
+   */
+  it("a row that is one line gets the job in its Other… list; a merchant's several lines do not, and no quick button guesses one", () => {
+    const [shell, deposit, check] = VIEW.rows;
+    expect(othersFor(check, VIEW).map((o) => o.id)).toContain("job:job-1");
+    expect(othersFor(shell, VIEW).map((o) => o.id)).not.toContain("job:job-1");
+    // A deposit's own list (the invoices open for its money) is the one it brings.
+    expect(othersFor({ ...deposit, others: [{ id: "invoice:inv-1", label: "On INV-1001 · $1,275.00 open" }] }, VIEW).map((o) => o.id)).toEqual(["invoice:inv-1"]);
+    // The job is said as the place, the number AND who — never a bare number (Erik).
+    const job = othersFor(check, VIEW).find((o) => o.id === "job:job-1")!;
+    expect(job.label).toBe("On 41 Larkspur · J-054 — Marla Finch");
+    expect(job.label).not.toMatch(/^On J-\d+$/);
+    // No button on the card guesses a job: a job is picked on purpose, from the list.
+    expect(buttons(render(VIEW)).every((b) => !b.text.includes("J-054"))).toBe(true);
   });
 
   it("a problem is said, with Set Aside; no Apply", () => {
