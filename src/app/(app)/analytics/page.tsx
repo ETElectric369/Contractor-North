@@ -69,7 +69,7 @@ export default async function AnalyticsPage({
     ? [ownerMoneyWindow(selection.segment, todayYmd), ...(selection.month ? [ownerMoneyWindow(selection.month, todayYmd)] : [])]
     : [];
   const ownerMoneyP = getOwnerMoneyViews(supabase, [ownerMoneyChartWindow(todayYmd), ...cardWindows], tz, todayYmd);
-  // FUEL BY THE WEEK (0362): shown to whoever sees the Owner's Draw card (it is a cost), and only
+  // FUEL BY THE WEEK (0362): shown to whoever sees the Net Profit card (it is a cost), and only
   // when there is fuel to show. Rides with the other reads.
   const fuelP = showOwnerMoney ? getFuelTrend(supabase, tz, todayYmd) : Promise.resolve(null);
 
@@ -175,7 +175,7 @@ export default async function AnalyticsPage({
 
   // The old "Overhead (all time)" tile and "Overhead by category" block are gone (0286). They
   // counted only no-job bills, all time, in the old category words, and disagreed with Business
-  // Costs. The Owner's Draw card carries them now, for the window, as a profit and loss: every
+  // Costs. The Net Profit card carries them now, for the window, as a profit and loss: every
   // bucket under Overhead, Fuel first (BUCKET_SECTION, profit-and-loss.ts).
 
   const stat = (label: string, value: string, Icon: any, tone: string) => (
@@ -224,7 +224,7 @@ export default async function AnalyticsPage({
       )}
 
       {/* A bank download shows the owner's draw and personal spending: the same switch as the
-          Owner's Draw card says who may drop and sort one (bank-viewer.ts). */}
+          Net Profit card says who may drop and sort one (bank-viewer.ts). */}
       {showOwnerMoney && <BankDropLine />}
 
       {fuel?.hasFuel && <FuelTrendCard trend={fuel} />}

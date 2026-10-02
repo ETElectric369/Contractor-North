@@ -227,7 +227,8 @@ describe("the Summary is Money by Month, to the cent, laid out as a profit and l
   });
 
   it("its rows are the profit and loss's, in the accounting industry's order and words, then the owner's hours", () => {
-    const labels = summary.rows.slice(headerAt + 1, headerAt + 1 + lines.length + 1).map((r) => r.cells[0]);
+    // + 3: the profit and loss's lines, then the owner's THREE hours rows (total, on jobs, in the office).
+    const labels = summary.rows.slice(headerAt + 1, headerAt + 1 + lines.length + 3).map((r) => r.cells[0]);
     expect(labels).toEqual([
       "Revenue",
       "Other Income (Inside Revenue)",
@@ -249,10 +250,14 @@ describe("the Summary is Money by Month, to the cent, laid out as a profit and l
       "Fees",
       "Other",
       "Total Overhead",
-      "Net Profit (Owner's Draw)",
-      "Owner Hours (not pay)",
+      "Net Profit",
+      "Owner Hours (Not Pay)",
+      // The two halves the allocation is made of (0373), so an accountant can tie the COGS line to hours.
+      "Owner Hours On Jobs (Build Time)",
+      "Owner Hours In The Office (Overhead)",
     ]);
-    expect(lines.map((l) => l.label)).toEqual(labels.slice(0, -1));
+    // The profit and loss's own lines are everything above the THREE owner-hours rows.
+    expect(lines.map((l) => l.label)).toEqual(labels.slice(0, -3));
   });
 
   it("formatted the way an accountant lays one out: headings and totals bold, every line under its heading indented", () => {
@@ -282,7 +287,7 @@ describe("the Summary is Money by Month, to the cent, laid out as a profit and l
     expect(cur.totals.crewPay).toBe(1030);
   });
 
-  it("Revenue less Total COGS is Gross Profit, less Total Overhead is Net Profit (Owner's Draw): the engine's net, in every column", () => {
+  it("Revenue less Total COGS is Gross Profit, less Total Overhead is Net Profit: the engine's net, in every column", () => {
     const col = (label: string, i: number) => cents(rowOf(summary, label)!.cells[i])!;
     for (let i = 1; i <= 6; i++) {
       expect(col("Revenue", i) - col("Total COGS", i), `column ${i}`).toBe(col("Gross Profit", i));
@@ -305,11 +310,11 @@ describe("the Summary is Money by Month, to the cent, laid out as a profit and l
     expect(r.cells.slice(1, 4).every((c) => typeof c === "number")).toBe(true);
   });
 
-  it("the bottom line is named exactly Net Profit (Owner's Draw), said before income tax", () => {
-    expect(NET_LABEL).toBe("Net Profit (Owner's Draw)");
+  it("the bottom line is named exactly Net Profit, said before income tax", () => {
+    expect(NET_LABEL).toBe("Net Profit");
     expect(summary.rows.filter((r) => r.cells[0] === NET_LABEL)).toHaveLength(1);
     expect(summary.rows.map((r) => r.cells[0])).toContain(BEFORE_TAX_NOTE);
-    expect(BEFORE_TAX_NOTE).toBe("Net Profit (Owner's Draw) is before income tax.");
+    expect(BEFORE_TAX_NOTE).toBe("Net Profit is before income tax.");
     // What the two halves are, in the accounting industry's own test, with the lines from the data.
     expect(summary.rows.map((r) => r.cells[0])).toContain(cogsOverheadNote());
     expect(cogsOverheadNote()).toBe(
@@ -427,7 +432,7 @@ describe("Income, Costs and People hold the rows behind the Summary", () => {
     const listed = costs.rows.slice(costs.rows.findIndex((r) => r.cells[0] === "Date") + 1, at - 1).reduce((s, r) => s + (cents(r.cells[6]) ?? 0), 0);
     expect(cents(costs.rows[totalAt].cells[1])).toBe(listed);
     // It leaves crew pay out, and says so, so it never reads as the Summary's Total COGS.
-    expect(costs.rows[totalAt + 1].cells[0]).toBe("Crew Pay (1099) and Crew Mileage Paid are in Cost of Goods Sold (COGS) too, but they are on the People tab, so they are not in this total.");
+    expect(costs.rows[totalAt + 1].cells[0]).toBe("Crew Pay (1099), Crew Mileage Paid and the owner's build time are in Cost of Goods Sold (COGS) too, but they are hours rather than paper, so their rows are on the People tab and they are not in this total.");
     // The ticket with a roll in it: its rest is Materials & Bills, its roll is Stock Bought. Scoped to
     // the cost list (above the totals) — the ticket's own lines are listed again further down the tab.
     const costList = costs.rows.slice(0, at);
@@ -471,9 +476,12 @@ describe("Income, Costs and People hold the rows behind the Summary", () => {
     const moneyCells = wb.tabs.flatMap((t) => t.rows.flatMap((r) => r.cells.map(cents))).filter((c): c is number => c != null);
     for (const rate of [0.655, 0.67, 0.7, 0.725]) for (const miles of [55, 35, 40, 95]) expect(moneyCells).not.toContain(Math.round(miles * rate * 100));
     const owner = rowOf(ppl, "Dana Pinecrest")!.cells;
-    expect(owner).toEqual(["Dana Pinecrest", "Owner (Owner's Draw)", 16, null, null, null, null, 40, 40, null, "Hours only: the owner's time is not pay or a cost."]);
-    expect(rowOf(tab(wb, "Summary"), "Owner Hours (not pay)")!.cells[4]).toBe(16);
-    // The owner's 16 hours cost nothing: Crew Pay is Sam's and Lee's alone.
+    expect(owner).toEqual(["Dana Pinecrest", "Owner (Owner's Draw)", 16, null, null, null, null, 40, 40, null, "Hours only: never a wage. Hours on a job are charged to the job at the owner's cost rate, and booked straight back on the profit and loss."]);
+    expect(rowOf(tab(wb, "Summary"), "Owner Hours (Not Pay)")!.cells[4]).toBe(16);
+    // HIS 16 HOURS ARE NOT IN CREW PAY, and never will be: Crew Pay is Sam's and Lee's alone. His build
+    // time is its own COGS line with its own contra (0373), so it can never be folded in here - that fold
+    // would deduct an owner's labour on the profit and loss, which a sole proprietor may not do.
+    expect(cur.totals.ownerBuildTimeOnJobs).toBe(0); // no cost rate set on this fixture
     expect(cur.totals.crewPay).toBe(880 + 150);
   });
 
@@ -669,7 +677,7 @@ describe("the owner's switch: an office download without Owner's Draw", () => {
 
   it("the page's words say what the file leaves out and what it keeps, and the file keeps its word", () => {
     expect(OWNER_HIDDEN_WHY).toContain(
-      "Revenue, Total COGS, Gross Profit and Gross Margin %, Total Overhead, Net Profit (Owner's Draw) and the owner's own rows are left out, here and in the file",
+      "Revenue, Total COGS, Gross Profit and Gross Margin %, Total Overhead, Net Profit, the owner's own build time and his Owner's Draw are left out, here and in the file",
     );
     // The lists stay with their own totals: said, not promised away.
     expect(OWNER_HIDDEN_WHY).toContain("with each list's own total");
@@ -861,7 +869,7 @@ describe("the files", () => {
     expect(income).toContain(`,'${SNEAKY},`); // a leading apostrophe: the spreadsheet shows it as text
     expect(income).not.toMatch(/(^|,)=cmd/m);
     expect(text(files[0].data).split("\r\n")[0]).toBe('"Pinecrest Electric Co: For Your Accountant, 2026 Q2"');
-    expect(tabCsv(tab(wb, "Summary"))).toContain("Net Profit (Owner's Draw),");
+    expect(tabCsv(tab(wb, "Summary"))).toContain("Net Profit,");
     expect(tabCsv(tab(wb, "Summary"))).toContain("Gross Margin %,");
     // Money to the cent, dates as the day.
     expect(income).toContain("2026-05-15,Birch Street LLC,INV-102,J-202,Birch Street Service,Card,2500,72.8,");

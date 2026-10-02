@@ -224,7 +224,7 @@ describe("get_bill — the three states of a receipt line reach Nort", () => {
     for (const i of out.items) expect(i).toMatchObject({ billable: null, billed_to_customer: null });
     expect(out.money_note).toContain("No job: this is a business cost in the Tools & Supplies bucket");
     // In the profit and loss's own words (2026-09-28): which half it is in, from BUCKET_SECTION.
-    expect(out.money_note).toContain("which the company's profit and loss counts in Overhead, before Net Profit (Owner's Draw).");
+    expect(out.money_note).toContain("which the company's profit and loss counts in Overhead, before Net Profit.");
     expect(out.money_note).not.toContain("owner's draw.");
     expect(out.money_note).toContain("No customer is billed for it");
     expect(out.money_note).not.toContain("job's cost");
@@ -235,7 +235,7 @@ describe("get_bill — the three states of a receipt line reach Nort", () => {
     const fuel = { ...oshBill, id: "fuel-1", supplier: "Corner Gas", amount: "61.20", category: "Fuel", job_id: null, jobs: null, bill_line_items: [] };
     const { client } = fakeDb({ data: fuel });
     const out = await parse("get_bill", { bill_id: fuel.id }, client);
-    expect(out.money_note).toContain("No job: this is a business cost in the Fuel bucket, which the company's profit and loss counts in Overhead, before Net Profit (Owner's Draw).");
+    expect(out.money_note).toContain("No job: this is a business cost in the Fuel bucket, which the company's profit and loss counts in Overhead, before Net Profit.");
     expect(out.money_note).not.toContain("Cost of Goods Sold");
   });
 
@@ -244,13 +244,13 @@ describe("get_bill — the three states of a receipt line reach Nort", () => {
     const desc = (name: string) => String(DATA_TOOLS.find((t) => t.name === name)?.description ?? "");
     expect(desc("revenue_trend")).toMatch(/^How Revenue is trending/);
     expect(desc("revenue_trend")).toContain("less any bank deposit someone placed as Other Income");
-    expect(desc("revenue_trend")).toContain("Gross Profit and Net Profit (Owner's Draw) are on Analytics' Owner's Draw card");
+    expect(desc("revenue_trend")).toContain("Gross Profit and Net Profit are on Analytics' Owner's Draw card");
     for (const name of ["list_job_profitability", "profit_by_type"]) {
-      expect(desc(name), name).toContain("never the company's Gross Profit or Net Profit (Owner's Draw)");
+      expect(desc(name), name).toContain("never the company's Gross Profit or Net Profit");
     }
     // The halves of a no-job bill, from the data (bucketHalvesWords): every bucket is Overhead since
     // Erik moved Fuel there, and the sentence says so as a sentence, never a joined empty list.
-    expect(desc("get_bill")).toContain("on the company's profit and loss every bucket is in Overhead, all counted before Net Profit (Owner's Draw)");
+    expect(desc("get_bill")).toContain("on the company's profit and loss every bucket is in Overhead, all counted before Net Profit");
     expect(desc("get_bill")).not.toMatch(/loss\s{2,}/);
   });
 

@@ -23,7 +23,7 @@ import { MoneyChartSvg } from "./money-chart-svg";
  * and the cost lines as more bars in the same group (never stacked, so every bar reads against the
  * same axis). Every series is a line of the profit and loss, in its words (profit-and-loss.ts).
  *
- * Tapping a month shows that month in the Owner's Draw card right below (?w=YYYY-MM, validated on
+ * Tapping a month shows that month in the Net Profit card right below (?w=YYYY-MM, validated on
  * the server); tapping it again goes back to the segment it was tapped from. The exact figures of
  * the hovered or selected month read out under the chips.
  *

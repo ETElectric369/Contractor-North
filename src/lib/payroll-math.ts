@@ -42,10 +42,16 @@ export type PayrollRow = {
  *  profile hourly_rate (or an explicit fallback when the row carries no profile).
  *  PAY-rate only — what we CHARGE the customer is the bill_rate in labor-billing.
  *
- *  AN OWNER'S HOUR PAYS NOTHING (0286). The owner is paid by owner's draw, so his hours are never a
- *  wage and never a cost, whatever the entry says: a stray rate_override on one of his shifts (the
+ *  AN OWNER'S HOUR PAYS NOTHING (0286), AND THAT IS STILL TRUE. The owner is paid by owner's draw, so
+ *  his hours are never a WAGE, whatever the entry says: a stray rate_override on one of his shifts (the
  *  DB now refuses a new one, but an old row could carry one) does not bring the wage back. The view
- *  already reads his hourly_rate as 0; this covers the override, the only other door. */
+ *  already reads his hourly_rate as 0; this covers the override, the only other door.
+ *
+ *  THIS IS NOT THE QUESTION "WHAT DID THE HOUR COST" (0373). His build time IS a direct cost of the job
+ *  he worked - Erik, 2026-10-01: "build time, including my build time is considered COGS" - at a cost
+ *  rate he sets, which nothing here reads. Two questions, two functions: this one answers what the hour
+ *  PAYS the person (nothing, for him), and buildTimeRate in lib/build-time-cost.ts answers what it
+ *  COST the business. A reader after a cost that calls this one gets $0 and is asking the wrong thing. */
 export function payRateForEntry(e: any, fallbackRate?: number): number {
   if (e?.profiles?.paid_by_draw === true || e?.paid_by_draw === true) return 0;
   const ov = Number(e?.rate_override);
@@ -380,7 +386,10 @@ export function balanceForPerson(input: {
  *  words, before anything is written or locked. */
 export function ownerWagesRefusal(name: string | null | undefined): string {
   const who = String(name ?? "").trim() || "This person";
-  return `${who} is the owner and is paid by owner's draw, not wages, so there is nothing to record here. What the owner takes out belongs in the accountant's books.`;
+  // THE SECOND SENTENCE POINTS AT A LINE THAT EXISTS NOW (0373). It used to say "belongs in the
+  // accountant's books", which was true while the app had nowhere to put a draw. Analytics has an
+  // Owner's Draw line below Net Profit since 0373, so it points there instead of out of the product.
+  return `${who} is the owner and is paid by owner's draw, not wages, so there is nothing to record here. What the owner takes out shows on Analytics as Owner's Draw, below Net Profit.`;
 }
 
 /** The ids of everyone paid by owner's draw, out of a payRateMap(Read) result. */
@@ -447,9 +456,16 @@ export function payrollCsvRows(input: {
     ...lines,
     ["TOTAL (unpaid base)", unpaidHours.toFixed(2), "", unpaidGross.toFixed(2), "", "", "", ""],
   ];
+  // THE FOOTNOTE DOES MORE WORK THAN IT USED TO (0373), so it says more. An accountant who knows the
+  // owner worked 341 hours needs to be told where they went, and the answer is now two-sided: no wage
+  // anywhere, and a cost on the jobs that the profit and loss books straight back. This is the only
+  // place a wage file is told the two reports disagree on purpose.
   for (const o of input.notOnFile ?? []) {
     const name = String(o?.name ?? "").trim() || "The owner";
     out.push([`Not on this file: ${name}, owner, paid by owner's draw`]);
+    out.push([
+      `${name}'s hours on jobs are costed to those jobs at the owner's cost rate, and the profit and loss books the same amount straight back, so they are never a wage and never a deduction.`,
+    ]);
   }
   return out;
 }

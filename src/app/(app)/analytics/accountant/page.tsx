@@ -42,7 +42,7 @@ const isKind = (v: unknown): v is AccountantPeriodKind => v === "month" || v ===
  * For Your Accountant, and one small link, Same Thing As CSV Files. The Shop Stock page links here.
  *
  * OFFICE ONLY (requireStaff; a tech is sent to My Day). The totals follow the owner's switch: an
- * office viewer the owner hasn't shared Owner's Draw with sees no totals, and the file leaves them
+ * office viewer the owner hasn't shared the owner's money with sees no totals, and the file leaves them
  * and the owner's rows out too (the route checks again). The figures are read over the SAME span the
  * route reads (accountantReadSpan), so they are the file's to the cent.
  */

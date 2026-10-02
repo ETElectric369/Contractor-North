@@ -102,20 +102,30 @@ describe("Nort's product map after the shell wave", () => {
       "Gross Profit and Gross Margin %",
       "Overhead: Fuel, Auto, Tools & Supplies, Phone & Office, Insurance & Licenses, Fees and Other",
       "Total Overhead",
-      "Net Profit (Owner's Draw), before income tax",
+      "Net Profit, before income tax",
     ]) {
       const i = line.indexOf(w, from);
       expect(i, w).toBeGreaterThanOrEqual(from);
       from = i + w.length;
     }
-    expect(line).toContain("The owner's hours are hours, never a cost.");
+    // BOTH HALVES, OR NORT REPEATS HALF A FACT AS THE WHOLE ONE (0373). It said "The owner's hours are
+    // hours, never a cost", which is now only true of the profit and loss and false of the job.
+    expect(line).toContain("his hours on a job ARE a direct cost of that job, at a cost rate he sets");
+    expect(line).toContain("books the same amount straight back");
+    expect(line).toContain("He is never paid wages for any of it.");
+    // And the equity line is named as what it is, below the bottom line.
+    expect(line).toContain("below the line Owner's Draw, which is equity");
     expect(line).toContain("you cannot read the card itself, so point to it");
     // True in code: the lines come from profit-and-loss.ts (the card's layout, stock inside
     // Materials & Bills), and the halves from BUCKET_SECTION.
     expect(line).toContain(cogsWords({ stockInMaterials: true }));
     expect(line).toContain(overheadWords());
     const card = readFileSync(join(process.cwd(), "src/app/(app)/analytics/left-for-card.tsx"), "utf8");
-    expect(card).toContain("stockInMaterials: true, margin: true");
+    // The card's own options, now one per line (0373 added the owner's two): stock inside Materials &
+    // Bills, the margin, the build-time pair and the draw below the line.
+    for (const opt of ["stockInMaterials: true", "margin: true", "ownerBuildTime:", "ownerDraw:"]) {
+      expect(card, opt).toContain(opt);
+    }
     const nav = readFileSync(join(process.cwd(), "src/app/(app)/analytics/page.tsx"), "utf8");
     expect(nav).toContain("For Your Accountant");
     expect(readFileSync(join(process.cwd(), "src/app/(app)/analytics/office-switch.tsx"), "utf8")).toContain('aria-label="Office Can See This"');

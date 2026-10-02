@@ -43,7 +43,7 @@ describe("Other Income in Received", () => {
     expect(year.totals.received).toBe(1349.5);
   });
 
-  it("on the profit and loss it is inside Revenue, said on its own line, and moves no cost: Net Profit (Owner's Draw) is still the engine's net", () => {
+  it("on the profit and loss it is inside Revenue, said on its own line, and moves no cost: Net Profit is still the engine's net", () => {
     const m = computeOwnerMoney(inputs({ otherIncome: [{ amount: 250.5, posted_on: "2026-09-20" }] }), ownerMoneyWindow("this_month", TODAY), TZ, TODAY);
     const rows = profitAndLoss(m.totals, { otherIncome: true, margin: true });
     const at = (k: Parameters<typeof pnlRow>[1]) => pnlRow(rows, k)!;

@@ -1,4 +1,5 @@
 import { attachRates, payRateMap } from "@/lib/profile-columns";
+import { BUILD_TIME_IS_A_COST_NOT_A_WAGE } from "@/lib/build-time-cost";
 import "server-only";
 import type Anthropic from "@anthropic-ai/sdk";
 import { tzDayStartUtc, todayStrInTz, payPeriodForOffset } from "@/lib/tz";
@@ -49,10 +50,10 @@ import type { JobCircuit, JobPanel } from "@/lib/types";
 
 /**
  * THE COMPANY'S PROFIT AND LOSS, IN NORT'S MOUTH (Erik, 2026-09-28): Nort says Revenue, Cost of
- * Goods Sold (COGS), Gross Profit, Overhead and Net Profit (Owner's Draw) exactly as the screens do
+ * Goods Sold (COGS), Gross Profit, Overhead, Net Profit and the Owner's Draw line below it exactly as the screens do
  * (profit-and-loss.ts), and never calls a job's own profit the company's.
  */
-const JOB_PROFIT_IS_NOT_THE_PNL = `A job's profit here is that job's own (what came in on it less what it cost), never the company's ${PNL_WORDS.grossProfit} or ${PNL_WORDS.netProfit}: those are on Analytics' Owner's Draw card, the company's profit and loss, and adding job profits up does not give them.`;
+const JOB_PROFIT_IS_NOT_THE_PNL = `A job's profit here is that job's own (what came in on it less what it cost), never the company's ${PNL_WORDS.grossProfit} or ${PNL_WORDS.netProfit}: those are on Analytics' ${PNL_WORDS.netProfit} card, the company's profit and loss, and adding job profits up does not give them.`;
 
 /** Which half of the profit and loss a business-cost bucket is in, in its own words (BUCKET_SECTION). */
 const sectionWords = (bucket: keyof typeof BUCKET_SECTION) => (BUCKET_SECTION[bucket] === "cogs" ? PNL_WORDS.cogs : PNL_WORDS.overhead);
@@ -246,7 +247,7 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
   {
     name: "get_job_financials",
     description:
-      "Is a specific job making money? Returns that job's PROFIT — revenue collected (cash paid, net of refunds) minus cost (CREW labor at pay rate + materials + bills + petty cash). The OWNER's hours are billed to the customer but are NEVER a cost (the owner is paid by owner's draw), so they come back separately as owner_hours, with profit_per_owner_hour (profit / owner_hours, null until money is collected): use it for 'what did I make per hour on this job'. Budget burn is still cost vs estimate, so on a job the owner works himself burn reads LOW even when the work is well along; read owner_hours before calling a job 'barely started' or 'under budget'. PLUS budget burn: the quoted estimate, cost to date, remaining vs estimate, % of the estimate spent, and whether it's over budget. Reconciles to the penny with the job page and /analytics. Get the job's id first (list_jobs). CAVEAT to disclose: a cost entered as BOTH a purchase order AND a bill is counted twice (there's no link between them yet), so mention that if the cost looks inflated. ALSO returns budget_vs_actual — per scope (Framing, Decking, Electrical…): estimate budget vs actual cost, remaining, % spent, and an over-budget flag — so you can say 'framing is 83% over' and warn when a job's total looks fine only because big scopes haven't started. Perfect for 'how's the deck doing vs budget'. ALSO returns `unbilled` — the running total of work NO invoice holds yet (hours + labor $ at bill rate, bills/POs marked up, the total, and the last invoice number): the same figure as the job page's Unbilled card, so use it for 'what's unbilled on Whitney' / 'can I invoice this job' — total 0 means everything worked is already on an invoice.",
+      `Is a specific job making money? Returns that job's PROFIT — revenue collected (cash paid, net of refunds) minus cost (CREW labor at pay rate + materials + bills + petty cash). ${BUILD_TIME_IS_A_COST_NOT_A_WAGE} So owner_hours, owner_cost and uncosted_owner_hours come back separately, with profit_per_owner_hour (profit / owner_hours, null until money is collected): use it for 'what did I make per hour on this job'. Budget burn counts his build time now, so it no longer reads low on a job he worked himself - UNLESS uncosted_owner_hours is above 0, which means no cost rate is set and burn and profit both read high by whatever it turns out to be. PLUS budget burn: the quoted estimate, cost to date, remaining vs estimate, % of the estimate spent, and whether it's over budget. Reconciles to the penny with the job page and /analytics. Get the job's id first (list_jobs). CAVEAT to disclose: a cost entered as BOTH a purchase order AND a bill is counted twice (there's no link between them yet), so mention that if the cost looks inflated. ALSO returns budget_vs_actual — per scope (Framing, Decking, Electrical…): estimate budget vs actual cost, remaining, % spent, and an over-budget flag — so you can say 'framing is 83% over' and warn when a job's total looks fine only because big scopes haven't started. Perfect for 'how's the deck doing vs budget'. ALSO returns \`unbilled\` — the running total of work NO invoice holds yet (hours + labor $ at bill rate, bills/POs marked up, the total, and the last invoice number): the same figure as the job page's Unbilled card, so use it for 'what's unbilled on Whitney' / 'can I invoice this job' — total 0 means everything worked is already on an invoice.`,
     input_schema: {
       type: "object",
       properties: { job_id: { type: "string", description: "The job's id (from list_jobs)." } },
@@ -256,7 +257,7 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
   {
     name: "list_job_profitability",
     description:
-      `Which jobs made or lost money, ranked. Returns each job's revenue collected (net refunds), cost (CREW labor + materials + bills + petty cash), profit, owner_hours and profit_per_owner_hour. The owner's hours are billed but never a cost (owner's draw), so a job the owner worked alone has cost ≈ materials and its profit is what it left him; profit_per_owner_hour is null until something is collected. sort 'profit' = most profitable first (default); sort 'loss' = biggest loss first (use for 'which jobs am I losing money on'). Optional status filter: a specific job status, or 'active' for all in-progress work. Same cost/revenue math as the job page + /analytics. Disclose the PO+bill double-count caveat if a cost looks inflated. ${JOB_PROFIT_IS_NOT_THE_PNL}`,
+      `Which jobs made or lost money, ranked. Returns each job's revenue collected (net refunds), cost (CREW labor + materials + bills + petty cash), profit, owner_hours and profit_per_owner_hour. ${BUILD_TIME_IS_A_COST_NOT_A_WAGE} profit_per_owner_hour is null until something is collected. sort 'profit' = most profitable first (default); sort 'loss' = biggest loss first (use for 'which jobs am I losing money on'). Optional status filter: a specific job status, or 'active' for all in-progress work. Same cost/revenue math as the job page + /analytics. Disclose the PO+bill double-count caveat if a cost looks inflated. ${JOB_PROFIT_IS_NOT_THE_PNL}`,
     input_schema: {
       type: "object",
       properties: {
@@ -287,7 +288,7 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
   {
     name: "profit_by_type",
     description:
-      `Which KIND of work makes money — job profit grouped by work type (the job's code-template: the company's own names for its kinds of work). Returns per type: job count, revenue, cost, profit, margin %, owner_hours and profit_per_owner_hour. The owner's hours are billed but never a cost (owner's draw); profit_per_owner_hour is what that kind of work left the owner per hour he worked. Use for 'what's my most profitable type of work?', 'am I underpricing <a kind of work>?'. Jobs with no assigned type group under 'Uncategorized'. ${JOB_PROFIT_IS_NOT_THE_PNL}`,
+      `Which KIND of work makes money — job profit grouped by work type (the job's code-template: the company's own names for its kinds of work). Returns per type: job count, revenue, cost, profit, margin %, owner_hours and profit_per_owner_hour. ${BUILD_TIME_IS_A_COST_NOT_A_WAGE} profit_per_owner_hour is what that kind of work left the owner per hour he worked. Use for 'what's my most profitable type of work?', 'am I underpricing <a kind of work>?'. Jobs with no assigned type group under 'Uncategorized'. ${JOB_PROFIT_IS_NOT_THE_PNL}`,
     input_schema: { type: "object", properties: {} },
   },
   {
@@ -2131,9 +2132,11 @@ export async function runDataTool(
           revenue_collected: f.rev,
           cost: f.cost,
           profit: f.profit,
-          // The owner's hours: billed, never a cost (0286). Beside burn so a $0 labor actual on a
-          // job the owner works himself is never read as a job that has barely started.
+          // His hours, what they COST this job, and the ones no rate prices yet (0373). All three, so
+          // Nort can say whose time the job took AND never quote a cost built on a rate nobody set.
           owner_hours: f.ownerHours,
+          owner_cost: f.ownerCost,
+          uncosted_owner_hours: f.uncostedOwnerHours,
           profit_per_owner_hour: f.perOwnerHour,
           estimate: f.estimate,
           work_to_date: f.workToDate,
@@ -2172,7 +2175,7 @@ export async function runDataTool(
           // fine because a big scope (decking, railing) hasn't started while another (framing)
           // is way over. Empty when the estimate has no scope categories.
           budget_vs_actual: budgetVsActual,
-          note: "Revenue = cash collected net of refunds. Cost = CREW labor (pay rate, split-aware) + materials + bills + petty cash. The owner's hours are NOT a cost (owner's draw): they are owner_hours, and profit_per_owner_hour is what the job left him per hour. Burn and the Labor row of budget_vs_actual are crew cost only, so on an owner-worked job they read low; say so and quote owner_hours rather than calling the job under budget. A cost entered as BOTH a PO and a bill is counted twice (per scope too). budget_vs_actual splits BOTH estimate and actual by scope — call out any scope that's overBudget, and any scope with budget but ~0 actual (not started yet) that's hiding the burn. LABOR IS ITS OWN ROW on both sides: estimate lines priced hourly (or saying 'labor') are budgeted there, and actual labor is the crew's logged time at pay rate — job-wide, because a time entry carries no scope, so labor can never be attributed to Framing vs Decking. Say 'labor overall' rather than implying a scope. CAVEAT: purchase orders have no scope and fall under 'Uncategorized' actual, so a PO-billed job may show real scopes at 0% spent — disclose that.",
+          note: `Revenue = cash collected net of refunds. Cost = CREW labor (pay rate, split-aware) + materials + bills + petty cash. ${BUILD_TIME_IS_A_COST_NOT_A_WAGE} Burn and the Labor row of budget_vs_actual COUNT his build time, so they no longer read low on a job he worked himself - unless uncosted_owner_hours is above 0, in which case say that no cost rate is set. A cost entered as BOTH a PO and a bill is counted twice (per scope too). budget_vs_actual splits BOTH estimate and actual by scope — call out any scope that's overBudget, and any scope with budget but ~0 actual (not started yet) that's hiding the burn. LABOR IS ITS OWN ROW on both sides: estimate lines priced hourly (or saying 'labor') are budgeted there, and actual labor is the crew's logged time at pay rate — job-wide, because a time entry carries no scope, so labor can never be attributed to Framing vs Decking. Say 'labor overall' rather than implying a scope. CAVEAT: purchase orders have no scope and fall under 'Uncategorized' actual, so a PO-billed job may show real scopes at 0% spent — disclose that.`,
         });
       }
 
@@ -2183,7 +2186,7 @@ export async function runDataTool(
         const rows = await listJobProfitability(supabase, { limit: clampLimit(input.limit, 15), statuses, sort });
         return JSON.stringify({
           count: rows.length,
-          note: "Profit = revenue collected (net refunds) − cost (crew labor + materials + bills + petty cash). The owner's hours are billed but never a cost (owner's draw): see owner_hours and profit_per_owner_hour. Same math as /analytics.",
+          note: `Profit = revenue collected (net refunds) − cost (crew labor + materials + bills + petty cash). ${BUILD_TIME_IS_A_COST_NOT_A_WAGE} See owner_hours, owner_cost, uncosted_owner_hours and profit_per_owner_hour. Same math as /analytics.`,
           jobs: rows.map((r) => ({
             job_number: r.job_number,
             name: r.name,
@@ -2192,6 +2195,8 @@ export async function runDataTool(
             cost: r.cost,
             profit: r.profit,
             owner_hours: r.ownerHours,
+            owner_cost: r.ownerCost,
+            uncosted_owner_hours: r.uncostedOwnerHours,
             profit_per_owner_hour: r.perOwnerHour,
           })),
         });
@@ -2232,7 +2237,7 @@ export async function runDataTool(
         const rows = await listProfitByType(supabase);
         return JSON.stringify({
           count: rows.length,
-          note: "Profit grouped by work type — same per-job cost/revenue math as /analytics. Jobs with no type are 'Uncategorized'. The owner's hours are billed but never a cost (owner's draw): owner_hours and profit_per_owner_hour say what each kind of work left him per hour.",
+          note: `Profit grouped by work type — same per-job cost/revenue math as /analytics. Jobs with no type are 'Uncategorized'. ${BUILD_TIME_IS_A_COST_NOT_A_WAGE} owner_hours and profit_per_owner_hour say what each kind of work left him per hour.`,
           types: rows.map((r) => ({
             type: r.type,
             jobs: r.jobs,

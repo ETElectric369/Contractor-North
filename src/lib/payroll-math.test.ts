@@ -747,7 +747,13 @@ describe("the Pay board and its CSV leave the owner off, and say so (0286)", () 
     expect(csv[1]).not.toContain("Total");
     // The total is the crew's alone: Brian's 10 h at $40, nothing of the owner's 30 h.
     expect(csv.find((r) => r[0] === "TOTAL (unpaid base)")).toEqual(["TOTAL (unpaid base)", "10.00", "", "400.00", "", "", "", ""]);
-    expect(csv[csv.length - 1]).toEqual(["Not on this file: Erik Taylor, owner, paid by owner's draw"]);
+    // TWO LINES NOW (0373), because the footnote does more work than it used to: an accountant who
+    // knows the owner worked 30 hours has to be told both halves - no wage anywhere, AND a cost on the
+    // jobs that the profit and loss books straight back. This is the only place a wage file says so.
+    expect(csv[csv.length - 2]).toEqual(["Not on this file: Erik Taylor, owner, paid by owner's draw"]);
+    expect(csv[csv.length - 1][0]).toBe(
+      "Erik Taylor's hours on jobs are costed to those jobs at the owner's cost rate, and the profit and loss books the same amount straight back, so they are never a wage and never a deduction.",
+    );
   });
 
   it("an org with no owner hours in the period keeps the exact old file shape", () => {
@@ -757,7 +763,9 @@ describe("the Pay board and its CSV leave the owner off, and say so (0286)", () 
 
   it("the wage doors' refusal is plain words with the real name", () => {
     expect(ownerWagesRefusal("Erik Taylor")).toBe(
-      "Erik Taylor is the owner and is paid by owner's draw, not wages, so there is nothing to record here. What the owner takes out belongs in the accountant's books.",
+      // THE SECOND SENTENCE POINTS AT A LINE THAT EXISTS NOW (0373). It used to send him to "the
+      // accountant's books", which was the only honest answer while the app had nowhere to put a draw.
+      "Erik Taylor is the owner and is paid by owner's draw, not wages, so there is nothing to record here. What the owner takes out shows on Analytics as Owner's Draw, below Net Profit.",
     );
     expect(ownerWagesRefusal("")).toMatch(/^This person is the owner/);
   });
