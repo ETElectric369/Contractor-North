@@ -18,9 +18,11 @@ import { Loader2, ArrowDown } from "lucide-react";
  * stale?" by itself; it does not answer "refresh it NOW", which is what a thumb on the screen is
  * asking. They stack: a page can have both.
  *
- * So this is built ONCE, here, and any screen gets it by mounting <PullToRefresh /> anywhere inside
- * itself. It finds its own scroller (the nearest scrollable parent, which in the app shell is
- * `main`), so no page has to pass anything.
+ * So this is built ONCE, here, and MOUNTED ONCE — in the app shell's own `<main>`, which is that one
+ * scroller — so every screen in the app has it. It finds its scroller itself (the nearest scrollable
+ * parent) and needs no data from the page it sits in, which is why no page mounts its own: a second
+ * copy would refresh twice on one pull. cn-v1039 shipped it on /billing alone, where the report came
+ * from, under this same headline; the headline was right and the wiring was short (pinned in the test).
  *
  * HOW IT BEHAVES, and why:
  *   · ONLY FROM THE TOP. The pull starts only when the scroller is already at the top, so scrolling
