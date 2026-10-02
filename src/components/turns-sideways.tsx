@@ -3,8 +3,9 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { usePathname } from "next/navigation";
 import { watchHowThePhoneIsHeld } from "@/lib/native-orientation";
-import { mayTurnSideways, type ScreenThatTurns } from "@/lib/screens-that-turn";
+import { whatOwnsTheTurn, type ScreenThatTurns } from "@/lib/screens-that-turn";
 import { isTurned, uprightTurn, type Held } from "@/lib/turned-geometry";
+import { overlaysOpen, watchOverlays } from "@/components/ui/modal-lock";
 
 /**
  * THE ONE THING THAT KNOWS THE PHONE HAS BEEN TURNED.
@@ -30,6 +31,13 @@ import { isTurned, uprightTurn, type Held } from "@/lib/turned-geometry";
  * schedule): if the viewer answered for itself on its way out it would un-turn the screen underneath
  * that was allowed to be turned. So a layer REGISTERS itself here and this works out the one answer —
  * route, plus anything open over it, plus whether somebody is typing.
+ *
+ * AND ONE OWNER, which is the other half, learnt the hard way. "May anything turn" is not the same
+ * question as "may THIS region draw the turn". When both were answered with the one word, the app
+ * shell's region and the full-screen viewer inside it both drew a quarter turn, the two transforms
+ * composed into a half turn, and a job photo opened while the phone was sideways read upside down and
+ * came out smaller than it is in portrait. So the answer also says WHOSE turn it is
+ * (whatOwnsTheTurn, lib/screens-that-turn.ts) and exactly one face draws it.
  *
  * EVERY WAY OF ARRIVING AND LEAVING lands on this effect:
  *  - deep link straight onto a turning screen, or a hard reload on one → the first run, on mount,
@@ -74,14 +82,19 @@ export function useTurnsSidewaysLayer(screen: ScreenThatTurns) {
  * box runs underneath it; a rotated region that used the whole box would draw the last strip of a
  * document under the glass. MEASURED off the real dock, never a number copied out of dock.tsx.
  */
-export type TurnAnswer = { readonly held: Held; readonly bottomChrome: number };
+export type TurnAnswer = {
+  readonly held: Held;
+  /** WHOSE turn this is — the one region that draws it. Null when nothing is turned. */
+  readonly owns: ScreenThatTurns | null;
+  readonly bottomChrome: number;
+};
 
-const UPRIGHT: TurnAnswer = { held: "upright", bottomChrome: 0 };
+const UPRIGHT: TurnAnswer = { held: "upright", owns: null, bottomChrome: 0 };
 let answer: TurnAnswer = UPRIGHT;
 const answerWatchers = new Set<() => void>();
 
 function publish(next: TurnAnswer) {
-  if (next.held === answer.held && next.bottomChrome === answer.bottomChrome) return;
+  if (next.held === answer.held && next.owns === answer.owns && next.bottomChrome === answer.bottomChrome) return;
   answer = next;
   for (const w of answerWatchers) w();
 }
@@ -152,27 +165,59 @@ export function typingInto(el: Element | null): boolean {
  *  - somebody tapping into a text box → upright, so the keyboard is usable
  * NOTHING STUCK falls straight out of that: there is no state here to get stuck IN.
  */
-export function whichWayToDraw(at: {
+export type WhereWeStand = {
   pathname: string;
-  layers: number;
+  /** The declared full-screen layers open, innermost LAST. */
+  layers: readonly ScreenThatTurns[];
+  /**
+   * Every full-screen overlay open, from the one shared body lock (ui/modal-lock.ts) — sheets AND
+   * declared layers. Compared against `layers` below, so the difference is "sheets".
+   */
+  overlays: number;
   held: Held;
   typing: boolean;
-}): Held {
-  if (at.typing) return "upright";
-  return mayTurnSideways(at.pathname, at.layers) ? at.held : "upright";
+};
+
+/**
+ * WHOSE TURN IT IS, or null for "nothing is turned". The one decision; `whichWayToDraw` is this read
+ * as a direction.
+ *
+ * A SHEET OVER THE PAGE HOLDS IT UPRIGHT. A turned region is painted through a transform, and a
+ * transform makes its element the containing block for every `position: fixed` descendant — so a Modal
+ * rendered inside one resolved its overlay against the rotated box instead of the window and landed as
+ * a sliver against one physical edge with Cancel and Save off the screen. There is no way round that;
+ * it is what a transform does. The cheapest correct answer is the one rule here: while a sheet is open
+ * the page comes upright, its keyboard matches the sheet, and closing it turns the page back. An
+ * overlay that must keep the turn declares itself a LAYER instead (the photo/PDF viewer does), which
+ * is why these are two counts and not one flag.
+ */
+export function whatTheTurnBelongsTo(at: WhereWeStand): ScreenThatTurns | null {
+  if (!isTurned(at.held)) return null;
+  if (at.typing) return null;
+  // More overlays open than declared layers means at least one is a sheet.
+  if (at.overlays > at.layers.length) return null;
+  return whatOwnsTheTurn(at.pathname, at.layers);
+}
+
+export function whichWayToDraw(at: WhereWeStand): Held {
+  return whatTheTurnBelongsTo(at) === null ? "upright" : at.held;
 }
 
 export function TurnsSideways() {
   const pathname = usePathname();
-  const [layers, setLayers] = useState(0);
+  const [layers, setLayers] = useState<readonly ScreenThatTurns[]>([]);
+  const [overlays, setOverlays] = useState(0);
   const [held, setHeld] = useState<Held>("upright");
   const [typing, setTyping] = useState(false);
   // What we last PUT ON THE DOCUMENT, so an ordinary navigation between two screens that both stay
-  // upright never touches the DOM at all.
-  const wrote = useRef<Held | null>(null);
+  // upright never touches the DOM at all. Both halves of it: the direction AND whose turn it is, so a
+  // viewer opening over a turned schedule — which hands ownership from the page to the viewer without
+  // changing the direction — still counts as the room changing.
+  const wrote = useRef<string | null>(null);
 
   useEffect(() => {
-    const tell = () => setLayers(openLayers.length);
+    // The NAMES, innermost last, not a count: the answer has to say which one owns the turn.
+    const tell = () => setLayers(openLayers.slice());
     layerWatchers.add(tell);
     // A layer that mounted before this watcher did (it can't today — this is in the root layout —
     // but a count read once at mount is cheaper than a rule nobody can see).
@@ -180,6 +225,14 @@ export function TurnsSideways() {
     return () => {
       layerWatchers.delete(tell);
     };
+  }, []);
+
+  // EVERY FULL-SCREEN OVERLAY, from the one shared body lock. A sheet and a turned page cannot both be
+  // right (see whatTheTurnBelongsTo above), and this is the count that already means "one is open".
+  useEffect(() => {
+    const tell = () => setOverlays(overlaysOpen());
+    tell();
+    return watchOverlays(tell);
   }, []);
 
   useEffect(() => watchHowThePhoneIsHeld(setHeld), []);
@@ -199,27 +252,54 @@ export function TurnsSideways() {
     };
   }, []);
 
+  const standing: WhereWeStand = { pathname, layers, overlays, held, typing };
+  const owns = whatTheTurnBelongsTo(standing);
+  const now = owns === null ? "upright" : held;
+
   useEffect(() => {
-    const now = whichWayToDraw({ pathname, layers, held, typing });
-    if (wrote.current === now) return;
-    wrote.current = now;
+    const changed = wrote.current !== `${now}|${owns ?? ""}`;
+    wrote.current = `${now}|${owns ?? ""}`;
     const root = document.documentElement;
-    if (isTurned(now)) {
-      // ONE number, from lib/turned-geometry.ts, read by the stylesheet rule that paints every square
-      // chrome control's face. The attribute is what that rule keys on.
-      root.style.setProperty("--turn-deg", uprightTurn(now));
-      root.dataset.phoneHeld = now;
-    } else {
-      delete root.dataset.phoneHeld;
-      root.style.removeProperty("--turn-deg");
+    if (changed) {
+      if (isTurned(now)) {
+        // ONE number, from lib/turned-geometry.ts, read by the stylesheet rule that paints every square
+        // chrome control's face. The attribute is what that rule keys on.
+        root.style.setProperty("--turn-deg", uprightTurn(now));
+        root.dataset.phoneHeld = now;
+      } else {
+        delete root.dataset.phoneHeld;
+        root.style.removeProperty("--turn-deg");
+      }
     }
-    publish({ held: now, bottomChrome: isTurned(now) ? measureTheDock() : 0 });
+    publish({ held: now, owns, bottomChrome: isTurned(now) ? measureTheDock() : 0 });
+    if (!changed) return;
     // THE DOCUMENT PREVIEW REDRAWS ON THIS. A drawn PDF page is a bitmap and does not re-flow, and
     // with the interface locked the window never resizes when the phone turns, so `resize` and
     // `orientationchange` — the two the viewer used to listen on — never fire. This is the event that
     // says "the room changed" now.
     window.dispatchEvent(new Event("cn:screen-turned"));
-  }, [pathname, layers, held, typing]);
+  }, [now, owns]);
+
+  // ── THE DOCK IS RE-MEASURED WHENEVER THE DOCK CHANGES, not only when the direction does ───────────
+  // `bottomChrome` is how much of the turned region the floating dock covers, and measureTheDock()
+  // honestly answers 0 while the dock is hidden (body.modal-open gives it `display: none`). Published
+  // only when the direction changed, that honest 0 outlived the thing that made it true: a turn decided
+  // while a sheet was up left ~67px of the page's edge drawn under the glass once the sheet closed,
+  // until the route or the direction happened to change. So the measurement follows the DOCK's own box.
+  useEffect(() => {
+    if (!isTurned(now) || typeof ResizeObserver === "undefined") return;
+    const dock = document.querySelector(".app-dock");
+    if (!dock) return;
+    const again = () => {
+      // A newer decision may already have landed between this observer being set up and it firing —
+      // republishing this one's direction would put the old answer back for a frame.
+      if (answer.held !== now || answer.owns !== owns) return;
+      publish({ held: now, owns, bottomChrome: measureTheDock() });
+    };
+    const ro = new ResizeObserver(again);
+    ro.observe(dock);
+    return () => ro.disconnect();
+  }, [now, owns]);
 
   return null;
 }

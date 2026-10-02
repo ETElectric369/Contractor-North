@@ -31,7 +31,18 @@ const grid = (p: Record<string, unknown>) =>
 describe("/timecards renders exactly as it did", () => {
   it("timecards-shaped props (no info, no crew, no worked time) render byte-for-byte what main's grid rendered", () => {
     // The props /timecards passes: person-colored pills with a sub line, an open entry, a heavy pay-
-    // period edge, an all-day row. The hash is main's (cn-v1030) TimeGrid rendering these same props.
+    // period edge, an all-day row.
+    //
+    // THE HASH MOVED ONCE, AND HERE IS THE WHOLE OF WHAT MOVED. It was main's (cn-v1030) rendering until
+    // the turned phone needed the week to FIT instead of scrolling sideways, which meant the columns'
+    // minimum had to be capped by a stylesheet — and a stylesheet cannot override an inline width without
+    // `!important`. So the one wrapper div hands its number over as a custom property instead:
+    //     - <div style="min-width:324px">
+    //     + <div class="time-grid-columns" style="--grid-natural-w:324px">
+    // and globals.css applies it (identically, upright). That ONE line is the entire difference: the two
+    // renderings were diffed line by line and every other byte — every pill, every tick, every row — is
+    // the same. 324 is 48 + 3 x 92 for the three days above, the same arithmetic, now in one function.
+    // Anything else that moves this hash is a change to /timecards and has to be looked at.
     const html = renderToStaticMarkup(
       createElement(TimeGrid, {
         days: [
@@ -53,8 +64,11 @@ describe("/timecards renders exactly as it did", () => {
         onDayClick: () => {},
       }),
     );
-    expect(createHash("sha256").update(html).digest("hex")).toBe("080f61fad81aa513097264872130882b237451f18da9a174cce7c76f90f69cbe");
+    expect(createHash("sha256").update(html).digest("hex")).toBe("0f59a79e7e2cc0372dc9da53631bdf576726648f67aa6ac7b4702e5e9be952f1");
     expect(html).not.toContain("data-worked-bars");
+    // The one line that moved, pinned on its own so the hash is not the only thing saying what it is.
+    expect(html).toContain('<div class="time-grid-columns" style="--grid-natural-w:324px">');
+    expect(html).not.toContain("min-width:");
   });
 });
 

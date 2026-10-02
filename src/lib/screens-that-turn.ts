@@ -117,3 +117,59 @@ export function screenTurningAt(pathname: string): ScreenThatTurns | null {
 export function mayTurnSideways(pathname: string, layersOpen = 0): boolean {
   return layersOpen > 0 || screenTurningAt(pathname) !== null;
 }
+
+/**
+ * WHICH ONE THING THE TURN BELONGS TO — and the reason there is a second answer here at all.
+ *
+ * `mayTurnSideways` above answers "may anything turn", and that was taken for "…so every region may
+ * draw it". It is not the same question. The app shell's region and the full-screen viewer inside it
+ * BOTH drew the quarter turn, the two transforms COMPOSED into a half turn, and a job photo opened
+ * while the phone was sideways came out upside down — and smaller than it is in portrait, because the
+ * viewer's `position: fixed` was resolving against the shell's transformed box instead of the window,
+ * so it was no longer full screen either. The turn has an OWNER, and only the owner draws it.
+ *
+ * THE INNERMOST DECLARED THING OWNS IT. A full-screen layer is the thing the person is looking at, so
+ * while one is open it owns the turn and the page underneath stays upright — which is also what puts
+ * the layer back over the whole screen, because with the shell's region untransformed there is no
+ * containing block left for `fixed` to resolve against but the window. With no layer open, the ROUTE
+ * owns it. `layers` is innermost last, so two viewers deep the top one owns it, and the first to close
+ * hands ownership back instead of taking it away.
+ */
+export function whatOwnsTheTurn(
+  pathname: string,
+  layers: readonly ScreenThatTurns[],
+): ScreenThatTurns | null {
+  if (!mayTurnSideways(pathname, layers.length)) return null;
+  return layers.length > 0 ? layers[layers.length - 1] : screenTurningAt(pathname);
+}
+
+/** Does this declared screen live at a route of its own, or is it a full-screen layer? */
+export function isARouteOfItsOwn(screen: ScreenThatTurns): boolean {
+  return SCREENS_THAT_TURN[screen].route !== null;
+}
+
+/**
+ * WHAT A REGION OF THE SCREEN IS, as far as the turn is concerned. Every <Turned> says which one it
+ * is, and that is what decides whether IT is the face that draws the quarter turn:
+ *  · a declared screen's name → a full-screen LAYER (the photo/PDF viewer): draws the turn only while
+ *    it is the innermost layer open, so it can never draw one on top of the page region's.
+ *  · "the route"  → the page region between the chrome (the app shell's scrolling middle, the document
+ *    preview's sheets): draws the turn only when it is owed to the ROUTE, so a viewer opened over a
+ *    screen that does not turn never rotates the page behind it.
+ *  · "the chrome" → a control in the top bar or the dock: draws it whenever anything is turned at all,
+ *    because a button has to read upright for the PERSON, not for a route.
+ */
+export type TurnedRegion = ScreenThatTurns | "the route" | "the chrome";
+
+/**
+ * IS THIS THE ONE FACE THAT DRAWS THE TURN? For any owner, exactly one content region answers true —
+ * which is the whole property: one quarter turn, never two composed into a half.
+ */
+export function faceDrawsTheTurn(region: TurnedRegion, owner: ScreenThatTurns | null): boolean {
+  if (owner === null) return false;
+  if (region === "the chrome") return true;
+  if (region === "the route") return isARouteOfItsOwn(owner);
+  // A declared NAME is a layer's region. A screen that has a route of its own is drawn by "the route",
+  // so naming one here answers false rather than making a second face that also draws the turn.
+  return region === owner && !isARouteOfItsOwn(owner);
+}

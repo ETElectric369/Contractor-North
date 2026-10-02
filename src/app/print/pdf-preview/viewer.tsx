@@ -58,6 +58,18 @@ export function PdfPreview({ doc, id, back }: { doc: string; id: string; back: s
   /** Always rendered, zero height, never display:none — the one thing that can always be measured. */
   const measureRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  /**
+   * HOW FAR DOWN THE DOCUMENT HE IS, remembered as he scrolls rather than read when a repaint starts.
+   *
+   * Turning the phone CHANGES WHICH ELEMENT SCROLLS: upright it is the box below, turned it is the
+   * quarter-turned face inside it (globals.css). The instant that swap lands, the box's content is gone
+   * — its scrollTop is forced to 0 — and the face starts at 0, so a fraction read at the top of a
+   * repaint was always 0 and the place-keeping that repaint is famous for did nothing at all: page 5 of
+   * an invoice became page 1 every time the phone turned, which is the exact bug it exists to prevent.
+   */
+  const placeKept = useRef(0);
+  /** True while a repaint is emptying and refilling the list, when a scroll to 0 is not a place. */
+  const repainting = useRef(false);
 
   /**
    * How wide a page may be drawn right now. Measured from inside the scroller rather than from
@@ -93,12 +105,11 @@ export function PdfPreview({ doc, id, back }: { doc: string; id: string; back: s
     setAllPainted(false);
     // KEEP HIS PLACE. Redrawing empties the list, so page 5 of an invoice would become page 1 every
     // time the phone turned. The sheets keep their aspect ratio, so the fraction scrolled is the
-    // same place at any width.
-    const scroller = theScroller(scrollRef.current);
-    const was =
-      scroller && scroller.scrollHeight > scroller.clientHeight
-        ? scroller.scrollTop / scroller.scrollHeight
-        : 0;
+    // same place at any width — and the fraction is the one REMEMBERED as he scrolled (placeKept
+    // above), never one read here, because by the time a turn gets this far the element that held his
+    // scroll position has already handed the job to another one and both read 0.
+    const was = placeKept.current;
+    repainting.current = true;
     try {
       host.innerHTML = "";
       // These canvases ARE the print output, so resolution matters — but every page is
@@ -141,6 +152,10 @@ export function PdfPreview({ doc, id, back }: { doc: string; id: string; back: s
       if (!turns.current.finishedPaint(seq, containerW)) return;
       setState("ready");
       setAllPainted(true);
+      // RESOLVED AGAIN HERE, never the element measured before the awaits above: a turn that landed
+      // mid-paint handed the scrolling from the box to the face (or back), and a scrollTop written to
+      // the one that is no longer scrolling is silently a no-op — the same silence as the bug above.
+      const scroller = theScroller(scrollRef.current);
       if (scroller && was > 0) scroller.scrollTop = was * scroller.scrollHeight;
     } catch (e: any) {
       // A page that won't rasterize is its own failure, not the fetch's — this used to be caught by
@@ -148,7 +163,30 @@ export function PdfPreview({ doc, id, back }: { doc: string; id: string; back: s
       if (!turns.current.paintOwns(seq)) return;
       setError(e?.message ?? "Couldn't draw the pages.");
       setState("error");
+    } finally {
+      // Only the paint that still owns the list stops the remembering: a superseded one returning late
+      // must not start recording a half-drawn list's scroll position as his place.
+      if (turns.current.paintOwns(seq)) repainting.current = false;
     }
+  }, []);
+
+  // ── WHERE HE IS, WRITTEN DOWN AS HE SCROLLS ────────────────────────────────────────────────────
+  // CAPTURE, on the box, so it sees whichever element is actually scrolling: the box itself upright, the
+  // quarter-turned face inside it once the phone is turned. A `scroll` event does not bubble, but a
+  // capturing listener on an ancestor is still called for it. Nothing is recorded while a repaint is
+  // emptying the list, because the scroll to 0 that causes is not a place anybody chose.
+  useEffect(() => {
+    const box = scrollRef.current;
+    if (!box) return;
+    const remember = (e: Event) => {
+      if (repainting.current) return;
+      const el = e.target as HTMLElement | null;
+      if (!el || !(el instanceof HTMLElement)) return;
+      if (el.scrollHeight <= el.clientHeight) return;
+      placeKept.current = el.scrollTop / el.scrollHeight;
+    };
+    box.addEventListener("scroll", remember, true);
+    return () => box.removeEventListener("scroll", remember, true);
   }, []);
 
   const load = useCallback(async () => {
@@ -349,9 +387,11 @@ export function PdfPreview({ doc, id, back }: { doc: string; id: string; back: s
 
       {/* `turn-host`: the bar above stays exactly where it is — the phone's top edge — and THIS is the
           rectangle the page turns inside when the phone is held sideways (Erik, 2026-10-01). Upright,
-          <Turned> has no box at all and this is the same scroller it has always been. */}
+          <Turned> has no box at all and this is the same scroller it has always been. `region="the
+          route"`: this screen IS the declared route, so it draws the turn — unless a full-screen layer
+          opens over it, which owns the turn itself and draws its own. */}
       <div ref={scrollRef} className="pdf-pages-scroll turn-host min-h-0 flex-1 overflow-y-auto px-2 py-6">
-       <Turned>
+       <Turned region="the route">
         {/* THE ONE THING THAT CAN ALWAYS BE MEASURED. The pages host below is display:none while
             loading (clientWidth 0 → a page drawn into a negative-width canvas: Erik's blank sheets),
             and window.innerWidth doesn't know about the camera inset this scroller is padded for. This

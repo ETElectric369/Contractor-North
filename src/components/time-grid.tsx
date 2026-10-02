@@ -115,6 +115,24 @@ export interface TimeGridAllDay {
 const HOUR_PX = 48;
 const PX_PER_MIN = HOUR_PX / 60;
 const MIN_COL_PX = 92; // 7 columns scroll horizontally on a phone; day view is the zoom-in
+/** The hour gutter down the left of the grid, in px — the `w-12` the header and every row start with. */
+const GUTTER_PX = 48;
+
+/**
+ * HOW WIDE A MULTI-DAY GRID WANTS TO BE: the hour gutter plus a readable column per day. A seven-day
+ * week is 48 + 7 x 92 = 692px, which is wider than any phone, so portrait scrolls sideways and the day
+ * view is the zoom-in. One day needs no minimum at all — it already fits.
+ *
+ * WANTS, NOT GETS. This is handed to the stylesheet as `--grid-natural-w` rather than written straight
+ * onto `min-width`, because inside a region drawn a quarter turn the rule is different: there the whole
+ * week has to FIT (that is the entire warrant for turning the phone on /schedule), so globals.css caps
+ * it at the room actually available and the columns share what there is. An inline width could not be
+ * capped by a stylesheet without `!important`; the arithmetic still lives only here.
+ */
+export function naturalGridWidth(days: number): number {
+  return days > 1 ? GUTTER_PX + days * MIN_COL_PX : 0;
+}
+
 /** An open spot is tapped to the half hour it sits in (12px under a thumb is noise; 24px is a slot). */
 export const SLOT_MIN = 30;
 
@@ -406,7 +424,13 @@ function TimeGridInner({
 
   return (
     <div ref={scrollRef} className="overflow-x-auto">
-      <div style={{ minWidth: days.length > 1 ? 48 + days.length * MIN_COL_PX : undefined }}>
+      {/* `time-grid-columns` + `--grid-natural-w`: the minimum is applied by globals.css, which is what
+          lets a turned phone cap it at the room there really is instead of scrolling the week sideways
+          again. Upright the rule resolves to this same number, so nothing changes. */}
+      <div
+        className="time-grid-columns"
+        style={{ "--grid-natural-w": `${naturalGridWidth(days.length)}px` } as React.CSSProperties}
+      >
         {/* Day headers */}
         <div className="flex border-b border-slate-100">
           <div className="w-12 shrink-0" />

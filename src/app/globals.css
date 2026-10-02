@@ -373,6 +373,34 @@ main.turn-host > .turn-face[data-held] {
   max-height: calc(var(--turn-h, 70dvh) - 8rem);
 }
 
+/* ── AND THE WEEK ITSELF HAS TO FIT, or /schedule does not deliver what it promised ──────────────
+   The warrant in lib/screens-that-turn.ts says: "Portrait shows three and scrolls sideways for the
+   rest; sideways the whole week is on screen at once." It was not. The seven-day grid asks for a
+   readable minimum per column — 48px of hour gutter plus 7 x 92 = 692px (components/time-grid.tsx) —
+   and the turned box on Erik's phone gives the week's scroller about 656. So it still scrolled
+   sideways and still clipped Sunday, which is the one thing turning the phone was for.
+
+   `min()`, NOT A SMALLER NUMBER. A lowered column width would fit a 16 Pro and miss an SE, and would
+   be a second copy of an arithmetic that lives in time-grid.tsx. This says what is actually meant: the
+   columns keep their readable minimum when there is room for it, and share the room when there is not.
+   `100%` is the scroller's own content box, so the grid stops exactly at the edge instead of
+   overflowing it, and the columns come out at (656 - 48) / 7 ≈ 87px each — 5px under the portrait
+   minimum, and the whole week on screen.
+
+   ONLY INSIDE A TURNED FACE. Upright this must not apply: a 370px portrait phone would squeeze seven
+   columns to 46px each, which is the layout the sideways scroll exists to avoid.
+
+   THE WIDTH IS A RULE HERE AND A NUMBER THERE. time-grid.tsx hands over its one arithmetic as
+   --grid-natural-w and stops setting `min-width` inline, because an inline width cannot be overridden
+   by a stylesheet without `!important` — and an `!important` that only sometimes applies is the kind of
+   rule nobody can reason about later. The number is still worked out in exactly one place. */
+.time-grid-columns {
+  min-width: var(--grid-natural-w, 0px);
+}
+.turn-face[data-held] .time-grid-columns {
+  min-width: min(var(--grid-natural-w, 0px), 100%);
+}
+
 /* ── THE BUTTONS READ UPRIGHT ────────────────────────────────────────────────
    Every control in the top bar is a 44px SQUARE, and a square turned a quarter
    turn is the same square — so the bar does not move a pixel and the tap target is
@@ -386,6 +414,16 @@ main.turn-host > .turn-face[data-held] {
    viewport, exactly as it is today. Do not move a marker up a level. */
 html[data-phone-held] [data-upright] {
   transform: rotate(var(--turn-deg, 0deg));
+}
+
+/* …EXCEPT ONE THAT IS ALREADY INSIDE A TURNED FACE. The rule above is a document-wide DESCENDANT
+   selector, and the turn is applied ONCE or it composes: a marked button sitting inside a region that
+   is itself being drawn a quarter turn would be painted through a second one and come out upside down
+   — which is exactly what happened to the full-screen viewer's Open / Download / Close row. The region
+   that owns the turn is now the only one that draws it (lib/screens-that-turn.ts), so this cannot
+   arise today; this is the floor under that, in the one place the other half of the rule lives. */
+html[data-phone-held] .turn-face[data-held] [data-upright] {
+  transform: none;
 }
 
 /* ── The dock's tiles ────────────────────────────────────────────────────────

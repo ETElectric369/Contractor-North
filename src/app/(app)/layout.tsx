@@ -376,8 +376,14 @@ export default async function AppLayout({
         <main className="turn-host flex-1 overflow-y-auto bg-slate-50/70 p-4 pb-[calc(7.5rem+env(safe-area-inset-bottom))] shell:p-6 shell:pb-6">
           {/* Upright this wrapper has no box at all (`display: contents`), so nothing about any screen
               changes. `avoidDock` takes the floating dock's MEASURED height off the bottom of the
-              turned box, so the last line of a document is never drawn under the glass. */}
-          <Turned avoidDock>
+              turned box, so the last line of a document is never drawn under the glass.
+
+              `region="the route"`: this region turns only when the turn is owed to the ROUTE. A
+              full-screen viewer opened over a job — which is every photo and every receipt — owns the
+              turn itself, and this region staying upright is what keeps the viewer full screen (its
+              `position: fixed` has no transformed ancestor to resolve against) and what stops the two
+              quarter turns composing into a half turn and drawing the photo upside down. */}
+          <Turned region="the route" avoidDock>
             <Suspense fallback={null}>
               <SectionSubnav isStaff={isStaff} features={doors} />
             </Suspense>

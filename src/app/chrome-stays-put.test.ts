@@ -1,7 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { dockCoverage, typingInto, whichWayToDraw } from "@/components/turns-sideways";
+import { dockCoverage, typingInto, whatTheTurnBelongsTo, whichWayToDraw } from "@/components/turns-sideways";
+import {
+  SCREENS_THAT_TURN,
+  faceDrawsTheTurn,
+  isARouteOfItsOwn,
+  type ScreenThatTurns,
+  type TurnedRegion,
+} from "@/lib/screens-that-turn";
+import { naturalGridWidth } from "@/components/time-grid";
 import { faceStyle, placeTheFace, uprightTurn } from "@/lib/turned-geometry";
 
 /**
@@ -34,10 +42,18 @@ const QUICK_ADD = read("src/components/global-quick-add.tsx");
 const BELL = read("src/components/app-shell/notification-bell.tsx");
 const ACCOUNT = read("src/components/account-menu.tsx");
 
+/** The full-screen photo/PDF viewer, open — the one declared LAYER there is. Innermost last. */
+const VIEWER: readonly ScreenThatTurns[] = ["document-full-screen"];
+/** A receipt opened on top of a receipt: two of them, which has to behave like one. */
+const TWO_VIEWERS: readonly ScreenThatTurns[] = ["document-full-screen", "document-full-screen"];
+const SCREEN_NAMES = Object.keys(SCREENS_THAT_TURN) as ScreenThatTurns[];
+/** Every region a <Turned> can declare itself to be. */
+const EVERY_REGION: readonly TurnedRegion[] = [...SCREEN_NAMES, "the route", "the chrome"];
+
 // ── WHICH WAY THE SCREEN IS DRAWN, every way in and every way out ──────────────────────────────────
 
 describe("every way of arriving at a turned screen, and every way of leaving one", () => {
-  const sideways = { layers: 0, held: "clockwise" as const, typing: false };
+  const sideways = { layers: [], overlays: 0, held: "clockwise" as const, typing: false };
 
   it("the four declared screens turn; everything else stays upright", () => {
     for (const path of ["/schedule", "/schedule/2026-10-01", "/price-list", "/print/pdf-preview/invoice/80"]) {
@@ -51,14 +67,16 @@ describe("every way of arriving at a turned screen, and every way of leaving one
   it("ARRIVING ALREADY TURNED lands turned — the shell is asked on the way in", () => {
     // A deep link or a hard reload while the phone is sideways fires no change: the phone has not
     // moved. native-orientation.ts asks read() once for exactly this, and the answer arrives here.
-    expect(whichWayToDraw({ pathname: "/schedule", layers: 0, held: "counterclockwise", typing: false })).toBe(
-      "counterclockwise",
-    );
+    expect(
+      whichWayToDraw({ pathname: "/schedule", layers: [], overlays: 0, held: "counterclockwise", typing: false }),
+    ).toBe("counterclockwise");
   });
 
   it("TURNING WHILE THERE turns, and turning back comes back", () => {
     expect(whichWayToDraw({ ...sideways, pathname: "/price-list" })).toBe("clockwise");
-    expect(whichWayToDraw({ pathname: "/price-list", layers: 0, held: "upright", typing: false })).toBe("upright");
+    expect(
+      whichWayToDraw({ pathname: "/price-list", layers: [], overlays: 0, held: "upright", typing: false }),
+    ).toBe("upright");
   });
 
   it("NAVIGATING AWAY TURNED — and the back gesture — is upright the same frame", () => {
@@ -69,25 +87,25 @@ describe("every way of arriving at a turned screen, and every way of leaving one
   });
 
   it("A FULL-SCREEN VIEWER opens over a screen that does not turn, and closing gives it back", () => {
-    const onATallList = { pathname: "/timecards", held: "clockwise" as const, typing: false };
-    expect(whichWayToDraw({ ...onATallList, layers: 0 })).toBe("upright");
-    expect(whichWayToDraw({ ...onATallList, layers: 1 })).toBe("clockwise"); // a receipt, opened
-    expect(whichWayToDraw({ ...onATallList, layers: 0 })).toBe("upright"); // closed again
+    const onATallList = { pathname: "/timecards", overlays: 0, held: "clockwise" as const, typing: false };
+    expect(whichWayToDraw({ ...onATallList, layers: [] })).toBe("upright");
+    expect(whichWayToDraw({ ...onATallList, layers: VIEWER })).toBe("clockwise"); // a receipt, opened
+    expect(whichWayToDraw({ ...onATallList, layers: [] })).toBe("upright"); // closed again
   });
 
   it("…and a viewer closing over a screen that ALREADY turns does not take its turn with it", () => {
     // The whole reason this is one watcher and not a per-screen call: a viewer answering for itself on
     // its way out would un-turn the schedule underneath it.
-    const overTheSchedule = { pathname: "/schedule", held: "clockwise" as const, typing: false };
-    expect(whichWayToDraw({ ...overTheSchedule, layers: 1 })).toBe("clockwise");
-    expect(whichWayToDraw({ ...overTheSchedule, layers: 0 })).toBe("clockwise");
+    const overTheSchedule = { pathname: "/schedule", overlays: 0, held: "clockwise" as const, typing: false };
+    expect(whichWayToDraw({ ...overTheSchedule, layers: VIEWER })).toBe("clockwise");
+    expect(whichWayToDraw({ ...overTheSchedule, layers: [] })).toBe("clockwise");
   });
 
   it("TWO viewers open at once: the first to close does not take the second one's turn", () => {
-    const base = { pathname: "/planner", held: "counterclockwise" as const, typing: false };
-    expect(whichWayToDraw({ ...base, layers: 2 })).toBe("counterclockwise");
-    expect(whichWayToDraw({ ...base, layers: 1 })).toBe("counterclockwise");
-    expect(whichWayToDraw({ ...base, layers: 0 })).toBe("upright");
+    const base = { pathname: "/planner", overlays: 0, held: "counterclockwise" as const, typing: false };
+    expect(whichWayToDraw({ ...base, layers: TWO_VIEWERS })).toBe("counterclockwise");
+    expect(whichWayToDraw({ ...base, layers: VIEWER })).toBe("counterclockwise");
+    expect(whichWayToDraw({ ...base, layers: [] })).toBe("upright");
   });
 
   it("DO NOT ROTATE A SCREEN A PERSON IS TYPING ON — the keyboard comes up the other way round", () => {
@@ -95,9 +113,154 @@ describe("every way of arriving at a turned screen, and every way of leaving one
     // its inline price cells. With the interface locked the keyboard rises from the phone's bottom
     // edge — the person's left or right hand side — so typing into a box drawn a quarter turn from it
     // is miserable. The screen comes upright while the box has focus and turns back when it is left.
-    expect(whichWayToDraw({ pathname: "/schedule", layers: 0, held: "clockwise", typing: true })).toBe("upright");
-    expect(whichWayToDraw({ pathname: "/price-list", layers: 0, held: "clockwise", typing: true })).toBe("upright");
-    expect(whichWayToDraw({ pathname: "/schedule", layers: 0, held: "clockwise", typing: false })).toBe("clockwise");
+    const box = { layers: [], overlays: 0, held: "clockwise" as const };
+    expect(whichWayToDraw({ ...box, pathname: "/schedule", typing: true })).toBe("upright");
+    expect(whichWayToDraw({ ...box, pathname: "/price-list", typing: true })).toBe("upright");
+    expect(whichWayToDraw({ ...box, pathname: "/schedule", typing: false })).toBe("clockwise");
+  });
+});
+
+// ── WHOSE TURN IT IS: THE ONE REGION THAT DRAWS IT ─────────────────────────────────────────────────
+
+describe("exactly ONE region draws the turn, and it is the one that owns it", () => {
+  /**
+   * The defect this is here for. "May anything turn" was taken for "so every region may draw it", and
+   * the app shell's region (layout.tsx) is an ANCESTOR of the full-screen viewer, which renders in place
+   * with `fixed inset-0` and no portal. Opening a job photo or a bill receipt while the phone was
+   * sideways therefore turned BOTH faces: the two quarter turns composed into a half turn, the photo
+   * read upside down, and because a transformed ancestor becomes the containing block for a `fixed`
+   * descendant the viewer was no longer full screen either — the top bar and the dock stayed visible
+   * around it and an 800x450 photo drew smaller than it does in portrait.
+   */
+  const heldSideways = { overlays: 0, held: "clockwise" as const, typing: false };
+
+  it("a photo opened over a job: the VIEWER draws the turn and the page behind it does not", () => {
+    // Not one of the four routes — which is every real entry point: a job's photos, a job's documents,
+    // the task list, the appointment inspector, a bill's receipt.
+    const standing = { ...heldSideways, pathname: "/jobs/41", layers: VIEWER };
+    expect(whatTheTurnBelongsTo(standing)).toBe("document-full-screen");
+    expect(faceDrawsTheTurn("document-full-screen", whatTheTurnBelongsTo(standing))).toBe(true);
+    expect(faceDrawsTheTurn("the route", whatTheTurnBelongsTo(standing))).toBe(false);
+  });
+
+  it("a receipt opened over the SCHEDULE: the viewer takes the turn over, and gives it back", () => {
+    const over = { ...heldSideways, pathname: "/schedule", layers: VIEWER };
+    expect(whatTheTurnBelongsTo(over)).toBe("document-full-screen");
+    expect(faceDrawsTheTurn("the route", whatTheTurnBelongsTo(over))).toBe(false);
+    // Closed again, the schedule has its own turn back — and now IT is the one that draws it.
+    const after = { ...heldSideways, pathname: "/schedule", layers: [] };
+    expect(whatTheTurnBelongsTo(after)).toBe("schedule");
+    expect(faceDrawsTheTurn("the route", whatTheTurnBelongsTo(after))).toBe(true);
+    expect(faceDrawsTheTurn("document-full-screen", whatTheTurnBelongsTo(after))).toBe(false);
+  });
+
+  it("two viewers deep, the INNERMOST one draws it — never both", () => {
+    const standing = { ...heldSideways, pathname: "/schedule", layers: TWO_VIEWERS };
+    expect(whatTheTurnBelongsTo(standing)).toBe("document-full-screen");
+    const drawn = EVERY_REGION.filter((r) => r !== "the chrome" && faceDrawsTheTurn(r, whatTheTurnBelongsTo(standing)));
+    expect(drawn).toEqual(["document-full-screen"]);
+  });
+
+  it("for EVERY owner there is exactly one content region that draws the turn", () => {
+    // The property the whole fix rests on: one quarter turn, never two composed into a half.
+    for (const owner of [...SCREEN_NAMES, null]) {
+      const drawn = EVERY_REGION.filter((r) => r !== "the chrome" && faceDrawsTheTurn(r, owner));
+      expect(drawn.length, `owner ${owner ?? "nobody"}`).toBe(owner === null ? 0 : 1);
+    }
+  });
+
+  it("the declared ROUTES are drawn by the page region; a LAYER is drawn by itself and nothing else", () => {
+    for (const name of SCREEN_NAMES) {
+      expect(faceDrawsTheTurn("the route", name)).toBe(isARouteOfItsOwn(name));
+      // A region named after a screen is a LAYER's region — naming a route there must not make a second
+      // face that also draws the turn, which is the whole class of defect being fixed.
+      expect(faceDrawsTheTurn(name, name)).toBe(!isARouteOfItsOwn(name));
+    }
+    expect(isARouteOfItsOwn("document-full-screen")).toBe(false);
+  });
+
+  it("the chrome stands up for WHOEVER owns the turn — a button reads upright for the person", () => {
+    for (const name of SCREEN_NAMES) expect(faceDrawsTheTurn("the chrome", name)).toBe(true);
+    expect(faceDrawsTheTurn("the chrome", null)).toBe(false);
+  });
+
+  it("every region that can turn says WHICH region it is — the prop is not optional", () => {
+    // A <Turned> with no region would fall back to some default, and a default is how the app shell's
+    // region ended up drawing a turn that belonged to the viewer inside it.
+    expect(TURNED).toContain("region: TurnedRegion");
+    expect(TURNED).toContain("faceDrawsTheTurn(region, owns)");
+    expect(SHELL).toContain('<Turned region="the route" avoidDock>');
+    expect(PDF_VIEWER).toContain('<Turned region="the route">');
+    expect(LIGHTBOX).toContain('<Turned region="document-full-screen">');
+    expect(DOCK).toContain('<Turned region="the chrome">');
+    // The viewer's region is the same declared name it registered itself under.
+    expect(LIGHTBOX).toContain('useTurnsSidewaysLayer("document-full-screen")');
+  });
+
+  it("and a face inside an already-turned face refuses, so a mistake can never compose", () => {
+    // The floor under the rule above: one quarter turn or none, never two.
+    expect(TURNED).toContain("const AlreadyTurned = createContext(false)");
+    expect(TURNED).toContain("!insideATurnedFace");
+    expect(TURNED).toContain("<AlreadyTurned.Provider value={true}>");
+    // Same belt on the chrome's own rule, which is a document-wide descendant selector.
+    expect(CSS).toMatch(
+      /html\[data-phone-held\] \.turn-face\[data-held\] \[data-upright\] \{\s*transform: none;\s*\}/,
+    );
+  });
+});
+
+// ── A SHEET OVER THE PAGE AND A TURNED PAGE CANNOT BOTH BE RIGHT ──────────────────────────────────
+
+describe("a sheet opened over a turned screen brings it upright instead of landing in a corner", () => {
+  /**
+   * A turned region is painted through a transform, and a transform makes its element the containing
+   * block for every `position: fixed` descendant. Modal renders IN PLACE by default, so its overlay —
+   * which on iOS is given the visual viewport's portrait rect, 402 x 874 — was being interpreted inside a
+   * 684 x 402 rotated box: a sliver against one physical edge with Cancel and Save off the glass. No
+   * transform can avoid that, so the rule is that the page comes upright while a sheet is open.
+   */
+  const onATurnedSchedule = { pathname: "/schedule", layers: [], held: "clockwise" as const, typing: false };
+
+  it("a sheet open over /schedule or /price-list: upright, with its keyboard the same way up", () => {
+    expect(whichWayToDraw({ ...onATurnedSchedule, overlays: 1 })).toBe("upright");
+    expect(whatTheTurnBelongsTo({ ...onATurnedSchedule, overlays: 1 })).toBeNull();
+    expect(whichWayToDraw({ ...onATurnedSchedule, pathname: "/price-list", overlays: 1 })).toBe("upright");
+    // Closing it turns the screen back — nothing is stuck, and nothing had to remember anything.
+    expect(whichWayToDraw({ ...onATurnedSchedule, overlays: 0 })).toBe("clockwise");
+  });
+
+  it("…and it does NOT depend on a field being focused, which is what left the sheet in the corner", () => {
+    // The sheets on these two screens (the tile sheet, Add To Schedule, Time Off, Edit Price Item, the
+    // item sheet) carry no autoFocus, so `typing` was false and the screen stayed turned the whole time
+    // the sheet was open. And where a field WAS focused, tapping Done on the keyboard turned the screen
+    // back under an open sheet, mid-use.
+    expect(whichWayToDraw({ ...onATurnedSchedule, overlays: 1, typing: false })).toBe("upright");
+    expect(whichWayToDraw({ ...onATurnedSchedule, overlays: 1, typing: true })).toBe("upright");
+  });
+
+  it("but the VIEWER keeps its turn — it declared itself a layer, so it is not a sheet", () => {
+    // The viewer holds the same shared body lock every sheet does, so the count alone cannot tell them
+    // apart. The declared layers are what does: one overlay, one layer → no sheet.
+    const viewerOpen = { pathname: "/jobs/41", layers: VIEWER, overlays: 1, held: "clockwise" as const, typing: false };
+    expect(whichWayToDraw(viewerOpen)).toBe("clockwise");
+    expect(whatTheTurnBelongsTo(viewerOpen)).toBe("document-full-screen");
+    // Two viewers, two locks, still no sheet.
+    expect(whichWayToDraw({ ...viewerOpen, layers: TWO_VIEWERS, overlays: 2 })).toBe("clockwise");
+    // A sheet opened ON TOP of the viewer is a sheet: one more overlay than there are layers.
+    expect(whichWayToDraw({ ...viewerOpen, overlays: 2 })).toBe("upright");
+  });
+
+  it("the count comes from the ONE shared body lock, not a second list of overlays", () => {
+    const LOCK = read("src/components/ui/modal-lock.ts");
+    expect(LOCK).toContain("export function overlaysOpen");
+    expect(LOCK).toContain("export function watchOverlays");
+    // Both ends of the count tell the watchers, or a sheet that closed would hold the screen upright.
+    expect(LOCK.slice(LOCK.indexOf("export function lockBodyForModal"))).toContain("tellTheWatchers()");
+    expect(LOCK.slice(LOCK.indexOf("export function unlockBodyForModal"))).toContain("tellTheWatchers()");
+    expect(WATCHER).toContain("watchOverlays");
+    expect(WATCHER).toContain("overlaysOpen()");
+    // Modal — the sheet this is about — is on that lock already, and still renders in place.
+    expect(read("src/components/ui/modal.tsx")).toContain("lockBodyForModal()");
   });
 });
 
@@ -157,6 +320,116 @@ describe("the dock is MEASURED, never a number copied out of dock.tsx", () => {
     // A dock hidden behind a modal has no height and must not be reserved against.
     expect(WATCHER).toContain("if (box.height === 0) return 0");
   });
+
+  it("and the measurement FOLLOWS THE DOCK, not only the direction the screen is drawn", () => {
+    // The 0 above is the honest answer while the dock is hidden (body.modal-open gives it
+    // `display: none`) — but published only when the drawn direction changed, that 0 outlived the thing
+    // that made it true. Turn the phone while a sheet is up, close the sheet, and about 67px of the
+    // turned page's edge stayed drawn under the glass dock until the route or the direction happened to
+    // change. So the measurement is re-published whenever the DOCK's own box changes.
+    const observers = WATCHER.match(/new ResizeObserver\(/g) ?? [];
+    expect(observers.length).toBeGreaterThan(0);
+    const at = WATCHER.indexOf("THE DOCK IS RE-MEASURED");
+    expect(at).toBeGreaterThan(-1);
+    const rule = WATCHER.slice(at);
+    expect(rule).toContain('document.querySelector(".app-dock")');
+    expect(rule).toContain("new ResizeObserver(again)");
+    expect(rule).toContain("bottomChrome: measureTheDock()");
+    // It is not enough to re-measure the HOST: the dock floats over it, so the dock changing size never
+    // changes the host's box and <Turned>'s own observer never fires.
+    expect(read("src/components/turned.tsx")).not.toContain("measureTheDock");
+  });
+});
+
+// ── AND THE WEEK ACTUALLY FITS, which is the whole warrant for turning the phone on /schedule ──────
+
+describe("turned sideways, the whole week is on screen — not still scrolling sideways", () => {
+  /**
+   * The warrant in lib/screens-that-turn.ts promises: "Portrait shows three and scrolls sideways for the
+   * rest; sideways the whole week is on screen at once." It did not. The seven-day grid asked for 48px of
+   * hour gutter plus 7 readable columns = 692px, and the turned box on Erik's phone gives the week's
+   * scroller about 656 — so it still scrolled sideways and still clipped Sunday, and the one screen he
+   * reported from did not deliver the thing it was put on the list for.
+   */
+  /** Erik's phone, turned: the face is ~684 wide, less 0.75rem of face padding each side and the Card's
+   *  two 1px borders — the room the week's own scroller gets. */
+  const ROOM_TURNED = 684 - 24 - 2;
+
+  it("a seven-day week wants more than the turned box has — that is the whole problem", () => {
+    expect(naturalGridWidth(7)).toBe(692);
+    expect(naturalGridWidth(7)).toBeGreaterThan(ROOM_TURNED);
+  });
+
+  it("so inside a turned face it is capped at the room there is, and nothing scrolls sideways", () => {
+    // What the CSS does, in arithmetic: min(what it wants, the room). 658 of 658 fits exactly, and the
+    // columns come out at (658 - 48) / 7 ≈ 87px — five under the portrait minimum, with Sunday on screen.
+    const laidOutAt = Math.min(naturalGridWidth(7), ROOM_TURNED);
+    expect(laidOutAt).toBe(ROOM_TURNED);
+    expect(laidOutAt).toBeLessThanOrEqual(ROOM_TURNED); // ⇒ scrollWidth ≤ clientWidth: no sideways scroll
+    expect(Math.floor((laidOutAt - 48) / 7)).toBeGreaterThanOrEqual(80);
+  });
+
+  it("and the stylesheet really is that min(), scoped to a turned face only", () => {
+    // Upright this must NOT apply: a 370px portrait phone would squeeze seven columns to 46px each,
+    // which is the layout the sideways scroll exists to avoid.
+    expect(CSS).toMatch(
+      /\.turn-face\[data-held\] \.time-grid-columns \{\s*min-width: min\(var\(--grid-natural-w, 0px\), 100%\);\s*\}/,
+    );
+    expect(CSS).toMatch(/\n\.time-grid-columns \{\s*min-width: var\(--grid-natural-w, 0px\);\s*\}/);
+  });
+
+  it("the class and the number both come from the grid, and the width is no longer inline", () => {
+    // An inline min-width cannot be capped by a stylesheet without `!important`, so the grid hands over
+    // its one arithmetic as a custom property instead. The number still lives in exactly one place.
+    const GRID = read("src/components/time-grid.tsx");
+    expect(GRID).toContain('className="time-grid-columns"');
+    expect(GRID).toContain('"--grid-natural-w": `${naturalGridWidth(days.length)}px`');
+    expect(GRID).not.toMatch(/minWidth:\s*days\.length/);
+    expect(GRID).toContain("export function naturalGridWidth");
+    // The day view needs no minimum at all — it already fits.
+    expect(naturalGridWidth(1)).toBe(0);
+  });
+});
+
+// ── A DOCUMENT KEEPS HIS PLACE ACROSS THE TURN ────────────────────────────────────────────────────
+
+describe("turning the phone on page 5 of an invoice does not send him back to page 1", () => {
+  /**
+   * The repaint has kept his place since it was written — but the turn CHANGES WHICH ELEMENT SCROLLS
+   * (the box upright, the quarter-turned face inside it once turned), and by the time the repaint ran the
+   * old scroller's content was gone (scrollTop forced to 0) and the new one had not been scrolled. So the
+   * fraction read at the top of the repaint was 0 every single time, and `if (was > 0)` meant the restore
+   * never ran: page 1, every turn, silently.
+   */
+  it("the fraction is REMEMBERED as he scrolls, not read when the repaint starts", () => {
+    expect(PDF_VIEWER).toContain("const placeKept = useRef(0)");
+    expect(PDF_VIEWER).toContain("const was = placeKept.current");
+    // The old shape — reading the scroller at paint time — is gone.
+    expect(PDF_VIEWER).not.toMatch(/const was =\s*\n?\s*scroller && scroller\.scrollHeight/);
+  });
+
+  it("…from whichever element is scrolling, which is why the listener captures", () => {
+    // A `scroll` event does not bubble, so a listener on the box only hears the box. Capture hears the
+    // quarter-turned face inside it too, which is the element that scrolls once the phone is turned.
+    expect(PDF_VIEWER).toContain('box.addEventListener("scroll", remember, true)');
+    expect(PDF_VIEWER).toContain('box.removeEventListener("scroll", remember, true)');
+    // And an empty list's scroll-to-0 during a repaint is not a place he chose.
+    expect(PDF_VIEWER).toContain("if (repainting.current) return");
+    expect(PDF_VIEWER).toContain("repainting.current = true");
+  });
+
+  it("and it is written back onto whichever element is scrolling AFTER the paint", () => {
+    // Resolved before the awaits, the element can have stopped being the scroller by the time the last
+    // page lands — and a scrollTop written to a box that is not scrolling is silently a no-op.
+    const paint = PDF_VIEWER.slice(PDF_VIEWER.indexOf("const paint = useCallback"));
+    const restore = paint.indexOf("scroller.scrollTop = was * scroller.scrollHeight");
+    expect(restore).toBeGreaterThan(-1);
+    const resolve = paint.lastIndexOf("const scroller = theScroller(scrollRef.current)", restore);
+    expect(resolve).toBeGreaterThan(-1);
+    // The resolve sits with the restore at the END of the paint, not up at the top with the measurement.
+    expect(paint.slice(resolve, restore)).not.toContain("host.innerHTML");
+    expect(PDF_VIEWER).toContain("function theScroller");
+  });
 });
 
 // ── THE GEOMETRY ACTUALLY REACHES THE ELEMENT ─────────────────────────────────────────────────────
@@ -209,7 +482,12 @@ describe("the content gets the swapped dimensions, and the element really wears 
     // `display: contents` is the whole reason this is safe to put in the root of the app shell: with the
     // phone upright the wrapper is not in the layout, and every screen renders what it renders today.
     expect(CSS).toMatch(/\.turn-face \{\s*display: contents;\s*\}/);
-    expect(TURNED).toContain('if (!turned) return <div ref={face} className="turn-face">{children}</div>');
+    // The upright return is a bare `turn-face` div: no data-held, so the CSS above applies, and no inline
+    // style, so there is no box and nothing to position against.
+    const upright = TURNED.slice(TURNED.indexOf("if (!turned)"), TURNED.indexOf("\n  return ("));
+    expect(upright).toContain('<div ref={face} className="turn-face">{children}</div>');
+    expect(upright).not.toContain("data-held");
+    expect(upright).not.toContain("style=");
   });
 
   it("the host becomes the frame, and only while a face inside it is turned", () => {
@@ -254,10 +532,14 @@ describe("the chrome itself is never transformed — only the faces of its contr
     expect(turnedRules()).not.toMatch(/\.app-topbar\b/);
     expect(turnedRules()).not.toMatch(/\.app-dock\b/);
     expect(turnedRules()).not.toMatch(/\.app-bottom-nav\b/);
-    // The only transforms in the whole block are on a control's face and on a turned region.
+    // The only transforms in the whole block are the ONE quarter turn, the origin it turns about, and an
+    // explicit `none` that takes a second turn back off (the belt on the chrome's document-wide rule).
+    // Anything else — a hand-written rotate, a translate, a scale — is a second spelling of the turn.
     const transforms = turnedRules().match(/^\s*transform(-origin)?:.*$/gm) ?? [];
     expect(transforms.length).toBeGreaterThan(0);
-    for (const line of transforms) expect(line).toMatch(/rotate\(var\(--turn-deg|transform-origin/);
+    for (const line of transforms) {
+      expect(line).toMatch(/rotate\(var\(--turn-deg, 0deg\)\);$|transform-origin|transform: none;$/);
+    }
   });
 
   it("the top bar's own element carries no marker — the marker is on each button", () => {

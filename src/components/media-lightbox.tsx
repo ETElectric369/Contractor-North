@@ -149,7 +149,11 @@ export function MediaLightbox({
       {/* `turn-host`: the photo or the PDF is what turns, in the rectangle below the bar. A site photo
           is usually wider than it is tall, so sideways it is drawn at nearly twice the size. */}
       <div className="media-lightbox-body turn-host flex flex-1 items-center justify-center overflow-auto p-2" onClick={onClose}>
-        <Turned>
+        {/* `region`: the SAME declared name this layer registered under, so while this viewer is the
+            innermost layer open it is the one and only face that draws the quarter turn — the page
+            region behind it stays upright, which is what keeps this layer full screen and keeps the
+            photo the right way up. */}
+        <Turned region="document-full-screen">
           {isPdf ? (
             <iframe
               src={url}

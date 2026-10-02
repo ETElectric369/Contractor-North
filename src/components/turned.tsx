@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTheTurn } from "@/components/turns-sideways";
+import { faceDrawsTheTurn, type TurnedRegion } from "@/lib/screens-that-turn";
 import { faceStyle, isTurned, placeTheFace, type Box, type FacePlacement } from "@/lib/turned-geometry";
 
 /**
@@ -29,16 +30,41 @@ import { faceStyle, isTurned, placeTheFace, type Box, type FacePlacement } from 
  * axis of their view arrives in this box as a vertical drag, and it scrolls the way they expect. The
  * same inverse is written out as whereTheFingerLands() in lib/turned-geometry.ts so the claim has a
  * test under it.
+ *
+ * EXACTLY ONE FACE DRAWS THE TURN, AND IT IS THE ONE THAT OWNS IT. Each region says which one it is
+ * (`region`), and faceDrawsTheTurn() in lib/screens-that-turn.ts matches that against the one owner in
+ * the answer. The bug that taught us: the app shell's region and the full-screen viewer inside it both
+ * read "the phone is sideways" and both turned, the two quarter turns composed into a half turn, and a
+ * job photo opened sideways read upside down — and came out SMALLER than in portrait, because the
+ * viewer's `position: fixed` was resolving against the shell's transformed box instead of the window.
+ * With the shell's region left upright while a layer owns the turn, both go away at once.
  */
 
 /** useLayoutEffect, except on the server, where React warns about it and there is nothing to lay out. */
 const useBeforePaint = typeof window === "undefined" ? useEffect : useLayoutEffect;
 
-export function Turned({ children, avoidDock = false }: { children: React.ReactNode; avoidDock?: boolean }) {
-  const { held, bottomChrome } = useTheTurn();
+/**
+ * THE FLOOR UNDER THE RULE ABOVE: is an ancestor face already drawing the turn? Ownership is what
+ * decides, and this is what makes "one turn, never two composed" true even if ownership is ever handed
+ * to the wrong region — the inner face declines rather than adding a second quarter turn. A failure
+ * then reads as "not turned", which a person can see and work around, instead of "upside down".
+ */
+const AlreadyTurned = createContext(false);
+
+export function Turned({
+  children,
+  region,
+  avoidDock = false,
+}: {
+  children: React.ReactNode;
+  region: TurnedRegion;
+  avoidDock?: boolean;
+}) {
+  const { held, owns, bottomChrome } = useTheTurn();
   const face = useRef<HTMLDivElement>(null);
   const [place, setPlace] = useState<FacePlacement | null>(null);
-  const turned = isTurned(held);
+  const insideATurnedFace = useContext(AlreadyTurned);
+  const turned = isTurned(held) && faceDrawsTheTurn(region, owns) && !insideATurnedFace;
   const reserve = avoidDock ? bottomChrome : 0;
 
   useBeforePaint(() => {
@@ -64,22 +90,29 @@ export function Turned({ children, avoidDock = false }: { children: React.ReactN
 
   // Upright: NO BOX. `display: contents` is set in globals.css, nothing is set here, and the children
   // lay out as though this element did not exist.
-  if (!turned) return <div ref={face} className="turn-face">{children}</div>;
+  if (!turned)
+    return (
+      <AlreadyTurned.Provider value={insideATurnedFace}>
+        <div ref={face} className="turn-face">{children}</div>
+      </AlreadyTurned.Provider>
+    );
 
   return (
-    <div
-      ref={face}
-      className="turn-face"
-      data-held={held}
-      style={
-        place
-          ? (faceStyle(place) as React.CSSProperties)
-          : // One frame, before the host has been measured: fill it, unrotated, rather than collapse to
-            // nothing. The measurement happens before paint, so in practice this is never seen.
-            { inset: "0", width: "auto", height: "auto" }
-      }
-    >
-      {children}
-    </div>
+    <AlreadyTurned.Provider value={true}>
+      <div
+        ref={face}
+        className="turn-face"
+        data-held={held}
+        style={
+          place
+            ? (faceStyle(place) as React.CSSProperties)
+            : // One frame, before the host has been measured: fill it, unrotated, rather than collapse to
+              // nothing. The measurement happens before paint, so in practice this is never seen.
+              { inset: "0", width: "auto", height: "auto" }
+        }
+      >
+        {children}
+      </div>
+    </AlreadyTurned.Provider>
   );
 }

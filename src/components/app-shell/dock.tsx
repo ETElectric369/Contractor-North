@@ -251,8 +251,10 @@ function DockInner({ branding, role, badges: badgesProp, features }: DockProps) 
               }`}
               aria-label={s.label}
             >
-              {/* Upright this wrapper has no box at all, so the tile is byte for byte what it is today. */}
-              <Turned>
+              {/* Upright this wrapper has no box at all, so the tile is byte for byte what it is today.
+                  `region="the chrome"`: a tile stands up whenever the phone is turned at all, whatever
+                  the turn belongs to — a button reads upright for the PERSON, not for a route. */}
+              <Turned region="the chrome">
                 <Icon className="relative z-10 h-5 w-5 shrink-0" />
                 <span className="relative z-10 whitespace-nowrap leading-none">{s.short ?? s.label}</span>
               </Turned>
