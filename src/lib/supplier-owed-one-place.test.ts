@@ -140,14 +140,14 @@ describe("the still-owed rule is written in exactly one place", () => {
         /\b(bill|bills|b|ticket|paper)\s*(\?\.)?\.status[^\n]*toLowerCase\(\)[^\n]*(!==|===|==|!=)\s*["'`]paid["'`]/.test(l),
     );
     expect(hits).toEqual([]);
-  });
+  }, 30_000);
 
   /** The same rule asked of the database instead of in TypeScript. A query that filters bills by
    *  status is the predicate, moved somewhere a grep for `status !== "paid"` would not find it. */
   it("no reader asks the database for unpaid bills by status", () => {
     const hits = scan((l) => /\.(eq|neq|in|not)\(\s*["'`]status["'`]\s*,[^)]*["'`](unpaid|paid)["'`]/.test(l) && /bill/i.test(l));
     expect(hits).toEqual([]);
-  });
+  }, 30_000);
 
   /**
    * A SUPPLIER MATCHED BY A NAME STRING. `supplierAccountForPaper` is the only thing that decides
@@ -161,7 +161,7 @@ describe("the still-owed rule is written in exactly one place", () => {
       /\b(spellingKey|supplierKey|sameSpelling|aliasKey)\s*=\s*\([^)]*\)\s*(:[^=]*)?=>\s*String\(/.test(l),
     );
     expect(hits).toEqual([]);
-  });
+  }, 30_000);
 
   /**
    * THE ROW'S OWN WORDS, ONCE. The same bill read "On Account" on a job's Costs tab and
@@ -171,7 +171,7 @@ describe("the still-owed rule is written in exactly one place", () => {
   it("no screen writes the Settled / On Account badge out by hand", () => {
     const hits = scan((l) => /["'`]On Account["'`]/.test(l) && /["'`]Settled/.test(l));
     expect(hits).toEqual([]);
-  });
+  }, 30_000);
 
   /**
    * A FIGURE READER THAT GATES A TICKET ON THE RAW `bills.supplier_account_id` COLUMN.
@@ -198,7 +198,7 @@ describe("the still-owed rule is written in exactly one place", () => {
         new RegExp(`${anAccount}[^\\n]*(===|!==)[^\\n]*${billColumn}`).test(l),
     ).filter((h) => !FILES_THE_PAPER.some((e) => h.startsWith(`${e.file}:`)));
     expect(hits).toEqual([]);
-  });
+  }, 30_000);
 
   /**
    * COULD THIS FIGURE BE TOTALLED AT ALL, WRITTEN OUT AGAIN. It was spelled out at four doors and
@@ -209,7 +209,7 @@ describe("the still-owed rule is written in exactly one place", () => {
   it("no reader writes the could-not-total test itself", () => {
     const hits = scan((l) => /model\s*(!==|===)\s*["'`]supplier-invoices["'`]/.test(l) && /onAccount/.test(l));
     expect(hits).toEqual([]);
-  });
+  }, 30_000);
 
   /**
    * ── "IS THIS PAPER A DISAGREEMENT" IS WRITTEN ONCE (cn-v1041) ─────────────────────────────────

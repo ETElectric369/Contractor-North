@@ -20,7 +20,7 @@ import {
   type MoneyChartMonth,
   type MoneySeriesKey,
 } from "@/lib/analytics/money-chart";
-import { BUCKETS_BESIDE_FUEL, computeOwnerMoney, ownerMoneyChartWindow, type OwnerMoney, type OwnerMoneyMonth } from "@/lib/analytics/owner-money";
+import { BUCKETS_BESIDE_FUEL, OWNER_DRAW_SEEN, computeOwnerMoney, ownerMoneyChartWindow, type OwnerMoney, type OwnerMoneyMonth } from "@/lib/analytics/owner-money";
 import { PNL_WORDS, pnlLines } from "@/lib/analytics/profit-and-loss";
 import { MoneyChartSvg } from "@/app/(app)/analytics/money-chart-svg";
 
@@ -54,6 +54,12 @@ const row = (month: string, f: Partial<OwnerMoneyMonth> = {}): OwnerMoneyMonth =
     left: Math.round((received - materialsAndBills - crewPay - crewMileagePaid - fuel - businessCostsTotal - putOnShelf - shopStockLost) * 100) / 100,
     ownerHours: 0,
     perOwnerHour: null,
+    // The owner's build time and its contra net to zero, so `left` above is untouched by them.
+    ownerBuildTimeOnJobs: f.ownerBuildTimeOnJobs ?? 0,
+    ownerOnSiteHours: f.ownerOnSiteHours ?? 0,
+    ownerOfficeHours: f.ownerOfficeHours ?? 0,
+    ownerUncostedBuildTimeHours: f.ownerUncostedBuildTimeHours ?? 0,
+    ownerDraw: f.ownerDraw ?? 0,
   };
 };
 const money = (months: OwnerMoneyMonth[]): OwnerMoney => ({
@@ -62,6 +68,7 @@ const money = (months: OwnerMoneyMonth[]): OwnerMoney => ({
   months,
   caveats: [],
   owners: [],
+  ownerDrawSeen: OWNER_DRAW_SEEN,
   onShelfNow: 0,
 });
 
@@ -218,19 +225,28 @@ describe("buildMoneyChartData: what this viewer's chart holds", () => {
     expect(d.months.map((m) => m.month)).toEqual(["2026-07", "2026-08", "2026-09"]);
   });
 
-  it("the owner gets every series, Revenue and Net Profit (Owner's Draw) on by default, each named by its profit-and-loss line", () => {
+  it("the owner gets every series, Revenue and Net Profit on by default, each named by its profit-and-loss line", () => {
     const d = buildMoneyChartData(etYear(), { ownerFigures: true });
     expect(d.series.map((s) => s.key)).toEqual(["collected", "gross", "left", "materials", "crewPay", "business"]);
-    expect(d.series.map((s) => s.label)).toEqual(["Revenue", "Gross Profit", "Net Profit (Owner's Draw)", "Materials & Bills", "Crew Pay (1099)", "Overhead"]);
+    expect(d.series.map((s) => s.label)).toEqual(["Revenue", "Gross Profit", "Net Profit", "Materials & Bills", "Crew Pay (1099)", "Overhead"]);
     expect(defaultSeriesOn(d.series)).toEqual(["collected", "left"]);
     // The same words for every viewer: there is no register to pass any more.
     expect(buildMoneyChartData(etYear(), { ownerFigures: true }).series.find((s) => s.key === "left")!.label).toBe(PNL_WORDS.netProfit);
   });
 
   it("every series is a line of the profit and loss: every COGS line has one, Overhead is one, so the bars account for every cent", () => {
-    const cogsLines = pnlLines({ stockInMaterials: true }).filter((l) => l.kind === "cost" && l.section === "cogs");
+    // A NETTING PAIR ACCOUNTS FOR NO MONEY, so it needs no bar (0373). The owner's build time is charged
+    // inside COGS and booked straight back on the next line, so the pair contributes exactly $0 of
+    // Revenue: two bars that cancel would be noise on a chart whose whole claim is that its bars account
+    // for every cent. Every COGS line that DOES carry money still has to have a series, which is what
+    // this holds - so a bucket moved into COGS can never quietly fall off the chart.
+    const cogsLines = pnlLines({ stockInMaterials: true, ownerBuildTime: true }).filter(
+      (l) => l.kind === "cost" && l.section === "cogs" && !l.netting,
+    );
     const drawn = new Set(Object.values(SERIES_LINE));
     for (const l of cogsLines) expect(drawn.has(l.key), l.label).toBe(true);
+    // And the pair really is excluded by NETTING, not by being absent from the layout.
+    expect(pnlLines({ stockInMaterials: true, ownerBuildTime: true }).filter((l) => l.netting)).toHaveLength(2);
     expect(drawn.has("total_overhead")).toBe(true);
     expect(drawn.has("revenue") && drawn.has("gross_profit") && drawn.has("net_profit")).toBe(true);
     // Each chip says its line's own words.
@@ -244,7 +260,7 @@ describe("buildMoneyChartData: what this viewer's chart holds", () => {
     expect(all.series.map((s) => s.label)).toEqual([
       "Revenue",
       "Gross Profit",
-      "Net Profit (Owner's Draw)",
+      "Net Profit",
       "Materials & Bills",
       "Stock Lost",
       "Crew Pay (1099)",
@@ -421,7 +437,7 @@ describe("MoneyChartSvg: the markup", () => {
     const d = buildMoneyChartData(etYear(), { ownerFigures: true });
     const html = render(d.months, ["collected", "left"], "2026-08");
     expect(html.match(/aria-pressed="true"/g)).toHaveLength(1);
-    expect(html).toMatch(/aria-pressed="true" aria-label="August 2026: Revenue \$19,132\.53, Net Profit \(Owner&#x27;s Draw\) \$11,482\.30"/);
+    expect(html).toMatch(/aria-pressed="true" aria-label="August 2026: Revenue \$19,132\.53, Net Profit \$11,482\.30"/);
     expect(html.match(/opacity-40/g)).toHaveLength(5);
   });
 

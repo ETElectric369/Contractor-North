@@ -5,21 +5,21 @@ describe("laborCostForJob — pay cost (job hub == analytics)", () => {
   const prof = (hourly: number) => ({ hourly_rate: hourly });
   it("un-split closed entry on the job: gross hours × pay rate", () => {
     const e = { job_id: "J", status: "closed", clock_in: "2026-06-01T08:00:00Z", clock_out: "2026-06-01T16:00:00Z", lunch_minutes: 0, profiles: prof(40) };
-    expect(laborCostForJob([e], "J")).toEqual({ hours: 8, cost: 320 , unratedHours: 0, ownerHours: 0 });
+    expect(laborCostForJob([e], "J")).toEqual({ hours: 8, cost: 320, unratedHours: 0, ownerHours: 0, ownerCost: 0, uncostedOwnerHours: 0 });
   });
   it("honors rate_override (supervisor rate) over the base", () => {
     const e = { job_id: "J", status: "closed", clock_in: "2026-06-01T08:00:00Z", clock_out: "2026-06-01T16:00:00Z", lunch_minutes: 0, rate_override: 60, profiles: prof(40) };
-    expect(laborCostForJob([e], "J")).toEqual({ hours: 8, cost: 480 , unratedHours: 0, ownerHours: 0 });
+    expect(laborCostForJob([e], "J")).toEqual({ hours: 8, cost: 480, unratedHours: 0, ownerHours: 0, ownerCost: 0, uncostedOwnerHours: 0 });
   });
   it("a split shift is two entries: each job costs only its own piece (0288)", () => {
     const left = { job_id: "J", status: "closed", clock_in: "2026-06-01T08:00:00Z", clock_out: "2026-06-01T09:00:00Z", lunch_minutes: 0, profiles: prof(40) };
     const right = { job_id: "OTHER", status: "closed", clock_in: "2026-06-01T09:00:00Z", clock_out: "2026-06-01T16:00:00Z", lunch_minutes: 0, profiles: prof(40) };
-    expect(laborCostForJob([left, right], "J")).toEqual({ hours: 1, cost: 40, unratedHours: 0, ownerHours: 0 });
-    expect(laborCostForJob([left, right], "OTHER")).toEqual({ hours: 7, cost: 280, unratedHours: 0, ownerHours: 0 });
+    expect(laborCostForJob([left, right], "J")).toEqual({ hours: 1, cost: 40, unratedHours: 0, ownerHours: 0, ownerCost: 0, uncostedOwnerHours: 0 });
+    expect(laborCostForJob([left, right], "OTHER")).toEqual({ hours: 7, cost: 280, unratedHours: 0, ownerHours: 0, ownerCost: 0, uncostedOwnerHours: 0 });
   });
   it("a job-less Drive piece belongs to no job", () => {
     const drive = { job_id: null, job_code: "DRIVE", status: "closed", clock_in: "2026-06-01T07:00:00Z", clock_out: "2026-06-01T08:00:00Z", lunch_minutes: 0, profiles: prof(40) };
-    expect(laborCostForJob([drive], "J")).toEqual({ hours: 0, cost: 0, unratedHours: 0, ownerHours: 0 });
+    expect(laborCostForJob([drive], "J")).toEqual({ hours: 0, cost: 0, unratedHours: 0, ownerHours: 0, ownerCost: 0, uncostedOwnerHours: 0 });
   });
   it("an open entry costs nothing yet", () => {
     const open = { job_id: "J", status: "open", clock_in: "2026-06-01T08:00:00Z", clock_out: null, lunch_minutes: 0, profiles: prof(40) };
@@ -251,7 +251,7 @@ describe("laborCostForJob — unrated hours are reported, never swallowed (v800 
       lunch_minutes: 0,
       profiles: { id: "p1", full_name: "New Hire", hourly_rate: null },
     };
-    expect(laborCostForJob([e], "J")).toEqual({ hours: 8, cost: 0, unratedHours: 8, ownerHours: 0 });
+    expect(laborCostForJob([e], "J")).toEqual({ hours: 8, cost: 0, unratedHours: 8, ownerHours: 0, ownerCost: 0, uncostedOwnerHours: 0 });
   });
 
   it("an explicit fallback rate prices them, and nothing is left unrated", () => {
@@ -263,7 +263,7 @@ describe("laborCostForJob — unrated hours are reported, never swallowed (v800 
       lunch_minutes: 0,
       profiles: { id: "p1", full_name: "New Hire", hourly_rate: null },
     };
-    expect(laborCostForJob([e], "J", 40)).toEqual({ hours: 8, cost: 320, unratedHours: 0, ownerHours: 0 });
+    expect(laborCostForJob([e], "J", 40)).toEqual({ hours: 8, cost: 320, unratedHours: 0, ownerHours: 0, ownerCost: 0, uncostedOwnerHours: 0 });
   });
 });
 
@@ -326,14 +326,25 @@ describe("labor lines claim their hours (0255)", () => {
 });
 
 /**
- * THE OWNER IS PAID BY DRAW (0286). Erik bills his own hours at $125 and the app ALSO costed them
- * at $125, so every hour he worked netted $0 and all-time job profit read -$1,085 instead of about
- * +$35,847. The view now reads his hourly_rate as 0 and carries paid_by_draw; these pin what every
- * cost reader does with that, and that billing did not move by a cent.
+ * THE OWNER'S BUILD TIME IS A DIRECT COST, AT A COST RATE HE SETS (0373; Erik, 2026-10-01: "build time,
+ * including my build time is considered COGS, so it would be considered a direct cost").
+ *
+ * WHAT CAME BEFORE. Erik bills his own hours at $125 and the app ALSO costed them at $125, so every hour
+ * he worked netted exactly $0 and all-time job profit read -$1,085 instead of about +$35,847. 0286 fixed
+ * that by making his hours cost nothing - which overshot: it then INFLATED every job he worked, and he
+ * works about 80% of the hours. The defect was never "his time is a cost", it was that his COST equalled
+ * his PRICE. So he has a cost rate of his own now, separate from the bill rate, and the margin on his
+ * labour is the gap between them.
+ *
+ * These pin all three states - a rate set, no rate set, and billing - and that billing did not move by a
+ * cent. The pay column stays 0 for him: he is still paid no wage at all (0286's triggers stand).
  */
-describe("the owner's hours are hours, never a cost (0286)", () => {
-  // Exactly what profile_pay hands back for Erik after 0286: pay 0, bill kept, the flag set.
-  const erikDraw = { id: "e", full_name: "Erik Taylor", hourly_rate: 0, bill_rate: 125, paid_by_draw: true };
+describe("the owner's build time is a cost at his cost rate, never a wage (0373)", () => {
+  // Exactly what profile_pay hands back for Erik: pay 0 (no wage), bill kept, the flag set, and the cost
+  // rate HE TYPED. $65 is a figure for this test only - the real one is Erik's to set, and it is NOT 125.
+  const erikDraw = { id: "e", full_name: "Erik Taylor", hourly_rate: 0, bill_rate: 125, paid_by_draw: true, cost_rate: 65 };
+  // The same owner before he has set anything: null, which is not $0.
+  const erikNoRate = { id: "e", full_name: "Erik Taylor", hourly_rate: 0, bill_rate: 125, paid_by_draw: true, cost_rate: null };
   const brianCrew = { id: "b", full_name: "Brian Taylor", hourly_rate: 40, bill_rate: 85, paid_by_draw: false };
   const shift = (profiles: any, extra: Record<string, unknown> = {}) => ({
     id: `${profiles.id}-1`,
@@ -346,27 +357,56 @@ describe("the owner's hours are hours, never a cost (0286)", () => {
     ...extra,
   });
 
-  it("an owner's 8 hours cost $0, count as hours and as owner hours, and are never unrated", () => {
-    expect(laborCostForJob([shift(erikDraw)], "J")).toEqual({ hours: 8, cost: 0, unratedHours: 0, ownerHours: 8 });
+  it("an owner's 8 hours cost 8 x his cost rate, and are never 'unrated' (he has no wage to be missing)", () => {
+    expect(laborCostForJob([shift(erikDraw)], "J")).toEqual({
+      hours: 8,
+      cost: 520,
+      unratedHours: 0,
+      ownerHours: 8,
+      ownerCost: 520,
+      uncostedOwnerHours: 0,
+    });
   });
 
-  it("even a leftover rate_override on the owner's shift costs nothing", () => {
-    expect(laborCostForJob([shift(erikDraw, { rate_override: 125 })], "J")).toEqual({ hours: 8, cost: 0, unratedHours: 0, ownerHours: 8 });
+  it("no cost rate set is NOT $0: the hours come back as uncosted and the cost is short by them", () => {
+    expect(laborCostForJob([shift(erikNoRate)], "J")).toEqual({
+      hours: 8,
+      cost: 0,
+      // NEVER the crew alarm: unratedHours means a WAGE went missing, and he has no wage.
+      unratedHours: 0,
+      ownerHours: 8,
+      ownerCost: 0,
+      uncostedOwnerHours: 8,
+    });
   });
 
-  it("a fallback rate never prices the owner either", () => {
-    expect(laborCostForJob([shift(erikDraw)], "J", 125)).toEqual({ hours: 8, cost: 0, unratedHours: 0, ownerHours: 8 });
+  it("a leftover rate_override on his shift is ignored: the cost rate is the only figure", () => {
+    // An override is a wage by another name and the database refuses a new one (0286). $125 is also his
+    // BILL rate, so honouring it here would rebuild the exact bug: cost == price, every hour netting $0.
+    expect(laborCostForJob([shift(erikDraw, { rate_override: 125 })], "J").ownerCost).toBe(520);
   });
 
-  it("split shifts: each of the owner's pieces lands in ownerHours on its own job", () => {
+  it("a crew fallback rate never prices the owner: his rate is his own column", () => {
+    expect(laborCostForJob([shift(erikNoRate)], "J", 125).ownerCost).toBe(0);
+    expect(laborCostForJob([shift(erikNoRate)], "J", 125).uncostedOwnerHours).toBe(8);
+  });
+
+  it("split shifts: each of the owner's pieces is costed to its own job (0288)", () => {
     const here = shift(erikDraw, { clock_out: "2026-06-01T18:00:00Z" });
     const there = shift(erikDraw, { job_id: "K", clock_in: "2026-06-01T18:00:00Z" });
-    expect(laborCostForJob([here, there], "J")).toEqual({ hours: 3, cost: 0, unratedHours: 0, ownerHours: 3 });
-    expect(laborCostForJob([here, there], "K")).toEqual({ hours: 5, cost: 0, unratedHours: 0, ownerHours: 5 });
+    expect(laborCostForJob([here, there], "J")).toMatchObject({ hours: 3, cost: 195, ownerHours: 3, ownerCost: 195 });
+    expect(laborCostForJob([here, there], "K")).toMatchObject({ hours: 5, cost: 325, ownerHours: 5, ownerCost: 325 });
   });
 
-  it("a crew member beside him is costed exactly as before", () => {
-    expect(laborCostForJob([shift(erikDraw), shift(brianCrew)], "J")).toEqual({ hours: 16, cost: 320, unratedHours: 0, ownerHours: 8 });
+  it("a crew member beside him is costed exactly as before, and the two are told apart", () => {
+    expect(laborCostForJob([shift(erikDraw), shift(brianCrew)], "J")).toEqual({
+      hours: 16,
+      cost: 320 + 520,
+      unratedHours: 0,
+      ownerHours: 8,
+      ownerCost: 520,
+      uncostedOwnerHours: 0,
+    });
   });
 
   it("a row without the flag still costs whatever the view says, so the view is the boundary", () => {
@@ -384,11 +424,15 @@ describe("the owner's hours are hours, never a cost (0286)", () => {
     expect(total).toBe(1680);
   });
 
-  it("the same owner hours bill $125 and cost $0 on one job: the whole $1,000 is left, not $0", () => {
+  it("THE MARGIN ON HIS LABOUR IS THE GAP: billed at $125, costed at $65, $480 left on 8 hours", () => {
     const e = { ...shift(erikDraw), id: "e1" };
     const billed = computeJobLaborBilling([e], 0).total;
     const cost = laborCostForJob([e], "J").cost;
-    expect(billed - cost).toBe(1000);
+    expect(billed).toBe(1000);
+    expect(cost).toBe(520);
+    // NOT $1,000 (0286, which costed him nothing and so inflated this) and NOT $0 (the original bug,
+    // where his cost equalled his price). The gap between the two rates is what his hour earns.
+    expect(billed - cost).toBe(480);
   });
 });
 

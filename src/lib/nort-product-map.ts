@@ -19,13 +19,14 @@ import { PNL_WORDS as P, cogsWords, overheadWords } from "@/lib/analytics/profit
  * A map that lags the product recreates the exact failure it was built to end.
  *
  * THE MONEY WORDS ARE THE PROFIT AND LOSS'S OWN (Erik, 2026-09-28): the Analytics line below is built
- * from profit-and-loss.ts, so Nort names Revenue, Cost of Goods Sold (COGS), Gross Profit, Overhead
- * and Net Profit (Owner's Draw), and which lines sit in each half, exactly as the screens do.
+ * from profit-and-loss.ts, so Nort names Revenue, Cost of Goods Sold (COGS), Gross Profit, Overhead,
+ * Net Profit and the Owner's Draw line below it, and which lines sit in each section, exactly as the
+ * screens do.
  */
 
 /** Analytics, in the profit and loss's words: the card's COGS lines (stock bought inside Materials &
  *  Bills, as the card shows it) and the Overhead buckets come from the data, never a copy. */
-const ANALYTICS_LINE = `- Analytics (/analytics, office only): Money by Month, a bar for each month's ${P.revenue} and ${P.netProfit}, with chips that add ${P.grossProfit} and each cost line; under it the Owner's Draw card (This Month, Last Month, This Year, or a month tapped on the chart), a profit and loss in the accounting words: ${P.revenue}; ${P.cogs}: ${cogsWords({ stockInMaterials: true })}; ${P.totalCogs}; ${P.grossProfit} and ${P.grossMargin}; ${P.overhead}: ${overheadWords()}; ${P.totalOverhead}; ${P.netProfit}, before income tax. ${P.revenue} is money received. The owner's hours are hours, never a cost. The owner's Office Can See This switch decides whether the office sees the card and the chart's other bars. For Your Accountant (a button on Analytics) opens the page that downloads one spreadsheet for a month, a quarter or a year, its Summary in the same layout. Say these figures in these words; you cannot read the card itself, so point to it.`;
+const ANALYTICS_LINE = `- Analytics (/analytics, office only): Money by Month, a bar for each month's ${P.revenue} and ${P.netProfit}, with chips that add ${P.grossProfit} and each cost line; under it the ${P.netProfit} card (This Month, Last Month, This Year, or a month tapped on the chart), a profit and loss in the accounting words: ${P.revenue}; ${P.cogs}: ${cogsWords({ stockInMaterials: true })}; ${P.totalCogs}; ${P.grossProfit} and ${P.grossMargin}; ${P.overhead}: ${overheadWords()}; ${P.totalOverhead}; ${P.netProfit}, before income tax; and below the line ${P.ownerDraw}, which is equity, what the owner took out, and is never subtracted. ${P.revenue} is money received. The owner's own build time: his hours on a job ARE a direct cost of that job, at a cost rate he sets, so ${P.cogs} carries ${P.ownerBuildTime} - and ${P.ownerBuildTimeContra} books the same amount straight back, because a sole proprietor cannot deduct his own labour, so ${P.netProfit} is unchanged to the cent. His office hours are ${P.overhead}, never on a job. He is never paid wages for any of it. If he has set no cost rate, his build time is counted and not costed, the card says so, and the jobs he worked read high. The owner's Office Can See This switch decides whether the office sees the card and the chart's other bars. For Your Accountant (a button on Analytics) opens the page that downloads one spreadsheet for a month, a quarter or a year, its Summary in the same layout. Say these figures in these words; you cannot read the card itself, so point to it.`;
 
 export const NORT_PRODUCT_MAP = `
 WHERE THINGS LIVE (the app's surfaces — point people here; you cannot press these buttons yourself):

@@ -10,7 +10,7 @@ describe("ownerRegister: the owner's money in the reader's own register (0286)",
       viewerIsOwner: true,
       hoursLabel: "Your Hours",
       perHourPhrase: "per hour you worked",
-      leftFor: "Owner's Draw",
+      leftFor: "Net Profit",
       notOnPayBoard: "You are paid by owner's draw, so your hours are not on this board.",
     });
   });
@@ -22,17 +22,17 @@ describe("ownerRegister: the owner's money in the reader's own register (0286)",
       count: 1,
       hoursLabel: "Erik's Hours",
       perHourPhrase: "per hour Erik worked",
-      leftFor: "Owner's Draw",
+      leftFor: "Net Profit",
       notOnPayBoard: "Erik is paid by owner's draw, so Erik's hours are not on this board.",
     });
   });
 
   it("two owners are 'the owners', whoever is reading", () => {
     const v = ownerRegister([erik, { id: "c", name: "Chris Taylor" }], "e");
-    expect(v).toMatchObject({ count: 2, leftFor: "Owner's Draw", hoursLabel: "Owners' Hours" });
+    expect(v).toMatchObject({ count: 2, leftFor: "Net Profit", hoursLabel: "Owners' Hours" });
   });
 
   it("no name to say: 'the owner'", () => {
-    expect(ownerRegister([{ id: "x", name: null }], "y").leftFor).toBe("Owner's Draw");
+    expect(ownerRegister([{ id: "x", name: null }], "y").leftFor).toBe("Net Profit");
   });
 });

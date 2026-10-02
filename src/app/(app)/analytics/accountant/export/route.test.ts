@@ -135,7 +135,7 @@ describe("GET /analytics/accountant/export", () => {
     expect(names).toEqual(["Summary", "Income", "Costs", "People", "Open", "Stock"]);
     // The Summary is a profit and loss, its bottom line named exactly (XML-escaped in the sheet).
     const sheet1 = parts.get("xl/worksheets/sheet1.xml")!;
-    for (const line of ["Revenue", "Cost of Goods Sold (COGS)", "Total COGS", "Gross Profit", "Overhead", "Total Overhead", "Net Profit (Owner&apos;s Draw)"]) {
+    for (const line of ["Revenue", "Cost of Goods Sold (COGS)", "Total COGS", "Gross Profit", "Overhead", "Total Overhead", "Net Profit"]) {
       expect(sheet1, line).toContain(`<t xml:space="preserve">${line}</t>`);
     }
     expect(state.reads).not.toContain("accountant_exports");
@@ -176,7 +176,7 @@ describe("GET /analytics/accountant/export", () => {
     const own = unzip(new Uint8Array(await (await GET(req("period=2026-Q3&as=csv"))).arrayBuffer()))
       .map((f) => text(f.data))
       .join("\n");
-    expect(own).toContain("Net Profit (Owner's Draw),");
+    expect(own).toContain("Net Profit,");
     expect(own).toContain("\r\nGross Profit,");
   });
 

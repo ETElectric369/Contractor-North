@@ -195,7 +195,7 @@ describe("markPeriodPaid — the snapshot is priced from the rows it CLAIMED", (
  */
 describe("the wage doors refuse the owner (0286)", () => {
   const ERIK = "e0000000-0000-4000-8000-000000000001";
-  const said = "Erik Taylor is the owner and is paid by owner's draw, not wages, so there is nothing to record here. What the owner takes out belongs in the accountant's books.";
+  const said = "Erik Taylor is the owner and is paid by owner's draw, not wages, so there is nothing to record here. What the owner takes out shows on Analytics as Owner's Draw, below Net Profit.";
 
   it("markPeriodPaid refuses before any period check or lock", async () => {
     state.client = fakeSupabase(

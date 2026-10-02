@@ -109,7 +109,11 @@ describe("a member's edit on /team", () => {
     expect(src).not.toContain("dailyReports && !!(m as any).crew_lead");
     expect(src).toContain("dailyReports={dailyReports}");
     expect(src).not.toContain("crewLeadDoor");
-    // The rates are not a switch's door.
-    expect(src).toMatch(/\{isAdmin && \(\s*<MemberRate/);
+    // THE RATES ARE NOT A SWITCH'S DOOR. They are drawn for an admin, gated only on the rates having
+    // actually been READ (2026-10-01): when the profile_pay read fails in a migration window every box
+    // arrives null and renders $0.00, and a save on top of that wrote the zeros back as nulls - so the
+    // boxes are hidden and the page says why instead. A read guard, never a feature switch.
+    expect(src).toMatch(/\{isAdmin && !payRead\.problem && \(\s*<MemberRate/);
+    expect(src).not.toMatch(/featureOn\([^)]*\)[^\n]*<MemberRate/);
   });
 });

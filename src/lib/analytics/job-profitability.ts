@@ -33,9 +33,16 @@ export type JobProfitRow = {
   rev: number;
   cost: number;
   profit: number;
-  /** Hours the owner worked on this job (0286). He is paid by owner's draw, so they are never in
-   *  `cost`; they are how much of his own time the profit bought. */
+  /** Hours the owner worked on this job. BUILD TIME IS A DIRECT COST (Erik, 2026-10-01), so these
+   *  hours ARE in `cost`, at the cost rate he set - and in `ownerCost` on their own, so a screen can
+   *  still say whose time it was. They are never a wage: nothing pays him, and the company's profit and
+   *  loss books the same amount straight back, so his tax figure is untouched. */
   ownerHours: number;
+  /** His share of `cost`: those hours in dollars. $0 while he has set no cost rate. */
+  ownerCost: number;
+  /** His hours here with no cost rate behind them. `cost` is short by exactly these, so this row's
+   *  profit reads HIGH until a rate is set - said in words wherever the row is drawn, never guessed. */
+  uncostedOwnerHours: number;
   /** profit / ownerHours: what the job left the owner per hour he put in. Null when he put in no
    *  hours, and null when nothing has been collected yet (a rate on no money is not a rate). */
   perOwnerHour: number | null;
@@ -117,7 +124,9 @@ export function computeJobProfitRows(inp: ProfitInputs): JobProfitRow[] {
   return ((inp.jobs ?? []) as any[])
     .map((j) => {
       const rev = Math.max(0, (revenueByJob.get(j.id) ?? 0) - (refundByJob.get(j.id) ?? 0));
-      // Crew labor only: the owner's hours come back as ownerHours and cost $0 (0286).
+      // ALL the labour this job took, the owner's build time included (Erik, 2026-10-01: "build time,
+      // including my build time is considered COGS"). His share comes back on its own too, so a screen
+      // can name it without re-deciding the rule.
       const labor = laborCostForJob((inp.entries ?? []) as any[], j.id);
       const cost = labor.cost + (matCost.get(j.id) ?? 0);
       const profit = rev - cost;
@@ -130,6 +139,8 @@ export function computeJobProfitRows(inp: ProfitInputs): JobProfitRow[] {
         cost,
         profit,
         ownerHours: labor.ownerHours,
+        ownerCost: labor.ownerCost,
+        uncostedOwnerHours: labor.uncostedOwnerHours,
         perOwnerHour: perOwnerHourOf(rev, profit, labor.ownerHours),
       };
     })
@@ -214,11 +225,14 @@ async function fetchProfitInputs(supabase: any, jobId?: string): Promise<ProfitI
 }
 
 /**
- * BUDGET BURN KEEPS ITS COST MEANING (0286, deliberately NOT redefined). remaining/burnPct/overBudget
- * are still cost against the estimate, and cost no longer includes the owner's hours. So on a job
- * the owner works himself, burn can read low while the job is well along: the hours were spent, they
- * just are not a cost. `ownerHours` (on the row) sits beside burn for exactly that reason, and Nort's
- * get_job_financials says so, so a $0 labor actual is never read as "barely started".
+ * BUDGET BURN IS COST AGAINST THE ESTIMATE, and the owner's build time is now part of that cost (Erik,
+ * 2026-10-01). remaining/burnPct/overBudget therefore finally mean what an estimator reads them to
+ * mean on a job the owner works himself: under 0286 his hours cost $0, so burn read LOW while the job
+ * was well along, and the caveat on Nort's get_job_financials existed only to warn about it.
+ *
+ * THE ONE CASE LEFT WHERE BURN STILL READS LOW: he has set no cost rate. Then his hours are counted and
+ * not costed, by design - `uncostedOwnerHours` on the row is how a screen or Nort knows to say so, and
+ * nothing guesses a figure to fill the gap.
  */
 export type JobFinancials = JobProfitRow & {
   estimate: number;
@@ -235,7 +249,9 @@ export async function getJobFinancials(supabase: any, jobId: string): Promise<Jo
   const inp = await fetchProfitInputs(supabase, jobId);
   const row = computeJobProfitRows(inp).find((r) => r.id === jobId)
     // computeJobProfitRows drops jobs with zero rev AND zero cost; synthesize a zero row so a brand-new job still answers.
-    ?? (inp.jobs[0] ? { id: jobId, job_number: inp.jobs[0].job_number, name: inp.jobs[0].name, status: inp.jobs[0].status, rev: 0, cost: 0, profit: 0, ownerHours: 0, perOwnerHour: null } : null);
+    ?? (inp.jobs[0]
+      ? { id: jobId, job_number: inp.jobs[0].job_number, name: inp.jobs[0].name, status: inp.jobs[0].status, rev: 0, cost: 0, profit: 0, ownerHours: 0, ownerCost: 0, uncostedOwnerHours: 0, perOwnerHour: null }
+      : null);
   if (!row) return null;
 
   const fin = await jobProgressFinancials(supabase, jobId);
@@ -472,23 +488,43 @@ export type ProfitByType = {
   cost: number;
   profit: number;
   marginPct: number | null;
-  /** Owner hours across the type's jobs (0286: never a cost). */
+  /**
+   * Owner hours across the type's jobs. HIS ON-SITE HOURS ARE NOW IN `cost` (Erik, 2026-10-01: "build
+   * time, including my build time is considered COGS") - this row's doc comment said "0286: never a
+   * cost", which stopped being true the moment laborCostForJob started costing them, and a reader who
+   * believed it would call an owner-worked type more profitable than it is.
+   */
   ownerHours: number;
+  /** His share of `cost`: the type's jobs' owner build time in dollars. $0 until he sets a cost rate. */
+  ownerCost: number;
+  /**
+   * OWNER hours across the type with no cost rate behind them, so `cost` is SHORT by them and `profit`
+   * and `marginPct` read high. Carried because the tool's own note tells a model to check this before
+   * quoting a cost, and the field it was told to check did not exist: with no rate set a type he worked
+   * 40 hours on reported an 85% margin against another type's 63%, and at $65/hr the same rows read 53%
+   * against 63% - the wrong answer to "what kind of work makes me the most money", with no way to say so.
+   */
+  uncostedOwnerHours: number;
   /** profit / ownerHours across the type, or null (no owner hours, or nothing collected). */
   profitPerOwnerHour: number | null;
 };
 
 /** Pure — roll per-job profit rows up by work type. `typeOf` maps job id → type name. */
 export function computeProfitByType(rows: JobProfitRow[], typeOf: Map<string, string>): ProfitByType[] {
-  const groups = new Map<string, { revenue: number; cost: number; profit: number; jobs: number; ownerHours: number }>();
+  type Group = { revenue: number; cost: number; profit: number; jobs: number; ownerHours: number; ownerCost: number; uncosted: number };
+  const groups = new Map<string, Group>();
   for (const r of rows) {
     const type = typeOf.get(r.id) ?? "Uncategorized";
-    const g = groups.get(type) ?? { revenue: 0, cost: 0, profit: 0, jobs: 0, ownerHours: 0 };
+    const g = groups.get(type) ?? { revenue: 0, cost: 0, profit: 0, jobs: 0, ownerHours: 0, ownerCost: 0, uncosted: 0 };
     g.revenue += r.rev;
     g.cost += r.cost;
     g.profit += r.profit;
     g.jobs += 1;
     g.ownerHours += Number(r.ownerHours) || 0;
+    // His share of the cost, and the hours the cost is SHORT by - summed exactly as ownerHours is, so a
+    // reader of this row can say what the type's margin is missing instead of quoting it as a fact.
+    g.ownerCost += Number(r.ownerCost) || 0;
+    g.uncosted += Number(r.uncostedOwnerHours) || 0;
     groups.set(type, g);
   }
   return [...groups.entries()]
@@ -500,6 +536,8 @@ export function computeProfitByType(rows: JobProfitRow[], typeOf: Map<string, st
       profit: round2(g.profit),
       marginPct: g.revenue > 0 ? Math.round((g.profit / g.revenue) * 100) : null,
       ownerHours: round2(g.ownerHours),
+      ownerCost: round2(g.ownerCost),
+      uncostedOwnerHours: round2(g.uncosted),
       profitPerOwnerHour: perOwnerHourOf(g.revenue, g.profit, g.ownerHours),
     }))
     .sort((a, b) => b.profit - a.profit);
