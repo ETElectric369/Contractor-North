@@ -1116,72 +1116,78 @@ export function CalendarView({
     "relative flex h-8 w-8 shrink-0 items-center justify-center rounded-lg before:absolute before:-inset-1.5 before:content-['']";
 
   return (
-    <div className="space-y-3">
-      {/* ROW 1 — paging + title + the door icons (Everyone's Day, map, person filter), every one a
-          44px target. The SectionSubnav pill above stays the ONLY brand-lit chrome. */}
-      <div className="flex items-center gap-1">
-        <Button size="icon-sm" variant="outline" onClick={() => shiftAnchor(-1)} aria-label="Previous" title="Previous">
-          <ChevronLeft className="h-4 w-4" />
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => nav(view, todayK)}
-          className="relative overflow-visible! before:absolute before:inset-x-0 before:-inset-y-1.5 before:content-['']"
-        >
-          Today
-        </Button>
-        <Button size="icon-sm" variant="outline" onClick={() => shiftAnchor(1)} aria-label="Next" title="Next">
-          <ChevronRight className="h-4 w-4" />
-        </Button>
-        {/* The way back out of the day drill — the PWA has no back chrome. */}
-        {view === "day" && (
-          <button
-            onClick={() => nav("week", anchorK)}
-            className="relative ml-1 shrink-0 text-xs font-medium text-brand hover:underline before:absolute before:-inset-x-1 before:-inset-y-3.5 before:content-['']"
+    <div className="space-y-3 turned:space-y-2">
+      {/* SIDEWAYS, THE TWO HEADER ROWS ARE ONE ROW (Erik, 2026-10-01). Held sideways a phone has
+          ~402pt of height and the paging row and the Day/Week/Month row cost ~90 of it stacked. There
+          is width to spare in that orientation and no height at all, so they sit side by side: same
+          buttons, same order, same 44px targets, one row less of the screen spent on chrome. */}
+      <div className="space-y-3 turned:flex turned:items-center turned:gap-2 turned:space-y-0">
+        {/* ROW 1 — paging + title + the door icons (Everyone's Day, map, person filter), every one a
+            44px target. The SectionSubnav pill above stays the ONLY brand-lit chrome. */}
+        <div className="flex min-w-0 items-center gap-1 turned:flex-1">
+          <Button size="icon-sm" variant="outline" onClick={() => shiftAnchor(-1)} aria-label="Previous" title="Previous">
+            <ChevronLeft className="h-4 w-4" />
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => nav(view, todayK)}
+            className="relative overflow-visible! before:absolute before:inset-x-0 before:-inset-y-1.5 before:content-['']"
           >
-            ← Week
-          </button>
-        )}
-        <span className="ml-1 min-w-0 flex-1 truncate text-sm font-semibold text-slate-900">{title}</span>
-        {crewBoard && (
+            Today
+          </Button>
+          <Button size="icon-sm" variant="outline" onClick={() => shiftAnchor(1)} aria-label="Next" title="Next">
+            <ChevronRight className="h-4 w-4" />
+          </Button>
+          {/* The way back out of the day drill — the PWA has no back chrome. */}
+          {view === "day" && (
+            <button
+              onClick={() => nav("week", anchorK)}
+              className="relative ml-1 shrink-0 text-xs font-medium text-brand hover:underline before:absolute before:-inset-x-1 before:-inset-y-3.5 before:content-['']"
+            >
+              ← Week
+            </button>
+          )}
+          <span className="ml-1 min-w-0 flex-1 truncate text-sm font-semibold text-slate-900">{title}</span>
+          {crewBoard && (
+            <Link
+              href="/schedule?view=crew"
+              aria-label="Everyone's Day (crew board)"
+              title="Everyone's Day — the whole crew, side by side"
+              className={`${iconBtn} text-slate-400 hover:bg-slate-100 hover:text-slate-700`}
+            >
+              <Columns3 className="h-4 w-4" />
+            </Link>
+          )}
           <Link
-            href="/schedule?view=crew"
-            aria-label="Everyone's Day (crew board)"
-            title="Everyone's Day — the whole crew, side by side"
+            href="/schedule?view=map"
+            aria-label="Job map"
+            title="Job map"
             className={`${iconBtn} text-slate-400 hover:bg-slate-100 hover:text-slate-700`}
           >
-            <Columns3 className="h-4 w-4" />
+            <MapPin className="h-4 w-4" />
           </Link>
-        )}
-        <Link
-          href="/schedule?view=map"
-          aria-label="Job map"
-          title="Job map"
-          className={`${iconBtn} text-slate-400 hover:bg-slate-100 hover:text-slate-700`}
-        >
-          <MapPin className="h-4 w-4" />
-        </Link>
-        <button
-          onClick={() => setFilterOpen((v) => !v)}
-          aria-label="Filter by person"
-          title="Filter by person"
-          className={`${iconBtn} ${personFilter ? "bg-brand-light/50 text-brand" : "text-slate-400 hover:bg-slate-100 hover:text-slate-700"}`}
-        >
-          <Users className="h-4 w-4" />
-        </button>
-      </div>
+          <button
+            onClick={() => setFilterOpen((v) => !v)}
+            aria-label="Filter by person"
+            title="Filter by person"
+            className={`${iconBtn} ${personFilter ? "bg-brand-light/50 text-brand" : "text-slate-400 hover:bg-slate-100 hover:text-slate-700"}`}
+          >
+            <Users className="h-4 w-4" />
+          </button>
+        </div>
 
-      {/* ROW 2 — zoom. Url-synced, not brand-lit (sub-toggle grammar). */}
-      <SegmentedControl
-        activeId={view}
-        onSelect={(id) => nav(id as View, anchorK)}
-        items={[
-          { id: "day", label: "Day" },
-          { id: "week", label: "Week" },
-          { id: "month", label: "Month" },
-        ]}
-      />
+        {/* ROW 2 — zoom. Url-synced, not brand-lit (sub-toggle grammar). */}
+        <SegmentedControl
+          activeId={view}
+          onSelect={(id) => nav(id as View, anchorK)}
+          items={[
+            { id: "day", label: "Day" },
+            { id: "week", label: "Week" },
+            { id: "month", label: "Month" },
+          ]}
+        />
+      </div>
 
       {/* The type-color legend is GONE: month cells now carry a labeled
           icon+count per type (briefcase/calendar/checkbox), and week/day chips
@@ -1267,7 +1273,7 @@ export function CalendarView({
         <div
           ref={monthStack.scrollRef}
           onScroll={monthStack.onScroll}
-          className="max-h-[max(70dvh,calc(100dvh-14rem))] space-y-3 overflow-y-auto"
+          className="cal-stack max-h-[max(70dvh,calc(100dvh-14rem))] space-y-3 overflow-y-auto turned:space-y-2"
         >
           {stackMonths.map((m) => {
             const isNow = m.getFullYear() === anchor.getFullYear() && m.getMonth() === anchor.getMonth();
@@ -1304,7 +1310,7 @@ export function CalendarView({
         <div
           ref={weekStack.scrollRef}
           onScroll={weekStack.onScroll}
-          className="max-h-[max(70dvh,calc(100dvh-14rem))] space-y-3 overflow-y-auto"
+          className="cal-stack max-h-[max(70dvh,calc(100dvh-14rem))] space-y-3 overflow-y-auto turned:space-y-2"
         >
           {weekData.map(({ days, events: ev, allDay: tray, label, hasToday, loadsBack }) => {
             /* WHICH MONTH AM I LOOKING AT. Erik, scrolling: "i dont know what month it is on the
