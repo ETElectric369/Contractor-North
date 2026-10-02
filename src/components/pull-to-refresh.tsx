@@ -25,6 +25,18 @@ import { Loader2, ArrowDown } from "lucide-react";
  * HOW IT BEHAVES, and why:
  *   · ONLY FROM THE TOP. The pull starts only when the scroller is already at the top, so scrolling
  *     back up through a long page never trips it.
+ *   · ONLY ON THE PAGE'S OWN SURFACE — never inside one of the page's own scrollers (Erik, iPhone,
+ *     /timecards): the week stack is a `max-h-[70dvh] overflow-y-auto` lid that arrives already
+ *     scrolled down (useEndlessStack fills it backwards and holds your place), so the FIRST thing a
+ *     thumb does there is drag DOWN inside the lid to reach the weeks the fill prepended — while
+ *     `main` is still at the top from the navigation. Gating on `main.scrollTop <= 0` alone claimed
+ *     that scroll as a pull: it blocked the lid while the move was still cancelable, drew the pill
+ *     over it, and refreshed on release — and router.refresh() remounts the stack, so the prepended
+ *     weeks go with the position. So the precondition is the whole chain from the thumb to the
+ *     scroller, not one element's scrollTop: the surface the finger landed on must BELONG to the
+ *     scroller we listen on (pullMayStart + scrollerOf). A lid keeps its gesture, the page keeps its
+ *     pull — on /timecards, /calendar, /schedule, Nort's transcript, a More menu, a section sheet,
+ *     and the next `max-h` + `overflow-y-auto` box somebody adds, without that page knowing.
  *   · ONLY A DOWNWARD, MOSTLY-VERTICAL DRAG, and the first few pixels are left alone, so a sideways
  *     swipe (a back gesture, a horizontal strip) is never stolen.
  *   · NOT WHILE A SHEET IS OPEN (body.modal-open) — the same rule RefreshOnVisible follows:
@@ -73,16 +85,50 @@ export function readPullMove(o: { dy: number; dx: number; claimed: boolean }): P
 export const pullReleases = (px: number): boolean => px >= TRIGGER;
 
 /**
- * The nearest ancestor that scrolls vertically — `main` in the app shell. Not "the nearest one with
- * something to scroll": a short page (an org with no invoices yet) still pulls down to refresh, and
- * it is still the right element to listen on once the page fills up.
+ * WHICH SCROLLER OWNS THIS SURFACE: the element itself if it scrolls vertically, else its nearest
+ * ancestor that does — `main` in the app shell. Not "the nearest one with something to scroll": a
+ * short page (an org with no invoices yet) still pulls down to refresh, and it is still the right
+ * element to listen on once the page fills up.
+ *
+ * It answers two questions with one walk, which is why it starts at `el` and not at `el.parentElement`:
+ * from the anchor it finds the scroller to LISTEN on (the anchor draws nothing and scrolls nothing,
+ * so starting at itself changes nothing there), and from a touch's target it finds the scroller that
+ * touch belongs to — including when the finger lands on the padding of the scrolling box itself.
  */
 export function scrollerOf(el: HTMLElement | null): HTMLElement | null {
-  for (let n: HTMLElement | null = el?.parentElement ?? null; n; n = n.parentElement) {
+  for (let n: HTMLElement | null = el; n; n = n.parentElement) {
     const oy = getComputedStyle(n).overflowY;
     if (oy === "auto" || oy === "scroll") return n;
   }
   return (document.scrollingElement as HTMLElement | null) ?? null;
+}
+
+/** Anything with a vertical scroll position: an element in the app, a stand-in in a test. */
+type VScroller = { scrollTop: number };
+
+/**
+ * MAY THIS TOUCH BECOME A PULL — the whole precondition, in one place, pure, so it is read without a
+ * browser and the listener decides nothing of its own (the next page with a `max-h` +
+ * `overflow-y-auto` box must not be able to re-break this by accident).
+ *
+ *   · one finger (two is a pinch, a zoom, a map)
+ *   · no sheet open — router.refresh() there replaces the history entry without the Modal's marker,
+ *     which breaks the back gesture out of an open sheet
+ *   · the scroller we listen on is already at its top, so scrolling back up never trips it
+ *   · and NOTHING between the thumb and that scroller can scroll: `surface` is the scroller that owns
+ *     the surface the finger landed on (scrollerOf(e.target)), and it has to BE the scroller we
+ *     listen on. A drag inside a page's own lid — a week stack, Nort's transcript, a More menu — is
+ *     that lid's scroll, not a pull, whether the lid is at its top or a month down.
+ */
+export function pullMayStart(o: {
+  fingers: number;
+  sheetOpen: boolean;
+  scroller: VScroller | null;
+  surface: VScroller | null;
+}): boolean {
+  if (o.fingers !== 1 || o.sheetOpen) return false;
+  if (!o.scroller || o.scroller.scrollTop > 0) return false;
+  return o.surface === o.scroller;
 }
 
 export function PullToRefresh() {
@@ -114,8 +160,17 @@ export function PullToRefresh() {
     };
 
     const onStart = (e: TouchEvent) => {
-      if (e.touches.length !== 1 || document.body.classList.contains("modal-open")) return stop();
-      tracking = scroller.scrollTop <= 0;
+      // The one rule, read from the one place: the listener reports the facts and obeys the answer.
+      if (
+        !pullMayStart({
+          fingers: e.touches.length,
+          sheetOpen: document.body.classList.contains("modal-open"),
+          scroller,
+          surface: scrollerOf(e.target as HTMLElement | null),
+        })
+      )
+        return stop();
+      tracking = true;
       pulling = false;
       startY = e.touches[0].clientY;
       startX = e.touches[0].clientX;
@@ -131,8 +186,9 @@ export function PullToRefresh() {
       if (move.kind === "notOurs") return void (tracking = false);
       if (move.kind === "ignore") return;
       pulling = true;
-      // The scroller is at the top and cannot move down (overscroll-behavior), so taking the
-      // gesture here steals nothing — but it must be cancelable to take it at all.
+      // The drag began on the page's own surface, with the page already at its top and unable to
+      // move down (overscroll-behavior) — pullMayStart established both — so taking the gesture
+      // here steals nothing. But it must be cancelable to take it at all.
       if (e.cancelable) e.preventDefault();
       show(move.px);
     };

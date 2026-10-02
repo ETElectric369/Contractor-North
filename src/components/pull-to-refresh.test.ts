@@ -20,7 +20,7 @@ import { renderToStaticMarkup } from "react-dom/server";
  */
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
 
-import { PullToRefresh, pullReleases, readPullMove, scrollerOf } from "./pull-to-refresh";
+import { PullToRefresh, pullMayStart, pullReleases, readPullMove, scrollerOf } from "./pull-to-refresh";
 
 const src = readFileSync(join(process.cwd(), "src/components/pull-to-refresh.tsx"), "utf8");
 const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|\s)\/\/[^\n]*/g, "$1");
@@ -73,6 +73,98 @@ describe("which element it listens on", () => {
   });
 });
 
+/**
+ * WHOSE DRAG IS IT — the page's, or one of the page's own scrollers' (Erik, iPhone, /timecards).
+ *
+ * The gesture used to ask one element one question: is `main` at the top? On /timecards that is
+ * always true on arrival, while the content lives in a `max-h-[70dvh] overflow-y-auto` lid that
+ * arrives ALREADY scrolled down — useEndlessStack fills it backwards and holds your place — so the
+ * first thing a thumb does there is drag DOWN inside the lid to reach the weeks the fill prepended.
+ * That drag was claimed as a pull: the lid was blocked while the move was still cancelable, the pill
+ * was drawn over it, and letting go ran router.refresh(), which remounts the stack and resets it to
+ * one week at scrollTop 0 — the position AND the prepended weeks, gone, for an ordinary scroll.
+ *
+ * So the precondition is the whole chain from the thumb to the scroller, and it is read here for
+ * real: scrollerOf walks the stand-in tree the way it walks the DOM, and its answer is what
+ * pullMayStart judges. Same shape on /calendar and /schedule (the month and day stacks), Nort's
+ * transcript, a More menu, a section sheet's nav, and the next `max-h` box somebody adds.
+ */
+describe("whose drag it is: the page's, or the page's own lid's", () => {
+  type Fake = { scrollTop: number; parentElement: Fake | null; overflowY: string };
+  const box = (overflowY: string, scrollTop: number, parentElement: Fake | null = null): Fake => ({
+    scrollTop,
+    parentElement,
+    overflowY,
+  });
+
+  /** /timecards as it arrives on a phone: main at the top, the week stack filled backwards. */
+  const timecards = (stackTop: number) => {
+    const main = box("auto", 0); // the shell's <main>, the one page scroller
+    const page = box("visible", 0, main);
+    const header = box("visible", 0, page); // the page's own chrome, outside the lid
+    const stack = box("auto", stackTop, page); // max-h-[70dvh] overflow-y-auto
+    const week = box("visible", 0, stack);
+    const row = box("visible", 0, week); // the day row under the thumb
+    return { main, header, stack, row };
+  };
+
+  const mayPull = (o: { thumbOn: Fake; main: Fake; fingers?: number; sheetOpen?: boolean }) => {
+    const realGetComputedStyle = globalThis.getComputedStyle;
+    const realDocument = globalThis.document;
+    (globalThis as any).getComputedStyle = (n: Fake) => ({ overflowY: n.overflowY });
+    (globalThis as any).document = { scrollingElement: null };
+    try {
+      return pullMayStart({
+        fingers: o.fingers ?? 1,
+        sheetOpen: o.sheetOpen ?? false,
+        scroller: o.main,
+        surface: scrollerOf(o.thumbOn as never) as unknown as Fake | null,
+      });
+    } finally {
+      (globalThis as any).getComputedStyle = realGetComputedStyle;
+      (globalThis as any).document = realDocument;
+    }
+  };
+
+  it("a thumb in the week stack is scrolling the week stack, even though the page is at its top", () => {
+    const t = timecards(300);
+    expect(mayPull({ thumbOn: t.row, main: t.main })).toBe(false);
+  });
+
+  it("…and at the very top of the stack too: that drag is how earlier weeks arrive", () => {
+    const t = timecards(0);
+    expect(mayPull({ thumbOn: t.row, main: t.main })).toBe(false);
+  });
+
+  it("…including a finger on the stack's own surface, not on a row inside it", () => {
+    const t = timecards(300);
+    expect(mayPull({ thumbOn: t.stack, main: t.main })).toBe(false);
+  });
+
+  it("but the page itself still pulls down to refresh: that is the whole point of it", () => {
+    const t = timecards(300);
+    expect(mayPull({ thumbOn: t.header, main: t.main })).toBe(true);
+  });
+
+  it("and the page's pull still only starts from the top of the page", () => {
+    const t = timecards(300);
+    t.main.scrollTop = 40;
+    expect(mayPull({ thumbOn: t.header, main: t.main })).toBe(false);
+  });
+
+  it("never two fingers, and never while a sheet is open", () => {
+    const t = timecards(300);
+    expect(mayPull({ thumbOn: t.header, main: t.main, fingers: 2 })).toBe(false);
+    expect(mayPull({ thumbOn: t.header, main: t.main, sheetOpen: true })).toBe(false);
+  });
+
+  it("a page with no lid is unchanged: every surface on it belongs to the page", () => {
+    const main = box("auto", 0);
+    const card = box("visible", 0, box("visible", 0, main));
+    expect(mayPull({ thumbOn: card, main })).toBe(true);
+  });
+});
+
 describe("what one move of the thumb means", () => {
   const move = (dy: number, dx = 0, claimed = false) => readPullMove({ dy, dx, claimed });
 
@@ -121,8 +213,16 @@ describe("what one move of the thumb means", () => {
  * listener itself, not a stand-in for the rules above (those are read for real).
  */
 describe("the wiring the listener can only do once", () => {
-  it("the pull starts only when the scroller is already at the top", () => {
-    expect(code).toContain("scroller.scrollTop <= 0");
+  /** From `const onStart` to the end of the listeners: the part that can only run in a browser. */
+  const listener = code.slice(code.indexOf("const onStart"));
+
+  it("the listener holds no gate of its own: it reports the facts and obeys pullMayStart", () => {
+    // The rule lived here once, as `scroller.scrollTop <= 0`, and asked only <main> — so a drag
+    // inside a page's own lid was claimed as a pull. Whoever adds the next condition adds it to
+    // pullMayStart, where it is read without a browser; a second `if` here would go unpinned.
+    expect(listener).toContain("pullMayStart({");
+    expect(listener).toMatch(/surface: scrollerOf\(e\.target/);
+    expect(listener).not.toMatch(/scrollTop/);
   });
 
   it("never while a sheet is open — a refresh there breaks the back gesture out of it", () => {
