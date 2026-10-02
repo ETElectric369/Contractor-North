@@ -17,22 +17,30 @@
  * table and there must never be one: a stored "reviewed" stamp would make this screen an authority.
  *
  * NO MONEY IS ADDED UP HERE. The supplier figures arrive from `readSupplierOwed` — the same single
- * read Nort and the Suppliers card make — and the per-spelling figures come out of
- * `unfiledSpellings`, which uses `isOnAccountBill` (the open-counts name for `isStillOwed`).
+ * read Nort and the Suppliers card make — and the papers-on-no-account figure is that read's own
+ * `notOnAnAccount`, handed down untouched so the section and /bills' "File It" door quote one pile.
+ *
+ * ── AND ONLY A DISAGREEMENT IS A ROW (cn-v1041) ───────────────────────────────────────────────
+ *
+ * `papersOnNoAccount` decides the pile through `paperDisagrees`: not on an account AND still open.
+ * A purchase paid at the register has one record, so there is nothing to reconcile, and this page
+ * was listing thirty-three spellings of settled card swipes with a button offering to open a
+ * supplier account with each of them — the stockpile failure, on the page built to be its opposite.
  */
 
 import { holdsTheirOwnPapers, indexSupplierIdentity, resolveSupplierPapers } from "@/lib/supplier-owed";
 import {
   duplicateTicketGroups,
   isOpenDuplicateGroup,
+  papersOnNoAccount,
   supplierNameWork,
   unassignedTotals,
-  unfiledSpellings,
   type NameWorkAccount,
   type NameWorkBill,
 } from "@/app/(app)/bills/supplier-name-work";
 import { countOpen } from "@/lib/open-counts";
 import { NO_DISAGREEMENTS, type ReconcileOpenCounts } from "@/lib/reconcile-kinds";
+import type { NotOnAnAccount } from "@/lib/supplier-owed";
 import type { SupplierOwedRead } from "@/lib/supplier-owed-read";
 import type { SupplierGapRow } from "./supplier-gap";
 import type { SupplierCandidateQuestion, SupplierMergeProposal, SupplierSpelling, DuplicateBillGroup } from "@/app/(app)/bills/supplier-balance";
@@ -45,6 +53,12 @@ export interface ReconcileFigures {
   settledBySupplier: ReadonlySet<string>;
   /** From `resolveSupplierPapers`, so a paper finds its supplier the one way the app resolves one. */
   identity: ReadonlyMap<string, { accountId: string | null }>;
+  /**
+   * THE PAPERS-ON-NO-ACCOUNT PILE, EXACTLY AS `whatISupplierOwed` COUNTED IT. This is the figure
+   * /bills' own "File It" door quotes, so the section that door lands on quotes the very same object
+   * rather than totalling the pile a second way. The badge is handed nothing and draws no money.
+   */
+  notOnAnAccount: NotOnAnAccount;
 }
 
 export interface ReconcileWork {
@@ -56,11 +70,33 @@ export interface ReconcileWork {
   counts: ReconcileOpenCounts;
   /** The unfiled pile totalled the way the Suppliers card totals it, for the fall-back sentence. */
   unassigned: { bills: number; total: number };
+  /** The papers on no supplier account: the rows, the one figure, and what is NOT in the rows. */
+  notOnAccount: ReconcilePile;
   /** False when the database has not got 0271: the duplicate picker is not drawn at all. */
   supersedeReady: boolean;
   /** Which reads failed, by name. Nothing is claimed off a failed read — the page says so. */
   failed: string[];
 }
+
+/**
+ * ── THE PAPERS ON NO SUPPLIER ACCOUNT, AS ONE PILE ────────────────────────────────────────────
+ *
+ * Erik's law: one number for one pile. /bills' "File It" door and the section it lands on used to
+ * be two readings of the same papers — the door quoting `notOnAnAccount` (open papers only) and the
+ * section listing every SPELLING ever scanned, settled ones included. On a live book that was
+ * "$147.92 On 1 Bill" over a list of thirty-one rows. So both figures come from the one read, and
+ * the rows come from the one membership test, and the two cannot drift.
+ */
+export interface ReconcilePile {
+  /** How many papers, and how much, exactly as the one read counted them. Null for the badge. */
+  figure: NotOnAnAccount | null;
+  /** Papers with no supplier name on them at all. They get a row rather than vanishing. */
+  unnamed: { papers: number; total: number };
+  /** Unmatched papers already settled at the register, left out and accounted for in a sentence. */
+  settledAtTheRegister: number;
+}
+
+const NO_PILE: ReconcilePile = { figure: null, unnamed: { papers: 0, total: 0 }, settledAtTheRegister: 0 };
 
 const EMPTY: ReconcileWork = {
   proposals: [],
@@ -69,6 +105,7 @@ const EMPTY: ReconcileWork = {
   duplicates: [],
   counts: NO_DISAGREEMENTS,
   unassigned: { bills: 0, total: 0 },
+  notOnAccount: NO_PILE,
   supersedeReady: true,
   failed: [],
 };
@@ -94,7 +131,7 @@ function isMissingColumn(err: unknown): boolean {
  */
 async function readBillsWithLines(supabase: any, orgId: string) {
   const columns = (supersede: boolean) =>
-    `id, supplier, supplier_account_id, amount, status, bill_date, job_id, notes, supplier_invoice_number${supersede ? ", superseded_by_bill_id" : ""}, jobs(name), bill_line_items(description)`;
+    `id, supplier, supplier_account_id, amount, status, bill_date, job_id, category, notes, supplier_invoice_number${supersede ? ", superseded_by_bill_id" : ""}, jobs(name), bill_line_items(description)`;
   const read = (supersede: boolean) =>
     supabase.from("bills").select(columns(supersede)).eq("org_id", orgId).order("created_at", { ascending: false }).limit(5000);
   const first = await read(true);
@@ -159,11 +196,12 @@ export async function readReconcileWork(
     );
   const accountOf = (billId: string) => identity.get(billId)?.accountId ?? null;
 
-  const unfiled = unfiledSpellings({
+  const pile = papersOnNoAccount({
     bills: live,
     accountOf,
     settledBySupplier: figures?.settledBySupplier ?? null,
   });
+  const unfiled = pile.unfiled;
 
   const aliasesOf = new Map<string, { alias: string }[]>();
   for (const a of aliasRows) {
@@ -200,12 +238,16 @@ export async function readReconcileWork(
       // settled state to filter out.
       "supplier-names": proposals.length,
       "same-supplier-or-two": questions.length,
-      "not-on-an-account": loose.length,
+      // A PAPER WITH NO SUPPLIER NAME ON IT IS A ROW TOO. It is not a spelling to file, so no
+      // spelling speaks for it, and it used to be in the door's figure and in no section at all —
+      // the dead end /bills' File It door landed on. One row for the lot of them, counted once.
+      "not-on-an-account": loose.length + (pile.unnamed.papers > 0 ? 1 : 0),
       // A duplicate group DOES have a settled state: the pick he already made keeps its row so he
       // can change his mind, and must not be counted. One rule, through the one counter.
       "same-ticket-two-jobs": supersedeReady ? countOpen(duplicates, isOpenDuplicateGroup) : 0,
     },
     unassigned: unassignedTotals(unfiled),
+    notOnAccount: { figure: figures?.notOnAnAccount ?? null, unnamed: pile.unnamed, settledAtTheRegister: pile.settledAtTheRegister },
     supersedeReady,
     failed,
   };
@@ -239,6 +281,7 @@ export function figuresFrom(owed: SupplierOwedRead | null): ReconcileFigures | n
     owedOf: new Map(owed.accounts.map((a) => [a.accountId, a.unread ? null : a.owed])),
     settledBySupplier: owed.settledBySupplier,
     identity: owed.identity,
+    notOnAnAccount: owed.owed.notOnAnAccount,
   };
 }
 

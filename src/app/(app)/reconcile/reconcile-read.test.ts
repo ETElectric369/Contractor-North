@@ -45,11 +45,14 @@ const BOOK = {
   bills: [
     // On the account by its own name: never a spelling to file.
     bill("b-on", { amount: 400, supplier_account_id: ACCOUNT }),
-    // Two spellings on no account that read as one name: a proposal.
-    bill("b-m1", { supplier: "Fernside Pipe & Fitting", amount: 50, status: "paid" }),
-    bill("b-m2", { supplier: "Fernside Pipe and Fitting", amount: 70, status: "paid" }),
+    // Two spellings on no account that read as one name: a proposal. STILL OPEN, which is what makes
+    // them a disagreement at all (cn-v1041): a purchase paid at the register has one record.
+    bill("b-m1", { supplier: "Fernside Pipe & Fitting", amount: 50 }),
+    bill("b-m2", { supplier: "Fernside Pipe and Fitting", amount: 70 }),
     // A spelling with no relative at all: one loose row.
     bill("b-loose", { supplier: "Quarry Lane Rentals", amount: 90 }),
+    // AND THE SAME SPELLING, SETTLED AT THE TILL. It is in no pile: one record, nothing to square up.
+    bill("b-settled", { supplier: "Hollin Street Fuel Stop", amount: 48.3, status: "paid", category: "Fuel", job_id: null }),
     // The same ticket on two jobs.
     bill("b-d1", { amount: 21.75, supplier_account_id: ACCOUNT, bill_line_items: TICKET, notes: "one.pdf", jobs: { name: "9 Alder Court" } }),
     bill("b-d2", { amount: 21.75, supplier_account_id: ACCOUNT, bill_line_items: TICKET, notes: "two.pdf", job_id: "job-2", jobs: { name: "31 Wren Street" }, bill_date: "2026-08-02" }),
@@ -118,6 +121,8 @@ describe("the badge reads the page's own read", () => {
     expect(reconcileBadge(page.counts)).toBe(3);
     expect(page.proposals[0].spellings.map((s) => s.alias).sort()).toEqual(["Fernside Pipe & Fitting", "Fernside Pipe and Fitting"]);
     expect(page.loose.map((s) => s.alias)).toEqual(["Quarry Lane Rentals"]);
+    // The settled card swipe is a row nowhere, and it never reaches the badge.
+    expect(page.notOnAccount.settledAtTheRegister).toBe(1);
   });
 
   /** THE MONEY IS THE ONLY DIFFERENCE, and only where the suppliers' own papers change it. */
@@ -142,12 +147,21 @@ describe("what is counted is what still needs someone", () => {
     expect(page.counts["same-ticket-two-jobs"]).toBe(0);
   });
 
-  it("the money on an unfiled spelling leaves out what the register already settled", async () => {
-    // Fernside's two bills are paid at the till; Quarry Lane's one is still on account.
+  /**
+   * A PAPER PAID AT THE REGISTER IS NOT A DISAGREEMENT AT ALL (cn-v1041). It used to be counted as a
+   * spelling with "$0.00 still owed", and on a live book that was 68 of 69 papers: thirty-three rows
+   * of settled card swipes, each offering to open a supplier account with a petrol station.
+   */
+  it("a paper settled at the register is in no pile, and is accounted for in one sentence", async () => {
     const { page } = await read(BOOK as any);
-    expect(page.unassigned.bills).toBe(1);
-    expect(page.unassigned.total).toBe(90);
-    expect(page.proposals[0].spellings.every((s) => s.unpaid === 0)).toBe(true);
+    // Three open papers on no account: the two Fernside spellings and Quarry Lane.
+    expect(page.unassigned.bills).toBe(3);
+    expect(page.unassigned.total).toBe(210);
+    expect([...page.loose, ...page.proposals.flatMap((p) => p.spellings)].map((s) => s.alias)).not.toContain("Hollin Street Fuel Stop");
+    // And nothing left in silence: the one it dropped is counted.
+    expect(page.notOnAccount.settledAtTheRegister).toBe(1);
+    // Every paper still in the pile is open, so its whole cost is what is still owed.
+    expect(page.proposals[0].spellings.every((s) => s.unpaid === s.total)).toBe(true);
   });
 
   it("without 0271's column the duplicate picker is not offered at all, and counts nothing", async () => {
@@ -264,7 +278,9 @@ describe("the two records, both from readSupplierOwed", () => {
     expect(line.owed).toBe(300);
     // Ours: the three open tickets the resolver placed on that account (400 + 21.75 + 21.75).
     expect(owed!.boughtByAccount[ACCOUNT]).toMatchObject({ total: 443.5, papers: 3 });
-    // And the whole-book figure is still the whole book, loose spellings included.
-    expect(owed!.bought.total).toBe(533.5);
+    // And the whole-book figure is still the whole book, loose spellings included (443.50 on the
+    // account, plus Fernside's 120.00 and Quarry Lane's 90.00 on no account). The settled card swipe
+    // is in none of it, which is the one rule both this figure and the pile share.
+    expect(owed!.bought.total).toBe(653.5);
   });
 });

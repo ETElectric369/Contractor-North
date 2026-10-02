@@ -798,6 +798,14 @@ export interface SupplierSpelling {
    * and a Sunnyvale price is not a Truckee price.
    */
   branchLabel?: string | null;
+  /**
+   * WHAT THE EXPENSE IS CATEGORISED AS, in the words stored on its papers. Erik's rule for the
+   * papers-on-no-account pile, verbatim: "What is the expense categorized as if it's unclear ask."
+   * So a row says this rather than pushing a supplier account at a one-off counter purchase.
+   */
+  categories?: string[];
+  /** How many of its papers carry no category word at all - the only "unclear" a bill can hold. */
+  uncategorised?: number;
 }
 
 export interface SupplierMergeProposal {

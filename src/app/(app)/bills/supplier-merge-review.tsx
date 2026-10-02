@@ -678,24 +678,44 @@ export interface SupplierSpellingActions {
 }
 
 /**
- * THE SPELLINGS THAT LOOKED LIKE NOTHING, AND SO WERE OFFERED NOTHING (review of cn-v963).
+ * ── THE PAPERS ON NO SUPPLIER ACCOUNT. STILL OPEN ONES ONLY, AND THE QUESTION IS THE CATEGORY ──
  *
- * The merge review only ever showed a spelling that resembled something else. Five of his sixteen
- * resembled nothing - Home Depot, Goodwin's, Tahoe City Lumber, the counters he pays at the till -
- * so the page dropped them, with a long comment arguing that Accept and Not-The-Same would do the
- * same thing on a group of one. That argument is right about a PROPOSAL and wrong as a conclusion:
- * the money was still there, counted in the amber line at the top of the card, named nowhere, with
- * nothing to press.
+ * Erik, minutes after this card shipped, on /reconcile, and it is the acceptance test for every
+ * line below:
  *
- * So there is no suggestion on this card at all. There is a list of names and one door each.
+ *   "I don't understand this give it account thing because it's already categorized and identified
+ *    and most things are not going to be on an account honestly, so it doesn't make sense to have
+ *    all these layers when it can be super simple. What is the expense categorized as if it's
+ *    unclear ask."
  *
- * IT SAYS WHAT KIND OF ACCOUNT IT IS MAKING, because an account with a balance and an account
+ *   "So therefore, anything not on an account will most likely be squared up as paid like
+ *    everything else in my bills... I think that might be what I'm seeing on this page showing
+ *    unaccounted for bills that doesn't make sense."
+ *
+ * He was looking at thirty-three rows, thirty-two of them register purchases already paid and
+ * already categorised, each wearing a button offering to open a supplier account with a petrol
+ * station. Three things changed, and none of them deletes a door:
+ *
+ *  1. ONLY OPEN PAPERS REACH THIS CARD (`paperDisagrees`). A purchase paid at the till has one
+ *     record, so it is not a disagreement. What that leaves out is said in one sentence below,
+ *     because nothing leaves a figure in silence — and it is ONE sentence, with no names and no
+ *     door, because the cure for a stockpile is not a smaller stockpile.
+ *  2. THE ROW LEADS WITH WHAT THE EXPENSE IS, in his own rule's words, and asks ONLY when that is
+ *     unclear — which here means a paper carrying no category word at all. On his own book that is
+ *     zero questions, which is the right number.
+ *  3. GIVING IT ITS OWN ACCOUNT IS STILL HERE, because it is exactly right for a real on-account
+ *     supplier arriving under a spelling nothing reached. It is no longer what the card pushes.
+ *
+ * AND IT SAYS WHAT KIND OF ACCOUNT IT WOULD MAKE, because an account with a balance and an account
  * without one are different things on the card above: a till counter carries no running balance,
  * and giving one a balance would put a figure on his screen that he does not owe anybody.
  */
 export function SupplierUnfiledSpellings({
   spellings,
   canSetOnAccount = false,
+  figure = null,
+  unnamed = null,
+  settledAtTheRegister = 0,
   actions,
 }: {
   spellings: SupplierSpelling[];
@@ -705,6 +725,21 @@ export function SupplierUnfiledSpellings({
    * about it only gets written when the door is there to be pointed at.
    */
   canSetOnAccount?: boolean;
+  /**
+   * THE ONE FIGURE FOR THIS PILE, exactly as `whatISupplierOwed` counted it — the same object
+   * /bills' own "File It" door quotes. The heading says it rather than adding the rows up, which is
+   * how that door came to read "$147.92 On 1 Bill" above a list of thirty-one rows. Null when no
+   * figure was read, and then the heading counts its own rows instead of inventing money.
+   */
+  figure?: { papers: number; total: number } | null;
+  /**
+   * PAPERS WITH NO SUPPLIER NAME ON THEM AT ALL. Not a spelling — there is nothing to type on a
+   * button — but they ARE in the door's figure, so they get a row here instead of vanishing from
+   * both sides and leaving that door pointing at a section nothing drew.
+   */
+  unnamed?: { papers: number; total: number } | null;
+  /** How many unmatched papers were already settled, so are not rows. Zero says nothing. */
+  settledAtTheRegister?: number;
   actions: SupplierSpellingActions;
 }) {
   const router = useRouter();
@@ -713,9 +748,18 @@ export function SupplierUnfiledSpellings({
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
 
-  if (spellings.length === 0) return null;
+  const namelessPapers = unnamed?.papers ?? 0;
+  const rows = spellings.length + (namelessPapers > 0 ? 1 : 0);
+  if (rows === 0) return null;
 
-  const owedHere = r2(spellings.reduce((s, g) => s + (Number(g.unpaid) || 0), 0));
+  // THE HEADING'S FIGURE IS THE READ'S, NEVER THESE ROWS ADDED UP. The fall-back is what the rows
+  // carry, for a caller handed no figure, and the heading then counts rows rather than claiming a
+  // paper count it did not read.
+  const papers = figure?.papers ?? null;
+  const owedHere = figure ? r2(figure.total) : r2(spellings.reduce((s, g) => s + (Number(g.unpaid) || 0), 0) + (unnamed?.total ?? 0));
+  // THE ONLY QUESTION THIS CARD ASKS NOW: a paper with no category word on it at all. Erik's rule,
+  // verbatim — "if it's unclear ask" — so a row whose papers are all categorised asks nothing.
+  const toAsk = spellings.filter((g) => (g.uncategorised ?? 0) > 0).length;
 
   function file(spelling: SupplierSpelling) {
     setError(null);
@@ -737,20 +781,36 @@ export function SupplierUnfiledSpellings({
     <Card className="mb-6 p-4">
       <div className="mb-3">
         <h2 className="text-base font-semibold text-slate-900">
-          Supplier Names Not On An Account Yet ({spellings.length})
-          {/* NOT A THIRD "OWED" ON ONE PAGE (8a982483). This is the same pile of his own tickets
-              All Bills counts, shown again under the names that still need an account - so it says
-              what it is, in the words that fold uses. */}
+          {/* THE COUNT IS THE PILE'S, NOT THE LIST'S LENGTH: the figure and the count come out of the
+              one read together, so this heading and /bills' own File It door quote one pile. */}
+          Papers Not On A Supplier Account Yet ({papers ?? rows})
           {owedHere > 0.005 ? (
-            <span className="font-normal text-slate-500"> · {formatCurrency(owedHere)} Bought On Account</span>
+            <span className="font-normal text-slate-500"> · {formatCurrency(owedHere)} Still Open</span>
           ) : null}
         </h2>
+        {/* ── WHAT IS NOT IN THIS LIST, SAID OUT LOUD ────────────────────────────────────────────
+            Nothing leaves a figure in silence. One sentence, a count, no names and no door: these
+            papers were paid at the till, so each has ONE record and there is no second record for it
+            to disagree with. Listing them is what made this page a stockpile. */}
+        {settledAtTheRegister > 0 && (
+          <p className="mt-1 text-sm text-slate-500">
+            {settledAtTheRegister} more {settledAtTheRegister === 1 ? "purchase" : "purchases"} on no supplier account{" "}
+            {settledAtTheRegister === 1 ? "was" : "were"} paid at the register, so {settledAtTheRegister === 1 ? "it has" : "each has"}{" "}
+            one record and nothing to square up. {settledAtTheRegister === 1 ? "It is" : "They are"} in All Bills on the Bills page.
+          </p>
+        )}
         <WhyFold>
           <p>
-            Nothing else in your book looks like these, so there is nothing to suggest. Give one an account of its own
-            and every bill scanned under that name goes onto it. It goes on as a counter you pay at the till, with no
-            running balance; if any of its bills are still marked unpaid, its Suppliers line says so
-            {canSetOnAccount ? " and offers to turn a running balance on." : ", and you can mark them Settled in All Bills."}
+            {/* THE EXPENSE CATEGORY IS THE USEFUL QUESTION ABOUT A ONE-OFF PURCHASE, in his words:
+                "What is the expense categorized as if it's unclear ask." Most of these never belong
+                on a supplier account at all, so that door is said last rather than first. */}
+            Each of these is still open and sitting on no supplier account. What matters about one is what the expense is
+            filed as, which each row says — and nothing is asked where that is already answered.
+          </p>
+          <p>
+            If one of them really is a supplier you buy from on account, Give It Its Own Account and every bill scanned
+            under that name goes onto it. It goes on as a counter you pay at the till, with no running balance
+            {canSetOnAccount ? ", and its Suppliers line offers to turn a running balance on." : "; you can mark its bills Settled in All Bills."}
           </p>
         </WhyFold>
       </div>
@@ -768,19 +828,70 @@ export function SupplierUnfiledSpellings({
           <li key={g.alias} className="flex flex-wrap items-center justify-between gap-3 px-3 py-2.5">
             <span className="min-w-0 flex-1">
               <span className="block truncate text-sm text-slate-800">{g.alias}</span>
-              <span className="block text-xs text-slate-400">
-                {g.bills} {g.bills === 1 ? "bill" : "bills"} · {formatCurrency(g.total)}
-                {g.unpaid > 0.005
-                  ? ` · ${formatCurrency(g.unpaid)} still marked unpaid`
-                  : " · all of it paid at the register already"}
-              </span>
+              {/* WHAT THE EXPENSE IS, FIRST. A row used to read "all of it paid at the register
+                  already" beside a button offering to open a supplier account with it. */}
+              <span className="block text-xs text-slate-500">{spellingSaid(g)}</span>
             </span>
-            <Button variant="outline" disabled={pending} onClick={() => file(g)}>
+            {/* AND ONLY WHERE IT IS UNCLEAR, A QUESTION — answered on the paper itself, which owns
+                its category. Reconcile reads; the paper is answered where the paper is. */}
+            {(g.uncategorised ?? 0) > 0 ? (
+              <a
+                href="/bills#bills-search"
+                className="flex min-h-11 shrink-0 items-center text-sm font-medium text-brand hover:underline"
+              >
+                Say What The Expense Is
+              </a>
+            ) : null}
+            {/* STILL POSSIBLE, NO LONGER PUSHED: the quiet door, after the row has said its piece. */}
+            <Button variant="ghost" disabled={pending} onClick={() => file(g)}>
               {pending && busy === `file:${g.alias}` ? "Adding..." : "Give It Its Own Account"}
             </Button>
           </li>
         ))}
+        {/* ── THE PAPERS WITH NO NAME ON THEM GET A ROW ───────────────────────────────────────────
+            They are in the door's figure and used to be in no section at all, so /bills' File It
+            door landed on a page with nothing about them on it. There is no spelling to file, so the
+            door is the one place a paper is answered: find it among your papers. */}
+        {namelessPapers > 0 && (
+          <li className="flex flex-wrap items-center justify-between gap-3 px-3 py-2.5">
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-sm text-slate-800">No Supplier Name On The Paper</span>
+              <span className="block text-xs text-slate-500">
+                {namelessPapers} {namelessPapers === 1 ? "paper" : "papers"} · {formatCurrency(unnamed?.total ?? 0)} still open ·
+                nothing typed in Where, so there is no name to file
+              </span>
+            </span>
+            <a
+              href="/bills#bills-search"
+              className="flex min-h-11 shrink-0 items-center text-sm font-medium text-brand hover:underline"
+            >
+              Find It In Your Papers
+            </a>
+          </li>
+        )}
       </ul>
+      {toAsk > 0 && (
+        <p className="mt-2 text-sm text-slate-500">
+          {toAsk} of {toAsk === 1 ? "these has" : "these have"} a paper with no expense category on it. That is the one thing worth
+          answering here.
+        </p>
+      )}
     </Card>
   );
+}
+
+/**
+ * WHAT ONE ROW SAYS ABOUT ITSELF: the expense category first, then the money still open. His rule,
+ * verbatim — "What is the expense categorized as if it's unclear ask" — so the words lead with the
+ * answer where there is one and name the gap where there is not.
+ */
+function spellingSaid(g: SupplierSpelling): string {
+  const bills = `${g.bills} ${g.bills === 1 ? "paper" : "papers"}`;
+  const open = `${formatCurrency(g.unpaid > 0.005 ? g.unpaid : g.total)} still open`;
+  const categories = g.categories ?? [];
+  const missing = g.uncategorised ?? 0;
+  if (!categories.length) return `${bills} · ${open} · no expense category on it yet`;
+  const said = `Filed as ${categories.join(", ")}`;
+  const gap = missing > 0 ? ` · ${missing} with no category on ${missing === 1 ? "it" : "them"}` : "";
+  return `${said} · ${bills} · ${open}${gap}`;
 }

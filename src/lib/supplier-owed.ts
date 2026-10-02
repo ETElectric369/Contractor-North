@@ -270,6 +270,43 @@ export function isStillOwed(paper: StillOwedShape | null | undefined): boolean {
 }
 
 /**
+ * ── IS THIS PAPER A DISAGREEMENT? THE ONE TEST /reconcile'S PILE IS DECIDED BY ────────────────
+ *
+ * Erik's law for that page, verbatim: "reconcile is the bottom fold filling in dots not controlling
+ * systems, a peace maker." Every row on it is ONE sentence: TWO RECORDS THAT SHOULD AGREE, AND DO
+ * NOT. So a paper belongs in the pile of papers on no supplier account only when there really are
+ * two records to compare, and that takes BOTH halves of this expression:
+ *
+ *   · NOT ON AN ACCOUNT. `accountId` is the RESOLVER's answer (`resolveSupplierPapers` /
+ *     `supplierAccountForPaper`), never the stored column — a paper spelled with an account's own
+ *     name is on that account whatever `bills.supplier_account_id` says.
+ *   · AND STILL OPEN. `isStillOwed`, above. THIS IS THE HALF THAT WAS MISSING, and leaving it out
+ *     is the whole fault: a purchase paid at the register has ONE record — the receipt in his hand
+ *     — so there is no second record for it to disagree with and nothing to reconcile. Measured on
+ *     a live book, 68 of 69 papers on no supplier account were already settled, every one of them
+ *     already filed under an expense category, and the page offered to open a supplier account with
+ *     a petrol station for each of them. Thirty-three names where one was waiting.
+ *
+ * ONE FUNCTION, EVERY READER (teeth in supplier-owed-one-place.test.ts): both halves written out by
+ * hand at a reader is exactly how `isStillOwed` came to exist three times, each copy knowing a
+ * different subset of the facts, so the same ticket read settled on one line of a screen and owed on
+ * the next.
+ */
+export function paperDisagrees(input: {
+  /** From the resolver: the account this paper belongs to, or null when nothing reached it. */
+  accountId: string | null | undefined;
+  /** The paper, in the shape the still-owed test reads. */
+  paper: StillOwedShape | null | undefined;
+  /** From `supplierCoverage`, when the caller holds the set rather than the flag on the paper. */
+  settledBySupplier?: boolean | null;
+}): boolean {
+  // On an account, the supplier's own balance is the other record, and the gap per supplier is
+  // where that comparison belongs — not in the pile of papers nobody has filed.
+  if (input?.accountId) return false;
+  return isStillOwed({ ...(input?.paper ?? {}), settledBySupplier: input?.paper?.settledBySupplier || input?.settledBySupplier });
+}
+
+/**
  * HOW IT WAS BOUGHT, WHICH IS THE ONLY THING bills.status SAYS - and naming that is most of what
  * this whole fix is (8a982483).
  *
@@ -706,16 +743,21 @@ export function whatISupplierOwed(input: {
     const id = String(p?.id ?? "");
     if (!id) continue;
     const settled = p?.settledBySupplier || input?.settledBySupplier?.has(id);
-    if (!isStillOwed({ ...p, settledBySupplier: settled })) continue;
     const who = input.identity.get(id) ?? supplierAccountForPaper(p, null);
     const amount = money(p?.amount);
     if (who.accountId) {
+      if (!isStillOwed({ ...p, settledBySupplier: settled })) continue;
       const g = openOnAccount.get(who.accountId) ?? { total: 0, papers: 0 };
       g.total = r2(g.total + amount);
       g.papers += 1;
       openOnAccount.set(who.accountId, g);
       continue;
     }
+    // ── THE PAPERS ON NO ACCOUNT ARE /reconcile'S PILE, so the membership test is the one that
+    // decides that pile and nothing else: `paperDisagrees`. The door on /bills quotes
+    // `notOnAnAccount` out of this arm and the section it lands on draws rows out of the same
+    // expression, which is what stops one page saying "1 bill" over a list of thirty-one.
+    if (!paperDisagrees({ accountId: who.accountId, paper: p, settledBySupplier: settled })) continue;
     const g = loose.get(who.group) ?? {
       name: who.spelling || NO_SUPPLIER_NAME_LABEL,
       total: 0,
