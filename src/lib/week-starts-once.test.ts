@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { isWeekendDay, weekDayStrs, weekWindowInTz, weekdayHeadings } from "@/lib/tz";
 import { shortDayWords, weekViewDays } from "@/lib/schedule/week-columns";
@@ -84,7 +84,6 @@ const ALLOWED: { file: string; why: string }[] = [
 
 /** Every source file in the app, so the scan cannot be dodged by adding a file nobody listed. */
 function sourceFiles(): string[] {
-  const { readdirSync, statSync } = require("node:fs") as typeof import("node:fs");
   const out: string[] = [];
   const walk = (dir: string) => {
     for (const name of readdirSync(join(process.cwd(), dir))) {
