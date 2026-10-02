@@ -47,9 +47,9 @@ describe("speakable — trade + app notation", () => {
   });
 
   it("street-suffix abbreviations expand (capitalized only, no false trips)", () => {
-    expect(speakable("the Apache Ct job")).toContain("Apache Court");
+    expect(speakable("the Acacia Ct job")).toContain("Acacia Court");
     expect(speakable("123 Sierra Blvd")).toContain("Sierra Boulevard");
-    expect(speakable("off Northwoods Rd")).toContain("Northwoods Road");
+    expect(speakable("off Nightshade Rd")).toContain("Nightshade Road");
     expect(speakable("the 3rd panel")).toContain("3rd"); // ordinal must survive
     expect(speakable("we have three")).toContain("three"); // 'have'/'three' must survive
   });
@@ -67,8 +67,8 @@ describe("speakable — trade + app notation", () => {
  * which never calls speakable(), still shows every line.
  */
 describe("speakable — cost breakdown collapses to highlights + total", () => {
-  const chmura =
-    "Here's E-010 for John Chmura — 400A Service Upgrade (T&M), still a draft:\n\n" +
+  const clover =
+    "Here's E-010 for John Clover — 400A Service Upgrade (T&M), still a draft:\n\n" +
     "- Labor — Owner: 24 hr × $150 = $3,600\n" +
     "- Labor — Bryan: 24 hr × $150 = $3,600\n" +
     "- Consumables allowance: $150\n\n" +
@@ -76,7 +76,7 @@ describe("speakable — cost breakdown collapses to highlights + total", () => {
     "Heads up — it's all labor. Want me to build the material side?";
 
   it("drops the per-line math but keeps the total + heads-up", () => {
-    const s = speakable(chmura);
+    const s = speakable(clover);
     expect(s).not.toContain("3,600");
     expect(s).not.toContain("by 150");
     expect(s).not.toMatch(/24 hours/);

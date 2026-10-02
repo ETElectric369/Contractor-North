@@ -13,7 +13,7 @@ import { finishJob, finishJobPreview, type FinishJobPreview } from "../actions";
  * "Finish Job" — quick end-of-job questions, then marks the job complete and puts its billing in
  * front of the office.
  *
- * THE TRUTH AT THE BUTTON (Connected North Phase 1; Tao Zhu, J-002). A job billed with progress
+ * THE TRUTH AT THE BUTTON (Connected North Phase 1; Tess Zane, J-002). A job billed with progress
  * payments is not billed by this modal: its toggles did nothing on the server, and "draft the
  * invoice" was a promise it didn't keep. So when it opens it asks the server what finishing will
  * actually do (finishJobPreview) and says that — including the hours and bills no bill holds

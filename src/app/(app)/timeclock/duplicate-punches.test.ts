@@ -138,8 +138,8 @@ describe("Add Entry over a punch that has no job", () => {
   });
 
   it("a punch STILL RUNNING on another job names where it is and hands back the clock-out move: no 'tap their shift on Timecards' (Erik, 2026-09-29)", async () => {
-    // Brian clocked in at 10:31 AM on Herringbone and is still on the clock; the office adds his 11:00 on 700 North Lake Boulevard.
-    const running = { ...brianPunch, clock_out: null, job_id: "other", job: { job_number: "J-011", name: "13897 Herringbone" }, lunch_minutes: 30, notes: "panel swap" };
+    // Brian clocked in at 10:31 AM on Honeysuckle and is still on the clock; the office adds his 11:00 on 700 North Juniper Boulevard.
+    const running = { ...brianPunch, clock_out: null, job_id: "other", job: { job_number: "J-011", name: "13897 Honeysuckle" }, lunch_minutes: 30, notes: "panel swap" };
     state.client = fakeSupabase((q) => {
       if (isOverlapRead(q)) return { data: [running] };
       if (q.table === "profiles") return { data: { full_name: "Brian Taylor" } };
@@ -148,11 +148,11 @@ describe("Add Entry over a punch that has no job", () => {
     const r = await createManualEntry({ profile_id: "brian-1", clock_in: "2026-09-11T18:00:00Z", clock_out: "2026-09-12T02:30:00Z", job_id: JOB, job_code: null, notes: "" });
     expect(r.ok).toBe(false);
     expect(r.error).toBe(
-      "Brian Taylor has been clocked in since Friday Sep 11, 10:31 AM on 13897 Herringbone, so these hours would be counted twice. Clock Brian out at the time they left there, then save these hours.",
+      "Brian Taylor has been clocked in since Friday Sep 11, 10:31 AM on 13897 Honeysuckle, so these hours would be counted twice. Clock Brian out at the time they left there, then save these hours.",
     );
     expect(r.error).not.toMatch(/Timecards/);
     // The clash carries what the clock-out sheet seeds itself with, so a stop from the form never blanks the punch's lunch or notes.
-    expect(r.clash).toMatchObject({ id: PUNCH, clockOut: null, noJob: false, jobId: "other", jobLabel: "13897 Herringbone", lunchMinutes: 30, notes: "panel swap" });
+    expect(r.clash).toMatchObject({ id: PUNCH, clockOut: null, noJob: false, jobId: "other", jobLabel: "13897 Honeysuckle", lunchMinutes: 30, notes: "panel swap" });
     expect(calls.some((c) => c.verb === "insert")).toBe(false);
   });
 
@@ -174,13 +174,13 @@ describe("Add Entry over a punch that has no job", () => {
 
   it("a shift on another job is named with its job, and the answer is to edit it", async () => {
     state.client = fakeSupabase((q) => {
-      if (isOverlapRead(q)) return { data: [{ ...brianPunch, job_id: "other", job: { job_number: "J-011", name: "Herringbone" } }] };
+      if (isOverlapRead(q)) return { data: [{ ...brianPunch, job_id: "other", job: { job_number: "J-011", name: "Honeysuckle" } }] };
       if (q.table === "profiles") return { data: { full_name: "Brian Taylor" } };
       if (q.table === "organizations") return ORG_TZ;
     }, calls);
     const r = await createManualEntry({ profile_id: "brian-1", clock_in: "2026-09-11T18:00:00Z", clock_out: "2026-09-12T02:30:00Z", job_id: JOB, job_code: null, notes: "" });
-    expect(r.error).toMatch(/on Herringbone, so these hours would be counted twice\. Edit that entry instead\.$/);
-    expect(r.clash).toMatchObject({ noJob: false, jobLabel: "Herringbone" });
+    expect(r.error).toMatch(/on Honeysuckle, so these hours would be counted twice\. Edit that entry instead\.$/);
+    expect(r.clash).toMatchObject({ noJob: false, jobLabel: "Honeysuckle" });
   });
 
   it("a clear day saves once and hands back the new shift's id (Add Time Entry's Open That Shift)", async () => {
@@ -202,7 +202,7 @@ describe("Add Entry over a punch that has no job", () => {
     state.client = fakeSupabase((q) => {
       if (q.table === "jobs") return { data: { id: JOB } };
       // The first look is clear; by the insert, a second tap's row has landed.
-      if (isOverlapRead(q)) return { data: overlapReads++ === 0 ? [] : [{ ...brianPunch, clock_in: "2026-09-11T18:00:00Z", clock_out: "2026-09-12T02:30:00Z", job_id: JOB, job: { name: "85 Whitney" } }] };
+      if (isOverlapRead(q)) return { data: overlapReads++ === 0 ? [] : [{ ...brianPunch, clock_in: "2026-09-11T18:00:00Z", clock_out: "2026-09-12T02:30:00Z", job_id: JOB, job: { name: "41 Larkspur" } }] };
       if (q.table === "time_entries" && q.verb === "insert")
         return { error: { code: "P0001", message: "Those exact times are already recorded for this person on another entry.", details: `time_entry:${PUNCH}` } };
       if (q.table === "profiles") return { data: { full_name: "Brian Taylor" } };
@@ -218,7 +218,7 @@ describe("Add Entry over a punch that has no job", () => {
 describe("Put This On <job>", () => {
   const routes = (entry: any, updated: any[] = [{ id: PUNCH }]) => (q: Q): Reply => {
     if (q.table === "time_entries" && q.verb === "select") return { data: entry };
-    if (q.table === "jobs") return { data: { id: JOB, job_number: "J-028", name: "85 Whitney" } };
+    if (q.table === "jobs") return { data: { id: JOB, job_number: "J-028", name: "41 Larkspur" } };
     if (q.table === "time_entries" && q.verb === "update") return { data: updated };
     if (q.table === "organizations") return ORG_TZ;
   };
@@ -227,16 +227,16 @@ describe("Put This On <job>", () => {
   it("moves only the job, only while the shift still has none, and says what it did with the real clock times", async () => {
     state.client = fakeSupabase(routes(noJob), calls);
     const r = await putShiftOnJob({ entry_id: PUNCH, job_id: JOB });
-    expect(r).toEqual({ ok: true, sentence: "Brian's Fri Sep 11 shift, 10:31 AM to 6:57 PM (8.43 h), is on 85 Whitney now." });
+    expect(r).toEqual({ ok: true, sentence: "Brian's Fri Sep 11 shift, 10:31 AM to 6:57 PM (8.43 h), is on 41 Larkspur now." });
     const upd = calls.find((c) => c.verb === "update")!;
     expect(upd.payload).toEqual({ job_id: JOB });
     expect(upd.filters).toEqual(expect.arrayContaining([["eq", "id", PUNCH], ["is", "job_id", null]]));
   });
 
   it("a shift that already has a job is left alone, in words", async () => {
-    state.client = fakeSupabase(routes({ ...noJob, job_id: "other", job: { name: "Herringbone" } }), calls);
+    state.client = fakeSupabase(routes({ ...noJob, job_id: "other", job: { name: "Honeysuckle" } }), calls);
     const r = await putShiftOnJob({ entry_id: PUNCH, job_id: JOB });
-    expect(r).toEqual({ ok: false, error: "That shift is already on Herringbone. Move it from Timecards if it belongs here." });
+    expect(r).toEqual({ ok: false, error: "That shift is already on Honeysuckle. Move it from Timecards if it belongs here." });
     expect(calls.some((c) => c.verb === "update")).toBe(false);
   });
 
@@ -313,11 +313,11 @@ describe("shiftsOnDay: what the person already has that day", () => {
             // Thursday evening, ended before Friday: not this day.
             { id: "thu", clock_in: "2026-09-11T00:00:00Z", clock_out: "2026-09-11T03:00:00Z", lunch_minutes: 0, job_id: null, job_code: null },
             { ...brianPunch, lunch_minutes: 0 },
-            { id: "billed", clock_in: "2026-09-11T18:00:00Z", clock_out: "2026-09-12T02:30:00Z", lunch_minutes: 0, job_id: JOB, job_code: null, job: { job_number: "J-028", name: "85 Whitney" } },
+            { id: "billed", clock_in: "2026-09-11T18:00:00Z", clock_out: "2026-09-12T02:30:00Z", lunch_minutes: 0, job_id: JOB, job_code: null, job: { job_number: "J-028", name: "41 Larkspur" } },
           ],
         };
       if (q.table === "profiles") return { data: { full_name: "Brian Taylor" } };
-      if (q.table === "jobs") return { data: { id: JOB, job_number: "J-028", name: "85 Whitney" } };
+      if (q.table === "jobs") return { data: { id: JOB, job_number: "J-028", name: "41 Larkspur" } };
       if (q.table === "invoice_items") return { data: [{ source_ids: ["billed"], invoices: { id: "inv", invoice_number: "INV-081", created_at: "2026-09-26" } }] };
     };
 
@@ -327,10 +327,10 @@ describe("shiftsOnDay: what the person already has that day", () => {
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.name).toBe("Brian Taylor");
-    expect(r.forJob).toEqual({ id: JOB, label: "85 Whitney" });
+    expect(r.forJob).toEqual({ id: JOB, label: "41 Larkspur" });
     expect(r.shifts.map((s) => [s.id, s.noJob, s.billedBy, s.jobLabel])).toEqual([
       [PUNCH, true, null, null],
-      ["billed", false, "INV-081", "85 Whitney"],
+      ["billed", false, "INV-081", "41 Larkspur"],
     ]);
     expect(r.shifts[0].hours).toBe(8.43);
     // Nothing on the schedule for him that day: nothing to start the Job field on.
@@ -348,13 +348,13 @@ describe("shiftsOnDay: what the person already has that day", () => {
         if (q.table === "crew_day_assignments") return { data: { job_id: JOB, kind: "job" } };
         if (q.table === "jobs" && q.cols === "id" && q.filters.some((f) => f[0] === "in" && f[1] === "status")) return { data: { id: JOB } };
         if (q.table === "jobs" && q.cols === "id, job_number, name, address, customers(name)")
-          return { data: { id: JOB, job_number: "J-028", name: "85 Whitney", address: "85 Whitney Ave", customers: { name: "Nora Arnoso" } } };
+          return { data: { id: JOB, job_number: "J-028", name: "41 Larkspur", address: "41 Larkspur Ave", customers: { name: "Nora Avocet" } } };
         return undefined;
       }),
       calls,
     );
     const r = await shiftsOnDay({ profile_id: "brian-1", date: "2026-09-11", for_job_id: null });
-    expect(r.ok && r.scheduledJob).toEqual({ id: JOB, label: "85 Whitney" });
+    expect(r.ok && r.scheduledJob).toEqual({ id: JOB, label: "41 Larkspur" });
     expect(r.ok && r.offThatDay).toBe(false);
   });
 
@@ -408,7 +408,7 @@ describe("a clock-in never starts over hours already recorded", () => {
   });
 
   it("a back-dated staff clock-in over a recorded shift is refused at the punch, naming it and the first time that fits", async () => {
-    const closed = { id: PUNCH, clock_in: new Date(Date.now() - 3 * H).toISOString(), clock_out: new Date(Date.now() - 1 * H).toISOString(), job_id: JOB, job_code: null, job: { name: "85 Whitney" } };
+    const closed = { id: PUNCH, clock_in: new Date(Date.now() - 3 * H).toISOString(), clock_out: new Date(Date.now() - 1 * H).toISOString(), job_id: JOB, job_code: null, job: { name: "41 Larkspur" } };
     state.client = fakeSupabase((q) => {
       if (q.table === "profiles" && q.cols === "org_id") return { data: { org_id: "org-1" } };
       if (q.table === "profiles") return { data: { role: "owner", full_name: "Erik Taylor" } };
@@ -418,7 +418,7 @@ describe("a clock-in never starts over hours already recorded", () => {
     }, calls);
     const r = await clockIn({ job_id: JOB, job_code: null, gps: null, clock_in_at: new Date(Date.now() - 2 * H).toISOString() });
     expect(r.ok).toBe(false);
-    expect(r.error).toMatch(/^You already have hours recorded .+ on 85 Whitney, so a clock started at .+ would count them twice\. Nothing was recorded\. Start the clock at .+ or later, or fix that shift on Timecards\.$/);
+    expect(r.error).toMatch(/^You already have hours recorded .+ on 41 Larkspur, so a clock started at .+ would count them twice\. Nothing was recorded\. Start the clock at .+ or later, or fix that shift on Timecards\.$/);
     expect(r.clash?.id).toBe(PUNCH);
     expect(calls.some((c) => c.verb === "insert")).toBe(false);
   });

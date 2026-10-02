@@ -13,24 +13,35 @@ import { supplierNetIfPaidBy, type SupplierInvoiceRow } from "./supplier-balance
  * read-only before its first statement). Prints the plan and the Pay figure after it.
  */
 // A PRODUCTION REPLAY (db-guard.ts): REPLAY_DB_* creds, opt-in, never in CI, read-only session.
-//   REPLAY_DB_HOST=… REPLAY_DB_USER=… REPLAY_DBPW=… OPEN_LIST_REPLAY=1 npx vitest run <this file>
-const { REPLAY_DBPW, REPLAY_DB_HOST, REPLAY_DB_USER, OPEN_LIST_REPLAY } = process.env;
-const d = REPLAY_DBPW && REPLAY_DB_HOST && REPLAY_DB_USER && OPEN_LIST_REPLAY === "1" && !process.env.CI ? describe : describe.skip;
+//   REPLAY_DB_HOST=… REPLAY_DB_USER=… REPLAY_DBPW=… REPLAY_ACCOUNT_NUMBER=… OPEN_LIST_REPLAY=1 \
+//     npx vitest run <this file>
+//
+// THE ACCOUNT NUMBER COMES FROM THE ENVIRONMENT, NOT FROM THIS FILE (cn-v1041). The Account # column
+// below is an INPUT, not a label: resolveAccount matches it against the account numbers stored in
+// production and only answers from: "number" on an exact hit. The real number used to be written
+// here, which is the sort of thing the scrub took out of this repo, and the invented stand-in that
+// replaced it cannot match production — so the match silently stopped firing and the replay fell
+// through to the "papers" path. Erik passes the real number when he runs it; the repo never holds it.
+const { REPLAY_DBPW, REPLAY_DB_HOST, REPLAY_DB_USER, REPLAY_ACCOUNT_NUMBER, OPEN_LIST_REPLAY } = process.env;
+const d = REPLAY_DBPW && REPLAY_DB_HOST && REPLAY_DB_USER && REPLAY_ACCOUNT_NUMBER && OPEN_LIST_REPLAY === "1" && !process.env.CI ? describe : describe.skip;
+
+/** The invented stand-in the fixture carries, swapped for the real number at run time. */
+const ACCOUNT_PLACEHOLDER = "AC-10427";
 
 const ET = "60195593-2e18-4230-bc8e-7a32d36d038d";
 
 const CED_OPEN_TAB_2026_09_26 = `Reference #,Account #,Type,PO Number,Inv Date,Due Date,Inv Amt,Disc Amt,Disc Date,Open Balance
-8802-1107338,TR-34426,Invoice,TTP106,09/03/2026,10/15/2026,223.29,4.10,10/10/2026,223.29
-8802-1106969,TR-34426,Invoice,13897 HERRINGBONE,09/04/2026,10/15/2026,301.81,5.54,10/10/2026,301.81
-8802-1107695,TR-34426,Invoice,85 WHITNEY,09/16/2026,10/15/2026,1062.18,8.47,10/10/2026,1062.18
-8802-1107820,TR-34426,Invoice,85 WHITNEY,09/16/2026,10/15/2026,187.64,1.77,10/10/2026,187.64
-8802-1108330,TR-34426,Invoice,518 CRATER LAKE,09/17/2026,10/15/2026,653.25,,,653.25
-8802-1108534,TR-34426,Invoice,13897 HERRINGBONE,09/22/2026,10/15/2026,873.66,10.02,10/10/2026,873.66
-8802-1108540,TR-34426,Credit Memo,518 CRATER LAKE,09/22/2026,10/15/2026,-82.10,,,-82.10
-8802-1108541,TR-34426,Credit Memo,518 CRATER LAKE,09/22/2026,10/15/2026,-115.33,,,-115.33
-8802-1108647,TR-34426,Invoice,13897 HERRING,09/23/2026,10/15/2026,103.99,,,103.99
-8802-1108648,TR-34426,Credit Memo,13897 HERRINGBONE,09/23/2026,10/15/2026,-51.58,-0.47,10/10/2026,-51.58
-8802-1108649,TR-34426,Invoice,TTP99,09/23/2026,10/15/2026,147.92,1.36,10/10/2026,147.92
+8802-1107338,AC-10427,Invoice,ARR106,09/03/2026,10/15/2026,223.29,4.10,10/10/2026,223.29
+8802-1106969,AC-10427,Invoice,13897 HONEYSUCKLE,09/04/2026,10/15/2026,301.81,5.54,10/10/2026,301.81
+8802-1107695,AC-10427,Invoice,41 LARKSPUR,09/16/2026,10/15/2026,1062.18,8.47,10/10/2026,1062.18
+8802-1107820,AC-10427,Invoice,41 LARKSPUR,09/16/2026,10/15/2026,187.64,1.77,10/10/2026,187.64
+8802-1108330,AC-10427,Invoice,518 CINDER LAKE,09/17/2026,10/15/2026,653.25,,,653.25
+8802-1108534,AC-10427,Invoice,13897 HONEYSUCKLE,09/22/2026,10/15/2026,873.66,10.02,10/10/2026,873.66
+8802-1108540,AC-10427,Credit Memo,518 CINDER LAKE,09/22/2026,10/15/2026,-82.10,,,-82.10
+8802-1108541,AC-10427,Credit Memo,518 CINDER LAKE,09/22/2026,10/15/2026,-115.33,,,-115.33
+8802-1108647,AC-10427,Invoice,13897 HONEY,09/23/2026,10/15/2026,103.99,,,103.99
+8802-1108648,AC-10427,Credit Memo,13897 HONEYSUCKLE,09/23/2026,10/15/2026,-51.58,-0.47,10/10/2026,-51.58
+8802-1108649,AC-10427,Invoice,ARR99,09/23/2026,10/15/2026,147.92,1.36,10/10/2026,147.92
 `;
 
 d("A supplier's open list, ET's CED account, replayed read-only", () => {
@@ -56,7 +67,11 @@ d("A supplier's open list, ET's CED account, replayed read-only", () => {
       await c.end();
     }
     const papers = rows.map(paperOf);
-    const read = readOpenListTable({ table: parseCSV(CED_OPEN_TAB_2026_09_26), from: "file", name: "CED Open tab", listDate: "2026-09-26", listDateFrom: "file", printedTotal: 3273.94, printedCount: 11 });
+    // The real account number goes in only here, in memory, for the number match to have anything
+    // to match. It is never written back to disk.
+    const table = CED_OPEN_TAB_2026_09_26.replaceAll(ACCOUNT_PLACEHOLDER, REPLAY_ACCOUNT_NUMBER!);
+    expect(table, "the fixture's account column did not get the real number").not.toContain(ACCOUNT_PLACEHOLDER);
+    const read = readOpenListTable({ table: parseCSV(table), from: "file", name: "CED Open tab", listDate: "2026-09-26", listDateFrom: "file", printedTotal: 3273.94, printedCount: 11 });
     if (!read.ok) throw new Error("the fixture did not read");
     const who = resolveAccount(read.list, null, accounts, papers);
     expect(who?.from).toBe("number");

@@ -48,13 +48,13 @@ export type UnbilledView =
  * THE BUTTON IS THE DOOR THAT REALLY BILLS IT ON THIS JOB: "Add to INV-0xx" onto an open draft
  * that takes new work; on a job that already bills with draws (a deposit, a progress payment),
  * "Create Progress Payment", which is createProgressReportInvoice - the Progress Payment → Actual
- * T&M door, netting the deposit (never the standard New Invoice, which reopened Tao's paid
+ * T&M door, netting the deposit (never the standard New Invoice, which reopened Tess's paid
  * deposit); otherwise "Create Invoice" (createInvoiceForJob, the Invoices tab's New Invoice).
  *
  * EVERY T&M JOB (jobBillsItsActuals), estimate or not: on Time & Material the estimate is a guide,
- * never a block (Erik, Tao J-002, where an accepted estimate hid the card). For the office, also a
+ * never a block (Erik, Tess J-002, where an accepted estimate hid the card). For the office, also a
  * fixed-price job with no live estimate (W1-19): its next New Invoice pulls the same hours and
- * receipts (nextInvoiceImportsActuals, J-010 Purple Sage), so this figure is what that door bills. A
+ * receipts (nextInvoiceImportsActuals, J-010 Pinyon Sage), so this figure is what that door bills. A
  * payment schedule or a fixed-price contract bills something else - a figure here would be a number
  * no door produces (MONEY law) - so there the Overview leads with Left To Bill instead
  * (left-to-bill-card.tsx). The Labor / Bills / Stock / Credit rows sit in a Why? fold under the one
@@ -313,7 +313,7 @@ export function UnbilledCard({
  * THE CARD'S DOOR, DECIDED ONCE. The Overview card and the Costs tab's Not Billed Yet both show
  * it, so both read this: the same draft, the same figure, the same label.
  *
- * THE OPEN DRAFT IS THE DOOR (85 Whitney's other half). createInvoiceForJob lands on the job's
+ * THE OPEN DRAFT IS THE DOOR (41 Larkspur's other half). createInvoiceForJob lands on the job's
  * open draft when there is one — one draft per job, never a second racing the first for the same
  * rows — and pulls what's new into it. Said up front, "Add to INV-062 ($X)", not "Create Invoice":
  * a click that then opens INV-062 must never read as "it made a new one". $X stays true either

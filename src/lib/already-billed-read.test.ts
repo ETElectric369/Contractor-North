@@ -56,8 +56,8 @@ function fake(route: (q: Q) => Reply, seen: Q[] = []) {
 const has = (q: Q, f: string) => q.filters.some((x) => x.startsWith(f));
 
 const ORG = "60195593-2e18-4230-bc8e-7a32d36d038d";
-const J010 = "00000000-0000-4000-8000-000000000010"; // Purple Sage: fixed price, no estimate
-const J011 = "00000000-0000-4000-8000-000000000011"; // Herringbone: Time & Material
+const J010 = "00000000-0000-4000-8000-000000000010"; // Pinyon Sage: fixed price, no estimate
+const J011 = "00000000-0000-4000-8000-000000000011"; // Honeysuckle: Time & Material
 const J020 = "00000000-0000-4000-8000-000000000020"; // fixed price, its estimate is the contract
 
 const typed = (id: string, description: string, total: number, o: Record<string, unknown> = {}) => ({
@@ -93,7 +93,7 @@ describe("readAlreadyBilledReach: one door rule for every door", () => {
       if (q.table === "payment_milestones") return { data: [] };
       if (q.table === "quotes") return { data: [{ job_id: J020, status: "accepted" }, { job_id: J010, status: "declined" }] };
       if (q.table === "invoices" && has(q, "is:job_id"))
-        // Invoices with no job: Purple Sage's customer's and Andrew's.
+        // Invoices with no job: Pinyon Sage's customer's and Andrew's.
         return {
           data: [
             { id: "inv-ps-nojob", invoice_number: "INV-030", status: "paid", invoice_kind: "standard", job_id: null, customer_id: "c-ps", created_at: "2026-07-01", invoice_items: [typed("li-ps", "Materials", 90)] },
@@ -330,7 +330,7 @@ describe("the Needs You row and the invoice's way back", () => {
 });
 
 describe("withAlreadyBilledDoors: the paper cards on My Day and /bills", () => {
-  const J = { id: J011, label: "J-011", name: "13897 Herringbone", status: "in progress" };
+  const J = { id: J011, label: "J-011", name: "13897 Honeysuckle", status: "in progress" };
   const card = (o: Record<string, unknown> = {}) =>
     ({ invoiceId: "si-1", invoiceNumber: "8802-1106969", supplier: "CED", date: null, total: 301.81, closed: false, said: null, state: "needs_job", verdict: "one", suggestion: J, candidates: [], onJob: null, because: "", samePurchase: [], ...o }) as any;
   const route = (q: Q): Reply => {

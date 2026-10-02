@@ -38,7 +38,7 @@ export function isFinishedJob(status: string | null | undefined): boolean {
   return /^complete/i.test(String(status ?? "").replace(/_/g, " ").trim());
 }
 
-/** "J-011 · 13897 Herringbone · In Progress": the picker's line for one job. */
+/** "J-011 · 13897 Honeysuckle · In Progress": the picker's line for one job. */
 export function jobPickerLine(j: PickJob): string {
   const name = String(j.name ?? "").trim();
   return [j.label, name && name !== j.label ? name : null, titleCaseWords(j.status)].filter(Boolean).join(" · ");

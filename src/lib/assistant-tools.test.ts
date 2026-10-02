@@ -12,7 +12,7 @@ import { runDataTool } from "@/lib/assistant-tools";
  * superseded $95.27 CED ticket counted beside the bill that replaced it.
  *
  * The fixtures are his own rows, read out of the live database on 2026-09-20 (the OSH - Cupertino
- * run for Jason Waldow, bill 905c9f3d, and the IDEAL Twister box on CED bill c0535cdb), with the
+ * run for Jason Wexley, bill 905c9f3d, and the IDEAL Twister box on CED bill c0535cdb), with the
  * numerics as strings because that is how PostgREST hands them back.
  */
 
@@ -86,7 +86,7 @@ const oshBill = {
   notes: null,
   pricing_provisional: false,
   superseded_by_bill_id: null,
-  jobs: { name: "Waldow" },
+  jobs: { name: "Wexley" },
   bill_line_items: [
     { id: "30874f02", description: "Kettle Chips Salt/Pepper", quantity: "1.00", unit_price: "2.09", amount: "2.09", category: "Other", billable: false, billed_amount: null, is_stock: false },
     { id: "3646c450", description: "Kettle Chip Honey Dijon", quantity: "1.00", unit_price: "2.09", amount: "2.09", category: "Other", billable: false, billed_amount: null, is_stock: false },
@@ -270,7 +270,7 @@ describe("get_bill — the three states of a receipt line reach Nort", () => {
 
 describe("list_bills — a replaced copy is not a second debt", () => {
   const rows = [
-    { id: "8ce93d0a", supplier: "CED", bill_number: null, amount: "95.27", status: "unpaid", pricing_provisional: true, superseded_by_bill_id: null, jobs: { name: "Whitney" } },
+    { id: "8ce93d0a", supplier: "CED", bill_number: null, amount: "95.27", status: "unpaid", pricing_provisional: true, superseded_by_bill_id: null, jobs: { name: "Larkspur" } },
   ];
 
   it("filters out the superseded copy the way every other cost reader does (0271)", async () => {

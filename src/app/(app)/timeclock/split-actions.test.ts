@@ -84,8 +84,8 @@ function fakeSupabase(route: (q: Q) => Reply, calls: Q[]) {
 
 const ENTRY = "0c7fae89-0000-4000-8000-000000000001";
 const RIGHT = "2f468f0d-0000-4000-8000-000000000002";
-const RHODESIA = "a0000000-0000-4000-8000-00000000033a";
-const HERRINGBONE = "a0000000-0000-4000-8000-00000000011b";
+const FERNHILL = "a0000000-0000-4000-8000-00000000033a";
+const HONEYSUCKLE = "a0000000-0000-4000-8000-00000000011b";
 const INV48 = "e4800000-0000-4000-8000-000000000048";
 
 let calls: Q[] = [];
@@ -98,19 +98,19 @@ beforeEach(() => {
 describe("splitTimeEntry", () => {
   it("calls split_time_entry with the cut, the new part's job and the lunch side, and names a carried claim", async () => {
     state.client = fakeSupabase((q) => {
-      if (q.table === "jobs") return { data: { id: RHODESIA } };
+      if (q.table === "jobs") return { data: { id: FERNHILL } };
       if (q.table === "rpc:split_time_entry")
         return { data: { left_id: ENTRY, right_id: RIGHT, left_hours: 4.5, right_hours: 1, carried: [{ invoice_id: INV48, invoice_number: "INV-048", status: "paid" }] } };
-      if (q.table === "time_entries") return { data: [{ job_id: RHODESIA }] };
+      if (q.table === "time_entries") return { data: [{ job_id: FERNHILL }] };
     }, calls);
-    const r = await splitTimeEntry({ entry_id: ENTRY, at: "2001-07-14T23:30:00.000Z", job_id: RHODESIA, lunch_on: "left" });
+    const r = await splitTimeEntry({ entry_id: ENTRY, at: "2001-07-14T23:30:00.000Z", job_id: FERNHILL, lunch_on: "left" });
     expect(r).toMatchObject({ ok: true, left_id: ENTRY, right_id: RIGHT, left_hours: 4.5, right_hours: 1 });
     expect(r.warning).toMatch(/INV-048 already bills this shift, so the new part carries that claim/);
     const rpc = calls.find((c) => c.table === "rpc:split_time_entry")!;
     expect(rpc.payload).toEqual({
       p_entry: ENTRY,
       p_at: "2001-07-14T23:30:00.000Z",
-      p_right_job: RHODESIA,
+      p_right_job: FERNHILL,
       p_right_code: null,
       p_lunch_on: "left",
       p_miles_on: null,
@@ -119,19 +119,19 @@ describe("splitTimeEntry", () => {
 
   it("the Jul 14 refusal comes back in the database's words, with a way to the invoice", async () => {
     state.client = fakeSupabase((q) => {
-      if (q.table === "jobs") return { data: { id: HERRINGBONE } };
+      if (q.table === "jobs") return { data: { id: HONEYSUCKLE } };
       if (q.table === "rpc:split_time_entry")
         return {
           error: {
             code: "P0001",
-            message: "INV-048 (paid) already bills this whole shift to Rhodesia. Moving 1 h to Herringbone would bill it twice.",
+            message: "INV-048 (paid) already bills this whole shift to Fernhill. Moving 1 h to Honeysuckle would bill it twice.",
             details: `invoice:${INV48}`,
           },
         };
     }, calls);
-    const r = await splitTimeEntry({ entry_id: ENTRY, at: "2001-07-14T23:30:00.000Z", job_id: HERRINGBONE });
+    const r = await splitTimeEntry({ entry_id: ENTRY, at: "2001-07-14T23:30:00.000Z", job_id: HONEYSUCKLE });
     expect(r.ok).toBe(false);
-    expect(r.error).toBe("INV-048 (paid) already bills this whole shift to Rhodesia. Moving 1 h to Herringbone would bill it twice.");
+    expect(r.error).toBe("INV-048 (paid) already bills this whole shift to Fernhill. Moving 1 h to Honeysuckle would bill it twice.");
     expect(r.invoiceHref).toBe(`/billing/${INV48}`);
   });
 
@@ -162,7 +162,7 @@ describe("splitTimeEntry", () => {
   it("is office only", async () => {
     state.staff = false;
     state.client = fakeSupabase(() => undefined, calls);
-    expect(await splitTimeEntry({ entry_id: ENTRY, at: "2001-07-14T23:30:00.000Z", job_id: RHODESIA })).toMatchObject({ ok: false });
+    expect(await splitTimeEntry({ entry_id: ENTRY, at: "2001-07-14T23:30:00.000Z", job_id: FERNHILL })).toMatchObject({ ok: false });
     expect(calls).toEqual([]);
   });
 });
@@ -170,7 +170,7 @@ describe("splitTimeEntry", () => {
 describe("joinTimeEntries and moveTimeEntryCut", () => {
   it("join calls join_time_entries with the two pieces in order", async () => {
     state.client = fakeSupabase((q) => {
-      if (q.table === "time_entries") return { data: [{ job_id: RHODESIA }, { job_id: HERRINGBONE }] };
+      if (q.table === "time_entries") return { data: [{ job_id: FERNHILL }, { job_id: HONEYSUCKLE }] };
       if (q.table === "rpc:join_time_entries") return { data: { kept_id: ENTRY, removed_id: RIGHT, hours: 5.5, released: [] } };
     }, calls);
     expect(await joinTimeEntries({ left_id: ENTRY, right_id: RIGHT })).toEqual({ ok: true, kept_id: ENTRY, hours: 5.5 });
@@ -240,7 +240,7 @@ describe("the claim the split sheet states before the tap, and a move across two
 
   it("a split's warning names only invoices that bill; a void one carries the id silently", async () => {
     state.client = fakeSupabase((q) => {
-      if (q.table === "jobs") return { data: { id: RHODESIA } };
+      if (q.table === "jobs") return { data: { id: FERNHILL } };
       if (q.table === "rpc:split_time_entry")
         return {
           data: {
@@ -252,28 +252,28 @@ describe("the claim the split sheet states before the tap, and a move across two
             ],
           },
         };
-      if (q.table === "time_entries") return { data: [{ job_id: RHODESIA }] };
+      if (q.table === "time_entries") return { data: [{ job_id: FERNHILL }] };
     }, calls);
-    const r = await splitTimeEntry({ entry_id: ENTRY, at: "2001-07-14T23:30:00.000Z", job_id: RHODESIA });
+    const r = await splitTimeEntry({ entry_id: ENTRY, at: "2001-07-14T23:30:00.000Z", job_id: FERNHILL });
     expect(r.warning).toBe("INV-048 already bills this shift, so the new part carries that claim and will not be billed again.");
   });
 });
 
 describe("switchJob goes through switch_job", () => {
-  const openRow = { id: ENTRY, org_id: "org-1", profile_id: "user-1", job_id: RHODESIA, job_code: null, notes: "pulled wire", rate_override: null };
+  const openRow = { id: ENTRY, org_id: "org-1", profile_id: "user-1", job_id: FERNHILL, job_code: null, notes: "pulled wire", rate_override: null };
 
   it("a cut returns the NEW open entry, keeps the typed note on the closing part, and hands over the fix", async () => {
     state.client = fakeSupabase((q) => {
       if (q.table === "time_entries" && q.verb === "select") return { data: openRow };
       if (q.table === "time_entries" && q.verb === "update") return { data: null };
-      if (q.table === "jobs" && q.cols === "id") return { data: { id: HERRINGBONE } };
-      if (q.table === "jobs") return { data: { job_number: "J-011", name: "Herringbone", org_id: "org-1" } };
+      if (q.table === "jobs" && q.cols === "id") return { data: { id: HONEYSUCKLE } };
+      if (q.table === "jobs") return { data: { job_number: "J-011", name: "Honeysuckle", org_id: "org-1" } };
       if (q.table === "rpc:switch_job") return { data: { mode: "cut", entry_id: RIGHT, closed_id: ENTRY, closed_hours: 4.25, rate_left_behind: false } };
     }, calls);
-    const r = await switchJob({ entry_id: ENTRY, job_id: HERRINGBONE, notes: "pulled wire, then the panel", gps: { lat: 39.8, lng: -120.1, accuracy: 20 } });
+    const r = await switchJob({ entry_id: ENTRY, job_id: HONEYSUCKLE, notes: "pulled wire, then the panel", gps: { lat: 39.8, lng: -120.1, accuracy: 20 } });
     expect(r).toMatchObject({ ok: true, entry_id: RIGHT, mode: "cut", closed_hours: 4.25, notes: "" });
     const rpc = calls.find((c) => c.table === "rpc:switch_job")!;
-    expect(rpc.payload).toMatchObject({ p_entry: ENTRY, p_job_id: HERRINGBONE, p_job_code: null });
+    expect(rpc.payload).toMatchObject({ p_entry: ENTRY, p_job_id: HONEYSUCKLE, p_job_code: null });
     expect(rpc.payload.p_gps).toMatchObject({ lat: 39.8, lng: -120.1, accuracy: 20 });
     const noteSave = calls.find((c) => c.table === "time_entries" && c.verb === "update")!;
     expect(noteSave.payload).toEqual({ notes: "pulled wire, then the panel" });
@@ -284,13 +284,13 @@ describe("switchJob goes through switch_job", () => {
     state.client = fakeSupabase((q) => {
       if (q.table === "time_entries" && q.verb === "select") return { data: { ...openRow, job_id: null, notes: null } };
       if (q.table === "time_entries" && q.verb === "update") return { data: null };
-      if (q.table === "jobs" && q.cols === "id") return { data: { id: HERRINGBONE } };
-      if (q.table === "jobs") return { data: { job_number: "J-011", name: "Herringbone", org_id: "org-1" } };
+      if (q.table === "jobs" && q.cols === "id") return { data: { id: HONEYSUCKLE } };
+      if (q.table === "jobs") return { data: { job_number: "J-011", name: "Honeysuckle", org_id: "org-1" } };
       if (q.table === "rpc:switch_job") return { data: { mode: "repointed", entry_id: ENTRY, closed_id: null, closed_hours: 0, rate_left_behind: false } };
     }, calls);
-    const r = await switchJob({ entry_id: ENTRY, job_id: HERRINGBONE, gps: null });
+    const r = await switchJob({ entry_id: ENTRY, job_id: HONEYSUCKLE, gps: null });
     expect(r).toMatchObject({ ok: true, mode: "repointed", entry_id: ENTRY });
-    expect(r.notes).toMatch(/^\[switched to Herringbone at .+Z\]$/);
+    expect(r.notes).toMatch(/^\[switched to Honeysuckle at .+Z\]$/);
     const write = calls.filter((c) => c.table === "time_entries" && c.verb === "update").pop()!;
     expect(write.payload).toMatchObject({ gps_in: null });
     expect(calls.find((c) => c.table === "rpc:switch_job")!.payload.p_gps).toBeNull();
@@ -300,12 +300,12 @@ describe("switchJob goes through switch_job", () => {
     state.client = fakeSupabase((q) => {
       if (q.table === "time_entries" && q.verb === "select") return { data: { ...openRow, rate_override: 40 } };
       if (q.table === "time_entries" && q.verb === "update") return { data: null };
-      if (q.table === "jobs" && q.cols === "id") return { data: { id: HERRINGBONE } };
-      if (q.table === "jobs") return { data: { job_number: "J-011", name: "Herringbone", org_id: "org-1" } };
+      if (q.table === "jobs" && q.cols === "id") return { data: { id: HONEYSUCKLE } };
+      if (q.table === "jobs") return { data: { job_number: "J-011", name: "Honeysuckle", org_id: "org-1" } };
       if (q.table === "profiles") return { data: { full_name: "Brian Taylor" } };
       if (q.table === "rpc:switch_job") return { data: { mode: "cut", entry_id: RIGHT, closed_id: ENTRY, closed_hours: 2, rate_left_behind: true } };
     }, calls);
-    const r = await switchJob({ entry_id: ENTRY, job_id: HERRINGBONE, gps: null });
+    const r = await switchJob({ entry_id: ENTRY, job_id: HONEYSUCKLE, gps: null });
     expect(r.warning).toMatch(/special pay rate stays on the part before the switch/);
     expect(spies.notify).toHaveLength(1);
     expect(spies.notify[0][1]).toEqual(["office-1"]); // never the person who switched
@@ -316,12 +316,12 @@ describe("switchJob goes through switch_job", () => {
     state.client = fakeSupabase((q) => {
       if (q.table === "time_entries" && q.verb === "select") return { data: openRow };
       if (q.table === "time_entries" && q.verb === "update") return { data: null };
-      if (q.table === "jobs" && q.cols === "id") return { data: { id: HERRINGBONE } };
-      if (q.table === "jobs") return { data: { job_number: "J-011", name: "Herringbone", org_id: "org-1" } };
+      if (q.table === "jobs" && q.cols === "id") return { data: { id: HONEYSUCKLE } };
+      if (q.table === "jobs") return { data: { job_number: "J-011", name: "Honeysuckle", org_id: "org-1" } };
       if (q.table === "rpc:switch_job")
         return { data: { mode: "cut", entry_id: RIGHT, closed_id: ENTRY, closed_hours: 0.17, lunch_moved: 45, rate_left_behind: false } };
     }, calls);
-    const r = await switchJob({ entry_id: ENTRY, job_id: HERRINGBONE, gps: null });
+    const r = await switchJob({ entry_id: ENTRY, job_id: HONEYSUCKLE, gps: null });
     expect(r.warning).toBe("The 45-minute lunch on this shift didn't fit the part before the switch, so it moved to this part.");
   });
 
@@ -420,7 +420,7 @@ describe("clock-out without the breakdown", () => {
 });
 
 describe("the auto clock-out debrief", () => {
-  const closedRow = { id: ENTRY, clock_in: "2001-07-14T18:30:00.000Z", clock_out: "2001-07-15T00:30:00.000Z", job_id: RHODESIA, lunch_minutes: 0, notes: "wired the kitchen" };
+  const closedRow = { id: ENTRY, clock_in: "2001-07-14T18:30:00.000Z", clock_out: "2001-07-15T00:30:00.000Z", job_id: FERNHILL, lunch_minutes: 0, notes: "wired the kitchen" };
 
   it("a lunch answer is saved with the crumb that stops the prompt asking again", async () => {
     state.client = fakeSupabase((q) => {
@@ -438,7 +438,7 @@ describe("the auto clock-out debrief", () => {
       if (q.table === "time_entries" && q.verb === "select") return { data: closedRow };
       if (q.table === "invoice_items") return { data: [] };
     }, calls);
-    const r = await completeAutoClockOut({ entry_id: ENTRY, lunch_minutes: 30, switched: { at: "2001-07-14T23:30:00.000Z", job_id: HERRINGBONE } });
+    const r = await completeAutoClockOut({ entry_id: ENTRY, lunch_minutes: 30, switched: { at: "2001-07-14T23:30:00.000Z", job_id: HONEYSUCKLE } });
     expect(r.ok).toBe(false);
     expect(r.error).toMatch(/office splits a shift/);
     expect(calls.some((c) => c.verb === "update" || c.verb === "rpc")).toBe(false);
@@ -447,15 +447,15 @@ describe("the auto clock-out debrief", () => {
   it("the office's own debrief splits with the lunch on the part it fits, and marks both parts answered", async () => {
     state.client = fakeSupabase((q) => {
       if (q.table === "time_entries" && q.verb === "select" && q.cols.includes("notes")) return { data: closedRow };
-      if (q.table === "time_entries" && q.verb === "select") return { data: [{ job_id: RHODESIA }] };
+      if (q.table === "time_entries" && q.verb === "select") return { data: [{ job_id: FERNHILL }] };
       if (q.table === "invoice_items") return { data: [] };
-      if (q.table === "jobs") return { data: { id: HERRINGBONE } };
+      if (q.table === "jobs") return { data: { id: HONEYSUCKLE } };
       if (q.table === "time_entries" && q.verb === "update") return { data: [{ id: "x" }] };
       if (q.table === "rpc:split_time_entry") return { data: { left_id: ENTRY, right_id: RIGHT, left_hours: 4.5, right_hours: 1, carried: [] } };
     }, calls);
-    const r = await completeAutoClockOut({ entry_id: ENTRY, lunch_minutes: 30, switched: { at: "2001-07-14T23:30:00.000Z", job_id: HERRINGBONE } });
+    const r = await completeAutoClockOut({ entry_id: ENTRY, lunch_minutes: 30, switched: { at: "2001-07-14T23:30:00.000Z", job_id: HONEYSUCKLE } });
     expect(r.ok).toBe(true);
-    expect(calls.find((c) => c.verb === "rpc")!.payload).toMatchObject({ p_at: "2001-07-14T23:30:00.000Z", p_right_job: HERRINGBONE, p_lunch_on: "left" });
+    expect(calls.find((c) => c.verb === "rpc")!.payload).toMatchObject({ p_at: "2001-07-14T23:30:00.000Z", p_right_job: HONEYSUCKLE, p_lunch_on: "left" });
     const updates = calls.filter((c) => c.verb === "update");
     expect(updates[updates.length - 1].payload).toEqual({ notes: AUTO_CONFIRMED_CRUMB });
     expect(updates[updates.length - 1].filters).toContainEqual(["eq", "id", RIGHT]);

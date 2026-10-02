@@ -158,7 +158,7 @@ function round(n: number): number {
 }
 
 /**
- * THE RECEIPT THAT BROKE IT. Erik scanned this into the Waldow job at 05:37 UTC on 2026-09-19,
+ * THE RECEIPT THAT BROKE IT. Erik scanned this into the Wexley job at 05:37 UTC on 2026-09-19,
  * twelve minutes after the Food & Drink prompt rule shipped. Every one of these lines is
  * transcribed exactly as the reader stored it, "Other" and all — this is the input the deployed
  * build actually produced with the correct prompt in front of it.
@@ -400,7 +400,7 @@ describe("the trade words that must never read as food (cn-v962 review)", () => 
 
 describe("the OSH receipt that failed the first real test", () => {
   /**
-   * Erik scanned this into the Waldow job 12 minutes after the feature shipped. The model filed
+   * Erik scanned this into the Wexley job 12 minutes after the feature shipped. The model filed
    * the chips and the ice cream bar as "Other" and left every line billable, so his customer would
    * have been charged for ice cream. The prompt told it plainly and it did not listen, which is
    * why there is a deterministic net underneath it now.

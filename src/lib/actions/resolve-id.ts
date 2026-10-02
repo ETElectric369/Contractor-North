@@ -2,8 +2,8 @@ import { dbError } from "@/lib/db-error";
 import { escapeLike } from "@/lib/utils";
 // Fragment-first name resolution — the SAFETY NET behind the "ids are uuids" prompt rule.
 //
-// Nort still occasionally passes a NAME ("John Chmura"), a fabricated slug ("c1a-first-rob"),
-// or a placeholder token ("{{APACHE_JOB_ID}}") where a uuid belongs, and the old handlers
+// Nort still occasionally passes a NAME ("John Clover"), a fabricated slug ("c1a-first-rob"),
+// or a placeholder token ("{{ACACIA_JOB_ID}}") where a uuid belongs, and the old handlers
 // error out with a raw Postgres "invalid input syntax for type uuid". Instead of erroring,
 // the entity handlers run every customer/job/person value through resolveEntityId first:
 //  · a real uuid passes straight through UNCHANGED (today's behavior — the handler still
@@ -41,7 +41,7 @@ export function isUuid(value: string): boolean {
 
 /** Does this look like a template placeholder / token the model fabricated rather than a
  *  real name the user said? — {{FOO}}, <foo>, [FOO], or a bare ALL_CAPS_SNAKE token with no
- *  spaces (e.g. APACHE_JOB_ID, JOB_ID). These are never a customer/job/person name, so we
+ *  spaces (e.g. ACACIA_JOB_ID, JOB_ID). These are never a customer/job/person name, so we
  *  refuse fast with a "look it up first" nudge instead of a doomed name search. A real name
  *  has a space or lowercase letters; a single ordinary word ("Miller") does NOT match. */
 export function looksLikePlaceholder(value: string): boolean {
@@ -50,7 +50,7 @@ export function looksLikePlaceholder(value: string): boolean {
   // Wrapped in mustache / angle / square brackets → a template slot.
   if (/^\{\{.*\}\}$/.test(v) || /^<.*>$/.test(v) || /^\[.*\]$/.test(v)) return true;
   // Bare ALL-CAPS snake token with no spaces AND an underscore or digit — reads as a code
-  // token (APACHE_JOB_ID, JOB_ID_1), never a spoken name. Requires the underscore/digit so a
+  // token (ACACIA_JOB_ID, JOB_ID_1), never a spoken name. Requires the underscore/digit so a
   // legitimately all-caps company name typed as one word ("ACME") isn't caught.
   if (/^[A-Z0-9]+(_[A-Z0-9]+)+$/.test(v)) return true;
   return false;

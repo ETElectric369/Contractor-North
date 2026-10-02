@@ -329,7 +329,7 @@ describe("billItemisation — a container billed by what the job used", () => {
 
 describe("billableBillCost — the one figure a panel may promise", () => {
   /**
-   * HIS OSH RUN FOR JASON WALDOW, from the live row (bills 905c9f3d, J-046): $16.28 of receipt,
+   * HIS OSH RUN FOR JASON WEXLEY, from the live row (bills 905c9f3d, J-046): $16.28 of receipt,
    * two bags of Kettle Chips and an ice cream bar switched off, ten bulk fasteners and the tax on.
    * The Unbilled card said $20.35 of material; the button beside it writes $8.13.
    */
@@ -396,13 +396,13 @@ describe("billedPortion / billLineBilledCost — one reading, both sides of the 
 
 describe("lines that add up to more than the receipt", () => {
   /**
-   * HIS TAO ZHU SCAN, CONDENSED BUT NOT INVENTED. One PDF held two CED invoices and the reader put
+   * HIS TESS ZANE SCAN, CONDENSED BUT NOT INVENTED. One PDF held two CED invoices and the reader put
    * both sets of lines on one bill: twenty-one rows, $1,547.19 of purchased lines and $128.97 of
    * tax (two tax rows, one per invoice - 8802-1101363 and 8802-1101419), against a bill amount of
    * $1,513.71, which is the second invoice alone. The four rows below carry those exact four
    * figures; the individual parts are not the point and the arithmetic is identical.
    */
-  const bill = { id: "tao", supplier: "Consolidated Electrical Distributors, Inc. (CED)", bill_number: null, amount: 1513.71 };
+  const bill = { id: "tess", supplier: "Consolidated Electrical Distributors, Inc. (CED)", bill_number: null, amount: 1513.71 };
   const lines = [
     { id: "a", description: "NMB 10/3 W/GND (250 ft Coil)", quantity: 250, unit_price: 1.65, amount: 411.68, category: "Electrical", billable: true, billed_amount: null },
     { id: "b", description: "Everything else on the two tickets", quantity: 1, unit_price: 1135.51, amount: 1135.51, category: "Electrical", billable: true, billed_amount: null },
@@ -452,8 +452,8 @@ function legacyExcludedReceiptCost(allLines: BillLine[]): number {
   return Math.round((excludedPurchasedCost + excludedTaxDirect + excludedTaxShare) * 100) / 100;
 }
 
-/** Herringbone's 7/31 CED ticket (bill 387341c7), line for line from the books. */
-const herringbone731 = (): BillLine[] => [
+/** Honeysuckle's 7/31 CED ticket (bill 387341c7), line for line from the books. */
+const honeysuckle731 = (): BillLine[] => [
   { id: "h1", description: "Flexbox single gang 20.5 cu in", quantity: 33, unit_price: 1.34, amount: 44.22, category: "Electrical" },
   { id: "h2", description: "Flexbox two gang 40 cu in OWB", quantity: 2, unit_price: 6.79, amount: 13.57, category: "Electrical" },
   { id: "h3", description: "Flexbox two gang 43.5 cu in", quantity: 10, unit_price: 2.58, amount: 25.8, category: "Electrical" },
@@ -466,16 +466,16 @@ const herringbone731 = (): BillLine[] => [
 ];
 
 describe("shelfLotCost: one line's share, and the parts add up to the receipt's figure", () => {
-  it("Herringbone 7/31: the 14/2 coil taken off the invoice is $121.64 on the shelf, tax share and all", () => {
-    const lines = herringbone731();
+  it("Honeysuckle 7/31: the 14/2 coil taken off the invoice is $121.64 on the shelf, tax share and all", () => {
+    const lines = honeysuckle731();
     expect(shelfLotCost(lines[7], lines)).toBe(121.64);
     expect(sumShares(lines)).toBe(excludedReceiptCost(lines));
     // Nothing else on the ticket was taken off, so nothing else has a share.
     for (const l of lines.filter((x) => x.id !== "h8")) expect(shelfLotCost(l, lines)).toBe(0);
   });
 
-  it("Herringbone 7/31 with the 12/2 coil also at 0 used: $180.17 + $121.64, and the parts are the bill's figure", () => {
-    const lines = herringbone731();
+  it("Honeysuckle 7/31 with the 12/2 coil also at 0 used: $180.17 + $121.64, and the parts are the bill's figure", () => {
+    const lines = honeysuckle731();
     lines[6] = { ...lines[6], billed_amount: 0 };
     // 39.42 x 165.29 / 437.98 = 14.877 and 39.42 x 111.60 / 437.98 = 10.044 cents-wise: the split
     // must land on the once-per-bill figure, 24.92.
@@ -522,7 +522,7 @@ describe("shelfLotCost: one line's share, and the parts add up to the receipt's 
   });
 
   it("finds the line by id when handed a copy, and gives a stranger no share", () => {
-    const lines = herringbone731();
+    const lines = honeysuckle731();
     expect(shelfLotCost({ ...lines[7] }, lines)).toBe(121.64);
     expect(shelfLotCost({ id: "nobody", amount: 5 }, lines)).toBe(0);
   });

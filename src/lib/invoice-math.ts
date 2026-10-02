@@ -209,7 +209,7 @@ export function shouldBlockStandardImport(invoiceKind: string | null | undefined
   return (invoiceKind ?? "standard") === "standard" && hasOtherDraws;
 }
 
-/** H4, the REVERSE direction — NARROWED (0255, Erik's 85 Whitney evening).
+/** H4, the REVERSE direction — NARROWED (0255, Erik's 41 Larkspur evening).
  *
  *  It used to read: a job being billed on ANY content-carrying standard invoice must not also get
  *  a progress draw. That was the only way to stop a draw re-billing the same hours when labor

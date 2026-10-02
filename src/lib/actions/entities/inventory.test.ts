@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 /**
  * NORT FILLS THE TOOK FROM STOCK CARD; A PERSON TAPS TAKE IT (Shop Stock, Phase 3, fill vs execute).
- * "took 60 feet of 12/2 from stock for Herringbone" resolves the job and the item and hands back the
+ * "took 60 feet of 12/2 from stock for Honeysuckle" resolves the job and the item and hands back the
  * link that opens the sheet filled in. Two items that match ask which; none says what the shelf has.
  * It never takes anything (the only RPC it calls is the crew's read of the shelf), and nothing it
  * says carries a price, for the crew or the office.
@@ -10,7 +10,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const { db } = vi.hoisted(() => ({
   db: {
-    job: { id: "8760a051-0000-4000-8000-000000000011", job_number: "J-011", name: "Herringbone" } as Record<string, unknown> | null,
+    job: { id: "8760a051-0000-4000-8000-000000000011", job_number: "J-011", name: "Honeysuckle" } as Record<string, unknown> | null,
     shelf: [] as Record<string, unknown>[],
     rpcs: [] as string[],
     filters: [] as string[],
@@ -44,7 +44,7 @@ const take = REGISTRY["stock.take"];
 const run = (input: Record<string, unknown>, role = "tech") => take.handler(take.input.parse(input), { userId: "u", orgId: ORG, role });
 
 beforeEach(() => {
-  db.job = { id: JOB, job_number: "J-011", name: "Herringbone" };
+  db.job = { id: JOB, job_number: "J-011", name: "Honeysuckle" };
   db.shelf = [
     { id: "i-122", name: "12/2 NM-B", unit: "ft", on_hand: "250.000" },
     { id: "i-122mc", name: "12/2 MC", unit: "ft", on_hand: "100" },
@@ -63,7 +63,7 @@ describe("stock.take fills the card", () => {
     expect(d.href).toBe(`/jobs/${JOB}?tab=materials&take=i-122&qty=60`);
     // Fill vs execute at a glance: nothing on the card reads as done.
     expect(d.card).toMatchObject({ kind: "task", eyebrow: "not saved yet", title: "Tap To Take: 60 ft of 12/2 NM-B", href: d.href, next: "Open it and tap Take It to save it." });
-    expect(d.card.scope).toBe("Not taken yet: tap above, then Take It. For Herringbone. In stock: 250 ft.");
+    expect(d.card.scope).toBe("Not taken yet: tap above, then Take It. For Honeysuckle. In stock: 250 ft.");
     expect(`${d.card.eyebrow} ${d.card.title}`).not.toMatch(/\btook\b|recorded|on the job/i);
     expect(r.speak).toContain("Tap Take It to save it.");
     expect(JSON.stringify(r)).not.toMatch(/\$|cost|price/i);

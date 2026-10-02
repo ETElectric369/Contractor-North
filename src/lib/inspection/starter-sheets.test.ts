@@ -6,7 +6,7 @@ import { orgTrade } from "@/lib/org-trade";
 
 /**
  * These sheets are the difference between a feature and a demo. Nothing in the repo seeded an
- * inspection sheet, so Andrew Cohen's first inspection page had no questions on it at all, and
+ * inspection sheet, so Andrew Crake's first inspection page had no questions on it at all, and
  * Erik's answer sets read as empty for months because the SHEET was empty — not because he
  * wasn't filling it in.
  */
@@ -137,7 +137,7 @@ describe("the trade KEY picks the starter, and never to nothing", () => {
   });
 
   it("falls back to generic rather than to an empty sheet", () => {
-    // The failure this prevents IS the Andrew Cohen bug: an unrecognised trade must still get
+    // The failure this prevents IS the Andrew Crake bug: an unrecognised trade must still get
     // questions. A blank inspector reads as a thin product, not a missing template.
     for (const label of ["landscaping", "glazier", "", null, undefined, "   "]) {
       expect(starterTradeFor(label)).toBe("generic");

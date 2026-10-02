@@ -5,8 +5,8 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 /**
- * ADD TO SCHEDULE FROM THE SCHEDULE, FOR ANY JOB (Erik, 2026-09-28: "i want to put heringbone on the
- * page for the rest of the day after Seiler but theres no way to add to the schedule from the schedule
+ * ADD TO SCHEDULE FROM THE SCHEDULE, FOR ANY JOB (Erik, 2026-09-28: "i want to put honysuckle on the
+ * page for the rest of the day after Siskin but theres no way to add to the schedule from the schedule
  * page unless its already scripted"). An open spot on a day, or the day's "+", opens one sheet: the job
  * (searched, most recent first, by its name with its street and who), the day, the time (the same
  * controls as everywhere, two hours said when nobody chose), who's on it. The office only; every door
@@ -25,8 +25,8 @@ const team = [
   { id: "p-brian", full_name: "Brian Cole" },
 ];
 const jobs: AddableJob[] = [
-  { id: "j011", name: "Herringbone", status: "in_progress", address: "22 Herringbone Way", city: "Truckee", planned_minutes: null, assigned_to: ["p-erik"], customers: { name: "Kim Hale" } },
-  { id: "j060", name: "498 Mil Drae Lane", status: "on_hold", address: "498 Mil Drae Lane", city: "Truckee", planned_minutes: 240, assigned_to: [], customers: { name: "Jackie Burks" } },
+  { id: "j011", name: "Honeysuckle", status: "in_progress", address: "22 Honeysuckle Way", city: "Truckee", planned_minutes: null, assigned_to: ["p-erik"], customers: { name: "Kim Hale" } },
+  { id: "j060", name: "498 May Dell Lane", status: "on_hold", address: "498 May Dell Lane", city: "Truckee", planned_minutes: 240, assigned_to: [], customers: { name: "Marla Finch" } },
   { id: "j061", name: "12 Elm St", status: "to_be_scheduled", address: "12 Elm St", city: "Kings Beach", planned_minutes: 960, assigned_to: [], customers: null, job_number: "J-061" },
 ];
 const doors = (html: string) => html.match(/<(button|a|input)\b[^>]*>/g) ?? [];
@@ -46,10 +46,10 @@ describe("the sheet", () => {
     const t = text(html);
     expect(t).toContain("Add To Schedule");
     expect(html).toMatch(/<input[^>]*aria-label="Find a job"/);
-    expect(t).toContain("Herringbone");
-    expect(t).toContain("22 Herringbone Way · Kim Hale");
+    expect(t).toContain("Honeysuckle");
+    expect(t).toContain("22 Honeysuckle Way · Kim Hale");
     // A job named for its street: who, not the street twice.
-    expect(t).toContain("498 Mil Drae Lane Jackie Burks");
+    expect(t).toContain("498 May Dell Lane Marla Finch");
     expect(html).toMatch(/<input[^>]*type="date"[^>]*value="2026-09-28"/);
     expect(t).toContain("Mon, Sep 28. The job keeps every other day it has.");
     // Noon, and two hours said as nobody's choice, until a job is picked.
@@ -84,14 +84,14 @@ describe("the sheet", () => {
 
 describe("the sheet's words and search", () => {
   it("a job's line: its street unless its name is the street, and who unless its name says who", () => {
-    expect(addableLine(jobs[0])).toBe("22 Herringbone Way · Kim Hale");
-    expect(addableLine(jobs[1])).toBe("Jackie Burks");
-    expect(addableLine({ name: "Jackie Burks · Panel Upgrade", address: null, customers: { name: "Jackie Burks" } })).toBe("");
+    expect(addableLine(jobs[0])).toBe("22 Honeysuckle Way · Kim Hale");
+    expect(addableLine(jobs[1])).toBe("Marla Finch");
+    expect(addableLine({ name: "Marla Finch · Panel Upgrade", address: null, customers: { name: "Marla Finch" } })).toBe("");
   });
 
   it("search: every word, anywhere in the name, the street, who, the number or the town", () => {
-    expect(findAddable(jobs, "herring").map((j) => j.id)).toEqual(["j011"]);
-    expect(findAddable(jobs, "jackie 498").map((j) => j.id)).toEqual(["j060"]);
+    expect(findAddable(jobs, "honey").map((j) => j.id)).toEqual(["j011"]);
+    expect(findAddable(jobs, "marla 498").map((j) => j.id)).toEqual(["j060"]);
     expect(findAddable(jobs, "J-061").map((j) => j.id)).toEqual(["j061"]);
     expect(findAddable(jobs, "kings").map((j) => j.id)).toEqual(["j061"]);
     expect(findAddable(jobs, "  ").map((j) => j.id)).toEqual(["j011", "j060", "j061"]);

@@ -1,5 +1,5 @@
-/** 8802-1101363, 235 Timber Creek, $162.45: the same text ced-invoice-parse.test.ts reads, shared with the importer tests. */
-export const TIMBER_CREEK = `
+/** 8802-1101363, 235 Thistle Wood, $162.45: the same text ced-invoice-parse.test.ts reads, shared with the importer tests. */
+export const THISTLE_WOOD = `
 10338 RIVER PARK PL # 2
 TRUCKEE, CA 96161
 Invoice
@@ -15,11 +15,11 @@ PLEASE SHOW INVOICE NO. AND REMIT TO:
 PO BOX 888835
 LOS ANGELES, CA 90088-8835
 ACCOUNT #/NAME
-TR-34426 ERIK TAYLOR
+AC-10427 ERIK TAYLOR
 JOB NAME
-235 TIMBER CREEK
+235 THISTLE WOOD
 CUSTOMER ORDER NO.
-235 TIMBER CREEK
+235 THISTLE WOOD
 SALESPERSON
 6710 DH
 SHIPPING INFORMATION

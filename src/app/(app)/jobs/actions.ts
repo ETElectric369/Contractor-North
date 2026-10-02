@@ -340,7 +340,7 @@ export async function createInvoiceForJob(
     return fromDrawDoor(await createProgressReportInvoice(jobId, "progress"), keepsOwnTax(openDraft.number ?? "The open draft"));
   }
 
-  // ONLY A DRAFT CAPTURES THE CLICK (85 Whitney, 2026-09-11). cn-v479 handed back the newest
+  // ONLY A DRAFT CAPTURES THE CLICK (41 Larkspur, 2026-09-11). cn-v479 handed back the newest
   // non-void standard invoice whatever its status, so once INV-061 was PAID every "New Invoice"
   // opened that locked invoice with a note, and the 5 new hours and two CED bills logged since had
   // no door at all — "it kept referring to the old invoice". The invariant was never "one standard
@@ -379,7 +379,7 @@ export async function createInvoiceForJob(
     (q) => q.status !== "declined" && q.status !== "expired",
   );
   const estimate = usableQuotes.find((q) => q.status === "accepted") ?? usableQuotes[0] ?? null;
-  // ON A TIME & MATERIAL JOB THE ESTIMATE IS A GUIDE, NEVER THE CONTRACT (Erik, 2026-09-26, Tao
+  // ON A TIME & MATERIAL JOB THE ESTIMATE IS A GUIDE, NEVER THE CONTRACT (Erik, 2026-09-26, Tess
   // J-002). Its bills are the hours and receipts, exactly what the Overview card totals - so from
   // here on `quote` means "the contract", and a T&M job has none: no quote lines copied, the
   // actuals pulled, and a job with draws billed through the progress report.
@@ -391,8 +391,8 @@ export async function createInvoiceForJob(
   // blank; what is new on a quoted job is its approved change orders (and actuals only when a
   // caller deliberately asks), never the quote lines a second time.
   //
-  // THE ESTIMATE'S INVOICE IS REUSED ONLY WHILE IT'S A DRAFT (Connected North Phase 1; Tao Zhu
-  // J-002). This used to count only STANDARD invoices as the quote's, so on Tao's job - whose
+  // THE ESTIMATE'S INVOICE IS REUSED ONLY WHILE IT'S A DRAFT (Connected North Phase 1; Tess Zane
+  // J-002). This used to count only STANDARD invoices as the quote's, so on Tess's job - whose
   // estimate was billed as a DEPOSIT draw (INV-00006, $10,000, paid) - it read the quote as never
   // billed, asked createInvoiceFromQuote, got the paid deposit back, and "New Invoice" opened it:
   // a paid bill reopened as the place for new work. Any non-void invoice made from the estimate
@@ -409,7 +409,7 @@ export async function createInvoiceForJob(
   // the job, a standard invoice is refused (H4, blockStandardCreateOnDrawJob) — so "Create Invoice
   // for $X" on the Overview card after INV-078 went out would be the same dead door. The next bill
   // is a progress report of exactly the unclaimed work, which is what the card priced: on a job with
-  // no contract (every T&M job - its estimate is a guide - so Tao's next hours go on the next report,
+  // no contract (every T&M job - its estimate is a guide - so Tess's next hours go on the next report,
   // netting the deposit), and on a fixed-price quoted job whose draws already bill its actuals. A
   // fixed-price quoted job whose draws are all slices of the contract is not billed from actuals
   // behind anyone's back: it is told the door (the job's New Invoice, Part Of The Estimate chosen -
@@ -681,12 +681,12 @@ export async function setJobStatus(
 ): Promise<{ ok: boolean; error?: string; id?: string; speak?: string; warning?: string }> {
   if (!(JOB_STATUSES as readonly string[]).includes(status)) return { ok: false, error: `Status must be one of: ${JOB_STATUSES.join(", ")}.` };
   /**
-   * FINISHING A JOB BILLS ITS WORK FIRST — THROUGH THIS DOOR TOO (M2, Tao J-002).
+   * FINISHING A JOB BILLS ITS WORK FIRST — THROUGH THIS DOOR TOO (M2, Tess J-002).
    *
    * This writer took "complete" from anybody and wrote the word alone. The job page's Complete had
    * already been pointed at finishJob (209451e1), but every OTHER caller of this function — Nort's
    * "mark it complete", and whatever door is written next — still ended a job with its hours and
-   * receipts on no bill: exactly Tao's 19.5 hours, which dropped off every screen with nobody told.
+   * receipts on no bill: exactly Tess's 19.5 hours, which dropped off every screen with nobody told.
    *
    * So the rule lives at the WRITER, not at each door, and it reads the one typed table that says
    * which statuses end a job (lib/job-status JOB_STATUS_DOOR — a new status will not compile until
@@ -928,8 +928,8 @@ export async function finishJob(
     return { ok: true };
   };
 
-  // A TIME & MATERIAL JOB IS FINISHED WITH ITS FINAL BUILT, NEVER SENT (Erik, 2026-09-26, Tao J-002).
-  // Finishing used to mark Tao's job complete and bill nothing, leaving 19.5 h to a note. Now the
+  // A TIME & MATERIAL JOB IS FINISHED WITH ITS FINAL BUILT, NEVER SENT (Erik, 2026-09-26, Tess J-002).
+  // Finishing used to mark Tess's job complete and bill nothing, leaving 19.5 h to a note. Now the
   // work not yet billed is built into a DRAFT through the card's own door (tmFinishPlan): the draw
   // door as the Final on a job with draws, the open draft when one takes it, a standard invoice on
   // a plain T&M job. Only a draft that was really built completes the job; a door that refuses (or
@@ -992,7 +992,7 @@ export async function finishJob(
       };
     }
     // No open draft (or it couldn't be read - then no draft is named, only the door that is there).
-    // THE WORK THAT IS NOT ON A BILL IS NAMED (Tao J-002: 19.5 h after INV-00028). Finishing bills
+    // THE WORK THAT IS NOT ON A BILL IS NAMED (Tess J-002: 19.5 h after INV-00028). Finishing bills
     // nothing here, so hours and receipts no bill claims would drop off every screen unsaid; the
     // sentence counts them from the Unbilled card's own arithmetic, as a warning every surface relays.
     const unbilled = await unbilledWorkForJob(supabase, jobId).catch((e) => {
@@ -1508,7 +1508,7 @@ export async function createBill(input: {
 /** Link an already-uploaded receipt document to an already-saved bill: "it IS that bill".
  *  When the photo upload fails on the first save, the bill exists with NO link, so a later
  *  upload of that same receipt (retry button, or the job's Receipts tab) reads it as a fresh
- *  cost and files a SECOND bill for the same money — the Tao Zhu double-charge class. This
+ *  cost and files a SECOND bill for the same money — the Tess Zane double-charge class. This
  *  writes the same organized_items link createBill would have, making the file answer
  *  "already recorded". Same containment rule: the document must be visible and on the bill's job.
  *

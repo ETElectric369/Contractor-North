@@ -103,7 +103,7 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
   {
     name: "list_invoices",
     description:
-      "List invoices with status, total, amount paid, remaining balance, and an OVERDUE flag (past its due date with a balance). Use for 'show unpaid invoices', 'what does Jackie owe' (pass customer_id), or to see WHICH invoices are overdue (pass overdue_only). Returns the NEWEST 40 only — for a TOTAL ('what's outstanding', 'how much am I owed', 'what's overdue in total') call ar_aging instead: it reads the whole book. Overdue invoices sort first.",
+      "List invoices with status, total, amount paid, remaining balance, and an OVERDUE flag (past its due date with a balance). Use for 'show unpaid invoices', 'what does Marla owe' (pass customer_id), or to see WHICH invoices are overdue (pass overdue_only). Returns the NEWEST 40 only — for a TOTAL ('what's outstanding', 'how much am I owed', 'what's overdue in total') call ar_aging instead: it reads the whole book. Overdue invoices sort first.",
     input_schema: {
       type: "object",
       properties: {
@@ -246,7 +246,7 @@ export const DATA_TOOLS: Anthropic.Tool[] = [
   {
     name: "get_job_financials",
     description:
-      "Is a specific job making money? Returns that job's PROFIT — revenue collected (cash paid, net of refunds) minus cost (CREW labor at pay rate + materials + bills + petty cash). The OWNER's hours are billed to the customer but are NEVER a cost (the owner is paid by owner's draw), so they come back separately as owner_hours, with profit_per_owner_hour (profit / owner_hours, null until money is collected): use it for 'what did I make per hour on this job'. Budget burn is still cost vs estimate, so on a job the owner works himself burn reads LOW even when the work is well along; read owner_hours before calling a job 'barely started' or 'under budget'. PLUS budget burn: the quoted estimate, cost to date, remaining vs estimate, % of the estimate spent, and whether it's over budget. Reconciles to the penny with the job page and /analytics. Get the job's id first (list_jobs). CAVEAT to disclose: a cost entered as BOTH a purchase order AND a bill is counted twice (there's no link between them yet), so mention that if the cost looks inflated. ALSO returns budget_vs_actual — per scope (Framing, Decking, Electrical…): estimate budget vs actual cost, remaining, % spent, and an over-budget flag — so you can say 'framing is 83% over' and warn when a job's total looks fine only because big scopes haven't started. Perfect for 'how's the deck doing vs budget'. ALSO returns `unbilled` — the running total of work NO invoice holds yet (hours + labor $ at bill rate, bills/POs marked up, the total, and the last invoice number): the same figure as the job page's Unbilled card, so use it for 'what's unbilled on Whitney' / 'can I invoice this job' — total 0 means everything worked is already on an invoice.",
+      "Is a specific job making money? Returns that job's PROFIT — revenue collected (cash paid, net of refunds) minus cost (CREW labor at pay rate + materials + bills + petty cash). The OWNER's hours are billed to the customer but are NEVER a cost (the owner is paid by owner's draw), so they come back separately as owner_hours, with profit_per_owner_hour (profit / owner_hours, null until money is collected): use it for 'what did I make per hour on this job'. Budget burn is still cost vs estimate, so on a job the owner works himself burn reads LOW even when the work is well along; read owner_hours before calling a job 'barely started' or 'under budget'. PLUS budget burn: the quoted estimate, cost to date, remaining vs estimate, % of the estimate spent, and whether it's over budget. Reconciles to the penny with the job page and /analytics. Get the job's id first (list_jobs). CAVEAT to disclose: a cost entered as BOTH a purchase order AND a bill is counted twice (there's no link between them yet), so mention that if the cost looks inflated. ALSO returns budget_vs_actual — per scope (Framing, Decking, Electrical…): estimate budget vs actual cost, remaining, % spent, and an over-budget flag — so you can say 'framing is 83% over' and warn when a job's total looks fine only because big scopes haven't started. Perfect for 'how's the deck doing vs budget'. ALSO returns `unbilled` — the running total of work NO invoice holds yet (hours + labor $ at bill rate, bills/POs marked up, the total, and the last invoice number): the same figure as the job page's Unbilled card, so use it for 'what's unbilled on Larkspur' / 'can I invoice this job' — total 0 means everything worked is already on an invoice.",
     input_schema: {
       type: "object",
       properties: { job_id: { type: "string", description: "The job's id (from list_jobs)." } },
@@ -1357,7 +1357,7 @@ export async function runDataTool(
       case "list_material_items": {
         // Erik to Nort, 2026-09-16, on the job's materials list: "I want you to be able to do
         // everything that I can do on this app." list_material_lists only ever counted the lines;
-        // this reads them, so Nort can answer "what's on the Waldow list" and resolve a line before
+        // this reads them, so Nort can answer "what's on the Wexley list" and resolve a line before
         // it ticks or removes one. RLS scopes the rows; the COLUMNS are role-shaped the way the job
         // tab and /materials/[id] shape them (TECH_ITEM_COLUMNS: no est_cost, no vendor for the
         // crew) — the tool itself is offered to techs, since the list is theirs to work.
@@ -1882,7 +1882,7 @@ export async function runDataTool(
 
       case "schedule_overview": {
         // A specific date / an "around" pivot beats the named range — and both may sit in
-        // the PAST (the named ranges are future-biased; "when WAS the Waldow oven visit"
+        // the PAST (the named ranges are future-biased; "when WAS the Wexley oven visit"
         // needs to look backward). Day boundaries are the ORG's local midnight, not UTC
         // (audit v921 high) — else a Pacific org's evening visits fall a day out.
         const { data: schedOrg } = await supabase.from("organizations").select("settings").limit(1).maybeSingle();
@@ -2594,7 +2594,7 @@ export async function runDataTool(
          *
          * `amount` is the whole receipt — what left his bank, and what job cost still eats (0272's
          * closing note). `billable_amount` is what an invoice built off this receipt charges the
-         * customer, at cost before markup. On the OSH run for Jason Waldow that is $16.28 against
+         * customer, at cost before markup. On the OSH run for Jason Wexley that is $16.28 against
          * $6.50: two bags of chips and an ice cream bar are the company's, not the customer's, and
          * before this projection Nort presented all five lines as theirs.
          *

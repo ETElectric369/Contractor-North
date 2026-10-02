@@ -11,7 +11,7 @@ import type { ActionCtx, ActionDef, ActionResult } from "../types";
 // THE JOB'S ONE MATERIALS LIST, BY VOICE.
 //
 // Erik to Nort, 2026-09-16: "can you add a single gang bell box to the materials list for Jason
-// Waldo job and a short and long extension bit to be purchased". Nort: "I can't add lines to a
+// Wexle job and a short and long extension bit to be purchased". Nort: "I can't add lines to a
 // job's materials list — I don't have a tool for that." Erik: "No, I want you to be able to do
 // everything that I can do on this app. That's kind of the whole point."
 //
@@ -22,7 +22,7 @@ import type { ActionCtx, ActionDef, ActionResult } from "../types";
 // (withoutMoney on the server, the 0254 trigger at the database). A new line is unpurchased,
 // which on this list means "to be purchased".
 //
-// A spoken job NAME ("Waldow", "the Waldo job", "J-012") goes through resolveJobId, which
+// A spoken job NAME ("Wexley", "the Wexle job", "J-012") goes through resolveJobId, which
 // settles on exactly one job or asks — it never guesses among several. A spoken LINE ("the bell
 // box") is resolved against that job's own list the same way: exactly one match or a refusal
 // that lists the candidates, because ticking or deleting the wrong line is a real error.

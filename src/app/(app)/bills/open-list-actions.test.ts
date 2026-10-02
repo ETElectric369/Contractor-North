@@ -92,17 +92,17 @@ function fakeDb() {
 }
 
 const CED_OPEN_CSV = `Reference #,Account #,Type,PO Number,Inv Date,Due Date,Inv Amt,Disc Amt,Disc Date,Open Balance
-8802-1107338,TR-34426,Invoice,TTP106,09/03/2026,10/15/2026,223.29,4.10,10/10/2026,223.29
-8802-1106969,TR-34426,Invoice,13897 HERRINGBONE,09/04/2026,10/15/2026,301.81,5.54,10/10/2026,301.81
-8802-1107695,TR-34426,Invoice,85 WHITNEY,09/16/2026,10/15/2026,1062.18,8.47,10/10/2026,1062.18
-8802-1107820,TR-34426,Invoice,85 WHITNEY,09/16/2026,10/15/2026,187.64,1.77,10/10/2026,187.64
-8802-1108330,TR-34426,Invoice,518 CRATER LAKE,09/17/2026,10/15/2026,653.25,,,653.25
-8802-1108534,TR-34426,Invoice,13897 HERRINGBONE,09/22/2026,10/15/2026,873.66,10.02,10/10/2026,873.66
-8802-1108540,TR-34426,Credit Memo,518 CRATER LAKE,09/22/2026,10/15/2026,-82.10,,,-82.10
-8802-1108541,TR-34426,Credit Memo,518 CRATER LAKE,09/22/2026,10/15/2026,-115.33,,,-115.33
-8802-1108647,TR-34426,Invoice,13897 HERRING,09/23/2026,10/15/2026,103.99,,,103.99
-8802-1108648,TR-34426,Credit Memo,13897 HERRINGBONE,09/23/2026,10/15/2026,-51.58,-0.47,10/10/2026,-51.58
-8802-1108649,TR-34426,Invoice,TTP99,09/23/2026,10/15/2026,147.92,1.36,10/10/2026,147.92
+8802-1107338,AC-10427,Invoice,ARR106,09/03/2026,10/15/2026,223.29,4.10,10/10/2026,223.29
+8802-1106969,AC-10427,Invoice,13897 HONEYSUCKLE,09/04/2026,10/15/2026,301.81,5.54,10/10/2026,301.81
+8802-1107695,AC-10427,Invoice,41 LARKSPUR,09/16/2026,10/15/2026,1062.18,8.47,10/10/2026,1062.18
+8802-1107820,AC-10427,Invoice,41 LARKSPUR,09/16/2026,10/15/2026,187.64,1.77,10/10/2026,187.64
+8802-1108330,AC-10427,Invoice,518 CINDER LAKE,09/17/2026,10/15/2026,653.25,,,653.25
+8802-1108534,AC-10427,Invoice,13897 HONEYSUCKLE,09/22/2026,10/15/2026,873.66,10.02,10/10/2026,873.66
+8802-1108540,AC-10427,Credit Memo,518 CINDER LAKE,09/22/2026,10/15/2026,-82.10,,,-82.10
+8802-1108541,AC-10427,Credit Memo,518 CINDER LAKE,09/22/2026,10/15/2026,-115.33,,,-115.33
+8802-1108647,AC-10427,Invoice,13897 HONEY,09/23/2026,10/15/2026,103.99,,,103.99
+8802-1108648,AC-10427,Credit Memo,13897 HONEYSUCKLE,09/23/2026,10/15/2026,-51.58,-0.47,10/10/2026,-51.58
+8802-1108649,AC-10427,Invoice,ARR99,09/23/2026,10/15/2026,147.92,1.36,10/10/2026,147.92
 `;
 
 const OPEN: [string, string, string, number, number | null, string | null][] = [
@@ -143,8 +143,8 @@ function seed(stored: StoredOpenList = { list: cedList(), needs: null }) {
   db = {
     organizations: [{ id: "org-1", settings: { timezone: "America/Los_Angeles" } }],
     supplier_accounts: [
-      { id: "acct-1", org_id: "org-1", name: "Consolidated Electrical Distributors", account_number: "TR-34426", on_account: true },
-      { id: "acct-x", org_id: "org-2", name: "Someone Else's Supplier", account_number: "TR-34426", on_account: true },
+      { id: "acct-1", org_id: "org-1", name: "Consolidated Electrical Distributors", account_number: "AC-10427", on_account: true },
+      { id: "acct-x", org_id: "org-2", name: "Someone Else's Supplier", account_number: "AC-10427", on_account: true },
     ],
     supplier_invoices: [
       ...OPEN.map(([n, kind, d, open, disc, dby], i) => ({
@@ -191,7 +191,7 @@ describe("Apply", () => {
     const added = db.supplier_invoices.filter((r) => ["8802-1108647", "8802-1108648", "8802-1108649"].includes(r.invoice_number));
     expect(added).toHaveLength(3);
     expect(added.every((r) => r.org_id === "org-1" && r.supplier_account_id === "acct-1" && r.closed === false)).toBe(true);
-    expect(added.find((r) => r.invoice_number === "8802-1108648")).toMatchObject({ kind: "credit_memo", job_name_raw: "13897 HERRINGBONE", open_balance: -51.58, discount_amount: -0.47 });
+    expect(added.find((r) => r.invoice_number === "8802-1108648")).toMatchObject({ kind: "credit_memo", job_name_raw: "13897 HONEYSUCKLE", open_balance: -51.58, discount_amount: -0.47 });
     expect(openSum()).toBe(3304.73);
     // THE PAY CARD FOLLOWS: it reads these same papers. CED's Total Balance ($3,273.94) takes off
     // every discount on the list, including -$0.47 on credit memo 8802-1108648, and so does the app:
@@ -401,7 +401,7 @@ describe("the doors", () => {
 
   it("asks for the columns once, and remembers them on the supplier's account", async () => {
     db.organized_items = [];
-    const odd = parseCSV(`Doc Ref Code,Acct,When,Still Owing\nQ-1001,TR-34426,09/01/26,10.00\nQ-1002,TR-34426,09/05/26,20.00\n`);
+    const odd = parseCSV(`Doc Ref Code,Acct,When,Still Owing\nQ-1001,AC-10427,09/01/26,10.00\nQ-1002,AC-10427,09/05/26,20.00\n`);
     const added = await addOpenList({ name: "odd.csv", table: odd, listDate: "2026-09-26" });
     expect(added.ok).toBe(true);
     const id = db.organized_items[0].id;
@@ -456,12 +456,12 @@ describe("the doors", () => {
 
   it("a statement PDF dropped anywhere is recognised from its own text, with no model", async () => {
     db.organized_items = [];
-    const text = `STATEMENT\nACCOUNT\nTR-34426\nDATE\n09/25/26\nPAGE\n1 of 1\nDATE\n09-17-26\n09-22-26\nCODE\nINV\nCRM\nREFERENCE\n8802-1108330\n8802-1108540\nAMOUNT\n653.25\n-82.10\nTOTAL DUE\n$571.15\n`;
+    const text = `STATEMENT\nACCOUNT\nAC-10427\nDATE\n09/25/26\nPAGE\n1 of 1\nDATE\n09-17-26\n09-22-26\nCODE\nINV\nCRM\nREFERENCE\n8802-1108330\n8802-1108540\nAMOUNT\n653.25\n-82.10\nTOTAL DUE\n$571.15\n`;
     const res = await addPaperwork({ path: "org-1/organize/1-statement.pdf", name: "statement.pdf", mime: "application/pdf", size: 1000, sha256: "b".repeat(64), source: "organize", pdfText: text });
     expect(res).toMatchObject({ ok: true, needsRead: false });
     const row = db.organized_items[0];
     expect(row).toMatchObject({ doc_type: "statement", file_url: "org-1/organize/1-statement.pdf", source: "organize" });
-    expect(row.proposal.openList.list).toMatchObject({ from: "statement", listDate: "2026-09-25", accountNumber: "TR-34426", printedTotal: 571.15 });
+    expect(row.proposal.openList.list).toMatchObject({ from: "statement", listDate: "2026-09-25", accountNumber: "AC-10427", printedTotal: 571.15 });
     const view = (await openListViews(state.client, "org-1", db.organized_items as any[]))[row.id];
     expect(view.plan!.complete.ok).toBe(true);
     // Everything on the account dated on or before 9/25 that the statement doesn't list is marked paid.

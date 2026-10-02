@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { endAfterStart, keptEnd } from "@/lib/appointments/times";
 
 /** The guard rescheduleAppointment always had, ported to create/update after prod row
- *  d2788015 ("Disposal inspection — TTP #11") was saved via Edit Details ending an hour
+ *  d2788015 ("Disposal inspection — ARR #11") was saved via Edit Details ending an hour
  *  BEFORE it started. Pin it so the create/update paths can't lose it again. */
 describe("endAfterStart", () => {
   it("no end time is fine (open-ended appointment)", () => {

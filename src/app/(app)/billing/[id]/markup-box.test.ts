@@ -40,7 +40,7 @@ function box(overrides: Partial<Parameters<typeof MarkupBox>[0]> = {}) {
     applied: start.applied,
     canApply: true,
     pending: false,
-    words: markupBoxWords(INV_078, "Andrew Cohen"),
+    words: markupBoxWords(INV_078, "Andrew Crake"),
     onChange,
     onApply,
     ...overrides,
@@ -62,7 +62,7 @@ describe("the % box on an invoice priced at 11%", () => {
     const html = renderToStaticMarkup(createElement(MarkupBox, props));
     expect(html).toContain('value="11"');
     expect(html).toContain("Priced at 11%");
-    expect(html).toContain("Andrew Cohen&#x27;s usual is 15%");
+    expect(html).toContain("Andrew Crake&#x27;s usual is 15%");
     expect(html).not.toContain(">Apply<");
   });
 
@@ -115,7 +115,7 @@ describe("the % box on an invoice priced at 11%", () => {
 
   it("lines at different markups say so beside the box", () => {
     const mixed = markupBoxSeed({ kind: "mixed" }, 15);
-    const html = renderToStaticMarkup(createElement(MarkupBox, { ...box().props, value: 15, applied: 15, words: markupBoxWords(mixed, "Andrew Cohen") }));
+    const html = renderToStaticMarkup(createElement(MarkupBox, { ...box().props, value: 15, applied: 15, words: markupBoxWords(mixed, "Andrew Crake") }));
     expect(html).toContain('value="15"');
     expect(html).toContain("Lines are at different markups");
   });

@@ -169,7 +169,7 @@ describe("what happened, on a past block", () => {
   it("a ghost says '<job name> · worked, not booked', its bars inside it, and its tap is its one button", () => {
     const ghost = block({
       id: "g-j11-2026-09-22",
-      label: "22 Herringbone Way",
+      label: "22 Honeysuckle Way",
       sub: "Kim Hale",
       info: undefined,
       ghost: true,
@@ -179,7 +179,7 @@ describe("what happened, on a past block", () => {
     });
     const html = grid({ events: [ghost], onEventTap: () => {} });
     expect(html.match(/<button/g)).toHaveLength(1);
-    expect(html).toMatch(/<button[^>]*aria-label="22 Herringbone Way · worked, not booked · Brian 11:04 AM–1:46 PM"/);
+    expect(html).toMatch(/<button[^>]*aria-label="22 Honeysuckle Way · worked, not booked · Brian 11:04 AM–1:46 PM"/);
     expect(html).toContain("border-2 border-dashed border-slate-400 bg-white/60 text-slate-700");
     expect(html).toContain('data-worked-bars="g-j11-2026-09-22"');
     expect(text(html)).toContain("Kim Hale");

@@ -102,7 +102,7 @@ export function defineStockLedgerSuite(connect: () => Promise<SqlClient>) {
     const asLines: BillLine[] = lines.map((l, i) => ({ id: ids[i], ...l }));
     return { id: b.id as string, amount, lineIds: ids, lines: asLines };
   };
-  /** Herringbone's 8/19 CED ticket shape, the coil at 0 used: its lot costs $180.17. */
+  /** Honeysuckle's 8/19 CED ticket shape, the coil at 0 used: its lot costs $180.17. */
   const coilTicket = (job: string | null, date: string) =>
     bill(job, date, [
       { description: "TEST Flexbox BH bar hanger ground", amount: 8.82 },
@@ -531,7 +531,7 @@ export function defineStockLedgerSuite(connect: () => Promise<SqlClient>) {
   it("two jobs, one box: A uses 60 of its own box, B takes 20 from the shelf; each bills once and the costs add to the paper", async () => {
     if (!needs()) return;
     await step(async () => {
-      // The Waldow shape: a 500-count Twister box on job A's CED ticket, A used 60 ($9.29).
+      // The Wexley shape: a 500-count Twister box on job A's CED ticket, A used 60 ($9.29).
       const t = await bill(jobA, "2001-09-15", [
         { description: "TEST ITE 125A load center", amount: 119.26 },
         { description: "TEST IDEAL 30641 Twister 500", amount: 77.39, quantity: 500, billed_amount: 9.29 },

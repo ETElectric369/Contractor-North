@@ -263,7 +263,7 @@ describe("returnLinesAgainstPurchases — the return is held to the purchase it 
     expect(credit(bills, 0)).toEqual([-10]);
   });
 
-  it("the Herringbone job as it sits today reads the same: nothing new to credit on INV-078", () => {
+  it("the Honeysuckle job as it sits today reads the same: nothing new to credit on INV-078", () => {
     // Every return line is switched off (Erik's hand fix), and so is the purchase line it reverses.
     const bills: B[] = [
       {

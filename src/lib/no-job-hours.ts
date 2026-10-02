@@ -3,7 +3,7 @@
  *
  * The duplicate punches (2026-09-26) all started here. Brian's clock went in with no job on 9/11
  * (the schedule said J-028 was 9/10 only), the "entry has no job" line left Needs You three days
- * later, and on 9/19 the office, billing 85 Whitney, found no 9/11 hours on the job and typed the
+ * later, and on 9/19 the office, billing 41 Larkspur, found no 9/11 hours on the job and typed the
  * day again. The punch was still there, on nobody's list, and payroll paid both.
  *
  * So a no-job shift stays findable until a person decides what it was: put it on its job, or file
@@ -173,7 +173,7 @@ export function companyTimeCode(codes: { code?: string | null; billable?: boolea
 
 // ── PUNCHES WITH NO JOB, NEAR ONE JOB (the job's Time tab) ────────────────────────────────────
 //
-// On 9/19 the office billing 85 Whitney looked at the job's Time tab, found no 9/11 hours and typed
+// On 9/19 the office billing 41 Larkspur looked at the job's Time tab, found no 9/11 hours and typed
 // the day again: Brian's own 9/11 punch was in the book on no job, and the job page never showed
 // it. So the job's Time tab lists the shifts on no job that its crew clocked around its days, each
 // with "Put This On <job>": the same shifts Hours On No Job lists (this file's rule), cut to this

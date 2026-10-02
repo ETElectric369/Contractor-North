@@ -1,7 +1,7 @@
 "use server";
 
 /**
- * ONE RECEIPT'S BILLING CARD, READ ON ITS OWN (Already Billed's shelf step, Purple Sage).
+ * ONE RECEIPT'S BILLING CARD, READ ON ITS OWN (Already Billed's shelf step, Pinyon Sage).
  *
  * The Bills page builds every job receipt's card in one breath (bills/page.tsx). Already Billed
  * asks "Did J-010 Use All Of It?" and, on No, shows the same card for the one receipt so the kept

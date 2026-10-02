@@ -3,16 +3,16 @@ import { quoteDraftKey, quoteDraftLegacyKeys } from "./quote-draft-key";
 
 /** THE COLLISION THIS FILE EXISTS FOR: two walk-throughs, no job, no customer, no lead. */
 describe("quoteDraftKey — two inspections must never share a slot", () => {
-  const moraine = { captureId: "266f0778", jobId: null, customerId: null, inquiryId: null };
-  const cain = { captureId: "4314d903", jobId: null, customerId: null, inquiryId: null };
+  const mayfern = { captureId: "266f0778", jobId: null, customerId: null, inquiryId: null };
+  const dale = { captureId: "4314d903", jobId: null, customerId: null, inquiryId: null };
 
   it("keeps two customer-less, job-less inspections apart", () => {
-    expect(quoteDraftKey(moraine)).not.toBe(quoteDraftKey(cain));
+    expect(quoteDraftKey(mayfern)).not.toBe(quoteDraftKey(dale));
   });
 
   it("neither of them lands in the shared 'new' slot", () => {
-    expect(quoteDraftKey(moraine)).not.toContain(":new");
-    expect(quoteDraftKey(cain)).not.toContain(":new");
+    expect(quoteDraftKey(mayfern)).not.toContain(":new");
+    expect(quoteDraftKey(dale)).not.toContain(":new");
   });
 
   it("the appointment outranks the others — one job can hold several walk-throughs", () => {
@@ -43,7 +43,7 @@ describe("quoteDraftKey — two inspections must never share a slot", () => {
 
 /**
  * THE RECOVERY. cn-v680's "v2:" prefix orphaned every pre-fix draft, and an unsaved hand-built
- * Moraine Rd estimate was in the slot it orphaned. A key rename must carry its own way back.
+ * Mayfern Rd estimate was in the slot it orphaned. A key rename must carry its own way back.
  */
 describe("quoteDraftLegacyKeys — a rename must not strand unsaved work", () => {
   it("looks in the shared 'new' slot for a walk-through estimate — where the lost work is", () => {

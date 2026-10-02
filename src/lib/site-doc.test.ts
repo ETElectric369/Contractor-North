@@ -17,7 +17,7 @@ const base: SiteDoc = extractSiteDoc({
   splash_headline: "Custom Lighting, Truckee",
   splash_tagline: "Design-build electrical for the Sierra.",
   splash_bullets: "Panels\nEV chargers",
-  service_area: "Truckee · North Lake Tahoe",
+  service_area: "Truckee · North Juniper Tahoe",
   portfolio: [
     { url: PHOTO_A, caption: "Great room" },
     { url: PHOTO_B, caption: "Exterior" },

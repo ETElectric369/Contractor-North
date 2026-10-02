@@ -43,7 +43,7 @@ const payment = (over: Partial<SupplierPaymentRow> = {}): SupplierPaymentRow => 
 const account = (over: Partial<SupplierAccountRow> = {}): SupplierAccountRow => ({
   id: "acct-ced",
   name: "CED Truckee",
-  accountNumber: "TR-34426",
+  accountNumber: "AC-10427",
   branchCode: "8802",
   onAccount: true,
   note: null,
@@ -232,8 +232,8 @@ describe("what a merge proposal is holding", () => {
 
 describe("naming the two jobs a duplicated ticket sits on", () => {
   it("uses the job name, and says overhead when there is no job", () => {
-    expect(copyPlace({ billId: "a", jobId: "j1", jobName: "13631 Northwoods", billDate: "2026-07-29", supplier: "CED" })).toBe(
-      "13631 Northwoods",
+    expect(copyPlace({ billId: "a", jobId: "j1", jobName: "13631 Nightshade", billDate: "2026-07-29", supplier: "CED" })).toBe(
+      "13631 Nightshade",
     );
     expect(copyPlace({ billId: "b", jobId: null, jobName: null, billDate: "2026-08-28", supplier: "CED" })).toBe(
       "Overhead (no job)",
@@ -289,27 +289,27 @@ const open = (
  * says. Gross $3,845.14, less $25.48 of live discount, is their own headline: $3,819.66.
  */
 const CED_OPEN: SupplierInvoiceRow[] = [
-  open("1103832", 10.29, { invoiceDate: "2026-07-22", jobNameRaw: "13631 NORTHWOODS", discountAmount: 11.87, discountBy: "2026-08-10" }),
+  open("1103832", 10.29, { invoiceDate: "2026-07-22", jobNameRaw: "13631 NIGHTSHADE", discountAmount: 11.87, discountBy: "2026-08-10" }),
   invoice({ invoiceNumber: "9019682437", kind: "service_charge", total: 31.26, openBalance: 31.26, closed: false, invoiceDate: "2026-07-25" }),
-  open("1104147", 101.96, { invoiceDate: "2026-07-28", jobNameRaw: "13631 NORTHWOODS", discountAmount: 0.93, discountBy: "2026-08-10" }),
-  open("1104268", 859.99, { invoiceDate: "2026-07-28", jobNameRaw: "13631 NORTHWOODS", discountAmount: 6.25, discountBy: "2026-08-10" }),
-  open("1104644", 95.27, { invoiceDate: "2026-07-29", jobNameRaw: "85 WHITNEY PLACE", discountAmount: 1.48, discountBy: "2026-08-10" }),
-  open("1104646", 36.54, { invoiceDate: "2026-07-29", jobNameRaw: "13631 NORTHWOODS", discountAmount: 0.34, discountBy: "2026-08-10" }),
-  open("1104645", -31.86, { invoiceDate: "2026-08-06", jobNameRaw: "13631 NORTHWOODS", kind: "credit_memo" }),
-  open("1105963", 84.37, { invoiceDate: "2026-08-19", jobNameRaw: "85 WHITNEY PL", discountAmount: 0.26, discountBy: "2026-09-10" }),
-  open("1105997", 2.30, { invoiceDate: "2026-08-19", jobNameRaw: "10429 BADGER", discountAmount: 0.04, discountBy: "2026-09-10" }),
-  open("1106188", 199.48, { invoiceDate: "2026-08-21", jobNameRaw: "13897 HARRINGBONE", discountAmount: 3.67, discountBy: "2026-09-10" }),
-  open("1106249", 150.27, { invoiceDate: "2026-08-21", jobNameRaw: "13897 HERRING BONE", discountAmount: 1.15, discountBy: "2026-09-10" }),
+  open("1104147", 101.96, { invoiceDate: "2026-07-28", jobNameRaw: "13631 NIGHTSHADE", discountAmount: 0.93, discountBy: "2026-08-10" }),
+  open("1104268", 859.99, { invoiceDate: "2026-07-28", jobNameRaw: "13631 NIGHTSHADE", discountAmount: 6.25, discountBy: "2026-08-10" }),
+  open("1104644", 95.27, { invoiceDate: "2026-07-29", jobNameRaw: "41 LARKSPUR PLACE", discountAmount: 1.48, discountBy: "2026-08-10" }),
+  open("1104646", 36.54, { invoiceDate: "2026-07-29", jobNameRaw: "13631 NIGHTSHADE", discountAmount: 0.34, discountBy: "2026-08-10" }),
+  open("1104645", -31.86, { invoiceDate: "2026-08-06", jobNameRaw: "13631 NIGHTSHADE", kind: "credit_memo" }),
+  open("1105963", 84.37, { invoiceDate: "2026-08-19", jobNameRaw: "41 LARKSPUR PL", discountAmount: 0.26, discountBy: "2026-09-10" }),
+  open("1105997", 2.30, { invoiceDate: "2026-08-19", jobNameRaw: "10429 BAYBERRY", discountAmount: 0.04, discountBy: "2026-09-10" }),
+  open("1106188", 199.48, { invoiceDate: "2026-08-21", jobNameRaw: "13897 HANEYSUCKLE", discountAmount: 3.67, discountBy: "2026-09-10" }),
+  open("1106249", 150.27, { invoiceDate: "2026-08-21", jobNameRaw: "13897 HONEY SUCKLE", discountAmount: 1.15, discountBy: "2026-09-10" }),
   invoice({ invoiceNumber: "9019994306", kind: "service_charge", total: 15.16, openBalance: 15.16, closed: false, invoiceDate: "2026-08-25" }),
-  open("1107088", 456.02, { invoiceDate: "2026-09-01", jobNameRaw: "13683 HILLSIDE", discountAmount: 4.70, discountBy: "2026-10-10" }),
-  open("1107139", 59.17, { invoiceDate: "2026-09-01", jobNameRaw: "13683 HILLSIDE", discountAmount: 0.90, discountBy: "2026-10-10" }),
+  open("1107088", 456.02, { invoiceDate: "2026-09-01", jobNameRaw: "13683 HAZELNUT", discountAmount: 4.70, discountBy: "2026-10-10" }),
+  open("1107139", 59.17, { invoiceDate: "2026-09-01", jobNameRaw: "13683 HAZELNUT", discountAmount: 0.90, discountBy: "2026-10-10" }),
   // Billed, then reversed to the cent by the credit memo below it, then rebilled as 1107338.
-  open("1107230", 225.47, { invoiceDate: "2026-09-03", jobNameRaw: "TTP 106", discountAmount: 4.14, discountBy: "2026-10-10" }),
-  open("1107337", -225.47, { invoiceDate: "2026-09-03", jobNameRaw: "TTP 106", kind: "credit_memo" }),
-  open("1107338", 223.29, { invoiceDate: "2026-09-03", jobNameRaw: "TTP106", discountAmount: 4.10, discountBy: "2026-10-10" }),
-  open("1106969", 301.81, { invoiceDate: "2026-09-04", jobNameRaw: "13897 HERRINGBONE", discountAmount: 5.54, discountBy: "2026-10-10" }),
-  open("1107695", 1062.18, { invoiceDate: "2026-09-16", jobNameRaw: "85 WHITNEY", discountAmount: 8.47, discountBy: "2026-10-10" }),
-  open("1107820", 187.64, { invoiceDate: "2026-09-16", jobNameRaw: "85 WHITNEY", discountAmount: 1.77, discountBy: "2026-10-10" }),
+  open("1107230", 225.47, { invoiceDate: "2026-09-03", jobNameRaw: "ARR 106", discountAmount: 4.14, discountBy: "2026-10-10" }),
+  open("1107337", -225.47, { invoiceDate: "2026-09-03", jobNameRaw: "ARR 106", kind: "credit_memo" }),
+  open("1107338", 223.29, { invoiceDate: "2026-09-03", jobNameRaw: "ARR106", discountAmount: 4.10, discountBy: "2026-10-10" }),
+  open("1106969", 301.81, { invoiceDate: "2026-09-04", jobNameRaw: "13897 HONEYSUCKLE", discountAmount: 5.54, discountBy: "2026-10-10" }),
+  open("1107695", 1062.18, { invoiceDate: "2026-09-16", jobNameRaw: "41 LARKSPUR", discountAmount: 8.47, discountBy: "2026-10-10" }),
+  open("1107820", 187.64, { invoiceDate: "2026-09-16", jobNameRaw: "41 LARKSPUR", discountAmount: 1.77, discountBy: "2026-10-10" }),
 ];
 
 /**
@@ -327,7 +327,7 @@ const EDGE_CASES: SupplierInvoiceRow[] = [
 /** Documents CED has already settled. They are the other 27 of the 47, in miniature. */
 const CED_CLOSED: SupplierInvoiceRow[] = [
   invoice({ invoiceNumber: "8802-1105868", total: 2950.17, openBalance: 0, closed: true }),
-  invoice({ invoiceNumber: "8802-1103059", total: 47.92, openBalance: 0, closed: true, jobNameRaw: "5659 RHODESIA" }),
+  invoice({ invoiceNumber: "8802-1103059", total: 47.92, openBalance: 0, closed: true, jobNameRaw: "5659 FERNHILL" }),
   invoice({ invoiceNumber: "8802-1103061", total: 114.4, openBalance: 0, closed: true, jobNameRaw: "STOCK" }),
   // A settled document with a discount date still in the future. It is DONE, and a closed
   // document must never put money into "still claimable" - that would be offering him a saving

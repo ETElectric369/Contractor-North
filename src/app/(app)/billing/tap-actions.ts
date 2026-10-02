@@ -746,7 +746,7 @@ export async function cancelTapPaymentIntent(paymentIntentId: string): Promise<{
 }
 
 /**
- * DID IT ACTUALLY GO THROUGH? (0e2cb937 — Rich Seiler, INV-083, 2026-09-30.)
+ * DID IT ACTUALLY GO THROUGH? (0e2cb937 — Rich Siskin, INV-083, 2026-09-30.)
  *
  * The phone's confirm resolved, the sheet said "Card approved — Stripe confirmed the charge",
  * and Stripe had charged nothing: the plugin's Swift confirm resolved on any non-nil result
@@ -767,7 +767,7 @@ export async function cancelTapPaymentIntent(paymentIntentId: string): Promise<{
  * `booked` is false because it was there. When it hasn't landed yet, the money is booked HERE,
  * through the SAME writer the webhook uses (lib/record-invoice-payment.ts), under the SAME key
  * derived from the PaymentIntent — so the webhook, arriving a beat later, hits the unique index
- * and heals instead of booking a second row (the Tao Zhu double-charge class; invoice-claims-
+ * and heals instead of booking a second row (the Tess Zane double-charge class; invoice-claims-
  * model: never the same money twice).
  *
  * A status that is not succeeded lands in error_events (stripe:terminal:confirm-not-succeeded),

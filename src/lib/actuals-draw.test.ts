@@ -121,7 +121,7 @@ describe("unbilledCardDoor — the card never offers what the server refuses", (
   });
 });
 
-describe("the card on a T&M job billed with draws - Open: $X and the door that bills it (Tao J-002)", () => {
+describe("the card on a T&M job billed with draws - Open: $X and the door that bills it (Tess J-002)", () => {
   const base = { workPending: true, returns: 0, total: 3067.9, newWork: 3067.9, money: formatCurrency };
 
   it("no draft on a job with a deposit and a progress payment: the DRAW door, never the standard New Invoice", () => {
@@ -147,7 +147,7 @@ describe("the card on a T&M job billed with draws - Open: $X and the door that b
     expect(openFigure(d, base.total)).toBe(0);
   });
 
-  it("an open actuals draft still says Add to it, draws or not (Herringbone INV-078)", () => {
+  it("an open actuals draft still says Add to it, draws or not (Honeysuckle INV-078)", () => {
     const d = unbilledCardDoor({ ...base, openDraft: { id: "inv-078", number: "INV-078", refreshable: true }, drawBilled: true });
     expect(d?.kind).toBe("add");
     expect(d && "label" in d ? d.label : "").toBe("Add to INV-078 ($3,067.90)");

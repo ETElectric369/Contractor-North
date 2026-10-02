@@ -30,7 +30,7 @@ function answer(op: Op): { data: unknown; error: null } {
     return { data: { role: "tech", org_id: "org-1", full_name: "Brian Smith" }, error: null };
   }
   if (op.table === "profiles") return { data: [{ id: "boss-1", role: "owner" }, { id: "u-2", role: "tech" }], error: null };
-  if (op.table === "jobs") return { data: { id: "job-1", org_id: "org-1", job_number: "J-028", name: "85 Whitney Place" }, error: null };
+  if (op.table === "jobs") return { data: { id: "job-1", org_id: "org-1", job_number: "J-028", name: "41 Larkspur Place" }, error: null };
   if (op.table === "material_lists" && op.verb === "select") return { data: listOnJob ? { id: listOnJob } : null, error: null };
   if (op.table === "material_lists" && op.verb === "insert") {
     listOnJob = "list-new";
@@ -97,7 +97,7 @@ describe("requestMaterials: a line on the list, never a duplicate task", () => {
     const [org, to, n] = createNotifications.mock.calls[0] as [string, string[], Record<string, string>];
     expect(org).toBe("org-1");
     expect(to).toEqual(["boss-1"]);
-    expect(n.title).toMatch(/^Materials needed — .*85 Whitney Place/);
+    expect(n.title).toMatch(/^Materials needed — .*41 Larkspur Place/);
     expect(n.body).toBe("Brian Smith: Short on 12-2 for the far wall");
     expect(n.url).toBe("/jobs/job-1?tab=materials");
     expect(sendPushToProfiles).toHaveBeenCalledTimes(1);

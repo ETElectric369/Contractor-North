@@ -6,7 +6,7 @@
  *
  * Measured against what he actually typed in one sitting: TWELVE leads, FIVE of which already
  * existed as customers in the same org, and only TWO of those got linked. For two of them —
- * Mike Scrivano and Jackie Burks — the CUSTOMER record already held a phone and an email, and the
+ * Mike Sparrow and Marla Finch — the CUSTOMER record already held a phone and an email, and the
  * lead came back with neither. So the app had the phone number, he typed the name, and it handed
  * him a lead he cannot call. Ten of his twelve leads now have no way to contact them.
  *

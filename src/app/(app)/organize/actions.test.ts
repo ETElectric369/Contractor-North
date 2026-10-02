@@ -63,7 +63,7 @@ const GUARD = {
 };
 
 /** The live row. `select("*")` hands the action the whole thing, so the fake does too. */
-const WALDOW_RECEIPT = {
+const WEXLEY_RECEIPT = {
   id: "bf638150-21c9-4290-ae0f-d6608c31d331",
   kind: "receipt",
   status: "needs_review",
@@ -165,12 +165,12 @@ function withTeardownReads(
   if (!o.noBill) {
     add(
       "bills.select",
-      { data: o.bill === undefined ? { id: WALDOW_RECEIPT.bill_id, amount: 467.87, on_shelf: false, bill_line_items: [] } : o.bill, error: null },
+      { data: o.bill === undefined ? { id: WEXLEY_RECEIPT.bill_id, amount: 467.87, on_shelf: false, bill_line_items: [] } : o.bill, error: null },
       { data: o.copies ?? [], error: null },
     );
     add("organized_items.select", { data: o.tied ?? [], error: null });
   }
-  add("documents.select", { data: o.doc === undefined ? { id: "doc-1", created_at: "2026-09-15T12:00:00Z", file_url: WALDOW_RECEIPT.file_url } : o.doc, error: null });
+  add("documents.select", { data: o.doc === undefined ? { id: "doc-1", created_at: "2026-09-15T12:00:00Z", file_url: WEXLEY_RECEIPT.file_url } : o.doc, error: null });
   return script;
 }
 
@@ -178,14 +178,14 @@ describe("fileItem — re-filing a receipt an invoice already bills", () => {
   it("refuses the whole move, names INV-069, and tells him what to do about it", async () => {
     state.client = fakeSupabase(
       withTeardownReads({
-        "organized_items.select": [{ data: WALDOW_RECEIPT, error: null }],
+        "organized_items.select": [{ data: WEXLEY_RECEIPT, error: null }],
         "bills.delete": [{ data: null, error: GUARD }],
         "organized_items.update": [{ data: [{ id: "oi" }], error: null }, { data: [{ id: "oi" }], error: null }],
       }),
       calls,
     );
 
-    const res = await fileItem(WALDOW_RECEIPT.id, { type: "job", jobId: "job-047" });
+    const res = await fileItem(WEXLEY_RECEIPT.id, { type: "job", jobId: "job-047" });
     expect(res.ok).toBe(false);
     // The invoice number is the DATABASE'S, never re-looked-up or guessed.
     expect(res.error).toContain("INV-069 already bills this receipt.");
@@ -198,14 +198,14 @@ describe("fileItem — re-filing a receipt an invoice already bills", () => {
   it("leaves the old filing completely standing — nothing torn down, no second bill built", async () => {
     state.client = fakeSupabase(
       withTeardownReads({
-        "organized_items.select": [{ data: WALDOW_RECEIPT, error: null }],
+        "organized_items.select": [{ data: WEXLEY_RECEIPT, error: null }],
         "bills.delete": [{ data: null, error: GUARD }],
         "organized_items.update": [{ data: [{ id: "oi" }], error: null }, { data: [{ id: "oi" }], error: null }],
       }),
       calls,
     );
 
-    await fileItem(WALDOW_RECEIPT.id, { type: "job", jobId: "job-047" });
+    await fileItem(WEXLEY_RECEIPT.id, { type: "job", jobId: "job-047" });
 
     // The bill goes first precisely so "Nothing was moved" is a fact.
     expect(did("documents", "delete")).toBeUndefined();
@@ -222,21 +222,21 @@ describe("fileItem — re-filing a receipt an invoice already bills", () => {
   it("asks for the row back (.select('id')) so an RLS refusal can never read as a 204", async () => {
     state.client = fakeSupabase(
       withTeardownReads({
-        "organized_items.select": [{ data: WALDOW_RECEIPT, error: null }],
+        "organized_items.select": [{ data: WEXLEY_RECEIPT, error: null }],
         "bills.delete": [{ data: null, error: GUARD }],
         "organized_items.update": [{ data: [{ id: "oi" }], error: null }, { data: [{ id: "oi" }], error: null }],
       }),
       calls,
     );
-    await fileItem(WALDOW_RECEIPT.id, { type: "job", jobId: "job-047" });
+    await fileItem(WEXLEY_RECEIPT.id, { type: "job", jobId: "job-047" });
     expect(did("bills", "delete")?.selected).toBe(true);
   });
 
   it("an unclaimed receipt still moves: bill torn down, new one built on the new job", async () => {
     state.client = fakeSupabase(
       withTeardownReads({
-        "organized_items.select": [{ data: WALDOW_RECEIPT, error: null }],
-        "bills.delete": [{ data: [{ id: WALDOW_RECEIPT.bill_id }], error: null }],
+        "organized_items.select": [{ data: WEXLEY_RECEIPT, error: null }],
+        "bills.delete": [{ data: [{ id: WEXLEY_RECEIPT.bill_id }], error: null }],
         "documents.delete": [{ data: [{ id: "doc-1" }], error: null }],
         "documents.insert": [{ data: { id: "doc-2" }, error: null }],
         "bills.insert": [{ data: { id: "bill-new" }, error: null }],
@@ -246,7 +246,7 @@ describe("fileItem — re-filing a receipt an invoice already bills", () => {
       calls,
     );
 
-    const res = await fileItem(WALDOW_RECEIPT.id, { type: "job", jobId: "job-047" });
+    const res = await fileItem(WEXLEY_RECEIPT.id, { type: "job", jobId: "job-047" });
     expect(res).toEqual({ ok: true });
     expect(did("bills", "insert")?.payload).toMatchObject({ job_id: "job-047", amount: 467.87 });
     const rowWrites = calls.filter((c) => c.table === "organized_items" && c.verb === "update");
@@ -259,7 +259,7 @@ describe("fileItem — re-filing a receipt an invoice already bills", () => {
     // the no-dead-ends rule exists for. Only a real error stops the move.
     state.client = fakeSupabase(
       withTeardownReads({
-        "organized_items.select": [{ data: WALDOW_RECEIPT, error: null }],
+        "organized_items.select": [{ data: WEXLEY_RECEIPT, error: null }],
         "bills.delete": [{ data: [], error: null }],
         "documents.delete": [{ data: [], error: null }],
         "documents.insert": [{ data: { id: "doc-2" }, error: null }],
@@ -269,7 +269,7 @@ describe("fileItem — re-filing a receipt an invoice already bills", () => {
       }, { bill: null }),
       calls,
     );
-    const res = await fileItem(WALDOW_RECEIPT.id, { type: "job", jobId: "job-047" });
+    const res = await fileItem(WEXLEY_RECEIPT.id, { type: "job", jobId: "job-047" });
     expect(res).toEqual({ ok: true });
   });
 
@@ -279,7 +279,7 @@ describe("fileItem — re-filing a receipt an invoice already bills", () => {
     // dropped word.
     state.client = fakeSupabase(
       withTeardownReads({
-        "organized_items.select": [{ data: WALDOW_RECEIPT, error: null }],
+        "organized_items.select": [{ data: WEXLEY_RECEIPT, error: null }],
         "bills.delete": [{
           data: null,
           error: { code: "P0001", message: "another invoice already bills this receipt. Void that invoice, or take its materials lines off, then delete this receipt." },
@@ -288,7 +288,7 @@ describe("fileItem — re-filing a receipt an invoice already bills", () => {
       }),
       calls,
     );
-    const res = await fileItem(WALDOW_RECEIPT.id, { type: "job", jobId: "job-047" });
+    const res = await fileItem(WEXLEY_RECEIPT.id, { type: "job", jobId: "job-047" });
     expect(res.error).toMatch(/^Another invoice already bills this receipt\. /);
     expect(res.error).toContain("Nothing was moved.");
   });
@@ -296,13 +296,13 @@ describe("fileItem — re-filing a receipt an invoice already bills", () => {
   it("an error the guard did not raise keeps its own sentence (RLS gets the plain-English one)", async () => {
     state.client = fakeSupabase(
       withTeardownReads({
-        "organized_items.select": [{ data: WALDOW_RECEIPT, error: null }],
+        "organized_items.select": [{ data: WEXLEY_RECEIPT, error: null }],
         "bills.delete": [{ data: null, error: { message: 'new row violates row-level security policy for table "bills"' } }],
         "organized_items.update": [{ data: [{ id: "oi" }], error: null }, { data: [{ id: "oi" }], error: null }],
       }),
       calls,
     );
-    const res = await fileItem(WALDOW_RECEIPT.id, { type: "job", jobId: "job-047" });
+    const res = await fileItem(WEXLEY_RECEIPT.id, { type: "job", jobId: "job-047" });
     expect(res.ok).toBe(false);
     expect(res.error).toContain("don't have access");
     expect(res.error).not.toContain("Nothing was moved");
@@ -312,14 +312,14 @@ describe("fileItem — re-filing a receipt an invoice already bills", () => {
   it("a failed document teardown stops the re-file instead of leaving two copies on the job", async () => {
     state.client = fakeSupabase(
       withTeardownReads({
-        "organized_items.select": [{ data: WALDOW_RECEIPT, error: null }],
-        "bills.delete": [{ data: [{ id: WALDOW_RECEIPT.bill_id }], error: null }],
+        "organized_items.select": [{ data: WEXLEY_RECEIPT, error: null }],
+        "bills.delete": [{ data: [{ id: WEXLEY_RECEIPT.bill_id }], error: null }],
         "documents.delete": [{ data: null, error: { message: "boom" } }],
         "organized_items.update": [{ data: [{ id: "oi" }], error: null }, { data: [{ id: "oi" }], error: null }],
       }),
       calls,
     );
-    const res = await fileItem(WALDOW_RECEIPT.id, { type: "job", jobId: "job-047" });
+    const res = await fileItem(WEXLEY_RECEIPT.id, { type: "job", jobId: "job-047" });
     expect(res.ok).toBe(false);
     expect(res.error).toContain("still on the job");
     expect(did("documents", "insert")).toBeUndefined();
@@ -328,13 +328,13 @@ describe("fileItem — re-filing a receipt an invoice already bills", () => {
   it("a failed petty-cash teardown stops the re-file (audit 9's double disbursement, said out loud)", async () => {
     state.client = fakeSupabase(
       {
-        "organized_items.select": [{ data: { ...WALDOW_RECEIPT, bill_id: null, document_id: null, petty_cash_id: "pc-1" }, error: null }],
+        "organized_items.select": [{ data: { ...WEXLEY_RECEIPT, bill_id: null, document_id: null, petty_cash_id: "pc-1" }, error: null }],
         "petty_cash.delete": [{ data: null, error: { message: "boom" } }],
         "organized_items.update": [{ data: [{ id: "oi" }], error: null }, { data: [{ id: "oi" }], error: null }],
       },
       calls,
     );
-    const res = await fileItem(WALDOW_RECEIPT.id, { type: "job", jobId: "job-047" });
+    const res = await fileItem(WEXLEY_RECEIPT.id, { type: "job", jobId: "job-047" });
     expect(res.ok).toBe(false);
     expect(res.error).toContain("still in the drawer");
     expect(did("bills", "insert")).toBeUndefined();
@@ -394,7 +394,7 @@ describe("billJobReceipt — the link row IS the idempotency", () => {
 
 describe("billJobReceipt — a paper whose number is already on the books is FILED with that bill", () => {
   /**
-   * J-013 "TTP #56" (2026-09-30): one live bill, no supplier papers, and the Costs badge said 3 with
+   * J-013 "ARR #56" (2026-09-30): one live bill, no supplier papers, and the Costs badge said 3 with
    * the receipts fold reading "Not On A Bill Yet". The second photo of the same CED ticket got
    * "Already on the books" and NO row, so the job page called it loose forever: counted on the chip,
    * flagged on its line, and its Record As Cost only ever answered the same sentence. Now the photo
@@ -412,7 +412,7 @@ describe("billJobReceipt — a paper whose number is already on the books is FIL
     amount: 467.87,
     bill_date: "2026-09-15",
     job_id: "job-013",
-    jobs: { job_number: "J-013", name: "TTP #56" },
+    jobs: { job_number: "J-013", name: "ARR #56" },
   };
   const sameNumberScript = (tieResult: any): Record<string, any[]> => ({
     "documents.select": [{ data: DOC, error: null }],
@@ -556,12 +556,12 @@ describe("deleteOrganizedItem — throwing away a receipt an invoice bills", () 
   it("refuses, and the trash door's own sentence is the trigger's own sentence", async () => {
     state.client = fakeSupabase(
       withTeardownReads({
-        "organized_items.select": [{ data: WALDOW_RECEIPT, error: null }],
+        "organized_items.select": [{ data: WEXLEY_RECEIPT, error: null }],
         "bills.delete": [{ data: null, error: GUARD }],
       }),
       calls,
     );
-    const res = await deleteOrganizedItem(WALDOW_RECEIPT.id);
+    const res = await deleteOrganizedItem(WEXLEY_RECEIPT.id);
     expect(res.ok).toBe(false);
     expect(res.error).toContain("INV-069 already bills this receipt.");
     expect(res.error).toContain("Void that invoice, or take its materials lines off, then delete this receipt.");
@@ -572,13 +572,13 @@ describe("deleteOrganizedItem — throwing away a receipt an invoice bills", () 
     const storage = { removed: [] as string[][] };
     state.client = fakeSupabase(
       withTeardownReads({
-        "organized_items.select": [{ data: WALDOW_RECEIPT, error: null }],
+        "organized_items.select": [{ data: WEXLEY_RECEIPT, error: null }],
         "bills.delete": [{ data: null, error: GUARD }],
       }),
       calls,
       storage,
     );
-    await deleteOrganizedItem(WALDOW_RECEIPT.id);
+    await deleteOrganizedItem(WEXLEY_RECEIPT.id);
     expect(did("documents", "delete")).toBeUndefined();
     expect(did("organized_items", "delete")).toBeUndefined();
     expect(storage.removed).toEqual([]);
@@ -588,17 +588,17 @@ describe("deleteOrganizedItem — throwing away a receipt an invoice bills", () 
     const storage = { removed: [] as string[][] };
     state.client = fakeSupabase(
       withTeardownReads({
-        "organized_items.select": [{ data: WALDOW_RECEIPT, error: null }],
-        "bills.delete": [{ data: [{ id: WALDOW_RECEIPT.bill_id }], error: null }],
+        "organized_items.select": [{ data: WEXLEY_RECEIPT, error: null }],
+        "bills.delete": [{ data: [{ id: WEXLEY_RECEIPT.bill_id }], error: null }],
         "documents.delete": [{ data: [{ id: "doc-1" }], error: null }],
-        "organized_items.delete": [{ data: [{ id: WALDOW_RECEIPT.id }], error: null }],
+        "organized_items.delete": [{ data: [{ id: WEXLEY_RECEIPT.id }], error: null }],
       }),
       calls,
       storage,
     );
-    const res = await deleteOrganizedItem(WALDOW_RECEIPT.id);
+    const res = await deleteOrganizedItem(WEXLEY_RECEIPT.id);
     expect(res).toEqual({ ok: true });
-    expect(storage.removed).toEqual([[WALDOW_RECEIPT.file_url]]);
+    expect(storage.removed).toEqual([[WEXLEY_RECEIPT.file_url]]);
     expect(did("organized_items", "delete")?.selected).toBe(true);
   });
 
@@ -606,13 +606,13 @@ describe("deleteOrganizedItem — throwing away a receipt an invoice bills", () 
     const storage = { removed: [] as string[][] };
     state.client = fakeSupabase(
       {
-        "organized_items.select": [{ data: { ...WALDOW_RECEIPT, bill_id: null, document_id: null }, error: null }],
+        "organized_items.select": [{ data: { ...WEXLEY_RECEIPT, bill_id: null, document_id: null }, error: null }],
         "organized_items.delete": [{ data: [], error: null }],
       },
       calls,
       storage,
     );
-    const res = await deleteOrganizedItem(WALDOW_RECEIPT.id);
+    const res = await deleteOrganizedItem(WEXLEY_RECEIPT.id);
     expect(res.ok).toBe(false);
     expect(res.error).toContain("Nothing deleted.");
     expect(storage.removed).toEqual([]);
@@ -622,13 +622,13 @@ describe("deleteOrganizedItem — throwing away a receipt an invoice bills", () 
     const storage = { removed: [] as string[][], error: { message: "storage offline" } };
     state.client = fakeSupabase(
       {
-        "organized_items.select": [{ data: { ...WALDOW_RECEIPT, bill_id: null, document_id: null }, error: null }],
-        "organized_items.delete": [{ data: [{ id: WALDOW_RECEIPT.id }], error: null }],
+        "organized_items.select": [{ data: { ...WEXLEY_RECEIPT, bill_id: null, document_id: null }, error: null }],
+        "organized_items.delete": [{ data: [{ id: WEXLEY_RECEIPT.id }], error: null }],
       },
       calls,
       storage,
     );
-    const res = await deleteOrganizedItem(WALDOW_RECEIPT.id);
+    const res = await deleteOrganizedItem(WEXLEY_RECEIPT.id);
     expect(res).toEqual({ ok: true });
     expect(reported.calls.map((c) => c.where)).toContain("organize:deleteOrganizedItem.storage");
   });

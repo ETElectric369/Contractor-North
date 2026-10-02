@@ -86,7 +86,7 @@ export function receiptRowTitle(doc: Pick<ReceiptDoc, "category" | "created_at">
   return [who ? `${what} from ${who}` : what, day && day !== "—" ? day : null].filter(Boolean).join(" · ");
 }
 
-/** The job it is on, name first ("Herringbone · J-011"). */
+/** The job it is on, name first ("Honeysuckle · J-011"). */
 export function receiptRowJob(doc: Pick<ReceiptDoc, "jobs">): string {
   const j = Array.isArray(doc.jobs) ? doc.jobs[0] : doc.jobs;
   return jobWords(j ?? null);

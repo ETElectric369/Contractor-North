@@ -8,7 +8,7 @@ import { assertTestDatabase, notOnThisDatabase } from "@/lib/db-guard";
 /**
  * Migration 0357: Already Billed, where its rules live.
  *
- * Erik, 2026-09-26: "i have a bill for purple sage that was already charged and i have no way to
+ * Erik, 2026-09-26: "i have a bill for pinyon sage that was already charged and i have no way to
  * associate it to the paid invoice becuase i did it manually". mark_already_billed lets a line on a
  * sent invoice claim what it already charged for; unmark_already_billed takes back only what a person
  * added. Pinned against the real database, inside ONE transaction that is always rolled back, in a
@@ -21,7 +21,7 @@ import { assertTestDatabase, notOnThisDatabase } from "@/lib/db-guard";
  *   · Undo takes off only what a person added, and a split shift comes off whole;
  *   · a split carries the hand claim onto the new piece (and a piece split from a piece), and a join
  *     takes the absorbed piece off both lists;
- *   · the Purple Sage shape: a receipt with part of it on the shelf is claimed by a hand line, after
+ *   · the Pinyon Sage shape: a receipt with part of it on the shelf is claimed by a hand line, after
  *     which the shelf refuses it until the claim comes off.
  *
  *   TEST_DB_HOST=… TEST_DB_USER=… TEST_DBPW=… npx vitest run <this file>
@@ -185,7 +185,7 @@ d("0357: Already Billed", () => {
     tech = fx.techId;
     strangerOrg = fx.otherOrgId;
     stranger = fx.otherStaffId;
-    cust = (await one("insert into public.customers (org_id, name) values ($1, 'TEST AB Purple Sage') returning id", [org])).id;
+    cust = (await one("insert into public.customers (org_id, name) values ($1, 'TEST AB Pinyon Sage') returning id", [org])).id;
     otherCust = (await one("insert into public.customers (org_id, name) values ($1, 'TEST AB someone else') returning id", [org])).id;
     jobA = await newJob(cust, "A");
     jobB = await newJob(cust, "B");
@@ -573,7 +573,7 @@ d("0357: Already Billed", () => {
     expect(st.hand).toEqual([]);
   });
 
-  it("Purple Sage: the kept GFCIs go on the shelf first, then the typed Materials line claims the receipt, after which the shelf refuses it until the claim comes off", async () => {
+  it("Pinyon Sage: the kept GFCIs go on the shelf first, then the typed Materials line claims the receipt, after which the shelf refuses it until the claim comes off", async () => {
     if (!go()) return;
     const receipt = await bill(jobA, 186.93);
     const lines = [

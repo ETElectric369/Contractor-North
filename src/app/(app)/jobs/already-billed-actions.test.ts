@@ -8,7 +8,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
  *   - a mark that lands is read back from the function's own answer and said with its Undo; one that
  *     comes back empty is "didn't save", never a quiet success;
  *   - the function's own refusal reaches the office in its own words;
- *   - the sheet offers Purple Sage's paid INV-00023 with its typed Materials line picked, says the
+ *   - the sheet offers Pinyon Sage's paid INV-00023 with its typed Materials line picked, says the
  *     draft instead of offering it, leaves the deposit out; J-010 is fixed-price with no estimate,
  *     so New Invoice bills its actuals and the sheet opens there, and it refuses a job whose live
  *     estimate is the contract (New Invoice's own rule).
@@ -68,7 +68,7 @@ const rpcAnswers =
   (table: string): Reply =>
     table.startsWith("rpc:") ? r : table === "time_entries" ? { data: [] } : { data: null };
 
-/** J-010, 11301 Purple Sage (ids are uuids: they go into the invoices filter). */
+/** J-010, 11301 Pinyon Sage (ids are uuids: they go into the invoices filter). */
 const J010 = "0100aaaa-0000-4000-8000-000000000010";
 
 const PS_BILL = {
@@ -116,7 +116,7 @@ function sheetRoute(
   o: { billing?: string; invoicesError?: any; quotes?: { id: string; status: string }[]; milestones?: number; invoices?: any[]; drawLines?: { import_source: string | null }[] } = {},
 ) {
   return (table: string, cols: string): Reply => {
-    if (table === "jobs") return { data: { id: J010, job_number: "J-010", name: "11301 Purple Sage", customer_id: "c0000000-0000-4000-8000-000000000001", billing_type: o.billing ?? "fixed" } };
+    if (table === "jobs") return { data: { id: J010, job_number: "J-010", name: "11301 Pinyon Sage", customer_id: "c0000000-0000-4000-8000-000000000001", billing_type: o.billing ?? "fixed" } };
     if (table === "payment_milestones") return { data: Array.from({ length: o.milestones ?? 0 }, (_, i) => ({ id: `m${i}` })) };
     if (table === "quotes") return { data: o.quotes ?? [] };
     if (table === "organizations") return { data: { settings: { timezone: "America/Los_Angeles", features: { shop_stock: true } } } };
@@ -216,7 +216,7 @@ describe("after it", () => {
     expect(res.undo).toEqual({ jobId: J010, lineId: "li-b", ids: ["t2", "t1"], what: "6.5 h of Brian Taylor's time" });
   });
 
-  it("Purple Sage's sheet: INV-00023's typed Materials line, picked; the draft said, the deposit left out; the bill at what it cost this job", async () => {
+  it("Pinyon Sage's sheet: INV-00023's typed Materials line, picked; the draft said, the deposit left out; the bill at what it cost this job", async () => {
     state.client = fake(sheetRoute(), calls);
     const res = await alreadyBilledSheet(J010, { kind: "bill", ids: ["bill-ps"] });
     expect(res.ok).toBe(true);

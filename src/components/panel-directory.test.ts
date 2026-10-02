@@ -3,7 +3,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { CircuitMapSchedule, PanelDirectoryList, PanelDoorCard } from "./panel-directory";
 import { directoryFromRows } from "@/lib/panel/directory";
-import { FINAL_MAP, PANEL, circuit } from "@/lib/panel/__fixtures__/herringbone";
+import { FINAL_MAP, PANEL, circuit } from "@/lib/panel/__fixtures__/honeysuckle";
 
 /**
  * THE ONE DIRECTORY RENDERER (Panel plan, phase 5): the printed map carries the hand-built J-011

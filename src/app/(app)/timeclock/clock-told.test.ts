@@ -241,8 +241,8 @@ describe("the job named the way a person knows it — never a bare number", () =
   });
 
   it("a name that already carries the street doesn't say it twice", () => {
-    expect(punchJobLabel(job({ name: "13631 Northwoods — Garage Subpanel", address: "13631 Northwoods" }), true)).toBe(
-      "13631 Northwoods — Garage Subpanel",
+    expect(punchJobLabel(job({ name: "13631 Nightshade — Garage Subpanel", address: "13631 Nightshade" }), true)).toBe(
+      "13631 Nightshade — Garage Subpanel",
     );
   });
 

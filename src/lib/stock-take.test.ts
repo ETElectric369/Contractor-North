@@ -24,7 +24,7 @@ import {
 
 /**
  * TOOK FROM STOCK'S WORDS (Shop Stock, Phase 3), in the plan's own sentences: "Took 60 ft of 12/2
- * NM-B for Herringbone · Undo", "Brian took 20 ft of 12/2, the shelf said 5 ft. Count it or file the
+ * NM-B for Honeysuckle · Undo", "Brian took 20 ft of 12/2, the shelf said 5 ft. Count it or file the
  * roll.", "Take It Off INV-078 First".
  */
 
@@ -61,7 +61,7 @@ describe("the shelf and the takes, as the database hands them back", () => {
 
 describe("the words", () => {
   it("says a take the plan's way", () => {
-    expect(tookWords({ qty: 60, unit: "ft", item: "12/2 NM-B", job: "Herringbone" })).toBe("Took 60 ft of 12/2 NM-B for Herringbone");
+    expect(tookWords({ qty: 60, unit: "ft", item: "12/2 NM-B", job: "Honeysuckle" })).toBe("Took 60 ft of 12/2 NM-B for Honeysuckle");
     expect(fmtQty(12.1254)).toBe("12.125");
   });
 
@@ -70,8 +70,8 @@ describe("the words", () => {
     expect(shortOf(250, 60)).toBe(0);
     expect(shortOf(-15, 10)).toBe(10); // a shelf already below zero shows none
     expect(shortWords(20, "ft")).toBe("20 ft more than stock shows — the office will settle it");
-    expect(tookWords({ qty: 20, unit: "ft", item: "12/2 NM-B", job: "Herringbone", short: 15 })).toBe(
-      "Took 20 ft of 12/2 NM-B for Herringbone. 15 ft more than stock shows — the office will settle it.",
+    expect(tookWords({ qty: 20, unit: "ft", item: "12/2 NM-B", job: "Honeysuckle", short: 15 })).toBe(
+      "Took 20 ft of 12/2 NM-B for Honeysuckle. 15 ft more than stock shows — the office will settle it.",
     );
   });
 
@@ -81,10 +81,10 @@ describe("the words", () => {
     expect(takeShort(row, 40)).toEqual({ short: 40, past: 0 });
     expect(takeShortWords({ ...takeShort(row, 40), unit: "ft" })).toBe("40 ft of that isn't on a filed roll yet — it still saves, and the office settles it");
     // stock_draw hands back on_hand 60 and a 40 ft short: the toast agrees with the sheet.
-    expect(tookWords({ qty: 40, unit: "ft", item: "12/2 NM-B", job: "Herringbone", short: 40, onHandAfter: 60 })).toBe(
-      "Took 40 ft of 12/2 NM-B for Herringbone. 40 ft of that isn't on a filed roll yet — it still saves, and the office settles it.",
+    expect(tookWords({ qty: 40, unit: "ft", item: "12/2 NM-B", job: "Honeysuckle", short: 40, onHandAfter: 60 })).toBe(
+      "Took 40 ft of 12/2 NM-B for Honeysuckle. 40 ft of that isn't on a filed roll yet — it still saves, and the office settles it.",
     );
-    const bell = officeBellWords({ who: "Brian", qty: 40, unit: "ft", item: "12/2 NM-B", job: "Herringbone", short: 40, onHandAfter: 60 });
+    const bell = officeBellWords({ who: "Brian", qty: 40, unit: "ft", item: "12/2 NM-B", job: "Honeysuckle", short: 40, onHandAfter: 60 });
     expect(bell.title).toBe("Brian took 40 ft of 12/2 NM-B; 40 ft of it isn't on a filed roll");
     expect(bell.title).not.toContain("stock showed");
     // Enough on filed rolls: nothing to say.
@@ -94,8 +94,8 @@ describe("the words", () => {
   });
 
   it("never sends the office to count a short it can't settle by counting", () => {
-    const bell = officeBellWords({ who: "Brian", qty: 20, unit: "ft", item: "12/2", job: "Herringbone", short: 15, onHandAfter: -15 });
-    expect(bell.body).toBe("For Herringbone. File the roll on Shop Stock, then Settle From Stock — or Undo the take.");
+    const bell = officeBellWords({ who: "Brian", qty: 20, unit: "ft", item: "12/2", job: "Honeysuckle", short: 15, onHandAfter: -15 });
+    expect(bell.body).toBe("For Honeysuckle. File the roll on Shop Stock, then Settle From Stock — or Undo the take.");
     expect(bell.body).not.toMatch(/count it/i);
     // A database before 0364 still ends its refusal the old way: it is still turned round.
     expect(settleRefusalWords("Only 0 on the shelf, and 15 were taken past it. File the roll or count the shelf first.")).toBe(
@@ -108,12 +108,12 @@ describe("the words", () => {
   });
 
   it("rings the office in the plan's words, and a short says what the shelf showed", () => {
-    expect(officeBellWords({ who: "Brian", qty: 60, unit: "ft", item: "12/2 NM-B", job: "Herringbone", short: 0, onHandAfter: 190 }).title).toBe(
-      "Brian took 60 ft of 12/2 NM-B for Herringbone",
+    expect(officeBellWords({ who: "Brian", qty: 60, unit: "ft", item: "12/2 NM-B", job: "Honeysuckle", short: 0, onHandAfter: 190 }).title).toBe(
+      "Brian took 60 ft of 12/2 NM-B for Honeysuckle",
     );
-    const short = officeBellWords({ who: "Brian", qty: 20, unit: "ft", item: "12/2", job: "Herringbone", short: 15, onHandAfter: -15 });
+    const short = officeBellWords({ who: "Brian", qty: 20, unit: "ft", item: "12/2", job: "Honeysuckle", short: 15, onHandAfter: -15 });
     expect(short.title).toBe("Brian took 20 ft of 12/2, stock showed 5 ft");
-    expect(short.body).toBe("For Herringbone. File the roll on Shop Stock, then Settle From Stock — or Undo the take.");
+    expect(short.body).toBe("For Honeysuckle. File the roll on Shop Stock, then Settle From Stock — or Undo the take.");
     for (const w of [short.title, short.body]) expect(w).not.toMatch(/\$/);
   });
 
@@ -148,12 +148,12 @@ describe("never silent (audit v1018)", () => {
     expect(belowZeroWords(190, "ft")).toBeNull();
     expect(belowZeroWords(0, "ft")).toBeNull();
     expect(belowZeroWords(undefined, "ft")).toBeNull();
-    expect(tookWords({ qty: 90, unit: "ft", item: "12/2 NM-B", job: "Herringbone", short: 0, onHandAfter: -10 })).toBe(
-      "Took 90 ft of 12/2 NM-B for Herringbone. Stock now reads -10 ft, below zero — the office will settle it.",
+    expect(tookWords({ qty: 90, unit: "ft", item: "12/2 NM-B", job: "Honeysuckle", short: 0, onHandAfter: -10 })).toBe(
+      "Took 90 ft of 12/2 NM-B for Honeysuckle. Stock now reads -10 ft, below zero — the office will settle it.",
     );
-    const bell = officeBellWords({ who: "Brian", qty: 90, unit: "ft", item: "12/2 NM-B", job: "Herringbone", short: 0, onHandAfter: -10 });
+    const bell = officeBellWords({ who: "Brian", qty: 90, unit: "ft", item: "12/2 NM-B", job: "Honeysuckle", short: 0, onHandAfter: -10 });
     expect(bell.title).toBe("Brian took 90 ft of 12/2 NM-B; stock now reads -10 ft");
-    expect(bell.body).toBe("For Herringbone. An older short on it is still open: File the roll on Shop Stock, then Settle From Stock — or Undo the take.");
+    expect(bell.body).toBe("For Honeysuckle. An older short on it is still open: File the roll on Shop Stock, then Settle From Stock — or Undo the take.");
     // The bell opens where its words send the office: Shop Stock, whenever there is a short to settle.
     expect(officeBellOpensShelf({ short: 0, onHandAfter: -10 })).toBe(true);
     expect(officeBellOpensShelf({ short: 15, onHandAfter: -15 })).toBe(true);

@@ -114,7 +114,7 @@ describe("customerHoldsOlderCopy — the sentence the invoice page says out loud
 });
 
 describe("customerHoldsOlderCopy — paying the corrected bill in full settles it (INV-071)", () => {
-  // Karen Wucher's row, straight off the database: sent, revised that night, paid in full through
+  // Karen Willet's row, straight off the database: sent, revised that night, paid in full through
   // her own live link the next afternoon.
   const sent = "2026-09-19T20:54:55.199Z";
   const revised = "2026-09-20T05:21:57.343Z";

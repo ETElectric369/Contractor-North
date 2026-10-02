@@ -59,14 +59,14 @@ describe("autoClockoutPromptState: ask until somebody answers", () => {
 describe("switch breadcrumb — when the geofence anchor was deliberately cleared", () => {
   it("round-trips the timestamp it wrote", () => {
     const iso = "2026-07-20T18:05:00.000Z";
-    expect(lastSwitchMs(switchBreadcrumb("J-102 · Northwoods", iso))).toBe(Date.parse(iso));
+    expect(lastSwitchMs(switchBreadcrumb("J-102 · Nightshade", iso))).toBe(Date.parse(iso));
   });
 
   it("returns the LAST switch when a shift has several", () => {
     const notes = [
       "Pulled wire in the crawlspace",
       switchBreadcrumb("J-101 · Alpine", "2026-07-20T16:00:00.000Z"),
-      switchBreadcrumb("J-102 · Northwoods", "2026-07-20T20:30:00.000Z"),
+      switchBreadcrumb("J-102 · Nightshade", "2026-07-20T20:30:00.000Z"),
     ].join("\n");
     expect(lastSwitchMs(notes)).toBe(Date.parse("2026-07-20T20:30:00.000Z"));
   });

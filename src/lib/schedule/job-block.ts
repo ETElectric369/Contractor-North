@@ -3,7 +3,7 @@
  * writer (schedule/actions writeScheduleRanges, the one choke point) and every reader (the calendar's
  * grid, the job page's time controls, the schedule tile's sheet).
  *
- * Erik, 2026-09-28, placing J-058 Seiler · 3-way switches: "i forgot to set an amount of time it took
+ * Erik, 2026-09-28, placing J-058 Siskin · 3-way switches: "i forgot to set an amount of time it took
  * or i set it for 2 hours and it jumped to a later time block for many hours and i had no way to adjust
  * the time ... within the job itself i could only set a start time and no end time".
  *
@@ -31,7 +31,7 @@
  *    (DEFAULT_JOB_MINUTES). planned_minutes stays blank (nobody sized it) and every schedule surface
  *    says so in words: "2 hours — change it". All day is a choice (the Full Day chip), never a fallback.
  *  - A move keeps the block: the same start time and the same length on the new day.
- *  - A JOB'S USUAL HOURS ARE ITS HOURS ON EACH OF ITS DAYS. Erik, 2026-09-29, on 700 North Lake
+ *  - A JOB'S USUAL HOURS ARE ITS HOURS ON EACH OF ITS DAYS. Erik, 2026-09-29, on 700 North Juniper
  *    Boulevard: a second date range (Add Date Range) turned his 10–12 job into "full days", stamped the
  *    end at closing over the end he set, and hid the End box and the length chips. The "several days
  *    are full days" rule (cn-v1030) was written for one contiguous stretch and fired for two separate
@@ -87,7 +87,7 @@ export function ownDayMinutes(h: DayHours | null | undefined): { startMin: numbe
 /**
  * WHERE THE JOB SITS ON ONE DAY of the calendar, in minutes past the company's midnight.
  *
- *   its own hours (0370): a day that keeps its own hours (Herringbone added today, noon to 5, beside
+ *   its own hours (0370): a day that keeps its own hours (Honeysuckle added today, noon to 5, beside
  *               its other days) draws exactly those, on any day, in the plan or kept as history. The
  *               rest of this is the job's USUAL hours, for every day without its own:
  *   any day of the plan: its start to its stored end, AS TIMES OF DAY, on the first day, a middle day or

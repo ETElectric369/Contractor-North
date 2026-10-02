@@ -15,7 +15,7 @@ import type { ActionDef, ActionResult } from "../types";
  * left as a door that says no.
  *
  * stock.take (Phase 3) is Nort's way to move stock, and it moves nothing. "Took 60 feet of 12/2 from
- * stock for Herringbone" FILLS the Took From Stock card: the job resolved, the item resolved by name
+ * stock for Honeysuckle" FILLS the Took From Stock card: the job resolved, the item resolved by name
  * off the crew's view of the shelf (shelf_for_crew: names, units, counts, never a cost), the count
  * with the item's own unit. The card's link opens the job's sheet filled in, and a PERSON taps Take
  * It (fill vs execute, Erik 2026-08-02). Two items that match the name are a question back, never a

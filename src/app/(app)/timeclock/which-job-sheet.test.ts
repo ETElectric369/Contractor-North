@@ -29,9 +29,9 @@ import { Modal } from "@/components/ui/modal";
 import { askAfterPunch, orderWhichJobChoices, pickOutcome, routePick, sheetAfterLoad, whichJobLabel, type WhichJobOption } from "./which-job-choices";
 
 const jobs: WhichJobOption[] = [
-  { id: "j28", label: "85 Whitney", why: "Where you worked last" },
-  { id: "j30", label: "13631 Northwoods", why: "On today's schedule" },
-  { id: "j39", label: "Tahoe Park Heights" },
+  { id: "j28", label: "41 Larkspur", why: "Where you worked last" },
+  { id: "j30", label: "13631 Nightshade", why: "On today's schedule" },
+  { id: "j39", label: "Cedar Park Heights" },
 ];
 
 const view = (state: SheetPhase, over: Partial<Parameters<typeof WhichJobSheetView>[0]> = {}) => ({
@@ -114,7 +114,7 @@ describe("the sheet", () => {
     clickable(tree, "Skip, The Office Will Pick")!.props.onClick();
     expect(props.onSkip).toHaveBeenCalledTimes(1);
     expect(props.onPick).not.toHaveBeenCalled();
-    clickable(tree, "13631 Northwoods")!.props.onClick();
+    clickable(tree, "13631 Nightshade")!.props.onClick();
     expect(props.onPick).toHaveBeenCalledWith(jobs[1]);
   });
 
@@ -152,8 +152,8 @@ describe("the sheet", () => {
     const refused = render(view({ phase: "ready", jobs, isStaff: false }, { err: "That job is finished." }));
     expect(refused).toContain('role="alert"');
     expect(refused).toContain("That job is finished.");
-    const placed = render(view({ phase: "ready", jobs, isStaff: false }, { placed: "Your punch is on 85 Whitney." }));
-    expect(placed).toContain("Your punch is on 85 Whitney.");
+    const placed = render(view({ phase: "ready", jobs, isStaff: false }, { placed: "Your punch is on 41 Larkspur." }));
+    expect(placed).toContain("Your punch is on 41 Larkspur.");
     expect(placed).toContain(">Done</button>");
     expect(placed).not.toContain("Skip, The Office Will Pick");
   });
@@ -163,8 +163,8 @@ describe("a tap on a row", () => {
   const job = jobs[0];
 
   it("saves through the checked write and says where the punch went", async () => {
-    const put = vi.fn(async () => ({ ok: true, label: "85 Whitney" }));
-    expect(await pickOutcome(put, "p1", job)).toEqual({ kind: "placed", sentence: "Your punch is on 85 Whitney." });
+    const put = vi.fn(async () => ({ ok: true, label: "41 Larkspur" }));
+    expect(await pickOutcome(put, "p1", job)).toEqual({ kind: "placed", sentence: "Your punch is on 41 Larkspur." });
     expect(put).toHaveBeenCalledWith("p1", "j28");
   });
 
@@ -186,7 +186,7 @@ describe("a tap on a row", () => {
 });
 
 describe("where a pick's answer lands", () => {
-  const placed = { kind: "placed", sentence: "Your punch is on 85 Whitney." } as const;
+  const placed = { kind: "placed", sentence: "Your punch is on 41 Larkspur." } as const;
   const stale = { kind: "stale", sentence: "That shift closed a while ago, so the office puts it on its job from Timecards." } as const;
   const refused = { kind: "refused", sentence: "That job is finished." } as const;
   const open = { confirmInline: false, gone: false };
@@ -287,24 +287,24 @@ describe("the order, and the label", () => {
   });
 
   it("A GAP DAY IS NOT A JOB DAY: a job booked day 1 and day 3 is not on today's schedule on day 2; the job booked today is", () => {
-    // Herringbone: 9/18, 9/22 and 9/24, its window mirrored 9/18 8 AM to 9/24 4 PM. Seiler: 9/23 only.
-    const herringbone = { id: "herringbone", name: "Herringbone", status: "scheduled", scheduled_start: "2026-09-18T15:00:00Z", scheduled_end: "2026-09-24T23:00:00Z" };
-    const seiler = { id: "seiler", name: "Seiler", status: "scheduled", scheduled_start: "2026-09-23T17:00:00Z", scheduled_end: "2026-09-23T19:00:00Z" };
-    const base = { jobs: [herringbone, seiler], lastJobId: null, tz: "America/Los_Angeles", codesOn: true };
-    // 9/23: Seiler's segment covers it; Herringbone has day rows, none today, so its window is not asked.
-    expect(orderWhichJobChoices({ ...base, segToday: new Set(["seiler"]), hasSegments: new Set(["herringbone", "seiler"]), todayStr: "2026-09-23" })).toEqual([
-      { id: "seiler", label: "Seiler", why: "On today's schedule" },
+    // Honeysuckle: 9/18, 9/22 and 9/24, its window mirrored 9/18 8 AM to 9/24 4 PM. Siskin: 9/23 only.
+    const honeysuckle = { id: "honeysuckle", name: "Honeysuckle", status: "scheduled", scheduled_start: "2026-09-18T15:00:00Z", scheduled_end: "2026-09-24T23:00:00Z" };
+    const siskin = { id: "siskin", name: "Siskin", status: "scheduled", scheduled_start: "2026-09-23T17:00:00Z", scheduled_end: "2026-09-23T19:00:00Z" };
+    const base = { jobs: [honeysuckle, siskin], lastJobId: null, tz: "America/Los_Angeles", codesOn: true };
+    // 9/23: Siskin's segment covers it; Honeysuckle has day rows, none today, so its window is not asked.
+    expect(orderWhichJobChoices({ ...base, segToday: new Set(["siskin"]), hasSegments: new Set(["honeysuckle", "siskin"]), todayStr: "2026-09-23" })).toEqual([
+      { id: "siskin", label: "Siskin", why: "On today's schedule" },
     ]);
     // A job with no day rows at all still rides in on its own window.
     expect(orderWhichJobChoices({ ...base, segToday: new Set(), hasSegments: new Set(), todayStr: "2026-09-23" }).map((o) => o.id)).toEqual([
-      "herringbone",
-      "seiler",
+      "honeysuckle",
+      "siskin",
     ]);
   });
 
   it("codes off, a job reads the way the crew knows it: customer · street", () => {
-    const j = { id: "x", name: "Panel swap", address: "85 Whitney", customers: { name: "Nora" } };
-    expect(whichJobLabel(j, false)).toBe("Nora · 85 Whitney");
+    const j = { id: "x", name: "Panel swap", address: "41 Larkspur", customers: { name: "Nora" } };
+    expect(whichJobLabel(j, false)).toBe("Nora · 41 Larkspur");
     expect(whichJobLabel(j, true)).toBe("Panel swap");
   });
 });

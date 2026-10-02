@@ -736,7 +736,7 @@ function keptLine(kept: string[]): string {
 
 /** Schedule a job's work window (Nort's job.scheduleDay). Used to be a bare
  *  setJobScheduleRanges([window]), which replaced the whole schedule and so erased the days
- *  already worked (Herringbone, 2026-09-24).
+ *  already worked (Honeysuckle, 2026-09-24).
  *
  *  A RESCHEDULE MOVES THE PLAN, NOT THE HISTORY. The window still replaces the plan, but every
  *  day that was on the old schedule and was WORKED stays on the calendar, and the result says
@@ -1087,7 +1087,7 @@ const NEEDS_0370 =
 
 /**
  * ONE DAY'S TIME, THAT DAY ONLY (0370): the schedule tile's sheet, "This Day". Erik, 2026-09-28: a job
- * over several days had one time of day for all of them, so Herringbone's afternoon after Seiler could
+ * over several days had one time of day for all of them, so Honeysuckle's afternoon after Siskin could
  * only land at its usual hours. The job page's time control still sets the job's USUAL hours (every
  * day without its own, setJobTimes); this sets one day's.
  *
@@ -1161,7 +1161,7 @@ export async function setJobDayTimes(
 
 /**
  * ADD TO SCHEDULE, FOR ANY JOB, FROM THE SCHEDULE (Erik, 2026-09-28, at night: "im on the schedule page
- * and i want to put heringbone on the page for the rest of the day after Seiler but theres no way to add
+ * and i want to put honysuckle on the page for the rest of the day after Siskin but theres no way to add
  * to the schedule from the schedule page unless its already scripted"). The rail lists only jobs with
  * no day (or on hold); an in-progress job over several days had no door to another day.
  *
@@ -1273,7 +1273,7 @@ export async function addJobDay(
       live = { mirror, days: frozen.segments };
     } else {
       /* BEFORE 0370 NO DAY CAN KEEP ITS BLOCK, so a span that grows would redraw the job's other days
-         (Seiler's one day 10 to 12 would draw 10 to 5 the moment Wed joins it, and stay that way after
+         (Siskin's one day 10 to 12 would draw 10 to 5 the moment Wed joins it, and stay that way after
          0370 runs): refused in words, nothing written. A day that redraws no other day goes on at the
          job's usual hours, and the note says the hours it actually draws there. */
       if (frozen.frozen.length) {
@@ -1358,7 +1358,7 @@ export async function addJobDay(
 
 /**
  * CLEAR THE DATE: the job goes back to waiting for a day (the schedule's rail), from the tile's sheet.
- * The plan leaves; a day already WORKED stays on the calendar as history (the Herringbone rule), a
+ * The plan leaves; a day already WORKED stays on the calendar as history (the Honeysuckle rule), a
  * Scheduled job is To Be Scheduled again (one already under way keeps its status), a pending
  * pick-a-date link is withdrawn so a customer's later tap can't put back a day the office just
  * cleared, and the Google event goes. What was kept or withdrawn comes back in `note`.
@@ -1779,7 +1779,7 @@ export async function planDayTimes(
     .in("status", ["scheduled", "in_progress"])
     .limit(100);
 
-  /* A DAY'S OWN HOURS (0370) are the block that day holds: Herringbone's noon to 5 beside its other
+  /* A DAY'S OWN HOURS (0370) are the block that day holds: Honeysuckle's noon to 5 beside its other
      days is busy noon to 5, never its usual full day. Before 0370 there are none (the read without
      the columns), and every job holds its usual block, as before. */
   const { data: daySegs } = await withDayHours((h) =>
@@ -1843,8 +1843,8 @@ export async function planDayTimes(
 /**
  * PARK A JOB WITH ITS REASON, OR WAKE IT — from the board itself.
  *
- * Erik: "the tanager job requires a permit so im thinking that any On Hold job should have a
- * reason and therefore needs an action... with the tanager ln and others ive had to click out to
+ * Erik: "the tupelo job requires a permit so im thinking that any On Hold job should have a
+ * reason and therefore needs an action... with the tupelo ln and others ive had to click out to
  * jobs and find it and change the dropdown to on hold from there."
  *
  * The round trip (rail → Jobs → find it → dropdown → back) is exactly the leaving-page-and-back

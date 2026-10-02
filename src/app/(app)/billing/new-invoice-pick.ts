@@ -13,7 +13,7 @@ export type PickJob = {
   job_number: string | null;
   name: string | null;
   customer_id: string | null;
-  /** The job's customer, by name: rows read "J-011 · Timbercreek · Tao Zhu". */
+  /** The job's customer, by name: rows read "J-011 · Thistlewood · Tess Zane". */
   customer_name?: string | null;
 };
 export type PickCustomer = { id: string; name: string };
@@ -23,7 +23,7 @@ export type Pick = { kind: "job" | "customer"; id: string; label: string };
 export type PickRow =
   | { kind: "job"; id: string; label: string }
   | { kind: "customer"; id: string; label: string }
-  /** No match: the last row makes the customer ("+ New Customer 'Tao Zhu'") and picks them. */
+  /** No match: the last row makes the customer ("+ New Customer 'Tess Zane'") and picks them. */
   | { kind: "new-customer"; name: string };
 
 /** Before anything is typed: the newest jobs that aren't cancelled (the page reads them that way). */
@@ -31,7 +31,7 @@ export const RECENT_JOBS = 8;
 /** At most this many of each kind while typing: the list stays one screen on a phone. */
 export const MATCHES_EACH = 12;
 
-/** "J-011 · Timbercreek · Tao Zhu": the J-number once (a name that already starts with it isn't
+/** "J-011 · Thistlewood · Tess Zane": the J-number once (a name that already starts with it isn't
  *  given it twice), the job's name, its customer. */
 export function jobRowLabel(j: PickJob): string {
   const num = (j.job_number ?? "").trim();

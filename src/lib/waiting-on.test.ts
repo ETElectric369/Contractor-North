@@ -5,8 +5,8 @@ import { isSchedulable, isWaiting, waitingDays, waitingLabel, waitingList, waitT
  * THE THREE ROWS THIS EXISTS FOR, as they sit in production today:
  *
  *   200A Service Upgrade   on_hold, start Aug 31, created Jul 16 — TOUCHED TODAY, bumped again
- *   Tao Zhu                on_hold, start Jul 9  — a date a month in the past
- *   TTP #56                on_hold, start Jun 17 — same
+ *   Tess Zane                on_hold, start Jul 9  — a date a month in the past
+ *   ARR #56                on_hold, start Jun 17 — same
  *
  * Every one of those dates is fiction. The app had no way to say "waiting on the county", so it
  * got a date instead, and the date has to be maintained by hand forever.
@@ -75,8 +75,8 @@ describe("it gets louder on its own", () => {
 
   it("the three real rows, told honestly", () => {
     expect(waitTone(waitingDays({ blocked_on: "x", blocked_since: "2026-07-16" }, TODAY))).toBe("aging"); // 200A, 19d
-    expect(waitTone(waitingDays({ blocked_on: "x", blocked_since: "2026-06-08" }, TODAY))).toBe("stale"); // Tao Zhu, 57d
-    expect(waitTone(waitingDays({ blocked_on: "x", blocked_since: "2026-06-15" }, TODAY))).toBe("stale"); // TTP #56
+    expect(waitTone(waitingDays({ blocked_on: "x", blocked_since: "2026-06-08" }, TODAY))).toBe("stale"); // Tess Zane, 57d
+    expect(waitTone(waitingDays({ blocked_on: "x", blocked_since: "2026-06-15" }, TODAY))).toBe("stale"); // ARR #56
   });
 });
 
@@ -106,14 +106,14 @@ describe("the one line a person reads", () => {
 describe("the list — longest wait first", () => {
   const rows = [
     { id: "fresh", blocked_on: "permit", blocked_since: "2026-08-02" },
-    { id: "taozhu", blocked_on: "permit", blocked_since: "2026-06-08" },
+    { id: "tesszane", blocked_on: "permit", blocked_since: "2026-06-08" },
     { id: "200a", blocked_on: "permit", blocked_since: "2026-07-16" },
     { id: "clear" },
     { id: "unknown", blocked_on: "permit" },
   ];
 
   it("the three-week-old request is the one that has gone wrong", () => {
-    expect(waitingList(rows, TODAY).map((r) => r.id)).toEqual(["taozhu", "200a", "fresh", "unknown"]);
+    expect(waitingList(rows, TODAY).map((r) => r.id)).toEqual(["tesszane", "200a", "fresh", "unknown"]);
   });
 
   it("drops anything not actually waiting", () => {

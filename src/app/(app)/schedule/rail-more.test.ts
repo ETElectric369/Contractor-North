@@ -139,8 +139,8 @@ describe("a rail card: one ⋯, no status dropdown", () => {
   const job = (over: Record<string, unknown> = {}) => ({
     id: "j1",
     kind: "job" as const,
-    name: "498 Mil Drae Lane",
-    address: "498 Mil Drae Lane",
+    name: "498 May Dell Lane",
+    address: "498 May Dell Lane",
     city: "Truckee",
     status: "to_be_scheduled",
     ...over,
@@ -221,7 +221,7 @@ describe("Undo on the rail's place", () => {
   const today = () => todayStrInTz(db.tz);
   const dateless = (over: Row = {}) => ({
     id: "j1",
-    name: "498 Mil Drae Lane",
+    name: "498 May Dell Lane",
     status: "to_be_scheduled",
     scheduled_start: null,
     scheduled_end: null,

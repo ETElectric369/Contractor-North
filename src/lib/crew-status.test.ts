@@ -27,9 +27,9 @@ const brian = { id: "u1", full_name: "Brian" };
 describe("getCrewStatus — the job label", () => {
   it("shows the NAME, not the number", async () => {
     const crew = await getCrewStatus(
-      fakeSupabase([brian], [{ profile_id: "u1", job: { job_number: "J-009", name: "TTP #11" } }]),
+      fakeSupabase([brian], [{ profile_id: "u1", job: { job_number: "J-009", name: "ARR #11" } }]),
     );
-    expect(crew[0].jobLabel).toBe("TTP #11");
+    expect(crew[0].jobLabel).toBe("ARR #11");
     expect(crew[0].jobLabel).not.toContain("J-009");
   });
 
@@ -42,17 +42,17 @@ describe("getCrewStatus — the job label", () => {
   });
 
   it("three dwellings at one address stay distinguishable", async () => {
-    // The whole reason the number is wrong here: J-009/J-013/J-017 are 300 W Lake Blvd #11/#56/#224.
+    // The whole reason the number is wrong here: J-009/J-013/J-017 are 300 W Garnet Blvd #11/#56/#224.
     const crew = await getCrewStatus(
       fakeSupabase(
         [brian, { id: "u2", full_name: "Ryan" }],
         [
-          { profile_id: "u1", job: { job_number: "J-009", name: "TTP #11" } },
-          { profile_id: "u2", job: { job_number: "J-017", name: "TTP #224" } },
+          { profile_id: "u1", job: { job_number: "J-009", name: "ARR #11" } },
+          { profile_id: "u2", job: { job_number: "J-017", name: "ARR #224" } },
         ],
       ),
     );
-    expect(crew.map((c) => c.jobLabel)).toEqual(["TTP #11", "TTP #224"]);
+    expect(crew.map((c) => c.jobLabel)).toEqual(["ARR #11", "ARR #224"]);
   });
 
   it("off the clock is a null label and clockedIn false, not an empty string", async () => {
@@ -69,7 +69,7 @@ describe("getCrewStatus — the job label", () => {
     const crew = await getCrewStatus(
       fakeSupabase(
         [brian, { id: "u2", full_name: "Ryan" }],
-        [{ id: "e1", profile_id: "u1", clock_in: "2001-01-01T21:37:00Z", job: { job_number: "J-011", name: "Herringbone" } }],
+        [{ id: "e1", profile_id: "u1", clock_in: "2001-01-01T21:37:00Z", job: { job_number: "J-011", name: "Honeysuckle" } }],
       ),
     );
     expect(crew[0]).toMatchObject({ clockedIn: true, entryId: "e1", clockIn: "2001-01-01T21:37:00Z" });

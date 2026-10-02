@@ -321,7 +321,7 @@ export function billsSettledBySupplier(input: {
   );
 }
 
-/** His jobs as the matcher and the card picker read them: enough to tell five Rhodesias apart. */
+/** His jobs as the matcher and the card picker read them: enough to tell five Fernhills apart. */
 export function reconcileJobsOf(rows: any[]): ReconcileJob[] {
   return ((rows ?? []) as any[]).map((j) => ({
     id: String(j.id),

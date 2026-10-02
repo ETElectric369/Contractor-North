@@ -10,14 +10,14 @@ import {
   rollupWorkedJobs,
 } from "@/lib/action-items/leak-detectors";
 
-// The Apache Ct scenario, pinned: an open 26-hour entry attached to no job, a worked
+// The Acacia Ct scenario, pinned: an open 26-hour entry attached to no job, a worked
 // job with zero costs (30' of Romex nobody recorded), and no return visit scheduled.
 
 const TODAY = "2026-07-01";
 const NOW = Date.parse("2026-07-01T15:00:00Z");
 
 describe("detectStrayTime — the forgotten clock and the job-less hours", () => {
-  it("flags an open entry from a past day (the 26-hour Apache Ct clock)", () => {
+  it("flags an open entry from a past day (the 26-hour Acacia Ct clock)", () => {
     const rows = [{ id: "e1", status: "open", clock_in: "2026-06-30T13:00:00Z", profiles: { full_name: "Brian Smith" } }];
     const out = detectStrayTime(rows, TODAY, NOW);
     expect(out).toEqual([{ entryId: "e1", name: "Brian", openStill: true, when: "2026-06-30T13:00:00Z" }]);
@@ -79,7 +79,7 @@ describe("rollupWorkedJobs — entries → the jobs they touched", () => {
 });
 
 describe("detectUnbilledWork — the 30'-of-Romex leak", () => {
-  const job = { id: "A", name: "Apache Ct", status: "in_progress" };
+  const job = { id: "A", name: "Acacia Ct", status: "in_progress" };
   const worked = new Map([["A", { lastWorked: "2026-06-30T15:00:00Z", hasOpenEntry: false, workedInUnbilledWindow: true }]]);
   it("flags a worked job with zero costs/POs/materials", () => {
     const out = detectUnbilledWork({ jobs: [job], worked, costedJobIds: new Set(), invoicedJobIds: new Set() });
@@ -105,7 +105,7 @@ describe("detectUnbilledWork — the 30'-of-Romex leak", () => {
 
 describe("detectNeedsReturn — the forgotten return visit", () => {
   const worked = new Map([["A", { lastWorked: "2026-06-30T15:00:00Z", hasOpenEntry: false, workedInUnbilledWindow: true }]]);
-  const base = { id: "A", name: "Apache Ct", status: "in_progress", scheduled_start: null };
+  const base = { id: "A", name: "Acacia Ct", status: "in_progress", scheduled_start: null };
   const none = { futureApptJobIds: new Set<string>(), futureSegmentJobIds: new Set<string>() };
   it("flags an in-flight worked job with nothing on the calendar", () => {
     expect(detectNeedsReturn({ jobs: [base], worked, todayStr: TODAY, ...none }).map((f) => f.job.id)).toEqual(["A"]);
@@ -165,7 +165,7 @@ describe("costedJobIds — THE one rule for 'costs on the record' (My Day and th
 
   it("feeds detectUnbilledWork: a job whose invoice bills its materials is not 'no costs recorded'", () => {
     const worked = new Map([["E", { lastWorked: "2026-07-01T14:00:00Z", hasOpenEntry: false, workedInUnbilledWindow: true }]]);
-    const job = { id: "E", name: "Herringbone", status: "in_progress" };
+    const job = { id: "E", name: "Honeysuckle", status: "in_progress" };
     const invoices = [{ job_id: "E", status: "sent", invoice_items: [{ line_kind: "materials" }] }];
     expect(detectUnbilledWork({ jobs: [job], worked, costedJobIds: costedJobIds({ invoices }), invoicedJobIds: new Set(["E"]) })).toEqual([]);
     expect(detectUnbilledWork({ jobs: [job], worked, costedJobIds: costedJobIds({}), invoicedJobIds: new Set(["E"]) }).map((f) => f.job.id)).toEqual(["E"]);

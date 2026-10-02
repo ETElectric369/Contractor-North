@@ -116,7 +116,7 @@ beforeEach(() => {
     id: "appt-tom",
     title: "Walk-Through: Tom Goodman",
     customer_id: "cust-tom",
-    location: "3245 W. Lake Blvd",
+    location: "3245 W. Garnet Blvd",
     city: null,
     state: null,
     zip: null,
@@ -290,9 +290,9 @@ describe("createJobFromAppointment: a fresh lead gets its customer, and the job 
     db.appt.customer_id = null;
     db.appt.inquiry_id = "inq-fresh";
     db.appt.notes = "Kitchen hood outlet, wants it before the range arrives.";
-    db.inquiry = { id: "inq-fresh", customer_id: null, name: "Jackie Burks", company_name: null, type: "residential" };
+    db.inquiry = { id: "inq-fresh", customer_id: null, name: "Marla Finch", company_name: null, type: "residential" };
     win.customerForInquiry.mockResolvedValue("cust-minted");
-    db.customers["cust-minted"] = { name: "Jackie Burks", company_name: null, type: "residential" };
+    db.customers["cust-minted"] = { name: "Marla Finch", company_name: null, type: "residential" };
 
     const res = await createJobFromAppointment("appt-tom");
     expect(res.ok).toBe(true);

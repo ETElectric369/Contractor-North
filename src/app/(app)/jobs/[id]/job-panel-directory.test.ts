@@ -18,7 +18,7 @@ vi.mock("../panel-portal-actions", () => ({
 import { PanelDirectoryCard } from "./job-panel-directory";
 import { PanelCardView } from "./job-portal-panel";
 import { directoryFromRows } from "@/lib/panel/directory";
-import { FINAL_MAP, J011, PANEL, circuit } from "@/lib/panel/__fixtures__/herringbone";
+import { FINAL_MAP, J011, PANEL, circuit } from "@/lib/panel/__fixtures__/honeysuckle";
 
 const text = (s: string) => s.replace(/<[^>]+>/g, " ").replace(/&#x27;/g, "'").replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/\s+/g, " ");
 const clickables = (html: string) => [...html.matchAll(/<(button|a)\b([^>]*)>([\s\S]*?)<\/\1>/g)].map((m) => ({ attrs: m[2], label: text(m[3]).trim() }));
@@ -58,7 +58,7 @@ describe("the Customer Page tab's panel switch", () => {
   const view = (over: Partial<Parameters<typeof PanelCardView>[0]> = {}) =>
     renderToStaticMarkup(
       createElement(PanelCardView, {
-        who: "Andrew Cohen",
+        who: "Andrew Crake",
         jobId: J011,
         panels: [{ id: PANEL.id, name: "Main Panel", shown: false }],
         preview,
@@ -75,8 +75,8 @@ describe("the Customer Page tab's panel switch", () => {
     expect(html).toContain('role="switch"');
     expect(html).toContain('aria-checked="false"');
     expect(t).toContain("Show The Panel On Their Page");
-    expect(t).toContain("Andrew Cohen doesn't see the panel. Turn it on when the list is ready.");
-    expect(t).toContain("What Andrew Cohen Would See");
+    expect(t).toContain("Andrew Crake doesn't see the panel. Turn it on when the list is ready.");
+    expect(t).toContain("What Andrew Crake Would See");
     expect(html).toContain('data-panel-line="— · Entry Lights · feeds Kitchen And Living Lights · 15A"');
     expect(t).toContain("Never shown: part numbers, suppliers, prices, wire tags, notes, progress, or suggestions nobody kept.");
     for (const c of clickables(html)) {
@@ -89,7 +89,7 @@ describe("the Customer Page tab's panel switch", () => {
     const html = view({ panels: [{ id: PANEL.id, name: "Main Panel", shown: true }], circuitMap: { documentId: "d", title: "Circuit Map", sharedAt: "2026-09-25T17:00:00Z" } });
     const t = text(html);
     expect(html).toContain('aria-checked="true"');
-    expect(t).toContain("What Andrew Cohen Sees");
+    expect(t).toContain("What Andrew Crake Sees");
     expect(t).toContain('On their Plans And Drawings: "Circuit Map", shown Sep 25, 2026.');
   });
 

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { TIMBER_CREEK } from "@/test/ced-timber-creek";
+import { THISTLE_WOOD } from "@/test/ced-thistle-wood";
 
 /**
  * PAPER WAITS FOR A PERSON (Erik, 2026-09-24; 0295).
@@ -133,7 +133,7 @@ const did = (table: string, verb: string) => calls.find((c) => c.table === table
 const lastDid = (table: string, verb: string) => [...calls].reverse().find((c) => c.table === table && c.verb === verb);
 const all = (table: string, verb: string) => calls.filter((c) => c.table === table && c.verb === verb);
 
-const JOBS = { data: [{ id: "job-046", job_number: "J-046", name: "Jason Waldow", address: "518 Crater Lake Rd", city: null, customers: { name: "Jason" } }], error: null };
+const JOBS = { data: [{ id: "job-046", job_number: "J-046", name: "Jason Wexley", address: "518 Cinder Lake Rd", city: null, customers: { name: "Jason" } }], error: null };
 
 describe("the reader proposes; it never files (Erik, 2026-09-24)", () => {
   it("a bill whose PAPER names the job (its address) comes in with that job picked, says why, and still waits: no bill, no document", async () => {
@@ -148,9 +148,9 @@ describe("the reader proposes; it never files (Erik, 2026-09-24)", () => {
       line_items: [{ description: "HOM120", quantity: 1, unit_price: 467.87, amount: 467.87, category: "Materials" }],
       payment: "on_account",
       destination: "job",
-      job_marks: { address: "518 CRATER LAKE RD" },
+      job_marks: { address: "518 CINDER LAKE RD" },
       job_id: "job-046",
-      job_hint: "518 CRATER LAKE",
+      job_hint: "518 CINDER LAKE",
       confidence: "high",
     };
     state.client = fakeSupabase(
@@ -165,7 +165,7 @@ describe("the reader proposes; it never files (Erik, 2026-09-24)", () => {
     const res = await analyzeAndFile({ path: "org-1/organize/1-ced.jpg", name: "ced.jpg", mime: "image/jpeg", size: 1000, sha256: "a".repeat(64) });
     expect(res.ok).toBe(true);
     expect(res.item).toMatchObject({ status: "needs_review", destination: "none", job_id: null });
-    expect(res.item?.suggestion).toMatchObject({ picked: true, because: "Job picked from the address on the bill: 518 CRATER LAKE RD" });
+    expect(res.item?.suggestion).toMatchObject({ picked: true, because: "Job picked from the address on the bill: 518 CINDER LAKE RD" });
     expect(res.item?.suggestion?.jobLabel).toContain("J-046");
     expect(did("bills", "insert")).toBeUndefined();
     expect(did("documents", "insert")).toBeUndefined();
@@ -174,7 +174,7 @@ describe("the reader proposes; it never files (Erik, 2026-09-24)", () => {
       status: "needs_review",
       doc_type: "bill",
       doc_number: "8802-1108330",
-      proposal: expect.objectContaining({ jobId: "job-046", jobFrom: "address", jobHint: "518 CRATER LAKE RD", guessJobId: null }),
+      proposal: expect.objectContaining({ jobId: "job-046", jobFrom: "address", jobHint: "518 CINDER LAKE RD", guessJobId: null }),
     });
     // The matcher ran over this org's open jobs, filtered by org.
     expect(did("jobs", "select")!.eqs).toContainEqual(["org_id", "org-1"]);
@@ -226,7 +226,7 @@ describe("the reader proposes; it never files (Erik, 2026-09-24)", () => {
     await analyzeAndFile({ path: "org-1/organize/8.jpg", name: "8.jpg", mime: "image/jpeg", size: 1000 });
     expect(ai.systems[0]).not.toContain("job-046");
     expect(ai.systems[0]).not.toContain("Jason");
-    expect(ai.systems[0]).not.toContain("Crater Lake");
+    expect(ai.systems[0]).not.toContain("Cinder Lake");
     expect(ai.systems[0]).not.toContain('"job_id"');
   });
 
@@ -364,10 +364,10 @@ describe("the reader proposes; it never files (Erik, 2026-09-24)", () => {
       vendor: "Consolidated Electrical Dist.",
       amount: 323.71,
       document_number: "8802-SO-257555",
-      po_number: "13897 HERRINGBONE",
+      po_number: "13897 HONEYSUCKLE",
       payment: "on_account",
       job_marks: { address: null, job_name: null, job_number: null, customer: "ERIK TAYLOR" },
-      job_hint: "JOB NAME AND ADDRESS ERIK TAYLOR 13897 HERRINGBONE",
+      job_hint: "JOB NAME AND ADDRESS ERIK TAYLOR 13897 HONEYSUCKLE",
       confidence: "high",
     };
     state.client = fakeSupabase(
@@ -376,7 +376,7 @@ describe("the reader proposes; it never files (Erik, 2026-09-24)", () => {
         "jobs.select": [
           {
             data: [
-              { id: "job-011", job_number: "J-011", name: "13897 Herringbone", address: "13897 Herringbone Way", customers: { name: "Andrew Cohen" } },
+              { id: "job-011", job_number: "J-011", name: "13897 Honeysuckle", address: "13897 Honeysuckle Way", customers: { name: "Andrew Crake" } },
               { id: "job-099", job_number: "J-099", name: "Shop", address: null, customers: { name: "Erik Taylor" } },
             ],
             error: null,
@@ -389,13 +389,13 @@ describe("the reader proposes; it never files (Erik, 2026-09-24)", () => {
       calls,
     );
     const res = await analyzeAndFile({ path: "org-1/organize/h.jpg", name: "h.jpg", mime: "image/jpeg", size: 1000 });
-    expect(res.item?.suggestion).toMatchObject({ picked: true, because: "Job picked from the PO on the bill: 13897 HERRINGBONE" });
+    expect(res.item?.suggestion).toMatchObject({ picked: true, because: "Job picked from the PO on the bill: 13897 HONEYSUCKLE" });
     const proposal = did("organized_items", "update")!.payload.proposal;
     expect(proposal).toMatchObject({
       jobId: "job-011",
       jobFrom: "po",
       jobConflict: null,
-      marks: { po: "13897 HERRINGBONE", customer: "ERIK TAYLOR", hint: "JOB NAME AND ADDRESS ERIK TAYLOR 13897 HERRINGBONE" },
+      marks: { po: "13897 HONEYSUCKLE", customer: "ERIK TAYLOR", hint: "JOB NAME AND ADDRESS ERIK TAYLOR 13897 HONEYSUCKLE" },
     });
     expect(did("profiles", "select")!.eqs).toContainEqual(["org_id", "org-1"]);
   });
@@ -465,7 +465,7 @@ const BOOKED_BILL = {
   amount: 653.25,
   bill_date: "2026-09-17",
   job_id: "job-046",
-  jobs: { job_number: "J-046", name: "Jason Waldow" },
+  jobs: { job_number: "J-046", name: "Jason Wexley" },
 };
 const books = (bills: any[] = [BOOKED_BILL]) => ({
   "bills.select": [{ data: bills, error: null }],
@@ -616,7 +616,7 @@ describe("File It: the one door, with every check the weaker doors skipped", () 
 /**
  * A SUPPLIER RETURN FILED THROUGH ORGANIZE KEEPS ITS LINES (audit v994, DB4). The reader dropped a
  * credit memo's lines, Fix Details → Bill kept the negative total, and File It wrote a lineless
- * -$51.58 bill on Herringbone that the importer credited in full at markup: $64.48 back to Andrew
+ * -$51.58 bill on Honeysuckle that the importer credited in full at markup: $64.48 back to Andrew
  * for four housings he was never charged for.
  */
 describe("a supplier return through Organize: its lines come with it, or it does not go on a job", () => {
@@ -999,14 +999,14 @@ describe("a CED document with the same number: link it, don't make the person li
         "supplier_invoices.select": [{ data: [CED_DOC], error: null }],
         "supplier_aliases.select": [{ data: [], error: null }],
         "bill_supplier_invoices.select": [
-          { data: [{ supplier_invoice_id: "si-1", bill_id: "bill-7", bills: { id: "bill-7", job_id: "job-046", jobs: { job_number: "J-046", name: "Jason Waldow" } } }], error: null },
+          { data: [{ supplier_invoice_id: "si-1", bill_id: "bill-7", bills: { id: "bill-7", job_id: "job-046", jobs: { job_number: "J-046", name: "Jason Wexley" } } }], error: null },
         ],
       },
       calls,
     );
     const res = await fileItem("oi-9", { type: "job", jobId: "job-046" });
     expect(res.ok).toBe(false);
-    expect(res.error).toContain("Already on the books: supplier document 8802-1108330, $653.25, covered by a bill on J-046 Jason Waldow.");
+    expect(res.error).toContain("Already on the books: supplier document 8802-1108330, $653.25, covered by a bill on J-046 Jason Wexley.");
     expect(did("bills", "insert")).toBeUndefined();
     expect(did("organized_items", "update")).toBeUndefined();
   });
@@ -1094,7 +1094,7 @@ describe("AI Suggest never takes money out of the tray", () => {
 
   // PR2, ERIK'S CALL (audit v994): "AI Suggest on a note or kept paper PROPOSES; a person taps to
   // confirm". It used to make the task and file the note itself.
-  const NOTE = { id: "oi-2", kind: "note", status: "needs_review", title: "call the inspector about Herringbone", summary: "call the inspector about Herringbone", category: "Note", org_id: "org-1", proposal: null };
+  const NOTE = { id: "oi-2", kind: "note", status: "needs_review", title: "call the inspector about Honeysuckle", summary: "call the inspector about Honeysuckle", category: "Note", org_id: "org-1", proposal: null };
 
   it("keep_note on a note is a PROPOSAL kept on the row: nothing is filed, nothing leaves the tray", async () => {
     ai.parsed = { action: "keep_note", reason: "Reference." };
@@ -1258,9 +1258,9 @@ describe("AI Suggest never takes money out of the tray", () => {
   });
 });
 
-describe("AI Suggest on the 13897 HERRINGBONE ticket (Erik, 2026-09-24)", () => {
+describe("AI Suggest on the 13897 HONEYSUCKLE ticket (Erik, 2026-09-24)", () => {
   // ET's live row 12962a84 as it is stored: read before the PO box counted as the job.
-  const HERRINGBONE_ROW = {
+  const HONEYSUCKLE_ROW = {
     id: "oi-h",
     kind: "receipt",
     status: "needs_review",
@@ -1274,36 +1274,36 @@ describe("AI Suggest on the 13897 HERRINGBONE ticket (Erik, 2026-09-24)", () => 
     line_items: [{ description: "Q21530CT", amount: 41.2 }],
     org_id: "org-1",
     proposal: {
-      po: "13897 HERRINGBONE",
+      po: "13897 HONEYSUCKLE",
       jobId: null,
       bucket: null,
       jobFrom: null,
-      jobHint: "JOB NAME AND ADDRESS ERIK TAYLOR 13897 HERRINGBONE",
+      jobHint: "JOB NAME AND ADDRESS ERIK TAYLOR 13897 HONEYSUCKLE",
       guessJobId: null,
       jobConflict: null,
     },
   };
   const OPEN = {
     data: [
-      { id: "job-011", job_number: "J-011", name: "13897 Herringbone", address: "13897 Herringbone Way", customers: { name: "Andrew Cohen" } },
-      { id: "job-046", job_number: "J-046", name: "Jason Waldow", address: "518 Crater Lake Rd", customers: { name: "Jason Waldow" } },
+      { id: "job-011", job_number: "J-011", name: "13897 Honeysuckle", address: "13897 Honeysuckle Way", customers: { name: "Andrew Crake" } },
+      { id: "job-046", job_number: "J-046", name: "Jason Wexley", address: "518 Cinder Lake Rd", customers: { name: "Jason Wexley" } },
     ],
     error: null,
   };
 
   it("the rules answer first: the PO names J-011, said plainly, with no model call and nothing written", async () => {
-    state.client = fakeSupabase({ "organized_items.select": [{ data: HERRINGBONE_ROW, error: null }], "jobs.select": [OPEN] }, calls);
+    state.client = fakeSupabase({ "organized_items.select": [{ data: HONEYSUCKLE_ROW, error: null }], "jobs.select": [OPEN] }, calls);
     const res = await aiReviewItem("oi-h");
     expect(res.ok).toBe(true);
-    expect(res.message).toContain("J-011 13897 Herringbone");
-    expect(res.message).toContain("Job picked from the PO on the bill: 13897 HERRINGBONE");
+    expect(res.message).toContain("J-011 13897 Honeysuckle");
+    expect(res.message).toContain("Job picked from the PO on the bill: 13897 HONEYSUCKLE");
     expect(ai.systems).toHaveLength(0);
     expect(did("organized_items", "update")).toBeUndefined();
   });
 
   it("when the rules can't settle it, the model is handed what the reader found and every open job", async () => {
-    ai.parsed = { action: "file_job", job_id: "job-011", reason: "The PO box names Herringbone." };
-    const unsettled = { ...HERRINGBONE_ROW, proposal: { ...HERRINGBONE_ROW.proposal, po: "HERRINGBONE", jobHint: "HERRINGBONE JOB" } };
+    ai.parsed = { action: "file_job", job_id: "job-011", reason: "The PO box names Honeysuckle." };
+    const unsettled = { ...HONEYSUCKLE_ROW, proposal: { ...HONEYSUCKLE_ROW.proposal, po: "HONEYSUCKLE", jobHint: "HONEYSUCKLE JOB" } };
     state.client = fakeSupabase(
       {
         "organized_items.select": [{ data: unsettled, error: null }],
@@ -1314,15 +1314,15 @@ describe("AI Suggest on the 13897 HERRINGBONE ticket (Erik, 2026-09-24)", () => 
       calls,
     );
     const res = await aiReviewItem("oi-h");
-    expect(ai.systems[0]).toContain("J-011 13897 Herringbone; address: 13897 Herringbone Way; customer: Andrew Cohen");
+    expect(ai.systems[0]).toContain("J-011 13897 Honeysuckle; address: 13897 Honeysuckle Way; customer: Andrew Crake");
     expect(res.ok).toBe(true);
-    expect(res.message).toMatch(/^A guess: J-011 13897 Herringbone/);
+    expect(res.message).toMatch(/^A guess: J-011 13897 Honeysuckle/);
     expect(did("organized_items", "update")!.payload.proposal).toMatchObject({ guessJobId: "job-011" });
   });
 
   it("nothing to suggest is a plain note, not an error", async () => {
     ai.parsed = { action: "unsure", reason: "Materials receipt lacks a job reference to attribute it to a specific job." };
-    const bare = { ...HERRINGBONE_ROW, proposal: { po: null, jobHint: null } };
+    const bare = { ...HONEYSUCKLE_ROW, proposal: { po: null, jobHint: null } };
     state.client = fakeSupabase(
       {
         "organized_items.select": [{ data: bare, error: null }],
@@ -1389,7 +1389,7 @@ describe("Tie and Undo", () => {
   });
 
   it("Undo of a job's photo filed with a bill already on the books drops the row, never the bill, never into the tray", async () => {
-    // billJobReceipt's same-number answer (J-013 "TTP #56"): a job document tied to the bill its
+    // billJobReceipt's same-number answer (J-013 "ARR #56"): a job document tied to the bill its
     // number names, source "job". There is no tray paper to put back: the photo stays the job's and
     // reads Not On A Bill Yet on its Costs tab again.
     state.client = fakeSupabase(
@@ -1475,7 +1475,7 @@ describe("Undo, Delete and a deleted bill leave nothing wrong behind (audit v994
         "organized_items.select": [{ data: FILED, error: null }, { data: [], error: null }],
         "bills.select": [
           bill(),
-          { data: [{ id: "bill-copy", supplier: "Swigard's", amount: 95.27, bill_date: "2026-09-10", job_id: "job-044", jobs: { job_number: "J-044", name: "Dino" } }], error: null },
+          { data: [{ id: "bill-copy", supplier: "Brandow's", amount: 95.27, bill_date: "2026-09-10", job_id: "job-044", jobs: { job_number: "J-044", name: "Remy" } }], error: null },
         ],
         "documents.select": [OWN_DOC],
       },
@@ -1483,7 +1483,7 @@ describe("Undo, Delete and a deleted bill leave nothing wrong behind (audit v994
     );
     const res = await undoPaperwork("oi-9");
     expect(res.ok).toBe(false);
-    expect(res.error).toContain("The copy on J-044 Dino (Swigard's, $95.27, 2026-09-10) was set aside as a duplicate of this bill");
+    expect(res.error).toContain("The copy on J-044 Remy (Brandow's, $95.27, 2026-09-10) was set aside as a duplicate of this bill");
     expect(res.error).toContain("Change Your Mind");
     expect(res.error).toContain("Nothing was undone.");
     expect(did("bills", "delete")).toBeUndefined();
@@ -1585,7 +1585,7 @@ describe("Undo, Delete and a deleted bill leave nothing wrong behind (audit v994
   });
 
   it("TD1: Undo on a receipt recorded as a cost on the job page takes the bill down and NEVER the job's own receipt", async () => {
-    const LINK = { ...FILED, source: "organize", created_at: "2026-09-20T10:00:00Z", file_url: "org-1/job-046/1780000000000-swigards.jpg" };
+    const LINK = { ...FILED, source: "organize", created_at: "2026-09-20T10:00:00Z", file_url: "org-1/job-046/1780000000000-brandows.jpg" };
     state.client = fakeSupabase(
       {
         "organized_items.select": [{ data: LINK, error: null }, { data: [], error: null }],
@@ -2070,12 +2070,12 @@ describe("Drop Paperwork: the row a file becomes", () => {
 
   it("the same FILE already in adds nothing and says where it is", async () => {
     state.client = fakeSupabase(
-      { "organized_items.select": [{ data: [{ id: "oi-1", status: "filed", created_at: "2026-09-20T12:00:00Z", bill_id: "b", jobs: { job_number: "J-046", name: "Waldow" } }], error: null }] },
+      { "organized_items.select": [{ data: [{ id: "oi-1", status: "filed", created_at: "2026-09-20T12:00:00Z", bill_id: "b", jobs: { job_number: "J-046", name: "Wexley" } }], error: null }] },
       calls,
     );
     const res = await addPaperwork(input);
     expect(res.ok).toBe(false);
-    expect(res.already).toMatch(/^Already In: filed .* on J-046 Waldow\.$/);
+    expect(res.already).toMatch(/^Already In: filed .* on J-046 Wexley\.$/);
     expect(did("organized_items", "insert")).toBeUndefined();
     expect(did("organized_items", "select")!.eqs).toContainEqual(["org_id", "org-1"]);
   });
@@ -2084,13 +2084,13 @@ describe("Drop Paperwork: the row a file becomes", () => {
     state.client = fakeSupabase(
       {
         "organized_items.select": [{ data: [], error: null }],
-        // The company's own account for the number the paper prints (TR-34426).
-        "supplier_accounts.select": [{ data: [{ id: "acct-1", name: "Consolidated Electrical Distributors", account_number: "TR-34426", branch_code: null }], error: null }],
+        // The company's own account for the number the paper prints (AC-10427).
+        "supplier_accounts.select": [{ data: [{ id: "acct-1", name: "Consolidated Electrical Distributors", account_number: "AC-10427", branch_code: null }], error: null }],
         "organized_items.insert": [{ data: { id: "oi-5" }, error: null }],
       },
       calls,
     );
-    const res = await addPaperwork({ ...input, pdfText: TIMBER_CREEK });
+    const res = await addPaperwork({ ...input, pdfText: THISTLE_WOOD });
     expect(res).toMatchObject({ ok: true, id: "oi-5", needsRead: false });
     const row = did("organized_items", "insert")!.payload;
     expect(row).toMatchObject({ doc_type: "supplier_documents", doc_number: "8802-1101363", amount: 162.45, source: "bills_drop", status: "needs_review" });
@@ -2111,7 +2111,7 @@ describe("Drop Paperwork: the row a file becomes", () => {
       },
       calls,
     );
-    await addPaperwork({ ...input, pdfText: TIMBER_CREEK });
+    await addPaperwork({ ...input, pdfText: THISTLE_WOOD });
     expect(did("organized_items", "insert")!.payload).toMatchObject({ vendor: null, title: "Supplier 8802-1101363" });
   });
 
@@ -2124,7 +2124,7 @@ describe("Drop Paperwork: the row a file becomes", () => {
       },
       calls,
     );
-    const res = await addPaperwork({ ...input, source: "organize", pdfText: TIMBER_CREEK });
+    const res = await addPaperwork({ ...input, source: "organize", pdfText: THISTLE_WOOD });
     expect(res).toMatchObject({ ok: true, id: "oi-6", needsRead: false });
     expect(did("organized_items", "insert")!.payload).toMatchObject({ doc_type: "supplier_documents", source: "organize", amount: 162.45 });
     expect(ai.systems).toHaveLength(0);
@@ -2155,7 +2155,7 @@ describe("importCedInvoices knows a PDF by its content, never its name", () => {
       },
       calls,
     );
-    const res = await importCedInvoices({ files: [{ name: "invoice_8802-1101363.pdf", text: TIMBER_CREEK }] });
+    const res = await importCedInvoices({ files: [{ name: "invoice_8802-1101363.pdf", text: THISTLE_WOOD }] });
     expect(res.ok).toBe(true);
     expect(res.refused).toEqual([]);
     expect(res.landed.map((d) => d.invoiceNumber)).toEqual(["8802-1101363"]);
@@ -2326,7 +2326,7 @@ describe("CED documents a paper added: Restore, Undo and a second Add", () => {
 
 describe("a CED PDF with one document that doesn't add up says so", () => {
   it("the refused document rides on the proposal and in the drop line", async () => {
-    const broken = TIMBER_CREEK.replace("8802-1101363", "8802-1101999").replace("TOTAL DUE 162.45", "TOTAL DUE 999.99");
+    const broken = THISTLE_WOOD.replace("8802-1101363", "8802-1101999").replace("TOTAL DUE 162.45", "TOTAL DUE 999.99");
     state.client = fakeSupabase(
       {
         "organized_items.select": [{ data: [], error: null }],
@@ -2341,7 +2341,7 @@ describe("a CED PDF with one document that doesn't add up says so", () => {
       mime: "application/pdf",
       size: 100,
       sha256: "d".repeat(64),
-      pdfText: `${TIMBER_CREEK}\n${broken}`,
+      pdfText: `${THISTLE_WOOD}\n${broken}`,
     });
     expect(res).toMatchObject({ ok: true, needsRead: false });
     const ced = did("organized_items", "insert")!.payload.proposal.ced;
@@ -2364,9 +2364,9 @@ describe("File It records who decided where the paper went (Paper B, 12962a84)",
     amount: 323.71,
     pricing_provisional: false,
     line_items: null,
-    proposal: { po: "13897 HERRINGBONE", jobId: null, jobFrom: null, bucket: null, guessJobId: null, jobHint: "JOB NAME AND ADDRESS ERIK TAYLOR 13897 HERRINGBONE" },
+    proposal: { po: "13897 HONEYSUCKLE", jobId: null, jobFrom: null, bucket: null, guessJobId: null, jobHint: "JOB NAME AND ADDRESS ERIK TAYLOR 13897 HONEYSUCKLE" },
   };
-  const J011 = { id: "j11", job_number: "J-011", name: "13897 Herringbone", address: "13897 Herringbone Way", customers: { name: "Andrew Cohen" } };
+  const J011 = { id: "j11", job_number: "J-011", name: "13897 Honeysuckle", address: "13897 Honeysuckle Way", customers: { name: "Andrew Crake" } };
   const script = () => ({
     "organized_items.select": [{ data: PAPER_B, error: null }, { data: [], error: null }],
     "bills.select": [{ data: [], error: null }],
@@ -2390,16 +2390,16 @@ describe("File It records who decided where the paper went (Paper B, 12962a84)",
     const res = await fileItem("12962a84", { type: "job", jobId: "j11" });
     expect(res.ok).toBe(true);
     expect(did("bills", "insert")!.payload.notes).toBe(
-      "Bill filed by a person from the tray: Consolidated Electrical Dist. — $323.71\nJob picked from the PO on the bill: 13897 HERRINGBONE.",
+      "Bill filed by a person from the tray: Consolidated Electrical Dist. — $323.71\nJob picked from the PO on the bill: 13897 HONEYSUCKLE.",
     );
     const proposal = lastDid("organized_items", "update")!.payload.proposal;
     expect(proposal.filed).toEqual({
       how: "bill",
       picked: "paper",
       paperPick: "job:j11",
-      because: "Job picked from the PO on the bill: 13897 HERRINGBONE",
+      because: "Job picked from the PO on the bill: 13897 HONEYSUCKLE",
       jobFrom: "po",
-      jobHint: "13897 HERRINGBONE",
+      jobHint: "13897 HONEYSUCKLE",
     });
     // The reader's proposal is untouched: Undo clears `filed` and the paper is as it was read.
     expect(proposal.jobId).toBeNull();
@@ -2410,7 +2410,7 @@ describe("File It records who decided where the paper went (Paper B, 12962a84)",
     state.client = fakeSupabase(script(), calls);
     await fileItem("12962a84", { type: "job", jobId: "job-046" });
     expect(did("bills", "insert")!.payload.notes).toContain(
-      "A person picked this over what the paper names (Job picked from the PO on the bill: 13897 HERRINGBONE).",
+      "A person picked this over what the paper names (Job picked from the PO on the bill: 13897 HONEYSUCKLE).",
     );
     expect(lastDid("organized_items", "update")!.payload.proposal.filed.picked).toBe("person");
   });
@@ -2427,7 +2427,7 @@ describe("billJobReceipt asks 'already on the books?' like every other door (aud
     amount: 323.71,
     bill_date: "2026-09-24",
     job_id: "j11",
-    jobs: { job_number: "J-011", name: "13897 Herringbone" },
+    jobs: { job_number: "J-011", name: "13897 Honeysuckle" },
   };
   const snapped = (over: Record<string, any[]> = {}) => ({
     "documents.select": [{ data: { id: "doc-2", name: "IMG_2375.jpg", file_url: "org-1/j11/IMG_2375.jpg", size_bytes: 10, job_id: "j11" }, error: null }],
@@ -2459,7 +2459,7 @@ describe("billJobReceipt asks 'already on the books?' like every other door (aud
       snapped({
         // The "already billed?" read, loadBooks' papers read, then the "already tied?" read.
         "organized_items.select": [{ data: null, error: null }, { data: [], error: null }, { data: null, error: null }],
-        // The tie: this photo filed against the bill (J-013 "TTP #56": a loose second photo used to
+        // The tie: this photo filed against the bill (J-013 "ARR #56": a loose second photo used to
         // sit on the Costs badge as "Not On A Bill Yet" forever).
         "organized_items.insert": [{ data: [{ id: "oi-tie" }], error: null }],
       }),
@@ -2467,10 +2467,10 @@ describe("billJobReceipt asks 'already on the books?' like every other door (aud
     );
     const res = await billJobReceipt("doc-2");
     expect(res).toMatchObject({ ok: true, already: true });
-    expect(res.sameAs).toContain("Already on the books: Consolidated Electrical Dist. #8802-SO-257555, $323.71, 2026-09-24, on J-011 13897 Herringbone.");
+    expect(res.sameAs).toContain("Already on the books: Consolidated Electrical Dist. #8802-SO-257555, $323.71, 2026-09-24, on J-011 13897 Honeysuckle.");
     // The fact only: each door names the button it renders (never "under Receipts & Documents").
     expect(res.sameAs).toBe(
-      "Already on the books: Consolidated Electrical Dist. #8802-SO-257555, $323.71, 2026-09-24, on J-011 13897 Herringbone. This photo is filed with that bill; nothing was recorded twice.",
+      "Already on the books: Consolidated Electrical Dist. #8802-SO-257555, $323.71, 2026-09-24, on J-011 13897 Honeysuckle. This photo is filed with that bill; nothing was recorded twice.",
     );
     // The Add Cost sheet never falls back to a typed second bill on an ok.
     expect(res.warning).toBe(res.sameAs);
@@ -2702,7 +2702,7 @@ describe("audit v994 wave 2: the paperwork doors say what they did", () => {
       {
         "bills.select": [
           { data: { id: "bill-2", amount: 95.27, on_shelf: false, bill_line_items: [] }, error: null },
-          { data: [{ id: "bill-c", supplier: "Swigard's", amount: 95.27, bill_date: "2026-09-10", job_id: "job-044", jobs: { job_number: "J-044", name: "Dino" } }], error: null },
+          { data: [{ id: "bill-c", supplier: "Brandow's", amount: 95.27, bill_date: "2026-09-10", job_id: "job-044", jobs: { job_number: "J-044", name: "Remy" } }], error: null },
         ],
         "organized_items.select": [{ data: [], error: null }],
       },
@@ -2710,7 +2710,7 @@ describe("audit v994 wave 2: the paperwork doors say what they did", () => {
     );
     const res = await deleteBill("bill-2", "job-046");
     expect(res.ok).toBe(false);
-    expect(res.error).toContain("The copy on J-044 Dino");
+    expect(res.error).toContain("The copy on J-044 Remy");
     expect(res.error).toContain("Nothing was deleted.");
     expect(did("bills", "delete")).toBeUndefined();
   });

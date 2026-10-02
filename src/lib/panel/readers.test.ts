@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { FINAL_MAP, PANEL, PANEL_ID, circuit } from "./__fixtures__/herringbone";
+import { FINAL_MAP, PANEL, PANEL_ID, circuit } from "./__fixtures__/honeysuckle";
 import {
   NORT_SAYS,
   PANEL_SAYS,

@@ -2,7 +2,7 @@ import type { CircuitKind, CircuitWork, JobCircuit, JobPanel, QuoteCircuit } fro
 import type { HaveItem } from "../model";
 
 /**
- * J-011, 13897 HERRINGBONE — the night of 2026-09-24/25, as data (Panel plan, phase 1).
+ * J-011, 13897 HONEYSUCKLE — the night of 2026-09-24/25, as data (Panel plan, phase 1).
  *
  * FINAL_MAP is the "Final Circuit Map" built by hand that night (v3): 3 lighting 1P 15A (one of
  * them reused: the kitchen-and-living lights, whose door label is "Entry Lights"), 16 outlet and
@@ -20,7 +20,7 @@ import type { HaveItem } from "../model";
  */
 
 export const J011 = "8760a051-b6f8-4a6b-b3a5-6ac7078f9ac1";
-export const PANEL_ID = "panel-herringbone-main";
+export const PANEL_ID = "panel-honeysuckle-main";
 
 export const PANEL: JobPanel = {
   id: PANEL_ID,

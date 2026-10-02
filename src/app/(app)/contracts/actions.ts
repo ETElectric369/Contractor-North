@@ -22,8 +22,8 @@ const csz = (x: { city?: string | null; state?: string | null; zip?: string | nu
 /**
  * THE ADDRESS ON THE SIGNED PAPER, through the one resolver (cn-v711).
  *
- * This built its address strings by hand and so predated `unit` entirely: four TTP jobs share
- * 300 W Lake Blvd, and the contract naming the property said only "300 W Lake Blvd" — on the one
+ * This built its address strings by hand and so predated `unit` entirely: four ARR jobs share
+ * 300 W Garnet Blvd, and the contract naming the property said only "300 W Garnet Blvd" — on the one
  * document where which dwelling it is has to be unambiguous. It also had no fallback, so a job
  * carrying no address of its own printed an EMPTY property block, and contract-body's own
  * `|| cu.address` then quietly named the customer's HOME as the work site — which after 0189 is a

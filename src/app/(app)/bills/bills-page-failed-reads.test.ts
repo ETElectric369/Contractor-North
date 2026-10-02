@@ -22,8 +22,8 @@ const J011 = "job-011";
 const J045 = "job-045";
 
 const JOBS = [
-  { id: J011, job_number: "J-011", name: "13897 Herringbone", status: "in_progress", address: "13897 Herringbone Way", created_at: "2026-06-20T00:00:00Z" },
-  { id: J045, job_number: "J-045", name: "13683 Hillside", status: "complete", address: "13683 Hillside Dr", created_at: "2026-09-01T00:00:00Z" },
+  { id: J011, job_number: "J-011", name: "13897 Honeysuckle", status: "in_progress", address: "13897 Honeysuckle Way", created_at: "2026-06-20T00:00:00Z" },
+  { id: J045, job_number: "J-045", name: "13683 Hazelnut", status: "complete", address: "13683 Hazelnut Dr", created_at: "2026-09-01T00:00:00Z" },
 ];
 const bill = (id: string, over: Record<string, unknown>) => ({
   id,
@@ -41,7 +41,7 @@ const bill = (id: string, over: Record<string, unknown>) => ({
   is_statement: false,
   superseded_by_bill_id: null,
   pricing_provisional: false,
-  jobs: { job_number: "J-011", name: "13897 Herringbone" },
+  jobs: { job_number: "J-011", name: "13897 Honeysuckle" },
   bill_line_items: [],
   ...over,
 });
@@ -71,12 +71,12 @@ const doc = (id: string, over: Record<string, unknown>) => ({
   ...over,
 });
 const PAPERS = [
-  doc("si-1106969", { invoice_number: "8802-1106969", invoice_date: "2026-09-04", job_name_raw: "13897 HERRINGBONE", total: 301.81, open_balance: 301.81 }),
-  doc("si-1107820", { invoice_number: "8802-1107820", invoice_date: "2026-09-16", job_name_raw: "13897 HERRINGBONE", total: 187.64, open_balance: 187.64 }),
+  doc("si-1106969", { invoice_number: "8802-1106969", invoice_date: "2026-09-04", job_name_raw: "13897 HONEYSUCKLE", total: 301.81, open_balance: 301.81 }),
+  doc("si-1107820", { invoice_number: "8802-1107820", invoice_date: "2026-09-16", job_name_raw: "13897 HONEYSUCKLE", total: 187.64, open_balance: 187.64 }),
   // His real credit memo on no job: its only home is CED's own Invoices With No Job list.
-  doc("si-1104645", { invoice_number: "8802-1104645", kind: "credit_memo", invoice_date: "2026-08-06", job_name_raw: "13631 NORTHWOODS", total: -31.86, open_balance: -31.86 }),
-  // 13683 HILLSIDE, set aside for a credit on Sep 20: Stop Waiting is in its Waiting On A Credit fold.
-  doc("si-1107139", { invoice_number: "8802-1107139", invoice_date: "2026-09-10", job_name_raw: "13683 HILLSIDE", total: 59.17, open_balance: 59.17, waiting_credit_since: "2026-09-20T18:00:00Z" }),
+  doc("si-1104645", { invoice_number: "8802-1104645", kind: "credit_memo", invoice_date: "2026-08-06", job_name_raw: "13631 NIGHTSHADE", total: -31.86, open_balance: -31.86 }),
+  // 13683 HAZELNUT, set aside for a credit on Sep 20: Stop Waiting is in its Waiting On A Credit fold.
+  doc("si-1107139", { invoice_number: "8802-1107139", invoice_date: "2026-09-10", job_name_raw: "13683 HAZELNUT", total: 59.17, open_balance: 59.17, waiting_credit_since: "2026-09-20T18:00:00Z" }),
 ];
 
 const BASE: Record<string, unknown[]> = {
@@ -88,7 +88,7 @@ const BASE: Record<string, unknown[]> = {
   jobs: JOBS,
   material_lists: [],
   supplier_accounts: [
-    { id: CED, name: "Consolidated Electrical Distributors", account_number: "TR-34426", branch_code: "8802", on_account: true, note: null },
+    { id: CED, name: "Consolidated Electrical Distributors", account_number: "AC-10427", branch_code: "8802", on_account: true, note: null },
     { id: ACE, name: "Ace Mountain Hardware", account_number: null, branch_code: null, on_account: true, note: null },
   ],
   supplier_aliases: [
@@ -303,7 +303,7 @@ describe("which receipt made which bill, unread", () => {
 });
 
 describe("Needs You never gives an all-clear over a read that failed", () => {
-  // The fixture's 8802-1106969 (13897 Herringbone) is NOT in the books: with every read answered it
+  // The fixture's 8802-1106969 (13897 Honeysuckle) is NOT in the books: with every read answered it
   // is a card, so "every paper is in your books" beside a failed read is a false all-clear.
   it("each supplier-half failure carries the alert alone, never 'is in your books'", async () => {
     for (const table of ["bills", "bill_supplier_invoices", "supplier_invoices", "supplier_accounts", "supplier_aliases", "jobs"]) {

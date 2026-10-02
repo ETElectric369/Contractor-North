@@ -224,7 +224,7 @@ export const quoteActions: Record<string, ActionDef> = {
     // DB trigger). No auto follow-up task — the "awaiting reply" inbox item on My Day is
     // the follow-up and self-clears. Map its {ok,id} into the ActionResult shape.
     handler: async (i) => {
-      // Fragment-first safety net: Nort sometimes passes a NAME ("John Chmura") where the
+      // Fragment-first safety net: Nort sometimes passes a NAME ("John Clover") where the
       // customer_id belongs. Resolve it (and any job name) to a real id BEFORE the dup check
       // and save — a single match resolves; zero/several ASK rather than attach the wrong one.
       const refused = await taxRefusal(i.tax_rate);

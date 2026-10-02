@@ -102,7 +102,7 @@ export function decodeCode(token: string): DecodedBreaker | UnknownBreaker | nul
   }
   if (SIEMENS_TWO_DOUBLES[t]) return made(t, "siemens", "quad", SIEMENS_TWO_DOUBLES[t].map((a) => one(2, a)));
   if ((m = /^QSA(\d{2})(\d{2})SPD$/.exec(t)) && amp(m[1]) && amp(m[2])) {
-    // The Siemens surge arrester with two 1P breakers on it (GDO #1 and #2 at Herringbone).
+    // The Siemens surge arrester with two 1P breakers on it (GDO #1 and #2 at Honeysuckle).
     return made(t, "siemens", "twin", [one(1, amp(m[1])!, "spd"), one(1, amp(m[2])!, "spd")]);
   }
   if ((m = /^QF([12])(\d{2,3})(A|AN|AP)?$/.exec(t)) && amp(m[2])) return plain(t, "siemens", Number(m[1]), amp(m[2])!, "gfci");

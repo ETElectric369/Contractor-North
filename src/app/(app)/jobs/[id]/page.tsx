@@ -185,7 +185,7 @@ export default async function JobDetailPage({
       // MaterialBill.bill_line_items is optional, so a row that arrives without them silently
       // bills its whole amount exactly as it always did. job-financials went through
       // readJobBillsWithLines; this read did not, so the hub's Work To Date and the draw modal
-      // that opens from it disagreed by $12.22 on the Waldow job while both claimed to be the
+      // that opens from it disagreed by $12.22 on the Wexley job while both claimed to be the
       // same number. The projection law, on the one figure the two screens share.
       // supplier_account_id, supplier_invoice_number, notes and is_statement ride along for the one
       // covering walk (readSettledBySupplier, 8a982483): without them this tab could not be told
@@ -199,7 +199,7 @@ export default async function JobDetailPage({
       )
       .eq("job_id", id)
       // THE BUTTON THAT SET IT ASIDE HAS TO MEAN SOMETHING HERE TOO (review, 2026-09-19). Without
-      // this the hub counted the $95.27 duplicate on 13631 Northwoods in cost, in profit and in
+      // this the hub counted the $95.27 duplicate on 13631 Nightshade in cost, in profit and in
       // work-to-date, while /analytics and the job's own financials dropped it - the same job
       // reading $1,990.57 on one screen and $1,895.30 on another.
       .is("superseded_by_bill_id", null)
@@ -315,7 +315,7 @@ export default async function JobDetailPage({
   const PERMIT_COLUMNS = "id, permit_number, type, authority, status, applied_date, issued_date, inspection_date, inspector, inspection_result, notes, portal_url";
   // THE CARD'S MONEY IS THE DOOR'S MONEY (MONEY law). EVERY Time & Material job bills its actuals
   // (unclaimed hours + bills), estimate or not: on T&M the estimate is a guide, never a block (Erik,
-  // 2026-09-26, Tao J-002, whose accepted estimate hid the running total). A payment schedule is
+  // 2026-09-26, Tess J-002, whose accepted estimate hid the running total). A payment schedule is
   // billed by its milestones and a fixed-price job by its contract; there no door would draft the
   // card's figure, so the Overview carries no UnbilledCard at all and the page skips the read.
   // One rule with the customer portal (jobBillsItsActuals), so the customer is shown "not on a
@@ -323,7 +323,7 @@ export default async function JobDetailPage({
   const billsActuals = jobBillsItsActuals(j.billing_type, (paymentMilestones ?? []).length);
   // THE COSTS TAB'S PILES FOLLOW NEW INVOICE'S OWN RULE (nextInvoiceImportsActuals): wherever the next
   // New Invoice pulls the job's hours and receipts, the tab says what is Not Billed Yet and offers
-  // Already Billed, fixed-price jobs with no live estimate included (J-010 Purple Sage). The same rule
+  // Already Billed, fixed-price jobs with no live estimate included (J-010 Pinyon Sage). The same rule
   // opens the Already Billed sheet, so no door shows where the sheet refuses and none is missing where
   // it works. Wider than billsActuals (every Time & Material job with no schedule is in both); the
   // Overview's running total keeps billsActuals.
@@ -501,7 +501,7 @@ export default async function JobDetailPage({
         })
       : Promise.resolve(null),
     // THE SUPPLIER'S PAPERS THAT NAME THIS JOB AND ARE IN NOBODY'S BOOKS (Erik, 2026-09-25: CED
-    // 8802-1107820, $187.64, "85 WHITNEY", was on no cost list and no invoice). The Costs tab's
+    // 8802-1107820, $187.64, "41 LARKSPUR", was on no cost list and no invoice). The Costs tab's
     // Named On A Paper list; staff only (the Costs tab is). A failed read is logged and the list
     // says it couldn't check - never an empty list, which would read as "nothing missing".
     viewerIsStaff
@@ -530,7 +530,7 @@ export default async function JobDetailPage({
     // ALREADY BILLED (0357): which of the job's rows a person marked as billed, and on which line,
     // for "Billed By Hand On INV-x · Not Billed After All". Staff only, on EVERY job whatever its
     // billing type: a mark can sit on a fixed-price job New Invoice bills from its actuals (J-010
-    // Purple Sage), and the way back has to be there wherever a mark is. A lost read is logged and
+    // Pinyon Sage), and the way back has to be there wherever a mark is. A lost read is logged and
     // SAID (handsNote below): the marks and their Not Billed After All can't be shown, and marked
     // hours would otherwise vanish from the tab without a word. A database without 0357 reads as
     // not ready (nothing can have been marked).
@@ -628,7 +628,7 @@ export default async function JobDetailPage({
     viewerIsStaff && pilesOn && !costGroups
       ? "Couldn't tell which bills are on an invoice right now, so this is every bill on the job. The Invoices tab has what each invoice holds."
       : null;
-  // ALREADY BILLED (0357, Erik's Purple Sage). Only where the piles exist (staff, a job whose next New
+  // ALREADY BILLED (0357, Erik's Pinyon Sage). Only where the piles exist (staff, a job whose next New
   // Invoice pulls its actuals, the claims readable): Already Billed on a Not Billed Yet row when a
   // sent bill the sheet offers could hold it (never one with no job for a Time & Material job: its
   // work to date counts only its own invoices); Billed By Hand · Not Billed After All on a row a

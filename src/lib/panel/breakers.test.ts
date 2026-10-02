@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { boughtLines, breakerCard, candidatesFor, firstPicks, groupBreakers, groupLabel, placementOf } from "./breakers";
 import { spaceMap } from "./model";
-import { FINAL_MAP, PANEL, PHOTO_EXISTING } from "./__fixtures__/herringbone";
+import { FINAL_MAP, PANEL, PHOTO_EXISTING } from "./__fixtures__/honeysuckle";
 
 /**
  * THE BREAKERS CARD ON J-011's NIGHT (Panel plan, phase 3), from the ticket's own words: CED
@@ -26,7 +26,7 @@ const LIST_LINES = [
 ];
 const all = [...FINAL_MAP, ...PHOTO_EXISTING];
 
-describe("the Herringbone Breakers card", () => {
+describe("the Honeysuckle Breakers card", () => {
   const card = breakerCard({ circuits: all, panel: PANEL, bought: TICKET_LINES, list: LIST_LINES, shelf: [] });
 
   it("counts what the ticket brought: 8 x Q2020 and 1 x Q21530CT, and nothing that isn't a breaker", () => {

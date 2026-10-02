@@ -1,13 +1,13 @@
 /**
  * A FILENAME AN HTTP HEADER CAN ACTUALLY CARRY.
  *
- * Erik, 8/18: "i tried to create an invoice today for badger lane and it failed." The invoice was
+ * Erik, 8/18: "i tried to create an invoice today for bayberry lane and it failed." The invoice was
  * fine and the PDF rendered and stored fine — the RESPONSE died:
  *
  *   Cannot convert argument to a ByteString because the character at index 34
  *   has a value of 8212 which is greater than 255.
  *
- * 8212 is the em-dash in `Invoice INV-060 — 10410 Badger Lane.pdf`. Header values are
+ * 8212 is the em-dash in `Invoice INV-060 — 10410 Bayberry Lane.pdf`. Header values are
  * ByteStrings: every code point must fit in a byte, so ONE typographic character in a job name
  * threw at the moment of sending and the whole preview 500'd. The old sanitizer stripped quotes
  * and newlines (header injection) and never considered characters that simply cannot be sent —
@@ -17,7 +17,7 @@
  * Both halves are needed, and that is the point of RFC 5987:
  *   · `filename="…"` — ASCII only, the fallback every client understands.
  *   · `filename*=UTF-8''…` — percent-encoded, what modern browsers actually use, so the customer
- *     still gets "Invoice INV-060 — 10410 Badger Lane.pdf" with its real punctuation.
+ *     still gets "Invoice INV-060 — 10410 Bayberry Lane.pdf" with its real punctuation.
  */
 
 /** ASCII-only, header-safe, never empty — the quoted fallback. */

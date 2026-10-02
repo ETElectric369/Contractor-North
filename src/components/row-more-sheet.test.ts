@@ -37,12 +37,12 @@ describe("the sheet", () => {
     const html = renderToStaticMarkup(
       el(
         RowMoreSheetView,
-        { open: true, title: "Smith walk-through", subline: "9:00 AM · 85 Whitney", onClose: () => {} },
+        { open: true, title: "Smith walk-through", subline: "9:00 AM · 41 Larkspur", onClose: () => {} },
         createElement("button", { type: "button", className: SHEET_ROW }, "Mark Done"),
       ),
     );
     expect(html).toContain(">Smith walk-through</h2>");
-    expect(html).toContain("9:00 AM · 85 Whitney");
+    expect(html).toContain("9:00 AM · 41 Larkspur");
     expect(html).toContain("max-w-sm"); // size sm
     expect(html).toMatch(/<button type="button" class="[^"]*min-h-\[44px\][^"]*">Mark Done<\/button>/);
     expect(html.indexOf("9:00 AM")).toBeLessThan(html.indexOf("Mark Done"));

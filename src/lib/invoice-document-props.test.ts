@@ -68,11 +68,11 @@ const ROWS: Rows = {
     { id: "p0", invoice_id: PRIOR, org_id: ORG, amount: 16527.3, paid_at: "2026-09-20T18:00:00Z", method: "check", note: "check #1044 — call before depositing" },
   ],
   customers: [
-    { id: CUST, org_id: ORG, name: "Tao Zhu", company_name: null, email: "tao@example.com", phone: "(708) 555-0100", address: "235 Timbercreek Ct", unit: null, city: "Reno", state: "NV", zip: "89511", notes: "INTERNAL CUSTOMER NOTE" },
+    { id: CUST, org_id: ORG, name: "Tess Zane", company_name: null, email: "tess@example.com", phone: "(708) 555-0100", address: "235 Thistlewood Ct", unit: null, city: "Reno", state: "NV", zip: "89511", notes: "INTERNAL CUSTOMER NOTE" },
   ],
   jobs: [
     {
-      id: JOB, org_id: ORG, billing_type: "tm", address: "235 Timbercreek Court", unit: null, city: "Reno", state: "NV", zip: "89511",
+      id: JOB, org_id: ORG, billing_type: "tm", address: "235 Thistlewood Court", unit: null, city: "Reno", state: "NV", zip: "89511",
       notes: "INTERNAL JOB NOTE", customers: { pricing_levels: null },
     },
     { id: OTHER_JOB, org_id: OTHER, billing_type: "fixed", customers: { pricing_levels: null } },
@@ -249,9 +249,9 @@ describe("what INV-080 now carries on every surface", () => {
     expect(p.co.brand).not.toBe(accentHex(null));
     expect(p.template).toBe("modern");
     expect(p.docStyle).toMatchObject({ density: "airy", col_gap: 12 });
-    expect(p.customer).toMatchObject({ name: "Tao Zhu", phone: "(708) 555-0100", email: "tao@example.com" });
+    expect(p.customer).toMatchObject({ name: "Tess Zane", phone: "(708) 555-0100", email: "tess@example.com" });
     expect(p.billingLabel).toBe("Time & Material · Final Payment");
-    expect(p.site).toMatchObject({ address: "235 Timbercreek Court", source: "job" });
+    expect(p.site).toMatchObject({ address: "235 Thistlewood Court", source: "job" });
     expect(p.terms).toBe("Payment Methods: Card, Check, Cash");
     expect(p.documentFooter).toBeNull();
     expect(p.invoiceKind).toBe("final");
@@ -283,7 +283,7 @@ describe("what INV-080 now carries on every surface", () => {
     const text = html.replace(/<[^>]+>/g, " ").replace(/&amp;/g, "&").replace(/\s+/g, " ");
     expect(html).toContain(accentHex("#006d8f"));
     expect(text).toContain("(708) 555-0100");
-    expect(text).toContain("tao@example.com");
+    expect(text).toContain("tess@example.com");
     expect(text).toContain("Progress summary");
     // Work to date 21,336.64 (billed 19,716.64 + 1,620 not on a bill yet) − 17,325: in words, never a negative.
     expect(text).toContain("Total to estimate $4,011.64 over");

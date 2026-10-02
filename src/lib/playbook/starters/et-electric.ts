@@ -265,7 +265,7 @@ export const ET_ELECTRIC: Playbook = {
 
 /**
  * WHAT I DELIBERATELY DID NOT PUT IN, and why — each of these was on his real sheet and each one
- * failed him on 13125 Moraine Rd:
+ * failed him on 13125 Mayfern Rd:
  *
  *   fixture_count                 — a can layout is his design decision, and he states it in the
  *                                   scope. (device_count was on this list too, on the grounds that

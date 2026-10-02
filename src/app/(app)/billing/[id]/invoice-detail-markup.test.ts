@@ -48,7 +48,7 @@ const items = [
 
 function render(seed: ReturnType<typeof markupBoxSeed>, levelMarkupPct: number | null = 15) {
   return renderToStaticMarkup(
-    createElement(InvoiceDetail, { invoice, items, payments: [], markupSeed: seed, levelMarkupPct, customerName: "Andrew Cohen", importMode: "standard" }),
+    createElement(InvoiceDetail, { invoice, items, payments: [], markupSeed: seed, levelMarkupPct, customerName: "Andrew Crake", importMode: "standard" }),
   );
 }
 
@@ -62,7 +62,7 @@ describe("InvoiceDetail's % box", () => {
     const html = render(markupBoxSeed({ kind: "one", pct: 11 }, 15));
     expect(box(html)).toContain('value="11"');
     expect(html).toContain("Priced at 11%");
-    expect(html).toContain("Andrew Cohen&#x27;s usual is 15%");
+    expect(html).toContain("Andrew Crake&#x27;s usual is 15%");
     expect(html).not.toContain(">Apply<");
     expect(importCostsIntoInvoice).not.toHaveBeenCalled();
   });
@@ -180,7 +180,7 @@ describe("the invoice body (W1-27)", () => {
         items,
         payments: [],
         markupSeed: markupBoxSeed({ kind: "one", pct: 11 }, 15),
-        customerName: "Andrew Cohen",
+        customerName: "Andrew Crake",
         importMode: "standard",
         netDays: 14,
         ...extra,

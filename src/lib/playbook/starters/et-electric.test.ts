@@ -3,7 +3,7 @@ import { ET_ELECTRIC } from "./et-electric";
 import { applicableNeeds, clearInapplicable, holdingNeeds, isClosed, isOpen, missingNeeds, splitAsk } from "../resolve";
 
 /**
- * THE ACCEPTANCE TEST IS ERIK'S OWN JOB — 13125 Moraine Rd, said in one breath, unprompted:
+ * THE ACCEPTANCE TEST IS ERIK'S OWN JOB — 13125 Mayfern Rd, said in one breath, unprompted:
  *
  *   "Adding outlets and lights in a storage room they're converting. They're pulling a permit for
  *    occupancy. Main panel's way the hell over on the other side but the meter panel's right here

@@ -128,24 +128,24 @@ describe("the close-out push and the jobs it names", () => {
   };
 
   it("a held job isn't named: it waits on its own day", async () => {
-    const held = { id: "j-held", job_number: "J-048", name: "Tanager Ln", status: "on_hold", scheduled_start: null };
+    const held = { id: "j-held", job_number: "J-048", name: "Tupelo Ln", status: "on_hold", scheduled_start: null };
     await sendCloseOutNudges(fake(routeJobs([held], { bills: [{ job_id: "j-held" }] })));
     expect(sent).toEqual([]);
     // The same job, not held, is asked about.
     await sendCloseOutNudges(fake(routeJobs([{ ...held, status: "in_progress" }], { bills: [{ job_id: "j-held" }] })));
-    expect(sent.map((m) => m.body)).toEqual(["Tanager Ln has nothing scheduled next"]);
+    expect(sent.map((m) => m.body)).toEqual(["Tupelo Ln has nothing scheduled next"]);
   });
 
   it("a job whose live invoice bills materials lines isn't 'no costs'; labor lines alone, or a void invoice, still are", async () => {
-    const job = { id: "j-9", job_number: "J-009", name: "Herringbone", status: "in_progress", scheduled_start: `${day(-3)}T16:00:00Z` };
+    const job = { id: "j-9", job_number: "J-009", name: "Honeysuckle", status: "in_progress", scheduled_start: `${day(-3)}T16:00:00Z` };
     await sendCloseOutNudges(
       fake(routeJobs([job], { invoices: [{ job_id: "j-9", status: "draft", invoice_items: [{ line_kind: "labor" }, { line_kind: "materials" }] }] })),
     );
     expect(sent).toEqual([]);
     await sendCloseOutNudges(fake(routeJobs([job], { invoices: [{ job_id: "j-9", status: "sent", invoice_items: [{ line_kind: "labor" }] }] })));
-    expect(sent.map((m) => m.body)).toEqual(["Herringbone has no costs recorded"]);
+    expect(sent.map((m) => m.body)).toEqual(["Honeysuckle has no costs recorded"]);
     sent.length = 0;
     await sendCloseOutNudges(fake(routeJobs([job], { invoices: [{ job_id: "j-9", status: "void", invoice_items: [{ line_kind: "materials" }] }] })));
-    expect(sent.map((m) => m.body)).toEqual(["Herringbone has no costs recorded"]);
+    expect(sent.map((m) => m.body)).toEqual(["Honeysuckle has no costs recorded"]);
   });
 });

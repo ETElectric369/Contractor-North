@@ -35,7 +35,7 @@ import {
 export interface SupplierInvoiceActions {
   /**
    * A PERSON says which job an invoice belongs to. Never inferred, not once: the same road reads
-   * "5659 RHODESIA", "561 RHODESIA", "5661 RHODESIA" and "5659 RODESSIA" on CED's paper, and he
+   * "5659 FERNHILL", "561 FERNHILL", "5661 FERNHILL" and "5659 FERNHILE" on CED's paper, and he
    * has five separate jobs on it. A machine picking there is guessing with his job costs.
    */
   setInvoiceJob: (input: { invoiceId: string; jobId: string }) => Promise<SupplierActionResult>;

@@ -6,7 +6,7 @@ import { claimantNumbers, claimedIdsOfLines, computeUnbilledWork, fixedBillingsT
  *
  * The fetcher (unbilledWorkForJob) is a thin wrapper; the arithmetic that decides what a job can
  * still bill lives in these functions so it can be pinned without a database. The shape of the
- * 85 Whitney evening is the reference case: INV-061 (paid) holds nine entries and three bills;
+ * 41 Larkspur evening is the reference case: INV-061 (paid) holds nine entries and three bills;
  * Brian's 5.22 h on 09-10 and two CED bills ($467.37 + $1,062.18) are new; markup 25%.
  */
 
@@ -124,7 +124,7 @@ describe("claimantNumbers / joinNumbers", () => {
   });
 });
 
-describe("computeUnbilledWork — the 85 Whitney reference case", () => {
+describe("computeUnbilledWork — the 41 Larkspur reference case", () => {
   const held = ["e1", "e2", "e3", "e4", "e5", "e6", "e7", "e8", "e9", "bill-a", "bill-b", "bill-c"];
   const base = {
     claims: claimsHolding(held),
@@ -179,7 +179,7 @@ describe("computeUnbilledWork — the 85 Whitney reference case", () => {
   });
 
   /**
-   * HIS OSH RUN FOR JASON WALDOW (bills 905c9f3d on J-046, live row): $16.28 of receipt, two bags
+   * HIS OSH RUN FOR JASON WEXLEY (bills 905c9f3d on J-046, live row): $16.28 of receipt, two bags
    * of Kettle Chips and an ice cream bar switched off, ten bulk fasteners and $1.01 of tax on.
    * Nothing claims it. The card used to say $20.35 of unbilled material and the button beside it
    * wrote $8.13 - $12.22 of his own snacks with 25% on top, presented as money a customer owed.
@@ -428,7 +428,7 @@ describe("fixedBillingsToNet — what a DELTA draw still credits", () => {
 
 describe("computeUnbilledWork.costRows — where each bill stands (the Costs tab, 2026-09-25)", () => {
   /**
-   * 85 Whitney while INV-081 is being built: INV-061 (paid) holds three CED bills, INV-081 (a
+   * 41 Larkspur while INV-081 is being built: INV-061 (paid) holds three CED bills, INV-081 (a
    * DRAFT) holds two, and the $187.64 CED paper has just been recorded as a bill no invoice holds.
    * Beside them, a snack run that was all his own and a $0 row. Every row gets exactly one verdict,
    * and the open ones are exactly the ones billsCount counted.

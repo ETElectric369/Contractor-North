@@ -125,7 +125,7 @@ export type BookRow = { code: string; description: string; unit: string; price: 
  * resolver the interview will speak through. That is the whole reason for the swap: the cold path
  * and the warm path can no longer disagree about what is still missing.
  *
- * Three things it buys immediately, all of which failed Erik at 13125 Moraine Rd:
+ * Three things it buys immediately, all of which failed Erik at 13125 Mayfern Rd:
  *   - the LABEL IS A SENTENCE (`need.ask`). His sheet had a field called "Panel"; he typed 2 into
  *     it and then 2 again into the next box, because a heading transmits nothing about the answer.
  *   - MULTI-SELECT. His job was outlets AND lights. A router that holds one value is why the sheet
@@ -263,7 +263,7 @@ export function Inspector({
   // the top and shows up below — the top of the screen is never a list of things you've done.
   // ── THE FIELD YOU ARE TYPING IN DOES NOT MOVE ────────────────────────────────────────────
   //
-  // Erik, bug 48fbfd6e, filed from 13125 Moraine Rd: "Can't type, keyboard disappears with one
+  // Erik, bug 48fbfd6e, filed from 13125 Mayfern Rd: "Can't type, keyboard disappears with one
   // click." That inspection's scope still reads "The scope of the job is to add" and stops there.
   // He didn't lose the rest — he could never enter it.
   //
@@ -342,7 +342,7 @@ export function Inspector({
   const open = useMemo(() => missingNeeds(playbook, answers, held), [playbook, answers, held]);
 
   // ── THE SPINE STAYS UP TOP ───────────────────────────────────────────────────────────────
-  // Erik, looking at the Sara Cain walk-through: "i updated the scope and now its at the bottom
+  // Erik, looking at the Sara Dale walk-through: "i updated the scope and now its at the bottom
   // and all this other stuff doesnt make sense." He was right about the effect and generous about
   // the cause — nothing broke. The rule above did exactly what it says, and the rule is wrong for
   // one kind of need.
@@ -654,7 +654,7 @@ export function Inspector({
           autoComplete="off"
           onFocus={() => focusNeed(n.key)}
           onBlur={() => setEditingKey((k) => (k === n.key ? null : k))}
-          // GROWS WITH WHAT HE WROTE. Sara Cain's scope is 8 lines and ~700 characters; at a fixed
+          // GROWS WITH WHAT HE WROTE. Sara Dale's scope is 8 lines and ~700 characters; at a fixed
           // 2 rows he could see two of them, which is half of why it read as lost rather than moved.
           rows={Math.min(14, Math.max(3, text.split("\n").length + 1))}
           value={text}

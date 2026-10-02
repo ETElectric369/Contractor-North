@@ -69,9 +69,9 @@ const jobs: CalJob[] = [
   // Worked past day: Erik 10 to 6 against a 9-to-5 block.
   job({ id: "j-worked", name: "12 Elm St", scheduled_start: at(PAST, "09:00"), scheduled_end: at(PAST, "17:00"), planned_minutes: 480 }),
   // Booked, and nobody went.
-  job({ id: "j-hollow", name: "498 Mil Drae Lane", job_number: "J-002", scheduled_start: at(PAST2, "09:00"), scheduled_end: at(PAST2, "11:00"), planned_minutes: 120 }),
+  job({ id: "j-hollow", name: "498 May Dell Lane", job_number: "J-002", scheduled_start: at(PAST2, "09:00"), scheduled_end: at(PAST2, "11:00"), planned_minutes: 120 }),
   // Upcoming, its crew moved by Everyone's Day; a person who left is on it.
-  job({ id: "j-next", name: "22 Herringbone Way", job_number: "J-003", assigned_to: ["p-erik", "p-brian", "p-gone"], scheduled_start: at(FUTURE, "09:00"), scheduled_end: at(FUTURE, "11:00"), planned_minutes: 120 }),
+  job({ id: "j-next", name: "22 Honeysuckle Way", job_number: "J-003", assigned_to: ["p-erik", "p-brian", "p-gone"], scheduled_start: at(FUTURE, "09:00"), scheduled_end: at(FUTURE, "11:00"), planned_minutes: 120 }),
 ];
 const appointments: CalAppt[] = [];
 const entryRows = [
@@ -165,7 +165,7 @@ describe("the week", () => {
   it("the month draws the ghost as a dashed pill and the hollow day in its faint tone", () => {
     const month = render("month", PAST3);
     expect(month).toMatch(/border border-dashed border-slate-400 bg-white\/60 text-slate-700[^>]*>5 Pine Rd · Kim Hale</);
-    expect(month).toMatch(/bg-white\/40 text-blue-400 ring-1 ring-inset ring-blue-200[^>]*>498 Mil Drae Lane · Rita Moss</);
+    expect(month).toMatch(/bg-white\/40 text-blue-400 ring-1 ring-inset ring-blue-200[^>]*>498 May Dell Lane · Rita Moss</);
   });
 });
 

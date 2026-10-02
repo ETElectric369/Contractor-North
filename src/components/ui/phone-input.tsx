@@ -4,7 +4,7 @@ import * as React from "react";
 import { Input } from "./input";
 import { formatPhone } from "@/lib/utils";
 
-/** Phone field that formats to "(530) 933-6686" as you type. Submits via name. */
+/** Phone field that formats to "(530) 555-0133" as you type. Submits via name. */
 export function PhoneInput({
   defaultValue,
   ...props

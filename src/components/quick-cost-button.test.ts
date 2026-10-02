@@ -150,7 +150,7 @@ describe("what the typed sheet hands createBill", () => {
   });
 
   it("names a job the way it is read: the place first, the number second", () => {
-    expect(jobPickLabel({ job_number: "J-011", name: "13897 Herringbone" })).toBe("13897 Herringbone · J-011");
+    expect(jobPickLabel({ job_number: "J-011", name: "13897 Honeysuckle" })).toBe("13897 Honeysuckle · J-011");
     expect(jobPickLabel({ job_number: "J-011", name: "" })).toBe("J-011");
   });
 });
@@ -191,7 +191,7 @@ describe("the reader failed and the typed figure was saved instead", () => {
 });
 
 describe("the sheet as it is drawn", () => {
-  const JOBS = [{ id: "job-011", label: "13897 Herringbone · J-011" }];
+  const JOBS = [{ id: "job-011", label: "13897 Honeysuckle · J-011" }];
   const bills = renderToStaticMarkup(createElement(QuickCostButton, { typeOnly: true, jobs: JOBS, label: "Add By Hand", icon: "none" }));
 
   it("Add By Hand opens Type It In: What's It For? with the job picker first, then Business Cost", () => {
@@ -201,7 +201,7 @@ describe("the sheet as it is drawn", () => {
     const select = bills.match(/<select[^>]*id="ti-job"[^>]*>([\s\S]*?)<\/select>/)!;
     expect(select).not.toBeNull();
     expect(text(select[1]).trim().startsWith("Pick A Job")).toBe(true);
-    expect(select[1]).toContain("13897 Herringbone · J-011");
+    expect(select[1]).toContain("13897 Honeysuckle · J-011");
     const business = buttons(bills).find((b) => b.words === "Business Cost")!;
     expect(business.attrs).toContain("min-h-11");
     expect(business.attrs).toContain('aria-checked="false"');

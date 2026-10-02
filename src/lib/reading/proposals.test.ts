@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { READ_SYSTEM, coerceProposals, defaultTicked, duplicateCount } from "./proposals";
 
 /**
- * The fixture is Sara Cain's real report (10410 Badger Ln B, Saturno Inspections, 49 pages) — the
+ * The fixture is Sara Dale's real report (10410 Bayberry Ln B, Clearview Inspections, 49 pages) — the
  * job Erik was estimating when this was built. 5.1.1 and 8.1.1 are the SAME defect filed in two
  * sections, which is exactly the trap: estimate straight off the report and you bill it twice.
  */
@@ -85,7 +85,7 @@ describe("what Nort is told to do with a source", () => {
 
 describe("the dedup fingerprints the SOURCE's words, not the model's paraphrase", () => {
   /**
-   * Run live against Sara Cain's real 49-page report, the first cut caught ZERO duplicates: the
+   * Run live against Sara Dale's real 49-page report, the first cut caught ZERO duplicates: the
    * model described 5.1.1 as "Interior lights not turning on…" and 8.1.1 differently, because a
    * paraphrase is free to vary. The report's own sentence is identical in both places. That is the
    * signal, and this is the fixture that proves it — both quotes verbatim from the PDF.

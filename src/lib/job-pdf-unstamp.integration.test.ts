@@ -87,7 +87,7 @@ d("0349: a changed job retires its bills' stored PDFs", () => {
       (
         await one(
           `insert into public.jobs (org_id, name, job_number, status, billing_type, customer_id, address, city, state, zip)
-           values ($1, $2, $2, 'in_progress', 'tm', $3, '235 Timbercreek Ct', 'Reno', 'NV', '89511') returning id`,
+           values ($1, $2, $2, 'in_progress', 'tm', $3, '235 Thistlewood Ct', 'Reno', 'NV', '89511') returning id`,
           [org, `TEST-0349-${n}`, cust],
         )
       ).id as string;
@@ -174,7 +174,7 @@ d("0349: a changed job retires its bills' stored PDFs", () => {
     await stampAll();
     await c.query("update public.jobs set notes = 'TEST gate code 1234' where id = $1", [job]);
     expect(await served()).toEqual(ALL);
-    await c.query("update public.jobs set address = '237 Timbercreek Ct' where id = $1", [job]);
+    await c.query("update public.jobs set address = '237 Thistlewood Ct' where id = $1", [job]);
     expect(await served()).toEqual({ draw: false, standard: false, otherDraw: true });
     await stampAll();
     await c.query("update public.jobs set billing_type = 'fixed' where id = $1", [job]);

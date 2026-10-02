@@ -31,7 +31,7 @@ vi.mock("@/lib/supabase/server", () => ({
         maybeSingle: async () =>
           table === "tasks"
             ? { data: { job_id: state.parentJob, assigned_to: null }, error: null }
-            : { data: { job_number: "J-055", name: "Apache Ct" }, error: null },
+            : { data: { job_number: "J-055", name: "Acacia Ct" }, error: null },
       };
       return chain;
     },

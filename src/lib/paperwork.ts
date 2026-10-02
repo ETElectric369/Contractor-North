@@ -3,7 +3,7 @@
  *
  * "Organize photos wait for File It": a model read is a proposal, never a filing. Every receipt,
  * bill or invoice that comes in through Snap Or Note is read, shown as ONE card ("Home Depot ·
- * $84.12 · It Says 13897 HERRINGBONE"), and becomes money only when a person taps one of the
+ * $84.12 · It Says 13897 HONEYSUCKLE"), and becomes money only when a person taps one of the
  * card's answers (Put It On J-011, Another Job, Shop Stock, Business Cost). This module is the pure
  * half of that: what a piece of paper IS, what it can become today, what stops it, and whether the
  * same purchase is already on the books. The server's File It and each answer on screen ask the
@@ -152,7 +152,7 @@ export type PaperProposal = {
   bucketFrom?: "reader" | "ai" | null;
   /**
    * THE COMPANY'S OWN USE, WRITTEN ON THE PAPER (Erik, 2026-09-24): "TOOLS" in a supplier's PO box
-   * picks Tools & Supplies exactly the way "13897 HERRINGBONE" picks the job. Found in code, by an
+   * picks Tools & Supplies exactly the way "13897 HONEYSUCKLE" picks the job. Found in code, by an
    * exact whole-field match (companyUseWord, placeFromMarks), never by a model. `bucket` null is a word that names
    * the company's own use and no bucket (STOCK: a shop-stock shelf is a later update), said on the
    * row and never picked.
@@ -619,7 +619,7 @@ function paperWord(item: PaperItem): string {
 
 /**
  * WHY THE JOB IS ALREADY PICKED, in a few words, with the words on the paper that picked it: "Job
- * picked from the PO on the bill: 13897 HERRINGBONE". Null when the paper picked nothing.
+ * picked from the PO on the bill: 13897 HONEYSUCKLE". Null when the paper picked nothing.
  */
 export function pickedBecause(item: PaperItem): string | null {
   const p = proposalOf(item);
@@ -681,7 +681,7 @@ export function firstAnswer(item: PaperItem, jobIds: readonly string[], opts: { 
 }
 
 /**
- * WHAT THE PAPER NAMES, for the card's headline ("Home Depot · $84.12 · It Says 13897 HERRINGBONE",
+ * WHAT THE PAPER NAMES, for the card's headline ("Home Depot · $84.12 · It Says 13897 HONEYSUCKLE",
  * the supplier card's grammar). The words that made its own pick (a job's printed mark, a
  * company-use word), else what is printed where a job goes (on_paper: the PO box, else the reader's
  * hint with the company's own names taken out, worked out on the server). Null when it names
@@ -770,8 +770,8 @@ export function pickProvenance(settled: PaperItem, destValue: string): { filed: 
 
 /**
  * THE WORDS, AND WHAT EACH ONE PICKS (Erik, 2026-09-24: "TOOLS" in the PO box is the tools
- * bucket, the same way "13897 HERRINGBONE" is the job). The WHOLE box must be the word: "TOOLS",
- * "Tool", "SHOP TOOLS", "TRUCK 2", "#2 TRUCK", "VAN", "OFFICE". "TOOLS FOR HERRINGBONE" is not.
+ * bucket, the same way "13897 HONEYSUCKLE" is the job). The WHOLE box must be the word: "TOOLS",
+ * "Tool", "SHOP TOOLS", "TRUCK 2", "#2 TRUCK", "VAN", "OFFICE". "TOOLS FOR HONEYSUCKLE" is not.
  *
  * STOCK, SHOP STOCK and INVENTORY say the company's own too, and what they name is the shop shelf
  * (Shop Stock, Phase 2): no bucket, and `shelf` instead, which SUGGESTS the Shop Stock destination
@@ -807,7 +807,7 @@ export type PaperPlace = { job: JobFromMarks; companyUse: CompanyUse | null };
  *   · A JOB MARK ALWAYS BEATS A COMPANY WORD. A box whose words name a job exactly (a job the
  *     owner named "Tools") is that job, and the word is not read as company use at all.
  *   · A PAPER NAMING BOTH says so and picks nothing: "TOOLS" in the PO box and "13897
- *     HERRINGBONE" in the address is two answers, and choosing between them is a person's call.
+ *     HONEYSUCKLE" in the address is two answers, and choosing between them is a person's call.
  *   · A fee-shaped paper (a supplier's late or service charge) is never given a bucket by a word.
  */
 export function placeFromMarks(
@@ -889,7 +889,7 @@ export type PaperMarks = {
   customer?: string | null;
   /**
    * The reader's job_hint: the words on the paper that point to a job, often a label, a name and
-   * a street run together ("JOB NAME AND ADDRESS ERIK TAYLOR 13897 HERRINGBONE"). Only the street
+   * a street run together ("JOB NAME AND ADDRESS ERIK TAYLOR 13897 HONEYSUCKLE"). Only the street
    * in it is used (addressInHint), and only when the reader gave no address of its own.
    */
   hint?: string | null;
@@ -925,7 +925,7 @@ function compactKey(raw: string | null | undefined): string {
   return String(raw ?? "").toUpperCase().replace(/[^A-Z0-9]+/g, "");
 }
 
-/** "Jason  Waldow", "JASON WALDOW" and "Jason Waldow." are one name. */
+/** "Jason  Wexley", "JASON WEXLEY" and "Jason Wexley." are one name. */
 function wordsKey(raw: string | null | undefined): string {
   return String(raw ?? "").toUpperCase().replace(/[^A-Z0-9]+/g, " ").trim();
 }
@@ -945,8 +945,8 @@ export type StreetParts = { number: string; words: string[]; type: string | null
 
 /**
  * THE STREET, TAKEN APART ONE WAY: the house number, the street's own words and its street type,
- * each in one spelling. "518 Crater Lake Rd, Chilcoot CA" and "518 CRATER LAKE ROAD" are both 518 /
- * CRATER LAKE / RD. A unit on a shared street (300 W Lake Blvd #11) is cut off after the street
+ * each in one spelling. "518 Cinder Lake Rd, Chilcoot CA" and "518 CINDER LAKE ROAD" are both 518 /
+ * CINDER LAKE / RD. A unit on a shared street (300 W Garnet Blvd #11) is cut off after the street
  * type. No house number, or no word after it: no street, and a street alone places nothing.
  */
 export function streetParts(raw: string | null | undefined): StreetParts | null {
@@ -975,9 +975,9 @@ export function streetParts(raw: string | null | undefined): StreetParts | null 
 }
 
 /**
- * THE STREET, SPELLED ONE WAY: "518 CRATER LAKE RD". The same house number, the same words in the
- * same order and the same street type are one key; "13631 Northwoods" is never "13466 Northwoods"
- * and "518 Crater Lake Dr" is never "518 Crater Lake Rd".
+ * THE STREET, SPELLED ONE WAY: "518 CINDER LAKE RD". The same house number, the same words in the
+ * same order and the same street type are one key; "13631 Nightshade" is never "13466 Nightshade"
+ * and "518 Cinder Lake Dr" is never "518 Cinder Lake Rd".
  */
 export function streetKey(raw: string | null | undefined): string | null {
   const s = streetParts(raw);
@@ -986,8 +986,8 @@ export function streetKey(raw: string | null | undefined): string | null {
 
 /**
  * THE SAME STREET? The same house number and exactly the same street words, and the same street
- * type when BOTH are written. A paper that leaves the type off ("13897 HERRINGBONE", in a
- * supplier's PO box) does not disagree with a job at "13897 Herringbone Way": it just didn't
+ * type when BOTH are written. A paper that leaves the type off ("13897 HONEYSUCKLE", in a
+ * supplier's PO box) does not disagree with a job at "13897 Honeysuckle Way": it just didn't
  * write it (Erik, 2026-09-24). Two written types that differ are two streets: Dr is never Rd.
  * This is still spelling, not likeness; a street with no type on a road that has two (a Way and a
  * Court at the same number) matches both jobs, and two matches pick nothing.
@@ -1001,7 +1001,7 @@ export function sameStreet(a: StreetParts | null, b: StreetParts | null): boolea
 
 /**
  * THE STREET IN THE READER'S HINT. The hint is the reader's own run-together of what points to a
- * job: "JOB NAME AND ADDRESS ERIK TAYLOR 13897 HERRINGBONE" (a label, the name on the account, the
+ * job: "JOB NAME AND ADDRESS ERIK TAYLOR 13897 HONEYSUCKLE" (a label, the name on the account, the
  * street). The street starts at the first house number followed by a word, and runs to a comma or
  * the end. Only that is taken; the words before it (a label, a person's name) are never read as a
  * customer. Null when there is no house number followed by a word.
@@ -1023,7 +1023,7 @@ export function addressInHint(hint: string | null | undefined): string | null {
  *
  *   · each mark finds the open jobs it names exactly: a job number; a PO against job numbers,
  *     this org's own purchase orders, AND the jobs' names and streets (a contractor writes the
- *     JOB in a supplier's PO box: "13897 HERRINGBONE", "561 RHODESIA", Erik on every CED ticket);
+ *     JOB in a supplier's PO box: "13897 HONEYSUCKLE", "561 FERNHILL", Erik on every CED ticket);
  *     an address by its street (sameStreet: a type left off is not a different street); a job
  *     name, by name or by street; a customer;
  *   · the company's own name and its people's names (selfNames) are never a customer or a job
@@ -1069,7 +1069,7 @@ export function jobFromPaperMarks(
   };
   /**
    * A job's name, exactly, never the company's own name or one of its people. A job named after
-   * its customer ("Jackie Burks") is also that customer's name, so the same words name every open
+   * its customer ("Marla Finch") is also that customer's name, so the same words name every open
    * job of that customer too: with more than one, the name is not decisive and nothing is picked
    * (the customer mark reads those words the same way).
    */
@@ -1120,7 +1120,7 @@ export function jobFromPaperMarks(
       sentence: `The paper points to more than one job (${said(decisive[0])} and ${said(disagree)}), so no job was picked.`,
     };
   }
-  // A STREET SHARED WITH FINISHED JOBS PICKS NOTHING (Erik, audit v994 PR1). 300 W Lake Blvd has
+  // A STREET SHARED WITH FINISHED JOBS PICKS NOTHING (Erik, audit v994 PR1). 300 W Garnet Blvd has
   // an open job and finished ones; a ticket naming only the street could be for any of them, and a
   // finished job still gets late tickets. A job number, a PO number, a job name or a customer that
   // names the open job still picks it.
@@ -1152,7 +1152,7 @@ export function storedMarks(p: PaperProposal): PaperMarks {
 /**
  * THE TRAY MATCHES AGAIN, IN MEMORY (2026-09-24). A paper read before the rules learned that a PO
  * box holds the job, or that a street's type can be left off, sat in the tray asking "Where does
- * this go?" with "13897 HERRINGBONE" printed on it. On every load, each waiting paper the paper
+ * this go?" with "13897 HONEYSUCKLE" printed on it. On every load, each waiting paper the paper
  * itself has not already settled (no pick, no conflict said) is matched again from what was
  * stored: the same exact rules, no model call, and NOTHING WRITTEN. The row shows the pick and why,
  * and a person still presses File It. A paper a person has filed, set aside, or that already

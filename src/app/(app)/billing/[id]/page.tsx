@@ -128,7 +128,7 @@ export default async function InvoicePage({
         ? supabase.from("jobs").select("id, name, job_number, customer_id").order("created_at", { ascending: false }).limit(2000)
         : Promise.resolve({ data: [] as { id: string; name: string | null; job_number: string | null; customer_id: string | null }[] }),
     ]);
-  // A FAILED LINES READ IS NOT AN EMPTY INVOICE (2026-09-25, Tao's INV-080). A lock on
+  // A FAILED LINES READ IS NOT AN EMPTY INVOICE (2026-09-25, Tess's INV-080). A lock on
   // invoice_items made this read fail while the invoice row loaded, and the page said "No line
   // items yet" under a $3,189.34 total: a lie, with an Add row inviting a second copy of every line.
   // Same for payments ("Paid $0.00" on a paid bill). Throw, as the invoice read above does: the error

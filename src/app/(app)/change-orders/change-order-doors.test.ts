@@ -74,7 +74,7 @@ const fd = (fields: Record<string, string>) => {
   return f;
 };
 const writes = () => state.calls.filter((c) => c.table === "change_orders");
-const JOB = { id: "job-11", job_number: "J-011", name: "13897 Herringbone" };
+const JOB = { id: "job-11", job_number: "J-011", name: "13897 Honeysuckle" };
 const CO = { id: "co-1", co_number: "CO-00004", description: "Add two circuits", amount: 480, job_id: "job-11" };
 
 beforeEach(() => {
@@ -113,7 +113,7 @@ describe("New Change Order posts its job, and has no Job box", () => {
     expect(html).not.toMatch(/<select[^>]*name="job_id"/);
     expect(html).not.toContain("<select");
     expect(html).toContain("New Change Order");
-    expect(html).toContain("On 13897 Herringbone.");
+    expect(html).toContain("On 13897 Honeysuckle.");
   });
 
   it("anything but exactly one job: a plain line, never a form that could save a stray", () => {

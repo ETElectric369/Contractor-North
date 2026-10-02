@@ -67,8 +67,8 @@ const render = (access: WalkthroughAccess, over: Record<string, unknown> = {}) =
       initialAnswers: ANSWERS as never,
       initialCapture: { notes: "Meter base pulling off the wall", photos: [PHOTO.path], measures: [{ id: "m1", label: "Run", value: 40, unit: "ft" }] },
       initialPhotos: [PHOTO],
-      initialLocation: "13125 Moraine Rd",
-      linked: { kind: "lead", name: "Sara Cain" },
+      initialLocation: "13125 Mayfern Rd",
+      linked: { kind: "lead", name: "Sara Dale" },
       estimateHref: access === "office" ? "/quotes/new?capture=appt-1" : null,
       access,
       ...over,
@@ -131,8 +131,8 @@ describe("a crew lead on this visit: fills it in, never a price", () => {
 
   it("the address and the links are the office's: shown, not editable", () => {
     expect(html).not.toContain('data-address-box="yes"');
-    expect(t).toContain("13125 Moraine Rd");
-    expect(t).toContain("Sara Cain");
+    expect(t).toContain("13125 Mayfern Rd");
+    expect(t).toContain("Sara Dale");
     expect(buttons(html).map((b) => b.text)).not.toContain("change");
   });
 

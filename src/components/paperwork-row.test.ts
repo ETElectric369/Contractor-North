@@ -36,8 +36,8 @@ import { PaperworkRow, differentPurchaseOf, paperMenuRows, pickJobOf, type Paper
 import { RETURN_NEEDS_LINES } from "@/lib/paperwork";
 
 const JOBS = [
-  { id: "job-046", job_number: "J-046", name: "Jason Waldow", status: "in_progress" },
-  { id: "job-011", job_number: "J-011", name: "13897 Herringbone", status: "complete" },
+  { id: "job-046", job_number: "J-046", name: "Jason Wexley", status: "in_progress" },
+  { id: "job-011", job_number: "J-011", name: "13897 Honeysuckle", status: "complete" },
 ];
 const base: PaperRowItem = {
   id: "p1",
@@ -87,19 +87,19 @@ describe("the cost card: the Supplier Bills grammar", () => {
   });
 
   it("the paper names the job: Put It On J-046 first, primary, with why under it, then Another Job", () => {
-    const html = render({ doc_number: "8802-1108330", item_date: "2026-09-20", proposal: { jobId: "job-046", jobFrom: "address", jobHint: "518 CRATER LAKE RD" } });
-    expect(words(html)).toContain("Home Depot · $84.12 · It Says 518 CRATER LAKE RD");
+    const html = render({ doc_number: "8802-1108330", item_date: "2026-09-20", proposal: { jobId: "job-046", jobFrom: "address", jobHint: "518 CINDER LAKE RD" } });
+    expect(words(html)).toContain("Home Depot · $84.12 · It Says 518 CINDER LAKE RD");
     expect(words(html)).toContain("#8802-1108330 · Sep 20, 2026 · Receipt (Paid)");
     expect(answers(html)).toEqual(["Put It On J-046", "Another Job", "Shop Stock", "Business Cost"]);
     expect(tagOf(html, "Put It On J-046")).not.toMatch(SHUT);
     expect(tagOf(html, "Put It On J-046")).toContain("glass-ink"); // the primary button
-    expect(html).toContain("Job picked from the address on the receipt: 518 CRATER LAKE RD");
+    expect(html).toContain("Job picked from the address on the receipt: 518 CINDER LAKE RD");
     expect(html).not.toMatch(/>Where does this go\?<\/p>/);
     expect(html).not.toContain("Guess");
   });
 
   it("a MODEL'S GUESS is the first answer too, but marked Guess, with 'Not read off the paper' under it", () => {
-    for (const proposal of [{ guessJobId: "job-046", why: "The store is near the job." }, { jobId: "job-046", jobHint: "518 CRATER LAKE" }]) {
+    for (const proposal of [{ guessJobId: "job-046", why: "The store is near the job." }, { jobId: "job-046", jobHint: "518 CINDER LAKE" }]) {
       const html = render({ proposal });
       expect(answers(html)).toEqual(["Put It On J-046 Guess", "Another Job", "Shop Stock", "Business Cost"]);
       expect(html).toContain("Not read off the paper");
@@ -129,7 +129,7 @@ describe("the cost card: the Supplier Bills grammar", () => {
   });
 
   it("a number already on the books: Tie Them, and one line saying every other answer is a different purchase", () => {
-    const matches = [{ kind: "bill", billId: "bill-1", sentence: "Already on the books: CED #8802-1108330, $653.25, on J-046 Jason Waldow." }];
+    const matches = [{ kind: "bill", billId: "bill-1", sentence: "Already on the books: CED #8802-1108330, $653.25, on J-046 Jason Wexley." }];
     const html = render({ doc_number: "8802-1108330" }, matches);
     expect(html).toContain("Already on the books: CED #8802-1108330");
     expect(answers(html)).toEqual(["Same Purchase: Tie Them", "Pick A Job", "Shop Stock", "Business Cost"]);
@@ -190,7 +190,7 @@ describe("the cost card: the Supplier Bills grammar", () => {
     expect(tagOf(html, "Pick A Job")).toContain('aria-expanded="false"');
     expect(tagOf(html, "Business Cost")).toContain('aria-expanded="false"');
     // Jobs as the buttons say them: the number first, a finished one known by its status.
-    expect(pickJobOf(JOBS[1])).toEqual({ id: "job-011", label: "J-011", name: "13897 Herringbone", status: "complete" });
+    expect(pickJobOf(JOBS[1])).toEqual({ id: "job-011", label: "J-011", name: "13897 Honeysuckle", status: "complete" });
     expect(pickJobOf({ id: "x", job_number: "", name: "Smith Panel" })).toMatchObject({ label: "Smith Panel" });
   });
 });
@@ -434,7 +434,7 @@ describe("the law on every card", () => {
       payment: "on_account",
       line_items: null,
       file_url: "org-1/organize/ret.jpg",
-      proposal: { jobId: "job-046", jobFrom: "address", jobHint: "13897 HERRINGBONE" },
+      proposal: { jobId: "job-046", jobFrom: "address", jobHint: "13897 HONEYSUCKLE" },
     });
     expect(html).toContain("Press Read Again so its lines come with it");
     expect(tagOf(html, "Put It On J-046")).toMatch(SHUT);
@@ -451,7 +451,7 @@ describe("the law on every card", () => {
       payment: "on_account",
       line_items: [{ description: "H245ICAT 4 in LED Shallow IC HSG", quantity: -4, unit_price: -11.83, amount: -47.32 }],
       file_url: "org-1/organize/ret.jpg",
-      proposal: { jobId: "job-046", jobFrom: "address", jobHint: "13897 HERRINGBONE" },
+      proposal: { jobId: "job-046", jobFrom: "address", jobHint: "13897 HONEYSUCKLE" },
     });
     expect(buttons(lined)).not.toContain("Read Again");
     expect(tagOf(lined, "Put It On J-046")).not.toMatch(SHUT);

@@ -113,7 +113,7 @@ function stubModel(reply: object) {
   return create;
 }
 
-const job = { data: { id: JOB, job_number: "J-011", name: "13897 Herringbone", customer_id: CUST }, error: null };
+const job = { data: { id: JOB, job_number: "J-011", name: "13897 Honeysuckle", customer_id: CUST }, error: null };
 const photo = { data: { id: PHOTO, name: "panel.jpg", file_url: `${ORG}/${JOB}/1727-panel.jpg`, size_bytes: 400_000 }, error: null };
 const panelRow = {
   id: PANEL, org_id: ORG, job_id: JOB, name: "Main Panel", brand: "Siemens", bus_amps: 125, main_amps: 125, spaces: 32, numbering: "top_down",
@@ -286,7 +286,7 @@ describe("readPlanCircuits (the office only)", () => {
       "office",
       {
         "jobs.select": [job],
-        "documents.select": [{ data: { id: PLAN, name: "Herringbone.pdf", file_url: `${ORG}/customers/${CUST}/1-Herringbone.pdf`, job_id: null, customer_id: CUST, category: "Plan" }, error: null }],
+        "documents.select": [{ data: { id: PLAN, name: "Honeysuckle.pdf", file_url: `${ORG}/customers/${CUST}/1-Honeysuckle.pdf`, job_id: null, customer_id: CUST, category: "Plan" }, error: null }],
         "job_circuits.select": [{ data: [], error: null }, { data: null, error: null }],
         "job_panels.select": [{ data: [{ id: PANEL }], error: null }],
         "job_circuits.insert": [{ data: [{ id: "p1" }], error: null }],
@@ -299,9 +299,9 @@ describe("readPlanCircuits (the office only)", () => {
     expect(s.capKeys).toEqual([`panel-plans:${JOB}`]);
     const ins = calls.find((c) => c.verb === "insert")!;
     expect(ins.payload[0]).toMatchObject({ source: "plan", source_document_id: PLAN, state: "suggested", description: "Bath Floor Heat", amps: 20, poles: 2, space: null, panel_id: PANEL });
-    expect(ins.payload[0].source_row).toMatchObject({ sheet: "E-1", ckt: "14", document_name: "Herringbone.pdf" });
+    expect(ins.payload[0].source_row).toMatchObject({ sheet: "E-1", ckt: "14", document_name: "Honeysuckle.pdf" });
     expect(r.notes).toEqual(["MPE-1 Was Too Dense To Count."]);
-    expect(r.message).toMatch(/^Read 1 circuit off Herringbone\.pdf: 1 New Suggestion\. Nothing counts until you keep it\. Sheets read: E-1\.$/);
+    expect(r.message).toMatch(/^Read 1 circuit off Honeysuckle\.pdf: 1 New Suggestion\. Nothing counts until you keep it\. Sheets read: E-1\.$/);
   });
 });
 

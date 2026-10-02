@@ -70,8 +70,8 @@
  * NOTHING HERE TOUCHES A DATABASE and nothing here decides anything. It reports what the document
  * says. Whether that closes a bill, and which job it belongs to, are decisions with a person on
  * the end of them - see supplier-import-actions.ts, and see the header of 0273 for why the JOB
- * NAME is stored raw: his same road is "5659 RHODESIA", "561 RHODESIA", "5661 RHODESIA" and
- * "5659 RODESSIA", and he has five jobs on it.
+ * NAME is stored raw: his same road is "5659 FERNHILL", "561 FERNHILL", "5661 FERNHILL" and
+ * "5659 FERNHILE", and he has five jobs on it.
  */
 
 /** E = each, C = per hundred, M = per thousand. CED's own pricing unit, printed beside the price. */
@@ -102,7 +102,7 @@ export interface CedInvoice {
   kind: "invoice" | "credit_memo" | "service_charge";
   /** "YYYY-MM-DD", or null when the document did not print one. */
   invoiceDate: string | null;
-  /** TR-34426. The number on the statement, which is what a supplier account is really keyed on. */
+  /** AC-10427. The number on the statement, which is what a supplier account is really keyed on. */
   accountNumber: string | null;
   accountName: string | null;
   /** CED's JOB NAME, verbatim, before anybody interprets it. */
@@ -251,7 +251,7 @@ function findLabel(lines: string[], pattern: RegExp, from = 0): { start: number;
 
 /**
  * The VALUE that follows a label, gathered until the next label arrives. Gathering rather than
- * taking one line is what lets "235 TIMBER CREEK" survive an extractor that puts each word on its
+ * taking one line is what lets "235 THISTLE WOOD" survive an extractor that puts each word on its
  * own line, while still stopping dead at "CUSTOMER ORDER NO." on one that does not.
  */
 function valueAfter(lines: string[], from: number, stop: RegExp, maxLines = 8): string | null {
@@ -405,7 +405,7 @@ function serviceStubDate(doc: string[]): string | null {
   return m ? toIsoDate(`${m[1]}/${m[2]}/20${m[3]}`) : toIsoDate(printed);
 }
 
-/** The account number under the stub's bare ACCOUNT heading: "ACCOUNT" then "TR-34426". The words
+/** The account number under the stub's bare ACCOUNT heading: "ACCOUNT" then "AC-10427". The words
  *  are required to BE the line, so the boilerplate "STATUS OF ACCOUNT" further down the same page
  *  can never answer for it. */
 function serviceStubAccount(doc: string[]): string | null {
@@ -585,7 +585,7 @@ function readLines(doc: string[], itemsFrom: number, totalsAt: number): CedInvoi
 
   // PRODUCT CODES AND PART NUMBERS ARE READ AS LINES, NOT TOKENS, and that is not a style choice:
   // a part number can contain a space. "ELL2 45D" and "ELL2 22-1/2D" are single part numbers on
-  // his 235 Timber Creek invoice, and counting tokens made twelve entries out of ten, which lined
+  // his 235 Thistle Wood invoice, and counting tokens made twelve entries out of ten, which lined
   // up with nothing and dropped both columns to null on every invoice carrying an elbow.
   const codeLines = doc.slice(productCode.after, description?.start ?? qtyShipped.start).filter((l) => l.length > 0);
   const descriptionLines = description
@@ -722,7 +722,7 @@ function readServiceCharge(doc: string[], invoiceNumber: string): CedParseResult
   const account =
     (accountLabel ? valueAfter(doc, accountLabel.after, /JOB\s+NAME|CUSTOMER\s+ORDER/i) : null) ??
     // WITHOUT THIS THE CHARGE LANDS ON NO SUPPLIER ACCOUNT AT ALL. The importer matches a document
-    // to his CED account on the printed account number TR-34426, falling back to the branch code
+    // to his CED account on the printed account number AC-10427, falling back to the branch code
     // in the invoice number - and a service charge is numbered 9019059048, no branch, no hyphen,
     // so there is no fallback. A null here is an interest bill that never reaches the balance it
     // is interest on.
@@ -779,7 +779,7 @@ function readDocument(pages: string[][], invoiceNumber: string): CedParseResult 
   const customerOrderRaw = orderLabel ? valueAfter(doc, orderLabel.after, /SALESPERSON|SHIPPING\s+INFORMATION/i) : null;
   /**
    * WHEN THE TWO COLUMNS CARRY THE SAME WORDS, CED PRINTS ONE VALUE UNDER BOTH HEADINGS. The text
-   * then reads "JOB NAME" and "CUSTOMER ORDER NO." with a single "235 TIMBER CREEK" underneath
+   * then reads "JOB NAME" and "CUSTOMER ORDER NO." with a single "235 THISTLE WOOD" underneath
    * them both, and nothing else between it and SALESPERSON. Looking only for a heading that ENDS
    * in "JOB NAME" left invoice 1101419 with no job name at all - $1,513.71 of material with
    * nothing on it to say which job it belongs to, which is the single most useful thing on a CED
@@ -790,11 +790,11 @@ function readDocument(pages: string[][], invoiceNumber: string): CedParseResult 
    * whether the words landed on ONE line - and his own PDFs, pulled through PyMuPDF, put them on
    * two:
    *
-   *     JOB NAME / CUSTOMER ORDER NO. / 235 TIMBER CREEK
+   *     JOB NAME / CUSTOMER ORDER NO. / 235 THISTLE WOOD
    *
    * so the heading WAS found, the fallback never ran, and the read under JOB NAME stopped dead on
    * the very next line at CUSTOMER ORDER NO. with nothing gathered. jobNameRaw came back null on
-   * 1101419 and on 1102291 while customerOrderRaw came back "235 TIMBER CREEK" out of the same
+   * 1101419 and on 1102291 while customerOrderRaw came back "235 THISTLE WOOD" out of the same
    * text in the same call. The one invoice this fix was written for, still dropping its job.
    *
    * So the fallback now keys off an EMPTY read rather than a missing label, and the two headings

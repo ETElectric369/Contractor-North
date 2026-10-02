@@ -156,7 +156,7 @@ describe("jobNameFrom: street number and name, as always (Erik 2026-09-28)", () 
 
   it("typedNameMayBeATag: only a blank, tagged or call-led name needs who and where read", () => {
     for (const t of ["", "  ", "Inspection", "Site inspection: Rita Moss", "Call Rita Moss", "Job from appointment"]) expect(typedNameMayBeATag(t), t).toBe(true);
-    for (const t of ["RV Inspection", "Garage subpanel", "TTP #56"]) expect(typedNameMayBeATag(t), t).toBe(false);
+    for (const t of ["RV Inspection", "Garage subpanel", "ARR #56"]) expect(typedNameMayBeATag(t), t).toBe(false);
   });
 
   it("leadScopeWords: the project type's head, else a one-line short message, never a paragraph", () => {

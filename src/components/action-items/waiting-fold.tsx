@@ -48,7 +48,7 @@ export function WaitingFold({ items }: { items: WaitingItem[] }) {
   );
 }
 
-/** "Tanager Panel · J-034 · Waiting on the permit · Back Oct 3". */
+/** "Tupelo Panel · J-034 · Waiting on the permit · Back Oct 3". */
 export function waitingLine(w: Pick<WaitingItem, "title" | "why" | "backOn">): string {
   return [w.title, w.why, `Back ${shortDay(w.backOn)}`].filter(Boolean).join(" · ");
 }

@@ -190,8 +190,8 @@ d("the readers' writes (0333's guard, phase 4)", () => {
   it("a Plan kept on the customer (no job yet) files, and the crew can read it", async () => {
     await as(staffId);
     const doc = await one(
-      "insert into documents (org_id, job_id, customer_id, name, category, kind, file_url, size_bytes, uploaded_by) values ($1, null, $2, 'Herringbone plans.pdf', 'Plan', 'other', $3, 412000, $4) returning id, org_id, job_id, customer_id",
-      [orgId, custId, `${orgId}/customers/${custId}/1-Herringbone_plans.pdf`, staffId],
+      "insert into documents (org_id, job_id, customer_id, name, category, kind, file_url, size_bytes, uploaded_by) values ($1, null, $2, 'Honeysuckle plans.pdf', 'Plan', 'other', $3, 412000, $4) returning id, org_id, job_id, customer_id",
+      [orgId, custId, `${orgId}/customers/${custId}/1-Honeysuckle_plans.pdf`, staffId],
     );
     expect(doc).toMatchObject({ org_id: orgId, job_id: null, customer_id: custId });
     await as(techId);

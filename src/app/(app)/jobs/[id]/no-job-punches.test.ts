@@ -6,7 +6,7 @@ import { readFileSync } from "node:fs";
 /**
  * PUNCHES WITH NO JOB, ON THE JOB'S TIME TAB (the duplicate punches, 2026-09-26).
  *
- * On 9/19 the office billing 85 Whitney saw no 9/11 hours on the job's Time tab and typed the day
+ * On 9/19 the office billing 41 Larkspur saw no 9/11 hours on the job's Time tab and typed the day
  * again; Brian's own 9/11 punch was in the book on no job. The tab now lists this job's crew's
  * closed, job-less, unbilled, non-company-time punches from the day before its first day to two
  * days after its last, each with Put This On <job> (office only), and shows nothing when there are
@@ -152,7 +152,7 @@ describe("the list on the Time tab", () => {
   const punch: NearPunch = { id: "punch", name: "Brian Taylor", clockIn: "2026-09-11T17:31:00Z", clockOut: "2026-09-12T01:57:00Z", hours: 8.43, jobCode: null };
   const props = (over: Partial<Parameters<typeof NoJobPunchesList>[0]> = {}) => ({
     punches: [punch],
-    jobLabel: "85 Whitney",
+    jobLabel: "41 Larkspur",
     tz: TZ,
     onPut: vi.fn(),
     ...over,
@@ -163,7 +163,7 @@ describe("the list on the Time tab", () => {
     const html = render(props());
     expect(html).toContain("Punches With No Job");
     expect(html).toContain("Brian · Fri, Sep 11 · 10:31 AM to 6:57 PM · 8.43 h");
-    expect(html).toMatch(/<button[^>]*class="[^"]*min-h-11[^"]*"[^>]*>Put This On 85 Whitney<\/button>/);
+    expect(html).toMatch(/<button[^>]*class="[^"]*min-h-11[^"]*"[^>]*>Put This On 41 Larkspur<\/button>/);
     expect(nearPunchLine({ ...punch, jobCode: "ROUGH" }, TZ)).toBe("Brian · Fri, Sep 11 · 10:31 AM to 6:57 PM · 8.43 h · ROUGH");
   });
 
@@ -191,10 +191,10 @@ describe("the list on the Time tab", () => {
   it("shows the newest five above the job's own entries, and Show All <n> (44px) opens the rest", () => {
     const many = Array.from({ length: 13 }, (_, i) => ({ ...punch, id: `p${i}` }));
     const short = render(props({ punches: many }));
-    expect(short.match(/>Put This On 85 Whitney<\/button>/g)).toHaveLength(NEAR_SHOWN);
+    expect(short.match(/>Put This On 41 Larkspur<\/button>/g)).toHaveLength(NEAR_SHOWN);
     expect(short).toMatch(/<button[^>]*class="[^"]*min-h-11[^"]*"[^>]*>Show All 13<\/button>/);
     const all = render(props({ punches: many, showAll: true }));
-    expect(all.match(/>Put This On 85 Whitney<\/button>/g)).toHaveLength(13);
+    expect(all.match(/>Put This On 41 Larkspur<\/button>/g)).toHaveLength(13);
     expect(all).not.toContain("Show All");
     // Five or fewer: nothing to open.
     expect(render(props({ punches: many.slice(0, NEAR_SHOWN) }))).not.toContain("Show All");

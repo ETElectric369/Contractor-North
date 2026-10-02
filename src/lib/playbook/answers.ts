@@ -11,7 +11,7 @@ import { uploadDisplayName } from "./uploads";
  * everything that still reads a raw sheet. But the moment the inspector renders from a playbook,
  * coercing the result against the SHEET splits the truth in half — and it splits it exactly where
  * it hurts. A sheet checkbox becomes a two-option select (see from-sheet, and the permit that
- * vanished at 13125 Moraine Rd), so the answer on the wire is now the string "Yes" or "No". Fed
+ * vanished at 13125 Mayfern Rd), so the answer on the wire is now the string "Yes" or "No". Fed
  * back through the sheet's checkbox branch, "No" is a non-empty string, so it coerces to `true` —
  * and a job with no permit gets stored as permitted. One renderer, one coercer, or the two
  * disagree about what a value means.
@@ -61,7 +61,7 @@ export function coerceNeed(n: Need, v: unknown): AnswerValue {
       // THE CAP IS THE OPEN CAP, NOT A CHIP CAP (cn-v698). It was 500, sized for a value that
       // looks like a chip. But the whole reason a question carries `other` is that the listed
       // answers are not exhaustive, and the answer that isn't listed is the PARAGRAPH — Erik's
-      // Sara Cain scope is ~700 characters, and the open branch above allows 8000. At 500 the
+      // Sara Dale scope is ~700 characters, and the open branch above allows 8000. At 500 the
       // moment a question gained choices its stored answer would be truncated on the next
       // autosave, silently, and factsForEstimator would hand the estimator the short version as
       // fact. One cap, both branches: the shape of the control must not decide how much of what
@@ -111,7 +111,7 @@ export function coerceByPlaybook(pb: Playbook, input: unknown): Answers {
 /**
  * WHAT HE ANSWERED BEFORE HE CHANGED THE QUESTION.
  *
- * Erik, looking at 13125 Moraine Rd: "a bunch of info is missing and i found it in the playbook in
+ * Erik, looking at 13125 Mayfern Rd: "a bunch of info is missing and i found it in the playbook in
  * those questions i deleted."
  *
  * coerceByPlaybook rebuilds the whole map from `pb.needs`, so the moment a question leaves the
@@ -313,7 +313,7 @@ function needText(n: Need, v: AnswerValue): string {
     const names = (Array.isArray(v) ? v : [v])
       .filter((x): x is string => typeof x === "string" && x.trim() !== "")
       .map(uploadDisplayName);
-    // Say it cannot be opened, in the same breath. Erik hit the other half of this on Sara Cain's
+    // Say it cannot be opened, in the same breath. Erik hit the other half of this on Sara Dale's
     // estimate — a PDF that was there and went unmentioned — and naming a file without saying we
     // can't read it just trades one wrong answer for a more confident one.
     return names.length ? `${names.join(", ")} (attached — you cannot open these)` : "";
@@ -359,7 +359,7 @@ export function factsForEstimatorByProvenance(
   for (const n of applicableNeeds(pb, answers)) {
     const t = needText(n, answers[n.key]);
     if (!t.trim()) continue;
-    // HIS LINE BREAKS ARE HIS STRUCTURE. Erik answered Sara Cain's scope as an eight-line punch
+    // HIS LINE BREAKS ARE HIS STRUCTURE. Erik answered Sara Dale's scope as an eight-line punch
     // list — one item per line, each carrying its own materials and its own minutes: "new white
     // decor switch for bathroom (single pole switch + 30 mins)". The bullet prefixed only the FIRST
     // line, so the other seven arrived unbulleted and unattached, and we then asked a model to

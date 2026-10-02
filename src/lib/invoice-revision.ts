@@ -83,7 +83,7 @@ export type PaidSinceRevision = {
  * Equal timestamps are NOT a revision. A re-send stamps `sent_at` at the same instant the office
  * is looking at, and a stamp that compared `>=` would nag forever about the copy it had just sent.
  *
- * PAYING THE CORRECTED BILL IN FULL ANSWERS IT TOO (INV-071, Karen Wucher, 2026-09-20). Erik
+ * PAYING THE CORRECTED BILL IN FULL ANSWERS IT TOO (INV-071, Karen Willet, 2026-09-20). Erik
  * changed her bill at 10:21 PM; at 4:40 PM the next day she paid the new $1,875.98 through her
  * own link, which always shows the live bill. Nothing moves `sent_at` when a customer pays (a pay
  * door is never a delivery, 0267), so the board kept telling him to re-send a paid bill forever.

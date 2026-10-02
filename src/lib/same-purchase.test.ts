@@ -29,7 +29,7 @@ const paperB: LedgerBill = {
   amount: "323.71",
   bill_date: "2026-09-24",
   job_id: J011,
-  jobs: { job_number: "J-011", name: "13897 Herringbone" },
+  jobs: { job_number: "J-011", name: "13897 Honeysuckle" },
 };
 const paperA: LedgerBill = {
   id: "fef38cb9",
@@ -98,7 +98,7 @@ describe("billsCarryingNumber: the one reading every door uses", () => {
 });
 
 describe("samePurchaseCandidates: the counter ticket and CED's invoice for it", () => {
-  // CED invoices Paper B's breakers later, under its own number, job name "13897 HERRINGBONE".
+  // CED invoices Paper B's breakers later, under its own number, job name "13897 HONEYSUCKLE".
   const cedInvoice: SupplierDoc = {
     id: "si-new",
     invoice_number: "8802-1109999",
@@ -111,7 +111,7 @@ describe("samePurchaseCandidates: the counter ticket and CED's invoice for it", 
   it("offers Paper B's SO ticket to CED's invoice for it: same account, job and total, two days apart", () => {
     const c = samePurchaseCandidates(cedInvoice, [paperB, paperA], new Set(), aliases);
     expect(c).toEqual([expect.objectContaining({ billId: "e2380fc9", exact: false, dollarsOff: 0, daysApart: 2, jobId: J011 })]);
-    expect(samePurchaseSentence(c[0])).toContain("Maybe already on the books: Consolidated Electrical Dist. #8802-SO-257555, $323.71, 2026-09-24, on J-011 13897 Herringbone");
+    expect(samePurchaseSentence(c[0])).toContain("Maybe already on the books: Consolidated Electrical Dist. #8802-SO-257555, $323.71, 2026-09-24, on J-011 13897 Honeysuckle");
     expect(samePurchaseSentence(c[0])).toContain("the same total, 2 days apart");
   });
 

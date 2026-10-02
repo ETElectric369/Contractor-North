@@ -1,7 +1,7 @@
 /**
- * FINISH JOB SAYS THE TRUTH AT THE BUTTON (Connected North Phase 1; Tao Zhu, J-002).
+ * FINISH JOB SAYS THE TRUTH AT THE BUTTON (Connected North Phase 1; Tess Zane, J-002).
  *
- * Tao's job bills with progress payments: a $10,000 deposit and INV-00028, both paid. Sept 8-9 is
+ * Tess's job bills with progress payments: a $10,000 deposit and INV-00028, both paid. Sept 8-9 is
  * on no bill - 19.5 hours. Finish Job on it marked the job complete, billed nothing, said "It bills
  * with progress payments", and those hours dropped off the job card, My Day, the billing board and
  * the portal. The work that is not billed is named - at the button before the press, and in the

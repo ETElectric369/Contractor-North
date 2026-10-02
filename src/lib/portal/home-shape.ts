@@ -6,10 +6,10 @@
  *    never projected, so the account page was always the default teal while the job page wore the
  *    org's color. 0323 projects it; this takes it only when it is a "#rrggbb" color (seaGlassStyle
  *    checks again), the same rule the job page's shape uses.
- *  - THE RUNNING BILL (Connected North, Andrew's Herringbone). A long-running draft is not a bill,
+ *  - THE RUNNING BILL (Connected North, Andrew's Honeysuckle). A long-running draft is not a bill,
  *    so the home's Bills list never named it, and the home said nothing about $2,830.89 still to
  *    pay. 0323 returns, per job, the sum of that customer's draft bills; each becomes one row,
- *    "13897 Herringbone · Running total, not a bill yet · $2,830.89 left", opening the job page.
+ *    "13897 Honeysuckle · Running total, not a bill yet · $2,830.89 left", opening the job page.
  */
 import type { PortalOrg } from "@/components/portal/portal-shell";
 

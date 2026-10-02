@@ -15,7 +15,7 @@ import { linkAppointmentTo, searchLinkTargets, type LinkTarget } from "../action
  *
  * ONE BOX, NOT THREE PICKERS. Lead, customer and job are three tables and one idea — "who this is
  * for". Three labelled dropdowns would force a person to classify the thing before they can find
- * it, and standing at a job the honest answer is "it's the Cain place", not "it is an inquiry
+ * it, and standing at a job the honest answer is "it's the Dale place", not "it is an inquiry
  * record". So the kind is an OUTCOME of the pick, not a question asked first.
  *
  * FRAGMENT FIRST. Nothing is required. You can capture a whole walk-through connected to nothing
@@ -24,7 +24,7 @@ import { linkAppointmentTo, searchLinkTargets, type LinkTarget } from "../action
  * make an inspection can set `inquiry_id` at all, which is why 10 of 13 in production float free.
  *
  * IT OFFERS THE MATCH. When the address is already typed, that text seeds the search — so the
- * common case is "look down, the Cain lead is already sitting there, tap it" rather than
+ * common case is "look down, the Dale lead is already sitting there, tap it" rather than
  * remembering a name and typing it again. Matching on address is the whole point: the address is
  * the fact that names the lead, the estimate, the job and the invoice.
  */

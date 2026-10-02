@@ -38,7 +38,7 @@ const BASE: OpenListView = {
     keepNewer: [],
     keepUndated: [],
     keepPartial: [],
-    add: [{ number: "8802-1108647", kind: "invoice", date: "2026-09-23", po: "13897 HERRING", open: 103.99 }],
+    add: [{ number: "8802-1108647", kind: "invoice", date: "2026-09-23", po: "13897 HONEY", open: 103.99 }],
     update: [],
     conflicts: [],
     payments: [],

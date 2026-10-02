@@ -26,7 +26,7 @@ const ORG: PortalOrg = {
 const never = () => new Promise<never>(() => undefined);
 const render = (props: Partial<Parameters<typeof PortalSignIn>[0]> = {}) =>
   renderToStaticMarkup(
-    createElement(PortalSignIn, { org: ORG, maskedEmail: "m*******@comcast.net", send: never, check: never, ...props }),
+    createElement(PortalSignIn, { org: ORG, maskedEmail: "r*******@comcast.net", send: never, check: never, ...props }),
   );
 const text = (s: string) => s.replace(/<[^>]+>/g, " ").replace(/&#x27;/g, "'").replace(/&amp;/g, "&").replace(/\s+/g, " ");
 
@@ -44,10 +44,10 @@ describe("the sign-in screen at 375px", () => {
 
   it("says whose page it is and where the code goes, masked, with one button", () => {
     expect(words).toContain("Your page with ET Electric");
-    expect(words).toContain("For your privacy, we'll email a 6-digit code to m*******@comcast.net");
+    expect(words).toContain("For your privacy, we'll email a 6-digit code to r*******@comcast.net");
     expect(words).toContain("Send My Code");
     expect(words).toContain("I Already Have A Code");
-    expect(html).not.toContain("mcpowder");
+    expect(html).not.toContain("redfinch");
     expect(html).not.toMatch(/comcast\.net"/); // never in an attribute (a mailto, a value)
   });
 
@@ -102,7 +102,7 @@ describe("a code already out (re-clicking the link from a text)", () => {
   const words = text(html);
 
   it("opens on the code box, not on a send that would cancel the code just read", () => {
-    expect(words).toContain("We emailed a code to m*******@comcast.net 3 minutes ago. Enter it below.");
+    expect(words).toContain("We emailed a code to r*******@comcast.net 3 minutes ago. Enter it below.");
     expect(html).toContain('id="portal-code"');
     expect(words).toContain("Open My Page");
     expect(words).toContain("Send A New Code");

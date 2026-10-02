@@ -84,7 +84,7 @@ function fake() {
     if (q.table === "time_entries" && q.filters.some(([op]) => op === "gte")) return { data: state.closed, error: null };
     if (q.table === "time_entries") return { data: state.open.length ? state.open.shift() : null, error: null };
     if (q.table === "jobs" && f("id")) {
-      return { data: { id: f("id"), job_number: "J-056", name: "3245 West Lake Boulevard" }, error: null };
+      return { data: { id: f("id"), job_number: "J-056", name: "3245 West Garnet Boulevard" }, error: null };
     }
     if (q.table === "jobs" && f("customer_id")) {
       // The read the page and the link share: this customer, not cancelled, made inside [gte, lt).
@@ -270,7 +270,7 @@ describe("already on the clock elsewhere: Switch To This Job, never a second ope
     job_id: "job-50",
     job_code: null,
     clock_in: "2026-09-25T15:00:00.000Z",
-    job: { job_number: "J-050", name: "Apache Ct" },
+    job: { job_number: "J-050", name: "Acacia Ct" },
   };
 
   it("a clock-in is refused before anything is made, and the answer names the running clock", async () => {
@@ -323,7 +323,7 @@ describe("Tom Goodman as it stood: on the clock on J-055, the visit unlinked", (
   const j55 = {
     id: "job-55",
     job_number: "J-055",
-    name: "3245 West Lake Boulevard",
+    name: "3245 West Garnet Boulevard",
     status: "in_progress",
     customer_id: "cust-tom",
     created_at: "2026-09-25T22:29:56.167Z",
@@ -350,7 +350,7 @@ describe("Tom Goodman as it stood: on the clock on J-055, the visit unlinked", (
 
   it("a switch from some other job still goes through", async () => {
     state.jobs = [j55];
-    state.open = [{ ...onJ55, job_id: "job-50", job: { job_number: "J-050", name: "Apache Ct" } }];
+    state.open = [{ ...onJ55, job_id: "job-50", job: { job_number: "J-050", name: "Acacia Ct" } }];
     const res = await startJobFromVisit({ appointmentId: "appt-tom", clock: "switch" });
     expect(res.ok).toBe(true);
     expect(spies.switchJob).toHaveBeenCalledTimes(1);
@@ -447,7 +447,7 @@ describe("Link To J-055 Instead", () => {
   const j55 = {
     id: "job-55",
     job_number: "J-055",
-    name: "3245 West Lake Boulevard",
+    name: "3245 West Garnet Boulevard",
     status: "in_progress",
     customer_id: "cust-tom",
     created_at: "2026-09-25T22:29:56.167Z", // 3:29 PM Pacific, the visit's day

@@ -110,8 +110,8 @@ describe("an undated appointment is its own kind", () => {
   const appt: Placeable = {
     id: "appt-1",
     kind: "appointment",
-    name: "Walk 10816 West River",
-    address: "10816 West River Street, Truckee, CA",
+    name: "Walk 10816 East Meadow",
+    address: "10816 East Meadow Street, Truckee, CA",
     city: null,
     type: null,
   };

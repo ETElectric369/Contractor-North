@@ -154,7 +154,7 @@ const newParam = createParamClaim();
  * NEW JOB IN FOUR FIELDS (W1-22): Customer, Address, Date, Description, and one closed More Options
  * row (Unit / Apt, Start Time, Billing) that opens itself when a restored draft has something inside.
  *
- *   No Job Name field: a live line says "It'll Be Called: 1871 Apache Ct" (the street number and
+ *   No Job Name field: a live line says "It'll Be Called: 1871 Acacia Ct" (the street number and
  *   name, " #56" with a unit; no street, the customer as written), and the server builds the same
  *   name (lib/schedule-options defaultJobName) since none is sent.
  *   No Status field: the server sets it from the date, on the company's today (today or earlier In

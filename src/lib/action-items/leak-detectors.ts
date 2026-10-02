@@ -1,4 +1,4 @@
-// The end-of-day money-leak detectors — the "Apache Ct" sweep. One voice ramble
+// The end-of-day money-leak detectors — the "Acacia Ct" sweep. One voice ramble
 // proved three silent leaks the system never surfaced: an open 26-hour time entry
 // attached to no job, a worked job with zero recorded costs (30' of Romex nobody
 // billed), and a worked job with no return visit scheduled. These are the PURE
@@ -148,7 +148,7 @@ export type JobRow = {
 
 export type JobLeakFinding = { job: JobRow; lastWorked: string };
 
-/** "Apache Ct" / a readable handle for the job in titles and push bodies. */
+/** "Acacia Ct" / a readable handle for the job in titles and push bodies. */
 export const jobLabel = (j: JobRow): string => j.name || j.job_number || "a job";
 
 /** The invoice columns costedJobIds reads: its status, and the KIND of each line (0342). */

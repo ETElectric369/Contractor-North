@@ -10,7 +10,7 @@ import {
 
 /**
  * resolve-id is the fragment-first SAFETY NET behind Nort's "ids are uuids" prompt rule —
- * the fix for the 'invalid uuid: John Chmura / {{APACHE_JOB_ID}} / c1a-first-rob' error class.
+ * the fix for the 'invalid uuid: John Clover / {{ACACIA_JOB_ID}} / c1a-first-rob' error class.
  * These pin the four load-bearing branches: a uuid passes through untouched, a single name
  * resolves, an ambiguous name ASKS (never guesses — a wrong customer on a quote is a real
  * money-adjacent error), and a fabricated placeholder is refused before any DB round-trip.
@@ -121,18 +121,18 @@ describe("isUuid / looksLikePlaceholder — the classifiers", () => {
   it("recognizes a real v4 uuid and rejects names/slugs", () => {
     expect(isUuid(A_UUID)).toBe(true);
     expect(isUuid(`  ${A_UUID}  `)).toBe(true); // trims
-    expect(isUuid("John Chmura")).toBe(false);
+    expect(isUuid("John Clover")).toBe(false);
     expect(isUuid("c1a-first-rob")).toBe(false);
   });
 
   it("flags template tokens as placeholders, not ordinary names", () => {
-    expect(looksLikePlaceholder("{{APACHE_JOB_ID}}")).toBe(true);
+    expect(looksLikePlaceholder("{{ACACIA_JOB_ID}}")).toBe(true);
     expect(looksLikePlaceholder("<job_id>")).toBe(true);
     expect(looksLikePlaceholder("[CUSTOMER_ID]")).toBe(true);
-    expect(looksLikePlaceholder("APACHE_JOB_ID")).toBe(true); // bare ALL_CAPS snake token
+    expect(looksLikePlaceholder("ACACIA_JOB_ID")).toBe(true); // bare ALL_CAPS snake token
     // A real spoken name — including a single all-caps word — is NOT a placeholder.
     expect(looksLikePlaceholder("Miller")).toBe(false);
-    expect(looksLikePlaceholder("John Chmura")).toBe(false);
+    expect(looksLikePlaceholder("John Clover")).toBe(false);
     expect(looksLikePlaceholder("ACME")).toBe(false);
   });
 });
@@ -173,7 +173,7 @@ describe("resolveEntityId — the four branches", () => {
 
   it("refuses a placeholder token BEFORE any DB round-trip", async () => {
     const { client, calls } = fakeClient({ rows: [{ id: A_UUID }] });
-    const r = await resolveEntityId(client, "jobs", "{{APACHE_JOB_ID}}", { thing: "job" });
+    const r = await resolveEntityId(client, "jobs", "{{ACACIA_JOB_ID}}", { thing: "job" });
     expect("error" in r && r.error).toMatch(/placeholder, not a real job/);
     expect(calls).toHaveLength(0); // never queried — refused up front
   });

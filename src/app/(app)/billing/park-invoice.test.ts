@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 /**
  * SET ASIDE UNTIL… ON A DRAFT WHOSE JOB IS OVER (Wave 1 seam fix). Needs You puts a set-aside draft
- * on a finished or cancelled job straight back on top as "Herringbone · J-011 Finished · Send
+ * on a finished or cancelled job straight back on top as "Honeysuckle · J-011 Finished · Send
  * INV-081", and Nort's invoice.setAside refused it in words, but the invoice page's ⋯ Set Aside
  * Until… called parkInvoice, which wrote the day and let the page promise "It comes back on your
  * list that day". The rule now lives in parkInvoice, so every door refuses it with the same words,
@@ -60,25 +60,25 @@ beforeEach(() => {
 
 describe("parkInvoice on a draft whose job is over", () => {
   it("refuses a day in the same words as Nort, and writes nothing", async () => {
-    state.job = { job_number: "J-011", name: "Herringbone", status: "complete" };
+    state.job = { job_number: "J-011", name: "Honeysuckle", status: "complete" };
     const r = await parkInvoice("inv-81", "2026-10-10", "Waiting on the walk-through");
     expect(r).toEqual({
       ok: false,
-      error: "Herringbone · J-011 is finished, so this draft has nothing left to wait for and stays on Needs You. Send it, or void it if it won't be billed.",
+      error: "Honeysuckle · J-011 is finished, so this draft has nothing left to wait for and stays on Needs You. Send it, or void it if it won't be billed.",
     });
-    state.job = { job_number: "J-011", name: "Herringbone", status: "cancelled" };
+    state.job = { job_number: "J-011", name: "Honeysuckle", status: "cancelled" };
     expect((await parkInvoice("inv-81", "2026-10-10")).ok).toBe(false);
     expect(state.updates).toEqual([]);
   });
 
   it("Put Back (no day) still works there, so an old day can always be taken off", async () => {
-    state.job = { job_number: "J-011", name: "Herringbone", status: "complete" };
+    state.job = { job_number: "J-011", name: "Honeysuckle", status: "complete" };
     expect(await parkInvoice("inv-81", null)).toEqual({ ok: true });
     expect(state.updates).toEqual([{ hold_until: null, hold_reason: null }]);
   });
 
   it("a draft on a job still going, or on no job, is set aside as before", async () => {
-    state.job = { job_number: "J-048", name: "Tanager Panel", status: "in_progress" };
+    state.job = { job_number: "J-048", name: "Tupelo Panel", status: "in_progress" };
     expect(await parkInvoice("inv-81", "2026-10-10", " Waiting on the change order ")).toEqual({ ok: true });
     state.job = null;
     expect(await parkInvoice("inv-81", "2026-10-10")).toEqual({ ok: true });

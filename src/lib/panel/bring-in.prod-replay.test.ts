@@ -12,7 +12,7 @@ import { JobPanel } from "@/app/(app)/jobs/[id]/job-panel";
 
 /**
  * BRING IN E-017, REPLAYED READ-ONLY AGAINST J-011 (Panel plan, phase 2). Exactly what the office's
- * Bring Them In would do on 13897 Herringbone — WITHOUT WRITING. Inside a READ ONLY transaction it
+ * Bring Them In would do on 13897 Honeysuckle — WITHOUT WRITING. Inside a READ ONLY transaction it
  * runs the finder bringInEstimateCircuits / loadJobPanel run (the job's own estimates, then the same
  * customer's with no job, each only with circuits; always inside ET's org), picks E-017, builds the
  * suggestions with the same pure code, and diffs them against what the job already holds (nothing

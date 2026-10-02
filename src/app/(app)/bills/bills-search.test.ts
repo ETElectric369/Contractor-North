@@ -21,9 +21,9 @@ const row = (key: string, kind: BillsSearchRow["kind"], ...words: unknown[]): Bi
 const ROWS: BillsSearchRow[] = [
   row("bill:gas", "bill", "Corner Gas", moneyWords(64.1), "2026-09-10", "business cost", "Fuel", "settled paid"),
   row("bill:phone", "bill", "Phone Company", moneyWords(120), "business cost", "Phone & Office", "settled paid"),
-  row("bill:ticket", "bill", "8802-1107820", "Supply House", moneyWords(187.64), "on account unpaid", "J-028", "85 Whitney Place"),
-  row("po:1", "po", "po purchase order", "PO-001", "Supply House", moneyWords(412.5), "draft", "13897 Herringbone"),
-  row("file:1", "file", "file", "IMG_0412.jpg", "Receipt", "13897 Herringbone"),
+  row("bill:ticket", "bill", "8802-1107820", "Supply House", moneyWords(187.64), "on account unpaid", "J-028", "41 Larkspur Place"),
+  row("po:1", "po", "po purchase order", "PO-001", "Supply House", moneyWords(412.5), "draft", "13897 Honeysuckle"),
+  row("file:1", "file", "file", "IMG_0412.jpg", "Receipt", "13897 Honeysuckle"),
 ];
 
 describe("what All Bills keeps for a query", () => {
@@ -39,8 +39,8 @@ describe("what All Bills keeps for a query", () => {
 
   it("by number, street, job, supplier or money, every word on the row", () => {
     expect([...matchingKeys(ROWS, "1107820")!]).toEqual(["bill:ticket"]);
-    expect([...matchingKeys(ROWS, "whitney")!]).toEqual(["bill:ticket"]);
-    expect([...matchingKeys(ROWS, "herringbone")!]).toEqual(["po:1", "file:1"]);
+    expect([...matchingKeys(ROWS, "larkspur")!]).toEqual(["bill:ticket"]);
+    expect([...matchingKeys(ROWS, "honeysuckle")!]).toEqual(["po:1", "file:1"]);
     expect([...matchingKeys(ROWS, "supply house 412")!]).toEqual(["po:1"]);
     expect([...matchingKeys(ROWS, "$187.64")!]).toEqual(["bill:ticket"]);
     expect([...matchingKeys(ROWS, "unpaid")!]).toEqual(["bill:ticket"]);
@@ -49,7 +49,7 @@ describe("what All Bills keeps for a query", () => {
   });
 
   it("the dropdown's hits are the supplier's own papers only (they live on their cards)", () => {
-    const paper = row("paper:1", "paper", "8802-1107820", "85 WHITNEY");
+    const paper = row("paper:1", "paper", "8802-1107820", "41 LARKSPUR");
     expect(searchBills([...ROWS, paper].filter((r) => r.kind === "paper"), "1107820").hits.map((h) => h.key)).toEqual(["paper:1"]);
   });
 

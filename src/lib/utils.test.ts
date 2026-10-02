@@ -15,7 +15,7 @@ describe("formatCityStateZip — the one canonical 'City, ST ZIP'", () => {
 
 describe("formatFullAddress — 'Street, City, ST ZIP'", () => {
   it("prepends the street, comma-joined to the city/state/zip tail", () => {
-    expect(formatFullAddress("10244 Schaffer Rd", "Truckee", "CA", "96161")).toBe("10244 Schaffer Rd, Truckee, CA 96161");
+    expect(formatFullAddress("10244 Snowbell Rd", "Truckee", "CA", "96161")).toBe("10244 Snowbell Rd, Truckee, CA 96161");
   });
   it("with no street, is just the tail", () => {
     expect(formatFullAddress(null, "Truckee", "CA", "96161")).toBe("Truckee, CA 96161");

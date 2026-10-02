@@ -101,7 +101,7 @@ describe("planFifoTake: the take the database stamps, worked out for a preview",
     costLeft,
   });
 
-  it("Herringbone: 60 ft of the 8/19 coil ($180.17 for 250 ft) is $43.24, and the shelf keeps $136.93", () => {
+  it("Honeysuckle: 60 ft of the 8/19 coil ($180.17 for 250 ft) is $43.24, and the shelf keeps $136.93", () => {
     const plan = planFifoTake([lot("L819", "2026-08-19", 250, 180.17)], 60);
     expect(plan).toEqual({ takes: [{ lotId: "L819", qty: 60, cost: 43.24 }], short: 0, cost: 43.24 });
     expect(Math.round((180.17 - plan.cost) * 100) / 100).toBe(136.93);
@@ -170,7 +170,7 @@ describe("planFifoTake: the take the database stamps, worked out for a preview",
   });
 });
 
-/** Herringbone's 8/19 ticket, with the 12/2 coil at 0 used: the lot is $180.17. */
+/** Honeysuckle's 8/19 ticket, with the 12/2 coil at 0 used: the lot is $180.17. */
 const ticket = (): (BillLine & { id: string })[] => [
   { id: "a", description: "Flexbox BH bar hanger ground", quantity: 1, amount: 8.82, category: "Electrical" },
   { id: "b", description: "NMB 12/2 w/gnd wire 250 ft coil", quantity: 250, amount: 165.29, category: "Electrical", billed_amount: 0 },

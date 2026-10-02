@@ -625,7 +625,7 @@ export default async function TimecardsPage({
    *  THE PLAN-DRIFT HALF IS GONE (2026-09-24). It compared the job calendar to where the hours
    *  landed and listed "moved", "unplanned" and "no-show" days under the broken rows. Erik asked
    *  on 09-18 "Is this box accurate in any way that can help us", and on 09-23, three minutes after
-   *  fixing Brian's forgotten Herringbone shift by hand: "there's no way to fix it, I don't think
+   *  fixing Brian's forgotten Honeysuckle shift by hand: "there's no way to fix it, I don't think
    *  this is useful". He was right both times. A calendar edited after the fact produced findings
    *  that no row could act on: the hours were already on the job they were worked on, and the only
    *  thing "wrong" was a schedule nobody needs to rewrite. So the box shows the rows that have a
@@ -660,7 +660,7 @@ export default async function TimecardsPage({
   /* ── AND THE SHIFTS ON NO JOB, HOWEVER OLD (the duplicate punches, 2026-09-26) ──────────────
    *
    *  Brian's 9/11 clock punch landed on no job. Needs You dropped it after three days, this box never
-   *  listed it, and on 9/19 the office billing 85 Whitney typed the day again: the same hours, paid
+   *  listed it, and on 9/19 the office billing 41 Larkspur typed the day again: the same hours, paid
    *  twice. A shift on no job is hours nobody bills, so it stays here, in any week, until a person
    *  says what it was: Pick A Job (the row opens its editor) or Company Time (the company's own
    *  non-billable code). Needs You's Hours On No Job line opens this list (#no-job). */

@@ -3,7 +3,7 @@
  *
  * Erik: "Nort cant be giving examples that dont make sense like in the tour." Nort's own
  * instructions were the worst offender: every company's Nort was taught with ET's crew, jobs and
- * wire ("have Brian install the ground rod", "2 4S boxes at Apache", "30 feet of 10/3 romex"), and
+ * wire ("have Brian install the ground rod", "2 4S boxes at Acacia", "30 feet of 10/3 romex"), and
  * every company not pricing from a catalog was told to size its work by the electrical code.
  */
 import type { TradeKey } from "@/lib/features";

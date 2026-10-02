@@ -38,7 +38,7 @@ const ITEM = "11111111-1111-4111-8111-111111111111";
 const GROUP = "22222222-2222-4222-8222-222222222222";
 
 /** The caller's client, recording every filter the job read makes. */
-function member(staff: boolean, job: Record<string, unknown> | null = { id: JOB, job_number: "J-011", name: "Herringbone" }) {
+function member(staff: boolean, job: Record<string, unknown> | null = { id: JOB, job_number: "J-011", name: "Honeysuckle" }) {
   const filters: string[] = [];
   const builder: any = {
     select: () => builder,
@@ -82,7 +82,7 @@ describe("takeFromStockAction: a count in, never a price", () => {
   it("hands back counts and the plan's words, and never a cost, even the office's", async () => {
     member(true);
     const r = await takeFromStockAction({ itemId: ITEM, jobId: JOB, qty: 60 });
-    expect(r).toEqual({ ok: true, drawGroup: GROUP, item: "12/2 NM-B", unit: "ft", qty: 60, short: 0, onHand: 190, message: "Took 60 ft of 12/2 NM-B for Herringbone" });
+    expect(r).toEqual({ ok: true, drawGroup: GROUP, item: "12/2 NM-B", unit: "ft", qty: 60, short: 0, onHand: 190, message: "Took 60 ft of 12/2 NM-B for Honeysuckle" });
     expect(JSON.stringify(r)).not.toContain("43.24");
     expect(takeFromStock).toHaveBeenCalledWith({ itemId: ITEM, jobId: JOB, qty: 60, note: null, source: "office" });
   });
@@ -104,7 +104,7 @@ describe("takeFromStockAction: a count in, never a price", () => {
     await afterCalls[0]();
     expect(createNotifications).toHaveBeenCalledTimes(1);
     expect((createNotifications.mock.calls[0] as any[])[1]).toEqual(["boss-1"]);
-    expect((createNotifications.mock.calls[0] as any[])[2]).toMatchObject({ type: "stock_taken", title: "Brian took 60 ft of 12/2 NM-B for Herringbone", url: `/jobs/${JOB}?tab=materials` });
+    expect((createNotifications.mock.calls[0] as any[])[2]).toMatchObject({ type: "stock_taken", title: "Brian took 60 ft of 12/2 NM-B for Honeysuckle", url: `/jobs/${JOB}?tab=materials` });
     expect(sendPushToProfiles).toHaveBeenCalledTimes(1);
   });
 
@@ -112,11 +112,11 @@ describe("takeFromStockAction: a count in, never a price", () => {
     member(false);
     takeFromStock.mockResolvedValue({ ok: true, drawGroup: GROUP, item: "12/2 NM-B", unit: "ft", qty: 20, short: 15, onHand: -15 });
     const r = await takeFromStockAction({ itemId: ITEM, jobId: JOB, qty: 20 });
-    expect(r.ok && r.message).toBe("Took 20 ft of 12/2 NM-B for Herringbone. 15 ft more than stock shows — the office will settle it.");
+    expect(r.ok && r.message).toBe("Took 20 ft of 12/2 NM-B for Honeysuckle. 15 ft more than stock shows — the office will settle it.");
     await afterCalls[0]();
     expect((createNotifications.mock.calls[0] as any[])[2]).toMatchObject({
       title: "Brian took 20 ft of 12/2 NM-B, stock showed 5 ft",
-      body: "For Herringbone. File the roll on Shop Stock, then Settle From Stock — or Undo the take.",
+      body: "For Honeysuckle. File the roll on Shop Stock, then Settle From Stock — or Undo the take.",
       url: `/inventory?item=${ITEM}`, // opens on the item, where Settle From The Shelf is
     });
   });

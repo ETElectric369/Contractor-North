@@ -5,7 +5,7 @@ import { assertTestDatabase, notOnThisDatabase } from "@/lib/db-guard";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { quoteCircuitsToSuggestions } from "./panel/model";
-import { E017 } from "./panel/__fixtures__/herringbone";
+import { E017 } from "./panel/__fixtures__/honeysuckle";
 
 /**
  * Migration 0333 — THE JOB KNOWS ITS PANEL, exercised where the boundary lives.

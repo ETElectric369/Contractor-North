@@ -72,7 +72,7 @@ type TerminalPlugin = {
   cancelCollectPaymentMethod(): Promise<void>;
   /**
    * The stock plugin resolves with NOTHING — and, until the 2026-09-30 patch, resolved on any
-   * non-nil confirm result without reading the intent's status (Rich Seiler's $420: "approved"
+   * non-nil confirm result without reading the intent's status (Rich Siskin's $420: "approved"
    * on the phone, never charged). The patched Swift rejects unless the status is succeeded or
    * requires_capture, and answers `{ status: "succeeded" }`. An older shell build still answers
    * void: that is why the answer is optional, and why the sheet asks Stripe itself either way.
@@ -1741,7 +1741,7 @@ async function collectAttempt(p: TerminalPlugin, input: { clientSecret: string }
       }
       readerArmed = true;
       cancelBeforeReader = null;
-      // A NATIVE "FAILED" IS NEVER SWALLOWED (Rich Seiler, INV-083, 2026-09-30). The plugin
+      // A NATIVE "FAILED" IS NEVER SWALLOWED (Rich Siskin, INV-083, 2026-09-30). The plugin
       // tells its listeners about a failed collect or confirm AND rejects the call — but a
       // resolve is only "the bridge answered", and the stock Swift confirm resolved without ever
       // reading the intent's status. So the two verdict events are heard for the life of this

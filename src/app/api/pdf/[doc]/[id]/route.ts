@@ -37,8 +37,8 @@ const DOCS: Record<string, string> = {
 /** The one document the crew may print: the panel directory has no price, no supplier, no pay. */
 const MEMBER_DOCS = new Set(["panel"]);
 
-/** Friendly filename — the number and the street, "INV-080_235 Timbercreek.pdf" / "E-017_13897
- *  Herringbone.pdf" (Erik 2026-09-25; lib/doc-place). Never the customer's name. Shared by the
+/** Friendly filename — the number and the street, "INV-080_235 Thistlewood.pdf" / "E-017_13897
+ *  Honeysuckle.pdf" (Erik 2026-09-25; lib/doc-place). Never the customer's name. Shared by the
  *  stored-bytes and the fresh-render paths so the two can never disagree. */
 async function docFilename(supabase: Awaited<ReturnType<typeof createClient>>, doc: string, id: string): Promise<string> {
   let filename = `${doc}-${id.slice(0, 8)}.pdf`;
@@ -72,7 +72,7 @@ function pdfResponse(bytes: Uint8Array, filename: string) {
       "Content-Type": "application/pdf",
       // Quote/newline-strip: invoice_number is settable via a direct PostgREST PATCH, and a
       // raw quote or CRLF in a header value is a response-splitting primitive.
-      // ASCII fallback + RFC 5987 UTF-8 (audit: the Badger Lane em-dash killed the response).
+      // ASCII fallback + RFC 5987 UTF-8 (audit: the Bayberry Lane em-dash killed the response).
       "Content-Disposition": contentDisposition(filename),
       // no-store at the HTTP layer on purpose: the caching lives server-side, behind the
       // fingerprint check, where staleness is impossible. A browser-cached copy could go stale.

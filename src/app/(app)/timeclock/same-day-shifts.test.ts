@@ -37,7 +37,7 @@ const billed: DayShift = {
   clockOut: "2026-09-12T02:30:00Z",
   hours: 8.5,
   jobId: "j28",
-  jobLabel: "85 Whitney",
+  jobLabel: "41 Larkspur",
   jobCode: null,
   noJob: false,
   billedBy: "INV-081",
@@ -52,20 +52,20 @@ const render = (shifts: DayShift[], forJob: { id: string; label: string } | null
 
 describe("the day's shifts, above the form", () => {
   it("a punch on no job offers Put This On <the form's job>, with its own clock times", () => {
-    const html = render([punch], { id: "j28", label: "85 Whitney" });
+    const html = render([punch], { id: "j28", label: "41 Larkspur" });
     expect(html).toContain("Brian already has a shift on Fri, Sep 11");
     expect(html).toContain("10:31 AM to 6:57 PM · 8.43 h");
     expect(html).toContain("No job");
-    expect(html).toContain(">Put This On 85 Whitney</button>");
-    expect(html).toContain("Put it on 85 Whitney instead of adding the hours again.");
+    expect(html).toContain(">Put This On 41 Larkspur</button>");
+    expect(html).toContain("Put it on 41 Larkspur instead of adding the hours again.");
   });
 
   it("a punch STILL RUNNING on no job gets Put This On <job> too (putShiftOnJob takes an open row: 'running since … is on <job> now')", () => {
     const running: DayShift = { ...punch, id: "running", clockOut: null, hours: 0 };
-    const html = render([running], { id: "j28", label: "85 Whitney" });
+    const html = render([running], { id: "j28", label: "41 Larkspur" });
     expect(html).toContain("since 10:31 AM, still on the clock");
     expect(html).toContain("No job");
-    expect(html).toContain(">Put This On 85 Whitney</button>");
+    expect(html).toContain(">Put This On 41 Larkspur</button>");
     // The server marks it the door's kind whether it is closed or still running.
     const actions = readFileSync(new URL("./actions.ts", import.meta.url), "utf8");
     expect(actions).toContain("noJob: !r.job_id && !code,");
@@ -83,23 +83,23 @@ describe("the day's shifts, above the form", () => {
   });
 
   it("a day the office marked this person off says so, with or without shifts on it", () => {
-    expect(render([], { id: "j28", label: "85 Whitney" }, true)).toContain("Marked off that day on the schedule.");
-    const withShift = render([billed], { id: "j28", label: "85 Whitney" }, true);
+    expect(render([], { id: "j28", label: "41 Larkspur" }, true)).toContain("Marked off that day on the schedule.");
+    const withShift = render([billed], { id: "j28", label: "41 Larkspur" }, true);
     expect(withShift).toContain("Marked off that day on the schedule.");
-    expect(withShift).toContain("85 Whitney · on INV-081");
-    expect(render([billed], { id: "j28", label: "85 Whitney" })).not.toContain("Marked off");
+    expect(withShift).toContain("41 Larkspur · on INV-081");
+    expect(render([billed], { id: "j28", label: "41 Larkspur" })).not.toContain("Marked off");
   });
 
   it("a shift already on a job (and billed) is named with its job and invoice, and opens on Timecards", () => {
-    const html = render([billed], { id: "j28", label: "85 Whitney" });
-    expect(html).toContain("85 Whitney · on INV-081");
+    const html = render([billed], { id: "j28", label: "41 Larkspur" });
+    expect(html).toContain("41 Larkspur · on INV-081");
     expect(html).not.toContain("Put This On");
     expect(html).toContain("Open That Shift");
     expect(html).toContain("Hours that overlap these would be counted twice.");
   });
 
   it("an empty day renders nothing at all", () => {
-    expect(render([], { id: "j28", label: "85 Whitney" })).toBe("");
+    expect(render([], { id: "j28", label: "41 Larkspur" })).toBe("");
   });
 });
 
@@ -162,6 +162,6 @@ describe("one tap, one entry", () => {
     expect(src("./same-day-shifts.tsx")).toMatch(/href=\{`\/timecards\?entry=\$\{s\.id\}`\}\s*onClick=\{\(\) => onOpenShift\?\.\(s\)\}/);
   });
   it("the door is an outline button, never a second primary beside the form's own", () => {
-    expect(render([punch], { id: "j28", label: "85 Whitney" })).toMatch(/<button[^>]*class="[^"]*border-slate-300[^"]*"[^>]*>Put This On 85 Whitney<\/button>/);
+    expect(render([punch], { id: "j28", label: "41 Larkspur" })).toMatch(/<button[^>]*class="[^"]*border-slate-300[^"]*"[^>]*>Put This On 41 Larkspur<\/button>/);
   });
 });

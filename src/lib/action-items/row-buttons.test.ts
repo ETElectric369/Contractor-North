@@ -77,10 +77,10 @@ describe("the table", () => {
     for (const d of rowButtons(row("job_to_schedule"), staff).more.filter((x) => x.label !== "Assign")) expect(d.act.type).toBe("confirm");
   });
 
-  it("a draft whose job is finished ('Herringbone · J-011 Finished · Send INV-078') has no Set Aside Until…: it waits on nothing", () => {
+  it("a draft whose job is finished ('Honeysuckle · J-011 Finished · Send INV-078') has no Set Aside Until…: it waits on nothing", () => {
     // The build leaves snooze off a draft whose job is complete or cancelled (draftInvoiceState):
     // a day written there would put it straight back on top, so the door would be a dead end.
-    const finished = rowButtons(row("invoice_draft", { title: "Herringbone · J-011 Finished · Send INV-078", affordances: AFFORDANCES.invoice_draft.filter((v) => v !== "snooze") }), staff);
+    const finished = rowButtons(row("invoice_draft", { title: "Honeysuckle · J-011 Finished · Send INV-078", affordances: AFFORDANCES.invoice_draft.filter((v) => v !== "snooze") }), staff);
     expect(finished.primary?.label).toBe("Send It");
     expect(labels(finished.more)).toEqual([]);
     expect(allDoors(rowButtons(row("invoice_draft", { affordances: ["open"] }), staff)).map((d) => d.label)).not.toContain("Set Aside Until…");

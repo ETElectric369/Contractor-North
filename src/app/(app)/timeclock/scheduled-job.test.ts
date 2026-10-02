@@ -176,42 +176,42 @@ describe("scheduledJobFor: a rostered job whose days cover the date", () => {
   });
 
   it("A GAP DAY IS NOT A JOB DAY: a job booked day 1 and day 3 is not on day 2, and on day 2 the job booked that day wins", async () => {
-    // Herringbone: 9/18, 9/22 and 9/24 (Add To Schedule), its window mirrored 9/18 8 AM to 9/24 4 PM.
-    // Seiler: one day, 9/23 at 10 AM. Brian is on both crews.
-    const herringbone = { id: "herringbone", scheduled_start: "2026-09-18T15:00:00Z", scheduled_end: "2026-09-24T23:00:00Z" };
-    const seiler = { id: "seiler", scheduled_start: "2026-09-23T17:00:00Z", scheduled_end: "2026-09-23T19:00:00Z" };
+    // Honeysuckle: 9/18, 9/22 and 9/24 (Add To Schedule), its window mirrored 9/18 8 AM to 9/24 4 PM.
+    // Siskin: one day, 9/23 at 10 AM. Brian is on both crews.
+    const honeysuckle = { id: "honeysuckle", scheduled_start: "2026-09-18T15:00:00Z", scheduled_end: "2026-09-24T23:00:00Z" };
+    const siskin = { id: "siskin", scheduled_start: "2026-09-23T17:00:00Z", scheduled_end: "2026-09-23T19:00:00Z" };
     const segments = [
-      { job_id: "herringbone", start_date: "2026-09-18", end_date: "2026-09-18" },
-      { job_id: "herringbone", start_date: "2026-09-22", end_date: "2026-09-22" },
-      { job_id: "herringbone", start_date: "2026-09-24", end_date: "2026-09-24" },
-      { job_id: "seiler", start_date: "2026-09-23", end_date: "2026-09-23" },
+      { job_id: "honeysuckle", start_date: "2026-09-18", end_date: "2026-09-18" },
+      { job_id: "honeysuckle", start_date: "2026-09-22", end_date: "2026-09-22" },
+      { job_id: "honeysuckle", start_date: "2026-09-24", end_date: "2026-09-24" },
+      { job_id: "siskin", start_date: "2026-09-23", end_date: "2026-09-23" },
     ];
-    const sb = fakeSupabase(planRoutes({ roster: [herringbone, seiler], segments }), calls);
+    const sb = fakeSupabase(planRoutes({ roster: [honeysuckle, siskin], segments }), calls);
     // Day 2 of the gap: the job actually booked that day, not the older multi-day one.
-    expect(await scheduledJobFor(sb as any, "brian-1", "2026-09-23", TZ)).toEqual({ off: false, jobId: "seiler" });
-    // A pure gap day, nothing else booked: nothing, not Herringbone.
+    expect(await scheduledJobFor(sb as any, "brian-1", "2026-09-23", TZ)).toEqual({ off: false, jobId: "siskin" });
+    // A pure gap day, nothing else booked: nothing, not Honeysuckle.
     expect(await scheduledJobFor(sb as any, "brian-1", "2026-09-21", TZ)).toEqual(NOTHING_SCHEDULED);
     // Its booked days are still its own.
-    expect(await scheduledJobFor(sb as any, "brian-1", "2026-09-22", TZ)).toEqual({ off: false, jobId: "herringbone" });
-    expect(await scheduledJobFor(sb as any, "brian-1", "2026-09-24", TZ)).toEqual({ off: false, jobId: "herringbone" });
+    expect(await scheduledJobFor(sb as any, "brian-1", "2026-09-22", TZ)).toEqual({ off: false, jobId: "honeysuckle" });
+    expect(await scheduledJobFor(sb as any, "brian-1", "2026-09-24", TZ)).toEqual({ off: false, jobId: "honeysuckle" });
   });
 
   it("the window still answers for a job with no segment rows beside one that has them", async () => {
-    // Seiler has no day rows (an old one-day booking): its own window puts it on 9/23.
+    // Siskin has no day rows (an old one-day booking): its own window puts it on 9/23.
     const sb = fakeSupabase(
       planRoutes({
         roster: [
-          { id: "herringbone", scheduled_start: "2026-09-18T15:00:00Z", scheduled_end: "2026-09-24T23:00:00Z" },
-          { id: "seiler", scheduled_start: "2026-09-23T17:00:00Z", scheduled_end: null },
+          { id: "honeysuckle", scheduled_start: "2026-09-18T15:00:00Z", scheduled_end: "2026-09-24T23:00:00Z" },
+          { id: "siskin", scheduled_start: "2026-09-23T17:00:00Z", scheduled_end: null },
         ],
         segments: [
-          { job_id: "herringbone", start_date: "2026-09-18", end_date: "2026-09-18" },
-          { job_id: "herringbone", start_date: "2026-09-24", end_date: "2026-09-24" },
+          { job_id: "honeysuckle", start_date: "2026-09-18", end_date: "2026-09-18" },
+          { job_id: "honeysuckle", start_date: "2026-09-24", end_date: "2026-09-24" },
         ],
       }),
       calls,
     );
-    expect(await scheduledJobFor(sb as any, "brian-1", "2026-09-23", TZ)).toEqual({ off: false, jobId: "seiler" });
+    expect(await scheduledJobFor(sb as any, "brian-1", "2026-09-23", TZ)).toEqual({ off: false, jobId: "siskin" });
   });
 
   it("AN EVENING START STAYS ON ITS OWN COMPANY DAY: booked Tuesday 6 PM, it is Tuesday's, not Wednesday's", async () => {
@@ -325,24 +325,24 @@ describe("the clock resolves exactly as before (resolveTechJobToday, through a j
   it("no day row: a gap between a job's booked days is not today, so the punch lands on the job booked today", async () => {
     const { jobId } = await punch({
       roster: [
-        { id: "herringbone", scheduled_start: "2026-09-18T15:00:00Z", scheduled_end: "2026-09-24T23:00:00Z" },
-        { id: "seiler", scheduled_start: "2026-09-23T17:00:00Z", scheduled_end: "2026-09-23T19:00:00Z" },
+        { id: "honeysuckle", scheduled_start: "2026-09-18T15:00:00Z", scheduled_end: "2026-09-24T23:00:00Z" },
+        { id: "siskin", scheduled_start: "2026-09-23T17:00:00Z", scheduled_end: "2026-09-23T19:00:00Z" },
       ],
       segments: [
-        { job_id: "herringbone", start_date: "2026-09-22", end_date: "2026-09-22" },
-        { job_id: "herringbone", start_date: "2026-09-24", end_date: "2026-09-24" },
-        { job_id: "seiler", start_date: "2026-09-23", end_date: "2026-09-23" },
+        { job_id: "honeysuckle", start_date: "2026-09-22", end_date: "2026-09-22" },
+        { job_id: "honeysuckle", start_date: "2026-09-24", end_date: "2026-09-24" },
+        { job_id: "siskin", start_date: "2026-09-23", end_date: "2026-09-23" },
       ],
     });
-    expect(jobId).toBe("seiler");
+    expect(jobId).toBe("siskin");
   });
 
   it("no day row: a segment covering today", async () => {
     const { jobId } = await punch({
-      roster: [{ id: "tanager", scheduled_start: "2026-09-01T15:00:00Z", scheduled_end: "2026-09-30T00:00:00Z" }],
-      segments: [{ job_id: "tanager", start_date: "2026-09-23", end_date: "2026-09-23" }],
+      roster: [{ id: "tupelo", scheduled_start: "2026-09-01T15:00:00Z", scheduled_end: "2026-09-30T00:00:00Z" }],
+      segments: [{ job_id: "tupelo", start_date: "2026-09-23", end_date: "2026-09-23" }],
     });
-    expect(jobId).toBe("tanager");
+    expect(jobId).toBe("tupelo");
   });
 
   it("nothing scheduled: the org's only job in progress (tier 2, the clock's alone)", async () => {

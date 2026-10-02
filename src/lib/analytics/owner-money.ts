@@ -1427,7 +1427,7 @@ export function supplierDocCoverage(docs: any[], bills: any[], identity?: Readon
 
 /**
  * Supplier credit memos and service charges that NO bill covers. Once a bill covers a document it
- * is already in Materials & Bills as that bill (a credit memo as a negative bill, the 518 Crater
+ * is already in Materials & Bills as that bill (a credit memo as a negative bill, the 518 Cinder
  * Lake correction), so it must not also be named as "not counted". With the live bills, coverage
  * is supplierDocCoverage's (links and carried numbers, the reading the "Counted" figure uses);
  * without them, a document with any link is covered.

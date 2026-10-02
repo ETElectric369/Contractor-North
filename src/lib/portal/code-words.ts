@@ -30,7 +30,7 @@ export function normalizeCode(input: unknown): string | null {
 }
 
 /**
- * "mcpowder@comcast.net" → "m*******@comcast.net". Enough for the customer to know which inbox to
+ * "redfinch@comcast.net" → "r*******@comcast.net". Enough for the customer to know which inbox to
  * look in, not enough to read the address off the screen. The first letter stays, every other
  * letter of the name becomes a star (at least 3, so a short name doesn't give its length away), and
  * the domain stays whole. Not an email shape: null (the page says to ask the business).

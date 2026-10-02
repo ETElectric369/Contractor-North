@@ -5,7 +5,7 @@ const LA = "America/Los_Angeles";
 const tom: LinkCandidateRow = {
   id: "78fa75b1-8384-4148-8895-242846abcce5",
   title: "Walk-Through: Tom Goodman",
-  location: "3245 W. Lake Blvd, Homewood, CA 96141",
+  location: "3245 W. Garnet Blvd, Homewood, CA 96141",
   starts_at: "2026-09-25T17:00:00.000Z",
 };
 const other: LinkCandidateRow = { id: "a", title: "Panel swap — Rita Moss", location: "12 Pine St", starts_at: "2026-09-26T16:00:00Z" };
@@ -19,7 +19,7 @@ describe("matchLinkOffers — the visit Nort just booked for the customer it jus
   it("matches on the street address when the title doesn't name them", () => {
     // The stock title of a walk-through with nobody named yet (W2-10's one word).
     const untitled = { ...tom, title: "Walk-Through" };
-    expect(matchLinkOffers([untitled], { name: "Thomas Goodman", address: "3245 W. Lake Blvd" }, LA)).toHaveLength(1);
+    expect(matchLinkOffers([untitled], { name: "Thomas Goodman", address: "3245 W. Garnet Blvd" }, LA)).toHaveLength(1);
   });
 
   it("a partial name (one shared word) is not a match", () => {
@@ -27,7 +27,7 @@ describe("matchLinkOffers — the visit Nort just booked for the customer it jus
   });
 
   it("nothing that names them, no offer", () => {
-    expect(matchLinkOffers([other], { name: "Tom Goodman", address: "3245 W. Lake Blvd" }, LA)).toEqual([]);
+    expect(matchLinkOffers([other], { name: "Tom Goodman", address: "3245 W. Garnet Blvd" }, LA)).toEqual([]);
   });
 });
 
@@ -97,19 +97,19 @@ describe("autoLinkPick — link now only when it can't be anyone else's visit", 
 
   it("a place alone is a guess: offered, never linked", () => {
     const untitled = { ...tom, title: "Walk-Through" };
-    expect(autoLinkPick([untitled], { name: "Thomas Goodman", address: "3245 W. Lake Blvd" })).toBeNull();
-    expect(matchLinkOffers([untitled], { name: "Thomas Goodman", address: "3245 W. Lake Blvd" }, LA)).toHaveLength(1);
+    expect(autoLinkPick([untitled], { name: "Thomas Goodman", address: "3245 W. Garnet Blvd" })).toBeNull();
+    expect(matchLinkOffers([untitled], { name: "Thomas Goodman", address: "3245 W. Garnet Blvd" }, LA)).toHaveLength(1);
   });
 
   it("the same name at a different address: offered, never linked; the same address or none given: linked", () => {
     expect(autoLinkPick([tom], { name: "Tom Goodman", address: "88 Other Rd" })).toBeNull();
-    expect(autoLinkPick([tom], { name: "Tom Goodman", address: "3245 W. Lake Blvd" })?.id).toBe(tom.id);
+    expect(autoLinkPick([tom], { name: "Tom Goodman", address: "3245 W. Garnet Blvd" })?.id).toBe(tom.id);
     expect(autoLinkPick([{ ...tom, location: null }], { name: "Tom Goodman", address: "88 Other Rd" })?.id).toBe(tom.id);
   });
 
   it("a name match plus another visit at their address: two candidates, so it asks", () => {
-    const atHome = { ...other, id: "c", location: "3245 W. Lake Blvd" };
-    expect(autoLinkPick([tom, atHome], { name: "Tom Goodman", address: "3245 W. Lake Blvd" })).toBeNull();
+    const atHome = { ...other, id: "c", location: "3245 W. Garnet Blvd" };
+    expect(autoLinkPick([tom, atHome], { name: "Tom Goodman", address: "3245 W. Garnet Blvd" })).toBeNull();
   });
 
   it("a partial name is no match at all", () => {

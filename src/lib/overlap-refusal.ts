@@ -182,7 +182,7 @@ export async function findOverlap(
   // An open shift has no finish to name, so it gets its start instead of a made-up one, and WHERE it
   // is running (the job's street name, its code, or no job): what the office sees on the form. The
   // way out is said as the one move it is (Erik, 2026-09-29, Brian's running punch while adding his
-  // hours on 700 North Lake Boulevard): clock him out at the time he left, then save. The form that
+  // hours on 700 North Juniper Boulevard): clock him out at the time he left, then save. The form that
   // got refused carries the door itself (Add Time Entry's Clock Out <Name>), so the sentence never
   // sends anyone to another page.
   const startedAt = shiftWhen(clash.clock_in, clash.clock_in, tz).split(" to ")[0];
@@ -195,7 +195,7 @@ export async function findOverlap(
     };
   }
   const when = shiftWhen(clash.clock_in, clash.clock_out, tz);
-  // A punch with NO JOB is the 85 Whitney case: the hours are real and already recorded, they are
+  // A punch with NO JOB is the 41 Larkspur case: the hours are real and already recorded, they are
   // just not on the job. On Add Entry, where the door is, the move is to put that punch on the job,
   // not to type them again; only there, and only while no invoice bills it (putOnJobIf).
   let putOnJob = false;

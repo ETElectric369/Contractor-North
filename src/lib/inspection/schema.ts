@@ -148,7 +148,7 @@ export function coerceAnswers(fields: InspectionField[], input: unknown): Inspec
         //
         // Erik, from the field: "i did notice the permit spot was gone." It was. The question left
         // his screen the instant he tapped anything (see unansweredFields), and this line then
-        // wrote `false` behind it — recording NO PERMIT on 13125 Moraine Rd, a storage room being
+        // wrote `false` behind it — recording NO PERMIT on 13125 Mayfern Rd, a storage room being
         // converted to living space. His own correction sharpens why that mattered: he isn't the
         // one pulling it. The homeowner is pulling an occupancy permit, which means the work gets
         // INSPECTED BEFORE COVER — a rough-in hold point and a second trip. Stored as "no", that
@@ -269,7 +269,7 @@ export function unansweredFields(fields: InspectionField[], answers: InspectionA
     // keystroke — `answers[key] ?? null` — so after the first tap anywhere on the sheet no key is
     // `undefined` any more. This test therefore went false for every checkbox the instant the
     // sheet was touched, and the question silently left the still-open list having never been
-    // asked. On a real job (13125 Moraine Rd, a storage room being converted to living space) it
+    // asked. On a real job (13125 Mayfern Rd, a storage room being converted to living space) it
     // ate `permit` — recorded as unchecked, i.e. NO PERMIT, on a job pulling one for occupancy.
     // The two most consequential facts on the job, gone without a mark on the screen.
     if (f.type === "checkbox") return v === undefined || v === null;

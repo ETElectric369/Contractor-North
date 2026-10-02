@@ -313,7 +313,7 @@ describe("SW4: the office's Clock Out on a shift that was switched meanwhile", (
     notes: null,
     paid_at: null,
     profiles: { full_name: "Brian Taylor" },
-    job: { job_number: "J-011", name: "Herringbone" },
+    job: { job_number: "J-011", name: "Honeysuckle" },
   };
   const routes = (row: any, updated: any[] = [{ id: LIVE }]) => (q: Q): Reply => {
     if (q.table === "organizations") return ORG_TZ;
@@ -323,7 +323,7 @@ describe("SW4: the office's Clock Out on a shift that was switched meanwhile", (
     // as the database would: a fresh clock-in carries no split_from.
     if (q.table === "time_entries" && q.verb === "select" && q.cols.startsWith("id, clock_in, job_code"))
       return q.filters.some((f) => f[0] === "eq" && f[1] === "split_from" && f[2] === LIVE)
-        ? { data: { id: NEXT, clock_in: ago(0.1), job_code: null, job: { job_number: "J-012", name: "Rhodesia" } } }
+        ? { data: { id: NEXT, clock_in: ago(0.1), job_code: null, job: { job_number: "J-012", name: "Fernhill" } } }
         : { data: null };
     if (q.table === "time_entries" && q.verb === "select") return { data: [] };
     if (q.table === "time_entries" && q.verb === "update") return { data: updated };
@@ -335,7 +335,7 @@ describe("SW4: the office's Clock Out on a shift that was switched meanwhile", (
     const r = await stopShift({ entry_id: LIVE, clock_out: ago(0.5), lunch_minutes: 0 });
     expect(r.ok).toBe(false);
     expect(r.still_open_entry_id).toBe(NEXT);
-    expect(r.error).toMatch(/^Brian switched to Rhodesia at .+ and is still on the clock\. Nothing was changed\. Open that shift to Clock Out Brian\.$/);
+    expect(r.error).toMatch(/^Brian switched to Fernhill at .+ and is still on the clock\. Nothing was changed\. Open that shift to Clock Out Brian\.$/);
     expect(calls.some((c) => c.verb === "update")).toBe(false);
     const look = calls.find((c) => c.cols.startsWith("id, clock_in, job_code"))!;
     expect(look.filters).toEqual(

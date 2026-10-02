@@ -4,7 +4,7 @@ import { describeGbpChanges, diffGbp, studioInstructionFor, type GbpSnapshot } f
 const snap = (over: Partial<GbpSnapshot> = {}): GbpSnapshot => ({
   placeId: "places/X",
   displayName: "ET Electric",
-  nationalPhoneNumber: "(530) 933-6686",
+  nationalPhoneNumber: "(530) 555-0133",
   websiteUri: "https://etelectricity.com",
   primaryType: "Electrician",
   hours: ["Monday: 8 AM–5 PM", "Tuesday: 8 AM–5 PM"],
@@ -27,7 +27,7 @@ describe("diffGbp — the nightly listing watch", () => {
   it("a phone change is WIRING — the site should just match it", () => {
     const d = diffGbp(snap(), snap({ nationalPhoneNumber: "(530) 555-0000" }));
     expect(d).toHaveLength(1);
-    expect(d[0]).toMatchObject({ field: "nationalPhoneNumber", kind: "wiring", from: "(530) 933-6686", to: "(530) 555-0000" });
+    expect(d[0]).toMatchObject({ field: "nationalPhoneNumber", kind: "wiring", from: "(530) 555-0133", to: "(530) 555-0000" });
   });
 
   it("a name or category change is COPY — a person decides what the page should say", () => {
