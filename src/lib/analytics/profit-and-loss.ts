@@ -1,5 +1,5 @@
 import { BUCKET_SECTION, bucketsIn, type BusinessCostBucket } from "@/lib/business-cost-buckets";
-import { PNL_SECTION_SHAPE, type PnlKind, type PnlNetting, type PnlSection } from "@/lib/analytics/pnl-shape";
+import { isSubtracted, type PnlKind, type PnlNetting, type PnlSection } from "@/lib/analytics/pnl-shape";
 import type { OwnerMoneyCostTarget, OwnerMoneyFigures } from "@/lib/analytics/owner-money";
 
 export { PNL_KINDS, PNL_KIND_SHAPE, PNL_SECTIONS, PNL_SECTION_SHAPE, isBelowNetProfit, isSubtracted } from "@/lib/analytics/pnl-shape";
@@ -348,8 +348,7 @@ export function pnlLines(opts: PnlOptions = {}): PnlLine[] {
   // file: a line in a section the shape calls `subtracted: false` (equity) contributes nothing to any
   // total even if somebody puts it in one of these arrays. That is the difference between a comment
   // saying "never sum the draw" and a bottom line that cannot be off by it.
-  const sum = (list: Def[]) => (f: PnlFigures) =>
-    list.reduce((s, d) => s + (PNL_SECTION_SHAPE[d.section ?? "cogs"].subtracted ? (d.cents?.(f) ?? 0) : 0), 0);
+  const sum = (list: Def[]) => (f: PnlFigures) => list.reduce((s, d) => s + (isSubtracted(d.section) ? (d.cents?.(f) ?? 0) : 0), 0);
   const totalCogs = sum(cogs);
   const totalOverhead = sum(overhead);
   const revenue = (f: PnlFigures) => pnlCents(f.received);
