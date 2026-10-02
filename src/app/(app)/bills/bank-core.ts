@@ -22,6 +22,7 @@ import {
   choiceId,
   groupTitle,
   inPayWindow,
+  JOB_REFUND_NEXT,
   learnableAnswer,
   namesOf,
   PAY_WINDOW,
@@ -52,6 +53,9 @@ import { OWNER_SORTS_BANK, viewerSortsBank } from "@/lib/bank-viewer";
 // THE ONE JOB-LABEL HELPER: the place, the number and who ("41 Larkspur · J-054 — A. Customer"), for
 // a picker read away from the job itself. Erik: "i cant tell by job numbers alone".
 import { jobSaidLabel } from "@/lib/job-pick-label";
+// THE RULE EVERY DOOR THAT PUTS A COST ON A JOB IS HELD TO (audit v994's DB4): a lineless return on a
+// job credits the customer the whole amount, so this door asks before it writes one.
+import { jobCostRefusal } from "@/lib/job-cost-guard";
 import { customerNamePart } from "@/lib/schedule-options";
 
 /**
@@ -672,13 +676,19 @@ export async function applyBankCore(
    * or the unwrite here only one of the two would get the fix.
    *
    * A bill is the line turned round: money OUT is a paid cost, money IN is a refund of one — the same
-   * bucket or the same job with a negative amount (a return, a supplier's credit), so what it was
-   * charged to comes down by it. A line whose bill did not land comes off again (unwrite), so the next
-   * look at the download asks about it instead of counting it as sorted.
+   * bucket with a negative amount (a return, a store's credit), so what it was charged to comes down by
+   * it. A line whose bill did not land comes off again (unwrite), so the next look at the download asks
+   * about it instead of counting it as sorted.
+   *
+   * THE COST GUARD IS ASKED HERE, AT THE WRITE (lib/job-cost-guard, audit v994's DB4). A bank line
+   * carries no lines, so a NEGATIVE bill on a job would be a lineless supplier return and the importer
+   * would credit the customer the whole amount at markup. The card offers no job on money in and
+   * validPicks refuses one (jobRefusalFor) — this is the teeth behind both, so no later answer, rule or
+   * screen can hand this function a job row of the wrong sign and have it written anyway.
    */
   const writeBills = async (ws: Work[], what: { one: string; many: string }) => {
     if (!ws.length) return;
-    const rows = ws.map((w) => ({
+    const all = ws.map((w) => ({
       org_id: who.orgId,
       supplier: w.line.description.slice(0, 120),
       bill_number: w.line.check ? `Check ${w.line.check}` : null,
@@ -692,6 +702,17 @@ export async function applyBankCore(
       // bucket and no job. Undo reads the same function to know this bill is still the one it wrote.
       ...billPlacement(storedAnswer(w.choice)),
     }));
+    const stopped = new Map<Work, string>();
+    ws.forEach((w, i) => {
+      const why = jobCostRefusal({ jobId: all[i].job_id, amount: all[i].amount, lines: [] }, JOB_REFUND_NEXT);
+      if (why) stopped.set(w, why);
+    });
+    if (stopped.size) {
+      // SAID OUT LOUD, never dropped quietly: the lines come back off, the reason is the guard's, and
+      // the next look at the download asks about them again.
+      await unwrite([...stopped.keys()].map((w) => w.line.key), `${stopped.size} ${stopped.size === 1 ? "line wasn't" : "lines weren't"} put on a job. ${[...stopped.values()][0]}`);
+    }
+    const rows = all.filter((_, i) => !stopped.has(ws[i]));
     for (const part of chunks(rows, 200)) {
       const { data, error } = await supabase.from("bills").insert(part).select("id, bank_line_id");
       const got = new Set(((data ?? []) as { bank_line_id: string }[]).map((r) => String(r.bank_line_id)));

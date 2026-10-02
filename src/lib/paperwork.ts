@@ -1405,12 +1405,23 @@ export function findSameNumber(
 }
 
 /**
- * THE SAME PURCHASE, WRITTEN BY A BANK DOWNLOAD (2026-09-27). A bank line placed as a business cost
- * becomes a no-job bill with no number (the bank prints none), so the number check above can never
- * find it: a pump receipt snapped after the download filed that fill-up a second time. A receipt or
- * bill of the SAME MONEY, dated within 3 days of a bill a bank download wrote, is that bill (a
- * "bill" match: Same Purchase: Tie Them, or Different Purchase: File It Anyway). The reverse order,
- * the receipt first, is the bank download's own match.
+ * THE SAME PURCHASE, WRITTEN BY A BANK DOWNLOAD (2026-09-27). A bank line becomes a bill with no
+ * number (the bank prints none), so the number check above can never find it: a pump receipt snapped
+ * after the download filed that fill-up a second time. A receipt or bill of the SAME MONEY, dated
+ * within 3 days of a bill a bank download wrote, is that bill (a "bill" match: Same Purchase: Tie
+ * Them, or Different Purchase: File It Anyway). The reverse order, the receipt first, is the bank
+ * download's own match.
+ *
+ * A BANK LINE ON A JOB IS ONE OF THEM (0375). This read once said "a bank line is always a business
+ * cost" and skipped every bill with a job. The day a line could be put on the job it was bought for,
+ * that skip let the counter receipt for that very purchase through: File It found nothing, offered no
+ * tie, and wrote a SECOND bill on the same job. The job cost doubled, and on a time-and-material job
+ * the Unbilled card billed the customer for it twice — the incident same-purchase.ts was written
+ * about. So a bill the BANK wrote counts whether or not it is on a job.
+ *
+ * A JOB'S BILL WRITTEN ANY OTHER WAY DOES NOT, and that is not the same rule twisted: a hand-filed
+ * job cost carries its printed number, which findSameNumber matches exactly, and matching a job's
+ * cost on money and day alone would tie two different trips to the supply house for the same $120.
  *
  * NOT ONLY THE BANK DOOR'S (review of release/v1026): a business cost with no job and no number
  * written any other way (Add By Hand, or a company's fill-ups loaded by hand from a bank
@@ -1430,21 +1441,27 @@ export function sameMoneyFromBank(item: PaperItem, bankBills: readonly BookedBil
     .filter(
       (b) =>
         b.id !== item.bill_id &&
-        !b.job_id &&
+        (b.from_bank === true || !b.job_id) &&
         !b.superseded_by_bill_id &&
         !already.some((m) => (m.kind === "bill" || m.kind === "maybe_bill") && m.billId === b.id) &&
         Math.round(Number(b.amount) * 100) === cents &&
         !!b.bill_date &&
         apart(String(b.bill_date).slice(0, 10), day) <= 3,
     )
-    .map((b) => ({
-      kind: "bill" as const,
-      billId: b.id,
-      jobId: null,
-      sentence: b.from_bank
-        ? `Already on the books: ${b.supplier ?? "a bank line"}, ${money(amount)}, ${b.bill_date}, from the bank download (a business cost).`
-        : `Already on the books: ${b.supplier ?? "a business cost"}, ${money(amount)}, ${b.bill_date}, a business cost with no number.`,
-    }));
+    .map((b) => {
+      // The job said as a person reads one, the same reading findSameNumber uses: never a bare number.
+      const job = b.jobs?.job_number ? `${b.jobs.job_number}${b.jobs.name ? ` ${b.jobs.name}` : ""}` : b.job_id ? "a job" : null;
+      return {
+        kind: "bill" as const,
+        billId: b.id,
+        // THE JOB COMES WITH THE TIE: Same Purchase: Tie Them files the paper against this bill and
+        // onto this bill's job (tiePaperwork writes hit.jobId), so a null here would drop the job.
+        jobId: b.job_id ?? null,
+        sentence: b.from_bank
+          ? `Already on the books: ${b.supplier ?? "a bank line"}, ${money(amount)}, ${b.bill_date}, from the bank download${job ? `, on ${job}` : " (a business cost)"}.`
+          : `Already on the books: ${b.supplier ?? "a business cost"}, ${money(amount)}, ${b.bill_date}, a business cost with no number.`,
+      };
+    });
 }
 
 /**

@@ -159,10 +159,11 @@ function Row({
 }
 
 /**
- * THE Other… LIST A ROW GETS. A row that is ONE line gets the longer list, both ways: the answers that
- * go on one thing — an invoice, and a job (0375) — are offered only where there is one line to put on
- * it. A row holding several of a merchant's lines gets the shared list, with neither in it. A deposit
- * brings its own list (the invoices open for at least its money, said in full).
+ * THE Other… LIST A ROW GETS. A row that is ONE line gets the longer list: the answers that go on one
+ * thing — an invoice coming in, a job going out (0375) — are offered only where there is one line to
+ * put on it. A row holding several of a merchant's lines gets the shared list, with neither in it. A
+ * deposit brings its own list (the invoices open for at least its money, said in full, and never a
+ * job: a credit on a job with no lines would credit the customer the whole amount).
  */
 export function othersFor(
   row: Pick<BankRowView, "direction" | "single" | "others">,

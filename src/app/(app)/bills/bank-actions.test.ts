@@ -22,6 +22,8 @@ vi.mock("next/navigation", () => ({ redirect: vi.fn() }));
 vi.mock("@/lib/observe", () => ({ reportError: () => {} }));
 vi.mock("@/lib/pdf-cache", () => ({ bustDocPdf: vi.fn(async () => {}), warmDocPdf: vi.fn(async () => {}) }));
 
+// The cost guard's own sentence: a refusal here must BE it, never a second wording of the same rule.
+import { RETURN_ON_JOB_WHY } from "@/lib/job-cost-guard";
 import { addOpenList } from "./open-list-actions";
 import { applyBankDownload, forgetBankRule, setBankAccount, swapBankDownload, undoBankDownload } from "./bank-actions";
 import { applyBankCore, bankLinesStayHere, bankViews, BANK_NEEDS_UPDATE } from "./bank-core";
@@ -64,6 +66,11 @@ function fakeDb() {
         if (cols.includes("customers(")) {
           const c = (db.customers ?? []).find((x) => x.id === r.customer_id);
           out.customers = c ? { name: c.name ?? null, company_name: c.company_name ?? null } : null;
+        }
+        // The job a row names, for the readers that say which job in words (the same-purchase check).
+        if (cols.includes("jobs(")) {
+          const j = (db.jobs ?? []).find((x) => x.id === r.job_id);
+          out.jobs = j ? { job_number: j.job_number ?? null, name: j.name ?? null } : null;
         }
         return out;
       };
@@ -573,17 +580,47 @@ describe("a line put on the job it was for", () => {
     expect(db.bank_lines).toHaveLength(0);
   });
 
-  it("a credit back from the supply house is a refund ON that job, never income and never a bucket", async () => {
+  /**
+   * A CREDIT BACK FROM THE SUPPLY HOUSE IS NEVER PUT ON A JOB FROM HERE (lib/job-cost-guard, audit
+   * v994's DB4). A bank line carries no lines, so bills{job_id, amount: -22.80} with none under it is a
+   * supplier return the importer credits to the customer IN FULL and at markup — $22.80 off her bill,
+   * plus markup, for parts nothing says she was ever charged for. The guard refuses that row at the
+   * typing and paper doors; this door asks it too, at the card AND at the write.
+   */
+  it("a credit back from the supply house is never put on a job, and nothing is written", async () => {
     const id = await drop(CREDIT, "Card1234.csv");
     const v = await view(id);
     const row = v.rows[0];
     expect(row.direction).toBe("in");
-    expect(row.others!.find((b) => b.id === "job:job-kitchen")!.label).toBe("Refund: On 41 Larkspur · J-054 — Marla Finch");
-    expect((await applyBankDownload(id, { fingerprint: v.fingerprint, picks: { [row.id]: "job:job-kitchen" } })).ok).toBe(true);
-    expect(db.bills).toEqual([expect.objectContaining({ job_id: "job-kitchen", category: null, amount: -22.8 })]);
-    expect(db.bank_rules).toHaveLength(0);
-    expect((await undoBankDownload(id)).ok).toBe(true);
+    // NO DEAD DOOR: no job is drawn on a money-in row at all — a bucket refund is, and reads plainly.
+    expect(JSON.stringify(row.others)).not.toContain("job:");
+    expect(JSON.stringify(v.otherInSingle)).not.toContain("job:");
+    expect(JSON.stringify(v.otherIn)).not.toContain("job:");
+    expect(row.others!.some((b) => b.label === "Refund: Tools & Supplies")).toBe(true);
+    // AND A PICK THAT NEVER CAME FROM A BUTTON IS REFUSED, in the guard's own words. Nothing lands:
+    // no bill, no bank line, and the card is still waiting.
+    const res = await applyBankDownload(id, { fingerprint: v.fingerprint, picks: { [row.id]: "job:job-kitchen" } });
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain(RETURN_ON_JOB_WHY);
     expect(db.bills).toHaveLength(0);
+    expect(db.bank_lines).toHaveLength(0);
+    expect(db.organized_items[0].status).toBe("needs_review");
+    // THE CREDIT STILL HAS A HOME: off the bucket it was bought on, as a negative business cost.
+    expect((await applyBankDownload(id, { fingerprint: v.fingerprint, picks: { [row.id]: "cost:Tools & Supplies" } })).ok).toBe(true);
+    expect(db.bills).toEqual([expect.objectContaining({ job_id: null, category: "Tools & Supplies", amount: -22.8 })]);
+  });
+
+  /**
+   * AND THE SAME RULE AT THE WRITE, behind the card (lib/bills-write-guard.test.ts holds bank-core to
+   * it). validPicks refuses the answer, so today nothing gets past it to writeBills — which is exactly
+   * why the write asks the guard too: the day somebody adds a way for a stored answer to reach the
+   * write without going through validPicks, the money still cannot land on the job. A job cost going
+   * OUT is never touched by it, and the test above pins that it is still written.
+   */
+  it("asks the cost guard at the write as well, not only at the card", async () => {
+    const { readFileSync } = await import("node:fs");
+    const src = readFileSync("src/app/(app)/bills/bank-core.ts", "utf8");
+    expect(src).toContain("jobCostRefusal({ jobId: all[i].job_id, amount: all[i].amount, lines: [] }, JOB_REFUND_NEXT)");
   });
 
   it("a job bill somebody moved to another job since stays, and says so", async () => {
@@ -739,6 +776,40 @@ describe("a receipt snapped after the download", () => {
     expect(res.error).toMatch(/^Already on the books: 1111-SHELL 123 ANYTOWN ST, \$100\.00, 2026-09-16, from the bank download/);
     expect(res.error).toMatch(/Different Purchase: File It Anyway/);
     expect(db.bills).toHaveLength(3);
+  });
+
+  /**
+   * THE COUNTER RECEIPT FOR A LINE PUT ON A JOB (0375). The wire was bought at the counter for one
+   * kitchen and the bank line was put on that job. Two days later the receipt for the SAME purchase is
+   * snapped and filed on the same job. Nothing printed on either carries a number the other has, so
+   * only money and day can find it — and the same-purchase check used to skip every bill with a job,
+   * because a bank line could never have one. It wrote a second $340.55 bill on J-054: the job cost
+   * doubled, and on a time-and-material job the customer was billed for it twice.
+   */
+  it("the receipt for a line already put on a job is refused, names that job, and writes no second cost", async () => {
+    const id = await drop(`Date,Description,Amount\n09/12/2026,ANYTOWN WIRE HOUSE #4,-340.55\n`, "Card1234.csv");
+    const v = await view(id);
+    expect((await applyBankDownload(id, { fingerprint: v.fingerprint, picks: { [v.rows[0].id]: "job:job-kitchen" } })).ok).toBe(true);
+    expect(db.bills).toHaveLength(1);
+    db.organized_items.push({
+      id: "counter",
+      org_id: "org-1",
+      kind: "receipt",
+      status: "needs_review",
+      doc_type: "receipt",
+      title: "Wire house counter receipt",
+      vendor: "Anytown Wire House",
+      amount: 340.55,
+      item_date: "2026-09-14",
+      payment: "paid_at_purchase",
+      proposal: {},
+    });
+    const res = await fileItem("counter", { type: "job", jobId: "job-kitchen" });
+    expect(res.ok).toBe(false);
+    // SAID AS THE JOB IT IS ON, never a bare number (Erik: "i cant tell by job numbers alone").
+    expect(res.error).toMatch(/^Already on the books: ANYTOWN WIRE HOUSE #4, \$340\.55, 2026-09-12, from the bank download, on J-054 41 Larkspur\./);
+    expect(res.error).toMatch(/Same Purchase: Tie Them/);
+    expect(db.bills).toHaveLength(1);
   });
 
   // Review of release/v1026: a company's fill-ups loaded by hand from a bank export before the bank

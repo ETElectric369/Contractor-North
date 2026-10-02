@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { parseCSV } from "@/lib/csv";
+// The cost guard's own sentence: the bank card's refusal must BE it, never a second wording.
+import { RETURN_ON_JOB_WHY } from "@/lib/job-cost-guard";
 import {
   bankHeadline,
   bankViewOf,
@@ -15,6 +17,7 @@ import {
   flowLabelOf,
   guessFor,
   isBareCheck,
+  jobRefusalFor,
   learnableAnswer,
   lookalikePayment,
   lineNamesAccount,
@@ -1031,8 +1034,10 @@ describe("the card and the person's answers", () => {
  *     the supply house in a week can be three different jobs.
  *   · NEVER A RULE. A rule is per merchant, so "the supply house is always this job" is never true.
  *   · ONLY THIS COMPANY'S JOBS, each said as the place, the number AND who.
- *   · BOTH DIRECTIONS: money out is a cost on the job, money in is a refund on it (a supplier's
- *     credit for material returned off that job).
+ *   · MONEY OUT ONLY. A bank line carries no lines, and a negative bill on a job with no lines is a
+ *     supplier return the importer credits to the customer IN FULL, at markup, for parts nothing says
+ *     they were ever charged for (lib/job-cost-guard, audit v994's DB4). A credit comes in as the
+ *     supply house's paper, filed on the job with the returned parts on it.
  */
 describe("a bank line on a job", () => {
   const names = () => namesOf(ORG_BOOKS());
@@ -1062,28 +1067,48 @@ describe("a bank line on a job", () => {
     expect(choiceLabel({ choice: "job", jobId: "gone" }, names())).toBe("On Job");
   });
 
-  it("fits money out as a cost on the job, and money in as a refund on it", () => {
+  /**
+   * MONEY OUT IS A COST ON THE JOB; MONEY IN IS NOT OFFERED A JOB AT ALL, and the reason is the cost
+   * guard's, not this module's. A $22.80 credit from the supply house put on J-054 would write
+   * bills{job_id, amount: -22.80} with no lines under it, and the next materials import would credit
+   * the customer $22.80 TIMES MARKUP for parts nothing says they were ever charged for. The guard
+   * refuses that row at the paper and typing doors; the card may not draw what Apply refuses.
+   */
+  it("fits money out as a cost on the job, and refuses money in in the cost guard's own words", () => {
     const job = { choice: "job", jobId: "job-kitchen" } as const;
     expect(choiceFits(job, "out")).toBe(true);
-    // The same both ways as the bucket answer it follows: a refund comes off what it was charged to.
-    expect(choiceFits(job, "in")).toBe(choiceFits({ choice: "cost", bucket: "Fuel" }, "in"));
-    // And the money-in button says so in plain words, in the list the card shows a deposit.
-    const { view } = sortOf(CREDITED);
+    expect(jobRefusalFor("out")).toBeNull();
+    // Not the bucket answer's rule: a bucket IS the company's own book, and a refund comes off it.
+    expect(choiceFits({ choice: "cost", bucket: "Fuel" }, "in")).toBe(true);
+    expect(choiceFits(job, "in")).toBe(false);
+    // THE SENTENCE IS THE GUARD'S, word for word, plus this door's next step — never invented here.
+    const why = jobRefusalFor("in")!;
+    expect(why.startsWith(RETURN_ON_JOB_WHY)).toBe(true);
+    expect(why).toContain("credit paper on that job");
+    // NO DEAD DOOR: the credit's row and every money-in list leave the job out, so nobody taps a
+    // button that can only refuse. A bucket refund is still right there.
+    const { view, plan, group, books } = sortOf(CREDITED);
     expect(view.rows[0].direction).toBe("in");
-    expect(view.otherInSingle.find((b) => b.id === "job:job-kitchen")!.label).toBe("Refund: On 41 Larkspur · J-054 — Marla Finch");
-    expect(view.rows[0].others!.find((b) => b.id === "job:job-kitchen")!.label).toBe("Refund: On 41 Larkspur · J-054 — Marla Finch");
+    expect(JSON.stringify(view.rows[0].others)).not.toContain("job:");
+    expect(JSON.stringify(view.otherInSingle)).not.toContain("job:");
+    expect(JSON.stringify(view.otherIn)).not.toContain("job:");
+    expect(view.rows[0].others!.some((b) => b.label === "Refund: Tools & Supplies")).toBe(true);
+    // AND A HAND-MADE PICK IS REFUSED, in the same sentence: the card is not the boundary.
+    const refused = validPicks({ [group.id]: "job:job-kitchen" }, plan, books);
+    expect(refused.ok.size).toBe(0);
+    expect(refused.refused[0]).toContain(RETURN_ON_JOB_WHY);
   });
 
-  it("is offered ONLY on a row that is one line, in both directions, and never as a quick button", () => {
-    for (const direction of ["out", "in"] as const) {
-      const single = everyChoice(direction, ORG_BOOKS(), true).map(choiceId);
-      const several = everyChoice(direction, ORG_BOOKS(), false).map(choiceId);
-      expect(single).toContain("job:job-kitchen");
-      expect(single).toContain("job:job-shop");
-      expect(several.some((id) => id.startsWith("job:"))).toBe(false);
-      // The everyday answers keep their places: the jobs are added, never put in front.
-      expect(single.slice(0, several.length)).toEqual(several);
-    }
+  it("is offered ONLY on a row that is one line, only going out, and never as a quick button", () => {
+    const single = everyChoice("out", ORG_BOOKS(), true).map(choiceId);
+    const several = everyChoice("out", ORG_BOOKS(), false).map(choiceId);
+    expect(single).toContain("job:job-kitchen");
+    expect(single).toContain("job:job-shop");
+    expect(several.some((id) => id.startsWith("job:"))).toBe(false);
+    // The everyday answers keep their places: the jobs are added, never put in front.
+    expect(single.slice(0, several.length)).toEqual(several);
+    // Money in is offered no job, one line or several.
+    for (const only of [true, false]) expect(everyChoice("in", ORG_BOOKS(), only).some((c) => c.choice === "job")).toBe(false);
     // THREE TRIPS TO ONE SUPPLY HOUSE are ONE row of three lines, and it offers no job: one tap must
     // never put three jobs' material on one job.
     const { view } = sortOf(THREE_TRIPS);
@@ -1094,6 +1119,27 @@ describe("a bank line on a job", () => {
     // No row's guess or button is ever a job: there is no way to guess WHICH job.
     const guessed = [...view.rows.flatMap((r) => r.buttons.map((b) => b.id)), ...sortOf(BOUGHT).view.rows.flatMap((r) => [...r.buttons.map((b) => b.id), r.guess ?? ""])];
     expect(guessed.some((id) => id.startsWith("job:"))).toBe(false);
+  });
+
+  /**
+   * ONE CARD, ONE COPY OF THE JOB LIST. A company may have 500 live jobs (BANK_JOBS) and a statement
+   * may hold forty single deposits — each of which is a question row of its own. A job list rebuilt
+   * into every one of those rows' Other… lists ships the same 500 buttons forty times in the page's
+   * props, on every load and every revalidate, when only the ONE row being answered needs a list at
+   * all. The jobs ride in the shared money-out list, once.
+   */
+  it("hands the browser each job once, however many rows the statement has", () => {
+    const deposits = ["Date,Description,Amount"];
+    for (let d = 1; d <= 12; d++) deposits.push(`09/${String(d).padStart(2, "0")}/2026,DEPOSIT,${100 + d}.00`);
+    const books = ORG_BOOKS();
+    const { view } = sortOf(`${deposits.join("\n")}\n`, books);
+    // Every one of them is its own row, and each is one line (so each would have taken a job list).
+    expect(view.rows).toHaveLength(12);
+    expect(view.rows.every((r) => r.direction === "in" && r.single)).toBe(true);
+    for (const j of books.jobs) {
+      const times = JSON.stringify(view).split(`job:${j.id}`).length - 1;
+      expect(times, `${j.label} rides in the card ${times} times`).toBeLessThanOrEqual(1);
+    }
   });
 
   /**
