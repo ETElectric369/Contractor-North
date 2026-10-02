@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { WhichJobSheet } from "../planner/which-job";
-import { CHANGE_JOB_LABEL, changeJobAsk, type AppChoseNotice } from "./clock-told";
+import { CHANGE_JOB_LABEL, changeJobAsk, noticeOnScreen, type AppChoseNotice, type PunchOnScreen } from "./clock-told";
 import type { WhichJobAsk } from "./which-job-choices";
 
 /**
@@ -26,6 +26,7 @@ import type { WhichJobAsk } from "./which-job-choices";
  */
 export function AppChoseJobNotice({
   notice,
+  punch,
   onDone,
   confirmInline = false,
   className = "",
@@ -33,6 +34,15 @@ export function AppChoseJobNotice({
   /** What the clock answered (clock-told: tellAppChose). Null: the person chose the job, or there is
    *  nothing to say — then this renders nothing at all. */
   notice: AppChoseNotice | null;
+  /** THE PUNCH ON SCREEN, and it is not optional: the sentence is only true while this is the very
+   *  punch it is about, still on the job it names (clock-told: noticeForEntry). A door that cannot
+   *  know — the shell's offline queue, reporting a punch that landed hours after the tap — passes
+   *  NO_PUNCH_ON_SCREEN and says so. Asked HERE rather than at every door, because the Now card
+   *  showed what skipping it looks like: a line still reading "Your punch is on <the old job>. The
+   *  app picked that" after the office moved the punch, with its Change door aimed at a piece the
+   *  person had already left. A required prop is the one version of this rule a new door cannot
+   *  quietly opt out of — it does not compile. */
+  punch: PunchOnScreen;
   /** The door's own state reset: the punch has been moved, or the person is done reading. */
   onDone: () => void;
   /** The door has no toast (the shell's offline queue sits outside the toast provider), so the
@@ -41,14 +51,16 @@ export function AppChoseJobNotice({
   className?: string;
 }) {
   const [ask, setAsk] = useState<WhichJobAsk | null>(null);
-  if (!notice) return null;
+  // THE RULE, not what the door remembered.
+  const live = noticeOnScreen(notice, punch);
+  if (!live) return null;
   return (
     <>
       <div className={`text-sm ${className}`} role="status">
-        <span className="text-slate-600">{notice.sentence}</span>{" "}
+        <span className="text-slate-600">{live.sentence}</span>{" "}
         <button
           type="button"
-          onClick={() => setAsk(changeJobAsk(notice))}
+          onClick={() => setAsk(changeJobAsk(live))}
           className="inline-flex min-h-11 items-center font-semibold text-brand underline-offset-2 hover:underline"
         >
           {CHANGE_JOB_LABEL}

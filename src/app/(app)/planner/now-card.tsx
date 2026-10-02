@@ -14,7 +14,7 @@ import { isLongOpenShift } from "@/lib/long-shift";
 import { useToast } from "@/components/toast";
 import { WhichJobSheet } from "./which-job";
 import { askAfterPunch, type WhichJobAsk } from "../timeclock/which-job-choices";
-import { tellAppChose, type AppChoseNotice } from "../timeclock/clock-told";
+import { noticeOnScreen, tellAppChose, type AppChoseNotice } from "../timeclock/clock-told";
 import { AppChoseJobNotice } from "../timeclock/app-chose-notice";
 
 /** Best-effort on-gesture GPS with a short cap (the timeclock panel's race pattern):
@@ -47,8 +47,16 @@ export interface NowPunch {
   /** When the SHIFT began (lib/shift-chain), the first part's clock-in after a Switch Job. The
    *  long-shift door counts twelve hours from it (audit v994 SW1). */
   shift_start?: string | null;
-  /** The punch carries a job. False: the clock couldn't tell the job, so the card asks. */
-  onJob: boolean;
+  /**
+   * THE JOB THE PUNCH IS ON, by its id. Null: the clock couldn't tell the job, so the card asks.
+   *
+   * It was `onJob: boolean`, and that shape is what let the card lie (Erik, 2026-10-01). A boolean
+   * answers "is there a job" and nothing else, so the card could not ask clock-told's staleness rule
+   * whether its remembered "the app picked that" sentence is still about this punch on this job — and
+   * it did not ask. After the office re-pointed the punch from Timecards, the banner above said the
+   * new job while the sentence below named the old one, and the Change door refused as stale.
+   */
+  job_id: string | null;
 }
 
 const TIMECLOCK_LINK = "inline-flex min-h-11 items-center text-sm font-medium text-brand hover:underline";
@@ -261,7 +269,7 @@ export function NowCard({
                 {job.sub && <div className="text-sm text-slate-500">{job.sub}</div>}
                 {children}
               </>
-            ) : open.onJob ? (
+            ) : open.job_id ? (
               /* The punch is on a job this page couldn't read (a lost read, a job the list can't
                  see). Said, not skipped: the doors are one tap away on Timeclock. */
               <p className="mt-1 text-sm text-slate-600">
@@ -324,9 +332,15 @@ export function NowCard({
           </div>
           {/* The sentence sits between the job and the clock-out footer: on the card, beside the job
               it is about, with no timer on it. */}
-          {chose && (
+          {/* IS THE SENTENCE STILL TRUE OF THIS PUNCH? (clock-told: noticeOnScreen, which the notice
+              asks again itself.) The punch moves underneath this card — a Switch Job cuts after two
+              minutes so the clock is a NEW row, it re-points whole inside them, and the office can move
+              it from Timecards while My Day sits open. In every one of those the person HAS chosen the
+              job, and a line still naming the app's pick would be the card contradicting the job
+              printed above it. Derived, so there is no path left that must remember to clear it. */}
+          {noticeOnScreen(chose, open) && (
             <div className="border-t border-brand/20 px-5 py-3">
-              <AppChoseJobNotice notice={chose} onDone={() => setChose(null)} />
+              <AppChoseJobNotice notice={chose} punch={open} onDone={() => setChose(null)} />
             </div>
           )}
           {(err || held) && <div className="px-5 pb-3">{lines}</div>}

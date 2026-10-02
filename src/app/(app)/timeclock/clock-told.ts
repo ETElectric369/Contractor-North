@@ -135,6 +135,26 @@ export function noticeForEntry(
   return (entry.job_id ?? null) === notice.job.id ? notice : null;
 }
 
+/**
+ * THE ONE DOOR WITH NO PUNCH IN ITS HANDS. The shell's offline queue reports a punch that finally
+ * landed hours after the tap, from a screen that holds no live entry to check the sentence against —
+ * so it says that by name instead of passing null, which would read as "the shift ended" and silence
+ * the very sentence Brian is owed. Every other door knows its punch and must hand it over.
+ */
+export const NO_PUNCH_ON_SCREEN = "no-punch-on-screen" as const;
+
+/** What a door hands the notice: the punch on screen, none (the shift ended), or NO_PUNCH_ON_SCREEN. */
+export type PunchOnScreen = { id: string; job_id?: string | null } | null | typeof NO_PUNCH_ON_SCREEN;
+
+/**
+ * WHAT A DOOR ACTUALLY DRAWS — noticeForEntry for a door that knows its punch, and the remembered
+ * line for the one that cannot know. The notice component asks this itself, so skipping it is not a
+ * thing a door can do: the Now card's whole defect was that `notice={chose}` compiled.
+ */
+export function noticeOnScreen(notice: AppChoseNotice | null | undefined, punch: PunchOnScreen): AppChoseNotice | null {
+  return punch === NO_PUNCH_ON_SCREEN ? (notice ?? null) : noticeForEntry(notice, punch);
+}
+
 /** What the Change door opens: the clock's own sheet, in move mode, off the job the app chose. */
 export function changeJobAsk(notice: AppChoseNotice): WhichJobAsk {
   return { entryId: notice.entryId, moment: "move", from: notice.job };
