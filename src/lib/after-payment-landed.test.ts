@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { fakeDb } from "@/lib/bank-transfer-fake.test-util";
+import { codeOnly } from "@/lib/migration-body.test-util";
 
 /**
  * WHAT HAPPENS AFTER MONEY LANDS ON AN INVOICE (M1) — the four steps, without a database.
@@ -269,11 +270,20 @@ describe("afterPaymentLanded — the four steps every pay door takes", () => {
  * is pinned above.)
  */
 describe("every door that records a payment goes through the one helper", () => {
-  /** Source with comments removed, so prose can neither satisfy nor trip an assertion about code. */
-  const code = (path: string) =>
-    readFileSync(join(process.cwd(), path), "utf8")
-      .replace(/\/\*[\s\S]*?\*\//g, "")
-      .replace(/(^|\s)\/\/[^\n]*/g, "$1");
+  /**
+   * Source with comments removed, so prose can neither satisfy nor trip an assertion about code —
+   * through THE one stripper every bypass tripwire reads (lib/migration-body.test-util: codeOnly).
+   *
+   * THIS ONE'S BLINDNESS WAS LOAD-BEARING: the writer list below is BUILT by scanning, so a file whose
+   * `from("payments").insert(` sat inside a hidden span would not have been found at all — not a
+   * failing case, a missing one, and the "finds the writers" guard would have passed with a short list
+   * that looked deliberate. The copy that used to live here treated every `/*` as a comment opener,
+   * including the one inside `accept="image/` + a star + `"` on a camera input, which opened a comment
+   * that ran on to the next real comment close: twenty app files came back short by 784 lines of code,
+   * one span of src/middleware.ts covering 118 of them. The three writers below are the same three
+   * either way today — nothing was hidden — but a fourth door could have been.
+   */
+  const code = (path: string) => codeOnly(readFileSync(join(process.cwd(), path), "utf8"));
 
   const writers = (readdirSync(join(process.cwd(), "src"), { recursive: true }) as string[])
     .filter((f) => /\.(ts|tsx)$/.test(f) && !/\.test\.tsx?$/.test(f))

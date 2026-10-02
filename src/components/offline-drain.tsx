@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { clockIn } from "@/app/(app)/timeclock/actions";
 import { WhichJobSheet } from "@/app/(app)/planner/which-job";
 import { type WhichJobAsk } from "@/app/(app)/timeclock/which-job-choices";
-import { replayTold, type AppChoseNotice } from "@/app/(app)/timeclock/clock-told";
+import { NO_PUNCH_ON_SCREEN, replayTold, type AppChoseNotice } from "@/app/(app)/timeclock/clock-told";
 import { AppChoseJobNotice } from "@/app/(app)/timeclock/app-chose-notice";
 import { listPending, registerReplayer, remove, startAutoDrain, type QueuedOp } from "@/lib/offline/queue";
 
@@ -103,7 +103,10 @@ export function OfflineDrain({ userId }: { userId: string | null }) {
   // uses: it stays until it is answered or waved off, which is what "survives the walk" means.
   const choseLine = chose ? (
     <div className="pointer-events-auto w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-3 shadow-lg">
-      <AppChoseJobNotice notice={chose} onDone={() => setChose(null)} confirmInline />
+      {/* THE ONE DOOR WITH NO PUNCH IN ITS HANDS, and it says so by name: this banner reports a punch
+          that landed hours after the tap, from the shell, which holds no live entry to check the
+          sentence against. Every other door hands over the punch on screen (clock-told). */}
+      <AppChoseJobNotice notice={chose} punch={NO_PUNCH_ON_SCREEN} onDone={() => setChose(null)} confirmInline />
     </div>
   ) : null;
 

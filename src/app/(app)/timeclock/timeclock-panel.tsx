@@ -32,7 +32,7 @@ import { NewJobInline, type CreatedJob } from "./new-job-inline";
 import { DailyReportDebrief } from "./daily-report-debrief";
 import { WhichJobSheet } from "../planner/which-job";
 import { askAfterPunch, type WhichJobAsk } from "./which-job-choices";
-import { noticeForEntry, tellAppChose, type AppChoseNotice } from "./clock-told";
+import { noticeOnScreen, tellAppChose, type AppChoseNotice } from "./clock-told";
 import { AppChoseJobNotice } from "./app-chose-notice";
 
 interface JobOption {
@@ -487,13 +487,14 @@ export function TimeclockPanel({
     // 0:00 after a Switch Job was reading his day reset.
     const earlier = Math.max(0, Number(earlierShiftHours) || 0);
     const shiftTotal = earlier > 0 ? elapsed + earlier : elapsed;
-    // IS THE SENTENCE STILL TRUE OF THIS PUNCH? (clock-told: noticeForEntry.) A Switch Job CUTS after
+    // IS THE SENTENCE STILL TRUE OF THIS PUNCH? (clock-told: noticeOnScreen → noticeForEntry, which the
+    // notice component asks again itself, so no door can skip it.) A Switch Job CUTS after
     // two minutes, so the running entry is a NEW row; inside them it re-points whole, so the same row
     // carries a different job; the office can move the punch from Timecards while this page sits open.
     // In every one of those the person HAS chosen the job, and a line still naming the app's pick
     // would be this page contradicting its own banner — with a Change door aimed at the wrong piece.
     // Derived, never remembered: there is no path left that has to remember to clear it.
-    const choseNow = noticeForEntry(chose, openEntry);
+    const choseNow = noticeOnScreen(chose, openEntry);
     // Codes on: name only (not the shared number·name jobLabel helper) — the running
     // banner reads better without the job number; renamed so the helper isn't shadowed.
     // Codes off: the customer · address identity IS the name the crew knows.
@@ -643,7 +644,7 @@ export function TimeclockPanel({
               Day's Now card, from the one function both call. */}
           {choseNow && (
             <div className="rounded-xl border border-brand/30 bg-brand/5 p-3">
-              <AppChoseJobNotice notice={choseNow} onDone={() => setChose(null)} />
+              <AppChoseJobNotice notice={choseNow} punch={openEntry} onDone={() => setChose(null)} />
             </div>
           )}
 

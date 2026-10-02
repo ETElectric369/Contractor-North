@@ -234,7 +234,7 @@ describe("where a pick's answer lands", () => {
 
 describe("My Day asks from the same list the clock asked from", () => {
   const src = (p: string) => readFileSync(join(process.cwd(), p), "utf8");
-  const onNoJob = { id: "p1", clock_in: "2026-09-27T14:00:00Z", notes: null, onJob: false };
+  const onNoJob = { id: "p1", clock_in: "2026-09-27T14:00:00Z", notes: null, job_id: null };
 
   it("the Now card on a punch with no job has ONE door, Pick The Job, and it opens the clock's own sheet", () => {
     const html = renderToStaticMarkup(createElement(NowCard, { userId: "u1", open: onNoJob, job: null }));

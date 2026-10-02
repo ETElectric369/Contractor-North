@@ -61,13 +61,14 @@ import {
   type ChoiceJob,
   type SheetPhase,
 } from "./which-job-choices";
-import { noticeForEntry } from "./clock-told";
-import { timeActions } from "@/lib/actions/entities/time";
+import { NO_PUNCH_ON_SCREEN, noticeForEntry } from "./clock-told";
+import { switchJobSpoken, timeActions } from "@/lib/actions/entities/time";
 import { agentToolResultBody } from "@/lib/actions/agent-tool-result";
 import type { ActionCtx, ActionResult } from "@/lib/actions/types";
 import { workedDaysFrom } from "@/lib/schedule-math";
 import { WhichJobSheetView } from "../planner/which-job";
 import { AppChoseJobNotice } from "./app-chose-notice";
+import { codeOnly } from "@/lib/migration-body.test-util";
 
 type Q = { table: string; verb: "select" | "insert" | "update" | "delete"; cols: string; returning?: string; payload?: any; filters: any[] };
 type Reply = { data?: any; error?: any } | undefined;
@@ -268,7 +269,7 @@ describe("PART 2 — one tap to change it, and it is not a dead end", () => {
 
   it("the sentence carries the Change door, and both are rendered by every clock door's one component", () => {
     const told = tellAppChose({ ok: true, id: PUNCH, jobPick: { chosenBy: "app", id: ARR, from: "schedule", label: "ARR 56 rough-in · 56 Alder Ridge Rd" } })!;
-    const html = renderToStaticMarkup(createElement(AppChoseJobNotice, { notice: told, onDone: () => {} }));
+    const html = renderToStaticMarkup(createElement(AppChoseJobNotice, { notice: told, punch: { id: PUNCH, job_id: ARR }, onDone: () => {} }));
     expect(html).toContain("ARR 56 rough-in · 56 Alder Ridge Rd");
     expect(html).toContain("The app picked that from today&#x27;s schedule");
     expect(html).toContain(CHANGE_JOB_LABEL);
@@ -279,7 +280,7 @@ describe("PART 2 — one tap to change it, and it is not a dead end", () => {
   });
 
   it("nothing to say, nothing rendered: a person-picked punch puts no line on the card", () => {
-    expect(renderToStaticMarkup(createElement(AppChoseJobNotice, { notice: null, onDone: () => {} }))).toBe("");
+    expect(renderToStaticMarkup(createElement(AppChoseJobNotice, { notice: null, punch: { id: PUNCH, job_id: ARR }, onDone: () => {} }))).toBe("");
   });
 
   it("the sheet in move mode names the job it is moving the punch OFF, and its way out is not a lie", () => {
@@ -549,6 +550,78 @@ describe("Nort's door: the sentence reaches the MODEL, or nobody hears it at all
     expect(projected(res).warning).toBeUndefined();
   });
 
+  /**
+   * THE DOOR WITH NO BUTTON MUST NOT READ OUT THE BUTTON'S WORDS (Erik, 2026-10-01).
+   *
+   * Nort relayed the screens' sentence verbatim — "change it if you're somewhere else" — and could not
+   * change it. His only move on a running shift is switch_job, which CUTS after two minutes: it closes
+   * the part so far and opens a new one, so the minutes already billed to the wrong customer stay
+   * exactly where they are. An instruction is a dead end when the door it names is not where it is read.
+   *
+   * NO NEW WRITE VERB WAS REGISTERED FOR HIM, on purpose: moving a punch decides which customer gets
+   * billed, the three doors that already do it are one tap away, and agent-write expansion stays frozen
+   * until multi-tenant is dialled. His sentence says WHERE, and says he cannot.
+   */
+  it("THE DEFECT: Nort's sentence never tells somebody to press a button he has not got", async () => {
+    state.client = fakeSupabase(schedulePutsHimOnArr(), calls);
+    const res = await timeActions["time.clockIn"].handler({ job_id: null, job_code: null, clock_in_at: null }, CTX);
+    const warning = String(projected(res).warning);
+
+    // Same facts: the job, named the way a person knows it, and the source it came from.
+    expect(warning).toContain("ARR 56 rough-in · 56 Alder Ridge Rd");
+    expect(warning).toContain("The app picked that from today's schedule");
+    // But NOT the screens' instruction, which points at a button that is not in this conversation.
+    expect(warning).not.toContain("change it if you're somewhere else");
+    // It names the doors that actually move a punch, and it says out loud that he cannot.
+    expect(warning).toContain("My Day");
+    expect(warning).toContain("Timeclock");
+    expect(warning).toContain("Timecards");
+    expect(warning).toContain(CHANGE_JOB_LABEL);
+    expect(warning).toContain("I can't move it for you");
+  });
+
+  it("and the screens keep their own words, because their button is right there", () => {
+    expect(appChoseSentence("ARR 56 rough-in", "schedule")).toContain("change it if you're somewhere else");
+    // One place builds both, off the same label and the same source, so they cannot drift.
+    const told = tellAppChose({ ok: true, id: PUNCH, jobPick: { chosenBy: "app", id: ARR, from: "only-job", label: "ARR 56" } })!;
+    expect(told.sentence).toContain("because it's the only job going");
+    expect(told.say).toContain("because it's the only job going");
+    expect(told.say).not.toBe(told.sentence);
+  });
+
+  /**
+   * AND HE CANNOT ANNOUNCE A CORRECTION THAT DID NOT HAPPEN. The move he DOES have on a running shift
+   * cuts it, so a "put me on the right job" answered with switch_job leaves the hours already worked
+   * exactly where they were.
+   */
+  it("THE DEFECT, second half: a switch that CUT says where the hours before it stayed", () => {
+    const said = switchJobSpoken("cut", 2.32, "J-013 ARR 56 rough-in · 56 Alder Ridge Rd");
+    expect(said).toContain("2.32 hours");
+    expect(said).toContain("stayed on J-013 ARR 56 rough-in · 56 Alder Ridge Rd");
+    expect(said).toContain("it never moves hours already worked");
+    expect(said).toContain("Timecards");
+    // The old wording read as a correction: the part "closed", and you are on the new job. Nothing
+    // in it said the 2.32 hours were still billing the wrong customer.
+    expect(said).not.toMatch(/^Done/);
+  });
+
+  it("a switch that RE-POINTED really did move the whole shift, and keeps its own words", () => {
+    expect(switchJobSpoken("repointed", 0, "J-013 ARR 56")).toBe("Done — this whole shift is on the new job now.");
+  });
+
+  it("the hours are never dropped, even when the job they stayed on could not be read", () => {
+    const said = switchJobSpoken("cut", 0.75, null);
+    expect(said).toContain("0.75 hours");
+    expect(said).toContain("the job you were on");
+  });
+
+  it("the verb's own description tells the model it is not a way to correct a wrong job", () => {
+    const d = timeActions["time.switchJob"].description ?? "";
+    expect(d).toContain("NEVER MOVES HOURS ALREADY WORKED");
+    expect(d).toContain("Timecards");
+    expect(d).toMatch(/no verb that moves worked hours/i);
+  });
+
   it("the projection carries every channel a write has to be heard on, and nothing else", () => {
     const body = projected({ ok: true, warning: "w", recorded: "r", speak: "s", data: { id: "x" }, confirmPrompt: "never shown" });
     expect(Object.keys(body).sort()).toEqual(["data", "error", "ok", "recorded", "speak", "warning"]);
@@ -754,6 +827,50 @@ describe("the sentence retires itself the moment the person answers it another w
   });
 });
 
+/**
+ * THE RULE MOVED INTO THE COMPONENT, because a door opted out of it (Erik's law: one rule, one
+ * place, and unbypassable — a shared helper the next door can forget to call is a convention).
+ *
+ * My Day's Now card asked nothing: it rendered the remembered line raw as `notice={chose}`. So when
+ * the office re-pointed the punch from Timecards while My Day sat open, the card's banner updated to
+ * the new job while the sentence under it still named the old one — and its Change door then refused
+ * as stale ("This punch already carries a job"). The card could not ask the rule as it stood, because
+ * NowPunch carried `onJob: boolean` instead of the job's id: the shape itself hid the fact the rule
+ * needs. Fixed at the shape, not around it.
+ *
+ * Now the ONE component every clock door draws takes the punch it is about and asks the rule itself,
+ * so there is nothing left for a door to skip. `punch` is REQUIRED — a new door cannot render the
+ * line without saying which punch it is about, or declaring (NO_PUNCH_ON_SCREEN) that it has none,
+ * which is the shell's offline queue: the punch it reports landed hours after the tap and it holds no
+ * live entry to check against.
+ */
+describe("the line is drawn by the rule, not by what a door remembered", () => {
+  const told = tellAppChose({ ok: true, id: PUNCH, jobPick: { chosenBy: "app", id: ARR, from: "schedule", label: "ARR 56 rough-in" } })!;
+  const draw = (punch: unknown) =>
+    renderToStaticMarkup(createElement(AppChoseJobNotice, { notice: told, punch, onDone: () => {} } as never));
+
+  it("while the punch on screen is the one it is about, on the job it names, the line is drawn", () => {
+    expect(draw({ id: PUNCH, job_id: ARR })).toContain("ARR 56 rough-in");
+  });
+
+  it("THE DEFECT: the office moved the punch while the page sat open — the line goes, not the sentence's word", () => {
+    expect(draw({ id: PUNCH, job_id: SUPPLY })).toBe("");
+    expect(draw({ id: PUNCH, job_id: null })).toBe("");
+  });
+
+  it("a Switch Job that CUT: the clock is on a new entry, so nothing is said about the old one", () => {
+    expect(draw({ id: "b0000000-0000-4000-8000-00000000000b", job_id: ARR })).toBe("");
+  });
+
+  it("the shift ended: no punch on screen, no line", () => {
+    expect(draw(null)).toBe("");
+  });
+
+  it("the one door with no punch in its hands says so, and still gets to speak", () => {
+    expect(draw(NO_PUNCH_ON_SCREEN)).toContain("ARR 56 rough-in");
+  });
+});
+
 // ── PART 4 — the teeth ───────────────────────────────────────────────────────────────────────
 //
 // Two DELIBERATE source greps, and they are the only two: a door that handles a clock answer without
@@ -793,16 +910,37 @@ describe("PART 4 — teeth: no clock door may report a resolved job without sayi
     }
   });
 
-  it("a door that knows the punch on screen shows the line through the staleness rule, not raw state", () => {
-    // DELIBERATE TRIPWIRE, and the third of only three: the symptom of skipping noticeForEntry is a
-    // line that is still THERE when it should be gone, which nothing a static render can reach (the
-    // notice only exists after a punch sets client state, and this suite runs with no DOM). The rule
-    // itself is pinned behaviourally above; this pins that the panel actually asks it.
-    const src = read("app/(app)/timeclock/timeclock-panel.tsx");
-    expect(src, "the Timeclock panel must ask whether the notice is still true of the punch on screen").toMatch(
-      /noticeForEntry\(\s*chose/,
-    );
-    expect(src, "the panel must not hand the remembered notice straight to the view").not.toMatch(/notice=\{chose\}/);
+  it("EVERY door that draws the line names the punch it is about — the list is found, not written", () => {
+    // DELIBERATE TRIPWIRE, and the third of only three. It used to name ONE door, the Timeclock panel,
+    // and the Now card was quietly outside it — which is how `notice={chose}` shipped there. So the
+    // doors are FOUND: every app source that draws the component. Each must hand it the punch, which
+    // the component checks the sentence against; a door with none in its hands has to say so by name.
+    const doors = allSources()
+      .filter((f) => !/\.(test|test-util)\.tsx?$/.test(f) && !f.endsWith("app-chose-notice.tsx"))
+      .filter((f) => /<AppChoseJobNotice\b/.test(codeOnly(read(f))));
+    // An empty scan can never pass: these are the three doors that draw it today.
+    expect(doors.sort()).toEqual([
+      "app/(app)/planner/now-card.tsx",
+      "app/(app)/timeclock/timeclock-panel.tsx",
+      "components/offline-drain.tsx",
+    ]);
+    for (const door of doors) {
+      const src = codeOnly(read(door));
+      expect(src, `${door} draws the line, so it must hand the component the punch it is about (or NO_PUNCH_ON_SCREEN)`).toMatch(
+        /<AppChoseJobNotice[\s\S]{0,200}?punch=\{/,
+      );
+    }
+  });
+
+  it("and no door re-words the staleness rule for itself: it asks noticeForEntry or hands over the punch", () => {
+    for (const f of allSources()) {
+      if (f.endsWith("clock-told.ts") || f.endsWith("clock-told.test.ts")) continue;
+      const src = codeOnly(read(f));
+      // Comparing a notice's entry or its job to a punch's by hand IS the rule, written again.
+      expect(src, `${f}: re-tests whether the notice is still about the punch on screen`).not.toMatch(
+        /notice\.(entryId|job)\b[^\n]*(===|!==)/,
+      );
+    }
   });
 
   it("nobody writes the rule twice: the sentence and the \"did the app choose this\" test live in one file", () => {

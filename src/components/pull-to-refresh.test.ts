@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -21,6 +21,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
 
 import { PullToRefresh, pullReleases, readPullMove, scrollerOf } from "./pull-to-refresh";
+import { codeOnly } from "@/lib/migration-body.test-util";
 
 const src = readFileSync(join(process.cwd(), "src/components/pull-to-refresh.tsx"), "utf8");
 const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|\s)\/\/[^\n]*/g, "$1");
@@ -146,8 +147,43 @@ describe("the wiring the listener can only do once", () => {
   });
 });
 
+/**
+ * THE SCREENS THAT HAVE IT: ALL OF THEM (Erik, 2026-10-01).
+ *
+ * This file's own headline has said "ONE OF THEM, FOR EVERY SCREEN" since cn-v1039, and it shipped
+ * mounted on exactly one page — /billing, where the bug report came from. Every other screen in the
+ * iOS shell still did nothing when a thumb pulled it down: the shell's root is h-dvh + overflow-hidden
+ * and the document's rubber-band is off on purpose, so there is no browser gesture to fall back on.
+ * It needs no per-page data — it finds its own scroller — so the headline was right and the wiring was
+ * short. It is mounted ONCE in the app shell's <main>, which IS that scroller.
+ */
 describe("the screens that have it", () => {
-  it("/billing mounts the shared one (Erik asked for it there), and nobody rolled their own", () => {
-    expect(readFileSync(join(process.cwd(), "src/app/(app)/billing/page.tsx"), "utf8")).toContain("<PullToRefresh />");
+  const layout = readFileSync(join(process.cwd(), "src/app/(app)/layout.tsx"), "utf8");
+
+  it("the app shell mounts it once, inside the one scroller, so every screen pulls down to refresh", () => {
+    expect(layout).toContain('import { PullToRefresh } from "@/components/pull-to-refresh"');
+    expect(layout.match(/<PullToRefresh \/>/g) ?? []).toHaveLength(1);
+    // Inside <main>, which is the scroller it walks up to find (overflow-y-auto on the shell's main).
+    const main = layout.slice(layout.indexOf("<main"), layout.indexOf("</main>"));
+    expect(main).toContain("<PullToRefresh />");
+    expect(main).toContain("overflow-y-auto");
+  });
+
+  it("and no page mounts a second one: two of them would refresh twice on one pull", () => {
+    const pages: string[] = [];
+    const walk = (dir: string) => {
+      for (const e of readdirSync(dir, { withFileTypes: true })) {
+        const p = join(dir, e.name);
+        if (e.isDirectory()) walk(p);
+        else if (
+          /\.tsx$/.test(e.name) &&
+          !p.endsWith(join("app", "(app)", "layout.tsx")) &&
+          codeOnly(readFileSync(p, "utf8")).includes("<PullToRefresh")
+        )
+          pages.push(p);
+      }
+    };
+    walk(join(process.cwd(), "src"));
+    expect(pages).toEqual([]);
   });
 });
