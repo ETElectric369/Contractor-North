@@ -158,6 +158,22 @@ function Row({
   );
 }
 
+/**
+ * THE Other… LIST A ROW GETS. A row that is ONE line gets the longer list: the answers that go on one
+ * thing — an invoice coming in, a job going out (0375) — are offered only where there is one line to
+ * put on it. A row holding several of a merchant's lines gets the shared list, with neither in it. A
+ * deposit brings its own list (the invoices open for at least its money, said in full, and never a
+ * job: a credit on a job with no lines would credit the customer the whole amount).
+ */
+export function othersFor(
+  row: Pick<BankRowView, "direction" | "single" | "others">,
+  view: Pick<BankView, "otherOut" | "otherOutSingle" | "otherIn" | "otherInSingle">,
+): { id: string; label: string }[] {
+  if (row.others) return row.others;
+  if (row.direction === "in") return row.single ? view.otherInSingle : view.otherIn;
+  return row.single ? view.otherOutSingle : view.otherOut;
+}
+
 /** The picks for rows still on the card: a row the books took away since keeps no answer. */
 export function livePicks(picks: Record<string, string>, rows: readonly { id: string }[]): Record<string, string> {
   return Object.fromEntries(Object.entries(picks).filter(([id]) => rows.some((r) => r.id === id)));
@@ -251,7 +267,7 @@ export function BankCard({ itemId, view, run, busy, working }: { itemId: string;
                   return next;
                 })
               }
-              others={r.others ?? (r.direction === "in" ? (r.single ? view.otherInSingle : view.otherIn) : view.otherOut)}
+              others={othersFor(r, view)}
               working={working}
             />
           ))}

@@ -40,9 +40,10 @@ const MAY_WRITE_BILLS: Record<string, string> = {
   "app/(app)/organize/paperwork-core.ts": "guarded",
   "app/(app)/jobs/actions.ts": "guarded",
   "app/(app)/bills/supplier-actions.ts": "guarded",
-  // A bank download's costs are ALWAYS job_id: null — the company's own book, which never reaches a
-  // customer. Re-pointing one onto a job happens in updateBill, which is guarded.
-  "app/(app)/bills/bank-core.ts": "job_id is null on every row it writes (a business cost)",
+  // A bank line CAN be put on the job it was for since 0375, so this door is no longer "job_id is
+  // null on every row it writes": it asks jobCostRefusal at the write, and lib/bank-download's
+  // jobRefusalFor keeps a job off the money-in list and out of validPicks at the card.
+  "app/(app)/bills/bank-core.ts": "guarded",
   // A recurring expense is a business cost: job_id: null, hard-coded.
   "lib/recurring-engine.ts": "job_id is null on every row it writes (a business cost)",
   // The shelf: on_shelf flips on a bill that already has no job (.is('job_id', null) on the write).
@@ -81,6 +82,27 @@ describe("the bills table has one write boundary (items C1, C2)", () => {
       if (why !== "guarded") continue;
       const src = readFileSync(join(SRC, file), "utf8");
       expect(src, `${file} is listed as guarded but never calls jobCostRefusal`).toContain("jobCostRefusal(");
+    }
+  });
+
+  /**
+   * A REASON THAT IS NO LONGER TRUE IS WORSE THAN NO REASON (0375). The bank door sat on this list
+   * reading "job_id is null on every row it writes" while a new answer put a bank line ON a job: the
+   * reason is free text, nothing compared it with the code, and the hole the guard exists to close was
+   * open again at a door the list called safe. So the one claim a machine CAN check is checked — a file
+   * that makes it may say job_id nowhere but as null.
+   */
+  it('a file whose reason is "job_id is null on every row it writes" names job_id nowhere else', () => {
+    const CLAIM = "job_id is null on every row it writes";
+    for (const [file, why] of Object.entries(MAY_WRITE_BILLS)) {
+      if (!why.includes(CLAIM)) continue;
+      // Both ways of saying "no job": the write itself, and a filter that holds the write to one.
+      const left = readFileSync(join(SRC, file), "utf8").split(/job_id:\s*null|"job_id",\s*null/).join("");
+      expect(
+        left,
+        `${file} says "${CLAIM}" but names job_id some other way. Either the reason is stale — ask ` +
+          "jobCostRefusal and make it \"guarded\" — or write the true reason here.",
+      ).not.toContain("job_id");
     }
   });
 

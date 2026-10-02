@@ -671,16 +671,22 @@ export async function loadBooks(supabase: any, orgId: string | null | undefined)
         .eq("org_id", orgId)
         .limit(5000),
     ),
-    // THE BUSINESS COSTS A BANK DOWNLOAD WROTE (0363): they carry no number, so a receipt for the
-    // same purchase is found by its money and day (sameMoneyFromBank). Newest first; a database
-    // before 0363 has no bank_line_id and this is simply empty.
+    // THE COSTS A BANK DOWNLOAD WROTE (0363): they carry no number, so a receipt for the same
+    // purchase is found by its money and day (sameMoneyFromBank). Newest first; a database before
+    // 0363 has no bank_line_id and this is simply empty.
+    //
+    // ON A JOB TOO, SINCE 0375. This read filtered on `.is("job_id", null)` while a bank line could
+    // only be a business cost, and the day a line could be put on the job it was bought for that
+    // filter made the counter receipt for that very purchase invisible: File It found nothing, never
+    // offered Same Purchase: Tie Them, and wrote a SECOND bill on the same job — the job cost doubled
+    // and, on a time-and-material job, the customer was billed for it twice. The job comes with it
+    // (jobs(...)), because the sentence names the job the way Erik reads one.
     safe<BookedBill>(() =>
       supabase
         .from("bills")
-        .select("id, supplier, bill_number, supplier_invoice_number, supplier_account_id, superseded_by_bill_id, amount, bill_date, job_id")
+        .select("id, supplier, bill_number, supplier_invoice_number, supplier_account_id, superseded_by_bill_id, amount, bill_date, job_id, jobs(job_number, name)")
         .eq("org_id", orgId)
         .not("bank_line_id", "is", null)
-        .is("job_id", null)
         .is("superseded_by_bill_id", null)
         .order("bill_date", { ascending: false })
         .limit(2000),

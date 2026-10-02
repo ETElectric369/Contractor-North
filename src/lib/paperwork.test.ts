@@ -712,10 +712,35 @@ describe("sameMoneyFromBank: a purchase a bank download already wrote", () => {
       { kind: "bill", billId: "bill-bank", jobId: null, sentence: "Already on the books: 1111-SHELL OIL 12345 ANYTOWN, $62.10, 2026-09-12, from the bank download (a business cost)." },
     ]);
   });
-  it("another amount, a day 4 apart, a job's bill, or a paper that isn't a cost is not", () => {
+  /**
+   * A BANK LINE PUT ON THE JOB IT WAS FOR IS ONE OF THESE TOO (0375). This check once skipped every
+   * bill with a job, because a bank line could only ever be a business cost. The day a line could go on
+   * the job it was bought for, that skip hid the counter receipt's own twin: File It found nothing,
+   * offered no tie and wrote a SECOND bill on the same job — the job cost doubled, and on a
+   * time-and-material job the customer was billed for it twice.
+   */
+  it("a bank line put on a job is the same purchase, and says which job", () => {
+    const onJob = { ...bankBill, job_id: "job-1", jobs: { job_number: "J-054", name: "41 Larkspur" } };
+    expect(sameMoneyFromBank(receipt({ vendor: "Shell", amount: 62.1, item_date: "2026-09-13" }), [onJob])).toEqual([
+      {
+        kind: "bill",
+        billId: "bill-bank",
+        // The tie files the paper onto the bill's own job, so the job comes back with the match.
+        jobId: "job-1",
+        sentence: "Already on the books: 1111-SHELL OIL 12345 ANYTOWN, $62.10, 2026-09-12, from the bank download, on J-054 41 Larkspur.",
+      },
+    ]);
+    // A job whose row didn't come with its number still reads as something, never "undefined".
+    expect(sameMoneyFromBank(receipt({ amount: 62.1, item_date: "2026-09-13" }), [{ ...bankBill, job_id: "job-1" }])[0].sentence).toContain("on a job.");
+  });
+
+  it("another amount, a day 4 apart, a job's bill filed by hand, or a paper that isn't a cost is not", () => {
     expect(sameMoneyFromBank(receipt({ amount: 62.11, item_date: "2026-09-12" }), [bankBill])).toEqual([]);
     expect(sameMoneyFromBank(receipt({ amount: 62.1, item_date: "2026-09-16" }), [bankBill])).toEqual([]);
-    expect(sameMoneyFromBank(receipt({ amount: 62.1, item_date: "2026-09-12" }), [{ ...bankBill, job_id: "job-1" }])).toEqual([]);
+    // A JOB COST FILED BY HAND is not matched on money and day: it carries the number its paper
+    // printed, which findSameNumber matches exactly, and two trips to the supply house for the same
+    // $62.10 on one job are two purchases, not one.
+    expect(sameMoneyFromBank(receipt({ amount: 62.1, item_date: "2026-09-12" }), [{ ...bankBill, job_id: "job-1", from_bank: undefined }])).toEqual([]);
     expect(sameMoneyFromBank(receipt({ amount: 62.1, item_date: "2026-09-12", doc_type: "not_a_cost" }), [bankBill])).toEqual([]);
     // The bill this paper made is never its own twin.
     expect(sameMoneyFromBank(receipt({ amount: 62.1, item_date: "2026-09-12", bill_id: "bill-bank" }), [bankBill])).toEqual([]);

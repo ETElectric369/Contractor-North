@@ -13,11 +13,15 @@
  * asked - and the Edit Bill box is the shortest road to it, because a bank credit lands as a
  * business cost with no lines at all and one dropdown re-points it onto a job.
  *
- * So the rule lives HERE, at the write, and all FOUR doors ask this one function:
+ * So the rule lives HERE, at the write, and all FIVE doors ask this one function:
  *   · insertItemizedBill         (a paper filed from Organize, a receipt read on the job page, shop stock)
  *   · createBill                 (Type It In, Add By Hand, Nort's bill.create)
  *   · updateBill                 (the Edit Bill box, Nort's bill.update: a re-point or a re-price)
  *   · recordSupplierInvoiceAsBill (Record It As A Bill on the supplier's card)
+ *   · applyBankCore              (sorting a bank download: a line put on the job it was for, 0375 -
+ *                                 the dropdown above, now its own answer. The bank card is held here
+ *                                 at BOTH ends: lib/bank-download's jobRefusalFor keeps a job off the
+ *                                 money-in list and out of validPicks, and the write asks again.)
  * A business cost is the company's own book and never reaches a customer, so it is not held to it.
  *
  * TEETH: bills-write-guard.test.ts fails if a file that inserts or updates `bills` does not come

@@ -15,12 +15,15 @@ import { afterPaymentLanded } from "@/lib/after-payment-landed";
 import { paymentMethodKey } from "@/lib/payment-method";
 import {
   bankViewOf,
+  billPlacement,
   branchFromNumbers,
   centsOf,
   lookalikePayment,
   choiceId,
   groupTitle,
   inPayWindow,
+  JOB_REFUND_NEXT,
+  learnableAnswer,
   namesOf,
   PAY_WINDOW,
   ruleChoice,
@@ -30,6 +33,7 @@ import {
   planBankDownload,
   readBankTable,
   sayRange,
+  storedAnswer,
   storedChoice,
   storedChoiceName,
   validPicks,
@@ -42,8 +46,17 @@ import {
   type MatchTable,
   type StoredBank,
 } from "@/lib/bank-download";
-import { insertPaperRow } from "@/app/(app)/organize/paperwork-core";
+// THE JOBS A PAPER MAY BE FILED TO, from the one list every other paper picker reads (PR1): every
+// open job AND every finished one, never a cancelled one. A bank line is a paper like any other.
+import { insertPaperRow, PAPER_JOB_STATUSES } from "@/app/(app)/organize/paperwork-core";
 import { OWNER_SORTS_BANK, viewerSortsBank } from "@/lib/bank-viewer";
+// THE ONE JOB-LABEL HELPER: the place, the number and who ("41 Larkspur · J-054 — A. Customer"), for
+// a picker read away from the job itself. Erik: "i cant tell by job numbers alone".
+import { jobSaidLabel } from "@/lib/job-pick-label";
+// THE RULE EVERY DOOR THAT PUTS A COST ON A JOB IS HELD TO (audit v994's DB4): a lineless return on a
+// job credits the customer the whole amount, so this door asks before it writes one.
+import { jobCostRefusal } from "@/lib/job-cost-guard";
+import { customerNamePart } from "@/lib/schedule-options";
 
 /**
  * A BANK DOWNLOAD, ON THE SERVER (2026-09-27): the reads, the one Apply and its Undo. Not a
@@ -69,6 +82,24 @@ export function isMissingBank(err: unknown): boolean {
   if (code === "42P01" || code === "PGRST205" || code === "42703" || code === "PGRST204") return true;
   return /bank_lines|bank_rules|bank_line_id/i.test(msg) && /does not exist|could not find|schema cache/i.test(msg);
 }
+
+/**
+ * CAN A BANK LINE NAME THE JOB IT WAS FOR ON THIS DATABASE YET (0375)? One row, one column, and the
+ * answer decides whether a job is offered AT ALL.
+ *
+ * Migration 0375 is additive and may land after this code. Until it does, bank_lines has no job_id:
+ * offering the answer would write a row the CHECK refuses and show a person a raw database error, so
+ * instead nothing is offered anywhere, no write mentions the column, and the card says not one word
+ * about a feature that is not there yet. Any other read failure answers the same careful way.
+ */
+export async function bankLinesNameJobs(supabase: Db, orgId: string): Promise<boolean> {
+  const { error } = await supabase.from("bank_lines").select("job_id").eq("org_id", orgId).limit(1);
+  return !error;
+}
+
+/** The most jobs a bank line's Other… list offers, newest first: enough for any company's live work,
+ *  and a bound on what one card hands the browser. */
+export const BANK_JOBS = 500;
 
 export const sha256Hex = (text: string) => createHash("sha256").update(text).digest("hex");
 
@@ -131,7 +162,7 @@ export async function loadBankBooks(supabase: Db, orgId: string, dl: BankDownloa
     chunks(keys, 150).map((ks) => supabase.from("bank_lines").select("line_key, choice, bucket, amount").eq("org_id", orgId).in("line_key", ks)),
   );
   const paged = <T,>(q: (f: number, t: number) => PromiseLike<{ data: T[] | null; error: unknown }>) => readAllPages<T>(q, 20);
-  const [alreadyR, payR, crewR, supR, billR, pettyR, acctR, aliasR, invR, peopleR, ruleR, paidR, docR, storedR] = await Promise.all([
+  const [alreadyR, payR, crewR, supR, billR, pettyR, acctR, aliasR, invR, peopleR, ruleR, paidR, docR, storedR, jobR, namesJobs] = await Promise.all([
     already,
     paged<any>((f, t) =>
       supabase
@@ -215,6 +246,18 @@ export async function loadBankBooks(supabase: Db, orgId: string, dl: BankDownloa
         .order("id")
         .range(f, t),
     ),
+    // THE JOBS A LINE MAY BE PUT ON (0375), newest first: every open job and every finished one, never
+    // a cancelled one — a line from June can belong to a job that is complete now, and only a job that
+    // never happened is left off. A failed read is NO job offered, never a wrong one, and never the
+    // whole card: every other answer still works.
+    supabase
+      .from("jobs")
+      .select("id, job_number, name, status, customers(name, company_name)")
+      .eq("org_id", orgId)
+      .in("status", PAPER_JOB_STATUSES)
+      .order("created_at", { ascending: false })
+      .limit(BANK_JOBS),
+    bankLinesNameJobs(supabase, orgId),
   ]);
 
   const errors = [
@@ -256,6 +299,16 @@ export async function loadBankBooks(supabase: Db, orgId: string, dl: BankDownloa
   }));
   const onAccount = new Set(accounts.filter((a) => a.onAccount).map((a) => a.id));
   const dayOf = (iso: string) => todayStrInTz(tz, new Date(iso));
+  // NO JOB IS OFFERED until bank_lines can hold one (0375), and none if the jobs couldn't be read.
+  // Each one said in full by the repo's one job-label helper, so no screen invents a second format.
+  if (jobR.error) reportError("bills:bank.loadBooks.jobs", jobR.error, { orgId });
+  const jobs =
+    !namesJobs || jobR.error
+      ? []
+      : ((jobR.data ?? []) as any[]).map((j) => {
+          const c = Array.isArray(j.customers) ? j.customers[0] : j.customers;
+          return { id: String(j.id), label: jobSaidLabel({ job_number: j.job_number, name: j.name, customer: customerNamePart(c) }) };
+        });
 
   const books: BankBooks = {
     already: alreadyMap,
@@ -293,6 +346,7 @@ export async function loadBankBooks(supabase: Db, orgId: string, dl: BankDownloa
       }))
       .filter((i) => i.balanceCents > 0),
     crew: ((peopleR.data ?? []) as any[]).map((p) => ({ id: String(p.id), name: String(p.full_name ?? "").trim() || "Crew" })),
+    jobs,
     rules: ((ruleR.data ?? []) as any[]).map((r) => ({
       id: String(r.id),
       direction: r.direction === "in" ? "in" : "out",
@@ -331,6 +385,7 @@ function problemView(dl: BankDownload, problem: string): BankView {
     accounts: [],
     invoices: [],
     crew: [],
+    jobs: [],
     rules: [],
     crewPaid: [],
   };
@@ -564,12 +619,10 @@ export async function applyBankCore(
       description: w.line.description,
       check_number: w.line.check,
       merchant_key: w.line.merchantKey,
-      // The stored word (0363's CHECK): Cash Taken Out keeps the word it replaced (storedChoice).
-      choice: c ? storedChoice(c) : "matched",
-      bucket: c?.choice === "cost" ? c.bucket : null,
-      supplier_account_id: c?.choice === "supplier" ? c.supplierAccountId : null,
-      profile_id: c?.choice === "crew" ? c.profileId : null,
-      invoice_id: c?.choice === "invoice" ? c.invoiceId : null,
+      // The answer as bank_lines holds it, from the one function the money row below reads too: the
+      // stored word (0363's CHECK, Cash Taken Out under the word it replaced) and its one id or
+      // bucket. A job answer and its job are inseparable there (0375's bank_lines_job_named).
+      ...storedAnswer(c),
       sorted_by: w.sortedBy,
       created_by: who.userId,
     };
@@ -615,36 +668,65 @@ export async function applyBankCore(
   // The file's name never rides on a money row: only which account and which days.
   const note = `From the bank download${dl.last4 ? ` (••${dl.last4})` : ""} of ${sayRange(dl.from, dl.to)}.`;
   const written = (w: Work) => lineId.has(w.line.key);
-  // A cost on money OUT is a paid business cost; on money IN it is a refund of one, the same bucket
-  // with a negative amount (a return, a supplier's credit), so the bucket comes down by it.
-  const costs = work.filter((w) => written(w) && w.choice?.choice === "cost");
-  if (costs.length) {
-    const rows = costs.map((w) => {
-      const c = w.choice as Extract<BankChoice, { choice: "cost" }>;
-      return {
-        org_id: who.orgId,
-        job_id: null,
-        supplier: w.line.description.slice(0, 120),
-        bill_number: w.line.check ? `Check ${w.line.check}` : null,
-        amount: -w.line.cents / 100,
-        status: "paid",
-        bill_date: w.line.postedOn,
-        notes: note,
-        category: c.bucket,
-        bank_line_id: lineId.get(w.line.key),
-        created_by: who.userId,
-      };
+  /**
+   * THE MONEY ROW A SORTED LINE WRITES, FOR EVERY ANSWER THAT WRITES A BILL — one function, called
+   * twice. A business cost and a line put on a job (0375) differ in exactly TWO fields, job_id and
+   * category, and billPlacement is the one place that decides them; a second copy of this block with
+   * those two swapped is the bug this repo keeps shipping, and the day somebody changed the chunking
+   * or the unwrite here only one of the two would get the fix.
+   *
+   * A bill is the line turned round: money OUT is a paid cost, money IN is a refund of one — the same
+   * bucket with a negative amount (a return, a store's credit), so what it was charged to comes down by
+   * it. A line whose bill did not land comes off again (unwrite), so the next look at the download asks
+   * about it instead of counting it as sorted.
+   *
+   * THE COST GUARD IS ASKED HERE, AT THE WRITE (lib/job-cost-guard, audit v994's DB4). A bank line
+   * carries no lines, so a NEGATIVE bill on a job would be a lineless supplier return and the importer
+   * would credit the customer the whole amount at markup. The card offers no job on money in and
+   * validPicks refuses one (jobRefusalFor) — this is the teeth behind both, so no later answer, rule or
+   * screen can hand this function a job row of the wrong sign and have it written anyway.
+   */
+  const writeBills = async (ws: Work[], what: { one: string; many: string }) => {
+    if (!ws.length) return;
+    const all = ws.map((w) => ({
+      org_id: who.orgId,
+      supplier: w.line.description.slice(0, 120),
+      bill_number: w.line.check ? `Check ${w.line.check}` : null,
+      amount: -w.line.cents / 100,
+      status: "paid",
+      bill_date: w.line.postedOn,
+      notes: note,
+      bank_line_id: lineId.get(w.line.key),
+      created_by: who.userId,
+      // The job and the bucket, from the answer the line holds: a job (and no bucket beside it), or a
+      // bucket and no job. Undo reads the same function to know this bill is still the one it wrote.
+      ...billPlacement(storedAnswer(w.choice)),
+    }));
+    const stopped = new Map<Work, string>();
+    ws.forEach((w, i) => {
+      const why = jobCostRefusal({ jobId: all[i].job_id, amount: all[i].amount, lines: [] }, JOB_REFUND_NEXT);
+      if (why) stopped.set(w, why);
     });
+    if (stopped.size) {
+      // SAID OUT LOUD, never dropped quietly: the lines come back off, the reason is the guard's, and
+      // the next look at the download asks about them again.
+      await unwrite([...stopped.keys()].map((w) => w.line.key), `${stopped.size} ${stopped.size === 1 ? "line wasn't" : "lines weren't"} put on a job. ${[...stopped.values()][0]}`);
+    }
+    const rows = all.filter((_, i) => !stopped.has(ws[i]));
     for (const part of chunks(rows, 200)) {
       const { data, error } = await supabase.from("bills").insert(part).select("id, bank_line_id");
       const got = new Set(((data ?? []) as { bank_line_id: string }[]).map((r) => String(r.bank_line_id)));
-      const missed = costs.filter((w) => part.some((r) => r.bank_line_id === lineId.get(w.line.key)) && !got.has(String(lineId.get(w.line.key))));
+      const missed = ws.filter((w) => part.some((r) => r.bank_line_id === lineId.get(w.line.key)) && !got.has(String(lineId.get(w.line.key))));
       if (error || missed.length) {
         if (error) reportError("bills:bank.apply.bills", error, { itemId });
-        await unwrite(missed.map((w) => w.line.key), `${missed.length} business ${missed.length === 1 ? "cost wasn't" : "costs weren't"} written${error ? `: ${dbError(error)}` : "."}`);
+        await unwrite(missed.map((w) => w.line.key), `${missed.length} ${missed.length === 1 ? what.one : what.many}${error ? `: ${dbError(error)}` : "."}`);
       }
     }
-  }
+  };
+  await writeBills(work.filter((w) => written(w) && w.choice?.choice === "cost"), { one: "business cost wasn't written", many: "business costs weren't written" });
+  // A LINE PUT ON A JOB: the same bills row, on that job, with no bucket — a job cost on the P&L's
+  // Materials & Bills, on the job's own profit and in the accountant's download (0375).
+  await writeBills(work.filter((w) => written(w) && w.choice?.choice === "job"), { one: "job cost wasn't written", many: "job costs weren't written" });
 
   // CASH TAKEN OUT (NOT A COST) WRITES NOTHING (Erik, 2026-09-27; W1-34), like Not A Cost (Transfer):
   // the bank line is counted, and the cash counts only when its receipts come in, each filed as a cost
@@ -755,9 +837,10 @@ export async function applyBankCore(
   const learned = new Map<string, { direction: "in" | "out"; key: string; c: BankChoice; min: number; max: number; title: string }>();
   const groupsById = new Map(plan.groups.map((g) => [g.id, g]));
   for (const w of work) {
-    // Never an invoice (one deposit, one invoice) and never Other Income (0363: money in is a
-    // customer's until a person says otherwise, every time).
-    if (w.sortedBy !== "person" || !w.group || !written(w) || !w.choice || w.choice.choice === "invoice" || w.choice.choice === "other_income") continue;
+    // ONLY AN ANSWER A RULE MAY HOLD (learnableAnswer): never a job (0375: a rule is per merchant, and
+    // three trips to the supply house can be three jobs), never an invoice (one deposit, one invoice),
+    // never Other Income (0363: money in is a customer's until a person says otherwise, every time).
+    if (w.sortedBy !== "person" || !w.group || !written(w) || !w.choice || !learnableAnswer(w.choice)) continue;
     const g = groupsById.get(w.group);
     // Money in teaches only Not Income (0363); a refund's bucket is answered each time.
     if (g?.direction === "in" && w.choice.choice !== "not_income") continue;
@@ -896,11 +979,23 @@ export async function applyBankCore(
 
 // ── UNDO ───────────────────────────────────────────────────────────────────────────────────────
 
-type LineRow = { id: string; choice: string; amount: number | string; bucket: string | null; invoice_id: string | null; posted_on: string; description: string };
+type LineRow = {
+  id: string;
+  choice: string;
+  amount: number | string;
+  bucket: string | null;
+  invoice_id: string | null;
+  posted_on: string;
+  description: string;
+  /** Only read where the database has it (0375). Absent reads as no job, which is what every line on a
+   *  database without the column is. */
+  job_id?: string | null;
+};
 
 /**
  * TAKE A WHOLE DOWNLOAD BACK: only what it wrote, and only what nobody has changed since.
- *   · a bill it wrote is deleted while it is still that business cost (0278 still refuses one an
+ *   · a bill it wrote is deleted while it is still the bill its line wrote — that business cost, or
+ *     that job's cost (0375), by the one function Apply placed it with (0278 still refuses one an
  *     invoice bills); a payment it put on an invoice is deleted and the invoice recomputed;
  *   · a supplier or crew payment it wrote is voided (never deleted: the undo-trail law);
  *   · a petty cash top-up it wrote (an ATM line applied before W1-34, when it still wrote one) is
@@ -911,9 +1006,11 @@ type LineRow = { id: string; choice: string; amount: number | string; bucket: st
  *     NULL). A line whose row stays (changed since, or refused) stays counted, and is named.
  */
 export async function undoBankCore(supabase: Db, orgId: string, userId: string, importId: string): Promise<{ ok: true; left: string[]; undone: number } | { ok: false; error: string }> {
+  // The job a line names is read only where the database has the column (0375): asking for it on a
+  // database without it would fail the read and undo nothing at all.
+  const cols = `id, choice, amount, bucket, invoice_id, posted_on, description${(await bankLinesNameJobs(supabase, orgId)) ? ", job_id" : ""}`;
   const read = await readAllPages<LineRow>(
-    (f, t) =>
-      supabase.from("bank_lines").select("id, choice, amount, bucket, invoice_id, posted_on, description").eq("org_id", orgId).eq("import_id", importId).order("id").range(f, t),
+    (f, t) => supabase.from("bank_lines").select(cols).eq("org_id", orgId).eq("import_id", importId).order("id").range(f, t),
     20,
   );
   if (read.error) return { ok: false, error: isMissingBank(read.error) ? BANK_NEEDS_UPDATE : `The download's lines couldn't be read, so nothing was undone. ${dbError(read.error as never)}` };
@@ -945,7 +1042,13 @@ export async function undoBankCore(supabase: Db, orgId: string, userId: string, 
         }
         if (table === "bills") {
           // The bill is the line turned round: a cost for money out, a refund (negative) for money in.
-          const untouched = !row.job_id && centsOf(row.amount) === -centsOf(l.amount) && String(row.category ?? "") === String(l.bucket ?? "");
+          // STILL THE BILL THIS LINE WROTE? Its money, and the job and bucket Apply placed it with —
+          // from the SAME function Apply used (billPlacement), so a job line's bill comes off exactly
+          // as a business cost's does. Asked here by hand, a job line's bill was left behind for ever
+          // as "changed since", because the check said a bill on a job was somebody else's work.
+          const want = billPlacement(l);
+          const untouched =
+            String(row.job_id ?? "") === String(want.job_id ?? "") && centsOf(row.amount) === -centsOf(l.amount) && String(row.category ?? "") === String(want.category ?? "");
           if (!untouched) {
             keep.add(l.id);
             say(l, "its bill was changed since, so it stays");

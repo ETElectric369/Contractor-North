@@ -22,6 +22,8 @@ vi.mock("next/navigation", () => ({ redirect: vi.fn() }));
 vi.mock("@/lib/observe", () => ({ reportError: () => {} }));
 vi.mock("@/lib/pdf-cache", () => ({ bustDocPdf: vi.fn(async () => {}), warmDocPdf: vi.fn(async () => {}) }));
 
+// The cost guard's own sentence: a refusal here must BE it, never a second wording of the same rule.
+import { RETURN_ON_JOB_WHY } from "@/lib/job-cost-guard";
 import { addOpenList } from "./open-list-actions";
 import { applyBankDownload, forgetBankRule, setBankAccount, swapBankDownload, undoBankDownload } from "./bank-actions";
 import { applyBankCore, bankLinesStayHere, bankViews, BANK_NEEDS_UPDATE } from "./bank-core";
@@ -32,6 +34,9 @@ type Row = Record<string, any>;
 let db: Record<string, Row[]>;
 let seq = 0;
 let missingBank = false;
+/** 0375 not applied yet: bank_lines has no job_id, so asking for it or writing it fails the way
+ *  PostgREST fails (an unknown column, an unknown key in the schema cache). */
+let noJobColumn = false;
 
 // bank_rules: one per merchant AND answer (0363's generated `answer` column, spelled out here).
 const UNIQUE: Record<string, string[]> = {
@@ -58,10 +63,26 @@ function fakeDb() {
           const inv = (db.invoices ?? []).find((i) => i.id === r.invoice_id);
           out.invoices = inv ? { invoice_number: inv.invoice_number, status: inv.status } : null;
         }
+        if (cols.includes("customers(")) {
+          const c = (db.customers ?? []).find((x) => x.id === r.customer_id);
+          out.customers = c ? { name: c.name ?? null, company_name: c.company_name ?? null } : null;
+        }
+        // The job a row names, for the readers that say which job in words (the same-purchase check).
+        if (cols.includes("jobs(")) {
+          const j = (db.jobs ?? []).find((x) => x.id === r.job_id);
+          out.jobs = j ? { job_number: j.job_number ?? null, name: j.name ?? null } : null;
+        }
         return out;
       };
       const run = () => {
         if (missingBank && touchesBank) return { data: null, error: { code: "42P01", message: 'relation "bank_lines" does not exist' } };
+        // BEFORE 0375: the column isn't there. A read of it is an unknown column, and a write carrying
+        // it is a key the schema cache has never heard of — which would fail the WHOLE insert.
+        if (noJobColumn && table === "bank_lines") {
+          if (verb === "select" && /job_id/.test(cols)) return { data: null, error: { code: "42703", message: 'column bank_lines.job_id does not exist' } };
+          if ((verb === "insert" || verb === "upsert") && (Array.isArray(payload) ? payload : [payload]).some((r: Row) => r && "job_id" in r))
+            return { data: null, error: { code: "PGRST204", message: "Could not find the 'job_id' column of 'bank_lines' in the schema cache" } };
+        }
         if (verb === "insert" || verb === "upsert") {
           const list = (Array.isArray(payload) ? payload : [payload]).map((r: Row): Row => ({
             id: `${table}-${++seq}`,
@@ -169,8 +190,21 @@ XXXXX1234,09/16/2026,,1111-SHELL 123 ANYTOWN ST,100.00,,Posted,9421.70
 function seed() {
   seq = 0;
   missingBank = false;
+  noJobColumn = false;
   db = {
     organizations: [{ id: "org-1", settings: { timezone: "America/Los_Angeles" } }],
+    customers: [
+      { id: "cust-1", org_id: "org-1", name: "Marla Finch", company_name: null },
+      { id: "cust-2", org_id: "org-1", name: "Tess Zane", company_name: null },
+    ],
+    // The jobs a line may be put on: open, and finished (a line from June can belong to a job that is
+    // complete now). Never a cancelled one, and never another company's.
+    jobs: [
+      { id: "job-kitchen", org_id: "org-1", job_number: "J-054", name: "41 Larkspur", status: "in_progress", customer_id: "cust-1", created_at: "2026-09-01T00:00:00Z" },
+      { id: "job-done", org_id: "org-1", job_number: "J-040", name: "12 Thistle Wood", status: "complete", customer_id: "cust-2", created_at: "2026-06-01T00:00:00Z" },
+      { id: "job-off", org_id: "org-1", job_number: "J-051", name: "9 Clover", status: "cancelled", customer_id: "cust-1", created_at: "2026-08-01T00:00:00Z" },
+      { id: "job-theirs", org_id: "org-2", job_number: "J-900", name: "Another Company's Job", status: "in_progress", customer_id: null, created_at: "2026-09-01T00:00:00Z" },
+    ],
     supplier_accounts: [
       { id: "acct-cs", org_id: "org-1", name: "Contractor Supply", account_number: "CS-12345", branch_code: null, on_account: true },
       { id: "acct-x", org_id: "org-2", name: "Someone Else's Supplier", account_number: "CS-12345", on_account: true },
@@ -503,6 +537,143 @@ describe("Apply", () => {
   });
 });
 
+/**
+ * A BANK LINE CAN GO ON THE JOB IT WAS FOR (0375, Erik 2026-10-02). The $340 of wire bought at the
+ * counter for one kitchen used to have no answer but a business bucket, so it became OVERHEAD, the job
+ * never saw the cost, and Gross Profit read high by exactly that much. A job line writes the same
+ * bills row a receipt filed on that job writes — job_id set, no bucket beside it — which owner-money
+ * splits with `if (b.job_id)` into Materials & Bills inside Cost Of Goods Sold.
+ */
+describe("a line put on the job it was for", () => {
+  const SUPPLY = `Date,Description,Amount\n09/12/2026,ANYTOWN WIRE HOUSE #4,-340.55\n`;
+  const CREDIT = `Date,Description,Amount\n09/19/2026,ANYTOWN WIRE HOUSE #4 CREDIT,22.80\n`;
+
+  it("offers only this company's jobs, each said in full, and writes the money onto the job with no bucket", async () => {
+    const id = await drop(SUPPLY, "Card1234.csv");
+    const v = await view(id);
+    // THE LIST: open and finished jobs, said as the place, the number AND who. Never a cancelled job,
+    // never another company's, and never a quick button (there is no way to guess WHICH job).
+    expect(v.otherOutSingle.find((b) => b.id === "job:job-kitchen")!.label).toBe("On 41 Larkspur · J-054 — Marla Finch");
+    expect(v.otherOutSingle.map((b) => b.id)).toContain("job:job-done");
+    expect(JSON.stringify(v)).not.toContain("job-off");
+    expect(JSON.stringify(v)).not.toContain("job-theirs");
+    expect(v.rows[0].buttons.some((b) => b.id.startsWith("job:"))).toBe(false);
+
+    const res = await applyBankDownload(id, { fingerprint: v.fingerprint, picks: { [v.rows[0].id]: "job:job-kitchen" } });
+    expect(res.ok).toBe(true);
+    const line = db.bank_lines[0];
+    expect(line).toMatchObject({ choice: "job", job_id: "job-kitchen", bucket: null, sorted_by: "person", amount: -340.55 });
+    // THE MONEY ROW: on the job, category NULL (the job already decides), the bank's day, marked.
+    expect(db.bills).toEqual([
+      expect.objectContaining({ org_id: "org-1", job_id: "job-kitchen", category: null, amount: 340.55, status: "paid", bill_date: "2026-09-12", bank_line_id: line.id }),
+    ]);
+    // NEVER A RULE: "the wire house is always this job" is never true (0375 leaves bank_rules alone).
+    expect(db.bank_rules).toHaveLength(0);
+    // AND WHERE THE MONEY WENT draws it as the job cost it is, in the profit and loss's own words:
+    // the next download of the same week counts this line as already in North, and says so.
+    const again = await drop(SUPPLY, "Card1234-again.csv");
+    expect((await view(again)).flow).toEqual([{ key: "materials", label: "Materials & Bills", cents: 34055 }]);
+
+    // UNDO takes a job bill off exactly as it takes a business cost off.
+    expect((await undoBankDownload(id)).ok).toBe(true);
+    expect(db.bills).toHaveLength(0);
+    expect(db.bank_lines).toHaveLength(0);
+  });
+
+  /**
+   * A CREDIT BACK FROM THE SUPPLY HOUSE IS NEVER PUT ON A JOB FROM HERE (lib/job-cost-guard, audit
+   * v994's DB4). A bank line carries no lines, so bills{job_id, amount: -22.80} with none under it is a
+   * supplier return the importer credits to the customer IN FULL and at markup — $22.80 off her bill,
+   * plus markup, for parts nothing says she was ever charged for. The guard refuses that row at the
+   * typing and paper doors; this door asks it too, at the card AND at the write.
+   */
+  it("a credit back from the supply house is never put on a job, and nothing is written", async () => {
+    const id = await drop(CREDIT, "Card1234.csv");
+    const v = await view(id);
+    const row = v.rows[0];
+    expect(row.direction).toBe("in");
+    // NO DEAD DOOR: no job is drawn on a money-in row at all — a bucket refund is, and reads plainly.
+    expect(JSON.stringify(row.others)).not.toContain("job:");
+    expect(JSON.stringify(v.otherInSingle)).not.toContain("job:");
+    expect(JSON.stringify(v.otherIn)).not.toContain("job:");
+    expect(row.others!.some((b) => b.label === "Refund: Tools & Supplies")).toBe(true);
+    // AND A PICK THAT NEVER CAME FROM A BUTTON IS REFUSED, in the guard's own words. Nothing lands:
+    // no bill, no bank line, and the card is still waiting.
+    const res = await applyBankDownload(id, { fingerprint: v.fingerprint, picks: { [row.id]: "job:job-kitchen" } });
+    expect(res.ok).toBe(false);
+    expect(res.error).toContain(RETURN_ON_JOB_WHY);
+    expect(db.bills).toHaveLength(0);
+    expect(db.bank_lines).toHaveLength(0);
+    expect(db.organized_items[0].status).toBe("needs_review");
+    // THE CREDIT STILL HAS A HOME: off the bucket it was bought on, as a negative business cost.
+    expect((await applyBankDownload(id, { fingerprint: v.fingerprint, picks: { [row.id]: "cost:Tools & Supplies" } })).ok).toBe(true);
+    expect(db.bills).toEqual([expect.objectContaining({ job_id: null, category: "Tools & Supplies", amount: -22.8 })]);
+  });
+
+  /**
+   * AND THE SAME RULE AT THE WRITE, behind the card (lib/bills-write-guard.test.ts holds bank-core to
+   * it). validPicks refuses the answer, so today nothing gets past it to writeBills — which is exactly
+   * why the write asks the guard too: the day somebody adds a way for a stored answer to reach the
+   * write without going through validPicks, the money still cannot land on the job. A job cost going
+   * OUT is never touched by it, and the test above pins that it is still written.
+   */
+  it("asks the cost guard at the write as well, not only at the card", async () => {
+    const { readFileSync } = await import("node:fs");
+    const src = readFileSync("src/app/(app)/bills/bank-core.ts", "utf8");
+    expect(src).toContain("jobCostRefusal({ jobId: all[i].job_id, amount: all[i].amount, lines: [] }, JOB_REFUND_NEXT)");
+  });
+
+  it("a job bill somebody moved to another job since stays, and says so", async () => {
+    const id = await drop(SUPPLY, "Card1234.csv");
+    const v = await view(id);
+    await applyBankDownload(id, { fingerprint: v.fingerprint, picks: { [v.rows[0].id]: "job:job-kitchen" } });
+    db.bills[0].job_id = "job-done";
+    const res = await undoBankDownload(id);
+    expect(res.message).toMatch(/its bill was changed since, so it stays/);
+    expect(db.bills).toHaveLength(1);
+    expect(db.bank_lines).toHaveLength(1);
+  });
+
+  it("refuses another company's job, and writes nothing", async () => {
+    const id = await drop(SUPPLY, "Card1234.csv");
+    const v = await view(id);
+    const res = await applyBankDownload(id, { fingerprint: v.fingerprint, picks: { [v.rows[0].id]: "job:job-theirs" } });
+    expect(res.ok).toBe(false);
+    expect(res.error).toMatch(/that job isn't one of yours/);
+    expect(db.bills).toHaveLength(0);
+    expect(db.bank_lines).toHaveLength(0);
+    expect(db.organized_items[0].status).toBe("needs_review");
+  });
+
+  /**
+   * BEFORE 0375 LANDS (the migration is additive and may land after this code): bank_lines has no
+   * job_id, so no job is offered anywhere, no write mentions the column — a key the schema cache has
+   * never heard of fails the WHOLE insert, every line of it — and the card says not one word about a
+   * feature that isn't there yet.
+   */
+  it("before the database can hold a job, no job is offered, nothing throws, and every other answer still works", async () => {
+    noJobColumn = true;
+    const id = await drop(SUPPLY, "Card1234.csv");
+    const v = await view(id);
+    expect(v.problem).toBeNull();
+    expect(JSON.stringify(v)).not.toContain("job:");
+    expect(JSON.stringify(v)).not.toContain("J-054");
+    // A hand-made job pick is refused, not attempted.
+    expect(await applyBankDownload(id, { fingerprint: v.fingerprint, picks: { [v.rows[0].id]: "job:job-kitchen" } })).toMatchObject({ ok: false });
+    expect(db.bank_lines).toHaveLength(0);
+    // And the everyday answer writes as always: the line's row never carries the column.
+    const ok = await applyBankDownload(id, { fingerprint: v.fingerprint, picks: { [v.rows[0].id]: "cost:Tools & Supplies" } });
+    expect(ok.ok).toBe(true);
+    expect(ok.message).not.toMatch(/database update/);
+    expect(db.bills).toEqual([expect.objectContaining({ job_id: null, category: "Tools & Supplies", amount: 340.55 })]);
+    expect("job_id" in db.bank_lines[0]).toBe(false);
+    // Undo runs too: it never asks for a column that isn't there.
+    expect((await undoBankDownload(id)).ok).toBe(true);
+    expect(db.bills).toHaveLength(0);
+    expect(db.bank_lines).toHaveLength(0);
+  });
+});
+
 describe("the next download", () => {
   it("counts what the first wrote as already in North, and sorts by the answers the first taught", async () => {
     const first = await drop();
@@ -605,6 +776,40 @@ describe("a receipt snapped after the download", () => {
     expect(res.error).toMatch(/^Already on the books: 1111-SHELL 123 ANYTOWN ST, \$100\.00, 2026-09-16, from the bank download/);
     expect(res.error).toMatch(/Different Purchase: File It Anyway/);
     expect(db.bills).toHaveLength(3);
+  });
+
+  /**
+   * THE COUNTER RECEIPT FOR A LINE PUT ON A JOB (0375). The wire was bought at the counter for one
+   * kitchen and the bank line was put on that job. Two days later the receipt for the SAME purchase is
+   * snapped and filed on the same job. Nothing printed on either carries a number the other has, so
+   * only money and day can find it — and the same-purchase check used to skip every bill with a job,
+   * because a bank line could never have one. It wrote a second $340.55 bill on J-054: the job cost
+   * doubled, and on a time-and-material job the customer was billed for it twice.
+   */
+  it("the receipt for a line already put on a job is refused, names that job, and writes no second cost", async () => {
+    const id = await drop(`Date,Description,Amount\n09/12/2026,ANYTOWN WIRE HOUSE #4,-340.55\n`, "Card1234.csv");
+    const v = await view(id);
+    expect((await applyBankDownload(id, { fingerprint: v.fingerprint, picks: { [v.rows[0].id]: "job:job-kitchen" } })).ok).toBe(true);
+    expect(db.bills).toHaveLength(1);
+    db.organized_items.push({
+      id: "counter",
+      org_id: "org-1",
+      kind: "receipt",
+      status: "needs_review",
+      doc_type: "receipt",
+      title: "Wire house counter receipt",
+      vendor: "Anytown Wire House",
+      amount: 340.55,
+      item_date: "2026-09-14",
+      payment: "paid_at_purchase",
+      proposal: {},
+    });
+    const res = await fileItem("counter", { type: "job", jobId: "job-kitchen" });
+    expect(res.ok).toBe(false);
+    // SAID AS THE JOB IT IS ON, never a bare number (Erik: "i cant tell by job numbers alone").
+    expect(res.error).toMatch(/^Already on the books: ANYTOWN WIRE HOUSE #4, \$340\.55, 2026-09-12, from the bank download, on J-054 41 Larkspur\./);
+    expect(res.error).toMatch(/Same Purchase: Tie Them/);
+    expect(db.bills).toHaveLength(1);
   });
 
   // Review of release/v1026: a company's fill-ups loaded by hand from a bank export before the bank

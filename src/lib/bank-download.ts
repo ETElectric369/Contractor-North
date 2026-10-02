@@ -1,6 +1,10 @@
 import { BUCKET_SECTION, BUSINESS_COST_BUCKETS, bucketOf, isBusinessCostBucket, type BusinessCostBucket } from "@/lib/business-cost-buckets";
 import { PNL_WORDS } from "@/lib/analytics/profit-and-loss";
 import { findHeaderRow, fingerprintOf, headerKey, readDate, readHeaderRow, readHeaderWith, readMoney, sayDollars } from "@/lib/supplier-open-list";
+// THE RULE EVERY DOOR THAT PUTS A COST ON A JOB IS HELD TO (audit v994's DB4). A bank line writes a
+// bills row with NO LINES under it, so which way the money goes decides whether a job is an answer at
+// all. jobRefusalFor below asks this guard; nothing in this module decides that for itself.
+import { jobCostRefusal } from "@/lib/job-cost-guard";
 
 /**
  * A BANK'S DOWNLOAD, SORTED THE WAY THE COMPANY SORTS IT (Erik, 2026-09-27, "yes go for those").
@@ -606,6 +610,12 @@ export function readBankTable(table: readonly (readonly string[])[], name: strin
  *  (ATM), which wrote a petty-cash top-up; those already written still count once, and still Undo. */
 export type BankChoice =
   | { choice: "cost"; bucket: BusinessCostBucket }
+  // THE JOB THE MONEY WAS FOR (0375), on money going OUT. Eleven answers and not one of them was a
+  // job, so the $340 of wire bought at the counter for one kitchen became Overhead, the job never saw
+  // the cost, and Gross Profit read high by exactly that much. A job line writes the same bills row a
+  // snapped receipt filed on that job writes, so it lands in Materials & Bills inside Cost Of Goods
+  // Sold. Money coming IN is never put on a job here: see jobRefusalFor.
+  | { choice: "job"; jobId: string }
   | { choice: "draw" }
   | { choice: "personal" }
   | { choice: "cash_out" }
@@ -644,6 +654,8 @@ export function choiceId(c: BankChoice): string {
       return `crew:${c.profileId}`;
     case "invoice":
       return `invoice:${c.invoiceId}`;
+    case "job":
+      return `job:${c.jobId}`;
     default:
       return c.choice;
   }
@@ -666,6 +678,9 @@ export function parseChoiceId(id: unknown): BankChoice | null {
       return UUIDISH.test(a ?? "") ? { choice: "crew", profileId: a } : null;
     case "invoice":
       return UUIDISH.test(a ?? "") ? { choice: "invoice", invoiceId: a } : null;
+    // A job, exactly like an invoice: the id is checked against this company's own jobs in validPicks.
+    case "job":
+      return UUIDISH.test(a ?? "") ? { choice: "job", jobId: a } : null;
     // Cash Taken Out, and the word it had before W1-34 (a card's pick saved under the old name).
     case "cash_out":
     case CASH_OUT_STORED:
@@ -683,16 +698,56 @@ export function parseChoiceId(id: unknown): BankChoice | null {
 
 const IN_CHOICES = new Set<ChoiceName>(["invoice", "other_income", "not_income"]);
 
-/** Money in takes the income choices, or a business cost's bucket (a refund of that cost: a
- *  negative bill in the bucket); money out takes the rest. */
+/** THE ANSWERS THAT PUT A COST ON THE BOOKS AND MAY BE GIVEN BACK: a bucket, and a bucket only — a
+ *  store's refund comes off that bucket, the company's own book, which never reaches a customer. A JOB
+ *  IS NOT ONE OF THEM, and jobRefusalFor says why in the cost guard's own words. One set, so the
+ *  direction rule and the "Refund: …" words on a money-in button can't drift apart. */
+const COSTING_CHOICES = new Set<ChoiceName>(["cost"]);
+
+/** The next step after the guard's reason, in this door's own words. It is a real road, not a
+ *  brush-off: a credit already on the books as a negative bill is what this very line MATCHES
+ *  ("Return from … already on the books"), so filing the paper first leaves nothing to answer here. */
+export const JOB_REFUND_NEXT =
+  "File the supply house's credit paper on that job first, so the parts that went back come with it — this line then matches it. Here it can only come off a bucket.";
+
+/**
+ * WHAT A LINE PUT ON A JOB WOULD DO TO THE CUSTOMER'S BILL WHEN THE MONEY COMES THE OTHER WAY — the
+ * cost guard's own sentence, or null when the money may go on a job. THE ONE PLACE the bank's job
+ * answer is held to lib/job-cost-guard (audit v994's DB4).
+ *
+ * A bank line writes a bills row with NO LINES under it. Money out is a cost paid, and on a job it is
+ * the same row a receipt filed on that job writes. Money IN on a job is a negative bill with no lines,
+ * which the importer reads as a supplier return and credits to the customer IN FULL at markup, for
+ * parts nothing says they were ever charged for — the housings credited to a customer who was never
+ * charged for them, the incident the guard was written for.
+ *
+ * BOTH ENDS ASK IT, so the card can never offer what Apply refuses: everyChoice offers a job only
+ * where this is null, choiceFits keeps the direction rule on it, and validPicks says this sentence
+ * back to a pick that was hand-made. applyBankCore asks the guard again at the write itself.
+ */
+export function jobRefusalFor(direction: "in" | "out"): string | null {
+  // The bills row the line would write, as the guard reads one: money out is a positive amount, money
+  // in a negative one, and never a described line under either. The SIGN is the whole of the question
+  // here — which job it is, and how much, cannot change the answer — so a dollar of the right sign
+  // asks it exactly, and jobId only has to BE there (the guard asks whether this is going on a job at
+  // all; which job it is cannot change the answer).
+  return jobCostRefusal({ jobId: "a job", amount: direction === "in" ? -1 : 1, lines: [] }, JOB_REFUND_NEXT);
+}
+
+/** Money in takes the income choices, or a bucket (a refund of that cost: a negative bill in it);
+ *  money out takes the rest. A job is money out only (jobRefusalFor). */
 export function choiceFits(c: BankChoice, direction: "in" | "out"): boolean {
-  return direction === "in" ? IN_CHOICES.has(c.choice) || c.choice === "cost" : !IN_CHOICES.has(c.choice);
+  if (c.choice === "job") return !jobRefusalFor(direction);
+  return direction === "in" ? IN_CHOICES.has(c.choice) || COSTING_CHOICES.has(c.choice) : !IN_CHOICES.has(c.choice);
 }
 
 export type BankNames = {
   accounts: Map<string, string>;
   crew: Map<string, string>;
   invoices: Map<string, string>;
+  /** Each job said the way Erik reads one: the place, the number and who ("i cant tell by job
+   *  numbers alone"). Built by namesOf from the books, never a bare number. */
+  jobs: Map<string, string>;
 };
 
 /** The button's words, Title Case. */
@@ -714,6 +769,10 @@ export function choiceLabel(c: BankChoice, names: BankNames): string {
       return `Pay ${names.crew.get(c.profileId) ?? "Crew"}`;
     case "invoice":
       return `On ${names.invoices.get(c.invoiceId) ?? "Invoice"}`;
+    // "On 12 Elm St · J-047 — A. Customer": the same "On …" the invoice answer reads, and the job
+    // said in full. A bare number is no answer a person can tell apart (Erik).
+    case "job":
+      return `On ${names.jobs.get(c.jobId) ?? "Job"}`;
     case "other_income":
       return "Other Income";
     case "not_income":
@@ -721,6 +780,54 @@ export function choiceLabel(c: BankChoice, names: BankNames): string {
       // income (a transfer from the company's own account, a loan).
       return "Already Counted Or Not Income";
   }
+}
+
+/**
+ * THE ANSWER AS bank_lines HOLDS IT (0363, 0375): the stored word, and the one bucket or id that goes
+ * with it. A matched line holds the word 'matched' and nothing else.
+ *
+ * job_id IS LEFT OFF THE ROW ENTIRELY unless a job was named, and that is deliberate: a database
+ * without 0375 has no such column, and a key it has never heard of fails the write for EVERY line of
+ * the download, not just that one. No job is offered there, so no row needs it. Where the column is
+ * there, the bank_lines_job_named CHECK holds both halves together — a job answer must name a job,
+ * and no other answer may.
+ */
+export function storedAnswer(c: BankChoice | null): {
+  choice: string;
+  bucket: string | null;
+  supplier_account_id: string | null;
+  profile_id: string | null;
+  invoice_id: string | null;
+  job_id?: string;
+} {
+  return {
+    // Cash Taken Out keeps the word it replaced (storedChoice).
+    choice: c ? storedChoice(c) : "matched",
+    bucket: c?.choice === "cost" ? c.bucket : null,
+    supplier_account_id: c?.choice === "supplier" ? c.supplierAccountId : null,
+    profile_id: c?.choice === "crew" ? c.profileId : null,
+    invoice_id: c?.choice === "invoice" ? c.invoiceId : null,
+    ...(c?.choice === "job" ? { job_id: c.jobId } : {}),
+  };
+}
+
+/**
+ * WHERE A SORTED LINE'S MONEY LANDS — the two fields on the bills row that decide it, from the answer
+ * the line holds, in ONE place:
+ *   · a job → that job, and category NULL. owner-money splits every live bill with `if (b.job_id)`
+ *     EXCLUSIVELY, so the money is Materials & Bills inside Cost Of Goods Sold, on the job's own
+ *     profit and in the accountant's download — the same place a receipt filed on that job lands. The
+ *     bucket must be null because the job already decides, and a bucket beside it is dead data that
+ *     reads like a second answer to one question;
+ *   · anything else that writes a bill → no job, its bucket: a business cost, Overhead or COGS by
+ *     BUCKET_SECTION.
+ *
+ * BOTH ENDS CALL IT: Apply writes these two fields, and Undo asks whether the bill it is about to take
+ * off is still the one its line wrote. Written twice, the bill a job line wrote would be left behind
+ * for ever as "changed since", and nobody would know why.
+ */
+export function billPlacement(a: { choice: string; bucket?: string | null; job_id?: string | null }): { job_id: string | null; category: string | null } {
+  return storedChoiceName(a.choice) === "job" ? { job_id: a.job_id ?? null, category: null } : { job_id: null, category: a.bucket ?? null };
 }
 
 // ── THE BOOKS IT IS COMPARED WITH ──────────────────────────────────────────────────────────────
@@ -741,6 +848,9 @@ export type BooksPetty = { id: string; cents: number; day: string; kind: string 
 export type BooksAccount = { id: string; name: string; number: string | null; branch: string | null; onAccount: boolean; aliases: string[] };
 export type BooksInvoice = { id: string; number: string; balanceCents: number; customer?: string | null };
 export type BooksCrew = { id: string; name: string };
+/** A job a line may be put on, with its label already made by the repo's one job-label helper
+ *  (jobSaidLabel, in bank-core's read): this module stays pure and never invents a second format. */
+export type BooksJob = { id: string; label: string };
 export type BooksRule = {
   id: string;
   direction: "in" | "out";
@@ -769,6 +879,9 @@ export type BankBooks = {
   accounts: BooksAccount[];
   invoices: BooksInvoice[];
   crew: BooksCrew[];
+  /** The jobs a line may be put on. EMPTY until migration 0375 is on the database: with no job_id
+   *  column on bank_lines no job is offered anywhere, and nothing says a word about it. */
+  jobs: BooksJob[];
   rules: BooksRule[];
   /** Every live crew payment (marked or not), for "a crew member on a check" guesses. */
   crewPaid: { profileId: string; cents: number }[];
@@ -1055,6 +1168,11 @@ export function ruleChoice(r: BooksRule, books: Pick<BankBooks, "accounts" | "cr
     // OTHER INCOME IS NEVER A RULE'S (0363): money in that is income is a customer's until a person
     // says otherwise, every time. A rule on money in may only say Not Income.
     case "other_income":
+      return null;
+    // A JOB IS NEVER A RULE'S (0375): a rule is per MERCHANT, and "the supply house is always this
+    // job" is never true — three trips in a week are three jobs. The database refuses the word on
+    // bank_rules; a row that somehow carried it places nothing, and its lines ask.
+    case "job":
       return null;
     case "cost":
       return isBusinessCostBucket(r.bucket) ? { choice: "cost", bucket: r.bucket } : null;
@@ -1412,22 +1530,51 @@ function buttonsFor(g: NeedGroup, books: BankBooks): string[] {
   return out.slice(0, 3);
 }
 
+/**
+ * AN ANSWER A RULE MAY REMEMBER. A rule is per MERCHANT and sorts every later line that merchant
+ * sends, so an answer that names ONE thing is never one:
+ *   · a job (0375) — three trips to the supply house in a week are three different jobs, and a rule
+ *     that put them all on the first would spend one job's money on another's, silently, forever;
+ *   · an invoice — one deposit, one invoice;
+ *   · Other Income (0363) — money in is a customer's until a person says otherwise, every time.
+ * One list, because the learning loop and ruleChoice must agree about this.
+ */
+export function learnableAnswer(c: BankChoice): boolean {
+  return c.choice !== "job" && c.choice !== "invoice" && c.choice !== "other_income";
+}
+
 /** Every answer a row may take, for its Other… list. */
-export function everyChoice(direction: "in" | "out", books: Pick<BankBooks, "accounts" | "crew" | "invoices">, single: boolean): BankChoice[] {
+export function everyChoice(direction: "in" | "out", books: Pick<BankBooks, "accounts" | "crew" | "invoices" | "jobs">, single: boolean): BankChoice[] {
+  /**
+   * THE JOB ANSWERS, ON A ROW THAT IS EXACTLY ONE LINE AND NEVER OTHERWISE, and only where the money
+   * is going OUT. A question row is one row per MERCHANT and amount band, so one row can hold several
+   * lines — and a job is per LINE: three trips to the supply house in a week can be three different
+   * jobs, and one tap putting all three on one job is money on the wrong job with nobody told. Exactly
+   * the rule the invoice answer already lives by ("One line may go on an invoice, whatever its
+   * merchant; several may not").
+   *
+   * MONEY IN IS NOT OFFERED A JOB AT ALL (jobRefusalFor): a credit on a job with no lines under it
+   * would credit the customer the whole amount at markup. A control that can only refuse is a dead
+   * door, so it is not drawn — Apply would refuse it in the same words.
+   *
+   * LAST IN THE LIST on purpose: the everyday answers (the buckets, Owner's Draw, a supplier) keep
+   * the places a person's hand already knows, and a job is picked on purpose, newest job first.
+   */
+  const jobs = (): BankChoice[] => (single && !jobRefusalFor(direction) ? books.jobs.map((j): BankChoice => ({ choice: "job", jobId: j.id })) : []);
   if (direction === "in") {
     const out: BankChoice[] = [];
     if (single) for (const i of books.invoices) out.push({ choice: "invoice", invoiceId: i.id });
     out.push({ choice: "other_income" }, { choice: "not_income" });
     // A REFUND OF A COST: money back from a store or a supplier comes off that bucket.
     for (const b of BUSINESS_COST_BUCKETS) out.push({ choice: "cost", bucket: b });
-    return out;
+    return [...out, ...jobs()];
   }
   // Every bucket, Fuel and Auto first (the list's own order).
   const out: BankChoice[] = BUSINESS_COST_BUCKETS.map((b): BankChoice => ({ choice: "cost", bucket: b }));
   out.push({ choice: "draw" }, { choice: "personal" }, { choice: "cash_out" }, { choice: "not_cost" });
   for (const a of books.accounts) if (a.onAccount) out.push({ choice: "supplier", supplierAccountId: a.id });
   for (const c of books.crew) out.push({ choice: "crew", profileId: c.id });
-  return out;
+  return [...out, ...jobs()];
 }
 
 // ── WHAT THE CARD SAYS ─────────────────────────────────────────────────────────────────────────
@@ -1497,6 +1644,10 @@ export function flowLabelOf(choice: string, bucket: string | null): { key: strin
       return { key: "suppliers", label: "Suppliers" };
     case "crew":
       return { key: "crew", label: "Crew Pay" };
+    // A LINE PUT ON A JOB (0375) is a job cost: the same segment a bill already on a job draws, by
+    // the same words the profit and loss uses for it.
+    case "job":
+      return { key: "materials", label: PNL_WORDS.materials };
     default:
       return { key: "other", label: "Other" };
   }
@@ -1570,7 +1721,7 @@ export { plural as sayCount };
 export function validPicks(
   picks: Record<string, unknown> | null | undefined,
   plan: Pick<BankPlan, "groups">,
-  books: Pick<BankBooks, "accounts" | "crew" | "invoices">,
+  books: Pick<BankBooks, "accounts" | "crew" | "invoices" | "jobs">,
 ): { ok: Map<string, BankChoice>; refused: string[] } {
   const ok = new Map<string, BankChoice>();
   const refused: string[] = [];
@@ -1582,12 +1733,28 @@ export function validPicks(
       continue;
     }
     const c = parseChoiceId(raw);
+    // A JOB ON MONEY COMING IN is refused in the COST GUARD'S OWN WORDS, not as "that answer doesn't
+    // fit": the reason a person needs is what it would do to the customer's bill, and the next step.
+    // The card offers it nowhere, so a pick that gets here was hand-made.
+    const jobWhy = c?.choice === "job" ? jobRefusalFor(g.direction) : null;
+    if (jobWhy) {
+      refused.push(`${groupTitle(g)}: ${jobWhy}`);
+      continue;
+    }
     if (!c || !choiceFits(c, g.direction)) {
       refused.push(`${groupTitle(g)}: that answer doesn't fit ${g.direction === "in" ? "money in" : "money out"}`);
       continue;
     }
     if (c.choice === "invoice" && (!g.single || !books.invoices.some((i) => i.id === c.invoiceId && i.balanceCents >= g.cents))) {
       refused.push(`${groupTitle(g)}: that invoice isn't open for that much`);
+      continue;
+    }
+    // A JOB, ONLY ONE OF THIS COMPANY'S AND ONLY ON A ROW THAT IS ONE LINE (0375). The card offers a
+    // job nowhere else, so a pick that gets here naming another company's job — or several lines at
+    // once — was hand-made, and money on another company's job is the one thing three orgs in one
+    // database must never allow.
+    if (c.choice === "job" && (!g.single || !books.jobs.some((j) => j.id === c.jobId))) {
+      refused.push(`${groupTitle(g)}: ${g.single ? "that job isn't one of yours" : "a job goes on one line at a time"}`);
       continue;
     }
     if (c.choice === "supplier" && !books.accounts.some((a) => a.id === c.supplierAccountId)) {
@@ -1679,8 +1846,10 @@ export type BankView = {
   fingerprint: string;
   counts: BankPlan["counts"];
   rows: BankRowView[];
-  /** The Other… lists: money out, money in, and money in on a single line (invoices too). */
+  /** The Other… lists: money out, money out on a single line (a job too), money in, and money in on
+   *  a single line (invoices and a job too). */
   otherOut: BankButton[];
+  otherOutSingle: BankButton[];
   otherIn: BankButton[];
   otherInSingle: BankButton[];
   flow: FlowSegment[];
@@ -1726,11 +1895,12 @@ function rulesUsed(plan: BankPlan, books: BankBooks, names: BankNames): BankView
     .sort((a, b) => b.n - a.n || a.label.localeCompare(b.label));
 }
 
-export function namesOf(books: Pick<BankBooks, "accounts" | "crew" | "invoices">): BankNames {
+export function namesOf(books: Pick<BankBooks, "accounts" | "crew" | "invoices" | "jobs">): BankNames {
   return {
     accounts: new Map(books.accounts.map((a) => [a.id, a.name])),
     crew: new Map(books.crew.map((c) => [c.id, c.name])),
     invoices: new Map(books.invoices.map((i) => [i.id, i.number])),
+    jobs: new Map(books.jobs.map((j) => [j.id, j.label])),
   };
 }
 
@@ -1742,19 +1912,23 @@ export function bankViewOf(dl: BankDownload, plan: BankPlan, books: BankBooks, o
     return c ? choiceLabel(c, names) : id;
   };
   const button = (c: BankChoice): BankButton => ({ id: choiceId(c), label: choiceLabel(c, names) });
-  /** On money in, a bucket is a refund of that cost. */
-  const inButton = (c: BankChoice): BankButton => ({ id: choiceId(c), label: c.choice === "cost" ? `Refund: ${choiceLabel(c, names)}` : choiceLabel(c, names) });
+  /** On money in, a bucket is a refund of that cost ("Refund: Fuel": money back from the store comes
+   *  off the bucket it was charged to). */
+  const inButton = (c: BankChoice): BankButton => ({ id: choiceId(c), label: COSTING_CHOICES.has(c.choice) ? `Refund: ${choiceLabel(c, names)}` : choiceLabel(c, names) });
   /** An invoice in an Other… list, said in full: its number, its customer, what is open on it. */
   const invoiceButton = (i: BooksInvoice): BankButton => ({
     id: choiceId({ choice: "invoice", invoiceId: i.id }),
     label: [`On ${i.number}`, i.customer?.trim() || null, `${sayDollars(i.balanceCents / 100)} open`].filter(Boolean).join(" · "),
   });
-  /** A single deposit's Other… list: the invoices it can go on (open for at least its money), then
-   *  the rest of the money-in answers. */
-  const othersForDeposit = (cents: number): BankButton[] => [
-    ...books.invoices.filter((i) => i.balanceCents >= cents).map(invoiceButton),
-    ...everyChoice("in", books, false).map(inButton),
-  ];
+  /** The money-in answers that are the same for EVERY deposit (the buckets and the fixed words), made
+   *  once for the whole card and never per row: a statement can hold forty single deposits, and a list
+   *  rebuilt for each of them is forty copies of the same buttons in the page's props. */
+  const sharedForDeposit = everyChoice("in", books, true)
+    .filter((c) => c.choice !== "invoice")
+    .map(inButton);
+  /** A single deposit's Other… list: what is different about THIS row (the invoices open for at least
+   *  its money, said in full), then the shared answers above. */
+  const othersForDeposit = (cents: number): BankButton[] => [...books.invoices.filter((i) => i.balanceCents >= cents).map(invoiceButton), ...sharedForDeposit];
   const byKey = new Map(dl.lines.map((l) => [l.key, l]));
   const sorted = new Map<string, { label: string; n: number; cents: number }>();
   for (const [key, d] of plan.dispositions) {
@@ -1794,6 +1968,7 @@ export function bankViewOf(dl: BankDownload, plan: BankPlan, books: BankBooks, o
       };
     }),
     otherOut: everyChoice("out", books, false).map(button),
+    otherOutSingle: everyChoice("out", books, true).map(button),
     otherIn: everyChoice("in", books, false).map(inButton),
     otherInSingle: everyChoice("in", books, true).map(inButton),
     flow: flow.out,
