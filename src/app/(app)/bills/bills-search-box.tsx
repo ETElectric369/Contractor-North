@@ -23,8 +23,23 @@ const BillsSearchCtx = createContext<BillsSearch | null>(null);
  * ONE QUERY FOR THE PAGE (W1-32): the box at the top and All Bills below read the same words, so
  * typing in the box filters the list in place. The rows are handed over once, here.
  */
-export function BillsSearchProvider({ rows, children }: { rows: BillsSearchRow[]; children: ReactNode }) {
-  const [query, setQuery] = useState("");
+export function BillsSearchProvider({
+  rows,
+  children,
+  initialQuery = "",
+}: {
+  rows: BillsSearchRow[];
+  children: ReactNode;
+  /**
+   * WHAT A DOOR SOMEWHERE ELSE ASKED TO HAVE LOOKED UP (`/bills?q=...`). /reconcile's rows name a
+   * spelling and then send him here to answer that paper; linking to `#bills-search` alone scrolled
+   * him to an empty box, so the door's own words had to be retyped from the screen he had just left.
+   * It is a STARTING POINT and nothing more: he clears or retypes it like anything he typed himself,
+   * and the URL is not rewritten behind him.
+   */
+  initialQuery?: string;
+}) {
+  const [query, setQuery] = useState(initialQuery);
   const listRows = useMemo(() => rows.filter((r) => r.kind !== "paper"), [rows]);
   const keys = useMemo(() => matchingKeys(listRows, query), [listRows, query]);
   const value = useMemo(() => ({ query, setQuery, rows, keys }), [query, rows, keys]);

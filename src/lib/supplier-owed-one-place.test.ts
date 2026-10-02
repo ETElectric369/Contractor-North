@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
-import { codeOnly } from "@/lib/migration-body.test-util";
+import { codeOnly, eachAppSource } from "@/lib/migration-body.test-util";
 
 /**
  * ONE RULE, ONE PLACE - WITH A TRIPWIRE ON IT (8a982483).
@@ -209,6 +209,172 @@ describe("the still-owed rule is written in exactly one place", () => {
   it("no reader writes the could-not-total test itself", () => {
     const hits = scan((l) => /model\s*(!==|===)\s*["'`]supplier-invoices["'`]/.test(l) && /onAccount/.test(l));
     expect(hits).toEqual([]);
+  });
+
+  /**
+   * ── "IS THIS PAPER A DISAGREEMENT" IS WRITTEN ONCE (cn-v1041) ─────────────────────────────────
+   *
+   * Erik, after using the page: "I don't understand this give it account thing because it's already
+   * categorized and identified and most things are not going to be on an account honestly". He was
+   * looking at thirty-three rows, THIRTY-TWO of them register purchases already settled, because the
+   * pile's membership test had only half of the rule in it. A paper is a disagreement when it is on
+   * no supplier account AND STILL OPEN: a purchase paid at the till has one record, so there is no
+   * second record for it to disagree with.
+   *
+   * THE RULE IS NOW ONE FUNCTION, `paperDisagrees`, and this is why it needs a tripwire rather than
+   * just an export: both halves are one-liners anybody can retype, and the LAST time half of a rule
+   * was retyped at a reader it took a year and a live book to notice. A reader that spells out the
+   * account test beside the open test has written the pile a second time, and the two piles will
+   * eventually be different sizes on two screens about the same papers.
+   *
+   * It lives here, beside its siblings, so no second scanner can disagree with this one about what a
+   * line of code is — and it reads through the SHARED stripper, so it cannot be blinded to a file.
+   */
+  it("no reader writes the is-this-a-disagreement test itself", () => {
+    // The open half, by any of its names, on a line that also asks whether a paper is on an account.
+    const openHalf = /\b(isStillOwed|isOnAccountBill|boughtAtRegister)\s*\(/;
+    const accountHalf = /\baccountOf\s*\(|\baccountId\b|\bsupplier_account_id\b/;
+    const hits: string[] = [];
+    let scanned = 0;
+    eachAppSource(
+      (path, source) => {
+        scanned += 1;
+        const rel = relative(ROOT, path);
+        const lines = source.split("\n");
+        for (let i = 0; i < lines.length; i += 1) {
+          const l = lines[i];
+          // The one function IS both halves, so a line that calls it is the rule, not a copy of it.
+          if (l.includes("paperDisagrees(")) continue;
+          if (openHalf.test(l) && accountHalf.test(l)) hits.push(`${rel}:${i + 1}: ${l.trim().slice(0, 140)}`);
+        }
+      },
+      // The owner. `paperDisagrees` is defined there, out of `isStillOwed` three lines above it.
+      [join("src", "lib", "supplier-owed.ts")],
+    );
+    expect(hits, `these decide the papers-on-no-account pile themselves — call paperDisagrees: ${hits.join(" | ")}`).toEqual([]);
+    /**
+     * AND THE SCAN REALLY LOOKED AT THE APP. A stripper that eats real code reports PASS, which is
+     * how eighteen files sat outside every tripwire in this file until 2026-10-01. A floor on the
+     * file count catches a walker that stopped early; the two files below are the ones this rule is
+     * actually about, so a rename that left this scanning ghosts fails here.
+     */
+    expect(scanned, "the app-source walk came back with far too few files").toBeGreaterThan(600);
+    for (const owner of ["src/lib/supplier-owed.ts", "src/app/(app)/bills/supplier-name-work.ts"]) {
+      const src = codeOnly(readFileSync(join(ROOT, owner), "utf8"));
+      expect(src, `${owner} must reach the pile through the one function`).toContain("paperDisagrees(");
+      // And the stripper left the file's code behind: a blinded read would be nearly empty.
+      expect(src.split("\n").filter((l) => l.trim().length > 0).length, owner).toBeGreaterThan(60);
+    }
+  });
+
+  /**
+   * ── ONE NUMBER FOR ONE PILE: THE DOOR AND THE SECTION IT LANDS ON ────────────────────────────
+   *
+   * /bills' Suppliers card draws "$X On N Bills With No Supplier Account · File It" out of
+   * `notOnAnAccount`, and links to the section on /reconcile that answers it. That section used to
+   * count its own rows: "1 Bill" at the door, thirty-one rows underneath. So the section is HANDED
+   * that same object and may not total the pile itself.
+   */
+  it("the papers-on-no-account section is handed the read's figure, never its own sum", () => {
+    const page = readFileSync(join(ROOT, "src/app/(app)/reconcile/page.tsx"), "utf8");
+    expect(page).toContain("figure={work.notOnAccount.figure}");
+    const read = codeOnly(readFileSync(join(ROOT, "src/app/(app)/reconcile/reconcile-read.ts"), "utf8"));
+    // Handed down from the one read, untouched — never rebuilt from the bills this module holds.
+    expect(read).toContain("owed.owed.notOnAnAccount");
+    expect(read).toContain("figures?.notOnAnAccount");
+    const card = codeOnly(readFileSync(join(ROOT, "src/app/(app)/bills/suppliers-card.tsx"), "utf8"));
+    expect(card).toContain("notOnAccount.papers");
+  });
+
+  /**
+   * ── THE SENTENCE FOR WHAT THE PILE STOPPED SHOWING IS WRITTEN ONCE (cn-v1041) ─────────────────
+   *
+   * Nothing leaves a figure in silence, and that sentence was typed as JSX inside the rows card —
+   * which returns null the moment it has no rows. The measured book is in exactly that shape: the one
+   * open paper arrives under a spelling the fuzzy matcher has an opinion about, so it is a row in a
+   * suggestion further up the page and the pile's own list is empty. Sixty-nine settled papers were
+   * then accounted for NOWHERE, while /bills' File It door went on quoting money for the pile.
+   *
+   * THREE PLACES SAY IT NOW — the rows card, the one-line card the door lands on, and the all-clear —
+   * so it is a function, and a reader that types the words itself is a fourth place that will drift.
+   */
+  it("what the pile stopped showing is said through one function, in every place it is said", () => {
+    const owner = codeOnly(readFileSync(join(ROOT, "src/lib/supplier-owed.ts"), "utf8"));
+    expect(owner, "the sentence lives beside the other two about this pile").toContain(
+      "export function settledAtTheRegisterSentence",
+    );
+    for (const rel of ["src/app/(app)/reconcile/page.tsx", "src/app/(app)/bills/supplier-merge-review.tsx"]) {
+      const src = codeOnly(readFileSync(join(ROOT, rel), "utf8"));
+      expect(src, `${rel} must say it through settledAtTheRegisterSentence`).toContain("settledAtTheRegisterSentence");
+      // The one phrase only the owner may build. A reader that types it has written a second sentence
+      // about one pile, and the two will eventually disagree about a count.
+      expect(src, `${rel} types the sentence itself`).not.toContain("paid at the register, so");
+      expect(src.split("\n").filter((l) => l.trim().length > 0).length, rel).toBeGreaterThan(60);
+    }
+  });
+
+  /**
+   * ── AND A ROW'S MONEY WORDS READ THE SIGN, FROM ONE PLACE ─────────────────────────────────────
+   *
+   * A return goes in this app as a NEGATIVE on-account bill, so a group on no supplier account can
+   * carry a negative net — and a row built with `formatCurrency(...) + " still open"` printed
+   * "-$51.58 still open", a negative debt, directly under a lead that said the same money was "money
+   * back, so it is not in that figure either". `spellingMoneySaid` owns the split (credit / nothing
+   * owed / still open), the same way `whatISupplierOwed` routes a credit to `ahead` rather than into
+   * the total. A $0.00 paper read "$0.00 still open" through the same missing branch.
+   */
+  it("no row of the papers-on-no-account pile formats money straight into still open", () => {
+    const owner = codeOnly(readFileSync(join(ROOT, "src/app/(app)/bills/supplier-balance.ts"), "utf8"));
+    expect(owner, "the sign becomes words in exactly one place").toContain("export function spellingMoneySaid");
+    // THE FILES THAT BUILD AND DRAW THIS PILE'S ROWS. Scoped on purpose: "still open" is a true
+    // sentence elsewhere about figures that cannot go negative (a supplier's own open balance, a late
+    // interest charge), and a tripwire that cries about those gets switched off. These three are the
+    // ones a credit can reach.
+    const drawers = [
+      "src/app/(app)/bills/supplier-merge-review.tsx",
+      "src/app/(app)/bills/supplier-name-work.ts",
+      "src/app/(app)/reconcile/page.tsx",
+    ];
+    const hits: string[] = [];
+    for (const rel of drawers) {
+      const src = codeOnly(readFileSync(join(ROOT, rel), "utf8"));
+      // AND THE FILE WAS REALLY READ. A stripper that eats a file, or a rename that leaves this
+      // reading a ghost, reports PASS — which is how eighteen app files sat outside every tripwire in
+      // here until 2026-10-01. A nearly-empty read is a blinded read, not a clean one.
+      expect(src.split("\n").filter((l) => l.trim().length > 0).length, `${rel} came back all but empty`).toBeGreaterThan(60);
+      src.split("\n").forEach((l, i) => {
+        // LOWERCASE ON PURPOSE: a row's sentence is prose and is where a credit lands. The Title Case
+        // "Still Open" beside a heading is the read's own `notOnAnAccount.total`, which cannot be
+        // negative by construction — `whatISupplierOwed` sends every credit to `ahead` and only adds
+        // a group over half a cent into that figure — and it is guarded above half a cent as well.
+        if (/still open/.test(l) && /formatCurrency\s*\(|formatMoney\s*\(/.test(l)) hits.push(`${rel}:${i + 1}: ${l.trim().slice(0, 140)}`);
+      });
+    }
+    expect(hits, `these can print a negative debt — call spellingMoneySaid: ${hits.join(" | ")}`).toEqual([]);
+    const card = codeOnly(readFileSync(join(ROOT, "src/app/(app)/bills/supplier-merge-review.tsx"), "utf8"));
+    expect(card, "the pile's rows read the sign through the one function").toContain("spellingMoneySaid(");
+  });
+
+  /**
+   * ── AND THE ONE QUESTION THE PILE ASKS IS ONE A BILL CAN ANSWER (cn-v1041) ────────────────────
+   *
+   * `bills.category` is the BUSINESS-COST bucket. The bill editor writes `category: isOverhead ?
+   * billCategory : null` and renders its Bucket control only `{isOverhead && ...}`, so a paper on a
+   * job cannot hold one by design. Counting its blank as "unclear" put the page's one question on
+   * every job-costed paper and then sent him to a bill with no control that could answer it — a dead
+   * end wearing the question. Reconcile READS; it does not re-rule. So the count follows the owning
+   * screen, and this is the tripwire that says the two are still describing the same rule.
+   */
+  it("the unclear-category count follows the screen that owns the category", () => {
+    const editor = codeOnly(readFileSync(join(ROOT, "src/app/(app)/bills/bills-receipts.tsx"), "utf8"));
+    // Still true: a bill off a job gets no category written, and no control to write one with.
+    expect(editor, "the owning screen decides this, and it still decides it this way").toContain(
+      "category: isOverhead ? billCategory : null",
+    );
+    const pile = codeOnly(readFileSync(join(ROOT, "src/app/(app)/bills/supplier-name-work.ts"), "utf8"));
+    // So a job-costed paper is answered — counted as what it is, never as a question.
+    expect(pile).toMatch(/else if \(b\.job_id\)/);
+    expect(pile).toContain("g.onAJob += 1");
   });
 
   /**

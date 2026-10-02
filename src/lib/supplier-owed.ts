@@ -270,6 +270,43 @@ export function isStillOwed(paper: StillOwedShape | null | undefined): boolean {
 }
 
 /**
+ * ── IS THIS PAPER A DISAGREEMENT? THE ONE TEST /reconcile'S PILE IS DECIDED BY ────────────────
+ *
+ * Erik's law for that page, verbatim: "reconcile is the bottom fold filling in dots not controlling
+ * systems, a peace maker." Every row on it is ONE sentence: TWO RECORDS THAT SHOULD AGREE, AND DO
+ * NOT. So a paper belongs in the pile of papers on no supplier account only when there really are
+ * two records to compare, and that takes BOTH halves of this expression:
+ *
+ *   · NOT ON AN ACCOUNT. `accountId` is the RESOLVER's answer (`resolveSupplierPapers` /
+ *     `supplierAccountForPaper`), never the stored column — a paper spelled with an account's own
+ *     name is on that account whatever `bills.supplier_account_id` says.
+ *   · AND STILL OPEN. `isStillOwed`, above. THIS IS THE HALF THAT WAS MISSING, and leaving it out
+ *     is the whole fault: a purchase paid at the register has ONE record — the receipt in his hand
+ *     — so there is no second record for it to disagree with and nothing to reconcile. Measured on
+ *     a live book, 68 of 69 papers on no supplier account were already settled, every one of them
+ *     already filed under an expense category, and the page offered to open a supplier account with
+ *     a petrol station for each of them. Thirty-three names where one was waiting.
+ *
+ * ONE FUNCTION, EVERY READER (teeth in supplier-owed-one-place.test.ts): both halves written out by
+ * hand at a reader is exactly how `isStillOwed` came to exist three times, each copy knowing a
+ * different subset of the facts, so the same ticket read settled on one line of a screen and owed on
+ * the next.
+ */
+export function paperDisagrees(input: {
+  /** From the resolver: the account this paper belongs to, or null when nothing reached it. */
+  accountId: string | null | undefined;
+  /** The paper, in the shape the still-owed test reads. */
+  paper: StillOwedShape | null | undefined;
+  /** From `supplierCoverage`, when the caller holds the set rather than the flag on the paper. */
+  settledBySupplier?: boolean | null;
+}): boolean {
+  // On an account, the supplier's own balance is the other record, and the gap per supplier is
+  // where that comparison belongs — not in the pile of papers nobody has filed.
+  if (input?.accountId) return false;
+  return isStillOwed({ ...(input?.paper ?? {}), settledBySupplier: input?.paper?.settledBySupplier || input?.settledBySupplier });
+}
+
+/**
  * HOW IT WAS BOUGHT, WHICH IS THE ONLY THING bills.status SAYS - and naming that is most of what
  * this whole fix is (8a982483).
  *
@@ -706,16 +743,21 @@ export function whatISupplierOwed(input: {
     const id = String(p?.id ?? "");
     if (!id) continue;
     const settled = p?.settledBySupplier || input?.settledBySupplier?.has(id);
-    if (!isStillOwed({ ...p, settledBySupplier: settled })) continue;
     const who = input.identity.get(id) ?? supplierAccountForPaper(p, null);
     const amount = money(p?.amount);
     if (who.accountId) {
+      if (!isStillOwed({ ...p, settledBySupplier: settled })) continue;
       const g = openOnAccount.get(who.accountId) ?? { total: 0, papers: 0 };
       g.total = r2(g.total + amount);
       g.papers += 1;
       openOnAccount.set(who.accountId, g);
       continue;
     }
+    // ── THE PAPERS ON NO ACCOUNT ARE /reconcile'S PILE, so the membership test is the one that
+    // decides that pile and nothing else: `paperDisagrees`. The door on /bills quotes
+    // `notOnAnAccount` out of this arm and the section it lands on draws rows out of the same
+    // expression, which is what stops one page saying "1 bill" over a list of thirty-one.
+    if (!paperDisagrees({ accountId: who.accountId, paper: p, settledBySupplier: settled })) continue;
     const g = loose.get(who.group) ?? {
       name: who.spelling || NO_SUPPLIER_NAME_LABEL,
       total: 0,
@@ -894,4 +936,32 @@ export function papersOnNoAccountAside(n: NotOnAnAccount | null | undefined, for
   // because this sentence prints both under a dispute figure and on its own when there is none, and a
   // sentence that points at something that may not be there reads as the machine losing track.
   return `${formatMoney(n.total)} is on ${papers} not on a supplier account yet, counted under the name on the paper. A paper on no account has no supplier balance to disagree with, so none of it is in a gap figure on this page.${unnamed}${credits}`;
+}
+
+/**
+ * ── WHAT IS NOT SHOWN, IN ONE SENTENCE, FROM ONE PLACE ────────────────────────────────────────
+ *
+ * `paperDisagrees` keeps every settled register purchase out of /reconcile's pile, and nothing may
+ * leave a figure in silence: this is the sentence that accounts for them. A count, no names, no
+ * list and no door — the cure for a stockpile is not a smaller stockpile with an explanation.
+ *
+ * IT IS A FUNCTION RATHER THAN JSX BECAUSE THREE PLACES SAY IT AND ONE OF THEM USED NOT TO. It was
+ * written inline inside the rows card, which returns null the moment it has no rows — and it has no
+ * rows in exactly the shape the measured book is in: every open paper held by a suggestion further
+ * up the page. On that book the settled papers were accounted for NOWHERE, while /bills' File It
+ * door went on quoting a figure for the pile. Three readers now, one sentence:
+ *
+ *   · the rows card on /reconcile, under its heading;
+ *   · the one-line card the File It door lands on when every row is upstairs;
+ *   · the all-clear lead, where the whole pile is settled and no section is drawn at all.
+ */
+export function settledAtTheRegisterSentence(settled: number | null | undefined): string | null {
+  const n = Math.trunc(Number(settled) || 0);
+  if (n <= 0) return null;
+  const one = n === 1;
+  return (
+    `${n} more ${one ? "purchase" : "purchases"} on no supplier account ${one ? "was" : "were"} paid at the register, ` +
+    `so ${one ? "it has" : "each has"} one record and nothing to square up. ` +
+    `${one ? "It is" : "They are"} in All Bills on the Bills page.`
+  );
 }
