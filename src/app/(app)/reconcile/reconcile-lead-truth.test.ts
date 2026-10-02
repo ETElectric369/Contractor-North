@@ -362,3 +362,41 @@ describe("the all-clear sentence claims only what it checked", () => {
     expect(lead(html)).not.toContain("no ticket is filed twice");
   });
 });
+
+/**
+ * ── 7. THE ALL-CLEAR IS SCOPED TO THE PAGE THAT COUNTED IT ──────────────────────────────────────
+ *
+ * The statement door is drawn on a quiet page on purpose — that is the moment the next download is in
+ * his hand — so the lead stopped saying "Nothing for you to do here" above it. What replaced it was a
+ * claim about the whole book: "Nothing is waiting on you". But the door directly underneath that
+ * sentence CREATES waiting work — a dropped download waits as a card under Needs You on Bills — and
+ * this page never reads that queue; it reads bills and suppliers' own papers. So after one drop the
+ * lead told him nothing was waiting on him three inches above its own "Waiting under Needs You on
+ * Bills", and went on telling him so on every later visit. One word, "here", keeps both true.
+ */
+describe("the all-clear is scoped to what this page counted", () => {
+  it("says nothing HERE is waiting, over a door whose whole job is to make work elsewhere", async () => {
+    CURRENT = { profiles: BASE.profiles, organizations: BASE.organizations };
+    const html = await render();
+    const words = lead(html);
+    expect(words).toContain("Nothing Disagrees Right Now");
+    // Scoped, and the door is still named: no flat "nothing to do" over a door, and no whole-book claim.
+    expect(words).toContain("Nothing here is waiting on you");
+    expect(words).toContain("drop it in below");
+    expect(words).not.toContain("Nothing for you to do here");
+    expect(words).not.toMatch(/Nothing is waiting on you/);
+    expect(textOf(html)).toContain("Drop A Bank Or Supplier Download");
+  });
+
+  it("and the scope is required, because nothing on this page reads the paper queue", async () => {
+    // THE TRIPWIRE FROM THE OTHER END. The day this page does read `organized_items` and counts what
+    // waits under Needs You, the sentence above may be widened — and that happens here, on purpose,
+    // rather than in a copy-edit that nobody checked the reads for.
+    const { readFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    for (const f of ["page.tsx", "reconcile-read.ts", "supplier-gap.tsx"]) {
+      const src = readFileSync(join(process.cwd(), "src/app/(app)/reconcile", f), "utf8");
+      expect(src, f).not.toContain('from("organized_items")');
+    }
+  });
+});

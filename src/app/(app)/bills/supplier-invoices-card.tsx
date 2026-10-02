@@ -24,11 +24,12 @@ import {
   lateInterest,
   missedDiscounts,
   needsJobTotals,
+  noJobRowLine,
   openDocuments,
   sayKind,
   shopStockPileClause,
-  SHOP_STOCK_NO_JOB_LINE,
   supplierSaysOpen,
+  wentBackPileClause,
   type SupplierInvoiceKind,
   type SupplierPaperCard,
   type SupplierReconcileFeed,
@@ -471,10 +472,14 @@ export function SupplierPaperLists({
             <p>
               Buying no job is carrying yet. {accountName} wrote a job name on each one, and nothing is picked for you.
               {needJobTotals.stock > 0 ? ` ${shopStockPileClause(needJobTotals.stock, formatCurrency(needJobTotals.stockTotal))}` : ""}
+              {/* AND THE STOCK PAPERS NOTHING WAS KEPT OFF ARE COUNTED SEPARATELY, never as shop stock:
+                  the clause above tells him to record them, and a return has nothing to record. */}
+              {needJobTotals.wentBack > 0 ? ` ${wentBackPileClause(needJobTotals.wentBack, formatCurrency(needJobTotals.wentBackTotal))}` : ""}
             </p>
           </WhyFold>
           <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
-            {(showAll.job ? needJob : needJob.slice(0, LIST_LIMIT)).map(({ invoice, match }) => {
+            {(showAll.job ? needJob : needJob.slice(0, LIST_LIMIT)).map((row) => {
+              const { invoice, match } = row;
               const choice = picked[invoice.id] ?? "";
               const canPick = match.verdict !== "stock" && match.ranked.length > 0;
               return (
@@ -531,10 +536,12 @@ export function SupplierPaperLists({
                           </Button>
                         </>
                       ) : (
-                        /* THE SAME SENTENCE THE PILE'S HEADING SAYS, out of the one place that says it
-                           (supplier-reconcile.ts): a stock ticket's cost does NOT stay as overhead
-                           once the shelf has it. */
-                        <p className="text-xs leading-relaxed text-slate-600">{SHOP_STOCK_NO_JOB_LINE}</p>
+                        /* THE SENTENCE FOR THIS ROW, out of the one place that says them all
+                           (supplier-reconcile.ts noJobRowLine): a stock ticket's cost does NOT stay as
+                           overhead once the shelf has it — and a credit memo, or a purchase a credit
+                           memo took back, is NOT told to record anything, because the only Record To
+                           Stock button on this card is drawn for a purchase nothing came back off. */
+                        <p className="text-xs leading-relaxed text-slate-600">{noJobRowLine(row)}</p>
                       )}
                       {failedAt === `job:${invoice.id}` && error && (
                         <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>

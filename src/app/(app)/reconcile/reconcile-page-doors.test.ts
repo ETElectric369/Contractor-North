@@ -408,6 +408,25 @@ describe("who may bring a bank download in", () => {
       CURRENT = TABLES;
     }
   });
+
+  /**
+   * AND FAIL-CLOSED IS FOR THE VIEWER THE SWITCH IS ABOUT, NEVER FOR THE OWNER. The page read the
+   * settings first and required the row, so a lost read — or an org_id that is still null, which
+   * profiles allows — took the OWNER'S own door away and printed "The owner brings in bank downloads"
+   * at the owner. The same owner stayed a yes through viewerSortsBank in every server action, which is
+   * two answers to one question. The rule is asked in bank-viewer's own order now: the owner first,
+   * and the read only where the switch can change the answer.
+   */
+  it("an owner whose settings could not be read keeps his own door: the switch was never his gate", async () => {
+    CURRENT = { ...TABLES, profiles: [{ id: "user-owner", org_id: ORG, role: "owner", full_name: "A N Owner" }], organizations: [] };
+    try {
+      const out = await render();
+      expect(count(doors(out), "Drop A Bank Or Supplier Download")).toBe(1);
+      expect(text(out)).not.toContain("The owner brings in bank downloads");
+    } finally {
+      CURRENT = TABLES;
+    }
+  });
 });
 
 /**

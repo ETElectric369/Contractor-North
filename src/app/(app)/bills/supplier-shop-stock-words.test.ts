@@ -3,7 +3,13 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import ts from "typescript";
 import { jobMaterialCostFrom, splitJobMaterialCost } from "@/lib/job-cost";
-import { SHOP_STOCK_NO_JOB_LINE, shopStockPileClause } from "./supplier-reconcile";
+import {
+  NOTHING_KEPT_NO_JOB_LINE,
+  NO_JOB_ON_YOUR_LIST_LINE,
+  SHOP_STOCK_NO_JOB_LINE,
+  shopStockPileClause,
+  wentBackPileClause,
+} from "./supplier-reconcile";
 
 /**
  * A SHOP-STOCK TICKET DOES NOT "STAY AS OVERHEAD" (Shop Stock, migrations 0303-0350).
@@ -96,8 +102,40 @@ describe("nothing in the app teaches the dead end again", () => {
 
   it("the Suppliers card takes both sentences from the one place rather than typing them", () => {
     const card = read("src/app/(app)/bills/supplier-invoices-card.tsx");
-    expect(card).toContain("SHOP_STOCK_NO_JOB_LINE");
+    // The row's sentence comes from the one function that knows WHICH of them this row gets, and the
+    // pile's clause counts only the rows that can be recorded.
+    expect(card).toContain("noJobRowLine(row)");
     expect(card).toContain("shopStockPileClause(needJobTotals.stock");
     expect(card).not.toContain("shop stock (");
+  });
+});
+
+/**
+ * AND THE SENTENCE ONLY GOES TO A ROW THAT HAS THE BUTTON IT NAMES (2026-10-02).
+ *
+ * "Record it to stock" is an instruction, and the pile it was printed in admits papers no Record To
+ * Stock control is ever drawn for: a credit memo (the server refuses one in those words — "Only an
+ * invoice can go into stock.") and a purchase a credit memo already took back, which the other fold
+ * words as "nothing to record". `noJobRowLine` is where that is decided, once, and these are the words
+ * each row may be given. The behaviour itself is pinned in supplier-reconcile.test.ts, on real rows.
+ */
+describe("the stock instruction goes only to a row that can be recorded", () => {
+  it("a return is told nothing was kept, and never told to record anything", () => {
+    expect(NOTHING_KEPT_NO_JOB_LINE).toContain("went back on a credit memo");
+    expect(NOTHING_KEPT_NO_JOB_LINE).toContain("nothing to record");
+    expect(NOTHING_KEPT_NO_JOB_LINE).not.toContain("Record it to stock");
+    expect(NOTHING_KEPT_NO_JOB_LINE.toLowerCase()).not.toContain("overhead");
+  });
+
+  it("a book with no job to offer is told to add the job, which is a door and not a dead end", () => {
+    expect(NO_JOB_ON_YOUR_LIST_LINE).toContain("no job on your list");
+    expect(NO_JOB_ON_YOUR_LIST_LINE).toContain("Add the job");
+    expect(NO_JOB_ON_YOUR_LIST_LINE).not.toContain("Record it to stock");
+  });
+
+  it("the went-back count has its own clause, so the pile's figure is never silent", () => {
+    expect(wentBackPileClause(1, "$76.20")).toBe("1 paper went back on a credit memo ($76.20): nothing kept, so there is nothing to record.");
+    expect(wentBackPileClause(2, "$0.00")).toContain("2 papers went back on credit memos ($0.00)");
+    expect(wentBackPileClause(0, "$0.00")).toBe("");
   });
 });

@@ -100,8 +100,17 @@ export default async function ReconcilePage() {
   //
   // A FAILED SETTINGS READ IS A NO, never the default: the default is ON, so a lost read would hand
   // the owner's money to an office viewer the owner had switched off.
-  const { data: orgRow } = await supabase.from("organizations").select("settings").eq("id", orgId).maybeSingle();
-  const sortsBank = !!orgRow && viewerSeesOwnerMoney(me.role, getOrgSettings((orgRow as { settings?: unknown }).settings).office_sees_owner_money);
+  //
+  // AND THE OWNER IS ASKED FIRST, in viewerSortsBank's own order (bank-viewer.ts: "THE OWNER'S ANSWER
+  // NEVER DEPENDS ON THE SWITCH, so their yes costs no second read"). Reading first and requiring the
+  // row made a lost read a no for the OWNER too — his own door gone, and copy written for somebody
+  // else in its place, while the same owner was still a yes through every server action. Fail-closed
+  // is for the office viewer the switch is about; nobody can hand the owner money he already owns.
+  let sortsBank = viewerSeesOwnerMoney(me.role, false);
+  if (!sortsBank) {
+    const { data: orgRow } = await supabase.from("organizations").select("settings").eq("id", orgId).maybeSingle();
+    sortsBank = !!orgRow && viewerSeesOwnerMoney(me.role, getOrgSettings((orgRow as { settings?: unknown }).settings).office_sees_owner_money);
+  }
 
   // ── THE FIGURES COME FIRST, BECAUSE THE PILES USE THEM ───────────────────────────────────────
   // One read for both supplier questions (and the identity and coverage behind them), then one read
@@ -212,12 +221,19 @@ export default async function ReconcilePage() {
             {/* AND IT DOES NOT SAY "NOTHING FOR YOU TO DO HERE" OVER A DOOR. The statement door below
                 is drawn even on an all-clear page — that is the moment he brings the next download in
                 — and a flat "nothing to do" printed above it reads as a contradiction, so where the
-                door is drawn the sentence ends by naming it instead. */}
+                door is drawn the sentence ends by naming it instead.
+                IT STILL SAYS "HERE", AND THE WORD IS LOAD-BEARING. A bare "nothing is waiting on you"
+                is a claim about the whole book, and the door directly below this sentence CREATES
+                waiting work: dropping a download puts a card under Needs You on Bills, which this
+                page never reads (it reads bills and supplier papers, not the paper queue). The
+                refresh after a drop would then print the all-clear over "Waiting under Needs You on
+                Bills." — the lead claiming what it did not check, which is the one thing it may not
+                do. Scoped to this page, both sentences are true at once. */}
             <p className="mt-1 text-sm text-slate-600">
               Your bills and your suppliers&apos; own papers line up, no supplier name is waiting to be put on an account,
               and no ticket is waiting on you to pick a job.{" "}
               {sortsBank
-                ? "Nothing is waiting on you — when the next download comes off your bank or a supplier, drop it in below."
+                ? "Nothing here is waiting on you — when the next download comes off your bank or a supplier, drop it in below."
                 : "Nothing for you to do here."}
             </p>
             {settledSaid && <p className="mt-1 text-sm text-slate-600">{settledSaid}</p>}

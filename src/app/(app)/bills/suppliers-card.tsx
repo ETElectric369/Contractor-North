@@ -616,13 +616,23 @@ export function SuppliersCard({
               led with one number over a list that led with another.
               AND EACH ONE NAMES ITS QUESTION. This sentence used to end "and neither is wrong",
               which asked him to accept two numbers on faith; two true figures are only confusing
-              while nobody says what each one answers, so now it says. */}
+              while nobody says what each one answers, so now it says.
+              AND IT DOES NOT CALL THE FIGURE ABOVE A SUPPLIER'S ASK WHEN NO SUPPLIER ASKED. It used to
+              end by calling that figure what the suppliers were asking for, and the figure is a BLEND:
+              their own papers where they send them, plus our own open tickets, plus register accounts,
+              plus papers on no account (the fold above names each slice). A company nobody sends a
+              portal balance to has a total made entirely of its own tickets — no supplier has asked
+              for anything, and the two figures then differ only by the payments sent against them. So
+              the supplier's-own-figure half of the sentence is said only where there IS one, which is
+              the same hedge the headline carries ("Where they send you their own papers, this is their
+              figure"). */}
           {boughtNotSettled && boughtNotSettled.total > 0.005 && (
             <p>
               All Bills below says {formatCurrency(boughtNotSettled.total)} across {boughtNotSettled.papers}{" "}
-              {boughtNotSettled.papers === 1 ? "bill" : "bills"} bought on account and not squared up yet. That is your own
-              paperwork, not a bill from them, so it answers a different question: this one is what you bought and have
-              not paid for, and the figure above is what your suppliers are asking you for.
+              {boughtNotSettled.papers === 1 ? "bill" : "bills"} bought on account and not squared up yet, so it answers a
+              different question: that one counts every ticket you have not squared up, and the figure above is what is
+              still owed once the payments you have sent come off
+              {theirOwnPapers > 0.005 ? ", which is your suppliers' own figure where they send you papers" : ""}.
             </p>
           )}
           {supplierModelled.length > 0 && (

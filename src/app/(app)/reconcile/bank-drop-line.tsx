@@ -49,9 +49,15 @@ export function BankDropLine() {
       }
       // NO `expect` HERE, AND THAT IS THE POINT. `expect: "bank"` turned a supplier's own open list
       // away at this door, and the two statements Erik names in one breath are what this page is
-      // for. addOpenList already tells them apart by what is in the file — a bank's columns become a
-      // bank download (and only whoever sorts the bank may bring one in, checked on the server), and
-      // anything else is read as a supplier's open list — so widening the door adds no new path.
+      // for. addOpenList tells them apart by what is in the file — a bank's columns become a bank
+      // download (and only whoever sorts the bank may bring one in, checked on the server), and
+      // anything else is read as a supplier's open list.
+      //
+      // WIDENING THE DOOR DID ADD A PATH, AND THE SERVER CLOSED IT. A bank table the reader could not
+      // make a download of used to be kept as a supplier's list — a class of paper the whole office
+      // may read, with four of its lines sampled onto the card — so `expect: "bank"` had been the
+      // only thing refusing it here. The refusal is now `unreadBankTable` inside addOpenList, where
+      // every door gets it, because this door cannot tell the two files apart and nor could the next.
       const added = await addOpenList({ name: file.name || "Statement", sha256: sha, table: read.table, listDate: read.listDate, source: "bills_drop" });
       if (!added.ok) return setSaid({ text: added.already ? `${added.already} Nothing was added twice.` : (added.error ?? "Not added."), ok: !!added.already });
       setSaid({ text: (added.line ?? "Waiting under Needs You on Bills.").replace("Waiting below", "Waiting under Needs You on Bills"), ok: true, waiting: true });
