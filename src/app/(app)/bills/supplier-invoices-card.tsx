@@ -26,6 +26,8 @@ import {
   needsJobTotals,
   openDocuments,
   sayKind,
+  shopStockPileClause,
+  SHOP_STOCK_NO_JOB_LINE,
   supplierSaysOpen,
   type SupplierInvoiceKind,
   type SupplierPaperCard,
@@ -468,9 +470,7 @@ export function SupplierPaperLists({
           <WhyFold>
             <p>
               Buying no job is carrying yet. {accountName} wrote a job name on each one, and nothing is picked for you.
-              {needJobTotals.stock > 0
-                ? ` ${needJobTotals.stock} ${needJobTotals.stock === 1 ? "is" : "are"} shop stock (${formatCurrency(needJobTotals.stockTotal)}) and stay as overhead.`
-                : ""}
+              {needJobTotals.stock > 0 ? ` ${shopStockPileClause(needJobTotals.stock, formatCurrency(needJobTotals.stockTotal))}` : ""}
             </p>
           </WhyFold>
           <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200">
@@ -531,7 +531,10 @@ export function SupplierPaperLists({
                           </Button>
                         </>
                       ) : (
-                        <p className="text-xs leading-relaxed text-slate-600">Shop stock: no job to put it on. It stays as overhead.</p>
+                        /* THE SAME SENTENCE THE PILE'S HEADING SAYS, out of the one place that says it
+                           (supplier-reconcile.ts): a stock ticket's cost does NOT stay as overhead
+                           once the shelf has it. */
+                        <p className="text-xs leading-relaxed text-slate-600">{SHOP_STOCK_NO_JOB_LINE}</p>
                       )}
                       {failedAt === `job:${invoice.id}` && error && (
                         <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>

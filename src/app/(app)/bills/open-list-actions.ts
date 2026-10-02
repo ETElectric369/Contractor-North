@@ -49,8 +49,11 @@ export async function addOpenList(input: {
   /** The day the file was saved (the browser's lastModified), or null for today. */
   listDate?: string | null;
   source?: "bills_drop" | "organize";
-  /** "bank": the door is Money's Drop Your Bank Download. A file that isn't one is refused in
-   *  plain words, never turned into a supplier's list. */
+  /** "bank": the caller promised a bank download, so a file that isn't one is refused in plain
+   *  words rather than turned into a supplier's list. NO DOOR PASSES IT TODAY: Reconcile's drop line
+   *  takes either statement on purpose (Erik: "i want to upload my bank statement and supplier
+   *  statement"), and this file tells them apart by what is in them. Kept for a door that one day
+   *  promises one kind, and its refusal is tested. */
   expect?: "bank" | null;
 }): Promise<Result & { id?: string; already?: string; line?: string }> {
   const ctx = await requireStaff();

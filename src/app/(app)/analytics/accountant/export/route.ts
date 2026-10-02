@@ -2,6 +2,7 @@ import { deflateRawSync } from "node:zlib";
 import { NextResponse, type NextRequest } from "next/server";
 import { requireStaff } from "@/lib/staff-guard";
 import { getOrgSettings } from "@/lib/org-settings";
+import { viewerSeesOwnerMoney } from "@/lib/bank-viewer";
 import { featureOn } from "@/lib/features";
 import { todayStrInTz, tzDayStartUtc, wallClockInTz } from "@/lib/tz";
 import { readAllPages } from "@/lib/read-all-pages";
@@ -73,7 +74,9 @@ export async function GET(req: NextRequest) {
 
   const period = parseAccountantPeriod(sp.get("period"), todayYmd);
   if (!period) return say("Pick a month, a quarter or a year that has already started.", 400);
-  const showOwner = (meRead.data as { role?: string } | null)?.role === "owner" || settings.office_sees_owner_money;
+  // WHO GETS THE OWNER'S BOTTOM LINE IN THE FILE: the one rule (bank-viewer.ts), the same function
+  // the page's viewer and every bank door ask. This route used to spell the condition out itself.
+  const showOwner = viewerSeesOwnerMoney((meRead.data as { role?: string } | null)?.role, settings.office_sees_owner_money);
   const salesTaxOn = featureOn(settings.features, "sales_tax");
 
   const win = periodWindow(period);

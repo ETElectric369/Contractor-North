@@ -718,6 +718,30 @@ export function needsJobTotals(rows: NeedsJobRow[]): {
   return { rows: (rows ?? []).length, total, undecided, stock, stockTotal };
 }
 
+/**
+ * WHAT ACTUALLY HAPPENS TO A SHOP-STOCK TICKET'S MONEY, SAID IN ONE PLACE (Shop Stock, 0303-0350).
+ *
+ * Both of this pile's sentences used to end "it stays as overhead", and that has been untrue since
+ * the shelf shipped. The shelf is a ledger: a lot's cost comes OFF the job that bought it, and the
+ * database stamps every draw from its lot, so `job_shelf_net.from_shelf` puts what a piece cost onto
+ * the job that took it, and job material cost is `bills - off_shelf + from_shelf`
+ * (src/lib/job-cost.ts jobMaterialCostFrom, migration 0303's job_shelf_net). "It stays as overhead"
+ * taught a dead end that does not exist: he would stop looking for the cost on the job that used it.
+ *
+ * ONE FUNCTION FOR BOTH SENTENCES. The pile's heading said it and so did every row, in two different
+ * strings — which is how one of them went stale and the other went stale with it. A third door gets
+ * these words from here, or the tripwire in supplier-shop-stock-words.test.ts fails.
+ */
+export const SHOP_STOCK_NO_JOB_LINE =
+  "Shop stock, so there is no job to put it on. Record it to stock, and the job that takes a piece out carries exactly what that piece cost; what is still in stock is the company's.";
+
+/** The same truth where the pile is counted: "2 are shop stock ($114.40): …". `money` is formatted. */
+export function shopStockPileClause(rows: number, money: string): string {
+  const n = Math.max(0, Math.trunc(Number(rows) || 0));
+  if (!n) return "";
+  return `${n} ${n === 1 ? "is" : "are"} shop stock (${money}): record them to stock, and each job that takes a piece out carries what that piece cost.`;
+}
+
 export interface NeedsBillSlice {
   rows: SupplierInvoiceRow[];
   total: number;

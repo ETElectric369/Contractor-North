@@ -2,6 +2,8 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { isStaffRole } from "@/lib/actions/perms";
+import { getOrgSettings } from "@/lib/org-settings";
+import { viewerSeesOwnerMoney } from "@/lib/bank-viewer";
 import { PageHeader } from "@/components/page-header";
 import { Card } from "@/components/ui/card";
 import { formatCurrency } from "@/lib/utils";
@@ -25,6 +27,7 @@ import {
   resolveDuplicateBill,
   unresolveDuplicateBill,
 } from "@/app/(app)/bills/supplier-actions";
+import { BankDropLine } from "./bank-drop-line";
 
 export const dynamic = "force-dynamic";
 
@@ -63,8 +66,11 @@ const OWED_READ = "what your suppliers say you owe";
  *     supplier_accounts or bills.superseded_by_bill_id — nothing of this page's own. There is no
  *     reconcile table and there must never be one.
  *  2. IT IS NEVER THE ONLY DOOR. A bank download and a supplier's open list arrive in the one paper
- *     queue and are answered on their own card under Needs You, which is where they stay. The
- *     supplier gap is read-only here and links to the card that owns those figures.
+ *     queue and are ANSWERED on their own card under Needs You, which is where that stays. The
+ *     supplier gap is read-only here and links to the card that owns those figures. Bringing one IN
+ *     is a different thing and it does live here (Bring In A Statement, at the bottom): an intake is
+ *     not a control, and Snap Or Note on Bills still takes the same files, so this is not the only
+ *     way in either.
  *  3. IT READS THE SAME FUNCTIONS THE OWNING SCREENS READ. Every supplier figure comes out of
  *     `readSupplierOwed` — the one read behind Nort, the Suppliers card, the workbook and the P&L —
  *     and no amount is added up on this page.
@@ -84,6 +90,18 @@ export default async function ReconcilePage() {
   const { data: me } = await supabase.from("profiles").select("org_id, role").eq("id", user?.id ?? "").maybeSingle();
   if (!me || !isStaffRole(me.role)) redirect("/timeclock");
   const orgId = String((me as { org_id?: string }).org_id ?? "");
+
+  // ── WHO MAY BRING A BANK DOWNLOAD IN, ASKED OF THE ONE RULE ──────────────────────────────────
+  // A bank download is the owner's draw and personal spending line by line, so the drop door below
+  // is gated exactly as it was on /analytics: by the owner's "Office Can See This" switch (0286).
+  // The condition is NOT re-derived here — `viewerSeesOwnerMoney` (lib/bank-viewer.ts) is the one
+  // function /analytics, the accountant page, its download route and every bank action ask, and a
+  // page that spelled the condition out again is how the two sides of one rule drift apart.
+  //
+  // A FAILED SETTINGS READ IS A NO, never the default: the default is ON, so a lost read would hand
+  // the owner's money to an office viewer the owner had switched off.
+  const { data: orgRow } = await supabase.from("organizations").select("settings").eq("id", orgId).maybeSingle();
+  const sortsBank = !!orgRow && viewerSeesOwnerMoney(me.role, getOrgSettings((orgRow as { settings?: unknown }).settings).office_sees_owner_money);
 
   // ── THE FIGURES COME FIRST, BECAUSE THE PILES USE THEM ───────────────────────────────────────
   // One read for both supplier questions (and the identity and coverage behind them), then one read
@@ -191,9 +209,16 @@ export default async function ReconcilePage() {
                 empties this pile while thirty-two names sit on no account, every one of them settled.
                 What the page counted is that none of them is WAITING on an account, so that is what
                 it says, and the settled count is said in the next breath rather than left out. */}
+            {/* AND IT DOES NOT SAY "NOTHING FOR YOU TO DO HERE" OVER A DOOR. The statement door below
+                is drawn even on an all-clear page — that is the moment he brings the next download in
+                — and a flat "nothing to do" printed above it reads as a contradiction, so where the
+                door is drawn the sentence ends by naming it instead. */}
             <p className="mt-1 text-sm text-slate-600">
               Your bills and your suppliers&apos; own papers line up, no supplier name is waiting to be put on an account,
-              and no ticket is waiting on you to pick a job. Nothing for you to do here.
+              and no ticket is waiting on you to pick a job.{" "}
+              {sortsBank
+                ? "Nothing is waiting on you — when the next download comes off your bank or a supplier, drop it in below."
+                : "Nothing for you to do here."}
             </p>
             {settledSaid && <p className="mt-1 text-sm text-slate-600">{settledSaid}</p>}
           </>
@@ -323,25 +348,57 @@ export default async function ReconcilePage() {
         />
       )}
 
-      {/* ── WHAT IS ANSWERED SOMEWHERE ELSE, SAID ONCE ──────────────────────────────────────────
-          A bank download against the books, and a supplier's open list against our bills, are both
-          this page's sentence — and both arrive as a PAPER in the one paper queue and are answered
-          on their own card under Needs You. Carrying their Apply here would make Reconcile the only
-          door to a queued paper, which is the one thing Erik's law forbids outright. So this is a
-          line of words and a link, never a control. */}
-      {!nothingAtAll && (
-        <Card className="mb-6 p-4">
-          <h2 className="text-base font-semibold text-slate-900">Answered Where The Paper Is</h2>
+      {/* ── BRING ONE IN HERE; IT IS ANSWERED WHERE THE PAPER IS ────────────────────────────────
+          THE DOOR Erik asked for twice: "i want to upload my bank statement and supplier statement,
+          every item will either match or need a category", and on finding it over on Money, "this
+          should be in reconcile too i imagine". So it moved here and left /analytics — one door, on
+          the page named for the job.
+
+          AND IT HOLDS NO APPLY, WHICH IS THE LAW: "reconcile is the bottom fold filling in dots not
+          controlling systems, a peace maker". Bringing a paper IN is an intake, not a control.
+          ANSWERING it stays on the paper's own card under Needs You, the one place every paper is
+          answered — carrying that Apply here would make Reconcile the only door to a queued paper,
+          the one thing the law forbids outright.
+
+          IT IS DRAWN EVEN WHEN NOTHING DISAGREES. It used to sit inside {!nothingAtAll}, which hid
+          it at precisely the moment a person opens this page: the book is quiet and he has the next
+          download in his hand. An all-clear page with no way to put anything on it is a dead end.
+
+          WHAT IT TAKES IS NAMED, NOT IMPLIED. LIST_ACCEPT (lib/open-list-file.ts) reads CSV, TSV, a
+          text table, Excel old or new and a bank's OFX/QFX/QBO — and NOT a PDF. "Drop your
+          statement" would send him to the bank's Statements page for the PDF and hand him a refusal
+          he had no reason to expect. */}
+      {/* THE ANCHOR IS DRAWN FOR EVERY STAFF VIEWER, both halves of the gate, because the Net Profit
+          card on /analytics links to it: an anchor that is not drawn is the dead end this page's own
+          "File It" door already taught us (see the not-on-an-account section above). */}
+      <Card id="bring-in-a-statement" className="mb-6 scroll-mt-20 p-4">
+        <h2 className="text-base font-semibold text-slate-900">Bring In A Statement</h2>
+        {sortsBank ? (
+          <>
+            <p className="mb-2 mt-1 text-sm text-slate-600">
+              Download the month off your bank&apos;s website or a supplier&apos;s portal and drop it here: CSV, Excel, or
+              your bank&apos;s OFX, QFX or QBO file. A PDF can&apos;t be read as a list of lines, so take the CSV or
+              Excel version instead.
+            </p>
+            <BankDropLine />
+          </>
+        ) : (
+          /* NOT A TEASE AND NOT A DEAD DOOR: no control is drawn, and the line names the door that
+             IS this viewer's. A bank download is the owner's own money (0286), so the owner brings
+             those in; a supplier's open list comes in through Snap Or Note on Bills like any paper. */
           <p className="mt-1 text-sm text-slate-600">
-            A bank download against your books, and a supplier&apos;s open list against your bills, are the same kind of
-            disagreement — and both arrive as a paper and are answered on the paper&apos;s own card under Needs You, the
-            one place every paper is answered. Nothing about them is repeated here.
+            The owner brings in bank downloads: they show the owner&apos;s own money line by line. A supplier&apos;s own
+            list of what is open goes in through Snap Or Note on Bills, the same as any other paper.
           </p>
-          <Link href="/bills" className="mt-1 flex min-h-11 items-center text-sm font-medium text-brand hover:underline">
-            Open Bills
-          </Link>
-        </Card>
-      )}
+        )}
+        <p className="mt-1 text-sm text-slate-600">
+          Either one is answered on its own card under Needs You on Bills, where every line either matches a paper you
+          already have or asks you what it was for, and nothing is written until you press Apply there.
+        </p>
+        <Link href="/bills" className="mt-1 flex min-h-11 items-center text-sm font-medium text-brand hover:underline">
+          Open Bills
+        </Link>
+      </Card>
     </div>
   );
 }

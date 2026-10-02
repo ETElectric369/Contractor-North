@@ -268,13 +268,23 @@ export function LeftForCard({
                 </div>
                 {/* $0.00 IS NOT "YOU TOOK NOTHING OUT". The figure has ONE source - bank lines sorted as
                     Owner's Draw - so an empty one means "nothing this period that the app can see", and
-                    the door that changes the answer is Drop Your Bank Download, the line directly below
-                    this card on this same page. Named rather than linked, because it is a file picker
-                    three inches away and a link to somewhere else would be the longer way round. */}
+                    the door that changes the answer is the statement drop line. It used to sit three
+                    inches below this card, so the sentence NAMED it rather than linking; it lives on
+                    Reconcile now (Erik: "this should be in reconcile too i imagine"), and a sentence
+                    pointing "below" at a door that is no longer there is a dead end. So it is a link,
+                    and it lands on the card that holds the door. */}
                 <p className="mt-0.5 text-xs text-slate-500">
                   Equity, not a cost: it is not taken off Net Profit. {money.ownerDrawSeen}
-                  {drawUnseen ? " Nothing this period that the app can see — Drop Your Bank Download below to change that." : ""}
+                  {drawUnseen ? " Nothing this period that the app can see: a bank download is what tells it." : ""}
                 </p>
+                {drawUnseen && (
+                  <a
+                    href="/reconcile#bring-in-a-statement"
+                    className="mt-1 inline-flex min-h-[44px] items-center text-sm font-medium text-brand-600"
+                  >
+                    Bring In A Statement
+                  </a>
+                )}
               </div>
             )}
 

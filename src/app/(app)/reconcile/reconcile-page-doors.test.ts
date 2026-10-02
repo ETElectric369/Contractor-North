@@ -1,7 +1,10 @@
 import { describe, it, expect, vi, beforeAll, afterAll } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { renderToStaticMarkup } from "react-dom/server";
 import { countDoors, doorsIn, sectionOf, textOf } from "@/test/rendered-page";
 import { RECONCILE_ANSWERED_HERE, RECONCILE_KINDS } from "@/lib/reconcile-kinds";
+import { LIST_ACCEPT } from "@/lib/open-list-file";
 
 /**
  * EVERY DOOR THAT MOVED OFF /bills HAS A HOME HERE, AND NOWHERE ELSE (cn-v1037).
@@ -269,9 +272,45 @@ describe("the page reads; it does not re-rule", () => {
     expect(lead).not.toMatch(/^\s*\d+ Things/);
   });
 
-  it("says where a bank download and a supplier's open list are answered, and carries neither Apply", () => {
-    expect(text(html)).toContain("Answered Where The Paper Is");
+  /**
+   * THE STATEMENT DOOR IS AN INTAKE, NOT A CONTROL. Erik asked for it here twice ("i want to upload
+   * my bank statement and supplier statement, every item will either match or need a category", and
+   * of the line on Money: "this should be in reconcile too i imagine"), and it moved off /analytics
+   * rather than being copied: one door. What it may NOT carry is the Apply — a paper is answered on
+   * its own card under Needs You, or this page becomes the only door to a queued paper.
+   */
+  it("takes a statement in, says where it is answered, and carries no Apply", () => {
+    expect(count(doors(html), "Drop A Bank Or Supplier Download")).toBe(1);
+    expect(text(html)).toContain("Bring In A Statement");
+    expect(text(html)).toContain("answered on its own card under Needs You on Bills");
+    expect(count(doors(html), "Open Bills")).toBe(1);
     for (const gone of ["Apply", "Undo It", "Swap"]) expect(count(doors(html), gone), gone).toBe(0);
+  });
+
+  /**
+   * AND IT NAMES WHAT IT ACTUALLY READS. LIST_ACCEPT (lib/open-list-file.ts) takes .csv .tsv .txt
+   * .xlsx .xls .ofx .qfx .qbo and NOT a PDF, so copy that said "your statement" would send him to
+   * the bank's Statements page for the PDF and hand him a refusal he had no reason to expect.
+   */
+  /**
+   * AND THE DOOR THAT WAS NAMED "BELOW THIS CARD" ON MONEY NOW LANDS HERE. The Net Profit card's
+   * Owner's Draw line said "Drop Your Bank Download below to change that" because the door was three
+   * inches under it on /analytics. With the door moved, "below" pointed at nothing — so it is a link
+   * now, and a link to an anchor that is not drawn is the same dead end from the other end.
+   */
+  it("the anchor the Net Profit card links to is drawn on this page, for either half of the gate", () => {
+    const card = readFileSync(join(process.cwd(), "src/app/(app)/analytics/left-for-card.tsx"), "utf8");
+    expect(card).toContain('href="/reconcile#bring-in-a-statement"');
+    expect(card).not.toContain("Drop Your Bank Download");
+    expect(html).toContain('id="bring-in-a-statement"');
+  });
+
+  it("the file types on the card are the file types the reader takes, PDF named as the one that is not", () => {
+    const card = text(html.slice(html.indexOf("Bring In A Statement")));
+    for (const said of ["CSV", "Excel", "OFX", "QFX", "QBO"]) expect(card, said).toContain(said);
+    expect(card).toContain("A PDF can't be read as a list of lines");
+    for (const ext of [".csv", ".tsv", ".txt", ".xlsx", ".xls", ".ofx", ".qfx", ".qbo"]) expect(LIST_ACCEPT, ext).toContain(ext);
+    expect(LIST_ACCEPT).not.toContain(".pdf");
   });
 });
 
@@ -321,6 +360,57 @@ describe("staff only, and proved", () => {
 });
 
 /**
+ * THE DROP DOOR IS THE OWNER'S MONEY, GATED BY THE OWNER'S ONE SWITCH (0286). A bank download is the
+ * draw and the personal spending, line by line. /analytics gated this door on that switch; Reconcile
+ * asks the SAME function (lib/bank-viewer.ts viewerSeesOwnerMoney) rather than deciding again, and
+ * these two renders are the proof — a second copy of the condition would pass a source scan and fail
+ * right here.
+ */
+describe("who may bring a bank download in", () => {
+  const asOffice = (officeSees: boolean) => ({
+    ...TABLES,
+    profiles: [{ id: "user-owner", org_id: ORG, role: "office", full_name: "An Office Hand" }],
+    organizations: [{ settings: { timezone: "America/Los_Angeles", office_sees_owner_money: officeSees }, name: "Synthetic Electric" }],
+  });
+
+  it("an office hand the owner has switched off gets no door, and is told which door is theirs", async () => {
+    CURRENT = asOffice(false);
+    try {
+      const out = await render();
+      expect(count(doors(out), "Drop A Bank Or Supplier Download")).toBe(0);
+      expect(out).not.toContain('type="file"');
+      // NOT A DEAD END: no control that could only refuse, and the door that IS theirs is named.
+      expect(text(out)).toContain("The owner brings in bank downloads");
+      expect(text(out)).toContain("Snap Or Note on Bills");
+      expect(count(doors(out), "Open Bills")).toBe(1);
+    } finally {
+      CURRENT = TABLES;
+    }
+  });
+
+  it("an office hand the owner has shared with gets the same door the owner has", async () => {
+    CURRENT = asOffice(true);
+    try {
+      const out = await render();
+      expect(count(doors(out), "Drop A Bank Or Supplier Download")).toBe(1);
+      expect(text(out)).not.toContain("The owner brings in bank downloads");
+    } finally {
+      CURRENT = TABLES;
+    }
+  });
+
+  it("a company whose settings could not be read gets no door: the switch's default is never taken as a yes", async () => {
+    CURRENT = { ...TABLES, profiles: [{ id: "user-owner", org_id: ORG, role: "office", full_name: "An Office Hand" }], organizations: [] };
+    try {
+      const out = await render();
+      expect(count(doors(out), "Drop A Bank Or Supplier Download")).toBe(0);
+    } finally {
+      CURRENT = TABLES;
+    }
+  });
+});
+
+/**
  * A KIND WITH NOTHING OPEN DRAWS NOTHING, and a page with nothing open says so in plain words and is
  * NOT an error (badges show open; no dead ends).
  */
@@ -332,9 +422,16 @@ describe("a new company sees words, not an error", () => {
       expect(text(fresh)).toContain("Reconcile");
       expect(text(fresh)).toContain("Nothing Disagrees Right Now");
       expect(text(fresh)).not.toContain("Couldn't");
-      // No section of any kind, and no door at all: nothing to press and nothing to read.
+      // No section of any kind, and no decision to press: nothing disagrees, so nothing is asked.
       for (const k of Object.values(RECONCILE_KINDS)) expect(fresh, k.anchor).not.toContain(`id="${k.anchor}"`);
-      expect(doors(fresh)).toEqual([]);
+      // THE ONLY TWO DOORS ON A QUIET PAGE ARE THE STATEMENT INTAKE AND THE LINK TO BILLS, and the
+      // intake is drawn PRECISELY here: the book is quiet and the next download is in his hand. The
+      // card used to be hidden on this page, which left an all-clear with no way to put anything on
+      // it — a dead end. So the lead may not then print a flat "Nothing for you to do here" above a
+      // door, and it does not: it names the door instead.
+      expect(doors(fresh)).toEqual(["Drop A Bank Or Supplier Download", "Open Bills"]);
+      expect(text(fresh)).toContain("drop it in below");
+      expect(text(fresh)).not.toContain("Nothing for you to do here");
     } finally {
       CURRENT = TABLES;
     }

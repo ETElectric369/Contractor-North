@@ -150,6 +150,19 @@ describe("the card says the things a balance cannot say for itself", () => {
     expect(CARD).toContain("Still owed; mark {c.bills.length === 1 ? \"it\" : \"them\"} Settled when you pay.");
   });
 
+  /**
+   * TWO TRUE FIGURES, AND THE SENTENCE NAMES WHAT EACH ONE ANSWERS. It used to end "and neither is
+   * wrong", which is a hedge: it asked an electrician between jobs to accept two numbers on faith
+   * instead of telling him which question each one answers. Two figures are only confusing while
+   * nobody says that.
+   */
+  it("names the question behind each of the two supplier figures instead of asking him to accept both", () => {
+    // The sentence, not the comment above it: the comment quotes the hedge to say what it prevents.
+    expect(CARD).not.toContain("neither is wrong.");
+    expect(CARD).toContain("so it answers a different question: this one is what you bought and have");
+    expect(CARD).toContain("not paid for, and the figure above is what your suppliers are asking you for.");
+  });
+
   /** Model B: their figure cannot cover a purchase they never billed him for. */
   it("does not explain away the bills the supplier has no document for", () => {
     expect(CARD).toContain("const modelledExplained =");

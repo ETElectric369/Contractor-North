@@ -1,4 +1,5 @@
 import { getOrgSettings } from "@/lib/org-settings";
+import { viewerSeesOwnerMoney } from "@/lib/bank-viewer";
 import { OWNER_HIDDEN_WHY } from "@/lib/accountant-workbook";
 
 /** Why the totals aren't shown, when a read failed: said in words, never the owner's-switch note. */
@@ -20,6 +21,8 @@ export function accountantPageViewer(
   if (orgRead.error || !org) return { showOwner: false, why: ORG_UNREAD_WORDS };
   const role = (meRead.data as { role?: string } | null)?.role;
   if (meRead.error || !role) return { showOwner: false, why: ROLE_UNREAD_WORDS };
-  if (role === "owner" || getOrgSettings(org.settings).office_sees_owner_money) return { showOwner: true, why: null };
+  // THE ONE RULE (bank-viewer.ts viewerSeesOwnerMoney), not a second copy of it: this page used to
+  // spell out `role === "owner" || office_sees_owner_money` itself, which is how a door drifts.
+  if (viewerSeesOwnerMoney(role, getOrgSettings(org.settings).office_sees_owner_money)) return { showOwner: true, why: null };
   return { showOwner: false, why: OWNER_HIDDEN_WHY };
 }

@@ -613,12 +613,16 @@ export function SuppliersCard({
           )}
           {/* THE TWO FIGURES, NAMED, ON THE SAME SCREEN. The arithmetic that reconciles them used
               to be the only honest thing on this card and it was folded away under a heading that
-              led with one number over a list that led with another. */}
+              led with one number over a list that led with another.
+              AND EACH ONE NAMES ITS QUESTION. This sentence used to end "and neither is wrong",
+              which asked him to accept two numbers on faith; two true figures are only confusing
+              while nobody says what each one answers, so now it says. */}
           {boughtNotSettled && boughtNotSettled.total > 0.005 && (
             <p>
               All Bills below says {formatCurrency(boughtNotSettled.total)} across {boughtNotSettled.papers}{" "}
               {boughtNotSettled.papers === 1 ? "bill" : "bills"} bought on account and not squared up yet. That is your own
-              paperwork, not a bill from them, so it is a different number from the one above and neither is wrong.
+              paperwork, not a bill from them, so it answers a different question: this one is what you bought and have
+              not paid for, and the figure above is what your suppliers are asking you for.
             </p>
           )}
           {supplierModelled.length > 0 && (

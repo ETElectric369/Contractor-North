@@ -13,6 +13,7 @@ import { computeJobProfitRows } from "@/lib/analytics/job-profitability";
 import { readJobShelfNet } from "@/lib/job-cost";
 import { computeArAging, computeQuoteStats } from "@/lib/analytics/money-metrics";
 import { getOrgSettings } from "@/lib/org-settings";
+import { viewerSeesOwnerMoney } from "@/lib/bank-viewer";
 import { todayStrInTz } from "@/lib/tz";
 import { getOwnerMoneyViews, ownerMoneyChartWindow, ownerMoneyWindow, resolveOwnerMoneySelection } from "@/lib/analytics/owner-money";
 import { buildMoneyChartData, drawnMonth, emptyChartSentence } from "@/lib/analytics/money-chart";
@@ -23,7 +24,6 @@ import { LeftForCard } from "./left-for-card";
 import { MoneyChartCard } from "./money-chart-card";
 import { getFuelTrend } from "@/lib/analytics/fuel-trend";
 import { FuelTrendCard } from "./fuel-trend-card";
-import { BankDropLine } from "./bank-drop-line";
 
 export const dynamic = "force-dynamic";
 
@@ -51,8 +51,10 @@ export default async function AnalyticsPage({
   // LEFT FOR YOU (0286). The owner always sees it; office staff (admin, office) see it unless the
   // owner switched "Office Can See This" off, in which case they get no card at all. Techs never
   // reach this page (the redirect above).
+  // ONE RULE, ONE FUNCTION (bank-viewer.ts viewerSeesOwnerMoney). This line used to be the rule's
+  // own fourth spelling; Reconcile's statement door asks the very same function now.
   const viewerIsOwner = me.role === "owner";
-  const showOwnerMoney = viewerIsOwner || orgSettings.office_sees_owner_money;
+  const showOwnerMoney = viewerSeesOwnerMoney(me.role, orgSettings.office_sees_owner_money);
   const todayYmd = todayStrInTz(tz);
 
   // MONEY BY MONTH + LEFT FOR YOU, ONE READ. The card shows This Year unless a segment or a month
@@ -227,10 +229,9 @@ export default async function AnalyticsPage({
         />
       )}
 
-      {/* A bank download shows the owner's draw and personal spending: the same switch as the
-          Net Profit card says who may drop and sort one (bank-viewer.ts). */}
-      {showOwnerMoney && <BankDropLine />}
-
+      {/* THE DROP DOOR IS ON RECONCILE NOW (Erik, on seeing it here: "this should be in reconcile
+          too i imagine"). Bringing a statement in belongs on the page named for the job of matching
+          it, and ONE door is the whole point: it is not drawn here as well. */}
       {fuel?.hasFuel && <FuelTrendCard trend={fuel} />}
 
       <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-3">
