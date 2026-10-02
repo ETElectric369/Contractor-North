@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { clockIn, clockOutCurrent, createManualEntry, switchJob, updateTimeEntry } from "@/app/(app)/timeclock/actions";
-import { tellAppChose } from "@/app/(app)/timeclock/clock-told";
+import { punchJobLabel, tellAppChose } from "@/app/(app)/timeclock/clock-told";
 import { clockInputValue, splitClock, splitPreview } from "@/lib/split-preview";
 import { hoursBetween } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/server";
@@ -22,6 +22,47 @@ async function orgLocalConverter(supabase: Awaited<ReturnType<typeof createClien
   return (v?: string) => tzNaiveIsoToUtc(v, tz);
 }
 import type { ActionDef } from "../types";
+
+/**
+ * A JOB NAMED THE WAY A PERSON KNOWS IT (Erik: "i cant tell by job numbers alone"), for a spoken
+ * sentence. The label rule itself is the clock's one copy (clock-told: punchJobLabel); this only
+ * fetches the row. Best-effort: a read that fails never turns a saved write into a refusal — the
+ * sentence falls back to words, never to a bare id and never to silence.
+ */
+/**
+ * WHAT NORT SAYS A SWITCH DID — and it may not sound like a correction it was not (Erik, 2026-10-01).
+ *
+ * A SWITCH IS A CUT (0288). After the first two minutes switch_job closes the part so far and opens a
+ * new one, so the hours already worked STAY on the job they were worked on. The old announcement —
+ * "Done — the part so far closed at 2.32 hours, and you're on the new job" — let Nort answer "the app
+ * put me on the wrong job, fix it" with what reads as a fix, while 2.32 hours went on billing the
+ * wrong customer. It now names the job those hours stayed on and the one door that moves them.
+ *
+ * A RE-POINT (a job-less shift, or one under two minutes old) really did move the whole shift, so it
+ * keeps its own words. The hours are never dropped from the sentence either way: nothing silent.
+ */
+export function switchJobSpoken(mode: "cut" | "repointed" | undefined, closedHours: number | undefined, stayedOn: string | null): string {
+  if (mode === "repointed") return "Done — this whole shift is on the new job now.";
+  const hours = Number(closedHours ?? 0).toFixed(2);
+  return (
+    `Switched — the clock is running on the new job now. The ${hours} hours before the switch stayed on ` +
+    `${stayedOn ?? "the job you were on"}: a switch starts a new entry, it never moves hours already worked. ` +
+    `If those hours belong on the new job too, the office moves them on Timecards.`
+  );
+}
+
+async function jobSaidAs(supabase: Awaited<ReturnType<typeof createClient>>, jobId: string): Promise<string | null> {
+  try {
+    const [{ data: jobRow }, { data: orgRow }] = await Promise.all([
+      supabase.from("jobs").select("id, job_number, name, address, customers(name)").eq("id", jobId).maybeSingle(),
+      supabase.from("organizations").select("settings").limit(1).maybeSingle(),
+    ]);
+    const codesOn = getOrgSettings((orgRow as { settings?: unknown } | null)?.settings).timeclock_job_codes;
+    return jobRow ? punchJobLabel(jobRow as Parameters<typeof punchJobLabel>[0], codesOn) : null;
+  } catch {
+    return null;
+  }
+}
 
 // Time-logging, finally in the registry — so voice ("clock me in / out / add 2 hours
 // to the Smith job") and every surface go through the SAME path the timeclock UI uses.
@@ -55,8 +96,14 @@ export const timeActions: Record<string, ActionDef> = {
       // dropped by that allowlist, so Nort read {"ok":true} and said "You're clocked in" while the
       // hours billed the wrong customer. Joined with anything the punch already had to say (a job it
       // took off hold), because both are the same kind of fact and there is one channel for them.
+      //
+      // AND IT IS HIS WORDING OF THE SAME FACTS, not the screens' (clock-told: `say`). Every screen
+      // ends the sentence with "change it if you're somewhere else" because Change The Job is beside
+      // it. Nort relayed those words and could not do it: his only move on a running shift is
+      // switch_job, which CUTS, leaving the minutes already on the wrong customer exactly where they
+      // are. His sentence names the three doors that DO move the punch, and says he cannot.
       const told = tellAppChose(res);
-      return told ? { ...res, warning: [res.warning, told.sentence].filter(Boolean).join(" ") } : res;
+      return told ? { ...res, warning: [res.warning, told.say].filter(Boolean).join(" ") } : res;
     },
   },
   "time.clockOut": {
@@ -319,7 +366,7 @@ export const timeActions: Record<string, ActionDef> = {
     group: "time",
     label: "Switch job",
     description:
-      "Move the current user's RUNNING shift to another job, right now ('I'm heading over to the Miller job'). The part so far closes as its own timecard entry and the clock keeps running on the new job (a shift with no job yet just moves over whole). Only for a live switch happening NOW — a switch that already happened earlier today is time.splitEntry. job_id is the job's uuid (resolve a spoken name with list_jobs first); job_code optional. Announce what the result says: the new job and the hours on the part that closed.",
+      "Move the current user's RUNNING shift to another job, right now ('I'm heading over to the Miller job'). The part so far closes as its own timecard entry and the clock keeps running on the new job (a shift with no job yet just moves over whole). Only for a live switch happening NOW — a switch that already happened earlier today is time.splitEntry. job_id is the job's uuid (resolve a spoken name with list_jobs first); job_code optional. THIS NEVER MOVES HOURS ALREADY WORKED: after the first two minutes it CUTS, so the time before the switch stays on the job it was on. It is therefore NOT a way to correct a punch that is on the wrong job — for that, say where it is done (My Day's Now card, Timeclock, or the office on Timecards); you have no verb that moves worked hours. Announce what the result's `speak` says, word for word, including where the hours before the switch stayed.",
     input: z.object({
       job_id: z.string(),
       job_code: z.string().nullable().optional(),
@@ -336,11 +383,12 @@ export const timeActions: Record<string, ActionDef> = {
       if (!job.id) return { ok: false, missingFields: ["job_id"], error: "Which job are you switching to?" };
       const { data: open } = await supabase
         .from("time_entries")
-        .select("id, notes")
+        .select("id, notes, job_id")
         .eq("profile_id", meId)
         .eq("status", "open")
         .maybeSingle();
       if (!open) return { ok: false, error: "You're not clocked in." };
+      const wasOn = (open as { job_id?: string | null }).job_id ?? null;
       const res = await switchJob({
         entry_id: (open as { id: string }).id,
         job_id: job.id,
@@ -349,13 +397,8 @@ export const timeActions: Record<string, ActionDef> = {
         gps: null,
       });
       if (!res.ok) return res;
-      return {
-        ...res,
-        speak:
-          res.mode === "repointed"
-            ? "Done — this whole shift is on the new job now."
-            : `Done — the part so far closed at ${Number(res.closed_hours ?? 0).toFixed(2)} hours, and you're on the new job.`,
-      };
+      const stayedOn = wasOn ? await jobSaidAs(supabase, wasOn) : null;
+      return { ...res, speak: switchJobSpoken(res.mode, res.closed_hours, stayedOn) };
     },
   },
   /**

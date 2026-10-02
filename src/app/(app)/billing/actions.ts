@@ -3504,6 +3504,8 @@ export async function recordPayment(input: {
   await afterPaymentLanded(supabase, {
     invoiceId: input.invoice_id,
     orgId: inv.org_id,
+    // A person typed this: `supabase` is their own RLS client, which is what prices the job's hours.
+    access: { kind: "staff" },
     bell: { amount: input.amount, recordedBy: ctx.userId },
   });
   return { ok: true };

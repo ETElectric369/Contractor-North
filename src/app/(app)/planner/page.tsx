@@ -841,7 +841,7 @@ export default async function PlannerPage({ searchParams }: { searchParams: Prom
                 clock_in: openEntry.clock_in,
                 notes: openEntry.notes ?? null,
                 shift_start: openShiftStart,
-                onJob: !!openEntry.job_id,
+                job_id: openEntry.job_id ?? null,
               }
             : null
         }

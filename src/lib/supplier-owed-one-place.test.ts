@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
+import { codeOnly } from "@/lib/migration-body.test-util";
 
 /**
  * ONE RULE, ONE PLACE - WITH A TRIPWIRE ON IT (8a982483).
@@ -33,9 +34,10 @@ import { join, relative } from "node:path";
  * This test only answers "did somebody write the rule again somewhere else", which is the thing
  * that has happened three times.
  *
- * Comments are stripped before scanning, so the comment above may name the predicate it bans. The
- * scanner is the one in no-supplier-name.test.ts, which this copies deliberately: two tripwires
- * that disagree about what a line of code is would be the same fault wearing a third hat.
+ * Comments are stripped before scanning, so the comment above may name the predicate it bans. What
+ * counts as a comment is decided in ONE place (lib/migration-body.test-util: codeOnly, pinned in
+ * migration-body.test.ts) and every bypass tripwire in the repo reads through it: two tripwires that
+ * disagree about what a line of code is would be the same fault wearing a third hat.
  */
 
 const ROOT = process.cwd();
@@ -91,13 +93,20 @@ function files(dir: string): string[] {
   });
 }
 
-/** Comments out, so a comment may describe the rule it bans. Copied from no-supplier-name.test.ts. */
-const code = (src: string) =>
-  src
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .split("\n")
-    .map((l) => l.replace(/(^|[^:])\/\/.*$/, "$1"))
-    .join("\n");
+/**
+ * Comments out, so a comment may describe the rule it bans — through THE one stripper every bypass
+ * tripwire reads (lib/migration-body.test-util: codeOnly).
+ *
+ * It used to carry its own copy, and that copy treated every `/*` as a comment opener, including the
+ * one inside `accept="image/` + a star + `"` on a camera input: that opened a comment which ran on to
+ * the next real comment close and blanked everything between. Twenty app files came back short by 784
+ * lines of code that way, src/middleware.ts for 118 of them in a single span. A hand-written copy of
+ * this rule inside one of those spans would have passed this tripwire BY NAME while the same line
+ * twenty lines higher failed it. Nothing was in fact hidden — both strippers give this scan the same
+ * answer today — but a tripwire whose reach depends on where a camera input happens to sit is not a
+ * tripwire.
+ */
+const code = codeOnly;
 
 const scan = (test: (line: string) => boolean) => {
   const hits: string[] = [];

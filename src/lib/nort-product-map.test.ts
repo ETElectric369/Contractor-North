@@ -10,6 +10,7 @@ import { DOCK, visibleDock } from "./dock";
 import { helpRows } from "./onboarding/help-rows";
 import { ALL_ON } from "./features";
 import { appointmentTypeLabel } from "./statuses";
+import { RECONCILE_KINDS } from "./reconcile-kinds";
 
 /**
  * WHERE NORT SAYS THINGS LIVE, HELD TO WHERE THEY DO (W1-09 / W1-07 / W1-08). A map that lags the
@@ -182,6 +183,80 @@ describe("Nort's product map after the shell wave", () => {
     expect(src("src/app/(app)/schedule/actions.ts")).toMatch(/export async function bookWorkedDay/);
     // bookWorkedDay never promotes: that is the whole difference from addJobDay.
     expect(src("src/app/(app)/schedule/actions.ts")).toMatch(/promote: false/);
+  });
+
+  /**
+   * RECONCILE IS ON THE MAP — AND NOTHING DOCKED CAN SHIP OFF IT IN SILENCE AGAIN.
+   *
+   * This file's own header calls the map part of the ship ritual: "when a deploy adds or moves a
+   * user-facing surface, this file moves with it, in the same commit". Reconcile shipped in cn-v1037
+   * docked under Money AND badged, with no line here. So asked where to fix a supplier spelled five
+   * ways, Nort said he could not help — about a page built for exactly that — instead of "Money →
+   * Reconcile". The ritual was a sentence in a comment; it is a test now.
+   *
+   * Every docked screen is either named by its route in the map, or written down below as OWED, with
+   * what partial cover it has. The owed list is FROZEN: a new dock row is red until somebody decides
+   * on purpose which of the two it is.
+   */
+  const OWED: Record<string, string> = {
+    "/price-list": "named only inside Settings → Money's line (\"price list (CSV import)\"), not as the Money → Price List page",
+    "/payroll": "no line at all — Nort cannot point at Payroll",
+    "/tax-report": "no line at all — the Analytics line names For Your Accountant, which is a different door",
+    "/recurring": "no line at all",
+    "/compliance": "named only in the Office cluster sentence",
+    "/insurance": "no line at all",
+    "/safety": "no line at all",
+    "/audits": "no line at all",
+    "/team": "named only in the Office cluster sentence",
+    "/employee-docs": "no line at all",
+    "/forms": "named only in the Office cluster sentence",
+    "/resources": "named only in the Office cluster sentence",
+    "/handbook": "no line at all",
+    "/activity": "no line at all",
+    "/audit": "no line at all",
+    "/settings": "named by its groups (Settings → Playbook / Website / Money / You), never by its path",
+  };
+
+  it("every docked screen is either on the map by its route, or written down as owed", () => {
+    const docked = [
+      ...new Set(
+        [...visibleDock({ isStaff: true, features: ALL_ON }), ...visibleDock({ isStaff: false, features: ALL_ON })]
+          .flatMap((s) => s.children)
+          .flatMap((c) => (c.href ? [c.href.split("?")[0]] : [])),
+      ),
+    ].sort();
+    const onMap = docked.filter((p) => NORT_PRODUCT_MAP.includes(p));
+    const missing = docked.filter((p) => !NORT_PRODUCT_MAP.includes(p));
+    // Nothing may be missing that is not argued for in writing, and nothing may be argued for that
+    // is no longer missing: both directions, so the list cannot rot either way.
+    expect(missing.sort()).toEqual(Object.keys(OWED).sort());
+    expect(onMap.length).toBeGreaterThan(10);
+  });
+
+  it("Reconcile is one of them: the page for two records that should agree", () => {
+    const line = NORT_PRODUCT_MAP.split("\n").find((l) => l.startsWith("- Money → Reconcile (/reconcile"))!;
+    expect(line).toBeTruthy();
+    expect(Object.keys(OWED)).not.toContain("/reconcile");
+    // Its five sections, in the words the page draws them in, and in its order.
+    let from = 0;
+    for (const kind of Object.values(RECONCILE_KINDS).sort((a, b) => a.order - b.order)) {
+      const i = line.indexOf(kind.heading, from);
+      expect(i, kind.heading).toBeGreaterThanOrEqual(from);
+      from = i + kind.heading.length;
+    }
+    // The three things the page may not do, so Nort never offers it as the owner of a figure.
+    expect(line).toContain("office only");
+    expect(line).toContain("It owns no record and adds up no amount of its own");
+    expect(line).toContain("supplier_balances");
+    // The gap is answered where the record lives, which the kinds table says by name.
+    expect(RECONCILE_KINDS["supplier-gap"].answeredOn).toEqual({ screen: "Suppliers", href: "/bills#suppliers" });
+    expect(line).toContain("answered on the Suppliers card on Bills");
+    // True in code: docked under Money, office only, and badged over the kinds answered here.
+    const money = DOCK.find((s) => s.key === "invoices")!;
+    expect(money.children.find((c) => c.href === "/reconcile")).toMatchObject({ label: "Reconcile", staffOnly: true });
+    expect(readFileSync(join(process.cwd(), "src/app/(app)/reconcile/page.tsx"), "utf8")).toContain(
+      '<PageHeader title="Reconcile" description="Two records that should agree, and do not." />',
+    );
   });
 
   it("Nort can set every customer type the app offers, Contractor included (W2-13 Part A)", () => {

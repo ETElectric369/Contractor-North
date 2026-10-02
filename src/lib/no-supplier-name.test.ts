@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
+import { codeOnly } from "@/lib/migration-body.test-util";
 
 /**
  * NO SUPPLIER'S NAME IN THE APP'S WORDS (Wave 0). "Choose CED PDFs", "Add To CED Documents",
@@ -16,12 +17,11 @@ function files(dir: string): string[] {
     return /\.(ts|tsx)$/.test(p) && !/\.(test|db-suite|db-fixture|prod-replay)\.tsx?$|\.prod-replay\.test\.ts$/.test(p) ? [p] : [];
   });
 }
-const code = (src: string) =>
-  src
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .split("\n")
-    .map((l) => l.replace(/(^|[^:])\/\/.*$/, "$1"))
-    .join("\n");
+/** THE one stripper every bypass tripwire reads (lib/migration-body.test-util: codeOnly). Its own
+ *  copy here had the same hole the others did — an opener inside `accept="image/` + a star + `"`
+ *  blanked everything to the next real comment close — and supplier-owed-one-place.test.ts points at
+ *  this file as the scanner it follows, so the two have to be the same scanner to say that. */
+const code = codeOnly;
 
 describe("the app names no supplier in its own words", () => {
   it("no code outside a comment says CED (a regex that still reads old stored sentences excepted)", () => {

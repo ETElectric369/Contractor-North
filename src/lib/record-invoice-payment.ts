@@ -1,6 +1,7 @@
 // WHAT FOLLOWS A PAYMENT, for every door that writes one (M1): recalc, finish the job, the bell,
 // the refresh. This file used to carry its own copy of all four.
 import { afterPaymentLanded, type PaymentBell } from "@/lib/after-payment-landed";
+import type { BillingAccess } from "@/lib/finish-bills-first";
 import { paymentReachedDraft } from "@/lib/tap-settlement";
 import { reportError } from "@/lib/observe";
 import { captureProcessorFee } from "@/lib/processor-fee-capture";
@@ -130,6 +131,13 @@ export async function recordStripeInvoicePayment(
     connectedAccount: string | null;
     /** Which door the money came through — the ledger note, the office push, the method key. */
     via?: RecordVia;
+    /**
+     * WHICH CLIENT THE CALLER HOLDS. The webhook runs on createServiceClient (RLS off) and the Pay Now
+     * sheet on its staff session, and the paid-in-full gate behind this prices the job's hours off that
+     * difference — so it is said, not guessed. `{ kind: "service", orgId }` on the webhook; the org is the
+     * one claimedInvoice above has just proved owns both the connected account and the invoice.
+     */
+    access: BillingAccess;
   },
 ): Promise<RecordOutcome> {
   const { invoiceId, orgId, amount, idempotencyKey, paymentIntent, connectedAccount } = input;
@@ -163,7 +171,7 @@ export async function recordStripeInvoicePayment(
    * retry the same event id — the insert then hits 23505 and the heal branch settles it.
    */
   const settle = async (id: string, bell?: PaymentBell): Promise<boolean> =>
-    (await afterPaymentLanded(supabase, { invoiceId: id, orgId, bell })).settled;
+    (await afterPaymentLanded(supabase, { invoiceId: id, orgId, access: input.access, bell })).settled;
 
   // LOCK 2: the same PaymentIntent already booked, under whatever key (a row from before this
   // module, or the other writer). Settle again — free, and it heals a crashed first attempt.

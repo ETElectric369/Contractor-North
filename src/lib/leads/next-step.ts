@@ -45,6 +45,20 @@ export type LeadStepInput = {
  *  and that visit's type. */
 export type LeadVisits = { done: number; upcoming: number; nextAt: string | null; nextType?: string | null };
 
+/**
+ * NOBODY COULD READ THIS LEAD'S VISITS (lib/leads/visit-read). The third answer, and the whole point
+ * of having one: a failed read used to arrive here as `null` — the same value as "this lead has no
+ * visits" — so the chip printed "New · Call Them" on a lead with a walk-through booked for Tuesday.
+ */
+export const VISITS_UNREAD = "unread" as const;
+
+/** What the board can say about a lead's visits: what it read, NONE, or that it could not tell. */
+export type LeadVisitsAnswer = LeadVisits | typeof VISITS_UNREAD | null;
+
+/** The chip's words when the visits are not known. It says the one true thing instead of the next
+ *  step, because every next step left depends on what is booked (Erik: nothing silent). */
+export const VISITS_UNREAD_LABEL = "Visits Didn't Load";
+
 export type LeadStepTone = "slate" | "amber" | "blue" | "green" | "indigo";
 export type LeadBucketLetter = "A" | "B" | "C";
 
@@ -103,7 +117,7 @@ const BUCKETS: readonly string[] = ["A", "B", "C"];
 
 export function leadNextStep(
   input: LeadStepInput,
-  visits: LeadVisits | null,
+  visits: LeadVisitsAnswer,
   todayYmd: string,
   opts: { estimatesOn: boolean; tz: string },
 ): LeadStep {
@@ -117,15 +131,23 @@ export function leadNextStep(
   if (input.status === "lost") return { label: "Lost", tone: "slate", bucket: null, web };
 
   const follow = ymdOf(input.next_follow_up_at);
-  const upcoming = visits?.upcoming ?? 0;
-  const done = visits?.done ?? 0;
+  // NOT READ IS NOT ZERO. The read's three-state answer stops here: a lead whose visits nobody could
+  // read has no upcoming count and no done count, and must never be treated as having none of either.
+  const read = visits === VISITS_UNREAD ? null : visits;
+  const unread = visits === VISITS_UNREAD;
+  const upcoming = read?.upcoming ?? 0;
+  const done = read?.done ?? 0;
 
   let step: { label: string; tone: LeadStepTone };
   if (follow && follow < todayYmd) {
     step = { label: `Call Back · ${monthDay(follow)}`, tone: "amber" };
+  } else if (unread) {
+    // Every rule left — a visit booked, a visit walked, and the three that only hold while NOTHING is
+    // booked — is an answer about visits. So the chip says the one thing that is true: it doesn't know.
+    step = { label: VISITS_UNREAD_LABEL, tone: "amber" };
   } else if (upcoming > 0) {
-    const day = visits?.nextAt ? todayStrInTz(opts.tz, new Date(visits.nextAt)) : null;
-    step = { label: `${visitWord(visits?.nextType)} · ${day ? weekdayMonthDay(day) : "No Day Yet"}`, tone: "blue" };
+    const day = read?.nextAt ? todayStrInTz(opts.tz, new Date(read.nextAt)) : null;
+    step = { label: `${visitWord(read?.nextType)} · ${day ? weekdayMonthDay(day) : "No Day Yet"}`, tone: "blue" };
   } else if (done > 0) {
     step = { label: opts.estimatesOn ? "Walked · Estimate Next" : "Walked", tone: "green" };
   } else if (follow) {
@@ -139,7 +161,9 @@ export function leadNextStep(
   }
 
   const bucket = BUCKETS.includes(String(input.lead_bucket ?? "")) ? (input.lead_bucket as LeadBucketLetter) : null;
-  const needsVisit = !!input.site_inspection_required && upcoming === 0 && done === 0;
+  // "Needs A Visit" is the same claim the other way round: it says nothing is booked, which is exactly
+  // what nobody could read. An unread board says neither.
+  const needsVisit = !unread && !!input.site_inspection_required && upcoming === 0 && done === 0;
   const label = [bucket, step.label, needsVisit ? "Needs A Visit" : null].filter(Boolean).join(" · ");
   return { label, tone: step.tone, bucket, web };
 }

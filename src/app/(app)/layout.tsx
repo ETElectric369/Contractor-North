@@ -17,6 +17,7 @@ import { reportError } from "@/lib/observe";
 import { todayStrInTz } from "@/lib/tz";
 import { GeofenceMonitor } from "@/components/geofence-monitor";
 import { OfflineDrain } from "@/components/offline-drain";
+import { PullToRefresh } from "@/components/pull-to-refresh";
 import { ShellNavigationWatch } from "@/components/shell-navigation-watch";
 import { PageOpenCounter } from "@/components/page-open-counter";
 import { BugReporter } from "@/components/bug-reporter";
@@ -369,6 +370,13 @@ export default async function AppLayout({
           </div>
         )}
         <main className="flex-1 overflow-y-auto bg-slate-50/70 p-4 pb-[calc(7.5rem+env(safe-area-inset-bottom))] shell:p-6 shell:pb-6">
+          {/* PULL DOWN TO REFRESH, ONCE, FOR EVERY SCREEN (44aeec9c; cn-v1039 built it and mounted it
+              on /billing alone, where the report came from, while its own headline said "for every
+              screen"). It needs no page data — it walks up to its scroller, which is THIS element —
+              and in the shell there is no browser gesture to fall back on: the root is h-dvh +
+              overflow-hidden and the document's rubber-band is off on purpose. Touch only, nothing
+              drawn at rest, and never while a sheet is open. One mount: two would refresh twice. */}
+          <PullToRefresh />
           <Suspense fallback={null}>
             <SectionSubnav isStaff={isStaff} features={doors} />
           </Suspense>

@@ -833,6 +833,8 @@ export async function tapPaymentOutcome(invoiceId: string, paymentIntentId: stri
       paymentIntent: pi.id,
       connectedAccount: accountId,
       via: TAP_VIA,
+      // ctx.supabase is this person's own RLS client (requireStaff), so the rates come from profile_pay.
+      access: { kind: "staff" },
     });
     if (outcome === "refused") return { ok: false, error: "That payment isn't this company's." };
     return { ok: true, status, amountReceived, lastError, booked: outcome === "booked", recorded: true };

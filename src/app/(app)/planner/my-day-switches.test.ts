@@ -31,6 +31,7 @@ vi.mock("../timeclock/which-job-actions", () => ({ whichJobChoices: vi.fn(), put
 import { YourList, AddReminderLine, LATER_CHOICE, PROGRESS_MARKS, addDaysStr, laterRow, movedWords, type SixSlot } from "./your-list";
 import { NewReminderBox } from "../tasks/tasks-view";
 import { NowCard } from "./now-card";
+import { codeOnly } from "@/lib/migration-body.test-util";
 import { LUNCH_LABEL } from "@/lib/lunch-rule";
 import { carriedDay, rankSix } from "@/lib/six-rank";
 
@@ -452,7 +453,7 @@ describe("My Day's cards (structural: the page is a server component over the da
 
 describe("the Now card (rendered)", () => {
   const at = (hoursAgo: number) => new Date(Date.now() - hoursAgo * 3_600_000).toISOString();
-  const punch = (over: Record<string, unknown> = {}) => ({ id: "p1", clock_in: at(2), notes: null, onJob: true, ...over });
+  const punch = (over: Record<string, unknown> = {}) => ({ id: "p1", clock_in: at(2), notes: null, job_id: "j55", ...over });
   const job = { name: "J-055 Smith Panel", sub: "Nora Smith · 41 Larkspur", href: "/jobs/j55" };
   const render = (props: Record<string, unknown>) =>
     renderToStaticMarkup(createElement(NowCard, { userId: "u1", ...props } as any, createElement("div", null, "THE-DOORS")));
@@ -496,7 +497,7 @@ describe("the Now card (rendered)", () => {
   });
 
   it("on the clock with no job: the timer, the question and ONE Pick The Job; no job doors", () => {
-    const html = render({ open: punch({ onJob: false }), job: null });
+    const html = render({ open: punch({ job_id: null }), job: null });
     expect(html).toContain("Which job are you on?");
     expect(html.match(/Pick The Job/g)).toHaveLength(1);
     expect(html).not.toContain("THE-DOORS");
@@ -505,9 +506,28 @@ describe("the Now card (rendered)", () => {
   });
 
   it("a punch on a job the page couldn't read says so instead of asking which job", () => {
-    const html = render({ open: punch({ onJob: true }), job: null });
+    const html = render({ open: punch({ job_id: "j55" }), job: null });
     expect(html).not.toContain("Pick The Job");
     expect(html).toContain("Your punch is on a job this page couldn’t load just now. Timeclock shows it.");
+  });
+
+  /**
+   * THE PUNCH CARRIES ITS JOB'S ID, NOT A BOOLEAN (Erik, 2026-10-01). NowPunch said only `onJob:
+   * true`, so the card could not ask clock-told's staleness rule whether the remembered "the app
+   * picked that" sentence is still true of the punch on screen — and it did not ask: it drew the
+   * line raw. After the office re-pointed the punch from Timecards, the banner updated to the new job
+   * while the sentence under it named the old one, with a Change door that then refused as stale.
+   */
+  it("the card is handed the job the punch is ON, so the app-picked sentence can be checked against it", () => {
+    const card = codeOnly(readFileSync(join(process.cwd(), "src/app/(app)/planner/now-card.tsx"), "utf8"));
+    expect(card, "NowPunch carries the job id the staleness rule needs").toMatch(/job_id\??: string \| null/);
+    expect(card, "no boolean stand-in for the job on the punch").not.toContain("onJob");
+    // And the card asks the rule instead of drawing what it remembered.
+    expect(card, "the card checks the sentence against the punch on screen").toMatch(/noticeOnScreen\(\s*chose/);
+    expect(card, "and hands the punch to the notice, which checks it again").toMatch(/punch=\{open\}/);
+    // And it reaches the card: the planner page hands over the open entry's job_id.
+    const page = readFileSync(join(process.cwd(), "src/app/(app)/planner/page.tsx"), "utf8");
+    expect(page).toContain("job_id: openEntry.job_id ?? null");
   });
 
   it("off the clock: Not Clocked In, a big Clock In and the Timeclock link", () => {

@@ -149,6 +149,84 @@ describe("commandNavItems", () => {
 });
 
 /**
+ * EVERY DOCKED SCREEN IS REACHABLE BY THE WORDS A PERSON WOULD TYPE — INCLUDING THE WORD IT USED TO
+ * BE CALLED. (Erik, 2026-10-01.)
+ *
+ * cn-v1034 renamed the dock row "Inspections" to "Walk-Throughs" and nobody touched the nickname list
+ * here. So typing "inspection" found NOTHING — while the route is still /inspections, the stored
+ * appointment type is still "inspection", and Nort's own description of the page still uses the word.
+ * The man who had called it that for years got an empty palette. Reconcile had the gap the other way
+ * round: it shipped findable only by its exact name, with none of the words its own rows are about.
+ *
+ * SO THE LIST IS PINNED, not just extended. Every dock row has to appear in this table and every word
+ * in it has to actually land on that row: the next rename cannot orphan a word, because the renamed
+ * row's old word is written down here as a requirement.
+ */
+const TYPED_WORDS: Record<string, readonly string[]> = {
+  "/planner": ["my day"],
+  "/schedule": ["schedule", "calendar", "dispatch"],
+  "/timeclock": ["timeclock", "clock in", "punch"],
+  "/leads": ["leads", "prospects", "inquiries", "pipeline"],
+  // The word it was called before cn-v1034, and the one-word spelling nobody hyphenates.
+  "/inspections": ["walk-through", "walkthrough", "walk through", "inspection", "inspections", "site visit"],
+  "/quotes": ["estimates", "estimate", "quote", "proposal", "bid"],
+  "/crm": ["customers", "clients", "contacts"],
+  "/jobs": ["jobs", "work", "projects"],
+  "/billing": ["invoices", "owed", "payments", "aging"],
+  "/timecards": ["timecards", "hours", "timesheet"],
+  "/bills": ["bills", "accounts payable", "vendor", "expense"],
+  // Its rows' own words (lib/reconcile-kinds), not only its name.
+  "/reconcile": ["reconcile", "statement", "supplier statement", "spelling", "duplicate", "same ticket"],
+  "/price-list": ["price list", "pricing", "rates", "catalog"],
+  "/payroll": ["payroll", "wages", "paycheck"],
+  "/tax-report": ["tax report", "taxes", "1099"],
+  "/analytics": ["analytics", "reports", "profit"],
+  "/recurring": ["recurring", "subscription"],
+  "/compliance": ["compliance", "osha"],
+  "/insurance": ["insurance", "workers comp"],
+  "/safety": ["safety", "hazard"],
+  "/audits": ["audits"],
+  "/team": ["team"],
+  "/employee-docs": ["employee docs"],
+  "/forms": ["forms"],
+  "/resources": ["resources"],
+  "/handbook": ["handbook"],
+  "/inventory": ["shop stock", "inventory", "stock", "parts"],
+  "/activity": ["activity"],
+  "/audit": ["activity audit"],
+  "/tools": ["calculators", "calculator"],
+  // A tech's "Your Settings" row is NOT here: its href carries a ?query, and the palette leaves query
+  // rows out on purpose (a /jobs?status= row stripped of its section collides with Estimates).
+  // Not dock rows: the four hand-written entries the palette adds (My Day is one row now, plan
+  // take-offs live on New Estimate, and a company with cash rows gets Petty Cash).
+  "/tasks": ["reminders", "tasks", "to-do"],
+  "/organize": ["organize"],
+  "/quotes/new": ["new estimate", "plans", "take-off"],
+  "/petty-cash": ["petty cash", "cash box", "atm"],
+};
+
+describe("every dock row is findable by the words a person would type", () => {
+  const staff = commandNavItems(true, ALL_ON, true);
+  const tech = commandNavItems(false, ALL_ON, true);
+  /** Every page the palette offers either role, by its path (a ?query dropped: /jobs?status=… rows
+   *  never reach the palette, and a tech's /settings?tab=you is the /settings page). */
+  const offered = [...new Set([...staff, ...tech].map((i) => i.href.split("?")[0]))].sort();
+
+  it("the table covers exactly the pages the palette offers — a new row has to be given its words", () => {
+    expect(Object.keys(TYPED_WORDS).sort()).toEqual(offered);
+  });
+
+  it("and every word in it lands on that page", () => {
+    for (const [href, words] of Object.entries(TYPED_WORDS)) {
+      const items = staff.some((i) => i.href.split("?")[0] === href) ? staff : tech;
+      for (const word of words) {
+        expect(hrefs(matchNavItems(items, word)).map((h) => h.split("?")[0]), `"${word}" should find ${href}`).toContain(href);
+      }
+    }
+  });
+});
+
+/**
  * THE KEYBOARD LINE (W1-12): "↑↓ to navigate · ↵ to open · esc to close" names keys a phone
  * doesn't have, so the footer shows only with a mouse or a trackpad (Tailwind's pointer-fine
  * variant, never a width breakpoint: an iPad and a laptop can be the same width), and its chip
