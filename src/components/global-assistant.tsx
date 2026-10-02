@@ -1,7 +1,7 @@
 "use client";
 
 import { Suspense, useEffect, useRef, useState } from "react";
-import { safeAreaTop } from "@/lib/native-shell";
+import { safeAreaLeft, safeAreaRight, safeAreaTop } from "@/lib/native-shell";
 import { isStaffRole } from "@/lib/actions/perms";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { X, ChevronDown, ChevronUp, GripHorizontal } from "lucide-react";
@@ -89,10 +89,31 @@ export function GlobalAssistant() {
   const panelRef = useRef<HTMLDivElement | null>(null);
   const { draft } = useEstimator();
 
-  // Default dock: centered horizontally, just under the topbar.
+  /**
+   * WHERE THE PANEL IS ALLOWED TO SIT — one rule, so the default position, the rotate clamp and the
+   * drag clamp cannot disagree about the edges. The shell paints edge to edge (contentInset never),
+   * so on a turned phone the Dynamic Island covers about 59pt of ONE side: a bare 8px left it
+   * underneath (Erik, 2026-10-01: "Nort's box was off the page to the left a bit"). The side insets
+   * are 0 in portrait and in a browser, so this changes nothing there.
+   */
+  function panelBounds() {
+    const left = safeAreaLeft() + 8;
+    const right = safeAreaRight() + 8;
+    const w = Math.min(PANEL_W, Math.max(120, window.innerWidth - left - right));
+    return { left, right, w, maxX: Math.max(left, window.innerWidth - right - w) };
+  }
+  const clampPos = (x: number, y: number, h: number) => {
+    const b = panelBounds();
+    return {
+      x: Math.max(b.left, Math.min(b.maxX, x)),
+      y: Math.max(8 + safeAreaTop(), Math.min(Math.max(8, window.innerHeight - h - 8), y)),
+    };
+  };
+
+  // Default dock: centered horizontally between the insets, just under the topbar.
   function centeredPos() {
-    const w = Math.min(PANEL_W, window.innerWidth - 16);
-    return { x: Math.round((window.innerWidth - w) / 2), y: 68 + safeAreaTop() };
+    const b = panelBounds();
+    return { x: Math.round(b.left + (window.innerWidth - b.left - b.right - b.w) / 2), y: 68 + safeAreaTop() };
   }
 
   // The listener is added once, so it calls whatever launch() is CURRENT through this ref.
@@ -172,13 +193,15 @@ export function GlobalAssistant() {
     if (!open) return;
     const reclamp = () =>
       setPos((cur) => {
-        if (!cur) return cur;
-        const w = Math.min(PANEL_W, window.innerWidth - 16);
+        // A panel the person never dragged used to return here untouched, so a turn left it wherever
+        // the DEFAULT had put it for the old viewport. That is the case Erik hit, so an undragged
+        // panel is re-defaulted rather than skipped.
         const h = panelRef.current?.getBoundingClientRect().height ?? 80;
-        return {
-          x: Math.max(8, Math.min(window.innerWidth - w - 8, cur.x)),
-          y: Math.max(8, Math.min(Math.max(8, window.innerHeight - h - 8), cur.y)),
-        };
+        if (!cur) {
+          const d = centeredPos();
+          return clampPos(d.x, d.y, h);
+        }
+        return clampPos(cur.x, cur.y, h);
       });
     window.addEventListener("resize", reclamp);
     window.addEventListener("orientationchange", reclamp);
@@ -232,7 +255,14 @@ export function GlobalAssistant() {
           role="dialog"
           aria-label="Nort"
           className="fixed z-[120] flex max-h-[75vh] flex-col overflow-hidden rounded-2xl border border-white/50 bg-white/90 shadow-2xl backdrop-blur-xl"
-          style={{ left: p.x, top: p.y, width: `min(${PANEL_W}px, calc(100vw - 1rem))` }}
+          style={{
+            // The side insets keep it clear of the Dynamic Island on a turned phone, and are 0 in
+            // portrait and in a browser. Done in CSS so the FIRST paint is right, before any
+            // measurement runs; the clamp above then refines it on every turn and resize.
+            left: `max(${p.x}px, calc(var(--sal, 0px) + 8px))`,
+            top: p.y,
+            width: `min(${PANEL_W}px, calc(100vw - var(--sal, 0px) - var(--sar, 0px) - 1rem))`,
+          }}
         >
           {/* Slim handle: drag grip · (collapsed summary) · collapse · close. No "Assistant" title. */}
           <div
