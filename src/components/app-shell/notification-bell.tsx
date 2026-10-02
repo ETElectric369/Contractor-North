@@ -99,6 +99,11 @@ function BellInner() {
     <div className="relative">
       <button
         onClick={() => setOpen((o) => !o)}
+        // `data-upright`: the top bar never rotates in the App Store app, so when the phone is turned
+        // this 44px square's face is painted through the same quarter turn and the bell reads upright.
+        // ON THE BUTTON — the list below is a SIBLING, and a transform on the wrapper would anchor it
+        // to this control instead of the viewport (globals.css says why).
+        data-upright
         className="relative flex h-11 w-11 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100"
         aria-label={badge ? `Notifications, ${unread} unread` : "Notifications"}
         title="Notifications"

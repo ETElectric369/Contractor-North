@@ -193,6 +193,11 @@ export function GlobalQuickAdd({
         }}
         aria-label={crew ? "Snap Or Note" : "Quick Add"}
         title={crew ? "Snap Or Note" : "Quick Add"}
+        // `data-upright`: in the App Store app the top bar never rotates, so when the phone is turned
+        // this button's face is painted through the same quarter turn and reads upright. ON THE BUTTON,
+        // never on the wrapper above — the menu below is a SIBLING, and a transform on an ancestor
+        // would make it the containing block for the menu's position:fixed (globals.css says why).
+        data-upright
         aria-haspopup={crew ? undefined : "menu"}
         aria-expanded={crew ? undefined : open}
         className="btn-gloss inline-flex h-11 w-11 items-center justify-center rounded-full bg-slate-900 text-white shadow-sm hover:bg-slate-700"

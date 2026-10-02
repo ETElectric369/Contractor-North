@@ -168,6 +168,11 @@ export function AccountMenu({
         aria-label="Account"
         aria-haspopup="menu"
         aria-expanded={open}
+        // `data-upright`: the top bar never rotates in the App Store app, so when the phone is turned
+        // this 44px square's face is painted through the same quarter turn and the avatar reads upright.
+        // ON THE BUTTON — the panel below is a SIBLING, and a transform on the wrapper would anchor its
+        // position:fixed to this control instead of the viewport (globals.css says why).
+        data-upright
         title={setupDot ? "Account — setup is waiting under Help" : "Account"}
         className="relative flex h-11 w-11 items-center justify-center rounded-full hover:bg-slate-100"
       >

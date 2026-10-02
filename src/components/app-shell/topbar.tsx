@@ -88,10 +88,19 @@ export function Topbar({
     // for its position:fixed descendants, which trapped Nort's floating panel inside the bar
     // (it rendered behind the section pills — cn-v344 regression). The bar never overlaps the
     // scrolling content, so a blur had nothing to frost anyway; the translucency reads glassy.
-    // `app-topbar`: turned sideways on a phone the notch is on the SIDE, so globals.css pads this
-    // bar past it — same bar, same controls, same places, just not under the camera.
+    // `app-topbar`: in a rotated BROWSER tab the notch is on the SIDE, so globals.css pads this bar
+    // past it. In the App Store app the interface is locked to portrait, so this bar never moves at
+    // all — when the phone is turned it simply becomes the strip down one side of the person's view,
+    // which is what Erik asked for, and each control below carries `data-upright` so its face is
+    // painted through the same quarter turn and reads the right way up.
+    //
+    // `data-upright` GOES ON THE BUTTON, NEVER ON THIS HEADER OR THE GROUP BELOW: a transform makes an
+    // element the containing block for its position:fixed descendants, which is the cn-v344 regression
+    // noted above. Every control here is a 44px square, so a quarter turn leaves its box — and its tap
+    // target — exactly 44 x 44.
     <header className="app-topbar flex h-[calc(4rem+var(--sat,0px))] items-center justify-between gap-2 border-b border-white/50 bg-[rgba(255,255,255,0.8)] px-4 pt-[var(--sat,0px)] shell:px-6">
       <button
+        data-upright
         className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100"
         onClick={() => {
           // router.back() does nothing (looks "frozen") when there's no app
@@ -128,6 +137,7 @@ export function Topbar({
         {nortOn && <GlobalAssistant />}
         <button
           onClick={() => window.dispatchEvent(new Event("cn:command"))}
+          data-upright
           data-tour="ask"
           aria-label={nortOn ? "Search Or Ask" : "Search"}
           title={`${nortOn ? "Search or ask Nort" : "Search"} (${modKey})${nortOn && waiting ? " — setup is waiting inside" : ""}`}
@@ -147,6 +157,7 @@ export function Topbar({
             <button
               onClick={() => window.dispatchEvent(new Event("cn:assistant-stop"))}
               // The same anchor as Talk To Nort: it is the same button, in its other state.
+              data-upright
               data-tour="nort"
               aria-label="Stop Nort"
               title="Stop Nort"
@@ -160,6 +171,7 @@ export function Topbar({
               // row) dispatches cn:nort-talk, and GlobalAssistant's launch() starts the mic before
               // this click returns — inside the tap, as iOS needs. Never put an await in front of it.
               onClick={talkToNort}
+              data-upright
               data-tour="nort"
               aria-label="Talk To Nort"
               title="Talk To Nort"
