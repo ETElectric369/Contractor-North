@@ -186,7 +186,11 @@ export function TurnsSideways() {
 
   useEffect(() => {
     const on = (e: FocusEvent) => setTyping(typingInto(e.target as Element | null));
-    const off = () => setTyping(false);
+    // THE ELEMENT FOCUS IS GOING TO, not "nothing". Tabbing from one box to the next fires focusout
+    // and then focusin as two separate events, so reading this as a plain "stopped typing" would turn
+    // the screen between two keystrokes and turn it back — a flash in the middle of filling a row in.
+    // `relatedTarget` is where focus is landing, and is null when it is landing nowhere.
+    const off = (e: FocusEvent) => setTyping(typingInto(e.relatedTarget as Element | null));
     window.addEventListener("focusin", on);
     window.addEventListener("focusout", off);
     return () => {

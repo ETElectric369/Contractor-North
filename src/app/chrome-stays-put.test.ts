@@ -125,6 +125,14 @@ describe("what counts as typing", () => {
     expect(typingInto(el("a"))).toBe(false);
     expect(typingInto(null)).toBe(false);
   });
+
+  it("moving from one box to the next does not turn the screen between two keystrokes", () => {
+    // focusout and focusin are two separate events, so reading focusout as a plain "stopped typing"
+    // would un-type for a frame and throw the screen a quarter turn in the middle of filling a row in.
+    // The watcher reads where focus is LANDING instead.
+    expect(WATCHER).toContain("typingInto(e.relatedTarget as Element | null)");
+    expect(WATCHER).not.toContain("const off = () => setTyping(false)");
+  });
 });
 
 describe("the dock is MEASURED, never a number copied out of dock.tsx", () => {
