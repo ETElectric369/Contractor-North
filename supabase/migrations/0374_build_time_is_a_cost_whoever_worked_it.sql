@@ -1,5 +1,5 @@
 -- ═══════════════════════════════════════════════════════════════════════════
--- Contractor North — migration 0374: build time is a cost, whoever worked it
+-- Contractor North — migration 0373: build time is a cost, whoever worked it
 --
 -- Erik, 2026-10-01: "build time, including my build time is considered COGS, so it would be considered
 -- a direct cost and should be counted that way." And: "lets get rid of the terminology owners draw and
