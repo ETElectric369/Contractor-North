@@ -9,7 +9,7 @@ import {
   type ScreenThatTurns,
   type TurnedRegion,
 } from "@/lib/screens-that-turn";
-import { naturalGridWidth } from "@/components/time-grid";
+import { dayButtonWidth, legalGridWidth, naturalGridWidth, turnedGridWidth } from "@/components/time-grid";
 import { faceStyle, placeTheFace, uprightTurn } from "@/lib/turned-geometry";
 
 /**
@@ -368,15 +368,22 @@ describe("the dock is MEASURED, never a number copied out of dock.tsx", () => {
   });
 });
 
-// ── AND THE WEEK ACTUALLY FITS, which is the whole warrant for turning the phone on /schedule ──────
+// ── AND THE WEEK FITS AS FAR AS THE 44px RULE LETS IT, which is the warrant AND the law together ────
 
-describe("turned sideways, the whole week is on screen — not still scrolling sideways", () => {
+describe("turned sideways, the week shares the room — but never past a 44px thumb", () => {
   /**
    * The warrant in lib/screens-that-turn.ts promises: "Portrait shows three and scrolls sideways for the
    * rest; sideways the whole week is on screen at once." It did not. The seven-day grid asked for 48px of
    * hour gutter plus 7 readable columns = 692px, and the turned box on Erik's phone gives the week's
-   * scroller about 656 — so it still scrolled sideways and still clipped Sunday, and the one screen he
-   * reported from did not deliver the thing it was put on the list for.
+   * scroller 658 — so it still scrolled sideways and still clipped Sunday, and the one screen he reported
+   * from did not deliver the thing it was put on the list for.
+   *
+   * CAPPING IT AT THE ROOM FIXED THAT AND BROKE SOMETHING ELSE, which is what the floor below is about:
+   * the cap had no bottom, and the only thing in a day column that gives way is the day's own button. So
+   * the week fitted and "open this day" came out 42px. Both claims live in this one block now, because
+   * they are one trade and nobody should be able to satisfy one of them without reading the other. The
+   * warrant no longer says "on screen at once" either — it says all seven are there with the last one
+   * 13px short, which is what this file measures.
    */
   /** Erik's phone, turned: the face is ~684 wide, less 0.75rem of face padding each side and the Card's
    *  two 1px borders — the room the week's own scroller gets. */
@@ -387,34 +394,99 @@ describe("turned sideways, the whole week is on screen — not still scrolling s
     expect(naturalGridWidth(7)).toBeGreaterThan(ROOM_TURNED);
   });
 
-  it("so inside a turned face it is capped at the room there is, and nothing scrolls sideways", () => {
-    // What the CSS does, in arithmetic: min(what it wants, the room). 658 of 658 fits exactly, and the
-    // columns come out at (658 - 48) / 7 ≈ 87px — five under the portrait minimum, with Sunday on screen.
-    const laidOutAt = Math.min(naturalGridWidth(7), ROOM_TURNED);
-    expect(laidOutAt).toBe(ROOM_TURNED);
-    expect(laidOutAt).toBeLessThanOrEqual(ROOM_TURNED); // ⇒ scrollWidth ≤ clientWidth: no sideways scroll
-    expect(Math.floor((laidOutAt - 48) / 7)).toBeGreaterThanOrEqual(80);
+  it("so inside a turned face the columns share the room — as far down as the 44px rule allows", () => {
+    // What the CSS does, in arithmetic: clamp(the floor, the room, what it wants).
+    const laidOutAt = turnedGridWidth(7, ROOM_TURNED);
+    expect(laidOutAt).toBeLessThan(naturalGridWidth(7)); // it did share the room: 671 of the 692 it wanted
+    expect(laidOutAt).toBe(legalGridWidth(7, true)); // and stopped at the floor, not below it
   });
 
-  it("and the stylesheet really is that min(), scoped to a turned face only", () => {
+  /**
+   * THE FLOOR, AND WHY THE SHARING NEEDED ONE. Capping at the room alone had no floor, and the room is
+   * not shared evenly inside a day column: the header is the day's own `flex-1` drill-in button beside a
+   * fixed `w-11` `+`, so every pixel the cap took came off the day's button and none off the `+`. It came
+   * out 42px on Erik's own phone — under the rule on the one screen the turn was built for — and 19px on
+   * a 375pt phone, where its `truncate` label showed nothing readable at all.
+   *
+   * THIS IS A TARGET SIZE, NOT A COLUMN WIDTH. The old guard here asserted `(658 - 48) / 7 >= 80`, which
+   * is a claim about columns and could not see a 42px button inside an 87px column. So: the button's own
+   * short side, at every width a phone can give it, and the next narrower phone trips this instead of his
+   * thumb.
+   */
+  it("the day's own drill-in button is never under 44px, at ANY room a phone can give it", () => {
+    // 300 is narrower than the narrowest turned face a phone has (a 320pt SE gives about 390), and 1400
+    // is wider than any of them: every width in between, one at a time, rather than two spot checks.
+    for (let room = 300; room <= 1400; room += 1) {
+      const laid = turnedGridWidth(7, room);
+      expect(dayButtonWidth(7, laid)).toBeGreaterThanOrEqual(44);
+    }
+    // The two phones it was measured on: his 16 Pro, and the 375pt phone where it was a dead end.
+    expect(dayButtonWidth(7, turnedGridWidth(7, ROOM_TURNED))).toBe(44);
+    expect(dayButtonWidth(7, turnedGridWidth(7, 518 - 24 - 2))).toBe(44);
+    // What it WAS, both of them, with the room-only cap this replaced — the failure, in one line each.
+    expect(dayButtonWidth(7, Math.min(naturalGridWidth(7), ROOM_TURNED))).toBeLessThan(44);
+    expect(dayButtonWidth(7, Math.min(naturalGridWidth(7), 492))).toBeLessThan(25);
+  });
+
+  it("and the cost of that floor is stated, not hidden: 13px of nudge on his own phone", () => {
+    // Seven days of two 44px targets and a 1px divider each, after 48px of hour gutter, is 671px; the
+    // turned face gives 658. So the week is 13px wider than the glass — six days and seven eighths of
+    // Sunday, with a nudge for the rest. A target under the rule is a dead end; 13px of scroll is not.
+    expect(legalGridWidth(7, true)).toBe(671);
+    expect(turnedGridWidth(7, ROOM_TURNED) - ROOM_TURNED).toBe(13);
+    // And the warrant says the same thing, because a promise and the arithmetic under it must not drift:
+    // the screen's own reason for turning used to read "the whole week is on screen at once".
+    expect(SCREENS_THAT_TURN.schedule.because).not.toContain("whole week is on screen at once");
+    expect(SCREENS_THAT_TURN.schedule.because).toContain("13px");
+  });
+
+  it("a header with ONE target per day still shares the room all the way down", () => {
+    // A tech with no edit rights has no `+`, and an armed placement makes the whole header one button.
+    // One 44px target per column is a floor no phone breaches, so those weeks fit exactly as before.
+    expect(turnedGridWidth(7, ROOM_TURNED, false)).toBe(ROOM_TURNED);
+    expect(dayButtonWidth(7, ROOM_TURNED, false)).toBeGreaterThanOrEqual(44);
+    expect(legalGridWidth(7, false)).toBeLessThan(ROOM_TURNED);
+  });
+
+  it("the floor can never invert the clamp: it is under what the columns want, for every day count", () => {
+    // clamp(MIN, VAL, MAX) answers MIN when MIN > MAX, so a floor above the natural width would silently
+    // become the width — a wider grid than the one it is protecting.
+    for (let days = 1; days <= 14; days += 1) {
+      expect(legalGridWidth(days, true)).toBeLessThanOrEqual(naturalGridWidth(days));
+    }
+  });
+
+  it("and the stylesheet really is that clamp(), scoped to a turned face only", () => {
     // Upright this must NOT apply: a 370px portrait phone would squeeze seven columns to 46px each,
     // which is the layout the sideways scroll exists to avoid.
     expect(CSS).toMatch(
-      /\.turn-face\[data-held\] \.time-grid-columns \{\s*min-width: min\(var\(--grid-natural-w, 0px\), 100%\);\s*\}/,
+      /\.turn-face\[data-held\] \.time-grid-columns \{\s*min-width: clamp\(var\(--grid-legal-w, 0px\), 100%, var\(--grid-natural-w, 0px\)\);\s*\}/,
     );
     expect(CSS).toMatch(/\n\.time-grid-columns \{\s*min-width: var\(--grid-natural-w, 0px\);\s*\}/);
+    // No pixel count of its own in the rule: both numbers come from the grid, or they can drift from it.
+    // (`0px` inside a var() fallback is "no minimum", not a width, so it is read out before looking.)
+    const at = CSS.indexOf(".turn-face[data-held] .time-grid-columns");
+    const rule = CSS.slice(at, CSS.indexOf("}", at)).replace(/var\(--[a-z-]+, 0px\)/g, "N");
+    expect(rule).not.toMatch(/\d+px/);
   });
 
-  it("the class and the number both come from the grid, and the width is no longer inline", () => {
+  it("the class and both numbers come from the grid, and the width is no longer inline", () => {
     // An inline min-width cannot be capped by a stylesheet without `!important`, so the grid hands over
-    // its one arithmetic as a custom property instead. The number still lives in exactly one place.
+    // its arithmetic as custom properties instead. The numbers still live in exactly one place.
     const GRID = read("src/components/time-grid.tsx");
     expect(GRID).toContain('className="time-grid-columns"');
     expect(GRID).toContain('"--grid-natural-w": `${naturalGridWidth(days.length)}px`');
+    expect(GRID).toContain('"--grid-legal-w": `${legalGridWidth(days.length, !placement && Boolean(onSlotTap))}px`');
     expect(GRID).not.toMatch(/minWidth:\s*days\.length/);
     expect(GRID).toContain("export function naturalGridWidth");
+    expect(GRID).toContain("export function legalGridWidth");
+    // The floor asks for the targets the header is ABOUT TO DRAW: the `+` renders on exactly that
+    // condition, so the two cannot drift into asking for a button that is not there.
+    expect(GRID).toMatch(/if \(onSlotTap\) \{/);
+    expect(GRID).toMatch(/className="flex min-h-11 w-11 shrink-0/);
     // The day view needs no minimum at all — it already fits.
     expect(naturalGridWidth(1)).toBe(0);
+    expect(legalGridWidth(1, true)).toBe(0);
   });
 });
 

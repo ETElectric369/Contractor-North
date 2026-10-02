@@ -398,31 +398,47 @@ main.turn-host > .turn-face[data-held] .pull-pill {
 }
 
 /* ── AND THE WEEK ITSELF HAS TO FIT, or /schedule does not deliver what it promised ──────────────
-   The warrant in lib/screens-that-turn.ts says: "Portrait shows three and scrolls sideways for the
+   The warrant in lib/screens-that-turn.ts promised: "Portrait shows three and scrolls sideways for the
    rest; sideways the whole week is on screen at once." It was not. The seven-day grid asks for a
    readable minimum per column — 48px of hour gutter plus 7 x 92 = 692px (components/time-grid.tsx) —
    and the turned box on Erik's phone gives the week's scroller about 656. So it still scrolled
    sideways and still clipped Sunday, which is the one thing turning the phone was for.
 
-   `min()`, NOT A SMALLER NUMBER. A lowered column width would fit a 16 Pro and miss an SE, and would
-   be a second copy of an arithmetic that lives in time-grid.tsx. This says what is actually meant: the
-   columns keep their readable minimum when there is room for it, and share the room when there is not.
-   `100%` is the scroller's own content box, so the grid stops exactly at the edge instead of
-   overflowing it, and the columns come out at (656 - 48) / 7 ≈ 87px each — 5px under the portrait
-   minimum, and the whole week on screen.
+   SHARE THE ROOM, BUT NEVER BELOW WHAT A THUMB NEEDS. Sharing the room was right and is still what this
+   does; sharing it with NO FLOOR was the bug. The room is not shared evenly inside a day column: the
+   header is two targets side by side, and only one of them gives way (components/time-grid.tsx — the
+   day's drill-in button is `flex-1`, the day's `+` is a fixed `w-11`). So every pixel the cap took came
+   off the day's OWN button: 87px columns made it 42px on Erik's 16 Pro, and 19px on a 375pt phone with a
+   label that showed nothing at all. Under the 44px rule on the one screen the whole turn was built for,
+   and a dead end on any phone narrower than about 400pt.
+
+   SO: clamp(the floor, the room, what it wants). Never under what the rule needs, never over what the
+   columns want, and otherwise exactly the room — `100%` being the scroller's own content box, so when
+   the week does fit it stops at the edge instead of overflowing it.
+
+   AND THE COST, PLAINLY, because this is a trade and not a free win. Seven days of two 44px targets plus
+   a 1px divider each, after 48px of hour gutter, is 671px. A 16 Pro held sideways gives the week's
+   scroller 658. So on his own phone the week is now 13px wider than the glass: six days and seven
+   eighths of Sunday, and a 13px nudge for the rest, where before it was the whole week with a button
+   nobody could honestly call 44px. A target under the rule is a dead end; 13px of scroll is a nudge.
+   The 13px is not hiding in the hour gutter either — the labels there read "12 PM", which needs about
+   30 of its 48px, so narrowing it would clip the clock instead. The warrant in screens-that-turn.ts was
+   rewritten to say that, because a promise this file cannot keep is not a promise anyone should read.
 
    ONLY INSIDE A TURNED FACE. Upright this must not apply: a 370px portrait phone would squeeze seven
    columns to 46px each, which is the layout the sideways scroll exists to avoid.
 
-   THE WIDTH IS A RULE HERE AND A NUMBER THERE. time-grid.tsx hands over its one arithmetic as
-   --grid-natural-w and stops setting `min-width` inline, because an inline width cannot be overridden
-   by a stylesheet without `!important` — and an `!important` that only sometimes applies is the kind of
-   rule nobody can reason about later. The number is still worked out in exactly one place. */
+   THE WIDTHS ARE A RULE HERE AND NUMBERS THERE. time-grid.tsx hands over both arithmetics as
+   --grid-natural-w and --grid-legal-w and stops setting `min-width` inline, because an inline width
+   cannot be overridden by a stylesheet without `!important` — and an `!important` that only sometimes
+   applies is the kind of rule nobody can reason about later. There is no pixel count in this rule: the
+   numbers are still worked out in exactly one place, and one of them says which targets the header is
+   about to draw. */
 .time-grid-columns {
   min-width: var(--grid-natural-w, 0px);
 }
 .turn-face[data-held] .time-grid-columns {
-  min-width: min(var(--grid-natural-w, 0px), 100%);
+  min-width: clamp(var(--grid-legal-w, 0px), 100%, var(--grid-natural-w, 0px));
 }
 
 /* ── THE BUTTONS READ UPRIGHT ────────────────────────────────────────────────

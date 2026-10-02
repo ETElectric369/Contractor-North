@@ -78,8 +78,11 @@ export const SCREENS_THAT_TURN: Record<ScreenThatTurns, Warrant> = {
   // ── The screen he reported from ────────────────────────────────────────────────────────────
   schedule: {
     route: "/schedule",
+    // IT SAID "the whole week is on screen at once" UNTIL 2026-10-01, and it has to say what is true: the
+    // seven columns share the room sideways, but never so far that a day's own button goes under 44px, so
+    // on a 16 Pro the week ends 13px past the glass. Six days and seven eighths of Sunday, and a nudge.
     because:
-      "The week is seven day columns. Portrait shows three and scrolls sideways for the rest; sideways the whole week is on screen at once.",
+      "The week is seven day columns. Portrait shows three and scrolls sideways for the rest; sideways all seven are there, the last one 13px short of whole because a day's own button never goes under 44px.",
   },
 };
 

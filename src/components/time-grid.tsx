@@ -133,6 +133,54 @@ export function naturalGridWidth(days: number): number {
   return days > 1 ? GUTTER_PX + days * MIN_COL_PX : 0;
 }
 
+/** The 44px rule, in pixels, once. Every tap target in this header is measured against it. */
+const TAP_PX = 44;
+/** The divider down a column's left edge. `border-box`, so it comes out of the column's own width. */
+const COL_DIVIDER_PX = 1;
+
+/**
+ * THE FLOOR UNDER THE CAP: the narrowest this grid may be laid out at before a TAP TARGET goes under
+ * 44px — which the cap above, left to itself, will happily do.
+ *
+ * WHY A FLOOR AT ALL, when sharing the room was the whole point. Because the room is not shared evenly
+ * inside a day column. A day's header is up to TWO targets side by side (see the header below): the
+ * day's own drill-in button, which is `flex-1` and gives way, and the day's `+`, which is a fixed 44px
+ * and does not. So every pixel the cap takes off a column comes off the DAY'S OWN BUTTON and none off
+ * the `+`: on Erik's 16 Pro, 87px columns made the day's button 42px, and on a 375pt phone 19px with a
+ * label that showed nothing. The one screen the turn was built for, and its "open this day" door was
+ * under the law on his own phone and a dead end on a smaller one.
+ *
+ * `daysOwnPlus` is that second target, and it is not always there — armed for a placement the whole
+ * header is one button, and with no edit rights there is no `+` — so the floor asks for exactly what
+ * THIS header is about to draw rather than for the worst case always. A tech reading the week gets the
+ * columns shared as before, because one 44px target per column is a floor no phone can breach.
+ */
+export function legalGridWidth(days: number, daysOwnPlus: boolean): number {
+  const col = COL_DIVIDER_PX + TAP_PX + (daysOwnPlus ? TAP_PX : 0);
+  return days > 1 ? GUTTER_PX + days * col : 0;
+}
+
+/**
+ * WHAT THE GRID IS ACTUALLY LAID OUT AT inside a turned face — the `clamp()` in globals.css written as
+ * arithmetic, so the rule is a number a test can read instead of a string nobody can run. Never under
+ * what the law needs, never over what it wants, and otherwise the room there is.
+ */
+export function turnedGridWidth(days: number, room: number, daysOwnPlus = true): number {
+  const wants = naturalGridWidth(days);
+  if (wants === 0) return Math.max(0, room); // one day asks for no minimum: it is the room
+  return Math.max(legalGridWidth(days, daysOwnPlus), Math.min(room, wants));
+}
+
+/**
+ * THE NUMBER THE 44px RULE IS ABOUT: how wide the day's own drill-in button comes out when the grid is
+ * laid out `gridWidth` wide — the column's share, less its divider, less the fixed 44px of the day's
+ * `+` beside it. The button is 44px TALL by `min-h-11`, so this is its short side, turned or upright.
+ */
+export function dayButtonWidth(days: number, gridWidth: number, daysOwnPlus = true): number {
+  if (days < 1) return 0;
+  return (gridWidth - GUTTER_PX) / days - COL_DIVIDER_PX - (daysOwnPlus ? TAP_PX : 0);
+}
+
 /** An open spot is tapped to the half hour it sits in (12px under a thumb is noise; 24px is a slot). */
 export const SLOT_MIN = 30;
 
@@ -424,12 +472,20 @@ function TimeGridInner({
 
   return (
     <div ref={scrollRef} className="overflow-x-auto">
-      {/* `time-grid-columns` + `--grid-natural-w`: the minimum is applied by globals.css, which is what
-          lets a turned phone cap it at the room there really is instead of scrolling the week sideways
-          again. Upright the rule resolves to this same number, so nothing changes. */}
+      {/* `time-grid-columns` + the two widths: the minimum is applied by globals.css, which is what lets
+          a turned phone cap it at the room there really is instead of scrolling the week sideways again —
+          and `--grid-legal-w` is the floor under that cap, the narrowest the columns may share before the
+          day's own button goes under 44px. The two targets the floor is about are the two buttons drawn
+          below, so the condition that renders the `+` is the condition that asks for its 44px.
+          Upright the rule resolves to the natural number alone, so nothing changes. */}
       <div
         className="time-grid-columns"
-        style={{ "--grid-natural-w": `${naturalGridWidth(days.length)}px` } as React.CSSProperties}
+        style={
+          {
+            "--grid-natural-w": `${naturalGridWidth(days.length)}px`,
+            "--grid-legal-w": `${legalGridWidth(days.length, !placement && Boolean(onSlotTap))}px`,
+          } as React.CSSProperties
+        }
       >
         {/* Day headers */}
         <div className="flex border-b border-slate-100">
@@ -467,7 +523,11 @@ function TimeGridInner({
             }
             /* THE DAY'S "+": Add To Schedule on this day, beside the day's own tap (which drills in).
                Two sibling buttons, never one inside the other. 44 by 44: a 92px week column still leaves
-               the day's label about 48px. */
+               the day's label about 48px.
+
+               AND THESE ARE THE TWO TARGETS THE FLOOR IS FOR. The `+` is `w-11 shrink-0` — it does not
+               give way — so whatever a narrow column takes, it takes from the `flex-1` button beside it.
+               That is why legalGridWidth() exists and why it is told whether this branch ran. */
             if (onSlotTap) {
               return (
                 <div key={d.dayStr} className={`flex min-w-0 flex-1 items-stretch ${colBorder(d)}`}>
