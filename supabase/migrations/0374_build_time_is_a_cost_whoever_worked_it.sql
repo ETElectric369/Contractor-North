@@ -152,7 +152,7 @@ select p.id,
        p.active,
        -- 0286: the owner is paid by owner's draw. He is not on payroll; his hours are billed and counted.
        (p.role = 'owner') as paid_by_draw,
-       -- 0373: what an hour of this person's own build time COSTS. Read straight through - no case, no
+       -- 0374: what an hour of this person's own build time COSTS. Read straight through - no case, no
        -- coalesce, no default. Null reaches the app as null, so the app can say "nobody has set this"
        -- instead of printing a figure built on a guess.
        p.cost_rate
