@@ -16,16 +16,23 @@ class NorthBridgeViewController: CAPBridgeViewController {
     /// WKWebView holds its navigation delegate weakly, so the relay lives here.
     private var navigationRelay: NavigationFailureRelay?
 
-    /// WHICH WAY THE PHONE MAY BE HELD. iOS asks the window's ROOT view controller — this one —
-    /// every time it considers rotating, so the page's answer (ScreenTurn.allowed, set through the
-    /// ScreenTurn plugin by whichever screen is open) takes effect with no relaunch. Portrait unless
-    /// a screen has asked for sideways; Info.plist's iPhone list is the outer bound, and the list of
-    /// screens that ask is src/lib/screens-that-turn.ts in the web app.
+    /// THE iPHONE'S INTERFACE NEVER ROTATES — and that IS the feature, not a restriction on it.
+    ///
+    /// Erik, on cn-v1041, which did let iOS rotate: "nice it rotates now on schedule but the dock and
+    /// top bar rotate with it still." iOS rotating the interface is what carries them around. He asked
+    /// for the opposite: "lock the top bar and the dock positions and just rotate the buttons while
+    /// the internal screen rotates." The only way the top bar stays against the phone's top edge and
+    /// the dock against its bottom edge is for nothing to move — so nothing does. The quarter turn is
+    /// DRAWN by the page, on the region between them, from the word ScreenTurnPlugin reports.
+    ///
+    /// Said here as well as in Info.plist on purpose: the list in Info.plist is the outer bound, and
+    /// this is the rule. Both have to agree for the chrome to stay put, so both say it.
     ///
     /// THE iPAD IS NOT GATED HERE. It already rotates on every screen (the ~ipad list in
-    /// Info.plist) and keeps doing so: `.all` hands the decision straight back to that list.
+    /// Info.plist) and keeps doing so: `.all` hands the decision straight back to that list. The
+    /// plugin never reports an iPad as turned, so the page does not draw a second turn on top.
     override var supportedInterfaceOrientations: UIInterfaceOrientationMask {
-        UIDevice.current.userInterfaceIdiom == .pad ? .all : ScreenTurn.allowed
+        UIDevice.current.userInterfaceIdiom == .pad ? .all : .portrait
     }
 
     override func capacitorDidLoad() {

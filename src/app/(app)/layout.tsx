@@ -29,6 +29,7 @@ import { TapToPayAwareness } from "@/components/tap-to-pay/awareness";
 import { SectionSubnav } from "@/components/section-subnav";
 import { RouteOffLine } from "@/components/route-off-line";
 import { ToastProvider } from "@/components/toast";
+import { Turned } from "@/components/turned";
 import { offFeatureKey } from "@/lib/features";
 import { countTeammates, shellDoors } from "@/lib/feature-doors";
 import { Suspense } from "react";
@@ -369,24 +370,55 @@ export default async function AppLayout({
             {graceLeft} more day{graceLeft === 1 ? "" : "s"}.
           </div>
         )}
-        <main className="flex-1 overflow-y-auto bg-slate-50/70 p-4 pb-[calc(7.5rem+env(safe-area-inset-bottom))] shell:p-6 shell:pb-6">
-          {/* PULL DOWN TO REFRESH, ONCE, FOR EVERY SCREEN (44aeec9c; cn-v1039 built it and mounted it
-              on /billing alone, where the report came from, while its own headline said "for every
-              screen"). It needs no page data — it walks up to its scroller, which is THIS element —
-              and in the shell there is no browser gesture to fall back on: the root is h-dvh +
-              overflow-hidden and the document's rubber-band is off on purpose. Touch only, nothing
-              drawn at rest, and never while a sheet is open. One mount: two would refresh twice. */}
-          <PullToRefresh />
-          <Suspense fallback={null}>
-            <SectionSubnav isStaff={isStaff} features={doors} />
-          </Suspense>
-          {/* A page whose feature is switched off still opens from a link, with the Off line on top. */}
-          <RouteOffLine features={features} isOwner={isOwner} />
-          {/* One count per page open, ids stripped, no user id (0353). Suspense: it reads ?tab=. */}
-          <Suspense fallback={null}>
-            <PageOpenCounter />
-          </Suspense>
-          <ToastProvider>{children}</ToastProvider>
+        {/* `turn-host`: on a screen declared in lib/screens-that-turn.ts, this is the rectangle of
+            glass BETWEEN the chrome — and when the phone is turned sideways it is the frame the page
+            is drawn into a quarter turn. The top bar above and the dock below are not transformed at
+            all, which is why they stay exactly where they are on the phone (Erik, 2026-10-01). */}
+        <main className="turn-host flex-1 overflow-y-auto bg-slate-50/70 p-4 pb-[calc(7.5rem+env(safe-area-inset-bottom))] shell:p-6 shell:pb-6">
+          {/* Upright this wrapper has no box at all (`display: contents`), so nothing about any screen
+              changes. `avoidDock` takes the floating dock's MEASURED height off the bottom of the
+              turned box, so the last line of a document is never drawn under the glass.
+
+              `region="the route"`: this region turns only when the turn is owed to the ROUTE. A
+              full-screen viewer opened over a job — which is every photo and every receipt — owns the
+              turn itself, and this region staying upright is what keeps the viewer full screen (its
+              `position: fixed` has no transformed ancestor to resolve against) and what stops the two
+              quarter turns composing into a half turn and drawing the photo upside down. */}
+          <Turned region="the route" avoidDock>
+            {/* PULL DOWN TO REFRESH, ONCE, FOR EVERY SCREEN (44aeec9c; cn-v1039 built it and mounted it
+                on /billing alone, where the report came from, while its own headline said "for every
+                screen"). It needs no page data — it finds its own scroller — and in the shell there is
+                no browser gesture to fall back on: the root is h-dvh + overflow-hidden and the document's
+                rubber-band is off on purpose. Touch only, nothing drawn at rest, and never while a sheet
+                is open. One mount: two would refresh twice.
+
+                INSIDE THE TURNED REGION, NOT BESIDE IT — and that placement is half of one fix, never a
+                tidy-up. WHICH ELEMENT SCROLLS CHANGES WHEN THE PHONE TURNS: upright it is this <main>,
+                and while the phone is held turned globals.css gives <main> `overflow: hidden` and moves
+                `overflow-y: auto` onto the turned face. Both obvious resolutions are wrong, and both were
+                traced before this one was written:
+                  · left OUTSIDE <Turned>, the walk up to a scroller steps over a <main> that no longer
+                    scrolls and arms the gesture on the document — a pull that does nothing, on the two
+                    screens a thumb is most likely to try it on.
+                  · moved inside and left at that, the gesture arms on the right element but still
+                    measures the thumb in GLASS coordinates, while the face's scroll axis has been turned
+                    a quarter turn — so a downward pull reads as sideways and is thrown away as a swipe.
+                So it sits inside the face AND reads the turn: scrollerForTheTurn() resolves the face as
+                its scroller, and thumbThroughTheTurn() maps the thumb through the same quarter turn the
+                face is drawn with. One answer decides which element scrolls and which way a thumb is
+                going, and upright nothing about any of it changes. */}
+            <PullToRefresh />
+            <Suspense fallback={null}>
+              <SectionSubnav isStaff={isStaff} features={doors} />
+            </Suspense>
+            {/* A page whose feature is switched off still opens from a link, with the Off line on top. */}
+            <RouteOffLine features={features} isOwner={isOwner} />
+            {/* One count per page open, ids stripped, no user id (0353). Suspense: it reads ?tab=. */}
+            <Suspense fallback={null}>
+              <PageOpenCounter />
+            </Suspense>
+            <ToastProvider>{children}</ToastProvider>
+          </Turned>
         </main>
       </div>
       {/* Search Or Ask's sheet: with nothing typed, Talk To Nort and (staff) the setup rows. */}

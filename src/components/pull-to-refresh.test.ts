@@ -18,9 +18,22 @@ import { renderToStaticMarkup } from "react-dom/server";
  * the right scroller to listen on, and the rules that keep the gesture from stealing a scroll or a
  * sideways swipe are the ones written in it.
  */
-vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
+// usePathname as well as useRouter: the gesture now reads how the phone is HELD, from the one watcher
+// (components/turns-sideways), and that module takes the route off the router. Nothing here renders the
+// watcher — only the store reader it exports — so the path it would report never matters.
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }), usePathname: () => "/billing" }));
 
-import { PullToRefresh, pullMayStart, pullReleases, readPullMove, scrollerOf } from "./pull-to-refresh";
+import {
+  PullToRefresh,
+  TURNED_FACE,
+  pullMayStart,
+  pullReleases,
+  readPullMove,
+  scrollerForTheTurn,
+  scrollerOf,
+  turnedFaceAround,
+} from "./pull-to-refresh";
+import { EVERY_WAY_HELD, thumbThroughTheTurn, type Held } from "@/lib/turned-geometry";
 import { codeOnly } from "@/lib/migration-body.test-util";
 
 const src = readFileSync(join(process.cwd(), "src/components/pull-to-refresh.tsx"), "utf8");
@@ -71,6 +84,218 @@ describe("which element it listens on", () => {
   it("it does NOT require something to scroll: an empty screen still pulls down to refresh", () => {
     // The guard that would have broken this is a scrollHeight > clientHeight test. It isn't there.
     expect(code).not.toMatch(/scrollHeight/);
+  });
+});
+
+/**
+ * ── AND WHEN THE PHONE IS HELD TURNED, THE ELEMENT THAT SCROLLS IS A DIFFERENT ELEMENT ─────────────
+ *
+ * Erik, 2026-10-01: "schedule and documents yes and no on everything else." On those three screens the
+ * app draws a quarter turn itself — the chrome never moves — and globals.css does it by taking the
+ * scroll OFF `main` (`overflow: hidden`) and putting it ON the turned face. So "walk up to the nearest
+ * scrolling ancestor" has two different right answers depending on how the phone is being held, and a
+ * gesture armed on the wrong one is a control that does nothing: the pull a thumb is most likely to
+ * try on a wide calendar.
+ *
+ * TWO WRONG ANSWERS WERE TRACED BEFORE THIS ONE WAS WRITTEN, and both are pinned here so neither can
+ * come back as a tidy-up:
+ *   (a) leave the mount OUTSIDE the turned region → the walk steps over a `main` that no longer
+ *       scrolls and arms on the document. Nothing happens when you pull.
+ *   (b) move it inside and stop there → it arms on the right element, but the thumb is still measured
+ *       in GLASS coordinates while the content has been turned a quarter turn beneath it, so a pull
+ *       down reads as a drag sideways and readPullMove correctly throws it away as a swipe.
+ * The fix is both halves of one answer, from the one word that says how the phone is held.
+ */
+describe("which element it arms on — upright, and held turned", () => {
+  type Fake = {
+    scrollTop: number;
+    parentElement: Fake | null;
+    overflowY: string;
+    /** The exact selector globals.css moves the scroll onto, or nothing. */
+    sel?: string;
+    matches?: (q: string) => boolean;
+  };
+  const el = (overflowY: string, parentElement: Fake | null = null, sel?: string): Fake => {
+    const node: Fake = { scrollTop: 0, parentElement, overflowY, sel };
+    node.matches = (q: string) => node.sel === q;
+    return node;
+  };
+
+  /**
+   * The app shell as the two states really are. Upright: `main` scrolls, the face is `display: contents`
+   * and has no box (so no `data-held`, and the selector does not match it). Turned: `main` is
+   * `overflow: hidden` and the face scrolls and carries `data-held`.
+   */
+  const shell = (held: Held) => {
+    const turned = held !== "upright";
+    const main = el(turned ? "hidden" : "auto");
+    const face = el(turned ? "auto" : "visible", main, turned ? TURNED_FACE : undefined);
+    const page = el("visible", face);
+    const anchor = el("visible", page); // <PullToRefresh />'s own hidden span, inside the face
+    return { main, face, page, anchor };
+  };
+
+  const resolve = (anchor: Fake, held: Held) => {
+    const realGetComputedStyle = globalThis.getComputedStyle;
+    const realDocument = globalThis.document;
+    (globalThis as any).getComputedStyle = (n: Fake) => ({ overflowY: n.overflowY });
+    (globalThis as any).document = { scrollingElement: "the document" };
+    try {
+      return scrollerForTheTurn(anchor as never, held);
+    } finally {
+      (globalThis as any).getComputedStyle = realGetComputedStyle;
+      (globalThis as any).document = realDocument;
+    }
+  };
+
+  it("UPRIGHT it is <main>, exactly as it was before any of this existed", () => {
+    const s = shell("upright");
+    expect(resolve(s.anchor, "upright")).toBe(s.main);
+    // Not the face: upright the face has no box at all, and arming on it would be arming on nothing.
+    expect(resolve(s.anchor, "upright")).not.toBe(s.face);
+  });
+
+  for (const held of ["clockwise", "counterclockwise"] as const) {
+    it(`HELD ${held} it is the turned face — the element the stylesheet handed the scroll to`, () => {
+      const s = shell(held);
+      expect(resolve(s.anchor, held)).toBe(s.face);
+      // Resolution (a), named: the walk alone would step over a `main` that no longer scrolls and land
+      // on the document, so the pull would do nothing on the three screens that turn.
+      expect(resolve(s.anchor, held)).not.toBe("the document");
+      expect(resolve(s.anchor, held)).not.toBe(s.main);
+    });
+  }
+
+  it("A PHOTO OPEN OVER THE PAGE: the screen is turned, but <main> is still the scroller", () => {
+    // This is the case the fallback exists for, and it is not hypothetical — it happens on every photo
+    // and every receipt. The turn has exactly ONE owner, and when a full-screen viewer owns it the app
+    // shell's region stays upright on purpose: no `data-held`, `display: contents`, `main` still
+    // scrolling. That is what keeps the viewer full screen (its `fixed` has no transformed ancestor to
+    // resolve against). So "held is clockwise" must NOT be read as "the face below me is the scroller".
+    const main = el("auto");
+    const face = el("visible", main); // the shell's region, upright because the viewer owns the turn
+    const anchor = el("visible", el("visible", face));
+    expect(resolve(anchor, "clockwise")).toBe(main);
+  });
+
+  it("the face is found through however many boxes the page puts in between", () => {
+    const main = el("hidden");
+    const face = el("auto", main, TURNED_FACE);
+    let n = face;
+    for (let i = 0; i < 6; i++) n = el("visible", n);
+    expect(turnedFaceAround(n as never)).toBe(face as never);
+  });
+
+  it("and a `.turn-face` with NO data-held is not it — that is the upright one", () => {
+    // The two states are one element wearing or not wearing an attribute, which is exactly the trap:
+    // matching the class alone would arm on a `display: contents` box on every upright screen.
+    const main = el("auto");
+    const face = el("visible", main, ".turn-face");
+    expect(turnedFaceAround(el("visible", face) as never)).toBeNull();
+  });
+
+  it("the selector it walks for is the one the stylesheet moves the scroll ONTO", () => {
+    // The hand-copied-list hazard: these are two halves of one fact in two files. Change the stylesheet
+    // and this fails, instead of the gesture quietly arming on the wrong element on a phone.
+    const css = readFileSync(join(process.cwd(), "src/app/globals.css"), "utf8");
+    expect(TURNED_FACE).toBe(".turn-face[data-held]");
+    expect(css).toMatch(/main\.turn-host:has\(> \.turn-face\[data-held\]\)[\s\S]{0,200}?overflow: hidden/);
+    expect(css).toMatch(/main\.turn-host > \.turn-face\[data-held\] \{[^}]*overflow-y: auto/);
+  });
+
+  it("the listeners come off the old scroller and onto the new one when the phone turns", () => {
+    // Bound once, this would stay on a `main` that had stopped scrolling. `held` is in the dependency
+    // list for that one reason, and `pulled` deliberately is not (the release reads a ref).
+    expect(code).toMatch(/const scroller = scrollerForTheTurn\(anchor\.current, held\)/);
+    expect(code).toMatch(/\}, \[router, held\]\)/);
+    expect(code).toMatch(/const \{ held \} = useTheTurn\(\)/);
+  });
+});
+
+describe("a downward pull is a downward pull on all three, and still only a pull", () => {
+  /**
+   * Resolution (b), named: arming on the right element is not enough. clientX/clientY are the GLASS's,
+   * and the face has been painted a quarter turn under them — so the gesture reads the thumb through
+   * the same turn the face is drawn with (lib/turned-geometry: thumbThroughTheTurn), and readPullMove
+   * then judges the content's own axes. This drives the two together, the way the listener does.
+   */
+  const pull = (onGlass: { dx: number; dy: number }, held: Held, claimed = false) => {
+    const thumb = thumbThroughTheTurn(onGlass, held);
+    return readPullMove({ dy: thumb.dy, dx: thumb.dx, claimed });
+  };
+
+  /** A straight pull DOWN the person's own view, as the glass reports it each way up. */
+  const down: Record<Held, { dx: number; dy: number }> = {
+    upright: { dx: 0, dy: 76 },
+    clockwise: { dx: 76, dy: 0 },
+    counterclockwise: { dx: -76, dy: 0 },
+  };
+
+  for (const held of EVERY_WAY_HELD) {
+    it(`${held}: a pull down past the trigger refreshes`, () => {
+      const move = pull(down[held], held);
+      expect(move.kind).toBe("pull");
+      expect(move.kind === "pull" && pullReleases(move.px)).toBe(true);
+    });
+
+    it(`${held}: raw, unmapped, that SAME thumb is NOT a pull — which is the bug`, () => {
+      // What (b) would ship as: on a turned phone the glass reports that pull as travel along its own
+      // X axis, where the rule sees no downward movement at all and never claims it. The gesture was
+      // not wrong on a turned screen, it was DEAD on one — which is the kind of thing a person reports
+      // as "pull to refresh doesn't work on the calendar" and nobody can reproduce on a laptop.
+      const raw = readPullMove({ dy: down[held].dy, dx: down[held].dx, claimed: false });
+      if (held === "upright") expect(raw.kind).toBe("pull");
+      else expect(raw.kind).not.toBe("pull");
+    });
+
+    it(`${held}: a pull UP the person's view is still theirs, not ours`, () => {
+      expect(pull({ dx: -down[held].dx, dy: -down[held].dy }, held).kind).toBe("notOurs");
+    });
+
+    it(`${held}: a swipe ACROSS the person's view is never claimed as a pull`, () => {
+      // Straight across reads as no downward travel at all — "ignore", the browser's to interpret.
+      const across =
+        held === "upright" ? { dx: 76, dy: 0 } : held === "clockwise" ? { dx: 0, dy: -76 } : { dx: 0, dy: 76 };
+      expect(pull(across, held).kind).not.toBe("pull");
+      // And across with a thumb's worth of drift down it is handed back explicitly — a back gesture is
+      // never half-stolen while it is still cancelable.
+      const drifting =
+        held === "upright"
+          ? { dx: 76, dy: 20 }
+          : held === "clockwise"
+            ? { dx: 20, dy: -76 }
+            : { dx: -20, dy: 76 };
+      expect(pull(drifting, held).kind).toBe("notOurs");
+    });
+
+    it(`${held}: the first few pixels still belong to the browser`, () => {
+      const tiny = { dx: Math.sign(down[held].dx) * 6, dy: Math.sign(down[held].dy) * 6 };
+      expect(pull(tiny, held).kind).toBe("ignore");
+    });
+
+    it(`${held}: how far it reports is the real travel of the thumb, measured past the slop`, () => {
+      const move = pull(down[held], held);
+      expect(move).toEqual({ kind: "pull", px: 64 });
+    });
+  }
+
+  it("UPRIGHT IS BYTE FOR BYTE WHAT MAIN DOES TODAY — the mapping is the identity there", () => {
+    // The one regression that would be invisible: every screen in the app is upright, and a mapping
+    // that touched the numbers there would change the feel of a gesture on all of them.
+    for (const d of [{ dx: 0, dy: 0 }, { dx: 9, dy: 30 }, { dx: -40, dy: 20 }, { dx: 3, dy: -200 }]) {
+      expect(pull(d, "upright")).toEqual(readPullMove({ dy: d.dy, dx: d.dx, claimed: false }));
+      expect(pull(d, "upright", true)).toEqual(readPullMove({ dy: d.dy, dx: d.dx, claimed: true }));
+    }
+  });
+
+  it("the listener maps the thumb before it judges it, and reads the SAME `held` it armed on", () => {
+    const listener = code.slice(code.indexOf("const onStart"));
+    // The raw glass deltas go INTO the mapping and only the mapped ones reach the rule. A second `held`
+    // from anywhere else would be the one way these two could disagree mid-gesture.
+    expect(listener).toMatch(/thumbThroughTheTurn\(\s*\{[^}]*clientY - startY[^}]*\},\s*held,\s*\)/);
+    expect(listener).toMatch(/readPullMove\(\{ dy: thumb\.dy, dx: thumb\.dx, claimed: pulling \}\)/);
+    // Nothing untransformed reaches readPullMove — this is the line resolution (b) would restore.
+    expect(listener).not.toMatch(/readPullMove\(\{[^}]*clientY/);
   });
 });
 
@@ -267,6 +492,19 @@ describe("the screens that have it", () => {
     const main = layout.slice(layout.indexOf("<main"), layout.indexOf("</main>"));
     expect(main).toContain("<PullToRefresh />");
     expect(main).toContain("overflow-y-auto");
+  });
+
+  it("…and INSIDE the turned region, which is the only placement that works both ways up", () => {
+    // Not tidiness and not an accident. Left a direct child of <main> it would resolve its scroller by
+    // walking up — and on a turned screen it would step over a <main> that globals.css has given
+    // `overflow: hidden` and arm on the document, so the pull would do nothing on the schedule and on a
+    // document. Inside the face, the walk finds the element the stylesheet actually handed the scroll
+    // to. The other half of the same fix is in the mapping above; neither works alone.
+    const main = layout.slice(layout.indexOf("<main"), layout.indexOf("</main>"));
+    const face = main.slice(main.indexOf("<Turned"), main.indexOf("</Turned>"));
+    expect(face).toContain("<PullToRefresh />");
+    // And ahead of the page's own content, so the anchor is the first thing in the face.
+    expect(face.indexOf("<PullToRefresh />")).toBeLessThan(face.indexOf("<ToastProvider>"));
   });
 
   it("and no page mounts a second one: two of them would refresh twice on one pull", () => {

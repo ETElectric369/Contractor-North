@@ -269,7 +269,13 @@ export function GlobalAssistant() {
             onPointerDown={onHandleDown}
             onPointerMove={onHandleMove}
             onPointerUp={onHandleUp}
-            className="flex shrink-0 cursor-grab touch-none select-none items-center gap-2 px-2 py-1 active:cursor-grabbing"
+            // NO VERTICAL PADDING OF ITS OWN ANY MORE: the two buttons on the right are 44px tall and
+            // they set this row's height, which is what makes them a REAL 44px target (2026-10-01).
+            // They were 24px squares — `p-1` around a 16px glyph — and that is under the rule in every
+            // orientation, not only a turned one. It showed up auditing what a person can reach from a
+            // turned screen: Nort's panel is one of the few that keeps its own turn, so on a sideways
+            // schedule somebody is aiming a thumb at a 24px Close that is itself a quarter turn round.
+            className="flex shrink-0 cursor-grab touch-none select-none items-center gap-2 px-2 active:cursor-grabbing"
           >
             <GripHorizontal className="h-4 w-4 shrink-0 text-slate-300" />
             {collapsed && draft ? (
@@ -289,11 +295,15 @@ export function GlobalAssistant() {
                 })
               }
               aria-label={collapsed ? "Expand" : "Collapse"}
-              className="rounded p-1 text-slate-400 hover:bg-white/60"
+              className="inline-flex h-11 w-11 items-center justify-center rounded text-slate-400 hover:bg-white/60"
             >
               {collapsed ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
             </button>
-            <button onClick={closePanel} aria-label="Close assistant" className="rounded p-1 text-slate-400 hover:bg-white/60">
+            <button
+              onClick={closePanel}
+              aria-label="Close assistant"
+              className="inline-flex h-11 w-11 items-center justify-center rounded text-slate-400 hover:bg-white/60"
+            >
               <X className="h-4 w-4" />
             </button>
           </div>

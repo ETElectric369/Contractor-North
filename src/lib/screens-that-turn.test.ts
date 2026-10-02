@@ -38,7 +38,14 @@ describe("nothing is on the list without a reason", () => {
   it("the list stays SHORT — a long list is the thing we were avoiding", () => {
     // Not a magic number: it is a tripwire. Passing it means someone should re-read the note at the
     // top of screens-that-turn.ts and the test above, not raise this line.
-    expect(names.length).toBeLessThanOrEqual(6);
+    //
+    // IT CAME DOWN, which is the direction a list like this almost never moves. It shipped with four
+    // and the person it was built for took one off after holding both builds: "schedule and documents
+    // yes and no on everything else" (Erik, 2026-10-01). So the tripwire comes down with it — left at
+    // six it would have had three entries of silent headroom, which is exactly the slack that lets a
+    // list grow by accident. Four is three plus one: the next entry is a decision somebody writes a
+    // reason for, and the one after that trips this.
+    expect(names.length).toBeLessThanOrEqual(4);
   });
 
   it("no two screens claim the same route", () => {
@@ -58,7 +65,7 @@ describe("nothing is on the list without a reason", () => {
   });
 });
 
-describe("what is actually on it (the four, by name)", () => {
+describe("what is actually on it (the three, by name)", () => {
   it("documents first — the PDF engine's own preview, the screen he named", () => {
     expect(SCREENS_THAT_TURN["document-preview"].route).toBe("/print/pdf-preview");
   });
@@ -71,8 +78,23 @@ describe("what is actually on it (the four, by name)", () => {
     expect(SCREENS_THAT_TURN.schedule.route).toBe("/schedule");
   });
 
-  it("the price table — already wider than the phone", () => {
-    expect(SCREENS_THAT_TURN["price-list"].route).toBe("/price-list");
+  it("THE PRICE LIST IS NOT ON IT — and that is a decision, not an omission", () => {
+    // Erik, 2026-10-01, having held both builds on his own phone: "schedule and documents yes and no on
+    // everything else." The price table was the fourth entry and it reads like the most obvious one of
+    // the four — it declares min-w-[1080px], so extra width genuinely shows more of it. The arithmetic
+    // is what decided: drawn in the glass between a top bar and a dock that no longer move, the table
+    // gets about 658px, against about 858px when iOS rotated the whole interface. Turning the phone
+    // THIS way shows LESS of it than the old way did. So it goes back to ordinary portrait rather than
+    // keeping a second rotation mode alive for one screen.
+    //
+    // Pinned by NAME rather than by count: a future "price-list" key would have to pass the whole file
+    // above, and this is the line that says somebody has to come back to this reason first.
+    expect(Object.keys(SCREENS_THAT_TURN)).not.toContain("price-list");
+    expect(screenTurningAt("/price-list")).toBeNull();
+    expect(mayTurnSideways("/price-list")).toBe(false);
+    // The reason is written down where the next person will look for it, in his words.
+    const file = read("src/lib/screens-that-turn.ts");
+    expect(file).toContain("schedule and documents yes and no on everything else");
   });
 });
 
@@ -89,6 +111,10 @@ describe("the default is portrait, and the default is most of the app", () => {
     "/timeclock",
     "/settings",
     "/login",
+    // Off the list on 2026-10-01, and listed HERE now so it is held portrait by the same test that
+    // holds the rest of the app portrait, rather than merely being absent from the other one.
+    "/price-list",
+    "/price-list/kits",
     "/",
     "/print/invoice/7f1c",
     "/print/business-card",
@@ -105,13 +131,12 @@ describe("the matcher stops at a segment boundary", () => {
   it("the route itself, and anything under it", () => {
     expect(screenTurningAt("/schedule")).toBe("schedule");
     expect(screenTurningAt("/print/pdf-preview")).toBe("document-preview");
-    expect(screenTurningAt("/price-list")).toBe("price-list");
+    expect(screenTurningAt("/schedule/2026-10-01")).toBe("schedule");
   });
 
   it("a NEIGHBOUR with the same prefix does not inherit the warrant", () => {
-    // The whole reason this isn't a bare startsWith: a future /price-lists or /schedules would
-    // otherwise rotate without anybody declaring it.
-    expect(screenTurningAt("/price-lists")).toBeNull();
+    // The whole reason this isn't a bare startsWith: a future /schedules would otherwise rotate
+    // without anybody declaring it.
     expect(screenTurningAt("/schedules")).toBeNull();
     expect(screenTurningAt("/print/pdf-preview-old")).toBeNull();
   });
@@ -152,13 +177,23 @@ describe("a document opened OVER a tall screen may still be turned", () => {
 });
 
 describe("there is ONE place that tells the phone, and ONE place that is mounted", () => {
-  it("only turns-sideways.tsx calls letTheScreenTurn", () => {
-    // Two writers is the race this design exists to avoid: a layer asking for portrait on its way
-    // out while the route underneath is still allowed to be sideways.
+  it("only turns-sideways.tsx watches how the phone is held", () => {
+    // Two writers is the race this design exists to avoid: a layer un-turning the screen on its way
+    // out while the route underneath is still allowed to be turned.
+    //
+    // The CALL changed shape with cn-v1042 and the rule did not. It used to ask the shell to unlock
+    // the interface so iOS would rotate the whole view — which is exactly what carried the top bar and
+    // the dock around with it (Erik: "nice it rotates now on schedule but the dock and top bar rotate
+    // with it still"). The shell is portrait-locked again and REPORTS which way the phone is held;
+    // this watcher is still the one and only thing that listens, and the one and only thing that
+    // decides what gets drawn.
     const callers = read("src/components/turns-sideways.tsx");
-    expect(callers).toContain("letTheScreenTurn");
+    expect(callers).toContain("watchHowThePhoneIsHeld");
     const lib = read("src/lib/native-orientation.ts");
-    expect(lib).toContain("export async function letTheScreenTurn");
+    expect(lib).toContain("export function watchHowThePhoneIsHeld");
+    // Nothing else in the app may listen for the shell's report directly.
+    const others = ["src/components/turned.tsx", "src/components/media-lightbox.tsx", "src/app/print/pdf-preview/viewer.tsx"];
+    for (const f of others) expect(read(f)).not.toContain("watchHowThePhoneIsHeld");
   });
 
   it("the watcher is mounted in the ROOT layout, so no screen has to remember anything", () => {

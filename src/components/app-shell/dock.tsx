@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { activeRowHref, activeSection, dockTiles, visibleDock } from "@/lib/dock";
 import { isStaffRole } from "@/lib/actions/perms";
+import { Turned } from "@/components/turned";
 import type { FeatureMap } from "@/lib/features";
 
 type Badges = Record<string, number>;
@@ -236,15 +237,27 @@ function DockInner({ branding, role, badges: badgesProp, features }: DockProps) 
               data-tour={`dock-${s.key}`}
               // A 44px target (W1-07): five tiles for staff and four for a tech share the width,
               // so each is ~67px wide at 375px — room for a 20px icon and an 11px label.
-              className={`relative flex min-h-[44px] flex-1 flex-col items-center justify-center gap-1 rounded-xl px-1 py-1.5 text-[11px] font-medium ${
+              //
+              // `dock-tile` + `turn-host`: the dock itself NEVER MOVES — in the App Store app the
+              // interface is locked to portrait, so it stays against the phone's bottom edge and
+              // becomes the strip down one side of the person's view when they turn the phone (Erik,
+              // 2026-10-01). A tile is not square, and it holds a stack (icon over label), so its FACE
+              // is laid out at the swapped size and painted through the quarter turn — see the dock
+              // rules in globals.css. The tile's own box, and its 44px target, do not change.
+              className={`dock-tile turn-host relative flex min-h-[44px] flex-1 flex-col items-center justify-center gap-1 rounded-xl px-1 py-1.5 text-[11px] font-medium ${
                 // Same `.seaglass-active` fill (tint + gloss + ink) as the desktop rail tile.
                 // Icon+label carry `relative z-10` to sit above the gloss sheen.
                 onRoute ? "seaglass-active" : "text-slate-600"
               }`}
               aria-label={s.label}
             >
-              <Icon className="relative z-10 h-5 w-5 shrink-0" />
-              <span className="relative z-10 whitespace-nowrap leading-none">{s.short ?? s.label}</span>
+              {/* Upright this wrapper has no box at all, so the tile is byte for byte what it is today.
+                  `region="the chrome"`: a tile stands up whenever the phone is turned at all, whatever
+                  the turn belongs to — a button reads upright for the PERSON, not for a route. */}
+              <Turned region="the chrome">
+                <Icon className="relative z-10 h-5 w-5 shrink-0" />
+                <span className="relative z-10 whitespace-nowrap leading-none">{s.short ?? s.label}</span>
+              </Turned>
             </Link>
           );
         })}

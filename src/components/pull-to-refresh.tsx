@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2, ArrowDown } from "lucide-react";
+import { useTheTurn } from "@/components/turns-sideways";
+import { isTurned, thumbThroughTheTurn, type Held } from "@/lib/turned-geometry";
 
 /**
  * PULL DOWN TO REFRESH — ONE OF THEM, FOR EVERY SCREEN (bug report 44aeec9c, Erik on /billing
@@ -51,6 +53,12 @@ import { Loader2, ArrowDown } from "lucide-react";
  *     the server has sent the new page, so the spinner ends when the data actually arrives instead
  *     of after a guessed delay.
  *   · TOUCH ONLY: a mouse never fires these events, so desktop is untouched.
+ *   · AND IT WORKS WITH THE PHONE HELD TURNED, on the screens that may be (the schedule and the two
+ *     document ones — lib/screens-that-turn.ts). That is not free, and it is not cosmetic either:
+ *     while turned, THE ELEMENT THAT SCROLLS IS A DIFFERENT ELEMENT, and a thumb's travel arrives
+ *     measured along an axis the content is no longer drawn on. Both halves are answered below —
+ *     scrollerForTheTurn() and thumbThroughTheTurn() — from the one word that says how the phone is
+ *     being held. Upright, every line of this behaves exactly as it did before any of that existed.
  */
 
 /** How far the thumb has to travel before the release refreshes (px of real finger movement). */
@@ -105,6 +113,49 @@ export function scrollerOf(el: HTMLElement | null): HTMLElement | null {
   return (document.scrollingElement as HTMLElement | null) ?? null;
 }
 
+/**
+ * THE SELECTOR globals.css MOVES THE SCROLL ONTO while the phone is held turned, spelled once. The
+ * stylesheet gives `main.turn-host` `overflow: hidden` and this element `overflow-y: auto` — so this
+ * string and that rule are two halves of one fact, and the test asserts the stylesheet still says it.
+ */
+export const TURNED_FACE = ".turn-face[data-held]";
+
+/**
+ * THE TURNED FACE THIS SURFACE IS DRAWN INSIDE, or null for "nothing here is turned". A walk, not
+ * `closest()`, for the same reason scrollerOf() is a walk: the rule is then readable without a browser,
+ * and the suite runs in plain Node.
+ */
+export function turnedFaceAround(el: Element | null): HTMLElement | null {
+  for (let n: Element | null = el; n; n = n.parentElement) {
+    if (n.matches?.(TURNED_FACE)) return n as HTMLElement;
+  }
+  return null;
+}
+
+/**
+ * WHICH ELEMENT SCROLLS RIGHT NOW — the whole resolution, pure, because the answer CHANGES when the
+ * phone is turned and a gesture armed on the wrong element is a dead control.
+ *
+ * Upright: scrollerOf(), unchanged, which is `main` in the app shell. Turned: the face `main`'s scroll
+ * was handed to.
+ *
+ * THE FALLBACK IS LOAD-BEARING, NOT DEFENSIVE, and the case is a real one that happens every time a
+ * photo is opened. `held` says which way the SCREEN is drawn, and the turn has exactly one owner
+ * (lib/screens-that-turn.ts): when a full-screen viewer owns it, `held` is "clockwise" while the app
+ * shell's own region deliberately stays upright — no `data-held`, `display: contents`, and `main` still
+ * the scroller, because that is what keeps the viewer full screen. So "turned" alone must not be read
+ * as "the face below me is the scroller": the walk for a turned face is what settles it, and finding
+ * none means `main` is still the right answer. (A pull is refused under an open viewer anyway — it
+ * holds the body lock — so this is the second of two reasons it cannot go wrong, not the only one.)
+ */
+export function scrollerForTheTurn(anchor: Element | null, held: Held): HTMLElement | null {
+  if (isTurned(held)) {
+    const face = turnedFaceAround(anchor);
+    if (face) return face;
+  }
+  return scrollerOf(anchor as HTMLElement | null);
+}
+
 /** Anything with a vertical scroll position: an element in the app, a stand-in in a test. */
 type VScroller = { scrollTop: number };
 
@@ -141,9 +192,17 @@ export function PullToRefresh() {
   /** The same figure the listeners read, so a release never acts on a stale render. */
   const live = useRef(0);
   const [refreshing, startRefresh] = useTransition();
+  /**
+   * HOW THE PHONE IS BEING HELD, from the one writer (components/turns-sideways.tsx) — the SAME word
+   * <Turned> draws the face with, not a second reading of the hardware. It decides two things here and
+   * it is in this effect's dependencies, so the moment the phone turns the listeners come off the old
+   * scroller and go onto the new one. Without that, a turn would leave the gesture bound to a `main`
+   * that had stopped scrolling.
+   */
+  const { held } = useTheTurn();
 
   useEffect(() => {
-    const scroller = scrollerOf(anchor.current);
+    const scroller = scrollerForTheTurn(anchor.current, held);
     if (!scroller) return;
     // The live gesture, kept out of state so a move never re-renders more than the indicator.
     let startY = 0;
@@ -180,11 +239,16 @@ export function PullToRefresh() {
 
     const onMove = (e: TouchEvent) => {
       if (!tracking || e.touches.length !== 1) return;
-      const move = readPullMove({
-        dy: e.touches[0].clientY - startY,
-        dx: e.touches[0].clientX - startX,
-        claimed: pulling,
-      });
+      // THE THUMB, IN THE FRAME THE CONTENT IS DRAWN IN. clientX/clientY are the GLASS's, and while
+      // the phone is held turned the face has been painted a quarter turn under them — so a pull down
+      // the person's own view arrives here as a drag sideways, and readPullMove would correctly call
+      // that "not ours" and drop it. One mapping, the same inverse the face is drawn with
+      // (lib/turned-geometry), and upright it returns the deltas untouched.
+      const thumb = thumbThroughTheTurn(
+        { dx: e.touches[0].clientX - startX, dy: e.touches[0].clientY - startY },
+        held,
+      );
+      const move = readPullMove({ dy: thumb.dy, dx: thumb.dx, claimed: pulling });
       if (move.kind === "notOurs") return void (tracking = false);
       if (move.kind === "ignore") return;
       pulling = true;
@@ -211,8 +275,9 @@ export function PullToRefresh() {
       scroller.removeEventListener("touchend", onEnd);
       scroller.removeEventListener("touchcancel", stop);
     };
-    // Bound once: the release reads the live figure off a ref, never a rendered one.
-  }, [router]);
+    // Re-bound when the phone turns and at no other time: the release reads the live figure off a ref,
+    // never a rendered one, so `pulled` is deliberately not a dependency.
+  }, [router, held]);
 
   const ready = pullReleases(pulled);
   const showing = refreshing || pulled > 0;
@@ -226,7 +291,14 @@ export function PullToRefresh() {
           // Just under the top bar (h-[calc(4rem+var(--sat))], in flow), reading the shell's own
           // safe-area variable so it lands in the same place on a notched phone. z-30 keeps it under
           // every sheet and menu.
-          className="pointer-events-none fixed inset-x-0 top-[calc(var(--sat,0px)+4.75rem)] z-30 flex justify-center"
+          //
+          // `pull-pill`: HELD TURNED, THIS IS FIXED INSIDE A TRANSFORMED BOX, which makes the face its
+          // containing block instead of the window — so it is already centred across the person's view
+          // and painted upright with the content, and only the offset needs saying. Inside the face
+          // there is no top bar above it and no notch at the person's top (the notch is down one side),
+          // so globals.css trades both of those for a plain 0.75rem. Not a second indicator: the same
+          // one, told where the top is.
+          className="pull-pill pointer-events-none fixed inset-x-0 top-[calc(var(--sat,0px)+4.75rem)] z-30 flex justify-center"
           style={refreshing ? undefined : { transform: `translateY(${Math.round(pulled / 2)}px)` }}
         >
           <p

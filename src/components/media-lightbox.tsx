@@ -7,6 +7,7 @@ import { isNativeShell } from "@/lib/native-shell";
 import { saveRoute } from "@/lib/shell-save";
 import { reportClientError } from "@/app/report-client-error";
 import { useTurnsSidewaysLayer } from "@/components/turns-sideways";
+import { Turned } from "@/components/turned";
 
 /** Full-screen in-app viewer for an image or PDF — always dismissible
  *  (fixes "can't go back from the photo" on the phone). */
@@ -120,44 +121,58 @@ export function MediaLightbox({
     // layer paints edge to edge — without the insets globals.css adds, Close and Download sit under
     // the Dynamic Island. Same row, same buttons, same 44px; they just clear the camera.
     <div className="media-lightbox fixed inset-0 z-[60] flex flex-col bg-black/90">
+      {/* THE BAR STAYS WHERE IT IS. In the App Store app the interface is locked to portrait, so this
+          row never leaves the phone's top edge — turned sideways it simply becomes the strip down one
+          side of the person's view. Its three 44px squares carry `data-upright` so their faces are
+          painted through the same quarter turn and read the right way up; the file's NAME is a long
+          line of text and is left alone, so it runs along the strip. */}
       <div className="media-lightbox-bar flex items-center justify-between gap-2 px-4 pb-3 pt-[max(0.75rem,var(--sat,0px))] text-white">
         <span className="min-w-0 flex-1 truncate text-sm font-medium">{name}</span>
-        <a href={url} target="_blank" rel="noopener noreferrer" className="inline-flex h-11 w-11 items-center justify-center rounded-lg hover:bg-white/10" title="Open in new tab" aria-label="Open in new tab">
+        <a href={url} target="_blank" rel="noopener noreferrer" data-upright className="inline-flex h-11 w-11 items-center justify-center rounded-lg hover:bg-white/10" title="Open in new tab" aria-label="Open in new tab">
           <ExternalLink className="h-5 w-5" />
         </a>
         <a
           href={url}
           {...(inShell ? { target: "_blank", rel: "noopener noreferrer" } : { download: name })}
           onClick={onDownload}
+          data-upright
           className="inline-flex h-11 w-11 items-center justify-center rounded-lg hover:bg-white/10"
           title="Download"
           aria-label="Download"
         >
           <Download className="h-5 w-5" />
         </a>
-        <button onClick={onClose} className="inline-flex h-11 w-11 items-center justify-center rounded-lg hover:bg-white/10" aria-label="Close">
+        <button onClick={onClose} data-upright className="inline-flex h-11 w-11 items-center justify-center rounded-lg hover:bg-white/10" aria-label="Close">
           <X className="h-6 w-6" />
         </button>
       </div>
-      <div className="media-lightbox-body flex flex-1 items-center justify-center overflow-auto p-2" onClick={onClose}>
-        {isPdf ? (
-          <iframe
-            src={url}
-            title={name}
-            className="h-full w-full rounded bg-white"
-            onClick={(e) => e.stopPropagation()}
-            onLoad={() => setShown(true)}
-          />
-        ) : (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={url}
-            alt={name}
-            className="max-h-full max-w-full rounded object-contain"
-            onClick={(e) => e.stopPropagation()}
-            onLoad={() => setShown(true)}
-          />
-        )}
+      {/* `turn-host`: the photo or the PDF is what turns, in the rectangle below the bar. A site photo
+          is usually wider than it is tall, so sideways it is drawn at nearly twice the size. */}
+      <div className="media-lightbox-body turn-host flex flex-1 items-center justify-center overflow-auto p-2" onClick={onClose}>
+        {/* `region`: the SAME declared name this layer registered under, so while this viewer is the
+            innermost layer open it is the one and only face that draws the quarter turn — the page
+            region behind it stays upright, which is what keeps this layer full screen and keeps the
+            photo the right way up. */}
+        <Turned region="document-full-screen">
+          {isPdf ? (
+            <iframe
+              src={url}
+              title={name}
+              className="h-full w-full rounded bg-white"
+              onClick={(e) => e.stopPropagation()}
+              onLoad={() => setShown(true)}
+            />
+          ) : (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={url}
+              alt={name}
+              className="max-h-full max-w-full rounded object-contain"
+              onClick={(e) => e.stopPropagation()}
+              onLoad={() => setShown(true)}
+            />
+          )}
+        </Turned>
       </div>
       {note && (
         <p role="status" className="px-4 pb-2 text-center text-sm font-medium text-amber-200">

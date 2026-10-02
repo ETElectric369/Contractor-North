@@ -31,7 +31,22 @@ const grid = (p: Record<string, unknown>) =>
 describe("/timecards renders exactly as it did", () => {
   it("timecards-shaped props (no info, no crew, no worked time) render byte-for-byte what main's grid rendered", () => {
     // The props /timecards passes: person-colored pills with a sub line, an open entry, a heavy pay-
-    // period edge, an all-day row. The hash is main's (cn-v1030) TimeGrid rendering these same props.
+    // period edge, an all-day row.
+    //
+    // THE HASH HAS MOVED TWICE, AND HERE IS THE WHOLE OF WHAT MOVED BOTH TIMES. The same ONE line, the
+    // wrapper div, which is the only byte of this rendering the turn has ever touched:
+    //     main (cn-v1030)  <div style="min-width:324px">
+    //     then             <div class="time-grid-columns" style="--grid-natural-w:324px">
+    //     now              <div class="time-grid-columns" style="--grid-natural-w:324px;--grid-legal-w:183px">
+    // FIRST, because the turned phone needed the week to FIT instead of scrolling sideways, so the columns'
+    // minimum had to be capped by a stylesheet — and a stylesheet cannot override an inline width without
+    // `!important`. SECOND, because that cap had no floor and squeezed the day's own drill-in button under
+    // 44px, so the grid now also hands over the narrowest width its tap targets can live in. globals.css
+    // applies them (identically, upright: the floor is only read inside a turned face). The two renderings
+    // were diffed line by line both times and every other byte — every pill, every tick, every row — is the
+    // same. 324 is 48 + 3 x 92; 183 is 48 + 3 x (1 + 44) for a header with no `+` beside the day, which is
+    // what /timecards draws. Anything ELSE that moves this hash is a change to /timecards and has to be
+    // looked at.
     const html = renderToStaticMarkup(
       createElement(TimeGrid, {
         days: [
@@ -53,8 +68,11 @@ describe("/timecards renders exactly as it did", () => {
         onDayClick: () => {},
       }),
     );
-    expect(createHash("sha256").update(html).digest("hex")).toBe("080f61fad81aa513097264872130882b237451f18da9a174cce7c76f90f69cbe");
+    expect(createHash("sha256").update(html).digest("hex")).toBe("22b03d3aa7c9a35d3db1e1da1122df18350c23aceaff6c7b19996fff2c5bcb47");
     expect(html).not.toContain("data-worked-bars");
+    // The one line that moved, pinned on its own so the hash is not the only thing saying what it is.
+    expect(html).toContain('<div class="time-grid-columns" style="--grid-natural-w:324px;--grid-legal-w:183px">');
+    expect(html).not.toContain("min-width:");
   });
 });
 

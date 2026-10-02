@@ -9,6 +9,12 @@ import { join } from "node:path";
  * calendar in full, but it would be nice to also keep the buttons for the top bar and the dock
  * exactly where they are while spinning everything in between only."
  *
+ * WHICH WORLD THIS FILE IS ABOUT. In the App Store app the interface is portrait-locked and the
+ * quarter turn is DRAWN on the region between the chrome — that contract lives in
+ * chrome-stays-put.test.ts. Everything here is the other world: a plain mobile browser tab and an
+ * installed web app, where the page rotates natively and always did, and where these rules are what
+ * keep the top bar and the dock where they belong inside the rotated viewport.
+ *
  * All of that is carried by CLASS NAMES on one side and a media query on the other, which is the
  * hand-copied-list hazard in its purest form: rename a class, or drop a clause from the query, and
  * nothing fails — the rules simply stop applying, on an orientation nobody tests on a laptop. So
@@ -54,7 +60,7 @@ function turnedBlock(): string {
   throw new Error("the sideways @media block is never closed");
 }
 
-describe("the `turned:` variant", () => {
+describe("the `turned:` variant — a BROWSER's rotated phone", () => {
   it("is defined, and spelled the same way in both places it appears", () => {
     // Once for the variant (utilities) and once for the plain rules. Two spellings would mean the
     // utilities and the rules fired on different screens.
@@ -122,10 +128,12 @@ describe("every selector the sideways rules target is really in the markup", () 
   });
 });
 
-describe("the chrome does not move when the phone turns", () => {
-  // A phone held sideways is ~700–930px WIDE, so sm: and md: fire. Every one of them in the top
+describe("in a BROWSER, where the page itself rotates, the chrome still does not change shape", () => {
+  // A rotated browser viewport is ~700–930px WIDE, so sm: and md: fire. Every one of them in the top
   // bar's control group has to be undone, or a control changes shape in the one place Erik said
-  // nothing may change.
+  // nothing may change. (In the App Store app none of this can happen at all: the interface is locked
+  // to portrait, the window never changes shape, and the quarter turn is drawn — see
+  // chrome-stays-put.test.ts. These rules are the browser's half.)
   const pairs: [RegExp, RegExp, string][] = [
     [/sm:gap-3/, /turned:gap-2/, "the gap between the controls"],
     [/md:w-auto/, /turned:w-11/, "Search Or Ask stays a 44px square"],
@@ -145,8 +153,8 @@ describe("the chrome does not move when the phone turns", () => {
     // `app-bottom-nav` for ONE reason: body.modal-open hides it with the dock. So no rule that MOVES
     // the dock may use that class — unlayered CSS beats the handle's Tailwind `left-0`, and the
     // sideways camera inset shoved it ~59pt into mid-page on every section with more than four pages
-    // (Jobs, Office and Money, which is where /price-list lives — one of the four screens that turn,
-    // and the one where this handle is the only sibling nav).
+    // (Jobs, Office and Money). In a rotated BROWSER tab — which is the world this file is about —
+    // every screen rotates, listed or not, so this is not limited to the declared three.
     // The handle's own class list, not the prose around it.
     const handle = /className="(app-bottom-nav[^"]*)"/.exec(SECTION_SHEET)?.[1];
     expect(handle).toBeTruthy();
@@ -199,6 +207,12 @@ describe("the documents keep their doors when the camera is on the side", () => 
     // in a 812pt-wide window, which is strictly worse than portrait.
     expect(PDF_VIEWER).toContain('window.addEventListener("resize"');
     expect(PDF_VIEWER).toContain('window.addEventListener("orientationchange"');
+    // AND THE ONE THAT ACTUALLY FIRES IN THE APP. The interface is locked to portrait, so turning the
+    // phone changes NOTHING about the window: neither of the two above happens. Without this listener
+    // the one screen Erik asked for rotation on first — "documents especially" — would turn and keep
+    // the portrait-width bitmap, and both of its others would be left behind as well.
+    expect(PDF_VIEWER).toContain('window.addEventListener("cn:screen-turned"');
+    expect(PDF_VIEWER).toContain('window.removeEventListener("cn:screen-turned"');
     // From the document already in hand, not a second trip to the server.
     expect(PDF_VIEWER).toMatch(/pdfRef\.current/);
     expect(PDF_VIEWER).toMatch(/void paint\(pdf, want\)/);
@@ -257,18 +271,23 @@ describe("the installed web app's manifest", () => {
   });
 });
 
-describe("the iPhone may rotate at all; the iPad is untouched", () => {
+describe("the iPhone's interface NEVER rotates; the iPad is untouched", () => {
   const list = (key: string) => {
     const at = PLIST.indexOf(`<key>${key}</key>`);
     expect(at).toBeGreaterThan(-1);
     return PLIST.slice(at, PLIST.indexOf("</array>", at));
   };
 
-  it("the iPhone allows portrait and both ways sideways — never upside down", () => {
+  it("the iPhone allows PORTRAIT AND NOTHING ELSE — that is the whole mechanism", () => {
+    // cn-v1041 listed both landscapes here and let iOS rotate the view. Erik: "nice it rotates now on
+    // schedule but the dock and top bar rotate with it still." Of course they did — iOS rotating the
+    // interface is what carries them around. The only way the top bar stays against the phone's top
+    // edge and the dock against its bottom edge is for nothing to move at all, so nothing does: the
+    // quarter turn is DRAWN, on the region between them, from the word ScreenTurnPlugin reports.
     const phone = list("UISupportedInterfaceOrientations");
     expect(phone).toContain("UIInterfaceOrientationPortrait<");
-    expect(phone).toContain("UIInterfaceOrientationLandscapeLeft");
-    expect(phone).toContain("UIInterfaceOrientationLandscapeRight");
+    expect(phone).not.toContain("UIInterfaceOrientationLandscapeLeft");
+    expect(phone).not.toContain("UIInterfaceOrientationLandscapeRight");
     expect(phone).not.toContain("UIInterfaceOrientationPortraitUpsideDown");
   });
 
@@ -290,14 +309,34 @@ describe("the iPhone may rotate at all; the iPad is untouched", () => {
     expect(proj).toMatch(/\/\* ScreenTurnPlugin\.swift in Sources \*\/,/);
   });
 
-  it("the shell answers portrait by default and never gates the iPad", () => {
+  it("the view controller says portrait too — both halves have to agree", () => {
     const vc = read("ios/App/App/NorthBridgeViewController.swift");
-    const plugin = read("ios/App/App/ScreenTurnPlugin.swift");
     expect(vc).toContain("override var supportedInterfaceOrientations");
-    expect(vc).toContain("userInterfaceIdiom == .pad ? .all");
+    // The iPad keeps rotating everywhere; the iPhone is portrait, full stop. No page may change this
+    // any more — there is nothing here for one to ask.
+    expect(vc).toContain("userInterfaceIdiom == .pad ? .all : .portrait");
     expect(vc).toContain("ScreenTurnPlugin()");
-    // Portrait is the floor: the app opens portrait and an unknown word locks rather than unlocks.
-    expect(plugin).toMatch(/static var allowed: UIInterfaceOrientationMask = \.portrait/);
-    expect(plugin).toContain('call.getString("turn") == "sideways"');
+    expect(vc).not.toContain("ScreenTurn.allowed");
+    expect(vc).not.toContain("requestGeometryUpdate");
+  });
+
+  it("the plugin REPORTS the turn and can no longer permit one", () => {
+    const plugin = read("ios/App/App/ScreenTurnPlugin.swift");
+    // It reads the DEVICE's orientation, which iOS keeps reporting while the INTERFACE is locked —
+    // that is the fact the whole mechanism rests on.
+    expect(plugin).toContain("UIDevice.orientationDidChangeNotification");
+    expect(plugin).toContain("beginGeneratingDeviceOrientationNotifications");
+    expect(plugin).toContain("case .landscapeLeft: return .counterclockwise");
+    expect(plugin).toContain("case .landscapeRight: return .clockwise");
+    // Upside down is never a turn, and neither is a phone lying flat on a bench.
+    expect(plugin).toContain("case .portrait, .portraitUpsideDown: return .upright");
+    expect(plugin).toContain("default: return nil");
+    // Nothing is left that changes what iOS will do.
+    expect(plugin).not.toContain("UIInterfaceOrientationMask");
+    expect(plugin).not.toContain('getString("turn")');
+    expect(plugin).not.toContain("setNeedsUpdateOfSupportedInterfaceOrientations");
+    // THE iPAD IS NEVER REPORTED AS TURNED: its interface really does rotate, so a second turn drawn
+    // on top of iOS's one would be the page rotating itself into nonsense.
+    expect(plugin).toContain("UIDevice.current.userInterfaceIdiom != .pad");
   });
 });

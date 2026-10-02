@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ChevronRight, X } from "lucide-react";
+import { useCoversTheScreen } from "@/components/ui/modal-lock";
 import type { DockNode, DockSection } from "@/lib/dock";
 
 /**
@@ -44,6 +45,13 @@ export function SectionSheet({
 
   // Safety net: any route change (row tap, back-swipe, command bar…) closes it.
   useEffect(() => setOpen(false), [pathname]);
+
+  // THIS COVERS THE SCREEN, so the page underneath comes upright while it is open. The scrim and the
+  // sheet are both `position: fixed`, and this renders INSIDE the app shell's turned region (the
+  // layout mounts SectionSubnav there) — so on /schedule or /price-list held sideways they would be
+  // laid out against a rotated box and land in a corner of the glass. NOT useModalLock: `modal-open`
+  // is what the Escape handler below stands down for, and it hides this sheet's own edge handle.
+  useCoversTheScreen(open);
 
   useEffect(() => {
     if (!open) return;
