@@ -69,7 +69,7 @@ public class ScreenTurnPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "read", returnType: CAPPluginReturnPromise)
     ]
 
-    /// The last word sent to the page. Main actor only.
+    /// The last word sent to the page. MAIN THREAD ONLY — every path below hops there first.
     private var held: PhoneHeld = .upright
     private var watching = false
     /// The orientation observer, kept so it can be let go of rather than outliving the plugin.
@@ -84,13 +84,19 @@ public class ScreenTurnPlugin: CAPPlugin, CAPBridgedPlugin {
         UIDevice.current.userInterfaceIdiom != .pad
     }
 
-    override public func load() {
-        Task { @MainActor in
-            self.startWatching()
-        }
+    /// GCD rather than a Task, deliberately. UIKit wants the main thread, Capacitor calls plugin
+    /// methods off it, and the observer below already lands on `.main` — so every one of these is on
+    /// the main thread by the time it touches anything. A `Task { @MainActor in … }` would carry a
+    /// non-Sendable plugin across an actor boundary to say the same thing, and the compiler is right
+    /// to warn about that.
+    private func onMain(_ work: @escaping () -> Void) {
+        if Thread.isMainThread { work() } else { DispatchQueue.main.async(execute: work) }
     }
 
-    @MainActor
+    override public func load() {
+        onMain { [weak self] in self?.startWatching() }
+    }
+
     private func startWatching() {
         guard !watching, reports else { return }
         watching = true
@@ -103,13 +109,11 @@ public class ScreenTurnPlugin: CAPPlugin, CAPBridgedPlugin {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in
-                self?.deviceTurned()
-            }
+            // `queue: .main`, so this is already on the main thread.
+            self?.deviceTurned()
         }
     }
 
-    @MainActor
     private func deviceTurned() {
         // A word we have no opinion on (flat on a bench) keeps the last one: the person has not
         // changed which way they are reading the screen.
@@ -120,7 +124,6 @@ public class ScreenTurnPlugin: CAPPlugin, CAPBridgedPlugin {
 
     /// The same channel NavigationFailureRelay uses. The word comes from a fixed enum, so there is
     /// nothing here a page could be made to evaluate.
-    @MainActor
     private func tellThePage(_ now: PhoneHeld) {
         guard let webView = self.webView else { return }
         webView.evaluateJavaScript(
@@ -133,8 +136,9 @@ public class ScreenTurnPlugin: CAPPlugin, CAPBridgedPlugin {
     /// this instant, for a screen that has just mounted. Never rejects: a screen that cannot find out
     /// has to keep working exactly as it does today, which means upright.
     @objc func read(_ call: CAPPluginCall) {
-        Task { @MainActor in
-            // A screen can mount before load() ran on the main actor; asking again is free.
+        onMain { [weak self] in
+            guard let self else { return call.resolve(["held": PhoneHeld.upright.rawValue]) }
+            // A screen can mount before load() got to the main thread; asking again is free.
             self.startWatching()
             let now = self.reports ? (PhoneHeld.from(UIDevice.current.orientation) ?? self.held) : .upright
             self.held = now
